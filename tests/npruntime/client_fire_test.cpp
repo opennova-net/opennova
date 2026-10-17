@@ -764,7 +764,44 @@ bool check_the_fire_action_rejudges_the_round() {
 			"a round within reach lands");
 }
 
+// The ring record of a network primary round carries the fire action's mode byte,
+// built from the firing slot's word before the spend: (clip & 3) << 4 | 2; an alt
+// round carries the request's flags and its sequence word recomposed with the slot's
+// roster index. [orig: WeaponAction_Fire @0x542C11; RoundData_AddRound @0x4FDCDE;
+//  Server_ClientFiredRound @0x50BD8F..0x50BDA5]
+bool check_the_ring_takes_the_fire_actions_words() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(2, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	auto &conn = roster[0];
+	conn.reply.player_slot = 3;
+	world.tables.weapons.entries.resize(6);
+	auto &weapon = world.tables.weapons.entries[5];
+	weapon.name = "MODE_RIFLE";
+	weapon.valid = true;
+	weapon.clipsize = 20;
+	weapon.category = 3;
+	weapon.rank = 2;
+	weapon.ammo_index = 1;
+	conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 7};
+	const auto shoot = [&](uint8_t flags, uint16_t hit_part) {
+		dispatch_fire(conn, roster, world,
+				fire_body(shooter.packed, flags, 5, 0, 0, 0, 0, 0, 0xFFFF, hit_part, 12, 0));
+	};
+	shoot(0x22, 0x0405);
+	shoot(0x23, 0x0C07);
+	if (!expect(world.out.rounds.count == 2, "both rounds append")) return false;
+	const w::RoundEvent &primary = world.out.rounds.records[0];
+	const w::RoundEvent &alt = world.out.rounds.records[1];
+	return expect(primary.mode_flags == ((7 & 3) << 4 | 2) && primary.shot_seq == 0x0405 &&
+					alt.mode_flags == 0x23 && alt.shot_seq == ((3 << 9) | 0x007),
+			"the primary ring takes the pre-spend clip's mode byte, the alt ring its slot's sequence word");
+}
+
 int main() {
+	if (!check_the_ring_takes_the_fire_actions_words()) return 1;
 	if (!check_the_fire_action_rejudges_the_round()) return 1;
 	if (!check_controller_seat_reads_no_bucket()) return 1;
 	if (!check_ungranted_combo_is_refused()) return 1;
@@ -845,7 +882,8 @@ int main() {
 		            "ring direction = the raw dir words << 16"))
 			return 1;
 		if (!expect(ev.shot_seq == 1025, "ring shot_seq = the uplink hit_part")) return 1;
-		if (!expect(ev.mode_flags == 0x22, "ring mode = the fire-flags byte")) return 1;
+		if (!expect(ev.mode_flags == ((30 & 3) << 4 | 2),
+		            "ring mode = the fire action's byte from the pre-spend clip")) return 1;
 		if (!expect(ev.subtype == 12, "ring subtype = extra_byte2 composite")) return 1;
 		if (!expect(ev.slot_byte == 64, "ring slot byte = PowerThrow charge")) return 1;
 		if (!expect(ev.adm_index == 5, "ring adm index")) return 1;

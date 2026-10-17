@@ -1954,6 +1954,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				uint8_t fired_adm = fr.adm_index;
 				// Whether the round clears the fire action's re-entry (below).
 				bool round_lands = true;
+				// The fire action's mode byte for an armory-fed primary round: the
+				// firing slot's word before the spend, low two bits << 4, | 2.
+				int32_t fired_mode = -1;
 				// ADM + ammo authority — armory-fed hosts only (a table-less host accepts,
 				// mirroring the 0x5A echo fallback, D-NET-141). Alt fire skips the adm lookup,
 				// the clip, and the equipped mirror [orig: @0x50bb0f / the @0x50be2b alt path].
@@ -2021,6 +2024,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						if (slot_def == nullptr) break;
 						fired_adm = personal->adm_index;
 					}
+					// [orig: WeaponAction_Fire @0x542C11 (slot+0x10 ahead of
+					//  Weapon_ConsumeAmmo @0x542C75) -> Entity_FireWeaponAndSendPacket's
+					//  fire_cmd+12 @0x42BE80 -> roundParams[2] @0x50C786 -> ring+30
+					//  @0x4FDCDE]
+					fired_mode = ((static_cast<int16_t>(mounted_slot != nullptr
+							? mounted_slot->clip : personal->clip) & 3) << 4) | 2;
                     world::WeaponFsmInputs fire_inputs;
                     world::weapon_fire_environment_inputs(*world, *shooter, fire_inputs);
                     world::WeaponFsmDef fire_def = slot_def->action_fsm;
@@ -2139,8 +2148,19 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				ev.origin_z = fr.pos_z;
 				ev.dir_yaw = int32_t(uint32_t(fr.dir_x) << 16);   // [orig: @0x513436]
 				ev.dir_pitch = int32_t(uint32_t(fr.dir_y) << 16); // [orig: @0x513449]
-				ev.shot_seq = fr.hit_part;   // [orig: word_B7C670 = hit_part @0x50c2ba -> ring+28]
-				ev.mode_flags = fr.fire_flags; // [orig: ring+30 = the fire-mode byte @0x4fdcde]
+				// The round's sequence word: the client's hit_part on the primary
+				// path, recomposed with the slot's roster index on the alt path
+				// [orig: word_B7C670 = hit_part @0x50c2ba / @0x50C774; the alt
+				//  (slot+20 << 9) | (hit_part & 0x1FF) @0x50BD8F..0x50BDA5 -> the round's
+				//  +120 word -> ring+28 @0x4fdcf5].
+				const uint16_t shot_seq = alt_fire
+						? uint16_t((uint32_t(conn.reply.player_slot) << 9) | (fr.hit_part & 0x1FFu))
+						: fr.hit_part;
+				ev.shot_seq = shot_seq;
+				// ring+30: the fire action's mode byte for an armory-fed primary round,
+				// else the request's fire-flags byte (alt fire's AddRound, a
+				// table-less host) [orig: @0x4fdcde; the alt path @0x50BDFC].
+				ev.mode_flags = fired_mode >= 0 ? uint8_t(fired_mode) : fr.fire_flags;
 				// Shooter fire-context composite [orig: ctx & 0x3F @0x50bd83, recombined
 				// | (ctx >> 7) << 7 into roundParams[4] @0x50c7bd -> ring+31].
 				ev.subtype = uint8_t((fr.extra_byte2 & 0x3F) | ((fr.extra_byte2 >> 7) << 7));
@@ -2166,7 +2186,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						rp.dir_pitch_bam = ev.dir_pitch;
 						rp.ammo_index = fire_adm->ammo_index;
 						rp.adm_index = fired_adm;
-						rp.shot_seq = fr.hit_part;
+						rp.shot_seq = shot_seq;
 						rp.subtype = ev.subtype;
 						// PowerThrow charge from fireRequest+80; RoundData_SpawnRound
 						// scales velocity for bytes 1..254 [orig: @0x4ec5bb].
