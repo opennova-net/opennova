@@ -440,8 +440,7 @@ const std::vector<opennova::world::DeathPieceDraw> &Simulation::death_piece_draw
 // The visible-person list retail walks holds every collected person; the rows
 // here are every decoded person, and the beam leg keeps the drawn bodies. A
 // row's entity+0x298 is its equipped AdmDef entry (the client's player-record
-// store; 0xFF names none) [retail NetPacket_SerializePlayerState @ 0x4c11f2 /
-// @ 0x4c120d].
+// store; 0xFF names none) (engine: net/npwire/ingame_decode.h).
 void Simulation::nvg_laser_sources(std::vector<NvgLaserSource> &r_sources) const {
 	r_sources.clear();
 	if (!world_installed_ || runtime_ == nullptr) return;

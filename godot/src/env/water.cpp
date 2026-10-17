@@ -516,8 +516,8 @@ void Water::build() {
 	mesh_instance_->set_layer_mask(VISUAL_LAYER_WATER);
 	add_child(mesh_instance_);
 	// The FrameFX bloom pass redraws the strip with the nightvision row
-	// colors into the Q3 target (retail FrameFX_RenderGlowSource @ 0x582a59..
-	// 0x582a5d -> Render_WaterSurface(0, 1)): its own surface, drawn by no
+	// colors into the Q3 target (engine: runtime/environment/water_frame.h, the glow
+	// source's Render_WaterSurface(0, 1)): its own surface, drawn by no
 	// camera (layer mask 0), only by the typed Q3 WaterNightVision pass.
 	Ref<ArrayMesh> night_vision_mesh;
 	night_vision_mesh.instantiate();

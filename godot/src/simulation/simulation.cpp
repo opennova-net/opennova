@@ -336,7 +336,7 @@ bool Simulation::native_environment_snapshot(
 	if (!world_installed_ || kernel_ == nullptr) return false;
 	const opennova::world::WeatherState &w = kernel_->world.weather;
 	const opennova::env::WeatherCore &core = w.core;
-	// (retail Debug_DrawEnvironmentValues @ 0x4ef000 — the rows' sources)
+	// (engine: runtime/devtools/environment_snapshot.h — the rows' sources)
 	out.valid = true;
 	out.logic_tick = kernel_->world.logic_tick;
 	out.env_name = kernel_->mission.get_environment();

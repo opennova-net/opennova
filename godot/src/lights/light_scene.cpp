@@ -405,7 +405,7 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 	// The render-slot dominant-light query: the witnessed per-entity collect
 	// over the ENTITY origin +- its bound radius, the nearest four, gated by
 	// the entity's interior group alone (no objects-disable gate, no three-cap,
-	// no D3D-fill boost) [retail RenderSlot_UpdateEntityLight @0x5d6a30 --
+	// no D3D-fill boost) [engine: runtime/renderer/light_scene.h --
 	// the collect and the pick live portable in
 	// opennova::renderer::LightScene::slot_light_candidates and
 	// opennova::renderer::pick_dominant_light, see
