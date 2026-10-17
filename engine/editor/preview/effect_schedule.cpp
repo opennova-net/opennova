@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <base/io/bam.h>
 #include <base/io/tick_rate.h>
 #include <runtime/renderer/render_order.h>
 
@@ -10,7 +11,7 @@ namespace opennova::editor {
 
 namespace {
 
-constexpr float kDegreesToRadians = 3.14159265358979323846f / 180.0f;
+constexpr float kDegreesToRadians = float(io::kRadiansPerDegree);
 
 // The plane through `eye` (or offset along its normal by `offset`) whose inside is along `normal`, normalized.
 void set_plane(float out[4], PreviewVec3 normal, const PreviewVec3 &eye, float offset) {

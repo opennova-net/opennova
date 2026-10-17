@@ -13,8 +13,7 @@ namespace {
 using io::JsonValue;
 using io::json_number;
 
-constexpr double kDegreesPerRadian = 1.0 / io::kRadiansPerDegree;
-constexpr float kTwoPi = 6.28318530717958647692f;
+constexpr float kTwoPi = float(2.0 * io::kPi);
 
 JsonValue point_json(const double point[3]) {
 	JsonValue out = JsonValue::make_array();
@@ -76,13 +75,13 @@ bool mission_camera_on_height(const OrbitCamera &camera, float x, float y, int w
 }
 
 double mission_camera_heading(const OrbitCamera &camera) {
-	double heading = std::fmod(-double(camera.yaw) * kDegreesPerRadian, 360.0);
+	double heading = std::fmod(-double(camera.yaw) * io::kDegreesPerRadian, 360.0);
 	if (heading < 0.0) heading += 360.0;
 	return heading;
 }
 
 double mission_camera_pitch(const OrbitCamera &camera) {
-	return double(camera.pitch) * kDegreesPerRadian;
+	return double(camera.pitch) * io::kDegreesPerRadian;
 }
 
 void mission_camera_top(OrbitCamera &camera) {
@@ -118,7 +117,7 @@ bool mission_camera_from_json(const io::JsonValue &json, OrbitCamera &camera, st
 		return false;
 	}
 	OrbitCamera held = camera;
-	const double limit = double(kOrbitPitchLimit) * kDegreesPerRadian;
+	const double limit = double(kOrbitPitchLimit) * io::kDegreesPerRadian;
 	for (const io::JsonMember &member : json.object) {
 		const std::string &key = member.key;
 		const JsonValue &value = member.value;

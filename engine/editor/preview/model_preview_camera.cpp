@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/model_geometry.h>
@@ -13,7 +14,7 @@ namespace opennova::editor {
 
 namespace {
 
-constexpr float kPi = 3.14159265358979f;
+constexpr float kPi = float(io::kPi);
 constexpr float kOrbitRadiansPerPixel = 0.01f;
 constexpr float kMinDistance = 0.01f;
 constexpr float kMaxDistance = 100000.0f;
