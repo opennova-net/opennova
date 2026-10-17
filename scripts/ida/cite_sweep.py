@@ -21,12 +21,16 @@ For each marker the tool asks the IDB what lives at the address and classifies t
                 (DOC_DEFAULT_IMAGE) -- skipped, this tool only knows the Jointops.exe IDB
 
   name-mismatch        a real symbol name is cited, the IDB names that address differently
+                       (a snake_case name at a function's entry counts: the name a port was
+                       written against before the IDB was curated)
   name-elsewhere       the cited symbol exists in the IDB, but at another address, and the
                        cited address neither lies inside it nor calls it
   unknown-name         the cited symbol-looking name does not exist in the IDB at all
   code-autoname        the marker cites an IDA auto-name (sub_/loc_/dword_/...) -- the IDB
                        has since named it, or never will
-  idb-autoname         the IDB still carries an auto-name where the code has a real one
+  idb-autoname         the IDB still carries an auto-name where the code has a real one, or
+                       the marker cites a function auto-name the IDB still carries
+                       (`sub_57FCE0 @0x57FCE0`, at its entry or a site inside it)
   undefined            the address is not code or data in the IDB
   malformed            the address is below the image (a dropped digit)
   unqualified-image    a DLL-range address (>= 0x10000000) with no image qualifier
@@ -136,6 +140,8 @@ AUTO_PREFIXES = (
     "sub_", "loc_", "locret_", "dword_", "word_", "byte_", "unk_", "off_", "flt_",
     "dbl_", "stru_", "asc_", "nullsub_", "j_", "def_", "algn_", "qword_", "xmmword_",
 )
+CODE_AUTO_PREFIXES = ("sub_", "loc_", "locret_", "nullsub_", "j_")
+SNAKE = re.compile(r"^[a-z]+_[a-z0-9_]+$")   # `merge_weapon_slot_params`: a pre-curation name
 LABELISH = re.compile(r"^(?:LABEL_\d+|var_[0-9A-Fa-f]+|arg_[0-9A-Fa-f]+|v\d+|a\d+|kong)$")
 DEFECTS = (
     "name-mismatch", "name-elsewhere", "unknown-name", "code-autoname", "idb-autoname",
@@ -267,6 +273,26 @@ def symbol_like(tok):
     return "_" in tok or bool(CAMEL.match(tok))
 
 
+def entry_snake(tok, addr, fs, nm):
+    """A snake_case token cited at a function's entry names that function: the name a port
+    was written against before the IDB was curated (`merge_weapon_slot_params @0x54c3f0` for
+    `KeyBinding_MergeWeaponSlotParams`), not a prose word or a field, which cite a site. The
+    bare leaf of a demangled name (`jpeg_read_header` for `D3DX::jpeg_read_header`) is that
+    name and stays a site cite."""
+    if not tok or fs != addr or not SNAKE.match(tok):
+        return False
+    return not any(f.endswith("::" + tok) for f in name_forms(nm))
+
+
+def owed_autoname(tok):
+    """A code auto-name the IDB owes a real name (`sub_`, `loc_`, `locret_`, `nullsub_`, or a
+    thunk of one, `j_sub_4A0000`); IDA's thunk of a named function (`j_Entity_Destroy`)
+    carries that function's name and owes none."""
+    while tok.startswith("j_"):
+        tok = tok[2:]
+    return tok.startswith(CODE_AUTO_PREFIXES)
+
+
 def marker_text(lines, i):
     """Line i plus, when its last `[orig:` marker wraps, the continuation lines up to the one
     that closes it (at most MAX_CONTINUATION), minus their comment lead-in (`Name @ //
@@ -375,7 +401,13 @@ for key in KEYS:
     out[a + "|" + (tok or "")] = [nm, fs, fn, defined, tea_s, ref, bool(tok in members)]
 result = json.dumps(out)
 '''
-OK_INFO = ["", None, "", True, None, None, False]  # an omitted key: the IDB name is the cited name
+OK_INFO = ["", None, "", True, None, None, False]  # a key outside the join (another image, out of range)
+
+
+def entry_info(tok, addr):
+    """The join row of a key the IDB side omitted because the IDB name at the address is the
+    cited name (a defined location when no name is cited)."""
+    return [tok or "", None, "", True, addr if tok else None, None, False]
 
 
 def label_like(tok):
@@ -412,12 +444,19 @@ def classify(tok, addr, ctx, info):
     if not tea and tok in DECORATED:
         tea = DECORATED[tok]
     fn_forms = name_forms(fn)
-    sym = symbol_like(tok)
+    sym = symbol_like(tok) or entry_snake(tok, addr, fs, nm)
     if not sym or member:
         # a prose word, a struct member, an unnamed site: only the address matters
         if tok and tea and (tea == addr or ref or tok in fn_forms):
             return "ok" if tea == addr else "call-site"
         return "site-only" if defined else "undefined"
+    # the auto-name test comes before the name tests: an auto-name the IDB still carries
+    # equals the IDB's name at its entry, and is still a name the IDB owes
+    if tok.startswith(AUTO_PREFIXES):
+        if tea and owed_autoname(tok):
+            return "idb-autoname"  # an unnamed function cited by its auto-name: the IDB owes it a name
+        if not tea:
+            return "code-autoname"
     if tok in name_forms(nm):
         return "ok"
     if fn and fs != addr and (tok in fn_forms or tok in fn):
@@ -427,11 +466,9 @@ def classify(tok, addr, ctx, info):
     if ref:
         return "call-site"
     if tok.startswith(AUTO_PREFIXES):
-        if tea and not tok.startswith(("sub_", "loc_", "locret_", "nullsub_", "j_")):
+        if not tok.startswith(CODE_AUTO_PREFIXES):
             return "ok"           # a literal-pool / BSS auto-name the IDB still uses (flt_7C3B94 = 0.5)
-        if tea:
-            return "idb-autoname"  # an unnamed function cited by its auto-name: the IDB owes it a name
-        return "code-autoname"
+        return "idb-autoname"     # a named function's thunk cited away from it
     if tea and tea != addr:
         return "name-elsewhere"
     if not tea and label_like(tok):
@@ -694,7 +731,9 @@ def main():
             nm, fs, fn = "", None, ""
             hint = ""
         else:
-            cls, nm, fs, fn = ("ok" if tok else "site-only"), (tok or ""), None, ""
+            # omitted by the IDB side: the IDB name at the address is the cited name
+            cls = classify(tok, addr, ctx, entry_info(tok, addr))
+            nm, fs, fn = (tok or ""), None, ""
         if is_other_image(ctx):
             hint = ctx.split(" ", 1)[1]   # the image (as spelled), also where the key was joined for a twin
         rows.append((cls, addr, tok or "", nm, fs or "", fn, "%s:%d" % (path, ln), hint))
