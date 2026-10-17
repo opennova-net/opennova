@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -185,8 +186,25 @@ int sbf_decode_all(const uint8_t *raw, size_t raw_size,
     return (int)produced;
 }
 
+std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
+                                      uint32_t block_size) {
+    std::vector<int16_t> out;
+    if (!entry_bytes || block_size < (uint32_t)SBF_CHUNK_HEADER) return out;
+    out.resize(size);
+    size_t produced = 0;
+    for (size_t off = 0; off + SBF_CHUNK_HEADER <= size; off += block_size) {
+        const size_t this_chunk = std::min<size_t>(block_size, size - off);
+        const int n = sbf_decode_chunk(entry_bytes + off, this_chunk, out.data() + produced,
+                                       out.size() - produced);
+        if (n < 0) break;
+        produced += (size_t)n & ~(size_t)1;
+    }
+    out.resize(produced);
+    return out;
+}
+
 /* Witnessed: jointops!Audio_StreamNextChunk @ 0x004ED7D0 (per-chunk ReadFile of
-   block_size bytes). Hot path for streaming AudioStreamPlayback. */
+   block_size bytes). */
 int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
                                uint32_t chunk_index, uint8_t *out_buf,
                                size_t buf_size) {

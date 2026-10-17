@@ -172,7 +172,6 @@
 #include "resource_index/resource_root.h"
 #include "audio/sbf_bank.h"
 #include "audio/sbf_audio_stream.h"
-#include "audio/sbf_audio_stream_playback.h"
 #include "audio/music_script.h"
 #include "audio/music_director.h"
 #include "audio/music_pair_names.h"
@@ -432,7 +431,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ResourceRoot);
 	GDREGISTER_CLASS(LaunchFlags);
 	GDREGISTER_CLASS(SbfAudioStream);
-	GDREGISTER_CLASS(SbfAudioStreamPlayback);
 	GDREGISTER_CLASS(SbfBank);
 	GDREGISTER_CLASS(MusicScript);
 	GDREGISTER_CLASS(MusicPairNames);

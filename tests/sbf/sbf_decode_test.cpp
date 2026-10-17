@@ -7,6 +7,10 @@
 #include <string.h>
 #include <formats/sbf/sbf.h>
 
+#include <vector>
+
+#include "sbf/sbf_streaming_reference.h"
+
 using namespace opennova::sbf;
 
 static int passed = 0, failed = 0;
@@ -164,6 +168,60 @@ static int test_decode_all_tone01_multichunk(void) {
     return 1;
 }
 
+/* The entry decode the Godot player hands the mixer (C-164) is sample for sample
+   the PCM the deleted streaming playback produced, for every entry of the
+   synthetic bank (each full chunk, then its one short last chunk). */
+static int test_decode_entry_matches_streaming(void) {
+    FILE *f = fopen(SYNTH_BANK, "rb");
+    CHECK(f != NULL, "open the fixture");
+    fseek(f, 0, SEEK_END);
+    const long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<uint8_t> bytes((size_t)size);
+    const size_t got = fread(bytes.data(), 1, bytes.size(), f);
+    fclose(f);
+    CHECK(got == bytes.size(), "read the fixture whole");
+    SbfArchive arc;
+    CHECK(sbf_open_memory(&arc, bytes.data(), bytes.size()) == 0, "open memory");
+    for (uint32_t i = 0; i < arc.header.entry_count; ++i) {
+        const SbfRawEntry &e = arc.entries[i];
+        const std::vector<int16_t> entry =
+                sbf_decode_entry(bytes.data() + e.data_offset, e.total_size, e.block_size);
+        CHECK(!entry.empty(), "every entry decodes to samples");
+        CHECK(entry == sbf_streaming_reference(bytes.data() + e.data_offset, e.total_size, e.block_size),
+              "the entry decode is the streaming playback's PCM");
+    }
+    const SbfRawEntry *tone01 = sbf_find_by_name(&arc, "TONE01");
+    CHECK(tone01 != NULL &&
+                  sbf_decode_entry(bytes.data() + tone01->data_offset, tone01->total_size, tone01->block_size).size() ==
+                          4096 + 4096 + 1000,
+          "TONE01's three chunks");
+    sbf_close(&arc);
+    return 1;
+}
+
+/* Chunk by chunk to the entry's end, each chunk's whole frames: an odd count's
+   last byte is not played and a short chunk does not end the stream (the split
+   counts frames as count >> 1 and the pump reads the next block until the
+   entry's bytes run out) [orig: Audio_SubmitStereoSampleSplit @ 0x7BD222;
+   AudioStream_Update @ 0x671D61]. */
+static int test_decode_entry_walks_every_chunk(void) {
+    const uint32_t block = SBF_CHUNK_HEADER + 8;
+    uint8_t entry[2 * (SBF_CHUNK_HEADER + 8)] = {0};
+    SbfChunkHeader h = {};
+    h.valid_samples = 5;
+    memcpy(entry, &h, SBF_CHUNK_HEADER);
+    for (int i = 0; i < 8; ++i) entry[SBF_CHUNK_HEADER + i] = (uint8_t)(0x81 + i);
+    h.valid_samples = 4;
+    memcpy(entry + block, &h, SBF_CHUNK_HEADER);
+    for (int i = 0; i < 8; ++i) entry[block + SBF_CHUNK_HEADER + i] = (uint8_t)(0x91 + i);
+    const std::vector<int16_t> pcm = sbf_decode_entry(entry, sizeof(entry), block);
+    CHECK(pcm.size() == 8, "two whole frames from each chunk");
+    CHECK(pcm.size() == 8 && pcm[3] == sbf_decode_sample(0x84, 0) && pcm[4] == sbf_decode_sample(0x91, 0),
+          "the odd byte dropped, the next chunk on the left again");
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_decode_sample_silence);
     RUN_TEST(test_decode_sample_extremes);
@@ -172,6 +230,8 @@ int main(void) {
     RUN_TEST(test_decode_chunk_silence_partial);
     RUN_TEST(test_decode_all_silence);
     RUN_TEST(test_decode_all_tone01_multichunk);
+    RUN_TEST(test_decode_entry_matches_streaming);
+    RUN_TEST(test_decode_entry_walks_every_chunk);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }
