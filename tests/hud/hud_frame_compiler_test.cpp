@@ -2556,14 +2556,26 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		CHECK(std::fabs(icons[2].v0 - 0.75f) < 1e-6f, "ready draws frame 3 on phase B");
 		CHECK(std::fabs(icons[1].v0 - 0.0f) < 1e-6f, "the attack frame is a blink");
 	}
-	// The conquest arm draws nothing (unmodelled, never invented).
+	// The conquest arm: no group break on a team change, every contested
+	// marker on its own row at the seed group's x (team 1's two zones put it
+	// 196 left of the anchor), the rows 86 apart
+	// [orig: HUD_DrawZoneStatusPanel @0x5a25e7..0x5a25f6 (the break skipped), the marker
+	//  leg @0x5a2711..0x5a2786; y_offset steps only in the AAS leg @0x5a27a3].
 	lp.game_type = opennova::game_type::kConquerAndControl;
 	const HudDrawList &list_c = compiler.compile(state, 1024.0f, 768.0f);
-	size_t conquest_icons = 0;
+	std::vector<HudQuad> conquest_icons;
 	for (const HudQuad &q : list_c.quads)
 		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
-				q.texture <= opennova::hud::kHudTexLfpNeutral) ++conquest_icons;
-	CHECK(conquest_icons == 0, "the conquest arm stays unmodelled");
+				q.texture <= opennova::hud::kHudTexLfpNeutral) conquest_icons.push_back(q);
+	CHECK(conquest_icons.size() == 3, "the conquest arm draws every contested marker");
+	if (conquest_icons.size() == 3) {
+		for (size_t i = 0; i < 3; ++i) {
+			CHECK(std::fabs(conquest_icons[i].x0 - (1020.0f - 196.0f)) < 0.01f,
+					"every conquest marker keeps the seed group's x");
+			CHECK(std::fabs(conquest_icons[i].y0 - (27.0f + 86.0f * float(i))) < 0.01f,
+					"every conquest marker takes its own row");
+		}
+	}
 	// Every other game type takes the AAS arm: retail calls the drawer every HUD
 	// frame and its one game-type test is the conquest arm's
 	// [orig: HUD_RenderAllOverlays @0x5a8530; `cmp g_GameType, 50010h`

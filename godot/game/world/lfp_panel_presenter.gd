@@ -5,9 +5,9 @@ extends RefCounted
 ## owning team, with the group's Under-Attack / Ready-for-Takeover text. Retail
 ## calls the drawer every HUD frame whatever the game type; its one game-type
 ## test picks the conquest arm (g_GameType == 0x50010), which the engine
-## element leaves undrawn (interface/hud-re.md). So this lane pushes the panel with the
-## session's game type and the engine decides; with no session the zone fill
-## finds nothing and the panel stays hidden.
+## element draws too. So this lane pushes the panel with the session's game
+## type and the engine decides; with no session the zone fill finds nothing
+## and the panel stays hidden.
 ## [orig: HUD_RenderAllOverlays @0x5a8530 -> HUD_DrawZoneStatusPanel @0x5a2480
 ##  -> HUD_DrawZoneMarker @0x5986f0; the game-type test @0x5a248d..0x5a24a1]
 ##
