@@ -213,6 +213,37 @@
       ]
     },
     {
+      "Sid": "ListOpenNovaTasks",
+      "Effect": "Allow",
+      "Action": "ecs:ListTasks",
+      "Resource": "*",
+      "Condition": {
+        "ArnLike": {
+          "ecs:cluster": "arn:aws:ecs:${region}:${account_id}:cluster/opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "ReadOpenNovaTasksDatabaseCache",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTasks",
+        "rds:DescribeDBInstances",
+        "elasticache:DescribeReplicationGroups"
+      ],
+      "Resource": [
+        "arn:aws:ecs:${region}:${account_id}:task/opennova-*/*",
+        "arn:aws:rds:${region}:${account_id}:db:opennova-*",
+        "arn:aws:elasticache:${region}:${account_id}:replicationgroup:opennova-*"
+      ]
+    },
+    {
+      "Sid": "ReadTargetHealth",
+      "Effect": "Allow",
+      "Action": "elasticloadbalancing:DescribeTargetHealth",
+      "Resource": "*"
+    },
+    {
       "Sid": "PassOpenNovaRolesToEcsTasksAndScheduler",
       "Effect": "Allow",
       "Action": "iam:PassRole",

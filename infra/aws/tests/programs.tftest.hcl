@@ -462,6 +462,23 @@ run "environments" {
     ])
     error_message = "web, the controller and the worker read hosting's settings (off without a data set) and the controller's Cloud Map URL"
   }
+  assert {
+    condition = (
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_REGION"] == "us-east-1" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_CLUSTER"] == "opennova-prod" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_DATABASE"] == "opennova-prod-db" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_CACHE"] == "opennova-prod-cache" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_RELEASE_PARAMETER"] == "/opennova/prod/release" &&
+      jsondecode({ for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_TARGET_GROUPS"]) == {
+        gate  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef"
+        lobby = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
+        http  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-http/0123456789abcdef"
+        https = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-https/0123456789abcdef"
+      } &&
+      alltrue([for p in ["gate", "lobby", "controller", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INFRA_")])
+    )
+    error_message = "web alone is told what the admin's infrastructure view reads: this deployment's cluster, its target groups by listener, its database, cache and release parameter, in its region"
+  }
 }
 
 run "services" {
@@ -591,7 +608,34 @@ run "task_roles" {
     condition = (
       length(aws_iam_role_policy.fleet_service) == 0 && length(aws_iam_role_policy.mail) == 0
     )
-    error_message = "without hosting and mail, every task role holds ECS Exec alone (fleet.tf and mail.tf add the worker's)"
+    error_message = "without hosting and mail, every task role holds ECS Exec alone but web's infrastructure reads (fleet.tf and mail.tf add the worker's)"
+  }
+  assert {
+    condition = (
+      aws_iam_role_policy.infra_read.role == aws_iam_role.program["web"].id &&
+      aws_iam_role_policy.infra_read.name == "opennova-prod-web-infra-read" &&
+      toset(flatten([for st in data.aws_iam_policy_document.infra_read.statement : st.actions])) == toset([
+        "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTasks", "elasticloadbalancing:DescribeTargetHealth",
+        "rds:DescribeDBInstances", "elasticache:DescribeReplicationGroups", "ssm:GetParameter", "ec2:DescribeInstances",
+      ]) &&
+      alltrue([for st in data.aws_iam_policy_document.infra_read.statement : !anytrue([for a in st.actions : !can(regex("^[a-z0-9]+:(Describe|List|Get)", a))])])
+    )
+    error_message = "web's role holds the infrastructure view's reads, and nothing but reads"
+  }
+  assert {
+    condition = (
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadServices"]) == toset(["arn:aws:ecs:us-east-1:123456789012:service/opennova-prod/*"]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "DescribeTasks"]) == toset(["arn:aws:ecs:us-east-1:123456789012:task/opennova-prod/*"]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st if st.sid == "ListTasks"]).resources == toset(["*"]) &&
+      length([for c in one([for st in data.aws_iam_policy_document.infra_read.statement : st if st.sid == "ListTasks"]).condition : c
+      if c.test == "ArnEquals" && c.variable == "ecs:cluster" && toset(c.values) == toset(["arn:aws:ecs:us-east-1:123456789012:cluster/opennova-prod"])]) == 1 &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadDatabase"]) == toset([aws_db_instance.main.arn]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadCache"]) == toset([aws_elasticache_replication_group.cache.arn]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadRelease"]) == toset([aws_ssm_parameter.release.arn]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadTargetHealth"]) == toset(["*"]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadMachines"]) == toset(["*"])
+    )
+    error_message = "each infrastructure read names this deployment's own cluster, tasks, database, cache and release parameter; ListTasks its cluster as a condition; the balancer's and EC2's describes take no resource"
   }
   assert {
     condition = (

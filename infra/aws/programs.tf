@@ -24,7 +24,9 @@
 #   worker      nothing inbound; the fleet's machine launches (fleet.tf)
 #
 # Every program reaches the database (database.tf); web alone reaches the
-# cache (cache.tf). Each container answers /livez (its stall watchdog) on
+# cache (cache.tf), and reads what the admin's infrastructure view shows (the
+# services, tasks, target groups, database, cache, release and machines below,
+# "web's infrastructure reads"). Each container answers /livez (its stall watchdog) on
 # health_port (web on game_http_port too, beside /healthz), which its ECS
 # health check asks; a task failing it is replaced. A deployment rolls with
 # the circuit breaker on (a deployment that never turns healthy rolls back)
@@ -210,6 +212,83 @@ resource "aws_iam_role_policy" "exec" {
   policy   = data.aws_iam_policy_document.exec.json
 }
 
+# Web's infrastructure reads, for the admin's view (apps/novaworld_web/infra/):
+# read-only, each scoped to this deployment's own resource where the API allows
+# one. ListTasks takes the cluster as a condition; Elastic Load Balancing's and
+# EC2's describe calls take no resource (web asks only for this deployment's
+# target groups and its machines' instance ids). The boundary
+# (infra/aws/iam/opennova-role-boundary.json) holds the same, so the org stack
+# applies it first.
+data "aws_iam_policy_document" "infra_read" {
+  statement {
+    sid       = "ReadServices"
+    effect    = "Allow"
+    actions   = ["ecs:DescribeServices"]
+    resources = ["arn:${local.partition}:ecs:${local.region}:${local.account_id}:service/${aws_ecs_cluster.main.name}/*"]
+  }
+
+  statement {
+    sid       = "ListTasks"
+    effect    = "Allow"
+    actions   = ["ecs:ListTasks"]
+    resources = ["*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [aws_ecs_cluster.main.arn]
+    }
+  }
+
+  statement {
+    sid       = "DescribeTasks"
+    effect    = "Allow"
+    actions   = ["ecs:DescribeTasks"]
+    resources = ["arn:${local.partition}:ecs:${local.region}:${local.account_id}:task/${aws_ecs_cluster.main.name}/*"]
+  }
+
+  statement {
+    sid       = "ReadTargetHealth"
+    effect    = "Allow"
+    actions   = ["elasticloadbalancing:DescribeTargetHealth"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadDatabase"
+    effect    = "Allow"
+    actions   = ["rds:DescribeDBInstances"]
+    resources = [aws_db_instance.main.arn]
+  }
+
+  statement {
+    sid       = "ReadCache"
+    effect    = "Allow"
+    actions   = ["elasticache:DescribeReplicationGroups"]
+    resources = [aws_elasticache_replication_group.cache.arn]
+  }
+
+  statement {
+    sid       = "ReadRelease"
+    effect    = "Allow"
+    actions   = ["ssm:GetParameter"]
+    resources = [aws_ssm_parameter.release.arn]
+  }
+
+  statement {
+    sid       = "ReadMachines"
+    effect    = "Allow"
+    actions   = ["ec2:DescribeInstances"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "infra_read" {
+  name   = "${local.name}-web-infra-read"
+  role   = aws_iam_role.program["web"].id
+  policy = data.aws_iam_policy_document.infra_read.json
+}
+
 # ---- what each program's container gets --------------------------------------------
 
 locals {
@@ -249,6 +328,19 @@ locals {
     ONNET_API_PROXY_ONLY  = "1"
   }
 
+  # The admin's infrastructure view (apps/novaworld_web/infra/infra_status.h):
+  # what web reads with its task role (the policy below), each setting naming
+  # this deployment's own: the cluster and its services, the balancer's target
+  # groups by listener, the database, the cache and the release parameter.
+  infra_status_env = {
+    ONNET_INFRA_REGION            = local.region
+    ONNET_INFRA_CLUSTER           = aws_ecs_cluster.main.name
+    ONNET_INFRA_TARGET_GROUPS     = jsonencode({ for k, g in aws_lb_target_group.public : k => g.arn })
+    ONNET_INFRA_DATABASE          = aws_db_instance.main.identifier
+    ONNET_INFRA_CACHE             = aws_elasticache_replication_group.cache.replication_group_id
+    ONNET_INFRA_RELEASE_PARAMETER = aws_ssm_parameter.release.name
+  }
+
   # Hosting (fleet.tf), for the programs that read it: the controller's URL
   # and the fleet's settings. The release adds the serve and hostd images
   # (`app deploy --serve-tag --hostd-tag`, pinned by digest).
@@ -257,7 +349,7 @@ locals {
   program_env = {
     gate       = merge(local.common_env, local.public_env)
     lobby      = merge(local.common_env, local.public_env, local.lobby_env)
-    web        = merge(local.common_env, local.public_env, local.site_env, local.web_env, local.cache_env, local.mail_env, local.hosting_env)
+    web        = merge(local.common_env, local.public_env, local.site_env, local.web_env, local.cache_env, local.mail_env, local.hosting_env, local.infra_status_env)
     controller = merge(local.common_env, local.public_env, local.site_env, local.hosting_env)
     worker     = merge(local.common_env, local.public_env, local.site_env, local.mail_env, local.hosting_env)
   }

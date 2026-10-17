@@ -14,6 +14,7 @@
 #include "hosted/net_cidr.h"
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
+#include "infra/infra_routes.h"
 #include "jobs/job_routes.h"
 #include "mailer.h"
 #include "password_reset_routes.h"
@@ -289,7 +290,8 @@ struct HttpListener::Impl {
 			users(access, pool),
 			billing(access, pool, redis),
 			resets(access, pool, redis),
-			jobs(access, pool) {}
+			jobs(access, pool),
+			infra(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -326,6 +328,8 @@ struct HttpListener::Impl {
 	PasswordResetRoutes resets;
 	// The admin's background jobs routes (jobs/job_routes.h).
 	jobs::JobRoutes jobs;
+	// The admin's infrastructure view (infra/infra_routes.h).
+	infra::InfraRoutes infra;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.
 	catalog::GameCatalog games;
@@ -406,6 +410,9 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->billing.set_billing(billing_);
 	impl_->billing.register_routes(impl_->app);
 	impl_->jobs.register_routes(impl_->app);
+	impl_->infra.configure(
+			infra_, impl_->hosted_servers.enabled(), impl_->hosted_servers.provider());
+	impl_->infra.register_routes(impl_->app);
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a

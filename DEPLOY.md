@@ -1281,6 +1281,12 @@ or secret is a change to the stack: add it, plan, apply. A new image replaces a 
 Every command here takes the deployment it reads or changes: `--deployment staging` or
 `--deployment prod`.
 
+- **At a glance.** The site's admin page **Infrastructure** (`/admin/infrastructure`) shows
+  what `app status` does and more: each program's service (its counts, rollout and revision
+  against the release), its tasks (health, zone, address, image, the recently stopped ones'
+  exit codes) and events, the load balancer's targets, the database's and the cache's status,
+  the lobby instances, the controller and the machines. Web reads AWS for it with its task
+  role (read-only, `infra/aws/programs.tf`), at most every 20 s.
 - **Logs.** `./deploy/run.sh --deployment <deployment> app logs [PROGRAM|backup] [--follow] [--since 2h]` reads
   CloudWatch (`/opennova/<deployment>/service`, 30 days, a stream per container and task,
   `<program>/<container>/<task id>`: web's task writes `web/web/...` and

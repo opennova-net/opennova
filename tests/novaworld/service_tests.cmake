@@ -635,6 +635,31 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(job_routes REDIS COMMAND job_routes_test)
     set_tests_properties(job_routes PROPERTIES TIMEOUT 120)
 
+    # The admin's infrastructure view's AWS reads (apps/novaworld_web/infra/), no
+    # database: the Query APIs' XML reader, the curl-signed calls and their config
+    # files on a stub CommandRunner (infra_aws_stub.h), the ECS agent's
+    # credentials, AWS's errors in words, every section of a deployment mid-deploy
+    # parsed, a failing section standing alone, the local stack calling nothing,
+    # and the cache window with one read shared by callers at once.
+    add_executable(infra_status_test novaworld/infra_status_test.cpp)
+    target_link_libraries(infra_status_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(infra_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME infra_status COMMAND infra_status_test)
+
+    # Its route (infra/infra_routes.h) on the in-process Crow listener over a
+    # migrated database and a Redis namespace: refused without an admin; the local
+    # stack's view (the cloud unavailable, the lobbies, the controller and the
+    # machines from rows); a deployment's from the stub AWS, read once per cache
+    # window; and no credential in any reply.
+    add_executable(infra_routes_test novaworld/infra_routes_test.cpp)
+    target_link_libraries(infra_routes_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(infra_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(infra_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(infra_routes REDIS COMMAND infra_routes_test)
+    set_tests_properties(infra_routes PROPERTIES TIMEOUT 120)
+
     # The outbound mail (apps/novaworld_common/mailer.h) and the address rule
     # (auth.h normalize_email): the shapes taken and refused, SesMailer's settings,
     # argv and SendEmail request on a stub CommandRunner (the request file
