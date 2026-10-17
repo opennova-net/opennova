@@ -27,6 +27,7 @@
 #include <formats/env/env.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/scr/scr.h>
 #include <formats/tga/tga.h>
 
 #include "common/file_io.h"
@@ -791,6 +792,17 @@ int test_retail() {
 	return 0;
 }
 
+// The retail SCR container over `plain` (the codec reverses, then XORs; this is its inverse): a wrapped file on
+// disk, as project_asset_source_test makes one.
+std::vector<uint8_t> scr_encoded(const std::string &plain, uint32_t key) {
+	std::vector<uint8_t> body(plain.rbegin(), plain.rend());
+	opennova::scr::scr_decrypt(body.data(), body.size(), key);
+	std::reverse(body.begin(), body.end());
+	std::vector<uint8_t> out = {'S', 'C', 'R', 1};
+	out.insert(out.end(), body.begin(), body.end());
+	return out;
+}
+
 } // namespace
 
 // A mission's terrain as the game judges it (D-13): the .trn, overcast.def, then the mission's .env through the
@@ -884,6 +896,12 @@ int test_mission_terrain() {
 	editor_test::handle_to_end(session, request::save("rows.trn"));
 	TEST_EXPECT(test_io::read_file_text(root + "/rows.trn").find("polytrn_sectors") != std::string::npos &&
 	            rows_refused() == 0);
+	// An SCR-wrapped .env reads decoded, as the game reads it: its polytrn_sectorcount 3 refuses the load.
+	TEST_EXPECT(test_io::write_file(root + "/wrapped.env",
+	                                scr_encoded("sky_height 175\r\npolytrn_sectorcount 3\r\n", opennova::scr::SCR_KEY_JO_DFX2)));
+	TEST_EXPECT(mission("wrapped.bms", "island", "wrapped") == 0);
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(refused("wrapped.env").size() + refused("wrapped.bms").size() == 1);
 	std::printf("mission terrain: the gate over the .trn, overcast.def and the .env; on the .env's line; the .trn's "
 	            "own row taken back where every mission takes it\n");
 	return 0;
