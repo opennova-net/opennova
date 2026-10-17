@@ -2323,15 +2323,25 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// (@0x42e647). The host walks pool 0 and answers with the index of every
 				// EMPTY entry (`entry_dword[7] == 0`); the client destroys whatever it
 				// still holds in those slots (NapiNPClientMsg_DestroyEntityList
-				// @0x429730). The handler reads NO fields from the request, is
-				// authority-gated, and is SKIPPED while g_NetSpawnSuspended or
+				// @0x429730). The handler reads NO fields from the request. It answers
+				// on the authority only, is SKIPPED while g_NetSpawnSuspended or
 				// g_SpawnSuccessGate (round over) is set — our reachable analog of the
-				// latter is world->match.outcome().ended. The walk covers pool 0's used
+				// latter is world->match.outcome().ended — and answers only a requester
+				// whose session player (conn+0x160) and its server slot (+0xC0) are
+				// bound, which our PlayerAdded phase stands for (the 0x22 and 0x0F
+				// gates' analogue). The walk covers pool 0's used
 				// count, its allocation high-water mark (D-NET-417); its empty test is the
 				// ItemTypeIndex (+0x1C) alone, with no def test: a free row, or a live one
 				// of a type items.def lacks (the lookup's miss answers row 0).
-				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0,
-				//  the used read @0x5160FF, the +0x1C test @0x516123]
+				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600 — the authority
+				//  @0x51A600..0x51A607, g_NetSpawnSuspended @0x51A609..0x51A610
+				//  (unmodeled, D-NET-116), the round-over gate @0x51A612..0x51A619, the
+				//  session player @0x51A61F..0x51A627 and its slot @0x51A62A..0x51A632;
+				//  body builder Server_CollectEmptyPool0Slots @0x5160f0, the used read
+				//  @0x5160FF, the +0x1C test @0x516123]
+				if (inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority ||
+				    conn.phase < ConnectionPhase::PlayerAdded)
+					break;
 				std::size_t consumed = 0;
 				if (world == nullptr ||
 				    !decode_empty_slots_request(
