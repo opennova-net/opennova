@@ -801,9 +801,9 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 		} else if (key == "waccuracy2") {
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.w_accuracy2 = static_cast<int16_t>(v);
-		} else if (key == "perception2" || key == "perception") { // one word each [orig: @0x452aad, @0x452b08]
+		} else if (key == "perception2" || key == "perception") { // one word each [orig: JOTACmed.exe MIS_ParseToken @0x452aad]
 			if (!token_i32(line, 1, entity.perception2, error)) return false;
-		} else if (key == "perfectionist2" || key == "perfectionist") {
+		} else if (key == "perfectionist2" || key == "perfectionist") { // [orig: JOTACmed.exe MIS_ParseToken @0x452b08]
 			if (!token_i32(line, 1, entity.perfectionist2, error)) return false;
 		} else if (key == "movetimer") {
 			if (!token_i32(line, 1, v, error)) return false;
