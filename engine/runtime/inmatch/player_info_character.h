@@ -57,9 +57,10 @@ public:
 	// fresh profile seeds into both blocks, PlayerProfile_InitDefaults
 	// @0x54bbe0 / @0x54bbe3], as join_character_profile.h reads it out of a
 	// session (D-PLAYERINFO-33). An Avatars.def with no combo of the side's
-	// alignment leaves the side absent, where retail's packer falls back to
-	// entry 0 (@0x57ad84..0x57adda; D-PLAYERINFO-X1); an empty registry (no
-	// Avatars.def) leaves neither side.
+	// alignment gives that side entry 0, the other side's first combo, its
+	// numbers and packed id as the packer leaves them in the side block
+	// [orig: EntitySlot_LookupAndPackEntry @0x57ad84..0x57adda, the entry-0
+	// fallback]; an empty registry (no Avatars.def) leaves neither side.
 	void set_registry(const CharacterRegistry &registry);
 
 	// The side the screen shows first: the profile's, else the authored
@@ -76,7 +77,8 @@ public:
 	// [orig: PlayerInfo_SaveFromDialog @0x55ee10 -- @0x55ee3f..0x55ef38: the
 	// class loop @0x55ee3f..0x55ee5a over both team blocks, then the
 	// nationality / division / combo stores of the shown team @0x55eeab /
-	// @0x55eeee / @0x55ef31].
+	// @0x55eeee / @0x55ef31]. A side holding the entry-0 fallback has no
+	// record of its own in `sides`.
 	struct Snapshot {
 		std::optional<PlayerInfoSideSelection> current;
 		std::optional<PlayerInfoSideSelection> sides[2];

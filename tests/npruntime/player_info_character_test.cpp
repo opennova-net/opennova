@@ -113,12 +113,59 @@ void test_snapshot_stamps_the_class() {
 			"both remembered sides still take the class");
 }
 
+// A one-sided Avatars.def: the side with no combo of its alignment takes entry
+// 0, the other side's first combo, as the packer leaves it in the side block
+// [orig: EntitySlot_LookupAndPackEntry @0x57ad84..0x57adda].
+void test_one_sided_default() {
+	inmatch::CharacterRegistry good_only;
+	good_only.add_entry(0, 0, 0, 3, 1, 1, 0, 1, false);
+	good_only.add_entry(0, 0, 1, 3, 1, 2, 0, 3, false);
+	inmatch::PlayerInfoCharacterState state;
+	std::optional<PlayerInfoSideSelection> sides[2] = { std::nullopt, saved(1, 0, 0, 1, 6) };
+	state.set_persisted(std::nullopt, std::nullopt, sides);
+	state.set_registry(good_only);
+	const auto blue = state.side_selection(0);
+	check(blue && blue->combo == 0, "one-sided: the populated side takes its first combo");
+	const auto red = state.side_selection(1);
+	check(red && red->team == 1 && red->nationality == 0 && red->division == 0 && red->combo == 0,
+			"one-sided: the empty side falls back to entry 0");
+	check(red && red->avatar_a == 3 && red->avatar_b == 1 &&
+					red->avatar_packed == character_id::pack(3, 1, 1, 0) && red->player_class == 6,
+			"one-sided: entry 0's numbers and packed id (its side bit kept), the saved class");
+	const auto snap = state.snapshot(1, 0, 0, 1, 7);
+	check(!snap.current, "one-sided: a side-B pick of a good combo resolves to none");
+	check(state.player_class(1) == 6, "one-sided: the fallback side's class reads");
+	check(!snap.sides[1], "one-sided: the fallback side has no record of its own to save");
+	check(snap.sides[0] && snap.sides[0]->combo == 0 && snap.sides[0]->player_class == 7,
+			"one-sided: the populated side takes the class");
+}
+
+// An authored id wider than its packed field (combo 64 packs as 0) still
+// resolves its own side, whose record the snapshot keeps.
+void test_wide_id_keeps_its_side() {
+	inmatch::CharacterRegistry r;
+	r.add_entry(0, 0, 0, 3, 1, 64, 0, 1, false);
+	r.add_entry(1, 0, 0, 7, 2, 5, 1, 10, true);
+	inmatch::PlayerInfoCharacterState state;
+	std::optional<PlayerInfoSideSelection> sides[2] = { saved(0, 0, 0, 0, 6), std::nullopt };
+	state.set_persisted(0, 6, sides);
+	state.set_registry(r);
+	const auto snap = state.snapshot(0, 0, 0, 0, 7);
+	check(snap.current && snap.current->avatar_packed == character_id::pack(3, 1, 64, 0),
+			"wide id: the shown side resolves");
+	check(snap.sides[0] && snap.sides[0]->combo == 0 && snap.sides[0]->player_class == 7,
+			"wide id: the side's record is saved");
+	check(snap.sides[1] && snap.sides[1]->nationality == 1, "wide id: the other side keeps its first combo");
+}
+
 } // namespace
 
 int main() {
 	test_selection();
 	test_normalize_and_reads();
 	test_snapshot_stamps_the_class();
+	test_one_sided_default();
+	test_wide_id_keeps_its_side();
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return 1;

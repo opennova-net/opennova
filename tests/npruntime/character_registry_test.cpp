@@ -218,6 +218,29 @@ int main() {
 				"the side requirement is -1");
 	}
 
+	// A one-sided Avatars.def: the side with no combo of its alignment takes
+	// entry 0's id (the other side's, its side bit kept) and its head voice
+	// [orig: EntitySlot_LookupAndPackEntry @0x57ad84..0x57adda].
+	{
+		opennova::inmatch::CharacterRegistry good_only;
+		good_only.add_entry(0, 0, 0, 3, 1, 1, AVATAR_ALIGN_GOOD, 4, false);
+		good_only.add_entry(0, 0, 1, 3, 1, 2, AVATAR_ALIGN_GOOD, 5, false);
+		JoinSideSelection none[2];
+		const JoinCharacterProfile p = join_character_profile(good_only, none, true);
+		check(p.character_ids[0] == good_only.entries()[0].packed_id && p.avatars[0] == 4,
+				"one-sided: side A takes its first combo");
+		check(p.character_ids[1] == good_only.entries()[0].packed_id && p.avatars[1] == 4,
+				"one-sided: side B falls back to entry 0");
+		JoinSideSelection saved[2];
+		saved[1].present = true;
+		saved[1].nationality_index = 0;
+		saved[1].division_index = 0;
+		saved[1].combo_index = 1;
+		const JoinCharacterProfile q = join_character_profile(good_only, saved, true);
+		check(q.character_ids[1] == good_only.entries()[0].packed_id,
+				"one-sided: a side-B pick of a good combo does not resolve, the fallback stands");
+	}
+
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return EXIT_FAILURE;

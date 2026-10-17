@@ -2,6 +2,8 @@
 
 #include <runtime/inmatch/join_character_profile.h>
 
+#include <net/npwire/character_id.h>
+
 #include <algorithm>
 
 namespace opennova::inmatch {
@@ -24,6 +26,33 @@ std::optional<PlayerInfoSideSelection> player_info_side_selection(const Characte
 	return selection;
 }
 
+namespace {
+
+// The side's retail default: the first combo of its alignment, else entry 0
+// whatever its side, with the authored numbers and packed id the side block
+// holds (a fallback's packed id keeps entry 0's side bit) and the entry's tree
+// indices beside them [orig: EntitySlot_LookupAndPackEntry @0x57ad40 - the side loop
+// @0x57ad6b..0x57ad80, the entry-0 fallback @0x57ad84..0x57adda, the stores of
+// its outType / outSubtype and packed word in PlayerProfile_InitDefaults
+// @0x54bba2..0x54bc17].
+std::optional<PlayerInfoSideSelection> side_default(const CharacterRegistry &registry, int side,
+		int player_class) {
+	const CharacterEntry *first = registry.find_by_packed_id(registry.first_character_id(side));
+	if (first == nullptr) return std::nullopt;
+	PlayerInfoSideSelection selection;
+	selection.team = side;
+	selection.nationality = first->nationality_index;
+	selection.division = first->division_index;
+	selection.combo = first->combo_index;
+	selection.player_class = player_class;
+	selection.avatar_a = first->nationality_id;
+	selection.avatar_b = first->division_id;
+	selection.avatar_packed = first->packed_id;
+	return selection;
+}
+
+} // namespace
+
 void PlayerInfoCharacterState::set_persisted(std::optional<int> team, std::optional<int> player_class,
 		const std::optional<PlayerInfoSideSelection> (&sides)[2]) {
 	profile_team_ = team;
@@ -43,13 +72,7 @@ void PlayerInfoCharacterState::set_registry(const CharacterRegistry &registry) {
 		std::optional<PlayerInfoSideSelection> selection = player_info_side_selection(registry_, side,
 				saved ? saved->nationality : -1, saved ? saved->division : -1, saved ? saved->combo : -1,
 				selected_class);
-		if (!selection) {
-			// [orig: EntitySlot_LookupAndPackEntry @0x57ad40 (the per-side default)]
-			const CharacterEntry *first = registry_.find_by_packed_id(registry_.first_character_id(side), side);
-			if (first != nullptr)
-				selection = player_info_side_selection(registry_, side, first->nationality_index,
-						first->division_index, first->combo_index, selected_class);
-		}
+		if (!selection) selection = side_default(registry_, side, selected_class);
 		sides_[side] = selection;
 	}
 }
@@ -83,6 +106,13 @@ PlayerInfoCharacterState::Snapshot PlayerInfoCharacterState::snapshot(int team, 
 	for (int side = 0; side < 2; ++side) {
 		if (!sides_[side]) continue;
 		PlayerInfoSideSelection saved = *sides_[side];
+		// A side holding the entry-0 fallback (its packed id carries the other
+		// side's bit) has no record of its own to save: its block keeps its own
+		// bytes (a fresh record's are this same default [orig: PlayerProfile_InitDefaults
+		// @0x54bba2..0x54bc17], as PlayerProfiles' set_defaults packs the same
+		// first_character_id), and the store's write takes only an id with the
+		// shown side's bit.
+		if (character_id::alignment(static_cast<uint16_t>(saved.avatar_packed)) != side) continue;
 		saved.player_class = selected_class;
 		out.sides[side] = saved;
 	}
