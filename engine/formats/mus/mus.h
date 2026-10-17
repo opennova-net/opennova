@@ -243,6 +243,13 @@ int mus_open(MusFile *out, const char *path);
 /* Free all malloc'd buffers held by `file` and zero the struct. Idempotent. */
 void mus_close(MusFile *file);
 
+/* Whether two parsed files hold the same in what the game reads of a script: the method-name
+   table it resolves the `method` calls through, and each program's name, code, sections, entry,
+   the globals' and locals' sizes, the `enter` frame base, the MessageHandler entry and the count of
+   the strings `pushstr` reads (each field's witness above). A save checks the bytes it wrote read
+   back as the model so. False for a NULL file. */
+bool mus_reads_the_same(const MusFile *a, const MusFile *b);
+
 /* A section's name for display: its debug label, else "Section_N" (N its
    index in the section table) where the file names it none. The game reads no
    label; the decompiler, the VM's section names and the bindings show this. */

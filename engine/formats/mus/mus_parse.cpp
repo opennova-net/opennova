@@ -384,4 +384,35 @@ void mus_close(MusFile *file) {
     memset(file, 0, sizeof(*file));
 }
 
+bool mus_reads_the_same(const MusFile *a, const MusFile *b) {
+    if (!a || !b) return false;
+    if (a->intrinsic_count != b->intrinsic_count || a->header.chunk_count != b->header.chunk_count) {
+        return false;
+    }
+    for (uint32_t i = 0; i < a->intrinsic_count; ++i) {
+        if (strncmp(a->intrinsic_names[i], b->intrinsic_names[i], MUS_METHOD_NAME_SIZE) != 0) {
+            return false;
+        }
+    }
+    for (uint32_t i = 0; i < a->header.chunk_count; ++i) {
+        const MusScript &x = a->scripts[i];
+        const MusScript &y = b->scripts[i];
+        if (strncmp(x.name, y.name, MUS_NAME_SIZE) != 0 || x.code_size != y.code_size ||
+            (x.code_size && memcmp(x.code, y.code, x.code_size) != 0) ||
+            x.section_count != y.section_count || x.entry_section_index != y.entry_section_index ||
+            x.globals_size != y.globals_size || x.locals_size != y.locals_size ||
+            x.locals_frame_offset != y.locals_frame_offset || x.string_count != y.string_count ||
+            x.has_message_handler != y.has_message_handler ||
+            (x.has_message_handler && x.message_handler_offset != y.message_handler_offset)) {
+            return false;
+        }
+        for (uint32_t k = 0; k < x.section_count; ++k) {
+            if (x.sections[k].code_offset != y.sections[k].code_offset) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 } // namespace opennova::mus
