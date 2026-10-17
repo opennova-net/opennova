@@ -819,6 +819,18 @@ void test_satchel_contact_presents_sound_only_and_no_water_gate() {
         // reads the tick's start Z, not the spawn's.
         CHECK(contacts(rig) == 0);
     }
+    // The contact count compares as a signed byte: a sixth contact is silent,
+    // a count wrapped past 127 sounds again [orig: cmp byte ptr [esi+155h], 5
+    // then setle, Entity_UpdateSatchelPhysics @0x44893D / @0x44894B].
+    for (const int before : {5, 199}) {
+        Rig rig(0);
+        const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        rig.w.round_sim.rounds[size_t(slot)].bounce_count = static_cast<uint8_t>(before);
+        rig.tick(120);
+        CHECK(contacts(rig) == (before == 199 ? 1 : 0));
+    }
 }
 
 void test_grenade_fuse_tick_boundaries() {

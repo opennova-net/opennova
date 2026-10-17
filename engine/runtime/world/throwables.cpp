@@ -241,6 +241,16 @@ int32_t ground_q16(const terrain::TerrainHeightField *terrain, int32_t x, int32_
     return to_fixed(h);
 }
 
+// The contact presentation's descriptor carries the sound bit while the
+// round's contact count byte, compared as a SIGNED byte, is at most 5: a
+// count that wraps past 127 sounds again.
+// [orig: cmp byte ptr [esi+155h], 5 then setle -- Entity_UpdateGrenadePhysics
+//  @0x4447D3 / @0x4447E1, Entity_UpdateClaymorePhysics @0x4478C8 / @0x4478D6,
+//  Entity_UpdateSatchelPhysics @0x44893D / @0x44894B]
+static bool contact_count_sounds(const LiveRound &r) {
+    return static_cast<int8_t>(r.bounce_count) <= 5;
+}
+
 // The motors' terrain ground test runs only while bit 0x80 of the round's
 // +0x114 word (the ammo's NoCollide, or the Indoors stamp its spawn took from
 // the shooter) and its Flags 0x800000 (its BB state) are both clear.
@@ -569,7 +579,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
     // In particular, retail does NOT submit the dirt row's Effect_FragGrndDirt
     // particle here; that same particle is also authored on the fuse's obj row.
     if (ground_hit && ground_surface != 0 && f.pz >= water &&
-        r.bounce_count <= 5) {
+        contact_count_sounds(r)) {
         push_motor_effect(world, sim, r, ground_surface + 4,
                           Vec3{static_cast<float>(from_fixed(f.px)),
                                static_cast<float>(from_fixed(f.py)),
@@ -784,7 +794,7 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     //  @0x448CA2; AmmoDef_ProcessImpactEffect @0x40A18D..0x40A1B1]
     const bool clipped_by_water = (ammo.flags & kAmmoFlagClipWaterFx) != 0 &&
                                   f.pz <= water && f.prev_z <= water;
-    if (ground_hit && ground_surface != 0 && !clipped_by_water && r.bounce_count <= 5)
+    if (ground_hit && ground_surface != 0 && !clipped_by_water && contact_count_sounds(r))
         push_motor_effect(world, sim, r, ground_surface + 4,
                           Vec3{static_cast<float>(from_fixed(f.px)),
                                static_cast<float>(from_fixed(f.py)),
