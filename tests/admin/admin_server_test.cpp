@@ -432,12 +432,12 @@ void test_rights_and_usage() {
 	          "every right lists every verb");
 	const auto quit = admin.command("quit");
 	expect(quit.empty() && !admin.open, "QUIT closes with no reply");
-	expect(inmatch::admin_split_command("a b c d e f g h i j k l m n o p q r s t u v w x y z").back() == "y z",
+	expect(admin_split_command("a b c d e f g h i j k l m n o p q r s t u v w x y z").back() == "y z",
 	       "the 25th token runs to the end of the line");
 	// B-8: the split is the .ACP CRT isspace, so cp1252's no-break space 0xA0 splits too
 	// [orig: CAdminServer_DispatchCommand @0x4067B5].
-	expect(inmatch::admin_split_command("SET\xA0ServerName x") ==
-	               std::vector<std::string>{ "SET", "ServerName", "x" },
+	expect(admin_split_command("SET\xA0ServerName x") ==
+	               std::vector<std::string_view>{ "SET", "ServerName", "x" },
 	       "a no-break space splits like a space");
 }
 
