@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <string>
 
+#include <base/io/bits.h>
 #include <runtime/hud/hud_frame.h>
 
 namespace opennova::hud {
@@ -78,7 +79,7 @@ inline constexpr const char *kHudBoxMonogramTexture = "monogram.tga";
 // material of an MFD texture whose sides are not both powers of two [orig: @0x59b19f..0x59b1bd].
 inline constexpr const char *kHudMfdTexture = "MFD1.PCX";
 constexpr bool hud_mfd_texture_takes(uint32_t width, uint32_t height) {
-	return width != 0 && (width & (width - 1)) == 0 && height != 0 && (height & (height - 1)) == 0;
+	return io::is_power_of_two(width) && io::is_power_of_two(height);
 }
 
 // The user's crosshair style picks the crosshair's texture, "cross%02d.tga" of the style + 1 [orig:

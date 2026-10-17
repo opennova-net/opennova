@@ -3,6 +3,7 @@
 // [orig: PolyTrn_RenderTile @ 0x60DA70; tile overlay submission
 // PolyTrn_DrawTileOverlayQuad @ 0x604700; docs/tiles/til-re.md]
 
+#include <base/io/bits.h>
 #include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_compression.h>
 #include <runtime/renderer/texture_dxt.h>
@@ -151,10 +152,6 @@ std::vector<Rgba8Image> retail_box_levels(const Rgba8Image &base) {
 	return levels;
 }
 
-bool power_of_two(uint32_t value) {
-	return value != 0 && (value & (value - 1)) == 0;
-}
-
 // A quadrant texture as the device makes it: its levels as their texels read back, and a DXT texture's blocks (the
 // texels' source, pixel_device_texture_levels' DXT path kept whole). A halved texture keeps no blocks; a synthetic
 // one whose sides are not powers of two its single base level.
@@ -162,7 +159,7 @@ TerrainTileQuadrantChain quadrant_device_chain(const Rgba8Image &base, uint32_t 
 	TerrainTileQuadrantChain chain;
 	chain.creation_flags = creation_flags;
 	if (!base.is_valid()) return chain;
-	if (!power_of_two(base.width) || !power_of_two(base.height)) {
+	if (!io::is_power_of_two(base.width) || !io::is_power_of_two(base.height)) {
 		chain.levels.push_back(base);
 		return chain;
 	}
@@ -201,7 +198,7 @@ std::vector<Rgba8Image> quadrant_device_levels(const Rgba8Image &base,
 		uint32_t creation_flags, uint32_t level_limit = 0) {
 	std::vector<Rgba8Image> levels;
 	if (!base.is_valid()) return levels;
-	if (!power_of_two(base.width) || !power_of_two(base.height)) {
+	if (!io::is_power_of_two(base.width) || !io::is_power_of_two(base.height)) {
 		levels.push_back(base);
 		return levels;
 	}

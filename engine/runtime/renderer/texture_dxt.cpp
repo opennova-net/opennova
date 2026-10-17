@@ -1,5 +1,7 @@
 #include <runtime/renderer/texture_dxt.h>
 
+#include <base/io/le.h>
+
 #include <algorithm>
 #include <cstring>
 #include <utility>
@@ -55,15 +57,6 @@ constexpr uint32_t kSteps8[] = {0, 2, 3, 4, 5, 6, 7, 1};
 // takes (to 0 blocks).
 uint32_t blocks_across(uint32_t side) {
 	return side / 4 + ((side & 3u) != 0 ? 1u : 0u);
-}
-
-uint16_t read_u16(const uint8_t *bytes) {
-	return static_cast<uint16_t>(bytes[0] | (bytes[1] << 8));
-}
-
-void write_u16(uint8_t *bytes, uint16_t value) {
-	bytes[0] = static_cast<uint8_t>(value);
-	bytes[1] = static_cast<uint8_t>(value >> 8);
 }
 
 // Floyd-Steinberg spread of one texel's error over the 4x4 block.
@@ -275,8 +268,8 @@ void encode_color_block(const DxtColor *texels, uint8_t *block, bool colorkey,
 			if (texels[i].a < 0.5f) ++keyed;
 		}
 		if (keyed == 16) {
-			write_u16(block, 0x0000);
-			write_u16(block + 2, 0xFFFF);
+			io::write_u16_le(block, 0x0000);
+			io::write_u16_le(block + 2, 0xFFFF);
 			std::memset(block + 4, 0xFF, 4);
 			return;
 		}
@@ -326,8 +319,8 @@ void encode_color_block(const DxtColor *texels, uint8_t *block, bool colorkey,
 	const uint16_t word_b = encode_565(endpoint_b.r * kInverseLuminanceR,
 			endpoint_b.g * kInverseLuminanceG, endpoint_b.b * kInverseLuminanceB);
 	if (steps == 4 && word_a == word_b) {
-		write_u16(block, word_a);
-		write_u16(block + 2, word_b);
+		io::write_u16_le(block, word_a);
+		io::write_u16_le(block + 2, word_b);
 		std::memset(block + 4, 0, 4);
 		return;
 	}
@@ -341,13 +334,13 @@ void encode_color_block(const DxtColor *texels, uint8_t *block, bool colorkey,
 			decoded_b.b * kLuminanceB, 0.0f};
 	DxtColor step[4];
 	if ((steps == 3) == (word_b >= word_a)) {
-		write_u16(block, word_a);
-		write_u16(block + 2, word_b);
+		io::write_u16_le(block, word_a);
+		io::write_u16_le(block + 2, word_b);
 		step[0] = endpoint_a;
 		step[1] = endpoint_b;
 	} else {
-		write_u16(block, word_b);
-		write_u16(block + 2, word_a);
+		io::write_u16_le(block, word_b);
+		io::write_u16_le(block + 2, word_a);
 		step[0] = endpoint_b;
 		step[1] = endpoint_a;
 	}
@@ -663,8 +656,8 @@ void encode_dxt5_block(const DxtBlockColors &texels, bool dither,
 }
 
 void decode_dxt1_block(const uint8_t *block, DxtBlockColors &texels) {
-	const uint16_t word0 = read_u16(block);
-	const uint16_t word1 = read_u16(block + 2);
+	const uint16_t word0 = io::read_u16_le(block);
+	const uint16_t word1 = io::read_u16_le(block + 2);
 	DxtColor palette[4];
 	palette[0] = decode_565(word0);
 	palette[1] = decode_565(word1);
