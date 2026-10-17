@@ -5,6 +5,8 @@
 
 #include "mission_detail.h"
 
+#include <formats/def/def.h>
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -131,7 +133,7 @@ std::vector<bms::MisAreaMarker> mis_area_markers_written(const bms::File &file) 
 	return out;
 }
 
-void write_mis_general_information(const bms::File &file, std::string &out) {
+void write_mis_general_information(const bms::File &file, std::string &out, const MisWeaponTable *weapons) {
 	const bms::Header &header = file.header;
 	const uint8_t *raw = header_bytes(header);
 	// Every item section, the area markers among them: the original editor takes its item count
@@ -208,9 +210,11 @@ void write_mis_general_information(const bms::File &file, std::string &out) {
 	append_kv(out, "  max_saves ", static_cast<int>(header.max_saves));
 	append_kv(out, "  map_zoom ", header.map_zoom);
 	append_kv(out, "  bonus_expiration ", header.bonus_expiration);
-	append_line(out, "  default_primary   WPN_M16M203BURST");
-	append_line(out, "  default_secondary WPN_colt45");
-	append_line(out, "  default_accessory WPN_AT4");
+	// The kit the mission's loadout leads with, as the original editor writes its own (D-MIS-X1).
+	const MisDefaultKit kit = mis_default_kit(file.loadout, weapons);
+	append_line(out, "  default_primary   " + kit[0]);
+	append_line(out, "  default_secondary " + kit[1]);
+	append_line(out, "  default_accessory " + kit[2]);
 	append_line(out, "end general_information");
 	append_line(out);
 }
@@ -597,13 +601,13 @@ constexpr size_t kMisTextReserveBytes = 32u * 1024u;
 } // namespace
 
 bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
-                    const std::vector<int32_t> *base_heights, const MisNames *names) {
+                    const std::vector<int32_t> *base_heights, const MisNames *names, const MisWeaponTable *weapons) {
 	out.clear();
 	out.reserve(kMisTextReserveBytes);
 	append_line(out, "// mission metafile");
 	append_line(out);
 	write_mis_variable_names(names, out);
-	write_mis_general_information(file, out);
+	write_mis_general_information(file, out, weapons);
 	write_mis_weapon_availability(out);
 	write_mis_briefing(file, out);
 	if (!write_mis_area_triggers(file, out, names, error)) {
@@ -686,6 +690,84 @@ void rebuild_mis_areas(bms::File &file) {
 		areas.push_back(area);
 	}
 	file.area_triggers = std::move(areas);
+}
+
+MisWeaponTable mis_weapon_table(const def::DefWeaponsFile &weapons) {
+	MisWeaponTable table = {{"None", 0}}; // [orig: sub_432E50 @ 0x432e64..0x432e92]
+	int32_t subclass_rows = 0;
+	for (size_t i = 0; i < weapons.count; ++i) {
+		const def::DefWeaponDef &row = weapons.entries[i];
+		if (row.unclosed != 0) continue; // a row is made at its `end` alone [orig: sub_432340 @ 0x4323c3, @ 0x4323f2]
+		if (subclass_rows > 0) {
+			--subclass_rows;
+			table.push_back({row.weapon_name, 0});
+			continue;
+		}
+		table.push_back({row.weapon_name, row.loadout_subclasses});
+		if (row.loadout_subclasses > 0) subclass_rows = row.loadout_subclasses;
+	}
+	return table;
+}
+
+namespace {
+
+// The first row of `table` named `name`, case aside (sub_432860's _stricmp); table->size() for none.
+size_t weapon_row(const MisWeaponTable &table, const std::string &name) {
+	for (size_t i = 0; i < table.size(); ++i)
+		if (strutil::iequals(table[i].name, name)) return i;
+	return table.size();
+}
+
+bms::WeaponLoadoutRecord kit_record(const std::string &name) {
+	bms::WeaponLoadoutRecord record;
+	record.name = name;
+	record.ammo_primary = "-1";
+	record.ammo_secondary = "-1";
+	record.flags = "-1";
+	record.has_flags = true;
+	return record;
+}
+
+} // namespace
+
+bms::WeaponLoadout mis_default_loadout(const MisDefaultKit &kit, const MisWeaponTable *table) {
+	bms::WeaponLoadout loadout;
+	for (const std::string &name : kit) {
+		if (!table) {
+			if (!name.empty()) loadout.entries.push_back(kit_record(name));
+			continue;
+		}
+		const size_t row = weapon_row(*table, name);
+		if (row == table->size()) continue;
+		loadout.entries.push_back(kit_record(name));
+		for (int32_t k = 1; k <= (*table)[row].subclasses && row + size_t(k) < table->size(); ++k)
+			loadout.entries.push_back(kit_record((*table)[row + size_t(k)].name));
+	}
+	for (const char *name : kMisLoadoutTail) loadout.entries.push_back(kit_record(name));
+	return loadout;
+}
+
+MisDefaultKit mis_default_kit(const bms::WeaponLoadout &loadout, const MisWeaponTable *table) {
+	MisDefaultKit kit;
+	size_t end = loadout.entries.size();
+	if (end >= kMisLoadoutTail.size()) {
+		bool tail = true;
+		for (size_t k = 0; k < kMisLoadoutTail.size(); ++k)
+			tail = tail && loadout.entries[end - kMisLoadoutTail.size() + k].name == kMisLoadoutTail[k];
+		if (tail) end -= kMisLoadoutTail.size();
+	}
+	size_t at = 0;
+	for (std::string &slot : kit) {
+		if (at >= end) break;
+		slot = loadout.entries[at].name;
+		size_t passed = 0;
+		if (table) {
+			const size_t row = weapon_row(*table, slot);
+			if (row < table->size()) passed = size_t(std::max<int32_t>(0, (*table)[row].subclasses));
+		}
+		at += 1 + passed;
+	}
+	return kit;
 }
 
 // [orig: JOTACmed.exe sub_4226D0 @ 0x4226d0, the original editor's terrain height, reached through sub_433690 @
