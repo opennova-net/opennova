@@ -57,11 +57,16 @@ export type AdminErrorCode =
   | 'store_error'
   | 'not_uploading'
   | 'too_large'
+  | 'duplicate_login'
   | 'duplicate_expansion'
   | 'no_such_parent'
   | 'in_use'
   | 'current'
+  | 'baseline'
   | 'pinned'
+  | 'not_draft'
+  | 'not_published'
+  | 'published'
   | 'up_to_date'
   | 'network'
   | 'unknown';
@@ -111,11 +116,16 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'store_error',
   'not_uploading',
   'too_large',
+  'duplicate_login',
   'duplicate_expansion',
   'no_such_parent',
   'in_use',
   'current',
+  'baseline',
   'pinned',
+  'not_draft',
+  'not_published',
+  'published',
   'up_to_date',
 ]);
 
@@ -186,6 +196,8 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'That tree is no longer taking uploads. Refresh the list.';
     case 'too_large':
       return 'The server refused an upload part as too large. Reload the page and upload again.';
+    case 'duplicate_login':
+      return 'Another data set already uses that updater login.';
     case 'duplicate_expansion':
       return 'That base already has an expansion with that code.';
     case 'no_such_parent':
@@ -193,9 +205,17 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'in_use':
       return 'That data set is in use: a live server runs it, or an expansion belongs to it. Stop the servers or delete the expansion first.';
     case 'current':
-      return "That tree is the data set's current data, so it stays. Upload newer data first.";
+      return "That tree is the data set's current data, so it stays. Upload or publish newer data first.";
+    case 'baseline':
+      return 'That tree is the baseline a release applies to, so it stays.';
     case 'pinned':
       return 'Live servers run on that tree, so it stays until they update or stop.';
+    case 'not_draft':
+      return 'Only a draft release can be published. Refresh the list.';
+    case 'not_published':
+      return 'That release is not published. Refresh the list.';
+    case 'published':
+      return 'A published release cannot be deleted. Retire it first.';
     case 'up_to_date':
       return 'That server already runs the current data.';
     case 'network':

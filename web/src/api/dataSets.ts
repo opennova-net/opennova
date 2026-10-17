@@ -1,4 +1,4 @@
-// The game data admin routes (/api/admin/data-sets*,
+// The game data admin routes (/api/admin/data-sets*, /api/admin/releases*,
 // /api/admin/hosted/update-all; apps/novaworld_web/data_sets, ADR 0064). Like
 // the other admin calls, each answers an AdminResult with the server's `error`
 // code mapped to a message (admin.ts), never the server's text; the two
@@ -15,7 +15,12 @@ import type {
   DataSetsResponse,
   GameOption,
   NewDataSet,
+  NewRelease,
+  NewReleaseReply,
   NewTreeReply,
+  PublishedRelease,
+  Release,
+  ReleaseSection,
   Tree,
   TreeUpload,
   TreeUploadFile,
@@ -33,6 +38,8 @@ function pickTree(value: unknown): Tree | null {
   return {
     id: v.id,
     state: v.state,
+    source: text(v.source),
+    release_id: idOrNull(v.release_id),
     version: text(v.version),
     bytes: isCount(v.bytes) ? v.bytes : 0,
     files: isCount(v.files) ? v.files : 0,
@@ -51,6 +58,12 @@ function pickCurrentTree(value: unknown): CurrentTree | null {
   return { id: v.id, version: text(v.version), ready_at: timeOrNull(v.ready_at) };
 }
 
+function pickPublishedRelease(value: unknown): PublishedRelease | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || !isCount(v.id)) return null;
+  return { id: v.id, name: text(v.name), sha256: text(v.sha256) };
+}
+
 function pickDataSet(value: unknown): DataSet | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || !isCount(v.id) || typeof v.display_name !== 'string') return null;
@@ -65,7 +78,12 @@ function pickDataSet(value: unknown): DataSet | null {
     expansion_code: text(v.expansion_code),
     title: text(v.title),
     game: text(v.game),
+    updater_login: text(v.updater_login),
+    command_file: text(v.command_file),
+    retail_updater: v.retail_updater === true,
     current_tree: pickCurrentTree(v.current_tree),
+    baseline_tree_id: idOrNull(v.baseline_tree_id),
+    published_release: pickPublishedRelease(v.published_release),
     servers_live: isCount(v.servers_live) ? v.servers_live : 0,
     servers_outdated: isCount(v.servers_outdated) ? v.servers_outdated : 0,
     trees: trees as Tree[],
@@ -93,8 +111,53 @@ function pickDataSetsResponse(data: unknown): DataSetsResponse | null {
   };
 }
 
+function pickSection(value: unknown): ReleaseSection | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || !isCount(v.data_set_id)) return null;
+  const tree = v.tree as Record<string, unknown> | null | undefined;
+  return {
+    data_set_id: v.data_set_id,
+    display_name: text(v.display_name),
+    expansion: text(v.expansion),
+    command_file: text(v.command_file),
+    version: text(v.version),
+    tree: tree && isCount(tree.id) ? { id: tree.id, state: text(tree.state) } : null,
+  };
+}
+
+function pickRelease(value: unknown): Release | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || !isCount(v.id) || typeof v.status !== 'string') return null;
+  const sections = Array.isArray(v.sections) ? v.sections.map(pickSection) : [];
+  if (sections.some((s) => s === null)) return null;
+  return {
+    id: v.id,
+    status: v.status,
+    name: text(v.name),
+    sha256: text(v.sha256),
+    bytes: isCount(v.bytes) ? v.bytes : 0,
+    package_product: text(v.package_product),
+    error: text(v.error),
+    sections: sections as ReleaseSection[],
+    created_by: text(v.created_by),
+    created_at: text(v.created_at),
+    published_at: timeOrNull(v.published_at),
+    retired_at: timeOrNull(v.retired_at),
+  };
+}
+
 function pickDataSetReply(data: unknown): DataSet | null {
   return pickDataSet((data as { data_set?: unknown } | null)?.data_set);
+}
+
+function pickReleaseReply(data: unknown): Release | null {
+  return pickRelease((data as { release?: unknown } | null)?.release);
+}
+
+// The ETag a part's PUT answered, for the complete call.
+function pickEtag(data: unknown): { etag: string } | null {
+  const etag = (data as { etag?: unknown } | null)?.etag;
+  return typeof etag === 'string' && etag !== '' ? { etag } : null;
 }
 
 // "a, b and c".
@@ -161,12 +224,13 @@ export function fetchDataSets(signal?: AbortSignal): Promise<AdminResult<DataSet
 }
 
 // POST /api/admin/data-sets: a new data set (201). 400 invalid_field or
-// missing_field; 409 duplicate_expansion, no_such_parent.
+// missing_field; 409 duplicate_login, duplicate_expansion, no_such_parent.
 export function createDataSet(body: NewDataSet): Promise<AdminResult<DataSet>> {
   return call(() => adminClient.post<unknown>('/data-sets', body), pickDataSetReply);
 }
 
-// PATCH /api/admin/data-sets/<id>: its display name, or a base's lobby.
+// PATCH /api/admin/data-sets/<id>: its display name, lobby, updater login and
+// command file, or retail updater flag.
 export function updateDataSet(id: number, patch: DataSetPatch): Promise<AdminResult<DataSet>> {
   return call(() => adminClient.patch<unknown>(`/data-sets/${id}`, patch), pickDataSetReply);
 }
@@ -178,9 +242,9 @@ export function deleteDataSet(id: number): Promise<AdminResult<void>> {
 }
 
 // ---------------------------------------------------------------------------
-// Trees: an upload goes POST trees (the files by name and size) -> per file,
-// each part PUT through the site (utils/partUpload.ts) -> POST complete per
-// file -> POST finalize.
+// Trees: a baseline upload goes POST trees (the files by name and size) ->
+// per file, each part PUT through the site (utils/partUpload.ts) -> POST
+// complete per file -> POST finalize.
 
 // POST /api/admin/data-sets/<id>/trees: a new uploading tree with one
 // multipart upload per file (201). 400 invalid_files (the missing and
@@ -222,10 +286,7 @@ export function putTreePart(
         headers: { 'Content-Type': 'application/octet-stream' },
         signal,
       }),
-    (data) => {
-      const etag = (data as { etag?: unknown } | null)?.etag;
-      return typeof etag === 'string' && etag !== '' ? { etag } : null;
-    },
+    pickEtag,
   );
 }
 
@@ -252,7 +313,7 @@ export function finalizeTree(dataSetId: number, treeId: number): Promise<AdminRe
 
 // DELETE /api/admin/data-sets/<id>/trees/<t>: an uploading tree's uploads
 // aborted and the row gone (204), or a ready or failed tree pruned (202). 409
-// current, pinned (with how many servers).
+// current, baseline, pinned (with how many servers).
 export function deleteTree(dataSetId: number, treeId: number): Promise<AdminResult<void>> {
   return remove(`/data-sets/${dataSetId}/trees/${treeId}`);
 }
@@ -268,4 +329,80 @@ export function updateAllServers(dataSetId?: number): Promise<AdminResult<number
       return isCount(updating) ? updating : null;
     },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Releases: one uploaded 1SFS package each, with a section per product it
+// carries. POST releases (the size) -> each part PUT through the site
+// (utils/partUpload.ts) -> POST complete, which starts the worker's
+// validation.
+
+// GET /api/admin/releases.
+export function fetchReleases(signal?: AbortSignal): Promise<AdminResult<Release[]>> {
+  return call(
+    () => adminClient.get<unknown>('/releases', { signal }),
+    (data) => {
+      const list = (data as { releases?: unknown } | null)?.releases;
+      if (!Array.isArray(list)) return null;
+      const releases = list.map(pickRelease);
+      return releases.some((r) => r === null) ? null : (releases as Release[]);
+    },
+  );
+}
+
+// POST /api/admin/releases: a new uploading release and its one multipart
+// upload (201). 400 invalid_field.
+export function createRelease(body: NewRelease): Promise<AdminResult<NewReleaseReply>> {
+  return call(
+    () => adminClient.post<unknown>('/releases', body),
+    (data) => {
+      const v = data as Record<string, unknown> | null;
+      const release = v?.release as Record<string, unknown> | null | undefined;
+      const upload = v?.upload as Record<string, unknown> | null | undefined;
+      if (!release || !isCount(release.id) || !upload || typeof upload.upload_id !== 'string') return null;
+      if (!isCount(upload.part_size) || upload.part_size === 0) return null;
+      return { release: { id: release.id }, upload: { key: text(upload.key), upload_id: upload.upload_id, part_size: upload.part_size } };
+    },
+  );
+}
+
+// PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>: one part of the
+// package, its raw bytes, which web hands to the store; the store's ETag, for
+// the complete call. 409 not_uploading, 413 too_large, 502 store_error, 503
+// store_unavailable.
+export function putReleasePart(id: number, uploadId: string, partNumber: number, blob: Blob, signal?: AbortSignal): Promise<AdminResult<{ etag: string }>> {
+  return call(
+    () =>
+      adminClient.put<unknown>(`/releases/${id}/parts/${partNumber}`, blob, {
+        params: { upload_id: uploadId },
+        headers: { 'Content-Type': 'application/octet-stream' },
+        signal,
+      }),
+    pickEtag,
+  );
+}
+
+// POST /api/admin/releases/<id>/complete: the parts joined and the worker's
+// validation queued (202, status validating).
+export function completeRelease(id: number, body: { upload_id: string; parts: UploadedPart[] }): Promise<AdminResult<Release>> {
+  return call(() => adminClient.post<unknown>(`/releases/${id}/complete`, body), pickReleaseReply);
+}
+
+// POST /api/admin/releases/<id>/publish: a draft release published (202): the
+// worker builds each section's data set a new tree from its baseline. 409
+// not_draft.
+export function publishRelease(id: number): Promise<AdminResult<Release>> {
+  return call(() => adminClient.post<unknown>(`/releases/${id}/publish`), pickReleaseReply);
+}
+
+// POST /api/admin/releases/<id>/retire: a published release retired (202):
+// the update service stops serving it. 409 not_published.
+export function retireRelease(id: number): Promise<AdminResult<Release>> {
+  return call(() => adminClient.post<unknown>(`/releases/${id}/retire`), pickReleaseReply);
+}
+
+// DELETE /api/admin/releases/<id>: a draft, invalid or retired release and its
+// package (204). 409 published.
+export function deleteRelease(id: number): Promise<AdminResult<void>> {
+  return remove(`/releases/${id}`);
 }

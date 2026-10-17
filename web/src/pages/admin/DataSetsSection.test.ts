@@ -2,29 +2,43 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import DataSetsSection from './DataSetsSection.vue';
 import {
+  completeRelease,
   completeTreeFile,
   createDataSet,
+  createRelease,
   createTree,
   deleteDataSet,
+  deleteRelease,
   deleteTree,
   fetchDataSets,
+  fetchReleases,
   finalizeTree,
+  publishRelease,
+  putReleasePart,
   putTreePart,
+  retireRelease,
   updateAllServers,
   updateDataSet,
 } from '../../api/dataSets';
 import { uploadFile } from '../../utils/partUpload';
-import { dataSet, dataSetsResponse, JO_SET, tree } from '../../test/dataSetFixtures';
+import { dataSet, dataSetsResponse, JO_SET, release, tree } from '../../test/dataSetFixtures';
 
 vi.mock('../../api/dataSets', () => ({
+  completeRelease: vi.fn(),
   completeTreeFile: vi.fn(),
   createDataSet: vi.fn(),
+  createRelease: vi.fn(),
   createTree: vi.fn(),
   deleteDataSet: vi.fn(),
+  deleteRelease: vi.fn(),
   deleteTree: vi.fn(),
   fetchDataSets: vi.fn(),
+  fetchReleases: vi.fn(),
   finalizeTree: vi.fn(),
+  publishRelease: vi.fn(),
+  putReleasePart: vi.fn(),
   putTreePart: vi.fn(),
+  retireRelease: vi.fn(),
   updateAllServers: vi.fn(),
   updateDataSet: vi.fn(),
 }));
@@ -37,6 +51,7 @@ vi.mock('../../utils/partUpload', async (importOriginal) => ({
 }));
 
 const sets = vi.mocked(fetchDataSets);
+const list = vi.mocked(fetchReleases);
 const create = vi.mocked(createDataSet);
 const update = vi.mocked(updateDataSet);
 const removeSet = vi.mocked(deleteDataSet);
@@ -46,6 +61,12 @@ const completeFile = vi.mocked(completeTreeFile);
 const finalize = vi.mocked(finalizeTree);
 const removeTree = vi.mocked(deleteTree);
 const updateAll = vi.mocked(updateAllServers);
+const openRelease = vi.mocked(createRelease);
+const putReleasePartMock = vi.mocked(putReleasePart);
+const completeUpload = vi.mocked(completeRelease);
+const publish = vi.mocked(publishRelease);
+const retire = vi.mocked(retireRelease);
+const removeRelease = vi.mocked(deleteRelease);
 const upload = vi.mocked(uploadFile);
 
 const PART_SIZE = 32 * 1024 * 1024;
@@ -85,6 +106,7 @@ describe('DataSetsSection', () => {
     vi.clearAllMocks();
     confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     sets.mockResolvedValue({ ok: true, value: dataSetsResponse() });
+    list.mockResolvedValue({ ok: true, value: [release(1), release(2, { status: 'draft' }), release(3, { status: 'retired' })] });
   });
 
   afterEach(() => {
@@ -93,18 +115,25 @@ describe('DataSetsSection', () => {
     confirm.mockRestore();
   });
 
-  it('lists each data set with its kind, data and servers', async () => {
+  it('lists each data set with its kind, updater, data, release and servers', async () => {
     const page = await mountSection();
     expect(page.text()).toContain("through the site to the service's local store, in 32 MiB parts");
     const rows = page.findAll('tr.ds-row');
     expect(rows).toHaveLength(3);
     expect(rows[0].text()).toContain('Joint Operations');
     expect(rows[0].text()).toContain('Base game Joint Operations, lobby Joint Operations');
+    expect(rows[0].text()).toContain('JOTRus');
+    expect(rows[0].text()).toContain('JOPTR.CMD');
+    expect(rows[0].text()).toContain('retail updater');
     expect(rows[0].text()).toContain('1.7.5.5');
+    expect(rows[0].text()).toContain('JO 1.7.5.5');
+    expect(rows[0].text()).toContain('ab12cd34ef56');
     expect(rows[0].text()).toContain('3 live');
     expect(rows[0].text()).toContain('1 outdated');
     expect(rows[1].text()).toContain('Expansion jox01 of Joint Operations');
+    expect(rows[1].text()).toContain('JOEus');
     expect(rows[2].text()).toContain('No data yet');
+    expect(rows[2].text()).toContain('Not served');
     // Only a data set with outdated servers offers their update.
     expect(rows[0].findAll('button').map((b) => b.text())).toContain('Update servers of Joint Operations');
     expect(rows[2].findAll('button').map((b) => b.text())).not.toContain('Update servers of Delta Force Xtreme 2');
@@ -120,12 +149,15 @@ describe('DataSetsSection', () => {
     const trees = page.findAll('tr.ds-tree-row');
     expect(trees).toHaveLength(2);
     expect(trees[0].text()).toContain('current');
+    expect(trees[0].text()).toContain('baseline');
+    expect(trees[0].text()).toContain('uploaded');
     expect(trees[0].text()).toContain('Ready');
     expect(trees[0].text()).toContain('1.3 GB');
     expect(trees[0].text()).toContain('54');
     expect(trees[0].text()).toContain('2');
     expect(trees[0].text()).toContain('by root');
     expect(trees[1].text()).not.toContain('current');
+    expect(trees[1].text()).not.toContain('baseline');
     expect(trees[1].text()).toContain('Failed');
     expect(trees[1].text()).toContain('version.txt is missing');
 
@@ -159,52 +191,71 @@ describe('DataSetsSection', () => {
     expect(create).not.toHaveBeenCalled();
     expect(page.get('#ds-new-display_name-error').text()).toBe('Enter a display name.');
 
-    // An expansion: its base among the bases, its code's shape.
+    // An expansion: its base among the bases, its code's shape, the updater pair.
     await page.get('#ds-new-kind').setValue('expansion');
     expect(page.findAll('#ds-new-parent_id option').map((o) => o.text())).toEqual(['Joint Operations', 'Delta Force Xtreme 2']);
     await page.get('#ds-new-display_name').setValue(' Escalation 2 ');
     await page.get('#ds-new-expansion_code').setValue('JOX-02');
+    await page.get('#ds-new-updater_login').setValue('JOEus2');
     submitForm(page, '#ds-new-display_name');
     await flushPromises();
     expect(create).not.toHaveBeenCalled();
     expect(page.get('#ds-new-expansion_code-error').text()).toContain('1 to 8 lowercase letters and digits');
+    expect(page.get('#ds-new-command_file-error').text()).toBe('An updater login needs its command file.');
 
     await page.get('#ds-new-expansion_code').setValue('jox02');
+    await page.get('#ds-new-command_file').setValue('joeptr2.cmd');
     submitForm(page, '#ds-new-display_name');
     await flushPromises();
-    expect(create).toHaveBeenCalledWith({ display_name: 'Escalation 2', kind: 'expansion', parent_id: 1, expansion_code: 'jox02' });
+    expect(create).toHaveBeenCalledWith({
+      display_name: 'Escalation 2',
+      kind: 'expansion',
+      retail_updater: false,
+      updater_login: 'JOEus2',
+      command_file: 'JOEPTR2.CMD',
+      parent_id: 1,
+      expansion_code: 'jox02',
+    });
     expect(page.find('#ds-new-form').exists()).toBe(false);
     expect(page.get('[role="status"]').text()).toBe('Escalation 2 is created. Upload its data next.');
     expect(sets).toHaveBeenCalledTimes(2);
 
-    // A base sends its title and lobby.
+    // A base sends its title and lobby, and no updater when none is named.
     await page.get('#ds-new-toggle').trigger('click');
     await page.get('#ds-new-display_name').setValue('OpenNova');
     await page.get('#ds-new-game').setValue('opennova_0_consumer');
     submitForm(page, '#ds-new-display_name');
     await flushPromises();
-    expect(create).toHaveBeenLastCalledWith({ display_name: 'OpenNova', kind: 'base', title: 'jo', game: 'opennova_0_consumer' });
+    expect(create).toHaveBeenLastCalledWith({ display_name: 'OpenNova', kind: 'base', retail_updater: false, title: 'jo', game: 'opennova_0_consumer' });
   });
 
-  it("edits a data set's name and lobby", async () => {
+  it("edits a data set's name, lobby and updater", async () => {
     update.mockResolvedValue({ ok: true, value: dataSet(1, { display_name: 'JO' }) });
     const page = await mountSection();
     await page.findAll('tr.ds-row')[0].findAll('button').find((b) => b.text().startsWith('Edit'))!.trigger('click');
     await page.get('#ds-edit-display_name-1').setValue('JO');
     await page.get('#ds-edit-game-1').setValue('opennova_0_consumer');
+    await page.get('#ds-edit-retail_updater-1').setValue(false);
     submitForm(page, '#ds-edit-display_name-1');
     await flushPromises();
-    expect(update).toHaveBeenCalledWith(1, { display_name: 'JO', game: 'opennova_0_consumer' });
+    expect(update).toHaveBeenCalledWith(1, { display_name: 'JO', game: 'opennova_0_consumer', updater_login: 'JOTRus', command_file: 'JOPTR.CMD', retail_updater: false });
     expect(page.get('[role="status"]').text()).toBe('JO is saved.');
 
-    // An expansion has no lobby of its own.
+    // An expansion has no lobby of its own; a command file without its login
+    // is refused in the page.
     update.mockResolvedValue({ ok: true, value: dataSet(2, { display_name: 'Escalation (JO)' }) });
     await page.findAll('tr.ds-row')[1].findAll('button').find((b) => b.text().startsWith('Edit'))!.trigger('click');
     expect(page.find('#ds-edit-game-2').exists()).toBe(false);
     await page.get('#ds-edit-display_name-2').setValue('Escalation (JO)');
+    await page.get('#ds-edit-updater_login-2').setValue('');
     submitForm(page, '#ds-edit-display_name-2');
     await flushPromises();
-    expect(update).toHaveBeenLastCalledWith(2, { display_name: 'Escalation (JO)' });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(page.get('tr.ds-edit-row').text()).toContain('A command file needs the updater login that goes with it.');
+    await page.get('#ds-edit-command_file-2').setValue('');
+    submitForm(page, '#ds-edit-display_name-2');
+    await flushPromises();
+    expect(update).toHaveBeenLastCalledWith(2, { display_name: 'Escalation (JO)', updater_login: '', command_file: '', retail_updater: false });
   });
 
   it("keeps only the kind's files out of a picked folder, then uploads, completes and finalizes them", async () => {
@@ -324,5 +375,86 @@ describe('DataSetsSection', () => {
     await flushPromises();
     expect(removeSet).toHaveBeenCalledWith(1);
     expect(page.get('[role="alert"]').text()).toBe('That data set is in use.');
+  });
+
+  it('lists the releases with their sections, and publishes, retires and deletes after a confirmation', async () => {
+    publish.mockResolvedValue({ ok: true, value: release(2, { status: 'published' }) });
+    retire.mockResolvedValue({ ok: true, value: release(1, { status: 'retired' }) });
+    removeRelease.mockResolvedValue({ ok: true, value: undefined });
+    const page = await mountSection();
+    const rows = page.findAll('tr.ds-release-row');
+    expect(rows).toHaveLength(3);
+    expect(rows[0].text()).toContain('JO 1.7.5.1');
+    expect(rows[0].text()).toContain('Published');
+    expect(rows[0].text()).toContain('312 MB');
+    expect(rows[0].text()).toContain('ab12cd34ef56');
+    const sections = rows[0].findAll('.ds-release-section').map((s) => s.text());
+    expect(sections[0]).toContain('Joint Operations');
+    expect(sections[0]).toContain('tree 10 ready');
+    expect(sections[1]).toContain('Escalation');
+    expect(sections[1]).toContain('(jox01)');
+    expect(rows[1].text()).toContain('Draft');
+    expect(rows[2].text()).toContain('Retired');
+
+    await rows[1].findAll('button').find((b) => b.text().startsWith('Publish'))!.trigger('click');
+    await flushPromises();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("builds each data set's new tree; servers update when their owners choose"));
+    expect(publish).toHaveBeenCalledWith(2);
+    expect(page.get('[role="status"]').text()).toContain('JO 1.7.5.2 is published');
+
+    await rows[0].findAll('button').find((b) => b.text().startsWith('Retire'))!.trigger('click');
+    await flushPromises();
+    expect(retire).toHaveBeenCalledWith(1);
+    await rows[2].findAll('button').find((b) => b.text().startsWith('Delete'))!.trigger('click');
+    await flushPromises();
+    expect(removeRelease).toHaveBeenCalledWith(3);
+    // A published release offers no delete, a retired one no publish.
+    expect(rows[0].findAll('button').map((b) => b.text())).not.toContain('Delete JO 1.7.5.1');
+    expect(rows[2].findAll('button').map((b) => b.text())).not.toContain('Publish JO 1.7.5.3');
+  });
+
+  it('uploads a release package in parts through the site and completes it', async () => {
+    openRelease.mockResolvedValue({ ok: true, value: { release: { id: 7 }, upload: { key: 'updates/upload-7.sfs', upload_id: 'r7', part_size: PART_SIZE } } });
+    putReleasePartMock.mockResolvedValue({ ok: true, value: { etag: '"e1"' } });
+    upload.mockImplementation(async (file, options) => {
+      options.onProgress?.(file.size);
+      // The page's part goes through the API with the release's upload, the
+      // part's bytes and the upload's signal.
+      const stored = await options.putPart(1, file.slice(0, file.size), options.signal);
+      expect(stored).toEqual({ etag: '"e1"' });
+      return [{ part_number: 1, etag: '"e1"' }];
+    });
+    completeUpload.mockResolvedValue({ ok: true, value: release(7, { status: 'validating' }) });
+    const page = await mountSection();
+    expect((page.get('#ds-release-upload').element as HTMLButtonElement).disabled).toBe(true);
+    await pickFiles(page, '#ds-release-file', [new File(['p'.repeat(100)], 'jo_1759.sfs')]);
+    await page.get('#ds-release-name').setValue('JO 1.7.5.9');
+    expect((page.get('#ds-release-upload').element as HTMLButtonElement).disabled).toBe(false);
+    submitForm(page, '#ds-release-name');
+    await flushPromises();
+    expect(openRelease).toHaveBeenCalledWith({ name: 'JO 1.7.5.9', size: 100 });
+    expect(upload.mock.calls[0][1]).toMatchObject({ partSize: PART_SIZE });
+    expect(putReleasePartMock).toHaveBeenCalledWith(7, 'r7', 1, expect.any(Blob), expect.any(AbortSignal));
+    expect(putReleasePartMock.mock.calls[0][3].size).toBe(100);
+    expect(completeUpload).toHaveBeenCalledWith(7, { upload_id: 'r7', parts: [{ part_number: 1, etag: '"e1"' }] });
+    expect(page.get('[role="status"]').text()).toBe('JO 1.7.5.9 is uploaded; the worker checks the package.');
+    expect(page.find('#ds-release-progress').exists()).toBe(false);
+  });
+
+  it("ends a release upload with the service's refusal of a part, and removes the half-uploaded release", async () => {
+    openRelease.mockResolvedValue({ ok: true, value: { release: { id: 8 }, upload: { key: 'updates/upload-8.sfs', upload_id: 'r8', part_size: PART_SIZE } } });
+    putReleasePartMock.mockResolvedValue({ ok: false, error: { code: 'store_error', status: 502, message: 'The object store refused the request.' } });
+    upload.mockImplementation(async (file, options) => {
+      await options.putPart(1, file, options.signal);
+      return [];
+    });
+    removeRelease.mockResolvedValue({ ok: true, value: undefined });
+    const page = await mountSection();
+    await pickFiles(page, '#ds-release-file', [new File(['p'], 'jo.sfs')]);
+    submitForm(page, '#ds-release-name');
+    await flushPromises();
+    expect(removeRelease).toHaveBeenCalledWith(8);
+    expect(completeUpload).not.toHaveBeenCalled();
+    expect(page.get('#ds-release-progress').text()).toContain('The upload failed: The object store refused the request.');
   });
 });
