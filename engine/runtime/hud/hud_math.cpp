@@ -211,8 +211,12 @@ double crosshair_spread_px_fp16(int32_t spread_fp16, double fov_deg,
 			16);
 }
 
-// [orig: @0x592b07..0x592b28] Wrapping i32 adds with the two arithmetic SAR
-// recoil terms.
+// The live ERROR: the row's authored ERROR plus the two recoil terms, each
+// `sar 7` [orig: HUD_DrawCrosshair @0x592b8e..0x592bc8 -- the row's fild
+// @0x592b8e, player +0x380 / +0x384 `sar 7` @0x592bae.., the terms scaled by
+// flt_7D76D0 (11930464.0) and summed in x87]. The x87 sum cannot wrap; the
+// wrapping int32 adds here equal it while the sum stays inside int32, which no
+// authored ERROR or recoil leaves.
 int32_t crosshair_total_spread_fp16(int32_t error_fp16, int32_t recoil_pitch_bam,
 		int32_t weapon_weight_spread_bam) {
 	uint32_t acc = static_cast<uint32_t>(error_fp16) +

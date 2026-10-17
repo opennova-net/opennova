@@ -206,8 +206,9 @@ LoadingBarSpan loading_bar_fill_span(int x, int w, int displayed);
 // ---------------------------------------------------------------------------
 // The crosshair spread projection [orig: HUD_DrawCrosshair
 // @0x592b07..0x592bf5]: pixel = (spread_16.16 * screen_w / int(fov_deg)) >> 16
-// (the 2^31/180 degree factors cancel); the instability sum wraps int32 with
-// the two arithmetic >>7 recoil terms [orig: @0x592b07..0x592b28]; the ERROR
+// (the 2^31/180 degree factors cancel); the live ERROR is the row's authored
+// ERROR plus the two arithmetic >>7 recoil terms, summed in x87 (equal to the
+// int32 sum while it stays in range) [orig: @0x592b8e..0x592bc8]; the ERROR
 // row = stance (0 prone / 1 crouch / 2 stand) + 3 when scoped
 // [orig: @0x592b37..0x592b84]; aimed shots hide the reticle unless the
 // vehicle/gunner leg keeps it [orig: gate @0x592afa]. Taper 0.1

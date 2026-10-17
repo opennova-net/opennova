@@ -5,6 +5,7 @@
 #include <runtime/world/player_weapon.h>
 
 #include <base/io/bam.h>
+#include <runtime/hud/hud_math.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
@@ -168,8 +169,8 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 		const WeaponTableEntry *weapon =
 				local != nullptr ? world.tables.weapons.by_index(local->equipped_adm_index) : nullptr;
 		const int32_t authored_error = weapon != nullptr ? weapon->error_fp16[row] : 0;
-		const int32_t live_error = io::bam_add(authored_error,
-				io::bam_add(io::bam_sar(recoil_pitch, 7), io::bam_sar(weapon_weight_spread, 7)));
+		const int32_t live_error =
+				hud::crosshair_total_spread_fp16(authored_error, recoil_pitch, weapon_weight_spread);
 		v.recoil_pitch_bam = recoil_pitch;
 		v.weapon_weight_spread_bam = weapon_weight_spread;
 		v.aimed_shot_available = aimed_shot_available;
