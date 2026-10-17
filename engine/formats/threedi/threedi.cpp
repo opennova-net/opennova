@@ -22,10 +22,20 @@ static void free_chunk(ThreediChunk *chunk)
     free(chunk->children);
 }
 
-static int parse_chunk(const uint8_t *buf, size_t buf_len, size_t cursor, ThreediChunk *out_chunk, size_t *advance)
+// The deepest chunk the tree takes: the root at depth 0, a shipped model's leaves at 2
+// (ROOT > RLOD > VERT). parse_chunk and free_chunk recurse once a level, so a file of
+// nested parent chunks (8 bytes each) would otherwise run the stack out; a chunk past
+// this depth refuses the file.
+static const unsigned kMaxChunkDepth = 64;
+
+// One chunk and its subtree. On a refusal the chunk keeps what it read (the children
+// before the failing one, each freed through free_chunk by the caller) and the failing
+// child's own subtree is freed here, since child_count does not reach it.
+static int parse_chunk(const uint8_t *buf, size_t buf_len, size_t cursor, ThreediChunk *out_chunk, size_t *advance,
+                       unsigned depth)
 {
     memset(out_chunk, 0, sizeof(*out_chunk));
-    if (cursor + 8 > buf_len) {
+    if (depth > kMaxChunkDepth || cursor + 8 > buf_len) {
         return -1;
     }
 
@@ -60,7 +70,9 @@ static int parse_chunk(const uint8_t *buf, size_t buf_len, size_t cursor, Threed
                 cap = new_cap;
             }
             size_t child_advance = 0;
-            if (parse_chunk(buf, buf_len, content_start + consumed, &out_chunk->children[out_chunk->child_count], &child_advance) != 0) {
+            ThreediChunk *child = &out_chunk->children[out_chunk->child_count];
+            if (parse_chunk(buf, buf_len, content_start + consumed, child, &child_advance, depth + 1) != 0) {
+                free_chunk(child);
                 return -1;
             }
             consumed += child_advance;
@@ -97,7 +109,7 @@ static int parse_owned_buffer(uint8_t *buf, size_t len, ThreediFile *out_file)
 
     ThreediChunk root = {0};
     size_t root_advance = 0;
-    if (parse_chunk(buf, len, 8, &root, &root_advance) != 0) {
+    if (parse_chunk(buf, len, 8, &root, &root_advance, 0) != 0) {
         free_chunk(&root);
         free(buf);
         return -1;
