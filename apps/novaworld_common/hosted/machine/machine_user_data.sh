@@ -35,7 +35,13 @@
 #      starts it under systemd (Restart=always): it redeems the token over the
 #      controller's internal listener (SERVICE_URL, resolved at each request),
 #      then runs what the service places on the machine's slots
-#      (apps/hostd/README.md).
+#      (apps/hostd/README.md), each container's output going to the machines'
+#      CloudWatch log group (LOG_GROUP), stream <machine id>/slot-<k>, through
+#      docker's awslogs driver;
+#   7. ships the agent's own journal (its lines, its unit's starts and exits)
+#      to the same log group, stream <machine id>/hostd, through the same
+#      driver (opennova-hostd-log.service). Docker writes with the machine
+#      role's credentials; the slots' users never hold them (step 5).
 #
 # The machine lives until the service ends it. A step here that fails powers
 # the machine off (InstanceInitiatedShutdownBehavior=terminate ends it), and
@@ -56,6 +62,9 @@ SERVE_IMAGE='@OPENNOVA_SERVE_IMAGE@'
 HOSTD_IMAGE='@OPENNOVA_HOSTD_IMAGE@'
 # "<data set>=<volume label> ...", in the data sets' sorted order.
 DATA_SETS='@OPENNOVA_DATA_SETS@'
+# The machines' CloudWatch log group and its region (the machine's own).
+LOG_GROUP='@OPENNOVA_LOG_GROUP@'
+REGION='@OPENNOVA_REGION@'
 
 readonly GAME_ROOT=/opt/game
 readonly CONF_DIR=/etc/opennova
@@ -212,7 +221,7 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/local/sbin/opennova-machine-fence
-ExecStart=$HOSTD --service $SERVICE_URL --machine $MACHINE_ID
+ExecStart=$HOSTD --service $SERVICE_URL --machine $MACHINE_ID --log-group $LOG_GROUP --log-region $REGION
 Restart=always
 RestartSec=5
 
@@ -223,3 +232,46 @@ chmod 0644 /etc/systemd/system/opennova-hostd.service
 systemctl daemon-reload
 systemctl enable --now opennova-hostd.service
 log "machine $MACHINE_ID: opennova-hostd started"
+
+# --- 7. the agent's log ------------------------------------------------------------
+# journalctl follows the agent's unit from its cursor (this boot's start the
+# first time) into a container of the hostd image that copies its input to its
+# output, which docker ships like the slots' (non-blocking: CloudWatch out of
+# reach drops lines past the buffer and holds nothing up). Logs never end the
+# machine: a failure here is logged and the unit tries again every 5 s.
+printf "LOG_GROUP='%s'\nREGION='%s'\nMACHINE_ID='%s'\nHOSTD_IMAGE='%s'\n" \
+  "$LOG_GROUP" "$REGION" "$MACHINE_ID" "$HOSTD_IMAGE" > "$CONF_DIR/hostd-log.conf"
+chmod 0644 "$CONF_DIR/hostd-log.conf"
+cat > /usr/local/sbin/opennova-hostd-log <<'RELAY'
+#!/bin/sh
+set -eu
+. /etc/opennova/hostd-log.conf
+docker rm -f opennova-hostd-log >/dev/null 2>&1 || true
+journalctl --unit=opennova-hostd.service --boot --lines=all --follow --quiet \
+    --output=short-iso --cursor-file=/var/lib/opennova-hostd-log/cursor |
+  docker run --rm -i --name opennova-hostd-log --network none --read-only --cap-drop ALL \
+    --security-opt no-new-privileges --user 65534:65534 --memory 64m --pids-limit 8 \
+    --log-driver awslogs --log-opt "awslogs-region=$REGION" --log-opt "awslogs-group=$LOG_GROUP" \
+    --log-opt "awslogs-stream=$MACHINE_ID/hostd" --log-opt mode=non-blocking \
+    --log-opt max-buffer-size=4m --entrypoint /usr/bin/cat "$HOSTD_IMAGE" >/dev/null
+RELAY
+chmod 0755 /usr/local/sbin/opennova-hostd-log
+cat > /etc/systemd/system/opennova-hostd-log.service <<'UNIT'
+[Unit]
+Description=opennova-hostd's journal to CloudWatch
+Requires=docker.service
+After=docker.service
+
+[Service]
+ExecStart=/usr/local/sbin/opennova-hostd-log
+StateDirectory=opennova-hostd-log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+chmod 0644 /etc/systemd/system/opennova-hostd-log.service
+systemctl daemon-reload
+systemctl enable --now opennova-hostd-log.service || log "opennova-hostd-log did not start"
+log "machine $MACHINE_ID: logs to $LOG_GROUP ($REGION), streams $MACHINE_ID/hostd and $MACHINE_ID/slot-<k>"

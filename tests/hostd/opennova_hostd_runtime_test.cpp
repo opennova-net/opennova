@@ -11,7 +11,9 @@
 // slot's directory over its data set with its arguments and the env file's
 // variables alone, listed running then exited with its code, stopped by SIGTERM,
 // killed, removed once ended, a start that cannot run exit 125) and the command
-// line (apps/hostd/hostd_options.h). No docker and no iptables run.
+// line (apps/hostd/hostd_options.h: its log group and region among them, which
+// send the containers' output to CloudWatch, a stream per slot). No docker and no
+// iptables run.
 
 #include "docker_runtime.h"
 #include "egress_counters.h"
@@ -21,6 +23,7 @@
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -157,6 +160,23 @@ int test_run_argv() {
 	not_started.error = "no such file";
 	runner.replies.push_back(not_started);
 	TEST_EXPECT(!docker.run(sample_spec(), 7000, code, error) && code == 125);
+
+	// A cloud machine's: the output to the machines' log group, the slot's own
+	// stream, never blocking the server; the rest of the start the same.
+	hostd::DockerRuntime cloud(
+			runner, kDocker, {}, "/tmp", { "/opennova/staging/machines", "us-east-1", 12 });
+	std::vector<std::string> logged = expected;
+	const auto journald = std::find(logged.begin(), logged.end(), "--log-driver");
+	TEST_EXPECT(journald != logged.end() && *(journald + 1) == "journald");
+	const auto at = logged.erase(journald, journald + 4);
+	logged.insert(at,
+			{ "--log-driver", "awslogs", "--log-opt", "awslogs-region=us-east-1", "--log-opt",
+					"awslogs-group=/opennova/staging/machines", "--log-opt",
+					"awslogs-stream=12/slot-3", "--log-opt", "mode=non-blocking", "--log-opt",
+					"max-buffer-size=4m" });
+	TEST_EXPECT(cloud.run_argv(sample_spec()) == logged);
+	TEST_EXPECT(hostd::DockerRuntime::slot_log_stream(12, 0) == "12/slot-0" &&
+			hostd::DockerRuntime::slot_log_stream(7, 31) == "7/slot-31");
 	return 0;
 }
 
@@ -693,6 +713,13 @@ int test_options() {
 											   "--runtime", "process", "--serve", "/opt/serve" },
 					o, error) == ParseOutcome::Run);
 	TEST_EXPECT(o.runtime == hostd::RuntimeKind::Process && o.serve == "/opt/serve");
+	TEST_EXPECT(o.log_group.empty() && o.log_region.empty());
+	o = {};
+	TEST_EXPECT(hostd::parse_hostd_options(
+						{ "--service", "http://controller:8070", "--machine", "12", "--log-group",
+								"/opennova/prod/machines", "--log-region", "eu-west-1" },
+						o, error) == ParseOutcome::Run);
+	TEST_EXPECT(o.log_group == "/opennova/prod/machines" && o.log_region == "eu-west-1");
 	TEST_EXPECT(hostd::parse_hostd_options({ "--help" }, o, error) == ParseOutcome::Help);
 	TEST_EXPECT(hostd::parse_hostd_options({ "--version" }, o, error) == ParseOutcome::Version);
 	const std::vector<std::vector<std::string>> bad = {
@@ -711,6 +738,16 @@ int test_options() {
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--frobnicate" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--runtime", "podman" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--serve", "opennova-serve" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/opennova/x" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-region", "us-east-1" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a b", "--log-region",
+				"us-east-1" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a:b", "--log-region",
+				"us-east-1" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a", "--log-region",
+				"US-East-1" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a", "--log-region",
+				"us-east-1", "--runtime", "process" },
 	};
 	for (const auto &args : bad) {
 		hostd::HostdOptions fresh;

@@ -393,6 +393,20 @@ bool is_env_name(std::string_view name) {
 	return all_of(name, [](char c) { return is_alnum(c) || c == '_'; });
 }
 
+bool is_log_group_name(std::string_view name) {
+	if (name.empty() || name.size() > 512)
+		return false;
+	return all_of(name,
+			[](char c) { return is_alnum(c) || c == '.' || c == '/' || c == '_' || c == '-'; });
+}
+
+bool is_aws_region(std::string_view region) {
+	if (region.empty() || region.size() > 32 || region[0] < 'a' || region[0] > 'z')
+		return false;
+	return all_of(region,
+			[](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; });
+}
+
 std::optional<int> protocol_of(std::string_view json) {
 	JsonValue v;
 	std::string error;

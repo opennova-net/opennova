@@ -1039,6 +1039,7 @@ label, by which the machine mounts it.
 ```bash
 D='--deployment staging'                        # or prod
 ./deploy/run.sh $D fleet status                # EC2's view, then the service's
+./deploy/run.sh $D fleet logs <machine> <slot> # a slot's server output (CloudWatch; below)
 ./deploy/run.sh $D fleet drain <machine>       # no new server there; its servers move
 ./deploy/run.sh $D fleet end <machine>         # end it (its servers move first)
 ./deploy/run.sh $D fleet roll                  # move every server to new machines
@@ -1093,9 +1094,26 @@ deploy with `--no-hosting`, delete the `hosted-<deployment>` vault item, `infra 
 - **New data, or a new data set.** Make its snapshot, set its vault field
   (`hosted-<deployment>`), `infra apply` (the templates mount it), `fleet roll`, then
   delete the old snapshot; staging first, then prod's own.
-- **A machine's logs.** CloudWatch `/opennova/<deployment>/machines`, and the serial
-  console (`./deploy/run.sh --deployment <deployment> aws ec2 get-console-output --instance-id <machine> --latest`) while EC2 still
-  lists it.
+- **A machine's logs.** Every machine writes CloudWatch `/opennova/<deployment>/machines`
+  (30 days), a stream per slot and one for its agent, named by the machine's id (the admin
+  fleet view's "Machine N, slot k"): `<id>/slot-<k>` holds the output of each server that
+  ran on slot k, in turn (`opennova-serve`'s standard output and error: why a server
+  exited), `<id>/hostd` the agent's journal (its starts and failures, docker's refusals).
+  The deploy user reads them, with no shell on the machine and no SSM:
+
+  ```bash
+  ./deploy/run.sh $D fleet logs 12 3                # machine 12, slot 3: the last hour
+  ./deploy/run.sh $D fleet logs 12 3 --since 1d     # further back (10m, 2h, 1d)
+  ./deploy/run.sh $D fleet logs 12 hostd --follow   # the agent, live
+  ./deploy/run.sh $D fleet logs 12                  # every stream of the machine, each line naming its stream
+  ./deploy/run.sh $D fleet logs i-0123456789abcdef0 3   # by EC2's id, while EC2 lists the machine
+  ```
+
+  The streams outlive the machine. A server the service restarts after a crash starts
+  again as a new container, often on the same slot, so its slot's stream reads each
+  attempt in turn. A machine whose setup failed before its agent started writes nothing
+  there: its serial console says why (`./deploy/run.sh --deployment <deployment> aws ec2
+  get-console-output --instance-id <machine> --latest`) while EC2 still lists it.
 - **A refused AWS call.** The service logs each failure (`app logs worker`); for an
   `UnauthorizedOperation`, `./deploy/run.sh --deployment <deployment> aws sts decode-authorization-message
   --encoded-message <message>` names the condition that refused it.
@@ -1265,7 +1283,8 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
 - **Logs.** `./deploy/run.sh --deployment <deployment> app logs [PROGRAM|backup] [--follow] [--since 2h]` reads
   CloudWatch (`/opennova/<deployment>/service`, 30 days, a stream per container and task,
   `<program>/<container>/<task id>`: web's task writes `web/web/...` and
-  `web/portal/...`; a program's name tails all of its tasks').
+  `web/portal/...`; a program's name tails all of its tasks'). The game machines' are
+  `fleet logs` ("Hosted game servers", Operating notes).
 - **Alarms** go to the deployment's SNS topic, `opennova-<deployment>-alerts` in its account, which emails
   `alerts/email` (confirm the subscription from the first email AWS sends): per program,
   no heartbeat for 5 minutes, more boots in 15 minutes than its `max` and 3 (a crash
@@ -1748,7 +1767,8 @@ every command).
   on both (web's logs show it): it completes.
 - **F. A shared machine.** Start a server: a shared machine launches (from the baked
   image, `fleet status`), its hostd reaches the controller by its Cloud Map name, the
-  server lands on slot k and is joinable by a retail and an OpenNova client.
+  server lands on slot k and is joinable by a retail and an OpenNova client; `fleet logs
+  <machine> <k>` shows the server's output and `fleet logs <machine> hostd` the agent's.
 - **G. A second account** starts one: it lands on slot k+1 of the same machine.
 - **H. Deploys that keep the lobby.** With a server listed and a retail client in the
   lobby: `app deploy --image portal=<tag>` (nothing restarts but web's task), then `app

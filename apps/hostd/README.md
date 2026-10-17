@@ -44,6 +44,8 @@ opennova-hostd --service http://<host>:<port> --machine <id> [options]
 | `--serve` | `/usr/local/bin/opennova-serve` | The process runtime's `opennova-serve`. |
 | `--iptables` | `/usr/sbin/iptables` | The egress counters' iptables, or `none` to count nothing. |
 | `--ip6tables` | `/usr/sbin/ip6tables` | The same for IPv6, used only where the kernel has IPv6; `none` skips it. |
+| `--log-group` | none | With `--log-region`, the docker runtime's: the CloudWatch log group the containers' output goes to, a stream per slot ("Logs" below). Unset, the machine's journal. |
+| `--log-region` | none | That log group's region. |
 | `--once` | | One pass, then exit: 0 when the sync was answered and read. |
 | `--verbose` | | Debug lines too. |
 | `--version` | | The build (`OPENNOVA_HOSTD_VERSION` at configure time; the serve image passes the commit). |
@@ -63,7 +65,7 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/local/sbin/opennova-machine-fence
-ExecStart=/usr/local/bin/opennova-hostd --service http://controller.prod.opennova.internal:8070 --machine 12
+ExecStart=/usr/local/bin/opennova-hostd --service http://controller.prod.opennova.internal:8070 --machine 12 --log-group /opennova/prod/machines --log-region us-east-1
 Restart=always
 RestartSec=5
 
@@ -165,7 +167,7 @@ docker run --pull never -d --name <name> --label opennova.hostd=1 --label openno
   --network host --user <uid>:<uid> --cap-drop ALL --security-opt no-new-privileges
   --read-only --tmpfs /tmp:size=64m,nosuid,nodev,noexec --cpus <cpus> --memory <mb>m
   --memory-swap <mb>m
-  --pids-limit <pids> --stop-timeout 60 --log-driver journald --log-opt tag=<name>
+  --pids-limit <pids> --stop-timeout 60 <the logs, below>
   --mount type=bind,source=<data set's mount path>,target=/opt/game,readonly
   --mount type=bind,source=/srv/slots/slot-<k>,target=/srv/serve
   [--env-file <file>] <image> <opennova-serve's arguments>
@@ -173,8 +175,52 @@ docker run --pull never -d --name <name> --label opennova.hostd=1 --label openno
 
 The machine's own network is required: NovaWorld lists a server at the source address and
 port of its datagrams, and a bridge's NAT would rewrite the port. Only containers with the
-agent's label are ever listed, stopped or removed. Their output is in the journal
-(`journalctl CONTAINER_NAME=<name>` or `-t <name>`).
+agent's label are ever listed, stopped or removed.
+
+## Logs
+
+On a cloud machine the servers' output and the agent's own log go to the deployment's
+machines log group, `/opennova/<deployment>/machines` (`infra/aws`, 30 days), one stream
+per slot and one for the agent, by the machine's id (the service's `fleet_machines` row,
+the id the admin fleet view shows beside each server's slot):
+
+| Stream | What |
+| --- | --- |
+| `<machine id>/slot-<k>` | slot k's container output, standard output and error: each server on the slot in turn |
+| `<machine id>/hostd` | the agent's own journal: its lines, its unit's starts and exits (systemd's) |
+
+A slot's containers log through docker's `awslogs` driver: `--log-group` and `--log-region`
+(the user-data passes both) make the start's log options
+
+```
+--log-driver awslogs --log-opt awslogs-region=<region> --log-opt awslogs-group=<group>
+--log-opt awslogs-stream=<machine id>/slot-<k> --log-opt mode=non-blocking
+--log-opt max-buffer-size=4m
+```
+
+Non-blocking, so CloudWatch slow or out of reach never holds up a server's write (lines past
+the 4 MB buffer are dropped) or its start (docker makes the stream in the background). The
+docker daemon writes with the machine role's credentials (which reach that log group
+alone); the slots' users are fenced off the metadata
+service and never hold them. Docker also keeps a local copy (its dual logging), so `docker
+logs <name>` reads a container's output on the machine (a Session Manager shell) until the
+agent removes the container; CloudWatch keeps it after. Without `--log-group` (a
+development machine) the output goes to the journal: `--log-driver journald --log-opt
+tag=<name>` (`journalctl CONTAINER_NAME=<name>`).
+
+The agent's own lines go to the journal (its unit's standard error), and the user-data's
+`opennova-hostd-log.service` ships them with the same driver: `journalctl
+--unit=opennova-hostd.service --follow` (from its cursor, this boot's start the first time)
+piped into a container of the hostd image that copies its input to its output (`cat`, no
+network, no capability, user nobody), which docker ships to `<machine id>/hostd`. The
+unit restarts with docker (and every 5 s while docker is down); stopped, journalctl
+writes its cursor, so the next start sends what came after it. A relay whose container
+ended alone stops without one and sends again from the last cursor (or the boot's start),
+so lines may come twice. On the machine, `journalctl -u opennova-hostd` reads it all.
+
+Reading them needs no shell on the machine: `./deploy/run.sh --deployment <deployment> fleet
+logs <machine id> [<slot>|hostd] [--since 1h] [--follow]` (DEPLOY.md, "Hosted game
+servers").
 
 ## The process runtime
 
@@ -216,7 +262,8 @@ with the machine: docker with no user-namespace remapping (the slot's UID in the
 is the machine's, which the egress counters and the metadata fence match); every data set's
 volume mounted read-only at the path the bootstrap names; ports 32768-32831 reserved out of
 the ephemeral range; the metadata fence widened to UIDs 10001-10032; the slots' UIDs unable
-to reach the service's internal port; the token file and the unit above.
+to reach the service's internal port; the token file and the unit above; the agent's log
+relay ("Logs").
 
 ## Development and tests
 
@@ -232,7 +279,8 @@ Not as root, it warns and leaves the slots' files its own user's.
 The ctests (`tests/hostd`, Linux only; neither runs docker nor iptables):
 
 - `opennova_hostd_runtime` drives the docker runtime, the egress counters and the command
-  line on a stub command runner that checks every argv: the exact `docker run`, the
+  line on a stub command runner that checks every argv: the exact `docker run` (with the
+  journal, and with a log group: the slot's stream, non-blocking), the
   listings and their partial answers, each call's timeout, the image check, docker's texts
   read, the chain's rules put in place only where missing and the counts summed; the
   background pull runs stand-in programs for the CLI. And the process runtime over a

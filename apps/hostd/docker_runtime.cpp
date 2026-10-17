@@ -109,11 +109,12 @@ std::optional<unsigned> digits(std::string_view text, size_t at, size_t count) {
 } // namespace
 
 DockerRuntime::DockerRuntime(proc::CommandRunner &runner, std::string docker,
-		std::vector<std::string> environment, std::string scratch_dir) :
+		std::vector<std::string> environment, std::string scratch_dir, ContainerLogs logs) :
 		runner_(runner),
 		docker_(std::move(docker)),
 		environment_(std::move(environment)),
-		scratch_dir_(std::move(scratch_dir)) {}
+		scratch_dir_(std::move(scratch_dir)),
+		logs_(std::move(logs)) {}
 
 DockerRuntime::~DockerRuntime() {
 	for (auto &pull : pulls_) {
@@ -273,10 +274,19 @@ std::vector<std::string> DockerRuntime::run_argv(const ContainerSpec &spec) cons
 		std::string("/tmp:") + kTmpfsOptions, "--cpus", format_cpus(spec.cpus), "--memory", memory,
 		"--memory-swap", memory,
 		"--pids-limit", std::to_string(spec.pids), "--stop-timeout",
-		std::to_string(kStopTimeoutSeconds), "--log-driver", "journald", "--log-opt",
-		"tag=" + spec.name, "--mount",
-		"type=bind,source=" + spec.data_dir + ",target=/opt/game,readonly", "--mount",
-		"type=bind,source=" + spec.work_dir + ",target=/srv/serve" };
+		std::to_string(kStopTimeoutSeconds) };
+	if (logs_.group.empty()) {
+		argv.insert(argv.end(), { "--log-driver", "journald", "--log-opt", "tag=" + spec.name });
+	} else {
+		argv.insert(argv.end(),
+				{ "--log-driver", "awslogs", "--log-opt", "awslogs-region=" + logs_.region,
+						"--log-opt", "awslogs-group=" + logs_.group, "--log-opt",
+						"awslogs-stream=" + slot_log_stream(logs_.machine_id, spec.slot),
+						"--log-opt", "mode=non-blocking", "--log-opt", "max-buffer-size=4m" });
+	}
+	argv.insert(argv.end(),
+			{ "--mount", "type=bind,source=" + spec.data_dir + ",target=/opt/game,readonly",
+					"--mount", "type=bind,source=" + spec.work_dir + ",target=/srv/serve" });
 	if (!spec.env_file.empty()) {
 		argv.push_back("--env-file");
 		argv.push_back(spec.env_file);
@@ -284,6 +294,10 @@ std::vector<std::string> DockerRuntime::run_argv(const ContainerSpec &spec) cons
 	argv.push_back(spec.image);
 	argv.insert(argv.end(), spec.args.begin(), spec.args.end());
 	return argv;
+}
+
+std::string DockerRuntime::slot_log_stream(int64_t machine_id, int slot) {
+	return std::to_string(machine_id) + "/slot-" + std::to_string(slot);
 }
 
 bool DockerRuntime::run(

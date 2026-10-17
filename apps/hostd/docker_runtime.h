@@ -11,7 +11,7 @@
 //     --security-opt no-new-privileges --read-only
 //     --tmpfs /tmp:size=64m,nosuid,nodev,noexec --cpus <cpus>
 //     --memory <mb>m --memory-swap <mb>m --pids-limit <pids> --stop-timeout 60
-//     --log-driver journald --log-opt tag=<name>
+//     <the logs: ContainerLogs below>
 //     --mount type=bind,source=<data set's mount path>,target=/opt/game,readonly
 //     --mount type=bind,source=<slot's directory>,target=/srv/serve
 //     [--env-file <file>] <image> <opennova-serve's arguments>
@@ -45,6 +45,29 @@
 
 namespace opennova::hostd {
 
+// Where the containers' output goes. With a group (a cloud machine; its
+// user-data passes --log-group and --log-region): that CloudWatch log group, a
+// stream per slot, "<machine id>/slot-<k>", which each server on the slot
+// writes in turn, through docker's awslogs driver:
+//
+//     --log-driver awslogs --log-opt awslogs-region=<region>
+//     --log-opt awslogs-group=<group> --log-opt awslogs-stream=<machine id>/slot-<k>
+//     --log-opt mode=non-blocking --log-opt max-buffer-size=4m
+//
+// Non-blocking: CloudWatch slow or out of reach never holds up a write of the
+// server's (lines past the 4 MB buffer are dropped) nor its start (docker makes
+// the stream in the background); docker's credentials are the machine role's.
+// Docker keeps a local copy as well (its dual logging), so `docker logs <name>`
+// reads a container's output on the machine while the container exists.
+// Without a group (a development machine): the machine's journal,
+//
+//     --log-driver journald --log-opt tag=<name>
+struct ContainerLogs {
+	std::string group;
+	std::string region;
+	int64_t machine_id = 0;
+};
+
 class DockerRuntime : public ContainerRuntime {
 public:
 	static constexpr const char *kManagedLabel = "opennova.hostd";
@@ -58,9 +81,10 @@ public:
 
 	// `docker`: the CLI's absolute path. `runner` must outlive this. A pull
 	// runs with `environment` (NAME=value entries) alone, its standard error
-	// in a file under `scratch_dir` (owner-only).
+	// in a file under `scratch_dir` (owner-only). The containers log as `logs`
+	// says.
 	DockerRuntime(proc::CommandRunner &runner, std::string docker,
-			std::vector<std::string> environment, std::string scratch_dir);
+			std::vector<std::string> environment, std::string scratch_dir, ContainerLogs logs = {});
 	// Ends the pulls still under way.
 	~DockerRuntime() override;
 
@@ -80,6 +104,8 @@ public:
 
 	// The argv run() runs for `spec`.
 	std::vector<std::string> run_argv(const ContainerSpec &spec) const;
+	// Slot `slot`'s CloudWatch stream on machine `machine_id`: "<id>/slot-<k>".
+	static std::string slot_log_stream(int64_t machine_id, int slot);
 
 private:
 	struct Pull {
@@ -96,6 +122,7 @@ private:
 	std::string docker_;
 	std::vector<std::string> environment_;
 	std::string scratch_dir_;
+	ContainerLogs logs_;
 	std::map<std::string, Pull> pulls_; // by image
 	uint64_t pulls_started_ = 0; // names the pulls' error files
 };

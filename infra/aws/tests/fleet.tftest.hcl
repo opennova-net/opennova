@@ -14,7 +14,8 @@
 # the largest the templates make, their images and snapshots; it ends only
 # machines carrying both tags. The machine role holds Session Manager and its
 # logs alone. Web's, the controller's and the worker's environment carry the
-# fleet's settings, infra.env what `fleet bake-image` needs. A t2 or Graviton
+# fleet's settings (the machines' log group among them), infra.env what `fleet
+# bake-image` and `fleet logs` need. A t2 or Graviton
 # type, a slot count past 32, and a data set the service does not know are
 # refused.
 
@@ -342,9 +343,14 @@ run "hosting_off" {
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "none" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://controller.prod.opennova.internal:8070" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "12" &&
-      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_HTTP_BIND")
+      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_HTTP_BIND") &&
+      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_EC2_LOG_GROUP")
     ]) && strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_PROVIDER='none'\n") && !strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET")
     error_message = "hosting off: the programs' environment turns the provider off and still names the controller's URL and the fleet's knobs (the controller binds its own task's address); infra.env says so to the toolbox"
+  }
+  assert {
+    condition     = strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_MACHINES_LOG_GROUP='/opennova/prod/machines'\n")
+    error_message = "infra.env names the machines' log group whether or not hosting is on (fleet logs reads what machines wrote)"
   }
   assert {
     condition     = output.hosted_enabled == false && length(output.fleet_launch_templates) == 0 && output.hosted_subnet_cidrs == null && output.fleet_image_parameter == null
@@ -444,10 +450,11 @@ run "hosting_on" {
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_SUBNETS"] == "subnet-0public0a,subnet-0public0b" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_BOOTSTRAP_CIDRS"] == "10.44.0.0/24,10.44.1.0/24" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_DEPLOYMENT"] == "opennova-prod" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_LOG_GROUP"] == "/opennova/prod/machines" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_DATA_SETS"] == "{\"dfx2_consumer\":{\"missions\":[]},\"jop_2_consumer\":{\"missions\":[]}}" &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "OPENNOVA_FLEET")
     ])
-    error_message = "web, the controller and the worker get the provider, the templates by kind, both zones' subnets, the deployment tag and the data sets the machines mount"
+    error_message = "web, the controller and the worker get the provider, the templates by kind, both zones' subnets, the deployment tag, the machines' log group and the data sets the machines mount"
   }
   assert {
     condition = (
@@ -456,9 +463,10 @@ run "hosting_on" {
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET_IMAGE_PARAMETER='/opennova/prod/fleet/image'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET_SECURITY_GROUP='sg-0machines'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_DEPLOYMENT='opennova-prod'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_MACHINES_LOG_GROUP='/opennova/prod/machines'\n") &&
       !strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES")
     )
-    error_message = "infra.env hands the toolbox what fleet bake-image launches its builder with and the machines' tag"
+    error_message = "infra.env hands the toolbox what fleet bake-image launches its builder with, the machines' tag and their log group (fleet logs)"
   }
   assert {
     condition     = aws_iam_role_policy.fleet_service[0].role == aws_iam_role.program["worker"].id && aws_iam_role_policy.fleet_service[0].name == "opennova-prod-fleet"

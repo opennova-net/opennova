@@ -69,7 +69,9 @@ resource "aws_cloudwatch_log_group" "service" {
   tags = var.tags
 }
 
-# The game machines' (hostd and the slots), through the machine role.
+# The game machines' (hostd and the slots), through the machine role: a
+# stream per slot, <machine id>/slot-<k>, and one for hostd, <machine id>/hostd
+# (apps/hostd/README.md, "Logs"). `./deploy/run.sh fleet logs` reads it.
 resource "aws_cloudwatch_log_group" "machines" {
   name              = "/opennova/${local.deployment}/machines"
   retention_in_days = var.log_retention_days

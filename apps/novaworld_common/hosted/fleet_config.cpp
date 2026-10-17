@@ -197,6 +197,7 @@ bool parse_fleet_config(const EnvLookup &env, FleetConfig &out, std::vector<std:
 			errors.push_back("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES " + why);
 	}
 	read.text("ONNET_HOSTED_EC2_REGION", ec2.region);
+	read.text("ONNET_HOSTED_EC2_LOG_GROUP", ec2.log_group);
 	if (const auto subnets = env("ONNET_HOSTED_EC2_SUBNETS"))
 		ec2.subnets = split_list(*subnets);
 	read.text("ONNET_HOSTED_DEPLOYMENT", ec2.deployment);

@@ -25,6 +25,11 @@ struct HostdOptions {
 	std::string serve = "/usr/local/bin/opennova-serve"; // --serve: the process runtime's
 	std::string iptables = "/usr/sbin/iptables"; // "none": no egress counters
 	std::string ip6tables = "/usr/sbin/ip6tables"; // "none", or used where the kernel has IPv6
+	// --log-group and --log-region, both or neither, the docker runtime's: the
+	// CloudWatch log group the containers' output goes to (docker_runtime.h
+	// ContainerLogs); neither, the machine's journal.
+	std::string log_group;
+	std::string log_region;
 	bool once = false;
 	bool verbose = false;
 };
