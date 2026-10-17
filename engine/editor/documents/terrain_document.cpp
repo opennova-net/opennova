@@ -37,16 +37,9 @@ int *cells_of(const RecordHandle &record) { return &record.as<int>(); }
 
 // --- values -------------------------------------------------------------------------------------
 
+// A whole number from a Value (model/value.h whole_number: a real holding one within 9e15).
 bool whole_of(const Value &value, int64_t &out, std::string &error) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) {
-		out = *whole;
-		return true;
-	}
-	if (const auto *real = std::get_if<double>(&value); real && std::isfinite(*real) && std::floor(*real) == *real &&
-	                                                    std::fabs(*real) < 9.0e15) {
-		out = static_cast<int64_t>(*real);
-		return true;
-	}
+	if (whole_number(value, out)) return true;
 	error = "A whole number.";
 	return false;
 }

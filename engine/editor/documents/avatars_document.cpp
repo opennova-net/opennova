@@ -35,15 +35,6 @@ const AvatarNationalityRecord &nationality_of(const RecordHandle &r) { return r.
 const AvatarDivisionRecord &division_of(const RecordHandle &r) { return r.as<AvatarDivisionRecord>(); }
 const AvatarComboRecord &combo_of(const RecordHandle &r) { return r.as<AvatarComboRecord>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 // A word of a line the walk cuts into one token: no blank, comma, quote, `;` or `//`, within the bytes its field
 // keeps (an empty one ends the line's fields: the writer refuses one before a filled field).
 bool set_word(std::string &field, size_t bytes, const Value &value, std::string &error) {
