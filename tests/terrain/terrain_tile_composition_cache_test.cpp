@@ -46,6 +46,37 @@ bool compose(TerrainTileCompositionCache &cache,
 	return cache.publish(*decision->job);
 }
 
+// The page tier: 256-texel pages at a terrain texture detail of 3 or more, 128
+// below it; a new side empties every record, and the jobs lay out at it.
+// [orig: Terrain_LoadEnvironmentConfig @ 0x610966..0x61099F;
+// PolyTrn_LoadTerrainConfig @ 0x60E41D..0x60E446]
+bool test_page_tier() {
+	for (int word = 0; word < 3; ++word) {
+		if (!expect(TerrainTileCompositionCache::page_dimension(word) == 128,
+				"terrain_texdetail 0..2 is the 128 tier")) return false;
+	}
+	if (!expect(TerrainTileCompositionCache::page_dimension(3) == 256 &&
+			TerrainTileCompositionCache::page_dimension(4) == 256,
+			"terrain_texdetail 3 and above is the 256 tier")) return false;
+	TerrainTileCompositionCache cache;
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	const TerrainTileCompositionRequest request = page_request(0, 0, 0, 2);
+	if (!expect(compose(cache, request) && cache.bind(request).has_value(),
+			"a page composes at the high tier")) return false;
+	cache.set_dimension(TerrainTileCompositionCache::page_dimension(1));
+	if (!expect(cache.dimension() == 128 && !cache.bind(request).has_value(),
+			"a new side empties every record")) return false;
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	const auto decision = cache.request(request);
+	if (!expect(decision.has_value() && decision->job.has_value(), "the low tier claims a record")) return false;
+	const auto &layout = decision->job->layout;
+	return expect(layout.texture_dimension == 128 && layout.world_span == 256 &&
+					std::fabs(layout.texels_per_world_unit - 0.5f) < 1e-6f,
+			"the low tier's job lays out 128 texels over the page's span");
+}
+
 bool test_layout_and_projection() {
 	TerrainTileCompositionCache cache;
 	cache.begin_frame(0);
@@ -59,9 +90,8 @@ bool test_layout_and_projection() {
 		if (!expect(decision.has_value() && decision->job.has_value(),
 				"a cold page request claims a record")) return false;
 		const auto &layout = decision->job->layout;
-		if (!expect(TerrainTileCompositionCache::kDimension == 256 &&
-				layout.texture_dimension == 256,
-				"active-quality cache pages are 256 texels square")) return false;
+		if (!expect(cache.dimension() == 256 && layout.texture_dimension == 256,
+				"the high tier's cache pages are 256 texels square")) return false;
 		if (!expect(TerrainTileCompositionCache::page_world_span(page_lod) ==
 					expected_spans[i] && layout.world_span == expected_spans[i],
 				"page span follows 1024 >> page_lod")) return false;
@@ -346,6 +376,7 @@ bool test_publication_and_invalidation() {
 } // namespace
 
 int main() {
+	if (!test_page_tier()) return 1;
 	if (!test_layout_and_projection()) return 1;
 	if (!test_claim_needs_two_idle_frames()) return 1;
 	if (!test_sweep_refreshes_one_tod_stale_page()) return 1;

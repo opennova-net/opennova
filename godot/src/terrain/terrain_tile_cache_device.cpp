@@ -122,6 +122,10 @@ bool TerrainTileCacheDevice::rebuild(
 	if (p_data.is_null() || p_surface_inputs.is_null()) {
 		return false;
 	}
+	// The page tier under the session's terrain texture detail
+	// (TerrainTileCompositionCache::page_dimension).
+	cache_.set_dimension(opennova::TerrainTileCompositionCache::page_dimension(
+			p_surface_inputs->get_terrain_texdetail()));
 	auto snapshot = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>();
 
 	opennova::terrain::Rgba8Image colormap;
@@ -374,7 +378,7 @@ std::optional<std::size_t> TerrainTileCacheDevice::update_heightfield_normal_reg
 	return cache_.invalidate_sampling(
 			[&](const opennova::TerrainTilePageKey &page, int32_t source_x, int32_t source_z) {
 				return opennova::terrain::terrain_tile_page_samples_any(changes, *normals, page.page_lod_level,
-						source_x, source_z);
+						source_x, source_z, cache_.dimension());
 			});
 }
 
@@ -407,7 +411,7 @@ bool TerrainTileCacheDevice::update_colormap_region(const uint8_t *p_rgba, uint3
 	const std::size_t retired = cache_.invalidate_sampling(
 			[&](const opennova::TerrainTilePageKey &page, int32_t source_x, int32_t source_z) {
 				return opennova::terrain::terrain_tile_page_samples(change, *colormap, page.page_lod_level, source_x,
-						source_z);
+						source_z, cache_.dimension());
 			});
 	++colormap_region_updates_;
 	colormap_pages_retired_ += retired;
@@ -458,9 +462,7 @@ void TerrainTileCacheDevice::clear_terrain_scorches() {
 
 bool TerrainTileCacheDevice::_allocate_texture() {
 	TypedArray<Ref<Image>> layers;
-	const Ref<Image> blank = Image::create(
-			opennova::TerrainTileCompositionCache::kDimension,
-			opennova::TerrainTileCompositionCache::kDimension, false,
+	const Ref<Image> blank = Image::create(cache_.dimension(), cache_.dimension(), false,
 			Image::FORMAT_RGBA8);
 	if (blank.is_null()) {
 		return false;
@@ -730,8 +732,7 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 				ready_page_output_hashes_[layer]);
 	}
 	diagnostics["available"] = is_ready();
-	diagnostics["dimension"] =
-			opennova::TerrainTileCompositionCache::kDimension;
+	diagnostics["dimension"] = cache_.dimension();
 	diagnostics["capacity"] =
 			opennova::TerrainTileCompositionCache::kCapacity;
 	diagnostics["ready_pages"] = ready_pages;

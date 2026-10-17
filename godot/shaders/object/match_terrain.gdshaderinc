@@ -16,7 +16,7 @@ vec3 obj_match_terrain_color() {
 	#ifdef OBJ_MATCHTERRAIN_SKINNED_STANCE
 	vec2 page_uv = (v_world_pos.xz - u_match_terrain_page_projection.xy) *
 			u_match_terrain_page_projection.z;
-	vec2 half_texel = vec2(0.5 / 256.0);
+	vec2 half_texel = vec2(0.5) / vec2(textureSize(u_match_terrain_cache, 0).xy); // the page tier's side
 	page_uv = clamp(page_uv, half_texel, vec2(1.0) - half_texel);
 	vec4 tile = texture(u_match_terrain_cache,
 			vec3(page_uv, u_match_terrain_page_layer));
