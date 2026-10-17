@@ -5,6 +5,13 @@
 # (OPENNOVA_NOVAWORLD_SERVICE, off by default; the Linux CI jobs and the programs' images
 # turn it on), so its paths are the including file's: ${CMAKE_CURRENT_SOURCE_DIR} is tests/.
 
+# Every test this file adds carries the `service` ctest label, and every target it adds
+# builds under the one aggregate target opennova_service_tests: the images' gate
+# (.github/workflows/net-linux.yml) builds and runs the service rows by those two, so a row
+# added here is in the gate with no hand list to keep (the end of this file applies them).
+get_directory_property(OPENNOVA_SERVICE_TESTS_BEFORE TESTS)
+get_directory_property(OPENNOVA_SERVICE_TARGETS_BEFORE BUILDSYSTEM_TARGETS)
+
 # The database tests run against a real PostgreSQL server: OPENNOVA_TEST_PG names
 # it (a libpq URI whose role may create and drop databases), and each test case
 # gets a database of its own there (tests/common/test_database.h). ctest hands
@@ -1107,3 +1114,13 @@ target_include_directories(object_store_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
 add_test(NAME object_store COMMAND object_store_test)
+
+# The `service` label and the aggregate target over everything this file added (the head of
+# this file says why).
+get_directory_property(OPENNOVA_SERVICE_TESTS TESTS)
+list(REMOVE_ITEM OPENNOVA_SERVICE_TESTS ${OPENNOVA_SERVICE_TESTS_BEFORE})
+set_property(TEST ${OPENNOVA_SERVICE_TESTS} APPEND PROPERTY LABELS service)
+get_directory_property(OPENNOVA_SERVICE_TARGETS BUILDSYSTEM_TARGETS)
+list(REMOVE_ITEM OPENNOVA_SERVICE_TARGETS ${OPENNOVA_SERVICE_TARGETS_BEFORE})
+add_custom_target(opennova_service_tests)
+add_dependencies(opennova_service_tests ${OPENNOVA_SERVICE_TARGETS})
