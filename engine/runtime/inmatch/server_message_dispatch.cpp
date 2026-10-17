@@ -920,7 +920,14 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	//  PlayerSlot_InitWeaponsFromLoadout call @0x5178E1]
 	if (!revive_deploy) {
 		if (!conn.link.spectator) world.commands.remove_placed_devices_by_owner(player->handle);
-		PlayerSlot_InitWeaponsFromLoadout(conn, world, *player);
+		// The listen host's own slot is skipped: ours keeps the host's local
+		// inventory apart from the slot and does not refill it at a deploy
+		// (D-NET-479; retail's local table is the slot table, built from its
+		// buffer, which the round init seeds from g_SpawnLoadoutBuffer
+		// @0x516BCA..0x516BE3 and the host's own 0x2F accepts rewrite). The slot
+		// takes no 0x2F here, so the rebuild would only empty it.
+		if (player->handle != world.cached.local_player)
+			PlayerSlot_InitWeaponsFromLoadout(conn, world, *player);
 	}
 	conn.discard_pre_deploy_uplinks = true;
 	// No +360 store; the +364 hold clears only for a raw handle other than

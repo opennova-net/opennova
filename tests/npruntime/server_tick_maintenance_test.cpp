@@ -28,7 +28,9 @@
 
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_loadout_grant.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -1635,6 +1637,116 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 			"a revive deploy sends the 0x61 reroll and no 0x5A");
 }
 
+// A slot that never submitted deploys into an empty table: the rebuild runs over
+// its empty buffer and list, so its rows go and every pool is zeroed.
+// [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 - the buffer test @0x5155EB skips
+//  the entry walk alone; WeaponSlots_SeedAmmoPoolsFromDefs @0x54169C..0x5416A5]
+bool check_deploy_rebuilds_an_unsubmitted_slot_empty() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	install_rifle_armory(world);
+	const w::EntityHandle remote = w::spawn_remote_player(world, player_spawn(3, 0, 0));
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kTeamDeathmatch;
+	w::MatchRules rules;
+	rules.game_type = ctx.config.game_type;
+	world.match.configure(rules);
+	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
+	auto &roster = ctx.np_protocol.connection_list;
+	roster.push_back(make_seeded_conn(3, 1, &remote_wire, ns::TransportMode::Client, remote, true));
+	inmatch::NapiNPConnection &conn = roster[0];
+	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30}; // a picked-up rifle
+	conn.reply.ammo_pools[0] = 40;
+	w::Entity *body = world.registry.get(remote);
+	body->flags |= w::kEntityFlagDead;
+	body->alive = false;
+	body->health = 0;
+	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
+	return expect(conn.weapon_slots.empty() && conn.reply.ammo_pools[0] == 0,
+			"an unsubmitted slot's deploy leaves no row and no pool");
+}
+
+// The listen host's own slot is kept apart from its local inventory (D-NET-479)
+// and takes no 0x2F: its deploy leaves the kit, its carry bits included, and the
+// slot's rows, where an empty rebuild would strip them.
+// [orig: Server_DeployPlayer @0x5178E1 over the host's slot, whose buffer is
+//  g_SpawnLoadoutBuffer (Server_InitAllPlayerEntitiesForRound @0x516BCA..0x516BE3)]
+bool check_deploy_leaves_the_listen_hosts_kit() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	install_rifle_armory(world);
+	w::LocalPlayer local(world);
+	world.local_player_state = &local;
+	const w::EntityHandle host = w::spawn_player(world, player_spawn(0, 0, 0));
+	if (!expect(host.valid() && world.cached.local_player == host,
+			"the deploy fixture spawned the listen host"))
+		return false;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kTeamDeathmatch;
+	w::MatchRules rules;
+	rules.game_type = ctx.config.game_type;
+	world.match.configure(rules);
+	auto &roster = ctx.np_protocol.connection_list;
+	roster.push_back(make_seeded_conn(0, 1, nullptr, ns::TransportMode::Client, host, true));
+	inmatch::NapiNPConnection &conn = roster[0];
+	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30};
+	w::Entity *body = world.registry.get(host);
+	body->carry_flags |= 0x18u; // the local kit's armor and parachute
+	body->flags |= w::kEntityFlagDead;
+	body->alive = false;
+	body->health = 0;
+	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
+	body = world.registry.get(host);
+	return expect(body != nullptr && (body->carry_flags & 0x18u) == 0x18u &&
+					conn.weapon_slots.size() == 1,
+			"the listen host's deploy keeps its kit's carry bits and rows");
+}
+
+// The map change keeps a slot's kit, and the round init rebuilds the slot's table from
+// it: the kit's rows, the pools seeded from the defs and one clip drawn, before any
+// count (the rifle's 90 start rounds, not the one granted magazine).
+// [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 (no store to +94408 /
+//  +88664 / +89176); Server_InitAllPlayerEntitiesForRound @0x516BF3..0x516C20]
+bool check_round_init_rebuilds_the_kept_kit() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	install_rifle_armory(world);
+	const w::EntityHandle remote = w::spawn_remote_player(world, player_spawn(3, 0, 0));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, remote, true));
+	inmatch::NapiNPConnection &conn = roster.front();
+	LoadoutSubmit request;
+	request.team = 1;
+	request.player_class = 8;
+	request.weapon_slot_index = 3 * 65 + 2;
+	request.entries.push_back(LoadoutSubmitEntry{5, 1, 0xFF, 0xFF});
+	conn.link.preround_loadout_latch = true;
+	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
+			100, roster, &world);
+	if (!expect(conn.reply.ammo_pools[0] == 0 && conn.weapon_slots[3 * 65 + 2].clip == 30,
+			"the one-magazine accept draws its clip and leaves no reserve"))
+		return false;
+	inmatch::reset_slot_for_next_mission(conn);
+	if (!expect(conn.reply.loadout_buffer_set && conn.weapon_slots.empty() &&
+					conn.reply.loadout_buffer.entries.size() == 1,
+			"the map change keeps the slot's buffer and drops its rows"))
+		return false;
+	inmatch::PlayerSlot_RebuildKitForRound(conn, world, *world.registry.get(remote));
+	return expect(conn.weapon_slots.size() == 1 && conn.weapon_slots[3 * 65 + 2].clip == 30 &&
+					conn.reply.ammo_pools[0] == 60,
+			"the round init rebuilds the rifle with its seeded 90 less one clip");
+}
+
 // --------------------------------------------------------------------------
 // The slot's damage-class bytes behind the S2C 0x5A fourth byte (D-NET-508).
 // --------------------------------------------------------------------------
@@ -2818,6 +2930,9 @@ int main() {
 	ok = check_kit_weight_recompute() && ok;
 	ok = check_kit_weight_reads_the_seat() && ok;
 	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
+	ok = check_deploy_rebuilds_an_unsubmitted_slot_empty() && ok;
+	ok = check_deploy_leaves_the_listen_hosts_kit() && ok;
+	ok = check_round_init_rebuilds_the_kept_kit() && ok;
 	ok = check_loadout_damage_class_bytes() && ok;
 	ok = check_loadout_sub_variant_rows() && ok;
 	ok = check_sub_variant_fire_after_the_grant() && ok;

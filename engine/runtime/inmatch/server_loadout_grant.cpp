@@ -401,7 +401,10 @@ void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &g
 void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &world,
                                        world::Entity &player) {
 	const world::WeaponTable &table = world.tables.weapons;
-	if (!conn.reply.loadout_buffer_set || table.empty()) return;
+	// A slot that never submitted has an empty buffer and list: the same rebuild
+	// leaves it an empty table with every pool zeroed [orig: the buffer test
+	//  @0x5155EB skips the entry walk alone].
+	if (table.empty()) return;
 	const world::WeaponAmmoSeat seat = world::entity_ammo_seat(world, player);
 	const LoadoutSubmit &buffer = conn.reply.loadout_buffer;
 	const uint8_t cls = static_cast<uint8_t>(conn.slot_class);
@@ -439,6 +442,37 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	apply_granted_loadout(conn, grant, /*rebuild_rows=*/true);
 	// The fill's carry bits stay on the entity: every listed weapon's
 	// [orig: WeaponSlotTable_LoadAllFromDefs - the clear @0x541503, the bits
+	//  @0x5415AA / @0x5415BC].
+	player.carry_flags = (player.carry_flags & ~0x18u) | inv.carry_flags;
+}
+
+void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
+                                   world::Entity &player) {
+	const world::WeaponTable &table = world.tables.weapons;
+	if (table.empty()) return;
+	const LoadoutSubmit &buffer = conn.reply.loadout_buffer;
+	const uint8_t cls = static_cast<uint8_t>(conn.slot_class);
+	const std::vector<KitEntry> entries = admitted_entries(buffer, buffer.player_class, table);
+	const world::WeaponAmmoSeat seat = world::entity_ammo_seat(world, player);
+	// The round init's rebuild of a kept slot from its buffer: the display list, a
+	// fill, the list rebuilt, every listed slot initialized again with its bucket
+	// zeroed, and the seed and the draw. No entry count is applied; the slot's next
+	// deploy applies them. [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 -
+	//  AvatarDef_BuildDisplayList @0x516BF3, WeaponSlotPool_ResetAllEntries @0x516C03,
+	//  WeaponSlotTable_LoadAllFromDefs @0x516C0E, PlayerSlot_BuildNameTable @0x516C14,
+	//  sub_4FE260 @0x516C1A, PlayerSlot_SeedAmmoPoolsAndRecalc @0x516C20]
+	world::WeaponInventory inv = slot_inventory(table, conn);
+	reload_slots(table, inv, kit_display_list(entries, table), cls);
+	const std::vector<std::string> display = slot_name_table(table, inv);
+	reinit_listed_slots(table, inv, display, cls, seat);
+	seed_and_recalc(table, inv, cls, conn.reply.revive_pose_valid, seat);
+	GrantedWeaponLoadout grant;
+	grant.reply.avatar_class = cls;
+	grant.ammo_pools = conn.reply.ammo_pools;
+	grant.shared_clips = conn.reply.shared_clips;
+	finish_grant(table, inv, conn.assigned_team, grant);
+	apply_granted_loadout(conn, grant, /*rebuild_rows=*/true);
+	// The fill's carry bits [orig: WeaponSlotTable_LoadAllFromDefs @0x541503 /
 	//  @0x5415AA / @0x5415BC].
 	player.carry_flags = (player.carry_flags & ~0x18u) | inv.carry_flags;
 }

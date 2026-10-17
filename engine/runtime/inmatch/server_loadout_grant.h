@@ -113,12 +113,20 @@ void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &g
 // from its loadout buffer (the last accepted 0x2F's entries and counts under the
 // stamped class), so a redeployed player starts every life with the kit it was
 // granted, full again; the entity's carry bits are the fill's. Nothing else changes:
-// no class stamp, no damage-class table, no cooldown. A slot with no buffer, or a host
-// with no weapon table, keeps its state. (D-NET-378)
+// no class stamp, no damage-class table, no cooldown. A slot that never submitted
+// rebuilds an empty table; a host with no weapon table keeps its state. (D-NET-378)
 // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550, called from
 //  Server_DeployPlayer @0x5178E1 on a deploy that is not a revive]
 void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &world,
                                        world::Entity &player);
+
+// The round init's rebuild of a kept slot's table from its loadout buffer, the
+// buffer the map change keeps: the kit and its sub-variants, the pools seeded from
+// the defs under the slot's class and one clip drawn (the counts wait for the deploy).
+// A host with no weapon table keeps its state.
+// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0, @0x516BF3..0x516C20]
+void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
+                                   world::Entity &player);
 
 // The player's live soldier class (entity+660), the header byte a current-slot-list
 // re-send carries.

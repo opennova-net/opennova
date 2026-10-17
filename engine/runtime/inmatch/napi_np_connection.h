@@ -333,11 +333,13 @@ struct SessionReplyState {
 	// The per-player loadout buffer: the last accepted C2S 0x2F's entries with
 	// their requested counts, under the class that accept stamped. Every deploy
 	// that is not a medic revive rebuilds the slot's weapon table, ammo pools and
-	// clips from it before the 0x5A re-send (D-NET-378). A slot with no accepted
-	// submission has none here (retail seeds it from the host's own kit then).
+	// clips from it before the 0x5A re-send (D-NET-378), and the map change keeps
+	// it for the round init's rebuild. A human slot with no accepted submission
+	// has an empty one (only a robot slot is seeded from the host's own kit).
 	// [orig: slot+94408, written by NapiNPServerMsg_HandlePlayerLoadout
 	//  @0x515CBD..0x515D83, read by PlayerSlot_InitWeaponsFromLoadout @0x515550;
-	//  the host-kit seed Server_PlayerAdd @0x51D12A]
+	//  Server_PlayerAdd's robot-only copy @0x51D11C..0x51D135, its source
+	//  g_SpawnLoadoutBuffer @0x51D12A]
 	LoadoutSubmit loadout_buffer;
 	bool loadout_buffer_set = false;
 	bool mission_status_received = false; // an accepted 0x0B (Server_HandlePlayerJoinRequest)
