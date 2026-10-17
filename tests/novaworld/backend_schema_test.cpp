@@ -784,6 +784,14 @@ int test_jobs_tables() {
 	TEST_EXPECT(refused(db, "INSERT INTO billing_sync_state (id) VALUES (2);"));
 	TEST_EXPECT(refused(
 			db, "INSERT INTO fleet_launch_backoff (kind, not_before_ms) VALUES ('big', 1);"));
+	// Each kind's failed launches in a row (0010_launch_backoff_failures.sql).
+	TEST_EXPECT(refused(db,
+			"INSERT INTO fleet_launch_backoff (kind, not_before_ms, failures) VALUES ('own', 1, "
+			"-1);"));
+	db.exec("INSERT INTO fleet_launch_backoff (kind, not_before_ms) VALUES ('own', 1);");
+	TEST_EXPECT(db.query("SELECT failures FROM fleet_launch_backoff WHERE kind = 'own';")
+						.front()
+						.as_int(0) == 0);
 	return 0;
 }
 

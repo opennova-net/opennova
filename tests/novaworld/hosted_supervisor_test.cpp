@@ -934,8 +934,9 @@ int test_exits_and_crash_restarts() {
 // no restart counted, however many fail. The driver's own text goes to the log,
 // not to the event the owner reads (written once per wait); the machine's row
 // fails (its launch job's), the next pass counts it for the heartbeat, and no
-// launch of that kind follows within the launch backoff, after which the server
-// is placed on the next one.
+// launch of that kind follows within the launch backoff, which doubles with
+// each refusal in a row to its cap (the rig's 5, 10, 20, 20 s); the server is
+// placed on the next machine that launches, whose boot ends the backoff.
 int test_launch_failure() {
 	Rig rig("hosted_launch_failure");
 	const int64_t id = rig.request("launch_refused");
@@ -953,28 +954,39 @@ int test_launch_failure() {
 	TEST_EXPECT(rig.sup->launch_failures() == 1);
 	const auto machines = hosted::list_machines(rig.db, 10);
 	TEST_EXPECT(machines.size() == 1 && machines[0].state == hosted::FleetMachineState::Failed &&
-			machines[0].end_reason == "the launch failed");
+			machines[0].end_reason == "the launch failed" &&
+			machines[0].kind == hosted::MachineKind::Shared);
 	// Within the launch backoff (5 s) nothing launches.
 	rig.advance(rig.config.launch_backoff_ms - 1);
 	rig.tick();
 	TEST_EXPECT(rig.fake.launches == 1 && rig.state(id) == State::Provisioning);
-	// Refused again, and again: still no restart, the event once.
-	for (int i = 0; i < 3; ++i) {
-		rig.advance(rig.config.launch_backoff_ms);
+	rig.advance(1);
+	// Refused again, and again: each backoff twice the one before, to the cap;
+	// still no restart, the event once.
+	for (const uint64_t wait : { 10000, 20000, 20000 }) {
 		rig.fake.fail_next_launch = true;
+		rig.tick(); // the launch, refused
+		rig.tick(); // the refusal counted
+		const int launches = rig.fake.launches;
+		rig.advance(wait - 1);
 		rig.tick();
-		rig.tick();
+		TEST_EXPECT(rig.fake.launches == launches); // held
+		rig.advance(1);
 	}
 	row = rig.server(id);
 	TEST_EXPECT(rig.fake.launches == 4 && rig.sup->launch_failures() == 4);
+	TEST_EXPECT(hosted::launch_backoff(rig.db, hosted::MachineKind::Shared).failures == 4);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0);
 	TEST_EXPECT(transitions(rig.db, id) ==
-			(std::vector<std::string>{ ">requested", "requested>provisioning", "provisioning>provisioning" }));
-	rig.advance(rig.config.launch_backoff_ms);
+			(std::vector<std::string>{
+					">requested", "requested>provisioning", "provisioning>provisioning" }));
 	rig.tick(); // the launch
 	rig.tick(); // the placement
 	TEST_EXPECT(rig.fake.launches == 5 && rig.state(id) == State::Booting);
 	TEST_EXPECT(rig.walk(id, State::Listing) && rig.server(id)->restarts == 0);
+	// Its machine booted: the backoff is over.
+	const hosted::LaunchBackoff after = hosted::launch_backoff(rig.db, hosted::MachineKind::Shared);
+	TEST_EXPECT(after.failures == 0 && after.not_before_ms == 0);
 	return 0;
 }
 

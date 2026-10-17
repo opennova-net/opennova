@@ -227,6 +227,7 @@ struct Rig {
 		config.idle_ms = 10 * 60 * 1000;
 		config.lost_end_ms = 3 * 60 * 1000;
 		config.launch_backoff_ms = 5000;
+		config.launch_backoff_max_ms = 20000; // 5, 10, 20, 20 s
 		// Every pass that wants a describe asks one (the jobs then run at once).
 		config.describe_interval_ms = 0;
 		config.clock_ms = [this] { return now; };
