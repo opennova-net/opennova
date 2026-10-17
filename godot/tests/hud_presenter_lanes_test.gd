@@ -127,9 +127,9 @@ func test_zone_lane_pushes_every_game_type() -> void:
 	assert_ne(int(sim.get_session_game_type()), NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE,
 			"A sessionless sim reads a non-AAS game type.")
 	var zones := LfpPanelPresenter.new()
-	zones.update(hud, sim, 0)
+	zones.update(hud, sim)
 	assert_true(zones.is_pushed(), "A non-AAS game type still pushes the panel.")
-	zones.update(hud, null, 0)
+	zones.update(hud, null)
 	assert_false(zones.is_pushed(), "No sim hides the pushed panel once.")
 	assert_true(is_instance_valid(hud))
 
