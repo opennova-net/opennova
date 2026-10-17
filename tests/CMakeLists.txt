@@ -1901,6 +1901,13 @@ add_executable(character_registry_test npruntime/character_registry_test.cpp)
 target_link_libraries(character_registry_test PRIVATE opennova_runtime)
 add_test(NAME character_registry COMMAND character_registry_test)
 
+# The PLAYER_INFO character memory (runtime/inmatch/player_info_character.h):
+# the side selection, the per-side default, the class rule and the dialog
+# save's shared class [orig: PlayerInfo_SaveFromDialog @0x55ee10].
+add_executable(player_info_character_test npruntime/player_info_character_test.cpp)
+target_link_libraries(player_info_character_test PRIVATE opennova_runtime)
+add_test(NAME player_info_character COMMAND player_info_character_test)
+
 # The role feeds (inmatch/role_feeds.h): the end-round state, overlay input and stat
 # rows off a joiner's replica state, the DEATH screen status, the bare-role fallbacks.
 add_executable(role_feeds_test netsim/role_feeds_test.cpp)
