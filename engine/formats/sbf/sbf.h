@@ -61,8 +61,8 @@ typedef struct SbfRawEntry {
 
 typedef struct SbfChunkHeader {
     uint32_t valid_samples;         /* count of AUDIO BYTES, not int16 samples */
-    uint8_t  scale_a;               /* L-channel right-shift (0..7) */
-    uint8_t  scale_b;               /* R-channel right-shift (0..7) */
+    uint8_t  scale_a;               /* L-channel right-shift, any byte (15 and up silent) */
+    uint8_t  scale_b;               /* R-channel right-shift, likewise */
     uint8_t  reserved_a;            /* never read: one value a bank, 0xFA in JO gamemus.sbf (menumus.sbf 0x1A, the expansion's 0x20 and 0xFB) */
     uint8_t  reserved_b;            /* never read: 0x00 or 0x01, one value a bank */
 } SbfChunkHeader;
@@ -106,17 +106,25 @@ int sbf_read_raw(const SbfArchive *arc, const SbfRawEntry *entry,
 int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
                    uint32_t chunk_index, uint8_t *out_buf, size_t buf_size);
 
-/* Decode one offset-binary u8 sample to int16 PCM at the channel's mix-coeff
-   shift. Algebraically equivalent at unity gain to the engine's mix-time path
-   in AudioChannel_ComputeMixCoefficients @ 0x007BD4B0; we collapse the
-   shift into the sample-value domain since engine/formats/sbf's output target is int16
-   PCM rather than the engine's 8-bit mix buffer. Caller passes scale_a for
-   even bytes (L) and scale_b for odd bytes (R). Scales above the format's
-   supported 0..7 range clamp to 7. */
+/* Decode one offset-binary u8 sample to int16 PCM at its channel's shift, as
+   the music stream mixes it. The stream pump hands each chunk to the stereo
+   split, which makes it two 8-bit AUD1 channel buffers: each sample byte - 0x80,
+   the width byte 1 and the shift byte the chunk's scale_a / scale_b [orig:
+   AudioStream_Update @ 0x671D17..0x671D56 -> Audio_SubmitStereoSampleSplit
+   @ 0x7BD205 -- the shifts @ 0x7BD23E / 0x7BD241, the width @ 0x7BD24A /
+   0x7BD24D, the bias @ 0x7BD258 / 0x7BD25A]. The mixer reads an 8-bit buffer at
+   the 16-bit scale, its four taps summed and shifted left 6, their average
+   times 256 [orig: sub_7BD671 @ 0x7BD6A1, the patched `shl ebx, 6`], and shifts
+   the channel's mix coefficients right by the shift byte, any count, so 15 or
+   more plays silent [orig: AudioChannel_ComputeMixCoefficients
+   @ 0x7BD5E6..0x7BD5F3, psraw]. Ours folds the shift onto the sample,
+   ((byte - 128) * 256) >> n, as lwf::decode_aud1 decodes the same 8-bit buffer
+   (the coefficient rounding is D-SND-51's). Caller passes scale_a for even
+   bytes (L) and scale_b for odd bytes (R). */
 static inline int16_t sbf_decode_sample(uint8_t byte, uint8_t scale) {
-    if (scale > 7) scale = 7;
-    const int32_t s = (int32_t)byte - 128;
-    return (int16_t)(s * (int32_t)(128u >> scale));
+    if (scale >= 15) return 0;
+    const int32_t s = ((int32_t)byte - 128) * 256;
+    return (int16_t)(s >> scale);
 }
 
 /* Decode one chunk to int16 PCM. Returns sample count (== chunk header
@@ -133,14 +141,15 @@ int sbf_decode_all(const uint8_t *raw_bytes, size_t raw_size,
 
    No engine equivalent: original game shipped pre-encoded SBFs. The encoder is
    the algebraic inverse of sbf_decode_sample so output bytes round-trip
-   through the witnessed decoder within one int8 quantum. */
+   through the witnessed decoder within one int8 quantum (256 >> scale). */
 
-/* Encode one int16 PCM sample to offset-binary u8 at the given mix-coeff
-   shift. Saturates rather than wrapping when the post-scale value would
-   overflow [0, 255]. Scales above 7 clamp to 7. */
+/* Encode one int16 PCM sample to offset-binary u8 at the given shift:
+   sample * 2^scale / 256 + 128, the inverse of sbf_decode_sample. Saturates
+   rather than wrapping when the post-scale value would overflow [0, 255].
+   The encoder writes shifts 0..7 alone (scales above 7 clamp to 7). */
 static inline uint8_t sbf_encode_sample(int16_t sample, uint8_t scale) {
     if (scale > 7) scale = 7;
-    int32_t v = (int32_t)sample * (int32_t)(2u << scale);
+    int32_t v = (int32_t)sample * (int32_t)(1u << scale);
     v = (v / 256) + 128;
     if (v < 0)   return 0;
     if (v > 255) return 255;
@@ -150,7 +159,7 @@ static inline uint8_t sbf_encode_sample(int16_t sample, uint8_t scale) {
 /* Pick the largest scale 0..7 whose chunk-wide max byte stays inside [0,255].
    Smaller scale = more headroom; larger scale = more precision but clips
    sooner. Falls through to 0 when the chunk's amplitude exceeds even scale 0
-   (encoded bytes will saturate via sbf_encode_sample). */
+   (only -32768, which encodes to the 0x00 rail exactly). */
 uint8_t sbf_pick_scale(const int16_t *samples, size_t count);
 
 /* Encode `sample_count` int16 samples (treated as L/R interleaved bytes by the
@@ -214,7 +223,7 @@ inline constexpr uint8_t SBF_CHUNK_RESERVED_B = 0x00;
 inline constexpr uint8_t SBF_CHUNK_TAIL = 0x80;
 
 struct SbfChunk {
-    uint8_t scale_a = 0;           /* the left channel's shift, 0..7 */
+    uint8_t scale_a = 0;           /* the left channel's shift, any byte (15 and up silent) */
     uint8_t scale_b = 0;           /* the right channel's */
     std::vector<uint8_t> audio;    /* the bytes the stream plays (SbfChunkHeader::valid_samples), at most block_size - 8 */
 };
@@ -265,8 +274,7 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
 
 /* A stream's audio as int16 PCM, byte-paired stereo interleaved (left then
    right) at SBF_SAMPLE_RATE: each chunk's bytes decoded at its shifts, in
-   order, the stream stopping at a chunk whose shift is past 7 (as the Godot
-   player stops: sbf_decode_chunk refuses such a chunk). */
+   order (sbf_decode_sample: a shift of 15 or more decodes to silence). */
 std::vector<int16_t> sbf_decode_stream(const SbfStream &stream);
 
 /* A stream of `pcm` (int16, left/right interleaved), encoded chunk by chunk

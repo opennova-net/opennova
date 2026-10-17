@@ -64,8 +64,8 @@ std::vector<uint8_t> riff(const std::vector<int16_t> &samples, uint16_t channels
 	return out;
 }
 
-// A sample of a wave as the stream holds it before the codec: its full scale the stream's (+-127 * 128).
-long streamed(int16_t sample) { return std::lround(double(sample) / 32768.0 * 16256.0); }
+// A sample of a wave as the stream holds it before the codec: its full scale the stream's (+-127 * 256).
+long streamed(int16_t sample) { return std::lround(double(sample) / 32768.0 * 32512.0); }
 
 // The stream at `place` of the bank `bytes` hold, decoded as the preview player sounds it, against `expected`
 // (interleaved left and right): its length, and each sample within its chunk's step (the shift of its side) and
@@ -86,7 +86,7 @@ bool sounds_as(const std::vector<uint8_t> &bytes, int place, const std::vector<l
 	size_t at = 0;
 	for (const sbf::SbfChunk &chunk : bank.streams[size_t(place)].chunks) {
 		for (size_t i = 0; i < chunk.audio.size(); ++i, ++at) {
-			const long step = long(128u >> (i % 2 ? chunk.scale_b : chunk.scale_a));
+			const long step = long(256u >> (i % 2 ? chunk.scale_b : chunk.scale_a));
 			const long got = long(int16_t(io::read_u16_le(pcm.pcm16.data() + at * 2)));
 			const long off = std::labs(got - expected[at]);
 			if (off > step + 2) {
@@ -221,7 +221,7 @@ int test_session() {
 	long peak = 0;
 	for (size_t i = 1; i < pcm.pcm16.size() / 2; i += 2)
 		peak = std::max(peak, std::labs(long(int16_t(io::read_u16_le(pcm.pcm16.data() + i * 2)))));
-	TEST_EXPECT(peak >= 16000 && peak <= 16256);
+	TEST_EXPECT(peak >= 32000 && peak <= 32512);
 
 	// Undo: the new stream gone; again, stream 1 its old chunks; redo, the wave's again.
 	editor_test::handle_to_end(session, request::undo(path));
