@@ -34,8 +34,15 @@
 //   * POST /api/me/servers/<id>/stop: the supervisor pushes ServerStopHosting,
 //     the listing leaves the browser, the container is gone from the machine,
 //     the row is stopped and the service account deleted; the admin link went
-//     down at stopping; the second server runs on, then stops the same way.
+//     down at stopping; the second server runs on;
+//   * the lobby is replaced at a new address (a second lobby takes clients, the
+//     first drains and stops, its listings with it): the second server's
+//     NovaWorld session reconnects only to the old address, so once its listing
+//     has been gone listing_lost_ms the supervisor places it again, no restart
+//     counted, and it lists through the gate on the new lobby; then it stops the
+//     same way, its ServerStopHosting through the new lobby.
 
+#include "lobby_client.h"
 #include "nw_service_harness.h"
 
 #include "hosted/admin_link.h"
@@ -181,6 +188,41 @@ bool wait_for(Done done, int seconds) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	return done();
 }
+
+// A lobby instance of its own on the service's database, at a new address, as a
+// lobby's replacement on another ECS task runs: the lobby program's NW UDP
+// listener and its connections, wired as apps/novaworld_lobby/main.cpp wires
+// them, its SessionInit naming the service's web endpoint as the first's does.
+struct ReplacementLobby {
+	opennova::ConnectionManager manager;
+	nws::NwUdpListener listener;
+	std::string endpoint;
+
+	explicit ReplacementLobby(opennova::db::ConnectionPool &pool) : listener(manager) {
+		listener.set_db_pool(&pool);
+		manager.on_lost([this](const opennova::Connection &c, opennova::DropReason r) {
+			listener.erase_lobby_state(c.addr, opennova::drop_reason_name(r));
+		});
+	}
+
+	// On a port free a moment ago (bound and let go), which its instance announces.
+	bool start(uint16_t http_port) {
+		nws::ServerConfig config;
+		config.web_host = "127.0.0.1";
+		config.http_port = http_port;
+		{
+			net::ScopedSocket probe(net::udp_bind(0, &config.nw_udp_port));
+		}
+		endpoint = "127.0.0.1:" + std::to_string(config.nw_udp_port);
+		config.lobby_endpoint = endpoint;
+		return listener.start(config);
+	}
+
+	void stop() {
+		listener.stop();
+		manager.shutdown();
+	}
+};
 
 // --- the machines: opennova-hostd processes ------------------------------------------------
 
@@ -490,6 +532,8 @@ int main(int argc, char **argv) {
 		config.tick_interval_ms = 100;
 		config.listing_timeout_ms = 60 * 1000;
 		config.restart_limit = 0; // a crash fails it at once, with its reason
+		// A listing gone this long places its server again (the lobby's replacement below).
+		config.listing_lost_ms = 10 * 1000;
 		config.serve_image = "opennova-serve:local";
 		hosted::Supervisor supervisor(service.pool, HostdMachines::profile(), config);
 		// The job workers that run the driver's calls (the launch, the describes, the ends).
@@ -523,6 +567,8 @@ int main(int argc, char **argv) {
 		routes.data_sets["jop_2_consumer"] = data.u8string();
 		routes.data_sets["dfx2_consumer"] = dfx2_data.u8string();
 		hosted::InternalListener internal(service.pool, supervisor, routes);
+		// The lobby that replaces the service's own, at a new address (below).
+		ReplacementLobby replacement(service.pool);
 		const bool internal_up = up && internal.start("127.0.0.1", 0);
 		expect(!up || internal_up, "the internal listener serves on loopback");
 		if (internal_up) {
@@ -777,6 +823,70 @@ int main(int argc, char **argv) {
 					static_cast<long long>(id), rid, static_cast<long long>(dfx2_id));
 		}
 
+		// A lobby's replacement at a new address, as an ECS lobby task's (ADR 0063
+		// d8): a second lobby takes clients, the first drains and stops, its
+		// listings going with it. The second server's NovaWorld session reconnects
+		// only to the old lobby's address (retail's), so its listing stays gone;
+		// listing_lost_ms on (short here) the supervisor places it again with no
+		// restart counted (this test leaves it none), and its new start lists
+		// through the gate on the new lobby and runs.
+		if (dfx2_running) {
+			const auto listed_rid = [&]() -> std::optional<uint32_t> {
+				const auto r = server_row(service, dfx2_id);
+				if (!r || !r->service_user_id)
+					return std::nullopt;
+				return hosted::listing_rid_of(*service.pool.acquire(), *r->service_user_id);
+			};
+			const std::string old_container = server_row(service, dfx2_id)->container;
+			const auto old_rid = listed_rid();
+			expect(old_rid.has_value(), "the second server is listed on the first lobby");
+			const bool second_up = replacement.start(service.http.bound_port());
+			expect(second_up, "a second lobby starts at a new address");
+			expect(service.nwudp.drain(), "the first lobby drains");
+			const net::Endpoint gate{ { 127, 0, 0, 1 }, service.gate.bound_port() };
+			const auto hands_out_new = [&] {
+				return lobby_client::gate_hands_out(gate) == replacement.endpoint;
+			};
+			const bool handed = second_up && wait_for(hands_out_new, 30);
+			expect(handed, "the gate hands out the new lobby alone");
+			service.nwudp.stop();
+			service.manager.shutdown();
+			const bool old_gone = !old_rid ||
+					!opennova::hostdb::find_host_by_rid(*service.pool.acquire(), *old_rid);
+			expect(old_gone, "the first lobby's stop took the listing with it");
+			const int64_t new_lobby = replacement.listener.lobby_id();
+			// Running again, a new container, listed on the new lobby's instance.
+			const auto listed_on_new = [&] {
+				const auto r = server_row(service, dfx2_id);
+				const auto rid_now = listed_rid();
+				if (!r || r->state != hosted::State::Running || r->container == old_container ||
+						!rid_now)
+					return false;
+				const auto rows = service.pool.acquire()->query(
+						"SELECT lobby_id FROM active_hosts WHERE rid = $1;",
+						{ opennova::db::BindValue(static_cast<int64_t>(*rid_now)) });
+				return !rows.empty() && rows[0].as_int(0) == new_lobby;
+			};
+			const bool relisted = handed && wait_for(listed_on_new, 90);
+			if (!relisted)
+				dump(service, driver, dfx2_id);
+			expect(relisted, "the second server, placed again, lists on the new lobby");
+			const auto after = server_row(service, dfx2_id);
+			expect(after && after->restarts == 0, "no restart counted");
+			const std::string placed = "placed again (no restart counted)";
+			bool placed_again = false;
+			for (const auto &e : hosted::list_events(*service.pool.acquire(), dfx2_id, 50)) {
+				placed_again = placed_again ||
+						(e.from_state == "running" && e.to_state == "provisioning" &&
+								e.detail.rfind("no listing for ", 0) == 0 &&
+								e.detail.find(placed) != std::string::npos);
+			}
+			expect(placed_again, "its timeline says why it was placed again");
+			std::printf("hosted_local_e2e: the lobby replaced at a new address, server %lld was "
+						"placed again and lists on the new lobby\n",
+					static_cast<long long>(dfx2_id));
+		}
+
 		if (dfx2_id != 0) {
 			const auto reply = send(service, "POST", "/api/me/servers/" + std::to_string(dfx2_id) + "/stop", as_owner(second, true));
 			expect(reply.code == 202, "the second owner's stop is accepted");
@@ -794,6 +904,7 @@ int main(int argc, char **argv) {
 		links.stop_all();
 		workers.stop();
 		internal.stop();
+		replacement.stop();
 		service.stop();
 	}
 	net::shutdown();

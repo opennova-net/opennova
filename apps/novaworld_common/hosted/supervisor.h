@@ -47,7 +47,9 @@
 //                 HostKeys claimed)
 //   running       every health interval the listing is checked and (with admin
 //                 links) the server's admin link answering, every pass its
-//                 agent's report; health_misses failed checks in a row fail it
+//                 agent's report; health_misses checks in a row with no answer
+//                 on its admin link fail it, and its listing gone for
+//                 listing_lost_ms places it again (below)
 //   stopping      asked for by the owner, an admin or the supervisor itself (an
 //                 owner's account deleted or no longer active, read every pass
 //                 and again right before a start mints credentials, or a server
@@ -89,8 +91,11 @@
 // none: a machine launched for it that the cloud refused, one it was placed on
 // that never booted (gone, or past the driver's boot timeout), its machine
 // lost, gone, ended by an admin, or drained (an admin's drain, a fleet roll, an
-// agent on another protocol). The server lets go of its slot and is placed
-// again at once, or, its machine's launch refused, waits for the next one;
+// agent on another protocol). A running server's listing gone for
+// listing_lost_ms costs none either: its lobby's replacement took it (a start
+// that then never lists still counts, at listing_timeout_ms). The server lets go of
+// its slot and is placed again at once, or, its machine's launch refused,
+// waits for the next one;
 // the brake on a fleet that cannot launch is the per-kind launch backoff and
 // the heartbeat's launch_failures (refused launches and machines that never
 // booted alike), not the servers' restarts. A stopped or failed server's
@@ -219,6 +224,23 @@ struct SupervisorConfig {
 	// @0x4d3e1f], the reap [orig: CNapiNPConnection_PumpStateMachine @0x6292e0]),
 	// before it reconnects and re-hosts: twice that 240 s.
 	uint64_t relist_grace_ms = 2 * 240 * 1000;
+	// A running server whose listing no health check has found for this long
+	// is placed again, no restart counted: its lobby went away (a lobby's
+	// replacement takes its listings, ADR 0063 d8). Its lister, opennova-serve's
+	// NWU session (retail's), notices only past those 240 s of receive silence,
+	// then reconnects to the lobby address the gate gave it, never through the
+	// gate again: its 0x41 to the gate's UDPNOVAWORLD targets 1 s on, every 3 s
+	// in 10 s windows, the re-join's 0x42 for up to 20 s, then the re-verify
+	// re-hosts (net/napi/session.h SESSION_RECONNECT_*, SESSION_JOIN_TIMEOUT_MS;
+	// [orig: CNapiNPConnection_PumpStateMachine @0x6292e0, the reconnect tail
+	// @0x629487..0x6296cb; CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0,
+	// the target walk @0x629183..0x6291b4;
+	// CNapiGameSession_HandleConnectVerifyResponse @0x4d5961..0x4d599e]). A
+	// lobby back at that address lists it again within about 271 s (240 + 1 +
+	// 10 + 20, one health interval later here); one at a new address, an ECS
+	// task's own, never does, and only a new start, through the gate, lists it
+	// again. Twice the 240 s, as above.
+	uint64_t listing_lost_ms = 2 * 240 * 1000;
 	uint64_t health_interval_ms = 20 * 1000;
 	int health_misses = 3;
 	// At most restart_limit crash restarts within the restart window: a run of
@@ -320,6 +342,9 @@ private:
 		State state = State::Requested;
 		uint64_t since_ms = 0;
 		uint64_t last_check_ms = 0;
+		// The last health check that found its listing, or the last pass its
+		// machine was lost (the listing's clock waits then); since_ms before either.
+		uint64_t listing_seen_ms = 0;
 		uint64_t grace_until_ms = 0;  // a resumed server's re-host window
 		uint64_t not_before_ms = 0;   // a restart's backoff
 		int misses = 0;

@@ -1113,25 +1113,49 @@ int test_timeouts_and_health() {
 	TEST_EXPECT(contains(last_detail(rig.db, quiet), "no listing in 20 s"));
 	TEST_EXPECT(hosted::request_stop(rig.db, quiet, "done"));
 	rig.step();
+	return 0;
+}
 
-	// Listed, then gone from the browser: three missed checks in a row fail it,
-	// and a check that finds the listing again starts the count over.
-	const int64_t id = rig.request("health_lost");
-	const std::string container = rig.to_running(id, 8001);
-	TEST_EXPECT(!container.empty());
-	hostdb::remove_host_by_rid(rig.db, 8001);
-	rig.step(); // before the interval: no check
-	for (int miss = 1; miss <= 2; ++miss) {
-		rig.advance(rig.config.health_interval_ms);
-		rig.step();
-		TEST_EXPECT(rig.state(id) == State::Running);
+// A running server's listing gone, as a lobby's replacement takes its listings
+// (the staging rehearsal of 2026-10-17 failed both servers listed on the old
+// lobby 55 s after the swap). Its checks wait listing_lost_ms, twice the 240 s
+// past which its lister's NWU session drops the dead lobby, which it then
+// reconnects to alone; a check that finds the listing again starts the clock
+// over, a lost machine holds it; gone that long, the server is placed again,
+// no restart counted, even with none left, and runs again.
+int test_listing_lost() {
+	Rig rig("hosted_listing_gone");
+	TEST_EXPECT(rig.config.listing_lost_ms == 2 * 240 * 1000);
+	const int64_t id = rig.request("listing_gone");
+	TEST_EXPECT(!rig.to_running(id, 8001).empty());
+	// Its restarts used up first (two crashes), so a counted restart would fail it.
+	for (int crash = 1; crash <= rig.config.restart_limit; ++crash) {
+		rig.agent_of(id)->exit_with(rig.container(id), 1);
+		rig.sync_all();
+		rig.tick();
+		TEST_EXPECT(rig.state(id) == State::Provisioning && rig.server(id)->restarts == crash);
+		hostdb::remove_host_by_rid(rig.db, 8000 + static_cast<uint32_t>(crash));
+		TEST_EXPECT(!rig.back_to_running(id, 8001 + static_cast<uint32_t>(crash)).empty());
 	}
-	// Back in the browser (its key still claimed for the RID): the count starts over.
+	const uint32_t rid = 8001 + static_cast<uint32_t>(rig.config.restart_limit);
+	const std::string container = rig.container(id);
+
+	// Gone from the browser for less than the window: every check finds it
+	// running, nothing counted.
+	hostdb::remove_host_by_rid(rig.db, rid);
+	const uint64_t ran_at = rig.now;
+	while (rig.now + 60 * 1000 < ran_at + rig.config.listing_lost_ms) {
+		rig.advance(60 * 1000);
+		rig.step();
+		TEST_EXPECT(rig.state(id) == State::Running && rig.container(id) == container);
+	}
+	TEST_EXPECT(rig.server(id)->restarts == rig.config.restart_limit);
+	// Back in the browser (its key still claimed for the RID): the clock starts over.
 	{
 		Database *db = &rig.db;
 		hostdb::HostRow row;
-		row.rid = 8001;
-		row.gsid = "GSID-8001";
+		row.rid = rid;
+		row.gsid = "GSID-" + std::to_string(rid);
 		row.game = "jop_2_consumer";
 		row.server_name = "Back";
 		row.host_ip = row.peer_ip = "198.51.100.1";
@@ -1141,19 +1165,48 @@ int test_timeouts_and_health() {
 	}
 	rig.advance(rig.config.health_interval_ms);
 	rig.step();
-	hostdb::remove_host_by_rid(rig.db, 8001);
-	for (int miss = 1; miss <= 2; ++miss) {
-		rig.advance(rig.config.health_interval_ms);
-		rig.step();
-		TEST_EXPECT(rig.state(id) == State::Running);
-	}
+	hostdb::remove_host_by_rid(rig.db, rid);
+	const uint64_t seen_at = rig.now;
+
+	// Unlisted most of the window, then its machine lost for 2 min (short of
+	// its end, lost_end_ms on) past the window's end: the listing's clock waits
+	// while the machine is lost, and starts over once its agent reports again.
+	rig.advance(rig.config.listing_lost_ms - 2 * 60 * 1000);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Running);
+	const int64_t machine = rig.machine_of(id);
+	rig.silence(machine);
+	rig.step();
+	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Lost);
+	rig.advance(2 * 60 * 1000);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Running &&
+			rig.machine(machine)->state == hosted::FleetMachineState::Lost);
+	rig.muted.erase(machine);
+	rig.step();
+	rig.step();
+	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Ready);
+	TEST_EXPECT(rig.now - seen_at >= rig.config.listing_lost_ms);
+	TEST_EXPECT(rig.state(id) == State::Running);
+	rig.advance(rig.config.listing_lost_ms - rig.config.health_interval_ms);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Running && rig.container(id) == container);
+
+	// Gone the whole window: placed again with no restart counted, its
+	// container no longer wanted; it starts again, lists and runs.
 	rig.advance(rig.config.health_interval_ms);
 	rig.step();
-	const auto row = rig.server(id);
-	TEST_EXPECT(row->state == State::Failed);
-	TEST_EXPECT(contains(row->failure_reason, "no listing at 3 health checks"));
-	TEST_EXPECT(row->restarts == 0);
-	TEST_EXPECT(rig.agents.begin()->second.find(container) == nullptr);
+	auto row = rig.server(id);
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == rig.config.restart_limit &&
+			!row->machine_ref);
+	TEST_EXPECT(contains(last_detail(rig.db, id),
+			"no listing for 480 s (its NovaWorld session reconnects only to the lobby it listed "
+			"on); placed again (no restart counted)"));
+	TEST_EXPECT(rig.agents.at(machine).find(container) == nullptr);
+	const std::string again = rig.to_running(id, rid + 1);
+	row = rig.server(id);
+	TEST_EXPECT(!again.empty() && again != container && row->state == State::Running &&
+			row->restarts == rig.config.restart_limit);
 	return 0;
 }
 
@@ -1594,7 +1647,8 @@ int test_reconciliation() {
 // NOVAWORLDUDP session and re-hosts (the 2026-10-16 deploy's two servers
 // listed again 217 s and 228 s after the restart). A running server its agent
 // still reports, unlisted 300 s on, is not failed and lists again; one that
-// never lists again fails once the grace is out and its checks miss.
+// never lists again is placed again once the grace is out, its listing gone
+// listing_lost_ms since the restart (no restart counted).
 int test_relist_grace() {
 	Rig rig("hosted_relist_grace");
 	TEST_EXPECT(rig.config.relist_grace_ms == 2 * 240 * 1000);
@@ -1624,19 +1678,16 @@ int test_relist_grace() {
 	rig.advance(restarted + rig.config.relist_grace_ms - rig.config.health_interval_ms - rig.now);
 	rig.step();
 	TEST_EXPECT(rig.state(alive) == State::Running && rig.state(dead) == State::Running);
-	// Past it they count: the listed one passes them, and the one that never
-	// listed again fails at health_misses misses in a row.
-	for (int check = 1; check < rig.config.health_misses; ++check) {
-		rig.advance(rig.config.health_interval_ms);
-		rig.step();
-		TEST_EXPECT(rig.state(dead) == State::Running);
-	}
+	// Past it the checks run: the listed one passes them, and the one that
+	// never listed again, unlisted listing_lost_ms since the restart, is placed
+	// again with no restart counted.
+	TEST_EXPECT(rig.config.listing_lost_ms <= rig.config.relist_grace_ms);
 	rig.advance(rig.config.health_interval_ms);
 	rig.step();
 	TEST_EXPECT(rig.state(alive) == State::Running);
 	const auto row = rig.server(dead);
-	TEST_EXPECT(row->state == State::Failed);
-	TEST_EXPECT(contains(row->failure_reason, "no listing at 3 health checks"));
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0);
+	TEST_EXPECT(contains(last_detail(rig.db, dead), "no listing for 480 s"));
 	return 0;
 }
 
@@ -1774,6 +1825,7 @@ int main(int argc, char **argv) {
 		{ "launch_refused_mid_pass", test_launch_refused_mid_pass },
 		{ "restart_window", test_restart_window },
 		{ "timeouts_and_health", test_timeouts_and_health },
+		{ "listing_lost", test_listing_lost },
 		{ "machine_lost_replaces", test_machine_lost_replaces },
 		{ "listing_waits_while_lost", test_listing_waits_while_lost },
 		{ "owner_changes", test_owner_changes },
