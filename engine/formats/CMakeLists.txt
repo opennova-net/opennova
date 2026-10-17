@@ -199,6 +199,7 @@ add_library(opennova_formats STATIC
     # update — NovaLogic's updater (UPDATE.EXE): the wizard, the command file, SERVER.LST, the 1ZLN
     # compressed file, the 1SFS single-file update, the updater's INI dialect and checksums
     # (docs/update/updater-re.md, ADR 0061)
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/apply.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/update/command_file.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/update/nlz.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/update/server_list.cpp
