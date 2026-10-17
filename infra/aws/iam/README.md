@@ -89,7 +89,9 @@ the AWS-managed keys through SSM and EC2, launching and ending machines tagged
 account's SES identities, running `opennova-*`
 task definitions in an `opennova-*` cluster and tagging their tasks, registering task
 definitions, pointing `opennova-*` services at them and pointing the backup schedule at a
-release's revision. Each role's own policy narrows its part. When a role gains a permission,
+release's revision, and the admin's infrastructure view's reads (web's: listing and
+describing `opennova-*` clusters' tasks, describing `opennova-*` databases and cache
+replication groups, the target groups' health). Each role's own policy narrows its part. When a role gains a permission,
 the boundary must gain it too, or the role is refused at run time (an AccessDenied naming the
 boundary).
 

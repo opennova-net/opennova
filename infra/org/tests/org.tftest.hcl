@@ -211,6 +211,27 @@ run "deploy_users" {
     error_message = "the boundary lets the deploy workflow's role point the backup schedule and hand it its role"
   }
   assert {
+    condition = alltrue([
+      for st in jsondecode(module.prod.documents.boundary).Statement : (
+        st.Sid == "ListOpenNovaTasks" ? (
+          st.Action == "ecs:ListTasks" && st.Resource == "*" &&
+          st.Condition.ArnLike["ecs:cluster"] == "arn:aws:ecs:us-east-1:111111111111:cluster/opennova-*"
+          ) : st.Sid == "ReadOpenNovaTasksDatabaseCache" ? (
+          toset(st.Action) == toset(["ecs:DescribeTasks", "rds:DescribeDBInstances", "elasticache:DescribeReplicationGroups"]) &&
+          toset(st.Resource) == toset([
+            "arn:aws:ecs:us-east-1:111111111111:task/opennova-*/*",
+            "arn:aws:rds:us-east-1:111111111111:db:opennova-*",
+            "arn:aws:elasticache:us-east-1:111111111111:replicationgroup:opennova-*",
+          ])
+          ) : st.Sid == "ReadTargetHealth" ? (
+          st.Action == "elasticloadbalancing:DescribeTargetHealth" && st.Resource == "*"
+        ) : true
+      )
+      ]) && length([for st in jsondecode(module.prod.documents.boundary).Statement : st
+    if contains(["ListOpenNovaTasks", "ReadOpenNovaTasksDatabaseCache", "ReadTargetHealth"], st.Sid)]) == 3
+    error_message = "the boundary holds web's infrastructure reads (infra/aws/programs.tf): OpenNova's clusters' tasks, its database and cache, the target groups' health"
+  }
+  assert {
     condition = (
       strcontains(module.prod.documents.deploy["network"], "ec2:AcceptAddressTransfer") &&
       strcontains(module.prod.documents.deploy["network"], "\"aws:ResourceTag/opennova:deployment\":\"opennova-prod\"")
