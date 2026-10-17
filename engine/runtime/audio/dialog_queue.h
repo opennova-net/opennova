@@ -88,6 +88,12 @@ struct DialogLineRef {
 std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
 		const lwf::File *dialog_sounds, int32_t dialog_index);
 
+// Every line of the dialog `group`, in order, each with the wave `dialog_sounds`
+// holds for it (no file and volume 255 where it holds none, or with no sounds):
+// the lines resolve_dialog_lines answers for the dialog its number names, and
+// the editor's dialog preview plays.
+std::vector<DialogLineRef> dialog_line_refs(const dbf::Group &group, const lwf::File *dialog_sounds);
+
 // A line's subtitle: the mission text's [Mission Dialog] entry keyed by the
 // line's wave name, else the text's flat entry whose index follows the last '_'
 // of the line's sequence (none where it holds no '_'); "" for none.
