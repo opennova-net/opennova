@@ -2,7 +2,8 @@
 // D-NET-152 — the C2S 0x06 client-fired-round pipeline. The dispatch case must validate the
 // shooter (anti-spoof vs the connection's own entity [orig: @0x51358d]), enforce the clip for
 // armory-known primary fire ("NO AMMO!" reject [orig: @0x50c15c]; decrement [orig:
-// Weapon_ConsumeAmmo @0x540913]), mirror the equipped weapon [orig: @0x50bd56] + the claimed
+// Weapon_ConsumeAmmo @0x540913]), mirror the fired weapon ahead of every refusal after the
+// dead-on-a-carrier return [orig: @0x50bd56] + the claimed
 // target [orig: @0x50c2ad], and append ONE g_RoundRing event carrying the client's exact
 // pre-spread fire pose [orig: RoundData_AddRound @0x4fdb40] — with NO reactive reply (the echo
 // rides the per-frame 0x0A tag-2 fan, §5.9.1). The 0x25 relay refills the same slot's clip
@@ -503,7 +504,53 @@ bool check_fire_owner_environment_and_origin() {
     return true;
 }
 
+// A refused primary fire still mirrors the fired weapon onto the entity: retail stamps
+// entity+688 ahead of its owner checks and the can-fire's NO AMMO, and only the
+// dead-on-a-carrier return precedes the stamp.
+// [orig: Server_ClientFiredRound - the -10 @0x50BAE8..0x50BB06, the stamp
+//  @0x50BD2D..0x50BD56, the -14 @0x50C0A8..0x50C0B9, the -15 @0x50C13A..0x50C169]
+bool check_refused_fire_mirrors_the_weapon() {
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    const auto shooter = w::spawn_remote_player(world, player_spawn(1));
+    auto *player = world.registry.get(shooter);
+    world.tables.weapons.entries.resize(3);
+    for (const uint8_t adm : {uint8_t{1}, uint8_t{2}}) {
+        auto &weapon = world.tables.weapons.entries[adm];
+        weapon.valid = true;
+        weapon.clipsize = 4;
+        weapon.category = 1;
+        weapon.rank = adm;
+        weapon.ammo_index = 1;
+        weapon.ammo_class_id = 1;
+    }
+    world.tables.weapons.entries[2].ammo_index = 0; // the zero-index round: Medic only
+    ns::UdpSessionTransport udp(ns::UdpSessionTransport::Role::Host);
+    std::vector<inmatch::NapiNPConnection> roster;
+    roster.push_back(make_seeded_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
+    // adm 1 holds its slot with an empty clip.
+    roster[0].weapon_slots[uint16_t(65 + 1)] = inmatch::WeaponSlotState{1, 0};
+    auto shoot = [&](uint8_t adm) {
+        dispatch_fire(roster[0], roster, world,
+                fire_body(shooter.packed, 2, adm, 0, 0, 0, 0, 0, 0xFFFF, 1, 0, 0));
+    };
+    player->equipped_adm_index = 0;
+    shoot(1);
+    if (!expect(world.out.rounds.count == 0 && player->equipped_adm_index == 1,
+                "an empty clip's NO AMMO refusal still mirrors the fired weapon"))
+        return false;
+    shoot(2);
+    if (!expect(world.out.rounds.count == 0 && player->equipped_adm_index == 2,
+                "the zero-index round's refusal still mirrors the fired weapon"))
+        return false;
+    player->flags |= 0x102u;
+    shoot(1);
+    return expect(world.out.rounds.count == 0 && player->equipped_adm_index == 2,
+                  "a dead shooter on a carrier returns ahead of the mirror");
+}
+
 int main() {
+	if (!check_refused_fire_mirrors_the_weapon()) return 1;
 	if (!check_fire_owner_environment_and_origin()) return 1;
 	if (!check_retail_fire_admission()) return 1;
 	if (!check_mounted_slot_select_fire_and_reload()) return 1;

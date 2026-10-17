@@ -1953,6 +1953,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (!world->tables.weapons.empty() && !alt_fire) {
 					const world::WeaponTableEntry *adm = world->tables.weapons.by_index(fr.adm_index);
 					if (adm == nullptr) break; // [orig: "Tried to fire NULL wpn, %i" @0x50bb49]
+					// Primary fire mirrors the fired weapon onto the entity ahead of every
+					// later refusal (the owner checks, the can-fire's NO AMMO), so a refused
+					// round still moves it. The same leg's entity+352 word (the client's
+					// ammo-def byte) is D-WPN-8's, unmodeled [orig: Server_ClientFiredRound
+					//  @0x50BD2D..0x50BD56, +352 @0x50BD48, entity+688 = adm @0x50BD56 - the
+					//  §5.10 off-16 source; the -8 / -9 / -12 / -14 / -15 returns follow
+					//  @0x50BF37..0x50C169].
+					shooter->equipped_adm_index = fr.adm_index;
 
                     if (world::weapon_fire_owner_status(*world, *shooter, adm, false) != 0)
                         break;
@@ -2024,9 +2032,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
 						conn.equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
 					}
-					// Primary fire mirrors the equipped weapon onto the entity
-					// [orig: @0x50bd56 entity+688 = adm — the §5.10 off-16 source].
-					shooter->equipped_adm_index = fr.adm_index;
 				}
 				// Stamp the claimed target on the shooter; the tag-2 serializer reads it LIVE
 				// [orig: @0x50c2ad shooter+104->+12; NetPacket_SerializeRoundEvent @0x50485a].
