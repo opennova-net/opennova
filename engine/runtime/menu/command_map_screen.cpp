@@ -83,7 +83,7 @@ std::string fireteam_label(const CommandMapText &text, uint8_t fireteam) {
 // TextResource_GetCharacterClassName: Game.bin "Menu" CHARCLASS_* for 5..9
 // (a miss formats "??key??"), else "".
 // [orig: TextResource_GetCharacterClassName @0x562f70;
-//  TextResource_GetStringWithFallback @0x... (the "??%s??" miss)]
+//  TextResource_GetStringWithFallback @0x562ee0 (the "??%s??" miss)]
 std::string character_class_name(const CommandMapText &text, uint8_t player_class) {
 	const char *key = nullptr;
 	switch (player_class) {
