@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <runtime/terrain/texture_preprocess.h>
+#include <runtime/renderer/device_texture.h>
 
 #include <algorithm>
 #include <cmath>
