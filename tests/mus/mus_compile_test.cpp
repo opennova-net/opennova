@@ -717,7 +717,25 @@ static int test_unnamed_sections_and_strings(void) {
     return 1;
 }
 
+/* A `done` statement and a section's closing brace both compile to done (0x3F): the decompiler prints
+   the brace for the done the section's code ends on and the statement for any other, so the minimal
+   script (play, done, brace) decompiles to text that compiles back to its bytes. It printed every done
+   as a brace, and `play / } / }` does not compile. */
+static int test_done_statement_round_trips(void) {
+    std::string text;
+    CHECK(round_trips("script test\nsection Begin\n{\n  play sound_0\n  done\n}\n", &text),
+          "the minimal script round-trips");
+    CHECK(text.find("done\n}") != std::string::npos, "its done a statement before the brace");
+    CHECK(round_trips("script t\nsection A\n{\n  done\n  play sound_1\n}\nsection B\n{\n  play sound_2\n  done\n}\n"),
+          "a done ahead of a statement, then the next section's");
+    CHECK(round_trips("script t\nsection A\n{\n  if ((Var01 == 1))\n  {\n    done\n  }\n  play sound_1\n}\n"),
+          "a done in an if body");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_1\n}\n"), "a section closed by its brace alone");
+    return 1;
+}
+
 int main(void) {
+    RUN_TEST(test_done_statement_round_trips);
     RUN_TEST(test_unnamed_sections_and_strings);
     RUN_TEST(test_encode_model_fields);
     RUN_TEST(test_parse_method_table);
