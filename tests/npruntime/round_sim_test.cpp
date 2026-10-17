@@ -1677,6 +1677,8 @@ int main() {
 	roster.push_back(make_seeded_conn(1, 2, &loop, ns::TransportMode::Loopback, ha, true));
 	roster.push_back(make_seeded_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
 	roster.push_back(make_seeded_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
+	// The rifle slot B's loadout grant left: the 0x06 fires only through a held slot.
+	roster[1].weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 30};
 	// Distinct roster slot indexes (playerSlot+20): the chat sender byte and the
 	// C2S 0x22 slot pull below address players by this index.
 	for (size_t i = 0; i < roster.size(); ++i)

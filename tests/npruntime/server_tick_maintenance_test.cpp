@@ -297,6 +297,7 @@ bool check_spawn_protection_cleared_by_validated_fire() {
 	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
 	roster.push_back(make_seeded_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
 	inmatch::NapiNPConnection &conn = roster[0];
+	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30}; // the grant's rifle
 	w::Entity *entity = world.registry.get(shooter);
 	entity->damage_state = 500;
 	uint32_t client_tick = conn.tick_seed;
@@ -1925,6 +1926,54 @@ bool check_loadout_sub_variant_rows() {
 			"a controller seat's draws read the carrier's reserve and spend nothing");
 }
 
+// After the grant a stock client's semi-mode and launcher fires find their slots, and
+// a weapon on a combo the kit's rifle holds fires the rifle; a combo the kit left
+// empty refuses (B-15 over D-NET-509's rows).
+// [orig: Server_ClientFiredRound @0x50C0C2..0x50C169, the slot's def firing @0x50C297;
+//  the grant's fill @0x515DBF]
+bool check_sub_variant_fire_after_the_grant() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	install_sub_variant_armory(world);
+	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(3, 0, 0));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	inmatch::NapiNPConnection &conn = roster.front();
+	LoadoutSubmit request;
+	request.team = 1;
+	request.player_class = 8;
+	request.weapon_slot_index = 3 * 65;
+	request.entries.push_back(LoadoutSubmitEntry{1, 0xFF, 0xFF, 0});
+	conn.link.preround_loadout_latch = true; // the post-join submit bypasses the window
+	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
+			100, roster, &world);
+	uint32_t client_tick = conn.tick_seed;
+	auto fire = [&](uint8_t adm) {
+		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+				{make_protocol_message(c2s::FIRED_ROUND,
+						fire_body(conn, shooter.packed, adm, client_tick))},
+				100, roster, &world);
+	};
+	fire(2); // the semi mode
+	fire(3); // the launcher
+	if (!expect(world.out.rounds.count == 2 && world.out.rounds.records[0].adm_index == 2 &&
+					world.out.rounds.records[1].adm_index == 3 &&
+					conn.reply.shared_clips[1] == 29 && conn.weapon_slots[200].clip == 1,
+			"the semi mode spends the shared bucket and the launcher its own clip"))
+		return false;
+	fire(4); // another weapon on the rifle's combo
+	if (!expect(world.out.rounds.count == 3 && world.out.rounds.records[2].adm_index == 1 &&
+					conn.reply.shared_clips[1] == 28,
+			"a weapon on the rifle's combo fires the rifle"))
+		return false;
+	world.tables.weapons.entries[4].rank = 7;
+	fire(4);
+	return expect(world.out.rounds.count == 3 && conn.weapon_slots.count(3 * 65 + 7) == 0,
+			"a combo the kit left empty refuses the fire and makes no slot");
+}
+
 // --------------------------------------------------------------------------
 // SpawnWaveList_TryQueuePlayer's unconditional other-row eviction.
 // --------------------------------------------------------------------------
@@ -2564,6 +2613,7 @@ bool check_validated_fire_scores_one_shot() {
 	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
 	roster.push_back(make_seeded_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
 	inmatch::NapiNPConnection &conn = roster[0];
+	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30}; // the grant's rifle
 	uint32_t client_tick = conn.tick_seed;
 	auto dispatch_fire = [&](std::vector<uint8_t> body) {
 		std::vector<ProtocolMessage> msgs;
@@ -2718,6 +2768,7 @@ int main() {
 	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
 	ok = check_loadout_damage_class_bytes() && ok;
 	ok = check_loadout_sub_variant_rows() && ok;
+	ok = check_sub_variant_fire_after_the_grant() && ok;
 	ok = check_try_queue_evicts_on_failed_pick() && ok;
 	ok = check_respawn_pick_admission() && ok;
 	ok = check_revived_pick_takes_no_target() && ok;

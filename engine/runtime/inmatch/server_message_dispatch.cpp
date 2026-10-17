@@ -1947,6 +1947,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 
 				if (((shooter->flags | shooter->engine_flags) & 0x102u) == 0x102u) break;
 				const bool alt_fire = (fr.fire_flags & 0x01) != 0; // [orig: @0x50bb0d]
+				// The weapon whose round fires: the request's, or the personal slot's.
+				uint8_t fired_adm = fr.adm_index;
 				// ADM + ammo authority — armory-fed hosts only (a table-less host accepts,
 				// mirroring the 0x5A echo fallback, D-NET-141). Alt fire skips the adm lookup,
 				// the clip, and the equipped mirror [orig: @0x50bb0f / the @0x50be2b alt path].
@@ -1964,22 +1966,44 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 
                     if (world::weapon_fire_owner_status(*world, *shooter, adm, false) != 0)
                         break;
+					// Off a mount the round fires through the player's own slot of the
+					// fired combo, and the can-fire tests that slot under the def it holds.
+					// A combo the player was never granted holds no def, which the can-fire
+					// refuses ("NO AMMO!", -15) before any clip leg, clipless weapons too; a
+					// slot granted to another weapon of the combo fires that weapon.
+					// [orig: Server_ClientFiredRound - the combo @0x50C0C2..0x50C0D7, the
+					//  personal slot @0x50C104..0x50C116 -> WeaponSlot_CanFire @0x541BA0
+					//  (the def test @0x541BB3, the slot def's legs @0x541BE1..0x541D08),
+					//  the refusal @0x50C13A..0x50C169; the slot's def fires @0x50C27F /
+					//  @0x50C297 / @0x50C30D]
+					const bool mounted_route =
+							shooter->use_gun_slot_swapped && shooter->mount_target.valid();
+					WeaponSlotState *personal = nullptr;
+					const world::WeaponTableEntry *slot_def = adm;
+					if (!mounted_route) {
+						const auto found = conn.weapon_slots.find(
+								static_cast<uint16_t>(uint16_t(adm->category) * 65u + adm->rank));
+						if (found == conn.weapon_slots.end()) break;
+						personal = &found->second;
+						slot_def = world->tables.weapons.by_index(personal->adm_index);
+						if (slot_def == nullptr) break;
+						fired_adm = personal->adm_index;
+					}
                     world::WeaponFsmInputs fire_inputs;
                     world::weapon_fire_environment_inputs(*world, *shooter, fire_inputs);
-                    world::WeaponFsmDef fire_def = adm->action_fsm;
-                    fire_def.flags = adm->flags;
-                    fire_def.clip_capacity = adm->clipsize;
-                    fire_def.ammo_cost = adm->ammo_class_count;
+                    world::WeaponFsmDef fire_def = slot_def->action_fsm;
+                    fire_def.flags = slot_def->flags;
+                    fire_def.clip_capacity = slot_def->clipsize;
+                    fire_def.ammo_cost = slot_def->ammo_class_count;
                     world::WeaponSlotState fire_slot;
-                    const int pool = adm->ammo_class_id;
+                    const int pool = slot_def->ammo_class_id;
                     fire_slot.reserve = pool >= 0 && pool < 128 ? st.ammo_pools[pool] : 0;
                     fire_slot.clip = 1; // the real mounted/personal clip is checked below
                     if (!world::weapon_fsm_can_fire(fire_def, fire_slot, fire_inputs)) break;
-					if (adm->clipsize != -1) {
+					if (slot_def->clipsize != -1) {
 						world::WeaponSlotState *mounted_slot = nullptr;
 						uint8_t mounted_adm = 0xFF;
-						if (shooter->use_gun_slot_swapped &&
-								shooter->mount_target.valid()) {
+						if (mounted_route) {
 							world::Entity *mount =
 									world->registry.get(shooter->mount_target);
 							if (mount != nullptr) {
@@ -2003,15 +2027,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							if (static_cast<int16_t>(mounted_slot->clip) == 0) break;
 							--mounted_slot->clip;
 						} else {
-							const uint16_t combo =
-									uint16_t(adm->category) * 65u + adm->rank;
-							WeaponSlotState &slot = conn.weapon_slots[combo];
-							if (slot.adm_index != fr.adm_index) {
-								slot.adm_index = fr.adm_index;
-								slot.clip = adm->clipsize;
-							}
-							if (adm->ammo_bucket != 0) {
-                                const uint32_t bucket = static_cast<uint32_t>(adm->ammo_bucket);
+							WeaponSlotState &slot = *personal;
+							if (slot_def->ammo_bucket != 0) {
+                                const uint32_t bucket = static_cast<uint32_t>(slot_def->ammo_bucket);
                                 if (bucket >= st.shared_clips.size() ||
                                         bucket >= world->tables.weapons.ammo_class_names.size() ||
                                         st.shared_clips[bucket] == 0) break;
@@ -2073,7 +2091,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// | (ctx >> 7) << 7 into roundParams[4] @0x50c7bd -> ring+31].
 				ev.subtype = uint8_t((fr.extra_byte2 & 0x3F) | ((fr.extra_byte2 >> 7) << 7));
 				ev.slot_byte = fr.misc_byte; // [orig: ring+32 <- fireRequest+80 @0x4fdcfc]
-				ev.adm_index = fr.adm_index;
+				ev.adm_index = fired_adm;
 				world->out.rounds.add(ev);
 				// The authoritative round spawns SYNCHRONOUSLY with the ring append
 				// [orig: RoundData_AddRound @0x4fdb40 inline-calls RoundData_SpawnRound
@@ -2082,7 +2100,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// armory- or ammo-less host skips the sim (fire still echoes).
 				if (!world->tables.ammo.empty()) {
 					const world::WeaponTableEntry *fire_adm =
-							world->tables.weapons.by_index(fr.adm_index);
+							world->tables.weapons.by_index(fired_adm);
 					if (fire_adm != nullptr && fire_adm->ammo_index >= 0) {
 						world::RoundSpawnParams rp;
 						rp.owner = conn.link.owned_entity;
@@ -2093,7 +2111,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						rp.dir_yaw_bam = ev.dir_yaw;
 						rp.dir_pitch_bam = ev.dir_pitch;
 						rp.ammo_index = fire_adm->ammo_index;
-						rp.adm_index = fr.adm_index;
+						rp.adm_index = fired_adm;
 						rp.shot_seq = fr.hit_part;
 						rp.subtype = ev.subtype;
 						// PowerThrow charge from fireRequest+80; RoundData_SpawnRound

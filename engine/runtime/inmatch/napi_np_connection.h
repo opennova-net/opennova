@@ -789,7 +789,9 @@ struct NapiNPConnection {
 	std::array<uint8_t, kAmmoDamageClassBytes> ammo_damage_classes{};
 
 	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
-	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
+	// by the loadout grant's rebuild (the kit and its sub-variants) and the powerup grants; a
+	// combo with no row holds no weapon, and the 0x06 refuses it. Refilled by the 0x25 relay.
+	// (D-NET-152)
 	std::map<uint16_t, WeaponSlotState> weapon_slots;
 
 	// This player's entity EquippedSlot (entity+0x118) as the host points it: the personal
