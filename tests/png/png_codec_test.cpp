@@ -197,6 +197,17 @@ int test_png_encode() {
 	            back.pixels[2 * 4 + 3] == 255 && back.pixels[8 * 4 + 3] == 255);
 	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, alpha, 21).empty() &&
 	            encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, nullptr, 3).empty());
+	// What its chunks hold, handed back beside the texels: the PLTE's 20 entries and the tRNS's 3 bytes; none for
+	// a palette image without a tRNS, nothing for a true-colour one; the IHDR's depth and colour type.
+	PngPalette held;
+	TEST_EXPECT(decode_png(clear, back, error, &read, &held) && held.entries == 20 &&
+	            held.alpha == std::vector<uint8_t>(alpha, alpha + 3));
+	TEST_EXPECT(decode_png(indexed, back, error, nullptr, &held) && held.entries == 20 && held.alpha.empty());
+	TEST_EXPECT(decode_png(bytes, back, error, nullptr, &held) && held.entries == 0 && held.alpha.empty());
+	uint8_t depth = 0, colour = 0;
+	TEST_EXPECT(png_header_form(clear, depth, colour) && depth == 8 && colour == 3);
+	TEST_EXPECT(png_header_form(bytes, depth, colour) && depth == 8 && colour == 6);
+	TEST_EXPECT(!png_header_form(std::vector<uint8_t>(clear.begin(), clear.begin() + 25), depth, colour));
 	// A grey image (colour type 0, 8 bits a sample): its levels read back as written.
 	const std::vector<uint8_t> grey = encode_png_gray(indices.data(), 5, 2);
 	GrayImage levels;
