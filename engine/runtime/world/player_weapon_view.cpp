@@ -120,7 +120,16 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	// ladder-contact bits (Flags & 0x108020) or an eye below the water force
 	// stand, and a parent attachment finally forces crouch. The +3 triplet is the
 	// shared Player_IsOpticalViewVisible verdict stamped before the body tick.
-	// [orig: HUD_DrawCrosshair @0x592b07..0x592b87]
+	// The drawer reads g_HUDInfoCurrentEntity, which is the local player
+	// whenever it draws: the pass builds the HUD info from g_LocalPlayerEntity
+	// at its head, and the one rebuild for a spectated entity (the death
+	// screen's HUD_RenderOverlays) runs after the crosshair and restores the
+	// info before it returns; the drawer itself returns on the death screen.
+	// [orig: HUD_DrawCrosshair @0x592b07..0x592b87, the death-screen return
+	//  @0x592646..0x59264d, called @0x5a84e5; HUD_RenderAllOverlays's
+	//  HUD_BuildEntityInfo(g_LocalPlayerEntity) @0x5a80b6..0x5a80bc;
+	//  HUD_RenderOverlays @0x5a84eb, its rebuild @0x5a7bf3, the restore
+	//  @0x5a7c17..0x5a7c25]
 	{
 		int32_t recoil_pitch = 0;
 		int32_t weapon_weight_spread = 0;
