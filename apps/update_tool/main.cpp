@@ -239,7 +239,7 @@ int run_serve(int argc, char **argv) {
 		return 1;
 	}
 	update::UpdateServer server(catalog);
-	update_tool::UpdateTcpServer listener(server, [](const std::string &line) {
+	net::UpdateTcpServer listener(server, [](const std::string &line) {
 		std::printf("%s\n", line.c_str());
 		std::fflush(stdout);
 	});
