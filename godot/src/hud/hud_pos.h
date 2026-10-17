@@ -74,8 +74,6 @@ public:
 		// band values are image-space; the bar rides the loading_bar_* statics.
 		LOADING_BAND_LEFT = 21,
 		LOADING_BAND_TOP = 29,
-		LOADING_BAND_RIGHT_CUSTOM = 661,
-		LOADING_BAND_RIGHT_STOCK = 782,
 		LOADING_BAND_BOTTOM = 500,
 		LOADING_PRESENT_INTERVAL_MS = 100,
 		// The SP start-mission splash (hud/loading_screen.h kSplash*; same
@@ -136,8 +134,6 @@ public:
 	static String format_ammo(int p_clip, int p_reserve, int p_capacity);
 	static int weapon_name_x_nudge(bool p_narrow_surface, int p_align);
 	static int round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_divisor);
-	static int folded_reserve(int p_clip, int p_reserve, int p_capacity);
-	static int displayed_clip(int p_clip, int p_capacity);
 	static int waypoint_distance_m(const Vector2 &p_ground_delta);
 	static int heat_fill_span(int p_extent_px, int p_heat);
 	static bool heat_bar_is_horizontal(const Vector2 &p_bar_size);
@@ -184,12 +180,10 @@ public:
 	static int draw_wrapped_text(CanvasItem *p_item, const Ref<Font> &p_font, int p_font_size,
 			const String &p_text, int p_x, int p_y, int p_width, int p_bottom, int p_align,
 			const Color &p_color, int p_skip_lines);
-	static String loading_fallback_image();
 	static String loading_font_small();
 	static String loading_font_large();
 	static String loading_msg_label_key();
 	static String loading_msg_label_fallback();
-	static String loading_sidecar_image_name(const String &p_mission_file);
 	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed);
 	static double loading_msg_x_frac();
 	static double loading_msg_right_frac();
@@ -258,10 +252,8 @@ public:
 	// outer radius, scale x, scale y, arm half thickness, tick pitch.
 	static PackedFloat32Array scope_mask_frame(const Vector2 &p_surface,
 			int p_screen_width, int p_aspect_mode);
-	// The scene frame's overlay fork (0 markers, 1 binocular mask, 2 sighted
-	// card, 3 scoped card + circle mask) and the two selector bytes' def halves.
-	static int scoped_view_overlay(bool p_binoculars_view_active, bool p_sighted,
-			bool p_scoped);
+	// The two selector bytes' def halves (the overlay fork itself is the HUD
+	// info record's, HudEntityInfo).
 	static bool scoped_selector_from_def(int p_weapon_flags, int p_weapon_flags2);
 	static bool sighted_selector_from_def(int p_weapon_flags, bool p_slot_switching_from);
 

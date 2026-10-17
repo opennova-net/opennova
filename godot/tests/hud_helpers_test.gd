@@ -165,30 +165,10 @@ func test_round_icon_count() -> void:
 	assert_eq(HudPos.round_icon_count(0, 90, 30, 1), 0)
 
 
-func test_folded_reserve() -> void:
-	# The capacity-1 chambered-round fold the presenter applies at the info edge.
-	# [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1]
-	assert_eq(HudPos.folded_reserve(1, 4, 1), 5)
-	assert_eq(HudPos.folded_reserve(12, 90, 30), 90, "Only capacity 1 folds.")
-	assert_eq(HudPos.folded_reserve(-1, 4, 1), 4, "The -1 sentinels never fold.")
-
-
-func test_displayed_clip() -> void:
-	# The clip the presenter feeds the HUD: an infinite-capacity weapon reads -1
-	# (hud_math.displayed_clip carries the witness).
-	assert_eq(HudPos.displayed_clip(12, 30), 12)
-	assert_eq(HudPos.displayed_clip(12, -1), -1, "A clipsize -1 weapon reads clip -1.")
-
-
-func test_scoped_view_overlay_fork() -> void:
-	# retail: the scene frame's overlay fork tests binoculars, then the Sighted
-	# card byte, then the Scoped card byte; only the Scoped arm chains the
-	# circle mask, and it chains it unconditionally. The engine owns the fork
-	# (runtime/hud/scope_circle_mask.h); see docs/interface/hud-re.md.
-	assert_eq(HudPos.scoped_view_overlay(true, true, true), 1, "Binoculars win.")
-	assert_eq(HudPos.scoped_view_overlay(false, true, true), 2, "Sighted pre-empts Scoped.")
-	assert_eq(HudPos.scoped_view_overlay(false, false, true), 3, "Scoped reaches the mask.")
-	assert_eq(HudPos.scoped_view_overlay(false, false, false), 0, "Neither draws markers.")
+func test_scoped_view_selector_halves() -> void:
+	# The two card selector bytes' weapon.def halves; the overlay fork over them
+	# is the HUD info record's (ctest hud_entity_info, sight_overlay; the engine
+	# runtime/hud/scope_circle_mask.h; see docs/interface/hud-re.md).
 	assert_true(HudPos.scoped_selector_from_def(1, 0), "Scoped without Inset.")
 	assert_false(HudPos.scoped_selector_from_def(1, 0x200), "Inset takes the other byte.")
 	assert_true(HudPos.sighted_selector_from_def(2, false), "The Sighted bit.")

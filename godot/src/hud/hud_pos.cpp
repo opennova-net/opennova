@@ -45,10 +45,6 @@ static_assert(godot::HudPos::LOADING_BAND_LEFT ==
 		opennova::hud::kLoadingBandLeft);
 static_assert(godot::HudPos::LOADING_BAND_TOP ==
 		opennova::hud::kLoadingBandTop);
-static_assert(godot::HudPos::LOADING_BAND_RIGHT_CUSTOM ==
-		opennova::hud::kLoadingBandRightCustom);
-static_assert(godot::HudPos::LOADING_BAND_RIGHT_STOCK ==
-		opennova::hud::kLoadingBandRightStock);
 static_assert(godot::HudPos::LOADING_BAND_BOTTOM ==
 		opennova::hud::kLoadingBandBottom);
 static_assert(godot::HudPos::LOADING_PRESENT_INTERVAL_MS ==
@@ -98,8 +94,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("message_expire_tick", "now_ticks", "prev_expire", "has_prev"), &HudPos::message_expire_tick);
 	ClassDB::bind_static_method("HudPos", D_METHOD("format_ammo", "clip", "reserve", "capacity"), &HudPos::format_ammo);
 	ClassDB::bind_static_method("HudPos", D_METHOD("round_icon_count", "clip", "reserve", "capacity", "divisor"), &HudPos::round_icon_count);
-	ClassDB::bind_static_method("HudPos", D_METHOD("folded_reserve", "clip", "reserve", "capacity"), &HudPos::folded_reserve);
-	ClassDB::bind_static_method("HudPos", D_METHOD("displayed_clip", "clip", "capacity"), &HudPos::displayed_clip);
 	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_distance_m", "ground_delta"), &HudPos::waypoint_distance_m);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_span", "x", "w", "displayed"), &HudPos::loading_bar_fill_span);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_spread_px_fp16", "spread_fp16", "fov_deg", "screen_w"), &HudPos::crosshair_spread_px_fp16);
@@ -112,12 +106,10 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("objective_header", "gametext"), &HudPos::objective_header);
 	ClassDB::bind_static_method("HudPos", D_METHOD("objective_directive", "mission", "win", "header_id"), &HudPos::objective_directive);
 	ClassDB::bind_static_method("HudPos", D_METHOD("triggered_text", "mission", "text_id"), &HudPos::triggered_text);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_fallback_image"), &HudPos::loading_fallback_image);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_small"), &HudPos::loading_font_small);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_large"), &HudPos::loading_font_large);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_key"), &HudPos::loading_msg_label_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_fallback"), &HudPos::loading_msg_label_fallback);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_sidecar_image_name", "mission_file"), &HudPos::loading_sidecar_image_name);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed"), &HudPos::loading_present_due);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_x_frac"), &HudPos::loading_msg_x_frac);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_right_frac"), &HudPos::loading_msg_right_frac);
@@ -146,7 +138,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_colors", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode", "nvg_lens"), &HudPos::scope_mask_colors, DEFVAL(-1), DEFVAL(false));
 	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_indices", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode", "nvg_lens"), &HudPos::scope_mask_indices, DEFVAL(-1), DEFVAL(false));
 	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_frame", "surface", "screen_width", "aspect_mode"), &HudPos::scope_mask_frame, DEFVAL(-1));
-	ClassDB::bind_static_method("HudPos", D_METHOD("scoped_view_overlay", "binoculars_view_active", "sighted", "scoped"), &HudPos::scoped_view_overlay);
 	ClassDB::bind_static_method("HudPos", D_METHOD("scoped_selector_from_def", "weapon_flags", "weapon_flags2"), &HudPos::scoped_selector_from_def);
 	ClassDB::bind_static_method("HudPos", D_METHOD("sighted_selector_from_def", "weapon_flags", "slot_switching_from"), &HudPos::sighted_selector_from_def);
 	ClassDB::bind_method(D_METHOD("load", "path"), &HudPos::load);
@@ -164,8 +155,6 @@ void HudPos::_bind_methods() {
 	BIND_CONSTANT(MESSAGE_SLOT_COUNT);
 	BIND_CONSTANT(LOADING_BAND_LEFT);
 	BIND_CONSTANT(LOADING_BAND_TOP);
-	BIND_CONSTANT(LOADING_BAND_RIGHT_CUSTOM);
-	BIND_CONSTANT(LOADING_BAND_RIGHT_STOCK);
 	BIND_CONSTANT(LOADING_BAND_BOTTOM);
 	BIND_CONSTANT(LOADING_PRESENT_INTERVAL_MS);
 	BIND_CONSTANT(SPLASH_CONTINUE_X);
@@ -396,14 +385,6 @@ int HudPos::round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_di
 	return opennova::hud::round_icon_count(p_clip, p_reserve, p_capacity, p_divisor);
 }
 
-int HudPos::folded_reserve(int p_clip, int p_reserve, int p_capacity) {
-	return opennova::hud::folded_reserve(p_clip, p_reserve, p_capacity);
-}
-
-int HudPos::displayed_clip(int p_clip, int p_capacity) {
-	return opennova::hud::displayed_clip(p_clip, p_capacity);
-}
-
 int HudPos::waypoint_distance_m(const Vector2 &p_ground_delta) {
 	return opennova::hud::waypoint_distance_m(p_ground_delta.x, p_ground_delta.y);
 }
@@ -420,16 +401,10 @@ int HudPos::power_fill_span(int p_progress_fp16, int p_extent_px) {
 	return opennova::hud::power_fill_span(p_progress_fp16, p_extent_px);
 }
 
-String HudPos::loading_fallback_image() { return opennova::hud::kLoadingFallbackImage; }
 String HudPos::loading_font_small() { return opennova::hud::kLoadingFontSmall; }
 String HudPos::loading_font_large() { return opennova::hud::kLoadingFontLarge; }
 String HudPos::loading_msg_label_key() { return opennova::hud::kLoadingServerMessageLabelKey; }
 String HudPos::loading_msg_label_fallback() { return opennova::hud::kLoadingServerMessageLabelFallback; }
-
-String HudPos::loading_sidecar_image_name(const String &p_mission_file) {
-	return opennova::to_gd(opennova::hud::loading_sidecar_image_name(
-			opennova::to_std(p_mission_file)));
-}
 
 bool HudPos::loading_present_due(int p_elapsed_ms, bool p_reported_changed) {
 	return opennova::hud::loading_present_due(p_elapsed_ms, p_reported_changed);
@@ -839,12 +814,6 @@ PackedFloat32Array HudPos::scope_mask_frame(const Vector2 &p_surface, int p_scre
 	out[7] = g.arm_half_thickness;
 	out[8] = g.tick_spacing;
 	return out;
-}
-
-int HudPos::scoped_view_overlay(bool p_binoculars_view_active, bool p_sighted,
-		bool p_scoped) {
-	return static_cast<int>(opennova::hud::scoped_view_overlay(
-			p_binoculars_view_active, p_sighted, p_scoped));
 }
 
 bool HudPos::scoped_selector_from_def(int p_weapon_flags, int p_weapon_flags2) {
