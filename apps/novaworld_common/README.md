@@ -1084,7 +1084,7 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   listens at once rather than after the closed session's TIME_WAIT. A listen that still
   fails leaves the server running without its console, as retail ignores its listen's
   result (`opennova-serve` keeps that); the supervisor's health check, which counts the
-  admin link, then restarts the server.
+  admin link, then fails the server.
 - **The console** is the table `hosted_server_console`,
   a capped ring of each server's newest 500 lines: the commands the routes ask a link to
   record (with their sender, `owner`, `admin` or `service`), each reply packet, and the
@@ -1093,8 +1093,14 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   the rotation, the chat window) are not recorded.
 - **Health.** While `running`, every pass reads its agent's report and every 20 s checks
   the listing and the admin link (its session up: its last status poll or command
-  answered); three failed checks in a row fail the server. Always on: nothing reaps an
-  idle server or ends one for its age.
+  answered). Three checks in a row with no answer on the admin link fail the server. A
+  listing no check has found for 8 min (`listing_lost_ms`) places the server again, no
+  restart counted: a lobby's replacement takes its listings, and a host's NovaWorld
+  session (retail's) drops the dead lobby only after 240 s of silence, then reconnects to
+  that lobby's address alone, so a lobby back at that address (the local stack's fixed
+  endpoint) lists it again within about 4.5 min and one at a new address (an ECS task's)
+  never does; a new start goes through the gate. While its machine is lost, the
+  listing's clock waits. Always on: nothing reaps an idle server or ends one for its age.
 - **Reconciliation** at the supervisor's start: a machine row still `launching` whose
   launch job is gone fails (one whose job waits or runs resumes: the job outlives the
   service); a `fleet.sweep` job runs (every cloud machine the driver lists, `list_tagged`,

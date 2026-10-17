@@ -743,26 +743,44 @@ void Supervisor::on_running(db::Database &db, const Fleet &fleet, const HostedSe
 		std::printf("[hosted] server %lld: ran %s, its %d restart(s) forgiven\n", static_cast<long long>(s.id),
 				seconds_text(config_.restart_reset_ms).c_str(), s.restarts);
 	}
-	// While its machine is lost the checks wait: the machine's end, not a missed
-	// listing, decides then.
-	if (machine->state == FleetMachineState::Lost) return;
+	// While its machine is lost the checks wait, and so does the listing's
+	// clock: the machine's end, not a missed listing, decides then.
+	if (machine->state == FleetMachineState::Lost) {
+		rt.listing_seen_ms = now_ms;
+		return;
+	}
 	if (now_ms < rt.grace_until_ms || now_ms - rt.last_check_ms < config_.health_interval_ms) return;
 	rt.last_check_ms = now_ms;
-	// Healthy: listed, and (with admin links) its admin link's session answering
-	// its status polls (ADR 0053 d6).
-	const bool listed = s.service_user_id && listing_rid_of(db, *s.service_user_id);
-	const bool answers = admin_links_ == nullptr || admin_links_->answering(s.id);
-	if (listed && answers) {
+	// Its listing: gone for listing_lost_ms, the lobby it listed on went away,
+	// and its NovaWorld session reconnects only to that lobby's address (the
+	// config's derivation), so a new start lists it again, no restart counted.
+	if (s.service_user_id && listing_rid_of(db, *s.service_user_id)) {
+		rt.listing_seen_ms = now_ms;
+	} else {
+		const uint64_t gone_ms = now_ms - std::max(rt.listing_seen_ms, rt.since_ms);
+		if (gone_ms >= config_.listing_lost_ms) {
+			replace(db, s, now_ms,
+					"no listing for " + seconds_text(gone_ms) +
+							" (its NovaWorld session reconnects only to the lobby it listed on)");
+			return;
+		}
+		std::printf("[hosted] server %lld: no listing for %s (placed again at %s)\n",
+				static_cast<long long>(s.id), seconds_text(gone_ms).c_str(),
+				seconds_text(config_.listing_lost_ms).c_str());
+	}
+	// Its admin link's session answering its status polls (ADR 0053 d6), with
+	// admin links: health_misses checks in a row with no answer fail it.
+	if (admin_links_ == nullptr || admin_links_->answering(s.id)) {
 		rt.misses = 0;
 		return;
 	}
 	++rt.misses;
-	const std::string found = listed ? "no answer on its admin link" : "no listing";
-	std::printf("[hosted] server %lld: health check %d of %d found %s\n", static_cast<long long>(s.id),
-			rt.misses, config_.health_misses, found.c_str());
+	std::printf("[hosted] server %lld: health check %d of %d found no answer on its admin link\n",
+			static_cast<long long>(s.id), rt.misses, config_.health_misses);
 	if (rt.misses >= config_.health_misses) {
 		finish(db, s, State::Failed,
-				found + " at " + std::to_string(config_.health_misses) + " health checks in a row");
+				"no answer on its admin link at " + std::to_string(config_.health_misses) +
+						" health checks in a row");
 	}
 }
 

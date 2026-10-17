@@ -769,11 +769,13 @@ new task waits as the standby, then leads once the old one lets the lock go; the
 hand out the old lobby and the new from the live list, and the old one's stop drains it:
 no gate hands it a new client, it serves on for a gate's refresh and 2 s, and its stop
 grace is 60 s). A lobby's restart is the one that shows: its players sign in again
-through the gate, landing on a live lobby, and the hosted servers listed on it leave the
-browser for up to about 4 min, since each `opennova-serve` drops the NovaWorld session
-the restart left dead only after 240 s of silence, then reconnects and lists again (the
-supervisor waits 8 min for that before its health checks count). The controller's and
-the workers' jobs wait out a restart in the database.
+through the gate, landing on a live lobby, and the servers listed on it leave the browser
+for good, since a host's NovaWorld session (retail's, `opennova-serve`'s too) drops the
+dead lobby only after 240 s of silence and then reconnects to that lobby's address alone,
+which the new task does not have. A retail host lists again once it hosts again; the
+supervisor places a hosted server whose listing has been gone 8 min again (no restart
+counted, its match starting over), so it lists again through the gate within about 9 min.
+The controller's and the workers' jobs wait out a restart in the database.
 
 ```bash
 D='--deployment staging'                              # or prod
@@ -1714,7 +1716,10 @@ every command).
   the client stays in the lobby and the server stays listed through each.
 - **I. A lobby's replacement.** On staging: `app restart lobby`: the new lobby starts
   beside the old, which drains as it stops; its players sign in again through the gate
-  onto the new one, and a listed server lists again within about 4 minutes. A lobby
+  onto the new one, and a hosted server listed on the old one is placed again once its
+  listing has been gone 8 minutes (its timeline: `no listing for 480 s ...; placed again
+  (no restart counted)`), then lists again on the new one within about 9 minutes, never
+  `failed`. A lobby
   image that never turns healthy (`app deploy --image lobby=<a broken tag>`) leaves the
   old lobby serving while the circuit breaker rolls it back, and the deploy records
   nothing.
