@@ -120,6 +120,20 @@ int test_checks() {
 	            test_io::write_file(t + "mapped.tga", tga_header(2, 24, 0, 4)) &&
 	            test_io::write_file(t + "odd.pcx", pcx(5, 4, 6)) && test_io::write_file(t + "oddfull.pcx", pcx(5, 16, 6)) &&
 	            test_io::write_file(t + "oddwide.pcx", pcx(6, 16, 16)));
+	// Rows of exactly its width, the last ending with a run of 63 at texel 63: the reader writes the run whole, 62
+	// texels past the buffer [orig: Texture_LoadPCXFromPFF32 @ 0x56EDC0..0x56EDD0].
+	{
+		std::vector<uint8_t> runs = pcx(64, 64, 64);
+		runs.resize(128);
+		for (int row = 0; row < 63; ++row) runs.insert(runs.end(), {0xFF, 5, 5});
+		runs.insert(runs.end(), {0xFF, 5, 0xFF, 5});
+		runs.push_back(0x0C);
+		runs.resize(runs.size() + 768, 0);
+		TEST_EXPECT(test_io::write_file(t + "runs.pcx", runs));
+		std::vector<uint8_t> narrow = pcx(1, 4, 30);
+		narrow[4] = 1; // xmin 1 over xmax 0: a width of 0
+		TEST_EXPECT(test_io::write_file(t + "narrow.pcx", narrow));
+	}
 	std::vector<uint8_t> four = pcx(4, 4, 4);
 	four[3] = 4;
 	// A 24-bit one (three planes) the reader takes, its odd width no overrun: no finding.
@@ -265,6 +279,19 @@ int test_checks() {
 	TEST_EXPECT(has("texture.pcx_overrun", "textures/odd.pcx", S::Warning, false));
 	TEST_EXPECT(has("texture.pcx_overrun", "textures/oddfull.pcx", S::Warning, false));
 	TEST_EXPECT(has("texture.pcx_overrun", "textures/oddwide.pcx", S::Error, true));
+	// Rows of its width, the last row's final run crossing its end: 248 bytes past a full block (64 x 64 x 4), past any
+	// block, gating (it was no finding: the header's rows fit).
+	TEST_EXPECT(has("texture.pcx_overrun", "textures/runs.pcx", S::Error, true));
+	for (const Found &f : found)
+		if (f.code == "texture.pcx_overrun" && f.asset == "textures/runs.pcx")
+			TEST_EXPECT(f.message.find("its rows reach 62 texels past the image's buffer") != std::string::npos &&
+			            f.message.find("past its buffer's block by 248 bytes") != std::string::npos);
+	// A width of 0: a request of no bytes is one 64-byte block [orig: FastMem_Alloc @ 0x7697C1..0x7697C6], and every
+	// row writes its 30 texels from the buffer's start, 56 bytes past it: past any block, gating.
+	TEST_EXPECT(has("texture.pcx_overrun", "textures/narrow.pcx", S::Error, true));
+	for (const Found &f : found)
+		if (f.code == "texture.pcx_overrun" && f.asset == "textures/narrow.pcx")
+			TEST_EXPECT(f.message.find("past its buffer's block by 56 bytes") != std::string::npos);
 	TEST_EXPECT(has("texture.pcx_short_rows", "textures/short.pcx", S::Warning, false));
 	// Read on past the file, no fault witnessed: listed (S26 A4).
 	TEST_EXPECT(has("texture.tga_truncated", "textures/cut.tga", S::Error, false));
@@ -280,7 +307,7 @@ int test_checks() {
 	}
 	// The odd width's words say how many bytes spill, not that the width is odd.
 	for (const Found &f : found)
-		if (f.code == "texture.pcx_overrun")
+		if (f.code == "texture.pcx_overrun" && f.asset != "textures/runs.pcx" && f.asset != "textures/narrow.pcx")
 			TEST_EXPECT(f.message.find(f.asset == "textures/oddwide.pcx" ? "each row's 10 extra texels" : "each row's 1 extra texel") !=
 			            std::string::npos);
 	for (const Found &f : found) {

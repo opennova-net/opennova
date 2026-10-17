@@ -239,6 +239,34 @@ PcxRowFit pcx_row_fit(const PcxHeader &header) {
 	return header.bytes_per_line < width ? PcxRowFit::Short : PcxRowFit::Exact;
 }
 
+uint64_t pcx_indexed_write_end(const uint8_t *data, size_t size) {
+	PcxHeader header;
+	if (!pcx_read_header(data, size, header) || header.planes == 3 || header.width < 0 || header.height <= 0)
+		return 0;
+	// The stream: the file less its header and the palette's 768 bytes [orig: @ 0x56ED19, lea edi, [esi-380h]].
+	const size_t end = size > 128 + 768 ? size - 768 : 128;
+	size_t at = 128;
+	uint64_t furthest = 0;
+	for (int row = 0; row < header.height; ++row) {
+		uint64_t x = 0;
+		while (x < header.bytes_per_line) {
+			if (at >= end) {
+				x = header.bytes_per_line; // the bytes past the stream, a texel each at the least
+				break;
+			}
+			const uint8_t byte = data[at++];
+			if ((byte & 0xC0) == 0xC0) {
+				x += byte & 0x3F; // the whole run, its value the next byte [orig: @ 0x56EDA3..0x56EDD0]
+				++at;
+			} else {
+				x += 1; // [orig: @ 0x56EDD4..0x56EDDE]
+			}
+		}
+		furthest = std::max(furthest, uint64_t(header.width) * uint64_t(row) + x);
+	}
+	return furthest;
+}
+
 bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error,
                         PcxIndexedForm *form) {
 	out = IndexedImage8{};
