@@ -1981,8 +1981,35 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					const bool mounted_route =
 							shooter->use_gun_slot_swapped && shooter->mount_target.valid();
 					WeaponSlotState *personal = nullptr;
-					const world::WeaponTableEntry *slot_def = adm;
-					if (!mounted_route) {
+					world::WeaponSlotState *mounted_slot = nullptr;
+					const world::WeaponTableEntry *slot_def = nullptr;
+					if (mounted_route) {
+						// On a UseGun seat, or a controller seat under an EWeap carrier, the
+						// can-fire and the fire take the carrier's slot under the def it
+						// holds, whatever weapon the request names; a carrier with no slot
+						// refuses, never a fallback into the player's personal combo map.
+						// [orig: Server_ClientFiredRound - the seat test @0x50C0CF..0x50C102,
+						//  Entity_GetWeaponSlots @0x50C127 -> WeaponSlot_CanFire @0x50C12E;
+						//  the network arm's seat test @0x50C197..0x50C1CE, the slot
+						//  @0x50C1E3..0x50C1F2, its def @0x50C297, the fire action
+						//  @0x50C300..0x50C30D]
+						uint8_t mounted_adm = 0xFF;
+						world::Entity *mount = world->registry.get(shooter->mount_target);
+						if (mount != nullptr) {
+							mounted_slot = world->vehicles.resolve_mounted_ammo_slot(*mount);
+							if (mounted_slot == &mount->primary_weapon_slot) {
+								mounted_adm = mount->primary_weapon_slot_adm;
+							} else if (mounted_slot != nullptr) {
+								world::Entity *parent = world->registry.get(mount->ground_target);
+								if (parent != nullptr && mounted_slot == &parent->primary_weapon_slot)
+									mounted_adm = parent->primary_weapon_slot_adm;
+							}
+						}
+						if (mounted_slot == nullptr) break;
+						slot_def = world->tables.weapons.by_index(mounted_adm);
+						if (slot_def == nullptr) break;
+						fired_adm = mounted_adm;
+					} else {
 						const auto found = conn.weapon_slots.find(
 								static_cast<uint16_t>(uint16_t(adm->category) * 65u + adm->rank));
 						if (found == conn.weapon_slots.end()) break;
@@ -2003,28 +2030,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                     fire_slot.clip = 1; // the real mounted/personal clip is checked below
                     if (!world::weapon_fsm_can_fire(fire_def, fire_slot, fire_inputs)) break;
 					if (slot_def->clipsize != -1) {
-						world::WeaponSlotState *mounted_slot = nullptr;
-						uint8_t mounted_adm = 0xFF;
-						if (mounted_route) {
-							world::Entity *mount =
-									world->registry.get(shooter->mount_target);
-							if (mount != nullptr) {
-								mounted_slot = world->vehicles.resolve_mounted_ammo_slot(*mount);
-								if (mounted_slot == &mount->primary_weapon_slot) {
-									mounted_adm = mount->primary_weapon_slot_adm;
-								} else if (mounted_slot != nullptr) {
-									world::Entity *parent =
-											world->registry.get(mount->ground_target);
-									if (parent != nullptr && mounted_slot ==
-											&parent->primary_weapon_slot)
-										mounted_adm = parent->primary_weapon_slot_adm;
-								}
-							}
-							// A borrowed EquippedSlot with an invalid route is a reject,
-							// never a fallback into the player's personal combo map.
-							if (mounted_slot == nullptr || mounted_adm != fr.adm_index)
-								break;
-						}
 						if (mounted_slot != nullptr) {
 							if (static_cast<int16_t>(mounted_slot->clip) == 0) break;
 							--mounted_slot->clip;

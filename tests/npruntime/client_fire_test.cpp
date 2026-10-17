@@ -202,6 +202,17 @@ bool check_mounted_slot_select_fire_and_reload() {
 			roster[0].weapon_slots.empty(),
 			"mounted parent-route fire spends only the parent world slot"))
 		return false;
+	// A request naming the child's weapon on the parent route fires the parent's: the
+	// carrier's slot fires under the def it holds, whatever the request names
+	// [orig: Server_ClientFiredRound @0x50C1E3..0x50C30D].
+	dispatch_fire(roster[0], roster, world,
+			fire_body(shooter.packed, 0x22, 5, 0, 0, 0, 0, 0,
+					0xFFFF, 3, 0, 0));
+	if (!expect(world.out.rounds.count == 2 && world.out.rounds.records[1].adm_index == 6 &&
+			live_parent->primary_weapon_slot.clip == 7 &&
+			live_child->primary_weapon_slot.clip == 4,
+			"a mounted fire fires the carrier slot's weapon whatever the request names"))
+		return false;
 
 	WeaponReload reload;
 	reload.entity_handle = child_h.packed;
