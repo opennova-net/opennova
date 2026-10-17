@@ -45,6 +45,12 @@ public:
 	// The test/fixture constructor: the endpoint plus the display name.
 	static Ref<LanServerRow> make(const String &p_server_name, const String &p_host_ip, int p_port);
 
+	// The LAN list's row text for this session (engine:
+	// net/npwire/lan_discovery.h lan_discovery_row_label), over the name back
+	// in the host's code page (cp1252_to_gd's inverse) and the expansion as
+	// row_record decoded it (UTF-8; every shipped variant name is ASCII).
+	String list_label() const;
+
 protected:
 	static void _bind_methods();
 
