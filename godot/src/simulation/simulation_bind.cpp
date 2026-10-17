@@ -434,6 +434,9 @@ void Simulation::_bind_methods() {
 	                     &Simulation::compute_iris_samples);
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &Simulation::local_player_in_armory_zone);
 	ClassDB::bind_method(D_METHOD("local_player_use_item_arm"), &Simulation::local_player_use_item_arm);
+	ClassDB::bind_method(D_METHOD("take_use_item_press"), &Simulation::take_use_item_press);
+	ClassDB::bind_method(D_METHOD("release_use_item_key"), &Simulation::release_use_item_key);
+	ClassDB::bind_method(D_METHOD("is_armory_press_latched"), &Simulation::is_armory_press_latched);
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"),
 	                     &Simulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("local_player_vehicle_zone_team_matches"),

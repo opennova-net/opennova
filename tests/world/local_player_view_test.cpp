@@ -3417,6 +3417,62 @@ void test_pack_drops_the_binocular_toggle_on_movement() {
     CHECK(!f.player.view.binoculars_raised);
 }
 
+// The armory press latch: a press that takes the armory arm latches it (a
+// countdown-refused one too), a latched press opens nothing, and only a
+// useitem release clears it. While it holds, each frame's input freezes after
+// the fold: the word clears, so no direction reaches MoveOrder or the
+// binocular refresh, MoveOrder keeps only its stance, and the X axis byte
+// packs 0. The latch survives a kernel replacement.
+// [orig: Input_HandleActionBinding_0 @0x4E0B12..0x4E0B21;
+//  Input_HandleMenuKeyRelease @0x4DE2F8; Game_ProcessMainFrame
+//  @0x526625..0x52666F; the X word @0x52663E]
+void test_armory_press_latch_freezes_input() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = 0;
+    f.player.view.scope_engaged = false;
+    f.player.view.scope_settled = false;
+    CHECK(f.player.take_use_item_press() == UseItemArm::kMountChain);
+    CHECK(!f.player.armory_press_latched);
+    f.entity().flags |= kEntityFlagArmoryZone;
+    CHECK(f.player.take_use_item_press() == UseItemArm::kArmory);
+    CHECK(f.player.armory_press_latched);
+    CHECK(f.player.take_use_item_press() == UseItemArm::kArmoryRefused);
+    CHECK(f.player.armory_press_latched);
+    // Forward + back held: no direction, an X word of +1023 (back's row lands
+    // last), so an unfrozen pack stores +127 on the X byte.
+    f.player.set_movement_keys(true, true, false, false, false, false, false);
+    CHECK(!f.player.view.movement_input);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.player.move_order.direction_bits == 0);
+    CHECK(f.entity().net_analog_x == 0);
+    // A frame without a pack strips the persisted MoveOrder to its stance.
+    f.player.move_order.stance = InfantryState::Stance::kCrouch;
+    f.player.move_order.lean_left = true;
+    f.player.move_order.direction_bits = PlayerBodyInput::kDirForward;
+    f.player.move_order.moving = true;
+    f.player.apply_player_input_pre_tick(/*pack_input=*/false);
+    CHECK(f.player.move_order.stance == InfantryState::Stance::kCrouch);
+    CHECK(!f.player.move_order.lean_left);
+    CHECK(f.player.move_order.direction_bits == 0 && !f.player.move_order.moving);
+    // The release clears it; the next frame's keys reach the pack.
+    f.player.release_use_item_key();
+    CHECK(!f.player.armory_press_latched);
+    f.player.set_movement_keys(true, true, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.player.move_order.direction_bits ==
+          (PlayerBodyInput::kDirForward | PlayerBodyInput::kDirBack));
+    CHECK(f.entity().net_analog_x == 127);
+    f.player.set_movement_keys(true, false, false, false, false, false, false);
+    CHECK(f.player.view.movement_input);
+    // A countdown-refused press latches as well.
+    f.player.view_session_inputs.armory_reuse_seconds = 30;
+    CHECK(f.player.take_use_item_press() == UseItemArm::kArmoryRefused);
+    CHECK(f.player.armory_press_latched);
+    ScopedAimFixture next;
+    next.player.carry_process_globals_from(f.player);
+    CHECK(next.player.armory_press_latched);
+}
+
 // The movement-held latch and the unscope-on-move run inside the pack, from
 // the packed word: a joiner between send boundaries keeps its settled scope
 // with a direction key down, and the boundary pack latches g_MovementKeyHeld
@@ -3795,6 +3851,7 @@ int main() {
     test_body_view_stamp_alone();
     test_pack_drops_the_binocular_toggle_on_movement();
     test_pack_owns_the_movement_latch_and_unscope();
+    test_armory_press_latch_freezes_input();
     test_pack_masks_movement_under_a_nomove_weapon();
     test_pack_analog_axes_and_their_hysteresis();
     test_authority_fire_gate_refuses_the_round();

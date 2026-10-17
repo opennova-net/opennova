@@ -66,7 +66,7 @@ var _armory := ArmoryMenuCompanion.new()
 
 func _init() -> void:
 	_armory.loadout_accepted.connect(_on_loadout_accepted)
-	_armory.armory_closed.connect(close)
+	_armory.armory_closed.connect(_on_cancel)
 
 
 ## Wire the presenter to its world view + player presenter and the node the menu
@@ -108,6 +108,14 @@ func try_open() -> bool:
 	if sim == null or sim.local_player_use_item_arm() != Simulation.USE_ITEM_ARM_ARMORY:
 		return false
 	return open()
+
+
+## Whether the WEAPON screen's ACCEPT and CANCEL act: neither does while the
+## engine's armory press latch is held (Simulation.is_armory_press_latched;
+## engine LocalPlayer::armory_press_latched carries the witness).
+func can_dismiss() -> bool:
+	var sim: Simulation = _view.sim() if _view != null else null
+	return sim == null or not sim.is_armory_press_latched()
 
 
 ## The post-zone-gate open leg: build + populate the WEAPON screen over live
@@ -248,6 +256,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
+# The screen's CANCEL: a close unless the press latch holds it open.
+func _on_cancel() -> void:
+	if can_dismiss():
+		close()
+
+
 func teardown() -> void:
 	set_process(false)
 	if _frame != null and is_instance_valid(_frame):
@@ -306,6 +320,8 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 #  expansion + WeaponSlot rebuild chain + Player_SelectWeaponSlot @0x4dd680 /
 #  Player_MountWeaponSlot @0x4dfa40]
 func _on_loadout_accepted(loadout: Dictionary) -> void:
+	if not can_dismiss():
+		return
 	var primary := String(loadout.get("primary", ""))
 	_player_class = int(loadout.get("player_class", _player_class))
 	if _view != null:

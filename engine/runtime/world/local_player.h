@@ -111,6 +111,24 @@ public:
     //  @0x4ae090 and Entity_UpdateInfantryPlayerBody @0x4b40e0 read it per tick;
     //  the merges @0x48b897 / @0x490d6d]
     PlayerBodyInput move_order;
+    // The USE-ITEM armory arm's press latch (g_WeaponScreenOpenDebounce): a
+    // press that takes the armory arm sets it ahead of the countdown test, and
+    // only the release of a useitem key clears it. While it is set a further
+    // press takes the arm and opens nothing, the WEAPON screen's ACCEPT and
+    // CANCEL do nothing, and with no menu screen open every frame's input
+    // freezes after its fold (the input-flag word and the X axis word clear,
+    // MoveOrder keeps its stance bits). A process global, it survives a kernel
+    // replacement.
+    // [orig: Input_HandleActionBinding_0 @0x4E0B12..0x4E0B21;
+    //  Input_HandleMenuKeyRelease @0x4DE2D0..0x4DE309;
+    //  WeaponLoadout_ApplyFromBuffer @0x565CE4..0x565CEB;
+    //  Game_ProcessMainFrame @0x526625..0x52666F]
+    bool armory_press_latched = false;
+    // The USE-ITEM press: the arm local_player_use_item_arm names over
+    // view_session_inputs, through the press latch.
+    UseItemArm take_use_item_press();
+    // A useitem key's release clears the press latch.
+    void release_use_item_key();
     // One frame of movement keys: stores the keys plus the sim-owned stance
     // latch onto `input` and refreshes the view aggregates, whose binocular
     // suppression reads the input word this frame's fold will leave. The
@@ -369,11 +387,12 @@ private:
     AnalogPackState analog_pack_;
     // The pack's analog legs onto the local player's entity+0x130..+0x133.
     // [orig: Player_PackInputStateToEntity @0x4df793..0x4df8f8]
-    void pack_analog_axes(Entity &entity, bool moving);
+    // x_frozen: the press latch's freeze zeroed the X axis word this frame.
+    void pack_analog_axes(Entity &entity, bool moving, bool x_frozen);
     // The pack itself: the input-flag word onto MoveOrder, its movement legs
     // and analog axes, then the word saved and cleared
     // [orig: Player_PackInputStateToEntity @0x4df450].
-    void pack_input_word();
+    void pack_input_word(bool x_frozen = false);
 };
 
 } // namespace opennova::world

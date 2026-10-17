@@ -301,12 +301,12 @@ bool local_player_in_armory_zone(const World &world);
 // @0x4e0b1f..0x4e0b2f) takes the press and opens nothing, else weapon.mnu WEAPON
 // opens (@0x4e0b3e..0x4e0b49). Otherwise a type-11 volume touch takes the
 // vehicle-loadout arm (@0x4e0ab2..0x4e0b05), and else the mount chain. With a
-// menu screen open the press closes it (@0x4e0b35..0x4e0b3c), the menu's own
-// input. The armory arm's press latch (g_WeaponScreenOpenDebounce, set @0x4e0b21
+// menu screen open an armory press that passes the latch and the countdown
+// closes it instead (@0x4e0b35..0x4e0b3c), a latched or refused one closing
+// nothing. The armory arm's press latch (g_WeaponScreenOpenDebounce, set @0x4e0b21
 // before the countdown test, cleared on the key's release by
-// Input_HandleMenuKeyRelease @0x4de2d0) also freezes the player's input while it
-// is held with no menu open (Game_ProcessMainFrame @0x526625..0x526679); that
-// freeze is unported (mnu/menu-re.md, the USE-ITEM open path).
+// Input_HandleMenuKeyRelease @0x4de2d0) is LocalPlayer::armory_press_latched; a
+// press takes the arm through it (LocalPlayer::take_use_item_press).
 enum class UseItemArm : uint8_t {
     kMountChain = 0,
     kArmory = 1,

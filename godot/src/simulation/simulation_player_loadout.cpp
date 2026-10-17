@@ -47,6 +47,19 @@ Simulation::UseItemArm Simulation::local_player_use_item_arm() const {
 			kernel_->world, kernel_->local.view_session_inputs));
 }
 
+Simulation::UseItemArm Simulation::take_use_item_press() {
+	if (!kernel_) return USE_ITEM_ARM_MOUNT_CHAIN;
+	return static_cast<UseItemArm>(kernel_->local.take_use_item_press());
+}
+
+void Simulation::release_use_item_key() {
+	if (kernel_) kernel_->local.release_use_item_key();
+}
+
+bool Simulation::is_armory_press_latched() const {
+	return kernel_ && kernel_->local.armory_press_latched;
+}
+
 bool Simulation::local_player_in_vehicle_loadout_zone() const {
 	// The useitem vehicle-loadout arm's gate (engine local_player_in_vehicle_loadout_zone:
 	// unmounted + the type-11 volume touch).

@@ -410,6 +410,15 @@ func _ready() -> void:
 # reports unhandled even after emitting pressed; without this early claim the same
 # Esc closes ARMORY and then immediately opens PAUSE.
 func _input(event: InputEvent) -> void:
+	# A useitem key's release clears the engine's armory press latch whatever
+	# is up (the original's key-message hook; engine LocalPlayer::
+	# release_use_item_key carries the witness), the event left for the other
+	# handlers.
+	if event is InputEventKey and not (event as InputEventKey).pressed and _world != null \
+			and _is_use_item_key(ArmoryPresenter.bound_key_of(event as InputEventKey)):
+		var release_sim: Simulation = _world.get_sim()
+		if release_sim != null:
+			release_sim.release_use_item_key()
 	# An open chat line takes every key (Esc included) before anything else
 	# sees it; only the shell's own window/tools keys pass.
 	if event is InputEventKey and _state == State.WORLD and _hud_presenter != null \
@@ -429,7 +438,10 @@ func _input(event: InputEvent) -> void:
 		return
 	var key := event as InputEventKey
 	if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
-		resume()
+		# Esc is the WEAPON screen's CANCEL, which does nothing while the press
+		# latch is held (ArmoryPresenter.can_dismiss).
+		if _armory_presenter == null or _armory_presenter.can_dismiss():
+			resume()
 		get_viewport().set_input_as_handled()
 
 
@@ -476,8 +488,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
-	# The USE-ITEM press: the engine decides its arm (Simulation.local_player_use_item_arm,
-	# engine/runtime/world/local_player_view.h) and the shell opens what it names.
+	# The USE-ITEM press: the engine decides its arm through the armory press
+	# latch (Simulation.take_use_item_press, engine/runtime/world/local_player.h)
+	# and the shell opens what it names.
 	# The mount chain is the input router's per-frame chain over the polled
 	# `useitem` row (the hold latch, the USE+digit seat pick, the mount toggle on
 	# the release edge, engine/runtime/controls/player_actions); every other arm
@@ -486,7 +499,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		var use_sim: Simulation = _world.get_sim() if _world != null else null
 		var arm: int = Simulation.USE_ITEM_ARM_MOUNT_CHAIN
 		if use_sim != null:
-			arm = use_sim.local_player_use_item_arm()
+			arm = use_sim.take_use_item_press()
 		if arm == Simulation.USE_ITEM_ARM_MOUNT_CHAIN:
 			return
 		if _player_presenter != null:

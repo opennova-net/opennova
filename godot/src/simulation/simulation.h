@@ -2101,6 +2101,16 @@ public:
 	// The arm the USE-ITEM press takes (engine local_player_use_item_arm over the
 	// session's pre-round timer and armory countdown); the mount chain without a kernel.
 	UseItemArm local_player_use_item_arm() const;
+	// The USE-ITEM press itself (engine LocalPlayer::take_use_item_press): the
+	// arm through the armory press latch, which an armory press sets and a
+	// latched one leaves refused; the mount chain without a kernel.
+	UseItemArm take_use_item_press();
+	// A useitem key's release clears the press latch (engine
+	// LocalPlayer::release_use_item_key).
+	void release_use_item_key();
+	// Whether the press latch is held: the WEAPON screen's ACCEPT and CANCEL
+	// do nothing while it is (engine LocalPlayer::armory_press_latched).
+	bool is_armory_press_latched() const;
 	// The USE key's vehicle-loadout arm (engine: runtime/world/local_player_view.h):
 	// the unmounted local player's type-11 volume touch, and the bay's team gate
 	// (the ground entity's team 0 or the player's own; a free-standing player
