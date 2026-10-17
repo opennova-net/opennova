@@ -38,13 +38,101 @@ std::vector<int> grenade_indices(const def::DefWeaponsFile &weapons, int class_m
 	return {indices.begin(), indices.end()};
 }
 
+} // namespace
+
 int armory_selected_clips(const MenuRuntime &menu, const std::string &control) {
 	const int combo = menu.widget_id(control + "_AMMO1");
 	if (combo < 0 || menu.selected_row(combo) < 0 || menu.item_count(combo) == 0) return -1;
 	return menu.selected_row(combo) + 1;
 }
 
-} // namespace
+LoadoutSlotRows loadout_fill_slot(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
+		const std::string &control, int slot, int class_mask, int team_mask,
+		const WeaponAvailability &availability, const std::string &none_label,
+		const hud::GameTextLookup &gametext) {
+	const int combo = menu.widget_id(control);
+	if (combo < 0) return {};
+	std::vector<int32_t> filtered;
+	world::weapon_slot_indices(weapons.entries, weapons.count, slot, class_mask, team_mask, filtered);
+	// [orig: the map availability skip @0x566e6b: a banned (0) weapon never lists]
+	std::vector<int32_t> listed;
+	std::vector<std::string> labels;
+	for (const int32_t index : filtered) {
+		const auto *w = weapon(weapons, index);
+		if (w == nullptr || (availability && availability(w->weapon_name) == 0)) continue;
+		listed.push_back(index);
+		labels.push_back(weapon_label(*w, gametext));
+	}
+	LoadoutSlotRows rows{ -1 };
+	std::vector<std::string> items{ none_label };
+	for (const int i : armory_slot_order(labels)) {
+		items.push_back(labels[static_cast<size_t>(i)]);
+		rows.push_back(listed[static_cast<size_t>(i)]);
+	}
+	menu.set_widget_items(combo, items);
+	menu.select_row(combo, 0, false);
+	return rows;
+}
+
+int32_t loadout_selected_weapon(const MenuRuntime &menu, const std::string &control,
+		const LoadoutSlotRows &rows) {
+	const int combo = menu.widget_id(control);
+	if (combo < 0) return -1;
+	const int row = menu.selected_row(combo);
+	return row >= 0 && static_cast<size_t>(row) < rows.size() ? rows[static_cast<size_t>(row)] : -1;
+}
+
+void loadout_select_weapon_row(MenuRuntime &menu, const std::string &control,
+		const LoadoutSlotRows &rows, int32_t weapon_row) {
+	const int combo = menu.widget_id(control);
+	if (combo < 0) return;
+	int found = -1;
+	for (size_t row = 0; row < rows.size(); ++row) {
+		if (rows[row] >= 0 && rows[row] == weapon_row) {
+			found = static_cast<int>(row);
+			break;
+		}
+	}
+	menu.select_row(combo, found, false);
+}
+
+void loadout_select_weapon_name(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
+		const std::string &control, const LoadoutSlotRows &rows, const std::string &name) {
+	const int combo = menu.widget_id(control);
+	if (combo < 0 || name.empty()) return;
+	for (size_t row = 1; row < rows.size(); ++row) {
+		const auto *w = weapon(weapons, rows[row]);
+		if (w != nullptr && strutil::iequals(w->weapon_name, name)) {
+			menu.select_row(combo, static_cast<int>(row), false);
+			return;
+		}
+	}
+}
+
+ArmoryLoadoutPick armory_loadout_pick(const MenuRuntime &menu, const def::DefWeaponsFile &weapons,
+		const LoadoutSlotRows (&rows)[3], const std::vector<int> &grenades) {
+	ArmoryLoadoutPick out;
+	for (size_t i = 0; i < std::size(kParents); ++i) {
+		const auto *w = weapon(weapons, loadout_selected_weapon(menu, kParents[i], rows[i]));
+		out.names[i] = w != nullptr ? std::string(w->weapon_name) : std::string();
+		out.clips[i] = armory_selected_clips(menu, kParents[i]);
+	}
+	// A grenade position's count is its GRENADE_AMMO row (the rows start at 0
+	// clips); a position at 0, or with no control, carries nothing.
+	for (size_t i = 0; i < grenades.size() && i < std::size(kGrenades); ++i) {
+		const int combo = menu.widget_id(kGrenades[i]);
+		const int clips = combo >= 0 ? menu.selected_row(combo) : 0;
+		const auto *w = weapon(weapons, grenades[i]);
+		if (clips <= 0 || w == nullptr) continue;
+		playersav::KitEntry entry;
+		entry.name = w->weapon_name;
+		entry.ammo_primary = clips;
+		entry.ammo_secondary = -1;
+		entry.flags = -1;
+		out.grenades.push_back(std::move(entry));
+	}
+	return out;
+}
 
 // [orig: PlayerInfo_PopulateAmmoComboBoxes @0x55def0; the ACCESSORY leg is the same
 //  logic inlined in PlayerInfo_PopulateWeaponAccessoryAmmoUI @0x55e8b0]

@@ -2104,6 +2104,15 @@ add_executable(loadout_screen_test menu/loadout_screen_test.cpp)
 target_link_libraries(loadout_screen_test PRIVATE opennova_runtime)
 add_test(NAME loadout_screen COMMAND loadout_screen_test)
 
+# The loadout dialogs' list and state model (menu/loadout_screen.h's list fill,
+# reselects, clip count and accept pick; menu/player_info_loadout.h): the rows
+# under NONE, the restore's catalog rows, the handlers' picks, the kit page's
+# selection [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430;
+# WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0].
+add_executable(loadout_dialog_test menu/loadout_dialog_test.cpp)
+target_link_libraries(loadout_dialog_test PRIVATE opennova_runtime)
+add_test(NAME loadout_dialog COMMAND loadout_dialog_test)
+
 add_executable(player_info_kit_test menu/player_info_kit_test.cpp)
 target_link_libraries(player_info_kit_test PRIVATE opennova_runtime)
 target_compile_features(player_info_kit_test PRIVATE cxx_std_17)
