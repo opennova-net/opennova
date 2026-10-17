@@ -1047,16 +1047,23 @@ static void decompile_block(Buf *out,
         }
         else if (strcmp(m, "done") == 0) {
             /* A section's closing brace compiles to done after its last statement, and so does a
-               `done` statement (mus_compile.cpp): the brace is the done the section's code ends on, at
-               the top level, where no instruction but the layout's padding follows it before the next
-               section or handler (or the end); every other done is the statement. */
+               `done` statement (mus_compile.cpp): the brace is the section's last done at the top
+               level, no other done following it before the next section or handler (or the end);
+               every other done is the statement. Statements may follow the brace (the compiler
+               takes top-level statements after a section), so what follows is not tested, only
+               whether a later done closes the section instead (a done inside an if's body is that
+               body's statement and closes nothing). */
             bool closes = !suppress_entries;
             for (int k = i + 1; closes && k < end_idx; ++k) {
                 const uint32_t next = insts[k].offset;
                 bool starts = is_section_entry(script, next) != 0;
                 for (int f = 0; !starts && f < function_count; ++f) starts = functions[f].start == next;
                 if (starts) break;
-                if (insts[k].opcode != 0) closes = false;
+                if (insts[k].opcode != MUS_OP_DONE) continue;
+                bool in_body = false;
+                for (int b = 0; !in_body && b < cf->count; ++b)
+                    in_body = next >= cf->blocks[b].body_start && next < cf->blocks[b].end_offset;
+                if (!in_body) closes = false;
             }
             place(out, script, inst->offset);
             if (closes) {
