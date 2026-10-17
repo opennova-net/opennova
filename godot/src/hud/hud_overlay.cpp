@@ -622,6 +622,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// The piece size comes off the border atlas's own width, not a
 		// constant [orig: the 4x4 cell grid, see docs/interface/hud-re.md].
 		layout_.box_tex_w = border.is_valid() ? border->get_width() : 0;
+		layout_.box_tex_h = border.is_valid() ? border->get_height() : 0;
 		layout_.net_icon_texture_valid = icon.is_valid();
 		// The connection indicators' other two atlases: the T/R link-error
 		// pair and the NovaWorld N (hud_frame.h kHudTexNetLinkIcon carries the
@@ -646,6 +647,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		textures_[opennova::hud::kHudTexTipGameplay] = tip_gameplay;
 		layout_.tip_box_texture_valid = tip_box.is_valid();
 		layout_.tip_box_tex_w = tip_box.is_valid() ? tip_box->get_width() : 0;
+		layout_.tip_box_tex_h = tip_box.is_valid() ? tip_box->get_height() : 0;
 		layout_.tip_keyboard_texture_valid = tip_keyboard.is_valid();
 		layout_.tip_gameplay_texture_valid = tip_gameplay.is_valid();
 	}
