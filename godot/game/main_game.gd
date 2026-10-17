@@ -421,6 +421,12 @@ func _input(event: InputEvent) -> void:
 		var release_sim: Simulation = _world.get_sim()
 		if release_sim != null:
 			release_sim.release_use_item_key()
+	# A useitem key-down, a press or an OS repeat (echo), sets the key again
+	# after a menu close's reset (engine controls::PlayerActions::reset_use_key
+	# carries the witness).
+	if event is InputEventKey and (event as InputEventKey).pressed and _player_presenter != null \
+			and _is_use_item_key(ArmoryPresenter.bound_key_of(event as InputEventKey)):
+		_player_presenter.use_key_down()
 	# An open chat line takes every key (Esc included) before anything else
 	# sees it; only the shell's own window/tools keys pass.
 	if event is InputEventKey and _state == State.WORLD and _hud_presenter != null \
@@ -488,31 +494,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			# The chord consumed the USE hold: no mount toggle on its release.
 			_player_presenter.consume_use_hold()
 		pick_at_crosshair()
-		get_viewport().set_input_as_handled()
-		return
-	# The USE-ITEM press: the engine decides its arm through the armory press
-	# latch (Simulation.take_use_item_press, engine/runtime/world/local_player.h)
-	# and the shell opens what it names.
-	# The mount chain is the input router's per-frame chain over the polled
-	# `useitem` row (the hold latch, the USE+digit seat pick, the mount toggle on
-	# the release edge, engine/runtime/controls/player_actions); every other arm
-	# takes the press, so that chain never latches it.
-	if is_gameplay_input_active() and _is_use_item_key(ArmoryPresenter.bound_key_of(key)):
-		var use_sim: Simulation = _world.get_sim() if _world != null else null
-		var arm: int = Simulation.USE_ITEM_ARM_MOUNT_CHAIN
-		if use_sim != null:
-			arm = use_sim.take_use_item_press()
-		if arm == Simulation.USE_ITEM_ARM_MOUNT_CHAIN:
-			return
-		if _player_presenter != null:
-			_player_presenter.consume_use_hold()
-		if arm == Simulation.USE_ITEM_ARM_ARMORY:
-			_try_open_armory()
-		elif arm == Simulation.USE_ITEM_ARM_VEHICLE_LOADOUT:
-			# The bay's team gate (the ground entity's team 0 or the player's own)
-			# selects vehicle.mnu's VEHICLE screen, unported (D-HUD-14).
-			if use_sim.local_player_vehicle_zone_team_matches():
-				pass
 		get_viewport().set_input_as_handled()
 		return
 
@@ -934,18 +915,18 @@ func set_local_player_profile(profile: Dictionary) -> void:
 		_player_info_companion.set_persisted_profile(_chosen_avatar)
 
 
-# The armory key while in-world: the shared ArmoryPresenter opens weapon.mnu's
-# WEAPON screen over LIVE play when the engine's USE-ITEM arm is the armory's —
-# the world keeps ticking underneath (State.ARMORY rides the presenter's opened
-# signal) [orig: useitem action 177 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON")
-# @0x4e0b49; no world-stop leg]. Returns false otherwise (key ignored, the
-# original's silent gate). The ACCEPT apply and the class/current-loadout open
+# The held USE row's armory arm (engine controls::PlayerActions): the shared
+# ArmoryPresenter opens weapon.mnu's WEAPON screen over LIVE play, the world
+# ticking underneath (State.ARMORY rides the presenter's opened signal). It
+# opens what the engine named, unre-gated: the same frame's release-edge toggle
+# may mount the player after the open, as retail's dispatch opens the screen
+# before that edge runs. The ACCEPT apply and the class/current-loadout open
 # protocol live on the host.
-func _try_open_armory() -> bool:
+func _open_armory() -> bool:
 	if _armory_presenter == null:
 		return false
 	_armory_presenter.set_player_team(int(_chosen_avatar.get("team", 0)))
-	return _armory_presenter.try_open()
+	return _armory_presenter.open()
 
 
 # Whether a key event is the `useitem` row's (retail default Shift; catalog row
@@ -1505,6 +1486,15 @@ func _on_command_map_requested() -> void:
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
 	if _state == from_state:
 		_state = State.WORLD
+		_reset_use_key()
+
+
+# Every menu screen's close resets the key state, so a useitem key held
+# through it reads up until its next key-down (engine
+# controls::PlayerActions::reset_use_key carries the witness).
+func _reset_use_key() -> void:
+	if _player_presenter != null:
+		_player_presenter.reset_use_key()
 
 
 func _pause() -> void:
@@ -1531,6 +1521,7 @@ func resume() -> void:
 			else State.WORLD
 	# Every resume leg lands here, so the session cannot stay stuck Paused.
 	_world.set_shell_paused(false)
+	_reset_use_key()
 	if _hud_presenter != null:
 		_hud_presenter.set_menu_pause(false)
 
@@ -1813,6 +1804,11 @@ func _process(delta: float) -> void:
 		var player_live := is_gameplay_input_active()
 		frame_input = _player_presenter.before_world_tick(
 				delta, player_live, player_live)
+		# The held USE row's armory arm took its open in that poll (engine
+		# controls::PlayerActions, through the sim's press latch); the shell
+		# opens what it names.
+		if _player_presenter.take_use_item_armory_request():
+			_open_armory()
 	else:
 		frame_input = MissionFrameInput.new()
 		frame_input.delta_seconds = delta

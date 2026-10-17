@@ -57,6 +57,14 @@ public:
 	// release edge then runs no mount toggle. Applied after this frame's
 	// fresh-press reset so a same-frame chord sticks.
 	void consume_use_hold();
+	// The held USE row's armory arm took its open on the last frame's poll
+	// (controls::PlayerAction::OpenArmory); reading clears it. The shell
+	// opens weapon.mnu's WEAPON screen.
+	bool take_armory_request();
+	// The menu close's key-state reset for the USE row, and a useitem key's
+	// down event (press or OS repeat) that ends it (controls::PlayerActions).
+	void reset_use_key();
+	void use_key_down();
 	// The HUD's key toggles, whose F9 Emotes / F10 Radio menus take a digit
 	// before the weapon rows do (controls::PlayerActions' menu arms); the HUD
 	// presenter hands its process-lifetime instance over. Null = no menus.
@@ -76,6 +84,7 @@ private:
 	Ref<PlayerMoveIntent> input_override_;
 	Ref<HudToggles> hud_toggles_;
 	opennova::controls::PlayerActions actions_;
+	bool armory_requested_ = false;
 	// The wheel notch remainder. Retail clears it only at process start, so it
 	// survives the reset-state path like the switch latches.
 	opennova::controls::WheelRemainder wheel_;

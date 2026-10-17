@@ -95,21 +95,6 @@ func get_menu_driver() -> MenuDriver:
 	return _driver
 
 
-## The armory key: open weapon.mnu's WEAPON screen over LIVE play when the
-## engine's USE-ITEM arm is the armory's (Simulation.local_player_use_item_arm:
-## an unmounted player in an armory zone, or anywhere while the pre-round timer
-## runs, with no armory countdown outside the pre-round). Returns false otherwise
-## or when the menu cannot build (the key is then ignored, matching the
-## original's silent gate).
-func try_open() -> bool:
-	if _view == null:
-		return false
-	var sim: Simulation = _view.sim()
-	if sim == null or sim.local_player_use_item_arm() != Simulation.USE_ITEM_ARM_ARMORY:
-		return false
-	return open()
-
-
 ## Whether the WEAPON screen's ACCEPT and CANCEL act: neither does while the
 ## engine's armory press latch is held (Simulation.is_armory_press_latched;
 ## engine LocalPlayer::armory_press_latched carries the witness).
@@ -118,9 +103,9 @@ func can_dismiss() -> bool:
 	return sim == null or not sim.is_armory_press_latched()
 
 
-## The post-zone-gate open leg: build + populate the WEAPON screen over live
-## play. The shells arrive through try_open()'s zone gate; tests that stage the
-## world without a type-6 volume drive this directly.
+## Build + populate the WEAPON screen over live play. The engine decides when
+## (the held USE row's armory arm, engine controls::PlayerActions and
+## world::LocalPlayer::take_use_item_press); the shell and the tests call this.
 func open() -> bool:
 	if is_open() or _view == null or _ui_parent == null:
 		return false

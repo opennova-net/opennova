@@ -130,9 +130,31 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 	use_held_prev_ = use_latched_;
 	use_latched_ = false;
 	if (!gate.active) use_held_prev_ = false;
-	if (gate.active && source.pressed("useitem")) {
-		if (!use_held_prev_) use_hold_consumed_ = false;
-		use_latched_ = true;
+	// The held row runs case 0xB1 on every frame a key is down, under the
+	// row's mode word (bit 1 alive, bit 2 the death screen): its arm comes
+	// through the press latch, and only the mount chain sets the hold latch,
+	// so a frame whose arm leaves the chain ends the hold as a release does
+	// (the armory opens first, then the release edge's toggle).
+	// [orig: Input_ProcessAnalogBindings @0x4995F0 -- the keys @0x499635, the
+	//  mode word @0x49963E..0x499650; case 0xB1 @0x4E0A82, the mount chain
+	//  @0x4E0B5E..0x4E0B71]
+	const bool use_admitted = !gate.death_screen || (row_modes("useitem") & 2u) != 0;
+	// A keyboard key held through a menu close's reset reads up until its
+	// next key-down (reset_use_key); a mouse-bound USE, which the reset leaves
+	// alone, holds through it, and a released row needs none.
+	const bool use_down = source.pressed("useitem");
+	// Only a real release ends it: an open text line hides the held key.
+	if (!use_down && !gate.keyboard_captured) use_key_reset_ = false;
+	const bool keyboard_leg = source.pressed_key("useitem") != 0;
+	if (gate.active && use_admitted && use_down && !(use_key_reset_ && keyboard_leg)) {
+		const UseItemPressArm arm = gate.take_use_item_arm ? gate.take_use_item_arm()
+		                                                   : UseItemPressArm::kMountChain;
+		if (arm == UseItemPressArm::kMountChain) {
+			if (!use_held_prev_) use_hold_consumed_ = false;
+			use_latched_ = true;
+		} else if (arm == UseItemPressArm::kOpenArmory) {
+			frame.requests.push_back({Action::OpenArmory});
+		}
 	}
 	if (use_consume_pending_) {
 		use_hold_consumed_ = true;
@@ -262,6 +284,14 @@ void PlayerActions::reset() {
 
 void PlayerActions::consume_use_hold() {
 	use_consume_pending_ = true;
+}
+
+void PlayerActions::reset_use_key() {
+	use_key_reset_ = true;
+}
+
+void PlayerActions::use_key_down() {
+	use_key_reset_ = false;
 }
 
 int WheelRemainder::feed(int32_t delta) {

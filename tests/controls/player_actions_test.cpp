@@ -10,6 +10,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 using namespace opennova::controls;
 using Action = PlayerAction;
@@ -23,7 +24,7 @@ namespace {
 	} \
 } while (false)
 
-constexpr PlayerActionPoll kLive{true, true, true};
+const PlayerActionPoll kLive{true, true, true};
 
 struct Keys : PlayerActionSource {
 	std::map<std::string, int> held;
@@ -153,7 +154,7 @@ bool test_reset_preserves_switch_hud_medic_and_use_state() {
 // [orig: Input_HandleSpecialKeys @0x49c5c0 runs only with g_InputCaptureMode
 // clear].
 bool test_captured_keyboard_keeps_the_use_digits() {
-	constexpr PlayerActionPoll kTyping{true, true, true, true};
+	const PlayerActionPoll kTyping{true, true, true, true};
 	PlayerActions actions;
 	Keys keys;
 	keys.hold("useitem");
@@ -506,6 +507,86 @@ bool test_to_special_dispatches_both_edges() {
 	return true;
 }
 
+// The held USE row runs its arm on every frame a key is down, through the
+// embedder's press latch, and only the mount chain holds the chain's latch:
+// walking into an armory with USE held opens it, and the chain the earlier
+// frames held ends there as a release does (the open first, then the
+// toggle); a latched press takes the arm with nothing to open, and its
+// release toggles nothing. The death screen admits no USE row (its mode word
+// carries bit 1 alone).
+// [orig: Input_ProcessAnalogBindings @0x4995F0 -- the keys @0x499635, the
+//  mode word @0x49963E..0x499650; Input_HandleActionBinding_0 case 0xB1
+//  @0x4E0A82, the mount chain @0x4E0B5E..0x4E0B71; Input_ProcessFrame's
+//  release edge @0x49D6C1..0x49D6DC]
+bool test_held_use_runs_the_arm_every_frame() {
+	using Arm = UseItemPressArm;
+	std::vector<Arm> arms;
+	std::size_t asked = 0;
+	PlayerActionPoll gate = kLive;
+	gate.take_use_item_arm = [&]() { return asked < arms.size() ? arms[asked++] : Arm::kTaken; };
+	PlayerActions actions;
+	Keys keys;
+	arms = {Arm::kMountChain, Arm::kMountChain, Arm::kOpenArmory, Arm::kTaken};
+	keys.hold("useitem");
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(requests_are(actions.poll(keys, gate), {{Action::OpenArmory}, {Action::ToggleMount}}));
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(asked == 4);
+	keys.release("useitem");
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(asked == 4);
+
+	PlayerActions fresh;
+	arms = {Arm::kOpenArmory};
+	asked = 0;
+	keys.hold("useitem");
+	CHECK(requests_are(fresh.poll(keys, gate), {{Action::OpenArmory}}));
+	keys.release("useitem");
+	CHECK(fresh.poll(keys, gate).requests.empty());
+
+	PlayerActions dead;
+	PlayerActionPoll dead_gate = gate;
+	dead_gate.death_screen = true;
+	asked = 0;
+	keys.hold("useitem");
+	CHECK(dead.poll(keys, dead_gate).requests.empty());
+	CHECK(asked == 0);
+	keys.release("useitem");
+	CHECK(dead.poll(keys, dead_gate).requests.empty());
+
+	// The WEAPON screen's close resets the key state: Shift held through the
+	// ACCEPT reads up, no arm asked and no chain held, until its next key-down
+	// (an OS repeat here) [orig: Input_ResetAllState @0x565D01 / @0x54E63F;
+	// Input_ClearKeyState @0x497ED5; Input_HandleKeyPress @0x760CBB].
+	PlayerActions closed;
+	arms = {Arm::kOpenArmory, Arm::kOpenArmory};
+	asked = 0;
+	keys.hold("useitem", 0x10); // the stock key, Shift
+	closed.reset_use_key();
+	CHECK(closed.poll(keys, gate).requests.empty());
+	CHECK(closed.poll(keys, gate).requests.empty());
+	CHECK(asked == 0);
+	closed.use_key_down();
+	CHECK(requests_are(closed.poll(keys, gate), {{Action::OpenArmory}}));
+	CHECK(asked == 1);
+	// A release ends the reset as well: the next press is a fresh key-down.
+	closed.reset_use_key();
+	keys.release("useitem");
+	closed.poll(keys, gate);
+	keys.hold("useitem", 0x10);
+	CHECK(requests_are(closed.poll(keys, gate), {{Action::OpenArmory}}));
+	// The reset leaves a mouse-bound USE (no keyboard key) holding.
+	PlayerActions mouse;
+	arms = {Arm::kOpenArmory};
+	asked = 0;
+	keys.release("useitem");
+	keys.hold("useitem");
+	mouse.reset_use_key();
+	CHECK(requests_are(mouse.poll(keys, gate), {{Action::OpenArmory}}));
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
@@ -518,7 +599,8 @@ int main() {
 			test_wheel_remainder_dispatches_whole_notches,
 			test_spectator_rows_edge_to_their_codes,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
-			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r})
+			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
+			test_held_use_runs_the_arm_every_frame})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

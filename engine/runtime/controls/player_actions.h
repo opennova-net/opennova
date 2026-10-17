@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -44,7 +45,17 @@ enum class PlayerAction {
 	// menu (hud::hud_toggles_close_voice_menu).
 	EmotePick,
 	RadioPick,
+	// The USE-ITEM armory arm's open (weapon.mnu WEAPON): the embedder's shell
+	// opens the screen.
+	OpenArmory,
 };
+
+// The arm a frame's held USE takes, as the embedder's press latch decides it
+// (world::LocalPlayer::take_use_item_press): the mount chain's hold, the
+// armory's open, or a press the arm takes with nothing to open (a latched or
+// refused armory press, the vehicle bay, whose vehicle.mnu is unported,
+// D-HUD-14).
+enum class UseItemPressArm : uint8_t { kMountChain, kOpenArmory, kTaken };
 
 struct PlayerActionRequest {
 	PlayerAction action = PlayerAction::ToggleMount;
@@ -67,6 +78,13 @@ struct PlayerActionPoll {
 	// medic rows and the weapon/seat/scope rows stay silent
 	// [orig: Input_IsBindingActiveForMode @0x497ea0].
 	bool death_screen = false;
+	// The held USE row's arm, asked once on every frame either of its keys is
+	// down: the row is a held row (flags 0x0C000805, bit 4), which the analog
+	// pass queues each frame, so case 0xB1 runs each frame the key is held.
+	// Unset = the mount chain.
+	// [orig: Input_ProcessAnalogBindings @0x4995F0, run from
+	//  Input_ProcessPlayerFrame @0x49D50C]
+	std::function<UseItemPressArm()> take_use_item_arm;
 };
 
 struct PlayerActionFrame {
@@ -123,6 +141,18 @@ public:
 	void reset();
 	// Deferred until after the next poll's fresh-USE-press reset.
 	void consume_use_hold();
+	// A menu close's key-state reset, for the USE row: a useitem KEYBOARD key
+	// held through it reads up until its next key-down, a fresh press or an OS
+	// repeat, which the embedder reports through use_key_down; the reset does
+	// not touch the mouse button state, so a mouse-bound USE keeps holding
+	// [orig: Input_PumpAndCenterCursor writes only the deltas and the cursor
+	//  @0x761724..0x76173A].
+	// [orig: WeaponLoadout_ApplyFromBuffer -> Input_ResetAllState @0x565D01;
+	//  UI_CloseMenuScreen @0x54E63F; Input_ClearKeyState @0x497ED5 (the
+	//  keyState memset @0x760DF4); only Input_HandleKeyPress sets a key again
+	//  @0x760CBB]
+	void reset_use_key();
+	void use_key_down();
 	// The death screen's spectator rows, the catalog's mode-2 rows 110..112
 	// (CycleSpectatorMode, IncSpectatorTarget, DecSpectatorTarget): the binding
 	// scan admits them only while the death screen is up, so the embedder
@@ -143,6 +173,7 @@ private:
 	bool use_held_prev_ = false;
 	bool use_hold_consumed_ = false;
 	bool use_consume_pending_ = false;
+	bool use_key_reset_ = false;
 	bool use_digit_was_down_[10] = {};
 	// This frame's menu digit arm: a menu was open while gameplay input ran.
 	bool menu_digits_ = false;

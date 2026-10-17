@@ -3,9 +3,8 @@ extends GutTest
 # ArmoryPresenter on the typed surfaces (ADR 0034): a REAL Simulation owns the
 # player/loadout state (mission boot + spawn + weapon table — the same recipe
 # the satchel/grenade tests always used), the world seam is an ArmoryWorldView
-# interface harness, and the zone gate is exercised through try_open() while the
-# staged tests drive the post-gate open() directly (no armory volume is
-# authored in the in-memory mission).
+# interface harness, and the staged tests drive open() directly (the arm that
+# opens it is the engine's, ctests local_player_view and player_actions).
 
 const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_presenter_test"
@@ -217,22 +216,6 @@ func test_accept_hotkey_reads_the_engine_press_latch() -> void:
 	assert_true(presenter.open(), "the armory reopens")
 	await _key_edge(KEY_SHIFT, false)
 	assert_true(presenter.is_open(), "a release accepts nothing")
-
-
-func test_out_of_zone_try_open_is_the_silent_gate() -> void:
-	# No type-6 armory volume exists in the in-memory mission, so the spawned
-	# player is out of zone and, with no pre-round in SP, the armory key is
-	# silently ignored [orig: Input_HandleActionBinding_0 Flags & 0x400000 @0x4e0aa1].
-	var sim := _real_sim()
-	var world := _make_world(sim, _make_weapons())
-	var overlay := Control.new()
-	add_child_autofree(overlay)
-	var presenter := ArmoryPresenter.new()
-	add_child_autofree(presenter)
-	presenter.setup(world, null, overlay)
-
-	assert_false(presenter.try_open(), "out of zone the key is ignored")
-	assert_null(overlay.get_node_or_null("ArmoryMenu"))
 
 
 func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:

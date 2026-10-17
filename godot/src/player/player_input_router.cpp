@@ -66,6 +66,8 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		// Sent over the session; the router closes the menu beside it.
 		case Action::EmotePick: p_sim.send_voice_menu_pick(false, p_request.value); break;
 		case Action::RadioPick: p_sim.send_voice_menu_pick(true, p_request.value); break;
+		// The shell opens the screen (PlayerInputRouter::take_armory_request).
+		case Action::OpenArmory: break;
 	}
 }
 
@@ -189,6 +191,17 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	gate.emotes_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
 	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
 	gate.death_screen = spectating;
+	// The held USE row's arm through the sim's press latch (engine
+	// LocalPlayer::take_use_item_press).
+	gate.take_use_item_arm = [&action_sim]() {
+		using Arm = opennova::controls::UseItemPressArm;
+		if (action_sim.is_null()) return Arm::kMountChain;
+		switch (action_sim->take_use_item_press()) {
+			case Simulation::USE_ITEM_ARM_MOUNT_CHAIN: return Arm::kMountChain;
+			case Simulation::USE_ITEM_ARM_ARMORY: return Arm::kOpenArmory;
+			default: return Arm::kTaken;
+		}
+	};
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
 	frame_input->set_weapon_input(actions.fire_held, actions.fire_edge,
 			actions.reload_edge, actions.medic_edge);
@@ -201,6 +214,10 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		if ((request.action == opennova::controls::PlayerAction::EmotePick || radio) &&
 				hud_toggles_.is_valid())
 			hud_toggles_->close_voice_menu(radio);
+		if (request.action == opennova::controls::PlayerAction::OpenArmory) {
+			armory_requested_ = true;
+			continue;
+		}
 		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
 	}
 	// The death screen's own rows (the spectate sub-mode and target).
@@ -214,6 +231,20 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 
 void PlayerInputRouter::consume_use_hold() {
 	actions_.consume_use_hold();
+}
+
+void PlayerInputRouter::reset_use_key() {
+	actions_.reset_use_key();
+}
+
+void PlayerInputRouter::use_key_down() {
+	actions_.use_key_down();
+}
+
+bool PlayerInputRouter::take_armory_request() {
+	const bool requested = armory_requested_;
+	armory_requested_ = false;
+	return requested;
 }
 
 // Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline

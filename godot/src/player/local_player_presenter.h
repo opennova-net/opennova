@@ -236,6 +236,13 @@ public:
 	// debug pick rides Shift+F6; the tools window opening mid-hold): the
 	// router's release edge then runs no mount toggle.
 	void consume_use_hold();
+	// The held USE row's armory arm took its open this frame (PlayerInputRouter::
+	// take_armory_request); reading clears it.
+	bool take_use_item_armory_request();
+	// The WEAPON screen's close resets the USE row's key state; a useitem
+	// key-down event (press or echo) ends the reset (PlayerInputRouter).
+	void reset_use_key();
+	void use_key_down();
 	// Mouse-look rides the input router: raw pixel deltas into the SIM's
 	// witnessed integer pipeline (engine: runtime/world/local_player.cpp).
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
