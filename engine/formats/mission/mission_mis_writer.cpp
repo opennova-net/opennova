@@ -693,11 +693,12 @@ void rebuild_mis_areas(bms::File &file) {
 }
 
 MisWeaponTable mis_weapon_table(const def::DefWeaponsFile &weapons) {
-	MisWeaponTable table = {{"None", 0}}; // [orig: sub_432E50 @ 0x432e64..0x432e92]
+	MisWeaponTable table = {{"None", 0}}; // [orig: JOTACmed.exe sub_432E50 @ 0x432e64..0x432e92]
 	int32_t subclass_rows = 0;
 	for (size_t i = 0; i < weapons.count; ++i) {
 		const def::DefWeaponDef &row = weapons.entries[i];
-		if (row.unclosed != 0) continue; // a row is made at its `end` alone [orig: sub_432340 @ 0x4323c3, @ 0x4323f2]
+		// A row is made at its `end` alone [orig: JOTACmed.exe sub_432340 @ 0x4323c3, @ 0x4323f2].
+		if (row.unclosed != 0) continue;
 		if (subclass_rows > 0) {
 			--subclass_rows;
 			table.push_back({row.weapon_name, 0});

@@ -95,9 +95,9 @@ inline bool mis_name_allowed(const std::string &name, size_t width, std::string 
 // closes with an `end`, in the file's order [orig: JOTACmed.exe sub_432E50 @ 0x432e50: the table zeroed
 // @ 0x432e62, "None" @ 0x432e64..0x432e92, the count 1 @ 0x432e83, the file @ 0x432e74]. Each row holds its
 // loadout_subclasses: how many of the rows right after it are its subclass rows, which the export lists with
-// it. A subclass row reads no loadout key, so its own count is 0 [orig: sub_432340 @ 0x432340: the row's name
-// @ 0x43271d..0x43275a, the row made at END @ 0x4323c3 / @ 0x4323f2, the count @ 0x4325ed..0x43261a, the
-// countdown @ 0x4323b0..0x4323e2, the subclass row's keys passed over @ 0x43241f]. JOTACmed reads its own
+// it. A subclass row reads no loadout key, so its own count is 0 [orig: JOTACmed.exe sub_432340 @ 0x432340: the
+// row's name @ 0x43271d..0x43275a, the row made at END @ 0x4323c3 / @ 0x4323f2, the count @ 0x4325ed..0x43261a,
+// the countdown @ 0x4323b0..0x4323e2, the subclass row's keys passed over @ 0x43241f]. JOTACmed reads its own
 // medwep.def (in med.pff, which no game mount reads); mis_weapon_table builds the table from the project's
 // weapon.def in its place, the def file NovaLogic's earlier jomed.exe reads (D-MIS-X1).
 struct MisWeaponRow {

@@ -241,7 +241,8 @@ int check_00trg_kit(const std::string &bms_path, const std::string &weapons_path
 	TEST_EXPECT(def::def_parse_weapons_memory(weapon_bytes.data(), weapon_bytes.size(), &weapons) == 0);
 	const MisWeaponTable table = mis_weapon_table(weapons);
 	def::def_free_weapons(&weapons);
-	TEST_EXPECT(!table.empty() && table[0].name == "None"); // the original's first row [orig: sub_432E50 @ 0x432e8d]
+	// The original's first row [orig: JOTACmed.exe sub_432E50 @ 0x432e8d].
+	TEST_EXPECT(!table.empty() && table[0].name == "None");
 	TEST_EXPECT(mis_default_kit(file.loadout, &table) == MisDefaultKit({"WPN_M16M203BURST", "WPN_colt45", "WPN_AT4"}));
 	sync_counts(file);
 	std::string written;
