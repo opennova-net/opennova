@@ -146,10 +146,12 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 	if _world != null:
 		_world.set_object_polydetail(state.object_polydetail)
 		_world.set_texfilter_level(state.texfilter_level)
-		# The particle density and the texture compression reach the next
-		# mission the world starts (its session copies, D-RMAT-24).
+		# The particle density, the texture compression and the terrain
+		# texture detail reach the next mission the world starts (its session
+		# copies, D-RMAT-24, D-RMAT-20).
 		_world.set_particle_density(state.particle_density)
 		_world.set_texcompression_level(state.texcompression_level)
+		_world.set_terrain_texdetail(state.terrain_texdetail)
 	if _hud_presenter != null:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
 		_hud_presenter.set_crosshair_color(state.crosshair_color)
