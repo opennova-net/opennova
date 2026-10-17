@@ -113,7 +113,7 @@ const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
 
 const machines = computed(() => {
-  const active = (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended');
+  const active = (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed');
   const shared = active.filter((m) => m.kind === 'shared').length;
   return { shared, own: active.length - shared };
 });

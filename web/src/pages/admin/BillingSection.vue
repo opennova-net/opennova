@@ -233,7 +233,7 @@
                 </th>
                 <td class="whitespace-nowrap px-4 py-2">{{ itemLabel(s) }}</td>
                 <td class="whitespace-nowrap px-4 py-2" :class="s.status === 'past_due' ? 'text-warn' : ''">
-                  {{ subscriptionStatusLabel(s.status) }}<template v-if="s.cancel_at_period_end">, canceling</template>
+                  {{ subscriptionStatusLabel(s.status) }}<template v-if="s.cancel_at_period_end && s.entitled">, canceling</template>
                 </td>
                 <td class="whitespace-nowrap px-4 py-2">
                   <RelativeTime v-if="s.current_period_end" :value="s.current_period_end" :now="now" />

@@ -337,7 +337,7 @@ let errorFromLoad = false;
 
 const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).length ?? 0);
 const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested).length ?? 0);
-const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended'));
+const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed'));
 
 // A pinned tree's version, or its id when the reply gave none.
 function pinnedText(tree: PinnedTree | null, treeId: number): string {
