@@ -501,7 +501,7 @@ TextureDxtFormat select_texture_dxt_format(
 	return format;
 }
 
-uint32_t texture_level_count(uint32_t width, uint32_t height,
+uint32_t texture_requested_level_count(uint32_t width, uint32_t height,
 		uint32_t creation_flags) {
 	uint32_t levels = 0;
 	for (uint32_t side = std::min(width, height); side > 2; side >>= 1) {
@@ -509,6 +509,12 @@ uint32_t texture_level_count(uint32_t width, uint32_t height,
 	}
 	if ((creation_flags & 0x40000u) != 0) levels = 1;
 	if ((creation_flags & 0x80000u) != 0) levels = std::min(levels, 3u);
+	return levels;
+}
+
+uint32_t texture_level_count(uint32_t width, uint32_t height,
+		uint32_t creation_flags) {
+	uint32_t levels = texture_requested_level_count(width, height, creation_flags);
 	if (levels == 0) {
 		// D3DXCreateTexture's 0: every level down to 1x1.
 		for (uint32_t side = std::max(width, height); side > 0; side >>= 1) {

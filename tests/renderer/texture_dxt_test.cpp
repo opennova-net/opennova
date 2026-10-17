@@ -92,6 +92,18 @@ void test_level_count() {
 					texture_level_count(48, 48, 0) == 5,
 			"pixel-built chains end at the last level above a smaller side of 2");
 	CHECK(texture_level_count(2, 8, 0) == 4, "a smaller side of 2 takes the full chain of the larger");
+	// The request as stored, the filter gate's input: 0 for a smaller side of 2 or less (D3DX's full
+	// chain, not BOX-filtered), 1 under 0x40000, at most 3 under 0x80000 (0 stays 0).
+	// [orig: GTexture_CreateFromPixelData_0 @ 0x6877E0, @ 0x687801; the gate @ 0x6878B1..0x6878B5]
+	CHECK(texture_requested_level_count(2, 8, 0) == 0 && texture_requested_level_count(2, 2, 0) == 0 &&
+					texture_requested_level_count(1, 64, 0) == 0,
+			"a smaller side of 2 or less asks for 0");
+	CHECK(texture_requested_level_count(2, 8, 0x40000u) == 1 && texture_requested_level_count(2, 8, 0x80000u) == 0 &&
+					texture_requested_level_count(256, 256, 0x80000u) == 3,
+			"0x40000 asks for one, 0x80000 caps at three and keeps a 0");
+	CHECK(texture_requested_level_count(512, 512, 0x100203u) == 8 && texture_requested_level_count(4, 4, 0) == 1 &&
+					texture_requested_level_count(256, 64, 0) == 5,
+			"a request above 0 is the level count");
 }
 
 void test_dxt1_blocks() {
