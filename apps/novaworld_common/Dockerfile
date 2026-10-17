@@ -3,8 +3,9 @@
 # program:
 #   docker build -f apps/novaworld_common/Dockerfile --target gate -t opennova-novaworld-gate .
 # and alike for lobby, web, controller and worker (.github/workflows/novaworld-images.yml
-# publishes them as ghcr.io/<owner>/opennova-novaworld-<program>). One more target,
-# smoke, is the local stack's smoke test (scripts/dev_stack.sh), never published.
+# publishes them as ghcr.io/<owner>/opennova-novaworld-<program>, all five in one bake:
+# docker-bake.hcl beside this file). One more target, smoke, is the local stack's
+# smoke test (scripts/dev_stack.sh), never published.
 #
 # Each runtime image holds its program's binary alone over one shared base: libpq,
 # the migrations and the seed (every program may migrate at boot),

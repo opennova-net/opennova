@@ -56,21 +56,19 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The Linux net leg the NovaWorld images gate on (net-linux.yml): it also
-  # builds opennova_serve and runs its tests on Linux, so a green here means
-  # the image's target builds.
+  # The Linux net leg the push gates on, as the NovaWorld images' does
+  # (net-linux.yml): it also builds opennova_serve and runs its tests on
+  # Linux, so a green here means the image's target builds.
   http-tests:
     uses: ./.github/workflows/net-linux.yml
 
-  # Built into the runner's docker and smoke-run first; then the same build,
-  # from the builder's cache, is pushed, on push events only.
+  # Built into the runner's docker and smoke-run, beside http-tests rather
+  # than after it; `push` below pushes the same build.
   serve-image:
-    needs: http-tests
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,27 +78,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Only log in + push on push events (PRs from forks can't push to GHCR).
-      - name: Log in to GHCR
-        if: github.event_name == 'push'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Image metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/opennova-serve
-          tags: |
-            type=sha,format=short
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-
       # Only pushes export the layer cache, mode=min, in a scope of its own, as
-      # the NovaWorld images do (novaworld-images.yml says why).
+      # the NovaWorld images do (novaworld-images.yml says why); `push` builds
+      # from it.
       - name: Build serve image
         uses: docker/build-push-action@v6
         with:
@@ -110,6 +90,7 @@ jobs:
           load: true
           tags: opennova-serve:ci
           cache-from: type=gha,scope=opennova-serve
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=opennova-serve,mode=min' || '' }}
 
       # The run contract, with no game data: the usage exits 0; a start with
       # no install mounted runs as the image's user (10001) in /srv/serve,
@@ -140,8 +121,46 @@ jobs:
           fi
           docker volume rm serve-smoke >/dev/null
 
+  # On push events alone (PRs from forks can't push to GHCR), once http-tests
+  # and the smoke run have passed: the same build, pushed. Its checkout is the
+  # smoke run's, so every step hits the cache serve-image just exported for
+  # this commit and the job compiles nothing, only uploads (a missed cache
+  # costs time alone: the same image builds again here).
+  push:
+    needs: [http-tests, serve-image]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/opennova-serve
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
       - name: Push serve image
-        if: github.event_name == 'push'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -151,4 +170,3 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=opennova-serve
-          cache-to: type=gha,scope=opennova-serve,mode=min
