@@ -373,11 +373,11 @@ ssm_secret_names() {
 
 # The registration of a revision of task definition $1 (described, with its
 # tags), on stdout: its containers' images from the release ($2, keyed by
-# container: hostd's among them), hosting's switch and the serve image for the
-# containers that read the fleet's policy (ONNET_HOSTED_PROVIDER: web, the
-# fleet, the worker), the hostd image for those that read the machine driver's
-# own settings too (ONNET_HOSTED_DEPLOYMENT: the worker's alone; its docker
-# driver's machines run it) ($3: serve, $4: hostd, $5: 1 on, 0 off), and its
+# container: hostd's among them), hosting's switch, the serve image and the
+# hostd image for the containers that read the fleet's policy
+# (ONNET_HOSTED_PROVIDER: web, the fleet, the worker; the worker's docker
+# driver's machines run the hostd image, and the fleet's health holds each
+# machine's agent against it) ($3: serve, $4: hostd, $5: 1 on, 0 off), and its
 # secrets: every one
 # the template names, which SSM must hold ($6, a JSON array of parameter
 # names), and each optional one its `opennova.optional-secrets` label names
@@ -394,11 +394,10 @@ def param: sub("^arn:[^:]*:ssm:[^:]*:[0-9]*:parameter"; "");
     . as $c
     | .image = ($images[$c.name] // error("the release has no image for container \($c.name)"))
     | if ((.environment // []) | any(.name == "ONNET_HOSTED_PROVIDER")) then
-        ((.environment // []) | any(.name == "ONNET_HOSTED_DEPLOYMENT")) as $driver
-        | .environment = ([.environment[] | select(.name != "ONNET_HOSTED_SERVE_IMAGE" and .name != "ONNET_HOSTED_HOSTD_IMAGE")
+        .environment = ([.environment[] | select(.name != "ONNET_HOSTED_SERVE_IMAGE" and .name != "ONNET_HOSTED_HOSTD_IMAGE")
                           | if .name == "ONNET_HOSTED_PROVIDER" and $hosting == "0" then .value = "none" else . end]
                         + (if $serve == "" then [] else [{name: "ONNET_HOSTED_SERVE_IMAGE", value: $serve}] end)
-                        + (if $hostd == "" or ($driver | not) then [] else [{name: "ONNET_HOSTED_HOSTD_IMAGE", value: $hostd}] end)
+                        + (if $hostd == "" then [] else [{name: "ONNET_HOSTED_HOSTD_IMAGE", value: $hostd}] end)
                         | sort_by(.name))
       else . end
     | .secrets = ([(.secrets // [])[] | . as $s | ($s.valueFrom | param) as $p

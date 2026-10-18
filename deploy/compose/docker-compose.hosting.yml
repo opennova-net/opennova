@@ -55,6 +55,10 @@ networks:
 x-hosting-env: &hosting-env
   ONNET_HOSTED_PROVIDER: docker
   ONNET_HOSTED_SERVE_IMAGE: ${SERVE_IMAGE:-opennova-serve:local}
+  # The hostd image the release pins: the machines' image (a server's start
+  # pins the serve image by name alone: the machines run their own binary), and
+  # what the fleet's health holds each machine's agent against.
+  ONNET_HOSTED_HOSTD_IMAGE: ${HOSTD_IMAGE:-opennova-hostd:local}
   # The fleet's internal listener at its fixed address (the dev
   # overlay's), admitting the agents from the stack's subnet; the machines'
   # admin.cfg admits the fleet's network.
@@ -90,9 +94,6 @@ services:
       ONNET_HOSTED_DOCKER_NETWORK: opennova-dev
       ONNET_HOSTED_DOCKER_DATA_FROM: opennova-dev-machine-data
       ONNET_HOSTED_DEPLOYMENT: dev
-      # The machines' image (a server's start pins the serve image by name
-      # alone: the machines run their own binary).
-      ONNET_HOSTED_HOSTD_IMAGE: ${HOSTD_IMAGE:-opennova-hostd:local}
       # The static addresses' driver's own: the addresses it hands out and
       # the zone file it writes.
       ONNET_HOSTED_DOCKER_ADDRESSES: 172.30.77.64/28

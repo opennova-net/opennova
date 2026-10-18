@@ -1055,6 +1055,19 @@ target_link_libraries(hosted_server_phase_test PRIVATE
 target_include_directories(hosted_server_phase_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hosted_server_phase COMMAND hosted_server_phase_test)
 
+# The fleet's health (apps/novaworld_common/hosted/fleet_health.h) over hand-made rows:
+# each rule just under and just over its bound (stalled starts, stuck and flapping
+# machines, the brake's held machines, a protocol mismatch, outdated agents and images,
+# machine pressure, late ticks, held launches, no lobby, failed servers and addresses,
+# orphans, oversold), the level, the admin page each links and its rule's name, stale rows
+# a warn "unknown", a machine's outdated by each image pair, the order and the heartbeat's
+# gauges. Database-free.
+add_executable(hosted_fleet_health_test novaworld/hosted_fleet_health_test.cpp)
+target_link_libraries(hosted_fleet_health_test PRIVATE
+    opennova_novaworld_common opennova_novaworld_service)
+target_include_directories(hosted_fleet_health_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hosted_fleet_health COMMAND hosted_fleet_health_test)
+
 # What an ECS task finds from its own metadata (apps/novaworld_common/ecs_metadata.h):
 # the fleet's bind (the task's private IPv4) against a fake metadata endpoint (an
 # HTTP server in the test on loopback), the environment's bind standing where it is

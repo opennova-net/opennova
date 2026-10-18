@@ -41,8 +41,14 @@
 //                                 deploy's pinned digest)
 //   ONNET_FLEET_IMAGE_ID          the image the launch templates pin (the
 //                                 deployment's fleet_ami, an ami-...), which
-//                                 a fleet roll's preview holds each machine's
+//                                 a fleet roll's preview and the fleet's
+//                                 health (fleet_health.h) hold each machine's
 //                                 against; "" with none
+//   ONNET_HOSTED_HOSTD_IMAGE      the hostd image the release pins (app
+//                                 deploy's, by digest): the image the docker
+//                                 driver's machines run, and what the fleet's
+//                                 health holds each machine's agent against;
+//                                 "" with none
 //
 // The drivers' variables:
 //
@@ -79,8 +85,8 @@
 // the docker driver (the local stack's), ONNET_HOSTED_DOCKER_URL (the Docker
 // Engine API, http://<host>:<port>), ONNET_HOSTED_DOCKER_NETWORK (the network
 // its machines join), ONNET_HOSTED_DOCKER_DATA_FROM (the container holding
-// the data sets' mounts) and ONNET_HOSTED_HOSTD_IMAGE (the machines' image:
-// opennova-hostd with opennova-serve beside it). Each driver's settings are
+// the data sets' mounts), its machines' image the policy's hostd image
+// (opennova-hostd with opennova-serve beside it). Each driver's settings are
 // read as they are; its check_config decides whether they run. Service
 // policy, not a port.
 
@@ -118,6 +124,8 @@ struct FleetConfig {
 	int slot_pids = kSlotPids;
 	// ONNET_HOSTED_SERVE_IMAGE ("" when unset).
 	std::string serve_image;
+	// ONNET_HOSTED_HOSTD_IMAGE ("" when unset).
+	std::string hostd_image;
 	// ONNET_HOSTED_ADDRESS_ZONE: the play zone the static addresses' names
 	// live in ("" when unset; the setup checks it, parts.h).
 	std::string address_zone;
@@ -172,8 +180,9 @@ EnvLookup process_env();
 bool parse_fleet_config(const EnvLookup &env, FleetConfig &out, std::vector<std::string> &errors);
 
 // The drivers' settings from `env` over the policy `fleet` (the drivers' serve
-// image and the address their machines' admin.cfg admits, its bind address,
-// are the policy's), as parse_fleet_config reads its own.
+// image, the docker driver's machines' hostd image and the address their
+// machines' admin.cfg admits, its bind address, are the policy's), as
+// parse_fleet_config reads its own.
 bool parse_driver_config(const EnvLookup &env, const FleetConfig &fleet, DriverConfig &out,
 		std::vector<std::string> &errors);
 

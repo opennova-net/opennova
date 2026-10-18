@@ -917,12 +917,12 @@ task has no execution role at all).
    FILE|-` takes the same JSON, the deploy workflow's way), and records which release it
    promoted;
 2. registers each program's task definition revision: Terraform's task definition (the
-   template, `infra.env` names it) with the release's images, the serve image in the
-   environment of the programs that read the fleet's policy (web, the fleet, the worker;
-   `--no-hosting` turns their provider off) and the hostd image in the one that reads the
-   machine driver's own settings (the worker, whose `docker` driver's machines run it),
-   every secret the template names (SSM must hold each) and each optional one its label
-   names that SSM holds; hostd's revision (its own template, the fleet cluster's daemon)
+   template, `infra.env` names it) with the release's images, the serve image and the
+   hostd image in the environment of the programs that read the fleet's policy (web, the
+   fleet, the worker; `--no-hosting` turns their provider off; the worker's `docker`
+   driver's machines run the hostd image, and the fleet's health holds each machine's
+   agent against it), every secret the template names (SSM must hold each) and each
+   optional one its label names that SSM holds; hostd's revision (its own template, the fleet cluster's daemon)
    takes the hostd image as its container's. A program whose
    revision would run exactly what it runs now keeps it, so a release that changes only
    web's image restarts web alone and never a lobby session;
