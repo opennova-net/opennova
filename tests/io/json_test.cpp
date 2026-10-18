@@ -89,7 +89,9 @@ static int test_round_trip_preserves_values() {
 static int test_escapes_and_surrogates() {
 	JsonValue v;
 	std::string error;
-	TEST_EXPECT(json_parse(R"(["\u00e9", "\ud83c\udfae", "\/\b\f\r"])", v, error));
+	// Not a raw string: MSVC 14.44 (VS 2022) reads a \u inside one as a
+	// universal-character-name and rejects the surrogate halves (C3850).
+	TEST_EXPECT(json_parse("[\"\\u00e9\", \"\\ud83c\\udfae\", \"\\/\\b\\f\\r\"]", v, error));
 	TEST_EXPECT(v.array[0].string == "\xC3\xA9");
 	TEST_EXPECT(v.array[1].string == "\xF0\x9F\x8E\xAE");
 	TEST_EXPECT(v.array[2].string == "/\b\f\r");
