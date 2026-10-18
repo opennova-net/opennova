@@ -48,9 +48,10 @@ jobs:
   # gates that do read them still run in `gates` (reported through the required
   # `test` check). Every other PR, and every
   # push, runs everything. The two required checks (`test`,
-  # `godot-tests`) gate their steps on `code` instead of skipping the job: a
-  # skipped matrix job reports under its bare name, which would leave the
-  # required "<job> (windows-latest)" check pending forever.
+  # `godot-tests`) are jobs of their own that always run and judge their legs
+  # against `code`, never skipped matrix jobs: a skipped matrix job reports
+  # under its bare name, which would leave the required
+  # "<job> (windows-latest)" check pending forever.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -837,36 +838,32 @@ jobs:
             godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
             godot/bin/libopennova_editor.windows.${{ matrix.target }}.x86_64.dll
 
-  godot-tests:
-    # One-entry matrix on purpose: branch protection requires the check named
-    # "godot-tests (windows-latest)", which the matrix produces.
+  # The Godot core suite on Windows as two shards, each on a runner of its own
+  # (scripts/ci/test_suites.py GODOT_SHARDS: `shells` the scripts under
+  # tests/authoring, game, mcp and probes, `world` the others), each attesting
+  # its own selection; one GUT process ran them back to back (~7 min of
+  # scripts, the run's longest leg). GitHub's standard runners, free for a
+  # public repository: GUT runs one test at a time. `godot-tests` reports them
+  # under the required check's name. Skipped with the extension build on a
+  # docs-only PR.
+  godot-tests-core:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
-    needs: [changes, build-gdextension-windows]
-    # Runs (its steps gated on `code`) when the extension build was skipped
-    # for a docs-only PR, so the required check still reports; skipped, as
-    # before, when that build failed. A failed `changes` skips it too, which
-    # leaves the required check pending rather than vacuously green.
-    if: >-
-      !cancelled() && needs.changes.result == 'success' &&
-      needs.build-gdextension-windows.result != 'failure'
+        shard: [shells, world]
+    runs-on: windows-latest
+    needs: [build-gdextension-windows]
     env:
       GODOT_VERSION: 4.6.1-stable
       OPENNOVA_JO_DIR: ''
       OPENNOVA_JO_ASSETS: ''
-      CODE: ${{ needs.changes.outputs.code }}
     steps:
       - uses: actions/checkout@v4
-        if: env.CODE == 'true'
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
           submodules: recursive
 
       - name: Pull Git LFS assets (fixtures/ only)
-        if: env.CODE == 'true'
         shell: bash
         run: |
           git lfs install --local
@@ -875,7 +872,6 @@ jobs:
       # runner.os, like the package and release jobs: one cache entry serves
       # every job that installs this binary.
       - name: Cache Godot binary
-        if: env.CODE == 'true'
         uses: actions/cache@v4
         with:
           path: .godot-bin
@@ -883,7 +879,6 @@ jobs:
 
       # This job uses the Windows console binary and matching GDExtension.
       - name: Install Godot (Windows)
-        if: env.CODE == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -899,14 +894,12 @@ jobs:
       # The editor binary that runs GUT loads the template_debug flavour only
       # (the editor-enabled variant, through the plain .gdextension row).
       - name: Download GDExtensions (Windows)
-        if: env.CODE == 'true'
         uses: actions/download-artifact@v4
         with:
           name: gdext_windows_template_debug
           path: godot/bin
 
       - name: Prime Godot import cache
-        if: env.CODE == 'true'
         shell: bash
         run: |
           GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
@@ -925,20 +918,48 @@ jobs:
             exit 1
           fi
 
-      - name: Run Godot tests
-        if: env.CODE == 'true'
+      - name: Run Godot tests (core, ${{ matrix.shard }})
         shell: bash
         run: |
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          bash scripts/test_godot.sh --suite core
+          bash scripts/test_godot.sh --suite core --shard ${{ matrix.shard }}
 
       - name: Upload godot core test reports
-        if: always() && env.CODE == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: godot-core-reports
+          name: godot-core-reports-${{ matrix.shard }}
           if-no-files-found: warn
           path: build/Testing/
+
+  # The required check "godot-tests (windows-latest)" (branch protection names
+  # it): green when both core shards passed, or were skipped because there was
+  # nothing for them to run (a docs-only change). It runs when a shard or the
+  # extension build fails too, so a failure reports red, never skipped.
+  godot-tests:
+    name: godot-tests (windows-latest)
+    if: ${{ !cancelled() }}
+    needs: [changes, godot-tests-core]
+    runs-on: ubuntu-latest
+    steps:
+      - name: The Windows Godot shards
+        shell: bash
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CORE: ${{ needs.godot-tests-core.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+        run: |
+          echo "godot-tests-core: ${CORE}"
+          if [[ "$CHANGES" != success ]]; then
+            echo "::error::a gate job did not pass (changes: ${CHANGES})"
+            exit 1
+          fi
+          want=skipped
+          if [[ "$CODE" == true ]]; then want=success; fi
+          if [[ "$CORE" != "$want" ]]; then
+            echo "::error::godot-tests-core: ${CORE} (expected ${want})"
+            exit 1
+          fi
 
   # The game archive and the editor archive (the editor plus the runtime it
   # plays a project with).
