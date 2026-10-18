@@ -737,6 +737,7 @@ void record_round_fire(World &world, RoundSim &sim,
     event.yaw_bam = params.dir_yaw_bam;
     event.pitch_bam = params.dir_pitch_bam;
     event.wire_round_flags = params.wire_round_flags;
+    event.action_leg_presentation = params.action_leg_presentation;
     event.adm_index = params.adm_index;
     sim.fired.push_back(event);
 	// Received ADM fire executes the action row on every peer, including its

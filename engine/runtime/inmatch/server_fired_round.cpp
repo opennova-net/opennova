@@ -344,6 +344,10 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			// own flight presents as any round's). [orig: Server_ClientFiredRound -
 			//  the alt AddRound @0x50BE52 and its return @0x50BE57..0x50BE64]
 			rp.launch_presented = alt_fire;
+			// A primary round came through the slot's fire action on this host, whose
+			// FIRE row presents its effect and glow [orig: the fire action
+			//  @0x50C30D -> WeaponAction_Fire @0x542CB4].
+			rp.action_leg_presentation = !alt_fire && fired_mode >= 0;
 			rp.shot_seq = shot_seq;
 			rp.subtype = ev.subtype;
 			// PowerThrow charge from fireRequest+80; RoundData_SpawnRound

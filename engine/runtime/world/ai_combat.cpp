@@ -619,6 +619,9 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     rp.ammo_index = ammo_index;
     rp.adm_index = adm_index;
     rp.shot_seq = fire_shot_seq;
+    // The gunner's slot fire action presents its FIRE row on the host
+    // [orig: WeaponAction_Fire @0x542CB4 -> ActionSlot_SpawnEffect @0x401F20].
+    rp.action_leg_presentation = true;
     // The spawn marks the shooter (Flags 0x4000, the §16.2 x6 scoring flag)
     // unless the ammo is SILENCED.
     world.round_sim.spawn(world, rp);

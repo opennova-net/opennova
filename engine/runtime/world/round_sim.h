@@ -195,6 +195,12 @@ RandomSpreadOffset weapon_calc_shotgun_spread_offset(
 
 struct RoundSpawnParams {
     bool launch_presented = false; // Weapon_FireProcess already emitted ammo launch effects
+    // The host's own copy of a slot fire action's round (an AI gunner's FSM fire, a
+    // remote client's primary 0x06): its launch effect and glow are the fired def's
+    // FIRE row's at the gun, as WeaponAction_Fire's ActionSlot_ExecuteActionTick
+    // presents them, not the ammo's. [orig: WeaponAction_Fire @0x542CB4 ->
+    //  ActionSlot_ExecuteActionTick @0x541A70 -> ActionSlot_SpawnEffect @0x401F20]
+    bool action_leg_presentation = false;
     EntityHandle owner;               // the shooter entity (skipped in the hit test)
     uint16_t shooter_handle = 0xFFFF; // pool<<12|slot, for death credit
     // The decoded shooter's carrier at fire time (visual-only rounds): keeps a
@@ -581,6 +587,8 @@ struct FireEvent {
     // observed shooter's equipped weapon — conflating them is a port bug.
     // [orig: AdmDef_GetEntryByIndex @0x42f6d9]
     uint8_t adm_index = 0;
+    // RoundSpawnParams::action_leg_presentation, carried to the presentation drain.
+    bool action_leg_presentation = false;
 };
 
 // One resolved hit-test outcome, kept in a persistent ring for the F3 Rounds
