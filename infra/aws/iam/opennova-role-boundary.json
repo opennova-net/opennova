@@ -16,7 +16,8 @@
         "ec2:DescribeAddresses",
         "ecs:DescribeTaskDefinition",
         "ecs:RegisterTaskDefinition",
-        "elasticloadbalancing:DescribeTargetHealth"
+        "elasticloadbalancing:DescribeTargetHealth",
+        "cloudwatch:GetMetricData"
       ],
       "Resource": "*"
     },
@@ -57,7 +58,9 @@
       "Action": [
         "logs:CreateLogStream",
         "logs:PutLogEvents",
-        "logs:DescribeLogStreams"
+        "logs:DescribeLogStreams",
+        "logs:GetLogEvents",
+        "logs:FilterLogEvents"
       ],
       "Resource": [
         "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*",

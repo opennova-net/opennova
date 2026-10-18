@@ -1640,7 +1640,12 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   CloudWatch (`/opennova/<deployment>/service`, 30 days, a stream per container and task,
   `<program>/<container>/<task id>`: web's task writes `web/web/...` and
   `web/portal/...`; a program's name tails all of its tasks'). The game machines' are
-  `fleet logs` ("Hosted game servers", Operating notes).
+  `fleet logs` ("Hosted game servers", Operating notes). The site's admin pages read the same
+  groups (`GET /api/admin/logs`: a program's tasks, a machine's hostd, a hosted server's
+  starts) with web's task role, which reads their events alone (`infra_read`), and each
+  program's, machine's and server's CPU, memory and network from the rows the service writes
+  (`GET /api/admin/usage`, `GET /api/admin/programs`), the database's, the cache's and the
+  balancer's from CloudWatch's metrics (`cloudwatch:GetMetricData`, kept 60 s).
 - **Alarms** go to the deployment's SNS topic, `opennova-<deployment>-alerts` in its account, which emails
   `alerts/email` (confirm the subscription from the first email AWS sends): per program,
   no heartbeat for 5 minutes, more boots in 15 minutes than its `max` and 3 (a crash

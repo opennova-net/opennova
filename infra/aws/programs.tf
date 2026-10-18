@@ -233,9 +233,23 @@ resource "aws_iam_role_policy" "exec" {
 # read-only, each scoped to this deployment's own resource where the API allows
 # one. ListTasks takes the cluster as a condition; Elastic Load Balancing's and
 # EC2's describe calls take no resource (web asks only for this deployment's
-# target groups and its machines' instance ids). The boundary
-# (infra/aws/iam/opennova-role-boundary.json) holds the same, so the org stack
-# applies it first.
+# target groups and its machines' instance ids), nor does CloudWatch's
+# GetMetricData (web asks for its database's, cache's and balancer's metrics
+# alone). The logs are this deployment's three groups' (the programs', the
+# machines' and the servers', observability.tf), read for the admin's log
+# view. The boundary (infra/aws/iam/opennova-role-boundary.json) holds the
+# same, so the org stack applies it first.
+locals {
+  log_group_prefix = "/opennova/${local.deployment}"
+  # Every group the log view reads, and each one's streams.
+  read_log_groups = flatten([
+    for g in ["service", "machines", "servers"] : [
+      "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${local.log_group_prefix}/${g}",
+      "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${local.log_group_prefix}/${g}:*",
+    ]
+  ])
+}
+
 data "aws_iam_policy_document" "infra_read" {
   statement {
     sid       = "ReadServices"
@@ -296,6 +310,20 @@ data "aws_iam_policy_document" "infra_read" {
     sid       = "ReadMachines"
     effect    = "Allow"
     actions   = ["ec2:DescribeInstances"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadLogs"
+    effect    = "Allow"
+    actions   = ["logs:GetLogEvents", "logs:FilterLogEvents", "logs:DescribeLogStreams"]
+    resources = local.read_log_groups
+  }
+
+  statement {
+    sid       = "ReadMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:GetMetricData"]
     resources = ["*"]
   }
 }
@@ -389,19 +417,22 @@ locals {
   # the toolbox's admin calls from there), /api/ for it alone (the retail port
   # is open to the internet), and the retail port's own proxy, the portal
   # nginx's retail server (web/nginx.conf), which reaches web from 127.0.0.2
-  # and names each client in X-Real-IP, no trusted proxy.
+  # and names each client in X-Real-IP, no trusted proxy. The admin's log view
+  # reads the deployment's log groups (apps/novaworld_web/infra/log_store.h).
   web_env = {
     ONNET_COOKIE_SECURE   = local.edge_proxied ? "1" : "0"
     ONNET_TRUSTED_PROXIES = "127.0.0.1"
     ONNET_API_PROXY_ONLY  = "1"
     ONNET_RETAIL_PROXY    = "127.0.0.2"
+    ONNET_LOG_STORE       = "cloudwatch:${local.log_group_prefix}"
   }
 
   # The admin's infrastructure view (apps/novaworld_web/infra/infra_status.h):
   # what web reads with its task role (the policy below, and fleet_agent.tf's),
   # each setting naming this deployment's own: the cluster and its services,
   # the fleet cluster ("" while hosting is off), the balancer's target groups
-  # by listener, the database, the cache and the release parameter.
+  # by listener, the database, the cache and the release parameter; and the
+  # balancer by its metrics' dimension (the usage view's, metrics_store.h).
   infra_status_env = {
     ONNET_INFRA_REGION            = local.region
     ONNET_INFRA_CLUSTER           = aws_ecs_cluster.main.name
@@ -410,6 +441,7 @@ locals {
     ONNET_INFRA_DATABASE          = aws_db_instance.main.identifier
     ONNET_INFRA_CACHE             = aws_elasticache_replication_group.cache.replication_group_id
     ONNET_INFRA_RELEASE_PARAMETER = aws_ssm_parameter.release.name
+    ONNET_INFRA_LOAD_BALANCER     = aws_lb.public.arn_suffix
   }
 
   # The update service (ADR 0061, 0064): web serves retail UPDATE.EXE on the

@@ -515,6 +515,8 @@ run "environments" {
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_DATABASE"] == "opennova-prod-db" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_CACHE"] == "opennova-prod-cache" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_RELEASE_PARAMETER"] == "/opennova/prod/release" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_LOAD_BALANCER"] == "net/opennova-prod/0123456789abcdef" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_LOG_STORE"] == "cloudwatch:/opennova/prod" &&
       jsondecode({ for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_TARGET_GROUPS"]) == {
         gate   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef"
         lobby  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
@@ -522,9 +524,10 @@ run "environments" {
         https  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-https/0123456789abcdef"
         update = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
       } &&
-      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INFRA_")])
+      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INFRA_")]) &&
+      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_LOG_STORE")])
     )
-    error_message = "web alone is told what the admin's infrastructure view reads: this deployment's cluster (and no fleet cluster with hosting off), its target groups by listener, its database, cache and release parameter, in its region"
+    error_message = "web alone is told what the admin's infrastructure view reads: this deployment's cluster (and no fleet cluster with hosting off), its target groups by listener, its database, cache, balancer and release parameter, in its region, and its log groups' prefix"
   }
 }
 
@@ -664,10 +667,23 @@ run "task_roles" {
       toset(flatten([for st in data.aws_iam_policy_document.infra_read.statement : st.actions])) == toset([
         "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTasks", "elasticloadbalancing:DescribeTargetHealth",
         "rds:DescribeDBInstances", "elasticache:DescribeReplicationGroups", "ssm:GetParameter", "ec2:DescribeInstances",
+        "logs:GetLogEvents", "logs:FilterLogEvents", "logs:DescribeLogStreams", "cloudwatch:GetMetricData",
       ]) &&
-      alltrue([for st in data.aws_iam_policy_document.infra_read.statement : !anytrue([for a in st.actions : !can(regex("^[a-z0-9]+:(Describe|List|Get)", a))])])
+      alltrue([for st in data.aws_iam_policy_document.infra_read.statement : !anytrue([for a in st.actions : !can(regex("^[a-z0-9]+:(Describe|List|Get|Filter)", a))])])
     )
     error_message = "web's role holds the infrastructure view's reads, and nothing but reads"
+  }
+  assert {
+    condition = (
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadLogs"]) == toset(flatten([
+        for g in ["service", "machines", "servers"] : [
+          "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/${g}",
+          "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/${g}:*",
+        ]
+      ])) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadMetrics"]) == toset(["*"])
+    )
+    error_message = "web reads the events of this deployment's three log groups alone (the programs', the machines', the servers'), and CloudWatch's metrics, which take no resource"
   }
   assert {
     condition = (
