@@ -1,7 +1,7 @@
 #pragma once
 
-// The admin's fleet routes (ADR 0053, proposed; README "Hosted servers"): the
-// fleet view (GET /api/admin/hosted: the machines and the servers on them,
+// The admin's fleet routes (ADR 0053, proposed; apps/novaworld_common/hosted/README.md
+// "Routes"): the fleet view (GET /api/admin/hosted: the machines and the servers on them,
 // filtered by owner and state), one server with its
 // machine (GET /api/admin/hosted/<id>), the machines' moves an admin makes: a
 // drain, an end and a fleet roll (POST /api/admin/fleet/...), and the force of

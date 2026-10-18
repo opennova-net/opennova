@@ -1,7 +1,8 @@
 #pragma once
 
-// The hosted servers' console routes (ADR 0053 d5, proposed; README "Hosted
-// servers"): the site's players, rotation, chat and console pages run the
+// The hosted servers' console routes (ADR 0053 d5, proposed;
+// apps/novaworld_common/hosted/README.md "The console routes"): the site's players,
+// rotation, chat and console pages run the
 // curated commands (console_commands.h) on the server's admin link
 // (admin_link.h), which the controller holds: each command goes through the
 // database (console_queue.h), and the link's state is its row
