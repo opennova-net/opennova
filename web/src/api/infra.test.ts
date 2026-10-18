@@ -33,7 +33,9 @@ describe('the infrastructure view client', () => {
     expect(cloud.database).toBeNull();
     expect(cloud.release).toBeNull();
     expect(cloud.release_none).toBe(false);
+    expect(cloud.fleet).toBeNull();
     expect(pickCloud({ configured: true, database: { identifier: 'x' } })).toBeNull();
+    expect(pickCloud({ configured: true, fleet: { cluster: 'c', instances: [{ status: 'ACTIVE' }] } })).toBeNull();
     expect(pickCloud({ configured: false })).toEqual({ configured: false, unavailable: 'AWS is not read here.' });
 
     const task = pickTask({ id: 'abc', containers: [{ name: 'web', exit_code: 2 }] });

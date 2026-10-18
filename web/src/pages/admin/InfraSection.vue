@@ -25,8 +25,8 @@
 
     <template v-if="overview">
       <p v-if="!overview.cloud.configured" class="infra-unavailable rounded-panel border border-border bg-panel p-4 text-sm text-ink-muted">
-        {{ overview.cloud.unavailable }}. The lobby instances, the fleet leader and the machines below come from the
-        database.
+        {{ overview.cloud.unavailable }}. What the programs use, the lobby instances, the fleet leader and the machines
+        below come from the database.
       </p>
       <p v-else-if="cloud?.error" class="infra-cloud-error rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
         AWS could not be read: {{ cloud.error }}
@@ -45,128 +45,100 @@
         <StatTile label="Fleet machines" :value="machinesTile.value" :detail="machinesTile.detail" />
       </dl>
 
-      <template v-if="cloud && !cloud.error">
-        <!-- The programs: an ECS service each. -->
-        <section class="space-y-4" aria-labelledby="infra-programs">
-          <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-            <h2 id="infra-programs" class="text-xl font-semibold text-ink">Programs</h2>
-            <p class="text-xs text-ink-muted">
-              Cluster <span class="font-mono text-ink">{{ cloud.cluster }}</span> in {{ cloud.region }}, read from AWS
-              <RelativeTime :value="cloud.read_at" :now="now" />
-            </p>
-          </div>
-          <p v-if="cloud.services_error" class="text-sm text-danger">The services could not be read: {{ cloud.services_error }}</p>
-          <p v-if="cloud.tasks_error" class="text-sm text-danger">The tasks could not be read: {{ cloud.tasks_error }}</p>
-          <p v-if="cloud.release_error" class="text-sm text-danger">The release could not be read: {{ cloud.release_error }}</p>
-          <div class="grid gap-4 xl:grid-cols-2">
-            <article
-              v-for="s in cloud.services"
-              :key="s.name"
-              class="infra-service min-w-0 space-y-3 rounded-panel border border-border bg-panel p-4"
-              :aria-labelledby="`infra-service-${s.name}`"
-            >
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <h3 :id="`infra-service-${s.name}`" class="text-lg font-semibold text-ink">{{ s.name }}</h3>
-                  <p class="break-all font-mono text-xs text-ink-muted">{{ s.task_definition }}</p>
-                  <p v-if="s.on_release !== null" class="text-xs" :class="s.on_release ? 'text-ink-muted' : 'text-warn'">
-                    {{ s.on_release ? "The release's revision" : "Not the release's revision" }}
-                  </p>
-                </div>
-                <div class="flex shrink-0 flex-col items-end gap-1">
-                  <span :class="toneBadgeClass(serviceState(s).tone)">{{ serviceState(s).label }}</span>
-                  <span class="whitespace-nowrap text-sm text-ink">{{ s.running }} of {{ s.desired }} running</span>
-                  <span v-if="s.pending > 0" class="text-xs text-warn">{{ s.pending }} starting</span>
-                </div>
-              </div>
-
-              <ul v-if="showDeployments(s)" class="space-y-1 text-xs text-ink-muted">
-                <li v-for="d in s.deployments" :key="d.id" class="infra-deployment">
-                  <span class="font-medium text-ink">{{ d.status === 'PRIMARY' ? 'New' : 'Old' }}</span> <span class="font-mono">{{
-                    d.task_definition
-                  }}</span>: {{ d.running }} of {{ d.desired }} running<template
-                    v-if="d.failed > 0"
-                    >, <span class="text-danger">{{ countLabel(d.failed, 'task') }} failed</span></template
-                  >, rollout {{ rolloutLabel(d.rollout_state).toLowerCase()
-                  }}<template v-if="d.created_at">, began <RelativeTime :value="d.created_at" :now="now" /></template>
-                </li>
-              </ul>
-              <p v-else-if="primaryDeployment(s)?.created_at" class="text-xs text-ink-muted">
-                Deployed <RelativeTime :value="primaryDeployment(s)!.created_at!" :now="now" />, rollout
-                {{ rolloutLabel(primaryDeployment(s)!.rollout_state).toLowerCase() }}
+      <!-- The programs: a card each (ECS's service, what its tasks use), and
+           hostd's daemon on the fleet cluster with its machines. -->
+      <section v-if="programNames.length" class="space-y-4" aria-labelledby="infra-programs">
+        <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+          <h2 id="infra-programs" class="text-xl font-semibold text-ink">Programs</h2>
+          <p v-if="cloudRead" class="text-xs text-ink-muted">
+            Cluster <span class="font-mono text-ink">{{ cloudRead.cluster }}</span> in {{ cloudRead.region }}, read from AWS
+            <RelativeTime :value="cloudRead.read_at" :now="now" />
+          </p>
+        </div>
+        <template v-if="cloudRead">
+          <p v-if="cloudRead.services_error" class="text-sm text-danger">The services could not be read: {{ cloudRead.services_error }}</p>
+          <p v-if="cloudRead.tasks_error" class="text-sm text-danger">The tasks could not be read: {{ cloudRead.tasks_error }}</p>
+          <p v-if="cloudRead.release_error" class="text-sm text-danger">The release could not be read: {{ cloudRead.release_error }}</p>
+        </template>
+        <p v-if="programsError" class="infra-programs-error text-sm text-danger">What the programs use could not be read: {{ programsError }}</p>
+        <div class="grid gap-4 xl:grid-cols-2">
+          <ProgramCard
+            v-for="name in programNames"
+            :key="name"
+            :name="name"
+            :service="serviceOf(name)"
+            :usage="usageOf(name)"
+            :cloud-read="cloudRead !== null"
+            :now="now"
+            :to="`/admin/infrastructure/programs/${name}`"
+          />
+          <ProgramCard
+            v-if="cloudRead?.fleet"
+            name="hostd"
+            :service="cloudRead.fleet.hostd"
+            :usage="null"
+            :cloud-read="true"
+            :now="now"
+            to="/admin/fleet"
+            link-label="Its machines, on the Fleet page"
+          >
+            <div class="infra-fleet-cluster space-y-1">
+              <h4 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                Machines in <span class="font-mono normal-case">{{ cloudRead.fleet.cluster }}</span>
+              </h4>
+              <p v-if="cloudRead.fleet.error" class="text-xs text-danger">The fleet cluster could not be read: {{ cloudRead.fleet.error }}</p>
+              <p v-else-if="cloudRead.fleet.instances.length === 0" class="text-xs text-ink-muted">
+                No machine has registered, so hostd runs nowhere yet.
               </p>
-
-              <ul v-if="s.tasks.length" class="divide-y divide-border border-t border-border">
-                <li v-for="t in s.tasks" :key="t.id" class="infra-task space-y-1 py-2 text-sm">
-                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span class="font-mono text-ink" :title="`Task ${t.id}`">{{ t.id.slice(0, 8) }}</span>
-                    <span :class="toneBadgeClass(healthLabel(t.health).tone)">{{ healthLabel(t.health).label }}</span>
-                    <span v-if="t.last_status !== 'RUNNING'" class="text-xs text-warn">{{ taskStatusLabel(t.last_status) }}</span>
-                    <span v-if="t.on_release === false" class="text-xs text-warn">Revision {{ revisionOf(t.task_definition) }}</span>
-                  </div>
-                  <p class="text-xs text-ink-muted">
-                    <template v-if="t.started_at">Started <RelativeTime :value="t.started_at" :now="now" /></template>
-                    <template v-else-if="t.created_at">Created <RelativeTime :value="t.created_at" :now="now" />, not started</template>
-                    <template v-if="t.zone">, {{ t.zone }}</template>
-                    <template v-if="t.private_ip">, <span class="font-mono">{{ t.private_ip }}</span></template>
-                    <template v-if="taskSize(t)">, {{ taskSize(t) }}</template>
-                  </p>
-                  <p v-for="c in t.containers" :key="c.name" class="break-all text-xs text-ink-muted">
-                    <span class="text-ink">{{ c.name }}</span>:
-                    <span class="font-mono" :title="c.image_digest ? `${c.image} (pulled ${c.image_digest})` : c.image">{{ shortImage(c.image) }}</span>
-                    <span v-if="c.health === 'UNHEALTHY'" class="text-danger">{{ ' unhealthy' }}</span>
-                  </p>
+              <ul v-else class="space-y-1">
+                <li v-for="i in cloudRead.fleet.instances" :key="i.id" class="infra-instance text-xs text-ink-muted">
+                  <RouterLink v-if="i.machine_id" :to="`/admin/fleet/machines/${i.machine_id}`" class="text-accent hover:text-ink-bright">
+                    Machine {{ i.machine_id }}</RouterLink
+                  ><span v-else class="text-warn">A machine with no machine-id</span>
+                  <template v-if="i.kind"> ({{ i.kind }})</template>:
+                  <span :class="i.agent_connected ? '' : 'font-semibold text-danger'">{{
+                    i.agent_connected ? 'its ECS agent connected' : 'its ECS agent NOT connected'
+                  }}</span>, {{ i.status.toLowerCase() }}, {{ countLabel(i.running_tasks, 'task') }} running<template v-if="i.pending_tasks"
+                    >, {{ i.pending_tasks }} starting</template
+                  ><template v-if="i.ec2_instance_id">, <span class="font-mono">{{ i.ec2_instance_id }}</span></template
+                  ><template v-if="i.image_id">, <span class="font-mono">{{ i.image_id }}</span></template>
                 </li>
               </ul>
-              <p v-else class="border-t border-border pt-2 text-sm text-ink-muted">No task runs.</p>
+            </div>
+          </ProgramCard>
+        </div>
 
-              <div v-if="s.stopped_tasks.length" class="space-y-1">
-                <h4 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">Recently stopped</h4>
-                <ul class="space-y-1">
-                  <li v-for="t in s.stopped_tasks" :key="t.id" class="infra-stopped-task text-xs text-ink-muted">
-                    <span class="font-mono text-ink" :title="`Task ${t.id}`">{{ t.id.slice(0, 8) }}</span>
-                    <template v-if="t.stopped_at"> stopped <RelativeTime :value="t.stopped_at" :now="now" /></template>:
-                    {{ stoppedReason(t) }}
-                  </li>
-                </ul>
-              </div>
+        <div v-if="cloudRead && (cloudRead.one_off_tasks.length || cloudRead.one_off_stopped_tasks.length)" class="infra-one-off rounded-panel border border-border bg-panel p-4">
+          <h3 class="text-sm font-semibold text-ink">One-off tasks</h3>
+          <p class="text-xs text-ink-muted">The nightly backup, and the toolbox's database tasks.</p>
+          <ul class="mt-2 space-y-1 text-sm">
+            <li v-for="t in cloudRead.one_off_tasks" :key="t.id" class="flex flex-wrap gap-x-3">
+              <span class="font-mono" :title="`Task ${t.id}`">{{ t.id.slice(0, 8) }}</span>
+              <span>{{ t.group.replace(/^family:/, '') }}</span>
+              <span class="text-xs text-ink-muted">
+                {{ taskStatusLabel(t.last_status) }}<template v-if="t.started_at">, started <RelativeTime :value="t.started_at" :now="now" /></template>
+              </span>
+            </li>
+            <li v-for="t in cloudRead.one_off_stopped_tasks" :key="t.id" class="flex flex-wrap gap-x-3 text-xs text-ink-muted">
+              <span class="font-mono text-ink" :title="`Task ${t.id}`">{{ t.id.slice(0, 8) }}</span>
+              <span>{{ t.group.replace(/^family:/, '') }}</span>
+              <span>
+                <template v-if="t.stopped_at">Stopped <RelativeTime :value="t.stopped_at" :now="now" />: </template>{{ stoppedReason(t) }}
+              </span>
+            </li>
+          </ul>
+        </div>
+      </section>
 
-              <details v-if="s.events.length" class="text-xs">
-                <summary class="cursor-pointer text-accent hover:text-ink-bright">Recent events ({{ s.events.length }})</summary>
-                <ul class="mt-2 space-y-1 text-ink-muted">
-                  <li v-for="(e, i) in s.events" :key="i" class="infra-event">
-                    <RelativeTime v-if="e.at" :value="e.at" :now="now" class="whitespace-nowrap" />: {{ e.message }}
-                  </li>
-                </ul>
-              </details>
-            </article>
-          </div>
-
-          <div v-if="cloud.one_off_tasks.length || cloud.one_off_stopped_tasks.length" class="infra-one-off rounded-panel border border-border bg-panel p-4">
-            <h3 class="text-sm font-semibold text-ink">One-off tasks</h3>
-            <p class="text-xs text-ink-muted">The nightly backup, and the toolbox's database tasks.</p>
-            <ul class="mt-2 space-y-1 text-sm">
-              <li v-for="t in cloud.one_off_tasks" :key="t.id" class="flex flex-wrap gap-x-3">
-                <span class="font-mono" :title="`Task ${t.id}`">{{ t.id.slice(0, 8) }}</span>
-                <span>{{ t.group.replace(/^family:/, '') }}</span>
-                <span class="text-xs text-ink-muted">
-                  {{ taskStatusLabel(t.last_status) }}<template v-if="t.started_at">, started <RelativeTime :value="t.started_at" :now="now" /></template>
-                </span>
-              </li>
-              <li v-for="t in cloud.one_off_stopped_tasks" :key="t.id" class="flex flex-wrap gap-x-3 text-xs text-ink-muted">
-                <span class="font-mono text-ink" :title="`Task ${t.id}`">{{ t.id.slice(0, 8) }}</span>
-                <span>{{ t.group.replace(/^family:/, '') }}</span>
-                <span>
-                  <template v-if="t.stopped_at">Stopped <RelativeTime :value="t.stopped_at" :now="now" />: </template>{{ stoppedReason(t) }}
-                </span>
-              </li>
-            </ul>
-          </div>
-        </section>
-
+      <template v-if="cloud && !cloud.error">
         <!-- The load balancer's target groups. -->
         <section class="space-y-4" aria-labelledby="infra-targets">
-          <h2 id="infra-targets" class="text-xl font-semibold text-ink">Load balancer</h2>
+          <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+            <h2 id="infra-targets" class="text-xl font-semibold text-ink">Load balancer</h2>
+            <RouterLink to="/admin/infrastructure/resources/nlb" class="infra-resource-link text-sm text-accent hover:text-ink-bright">
+              Its traffic and healthy targets over time
+            </RouterLink>
+          </div>
           <p class="text-sm text-ink-muted">
             Each listener's targets, the tasks behind it, as the network load balancer's health checks see them.
           </p>
@@ -245,6 +217,9 @@
                 <dt class="text-ink-muted">Storage</dt>
                 <dd>{{ cloud.database.storage_gb }} GiB{{ cloud.database.storage_type ? ` ${cloud.database.storage_type}` : '' }}</dd>
               </dl>
+              <RouterLink to="/admin/infrastructure/resources/rds" class="infra-resource-link block text-sm text-accent hover:text-ink-bright">
+                Its CPU, memory, connections and network over time
+              </RouterLink>
             </article>
             <article class="infra-cache space-y-2 rounded-panel border border-border bg-panel p-4" aria-labelledby="infra-cache-heading">
               <div class="flex items-start justify-between gap-3">
@@ -267,6 +242,9 @@
                   <dd>{{ n.role ? n.role.charAt(0).toUpperCase() + n.role.slice(1) : 'Node' }}<template v-if="n.zone">, {{ n.zone }}</template></dd>
                 </template>
               </dl>
+              <RouterLink to="/admin/infrastructure/resources/cache" class="infra-resource-link block text-sm text-accent hover:text-ink-bright">
+                Its CPU, memory, connections and network over time
+              </RouterLink>
             </article>
           </div>
         </section>
@@ -337,102 +315,53 @@
         </dl>
       </section>
 
-      <!-- The fleet's machines (fleet_machines). -->
-      <section class="space-y-4" aria-labelledby="infra-machines">
-        <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-          <h2 id="infra-machines" class="text-xl font-semibold text-ink">Fleet machines</h2>
-          <RouterLink to="/admin/fleet" class="text-sm text-accent hover:text-ink-bright">The fleet: machines, servers and their moves</RouterLink>
-        </div>
-        <p class="text-sm text-ink-muted">
-          The machines hosted servers run on.
-          <template v-if="!overview.hosting.enabled">Hosting is off on this service.</template>
-          <HistoryToggle v-model="showMachineHistory" :count="replacedMachineIds.size" class="ml-1" />
+      <!-- The fleet's machines (fleet_machines): their own page is the Fleet's. -->
+      <section class="space-y-2" aria-labelledby="infra-machines">
+        <h2 id="infra-machines" class="text-xl font-semibold text-ink">Fleet machines</h2>
+        <p class="infra-machines-summary text-sm text-ink">
+          {{ machinesSummary }}
+          <RouterLink to="/admin/fleet" class="text-accent hover:text-ink-bright">The fleet: machines, servers and their moves</RouterLink>
         </p>
+        <p v-if="ec2Gone > 0" class="text-sm text-warn">EC2 no longer runs {{ countLabel(ec2Gone, 'live machine') }} of them.</p>
         <p v-if="cloud?.machines_error" class="text-sm text-danger">EC2 could not be read: {{ cloud.machines_error }}</p>
-        <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
-          <table class="min-w-full divide-y divide-border">
-            <caption class="sr-only">Fleet machines</caption>
-            <thead>
-              <tr :class="headRow">
-                <th scope="col" class="px-4 py-3">Machine</th>
-                <th scope="col" class="px-4 py-3">Kind</th>
-                <th scope="col" class="px-4 py-3">State</th>
-                <th scope="col" class="px-4 py-3">Slots used</th>
-                <th scope="col" class="px-4 py-3">Instance</th>
-                <th scope="col" class="px-4 py-3">Zone</th>
-                <th scope="col" class="px-4 py-3">Launched</th>
-                <th scope="col" class="px-4 py-3">Ended</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-border text-sm text-ink">
-              <tr v-if="overview.machines.length === 0">
-                <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No machine has run.</td>
-              </tr>
-              <tr v-for="m in machinesShown" :key="m.id" class="infra-machine-row align-top hover:bg-hover">
-                <th scope="row" class="whitespace-nowrap px-4 py-3 text-left font-normal">
-                  <RouterLink to="/admin/fleet" class="font-mono text-xs text-accent hover:text-ink-bright">{{ m.id }}</RouterLink>
-                </th>
-                <td class="whitespace-nowrap px-4 py-3">{{ machineKindLabel(m.kind) }}</td>
-                <td class="whitespace-nowrap px-4 py-3" :class="machineStateClass(m.state)">{{ machineStateLabel(m.state) }}</td>
-                <td class="whitespace-nowrap px-4 py-3">{{ m.slots_used }} of {{ m.slots }}</td>
-                <td class="whitespace-nowrap px-4 py-3 font-mono text-xs">
-                  {{ m.cloud_id || 'None yet' }}
-                  <span v-if="m.instance_type" class="block text-ink-muted">{{ m.instance_type }}</span>
-                  <span v-if="m.ec2_state" class="block font-sans" :class="ec2Mismatch(m) ? 'text-warn' : 'text-ink-muted'">EC2: {{ m.ec2_state }}</span>
-                </td>
-                <td class="whitespace-nowrap px-4 py-3 text-xs">{{ m.zone || '' }}</td>
-                <td class="whitespace-nowrap px-4 py-3 text-xs text-ink-muted">
-                  <RelativeTime v-if="m.launched_at" :value="m.launched_at" :now="now" />
-                </td>
-                <td class="px-4 py-3 text-xs text-ink-muted">
-                  <template v-if="m.ended_at">
-                    <RelativeTime :value="m.ended_at" :now="now" />
-                    <span v-if="m.end_reason" class="block">{{ m.end_reason }}</span>
-                  </template>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
       </section>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-// /admin/infrastructure: the deployment as it runs (GET
-// /api/admin/infrastructure). Above, at a glance: the programs steady, the
-// tasks running, the load balancer's healthy targets, the release, the live
-// lobby instances and the fleet's machines, and the warnings to look at first.
-// Below: each program's ECS service with its tasks, stopped tasks and events,
-// the target groups, the database and the cache (from AWS, which web reads at
-// most every 20 seconds), then the lobby instances, the fleet leader and the
-// machines (from the database). On the local stack AWS is not read, and the
-// page says so rather than showing anything made up. Polled every 30 seconds.
+// /admin/infrastructure: the service's hub (GET /api/admin/infrastructure and
+// GET /api/admin/programs). Above, at a glance: the programs steady, the tasks
+// running, the load balancer's healthy targets, the release, the live lobby
+// instances and the fleet's machines, and the warnings to look at first.
+// Below: a card per program (ProgramCard: its ECS service with its tasks,
+// stopped tasks and events, what its tasks use now and its tasks gone in 24
+// hours), each opening its own page (usage per task, its logs), and hostd's
+// with the fleet cluster's machines; the target groups, the database and the
+// cache (from AWS, which web reads at most every 20 seconds), each opening its
+// charts; then the lobby instances, the fleet leader and one line on the
+// machines (from the database), whose page is the Fleet's. On the local stack
+// AWS is not read, and the page says so rather than showing anything made up;
+// the programs' own samples still show. Polled every 30 seconds.
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
+import ProgramCard from '../../components/ProgramCard.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
-import HistoryToggle from '../../components/HistoryToggle.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import { fetchInfrastructure } from '../../api/infra';
+import { fetchPrograms } from '../../api/usage';
 import { usePolling } from '../../composables/usePolling';
-import { replacedMachines } from '../../utils/history';
 import { keepInView } from '../../utils/keepInView';
-import type { InfraCloudRead, InfraLobby, InfraMachine, InfraOverview, InfraService, InfraTask } from '../../types/infra';
-import { machineKindLabel, machineStateLabel } from '../../utils/adminView';
+import type { InfraCloudRead, InfraLobby, InfraOverview, InfraService, InfraTask } from '../../types/infra';
+import type { ProgramUsage, ProgramsResponse } from '../../types/usage';
 import {
   countLabel,
-  healthLabel,
   infraWarnings,
   listenerLabel,
   offRelease,
-  primaryDeployment,
-  rolloutLabel,
   serviceState,
-  shortImage,
   targetLabel,
   targetTotals,
-  taskSize,
   taskStatusLabel,
   taskTotals,
   toneBadgeClass,
@@ -446,9 +375,9 @@ const secondaryButton =
 const headRow = 'bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted';
 
 const root = ref<HTMLElement | null>(null);
-// The ended machines a later launch replaced (utils/history.ts), shown on request.
-const showMachineHistory = ref(false);
 const overview = ref<InfraOverview | null>(null);
+const programs = ref<ProgramsResponse | null>(null);
+const programsError = ref('');
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
 const error = ref('');
@@ -456,11 +385,23 @@ const pollTrouble = ref(false);
 
 // AWS's sections, when they were read.
 const cloud = computed<InfraCloudRead | null>(() => (overview.value?.cloud.configured ? overview.value.cloud : null));
+// AWS's sections, when they were read whole.
+const cloudRead = computed<InfraCloudRead | null>(() => (cloud.value && !cloud.value.error ? cloud.value : null));
 const warnings = computed(() => (overview.value ? infraWarnings(overview.value) : []));
-const replacedMachineIds = computed(() => replacedMachines(overview.value?.machines ?? []));
-const machinesShown = computed(() =>
-  (overview.value?.machines ?? []).filter((m) => showMachineHistory.value || !replacedMachineIds.value.has(m.id)),
-);
+
+// The programs: the service's (the samples' list, in its order), then any
+// other service ECS runs in the cluster.
+const programNames = computed(() => {
+  const names = (programs.value?.programs ?? []).map((p) => p.name);
+  for (const s of cloudRead.value?.services ?? []) if (!names.includes(s.name)) names.push(s.name);
+  return names;
+});
+function serviceOf(name: string): InfraService | null {
+  return cloudRead.value?.services.find((s) => s.name === name) ?? null;
+}
+function usageOf(name: string): ProgramUsage | null {
+  return programs.value?.programs.find((p) => p.name === name) ?? null;
+}
 // The cloud's tiles say why they are empty.
 const noCloud = computed(() => {
   if (!overview.value) return '';
@@ -531,15 +472,20 @@ const machinesTile = computed(() => {
   return { value: String(live.length), detail: live.length ? `${used} of ${slots} slots used` : 'No machine runs' };
 });
 
-// The deployments listed while there is more than one, or the one is not done.
-function showDeployments(s: InfraService): boolean {
-  return s.deployments.length > 1 || (s.deployments.length === 1 && s.deployments[0].rollout_state !== 'COMPLETED');
-}
-
-// "43" from "opennova-prod-web:43".
-function revisionOf(taskDefinition: string): string {
-  return taskDefinition.slice(taskDefinition.lastIndexOf(':') + 1);
-}
+// The live machines in one line: their kinds and their slots.
+const liveMachines = computed(() => (overview.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed'));
+const machinesSummary = computed(() => {
+  const o = overview.value;
+  if (!o) return '';
+  const live = liveMachines.value;
+  if (live.length === 0) return o.hosting.enabled ? 'No machine runs.' : 'Hosting is off on this service.';
+  const shared = live.filter((m) => m.kind === 'shared').length;
+  const used = live.reduce((n, m) => n + m.slots_used, 0);
+  const slots = live.reduce((n, m) => n + m.slots, 0);
+  return `${countLabel(live.length, 'machine')} live (${shared} shared, ${live.length - shared} own), ${used} of ${slots} slots in use.`;
+});
+// Live machines EC2 lists as no longer running.
+const ec2Gone = computed(() => liveMachines.value.filter((m) => m.ec2_state !== null && m.ec2_state !== 'running' && m.ec2_state !== 'pending').length);
 
 function stoppedReason(t: InfraTask): string {
   const exits = t.containers
@@ -566,20 +512,6 @@ function lobbyLabel(l: InfraLobby): string {
   return l.state === 'active' ? 'Taking clients' : 'Draining';
 }
 
-function machineStateClass(state: string): string {
-  if (state === 'failed' || state === 'lost') return 'text-danger';
-  if (state === 'ready') return 'text-online';
-  if (state === 'ended') return 'text-ink-muted';
-  return 'text-warn';
-}
-
-// A live machine EC2 no longer runs, or an ended one it still does.
-function ec2Mismatch(m: InfraMachine): boolean {
-  const live = m.state !== 'ended' && m.state !== 'failed';
-  const running = m.ec2_state === 'running' || m.ec2_state === 'pending';
-  return live !== running;
-}
-
 // "3rd": an election's number.
 function ordinal(n: number): string {
   const tens = n % 100;
@@ -590,9 +522,16 @@ function ordinal(n: number): string {
 
 const poll = usePolling({
   async read(signal, background) {
-    const result = await fetchInfrastructure(signal);
+    const [result, used] = await Promise.all([fetchInfrastructure(signal), fetchPrograms(signal)]);
     if (signal.aborted) return false;
     now.value = Date.now();
+    // What the programs use is a section of its own: its failure leaves the rest.
+    if (used.ok) {
+      programs.value = used.value;
+      programsError.value = '';
+    } else {
+      programsError.value = used.error.message;
+    }
     if (result.ok) {
       await keepInView(() => {
         overview.value = result.value;

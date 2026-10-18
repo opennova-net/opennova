@@ -9,6 +9,8 @@ import type {
   InfraCache,
   InfraCloud,
   InfraContainer,
+  InfraContainerInstance,
+  InfraFleetCluster,
   InfraFleet,
   InfraDatabase,
   InfraDeployment,
@@ -185,6 +187,30 @@ function pickRelease(v: unknown): InfraRelease | null {
   return { id: v.id, created: textOrNull(v.created), revision: textOrNull(v.revision) };
 }
 
+function pickInstance(v: unknown): InfraContainerInstance | null {
+  if (!isObject(v) || typeof v.id !== 'string') return null;
+  return {
+    id: v.id,
+    ec2_instance_id: textOrNull(v.ec2_instance_id),
+    machine_id: textOrNull(v.machine_id),
+    kind: textOrNull(v.kind),
+    image_id: textOrNull(v.image_id),
+    status: text(v.status),
+    agent_connected: v.agent_connected === true,
+    running_tasks: count(v.running_tasks),
+    pending_tasks: count(v.pending_tasks),
+    agent_version: textOrNull(v.agent_version),
+  };
+}
+
+function pickFleetCluster(v: unknown): InfraFleetCluster | null {
+  if (!isObject(v) || typeof v.cluster !== 'string') return null;
+  const hostd = optional(v.hostd, pickService);
+  const instances = list(v.instances ?? [], pickInstance);
+  if (!hostd.ok || !instances) return null;
+  return { cluster: v.cluster, hostd: hostd.value, instances, error: textOrNull(v.error) };
+}
+
 // A section that may be null: null stays null, anything else must read.
 function optional<T>(value: unknown, pick: (v: unknown) => T | null): { ok: boolean; value: T | null } {
   if (value === null || value === undefined) return { ok: true, value: null };
@@ -203,7 +229,10 @@ export function pickCloud(v: unknown): InfraCloud | null {
   const release = optional(v.release, pickRelease);
   const database = optional(v.database, pickDatabase);
   const cache = optional(v.cache, pickCache);
-  if (!services || !missing || !oneOff || !oneOffStopped || !groups || !release.ok || !database.ok || !cache.ok) return null;
+  const fleet = optional(v.fleet, pickFleetCluster);
+  if (!services || !missing || !oneOff || !oneOffStopped || !groups || !release.ok || !database.ok || !cache.ok || !fleet.ok) {
+    return null;
+  }
   return {
     configured: true,
     read_at: text(v.read_at),
@@ -225,6 +254,7 @@ export function pickCloud(v: unknown): InfraCloud | null {
     cache: cache.value,
     cache_error: textOrNull(v.cache_error),
     machines_error: textOrNull(v.machines_error),
+    fleet: fleet.value,
   };
 }
 
@@ -261,6 +291,7 @@ function pickMachine(v: unknown): InfraMachine | null {
     end_reason: textOrNull(v.end_reason),
     zone: textOrNull(v.zone),
     ec2_state: textOrNull(v.ec2_state),
+    image_id: textOrNull(v.image_id),
   };
 }
 
