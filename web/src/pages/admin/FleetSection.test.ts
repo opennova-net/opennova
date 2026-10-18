@@ -65,7 +65,8 @@ describe('FleetSection', () => {
     expect(rows[1].text()).toContain('Own machine');
     expect(rows[1].text()).toContain('c7a.medium');
     expect(page.text()).toContain('1 shared, 1 own');
-    expect(page.text()).toContain('1 of 24');
+    expect(page.text()).toContain('1 of 24 shared');
+    expect(page.text()).toContain('0 of 2 own');
   });
 
   it('lists the servers with owner, tier, players and slot, each to its own page', async () => {
@@ -166,6 +167,11 @@ describe('FleetSection', () => {
       }),
     });
     const page = await mountSection();
+    // Only the lost one counts as a machine: a failed one never ran.
+    expect(page.text()).toContain('1 shared, 0 own');
+    // The failed and the ended one are history once a later machine launched.
+    expect(page.findAll('tr.fleet-machine-row')).toHaveLength(1);
+    await page.findAll('button').find((b) => b.text() === 'Show history (2)')!.trigger('click');
     const rows = page.findAll('tr.fleet-machine-row');
     expect(rows).toHaveLength(3);
     expect(rows[0].findAll('button')).toHaveLength(0);

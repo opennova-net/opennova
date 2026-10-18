@@ -57,6 +57,7 @@
 #include "server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
+#include "web_access.h"
 #include "web_session.h"
 
 #include <base/io/base64.h>
@@ -343,6 +344,10 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	row.player_count = 2;
 	row.max_players = 32;
 	row.region = "us";
+	row.mission_name = "AS - Kombang Valley";
+	row.game_type = "AAS";
+	row.exp = "jox01";
+	row.locked = "Y";
 	{
 		auto conn = h.pool.acquire();
 		opennova::hostdb::upsert_host(*conn, row);
@@ -363,6 +368,33 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	TEST_EXPECT(hosts[0]["players"].i() == 2);
 	TEST_EXPECT(hosts[0]["maxPlayers"].i() == 32);
 	TEST_EXPECT(str(hosts[0]["region"]) == "us");
+	// The mission, and the expansion a joiner needs by its data set's name.
+	TEST_EXPECT(str(hosts[0]["mission"]) == "AS - Kombang Valley");
+	TEST_EXPECT(str(hosts[0]["gameType"]) == "AAS");
+	TEST_EXPECT(str(hosts[0]["expansion"]) == "Escalation");
+	TEST_EXPECT(hosts[0]["locked"].b());
+
+	// GET /api/lobbies/<rid>: the listing's page, with the names of the players
+	// who joined it (never their addresses); a player's own host has no scoreboard.
+	{
+		opennova::hostdb::PlayerRow joiner;
+		joiner.host_rid = 1000;
+		joiner.nwhandle = "Joiner";
+		joiner.peer_ip = "10.9.9.9";
+		joiner.peer_port = 4000;
+		opennova::hostdb::add_player(*h.pool.acquire(), joiner);
+	}
+	reply = h.send("GET", "/api/lobbies/1000");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.transport_ok && reply.code == 200 && json);
+	TEST_EXPECT(str(json["serverName"]) == "Harness Srv" && str(json["game"]["slug"]) == "jop_2_consumer");
+	TEST_EXPECT(str(json["mission"]) == "AS - Kombang Valley" && str(json["expansion"]) == "Escalation");
+	TEST_EXPECT(json["timeLeft"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["roster"].size() == 1 && str(json["roster"][0]) == "Joiner");
+	TEST_EXPECT(json["scoreboard"].t() == crow::json::type::Null);
+	TEST_EXPECT(body_text(reply).find("10.9.9.9") == std::string::npos);
+	reply = h.send("GET", "/api/lobbies/4242");
+	TEST_EXPECT(reply.code == 404 && str(crow::json::load(body_text(reply))["error"]) == "not_found");
 	return 0;
 }
 
@@ -3841,7 +3873,7 @@ int test_name_and_value_rules(Harness &h) {
 	for (const char *value : { "3", "2345", "jop:cus2", "us", "127.0.0.1", "::ffff:10.0.0.7",
 				 "65537:3233:ABCDEFGHIJKLMNOP", "NWServer:NWLogin.dll:SESSIONTAG:123:0a1b2c3d",
 				 "A-A02-085D18", "5e550001", "ljim", "Space Handle", "Jim's \"quoted\"",
-				 "JT:0a000013143f1efe6c8000767fd748e1127304c5b6d728", "" }) {
+				 "JT:0a00001314cb0071078000767fd748e1127304c5b6d728", "" }) {
 		TEST_EXPECT(nws::cookie_value_ok(value));
 		TEST_EXPECT(nws::set_cookie_text("NWHANDLE", value, "Path=/") ==
 				std::string("NWHANDLE=") + value + "; Path=/");
@@ -4512,6 +4544,51 @@ int test_api_proxy_only(Harness &h) {
 	}
 	TEST_EXPECT(h.send("GET", "/api/health").code == 200);
 	TEST_EXPECT(h.send_to(h.secure_port, "GET", "/api/health").code == 200);
+	return 0;
+}
+
+// ONNET_RETAIL_PROXY: a request from the retail port's proxy (prod's portal
+// nginx's retail server, from 127.0.0.2) takes the client address it names in
+// X-Real-IP as its own before any check or route reads it, and is still no
+// trusted proxy's: its /api/ is refused as any client's. Any other peer's
+// X-Real-IP is its own claim and changes nothing; without the header the
+// proxy's request keeps the proxy's address.
+int test_retail_proxy_names_client(Harness &) {
+	nws::AccessMiddleware middleware;
+	middleware.api_proxy_only = true;
+	middleware.trusted_proxies = { "127.0.0.1" };
+	middleware.retail_proxy = "127.0.0.2";
+	const auto through = [&](const std::string &peer, const std::string &url,
+								 const std::string &real_ip, crow::response &res) {
+		crow::request req;
+		req.url = url;
+		req.remote_ip_address = peer;
+		if (!real_ip.empty())
+			req.add_header("X-Real-IP", real_ip);
+		nws::AccessMiddleware::context ctx;
+		middleware.before_handle(req, res, ctx);
+		return req.remote_ip_address;
+	};
+	crow::response res;
+	TEST_EXPECT(through("127.0.0.2", "/NWLogin.dll", "203.0.113.7", res) == "203.0.113.7");
+	TEST_EXPECT(!res.is_completed());
+	crow::response api;
+	TEST_EXPECT(through("127.0.0.2", "/api/health", "203.0.113.7", api) == "203.0.113.7");
+	TEST_EXPECT(api.is_completed() && api.code == 403 &&
+			api.body == "{\"error\":\"proxy_required\"}");
+	// Naming a trusted proxy's address makes the retail proxy's request no
+	// trusted proxy's: the API check reads the TCP peer.
+	crow::response named;
+	TEST_EXPECT(through("127.0.0.2", "/api/health", "127.0.0.1", named) == "127.0.0.1");
+	TEST_EXPECT(named.is_completed() && named.code == 403);
+	crow::response bare;
+	TEST_EXPECT(through("127.0.0.2", "/NWStart.dll", "", bare) == "127.0.0.2");
+	crow::response other;
+	TEST_EXPECT(through("198.51.100.4", "/NWStart.dll", "203.0.113.7", other) == "198.51.100.4");
+	TEST_EXPECT(!other.is_completed());
+	crow::response portal;
+	TEST_EXPECT(through("127.0.0.1", "/api/health", "203.0.113.7", portal) == "127.0.0.1");
+	TEST_EXPECT(!portal.is_completed());
 	return 0;
 }
 
@@ -5232,6 +5309,10 @@ int test_hosted_server_routes(Harness &h) {
 	reply = h.send("GET", "/api/admin/hosted", { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 4 && json["live"].i() == 4);
+	// The room per machine kind, from the placement policy (the defaults: 2
+	// shared machines of 12 slots, 2 own machines).
+	TEST_EXPECT(json["shared"]["live"].i() + json["own"]["live"].i() == 4 && json["shared"]["room"].i() == 24 &&
+			json["own"]["room"].i() == 2);
 	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "docker");
 	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
 	TEST_EXPECT(!json.has("jobs")); // the jobs routes' now (job_routes_test)
@@ -6558,6 +6639,33 @@ int test_hosted_console_routes(Harness &h) {
 	reply = get(me + "/rotation", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["rotation"].size() == 1 && json["rotation"][0]["current"].b());
+	// The lobby's page of its listing (the service account's): its scoreboard,
+	// read over the link for anyone, with no address or admin login in it.
+	{
+		const int64_t service = make_account(h, "console_service", "pw-console-service");
+		TEST_EXPECT(service > 0);
+		auto db = h.pool.acquire();
+		db->exec("UPDATE hosted_servers SET service_user_id = $1 WHERE id = $2;",
+				{ opennova::db::BindValue(service), opennova::db::BindValue(id) });
+		opennova::hostdb::HostRow listing;
+		listing.rid = 0x0A0000F1;
+		listing.gsid = "GSID-CONSOLE";
+		listing.game = "jop_2_consumer";
+		listing.server_name = "Console Test";
+		listing.host_ip = "10.0.0.9";
+		listing.host_port = 32768;
+		opennova::hostdb::upsert_host(*db, listing);
+		db->exec("UPDATE active_hosts SET host_user_id = $1 WHERE rid = $2;",
+				{ opennova::db::BindValue(service), opennova::db::BindValue(int64_t{ 0x0A0000F1 }) });
+	}
+	reply = get("/api/lobbies/" + std::to_string(0x0A0000F1), {});
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  lobby page: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && json["scoreboard"].size() == 2);
+	TEST_EXPECT(str(json["scoreboard"][0]["name"]) == "Ann" && json["scoreboard"][0]["team"].i() == 1 &&
+			json["scoreboard"][0]["kills"].i() == 5);
+	TEST_EXPECT(body_text(reply).find(password) == std::string::npos);
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), 0x0A0000F1);
 
 	// Hostile replies: names holding a control byte and a cp1252 letter, lines that are
 	// no row; the JSON stays valid and the parsers keep what parses.
@@ -7779,6 +7887,7 @@ int run(Harness &h) {
 		{ "reset_during_login", test_reset_during_login },
 		{ "join_identity", test_join_identity },
 		{ "api_proxy_only", test_api_proxy_only },
+		{ "retail_proxy_names_client", test_retail_proxy_names_client },
 		{ "template_values_escaped", test_template_values_escaped },
 		{ "register_handle_rule", test_register_handle_rule },
 		{ "login_row_kept_alive", test_login_row_kept_alive },

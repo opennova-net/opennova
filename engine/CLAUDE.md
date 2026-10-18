@@ -2,9 +2,8 @@
 
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `engine/`.
   Godot binding code lives only in `godot/src/`.
-- Five groups (ADR 0028; the fifth, `editor/`, ADR 0046 d3) — the directories, since
-  ADR 0029 the CMake build targets, and since ADR 0040 the first include-path segment
-  too (never C++ namespaces):
+- Five groups (ADR 0028, ADR 0046 d3): the directories, the CMake build targets (ADR 0029)
+  and the first include-path segment (ADR 0040), never C++ namespaces:
   - `base/` — shared substrate and repo plumbing.
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
     runtime-fused: ADR 0030). `formats/wac` is the bytecode/program model, the command
@@ -27,134 +26,27 @@
     game server's remote-admin TCP protocol). Nothing under
     `net/` includes `runtime/`; `opennova_net` never links `opennova_runtime`.
   - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/inmatch`
-    (ex net/inmatch + net/npruntime: `session.*` owns lifecycle, role policy,
-    fixed-tick banking and input consumption over a `Role`; the
-    listen-host frame; the IDA-faithful server/client state machines and
-    frame loops; the transports) and `runtime/replication` (ex net/netsim:
-    the world<->wire seam, the client replica state and its folds). Godot
+    (`session.*` owns lifecycle, role policy, fixed-tick banking and input consumption
+    over a `Role`; the listen-host frame; the IDA-faithful server/client state machines
+    and frame loops; the transports) and `runtime/replication` (the world<->wire seam,
+    the client replica state and its folds). Godot
     orders its own presentation/device pipeline. `world::Match` owns gameplay
     rules, scoring, clocks, winner evaluation, and the frozen result; wire
     code only serializes that result.
-  - `editor/` — the fifth group (ADR 0046 d3): the OpenNova Editor's portable core
-    (`project`, `assets`, `requirements`, `blank` (the from-scratch factories),
-    `project_build` (the steppable build), `run` (the Play session over the process
-    seam), `session` (the one open project and everything the editor does to it:
-    typed requests in, a view out; `ProjectSession` is a facade over its parts (S13 A2:
-    `SessionCore` the open project, the operation slot, the view and the request's outcome;
-    `DocumentSet` the open documents, their edits and the clipboard; `ProblemsService` the
-    validation and the Problems rows; `PlayController`, `ImportController`,
-    `RenameController`; `UnsavedGuard` the unsaved-changes prompt; `EditorPreferences` over
-    the `PreferencesStore` its embedder owns), which call one another, never `handle()`;
-    the request table (S13 A4, `request_kinds`: one row per request kind, its token, who
-    serves it, the typed fields it takes (`request_fields`), its policy; a request of each
-    kind from `request_factories.h`); the query table (S13 A5, `editor_queries`: one row per
-    question asked of the session without a request, its params, the list it pages, the concern
-    whose revision it answers with; `ProjectSession::query`); its wire form (`session_json`: the
-    documents, the records, a request with its edits in the batch form the editor MCP names
-    records by (`record_batch`), the findings; `view_json`: the view by section), the view the
-    windows read (`session/view`, S13 V4: sub-views of the project, the documents, the findings,
-    the activity and the dialogs, and the events a request posts for one window to take once),
-    the selection (S13 D7: one document's records over any of its rows), and the finding codes'
-    tables (S13 A6, `finding_codes`: every table with whose it is, the columns' wire forms)),
-    `model` (the
-    neutral editing core, ADR 0046 d9:
-    `DocumentBase` (every document's lifecycle, S13 D6), `Document` (the record document
-    over it, whose index of each row keeps every record's path there, `path_in`, S13 D8, and
-    which has a type renumber what names a collection's records by index when an edit moves them,
-    `RecordShift`) and `TextDocument` (a text whose spans its edits replace, its `TextHistory` of
-    replacements under the same budget, S13 D9), `Node`, `Edit`, `EditHistory` (steps of row
-    swaps under a byte budget),
-    `StagedRows` (a batch's rows over any rows before it commits, S13 D7), `id_list` (the one list
-    edit of a type's records and their identities, S13 D8), the `ChangeSet` a
-    document answers since a state, `FieldSchema`, and the finding codes (S13 A6,
-    `finding_code_row`: every finding is made from a row, the editor's own `CoreFinding` table's
-    or its document type's `findings`, and keeps it, `Diagnostic::row`); it names no format
-    type), `documents` (the document types over the engine's own records: the def
-    catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
-    over an immutable parsed base, ADR 0046 S10); and the text types, a `TextDocument` each, a
-    row per behaviour (S13 D9: a script through the WAC compiler, its operands' names as
-    references with spans; a music script as its MUS text; credits as a CBIN file's ConfigFile
-    text; a shader in the shader loader's SCR form; a configuration or a text);
-    `document_types` is the registry the
-    session and the windows reach a type through, each type's `validate_file` its file's own
-    findings from its document alone, which `validation_cache` keeps per file until the file
-    changes, never keeping a closed file's document, and its `project_check`, a check of its own
-    across the project's files that keeps state between validations (the menu type's render
-    check), which the row makes and whoever validates keeps, one per type (`project_checks`)),
-    `graph` (the asset graph: typed edges from the engine's own
-    parsed records in a slot per file that an update patches, a file's record sets (the records of a
-    collection its own references name by index, S13 D8's Record references, resolved within the
-    file), the one resolver behind the badges, the
-    pickers and the Problems rows, the reference queries a document's fields ask, a base layer's names
-    (an expansion project's base game's), and the rename transaction; what other files make of what one
-    defines, one `use_checks` row per asset kind, and what a stylesheet line's value is used as
-    (`style_value_use`, from the menus' uses of it); and `project_validation`, the one pass over the
-    project's files: the graph's update, each file's own findings, the use checks, the graph's
-    findings), `import` (the importers: a font set's glyph sheet to a `.fnt` (`font_import`, the
-    sheet brought beside the set when it is imported from the disk); a PNG to the texture
-    file its uses read, by the
-    record's options, each a row of its importer's (S18), the `.import` sidecars, the import pass
-    whose outputs the scan lists; the terrain importer (S20: a terrain set's images to a terrain's files,
-    `terrain_import`, its heights baked by TrnGen.exe's bake, the engine's `formats/cpt/trngen`); and the
-    one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
-    (the viewports, S13 V5: a document's picture as the game would draw it, one per (document,
-    kind) from a compiled-in kind table (`viewport_kinds`: the menu's and the model's, each a
-    Preview or a Main role), kept by the session (`viewports`, with the one preview clock) and
-    changed by a SetViewport request and the three changes its follow derives; what follows from
-    its document (S13 V8: the change set it answers since the state followed, which the kind reads
-    for what its picture shows), the files its picture
-    read and its state (`viewport_follow`: the action its device takes, Keep, Rebuild, Update or
-    Clear; for a kind whose row holds for a gesture, the model's, a Rebuild held while a gesture is
-    open in its document over a picture the device holds), its envelope on the wire
-    (`viewport_json`), what a drag or a command plans as requests (S13 V7: the session's `viewport`
-    query reads a viewport by op, and its `edit_in_viewport` request serves a drag or a command the
-    viewport plans), and the device seam (`viewport_device`; S13 V6: a device may build its picture
-    over the Shell's frames, a unit a step within the Shell's budget, the viewport loading meanwhile
-    and a newer build generation cancelling one in flight) with its least-recently-used cache of four
-    (`viewport_device_cache`; a kind's row may hold fewer of its own, the mission's two, and the
-    devices drawn in a frame arbitrate the scene state they render with, S14 E13); the Shell's
-    devices are `godot/src/authoring`'s over the runtime's `MenuFrame` and `ObjectModel` and, for a
-    mission, the game's own environment, sky, water, terrain, placer, foliage, particle renderer and light
-    director (DI-31; the items' effects the viewport's `mission_effects` steps). The menu's viewport (`menu_viewport`): its screen compiled
-    headless, the options it holds, what a drag of a window's handles or of several windows
-    writes, and what arranging several windows (align, distribute, drawing order) writes; the
-    model's (`model_viewport`): its orbit camera and the level the game draws, what it shows and
-    when the device builds again, a clip on its rig; the mission's (`mission_viewport`, S14, the
-    Document tab's Main view): its scene over the document's typed reads (`mission_scene`), its
-    camera flown and orbited in the mission's terms (`mission_camera`), its options, its marks
-    picked by their anchors, its overlays (`mission_overlay`), what a drag of a mark's handles
-    writes (`mission_handle_edit`: a move on the ground the device answers, height, yaw, an area's
-    edges), the commands frame, top and ground, and a drop of an item or a model (`mission_items`:
-    an item's pool, model and ground anchor through the graph); and the render check, the menu type's project check:
-    every menu screen compiled headless, its compiler notes as Problems rows, a menu rendered
-    again only when it, a file it read or a variable it names changes; a menu's tree, its
-    findings and a screen as the render check compiled it, as the menu_tree, menu_findings and
-    menu_render queries read them;
-    and the
-    canvas's portable half: its one gesture machine, its overlay shapes, and each kind's half of
-    it (`canvas_half`: what a press on the menu's or the model's picture takes, the requests a drag
-    raises and what is drawn)), `ui`
-    (the Dear ImGui windows on the engine's pass, built only with `OPENNOVA_IMGUI`;
-    the only tree besides `runtime/devtools` that may include an ImGui header; each window
-    reaches the session through the `Workspace` seam, `ui/workspace.h`; the
-    inspector is generic, and a document's view in its Document tab is its type's row of
-    `ui/document_views` (S13 V3: an outline over `ui/outline_model` as a tree, a list or master
-    and detail, or a view of its own; S13 V5: or a Main-role viewport filling the tab beside the
-    outline, `ui/main_viewport_view`), one per open document; a viewport's view (`ui/viewport_view`,
-    one per kind from `ui/viewport_views`) draws its canvas through the Workspace's devices)).
-    STATIC `opennova_editor`, PUBLIC-linking `opennova_runtime` so its validators reuse
-    the engine's own load paths; nothing under the four groups below may include or link it
-    (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
-    child never carry it. Inside it five libraries are ranked, model < documents < graph <
-    session < ui (ADR 0046 S13 D3, `include_graph_check.py`'s editor rank): a ranked library
-    includes only its own rank and below, `graph/reference_kinds.h` being a seam header any may
-    include; the upward includes the tree still makes are the lint's listed exceptions (none since
-    S13 V3), each naming the slice that removes it, and an exception the tree no longer makes fails
-    the lint.
-    The other editor libraries stay unranked. Tooling, not a port: its sources sit in the citation
-    allowlist by the `editor/` prefix. No directory under it may start with `build`
-    (the lints skip such directories; the build lib is `project_build/`).
-- Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
+  - `editor/`: the OpenNova Editor's portable core (ADR 0046 d3); its libraries are
+    mapped in [`editor/README.md`](editor/README.md). STATIC `opennova_editor`,
+    PUBLIC-linking `opennova_runtime`; nothing under the four groups above may include or
+    link it (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
+    child never carry it. Five of its libraries are ranked, model < documents < graph <
+    session < ui (`include_graph_check.py`'s editor rank): a ranked library includes only
+    its own rank and below, `graph/reference_kinds.h` being a seam header any may include;
+    an upward include is a listed lint exception naming the slice that removes it, and an
+    exception the tree no longer makes fails the lint. The other editor libraries stay
+    unranked. Only `editor/ui` and `runtime/devtools` may include an ImGui header. Tooling,
+    not a port: its sources sit in the citation allowlist by the `editor/` prefix. No
+    directory under it may start with `build` (the lints skip such directories; the build
+    lib is `project_build/`).
+- Layout per library: `engine/<group>/<domain>/*.{h,cpp}`,
   headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
   `npwire/wire/`), and `engine/` is the ONE public include root (ADR 0040): every
   engine header is included as `#include <group/domain/file.h>` —
@@ -164,10 +56,9 @@
   keeps `formats/mission` and `runtime/mission` (likewise `particle`, `wac`) apart
   and makes the layering a lint (`scripts/lint/include_graph_check.py`: a tree
   includes only the groups below it, no unqualified engine include, the ADR 0020
-  terrain seam, no `godot` include under engine/apps/tests). The
-  one-directory-per-format principle, fixtures, and tests (ADR 0024) survive the
-  target collapse, the flatten and the root change; a library builds inside its
-  group target, not as its own (see the group-targets bullet below).
+  terrain seam, no `godot` include under engine/apps/tests). One directory per format,
+  with its fixtures and tests (ADR 0024); a library builds inside its group target, not
+  as its own (the group-targets bullet below).
   Namespace `opennova`. Native consumers link the static group targets directly;
   no shared-library/FFI export surface is maintained.
 - Language: C++17 throughout (ADR 0043 d14). `engine/` carries no `.c` source
@@ -183,8 +74,8 @@
   spells the qualified name (a forward declaration goes inside the lib's
   namespace, never bare). Every header is `#pragma once`. The whitespace
   style is `.clang-format` at the repo root (tabs, 4-wide, 100 columns,
-  `NamespaceIndentation: None`) — config only until the whitespace-only
-  reformat commits land; never reformat a file as part of another change.
+  `NamespaceIndentation: None`); the tree is not reformatted wholesale, so never
+  reformat a file as part of another change.
 - Portable (ADR 0049 d5, kept by ADR 0062, which deleted the web build): nothing uses
   exceptions as control flow (`strutil::parse_int` / `parse_ulong` / `parse_float`, never
   `try { std::stoi }`); thread counts are the embedder's (the terrain composer's `Threads`
@@ -193,40 +84,35 @@
   target, so review keeps these. The NovaWorld service (`opennova_novaworld_service`,
   Linux only, never part of a game build) is outside this rule: its database layer
   reports a failed query or migration by throwing.
-- Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones (single ratified
-  exception: the `opennova_crt` STATIC leaf under `base/crt` — the one mutable
-  thread-local CRT rand stream; formats cannot link `opennova_base`, which sits
-  above formats, so both `opennova_formats` and `opennova_runtime` PUBLIC-link the
-  leaf directly) — `opennova_formats`
-  (every formats/ lib; the mission FORMAT lib's membership here is the fold that keeps
-  the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
-  pcapio, os_random, proc), `opennova_net` (novacrypto, napi, npwire, admin + novaworld session/gate —
-  the wire), `opennova_runtime` (the rest of runtime/, including `inmatch` and
-  `replication`), and `opennova_novaworld_service` (the service alone, defined only
-  with the root option `OPENNOVA_NOVAWORLD_SERVICE` — the ONLY target linking
-  `opennova_pq`, the INTERFACE target over the system libpq (`find_package(PostgreSQL)`);
-  the Godot layer (`godot/src`) links `opennova_runtime`, which PUBLIC-links
-  `opennova_net`, never the service).
-  `opennova_io` stays header-only INTERFACE. Since ADR 0046 a sixth STATIC group
-  target, `opennova_editor` (`editor/`), links `opennova_runtime` and is linked only
-  by the editor-enabled GDExtension variant, `apps/project` and the tests. PUBLIC
-  chain (ADR 0043 d4): formats
-  links io, base links formats (base deliberately sits ABOVE formats because vfs
-  parses pff/scr/bfc1), net links base, runtime links net, the service links net;
-  `link_graph_check.py` forbids `opennova_net -> opennova_runtime` and keeps the
-  libpq containment (`opennova_pq`). The ADR 0024 family groups are deleted as subsumed; ADR
-  0020's terrain seam is include-level (`scripts/lint/include_graph_check.py` —
-  for inmatch/replication/wac/mission/world the `runtime/terrain/` prefix is fully
-  forbidden; the seam is terrain_query's `<runtime/terrain_query/...>` headers),
+- Group targets (ADR 0029, ADR 0046): six STATIC group targets, no per-lib ones:
+  `opennova_formats` (every formats/ lib, the mission FORMAT lib included, which keeps the
+  partition acyclic), `opennova_base` (vfs, resource_index, gameprofile, pcapio, os_random,
+  proc), `opennova_net` (novacrypto, napi, npwire, admin and the novaworld session/gate: the
+  wire), `opennova_runtime` (the rest of runtime/, `inmatch` and `replication` included),
+  `opennova_novaworld_service` (the service alone, only with the root option
+  `OPENNOVA_NOVAWORLD_SERVICE`, the ONLY target linking `opennova_pq`, the INTERFACE target
+  over the system libpq) and `opennova_editor` (linked only by the editor-enabled
+  GDExtension variant, `apps/project` and the tests). The one ratified per-lib exception is
+  the `opennova_crt` STATIC leaf under `base/crt` (the one mutable thread-local CRT rand
+  stream), which `opennova_formats` and `opennova_runtime` both PUBLIC-link, since formats
+  cannot link base. `opennova_io` stays header-only INTERFACE. The PUBLIC chain (ADR 0043
+  d4): formats links io, base links formats (base sits ABOVE formats because vfs parses
+  pff/scr/bfc1), net links base, runtime links net, the service links net; the Godot layer
+  links `opennova_runtime`, never the service. `link_graph_check.py` forbids
+  `opennova_net -> opennova_runtime` and keeps the libpq containment. ADR 0020's terrain
+  seam is include-level (`include_graph_check.py`: for inmatch/replication/wac/mission/world
+  the `runtime/terrain/` prefix is forbidden; the seam is `<runtime/terrain_query/...>`),
   and every runtime lib but inmatch/replication is NET-AGNOSTIC (no `net/`,
-  `runtime/inmatch/` or `runtime/replication/` include — the same lint).
+  `runtime/inmatch/` or `runtime/replication/` include, the same lint).
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/`BitWriter`,
   `io/le.h` primitives (including the `append_*_le` vector writers every
   streaming encoder wants), `io/fixed.h` (16.16 / 2.14), `io/log.h` (the diagnostic
   sink), `io/strutil.h` ASCII case-insensitive helpers, `io/os_path.h` (a UTF-8 path
   string at an OS file call: `os_path`, `fopen_utf8`, `utf8_path`; Windows reads a
-  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`),
+  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`; and
+  `fseek64` / `ftell64`, the stdio seek at 64 bits, since Windows' `fseek` takes a 32-bit
+  `long`: every seek into an archive or a sound bank goes through it, D-VFS-16),
   `io/file_io.h` (whole-file reads and the atomic `.tmp`-then-rename write over
   `os_path`, the rename's bounded retry), `io/sha256.h` (FIPS 180-4 SHA-256: the
   streaming `Sha256` and the one-shot `sha256` / `sha256_hex`; infrastructure, not a
@@ -246,9 +132,9 @@
   from the NAPI manager's 16-bit LCG or the protocol's connection counter: the host key
   (HK), each connection's SK / CK and SCRK, and the CI (`net/npwire/nw_session_framing.h`:
   `manager_session_key`, `manager_connection_keys`, `next_connection_index`; D-NET-524,
-  D-NET-521). They stay on the LCG and the counter by the maintainer's decision of
-  2026-10-14 ("retail LCG everywhere"), predictable as retail's are (net-re §8, D-NET-524
-  records the cost): never move them back to the CSPRNG. Everything else stays on
+  D-NET-521). They stay on the LCG and the counter by the maintainer's decision ("retail
+  LCG everywhere"), predictable as retail's are (net-re §8, D-NET-524 records the cost):
+  never move them back to the CSPRNG. Everything else stays on
   `os_random`: the NovaWorld service's values (HOSTKEY, the service's SK / SCRK, cookies,
   salts, tags and ids) and the NovaWorld lobby client's (its CI, CK and SCRK; D-NET-704
   tracks retail's LCG there and waits on the maintainer). Do
@@ -266,27 +152,19 @@
   decoder wants the opposite — the first short read poisons the cursor so a truncated
   datagram cannot half-decode into plausible state; that is
   `engine/net/npwire/wire_cursor.h`, and it must not be folded into `ByteReader`.
-- Migration exceptions, each with its reason (do not "clean these up" casually):
-  the `mus`/`wac` VM program-counter cursors are a witnessed faithful-port surface with
-  their own clamp semantics. `engine/formats/cpt` is no longer one: it reads and writes through the shared
-  `io::BitReader` / `io::BitWriter`, and the writer's bytes (its high-water rule, the
-  zero pads) are pinned by a CPT-corpus byte diff: the
-  re-encode leg of the gated `tests/terrain/cpt_jo_assets_sweep_test` (ctest
-  `cpt_jo_assets_sweep`, `--suite retail`: every retail .cpt read by `load_cpt` and
-  written again by `save_cpt`, the writer behind `CptFile::write_bytes` and the TrnGen
-  bake in `formats/cpt/trngen`, byte for byte); `tests/cpt/cpt_roundtrip_test`
-  (ctest `cpt_roundtrip`) pins the bit codec and the DPTH/CDEP/POLY round-trips on
-  synthetic buffers in core and `tests/cpt/trngen_bake_test` (ctest `cpt_trngen_bake`)
-  the bake's output, so run the retail suite whenever you touch the CPT
-  encoder; `cpt_trngen_bake_test <dir>` bakes the retired TrnGen corpus (`git show
-  d57608b3d^:fixtures/terrain`) against TrnGen's own `.cpt` files. Three more stay
-  by design: `formats/bink`'s
-  `BitReader` is a fail-latching decoder contract (`peek`, `align32`, the first short
-  read poisons it), the `wire_cursor` posture rather than `io::BitReader`'s lenient
-  zero-fill; `net/npwire/wire/ingame_encode.cpp`'s `Writer` already rides
-  `io::append_*_le` and exists only for the witnessed `cstr`/`cstr_capped` wire string
-  forms over an external buffer; `formats/bad` and `formats/rtxt` read through
-  offset-indexed wrappers over `io::read_*_le` plus a NUL-string scanner, not cursors.
+- Migration exceptions, each with its reason (do not "clean these up" casually): the
+  `mus`/`wac` VM program-counter cursors are a witnessed faithful-port surface with their own
+  clamp semantics; `formats/bink`'s `BitReader` is a fail-latching decoder contract (`peek`,
+  `align32`, the first short read poisons it), the `wire_cursor` posture rather than
+  `io::BitReader`'s lenient zero-fill; `net/npwire/wire/ingame_encode.cpp`'s `Writer` rides
+  `io::append_*_le` and exists only for the witnessed `cstr`/`cstr_capped` wire string forms
+  over an external buffer; `formats/bad` and `formats/rtxt` read through offset-indexed
+  wrappers over `io::read_*_le` plus a NUL-string scanner, not cursors.
+- The CPT codec (`engine/formats/cpt`) reads and writes through `io::BitReader` /
+  `io::BitWriter`, its writer's bytes (the high-water rule, the zero pads) pinned by the
+  retail corpus: run `--suite retail` (ctest `cpt_jo_assets_sweep`, every retail .cpt read and
+  written again byte for byte) whenever you touch the CPT encoder; `cpt_roundtrip` and
+  `cpt_trngen_bake` pin the bit codec and the bake in core.
 - The parity rules (faithful ports cited `[orig: Name @ 0xADDR]`, writers from scratch, ADR
   0003) are the root CLAUDE.md's Conventions and docs/engine-primer.md. The full
   writer-parity gate is writer from scratch + roundtrip test + retail-corpus byte sweep
@@ -303,8 +181,7 @@
   under ~100 lines with one owner folds back into it (ADR 0043). Never bump the baseline.
   Exception: in `engine/editor`, a document type's or a view's own TU pair stays its own
   whatever its size, its one includer the registry that lists it (`document_types.cpp`,
-  `ui/document_views.cpp`); one type per TU pair is how the editor is laid out (decided
-  2026-10-15, audit E-12).
+  `ui/document_views.cpp`); one type per TU pair is how the editor is laid out.
 - Tests for this code live in `/tests/<domain>/` (ctest), not `godot/tests/`.
 - 3DI models: 3DI3 only, consumed directly (ADR 0027). `threedi_3di3_read` produces
   `Threedi3di3` (engine/formats/threedi/threedi_3di3.h) and that parsed struct IS

@@ -43,8 +43,8 @@
         >
           <p>
             Account created! Username <code class="font-mono">{{ success.username }}</code>, PCID
-            <code class="font-mono">{{ success.pcid }}</code>. You can now log in via Joint Operations,
-            or log in to this site.
+            <code class="font-mono">{{ success.pcid }}</code>. You can now log in from the game, or log in
+            to this site.
             <template v-if="success.email">A welcome mail is on its way to {{ success.email }}.</template>
           </p>
           <RouterLink

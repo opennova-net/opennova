@@ -117,8 +117,6 @@ jobs:
         working-directory: deploy/compose
         env:
           ONNET_PUBLIC_HOST: 192.0.2.10
-          STACK_DATA_DIR: /tmp
-          STACK_DATA_SETS: '{"jop_2_consumer":{}}'
         run: |
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet

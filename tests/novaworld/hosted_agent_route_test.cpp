@@ -507,6 +507,14 @@ int test_sync() {
 	row = hosted::find_machine(rig.db, m.id);
 	TEST_EXPECT(row->state == FleetMachineState::Draining &&
 			row->end_reason.find("protocol 1") != std::string::npos);
+	// Lost (its agent silent, since it is never read): it stays lost, so the
+	// supervisor ends it and its servers move, never back to draining.
+	TEST_EXPECT(hosted::transition_machine(
+			rig.db, m.id, FleetMachineState::Draining, FleetMachineState::Lost, "silent"));
+	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, 1))));
+	TEST_EXPECT(hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Lost);
+	TEST_EXPECT(hosted::transition_machine(
+			rig.db, m.id, FleetMachineState::Lost, FleetMachineState::Draining, ""));
 	// An ending machine's agent is refused from then on.
 	TEST_EXPECT(hosted::transition_machine(
 			rig.db, m.id, FleetMachineState::Draining, FleetMachineState::Ending, ""));

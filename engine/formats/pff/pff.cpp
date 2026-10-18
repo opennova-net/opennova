@@ -149,7 +149,7 @@ int pff_open(PffArchive *archive, const char *path)
 
     archive->header = hdr;
 
-    if (fseek(f, (long)hdr.file_table_offset, SEEK_SET) != 0) {
+    if (opennova::io::fseek64(f, (int64_t)hdr.file_table_offset, SEEK_SET) != 0) {
         fclose(f);
         return -1;
     }
@@ -195,7 +195,7 @@ int pff_open_legacy(PffArchive *archive, const char *path)
     if (!f) return -1;
 
     /* num_entries lives at file offset 12 (PFF_OpenLegacyArchive @ 0x7683f0). */
-    if (fseek(f, 12, SEEK_SET) != 0 || fread(&count, 4, 1, f) != 1
+    if (opennova::io::fseek64(f, 12, SEEK_SET) != 0 || fread(&count, 4, 1, f) != 1
         || !pff_count_sane(count)) {
         fclose(f);
         return -1;
@@ -299,7 +299,7 @@ int pff_extract_raw(const PffArchive *archive, const PffEntry *entry,
     f = (FILE *)archive->_file;
     if (!f) return -1;
 
-    if (fseek(f, (long)entry->offset, SEEK_SET) != 0) return -1;
+    if (opennova::io::fseek64(f, (int64_t)entry->offset, SEEK_SET) != 0) return -1;
     if (fread(out_buf, 1, entry->size, f) != entry->size) return -1;
 
     return 0;
@@ -315,7 +315,7 @@ uint32_t pff_footer_kept_word(const PffArchive *archive)
     if (!f) return 0;
     /* The last 12 bytes, kept only when they end in 'KING' [orig: sub_4030E0 @ 0x403133..0x40318A
        (pack.exe): the seek to 12 before the end, the 12-byte read, the 'KING' test, else zeroed]. */
-    if (fseek(f, -(long)PFF_FOOTER_SIZE, SEEK_END) != 0) return 0;
+    if (opennova::io::fseek64(f, -(int64_t)PFF_FOOTER_SIZE, SEEK_END) != 0) return 0;
     if (fread(footer, 1, sizeof(footer), f) != sizeof(footer)) return 0;
     if (memcmp(footer + 8, "KING", 4) != 0) return 0;
     return (uint32_t)footer[4] | ((uint32_t)footer[5] << 8) | ((uint32_t)footer[6] << 16) |

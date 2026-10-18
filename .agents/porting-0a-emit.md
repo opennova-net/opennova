@@ -6,7 +6,7 @@ fully-witnessed chain, and the port in `engine/runtime/replication` (`connection
 that chain, never an invented broadcast. This file is the runbook only: what to read, the chain
 to port against, and the verify loop. Ported-vs-not state lives in `docs/divergence-ledger.md`'s
 D-NET table and `docs/net/novaworld-net-re.md` §8; the 2026-07 rounds that built the emit are
-recorded there and in `engine/runtime/inmatch/ROADMAP.md`, not here.
+recorded there, not here.
 
 Read first: `docs/net/novaworld-net-re.md` §5.9 (wire format), §5.46 (the 0x0F flood context), and
 **§5.47 (the server emit path: the port spec)**. Closure: D-NET-134 (FIXED 2026-08-03).

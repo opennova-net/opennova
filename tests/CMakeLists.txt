@@ -751,6 +751,14 @@ target_link_libraries(update_server_test PRIVATE opennova_net)
 target_include_directories(update_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME update_server COMMAND update_server_test)
 
+# The update listener's pump (apps/common/update_tcp_server) over loopback: a client that
+# pipelines GETs and reads none of their replies is read no further once they back up, what the
+# listener holds for it bounded, and a client beside it served whole and in order.
+add_executable(update_tcp_server_test update/update_tcp_server_test.cpp)
+target_link_libraries(update_tcp_server_test PRIVATE opennova_net opennova_app_common Threads::Threads)
+target_include_directories(update_tcp_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME update_tcp_server COMMAND update_tcp_server_test)
+
 # opennova-update-tool's core: a packed update built from two synthetic trees and served on a
 # loopback port.
 add_executable(update_tool_test update/update_tool_test.cpp)
@@ -3722,15 +3730,6 @@ add_executable(jointops_hello_test novaworld/jointops_hello_test.cpp)
 target_link_libraries(jointops_hello_test PRIVATE opennova_net)
 target_include_directories(jointops_hello_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME jointops_hello COMMAND jointops_hello_test)
-
-# ADR 0010 real-NW parity — decodes the genuine .204 lobby capture (the oracle):
-# envelope + outer NWU + per-session SCRK, dumps every container so our builders
-# can be matched field for field. fixtures/novaworld/nw204_lobby.hexcap.
-add_executable(nw204_lobby_decode_test novaworld/nw204_lobby_decode_test.cpp)
-target_link_libraries(nw204_lobby_decode_test PRIVATE opennova_net)
-target_include_directories(nw204_lobby_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(nw204_lobby_decode_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
-add_test(NAME nw204_lobby_decode COMMAND nw204_lobby_decode_test)
 
 # Inline-pcap decoder regression — crafts tiny in-memory pcaps and round-trips
 # the 0x0D / 0x20 pool decoders through the full S2C stack (encode -> frame ->

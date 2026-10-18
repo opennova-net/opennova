@@ -1,7 +1,8 @@
 # OpenNova deploy toolbox
 
 This directory holds everything needed to deploy a NovaWorld stack to AWS. The full
-guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
+guide is [DEPLOY.md](../DEPLOY.md) at the repo root; its checklist "From zero, in order" is
+the whole bring-up.
 
 - `run.sh` / `run.ps1`: wrappers that build (when it changed) and run the toolbox
   container. `--deployment prod|staging` picks the deployment, each in an AWS account of
@@ -78,7 +79,8 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
   its deployment's deploy user's (`aws-<deployment>`) or, for `org`, `opennova-org`'s
   (`aws-org`); `billing.*.env.tpl`: Stripe's test mode for local work and CI,
   through the restricted key alone). No tracked file holds a value: the vault holds
-  every identifier a rebuild needs (DEPLOY.md, "Rebuilding from the vault"). The toolbox
+  every identifier a rebuild needs (DEPLOY.md, "Rebuilding from the vault", the vault's
+  contract item by item). The toolbox
   resolves the references itself, with no `op run`, `op inject` or `op read`: a run checks
   the token once, lists the vault once and reads each item it needs once, by its id, into
   a cache in the tmpfs that goes when the command ends, and every field and template
@@ -94,14 +96,6 @@ SSH: the programs run on Fargate, a shell is ECS Exec.
 
 ## Resetting the service database
 
-The database is durable: migrations are append-only, and `db reset-db` refuses while a
-subscription grants hosting:
-
-```bash
-./deploy/run.sh --deployment staging db reset-db --yes-drop-database
-```
-
-It dumps the database to S3 first (`--no-backup` skips that), stops every program, drops
-and recreates the database empty, and starts the programs on it, the first to boot applying
-every migration. `--orphan-subscriptions` resets past the billing guard. Details:
-[DEPLOY.md](../DEPLOY.md), "Resetting the service database".
+`./deploy/run.sh --deployment staging db reset-db --yes-drop-database` dumps, drops and
+recreates the database, and refuses while a subscription grants hosting: [DEPLOY.md](../DEPLOY.md),
+"Resetting the service database".

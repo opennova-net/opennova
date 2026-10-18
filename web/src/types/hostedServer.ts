@@ -283,6 +283,13 @@ export interface FleetServer extends HostedServer {
   machine?: FleetMachine | null;
 }
 
+// The live servers of one machine kind, and the most the fleet's machines of
+// that kind hold.
+export interface FleetRoom {
+  live: number;
+  room: number;
+}
+
 // GET /api/admin/hosted.
 export interface FleetResponse {
   enabled: boolean;
@@ -290,6 +297,8 @@ export interface FleetResponse {
   cap: number;
   // How many are live now.
   live: number;
+  shared: FleetRoom;
+  own: FleetRoom;
   machines: FleetMachine[];
   // The filter's servers, live ones first.
   servers: FleetServer[];

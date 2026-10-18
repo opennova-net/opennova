@@ -5,23 +5,21 @@
 
 # The service's programs (programs.tf) keep their defaults: a task each, gate,
 # lobby and controller at 0.25 vCPU and 0.5 GiB, web and worker at 0.5 vCPU and
-# 1 GiB (each scaling up to 2 on its CPU).
+# 1 GiB.
 
 # The gate's Elastic IP retail clients reach (54.162.79.147), adopted, never
 # managed (the load balancer's zone-a address), is no knob here: its
-# allocation id in the prod account (the one `aws ec2 accept-address-transfer`
-# gives it at the cutover) comes from prod's vault item (the field
-# aws-prod/gate_eip_allocation_id), as TF_VAR_service_eip_allocation_id; a prod
-# plan without it stops (service.tf).
+# allocation id in the prod account comes from prod's vault item (the field
+# aws-prod/gate_eip_allocation_id; DEPLOY.md, "The var-file"), as
+# TF_VAR_service_eip_allocation_id; a prod plan without it stops (service.tf).
 
 azs = ["us-east-1a", "us-east-1b"]
 
 cloudflare_web_proxied = true
 
-# The database (database.tf): Multi-AZ, max_connections sized for
-# db_service_processes processes of db_pool_max connections each.
-db_instance_class = "db.t4g.small"
-db_multi_az       = true
+# The database (database.tf) and the cache (cache.tf) keep their defaults while
+# traffic is small: a db.t4g.micro in one zone and one cache node. Their
+# standbys come back with db_multi_az = true and cache_node_count = 2.
 
 # Outbound mail through Amazon SES (mail.tf): the service sends its welcome
 # mail and password reset links as support@<domain>, through prod's own

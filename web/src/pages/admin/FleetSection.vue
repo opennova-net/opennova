@@ -4,8 +4,7 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">Fleet</h1>
         <p class="text-sm text-ink-muted">
-          The machines NovaWorld runs hosted servers on, and the servers on them. A shared machine holds several
-          servers, an own machine exactly one.
+          The machines that run hosted servers, and their servers.
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -26,7 +25,7 @@
 
     <dl v-if="fleet" class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
       <StatTile label="Hosting" :value="fleet.enabled ? 'On' : 'Off'" :detail="fleet.enabled ? 'Owners can start servers' : 'No server can start'" />
-      <StatTile label="Live servers" :value="`${fleet.live} of ${fleet.cap}`" detail="The service's cap on live servers" />
+      <StatTile label="Live servers" :value="`${fleet.shared.live} of ${fleet.shared.room} shared`" :detail="`${fleet.own.live} of ${fleet.own.room} own`" />
       <StatTile label="Machines" :value="String(activeMachines.length)" :detail="machineBreakdown" />
     </dl>
 
@@ -39,9 +38,9 @@
         </button>
       </div>
       <p id="fleet-roll-hint" class="text-xs text-ink-muted">
-        Rolling drains every shared machine and moves its servers to fresh ones (a new image, say); the moves count
-        as no restart. Each machine's launch and end runs as a background job: see
-        <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">Background jobs</RouterLink>.
+        Moves every server to fresh shared machines (a new image, say), not counted as a restart. Launches run as
+        <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">background jobs</RouterLink>.
+        <HistoryToggle v-model="showMachineHistory" :count="replacedMachineIds.size" class="ml-1" />
       </p>
       <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">
@@ -65,7 +64,7 @@
             <tr v-else-if="fleet.machines.length === 0">
               <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No machine is running.</td>
             </tr>
-            <tr v-for="m in fleet?.machines ?? []" :key="m.id" class="fleet-machine-row align-top hover:bg-hover">
+            <tr v-for="m in machinesShown" :key="m.id" class="fleet-machine-row align-top hover:bg-hover">
               <th scope="row" class="whitespace-nowrap px-4 py-3 text-left font-mono text-xs font-normal">
                 {{ m.id }}
                 <span v-if="m.cloud_id" class="block text-ink-muted">{{ m.cloud_id }}</span>
@@ -119,9 +118,9 @@
         </button>
       </div>
       <p id="fleet-update-all-hint" class="text-xs text-ink-muted">
-        A server keeps the game data it started on until its owner updates it. This restarts every live server
-        that runs older data than its data set's current, dropping their players; the data sets are on
-        <RouterLink to="/admin/data-sets" class="text-accent hover:text-ink-bright">Game data</RouterLink>.
+        Restarts every live server on older data than its
+        <RouterLink to="/admin/data-sets" class="text-accent hover:text-ink-bright">data set's</RouterLink> current,
+        dropping its players.
       </p>
       <form class="flex flex-wrap items-end gap-3" @submit.prevent="applyFilter">
         <label class="space-y-1">
@@ -148,6 +147,7 @@
           </select>
         </label>
         <button type="submit" :class="secondaryButton">Apply</button>
+              <HistoryToggle v-model="showServerHistory" :count="replacedServerIds.size" class="self-center" />
       </form>
       <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">
@@ -171,7 +171,7 @@
             <tr v-else-if="fleet.servers.length === 0">
               <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No hosted server matches.</td>
             </tr>
-            <tr v-for="s in fleet?.servers ?? []" :key="s.id" class="fleet-server-row align-top hover:bg-hover">
+            <tr v-for="s in serversShown" :key="s.id" class="fleet-server-row align-top hover:bg-hover">
               <th scope="row" class="px-4 py-3 text-left font-medium">
                 <RouterLink :to="`/admin/fleet/${s.id}`" class="break-words text-accent hover:text-ink-bright">
                   {{ s.settings.game_name || 'Unnamed server' }}
@@ -207,9 +207,9 @@
               </td>
               <td class="fleet-server-data px-4 py-3 text-xs">
                 <template v-if="s.base_tree_id !== null">
-                  <span class="block whitespace-nowrap">{{ pinnedText(s.data.base, s.base_tree_id) }}</span>
+                  <span class="block whitespace-nowrap">{{ pinnedText(s.data.base) }}</span>
                   <span v-if="s.expansion_tree_id !== null" class="block whitespace-nowrap text-ink-muted">
-                    {{ s.expansion?.display_name || 'Expansion' }} {{ pinnedText(s.data.expansion, s.expansion_tree_id) }}
+                    {{ s.expansion?.display_name || 'Expansion' }} {{ pinnedText(s.data.expansion) }}
                   </span>
                   <span v-if="s.update_requested" class="block text-warn">Update requested</span>
                   <span v-else-if="s.outdated" class="inline-block rounded-control bg-warn/10 px-2 py-0.5 font-medium text-warn">Outdated</span>
@@ -244,8 +244,7 @@
     <section class="space-y-4 rounded-panel border border-danger/40 p-4 sm:p-6" aria-labelledby="stop-all-heading">
       <h2 id="stop-all-heading" class="text-xl font-semibold text-danger">Stop all</h2>
       <p class="text-sm text-ink-muted">
-        The kill switch: every live hosted server goes to stopping at once. Their matches end for everyone on them.
-        Owners can start them again while hosting stays on.
+        Stops every live hosted server now, ending their matches. Owners can start them again.
       </p>
       <button
         v-if="!confirmingAll"
@@ -299,6 +298,8 @@
 // of every outdated server (POST /api/admin/hosted/update-all); and the kill
 // switch (POST /api/admin/hosted/stop-all) behind a typed confirmation. The
 // page polls, faster while a server changes state.
+import HistoryToggle from '../../components/HistoryToggle.vue';
+import { replacedMachines, replacedServers } from '../../utils/history';
 import { computed, nextTick, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
@@ -337,11 +338,26 @@ let errorFromLoad = false;
 
 const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).length ?? 0);
 const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested).length ?? 0);
-const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended'));
+const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed'));
 
-// A pinned tree's version, or its id when the reply gave none.
-function pinnedText(tree: PinnedTree | null, treeId: number): string {
-  return tree?.version ? tree.version : `tree ${treeId}`;
+// The ended rows a later start or launch replaced (utils/history.ts), shown
+// on request; the Ended only filter shows every ended server.
+const showMachineHistory = ref(false);
+const showServerHistory = ref(false);
+const replacedMachineIds = computed(() => replacedMachines(fleet.value?.machines ?? []));
+const machinesShown = computed(() =>
+  (fleet.value?.machines ?? []).filter((m) => showMachineHistory.value || !replacedMachineIds.value.has(m.id)),
+);
+const replacedServerIds = computed(() =>
+  query.value.state === 'ended' ? new Set<number>() : replacedServers(fleet.value?.servers ?? [], (s) => s.owner?.id ?? null),
+);
+const serversShown = computed(() =>
+  (fleet.value?.servers ?? []).filter((s) => showServerHistory.value || !replacedServerIds.value.has(s.id)),
+);
+
+// A pinned tree's version; data that ships no version.txt has none.
+function pinnedText(tree: PinnedTree | null): string {
+  return tree?.version || 'No version';
 }
 const machineBreakdown = computed(() => {
   const shared = activeMachines.value.filter((m) => m.kind === 'shared').length;

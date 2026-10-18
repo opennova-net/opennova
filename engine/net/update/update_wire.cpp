@@ -156,10 +156,18 @@ std::vector<uint8_t> encode_login_reply(int32_t id, int8_t result) {
 
 std::vector<uint8_t> encode_get_reply(
 		std::string_view name, int32_t id, const uint8_t *data, size_t size, int8_t result) {
+	std::vector<uint8_t> out = encode_get_reply_header(name, id, size, result);
+	if (size)
+		out.insert(out.end(), data, data + size);
+	return out;
+}
+
+std::vector<uint8_t> encode_get_reply_header(
+		std::string_view name, int32_t id, uint64_t size, int8_t result) {
 	const std::string header = "GET " + std::string(name) + "\r\nID " + std::to_string(id) +
 			"\r\nSIZE " + std::to_string(size) + "\r\nRESULT " + std::to_string(int(result)) +
 			"\r\n\r\n";
-	return bytes_of(header, data, size);
+	return bytes_of(header, nullptr, 0);
 }
 
 std::vector<uint8_t> encode_crc_reply(uint32_t crc, int32_t id) {

@@ -4,14 +4,13 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">CD keys</h1>
         <p class="text-sm text-ink-muted">
-          Keys for the games that activate against NovaWorld: Delta Force Xtreme 2. A copy is activated on its
-          first NovaWorld login, for the machine it runs on. Joint Operations needs no key.
+          Delta Force Xtreme 2 keys, activated on a copy's first NovaWorld login. Joint Operations needs none.
         </p>
         <p v-if="list" class="mt-1 text-xs text-ink-muted">
           <template v-if="list.auto_mint">
             An account with no key gets one at its first activation.
           </template>
-          <template v-else>Only keys assigned here activate; an account with no key is not activated.</template>
+          <template v-else>Only keys assigned here activate.</template>
         </p>
       </div>
       <button

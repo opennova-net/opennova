@@ -40,7 +40,7 @@ output "lb_dns_name" {
 
 output "lb_arn" {
   value       = aws_lb.public.arn
-  description = "The public load balancer (deletion protection on: DEPLOY.md's rollback from the cutover lifts it first)"
+  description = "The public load balancer (deletion protection on: it holds the gate's address)"
 }
 
 output "lb_addresses" {
@@ -66,6 +66,11 @@ output "web_domain" {
 output "update_host" {
   value       = local.update_host != "" ? local.update_host : null
   description = "The update service's hostname, an unproxied record at the load balancer (web's ONNET_UPDATE_HOST; retail UPDATE.EXE reaches it on the update ports); null without a zone"
+}
+
+output "novaworld_host" {
+  value       = local.novaworld_host != "" ? local.novaworld_host : null
+  description = "The gate's hostname, an unproxied A record at the gate's address (OpenNova's client's OpenNova NovaWorld; opennova-serve's --master-host); null without a zone"
 }
 
 output "ops_bucket" {

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <formats/pff/pff.h>
+#include "pff/pff_sparse_archive.h"
 #include "pff/pff_test_writer.h"
 
 using namespace opennova::pff;
@@ -791,6 +792,78 @@ static int test_write_rejects_offset_overflow(void) {
     return 1;
 }
 
+/* ---- archives past 2 GiB (sparse files: a few KB on the disk) ---- */
+
+/* `path` opens, holds exactly `entries`, each extracts as its payload, and its footer keeps
+   `kept`. */
+static int sparse_archive_reads(const char *path, const PffSparseEntry *entries, uint32_t n, uint32_t kept) {
+    PffArchive ar;
+    uint32_t i;
+    int ok;
+    if (pff_open(&ar, path) != 0) return 0;
+    ok = ar.entry_count == n && pff_footer_kept_word(&ar) == kept;
+    for (i = 0; ok && i < n; ++i)
+        ok = entry_bytes_equal(&ar, entries[i].name, (const uint8_t *)entries[i].data,
+                               (uint32_t)strlen(entries[i].data));
+    pff_close(&ar);
+    return ok;
+}
+
+/* A payload that starts past 2^31 extracts (the seek to it was a 32-bit long on Windows, so this
+   archive opened and its entry failed). The directory sits low, before the payload. */
+static int test_payload_past_2gib(void) {
+    const char *path = "pff_past_2gib_payload.pff";
+    const PffSparseEntry entries[] = { { "far.txt", 0x80000000u, "a payload past 2 GiB" } };
+    const uint64_t size = 0x80000000ull + 64;
+    if (!pff_sparse_write(path, size, PFF_HEADER_SIZE, entries, 1, 0)) {
+        remove(path);
+        printf("(no sparse file here: skipped) ");
+        return 1;
+    }
+    CHECK(sparse_archive_reads(path, entries, 1, 0), "the payload past 2 GiB extracts");
+    remove(path);
+    return 1;
+}
+
+/* The packer's layout past 2^31: the payloads, then the directory where they end, both past 2 GiB
+   (the directory's seek failed, so pff_open refused the archive). */
+static int test_directory_past_2gib(void) {
+    const char *path = "pff_past_2gib_directory.pff";
+    const PffSparseEntry entries[] = {
+        { "near.txt", PFF_HEADER_SIZE, "a payload at the start" },
+        { "far.txt", 0x80000010u, "a payload past 2 GiB" },
+    };
+    const uint32_t dir_offset = 0x80000100u;
+    const uint64_t size = (uint64_t)dir_offset + 2 * PFF_ENTRY_SIZE + PFF_FOOTER_SIZE;
+    if (!pff_sparse_write(path, size, dir_offset, entries, 2, 0)) {
+        remove(path);
+        printf("(no sparse file here: skipped) ");
+        return 1;
+    }
+    CHECK(sparse_archive_reads(path, entries, 2, 0), "the archive opens and both payloads extract");
+    remove(path);
+    return 1;
+}
+
+/* The top of the 32-bit offsets: a payload and the directory just under 4 GiB, so the directory and
+   the footer run past it, and the footer's kept word reads back (the footer's seek from the end
+   landed past 2^31). */
+static int test_directory_at_the_top_of_32_bits(void) {
+    const char *path = "pff_past_2gib_top.pff";
+    const PffSparseEntry entries[] = { { "top.txt", 0xFFFFFF00u, "a payload under 4 GiB" } };
+    const uint32_t dir_offset = 0xFFFFFFF0u;
+    const uint64_t size = (uint64_t)dir_offset + PFF_ENTRY_SIZE + PFF_FOOTER_SIZE;
+    if (!pff_sparse_write(path, size, dir_offset, entries, 1, 0x12345678u)) {
+        remove(path);
+        printf("(no sparse file here: skipped) ");
+        return 1;
+    }
+    CHECK(sparse_archive_reads(path, entries, 1, 0x12345678u),
+          "the archive opens, its payload extracts and its footer keeps its word");
+    remove(path);
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_is_pff3_magic);
     RUN_TEST(test_is_pff4_magic);
@@ -823,6 +896,9 @@ int main(void) {
     RUN_TEST(test_write_preserves_name_case);
     RUN_TEST(test_write_progress_callback);
     RUN_TEST(test_write_rejects_offset_overflow);
+    RUN_TEST(test_payload_past_2gib);
+    RUN_TEST(test_directory_past_2gib);
+    RUN_TEST(test_directory_at_the_top_of_32_bits);
 
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed > 0 ? EXIT_FAILURE : EXIT_SUCCESS;

@@ -17,7 +17,7 @@ import type {
   ConnectionsResponse,
   ServerStatus,
 } from '../types/admin';
-import type { FleetMachine, FleetQuery, FleetResponse, FleetServer } from '../types/hostedServer';
+import type { FleetMachine, FleetQuery, FleetResponse, FleetRoom, FleetServer } from '../types/hostedServer';
 
 // The `error` codes these routes answer with, plus `network` (no reply at
 // all) and `unknown` (a reply this client does not recognise).
@@ -406,10 +406,19 @@ function pickFleetServer(value: unknown): FleetServer | null {
   };
 }
 
+function pickRoom(data: unknown): FleetRoom | null {
+  const v = data as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || !isCount(v.live) || !isCount(v.room)) return null;
+  return { live: v.live, room: v.room };
+}
+
 function pickFleet(data: unknown): FleetResponse | null {
   const v = data as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null) return null;
   if (typeof v.enabled !== 'boolean' || !isCount(v.cap) || !isCount(v.live)) return null;
+  const shared = pickRoom(v.shared);
+  const own = pickRoom(v.own);
+  if (!shared || !own) return null;
   if (!Array.isArray(v.servers) || !Array.isArray(v.machines)) return null;
   const servers = v.servers.map(pickFleetServer);
   const machines = v.machines.map(pickMachine);
@@ -418,6 +427,8 @@ function pickFleet(data: unknown): FleetResponse | null {
     enabled: v.enabled,
     cap: v.cap,
     live: v.live,
+    shared,
+    own,
     machines: machines as FleetMachine[],
     servers: servers as FleetServer[],
   };

@@ -28,6 +28,11 @@ locals {
   # update listener off.
   update_host = local.dns_enabled ? (local.is_prod ? "update.${var.cloudflare_domain}" : "update.${local.deployment}.${var.cloudflare_domain}") : ""
 
+  # The gate's hostname (edge.tf's unproxied A record), the name OpenNova's
+  # own client dials: prod nw.<domain>, another deployment
+  # nw.<deployment>.<domain>; empty without a zone.
+  novaworld_host = local.dns_enabled ? (local.is_prod ? "nw.${var.cloudflare_domain}" : "nw.${local.deployment}.${var.cloudflare_domain}") : ""
+
   # The two availability zones: var.azs, or the region's first two. Public and
   # private subnet a share the first (the load balancer's zone-a node, the
   # database's primary when single-AZ), b the second.

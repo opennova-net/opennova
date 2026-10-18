@@ -179,6 +179,18 @@ struct ServerConfig {
 	// open. Off by default (the dev site's Vite proxy is in no trusted list).
 	bool api_proxy_only = false;
 
+	// The address the retail HTTP port's proxy reaches this server from
+	// (ONNET_RETAIL_PROXY; prod's: the portal nginx's retail server, which
+	// connects from 127.0.0.2, web/nginx.conf), the proxy that caps a request's
+	// body before this server buffers any of it. A request from it names the
+	// client in X-Real-IP (that nginx's own TCP peer, the client's address the
+	// balancer keeps), which is taken as the request's address before any route
+	// reads it, so the retail routes, the login brake and every record see the
+	// client as they would straight on the port. It is no trusted proxy: /api/
+	// refuses its requests as it refuses any client's. Empty (the default): no
+	// such proxy.
+	std::string retail_proxy;
+
 	// ONNET_BOOTSTRAP_ADMIN: an existing account web gives the admin role
 	// at boot, the way the first site admin is made. A name no account has is
 	// a warning.
@@ -209,8 +221,8 @@ struct ServerConfig {
 	std::string mail_region;
 
 	// ONNET_HOSTED_AWS_CLI: the AWS CLI v2 every call of it runs (an absolute
-	// path, run as given, no PATH search): the lobby's ECS discovery
-	// (ecs_metadata.h), the mailer's SES calls (mailer.h); the fleet's EC2
+	// path, run as given, no PATH search): the S3 object store
+	// (s3_object_store.h), the mailer's SES calls (mailer.h); the fleet's EC2
 	// driver reads it with its settings (hosted/fleet_config.h).
 	std::string aws_cli = "/usr/local/bin/aws";
 

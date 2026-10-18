@@ -1,6 +1,6 @@
 name: Deploy
 
-# A deploy of the NovaWorld stack (DEPLOY.md, section 4, "The deploy
+# A deploy of the NovaWorld stack (DEPLOY.md, section 5, "The deploy
 # workflow"): the toolbox's own `app deploy`, run here from a short-lived AWS
 # role in the deployment's own account instead of the vault. Manual runs alone.
 #

@@ -390,7 +390,7 @@ public:
 	}
 
 	// Deterministic golden replay: force the in-match connection state so frame_c2s_uplink
-	// reproduces a CAPTURED C2S 0x0C datagram byte-for-byte (the ROADMAP "Determinism" seed-inject).
+	// reproduces a CAPTURED C2S 0x0C datagram byte-for-byte (the seed-inject).
 	// session_id = the captured 0x43 header session_id (= ServerAuth.sk); client_key = the captured
 	// ClientAuth.ck — the S2C admission gate validates every inbound 0x83 header against it, so a
 	// replay that also decodes the capture's S2C stream MUST supply it (0 keeps the local default);

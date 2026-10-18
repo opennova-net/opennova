@@ -317,8 +317,8 @@ resource "aws_cloudwatch_metric_alarm" "program_utilization" {
 }
 
 # A target the load balancer has stopped sending to, for 10 minutes: a gate
-# task (UDP), a lobby task (UDP), web's portal (443) or web's server (the
-# retail port, the update service), one alarm per target group.
+# task (UDP), a lobby task (UDP), web's portal (443, the retail port) or web's
+# server (the update service), one alarm per target group.
 resource "aws_cloudwatch_metric_alarm" "lb_unhealthy" {
   for_each = local.lb_listeners
 
@@ -359,8 +359,8 @@ resource "aws_cloudwatch_metric_alarm" "db_cpu" {
   tags = var.tags
 }
 
-# A burstable database's CPU credits (a db.t4g.small earns 24 an hour and holds
-# at most 576). RDS runs its T classes in unlimited mode: past a spent balance
+# A burstable database's CPU credits (a db.t4g.micro earns 12 an hour and holds
+# at most 288). RDS runs its T classes in unlimited mode: past a spent balance
 # it is not throttled but bills surplus credits by the vCPU-hour, so a low
 # balance means hours of load past the class's baseline.
 resource "aws_cloudwatch_metric_alarm" "db_cpu_credits" {

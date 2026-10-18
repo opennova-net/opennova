@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Web's ephemeral state: ElastiCache for Valkey (DEPLOY.md, section 3, "The
+# Web's ephemeral state: ElastiCache for Valkey (DEPLOY.md, section 4, "The
 # cache")
 # ---------------------------------------------------------------------------
 #
@@ -31,7 +31,7 @@ locals {
   # Two nodes, the primary and its replica: ElastiCache names them
   # <group>-001 and <group>-002 (the alarms watch each).
   cache_group_id = "${local.name}-cache"
-  cache_nodes    = [for i in range(1, 3) : format("%s-%03d", local.cache_group_id, i)]
+  cache_nodes    = [for i in range(1, var.cache_node_count + 1) : format("%s-%03d", local.cache_group_id, i)]
 
   cache_env = {
     ONNET_REDIS_URL = "rediss://${aws_elasticache_replication_group.cache.primary_endpoint_address}:${local.cache_port}"
@@ -95,10 +95,12 @@ resource "aws_elasticache_replication_group" "cache" {
   port                 = local.cache_port
   parameter_group_name = aws_elasticache_parameter_group.cache.name
 
-  num_cache_clusters          = 2
-  preferred_cache_cluster_azs = local.azs
-  automatic_failover_enabled  = true
-  multi_az_enabled            = true
+  # One node while traffic is small; with two or more, the replicas take
+  # the other zones and the group fails over on its own.
+  num_cache_clusters          = var.cache_node_count
+  preferred_cache_cluster_azs = [for i in range(var.cache_node_count) : local.azs[i % length(local.azs)]]
+  automatic_failover_enabled  = var.cache_node_count > 1
+  multi_az_enabled            = var.cache_node_count > 1
 
   subnet_group_name  = aws_elasticache_subnet_group.cache.name
   security_group_ids = [aws_security_group.cache.id]

@@ -24,7 +24,7 @@ namespace opennova::replication {
 // the original's per-connection fan); both the legacy listen-server binding and inmatch's
 // Server_TickUpdate own that table elsewhere (inmatch: NapiNPProtocol.connection_list, each node's
 // embedded replication::Connection `link`) and call these two functions per node, so there is ONE
-// drain/emit implementation (ADR 0011 / inmatch ROADMAP P4). Faithful frame order
+// drain/emit implementation (ADR 0011). Faithful frame order
 // [orig: Game_ProcessMainFrame @ 0x5263f0]:
 //
 //   input -> drain_connection_c2s (C2S) -> World::run_script_pass (WAC/BMS)

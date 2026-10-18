@@ -61,10 +61,21 @@ describe('ServerOverviewTab', () => {
     );
     const section = page.get('#hosted-server-1-data').element.closest('section')!;
     expect(section.textContent).toContain('Joint Operations');
-    expect(section.textContent).toContain('version 1.7.5.5');
+    expect(section.textContent).toContain('1.7.5.5');
+    expect(section.textContent).not.toContain('version');
     expect(section.textContent).toContain('Escalation');
     expect(page.find('#hosted-server-update').exists()).toBe(false);
     expect(mine).not.toHaveBeenCalled();
+  });
+
+  it('says No version for data that names none, and offers Start again once the server ended', async () => {
+    const page = await mountTab(
+      hostedServer(1, { state: 'stopped', live: false, data: { base: { tree_id: 10, version: '' }, expansion: null } }),
+    );
+    const section = page.get('#hosted-server-1-data').element.closest('section')!;
+    expect(section.textContent).toContain('No version');
+    const again = page.findAll('a').find((a) => a.text() === 'Start again');
+    expect(again?.attributes('href')).toBe('/me/servers/new?from=1');
   });
 
   it("names the newer version and updates the server behind a warning, on the owner's page", async () => {

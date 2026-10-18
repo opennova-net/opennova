@@ -4,8 +4,7 @@
       <div>
         <h1 ref="heading" tabindex="-1" class="text-3xl font-semibold text-ink focus:outline-none">Servers</h1>
         <p class="mt-1 text-sm text-ink-muted">
-          The servers NovaWorld hosts for you, and the games you host yourself as
-          <span class="font-medium text-ink">{{ user?.username ?? 'your account' }}</span>.
+          Servers NovaWorld hosts for you, and games you host yourself.
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -119,9 +118,15 @@
       />
 
       <section v-if="ended.length > 0" class="space-y-4" aria-labelledby="servers-ended-heading">
-        <h2 id="servers-ended-heading" class="text-xl font-semibold text-ink">Recently ended</h2>
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="servers-ended-heading" class="text-xl font-semibold text-ink">Recently ended</h2>
+          <HistoryToggle v-model="showEndedHistory" :count="replacedEndedIds.size" />
+        </div>
+        <p v-if="endedShown.length === 0" class="text-sm text-ink-muted">
+          Every one you have started again since.
+        </p>
         <HostedServerCard
-          v-for="server in ended"
+          v-for="server in endedShown"
           :key="server.id"
           :server="server"
           :now="now"
@@ -174,6 +179,7 @@ import { computed, nextTick, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import AllowanceMeter from '../../components/AllowanceMeter.vue';
 import HostedServerCard from '../../components/HostedServerCard.vue';
+import HistoryToggle from '../../components/HistoryToggle.vue';
 import HostingLockedCallout from '../../components/HostingLockedCallout.vue';
 import MyServerCard from '../../components/MyServerCard.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
@@ -185,6 +191,7 @@ import { hostedCadence, usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
 import type { MyServer } from '../../types/myServers';
+import { replacedServers } from '../../utils/history';
 import {
   endedServers,
   hostingView,
@@ -217,6 +224,11 @@ const view = computed(() => hostingView(data.value, hostedError.value !== ''));
 const block = computed(() => (data.value ? startBlock(data.value) : null));
 const live = computed(() => liveServers(data.value?.servers ?? []));
 const ended = computed(() => endedServers(data.value?.servers ?? []));
+// An ended server you started again since (one of the same name after it) is
+// history, shown on request (utils/history.ts).
+const showEndedHistory = ref(false);
+const replacedEndedIds = computed(() => replacedServers(data.value?.servers ?? []));
+const endedShown = computed(() => ended.value.filter((s) => showEndedHistory.value || !replacedEndedIds.value.has(s.id)));
 const listings = computed(() => splitListings(hosts.value, data.value?.servers ?? []));
 
 const sourceLine = computed(() => {

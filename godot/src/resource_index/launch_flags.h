@@ -52,6 +52,8 @@ public:
 	static String capture_pcap();
 	// 0 = no runtime MCP endpoint.
 	static int mcp_port();
+	// `--novaworld-host <host>`: the OpenNova target's gate; "" = the product's own.
+	static String novaworld_host();
 	// `/NOHUD` — the HUD overlay master word's clear (boot_policy.h no_hud).
 	static bool no_hud();
 	// `/noreload` — the auto-reload global forced off (boot_policy.h no_reload).

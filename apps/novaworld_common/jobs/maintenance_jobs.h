@@ -13,6 +13,8 @@
 //   jobs.prune           finished jobs 14 days old (job_queue.h), or as old as
 //                        its payload's keep_s says (an admin's prune, at
 //                        least kPruneKeepMinS)
+//   unknown_messages.prune  the unknown-message rows no process has seen for
+//                        kUnknownKeepMs (UnknownTracker::prune), hourly
 //
 // and, with the HTTP layer (register_account_jobs, account_jobs.h), the
 // website's: sessions past their expiry, login addresses, password reset links
@@ -29,6 +31,7 @@ namespace opennova::novaworld_server::jobs {
 inline constexpr const char *kJobHostsPrune = "hosts.prune";
 inline constexpr const char *kJobHostKeysPrune = "host_keys.prune";
 inline constexpr const char *kJobJobsPrune = "jobs.prune";
+inline constexpr const char *kJobUnknownsPrune = "unknown_messages.prune";
 // The member of a jobs.prune payload that names its keep (seconds), and the
 // least it takes: a day of finished jobs always stays for the admin's view.
 inline constexpr const char *kPruneKeepKey = "keep_s";
@@ -38,6 +41,7 @@ struct MaintenanceConfig {
 	int64_t sweep_interval_ms = 30 * 1000; // HOST_SWEEP_INTERVAL_MS
 	int64_t host_stale_window_ms = 300 * 1000; // HOST_STALE_WINDOW_MS
 	int64_t jobs_prune_interval_ms = 60 * 60 * 1000;
+	int64_t unknowns_prune_interval_ms = 60 * 60 * 1000;
 };
 
 // The handlers (the worker's).

@@ -440,6 +440,8 @@ The local NovaWorld stack runs (project $project).
   admin API       Authorization: Bearer $admin_token
   retail client   the OpenNova Switcher: Custom address... $address
                   (or the hosts line: $address gs.novaworld.net); allow UDP 7597 and 64206
+  opennova.exe    its NovaWorld screen's OpenNova target: a source run dials 127.0.0.1;
+                  a packaged one takes --novaworld-host $address
   dev accounts    test/test, foo/foo, test1..3/test
   announced at    $address (gate udp 7597, lobby udp 64206, web http 8080)
 EOF
@@ -455,7 +457,7 @@ EOF
 
 cmd_smoke() {
     [[ -f "$env_file" ]] || die "no stack (scripts/dev_stack.sh up first)"
-    local args=(run --web novaworld-web:8080 --site novaworld-web:80 --gate novaworld-gate:7597
+    local args=(run --web novaworld-web:8082 --site novaworld-web:80 --gate novaworld-gate:7597
         --livez novaworld-gate:8081 --livez novaworld-lobby:8081
         --livez novaworld-controller:8081 --livez novaworld-worker:8081
         --admin-token "$(state_value ADMIN_API_TOKEN)" --timeout 300)

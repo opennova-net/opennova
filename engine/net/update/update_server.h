@@ -9,11 +9,27 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace opennova::update {
+
+// A file a GET reply sends: its size, then its bytes in order, read as the reply goes out, so
+// a file the server serves from disk is never held whole. Service plumbing, not a port.
+class UpdateFile {
+public:
+	virtual ~UpdateFile() = default;
+	virtual uint64_t size() const = 0;
+	// The next `count` bytes into `out`; false when they do not read.
+	virtual bool read(uint8_t *out, size_t count) = 0;
+
+	// A file held in memory.
+	static std::unique_ptr<UpdateFile> from_bytes(std::vector<uint8_t> bytes);
+	// The file at the UTF-8 `path`, read from disk as it goes out; null when it does not open.
+	static std::unique_ptr<UpdateFile> from_disk(const std::string &path);
+};
 
 // What the server serves, by product login (JOTRus, JOEus, ...).
 class UpdateCatalog {
@@ -31,6 +47,11 @@ public:
 	// false when it has none of that name.
 	virtual bool read_file(
 			std::string_view login, std::string_view name, std::vector<uint8_t> &out) const = 0;
+	// The same file opened for a GET reply; null when the product has none of that name. The
+	// default reads it whole through read_file (a catalog that holds its files in memory); a
+	// catalog serving files from disk opens it there (UpdateFile::from_disk).
+	virtual std::unique_ptr<UpdateFile> open_file(
+			std::string_view login, std::string_view name) const;
 };
 
 class UpdateServer {
@@ -44,9 +65,17 @@ public:
 		std::vector<uint8_t> send; // the replies to send, in order
 		bool keep_open = true; // false after CLOSE, a malformed request, or a request
 							   // the connection may not make
+		bool more = false; // replies wait past this call's kSendBudget: once `send` went
+						   // out, receive(connection, nullptr, 0) answers the next
 	};
-	// The bytes one read brought: every complete request answered.
+	// The bytes one read brought (none to go on): the complete requests answered in order,
+	// until what this call returns reaches kSendBudget (a file's body is cut there, the rest
+	// sent by the next call; a reply begun under the budget, a GET header or a small reply,
+	// may end past it by its own size, at most a few hundred bytes), so one connection's
+	// replies are made as fast as its client takes them and no faster. The bytes on the
+	// wire are the same however they are cut.
 	Received receive(uint32_t connection, const uint8_t *data, size_t size);
+	static constexpr size_t kSendBudget = 64 * 1024;
 
 	void close(uint32_t connection);
 	size_t connection_count() const { return connections_.size(); }
@@ -55,6 +84,13 @@ private:
 	struct Connection {
 		std::string buffer;
 		std::string login; // the product logged in, empty before
+		// The GET being answered: its id and names (the next at `next_name`), and the body
+		// going out (`body_left` bytes of `body` still to send).
+		int32_t get_id = 0;
+		std::vector<std::string> get_names;
+		size_t next_name = 0;
+		std::unique_ptr<UpdateFile> body;
+		uint64_t body_left = 0;
 	};
 
 	const UpdateCatalog &catalog_;

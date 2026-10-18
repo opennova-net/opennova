@@ -8,10 +8,10 @@
 # (service.tf: prod's adopted one, 54.162.79.147, which retail's hosts file
 # and the Switcher name, never released), zone b's one of its own. Retail
 # clients reach the gate, the lobby and web's HTTP routes at zone a's address
-# alone (ONNET_PUBLIC_HOST, ONNET_LOBBY_ENDPOINT, ONNET_WEB_HOST: no client
-# follows a DNS name); the site's proxied records point at the balancer's DNS
-# name (edge.tf), which answers with both, and so does the update service's
-# unproxied one. Target groups, of IP targets (the tasks) that see each
+# alone (ONNET_PUBLIC_HOST, ONNET_LOBBY_ENDPOINT, ONNET_WEB_HOST), which the
+# gate's own unproxied name, nw, also names (edge.tf; OpenNova's client dials
+# it); the site's proxied records point at the balancer's DNS name (edge.tf),
+# which answers with both, and so does the update service's unproxied one. Target groups, of IP targets (the tasks) that see each
 # client's own address, each with its listener on its port:
 #   gate            UDP gate_udp_port to the gate's tasks, from everyone (the
 #                   clients' probes, the hosts' status blobs); health: HTTP
@@ -29,13 +29,19 @@
 #                   Cloudflare's published ranges alone; health: the handshake.
 #                   With proxied records alone: without them there is no
 #                   origin certificate, and nginx listens on 80
-#   http            TCP game_http_port to web's server (the retail NW*.dll and
-#                   .gsb routes; plain HTTP, stock clients), from everyone;
-#                   health: /healthz (the stall watchdog, and the cache)
+#   http            TCP game_http_port to the portal nginx's retail server
+#                   (portal_retail_port below; web/nginx.conf), which caps a
+#                   request's body before web's server buffers it and hands
+#                   the request on to web's server on the task's loopback, with
+#                   the client's address (ONNET_RETAIL_PROXY): the retail
+#                   NW*.dll and .gsb routes, plain HTTP, stock clients, from
+#                   everyone; health: /healthz through it (the stall watchdog,
+#                   and the cache)
 #   update          TCP, the first of var.update_ports, to web's server: the
 #                   update service retail UPDATE.EXE speaks (ADR 0061; web
 #                   serves every update port, ONNET_UPDATE_PORTS), from
-#                   everyone; health: the same /healthz on game_http_port.
+#                   everyone; health: the same /healthz through the retail
+#                   server.
 #                   The other update ports get a listener each
 #                   (aws_lb_listener.update), all forwarding to this one group
 #                   (ECS admits five target groups per service; web holds
@@ -46,18 +52,27 @@
 # too, programs.tf). ECS registers each task with its target groups and holds
 # a deployment until the new tasks pass, and stops an old task only once its
 # targets drained (deregistration_delay below). Deletion protection is on: the
-# balancer holds the gate's address (DEPLOY.md's rollback from the cutover
-# turns it off first).
+# balancer holds the gate's address (lift it first to destroy the balancer on
+# purpose).
 
 locals {
+  # The portal nginx's retail server (web/nginx.conf), where the retail port's
+  # listener lands: the portal container's port beside 443 (programs.tf).
+  portal_retail_port = 8082
+
+  # Each listener's port, and the container port its tasks register on
+  # (target_port): the retail port's is the portal's retail server. A target
+  # group keeps its listener's port: ECS registers each task with the
+  # container port, and a changed group port would replace the group its
+  # listener holds.
   lb_listeners = merge(
     {
-      gate   = { program = "gate", container = "gate", protocol = "UDP", port = var.gate_udp_port }
-      lobby  = { program = "lobby", container = "lobby", protocol = "UDP", port = var.nw_udp_port }
-      http   = { program = "web", container = "web", protocol = "TCP", port = var.game_http_port }
-      update = { program = "web", container = "web", protocol = "TCP", port = var.update_ports[0] }
+      gate   = { program = "gate", container = "gate", protocol = "UDP", port = var.gate_udp_port, target_port = var.gate_udp_port }
+      lobby  = { program = "lobby", container = "lobby", protocol = "UDP", port = var.nw_udp_port, target_port = var.nw_udp_port }
+      http   = { program = "web", container = "portal", protocol = "TCP", port = var.game_http_port, target_port = local.portal_retail_port }
+      update = { program = "web", container = "web", protocol = "TCP", port = var.update_ports[0], target_port = var.update_ports[0] }
     },
-    local.edge_proxied ? { https = { program = "web", container = "portal", protocol = "TCP", port = 443 } } : {},
+    local.edge_proxied ? { https = { program = "web", container = "portal", protocol = "TCP", port = 443, target_port = 443 } } : {},
   )
 
   # The update ports after the first: a listener each, forwarding to the
@@ -72,7 +87,7 @@ locals {
       "gate-health"  = { program = "gate", protocol = "tcp", port = var.health_port, description = "The gate /livez, the load balancer health check" }
       "lobby"        = { program = "lobby", protocol = "udp", port = var.nw_udp_port, description = "NovaWorld UDP, the lobby (the port the gate announces), through the load balancer" }
       "lobby-health" = { program = "lobby", protocol = "tcp", port = var.health_port, description = "The lobby /livez, the load balancer health check" }
-      "http"         = { program = "web", protocol = "tcp", port = var.game_http_port, description = "HTTP routes of stock clients (NW*.dll, .gsb), through the load balancer" }
+      "http"         = { program = "web", protocol = "tcp", port = local.portal_retail_port, description = "HTTP routes of stock clients (NW*.dll, .gsb) to the portal retail server, through the load balancer" }
       "update"       = { program = "web", protocol = "tcp", port = var.update_ports[0], description = "The update service of retail UPDATE.EXE (every update port lands here), through the load balancer" }
     },
     local.edge_proxied ? { "https" = { program = "web", protocol = "tcp", port = 443, description = "The portal nginx over TLS (Full strict), through the load balancer" } } : {},
@@ -201,10 +216,10 @@ resource "aws_lb_target_group" "public" {
   connection_termination = each.value.protocol == "UDP" ? true : null
 
   # The update group speaks the updater's protocol on its port, so its check
-  # goes to the retail port's /healthz.
+  # goes to the retail server's /healthz.
   health_check {
     protocol            = each.key == "https" ? "TCP" : "HTTP"
-    port                = each.value.protocol == "UDP" ? tostring(var.health_port) : each.key == "update" ? tostring(var.game_http_port) : "traffic-port"
+    port                = each.value.protocol == "UDP" ? tostring(var.health_port) : each.key == "update" ? tostring(local.portal_retail_port) : "traffic-port"
     path                = each.value.protocol == "UDP" ? "/livez" : each.key == "http" || each.key == "update" ? "/healthz" : null
     matcher             = each.key == "https" ? null : "200"
     interval            = 10

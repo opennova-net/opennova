@@ -5,7 +5,7 @@
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
 # Hosting off (hosted_enabled false, the default) plans no machine resource
 # and tells the service so, with no store. Hosting on plans two launch
-# templates: shared (t3a.large, unlimited CPU credits) and own (c7a.medium, no
+# templates: shared (t3a.medium, unlimited CPU credits) and own (c7a.medium, no
 # credit setting), each terminating on shutdown, IMDSv2 with a hop limit of 1,
 # one encrypted root volume (40 GiB: the data trees hostd fetches live there)
 # and no other; the slots' game ports to everyone and admin ports to the
@@ -336,7 +336,7 @@ run "hosting_off" {
       for p in ["web", "controller", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "none" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://controller.prod.opennova.internal:8070" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "12" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "6" &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_HTTP_BIND") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_EC2_LOG_GROUP") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_OBJECT_STORE")
@@ -388,8 +388,8 @@ run "hosting_on" {
     error_message = "two templates: shared and own"
   }
   assert {
-    condition     = aws_launch_template.fleet["shared"].instance_type == "t3a.large" && one(aws_launch_template.fleet["shared"].credit_specification).cpu_credits == "unlimited"
-    error_message = "shared machines: t3a.large with unlimited CPU credits"
+    condition     = aws_launch_template.fleet["shared"].instance_type == "t3a.medium" && one(aws_launch_template.fleet["shared"].credit_specification).cpu_credits == "unlimited"
+    error_message = "shared machines: t3a.medium with unlimited CPU credits"
   }
   assert {
     condition     = aws_launch_template.fleet["own"].instance_type == "c7a.medium" && length(aws_launch_template.fleet["own"].credit_specification) == 0
@@ -411,15 +411,15 @@ run "hosting_on" {
     error_message = "every machine: one encrypted 40 GiB gp3 root volume (the trees it fetches live there), no data volume"
   }
   assert {
-    condition     = aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].from_port == 32768 && aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].to_port == 32779 && aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].ip_protocol == "udp"
-    error_message = "the 12 slots' game UDP ports to everyone"
+    condition     = aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].from_port == 32768 && aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].to_port == 32773 && aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].ip_protocol == "udp"
+    error_message = "the 6 slots' game UDP ports to everyone"
   }
   assert {
     condition = (
-      aws_vpc_security_group_ingress_rule.machines_admin[0].from_port == 32800 && aws_vpc_security_group_ingress_rule.machines_admin[0].to_port == 32811 &&
+      aws_vpc_security_group_ingress_rule.machines_admin[0].from_port == 32800 && aws_vpc_security_group_ingress_rule.machines_admin[0].to_port == 32805 &&
       aws_vpc_security_group_ingress_rule.machines_admin[0].ip_protocol == "tcp" && aws_vpc_security_group_ingress_rule.machines_admin[0].referenced_security_group_id == "sg-0controller"
     )
-    error_message = "the 12 slots' admin TCP ports to the controller alone"
+    error_message = "the 6 slots' admin TCP ports to the controller alone"
   }
   assert {
     condition = (
@@ -515,7 +515,7 @@ run "fleet_policy" {
       for st in data.aws_iam_policy_document.fleet_service[0].statement : st
       if st.sid == "LaunchMachines" && length([
         for c in st.condition : c
-        if(c.test == "StringEquals" && c.variable == "ec2:InstanceType" && toset(c.values) == toset(["t3a.large", "c7a.medium"])) ||
+        if(c.test == "StringEquals" && c.variable == "ec2:InstanceType" && toset(c.values) == toset(["t3a.medium", "c7a.medium"])) ||
         (c.test == "StringEquals" && c.variable == "ec2:MetadataHttpTokens" && contains(c.values, "required")) ||
         (c.test == "ArnEquals" && c.variable == "ec2:LaunchTemplate" && toset(c.values) == toset(["arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0shared", "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0own"]))
       ]) == 3

@@ -1,6 +1,7 @@
 #pragma once
 
-// The hosted servers' stats routes (README "Hosted servers"): one server's
+// The hosted servers' stats routes (apps/novaworld_common/hosted/README.md "Stats"): one
+// server's
 // stats for its owner (GET /api/me/servers/<id>/stats) and for an admin (GET
 // /api/admin/hosted/<id>/stats), an account's servers together (GET
 // /api/me/servers/stats), and the whole fleet's (GET /api/admin/hosted/stats),

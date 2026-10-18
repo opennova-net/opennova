@@ -49,6 +49,11 @@
 //   --capture-pcap <path>       record this session's datagrams to a pcap.
 //   --mcp-port <n>              host the runtime MCP endpoint on that loopback
 //                               port (1..65535); absent = no endpoint.
+//   --novaworld-host <host>     the gate the NovaWorld screen's OpenNova target
+//                               dials (a name or an address); absent = the
+//                               product's own (godot/game/novaworld_settings.gd:
+//                               nw.opennova.net in an exported build, loopback in
+//                               a source run). Never the Original target's.
 //   --working-dir <path>        the directory the game was started in, where it
 //                               keeps the files it writes beside itself as retail
 //                               keeps its saves in its working directory
@@ -92,6 +97,7 @@ inline constexpr const char *kLaunchFlagSpectatorPassword = "--spectator-passwor
 inline constexpr const char *kLaunchFlagCallsign = "--callsign";
 inline constexpr const char *kLaunchFlagCapturePcap = "--capture-pcap";
 inline constexpr const char *kLaunchFlagMcpPort = "--mcp-port";
+inline constexpr const char *kLaunchFlagNovaWorldHost = "--novaworld-host";
 inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
 inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 inline constexpr const char *kLaunchFlagNoReload = "/noreload";
@@ -125,6 +131,7 @@ struct LaunchFlags {
     std::string callsign;          // --callsign <name>
     std::string capture_pcap;      // --capture-pcap <path>
     int mcp_port = 0;              // --mcp-port; 0 = no endpoint (1..65535 accepted)
+    std::string novaworld_host;    // --novaworld-host <host>; "" = the product's own
     std::string working_dir;       // --working-dir <path>; "" = the process's own
     // /NOHUD — the whole token, any case: clears the HUD overlay master word
     // (runtime/hud/hud_frame.h hud_overlay_master) [orig:

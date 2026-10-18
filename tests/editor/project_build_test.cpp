@@ -23,14 +23,6 @@
 #include <io.h>
 #include <share.h>
 #include <sys/stat.h>
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <winioctl.h>
-#else
-#include <fcntl.h>
-#include <unistd.h>
 #endif
 
 #include <base/resource_index/boot_policy.h>
@@ -61,6 +53,7 @@
 #include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
 
+#include "common/sparse_file.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 
@@ -1276,28 +1269,6 @@ static int test_cancel_publishes_nothing() {
 // S26 C11: a build directory that will not go keeps the proof that it is one, so a later build prunes
 // it (it was left empty with no proof, a later build of its content refused as "not a build directory");
 // and a staging name taken by a directory that is no staging (no marker) is passed by, not a failure.
-// A file of `size` bytes that takes no room on the disk (sparse: NTFS's FSCTL_SET_SPARSE, a POSIX truncate's hole).
-static bool write_sparse(const std::string &path, uint64_t size) {
-#ifdef _WIN32
-	HANDLE file = CreateFileW(opennova::io::os_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-	                          FILE_ATTRIBUTE_NORMAL, nullptr);
-	if (file == INVALID_HANDLE_VALUE) return false;
-	DWORD returned = 0;
-	LARGE_INTEGER end;
-	end.QuadPart = LONGLONG(size);
-	const bool ok = DeviceIoControl(file, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned, nullptr) &&
-	                SetFilePointerEx(file, end, nullptr, FILE_BEGIN) && SetEndOfFile(file);
-	CloseHandle(file);
-	return ok;
-#else
-	const int file = ::open(path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
-	if (file < 0) return false;
-	const bool ok = ::ftruncate(file, off_t(size)) == 0;
-	::close(file);
-	return ok;
-#endif
-}
-
 // S26 C9: an archive entry's size is 32 bits, so a file past 4 GiB is refused (it wrapped, and its prefix was
 // packed as if whole). The file is sparse and its hash the build cache's, so no byte of it is read.
 static int test_entry_past_four_gib_refused() {
@@ -1309,7 +1280,7 @@ static int test_entry_past_four_gib_refused() {
 	if (plan.archives.empty()) return 1;
 	const uint64_t size = (uint64_t(1) << 32) + 1;
 	const std::string huge = p.root + "/huge.wav";
-	TEST_EXPECT(write_sparse(huge, size));
+	TEST_EXPECT(test_sparse::write_sparse(huge, size));
 	BuildEntry entry;
 	entry.logical_name = "huge.wav";
 	entry.source_path = huge;

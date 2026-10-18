@@ -368,7 +368,7 @@ run "task_definitions" {
       length(jsondecode(aws_ecs_task_definition.program["web"].container_definitions)) == 2 &&
       jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].name == "portal" &&
       jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].image == "ghcr.io/opennova-net/novaworld-web:latest" &&
-      jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].portMappings[0].containerPort == 443 &&
+      [for m in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].portMappings : "${m.protocol}/${m.containerPort}"] == ["tcp/443", "tcp/8082"] &&
       jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].dependsOn == [{ containerName = "web", condition = "HEALTHY" }] &&
       jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].logConfiguration.options["awslogs-stream-prefix"] == "web" &&
       toset([for s in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].secrets : s.valueFrom]) == toset([
@@ -381,7 +381,7 @@ run "task_definitions" {
       } &&
       alltrue([for p in ["gate", "lobby", "controller", "worker"] : length(jsondecode(aws_ecs_task_definition.program[p].container_definitions)) == 1])
     )
-    error_message = "web's task carries the portal's nginx on 443, started once the server answers, with edge authentication and the origin certificate (the previous edge secret optional, in its label); no other task carries it"
+    error_message = "web's task carries the portal's nginx on 443 and its retail server on 8082, started once the server answers, with edge authentication and the origin certificate (the previous edge secret optional, in its label); no other task carries it"
   }
 }
 
@@ -451,11 +451,12 @@ run "environments" {
     condition = (
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_TRUSTED_PROXIES"] == "127.0.0.1" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_API_PROXY_ONLY"] == "1" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_RETAIL_PROXY"] == "127.0.0.2" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_COOKIE_SECURE"] == "1" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_SITE_URL"] == "https://example.com" &&
       !strcontains(aws_ecs_task_definition.program["worker"].container_definitions, "ONNET_TRUSTED_PROXIES")
     )
-    error_message = "web trusts its own nginx on the task's loopback, answers /api/ to it alone, sets a Secure cookie on the https site"
+    error_message = "web trusts its own nginx on the task's loopback, answers /api/ to it alone, takes the client's address from the retail server (127.0.0.2), sets a Secure cookie on the https site"
   }
   assert {
     condition = (
@@ -470,7 +471,8 @@ run "environments" {
       for p in ["web", "controller", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://controller.prod.opennova.internal:8070" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "none" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "12" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "6" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_CAP"] == "14" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_SITE_URL"] == "https://example.com"
     ])
     error_message = "web, the controller and the worker read hosting's settings (off without a data set) and the controller's Cloud Map URL"
@@ -545,11 +547,11 @@ run "task_counts" {
   }
   assert {
     condition = (
-      aws_appautoscaling_target.program["web"].max_capacity == 2 && aws_appautoscaling_target.program["worker"].max_capacity == 2 &&
+      aws_appautoscaling_target.program["web"].max_capacity == 1 && aws_appautoscaling_target.program["worker"].max_capacity == 1 &&
       aws_appautoscaling_target.program["gate"].max_capacity == 1 && aws_appautoscaling_target.program["lobby"].max_capacity == 1 &&
       aws_appautoscaling_target.program["controller"].max_capacity == 1
     )
-    error_message = "web and the worker up to 2, the others 1"
+    error_message = "every program one task at the defaults"
   }
   assert {
     condition = (

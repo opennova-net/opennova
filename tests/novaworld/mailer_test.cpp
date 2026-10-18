@@ -103,7 +103,7 @@ nws::MailMessage sample() {
 int test_normalize_email() {
 	TEST_EXPECT(nws::normalize_email("Player.One+jo@Example.COM") == std::string("player.one+jo@example.com"));
 	TEST_EXPECT(nws::normalize_email("a@b.co") == std::string("a@b.co"));
-	TEST_EXPECT(nws::normalize_email("tmfinnell@gmail.com") == std::string("tmfinnell@gmail.com"));
+	TEST_EXPECT(nws::normalize_email("player@example.net") == std::string("player@example.net"));
 	// 254 bytes is the most.
 	const std::string domain = "@example.com";
 	const std::string longest = std::string(254 - domain.size(), 'x') + domain;

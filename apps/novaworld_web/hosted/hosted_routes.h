@@ -1,6 +1,7 @@
 #pragma once
 
-// The hosted servers' /api routes (ADR 0053, proposed; README "Hosted servers"):
+// The hosted servers' /api routes (ADR 0053, proposed;
+// apps/novaworld_common/hosted/README.md "Routes"):
 // the owner's, by server id (an account runs as many as its hosting
 // entitlement allows): GET /api/me/servers, GET /api/me/servers/<id>, POST
 // /api/me/servers (a start), POST /api/me/servers/<id>/stop and POST

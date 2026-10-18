@@ -1,7 +1,7 @@
 #pragma once
 
-// The admin's user routes (README "Website sessions and roles", "Hosted
-// servers"): GET and POST /api/admin/users, PUT and DELETE
+// The admin's user routes (README "Website sessions and roles";
+// apps/novaworld_common/hosted/README.md): GET and POST /api/admin/users, PUT and DELETE
 // /api/admin/users/<id>, PUT /api/admin/users/<id>/comp-servers (an admin's
 // grant of hosted servers) and PUT /api/admin/users/<id>/game-access. Every
 // handler opens with WebAccess::require_admin: the Bearer ADMIN_API_TOKEN, or
