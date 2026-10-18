@@ -412,7 +412,11 @@ struct SmWeapons {
     // @0x473046..0x473067, secondary @0x473008..0x473029].
     void fire(int which, const int32_t out[6]) const {
         if (ammo(which) > 0) --ammo(which);
-        (void)ctx.sys->fire_ai_round(*ctx.world, e, out, out[3], out[4], block(which).ammo_index);
+        // [orig: AIEntity_ProcessWeaponFire -> Weapon_FireProcess @0x53F5B0, the hull's
+        //  occupant the shooter @0x53F6D6, targetId 1 @0x53F705]
+        ctx.world->round_sim.fire_source(*ctx.world, ctx.world->registry.get(e.handle),
+                FixedVec3{out[0], out[1], out[2]}, out[3], out[4],
+                static_cast<uint8_t>(block(which).ammo_index));
     }
     // Under ATEAM_LOCK the solved pose is kept relative to the hull for the
     // locked burst [orig: primary @0x473F47..0x473F95, secondary

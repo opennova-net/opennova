@@ -2188,6 +2188,72 @@ bool run_round_event_fanout() {
 	return true;
 }
 
+// An aircraft's or a handler's fire is Weapon_FireProcess, the ammo-def arm whose
+// shooter is the hull's occupant: an occupied craft's round reaches the joiner with
+// flags 1, the ammo index and the occupant; a pilotless one names no shooter, so no
+// record goes out. [orig: Weapon_FireProcess @0x53F6D6, @0x53F705; RoundData_AddRound
+//  ring+4 0xFFFF @0x4FDC6C..0x4FDC70; Server_BuildRoundEventListForPlayer @0x4FFF4C;
+//  NetPacket_DeserializeRoundEvent @0x42F521]
+bool run_ai_round_reaches_the_joiner() {
+	w::World world;
+	world.rules.logic_authority = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	world.tables.ammo.entries.resize(4);
+	world.tables.ammo.entries[3].name = "AI_ROUND";
+	world.tables.ammo.entries[3].velocity = 300;
+	world.tables.ammo.entries[3].max_age_ticks = 62;
+	world.tables.ammo.entries[3].valid = true;
+	const w::EntityHandle host_h =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	const w::EntityHandle peer_h =
+			w::spawn_remote_player(world, player_spawn({4.0f, 5.0f, 6.0f}, 0, 0xFFF1));
+	const w::EntityHandle pilot_h =
+			w::spawn_remote_player(world, player_spawn({8.0f, 8.0f, 9.0f}, 0, 0xFFF2));
+	w::Entity craft;
+	craft.alive = true;
+	craft.health = 100;
+	const w::EntityHandle craft_h = world.registry.spawn(1, craft);
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch_host;
+	ns::LoopbackChannel ch_peer;
+	conns.push_back(ns::Connection{&ch_host, ns::TransportMode::Loopback, host_h, 0});
+	conns.push_back(ns::Connection{&ch_peer, ns::TransportMode::Client, peer_h, 0});
+	auto next_frame = [&](ns::LoopbackChannel &ch, nw::FrameUpdate &fu) {
+		ns::Datagram dg;
+		if (!ch.client_recv(dg) || dg.tag != nw::s2c::PER_FRAME_UPDATE) return false;
+		return nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id,
+		                               fu);
+	};
+	ns::test::emit_all(world, conns); // arm both watermarks
+	{
+		nw::FrameUpdate fh, fp;
+		(void)next_frame(ch_host, fh);
+		(void)next_frame(ch_peer, fp);
+	}
+	const w::FixedVec3 origin{w::to_fixed(4.0), w::to_fixed(5.0), w::to_fixed(7.0)};
+	const auto fire_and_read = [&](nw::FrameUpdate &fp) {
+		world.round_sim.fire_source(world, world.registry.get(craft_h), origin, 0, 0, 3);
+		ns::test::emit_all(world, conns);
+		nw::FrameUpdate fh;
+		(void)next_frame(ch_host, fh);
+		return next_frame(ch_peer, fp);
+	};
+	nw::FrameUpdate pilotless;
+	if (!expect(fire_and_read(pilotless) && pilotless.round_events.empty(),
+			"a pilotless craft's round names no shooter and never goes out"))
+		return false;
+	world.registry.get(craft_h)->primary_occupant = pilot_h;
+	nw::FrameUpdate fp;
+	if (!expect(fire_and_read(fp) && fp.round_events.size() == 1,
+			"an occupied craft's round reaches the joiner"))
+		return false;
+	const nw::RoundEventRecord &re = fp.round_events[0];
+	return expect((re.flags & 0x03) == 0x01 && re.adm_index == 3 &&
+					re.shooter_handle == pilot_h.packed,
+			"the AI round rides the ammo-def arm with its ammo index and the occupant");
+}
+
 // (i4) The drive-authority chain (net-re §5.13 witness 2026-07-04): vehicles have NO wire
 //      uplink — the HOST simulates the ridden vehicle from the driver's replicated
 //      MoveOrder/heading (the vehicle motor pass in AiSystem::tick), and the S2C 0x0A
@@ -2593,7 +2659,7 @@ int main() {
 	                run_mounted_g_slot_route_echo() &&
 	                run_vehicle_drive_authority() &&
 	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip() &&
-	                run_round_event_fanout();
+	                run_round_event_fanout() && run_ai_round_reaches_the_joiner();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

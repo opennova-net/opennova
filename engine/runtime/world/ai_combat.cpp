@@ -589,7 +589,8 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/
 // The ammo id rides the ring's adm byte as in the retail fire_cmd; the fire sound and
 // muzzle effect (g_AmmoDefTable +64/+68) ride the spawn's FireEvent.]
 bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
-                             int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index) {
+                             int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index,
+                             int32_t fire_mode, uint8_t fire_adm) {
     if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
     ++fire_shot_seq; // [orig: word_B7C670 round-trips into the ring +28 word]
 
@@ -601,12 +602,9 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     ev.dir_yaw = yaw_bam;
     ev.dir_pitch = pitch_bam;
     ev.shot_seq = fire_shot_seq;
-    const Entity *shooter = world.registry.get(e.handle);
-    const uint8_t adm_index = shooter != nullptr &&
-                                      world.tables.weapons.by_index(
-                                              shooter->equipped_adm_index) != nullptr
-            ? shooter->equipped_adm_index
-            : static_cast<uint8_t>(ammo_index & 0xFF);
+    // The adm-indexed arm: the action's mode byte and the slot's weapon.
+    const uint8_t adm_index = fire_adm;
+    ev.mode_flags = static_cast<uint8_t>(fire_mode);
     ev.adm_index = adm_index;
     world.out.rounds.add(ev);
 

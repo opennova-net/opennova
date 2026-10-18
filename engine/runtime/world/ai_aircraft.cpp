@@ -570,7 +570,12 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 			--ammo(which);
 		// The optional player-target missile substitution calls sub_545930,
 		// which is literally `return 1`; both replacement arms are unreachable.
-		fire_ai_round(world, ai, out, out[3], out[4], weapon(which).ammo_index);
+		// Weapon_FireProcess: the ammo-def arm, the hull's occupant the shooter
+		// [orig: AI_TickState_AircraftCombat -> Weapon_FireProcess @0x53F5B0, the
+		//  occupant @0x53F6D6, targetId 1 @0x53F705 / @0x53F722 / @0x53F73F].
+		world.round_sim.fire_source(world, world.registry.get(ai.handle),
+				FixedVec3{out[0], out[1], out[2]}, out[3], out[4],
+				static_cast<uint8_t>(weapon(which).ammo_index));
 		if (which == 1)
 			b.bytes()[AiBrain::kBoneFlagByte] |= 0x40;
 		b.f[AiBrain::kCooldownPair] = int32_t(
