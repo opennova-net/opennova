@@ -164,7 +164,7 @@
   `io::BitWriter`, its writer's bytes (the high-water rule, the zero pads) pinned by the
   retail corpus: run `--suite retail` (ctest `cpt_jo_assets_sweep`, every retail .cpt read and
   written again byte for byte) whenever you touch the CPT encoder; `cpt_roundtrip` and
-  `cpt_trngen_bake` pin the bit codec and the bake in core.
+  the `cpt_trngen_bake_*` rows pin the bit codec and the bake in core.
 - The parity rules (faithful ports cited `[orig: Name @ 0xADDR]`, writers from scratch, ADR
   0003) are the root CLAUDE.md's Conventions and docs/engine-primer.md. The full
   writer-parity gate is writer from scratch + roundtrip test + retail-corpus byte sweep

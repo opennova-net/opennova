@@ -144,10 +144,12 @@ std::vector<uint16_t> check_region(Baked &from, std::vector<uint16_t> map, const
 void test_threads_cancel_refusals(const Baked &baked);
 void test_rough_ground(const Baked &baked);
 
-void test_regions() {
+// The whole bake's state, and what a region bake over it refuses (test_regions bakes the same map again, its own
+// part's, for the chain of edits).
+void test_state() {
 	const std::array<CornerLockFlags, 4> none{};
-	std::vector<uint16_t> map = ground();
-	Baked baked = bake_whole(map, none);
+	const std::vector<uint16_t> map = ground();
+	const Baked baked = bake_whole(map, none);
 
 	// bake_terrain_state is bake_terrain, keeping its state, and a cancel never set (TerrainBakeInput::cancel)
 	// changes no byte: the plain bake runs under one, so one comparison holds both.
@@ -177,7 +179,12 @@ void test_regions() {
 
 	test_threads_cancel_refusals(baked);
 	test_rough_ground(baked);
+}
 
+void test_regions() {
+	const std::array<CornerLockFlags, 4> none{};
+	std::vector<uint16_t> map = ground();
+	Baked baked = bake_whole(map, none);
 	map = check_region(baked, map, {{270, 140, 30, 30}}, 3.0, none, "inside a leaf", 1, false);
 	map = check_region(baked, map, {{300, 300, 40, 12}}, -2.0, none, "across a 64 edge", 2, false);
 	map = check_region(baked, map, {{630, 630, 20, 20}}, 4.0, none,
@@ -323,11 +330,24 @@ void test_walk_cancelled_partway() {
 
 } // namespace
 
-int main() {
-	test_regions();
-	test_locks();
-	test_walk_cancelled_partway();
+// `--part <name>` runs one part (a ctest row each, so their whole bakes run side by side); no argument runs every part.
+int main(int argc, char **argv) {
+	const bool by_part = argc == 3 && std::string(argv[1]) == "--part";
+	const std::string part = by_part ? argv[2] : "";
+	if (argc != 1 && !by_part) {
+		std::fprintf(stderr, "usage: cpt_trngen_region_bake_test [--part state|regions|locks|walk]\n");
+		return 2;
+	}
+	if (by_part && part != "state" && part != "regions" && part != "locks" && part != "walk") {
+		std::fprintf(stderr, "FAIL: no part %s (state, regions, locks, walk)\n", part.c_str());
+		return 1;
+	}
+	const auto runs = [&](const char *name) { return !by_part || part == name; };
+	if (runs("state")) test_state();
+	if (runs("regions")) test_regions();
+	if (runs("locks")) test_locks();
+	if (runs("walk")) test_walk_cancelled_partway();
 	if (failures) return 1;
-	std::printf("OK: region bakes land the whole bake's bytes and state\n");
+	std::printf("OK: region bakes land the whole bake's bytes and state%s%s\n", by_part ? ": " : "", part.c_str());
 	return 0;
 }
