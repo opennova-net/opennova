@@ -39,7 +39,7 @@ struct Keys : PlayerActionSource {
 	}
 	bool digit_down(int digit) const override { return digits[digit]; }
 	bool shift = false;
-	bool shift_down() const override { return shift; }
+	bool fire_signed(const char *) const override { return shift; }
 	// The key state alone, for a held key the scan or a text line hides.
 	std::set<std::string> raw;
 	bool keys_down(const char *token) const override {
@@ -270,7 +270,10 @@ struct BoundKeys : PlayerActionSource {
 				[this](int vk) { return down.count(vk) != 0; });
 	}
 	bool digit_down(int digit) const override { return down.count('0' + digit) != 0; }
-	bool shift_down() const override { return down.count(16) != 0; }
+	bool fire_signed(const char *token) const override {
+		return bindings.fire_signed(bindings.index_of_token(token), 0,
+				[this](int vk) { return down.count(vk) != 0; });
+	}
 };
 
 bool test_live_binding_modifier_remap_and_use_stream() {
@@ -322,6 +325,13 @@ bool test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint() {
 	keys.down = {16}; actions.poll(keys, kLive);
 	keys.down.insert(0x76);
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WaypointCycle, -1}}));
+	keys.down.clear(); actions.poll(keys, kLive);
+	// Rebound to Ctrl+F7 the row fires through the modifier pass, unsigned:
+	// Shift held still cycles forward [orig: @0x49d41e..0x49d42f].
+	const int waypoint = keys.bindings.index_of_token("NextWaypoint");
+	CHECK(keys.bindings.assign_key(waypoint, 0x76, true, false, false, false));
+	keys.down = {16, 17, 0x76};
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WaypointCycle, 1}}));
 	keys.down.clear(); actions.poll(keys, kLive);
 	keys.down = {'B'};
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::Binoculars}}));

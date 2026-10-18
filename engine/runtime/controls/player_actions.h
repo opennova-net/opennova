@@ -17,10 +17,15 @@ public:
 	virtual bool pressed(const char *token) const = 0;
 	virtual int pressed_key(const char *token) const = 0;
 	virtual bool digit_down(int digit) const = 0;
-	// Shift held: a fallback-pass row fires with the direction bit
-	// [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d470 — Shift or row
-	//  flag 0x200 ORs 0x80000000 into the queued action].
-	virtual bool shift_down() const = 0;
+	// The sign bit the fire of the token's row carries: Shift held on a
+	// modifier-less key's fire (the fallback pass) or a held mouse button,
+	// never a fire through the row's held modifier (the modifier pass) or a
+	// joystick button (controls::BindingSet::fire_signed).
+	// [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d470 (the fallback's
+	//  sign) vs @0x49d41e..0x49d42f (the modifier pass, unsigned);
+	//  Input_TryDispatchBindingByWeaponType @0x499180..0x4991a4;
+	//  Input_TryTriggerJoystickButton @0x497B7A / @0x497BA9 (unsigned)]
+	virtual bool fire_signed(const char *token) const = 0;
 	// Whether a key bound to the token's row is down by the key state alone:
 	// no scan gate, no keyboard capture, a special-key take included. Retail's
 	// key-press latch is set on every key event (a captured or consumed one

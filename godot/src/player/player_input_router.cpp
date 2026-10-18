@@ -37,10 +37,8 @@ public:
 	}
 	// Shift's sign bit reads the key-state array, which a menu close's reset
 	// clears (engine controls::KeyStateReset carries the witness).
-	bool shift_down() const override {
-		if (controls_.is_valid()) return controls_->is_vk_down(0x10);
-		Input *input = Input::get_singleton();
-		return input != nullptr && input->is_physical_key_pressed(KEY_SHIFT);
+	bool fire_signed(const char *p_token) const override {
+		return controls_.is_valid() && controls_->is_token_fire_signed(String(p_token));
 	}
 
 private:

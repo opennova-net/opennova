@@ -92,7 +92,7 @@ const ActionRow kRows[] = {
 	{"NVG", {Action::NightVision}, Gate::Active},
 	{"nvggainup", {Action::NvgGain, 1}, Gate::Active},
 	{"nvggaindown", {Action::NvgGain, -1}, Gate::Active},
-	// F7; the value is replaced by the Shift direction when the row fires.
+	// F7; the value is replaced by the fire's sign (fire_signed) when the row fires.
 	// [orig: row 51 = dispatch 23 @0x49b3de]
 	{"NextWaypoint", {Action::WaypointCycle, 1}, Gate::Active},
 };
@@ -261,7 +261,10 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		if (world::latched_key_edge(down, active && !swallowed, rows_[i].down) &&
 				gate.simulation_available) {
 			PlayerActionRequest request = row.request;
-			if (request.action == Action::WaypointCycle && source.shift_down()) request.value = -1;
+			// NextWaypoint (code 23) reads the fire's sign: back when signed
+			// [orig: Input_HandleActionBinding case 23 @0x49B3DE..0x49B44D].
+			if (request.action == Action::WaypointCycle && source.fire_signed(row.token))
+				request.value = -1;
 			frame.requests.push_back(request);
 		}
 	}
