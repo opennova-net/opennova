@@ -1202,6 +1202,60 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         uint32_t index = 0;
     };
     std::vector<PersonWalkEntry> person_walk;
+    // The bone-section walk over one posed person: bones descend, the first
+    // qualifying (highest-index) bone is primary, and its COBJ radius
+    // controls both tolerance and hit distance; the final overlap is ray[32].
+    // [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]
+    const auto walk_posed_bones = [&](const CollisionModel &person_model,
+                                      const CollisionMatrix *matrices,
+                                      uint32_t section_mask, int32_t target_radius,
+                                      ProjectileHit &eh, int32_t &hit_distance) {
+        bool person_hit = false;
+        for (int32_t bone = static_cast<int32_t>(person_model.sections.size()) - 1;
+             bone >= 0; --bone) {
+            const uint32_t bit = 1u << (static_cast<uint32_t>(bone) & 31u);
+            if ((section_mask & bit) != 0) continue;
+            const CollisionSection &sec = person_model.sections[bone];
+            if (sec.radius < 0) continue; // host/test sentinel; authored zero is valid
+            int32_t center[3] = {};
+            matrices[bone].transform_point(sec.center, center);
+            const int32_t projection = static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[0]) * (center[0] - ray.start[0]) +
+                 static_cast<int64_t>(ray.dir[1]) * (center[1] - ray.start[1]) +
+                 static_cast<int64_t>(ray.dir[2]) * (center[2] - ray.start[2])) >> 16);
+            if (projection < 0 || projection > segment_length) continue;
+            int32_t closest[3] = {};
+            for (int axis = 0; axis < 3; ++axis) {
+                closest[axis] = ray.start[axis] + static_cast<int32_t>(
+                    (static_cast<int64_t>(ray.dir[axis]) * projection + 0x8000) >> 16);
+            }
+            const int32_t center_distance =
+                vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
+                             closest[2] - center[2]);
+            const int32_t hit_radius =
+                person_effective_radius(bone, sec.radius, target_radius);
+            if (center_distance > hit_radius) continue;
+
+            if (!person_hit) {
+                hit_distance = projection - (sec.radius >> 1);
+                eh.section_index = bone;
+                eh.bone_index = bone;
+                if (sec.face_count > 0 && sec.face_start >= 0 &&
+                    sec.face_start < static_cast<int32_t>(person_model.faces.size())) {
+                    const CollisionFace &face = person_model.faces[sec.face_start];
+                    eh.material_flags = face.normal_index >= 0
+                        ? face.material_flags
+                        : face.flags;
+                }
+            }
+            // The reverse walk retains the first/highest overlap in ray[31]
+            // for reactions, but ray[32] is overwritten through the final/
+            // lowest overlap and drives normal-infantry damage.
+            eh.hit_zone = bone;
+            person_hit = true;
+        }
+        return person_hit;
+    };
     if (trace.walk_persons && !person_faces_only) {
         const bool merge_proxies =
             trace.include_wire_proxies && !wire_person_proxies_.empty();
@@ -1259,7 +1313,37 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             if (profile_trace) trace_profile_.person_survivors++;
             ProjectileHit eh;
             int32_t hit_distance = 0;
-            if (!trace_torso_fallback(proxy.position_q16,
+            // The client built this person as its own pool-0 entity and walks
+            // its posed bone spheres like any other: the provider poses the
+            // row's model from the row's channels; without a pose the torso
+            // stand-in serves. A wire-built body carries no hidden sections.
+            // [orig: Physics_RaycastAgainstProximityList @ 0x4e4a30 ->
+            //  Physics_RaycastAgainstBoneSections @ 0x4e4670]
+            bool live_pose = false;
+            const CollisionModel *person_model =
+                proxy.model_id >= 0 ? model(proxy.model_id) : nullptr;
+            if (person_model != nullptr && person_model->valid() &&
+                pose_provider_ != nullptr) {
+                const int32_t proxy_pos[3] = {proxy.position_q16.x,
+                                              proxy.position_q16.y,
+                                              proxy.position_q16.z};
+                const CollisionMatrix proxy_world =
+                    collision_matrix_from_euler(0, 0, 0, proxy_pos);
+                std::vector<CollisionMatrix> mats;
+                live_pose = pose_provider_->build_wire_person_section_matrices(
+                                const_cast<World &>(world), proxy.wire_handle,
+                                proxy.model_id, proxy_world, *person_model, mats) &&
+                            mats.size() == person_model->sections.size();
+                if (live_pose &&
+                    !walk_posed_bones(*person_model, mats.data(), 0u,
+                                      person_extra_radius(world.rules.title, proxy.player,
+                                                          proxy.mounted, proxy.moving,
+                                                          effective_radius),
+                                      eh, hit_distance))
+                    continue;
+            }
+            if (!live_pose &&
+                !trace_torso_fallback(proxy.position_q16,
                                       proxy.uniform_scale_q16, eh, hit_distance))
                 continue;
             eh.victim_bound_radius_q16 = person_park_radius(proxy.bound_radius_q16);
@@ -1322,50 +1406,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             live_pose_available = true;
             const int32_t target_radius =
                     person_extra_radius(world.rules.title, *e, effective_radius);
-            const CollisionModel &person_model = *posed->model;
-            for (int32_t bone = static_cast<int32_t>(person_model.sections.size()) - 1;
-                 bone >= 0; --bone) {
-                const uint32_t bit = 1u << (static_cast<uint32_t>(bone) & 31u);
-                if ((e->section_mask & bit) != 0) continue;
-                const CollisionSection &sec = person_model.sections[bone];
-                if (sec.radius < 0) continue; // host/test sentinel; authored zero is valid
-                int32_t center[3] = {};
-                posed->matrices[bone].transform_point(sec.center, center);
-                const int32_t projection = static_cast<int32_t>(
-                    (static_cast<int64_t>(ray.dir[0]) * (center[0] - ray.start[0]) +
-                     static_cast<int64_t>(ray.dir[1]) * (center[1] - ray.start[1]) +
-                     static_cast<int64_t>(ray.dir[2]) * (center[2] - ray.start[2])) >> 16);
-                if (projection < 0 || projection > segment_length) continue;
-                int32_t closest[3] = {};
-                for (int axis = 0; axis < 3; ++axis) {
-                    closest[axis] = ray.start[axis] + static_cast<int32_t>(
-                        (static_cast<int64_t>(ray.dir[axis]) * projection + 0x8000) >> 16);
-                }
-                const int32_t center_distance =
-                    vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
-                                 closest[2] - center[2]);
-                const int32_t hit_radius =
-                    person_effective_radius(bone, sec.radius, target_radius);
-                if (center_distance > hit_radius) continue;
-
-                if (!person_hit) {
-                    hit_distance = projection - (sec.radius >> 1);
-                    eh.section_index = bone;
-                    eh.bone_index = bone;
-                    if (sec.face_count > 0 && sec.face_start >= 0 &&
-                        sec.face_start < static_cast<int32_t>(person_model.faces.size())) {
-                        const CollisionFace &face = person_model.faces[sec.face_start];
-                        eh.material_flags = face.normal_index >= 0
-                            ? face.material_flags
-                            : face.flags;
-                    }
-                }
-                // The reverse walk retains the first/highest overlap in ray[31]
-                // for reactions, but ray[32] is overwritten through the final/
-                // lowest overlap and drives normal-infantry damage.
-                eh.hit_zone = bone;
-                person_hit = true;
-            }
+            person_hit = walk_posed_bones(*posed->model, posed->matrices,
+                                          e->section_mask, target_radius, eh,
+                                          hit_distance);
         }
 
         if (live_pose_available && !person_hit) continue;

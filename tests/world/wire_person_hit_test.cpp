@@ -11,10 +11,13 @@
 #include <memory>
 #include <vector>
 
+#include <runtime/inmatch/client_replica_present_projection.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/pose_provider.h>
+#include <runtime/world/present_rows.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/wire_person_hit.h>
 #include <runtime/world/world.h>
@@ -476,6 +479,111 @@ void test_row_body_round_trip() {
     CHECK(row.spawn_phase == 64);
 }
 
+// A wire-built person walks its posed bone spheres: the pose provider poses
+// the row's model, and the reverse bone walk's primary section is the
+// record's section (ray[31]); a declined pose keeps the torso stand-in's 1.
+// [orig: Physics_RaycastAgainstProximityList @0x4E4A30 ->
+//  Physics_RaycastAgainstBoneSections @0x4E4670; the record +0x38 @0x4E81D2]
+struct WirePersonPoseProvider final : IPoseProvider {
+    int calls = 0;
+    bool pose = true;
+    bool build_wire_person_section_matrices(World &, uint16_t wire_handle, int32_t,
+            const CollisionMatrix &entity_world, const CollisionModel &model,
+            std::vector<CollisionMatrix> &out) override {
+        ++calls;
+        if (!pose || wire_handle != kRemoteH) return false;
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+};
+
+void test_posed_bones_pick_the_section() {
+    Joiner j(/*self_team=*/1);
+    j.remote(/*team=*/2);
+    CollisionModel person;
+    person.sections.resize(19);
+    for (CollisionSection &s : person.sections) s.radius = -1;
+    // Sections 3 and 9 both on the ray: the reverse walk keeps the first
+    // accepted (highest) bone, 9, in ray[31]; section 12 lies off it.
+    person.sections[3].center[2] = 58982;
+    person.sections[3].radius = 0x3000;
+    person.sections[9].center[2] = 58982;
+    person.sections[9].radius = 0x2000;
+    person.sections[12].center[2] = 0x4000;
+    person.sections[12].radius = 0x2000;
+    const int32_t model_id = j.collision.add_model(person);
+    WirePersonCollisionProxy proxy;
+    proxy.wire_handle = kRemoteH;
+    proxy.position_q16 = FixedVec3{5 * kQ, 0, 0};
+    proxy.model_id = model_id;
+    j.collision.replace_wire_collision_proxies({proxy}, {}, kSelfH);
+    WirePersonPoseProvider provider;
+    j.collision.set_pose_provider(&provider);
+    j.fire();
+    CHECK(provider.calls > 0);
+    CHECK(j.world.round_sim.hit_record.has_round);
+    CHECK(j.world.round_sim.hit_record.section == 9);
+
+    // The provider declines: the torso stand-in, section 1.
+    provider.pose = false;
+    j.world.round_sim.hit_record = HitRecord{};
+    j.fire();
+    CHECK(j.world.round_sim.hit_record.has_round);
+    CHECK(j.world.round_sim.hit_record.section == 1);
+    j.collision.set_pose_provider(nullptr);
+}
+
+// The collision pose reads the same channels the presenter draws: the armed
+// primary channel, its cross-fade source and a player's secondary channel,
+// as the present projection writes them for the same row.
+void test_pose_inputs_match_the_present_projection() {
+    namespace rep = opennova::replication;
+    namespace inm = opennova::inmatch;
+    rep::ClientState state;
+    rep::ClientEntityState &row = state.upsert(kRemoteH);
+    row.cls = opennova::EntityClass::Player;
+    row.type_id = 7;
+    row.rm_adm_id = 0;
+    row.rm_state = 5;
+    row.rm_phase = 12;
+    row.rm_prev_state = 3;
+    row.rm_prev_phase = 7;
+    row.rm_blend_weight = 0.5f;
+    row.anim_state_id = 1;
+    row.wpn_playing = 61;
+    row.wpn_phase = 4;
+    row.wpn_prev = 60;
+    row.wpn_prev_phase = 2;
+    row.wpn_blend_weight = 0.25f;
+    row.heading_bam = 0x20000000;
+    WeaponTable weapons;
+    const inm::ClientReplicaPresentContext context{nullptr, &weapons, true, nullptr};
+    float pf[PF_STRIDE];
+    inm::initialize_client_replica_present_row(pf);
+    inm::project_client_replica_present_row(pf, row, state, context);
+    SkeletalPoseInputs in;
+    CHECK(inm::skeletal_pose_inputs_for_client(row, state, context, in));
+    CHECK(in.primary_state == static_cast<int>(pf[PF_ANIM_STATE]));
+    CHECK(in.primary_phase == static_cast<int32_t>(pf[PF_ANIM_PHASE_TICKS]));
+    CHECK(in.blend);
+    CHECK(in.source_state == static_cast<int>(pf[PF_ANIM_SOURCE_STATE]));
+    CHECK(in.source_phase == static_cast<int32_t>(pf[PF_ANIM_SOURCE_PHASE_TICKS]));
+    CHECK(in.blend_weight == pf[PF_ANIM_BLEND_WEIGHT]);
+    const bool aim = (infantry_anim_flags(row.anim_state_id) & 0x40u) != 0;
+    CHECK(in.weapon == aim);
+    if (aim) {
+        CHECK(in.weapon_state == static_cast<int>(pf[PF_WPN_ANIM_STATE]));
+        CHECK(in.weapon_phase == static_cast<int32_t>(pf[PF_WPN_PHASE_TICKS]));
+        CHECK(in.weapon_blend);
+        CHECK(in.weapon_prev_state == static_cast<int>(pf[PF_WPN_SOURCE_STATE]));
+        CHECK(in.weapon_blend_weight == pf[PF_WPN_BLEND_WEIGHT]);
+    }
+    CHECK(in.overlay.aim_yaw == 0x20000000);
+    // An unarmed row is posed by the model's remote FSM: no channel pose.
+    row.rm_adm_id = -1;
+    CHECK(!inm::skeletal_pose_inputs_for_client(row, state, context, in));
+}
+
 struct NamedTest {
     const char *name;
     void (*fn)();
@@ -492,6 +600,8 @@ const NamedTest kTests[] = {
     {"test_vehicle_shooter_owner_group", test_vehicle_shooter_owner_group},
     {"test_org_callback_hit_emitter", test_org_callback_hit_emitter},
     {"test_row_body_round_trip", test_row_body_round_trip},
+    {"test_posed_bones_pick_the_section", test_posed_bones_pick_the_section},
+    {"test_pose_inputs_match_the_present_projection", test_pose_inputs_match_the_present_projection},
     {"test_plyr_callback_round_legs_and_restage", test_plyr_callback_round_legs_and_restage},
     {"test_plyr_callback_dead_return", test_plyr_callback_dead_return},
     {"test_plyr_callback_without_the_player_bit_alerts", test_plyr_callback_without_the_player_bit_alerts},

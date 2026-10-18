@@ -144,6 +144,7 @@ void MissionKernel::set_assets(const assets::AssetStore *source) {
 	mounted_live_cache_.clear();
 	mounted_cache_tick_ = 0xFFFFFFFFu;
 	collision_pose.set_assets(&assets());
+	wire_person_skeletal_failed_.clear();
 }
 
 void MissionKernel::resolve_item_traits(mission::ItemWireClassFn wire_class) {
@@ -1377,6 +1378,50 @@ bool MissionKernel::ensure_collision_instance(w::World &p_world, w::EntityHandle
 	collision_attached = mission::resolve_collision_instances(world, *items_table(),
 			collision_state, deps);
 	return collision.has_instance(world, entity);
+}
+
+// A wire-built person of a type takes the rig a registered entity of that
+// type takes: the def's one .adm (default.adm where that file is not
+// mounted) against its graphic's bone table [orig: Entity_SpawnFromItemDef
+// @0x45257c -> AnimMap_LoadAdmFile @0x40cc40; anim/adm_fallback.h]; a type
+// whose rig does not load is not tried again.
+bool MissionKernel::build_wire_person_section_matrices(w::World &p_world, uint16_t wire_handle,
+		int32_t model_id, const w::CollisionMatrix &entity_world, const w::CollisionModel &model,
+		std::vector<w::CollisionMatrix> &out) {
+	(void)p_world;
+	if (!wire_person_pose) return false;
+	uint16_t type_id = 0;
+	w::SkeletalPoseInputs inputs;
+	if (!wire_person_pose(wire_handle, type_id, inputs)) return false;
+	if (!collision_pose.has_skeletal_type(type_id)) {
+		if (wire_person_skeletal_failed_.find(type_id) != wire_person_skeletal_failed_.end())
+			return false;
+		bool registered = false;
+		const DefItemsFile *items = items_table();
+		const DefItemDef *def = items != nullptr
+				? mission::find_item_def(*items,
+						  mission::visual_item_id_for_runtime_type(type_id, *items))
+				: nullptr;
+		const assets::AssetStore &models = assets();
+		if (def != nullptr && def->anim_def[0] != '\0' && def->graphic[0] != '\0' &&
+				models.has_source()) {
+			const ResourceIndex *index = models.index();
+			const std::string adm = anim::adm_load_name(def->anim_def,
+					[index](const std::string &file) { return index->has_file(file); });
+			registered = collision_pose.register_skeletal_type(type_id, model_id, adm,
+					models.model(def->graphic));
+		}
+		if (!registered) {
+			wire_person_skeletal_failed_.emplace(type_id, true);
+			return false;
+		}
+	}
+	++collision_queries;
+	if (collision_pose.build_skeletal_from_inputs(type_id, model_id, inputs, entity_world,
+				model, out))
+		return true;
+	++collision_declines;
+	return false;
 }
 
 bool MissionKernel::build_section_matrices(w::World &p_world, w::EntityHandle entity,

@@ -5,6 +5,7 @@
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/spectator_session.h>
 #include <runtime/inmatch/client_replica_emplaced.h>
+#include <runtime/inmatch/client_replica_present_projection.h>
 #include <runtime/inmatch/client_weapon_replay.h>
 #include <runtime/inmatch/game_config.h>
 
@@ -991,6 +992,20 @@ void JoinerRole::wire_frame_providers() {
         state.mark_changed();
         return true;
     };
+    // The collision pose of a wire-built person: the row's channels as the
+    // presenter poses them (skeletal_pose_inputs_for_client), where retail's
+    // client walks the posed bones of the entity it built for the row
+    // [orig: Physics_RaycastAgainstBoneSections @0x4E4670].
+    kernel.wire_person_pose = [this](uint16_t handle, uint16_t &type_id,
+            world::SkeletalPoseInputs &inputs) {
+        const replication::ClientState &state = runtime->state();
+        const replication::ClientEntityState *row = state.find(handle);
+        if (row == nullptr) return false;
+        type_id = row->type_id;
+        const ClientReplicaPresentContext context{
+                &kernel_->seat_specs, &kernel_->world.tables.weapons, true, nullptr};
+        return skeletal_pose_inputs_for_client(*row, state, context, inputs);
+    };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
 	// The replica water/float channel reads the mission water plane
 	// [orig: g_EnvWaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
@@ -1557,6 +1572,7 @@ void JoinerRole::close() {
 		kernel_->world.round_sim.guided_inputs_provider = {};
 		kernel_->world.round_sim.wire_actor_provider = {};
 		kernel_->world.round_sim.wire_person_body = {};
+		kernel_->wire_person_pose = {};
 	}
 	if (!runtime) return;
 	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);

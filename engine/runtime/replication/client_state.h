@@ -564,9 +564,10 @@ struct ClientEntityState {
 	// The client-built AI slot's alert byte (slot +0x88), which the org class
 	// callback raises [orig: OrganicClass_HandleEvent @0x4073DB].
 	uint8_t ai_alert = 0;
-	// The collision force's hit type (+0x368): the 110 + n hit-reaction state
-	// the body tick selects while moveTimer (net_corpse_timer, +0x148) runs
-	// [orig: Entity_ApplyCollisionForce @0x4AF506].
+	// The collision force's hit type (+0x368) [orig: Entity_ApplyCollisionForce
+	// @0x4AF506], the byte the world body tick's burn selection reads with
+	// moveTimer (net_corpse_timer, +0x148) [orig: org1 @0x4BBF8F, org2
+	// @0x4B70D9]; a replica row runs no selection of its own.
 	uint8_t hit_type = 0;
 	// bodyRoll (+0x94), the hit-time tilt toward the shot
 	// [orig: OrganicClass_HandleEvent @0x407564 / @0x407575].

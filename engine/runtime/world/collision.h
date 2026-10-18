@@ -624,13 +624,17 @@ inline int32_t person_effective_radius(int32_t section, int32_t authored_radius,
 // the rest. Jointops.exe has no such step.
 // [orig: Physics_RaycastAgainstBoneSections @0x4e4670] [orig: @0x4e17af..0x4e17e0
 //  (dfx2.exe)]
-inline int32_t person_extra_radius(int title, const Entity &target, int32_t extra_radius) {
-    if (title != gameprofile::GAME_DFX2 ||
-            ((target.flags | target.engine_flags) & kEntityFlagPlayer) == 0)
-        return extra_radius;
-    if (!target.mount_target.valid() && (target.net_move_input & Entity::kMoveOrderMoving) != 0)
-        return extra_radius;
+inline int32_t person_extra_radius(int title, bool player, bool mounted, bool moving,
+                                   int32_t extra_radius) {
+    if (title != gameprofile::GAME_DFX2 || !player) return extra_radius;
+    if (!mounted && moving) return extra_radius;
     return extra_radius > 0x1000 ? ((extra_radius - 0x1000) >> 1) + 0x1000 : extra_radius;
+}
+inline int32_t person_extra_radius(int title, const Entity &target, int32_t extra_radius) {
+    return person_extra_radius(title,
+            ((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0,
+            target.mount_target.valid(),
+            (target.net_move_input & Entity::kMoveOrderMoving) != 0, extra_radius);
 }
 
 // Person/organic projectile narrow phase: one authored COBJ bound sphere per
@@ -794,6 +798,15 @@ struct WirePersonCollisionProxy {
     int32_t bound_radius_q16 = 0;
     int32_t uniform_scale_q16 = 0;
     FixedVec3 bbox_center_q16;
+    // The person's collision model (CollisionWorld model id; -1 unresolved):
+    // a resolved model walks its posed bone spheres through the pose
+    // provider's build_wire_person_section_matrices, else the torso stand-in.
+    int32_t model_id = -1;
+    // The entity fields person_extra_radius reads: the Player bit of Flags,
+    // a mount, and MoveOrder's moving bit.
+    bool player = false;
+    bool mounted = false;
+    bool moving = false;
 };
 
 // One decoded pool-1 mover (vehicle, emplacement, runtime item) projected into

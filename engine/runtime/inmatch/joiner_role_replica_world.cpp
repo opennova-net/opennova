@@ -894,6 +894,14 @@ void JoinerRole::refresh_wire_collision_proxies() {
 				proxy.bound_radius_q16 = shape.bound_radius_q16;
 				proxy.uniform_scale_q16 = shape.uniform_scale_q16;
 				proxy.bbox_center_q16 = shape.bbox_center_q16;
+				// The posed bone walk's model and person_extra_radius's
+				// inputs: the Flags word's Player bit, a seat mount and the
+				// movement byte's moving bit.
+				proxy.model_id = shape.model_id;
+				proxy.player = (entity.rm_entity_flags & world::kEntityFlagPlayer) != 0;
+				proxy.mounted = entity.carrier_handle != world::EntityHandle::kInvalid &&
+						entity.mount_bone != 0;
+				proxy.moving = (entity.move_input & world::Entity::kMoveOrderMoving) != 0;
 				person_proxies.push_back(proxy);
 				continue;
 			}
