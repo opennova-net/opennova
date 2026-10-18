@@ -314,6 +314,13 @@ void test_fire_effect_plan() {
 	row.is_local_player = true;
 	plan = w::fire_effect_plan(row);
 	CHECK(plan.glow && !plan.spawn && plan.effect.empty());
+	// A received round event's ammo-def arm draws its effect but no glow
+	// [orig: NetPacket_DeserializeRoundEvent @0x42f527..0x42f6c7].
+	row.is_local_player = false;
+	row.adm_arm = false;
+	row.wire_ammo_arm = true;
+	plan = w::fire_effect_plan(row);
+	CHECK(!plan.glow && plan.spawn && plan.effect == "muzzle_rifle");
 }
 
 } // namespace

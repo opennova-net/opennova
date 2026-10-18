@@ -27,6 +27,9 @@ class World;
 struct FirePresentationRow {
     Vec3 origin;
     bool adm_arm = false;
+    // A received round event's ammo-def arm (wire flags bit 0), which draws no
+    // muzzle glow.
+    bool wire_ammo_arm = false;
     int32_t adm_index = 0;
     Vec3 forward{0.0f, 1.0f, 0.0f};
     int32_t shooter_handle = -1;

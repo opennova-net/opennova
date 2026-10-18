@@ -178,6 +178,7 @@ void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow>
 		// [orig: @0x42f521 / @0x42f6ce; ammo legs @0x42f5dc / @0x42f6c2]
 		d.adm_arm = (fe.wire_round_flags & round_event_flag::kAltFire) == 0 &&
 				(fe.wire_round_flags & round_event_flag::kAdmIndexed) != 0;
+		d.wire_ammo_arm = (fe.wire_round_flags & round_event_flag::kAltFire) != 0;
 		d.adm_index = fe.adm_index;
 		// Retail's radians-per-BAM double on both presenting arms [orig:
 		//  WeaponSlot_FireAndSpawnEffects `fld dbl_7C3608` @0x53F4C7;
