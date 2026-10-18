@@ -1239,13 +1239,19 @@ jobs:
             echo "Retail compatibility tests skipped: reference-data credentials are unavailable." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # The retail suite as two shards beside each other, as the core suite runs
+  # (scripts/ci/test_suites.py GODOT_SHARDS; tests/retail/authoring holds the
+  # editor's mission viewport over the install, the suite's longest script),
+  # each attesting its own selection. One process ran them back to back (326 s
+  # of scripts). GitHub's free standard runners; each shard mounts the
+  # reference data from its cache.
   godot-tests-retail:
     if: needs.retail-availability.outputs.available == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
+        shard: [shells, world]
+    runs-on: windows-latest
     needs: [build-gdextension-windows, retail-availability]
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -1319,16 +1325,16 @@ jobs:
             exit 1
           fi
 
-      - name: Run Godot tests
+      - name: Run Godot tests (retail, ${{ matrix.shard }})
         shell: bash
         run: |
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          bash scripts/test_godot.sh --suite retail
+          bash scripts/test_godot.sh --suite retail --shard ${{ matrix.shard }}
 
       - name: Upload godot retail test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: godot-retail-reports
+          name: godot-retail-reports-${{ matrix.shard }}
           if-no-files-found: warn
           path: build/Testing/
