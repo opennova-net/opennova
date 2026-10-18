@@ -4,7 +4,7 @@
 # as a deployment runs each as its own ECS service, PostgreSQL, Valkey, the
 # portal (prod's nginx image in web's network, as in web's ECS task) and, with
 # a data set, hosted game servers on machines the worker launches as containers
-# of the serve image (the real opennova-hostd and opennova-serve). The project
+# of the hostd image (the real opennova-hostd and opennova-serve). The project
 # is opennova-dev; its state (the compose env file, the synthetic data set) is
 # build/dev-stack/.
 #
@@ -150,7 +150,7 @@ stage_prebuilt() {
 }
 
 # The programs' images, the portal's and the smoke test's (compiled in Docker,
-# or from --prebuilt binaries, which builds the machines' serve image too).
+# or from --prebuilt binaries, which builds the machines' hostd image too).
 build_images() {
     local prebuilt="$1"
     if [[ -z "$prebuilt" ]]; then
@@ -168,9 +168,9 @@ build_images() {
             -t "$tag" "$(host_path "$repo")" > /dev/null
         say "  $tag"
     done
-    MSYS_NO_PATHCONV=1 docker build -q -f "$(host_path "$repo/apps/serve/Dockerfile")" \
-        --build-context "build=$ctx" -t opennova-serve:local "$(host_path "$repo")" > /dev/null
-    say "  opennova-serve:local"
+    MSYS_NO_PATHCONV=1 docker build -q -f "$(host_path "$repo/apps/serve/Dockerfile")" --target hostd \
+        --build-context "build=$ctx" -t opennova-hostd:local "$(host_path "$repo")" > /dev/null
+    say "  opennova-hostd:local"
     MSYS_NO_PATHCONV=1 docker build -q -t opennova-portal:local "$(host_path "$repo/web")" > /dev/null
     say "  opennova-portal:local"
 }
@@ -415,9 +415,9 @@ cmd_up() {
             dir="$data"
         fi
         sed -i.bak 's/^STACK_HOSTING=0$/STACK_HOSTING=1/' "$env_file" && rm -f "$env_file.bak"
-        # The serve image the machines run (--prebuilt built it above).
+        # The hostd image the machines run (--prebuilt built it above).
         if [[ "$build" == 1 && -z "$prebuilt" ]]; then
-            say "building the machines' serve image"
+            say "building the machines' hostd image"
             stack_compose --profile machines build machine-image
         fi
     fi

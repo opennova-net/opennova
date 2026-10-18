@@ -279,9 +279,11 @@ and restart the server only on an exit it did not ask for (ADR 0053 d6).
 
 ## Container image
 
-`apps/serve/Dockerfile` builds `opennova-serve` into a Linux image (ubuntu 24.04), which
-`.github/workflows/serve-image.yml` publishes as `ghcr.io/<owner>/opennova-serve`
-(tagged `sha-<short>`, the branch, and `latest` on master). It is the server the hosted
+`apps/serve/Dockerfile` builds `opennova-serve` into a Linux image (ubuntu 24.04; its
+`serve` target, the default), which `.github/workflows/serve-image.yml` publishes as
+`ghcr.io/<owner>/opennova-serve` (tagged `sha-<short>`, the branch, and `latest` on
+master), beside the machine agent's own image from the same file (its `hostd` target,
+`ghcr.io/<owner>/opennova-hostd`: `apps/hostd/README.md`). It is the server the hosted
 game servers run (ADR 0053): opennova-hostd on each machine pulls it at the digest the
 service pinned for that server and runs it in the server's slot as below, with the server's
 base data set's tree bound read-only at `/opt/game` and, when it runs an expansion, the
