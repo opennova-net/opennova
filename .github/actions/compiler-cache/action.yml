@@ -24,13 +24,21 @@ description: >-
 #   on the same branch (never another branch's), which needs `actions: write`
 #   on the job.
 #
+# On a RunsOn runner with Magic Cache (ci.yml's build and test legs) the same
+# calls read and write RunsOn's S3 bucket in the ci account instead of GitHub's
+# store, with the same scopes. Its entries expire on the stack's retention
+# (infra/ci, 10 days) and the delete step, which lists GitHub's store, leaves
+# them alone.
+#
 # The cache branch is master (ci.yml's push trigger lists the same one). A pull
 # request's own entry would be readable by that pull request alone, so pull
 # requests never save.
 #
-# A flavour is one build tree (same flags, same paths): two jobs share one only
-# when they compile the same objects, and only the job that compiles the
-# superset saves it.
+# A flavour is one build tree (same flags, same paths, one runner image): two
+# jobs share one only when they compile the same objects on the same image
+# (actions/cache versions an entry by its path, so runner.temp keeps a RunsOn
+# runner's entries and a GitHub runner's apart), and only the job that
+# compiles the superset saves it.
 
 inputs:
   flavour:
