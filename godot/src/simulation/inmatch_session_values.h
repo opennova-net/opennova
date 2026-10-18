@@ -21,6 +21,8 @@ public:
 	enum HeldAction {
 		HELD_FIRE = opennova::inmatch::HELD_FIRE,
 		HELD_TO_SPECIAL = opennova::inmatch::HELD_TO_SPECIAL,
+		// The menu-open bit the session reads (D-MNU-X9).
+		HELD_MENU_OPEN = opennova::inmatch::HELD_MENU_OPEN,
 	};
 	enum PressedAction {
 		PRESSED_FIRE = opennova::inmatch::PRESSED_FIRE,
