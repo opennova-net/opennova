@@ -244,6 +244,18 @@ printf 'td:1' >"$current"
 : >"$calls"
 out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" \
   && [[ "$out" == *"no machine to confirm"* ]] && pass "with no hostd task there is no machine to confirm" || fail "no machine: $out"
+# The exec into web refused: the log names the refused call, and the deploy goes on.
+HOSTD_RUNNING=2
+# shellcheck disable=SC2317
+admin_api_json() {
+  echo "An error occurred (AccessDeniedException) when calling the ExecuteCommand operation: User: arn:aws:sts::222222222222:assumed-role/opennova-staging-github-deploy/run is not authorized to perform: ecs:ExecuteCommand" >&2
+  return 1
+}
+printf 'td:1' >"$current"
+: >"$calls"
+out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" \
+  && [[ "$out" == *"AWS refused the ExecuteCommand call of ECS Exec into a web task"* ]] && ! grep -q 'task-definition td:1' "$calls" \
+  && pass "an exec into web refused says so, and the deploy goes on" || fail "exec refused: $out"
 unset -f aws sleep admin_api_json
 
 

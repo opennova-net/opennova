@@ -12,9 +12,11 @@
 # infra.env and release, point the release, list which secrets SSM holds
 # (names, never values), write and read its release manifests, register the
 # release's revisions (handing them the stack's task roles), point the
-# cluster's services at them and the fleet cluster's hostd, and point the
-# nightly backup's schedule at the release's backup revision (handing it the
-# schedule's role). It names
+# cluster's services at them and the fleet cluster's hostd, ask the service's
+# admin API which hostd image each machine's agent runs (ECS Exec into this
+# deployment's web container alone: `app deploy`'s check after hostd's roll),
+# and point the nightly backup's schedule at the release's backup revision
+# (handing it the schedule's role). It names
 # infra/aws's resources by the names infra/aws gives them (opennova-<deployment>-*;
 # a renamed one there is a change here too). It carries the role boundary.
 
@@ -85,6 +87,22 @@ resource "aws_iam_role_policy" "github_deploy" {
       },
       # The programs' services, and hostd, the fleet cluster's daemon.
       { Sid = "PointServices", Effect = "Allow", Action = ["ecs:DescribeServices", "ecs:UpdateService"], Resource = ["${local.arn_ecs}:service/${local.name}/*", "${local.arn_ecs}:service/${local.name}-fleet/hostd"] },
+      # ECS Exec into a web task (deploy/bin/lib/app.sh, admin_api): its task
+      # found (ListTasks takes the cluster as a condition alone) and described
+      # (the CLI reads the container's runtime id), the exec into the web
+      # container alone, and the session plugin's data channel (no resource
+      # scope). ECS starts the session itself: no ssm:StartSession.
+      {
+        Sid       = "FindWebTask", Effect = "Allow", Action = "ecs:ListTasks", Resource = "*"
+        Condition = { ArnEquals = { "ecs:cluster" = "${local.arn_ecs}:cluster/${local.name}" } }
+      },
+      { Sid = "DescribeTasks", Effect = "Allow", Action = "ecs:DescribeTasks", Resource = "${local.arn_ecs}:task/${local.name}/*" },
+      {
+        Sid       = "ExecIntoWeb", Effect = "Allow", Action = "ecs:ExecuteCommand"
+        Resource  = ["${local.arn_ecs}:cluster/${local.name}", "${local.arn_ecs}:task/${local.name}/*"]
+        Condition = { StringEquals = { "ecs:container-name" = "web" } }
+      },
+      { Sid = "ExecChannel", Effect = "Allow", Action = "ssmmessages:OpenDataChannel", Resource = "*" },
       {
         Sid       = "PassTaskRoles", Effect = "Allow", Action = "iam:PassRole"
         Resource  = [for r in local.task_role : "${local.arn_iam}:role/${r}"]

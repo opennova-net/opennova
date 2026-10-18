@@ -464,7 +464,8 @@ or an admin role), outside the toolbox; everything else is the toolbox.
    `opennova-deploy` with the deploy policies (`infra/aws/iam/opennova-deploy-*.json`,
    filled for the account; it writes a role under either boundary alone) and its access
    key, and the GitHub deploy role (trusting the repository's environment of the same name
-   alone, under the role boundary; it rolls the programs and hostd); in the management account, the
+   alone, under the role boundary; it rolls the programs and hostd, and execs into its
+   deployment's web container to confirm hostd on the machines); in the management account, the
    Identity Center user and its two permission sets (`OpenNovaAdmin`, `OpenNovaReadOnly`)
    in every member account (`opennova-ci` gets nothing else here: section "CI runners").
    Its first run applies with a local state, then moves the state into prod's state
@@ -945,8 +946,10 @@ task has no execution role at all).
    and stops, the fleet program still on its own, so agents and fleet never run two
    releases' protocols apart for long
    (an agent of another protocol is held, heard and acted on for nothing, 10 minutes
-   before its machine drains). With no machine running hostd, or no answer from the
-   service (a first release, the cutover), there is no machine to confirm and the deploy
+   before its machine drains). With no machine running hostd there is no machine to
+   confirm; when the service cannot be asked (a first release, the cutover: no web or no
+   fleet program yet; or ECS Exec into web refused) nothing is confirmed and the log says
+   which failed (a refused call by name, the admin API's status). Either way the deploy
    goes on;
 5. once every program runs it, registers the backup task's revision (the nightly run
    takes the newest) and records the release: its manifest (the images by digest, each
@@ -1036,8 +1039,12 @@ none of them.
 
 A role may read its deployment's settings and the names of its secrets (never a value),
 write its release manifests and point its release, register task definition revisions
-(handing them the stack's task roles alone), point its cluster's services and its
-backup schedule at them, and nothing else.
+(handing them the stack's task roles alone), point its cluster's services, its fleet
+cluster's hostd and its backup schedule at them, open ECS Exec into its web container
+(the admin API on the task's loopback: after hostd's roll, `app deploy` asks which hostd
+image each machine's agent reports, as an operator's run does), and nothing else. A run
+whose exec is refused (the org stack not yet applied) logs the refused call, confirms
+nothing, and goes on.
 
 ## 6. Backups
 
