@@ -246,12 +246,19 @@ run "deploy_users" {
           ) : st.Sid == "ReadFleet" ? (
           st.Action == "ecs:DescribeContainerInstances" && st.Resource == "arn:aws:ecs:us-east-1:111111111111:container-instance/opennova-*/*"
           ) : st.Sid == "Unscoped" ? (
-          contains(st.Action, "elasticloadbalancing:DescribeTargetHealth") && st.Resource == "*" && !contains(keys(st), "Condition")
+          contains(st.Action, "elasticloadbalancing:DescribeTargetHealth") && contains(st.Action, "cloudwatch:GetMetricData") &&
+          st.Resource == "*" && !contains(keys(st), "Condition")
+          ) : st.Sid == "Logs" ? (
+          toset(st.Action) == toset(["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams", "logs:GetLogEvents", "logs:FilterLogEvents"]) &&
+          toset(st.Resource) == toset([
+            "arn:aws:logs:us-east-1:111111111111:log-group:/opennova/*",
+            "arn:aws:logs:us-east-1:111111111111:log-group:/opennova/*:log-stream:*",
+          ]) && !contains(keys(st), "Condition")
         ) : true
       )
       ]) && length([for st in jsondecode(module.prod.documents.boundary).Statement : st
-    if contains(["ListTasks", "TasksDbCache", "Clusters", "ReadFleet", "Unscoped"], st.Sid)]) == 5
-    error_message = "the boundary holds web's infrastructure reads (infra/aws/programs.tf, fleet_agent.tf): OpenNova's clusters' tasks and container instances, its database and cache, the target groups' health; and the deploy workflow's ECS Exec on OpenNova's clusters and tasks"
+    if contains(["ListTasks", "TasksDbCache", "Clusters", "ReadFleet", "Unscoped", "Logs"], st.Sid)]) == 6
+    error_message = "the boundary holds web's infrastructure reads (infra/aws/programs.tf, fleet_agent.tf): OpenNova's clusters' tasks and container instances, its database and cache, the target groups' health, CloudWatch's metrics, and the /opennova/* logs' events; and the deploy workflow's ECS Exec on OpenNova's clusters and tasks"
   }
   assert {
     condition = alltrue([for m in [module.prod.documents, module.staging.documents] :
