@@ -186,6 +186,8 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 
 PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const PlayerActionPoll &gate) {
 	PlayerActionFrame frame;
+	// No input frame runs under a menu screen (PlayerActionPoll::menu_open).
+	if (gate.menu_open) return frame;
 	sample_use(source, gate, frame);
 	const bool captured = gate.active && gate.captured;
 	// Fire held+edge, reload raw edge (refusal belongs to the sim), ADS toggle

@@ -1810,8 +1810,12 @@ func _process(delta: float) -> void:
 	var frame_input: MissionFrameInput
 	if _player_presenter != null:
 		var player_live := is_gameplay_input_active()
+		# No input frame runs under the INGAME (pause), WEAPON (armory) or CMAP
+		# (command map) screen (engine controls::PlayerActionPoll::menu_open
+		# carries the witness).
 		frame_input = _player_presenter.before_world_tick(
-				delta, player_live, player_live)
+				delta, player_live, player_live,
+				_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP)
 		# The held USE row's armory arm took its open in that poll (engine
 		# controls::PlayerActions, through the sim's press latch); the shell
 		# opens what it names.

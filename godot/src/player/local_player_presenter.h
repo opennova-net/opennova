@@ -219,7 +219,7 @@ public:
 	Node *world() const;
 
 	Ref<MissionFrameInput> before_world_tick(double p_delta, bool p_capture_mouse = false,
-			bool p_gameplay_input_active = true);
+			bool p_gameplay_input_active = true, bool p_menu_open = false);
 	void after_world_tick();
 	// Present one simulation tick's weapon batch before EffectWorld advances
 	// that same tick (the ex fixed-tick consumer: GameWorld's effect fan-out calls it

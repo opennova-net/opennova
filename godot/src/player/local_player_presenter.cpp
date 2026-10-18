@@ -348,8 +348,9 @@ void LocalPlayerPresenter::restamp_viewmodel_at_camera() {
 }
 
 Ref<MissionFrameInput> LocalPlayerPresenter::before_world_tick(double p_delta, bool p_capture_mouse,
-		bool p_gameplay_input_active) {
-	return input_router_.before_world_tick(p_delta, p_capture_mouse, p_gameplay_input_active);
+		bool p_gameplay_input_active, bool p_menu_open) {
+	return input_router_.before_world_tick(p_delta, p_capture_mouse, p_gameplay_input_active,
+			p_menu_open);
 }
 
 void LocalPlayerPresenter::after_world_tick() {
@@ -1205,8 +1206,9 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restamp_viewmodel_at_camera"),
 			&LocalPlayerPresenter::restamp_viewmodel_at_camera);
 	ClassDB::bind_method(D_METHOD("world"), &LocalPlayerPresenter::world);
-	ClassDB::bind_method(D_METHOD("before_world_tick", "delta", "capture_mouse", "gameplay_input_active"),
-			&LocalPlayerPresenter::before_world_tick, DEFVAL(false), DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("before_world_tick", "delta", "capture_mouse", "gameplay_input_active",
+								 "menu_open"),
+			&LocalPlayerPresenter::before_world_tick, DEFVAL(false), DEFVAL(true), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("after_world_tick"), &LocalPlayerPresenter::after_world_tick);
 	ClassDB::bind_method(D_METHOD("fixed_weapon_batches_consumed"),
 			&LocalPlayerPresenter::fixed_weapon_batches_consumed);

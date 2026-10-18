@@ -618,6 +618,42 @@ bool test_reset_drops_the_held_release() {
 	return true;
 }
 
+// No input frame runs under a menu screen: a USE hold latched on the mount
+// chain when the menu opened is not aged under it, so the first frame after
+// the close, its key read up by the reset, ends the hold and toggles the
+// mount. A seat pick made in the hold consumes it as before.
+// [orig: Game_ProcessMainFrame @0x52660D / @0x52661D; Input_ProcessFrame
+//  @0x49D57F..0x49D585, @0x49D6C1..0x49D6DC]
+bool test_menu_freezes_the_use_hold() {
+	Keys keys;
+	PlayerActionPoll gate;
+	gate.active = true;
+	gate.captured = true;
+	gate.simulation_available = true;
+	PlayerActions actions;
+	keys.hold("useitem", 0x10);
+	CHECK(actions.poll(keys, gate).requests.empty()); // the chain holds
+	PlayerActionPoll menu = gate;
+	menu.active = false;
+	menu.captured = false;
+	menu.menu_open = true;
+	CHECK(actions.poll(keys, menu).requests.empty());
+	keys.release("useitem"); // read up after the close's reset
+	CHECK(actions.poll(keys, menu).requests.empty());
+	CHECK(requests_are(actions.poll(keys, gate), {{Action::ToggleMount}}));
+	CHECK(actions.poll(keys, gate).requests.empty());
+	// An inactive frame that is no menu (the input frame runs) still cancels it.
+	PlayerActions overlay;
+	keys.hold("useitem", 0x10);
+	overlay.poll(keys, gate);
+	PlayerActionPoll inactive = gate;
+	inactive.active = false;
+	overlay.poll(keys, inactive);
+	keys.release("useitem");
+	CHECK(overlay.poll(keys, gate).requests.empty());
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
@@ -628,7 +664,7 @@ int main() {
 			test_live_binding_modifier_remap_and_use_stream,
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
 			test_wheel_remainder_dispatches_whole_notches,
-			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release,
+			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release, test_menu_freezes_the_use_hold,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
 			test_held_use_runs_the_arm_every_frame})

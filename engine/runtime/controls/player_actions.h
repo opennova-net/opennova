@@ -78,6 +78,15 @@ struct PlayerActionPoll {
 	// medic rows and the weapon/seat/scope rows stay silent
 	// [orig: Input_IsBindingActiveForMode @0x497ea0].
 	bool death_screen = false;
+	// A menu screen (INGAME, WEAPON, CMAP) is up: retail runs no input frame
+	// under it, so the poll neither ages a latch nor dispatches. A USE hold
+	// latched when the menu opened therefore ends on the first frame after
+	// the close, whose key-state reset reads the key up: the release edge's
+	// mount toggle runs then, unless a seat pick consumed the hold.
+	// [orig: Game_ProcessMainFrame -- the menu branch @0x52660D, the input
+	//  frame only in the no-menu branch @0x52661D; Input_ProcessFrame's latch
+	//  aging @0x49D57F..0x49D585 and release edge @0x49D6C1..0x49D6DC]
+	bool menu_open = false;
 	// The held USE row's arm, asked once on every frame either of its keys is
 	// down: the row is a held row (flags 0x0C000805, bit 4), which the analog
 	// pass queues each frame, so case 0xB1 runs each frame the key is held.

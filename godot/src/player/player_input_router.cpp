@@ -114,7 +114,7 @@ void PlayerInputRouter::set_input_override(const Ref<PlayerMoveIntent> &p_intent
 }
 
 Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool p_capture_mouse,
-		bool p_gameplay_input_active) {
+		bool p_gameplay_input_active, bool p_menu_open) {
 	Ref<MissionFrameInput> frame_input;
 	frame_input.instantiate();
 	frame_input->set_delta_seconds(p_delta);
@@ -194,6 +194,7 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	gate.emotes_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
 	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
 	gate.death_screen = spectating;
+	gate.menu_open = p_menu_open;
 	// The held USE row's arm through the sim's press latch (engine
 	// LocalPlayer::take_use_item_press).
 	gate.take_use_item_arm = [&action_sim]() {

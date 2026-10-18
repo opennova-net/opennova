@@ -42,8 +42,10 @@ public:
 	// poll the live bindings again.
 	void set_input_override(const Ref<PlayerMoveIntent> &p_intent);
 
+	// `p_menu_open`: a menu screen (INGAME, WEAPON, CMAP) is up, under which
+	// no input frame runs (controls::PlayerActionPoll::menu_open).
 	Ref<MissionFrameInput> before_world_tick(double p_delta, bool p_capture_mouse,
-			bool p_gameplay_input_active);
+			bool p_gameplay_input_active, bool p_menu_open = false);
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	// Drop the trigger latches (the presenter's reset-state path). The
