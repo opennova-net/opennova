@@ -3,6 +3,7 @@
 //
 //   opennova-3di build   <scene.o3d> -o <out.3di>
 //   opennova-3di migrate <gp.3di> -o <out.3di> [--region 0|1|2]
+//   opennova-3di gp      <model.3di|scene.o3d> -o <gp.3di>
 //   opennova-3di scene   <model.3di> -o <scene.o3d>
 //   opennova-3di info    <model.3di> [--verbose | --planes | --verts]
 //   opennova-3di compare [--strict] <expected.3di> <actual.3di>
@@ -48,6 +49,7 @@ int usage(const char *why) {
 	std::fprintf(stderr,
 			"usage: opennova-3di build   <scene.o3d> -o <out.3di>\n"
 			"       opennova-3di migrate <gp.3di> -o <out.3di> [--region 0|1|2]\n"
+			"       opennova-3di gp      <model.3di|scene.o3d> -o <gp.3di>\n"
 			"       opennova-3di scene   <model.3di> -o <scene.o3d>\n"
 			"       opennova-3di info    <model.3di> [--verbose | --planes | --verts]\n"
 			"       opennova-3di compare [--strict] <expected.3di> <actual.3di>\n"
@@ -169,6 +171,11 @@ int main(int argc, char **argv) {
 			return usage("--region takes 0, 1 or 2");
 		const int index = region ? argv[6][0] - '0' : 0;
 		return opennova::threedi_cli::cmd_migrate(argv[2], argv[4], index);
+	}
+	if (cmd == "gp") {
+		// A 3DI3 (or an .o3d scene) as the GP model Black Hawk Down loads, named after its file.
+		if (argc != 5 || std::strcmp(argv[3], "-o") != 0) return usage("gp needs <model.3di|scene.o3d> -o <gp.3di>");
+		return opennova::threedi_cli::cmd_gp(argv[2], argv[4]);
 	}
 	if (cmd == "scene") {
 		if (argc != 5 || std::strcmp(argv[3], "-o") != 0) return usage("scene needs <model.3di> -o <scene.o3d>");

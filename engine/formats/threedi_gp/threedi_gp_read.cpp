@@ -112,7 +112,9 @@ struct Parser {
 			r.skip(4);
 			t.id = r.read_i16();
 			t.flags = r.read_u16();
-			r.skip(20); // the size a failed load's checkerboard takes, then runtime handles
+			t.width = r.read_u16();
+			t.height = r.read_u16();
+			r.skip(16); // runtime handles
 		}
 		return true;
 	}
@@ -182,7 +184,9 @@ struct Parser {
 			for (int32_t &b : s.box) b = r.read_i32();
 			s.centre = i32x3();
 			s.radius = r.read_i32();
-			r.skip(24);
+			s.radius_xy = r.read_i32();
+			s.height = r.read_i32();
+			r.skip(16);
 		}
 		c.translations.resize(static_cast<size_t>(counts[4]));
 		for (auto &t : c.translations) t = i32x3();
@@ -195,7 +199,12 @@ struct Parser {
 		for (CollisionVolume &v : c.volumes) {
 			v.type = r.read_i32();
 			v.flags = r.read_i32();
-			r.skip(40);
+			v.centre = i32x3();
+			v.radius = r.read_i32();
+			v.radius_xy = r.read_i32();
+			r.skip(4); // the xy radius again
+			v.half = i32x3();
+			r.skip(4);
 			for (int32_t &b : v.box) b = r.read_i32();
 			v.plane_count = r.read_i32();
 			r.skip(20);
@@ -271,7 +280,8 @@ struct Parser {
 		Parser b{block, here(), error};
 		r.skip(blob);
 		if (!b.fits(point_count, 12, "render model: attach points")) return false;
-		block.skip(static_cast<size_t>(point_count) * 12);
+		m.attach_points.resize(static_cast<size_t>(point_count));
+		for (auto &p : m.attach_points) p = b.f32x3();
 		if (!b.fits(part_count, 72, "render model: parts")) return false;
 		std::vector<int32_t> part_batches(static_cast<size_t>(part_count));
 		m.parts.resize(static_cast<size_t>(part_count));
@@ -331,9 +341,9 @@ struct Parser {
 		if (!b.fits(material_count, 152, "render model: materials")) return false;
 		m.materials.resize(static_cast<size_t>(material_count));
 		for (Material &mat : m.materials) {
-			block.skip(16); // the record's name: no reader
+			mat.name = read_name(block, 16);
 			mat.attributes = block.read_u32();
-			block.skip(2);  // the flipbook rate: no runtime reader
+			mat.frame_rate = block.read_i16();
 			mat.frame_count = block.read_i8();
 			mat.frame_counter = block.read_u8();
 			block.skip(16); // the region colour (runtime) and its triplets
@@ -457,7 +467,9 @@ struct Parser {
 			o.type = r.read_u8();
 			o.parent = r.read_u8();
 			o.connecting = r.read_u8();
-			r.skip(17);
+			r.skip(1);
+			o.centre = f32x3();
+			o.radius = r.read_f32();
 			counts[i][0] = r.read_i32();
 			r.skip(4);
 			counts[i][1] = r.read_i32();
