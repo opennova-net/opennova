@@ -8,6 +8,11 @@ extends GutTest
 
 const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_presenter_test"
+# A music context for the armory's MUSICVAR to land in (the synthetic menu script and bank): the game
+# writes a menu's MUSICVAR into the open context's globals and drops it with none open [orig:
+# AudioVM_SetVariable @ 0x671fa0].
+const MUSIC_SCRIPT_FIXTURE := "res://../fixtures/mus/synth_menumus.bin"
+const MUSIC_BANK_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"
 
 # ArmoryFixture authors the small menu, catalog and string tables used here.
 const STAGED_FIXTURES: Array[String] = [
@@ -50,6 +55,19 @@ func before_each() -> void:
 func after_each() -> void:
 	Strings.clear()
 	ControlsBindings.model().restore_defaults()
+	MusicService.stop_context()
+
+
+# Open a music context on the service's director, its script's instance holding the vars.
+func _open_music_context() -> void:
+	var bank := SbfBank.new()
+	bank.load_from_path(MUSIC_BANK_FIXTURE)
+	var script := MusicScript.new()
+	script.load_from_path(MUSIC_SCRIPT_FIXTURE)
+	var director := MusicService.director()
+	director.set_bank(bank)
+	director.load_mus_script(script)
+	director.start()
 
 
 func after_all() -> void:
@@ -240,6 +258,7 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	var presenter := ArmoryPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, player_presenter, overlay)
+	_open_music_context()
 
 	assert_true(presenter.open(), "the staged player opens the armory")
 	var frame := overlay.get_node_or_null("ArmoryMenu") as MenuFrame
