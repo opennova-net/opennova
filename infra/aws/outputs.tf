@@ -153,9 +153,14 @@ output "hosted_subnet_cidrs" {
   description = "Their ranges, the only peers the internal listener's machine routes answer (ONNET_HOSTED_BOOTSTRAP_CIDRS); null while hosting is off"
 }
 
-output "fleet_image_parameter" {
-  value       = one(aws_ssm_parameter.fleet_image[*].name)
-  description = "The SSM parameter holding the image the machines launch from (fleet bake-image writes it); null while hosting is off"
+output "fleet_cluster" {
+  value       = one(aws_ecs_cluster.fleet[*].name)
+  description = "The fleet cluster, where hostd runs on every machine (ONNET_HOSTED_EC2_CLUSTER); null while hosting is off"
+}
+
+output "fleet_image_id" {
+  value       = one(data.aws_ami.fleet[*].id)
+  description = "The image the machines launch, fleet_ami's id (ONNET_FLEET_IMAGE_ID); null while hosting is off"
 }
 
 output "machines_security_group_id" {

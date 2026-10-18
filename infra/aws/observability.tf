@@ -69,9 +69,10 @@ resource "aws_cloudwatch_log_group" "service" {
   tags = var.tags
 }
 
-# The game machines' (hostd and the slots), through the machine role: a
-# stream per slot, <machine id>/slot-<k>, and one for hostd, <machine id>/hostd
-# (apps/hostd/README.md, "Logs"). `./deploy/run.sh fleet logs` reads it.
+# The game machines' (hostd and the slots), through the machine role: hostd's
+# task (fleet_agent.tf), a stream per task, hostd/hostd/<task id>, and a stream
+# per slot, <machine id>/slot-<k> (apps/hostd/README.md, "Logs").
+# `./deploy/run.sh fleet logs` reads it.
 resource "aws_cloudwatch_log_group" "machines" {
   name              = "/opennova/${local.deployment}/machines"
   retention_in_days = var.log_retention_days
@@ -159,7 +160,7 @@ locals {
     machines-lost = {
       metric      = "MachinesLost", statistic = "Maximum", period = 300, periods = 1,
       comparison  = "GreaterThanThreshold", threshold = 0, missing = "notBreaching",
-      description = "A game machine stopped reporting (fleet status)."
+      description = "A game machine stopped reporting (fleet status). With more than half the machines lost at once, the service holds them, ending none, until each reports again or an admin ends it (fleet end)."
     }
     launch-failures = {
       metric      = "LaunchFailures", statistic = "Sum", period = 900, periods = 1,

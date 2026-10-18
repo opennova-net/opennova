@@ -3,8 +3,9 @@
 # role ECS starts every task with (DEPLOY.md, "Operating")
 # ---------------------------------------------------------------------------
 #
-# One ECS cluster per deployment, Fargate alone (no instances to keep). The
-# fleet program's tasks register in a Cloud Map private DNS namespace,
+# The programs' ECS cluster, one per deployment, Fargate alone (no instances
+# to keep); the fleet's, where hostd runs on the machines, is fleet_agent.tf's.
+# The fleet program's tasks register in a Cloud Map private DNS namespace,
 # <deployment>.opennova.internal (a Route 53 zone private to the VPC that Cloud
 # Map keeps), as `fleet`: an A record of each running task's private address,
 # TTL 10, which the machines' hostd and ONNET_INTERNAL_URL name. The

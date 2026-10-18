@@ -30,3 +30,8 @@ mail_sender = "support"
 # machines, the game data's store in the operations bucket, the update
 # service. The fleet's sizes keep their defaults.
 hosted_enabled = true
+# The machines' image, pinned by its exact name (fleet_agent.tf): Amazon's
+# ECS-optimized Amazon Linux 2023. A bump lands here, staging's first;
+# the newest: aws ssm get-parameters --names
+# /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_name
+fleet_ami = "al2023-ami-ecs-hvm-2023.0.20260924-kernel-6.1-x86_64"

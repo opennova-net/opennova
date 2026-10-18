@@ -5,7 +5,6 @@
       "Sid": "SessionChannels",
       "Effect": "Allow",
       "Action": [
-        "ssm:UpdateInstanceInformation",
         "ssmmessages:CreateControlChannel",
         "ssmmessages:CreateDataChannel",
         "ssmmessages:OpenControlChannel",
@@ -153,6 +152,35 @@
         "ec2:DescribeLaunchTemplates",
         "ec2:DescribeLaunchTemplateVersions"
       ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "FleetAgentAndReadsOnClusters",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:RegisterContainerInstance",
+        "ecs:DeregisterContainerInstance",
+        "ecs:SubmitContainerStateChange",
+        "ecs:SubmitTaskStateChange",
+        "ecs:SubmitAttachmentStateChanges",
+        "ecs:ListContainerInstances"
+      ],
+      "Resource": "arn:aws:ecs:${region}:${account_id}:cluster/opennova-*"
+    },
+    {
+      "Sid": "FleetAgentAndReadsOnInstances",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:Poll",
+        "ecs:StartTelemetrySession",
+        "ecs:DescribeContainerInstances"
+      ],
+      "Resource": "arn:aws:ecs:${region}:${account_id}:container-instance/opennova-*/*"
+    },
+    {
+      "Sid": "FleetAgentDiscover",
+      "Effect": "Allow",
+      "Action": "ecs:DiscoverPollEndpoint",
       "Resource": "*"
     },
     {
