@@ -135,6 +135,47 @@ export function formatBitRate(bytesPerSecond: number): string {
   return `${shown} ${units[unit]}`;
 }
 
+// "0 B/s", "850 kB/s", "1.2 MB/s": a rate in bytes a second, in decimal units
+// (the usage views' network in and out).
+export function formatByteRate(bytesPerSecond: number): string {
+  const bytes = formatBytes(bytesPerSecond);
+  return bytes === 'unknown' ? bytes : `${bytes}/s`;
+}
+
+// "41 %", "4.5 %", "0 %": a percentage (0 to 100, a CPU's past 100 when it
+// uses more than one), one decimal under ten.
+export function formatPercent(percent: number): string {
+  if (!Number.isFinite(percent) || percent < 0) return 'unknown';
+  const shown = percent < 10 ? Math.round(percent * 10) / 10 : Math.round(percent);
+  return `${shown} %`;
+}
+
+// "0.25 vCPU", "1 vCPU", "2 vCPU": a CPU limit in CPUs, as ECS sizes a task.
+export function formatCpus(cpus: number): string {
+  if (!Number.isFinite(cpus) || cpus <= 0) return 'unknown';
+  return `${Math.round(cpus * 100) / 100} vCPU`;
+}
+
+// "16.4 ms", "120 ms": a frame's time (a game server's tick, 16 ms at
+// 62.5 Hz), one decimal under a hundred.
+export function formatFrameTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return 'unknown';
+  const shown = ms < 100 ? Math.round(ms * 10) / 10 : Math.round(ms);
+  return `${shown} ms`;
+}
+
+// "4 s ago", "50 s ago", then as formatRelative ("3 min ago"): how long ago a
+// report came, to the second while that matters (a machine's agent reports
+// every few seconds).
+export function formatAge(value: string | number, now: number): string {
+  const t = timeMs(value);
+  if (Number.isNaN(t)) return String(value);
+  const seconds = Math.round((now - t) / 1000);
+  if (seconds < 0) return 'just now';
+  if (seconds < 60) return `${seconds} s ago`;
+  return formatRelative(t, now);
+}
+
 // "1,284", "12.9K", "4.2M": a count, compact from ten thousand up.
 export function formatCount(n: number): string {
   if (!Number.isFinite(n)) return 'unknown';

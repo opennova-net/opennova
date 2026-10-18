@@ -77,6 +77,9 @@ export type AdminErrorCode =
   | 'not_releasable'
   | 'address_limit'
   | 'addresses_disabled'
+  // The log route (logs.ts).
+  | 'no_log_store'
+  | 'logs_unavailable'
   | 'network'
   | 'unknown';
 
@@ -142,6 +145,8 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'not_releasable',
   'address_limit',
   'addresses_disabled',
+  'no_log_store',
+  'logs_unavailable',
 ]);
 
 function adminMessageFor(code: AdminErrorCode): string {
@@ -245,6 +250,10 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'That account has a static address for every own machine it has. Grant it another own machine first.';
     case 'addresses_disabled':
       return 'This NovaWorld service sells no static address (ONNET_FLEET_MAX_ADDRESSES is 0, or its address settings are incomplete: the boot log says which).';
+    case 'no_log_store':
+      return 'This NovaWorld service reads no log store (ONNET_LOG_STORE is unset or malformed: the boot log says which).';
+    case 'logs_unavailable':
+      return 'The log store could not be read. Try again shortly.';
     case 'network':
       return 'Could not reach the server. Check your connection and try again.';
     case 'unknown':
