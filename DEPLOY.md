@@ -1503,21 +1503,13 @@ Once, in order:
    ```
 
    Read a fork's workflow changes before approving its run.
-8. **The Windows image**: RunsOn's `windows25-full-x64` carries Visual Studio 2022, whose
-   MSVC compiles and runs parts of the tree differently from the 2026 that GitHub's
-   `windows-latest` and the maintainers build with. `./deploy/run.sh ci image` (Packer,
-   about an hour, type `ci`) builds RunsOn's newest `windows25-full-x64` with Visual
-   Studio 2026's C++ build tools added (`infra/ci/image`), a private AMI in the ci
-   account (about $5 a month of snapshot), and prints its id: put it in
-   `.github/runs-on.yml` (the image `opennova-win25-vs2026`, which `ci.yml`'s Windows
-   legs name). Build it again for a newer Visual Studio or RunsOn image; deregister the
-   old AMI (and delete its snapshot) once `runs-on.yml` moves on.
 
 A leg that sits queued: RunsOn's alert email, the account's quotas (a launch past them
 fails), or the GitHub App's installation. The labels (`cpu=16`, the instance families, the
-image, our AMI on Windows and `ubuntu24-full-x64` on Linux, the volume) are `ci.yml`'s, on
-each leg. RunsOn's Ubuntu image leaves Ninja out (the Linux legs install it). A newer
-RunsOn: the module's `version` in `infra/ci/runners.tf`, then `ci apply`.
+image `windows25-full-x64` or `ubuntu24-full-x64`, the volume) are `ci.yml`'s, on each leg.
+RunsOn's Windows image carries Visual Studio 2022 (GitHub's `windows-latest` and the
+maintainers build with 2026), and its Ubuntu image leaves Ninja out (the Linux legs install
+it). A newer RunsOn: the module's `version` in `infra/ci/runners.tf`, then `ci apply`.
 
 ## Operating
 
