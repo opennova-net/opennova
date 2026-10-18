@@ -425,6 +425,43 @@ void test_change_team_blink() {
 	CHECK(au == bu && av == bv, "the change-team cell replaces the slot's");
 }
 
+// A neutral change-team footprint being taken blinks to the taker's colour on the
+// session frame clock; a held one keeps its fill. [orig: Render_CollisionWireframe
+// @0x5968C9..0x5968FA]
+void test_change_team_footprint_blink() {
+	HudMinimapInput in = corner();
+	HudMinimapMarker m = live(0, 0, 0, 0xFF208020u, HudMinimapBank::kTransient);
+	m.footprint = 1;
+	m.rotate = 0;
+	m.change_team = 1;
+	m.capture_team = 1;
+	in.markers.push_back(m);
+	std::vector<HudMinimapFootprint> footprints(1);
+	footprints[0].handle = m.handle;
+	footprints[0].fill_argb = 0xFF60A060u;
+	footprints[0].fill_xy_q16 = {-(4 << 16), -(4 << 16), 4 << 16, -(4 << 16), 0, 4 << 16};
+	hud_minimap_finalize_footprint(footprints[0]);
+	in.footprints = &footprints;
+	HudMinimapCompiler compiler;
+	auto fill = [&]() -> uint32_t {
+		const HudMapPass &p = compiler.compile(in);
+		return p.overlays.empty() ? 0u : p.overlays.front().color;
+	};
+	in.session_frame = 0x10;
+	CHECK(fill() == 0xFF60A060u, "the dark phase keeps the change-team green");
+	in.session_frame = 0x20;
+	CHECK(fill() == 0xFF304080u, "the lit phase blinks to taker 1's colour");
+	in.markers[0].capture_team = 2;
+	CHECK(fill() == 0xFF802020u, "taker 2's");
+	in.markers[0].zone_number = 5;
+	CHECK(fill() == 0xFF802020u, "the footprint has no zone-number test");
+	in.markers[0].team = 1;
+	CHECK(fill() == 0xFF60A060u, "a held zone keeps its fill");
+	in.markers[0].team = 0;
+	in.markers[0].change_team = 0;
+	CHECK(fill() == 0xFF60A060u, "only the change-team class blinks");
+}
+
 HudMinimapMarker zone_marker(uint8_t zone_number, uint8_t source, uint8_t team) {
 	HudMinimapMarker z = live(0, 0, 0, 0xFF304080u, HudMinimapBank::kTransient);
 	z.entity_bits = static_cast<uint8_t>(kMarkerEntityHasModel | kMarkerEntityZoneDef);
@@ -746,6 +783,7 @@ int main() {
 	test_blip_crop();
 	test_blip_flash_gates();
 	test_change_team_blink();
+	test_change_team_footprint_blink();
 	test_objective_tethers();
 	test_farp_chevron();
 	test_waypoint_nub_raw_state_colour();

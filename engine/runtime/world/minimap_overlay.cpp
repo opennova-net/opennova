@@ -242,6 +242,9 @@ MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
 		if (entity.has_minimap_model_marker) {
 			out.footprint = true;
 			out.rotate = false;
+			// The footprint's own change-team leg: its taker blink at draw time
+			// [orig: Render_CollisionWireframe @0x5968C9..0x5968CF].
+			out.change_team = (entity.item_attrib & kItemAttribChangeTeam) != 0;
 			return out;
 		}
 		return finish_blip_policy(out, icon);

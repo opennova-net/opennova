@@ -254,11 +254,22 @@ void draw_blip(MapCompile &c, const HudMinimapMarker &marker, uint32_t color,
 				px - ext > view.px_x2 || py - ext > view.px_y2)
 			return;
 		for (const HudMinimapFootprint *candidate : c.footprint_index) {
-			if (candidate->handle == marker.handle) {
-				emit_footprint(view, input, *candidate, c.clip_a, c.clip_b,
-						c.out, c.disc_crop);
-				break;
+			if (candidate->handle != marker.handle) continue;
+			// A neutral change-team footprint being taken blinks to the taker's
+			// colour on the session frame clock (no zone-number test here)
+			// [orig: Render_CollisionWireframe @0x5968C9..0x5968FA (the def's
+			//  +0x54 & 0x20000, entity+0x162 == 0, +0x223, `test byte ptr
+			//  dword_A87060, 20h` @0x5968DF, 0xFF304080 / 0xFF802020)].
+			uint32_t fill = candidate->fill_argb;
+			if (marker.change_team != 0 && marker.team == 0 && marker.capture_team != 0 &&
+					(input.session_frame & 0x20u) != 0) {
+				if (marker.capture_team == 1)
+					fill = 0xFF304080u;
+				else if (marker.capture_team == 2)
+					fill = 0xFF802020u;
 			}
+			emit_footprint(view, input, *candidate, fill, c.clip_a, c.clip_b, c.out, c.disc_crop);
+			break;
 		}
 		return;
 	}

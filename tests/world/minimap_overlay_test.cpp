@@ -325,6 +325,10 @@ int main(int argc, char **argv) {
 		policy = world::minimap_blip_draw_policy(e, 0, -1);
 		CHECK(policy.footprint && !policy.rotate,
 				"a marked building leaves the icon path for its footprint");
+		e.item_attrib = world::kItemAttribChangeTeam;
+		policy = world::minimap_blip_draw_policy(e, 0, -1);
+		CHECK(policy.footprint && policy.change_team,
+				"a change-team building's footprint carries the bit for its taker blink");
 	}
 
 	// The map-overlay caller passes a zero color-alpha override, which the
@@ -345,7 +349,7 @@ int main(int argc, char **argv) {
 				"team-two footprints are opaque red");
 		e.team = 0;
 		e.item_attrib = world::kItemAttribChangeTeam;
-		CHECK(world::minimap_footprint_fill_argb(e) == 0xFF609F60u,
+		CHECK(world::minimap_footprint_fill_argb(e) == 0xFF60A060u,
 				"change-team footprints are opaque green");
 	}
 

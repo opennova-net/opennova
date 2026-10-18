@@ -68,9 +68,10 @@ void clip_circle32(Polygon &poly, Polygon &scratch, float cx, float cy,
 void emit_fan(const Polygon &poly, uint32_t color, std::vector<HudMapTri> &out);
 bool clip_segment_rect(const MapView &view, float &x0, float &y0, float &x1,
 		float &y1);
-// Render_CollisionWireframe's fills for one footprint-class entity.
+// Render_CollisionWireframe's fills for one footprint-class entity, in `fill_argb` (the
+// footprint's own, or its taker blink's).
 void emit_footprint(const MapView &view, const HudMinimapInput &input,
-		const HudMinimapFootprint &footprint, Polygon &poly, Polygon &scratch,
+		const HudMinimapFootprint &footprint, uint32_t fill_argb, Polygon &poly, Polygon &scratch,
 		HudMapPass &pass, bool disc);
 
 void marker_uv(const HudMinimapInput &input, uint8_t icon, float &u0,
