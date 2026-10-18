@@ -1,6 +1,6 @@
 #include "stats_sampler.h"
 
-#include "stats_repository.h"
+#include "hosted/stats_repository.h"
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>

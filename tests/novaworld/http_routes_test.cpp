@@ -37,6 +37,7 @@
 #include "health.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
+#include "hosted/console_drain.h"
 #include "hosted/console_queue.h"
 #include "hosted/data_set_repository.h"
 #include "hosted/hosted_repository.h"
@@ -4975,17 +4976,17 @@ int test_healthz(Harness &h) {
 	TEST_EXPECT(nws::heartbeat_line(beat) ==
 			"{\"heartbeat\":{\"program\":\"lobby\",\"nw_sessions\":3,\"listed_hosts\":0,"
 			"\"db_lock_timeouts\":0,\"db_deadlocks\":0}}");
-	nws::Heartbeat controller;
-	controller.program = "controller";
-	controller.hosted_live = 2;
-	controller.hosted_failed = 1;
-	controller.machines_lost = 0;
-	controller.launch_failures = 0;
-	controller.limits_held = 1;
-	controller.db_lock_timeouts = 2;
-	controller.db_deadlocks = 1;
-	TEST_EXPECT(nws::heartbeat_line(controller) ==
-			"{\"heartbeat\":{\"program\":\"controller\",\"hosted_live\":2,\"hosted_failed\":1,"
+	nws::Heartbeat fleet;
+	fleet.program = "fleet";
+	fleet.hosted_live = 2;
+	fleet.hosted_failed = 1;
+	fleet.machines_lost = 0;
+	fleet.launch_failures = 0;
+	fleet.limits_held = 1;
+	fleet.db_lock_timeouts = 2;
+	fleet.db_deadlocks = 1;
+	TEST_EXPECT(nws::heartbeat_line(fleet) ==
+			"{\"heartbeat\":{\"program\":\"fleet\",\"hosted_live\":2,\"hosted_failed\":1,"
 			"\"machines_lost\":0,\"launch_failures\":0,\"limits_held\":1,\"db_lock_timeouts\":2,"
 			"\"db_deadlocks\":1}}");
 	nws::Heartbeat gate;
@@ -8016,7 +8017,7 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(nw_udp.start(udp_config));
 		nws::SessionStore sessions(http_redis.pool());
 		// The console routes' admin links (the console case syncs them by hand),
-		// declared before the listener so they outlive it, as the controller
+		// declared before the listener so they outlive it, as the fleet
 		// keeps them: their states published to their rows every 50 ms (the
 		// supervisor's pass does it each second) and the routes' commands
 		// drained from their table.

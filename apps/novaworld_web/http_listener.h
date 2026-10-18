@@ -67,7 +67,7 @@ namespace infra { class InfraStatus; }
 //   infrastructure      — InfraRoutes (infra/infra_routes.h): the admin's
 //                         read-only view of the deployment as it runs (the
 //                         programs' ECS services and tasks, the balancer, the
-//                         database, the cache, the lobbies, the controller,
+//                         database, the cache, the lobbies, the fleet,
 //                         the machines)
 //   game data           — DataSetRoutes and ReleaseRoutes (data_sets/): the
 //                         hosted data sets, their tree uploads into the object
@@ -141,7 +141,7 @@ public:
 	// Set before start(); unset, placement.h's defaults.
 	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
 
-	// The periodic jobs the deployment's controller schedules (parts.h
+	// The periodic jobs the deployment's fleet schedules (parts.h
 	// periodic_jobs, from the same settings): the admin's jobs page shows each
 	// one's schedule, and runs one now on request (jobs/job_routes.h). Set
 	// before start(); unset, none.

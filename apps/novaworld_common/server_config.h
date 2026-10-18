@@ -109,11 +109,11 @@ struct ServerConfig {
 	uint64_t tick_interval_ms = 500;
 
 	// ONNET_HEALTH_PORT: the TCP port GET /livez answers on
-	// (health_listener.h) in the gate, the lobby, the controller and the
+	// (health_listener.h) in the gate, the lobby, the fleet and the
 	// worker; web answers it on http_port. 0: the OS picks (the tests).
 	uint16_t health_port = 8081;
 
-	// The controller's internal listener bind its boot found in its ECS task
+	// The fleet's internal listener bind its boot found in its ECS task
 	// (<private IPv4>:8070, ecs_metadata.h) with ONNET_INTERNAL_HTTP_BIND
 	// unset; empty: the environment's (hosted/fleet_config.h reads it). Not an
 	// environment variable of its own.

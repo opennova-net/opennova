@@ -10,16 +10,16 @@
 // deployment's trees in the object store), IMDSv2 required and
 // InstanceInitiatedShutdownBehavior=terminate; no user-data). Its user-data is
 // machine/machine_user_data.sh with the machine's values filled in: the
-// controller's internal listener by its URL (ONNET_INTERNAL_URL, a name the
-// deployment's Cloud Map namespace keeps on whichever task runs the
-// controller) and that URL's port, the machine's id and one-time bootstrap
+// fleet's internal listener by its URL (ONNET_INTERNAL_URL, a name the
+// deployment's Cloud Map namespace keeps on whichever fleet task leads) and
+// that URL's port, the machine's id and one-time bootstrap
 // token, the serve image its containers run, the hostd image the agent is
 // copied out of, and the machines' CloudWatch log group
 // (ONNET_HOSTED_EC2_LOG_GROUP) with the region. The script installs docker and
 // the AWS CLI, makes the trees root (/opt/game, where the agent fetches each
 // tree the service names into its own directory, ADR 0064), fences the slots'
 // users off the instance metadata and off the internal port on every
-// destination (no address of the controller's is pinned in a firewall rule),
+// destination (no address of the fleet's is pinned in a firewall rule),
 // starts opennova-hostd (apps/hostd), which redeems the token, and ships the
 // agent's log and its containers' output to that log group (a stream per slot,
 // <machine id>/slot-<k>, and <machine id>/hostd). A machine is terminated at
@@ -84,8 +84,8 @@
 //               stopping and stopped machines. Throws std::runtime_error when
 //               the listing fails.
 //   profile     the supervisor's view (machine_driver.h MachineProfile, the
-//               controller's): kBootTimeoutMs, and slot k's ports (slots.h:
-//               32768 + k, 32800 + k) with the controller's network
+//               fleet's): kBootTimeoutMs, and slot k's ports (slots.h:
+//               32768 + k, 32800 + k) with the fleet's network
 //               (admin_pattern of admin_address) for admin.cfg's ip_restrict.
 
 #include "command_runner.h"
@@ -121,15 +121,15 @@ struct Ec2MachineConfig {
 	// The image opennova-hostd is copied out of (ONNET_HOSTED_HOSTD_IMAGE,
 	// pinned at deploy: an opennova-serve build); empty, the serve image.
 	std::string hostd_image;
-	// The controller's internal listener as the machines reach it
+	// The fleet's internal listener as the machines reach it
 	// (ONNET_INTERNAL_URL, http://<host>:<port>; in a deployment the name its
-	// Cloud Map namespace keeps on the controller, never a fixed address): the
+	// Cloud Map namespace keeps on the fleet leader, never a fixed address): the
 	// agent's --service, and its port the one the slots are fenced off.
 	std::string service_url;
-	// The controller's private IPv4, its internal listener's bind
+	// The fleet's private IPv4, its internal listener's bind
 	// (ONNET_INTERNAL_HTTP_BIND), which its admin links connect from: the
 	// machines' admin.cfg admits its network (admin_pattern). The
-	// controller's profile alone reads it; check_config does not.
+	// supervisor's profile alone reads it; check_config does not.
 	std::string admin_address;
 	// The log group the machines write (ONNET_HOSTED_EC2_LOG_GROUP; fleet.tf's
 	// /opennova/<deployment>/machines, which the machine role may write alone).
@@ -205,15 +205,15 @@ public:
 
 	// The supervisor's view of the machines `config` launches: no driver needed.
 	static MachineProfile profile(const Ec2MachineConfig &config);
-	// The ip_restrict pattern a machine's admin.cfg admits the controller by:
-	// its private address's /16, "10.44.*" for 10.44.0.17 (the deployment's
-	// VPC). The controller's address moves with each replacement of its
-	// instance, and a server keeps the admin.cfg its start rendered, so a
-	// pattern naming one address would refuse a new controller's admin links
-	// (and its health checks would then fail every running server); the
-	// machines' security group admits the admin ports from the controller's
-	// group alone. `controller_address` itself when it is no dotted quad.
-	static std::string admin_pattern(const std::string &controller_address);
+	// The ip_restrict pattern a machine's admin.cfg admits the fleet by: its
+	// private address's /16, "10.44.*" for 10.44.0.17 (the deployment's VPC).
+	// The fleet leader's address moves with each replacement of its task, and
+	// a server keeps the admin.cfg its start rendered, so a pattern naming one
+	// address would refuse a new leader's admin links (and its health checks
+	// would then fail every running server); the machines' security group
+	// admits the admin ports from the fleet's group alone. `fleet_address`
+	// itself when it is no dotted quad.
+	static std::string admin_pattern(const std::string &fleet_address);
 
 	const char *name() const override { return "ec2"; }
 	std::optional<LaunchedMachine> launch(const MachineLaunch &launch, std::string &error) override;

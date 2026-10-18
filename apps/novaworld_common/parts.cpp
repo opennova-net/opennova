@@ -8,7 +8,6 @@
 #include "hosted/hosted_settings.h"
 #include "hosted/owner_file.h"
 #include "hosted/stats_jobs.h"
-#include "hosted/supervisor.h"
 #include "jobs/account_jobs.h"
 #include "jobs/maintenance_jobs.h"
 #include "local_object_store.h"
@@ -330,10 +329,9 @@ std::vector<jobs::PeriodicJob> periodic_jobs(
 	if (const billing::BillingConfig billing_config = billing::billing_config_from_env();
 			billing::check_billing_config(billing_config).empty())
 		add(billing::billing_schedule(billing_config.reconcile_minutes));
-	// The sweep of the driver's machines, as often as the supervisor's config says.
+	// The sweep of the driver's machines (fleet_jobs.h kFleetSweepIntervalMs).
 	if (hosting.on)
-		add(hosted::fleet_schedule(
-				static_cast<int64_t>(hosted::SupervisorConfig{}.orphan_sweep_interval_ms)));
+		add(hosted::fleet_schedule());
 	// The data sets' prune of the trees nothing needs, while there is a store.
 	if (hosting.store_ok)
 		add(hosted::data_set_schedule());

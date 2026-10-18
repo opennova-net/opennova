@@ -4,9 +4,9 @@
 // apps/novaworld_common/hosted/README.md "The console routes"): the site's players,
 // rotation, chat and console pages run the
 // curated commands (console_commands.h) on the server's admin link
-// (admin_link.h), which the controller holds: each command goes through the
-// database (console_queue.h), and the link's state is its row
-// (admin_link_status). The owner's routes act on one of the caller's own servers by
+// (apps/novaworld_fleet/hosted/admin_link.h), which the fleet leader holds:
+// each command goes through the database (console_queue.h), and the link's
+// state is its row (admin_link_status). The owner's routes act on one of the caller's own servers by
 // its id: GET /api/me/servers/<id>/players, POST .../players/<slot>/punt, /ban,
 // /swap and /kill, GET .../missions, GET and POST .../rotation (the entries; one
 // appended), POST .../rotation/<index>/remove and /next, POST
@@ -44,7 +44,7 @@
 // count stay each process's own, since what they guard is its handler threads. GET .../console reads the database alone and is not
 // admitted.
 
-#include "hosted/admin_link.h"
+#include "hosted/admin_link_status.h"
 #include "console_commands.h"
 #include "hosted/hosted_repository.h"
 #include "rate_limiter.h"

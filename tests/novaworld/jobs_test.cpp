@@ -319,7 +319,7 @@ int test_retries() {
 
 // The periodic buckets: a tick enqueues each kind's job once per bucket, none beside
 // one still queued (its bucket's own follows once it ended), none for a bucket `wanted`
-// declines; an at_start job stands for its bucket; two schedulers (two controllers in
+// declines; an at_start job stands for its bucket; two schedulers (two leaders in
 // turn) never give a bucket two jobs.
 int test_scheduler() {
 	TestDatabase scratch;
@@ -383,7 +383,7 @@ int test_claim_lock_apart() {
 	start->rollback();
 	TEST_EXPECT(claimed && claimed->id == id);
 	for (const int64_t other : { opennova::db::kMigrationLock, opennova::db::kHostedStartLock,
-				 opennova::db::kControllerLock })
+				 opennova::db::kFleetLock })
 		TEST_EXPECT(other != opennova::db::kJobsClaimLock);
 	return 0;
 }

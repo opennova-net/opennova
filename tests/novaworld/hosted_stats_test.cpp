@@ -1,4 +1,4 @@
-// The hosted servers' stats (apps/novaworld_common/hosted/stats_sampler.h,
+// The hosted servers' stats (apps/novaworld_fleet/hosted/stats_sampler.h,
 // stats_repository.h; migration 0004_server_stats.sql) on a migrated database
 // and a hand-stepped wall clock: the sampler's one sample a minute of each live
 // server (its listing's players, slots and mission, its admin link's scene,

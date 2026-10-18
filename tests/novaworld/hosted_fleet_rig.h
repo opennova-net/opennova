@@ -300,7 +300,7 @@ struct Rig {
 			return true;
 		});
 		scheduler = std::make_unique<jobs::Scheduler>(pool,
-				hosted::fleet_schedule(static_cast<int64_t>(config.orphan_sweep_interval_ms)),
+				hosted::fleet_schedule(hosted::kFleetSweepIntervalMs),
 				[this] { return static_cast<int64_t>(now); });
 	}
 	// Every job due, run on this thread (it holds none of the pool's leases).

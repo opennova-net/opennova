@@ -113,7 +113,7 @@ std::optional<crow::response> ConsoleRoutes::check_server(
 		return json_error(409, "server_stopping", "this hosted server is being stopped");
 	if (server.state != State::Running)
 		return json_error(409, "server_not_running", "this hosted server is not running yet");
-	// No link up (as the controller last published it): refused before any
+	// No link up (as the fleet last published it): refused before any
 	// admission or token.
 	const std::optional<AdminLinkStatus> link = admin_link_status(db, server.id);
 	if (!link || link->state != AdminLinkState::Up)
@@ -308,7 +308,7 @@ std::optional<std::vector<std::string>> ConsoleRoutes::run(const Caller &c, cons
 	AdminCommandOptions options;
 	options.actor = c.actor;
 	options.record = writes;
-	// Through the controller, which holds the link (console_queue.h); none
+	// Through the fleet, which holds the link (console_queue.h); none
 	// there answers LinkDown.
 	AdminCommandResult result;
 	try {

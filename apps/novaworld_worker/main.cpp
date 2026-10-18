@@ -3,7 +3,7 @@
 // the prunes (the service's, the website's, the hosted stats'), the mail it
 // sends, the billing sync, the fleet's machine driver calls and the hosted
 // data sets' jobs over the object store. What it runs
-// is what the other programs enqueued (the controller's scheduler and
+// is what the other programs enqueued (the fleet's scheduler and
 // supervisor, web's routes); any number of worker processes share the queue.
 // Its watchdog watches the pool alone: a slow job occupies its worker, never a
 // watched loop.
@@ -135,7 +135,7 @@ int run(const program::Boot &boot) {
 
 	// Each worker ends once its job has (a job cut short runs again on the
 	// next lease's worker); then the parts, the driver last. The machines run
-	// on for the controller to resume.
+	// on for the fleet to resume.
 	std::printf("[shutdown] stopping the job workers\n");
 	workers.stop();
 	return exit_code;

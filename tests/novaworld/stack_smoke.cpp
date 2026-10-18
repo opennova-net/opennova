@@ -17,7 +17,7 @@
 //          set (POST /api/me/servers, with --mission's rotation or the data's
 //          whole one) on a machine the worker launches, which reaches running and
 //          is listed in the lobby (its listing's RID), takes console commands
-//          through the controller's admin link (PLAYER LIST, CHAT SEND), and
+//          through the fleet's admin link (PLAYER LIST, CHAT SEND), and
 //          stops.
 //   data-set <dir>
 //          writes the synthetic Joint Operations data set the stack's machines can
@@ -308,7 +308,7 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 	check(listed, "it is listed in the lobby (its listing's RID " + std::to_string(rid) + ")", why);
 	if (listed)
 		note("its listing names " + listed_at);
-	// The console: commands through the controller's admin link to the server.
+	// The console: commands through the fleet's admin link to the server.
 	std::string console;
 	const bool players = wait_for(
 			[&] {

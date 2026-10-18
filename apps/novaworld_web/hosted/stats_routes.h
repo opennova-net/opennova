@@ -15,7 +15,7 @@
 // Every reply is an error code with our own message, never database text.
 // Service policy, not a port.
 
-#include "hosted/admin_link.h"
+#include "hosted/admin_link_status.h"
 #include "hosted/hosted_repository.h"
 #include "rate_limiter.h"
 #include "hosted/stats_repository.h"

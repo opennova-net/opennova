@@ -1,4 +1,4 @@
-// The machine agents' routes (apps/novaworld_controller/hosted/agent_route.h) on the
+// The machine agents' routes (apps/novaworld_fleet/hosted/agent_route.h) on the
 // internal listener (hosted/internal_listener.h) on a loopback port over a
 // migrated database, driven with apps/common's http_exchange: the bootstrap (the
 // one-time token redeemed for a secret kept as its digest, again for a fresh one

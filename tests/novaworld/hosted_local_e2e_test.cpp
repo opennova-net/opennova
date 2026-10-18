@@ -546,7 +546,7 @@ int main(int argc, char **argv) {
 		HostdMachines driver(hostd_binary, serve_binary, work);
 		hosted::SupervisorConfig config;
 		// Where the machines fetch each tree from: the store's URL of trees/<id>/,
-		// as the controller hands it (a file:// copy for the agent).
+		// as the fleet hands it (a file:// copy for the agent).
 		config.tree_url = [&store](int64_t tree_id) {
 			return store.url_of("trees/" + std::to_string(tree_id) + "/");
 		};

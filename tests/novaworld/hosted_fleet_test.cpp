@@ -448,7 +448,7 @@ int test_reconcile_machines() {
 }
 
 // The periodic sweep: a cloud machine no live row names is ended between the
-// boots too, every orphan_sweep_interval_ms; the rows' own machines are kept.
+// boots too, every kFleetSweepIntervalMs; the rows' own machines are kept.
 int test_orphan_sweep() {
 	Rig rig("fleet_sweep");
 	const int64_t id = rig.request("sweep_owner");
@@ -457,7 +457,7 @@ int test_orphan_sweep() {
 	const std::string stray = rig.fake.adopt(4242);
 	rig.step();
 	TEST_EXPECT(!rig.fake.was_terminated(stray));
-	rig.advance(rig.config.orphan_sweep_interval_ms);
+	rig.advance(hosted::kFleetSweepIntervalMs);
 	rig.step();
 	TEST_EXPECT(rig.fake.was_terminated(stray) && !rig.fake.was_terminated(own_cloud));
 	TEST_EXPECT(rig.state(id) == State::Running);

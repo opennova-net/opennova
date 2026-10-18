@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The whole NovaWorld service on this machine, in Docker (deploy/compose): the
-# five programs (gate, lobby, web, controller, worker), each its own container
+# five programs (gate, lobby, web, fleet, worker), each its own container
 # as a deployment runs each as its own ECS service, PostgreSQL, Valkey, the
 # portal (prod's nginx image in web's network, as in web's ECS task) and, with
 # a data set, hosted game servers on machines the worker launches as containers
@@ -133,7 +133,7 @@ stage_prebuilt() {
     local tree="$1" ctx="$state/prebuilt"
     local program
     rm -rf "$ctx"
-    for program in gate lobby web controller worker; do
+    for program in gate lobby web fleet worker; do
         mkdir -p "$ctx/src/build/apps/novaworld_$program"
         cp "$tree/apps/novaworld_$program/opennova-novaworld-$program" "$ctx/src/build/apps/novaworld_$program/"
     done
@@ -161,7 +161,7 @@ build_images() {
     local ctx target
     ctx="$(host_path "$(stage_prebuilt "$prebuilt")")"
     say "building the images from $prebuilt's binaries"
-    for target in gate lobby web controller worker smoke; do
+    for target in gate lobby web fleet worker smoke; do
         local tag="opennova-novaworld-$target:local"
         MSYS_NO_PATHCONV=1 docker build -q -f "$(host_path "$repo/apps/novaworld_common/Dockerfile")" \
             --target "$target" --build-context "build=$ctx" --build-context "smoke-build=$ctx" \
@@ -459,7 +459,7 @@ cmd_smoke() {
     [[ -f "$env_file" ]] || die "no stack (scripts/dev_stack.sh up first)"
     local args=(run --web novaworld-web:8082 --site novaworld-web:80 --gate novaworld-gate:7597
         --livez novaworld-gate:8081 --livez novaworld-lobby:8081
-        --livez novaworld-controller:8081 --livez novaworld-worker:8081
+        --livez novaworld-fleet:8081 --livez novaworld-worker:8081
         --admin-token "$(state_value ADMIN_API_TOKEN)" --timeout 300)
     if [[ "$(state_value STACK_HOSTING)" == "1" ]]; then
         local id mission
@@ -475,7 +475,7 @@ cmd_smoke() {
         echo
         say "the smoke test failed; the last lines of each program (and machine):"
         stack_compose logs --no-color --tail 40 novaworld-gate novaworld-lobby novaworld-web \
-            novaworld-controller novaworld-worker || true
+            novaworld-fleet novaworld-worker || true
         local id
         for id in $(machine_ids); do
             echo "---- machine $(docker inspect --format '{{.Name}}' "$id")"

@@ -14,10 +14,10 @@
 //   web         the HTTP listener (8080: the retail NW*.dll routes, the
 //               website's API, GET /livez and /healthz), billing's routes, the
 //               Redis pool, the mail it queues        apps/novaworld_web
-//   controller  elected: while it leads, the internal listener (the machines'
+//   fleet       elected: while it leads, the internal listener (the machines'
 //               agent routes), the hosted servers' supervisor with its admin
 //               links, the console drain and the periodic jobs' scheduler
-//                                                     apps/novaworld_controller
+//                                                     apps/novaworld_fleet
 //   worker      the job pool and its handlers: the prunes, the account jobs, the
 //               mail it sends, the billing sync, the fleet's machine driver
 //                                                     apps/novaworld_worker
@@ -54,7 +54,7 @@
 namespace opennova::novaworld_server::program {
 
 // What every program's run starts from: the config, the database's options
-// (the controller's election opens a connection of its own) and the pool,
+// (the fleet's election opens a connection of its own) and the pool,
 // migrated and seeded.
 struct Boot {
 	const ServerConfig &config;
@@ -67,7 +67,7 @@ struct Program {
 	// (opennova-novaworld-<name>). One of the five: no escaping needed.
 	const char *name = "";
 	// Its own settings checked, and completed where its environment leaves one
-	// to be found (the controller's bind, from the ECS task metadata), before
+	// to be found (the fleet's bind, from the ECS task metadata), before
 	// the database is touched: "" to go on, else what the FATAL line says.
 	// None: nothing to check.
 	std::function<std::string(ServerConfig &config)> configure;

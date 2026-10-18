@@ -67,7 +67,7 @@ crow::json::wvalue live_json(db::Database &db, const HostedServer &s, int64_t no
 		live["game_type"] = nullptr;
 		live["time_left"] = nullptr;
 	}
-	// Its admin link as the controller last published it.
+	// Its admin link as the fleet last published it.
 	if (const std::optional<AdminLinkStatus> link = admin_link_status(db, s.id)) {
 		const AdminLinkStatus &status = *link;
 		std::string scene = status.game_state;

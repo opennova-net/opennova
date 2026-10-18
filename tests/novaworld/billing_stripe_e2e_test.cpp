@@ -233,7 +233,7 @@ int run(const std::string &secret_key) {
 	nw_service_test::Service service;
 	billing::Billing billing_service(
 			config, api, service.pool, billing::instance_id(*service.pool.acquire()));
-	// The controller's first reconcile, by hand (no worker): the prices checked.
+	// The first reconcile at a start, by hand (no worker): the prices checked.
 	billing_service.sync().reconcile_all(billing::unix_now());
 	const billing::SyncStatus first = billing_service.sync().status(*service.pool.acquire());
 	if (!first.prices_ok)

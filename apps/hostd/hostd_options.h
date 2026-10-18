@@ -15,7 +15,7 @@ namespace opennova::hostd {
 enum class RuntimeKind : uint8_t { Docker, Process };
 
 struct HostdOptions {
-	std::string service_url; // --service: http://<the controller's private name or address>:<port>
+	std::string service_url; // --service: http://<the fleet's private name or address>:<port>
 	int64_t machine_id = 0; // --machine
 	std::string token_file = "/etc/opennova/hostd.token";
 	std::string state_dir = "/var/lib/opennova-hostd";

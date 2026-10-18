@@ -5,7 +5,7 @@
 // the load balancer's, the gate's Elastic IP and the lobby port, which spreads
 // the clients across the lobby tasks), reaping the instances whose process is
 // gone; holds its sessions in memory alone, writes their rows (lobby_sessions,
-// active_hosts) and takes the commands web and the controller address to them
+// active_hosts) and takes the commands web and the fleet address to them
 // (lobby_commands). A redeploy of any other program leaves it serving. Its own
 // stop drains its instance and stops at once: on ECS the load balancer has
 // sent it no new client since its deregistration and ended its flows before

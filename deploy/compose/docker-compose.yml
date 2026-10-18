@@ -4,7 +4,7 @@
 #   novaworld-lobby       a lobby instance (UDP 64206)
 #   novaworld-web         the HTTP routes (8080: the retail NW*.dll and .gsb
 #                         routes, the website's API behind the portal)
-#   novaworld-controller  the fleet's reconcile pass, the jobs' scheduling, the
+#   novaworld-fleet       the fleet's reconcile pass, the jobs' scheduling, the
 #                         machines' internal listener (8070, the leader alone)
 #   novaworld-worker      the background jobs (the fleet's machine driver calls
 #                         among them)
@@ -63,7 +63,7 @@ x-novaworld-env: &novaworld-env
   ONNET_HTTP_PORT: ${ONNET_HTTP_PORT:-}
   ONNET_HEALTH_PORT: ${ONNET_HEALTH_PORT:-}
   # Web's address as the gate and the lobby announce it (the startup URL, the
-  # web domain, HOST_URL, GSB_SERVER), and the controller's internal listener
+  # web domain, HOST_URL, GSB_SERVER), and the fleet's internal listener
   # as the machines' hostd and the other programs reach it.
   ONNET_WEB_HOST: ${ONNET_WEB_HOST:-}
   ONNET_INTERNAL_URL: ${ONNET_INTERNAL_URL:-}
@@ -92,7 +92,7 @@ x-novaworld-env: &novaworld-env
   ONNET_MAIL_REGION: ${ONNET_MAIL_REGION:-}
   # Hosted game servers: unset, hosting is off. The hosting overlay turns it on
   # with the docker driver (the local stack's machines); a deployment's web,
-  # controller and worker get the ec2 driver's settings from their task
+  # fleet and worker get the ec2 driver's settings from their task
   # definitions (infra/aws/fleet.tf).
   ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
   ONNET_HOSTED_CAP: ${ONNET_HOSTED_CAP:-}
@@ -101,7 +101,7 @@ x-novaworld-env: &novaworld-env
   # page fills; hosting is on only with one. A deployment names its bucket in
   # S3 (s3://<bucket>/data, with the region); this stack a directory, the
   # store volume below, shared by web (the page's uploads, which it puts there
-  # part by part) and the worker (the trees it builds); the controller only
+  # part by part) and the worker (the trees it builds); the fleet only
   # builds URLs under it and mounts nothing.
   ONNET_OBJECT_STORE_URL: ${ONNET_OBJECT_STORE_URL:-file:///var/lib/opennova/store}
   ONNET_OBJECT_STORE_REGION: ${ONNET_OBJECT_STORE_REGION:-}
@@ -171,12 +171,12 @@ services:
     volumes:
       - store:/var/lib/opennova/store
 
-  novaworld-controller:
+  novaworld-fleet:
     <<: *novaworld
-    image: ${CONTROLLER_IMAGE:-opennova-novaworld-controller:local}
+    image: ${FLEET_IMAGE:-opennova-novaworld-fleet:local}
     build:
       <<: *novaworld-build
-      target: controller
+      target: fleet
     environment:
       <<: *novaworld-env
       # Where the internal listener binds (<IPv4>:<port>; unset: the ECS

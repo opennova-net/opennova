@@ -106,7 +106,7 @@ jobs:
       - name: Build the programs, the machines' binaries and the smoke test
         run: >-
           cmake --build build -j "$(nproc)" --target opennova_novaworld_gate
-          opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_controller
+          opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_fleet
           opennova_novaworld_worker opennova_serve opennova_hostd opennova_novaworld_stack_smoke
 
       - name: Bring the stack up (hosted servers on the synthetic data set)

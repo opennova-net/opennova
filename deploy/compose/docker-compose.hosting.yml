@@ -4,10 +4,10 @@
 # (apps/novaworld_common/hosted/docker_machine_driver.h), as a deployment's
 # worker launches EC2 machines. Each runs the image's own opennova-hostd with
 # its process runtime: it redeems the one-time token its launch handed it at
-# the controller's internal listener (bound at the controller's fixed address,
+# the fleet's internal listener (bound at the fleet's fixed address,
 # admitting the stack's subnet), syncs from the machine's address, and runs
-# each server the controller places on its slots as an opennova-serve child at
-# the slot's fixed ports; the controller's admin links reach those on the
+# each server the fleet places on its slots as an opennova-serve child at
+# the slot's fixed ports; the fleet's admin links reach those on the
 # machine's address; the servers list through the gate at ONNET_PUBLIC_HOST.
 #
 #   docker-api    the worker's Docker Engine API: a socket proxy that admits
@@ -28,7 +28,7 @@
 #                 mount of this container (ONNET_HOSTED_DOCKER_DATA_FROM), so a
 #                 machine's hostd copies a tree from
 #                 file:///var/lib/opennova/store/trees/<id>/, the URL the
-#                 controller hands it, into its own /opt/game.
+#                 fleet hands it, into its own /opt/game.
 #   machine-image the machines' image, the serve image, built and never run.
 #
 # scripts/dev_stack.sh up --data <dir> (or --synthetic-data) adds this file.
@@ -48,9 +48,9 @@ x-hosting-env: &hosting-env
   ONNET_HOSTED_DOCKER_DATA_FROM: opennova-dev-machine-data
   ONNET_HOSTED_DEPLOYMENT: dev
   ONNET_HOSTED_SERVE_IMAGE: ${SERVE_IMAGE:-opennova-serve:local}
-  # The controller's internal listener at its fixed address (the dev
+  # The fleet's internal listener at its fixed address (the dev
   # overlay's), admitting the agents from the stack's subnet; the machines'
-  # admin.cfg admits the controller's network.
+  # admin.cfg admits the fleet's network.
   ONNET_INTERNAL_HTTP_BIND: 172.30.77.10:8070
   ONNET_HOSTED_BOOTSTRAP_CIDRS: 172.30.77.0/24
   # A small fleet: one shared machine of 4 slots, one own machine.
@@ -63,7 +63,7 @@ services:
     environment:
       <<: *hosting-env
 
-  novaworld-controller:
+  novaworld-fleet:
     environment:
       <<: *hosting-env
 

@@ -87,11 +87,10 @@ std::string internal_bind(const Sources &sources, std::string &error) {
 	std::string address;
 	std::string why;
 	if (!read_task_address(sources.metadata_uri, address, why, sources.metadata_timeout_ms)) {
-		error = "the controller's internal listener bind from its ECS task: " + why;
+		error = "the fleet's internal listener bind from its ECS task: " + why;
 		return {};
 	}
-	std::printf("[boot] controller: the internal listener binds its ECS task's %s\n",
-			address.c_str());
+	std::printf("[boot] fleet: the internal listener binds its ECS task's %s\n", address.c_str());
 	return address + ":" + std::to_string(sources.port);
 }
 

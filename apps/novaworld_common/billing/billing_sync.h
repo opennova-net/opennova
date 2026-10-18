@@ -12,7 +12,7 @@
 // and the heartbeat wherever they run. Service policy over Stripe's REST API,
 // not a port.
 //
-//   - billing.reconcile (reconcile_all): at a controller's start, every
+//   - billing.reconcile (reconcile_all): at a fleet leader's start, every
 //     reconcile_minutes (ONNET_BILLING_RECONCILE_MINUTES, 360) and when an
 //     admin asks (POST /api/admin/billing/reconcile): every subscription of the account, a page of
 //     100 at a time with its customer expanded (at most kMaxReconcilePages); a subscription whose

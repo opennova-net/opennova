@@ -1,11 +1,11 @@
-#include "controller.h"
+#include "election.h"
 
 #include <chrono>
 #include <cstdio>
 #include <exception>
 #include <utility>
 
-namespace opennova::novaworld_server::controller {
+namespace opennova::novaworld_server::fleet {
 
 namespace {
 
@@ -13,18 +13,18 @@ using db::BindValue;
 
 } // namespace
 
-Controller::Controller(db::ConnectOptions options, ControllerConfig config) :
+Election::Election(db::ConnectOptions options, ElectionConfig config) :
 		options_(std::move(options)), config_(std::move(config)) {}
 
-Controller::~Controller() {
+Election::~Election() {
 	stop();
 }
 
-void Controller::add_part(ControllerPart part) {
+void Election::add_part(ElectionPart part) {
 	parts_.push_back(std::move(part));
 }
 
-void Controller::start() {
+void Election::start() {
 	if (thread_.joinable())
 		return;
 	{
@@ -34,7 +34,7 @@ void Controller::start() {
 	thread_ = std::thread([this] { run(); });
 }
 
-void Controller::stop() {
+void Election::stop() {
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 		stopping_ = true;
@@ -43,24 +43,24 @@ void Controller::stop() {
 	if (thread_.joinable())
 		thread_.join();
 	for (size_t i = started_parts_; i > 0; --i) {
-		const ControllerPart &part = parts_[i - 1];
+		const ElectionPart &part = parts_[i - 1];
 		if (part.stop)
 			part.stop();
 	}
 	if (started_parts_ > 0)
-		std::printf("[controller] %s stopped its parts\n", config_.holder.c_str());
+		std::printf("[fleet] %s stopped its parts\n", config_.holder.c_str());
 	started_parts_ = 0;
 	leading_.store(false);
 	lock_.reset(); // the lock let go: a standby takes over
 	conn_.reset();
 }
 
-bool Controller::wait_stop(int64_t ms) {
+bool Election::wait_stop(int64_t ms) {
 	std::unique_lock<std::mutex> lock(mu_);
 	return cv_.wait_for(lock, std::chrono::milliseconds(ms), [this] { return stopping_; });
 }
 
-bool Controller::generation_holds(db::Database &db, int64_t generation) {
+bool Election::generation_holds(db::Database &db, int64_t generation) {
 	// FOR SHARE: inside a transaction the row stays locked to its end, so an
 	// election's UPDATE (the generation moved on) waits for it and orders after
 	// its writes; a read after that election finds no row.
@@ -70,11 +70,11 @@ bool Controller::generation_holds(db::Database &db, int64_t generation) {
 					.empty();
 }
 
-bool Controller::still_leads(db::Database &db) const {
+bool Election::still_leads(db::Database &db) const {
 	return leading_.load() && generation_holds(db, generation_.load());
 }
 
-bool Controller::elect() {
+bool Election::elect() {
 	std::string last_error;
 	for (;;) {
 		{
@@ -86,14 +86,14 @@ bool Controller::elect() {
 		try {
 			if (!conn_) {
 				db::ConnectOptions options = options_;
-				options.application_name = "opennova-controller";
+				options.application_name = "opennova-fleet";
 				conn_ = std::make_unique<db::Database>(options);
 				const auto pid = conn_->query("SELECT pg_backend_pid();");
 				backend_pid_.store(
 						pid.empty() ? 0 : static_cast<int>(pid.front().as_int(0).value_or(0)));
 			}
 			// Waits the connection's lock timeout while another holds it.
-			lock_.emplace(*conn_, db::kControllerLock);
+			lock_.emplace(*conn_, db::kFleetLock);
 			const auto rows = conn_->query(
 					"UPDATE controller_leader SET generation = generation + 1, holder = $1, "
 					"elected_at = now() WHERE id = 1 RETURNING generation;",
@@ -105,8 +105,8 @@ bool Controller::elect() {
 			if (e.lock_timeout())
 				continue; // another leads: try again
 			if (last_error != e.what())
-				std::fprintf(stderr, "[controller] WARN %s: the election: %s\n",
-						config_.holder.c_str(), e.what());
+				std::fprintf(stderr, "[fleet] WARN %s: the election: %s\n", config_.holder.c_str(),
+						e.what());
 			last_error = e.what();
 			lock_.reset();
 			conn_.reset();
@@ -116,7 +116,7 @@ bool Controller::elect() {
 	}
 }
 
-void Controller::watch() {
+void Election::watch() {
 	while (!wait_stop(config_.check_ms)) {
 		turns_.fetch_add(1, std::memory_order_relaxed);
 		std::string why;
@@ -125,15 +125,15 @@ void Controller::watch() {
 					conn_->query("SELECT generation, holder FROM controller_leader WHERE id = 1;");
 			const int64_t generation = rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 			if (generation != generation_.load())
-				why = "another controller leads (generation " + std::to_string(generation) + ", " +
-						rows.front().as_text(1).value_or("") + ")";
+				why = "another fleet process leads (generation " + std::to_string(generation) +
+						", " + rows.front().as_text(1).value_or("") + ")";
 		} catch (const std::exception &e) {
 			why = std::string("its lock's connection failed: ") + e.what();
 		}
 		if (why.empty())
 			continue;
 		leading_.store(false);
-		std::fprintf(stderr, "[controller] FATAL %s lost the leadership (generation %lld): %s\n",
+		std::fprintf(stderr, "[fleet] FATAL %s lost the leadership (generation %lld): %s\n",
 				config_.holder.c_str(), static_cast<long long>(generation_.load()), why.c_str());
 		if (config_.on_lost)
 			config_.on_lost(why);
@@ -141,13 +141,13 @@ void Controller::watch() {
 	}
 }
 
-void Controller::run() {
-	std::printf("[controller] %s stands for election\n", config_.holder.c_str());
+void Election::run() {
+	std::printf("[fleet] %s stands for election\n", config_.holder.c_str());
 	if (!elect())
 		return;
-	std::printf("[controller] %s leads (generation %lld)\n", config_.holder.c_str(),
+	std::printf("[fleet] %s leads (generation %lld)\n", config_.holder.c_str(),
 			static_cast<long long>(generation_.load()));
-	for (const ControllerPart &part : parts_) {
+	for (const ElectionPart &part : parts_) {
 		{
 			std::lock_guard<std::mutex> lock(mu_);
 			if (stopping_)
@@ -160,4 +160,4 @@ void Controller::run() {
 	watch();
 }
 
-} // namespace opennova::novaworld_server::controller
+} // namespace opennova::novaworld_server::fleet

@@ -1,5 +1,5 @@
-// The controller's election (apps/novaworld_controller/controller.h) with
-// two controllers on one database, each over a supervisor of its own
+// The fleet program's election (apps/novaworld_fleet/election.h) with two
+// fleet processes on one database, each over a supervisor of its own
 // (hosted/supervisor.h) and the FakeDriver (hosted_fake_driver.h), the fleet's
 // jobs on real worker threads and a clock in the test's hand:
 //
@@ -12,13 +12,14 @@
 //     leader set still holds;
 //   - a pass an election overtook launches nothing (the fence asked again inside
 //     the launch's transaction), and an election waits for a write that holds it;
-//   - a console command its controller claimed and never answered: a route with no
+//   - a console command its leader claimed and never answered: a route with no
 //     done row says it was not sent, and the next leader's drain answers it link
 //     down.
 //
 // Compiles the hosted sources directly, as hosted_supervisor_test does.
 
-#include "controller.h"
+#include "election.h"
+#include "hosted/console_drain.h"
 #include "hosted/console_queue.h"
 #include "hosted_fleet_rig.h"
 
@@ -34,7 +35,7 @@
 
 using namespace hosted_rig;
 using hosted::FleetMachineState;
-namespace ctl = opennova::novaworld_server::controller;
+namespace fleet = opennova::novaworld_server::fleet;
 
 namespace {
 
@@ -50,11 +51,11 @@ bool wait_until(const std::function<bool()> &done, int ms) {
 	return done();
 }
 
-// One controller process as the test plays it: its supervisor, its election,
+// One fleet process as the test plays it: its supervisor, its election,
 // and whether it learnt it lost.
 struct Contender {
 	std::unique_ptr<hosted::Supervisor> sup;
-	std::unique_ptr<ctl::Controller> leader;
+	std::unique_ptr<fleet::Election> leader;
 	std::atomic<bool> lost{ false };
 
 	Contender(Rig &rig, const std::string &holder) {
@@ -63,20 +64,20 @@ struct Contender {
 		// A standby tries for the lock every 0.3 s.
 		options.lock_timeout_ms = 300;
 		options.statement_timeout_ms = 3000;
-		ctl::ControllerConfig config;
+		fleet::ElectionConfig config;
 		config.holder = holder;
 		config.check_ms = 50;
 		config.on_lost = [this](const std::string &) { lost.store(true); };
-		leader = std::make_unique<ctl::Controller>(options, config);
-		ctl::Controller *l = leader.get();
+		leader = std::make_unique<fleet::Election>(options, config);
+		fleet::Election *l = leader.get();
 		hosted::Supervisor *s = sup.get();
 		s->set_pass_guard([l](opennova::db::Database &db) { return l->still_leads(db); });
 		leader->add_part({ "supervisor", [s] { s->start(); }, [s] { s->stop(); } });
 	}
 };
 
-int test_two_controllers() {
-	Rig rig("controller_two");
+int test_two_leaders() {
+	Rig rig("fleet_two");
 	std::atomic<uint64_t> clock{ 1000 };
 	rig.config.tick_interval_ms = 20;
 	rig.config.clock_ms = [&clock] { return clock.load(); };
@@ -89,8 +90,8 @@ int test_two_controllers() {
 	jobs::WorkerPool workers(rig.pool, rig.registry, worker_config);
 	workers.start();
 
-	Contender a(rig, "controller-a");
-	Contender b(rig, "controller-b");
+	Contender a(rig, "fleet-a");
+	Contender b(rig, "fleet-b");
 	a.leader->start();
 	TEST_EXPECT(wait_until([&a] { return a.leader->leading(); }, 5000));
 	b.leader->start();
@@ -168,10 +169,10 @@ int test_two_controllers() {
 // A leader that stops (its process shutting down) lets the lock go: the standby
 // leads at once, the generation moved on.
 int test_orderly_handover() {
-	Rig rig("controller_handover");
+	Rig rig("fleet_handover");
 	rig.config.tick_interval_ms = 20;
-	Contender a(rig, "controller-a");
-	Contender b(rig, "controller-b");
+	Contender a(rig, "fleet-a");
+	Contender b(rig, "fleet-b");
 	a.leader->start();
 	TEST_EXPECT(wait_until([&a] { return a.leader->leading(); }, 5000));
 	b.leader->start();
@@ -180,7 +181,7 @@ int test_orderly_handover() {
 	a.leader->stop();
 	TEST_EXPECT(wait_until([&b] { return b.leader->leading(); }, 3000));
 	TEST_EXPECT(b.leader->generation() == a.leader->generation() + 1 && !a.lost.load());
-	TEST_EXPECT(ctl::Controller::generation_holds(rig.db, b.leader->generation()));
+	TEST_EXPECT(fleet::Election::generation_holds(rig.db, b.leader->generation()));
 	b.leader->stop();
 	return 0;
 }
@@ -191,14 +192,14 @@ int test_orderly_handover() {
 // The fence's share lock, held by a write's transaction, makes an election wait for
 // that write.
 int test_stale_launch_fenced() {
-	Rig rig("controller_stale_launch");
+	Rig rig("fleet_stale_launch");
 	rig.db.exec("UPDATE controller_leader SET generation = 1 WHERE id = 1;");
 	int64_t generation = 1;
 	bool elect_after_guard = false;
 	rig.sup->set_pass_guard([&rig, &generation, &elect_after_guard](opennova::db::Database &db) {
-		const bool holds = ctl::Controller::generation_holds(db, generation);
+		const bool holds = fleet::Election::generation_holds(db, generation);
 		if (elect_after_guard) {
-			// Another controller's election lands right after this guard.
+			// Another fleet process's election lands right after this guard.
 			elect_after_guard = false;
 			rig.db.exec("UPDATE controller_leader SET generation = generation + 1 WHERE id = 1;");
 		}
@@ -224,7 +225,7 @@ int test_stale_launch_fenced() {
 	// A write holding the fence: an election waits for it (here past its lock timeout).
 	{
 		opennova::db::Transaction tx(rig.db);
-		TEST_EXPECT(ctl::Controller::generation_holds(rig.db, 2));
+		TEST_EXPECT(fleet::Election::generation_holds(rig.db, 2));
 		opennova::db::ConnectOptions options = rig.scratch.options();
 		options.lock_timeout_ms = 200;
 		opennova::db::Database election(options);
@@ -240,12 +241,12 @@ int test_stale_launch_fenced() {
 	return 0;
 }
 
-// A console command its controller claimed and never answered (it went away with
+// A console command its leader claimed and never answered (it went away with
 // it): a route whose wait runs out with no done row says it was not sent; with a new
 // leader, its drain answers the earlier generation's claim link down well inside the
 // route's wait, and claims what it runs under its own generation.
 int test_console_after_handover() {
-	Rig rig("controller_console");
+	Rig rig("fleet_console");
 	const int64_t server = rig.request("console_owner");
 	TEST_EXPECT(server > 0);
 	rig.db.exec("UPDATE controller_leader SET generation = 1 WHERE id = 1;");
@@ -253,7 +254,7 @@ int test_console_after_handover() {
 	hosted::AdminCommandOptions options;
 	options.actor = "owner";
 	// The route's command claimed by generation 1's drain, gone since.
-	const auto claimed_by_gone_controller = [&rig] {
+	const auto claimed_by_gone_leader = [&rig] {
 		return wait_until(
 				[&rig] {
 					rig.db.exec("UPDATE hosted_console_commands SET state = 'running', "
@@ -268,7 +269,7 @@ int test_console_after_handover() {
 			result = hosted::run_console_command(
 					rig.pool, server, "GET GAMESTATE", options, std::chrono::milliseconds(300));
 		});
-		const bool claimed = claimed_by_gone_controller();
+		const bool claimed = claimed_by_gone_leader();
 		route.join();
 		TEST_EXPECT(
 				claimed && result.outcome == hosted::AdminCommandOutcome::TimedOut && !result.sent);
@@ -282,7 +283,7 @@ int test_console_after_handover() {
 			result = hosted::run_console_command(
 					rig.pool, server, "GET GAMESTATE", options, std::chrono::seconds(10));
 		});
-		const bool claimed = claimed_by_gone_controller();
+		const bool claimed = claimed_by_gone_leader();
 		hosted::ConsoleDrain drain(rig.pool, links, 5);
 		drain.start();
 		route.join();
@@ -318,7 +319,7 @@ int main(int argc, char **argv) {
 		int (*fn)();
 	};
 	const Case cases[] = {
-		{ "two_controllers", test_two_controllers },
+		{ "two_leaders", test_two_leaders },
 		{ "orderly_handover", test_orderly_handover },
 		{ "stale_launch_fenced", test_stale_launch_fenced },
 		{ "console_after_handover", test_console_after_handover },
@@ -330,6 +331,6 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 	}
-	std::printf("OK: the controller's election\n");
+	std::printf("OK: the fleet program's election\n");
 	return 0;
 }

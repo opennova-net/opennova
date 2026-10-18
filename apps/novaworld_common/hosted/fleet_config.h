@@ -6,19 +6,19 @@
 // from (ec2_machine_driver.h, docker_machine_driver.h). The variables:
 //
 //   ONNET_INTERNAL_HTTP_BIND      <IPv4>:<port> (127.0.0.1:8070): the
-//                                 controller's internal listener
-//                                 (internal_listener.h), on the controller
-//                                 task's private address in a deployment
-//                                 (unset there: the controller finds it in
-//                                 its ECS task's metadata, ecs_metadata.h);
-//                                 a private or loopback address, never a
-//                                 public or wildcard one. Also the address the
-//                                 machines' admin.cfg admits (the
-//                                 controller's admin links come from it)
+//                                 fleet's internal listener
+//                                 (internal_listener.h), on the fleet task's
+//                                 private address in a deployment (unset
+//                                 there: the fleet finds it in its ECS task's
+//                                 metadata, ecs_metadata.h); a private or
+//                                 loopback address, never a public or
+//                                 wildcard one. Also the address the
+//                                 machines' admin.cfg admits (the fleet's
+//                                 admin links come from it)
 //   ONNET_INTERNAL_URL            http://<host>:<port>: that listener as the
 //                                 machines' agents reach it, by the name the
 //                                 deployment's Cloud Map namespace keeps on
-//                                 the controller (controller.<deployment>.
+//                                 the fleet leader (fleet.<deployment>.
 //                                 opennova.internal:8070; the local stack's:
 //                                 its compose name), never a fixed address
 //   ONNET_HOSTED_BOOTSTRAP_CIDRS  comma-separated private IPv4 CIDRs: the
@@ -74,7 +74,7 @@ namespace opennova::novaworld_server::hosted {
 inline constexpr int kSlotPids = 128;
 
 struct FleetConfig {
-	// ONNET_INTERNAL_HTTP_BIND (the controller's).
+	// ONNET_INTERNAL_HTTP_BIND (the fleet's).
 	std::string internal_address = "127.0.0.1";
 	uint16_t internal_port = 8070;
 	// ONNET_INTERNAL_URL ("" when unset).

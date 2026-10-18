@@ -5,10 +5,10 @@
 // cloud machine is an EC2 machine (ec2_machine_driver.h), so the local stack runs
 // prod's flow end to end: the launch hands the machine its id and its one-time
 // token and nothing else; its agent (opennova-hostd, the image's own) redeems the
-// token at the controller's internal listener (ONNET_INTERNAL_URL) and syncs
+// token at the fleet's internal listener (ONNET_INTERNAL_URL) and syncs
 // from the machine's own address, which the routes check against its row; the
 // supervisor places servers on the machine's slots at their fixed ports (slots.h);
-// the controller's admin links reach each slot's admin port at the machine's
+// the fleet's admin links reach each slot's admin port at the machine's
 // address; the servers list through the gate (ONNET_PUBLIC_HOST). What differs is
 // the machine: hostd runs each server as an opennova-serve child of its own
 // (--runtime process: hostd/process_runtime.h), not a docker container, since the
@@ -47,7 +47,7 @@
 //   list_tagged GET /containers/json?all=1 filtered on both labels, in every state.
 //               Throws std::runtime_error when the listing fails.
 //   profile     kBootTimeoutMs, slot k's fixed ports (each machine has an address
-//               of its own) and the controller's network for admin.cfg
+//               of its own) and the fleet's network for admin.cfg
 //               (Ec2MachineDriver::admin_pattern of its internal listener's bind).
 //
 // Every failure is logged and handled here, never thrown, but by list_tagged.
@@ -73,12 +73,12 @@ struct DockerMachineConfig {
 	// ONNET_HOSTED_SERVE_IMAGE: the machines' image, opennova-hostd and
 	// opennova-serve in it (apps/serve/Dockerfile).
 	std::string image;
-	// ONNET_INTERNAL_URL: the controller's internal listener as the machines
+	// ONNET_INTERNAL_URL: the fleet's internal listener as the machines
 	// reach it (the agent's --service).
 	std::string service_url;
-	// The controller's internal listener's bind address (ONNET_INTERNAL_HTTP_BIND),
+	// The fleet's internal listener's bind address (ONNET_INTERNAL_HTTP_BIND),
 	// which its admin links connect from: the machines' admin.cfg admits its
-	// network. The controller's profile alone reads it.
+	// network. The supervisor's profile alone reads it.
 	std::string admin_address;
 	int call_timeout_ms = 20 * 1000;
 };

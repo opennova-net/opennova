@@ -151,7 +151,7 @@
 // supervisor: booting and never reported) is placed again, and the rest resume
 // where they were (a running one gets relist_grace_ms for its lister to
 // re-host before the health checks count). The sweep runs again every
-// orphan_sweep_interval_ms (fleet_schedule). A driver that cannot list its
+// kFleetSweepIntervalMs (fleet_jobs.h fleet_schedule). A driver that cannot list its
 // machines has nothing terminated or ended on that.
 //
 // The desired state (sync): the containers of the live servers placed on the
@@ -181,15 +181,16 @@
 // wins. Each pass leases its own pooled connection.
 
 #include "admin_link.h"
-#include "billing/entitlement.h"
-#include "data_set_repository.h"
 #include "fleet_desired_state.h"
-#include "fleet_repository.h"
-#include "hosted_repository.h"
-#include "limits_hold.h"
-#include "machine_driver.h"
-#include "placement.h"
 #include "stats_sampler.h"
+
+#include "billing/entitlement.h"
+#include "hosted/data_set_repository.h"
+#include "hosted/fleet_repository.h"
+#include "hosted/hosted_repository.h"
+#include "hosted/limits_hold.h"
+#include "hosted/machine_driver.h"
+#include "hosted/placement.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>
@@ -217,7 +218,7 @@ struct SupervisorConfig {
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;
 	// Where a machine's agent fetches tree `tree_id` from: the object store's
-	// URL of trees/<id>/ (object_store.h url_of; the controller holds no store,
+	// URL of trees/<id>/ (object_store.h url_of; the fleet holds no store,
 	// only this pure function of its config). Unset, the replies name no URL.
 	std::function<std::string(int64_t tree_id)> tree_url;
 	// The fleet (fleet_config.h): placement's knobs, how long a shared machine
@@ -269,8 +270,6 @@ struct SupervisorConfig {
 	uint64_t restart_reset_ms = 60 * 60 * 1000;
 	uint64_t restart_backoff_ms = 15 * 1000;
 	uint64_t stop_timeout_ms = 60 * 1000;
-	// The fleet.sweep job's period (fleet_schedule; the controller's scheduler).
-	uint64_t orphan_sweep_interval_ms = 5 * 60 * 1000;
 	// A booting, lost or unaddressed machine's describe, asked at most this
 	// often (the ec2 driver reads one describe of every machine at most every
 	// 10 s anyway).
@@ -344,8 +343,8 @@ public:
 	// those since its last line). Thread-safe.
 	uint64_t launch_failures() const { return launch_failures_.load(std::memory_order_relaxed); }
 
-	// A guard each pass asks first, on the pass's connection (a controller that
-	// still leads, controller/controller.h); false skips the pass. It is asked
+	// A guard each pass asks first, on the pass's connection (a fleet process
+	// that still leads, election.h); false skips the pass. It is asked
 	// again inside the transaction of each write that enqueues cloud work (a
 	// machine's launch with its row, an end with its terminate), where false
 	// writes nothing: a pass a new leader's election overtook launches and ends

@@ -32,10 +32,10 @@
 name: opennova-dev
 
 # The stack's network, by a fixed name and subnet: the hosting overlay's
-# machines join it by name, and the controller's internal listener binds a
+# machines join it by name, and the fleet's internal listener binds a
 # fixed address on it (the agents reach it there, its admin links come from
 # it). Docker hands out addresses from the upper half alone, so no container
-# (a machine the worker launches among them) ever takes the controller's.
+# (a machine the worker launches among them) ever takes the fleet's.
 networks:
   default:
     name: opennova-dev
@@ -56,8 +56,8 @@ x-dev-env: &dev-env
   # Web's address as the gate and the lobby announce it: its published 8080
   # on the same address.
   ONNET_WEB_HOST: ${ONNET_PUBLIC_HOST}
-  # The controller's internal listener, by its compose name.
-  ONNET_INTERNAL_URL: http://novaworld-controller:8070
+  # The fleet's internal listener, by its compose name.
+  ONNET_INTERNAL_URL: http://novaworld-fleet:8070
   # The postgres service below.
   DATABASE_URL: postgresql://novaworld@postgres:5432/novaworld
   DATABASE_PASSWORD: dev
@@ -169,7 +169,7 @@ services:
 
   # At a fixed address on the stack's network, where its internal listener
   # binds (the hosting overlay's ONNET_INTERNAL_HTTP_BIND).
-  novaworld-controller:
+  novaworld-fleet:
     depends_on: *dev-depends
     environment:
       <<: *dev-env

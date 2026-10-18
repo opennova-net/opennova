@@ -57,16 +57,16 @@ inline constexpr const char *kNwUdpLine = "[nwudp] listening on UDP :";
 inline constexpr const char *kHttpLine = "[http] listening on :";
 inline constexpr const char *kHealthLine = "[health] listening on TCP :";
 
-// The five programs' binaries, as ctest passes them (gate, lobby, web,
-// controller, worker; absolute, since a child runs in its temp directory).
+// The five programs' binaries, as ctest passes them (gate, lobby, web, fleet,
+// worker; absolute, since a child runs in its temp directory).
 struct Binaries {
-	std::string gate, lobby, web, controller, worker;
+	std::string gate, lobby, web, fleet, worker;
 
 	// argv[first..first+4]; false when there are not five.
 	bool read(int argc, char **argv, int first) {
 		if (argc < first + 5)
 			return false;
-		std::string *each[] = { &gate, &lobby, &web, &controller, &worker };
+		std::string *each[] = { &gate, &lobby, &web, &fleet, &worker };
 		for (int i = 0; i < 5; ++i)
 			*each[i] = std::filesystem::absolute(argv[first + i]).string();
 		return true;
