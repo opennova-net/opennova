@@ -300,6 +300,17 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		put_id(e, "base_tree_id", s.base_tree_id);
 		put_id(e, "expansion_tree_id", s.expansion_tree_id);
 		e["outdated"] = outdated;
+		// Its last minute of ticks as its slot's report carries it (its own
+		// container's, as put_phase reads it), null with none.
+		const auto report = is_live(s.state) ? slot_report_of(db, s.id) : std::nullopt;
+		if (report && report->container == s.container && report->tick) {
+			crow::json::wvalue t;
+			t["p99_ms"] = report->tick->p99_ms;
+			t["late"] = report->tick->late;
+			e["tick"] = std::move(t);
+		} else {
+			e["tick"] = nullptr;
+		}
 	}
 	return e;
 }

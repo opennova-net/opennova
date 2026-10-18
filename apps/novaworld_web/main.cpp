@@ -162,8 +162,9 @@ int run(const program::Boot &boot) {
 	http.set_metrics_store(&metrics_store);
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
-	// A fleet roll's preview: the image the launch templates pin.
-	http.set_fleet_image(hosting.fleet.image_id);
+	// The images the release pins: the launch templates' (a fleet roll's
+	// preview) and hostd's, each machine's held against them.
+	http.set_fleet_release({ hosting.fleet.image_id, hosting.fleet.hostd_image });
 	// The static addresses: on or off, and the zone they are named in.
 	http.set_addresses(hosting.addresses_on, hosting.fleet.address_zone);
 	// The admin usage view's limits: each container's memory and CPUs.

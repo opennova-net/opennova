@@ -1,6 +1,7 @@
 #pragma once
 
 #include "auth.h"
+#include "hosted/fleet_health.h"
 #include "hosted/placement.h"
 #include "jobs/scheduler.h"
 #include "retail_pins.h"
@@ -159,10 +160,12 @@ public:
 	// (hosted/sold_capacity.h). Set before start(); unset, placement.h's
 	// defaults.
 	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
-	// The image the fleet's launch templates pin (hosted/fleet_config.h
-	// ONNET_FLEET_IMAGE_ID), which a fleet roll's preview holds each machine's
-	// against. Set before start().
-	void set_fleet_image(std::string image_id) { fleet_image_ = std::move(image_id); }
+	// The images the release pins (hosted/fleet_config.h ONNET_FLEET_IMAGE_ID,
+	// the launch templates', which a fleet roll's preview holds each machine's
+	// against; ONNET_HOSTED_HOSTD_IMAGE), which the machines' JSON and the
+	// fleet's health (hosted/fleet_health.h) hold each machine's against. Set
+	// before start().
+	void set_fleet_release(hosted::ReleaseImages release) { fleet_release_ = std::move(release); }
 	// Whether the static addresses are on (parts.h HostedPolicy::addresses_on)
 	// and the play zone they are named in: the address routes and the servers'
 	// and accounts' views. Set before start(); unset, off.
@@ -308,8 +311,8 @@ private:
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
 	double fleet_slot_cpus_ = 1.0;
-	// The fleet roll's pinned image (set_fleet_image).
-	std::string fleet_image_;
+	// The images the release pins (set_fleet_release).
+	hosted::ReleaseImages fleet_release_;
 	// The hosted routes' placement policy (set_fleet_placement).
 	hosted::PlacementPolicy fleet_placement_;
 	// The static addresses (set_addresses).
