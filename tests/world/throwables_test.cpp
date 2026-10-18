@@ -610,7 +610,7 @@ void test_grenade_item_contact_backs_off_along_the_ray() {
 // y = 5..6), in one section: the wall first or second (`wall_first`), each
 // with its own face byte.
 CollisionModel two_face_model(bool wall_first, bool wall_only, uint8_t wall_byte,
-                              uint8_t other_byte) {
+                              uint8_t other_byte, int16_t other_ny = 16384) {
     CollisionModel model;
     auto vertex = [&](double x, double y, double z) {
         CollisionVertex value;
@@ -631,7 +631,7 @@ CollisionModel two_face_model(bool wall_first, bool wall_only, uint8_t wall_byte
     wall_normal.dominant_axis = 4;
     model.normals.push_back(wall_normal);
     CollisionNormal other_normal;
-    other_normal.n[1] = 16384;
+    other_normal.n[1] = other_ny;
     other_normal.dominant_axis = 2;
     model.normals.push_back(other_normal);
 
@@ -683,14 +683,16 @@ CollisionModel two_face_model(bool wall_first, bool wall_only, uint8_t wall_byte
 // face 1 leaves the reflection its negated-velocity normal, which at 10 u per
 // tick (the velocity normalized first) cancels the velocity outright. Alone,
 // the pool-2 wall reflects off its own face (vx flips, the round keeps
-// falling) and plays its own byte (3 + 4).
+// falling) and plays its own byte (3 + 4). A face 1
+// whose stored normal is zero is still the face found: the reflection keeps
+// the round's direction (no negated-velocity fallback).
 // [orig: Projectile_RaycastProximitySlots @0x4E5340, the reset @0x4E534F;
 //  Physics_RaycastAgainstBoneCollision, the record @0x4E5254..0x4E5276;
 //  Entity_UpdateGrenadePhysics, the keeps @0x44461D..0x44467A, the
 //  reflection @0x444719, the byte @0x44473F; Physics_ComputeReflectionForce
 //  @0x4E4416..0x4E449D]
 void test_grenade_kept_pool2_hit_carries_the_pool1_record() {
-    enum class Case { kPool2Alone, kFaceInRange, kFaceOutOfRange };
+    enum class Case { kPool2Alone, kFaceInRange, kFaceOutOfRange, kFaceZeroNormal };
     const auto run = [](Case c) {
         Rig rig(0);
         rig.w.tables.ammo.entries[kAmmoGrenade].flags |= 0x80u; // no terrain leg
@@ -705,7 +707,8 @@ void test_grenade_kept_pool2_hit_carries_the_pool1_record() {
         collision.assign_entity(
                 near_h, collision.add_model(two_face_model(
                                 /*wall_first=*/true,
-                                /*wall_only=*/c == Case::kFaceOutOfRange, 3, 5)),
+                                /*wall_only=*/c == Case::kFaceOutOfRange, 3, 5,
+                                c == Case::kFaceZeroNormal ? int16_t{0} : int16_t{16384})),
                 rig.w.registry.get(near_h)->registry_spawn_id);
         if (c != Case::kPool2Alone) {
             Entity far_seed;
@@ -746,11 +749,42 @@ void test_grenade_kept_pool2_hit_carries_the_pool1_record() {
             CHECK(tag == 9 + 4);
             CHECK(round.vel.x == 0.0f && round.vel.y == 0.0f && round.vel.z == 0.0f);
             break;
+        case Case::kFaceZeroNormal:
+            CHECK(tag == 9 + 4);
+            CHECK(round.vel.x > 0.0f && round.vel.y == 0.0f && round.vel.z < 0.0f);
+            break;
         }
     };
     run(Case::kPool2Alone);
     run(Case::kFaceInRange);
     run(Case::kFaceOutOfRange);
+    run(Case::kFaceZeroNormal);
+}
+
+// The face walk tests an entity's model before anything else: a pool-2 entity
+// with no collision model is never hit, whatever its bound, so the grenade
+// flies through it. [orig: Physics_RaycastAgainstBoneCollision @0x4E4CB0 --
+// the model pick and its null test @0x4E4D68..0x4E4D73]
+void test_motor_sweep_passes_a_model_less_entity() {
+    Rig rig(0);
+    rig.w.tables.ammo.entries[kAmmoGrenade].flags |= 0x80u; // no terrain leg
+    Entity seed;
+    seed.kind = EntityKind::Building;
+    seed.health = 100;
+    seed.position = Vec3{14.0f, 10.0f, 10.0f};
+    seed.yaw = 90;
+    seed.bound_radius = 12.0f;
+    rig.w.registry.spawn(2, seed);
+    CollisionWorld collision;
+    collision.build_tick_tables(rig.w);
+    const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10.0f, 10.0f, 14.0f}, 0, 0);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+    round.vel = Vec3{10.0f, 0.0f, -10.0f};
+    rig.w.round_sim.tick(rig.w, nullptr, &collision);
+    CHECK(round.bounce_count == 0);
+    CHECK(round.vel.x > 9.0f);
 }
 
 // The grenade's pools-2/1 gates project the item's center onto the line along
@@ -2612,6 +2646,7 @@ int main() {
     test_satchel_contact_presents_sound_only_and_no_water_gate();
     test_grenade_item_contact_backs_off_along_the_ray();
     test_grenade_kept_pool2_hit_carries_the_pool1_record();
+    test_motor_sweep_passes_a_model_less_entity();
     test_grenade_gates_project_along_the_velocity();
     test_satchel_item_contact_restores_the_tick_start_pose();
     test_charge_lands_on_the_object_floor();

@@ -325,7 +325,7 @@ void fixed_normalize3(int32_t v[3]) {
 // normalized in x87 (65536/|v| per component, ftol; zero when |v| == 0)
 // @0x4e432d..0x4e43c6 and is REPLACED by the struck face's normal when the hit
 // carries bone/face data @0x4e43ea..0x4e449d — our sweep hands that face
-// normal in (zero when it has none). Then, in 16.16:
+// normal in with ProjectileHit::face_normal_found. Then, in 16.16:
 //   dot     = (v . n) >> 16 from the ORIGINAL velocity        @0x4e44df
 //   hspeed  = sqrt(vx^2 + vy^2) / 65536  (NO vz)              @0x4e44dd..0x4e44f2
 //   if trunc(hspeed) != 0: v = normalize3(v)                  @0x4e44fe..0x4e4510
@@ -356,10 +356,13 @@ void negated_unit_velocity(const MotorFrame &f, int32_t n[3]) {
     }
 }
 
-void reflect_velocity(MotorFrame &f, const int32_t normal_q16[3]) {
+// `face_found`: the reflection's face lookup found the struck face, whose
+// normal (a stored zero one included) replaces the negated unit velocity
+// [orig: Physics_ComputeReflectionForce @0x4E4416..0x4E449D].
+void reflect_velocity(MotorFrame &f, const int32_t normal_q16[3], bool face_found) {
     int32_t v[3] = {f.vx, f.vy, f.vz};
     int32_t n[3] = {normal_q16[0], normal_q16[1], normal_q16[2]};
-    if (n[0] == 0 && n[1] == 0 && n[2] == 0) negated_unit_velocity(f, n);
+    if (!face_found) negated_unit_velocity(f, n);
     const int32_t dot = static_cast<int32_t>(
             (static_cast<int64_t>(v[1]) * n[1] + static_cast<int64_t>(v[0]) * n[0] +
              static_cast<int64_t>(v[2]) * n[2]) >> 16);
@@ -570,12 +573,11 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             f.pz = saved.z + qmul(dir[2], back);
             // Every sweep return is an item hit; a wire-proxy hit carries no
             // registry identity but still reflects (retail's decoded pool-1
-            // entities bounce grenades). reflect_velocity's -v fallback covers
-            // the normal-less sphere stand-ins.
+            // entities bounce grenades).
             if (bounce_eligible) {
                 const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y,
                                       hit.normal_q16.z};
-                reflect_velocity(f, n);
+                reflect_velocity(f, n, hit.face_normal_found);
                 ++r.bounce_count;
             }
             ground_hit = true;
@@ -721,12 +723,16 @@ void charge_parent_slide(World &world, CollisionWorld *collision, LiveRound &r,
             world, collision, r, FixedVec3{saved.x, saved.y, saved.z - 4096},
             FixedVec3{f.px, f.py, f.pz}, true, down, 1024, r.parent);
     if (!hit.hit() || hit.distance_q16 >= 1024) return;
+    // The dot and the push read the reflection's out-normal: the face's own
+    // (ProjectileHit::local_normal_q16), or with no face found the negated
+    // unit velocity it starts from.
+    int32_t out_n[3] = {hit.local_normal_q16.x, hit.local_normal_q16.y,
+                        hit.local_normal_q16.z};
+    if (!hit.face_normal_found) negated_unit_velocity(f, out_n);
+    const FixedVec3 out{out_n[0], out_n[1], out_n[2]};
     const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y, hit.normal_q16.z};
-    reflect_velocity(f, n);
+    reflect_velocity(f, n, hit.face_normal_found);
     ++r.bounce_count;
-    // The dot and the push read the reflection's out-normal, the face's own
-    // (ProjectileHit::local_normal_q16).
-    const FixedVec3 &out = hit.local_normal_q16;
     const int32_t dot = static_cast<int32_t>((static_cast<int64_t>(down[2]) * out.z) >> 16);
     const double dot_units = static_cast<double>(dot) * (1.0 / 65536.0);
     if (dot_units < 0.0 && dot_units > -0.5) {
@@ -904,9 +910,9 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             //  @0x447802..0x447850].
             int32_t out[3] = {hit.local_normal_q16.x, hit.local_normal_q16.y,
                               hit.local_normal_q16.z};
-            if (out[0] == 0 && out[1] == 0 && out[2] == 0) negated_unit_velocity(f, out);
+            if (!hit.face_normal_found) negated_unit_velocity(f, out);
             const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y, hit.normal_q16.z};
-            reflect_velocity(f, n);
+            reflect_velocity(f, n, hit.face_normal_found);
             if (throwable_surface_accepts_stick(FixedVec3{out[0], out[1], out[2]})) {
                 throwable_stick_pose(out, r.yaw_bam,
                                      claymore ? 0 : static_cast<int32_t>(0xC0000040), 0,
@@ -1179,8 +1185,8 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     // [orig: Entity_InitFromItemDef @ 0x49e550 Health = def healthMax]; the
     // sweep lifts health when traits resolve. Until then the device is
     // shootable at the default.
-    // The device is shootable through the bounded item-sphere fallback until a
-    // real collision instance resolves (the D-ITEM-1 stand-in semantics).
+    // The bound the proximity table carries; the face walk hits the device only
+    // once its collision instance resolves (a model-less entity is a miss).
     seed.bound_radius = 0.5f;
     Entity *owner_ent = world.registry.get(round.owner);
     const EntityHandle handle = world.registry.spawn(1, seed);

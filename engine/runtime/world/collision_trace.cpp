@@ -687,36 +687,6 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     if (context_ray)
         for (int axis = 0; axis < 3; ++axis) ray.dir[axis] = context_dir[axis];
 
-    // Compatibility sphere for an item whose graphic has no resolved collision
-    // instance. An assigned BVOL-only model is deliberately NOT substituted:
-    // gameplay volumes (CB/CL/CA/VC/BB/etc.) are not projectile CFAC geometry.
-    auto sphere_distance = [&](const int32_t center[3], int32_t radius,
-                               int32_t &out_distance) {
-        if (radius <= 0) return false;
-        const long double fx = static_cast<long double>(trace.start.x) -
-                               static_cast<long double>(center[0]);
-        const long double fy = static_cast<long double>(trace.start.y) -
-                               static_cast<long double>(center[1]);
-        const long double fz = static_cast<long double>(trace.start.z) -
-                               static_cast<long double>(center[2]);
-        const long double dx = delta[0], dy = delta[1], dz = delta[2];
-        const long double a = dx * dx + dy * dy + dz * dz;
-        const long double c = fx * fx + fy * fy + fz * fz -
-                              static_cast<long double>(radius) * radius;
-        if (c <= 0.0L) {
-            out_distance = 0;
-            return true;
-        }
-        const long double b = fx * dx + fy * dy + fz * dz;
-        const long double discriminant = b * b - a * c;
-        if (a <= 0.0L || discriminant < 0.0L) return false;
-        const long double t = (-b - std::sqrt(discriminant)) / a;
-        if (t < 0.0L || t > 1.0L) return false;
-        out_distance = static_cast<int32_t>(
-            t * static_cast<long double>(ray_length));
-        return true;
-    };
-
     // Segment endpoints in slot-table units for the witnessed broad phase.
     const float p0f[3] = {
         static_cast<float>(trace.start.x) / io::kFp16One,
@@ -899,24 +869,13 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                     trace_profile_.dynamic_faces += faces;
             }
             if (target == nullptr) {
-                // Weapon_RaycastAndSpawnImpact feeds every pool through the
-                // CFAC walker. A model-less person/item is a miss here, never
-                // the bounded sphere compatibility used by ordinary bullets.
-                // [orig: Weapon_RaycastAndSpawnImpact @0x4e8460;
-                // Physics_RaycastAgainstBoneCollision @0x4e4cb0]
-                if (person_faces_only || aim || trace.only_entity.valid()) continue;
-                const int32_t center[3] = {to_fixed(entity->position.x),
-                                           to_fixed(entity->position.y),
-                                           to_fixed(entity->position.z)};
-                const int32_t radius = entity->bound_radius > 0.0f
-                    ? to_fixed(entity->bound_radius)
-                    : 0;
-                if (!sphere_distance(center, radius, model_hit.distance_q16)) continue;
-                const int32_t t = t_for_distance(model_hit.distance_q16);
-                const FixedVec3 p = point_at(t);
-                model_hit.position_q16[0] = p.x;
-                model_hit.position_q16[1] = p.y;
-                model_hit.position_q16[2] = p.z;
+                // The face walk tests the entity's model before anything else:
+                // an entity without a collision model is never hit, by any
+                // walk [orig: Physics_RaycastAgainstBoneCollision @0x4E4CB0 --
+                // the model pick and its null test @0x4E4D68..0x4E4D73;
+                // Weapon_RaycastAndSpawnImpact @0x4E8460 feeds every pool
+                // through it].
+                continue;
             } else if (context_ray &&
                        !retail_entity_line_gate(ray.start, ray.end, context_dir,
                                                 target->pos, target->bound_radius)) {
@@ -947,6 +906,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         eh.face_index = table_hit.section_face_index;
         eh.surface_type = table_hit.poly_type;
         eh.material_flags = table_hit.material_flags;
+        eh.face_normal_found = table_hit.section_index >= 0;
         if (hit_class == ProjectileHitClass::DynamicEntity) {
             pool1_record = eh;
             pool1_walk_hit = true;
@@ -1108,6 +1068,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             eh.face_index = table_hit.section_face_index;
             eh.surface_type = table_hit.poly_type;
             eh.material_flags = table_hit.material_flags;
+            eh.face_normal_found = table_hit.section_index >= 0;
             pool1_record = eh;
             pool1_walk_hit = true;
             consider(eh, table_hit.distance_q16);
@@ -1131,9 +1092,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         const CollisionTargetView *kept = trace_target_view(world, best.geometry_entity);
         int32_t local_n[3] = {};
         int32_t world_n[3] = {};
-        if (kept != nullptr &&
-            collision_section_face_normal(*kept, best.section_index, best.face_index,
-                                          local_n, world_n)) {
+        best.face_normal_found =
+                kept != nullptr && collision_section_face_normal(*kept, best.section_index,
+                                                                 best.face_index, local_n, world_n);
+        if (best.face_normal_found) {
             best.normal_q16 = FixedVec3{world_n[0], world_n[1], world_n[2]};
             best.local_normal_q16 = FixedVec3{local_n[0], local_n[1], local_n[2]};
         }

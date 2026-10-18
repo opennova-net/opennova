@@ -918,6 +918,11 @@ struct ProjectileHit {
     // out-normal @0x4E4465..0x4E4491, ahead of the rotation of its own copy
     // @0x4E449D]
     FixedVec3 local_normal_q16;
+    // Whether the reflection's face lookup finds the hit's face: its normals
+    // are then the face's, a stored zero normal included, where a hit without
+    // one keeps the reflection's negated unit velocity.
+    // [orig: Physics_ComputeReflectionForce @0x4E4416..0x4E449D]
+    bool face_normal_found = false;
     int32_t section_index = -1;
     int32_t face_index = -1;
     int32_t bone_index = -1;
@@ -1327,8 +1332,7 @@ public:
 
     // Projectile face raycast against ONE entity's collision instance (the
     // husk-aware target view). kNoFaceMesh = no instance or the model carries
-    // no face mesh — the caller's bound-sphere stand-in applies (the D-ITEM-1
-    // bounded fallback); kMiss = a face mesh exists and the segment misses it
+    // no face mesh, which no walk hits; kMiss = a face mesh exists and the segment misses it
     // (the round flies on); kHit fills `out`. [orig: each pool-walk candidate
     // runs Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]
     enum class FaceRaycast { kNoFaceMesh, kMiss, kHit };

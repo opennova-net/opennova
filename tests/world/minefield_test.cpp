@@ -289,8 +289,7 @@ void vehicle_ground_query() {
     // No CFAC hit leaves the input Z indoors, but uses terrain outside.
     CHECK(collision.minefield_ground(w, {}, {10 * 65536, 0, 4 * 65536}, true) == 4 * 65536);
     CHECK(collision.minefield_ground(w, {}, {10 * 65536, 0, 4 * 65536}, false) == 0);
-    // An unresolved model has a broad-phase sphere in ordinary projectiles;
-    // the mine ground query must never substitute that sphere for a CFAC hit.
+    // An unresolved model is never hit, by the mine ground query either.
     Entity unresolved = deck;
     unresolved.position = {10, 0, 2};
     w.registry.spawn(1, unresolved);
