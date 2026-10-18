@@ -774,6 +774,29 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(log_routes REDIS COMMAND log_routes_test)
     set_tests_properties(log_routes PROPERTIES TIMEOUT 120)
 
+    # The AWS resources' metrics (apps/novaworld_web/infra/metrics_store.h), no database:
+    # GetMetricData's form for the database, the cache's node and the balancer's groups over
+    # 48 h and 400 days, the points in order, a NextToken, AWS's refusal, the 60 s cache, the
+    # local stack calling nothing.
+    add_executable(metrics_store_test novaworld/metrics_store_test.cpp)
+    target_link_libraries(metrics_store_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(metrics_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME metrics_store COMMAND metrics_store_test)
+
+    # The usage routes (infra/usage_routes.h) on the in-process Crow listener over a migrated
+    # database and a Redis namespace: a server's, a machine's and a program's minutes and
+    # hours (the counters' rates, none across a gap or a start-over; the tasks added up), an
+    # AWS resource's metrics (none locally; a stub's), the programs from the samples and from
+    # ECS (a stub).
+    add_executable(usage_routes_test novaworld/usage_routes_test.cpp)
+    target_link_libraries(usage_routes_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(usage_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(usage_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(usage_routes REDIS COMMAND usage_routes_test)
+    set_tests_properties(usage_routes PROPERTIES TIMEOUT 120)
+
     # The hosted data sets' admin routes (apps/novaworld_web/data_sets/, ADR 0064) on the
     # in-process Crow listener over a migrated database, a Redis namespace and a local
     # object store in a temp directory: every route refused without the admin, the list's
