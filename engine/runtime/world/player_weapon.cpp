@@ -932,14 +932,22 @@ bool local_held_weapon_visible(const World &world, const Entity &entity,
 	const WeaponTableEntry *def =
 			world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
 	if (def == nullptr) return false;             // no Def [orig: @0x4dcbda]
-	// The ammo leg, for defs that carry the flag: an empty pool hides the
-	// weapon. [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType @0x5406E0,
-	// ported as weapon_pool_get]
-	if ((def->flags & weapon_flag::kNoClipsNoDraw) != 0 &&
-			weapon_pool_get(inventory, def->ammo_class_id) == 0 &&
-			weapon_inventory_loaded_rounds(world.tables.weapons, inventory,
-                    inventory.equipped_combo) <= 0)
-		return false;
+	// The ammo leg, for defs that carry the flag: the pool, plus the loaded rounds
+	// only for a one-round clip, both read through the entity's seat; a zero total
+	// hides the weapon. [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType
+	// @0x4dcbf5; the clip legs clipsize != -1 @0x4dcc08 and == 1 @0x4dcc0d, the bucket
+	// sub_5405F0 @0x4dcc1b or slot+0x10 @0x4dcc25; the zero test @0x4dcc2b]
+	if ((def->flags & weapon_flag::kNoClipsNoDraw) != 0) {
+		const WeaponAmmoSeat seat = entity_ammo_seat(world, entity);
+		int32_t total = weapon_seat_pool(seat, def->ammo_class_id,
+				weapon_pool_get(inventory, def->ammo_class_id));
+		if (def->clipsize == 1) {
+			const int32_t own = weapon_inventory_loaded_rounds(world.tables.weapons, inventory,
+					inventory.equipped_combo);
+			total += def->ammo_bucket != 0 ? weapon_seat_bucket(seat, own) : own;
+		}
+		if (total == 0) return false;
+	}
 	// A weapon with no FIRST-person model is hidden on your OWN body even
 	// though every observer still sees it — retail asymmetry, not a bug.
 	// [orig: @0x4dcc32]

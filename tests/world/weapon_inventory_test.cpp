@@ -703,6 +703,19 @@ static int test_local_held_weapon_visible() {
 	CHECK(!local_held_weapon_visible(world, player, weapon, inv, true));
 	player.mount_type = SeatType::Passenger;
 	CHECK(local_held_weapon_visible(world, player, weapon, inv, true));
+	// NoClipsNoDraw adds the loaded rounds only for a one-round clip: an empty pool
+	// hides a rifle with rounds in its clip, while a one-round weapon's loaded round
+	// keeps it drawn [orig: Entity_CanFireWeapon @0x4dcbea..0x4dcc2d].
+	player.mounted = false;
+	player.mount_type = SeatType::None;
+	auto &m4 = world.tables.weapons.entries[static_cast<size_t>(f.m4)];
+	m4.flags |= weapon_flag::kNoClipsNoDraw;
+	inv.pools[static_cast<size_t>(m4.ammo_class_id)] = 0;
+	inv.slot(3 * 65)->clip = 5;
+	CHECK(!local_held_weapon_visible(world, player, weapon, inv, false));
+	m4.clipsize = 1;
+	inv.slot(3 * 65)->clip = 1;
+	CHECK(local_held_weapon_visible(world, player, weapon, inv, false));
 	std::printf("PASS local held-weapon draw gate\n");
 	return 0;
 }
