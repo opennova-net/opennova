@@ -58,7 +58,19 @@ crow::json::wvalue machine_json(
 	text_or_null(out, "cloud_id", m.cloud_id);
 	text_or_null(out, "instance_type", m.instance_type);
 	out["slots"] = m.slots;
-	out["slots_used"] = machine_is_live(m.state) ? static_cast<int64_t>(slot_holders(db, m.id).size()) : 0;
+	// The live servers on its slots, by slot (none on a machine that ended).
+	const std::vector<SlotHolder> holders =
+			machine_is_live(m.state) ? slot_holders(db, m.id) : std::vector<SlotHolder>{};
+	out["slots_used"] = static_cast<int64_t>(holders.size());
+	std::vector<crow::json::wvalue> held;
+	for (const SlotHolder &h : holders) {
+		crow::json::wvalue j;
+		j["slot"] = h.slot;
+		j["server_id"] = h.server_id;
+		j["state"] = state_name(h.state);
+		held.push_back(std::move(j));
+	}
+	out["slot_holders"] = std::move(held);
 	text_or_null(out, "private_address", m.private_address);
 	text_or_null(out, "public_address", m.public_address);
 	out["bootstrapped"] = m.bootstrapped;

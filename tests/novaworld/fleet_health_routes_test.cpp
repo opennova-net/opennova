@@ -8,7 +8,7 @@
 //   - the machine JSON (hosted/fleet_routes.h machine_json) in the fleet view: its image,
 //     log stream, use with the network's rates between its two newest minutes (none
 //     without a pair), the release's images and whether it runs others (true, false,
-//     null), its static address;
+//     null), its static address, the live servers on its slots;
 //   - GET /api/admin/fleet/machines/<id>: refused without an admin, 404 for no machine, the
 //     machine, its moves oldest first (the row's making's `from` null, a log stream's note),
 //     its trees with their manifests' totals (null for a tree the service does not hold);
@@ -246,6 +246,12 @@ int test_fleet_view(Harness &h) {
 	// Its image is not the launch templates': outdated, though its hostd is the release's.
 	TEST_EXPECT(m["outdated"].t() == crow::json::type::True);
 	TEST_EXPECT(m["address"]["id"].i() == h.rows.address && str(m["address"]["name"]) == "smoke");
+	// The live servers on its slots, whatever the view's server cap.
+	TEST_EXPECT(m["slots"].i() == 4 && m["slots_used"].i() == 1 && m["slot_holders"].size() == 1 &&
+			m["slot_holders"][0]["slot"].i() == 0 &&
+			m["slot_holders"][0]["server_id"].i() == h.rows.server &&
+			str(m["slot_holders"][0]["state"]) == "running");
+	TEST_EXPECT((*current)["slots_used"].i() == 0 && (*current)["slot_holders"].size() == 0);
 
 	// One minute alone: no rate. Every image the release's: not outdated.
 	TEST_EXPECT(is_null((*current)["stats"]["net_in_bps"]) &&

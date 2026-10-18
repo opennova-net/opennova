@@ -37,7 +37,9 @@
 namespace opennova::novaworld_server::hosted {
 
 // A fleet machine as JSON for the admin: its id, driver, kind, state, cloud id,
-// type, slots and the slots its live servers hold, addresses, agent (its
+// type, slots and the slots its live servers hold (how many, and each one's
+// slot, server and state: "slot_holders", whatever the fleet view's server
+// cap), addresses, agent (its
 // version, protocol and image, its own log stream, and since when it speaks
 // another protocol than the service's), its image, template, serve image, the
 // server an own machine is reserved for, whether the mass-lost brake holds it,
