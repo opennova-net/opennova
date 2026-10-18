@@ -104,6 +104,13 @@ x-novaworld-env: &novaworld-env
   # builds URLs under it and mounts nothing.
   ONNET_OBJECT_STORE_URL: ${ONNET_OBJECT_STORE_URL:-file:///var/lib/opennova/store}
   ONNET_OBJECT_STORE_REGION: ${ONNET_OBJECT_STORE_REGION:-}
+  # The logs' store (apps/novaworld_common/program_log.h): a deployment's
+  # CloudWatch groups (cloudwatch:/opennova/<deployment>); this stack the logs
+  # volume below, where every program copies each line it writes
+  # (programs/<program>/<container id>.log) and the hosting overlay's machines
+  # write theirs and their servers' (machines/, servers/), which web reads for
+  # the admin's log view.
+  ONNET_LOG_STORE: ${ONNET_LOG_STORE:-file:///var/log/opennova}
   # Billing, the monthly support tiers over Stripe: on only when the set is
   # complete and well-formed, else a boot warning and billing off. The key
   # and the webhook secret are secrets (the vault's stripe-test or
@@ -134,6 +141,8 @@ services:
       # The lobby the gate hands a client while no lobby instance is live
       # (host:port; unset, none).
       ONNET_LOBBY_ENDPOINT: ${ONNET_GATE_FALLBACK_LOBBY:-}
+    volumes:
+      - logs:/var/log/opennova
 
   novaworld-lobby:
     <<: *novaworld
@@ -147,6 +156,8 @@ services:
       # announces alike (on ECS the load balancer's: the gate's address and the
       # lobby port).
       ONNET_LOBBY_ENDPOINT: ${ONNET_LOBBY_ENDPOINT:-}
+    volumes:
+      - logs:/var/log/opennova
 
   novaworld-web:
     <<: *novaworld
@@ -170,6 +181,8 @@ services:
       ONNET_UPDATE_PORTS: ${ONNET_UPDATE_PORTS:-}
     volumes:
       - store:/var/lib/opennova/store
+      # Every program's and machine's log, its own copy among them.
+      - logs:/var/log/opennova
 
   novaworld-fleet:
     <<: *novaworld
@@ -182,6 +195,8 @@ services:
       # Where the internal listener binds (<IPv4>:<port>; unset: the ECS
       # task's private address, else 127.0.0.1:8070).
       ONNET_INTERNAL_HTTP_BIND: ${ONNET_INTERNAL_HTTP_BIND:-}
+    volumes:
+      - logs:/var/log/opennova
 
   novaworld-worker:
     <<: *novaworld
@@ -196,6 +211,8 @@ services:
       # The fleet's internal listener as the machines' hostd reach it: what the
       # machine driver hands each machine it launches.
       ONNET_INTERNAL_URL: ${ONNET_INTERNAL_URL:-}
+    volumes:
+      - logs:/var/log/opennova
 
   novaworld-data:
     <<: *novaworld
@@ -207,6 +224,7 @@ services:
       <<: *novaworld-env
     volumes:
       - store:/var/lib/opennova/store
+      - logs:/var/log/opennova
 
   # The website: the portal's nginx image (web/Dockerfile), which serves the
   # built site and proxies /api/ to web's server on 127.0.0.1:8080, and on 8082
@@ -233,3 +251,6 @@ volumes:
   # The local game data store (ONNET_OBJECT_STORE_URL above): the trees and
   # packages the Game data page uploads; `down -v` wipes it.
   store:
+  # The local log store (ONNET_LOG_STORE above): each program's lines and the
+  # hosting overlay's machines' and servers'; `down -v` wipes it.
+  logs:

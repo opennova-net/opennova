@@ -37,7 +37,12 @@
 #   scripts/dev_stack.sh status         the containers, the machines among them
 #   scripts/dev_stack.sh logs [args]    docker compose logs (e.g. -f novaworld-web)
 #   scripts/dev_stack.sh down           stop and remove it (the database stays)
-#   scripts/dev_stack.sh reset          down, the database, the store and the state too
+#   scripts/dev_stack.sh reset          down, the database, the store, the logs and the
+#                                       state too
+#
+# Every program and machine also writes its log into the stack's log store (the
+# `logs` volume, ONNET_LOG_STORE=file:///var/log/opennova), which the site's
+# admin pages read (GET /api/admin/logs) as a deployment's read CloudWatch.
 #
 # Seeding a data set needs curl and jq on this machine (the upload flow is the
 # admin API's, as the Game data page's: a tree, each file's parts PUT through
@@ -523,7 +528,7 @@ case "$action" in
     reset)
         cmd_down -v
         rm -rf "$state"
-        say "the stack's database, store and state are gone"
+        say "the stack's database, store, logs and state are gone"
         ;;
     -h|--help) echo "$usage" ;;
     *) die "$usage" ;;

@@ -88,6 +88,18 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
   where set, else the task's, else the machine's. The worker's `stats.prune` rolls the
   minutes up by the hour (`program_hourly`) and prunes both (48 h, 400 days); the admin's
   usage view reads them (Infrastructure below).
+- **Where the logs are** (`program_log.*`, `ONNET_LOG_STORE`): a deployment's are its
+  CloudWatch groups under `/opennova/<deployment>` (`/service` for the programs, filled by
+  ECS's driver; `/machines`, hostd's; `/servers`, the hosted servers'); the local stack's a
+  directory, the `logs` volume at `/var/log/opennova`. With a directory, every program
+  copies each line it writes to stdout and stderr, after its time
+  (`2026-10-18T14:05:03.123Z <line>`), into `programs/<program>/<container id>.log`: its
+  two descriptors become pipes a thread drains into the container's own log and the
+  file, so `docker logs` keeps every line in order. The file is written by a thread of its
+  own, so the console never waits on the disk: past 1 MiB waiting, lines are dropped and the
+  file notes how many in their place, and a file that refuses a write (a full disk) ends the
+  copy with one `[log]` line on stderr naming why. The machines' hostd writes `machines/` and
+  `servers/` beside them. Web reads either for the admin's log view (Infrastructure below).
 - **Each process logs `{"boot":{"program":"<program>"}}` once as it starts** (stdout, its
   first line, so a crash loop on a missing setting counts too: the log pipeline counts
   boots per program), keeps printing the `[boot] migrations:` line, logs its own
@@ -116,6 +128,7 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
 | `ONNET_LOBBY_ENDPOINT` | none | The lobby: the one lobby address every lobby announces, `<host>:<port>` (its instance row, the gates' `udpnovaworld`; on ECS the load balancer's, the gate's address and 64206); required. The gate: optional, the lobby it hands out while no instance takes clients; with none either, a probe goes unanswered (the client asks again) and the gate logs it, once every 10 s at most. |
 | `ONNET_INTERNAL_URL` | none | The fleet's internal listener as the machines' agents reach it, `http://<host>:<port>` (`fleet.<deployment>.opennova.internal:8070`, the deployment's Cloud Map name, in a deployment; the fleet's compose name in the local stack): the worker's alone, whose machine driver hands it to each machine it launches. Required by the driver with hosting on. |
 | `ONNET_HEALTH_PORT` | 8081 | The TCP port `GET /livez` answers on in the gate, the lobby, the fleet program, the worker and the data program (web's is its HTTP port); 0 lets the OS pick (the tests). |
+| `ONNET_LOG_STORE` | none | Where the logs are: `cloudwatch:/opennova/<deployment>` (the deployment's groups beneath that prefix; web's task sets it, for the admin's log view) or `file://<directory>` (the local stack's `file:///var/log/opennova`: every program copies its lines into `programs/<program>/<container id>.log` there; web reads it). Unset or malformed (a boot warning): no store, no copy, and the log view answers `no_log_store`. |
 
 ## Thread model
 
