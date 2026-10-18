@@ -68,7 +68,7 @@ struct ServerConfig {
 	std::string database_password;
 	size_t database_pool_max = 16;
 
-	// Web's Redis (redis_client.h; the HTTP listener requires it):
+	// Web's Redis (apps/novaworld_web/redis_client.h; the HTTP listener requires it):
 	// ONNET_REDIS_URL, redis://host[:port][/db] or rediss:// for TLS (not
 	// secret; the boot line prints it, a password in it masked), and
 	// ONNET_REDIS_PASSWORD, the AUTH password, kept apart from it (secret:

@@ -19,11 +19,10 @@ TARGET level are the two structural seams:
      NovaWorld service's programs under apps/novaworld_* and the service
      tests). Everything else — the engine groups, the godot adapter, the
      other apps/tests — is a violation. hiredis is contained the same way one
-     level up: the service's shared library (opennova_novaworld_common, whose
-     HTTP half holds the Redis client) is the ONLY library that links
-     opennova_redis (the interface target over the system hiredis,
-     hiredis_ssl and OpenSSL), and every target reaching it links that
-     library directly (the five programs, their cores and their tests).
+     level up: web's core (opennova_novaworld_web_core, which holds the Redis
+     client) is the ONLY library that links opennova_redis (the interface
+     target over the system hiredis, hiredis_ssl and OpenSSL), and every
+     target reaching it links that library directly (web and its tests).
 
   2. Forbidden edges: the game net stack never links the service leg (the
      service sits ABOVE opennova_net), and the godot adapter links
@@ -88,22 +87,22 @@ PQ_RULE_REASON = (
     "links opennova_pq; consumers must link the service target directly"
 )
 REDIS_TARGET = "opennova_redis"
-COMMON_TARGET = "opennova_novaworld_common"
+WEB_CORE_TARGET = "opennova_novaworld_web_core"
 REDIS_RULE_REASON = (
-    "hiredis containment: only opennova_novaworld_common links opennova_redis; "
-    "consumers must link the shared library directly"
+    "hiredis containment: only opennova_novaworld_web_core links opennova_redis; "
+    "consumers must link web's core directly"
 )
 # (leaf, its one owner, reason): every target reaching the leaf is the owner or
 # links the owner directly.
 CONTAINED = [
     (PQ_TARGET, SERVICE_TARGET, PQ_RULE_REASON),
-    (REDIS_TARGET, COMMON_TARGET, REDIS_RULE_REASON),
+    (REDIS_TARGET, WEB_CORE_TARGET, REDIS_RULE_REASON),
 ]
 # Defined only when the build turns OPENNOVA_NOVAWORLD_SERVICE on (the repo
 # root's option, off by default; opennova_redis with BUILD_NOVAWORLD_HTTP as
 # well): a graphviz dump of a tree configured without it lacks them, which
 # vacates no rule. The files walk always sees them.
-SERVICE_GATED = {PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, COMMON_TARGET}
+SERVICE_GATED = {PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, WEB_CORE_TARGET}
 
 # (reason, from-targets, to-targets, targets allowed to be absent from the
 # graph without a warning — e.g. the adapter target lives in the godot/src
@@ -358,7 +357,7 @@ def main() -> int:
             if path:
                 violations.append(f"{' -> '.join(path)}  [{reason}]")
 
-    for name in (PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, COMMON_TARGET):
+    for name in (PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, WEB_CORE_TARGET):
         if name not in known and name not in warned and source == "files":
             warned.add(name)
             print(f"[linkgraph] WARNING: rule target '{name}' not in the "

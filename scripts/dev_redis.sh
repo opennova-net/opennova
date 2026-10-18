@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A local Valkey 8 (the Redis the NovaWorld server's HTTP layer keeps its shared
-# web state in: apps/novaworld_common/redis_client.h) for the server and its
+# web state in: apps/novaworld_web/redis_client.h) for the server and its
 # tests, in Docker: the container opennova-dev-redis on 127.0.0.1 (port 6379
 # unless --port names another). It keeps nothing worth keeping (every key has a
 # TTL), so it runs with no persistence and no volume.

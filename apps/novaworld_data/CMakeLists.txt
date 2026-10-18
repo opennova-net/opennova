@@ -5,7 +5,7 @@
 # jobs and the scheduler of their prune.
 add_executable(opennova_novaworld_data main.cpp)
 # The shared library and the service directly (scripts/lint/link_graph_check.py:
-# the hiredis and libpq containments).
+# the libpq containment).
 target_link_libraries(opennova_novaworld_data
     PRIVATE
         opennova_novaworld_common

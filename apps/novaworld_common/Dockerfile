@@ -221,8 +221,8 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
 ENTRYPOINT ["/app/opennova-novaworld-lobby"]
 
 # ---- web -------------------------------------------------------------------
-# Web alone links hiredis (its Redis pool, the shared library's one hiredis
-# user: scripts/lint/link_graph_check.py), so its image alone carries it. It
+# Web alone links hiredis (its Redis pool, in web's core alone:
+# scripts/lint/link_graph_check.py), so its image alone carries it. It
 # runs the AWS CLI for the game data's store (the admin page's uploads, which
 # it puts there part by part, and the update service's packages) and serves
 # retail UPDATE.EXE on the updater's ports (ONNET_UPDATE_PORTS, with

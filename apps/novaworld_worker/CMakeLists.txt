@@ -5,7 +5,7 @@
 # handlers it registers, the machine driver it builds.
 add_executable(opennova_novaworld_worker main.cpp)
 # The shared library and the service directly (scripts/lint/link_graph_check.py:
-# the hiredis and libpq containments).
+# the libpq containment).
 target_link_libraries(opennova_novaworld_worker
     PRIVATE
         opennova_novaworld_common

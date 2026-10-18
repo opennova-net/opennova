@@ -1062,12 +1062,13 @@ locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh 
 
 ## Redis
 
-The HTTP layer's shared state, through hiredis
-([`redis_client.h`](redis_client.h): `RedisPool`, the `opennova_redis` target only this
-shared library links). In prod it is ElastiCache for Valkey over TLS with an AUTH
-password; locally `scripts/dev_redis.sh up` (Valkey 8). The HTTP listener needs it: a
-web process that cannot reach it at boot (a `PING`) logs `[boot] FATAL: redis
-unreachable` and exits 1 before any listener starts. No other program opens it.
+Web's shared state, through hiredis
+([`apps/novaworld_web/redis_client.h`](../novaworld_web/redis_client.h): `RedisPool`, the
+`opennova_redis` target only web's core, `opennova_novaworld_web_core`, links). In prod
+it is ElastiCache for Valkey over TLS with an AUTH password; locally
+`scripts/dev_redis.sh up` (Valkey 8). The HTTP listener needs it: a web process that
+cannot reach it at boot (a `PING`) logs `[boot] FATAL: redis unreachable` and exits 1
+before any listener starts. No other program opens it.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

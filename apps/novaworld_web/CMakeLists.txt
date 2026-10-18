@@ -1,9 +1,10 @@
 # opennova-novaworld-web: the NovaWorld service's web program
 # (apps/novaworld_common/README.md "Programs"), built with the HTTP layer
 # (BUILD_NOVAWORLD_HTTP). Its own code builds as opennova_novaworld_web_core
-# (the HTTP listener, its routes, the stores it keeps in Redis), which the
-# tests drive in-process; the executable is its main.cpp over it and the
-# shared library. The retail pages (templates/, static/) ship in its image.
+# (the HTTP listener, its routes, the Redis client and the stores it keeps
+# over it), which the tests drive in-process; the executable is its main.cpp
+# over it and the shared library. The retail pages (templates/, static/)
+# ship in its image.
 add_library(opennova_novaworld_web_core STATIC
     http_listener.cpp
     # The admin's user routes (moved out of http_listener.cpp whole).
@@ -16,9 +17,10 @@ add_library(opennova_novaworld_web_core STATIC
     # CD keys (migration 0015): the keys, the DFX2 activations, their routes.
     cd_keys.cpp
     cd_key_routes.cpp
-    # Web's shared state in Redis (over the shared library's client and
-    # pool): the retail sessions, the retail login pins and the rate
-    # limiters' buckets.
+    # Web's shared state in Redis: the client and its pool, and over them
+    # the retail sessions, the retail login pins and the rate limiters'
+    # buckets.
+    redis_client.cpp
     session_store.cpp
     retail_pins.cpp
     rate_limiter.cpp
@@ -65,14 +67,34 @@ add_library(opennova_novaworld_web_core STATIC
     infra/attention_routes.cpp
 )
 target_include_directories(opennova_novaworld_web_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-# The shared library directly: the hiredis containment
+# The service directly: the libpq containment
 # (scripts/lint/link_graph_check.py) wants every target that reaches
-# opennova_redis to link it itself, and the libpq containment the service.
+# opennova_pq to link it itself.
 target_link_libraries(opennova_novaworld_web_core
     PUBLIC
         opennova_novaworld_common
         opennova_novaworld_service
 )
+
+# The Redis client (redis_client.h): the system hiredis and hiredis_ssl
+# (libhiredis-dev to build, libhiredis1.1.0 to run) and OpenSSL (libssl-dev)
+# for rediss://, behind one interface target the containment lint can name
+# (scripts/lint/link_graph_check.py): only this library links opennova_redis,
+# and whatever reaches it links this library directly, as libpq rides
+# opennova_novaworld_service alone.
+find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h)
+find_library(HIREDIS_LIBRARY hiredis)
+find_library(HIREDIS_SSL_LIBRARY hiredis_ssl)
+if(NOT HIREDIS_INCLUDE_DIR OR NOT HIREDIS_LIBRARY OR NOT HIREDIS_SSL_LIBRARY)
+    message(FATAL_ERROR "The NovaWorld service's web program needs hiredis and hiredis_ssl "
+        "(Debian/Ubuntu: apt install libhiredis-dev)")
+endif()
+find_package(OpenSSL REQUIRED)
+add_library(opennova_redis INTERFACE)
+target_include_directories(opennova_redis INTERFACE ${HIREDIS_INCLUDE_DIR})
+target_link_libraries(opennova_redis INTERFACE
+    ${HIREDIS_SSL_LIBRARY} ${HIREDIS_LIBRARY} OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(opennova_novaworld_web_core PRIVATE opennova_redis)
 target_compile_features(opennova_novaworld_web_core PUBLIC cxx_std_17)
 
 add_executable(opennova_novaworld_web main.cpp)

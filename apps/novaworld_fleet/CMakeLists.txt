@@ -16,7 +16,7 @@ add_library(opennova_novaworld_fleet_core STATIC
 )
 target_include_directories(opennova_novaworld_fleet_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # The shared library and the service directly (scripts/lint/link_graph_check.py:
-# the hiredis and libpq containments), as on every target here.
+# the libpq containment), as on every target here.
 target_link_libraries(opennova_novaworld_fleet_core
     PUBLIC
         opennova_novaworld_common

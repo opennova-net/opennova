@@ -5,9 +5,9 @@
 // see, each key with a TTL: the retail NW*.dll login, join and host-key
 // sessions (session_store.h), the retail login pins (retail_pins.h) and the
 // rate limiters' buckets (rate_limiter.h). Anything with an invariant stays in
-// PostgreSQL. Through hiredis (hiredis_ssl for rediss://), which only this
-// server's core links (scripts/lint/link_graph_check.py), as libpq is contained
-// in the service target.
+// PostgreSQL. Through hiredis (hiredis_ssl for rediss://), which only web's
+// core links (scripts/lint/link_graph_check.py), as libpq is contained in the
+// service target.
 
 #include <chrono>
 #include <condition_variable>

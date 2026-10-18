@@ -22,7 +22,7 @@ get_directory_property(OPENNOVA_SERVICE_TARGETS_BEFORE BUILDSYSTEM_TARGETS)
 set(OPENNOVA_TEST_PG "" CACHE STRING
     "PostgreSQL server URI the NovaWorld service's database tests create their databases on")
 # The HTTP layer's tests also need a Redis server (Valkey 8; web's shared
-# state, apps/novaworld_common/redis_client.h): OPENNOVA_TEST_REDIS
+# state, apps/novaworld_web/redis_client.h): OPENNOVA_TEST_REDIS
 # names it (redis://host:port), ctest hands it to the test as `--redis <url>`,
 # and each test keeps its keys under a prefix of its own there
 # (tests/common/test_redis.h). With none set the test prints "SKIP: needs a
@@ -1012,11 +1012,11 @@ if(UNIX AND BUILD_NOVAWORLD_HTTP)
     foreach(program_test programs signal_shutdown)
         set(test_target opennova_novaworld_${program_test}_test)
         add_executable(${test_target} novaworld/${program_test}_test.cpp)
-        # The service for the test's own database (common/test_database.h), the
-        # shared library for the Redis test helper's header (common/test_redis.h:
-        # web's ONNET_REDIS_URL).
+        # The service for the test's own database (common/test_database.h), web's
+        # core for the Redis test helper's client (common/test_redis.h: web's
+        # ONNET_REDIS_URL).
         target_link_libraries(${test_target} PRIVATE
-            opennova_novaworld_common opennova_novaworld_service)
+            opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
         target_include_directories(${test_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         target_compile_definitions(${test_target} PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
         add_dependencies(${test_target} ${OPENNOVA_NOVAWORLD_PROGRAMS})
@@ -1040,7 +1040,7 @@ if(UNIX AND BUILD_NOVAWORLD_HTTP)
 
     add_executable(nw_programs_e2e_test novaworld/nw_programs_e2e_test.cpp)
     target_link_libraries(nw_programs_e2e_test PRIVATE
-        opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
     target_include_directories(nw_programs_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(nw_programs_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_dependencies(nw_programs_e2e_test ${OPENNOVA_NOVAWORLD_PROGRAMS})

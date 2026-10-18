@@ -3,7 +3,7 @@
 # main loop (program/program.*), the config, the health (the watchdog, the heartbeat,
 # the /livez listener), the address an ECS task finds from its own metadata,
 # the games catalogue; with the HTTP layer, the accounts and sessions, the
-# Redis pool, the mail, the background jobs' queue, pool and scheduler, the
+# mail, the background jobs' queue, pool and scheduler, the
 # hosted servers' and billing's logic, and what several programs build alike
 # from the same settings (parts.*). Each program's own code and its main()
 # live in apps/novaworld_<program> (gate, lobby, web, fleet, worker, data).
@@ -37,9 +37,6 @@ if(BUILD_NOVAWORLD_HTTP)
         accounts/auth.cpp
         accounts/web_session.cpp
         accounts/template_engine.cpp
-        # Web's shared state lives in Redis: the client and its pool (the
-        # stores over it are web's own, apps/novaworld_web).
-        redis_client.cpp
         # Account email: the outbound mail (SES through the AWS CLI, the
         # outbox, the templates) and the password reset links.
         accounts/mailer.cpp
@@ -136,26 +133,6 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(opennova_novaworld_common PUBLIC
         OPENNOVA_HTTP_ENABLED
     )
-
-    # The Redis client (redis_client.h): the system hiredis and hiredis_ssl
-    # (libhiredis-dev to build, libhiredis1.1.0 to run) and OpenSSL
-    # (libssl-dev) for rediss://, behind one interface target the containment
-    # lint can name (scripts/lint/link_graph_check.py): only this library
-    # links opennova_redis, and whatever reaches it links this library
-    # directly, as libpq rides opennova_novaworld_service alone.
-    find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h)
-    find_library(HIREDIS_LIBRARY hiredis)
-    find_library(HIREDIS_SSL_LIBRARY hiredis_ssl)
-    if(NOT HIREDIS_INCLUDE_DIR OR NOT HIREDIS_LIBRARY OR NOT HIREDIS_SSL_LIBRARY)
-        message(FATAL_ERROR "The NovaWorld service's HTTP layer needs hiredis and hiredis_ssl "
-            "(Debian/Ubuntu: apt install libhiredis-dev)")
-    endif()
-    find_package(OpenSSL REQUIRED)
-    add_library(opennova_redis INTERFACE)
-    target_include_directories(opennova_redis INTERFACE ${HIREDIS_INCLUDE_DIR})
-    target_link_libraries(opennova_redis INTERFACE
-        ${HIREDIS_SSL_LIBRARY} ${HIREDIS_LIBRARY} OpenSSL::SSL OpenSSL::Crypto)
-    target_link_libraries(opennova_novaworld_common PRIVATE opennova_redis)
 endif()
 
 # Crow uses some C++17 (filesystem) and some 20-flavored bits Crow's
