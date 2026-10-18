@@ -1,4 +1,4 @@
-// The hosted data sets' rows (apps/novaworld_common/hosted/data_set_repository.h, migrations
+// The hosted data sets' rows (apps/novaworld_common/data_sets/data_set_repository.h, migrations
 // 0011 and 0013) on a migrated database of the test's own: the seeded four, a data set
 // created, changed and refused (a duplicate login, a duplicate expansion, no base parent, in
 // use); trees from uploading to ready (the data set's current and baseline trees follow, a
@@ -11,8 +11,8 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
-#include "hosted/data_set_files.h"
-#include "hosted/data_set_repository.h"
+#include "data_sets/data_set_files.h"
+#include "data_sets/data_set_repository.h"
 
 #include <cstdio>
 #include <filesystem>

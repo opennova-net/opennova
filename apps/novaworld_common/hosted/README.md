@@ -30,13 +30,13 @@ this directory's.
   What every account's entitlement holds is what the service has sold, and no checkout
   sells past the fleet (`sold_capacity.*`; [`../README.md`](../README.md) "Billing").
   A start is still refused `at_capacity` when the fleet has no room for it now.
-- **Data sets** (`data_set_repository.*`, `data_set_files.*`,
+- **Data sets** (`../data_sets/data_set_repository.*`, `../data_sets/data_set_files.*`,
   `backend/migrations/0011_data_sets.sql`). A data set is a row an admin makes: a **base**
   game (its `title`, the `gameprofile` code `opennova-serve` speaks with `/game`, `jo` or
   `dfx2`, and its `game`, the `games` row whose lobby it lists in) or an **expansion** of a
   base (its `expansion_code`, `/exp jox01`). Its data lives in the object store
   (`ONNET_OBJECT_STORE_URL`) as **trees**, each one immutable version of the data set's
-  files (`data_set_files.h` names them) at `trees/<id>/`, uploaded by an admin or built by
+  files (`../data_sets/data_set_files.h` names them) at `trees/<id>/`, uploaded by an admin or built by
   applying a published update release, with the multiplayer missions its archives list. A
   base is **offered** while it has a ready current tree, with each of its expansions that
   has one; the host-screen limits are the title's (`host_limits.h`). Hosting is on only
@@ -513,7 +513,7 @@ writes need the CSRF header.
 ## Game data
 
 **Game data** (`apps/novaworld_web/data_sets/`, ADR 0064): the data sets as rows
-(`data_set_repository.h`, migrations 0011 and 0013), the trees the admin page uploads into
+(`../data_sets/data_set_repository.h`, migrations 0011 and 0013), the trees the admin page uploads into
 the object store (web begins each file's multipart upload, takes each part's PUT, 32 MiB
 a part, inside Cloudflare's request limits, and completes it), and the update releases
 (1SFS packages, uploaded the same way) the data program validates and applies and the
@@ -530,7 +530,7 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 | `POST /api/admin/data-sets` | a base (a title, a `games` slug) or an expansion (a base `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, and `retail_updater` (names `ftp.novaworld.com` in the updater's SERVER.LST instead of `ONNET_UPDATE_HOST`): 201; 400; 409 `duplicate_login`, `duplicate_expansion`, `no_such_parent` |
 | `PATCH /api/admin/data-sets/<id>` | the name, a base's lobby, the updater's fields: 200; 400; 404; 409 `duplicate_login` |
 | `DELETE /api/admin/data-sets/<id>` | the data set and its trees' objects: 204; 404; 409 `in_use`; 503 |
-| `POST /api/admin/data-sets/<id>/trees` | `{"files": [{"name", "size"}]}`: a new uploading tree and one multipart upload per file (names canonicalised by `data_set_files.h`): 201; 400 `invalid_files` (with `missing` and `unexpected`); 404; 409 `upload_in_flight`; 503 |
+| `POST /api/admin/data-sets/<id>/trees` | `{"files": [{"name", "size"}]}`: a new uploading tree and one multipart upload per file (names canonicalised by `../data_sets/data_set_files.h`): 201; 400 `invalid_files` (with `missing` and `unexpected`); 404; 409 `upload_in_flight`; 503 |
 | `PUT /api/admin/data-sets/<id>/trees/<t>/files/<name>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`; 413; 502; 503 |
 | `POST /api/admin/data-sets/<id>/trees/<t>/files/<name>/complete` | `{"upload_id", "parts"}`: the file's upload completed: 200; 400; 404; 409; 502; 503 |
 | `POST /api/admin/data-sets/<id>/trees/<t>/finalize` | the tree `finalizing` and its `tree.finalize` job: 202; 404; 409 `not_uploading` |

@@ -223,8 +223,8 @@
 #include "stats_sampler.h"
 
 #include "billing/entitlement.h"
+#include "data_sets/data_set_repository.h"
 #include "hosted/address_repository.h"
-#include "hosted/data_set_repository.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/limits_hold.h"

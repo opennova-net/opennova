@@ -5,7 +5,7 @@
 // (check_settings), and the supervisor renders the server's working directory
 // from scratch at every start (the host file, game.cfg, admin.cfg and the
 // NovaWorld credentials), in retail's own formats, read by opennova-serve
-// (apps/serve/README.md). The data set is a row (data_set_repository.h, ADR
+// (apps/serve/README.md). The data set is a row (data_sets/data_set_repository.h, ADR
 // 0064): a base the service offers (one with a ready current tree) and, when
 // the owner picked one, an expansion of it; the whole-number ranges are the
 // base's title's (host_limits.h) and the rotation names missions the data
@@ -13,7 +13,7 @@
 // GAME_NAME and SERVER_PASSWORD reads, 32 and 17 bytes with their terminators,
 // docs/mnu/menu-re.md "Host dialog rules").
 
-#include "data_set_repository.h"
+#include "data_sets/data_set_repository.h"
 #include "host_limits.h"
 #include "machine_driver.h"
 

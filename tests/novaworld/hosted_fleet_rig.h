@@ -14,7 +14,7 @@
 
 #include "accounts/auth.h"
 #include "billing/billing_repository.h"
-#include "hosted/data_set_repository.h"
+#include "data_sets/data_set_repository.h"
 #include "hosted/fleet_jobs.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_repository.h"

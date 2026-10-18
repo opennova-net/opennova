@@ -72,9 +72,9 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/admin_link_status.cpp
         hosted/agent_protocol.cpp
         hosted/console_queue.cpp
-        hosted/data_set_files.cpp
-        hosted/data_set_jobs.cpp
-        hosted/data_set_repository.cpp
+        data_sets/data_set_files.cpp
+        data_sets/data_set_jobs.cpp
+        data_sets/data_set_repository.cpp
         hosted/docker_address_driver.cpp
         hosted/docker_machine_driver.cpp
         hosted/ec2_address_driver.cpp

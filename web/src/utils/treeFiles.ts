@@ -1,4 +1,4 @@
-// The files a data set's tree holds, by kind (apps/novaworld_common/hosted/
+// The files a data set's tree holds, by kind (apps/novaworld_common/data_sets/
 // data_set_files.h, ADR 0064), mirrored for the admin page's folder picker:
 // what it keeps out of a picked folder, what it says is missing, and how
 // many files it leaves out. The upload route refuses any other name and the

@@ -1,7 +1,7 @@
 #pragma once
 
 // The ranges a hosted server's whole-number settings take: the host screen's of
-// the title the server's data set speaks (data_set_repository.h: a base data
+// the title the server's data set speaks (data_sets/data_set_repository.h: a base data
 // set's `title`, the gameprofile code opennova-serve's /game takes). Two
 // tables, Joint Operations' (`jo`, which OpenNova's own data speaks too) and
 // Delta Force Xtreme 2's (`dfx2`). Service policy, not a port: the host

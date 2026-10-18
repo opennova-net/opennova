@@ -13,7 +13,7 @@
 // release published, served after a refresh.
 
 #include "core/local_object_store.h"
-#include "hosted/data_set_repository.h"
+#include "data_sets/data_set_repository.h"
 #include "net_sockets.h"
 #include "updater/update_listener.h"
 

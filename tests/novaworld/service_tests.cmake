@@ -178,8 +178,8 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/address_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/admin_link_status.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_jobs.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_roll.cpp
@@ -381,8 +381,8 @@ add_executable(hosted_admin_link_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp
@@ -1175,12 +1175,12 @@ add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
 # slots' rows, the silent machines, and the slots the live servers hold (assigned once, the
 # generation moving on, let go, read back for placement). Compiles the hosted sources it needs
 # directly, so it runs on every service build.
-# The hosted data sets' rows (hosted/data_set_repository.h, migration 0011, ADR 0064): the
+# The hosted data sets' rows (data_sets/data_set_repository.h, migration 0011, ADR 0064): the
 # seeded data sets, trees, the servers' pins, and the migration's mapping of the old columns.
 add_executable(data_set_repository_test
     novaworld/data_set_repository_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp)
 target_link_libraries(data_set_repository_test PRIVATE opennova_novaworld_service Threads::Threads)
 target_include_directories(data_set_repository_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -1189,7 +1189,7 @@ target_compile_definitions(data_set_repository_test PRIVATE OPENNOVA_SOURCE_DIR=
 opennova_add_pg_test(data_set_repository COMMAND data_set_repository_test)
 set_tests_properties(data_set_repository PROPERTIES TIMEOUT 300)
 
-# The data sets' jobs (hosted/data_set_jobs.h, ADR 0064) on a migrated database and a local
+# The data sets' jobs (data_sets/data_set_jobs.h, ADR 0064) on a migrated database and a local
 # object store in a scratch directory, each run as the workers run it: a packed synthetic
 # tree finalized (its manifest, missions, version; the refusals; an expansion's pair) and
 # the prune. Compiles the jobs, the data set sources and the local store directly; links
@@ -1197,9 +1197,9 @@ set_tests_properties(data_set_repository PROPERTIES TIMEOUT 300)
 add_executable(data_set_jobs_test
     novaworld/data_set_jobs_test.cpp
     ${OPENNOVA_JOBS_SOURCES}
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_jobs.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_jobs.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/object_store.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/local_object_store.cpp)
 target_link_libraries(data_set_jobs_test
@@ -1216,8 +1216,8 @@ add_executable(hosted_fleet_repository_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp

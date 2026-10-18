@@ -75,7 +75,7 @@ struct HostedServer {
 	// an own-machine server's), kept through its restarts and moves; unset for
 	// none, and once the address lapses.
 	std::optional<int64_t> address_id;
-	// The trees it is pinned to (data_set_repository.h, ADR 0064): the base data
+	// The trees it is pinned to (data_sets/data_set_repository.h, ADR 0064): the base data
 	// set's and, with an expansion, the expansion's, taken from the data sets'
 	// current trees at its first start and kept through crash restarts and moves
 	// until its owner asks for an update (update_requested: the supervisor starts

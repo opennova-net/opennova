@@ -21,9 +21,9 @@
 // refused, an abandoned upload aborted).
 
 #include "core/local_object_store.h"
+#include "data_sets/data_set_files.h"
+#include "data_sets/data_set_repository.h"
 #include "data_sets/data_set_routes.h"
-#include "hosted/data_set_files.h"
-#include "hosted/data_set_repository.h"
 #include "http_listener.h"
 #include "jobs/job_queue.h"
 #include "net_http.h"

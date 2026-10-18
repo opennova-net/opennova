@@ -1,6 +1,6 @@
 #include "data_set_repository.h"
 
-#include "hosted_repository.h"
+#include "hosted/hosted_repository.h"
 
 #include <base/io/json.h>
 

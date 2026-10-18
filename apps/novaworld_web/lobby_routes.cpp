@@ -1,8 +1,8 @@
 #include "lobby_routes.h"
 
+#include "data_sets/data_set_repository.h"
 #include "hosted/console_commands.h"
 #include "hosted/console_queue.h"
-#include "hosted/data_set_repository.h"
 #include "hosted/hosted_repository.h"
 #include "http_json.h"
 #include "program/catalog_repository.h"

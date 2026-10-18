@@ -1,6 +1,6 @@
 // opennova-novaworld-data: the data program (program/program.h). The job pool
 // (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) over the hosted data sets'
-// jobs alone (hosted/data_set_jobs.h: tree.finalize, release.validate,
+// jobs alone (data_sets/data_set_jobs.h: tree.finalize, release.validate,
 // release.apply, tree.prune) on the object store, and the scheduler of its one
 // periodic kind (parts.h data_schedule: tree.prune), in every data process with
 // no election. What it runs is what web's data set and release routes and its
@@ -14,7 +14,7 @@
 #include "parts.h"
 #include "program/program.h"
 
-#include "hosted/data_set_jobs.h"
+#include "data_sets/data_set_jobs.h"
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
 

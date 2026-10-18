@@ -1,7 +1,7 @@
 #pragma once
 
 // The update listener's catalog (net/update/update_server.h's UpdateCatalog) over the
-// published releases (ADR 0064; hosted/data_set_repository.h published_sections): each data
+// published releases (ADR 0064; data_sets/data_set_repository.h published_sections): each data
 // set with an updater login serves the section of its published release that carries its
 // command file (the base product's section, or the expansion's PACKAGEBREAK section). A
 // refresh reads the rows and keeps a cache on disk under the cache directory: the package
@@ -16,7 +16,7 @@
 // through the Switcher's hosts block (retail_updater), else the deployment's update host
 // (ONNET_UPDATE_HOST). Service policy, not a port.
 
-#include "hosted/data_set_repository.h"
+#include "data_sets/data_set_repository.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/update/update_server.h>

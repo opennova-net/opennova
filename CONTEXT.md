@@ -622,7 +622,7 @@ _Avoid_: game (when you mean the identity, not the running program)
 One product a **hosted server** runs on (ADR 0064): a base game (Joint Operations, Delta
 Force Xtreme 2, OpenNova's own data), which speaks a title and lists in a lobby, or one
 expansion of a base (Escalation, `jox01`), holding only its own files
-(`hosted/data_set_files.h`). An admin creates one as a row on the Game data page and uploads
+(`data_sets/data_set_files.h`). An admin creates one as a row on the Game data page and uploads
 its files; the site offers only data sets with a ready **tree**.
 _Avoid_: game (for the data), install (a retail install is where a data set's files come
 from), snapshot (gone: the data lives in the object store), slug (a data set has an id and a

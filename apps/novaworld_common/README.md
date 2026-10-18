@@ -307,7 +307,7 @@ policy, not a port.
 | `stats.prune` | the machines' minutes rolled up into their hours; the hosted servers' and the machines' samples past 48 h, their hours past 400 days, the machines' egress months past 13, the programs' task minutes rolled up by the hour (minutes past 48 h, hours past 400 days), the fleet's machines ended or failed 14 days ago | hourly | worker | 1 |
 | `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | worker | 1 |
 | `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
-| `tree.finalize` | an uploaded data set tree checked, sized and made ready (`hosted/data_set_jobs.h`) | the admin's finalize | data | 2 |
+| `tree.finalize` | an uploaded data set tree checked, sized and made ready (`data_sets/data_set_jobs.h`) | the admin's finalize | data | 2 |
 | `release.validate` | an uploaded update package read, mapped to its data sets, made a draft or invalid | the admin's upload completion | data | 1 |
 | `release.apply` | one section of a published release applied to its data set's baseline, a new tree | the admin's publish, one per section | data | 1 |
 | `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each job above, the delete routes | data | 1 |

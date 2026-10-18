@@ -31,7 +31,7 @@
 //          serve without licensed data: the serve tests' deathmatch map
 //          SERVETST.BMS and game text packed into the three base archives a
 //          data set's tree holds (resource.pff, localres.pff, language.pff:
-//          apps/novaworld_common/hosted/data_set_files.h), with a version.txt,
+//          apps/novaworld_common/data_sets/data_set_files.h), with a version.txt,
 //          as an install's root. What `dev_stack.sh up --synthetic-data` uploads
 //          and CI hosts on.
 //

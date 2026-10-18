@@ -39,7 +39,7 @@ class ObjectStore;
 
 namespace hosted {
 
-struct ReleaseRow; // hosted/data_set_repository.h
+struct ReleaseRow; // data_sets/data_set_repository.h
 
 // A release as the admin's JSON: {id, status, name, sha256, bytes, package_product, error,
 // sections ([{data_set_id, display_name, expansion, command_file, version, tree ({id,

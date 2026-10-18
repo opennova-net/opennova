@@ -12,8 +12,8 @@
 // children over.
 
 #include "core/local_object_store.h"
-#include "hosted/data_set_files.h"
-#include "hosted/data_set_repository.h"
+#include "data_sets/data_set_files.h"
+#include "data_sets/data_set_repository.h"
 #include "serve/serve_test_support.h"
 
 #include <base/io/file_io.h>
