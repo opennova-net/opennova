@@ -173,7 +173,7 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 	// D3DXCreateTexture for (texture_requested_level_count) is above 1. Asked 0,
 	// D3DX makes its full chain and only level 0 is loaded, so levels 1+ keep what
 	// the managed pool's creation left there, which no witness reads; the port
-	// leaves them zero (D-RMAT-X1) [orig: GTexture_CreateFromPixelData_0 --
+	// leaves them zero (D-RMAT-27) [orig: GTexture_CreateFromPixelData_0 --
 	// D3DXCreateTexture @0x68781A, the level-0 load @0x6878A0, D3DXFilterTexture
 	// only for a request above 1 @0x6878B1..0x6878BE; the 0-means-full resolution
 	// D3DXTex_ValidateAndAdjustTextureParams @0x690C32..0x690C7D].

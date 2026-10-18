@@ -227,7 +227,7 @@ int check(const std::string &path) {
 	return 0;
 }
 
-// 00TRg's default kit (D-MIS-X1): over the install's weapon table, the kit the shipped .bms's loadout leads with is
+// 00TRg's default kit (D-MIS-19): over the install's weapon table, the kit the shipped .bms's loadout leads with is
 // the shipped .mis's, and the .mis's kit read back builds the shipped chunk's records, name for name.
 int check_00trg_kit(const std::string &bms_path, const std::string &weapons_path, const std::string &mis_path) {
 	using namespace opennova::mission;

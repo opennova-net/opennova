@@ -960,7 +960,7 @@ int main() {
 		TEST_EXPECT(mis_terrain_height(terrain, bms::to_fixed_16_16(-1.0), bms::to_fixed_16_16(-2.0)) == 0);
 	}
 
-	// The default kit (D-MIS-X1): the loadout chunk the original editor's .bms export builds from it over its weapon
+	// The default kit (D-MIS-19): the loadout chunk the original editor's .bms export builds from it over its weapon
 	// table, and the kit a loadout leads with, which the .mis carries [orig: JOTACmed.exe MIS_BuildDefaultLoadoutChunk @ 0x4328a0;
 	// MIS_ParseToken @ 0x451caa..0x451d1c; MIS_SaveDocument @ 0x454ba7..0x454bcb].
 	{

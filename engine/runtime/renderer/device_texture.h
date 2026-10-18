@@ -137,7 +137,7 @@ struct DeviceTextureLevel {
 // as zero. When the count it asked for is above 1 every later level is D3DX's box filter of the
 // level before (an A8R8G8B8 level of the bytes it was stored as, a DXT level of its blocks); a
 // texture that asked for 0 levels (the smaller side 2 or less, no 0x40000) gets D3DX's full chain
-// with level 0 alone loaded and its levels 1+ zero here (D-RMAT-X1). A DXT texture's blocks go to
+// with level 0 alone loaded and its levels 1+ zero here (D-RMAT-27). A DXT texture's blocks go to
 // `dxt` too when it is given (its unloaded levels zero blocks).
 // [orig: GTexture_CreateFromPixelData_0 @ 0x687717..0x687766 (the format), @ 0x687785 (the
 // halvings), @ 0x6877BA..0x6877E0 (the count), @ 0x68781A (D3DXCreateTexture), @ 0x6878A0 (level 0,

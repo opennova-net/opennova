@@ -272,7 +272,7 @@ static void test_slot_list_skips_an_unclosed_entry() {
 }
 
 // A sub-variant index past 255 wraps to the table's start in the accept's ammo leg,
-// as the display list's does (D-NET-XB17), and the walk runs on past the "null" def
+// as the display list's does (D-NET-757), and the walk runs on past the "null" def
 // the wrap reaches to every sub-variant of another class: the grenade launcher takes
 // the requested 5 rounds. [orig: WeaponLoadout_ApplyFromBuffer @0x5661CA ->
 //  AdmDef_GetEntryByIndex @0x53FC80; the walk @0x56621D..0x566233]

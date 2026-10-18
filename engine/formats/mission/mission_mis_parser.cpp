@@ -969,7 +969,7 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 		}
 	}
 	rebuild_mis_areas(out);
-	// The loadout chunk the original's .bms export builds from the kit (D-MIS-X1).
+	// The loadout chunk the original's .bms export builds from the kit (D-MIS-19).
 	out.loadout = mis_default_loadout(kit, weapons);
 	return true;
 }

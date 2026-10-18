@@ -106,7 +106,7 @@ void test_level_count() {
 			"a request above 0 is the level count");
 }
 
-// D3DX's sides and levels (D-RMAT-X2): a 0 side made 1, a DXT side rounded up to a multiple of 4,
+// D3DX's sides and levels (D-RMAT-28): a 0 side made 1, a DXT side rounded up to a multiple of 4,
 // the chain counted from those sides [orig: D3DXTex_ValidateAndAdjustTextureParams @ 0x690A2B /
 // @ 0x690A37, @ 0x690B99..0x690BCE, @ 0x690C32..0x690C7D].
 void test_d3dx_sides_and_levels() {

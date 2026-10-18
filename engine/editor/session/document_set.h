@@ -273,7 +273,7 @@ private:
 
 	// What a mission takes of the project's catalogs, handed to the document before an edit and a save, the rows
 	// read through `rows_`: the AI class a save writes for each item's records (D-MIS-10,
-	// MissionDocument::set_item_classes) and the weapon table its .mis's default kit is written over (D-MIS-X1,
+	// MissionDocument::set_item_classes) and the weapon table its .mis's default kit is written over (D-MIS-19,
 	// MissionDocument::set_weapon_table).
 	void hand_catalog_rows(DocumentBase &document);
 	// What a save stores back into a mission's records first, as the original editor's writers do: the clamps

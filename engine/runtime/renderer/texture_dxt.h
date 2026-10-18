@@ -88,7 +88,7 @@ uint32_t texture_level_count(uint32_t width, uint32_t height, uint32_t creation_
 // `dest_h` texels, each inside the source rect `rect_w` x `rect_h` the source's texel
 // y * `pitch` + x, transparent black past the rect. A texel past the source's `texels` written
 // ones reads 0 (retail reads the halving buffer's unwritten heap there; no witness fixes it,
-// D-RMAT-X1's convention).
+// D-RMAT-27's convention).
 // [orig: CBlt::Blt @ 0x6E30B5 -> BltNone @ 0x6E0D57 (filter byte 1 @ 0x6E0D66): the zero row
 // @ 0x6E0E41 and pad row @ 0x6E0E5D, a source row of the rect's width per destination row below
 // the shorter height @ 0x6E0E9B / @ 0x6E0EAA, the pad row below it @ 0x6E0EC8; each side from its

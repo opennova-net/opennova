@@ -91,7 +91,7 @@ inline bool mis_name_allowed(const std::string &name, size_t width, std::string 
 }
 
 // The original editor's weapon table, over which its .bms export builds a mission's weapon-loadout chunk from the
-// mission's default kit (D-MIS-X1). Its first row is "None"; then comes a row per weapon block its def file
+// mission's default kit (D-MIS-19). Its first row is "None"; then comes a row per weapon block its def file
 // closes with an `end`, in the file's order [orig: JOTACmed.exe sub_432E50 @ 0x432e50: the table zeroed
 // @ 0x432e62, "None" @ 0x432e64..0x432e92, the count 1 @ 0x432e83, the file @ 0x432e74]. Each row holds its
 // loadout_subclasses: how many of the rows right after it are its subclass rows, which the export lists with
@@ -99,7 +99,7 @@ inline bool mis_name_allowed(const std::string &name, size_t width, std::string 
 // row's name @ 0x43271d..0x43275a, the row made at END @ 0x4323c3 / @ 0x4323f2, the count @ 0x4325ed..0x43261a,
 // the countdown @ 0x4323b0..0x4323e2, the subclass row's keys passed over @ 0x43241f]. JOTACmed reads its own
 // medwep.def (in med.pff, which no game mount reads); mis_weapon_table builds the table from the project's
-// weapon.def in its place, the def file NovaLogic's earlier jomed.exe reads (D-MIS-X1).
+// weapon.def in its place, the def file NovaLogic's earlier jomed.exe reads (D-MIS-19).
 struct MisWeaponRow {
 	std::string name;
 	int32_t subclasses = 0;
@@ -182,7 +182,7 @@ namespace opennova::mission {
 // description, whatever its flags, as the original editor writes it. Refused (false, `error` names the area)
 // when an area's zone id is outside 1..99 or two areas share one: the original's .mis has an area slot per
 // zone id 1..99 alone (D-MIS-12). `weapons` (optional): the weapon table the default kit is read over, the kit
-// written the one the file's loadout leads with (mis_default_kit; D-MIS-X1).
+// written the one the file's loadout leads with (mis_default_kit; D-MIS-19).
 inline bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
                            const std::vector<int32_t> *base_heights = nullptr, const MisNames *names = nullptr,
                            const MisWeaponTable *weapons = nullptr) {
@@ -204,7 +204,7 @@ inline bool parse_mis_names(const std::string &text, MisNames &out, std::string 
 // original's slot; a key the original editor's reader refuses in its section is
 // skipped (the original fails the load); a teleport_target, wav_list or wind
 // section, which the original reads and the .bms has no room for, is walked. The loadout is the chunk the
-// original's export builds from the default kit over `weapons` (optional; mis_default_loadout, D-MIS-X1).
+// original's export builds from the default kit over `weapons` (optional; mis_default_loadout, D-MIS-19).
 inline bool parse_mis_text(const std::string &text, const MisItemTypeResolver &resolve_item_type,
                            bms::File &out, std::string &error, std::vector<MisIssue> *issues = nullptr,
                            const MisWeaponTable *weapons = nullptr) {

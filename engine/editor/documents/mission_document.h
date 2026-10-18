@@ -202,7 +202,7 @@ public:
 	void set_item_classes(std::shared_ptr<const MissionItemClasses> classes) { item_classes_ = std::move(classes); }
 	// The original editor's weapon table over the project's weapon.def (standing in for the original's medwep.def,
 	// mission::mis_weapon_table), which the .mis's default kit is written over (mission_names_text: the kit the
-	// mission's loadout leads with, mission::mis_default_kit; D-MIS-X1). The session hands it with the item
+	// mission's loadout leads with, mission::mis_default_kit; D-MIS-19). The session hands it with the item
 	// classes; null where it has none, each loadout record then standing alone.
 	void set_weapon_table(std::shared_ptr<const mission::MisWeaponTable> table) { weapon_table_ = std::move(table); }
 	const mission::MisWeaponTable *weapon_table() const { return weapon_table_.get(); }

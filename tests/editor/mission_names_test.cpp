@@ -1451,7 +1451,7 @@ int test_names_file_chores() {
 // (a save left them out of the original editor's .mis beside it: N1): a folder renamed, several files moved, a move
 // taken back, a rename taken back, a rename while the validation runs, a rename of a file the mission names; and
 // Quit and a project closed.
-// The .mis's default kit through the session (D-MIS-X1): a save writes the kit the mission's loadout leads with over
+// The .mis's default kit through the session (D-MIS-19): a save writes the kit the mission's loadout leads with over
 // the project's weapon table, a weapon's subclass rows passed over [orig: JOTACmed.exe MIS_BuildDefaultLoadoutChunk @ 0x4328a0;
 // MIS_SaveDocument @ 0x454ba7..0x454bcb]; the .bms as it was.
 int test_names_file_kit() {

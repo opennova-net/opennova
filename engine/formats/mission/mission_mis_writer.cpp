@@ -211,7 +211,7 @@ void write_mis_general_information(const bms::File &file, std::string &out, cons
 	append_kv(out, "  max_saves ", static_cast<int>(header.max_saves));
 	append_kv(out, "  map_zoom ", header.map_zoom);
 	append_kv(out, "  bonus_expiration ", header.bonus_expiration);
-	// The kit the mission's loadout leads with, as the original editor writes its own (D-MIS-X1).
+	// The kit the mission's loadout leads with, as the original editor writes its own (D-MIS-19).
 	const MisDefaultKit kit = mis_default_kit(file.loadout, weapons);
 	append_line(out, "  default_primary   " + kit[0]);
 	append_line(out, "  default_secondary " + kit[1]);

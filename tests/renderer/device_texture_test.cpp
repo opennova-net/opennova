@@ -217,7 +217,7 @@ void test_pixel_device_texture_levels() {
 		for (size_t i = 1; zero && i < thin.size(); ++i)
 			for (uint8_t b : thin[i].rgba) zero = zero && b == 0;
 		CHECK(zero, "levels 1+ unfilled (zero), not box-filtered");
-		// D-RMAT-X2: as DXT the texture is D3DX's 8 x 4, the strip on top and the rest transparent
+		// D-RMAT-28: as DXT the texture is D3DX's 8 x 4, the strip on top and the rest transparent
 		// black, then 4 x 2, 2 x 1, 1 x 1 [orig: D3DXTex_ValidateAndAdjustTextureParams
 		// @0x690B99..0x690BCE; BltNone @0x6E0D57].
 		std::vector<DxtSurface> blocks_out;

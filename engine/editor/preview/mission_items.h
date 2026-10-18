@@ -103,7 +103,7 @@ public:
 	size_t items_asked() const { return items_asked_; }
 	// The original editor's weapon table over the project's weapon.def, which stands in for the original's
 	// medwep.def (mission::mis_weapon_table), read again where the file moved; null where the project has none
-	// that reads (MissionDocument::set_weapon_table, D-MIS-X1).
+	// that reads (MissionDocument::set_weapon_table, D-MIS-19).
 	std::shared_ptr<const mission::MisWeaponTable> weapon_table(const SessionView &view);
 
 private:
