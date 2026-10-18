@@ -16,7 +16,6 @@ static int test_constants(void) {
     CHECK(MUS_MAGIC_SCR0      == 0x30524353u, "SCR0 magic");
     CHECK(MUS_CHUNK_TAG_MU01  == 0x3130554Du, "MU01 tag");
     CHECK(MUS_NAME_SIZE       == 16,           "name size");
-    CHECK(MUS_GLOBALS_BYTES   == 68,           "globals area");
     CHECK(MUS_OPCODE_COUNT    == 65,           "opcode count");
     CHECK(MUS_METHOD_NAME_SIZE == 126,         "a method name: 125 characters and its NUL");
     return 1;

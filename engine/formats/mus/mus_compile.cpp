@@ -58,8 +58,8 @@
              | IDENT                                              // VarN/g_n/l_n/Me
              | '(' expr OP expr ')'                               // binop
              | UNARYOP expr
-             | IDENT '(' [ expr ] ')'                             // method call
-             | IDENT '.' IDENT '(' [ expr ] ')'                   // qualified method
+             | IDENT '(' [ expr | STRING ] ')'                    // method call; a STRING pushstr's
+             | IDENT '.' IDENT '(' [ expr | STRING ] ')'          // qualified method
 */
 
 #include <formats/mus/mus.h>
@@ -70,6 +70,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <string>
+#include <vector>
 
 namespace opennova::mus {
 
@@ -144,6 +147,7 @@ struct Lexer {
     char        cur_text[256];
     int32_t     cur_int;        /* a Number's value as the push's 32 bits (0..4294967295 read unsigned) */
     bool        cur_out_of_range = false; /* a Number past 4294967295, which no push holds */
+    bool        cur_too_long = false;     /* a String past cur_text's 255 characters */
     int         cur_line = 1;   /* the line the current token is on (the line table's numbering) */
     int         phys_line = 1;  /* the text's own line, which a `#line` does not move: an error's line */
     size_t      cur_start = 0;  /* the current token's first byte (it ends at `pos`) */
@@ -269,8 +273,10 @@ void Lexer::advance() {
     if (c == '"') {
         ++pos; ++col;
         size_t k = 0;
+        cur_too_long = false;
         while (pos < len && src[pos] != '"') {
             if (k + 1 < sizeof(cur_text)) cur_text[k++] = src[pos];
+            else cur_too_long = true;
             ++pos; ++col;
         }
         cur_text[k] = 0;
@@ -571,6 +577,10 @@ struct Compiler {
     size_t       bind_cap;
     size_t       bind_count;
 
+    /* The strings `pushstr` pushes, as MDEdit's compiler makes them: a literal's text looked up among the
+       table's, the first use taking the next index (MDEdit.exe sub_408660 @ 0x408660). */
+    std::vector<std::string> strings;
+
     /* MDEdit's debug tables the text makes (mus.h): the functions, their parameters, the line table. */
     MusFunction *functions = NULL;
     size_t       function_count = 0, function_cap = 0;
@@ -811,6 +821,39 @@ struct Compiler {
 
     int parse_expr(const char **err);
 
+    /* A string parameter: `pushstr` and its index, the text's own or the next [orig: MDEdit.exe sub_40C4D0 @
+       0x40C707 -> sub_408660 @ 0x408660; AudioVM_Op_PushStr @ 0x672836 reads the index a byte]: a literal MDEdit's
+       compiler writes (mus_literal_compiles), at most 127 of them, its count a signed byte (byte_6316C8). */
+    int parse_string_parameter(const char **err) {
+        if (lex.cur_too_long || !mus_literal_compiles(lex.cur_text)) {
+            *err = "a string MDEdit's compiler does not write (empty, past 62 characters, or holding ; // , a line's "
+                   "end, a Ctrl-Z or a ) that closes the call)";
+            return -1;
+        }
+        const uint32_t open = mus_literal_open_parens(lex.cur_text);
+        size_t index = 0;
+        while (index < strings.size() && strings[index] != lex.cur_text) ++index;
+        if (index == strings.size()) {
+            if (strings.size() == 127) {
+                *err = "too many strings (MDEdit's 127 at most)";
+                return -1;
+            }
+            strings.emplace_back(lex.cur_text);
+        }
+        emit.byte(0x07);
+        emit.byte((uint8_t)index);
+        lex.advance();
+        /* A `(` it leaves open closes before the call's own `)`, as MDEdit's call scan reads it. */
+        for (uint32_t k = 0; k < open; ++k) {
+            if (lex.cur_kind != Tok::RParen) {
+                *err = "a string's open ( closes with a ) after the string, before the call's own";
+                return -1;
+            }
+            lex.advance();
+        }
+        return 0;
+    }
+
     int parse_method_call(const char *first_ident, const char **err) {
         /* We've consumed `first_ident`. Optional `.METHOD` then `(arg?)`. */
         char obj[32]   = "";
@@ -832,7 +875,10 @@ struct Compiler {
             return -1;
         }
         lex.advance();
-        if (lex.cur_kind != Tok::RParen) {
+        if (lex.cur_kind == Tok::String) {
+            int rc = parse_string_parameter(err);
+            if (rc != 0) return rc;
+        } else if (lex.cur_kind != Tok::RParen) {
             int rc = parse_expr(err);
             if (rc != 0) return rc;
         }
@@ -942,6 +988,11 @@ int Compiler::parse_expr(const char **err) {
         lex.advance();
         emit.byte(op);
         return 0;
+    }
+
+    if (lex.cur_kind == Tok::String) {
+        *err = "a string is a method call's parameter (MDEdit's compiler takes one there alone)";
+        return -1;
     }
 
     /* Number literal */
@@ -1713,6 +1764,18 @@ int Compiler::finalize(const char **err) {
             break;
         }
 
+    /* The string table, in the order the literals first appear. */
+    if (!strings.empty()) {
+        out.strings = (char **)calloc(strings.size(), sizeof(char *));
+        if (!out.strings) { *err = "OOM"; return -1; }
+        out.string_count = (uint32_t)strings.size();
+        for (size_t i = 0; i < strings.size(); ++i) {
+            out.strings[i] = (char *)malloc(strings[i].size() + 1);
+            if (!out.strings[i]) { *err = "OOM"; return -1; }
+            memcpy(out.strings[i], strings[i].c_str(), strings[i].size() + 1);
+        }
+    }
+
     /* The method table: MUSIC.LAN's, as MDEdit's linker writes it whichever methods the script calls. */
     out.intrinsic_names = (char (*)[MUS_METHOD_NAME_SIZE])calloc(kMusicLanMethods, MUS_METHOD_NAME_SIZE);
     if (!out.intrinsic_names) { *err = "OOM"; return -1; }
@@ -1816,6 +1879,28 @@ int mus_compile_plays(const char *text, MusScript *out_script, std::vector<MusPl
     return 0;
 }
 
+uint32_t mus_literal_open_parens(const char *text) {
+    int depth = 0;   /* the call's own scan: a `)` past the literal's `(`s closes the call's */
+    for (const char *c = text; c && *c; ++c) {
+        if (*c == '(') ++depth;
+        if (*c == ')' && --depth < 0) return 0;
+    }
+    return (uint32_t)depth;
+}
+
+bool mus_literal_compiles(const char *text) {
+    if (!text || !text[0]) return false;
+    if (strpbrk(text, ";,\"\r\n\x1a") || strstr(text, "//")) return false;
+    int depth = 0;
+    for (const char *c = text; *c; ++c) {
+        if (*c == '(') ++depth;
+        if (*c == ')' && --depth < 0) return false;
+    }
+    /* 62 characters: the 64-byte token holds the opening quote, the text and the NUL (sub_408660 reads to a quote
+       or the token's end). */
+    return strlen(text) <= 62;
+}
+
 std::string mus_bank_name(const std::string &script) {
     // [orig: Expansion_LoadAssets @ 0x4A4798 (GAMEMUS.BIN/.SBF, MENUMUS.BIN/.SBF), @ 0x4A4906..0x4A494A ("M%s.bin"
     // with "expansion\\%s\\M%s.sbf", "G%s.bin" with "expansion\\%s\\G%s.sbf")]
@@ -1838,6 +1923,10 @@ void mus_script_free(MusScript *s) {
     free(s->functions);
     free(s->lines);
     free(s->intrinsic_names);
+    for (uint32_t i = 0; s->strings && i < s->string_count; ++i) free(s->strings[i]);
+    free(s->strings);
+    s->strings = NULL;
+    s->string_count = 0;
     s->code = NULL;
     s->sections = NULL;
     s->variables = NULL;
@@ -1879,9 +1968,10 @@ static void buf_append_zero(uint8_t **buf, size_t *cap, size_t *used, size_t n) 
     *used += n;
 }
 
-/* Zeros to the next multiple of 16 of the file offset (MDEdit's string section and the name resolve table). */
-static void buf_align16(uint8_t **buf, size_t *cap, size_t *used) {
-    buf_append_zero(buf, cap, used, (16 - *used % 16) % 16);
+/* Zeros to the next multiple of 16 from the chunk's start (MDEdit's debug section, sub_40DF30 @ 0x40E23C..0x40E24B,
+   and the chunk's end, its file's length v37 @ 0x40E655). */
+static void buf_align16_from(uint8_t **buf, size_t *cap, size_t *used, size_t chunk_at) {
+    buf_append_zero(buf, cap, used, (16 - (*used - chunk_at) % 16) % 16);
 }
 
 /* One 48-byte debug entry: a value at +0 (and +8), a 32-byte name at +0x10. */
@@ -1897,11 +1987,13 @@ static void debug_entry(uint8_t **buf, size_t *cap, size_t *used, uint32_t first
 
 /* The SCR0 file in MDEdit's layout (above; MDEdit.exe's chunk writer sub_40DF30 @ 0x40DF30 and linker sub_40E6E0 @
    0x40E6E0): the 44-byte header and the chunk pointer table; each MU01 chunk's 0x48-byte header and 0x20 bytes of
-   zeros, its section table (chunk-relative entry PCs) and its code; zeros to 16, then the editor debug section:
+   zeros, its section table (chunk-relative entry PCs), its code and its string table (a chunk-relative offset a
+   string, then each string and its NUL); zeros to the chunk's next 16, then the editor debug section:
    the 256-byte source path, a 0x50-byte header of the five tables' entry size, offsets and counts, the sections'
    (bytecode-relative entries), the globals', the parameters' and the functions' 48-byte entries and the 8-byte
-   lines; zeros to 16, the method names' resolve table (zeros the loader fills) and the names, each its length byte
-   (itself, the name and its NUL), the name and its NUL. Each field as the model holds it: the chunk's sizes and
+   lines, then zeros to the chunk's next 16 (each chunk MDEdit's own file, which its linker puts down one after the
+   other); after the last, the method names' resolve table (zeros the loader fills) and the names, each its length
+   byte (itself, the name and its NUL), the name and its NUL. Each field as the model holds it: the chunk's sizes and
    frame base, the table the scripts hold. The runtime reads the header, the section table, the code and the names
    [orig: AudioVM_LoadScriptFile @ 0x672D20, AudioVM_FixupPointers @ 0x672470, ScriptInstance_Init @ 0x672EF0];
    MDEdit's reader the rest. */
@@ -1926,10 +2018,6 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
     }
     for (uint32_t k = 0; k < name_count; ++k)
         if (strnlen(table->intrinsic_names[k], MUS_METHOD_NAME_SIZE) == MUS_METHOD_NAME_SIZE) return -5;
-    /* The strings `pushstr` reads [orig: AudioVM_Op_PushStr @ 0x672836]: the model holds their count alone, so a
-       script holding any cannot be written as the game reads it (-6). */
-    for (uint32_t i = 0; i < script_count; ++i)
-        if (scripts[i]->string_count != 0) return -6;
 
     uint8_t *buf = NULL;
     size_t   cap = 0, used = 0;
@@ -1954,10 +2042,19 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
         const uint32_t bc_rel = (uint32_t)(bc_at - chunk_hdr_at);
         if (s->code && s->code_size > 0) buf_append(&buf, &cap, &used, s->code, s->code_size);
         for (uint32_t k = 0; k < s->section_count; ++k) io::write_u32_le(buf + sec_tab_at + 4 * k, bc_rel + s->sections[k].code_offset);
-        const size_t debug_info_at = used;
+        /* The strings `pushstr` pushes [orig: AudioVM_Op_PushStr @ 0x672836] where MDEdit writes them: the table at
+           the code's end (its padding to four the code's own), a chunk-relative offset a string, then the strings
+           packed, each to its NUL (MDEdit.exe sub_40DF30 @ 0x40E183..0x40E231). */
+        const size_t strings_table_at = used;
+        buf_append_zero(&buf, &cap, &used, (size_t)s->string_count * 4);
+        for (uint32_t k = 0; k < s->string_count; ++k) {
+            io::write_u32_le(buf + strings_table_at + 4 * k, (uint32_t)(used - chunk_hdr_at));
+            const char *text = s->strings && s->strings[k] ? s->strings[k] : "";
+            buf_append(&buf, &cap, &used, text, strlen(text) + 1);
+        }
 
-        /* The editor debug section. */
-        buf_align16(&buf, &cap, &used);
+        /* The editor debug section, at the chunk's next 16. */
+        buf_align16_from(&buf, &cap, &used, chunk_hdr_at);
         const size_t str_at = used;
         buf_append_zero(&buf, &cap, &used, 256);
         size_t plen = strnlen(s->source_path, 255);
@@ -1984,6 +2081,7 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
             io::write_u32_le(pair + 4, s->lines[k].line);
             buf_append(&buf, &cap, &used, pair, sizeof(pair));
         }
+        buf_align16_from(&buf, &cap, &used, chunk_hdr_at);   /* the chunk's end */
         uint8_t *h = buf + hdr_at;
         io::write_u32_le(h + 0x00, 48);
         io::write_u32_le(h + 0x04, rel(sections_at));
@@ -2008,8 +2106,8 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
         ch.section_table_offset = rel(sec_tab_at);
         ch.section_count        = s->section_count;
         ch.entry_section_index  = s->entry_section_index;
-        ch.strings_offset       = rel(debug_info_at);   /* the code's end: MDEdit's empty string table */
-        ch.string_count         = 0;
+        ch.strings_offset       = rel(strings_table_at);
+        ch.string_count         = s->string_count;
         ch.debug_offset         = rel(str_at);
         /* +0x3C doubles as the `enter` frame base (instance[+0x3C], added as it is [orig: AudioVM_Op_Enter @
            0x672C39]); 0x20 in every MDEdit file. */
@@ -2022,8 +2120,8 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
     }
 
     /* The method names' resolve table (a slot per name the loader fills) and the names, each its length (the
-       byte, the name, its NUL) then the name and its NUL. */
-    buf_align16(&buf, &cap, &used);
+       byte, the name, its NUL) then the name and its NUL, right after the last chunk (MDEdit.exe sub_40E6E0 @
+       0x40E6E0: the chunks' lengths summed from 44 and the chunk table). */
     size_t resolve_at = used;
     buf_append_zero(&buf, &cap, &used, (size_t)name_count * 4);
     size_t strings_at = used;

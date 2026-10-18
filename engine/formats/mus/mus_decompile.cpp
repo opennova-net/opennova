@@ -532,8 +532,17 @@ static bool reconstruct_expression(const Instruction *insts, int start, int end_
         } else if (strcmp(m, "push_me") == 0) {
             stk_push(&stk, "Me");
         } else if (strcmp(m, "pushstr") == 0) {
+            /* The string the game pushes [orig: AudioVM_Op_PushStr @ 0x672836] as its literal, which the
+               compiler interns back to its index as MDEdit does; an index past the table, or a string MDEdit's
+               compiler does not write (mus_literal_compiles), prints as no literal (the text does not compile,
+               the file held as it is). */
             int v = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            stk_pushf(&stk, "\"str_%04X\"", (unsigned)v);
+            if ((uint32_t)v < script->string_count && script->strings && mus_literal_compiles(script->strings[v])) {
+                /* A `(` the string leaves open closes after it, as MDEdit's call scan reads it. */
+                const std::string closing(mus_literal_open_parens(script->strings[v]), ')');
+                stk_pushf(&stk, "\"%s\"%s", script->strings[v], closing.c_str());
+            } else
+                stk_pushf(&stk, "pushstr(%d)", v);   /* past the table, or no literal spells it: no method's name */
         } else if (binop_str(m)) {
             const char *op = binop_str(m);
             if (stk.top >= 2) {

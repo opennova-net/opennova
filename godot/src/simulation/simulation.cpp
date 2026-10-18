@@ -1222,7 +1222,7 @@ PackedInt32Array Simulation::get_music_variables_snapshot() const {
 	PackedInt32Array values;
 	const auto &globals = kernel_->wac.program().music_globals;
 	if (globals) {
-		values.resize(opennova::mus::MUS_GLOBALS_BYTES / 4);
+		values.resize(static_cast<int64_t>(opennova::mus::mus_globals_count(*globals)));
 		for (int i = 0; i < values.size(); ++i)
 			values.set(i, opennova::mus::mus_globals_read(*globals, static_cast<uint32_t>(i)));
 	}

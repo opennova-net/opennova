@@ -180,9 +180,6 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
        0x672C20), the chunk's frame_base field. MDEdit emits 0x20; carry it
        through so the VM matches the binary for any chunk. */
     out->locals_frame_offset = ch.frame_base;
-    /* The strings `pushstr` reads [orig: AudioVM_Op_PushStr @ 0x672836]: their
-       count alone (the writer refuses a script holding any). */
-    out->string_count = ch.string_count;
 
     /* Section table: section_count uint32 chunk-relative entry-PCs. We
        normalise these to bytecode-relative offsets (subtract bytecode_offset)
@@ -242,6 +239,32 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
         && ch.message_handler_offset - ch.bytecode_offset < out->code_size) {
         out->message_handler_offset = ch.message_handler_offset - ch.bytecode_offset;
         out->has_message_handler = 1;
+    }
+
+    /* The strings `pushstr` pushes: the table's string_count chunk-relative offsets
+       at +0x30, each relocated [orig: AudioVM_FixupPointers @ 0x6724C5..0x6724D8], and
+       each string's bytes to its NUL, wherever in the file it lies. The game pushes the
+       string's address and reads none of it [orig: AudioVM_Op_PushStr @ 0x672836]; a
+       table past the file's end (-25), a string outside the file or with no NUL before
+       its end (-26) is read past the file's buffer, which the reader refuses (D-MUS-18).
+       A count the loop reads as negative relocates none [orig: @ 0x6724CA..0x6724CE, jle]:
+       no string (D-MUS-22). */
+    if ((int32_t)ch.string_count > 0) {
+        /* Each place the game's 32-bit add makes [orig: @ 0x67247D, @ 0x6724D0], wrapping as it does. */
+        const uint64_t table_at = (uint32_t)(chunk_off + ch.strings_offset);
+        if (table_at + 4ull * ch.string_count > size) return -25;
+        out->strings = (char **)calloc(ch.string_count, sizeof(char *));
+        if (!out->strings) return -5;
+        out->string_count = ch.string_count;
+        for (uint32_t i = 0; i < ch.string_count; ++i) {
+            const uint64_t at = (uint32_t)(chunk_off + io::read_u32_le(data + table_at + 4ull * i));
+            if (at >= size) return -26;
+            const size_t len = strnlen((const char *)data + at, size - (size_t)at);
+            if ((uint64_t)at + len >= size) return -26;
+            out->strings[i] = (char *)malloc(len + 1);
+            if (!out->strings[i]) return -5;
+            memcpy(out->strings[i], data + at, len + 1);
+        }
     }
 
     /* Editor debug section: source path + section name + variable name table.
@@ -408,6 +431,11 @@ bool mus_reads_the_same(const MusFile *a, const MusFile *b) {
             if (x.sections[k].code_offset != y.sections[k].code_offset) {
                 return false;
             }
+        }
+        for (uint32_t k = 0; k < x.string_count; ++k) {
+            const char *p = x.strings && x.strings[k] ? x.strings[k] : "";
+            const char *q = y.strings && y.strings[k] ? y.strings[k] : "";
+            if (strcmp(p, q) != 0) return false;
         }
     }
     return true;

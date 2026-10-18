@@ -19,7 +19,6 @@ namespace opennova::mus {
 inline constexpr uint32_t MUS_MAGIC_SCR0 = 0x30524353u;  /* 'SCR0' little-endian */
 inline constexpr uint32_t MUS_CHUNK_TAG_MU01 = 0x3130554Du;  /* 'MU01' little-endian */
 inline constexpr int MUS_NAME_SIZE = 16;
-inline constexpr int MUS_GLOBALS_BYTES = 68;  /* Var00..Var15 + 1 user global */
 inline constexpr int MUS_OPCODE_COUNT = 65;  /* opcodes 0x00..0x40 */
 /* A name of the file's method table, its NUL among them: the loader steps from a name to the next by its length
    byte read signed (the byte counts itself, the name and its NUL), so 125 characters is the longest name it steps
@@ -84,12 +83,13 @@ typedef struct MusChunkHeader {
     uint32_t section_table_offset;        /* chunk-relative; entries also relocated */
     uint32_t section_count;
     uint32_t entry_section_index;         /* index into section table */
-    /* +0x30/+0x34: the script's strings, a table of chunk-relative pointers
-       (relocated [orig: AudioVM_FixupPointers @ 0x6724C5..0x6724D8]) that
-       `pushstr` (0x07) indexes [orig: AudioVM_Op_PushStr @ 0x672836], then the
-       strings; MDEdit writes the table at the code's end (MDEdit.exe sub_40DF30
-       @ 0x40DF30: v1[12], v1[13]). No shipped script holds a string (count 0);
-       the model holds the count alone (MusScript::string_count). */
+    /* +0x30/+0x34: the script's strings, a table of string_count chunk-relative
+       pointers (each relocated [orig: AudioVM_FixupPointers @ 0x6724C5..0x6724D8])
+       that `pushstr` (0x07) indexes, pushing the string's address [orig:
+       AudioVM_Op_PushStr @ 0x672836]. MDEdit writes the table at the code's end
+       (its padding to four included) and the strings packed after it, each to its
+       NUL (MDEdit.exe sub_40DF30 @ 0x40DF30: v1[12], v1[13], @ 0x40E183..0x40E231).
+       No shipped script holds a string (count 0). */
     uint32_t strings_offset;
     uint32_t string_count;
     /* +0x38: the editor debug section (the source path, then MDEdit's tables),
@@ -181,9 +181,15 @@ typedef struct MusScript {
        code's leading nop (menumus.bin 0). [orig: sub_672E50 @ 0x672e95..0x672ec1] */
     uint32_t    message_handler_offset;
     int         has_message_handler;
-    /* The strings the chunk holds (its +0x34 count), which `pushstr` reads and
-       the model does not hold: a script holding any is not written
-       (mus_encode_file, -6). 0 in every shipped script and compiled one. */
+    /* The strings `pushstr` pushes, in the table's order (the chunk's +0x30/+0x34):
+       each malloc'd and ended by its NUL, freed by mus_script_free. MDEdit's
+       compiler makes one of each string literal a method's parameter names, the
+       first use of a text taking the next index and a later one its index
+       (MDEdit.exe sub_408660 @ 0x408660, called by its parameter compiler
+       sub_40C4D0 @ 0x40C707, which writes `pushstr` and the index); mus_compile
+       does the same, and takes a literal where MDEdit's does (mus_literal_compiles).
+       None in every shipped script. */
+    char      **strings;
     uint32_t    string_count;
 
     /* The editor debug section (the chunk's debug_offset): the source path and
@@ -245,9 +251,9 @@ void mus_close(MusFile *file);
 
 /* Whether two parsed files hold the same in what the game reads of a script: the method-name
    table it resolves the `method` calls through, and each program's name, code, sections, entry,
-   the globals' and locals' sizes, the `enter` frame base, the MessageHandler entry and the count of
-   the strings `pushstr` reads (each field's witness above). A save checks the bytes it wrote read
-   back as the model so. False for a NULL file. */
+   the globals' and locals' sizes, the `enter` frame base, the MessageHandler entry and the strings
+   `pushstr` pushes (each field's witness above). A save checks the bytes it wrote read
+   back as the model so (the strings compared by their text). False for a NULL file. */
 bool mus_reads_the_same(const MusFile *a, const MusFile *b);
 
 /* A section's name for display: its debug label, else "Section_N" (N its
@@ -298,6 +304,22 @@ int mus_decompile_with_names(const MusScript *script,
 int mus_compile(const char *text, MusScript *out_script,
                 int *err_line, int *err_col, const char **err_msg);
 
+/* Whether a string is one MDEdit's compiler writes as a literal, so the MUS text spells it and the compiler
+   takes it (a method call's parameter, its whole token: MDEdit.exe's method-call compiler sub_40C930 ->
+   sub_40C4D0 -> sub_408660): not empty (sub_408660 @ 0x408660 scans none), at most 62 characters (the
+   parameter's 64-byte token, its opening quote and NUL among them: the scan, sscanf "%[^\"]" @ 0x408688, reads
+   to a quote or the token's end, so the closing quote may be left off), and nothing that ends the text, the
+   line or the parameter first: a Ctrl-Z (0x1A: it reads the source in text mode, sub_407F40's fopen "rt"
+   @ 0x407FE2), `;` and `//` (the line compiler sub_40D6F0 cuts at the first of each @ 0x40D728..0x40D75E),
+   `,`, CR and LF (the token's sscanf "%[^,\r\n]", sub_409E30), `"`, or a `)` that closes the call's (its
+   parameter scan counts their depth from the call's own, @ 0x40C995..0x40C9AB). A `(` the literal leaves open
+   the MUS text closes with a `)` after the literal, before the call's own, as MDEdit's scan reads it (the
+   plain spelling, with none, MDEdit takes or not by what its line buffer holds past the line: D-MUS-22). The
+   decompiler prints another as `pushstr(N)`, which does not compile (the file held as it is). */
+bool mus_literal_compiles(const char *text);
+/* The `(`s a literal mus_literal_compiles takes leaves open: the `)`s its spelling puts after it. */
+uint32_t mus_literal_open_parens(const char *text);
+
 /* A sound a `play` names (a statement's, or an entry of an `on (...) play` table): the byte offset and the
    length of its name in the text (a quoted name's without its quotes) and the sound index it compiles to, the
    stream of the script's bank the game plays by that index [orig: AudioVM_Op_Play @ 0x672CB0, AudioVM_Op_PlayWait
@@ -337,9 +359,10 @@ void mus_script_free(MusScript *script);
    would read the names after it from elsewhere [orig: AudioVM_LoadScriptFile @
    0x672DEB..0x672DFC]. Nothing else of the table or the sizes is refused: the
    loader takes any [orig: AudioVM_LoadScriptFile @ 0x672D20; ScriptInstance_Init
-   @ 0x672EF0]. A script holding strings (string_count) is refused (-6): the
-   game's `pushstr` reads them [orig: AudioVM_Op_PushStr @ 0x672836], and the
-   model holds their count alone, so the writer cannot write them. A script that
+   @ 0x672EF0]. The strings follow the code as MDEdit writes them: the table of
+   their chunk-relative offsets, then each string and its NUL, the debug section
+   after them at the next 16 (a file of MDEdit's layout is written back as its own
+   bytes; one laid out otherwise is written in it). A script that
    calls a method needs its table (MusScript::intrinsic_names): a hand-built one
    written with none calls past the table the game reads. The returned buffer is malloc'd and must be released by the
    caller via `mus_free`. Returns 0 on success. */
@@ -371,6 +394,9 @@ struct MusGlobals;
 std::shared_ptr<MusGlobals> mus_vm_globals(MusVM *vm);
 int32_t mus_globals_read(const MusGlobals &globals, uint32_t index);
 void mus_globals_write_raw(MusGlobals &globals, uint32_t index, int32_t value);
+/* The globals the script's area holds: its globals_size in dwords [orig:
+   AudioVM_SaveScriptState @ 0x67257A..0x672583, the area's size / 4]. */
+uint32_t mus_globals_count(const MusGlobals &globals);
 typedef enum MusVMState {
     MUS_VM_STOPPED = 0,
     MUS_VM_RUNNING = 1,
@@ -416,12 +442,17 @@ void mus_vm_destroy(MusVM *vm);
    immediately after. */
 void mus_vm_set_hooks(MusVM *vm, const MusVMHooks *hooks);
 
-/* Bind a parsed MusScript to the VM. Resets the data and call stacks, zeros
-   the globals/locals/flags, and seeks pc to
+/* Bind a parsed MusScript to the VM. Resets the data and call stacks, makes the
+   instance's one zeroed block of the script's globals_size and locals_size, the
+   globals at its start and the locals after them [orig: ScriptInstance_Init @
+   0x672F78..0x672FA3], rounded up to 64 as the game's allocator gives it [orig:
+   FastMem_Alloc @ 0x7697D7], copies its string table for `pushstr`, clears the
+   flags, and seeks pc to
    `script->sections[script->entry_section_index].code_offset`; resolves the
    script's method names (intrinsic_names) as the game's loader does. Returns 0
-   on success, negative on error. The caller retains ownership of `script`; it
-   must outlive the VM (or be re-loaded before another tick). */
+   on success, negative on error (-2: a block or a string table past the 256 MiB
+   the VM holds, D-MUS-22), the VM then unchanged. The caller retains ownership of
+   `script`; it must outlive the VM (or be re-loaded before another tick). */
 int mus_vm_load_script(MusVM *vm, const MusScript *script);
 
 /* State transitions. start() requires a loaded script and switches STOPPED ->
@@ -471,9 +502,21 @@ uint32_t    mus_vm_pc             (const MusVM *vm);
 int         mus_vm_call_depth     (const MusVM *vm);
 
 /* Globals area accessors (Var00..Var15 at byte offsets 0..60 = var_index 0..15;
-   one user global slot at var_index 16). Out-of-range indices are silent. */
+   the user's globals after them, as many as the script's globals_size holds). The
+   game indexes the area unbounded [orig: AudioVM_SetVariable @ 0x672640]: an index
+   past the globals reads and writes the locals after them in the instance's one
+   block; one past the block reads 0 and writes nothing (D-MUS-22). */
 int32_t mus_vm_get_var(const MusVM *vm, uint8_t var_index);
 void    mus_vm_set_var(MusVM *vm, uint8_t var_index, int32_t value);
+
+/* The text a value `pushstr` pushed points into: the game pushes the address of
+   the script's index-th string [orig: AudioVM_Op_PushStr @ 0x672836], which the VM
+   holds as a tagged offset into its copy of the table and the strings (as it holds
+   a global's or a local's address, `push_ga` / `push_la`); NULL for a value that
+   points into no string, or into one whose NUL a write through it took (FSet and
+   FClear write through an address, the game's into its chunk). The embedder's
+   on_echo reads a string so. */
+const char *mus_vm_string(const MusVM *vm, int32_t value);
 
 /* Set pc to the named section's code_offset, fires on_section_entered.
    Returns 0 on success, negative on error (NULL inputs / unknown section). */
