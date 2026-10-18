@@ -25,6 +25,8 @@
 #include <string>
 #include <vector>
 
+#include "common/test_parts.h"
+
 using namespace opennova;
 using namespace opennova::trngen;
 
@@ -330,24 +332,14 @@ void test_walk_cancelled_partway() {
 
 } // namespace
 
-// `--part <name>` runs one part (a ctest row each, so their whole bakes run side by side); no argument runs every part.
+// A row per part (tests/common/test_parts.h), so the parts' whole bakes run side by side; with no argument every part.
 int main(int argc, char **argv) {
-	const bool by_part = argc == 3 && std::string(argv[1]) == "--part";
-	const std::string part = by_part ? argv[2] : "";
-	if (argc != 1 && !by_part) {
-		std::fprintf(stderr, "usage: cpt_trngen_region_bake_test [--part state|regions|locks|walk]\n");
-		return 2;
-	}
-	if (by_part && part != "state" && part != "regions" && part != "locks" && part != "walk") {
-		std::fprintf(stderr, "FAIL: no part %s (state, regions, locks, walk)\n", part.c_str());
-		return 1;
-	}
-	const auto runs = [&](const char *name) { return !by_part || part == name; };
-	if (runs("state")) test_state();
-	if (runs("regions")) test_regions();
-	if (runs("locks")) test_locks();
-	if (runs("walk")) test_walk_cancelled_partway();
+	failures += test_parts::run(argc, argv,
+	                            {{"state", {[] { test_state(); return 0; }}},
+	                             {"regions", {[] { test_regions(); return 0; }}},
+	                             {"locks", {[] { test_locks(); return 0; }}},
+	                             {"walk", {[] { test_walk_cancelled_partway(); return 0; }}}});
 	if (failures) return 1;
-	std::printf("OK: region bakes land the whole bake's bytes and state%s%s\n", by_part ? ": " : "", part.c_str());
+	std::printf("OK: region bakes land the whole bake's bytes and state\n");
 	return 0;
 }

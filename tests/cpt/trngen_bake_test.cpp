@@ -8,9 +8,9 @@
 // historical TrnGen project under <dir> (Sample, Gradient, Checker64 and Perlin: `<case>/<Name>.tpj`
 // with its 8-bit `.raw` depth map and TrnGen's own `<case>.cpt`, the corpus retired from fixtures/
 // with the old builder; `git show d57608b3d^:fixtures/terrain/...` through `git lfs smudge`
-// restores it) and compares every byte. ctest runs the first part alone, as four rows side by side, each
-// one part's bakes (`cpt_trngen_bake_test --part <island|hills|flat|refusals>`, tests/CMakeLists.txt); the
-// retail-corpus byte diff of the CPT writer the bake writes with is the re-encode leg of the gated
+// restores it) and compares every byte. ctest runs the first part alone, as four rows side by side
+// (cpt_trngen_bake_island, _hills, _flat and _refusals, tests/common/test_parts.h); the retail-corpus
+// byte diff of the CPT writer the bake writes with is the re-encode leg of the gated
 // cpt_jo_assets_sweep (tests/terrain/cpt_jo_assets_sweep_test.cpp).
 #include <formats/cpt/trngen/lod_mesh_data.h>
 #include <formats/cpt/trngen/terrain_bake.h>
@@ -30,6 +30,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include "common/test_parts.h"
 
 using namespace opennova;
 using namespace opennova::trngen;
@@ -294,24 +296,15 @@ void test_rough_ground_refused() {
 
 } // namespace
 
-// `--part <name>` runs one part (a ctest row each, so their bakes run side by side); no argument runs every part,
-// and a directory every part and then the by-hand TrnGen parity over it.
+// A row per part (tests/common/test_parts.h), so the parts' bakes run side by side; with no argument
+// every part, and with a directory every part and then the by-hand TrnGen parity over it.
 int main(int argc, char **argv) {
-	const bool by_part = argc == 3 && std::string(argv[1]) == "--part";
-	const std::string part = by_part ? argv[2] : "";
-	if (by_part && part != "island" && part != "hills" && part != "flat" && part != "refusals") {
-		std::fprintf(stderr, "FAIL: no part %s (island, hills, flat, refusals)\n", part.c_str());
-		return 1;
-	}
-	const auto runs = [&](const char *name) { return !by_part || part == name; };
-	if (runs("island")) test_island_pinned(test_bake_reads_back());
-	if (runs("hills")) test_hills_pinned();
-	if (runs("flat")) test_bake_16bit();
-	if (runs("refusals")) {
-		test_refusals();
-		test_rough_ground_refused();
-	}
-	if (!by_part && argc > 1) test_trngen_parity(argv[1]);
-	if (failures == 0) std::printf("cpt_trngen_bake%s%s: all passed\n", by_part ? " " : "", part.c_str());
+	failures += test_parts::run(argc, argv,
+	                            {{"island", {[] { test_island_pinned(test_bake_reads_back()); return 0; }}},
+	                             {"hills", {[] { test_hills_pinned(); return 0; }}},
+	                             {"flat", {[] { test_bake_16bit(); return 0; }}},
+	                             {"refusals", {[] { test_refusals(); test_rough_ground_refused(); return 0; }}}});
+	if (argc > 1) test_trngen_parity(argv[1]);
+	if (failures == 0) std::printf("cpt_trngen_bake: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
