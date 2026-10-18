@@ -1,8 +1,9 @@
 # shellcheck shell=bash
 # on-deploy's Terraform: the deployment's stack (`infra`), the Organization's
-# (`org`), the Cloudflare zone's (`zone`) and the GitHub organization's
-# (`github`). Every state lives in an S3 bucket of a deployment's account
-# (prod's for the three shared ones), locked by S3's own lock file.
+# (`org`), the Cloudflare zone's (`zone`), the GitHub organization's (`github`)
+# and the CI runners' (`ci`). Every state lives in an S3 bucket of a
+# deployment's account (prod's for the four shared ones), locked by S3's own
+# lock file.
 # deploy/bin/on-deploy sources this file before it runs a command: it defines
 # functions and their constants alone, and runs nothing itself. The helpers
 # every command shares (log, die, the deployment, the vault, AWS) are
@@ -149,10 +150,11 @@ cmd_infra() {
 }
 
 # ---------------------------------------------------------------------------
-# The other stacks: the Organization's (infra/org), and the two every
-# deployment shares, the Cloudflare zone's (infra/zone) and the GitHub
-# organization's (infra/github). All three keep their states in prod's state
-# bucket (prod owns what is shared; the management account keeps none)
+# The other stacks: the Organization's (infra/org), the two every deployment
+# shares, the Cloudflare zone's (infra/zone) and the GitHub organization's
+# (infra/github), and the CI runners' (infra/ci). All four keep their states
+# in prod's state bucket (prod owns what is shared; the management account
+# keeps none)
 # ---------------------------------------------------------------------------
 
 # Set by each command below: what the stack is, its directory and data
@@ -290,8 +292,9 @@ cmd_org() {
   org_write_back
 }
 
-# terraform init of the org stack on its S3 backend: prod's state bucket ($1),
-# reached through prod's OrganizationAccountAccessRole (account $2), the
+# terraform init of the org stack (or the ci stack) on its S3 backend, key
+# $STACK_KEY: prod's state bucket ($1), reached through prod's
+# OrganizationAccountAccessRole (account $2), the
 # settings in a file of the tmpfs; the init's mode is the caller's ($3..):
 # -reconfigure on a run, -migrate-state -force-copy for the first run's move
 # (Terraform takes the two modes only apart). Fails as terraform does.
@@ -342,6 +345,33 @@ org_write_back() {
   VAULT_VALUES["sso_portal_url"]="$value"
   vault_set_fields aws-org sso_portal_url:STRING
   log "vault aws-org: sso_portal_url $value"
+}
+
+# The CI runners' stack (infra/ci): RunsOn in the ci account, which has no
+# deploy user, so as the management account's opennova-org user (vault item
+# aws-org) through the ci account's OrganizationAccountAccessRole (the
+# stack's provider), its state in prod's state bucket beside the org stack's,
+# reached the same way. The org stack comes first: it adopts the account and
+# makes prod's state bucket.
+cmd_ci() {
+  STACK_LABEL="the CI runners (RunsOn in the ci account)"
+  STACK_DIR="$CI_TF_DIR"
+  STACK_DATA_DIR="$CI_TF_DIR/.terraform"
+  STACK_KEY="infra/ci/terraform.tfstate"
+  STACK_ENV_TPL="$CI_ENV_TPL"
+  STACK_WORD=ci
+  require_op
+  org_auth
+  local prod_json prod_account prod_bucket
+  prod_json="$(item_json aws-prod)"
+  prod_account="$(json_field "$prod_json" account_id)"
+  prod_bucket="$(json_field "$prod_json" state_bucket)"
+  [[ "$prod_account" =~ ^[0-9]{12}$ ]] || die "aws-prod names no account_id (DEPLOY.md, \"The Organization and the accounts\")"
+  [ -n "$prod_bucket" ] || die "aws-prod names no state_bucket: the org stack makes it (./deploy/run.sh org apply)"
+  org_backend_init "$prod_bucket" "$prod_account" -reconfigure \
+    || die "terraform init of $STACK_DIR failed (state s3://$prod_bucket/$STACK_KEY)"
+  log "$STACK_LABEL: state s3://$prod_bucket/$STACK_KEY"
+  stack_run_body "$@"
 }
 
 # A shared stack (the zone's, the organization's), its state in prod's state

@@ -79,6 +79,10 @@ make_vault() {
   mkitem aws-org API_CREDENTIAL account_id=333333333333 organization_id=o-abcdefghij region=us-east-1 \
     sso_given_name=Ada sso_family_name=Lovelace sso_email=ada@example.org \
     access_key_id=AKIAORGKEY0000000001 secret_access_key=SECRETVALUEawsorg
+  mkitem aws-ci SECURE_NOTE account_id=444444444444 account_name=opennova-ci region=us-east-1 \
+    root_email=aws-ci@example.org
+  # Titled as the maintainer made it: ci.env.tpl's runs-on finds it in any case.
+  mkitem Runs-On API_CREDENTIAL key=SECRETVALUErunsonlicense
   mkitem app-staging SERVER admin_api_token=SECRETVALUEadminapistaging database_password=SECRETVALUEdbstaging \
     redis_password=SECRETVALUEredisstaging edge_auth_secret=SECRETVALUEedgestaging \
     edge_auth_secret_previous=SECRETVALUEedgepreviousstaging
@@ -448,11 +452,12 @@ done <"$RUNTIME_TPL"
 [ "$matched" -eq 11 ] && pass "secrets sync wrote each of the 11 secrets the vault holds, as it holds them" \
   || fail "secrets sync wrote $matched of the 11 secrets as the vault holds them ($(cd "$STUB_SSM" && printf '%s ' *))"
 expect_requests "--deployment staging stripe check" 2 --deployment staging stripe check
-expect_requests "org plan" 3 org plan
+expect_requests "org plan" 4 org plan
 for v in region:aws-org:region organization_id:aws-org:organization_id management_account_id:aws-org:account_id \
          aws_account_id_prod:aws-prod:account_id aws_account_id_staging:aws-staging:account_id \
          account_name_prod:aws-prod:account_name account_name_staging:aws-staging:account_name \
          root_email_prod:aws-prod:root_email root_email_staging:aws-staging:root_email \
+         aws_account_id_ci:aws-ci:account_id account_name_ci:aws-ci:account_name root_email_ci:aws-ci:root_email \
          sso_given_name:aws-org:sso_given_name sso_family_name:aws-org:sso_family_name sso_email:aws-org:sso_email; do
   IFS=: read -r name item field <<<"$v"
   expect_tf_var "TF_VAR_$name" "$item" "$field"
@@ -467,6 +472,14 @@ expect_tf_var GITHUB_TOKEN github-terraform token
 expect_tf_var TF_VAR_members github-terraform members
 expect_tf_var TF_VAR_stripe_test_secret_key stripe-test restricted_key
 expect_tf_var TF_VAR_aws_region_staging aws-staging region
+expect_requests "ci plan" 5 ci plan
+for v in region:aws-ci:region aws_account_id_ci:aws-ci:account_id license_key:Runs-On:key alert_email:alerts:email; do
+  IFS=: read -r name item field <<<"$v"
+  expect_tf_var "TF_VAR_$name" "$item" "$field"
+done
+expect_tf_var AWS_ACCESS_KEY_ID aws-org access_key_id
+grep -q -- "-chdir=$root/infra/ci init .*-reconfigure" "$STUB_TF_CALLS" \
+  && pass "ci plan inits infra/ci on prod's state bucket" || fail "ci plan's init: $(head -n 1 "$STUB_TF_CALLS")"
 
 fresh_run
 jq '.title = "Cloudflare" | .fields |= map(if .label == "api_token" then .label = "API_Token" | .id = "f0123456789" else . end)' \
@@ -480,7 +493,7 @@ run_main org apply --yes
 printf '  %-44s %s\n' "org apply --yes" "$(tally)"
 [ "$RUN_RC" -eq 0 ] || fail "org apply exited $RUN_RC: $(tail -n 3 <<<"$RUN_OUT")"
 twice="$(grep '^get ' "$STUB_CALLS" | sort | uniq -c | awk '$1 > 2 { print $3 }' | tr '\n' ' ')"
-if [ "$TALLY_WHOAMI" -eq 1 ] && [ "$TALLY_LISTS" -eq 1 ] && [ "$TALLY_GETS" -eq 6 ] && [ "$TALLY_WRITES" -eq 3 ] \
+if [ "$TALLY_WHOAMI" -eq 1 ] && [ "$TALLY_LISTS" -eq 1 ] && [ "$TALLY_GETS" -eq 7 ] && [ "$TALLY_WRITES" -eq 3 ] \
    && [ "$TALLY_READS" -eq 0 ] && [ "$TALLY_INJECTS" -eq 0 ] && [ -z "$twice" ]; then
   pass "org apply: each item read once to plan, once more fresh before its write"
 else

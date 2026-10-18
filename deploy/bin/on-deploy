@@ -103,6 +103,13 @@
 #                                 environments, branch protection and Actions
 #                                 secrets; no --deployment; its state in prod's
 #                                 state bucket
+#   ci plan|apply|import|output|list [args...]
+#                                 the CI runners (infra/ci; DEPLOY.md, "CI
+#                                 runners"): RunsOn in the ci account (vault
+#                                 item aws-ci), as opennova-org through that
+#                                 account's OrganizationAccountAccessRole; no
+#                                 --deployment; its state in prod's state
+#                                 bucket
 #   aws <args...>                 the AWS CLI in the deployment's account
 #   app deploy [--tag T] [--image NAME=T|NAME=@sha256:D]... [--serve-tag T]
 #              [--hostd-tag T] [--promote staging | --images-from FILE|-]
@@ -200,11 +207,13 @@ TF_DIR="$ROOT/infra/aws"
 ORG_TF_DIR="$ROOT/infra/org"
 ZONE_TF_DIR="$ROOT/infra/zone"
 GH_TF_DIR="$ROOT/infra/github"
+CI_TF_DIR="$ROOT/infra/ci"
 ENV_DIR="$ROOT/deploy/env"
 TF_ENV_TPL="$ENV_DIR/terraform.env.tpl"
 ZONE_ENV_TPL="$ENV_DIR/zone.env.tpl"
 ORG_ENV_TPL="$ENV_DIR/org.env.tpl"
 GH_ENV_TPL="$ENV_DIR/github.env.tpl"
+CI_ENV_TPL="$ENV_DIR/ci.env.tpl"
 AWS_ENV_TPL="$ENV_DIR/aws.env.tpl"
 RUNTIME_TPL="$ENV_DIR/runtime.env.tpl"
 
@@ -759,7 +768,7 @@ usage() {
 command_kind() {
   local group="$1" action="$2"
   case "$group" in
-    help|-h|--help|github|zone|org) echo none ;;
+    help|-h|--help|github|zone|org|ci) echo none ;;
     secrets) case "${action:-check}" in check) echo read ;; *) echo change ;; esac ;;
     stripe) case "$action" in check) echo read ;; *) echo change ;; esac ;;
     infra) case "${action:-plan}" in output|list) echo read ;; *) echo change ;; esac ;;
@@ -805,6 +814,7 @@ main() {
     org)       cmd_org "$@" ;;
     zone)      cmd_zone "$@" ;;
     github)    cmd_github "$@" ;;
+    ci)        cmd_ci "$@" ;;
     aws)       cmd_aws "$@" ;;
     app)       cmd_app "$@" ;;
     db)        cmd_db "$@" ;;
