@@ -457,10 +457,14 @@ or an admin role), outside the toolbox; everything else is the toolbox.
    account through its `OrganizationAccountAccessRole` makes: the Terraform state bucket
    (`opennova-tfstate-<account id>`, versioned, encrypted, TLS alone, reached by the
    account's deploy user and admin role alone), the account's S3 public access block, the
-   role boundary every role a deployment's stack makes must carry, the deploy user
+   two boundaries every role a deployment's stack makes must carry one of (the machine
+   boundary on the machines' instance role and hostd's task role, the role boundary on
+   every other role: `infra/aws/iam/opennova-machine-boundary.json` and
+   `opennova-role-boundary.json`, each under IAM's 6,144 characters), the deploy user
    `opennova-deploy` with the deploy policies (`infra/aws/iam/opennova-deploy-*.json`,
-   filled for the account) and its access key, and the GitHub deploy role (trusting the
-   repository's environment of the same name alone); in the management account, the
+   filled for the account; it writes a role under either boundary alone) and its access
+   key, and the GitHub deploy role (trusting the repository's environment of the same name
+   alone, under the role boundary; it rolls the programs and hostd); in the management account, the
    Identity Center user and its two permission sets (`OpenNovaAdmin`, `OpenNovaReadOnly`)
    in every member account (`opennova-ci` gets nothing else here: section "CI runners").
    Its first run applies with a local state, then moves the state into prod's state
@@ -1172,14 +1176,17 @@ deployment's admins upload it on its own site, into its own bucket.
 
 ### Turning it on
 
-1. **The role boundary.** The task roles' store access needs `s3:DeleteObject` and
+1. **The boundaries.** The task roles' store access needs `s3:DeleteObject` and
    `s3:ListBucketMultipartUploads` in `infra/aws/iam/opennova-role-boundary.json`, and the
-   machine role the ECS agent's calls on the fleet cluster (its registration, its
-   polls, its state changes), which the org stack applies in both accounts before the
-   apply below (`./deploy/run.sh org plan`, then `org apply`; `infra/aws/iam/README.md`,
-   "Changing a policy"); applied after, every store call of web and the data program is
-   refused until it is, and no machine joins the fleet cluster. The deploy user passes
-   hostd's task role to ECS (`opennova-deploy-ecs.json`), applied the same way.
+   machines' two roles (the instance role, hostd's task role) their own boundary,
+   `opennova-machine-boundary.json` (the ECS agent's calls on the fleet cluster: its
+   registration, its polls, its state changes; the machines' and servers' logs; the
+   trees' reads), which the org stack makes in both accounts, with the deploy user's leave
+   to write a role under it and the deploy workflow's to roll hostd, before the apply below
+   (`./deploy/run.sh org plan`, then `org apply`; `infra/aws/iam/README.md`, "The
+   boundaries"); applied after, every store call of web and the data program is refused
+   until it is, and the apply cannot make the machines' roles, so no machine joins the
+   fleet cluster.
 
 2. **`hosted_enabled = true`** in the deployment's var-file (`infra/aws/<deployment>.tfvars`;
    prod's and staging's say so). Off, fleet.tf creates nothing and the programs run with

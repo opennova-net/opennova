@@ -160,7 +160,7 @@ resource "aws_iam_role" "machine" {
   count                = local.hosted_enabled ? 1 : 0
   name                 = "${local.name}-machine"
   assume_role_policy   = data.aws_iam_policy_document.ec2_assume_role.json
-  permissions_boundary = local.role_boundary_arn
+  permissions_boundary = local.machine_boundary_arn
 
   tags = merge(var.tags, {
     Name = "${local.name}-machine"
@@ -175,7 +175,9 @@ resource "aws_iam_role" "machine" {
 # makes each stream of and writes with this role: hostd's own (its task has no
 # execution role) and the slots' containers'. The servers' group is named, not
 # referenced: observability.tf makes it. hostd's task role reads the trees; a
-# slot's user reaches neither role's credentials (hostd's fences).
+# slot's user reaches neither role's credentials (hostd's fences). Both roles
+# carry the machine boundary (infra/aws/iam/opennova-machine-boundary.json),
+# which holds what they do and nothing of the programs'.
 data "aws_iam_policy_document" "machine" {
   count = local.hosted_enabled ? 1 : 0
 

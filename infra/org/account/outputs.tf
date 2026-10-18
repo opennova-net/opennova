@@ -27,14 +27,15 @@ output "github_deploy_role_arn" {
 # For the tests: what each policy says.
 output "documents" {
   value = {
-    boundary        = aws_iam_policy.boundary.policy
-    deploy          = { for k, p in aws_iam_policy.deploy : k => p.policy }
-    state           = aws_iam_user_policy.state.policy
-    guard           = aws_iam_user_policy.guard.policy
-    bucket          = aws_s3_bucket_policy.state.policy
-    github_trust    = aws_iam_role.github_deploy.assume_role_policy
-    github          = aws_iam_role_policy.github_deploy.policy
-    github_boundary = aws_iam_role.github_deploy.permissions_boundary
+    boundary         = aws_iam_policy.boundary.policy
+    machine_boundary = aws_iam_policy.machine_boundary.policy
+    deploy           = { for k, p in aws_iam_policy.deploy : k => p.policy }
+    state            = aws_iam_user_policy.state.policy
+    guard            = aws_iam_user_policy.guard.policy
+    bucket           = aws_s3_bucket_policy.state.policy
+    github_trust     = aws_iam_role.github_deploy.assume_role_policy
+    github           = aws_iam_role_policy.github_deploy.policy
+    github_boundary  = aws_iam_role.github_deploy.permissions_boundary
   }
   description = "Each policy document the account's baseline holds"
 }

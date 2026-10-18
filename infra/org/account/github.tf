@@ -12,8 +12,9 @@
 # infra.env and release, point the release, list which secrets SSM holds
 # (names, never values), write and read its release manifests, register the
 # release's revisions (handing them the stack's task roles), point the
-# cluster's services at them, and point the nightly backup's schedule at the
-# release's backup revision (handing it the schedule's role). It names
+# cluster's services at them and the fleet cluster's hostd, and point the
+# nightly backup's schedule at the release's backup revision (handing it the
+# schedule's role). It names
 # infra/aws's resources by the names infra/aws gives them (opennova-<deployment>-*;
 # a renamed one there is a change here too). It carries the role boundary.
 
@@ -24,8 +25,8 @@ locals {
   arn_ssm   = "arn:aws:ssm:${var.region}:${var.account_id}:parameter/opennova/${var.deployment}"
   ops_arn   = "arn:aws:s3:::${local.name}-ops-${var.account_id}"
   programs  = ["data", "fleet", "gate", "lobby", "web", "worker"]
-  families  = concat([for p in local.programs : "${local.name}-${p}"], ["${local.name}-backup"])
-  task_role = concat(["${local.name}-execution", "${local.name}-backup"], [for p in local.programs : "${local.name}-${p}"])
+  families  = concat([for p in local.programs : "${local.name}-${p}"], ["${local.name}-backup", "${local.name}-hostd"])
+  task_role = concat(["${local.name}-execution", "${local.name}-backup", "${local.name}-hostd"], [for p in local.programs : "${local.name}-${p}"])
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
@@ -82,7 +83,8 @@ resource "aws_iam_role_policy" "github_deploy" {
         Resource  = [for f in local.families : "${local.arn_ecs}:task-definition/${f}:*"]
         Condition = { StringEquals = { "ecs:CreateAction" = "RegisterTaskDefinition" } }
       },
-      { Sid = "PointServices", Effect = "Allow", Action = ["ecs:DescribeServices", "ecs:UpdateService"], Resource = "${local.arn_ecs}:service/${local.name}/*" },
+      # The programs' services, and hostd, the fleet cluster's daemon.
+      { Sid = "PointServices", Effect = "Allow", Action = ["ecs:DescribeServices", "ecs:UpdateService"], Resource = ["${local.arn_ecs}:service/${local.name}/*", "${local.arn_ecs}:service/${local.name}-fleet/hostd"] },
       {
         Sid       = "PassTaskRoles", Effect = "Allow", Action = "iam:PassRole"
         Resource  = [for r in local.task_role : "${local.arn_iam}:role/${r}"]

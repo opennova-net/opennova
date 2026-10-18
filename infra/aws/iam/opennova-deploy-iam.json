@@ -40,7 +40,10 @@
       "Resource": "arn:aws:iam::${account_id}:role/opennova-*",
       "Condition": {
         "StringEquals": {
-          "iam:PermissionsBoundary": "arn:aws:iam::${account_id}:policy/opennova-role-boundary"
+          "iam:PermissionsBoundary": [
+            "arn:aws:iam::${account_id}:policy/opennova-role-boundary",
+            "arn:aws:iam::${account_id}:policy/opennova-machine-boundary"
+          ]
         }
       }
     },

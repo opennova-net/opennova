@@ -418,7 +418,7 @@ run "hosting_on" {
 
   variables {
     hosted_enabled = true
-    fleet_ami      = "al2023-ami-ecs-hvm-2023.0.20260924-kernel-6.1-x86_64"
+    fleet_ami      = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64"
   }
 
   assert {
