@@ -1,0 +1,9 @@
+# RunsOn's repository configuration (infra/ci; DEPLOY.md, "CI runners"): the
+# image ci.yml's Windows legs name (image=opennova-win25-vs2026), RunsOn's
+# windows25-full-x64 with Visual Studio 2026 added (infra/ci/image). The AMI
+# is `./deploy/run.sh ci image`'s; a new build's id replaces it here.
+images:
+  opennova-win25-vs2026:
+    platform: windows
+    arch: x64
+    ami: ami-0b351f52f72dab2f2
