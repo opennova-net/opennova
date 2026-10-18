@@ -693,6 +693,8 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
                 static_cast<int32_t>(normal.n[2]) << 2,
             };
             mat.rotate_point(local_normal, out_hit.normal_q16);
+            for (int axis = 0; axis < 3; ++axis)
+                out_hit.local_normal_q16[axis] = local_normal[axis];
             out_hit.section_index = static_cast<int32_t>(si);
             out_hit.face_index = face_index;
             out_hit.section_face_index = local_face;

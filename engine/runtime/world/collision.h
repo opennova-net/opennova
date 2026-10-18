@@ -545,6 +545,9 @@ struct CollisionPolygonHit {
     int32_t distance_q16 = 0x7FFFFFFF;
     int32_t position_q16[3] = {};
     int32_t normal_q16[3] = {};
+    // The face's own normal (the model's int16 x 4), unrotated by the section
+    // matrix: what Physics_ComputeReflectionForce hands its caller.
+    int32_t local_normal_q16[3] = {};
     int32_t section_index = -1;
     int32_t face_index = -1;
     int32_t section_face_index = -1;
@@ -859,6 +862,19 @@ struct ProjectileTrace {
     //  parameter @0x4E51B8, the test point @0x4E51E4..0x4E522A]
     FixedVec3 ray_dir_q16;
     int32_t ray_length_q16 = 0;
+    // One entity alone, through its own gate and faces and no slot gate: the
+    // walk's other rows are misses, and so is the entity itself without a
+    // collision model (Physics_RaycastAgainstBoneCollision's model test).
+    // [orig: Weapon_ValidateHitTarget @0x4E52E0 -- its ItemTypeIndex, flag
+    // and exclusion tests @0x4E52F1..0x4E531E, the call
+    // Physics_RaycastAgainstBoneCollision @0x4E5327]
+    EntityHandle only_entity;
+    // The owner's mount (and a gunner's carrier) as the ray's ray[18..20]
+    // exclusions, a bullet's; the throwable motors' ray contexts leave them
+    // zero (their memsets), excluding the owner alone.
+    // [orig: Entity_UpdateGrenadePhysics @0x444522, Entity_UpdateSatchelPhysics
+    //  @0x4486B2, Entity_UpdateClaymorePhysics @0x447664]
+    bool owner_mount_exclusion = true;
 };
 
 struct ProjectileHit {
@@ -868,6 +884,14 @@ struct ProjectileHit {
     int32_t t_q16 = 0x10000;
     FixedVec3 position_q16;
     FixedVec3 normal_q16;
+    // A face hit's normal in the model's own frame (the int16 normal x 4,
+    // before the section matrix): the out-normal Physics_ComputeReflectionForce
+    // returns, which the throwable motors' stick test, stick pose and slide
+    // read, where the reflection itself uses the rotated one. Zero for a hit
+    // without a face. [orig: Physics_ComputeReflectionForce @0x4E4310 -- the
+    // out-normal @0x4E4465..0x4E4491, ahead of the rotation of its own copy
+    // @0x4E449D]
+    FixedVec3 local_normal_q16;
     int32_t section_index = -1;
     int32_t face_index = -1;
     int32_t bone_index = -1;

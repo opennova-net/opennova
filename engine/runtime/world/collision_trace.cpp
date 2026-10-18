@@ -646,7 +646,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     const Entity *owner = world.registry.get(trace.owner);
     EntityHandle ignored_mount = trace.mount_ignore;
     EntityHandle ignored_mount_parent;
-    if (owner != nullptr && owner->mounted) {
+    if (trace.owner_mount_exclusion && owner != nullptr && owner->mounted) {
         if (owner->mount_type == SeatType::Controller ||
             owner->mount_type == SeatType::Gunner ||
             owner->mount_type == SeatType::Driver) {
@@ -785,6 +785,8 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                     };
                     target.matrices[face_hit.section].rotate_point(
                         local_normal, model_hit.normal_q16);
+                    for (int axis = 0; axis < 3; ++axis)
+                        model_hit.local_normal_q16[axis] = local_normal[axis];
                 }
             }
             return true;
@@ -821,7 +823,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             };
             const float sc[3] = {coord_to_units(slot.x), coord_to_units(slot.y),
                                  coord_to_units(slot.z)};
-            if (context_ray) {
+            if (trace.only_entity.valid()) {
+                // The single-entity walk skips the slot gate (the entity's own
+                // gate below still runs).
+                if (h != trace.only_entity) continue;
+            } else if (context_ray) {
                 // The table's words in retail's Q16: a static slot's u16
                 // coordinates and radius << 16, a dynamic slot's dwords as is
                 // [orig: @0x4E53E5..0x4E5414 (static), the dword reads of the
@@ -894,7 +900,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 // the bounded sphere compatibility used by ordinary bullets.
                 // [orig: Weapon_RaycastAndSpawnImpact @0x4e8460;
                 // Physics_RaycastAgainstBoneCollision @0x4e4cb0]
-                if (person_faces_only || aim) continue;
+                if (person_faces_only || aim || trace.only_entity.valid()) continue;
                 const int32_t center[3] = {to_fixed(entity->position.x),
                                            to_fixed(entity->position.y),
                                            to_fixed(entity->position.z)};
@@ -929,6 +935,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                                     table_hit.position_q16[2]};
         eh.normal_q16 = FixedVec3{table_hit.normal_q16[0], table_hit.normal_q16[1],
                                   table_hit.normal_q16[2]};
+        eh.local_normal_q16 = FixedVec3{table_hit.local_normal_q16[0],
+                                        table_hit.local_normal_q16[1],
+                                        table_hit.local_normal_q16[2]};
         eh.section_index = table_hit.section_index;
         eh.bone_index = table_hit.section_index;
         eh.face_index = table_hit.section_face_index;
@@ -991,7 +1000,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             // compare before Physics_RaycastAgainstBoneCollision @ 0x4e5572].
             if (proxy.wire_handle == trace.shooter_wire_handle) continue;
             if (aim && proxy.registry_twin == trace.owner) continue;
-            if (proxy.wire_handle == trace.shooter_carrier_wire_handle) continue;
+            if (trace.owner_mount_exclusion &&
+                proxy.wire_handle == trace.shooter_carrier_wire_handle)
+                continue;
+            const bool only_this = trace.only_entity.valid();
+            if (only_this && proxy.registry_twin != trace.only_entity) continue;
             const float sc[3] = {
                 static_cast<float>(proxy.position_q16.x) / io::kFp16One,
                 static_cast<float>(proxy.position_q16.y) / io::kFp16One,
@@ -1000,7 +1013,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             const int32_t broad_radius = proxy.bound_radius_q16 > 0
                 ? proxy.bound_radius_q16
                 : 0x10000;
-            if (context_ray) {
+            if (only_this) {
+                // the slot gate skipped, as above
+            } else if (context_ray) {
                 const int32_t c[3] = {proxy.position_q16.x, proxy.position_q16.y,
                                       proxy.position_q16.z};
                 if (!retail_slot_line_gate(ray.start, ray.end, context_dir, c,
@@ -1077,6 +1092,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             eh.normal_q16 = FixedVec3{table_hit.normal_q16[0],
                                       table_hit.normal_q16[1],
                                       table_hit.normal_q16[2]};
+            eh.local_normal_q16 = FixedVec3{table_hit.local_normal_q16[0],
+                                            table_hit.local_normal_q16[1],
+                                            table_hit.local_normal_q16[2]};
             eh.section_index = table_hit.section_index;
             eh.bone_index = table_hit.section_index;
             eh.face_index = table_hit.section_face_index;

@@ -309,6 +309,13 @@ struct LiveRound {
     // Entity_InterpolateFromParentDelta @ 0x4a8d60 keeps no rider-side copy].
     EntityHandle parent;
     uint64_t parent_spawn_id = 0;
+    // The charge motors' rest leg on a non-authority peer: the round's +452
+    // update callback becomes the parent follow (a parented round) or nothing,
+    // and the round lingers 248 ticks [orig: Entity_UpdateSatchelPhysics
+    // @0x4489F6..0x448A10, @0x448C1A..0x448C24; Entity_UpdateClaymorePhysics
+    // @0x447981..0x44799B, @0x447B9B..0x447BA5]. motor reads kNone then, and
+    // this bit marks the follow.
+    bool rest_follows_parent = false;
     // Armed at 2 ticks remaining above water; the expiry queues the kill zone
     // [orig: the runtime 0x1000 flag @ 0x444a29 consumed by the update head].
     bool det_at_expiry = false;

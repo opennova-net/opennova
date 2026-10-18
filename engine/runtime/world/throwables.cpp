@@ -291,7 +291,7 @@ bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &
     trace.include_wire_proxies =
         r.consequence_mode == RoundConsequenceMode::VisualOnly;
     trace.shooter_wire_handle = r.shooter_handle;
-    trace.shooter_carrier_wire_handle = r.shooter_carrier_handle;
+    trace.owner_mount_exclusion = false;
     if (ray_dir != nullptr && ray_length > 0) {
         trace.ray_dir_q16 = FixedVec3{ray_dir[0], ray_dir[1], ray_dir[2]};
         trace.ray_length_q16 = ray_length;
@@ -653,17 +653,105 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
 // Entity_UpdateClaymorePhysics @ 0x4472F0 — one skeleton, claymore stays
 // upright and never terrain-bounces its spin].
 // ----------------------------------------------------------------------------
+
+// A pools-2/1 walk under a caller's ray context, for the charge motors' own
+// queries: the domains off, the decoded proxies on a visual client as the item
+// sweep's. `owner_slot`: the ray's ray[17] is the round's owner (the slide and
+// the sweep), whose decoded wire identity stands in for it on a visual client;
+// false for the object floor, whose ray[17] is the round itself. ray[18..20]
+// stay zero (the motors' memsets), so no mount is excluded.
+ProjectileHit charge_ray(World &world, CollisionWorld *collision, const LiveRound &r,
+                         const FixedVec3 &start, const FixedVec3 &end, bool owner_slot,
+                         const int32_t dir[3], int32_t length, EntityHandle only_entity) {
+    ProjectileHit none;
+    if (collision == nullptr || length <= 0) return none;
+    const CollisionWorld::RayDebugScope ray_scope(
+            collision, CollisionWorld::RayDebugCategory::kThrowable);
+    ProjectileTrace trace;
+    trace.start = start;
+    trace.end = end;
+    trace.owner = owner_slot ? r.owner : EntityHandle{};
+    trace.radius_q16 = 0;
+    trace.ammo_flags = 0;
+    trace.walk_terrain = false;
+    trace.walk_water = false;
+    trace.walk_persons = false;
+    trace.include_wire_proxies =
+        r.consequence_mode == RoundConsequenceMode::VisualOnly;
+    if (owner_slot) trace.shooter_wire_handle = r.shooter_handle;
+    trace.owner_mount_exclusion = false;
+    trace.ray_dir_q16 = FixedVec3{dir[0], dir[1], dir[2]};
+    trace.ray_length_q16 = length;
+    trace.only_entity = only_entity;
+    return collision->trace_projectile(world, trace);
+}
+
+// Entity_ProcessTerrainBounce(round, 0), a misnomer: a parented round's test
+// of its parent alone, from its saved pose 4096 lower to its moved one along
+// (0, 0, -1) over a length of 1024. A hit below that length reflects the
+// velocity off the struck face and counts a contact; then a face whose
+// (0, 0, -1) dot lies in (-0.5, 0), a steep one, pushes the horizontal
+// velocity along its normal by trunc((dot + 1) * 512).
+// [orig: Entity_ProcessTerrainBounce @0x4459F0 -- the ray @0x445A19..0x445AC0,
+//  Weapon_ValidateHitTarget and the < 1024 keep @0x445AC7..0x445AEA, the
+//  reflection @0x445AFF, the count @0x445B04, the dot @0x445B67..0x445B97,
+//  the 2^-16 scale and the two compares @0x445B9B..0x445BBD (flt_7C3310,
+//  flt_7C59B0 = -0.5), the push @0x445BBF..0x445C08 (flt_7C3280 = 1.0,
+//  flt_7C59AC = 512.0)]
+void charge_parent_slide(World &world, CollisionWorld *collision, LiveRound &r,
+                         const FixedVec3 &saved, MotorFrame &f) {
+    if (!r.parent.valid()) return;
+    const int32_t down[3] = {0, 0, -0x10000};
+    const ProjectileHit hit = charge_ray(
+            world, collision, r, FixedVec3{saved.x, saved.y, saved.z - 4096},
+            FixedVec3{f.px, f.py, f.pz}, true, down, 1024, r.parent);
+    if (!hit.hit() || hit.distance_q16 >= 1024) return;
+    const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y, hit.normal_q16.z};
+    reflect_velocity(f, n);
+    ++r.bounce_count;
+    // The dot and the push read the reflection's out-normal, the face's own
+    // (ProjectileHit::local_normal_q16).
+    const FixedVec3 &out = hit.local_normal_q16;
+    const int32_t dot = static_cast<int32_t>((static_cast<int64_t>(down[2]) * out.z) >> 16);
+    const double dot_units = static_cast<double>(dot) * (1.0 / 65536.0);
+    if (dot_units < 0.0 && dot_units > -0.5) {
+        const int32_t scale = static_cast<int32_t>((dot_units + 1.0) * 512.0);
+        f.vx += qmul(scale, out.x);
+        f.vy += qmul(scale, out.y);
+    }
+}
+
+// Physics_RaycastProximityEntities(round, saved, saved - 5 u): a falling
+// round's object floor. Pools 2 then 1 along the unit segment, each hit kept
+// only below the length so far, the end clipping to the nearest; the round is
+// the walk's excluded slot, so no row of it is excluded. No hit leaves the
+// end, 5 u under the saved pose.
+// [orig: Physics_RaycastProximityEntities @0x538350 -- the unit direction
+//  @0x538374..0x5383DA, the exclusion ray_state[17] @0x538453, the two keeps
+//  @0x5384EE / @0x538528, the clipped end @0x538545..0x5385AA; called
+//  @0x4483EA (satchel, the end `sub 50000h` @0x4483CA) / @0x447434 (claymore)]
+int32_t charge_object_floor(World &world, CollisionWorld *collision, const LiveRound &r,
+                            const FixedVec3 &saved) {
+    const int32_t end_z = saved.z - 0x50000;
+    const int32_t down[3] = {0, 0, -0x10000};
+    const ProjectileHit hit = charge_ray(world, collision, r, saved,
+                                         FixedVec3{saved.x, saved.y, end_z},
+                                         false, down, 0x50000, EntityHandle{});
+    if (!hit.hit() || hit.distance_q16 >= 0x50000) return end_z;
+    return saved.z + static_cast<int32_t>(
+            (static_cast<int64_t>(down[2]) * hit.distance_q16 + 0x8000) >> 16);
+}
+
 static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
                          const AmmoTableEntry &ammo, CollisionWorld *collision,
                          const terrain::TerrainHeightField *terrain,
                          bool claymore, bool allow_consequences) {
-    if (r.parent.valid()) follow_parent(world, r);
     MotorFrame f;
     load_frame(r, f);
+    // savedLivePose: the tick-start pose, the previous tail's copy
+    // [orig: the tail @0x448C88..0x448CB8 / @0x447C0B..0x447C39].
+    const FixedVec3 saved{f.px, f.py, f.pz};
     const int32_t water = throwable_water_q16(world);
-    bool ground_hit = false;
-    bool rest = false;
-    int32_t ground_surface = 0;
 
     // Drag + epsilon stop [orig: |v'| < 256 -> 0].
     if (f.vx != 0) {
@@ -676,6 +764,10 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         f.py += f.vy;
         if (std::abs(f.vy) < 256) f.vy = 0;
     }
+    // A parented round tests its parent's face first [orig: the groundEntity
+    // test and the call @0x448361..0x448369 (satchel) / @0x4473B1..0x4473B9
+    // (claymore)].
+    charge_parent_slide(world, collision, r, saved, f);
     // Inverted gravity split [orig: satchel @ 0x4482f8 — above water -55
     // (light toss), submerged -167 (sinks fast)].
     if (f.pz > water) f.vz -= 55;
@@ -690,6 +782,11 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         r.yaw_bam -= r.spin_yaw;
         r.pitch_bam -= r.spin_pitch;
     }
+    // A falling round's object floor; a rising one's is 0
+    // [orig: the floor's 0 seed @0x4482D5 / @0x447325; the vz <= 0 test
+    // @0x4483AC / @0x4473F6, the floor's store @0x4483F6 / @0x447440].
+    int32_t floor = 0;
+    if (f.vz <= 0) floor = charge_object_floor(world, collision, r, saved);
     // Water entry splash + submerged damp [orig: entry tag 11; schl 0.98 spin
     // 0.94 vel, clym velXY * 0.5].
     if (f.pz <= water) {
@@ -711,71 +808,106 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         }
     }
     int32_t speed = speed3_q16(f);
-    if (speed < 256) speed = 0; // [orig: @ 0x4484xx epsilon]
+    if (speed < 256) speed = 0; // [orig: @0x448599 / @0x44754B]
 
-    // Terrain: full stop, no bounce [orig: velocity zeroed, parent cleared],
-    // skipped on the round's NoCollide or Indoors bits.
-    int32_t ground = INT32_MIN;
+    // Terrain: the ground raises the floor, and a round below it stops there
+    // with no bounce and no parent; skipped on the round's NoCollide or
+    // Indoors bits. ground_height keeps the sampled height for the rest gate
+    // (0 when the test did not run).
+    // [orig: satchel @0x4485B1..0x448615 (the floor raise @0x4485CD..0x4485CF,
+    //  Terrain_GetSurfaceTypeAtPosition @0x4485E0); claymore @0x447563..0x4475C7
+    //  (Terrain_GetSurfaceTypeAtPosition @0x447592)]
+    bool ground_hit = false;
+    int32_t ground_surface = 0;
+    int32_t ground_height = 0;
     if (motor_terrain_test_runs(r, ammo)) {
-        ground = ground_q16(terrain, f.px, f.py);
-        if (ground != INT32_MIN && f.pz < ground) {
-            ++r.bounce_count;
-            f.pz = ground;
-            f.vx = 0;
-            f.vy = 0;
-            f.vz = 0;
-            speed = 0;
-            ground_hit = true;
-            // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 at the stop point,
-            //  @ 0x447592 (claymore) / @ 0x4485e0 (satchel)]
-            ground_surface = sampled_ground_surface(world, f);
-            r.parent = EntityHandle{};
-            r.parent_spawn_id = 0;
+        const int32_t ground = ground_q16(terrain, f.px, f.py);
+        if (ground != INT32_MIN) {
+            ground_height = ground;
+            if (floor < ground) floor = ground;
+            if (f.pz < ground) {
+                ++r.bounce_count;
+                f.pz = ground;
+                f.vx = 0;
+                f.vy = 0;
+                f.vz = 0;
+                speed = 0;
+                ground_hit = true;
+                ground_surface = sampled_ground_surface(world, f);
+                r.parent = EntityHandle{};
+                r.parent_spawn_id = 0;
+            }
         }
     }
-    // The swept item raycast + stick [orig: reflect; reflected z-speed above
-    // half the impact speed -> orient to the face + spins zeroed + parent].
+    // The parent follow, after the terrain test: its backup makes the moved
+    // pose the saved one the sweep starts from and an item contact restores
+    // [orig: @0x448619..0x44861F / @0x4475CB..0x4475D1 ->
+    // Entity_InterpolateFromParentDelta @0x4A8D60, the backup
+    // @0x4A8D7D..0x4A8DB4].
+    FixedVec3 start = saved;
+    if (r.parent.valid()) {
+        start = FixedVec3{f.px, f.py, f.pz};
+        store_frame(r, f);
+        follow_parent(world, r);
+        f.px = to_fixed(r.pos.x);
+        f.py = to_fixed(r.pos.y);
+        f.pz = to_fixed(r.pos.z);
+    }
+    // The swept item raycast under the motor's ray context (the velocity over
+    // the 3-D speed, that speed as the length; each pool's hit kept only below
+    // the length so far). A contact reflects the velocity off the struck
+    // face; a face whose normal points up past half its horizontal part
+    // orients the round to it and stops its spins, the satchel (pitch bias
+    // 0xC0000040) also taking the entity as its groundEntity; the round goes
+    // back to its saved pose and counts the contact; the claymore takes the
+    // entity as its groundEntity on every contact. Neither stops the round:
+    // the rest gate below decides. Every pools-2/1 hit carries an entity, so
+    // the entity-less arm (the roll's clear) never runs.
+    // [orig: satchel -- the direction @0x448629..0x448704, the length
+    //  @0x448724, the keeps @0x4487CD / @0x4487FF, the reflection @0x448853,
+    //  the stick @0x448882..0x4488C4, the store @0x448905..0x44891E; claymore
+    //  -- @0x4475DB..0x4476D6, @0x44777F / @0x4477B1, @0x4477FD,
+    //  @0x44782C..0x44785E, the store @0x447884..0x4478A4, the groundEntity
+    //  @0x4478A7]
     if (speed != 0) {
-        ProjectileHit hit;
-        const FixedVec3 start{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
-        if (motor_item_sweep(world, collision, r, start, f, speed, hit)) {
-            // An item contact puts the round back at its start-of-tick pose
-            // (+0x80..+0x88, the previous tail's copy), where the stick and the
-            // contact's payload read it [orig: Entity_UpdateSatchelPhysics
-            // @0x448818..0x44882A, stored @0x448914..0x44891E, the payload
-            // @0x448931..0x448956; Entity_UpdateClaymorePhysics
-            // @0x4477CA..0x4477E4, stored @0x44789A..0x4478A4].
+        const int32_t inv = static_cast<int32_t>(0x100000000LL / speed);
+        const int32_t dir[3] = {qmul(inv, f.vx), qmul(inv, f.vy), qmul(inv, f.vz)};
+        const ProjectileHit hit = charge_ray(world, collision, r, start,
+                                             FixedVec3{f.px, f.py, f.pz}, true, dir,
+                                             speed, EntityHandle{});
+        if (hit.hit() && hit.distance_q16 < speed) {
+            // The struck entity: a registry row, or a decoded mover's verified
+            // twin; a wire proxy without one reflects but cannot parent.
+            const EntityHandle struck = hit.geometry_entity.valid() ? hit.geometry_entity
+                                                                    : hit.wire_registry_twin;
+            const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y, hit.normal_q16.z};
+            reflect_velocity(f, n);
+            // The stick test and the pose read the reflection's out-normal, the
+            // face's own (ProjectileHit::local_normal_q16) [orig: satchel
+            // @0x448858..0x4488AA; claymore @0x447802..0x447850].
+            const int32_t out[3] = {hit.local_normal_q16.x, hit.local_normal_q16.y,
+                                    hit.local_normal_q16.z};
+            if (throwable_surface_accepts_stick(hit.local_normal_q16)) {
+                throwable_stick_pose(out, r.yaw_bam,
+                                     claymore ? 0 : static_cast<int32_t>(0xC0000040), 0,
+                                     r.pitch_bam, r.roll_bam);
+                r.spin_yaw = 0;
+                r.spin_pitch = 0;
+                if (!claymore) {
+                    r.spin_roll = 0;
+                    r.parent = struck;
+                    const Entity *parent = world.registry.get(struck);
+                    r.parent_spawn_id = parent != nullptr ? parent->registry_spawn_id : 0;
+                }
+            }
             f.px = start.x;
             f.py = start.y;
             f.pz = start.z;
             ++r.bounce_count;
-            {
-                const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y,
-                                      hit.normal_q16.z};
-                reflect_velocity(f, n);
-                // Stick/parenting needs a registry entity: a wire-proxy hit
-                // reflects but cannot parent — device-on-decoded-vehicle
-                // tracking is the D-THROW-7/D-WPN-8 residual.
-                if (hit.geometry_entity.valid() &&
-                    throwable_surface_accepts_stick(hit.normal_q16)) {
-                    // Stick to the face: yaw kept, satchel pitch bias
-                    // 0xC0000040 (~-90 deg), claymore 0; roll bias 0 on both
-                    // [orig: schl @ 0x448898..0x4488aa; clym @ 0x447842..].
-                    throwable_stick_pose(
-                            n, r.yaw_bam,
-                            claymore ? 0 : static_cast<int32_t>(0xC0000040), 0,
-                            r.pitch_bam, r.roll_bam);
-                    r.spin_yaw = 0;
-                    r.spin_pitch = 0;
-                    r.spin_roll = 0;
-                    f.vx = 0;
-                    f.vy = 0;
-                    f.vz = 0;
-                    r.parent = hit.geometry_entity;
-                    if (const Entity *parent = world.registry.get(r.parent))
-                        r.parent_spawn_id = parent->registry_spawn_id;
-                    rest = true;
-                }
+            if (claymore) {
+                r.parent = struck;
+                const Entity *parent = world.registry.get(struck);
+                r.parent_spawn_id = parent != nullptr ? parent->registry_spawn_id : 0;
             }
             ground_hit = true;
             ground_surface = hit.surface_type >= 0 ? hit.surface_type : 0;
@@ -792,8 +924,10 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     // [orig: Entity_UpdateClaymorePhysics @0x4478C8..0x44790E, the tail copy
     //  @0x447C23; Entity_UpdateSatchelPhysics @0x44893D..0x448983, the tail copy
     //  @0x448CA2; AmmoDef_ProcessImpactEffect @0x40A18D..0x40A1B1]
+    // The gate's +0x88 copy is the saved pose's Z, the follow's backup for a
+    // parented round [orig: Entity_InterpolateFromParentDelta @0x4A8D84..0x4A8D96].
     const bool clipped_by_water = (ammo.flags & kAmmoFlagClipWaterFx) != 0 &&
-                                  f.pz <= water && f.prev_z <= water;
+                                  f.pz <= water && start.z <= water;
     if (ground_hit && ground_surface != 0 && !clipped_by_water && contact_count_sounds(r))
         push_motor_effect(world, sim, r, ground_surface + 4,
                           Vec3{static_cast<float>(from_fixed(f.px)),
@@ -801,21 +935,55 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
                                static_cast<float>(from_fixed(f.pz))},
                           world.logic_tick, false, true);
 
-    // Rest gate [orig: height-over-ground <= 0xFF and not rising].
-    if (!rest && ground != INT32_MIN) {
-        const int32_t over = f.pz - ground;
-        if (over >= 0 && over <= 0xFF && (speed == 0 || f.vz <= 0)) rest = true;
+    // The landing and the five-contact stop: a falling round below the floor
+    // lands on it with no groundEntity; one past five contacts (a signed byte)
+    // that did not land loses its velocity and takes its own Z as the floor and
+    // the ground height. The rest gate then passes a round within 0xFF over
+    // the floor (unsigned) that sits on the ground height, has no speed, or is
+    // not rising.
+    // [orig: satchel @0x44898B..0x4489EE (the landing @0x44899E..0x4489A1, the
+    //  stop @0x4489A6..0x4489C3, the gate @0x4489C7..0x4489EE); claymore
+    //  @0x447916..0x447979]
+    int32_t rest_floor = floor;
+    if (f.pz >= floor || f.vz >= 0) {
+        if (static_cast<int8_t>(r.bounce_count) > 5) {
+            rest_floor = f.pz;
+            f.vz = 0;
+            f.vx = 0;
+            f.vy = 0;
+            ground_height = f.pz;
+        }
+    } else {
+        f.pz = floor;
+        r.parent = EntityHandle{};
+        r.parent_spawn_id = 0;
     }
+    const uint32_t over = static_cast<uint32_t>(f.pz) - static_cast<uint32_t>(rest_floor);
+    const bool rest = over <= 0xFF &&
+                      (ground_height == rest_floor || speed == 0 || f.vz <= 0);
     store_frame(r, f);
-    if (rest) {
-        // lift 4096 Q16 off the ground when unparented [orig: @ 0x4c... the
-        // rest leg], then convert.
-        if (!r.parent.valid()) r.pos.z += static_cast<float>(from_fixed(4096));
+    if (!rest) return true;
+    // The rest leg: an unparented round lifts 4096 and loses its update
+    // callback, a parented one keeps following its parent; the spins and the
+    // vertical speed stop. The authority converts the round into its placed
+    // device (the round slot releases); any other peer keeps the round 248
+    // ticks more, its aging back on.
+    // [orig: satchel @0x4489F6..0x448A22, the conversion @0x448A2E..0x448C12,
+    //  the client leg @0x448C1A..0x448C24; claymore @0x447981..0x4479AD,
+    //  @0x4479B9..0x447B93, @0x447B9B..0x447BA5]
+    if (!r.parent.valid()) r.pos.z += static_cast<float>(from_fixed(4096));
+    r.spin_yaw = 0;
+    r.spin_pitch = 0;
+    r.vel.z = 0.0f;
+    if (allow_consequences) {
         r.vel = Vec3{0.0f, 0.0f, 0.0f};
-        if (allow_consequences)
-            world.throwables.place_from_round(world, r, ammo);
+        world.throwables.place_from_round(world, r, ammo);
         return false; // the round slot releases [orig: source round expires]
     }
+    r.motor = ThrowClass::kNone;
+    r.rest_follows_parent = r.parent.valid();
+    // The age word becomes 248 and the post-motor decrement takes one.
+    r.max_age_ticks = r.age_ticks + 248 - 1;
     return true;
 }
 
@@ -866,6 +1034,15 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                              allow_consequences);
         break;
     default:
+        // A charge round at rest on a non-authority peer follows its parent
+        // (its +452 is the parent follow) and takes the BB refresh after it
+        // [orig: the rest leg's +452 store @0x4489FB / @0x447986;
+        //  Projectile_UpdatePhysics @0x4E9F1E..0x4E9F21].
+        if (round.rest_follows_parent) {
+            if (round.parent.valid()) follow_parent(world, round);
+            refresh_round_indoors(world, round, collision);
+            return true;
+        }
         // no motor bound: the round drifts unmoved and takes no BB refresh,
         // both sitting behind the +452 test (retail leaves +452 null)
         // [orig: @0x4E9F0C..0x4E9F1B]
