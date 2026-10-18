@@ -473,20 +473,6 @@ Vec3 vec_from_fixed(const FixedVec3 &v) {
 // [orig: Projectile_CopyEntityToHitRecord @0x4E7010: memset
 //  @0x4E7015..0x4E701A, position and angles @0x4E7023..0x4E7043, velocity
 //  @0x4E7046..0x4E7079, the round @0x4E707C, its owner @0x4E707F..0x4E7085]
-void copy_round_to_hit_record(HitRecord &record, const LiveRound &r,
-                              const FixedVec3 &velocity_q16) {
-    record = HitRecord{};
-    record.has_round = true;
-    record.round_pos = r.pos;
-    record.round_vel_q16 = velocity_q16;
-    record.round_yaw_bam = r.yaw_bam;
-    record.round_pitch_bam = r.pitch_bam;
-    record.round_roll_bam = r.roll_bam;
-    record.round_ammo_index = r.ammo_index;
-    record.round_owner = r.owner;
-    record.owner = r.owner;
-}
-
 // `surface_normal` is Entity_ApplyDragAndBounceForce's third argument: 0 for
 // the flight call, a positive multiplier for the person-hit call.
 void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
@@ -785,6 +771,21 @@ void record_round_fire(World &world, RoundSim &sim,
 }
 
 } // namespace
+
+void copy_round_to_hit_record(HitRecord &record, const LiveRound &r,
+                              const FixedVec3 &velocity_q16) {
+    record = HitRecord{};
+    record.has_round = true;
+    record.round_pos = r.pos;
+    record.round_vel_q16 = velocity_q16;
+    record.round_yaw_bam = r.yaw_bam;
+    record.round_pitch_bam = r.pitch_bam;
+    record.round_roll_bam = r.roll_bam;
+    record.round_ammo_index = r.ammo_index;
+    record.round_owner = r.owner;
+    record.owner = r.owner;
+    record.round_shooter_wire = r.shooter_handle;
+}
 
 bool entity_eye_below_water(const World &world, int32_t body_z_q16,
                             int32_t eye_offset_z) {
@@ -1340,6 +1341,14 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
 // [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0]
 void RoundSim::process_damage_hit(World &world, LiveRound &r,
         const ProjectileHit &collision, FixedVec3 &velocity_q16) {
+    // A person the joiner keeps as a replica row: the client leg over the
+    // body retail's client built for it (world/wire_person_hit.cpp).
+    if (collision.hit_class == ProjectileHitClass::Person &&
+            !collision.geometry_entity.valid() &&
+            collision.wire_person_handle != EntityHandle::kInvalid) {
+        process_wire_person_hit(world, r, collision, velocity_q16);
+        return;
+    }
     const bool authoritative = r.consequence_mode == RoundConsequenceMode::Authoritative &&
             (!world.rules.mp_session || world.rules.projectile_authority);
     const bool not_armed = false;

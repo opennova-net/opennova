@@ -11,6 +11,7 @@
 #include <net/npwire/ingame_decode.h> // EndRoundStats (the 0x56 board)
 #include <net/npwire/wire_handle.h>
 #include <runtime/world/parachute.h>
+#include <runtime/world/wire_person_hit.h>
 
 namespace opennova::replication {
 
@@ -551,6 +552,34 @@ struct ClientEntityState {
 	int32_t objective_drop_pitch_bam = 0;
 	uint32_t objective_drop_serial = 0;
 	uint16_t fire_target_handle = 0xFFFF; // shooter AI lock from the tag-2 fire descriptor
+	// --- The client damage leg's writes on a wire-built person (world/
+	// wire_person_hit.h): the fields retail's client entity takes when a round
+	// this client flies strikes it. Never wire fields; the 0x0C slot memset
+	// clears them with the row.
+	// The attacker stamp: lastAttacker (+0x178), the round's owner by its
+	// wire identity, and +0x17C, the round's ammo def (its table index)
+	// [orig: Projectile_ProcessDamageOnTarget @0x4E81F3 / @0x4E81F9].
+	uint16_t last_attacker = 0xFFFF;
+	int32_t last_attacker_ammo = -1;
+	// The client-built AI slot's alert byte (slot +0x88), which the org class
+	// callback raises [orig: OrganicClass_HandleEvent @0x4073DB].
+	uint8_t ai_alert = 0;
+	// The collision force's hit type (+0x368): the 110 + n hit-reaction state
+	// the body tick selects while moveTimer (net_corpse_timer, +0x148) runs
+	// [orig: Entity_ApplyCollisionForce @0x4AF506].
+	uint8_t hit_type = 0;
+	// bodyRoll (+0x94), the hit-time tilt toward the shot
+	// [orig: OrganicClass_HandleEvent @0x407564 / @0x407575].
+	int32_t rm_body_roll = 0;
+	// Entity_OnDamageReceived's tail: wasHit (+0x36B), damageTimer (+0x2F8)
+	// and its attacker (+0x2F4) by wire identity [orig: @0x4AF866, @0x4AF872,
+	// @0x4AF878].
+	bool was_hit = false;
+	int32_t damage_timer = 0;
+	uint16_t damage_attacker = 0xFFFF;
+	// spawnPhase, the think cadence the plyr callback re-arms
+	// [orig: Entity_HandleDamageAndTriggerZones @0x407B5E / @0x407C71].
+	int32_t spawn_phase = 0;
 	// The pure-client stale-carrier sweep's run length: consecutive mover
 	// ticks this no-callback child's persistent carrier stayed unresolvable.
 	// At 128 the sweep queues C2S 0x0F for the carrier AND the child, then
@@ -754,6 +783,70 @@ inline int32_t replica_tier_health(uint8_t health_class_byte, int32_t item_hp) {
 	const int32_t lower = static_cast<int32_t>((int64_t(28671) * item_hp + 0x8000) >> 16);
 	const uint8_t tier = (health_class_byte >> 4) & 3u;
 	return tier == 2 ? (upper + item_hp) >> 1 : tier == 1 ? (upper + lower) >> 1 : lower >> 1;
+}
+
+// The damage pass's view of a person row (world/wire_person_hit.h): load it
+// from the row, run the leg over it, store it back. The ItemDef pointer and
+// its attrib come from the items.def row the spawn typed the row from, which
+// the embedder resolves.
+inline world::WirePersonBody wire_person_body_of(const ClientEntityState &row,
+		bool has_item_def, uint32_t item_attrib, bool plyr_class) {
+	world::WirePersonBody body;
+	body.wire_handle = row.handle;
+	body.has_item_def = has_item_def;
+	body.item_attrib = item_attrib;
+	body.plyr_class = plyr_class;
+	// The client's Flags word: the spawn's (Player 0x100, the 0x0C @0x42E917)
+	// and the client's own latches on it.
+	body.flags = row.rm_entity_flags;
+	body.team = row.team;
+	body.pos[0] = row.x;
+	body.pos[1] = row.y;
+	body.pos[2] = row.z;
+	body.heading_bam = row.heading_bam;
+	body.health_zero = row.net_health_zero;
+	body.last_attacker = row.last_attacker;
+	body.last_attacker_ammo = row.last_attacker_ammo;
+	body.ai_alert = row.ai_alert;
+	body.death_anim_state = row.net_death_anim;
+	body.anim_current = row.net_anim_current;
+	body.anim_pending = row.net_anim_pending;
+	body.hit_type = row.hit_type;
+	body.move_timer = row.net_corpse_timer;
+	body.vel[0] = row.rm_vel_xy[0];
+	body.vel[1] = row.rm_vel_xy[1];
+	body.vel[2] = row.rm_vel_z;
+	body.body_roll = row.rm_body_roll;
+	body.was_hit = row.was_hit;
+	body.damage_timer = row.damage_timer;
+	body.damage_attacker = row.damage_attacker;
+	body.spawn_phase = row.spawn_phase;
+	return body;
+}
+
+inline void store_wire_person_body(const world::WirePersonBody &body,
+		ClientEntityState &row) {
+	row.last_attacker = body.last_attacker;
+	row.last_attacker_ammo = body.last_attacker_ammo;
+	row.ai_alert = body.ai_alert;
+	row.net_death_anim = body.death_anim_state;
+	if (body.anim_current != row.net_anim_current ||
+			body.anim_pending != row.net_anim_pending) {
+		row.net_anim_current = body.anim_current;
+		row.net_anim_pending = body.anim_pending;
+		// A restaged state carries no armed clip-end boundary.
+		row.net_anim_pending_boundary = -1;
+	}
+	row.hit_type = body.hit_type;
+	row.net_corpse_timer = body.move_timer;
+	row.rm_vel_xy[0] = body.vel[0];
+	row.rm_vel_xy[1] = body.vel[1];
+	row.rm_vel_z = body.vel[2];
+	row.rm_body_roll = body.body_roll;
+	row.was_hit = body.was_hit;
+	row.damage_timer = body.damage_timer;
+	row.damage_attacker = body.damage_attacker;
+	row.spawn_phase = body.spawn_phase;
 }
 
 // The carrier a compact-less (no-callback) child's pose follows: its 0x0D

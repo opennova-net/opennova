@@ -2958,6 +2958,13 @@ target_include_directories(projectile_combat_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(projectile_combat_test PRIVATE cxx_std_17)
 add_test(NAME projectile_combat COMMAND projectile_combat_test)
 
+# The client damage leg over a wire-built person: a joiner's round striking a
+# remote person row (the friendly-fire gate, the hit record, the attacker stamp).
+add_executable(wire_person_hit_test world/wire_person_hit_test.cpp)
+target_link_libraries(wire_person_hit_test PRIVATE opennova_runtime)
+target_compile_features(wire_person_hit_test PRIVATE cxx_std_17)
+add_test(NAME wire_person_hit COMMAND wire_person_hit_test)
+
 add_executable(hud_frame_counters_test world/hud_frame_counters_test.cpp)
 target_link_libraries(hud_frame_counters_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_counters_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

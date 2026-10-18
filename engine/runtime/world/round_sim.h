@@ -70,6 +70,7 @@ namespace opennova::world {
 
 struct FixedVec3;
 struct ProjectileHit;
+struct WirePersonBody; // world/wire_person_hit.h
 
 class CollisionWorld;
 
@@ -520,7 +521,19 @@ struct HitRecord {
     int32_t section = 0;          // +0x38 (hitRecord[14])
     EntityHandle owner;           // +0x44 (hitRecord[17])
     EntityHandle target;          // +0x48
+    // The round's owner and the struck person by their wire identity, for a
+    // joiner whose remote persons are replica rows with no registry entity
+    // (world/wire_person_hit.h): retail's client holds them as its own pool
+    // entities, so the round's +0x170 owner and +0x48 are those entities.
+    uint16_t round_shooter_wire = 0xFFFF;
+    uint16_t target_wire = 0xFFFF;
 };
+
+// Projectile_CopyEntityToHitRecord: zero the record, then copy the striking
+// round [orig: @0x4E7010 -- the memset @0x4E701A, the round @0x4E707C, its
+// owner @0x4E7085].
+void copy_round_to_hit_record(HitRecord &record, const LiveRound &round,
+                              const FixedVec3 &velocity_q16);
 
 // The person class callbacks' round legs, run on event 1 while the hit record
 // holds a round: the death clip from the record's section and the round's
@@ -681,9 +694,18 @@ public:
         int32_t player_class = 0; // entity+0x294
         uint8_t equipped_adm_index = 0xFF; // entity+0x2B0
         int32_t pos[3] = {};      // entity+4..+0xC, 16.16
+        uint32_t flags = 0;       // entity+0x24, the row's Flags word
         bool is_local = false;    // the handle is the local player's own
     };
     std::function<bool(uint16_t wire_handle, WireActor &out)> wire_actor_provider;
+    // A joiner's wire-built persons as the damage pass sees them: the role
+    // loads the row's WirePersonBody, hands it to `visit` and stores it back,
+    // synchronously, so the leg runs in retail's order inside the round tick.
+    // False when the handle names no person row. Host and single-player worlds
+    // leave it empty. [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0 over the
+    //  client-built pool-0 entity; world/wire_person_hit.h]
+    std::function<bool(uint16_t wire_handle,
+            const std::function<void(WirePersonBody &)> &visit)> wire_person_body;
     struct GuidedUpdate { uint16_t shooter, net_id; uint8_t groups; GuidedFlightState state; };
     std::vector<GuidedUpdate> guided_updates;
     void init_guided(World &, LiveRound &, const AmmoTableEntry &);
@@ -717,6 +739,10 @@ public:
 
     void process_damage_hit(World &world, LiveRound &round,
             const ProjectileHit &hit, FixedVec3 &velocity_q16);
+    // The client leg of the damage pass over a wire-built person
+    // (world/wire_person_hit.cpp).
+    void process_wire_person_hit(World &world, LiveRound &round,
+            const ProjectileHit &hit, const FixedVec3 &velocity_q16);
 
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;

@@ -356,6 +356,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/guided_missile_flight.cpp
     world/guided_round.cpp  # the stng pursuit integrator (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/round_sim.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/wire_person_hit.cpp   # the client damage leg over a wire-built person
     ${CMAKE_CURRENT_SOURCE_DIR}/world/impact_damage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/sound_emitter_mailbox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/terrain_scorch_events.cpp

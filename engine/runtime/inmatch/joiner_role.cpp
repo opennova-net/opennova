@@ -22,6 +22,7 @@
 
 #include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
+#include <base/io/strutil.h>          // iequals (the def's class tag)
 
 #include <runtime/mission/collision_resolve.h> // find_item_def (a rider's authored hp)
 #include <runtime/mission/seat_spec_extract.h> // refresh_item_seat_spec (a streamed row's seats)
@@ -961,6 +962,33 @@ void JoinerRole::wire_frame_providers() {
         out.pos[0] = row->x;
         out.pos[1] = row->y;
         out.pos[2] = row->z;
+        out.flags = row->rm_entity_flags;
+        return true;
+    };
+    // The damage pass's wire-built persons: a remote player or infantry is a
+    // replica row here, where retail's client flies its rounds into its own
+    // pool-0 entity for it (world/wire_person_hit.h). The row's def is the
+    // items.def row the spawn typed it from.
+    // [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0 over the client-built
+    //  entity; NapiNPClientMsg_0x00C @0x42E84A..0x42E84D]
+    world.round_sim.wire_person_body = [this](uint16_t handle,
+            const std::function<void(world::WirePersonBody &)> &visit) {
+        replication::ClientState &state = runtime->state();
+        replication::ClientEntityState *row = state.find(handle);
+        if (row == nullptr ||
+                (row->cls != EntityClass::Player && row->cls != EntityClass::Infantry))
+            return false;
+        const def::DefItemsFile *items = kernel_->items_table();
+        const def::DefItemDef *item = items != nullptr
+                ? mission::find_item_def(*items,
+                          static_cast<int>(row->type_id) + mission::kItemIdOffset)
+                : nullptr;
+        world::WirePersonBody body = replication::wire_person_body_of(
+                *row, item != nullptr, item != nullptr ? item->attrib : 0u,
+                item != nullptr && strutil::iequals(item->ai_function, "plyr"));
+        visit(body);
+        replication::store_wire_person_body(body, *row);
+        state.mark_changed();
         return true;
     };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
@@ -1528,6 +1556,7 @@ void JoinerRole::close() {
 	if (kernel_) {
 		kernel_->world.round_sim.guided_inputs_provider = {};
 		kernel_->world.round_sim.wire_actor_provider = {};
+		kernel_->world.round_sim.wire_person_body = {};
 	}
 	if (!runtime) return;
 	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
