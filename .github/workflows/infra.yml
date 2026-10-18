@@ -68,7 +68,7 @@ jobs:
           docker run --rm -v "$PWD:/w" -w /w/infra/zone "$TERRAFORM_IMAGE" init -backend=false -input=false
           docker run --rm -v "$PWD:/w" -w /w/infra/zone "$TERRAFORM_IMAGE" validate
           docker run --rm --network none -v "$PWD:/w" -w /w/infra/zone "$TERRAFORM_IMAGE" test
-      # The organization's CI runners and deploy environments (infra/github).
+      # The GitHub organization (infra/github).
       - name: terraform init, validate and test (infra/github)
         run: |
           docker run --rm -v "$PWD:/w" -w /w/infra/github "$TERRAFORM_IMAGE" init -backend=false -input=false
