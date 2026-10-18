@@ -301,10 +301,7 @@ run "mail_identities_are_stagings_own" {
   assert {
     condition = (
       one([for st in data.aws_iam_policy_document.mail[0].statement :
-        toset(st.resources) == toset([
-          "arn:aws:ses:us-east-1:123456789012:identity/staging.example.com",
-          "arn:aws:ses:us-east-1:123456789012:identity/maintainer@mail.example.org",
-        ]) && length([for c in st.condition : c if c.variable == "ses:FromAddress" && length(c.values) == 1 && contains(c.values, "support@staging.example.com")]) == 1
+        toset(st.resources) == toset(["arn:aws:ses:us-east-1:123456789012:identity/*"]) && length([for c in st.condition : c if c.variable == "ses:FromAddress" && length(c.values) == 1 && contains(c.values, "support@staging.example.com")]) == 1
       ]) &&
       { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_MAIL_FROM"] == "support@staging.example.com" &&
       { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_SITE_URL"] == "https://staging.example.com"

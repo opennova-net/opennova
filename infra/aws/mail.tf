@@ -19,8 +19,9 @@
 # email/forward_to address, which AWS asks its owner to verify by mail: mail to
 # it works in the sandbox.
 #
-# The worker may send from <mail_sender>@<web host> alone, through those
-# identities; web's environment and the worker's name the sender
+# The worker may send from <mail_sender>@<web host> alone (the policy's
+# ses:FromAddress condition), to any recipient, through any identity of the
+# account; web's environment and the worker's name the sender
 # (ONNET_MAIL_FROM) and SES's region (ONNET_MAIL_REGION), web's to decide
 # whether it queues mail at all. Off while var.mail_sender is empty or there is
 # no Cloudflare: no identity, no record, no permission, and the service runs
@@ -37,13 +38,14 @@ locals {
   mail_record_suffix = local.is_prod ? "" : ".${local.deployment}"
   mail_from_label    = "bounce${local.mail_record_suffix}"
   mail_from_domain   = "bounce.${local.mail_identity}"
-  # The domain's identity, and in the sandbox the forward_to address's (SES
-  # checks the sender's identity and, while sandboxed, each recipient's).
+  # Every identity of the account: SES authorizes SendEmail against the sender's
+  # identity AND against each recipient that is itself a verified identity of
+  # the account (an address someone verified in the console, say), so a list of
+  # named identities refused mail to such a recipient (prod, 2026-10-18:
+  # AccessDenied on identity/<a verified address>). The ses:FromAddress
+  # condition below is what pins the sender.
   mail_identity_prefix = "arn:${local.partition}:ses:${local.region}:${local.account_id}:identity"
-  mail_identities = local.mail_enabled ? concat(
-    ["${local.mail_identity_prefix}/${local.mail_identity}"],
-    local.email_forward_to != "" ? ["${local.mail_identity_prefix}/${local.email_forward_to}"] : [],
-  ) : []
+  mail_identities      = local.mail_enabled ? ["${local.mail_identity_prefix}/*"] : []
 
   mail_env = local.mail_enabled ? {
     ONNET_MAIL_FROM   = local.mail_from
