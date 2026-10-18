@@ -58,7 +58,7 @@ export function pickUsage(v: unknown): Usage | null {
     if (point === null) return null;
     series.push(point);
   }
-  const limit = isObject(v.limit) ? v.limit : {};
+  const limit: Fields = isObject(v.limit) ? v.limit : {};
   return {
     subject,
     id: String(v.id),
@@ -184,7 +184,7 @@ export function pickPrograms(v: unknown): ProgramsResponse | null {
     if (program === null) return null;
     programs.push(program);
   }
-  const cloud = isObject(v.cloud) ? v.cloud : {};
+  const cloud: Fields = isObject(v.cloud) ? v.cloud : {};
   return {
     at: v.at,
     cloud: { configured: cloud.configured === true, unavailable: textOrNull(cloud.unavailable), error: textOrNull(cloud.error) },
