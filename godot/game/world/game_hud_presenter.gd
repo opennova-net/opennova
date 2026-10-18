@@ -639,14 +639,13 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# apart (Ctrl+F6 fires only hudcolor, F6 only huddetail), and its first
 	# match gives a key both rows carry to hudcolor alone (code 10 before 19;
 	# engine BindingSet::pressed_key). showhud (row 27) ships unbound. Ctrl is a
-	# binding modifier, never a chord guard here; Shift/Alt chords stay ours
-	# (the debug pick rides Shift+F6).
+	# binding modifier; Shift or Alt held gates nothing, as the key scan has no
+	# such gate (engine hud::HudKeyEdge carries the witness).
 	# [orig: the key scan's fire @0x49d42f (the modifier pass) and @0x49d488
 	#  (the fallback); huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
 	# The key sampling is this presenter's (a shared key's first match is the
 	# sampler's, engine BindingSet::pressed_key); the edge latches, the cycles
 	# and the window toggles are the engine's poll.
-	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_ALT)
 	# The talk rows ride the same sampler; the dispatch gates, the capture and
 	# the line editor are the engine's chat entry, its talk-key debounce and
 	# flood on the main-frame counter (engine hud/hud_chat_entry.h
@@ -655,7 +654,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	for row in HudChatEntry.ROW_COUNT:
 		if ControlsBindings.pressed(HudChatEntry.row_token(row)):
 			talk_rows |= 1 << row
-	_chat.poll_rows(talk_rows, gameplay_input_active, hud_keys_chorded, sim,
+	_chat.poll_rows(talk_rows, gameplay_input_active, sim,
 			Strings.get_table(Strings.TABLE_GAMETEXT), sim.get_main_frame_counter())
 	_game_hud.set_chat_input(_chat, sim.is_mp_session())
 	var rows_down := 0
@@ -665,7 +664,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# The mousescale row's step direction is its fire's sign bit (Shift on a
 	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
 	var toggle_events := _toggles.poll(rows_down,
-			hud_keys_chorded, gameplay_input_active, sim.is_mp_session(),
+			gameplay_input_active, sim.is_mp_session(),
 			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
 			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
 			ControlsBindings.model().is_token_fire_signed(
@@ -1249,9 +1248,9 @@ func set_menu_pause(paused: bool) -> void:
 
 ## One hudcolor poll step over pre-sampled device state (the seam the tests
 ## drive); every other row idle.
-func poll_hud_color_edge(color_down: bool, chorded: bool, active: bool) -> void:
+func poll_hud_color_edge(color_down: bool, active: bool) -> void:
 	_apply_toggle_events(_toggles.poll(
-			(1 << HudToggles.ROW_HUD_COLOR) if color_down else 0, chorded, active,
+			(1 << HudToggles.ROW_HUD_COLOR) if color_down else 0, active,
 			false, false))
 
 
@@ -1265,14 +1264,14 @@ func cycle_hud_color() -> void:
 func poll_look_rows(flip_down: bool, scale_down: bool, negative: bool, active: bool) -> void:
 	var rows_down := ((1 << HudToggles.ROW_FLIP_MOUSE) if flip_down else 0) \
 			| ((1 << HudToggles.ROW_MOUSE_SCALE) if scale_down else 0)
-	_apply_toggle_events(_toggles.poll(rows_down, false, active, false, false, true,
+	_apply_toggle_events(_toggles.poll(rows_down, active, false, false, true,
 			false, false, negative))
 
 
 ## One huddetail poll step (the seam the tests drive); every other row idle.
-func poll_hud_detail_edge(detail_down: bool, chorded: bool, active: bool) -> void:
+func poll_hud_detail_edge(detail_down: bool, active: bool) -> void:
 	_apply_toggle_events(_toggles.poll(
-			(1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0, chorded, active,
+			(1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0, active,
 			false, false))
 
 

@@ -279,10 +279,12 @@ func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> vo
 
 	var detail_after := hud.hud_detail_level()
 	await _tap_with_shift(KEY_F6)
-	assert_eq(hud.hud_detail_level(), detail_after,
-			"Shift+F6 is consumed by the shell's debug picker.")
+	# Shift held gates no row: the key scan's fallback pass fires huddetail on
+	# Shift+F6 as on F6 (engine hud::HudKeyEdge carries the witness).
+	assert_eq(hud.hud_detail_level(), HudOverlay.next_hud_detail_level(detail_after),
+			"Shift+F6 cycles huddetail like a bare F6")
 	assert_eq(hud.hud_color_index(), color_before,
-			"a chorded press never cycles a HUD row")
+			"hudcolor's Ctrl+F6 wants Ctrl")
 	assert_not_null(shell.find_child("PickToast", true, false),
 			"the chord landed on the debug picker (every attempt confirms with a toast)")
 

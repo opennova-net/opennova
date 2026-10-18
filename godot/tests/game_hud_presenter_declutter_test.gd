@@ -40,25 +40,20 @@ func test_huddetail_edge_cycles_and_wraps_the_live_level() -> void:
 			"a fresh presenter's live level is the persisted config value")
 
 	# A plain down edge cycles once; holding the key does not repeat.
-	presenter.poll_hud_detail_edge(true, false, true)
+	presenter.poll_hud_detail_edge(true, true)
 	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
 			"the down edge cycles the level once")
-	presenter.poll_hud_detail_edge(true, false, true)
+	presenter.poll_hud_detail_edge(true, true)
 	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
 			"holding the key does not re-cycle")
 
 	# Held across a closed gate window: the latch rides the UNGATED state.
-	presenter.poll_hud_detail_edge(true, false, false)
-	presenter.poll_hud_detail_edge(true, false, true)
+	presenter.poll_hud_detail_edge(true, false)
+	presenter.poll_hud_detail_edge(true, true)
 	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
 			"a press held across a gate window cannot re-fire")
 
-	# A chorded press (our debug picks ride Shift+F6) never cycles.
-	presenter.poll_hud_detail_edge(false, false, true)
-	presenter.poll_hud_detail_edge(true, true, true)
-	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
-			"a chorded press never cycles")
-	presenter.poll_hud_detail_edge(false, false, true)
+	presenter.poll_hud_detail_edge(false, true)
 
 	# Three more cycles are the identity: level + 1 wraps past 3 to 0.
 	for i in range(3):

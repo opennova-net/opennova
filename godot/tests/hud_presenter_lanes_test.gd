@@ -53,25 +53,22 @@ func _font_overlay() -> HudOverlay:
 # @0x49939a].
 func test_message_log_toggle_edge() -> void:
 	var toggles := HudToggles.new()
-	var poll := func(down: bool, chorded: bool, active: bool) -> int:
+	var poll := func(down: bool, active: bool) -> int:
 		return toggles.poll((1 << HudToggles.ROW_OLD_MESSAGES) if down else 0,
-				chorded, active, false, false)
-	assert_eq(poll.call(true, false, true),
+				active, false, false)
+	assert_eq(poll.call(true, true),
 			HudToggles.EVENT_MESSAGE_LOG_TOGGLED | HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED)
 	assert_true(toggles.is_message_log_open(), "The first down-edge opens the window.")
-	assert_eq(poll.call(true, false, true), 0, "A held key does not re-toggle.")
-	poll.call(false, false, true)
-	poll.call(true, true, true)
-	assert_true(toggles.is_message_log_open(), "A chorded press is ignored.")
-	poll.call(false, false, true)
-	poll.call(true, false, false)
+	assert_eq(poll.call(true, true), 0, "A held key does not re-toggle.")
+	poll.call(false, true)
+	poll.call(true, false)
 	assert_true(toggles.is_message_log_open(),
 			"A press while gameplay input is inactive is ignored.")
-	poll.call(false, false, true)
-	poll.call(true, false, true)
+	poll.call(false, true)
+	poll.call(true, true)
 	assert_false(toggles.is_message_log_open(), "The next down-edge closes the window.")
-	poll.call(false, false, true)
-	poll.call(true, false, true)
+	poll.call(false, true)
+	poll.call(true, true)
 	assert_true(toggles.is_message_log_open())
 	toggles.reset_mission()
 	assert_false(toggles.is_message_log_open(), "reset_mission() clears the flag.")
@@ -148,8 +145,8 @@ func test_board_page_keys_and_chat_line_gates() -> void:
 	hud.reset_scoreboard_page()
 	var chat := HudChatEntry.new()
 	var every_row := (1 << HudChatEntry.ROW_COUNT) - 1
-	chat.poll_rows(0, true, false, null, null, 100)
-	chat.poll_rows(every_row, true, false, null, null, 101)
+	chat.poll_rows(0, true, null, null, 100)
+	chat.poll_rows(every_row, true, null, null, 101)
 	assert_false(chat.is_capturing(), "No session, no chat line.")
 	var before := hud.get_draw_list_stats().glyphs
 	hud.set_frame_clocks(101, 101, 101, 101)

@@ -31,7 +31,7 @@ func test_quit_dialog_keys_and_status_page_keys() -> void:
 	assert_eq(toggles.quit_dialog_key(y, true, y, n, r), 0,
 			"no dialog: the chain goes on")
 	# The listen host's ToggleServer row flips the view in a session.
-	assert_eq(toggles.poll(1 << HudToggles.ROW_TOGGLE_SERVER, false, true, true,
+	assert_eq(toggles.poll(1 << HudToggles.ROW_TOGGLE_SERVER, true, true,
 			false, true, true, true), HudToggles.EVENT_SERVER_STATUS_VIEW_TOGGLED)
 	assert_true(toggles.is_server_status_view())
 	# Esc with nothing open opens the quit dialog on the view.
@@ -64,13 +64,13 @@ func test_playerlist_takes_the_score_list_on_the_view() -> void:
 	var toggles := HudToggles.new()
 	var row := 1 << HudToggles.ROW_PLAYER_LIST
 	# Out of a session the playerlist action does nothing.
-	assert_eq(toggles.poll(row, false, true, false, false, true, true, true), 0)
+	assert_eq(toggles.poll(row, true, false, false, true, true, true), 0)
 	assert_false(toggles.is_scoreboard_open())
-	toggles.poll(0, false, true, true, false, true, true, true)
-	toggles.poll(1 << HudToggles.ROW_TOGGLE_SERVER, false, true, true, false, true,
+	toggles.poll(0, true, true, false, true, true, true)
+	toggles.poll(1 << HudToggles.ROW_TOGGLE_SERVER, true, true, false, true,
 			true, true)
-	toggles.poll(0, false, true, true, false, true, true, true)
-	assert_eq(toggles.poll(row, false, true, true, false, true, true, true),
+	toggles.poll(0, true, true, false, true, true, true)
+	assert_eq(toggles.poll(row, true, true, false, true, true, true),
 			HudToggles.EVENT_SERVER_STATUS_SCORE_LIST_TOGGLED)
 	assert_true(toggles.is_server_status_score_list_open())
 	assert_false(toggles.is_scoreboard_open())
