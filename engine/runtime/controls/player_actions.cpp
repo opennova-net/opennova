@@ -217,13 +217,21 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// ToSpecial's held state is the binding sampler's, its keys under the
 	// scan's first match (BindingSet::pressed_key); the handler itself reads
 	// the keys raw (g_InputState.keyState), and a release whose press another
-	// row took is D-CTRL-9's. An edge dispatches only with captured gameplay
+	// row took is D-CTRL-9's. A press dispatches only with captured gameplay
 	// input and under the death screen's binding scan, like the other weapon
-	// rows, and the latch follows the keys regardless.
-	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
+	// rows. The release pass has neither gate: a key whose press latch is set
+	// and that reads up dispatches its release row whenever the input frame
+	// runs, over a screen too, unless an open text line holds the keyboard,
+	// which clears the latch without the dispatch. The latch follows the keys
+	// regardless.
+	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181;
+	//  Input_ProcessKeyboardEvents, the release pass @0x49D249..0x49D2B9 (the
+	//  capture-mode skip of the queue @0x49D29F)]
 	frame.to_special_held = source.pressed("ToSpecial");
-	frame.to_special_edge = frame.to_special_held != to_special_was_down_ && captured &&
-			admitted("ToSpecial") && gate.simulation_available;
+	if (frame.to_special_held && !to_special_was_down_)
+		frame.to_special_edge = captured && admitted("ToSpecial") && gate.simulation_available;
+	else if (!frame.to_special_held && to_special_was_down_)
+		frame.to_special_edge = !gate.keyboard_captured && gate.simulation_available;
 	to_special_was_down_ = frame.to_special_held;
 	for (std::size_t i = 0; i < std::size(kRows); ++i) {
 		const auto &row = kRows[i];

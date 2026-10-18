@@ -654,6 +654,35 @@ bool test_menu_freezes_the_use_hold() {
 	return true;
 }
 
+// The ToSpecial release pass has no capture or mode gate: a release made over
+// a screen that holds the mouse still queues its edge (the session's
+// dispatcher head then drops it for a dead player, under the deploy hold and
+// once the round is over); an open text line drops it. The press keeps its
+// gates. [orig: Input_ProcessKeyboardEvents @0x49D249..0x49D2B9, @0x49D29F]
+bool test_to_special_release_over_a_screen() {
+	Keys keys;
+	PlayerActionPoll gate;
+	gate.active = true;
+	gate.captured = true;
+	gate.simulation_available = true;
+	PlayerActions actions;
+	keys.hold("ToSpecial", 'F');
+	CHECK(actions.poll(keys, gate).to_special_edge);
+	PlayerActionPoll screen = gate;
+	screen.active = false;
+	screen.captured = false;
+	CHECK(!actions.poll(keys, screen).to_special_edge);
+	keys.release("ToSpecial");
+	CHECK(actions.poll(keys, screen).to_special_edge); // the release, over the screen
+	keys.hold("ToSpecial", 'F');
+	CHECK(!actions.poll(keys, screen).to_special_edge); // no press there
+	keys.release("ToSpecial");
+	PlayerActionPoll typing = gate;
+	typing.keyboard_captured = true;
+	CHECK(!actions.poll(keys, typing).to_special_edge); // the text line drops it
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
@@ -664,7 +693,7 @@ int main() {
 			test_live_binding_modifier_remap_and_use_stream,
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
 			test_wheel_remainder_dispatches_whole_notches,
-			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release, test_menu_freezes_the_use_hold,
+			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release, test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
 			test_held_use_runs_the_arm_every_frame})
