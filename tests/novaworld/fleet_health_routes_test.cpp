@@ -10,14 +10,24 @@
 //     without a pair), the release's images and whether it runs others (true, false,
 //     null), its static address, the live servers on its slots;
 //   - GET /api/admin/fleet/machines/<id>: refused without an admin, 404 for no machine, the
-//     machine, its moves oldest first (the row's making's `from` null, a log stream's note),
-//     its trees with their manifests' totals (null for a tree the service does not hold);
-//   - a server's `tick` in the admin's fleet view, never in its owner's JSON.
+//     machine with its slot holders' servers named, their ports and ticks (the fleet view's
+//     holders without), its moves oldest first (the row's making's `from` null, a log
+//     stream's note), its trees with their manifests' totals (null for a tree the service
+//     does not hold);
+//   - a server's `tick` in the admin's fleet view, never in its owner's JSON;
+//   - GET /api/admin/attention: refused without an admin; the findings over these rows in
+//     their order with their links (no lobby the danger until one registers; a server
+//     whose data could not be fetched at its last starts, until one runs), no alarm
+//     read on the local stack; a deployment's (a second listener over CloudWatch behind
+//     a stub CommandRunner, infra_aws_stub.h): DescribeAlarms' form (the prefix, ALARM),
+//     the firing alarms by name with their times, the 20 s cache, AWS's refusal a warn
+//     finding in its own words and no credential.
 
 #include "auth.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_routes.h"
 #include "http_listener.h"
+#include "infra/alarm_store.h"
 #include "net_http.h"
 #include "net_sockets.h"
 #include "server_config.h"
@@ -25,6 +35,9 @@
 #include <net/novaworld/db/database.h>
 
 #include <crow/json.h>
+#include <net/novaworld/lobby_repository.h>
+
+#include "infra_aws_stub.h"
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -40,6 +53,7 @@
 namespace net = opennova::net;
 namespace nws = opennova::novaworld_server;
 namespace hosted = opennova::novaworld_server::hosted;
+namespace infra = opennova::novaworld_server::infra;
 using opennova::db::BindValue;
 using opennova::db::ConnectionPool;
 using opennova::db::Database;
@@ -63,11 +77,17 @@ struct Rows {
 };
 
 struct Harness {
-	uint16_t port = 0;
+	uint16_t port = 0; // the local stack's: no alarm read
+	uint16_t cloud_port = 0; // a deployment's: its alarms read through the stub
 	Rows rows;
+	infra_stub::AwsStub *stub = nullptr;
+	int64_t *steady_ms = nullptr; // the cloud's alarms' cache clock
 
 	net::HttpReply get(const std::string &path, bool admin = true) const {
-		const std::string url = "http://127.0.0.1:" + std::to_string(port) + path;
+		return get_at(port, path, admin);
+	}
+	net::HttpReply get_at(uint16_t at, const std::string &path, bool admin = true) const {
+		const std::string url = "http://127.0.0.1:" + std::to_string(at) + path;
 		std::vector<std::string> headers;
 		if (admin)
 			headers.push_back(kBearer);
@@ -310,6 +330,164 @@ int test_machine_page(Harness &h) {
 	return 0;
 }
 
+// Two alarms in ALARM as DescribeAlarms answers them: one moved into ALARM before its
+// reason's last update, one naming only its update.
+constexpr const char *kAlarms =
+		R"(<DescribeAlarmsResponse xmlns="http://monitoring.amazonaws.com/doc/2010-08-01/">)"
+		R"(<DescribeAlarmsResult><MetricAlarms>)"
+		R"(<member><AlarmName>opennova-prod-machines-stuck</AlarmName>)"
+		R"(<AlarmDescription>A machine is stuck (the admin Attention list).</AlarmDescription>)"
+		R"(<StateValue>ALARM</StateValue>)"
+		R"(<StateTransitionedTimestamp>2026-10-18T12:00:00.250Z</StateTransitionedTimestamp>)"
+		R"(<StateUpdatedTimestamp>2026-10-18T12:05:00.000Z</StateUpdatedTimestamp></member>)"
+		R"(<member><AlarmName>opennova-prod-db-cpu</AlarmName><StateValue>ALARM</StateValue>)"
+		R"(<StateUpdatedTimestamp>2026-10-18T11:00:00Z</StateUpdatedTimestamp></member>)"
+		R"(</MetricAlarms></DescribeAlarmsResult>)"
+		R"(<ResponseMetadata><RequestId>0f1e</RequestId></ResponseMetadata>)"
+		R"(</DescribeAlarmsResponse>)";
+
+int test_attention(Harness &h, ConnectionPool &pool) {
+	TEST_EXPECT(h.get("/api/admin/attention", false).code == 401);
+	auto reply = h.get("/api/admin/attention");
+	auto json = json_of(reply, 200);
+	TEST_EXPECT(json && no_store(reply));
+	// No lobby takes clients (danger), a server on the reporting machine late (warn), a
+	// machine on an older image (info, the fleet's).
+	const auto &findings = json["findings"];
+	TEST_EXPECT(findings.size() == 3);
+	TEST_EXPECT(str(findings[0]["level"]) == "danger" && str(findings[0]["source"]) == "no_lobby" &&
+			str(findings[0]["subject"]) == "The lobby" &&
+			str(findings[0]["link"]) == "/admin/infrastructure/programs/lobby" &&
+			is_null(findings[0]["since"]));
+	TEST_EXPECT(str(findings[1]["level"]) == "warn" && str(findings[1]["source"]) == "late_ticks" &&
+			str(findings[1]["link"]) ==
+					"/admin/fleet/machines/" + std::to_string(h.rows.reporting) &&
+			str(findings[1]["text"])
+							.find("Server " + std::to_string(h.rows.server) + " (42 late)") !=
+					std::string::npos);
+	TEST_EXPECT(str(findings[2]["level"]) == "info" &&
+			str(findings[2]["source"]) == "outdated_image" &&
+			str(findings[2]["link"]) == "/admin/fleet?tab=roll");
+	TEST_EXPECT(json["alarms_read"].t() == crow::json::type::False && json["alarms"].size() == 0);
+	TEST_EXPECT(str(json["checked_at"]).size() == 20 && str(json["checked_at"]).back() == 'Z');
+
+	// A lobby registers: no danger left.
+	{
+		auto db = pool.acquire();
+		opennova::lobbydb::register_instance(*db, "127.0.0.1:7598");
+	}
+	json = json_of(h.get("/api/admin/attention"), 200);
+	TEST_EXPECT(json && json["findings"].size() == 2);
+	for (const auto &f : json["findings"])
+		TEST_EXPECT(str(f["level"]) != "danger");
+
+	// A server whose data could not be fetched at its last three starts, the first
+	// 20 min ago (a start that ran before them ends the run back; one under way
+	// after them breaks nothing): a warn on the server with its data set, the
+	// trees its last start pinned and hostd's last reason. Once a start runs, none.
+	int64_t unfetched = 0;
+	{
+		auto db = pool.acquire();
+		unfetched = db->query("INSERT INTO hosted_servers (state, game_name, max_players, "
+							  "time_limit, kill_limit, max_score, respawn, start_delay, missions, "
+							  "generation, provider, data_set_id) VALUES ('provisioning', "
+							  "'Unfetched', 16, 30, 0, 0, 0, 0, 'm.bms', 5, 'docker', (SELECT id "
+							  "FROM data_sets WHERE display_name = 'Joint Operations' ORDER BY id "
+							  "LIMIT 1)) RETURNING id;")
+							.front()
+							.as_int(0)
+							.value_or(0);
+		db->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, "
+				 "base_tree_id, expansion_tree_id, running_at, ended_at, exit_code, cause, "
+				 "reason) VALUES "
+				 "($1, 1, 99, 0, 41, NULL, now() - interval '39 minutes', now() - interval '30 "
+				 "minutes', 3, 'crash', ''), "
+				 "($1, 2, 99, 0, 41, NULL, NULL, now() - interval '20 minutes', 125, "
+				 "'data_unavailable', 'its data could not be fetched: first'), "
+				 "($1, 3, 99, 1, 41, NULL, NULL, now() - interval '12 minutes', 125, "
+				 "'data_unavailable', 'its data could not be fetched: second'), "
+				 "($1, 4, 99, 2, 41, 42, NULL, now() - interval '5 minutes', 125, "
+				 "'data_unavailable', 'its data could not be fetched: aws s3 sync exited 1: "
+				 "AccessDenied'), "
+				 "($1, 5, 99, 0, 41, 42, NULL, NULL, NULL, NULL, '');",
+				{ BindValue(unfetched) });
+	}
+	json = json_of(h.get("/api/admin/attention"), 200);
+	bool warned = false;
+	for (const auto &f : json["findings"])
+		warned = warned ||
+				(str(f["source"]) == "data_unavailable" && str(f["level"]) == "warn" &&
+						str(f["subject"]) == "Server " + std::to_string(unfetched) + " (Unfetched)" &&
+						str(f["link"]) == "/admin/fleet/" + std::to_string(unfetched) &&
+						str(f["text"]) ==
+								"Its data could not be fetched at its last 3 starts, the first 20 "
+								"min ago (Joint Operations, trees 41 and 42); hostd's last reason: "
+								"aws s3 sync exited 1: AccessDenied.");
+	TEST_EXPECT(json && warned);
+	{
+		auto db = pool.acquire();
+		db->exec("UPDATE hosted_server_starts SET running_at = now() WHERE server_id = $1 AND "
+				 "generation = 5;",
+				{ BindValue(unfetched) });
+	}
+	json = json_of(h.get("/api/admin/attention"), 200);
+	TEST_EXPECT(json && json["findings"].size() == 2);
+	{
+		auto db = pool.acquire();
+		db->exec("DELETE FROM hosted_servers WHERE id = $1;", { BindValue(unfetched) });
+	}
+	return 0;
+}
+
+int test_alarms(Harness &h) {
+	h.stub->clear();
+	auto reply = h.get_at(h.cloud_port, "/api/admin/attention");
+	auto json = json_of(reply, 200);
+	TEST_EXPECT(json && json["alarms_read"].t() == crow::json::type::True);
+	const auto &alarms = json["alarms"];
+	TEST_EXPECT(alarms.size() == 2);
+	TEST_EXPECT(str(alarms[0]["name"]) == "opennova-prod-db-cpu" &&
+			str(alarms[0]["state_since"]) == "2026-10-18T11:00:00Z" &&
+			str(alarms[0]["description"]).empty());
+	TEST_EXPECT(str(alarms[1]["name"]) == "opennova-prod-machines-stuck" &&
+			str(alarms[1]["state_since"]) == "2026-10-18T12:00:00Z" &&
+			str(alarms[1]["description"]) == "A machine is stuck (the admin Attention list).");
+	// The form: this deployment's alarms by their prefix, the firing ones alone.
+	bool asked = false;
+	for (const infra_stub::Call &c : h.stub->calls())
+		if (c.key == "monitoring DescribeAlarms") {
+			const std::string form = infra_stub::config_line(c.config, "data-raw");
+			asked = form.find("Action=DescribeAlarms") != std::string::npos &&
+					form.find("AlarmNamePrefix=opennova-prod-") != std::string::npos &&
+					form.find("StateValue=ALARM") != std::string::npos &&
+					form.find("AlarmTypes.member.1=MetricAlarm") != std::string::npos;
+		}
+	TEST_EXPECT(asked && h.stub->count("monitoring DescribeAlarms") == 1);
+	// Within 20 s the read is answered again; past it, AWS is asked again.
+	TEST_EXPECT(json_of(h.get_at(h.cloud_port, "/api/admin/attention"), 200));
+	TEST_EXPECT(h.stub->count("monitoring DescribeAlarms") == 1);
+	*h.steady_ms += infra::AlarmStore::kCacheMs + 1;
+	h.stub->replies["monitoring DescribeAlarms"] = infra_stub::answer(403,
+			R"(<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code>)"
+			R"(<Message>User is not authorized to perform: cloudwatch:DescribeAlarms</Message>)"
+			R"(</Error><RequestId>1a2b</RequestId></ErrorResponse>)");
+	reply = h.get_at(h.cloud_port, "/api/admin/attention");
+	json = json_of(reply, 200);
+	TEST_EXPECT(json && json["alarms_read"].t() == crow::json::type::False &&
+			json["alarms"].size() == 0);
+	TEST_EXPECT(h.stub->count("monitoring DescribeAlarms") == 2);
+	bool told = false;
+	for (const auto &f : json["findings"])
+		told = told ||
+				(str(f["subject"]) == "CloudWatch alarms" && str(f["level"]) == "warn" &&
+						str(f["source"]) == "unknown" && is_null(f["link"]) &&
+						str(f["text"]).find("AccessDenied") != std::string::npos);
+	TEST_EXPECT(told);
+	TEST_EXPECT(body_text(reply).find(infra_stub::kSecret) == std::string::npos &&
+			body_text(reply).find(infra_stub::kToken) == std::string::npos);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -319,6 +497,7 @@ int main(int argc, char **argv) {
 	int rc = 1;
 	{
 		test_temp::TempDir temp("fleet_health_routes");
+		test_temp::TempDir scratch("fleet_health_routes_scratch");
 		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
 		ConnectionPool pool(database.options());
 		test_redis::TestRedis redis;
@@ -333,12 +512,34 @@ int main(int argc, char **argv) {
 		config.static_dir = temp.path / "static";
 		std::filesystem::create_directories(config.templates_dir);
 
+		// The local stack's: no AWS, no alarm read.
+		infra_stub::AwsStub stub;
+		infra::AlarmStore local_alarms(stub, infra::AlarmConfig{});
 		nws::HttpListener http(pool, redis.pool());
 		http.set_fleet_release({ kAmiNew, kHostd });
+		http.set_alarm_store(&local_alarms);
 		TEST_EXPECT(http.start(config));
+		// A deployment's: its alarms through the stub, on a clock the test steps.
+		stub.replies["credentials"] = infra_stub::answer(200, infra_stub::kCredentials);
+		stub.replies["monitoring DescribeAlarms"] = infra_stub::answer(200, kAlarms);
+		infra::AlarmConfig alarm_config;
+		alarm_config.aws.region = "us-east-1";
+		alarm_config.aws.credentials_uri = "/v2/credentials/0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+		alarm_config.aws.scratch_dir = scratch.root();
+		alarm_config.prefix = "opennova-prod-";
+		int64_t steady_ms = 1000;
+		infra::AlarmStore cloud_alarms(stub, alarm_config, [&steady_ms] { return steady_ms; });
+		TEST_EXPECT(cloud_alarms.unavailable().empty() && !local_alarms.unavailable().empty());
+		nws::HttpListener cloud(pool, redis.pool());
+		cloud.set_fleet_release({ kAmiNew, kHostd });
+		cloud.set_alarm_store(&cloud_alarms);
+		TEST_EXPECT(cloud.start(config));
 
 		Harness harness;
 		harness.port = http.bound_port();
+		harness.cloud_port = cloud.bound_port();
+		harness.stub = &stub;
+		harness.steady_ms = &steady_ms;
 		{
 			auto db = pool.acquire();
 			harness.rows = plant(*db);
@@ -356,8 +557,15 @@ int main(int argc, char **argv) {
 		std::printf("-- machine_page\n");
 		if (rc == 0 && test_machine_page(harness) != 0)
 			rc = 1;
+		std::printf("-- attention\n");
+		if (rc == 0 && test_attention(harness, pool) != 0)
+			rc = 1;
+		std::printf("-- alarms\n");
+		if (rc == 0 && test_alarms(harness) != 0)
+			rc = 1;
 		if (rc != 0)
 			std::fprintf(stderr, "FAIL\n");
+		cloud.stop();
 		http.stop();
 	}
 	net::shutdown();

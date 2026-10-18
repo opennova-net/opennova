@@ -10,6 +10,7 @@
 // the root) is refused. Platform plumbing, not a port.
 
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <string>
 #include <string_view>
@@ -39,5 +40,9 @@ struct XmlNode {
 // `text` read into `root` (its root element); false with `error` when it is no
 // well-formed document of elements.
 bool parse_xml(std::string_view text, XmlNode &root, std::string &error);
+
+// A Query reply's time, "2026-10-18T12:00:00Z" (a fraction allowed: CloudWatch's
+// GetMetricData and DescribeAlarms), as Unix seconds; -1 for text that is none.
+int64_t iso_seconds(std::string_view text);
 
 } // namespace opennova::novaworld_server::infra

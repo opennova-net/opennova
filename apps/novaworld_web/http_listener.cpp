@@ -17,6 +17,7 @@
 #include "hosted/net_cidr.h"
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
+#include "infra/attention_routes.h"
 #include "infra/infra_routes.h"
 #include "infra/log_routes.h"
 #include "infra/usage_routes.h"
@@ -303,6 +304,7 @@ struct HttpListener::Impl {
 			infra(access, pool),
 			logs(access, pool, redis),
 			usage(access, pool, redis),
+			attention(access, pool, redis),
 			data_sets(access, pool),
 			releases(access, pool) {}
 
@@ -351,6 +353,8 @@ struct HttpListener::Impl {
 	infra::LogRoutes logs;
 	// What everything uses, and the programs (infra/usage_routes.h).
 	infra::UsageRoutes usage;
+	// What needs an admin (infra/attention_routes.h).
+	infra::AttentionRoutes attention;
 	// The hosted data sets' and the update releases' routes over the object store
 	// (data_sets/data_set_routes.h, data_sets/release_routes.h).
 	hosted::DataSetRoutes data_sets;
@@ -448,6 +452,9 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->logs.register_routes(impl_->app);
 	impl_->usage.configure(infra_, metrics_store_, fleet_slot_memory_mb_, fleet_slot_cpus_);
 	impl_->usage.register_routes(impl_->app);
+	impl_->attention.configure(
+			alarm_store_, impl_->hosted_servers.hosting_on(), fleet_placement_, fleet_release_);
+	impl_->attention.register_routes(impl_->app);
 	impl_->data_sets.set_store(object_store_);
 	impl_->data_sets.register_routes(impl_->app);
 	impl_->releases.set_store(object_store_);
