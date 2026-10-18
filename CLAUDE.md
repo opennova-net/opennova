@@ -7,13 +7,10 @@ easier to relay than to rediscover.
 
 ## Map
 
-- `engine/` — the engine: the portable, Godot-free C++ core (ADR 0028; namespace
-  `opennova`). Five groups, which since ADR 0029 are also the CMake build targets:
-  `base/`, `formats/`, `runtime/` (including `inmatch` and `replication`, ADR 0043 d4),
-  `net/` (the wire only; it never includes or links `runtime/`) and `editor/` (the
-  OpenNova Editor's portable core above `runtime/`, ADR 0046; nothing below it includes
-  or links it). `engine/` is the one public include root: `#include <runtime/world/x.h>`
-  (ADR 0040). See `engine/CLAUDE.md`.
+- `engine/` — the engine: the portable, Godot-free C++ core (namespace `opennova`), five
+  groups that are also the build targets (`base/`, `formats/`, `runtime/`, `net/`,
+  `editor/`) and the one public include root (`#include <runtime/world/x.h>`). See
+  `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
   `game/` (the game shell plus its game-level GDScript runtime),
@@ -151,9 +148,7 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   separate matter, done sparingly with no load/abuse — that caution is not a license to
   write non-wire-compatible code.) See [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md)
   and ADRs 0009–0012.
-- "Host" means the game/server host and nothing else (CONTEXT.md "Host / Joiner");
-  front-ends are Shells, a lib's embedding app is its embedder. Vocabulary is a
-  review concern, not a lint (ADR 0043 retired `host_lint.py`).
+- "Host" means the game/server host and nothing else (CONTEXT.md "Host / Joiner").
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
   don't bundle pre-JO Delta Force titles; say pre-1.0/experimental, never
   "production-ready"; no em dashes.
@@ -180,15 +175,10 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   and what is next": the maturity program is closed, work now runs as retail-fidelity
   slices off [docs/divergence-ledger.md](docs/divergence-ledger.md), and this page routes
   each domain to the record that names its next step. It is a router, not a priority list.
-- [docs/maturity-program.md](docs/maturity-program.md) — the maturity program
-  (pre-reimplementation rearchitecture), CLOSED 2026-07-12 with the freeze lifted:
-  the dashboard, close-out dispositions, and the permanent enforcement instruments
-  live there. ADRs 0015, 0017, 0018, 0022 and 0023 carry the standing rules every
-  slice still builds under (serve mode, with ADR 0045 retiring the ONED product and
-  ADR 0048 the launcher, which ADR 0054 brought back as the OpenNova Switcher; typed
-  records, public-API testability, divergence burn-down,
-  render parity); 0016 and 0024 are historical (docs/README.md), their surviving
-  rules carried by ADR 0042's boundary rule and ADR 0029's group targets.
+- [docs/maturity-program.md](docs/maturity-program.md) — the closed maturity program's
+  record and its permanent enforcement instruments. ADRs 0015, 0017, 0018, 0022 and 0023
+  carry the standing rules every slice still builds under (serve mode, typed records,
+  public-API testability, divergence burn-down, render parity).
 - [.agents/README.md](.agents/README.md) — agent runbooks for networking work:
   architecture guardrails, retail interop, IDA witness rules, debugging, and task templates.
 - [docs/README.md](docs/README.md) — documentation index: ADRs, RE records by domain.
