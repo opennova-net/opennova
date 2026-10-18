@@ -802,6 +802,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     // static slots are signed whole-unit coordinates carried in u16 storage
     // (their +1.707u radius pad absorbs the rounding [orig: the u16 tables
     // built @ 0x4b94cb]); dynamic slots store signed full 16.16.
+    // Pool 1's walk's best, kept or not: the shared ray record's last writer
+    // (ProjectileTrace::shared_ray_record).
+    ProjectileHit pool1_record;
+    bool pool1_walk_hit = false;
     auto trace_polygon_table = [&](const auto &slots, ProjectileHitClass hit_class,
                                    float slot_to_units, bool signed_word_coords,
                                    bool tie_wins = false) {
@@ -943,6 +947,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         eh.face_index = table_hit.section_face_index;
         eh.surface_type = table_hit.poly_type;
         eh.material_flags = table_hit.material_flags;
+        if (hit_class == ProjectileHitClass::DynamicEntity) {
+            pool1_record = eh;
+            pool1_walk_hit = true;
+        }
         consider(eh, table_hit.distance_q16, tie_wins);
     };
     // A visual-only MP client (mp_session && !projectile_authority) uses decoded
@@ -1100,7 +1108,34 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             eh.face_index = table_hit.section_face_index;
             eh.surface_type = table_hit.poly_type;
             eh.material_flags = table_hit.material_flags;
+            pool1_record = eh;
+            pool1_walk_hit = true;
             consider(eh, table_hit.distance_q16);
+        }
+    }
+
+    // The motors' shared ray record: a kept pool-2 hit takes the record pool
+    // 1's walk wrote after it, and its normals read that section and face on
+    // the kept entity's model, none past its bounds (the reflection's
+    // negated-velocity fallback) [orig: Physics_RaycastAgainstBoneCollision
+    // @0x4E5254..0x4E5276; Physics_ComputeReflectionForce @0x4E4416..0x4E449D].
+    if (trace.shared_ray_record && pool1_walk_hit && best.hit() &&
+        best.hit_class == ProjectileHitClass::StaticEntity) {
+        best.surface_type = pool1_record.surface_type;
+        best.material_flags = pool1_record.material_flags;
+        best.section_index = pool1_record.section_index;
+        best.bone_index = pool1_record.bone_index;
+        best.face_index = pool1_record.face_index;
+        best.normal_q16 = FixedVec3{};
+        best.local_normal_q16 = FixedVec3{};
+        const CollisionTargetView *kept = trace_target_view(world, best.geometry_entity);
+        int32_t local_n[3] = {};
+        int32_t world_n[3] = {};
+        if (kept != nullptr &&
+            collision_section_face_normal(*kept, best.section_index, best.face_index,
+                                          local_n, world_n)) {
+            best.normal_q16 = FixedVec3{world_n[0], world_n[1], world_n[2]};
+            best.local_normal_q16 = FixedVec3{local_n[0], local_n[1], local_n[2]};
         }
     }
 

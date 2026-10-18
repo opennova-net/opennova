@@ -561,6 +561,18 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
                                 uint32_t ammo_flags,
                                 CollisionPolygonHit &out_hit);
 
+// The reflection's face lookup on a struck entity's model: the face at a
+// section-local index of a section, within the section count and that
+// section's face count, its normal x 4 (`local_out`) and that rotated by the
+// section's matrix (`world_out`). False past either bound, where the
+// reflection keeps its negated-velocity normal.
+// [orig: Physics_ComputeReflectionForce @0x4E4310 -- the section bound
+//  @0x4E4416..0x4E442D, the face bound @0x4E4440..0x4E444D, the normal x 4
+//  @0x4E445E..0x4E4486, the rotation @0x4E449D]
+bool collision_section_face_normal(const CollisionTargetView &target, int32_t section,
+                                   int32_t section_face, int32_t local_out[3],
+                                   int32_t world_out[3]);
+
 // ----------------------------------------------------------------------------
 // Segment-vs-face-mesh query — the PROJECTILE hit test. Closest accepted face
 // across every enabled section; the sphere broad phase is the caller's.
@@ -875,6 +887,20 @@ struct ProjectileTrace {
     // [orig: Entity_UpdateGrenadePhysics @0x444522, Entity_UpdateSatchelPhysics
     //  @0x4486B2, Entity_UpdateClaymorePhysics @0x447664]
     bool owner_mount_exclusion = true;
+    // The throwable motors' two walks share one ray record. Each walk resets
+    // the kept distance to the ray's length, and its best face writes the
+    // face flags, the face byte, the section and the face (ray[21], [22],
+    // [31], [33]) whether or not the motor keeps it; the motor copies only the
+    // distance and the entity. So when pool 1's walk, the second, also hits,
+    // a kept pool-2 hit carries pool 1's record, and the hit's normals read
+    // that section and face on the KEPT entity's model (none past its
+    // bounds).
+    // [orig: Projectile_RaycastProximitySlots @0x4E5340, the reset
+    //  @0x4E534F; Physics_RaycastAgainstBoneCollision, the record
+    //  @0x4E5254..0x4E5276; the keeps: Entity_UpdateGrenadePhysics
+    //  @0x44461D..0x44467A, Entity_UpdateSatchelPhysics @0x4487B6..0x448808,
+    //  Entity_UpdateClaymorePhysics @0x447768..0x4477BA]
+    bool shared_ray_record = false;
 };
 
 struct ProjectileHit {

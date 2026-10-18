@@ -578,6 +578,38 @@ static bool point_in_collision_triangle(const int32_t point[3],
     return crossings == 1;
 }
 
+bool collision_section_face_normal(const CollisionTargetView &target, int32_t section,
+                                   int32_t section_face, int32_t local_out[3],
+                                   int32_t world_out[3]) {
+    if (target.model == nullptr || target.matrices == nullptr) return false;
+    const CollisionModel &model = *target.model;
+    if (section < 0 || section >= static_cast<int32_t>(model.sections.size())) return false;
+    const CollisionSection &sec = model.sections[static_cast<size_t>(section)];
+    if (section_face < 0 || section_face >= sec.face_count) return false;
+    const int32_t face_index = sec.face_start + section_face;
+    if (face_index < 0 || face_index >= static_cast<int32_t>(model.faces.size()))
+        return false;
+    const CollisionFace &face = model.faces[static_cast<size_t>(face_index)];
+    // The two mesh forms the narrow phases read: the indexed normal table, or
+    // the face's own embedded normal.
+    const bool indexed = !model.vertices.empty() && !model.normals.empty();
+    int16_t n[3] = {};
+    if (indexed) {
+        const int32_t normal_index = sec.normal_start + face.normal_index;
+        if (face.normal_index < 0 || normal_index < 0 ||
+            normal_index >= static_cast<int32_t>(model.normals.size()))
+            return false;
+        for (int axis = 0; axis < 3; ++axis)
+            n[axis] = model.normals[static_cast<size_t>(normal_index)].n[axis];
+    } else {
+        for (int axis = 0; axis < 3; ++axis) n[axis] = face.normal[axis];
+    }
+    for (int axis = 0; axis < 3; ++axis)
+        local_out[axis] = static_cast<int32_t>(n[axis]) << 2;
+    target.matrices[section].rotate_point(local_out, world_out);
+    return true;
+}
+
 bool collision_raycast_polygons(const CollisionTargetView &target,
                                 const CollisionRay &ray,
                                 int32_t segment_length_q16,

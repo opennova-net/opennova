@@ -605,6 +605,154 @@ void test_grenade_item_contact_backs_off_along_the_ray() {
     CHECK(to_fixed(round.pos.z) == 395176);
 }
 
+// A wall face across the lane (normal -x, the local x = 0 plane, `half` on y
+// and z) and, unless `wall_only`, a second face off the lane (normal +y, at
+// y = 5..6), in one section: the wall first or second (`wall_first`), each
+// with its own face byte.
+CollisionModel two_face_model(bool wall_first, bool wall_only, uint8_t wall_byte,
+                              uint8_t other_byte) {
+    CollisionModel model;
+    auto vertex = [&](double x, double y, double z) {
+        CollisionVertex value;
+        value.p[0] = to_fixed(static_cast<float>(x));
+        value.p[1] = to_fixed(static_cast<float>(y));
+        value.p[2] = to_fixed(static_cast<float>(z));
+        model.vertices.push_back(value);
+    };
+    constexpr double half = 2.0;
+    vertex(0.0, -half, -half);
+    vertex(0.0, half, -half);
+    vertex(0.0, 0.0, half);
+    vertex(0.0, 5.0, 0.0);
+    vertex(1.0, 5.0, 0.0);
+    vertex(0.0, 5.0, 1.0);
+    CollisionNormal wall_normal;
+    wall_normal.n[0] = -16384;
+    wall_normal.dominant_axis = 4;
+    model.normals.push_back(wall_normal);
+    CollisionNormal other_normal;
+    other_normal.n[1] = 16384;
+    other_normal.dominant_axis = 2;
+    model.normals.push_back(other_normal);
+
+    CollisionFace wall;
+    wall.vertex_index[0] = 0;
+    wall.vertex_index[1] = 1;
+    wall.vertex_index[2] = 2;
+    wall.normal_index = 0;
+    wall.poly_type = wall_byte;
+    wall.min[1] = wall.min[2] = to_fixed(static_cast<float>(-half));
+    wall.max[1] = wall.max[2] = to_fixed(static_cast<float>(half));
+    CollisionFace other;
+    other.vertex_index[0] = 3;
+    other.vertex_index[1] = 4;
+    other.vertex_index[2] = 5;
+    other.normal_index = 1;
+    other.poly_type = other_byte;
+    other.plane_dist = -(5 << 16);
+    other.min[0] = 0;
+    other.max[0] = 1 << 16;
+    other.min[1] = 5 << 16;
+    other.max[1] = 5 << 16;
+    other.min[2] = 0;
+    other.max[2] = 1 << 16;
+    if (wall_only) {
+        model.faces.push_back(wall);
+    } else if (wall_first) {
+        model.faces.push_back(wall);
+        model.faces.push_back(other);
+    } else {
+        model.faces.push_back(other);
+        model.faces.push_back(wall);
+    }
+
+    CollisionSection section;
+    section.vertex_count = 6;
+    section.normal_count = 2;
+    section.face_count = static_cast<int32_t>(model.faces.size());
+    model.sections.push_back(section);
+    return model;
+}
+
+// The motors' two walks share one ray record: a grenade crossing a pool-2
+// wall at x = 14 and then a pool-1 wall at x = 18 keeps the nearer pool-2 hit,
+// but pool 1's walk, run second, has written its face's record (its byte 9,
+// section 0, face 1). The contact plays that byte (9 + 4), and the reflection
+// reads face 1 of the KEPT model: the pool-2 model's own off-lane face (normal
+// +y) turns the round sideways and keeps it going +x; a pool-2 model with no
+// face 1 leaves the reflection its negated-velocity normal, which at 10 u per
+// tick (the velocity normalized first) cancels the velocity outright. Alone,
+// the pool-2 wall reflects off its own face (vx flips, the round keeps
+// falling) and plays its own byte (3 + 4).
+// [orig: Projectile_RaycastProximitySlots @0x4E5340, the reset @0x4E534F;
+//  Physics_RaycastAgainstBoneCollision, the record @0x4E5254..0x4E5276;
+//  Entity_UpdateGrenadePhysics, the keeps @0x44461D..0x44467A, the
+//  reflection @0x444719, the byte @0x44473F; Physics_ComputeReflectionForce
+//  @0x4E4416..0x4E449D]
+void test_grenade_kept_pool2_hit_carries_the_pool1_record() {
+    enum class Case { kPool2Alone, kFaceInRange, kFaceOutOfRange };
+    const auto run = [](Case c) {
+        Rig rig(0);
+        rig.w.tables.ammo.entries[kAmmoGrenade].flags |= 0x80u; // no terrain leg
+        Entity near_seed;
+        near_seed.kind = EntityKind::Building;
+        near_seed.health = 100;
+        near_seed.position = Vec3{14.0f, 10.0f, 10.0f};
+        near_seed.yaw = 90; // identity model placement
+        near_seed.bound_radius = 12.0f;
+        const EntityHandle near_h = rig.w.registry.spawn(2, near_seed);
+        CollisionWorld collision;
+        collision.assign_entity(
+                near_h, collision.add_model(two_face_model(
+                                /*wall_first=*/true,
+                                /*wall_only=*/c == Case::kFaceOutOfRange, 3, 5)),
+                rig.w.registry.get(near_h)->registry_spawn_id);
+        if (c != Case::kPool2Alone) {
+            Entity far_seed;
+            far_seed.kind = EntityKind::Item;
+            far_seed.alive = true;
+            far_seed.position = Vec3{18.0f, 10.0f, 6.0f};
+            far_seed.yaw = 90;
+            far_seed.bound_radius = 12.0f;
+            const EntityHandle far_h = rig.w.registry.spawn(1, far_seed);
+            collision.assign_entity(
+                    far_h, collision.add_model(two_face_model(
+                                   /*wall_first=*/false, /*wall_only=*/false, 9, 7)));
+        }
+        collision.build_tick_tables(rig.w);
+        const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10.0f, 10.0f, 14.0f}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+        round.vel = Vec3{10.0f, 0.0f, -10.0f};
+        rig.w.round_sim.tick(rig.w, nullptr, &collision);
+        CHECK(round.bounce_count == 1);
+        CHECK(!rig.w.round_sim.impacts.empty());
+        const int tag = rig.w.round_sim.impacts.empty()
+                                ? -1
+                                : rig.w.round_sim.impacts.back().effect_tag;
+        switch (c) {
+        case Case::kPool2Alone:
+            CHECK(tag == 3 + 4);
+            CHECK(round.vel.x < 0.0f);
+            CHECK(round.vel.z < 0.0f);
+            break;
+        case Case::kFaceInRange:
+            CHECK(tag == 9 + 4);
+            CHECK(round.vel.x > 0.0f);
+            CHECK(round.vel.y > 0.0f);
+            break;
+        case Case::kFaceOutOfRange:
+            CHECK(tag == 9 + 4);
+            CHECK(round.vel.x == 0.0f && round.vel.y == 0.0f && round.vel.z == 0.0f);
+            break;
+        }
+    };
+    run(Case::kPool2Alone);
+    run(Case::kFaceInRange);
+    run(Case::kFaceOutOfRange);
+}
+
 // The grenade's pools-2/1 gates project the item's center onto the line along
 // its velocity over its horizontal speed, without dividing by that vector's
 // square length: a 45-degree throw lands the projected point 11.3 u past a
@@ -2463,6 +2611,7 @@ int main() {
     test_grenade_bounce_past_the_table_plays_the_obj_row();
     test_satchel_contact_presents_sound_only_and_no_water_gate();
     test_grenade_item_contact_backs_off_along_the_ray();
+    test_grenade_kept_pool2_hit_carries_the_pool1_record();
     test_grenade_gates_project_along_the_velocity();
     test_satchel_item_contact_restores_the_tick_start_pose();
     test_charge_lands_on_the_object_floor();

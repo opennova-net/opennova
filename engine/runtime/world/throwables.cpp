@@ -292,6 +292,8 @@ bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &
         r.consequence_mode == RoundConsequenceMode::VisualOnly;
     trace.shooter_wire_handle = r.shooter_handle;
     trace.owner_mount_exclusion = false;
+    // Its two walks share one ray record [orig: @0x44461D..0x44467A].
+    trace.shared_ray_record = true;
     if (ray_dir != nullptr && ray_length > 0) {
         trace.ray_dir_q16 = FixedVec3{ray_dir[0], ray_dir[1], ray_dir[2]};
         trace.ray_length_q16 = ray_length;
@@ -336,21 +338,28 @@ void fixed_normalize3(int32_t v[3]) {
 // left un-normalized; nothing renormalizes the result. The earlier float port
 // rescaled to 0.35 x |v_in| in 3-D, which popped near-vertical drops and
 // under-bounced fast horizontal hits.
+// The reflection's starting normal, the negated velocity at unit length
+// (zero for a still round), which a struck face's normal replaces; it is the
+// out-normal too when no face is found [orig: Physics_ComputeReflectionForce
+// @0x4E431D..0x4E43D1, fdivr flt_7C32BC @0x4e437d].
+void negated_unit_velocity(const MotorFrame &f, int32_t n[3]) {
+    n[0] = n[1] = n[2] = 0;
+    const double nvx = -static_cast<double>(f.vx);
+    const double nvy = -static_cast<double>(f.vy);
+    const double nvz = -static_cast<double>(f.vz);
+    const double len = std::sqrt(nvx * nvx + nvy * nvy + nvz * nvz);
+    if (len > 0.0) {
+        const double s = 65536.0 / len;
+        n[0] = static_cast<int32_t>(nvx * s);
+        n[1] = static_cast<int32_t>(nvy * s);
+        n[2] = static_cast<int32_t>(nvz * s);
+    }
+}
+
 void reflect_velocity(MotorFrame &f, const int32_t normal_q16[3]) {
     int32_t v[3] = {f.vx, f.vy, f.vz};
     int32_t n[3] = {normal_q16[0], normal_q16[1], normal_q16[2]};
-    if (n[0] == 0 && n[1] == 0 && n[2] == 0) {
-        const double nvx = -static_cast<double>(v[0]);
-        const double nvy = -static_cast<double>(v[1]);
-        const double nvz = -static_cast<double>(v[2]);
-        const double len = std::sqrt(nvx * nvx + nvy * nvy + nvz * nvz);
-        if (len > 0.0) {
-            const double s = 65536.0 / len; // [orig: fdivr flt_7C32BC @0x4e437d]
-            n[0] = static_cast<int32_t>(nvx * s);
-            n[1] = static_cast<int32_t>(nvy * s);
-            n[2] = static_cast<int32_t>(nvz * s);
-        }
-    }
+    if (n[0] == 0 && n[1] == 0 && n[2] == 0) negated_unit_velocity(f, n);
     const int32_t dot = static_cast<int32_t>(
             (static_cast<int64_t>(v[1]) * n[1] + static_cast<int64_t>(v[0]) * n[0] +
              static_cast<int64_t>(v[2]) * n[2]) >> 16);
@@ -660,9 +669,14 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
 // the sweep), whose decoded wire identity stands in for it on a visual client;
 // false for the object floor, whose ray[17] is the round itself. ray[18..20]
 // stay zero (the motors' memsets), so no mount is excluded.
+// `shared_ray_record`: the item sweep's two walks share one ray record
+// (ProjectileTrace::shared_ray_record); the slide walks one entity and the
+// object floor copies its kept record whole [orig: Physics_RaycastProximityEntities
+// @0x538350, its qmemcpy keeps].
 ProjectileHit charge_ray(World &world, CollisionWorld *collision, const LiveRound &r,
                          const FixedVec3 &start, const FixedVec3 &end, bool owner_slot,
-                         const int32_t dir[3], int32_t length, EntityHandle only_entity) {
+                         const int32_t dir[3], int32_t length, EntityHandle only_entity,
+                         bool shared_ray_record = false) {
     ProjectileHit none;
     if (collision == nullptr || length <= 0) return none;
     const CollisionWorld::RayDebugScope ray_scope(
@@ -683,6 +697,7 @@ ProjectileHit charge_ray(World &world, CollisionWorld *collision, const LiveRoun
     trace.ray_dir_q16 = FixedVec3{dir[0], dir[1], dir[2]};
     trace.ray_length_q16 = length;
     trace.only_entity = only_entity;
+    trace.shared_ray_record = shared_ray_record;
     return collision->trace_projectile(world, trace);
 }
 
@@ -874,20 +889,25 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         const int32_t dir[3] = {qmul(inv, f.vx), qmul(inv, f.vy), qmul(inv, f.vz)};
         const ProjectileHit hit = charge_ray(world, collision, r, start,
                                              FixedVec3{f.px, f.py, f.pz}, true, dir,
-                                             speed, EntityHandle{});
+                                             speed, EntityHandle{},
+                                             /*shared_ray_record=*/true);
         if (hit.hit() && hit.distance_q16 < speed) {
             // The struck entity: a registry row, or a decoded mover's verified
             // twin; a wire proxy without one reflects but cannot parent.
             const EntityHandle struck = hit.geometry_entity.valid() ? hit.geometry_entity
                                                                     : hit.wire_registry_twin;
+            // The stick test and the pose read the reflection's out-normal: the
+            // face's own (ProjectileHit::local_normal_q16), or, with no face
+            // found, the negated unit velocity the reflection starts from
+            // [orig: Physics_ComputeReflectionForce @0x4E43CA..0x4E43D1 /
+            //  @0x4E448A..0x4E4491; satchel @0x448858..0x4488AA; claymore
+            //  @0x447802..0x447850].
+            int32_t out[3] = {hit.local_normal_q16.x, hit.local_normal_q16.y,
+                              hit.local_normal_q16.z};
+            if (out[0] == 0 && out[1] == 0 && out[2] == 0) negated_unit_velocity(f, out);
             const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y, hit.normal_q16.z};
             reflect_velocity(f, n);
-            // The stick test and the pose read the reflection's out-normal, the
-            // face's own (ProjectileHit::local_normal_q16) [orig: satchel
-            // @0x448858..0x4488AA; claymore @0x447802..0x447850].
-            const int32_t out[3] = {hit.local_normal_q16.x, hit.local_normal_q16.y,
-                                    hit.local_normal_q16.z};
-            if (throwable_surface_accepts_stick(hit.local_normal_q16)) {
+            if (throwable_surface_accepts_stick(FixedVec3{out[0], out[1], out[2]})) {
                 throwable_stick_pose(out, r.yaw_bam,
                                      claymore ? 0 : static_cast<int32_t>(0xC0000040), 0,
                                      r.pitch_bam, r.roll_bam);
