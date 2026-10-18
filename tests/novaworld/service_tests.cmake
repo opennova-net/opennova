@@ -810,6 +810,7 @@ if(BUILD_NOVAWORLD_HTTP)
     target_link_libraries(fleet_health_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
     target_include_directories(fleet_health_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(fleet_health_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(fleet_health_routes REDIS COMMAND fleet_health_routes_test)
     set_tests_properties(fleet_health_routes PROPERTIES TIMEOUT 120)
 
