@@ -9,7 +9,7 @@
 // on a connection of the election's own, outside the pool, tried again while
 // another holds it (each try waits the connection's lock timeout); a standby
 // waits there. Once it holds the lock the leader moves the generation in
-// controller_leader on (migration 0008) and starts its parts in order. Then
+// fleet_leader on (migrations 0008, 0014) and starts its parts in order. Then
 // every check_ms it reads the row on that connection: the connection gone (and
 // the lock with it) or a generation no longer its own is the leadership lost,
 // and on_lost (the fleet program's: the process exits, and its container starts

@@ -9,7 +9,7 @@ import type {
   InfraCache,
   InfraCloud,
   InfraContainer,
-  InfraController,
+  InfraFleet,
   InfraDatabase,
   InfraDeployment,
   InfraEvent,
@@ -264,7 +264,7 @@ function pickMachine(v: unknown): InfraMachine | null {
   };
 }
 
-function pickController(v: unknown): InfraController | null {
+function pickFleet(v: unknown): InfraFleet | null {
   if (!isObject(v)) return null;
   return { leader: textOrNull(v.leader), generation: count(v.generation), elected_at: textOrNull(v.elected_at) };
 }
@@ -273,14 +273,14 @@ export function pickOverview(v: unknown): InfraOverview | null {
   if (!isObject(v) || typeof v.at !== 'string') return null;
   const cloud = pickCloud(v.cloud);
   const lobbies = list(v.lobbies, pickLobby);
-  const controller = pickController(v.controller);
+  const fleet = pickFleet(v.fleet);
   const machines = list(v.machines, pickMachine);
-  if (!cloud || !lobbies || !controller || !machines || !isObject(v.hosting)) return null;
+  if (!cloud || !lobbies || !fleet || !machines || !isObject(v.hosting)) return null;
   return {
     at: v.at,
     cloud,
     lobbies,
-    controller,
+    fleet,
     hosting: { enabled: v.hosting.enabled === true, provider: text(v.hosting.provider) || 'none' },
     machines,
   };

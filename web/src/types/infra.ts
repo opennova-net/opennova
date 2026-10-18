@@ -1,7 +1,7 @@
 // The admin's infrastructure view as GET /api/admin/infrastructure answers it
 // (apps/novaworld_web/infra/infra_routes.h). Times are ISO 8601 UTC. The cloud's
 // sections come from AWS, read by web at most every 20 seconds; the lobbies,
-// the controller and the machines from the database.
+// the fleet leader and the machines from the database.
 
 export interface InfraContainer {
   name: string;
@@ -185,7 +185,7 @@ export interface InfraLobby {
   listings: number;
 }
 
-export interface InfraController {
+export interface InfraFleet {
   leader: string | null;
   generation: number;
   elected_at: string | null;
@@ -216,7 +216,7 @@ export interface InfraOverview {
   at: string;
   cloud: InfraCloud;
   lobbies: InfraLobby[];
-  controller: InfraController;
+  fleet: InfraFleet;
   hosting: { enabled: boolean; provider: string };
   machines: InfraMachine[];
 }

@@ -161,7 +161,7 @@ function isRolling(s: InfraService): boolean {
   return s.deployments.length > 1 || primaryDeployment(s)?.rollout_state === 'IN_PROGRESS';
 }
 
-// "web, controller and worker".
+// "web, fleet and worker".
 function names(services: InfraService[]): string {
   const n = services.map((s) => s.name);
   return n.length < 2 ? n.join('') : `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}`;
@@ -214,6 +214,6 @@ export function infraWarnings(o: InfraOverview): string[] {
   if (!o.lobbies.some((l) => l.live && l.state === 'active')) {
     out.push('No lobby instance has been seen taking clients in the last 15 seconds.');
   }
-  if (!o.controller.leader) out.push('No controller has been elected yet: nothing schedules the periodic jobs or runs the fleet.');
+  if (!o.fleet.leader) out.push('No fleet process has been elected yet: nothing schedules the periodic jobs or runs the fleet.');
   return out;
 }

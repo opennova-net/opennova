@@ -193,7 +193,7 @@ int test_orderly_handover() {
 // that write.
 int test_stale_launch_fenced() {
 	Rig rig("fleet_stale_launch");
-	rig.db.exec("UPDATE controller_leader SET generation = 1 WHERE id = 1;");
+	rig.db.exec("UPDATE fleet_leader SET generation = 1 WHERE id = 1;");
 	int64_t generation = 1;
 	bool elect_after_guard = false;
 	rig.sup->set_pass_guard([&rig, &generation, &elect_after_guard](opennova::db::Database &db) {
@@ -201,7 +201,7 @@ int test_stale_launch_fenced() {
 		if (elect_after_guard) {
 			// Another fleet process's election lands right after this guard.
 			elect_after_guard = false;
-			rig.db.exec("UPDATE controller_leader SET generation = generation + 1 WHERE id = 1;");
+			rig.db.exec("UPDATE fleet_leader SET generation = generation + 1 WHERE id = 1;");
 		}
 		return holds;
 	});
@@ -231,7 +231,7 @@ int test_stale_launch_fenced() {
 		opennova::db::Database election(options);
 		bool waited = false;
 		try {
-			election.exec("UPDATE controller_leader SET generation = generation + 1 WHERE id = 1;");
+			election.exec("UPDATE fleet_leader SET generation = generation + 1 WHERE id = 1;");
 		} catch (const opennova::db::Error &e) {
 			waited = e.lock_timeout();
 		}
@@ -249,7 +249,7 @@ int test_console_after_handover() {
 	Rig rig("fleet_console");
 	const int64_t server = rig.request("console_owner");
 	TEST_EXPECT(server > 0);
-	rig.db.exec("UPDATE controller_leader SET generation = 1 WHERE id = 1;");
+	rig.db.exec("UPDATE fleet_leader SET generation = 1 WHERE id = 1;");
 	hosted::AdminLinks links(&rig.pool);
 	hosted::AdminCommandOptions options;
 	options.actor = "owner";
@@ -275,7 +275,7 @@ int test_console_after_handover() {
 				claimed && result.outcome == hosted::AdminCommandOutcome::TimedOut && !result.sent);
 	}
 	// Generation 2 leads; its drain starts once the route's command was claimed by 1.
-	rig.db.exec("UPDATE controller_leader SET generation = 2 WHERE id = 1;");
+	rig.db.exec("UPDATE fleet_leader SET generation = 2 WHERE id = 1;");
 	{
 		hosted::AdminCommandResult result;
 		const auto started = Clock::now();

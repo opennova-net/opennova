@@ -64,7 +64,7 @@ bool Election::generation_holds(db::Database &db, int64_t generation) {
 	// FOR SHARE: inside a transaction the row stays locked to its end, so an
 	// election's UPDATE (the generation moved on) waits for it and orders after
 	// its writes; a read after that election finds no row.
-	return !db.query("SELECT 1 FROM controller_leader WHERE id = 1 AND generation = $1 FOR "
+	return !db.query("SELECT 1 FROM fleet_leader WHERE id = 1 AND generation = $1 FOR "
 					 "SHARE;",
 					  { BindValue(generation) })
 					.empty();
@@ -95,7 +95,7 @@ bool Election::elect() {
 			// Waits the connection's lock timeout while another holds it.
 			lock_.emplace(*conn_, db::kFleetLock);
 			const auto rows = conn_->query(
-					"UPDATE controller_leader SET generation = generation + 1, holder = $1, "
+					"UPDATE fleet_leader SET generation = generation + 1, holder = $1, "
 					"elected_at = now() WHERE id = 1 RETURNING generation;",
 					{ BindValue(config_.holder) });
 			generation_.store(rows.empty() ? 0 : rows.front().as_int(0).value_or(0));
@@ -122,7 +122,7 @@ void Election::watch() {
 		std::string why;
 		try {
 			const auto rows =
-					conn_->query("SELECT generation, holder FROM controller_leader WHERE id = 1;");
+					conn_->query("SELECT generation, holder FROM fleet_leader WHERE id = 1;");
 			const int64_t generation = rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 			if (generation != generation_.load())
 				why = "another fleet process leads (generation " + std::to_string(generation) +

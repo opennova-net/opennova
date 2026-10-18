@@ -21,7 +21,7 @@
 namespace opennova::novaworld_server::hosted {
 
 // The fleet's side: claims the queued commands every poll_ms under its
-// leader's generation (controller_leader's when start() runs: the drain starts
+// leader's generation (fleet_leader's when start() runs: the drain starts
 // once the fleet program leads; 0 when driven by hand) and runs each on its
 // link (none: LinkDown), writing its answer to its row; the rows whose routes
 // went away (past their deadline a minute) are deleted, and those an earlier

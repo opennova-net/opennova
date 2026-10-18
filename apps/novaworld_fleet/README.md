@@ -12,7 +12,7 @@ checks and the tests: [`../novaworld_common/README.md`](../novaworld_common/READ
 image is the `fleet` target of [`../novaworld_common/Dockerfile`](../novaworld_common/Dockerfile).
 
 - `election.*`: the election (`fleet::Election`; the leader lock `db::kFleetLock`, its
-  generation in `controller_leader`); a leadership lost ends the process with 71.
+  generation in `fleet_leader`); a leadership lost ends the process with 71.
 - `hosted/supervisor.*`, `hosted/stats_sampler.*`, `hosted/fleet_desired_state.h`: the
   hosted servers' supervisor, its per-minute stats sample and the answer each machine's
   sync gets.

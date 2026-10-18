@@ -1,7 +1,7 @@
 #pragma once
 
 // The admin's infrastructure view, AWS's side (infra_routes.h serves it beside
-// the database's: the lobby instances, the controller, the fleet's machines):
+// the database's: the lobby instances, the fleet leader, the fleet's machines):
 // what the deployment's cloud runs now, read with web's task role through
 // aws_api.h and kept for InfraConfig::cache_ms, so however many admins look and
 // however often their pages poll, one web process reads AWS at most once in

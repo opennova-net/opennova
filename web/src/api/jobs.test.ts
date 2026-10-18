@@ -103,7 +103,8 @@ const wireOverview = {
       pending: false,
     },
   ],
-  controller: { leader: 'controller-0f0f0f0f', elected_at: '2026-10-16T10:00:00Z', last_scheduled_at: null },
+  last_scheduled_at: null,
+  fleet: { leader: 'fleet-0f0f0f0f', elected_at: '2026-10-16T10:00:00Z' },
 };
 
 describe('the background jobs client', () => {
@@ -122,7 +123,8 @@ describe('the background jobs client', () => {
     expect(result.value.attention[0]).toEqual(wireOverview.attention[0]);
     expect(result.value.attention_total).toBe(14);
     expect(result.value.workers[0]).toEqual(wireOverview.workers[0]);
-    expect(result.value.controller).toEqual({ leader: 'controller-0f0f0f0f', elected_at: '2026-10-16T10:00:00Z', last_scheduled_at: null });
+    expect(result.value.fleet).toEqual({ leader: 'fleet-0f0f0f0f', elected_at: '2026-10-16T10:00:00Z' });
+    expect(result.value.last_scheduled_at).toBeNull();
   });
 
   it('refuses a reply it cannot read', async () => {
