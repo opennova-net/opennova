@@ -272,7 +272,7 @@ void InfraRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/admin/infrastructure — {"at" (the database's now), "cloud", "lobbies",
-// "controller", "hosting", "machines"}; README "Infrastructure" spells out each.
+// "fleet", "hosting", "machines"}; README "Infrastructure" spells out each.
 // The database's sections from one snapshot, then the cloud (no lease held
 // while AWS answers). No-store.
 crow::response InfraRoutes::overview(const crow::request &req) {
@@ -316,19 +316,19 @@ crow::response InfraRoutes::overview(const crow::request &req) {
 		}
 		out["lobbies"] = std::move(lobbies);
 
-		crow::json::wvalue controller;
-		controller["leader"] = nullptr;
-		controller["generation"] = 0;
-		controller["elected_at"] = nullptr;
+		crow::json::wvalue fleet;
+		fleet["leader"] = nullptr;
+		fleet["generation"] = 0;
+		fleet["elected_at"] = nullptr;
 		const auto leader =
 				db_conn->query("SELECT holder, generation, elected_at::timestamp(0)::text FROM "
-							   "controller_leader WHERE id = 1;");
+							   "fleet_leader WHERE id = 1;");
 		if (!leader.empty()) {
-			text_or_null(controller, "leader", leader.front().as_text(0).value_or(""));
-			controller["generation"] = leader.front().as_int(1).value_or(0);
-			iso_or_null(controller, "elected_at", leader.front().as_text(2).value_or(""));
+			text_or_null(fleet, "leader", leader.front().as_text(0).value_or(""));
+			fleet["generation"] = leader.front().as_int(1).value_or(0);
+			iso_or_null(fleet, "elected_at", leader.front().as_text(2).value_or(""));
 		}
-		out["controller"] = std::move(controller);
+		out["fleet"] = std::move(fleet);
 
 		machines = hosted::list_machines(*db_conn, kEndedMachinesShown);
 		for (const hosted::FleetMachineRow &m : machines)

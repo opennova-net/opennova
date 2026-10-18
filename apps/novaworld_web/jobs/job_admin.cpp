@@ -262,7 +262,7 @@ JobsOverview overview(db::Database &db) {
 		out.workers.push_back(std::move(w));
 	}
 
-	const auto leader = db.query("SELECT holder, elected_at FROM controller_leader WHERE id = 1;");
+	const auto leader = db.query("SELECT holder, elected_at FROM fleet_leader WHERE id = 1;");
 	if (!leader.empty()) {
 		out.leader = leader.front().as_text(0).value_or("");
 		out.elected_at = iso(leader.front().as_text(1));

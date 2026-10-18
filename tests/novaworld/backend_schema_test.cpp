@@ -83,8 +83,8 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
 		"billing_customers", "billing_events", "billing_subscriptions", "billing_sync_backoff",
-		"billing_sync_state", "cd_key_activations", "cd_keys", "controller_leader",
-		"data_set_trees", "data_sets", "fleet_launch_backoff", "fleet_machine_egress",
+		"billing_sync_state", "cd_key_activations", "cd_keys", "data_set_trees", "data_sets",
+		"fleet_launch_backoff", "fleet_leader", "fleet_machine_egress",
 		"fleet_machines", "fleet_slot_reports",
 		"games", "host_keys", "host_players", "host_roster", "hosted_admin_links",
 		"hosted_console_commands", "hosted_console_replies", "hosted_limits_hold",
@@ -808,16 +808,19 @@ int test_jobs_tables() {
 	return 0;
 }
 
-// The controller's state (0008_controller_state.sql): the leadership's and the
-// limits hold's one rows, the admin links' states (gone with their server), and
-// the console's commands with their replies (gone with their command).
-int test_controller_tables() {
+// The fleet program's state (0008_controller_state.sql, its leadership's row
+// renamed by 0014_fleet_leader.sql): the leadership's and the limits hold's one
+// rows, the admin links' states (gone with their server), and the console's
+// commands with their replies (gone with their command).
+int test_fleet_tables() {
 	TestDatabase scratch({ /*migrate=*/true });
 	Database db = scratch.open();
 	TEST_EXPECT(
-			db.query("SELECT generation FROM controller_leader WHERE id = 1;").front().as_int(0) ==
-			0);
-	TEST_EXPECT(refused(db, "INSERT INTO controller_leader (id) VALUES (2);"));
+			db.query("SELECT generation FROM fleet_leader WHERE id = 1;").front().as_int(0) == 0);
+	TEST_EXPECT(refused(db, "INSERT INTO fleet_leader (id) VALUES (2);"));
+	TEST_EXPECT(has_index(db, "fleet_leader", "fleet_leader_pkey"));
+	TEST_EXPECT(!db.query("SELECT 1 FROM pg_constraint WHERE conname = 'fleet_leader_id_check';")
+						 .empty());
 	TEST_EXPECT(
 			db.query("SELECT held FROM hosted_limits_hold WHERE id = 1;").front().as_int(0) == 0);
 	TEST_EXPECT(refused(db, "INSERT INTO hosted_limits_hold (id) VALUES (2);"));
@@ -903,11 +906,11 @@ int main(int argc, char **argv) {
 		return 1;
 	if (test_lobby_instances_tables() != 0)
 		return 1;
-	if (test_controller_tables() != 0)
+	if (test_fleet_tables() != 0)
 		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
 				"web sessions + roles, games titles, host keys, credentials generation, hosted "
 				"server games, "
-				"cd keys, billing, account email, jobs, controller state)\n");
+				"cd keys, billing, account email, jobs, fleet state)\n");
 	return 0;
 }

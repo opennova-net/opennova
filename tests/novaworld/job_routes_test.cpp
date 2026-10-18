@@ -12,7 +12,7 @@
 // latency, the failures to look at grouped by kind and failure key (their ids, numbers
 // and times apart; an admin's cancels and the ones past a day left out), the worker
 // processes with their threads, busy threads and leases (one run out), the schedules
-// (the last run, the next bucket, a pending one) and the controller's row; the list's
+// (the last run, the next bucket, a pending one) and the fleet leader's row; the list's
 // filters (state, kind, a time range, a key search, a failure key) and its pages; one
 // job's detail with its payload; the actions, each a compare-and-set (a retry of a
 // failed job only, with one more attempt; refused for a job not failed, one whose
@@ -245,7 +245,7 @@ int test_access(Harness &h) {
 // The overview: the counts by kind and state, the queue's latency, the
 // failures to look at grouped by kind and failure key (their ids, numbers and
 // times apart), the worker processes with their threads and leases (one run
-// out), the schedules and the controller's row; and never a secret.
+// out), the schedules and the fleet leader's row; and never a secret.
 int test_overview(Harness &h) {
 	clear_jobs(h);
 	int64_t failed = 0, cancelled = 0;
@@ -315,13 +315,13 @@ int test_overview(Harness &h) {
 				{ BindValue(gamma[0]), BindValue(gamma[2]) });
 		db->exec("UPDATE jobs SET finished_at = now() - interval '2 days' WHERE id = $1;",
 				{ BindValue(gamma[3]) });
-		// A scheduled jobs.prune that ran, and the controller that leads.
+		// A scheduled jobs.prune that ran, and the fleet process that leads.
 		jobs::NewJob prune = job_of(jobs::kJobJobsPrune, jobs::kJobJobsPrune, 1);
 		prune.schedule_key = jobs::Scheduler::schedule_key(
 				jobs::kJobJobsPrune, jobs::Scheduler::wall_now_ms(), 60 * 60 * 1000);
 		auto p = claimed(*db, prune, "worker-feedf00d-1");
 		TEST_EXPECT(p && jobs::complete(*db, *p));
-		db->exec("UPDATE controller_leader SET holder = 'controller-1234abcd', generation = "
+		db->exec("UPDATE fleet_leader SET holder = 'fleet-1234abcd', generation = "
 				 "generation + 1, elected_at = now() - interval '1 hour' WHERE id = 1;");
 	}
 
@@ -394,9 +394,8 @@ int test_overview(Harness &h) {
 			TEST_EXPECT(kind == "test.cond" && s["conditional"].b());
 		}
 	}
-	TEST_EXPECT(str(o["controller"]["leader"]) == "controller-1234abcd");
-	TEST_EXPECT(!is_null(o["controller"]["elected_at"]) &&
-			!is_null(o["controller"]["last_scheduled_at"]));
+	TEST_EXPECT(str(o["fleet"]["leader"]) == "fleet-1234abcd");
+	TEST_EXPECT(!is_null(o["fleet"]["elected_at"]) && !is_null(o["last_scheduled_at"]));
 	return 0;
 }
 

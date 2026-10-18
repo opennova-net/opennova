@@ -114,7 +114,7 @@ describe('InfraSection', () => {
     expect(oneOff.text()).toContain('started 10 min ago');
   });
 
-  it('lists the target groups, the database and the cache, the lobbies, the controller and the machines', async () => {
+  it('lists the target groups, the database and the cache, the lobbies, the fleet leader and the machines', async () => {
     const page = await mountSection();
     const targets = page.findAll('tr.infra-target-row');
     expect(targets).toHaveLength(6);
@@ -151,10 +151,10 @@ describe('InfraSection', () => {
     expect(lobbies[1].text()).toContain('Not seen');
     expect(lobbies[1].text()).toContain('2 min ago');
 
-    const controller = page.get('.infra-controller');
-    expect(controller.text()).toContain('controller-1234abcd');
-    expect(controller.text()).toContain('1 hour ago');
-    expect(controller.text()).toContain('The 3rd');
+    const fleet = page.get('.infra-fleet');
+    expect(fleet.text()).toContain('fleet-1234abcd');
+    expect(fleet.text()).toContain('1 hour ago');
+    expect(fleet.text()).toContain('The 3rd');
 
     const machines = page.findAll('tr.infra-machine-row');
     expect(machines).toHaveLength(2);
@@ -223,7 +223,7 @@ describe('InfraSection', () => {
     expect(tiles(page)['Load balancer targets']).toEqual(['3 of 5 healthy', '1 target group could not be read']);
   });
 
-  it('warns of a failed rollout, a program short of tasks, a missing service, a busy database and no lobby or controller', async () => {
+  it('warns of a failed rollout, a program short of tasks, a missing service, a busy database and no lobby or fleet leader', async () => {
     read.mockResolvedValue({
       ok: true,
       value: overview({
@@ -240,7 +240,7 @@ describe('InfraSection', () => {
           target_groups: [],
         }),
         lobbies: [],
-        controller: { leader: null, generation: 0, elected_at: null },
+        fleet: { leader: null, generation: 0, elected_at: null },
       }),
     });
     const page = await mountSection();
@@ -251,13 +251,13 @@ describe('InfraSection', () => {
       'The database is modifying.',
       "controller runs opennova-prod-controller:9, not the release's revision: a deploy or a rollback did not finish.",
       'No lobby instance has been seen taking clients in the last 15 seconds.',
-      'No controller has been elected yet: nothing schedules the periodic jobs or runs the fleet.',
+      'No fleet process has been elected yet: nothing schedules the periodic jobs or runs the fleet.',
     ]);
     expect(card(page, 'gate').text()).toContain('Rollout failed');
     expect(card(page, 'worker').text()).toContain('Short of tasks');
     expect(card(page, 'worker').text()).toContain('No task runs.');
     expect(tiles(page)['Release'][1]).toBe('20261017T120000Z-abc1234. controller runs another revision');
-    expect(page.get('.infra-controller').text()).toContain('None elected');
+    expect(page.get('.infra-fleet').text()).toContain('None elected');
   });
 
   it('says a deploy is rolling out while one is, naming the programs it rolled, and labels the updater', async () => {

@@ -309,7 +309,7 @@ export function overview(overrides: Partial<InfraOverview> = {}): InfraOverview 
     at: ago(0),
     cloud: cloud(),
     lobbies: [lobby(1), lobby(2, { state: 'draining', live: false, last_seen_at: ago(120), seen_ago_seconds: 120, sessions: 0, listings: 0 })],
-    controller: { leader: 'controller-1234abcd', generation: 3, elected_at: ago(3600) },
+    fleet: { leader: 'fleet-1234abcd', generation: 3, elected_at: ago(3600) },
     hosting: { enabled: true, provider: 'ec2' },
     machines: [
       machine(1),

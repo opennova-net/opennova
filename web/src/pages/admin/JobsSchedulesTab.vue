@@ -1,15 +1,15 @@
 <template>
   <section class="space-y-4" aria-labelledby="jobs-schedules">
     <h2 id="jobs-schedules" class="text-xl font-semibold text-ink">Schedules</h2>
-    <p v-if="overview" class="jobs-controller text-sm text-ink-muted">
-      <template v-if="overview.controller.leader">
-        The controller <span class="font-mono">{{ overview.controller.leader }}</span> enqueues them<template
-          v-if="overview.controller.elected_at"
-        >, leading since <RelativeTime :value="overview.controller.elected_at" :now="now" /></template>.
+    <p v-if="overview" class="jobs-fleet text-sm text-ink-muted">
+      <template v-if="overview.fleet.leader">
+        The fleet leader <span class="font-mono">{{ overview.fleet.leader }}</span> enqueues them<template
+          v-if="overview.fleet.elected_at"
+        >, leading since <RelativeTime :value="overview.fleet.elected_at" :now="now" /></template>.
       </template>
-      <template v-else>No controller has led yet.</template>
-      <template v-if="overview.controller.last_scheduled_at">
-        The last scheduled job came in <RelativeTime :value="overview.controller.last_scheduled_at" :now="now" />.
+      <template v-else>No fleet process has led yet.</template>
+      <template v-if="overview.last_scheduled_at">
+        The last scheduled job came in <RelativeTime :value="overview.last_scheduled_at" :now="now" />.
       </template>
     </p>
     <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
@@ -39,7 +39,7 @@
             <td class="px-4 py-3">
               {{ capitalized(everyLabel(s.interval_seconds)) }}
               <span v-if="s.conditional" class="block text-xs text-ink-muted">only while there is work for it</span>
-              <span v-if="s.at_start" class="block text-xs text-ink-muted">and when a controller starts</span>
+              <span v-if="s.at_start" class="block text-xs text-ink-muted">and when a fleet leader starts</span>
             </td>
             <td class="px-4 py-3">
               <template v-if="s.last">
@@ -73,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-// The background jobs page's Schedules tab (JobsSection.vue): the controller
+// The background jobs page's Schedules tab (JobsSection.vue): the fleet leader
 // that enqueues them, and each periodic kind (how often, its last run and its
 // result, the next, run now: POST /api/admin/jobs/run, asked first).
 import { ref } from 'vue';

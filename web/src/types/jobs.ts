@@ -98,10 +98,11 @@ export interface JobSchedule {
   pending: boolean;
 }
 
-export interface JobsController {
+// The fleet process that leads (no program schedules on its behalf: each
+// schedules its own kinds).
+export interface JobsFleet {
   leader: string | null;
   elected_at: string | null;
-  last_scheduled_at: string | null;
 }
 
 export interface JobsOverview {
@@ -113,7 +114,9 @@ export interface JobsOverview {
   attention_total: number;
   workers: JobWorker[];
   schedules: JobSchedule[];
-  controller: JobsController;
+  // The newest job a schedule enqueued.
+  last_scheduled_at: string | null;
+  fleet: JobsFleet;
 }
 
 // What a failure group's retry did with each of its jobs.

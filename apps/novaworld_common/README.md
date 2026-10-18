@@ -271,7 +271,7 @@ policy, not a port.
 | `tree.prune` | the objects of the prunable trees removed | hourly, after each job above, the delete routes | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
-**Background jobs**, `/admin/jobs`) reads the jobs table and the fleet's row alone,
+**Background jobs**, `/admin/jobs`) reads the jobs table and the fleet leader's row alone,
 so every replica answers alike. A worker process shows by the claims its threads left on
 the rows; a running job whose lease ran out is one whose process has gone away. The
 failures come grouped by kind and **failure key** (the error with its ids, times and
@@ -281,7 +281,7 @@ a worker holds, and each is logged with its actor and the job.
 
 | Route | Auth | Reply |
 | --- | --- | --- |
-| `GET /api/admin/jobs/overview` | admin | each kind's counts, latency and mean run, the newest 20 failure groups, the worker processes, the schedules, the fleet program; never a job's secret |
+| `GET /api/admin/jobs/overview` | admin | each kind's counts, latency and mean run, the newest 20 failure groups, the worker processes, the schedules, the newest scheduled job, the fleet leader; never a job's secret |
 | `GET /api/admin/jobs` | admin | the filtered, paged list (`?state=`, `?kind=`, `?from=`, `?to=`, `?q=`, `?failure=`, `?before=`, `?limit=` 1..200); 400 `invalid_field` |
 | `GET /api/admin/jobs/<id>` | admin | `{"job"}` with its `payload`; 404 |
 | `POST /api/admin/jobs/<id>/retry` | admin | a failed job queued again with one more attempt: 200; 404; 409 `not_failed`, `secret_dropped`, `already_pending` |
@@ -298,7 +298,8 @@ The replies' times are ISO 8601 UTC, with `Cache-Control: no-store`.
 
 ## The fleet program
 
-`apps/novaworld_fleet/election.*` (migration `0008_controller_state.sql`): of the
+`apps/novaworld_fleet/election.*` (migrations `0008_controller_state.sql` and
+`0014_fleet_leader.sql`, which renamed its row's table): of the
 fleet processes (`apps/novaworld_fleet/main.cpp`), the one that runs the machines' internal
 listener, the hosted servers' supervisor (with its admin links), the console drain and the
 periodic jobs' scheduler, elected among them. Service policy, not a port.
@@ -306,7 +307,7 @@ periodic jobs' scheduler, elected among them. Service policy, not a port.
 - **The election.** A session advisory lock (`db::SessionLock`, its own key) on a
   connection of the fleet's own, outside the pool, tried again while another
   process holds it (each try waits the lock timeout): a standby waits there. Once it
-  holds the lock, the fleet program moves `controller_leader.generation` on and names
+  holds the lock, the fleet program moves `fleet_leader.generation` on and names
   itself (`holder`, a random `fleet-<hex>`), then starts its parts: the internal
   listener (bound only now, so the deployment's internal name reaches the process that
   renders the start files; a bind that fails ends the process), the supervisor (which

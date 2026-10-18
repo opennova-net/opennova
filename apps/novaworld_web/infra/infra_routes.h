@@ -4,8 +4,8 @@
 // /admin/infrastructure; README "Infrastructure"): GET
 // /api/admin/infrastructure, require_admin, the deployment as it runs now in
 // one reply. From the database, which every web replica reads alike: the lobby
-// instances (lobby_instances, with their sessions and listings), the
-// controller that leads (controller_leader) and the fleet's machines
+// instances (lobby_instances, with their sessions and listings), the fleet
+// process that leads (fleet_leader) and the fleet's machines
 // (fleet_machines: the live ones and the newest ended). From AWS, through
 // infra_status.h (kept for its cache window, so the page's polls cost AWS
 // nothing more): the programs' ECS services and their tasks, the balancer's

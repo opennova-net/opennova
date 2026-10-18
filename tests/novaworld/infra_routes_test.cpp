@@ -5,10 +5,10 @@
 // whose InfraStatus reads no cloud, and a deployment's, whose reads go to a stub
 // CommandRunner answering as AWS would mid-deploy (infra_aws_stub.h). Rows are
 // planted as the programs would leave them: two lobby instances (one live with a
-// session, one gone quiet and draining), the controller's election, a ready
+// session, one gone quiet and draining), the fleet's election, a ready
 // fleet machine and an ended one. The cases: the route refused without an
 // admin (401, 403 for a player); the local stack's view (the cloud unavailable,
-// saying why, nothing called; the lobbies, the controller and the machines from
+// saying why, nothing called; the lobbies, the fleet leader and the machines from
 // the database); the deployment's (every program with its counts, rollout,
 // revision and whether it is the release's, its running and stopped tasks and
 // events; the one-off task; the target groups' targets; the database and the
@@ -126,7 +126,7 @@ std::string session_cookie(Database &db, int64_t id) {
 	return token ? std::string("Cookie: ") + nws::kWebSessionCookie + "=" + *token : std::string();
 }
 
-// The rows the programs would have left: two lobby instances, the controller's
+// The rows the programs would have left: two lobby instances, the fleet's
 // election, a ready machine and an ended one. The live lobby's id.
 int64_t plant(Database &db) {
 	const int64_t live = lobbydb::register_instance(db, "54.162.79.147:64206");
@@ -143,7 +143,7 @@ int64_t plant(Database &db) {
 	s.pn = "NOVAWORLDUDP";
 	s.identity = "jop:cus2";
 	lobbydb::insert_session(db, s);
-	db.exec("UPDATE controller_leader SET holder = 'controller-1234abcd', generation = 3, "
+	db.exec("UPDATE fleet_leader SET holder = 'fleet-1234abcd', generation = 3, "
 			"elected_at = now() - "
 			"interval '1 hour' WHERE id = 1;");
 
@@ -211,10 +211,9 @@ int test_local(Harness &h, int64_t live_lobby) {
 			lobbies[1]["seen_ago_seconds"].i() >= 110 && lobbies[1]["sessions"].i() == 0);
 	TEST_EXPECT(str(lobbies[0]["last_seen_at"]).back() == 'Z');
 
-	const auto &controller = json["controller"];
-	TEST_EXPECT(str(controller["leader"]) == "controller-1234abcd" &&
-			controller["generation"].i() == 3);
-	TEST_EXPECT(str(controller["elected_at"]).size() == 20);
+	const auto &fleet = json["fleet"];
+	TEST_EXPECT(str(fleet["leader"]) == "fleet-1234abcd" && fleet["generation"].i() == 3);
+	TEST_EXPECT(str(fleet["elected_at"]).size() == 20);
 
 	TEST_EXPECT(!json["hosting"]["enabled"].b() && str(json["hosting"]["provider"]) == "none");
 	// The machines: the ready one, then the ended one; no zone without the cloud.

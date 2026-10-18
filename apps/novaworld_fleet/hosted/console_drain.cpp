@@ -52,7 +52,7 @@ void ConsoleDrain::start() {
 	// starts once the fleet program leads).
 	try {
 		const auto rows =
-				pool_.acquire()->query("SELECT generation FROM controller_leader WHERE id = 1;");
+				pool_.acquire()->query("SELECT generation FROM fleet_leader WHERE id = 1;");
 		generation_ = rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr,

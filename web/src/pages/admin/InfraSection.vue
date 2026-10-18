@@ -25,7 +25,7 @@
 
     <template v-if="overview">
       <p v-if="!overview.cloud.configured" class="infra-unavailable rounded-panel border border-border bg-panel p-4 text-sm text-ink-muted">
-        {{ overview.cloud.unavailable }}. The lobby instances, the controller and the machines below come from the
+        {{ overview.cloud.unavailable }}. The lobby instances, the fleet leader and the machines below come from the
         database.
       </p>
       <p v-else-if="cloud?.error" class="infra-cloud-error rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
@@ -315,24 +315,24 @@
         </div>
       </section>
 
-      <!-- The controller (controller_leader). -->
-      <section class="space-y-4" aria-labelledby="infra-controller">
-        <h2 id="infra-controller" class="text-xl font-semibold text-ink">Controller</h2>
-        <dl class="infra-controller grid grid-cols-1 gap-x-6 gap-y-1 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-3">
+      <!-- The fleet program's leader (fleet_leader). -->
+      <section class="space-y-4" aria-labelledby="infra-fleet">
+        <h2 id="infra-fleet" class="text-xl font-semibold text-ink">Fleet leader</h2>
+        <dl class="infra-fleet grid grid-cols-1 gap-x-6 gap-y-1 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-3">
           <div>
             <dt class="text-xs text-ink-muted">Leader</dt>
-            <dd class="font-mono">{{ overview.controller.leader || 'None elected' }}</dd>
+            <dd class="font-mono">{{ overview.fleet.leader || 'None elected' }}</dd>
           </div>
           <div>
             <dt class="text-xs text-ink-muted">Elected</dt>
             <dd>
-              <RelativeTime v-if="overview.controller.elected_at" :value="overview.controller.elected_at" :now="now" />
+              <RelativeTime v-if="overview.fleet.elected_at" :value="overview.fleet.elected_at" :now="now" />
               <template v-else>Never</template>
             </dd>
           </div>
           <div>
             <dt class="text-xs text-ink-muted">Election</dt>
-            <dd>{{ overview.controller.generation === 0 ? 'None yet' : `The ${ordinal(overview.controller.generation)}` }}</dd>
+            <dd>{{ overview.fleet.generation === 0 ? 'None yet' : `The ${ordinal(overview.fleet.generation)}` }}</dd>
           </div>
         </dl>
       </section>
@@ -406,7 +406,7 @@
 // lobby instances and the fleet's machines, and the warnings to look at first.
 // Below: each program's ECS service with its tasks, stopped tasks and events,
 // the target groups, the database and the cache (from AWS, which web reads at
-// most every 20 seconds), then the lobby instances, the controller and the
+// most every 20 seconds), then the lobby instances, the fleet leader and the
 // machines (from the database). On the local stack AWS is not read, and the
 // page says so rather than showing anything made up. Polled every 30 seconds.
 import { computed, ref } from 'vue';

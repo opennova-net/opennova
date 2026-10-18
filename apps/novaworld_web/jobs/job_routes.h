@@ -4,7 +4,7 @@
 // admin page /admin/jobs), over job_admin.h: GET /api/admin/jobs/overview
 // (the counts by kind, the queue's latency, the failures to look at grouped
 // by kind and failure key, the worker processes with their threads and
-// leases, the schedules and the controller that runs them), GET
+// leases, the schedules, the fleet leader), GET
 // /api/admin/jobs (a page of jobs by state, kind, time, key and failure,
 // newest first), GET /api/admin/jobs/<id> (one job with its payload), and the
 // actions: POST /api/admin/jobs/<id>/retry (a failed job, queued again now
@@ -14,7 +14,7 @@
 // past a keep, as a jobs.prune job). Every one
 // require_admin (a state change with the CSRF header unless the Bearer token
 // carries it, and logged with its actor by AccessMiddleware, and here with
-// what it did); they read the jobs table and the controller's row alone, so
+// what it did); they read the jobs table and the fleet leader's row alone, so
 // any web replica answers alike. Never a job's secret: only whether it holds
 // one, or held one. Every refusal is an error code with our own message,
 // never database text. The HttpListener owns one.
@@ -42,7 +42,7 @@ public:
 	JobRoutes(const JobRoutes &) = delete;
 	JobRoutes &operator=(const JobRoutes &) = delete;
 
-	// The periodic jobs this deployment's controller schedules (its settings
+	// The periodic jobs this deployment's fleet schedules (its settings
 	// read alike, parts.h periodic_jobs): what the schedules show and the
 	// kinds POST /api/admin/jobs/run takes. Before register_routes().
 	void set_schedules(std::vector<PeriodicJob> schedules) { schedules_ = std::move(schedules); }
