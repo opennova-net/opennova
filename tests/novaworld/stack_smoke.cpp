@@ -19,9 +19,13 @@
 //          done by a worker process, never the fleet or the data program), which
 //          reaches running and is listed in the lobby (its listing's RID), takes
 //          console commands
-//          through the fleet's admin link (PLAYER LIST, CHAT SEND), and
-//          stops. Then the static addresses (check_static_address), with
-//          --zone-file the zone the worker writes.
+//          through the fleet's admin link (PLAYER LIST, CHAT SEND), shows on
+//          the admin's pages (its machine's page with an agent and a ready
+//          tree, its log holding "serving on UDP", usage samples of it, its
+//          machine and every program), and stops. Then the static addresses
+//          (check_static_address), with --zone-file the zone the worker
+//          writes. Last, the attention list holds no danger (and reads no
+//          alarm: the local stack has none).
 //   data-set <dir>
 //          writes the synthetic Joint Operations data set the stack's machines can
 //          serve without licensed data: the serve tests' deathmatch map
@@ -232,6 +236,95 @@ std::string session_cookie(const net::HttpReply &reply) {
 	return {};
 }
 
+// A running server as the admin's pages read it: its machine's page (an agent,
+// a ready tree), its log (the line opennova-serve writes once it serves, read
+// through the log store), and the usage samples of it, its machine and every
+// program (each written once a minute).
+void check_admin_views(const Site &site, int64_t server_id) {
+	auto reply = site.admin("GET", "/api/admin/hosted/" + std::to_string(server_id));
+	const auto view = json_of(reply);
+	const int64_t machine = reply.code == 200 && view ? number_at(*view, { "machine", "id" }) : 0;
+	if (!check(machine > 0, "the admin's server view names its machine", status_text(reply)))
+		return;
+	std::string why;
+	const std::string machine_path = "/api/admin/fleet/machines/" + std::to_string(machine);
+	const bool page = wait_for(
+			[&] {
+				const auto r = site.admin("GET", machine_path);
+				const auto m = json_of(r);
+				why = status_text(r);
+				if (r.code != 200 || !m)
+					return false;
+				bool ready = false;
+				if (const io::JsonValue *trees = at(*m, { "trees" }); trees && trees->is_array())
+					for (const io::JsonValue &t : trees->array)
+						ready = ready || text_at(t, { "state" }) == "ready";
+				return ready && !text_at(*m, { "machine", "agent_version" }).empty();
+			},
+			60);
+	check(page, "its machine's page (GET " + machine_path + ") has an agent and a ready tree", why);
+	const std::string logs = "/api/admin/logs?subject=server&id=" + std::to_string(server_id) +
+			"&q=serving%20on%20UDP";
+	const bool serving = wait_for(
+			[&] {
+				const auto r = site.admin("GET", logs);
+				const auto l = json_of(r);
+				why = status_text(r);
+				const io::JsonValue *lines = r.code == 200 && l ? at(*l, { "lines" }) : nullptr;
+				if (!lines || !lines->is_array())
+					return false;
+				for (const io::JsonValue &line : lines->array)
+					if (text_at(line, { "text" }).find("serving on UDP") != std::string::npos)
+						return true;
+				return false;
+			},
+			60);
+	check(serving, "its log (GET /api/admin/logs) holds \"serving on UDP\"", why);
+	const auto sampled = [&](const std::string &subject, const std::string &id) {
+		const std::string path =
+				"/api/admin/usage?subject=" + subject + "&id=" + id + "&range=48h";
+		const bool any = wait_for(
+				[&] {
+					const auto r = site.admin("GET", path);
+					const auto u = json_of(r);
+					why = status_text(r);
+					const io::JsonValue *series =
+							r.code == 200 && u ? at(*u, { "series" }) : nullptr;
+					return series && series->is_array() && !series->array.empty();
+				},
+				180);
+		check(any, "usage samples exist for " + subject + " " + id + " (GET /api/admin/usage)",
+				why);
+	};
+	sampled("server", std::to_string(server_id));
+	sampled("machine", std::to_string(machine));
+	for (const char *program : { "gate", "lobby", "web", "fleet", "worker", "data" })
+		sampled("program", program);
+}
+
+// What needs an admin, once the rest ran: no danger finding, and no alarm read
+// (the local stack has none). Each finding is noted.
+void check_attention(const Site &site) {
+	const auto reply = site.admin("GET", "/api/admin/attention");
+	const auto json = json_of(reply);
+	const io::JsonValue *findings = reply.code == 200 && json ? at(*json, { "findings" }) : nullptr;
+	const io::JsonValue *alarms_read = json ? at(*json, { "alarms_read" }) : nullptr;
+	if (!check(findings && findings->is_array() && alarms_read && alarms_read->is_bool() &&
+					   !alarms_read->boolean,
+				"the attention list answers, reading no alarm here (GET /api/admin/attention)",
+				status_text(reply)))
+		return;
+	std::string dangers;
+	for (const io::JsonValue &f : findings->array) {
+		const std::string line = text_at(f, { "level" }) + " " + text_at(f, { "subject" }) + ": " +
+				text_at(f, { "text" });
+		note("attention: " + line);
+		if (text_at(f, { "level" }) == "danger")
+			dangers += (dangers.empty() ? "" : "; ") + line;
+	}
+	check(dangers.empty(), "the attention list holds no danger", dangers);
+}
+
 void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 	auto reply = site.admin("PUT", "/api/admin/users/" + std::to_string(user_id) + "/comp",
 			"{\"servers\":1,\"own_machines\":0}");
@@ -339,6 +432,7 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 	const auto chat = json_of(reply);
 	check(reply.code == 200 && chat && text_at(*chat, { "result" }) == "sent",
 			"a console command reaches it (CHAT SEND)", status_text(reply));
+	check_admin_views(site, id);
 	reply = site.user("POST", path + "/stop");
 	check(reply.code == 202, "it stops (POST /api/me/servers/<id>/stop)", status_text(reply));
 	check(wait_for(
@@ -534,6 +628,7 @@ int run(const Options &o) {
 	}
 	else if (o.hosting.empty())
 		note("hosting not checked: no data set (dev_stack.sh up --data <dir> or --synthetic-data)");
+	check_attention(site);
 	std::printf("%s: %d failure(s)\n", g_failures == 0 ? "PASSED" : "FAILED", g_failures);
 	return g_failures;
 }
