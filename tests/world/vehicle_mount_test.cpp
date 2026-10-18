@@ -2223,6 +2223,28 @@ void test_prepare_vehicle_weapon_slot_after_armory_load() {
     CHECK(mount.primary_weapon_slot.clip == 7);
     CHECK(mount.primary_weapon_slot.reserve == 23);
     CHECK(mount.primary_weapon_slot.redirect_to_parent_slot);
+
+    // The reserve word is retail's: raw startrounds when either word is 0xFFFF,
+    // else the unclamped 16-bit difference. [orig: WeaponSlot_InitFromEntityDef
+    //  @0x546717..0x546733]
+    struct Seed {
+        int16_t clipsize, startrounds;
+        int32_t clip, reserve;
+    };
+    const Seed seeds[] = {
+        {30, 10, 30, -20},  // more clip than rounds: a negative word, not 0
+        {-1, 25, -1, 25},   // clipless: the raw startrounds
+        {12, -1, 12, -1},   // startrounds 0xFFFF: raw
+    };
+    for (const Seed &s : seeds) {
+        weapon.clipsize = s.clipsize;
+        weapon.startrounds = s.startrounds;
+        Entity fresh;
+        fresh.primary_weapon = weapon.name;
+        CHECK(w.vehicles.prepare_weapon_slot(fresh));
+        CHECK(fresh.primary_weapon_slot.clip == s.clip);
+        CHECK(fresh.primary_weapon_slot.reserve == s.reserve);
+    }
 }
 
 // An emplacement's slot starts its optic at the WeaponSlot_InitFromDef seed,
