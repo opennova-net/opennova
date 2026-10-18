@@ -436,7 +436,7 @@ public:
 	std::string get_widget_text(int id) const;
 	// Move a widget: its own rect (relative to its parent's origin, design
 	// units) replaced until the document reopens [orig: CWnd_SetRect @0x646560,
-	// sub_646580 @0x646580 (the same at the widget's own square size)].
+	// CWnd_MoveToSquare @0x646580 (the same at the widget's own square size)].
 	void set_widget_rect(int id, int left, int top, int right, int bottom);
 	// Clip a widget's own passes to an absolute design rect until the
 	// document reopens; `enabled` false removes it [orig: CWnd_SetClipRect

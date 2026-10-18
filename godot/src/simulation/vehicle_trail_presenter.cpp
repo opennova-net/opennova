@@ -77,14 +77,14 @@ void VehicleTrailPresenter::sync_fixed_tick_effects() {
 }
 
 // The zone's surface-effect group, executed as the sim orders it. Release
-// stops the group (retail: sub_5F6C70 -> sub_5E5ED0 notifies each child dead)
+// stops the group (retail: Effect_ReleaseEmitterIfLive -> sub_5E5ED0 notifies each child dead)
 // and drops the record; Ensure creates the group at the hit with the zone-less
 // spawn (its scheduled particles search their zone); Trigger re-spawns every
 // child at the hit with the zone as the spawn window. A group the scene has
 // already reaped answers the trigger with false and keeps its record: retail's
 // slot holds the freed instance pointer until the surface effect changes. The
 // witness (WeatherParticle_UpdateAllEmitters, CEffectWorld_SpawnEmitterAtPosition
-// with dest{type 4, id, hit}, sub_5F6C10 -> CEffectWorld_SpawnAllActiveChildren
+// with dest{type 4, id, hit}, Effect_TriggerGroupAtFixedPointPos -> CEffectWorld_SpawnAllActiveChildren
 // with direction (0, 1, 0)) is cited at the sim's producer (world/rotor_wash.cpp)
 // and the portable scene's trigger (particle/effect_scene.h).
 void VehicleTrailPresenter::apply_zone_group_event(EffectWorld *p_fx,

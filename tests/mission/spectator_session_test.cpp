@@ -7,7 +7,7 @@
 // free places the entity on the composed view pose. The replica track legs
 // build the map POI list outside the waypoint gametypes.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b40f8..0x4b411a;
-//  Camera_UpdateFreeFly @0x4b2980; DeathScreen_FilterInputAction @0x52ad50; sub_52AFF0
+//  Camera_UpdateFreeFly @0x4b2980; DeathScreen_FilterInputAction @0x52ad50; Spectator_CycleMode
 //  @0x52b082..0x52b0ee; NapiNPClientMsg_0x00A @0x42ffb8..0x42ffc9;
 //  Entity_BuildMapPoiLists @0x42de40]
 #include <runtime/inmatch/client_runtime.h>

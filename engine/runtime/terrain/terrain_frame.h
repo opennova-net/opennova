@@ -245,9 +245,9 @@ struct TerrainDrawList {
 // advances the cache's frame counter and claims pages like the main one
 // (TerrainTileCompositionCache::begin_frame). Both skip under the main
 // frame's indoors letter (renderer::ScenePassGates::terrain).
-// [orig: Render_ProcessMainSceneFrame -> sub_60FF50 @ 0x5CA654, then
+// [orig: Render_ProcessMainSceneFrame -> Terrain_RenderFromCameraView @ 0x5CA654, then
 // Render_WeaponInsetScene @ 0x5CA949 -> Render_SetViewAndProjectionMatrices
-// @ 0x5C9A1B, sub_60FF50 @ 0x5C9A2F (its context from g_ViewportViewMatrixFloat
+// @ 0x5C9A1B, Terrain_RenderFromCameraView @ 0x5C9A2F (its context from g_ViewportViewMatrixFloat
 // @ 0x60FF6F) -> PolyTrn_ResetFrameStatsAndRender @ 0x610009 -> PolyTrn_RenderFrame,
 // whose `add dword_319FC04` @ 0x60EAE8 advances the page frame; the Inset's
 // sector pass Terrain_RenderMainSectorPass @ 0x5C9D65]

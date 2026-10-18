@@ -712,7 +712,7 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 		// The zone entity's own Team byte, never a timer entry's mode: the
 		// letter colour, the own-team pulse and labels, and the blip's team
 		// reads all take +0x162 [orig: MapOverlay_DrawView `v12[354]`
-		//  @0x5A5AE9 and @0x5A5C73; sub_597FD0 `entity_ptr[354]` @0x598102].
+		//  @0x5A5AE9 and @0x5A5C73; Minimap_DrawEntityBlip `entity_ptr[354]` @0x598102].
 		zone.team = zone_team_byte(view, *e);
 		if (runtime != nullptr) {
 			// Any timer entry gates the letter, a window-only one (zeros) as
@@ -735,7 +735,7 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 				zone.countdown = c.wave_countdown;
 			}
 		}
-		// sub_597FD0's entity reads (hud_map_view.h death_map_zone_blip).
+		// Minimap_DrawEntityBlip's entity reads (hud_map_view.h death_map_zone_blip).
 		zone.has_def = e->has_item_def;
 		zone.def_type = e->has_item_def ? e->item_type : 0u;
 		zone.def_attrib = e->has_item_def ? e->item_attrib : 0u;
@@ -752,7 +752,7 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 			zone.occupant_team = occupant->team;
 		}
 		// The anchor: the Euler matrix (no scale) about the position applied
-		// to the bbox centre [orig: sub_59C300 @0x59c311..0x59c327].
+		// to the bbox centre [orig: Entity_GetWorldBoundsCenter @0x59c311..0x59c327].
 		int32_t euler[3];
 		world::entity_live_euler_bam(*e, euler);
 		const int32_t position[3] = {io::float_to_fp16_16_sat(e->position.x),
@@ -1287,7 +1287,7 @@ bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gam
 	// [orig: `g_LocalPlayerEntity ? ->Team (+0x162) : 0` @0x5b92de..0x5b92f1]
 	if (const world::Entity *local = w.registry.get(w.cached.local_player))
 		inputs.local_team = static_cast<int8_t>(local->team);
-	inputs.spawn_zones = w.zones.has_spawn_zone(); // sub_43B910
+	inputs.spawn_zones = w.zones.has_spawn_zone(); // SpawnZoneList_HasAny
 	// [orig: g_ScoreboardInGameCount, the 0x16 trailer @0x42fe70]
 	return hud::build_end_game_stats_text(sv, state.scoreboard.in_game_count, inputs, gametext, out);
 }

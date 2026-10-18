@@ -332,7 +332,7 @@ int test_the_delay_ignores_the_channel() {
 // Sixteen dialogs at once; a seventeenth is dropped [orig: Dialog_Register
 // @0x44d9c3]. A dialog leaves its slot once its last line has held and the
 // channel is free, and the slots behind it close up [orig: Dialog_FreeByName
-// @0x44db40 -> sub_44DAF0 @0x44daf0].
+// @0x44db40 -> Dialog_CompactSlots @0x44daf0].
 int test_sixteen_slots_and_the_free() {
 	DialogQueue queue;
 	Device device;
@@ -409,7 +409,7 @@ int test_a_play_registers_the_dialog() {
 // The PLYRDIALOG readers over a dialog's life: registered, holding its line,
 // waiting on the channel, then gone from its slot. active = a slot holds it
 // [orig: Dialog_ExistsByIndex @0x44e170]; finished = the history holds it and
-// no slot does [orig: sub_44E220 @0x44e220: history miss -> 0 @0x44e291, slot
+// no slot does [orig: Dialog_IsFinishedByIndex @0x44e220: history miss -> 0 @0x44e291, slot
 // hit -> 0 @0x44e313, 1 @0x44e2f5].
 int test_the_plyrdialog_readers_over_a_dialog_s_life() {
 	DialogQueue queue;
@@ -441,7 +441,7 @@ int test_the_plyrdialog_readers_over_a_dialog_s_life() {
 // two agree but for -99..-1, so a dialog "dlg-05" that PlayWavList -5 plays is
 // never found by the number -5, which looks for "dlg-005" [orig:
 // Dialog_PlayByIndex @0x527b01 "dlg%03i"; Dialog_ExistsByIndex @0x44e190 and
-// sub_44E220 @0x44e23f "dlg%.3d"].
+// Dialog_IsFinishedByIndex @0x44e23f "dlg%.3d"].
 int test_the_readers_name_their_number_dlg_dot3d() {
 	dbf::File dialogs;
 	for (const char *name : { "dlg-05", "dlg000", "dlg1234" }) {
@@ -467,7 +467,7 @@ int test_the_readers_name_their_number_dlg_dot3d() {
 
 // The history count saturates at 255: registration 256 and every one after it
 // overwrite entry 255, which the scan never reaches, so those dialogs never
-// read finished [orig: Dialog_Register @0x44d99c..0x44d9a3; sub_44E220's scan
+// read finished [orig: Dialog_Register @0x44d99c..0x44d9a3; Dialog_IsFinishedByIndex's scan
 // bound @0x44e28e].
 int test_the_history_saturates_at_255() {
 	DialogQueue queue;

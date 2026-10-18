@@ -43,7 +43,7 @@ int converted_index_count(const CptTileLOD &lod, std::vector<uint32_t> &scratch)
 // The retail cull: the clip cone from the horizontal FOV, the far slab from
 // the frame's view distance when positive, and the settings-derived LOD
 // multiplier folded into the context scale.
-// [orig: PolyTrn_RenderFrame @ 0x60EAC0 — sub_603DA0 @0x60eaff, far
+// [orig: PolyTrn_RenderFrame @ 0x60EAC0 — Terrain_BuildFrustumPlanes @0x60eaff, far
 //  override @0x60eb7e..0x60eb8d, `flt_319FB2C = ctx[5] * flt_8493D8`
 //  @0x60eb4a]
 TerrainViewCull view_cull_for(const TerrainViewInput &view) {

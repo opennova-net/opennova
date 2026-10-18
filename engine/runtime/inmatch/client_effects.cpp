@@ -366,7 +366,7 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             // [orig: NapiNPClientMsg_HandleEmote @0x427E90 -- Pool_GetEntryUnchecked
             //  @0x427eeb, the ItemTypeIndex gate @0x427ef5, the state write
             //  @0x427efb..0x427f18, PlayerSlot_FindByEntityPtr @0x427f29, the
-            //  slot+50 bit 0 gate @0x427f39, sub_5BFB00(.., 9, ..) +
+            //  slot+50 bit 0 gate @0x427f39, VMacros_BuildRemappedName(.., 9, ..) +
             //  Audio_StartEntityPlayback @0x427f44..0x427f55,
             //  HUD_SetTrackedEntityTarget @0x427f5b]
             world::Entity speaker;

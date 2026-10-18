@@ -5,7 +5,7 @@
 // its callers' entry point, the tracer whiz, the Stinger lock note, the whiz
 // radius resolve, and the per-HUD-frame snapshot.
 // [orig: Radar_AddBlip @0x59b280; Radar_UpdateContacts @0x59a7e0;
-//  sub_59B200 @0x59b200; HUD_ResetAllOverlayBuffers @0x59dd40;
+//  Radar_TrackMissile @0x59b200; HUD_ResetAllOverlayBuffers @0x59dd40;
 //  Player_OnDamageReceived @0x4dd880; Projectile_SpawnTracerScarEffect
 //  @0x4e5ac0; Entity_UpdateGuidedMissile_0 @0x4465db; AmmoDef_InitEffectsTable
 //  @0x409f20; HUD_RenderAllOverlays @0x5a817d / @0x5a87ef]

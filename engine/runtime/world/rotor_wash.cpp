@@ -321,7 +321,7 @@ FocalSwayPose RotorWashSystem::sway_pose(const Entity &e) const {
 // presentation stream (World::prng16_c_state): every draw sits behind the
 // listener/camera-distance gates, so the stream is never authoritative.
 // [orig: WeatherParticle_UpdateAllEmitters @0x5CB100 (0x5CB100..0x5CB5B0;
-//  earlier records cite its body @0x5CB220); sub_5F6C10 @0x5F6C10;
+//  earlier records cite its body @0x5CB220); Effect_TriggerGroupAtFixedPointPos @0x5F6C10;
 //  PRNG_Next16_C @0x6131B0]
 void RotorWashSystem::tick() {
 	water_wakes_.tick();
@@ -402,8 +402,8 @@ void RotorWashSystem::tick() {
 				// child, after which the stale instance word makes the trigger
 				// a no-op until the surface effect changes.
 				// [orig: WeatherParticle_UpdateAllEmitters @0x5CB407..0x5CB4A0;
-				//  sub_5F6C70 @0x5F6C70 (release); CEffectWorld_SpawnEmitterAtPosition
-				//  @0x5F6DF0 (create, dest{type 4, id, hit}); sub_5F6C10 @0x5F6C10
+				//  Effect_ReleaseEmitterIfLive @0x5F6C70 (release); CEffectWorld_SpawnEmitterAtPosition
+				//  @0x5F6DF0 (create, dest{type 4, id, hit}); Effect_TriggerGroupAtFixedPointPos @0x5F6C10
 				//  -> CEffectWorld_SpawnAllActiveChildren @0x5E5E70 (trigger)]
 				const auto push = [&](VehicleEffectEvent::Kind kind, const std::string &name) {
 					VehicleEffectEvent event;
@@ -438,7 +438,7 @@ void RotorWashSystem::tick() {
 		// word; the ray radius's `*(_ESI - 4)` @0x5CB265 is the DWORD index
 		// -4 = slot dword 27, the inner radius).
 		// [orig: WeatherParticle_UpdateAllEmitters @0x5CB4D1..0x5CB584;
-		//  sub_6108E0 @ 0x6108E0]
+		//  WaterRing_SpawnAt @ 0x6108E0]
 		if (world_.env.water_z != 0 && (world_.logic_tick & 7u) == 0) {
 			const int32_t height = io::bam_sub(z.frame.m[11], world_.env.water_z);
 			const float opacity = std::min(1.0f,

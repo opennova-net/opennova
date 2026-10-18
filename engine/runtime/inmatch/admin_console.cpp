@@ -641,7 +641,7 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 // past VERSION, which out of a session matches the line's CRC against the binding table and
 // queues its input action (D-NET-710). SAVENFO writes debug.nfo (entity_usage_text); VERSION posts
 // "Version <version>  - <title>" to the SYSTEM ring in white with the 930-tick life.
-// [orig: Client_ProcessLocalCommand @0x520BF0 — sub_4D7F00 @0x520C2A; the `pb_` arm
+// [orig: Client_ProcessLocalCommand @0x520BF0 — PBServer_InvokeCommandCallback @0x520C2A; the `pb_` arm
 //  @0x520C3B..0x520CB6: the '/' or '\\' skip @0x520C3B..0x520C45, strnicmp(.., "pb_", 3)
 //  @0x520C50 (the string @0x7CCF84), "sv_" @0x520C6B, the PunkBuster calls @0x520C94 /
 //  @0x520CC9 (0x4DA3F0 / 0x4D7ED0, each a no-op with no context 0xB608F4), return 1; the

@@ -138,7 +138,7 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState
 void local_player_view_refresh(World *world, PlayerViewState &v) {
     const Entity *local = local_entity(world);
     // Camera changes also update layer admission on frames without a body tick.
-    // [orig: Camera_SetTrackedEntity @0x4391D0 -> sub_75BE80 @0x75BE80]
+    // [orig: Camera_SetTrackedEntity @0x4391D0 -> Sound_SetListenerViewFlags @0x75BE80]
     if (local != nullptr) world->cached.sound_listener_view_flags = audio::listener_view_flags_for_camera(v.camera_mode);
     const bool alive = local != nullptr && local->alive && local->health > 0;
     const bool round_ended = world != nullptr && world->match.outcome().ended;

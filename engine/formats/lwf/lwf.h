@@ -102,7 +102,7 @@ struct MultiHeader {
 
 struct Single {
   std::string name;
-  // The byte at +33, a dialog line's volume (0 full) [orig: sub_75BE10 @ 0x75be10,
+  // The byte at +33, a dialog line's volume (0 full) [orig: SoundBank_GetEntryVolumeByName @ 0x75be10,
   // from Dialog_LoadAudioClip @ 0x44dd15]; +32 is no field (no reader reads it),
   // written zero.
   uint8_t volume = 0;
@@ -119,7 +119,7 @@ struct Single {
   uint32_t entry_word28 = 0;
   // (+34..+47 are no fields: the engine's runtime words, the preload mark at +34
   // [orig: SoundBank_LoadTriggerSets @ 0x75c5fd], the loaded flag at +35 and the
-  // wave pointer at +36 [orig: sub_75BC20 @ 0x75bc20], which a file's set +35
+  // wave pointer at +36 [orig: SoundBank_LoadEntryWave @ 0x75bc20], which a file's set +35
   // would make the engine take as a wave buffer: written zero; +48, the path
   // pointer, is the pool slot's offset in an 'LWF1' bank, zero in another, which
   // binds none [orig: @ 0x75c671].)

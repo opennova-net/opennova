@@ -1755,7 +1755,7 @@ int Compiler::finalize(const char **err) {
     out.locals_frame_offset = MUS_DEFAULT_LOCALS_BASE;   /* `enter` frame base: MDEdit's 32 (sub_40DF30, v1[15]) */
     out.entry_section_index = 0;
     /* The +0x40 MessageHandler entry: the function of that name, else the code's start, its leading nop
-       (gamemus.bin 0x09, menumus.bin 0) [orig: sub_672E50 @ 0x672eba jumps there]. */
+       (gamemus.bin 0x09, menumus.bin 0) [orig: AudioVM_RunContext @ 0x672eba jumps there]. */
     out.message_handler_offset = 0;
     out.has_message_handler = 1;
     for (size_t i = 0; i < function_count; ++i)

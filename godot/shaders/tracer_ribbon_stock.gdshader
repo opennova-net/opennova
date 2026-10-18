@@ -1,7 +1,7 @@
 shader_type spatial;
 // The tracer ribbon on the device's stock slot 6 (mode word 0x222): ONE/ONE,
 // colour = alpha = DIFFUSE, untextured — the std/rapid/sniper/df1 styles
-// (retail CEffectChannel_Init @ 0x5DB1D6, the stock block built by sub_6780A0
+// (retail CEffectChannel_Init @ 0x5DB1D6, the stock block built by CGfxDevice_CreateDefaultRenderStates
 // @ 0x678113). The pass flags 0x10520000 (retail CEffectChannel_RenderRibbon
 // @ 0x5DC86C): lighting off, cull none, z-write off, fog on; the +0 style
 // word fogs to black (SetFogAndBlendMode mode 2 @ 0x5DC85A). The geometry is

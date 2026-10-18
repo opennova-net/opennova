@@ -387,7 +387,7 @@ int test_retail_overlays() {
 } // namespace
 
 // A terrain whose height data is another's (D-TERRAIN-17: 15 of JO:CA's 38, dvxg8a.trn naming dvxg8.cpt): the store
-// reads the .cpt the .trn names [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> sub_603CC0 @ 0x603D0A]; and the
+// reads the .cpt the .trn names [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> Terrain_ConfigureAndLoadLodStorage @ 0x603D0A]; and the
 // terrain's own tile placement where the mission has none (polytrn_tileinfo, its extension forced to TIL [orig:
 // Terrain_Init @ 0x60FCFD; PolyTrn_LoadTerrainConfig @ 0x60E6DC..0x60E6E5]).
 int test_named_files() {

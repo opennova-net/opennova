@@ -157,7 +157,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			// bucket. [orig: WeaponSlot_CanFire @0x541C6D..0x541C89;
 			//  Weapon_ConsumeAmmo @0x540850 - the seat legs @0x54086B..0x540894,
 			//  the bucket @0x5408B5..0x5408C9, the slot word @0x540907..0x540913;
-			//  sub_5461D0 @0x5461D0]
+			//  Entity_SpendMountSlotReserve @0x5461D0]
 			if (slot_def->ammo_bucket != 0) {
 				const uint32_t bucket = static_cast<uint32_t>(slot_def->ammo_bucket);
 				const bool own_bucket = bucket < st.shared_clips.size() &&

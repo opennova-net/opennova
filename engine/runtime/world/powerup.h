@@ -157,7 +157,7 @@ void powerup_sync_local_weapon_grant(World &world, LocalPlayer &lp, const Entity
 // mounted. Refused for a dead player, a missing row, or a weapon that names no
 // slot; returns whether the weapon landed. The caller resolves the handles and
 // checks the picker is its own player.
-// [orig: NapiNPClientMsg_0x035 @0x4261A0 -> sub_4E03D0 @0x4E03D0 ->
+// [orig: NapiNPClientMsg_0x035 @0x4261A0 -> Player_MountPickedUpWeapon @0x4E03D0 ->
 //  WeaponSlot_InitFromAvatarDef @0x4E0401, Player_MountWeaponSlot @0x4E040E]
 bool powerup_weapon_grant_received(World &world, LocalPlayer &lp, const Entity *row,
                                    bool local_dead);

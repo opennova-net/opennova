@@ -140,7 +140,7 @@ struct BadBuildBone {
     // frame_count + 1 entries under BAD_FLAG_TRANSLATION (rows 0..frame_count),
     // mission axes, as the keys and events carry: the runtime reads row
     // trunc(frame_count * t) and lerps it with the next one, so the last
-    // interval of every cycle reaches row frame_count [orig: sub_4102D0
+    // interval of every cycle reaches row frame_count [orig: AnimChannel_GetTranslationRowAtTime
     // @0x4102d0 via BoneAnim_TransformBones @0x410360]. The writer appends the
     // pad row retail's clips carry past it (bad_write.cpp); no author gives it.
     std::vector<BadBuildVec3> translations;

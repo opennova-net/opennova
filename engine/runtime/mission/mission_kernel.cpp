@@ -829,7 +829,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// The vehicle spawn-marker list is built from the mission as loaded, once
 	// the definitions are attached and ahead of the class inits, the
 	// PreMission pass and the WAC's initial execution.
-	// [orig: Game_StartMission — the per-vehicle sub_529A80 walk
+	// [orig: Game_StartMission — the per-vehicle SpawnMarkerBudgetList_Add walk
 	//  @0x52527A..0x5252BF and the Spawn_BuildMarkerBudgetList call
 	//  @0x5252C6 precede the Entity_InitAllFromModels call @0x52567F and the
 	//  EventTrigger_UpdateAllWithFlag2 call @0x525B86]
@@ -888,7 +888,7 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;
 	// [orig: dword_26970F4, whose only live writer is the cine render pass
-	//  sub_570BB0 @0x570C66]
+	//  Cine_RenderOverlays @0x570C66]
 	world.epilog.frame_drawn = previous.world.epilog.frame_drawn;
 	// [orig: dword_2C05A14 (the mode) and dword_2C05A18..20 (the camera),
 	// zero-initialized data whose only writer is Render_WeatherTrailParticles
@@ -963,7 +963,7 @@ bool MissionKernel::complete_mission_start() {
 	// The mission start's cine legs, after the unit census: every node gone,
 	// the end screen down, and on a first SP start the intro-cine leg
 	// [orig: Game_StartMission — Score_CountMissionSubgoalsAndUnits @0x525D5D,
-	//  then sub_577940 @0x525DA8 and the intro arm @0x525DAF..0x525DD6].
+	//  then Cine_ReleaseAll @0x525DA8 and the intro arm @0x525DAF..0x525DD6].
 	world.epilog.mission_start(!restart_boot_, world.rules.mp_session, world);
 	if (world.rules.projectile_authority)
 		world.vehicles.initialize_mission_vehicles();

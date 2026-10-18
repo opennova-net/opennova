@@ -775,7 +775,7 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 // the cursor, so with N flags every flag's state is re-sent once per N+1
 // seconds. Authority-gated only: not on is_in_session, the round-over latch or
 // the pre-round timer, and the alive/dead bits are never tested.
-// [orig: sub_517B20 @0x517B20 — authority @0x517b27, def @0x517b55, ids
+// [orig: Server_RefreshNextFlagState @0x517B20 — authority @0x517b27, def @0x517b55, ids
 //  @0x517b57..0x517b6d, cursor compare @0x517b71, ++ @0x517b81, reset
 //  @0x517b90; sender Server_SendDestructibleDeathPacket @0x50D900 (mask 0x80
 //  @0x50d922, SendFiltered(0x2F) @0x50d95a) -> NetPacket_SerializeEntityWithParentAndTarget
@@ -1925,7 +1925,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// (flag carry limit, MaxFriendlyKills / suicide punts) and the round-robin
 	// 0x2F flag refresh, both ahead of the spawn-wave release.
 	// [orig: Server_TickUpdate @0x51df5f Server_CheckPlayerViolations,
-	//  @0x51df64 sub_517B20, then @0x51df6e SpawnWaveList_Tick]
+	//  @0x51df64 Server_RefreshNextFlagState, then @0x51df6e SpawnWaveList_Tick]
 	if (periodic_second) {
 		check_player_violations(ctx, world);
 		refresh_next_flag_state(ctx, world);

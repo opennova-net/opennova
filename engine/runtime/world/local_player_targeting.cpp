@@ -12,14 +12,14 @@ namespace opennova::world {
 // The heat-seeker arm of the shared target query, contexts 6 and 11: the
 // pool-0 and pool-1 legs. LOS follows the bounded, stable score sort; the
 // query disables it during scan. NOT ported: the ctx-flag 0x200 projectile-
-// list leg (the 128-entry {entity, ttl} ring sub_4E70F0 keeps, fed by the
+// list leg (the 128-entry {entity, ttl} ring ProjectileTargetRing_Update keeps, fed by the
 // shell-bounce update and released at round death, walked through the same
 // validator/score with the MP case-11 Entity_IsShellProjectile deflection
 // roll) -- its feeders, the shell-bounce ring, are absent from the port, so
 // live rounds such as flares never enter the candidate list here.
 // [orig: Entity_SpawnWeaponEffect @0x545840 (ctx flags 0x662 @0x54591b);
 // Entity_FindTargets @0x53a610 -- the pool legs ported, the 0x200 ring leg
-// @0x53acf7..0x53ade0 not; ring sub_4E70F0 @0x4e70f0, feeders
+// @0x53acf7..0x53ade0 not; ring ProjectileTargetRing_Update @0x4e70f0, feeders
 // Entity_UpdateShellBounce @0x443e69 / Projectile_ReleaseEffects @0x4e82ea,
 // case-11 deflection arm @0x539385..0x539415; Entity_ValidateWeaponTarget
 // @0x53a400; Weapon_CalcDamageByType @0x539140]

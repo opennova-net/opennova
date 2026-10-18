@@ -426,7 +426,7 @@ public:
 	// field). The emitters' own schedules are untouched. False for a missing
 	// or detached group, which is how a retail group that already died
 	// (pool slot freed) answers the weather slot's stale instance pointer.
-	// [orig: sub_5F6C10 @0x5F6C10 -> CEffectWorld_SpawnAllActiveChildren
+	// [orig: Effect_TriggerGroupAtFixedPointPos @0x5F6C10 -> CEffectWorld_SpawnAllActiveChildren
 	//  @0x5E5E70: walks group+52's child list, vtable slot 6
 	//  (CParticleEmitter_SpawnNewParticle @0x5F35B0) on each child whose
 	//  nested-child word +264 is clear; CEffectWorld_UpdateAndReapGroups

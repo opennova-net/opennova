@@ -64,7 +64,7 @@ inline constexpr size_t kNameMaxChars = 16;
 inline constexpr uint32_t kRecordFlagNoName = 1;
 
 // The campaign table, a byte per mission: +64 + 32 * campaign + mission
-// [orig: sub_54D6A0 @0x54d70a].
+// [orig: PlayerProfile_SaveRoundEndProgress @0x54d70a].
 inline constexpr size_t kCampaignOffset = 64;
 inline constexpr size_t kCampaigns = 16;
 inline constexpr size_t kCampaignMissions = 32;

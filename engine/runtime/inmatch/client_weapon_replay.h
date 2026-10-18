@@ -18,6 +18,6 @@ bool replica_shooter_indoors(mission::MissionKernel &, const replication::Client
 // joiner's own player lands the weapon its copy of the row names and mounts it
 // (world/powerup.h powerup_weapon_grant_received).
 // [orig: NapiNPClientMsg_0x035 @0x4261A0 -- the handle resolves @0x4261CF..0x426239,
-//  sub_4E03D0 @0x42624C / @0x42625B]
+//  Player_MountPickedUpWeapon @0x42624C / @0x42625B]
 void apply_weapon_pickups(JoinerRole &, ClientRuntime &, world::World &, world::LocalPlayer &);
 }

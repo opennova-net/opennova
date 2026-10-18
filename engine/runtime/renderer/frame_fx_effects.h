@@ -286,7 +286,7 @@ std::vector<std::uint8_t> frame_fx_scanline_texels(const FrameFxRand &rand);
 
 // The NVG targets: the scene renders into a 512-square target and the glow
 // accumulates in a persistent 256-square one.
-// [orig: sub_5CF400 @0x5cf422..0x5cf42c (0x200 x 0x200 on pixel-shader
+// [orig: ViewFx_InitNvgTargetSize @0x5cf422..0x5cf42c (0x200 x 0x200 on pixel-shader
 //  hardware); ViewFx_CreateRenderTargets @0x5cf665..0x5cf690 (the
 //  glow at half that)]
 inline constexpr int kNvgSceneSide = 512;

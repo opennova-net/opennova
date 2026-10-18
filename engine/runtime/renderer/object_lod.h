@@ -59,9 +59,9 @@ inline constexpr int clamp_object_lod_detail(int32_t level) {
 // 2 when both hold, with the default preset's zero offset. The slower devices'
 // rungs (1, or 0 on a CPU under 1980 MHz without the memory) are not probed.
 // [orig: Renderer_ComputeQualityLevels @ 0x586196..0x5861c4 (the object-detail
-//  word, quality_levels[2]), fed by sub_587790 @ 0x5877dc..0x587834 (the CPU
+//  word, quality_levels[2]), fed by Renderer_ComputeHardwareQualityLevels @ 0x5877dc..0x587834 (the CPU
 //  and memory marks); Game_RunVideoTestDialog @ 0x53ed1b and the VIDEODEFAULT
-//  preset sub_55A430 @ 0x55a43a both pass offset 0]
+//  preset Options_OnVideoDefault @ 0x55a43a both pass offset 0]
 inline constexpr int kObjectLodDetailFreshProfile = 2;
 
 // Entity-local sphere consumed by the visibility projector, in the source

@@ -76,7 +76,7 @@ bool table_set_cell_text(std::vector<MenuTableRow> &rows, int row, int column, i
 
 // The per-column cell record's value (the pair's second dword): the write
 // [orig: CTableWnd_SetCellValue @0x6420f0 (ex
-// CTableWnd_SetCellValue)], and the column-0 rewrite [orig: sub_63F440 @0x63f440].
+// CTableWnd_SetCellValue)], and the column-0 rewrite [orig: CTableWnd_SetRowValue @0x63f440].
 bool table_set_cell_value(std::vector<MenuTableRow> &rows, int row, int column, int column_count,
 		int32_t value);
 // The cell record's value (+4), none when the row or the column is out of range

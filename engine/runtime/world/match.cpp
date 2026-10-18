@@ -758,7 +758,7 @@ void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPos
     // carrier's pitch in Q22 (`imul 400h; shrd 16h`, an arithmetic >> 12),
     // and the free fall installed as the object's update callback
     // (Match::update_dropped_object). The +0x155 byte the drop sets to 0x10 is
-    // read only by the S2C 0x35 pickup refusal [orig: sub_4E03D0 @0x4e03f0],
+    // read only by the S2C 0x35 pickup refusal [orig: Player_MountPickedUpWeapon @0x4e03f0],
     // a message this port leaves unhandled.
     // [orig: @0x439e54..0x439e88 (the motion), @0x439e95 (+0x1C4 =
     //  Entity_UpdatePositionAndTransform)]

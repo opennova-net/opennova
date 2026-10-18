@@ -4,7 +4,7 @@
 // countdown, the remote-player grants and the S2C 0x35 weapon fan and receive.
 // [orig: PowerupEntity_InitFromDef @0x442D00; PowerupAction_Pickup @0x4428A0;
 //  WeaponSlot_RecalculateScore @0x542450; WeaponSlot_InitFromAvatarDef
-//  @0x542730; Server_BroadcastWeaponOverlayUpdate @0x509FC0; sub_4E03D0
+//  @0x542730; Server_BroadcastWeaponOverlayUpdate @0x509FC0; Player_MountPickedUpWeapon
 //  @0x4E03D0; Powerup_TickRespawn @0x442850; PowerupAction_Respawn @0x442B40]
 #include <runtime/world/powerup.h>
 
@@ -933,7 +933,7 @@ void test_server_weapon_grant_fan() {
 // lands and is mounted -- the slot becomes the pending one and the held
 // weapon queues its switch-out. A dead player or a missing row refuse; with
 // no equipped weapon the weapon lands and nothing mounts, as retail's gates do.
-// [orig: sub_4E03D0 @0x4E03D0; Player_MountWeaponSlot @0x4DFA40]
+// [orig: Player_MountPickedUpWeapon @0x4E03D0; Player_MountWeaponSlot @0x4DFA40]
 void test_weapon_pickup_received() {
     Rig rig;
     const EntityHandle row = rig.spawn_powerup(10);

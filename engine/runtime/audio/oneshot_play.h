@@ -30,7 +30,7 @@ namespace opennova::audio {
 // where its flags share a view bit with the listener's): first person 2, an
 // external camera mode 4; the startup word, before any camera is tracked, both.
 // The camera's tracked entity stamps 2 for camera mode 0 and 4 for any other.
-// [orig: Camera_SetTrackedEntity @0x4391D0 -> sub_75BE80 @0x75BE80; the startup
+// [orig: Camera_SetTrackedEntity @0x4391D0 -> Sound_SetListenerViewFlags @0x75BE80; the startup
 //  word @0x43924A; SoundBank_PlayTriggerEntries @0x75CD54, the admission test]
 inline constexpr uint8_t kListenerViewFirstPerson = 2;
 inline constexpr uint8_t kListenerViewExternal = 4;
@@ -150,7 +150,7 @@ std::optional<RadioVoice> select_radio_voice(const lwf::File &bank,
 // the radio line, but the member file as the bank loaded it (no extension
 // swap) and the set's then the member's pitch jitter composed on the shared
 // stream. [orig: SoundBank_SelectTriggerEntryFromBank @0x75BF20 -- the walk
-//  @0x75bf56..0x75c062, the lazy load sub_75BC20 @0x75c07b, the pitch
+//  @0x75bf56..0x75c062, the lazy load SoundBank_LoadEntryWave @0x75c07b, the pitch
 //  @0x75c089..0x75c109, the volume @0x75c113, the radius @0x75c122]
 std::optional<RadioVoice> select_entity_voice(const lwf::File &bank,
         const SetLocation &loc, SoundSelector &selector, uint8_t listener_view_flags);

@@ -29,7 +29,7 @@
 //     hidden fields plaintext for the permissive OpenNova-server path only.
 //   * The EPASK bundle arrives as a Set-Cookie at /nwprepare.dll, is stored in
 //     the cookie jar (CookieJar_UpdateFromURL @ 0x64e630), and is read back by
-//     name (sub_64EA90 @ 0x64ea90).
+//     name (CookieJar_GetValueByName @ 0x64ea90).
 //   * BOTH the GET and POST request builders attach EVERY cookie in the jar to
 //     the request, the .gsb server-browser fetch included. They key the host
 //     first (Network_TruncateIPToSubnet @ 0x62dfe0, subnet_key below), but the
@@ -146,7 +146,7 @@ bool joi_endpoint_usable(const std::string &host_ip, long port);
 //  CookieJar_UpdateFromURL @0x64E698 (the walk @0x64E6B0, a new node's 0 @0x64E98A),
 //  Config_QueryMatchingEntries @0x64EC18, and the request builders
 //  CUIBrowser_SendHTTPRequest @0x658A34 / GopherWebWidget_SendHttpPost @0x658C57 into
-//  sub_64EA40 @0x64EA40; the by-name read sub_64EA90 @0x64EA90; the jar file's save
+//  CookieJar_GetEntriesForHost @0x64EA40; the by-name read CookieJar_GetValueByName @0x64EA90; the jar file's save
 //  CookieJar_SaveToFile @0x64EE60 (node+0 written @0x64EF16) and load
 //  CUIStringTable_LoadFromFile @0x64F290 (node+0 set @0x64F547)]
 std::string subnet_key(const std::string &host);

@@ -47,7 +47,7 @@ inline constexpr float kMissionMapZoomMax = 40.0f;
 // The map's camera: the mission point at the picture's middle (metres, x east, y north) and the CMAP's zoom.
 struct MissionMapCamera {
 	double center[2] = { 0.0, 0.0 };
-	float zoom = 4.0f; // the CMAP's opening zoom [orig: sub_54B280 @0x54b280]
+	float zoom = 4.0f; // the CMAP's opening zoom [orig: CMap_InitScreenOnce @0x54b280]
 	bool operator==(const MissionMapCamera &o) const {
 		return center[0] == o.center[0] && center[1] == o.center[1] && zoom == o.zoom;
 	}

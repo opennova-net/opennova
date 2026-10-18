@@ -13,7 +13,7 @@ struct VehicleTraits;
 
 // The helicopter's bounded focal-wind pool, shared by downwash particles and
 // procedural foliage. A handle retains its slot until its vehicle is released.
-// [orig: Terrain_OverlayAlloc @0x5CAF40; sub_5CB020 @0x5CB020]
+// [orig: Terrain_OverlayAlloc @0x5CAF40; Terrain_OverlayUpdatePose @0x5CB020]
 struct FocalSwayPose {
 	bool active = false;
 	float basis[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };

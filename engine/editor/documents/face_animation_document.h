@@ -17,7 +17,7 @@ namespace opennova::editor {
 // engine's own record, grm::File (docs/world/world-wac-ai-re.md section 33.30). The game opens `<model>.GRM` for a
 // person (an item of type 3) through the archives when the shadow quality is above 0 [orig: Entity_InitFromModel @
 // 0x40E211..0x40E236 -> FaceAnim_AllocEntitySlot @ 0x57FDF0 -> FaceAnim_FindOrLoadFile @ 0x57FCE0 (the model's name, its path and extension
-// stripped, .GRM added) -> sub_5891E0 @ 0x5891E0 -> FaceAnimConfig_LoadFile @ 0x588BE0]: no file names one.
+// stripped, .GRM added) -> FaceAnimConfig_InitAndLoadFile @ 0x5891E0 -> FaceAnimConfig_LoadFile @ 0x588BE0]: no file names one.
 //
 // One row, the face: its base texture and its two eye textures (each name made .TGA, the base's .MDT twin too, and
 // loaded by stage [orig: Shadow_DecalLoadTextures @ 0x588040]), its eyes' size, centres and limits, and the
@@ -25,8 +25,8 @@ namespace opennova::editor {
 // moves it by), its triangles (three vertices each, by their index: a Record reference, so a triangle follows its
 // vertices), and its gestures (an expression by name, each with at most 32 parameters, a group's offset). The
 // game plays the nine expressions by name [orig: AnimState_FindByName @ 0x5800B0, the table @ 0x7D7960], the last
-// gesture of a name [orig: sub_588FE0 @ 0x588FE0], each vertex moved by the first parameter of its group [orig:
-// sub_589090 @ 0x589090; sub_5890F0 @ 0x5890F0], the group "xxx" never [orig: Model_CollectUniqueMaterialNames @
+// gesture of a name [orig: FaceAnimConfig_SelectGestures @ 0x588FE0], each vertex moved by the first parameter of its group [orig:
+// FaceAnimConfig_FindGestureParameter @ 0x589090; FaceAnimConfig_BlendVertex @ 0x5890F0], the group "xxx" never [orig: Model_CollectUniqueMaterialNames @
 // 0x588D90].
 enum class FaceAnimationKind : NodeKind { Face = 0, Vertex = 1, Triangle = 2, Gesture = 3, Parameter = 4 };
 constexpr NodeKind node_kind(FaceAnimationKind kind) { return static_cast<NodeKind>(kind); }

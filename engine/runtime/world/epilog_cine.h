@@ -14,7 +14,7 @@
 // [orig: Cinematic_EpilogUpdate @0x577950 (from Entity_UpdateAllEntities
 //  @0x4C2230 / @0x4C2634); Cine_InitPlayback @0x578390; Cine_StartPlayback
 //  @0x577840; Cine_EpilogStateMachineUpdate @0x576240; the render pass
-//  sub_575A50 @0x575A50 from Render_ProcessMainSceneFrame @0x5CADFC]
+//  Cine_RenderOrEndPlayback @0x575A50 from Render_ProcessMainSceneFrame @0x5CADFC]
 
 #include <runtime/world/geom.h>
 
@@ -55,7 +55,7 @@ enum class CineEventKind : uint8_t {
 enum class CineTextSource : uint8_t { GameText = 0, Banner };
 
 // The ImageFade +0x124 fade modes [orig: CCineEventImageFade_InitFadeState
-// @0x570FE0; its update sub_571020 @0x571020].
+// @0x570FE0; its update CCineEventImageFade_Step @0x571020].
 enum class CineFadeMode : int32_t {
 	In = 1,   // alpha 0 -> 1 at the rate, clamped
 	Out = 2,  // alpha 1 -> 0 at the rate, clamped
@@ -74,7 +74,7 @@ struct CineEvent {
 	int32_t start = 0;    // +0x04 the first live timeline frame
 	int32_t duration = 0; // +0x08 live through start + duration
 	// +0x14: bit 0 draws the node in the second pass (the lines over the
-	// images and fades) [orig: sub_570000 @0x570017 / @0x570053].
+	// images and fades) [orig: Cine_DrawActiveNodes @0x570017 / @0x570053].
 	int32_t flags = 0;
 	// CacheCamera: the cached pose, the start and end keyframes alike (the
 	// local player's Position, Yaw and Pitch at the round end).
@@ -96,7 +96,7 @@ struct CineEvent {
 	// GameText line was fetched from; the mission-text section "CineText" the
 	// constructor resolves it through comes back empty for a gametext
 	// string, so the line draws the gametext.
-	// [orig: sub_573020 @0x573020 -> HUD_DrawWrappedText @0x580C00 (mode 4)]
+	// [orig: CCineEventTextFade_Draw @0x573020 -> HUD_DrawWrappedText @0x580C00 (mode 4)]
 	CineTextSource text_source = CineTextSource::GameText;
 	std::string text_section;
 	std::string text_key;
@@ -203,15 +203,15 @@ inline constexpr int32_t kWorldMissionExitRestart = 4;
 // own alpha byte multiplies the node's (the epilog's two fades pass
 // 0x00FFFFFF). A TextFade line is the half-bright fold of the node's alpha
 // over its colour; a counter the half-bright fold of white.
-// [orig: sub_5710B0 @0x5710B0 (8355711 - (alpha * -255) << 24) and the fill
-//  pixels CinematicFadeEvent_LoadTexture @0x570F1B; sub_573020 @0x5730A3 /
+// [orig: CCineEventImageFade_Draw @0x5710B0 (8355711 - (alpha * -255) << 24) and the fill
+//  pixels CinematicFadeEvent_LoadTexture @0x570F1B; CCineEventTextFade_Draw @0x5730A3 /
 //  @0x57314C -> HUD_DrawWrappedText @0x580CBE; CineEventEpilogCounter_Draw
 //  @0x5734DE (color -1)]
 uint32_t cine_event_draw_argb(const CineEvent &e);
 
 // The cinematic bars' height over a width x height viewport: the leftover of
 // the 16:9 band, halved, one bar at the top and one at the bottom (none when
-// the viewport is 16:9 or wider) [orig: sub_570240 @0x570285 — (bottom +
+// the viewport is 16:9 or wider) [orig: Cine_ComputeLetterboxBars @0x570285 — (bottom +
 // 9 * (left - right) / 16 - top) >> 1].
 inline int32_t epilog_bar_height(int32_t width, int32_t height) {
 	return (height - 9 * width / 16) >> 1;
@@ -219,7 +219,7 @@ inline int32_t epilog_bar_height(int32_t width, int32_t height) {
 
 // The g_CineMode values [orig: Cine_InitPlayback @0x57864F (1),
 //  Cine_StartPlayback @0x577922 (2), Cine_DestroyAllNodesAndFont @0x57685D
-//  and the intro-cine load sub_578270 @0x5782B8 (0)].
+//  and the intro-cine load Cine_StartScriptPlayback @0x5782B8 (0)].
 enum class EpilogCineMode : int32_t { None = 0, Win = 1, Lose = 2 };
 
 struct EpilogCine {
@@ -227,7 +227,7 @@ struct EpilogCine {
 	// clears it once the timeline passes its last event [orig: dword_26970FC].
 	bool active = false;
 	// The timeline frame, advanced once per dispatch [orig: dword_2697100;
-	//  sub_56FF40 @0x56FF52].
+	//  Cine_AdvanceTimelineFrame @0x56FF52].
 	int32_t frame = -1;
 	EpilogCineMode mode = EpilogCineMode::None; // [orig: g_CineMode @0x2696DC4]
 	int32_t win_state = 0;  // [orig: g_EpilogWinState @0x2696DB4]
@@ -243,7 +243,7 @@ struct EpilogCine {
 	bool screen_active = false;
 	// A cine frame has rendered since the process started: the end screens
 	// build only once one has. Process-lifetime: only the cine render pass
-	// writes it (sub_570BB0 @0x570C66), so it crosses every load.
+	// writes it (Cine_RenderOverlays @0x570C66), so it crosses every load.
 	// [orig: dword_26970F4]
 	bool frame_drawn = false;
 	// The fade states' full-screen quad and its alpha: the live path never
@@ -256,8 +256,8 @@ struct EpilogCine {
 	// held opaque after a fade-in node ends, gone after a fade-out node ends
 	// [orig: dword_26970EC (fading) / dword_26970E8 (held) / flt_26970F0 (the
 	//  alpha), written by the letterbox update CCineEventFade_StepAlpha
-	//  @0x5712D0 and its end sub_571330 @0x571330; drawn by sub_570390
-	//  @0x570390 over the bars sub_570240 @0x570240 lays].
+	//  @0x5712D0 and its end CCineEventLetterbox_Finish @0x571330; drawn by Cine_DrawLetterboxBars
+	//  @0x570390 over the bars Cine_ComputeLetterboxBars @0x570240 lays].
 	bool bars_fading = false;
 	bool bars_held = false;
 	float bars_alpha = 0.0f;
@@ -266,11 +266,11 @@ struct EpilogCine {
 	// keeps the build order).
 	std::vector<CineEvent> events;
 
-	// The mission start's cine legs [orig: Game_StartMission — sub_577940
+	// The mission start's cine legs [orig: Game_StartMission — Cine_ReleaseAll
 	// @0x525DA8 (destroy every node, mode 0); on a first start out of a
-	// session the <mission>.cin intro load sub_578270 @0x525DC9 (active = 1,
+	// session the <mission>.cin intro load Cine_StartScriptPlayback @0x525DC9 (active = 1,
 	// mode 0, the fade quad down; no shipped mission carries a .cin), the
-	// frame reset sub_56FB50 @0x525DD1 and one Cinematic_EpilogUpdate
+	// frame reset Cine_ResetTimelineFrame @0x525DD1 and one Cinematic_EpilogUpdate
 	// @0x525DD6; Game_ResetSessionHudState @0x434BDC clears the screen].
 	void mission_start(bool first_start, bool in_session, World &world);
 	// The WIN epilog with no <mission>.end cine (the only form a shipped
@@ -285,7 +285,7 @@ struct EpilogCine {
 	void update(World &world);
 	// The frame's render pass: while the cine runs, a timeline before its
 	// last event draws a cine frame, else the cine stops
-	// [orig: sub_575A50 @0x575A50 -> sub_570BB0 @0x570BB0].
+	// [orig: Cine_RenderOrEndPlayback @0x575A50 -> Cine_RenderOverlays @0x570BB0].
 	void render_pass();
 	// The timeline's last frame: the largest start + duration, 0 for an empty
 	// list [orig: CineNode_RecalcTimeRange @0x5701C0].
@@ -295,7 +295,7 @@ private:
 	void clear_events();
 	// The timeline step: the frame advances, then every live node activates
 	// on its start frame, updates, and ends on its last frame, in list order
-	// [orig: sub_56FF40 @0x56FF40].
+	// [orig: Cine_AdvanceTimelineFrame @0x56FF40].
 	void step_timeline(World &world);
 	void activate_event(CineEvent &e);
 	void update_event(CineEvent &e, World &world);

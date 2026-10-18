@@ -84,7 +84,7 @@ enum class ItemDeathClass : uint8_t {
 	       // callback-less nade @0x813138, an empty/unknown tag) -> 0x406FF0:
 	       // +0x2AC = 0x1000000 and nothing else — the item never dies.
 	       // The missile rows rokt/stng/hlfr/jvln @0x8132B8..0x813300 ->
-	       // sub_443630 @0x443630 and arty @0x813318 -> sub_443640 @0x443640
+	       // MissileClass_HandleEvent @0x443630 and arty @0x813318 -> ArtyClass_HandleEvent @0x443640
 	       // are byte-identical to that body (IDA 2026-09-14).
 	kGnrc, // "gnrc" @0x8130C0 -> 0x407020
 	kGnrl, // "gnrl" @0x8130D8 -> 0x407F80
@@ -104,8 +104,8 @@ enum class ItemDeathClass : uint8_t {
     kPalm, // palm @0x53C4C0
     kTower, // towr @0x4406A0
     kSquib, // squib @0x449810
-    // The flare rows aflr @0x813330 -> nullsub_65 @0x443650 and gflr
-    // @0x813348 -> nullsub_66 @0x443660: a bare `retn` — no +0x2AC write, no
+    // The flare rows aflr @0x813330 -> AflrClass_HandleEvent @0x443650 and gflr
+    // @0x813348 -> GflrClass_HandleEvent @0x443660: a bare `retn` — no +0x2AC write, no
     // body at all. Never the tree body. (IDA 2026-09-14)
     kNone,
 };

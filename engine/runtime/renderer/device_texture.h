@@ -52,7 +52,7 @@ inline constexpr int kTerrainTexDetailFull = 3;
 // card with the shader-model-2 mark and a CPU past 2980 MHz, else 2, one less without more than 120 MB
 // of video memory, plus the preset offset (0 on the first launch), then the 0..3 clamp; the reference
 // machine has all three, so full detail [orig: Renderer_ComputeQualityLevels @0x58617E..0x586193
-// (caps[8] && caps[0] ? 3 : 2, --without caps[3]), the clamp @0x58629A..0x5862A9; sub_587790's caps
+// (caps[8] && caps[0] ? 3 : 2, --without caps[3]), the clamp @0x58629A..0x5862A9; Renderer_ComputeHardwareQualityLevels's caps
 // @0x5877F5 (CPU > 2980 MHz), @0x587834 (display memory > 0x7800000), @0x58787A (the SM2 mark);
 // the first launch's offset 0 @0x53ED0D].
 inline constexpr int kTerrainTexDetailFreshProfile = kTerrainTexDetailFull;

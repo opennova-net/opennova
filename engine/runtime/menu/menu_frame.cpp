@@ -1980,7 +1980,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 	// A RADIOEDIT's render alone has no gate: it renders its children, each by
 	// its own flag (CWnd_IsShown @ 0x646280 reads the window's own), its radio
 	// made shown at its create [orig: 0x65d310, the RADIOEDIT's render, no
-	// CWnd_IsShown call; sub_65D210 @ 0x65d2aa], so a hidden RADIOEDIT still
+	// CWnd_IsShown call; CRadioEditWnd_CreateChildWindows @ 0x65d2aa], so a hidden RADIOEDIT still
 	// draws its radio and what it holds (the pump still skips it).
 	if (!node_shown(w, ws) && w.type != mnu::WindowType::RadioEdit) {
 		for (size_t c = 0; c < w.children.size(); ++c) {
@@ -2019,7 +2019,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 		// A RADIOEDIT draws nothing of its own: its render draws its parts [orig: 0x65d310, the
 		// RADIOEDIT's render (IDB CEffect_SetParamFromTypedData), its children alone], a RADIOEDIT_EDIT
 		// made hidden and a RADIOEDIT_RADIO made shown, each parsed from the RADIOEDIT's own element at
-		// its origin [orig: sub_65D210 @ 0x65d210, the edit @ 0x65d259 / 0x65d25f, the radio @ 0x65d29f
+		// its origin [orig: CRadioEditWnd_CreateChildWindows @ 0x65d210, the edit @ 0x65d259 / 0x65d25f, the radio @ 0x65d29f
 		// / 0x65d2aa], so at rest it is the radio of its element (the swap to the edit on a second
 		// activation, CRadioEditWnd_HandleEvent @ 0x65d589, is not drawn: D-MNU-13).
 		case mnu::WindowType::RadioEdit:

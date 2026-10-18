@@ -191,7 +191,7 @@ public:
 	void commit_name(const std::string &text);
 
 	// The QUERY_YES of the PLAYER_INFO delete query: the current record seeded
-	// again and flagged nameless [orig: sub_561400 @0x561400 — @0x561435,
+	// again and flagged nameless [orig: PlayerInfo_OnDeleteQueryYes @0x561400 — @0x561435,
 	// @0x561442].
 	void reset_current(const ProfileDefaults &defaults);
 
@@ -202,7 +202,7 @@ public:
 	// The session start's copy of +1460 [orig: Game_ApplySessionSettingsToGlobals
 	// @0x55163c -> dword_24D2368] and the round end's write back, after a won
 	// campaign mission's completion byte and count outside a session
-	// [orig: sub_54D6A0 @0x54d6a0 — the gate @0x54d6c6..0x54d6e5, @0x54d70a,
+	// [orig: PlayerProfile_SaveRoundEndProgress @0x54d6a0 — the gate @0x54d6c6..0x54d6e5, @0x54d70a,
 	// @0x54d712, @0x54d724]. True when the original goes on to save
 	// (@0x54d72f); outside a session a player who never spawned returns first.
 	// The callers' copy before it on a won SP round has no counterpart: it
