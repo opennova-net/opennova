@@ -112,6 +112,24 @@ describe('fetchMyServers', () => {
     const bare = await fetchMyServers();
     expect(bare.ok && bare.value.servers[0].address).toEqual({ ...at, hostname: null, public_ip: null });
   });
+
+  it("reads where a start stands and why a server's last run ended", async () => {
+    const server = hostedServer(3, {
+      state: 'booting',
+      phase: { name: 'downloading_data', bytes_done: 5, bytes_total: 10 },
+    });
+    const stopped = hostedServer(4, { state: 'failed', stopped_because: { cause: 'crash', exit_code: 3, oom: true, line: 'out of memory' } });
+    get.mockResolvedValue(reply(serversResponse([server, stopped])));
+    const result = await fetchMyServers();
+    expect(result.ok && result.value.servers[0].phase).toEqual({ name: 'downloading_data', bytes_done: 5, bytes_total: 10 });
+    expect(result.ok && result.value.servers[1].stopped_because).toEqual({ cause: 'crash', exit_code: 3, oom: true, line: 'out of memory' });
+
+    // A malformed or missing one reads as none; the server still shows.
+    get.mockResolvedValue(reply(serversResponse([hostedServer(5, { phase: { bytes_done: 1 } as never, stopped_because: undefined as never })])));
+    const bare = await fetchMyServers();
+    expect(bare.ok && bare.value.servers[0].phase).toBeNull();
+    expect(bare.ok && bare.value.servers[0].stopped_because).toBeNull();
+  });
 });
 
 describe('the start, the stop and one server', () => {

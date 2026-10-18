@@ -148,6 +148,46 @@ export interface HostedEvent {
   at: string;
 }
 
+// Where a start stands, in its owner's words (hosted/server_phase.h): the
+// states themselves, and within them what the fleet does for it.
+export type ServerPhaseName =
+  | 'queued'
+  | 'restarting'
+  | 'moving'
+  | 'launches_held'
+  | 'launching_machine'
+  | 'waiting_for_slot'
+  | 'downloading_data'
+  | 'downloading_server'
+  | 'starting_server'
+  | 'signing_in'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'failed';
+
+export interface ServerPhase {
+  name: ServerPhaseName | (string & {});
+  // downloading_data: its trees' bytes fetched so far, of their manifests'.
+  bytes_done?: number;
+  bytes_total?: number;
+  // restarting: restart `restart` of `restart_limit`.
+  restart?: number;
+  restart_limit?: number;
+}
+
+// Why a stopped or failed server's last run ended: its cause, how its
+// container ended, and the server's own last line ('' for none).
+export type StopCause = 'crash' | 'timeout' | 'fleet' | 'stop' | 'update' | 'limits' | 'no_data' | 'link_lost';
+
+export interface StoppedBecause {
+  cause: StopCause | (string & {});
+  exit_code: number | null;
+  // It ran out of memory.
+  oom: boolean;
+  line: string;
+}
+
 // A hosted server, as its owner sees it. Times are UTC 'YYYY-MM-DD HH:MM:SS'.
 export interface HostedServer {
   id: number;
@@ -184,6 +224,11 @@ export interface HostedServer {
   running_at: string | null;
   ended_at: string | null;
   listing: HostedListing | null;
+  // Where its start stands; null where the reply carries none (the admin's
+  // fleet list).
+  phase: ServerPhase | null;
+  // Why its last run ended, for a stopped or failed server; else null.
+  stopped_because: StoppedBecause | null;
   // The newest 50 transitions, oldest first: GET /api/me/servers/<id> only
   // (the list, the start and the stop replies leave them out).
   events?: HostedEvent[];

@@ -100,6 +100,8 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
     running_at: state === 'running' ? '2026-10-14 12:02:00' : null,
     ended_at: live ? null : '2026-10-14 13:00:00',
     listing: null,
+    phase: { name: state },
+    stopped_because: live ? null : { cause: 'stop', exit_code: 0, oom: false, line: '' },
     ...overrides,
   };
 }

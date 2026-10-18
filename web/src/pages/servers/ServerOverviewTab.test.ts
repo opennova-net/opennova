@@ -121,4 +121,43 @@ describe('ServerOverviewTab', () => {
     expect(callout.text()).toContain('an admin updates every outdated server');
     expect(callout.find('button').exists()).toBe(false);
   });
+
+  it("says where the start stands under its progress, and when it is slower than usual", async () => {
+    // The data's been downloading since 12:00 (an hour before NOW): far past its usual few minutes.
+    const page = await mountTab(
+      hostedServer(1, {
+        state: 'booting',
+        updated_at: '2026-10-14 12:00:00',
+        phase: { name: 'downloading_data', bytes_done: 1_200_000_000, bytes_total: 2_300_000_000 },
+      }),
+    );
+    expect(page.get('.server-phase').text()).toBe('Downloading game data: 1.2 of 2.3 GB.');
+    expect(page.get('.server-phase-slow').text()).toBe('This is taking longer than usual.');
+    expect(page.find('.launches-held').exists()).toBe(false);
+  });
+
+  it('shows the fleet notice while launches are held, and nothing slow about the hold', async () => {
+    const page = await mountTab(
+      hostedServer(1, { state: 'provisioning', updated_at: '2026-10-14 12:00:00', phase: { name: 'launches_held' } }),
+    );
+    expect(page.get('.server-phase').text()).toBe('Waiting for a machine: new machines are held for a moment.');
+    expect(page.get('.launches-held').text()).toContain('A server waiting for a machine starts as soon as launches resume');
+    expect(page.find('.server-phase-slow').exists()).toBe(false);
+  });
+
+  it("says why it stopped, with the server's own last line", async () => {
+    const page = await mountTab(
+      hostedServer(1, {
+        state: 'failed',
+        failure_reason: 'it crashed 3 times in an hour',
+        stopped_because: { cause: 'crash', exit_code: 3, oom: false, line: 'fatal: mission jo_two.bms is missing' },
+      }),
+    );
+    const why = page.get('.server-stopped-because');
+    expect(why.text()).toContain('Why it stopped');
+    expect(why.text()).toContain('It crashed (exit code 3).');
+    expect(why.text()).toContain('fatal: mission jo_two.bms is missing');
+    expect(why.findAll('p')[1].classes()).toContain('text-danger');
+    expect(page.find('.server-phase').exists()).toBe(false);
+  });
 });

@@ -31,6 +31,20 @@
         <span class="font-semibold">{{ ownerStateLabel(server.state) }}.</span>
         {{ stateDescription(server.state) }}
       </p>
+      <!-- Where its start stands, and when that is slower than usual. -->
+      <p v-if="phaseLine" class="server-phase text-sm text-ink">{{ phaseLine }}</p>
+      <p v-if="slow" class="server-phase-slow text-sm font-semibold text-warn">{{ SLOW_PHASE_TEXT }}</p>
+      <p v-if="server.phase?.name === 'launches_held'" class="launches-held rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
+        {{ LAUNCHES_HELD_NOTICE }}
+      </p>
+      <!-- Why its last run ended, with the server's own last line. -->
+      <div v-if="!server.live && server.stopped_because" class="server-stopped-because space-y-1 text-sm">
+        <p class="font-semibold text-ink">Why it stopped</p>
+        <p :class="stoppedBad ? 'text-danger' : 'text-ink'">{{ stoppedBecauseText(server.stopped_because) }}</p>
+        <p v-if="server.stopped_because.line" class="break-words rounded-panel border border-border bg-surface p-2 font-mono text-xs text-ink">
+          <span class="sr-only">The server's last line: </span>{{ server.stopped_because.line }}
+        </p>
+      </div>
       <p v-if="server.state === 'failed' && server.failure_reason" class="break-words text-sm text-danger">
         {{ server.failure_reason }}
       </p>
@@ -239,11 +253,16 @@ import { usePolling } from '../../composables/usePolling';
 import type { HostedEvent, HostedServer, PinnedTree } from '../../types/hostedServer';
 import type { MyServer } from '../../types/myServers';
 import {
+  LAUNCHES_HELD_NOTICE,
   OWNER_START_STEPS,
+  SLOW_PHASE_TEXT,
   ownerStateLabel,
   ownerStepIndex,
+  phaseSlow,
+  phaseText,
   stateDescription,
   stateLabel,
+  stoppedBecauseText,
 } from '../../utils/hostedState';
 
 const props = defineProps<{
@@ -407,6 +426,16 @@ watch(
 );
 
 const stepIndex = computed(() => ownerStepIndex(props.server.state));
+
+// The phase under the progress while the server starts (its states' own
+// notes say the rest).
+const phaseLine = computed(() => (props.server.live && props.server.phase ? phaseText(props.server.phase) : ''));
+const slow = computed(() => props.server.live && phaseSlow(props.server, props.now));
+// An end the server or its limits caused, rather than a stop or an update.
+const stoppedBad = computed(() => {
+  const cause = props.server.stopped_because?.cause;
+  return cause === 'crash' || cause === 'timeout' || cause === 'no_data' || cause === 'link_lost';
+});
 
 function stepBarClass(index: number): string {
   if (index < stepIndex.value) return 'bg-online';
