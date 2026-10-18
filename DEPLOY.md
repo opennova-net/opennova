@@ -908,7 +908,7 @@ credentials).
    failed or unfinished one stops the deploy, leaving the rest on what they ran. A service
    at no task before the deployment's first release starts at its `desired` count, and
    its floor is raised to its `min` (the controller, up before any lobby, starts no
-   hosted server until a lobby runs: `apps/novaworld_common/README.md` "No lobby live");
+   hosted server until a lobby runs: `apps/novaworld_common/hosted/README.md` "No lobby live");
 5. once every program runs it, registers the backup task's revision (the nightly run
    takes the newest) and records the release: its manifest (the images by digest, each
    revision, the previous release, the release it was promoted from) goes to
