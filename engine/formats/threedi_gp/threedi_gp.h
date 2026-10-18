@@ -1,7 +1,8 @@
 // The GP model format (GPM, GPS, GPP): the runtime `.3di` of Delta Force: Black Hawk
-// Down, the format JO's 3DI3 replaced. OpenNova reads it only to migrate it to 3DI3
-// (threedi_gp_migrate.h; ADR 0027 as amended for the BHD-era import): nothing at runtime
-// walks a GP model and nothing writes one.
+// Down, the format JO's 3DI3 replaced. OpenNova reads it to migrate it to 3DI3
+// (threedi_gp_migrate.h; ADR 0027 as amended for the BHD-era import) and writes it only to
+// lower a 3DI3 model back for BHD (threedi_gp_lower.h, threedi_gp_write.h): nothing at
+// runtime walks a GP model.
 //
 // The layout is the BHD loader's [orig: GP_LoadModel @ 0x510E10 (dfbhd)], one section after
 // another with no chunk headers: the 0xEC header, the user points, the texture table, the
@@ -82,6 +83,10 @@ struct TextureRow {
 	std::string alpha;  // +0x10, 16 bytes: the alpha source a flag 0x100 row loads
 	int16_t id = 0;     // +0x24
 	uint16_t flags = 0; // +0x26: 0x8 alpha only, 0x100 colour with +0x10's alpha
+	// +0x28: the image's size, the checkerboard a failed load makes [orig: @ 0x5161C3..0x5161C7
+	// (dfbhd)], which the tool takes from the file it loads [orig: sub_4485B0 @ 0x4486F7..0x44871F
+	// (df4oed)].
+	uint16_t width = 0, height = 0;
 };
 
 // --- collision (mission axes; 8.8 vertices, Q14 normals, 16.16 the rest) ---------
@@ -118,6 +123,11 @@ struct CollisionSection {
 	std::array<int32_t, 6> box{};     // +64, INTERLEAVED, as stored (the loader widens it)
 	std::array<int32_t, 3> centre{};  // +88
 	int32_t radius = 0;               // +100
+	// +104, +108: the radius in xy about the centre and the box's height, as the tool derives
+	// them from the section's vertices [orig: sub_443980 @ 0x4449AA..0x4449ED (df4oed)]; no
+	// dfbhd reader found.
+	int32_t radius_xy = 0;
+	int32_t height = 0;
 };
 
 // A bounding plane, 16 bytes: a 16.16 unit normal and its distance (inside: n.p + d < 0).
@@ -130,6 +140,12 @@ struct CollisionPlane {
 struct CollisionVolume {
 	int32_t type = 0;                 // +0, the collidable type
 	int32_t flags = 0;                // +4
+	// +8: the centre, the sphere and xy radii (the xy one twice) and the half extents the tool
+	// stores [orig: sub_443980 @ 0x444D44..0x444DDE (df4oed)]; no dfbhd reader found.
+	std::array<int32_t, 3> centre{};
+	int32_t radius = 0;
+	int32_t radius_xy = 0;
+	std::array<int32_t, 3> half{};
 	std::array<int32_t, 6> box{};     // +48, INTERLEAVED: the box every reader tests
 	int32_t plane_count = 0;          // +72
 };
@@ -217,7 +233,8 @@ struct RgbGenerator {
 
 // A render material, 152 bytes. GP names no shader: the render state comes from the
 // bytes below [orig: GPMaterial_BuildModeWord @ 0x5163F0; GPMaterial_CompileGPM @ 0x516E70
-// (dfbhd)]; the record's own name (+0x00) is never read.
+// (dfbhd)]; the record's own name (+0x00) is never read (the tool writes the material's name,
+// in BHD's corpus most often its texture's [orig: GP_WriteRenderModel @ 0x4478DD (df4oed)]).
 inline constexpr uint32_t kMaterialTwoSided = 0x1;    // cull none
 inline constexpr uint32_t kMaterialAlphaTest = 0x2;   // GREATER than +0x3B
 inline constexpr uint32_t kMaterialAlphaTestInv = 0x4;
@@ -226,7 +243,9 @@ inline constexpr uint32_t kMaterialFlipbook = 0x10;
 inline constexpr uint32_t kMaterialUnlit = 0x100;
 inline constexpr uint32_t kMaterialBump = 0x200;
 struct Material {
+	std::string name;             // +0x00, 16 bytes
 	uint32_t attributes = 0;      // +0x10: kMaterial*
+	int16_t frame_rate = 0;       // +0x14: a flipbook's, scaled at load [orig: @ 0x515CFD..0x515D12 (dfbhd)]
 	int8_t frame_count = 0;       // +0x16: a flipbook's frames
 	uint8_t frame_counter = 0;    // +0x17: the counter that picks the frame
 	std::array<int8_t, 3> region_textures{}; // +0x28: the texture row id per mission region (-1 none)
@@ -265,15 +284,16 @@ struct PartAnimation {
 	std::array<float, 3> spin{};
 };
 
-// One LOD's render model: the 0x88 header and the blob it sizes. The blob opens with one
-// 12-byte point a non-root part (mission axes: the attach points the collision block's
-// translations hold too), which nothing reads; they are skipped.
+// One LOD's render model: the 0x88 header and the blob it sizes. The blob opens with the
+// attach points (12 bytes each, mission axes: the collision block's translations as floats
+// [orig: sub_446D90 @ 0x4470D5..0x44712C (df4oed)]), which nothing reads.
 inline constexpr uint32_t kRenderGlobalBatch = 0x1;
 inline constexpr uint32_t kRenderPartAnimations = 0x2;
 struct RenderModel {
 	uint32_t flags = 0;                  // +0x50: kRender*
 	uint32_t extra_count = 0;            // +0x60: 88-byte primitives (none in BHD's corpus)
 	uint32_t record_count = 0;           // +0x68: 232-byte records (none in BHD's corpus)
+	std::vector<std::array<float, 3>> attach_points;
 	std::vector<Part> parts;
 	std::vector<Batch> batches;          // one a part (local), or the global table's
 	std::vector<Primitive> primitives;   // in file order: batch by batch, opaque then alpha
@@ -293,6 +313,10 @@ struct Light {
 
 struct OcclusionObject {
 	uint8_t type = 0, parent = 0, connecting = 0;
+	// +4: the sphere the tool stores, which the loader recomputes [orig: GP_LoadOcclusionData
+	// @ 0x5150C9..0x515258 (dfbhd); sub_442110 @ 0x4421A1..0x4421CB (df4oed)].
+	std::array<float, 3> centre{};
+	float radius = 0.0f;
 	std::vector<std::array<float, 3>> vertices;
 	std::vector<std::array<float, 4>> planes;
 	std::vector<std::array<uint32_t, 3>> faces;
