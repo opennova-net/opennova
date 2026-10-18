@@ -104,6 +104,15 @@ CLAUDE.local.md
 
 .scratch/
 
+# Secrets that must never land here: a root dotenv, a rendered deploy env (the
+# tracked files are the op:// *.tpl), keys and certificates, account notes.
+/.env
+deploy/env/*.env
+*.pem
+*.key
+id_rsa*
+NW*.txt
+
 # Retail capture restore tokens bind machine-local absolute install paths.
 *.restore-token.local.json
 

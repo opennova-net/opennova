@@ -16,7 +16,7 @@ function listed(overrides: Partial<LobbyServer> = {}): LobbyServer {
   return {
     id: 167772173,
     serverName: 'Retail Joint Ops: Escalation',
-    hostIp: '3.232.55.36',
+    hostIp: '203.0.113.7',
     hostPort: 32768,
     players: 2,
     maxPlayers: 32,
@@ -57,7 +57,7 @@ describe('LobbyServerPage', () => {
     expect(info).toContain('AS - Kombang Valley (AAS)');
     expect(info).toContain('23 min');
     expect(info).toContain('Escalation');
-    expect(info).toContain('3.232.55.36:32768');
+    expect(info).toContain('203.0.113.7:32768');
     expect(page.text()).not.toContain('Put your message here');
     expect(info).not.toContain('Unknown');
     // No scores: the names who joined.
