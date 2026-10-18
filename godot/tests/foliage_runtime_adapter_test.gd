@@ -481,32 +481,38 @@ func test_aerial_eye_collects_no_detail_cells() -> void:
 
 
 # The cell's 3D distance (the eye's altitude included) feeds retail's 20-to-42
-# fade to BOTH near submissions. The fade law at an exact distance (31 -> 0.5
-# on the HIGH draw and its LOW secondary) is the foliage_runtime_vectors ctest's.
+# fade to BOTH near submissions. The eye stands 31 over the ground at the centre
+# of the 16-unit cell (-64..-48, -64..-48); the Tmap ramp rises 1 unit across
+# it, so the cell lies 30.5 to 31.5 below the eye and (42 - d) / 22 is 0.5
+# within 0.025 there. (The fade law at an exact distance is the
+# foliage_runtime_vectors ctest's: 31 -> 0.5 on both submissions.)
 func test_eye_altitude_drives_detail_alpha_fade() -> void:
 	_dispatcher.height_sampler = Callable(self, "_sample_flat_height")
-	var elevated := _staged_xform(31.0)
+	var elevated := _staged_xform(31.0, GROUND_POINT + Vector2(8.0, 8.0))
 	await _stage(elevated)
 	_frame(elevated)
 	_frame(elevated)
 
 	var draws := _backend_draws("detail")
 	assert_gt(draws.size(), 0)
-	var found_secondary_pair := false
-	for index in range(draws.size()):
-		var draw := draws[index] as Dictionary
-		var fade := float(draw.fade)
-		assert_lt(fade, 1.0, "every cell lies past 20 units of the eye 31 over the ground")
-		assert_gte(fade, 0.0)
-		if index + 1 < draws.size() and String(draw.pass) == "high":
-			var low := draws[index + 1] as Dictionary
-			if String(low.pass) == "low" \
-					and is_equal_approx(float(low.high_pass_cutoff), 180.0 / 255.0):
-				found_secondary_pair = true
-				assert_almost_eq(float(low.fade), fade, 0.000001,
-					"the near LOW secondary takes its HIGH twin's fade")
-	assert_true(found_secondary_pair,
-		"A near cell must feed the fade to both its HIGH draw and the strict-LESS LOW secondary.")
+	# The cell key: HIGH15 the cell's x minimum, LOW15 its z minimum (render plane).
+	var eye_cell_key := ((int(GROUND_POINT.x) & 0x7FFF) << 16) | (int(GROUND_POINT.y) & 0x7FFF)
+	var high_fade := -1.0
+	var low_fade := -1.0
+	for draw_value in draws:
+		var draw := draw_value as Dictionary
+		assert_lt(float(draw.fade), 1.0, "every cell lies past 20 units of the eye 31 over the ground")
+		if (int(draw.cell_key) & 0x7FFFFFFF) != eye_cell_key:
+			continue
+		if String(draw.pass) == "high":
+			high_fade = float(draw.fade)
+		elif String(draw.pass) == "low" \
+				and is_equal_approx(float(draw.high_pass_cutoff), 180.0 / 255.0):
+			low_fade = float(draw.fade)
+	assert_almost_eq(high_fade, 0.5, 0.025,
+		"the cell under the eye fades by its 3D distance, 30.5..31.5 units")
+	assert_almost_eq(low_fade, high_fade, 0.000001,
+		"the near LOW secondary takes its HIGH twin's fade")
 
 
 func test_near_detail_submits_high_then_exact_low_secondary() -> void:
