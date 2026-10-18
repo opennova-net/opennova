@@ -6,6 +6,10 @@ private address in a deployment, found from the ECS task metadata), the hosted s
 supervisor with its admin links and its stats sampler, and the console drain. It calls no
 cloud and runs and schedules no job: what it decides it writes as rows and jobs, which the
 worker runs. `GET /livez` on `ONNET_HEALTH_PORT` (8081). Built with `BUILD_NOVAWORLD_HTTP`.
+The leader's heartbeat carries the fleet's health over its rows (the shared library's
+`hosted/fleet_health.*`: its danger and warn findings, the machines stuck, the least free
+disk) and the age of its supervisor's last pass that failed in nothing, which the
+deployment's `fleet-pass-age` alarm reads (`../novaworld_common/README.md`, "Health").
 
 The service as a whole, its programs, their settings, the database, Redis, the health
 checks and the tests: [`../novaworld_common/README.md`](../novaworld_common/README.md). The
