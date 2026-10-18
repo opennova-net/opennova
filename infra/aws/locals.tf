@@ -33,6 +33,11 @@ locals {
   # nw.<deployment>.<domain>; empty without a zone.
   novaworld_host = local.dns_enabled ? (local.is_prod ? "nw.${var.cloudflare_domain}" : "nw.${local.deployment}.${var.cloudflare_domain}") : ""
 
+  # The static addresses' zone (edge.tf's Route 53 zone, which the Cloudflare
+  # zone delegates): prod play.<domain>, another deployment
+  # play.<deployment>.<domain>; an address's name is <name>.<zone>.
+  play_zone_name = local.is_prod ? "play.${var.cloudflare_domain}" : "play.${local.deployment}.${var.cloudflare_domain}"
+
   # The two availability zones: var.azs, or the region's first two. Public and
   # private subnet a share the first (the load balancer's zone-a node, the
   # database's primary when single-AZ), b the second.

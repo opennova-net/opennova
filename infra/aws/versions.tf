@@ -19,7 +19,8 @@
 #   database.tf    PostgreSQL 17 on RDS
 #   cache.tf       Valkey on ElastiCache: web's ephemeral state
 #   edge.tf        Cloudflare: the deployment's site records and its origin
-#                  certificate (the zone's own settings and rules are infra/zone's)
+#                  certificate (the zone's own settings and rules are infra/zone's);
+#                  the static addresses' Route 53 zone, delegated from it
 #   mail.tf        outbound mail: the deployment's Amazon SES identity, its DKIM
 #                  and MAIL FROM records, the service's permission to send
 #   ops_bucket.tf  the deployment's operations bucket (releases, dumps)

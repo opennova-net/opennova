@@ -325,7 +325,7 @@ a value:
 | `aws-<deployment>` | `account_name`, `region` | `opennova-<deployment>`, `us-east-1` |
 | `aws-org` | `account_id`, `organization_id` | `REPLACE_ME` |
 | `aws-org` | `region` | `us-east-1` |
-| `stripe-test`, `stripe-live` | `secret_key`, `webhook_secret`, `price_tier1`, `price_tier2`, `price_tier3`, `price_own_machine` | `REPLACE_ME` |
+| `stripe-test`, `stripe-live` | `secret_key`, `webhook_secret`, `price_tier1`, `price_tier2`, `price_tier3`, `price_own_machine`, `price_static_address` | `REPLACE_ME` |
 | `stripe-test` | `restricted_key` (the local stack's and CI's key: "GitHub" below) | `REPLACE_ME` |
 | `alerts` | `email` | `REPLACE_ME` |
 | `email` | `forward_to` | `REPLACE_ME` |
@@ -372,7 +372,7 @@ export OP_SERVICE_ACCOUNT_TOKEN=ops_...                         # the only secre
 
 `./deploy/run.sh --deployment staging secrets check`, once `org apply` (section 3) has
 written the deploy keys it resolves too, resolves every reference without printing a
-value, and reports each Stripe item as `OK (test mode, 3 tiers + own machine)`, `placeholders: <fields> (billing
+value, and reports each Stripe item as `OK (test mode, 3 tiers + own machine + static address)`, `placeholders: <fields> (billing
 off)`, `absent (billing off)` or `FAILED: <field> (malformed)` / `(a test key in a live
 item)`; a failed one makes it exit non-zero. The forms it checks: `secret_key`
 `sk_<mode>_...` or `rk_<mode>_...` (the item's mode: `test` for `stripe-test`, `live` for
@@ -591,7 +591,8 @@ Cloudflare records (its site's, proxied; the update service's and the gate's, un
 certificate; its outbound mail's SES identities and records (with a sender); the update
 service's listeners; and (with `hosted_enabled`) the fleet cluster with its hostd daemon,
 the fleet's launch templates, the machine role and web's and the data program's store
-policies (section 7). A new
+policies, and (with `fleet_max_addresses` above 0) the static addresses' Route 53 zone
+`play.<domain>` with its Cloudflare NS records (section 7). A new
 database takes 10 to 15 minutes, a new cache about as long. A service runs no task until
 a release names its program (the release manifest's program list): a template's images
 are unpinned (`image_tag`, `latest`), so no task starts from one, and its count's floor
@@ -1103,7 +1104,7 @@ again (section 4). On prod it asks for `prod` besides `--yes-drop-database`.
 ## 7. Hosted game servers
 
 An account with a hosting entitlement (a monthly support tier, or an admin's comp grant
-of `comp_servers`) starts servers from the site's My servers page, picking a data set
+of servers and own machines, the admin user page) starts servers from the site's My servers page, picking a data set
 (JO, DFX2 or OpenNova: a product's game files, which admins upload on the site's Game
 data page, below) and, for JO, its Escalation expansion. The server is always the public
 `opennova-serve` image, started with `/game <title>` (and `/exp <code>`) over the data
@@ -1131,7 +1132,12 @@ terminated, never stopped. No machine has an SSH key or database credentials;
 break-glass is ECS Exec into its hostd (`fleet shell`). At most 2 shared and 2 own machines run at
 once (`fleet_max_shared`, `fleet_max_own`); `ONNET_HOSTED_CAP`, what that fleet holds at
 its most (`fleet_max_shared` x `shared_slots` + `fleet_max_own`: 14 at the defaults, 7 on
-staging), caps the servers.
+staging), caps the servers. The same sizes are what the site sells: a checkout past
+`fleet_max_shared` x `shared_slots` shared places, `fleet_max_own` own machines or
+`fleet_max_addresses` static addresses (0 by default: the static-address add-on off;
+"Turning it on", step 9) is refused as sold out. `infra plan` and `infra apply` warn when a
+plan lowers one of the four: an account already sold more keeps it, and the admin's
+attention list shows the shortfall.
 
 ### The game data
 
@@ -1236,8 +1242,38 @@ deployment's admins upload it on its own site, into its own bucket.
    `prod.tfvars` ("A machine image", below).
 
 8. **Subscribe, or grant.** An account hosts once it subscribes to a support tier, or an
-   admin gives it a comp grant (`comp_servers`, the admin user page). Run smoke tests F
+   admin gives it a comp grant (servers, and own machines, on the admin user page). Run smoke tests F
    to J ("Smoke tests", at the end).
+
+9. **Static addresses** (optional): the add-on that gives an own machine a static IPv4
+   address and a name, `<name>.play.<domain>` (staging's `<name>.play.staging.<domain>`).
+   Off while `fleet_max_addresses` is 0, the default. In this order:
+   - **The Elastic IP quota, first.** Each address is an Elastic IP of the deployment's
+     account, under the quota L-0263D0A3 ("EC2-VPC Elastic IPs", per Region): 5 by default,
+     and the load balancer holds 2 of them in each account. Request 10 in each account in
+     the Service Quotas console, and wait until it is granted, before raising
+     `fleet_max_addresses` (an allocation past the quota fails, and the address shows
+     failed):
+
+     ```bash
+     ./deploy/run.sh --deployment staging aws service-quotas get-service-quota --service-code ec2 --quota-code L-0263D0A3
+     ```
+
+   - **The role boundary** (step 1) holds the worker's address and Route 53 rights: `org
+     apply` with this checkout's `opennova-role-boundary.json` before the apply below.
+   - **The price.** `stripe setup` makes the add-on's price and writes
+     `price_static_address` ("Monthly support tiers (Stripe)"), then `secrets sync`; with
+     `fleet_max_addresses` above 0 and no `STRIPE_PRICE_STATIC_ADDRESS`, billing stays off.
+   - **`fleet_max_addresses`** in the deployment's var-file (the addresses it sells, at
+     most 64), then `infra apply`: the plan makes the play zone (`aws_route53_zone.play`,
+     a Route 53 public zone of the deployment's own) and the four Cloudflare NS records
+     that delegate it to Route 53 (`cloudflare_record.play_ns`), both `prevent_destroy`,
+     and names the zone to web, the fleet and the worker (`ONNET_HOSTED_ADDRESS_ZONE`) and
+     its id to the worker alone (`ONNET_HOSTED_ADDRESS_ZONE_ID`; `app converge` takes them).
+
+   The zone costs $0.50 a month. An address costs $3.65 a month while it is idle, and
+   nothing more while its server runs (it takes the place of the machine's own public
+   IPv4).
 
 ### The update service
 
@@ -1357,8 +1393,12 @@ mode serves staging (`stripe-test`), live mode prod (`stripe-live`).
 monthly USD prices, found by lookup key (`opennova_tier1_monthly` $5,
 `opennova_tier2_monthly` $10, `opennova_tier3_monthly` $15: 1, 2 and 3 hosted servers;
 `opennova_own_machine_monthly` $45, the add-on that puts one of the account's servers on
-a machine of its own, about what a `c7a.medium` costs), their ids in the item's
-`price_tier1`..`price_tier3` and `price_own_machine` fields; the Customer Portal
+a machine of its own, about what a `c7a.medium` costs; `opennova_static_address_monthly`
+$5, the add-on that gives one own machine a static IPv4 address and a name under the
+deployment's play zone, which covers the address's $3.65 and Stripe's fee on the charge),
+their ids in the item's `price_tier1`..`price_tier3`, `price_own_machine` and
+`price_static_address` fields (`secrets sync` syncs billing's parameters only while every
+one is filled: when a new one appears, `stripe setup` fills it); the Customer Portal
 configuration tagged `opennova=support_tiers`; and the webhook endpoint (live
 `https://<domain>/api/billing/webhook`, test `https://staging.<domain>/api/billing/webhook`)
 on the API version the server pins (`2025-03-31.basil`) with the 11 events it handles
@@ -1379,16 +1419,18 @@ keys); the rest is the toolbox's:
 The mode is the deployment's: prod live (`stripe-live`), staging test (`stripe-test`),
 each on its own site; no command crosses them. On prod `stripe setup` asks first. `stripe setup` makes what the mode lacks and leaves
 the rest: a product and a monthly price per lookup key (`--tier1`, `--tier2`, `--tier3`,
-`--own-machine` take other amounts in US dollars: an amount that differs from the current
-price makes a new price, which takes the lookup key and goes first in the field, the old
-one kept after it, since the first is sold and the rest still grant); the price ids
-into the item; the portal configuration (customers switch among the three tier products,
-an upgrade prorating at once and a downgrade waiting for the period's end, quantity
-changes off; cancel any subscription at the period's end, a tier or one own machine,
-since each own machine is a subscription of its own (quantity 1) bought through
-Checkout; and update the card, the email and the address and see invoices; the
-privacy and terms links are `https://<domain>/privacy` and `/terms`, the return link
-`https://<web host>/me/support`), brought to those settings when it exists; and the
+`--own-machine`, `--static-address` take other amounts in US dollars: an amount that
+differs from the current price makes a new price, which takes the lookup key and goes
+first in the field, the old one kept after it, since the first is sold and the rest still
+grant); the price ids into the item; the portal configuration (customers switch among the
+three tier products, an upgrade prorating at once and a downgrade waiting for the
+period's end, quantity changes off; cancel any subscription at the period's end, a tier,
+one own machine or one static address, since each add-on is a subscription of its own
+(quantity 1) bought through Checkout, and a static address's Cancel on the site opens the
+portal at that subscription's cancellation; and update the card, the email and the
+address and see invoices; the privacy and terms links are `https://<domain>/privacy` and
+`/terms`, the return link `https://<web host>/me/support`), brought to those settings
+when it exists; and the
 webhook endpoint on `https://<web host>/api/billing/webhook`, whose missing events it
 adds, a new one's signing secret going into `webhook_secret` (an endpoint's API version
 never changes: for another, delete the endpoint in Stripe and run setup again).
@@ -1661,7 +1703,9 @@ machines and their egress; staging's account has its own (200).
 
 The machines: a full shared machine (`t3a.medium`, its address and volume, about $34) is
 about $5.70 a server at 6 servers, before egress (its CPU credits add a little under a
-sustained load); an own machine (`c7a.medium`) about $43.
+sustained load); an own machine (`c7a.medium`) about $43. With static addresses sold, the
+play zone adds $0.50, and each address $3.65 while no server runs at it (net $0 while one
+does: it replaces the machine's own public IPv4).
 Egress is about $0.09 a GB, and a full 64-player server sends about 1.8 GB an hour, so
 egress can cost more than the machine: the egress budget is the alarm. The first shared
 machine runs at a loss until it fills.

@@ -262,6 +262,39 @@ run "deploy_users" {
   }
   assert {
     condition = alltrue([
+      for st in jsondecode(module.prod.documents.boundary).Statement : (
+        st.Sid == "LaunchTagged" ? (
+          toset(st.Action) == toset(["ec2:RunInstances", "ec2:AllocateAddress"]) &&
+          toset(st.Resource) == toset(["arn:aws:ec2:us-east-1:111111111111:instance/*", "arn:aws:ec2:us-east-1:111111111111:elastic-ip/*"]) &&
+          st.Condition == { StringEquals = { "aws:RequestTag/opennova:hosted" = "1" }, StringLike = { "aws:RequestTag/opennova:deployment" = "opennova-*" } }
+          ) : st.Sid == "TagAtLaunch" ? (
+          st.Action == "ec2:CreateTags" && toset(st.Condition.StringEquals["ec2:CreateAction"]) == toset(["RunInstances", "AllocateAddress"]) &&
+          length(keys(st.Condition)) == 1 && length(keys(st.Condition.StringEquals)) == 1
+          ) : st.Sid == "EndMachines" ? (
+          toset(st.Action) == toset(["ec2:TerminateInstances", "ec2:AssociateAddress"]) &&
+          st.Resource == "arn:aws:ec2:us-east-1:111111111111:instance/*" &&
+          st.Condition == { StringEquals = { "aws:ResourceTag/opennova:hosted" = "1" }, StringLike = { "aws:ResourceTag/opennova:deployment" = "opennova-*" } }
+          ) : st.Sid == "MoveAddresses" ? (
+          toset(st.Action) == toset(["ec2:AssociateAddress", "ec2:DisassociateAddress", "ec2:ReleaseAddress"]) &&
+          st.Resource == "arn:aws:ec2:us-east-1:111111111111:elastic-ip/*" &&
+          st.Condition == { StringEquals = { "aws:ResourceTag/opennova:hosted" = "1" }, StringLike = { "aws:ResourceTag/opennova:deployment" = "opennova-*" } }
+          ) : st.Sid == "PlayRecords" ? (
+          st.Action == "route53:ChangeResourceRecordSets" && st.Resource == "arn:aws:route53:::hostedzone/*" &&
+          st.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsRecordTypes"] == "A" &&
+          toset(st.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsActions"]) == toset(["UPSERT", "DELETE"]) &&
+          st.Condition["ForAllValues:StringLike"] == { "route53:ChangeResourceRecordSetsNormalizedRecordNames" = "*.play.*" }
+          ) : st.Sid == "ZoneChanges" ? (
+          st.Action == "route53:GetChange" && st.Resource == "arn:aws:route53:::change/*" && !contains(keys(st), "Condition")
+          ) : st.Sid == "Unscoped" ? (
+          contains(st.Action, "ec2:DescribeAddresses")
+        ) : !strcontains(jsonencode(st), "Address") && !strcontains(jsonencode(st), "route53:")
+      )
+      ]) && length([for st in jsondecode(module.prod.documents.boundary).Statement : st
+    if contains(["LaunchTagged", "TagAtLaunch", "EndMachines", "MoveAddresses", "PlayRecords", "ZoneChanges"], st.Sid)]) == 6
+    error_message = "the role boundary holds the worker's static addresses: allocated and tagged at creation under this deployment's tags, associated with its machines, moved and released only while they carry both tags, their A records under a play zone by UPSERT and DELETE alone, a change's state; nothing else names an address or Route 53"
+  }
+  assert {
+    condition = alltrue([
       for st in jsondecode(module.prod.documents.machine_boundary).Statement : (
         st.Sid == "EcsAgentCluster" ? (
           toset(st.Action) == toset([

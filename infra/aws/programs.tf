@@ -441,7 +441,7 @@ locals {
   # init` makes them), which the template names, and the optional ones (the
   # "# optional" and "# billing" lines of deploy/env/runtime.env.tpl), which
   # its label names for a deploy to add while SSM holds them.
-  billing_secrets = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE"]
+  billing_secrets = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE", "STRIPE_PRICE_STATIC_ADDRESS"]
   program_secrets = {
     gate   = ["DATABASE_PASSWORD"]
     lobby  = ["DATABASE_PASSWORD"]

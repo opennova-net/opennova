@@ -10,8 +10,9 @@
 # aws, terraform and curl around a fixture vault in a scratch directory, so
 # nothing reaches 1Password, AWS or Stripe. Each command's 1Password calls are
 # counted and printed (the op stub still answers op read, op inject and op
-# run, so the same count runs against an older on-deploy). It needs bash and
-# jq; .github/workflows/infra.yml runs it:
+# run, so the same count runs against an older on-deploy). Beside them, infra
+# plan's and apply's warning of a fleet size the plan lowers, on the stubbed
+# plan and state. It needs bash and jq; .github/workflows/infra.yml runs it:
 #   bash deploy/bin/tests/vault_requests_test.sh
 # pass and fail never fail, so `cond && pass || fail` is the if-then-else it reads as.
 # shellcheck disable=SC2015
@@ -46,6 +47,7 @@ fail() { printf 'FAIL %s\n' "$1"; failures=$((failures + 1)); }
 export STUB_VAULT_DIR="$scratch/vault" STUB_CALLS="$scratch/op.calls" STUB_FAILS="$scratch/op.fails"
 export STUB_LIST_REPLY="$scratch/list.reply" STUB_CACHE_MODES="$scratch/cache.modes"
 export STUB_TF_ENV="$scratch/tfenv" STUB_TF_CALLS="$scratch/tf.calls" STUB_SSM="$scratch/ssm"
+export STUB_PLAN_JSON="$scratch/plan.json" STUB_CAPACITY="$scratch/capacity.json"
 export STUB_VAULT_ID=vltopennovadeploy000000000
 mkdir -p "$STUB_VAULT_DIR" "$STUB_TF_ENV" "$STUB_SSM" "$OPENNOVA_SECRETS_DIR"
 
@@ -65,7 +67,8 @@ mkitem() {
 # The members are JSON over several lines: a value's newlines reach terraform.
 MEMBERS_JSON=$'{\n  "maintainer": "admin",\n  "helper": "member"\n}'
 STRIPE_PRICES=(price_tier1=price_opennovatier1monthly price_tier2=price_opennovatier2monthly
-  price_tier3=price_opennovatier3monthly price_own_machine=price_opennovaownmachinemonthly)
+  price_tier3=price_opennovatier3monthly price_own_machine=price_opennovaownmachinemonthly
+  price_static_address=price_opennovastaticaddressmonthly)
 make_vault() {
   rm -f "$STUB_VAULT_DIR"/*.json
   mkitem aws-staging SECURE_NOTE account_id=222222222222 account_name=opennova-staging region=us-east-1 \
@@ -95,7 +98,7 @@ make_vault() {
   mkitem stripe-test API_CREDENTIAL secret_key=sk_test_SECRETVALUEstripetest webhook_secret=whsec_SECRETVALUEwebhooktest \
     "${STRIPE_PRICES[@]}" restricted_key=rk_test_SECRETVALUErestricted
   mkitem stripe-live API_CREDENTIAL secret_key=REPLACE_ME webhook_secret=REPLACE_ME price_tier1=REPLACE_ME \
-    price_tier2=REPLACE_ME price_tier3=REPLACE_ME price_own_machine=REPLACE_ME
+    price_tier2=REPLACE_ME price_tier3=REPLACE_ME price_own_machine=REPLACE_ME price_static_address=REPLACE_ME
   mkitem github-terraform API_CREDENTIAL token=SECRETVALUEgithubtoken billing_email=billing@example.org \
     "members=$MEMBERS_JSON"
   mkitem reference-assets API_CREDENTIAL token=SECRETVALUEreferenceassets
@@ -266,8 +269,9 @@ aws() {
 
 # terraform: each variable a run sees from the vault lands in
 # STUB_TF_ENV/<NAME> (never on an output), and the run's vault cache's modes
-# in STUB_CACHE_MODES; show and output answer as an empty plan and the org
-# stack's outputs do.
+# in STUB_CACHE_MODES; show and output answer as an empty plan (or
+# STUB_PLAN_JSON), the org stack's outputs and the state's fleet_capacity
+# (STUB_CAPACITY; none without it) do.
 terraform() {
   local v
   echo "terraform $*" >>"$STUB_TF_CALLS"
@@ -280,7 +284,8 @@ terraform() {
       [ ! -d "${VAULT_CACHE:-}" ] || stat -c '%a %n' "$VAULT_CACHE" "$VAULT_CACHE"/* >"$STUB_CACHE_MODES" ;;
   esac
   case " $* " in
-    *" show -json "*) echo '{"resource_changes":[]}' ;;
+    *" show -json "*) if [ -s "$STUB_PLAN_JSON" ]; then cat "$STUB_PLAN_JSON"; else echo '{"resource_changes":[]}'; fi ;;
+    *" output -json fleet_capacity "*) [ ! -s "$STUB_CAPACITY" ] || cat "$STUB_CAPACITY" ;;
     *" output -json deployments "*) echo '{"prod":{"state_bucket":"opennova-tfstate-111111111111","github_deploy_role_arn":"arn:r:prod"},"staging":{"state_bucket":"opennova-tfstate-222222222222","github_deploy_role_arn":"arn:r:staging"}}' ;;
     *" output -json deploy_keys "*) echo '{"prod":{"access_key_id":"AKIAPRODKEY000000001","secret_access_key":"SECRETVALUEawsprod"},"staging":{"access_key_id":"AKIASTAGINGKEY000001","secret_access_key":"SECRETVALUEawsstaging2"}}' ;;
     *" output -raw sso_portal_url "*) printf 'https://d-0000000000.awsapps.com/start' ;;
@@ -330,7 +335,7 @@ curl() {
 fresh_run() {
   make_vault
   rm -rf "${VAULT_CACHE:-$scratch/no-cache}" "$OPENNOVA_SECRETS_DIR"/item.* "${STUB_TF_ENV:?}"/* "${STUB_SSM:?}"/* \
-    "$STUB_LIST_REPLY" "$STUB_CACHE_MODES"
+    "$STUB_LIST_REPLY" "$STUB_CACHE_MODES" "$STUB_PLAN_JSON" "$STUB_CAPACITY"
   : >"$STUB_CALLS"
   : >"$STUB_FAILS"
   : >"$STUB_TF_CALLS"
@@ -449,8 +454,8 @@ while IFS= read -r line; do
     fail "SSM got $RT_NAME, whose optional field $item/$field is absent"
   fi
 done <"$RUNTIME_TPL"
-[ "$matched" -eq 11 ] && pass "secrets sync wrote each of the 11 secrets the vault holds, as it holds them" \
-  || fail "secrets sync wrote $matched of the 11 secrets as the vault holds them ($(cd "$STUB_SSM" && printf '%s ' *))"
+[ "$matched" -eq 12 ] && pass "secrets sync wrote each of the 12 secrets the vault holds, as it holds them" \
+  || fail "secrets sync wrote $matched of the 12 secrets as the vault holds them ($(cd "$STUB_SSM" && printf '%s ' *))"
 expect_requests "--deployment staging stripe check" 2 --deployment staging stripe check
 expect_requests "org plan" 4 org plan
 for v in region:aws-org:region organization_id:aws-org:organization_id management_account_id:aws-org:account_id \
@@ -487,6 +492,22 @@ jq '.title = "Cloudflare" | .fields |= map(if .label == "api_token" then .label 
 RUN_KEEP=1 run_main --deployment staging infra plan
 [ "$RUN_RC" -eq 0 ] && [ "$(cat "$STUB_TF_ENV/TF_VAR_cloudflare_api_token" 2>/dev/null)" = SECRETVALUEcloudflare ] \
   && pass "a reference finds its item and field in any case, as op does" || fail "case: rc $RUN_RC: $(tail -n 2 <<<"$RUN_OUT")"
+
+echo "--- infra plan and apply warn of a fleet size the plan lowers"
+for cmd in plan apply; do
+  fresh_run
+  echo '{"resource_changes":[],"planned_values":{"outputs":{"fleet_capacity":{"sensitive":false,"value":{"max_shared":2,"shared_slots":6,"max_own":1,"max_addresses":4}}}}}' >"$STUB_PLAN_JSON"
+  echo '{"max_addresses":0,"max_own":2,"max_shared":2,"shared_slots":6}' >"$STUB_CAPACITY"
+  RUN_KEEP=1 run_main --deployment staging infra "$cmd"
+  [ "$RUN_RC" -eq 0 ] && [ "$(grep -c 'drops from' <<<"$RUN_OUT")" -eq 1 ] \
+    && [[ "$RUN_OUT" == *"WARNING: fleet_max_own drops from 2 to 1: accounts already sold more than that keep it"* ]] \
+    && pass "infra $cmd warns of fleet_max_own's drop alone (a raise is no warning)" \
+    || fail "infra $cmd's fleet warning: rc $RUN_RC: $(grep 'drops from' <<<"$RUN_OUT")"
+done
+rm -f "$STUB_CAPACITY"
+RUN_KEEP=1 run_main --deployment staging infra plan
+[ "$RUN_RC" -eq 0 ] && [[ "$RUN_OUT" != *"drops from"* ]] \
+  && pass "a state without fleet_capacity yet (the first apply that makes it) warns of nothing" || fail "no fleet_capacity: rc $RUN_RC: $RUN_OUT"
 
 echo "--- a write reads its item fresh, and the run reads it again after"
 run_main org apply --yes

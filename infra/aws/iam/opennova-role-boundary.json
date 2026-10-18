@@ -13,6 +13,7 @@
         "ec2:DescribeInstances",
         "ec2:DescribeLaunchTemplates",
         "ec2:DescribeLaunchTemplateVersions",
+        "ec2:DescribeAddresses",
         "ecs:DescribeTaskDefinition",
         "ecs:RegisterTaskDefinition",
         "elasticloadbalancing:DescribeTargetHealth"
@@ -87,8 +88,14 @@
     {
       "Sid": "LaunchTagged",
       "Effect": "Allow",
-      "Action": "ec2:RunInstances",
-      "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:AllocateAddress"
+      ],
+      "Resource": [
+        "arn:aws:ec2:${region}:${account_id}:instance/*",
+        "arn:aws:ec2:${region}:${account_id}:elastic-ip/*"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestTag/opennova:hosted": "1"
@@ -129,18 +136,25 @@
       "Action": "ec2:CreateTags",
       "Resource": [
         "arn:aws:ec2:${region}:${account_id}:instance/*",
-        "arn:aws:ec2:${region}:${account_id}:volume/*"
+        "arn:aws:ec2:${region}:${account_id}:volume/*",
+        "arn:aws:ec2:${region}:${account_id}:elastic-ip/*"
       ],
       "Condition": {
         "StringEquals": {
-          "ec2:CreateAction": "RunInstances"
+          "ec2:CreateAction": [
+            "RunInstances",
+            "AllocateAddress"
+          ]
         }
       }
     },
     {
       "Sid": "EndMachines",
       "Effect": "Allow",
-      "Action": "ec2:TerminateInstances",
+      "Action": [
+        "ec2:TerminateInstances",
+        "ec2:AssociateAddress"
+      ],
       "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
       "Condition": {
         "StringEquals": {
@@ -150,6 +164,48 @@
           "aws:ResourceTag/opennova:deployment": "opennova-*"
         }
       }
+    },
+    {
+      "Sid": "MoveAddresses",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:AssociateAddress",
+        "ec2:DisassociateAddress",
+        "ec2:ReleaseAddress"
+      ],
+      "Resource": "arn:aws:ec2:${region}:${account_id}:elastic-ip/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/opennova:hosted": "1"
+        },
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "PlayRecords",
+      "Effect": "Allow",
+      "Action": "route53:ChangeResourceRecordSets",
+      "Resource": "arn:aws:route53:::hostedzone/*",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "route53:ChangeResourceRecordSetsRecordTypes": "A",
+          "route53:ChangeResourceRecordSetsActions": [
+            "UPSERT",
+            "DELETE"
+          ]
+        },
+        "ForAllValues:StringLike": {
+          "route53:ChangeResourceRecordSetsNormalizedRecordNames": "*.play.*"
+        }
+      }
+    },
+    {
+      "Sid": "ZoneChanges",
+      "Effect": "Allow",
+      "Action": "route53:GetChange",
+      "Resource": "arn:aws:route53:::change/*"
     },
     {
       "Sid": "PassRoles",
