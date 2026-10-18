@@ -457,14 +457,12 @@ void Water::_recompute_terrain_water_fallback() {
 
 void Water::_apply_environment_water_height() {
 	MissionEnvironment *env = _env_node();
-	opennova::env::WaterHeightRungs rungs;
-	rungs.has_mission_override = !std::isnan(mission_water_height_override_);
-	rungs.mission_override = rungs.has_mission_override
-			? mission_water_height_override_
-			: 0.0f;
-	rungs.terrain_height = terrain_water_height_;
-	rungs.has_loaded_terrain =
-			terrain_data_.is_valid() && terrain_data_->is_loaded();
+	// The rungs the mission load assembles (env::water_height_rungs, the
+	// header's override held here in world units, NaN for none).
+	const opennova::env::WaterHeightRungs rungs = opennova::env::water_height_rungs(
+			std::isnan(mission_water_height_override_) ? std::nullopt
+														: std::optional<float>(mission_water_height_override_),
+			terrain_water_height_, terrain_data_.is_valid() && terrain_data_->is_loaded());
 	const float resolved = opennova::env::resolve_water_height(rungs,
 			env != nullptr ? &env->state() : nullptr, water_height_);
 	if (resolved != water_height_) {

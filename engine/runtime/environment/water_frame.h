@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include <runtime/environment/environment_state.h>
 
@@ -42,6 +43,10 @@ struct WaterHeightRungs {
 // header writes it) and the terrain's water height in world units, the
 // terrain loaded or not.
 WaterHeightRungs mission_water_rungs(const BmsEnvOverrides &overrides,
+		float terrain_height, bool has_loaded_terrain);
+// The same rungs from the header's override already in world units (none:
+// not flagged), as the live Water node holds it.
+WaterHeightRungs water_height_rungs(std::optional<float> mission_override,
 		float terrain_height, bool has_loaded_terrain);
 
 // Which rung gave the plane its height: the header's override, the

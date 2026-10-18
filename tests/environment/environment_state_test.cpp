@@ -1368,6 +1368,13 @@ int main() {
 		rungs = opennova::env::mission_water_rungs(none, 0.0f, false);
 		ok &= expect(!rungs.has_mission_override && rungs.mission_override == 0.0f && !rungs.has_loaded_terrain,
 				"an unflagged header sets no override");
+		// The live Water node holds the override in world units (C-45): the same rungs.
+		const opennova::env::WaterHeightRungs held = opennova::env::water_height_rungs(12.0f, 10.5f, true);
+		ok &= expect(held.has_mission_override && held.mission_override == 12.0f && held.terrain_height == 10.5f &&
+						held.has_loaded_terrain,
+				"a held world-unit override makes the same rungs");
+		ok &= expect(!opennova::env::water_height_rungs(std::nullopt, 0.0f, false).has_mission_override,
+				"none held, no override");
 
 		opennova::env::Config with_height;
 		with_height.water_height = 30.0f;
