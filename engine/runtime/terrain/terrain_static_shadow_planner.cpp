@@ -208,9 +208,8 @@ void TerrainStaticShadowPlanner::set_light(
 
 float static_shadow_caster_ground(const TerrainHeightField &field,
 		const std::array<int32_t, 2> &origin_q16) {
-	// The words' float image (bms::Entity::get_x's expression): the placed transform's origin.
-	return height_field_height_mission(field, static_cast<float>(origin_q16[0]) / io::kFp16One,
-			static_cast<float>(origin_q16[1]) / io::kFp16One);
+	return static_cast<float>(height_field_height_fixed(field, origin_q16[0], origin_q16[1])) /
+			io::kFp16One;
 }
 
 void TerrainStaticShadowPlanner::replace_casters(

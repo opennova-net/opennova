@@ -138,6 +138,16 @@ TerrainSurfaceNormal height_field_surface_normal_world(
 }
 
 
+int32_t height_field_height_fixed(const TerrainHeightField &f, int32_t mission_x, int32_t mission_y) {
+	if (!f.valid()) return 0;
+	const TerrainAtlasTexel texel = terrain_atlas_texel_at(
+			TerrainAtlasRouting{f.layout.sector_grid, f.layout.origin_x, f.layout.origin_y, f.wrap_x, f.wrap_z},
+			mission_x, mission_y);
+	// A test atlas narrower than retail's 1024 has no texel past its side.
+	if (!texel.mapped || texel.x >= f.dim || texel.z >= f.dim) return 0;
+	return static_cast<int32_t>(f.heightmap[static_cast<std::size_t>(texel.z) * f.dim + texel.x]) << 8;
+}
+
 TerrainHeightGradient height_field_gradient_fixed(
 		const TerrainHeightField &f, int32_t mission_x, int32_t mission_y) {
 	if (!f.valid() || !f.layout.sector_grid) return {};

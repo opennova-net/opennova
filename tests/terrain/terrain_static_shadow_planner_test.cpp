@@ -690,6 +690,23 @@ int main() {
 				"no terrain grounds a caster at 0")) {
 			return 1;
 		}
+		// The lookup routes the words, as Terrain_GetHeightAtPosition does ((x >> 16) & 0x1FF
+		// @ 0x60677C): x = 0x0100FFFF is texel 256, while its float image rounds to 257.0, the
+		// next texel. The ramp makes the two heights differ.
+		const std::array<int32_t, 2> edge{0x0100FFFF, static_cast<int32_t>(200.75 * 65536)};
+		const float edge_float = static_cast<float>(edge[0]) / 65536.0f;
+		if (!expect(edge_float == 257.0f, "0x0100FFFF's float image is 257.0")) return 1;
+		const float edge_ground = static_shadow_caster_ground(field, edge);
+		if (!expect(edge_ground == height_field_height_mission(field, 256.5f, 200.75f) &&
+						edge_ground != height_field_height_mission(field, edge_float, 200.75f),
+				"the ground is texel 256's, the word's, not the float image's texel 257")) {
+			return 1;
+		}
+		if (!expect(height_field_height_fixed(field, edge[0], edge[1]) ==
+						static_cast<int32_t>(edge_ground * 65536.0f),
+				"the fixed lookup is the raw16 shifted up by 8")) {
+			return 1;
+		}
 	}
 
 	std::puts("terrain_static_shadow_planner_test: OK");
