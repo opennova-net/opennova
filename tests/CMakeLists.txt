@@ -1521,11 +1521,14 @@ add_test(NAME cpt_roundtrip COMMAND cpt_roundtrip_test)
 
 # The TrnGen.exe terrain bake (formats/cpt/trngen): a procedural map baked and read back
 # as the game reads it, the same bytes on one thread and on four. `cpt_trngen_bake_test
-# <dir>` runs the by-hand byte parity with TrnGen's own .cpt (the test's header).
+# <dir>` runs the by-hand byte parity with TrnGen's own .cpt (the test's header). A row per part,
+# so the parts' whole bakes run side by side.
 add_executable(cpt_trngen_bake_test cpt/trngen_bake_test.cpp)
 target_link_libraries(cpt_trngen_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME cpt_trngen_bake COMMAND cpt_trngen_bake_test)
+foreach(part island hills flat refusals)
+    add_test(NAME cpt_trngen_bake_${part} COMMAND cpt_trngen_bake_test --part ${part})
+endforeach()
 
 # A heightmap image (a PNG at any depth, TrnGen's .raw, the game's raw16) made
 # into the depth the bake takes (formats/cpt/trngen heightmap_depth.h).
@@ -1542,7 +1545,8 @@ add_test(NAME heightmap_depth_encode16 COMMAND heightmap_depth_encode16_test)
 
 # The TrnGen bake's region bake (formats/cpt/trngen terrain_region_bake.h): which leaves an edited
 # depth texel reaches (the taps, wraps and locks), and a region baked again landing the bytes and
-# the state a whole bake of the edited map makes.
+# the state a whole bake of the edited map makes; a row per part of the region bake's test, so the parts'
+# whole bakes run side by side.
 add_executable(cpt_trngen_leaf_taps_test cpt/trngen_leaf_taps_test.cpp)
 target_link_libraries(cpt_trngen_leaf_taps_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_leaf_taps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1550,7 +1554,9 @@ add_test(NAME cpt_trngen_leaf_taps COMMAND cpt_trngen_leaf_taps_test)
 add_executable(cpt_trngen_region_bake_test cpt/trngen_region_bake_test.cpp)
 target_link_libraries(cpt_trngen_region_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_region_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME cpt_trngen_region_bake COMMAND cpt_trngen_region_bake_test)
+foreach(part state regions locks walk)
+    add_test(NAME cpt_trngen_region_bake_${part} COMMAND cpt_trngen_region_bake_test --part ${part})
+endforeach()
 # Over the shipped .cpt files (a cold bake's state from the atlas; the W3 draw-back report).
 add_executable(cpt_region_bake_retail_test cpt/trngen_region_bake_retail_test.cpp)
 target_link_libraries(cpt_region_bake_retail_test PRIVATE opennova_formats)
