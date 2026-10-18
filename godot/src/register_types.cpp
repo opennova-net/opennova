@@ -253,7 +253,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ObjectData);
 	GDREGISTER_CLASS(EnvLightValues);
 	GDREGISTER_CLASS(EnvDayPhase);
-	GDREGISTER_CLASS(EnvSunGlare);
 	GDREGISTER_CLASS(EnvironmentSnapshot);
 	GDREGISTER_CLASS(EnvLightState);
 	GDREGISTER_CLASS(PanmClock);

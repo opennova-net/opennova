@@ -182,21 +182,12 @@ public:
 	// (engine: formats/env/env_render.cpp).
 	Ref<EnvDayPhase> get_day_phase(float p_time) const;
 
-	// Derived render colors [orig: Environment_UpdateWeatherTick tail, see docs/env/env-tod-re.md].
-	static Color double_saturate_color(const Color &p_color);
-	static Color combine_terrain_light(const Color &p_light, const Color &p_sky);
-	static Color lit_water_color(const Color &p_water, const Color &p_light);
 	// The frame-clear horizon blend: skyfog cross-faded toward fog when the
 	// smoothed fog distance drops below half the reference (distances in world
 	// units; converted to 16.16 internally). Operates on UNDOUBLED colors.
 	// (engine: formats/env/env_render.cpp)
 	static Color horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 			float p_fog_distance, float p_fog_distance_reference);
-
-	// Sun glare intensity from view-sun alignment and occlusion brightness
-	// (engine: formats/env/env_celestial.h) as an EnvSunGlare record
-	// (glare 0..255, fog_whiten 0..40).
-	static Ref<EnvSunGlare> compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
 
 	// The mission time-of-day clock (env/tod_clock.h): the BMS Q8.8 start hour
 	// widened into the day-wrapped 8.24 accumulator (engine: formats/env/env.h)
@@ -214,37 +205,11 @@ public:
 	// NORMAL / TEX_UV / TEX_UV2 / INDEX populated), built at p_sky_height
 	// (engine: formats/env/env_celestial.h) in the render basis and placed
 	// in the Godot world through the util/axes.h x/z swap (the UVs stay the
-	// builder's render-basis ones). The reimpl builds ONCE at
-	// dome_reference_height() and folds the Y-only height scale into the
+	// builder's render-basis ones). The reimpl builds ONCE at the reference
+	// height (env::kSkyDomeReferenceHeight) and folds the Y-only height scale into the
 	// vertex shader (env #20's ratified structure; retail re-bakes on
 	// smoothed-height change via SkyDome_SetHeightAndRebuild @ 0x579070).
 	static Array build_sky_dome_arrays(float p_sky_height);
-
-	// 3072 - sqrt(2^23) ~= 175.6906 — the exact apex reference height behind
-	// the shaders' rounded "175.69" divisor (engine: formats/env/env_celestial.h).
-	static float dome_reference_height();
-
-	// Celestial bodies place at camera + direction * this distance (world
-	// units, full camera height, identity rotation)
-	// (engine: formats/env/env_celestial.h).
-	static float celestial_body_distance();
-
-	// Witnessed body alphas (0..1 out): sun = (1 - overcast) x (100 - dim)/100;
-	// moon = clamp01((fogDistInt - 400)/600) x (1 - overcast)
-	// (engine: formats/env/env_celestial.h). overcast/dim in 0..1 / 0..100.
-	static float celestial_sun_alpha(float p_overcast_blend, float p_sun_dim_pct);
-	static float celestial_moon_alpha(float p_fog_distance, float p_overcast_blend);
-
-	// The glare glow alpha (0..1): dot_view^4/2 x brightness(0..256)/256 x the
-	// overcast and SunDim folds (engine: formats/env/env_celestial.h).
-	static float glare_glow_alpha(float p_view_dot_sun, int p_brightness,
-			float p_overcast_blend, float p_sun_dim_pct);
-
-	// Field name -> renderer-consumption status for editor badging:
-	// {"status": "honored"|"partial"|"unconsumed", "faithful": bool,
-	//  "anchor": String, "note": String}. Statuses mirror
-	// docs/env/env-honored-matrix.md and flip only with grill citations.
-	static Dictionary get_field_consumption();
 
 	// BMS mission override layer (env/mission_environment_overrides.h): the
 	// armed fields land on a copy of the base config.

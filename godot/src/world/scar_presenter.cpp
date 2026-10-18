@@ -23,11 +23,13 @@
 #include <runtime/renderer/texture_filter.h>
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/present_passes.h>
+#include <formats/env/env_weather.h>
 
 #include <vector>
 
 #include "env/env_file.h"
 #include "env/mission_environment.h"
+#include "util/color_convert.h"
 #include "object/entity_index.h"
 #include "object/object_model.h"
 #include "simulation/entity_presenter.h"
@@ -472,8 +474,8 @@ void ScarPresenter::present_frame(Simulation *p_sim, const Vector3 &p_camera,
 		// "Derived render colors"; the same chain the water surface lights by).
 		const Vector3 sun = p_environment->get_sun_light();
 		const Vector3 sky = p_environment->get_sky_ambient();
-		terrain_light = EnvFile::combine_terrain_light(
-				Color(sun.x, sun.y, sun.z), Color(sky.x, sky.y, sky.z));
+		terrain_light = opennova::color_from_env_rgb(opennova::env::combine_terrain_light(
+				opennova::env::Rgb{sun.x, sun.y, sun.z}, opennova::env::Rgb{sky.x, sky.y, sky.z}));
 	}
 	present_draw_list(p_sim->get_scar_draw_list(camera, fog_distance, terrain_light),
 			p_index, p_wire);

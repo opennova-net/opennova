@@ -1212,26 +1212,23 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 			"an eye exactly on the plane stays dry: retail's side test is strict <")
 	assert_true(env.is_underwater_overlay_view(),
 			"the later retail murk scissor includes exact waterline equality")
-	var lit_water := func() -> Color:
-		var light := EnvFile.combine_terrain_light(
-				Color(env.get_sun_light().x, env.get_sun_light().y, env.get_sun_light().z),
-				Color(env.get_sky_ambient().x, env.get_sky_ambient().y, env.get_sky_ambient().z))
-		return EnvFile.lit_water_color(
-				Color(env.get_water_color().x, env.get_water_color().y, env.get_water_color().z),
-				light)
-	# The clear's `jle` keeps the lit water color AT the waterline too
-	# [orig: Render_ProcessMainSceneFrame @ 0x5ca785..0x5ca790].
-	var at_line: Color = lit_water.call()
-	assert_eq(world.get_current_frame_clear_color(),
-			Color(at_line.r, at_line.g, at_line.b).linear_to_srgb(),
-			"the frame clear shares the murk's inclusive waterline side")
+	var at_line_clear := world.get_current_frame_clear_color()
 	camera.v_offset = -1.0
 	assert_lt(camera.get_camera_transform().origin.y, water.water_height)
 	world.tick(camera.global_position, camera.get_global_transform())
 	assert_true(env.is_underwater_overlay_view())
-	var lit: Color = lit_water.call()
-	assert_eq(world.get_current_frame_clear_color(), Color(lit.r, lit.g, lit.b).linear_to_srgb(),
+	# Below the plane the scene fog is Env_WaterColorLit, the lit water colour the
+	# environment state builds from the water, sun and sky blocks (its arithmetic:
+	# the env_render_unit and environment_state ctests).
+	assert_true(env.is_underwater_view(), "below the plane the scene fogs underwater")
+	var lit_fog: Vector3 = env.get_scene_fog_color()
+	var lit := Color(lit_fog.x, lit_fog.y, lit_fog.z)
+	assert_eq(world.get_current_frame_clear_color(), lit.linear_to_srgb(),
 			"v_offset below water selects the underwater clear even when the node origin is above")
+	# The clear's `jle` keeps the lit water color AT the waterline too
+	# [orig: Render_ProcessMainSceneFrame @ 0x5ca785..0x5ca790].
+	assert_eq(at_line_clear, lit.linear_to_srgb(),
+			"the frame clear shares the murk's inclusive waterline side")
 	# Environment_ApplyFogAndAmbient selects one pass payload from the same
 	# render-eye classification as the clear: underwater the lit water color,
 	# murk-derived visibility end, and linear fog must reach both the terrain

@@ -1999,7 +1999,7 @@ public:
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's
 	// camera (Godot space), fog distance and g_EnvTerrainLightCombined
-	// (EnvFile.combine_terrain_light(sun, sky) — the sun+sky combine).
+	// (env::combine_terrain_light(sun, sky) — the sun+sky combine).
 	// { vertices (PackedVector3Array, Godot axes; world space for shared-ring
 	//   batches, SECTION-LOCAL for entity-ring batches, which world_vertices
 	//   from batch_world_first also hold in world space, -1 none), uvs, colors,

@@ -4,8 +4,7 @@ extends GutTest
 # ENG-1 — environment parity vectors (docs/maturity-program.md, ENG track).
 #
 # Pins the GDScript-visible outputs of the environment stack —
-# MissionEnvironment / Weather / SkyDome / Water (+ the reachable
-# Celestial math via EnvFile statics), godot/src/environment/*.gd —
+# MissionEnvironment / Weather / SkyDome / Water, godot/src/environment/*.gd —
 # against committed vectors over a deterministic in-code corpus, so ENG-2 can
 # port the math into engine/formats/env and delete the GDScript with these staying green
 # pre/post. Structure mirrors tests/novaworld/nw_codec_identity_test.cpp (the
@@ -188,10 +187,10 @@ const FLOAT_EPSILON := 1e-4
 # [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 windows].
 const GRID_TIMES: Array[int] = [0, 550, 600, 615, 1200, 1830, 1845, 1900, 2200]
 
-# Glare sweep inputs (EnvFile.compute_sun_glare pins the dot^16 curve
-# [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]).
-const GLARE_DOTS: Array[float] = [-1.0, -0.5, 0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 1.0]
-const GLARE_BRIGHTNESS: Array[int] = [0, 32, 64, 128, 192, 255]
+# (The celestial keys - the glare sweep and occlusion, the body distance and
+# alphas, the glow - and the derived render colours rode EnvFile's statics; they
+# moved to the env_render_unit ctest over the engine functions when the statics
+# were unbound, review C-45.)
 
 # ---------------------------------------------------------------------------
 # Committed vectors — regenerate ONLY per the policy header (dumped ONCE).
@@ -251,13 +250,6 @@ const EXPECTED_BYTES := {
 	"c2/t1900/water": "11274A",
 	"c2/t2200": "273748 14212C 2B2D40 FFFFFF 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
 	"c2/t2200/water": "102750",
-	"celestial/glare_occlusion": "0000 1805 300A 6014 901E C028",
-	# Re-dumped 2026-10-17 with the witnessed powers: the veil on dot^16 and the
-	# whitening on dot^64 [orig: Environment_ComputeSunGlareAndFogBlend
-	# @ 0x5ad7a5..0x5ad7b1, @ 0x5ad7c1..0x5ad7fc] (the dump had pinned dot^32 /
-	# dot^128, one square too many on each).
-	"celestial/glare_sweep": "0000 0000 0000 0000 0000 0100 2300 5401 8007 A315 C028",
-	"envfile/derived": "9AFFFF 9A9A9A 7A5F43",
 	"sky/flat": "01 2D3C4B",
 	"sky/mesh": "441 2400 0 22 21 0 1 22 1 23 22 1 2 23",
 	"wa/k001": "0012 01 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
@@ -311,9 +303,6 @@ const EXPECTED_FLOATS := {
 	"c2/t1900": [0.836503923, 0.224140391, -0.500000000, 0.750732601, 0.500000000, 300.000000000],
 	"c2/t2200": [0.433006197, 0.749988914, -0.500000000, 1.000000000, 0.500000000, 300.000000000],
 	"c2/water_params": [1.000000000],
-	"celestial/body_alpha": [1.000000000, 0.500000000, 0.500000000, 1.000000000, 0.500000000, 0.000000000, 0.000000000],
-	"celestial/body_distance": [64.000000000],
-	"celestial/glow": [0.500000000, 0.031250000, 0.250000000, 0.250000000, 0.000000000],
 	"dir/t0000": [-0.342010498, -0.939682007, 0.000000000, -0.500000000, 0.866012573, -0.000000076],
 	"dir/t0550": [-0.342010498, -0.040989649, 0.938787580, -0.500000000, 0.037775949, -0.865188301],
 	"dir/t0600": [-0.342010498, 0.000000041, 0.939682007, -0.500000000, -0.000000010, -0.866012573],
@@ -409,10 +398,6 @@ static func _hex_color(value: Vector3) -> String:
 		int(value.y * 255.0 + 0.5),
 		int(value.z * 255.0 + 0.5),
 	]
-
-
-static func _hex_color_c(value: Color) -> String:
-	return _hex_color(Vector3(value.r, value.g, value.b))
 
 
 static func _hex_byte(value: int) -> String:
@@ -747,65 +732,11 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	# C++-only.)
 
 
-func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
-	# Node-level celestial placement is asset-gated (see header). The
-	# separable math is pinned through the public surface it delegates to.
-	var sweep := PackedStringArray()
-	for dot in GLARE_DOTS:
-		var glare := EnvFile.compute_sun_glare(dot, 255)
-		sweep.append("%02X%02X" % [glare.glare, glare.fog_whiten])
-	bytes["celestial/glare_sweep"] = " ".join(sweep)
-
-	var occlusion := PackedStringArray()
-	for brightness in GLARE_BRIGHTNESS:
-		var glare := EnvFile.compute_sun_glare(1.0, brightness)
-		occlusion.append("%02X%02X" % [glare.glare, glare.fog_whiten])
-	bytes["celestial/glare_occlusion"] = " ".join(occlusion)
-
-	# Bodies place at camera + direction * 64 [orig: Render_CelestialBodies
-	# @ 0x5acaa0] — the old dome_distance key pinned the invented dir*2000
-	# model (env #32).
-	floats["celestial/body_distance"] = [EnvFile.celestial_body_distance()]
-
-	# The witnessed body alphas [orig: @ 0x5acbc1..0x5acccd].
-	floats["celestial/body_alpha"] = [
-		EnvFile.celestial_sun_alpha(0.0, 0.0),
-		EnvFile.celestial_sun_alpha(0.5, 0.0),
-		EnvFile.celestial_sun_alpha(0.0, 50.0),
-		EnvFile.celestial_moon_alpha(1024.0, 0.0),
-		EnvFile.celestial_moon_alpha(700.0, 0.0),
-		EnvFile.celestial_moon_alpha(400.0, 0.0),
-		EnvFile.celestial_moon_alpha(1024.0, 1.0),
-	]
-
-	# The glow alpha chain (dot^4/2 x brightness x folds) [orig:
-	# Render_SkyboxSunGlow @ 0x5acfb8..0x5ad0a9].
-	floats["celestial/glow"] = [
-		EnvFile.glare_glow_alpha(1.0, 256, 0.0, 0.0),
-		EnvFile.glare_glow_alpha(0.5, 256, 0.0, 0.0),
-		EnvFile.glare_glow_alpha(1.0, 128, 0.0, 0.0),
-		EnvFile.glare_glow_alpha(1.0, 256, 0.5, 0.0),
-		EnvFile.glare_glow_alpha(-0.5, 256, 0.0, 0.0),
-	]
-
-	# (The env #14 occlusion state machine — window fill/decay, the dead-band
-	# hysteresis at fog 1000 and the jitter offsets — rides the env_render_unit
-	# ctest since the GlareOcclusion binding went C++-only.)
-
-
-func _collect_statics(bytes: Dictionary, floats: Dictionary) -> void:
+func _collect_statics(floats: Dictionary) -> void:
 	# (The ColorSmoother snap/step sequences — the smoother/* keys — ride the
 	# env_render_unit ctest over the engine's ColorChannelState since the
-	# binding died with the ADR 0043 d10 sweep.)
-
-	# EnvFile derived-color statics [orig: Environment_UpdateWeatherTick
-	# @ 0x57f0b3..0x57f1b1].
-	var doubled := EnvFile.double_saturate_color(Color(0.3, 0.5, 0.7))
-	var combined := EnvFile.combine_terrain_light(Color(0.5, 0.5, 0.5), Color(0.25, 0.25, 0.25))
-	var lit := EnvFile.lit_water_color(Color(0.4, 0.31, 0.22), combined)
-	bytes["envfile/derived"] = "%s %s %s" % [
-		_hex_color_c(doubled), _hex_color_c(combined), _hex_color_c(lit),
-	]
+	# binding died with the ADR 0043 d10 sweep; so do the celestial and
+	# derived-colour keys since EnvFile's statics were unbound.)
 
 	# fog_type 0 exponential policy (no grid config uses it; pinned directly).
 	var exp_env := EnvFile.new()
@@ -826,8 +757,7 @@ func _collect_all() -> Array:
 	_collect_weather(bytes)
 	_collect_sky(bytes, floats)
 	_collect_water_mesh(bytes, floats)
-	_collect_celestial(bytes, floats)
-	_collect_statics(bytes, floats)
+	_collect_statics(floats)
 	return [bytes, floats]
 
 
