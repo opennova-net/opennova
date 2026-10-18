@@ -48,8 +48,8 @@ describe('InfraSection', () => {
     expect(read).toHaveBeenCalledTimes(1);
     const t = tiles(page);
     expect(Object.keys(t)).toEqual(['Programs', 'Tasks running', 'Load balancer targets', 'Release', 'Lobby instances', 'Fleet machines']);
-    expect(t['Programs']).toEqual(['4 of 5 steady', 'web rolling out']);
-    expect(t['Tasks running']).toEqual(['5 of 6', '1 starting']);
+    expect(t['Programs']).toEqual(['5 of 6 steady', 'web rolling out']);
+    expect(t['Tasks running']).toEqual(['6 of 7', '1 starting']);
     expect(t['Load balancer targets']).toEqual(['4 of 6 healthy', 'Across 4 listeners']);
     expect(t['Release']).toEqual(['abc1234', '20261017T120000Z-abc1234. Every program runs it']);
     expect(t['Lobby instances']).toEqual(['1 live', '1 taking clients, 3 sessions']);
@@ -68,7 +68,7 @@ describe('InfraSection', () => {
   it('shows each program with its rollout, its revision against the release, its tasks and events', async () => {
     const page = await mountSection();
     const names = page.findAll('article.infra-service h3').map((h) => h.text());
-    expect(names).toEqual(['gate', 'lobby', 'web', 'controller', 'worker']);
+    expect(names).toEqual(['gate', 'lobby', 'web', 'fleet', 'worker', 'data']);
 
     const gate = card(page, 'gate');
     expect(gate.text()).toContain('Steady');
@@ -233,7 +233,7 @@ describe('InfraSection', () => {
               deployments: [{ ...service('gate').deployments[0], rollout_state: 'FAILED', rollout_reason: 'tasks failed to start' }],
             }),
             service('worker', { running: 0, tasks: [] }),
-            service('controller', { task_definition: 'opennova-prod-controller:9', on_release: false }),
+            service('fleet', { task_definition: 'opennova-prod-fleet:9', on_release: false }),
           ],
           missing_services: ['lobby (MISSING)'],
           database: { ...cloud().database!, status: 'modifying' },
@@ -249,14 +249,14 @@ describe('InfraSection', () => {
       'worker has 0 of 1 tasks running.',
       'ECS has no service lobby (MISSING).',
       'The database is modifying.',
-      "controller runs opennova-prod-controller:9, not the release's revision: a deploy or a rollback did not finish.",
+      "fleet runs opennova-prod-fleet:9, not the release's revision: a deploy or a rollback did not finish.",
       'No lobby instance has been seen taking clients in the last 15 seconds.',
-      'No fleet process has been elected yet: nothing schedules the periodic jobs or runs the fleet.',
+      'No fleet process has been elected yet: nothing runs the fleet.',
     ]);
     expect(card(page, 'gate').text()).toContain('Rollout failed');
     expect(card(page, 'worker').text()).toContain('Short of tasks');
     expect(card(page, 'worker').text()).toContain('No task runs.');
-    expect(tiles(page)['Release'][1]).toBe('20261017T120000Z-abc1234. controller runs another revision');
+    expect(tiles(page)['Release'][1]).toBe('20261017T120000Z-abc1234. fleet runs another revision');
     expect(page.get('.infra-fleet').text()).toContain('None elected');
   });
 
@@ -275,7 +275,7 @@ describe('InfraSection', () => {
               ],
             }),
             service('web', rolled),
-            service('controller', { ...rolled, task_definition: 'opennova-prod-controller:9' }),
+            service('fleet', { ...rolled, task_definition: 'opennova-prod-fleet:9' }),
             service('worker'),
           ],
           target_groups: [
@@ -291,7 +291,7 @@ describe('InfraSection', () => {
     });
     const page = await mountSection();
     expect(page.findAll('.infra-warnings li').map((w) => w.text())).toEqual([
-      'A deploy is rolling out (lobby now): web and controller run their new revisions, and the release is recorded once every program does.',
+      'A deploy is rolling out (lobby now): web and fleet run their new revisions, and the release is recorded once every program does.',
     ]);
     expect(page.get('tr.infra-target-row').text()).toContain('The updater (TCP 20044, 20556, 21068, 21580)');
   });

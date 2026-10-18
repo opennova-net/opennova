@@ -104,7 +104,7 @@ describe('JobsSection', () => {
     warnings = page.findAll('.jobs-warnings li').map((w) => w.text());
     expect(warnings).toEqual([
       'The oldest due job has waited 5 minutes for a worker: the workers are busy, or none runs.',
-      'No schedule has enqueued a job for 10 minutes. Is a fleet process leading?',
+      'No schedule has enqueued a job for 10 minutes. Is a worker running?',
     ]);
   });
 

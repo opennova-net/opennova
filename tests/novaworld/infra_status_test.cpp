@@ -337,7 +337,7 @@ int test_snapshot() {
 	for (const infra_stub::Call &c : calls) {
 		if (c.key == "ecs DescribeServices")
 			TEST_EXPECT(contains(c.config,
-					R"(\"services\":[\"gate\",\"lobby\",\"web\",\"controller\",\"worker\"])"));
+					R"(\"services\":[\"gate\",\"lobby\",\"web\",\"fleet\",\"worker\",\"data\"])"));
 		if (c.key == "ecs DescribeTasks")
 			TEST_EXPECT(contains(c.config, "9999ffff9999ffff9999ffff9999ffff") &&
 					contains(c.config, "8888bbbb"));
@@ -353,7 +353,7 @@ int test_snapshot() {
 	TEST_EXPECT(dir_empty(scratch.root()));
 
 	// The programs, in their order.
-	TEST_EXPECT(snap->services.size() == 5 && snap->missing_services.empty() &&
+	TEST_EXPECT(snap->services.size() == 6 && snap->missing_services.empty() &&
 			snap->services_error.empty());
 	const infra::EcsService &gate = snap->services[0];
 	TEST_EXPECT(gate.name == "gate" && gate.status == "ACTIVE" && gate.desired == 1 &&
@@ -371,7 +371,7 @@ int test_snapshot() {
 	TEST_EXPECT(web.deployments.size() == 2 && web.deployments[0].status == "PRIMARY" &&
 			web.deployments[0].rollout_state == "IN_PROGRESS" && web.deployments[0].failed == 1 &&
 			web.deployments[1].status == "ACTIVE");
-	TEST_EXPECT(snap->services[4].name == "worker");
+	TEST_EXPECT(snap->services[4].name == "worker" && snap->services[5].name == "data");
 
 	// The tasks: running first by start (the pending one by its creation), then stopped.
 	TEST_EXPECT(snap->tasks_error.empty());
@@ -438,7 +438,9 @@ int test_snapshot() {
 	TEST_EXPECT(snap->release->id == "20261017T120000Z-abc1234" &&
 			snap->release->created == "2026-10-17T12:00:00Z" &&
 			snap->release->revision == "abc1234def56");
-	TEST_EXPECT(snap->release->task_definitions.size() == 6 &&
+	TEST_EXPECT(snap->release->task_definitions.size() == 7 &&
+			snap->release->task_definitions.at("data") ==
+					"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:2" &&
 			snap->release->task_definitions.at("web") ==
 					"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:42");
 	TEST_EXPECT(snap->machines.size() == 1 && snap->machines_error.empty());

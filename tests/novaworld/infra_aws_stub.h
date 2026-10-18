@@ -172,7 +172,7 @@ private:
 // ---- a deployment mid-deploy -----------------------------------------------------------
 //
 // Release 20261017T120000Z-abc1234 runs every program at revision 7 (gate,
-// lobby), 42 (web) or 5 (controller, worker). Web is rolling out revision 43:
+// lobby), 42 (web), 5 (fleet, worker) or 2 (data). Web is rolling out revision 43:
 // its new task is still starting beside the old one, and an earlier task of
 // it stopped (its container exited 1). The nightly backup runs as a one-off
 // task. The balancer: the gate, the lobby and the retail port healthy, 443 with
@@ -208,14 +208,19 @@ constexpr const char *kServices = R"json({"services":[
    "desiredCount":1,"pendingCount":0,"runningCount":1,"failedTasks":0,"createdAt":1792233600,"updatedAt":1792233900,"rolloutState":"COMPLETED"}],
  "events":[{"id":"w2","createdAt":1792238460,"message":"(service web) has started 1 tasks: (task 3333cccc)."},
    {"id":"w1","createdAt":1792238430,"message":"(service web) has stopped 1 running tasks: (task 9999ffff)."}]},
-{"serviceName":"controller","status":"ACTIVE","desiredCount":1,"runningCount":1,"pendingCount":0,
- "taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:5",
- "deployments":[{"id":"ecs-svc/5","status":"PRIMARY","taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:5",
+{"serviceName":"fleet","status":"ACTIVE","desiredCount":1,"runningCount":1,"pendingCount":0,
+ "taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:5",
+ "deployments":[{"id":"ecs-svc/5","status":"PRIMARY","taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:5",
    "desiredCount":1,"pendingCount":0,"runningCount":1,"failedTasks":0,"createdAt":1792233600,"updatedAt":1792233900,"rolloutState":"COMPLETED"}],
  "events":[]},
 {"serviceName":"worker","status":"ACTIVE","desiredCount":1,"runningCount":1,"pendingCount":0,
  "taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:5",
  "deployments":[{"id":"ecs-svc/6","status":"PRIMARY","taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:5",
+   "desiredCount":1,"pendingCount":0,"runningCount":1,"failedTasks":0,"createdAt":1792233600,"updatedAt":1792233900,"rolloutState":"COMPLETED"}],
+ "events":[]},
+{"serviceName":"data","status":"ACTIVE","desiredCount":1,"runningCount":1,"pendingCount":0,
+ "taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:2",
+ "deployments":[{"id":"ecs-svc/7","status":"PRIMARY","taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:2",
    "desiredCount":1,"pendingCount":0,"runningCount":1,"failedTasks":0,"createdAt":1792233600,"updatedAt":1792233900,"rolloutState":"COMPLETED"}],
  "events":[]}
 ],"failures":[]})json";
@@ -274,7 +279,7 @@ inline std::string described_tasks() {
 		   R"("attachments":[{"type":"ElasticNetworkInterface","status":"ATTACHED","details":[{"name":"privateIPv4Address","value":"10.40.1.13"}]}],)"
 		   R"("containers":[{"name":"web","image":"ghcr.io/opennova-net/opennova-novaworld-web@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210","lastStatus":"PENDING","healthStatus":"UNKNOWN"},)"
 		   R"({"name":"portal","image":"ghcr.io/opennova-net/novaworld-web@sha256:aaaa","lastStatus":"PENDING","healthStatus":"UNKNOWN"}]},)";
-	out += task_json("5555eeee5555eeee5555eeee5555eeee", "controller", "5", "1792233630",
+	out += task_json("5555eeee5555eeee5555eeee5555eeee", "fleet", "5", "1792233630",
 				   "us-east-1b", "10.40.1.15", "HEALTHY") +
 			",";
 	out += task_json("6666ffff6666ffff6666ffff6666ffff", "worker", "5", "1792233640", "us-east-1a",
@@ -298,13 +303,14 @@ inline std::string described_tasks() {
 constexpr const char *kRelease =
 		R"({"Parameter":{"Name":"/opennova/prod/release","Type":"String","Version":12,"LastModifiedDate":1792233950.1,)"
 		R"("Value":"{\"id\":\"20261017T120000Z-abc1234\",\"deployment\":\"prod\",\"created\":\"2026-10-17T12:00:00Z\",)"
-		R"(\"revision\":\"abc1234def56\",\"dirty\":false,\"previous\":\"20261016T090000Z-0f0f0f0\",\"programs\":[\"gate\",\"lobby\",\"web\",\"controller\",\"worker\"],)"
+		R"(\"revision\":\"abc1234def56\",\"dirty\":false,\"previous\":\"20261016T090000Z-0f0f0f0\",\"programs\":[\"gate\",\"lobby\",\"web\",\"fleet\",\"worker\",\"data\"],)"
 		R"(\"images\":{\"gate\":\"ghcr.io/opennova-net/opennova-novaworld-gate@sha256:0123\"},)"
 		R"(\"task_definitions\":{\"gate\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-gate:7\",)"
 		R"(\"lobby\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-lobby:7\",)"
 		R"(\"web\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:42\",)"
-		R"(\"controller\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:5\",)"
+		R"(\"fleet\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:5\",)"
 		R"(\"worker\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:5\",)"
+		R"(\"data\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:2\",)"
 		R"(\"backup\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-backup:3\"}}"}})";
 
 // A DescribeTargetHealth reply of `members` (each a <member>...</member>).

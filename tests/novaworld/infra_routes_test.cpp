@@ -249,7 +249,7 @@ int test_cloud(Harness &h) {
 			is_null(cloud["release_error"]));
 
 	const auto &services = cloud["services"];
-	TEST_EXPECT(services.size() == 5 && is_null(cloud["services_error"]) &&
+	TEST_EXPECT(services.size() == 6 && is_null(cloud["services_error"]) &&
 			cloud["missing_services"].size() == 0);
 	const auto *gate = service_named(services, "gate");
 	TEST_EXPECT(gate != nullptr);
