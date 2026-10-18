@@ -1737,10 +1737,12 @@ bool check_round_init_rebuilds_the_kept_kit() {
 			"the one-magazine accept draws its clip and leaves no reserve"))
 		return false;
 	inmatch::reset_slot_for_next_mission(conn);
-	if (!expect(conn.reply.loadout_buffer_set && conn.weapon_slots.empty() &&
+	if (!expect(conn.reply.loadout_buffer_set && conn.weapon_slots.size() == 1 &&
+					conn.weapon_slots[3 * 65 + 2].clip == 30 &&
 					conn.reply.loadout_buffer.entries.size() == 1,
-			"the map change keeps the slot's buffer and drops its rows"))
+			"the map change keeps the slot's buffer and its rows"))
 		return false;
+	conn.weapon_slots[3 * 65 + 2].clip = 4; // a spent clip the round init redraws
 	inmatch::PlayerSlot_RebuildKitForRound(conn, world, *world.registry.get(remote));
 	return expect(conn.weapon_slots.size() == 1 && conn.weapon_slots[3 * 65 + 2].clip == 30 &&
 					conn.reply.ammo_pools[0] == 60,

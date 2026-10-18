@@ -75,9 +75,9 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 // client's medic preference; the reply state's name, roster slot, ping
 // history, team-change stamp and integrity salts, the latches that make
 // the admission's 0x04 / 0x7B boundary and the join announcement one-shot,
-// and the slot's kit: its loadout buffer, ammo pools and loaded-round
-// buckets, which the reset does not store to (the round init rebuilds the
-// slot table from them) and the retained list body.
+// and the slot's kit: its loadout buffer, ammo pools, loaded-round buckets
+// and slot table, which the reset does not store to (the round init rebuilds
+// the slot table from them), and the retained list body.
 // The burst starts over at the kept slot's next C2S 0x37 (the 0x16 push),
 // as a stock joiner's reload asks for it.
 // [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 -- the entity
@@ -135,7 +135,9 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	conn.world_stream_announced = false;
 	conn.spawned_announced = false;
 	conn.burst = InitialStateBurst{};
-	conn.weapon_slots.clear();
+	// The slot table (+0x1D0) is left as well; the round init rebuilds it
+	// [orig: the reset stores +0x1CC alone @0x5163B2..0x516417;
+	//  Server_InitAllPlayerEntitiesForRound @0x516BF3..0x516C20].
 	conn.equipped_slot = NapiNPConnection::EquippedSlotRef{};
 }
 
