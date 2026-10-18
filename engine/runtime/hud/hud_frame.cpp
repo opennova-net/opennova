@@ -1836,7 +1836,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state, float s
 		// The target's slot under a death-screen sub-mode takes the large label
 		// font [orig: @0x5a3a05..0x5a3a2e — dword_A860F4, dword_A860F0, the
 		// slot's +0x24 entity against the target; g_HUDLabelFontLarge @0xB4C3A0
-		// (slot +0x18, Impac22b)].
+		// (slot +0x18, Impac22b) loaded @0x5a3a29].
 		const bool large = target && tag.has_slot && state.session.spectate_submode != 0 &&
 				label_font_large_.font() != nullptr;
 		const GameFont &lf = large ? label_font_large_ : normal_font;
