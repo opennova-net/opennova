@@ -23,6 +23,8 @@ import ServerConsoleTab from '../pages/servers/ServerConsoleTab.vue';
 import ServerStatsTab from '../pages/servers/ServerStatsTab.vue';
 import ServerSettingsTab from '../pages/servers/ServerSettingsTab.vue';
 import ServerMachineTab from '../pages/servers/ServerMachineTab.vue';
+import ServerUsageTab from '../pages/servers/ServerUsageTab.vue';
+import ServerLogsTab from '../pages/servers/ServerLogsTab.vue';
 import AdminLayout from '../pages/admin/AdminLayout.vue';
 import OverviewSection from '../pages/admin/OverviewSection.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
@@ -113,6 +115,8 @@ const router = createRouter({
             { path: 'stats', component: ServerStatsTab },
             { path: 'console', component: ServerConsoleTab },
             { path: 'game-settings', component: ServerSettingsTab },
+            { path: 'usage', component: ServerUsageTab },
+            { path: 'logs', component: ServerLogsTab },
             { path: 'machine', component: ServerMachineTab },
           ],
         },
