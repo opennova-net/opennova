@@ -79,6 +79,7 @@ void Supervisor::start() {
 			profile_.provider.c_str(), config_.placement.shared_slots, config_.placement.max_shared,
 			config_.placement.max_own, config_.cap, config_.master_host.c_str(),
 			static_cast<unsigned>(config_.master_gate_port));
+	last_good_pass_ms_.store(config_.clock_ms(), std::memory_order_relaxed);
 	try {
 		reconcile(config_.clock_ms());
 	} catch (const std::exception &e) {
@@ -226,22 +227,28 @@ void Supervisor::tick(uint64_t now_ms) {
 					"an exit counts no restart, until one is\n");
 		lobby_live_ = lobby_live;
 	}
+	// Whether every step of this pass ran without a database error
+	// (last_good_pass_ms).
+	bool good = true;
 	// The servers this pass stopped for their owners' limits: stepped from the
 	// next pass on, as stopping (their rows here hold the state before it).
 	std::set<int64_t> limited;
 	try {
 		limited = enforce_limits(db, list_live(db));
 	} catch (const db::Error &e) {
+		good = false;
 		std::fprintf(stderr, "[hosted] WARN the owners' limits: %s\n", e.what());
 	}
 	try {
 		step_machines(db, now_ms);
 	} catch (const db::Error &e) {
+		good = false;
 		std::fprintf(stderr, "[fleet] WARN the machines: %s\n", e.what());
 	}
 	try {
 		step_addresses(db, now_ms);
 	} catch (const db::Error &e) {
+		good = false;
 		std::fprintf(stderr, "[fleet] WARN the static addresses: %s\n", e.what());
 	}
 
@@ -264,6 +271,7 @@ void Supervisor::tick(uint64_t now_ms) {
 		try {
 			step(db, fleet, s, rt, now_ms);
 		} catch (const db::Error &e) {
+			good = false;
 			std::fprintf(stderr, "[hosted] WARN server %lld: %s\n", static_cast<long long>(s.id), e.what());
 		}
 		pass_turns_.fetch_add(1, std::memory_order_relaxed);
@@ -275,6 +283,7 @@ void Supervisor::tick(uint64_t now_ms) {
 		try {
 			sync_admin_links(db);
 		} catch (const db::Error &e) {
+			good = false;
 			std::fprintf(stderr, "[hosted] WARN admin links: %s\n", e.what());
 		}
 	}
@@ -286,8 +295,11 @@ void Supervisor::tick(uint64_t now_ms) {
 			return StatsSampler::LinkView{ status.game_state, status.state == AdminLinkState::Up };
 		});
 	} catch (const db::Error &e) {
+		good = false;
 		std::fprintf(stderr, "[hosted] WARN the stats' sample: %s\n", e.what());
 	}
+	if (good)
+		last_good_pass_ms_.store(now_ms, std::memory_order_relaxed);
 	pass_turns_.fetch_add(1, std::memory_order_relaxed);
 }
 

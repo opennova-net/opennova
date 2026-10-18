@@ -1322,6 +1322,25 @@ int test_exits_and_crash_restarts() {
 	return 0;
 }
 
+// The age of the supervisor's last good pass (the fleet leader's heartbeat's
+// fleet_pass_age_s): none before it starts, each pass that runs whole moves it
+// on, and a pass its guard skips (a fleet process that no longer leads) does
+// not.
+int test_last_good_pass() {
+	Rig rig("hosted_last_good_pass");
+	TEST_EXPECT(rig.sup->last_good_pass_ms() == 0);
+	rig.tick();
+	TEST_EXPECT(rig.sup->last_good_pass_ms() == rig.now);
+	rig.advance(5000);
+	rig.tick();
+	TEST_EXPECT(rig.sup->last_good_pass_ms() == 6000);
+	rig.sup->set_pass_guard([](opennova::db::Database &) { return false; });
+	rig.advance(5000);
+	rig.tick();
+	TEST_EXPECT(rig.sup->last_good_pass_ms() == 6000);
+	return 0;
+}
+
 // A machine launch the cloud refuses is the machine's cause, never the server's:
 // no restart counted, however many fail. The driver's own text goes to the log,
 // not to the event the owner reads (written once per wait); the machine's row
@@ -2316,6 +2335,7 @@ int main(int argc, char **argv) {
 		{ "static_address_brake", test_static_address_brake },
 		{ "stop_paths", test_stop_paths },
 		{ "exits_and_crash_restarts", test_exits_and_crash_restarts },
+		{ "last_good_pass", test_last_good_pass },
 		{ "launch_failure", test_launch_failure },
 		{ "launch_refused_mid_pass", test_launch_refused_mid_pass },
 		{ "restart_window", test_restart_window },

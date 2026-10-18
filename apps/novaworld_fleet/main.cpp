@@ -19,6 +19,7 @@
 
 #include "hosted/admin_link.h"
 #include "hosted/console_drain.h"
+#include "hosted/fleet_health.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/internal_listener.h"
@@ -196,7 +197,13 @@ int run(const program::Boot &boot) {
 	program::LoopHooks hooks;
 	uint64_t launch_failures_reported = 0;
 	hosted::Supervisor *counted = supervisor.get();
-	hooks.heartbeat = [counted, &launch_failures_reported](
+	// The leader's own fields: the age of its supervisor's last pass that failed
+	// in nothing (first, so a database that fails the rest still sends it), then
+	// the fleet's health over the rows (hosted/fleet_health.h) against the
+	// release's images.
+	const hosted::ReleaseImages release{ fleet.image_id, fleet.hostd_image };
+	const hosted::PlacementPolicy placement = fleet.placement;
+	hooks.heartbeat = [counted, &leader, &launch_failures_reported, release, placement](
 							  db::Database &db, Heartbeat &beat, int64_t window_s) {
 		if (counted == nullptr)
 			return;
@@ -208,6 +215,20 @@ int run(const program::Boot &boot) {
 		beat.machines_lost = hosted::count_machines(db, hosted::FleetMachineState::Lost);
 		beat.machines_held = hosted::count_held_machines(db);
 		beat.limits_held = hosted::limits_hold::held(db) ? 1 : 0;
+		if (!leader.leading())
+			return;
+		const uint64_t now_ms = counted->config().clock_ms();
+		const uint64_t good_ms = counted->last_good_pass_ms();
+		beat.fleet_pass_age_s =
+				static_cast<int64_t>(now_ms > good_ms ? (now_ms - good_ms) / 1000 : 0);
+		const hosted::HealthInputs inputs = hosted::read_health(db, &placement);
+		const hosted::HealthGauges gauges =
+				hosted::health_gauges(inputs, hosted::fleet_health(inputs, release));
+		beat.attention_danger = gauges.danger;
+		beat.attention_warn = gauges.warn;
+		beat.machines_stuck = gauges.machines_stuck;
+		if (gauges.disk_free_min_percent)
+			beat.machine_disk_free_pct = *gauges.disk_free_min_percent;
 	};
 	const int exit_code = program::run_main_loop("fleet", boot, watchdog, hooks);
 

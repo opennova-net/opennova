@@ -382,6 +382,13 @@ public:
 	// supervisor's passes counted them (the heartbeat's launch_failures counts
 	// those since its last line). Thread-safe.
 	uint64_t launch_failures() const { return launch_failures_.load(std::memory_order_relaxed); }
+	// When the last pass that failed in nothing ended, on the passes' clock
+	// (clock_ms): a step that hit a database error, or a pass cut short, is no
+	// such pass. start() sets it, so a leader whose passes all fail ages from its
+	// start (the fleet leader's heartbeat's fleet_pass_age_s). Thread-safe.
+	uint64_t last_good_pass_ms() const {
+		return last_good_pass_ms_.load(std::memory_order_relaxed);
+	}
 
 	// A guard each pass asks first, on the pass's connection (a fleet process
 	// that still leads, election.h); false skips the pass. It is asked
@@ -572,6 +579,7 @@ private:
 	std::atomic<bool> running_{ false };
 	std::atomic<uint64_t> pass_turns_{ 0 };
 	std::atomic<uint64_t> launch_failures_{ 0 };
+	std::atomic<uint64_t> last_good_pass_ms_{ 0 };
 
 	std::function<bool(db::Database &)> pass_guard_;
 };

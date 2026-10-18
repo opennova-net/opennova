@@ -69,6 +69,11 @@ std::string heartbeat_line(const Heartbeat &b) {
 	field("limits_held", b.limits_held);
 	field("probes_unanswered", b.probes_unanswered);
 	field("lobbies_live", b.lobbies_live);
+	field("attention_danger", b.attention_danger);
+	field("attention_warn", b.attention_warn);
+	field("machines_stuck", b.machines_stuck);
+	field("machine_disk_free_pct", b.machine_disk_free_pct);
+	field("fleet_pass_age_s", b.fleet_pass_age_s);
 	field("db_lock_timeouts", b.db_lock_timeouts);
 	field("db_deadlocks", b.db_deadlocks);
 	// The program is one of the five names (program.h): no escaping needed.
