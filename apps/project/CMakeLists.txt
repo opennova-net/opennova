@@ -16,4 +16,12 @@ if(WIN32)
   # main.cpp reads the arguments wide (CommandLineToArgvW) and hands the verbs UTF-8.
   target_link_libraries(opennova_project PRIVATE shell32)
 endif()
+if(MSVC)
+  # The editor core runs on Godot's main thread, whose stack is 8 MiB (the Godot 4.6.1 binary's
+  # SizeOfStackReserve 0x800000); this command line drives the same core, so its main thread gets the
+  # same stack. A menu nests its windows as deep as the game's own stack takes them, thousands of
+  # levels (engine/formats/mnu/mnu.cpp), and the core's walks over a menu recurse once a window; on
+  # the default 1 MiB a 400-level menu ran validate's stack out.
+  target_link_options(opennova_project PRIVATE /STACK:8388608)
+endif()
 target_compile_features(opennova_project PRIVATE cxx_std_17)

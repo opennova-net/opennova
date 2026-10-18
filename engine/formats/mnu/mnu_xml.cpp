@@ -14,6 +14,17 @@ namespace {
 
 constexpr char32_t kNul = 0;
 
+// The game frees a menu's element tree once it has built the menu [orig: XML_ParseWithBOMDetection
+// @ 0x76a690, the call @ 0x76a742, 44 bytes into its frame] with a walk that recurses once an element
+// level and loops over siblings [orig: XML_FreeNodeTree @ 0x76a5c0, the self-call on the first child
+// @ 0x76a5dd: 24 bytes a level, 12 more in the call on a childless element's null list], on its main
+// thread's 1 MiB stack (Jointops.exe's SizeOfStackReserve 0x100000). An element at depth d (a top-level
+// one at 1) takes it 48 + 24 d + 12 bytes down, the least the free spends (the stack the loader's
+// callers hold is not counted): the game survives 43,688 levels and crashes freeing an element at
+// 43,689.
+constexpr size_t kGameStackBytes = 0x100000;
+size_t free_stack_bytes(size_t depth) { return 48 + 24 * depth + 12; }
+
 // The named-entity table [orig: off_85A628, lengths filled once per load by
 // NapiXML_ParserCtor @ 0x769c70]: each full name (the '&' and the ';' included) is
 // matched as a prefix of the text at the '&', the first seven ignoring case, the
@@ -254,10 +265,12 @@ bool Reader::run(std::string &error) {
 					if (!at(pos_)) return fail(error, "The file ends inside RAW_TEXT.");
 				}
 			} else {
-				if (depth_ >= kMaxElementDepth) {
-					note("An element nested more than " + std::to_string(kMaxElementDepth) +
-					     " levels deep: OpenNova's reader stops here (retail's parse recurses once a WINDOW "
-					     "level and runs out of stack at some depth); the rest of the file is not read.");
+				if (free_stack_bytes(depth_ + 1) > kGameStackBytes) {
+					note("An element nested " + std::to_string(depth_ + 1) +
+					     " levels deep: the game's free of the menu's elements runs past its 1 MiB stack here (" +
+					     std::to_string(free_stack_bytes(depth_ + 1)) +
+					     " bytes at least), so the game crashes after loading this menu; the rest of the file is not "
+					     "read.");
 					return true;
 				}
 				auto node = std::make_unique<Node>();

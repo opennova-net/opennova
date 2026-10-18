@@ -18,12 +18,12 @@
 //   text inside a tag name or a RAW_TEXT body (retail's E_FAIL: the file loads
 //   nothing). Where retail crashes or hangs instead, the reader stops gracefully:
 //   parse() fails, or keeps what it built with a note, as each case says.
-// - Elements nest at most kMaxElementDepth deep: an element opened deeper stops the
-//   reader with a note, keeping what it built. Retail's reader is a loop and takes any
-//   depth, but its parse recurses once a WINDOW level [orig: CUIElement_ParseXMLDefinition
-//   @ 0x648120, the CUIScene_CreateWidgetByType call @ 0x649789] and runs out of stack at
-//   some depth; ours recurses once an element level in the walks over the tree, so a
-//   small file of nested elements would run the stack out instead.
+// - Elements nest as deep as the game survives: its reader is a loop and takes any depth
+//   [orig: NapiXML_ParseElementTree @ 0x769d70], but its free of the tree recurses once a
+//   level [orig: XML_FreeNodeTree @ 0x76a5c0] and runs its 1 MiB stack out at 43,689 levels,
+//   where this reader stops with a note, keeping what it built (mnu_xml.cpp). The tree is
+//   freed and walked here with explicit stacks, never a recursion a level. (The depth the
+//   game's window creation runs its stack out at is the menu parse's, mnu.cpp.)
 #pragma once
 
 #include <cstddef>
@@ -36,10 +36,6 @@ namespace opennova::mnu_xml {
 
 // The reader works on wide characters, as retail does after the decode.
 using Text = std::u32string;
-
-// The deepest element the reader takes: a top-level element is at depth 1 (a shipped
-// menu nests a handful of levels).
-constexpr size_t kMaxElementDepth = 64;
 
 struct Attribute {
 	Text name;
@@ -78,8 +74,8 @@ struct Node {
 	const Attribute *last_attr(const char *name) const;
 };
 
-// What the reader kept going past: a retail crash or hang it stops at gracefully, or
-// an element nested past kMaxElementDepth.
+// What the reader kept going past: a retail crash or hang it stops at gracefully (an element
+// nested past the depth the game's free of the tree survives among them).
 struct Note {
 	size_t line = 0;
 	std::string message;

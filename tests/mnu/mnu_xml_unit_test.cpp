@@ -185,11 +185,14 @@ bool test_end_of_text() {
   return true;
 }
 
-// Elements nest at most kMaxElementDepth (64) deep: one opened deeper stops the reader with a
-// note and the tree read so far is kept; 30,000 nested elements no longer run the stack out (they
-// did destroying the Document). A node frees a deep subtree without recursing.
+// Elements nest as deep as the game survives. Its reader is a loop and takes any depth [orig:
+// NapiXML_ParseElementTree @ 0x769d70], but its free of the tree recurses once a level, 24 bytes a level
+// on a 1 MiB stack [orig: XML_FreeNodeTree @ 0x76a5c0, the self-call @ 0x76a5dd; from
+// XML_ParseWithBOMDetection @ 0x76a690]: 43,688 levels take it 1,048,572 bytes down, 43,689 run it out.
+// So 43,688 nested elements read whole; the 43,689th stops the reader with a note, the tree kept. The
+// Document frees them without recursing (destroying it once ran the stack out), as a node does a deep
+// subtree.
 bool test_nesting_depth() {
-  using opennova::mnu_xml::kMaxElementDepth;
   auto nested = [](size_t levels) {
     std::string xml;
     for (size_t i = 0; i < levels; ++i) xml += "<A>";
@@ -205,15 +208,23 @@ bool test_nesting_depth() {
   };
   Document doc;
   std::string err;
-  CHECK(kMaxElementDepth == 64, "the bound");
-  CHECK(read(nested(64).c_str(), doc, err) && doc.notes.empty() && depth_of(doc) == 64, "64 levels read whole");
-  CHECK(read(nested(65).c_str(), doc, err) && doc.notes.size() == 1 &&
-            doc.notes[0].message.find("nested more than 64 levels") != std::string::npos && depth_of(doc) == 64,
-        "the 65th level stops the reader with a note, 64 kept");
+  CHECK(read(nested(65).c_str(), doc, err) && doc.notes.empty() && depth_of(doc) == 65, "65 levels read whole");
   {
     Document deep;
-    CHECK(read(nested(30000).c_str(), deep, err) && deep.notes.size() == 1 && depth_of(deep) == 64,
-          "30,000 levels stop at 64");
+    CHECK(read(nested(30000).c_str(), deep, err) && deep.notes.empty() && depth_of(deep) == 30000,
+          "30,000 levels read whole");
+  }
+  {
+    Document deepest;
+    CHECK(read(nested(43688).c_str(), deepest, err) && deepest.notes.empty() && depth_of(deepest) == 43688,
+          "43,688 levels read whole");
+  }
+  {
+    Document past;
+    CHECK(read(nested(43689).c_str(), past, err) && past.notes.size() == 1 &&
+              past.notes[0].message.find("43689 levels deep") != std::string::npos &&
+              past.notes[0].message.find("1048596 bytes") != std::string::npos && depth_of(past) == 43688,
+          "the 43,689th level runs the game's free out: a note, 43,688 kept");
   }
   {
     auto top = std::make_unique<Node>();

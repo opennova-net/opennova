@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -44,6 +45,23 @@ struct WrittenElement {
 	std::vector<WrittenAttribute> attributes;
 	std::string text; // the model's text (escape_text writes it)
 	std::vector<WrittenElement> children;
+
+	WrittenElement() = default;
+	WrittenElement(WrittenElement &&) noexcept = default;
+	WrittenElement &operator=(WrittenElement &&) noexcept = default;
+	WrittenElement(const WrittenElement &) = delete;
+	WrittenElement &operator=(const WrittenElement &) = delete;
+	// Frees the subtree without recursing once a level: a menu nests its windows as deep as the
+	// game's stack takes them, thousands of levels (mnu.cpp).
+	~WrittenElement() {
+		std::vector<WrittenElement> rest = std::move(children);
+		while (!rest.empty()) {
+			WrittenElement last = std::move(rest.back());
+			rest.pop_back();
+			for (WrittenElement &child : last.children) rest.push_back(std::move(child));
+			last.children.clear();
+		}
+	}
 };
 
 // The writer's layout: a line ending and the step each level of elements is indented by (both
@@ -157,10 +175,29 @@ std::vector<SortKeyPlace> sort_key_places(const TableColumn &c) {
 class Words {
 public:
 	WrittenElement screen(const Screen &s);
+	// The elements written in a window; each part's and child window's as its head alone (its tag and
+	// attributes), what is in it written by fill.
 	void window_elements(const Window &w, std::vector<WrittenElement> &out);
 
 private:
-	WrittenElement window(const Window &w, const char *tag, bool part, std::vector<WrittenAttribute> extra = {});
+	// A part's or child window's head whose content is still to write: its path from the elements
+	// window_elements wrote (each step an index into an element's children), with the state it is
+	// written under.
+	struct Deferred {
+		std::vector<size_t> path;
+		const Window *window;
+		bool glb_header_fields;
+		const GlbFields *server_fields; // GLB_INFO_SERVER_DETAILS: its FIELDS follow its elements
+	};
+	// A window's element alone: its tag and attributes.
+	WrittenElement window_head(const Window &w, const char *tag, bool part, std::vector<WrittenAttribute> extra = {});
+	// A part's or child window's head in `out`, its content deferred.
+	void defer_window(std::vector<WrittenElement> &out, const Window &w, const char *tag, bool part,
+	                  std::vector<WrittenAttribute> extra = {}, const GlbFields *server_fields = nullptr);
+	// What is in `head`, the element of `w`, and in every part and window under it, written with an
+	// explicit stack: never a recursion a level, a menu nesting its windows thousands deep.
+	void fill(WrittenElement &head, const Window &w);
+	std::vector<Deferred> *deferred_ = nullptr;
 	void appearance(const Appearance &a, const char *tag, std::vector<WrittenElement> &out, bool table = false);
 	WrittenElement item(const Item &i, bool cell, WindowType type);
 	void items(const Items &items, WindowType type, std::vector<WrittenElement> &out);
@@ -299,7 +336,7 @@ void Words::glb_fields(const GlbFields &fields, WrittenElement &out) {
 WrittenElement Words::category(const GopherCategory &c) {
 	WrittenElement e = element("CATEGORY", WrittenForm::Container);
 	if (c.has_level) put(e.attributes, "LEVEL", c.level);
-	if (c.label) e.children.push_back(window(*c.label, "LABEL", true));
+	if (c.label) e.children.push_back(window_head(*c.label, "LABEL", true)); // its content deferred (window_elements)
 	for (const GopherEntry &entry : c.entries) {
 		WrittenElement row = element(entry.info ? "INFO" : "ITEM", WrittenForm::Leaf);
 		put(row.attributes, "NAME", entry.name);
@@ -312,7 +349,8 @@ WrittenElement Words::category(const GopherCategory &c) {
 	return e;
 }
 
-WrittenElement Words::window(const Window &w, const char *tag, bool part, std::vector<WrittenAttribute> extra_attributes) {
+WrittenElement Words::window_head(const Window &w, const char *tag, bool part,
+                                  std::vector<WrittenAttribute> extra_attributes) {
 	WrittenElement e = element(tag, WrittenForm::Container);
 	e.attributes = std::move(extra_attributes);
 	// The type's own name [orig: CUIScene_CreateWidgetByType @ 0x64f630 matches it without case].
@@ -334,8 +372,42 @@ WrittenElement Words::window(const Window &w, const char *tag, bool part, std::v
 	put_bare(e.attributes, "PASSWORD", edit && w.password);
 	put_int(e.attributes, "FORM", w.has_form, w.form);
 	put_bare(e.attributes, "PLAYERLIST", reads(w.type, "glb_playerlist") && w.glb_playerlist);
-	window_elements(w, e.children);
 	return e;
+}
+
+void Words::defer_window(std::vector<WrittenElement> &out, const Window &w, const char *tag, bool part,
+                         std::vector<WrittenAttribute> extra, const GlbFields *server_fields) {
+	out.push_back(window_head(w, tag, part, std::move(extra)));
+	if (deferred_) deferred_->push_back({{out.size() - 1}, &w, glb_header_fields_, server_fields});
+}
+
+void Words::fill(WrittenElement &head, const Window &w) {
+	struct Job {
+		WrittenElement *element;
+		const Window *window;
+		bool glb_header_fields;
+		const GlbFields *server_fields;
+	};
+	const bool saved = glb_header_fields_;
+	std::vector<Job> jobs{{&head, &w, glb_header_fields_, nullptr}};
+	std::vector<Deferred> deferred;
+	while (!jobs.empty()) {
+		const Job job = jobs.back();
+		jobs.pop_back();
+		glb_header_fields_ = job.glb_header_fields;
+		deferred.clear();
+		deferred_ = &deferred;
+		window_elements(*job.window, job.element->children);
+		deferred_ = nullptr;
+		if (job.server_fields) glb_fields(*job.server_fields, *job.element);
+		// The paths resolve once the element's content is whole, so no vector on them grows again.
+		for (size_t i = deferred.size(); i-- > 0;) {
+			WrittenElement *e = job.element;
+			for (size_t step : deferred[i].path) e = &e->children[step];
+			jobs.push_back({e, deferred[i].window, deferred[i].glb_header_fields, deferred[i].server_fields});
+		}
+	}
+	glb_header_fields_ = saved;
 }
 
 void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
@@ -458,31 +530,28 @@ void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
 	if (w.list_box && reads(t, "list_box")) {
 		std::vector<WrittenAttribute> pad;
 		put_int(pad, "sb_edge_pad", w.has_sb_edge_pad, w.sb_edge_pad);
-		out.push_back(window(*w.list_box, "LIST_BOX", true, std::move(pad)));
+		defer_window(out, *w.list_box, "LIST_BOX", true, std::move(pad));
 	}
-	if (w.spinup && reads(t, "spinup")) out.push_back(window(*w.spinup, "SPINUP", true));
-	if (w.spindown && reads(t, "spindown")) out.push_back(window(*w.spindown, "SPINDOWN", true));
+	if (w.spinup && reads(t, "spinup")) defer_window(out, *w.spinup, "SPINUP", true);
+	if (w.spindown && reads(t, "spindown")) defer_window(out, *w.spindown, "SPINDOWN", true);
 	if (reads(t, "column")) column(w.table_data.column, out);
 	if (w.table_data.has_min_item_height && reads(t, "min_item_height"))
 		out.push_back(leaf("MIN_ITEM_HEIGHT", std::to_string(w.table_data.min_item_height)));
 	if (w.table_data.has_fixed_header_height && reads(t, "fixed_header_height"))
 		out.push_back(leaf("FIXED_HEADER_HEIGHT", std::to_string(w.table_data.fixed_header_height)));
-	if (w.scrollbar && reads(t, "scrollbar")) out.push_back(window(*w.scrollbar, "SCROLLBAR", true));
-	if (w.join_button && reads(t, "join_button")) out.push_back(window(*w.join_button, "JOIN_BUTTON", true));
-	if (w.search_button && reads(t, "search_button")) out.push_back(window(*w.search_button, "SEARCH_BUTTON", true));
+	if (w.scrollbar && reads(t, "scrollbar")) defer_window(out, *w.scrollbar, "SCROLLBAR", true);
+	if (w.join_button && reads(t, "join_button")) defer_window(out, *w.join_button, "JOIN_BUTTON", true);
+	if (w.search_button && reads(t, "search_button")) defer_window(out, *w.search_button, "SEARCH_BUTTON", true);
 	if (reads(t, "glb_table")) {
 		const bool saved = glb_header_fields_;
 		glb_header_fields_ = true;
-		if (w.glb_table) out.push_back(window(*w.glb_table, "GLB_TABLE", true));
-		if (w.glb_info_player_details) out.push_back(window(*w.glb_info_player_details, "GLB_INFO_PLAYER_DETAILS", true));
+		if (w.glb_table) defer_window(out, *w.glb_table, "GLB_TABLE", true);
+		if (w.glb_info_player_details) defer_window(out, *w.glb_info_player_details, "GLB_INFO_PLAYER_DETAILS", true);
 		glb_header_fields_ = saved;
-		if (w.glb_info_button) out.push_back(window(*w.glb_info_button, "GLB_INFO_BUTTON", true));
-		if (w.glb_info_server_details) {
-			WrittenElement details = window(*w.glb_info_server_details, "GLB_INFO_SERVER_DETAILS", true);
-			glb_fields(w.glb_server_fields, details);
-			out.push_back(std::move(details));
-		}
-		if (w.glb_nw_info) out.push_back(window(*w.glb_nw_info, "GLB_NW_INFO", true));
+		if (w.glb_info_button) defer_window(out, *w.glb_info_button, "GLB_INFO_BUTTON", true);
+		if (w.glb_info_server_details)
+			defer_window(out, *w.glb_info_server_details, "GLB_INFO_SERVER_DETAILS", true, {}, &w.glb_server_fields);
+		if (w.glb_nw_info) defer_window(out, *w.glb_nw_info, "GLB_NW_INFO", true);
 		if (w.has_glb_target) out.push_back(leaf("TARGET", w.glb_target));
 	}
 	if (reads(t, "gopher_targets"))
@@ -491,16 +560,24 @@ void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
 		WrittenElement filters = element("FILTERS", WrittenForm::Container);
 		for (const GopherCategory &c : w.gopher_categories) filters.children.push_back(category(c));
 		out.push_back(std::move(filters));
+		// Each LABEL's content, deferred: its head is its CATEGORY's first element.
+		if (deferred_)
+			for (size_t i = 0; i < w.gopher_categories.size(); ++i)
+				if (w.gopher_categories[i].label)
+					deferred_->push_back(
+					        {{out.size() - 1, i, 0}, w.gopher_categories[i].label.get(), glb_header_fields_, nullptr});
 	}
-	if (w.gopher_back && reads(t, "gopher_back")) out.push_back(window(*w.gopher_back, "GOPHER_BACK", true));
-	for (const Window &child : w.children) out.push_back(window(child, "WINDOW", false));
+	if (w.gopher_back && reads(t, "gopher_back")) defer_window(out, *w.gopher_back, "GOPHER_BACK", true);
+	for (const Window &child : w.children) defer_window(out, child, "WINDOW", false);
 }
 
 WrittenElement Words::screen(const Screen &s) {
 	WrittenElement e = element("SCREEN", WrittenForm::Container);
 	if (!s.name.empty()) e.children.push_back(leaf("NAME", s.name));
 	if (s.has_music_var) e.children.push_back(leaf("MUSICVAR", std::to_string(s.music_var)));
-	for (const Window &root : s.roots) e.children.push_back(window(root, "WINDOW", false));
+	const size_t first = e.children.size();
+	for (const Window &root : s.roots) e.children.push_back(window_head(root, "WINDOW", false));
+	for (size_t i = 0; i < s.roots.size(); ++i) fill(e.children[first + i], s.roots[i]);
 	return e;
 }
 
@@ -520,39 +597,49 @@ std::string written_open_tag(const WrittenElement &e) {
 	return out + ">";
 }
 
-void render_written_content(const WrittenElement &e, const WrittenStyle &style, const std::string &indent,
-                            std::string &out);
-
-// An element in the writer's layout; `indent` is what stands before its own first line, so each
-// element in it goes on a new line at `indent` and one `unit` more.
-void render_written(const WrittenElement &e, const WrittenStyle &style, const std::string &indent, std::string &out) {
-	out += written_open_tag(e);
-	render_written_content(e, style, indent, out);
-	out += "</" + e.tag + ">";
-}
-
-// What stands between an element's open and close tags.
-void render_written_content(const WrittenElement &e, const WrittenStyle &style, const std::string &indent,
-                            std::string &out) {
-	switch (e.form) {
-	case WrittenForm::Leaf: out += escape_text(e.text); break;
-	case WrittenForm::Compact: {
-		out += escape_text(e.text);
-		const WrittenStyle one_line;
-		for (const WrittenElement &child : e.children) render_written(child, one_line, std::string(), out);
-		break;
-	}
-	case WrittenForm::Container: {
-		const std::string inner = indent + style.unit;
-		for (const WrittenElement &child : e.children) {
-			out += style.eol;
-			out += inner;
-			render_written(child, style, inner, out);
+// An element in the writer's layout, the root at the start of a line: each element in a Container on a
+// line of its own one `unit` further in, a Compact's on its line, a Leaf's text alone. An explicit
+// stack, never a recursion a level.
+void render_written(const WrittenElement &root, const WrittenStyle &style, std::string &out) {
+	static const WrittenStyle one_line;
+	struct Open {
+		const WrittenElement *element;
+		const WrittenStyle *style;
+		size_t level; // `unit`s before its own first line
+		size_t next;  // its next element to put down
+	};
+	std::vector<Open> open;
+	const auto indent = [&out](const WrittenStyle &s, size_t level) {
+		for (size_t k = 0; k < level; ++k) out += s.unit;
+	};
+	const auto start = [&](const WrittenElement &e, const WrittenStyle &s, size_t level) {
+		out += written_open_tag(e);
+		if (e.form != WrittenForm::Container) out += escape_text(e.text);
+		open.push_back({&e, &s, level, 0});
+	};
+	start(root, style, 0);
+	while (!open.empty()) {
+		Open &top = open.back();
+		const WrittenElement &e = *top.element;
+		if (e.form != WrittenForm::Leaf && top.next < e.children.size()) {
+			const WrittenElement &child = e.children[top.next++];
+			if (e.form == WrittenForm::Compact) {
+				start(child, one_line, 0);
+			} else {
+				const WrittenStyle &s = *top.style;
+				const size_t level = top.level + 1;
+				out += s.eol;
+				indent(s, level);
+				start(child, s, level);
+			}
+			continue;
 		}
-		out += style.eol;
-		out += indent;
-		break;
-	}
+		if (e.form == WrittenForm::Container) {
+			out += top.style->eol;
+			indent(*top.style, top.level);
+		}
+		out += "</" + e.tag + ">";
+		open.pop_back();
 	}
 }
 
@@ -595,6 +682,10 @@ private:
 	void rows(const std::string &window, const std::string &owner, const char *list, const char *tag,
 	          const std::vector<Appearance> &rows, bool read);
 	void window(const Window &w, const std::string &locator, const char *tag, bool part);
+	// A window's own checks; one CATEGORY's; the checks after its typed parts'.
+	void own_checks(const Window &w, const std::string &locator, const char *tag, bool part);
+	void category_checks(const Window &w, const std::string &locator, size_t i);
+	void late_checks(const Window &w, const std::string &locator);
 	// A FLAGS word the table's names cannot spell (a bit no row holds).
 	void flags(const std::string &window, const std::string &locator, const std::string &field, uint32_t word) {
 		if (word != kDefaultUiMaterialFlags && ui_material_flags_text(word).empty())
@@ -626,7 +717,7 @@ void IssueCheck::rows(const std::string &window, const std::string &owner, const
 	}
 }
 
-void IssueCheck::window(const Window &w, const std::string &locator, const char *tag, bool part) {
+void IssueCheck::own_checks(const Window &w, const std::string &locator, const char *tag, bool part) {
 	const std::string &name = w.name;
 	value(name, locator, "name", w.name);
 	if (!writes_elements(w)) {
@@ -721,34 +812,28 @@ void IssueCheck::window(const Window &w, const std::string &locator, const char 
 	if (glb.has_format && (glb.format.find("\\r") != std::string::npos || glb.format.find("\\n") != std::string::npos))
 		add(name, locator, "glb_server_fields.format",
 		    "A FORMAT holding a backslash before r or n reads back as a line break: it cannot be saved.");
-	for (size_t i = 0; i < w.gopher_categories.size(); ++i) {
-		const GopherCategory &c = w.gopher_categories[i];
-		const std::string row = at(locator, "gopher_category", i);
-		value(name, row, "level", c.level);
-		if (!c.label && c.entries.empty())
-			add(name, row, "", "An empty CATEGORY crashes retail (its parse reads no element).");
-		for (size_t e = 0; e < c.entries.size(); ++e) {
-			const GopherEntry &entry = c.entries[e];
-			const std::string at_entry = at(row, "entry", e);
-			value(name, at_entry, "name", entry.name);
-			value(name, at_entry, "target", entry.target);
-			value(name, at_entry, "filter", entry.filter);
-			value(name, at_entry, "table", entry.table);
-		}
-		if (c.label) window(*c.label, at(row, "label", 0), "LABEL", true);
+}
+
+void IssueCheck::category_checks(const Window &w, const std::string &locator, size_t i) {
+	const std::string &name = w.name;
+	const GopherCategory &c = w.gopher_categories[i];
+	const std::string row = at(locator, "gopher_category", i);
+	value(name, row, "level", c.level);
+	if (!c.label && c.entries.empty())
+		add(name, row, "", "An empty CATEGORY crashes retail (its parse reads no element).");
+	for (size_t e = 0; e < c.entries.size(); ++e) {
+		const GopherEntry &entry = c.entries[e];
+		const std::string at_entry = at(row, "entry", e);
+		value(name, at_entry, "name", entry.name);
+		value(name, at_entry, "target", entry.target);
+		value(name, at_entry, "filter", entry.filter);
+		value(name, at_entry, "table", entry.table);
 	}
-	const std::pair<const WindowPart *, const char *> typed_parts[] = {
-	        {&w.join_button, "JOIN_BUTTON"},
-	        {&w.search_button, "SEARCH_BUTTON"},
-	        {&w.glb_table, "GLB_TABLE"},
-	        {&w.glb_info_button, "GLB_INFO_BUTTON"},
-	        {&w.glb_info_player_details, "GLB_INFO_PLAYER_DETAILS"},
-	        {&w.glb_info_server_details, "GLB_INFO_SERVER_DETAILS"},
-	        {&w.glb_nw_info, "GLB_NW_INFO"},
-	        {&w.gopher_back, "GOPHER_BACK"},
-	};
-	for (const auto &[part, part_tag] : typed_parts)
-		if (*part) window(**part, at(locator, strutil::to_lower(part_tag).c_str(), 0), part_tag, true);
+}
+
+void IssueCheck::late_checks(const Window &w, const std::string &locator) {
+	const std::string &name = w.name;
+	const bool list = w.type == WindowType::List || w.type == WindowType::LanList || w.type == WindowType::Table;
 	// [orig: CTableWnd_RecalcLayout @ 0x63f1a0, idiv @ 0x63f26b; every CListWnd's row height, LIST, LAN_LIST and a
 	//  combo's LIST_BOX: CListWnd_RecalcLayout @ 0x6443d0, idiv @ 0x644444, from CListWnd_Init @ 0x644d6f, the LAN
 	//  list's @ 0x65bddf, CComboWnd_Init @ 0x65c3d3]
@@ -763,11 +848,83 @@ void IssueCheck::window(const Window &w, const std::string &locator, const char 
 		add(name, locator, "global_var",
 		    edit ? "GLOBAL_VAR on an edit window faults when retail parses it (the scene is not set yet)."
 		         : "GLOBAL_VAR on a CHECKED checkbox faults when retail parses it (the scene is not set yet).");
-	if (w.list_box) window(*w.list_box, at(locator, "list_box", 0), "LIST_BOX", true);
-	if (w.spinup) window(*w.spinup, at(locator, "spinup", 0), "SPINUP", true);
-	if (w.spindown) window(*w.spindown, at(locator, "spindown", 0), "SPINDOWN", true);
-	if (w.scrollbar) window(*w.scrollbar, at(locator, "scrollbar", 0), "SCROLLBAR", true);
-	for (size_t i = 0; i < w.children.size(); ++i) window(w.children[i], at(locator, "window", i), "WINDOW", false);
+}
+
+// Each window's own checks, then its CATEGORYs' (each LABEL's window after its CATEGORY), its typed
+// parts' windows, its late checks, its list box's, spin buttons' and scrollbar's windows, then its
+// child windows', in that order (the issues' order: the first is serialize_bytes's error). An explicit
+// stack, never a recursion a level; the locator one string the walk extends and cuts back.
+void IssueCheck::window(const Window &root, const std::string &root_locator, const char *root_tag, bool root_part) {
+	struct Open {
+		const Window *window;
+		size_t locator_size;
+		int stage;
+		size_t next;
+	};
+	std::string locator = root_locator;
+	std::vector<Open> open;
+	const auto enter = [&](const Window &w, const std::string &step, const char *tag, bool part) {
+		locator += step;
+		own_checks(w, locator, tag, part);
+		open.push_back({&w, locator.size(), 0, 0});
+	};
+	enter(root, std::string(), root_tag, root_part);
+	while (!open.empty()) {
+		Open &top = open.back();
+		const Window &w = *top.window;
+		locator.resize(top.locator_size);
+		if (top.stage == 0) { // the CATEGORYs, each LABEL's window after its own checks
+			if (top.next < w.gopher_categories.size()) {
+				const size_t i = top.next++;
+				category_checks(w, locator, i);
+				if (w.gopher_categories[i].label)
+					enter(*w.gopher_categories[i].label, "/gopher_category:" + std::to_string(i) + "/label:0", "LABEL", true);
+				continue;
+			}
+			top.stage = 1;
+			top.next = 0;
+		}
+		if (top.stage == 1) { // the typed parts' windows
+			const std::pair<const WindowPart *, const char *> typed_parts[] = {
+			        {&w.join_button, "JOIN_BUTTON"},
+			        {&w.search_button, "SEARCH_BUTTON"},
+			        {&w.glb_table, "GLB_TABLE"},
+			        {&w.glb_info_button, "GLB_INFO_BUTTON"},
+			        {&w.glb_info_player_details, "GLB_INFO_PLAYER_DETAILS"},
+			        {&w.glb_info_server_details, "GLB_INFO_SERVER_DETAILS"},
+			        {&w.glb_nw_info, "GLB_NW_INFO"},
+			        {&w.gopher_back, "GOPHER_BACK"},
+			};
+			if (top.next < std::size(typed_parts)) {
+				const auto &[part, part_tag] = typed_parts[top.next++];
+				if (*part) enter(**part, "/" + strutil::to_lower(part_tag) + ":0", part_tag, true);
+				continue;
+			}
+			late_checks(w, locator);
+			top.stage = 2;
+			top.next = 0;
+		}
+		if (top.stage == 2) { // the list box's, spin buttons' and scrollbar's windows
+			const std::pair<const WindowPart *, const char *> parts[] = {{&w.list_box, "list_box"},
+			                                                            {&w.spinup, "spinup"},
+			                                                            {&w.spindown, "spindown"},
+			                                                            {&w.scrollbar, "scrollbar"}};
+			const char *const tags[] = {"LIST_BOX", "SPINUP", "SPINDOWN", "SCROLLBAR"};
+			if (top.next < std::size(parts)) {
+				const size_t i = top.next++;
+				if (*parts[i].first) enter(**parts[i].first, std::string("/") + parts[i].second + ":0", tags[i], true);
+				continue;
+			}
+			top.stage = 3;
+			top.next = 0;
+		}
+		if (top.next < w.children.size()) { // the child windows'
+			const size_t i = top.next++;
+			enter(w.children[i], "/window:" + std::to_string(i), "WINDOW", false);
+			continue;
+		}
+		open.pop_back();
+	}
 }
 
 void IssueCheck::screen(const Screen &s, size_t index) {
@@ -818,7 +975,7 @@ std::string serialize(const Document &doc, bool pretty, int indent_size) {
 	const WrittenStyle style = canonical_style(pretty, indent_size);
 	std::string out;
 	for (const WrittenElement &screen : screens) {
-		render_written(screen, style, std::string(), out);
+		render_written(screen, style, out);
 		out += style.eol;
 	}
 	return out;

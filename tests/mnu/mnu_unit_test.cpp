@@ -542,29 +542,154 @@ bool test_fatal_notes() {
         "a WINDOW with an empty TYPE");
   CHECK(fatal("<SCREEN><NAME>S</NAME><MUSICVAR></MUSICVAR></SCREEN>", "/MUSICVAR") == 1, "an empty MUSICVAR");
   {
-    // 400 nested STATIC WINDOWs (23,231 bytes) ran the stack out (the parse recurses once a WINDOW
-    // level, as retail's does); the reader stops past 64 levels with a fatal note, the windows above
-    // it kept: 63 WINDOW elements under the SCREEN, the last cut before its STRING, and a WINDOW with
-    // no child element is not created, so 62 windows.
-    std::string deep = "<SCREEN><NAME>S</NAME>";
-    for (int i = 0; i < 400; ++i) deep += "<WINDOW TYPE=\"STATIC\" NAME=\"W\"><STRING>t</STRING>";
-    for (int i = 0; i < 400; ++i) deep += "</WINDOW>";
-    deep += "</SCREEN>";
-    CHECK(deep.size() == 23231, "the 23,231-byte menu");
+    // Nested WINDOWs. The game creates them recursively and each create event runs up the window's
+    // chain, on a 1 MiB stack with nothing capping the nesting: a generic window's level takes 448
+    // bytes and its event 64 + 44 + 32 bytes plus 72 a handler up the chain, so the 2018th nested
+    // generic window runs the stack out (520 * 2017 + 212 > 1 MiB) and the game crashes loading the
+    // menu. The reader creates windows from a queue, never recursing: 2017 levels read whole; the
+    // 2018th is left out with a fatal note. The finding's 400 nested STATIC WINDOWs (23,231 bytes),
+    // which ran the old recursive parse out, read whole.
+    const auto nested = [](int levels, const char *type, const char *content, const char *last) {
+      std::string xml = "<SCREEN><NAME>S</NAME>";
+      for (int i = 0; i < levels; ++i)
+        xml += std::string("<WINDOW TYPE=\"") + type + "\" NAME=\"" + (i + 1 == levels ? last : "W") + "\">" +
+               content;
+      for (int i = 0; i < levels; ++i) xml += "</WINDOW>";
+      return xml + "</SCREEN>";
+    };
+    const auto depth_of = [](const mnu::Document &doc) {
+      size_t windows = 0;
+      for (const mnu::Window *w = doc.screens.empty() || doc.screens[0].roots.empty() ? nullptr
+                                                                                    : &doc.screens[0].roots[0];
+           w; w = w->children.empty() ? nullptr : &w->children[0])
+        ++windows;
+      return windows;
+    };
+    const auto stack_notes = [](const std::vector<mnu::ParseNote> &notes) {
+      size_t found = 0;
+      for (const mnu::ParseNote &n : notes)
+        if (n.fatal && n.message.find("runs past its 1 MiB stack") != std::string::npos) ++found;
+      return found;
+    };
+    // The deepest a menu nests, written and read back the same: the writer, the write check, the
+    // comparison and the search walk with explicit stacks too.
+    const auto round_trip = [](const mnu::Document &doc) {
+      std::vector<uint8_t> bytes;
+      std::string why;
+      if (!mnu::serialize_bytes(doc, bytes, why, false)) return "written: " + why;
+      mnu::Document back;
+      if (!mnu::parse(bytes.data(), bytes.size(), back, why)) return "read back: " + why;
+      return mnu::equal(doc, back, &why) ? std::string() : "differs at " + why;
+    };
+    const std::string statics = nested(400, "STATIC", "<STRING>t</STRING>", "W");
+    CHECK(statics.size() == 23231, "the 23,231-byte menu");
     mnu::Document doc;
     std::vector<mnu::ParseNote> notes;
     std::string error;
-    CHECK(mnu::parse(deep, doc, error, &notes), error);
-    bool depth_note = false;
-    for (const mnu::ParseNote &n : notes)
-      depth_note = depth_note || (n.fatal && n.message.find("nested more than 64 levels") != std::string::npos);
-    CHECK(depth_note, "the depth stop is a fatal note");
-    size_t windows = 0;
-    for (const mnu::Window *w = doc.screens.empty() || doc.screens[0].roots.empty() ? nullptr
-                                                                                  : &doc.screens[0].roots[0];
-         w; w = w->children.empty() ? nullptr : &w->children[0])
-      ++windows;
-    CHECK(windows == 62, "the 62 created WINDOW levels kept (" + std::to_string(windows) + ")");
+    CHECK(mnu::parse(statics, doc, error, &notes), error);
+    CHECK(depth_of(doc) == 400 && stack_notes(notes) == 0, "400 nested STATIC windows read whole");
+    const char *const kAt = "<POSITION><LEFT>1</LEFT></POSITION>";
+    CHECK(mnu::parse(nested(2017, "X", kAt, "DEEP"), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 2017 && stack_notes(notes) == 0, "2017 nested generic windows read whole");
+    {
+      const mnu::Window *deepest = &doc.screens[0].roots[0];
+      while (!deepest->children.empty()) deepest = &deepest->children[0];
+      CHECK(mnu::find_window(doc.screens[0], "DEEP") == deepest, "the search finds the deepest window");
+      const std::string trip = round_trip(doc);
+      CHECK(trip.empty(), "2017 nested windows round-trip: " + trip);
+    }
+    CHECK(mnu::parse(nested(2018, "X", kAt, "DEEP"), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 2017 && stack_notes(notes) == 1, "the 2018th runs the game's stack out: a fatal note");
+
+    // A part's widget has no parent while its owner parses, so its windows' events end at it, and a
+    // LAN_LIST's JOIN_BUTTON parses 628 bytes above the list's own base parse: 520 bytes a list and its
+    // button, so 2015 nested lists read (520 * 2014 + 1148 bytes), 4031 windows of the model deep, and
+    // the 2016th is left out (520 * 2015 + 1148 > 1 MiB).
+    const auto lan_chain = [](int levels) {
+      std::string xml = "<SCREEN><NAME>S</NAME>";
+      for (int i = 0; i < levels; ++i) xml += "<WINDOW TYPE=\"LAN_LIST\" NAME=\"L\"><JOIN_BUTTON>";
+      xml += "<WINDOW TYPE=\"STATIC\" NAME=\"DEEP\"><STRING>t</STRING></WINDOW>";
+      for (int i = 0; i < levels; ++i) xml += "</JOIN_BUTTON></WINDOW>";
+      return xml + "</SCREEN>";
+    };
+    const auto lan_depth = [](const mnu::Document &doc, bool &leaf) {
+      size_t windows = 0;
+      leaf = false;
+      const mnu::Window *w = doc.screens.empty() || doc.screens[0].roots.empty() ? nullptr : &doc.screens[0].roots[0];
+      while (w) {
+        ++windows;
+        if (w->type == mnu::WindowType::Static) leaf = true;
+        if (w->join_button) {
+          ++windows;
+          w = w->join_button->children.empty() ? nullptr : &w->join_button->children[0];
+        } else {
+          w = nullptr;
+        }
+      }
+      return windows;
+    };
+    bool leaf = false;
+    CHECK(mnu::parse(lan_chain(2015), doc, error, &notes), error);
+    CHECK(lan_depth(doc, leaf) == 4031 && leaf && stack_notes(notes) == 0, "2015 nested lists read, 4031 deep");
+    {
+      const std::string trip = round_trip(doc);
+      CHECK(trip.empty(), "4031 windows deep round-trip: " + trip);
+    }
+    CHECK(mnu::parse(lan_chain(2016), doc, error, &notes), error);
+    CHECK(lan_depth(doc, leaf) == 4030 && !leaf && stack_notes(notes) == 1, "the 2016th list runs it out");
+
+    // A MULTILINE_EDIT forwards no event named its own NAME [orig: CMEditWnd_HandleEvent @ 0x660f40, the
+    // _stricmp @ 0x660f58], and each forward names the event by the forwarding window's NAME [orig: @ 0x649c76,
+    // @ 0x66100b]. An edit's own create event goes no further than its handler, so its 516-byte level binds:
+    // 2032 nested edits read, the 2033rd is left out (516 * 2033 > 1 MiB). A STATIC under nested edits
+    // forwards up each one of another name: under 1913 of distinct names it reads (548 * 1913 + 212 bytes),
+    // under 1914 its event runs the stack out; under 1914 of its own name its event stops at the first.
+    const auto edits = [](int levels, bool one_name, bool leaf_static) {
+      std::string xml = "<SCREEN><NAME>S</NAME>";
+      for (int i = 0; i < levels; ++i)
+        xml += "<WINDOW TYPE=\"MULTILINE_EDIT\" NAME=\"" + (one_name ? std::string("W") : "W" + std::to_string(i)) +
+               "\"><STRING>t</STRING>";
+      if (leaf_static)
+        xml += std::string("<WINDOW TYPE=\"STATIC\" NAME=\"") + (one_name ? "w" : "LEAF") +
+               "\"><STRING>t</STRING></WINDOW>";
+      for (int i = 0; i < levels; ++i) xml += "</WINDOW>";
+      return xml + "</SCREEN>";
+    };
+    CHECK(mnu::parse(edits(2032, true, false), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 2032 && stack_notes(notes) == 0, "2032 nested edits read");
+    CHECK(mnu::parse(edits(2033, true, false), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 2032 && stack_notes(notes) == 1, "the 2033rd edit's base parse runs it out");
+    CHECK(mnu::parse(edits(1913, false, true), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 1914 && stack_notes(notes) == 0, "a STATIC under 1913 edits of other names reads");
+    CHECK(mnu::parse(edits(1914, false, true), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 1914 && stack_notes(notes) == 1, "under 1914 its event runs the stack out");
+    CHECK(mnu::parse(edits(1914, true, true), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 1915 && stack_notes(notes) == 0, "under edits of its name (case aside) its event stops");
+
+    // A repeated part element parses into the same widget, so its WINDOWs join the earlier one's: a LIST's
+    // two SCROLLBARs give the scrollbar all four windows, each read whole.
+    std::string twice = "<SCREEN><NAME>S</NAME><WINDOW TYPE=\"LIST\" NAME=\"L\"><STRING>x</STRING><SCROLLBAR>";
+    for (int i = 0; i < 3; ++i)
+      twice += "<WINDOW TYPE=\"STATIC\" NAME=\"A" + std::to_string(i) + "\"><STRING>a</STRING></WINDOW>";
+    twice += "</SCROLLBAR><SCROLLBAR><WINDOW TYPE=\"STATIC\" NAME=\"B\"><STRING>b</STRING></WINDOW></SCROLLBAR>"
+             "</WINDOW></SCREEN>";
+    CHECK(mnu::parse(twice, doc, error, &notes), error);
+    {
+      const mnu::Window *bar = doc.screens[0].roots[0].scrollbar.get();
+      std::string read;
+      for (const mnu::Window &w : bar ? bar->children : std::vector<mnu::Window>())
+        read += w.name + "=" + w.string_data.value + " ";
+      CHECK(read == "A0=a A1=a A2=a B=b ", "both SCROLLBARs' windows, read whole: " + read);
+    }
+
+    // Other nested elements are a loop's in the game's reader, and its free of the tree takes them 43,688
+    // deep (mnu_xml_unit): 3,000 inside a window read.
+    std::string elements = "<SCREEN><NAME>S</NAME><WINDOW TYPE=\"STATIC\" NAME=\"W\"><STRING>t</STRING>";
+    for (int i = 0; i < 3000; ++i) elements += "<A>";
+    for (int i = 0; i < 3000; ++i) elements += "</A>";
+    elements += "</WINDOW></SCREEN>";
+    CHECK(mnu::parse(elements, doc, error, &notes), error);
+    CHECK(depth_of(doc) == 1 && stack_notes(notes) == 0, "3,000 nested unknown elements read");
   }
   CHECK(fatal(screen_of("type=\"radio\" name=\"W\"", std::string(kPos) + "<GROUP>1</GROUP>"), "/GROUP") == -2,
         "a note-free menu");
