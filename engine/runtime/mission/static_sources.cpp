@@ -1,6 +1,8 @@
 #include <runtime/mission/static_sources.h>
 #include <runtime/mission/placement_traits.h>
 
+#include <base/io/fixed.h>
+
 #include <algorithm>
 #include <utility>
 
@@ -16,7 +18,27 @@ bool admitted(const StaticTerrainShadowSource &source) {
 			source.item_attrib, source.item_attrib2);
 }
 
+// The origin a pose `from` -> `to` leaves: the caller's words when it has them, else the new
+// float's word on an axis whose float moved (one that stands keeps its word). Whether it changed.
+bool move_origin(StaticSourceOrigin &origin, const StaticSourceTransform &from,
+		const StaticSourceTransform &to, const std::optional<StaticSourceOrigin> &words) {
+	const StaticSourceOrigin before = origin;
+	if (words) {
+		origin = *words;
+	} else {
+		const StaticSourceOrigin moved = static_source_origin_of(to);
+		if (from[9] != to[9]) origin[0] = moved[0];
+		if (from[11] != to[11]) origin[1] = moved[1];
+	}
+	return origin != before;
+}
+
 } // namespace
+
+StaticSourceOrigin static_source_origin_of(const StaticSourceTransform &transform) {
+	return {io::float_to_fp16_16_round_sat(transform[9]),
+			io::float_to_fp16_16_round_sat(-transform[11])};
+}
 
 void StaticSources::bump_shadow_revision() {
 	if (++shadow_revision_ == 0) ++shadow_revision_;
@@ -129,7 +151,10 @@ std::vector<StaticTerrainShadowSource> StaticSources::shadow_sources(
 		if (source.asset_id == 0 && !source.graphic.empty())
 			source.asset_id = resolve(source.graphic);
 		if (source.bms_id == 0) continue;
-		if (const auto *placed = instance(source.bms_id)) source.world_transform = placed->xform;
+		if (const auto *placed = instance(source.bms_id)) {
+			source.world_transform = placed->xform;
+			source.origin_q16 = placed->origin_q16;
+		}
 		source.active = !is_hidden(source.bms_id);
 		apply_replacement(source);
 	}
@@ -146,6 +171,7 @@ std::vector<StaticTerrainShadowSource> StaticSources::shadow_sources(
 		source.entity_attrib = placed.casts_static_shadow ? 0u : kEntityAttribNoShadow;
 		source.graphic = placed.graphic;
 		source.world_transform = placed.xform;
+		source.origin_q16 = placed.origin_q16;
 		source.asset_id = resolve(source.graphic);
 		source.active = !is_hidden(placed.bms_id);
 		apply_replacement(source);
@@ -155,7 +181,7 @@ std::vector<StaticTerrainShadowSource> StaticSources::shadow_sources(
 }
 
 bool StaticSources::update_shadow_transform(int kind, int index,
-		const StaticSourceTransform &transform) {
+		const StaticSourceTransform &transform, const std::optional<StaticSourceOrigin> &origin) {
 	bool matched = false;
 	bool saw_source_match = false;
 	bool observable_changed = false;
@@ -172,10 +198,12 @@ bool StaticSources::update_shadow_transform(int kind, int index,
 			const bool has_replacement = source.bms_id != 0 && replacement != replacements_.end();
 			if (has_replacement) effective_active = replacement->second.active;
 			bool changed = source.world_transform != transform;
+			changed |= move_origin(source.origin_q16, source.world_transform, transform, origin);
 			source.world_transform = transform;
 			if (source.bms_id != 0) {
 				if (auto *placed = mutable_instance(source.bms_id)) {
 					changed |= placed->xform != transform;
+					changed |= move_origin(placed->origin_q16, placed->xform, transform, origin);
 					placed->xform = transform;
 				}
 				if (has_replacement) {
@@ -195,6 +223,7 @@ bool StaticSources::update_shadow_transform(int kind, int index,
 			const bool effective_active = placed.casts_static_shadow &&
 					(has_replacement ? replacement->second.active : !is_hidden(placed.bms_id));
 			bool changed = placed.xform != transform;
+			changed |= move_origin(placed.origin_q16, placed.xform, transform, origin);
 			placed.xform = transform;
 			if (has_replacement) {
 				changed |= replacement->second.world_transform != transform;

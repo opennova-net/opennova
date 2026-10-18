@@ -545,6 +545,9 @@ struct CollisionPolygonHit {
     int32_t distance_q16 = 0x7FFFFFFF;
     int32_t position_q16[3] = {};
     int32_t normal_q16[3] = {};
+    // The face's own normal (the model's int16 x 4), unrotated by the section
+    // matrix: what Physics_ComputeReflectionForce hands its caller.
+    int32_t local_normal_q16[3] = {};
     int32_t section_index = -1;
     int32_t face_index = -1;
     int32_t section_face_index = -1;
@@ -557,6 +560,18 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
                                 int32_t segment_length_q16,
                                 uint32_t ammo_flags,
                                 CollisionPolygonHit &out_hit);
+
+// The reflection's face lookup on a struck entity's model: the face at a
+// section-local index of a section, within the section count and that
+// section's face count, its normal x 4 (`local_out`) and that rotated by the
+// section's matrix (`world_out`). False past either bound, where the
+// reflection keeps its negated-velocity normal.
+// [orig: Physics_ComputeReflectionForce @0x4E4310 -- the section bound
+//  @0x4E4416..0x4E442D, the face bound @0x4E4440..0x4E444D, the normal x 4
+//  @0x4E445E..0x4E4486, the rotation @0x4E449D]
+bool collision_section_face_normal(const CollisionTargetView &target, int32_t section,
+                                   int32_t section_face, int32_t local_out[3],
+                                   int32_t world_out[3]);
 
 // ----------------------------------------------------------------------------
 // Segment-vs-face-mesh query — the PROJECTILE hit test. Closest accepted face
@@ -579,8 +594,14 @@ struct RayFaceHit {
     int32_t section = -1;
     int32_t face = -1;
 };
+// `ray_dir` / `ray_length` (both or neither): the caller's ray context
+// direction and length (rayState[6..8] / [9]) where they differ from the
+// segment's; the hit's distance is then |d0| * ray_length / (|d0| + |d1|) and
+// its test point start + ray_dir * that distance [orig: @0x4E51B8;
+// @0x4E51E4..0x4E522A]. Null = the segment's own unit direction and length.
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
-                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out);
+                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out,
+                             const int32_t *ray_dir = nullptr, int32_t ray_length = 0);
 
 // A person section's hit radius (Q16) about its bone: 45 percent of the
 // authored COBJ radius (65 for section 14, the head) plus the fixed 0xCCC floor
@@ -603,13 +624,17 @@ inline int32_t person_effective_radius(int32_t section, int32_t authored_radius,
 // the rest. Jointops.exe has no such step.
 // [orig: Physics_RaycastAgainstBoneSections @0x4e4670] [orig: @0x4e17af..0x4e17e0
 //  (dfx2.exe)]
-inline int32_t person_extra_radius(int title, const Entity &target, int32_t extra_radius) {
-    if (title != gameprofile::GAME_DFX2 ||
-            ((target.flags | target.engine_flags) & kEntityFlagPlayer) == 0)
-        return extra_radius;
-    if (!target.mount_target.valid() && (target.net_move_input & Entity::kMoveOrderMoving) != 0)
-        return extra_radius;
+inline int32_t person_extra_radius(int title, bool player, bool mounted, bool moving,
+                                   int32_t extra_radius) {
+    if (title != gameprofile::GAME_DFX2 || !player) return extra_radius;
+    if (!mounted && moving) return extra_radius;
     return extra_radius > 0x1000 ? ((extra_radius - 0x1000) >> 1) + 0x1000 : extra_radius;
+}
+inline int32_t person_extra_radius(int title, const Entity &target, int32_t extra_radius) {
+    return person_extra_radius(title,
+            ((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0,
+            target.mount_target.valid(),
+            (target.net_move_input & Entity::kMoveOrderMoving) != 0, extra_radius);
 }
 
 // Person/organic projectile narrow phase: one authored COBJ bound sphere per
@@ -773,6 +798,15 @@ struct WirePersonCollisionProxy {
     int32_t bound_radius_q16 = 0;
     int32_t uniform_scale_q16 = 0;
     FixedVec3 bbox_center_q16;
+    // The person's collision model (CollisionWorld model id; -1 unresolved):
+    // a resolved model walks its posed bone spheres through the pose
+    // provider's build_wire_person_section_matrices, else the torso stand-in.
+    int32_t model_id = -1;
+    // The entity fields person_extra_radius reads: the Player bit of Flags,
+    // a mount, and MoveOrder's moving bit.
+    bool player = false;
+    bool mounted = false;
+    bool moving = false;
 };
 
 // One decoded pool-1 mover (vehicle, emplacement, runtime item) projected into
@@ -839,6 +873,47 @@ struct ProjectileTrace {
     bool walk_terrain = true;
     bool walk_water = true;
     bool walk_persons = true;
+    // The ray context's own direction and length (rayState[6..8] and [9]) where
+    // a caller's differ from the segment's: a throwable motor's ray runs along
+    // its velocity over its speed. A pools-2/1 walk (the terrain, water and
+    // person domains off) then gates each slot on the line through the start
+    // along that direction, reads a face hit at start + dir * dist with
+    // dist = |d0| * length / (|d0| + |d1|), and reports that dist as the hit's
+    // distance (its t a fraction of the length). Zero length = the segment's
+    // own unit direction and length, as every bullet's.
+    // [orig: Projectile_RaycastProximitySlots @0x4E5340 -- the seed
+    //  rayState[29] = rayState[9] @0x4E534F, the slot gate's projection onto
+    //  rayState[6..8]; Physics_RaycastAgainstBoneCollision @0x4E4CB0 -- the
+    //  parameter @0x4E51B8, the test point @0x4E51E4..0x4E522A]
+    FixedVec3 ray_dir_q16;
+    int32_t ray_length_q16 = 0;
+    // One entity alone, through its own gate and faces and no slot gate: the
+    // walk's other rows are misses, and so is the entity itself without a
+    // collision model (Physics_RaycastAgainstBoneCollision's model test).
+    // [orig: Weapon_ValidateHitTarget @0x4E52E0 -- its ItemTypeIndex, flag
+    // and exclusion tests @0x4E52F1..0x4E531E, the call
+    // Physics_RaycastAgainstBoneCollision @0x4E5327]
+    EntityHandle only_entity;
+    // The owner's mount (and a gunner's carrier) as the ray's ray[18..20]
+    // exclusions, a bullet's; the throwable motors' ray contexts leave them
+    // zero (their memsets), excluding the owner alone.
+    // [orig: Entity_UpdateGrenadePhysics @0x444522, Entity_UpdateSatchelPhysics
+    //  @0x4486B2, Entity_UpdateClaymorePhysics @0x447664]
+    bool owner_mount_exclusion = true;
+    // The throwable motors' two walks share one ray record. Each walk resets
+    // the kept distance to the ray's length, and its best face writes the
+    // face flags, the face byte, the section and the face (ray[21], [22],
+    // [31], [33]) whether or not the motor keeps it; the motor copies only the
+    // distance and the entity. So when pool 1's walk, the second, also hits,
+    // a kept pool-2 hit carries pool 1's record, and the hit's normals read
+    // that section and face on the KEPT entity's model (none past its
+    // bounds).
+    // [orig: Projectile_RaycastProximitySlots @0x4E5340, the reset
+    //  @0x4E534F; Physics_RaycastAgainstBoneCollision, the record
+    //  @0x4E5254..0x4E5276; the keeps: Entity_UpdateGrenadePhysics
+    //  @0x44461D..0x44467A, Entity_UpdateSatchelPhysics @0x4487B6..0x448808,
+    //  Entity_UpdateClaymorePhysics @0x447768..0x4477BA]
+    bool shared_ray_record = false;
 };
 
 struct ProjectileHit {
@@ -848,6 +923,19 @@ struct ProjectileHit {
     int32_t t_q16 = 0x10000;
     FixedVec3 position_q16;
     FixedVec3 normal_q16;
+    // A face hit's normal in the model's own frame (the int16 normal x 4,
+    // before the section matrix): the out-normal Physics_ComputeReflectionForce
+    // returns, which the throwable motors' stick test, stick pose and slide
+    // read, where the reflection itself uses the rotated one. Zero for a hit
+    // without a face. [orig: Physics_ComputeReflectionForce @0x4E4310 -- the
+    // out-normal @0x4E4465..0x4E4491, ahead of the rotation of its own copy
+    // @0x4E449D]
+    FixedVec3 local_normal_q16;
+    // Whether the reflection's face lookup finds the hit's face: its normals
+    // are then the face's, a stored zero normal included, where a hit without
+    // one keeps the reflection's negated unit velocity.
+    // [orig: Physics_ComputeReflectionForce @0x4E4416..0x4E449D]
+    bool face_normal_found = false;
     int32_t section_index = -1;
     int32_t face_index = -1;
     int32_t bone_index = -1;
@@ -1257,8 +1345,7 @@ public:
 
     // Projectile face raycast against ONE entity's collision instance (the
     // husk-aware target view). kNoFaceMesh = no instance or the model carries
-    // no face mesh — the caller's bound-sphere stand-in applies (the D-ITEM-1
-    // bounded fallback); kMiss = a face mesh exists and the segment misses it
+    // no face mesh, which no walk hits; kMiss = a face mesh exists and the segment misses it
     // (the round flies on); kHit fills `out`. [orig: each pool-walk candidate
     // runs Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]
     enum class FaceRaycast { kNoFaceMesh, kMiss, kHit };

@@ -4,6 +4,7 @@
 // trigger + shrapnel fan, the AV mine's moving-vehicle proximity, and the owner-death
 // cleanup. Driven by a manual World, the destruction-test harness pattern.
 #include <cmath>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -532,13 +533,21 @@ void test_motor_sweep_ignores_non_pool_domains() {
         item.alive = true;
         item.position = Vec3{18.0f, 10.0f, -4.0f};
         item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
-        item.bound_radius = 0.4f;
+        // The grenade's gates project along its velocity over its horizontal
+        // speed, which a 45-degree throw overshoots by 2x: the bound must reach
+        // the projected point 11.3 u past the item for the walk to reach the
+        // face [orig: Projectile_RaycastProximitySlots @0x4E5340;
+        // Physics_RaycastAgainstBoneCollision @0x4E4D9F..0x4E4EB4].
+        item.bound_radius = 12.0f;
         const EntityHandle item_h = rig.w.registry.spawn(1, item);
         CHECK(item_h.valid());
 
+        // A 2 u wall: the water case's slowed ray (XY x 0.25 at the entry,
+        // then x 0.95 submerged) tests its face a hair under the 0.4 u wall's
+        // top vertex.
         CollisionWorld collision;
         collision.assign_entity(
-            item_h, collision.add_model(projectile_wall_model(0.4)));
+            item_h, collision.add_model(projectile_wall_model(2.0)));
         collision.build_tick_tables(rig.w);
         const int slot = rig.throw_ammo(
                 kAmmoGrenade, Vec3{10.0f, 10.0f, 4.0f}, 0, 0);
@@ -550,12 +559,296 @@ void test_motor_sweep_ignores_non_pool_domains() {
         rig.w.round_sim.tick(
                 rig.w, terrain_occluder ? &rig.flat.field : nullptr, &collision);
         CHECK(round.bounce_count == 1);
-        CHECK(round.pos.x > 17.0f && round.pos.x < 19.0f);
+        // The landing 2048 back along the ray from the saved pose: the water
+        // case's direction is (15563, 0, -62269), the others' (65530, 0, -65547)
+        // [orig: Entity_UpdateGrenadePhysics @0x444694..0x4447AC].
+        CHECK(to_fixed(round.pos.x) == (water_occluder ? 779378 : 1177552));
     };
 
     run_case(false, true, false);  // water at x≈12 used to mask the item
     run_case(true, false, false);  // terrain at x≈14 used to mask the item
     run_case(false, false, true);  // person at x≈16 used to mask the item
+}
+
+// A grenade's item contact backs off 2048 along its ray from the saved pose.
+// Thrown from (10, 10, 14) at (+10, 0, -10) u per tick, it meets the wall at
+// x = 18: the ray's direction is (65530, 0, -65547) (2^32 / 655360 = 6553 per
+// axis), the hit's parameter t = |d0| * 655360 / (|d0| + |d1|) = 524288, and
+// the round lands at raw x = 655360 + qmul(65530, t - 2048) = 1177552 and
+// z = 917504 + qmul(-65547, t - 2048) = 395176, about 0.032 u short of the
+// face (2096 raw on x), not on it; the scene sits above the floor at 0, so
+// the landing leaves the Z alone.
+// [orig: Entity_UpdateGrenadePhysics @0x444493..0x444519, @0x444694..0x4446FC,
+//  stored @0x444746..0x4447AC; Physics_RaycastAgainstBoneCollision @0x4E51B8]
+void test_grenade_item_contact_backs_off_along_the_ray() {
+    Rig rig(0);
+    rig.w.tables.ammo.entries[kAmmoGrenade].flags |= 0x80u; // no terrain leg
+    Entity item;
+    item.kind = EntityKind::Item;
+    item.alive = true;
+    item.position = Vec3{18.0f, 10.0f, 6.0f};
+    item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    item.bound_radius = 12.0f; // the gates' 45-degree overshoot (above)
+    const EntityHandle item_h = rig.w.registry.spawn(1, item);
+    CHECK(item_h.valid());
+    CollisionWorld collision;
+    collision.assign_entity(item_h, collision.add_model(projectile_wall_model(0.4)));
+    collision.build_tick_tables(rig.w);
+    const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10.0f, 10.0f, 14.0f}, 0, 0);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+    round.vel = Vec3{10.0f, 0.0f, -10.0f};
+    rig.w.round_sim.tick(rig.w, nullptr, &collision);
+    CHECK(round.bounce_count == 1);
+    CHECK(to_fixed(round.pos.x) == 1177552);
+    CHECK(to_fixed(round.pos.z) == 395176);
+}
+
+// A wall face across the lane (normal -x, the local x = 0 plane, `half` on y
+// and z) and, unless `wall_only`, a second face off the lane (normal +y, at
+// y = 5..6), in one section: the wall first or second (`wall_first`), each
+// with its own face byte.
+CollisionModel two_face_model(bool wall_first, bool wall_only, uint8_t wall_byte,
+                              uint8_t other_byte, int16_t other_ny = 16384) {
+    CollisionModel model;
+    auto vertex = [&](double x, double y, double z) {
+        CollisionVertex value;
+        value.p[0] = to_fixed(static_cast<float>(x));
+        value.p[1] = to_fixed(static_cast<float>(y));
+        value.p[2] = to_fixed(static_cast<float>(z));
+        model.vertices.push_back(value);
+    };
+    constexpr double half = 2.0;
+    vertex(0.0, -half, -half);
+    vertex(0.0, half, -half);
+    vertex(0.0, 0.0, half);
+    vertex(0.0, 5.0, 0.0);
+    vertex(1.0, 5.0, 0.0);
+    vertex(0.0, 5.0, 1.0);
+    CollisionNormal wall_normal;
+    wall_normal.n[0] = -16384;
+    wall_normal.dominant_axis = 4;
+    model.normals.push_back(wall_normal);
+    CollisionNormal other_normal;
+    other_normal.n[1] = other_ny;
+    other_normal.dominant_axis = 2;
+    model.normals.push_back(other_normal);
+
+    CollisionFace wall;
+    wall.vertex_index[0] = 0;
+    wall.vertex_index[1] = 1;
+    wall.vertex_index[2] = 2;
+    wall.normal_index = 0;
+    wall.poly_type = wall_byte;
+    wall.min[1] = wall.min[2] = to_fixed(static_cast<float>(-half));
+    wall.max[1] = wall.max[2] = to_fixed(static_cast<float>(half));
+    CollisionFace other;
+    other.vertex_index[0] = 3;
+    other.vertex_index[1] = 4;
+    other.vertex_index[2] = 5;
+    other.normal_index = 1;
+    other.poly_type = other_byte;
+    other.plane_dist = -(5 << 16);
+    other.min[0] = 0;
+    other.max[0] = 1 << 16;
+    other.min[1] = 5 << 16;
+    other.max[1] = 5 << 16;
+    other.min[2] = 0;
+    other.max[2] = 1 << 16;
+    if (wall_only) {
+        model.faces.push_back(wall);
+    } else if (wall_first) {
+        model.faces.push_back(wall);
+        model.faces.push_back(other);
+    } else {
+        model.faces.push_back(other);
+        model.faces.push_back(wall);
+    }
+
+    CollisionSection section;
+    section.vertex_count = 6;
+    section.normal_count = 2;
+    section.face_count = static_cast<int32_t>(model.faces.size());
+    model.sections.push_back(section);
+    return model;
+}
+
+// The motors' two walks share one ray record: a grenade crossing a pool-2
+// wall at x = 14 and then a pool-1 wall at x = 18 keeps the nearer pool-2 hit,
+// but pool 1's walk, run second, has written its face's record (its byte 9,
+// section 0, face 1). The contact plays that byte (9 + 4), and the reflection
+// reads face 1 of the KEPT model: the pool-2 model's own off-lane face (normal
+// +y) turns the round sideways and keeps it going +x; a pool-2 model with no
+// face 1 leaves the reflection its negated-velocity normal, which at 10 u per
+// tick (the velocity normalized first) cancels the velocity outright. Alone,
+// the pool-2 wall reflects off its own face (vx flips, the round keeps
+// falling) and plays its own byte (3 + 4). A face 1
+// whose stored normal is zero is still the face found: the reflection keeps
+// the round's direction (no negated-velocity fallback).
+// [orig: Projectile_RaycastProximitySlots @0x4E5340, the reset @0x4E534F;
+//  Physics_RaycastAgainstBoneCollision, the record @0x4E5254..0x4E5276;
+//  Entity_UpdateGrenadePhysics, the keeps @0x44461D..0x44467A, the
+//  reflection @0x444719, the byte @0x44473F; Physics_ComputeReflectionForce
+//  @0x4E4416..0x4E449D]
+void test_grenade_kept_pool2_hit_carries_the_pool1_record() {
+    enum class Case { kPool2Alone, kFaceInRange, kFaceOutOfRange, kFaceZeroNormal };
+    const auto run = [](Case c) {
+        Rig rig(0);
+        rig.w.tables.ammo.entries[kAmmoGrenade].flags |= 0x80u; // no terrain leg
+        Entity near_seed;
+        near_seed.kind = EntityKind::Building;
+        near_seed.health = 100;
+        near_seed.position = Vec3{14.0f, 10.0f, 10.0f};
+        near_seed.yaw = 90; // identity model placement
+        near_seed.bound_radius = 12.0f;
+        const EntityHandle near_h = rig.w.registry.spawn(2, near_seed);
+        CollisionWorld collision;
+        collision.assign_entity(
+                near_h, collision.add_model(two_face_model(
+                                /*wall_first=*/true,
+                                /*wall_only=*/c == Case::kFaceOutOfRange, 3, 5,
+                                c == Case::kFaceZeroNormal ? int16_t{0} : int16_t{16384})),
+                rig.w.registry.get(near_h)->registry_spawn_id);
+        if (c != Case::kPool2Alone) {
+            Entity far_seed;
+            far_seed.kind = EntityKind::Item;
+            far_seed.alive = true;
+            far_seed.position = Vec3{18.0f, 10.0f, 6.0f};
+            far_seed.yaw = 90;
+            far_seed.bound_radius = 12.0f;
+            const EntityHandle far_h = rig.w.registry.spawn(1, far_seed);
+            collision.assign_entity(
+                    far_h, collision.add_model(two_face_model(
+                                   /*wall_first=*/false, /*wall_only=*/false, 9, 7)));
+        }
+        collision.build_tick_tables(rig.w);
+        const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10.0f, 10.0f, 14.0f}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+        round.vel = Vec3{10.0f, 0.0f, -10.0f};
+        rig.w.round_sim.tick(rig.w, nullptr, &collision);
+        CHECK(round.bounce_count == 1);
+        CHECK(!rig.w.round_sim.impacts.empty());
+        const int tag = rig.w.round_sim.impacts.empty()
+                                ? -1
+                                : rig.w.round_sim.impacts.back().effect_tag;
+        switch (c) {
+        case Case::kPool2Alone:
+            CHECK(tag == 3 + 4);
+            CHECK(round.vel.x < 0.0f);
+            CHECK(round.vel.z < 0.0f);
+            break;
+        case Case::kFaceInRange:
+            CHECK(tag == 9 + 4);
+            CHECK(round.vel.x > 0.0f);
+            CHECK(round.vel.y > 0.0f);
+            break;
+        case Case::kFaceOutOfRange:
+            CHECK(tag == 9 + 4);
+            CHECK(round.vel.x == 0.0f && round.vel.y == 0.0f && round.vel.z == 0.0f);
+            break;
+        case Case::kFaceZeroNormal:
+            CHECK(tag == 9 + 4);
+            CHECK(round.vel.x > 0.0f && round.vel.y == 0.0f && round.vel.z < 0.0f);
+            break;
+        }
+    };
+    run(Case::kPool2Alone);
+    run(Case::kFaceInRange);
+    run(Case::kFaceOutOfRange);
+    run(Case::kFaceZeroNormal);
+}
+
+// The face walk tests an entity's model before anything else: a pool-2 entity
+// with no collision model is never hit, whatever its bound, so the grenade
+// flies through it. [orig: Physics_RaycastAgainstBoneCollision @0x4E4CB0 --
+// the model pick and its null test @0x4E4D68..0x4E4D73]
+void test_motor_sweep_passes_a_model_less_entity() {
+    Rig rig(0);
+    rig.w.tables.ammo.entries[kAmmoGrenade].flags |= 0x80u; // no terrain leg
+    Entity seed;
+    seed.kind = EntityKind::Building;
+    seed.health = 100;
+    seed.position = Vec3{14.0f, 10.0f, 10.0f};
+    seed.yaw = 90;
+    seed.bound_radius = 12.0f;
+    rig.w.registry.spawn(2, seed);
+    CollisionWorld collision;
+    collision.build_tick_tables(rig.w);
+    const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10.0f, 10.0f, 14.0f}, 0, 0);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+    round.vel = Vec3{10.0f, 0.0f, -10.0f};
+    rig.w.round_sim.tick(rig.w, nullptr, &collision);
+    CHECK(round.bounce_count == 0);
+    CHECK(round.vel.x > 9.0f);
+}
+
+// The grenade's pools-2/1 gates project the item's center onto the line along
+// its velocity over its horizontal speed, without dividing by that vector's
+// square length: a 45-degree throw lands the projected point 11.3 u past a
+// small item it flies straight through, so the walk never reaches the face,
+// while a shallow throw's point stays within the bound and the face takes it.
+// [orig: Projectile_RaycastProximitySlots @0x4E5340, the projection on each
+//  leg; Physics_RaycastAgainstBoneCollision @0x4E4D9F..0x4E4EB4]
+void test_grenade_gates_project_along_the_velocity() {
+    const auto run = [](Vec3 vel, float item_z) {
+        Rig rig(0);
+        rig.w.tables.ammo.entries[kAmmoGrenade].flags |= 0x80u; // no terrain leg
+        Entity item;
+        item.kind = EntityKind::Item;
+        item.alive = true;
+        item.position = Vec3{18.0f, 10.0f, item_z};
+        item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+        item.bound_radius = 0.4f;
+        const EntityHandle item_h = rig.w.registry.spawn(1, item);
+        CHECK(item_h.valid());
+        CollisionWorld collision;
+        collision.assign_entity(item_h, collision.add_model(projectile_wall_model(0.4)));
+        collision.build_tick_tables(rig.w);
+        const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10.0f, 10.0f, 4.0f}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return -1;
+        LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+        round.vel = vel;
+        rig.w.round_sim.tick(rig.w, nullptr, &collision);
+        return static_cast<int>(round.bounce_count);
+    };
+    CHECK(run(Vec3{10.0f, 0.0f, -10.0f}, -4.0f) == 0); // through the small bound
+    CHECK(run(Vec3{10.0f, 0.0f, -1.0f}, 3.2f) == 1);   // the face takes it
+}
+
+// An item contact puts a satchel back at its start-of-tick pose (+0x80..+0x88),
+// where the stick and the contact's payload read it, not at the hit point.
+// [orig: Entity_UpdateSatchelPhysics @0x448818..0x44882A, stored
+//  @0x448914..0x44891E]
+void test_satchel_item_contact_restores_the_tick_start_pose() {
+    Rig rig(0);
+    rig.w.tables.ammo.entries[kAmmoSatchel].flags |= 0x80u; // no terrain leg
+    Entity item;
+    item.kind = EntityKind::Item;
+    item.alive = true;
+    item.position = Vec3{18.0f, 10.0f, -4.0f};
+    item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    item.bound_radius = 0.4f;
+    const EntityHandle item_h = rig.w.registry.spawn(1, item);
+    CHECK(item_h.valid());
+    CollisionWorld collision;
+    collision.assign_entity(item_h, collision.add_model(projectile_wall_model(0.4)));
+    collision.build_tick_tables(rig.w);
+    const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{10.0f, 10.0f, 4.0f}, 0, 0);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+    round.vel = Vec3{10.0f, 0.0f, -10.0f};
+    const FixedVec3 before{to_fixed(round.pos.x), to_fixed(round.pos.y), to_fixed(round.pos.z)};
+    rig.w.round_sim.tick(rig.w, nullptr, &collision);
+    CHECK(round.bounce_count == 1); // the wall took the contact
+    CHECK(to_fixed(round.pos.x) == before.x && to_fixed(round.pos.y) == before.y &&
+          to_fixed(round.pos.z) == before.z);
 }
 
 // Retail's grenade-bounce spin and the host's retained S2C 0x39 seed both call
@@ -633,6 +926,94 @@ void test_grenade_bounce_samples_charmap_surface() {
     CHECK(!rig.w.round_sim.impacts.empty());
     for (const RoundImpact &bounce : rig.w.round_sim.impacts)
         CHECK(bounce.effect_tag == 10); // grass, not the dirt default
+}
+
+// A class past the tag table keeps its material + 4, and the impact presenter's
+// clamp plays the obj row for it, not the dirt row. [orig:
+// Entity_UpdateGrenadePhysics: the class @ 0x4443d0, + 4 @ 0x44481f into
+// AmmoDef_ProcessImpactEffect @ 0x444824; a tag of 28 or more -> 4
+// @ 0x40a1bc..0x40a1c1]
+void test_grenade_bounce_past_the_table_plays_the_obj_row() {
+    static const uint8_t raster[4] = {30, 30, 30, 30};
+    static const int mapped_grid[256] = {1};
+    Rig rig(0);
+    rig.w.tables.surface_map.data = raster;
+    rig.w.tables.surface_map.width = 2;
+    rig.w.tables.surface_map.height = 2;
+    rig.w.tables.surface_map.sector_grid = mapped_grid;
+    const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 2}, 0, 0);
+    CHECK(slot >= 0);
+    rig.tick(80);
+    CHECK(!rig.w.round_sim.impacts.empty());
+    for (const RoundImpact &bounce : rig.w.round_sim.impacts) {
+        CHECK(bounce.effect_tag == 34);
+        CHECK(round_impact_row(rig.w.tables.ammo, bounce).tag == 4);
+    }
+}
+
+// A satchel's ground contact presents through the impact presenter with the
+// grenade's descriptor (sound only for its first five contacts) and no
+// water-height test of its own: under the water plane it still sounds, unless
+// its ammo carries ClipWaterFx, whose presenter gate drops a round whose Z and
+// +0x88 copy (the Z its tick began at, refreshed at each motor tick's tail)
+// both sit at or under the plane.
+// [orig: Entity_UpdateSatchelPhysics @ 0x44893D..0x448983, the tail copy
+//  @ 0x448CA2; AmmoDef_ProcessImpactEffect @ 0x40A18D..0x40A1B1]
+void test_satchel_contact_presents_sound_only_and_no_water_gate() {
+    const auto contacts = [](Rig &rig) {
+        int n = 0;
+        for (const RoundImpact &imp : rig.w.round_sim.impacts)
+            if (imp.ammo_index == kAmmoSatchel && imp.effect_tag != 11) {
+                CHECK(imp.effect_tag == 5); // no char map: class 1, dirt
+                CHECK(!imp.present_effect);
+                CHECK(imp.present_sound);
+                ++n;
+            }
+        return n;
+    };
+    {
+        Rig rig(0);
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0) >= 0);
+        rig.tick(120);
+        CHECK(contacts(rig) == 1); // a dry stop
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = 5 << 16; // the stop lies under the plane
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0) >= 0);
+        rig.tick(240);
+        CHECK(contacts(rig) == 1); // still sounds: no water-height test
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = 5 << 16;
+        rig.w.tables.ammo.entries[kAmmoSatchel].flags |= kAmmoFlagClipWaterFx;
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0) >= 0);
+        rig.tick(240);
+        CHECK(contacts(rig) == 0); // ClipWaterFx, spawned and stopped under it
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = 1 << 16;
+        rig.w.tables.ammo.entries[kAmmoSatchel].flags |= kAmmoFlagClipWaterFx;
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 4}, 0, 0) >= 0);
+        rig.tick(240);
+        // Thrown from above the plane, it sinks and stops under it: the gate
+        // reads the tick's start Z, not the spawn's.
+        CHECK(contacts(rig) == 0);
+    }
+    // The contact count compares as a signed byte: a sixth contact is silent,
+    // a count wrapped past 127 sounds again [orig: cmp byte ptr [esi+155h], 5
+    // then setle, Entity_UpdateSatchelPhysics @0x44893D / @0x44894B].
+    for (const int before : {5, 199}) {
+        Rig rig(0);
+        const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        rig.w.round_sim.rounds[size_t(slot)].bounce_count = static_cast<uint8_t>(before);
+        rig.tick(120);
+        CHECK(contacts(rig) == (before == 199 ? 1 : 0));
+    }
 }
 
 void test_grenade_fuse_tick_boundaries() {
@@ -1944,6 +2325,218 @@ void test_grenade_lands_on_the_face_below() {
     }
 }
 
+// A deck item whose one level face sits at z = 2 (the floor model), in a
+// CollisionWorld the charge motors walk.
+struct DeckScene {
+    CollisionWorld cw;
+    EntityHandle deck;
+    explicit DeckScene(Rig &rig) {
+        Entity e;
+        e.kind = EntityKind::Item;
+        e.position = Vec3{20, 20, 2};
+        e.bound_radius = 4;
+        deck = rig.w.registry.spawn(1, e);
+        cw.assign_entity(deck, cw.add_model(level_floor_model()));
+        cw.build_tick_tables(rig.w);
+    }
+};
+
+// The object floor: a falling satchel or claymore probes pools 2/1 from its
+// saved pose 5 u down, the hit's Z its floor. 50 raw over the deck's face at
+// 10 + 55 raw per tick down, it sinks under the floor with too little speed to
+// sweep (65 < 256), lands on it with no groundEntity, passes the rest gate on
+// the zero height, and converts lifted 4096 above it. (Ours had no object
+// floor: with the terrain test off it fell through the deck.)
+// [orig: Physics_RaycastProximityEntities @0x538350, called @0x4483EA /
+//  @0x447434; the landing @0x44899E..0x4489A1 / @0x447929..0x44792C; the
+//  rest gate @0x4489C7..0x4489EE / @0x447952..0x447979]
+void test_charge_lands_on_the_object_floor() {
+    for (const bool claymore : {false, true}) {
+        const int ammo = claymore ? kAmmoClaymore : kAmmoSatchel;
+        Rig rig(0);
+        rig.w.tables.ammo.entries[ammo].flags |= 0x80u; // no terrain leg
+        DeckScene scene(rig);
+        const int slot = rig.throw_ammo(ammo, Vec3{20, 20, 2}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+        r.pos = Vec3{20.0f, 20.0f, static_cast<float>(131122) / 65536.0f};
+        r.vel = Vec3{0.0f, 0.0f, static_cast<float>(-10) / 65536.0f};
+        rig.w.round_sim.tick(rig.w, &rig.flat.field, &scene.cw);
+        CHECK(!r.active);
+        CHECK(rig.w.throwables.devices.size() == 1);
+        if (rig.w.throwables.devices.empty()) return;
+        const PlacedDevice &d = rig.w.throwables.devices[0];
+        CHECK(to_fixed(d.pos.z) == 131072 + 4096);
+        CHECK(!d.parent.valid());
+    }
+}
+
+// An item contact reflects the velocity and sends the round back to its
+// saved pose without stopping it: the rest gate, not the stick, decides. The
+// satchel takes the struck entity as its groundEntity on a stick, the
+// claymore on every contact. Dropped at 0.25 u per tick from 0.0625 u over
+// the deck, the round crosses the face in the tick, sticks to it (the level
+// face points up), and ends the tick back at 0.0625 u, 4096 over its floor,
+// past the gate's 0xFF. (Ours rested and converted on the stick.)
+// [orig: Entity_UpdateSatchelPhysics -- the reflection @0x448853, the stick
+//  @0x448882..0x4488C4, the store @0x448905..0x44891E;
+//  Entity_UpdateClaymorePhysics @0x4477FD, @0x44782C..0x44785E, the store
+//  @0x447884..0x4478A4, the groundEntity @0x4478A7]
+void test_charge_item_contact_reflects_and_does_not_rest() {
+    for (const bool claymore : {false, true}) {
+        const int ammo = claymore ? kAmmoClaymore : kAmmoSatchel;
+        Rig rig(0);
+        rig.w.tables.ammo.entries[ammo].flags |= 0x80u; // no terrain leg
+        DeckScene scene(rig);
+        const int slot = rig.throw_ammo(ammo, Vec3{20, 20, 2}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+        r.pos = Vec3{20.0f, 20.0f, 2.0625f};
+        r.vel = Vec3{0.0f, 0.0f, -0.25f};
+        rig.w.round_sim.tick(rig.w, &rig.flat.field, &scene.cw);
+        CHECK(r.active);
+        CHECK(rig.w.throwables.devices.empty());
+        CHECK(r.bounce_count == 1);
+        CHECK(r.parent == scene.deck);
+        CHECK(to_fixed(r.pos.z) == 135168);
+        CHECK(r.vel.z == 0.0f); // no horizontal speed: the reflection's damping is 0
+    }
+}
+
+// The claymore takes the struck entity as its groundEntity on every contact,
+// a wall it cannot stick to included; the satchel only on a stick.
+// [orig: Entity_UpdateClaymorePhysics @0x4478A7; Entity_UpdateSatchelPhysics
+//  @0x4488C4]
+void test_claymore_parents_to_every_contact() {
+    for (const bool claymore : {false, true}) {
+        const int ammo = claymore ? kAmmoClaymore : kAmmoSatchel;
+        Rig rig(0);
+        rig.w.tables.ammo.entries[ammo].flags |= 0x80u; // no terrain leg
+        Entity item;
+        item.kind = EntityKind::Item;
+        item.alive = true;
+        item.position = Vec3{18.0f, 10.0f, -4.0f};
+        item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+        item.bound_radius = 0.4f;
+        const EntityHandle item_h = rig.w.registry.spawn(1, item);
+        CollisionWorld collision;
+        collision.assign_entity(item_h, collision.add_model(projectile_wall_model(0.4)));
+        collision.build_tick_tables(rig.w);
+        const int slot = rig.throw_ammo(ammo, Vec3{10.0f, 10.0f, 4.0f}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+        r.vel = Vec3{10.0f, 0.0f, -10.0f};
+        rig.w.round_sim.tick(rig.w, nullptr, &collision);
+        CHECK(r.active);
+        CHECK(r.bounce_count == 1);
+        CHECK(r.parent == (claymore ? item_h : EntityHandle{}));
+    }
+}
+
+// The stick reads the reflection's out-normal, the face's own normal before
+// the section matrix: a satchel dropped onto a face tilted 30 degrees about
+// local y, on an item yawed a quarter turn off the identity placement, takes
+// the pose of the face's LOCAL normal (0.5, 0, 0.866), not of the rotated one
+// the reflection uses. [orig: Physics_ComputeReflectionForce @0x4E4310, the
+// out-normal @0x4E4465..0x4E4491; Entity_UpdateSatchelPhysics
+// @0x448858..0x4488AA]
+void test_charge_stick_reads_the_local_face_normal() {
+    Rig rig(0);
+    rig.w.tables.ammo.entries[kAmmoSatchel].flags |= 0x80u; // no terrain leg
+    CollisionModel slope;
+    for (const auto &xyz : {std::array<double, 3>{-2.0, -2.0, 2.0 * 0.57735},
+                            std::array<double, 3>{2.0, -2.0, -2.0 * 0.57735},
+                            std::array<double, 3>{0.0, 2.0, 0.0}}) {
+        CollisionVertex vertex;
+        for (int axis = 0; axis < 3; ++axis)
+            vertex.p[axis] = to_fixed(static_cast<float>(xyz[size_t(axis)]));
+        slope.vertices.push_back(vertex);
+    }
+    CollisionNormal normal;
+    normal.n[0] = 8192;  // 0.5 (Q14)
+    normal.n[2] = 14189; // 0.866
+    normal.dominant_axis = 1;
+    slope.normals.push_back(normal);
+    CollisionFace face;
+    face.normal_index = 0;
+    face.vertex_index[0] = 0;
+    face.vertex_index[1] = 1;
+    face.vertex_index[2] = 2;
+    face.min[0] = face.min[1] = -2 * 65536;
+    face.max[0] = face.max[1] = 2 * 65536;
+    face.min[2] = to_fixed(-1.2f);
+    face.max[2] = to_fixed(1.2f);
+    slope.faces.push_back(face);
+    CollisionSection section;
+    section.vertex_count = 3;
+    section.normal_count = 1;
+    section.face_count = 1;
+    slope.sections.push_back(section);
+
+    Entity item;
+    item.kind = EntityKind::Item;
+    item.position = Vec3{20, 20, 2};
+    item.yaw = 0; // a quarter turn off the identity placement (yaw 90)
+    item.bound_radius = 4;
+    const EntityHandle item_h = rig.w.registry.spawn(1, item);
+    CollisionWorld cw;
+    cw.assign_entity(item_h, cw.add_model(std::move(slope)));
+    cw.build_tick_tables(rig.w);
+    const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 2}, 0, 0);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+    r.pos = Vec3{20.0f, 20.0f, 2.0625f};
+    r.vel = Vec3{0.0f, 0.0f, -0.25f};
+    rig.w.round_sim.tick(rig.w, &rig.flat.field, &cw);
+    CHECK(r.bounce_count == 1);
+    CHECK(r.parent == item_h);
+    const auto pose = [&r](const int32_t n[3]) {
+        int32_t pitch = 0, roll = 0;
+        throwable_stick_pose(n, r.yaw_bam, static_cast<int32_t>(0xC0000040), 0, pitch, roll);
+        return std::array<int32_t, 2>{pitch, roll};
+    };
+    const int32_t local[3] = {8192 * 4, 0, 14189 * 4};
+    const int32_t turned_a[3] = {0, 8192 * 4, 14189 * 4};
+    const int32_t turned_b[3] = {0, -8192 * 4, 14189 * 4};
+    const std::array<int32_t, 2> got{r.pitch_bam, r.roll_bam};
+    CHECK(got == pose(local));
+    CHECK(got != pose(turned_a));
+    CHECK(got != pose(turned_b));
+}
+
+// A non-authority peer's charge round at rest keeps its slot 248 ticks: its
+// update callback goes (no parent), its aging comes back, and the authority's
+// placed device arrives on its own wire record.
+// [orig: Entity_UpdateSatchelPhysics @0x4489F6..0x448A10, the client leg
+//  @0x448C1A..0x448C24]
+void test_visual_charge_rest_keeps_the_round() {
+    Rig rig(0);
+    rig.w.rules.mp_session = true;
+    rig.w.rules.projectile_authority = false;
+    RoundSpawnParams p;
+    p.shooter_handle = 0x0002;
+    p.shooter_team = 1;
+    p.origin = Vec3{20, 20, 0};
+    p.ammo_index = kAmmoSatchel;
+    const int slot = rig.w.round_sim.spawn(rig.w, p, RoundConsequenceMode::VisualOnly);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
+    r.vel = Vec3{0.0f, 0.0f, 0.0f};
+    rig.tick(1);
+    CHECK(r.active);
+    CHECK(r.motor == ThrowClass::kNone);
+    CHECK(!r.rest_follows_parent);
+    CHECK(r.max_age_ticks - r.age_ticks == 247);
+    CHECK(rig.w.throwables.devices.empty());
+    rig.tick(260);
+    CHECK(!r.active);
+}
+
 // The satchel and claymore motors' terrain stop skips on either bit: an
 // indoors round over open ground drops through the terrain and rests nowhere.
 // [orig: Entity_UpdateSatchelPhysics @0x4485A1 / @0x4485AA;
@@ -2049,6 +2642,18 @@ int main() {
     test_control_and_bounce_share_prng16_stream();
     test_grenade_bounce_and_fuse();
     test_grenade_bounce_samples_charmap_surface();
+    test_grenade_bounce_past_the_table_plays_the_obj_row();
+    test_satchel_contact_presents_sound_only_and_no_water_gate();
+    test_grenade_item_contact_backs_off_along_the_ray();
+    test_grenade_kept_pool2_hit_carries_the_pool1_record();
+    test_motor_sweep_passes_a_model_less_entity();
+    test_grenade_gates_project_along_the_velocity();
+    test_satchel_item_contact_restores_the_tick_start_pose();
+    test_charge_lands_on_the_object_floor();
+    test_charge_item_contact_reflects_and_does_not_rest();
+    test_claymore_parents_to_every_contact();
+    test_visual_charge_rest_keeps_the_round();
+    test_charge_stick_reads_the_local_face_normal();
     test_grenade_fuse_tick_boundaries();
     test_smoke_grenade_expiry_presents_no_second_obj_row();
     test_submerged_fuse_presents_at_the_water_surface();

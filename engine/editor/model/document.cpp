@@ -35,12 +35,6 @@ Document::Document(const Document &other)
 
 namespace {
 
-bool fail(Diagnostic &error, const std::string &path, CoreFinding code, const std::string &message,
-          const std::string &field = {}) {
-	error = make_finding(code, DiagnosticSeverity::Error, message, path, field);
-	return false;
-}
-
 // True for an edit that may change what a row holds (an Apply's payload may too): a later edit
 // of its batch finds its record by walking the clone.
 bool structural(EditOperation operation) {
@@ -387,8 +381,18 @@ std::string Document::record_name(const NodeAddress &address) const {
 
 std::string Document::record_path(const NodeAddress &address) const {
 	if (!row(address.row)) return std::string();
+	if (path_names_.load_generation != load_generation() || path_names_.revision != revision()) {
+		path_names_.names.clear();
+		path_names_.load_generation = load_generation();
+		path_names_.revision = revision();
+	}
 	std::string path;
-	for (const NodeAddress &owner : ancestors(address)) path += record_name(owner) + "/";
+	for (const NodeAddress &owner : ancestors(address)) {
+		auto named = path_names_.names.find(owner);
+		if (named == path_names_.names.end()) named = path_names_.names.emplace(owner, record_name(owner)).first;
+		path += named->second;
+		path += '/';
+	}
 	return path + record_name(address);
 }
 
@@ -417,34 +421,78 @@ std::string value_word(const Value &value) {
 } // namespace
 
 std::string Document::record_identity(const NodeAddress &address) const {
-	const Node *top = row(address.row);
-	if (!top) return std::string();
-	NodeKind kind = top->kind;
-	if (address.child) {
-		Placement at;
-		if (!placement(address, at)) return std::string();
-		kind = at.spec.kind;
-	}
-	const char *token = kind_token(kind);
-	const std::string word = *token ? std::string(token) : std::to_string(kind);
-	const std::string own = own_name(address);
-	if (!own.empty()) return word + ":" + own;
-	uint64_t digest = 14695981039346656037ull;
-	for (const FieldSchema &field : fields(kind)) {
-		// A field its place derives (a stylesheet line's number) or one naming a record by its index (an
-		// event's trigger naming another event: renumbered when one is inserted above) is no part of it.
-		if (field.read_only || (field.reference != ReferenceKind::None &&
-		                        reference_row(field.reference).resolution == ReferenceResolution::Record))
+	// A record its own name does not say folds in each record it holds, whose identity is worked out
+	// first: from an explicit stack, a level a record, never a call a level (a menu nests its windows
+	// thousands deep).
+	struct Level {
+		NodeAddress address;
+		std::string word;
+		uint64_t digest = 0;
+		std::vector<Collection> held;
+		size_t collection = 0, index = 0;
+	};
+	std::vector<Level> stack;
+	std::string done; // the identity of the record last worked out
+	// The record's own part: true when that is its whole identity (in `done`), false with its level
+	// pushed for what it holds.
+	const auto enter = [&](const NodeAddress &at) {
+		const Node *top = row(at.row);
+		if (!top) {
+			done.clear();
+			return true;
+		}
+		NodeKind kind = top->kind;
+		if (at.child) {
+			Placement placed;
+			if (!placement(at, placed)) {
+				done.clear();
+				return true;
+			}
+			kind = placed.spec.kind;
+		}
+		const char *token = kind_token(kind);
+		std::string word = *token ? std::string(token) : std::to_string(kind);
+		const std::string own = own_name(at);
+		if (!own.empty()) {
+			done = word + ":" + own;
+			return true;
+		}
+		uint64_t digest = 14695981039346656037ull;
+		for (const FieldSchema &field : fields(kind)) {
+			// A field its place derives (a stylesheet line's number) or one naming a record by its index (an
+			// event's trigger naming another event: renumbered when one is inserted above) is no part of it.
+			if (field.read_only || (field.reference != ReferenceKind::None &&
+			                        reference_row(field.reference).resolution == ReferenceResolution::Record))
+				continue;
+			Value value;
+			if (!present(at, field.id) || !get(at, field.id, value)) continue;
+			digest_word(digest, field.id);
+			digest_word(digest, value_word(value));
+		}
+		stack.push_back({at, std::move(word), digest, collections_of(at)});
+		return false;
+	};
+	if (enter(address)) return done;
+	while (!stack.empty()) {
+		Level &top = stack.back();
+		if (top.collection == top.held.size()) {
+			done = top.word + "#" + std::to_string(top.digest);
+			stack.pop_back();
+			if (stack.empty()) break;
+			digest_word(stack.back().digest, done);
 			continue;
-		Value value;
-		if (!present(address, field.id) || !get(address, field.id, value)) continue;
-		digest_word(digest, field.id);
-		digest_word(digest, value_word(value));
+		}
+		const Collection &collection = top.held[top.collection];
+		if (top.index == collection.ids.size()) {
+			++top.collection;
+			top.index = 0;
+			continue;
+		}
+		const size_t i = top.index++;
+		const NodeAddress child{top.address.row, collection.kind_at(i), collection.ids[i]};
+		if (enter(child)) digest_word(stack.back().digest, done);
 	}
-	for (const Collection &collection : collections_of(address))
-		for (size_t i = 0; i < collection.ids.size(); ++i)
-			digest_word(digest, record_identity({address.row, collection.kind_at(i), collection.ids[i]}));
-	return word + "#" + std::to_string(digest);
+	return done;
 }
 
 void key_findings(const DocumentBase &document, std::vector<Diagnostic> &findings, size_t from) {
@@ -576,7 +624,7 @@ bool Document::move_out_edits(const Edit &move, std::vector<Edit> &, std::string
 }
 
 bool Document::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	return fail(error, path(), CoreFinding::DocumentValue, "This document has no file-wide values.");
+	return fail_with(error, path(), CoreFinding::DocumentValue, "This document has no file-wide values.");
 }
 
 bool Document::read_source(const std::vector<uint8_t> &decoded, bool adopt,
@@ -667,11 +715,11 @@ bool Document::stage_restore(StagedRows &staged, Diagnostic &error) {
 	std::vector<SourceIssue> issues;
 	Diagnostic unread;
 	if (!parse(bytes, rows, state, issues, unread))
-		return fail(error, path(), CoreFinding::DocumentPayload,
+		return fail_with(error, path(), CoreFinding::DocumentPayload,
 		            "The file with every line ending CR LF does not read: " + unread.message);
 	for (const SourceIssue &issue : issues)
 		if (issue.blocks)
-			return fail(error, path(), CoreFinding::DocumentPayload,
+			return fail_with(error, path(), CoreFinding::DocumentPayload,
 			            "The file with every line ending CR LF does not read as the game reads it: " + issue.message);
 	std::vector<NodeId> old;
 	old.reserve(staged.rows().size());
@@ -744,7 +792,7 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (!accept_step(step, staged, refusal)) {
 		const std::string message = refusal.message.empty() ? "This document refuses that change." : refusal.message;
 		if (!refusal.code) {
-			fail(error, path(), CoreFinding::DocumentStructure, message);
+			fail_with(error, path(), CoreFinding::DocumentStructure, message);
 			return refused();
 		}
 		error = make_finding(*refusal.code, DiagnosticSeverity::Error, message, path(), refusal.field);
@@ -801,7 +849,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 	// A refusal: `code` in `words`, on `field` where it names one.
 	const auto refuse = [&](C code, const std::string &words,
 	                        const std::string &field = std::string()) {
-		return fail(error, path(), code, words, field);
+		return fail_with(error, path(), code, words, field);
 	};
 	// A record of one kind where the address says another.
 	const auto wrong_kind = [&](NodeKind is, NodeKind says) {
@@ -1296,7 +1344,7 @@ bool Document::renumber_place_lists(NodeId row, const std::vector<std::vector<No
 		std::vector<Edit> sites;
 		std::string message;
 		if (!renumber_places(staged, row, list, shift, sites, message))
-			return fail(error, path(), CoreFinding::DocumentCollection,
+			return fail_with(error, path(), CoreFinding::DocumentCollection,
 			            message.empty() ? "This collection cannot accept that edit." : message);
 		std::vector<NodeId> made, added;
 		if (!sites.empty() && !stage_edits(sites, staged, made, added, error)) return false;
@@ -1347,7 +1395,7 @@ bool Document::renumber(const std::vector<TargetedCollection> &targets,
 		std::vector<Edit> sites;
 		std::string message;
 		if (!renumber_references(staged, shift, sites, message))
-			return fail(error, path(), CoreFinding::DocumentCollection,
+			return fail_with(error, path(), CoreFinding::DocumentCollection,
 			            message.empty() ? "This collection cannot accept that edit." : message);
 		// The type's Sets, in the same step, against the rows as the edit left them.
 		std::vector<NodeId> made, added;
@@ -1388,6 +1436,10 @@ std::shared_ptr<const Node> Document::current_row(NodeId id) const {
 std::shared_ptr<const Node> Document::saved_row(NodeId id) const {
 	const auto found = saved_positions_.find(id);
 	return found == saved_positions_.end() ? nullptr : saved_rows_[found->second];
+}
+
+bool Document::committed(const Node &row) const {
+	return current_row(row.id).get() == &row || saved_row(row.id).get() == &row;
 }
 
 bool Document::holds(const std::shared_ptr<const Node> &row, const NodeAddress &address) const {

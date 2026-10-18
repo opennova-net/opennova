@@ -134,7 +134,7 @@ uint8_t selected_lod(const TerrainStaticShadowCandidate &candidate,
 // The STRP index-window convention the runtime decode rides: indices are
 // either relative to the ROBJ's vertex window or absolute into the shared
 // buffer, disambiguated by range [orig: STRP runtime decode — basic loop
-// @ 0x474CAF, skinned @ 0x474B60; docs/threedi/3di-gp-format-re.md STRP/ROBJ].
+// @ 0x474CAF, skinned @ 0x474B60 (ModSuperOed.exe); docs/threedi/3di-gp-format-re.md STRP/ROBJ].
 bool terrain_static_shadow_strip_indices_are_valid(
 		const uint16_t *indices, uint32_t index_buffer_count,
 		int32_t index_offset, uint16_t index_count,

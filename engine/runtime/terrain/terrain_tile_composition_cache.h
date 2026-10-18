@@ -148,12 +148,30 @@ struct TerrainTileSectorPatchPoint {
 
 class TerrainTileCompositionCache {
 public:
-	// The active-quality retail cache layout. Low-quality 128x128 pages are a
-	// separate future policy, not a runtime mutation of this cache instance.
+	// The retail cache layout: 128 records over pages of the tier's side.
 	// [orig: 128-record scan bound @ 0x60db40 over dword_319A2E0; the page RT
-	// dimension is the active-quality global dword_31A00D4 (256).]
+	// side is dword_31A00D4, Terrain_CreateTileCacheTargets @ 0x604DE0.]
 	static constexpr int kCapacity = 128;
-	static constexpr int kDimension = 256;
+	// The page tier: the terrain load keeps the high tier (config +0x1740 = 1)
+	// at a terrain texture detail of 3 or more and the low one below it, and the
+	// terrain config sizes the pages from it, 256 texels high and 128 low (the
+	// model-shadow temp twice that, terrain_static_shadow_raster.cpp). The high
+	// tier's other two arms are not modelled: dword_B4C3C0 is the capture-quality
+	// input-binding toggle (object_lod.cpp's note), and dword_31BEAE4's only
+	// writer, sub_60F320, has no caller.
+	// [orig: Terrain_LoadEnvironmentConfig @ 0x610966 (cmp g_TerrainTexDetail, 3),
+	// @ 0x610987 (jge: +0x1740 = 1 @ 0x61099F), @ 0x610989..0x610997 (the other
+	// arms, else 0); PolyTrn_LoadTerrainConfig @ 0x60E41D..0x60E446 (256 / 512
+	// or 128 / 256 into dword_31A00D4 / dword_31A00D0)]
+	static constexpr int kDimensionHigh = 256;
+	static constexpr int kDimensionLow = 128;
+	static constexpr int page_dimension(int terrain_texdetail) noexcept {
+		return terrain_texdetail >= 3 ? kDimensionHigh : kDimensionLow;
+	}
+	// The pages' side, kDimensionHigh until set; a new side empties every
+	// record (the embedder sets it as it builds the terrain, before any claim).
+	void set_dimension(int dimension) noexcept;
+	int dimension() const noexcept { return dimension_; }
 	// Creation-time clear of every page render target. Retail clears each of
 	// the 128 tile RTs to D3DCOLOR 0xFFFF6060 (ARGB: A=FF R=FF G=60 B=60) with
 	// z 0.99994999 as it allocates them, then seeds the slot key/UV sentinels
@@ -284,6 +302,7 @@ private:
 	std::array<Slot, kCapacity> slots_{};
 	uint32_t frame_ = 0;
 	uint32_t tod_epoch_ = 0;
+	int dimension_ = kDimensionHigh;
 };
 
 } // namespace opennova

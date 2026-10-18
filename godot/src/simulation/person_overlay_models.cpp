@@ -76,7 +76,7 @@ Variant PersonOverlayModels::nvg_transform(Object *p_body) {
 		return Variant();
 	}
 	// The head bone's own rotation; its pivot nudged through the bone.
-	// [retail Entity_BuildBoneTransformMatrices @ 0x4b24e3..0x4b258e]
+	// (engine: runtime/world/person_overlays.h)
 	return Transform3D(model_to_world.basis,
 			joint.origin + model_to_world.basis.xform(kNightVisionNudge));
 }
@@ -95,7 +95,7 @@ Variant PersonOverlayModels::binoculars_transform(Object *p_body) {
 	if (!bone_frames(p_body, ow::kBinocularsBoneIndex, joint, model_to_world)) {
 		return Variant();
 	}
-	// [retail Entity_BuildBoneTransformMatrices @ 0x4b2308..0x4b24d2]
+	// (engine: runtime/world/person_overlays.h)
 	return Transform3D(binoculars_frame_basis(model_to_world.basis),
 			joint.origin + model_to_world.basis.xform(kBinocularsNudge));
 }
@@ -120,7 +120,7 @@ Variant PersonOverlayModels::carried_transform(Object *p_body,
 		return Variant();
 	}
 	// The binocular frame's point, the carrier's own orientation.
-	// [retail BoneCallback_org0_World @ 0x4e3df6..0x4e3e26]
+	// (engine: runtime/world/person_overlays.h)
 	return Transform3D(carried_frame_basis(p_carrier_euler_bms),
 			static_cast<Transform3D>(hand).origin);
 }
@@ -234,7 +234,7 @@ void PersonOverlayModels::present_slot(Slot &p_slot, int p_kind, int32_t p_type_
 			p_body->is_interior_lerp(), p_body->get_interior_daylight());
 	// The overlay's CTRL registers, written before its submit: the canopy's
 	// PARA / PARA_O, the goggles' NVG_FLIP.
-	// [retail BoneCallback_org0_World @ 0x4e3a16..0x4e3a56, @ 0x4e3b9d]
+	// (engine: runtime/world/person_overlays.h)
 	if (p_kind == KIND_CANOPY) {
 		if (p_slot.ctrl_first != p_overlays.canopy_para) {
 			model->set_ctrl_value("PARA", p_overlays.canopy_para);

@@ -60,6 +60,10 @@ HudMinimapMarker sample(uint16_t handle) {
     m.timer_value = 31 * 65536;
     m.timer_limit = 62 * 65536;
     m.timer_rate = -1057;
+    // v8: the change-team class's cell and the zone's taker.
+    m.change_team = 1;
+    m.cell = 27;
+    m.capture_team = 2;
     return m;
 }
 
@@ -78,7 +82,8 @@ bool same(const HudMinimapMarker &a, const HudMinimapMarker &b) {
            a.bay_groups == b.bay_groups && a.timer_known == b.timer_known &&
            a.timer_active == b.timer_active && a.timer_team == b.timer_team &&
            a.timer_bar_team == b.timer_bar_team && a.timer_value == b.timer_value &&
-           a.timer_limit == b.timer_limit && a.timer_rate == b.timer_rate;
+           a.timer_limit == b.timer_limit && a.timer_rate == b.timer_rate &&
+           a.change_team == b.change_team && a.cell == b.cell && a.capture_team == b.capture_team;
 }
 
 void test_round_trip_is_exact() {
@@ -94,9 +99,10 @@ void test_round_trip_is_exact() {
     CHECK(feed[0] == kMinimapFeedVersion);
     CHECK(feed[1] == kMinimapFeedStride);
     CHECK(feed[2] == 2);
-    CHECK(feed[kMinimapFeedHeaderSize + 12] == 2); // bit1 footprint, bit0 rotate clear
+    CHECK(feed[kMinimapFeedHeaderSize + 12] == 6); // bit1 footprint, bit2 change team, bit0 rotate clear
     CHECK(feed[kMinimapFeedHeaderSize + 16] == 1); // v4 medic
-    CHECK(kMinimapFeedVersion == 7 && kMinimapFeedStride == 36);
+    CHECK(kMinimapFeedVersion == 8 && kMinimapFeedStride == 38);
+    CHECK(feed[kMinimapFeedHeaderSize + 36] == 27 && feed[kMinimapFeedHeaderSize + 37] == 2); // v8
     CHECK(feed[kMinimapFeedHeaderSize + 30] == 3); // v7 timer flags: known | active
     CHECK(feed[kMinimapFeedHeaderSize + kMinimapFeedStride + 30] == 1);
     CHECK(feed[kMinimapFeedHeaderSize + 35] == -1057); // the signed rate rides as is
@@ -173,12 +179,42 @@ void test_a_wider_stride_skips_the_extra_columns() {
 
 } // namespace
 
+// The footprint feed's layout is the engine's (C-492): an exact round trip, each
+// row finalized; a foreign header draws none; a short row ends the walk.
+void test_footprint_feed_round_trip() {
+    std::vector<HudMinimapFootprint> in(2);
+    in[0].handle = 0x2042;
+    in[0].fill_argb = 0xFF60A060u;
+    in[0].fill_xy_q16 = {20 << 16, -(4 << 16), 24 << 16, -(4 << 16), 22 << 16, 4 << 16};
+    in[0].edge_xy_q16 = {20 << 16, -(4 << 16), 24 << 16, -(4 << 16)};
+    in[1].handle = 7;
+    in[1].fill_argb = 0xFFA0A0A0u;
+    std::vector<int32_t> feed;
+    minimap_footprint_feed_encode(in, feed);
+    CHECK(feed.size() == 2 + (3 + 6 + 1 + 4) + (3 + 0 + 1 + 0));
+    CHECK(feed[0] == kMinimapFootprintFeedVersion && feed[1] == 2);
+    std::vector<HudMinimapFootprint> out;
+    CHECK(minimap_footprint_feed_decode(feed.data(), feed.size(), out));
+    CHECK(out.size() == 2 && out[0].handle == 0x2042 && out[0].fill_argb == 0xFF60A060u &&
+          out[0].fill_xy_q16 == in[0].fill_xy_q16 && out[0].edge_xy_q16 == in[0].edge_xy_q16 &&
+          out[1].handle == 7 && out[1].fill_xy_q16.empty());
+    HudMinimapFootprint finalized = in[0];
+    hud_minimap_finalize_footprint(finalized);
+    CHECK(!out.empty() && out[0].bound_x_q16 == finalized.bound_x_q16 &&
+          out[0].bound_radius_q16 == finalized.bound_radius_q16 && finalized.bound_radius_q16 > 0);
+    std::vector<int32_t> foreign = feed;
+    foreign[0] = kMinimapFootprintFeedVersion + 1;
+    CHECK(!minimap_footprint_feed_decode(foreign.data(), foreign.size(), out) && out.empty());
+    CHECK(minimap_footprint_feed_decode(feed.data(), 2 + 3 + 6, out) && out.empty());
+}
+
 int main() {
     test_round_trip_is_exact();
     test_empty_feed_round_trips_to_no_markers();
     test_foreign_headers_yield_no_markers();
     test_declared_count_is_clamped_to_the_buffer();
     test_a_wider_stride_skips_the_extra_columns();
+    test_footprint_feed_round_trip();
     if (failures == 0) std::printf("hud_minimap_feed_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

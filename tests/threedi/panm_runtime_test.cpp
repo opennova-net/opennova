@@ -34,7 +34,7 @@ int main(void) {
 
     table = threedi_panm_wave_table();
     ok &= expect_eq("table_sin0", table[256], 0x7F);
-    ok &= expect_eq("table_rand0", table[1536], 0x6F);
+    ok &= expect_eq("table_rand0", table[1536], 0x83);
 
     // SET (control=24): returns start<<8
     memset(&t_set, 0, sizeof(t_set));
@@ -114,7 +114,7 @@ int main(void) {
     // Random band (control=0x17)
     memset(&t_rand, 0, sizeof(t_rand));
     t_rand.control = 0x17; t_rand.end = 256;
-    ok &= expect_eq("rand_band", threedi_panm_sample_track_raw(&t_rand, 0, NULL), 0x6F00);
+    ok &= expect_eq("rand_band", threedi_panm_sample_track_raw(&t_rand, 0, NULL), 0x8300);
 
     // Spinner mode reinterprets four bytes beginning at rotation_y.control as
     // a float coefficient; its conventional control high nibble is therefore

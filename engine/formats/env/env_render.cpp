@@ -1,4 +1,5 @@
 #include <formats/env/env_celestial.h>
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 #include <base/io/tick_rate.h>
 #include <formats/env/env_water_render.h>
@@ -30,14 +31,6 @@ int32_t neg_clamp(int32_t v, int32_t limit) {
 	const int32_t low = wrap_neg(limit);
 	if (v < low) v = low;
 	return v;
-}
-
-int32_t wrap_add(int32_t a, int32_t b) {
-	return static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b));
-}
-
-int32_t wrap_sub(int32_t a, int32_t b) {
-	return static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b));
 }
 
 int rgb_byte(float normalized) {
@@ -147,8 +140,8 @@ DayPhase compute_day_phase(float hhmm_time) {
 int smooth_eighth(int current, int target) {
 	// [orig: Environment_UpdateWeatherTick @ 0x57ee78] — eighth step with
 	// overshoot snap.
-	const int step = wrap_add(wrap_sub(target, current), 7) >> 3;
-	const int next = wrap_add(current, step);
+	const int step = io::bam_add(io::bam_sub(target, current), 7) >> 3;
+	const int next = io::bam_add(current, step);
 	if ((current < target && next > target) || (current > target && next < target)) {
 		return target;
 	}
@@ -159,8 +152,8 @@ int spring_step(int current, int target, int step_clamp, int max_abs) {
 	// [orig: Environment_UpdateWeatherTick @ 0x57ede2..0x57ee12] — 1/32 step
 	// under the two-compare step clamp, the sum under the same clamp against
 	// the absolute max; every add wraps like the original's.
-	const int step = neg_clamp(wrap_add(wrap_sub(target, current), 31) >> 5, step_clamp);
-	return neg_clamp(wrap_add(current, step), max_abs);
+	const int step = neg_clamp(io::bam_add(io::bam_sub(target, current), 31) >> 5, step_clamp);
+	return neg_clamp(io::bam_add(current, step), max_abs);
 }
 
 void EnvScalarChannels::tick() {
@@ -220,8 +213,8 @@ uint32_t ColorChannelState::step(uint32_t target_packed, int max_step_fp) {
 	// [orig: Environment_InterpolateWeatherColor @ 0x57d9e0] — per-channel (delta >> 3)
 	// clamped, accumulate in 12.20, repack with +0x80000 rounding.
 	const auto step_channel = [max_step_fp](int32_t &channel_fp, int target_byte) {
-		const int32_t delta = neg_clamp(wrap_sub(target_byte << 20, channel_fp) >> 3, max_step_fp);
-		channel_fp = wrap_add(channel_fp, delta);
+		const int32_t delta = neg_clamp(io::bam_sub(target_byte << 20, channel_fp) >> 3, max_step_fp);
+		channel_fp = io::bam_add(channel_fp, delta);
 	};
 	step_channel(b_fp, static_cast<int>(target_packed & 0xFF));
 	step_channel(g_fp, static_cast<int>((target_packed >> 8) & 0xFF));
@@ -231,7 +224,7 @@ uint32_t ColorChannelState::step(uint32_t target_packed, int max_step_fp) {
 	// an accumulator past 255 wraps around [orig: @ 0x57da85..0x57da8e `lea
 	// ebx, [esi+80000h]; sar ebx, 14h; mov byte ptr [..], bl`].
 	const auto repack = [](int32_t channel_fp) -> uint32_t {
-		return static_cast<uint32_t>(wrap_add(channel_fp, 0x80000) >> 20) & 0xFFu;
+		return static_cast<uint32_t>(io::bam_add(channel_fp, 0x80000) >> 20) & 0xFFu;
 	};
 	return repack(b_fp) | (repack(g_fp) << 8) | (repack(r_fp) << 16) | (repack(a_fp) << 24);
 }
@@ -386,7 +379,7 @@ void WeatherColorBlock::set_step_deltas(int frames) {
 	// Wrapping adds, the abs32 negate wrapping too, then the SIGNED idiv: a
 	// negative frame count installs a negative rate [orig: @ 0x57d97b..0x57d9cc].
 	const auto rate_for = [frames](int target_byte, int32_t channel_fp) -> int32_t {
-		const int32_t delta = wrap_sub(wrap_add(target_byte << 20, frames >> 1), channel_fp);
+		const int32_t delta = io::bam_sub(io::bam_add(target_byte << 20, frames >> 1), channel_fp);
 		const int32_t magnitude = delta < 0 ? wrap_neg(delta) : delta;
 		return static_cast<int32_t>(static_cast<int64_t>(magnitude) / frames);
 	};
@@ -404,8 +397,8 @@ void WeatherColorBlock::tick(uint32_t modulator_packed, int hit_dim_intensity) {
 	// idiom (a negative rate — a negative colorfade — pins every channel to
 	// +|rate| per tick), the accumulate wraps [orig: @ 0x57da08..0x57da7c].
 	const auto step_channel = [](int32_t &channel_fp, int target_byte, int32_t rate) {
-		const int32_t delta = neg_clamp(wrap_sub(target_byte << 20, channel_fp) >> 3, rate);
-		channel_fp = wrap_add(channel_fp, delta);
+		const int32_t delta = neg_clamp(io::bam_sub(target_byte << 20, channel_fp) >> 3, rate);
+		channel_fp = io::bam_add(channel_fp, delta);
 	};
 	step_channel(channels.b_fp, static_cast<int>(target & 0xFF), max_rate[0]);
 	step_channel(channels.g_fp, static_cast<int>((target >> 8) & 0xFF), max_rate[1]);
@@ -415,7 +408,7 @@ void WeatherColorBlock::tick(uint32_t modulator_packed, int hit_dim_intensity) {
 	// an accumulator past 255 wraps around [orig: @ 0x57da85..0x57da8e `lea
 	// ebx, [esi+80000h]; sar ebx, 14h; mov byte ptr [..], bl`].
 	const auto repack = [](int32_t channel_fp) -> uint32_t {
-		return static_cast<uint32_t>(wrap_add(channel_fp, 0x80000) >> 20) & 0xFFu;
+		return static_cast<uint32_t>(io::bam_add(channel_fp, 0x80000) >> 20) & 0xFFu;
 	};
 	const uint32_t stepped = repack(channels.b_fp) | (repack(channels.g_fp) << 8) |
 			(repack(channels.r_fp) << 16) | (repack(channels.a_fp) << 24);
@@ -1385,31 +1378,37 @@ std::vector<WaterStripBatch> water_strip_batches(int row_count) {
 // Sun glare
 
 GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {
-	// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]: dot^32 -> glare
-	// (x192, clamp 255); dot^128 -> fog whitening (x40, clamp 40); both scaled
-	// by the occlusion brightness (0..255).
+	// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]: dot^16 -> glare
+	// (x192, clamp 255; four squarings @ 0x5ad745..0x5ad7a1, the scale
+	// @ 0x5ad7a5..0x5ad7b1); dot^64 -> fog whitening (x40, clamp 40; two more
+	// @ 0x5ad7c1..0x5ad7e9, the scale @ 0x5ad7ed..0x5ad7fc); both scaled by
+	// the occlusion brightness (0..255).
 	GlareResult result;
 	if (view_dot_sun <= 0.0f) {
 		return result;
 	}
 	const float dot = std::min(view_dot_sun, 1.0f);
-	float pow32 = dot;
-	for (int i = 0; i < 5; ++i) {
-		pow32 *= pow32; // dot^32
+	float pow16 = dot;
+	for (int i = 0; i < 4; ++i) {
+		pow16 *= pow16; // dot^16
 	}
-	const float pow128 = pow32 * pow32 * pow32 * pow32; // dot^128
+	const float pow32 = pow16 * pow16;
+	const float pow64 = pow32 * pow32; // dot^64
 	const float occlusion = static_cast<float>(std::clamp<int>(occlusion_brightness, 0, 255)) / 255.0f;
-	result.glare = std::clamp<int>(static_cast<int>(pow32 * 192.0f * occlusion), 0, 255);
-	result.fog_whiten = std::clamp<int>(static_cast<int>(pow128 * 40.0f * occlusion), 0, 40);
+	result.glare = std::clamp<int>(static_cast<int>(pow16 * 192.0f * occlusion), 0, 255);
+	result.fog_whiten = std::clamp<int>(static_cast<int>(pow64 * 40.0f * occlusion), 0, 40);
 	return result;
 }
 
 SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
                           int sun_dim_fixed, int overcast_blend_fixed) {
 	// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610] — the exact 16.16
-	// chain: five squarings to dot^32, two more to dot^128, brightness >> 8,
-	// the x192 / x40 scales, then the SunDim (x(0x640000 - dim)>>8,
-	// /25600) and overcast (x(1 - overcast)) folds on BOTH outputs.
+	// chain over the view dot it is handed (retail's own @ 0x5ad718..0x5ad734;
+	// the caller, runtime/environment/celestial_frame.h, computes it in float):
+	// four squarings to dot^16 for the veil, two more to dot^64 for the
+	// stop-down, brightness >> 8, the x192 / x40 scales, then the SunDim
+	// (x(0x640000 - dim)>>8, /25600) and overcast (x(1 - overcast)) folds on
+	// BOTH outputs.
 	SunVeil veil;
 	int glare_value = 0;
 	int fog_value = 0;
@@ -1422,14 +1421,15 @@ SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
 		const int32_t dot4 = sq(dot2);             // @ 0x5ad771
 		const int32_t dot8 = sq(dot4);             // @ 0x5ad789
 		const int32_t dot16 = sq(dot8);            // @ 0x5ad7a1
-		const int32_t dot32 = sq(dot16);
-		glare_value = (192 * ((occlusion_brightness * dot32) >> 8)) >> 16; // @ 0x5ad7b1
+		// The veil reads dot^16 itself (`imul eax, ebp` @ 0x5ad7a5 on the
+		// value just stored), not a fifth square.
+		glare_value = (192 * ((occlusion_brightness * dot16) >> 8)) >> 16; // @ 0x5ad7b1
 		if (glare_value > 255) {
 			glare_value = 255; // @ 0x5ad7ba
 		}
-		const int32_t dot64 = sq(dot32);  // @ 0x5ad7d5
-		const int32_t dot128 = sq(dot64);
-		fog_value = (40 * ((occlusion_brightness * dot128) >> 8)) >> 16; // @ 0x5ad7fc
+		const int32_t dot32 = sq(dot16);  // @ 0x5ad7d5
+		const int32_t dot64 = sq(dot32);  // @ 0x5ad7d9..0x5ad7e9, kept in eax
+		fog_value = (40 * ((occlusion_brightness * dot64) >> 8)) >> 16; // @ 0x5ad7fc
 		if (fog_value > 40) {
 			fog_value = 40; // @ 0x5ad802
 		}

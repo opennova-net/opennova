@@ -248,6 +248,11 @@ void threedi_build_material_surface(ThreediMaterial &material, bool glass_shader
 
 ThreediTransform threedi_build_track(uint8_t control, uint8_t param, int16_t rate, int16_t start, int16_t end);
 
+// The planes the retired exporter's plane table holds: its rule stops at the 32nd [orig: ConvertToInternal @
+// 0x4268B3 (ModSuperOed.exe)], an exporter's limit, not the game's (a record given its planes holds the game's
+// 128, ThreediTargetLimits::occlusion_planes).
+inline constexpr size_t kOedPlaneTable = 32;
+
 struct ThreediBuildModel {
 	std::string name;
 	bool skinned = false;
@@ -345,13 +350,13 @@ struct ThreediBuildModel {
 	// mission axes, as retail stores them) and name a plane, or -1 to let the
 	// OED rule pick one: the six bounding-box planes first (+x -x +y -y +z -z),
 	// then each face's own plane unless one already matches it (normal within
-	// 0.005 per axis and distance within 0.03; the LAST match wins), at most 32
-	// planes [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe), the
-	// collision/occlusion plane table; witnessed on Armry01's OCCL]. `planes`
+	// 0.005 per axis and distance within 0.03; the LAST match wins), at most
+	// kOedPlaneTable planes [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe),
+	// the collision/occlusion plane table; witnessed on Armry01's OCCL]. `planes`
 	// given explicitly (mission axes, n . p + d == 0) replace the rule. The
 	// record's sphere is threedi_build_occ_sphere's unless `sphere` gives the
 	// one it stores. False when the rule needs more than `plane_limit` planes
-	// (the target's: OED stops at 32, the runtime's 32-bit clip mask).
+	// (the exporter's table: kOedPlaneTable).
 	bool add_occ_record(uint8_t type, int section_a, int section_b, const std::vector<ThreediBuildVec3> &verts,
 			const std::vector<std::array<int, 4>> &faces, const std::vector<std::array<double, 4>> &explicit_planes = {},
 			const ThreediBuildOccSphere *sphere = nullptr, size_t plane_limit = 32);

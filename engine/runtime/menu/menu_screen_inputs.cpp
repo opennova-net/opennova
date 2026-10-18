@@ -6,22 +6,50 @@
 
 #include <base/io/strutil.h>
 
+#include <iterator>
 #include <utility>
+#include <vector>
 
 namespace opennova::menu {
 
 namespace {
 
+// A window's TEXT_RSRC, then its parts' trees', then its children's, each once (case aside), from an
+// explicit stack: a menu nests its windows thousands deep.
 void collect(const mnu::Window &w, std::vector<std::string> &names) {
-	if (w.has_text_rsrc) {
+	const auto note = [&](const mnu::Window &window) {
+		if (!window.has_text_rsrc) return;
 		bool seen = false;
 		for (const std::string &name : names)
-			if (strutil::iequals(name, w.text_rsrc)) seen = true;
-		if (!seen) names.push_back(w.text_rsrc);
+			if (strutil::iequals(name, window.text_rsrc)) seen = true;
+		if (!seen) names.push_back(window.text_rsrc);
+	};
+	struct Level {
+		const mnu::Window *window;
+		size_t part, child;
+	};
+	note(w);
+	std::vector<Level> stack{{&w, 0, 0}};
+	while (!stack.empty()) {
+		Level &top = stack.back();
+		const mnu::Window &at = *top.window;
+		const mnu::WindowPart *const parts[] = {&at.list_box, &at.spinup, &at.spindown, &at.scrollbar};
+		if (top.part < std::size(parts)) {
+			const mnu::WindowPart *part = parts[top.part++];
+			if (part->present()) {
+				note(**part);
+				stack.push_back({&**part, 0, 0});
+			}
+			continue;
+		}
+		if (top.child < at.children.size()) {
+			const mnu::Window &child = at.children[top.child++];
+			note(child);
+			stack.push_back({&child, 0, 0});
+			continue;
+		}
+		stack.pop_back();
 	}
-	for (const mnu::WindowPart *part : {&w.list_box, &w.spinup, &w.spindown, &w.scrollbar})
-		if (part->present()) collect(**part, names);
-	for (const mnu::Window &child : w.children) collect(child, names);
 }
 
 } // namespace

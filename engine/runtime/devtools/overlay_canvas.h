@@ -10,6 +10,7 @@
 // draw list: a primitive past its layer's budget is counted, not drawn.
 #pragma once
 
+#include <base/io/fixed.h>
 #include <runtime/devtools/overlay_camera.h>
 #include <runtime/world/geom.h>
 
@@ -26,6 +27,18 @@ uint32_t overlay_rgba(float r, float g, float b, float a = 1.0f);
 uint32_t overlay_index_color(int index, float alpha = 1.0f);
 // The colour with its alpha scaled (0..1).
 uint32_t overlay_fade(uint32_t rgba, float alpha);
+
+// A 16.16 mission-frame point and a 16.16 length in the canvas's units (float
+// mission units), the records' fixed words the overlays draw.
+inline world::Vec3 overlay_point(const int32_t p[3]) {
+	return {static_cast<float>(p[0] / io::kFp16OneD), static_cast<float>(p[1] / io::kFp16OneD),
+			static_cast<float>(p[2] / io::kFp16OneD)};
+}
+inline world::Vec3 overlay_point(const world::FixedVec3 &p) {
+	return {static_cast<float>(p.x / io::kFp16OneD), static_cast<float>(p.y / io::kFp16OneD),
+			static_cast<float>(p.z / io::kFp16OneD)};
+}
+inline float overlay_units(int32_t q16) { return static_cast<float>(q16 / io::kFp16OneD); }
 
 struct OverlayLayerStats {
 	int lines = 0;

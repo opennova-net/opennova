@@ -674,7 +674,13 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
 		world.vehicles.weapon_recoil(owner,
 				weapon->action_fsm.actions[weapon_action::kFire].action_value, weapon,
 				mount->primary_weapon_slot.clip, 1);
-		if (fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index))
+		// The slot's fire action leaves through the adm-indexed arm with its mode
+		// byte from the barrel before the spend [orig: WeaponAction_Fire @0x542C11,
+		//  @0x542C1C..0x542C2F].
+		const int32_t fire_mode =
+				((weapon_events.fired_clip_before_consume & 3) << 4) | 2;
+		if (fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index,
+				fire_mode, mount->primary_weapon_slot_adm))
 			gunner->inf.aim_ref0 = gunner->inf.combat_target;
     }
 }
@@ -1002,7 +1008,6 @@ void AiSystem::on_load(World &) {
     target_set_calls.clear();
     scan_candidates_.clear();
     find_target_calls = 0;
-    fire_shot_seq = 0;
 }
 
 // [orig: Entity_CalcAverageGroundHeight @0x457230] 5-tap weighted ground height (16.16 fixed).

@@ -34,6 +34,7 @@
 #include <runtime/renderer/foliage_frame.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/model_geometry.h>
+#include <runtime/world/occlusion_feed.h>
 #include <runtime/renderer/render_order.h>
 
 using namespace opennova::threedi;
@@ -284,7 +285,7 @@ Transform3D ObjectModel::compose_entity_transform(const Basis &p_basis,
 	if (entity_uniform_scale_q16_ == 0) {
 		return Transform3D(p_basis, p_origin);
 	}
-	const float scale = static_cast<float>(entity_uniform_scale_q16_) / 65536.0f;
+	const float scale = opennova::io::fp16_16_to_float(entity_uniform_scale_q16_);
 	return Transform3D(p_basis.scaled(Vector3(scale, scale, scale)), p_origin);
 }
 
@@ -295,7 +296,7 @@ void ObjectModel::set_shadow_bound_radii(float p_model_sphere, float p_entity_bo
 }
 
 void ObjectModel::set_bound_radii_q16(int32_t p_model_sphere, int32_t p_entity_bound) {
-	const float sphere = static_cast<float>(MAX(p_model_sphere, 0)) / 65536.0f;
+	const float sphere = opennova::io::fp16_16_to_float(MAX(p_model_sphere, 0));
 	const int32_t bound = MAX(p_entity_bound, 0);
 	if (model_sphere_radius_ != sphere || entity_bound_radius_q16_ != bound) {
 		SlotShadow::bump_caster_group_revision();
@@ -310,7 +311,7 @@ float ObjectModel::get_model_sphere_radius() const {
 }
 
 float ObjectModel::get_entity_bound_radius() const {
-	return static_cast<float>(entity_bound_radius_q16_) / 65536.0f;
+	return opennova::io::fp16_16_to_float(entity_bound_radius_q16_);
 }
 
 void ObjectModel::set_entity_light_owner(ObjectModel *p_owner) {
@@ -599,20 +600,11 @@ Dictionary ObjectModel::get_render_part_nodes() const {
 	return result;
 }
 
-// Retail hides part i when bit (i & 31) of entity+0x138 | g_HiddenSectionMask
-// is set; g_HiddenSectionMask (retail @ 0xB7965C) is ~(raw | forced) for a batched building
-// (retail Terrain_RenderSectorModels @ 0x5c5d72..0x5c5e4f) and 0 for every
-// other sector entity (@ 0x5c7b6b), so a model without a verdict hides only
-// its destroyed sections (retail BoneCallback_bldg_World @ 0x4e22cf..0x4e22e2).
+// The engine's section rule (world/occlusion_feed.h section_visible) over the
+// main view's verdict.
 bool ObjectModel::section_part_visible(int p_section) const {
-	const uint32_t bit = 1u << (static_cast<uint32_t>(p_section) & 31u);
-	if ((destroyed_section_mask_ & bit) != 0) {
-		return false;
-	}
-	if (occlusion_section_mask_ == -1) {
-		return true;
-	}
-	return ((static_cast<uint32_t>(occlusion_section_mask_) | forced_section_mask_) & bit) != 0;
+	return opennova::world::section_visible(destroyed_section_mask_, occlusion_section_mask_,
+			forced_section_mask_, p_section);
 }
 
 void ObjectModel::apply_section_visibility() {
@@ -712,7 +704,7 @@ void ObjectModel::set_attachment_pixel_cull(bool p_enabled) {
 		return;
 	}
 	// The weapon model's own header sphere (gpm[5]) — the radius the gate
-	// projects. [retail BoneCallback_org0_World @ 0x4e3d2b]
+	// projects (engine: runtime/renderer/object_lod.h).
 	attachment_pixel_cull_radius_q16_ = object_data_.is_valid()
 			? opennova::world::model_bound_radius_q16_from_3di(object_data_->native_model())
 			: 0;
@@ -1285,7 +1277,7 @@ void ObjectModel::stamp_foliage_mask_side(float p_side) {
 // mounted child submitted through its bone callback with its flags) share
 // that wave. The first-person viewmodel is drawn before the scene and never
 // takes the masks (the engine's foliage_entity_far_side carries the wave
-// witness; retail BoneCallback_org0_World @ 0x4e3c87 submits the children).
+// witness; the children's submit, engine: runtime/renderer/render_order.h).
 void ObjectModel::refresh_foliage_mask_frame(float p_camera_y, float p_water_height) {
 	if (foliage_mask_models_.is_empty()) {
 		return;
@@ -1407,6 +1399,16 @@ void ObjectModel::_notification(int p_what) {
 // Advance the model's render-time state once. Public for deterministic owners
 // and tests: clocks continue while hidden; render-derived work waits until the
 // model can be submitted again.
+void ObjectModel::advance_private_clock(double p_delta) {
+	// The DWORD clock a model with no PanmClock keeps for itself: whole
+	// milliseconds, the fraction carried to the next frame (dropping it ran the
+	// clock 4% slow at 60 fps, 13.5% at 144, and stopped it from 1000 fps).
+	const double total_ms = anim_time_fraction_ms_ + p_delta * 1000.0;
+	const double whole_ms = std::floor(total_ms);
+	anim_time_fraction_ms_ = total_ms - whole_ms;
+	anim_time_ms_ = (anim_time_ms_ + static_cast<int64_t>(whole_ms)) & 0xffffffff;
+}
+
 void ObjectModel::advance_runtime_frame(double p_delta) {
 	advance_runtime_frame_profiled(p_delta, nullptr);
 }
@@ -1434,8 +1436,7 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 				? Time::get_singleton()->get_ticks_usec()
 				: 0;
 		if (panm_clock_.is_null() && is_playing_) {
-			anim_time_ms_ = (anim_time_ms_ + static_cast<int64_t>(p_delta * 1000.0)) &
-					0xffffffff;
+			advance_private_clock(p_delta);
 		}
 		if (p_profile != nullptr) {
 			p_profile->clock_animation_us +=
@@ -1528,8 +1529,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	if (panm_clock_.is_valid()) {
 		anim_time_ms_ = panm_clock_->get_time_ms();
 	} else if (is_playing_) {
-		anim_time_ms_ = (anim_time_ms_ + static_cast<int64_t>(p_delta * 1000.0)) &
-				0xffffffff;
+		advance_private_clock(p_delta);
 	}
 	const bool part_changed = advance_part_anims(p_delta);
 	advance_body_animation(p_delta, p_renderable);
@@ -1557,14 +1557,18 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 		if (ObjectData::weather_ctrl_registers_at(p[0], p[1], p[2], flicker, swing)) {
 			controls_.sample_weather(flicker, swing);
 		} else {
-			// No rings stand. Only the absent set a picture with no world takes
-			// clears them once a weather published them (E13; the editor's
-			// world-less devices, ViewportDevice::publish_scene_state), so a
-			// game model that sampled keeps sampling, as retail's always do,
-			// and one that never sampled has nothing to drop. Here the last
-			// weather's sample goes, the registers read as a model's that never
-			// sampled (the absent set's 0 pair). A value written to or a clear
-			// of either register since stands (ModelControls::drop_weather).
+			// No rings stand. The absent set clears them once a weather
+			// published them: a picture with no world takes it (E13; the
+			// editor's world-less devices, ViewportDevice::publish_scene_state),
+			// and so does a world's teardown (Weather::publish_absent from
+			// release_simulation, bind_simulation(nullptr), _exit_tree and
+			// prepare_autonomous), when the world's own models go with it; while
+			// a world stands its rings stay published, so a game model that
+			// sampled keeps sampling, as retail's always do, and one that never
+			// sampled has nothing to drop. Here the last weather's sample goes,
+			// the registers read as a model's that never sampled (the absent
+			// set's 0 pair). A value written to or a clear of either register
+			// since stands (ModelControls::drop_weather).
 			controls_.drop_weather();
 		}
 	}
@@ -1875,12 +1879,11 @@ Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
 		return get_global_position();
 	}
 	const Ref<ModelLight> info = object_data_->get_light_info(p_index);
-	const int subobject = info->get_subobject();
-	// Zero is the witnessed unattached sentinel. A nonzero subobject follows
-	// the live rendered part, matching the user-point attachment basis.
-	const Transform3D model_to_world = subobject > 0
-			? subobject_model_to_world(subobject) : get_global_transform();
-	return model_to_world.xform(info->get_position());
+	// By the model matrix alone, as the glow spawn places every model light
+	// (engine/runtime/renderer/light_scene.h carries the witness): the record's
+	// subobject byte names an owner group, never a position transform, so an
+	// animated part does not carry its light.
+	return get_global_transform().xform(info->get_position());
 }
 
 void ObjectModel::apply_point_light_selection_to_robj(int p_robj_index,

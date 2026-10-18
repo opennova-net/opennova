@@ -334,7 +334,7 @@ int main(int argc, char **argv) {
         TEST_EXPECT(bad_build_check_set(lone, kRetail, test_slots, problems));
 
         // Every problem at once, each naming its clip, bone or row: a key
-        // naming no slot, a row of nine clips, a bone name of 32 characters, a
+        // naming no slot, a row of thirty clips, a bone name of 32 characters, a
         // key held past the u16 duration word (the channel slerps across a
         // key's whole duration, so no run of keys stands in for it), a clip of
         // 65 bones.
@@ -351,7 +351,7 @@ int main(int argc, char **argv) {
         many.clips = {rst, held, wide};
         many.rows.push_back(BadBuildRow{"anim_reset", {"rst"}});
         many.rows.push_back(BadBuildRow{"anim_nowhere", {"held"}});
-        many.rows.push_back(BadBuildRow{"anim_idle", std::vector<std::string>(9, "wide")});
+        many.rows.push_back(BadBuildRow{"anim_idle", std::vector<std::string>(30, "wide")});
         problems.clear();
         TEST_EXPECT(!bad_build_check_set(many, kRetail, test_slots, problems) && problems.size() == 5);
         const auto found = [&problems](const std::string &words, int clip, int bone, int row) {
@@ -361,7 +361,7 @@ int main(int argc, char **argv) {
             return false;
         };
         TEST_EXPECT(found("row 'anim_nowhere' names no anim slot", -1, -1, 1));
-        TEST_EXPECT(found("names 9 clips; a table row holds 8", -1, -1, 2));
+        TEST_EXPECT(found("names 30 clips; a table row holds 29", -1, -1, 2));
         TEST_EXPECT(found("is 32 characters; a bone name holds 31", 1, 1, -1));
         TEST_EXPECT(found("key 1 holds 70000 frames; a key's duration word holds 65535", 1, 1, -1));
         TEST_EXPECT(found("holds 65 bones", 2, -1, -1));
@@ -370,6 +370,23 @@ int main(int argc, char **argv) {
         problems.clear();
         TEST_EXPECT(!bad_build_mint_set(many, "many.adm", kRetail, test_slots, files, problems) &&
                     problems.size() == 5 && files.empty());
+        // A 29th clip the table writes bare, its line's 30th token: one with a space does not read back, refused
+        // with the writer's rule (adm::adm_bare_token), naming the clip; a bare one passes.
+        {
+            BadBuildSet tail;
+            tail.clips = {rst};
+            tail.rows.push_back(BadBuildRow{"anim_reset", {"rst"}});
+            std::vector<std::string> clips(28, "rst");
+            clips.push_back("rst two");
+            tail.rows.push_back(BadBuildRow{"anim_idle", clips});
+            problems.clear();
+            bad_build_check_set(tail, kRetail, test_slots, problems);
+            TEST_EXPECT(found("names 'rst two' as its 29th clip", -1, -1, 1));
+            tail.rows[1].variants.back() = "rst";
+            problems.clear();
+            bad_build_check_set(tail, kRetail, test_slots, problems);
+            TEST_EXPECT(!found("as its 29th clip", -1, -1, 1));
+        }
         // The assembly refuses the long hold itself, naming bone and key.
         BadAssembled built;
         std::string error;
@@ -399,7 +416,7 @@ int main(int argc, char **argv) {
         // The table reads back as the rows that went in.
         opennova::adm::AdmFile table = {};
         TEST_EXPECT(opennova::adm::adm_parse_buffer(text.data(), text.size(), &table) == 0);
-        TEST_EXPECT(table.count == 2 && table.entries[1].variant_count == 2);
+        TEST_EXPECT(table.count == 2 && table.entries[1].variants.size() == 2);
         TEST_EXPECT(std::strcmp(table.entries[1].variants[1], "walkf2") == 0);
         opennova::adm::adm_free(&table);
 
@@ -427,7 +444,7 @@ int main(int argc, char **argv) {
         quoted.rows[1].variants[0] = "walk\"f";
         TEST_EXPECT(!bad_build_mint_table(quoted, kRetail, text, &error));
         BadBuildSet wide = set;
-        wide.rows[1].variants.assign(9, "walkf");
+        wide.rows[1].variants.assign(30, "walkf");
         TEST_EXPECT(!bad_build_mint_table(wide, kRetail, text, &error));
         // A variant names a clip beside the table, never a path.
         BadBuildSet escape = set;

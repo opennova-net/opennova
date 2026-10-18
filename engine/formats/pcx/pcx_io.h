@@ -34,6 +34,15 @@ bool pcx_read_header(const uint8_t *data, size_t size, PcxHeader &out);
 enum class PcxRowFit : uint8_t { Exact, Overrun, Short };
 PcxRowFit pcx_row_fit(const PcxHeader &header);
 
+// Where the game's PCX reader stops writing an indexed image's texels, counted in texels from its buffer's start
+// (the buffer holds width x height): each row from width x row, its runs decoded while the row's count is below
+// the bytes a line, and each run written whole, so a run across the line's end writes on past it [orig:
+// Texture_LoadPCXFromPFF32 @ 0x56EA30, the rows @ 0x56ED70..0x56EE02: a run's count @ 0x56EDA3, written whole
+// @ 0x56EDC0..0x56EDD0, the row's test @ 0x56EDE1..0x56EDEB]. It reads the run bytes from 128 to the palette's
+// 768 (the stream it allocates and reads, @ 0x56ED19, @ 0x56ED43); where those end before the rows do, the rest of
+// a row is taken a texel a byte, its bytes a line at least. 0 for no header, a three-plane image or no rows.
+uint64_t pcx_indexed_write_end(const uint8_t *data, size_t size);
+
 // How an 8-bit indexed PCX's rows are run-length coded, as a file shows it. Each row is coded alone, a run
 // of 2 to 63 equal bytes as a count byte (0xC0 | n) and the byte, a byte with its top two bits set as a
 // count of 1 and the byte, and:
@@ -41,7 +50,7 @@ PcxRowFit pcx_row_fit(const PcxHeader &header);
 //            coder and MED's (every row ends in a run, none in a lone byte), so the shipped tool's own tail
 //            rule is unwitnessed; a shipped map's header (72 dpi) reads it as this one.
 //   Med      the same, but each row's LAST run always a count pair, a single byte below 0xC0 included:
-//            JO's mission editor, which writes the char map it paints [orig: JOTACmed.exe sub_45E8A0 @
+//            JO's mission editor, which writes the char map it paints [orig: JOTACmed.exe PCX_WriteRleRow @
 //            0x45E8A0, the tail @ 0x45E9BF..0x45E9E7; the rows a row at a time, sub_45EA00 @ 0x45EA2B].
 //   Other    rows neither coder writes as they are (another program's, a row padded past its width, a
 //            run across rows): read whole, written again in the shipped coding.
@@ -96,7 +105,7 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
                         const PcxIndexedForm *form = nullptr);
 // A 24-bit PCX (8 bits a plane, three planes): each row the red, green and blue planes of `width`
 // bytes each, run-length coded a plane at a time, no palette. The shape the game's 24-bit path reads
-// [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31; load_pcx_to_argb @ 0x664cc0's NPlanes == 3 path]: 3 x
+// [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31; PCX_LoadToARGB @ 0x664cc0's NPlanes == 3 path]: 3 x
 // BytesPerLine bytes a row, the planes `width` apart, so its bytes a line are its width exactly.
 bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::string &error);
 
@@ -114,7 +123,7 @@ bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::strin
 // describe (decode_pcx_menu_rgba's bound).
 bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out, std::string &error);
 
-// The menu texture loader's PCX decode, a structural port [orig: load_pcx_to_argb
+// The menu texture loader's PCX decode, a structural port [orig: PCX_LoadToARGB
 // @ 0x664cc0 via CTextureManager_LoadOrFindTexture @ 0x654980]: the header's bits
 // per pixel (byte 3) must be 8; NPlanes (byte 0x41) 3 takes the 24-bit path, which
 // reads 3 * BytesPerLine RLE bytes a row and takes the red, green and blue planes

@@ -50,6 +50,7 @@ struct GameCfg;
 namespace opennova::inmatch {
 
 class HostRole;
+struct NapiNPConnection;
 struct HostScreenState;
 struct NapiNPServerCtx;
 
@@ -92,6 +93,12 @@ MapChangeStep begin_host_map_change(HostRole &role,
 // a new entity for every active slot, a remote one with the slot's class.
 // [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 (the call @0x525BAF)]
 void init_all_player_entities_for_round(HostRole &role);
+
+// A kept slot's per-mission state back to a fresh mission's, around what the
+// map change keeps (its identity, team and kit). [orig:
+// Server_DisconnectAndResetAllPlayerSlots @0x516160, the active slot's stores
+// @0x5163B2..0x516417]
+void reset_slot_for_next_mission(NapiNPConnection &conn);
 
 // The load end's S2C 0x7B to every net player with a slot, each its own
 // summary. [orig: Server_BroadcastPlayerInfoToAll @0x50B310, the call

@@ -119,7 +119,7 @@ void HudFrameCompiler::element_capture_point_labels(const HudFrameState &s, floa
 	for (const HudCaptureLabel &label : labels) {
 		uint32_t color = hud_palette(label.palette);
 		// [orig: `test byte g_HUDFrameCounter, 18h; jnz` @0x5a2a54]
-		if (label.flash && (s.ticks & 0x18) == 0)
+		if (label.flash && (s.hud_frame & 0x18u) == 0)
 			color = kCaptureLabelFlashColor;
 		// Behind the near plane, or clipped by any frustum plane, the marker
 		// draws nothing and returns 0, which also skips the bar [orig: the

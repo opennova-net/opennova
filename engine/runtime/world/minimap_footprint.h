@@ -34,12 +34,12 @@ MinimapFootprintMesh minimap_footprint_from_occlusion(
 
 // The witnessed footprint fill color for a placed entity: team blue/red, the
 // ChangeTeam green, gray otherwise — opaque because the map-overlay caller's
-// zero alpha override is promoted to 0xFF. The byte-547 zone-state recolor
-// under caps flag 0x20 is an unported residual.
+// zero alpha override is promoted to 0xFF. A neutral change-team footprint
+// being taken blinks to its taker's colour at draw time (hud draw_blip).
 // [orig: MapOverlay_DrawView @0x5a5abc; Render_CollisionWireframe
-//  @0x596884..0x596891 and @0x596848..0x596880 —
-//  0x4050A0 / 0xA05040 / itemAttrib bit17 -> 0x609F60 / 0xA0A0A0,
-//  each | 0xFF << 24]
+//  @0x596884..0x596891 and @0x596888..0x5968C0 —
+//  0x4050A0 / 0xA05040 / itemAttrib bit17 -> 0x60A060 (`add eax, 60A060h`
+//  @0x5968B9) / 0xA0A0A0, each | 0xFF << 24]
 uint32_t minimap_footprint_fill_argb(const Entity &entity);
 
 // Place model-local X/Z in mission X/Y with entityHeading-90 degrees. That

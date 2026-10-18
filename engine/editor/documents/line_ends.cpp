@@ -10,6 +10,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/text_types.h>
+#include <editor/model/field_text.h>
 #include <editor/model/core_finding.h>
 #include <editor/model/document.h>
 #include <editor/model/source_state.h>
@@ -21,10 +22,6 @@ namespace opennova::editor {
 namespace {
 
 constexpr size_t npos = std::string_view::npos;
-
-std::string count_of(size_t n, const char *one, const char *many) {
-	return std::to_string(n) + " " + (n == 1 ? one : many);
-}
 
 // A text as the editor numbers its lines (each LF ends one) and as the game's reader cuts it (CR LF
 // alone ends one): its LFs no CR comes before and the first's offset, how many lines it has as
@@ -79,7 +76,7 @@ std::string walk_words(const Reading &r) {
 // The finding's words: where, what the game reads, and what it makes of it.
 std::string reading_words(const Reading &r, LineReader reader) {
 	std::string words =
-			r.whole ? "None of the file's " + count_of(r.lines, "line", "lines") + " ends CR LF"
+			r.whole ? "None of the file's " + counted_digits(r.lines, "line", "lines") + " ends CR LF"
 			        : "Line " + std::to_string(r.first_line) + " ends with an LF alone" +
 			                  (r.lone > 1 ? " (" + std::to_string(r.lone) + " line ends in the file are so)"
 			                              : std::string());
@@ -123,7 +120,7 @@ std::vector<Diagnostic> line_end_findings(const DocumentBase &document, const st
 		if (text->line_ends() != TextLineEnds::AsWritten) words += " Save ends every line CR LF.";
 		Diagnostic d = text_finding(finding_code(CoreFinding::DocumentLineEnds), DiagnosticSeverity::Warning,
 				std::move(words), *text, r.first);
-		fix.detail += ", so the game reads the file's " + count_of(r.lines, "line", "lines") + " as the editor shows them.";
+		fix.detail += ", so the game reads the file's " + counted_digits(r.lines, "line", "lines") + " as the editor shows them.";
 		fix.edits.push_back(line_ends_restore());
 		d.planned.push_back(std::move(fix));
 		findings.push_back(std::move(d));
@@ -140,13 +137,13 @@ std::vector<Diagnostic> line_end_findings(const DocumentBase &document, const st
 	const bool reads = records_read(document, strutil::with_crlf_line_ends(*source->odd_lines), game, restored);
 	const size_t now = records->rows().size();
 	if (reads && restored != now)
-		words += " Read so, the file defines " + count_of(now, "record", "records") + "; with CR LF line ends it defines " +
+		words += " Read so, the file defines " + counted_digits(now, "record", "records") + "; with CR LF line ends it defines " +
 		         std::to_string(restored) + ".";
 	Diagnostic d = make_finding(CoreFinding::DocumentLineEnds, DiagnosticSeverity::Warning, std::move(words),
 			document.path());
 	d.line = r.first_line;
-	fix.detail += reads ? ", and reads the file again: the game then reads its " + count_of(r.lines, "line", "lines") +
-	                              ", " + count_of(restored, "record", "records") + "."
+	fix.detail += reads ? ", and reads the file again: the game then reads its " + counted_digits(r.lines, "line", "lines") +
+	                              ", " + counted_digits(restored, "record", "records") + "."
 	                    : ", and reads the file again.";
 	if (document.dirty()) fix.detail += " The unsaved edits, made over the file as the game reads it now, give way to it.";
 	fix.edits.push_back(line_ends_restore());

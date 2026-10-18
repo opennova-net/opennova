@@ -20,6 +20,9 @@
 
 namespace opennova::world {
 
+class World;
+struct Entity;
+
 // Weapon-slot combo = category*65 + rank; 12 categories x 65 ranks = 780 slots
 // [orig: slot = table + 100*(rank + 65*category) @ 0x5415D3; scans clamp @ 780].
 namespace weapon_combo {
@@ -156,8 +159,8 @@ struct WeaponInventory {
     // observable, so one array carries all classes here (D-WPN-24).
     // [orig: g_LocalAmmoPools @ 0xB75FE8; entity+288 @ 0x540ba5; caps @ 0x24E7DE0]
     std::vector<int32_t> pools;
-    // Shared loaded rounds, distinct from carried reserves [orig: sub_5405F0
-    // @0x5405F0 / sub_540670 @0x540670, local table @0xB761E8].
+    // Shared loaded rounds, distinct from carried reserves [orig: WeaponSlot_GetSharedLoadedRounds
+    // @0x5405F0 / WeaponSlot_SetSharedLoadedRounds @0x540670, local table @0xB761E8].
     std::vector<int32_t> shared_clips;
     int32_t equipped_combo = -1; // [orig: EquippedSlot +0x118 / g_CurrentWeaponSlot]
     int32_t pending_combo = -1;  // [orig: entity+0x308 staged slot / g_PendingWeaponSlot]
@@ -228,7 +231,7 @@ WeaponFillResult weapon_inventory_load_from_display(
         WeaponInventory &inv, int32_t owner_class, bool allow_sniper_scope_zoom);
 
 // The spawn pool seeding [orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x541690, ex the
-// 'WeaponOverlay_BuildTypeLookup' misnomer]: for every populated slot,
+// 'WeaponOverlay_BuildTypeLookup' misnomer]: every pool zeroed, then for every populated slot,
 // pools[def.ammo_class_id] = classrounds[value(player_class)] when the def authors one,
 // else startrounds. player_class 5..9 -> classrounds indices 1/2/3/5/6; other classes
 // take plain startrounds. Walk order is slot order, later slots overwrite (witnessed).
@@ -264,9 +267,52 @@ int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
 // The clip normalization [orig: WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280]:
 // for each populated slot with ammo_class_count (pool-units/round) nonzero and
 // clipsize != -1: return the current clip to the pool, then draw one full clip
-// clamped by what the pool affords. The def+0xDC pass-type leg (shared-pool "clip"
-// weapons) is deferred — see the RE record's divergence entry.
+// clamped by what the pool affords; def+0xDC selects the shared loaded-round bucket.
 void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv);
+
+// The owner's seat as the slot-table ammo accessors read it: entity+0x168 and the
+// seated carrier (entity+0x16C). A UseGun seat (3) reads each pool as the carrier's
+// MountSlot reserve (ammo class 1 as its +0x120 word) and each loaded-round bucket as
+// its MountSlot clip, writes no bucket, and its redraw returns at once; a controller
+// seat (2) reads each bucket as 0 and writes none, spends nothing, and reads each pool
+// as the carrier's reserve when the carrier is an EWeap item, else 0 (ammo class 1
+// always 0). Every other seat reads the owner's own tables. The carrier's reserve and
+// clip are its one MountSlot's here (retail reads its +710 / +708 words, or +1158 /
+// +1156 under its def's PlayerControl bit; 0 without an item def).
+// [orig: Entity_GetScoreValueBySlotType @0x5406E0 - the carrier @0x540707..0x54071A,
+//  its EWeap bit @0x540721..0x540739, the class-1 leg @0x54073F..0x540763, Entity_GetMountSlotReserve
+//  @0x540764..0x540774, seat 2 -> 0 @0x54078F..0x540799; WeaponSlot_GetSharedLoadedRounds @0x540604..0x540627
+//  (Entity_GetMountSlotClip @0x5461A0); WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692; WeaponSlot_DecrementAmmo
+//  @0x540920; WeaponSlots_RecalculateAmmoFromCapacity @0x54228D..0x542294]
+struct WeaponAmmoSeat {
+    int32_t parent_slot = 0;      // entity+0x168: 2 controller, 3 UseGun
+    bool carrier = false;         // a seated carrier exists
+    bool carrier_eweap = false;   // its item def's EWeap bit
+    int32_t carrier_reserve = 0;  // Entity_GetMountSlotReserve: its MountSlot reserve word
+    int32_t carrier_clip = 0;     // Entity_GetMountSlotClip: its MountSlot clip word
+    int32_t carrier_class1 = 0;   // its +0x120 word
+};
+// The entity's seat, read off its mount [orig: entity+0x168 / +0x16C].
+WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity);
+// A pool read through the seat; `own` is the owner's own pool for the class.
+// [orig: Entity_GetScoreValueBySlotType @0x5406E0]
+int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own);
+// A loaded-round bucket read through the seat; `own` is the owner's own bucket.
+// [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0]
+int32_t weapon_seat_bucket(const WeaponAmmoSeat &seat, int32_t own);
+// Whether the seat writes the owner's buckets [orig: WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692].
+bool weapon_seat_writes_buckets(const WeaponAmmoSeat &seat);
+void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv,
+                                   const WeaponAmmoSeat &seat);
+// The total clips and the loadout weight with the owner's seat (the seatless forms are
+// the unseated owner) [orig: WeaponSlot_GetTotalClips @0x5425F0 - the pool
+//  @0x542638, the bucket @0x542651; Server_RecalculateAllPlayerScores @0x501546 /
+//  @0x5015CF; Terrain_AccumulateSectorScores @0x425220].
+int32_t weapon_inventory_total_clips(const WeaponTable &table, const WeaponInventory &inv,
+                                     int32_t combo, const WeaponAmmoSeat &seat);
+int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
+                                             const WeaponInventory &inv,
+                                             const WeaponAmmoSeat &seat);
 
 // The eligibility ammo score [orig: Score_CalculateKillScore @ 0x5407E0 in its
 // slot-predicate role: pool for the def's ammo class + the slot's loaded rounds].
@@ -293,7 +339,7 @@ struct WeaponAvatarGrant {
 };
 WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table,
         WeaponInventory &inv, int32_t adm_index, int32_t owner_class,
-        bool allow_sniper_scope_zoom);
+        bool allow_sniper_scope_zoom, const WeaponAmmoSeat &seat);
 
 // The authority's pickup refusals [orig: WeaponSlot_RecalculateScore @ 0x542450;
 // it returns 0 (proceed) on a peer without authority]. The slot leg: the
@@ -310,9 +356,27 @@ bool weapon_inventory_all_full(const WeaponTable &table, const WeaponInventory &
 
 // The reload transfer [orig: WeaponSlot_ReloadAmmo @ 0x541720, net-re §5.58]: refund
 // the remaining clip into the pool, then refill to clipsize clamped by the pool.
-// Returns the rounds now loaded (unchanged when the def has no clip).
+// Returns the rounds now loaded as the seat reads them (unchanged when the def has
+// no clip). The ammo reads, the spend and the bucket write take the owner's seat.
 int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &inv,
-                                     int32_t combo);
+                                     int32_t combo, const WeaponAmmoSeat &seat);
+
+// The reload transfer on an EWeap entity, as retail's accessors route an EWeap
+// owner. The routed slot (the entity's own, or its carrier's when the route bit
+// is set) and its def give the loaded rounds, the draw's size and the clip store;
+// the entity's own slot and def take the refund, the reserve read and the spend.
+// The remaining clip is refunded through the own slot's re-split (clip + reserve +
+// the refund, capped at its def's startrounds, re-split into a clipsize clip and
+// the rest), then clipsize * units is drawn from the own reserve word (floored at
+// 0, -1 kept) and the routed clip becomes what was drawn.
+// [orig: WeaponSlot_ReloadAmmo @0x541720 - Entity_GetWeaponSlots @0x541730 (the
+//  route @0x54610E..0x546113), the loaded word @0x5417C9, WeaponSlot_AddAmmo
+//  @0x5417E7 -> the re-split @0x5462A0..0x5462FF on the entity's own words
+//  (@0x540A85..0x540AB0), the reserve read Entity_GetMountSlotReserve @0x546120
+//  from @0x541805 (@0x540780..0x54078E), WeaponSlot_DecrementAmmo @0x541821 ->
+//  sub_5461D0 @0x5461D0, the clip store @0x541850]
+void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotState &routed,
+                              const WeaponTableEntry &own_def, WeaponSlotState &own);
 
 // Player_SelectWeaponSlot @ 0x4DD680 — the category-level select. Stages the pending
 // slot; the caller commits pending->equipped unless seated (the original applies to

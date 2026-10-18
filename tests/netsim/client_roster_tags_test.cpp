@@ -87,7 +87,7 @@ void test_walk_and_gates() {
 			CHECK(!t.dead && t.revive_seconds == 0 && !t.medic_request);
 			CHECK(t.health_ratio_fp16 == 0x8000); // 40/80
 			CHECK(t.position.x == 10.0f && t.position.z == 3.0f);
-			CHECK(t.net_id == 0x0002);
+			CHECK(t.fallback_name_id == 0x0002);
 		}
 		if (t.name == "Bee") {
 			saw_bee = true;

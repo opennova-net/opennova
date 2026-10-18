@@ -73,7 +73,7 @@ bool texture_role_has_budget(renderer::TextureRoleId role);
 //   A8R8G8B8), their full chains [orig: PolyTrn_InitTextures @ 0x60ABAD..0x60ABC6 (the word), @ 0x60B4FE..0x60B532,
 //   @ 0x60B970..0x60B986]; the splat layers through the stage loader (a .dds beside the name first) with
 //   0x400200, 0x8 and the terrain texture detail's halvings (0x20000 at level 0, 0x10000 at 1 and 2, none at 3),
-//   DXT1 from pixels [orig: @ 0x60ABE5..0x60AC13; sub_605D70 @ 0x605DBF..0x605E0A from Terrain_Init
+//   DXT1 from pixels [orig: @ 0x60ABE5..0x60AC13; Terrain_ApplyDetailSettings @ 0x605DBF..0x605E0A from Terrain_Init
 //   @ 0x60FC0D..0x60FC36]; the second detail map through the stage loader with 0x8 and the same halvings,
 //   A8R8G8B8 from pixels [orig: @ 0x60AF80..0x60AF88]; its far pair drawn into its levels, no texture of its own
 //   [orig: GTexture_CreateFromPixelDataWithAlphaBlend @ 0x60B01A]; the tile atlas at its sides with 0x100203, DXT5,

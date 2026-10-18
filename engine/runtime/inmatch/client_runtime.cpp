@@ -902,8 +902,9 @@ void ClientRuntime::stage_reload_notifications_before_body_tick() {
 	for (const WeaponReload &reload : decoded) {
 		// The retail receive handler applies this side effect immediately. It is
 		// therefore visible to Entity_UpdateInfantryPlayerBody later in the same
-		// Game_ProcessMainFrame. Self reloads take the WeaponSlot_ReloadAmmo branch;
-		// remote non-Person refill remains deliberately unmodeled here.
+		// Game_ProcessMainFrame. Self reloads take the WeaponSlot_ReloadAmmo branch,
+		// and a non-Person EWeap entity's refill runs in the joiner's drain
+		// (VehicleSystem::reload_weapon_slot).
 		// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42c0a0;
 		//  remote Person stamp @0x42c10b; Client_ProcessNetworkFrame @0x526692;
 		//  Entity_UpdateAllEntities @0x52674b]
@@ -1254,6 +1255,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// S2C 0x5A. That is distinct from the causal spawn release below.
 			if (pr.gameplay_release_applied || pr.reached_in_match || respawn_release_in_poll)
 				deployed_ = true;
+			if (pr.game_start_acked) input_reset_pending_ = true;
 			// The owner-ID match may precede loadout by dozens of world-stream packets. Retail only
 			// opens its authoritative spawn latch after H and the applicable deployment release meet.
 			if (pr.reached_in_match || respawn_release_in_poll) {

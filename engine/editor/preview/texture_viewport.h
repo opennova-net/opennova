@@ -117,7 +117,8 @@ struct TexturePlacement {
 // @ 0x6912AD..0x6912F9]: renderer::extend_box_chain, the game's own chain.
 std::vector<TextureLevel> texture_game_chain(const TextureLevel &first, uint32_t levels);
 // `level` halved `halvings` times as the game halves a texture before it makes its device texture: each texel
-// the truncated mean of a 2 x 2 block (renderer::halve_rgba_times, GTexture_Downsample2x2_RGBA8).
+// the truncated mean of a 2 x 2 block (renderer::halve_rgba_times, GTexture_Downsample2x2_RGBA8), as the
+// A8R8G8B8 device's level 0 holds it (a side halved to 0 made 1, renderer::load_rgba8_filter_none).
 TextureLevel texture_halved(const TextureLevel &level, uint32_t halvings);
 // A normal map's level lit from `light` degrees round the picture (0 from its right, 90 from its top) and
 // above it: each texel's colour read as a normal ((c / 255) * 2 - 1, red across, green down the texture as the

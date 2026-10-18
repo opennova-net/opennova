@@ -204,9 +204,68 @@ static void test_unobservable_changes_and_live_draws() {
 	CHECK(!sources.is_hidden(200) && sources.shadow_revision() > before_clear);
 }
 
+// The caster's 16.16 origin is the placement's own words, carried through the rows, the placed
+// instances and the replacements; a pose moves it only on an axis whose float moved
+// [orig: Terrain_CollectAndRenderTileModels @ 0x60D50A, 0x60D531 read entity+4 / +8].
+static void test_placement_origin_words() {
+	CHECK((static_source_origin_of(at(1.5f, 0, -2.25f)) == StaticSourceOrigin{0x18000, 0x24000}));
+	// x = 0x01000001 is 256 + 1/65536: its float image is 256.0, whose round trip is 0x01000000;
+	// y = -0x02000003 rounds to -0x02000004 the same way.
+	constexpr int32_t kX = 0x01000001, kY = -0x02000003;
+	const float fx = static_cast<float>(kX) / 65536.0f, fy = static_cast<float>(kY) / 65536.0f;
+	CHECK(fx == 256.0f);
+	CHECK((static_source_origin_of(at(fx, 3, -fy)) == StaticSourceOrigin{0x01000000, -0x02000004}));
+	StaticSources sources;
+	StaticTerrainShadowSource row;
+	row.entity_kind = kEntityKindBuilding;
+	row.entity_index = 5;
+	row.bms_id = 61;
+	row.graphic = "house";
+	row.world_transform = at(fx, 3, -fy);
+	row.origin_q16 = {kX, kY};
+	sources.record_shadow(row);
+	auto rows = sources.shadow_sources(resolve);
+	CHECK(rows.size() == 1 && (rows[0].origin_q16 == StaticSourceOrigin{kX, kY}));
+	// The placed instance's words win as its transform does.
+	StaticInstance placed = instance(61, 5);
+	placed.xform = at(fx, 3, -fy);
+	placed.origin_q16 = {kX, kY};
+	sources.register_instance(placed, false);
+	CHECK((sources.shadow_sources(resolve)[0].origin_q16 == StaticSourceOrigin{kX, kY}));
+	// The same pose again, or a turn in place: the words stand.
+	CHECK(sources.update_shadow_transform(kEntityKindBuilding, 5, at(fx, 3, -fy)));
+	auto turned = at(fx, 3, -fy);
+	turned[0] = 0; turned[2] = 1; turned[6] = -1; turned[8] = 0;
+	CHECK(sources.update_shadow_transform(kEntityKindBuilding, 5, turned));
+	CHECK((sources.shadow_sources(resolve)[0].origin_q16 == StaticSourceOrigin{kX, kY}));
+	// A move east: x takes the new float's word, y keeps the placement's.
+	CHECK(sources.update_shadow_transform(kEntityKindBuilding, 5, at(300.5f, 3, -fy)));
+	CHECK((sources.shadow_sources(resolve)[0].origin_q16 == StaticSourceOrigin{0x012C8000, kY}));
+	CHECK((sources.instance(61)->origin_q16 == StaticSourceOrigin{0x012C8000, kY}));
+	// A husk stands at the entity's words, whatever its transform's float says.
+	CHECK(sources.set_shadow_replacement(61, "husk", at(300.5f, 3, -fy), true, 20));
+	rows = sources.shadow_sources(resolve);
+	CHECK(rows[0].graphic == "husk" && (rows[0].origin_q16 == StaticSourceOrigin{0x012C8000, kY}));
+	// A manual registration's words ride its merged row.
+	StaticInstance manual = instance(62, 6);
+	manual.origin_q16 = {kX, kY};
+	sources.register_instance(manual, true);
+	rows = sources.shadow_sources(resolve);
+	CHECK(rows.size() == 2 && rows[1].bms_id == 62 && (rows[1].origin_q16 == StaticSourceOrigin{kX, kY}));
+	// A caller holding the words (the editor's document) hands them: the rows take them, even
+	// where the float pose stands still, and the change publishes.
+	const auto revision = sources.shadow_revision();
+	CHECK(sources.update_shadow_transform(kEntityKindBuilding, 5, at(300.5f, 3, -fy),
+			StaticSourceOrigin{0x012C8001, kY + 1}));
+	CHECK((sources.shadow_sources(resolve)[0].origin_q16 == StaticSourceOrigin{0x012C8001, kY + 1}));
+	CHECK((sources.instance(61)->origin_q16 == StaticSourceOrigin{0x012C8001, kY + 1}));
+	CHECK(sources.shadow_revision() > revision);
+}
+
 int main() {
 	test_manual_shadow_lifecycle();
 	test_placed_order_policy_and_epoch();
 	test_unobservable_changes_and_live_draws();
+	test_placement_origin_words();
 	return failures ? 1 : 0;
 }

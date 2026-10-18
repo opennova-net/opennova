@@ -289,7 +289,7 @@ void HudFrameCompiler::element_team_id_line(const HudFrameState &state, float w,
 		int text_w = 0;
 		bold.measure(text.c_str(), bold_scale, bold_scale, &text_w, &text_h);
 	}
-	// The spectated player's name, first [orig: sub_5D2EA0(.., dword_A860F4 + 244,
+	// The spectated player's name, first [orig: sub_5D2EA0(.., g_DeathScreenTarget + 244,
 	// ..) @0x59AC64].
 	if (death)
 		emit_half_bright_text(label_font_bold_, label_scale_, s.spectated_name.c_str(),

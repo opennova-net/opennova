@@ -9,10 +9,10 @@
 #include <runtime/world/world.h>
 
 #include <base/gameprofile/game_type.h>
-#include <base/io/cp1252.h> // cp1252_isspace (the .ACP CRT isspace)
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <formats/gamecfg/game_cfg.h>
+#include <net/admin/admin_protocol.h> // admin_split_command (DispatchCommand's split)
 #include <net/npwire/ingame_message_id.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 #include <net/title/title_identity.h> // title_in_match (WEAPON's armory value, DFX2-10)
@@ -52,15 +52,6 @@ constexpr uint32_t kCycleLingerTicks = 620;
 // [orig: CAdminServer_HandleGet — the buffer at frame +0x18, the cookie at +0x4C]
 constexpr size_t kGameSettingsValueMaxChars = 52 - 21 - 2 - 1 - 1;
 
-// The CRT isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252 (the six C-locale
-// spaces plus 0xA0, D-NET-381 / D-NET-382). The walk passes the byte sign-extended; the CRT's
-// ctype table mirrors its 128..254 rows below index 0, so 0xA0 (-96) splits here too.
-// [orig: CAdminServer_DispatchCommand @0x406720 - `movsx` @0x4067AD, isspace @0x4067B5 ->
-//  @0x76B964; CRT_init_ctype's mirror copy @0x784C59]
-bool is_space(char c) {
-	return cp1252_isspace(static_cast<uint8_t>(c));
-}
-
 int32_t atol_of(const std::string &s) {
 	return io::retail_atol(s.c_str());
 }
@@ -78,33 +69,6 @@ std::string itos(int64_t v) {
 }
 
 } // namespace
-
-// The command line's split: the walk NUL-terminates each run of spaces and starts a token
-// at the run's end, at most 25 tokens; the last one runs to the line's end.
-// [orig: CAdminServer_DispatchCommand @0x406720 - the 25-token cap @0x4067A0, the isspace
-//  walk @0x4067A0..0x4067EB]
-std::vector<std::string> admin_split_command(std::string_view line) {
-	std::vector<std::string> tokens;
-	size_t start = std::string_view::npos;
-	bool expect_new = true;
-	size_t count = 0;
-	for (size_t i = 0; i < line.size(); ++i) {
-		if (count >= 25) break;
-		if (is_space(line[i])) {
-			if (start != std::string_view::npos) tokens.emplace_back(line.substr(start, i - start));
-			start = std::string_view::npos;
-			expect_new = true;
-		} else if (expect_new) {
-			expect_new = false;
-			start = i;
-			++count;
-		}
-	}
-	// The last token runs to the line's end: the walk ended there, or the cap stopped it
-	// writing terminators.
-	if (start != std::string_view::npos) tokens.emplace_back(line.substr(start));
-	return tokens;
-}
 
 std::string admin_usage_reply(uint32_t rights) {
 	using namespace admincfg::right;
@@ -132,7 +96,8 @@ AdminConsole::AdminConsole(NapiNPServerCtx &ctx, Seams seams) : ctx_(ctx), seams
 bool AdminConsole::dispatch(const AdminSession &session, std::string_view line,
 		std::vector<std::string> &replies) {
 	using namespace admincfg::right;
-	const std::vector<std::string> tokens = admin_split_command(line);
+	const std::vector<std::string_view> split = admin_split_command(line);
+	const std::vector<std::string> tokens(split.begin(), split.end());
 	const uint32_t rights = session.rights;
 	if (!tokens.empty()) {
 		const std::string &verb = tokens[0];

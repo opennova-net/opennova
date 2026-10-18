@@ -153,31 +153,17 @@ func _refresh_lan_list() -> void:
 	if id < 0:
 		return
 	var rows := PackedStringArray()
-	for s in _servers:
-		rows.append(_format_server_row(s))
+	for s: LanServerRow in _servers:
+		# Map identity is deliberately absent: retail LAN enumeration has not
+		# joined the session yet, and it arrives in the post-auth 0x7B stream.
+		# The row text is the engine's (net/npwire/lan_discovery.h
+		# lan_discovery_row_label carries the witness).
+		rows.append(s.list_label())
 	# Surface a search failure in the list itself (the row is inert: the join
 	# guard checks against _servers, which stays empty).
 	if rows.is_empty() and not _browse_error.is_empty():
 		rows.append("Search failed - %s" % _browse_error)
 	_driver.set_widget_items(id, rows)
-
-
-func _format_server_row(s: LanServerRow) -> String:
-	var name := s.server_name if not s.server_name.is_empty() else "?"
-	var cur := s.players
-	var max_p := s.max_players
-	# Retail LAN enumeration has not joined the session yet, so map identity is
-	# deliberately absent here; it arrives in the normal post-auth 0x7B stream.
-	# The row format is the witnessed retail pair: with an advertised expansion
-	# variant "%s - %s (%ld/%ld)", else "%s (%ld/%ld)". The list walks the
-	# translated session record CNapiNetwork_OnSessionDiscovered @0x4c8470 fills
-	# from the 0x81 (SN -> +32, NP -> +580, MP -> +584, SUS2 -> +1104), which
-	# the row copies 32 bytes of the expansion from.
-	# [orig: UI_ProcessLANSessionStateMachine @ 0x558de0 sprintf @0x559493/@0x5594b9]
-	var expansion := s.expansion.strip_edges()
-	if expansion.is_empty():
-		return "%s (%d/%d)" % [name, cur, max_p]
-	return "%s - %s (%d/%d)" % [name, expansion, cur, max_p]
 
 
 func _on_list_activated(id: int, row: int) -> void:

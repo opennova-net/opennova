@@ -2,12 +2,13 @@
 // other, and it reads nothing past the chunk. Asserts used to guard these, and release builds
 // compile them out. The editor reads every model in a project, and a file another tool saved
 // badly used to crash it. Each case below builds a minimal valid model in memory and then
-// spoils one chunk.
+// spoils one chunk; the last reads deep and wide trees up to the game's 2000-node cap.
 #include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include <formats/threedi/threedi.h>
 #include <formats/threedi/threedi_3di3.h>
 
 using namespace opennova::threedi;
@@ -189,6 +190,65 @@ int main() {
 			model(good_vert(), good_indx(), {}, { chunk("CMDL", Bytes(64, 0)) }));
 	expect_refused("a material naming more than 24 textures",
 			model(good_vert(), good_indx(), {}, { chunk("MTRL", mtrl_data(25)) }));
+
+	// Deep and wide trees. The game keeps a model's chunks as nodes in a list capped at 2000, its own
+	// ROOT node at index 0, so at most 1999 chunks below the file's root read and the 2000th refuses
+	// the load, at any depth (ChunkFile_CreateChildNode @ 0x56F560, the cap @ 0x56F60E..0x56F614).
+	// The port counts the same and reads with an explicit stack: 1999 nested parent chunks, which
+	// a recursion a level would hold too, read; 10,000 (80,016 bytes), which ran the old walk's
+	// stack out, are refused by the cap.
+	const auto nested = [](size_t levels) { // `levels` chunks below the root: NEST parents, a leaf
+		Bytes file = { '3', 'D', 'I', '3' };
+		put_u32(file, 3);
+		for (size_t i = 0; i < levels; ++i) {
+			file.insert(file.end(), { 'N', 'E', 'S', 'T' });
+			put_u32(file, (uint32_t)(8 * (levels - i)) | THREEDI_3DI3_PARENT_FLAG);
+		}
+		file.insert(file.end(), { 'L', 'E', 'A', 'F' });
+		put_u32(file, 0);
+		return file;
+	};
+	const auto wide = [](size_t chain, size_t leaves) { // a LIST root: a chain of `chain` chunks, `leaves` leaves
+		Bytes file = { '3', 'D', 'I', '3' };
+		put_u32(file, 3);
+		file.insert(file.end(), { 'L', 'I', 'S', 'T' });
+		put_u32(file, (uint32_t)(8 * (chain + leaves)) | THREEDI_3DI3_PARENT_FLAG);
+		for (size_t i = 0; i + 1 < chain; ++i) {
+			file.insert(file.end(), { 'N', 'E', 'S', 'T' });
+			put_u32(file, (uint32_t)(8 * (chain - 1 - i)) | THREEDI_3DI3_PARENT_FLAG);
+		}
+		for (size_t i = 0; i < (chain ? 1 : 0) + leaves; ++i) {
+			file.insert(file.end(), { 'L', 'E', 'A', 'F' });
+			put_u32(file, 0);
+		}
+		return file;
+	};
+	const auto tree_rc = [](const Bytes &file) {
+		ThreediFile tree = {};
+		const int rc = threedi_read_memory(file.data(), file.size(), &tree);
+		if (rc == 0)
+			threedi_free_file(&tree);
+		return rc;
+	};
+	check(nested(10000).size() == 80016, "the nesting case is the 80,016-byte file");
+	check(tree_rc(nested(1999)) == 0, "1999 nested chunks read");
+	check(tree_rc(nested(2000)) != 0, "the 2000th nested chunk is refused");
+	check(tree_rc(nested(10000)) != 0, "10,000 nested parent chunks are refused");
+	expect_refused("a model nested 10,000 chunks deep", nested(10000));
+	check(tree_rc(wide(0, 1999)) == 0, "1999 sibling chunks read");
+	check(tree_rc(wide(0, 2000)) != 0, "the 2000th sibling is refused");
+	check(tree_rc(wide(1000, 999)) == 0, "1000 nested and 999 siblings read");
+	check(tree_rc(wide(1000, 1000)) != 0, "one more is refused: the cap counts chunks, not depth");
+	{
+		// A model counts its own chunks too: RLOD, VERT and INDX below ROOT, so a chain of 1996 chunks
+		// beside them reads and one of 1997 is refused.
+		const auto with_chain = [&](size_t chain) {
+			const Bytes deep = nested(chain - 1); // chain - 1 NEST parents and a leaf: `chain` chunks
+			return model(good_vert(), good_indx(), {}, { Bytes(deep.begin() + 8, deep.end()) });
+		};
+		expect_read("a model holding a 1996-chunk chain", with_chain(1996));
+		expect_refused("a model holding a 1997-chunk chain", with_chain(1997));
+	}
 
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

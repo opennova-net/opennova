@@ -10,10 +10,13 @@
 #include <formats/avatars/avatars.h>
 #include <formats/avatars/preview_animation.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
+#include <base/io/bam.h>
 #include <runtime/inmatch/join_character_profile.h>
+#include <runtime/menu/player_info_avatars.h>
 #include <net/npwire/character_id.h>
 
 #include <algorithm>
+#include <ctime>
 
 using namespace godot;
 using namespace opennova::avatars;
@@ -39,6 +42,12 @@ String AvatarDatabase::preview_skeleton_bad() {
 }
 String AvatarDatabase::preview_idle_bad() {
 	return String(opennova::avatars::kPreviewIdleBad);
+}
+double AvatarDatabase::preview_initial_yaw_rad() {
+	// The clock word the reseed takes (the CRT _time64's seconds, a platform primitive).
+	const int32_t bam = opennova::menu::player_info_preview_initial_yaw_bam(
+			static_cast<uint32_t>(std::time(nullptr)));
+	return static_cast<double>(bam) * opennova::io::kRadiansPerBam;
 }
 
 PackedStringArray AvatarDatabase::part_camo_registers() {
@@ -85,6 +94,8 @@ void AvatarDatabase::_bind_methods() {
 	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("preview_idle_bad"), &AvatarDatabase::preview_idle_bad);
 	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_initial_yaw_rad"), &AvatarDatabase::preview_initial_yaw_rad);
+	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("apply_part_camo", "model", "camo", "owner"),
 			&AvatarDatabase::apply_part_camo);
 	ClassDB::bind_method(D_METHOD("load", "path"), &AvatarDatabase::load);
@@ -119,7 +130,6 @@ void AvatarDatabase::_bind_methods() {
 	BIND_CONSTANT(ALIGN_EVIL);
 	BIND_CONSTANT(DIAG_WARNING);
 	BIND_CONSTANT(DIAG_ERROR);
-	BIND_CONSTANT(PREVIEW_INITIAL_YAW_RANGE_DEG);
 }
 
 AvatarDatabase::~AvatarDatabase() {

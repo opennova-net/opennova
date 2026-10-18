@@ -843,44 +843,52 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     // recipient) over the pool-3 markers, with the marker waypoint fields.
     // [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e41 (channel scan) +
     //  Entity_SpawnFromBMSRecord @0x40f0aa (the marker fields); ≤128 entries]
+    // Its stops are the words the writer walks, past the record's 32 slots into the next records
+    // (bms::player_route_stops).
     world.script.waypoints.clear();
-    for (const bms::WaypointRecord &wr : m.waypoint_records) {
-        if (!bms::is_player_route(wr))
+    for (const uint32_t stop : bms::player_route_stops(m)) {
+        // Each word looked up unchecked in pool 3 [orig: Pool_GetEntryUnchecked @0x441fc0, from @0x502f2d]:
+        // a slot no marker fills is the zeroed entry Pool_Clear leaves at the mission's reset [orig:
+        // Pool_Clear @0x442060] (position 0, radius 0, name 0, not done); a word past the pool's 768
+        // [orig: EntityPool_Allocate, the capacity @0x442203] reads memory past the pool, the next pool's
+        // entities among it, which the editor's build refuses (mission.route_past_pool), so none is listed.
+        if (stop >= world::retail_pool_capacity(3)) continue;
+        const int idx = static_cast<int>(stop);
+        if (idx >= static_cast<int>(m.markers.size())) {
+            WaypointEntry zeroed;
+            zeroed.node = idx;
+            zeroed.radius = 0;
+            world.script.waypoints.entries.push_back(zeroed);
             continue;
-        const int count = static_cast<int>(bms::player_route_stop_count(wr));
-        for (int k = 0; k < count; ++k) {
-            const int idx = static_cast<int>(wr.waypoint_numbers[k]);
-            if (idx < 0 || idx >= static_cast<int>(m.markers.size())) continue;
-            const bms::Entity &mk = m.markers[static_cast<size_t>(idx)];
-            WaypointEntry e;
-            e.node = idx;
-            if (!admit_record(mk, world, opts)) {
-                e.radius = 0;
-                world.script.waypoints.entries.push_back(e);
-                continue;
-            }
-            e.x = mk.x;
-            e.y = mk.y;
-            e.z = mk.z;
-            // [orig: entity+0 = wp_distance<<16, default 0x8000 @0x40f09b]
-            e.radius = (mk.wp_distance != 0) ? (mk.wp_distance << 16) : opts.arrival_radius;
-            // [orig: entity+672 = the record's ttool_index @0x40f0ad — the
-            //  WPNames STRWPNAME%03i id]
-            e.name_id = mk.ttool_index;
-            // [orig: entity+528 = word rec 'wp_adv_trigger' @0x40f0b7; the
-            //  fired-event index that completes this waypoint]
-            e.linked_event = mk.wp_adv_trigger;
-            // [orig: entity+535 = attributes bit 22 @0x40f123-0x40f129]
-            e.chain_back = (mk.bmsi_attributes & (1u << 22)) != 0;
-            // [orig: entity+0x20C = the record's wpgoal0..3 dword (+0x64) on a
-            //  type-6005 marker @0x40f090; read bytewise @0x4dbeb4]
-            if (mk.type_id == def::DEF_TYPE_WAYPOINT)
-                for (int g = 0; g < 4; ++g)
-                    e.goals[g] = static_cast<uint8_t>(
-                            static_cast<uint32_t>(mk.wp_goals) >> (8 * g));
-            world.script.waypoints.entries.push_back(e);
         }
-        break; // first flagged channel only [orig: the @0x502e53 scan stops on the first hit]
+        const bms::Entity &mk = m.markers[static_cast<size_t>(idx)];
+        WaypointEntry e;
+        e.node = idx;
+        if (!admit_record(mk, world, opts)) {
+            e.radius = 0;
+            world.script.waypoints.entries.push_back(e);
+            continue;
+        }
+        e.x = mk.x;
+        e.y = mk.y;
+        e.z = mk.z;
+        // [orig: entity+0 = wp_distance<<16, default 0x8000 @0x40f09b]
+        e.radius = (mk.wp_distance != 0) ? (mk.wp_distance << 16) : opts.arrival_radius;
+        // [orig: entity+672 = the record's ttool_index @0x40f0ad — the
+        //  WPNames STRWPNAME%03i id]
+        e.name_id = mk.ttool_index;
+        // [orig: entity+528 = word rec 'wp_adv_trigger' @0x40f0b7; the
+        //  fired-event index that completes this waypoint]
+        e.linked_event = mk.wp_adv_trigger;
+        // [orig: entity+535 = attributes bit 22 @0x40f123-0x40f129]
+        e.chain_back = (mk.bmsi_attributes & (1u << 22)) != 0;
+        // [orig: entity+0x20C = the record's wpgoal0..3 dword (+0x64) on a
+        //  type-6005 marker @0x40f090; read bytewise @0x4dbeb4]
+        if (mk.type_id == def::DEF_TYPE_WAYPOINT)
+            for (int g = 0; g < 4; ++g)
+                e.goals[g] = static_cast<uint8_t>(
+                        static_cast<uint32_t>(mk.wp_goals) >> (8 * g));
+        world.script.waypoints.entries.push_back(e);
     }
 
     // The objectives panel's per-slot text-id tables, from the mission header.

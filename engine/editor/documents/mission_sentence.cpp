@@ -440,15 +440,6 @@ std::string param_word(ParamKind kind, int64_t value, const MissionNames &names)
 	return number(value);
 }
 
-int64_t param_of(const bms::Trigger &trigger, int slot) {
-	const int32_t params[4] = {trigger.param1, trigger.param2, trigger.param3, trigger.param4};
-	return slot >= 0 && slot < 4 ? params[slot] : 0;
-}
-int64_t param_of(const bms::Action &action, int slot) {
-	const int32_t params[4] = {action.param1, action.param2, action.param3, action.param4};
-	return slot >= 0 && slot < 4 ? params[slot] : 0;
-}
-
 // Words built as runs (trigger_runs, action_runs): each piece added with what it is, a piece of the same
 // kind as the last joining it.
 class Runs {
@@ -687,10 +678,10 @@ std::vector<LogicRun> trigger_runs(const bms::Trigger &trigger, const MissionNam
 		// The AWOL counter counts 64-tick steps, not seconds [D-EVT-2]: its time as they come to.
 		if (main == kPlayerType && sub == 36 && slot == 0) {
 			char text[32];
-			std::snprintf(text, sizeof(text), "%.1f s", logic_units_seconds(param_of(trigger, slot)));
+			std::snprintf(text, sizeof(text), "%.1f s", logic_units_seconds(trigger.param(slot)));
 			return std::string(text);
 		}
-		std::string out = param_word(mission::trigger_param_kind(trigger, slot), param_of(trigger, slot), names);
+		std::string out = param_word(mission::trigger_param_kind(trigger, slot), trigger.param(slot), names);
 		if (mission::trigger_ssn_unrecorded(trigger, slot)) out += " (never recorded: the game keeps SSNs below 128)";
 		return out;
 	};
@@ -699,7 +690,7 @@ std::vector<LogicRun> trigger_runs(const bms::Trigger &trigger, const MissionNam
 		// An area trigger naming a zone that does not resolve is dropped at the mission's start: it reads
 		// false, so negated it reads true [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000; section 7.3].
 		const int zone_slot = (main == kGroup || main == kSingle) && sub == 10 ? 1 : main == kPlayerType && sub == 37 ? 0 : -1;
-		if (zone_slot >= 0 && !names.zone_resolves(param_of(trigger, zone_slot)))
+		if (zone_slot >= 0 && !names.zone_resolves(trigger.param(zone_slot)))
 			out.add(negated ? " (always true in the game: it drops a trigger whose area does not resolve, and reads it false)"
 			                : " (never true in the game: it drops a trigger whose area does not resolve)",
 			        kNote);
@@ -725,7 +716,7 @@ std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names
 std::vector<LogicRun> action_runs(const bms::Action &action, const MissionNames &names, const bms::Header *header) {
 	const int32_t type = int32_t(action.action_type);
 	const int32_t sub = action.action_sub_type;
-	const auto word = [&](int slot) { return param_word(mission::action_param_kind(action, slot), param_of(action, slot), names); };
+	const auto word = [&](int slot) { return param_word(mission::action_param_kind(action, slot), action.param(slot), names); };
 	const auto param = [&](int slot) { return Runs().add(word(slot), slot); };
 	Runs out;
 	switch (action.action_type) {

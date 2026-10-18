@@ -5,6 +5,7 @@
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/spectator_session.h>
 #include <runtime/inmatch/client_replica_emplaced.h>
+#include <runtime/inmatch/client_replica_present_projection.h>
 #include <runtime/inmatch/client_weapon_replay.h>
 #include <runtime/inmatch/game_config.h>
 
@@ -22,6 +23,7 @@
 
 #include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
+#include <base/io/strutil.h>          // iequals (the def's class tag)
 
 #include <runtime/mission/collision_resolve.h> // find_item_def (a rider's authored hp)
 #include <runtime/mission/seat_spec_extract.h> // refresh_item_seat_spec (a streamed row's seats)
@@ -496,13 +498,17 @@ void JoinerRole::tick_local_weapon() {
 		const world::AiEntity *pilot = kernel.world.ai.for_handle(params.owner);
 		if (pilot == nullptr)
 			continue;
-		params.shot_seq = ++lp.weapon.round_sequence;
+		// The client's spawn mints the round's id from the fresh word, and the
+		// descriptor's hit_part is the spawned round's [orig:
+		//  Entity_FireWeaponAndSendPacket's client leg RoundData_SpawnRound
+		//  @0x42C02B, pool[ret]+0x78 @0x42C030].
+		params.shot_seq = world::RoundSim::kFreshRoundWord;
 		params.shooter_handle = self_wire_handle();
 		params.shooter_carrier_handle = io.carrier_exclusion();
 		kernel.world.round_sim.spawn(kernel.world, params, world::RoundConsequenceMode::VisualOnly);
 		world::LocalWeaponFiredWire fired;
 		fired.valid = true;
-		fired.shot_seq = params.shot_seq;
+		fired.shot_seq = kernel.world.round_sim.spawned_round_word();
 		// The descriptor's off32 is the PILOT's entity+0x160 — his handheld
 		// ammo-def index, the same source the on-foot pump reads (the equipped
 		// adm's ammo row) — NOT the flare's: the writer's flags byte is
@@ -548,8 +554,10 @@ void JoinerRole::tick_local_weapon() {
 		fire.fire_flags = fired.round.mode_flags;
 		fire.adm_index = fired.adm_index;
 		fire.target_handle = fired.target_handle;
-		// hit_part is NOT a bare sequence: it is
-		// (own roster slot << 9) | (shot_seq & 0x1FF). The host copies the
+		// hit_part is NOT a bare sequence: it is the spawned round's id, which
+		// the pool mints as (own roster slot << 9) | (its counter & 0x1FF)
+		// [orig: CEntityManager_AllocateSlot @0x4EAAE6..0x4EAB0C, with
+		// g_LocalPlayerSlotId the S2C 0x04 slot]. The host copies the
 		// raw word straight into the GLOBAL word_B7C670 on the network arm
 		// [orig: Server_ClientFiredRound @0x50BAA0 @0x50c2ba / @0x50c774],
 		// and its own composition of the same word packs the shooter's
@@ -568,7 +576,7 @@ void JoinerRole::tick_local_weapon() {
 		// comment ALSO blamed it for a retail host's own first-person weapon
 		// reacting to our shots; that was WRONG, and the symptom survived this
 		// fix. The actual mechanism is D-NET-184 and is not packet-driven.
-		fire.hit_part = opennova::pack_fired_round_hit_part(rt.local_player_slot(), fired.shot_seq);
+		fire.hit_part = fired.shot_seq;
 		// entity+0x160 — the shooter's current AMMO-DEFINITION index, a u16 index
 		// into g_AmmoDefTable (stride 276). The host stores it onto the remote
 		// shooter's entity [orig: the send-side read Entity_FireWeaponAndSendPacket
@@ -763,10 +771,17 @@ void JoinerRole::pump() {
 
 	const bool preround_active = world.preround_delay_seconds != 0;
     world.rules.cease_fire = rt.state().cease_fire;
+    // The joiner's own roster slot rides a fresh round id [orig:
+    //  NapiNPClientMsg_SessionSlotConfig @0x4254A2 -> g_LocalPlayerSlotId].
+    world.round_sim.local_slot_id = rt.local_player_slot();
     // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_RulesFlags
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
     // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
 	world.rules.mpattrib = rt.view().mp_attributes();
+	// The session's sniper-zoom rule is the S2C 0x08 flags dword's bit 16
+	// [orig: NapiNPClientMsg_HandleSessionConfig @0x42837A..0x428392 -> byte_A821F0].
+	world.rules.allow_sniper_scope_zoom = (rt.state().session_rules_flags & 0x10000u) != 0;
+	world.rules.sniper_zoom_fill = world.rules.allow_sniper_scope_zoom; // an in-session peer
     world.rules.auto_scope_zero =
             (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
     world.rules.no_friendly_fire =
@@ -955,7 +970,48 @@ void JoinerRole::wire_frame_providers() {
         out.pos[0] = row->x;
         out.pos[1] = row->y;
         out.pos[2] = row->z;
+        out.flags = row->rm_entity_flags;
         return true;
+    };
+    // The damage pass's wire-built persons: a remote player or infantry is a
+    // replica row here, where retail's client flies its rounds into its own
+    // pool-0 entity for it (world/wire_person_hit.h). The row's def is the
+    // items.def row the spawn typed it from.
+    // [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0 over the client-built
+    //  entity; NapiNPClientMsg_0x00C @0x42E84A..0x42E84D]
+    world.round_sim.wire_person_body = [this](uint16_t handle,
+            const std::function<void(world::WirePersonBody &)> &visit) {
+        replication::ClientState &state = runtime->state();
+        replication::ClientEntityState *row = state.find(handle);
+        if (row == nullptr ||
+                (row->cls != EntityClass::Player && row->cls != EntityClass::Infantry))
+            return false;
+        const def::DefItemsFile *items = kernel_->items_table();
+        const def::DefItemDef *item = items != nullptr
+                ? mission::find_item_def(*items,
+                          static_cast<int>(row->type_id) + mission::kItemIdOffset)
+                : nullptr;
+        world::WirePersonBody body = replication::wire_person_body_of(
+                *row, item != nullptr, item != nullptr ? item->attrib : 0u,
+                item != nullptr && strutil::iequals(item->ai_function, "plyr"));
+        visit(body);
+        replication::store_wire_person_body(body, *row);
+        state.mark_changed();
+        return true;
+    };
+    // The collision pose of a wire-built person: the row's channels as the
+    // presenter poses them (skeletal_pose_inputs_for_client), where retail's
+    // client walks the posed bones of the entity it built for the row
+    // [orig: Physics_RaycastAgainstBoneSections @0x4E4670].
+    kernel.wire_person_pose = [this](uint16_t handle, uint16_t &type_id,
+            world::SkeletalPoseInputs &inputs) {
+        const replication::ClientState &state = runtime->state();
+        const replication::ClientEntityState *row = state.find(handle);
+        if (row == nullptr) return false;
+        type_id = row->type_id;
+        const ClientReplicaPresentContext context{
+                &kernel_->seat_specs, &kernel_->world.tables.weapons, true, nullptr};
+        return skeletal_pose_inputs_for_client(*row, state, context, inputs);
     };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
 	// The replica water/float channel reads the mission water plane
@@ -989,6 +1045,25 @@ void JoinerRole::wire_frame_providers() {
 				out.leave_corpse = (item->attrib & def::DEF_ITEM_ATTRIB_LEAVECORPSE) != 0;
 				out.decay_effect = item->particledeath[0] != '\0';
 				return true;
+			});
+	// The 0x13's class callback reads the joiner world's hit record, which
+	// this peer's own rounds write [orig: NapiNPClientMsg_EntityDeath
+	// @0x42EBF5 -> OrganicClass_HandleEvent @0x40734C].
+	rt.view().set_replica_hit_record_resolver(
+			[this]() -> const world::HitRecord * {
+				return &kernel_->world.round_sim.hit_record;
+			});
+	// The 0x26 route's section store, at the fold, under the gate
+	// apply_item_state_event applies to the same entity (it stores the same
+	// word again when the drain runs the callback).
+	// [orig: Entity_KillBySlotId @0x42BD29..0x42BD47]
+	rt.view().set_replica_kill_section_store(
+			[this](uint16_t handle, int16_t section) {
+				world::World &world = kernel_->world;
+				const world::Entity *e = world.registry.get(world::EntityHandle{handle});
+				if (e != nullptr && e->item_type_index != 0 &&
+						(e->engine_flags & world::kEntityFlagDead) == 0)
+					world.round_sim.hit_record.section = section;
 			});
 	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
 	// joiner world's collision tables live, each armed Player/Infantry row's
@@ -1376,11 +1451,20 @@ void JoinerRole::apply_gameplay_events() {
 		lp.weapon.reload_received_entity = reload.entity_handle;
 		lp.weapon.reload_received_param = reload.reload_param;
 		// ClientRuntime already applied the remote-Person receive-handler stamp
-		// before that frame's body tick. This drain retains diagnostics plus the
+		// before that frame's body tick. This drain retains diagnostics, the
+		// non-person branch's refill on an EWeap entity's own MountSlot, and the
 		// self-only WeaponSlot_ReloadAmmo branch below.
-		if (!lp.inventory_valid || !rt.has_self_handle() ||
-				reload.entity_handle != rt.self_handle())
+		// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the non-person
+		//  WeaponSlot_ReloadAmmo call @0x42C109, whose EWeap slot @0x54172D]
+		if (!rt.has_self_handle() || reload.entity_handle != rt.self_handle()) {
+			world::Entity *mount = world.registry.get(world::EntityHandle{reload.entity_handle});
+			if (mount != nullptr && mount->has_item_def &&
+					(mount->item_attrib & world::kItemAttribEweap) != 0u &&
+					world.vehicles.prepare_weapon_slot(*mount))
+				world.vehicles.reload_weapon_slot(*mount);
 			continue;
+		}
+		if (!lp.inventory_valid) continue;
 
 		const int32_t combo = reload.reload_param;
 		world::WeaponInventorySlot *reloaded = lp.inventory.slot(combo);
@@ -1395,8 +1479,13 @@ void JoinerRole::apply_gameplay_events() {
 		// the payload-addressed slot's remaining clip to its ammo-class pool and
 		// draw a full clip. A late echo still reloads that exact slot after a switch;
 		// only the currently active personal slot has an FSM mirror to update here.
-		world::weapon_inventory_reload_slot(
-				world.tables.weapons, lp.inventory, combo);
+		// The refill reads, spends and writes through the player's seat
+		// [orig: WeaponSlot_ReloadAmmo @0x5417C5..0x541842].
+		const world::Entity *self_body = world.registry.get(world.cached.local_player);
+		const world::WeaponAmmoSeat seat = self_body != nullptr
+				? world::entity_ammo_seat(world, *self_body) : world::WeaponAmmoSeat{};
+		const int32_t reloaded_rounds = world::weapon_inventory_reload_slot(
+				world.tables.weapons, lp.inventory, combo, seat);
 		if (lp.weapon.active && !lp.weapon.usegun_slot_active &&
 				lp.inventory.equipped_combo >= 0) {
 			world::WeaponSlotState &active_slot =
@@ -1409,12 +1498,11 @@ void JoinerRole::apply_gameplay_events() {
 									static_cast<uint8_t>(equipped->adm_index))
 							: nullptr;
 			if (equipped_def != nullptr) {
-				active_slot.reserve = world::weapon_pool_get(
-						lp.inventory, equipped_def->ammo_class_id);
+				active_slot.reserve = world::weapon_seat_pool(seat, equipped_def->ammo_class_id,
+						world::weapon_pool_get(lp.inventory, equipped_def->ammo_class_id));
 			}
 			if (combo == lp.inventory.equipped_combo) {
-				active_slot.clip = world::weapon_inventory_loaded_rounds(
-                        world.tables.weapons, lp.inventory, combo);
+				active_slot.clip = reloaded_rounds;
 				active_slot.phase = static_cast<uint8_t>(
 						active_slot.phase &
 						~world::weapon_phase::kReloadPendingBit);
@@ -1503,6 +1591,8 @@ void JoinerRole::close() {
 	if (kernel_) {
 		kernel_->world.round_sim.guided_inputs_provider = {};
 		kernel_->world.round_sim.wire_actor_provider = {};
+		kernel_->world.round_sim.wire_person_body = {};
+		kernel_->wire_person_pose = {};
 	}
 	if (!runtime) return;
 	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
@@ -1518,9 +1608,38 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 	// enter RoundData_SpawnRound.
 	if ((ev.flags & (kRoundEventFlagAltFire | kRoundEventFlagAdmIndexed)) == 0)
 		return;
-	const world::WeaponTableEntry *adm =
-			world.tables.weapons.by_index(ev.adm_index);
-	if (adm == nullptr || adm->ammo_index < 0) return;
+	// The event names its shooter, which must resolve to a live entity with an
+	// item def on this client, or the whole event is dropped: no 0xFFFF, no pool
+	// past 4, no slot past its pool, no empty slot or def. Here a shooter is a
+	// decoded row with its type or a native twin with its def.
+	// [orig: NetPacket_DeserializeRoundEvent - the 0xFFFF test @0x42F451, the pool
+	//  @0x42F465, the slot @0x42F47C..0x42F482, the entity and its +0x20 def
+	//  @0x42F497..0x42F4A1]
+	{
+		if (wire_handle::is_batch_end_sentinel(ev.shooter_handle)) return;
+		const replication::ClientEntityState *row = rt.state().find(ev.shooter_handle);
+		const world::Entity *twin = world.registry.get(world::EntityHandle{ev.shooter_handle});
+		if ((row == nullptr || row->type_id == 0) && (twin == nullptr || !twin->has_item_def))
+			return;
+	}
+	// Bit 0 is tested first: the ammo-def arm reads the byte as the round's ammo
+	// index and spawns with no weapon. Only with bit 0 clear does the adm-indexed
+	// arm resolve the byte as a weapon and fly that weapon's round.
+	// [orig: NetPacket_DeserializeRoundEvent - the arm test @0x42F521, the ammo
+	//  bound @0x42F52C..0x42F53E, the null weapon @0x42F582 into
+	//  RoundData_SpawnRound @0x42F5BA; the adm arm's AdmDef_GetEntryByIndex
+	//  @0x42F6D9 and its ammo byte @0x42F6F9]
+	const bool ammo_arm = (ev.flags & kRoundEventFlagAltFire) != 0;
+	int32_t round_ammo = -1;
+	if (ammo_arm) {
+		if (world.tables.ammo.by_index(ev.adm_index) == nullptr) return;
+		round_ammo = ev.adm_index;
+	} else {
+		const world::WeaponTableEntry *adm =
+				world.tables.weapons.by_index(ev.adm_index);
+		if (adm == nullptr || adm->ammo_index < 0) return;
+		round_ammo = adm->ammo_index;
+	}
 	world::RoundSpawnParams round;
 	world::RoundSourceState source;
 	round.owner = world::EntityHandle{};
@@ -1540,30 +1659,55 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 		// The category follows the retail animation-flags table, not a
 		// hand-maintained list of familiar locomotion clips. In particular,
 		// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
-		// neither. [orig: g_AnimStateFlagsTable @0x8139E8; category read in
-		// RoundData_SpawnRound @0x4EC252..0x4EC27A]
+		// neither. [orig: g_AnimStateFlagsTable @0x8139E8, mapped onto +0x12C by
+		// NetPacket_SerializePlayerState @0x4C11FD..0x4C1242; category read in
+		// RoundData_SpawnRound @0x4EC129..0x4EC14C, the row @0x4EC2A6..0x4EC2FD]
 		const uint32_t anim_flags = world::infantry_anim_flags(anim);
 		const bool prone = (anim_flags & world::kAnimStanceFlagProne) != 0;
+		// The spread's up/down limit reads the raw prone bit, not the row
+		// [orig: RoundData_SpawnRound @0x4EC137, read @0x4EC454].
+		source.prone = prone;
 		const bool crouched =
 				(anim_flags & world::kAnimStanceFlagCrouched) != 0;
-		const bool swimming = anim == 36 || anim == 37 || anim == 154;
 		const bool mounted =
 				round.shooter_carrier_handle != wire_handle::kInvalid;
+		// The shooter's Flags dword as a retail client holds a decoded peer's:
+		// the spawn word and the client motor's bits (the row's mirror), with the
+		// latest compact record's byte folded in under 0xFD, as the 0x0A fold
+		// does (`Flags ^= (Flags ^ wire) & 0xFD`): Parachute 0x20 rides the
+		// record, Drowning 0x8000 and LadderContact 0x100000 are the motor's.
+		// [orig: NetPacket_SerializePlayerState @0x4C1307..0x4C1311 (a player);
+		//  @0x4C065D..0x4C0662 (an infantry)]
+		const uint32_t mirror = shooter_row->rm_entity_flags;
+		const uint32_t shooter_flags = shooter_row->state_flags_known
+				? (mirror & ~0xFDu) | (shooter_row->state_flags & 0xFDu)
+				: mirror;
 		// Retail tests eye Z (Position.Z + CameraOffset.Z) against the fixed
 		// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
 		// decoded row has no CameraOffset carrier, so raw fixed position Z is
-		// the bounded projection; the swimming anim remains an independent
-		// positive witness. Do not invent a standing-eye constant here.
+		// the bounded projection. Do not invent a standing-eye constant here.
 		const bool below_water = world.env.water_z != 0 &&
 				shooter_row->z < world.env.water_z;
 		source.person_with_item_def =
 				shooter_row->cls == EntityClass::Player ||
 				shooter_row->cls == EntityClass::Infantry;
 		source.player = shooter_row->cls == EntityClass::Player;
-		source.underwater = swimming || below_water;
-		// Mounted is the later retail override and therefore wins even while
-		// below water; otherwise the underwater predicate forces standing row 2.
-		source.stance_category = mounted ? 1 : (source.underwater ? 2 :
+		// The recoil's x4 leg: Drowning, or the eye below the water
+		// [orig: RoundData_SpawnRound `test ecx, 8000h` @0x4EC342 (the shotgun
+		//  leg) / @0x4EC86D (the single round), the eye @0x4EC34E..0x4EC35A /
+		//  @0x4EC879..0x4EC885].
+		source.underwater =
+				(shooter_flags & world::kEntityFlagDrowning) != 0u || below_water;
+		// The stance row: Parachute, Drowning or LadderContact, or the eye below
+		// the water, forces the standing row 2; a mount after it wins (row 1).
+		// [orig: RoundData_SpawnRound `test dword ptr [ebp+24h], 108020h`
+		//  @0x4EC2D5, the eye @0x4EC2DE..0x4EC2EA, row 2 @0x4EC2EC, the mount
+		//  @0x4EC2F4..0x4EC2FD]
+		const bool standing_override =
+				(shooter_flags & (world::kEntityFlagParachute | world::kEntityFlagDrowning |
+				                  world::kEntityFlagLadderContact)) != 0u ||
+				below_water;
+		source.stance_category = mounted ? 1 : (standing_override ? 2 :
 				(prone ? 0 : (crouched ? 1 : 2)));
 		source.scope_raised =
 				(shooter_row->state_flags &
@@ -1593,8 +1737,9 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 	round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;
 	round.dir_yaw_bam = ev.dir_yaw_bam;
 	round.dir_pitch_bam = ev.dir_pitch_bam;
-	round.ammo_index = adm->ammo_index;
+	round.ammo_index = round_ammo;
 	round.adm_index = ev.adm_index;
+	round.no_weapon = ammo_arm;
 	round.shot_seq = ev.shot_seq;
 	round.subtype = ev.subtype;
 	round.charge = ev.slot_byte;

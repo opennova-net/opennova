@@ -28,9 +28,9 @@
 
 namespace opennova::hud {
 
-inline constexpr int32_t kMinimapFeedVersion = 7;
+inline constexpr int32_t kMinimapFeedVersion = 8;
 inline constexpr int32_t kMinimapFeedHeaderSize = 3;
-inline constexpr int32_t kMinimapFeedStride = 36;
+inline constexpr int32_t kMinimapFeedStride = 38;
 
 // {version, stride, count} + count rows.
 void minimap_feed_encode(const std::vector<HudMinimapMarker> &markers,
@@ -55,5 +55,16 @@ void radar_feed_encode(const HudMinimapRadar &radar, std::vector<int32_t> &out);
 // A short or foreign header yields false with `out` cleared (the legs draw
 // nothing lit); a declared count past the buffer clamps to what it holds.
 bool radar_feed_decode(const int32_t *data, std::size_t size, HudMinimapRadar &out);
+
+// The footprint feed (HudMinimapFootprint): {version, count} then per row {handle, fill_argb,
+// fill_value_count, x, y ..., edge_value_count, x, y ...}, mission 16.16 world space.
+inline constexpr int32_t kMinimapFootprintFeedVersion = 1;
+
+void minimap_footprint_feed_encode(const std::vector<HudMinimapFootprint> &footprints,
+		std::vector<int32_t> &out);
+// A short or foreign header yields false with `out` cleared (no footprint draws); a row past the
+// buffer ends the walk. Each row comes back finalized (hud_minimap_finalize_footprint).
+bool minimap_footprint_feed_decode(const int32_t *data, std::size_t size,
+		std::vector<HudMinimapFootprint> &out);
 
 } // namespace opennova::hud

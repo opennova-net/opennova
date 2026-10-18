@@ -167,6 +167,12 @@ public:
 		// g_ClientDeployHold clear, independently from whether it is the causal
 		// ACK-qualified deployment/UI release.
 		bool gameplay_release_applied = false;
+		// The S2C 0x1A that ends the world stream: retail's Game_StartMission
+		// leaves its game-start wait there and, after the loadout submits, runs
+		// the input reset, ahead of its final 0x0F wait.
+		// [orig: Game_StartMission -- NapiClient_WaitForGameStart @0x524E29, the
+		//  0x2F submits @0x525836 / @0x525C2E, Input_ResetAllState @0x525C66]
+		bool game_start_acked = false;
 		// The headless auto-pick can be queued inside this receive fold. It re-arms
 		// only g_ClientDeployHold after an initial 0x5A may already have opened gameplay.
 		bool gameplay_hold_rearmed = false;

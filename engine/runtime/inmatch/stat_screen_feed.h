@@ -40,13 +40,13 @@ struct StatScreenColumn {
 // The fill [orig: StatScreen_PopulateStatResultsList @0x562240]: the rows cleared
 // @0x56227a, the width split read off the table's design rect [orig: CWnd_GetRect
 // @0x5622c3], the column count set through the table's vtable +0x6C @0x5622fa,
-// then one init_table_row per column. How init_table_row sets every column up
+// then one CTableWnd_InitRow per column. How CTableWnd_InitRow sets every column up
 // [orig: @0x562346 / 0x56237a / 0x56242b — justify -1 (read as 1, centred),
 // vjustify 32 (bottom)], and the sort the fill
 // ends with [orig: sub_63EC30(table, 2, 0) then CTableWnd_SortByColumn(table, 2)
 // @0x5626e6..0x5626f9]: the first stat column, descending. Between them the rows
 // go in with their colours, a team row's replacing the table's [orig: the row
-// colour override sub_640110 @0x5625a9]; after it the local player's row is
+// colour override CTableWnd_SetRowColor @0x5625a9]; after it the local player's row is
 // selected.
 inline constexpr int kStatScreenColumnJustify = 1;
 inline constexpr int kStatScreenColumnVJustify = 32;
@@ -102,8 +102,8 @@ bool stat_screen_row_visible(int tab_index, uint8_t team);
 // first stat column, descending, and after it the first row whose column-1
 // value is `local_slot` (the local player entity's slot id, +0x154) selected
 // [orig: the AddRow call's team @0x562550..0x562565, the column-1 value call
-// @0x562576 (the IDB's CEffectCompiler_HasErrors @0x6420f0, a misnomer:
-// SetCellValue), the row walk @0x562700..0x562754] (D-MNU-51). The NAME
+// @0x562576 (CTableWnd_SetCellValue @0x6420f0, ex
+// CTableWnd_SetCellValue), the row walk @0x562700..0x562754] (D-MNU-51). The NAME
 // and Squad cells are the player slot's name and squad tag as the roster holds
 // them, its bytes in the code page, as the game's table holds, draws and sorts
 // them [orig: the Napi_CopyString calls of the squad @0x56252c and the name

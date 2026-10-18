@@ -397,11 +397,13 @@ static int test_use_check_table() {
 		TEST_EXPECT(row->kind == static_cast<AssetKind>(k) && row->check &&
 				document_type_for(row->kind));
 	}
-	// The textures' check (S18), the gametext keys a single-player mission reads (the mission authoring
-	// round), the stylesheet's unused-variable check, the mission's pool check (S14) and the particle files' token
-	// slots (the game's line tokenizer read past a line).
-	TEST_EXPECT(rows == 5 && use_check(AssetKind::Texture) && use_check(AssetKind::Strings) && use_check(AssetKind::MenuStyle) &&
-	            use_check(AssetKind::Mission) && use_check(AssetKind::Particles) && !use_check(AssetKind::ItemDefs));
+	// The animation maps' clip names the game's node cannot hold (the 2026-10 review), the textures' check (S18),
+	// the gametext keys a single-player mission reads (the mission authoring round), the stylesheet's
+	// unused-variable check, the mission's pool check (S14), the terrain gate over each mission's load (the 2026-10
+	// review, D-13) and the particle files' token slots (the game's line tokenizer read past a line).
+	TEST_EXPECT(rows == 7 && use_check(AssetKind::AnimationMap) && use_check(AssetKind::Texture) &&
+	            use_check(AssetKind::Strings) && use_check(AssetKind::MenuStyle) && use_check(AssetKind::Mission) &&
+	            use_check(AssetKind::Terrain) && use_check(AssetKind::Particles) && !use_check(AssetKind::ItemDefs));
 	return 0;
 }
 

@@ -225,6 +225,11 @@ public:
     // routes return null rather than falling back to attachment metadata.
     // [orig: shared helper @0x5460e0; NetPacket_WritePlayerState @0x4ffe18]
     WeaponSlotState *resolve_mounted_ammo_slot(Entity &mount);
+    // An EWeap entity's reload: the routed slot and its def with the entity's own
+    // slot and def (weapon_mount_slot_reload). False when the slot resolves to
+    // nothing. [orig: WeaponSlot_ReloadAmmo @0x541720 -> Entity_GetWeaponSlots
+    //  @0x5460E0]
+    bool reload_weapon_slot(Entity &mount);
     // Entity_RequestVehicleAttach snaps the requester yaw to the chosen seat before
     // the process (request_attach_heading). Keep the registry Entity and our split
     // AiEntity/local-player look target coherent so the first mounted tick cannot

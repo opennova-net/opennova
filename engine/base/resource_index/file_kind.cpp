@@ -1,6 +1,7 @@
 #include <base/resource_index/file_kind.h>
 
 #include <base/io/os_path.h>
+#include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_kind.h>
 #include <base/vfs/vfs.h>
@@ -18,7 +19,7 @@ constexpr const char *kAiProfile[] = {".aip", nullptr};
 // .tga [orig: Texture_LoadByNameWithChannel @ 0x58B66F..0x58B6E6; Texture_LoadAndRegister @
 // 0x58B80E..0x58B881], no DDS sibling taken for it [orig: Texture_LoadAsNormalMap @ 0x58C480]
 // (renderer::material_texture_source). A PNG is one too: retail's menu loader decodes it [orig:
-// CTextureManager_LoadOrFindTexture @ 0x654980 -> load_png_from_file @ 0x6654d0], so one with no
+// CTextureManager_LoadOrFindTexture @ 0x654980 -> PNG_LoadFromFile @ 0x6654d0], so one with no
 // import record is a texture as it is (one with its record beside it is an import source).
 constexpr const char *kTexture[] = {".tga", ".pcx", ".dds", ".mdt", ".png", nullptr};
 constexpr const char *kRawBin[] = {".bin", nullptr};
@@ -382,7 +383,7 @@ FileKind file_kind_for_file(const std::string &logical_name, const std::vector<u
 
 FileKind file_kind_for_name(const std::string &logical_name) { return file_kind_for_file(logical_name, nullptr); }
 
-FileKind file_kind_for_required_name(const std::string &name) {
+FileKind file_kind_for_required_name(const std::string &name, const std::string &expansion) {
 	const std::string extension = resource_extension_for_name(name);
 	if (extension != ".bin") return file_kind_for_name(name);
 	// The witnessed `.bin` rows: a kind a row knows by its whole name (CC.BIN, the country
@@ -392,6 +393,18 @@ FileKind file_kind_for_required_name(const std::string &name) {
 	if (named != FileKind::RawBin && named != FileKind::Unknown) return named;
 	const std::string basename = strutil::to_lower(io::utf8_file_name(name));
 	if (basename == "menumus.bin" || basename == "gamemus.bin") return FileKind::MusicScript;
+	// The expansion's forms, M<n>.bin and G<n>.bin, which the game reads in the pair's place under
+	// /exp <n> [orig: Expansion_LoadAssets @ 0x4a4730, "M%s.bin" @ 0x4a4913, "G%s.bin" @ 0x4a4940]:
+	// the kind of the file a RES_F_EXPANSION row replaces, where `expansion` forms its name. Only an
+	// expansion's name tells them: the base game's menutxt.bin and Gameerr.bin are string tables.
+	if (!expansion.empty()) {
+		for (int i = 0; i < gameprofile::gameprofile_required_resource_count(); ++i) {
+			const gameprofile::RequiredResource *row = gameprofile::gameprofile_required_resource_at(i);
+			if (!(row->flags & gameprofile::RES_F_EXPANSION) || !row->replaces) continue;
+			if (strutil::to_lower(gameprofile::gameprofile_expansion_file_name(row, expansion)) == basename)
+				return file_kind_for_required_name(row->replaces);
+		}
+	}
 	if (basename == "fgn2.bin" || basename == "epass.bin" || basename == "passgen.bin") return FileKind::RawBin;
 	return FileKind::Strings;
 }

@@ -349,14 +349,15 @@ static int test_columns() {
 	// (S23) the ones whose input the editor's model cannot carry where the game reads the file on gate only an open
 	// file with unsaved edits (unwritable_code). An error made from no row blocks.
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.gates_build; }) ==
-	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "avatars.reader_stops",
+	            Tokens({ "animation_map.clip_name_long", "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "avatars.reader_stops",
 	                     "build.archive", "build.expansion.base_missing", "build.expansion.exp_name",
 	                     "build.name_unstorable", "document.config_overrun", "document.decode", "document.kind",
 	                     "document.no_records", "document.parse", "document.read", "document.stale",
 	                     "hudfx.power_slots_empty", "import.decode",
 	                     "import.encode", "import.font", "import.input", "import.migrate", "import.option", "import.read",
 	                     "import.scene", "import.sidecar", "import.terrain", "import.write", "menu.invalid_input",
-	                     "mission.runs_past_table", "model.light_no_registers", "particle.unfilled_token_slot",
+	                     "mission.route_past_pool", "mission.runs_past_table", "model.light_no_registers",
+	                     "particle.unfilled_token_slot",
 	                     "project.root.unreadable", "style.hangs",
 	                     "terrain.refused", "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.integrity; }) ==
@@ -373,10 +374,10 @@ static int test_columns() {
 	// does hudfx.def's HUD model as its one line read, the power slots' draw then reading a slot of no model, and an
 	// Avatars.def past its reader's tables, where the game fails (S23 B).
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.game_refusal != nullptr; }) ==
-	            Tokens({ "avatars.reader_stops", "build.expansion.exp_name", "document.config_overrun",
+	            Tokens({ "animation_map.clip_name_long", "avatars.reader_stops", "build.expansion.exp_name", "document.config_overrun",
 	                     "hudfx.power_slots_empty",
-	                     "menu.invalid_input", "mission.runs_past_table", "model.light_no_registers",
-	                     "particle.unfilled_token_slot", "style.hangs",
+	                     "menu.invalid_input", "mission.route_past_pool", "mission.runs_past_table",
+	                     "model.light_no_registers", "particle.unfilled_token_slot", "style.hangs",
 	                     "terrain.refused", "texture.particle_too_big", "texture.pcx_overrun", "texture.wrong_reader" }));
 	// A finding whose file the editor's model cannot carry where the game reads it on (unwritable_code) gates only
 	// an open file with unsaved edits, which the build's Save cannot write: a closed one packs as stored. One the

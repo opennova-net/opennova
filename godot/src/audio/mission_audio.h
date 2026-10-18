@@ -129,7 +129,7 @@ public:
 	void apply_sound_emitter_events(const std::vector<opennova::world::SoundEmitterEvent> &p_events);
 	// The weather tick's thunder: the THUNDER trigger set played at a distance
 	// from the listener along a bearing (a 0..255 turn; 128 = behind the camera)
-	// (retail Sound_PlayTriggerSetScaled @ 0x527b90 -- the 24-byte emitter
+	// (engine: runtime/world/weather_state.h -- the 24-byte emitter
 	// {0x10000, bearing, g_SoundVolumeOption, 0, distance, 0} into
 	// SoundBank_PlayTriggerEntries @ 0x75ccd0 on dword_24E0914; sequencer A at
 	// 1 m centred @ 0x57ecfb, B at 10 m from behind @ 0x57edc4).

@@ -60,12 +60,6 @@ std::string details(const FieldSchema &field) {
 
 unsigned channel(float f) { return unsigned(std::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); }
 
-int64_t whole(const Value &value) {
-	if (const auto *number = std::get_if<int64_t>(&value)) return *number;
-	if (const auto *real = std::get_if<double>(&value)) return int64_t(*real);
-	return 0;
-}
-
 // Whether a colour field shows its swatch for this value (a HexArgb one names no %VAR%).
 bool shows_swatch(FieldColor color, const Value &value) {
 	if (color == FieldColor::HexArgb) {

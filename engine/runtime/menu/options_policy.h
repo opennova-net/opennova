@@ -53,7 +53,6 @@ struct VideoQualityControl {
 };
 inline constexpr VideoQualityControl kVideoQualityControls[] = {
     {"TERRAINPOLY", "3"},
-    {"TERRAINTEX", "3"},
     {"OBJECTTEX", "3"},
     // The authored 3..16 rows are placeholders; mode 2 is the highest
     // multisample mode supported by the retail device contract.
@@ -121,6 +120,20 @@ inline constexpr const char *kParticleDensityControls[] = {"PARTICLES"};
 // (the ACCEPT's read)]. The in-game options author no such row. The word
 // reaches the textures the next mission builds.
 inline constexpr const char *kTexCompressionControls[] = {"TEXCOMPRESSION"};
+
+// The terrain-texture-detail row is served, not pinned: game.cfg's
+// `terrain_texdetail` (renderer/device_texture.h). The front-end OPTIONS
+// screen's TERRAINTEX combobox selects the row whose item value is the
+// persisted word and writes the selected row's value back
+// [orig: UI_PopulateRenderAndAudioSettings @0x55ce2a..0x55ce71 locks only the
+// rows above g_GameConfigState.recommendedGraphicsQuality_140+0x04, 3 on a
+// shader-model-2 device past 120 MiB (RenderSettings_ComputeFromGPUCaps
+// @0x587986..0x58798a), so every row is open on the device OpenNova ports;
+// UI_SyncRenderSettingsToWidgets @0x55a1c0..0x55a1cf (the select by value);
+// Options_HandleAcceptOrBack @0x55a80a..0x55a815 (the ACCEPT's read)]. The
+// in-game options author no such row. The word reaches the terrain the next
+// mission builds.
+inline constexpr const char *kTerrainTexDetailControls[] = {"TERRAINTEX"};
 
 // The registered retail comparison profile's gamma reference. Gamma is
 // calibration, not a quality rung, so pushing it to the numeric maximum would

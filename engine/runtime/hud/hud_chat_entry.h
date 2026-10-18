@@ -159,7 +159,7 @@ public:
 	// as retail's router hands each key to exactly one of the two
 	// [orig: Input_ProcessKeyboardEvents @0x49d2e3 — the capture branch
 	// @0x49d498 vs the special-keys/binding scan @0x49d2fb..0x49d488].
-	uint32_t poll_rows(uint32_t rows_down, bool active, bool chorded,
+	uint32_t poll_rows(uint32_t rows_down, bool active,
 			const ChatEntryFacts &facts, const GameTextLookup &gametext);
 	// One key event while the capture is open: `key_char` the translated
 	// character (0 for none), `vk` the virtual key. Every key reaches here

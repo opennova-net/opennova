@@ -56,7 +56,6 @@ int usage(const char *why) {
 			"       opennova-3di anim info    <in.adm|in.bad> [--verbose | --keys]\n"
 			"       opennova-3di anim compare <expected.adm|.bad> <actual.adm|.bad>\n"
 			"       opennova-3di weapon timing <timing.txt> -o <edits.txt>\n"
-			"       opennova-3di weapon merge  <weapon.def> <edits.txt> -o <out.def>\n"
 			"       opennova-3di texture <in.png|in.tga|in.pcx> -o <out.dds|out.tga|out.mdt>\n"
 			"                            [--format auto|dxt1|dxt5|argb] [--mips full|none] [--max-size N]\n"
 			"                            [--alpha source|opaque|luminance|threshold:N|key:#RRGGBB]\n"
@@ -122,12 +121,7 @@ int main(int argc, char **argv) {
 				return usage("weapon timing needs <timing.txt> -o <edits.txt>");
 			return opennova::threedi_cli::cmd_weapon_timing(argv[3], argv[5]);
 		}
-		if (sub == "merge") {
-			if (argc != 7 || std::strcmp(argv[5], "-o") != 0)
-				return usage("weapon merge needs <weapon.def> <edits.txt> -o <out.def>");
-			return opennova::threedi_cli::cmd_weapon_merge(argv[3], argv[4], argv[6]);
-		}
-		return usage("weapon takes timing or merge");
+		return usage("weapon takes timing");
 	}
 	if (cmd == "texture") {
 		if (argc < 5 || std::strcmp(argv[3], "-o") != 0)

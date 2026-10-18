@@ -234,6 +234,12 @@ const GameWorld::FrameLeg GameWorld::kFrozenPoseRefresh[] = {
 	// flicker phase freezes with the weather ring, matching the phase
 	// contract).
 	{ "lights", kNoSlot, &GameWorld::leg_lights, kLegNone },
+	// Compile the focused Q3 frame at the settled pose, as the live table does
+	// after its producers: without it the bloom pass drew the last live
+	// frame's Q3 snapshot, whose glare took the pre-settle ColorSrcGlobalGain
+	// (76/64 at the 00TRa sun pose against the settled 47/64), so the fixture's
+	// sun glow read up to 26 levels above retail at r 105-165 px (review C-47).
+	{ "framefx", kNoSlot, &GameWorld::leg_framefx, kLegNone },
 	// Re-plan the render-slot ground shadows for the moved capture camera
 	// (slot priority and the capture poses are camera-relative).
 	{ "slot_shadows", kNoSlot, &GameWorld::leg_slot_shadows, kLegNone },
@@ -781,8 +787,8 @@ void GameWorld::render_scene_overlay_frame() {
 	effect_world->publish_scene_overlay(submission);
 }
 
-// The NVG laser beams, the tail's first slot (retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0,
-// called @ 0x5c9695): the local view's g_NVGActive and g_CameraMode gate
+// The NVG laser beams, the tail's first slot (engine: runtime/world/nvg_laser.h): the local view's
+// g_NVGActive and g_CameraMode gate
 // every beam (the defaults with no local player or for a spectator), the
 // frame's render camera builds the ribbons and the frame's scene fog folds
 // into them; the entity presenter's third-person guns carry the action

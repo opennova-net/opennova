@@ -22,7 +22,7 @@ namespace {
 using configfile::ConfigSection;
 
 // The ConfigFile's accessors (formats/configfile/config_file.h) [orig: ConfigFile_FindSection @ 0x75eeb0;
-// effect_get_param_value_0 @ 0x75fa00; effect_get_param_value @ 0x75f580].
+// Effect_GetParamValue_0 @ 0x75fa00; Effect_GetParamValue @ 0x75f580].
 ConfigSection *find_section(std::vector<ConfigSection> &sections, const char *name) {
 	return configfile::find_config_section(sections, name);
 }

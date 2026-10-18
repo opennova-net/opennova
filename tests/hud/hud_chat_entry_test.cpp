@@ -296,26 +296,24 @@ void test_poll_rows() {
 	const ChatEntryFacts f = live();
 	const uint32_t local = 1u << kChatRowLocal;
 	const uint32_t enter = 1u << kChatRowTalk;
-	CHECK(c.poll_rows(local, true, false, f, kText) == chat_entry_event::kBegan);
+	CHECK(c.poll_rows(local, true, f, kText) == chat_entry_event::kBegan);
 	CHECK(c.open_dispatch() == kChatDispatchLocal);
 	// Held: no second edge; capturing: rows are the editor's.
-	CHECK(c.poll_rows(local, true, false, f, kText) == 0);
+	CHECK(c.poll_rows(local, true, f, kText) == 0);
 	// Enter reaches the editor, submits; the same frame's poll sees Enter
 	// down but must not reopen.
 	c.key('x', 0, f, kText, nullptr);
 	c.key(13, 0, f, kText, [](int, std::string &) { return ChatSendResult::Sent; });
 	CHECK(!c.capturing());
-	CHECK(c.poll_rows(enter, true, false, f, kText) == 0 && !c.capturing());
+	CHECK(c.poll_rows(enter, true, f, kText) == 0 && !c.capturing());
 	// Released, then pressed after the debounce: the repeat row reopens Local.
-	c.poll_rows(0, true, false, live(300), kText);
-	CHECK(c.poll_rows(enter, true, false, live(301), kText) == chat_entry_event::kBegan);
+	c.poll_rows(0, true, live(300), kText);
+	CHECK(c.poll_rows(enter, true, live(301), kText) == chat_entry_event::kBegan);
 	c.reset();
-	// Inactive gameplay or a Shift/Alt chord never dispatches.
+	// Inactive gameplay never dispatches; Shift or Alt held gates nothing.
 	ChatEntry d;
-	d.poll_rows(0, true, false, f, kText);
-	CHECK(d.poll_rows(local, false, false, f, kText) == 0);
-	d.poll_rows(0, true, false, f, kText);
-	CHECK(d.poll_rows(local, true, true, f, kText) == 0);
+	d.poll_rows(0, true, f, kText);
+	CHECK(d.poll_rows(local, false, f, kText) == 0);
 }
 
 } // namespace

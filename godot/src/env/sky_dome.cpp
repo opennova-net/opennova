@@ -15,6 +15,7 @@
 #include "env/mission_environment.h"
 #include "env/weather.h"
 
+#include <formats/env/env_celestial.h>
 #include <runtime/renderer/render_order.h>
 #include <runtime/renderer/texture_filter.h>
 
@@ -124,7 +125,7 @@ void SkyDome::build() {
 	// reference height (env #20's ratified fold; env_celestial.h carries the
 	// mesh-builder cites).
 	const Array arrays =
-			EnvFile::build_sky_dome_arrays(EnvFile::dome_reference_height());
+			EnvFile::build_sky_dome_arrays(static_cast<float>(opennova::env::kSkyDomeReferenceHeight));
 	Ref<ArrayMesh> mesh;
 	mesh.instantiate();
 	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);

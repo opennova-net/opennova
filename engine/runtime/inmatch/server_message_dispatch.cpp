@@ -1,14 +1,13 @@
-#include <runtime/world/weapon_fire_gate.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_visible_players.h>
-#include <runtime/inmatch/server_doors.h>
+#include <runtime/inmatch/server_entity_routes.h> // Server_HandleDoorRowRequest (C2S 0x1A)
 #include <runtime/inmatch/server_team_change.h>
-#include <runtime/inmatch/server_death_timeout_reset.h>
 #include <runtime/inmatch/server_kill_page.h>
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
 #include <runtime/inmatch/server_join_check.h>    // the 0x00 JOIN's validation ladder
+#include <runtime/inmatch/server_fired_round.h>   // the C2S 0x06 fired round
 
 
 #include <runtime/inmatch/integrity_sources.h>
@@ -22,7 +21,7 @@
 #include <runtime/inmatch/server_vehicle_spawn.h> // the 0x40 / 0x42 handlers
 #include <runtime/inmatch/napi_np_server_ctx.h>  // ServerDispatchInputs::server_ctx
 #include <runtime/inmatch/session_status.h>
-#include <runtime/world/weapon_table_build.h> // loadout_entry_permitted / resolve_loadout_ammo (D-NET-141)
+#include <runtime/world/weapon_table_build.h> // loadout_entry_permitted (D-NET-141)
 
 #include <runtime/replication/connection_fan.h>     // apply_connection_uplink — the in-order 0x0C read-apply
 #include <runtime/replication/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
@@ -58,7 +57,6 @@
 #include <cstring>
 #include <iterator>
 #include <utility>
-#include <base/io/fixed.h> // fp16_16_to_float
 #include <base/io/le.h>
 #include <cstddef>
 #include <cstdint>
@@ -162,29 +160,13 @@ namespace {
 // @0x506bb0): D-NET-127 closed, its last 0x46 fields with D-NET-295 (net-re §8).
 // ---------------------------------------------------------------------------
 
-void append_u16_le(std::vector<uint8_t> &out, uint16_t v) {
-	opennova::io::append_u16_le(out, v);
-}
-
-void append_u32_le(std::vector<uint8_t> &out, uint32_t v) {
-	opennova::io::append_u32_le(out, v);
-}
-
-void write_u32_le(std::vector<uint8_t> &out, size_t off, uint32_t v) {
-	opennova::io::write_u32_le(out.data() + off, v);
-}
-
-uint32_t read_u32_le(const uint8_t *data) {
-	return opennova::io::read_u32_le(data);
-}
-
 bool validates_padding_echo(
 		const NapiNPConnection &conn, const std::vector<uint8_t> &payload) {
 	// The server challenge advertises paddingLen=256. Retail echoes exactly that many bytes,
 	// preserving the first two position dwords and replacing the third with its net-frame counter.
 	return payload.size() == 256 &&
-	       read_u32_le(payload.data()) == conn.admission_padding_x &&
-	       read_u32_le(payload.data() + 4) == conn.admission_padding_y;
+	       io::read_u32_le(payload.data()) == conn.admission_padding_x &&
+	       io::read_u32_le(payload.data() + 4) == conn.admission_padding_y;
 }
 
 void append_cstr(std::vector<uint8_t> &out, const std::string &s) {
@@ -218,7 +200,7 @@ bool is_default_ash_session_config(const GameConfig &cfg) {
 // tag=0x02 server push. [orig: NapiNPClientMsg_HandleJoinResponse @0x42E0F0 reads 12 B; D-NET-127 carried 512.]
 std::vector<uint8_t> build_tag02_push(uint32_t now_tick) {
 	std::vector<uint8_t> payload(512, 0);
-	write_u32_le(payload, 0, now_tick);
+	io::write_u32_le(payload.data(), now_tick);
 	payload[4] = 0x02;
 	payload[8] = 0x00;
 	payload[9] = 0x01;
@@ -258,7 +240,7 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 	append_cstr(payload, cfg.server_name); // [orig: g_ServerNameStr @0x24D1FC4]
 	append_cstr(payload, advertised_mission);
 	append_cstr(payload, cfg.mission_file);// [orig: g_MapFileName @0x24D1F3E]
-	append_u32_le(payload, cfg.game_type);  // [orig: g_GameType @0x24D2128]
+	io::append_u32_le(payload, cfg.game_type);  // [orig: g_GameType @0x24D2128]
 	payload.push_back(0);                  // [orig: g_EmptyStr @0x7C08C6] empty C string
 	append_cstr(payload, cfg.expansion);   // [orig: g_ExpansionName @0xB4C584]
 	return payload;
@@ -282,9 +264,9 @@ std::vector<uint8_t> build_transfer_chunk(uint32_t transfer_id, const uint8_t *s
 	const uint32_t clamped_offset = std::min(offset, total);
 	const uint32_t copy_len = std::min(total - clamped_offset, kTransferChunkBytes);
 	std::vector<uint8_t> reply(12, 0);
-	write_u32_le(reply, 0, transfer_id);
-	write_u32_le(reply, 4, total);
-	write_u32_le(reply, 8, clamped_offset);
+	io::write_u32_le(reply.data(), transfer_id);
+	io::write_u32_le(reply.data() + 4, total);
+	io::write_u32_le(reply.data() + 8, clamped_offset);
 	reply.insert(reply.end(), stream + clamped_offset, stream + clamped_offset + copy_len);
 	return reply;
 }
@@ -337,7 +319,7 @@ std::vector<uint8_t> build_tag64_mission_metadata(
 // then computes RTT + runs the min/max-ping kick; no reply.)
 std::vector<uint8_t> build_tag57_pong(uint32_t timestamp) {
 	std::vector<uint8_t> b;
-	append_u32_le(b, timestamp);
+	io::append_u32_le(b, timestamp);
 	b.push_back(0);
 	return b;
 }
@@ -557,16 +539,16 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 
 // tag=0x04 join/slot-assignment body (24 B) [orig: NetPacket_WriteSlotAssignment @0x502b30, sent from
 // CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]: [4x u32 netPlayer+60..72 stat dwords (0 on a fresh
-// join)][u8 g_difficulty dword_24D2110][u8 player_slot (slot+20)][u8 slot capacity @0x24c0ca4][u32 0]
+// join)][u8 g_difficulty g_SessionDifficulty][u8 player_slot (slot+20)][u8 slot capacity @0x24c0ca4][u32 0]
 // [u8 team (slot+416)]. The retail reader skips the four leading dwords and the
 // pad and stores bytes 16/17/18/23; byte 16 lands in the joiner's own
-// dword_24D2110, the difficulty word its max-health and score tallies read.
+// g_SessionDifficulty, the difficulty word its max-health and score tallies read.
 // [orig: NapiNPClientMsg_SessionSlotConfig @0x425410 (@0x4254A8 byte 16);
 //  Entity_GetMaxHealthWithDifficulty @0x43B8A0; Score_TallyKillByLocalPlayer @0x4FD160]
 std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t player_slot,
                                                  uint8_t slot_capacity, uint8_t team) {
 	std::vector<uint8_t> payload(24, 0);
-	payload[16] = difficulty;    // [orig: dword_24D2110's low byte, NetPacket_WriteSlotAssignment @0x502B96]
+	payload[16] = difficulty;    // [orig: g_SessionDifficulty's low byte, NetPacket_WriteSlotAssignment @0x502B96]
 	payload[17] = player_slot;   // the joiner's assigned slot index [orig slot+20]
 	payload[18] = slot_capacity; // player-slot array capacity [orig: g_PlayerSlotCapacity @0x24c0ca4]
 	payload[23] = team;          // [orig slot+416]
@@ -800,7 +782,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 	messages.push_back(make_protocol_message(s2c::SYNC_TICK, {0x00}));
 	append_connection_settings(config, messages);
 	messages.push_back(make_protocol_message(s2c::GAME_START_SIGNAL, {0x01}));
-	// config_bytes[6] is the session's dword_24D2110 low byte (the S2C 0x08
+	// config_bytes[6] is the session's g_SessionDifficulty low byte (the S2C 0x08
 	// record's seventh byte) — the same word the 0x04 hands the joiner.
 	messages.push_back(make_protocol_message(
 			0x04, build_tag04_slot_assignment(
@@ -938,7 +920,14 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	//  PlayerSlot_InitWeaponsFromLoadout call @0x5178E1]
 	if (!revive_deploy) {
 		if (!conn.link.spectator) world.commands.remove_placed_devices_by_owner(player->handle);
-		PlayerSlot_InitWeaponsFromLoadout(config, conn, world.tables.weapons);
+		// The listen host's own slot is skipped: ours keeps the host's local
+		// inventory apart from the slot and does not refill it at a deploy
+		// (D-NET-479; retail's local table is the slot table, built from its
+		// buffer, which the round init seeds from g_SpawnLoadoutBuffer
+		// @0x516BCA..0x516BE3 and the host's own 0x2F accepts rewrite). The slot
+		// takes no 0x2F here, so the rebuild would only empty it.
+		if (player->handle != world.cached.local_player)
+			PlayerSlot_InitWeaponsFromLoadout(conn, world, *player);
 	}
 	conn.discard_pre_deploy_uplinks = true;
 	// No +360 store; the +364 hold clears only for a raw handle other than
@@ -1086,8 +1075,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				conn.join_ticket_validation =
 						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
 				std::vector<uint8_t> challenge = build_tag02_push(now_tick);
-				conn.admission_padding_x = read_u32_le(challenge.data());
-				conn.admission_padding_y = read_u32_le(challenge.data() + 4);
+				conn.admission_padding_x = io::read_u32_le(challenge.data());
+				conn.admission_padding_y = io::read_u32_le(challenge.data() + 4);
 				replies.push_back(
 						make_protocol_message(s2c::JOIN_PADDING_PROBE, std::move(challenge)));
 				conn.admission_stage = GameAdmissionStage::AwaitPaddingEcho;
@@ -1155,7 +1144,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(std::move(m));
 				break;
 			}
-			case c2s::DOOR_SLOT_REQUEST: // [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+			case c2s::DOOR_SLOT_REQUEST: // [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20]
 				if (world == nullptr || inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) break;
 				for (ProtocolMessage &m : Server_HandleDoorRowRequest(conn, msg.payload, *world))
 					replies.push_back(std::move(m));
@@ -1196,10 +1185,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// [orig: NapiNPServerMsg_ValidateTimeSync @0x502210, reset @0x502273]
 				st.time_sync_unanswered_count = 0;
 				if (msg.payload.size() == 8 &&
-						read_u32_le(msg.payload.data()) == st.time_sync_sequence &&
+						io::read_u32_le(msg.payload.data()) == st.time_sync_sequence &&
 						st.time_sync_round_host_ms != 0) {
 					const uint32_t client_ms =
-							read_u32_le(msg.payload.data() + 4);
+							io::read_u32_le(msg.payload.data() + 4);
 					if (st.time_sync_client_baseline_ms == 0)
 						st.time_sync_client_baseline_ms = client_ms;
 					if (st.time_sync_previous_client_ms == 0) {
@@ -1431,7 +1420,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					break;
 				}
 				const GrantedWeaponLoadout grant =
-						grant_weapon_loadout(req, config.class_allow_mask, armory);
+						grant_weapon_loadout(req, config.class_allow_mask, armory, conn,
+								world::entity_ammo_seat(*world, *loadout_player),
+								world->rules.sniper_zoom_fill);
 				// The accepted entries become the slot's loadout buffer, which every
 				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515CBD..0x515D83].
 				st.loadout_buffer = req;
@@ -1446,8 +1437,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				apply_granted_loadout(conn, grant, armory != nullptr);
 				if (armory != nullptr) {
 					// The accept points the entity's EquippedSlot at the submitted slot and
-					// keeps it only when that slot's def is NoSelect.
-					// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515f52..0x515f8a]
+					// clears it when that slot holds no def or a NoSelect one (flags2 bit 0).
+					// [orig: NapiNPServerMsg_HandlePlayerLoadout - the store @0x515F52..0x515F62,
+					//  the slot / def tests @0x515F73..0x515F7C, `and ecx, 1` @0x515F81 whose
+					//  zero skips the clear @0x515F88, the clear @0x515F8A]
 					conn.equipped_slot = {};
 					const auto submitted = req.weapon_slot_index <= 0xFFFFu
 							? conn.weapon_slots.find(static_cast<uint16_t>(req.weapon_slot_index))
@@ -1456,7 +1449,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							? armory->by_index(submitted->second.adm_index)
 							: nullptr;
 					if (submitted_def != nullptr &&
-							(submitted_def->flags2 & world::weapon_flag2::kNoSelect) != 0) {
+							(submitted_def->flags2 & world::weapon_flag2::kNoSelect) == 0) {
 						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
 						conn.equipped_slot.combo = submitted->first;
 					}
@@ -1932,199 +1925,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
 				Server_HandlePlayerJoinRequest(conn, world);
 				break;
-			case c2s::FIRED_ROUND: { // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
-				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310, slot lookup @0x513338]
-				// Residual Server_ClientFiredRound compensation (D-NET-152): saved-live-pose
-				// subtraction @0x50BBAC and moving-carrier re-anchor branch @0x50BC41.
-				// Cease-fire and spectator gates precede the clock, ammo, and round
-				// effects. Freshness is checked on this host, never on a joiner's
-				// predicted-fire path [orig: Entity_FireWeaponAndSendPacket @0x42BD80].
-				if (world == nullptr || !conn.burst.spawned ||
-						world->rules.cease_fire || conn.link.spectator) break;
-				// The host's own loopback fire is a net-path no-op [orig: @0x50c18d returns 0
-				// for the local player — its fire already ran locally].
-				if (conn.link.mode == replication::TransportMode::Loopback) break;
-				ClientFiredRound fr;
-				size_t fire_consumed = 0;
-				if (!decode_client_fired_round(msg.payload.data(), msg.payload.size(), fr,
-				                               fire_consumed))
-					break;
-				// Handle validity [orig: @0x513543], then anti-spoof: the claimed shooter must
-				// BE this connection's own entity [orig: @0x51358d, doubled at @0x50bf37 -> -9].
-				if (wire_handle::is_batch_end_sentinel(fr.shooter_handle))
-					break;
-				if (!conn.link.owned_entity.valid() ||
-				    conn.link.owned_entity.packed != fr.shooter_handle)
-					break;
-				world::Entity *shooter = world->registry.get(conn.link.owned_entity);
-				if (shooter == nullptr) break;
-				if (!Server_AcceptsPlayerFireTick(conn, fr.current_tick, world->logic_tick,
-						config.effective_send_holdoff_ticks())) break;
-
-				if (((shooter->flags | shooter->engine_flags) & 0x102u) == 0x102u) break;
-				const bool alt_fire = (fr.fire_flags & 0x01) != 0; // [orig: @0x50bb0d]
-				// ADM + ammo authority — armory-fed hosts only (a table-less host accepts,
-				// mirroring the 0x5A echo fallback, D-NET-141). Alt fire skips the adm lookup,
-				// the clip, and the equipped mirror [orig: @0x50bb0f / the @0x50be2b alt path].
-				if (!world->tables.weapons.empty() && !alt_fire) {
-					const world::WeaponTableEntry *adm = world->tables.weapons.by_index(fr.adm_index);
-					if (adm == nullptr) break; // [orig: "Tried to fire NULL wpn, %i" @0x50bb49]
-
-                    if (world::weapon_fire_owner_status(*world, *shooter, adm, false) != 0)
-                        break;
-                    world::WeaponFsmInputs fire_inputs;
-                    world::weapon_fire_environment_inputs(*world, *shooter, fire_inputs);
-                    world::WeaponFsmDef fire_def = adm->action_fsm;
-                    fire_def.flags = adm->flags;
-                    fire_def.clip_capacity = adm->clipsize;
-                    fire_def.ammo_cost = adm->ammo_class_count;
-                    world::WeaponSlotState fire_slot;
-                    const int pool = adm->ammo_class_id;
-                    fire_slot.reserve = pool >= 0 && pool < 128 ? st.ammo_pools[pool] : 0;
-                    fire_slot.clip = 1; // the real mounted/personal clip is checked below
-                    if (!world::weapon_fsm_can_fire(fire_def, fire_slot, fire_inputs)) break;
-					if (adm->clipsize != -1) {
-						world::WeaponSlotState *mounted_slot = nullptr;
-						uint8_t mounted_adm = 0xFF;
-						if (shooter->use_gun_slot_swapped &&
-								shooter->mount_target.valid()) {
-							world::Entity *mount =
-									world->registry.get(shooter->mount_target);
-							if (mount != nullptr) {
-								mounted_slot = world->vehicles.resolve_mounted_ammo_slot(*mount);
-								if (mounted_slot == &mount->primary_weapon_slot) {
-									mounted_adm = mount->primary_weapon_slot_adm;
-								} else if (mounted_slot != nullptr) {
-									world::Entity *parent =
-											world->registry.get(mount->ground_target);
-									if (parent != nullptr && mounted_slot ==
-											&parent->primary_weapon_slot)
-										mounted_adm = parent->primary_weapon_slot_adm;
-								}
-							}
-							// A borrowed EquippedSlot with an invalid route is a reject,
-							// never a fallback into the player's personal combo map.
-							if (mounted_slot == nullptr || mounted_adm != fr.adm_index)
-								break;
-						}
-						if (mounted_slot != nullptr) {
-							if (static_cast<int16_t>(mounted_slot->clip) == 0) break;
-							--mounted_slot->clip;
-						} else {
-							const uint16_t combo =
-									uint16_t(adm->category) * 65u + adm->rank;
-							WeaponSlotState &slot = conn.weapon_slots[combo];
-							if (slot.adm_index != fr.adm_index) {
-								slot.adm_index = fr.adm_index;
-								slot.clip = adm->clipsize;
-							}
-							if (adm->ammo_bucket != 0) {
-                                const uint32_t bucket = static_cast<uint32_t>(adm->ammo_bucket);
-                                if (bucket >= st.shared_clips.size() ||
-                                        bucket >= world->tables.weapons.ammo_class_names.size() ||
-                                        st.shared_clips[bucket] == 0) break;
-                                --st.shared_clips[bucket];
-                            } else {
-                                if (slot.clip == 0) break;
-                                --slot.clip;
-                            }
-						}
-					}
-					// The accepted fire re-points the shooter's EquippedSlot: the borrowed
-					// mount slot it fired through, else the personal slot of the fired
-					// combo. [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d]
-					if (shooter->use_gun_slot_swapped && shooter->mount_target.valid()) {
-						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kMount;
-						conn.equipped_slot.mount = shooter->mount_target;
-					} else {
-						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
-						conn.equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
-					}
-					// Primary fire mirrors the equipped weapon onto the entity
-					// [orig: @0x50bd56 entity+688 = adm — the §5.10 off-16 source].
-					shooter->equipped_adm_index = fr.adm_index;
-				}
-				// Stamp the claimed target on the shooter; the tag-2 serializer reads it LIVE
-				// [orig: @0x50c2ad shooter+104->+12; NetPacket_SerializeRoundEvent @0x50485a].
-				world::EntityHandle fire_target{};
-				if (!wire_handle::is_batch_end_sentinel(fr.target_handle)) {
-					const world::EntityHandle th{fr.target_handle};
-					if (world->registry.get(th) != nullptr) fire_target = th; // [orig: @0x5135d2]
-				}
-				shooter->last_fire_target = fire_target;
-				// A primary round re-enters through the adm fire action, whose
-				// local pass scores the shot (scorer event 1) once it clears the
-				// pose checks; alt fire returns through RoundData_AddRound first.
-				// [orig: Server_ClientFiredRound @0x50BAA0 — alt @0x50BB0D, the
-				//  event-1 call @0x50C727]
-				if (!alt_fire) world->match.record_shot(*world, conn.link.owned_entity);
-				// The validated round ends the shooter's spawn protection: an in-session
-				// authority clears entity+292 for a non-spectator slot whose value is
-				// nonzero. A rejected fire never reaches this store. The listen host's own
-				// fire takes the same clear through Entity_FireWeaponAndSendPacket's
-				// authority leg (world/player_weapon.cpp local commit).
-				// [orig: Server_ClientFiredRound @0x50BAA0 @0x50c736..0x50c75d]
-				if (world->rules.mp_session && shooter->damage_state != 0 &&
-				    !conn.link.spectator)
-					shooter->damage_state = 0;
-
-				// Ring append [orig: RoundData_AddRound @0x4fdb40]. The ring stores the
-				// PRE-SPREAD origin/direction — exactly the client's claimed fire pose
-				// [orig: @0x4fdbce reads the request before RoundData_SpawnRound's spread].
-				world::RoundEvent ev;
-				ev.shooter_handle = fr.shooter_handle;
-				ev.origin_x = fr.pos_x;
-				ev.origin_y = fr.pos_y;
-				ev.origin_z = fr.pos_z;
-				ev.dir_yaw = int32_t(uint32_t(fr.dir_x) << 16);   // [orig: @0x513436]
-				ev.dir_pitch = int32_t(uint32_t(fr.dir_y) << 16); // [orig: @0x513449]
-				ev.shot_seq = fr.hit_part;   // [orig: word_B7C670 = hit_part @0x50c2ba -> ring+28]
-				ev.mode_flags = fr.fire_flags; // [orig: ring+30 = the fire-mode byte @0x4fdcde]
-				// Shooter fire-context composite [orig: ctx & 0x3F @0x50bd83, recombined
-				// | (ctx >> 7) << 7 into roundParams[4] @0x50c7bd -> ring+31].
-				ev.subtype = uint8_t((fr.extra_byte2 & 0x3F) | ((fr.extra_byte2 >> 7) << 7));
-				ev.slot_byte = fr.misc_byte; // [orig: ring+32 <- fireRequest+80 @0x4fdcfc]
-				ev.adm_index = fr.adm_index;
-				world->out.rounds.add(ev);
-				// The authoritative round spawns SYNCHRONOUSLY with the ring append
-				// [orig: RoundData_AddRound @0x4fdb40 inline-calls RoundData_SpawnRound
-				// @0x4ec0d0 — the ring is only the tag-2 fan-out log; §5.60]. Ammo = the
-				// adm's load-time-resolved round_type (+4; +84 is the stat id); an
-				// armory- or ammo-less host skips the sim (fire still echoes).
-				if (!world->tables.ammo.empty()) {
-					const world::WeaponTableEntry *fire_adm =
-							world->tables.weapons.by_index(fr.adm_index);
-					if (fire_adm != nullptr && fire_adm->ammo_index >= 0) {
-						world::RoundSpawnParams rp;
-						rp.owner = conn.link.owned_entity;
-						rp.shooter_handle = fr.shooter_handle;
-						rp.origin.x = opennova::io::fp16_16_to_float(fr.pos_x);
-						rp.origin.y = opennova::io::fp16_16_to_float(fr.pos_y);
-						rp.origin.z = opennova::io::fp16_16_to_float(fr.pos_z);
-						rp.dir_yaw_bam = ev.dir_yaw;
-						rp.dir_pitch_bam = ev.dir_pitch;
-						rp.ammo_index = fire_adm->ammo_index;
-						rp.adm_index = fr.adm_index;
-						rp.shot_seq = fr.hit_part;
-						rp.subtype = ev.subtype;
-						// PowerThrow charge from fireRequest+80; RoundData_SpawnRound
-						// scales velocity for bytes 1..254 [orig: @0x4ec5bb].
-						rp.charge = fr.misc_byte;
-						world->round_sim.spawn(*world, rp);
-					}
-				}
-				// A rejected shot leaves this floor untouched. Alt fire stamps only
-				// its tick; primary adds the baked ADM action interval.
-				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310, stamp @0x513740]
-				if (conn.fire_tick_mode) {
-					const auto *adm = world->tables.weapons.by_index(fr.adm_index);
-					conn.fire_tick_floor = fr.current_tick +
-							(!alt_fire && adm != nullptr ? adm->fire_interval_ticks() : 0u);
-				}
-				// No reactive reply — the echo rides the per-frame 0x0A fan (replication
-				// select_round_events), reaching every OTHER in-match recipient.
+			case c2s::FIRED_ROUND: // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
+				Server_HandleClientFiredRound(config, conn, msg.payload.data(), msg.payload.size(), world);
 				break;
-			}
 			case c2s::WEAPON_RELOAD_REQUEST: { // reload request -> S2C 0x49 BROADCAST [orig: NapiNPServerMsg_HandleReloadRequest
 				// @0x514DF0 — validates the [u16 entityHandle][u16 weaponSlotCombo] body, then relays it
 				// verbatim as S2C 0x49 via two NapiNPServer_SendFiltered @0x4C87E0 sends that together
@@ -2178,8 +1981,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						peer->inf.reload_anim_ticks = 80;
 				}
 				// Host-side clip refill for a REMOTE requester [orig: WeaponSlot_ReloadAmmo
-				// @0x541720, called @0x514F03 after the relay iff requester != local player.
-				// Refund + ammo-pool clamp deferred -> refill to capacity @0x541811]. The wire
+				// @0x541720, called @0x514F03 after the relay iff requester != local player:
+				// the refund @0x5417E7, the draw clamped by the pool @0x541811, the store
+				// @0x541842 / @0x541850]. The wire
 				// combo (the second u16) keys the same slot the 0x06 pipeline decrements
 				// [orig: slotIndex = HIWORD @0x514f03; slot = playerSlot+464+100*combo @0x54176d].
 				if (!world->tables.weapons.empty() &&
@@ -2192,24 +1996,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							(addressed_entity->item_attrib &
 									world::kItemAttribEweap) != 0u &&
 							world->vehicles.prepare_weapon_slot(*addressed_entity)) {
-						world::WeaponSlotState *slot =
-								world->vehicles.resolve_mounted_ammo_slot(*addressed_entity);
-						uint8_t slot_adm = addressed_entity->primary_weapon_slot_adm;
-						if (slot != nullptr &&
-								slot != &addressed_entity->primary_weapon_slot) {
-							world::Entity *parent = world->registry.get(
-									addressed_entity->ground_target);
-							if (parent == nullptr ||
-									slot != &parent->primary_weapon_slot)
-								slot = nullptr;
-							else
-								slot_adm = parent->primary_weapon_slot_adm;
-						}
-						const world::WeaponTableEntry *adm =
-								world->tables.weapons.by_index(slot_adm);
-						if (slot != nullptr && adm != nullptr &&
-								adm->clipsize != -1)
-							slot->clip = adm->clipsize;
+						// [orig: WeaponSlot_ReloadAmmo's EWeap legs]
+						world->vehicles.reload_weapon_slot(*addressed_entity);
 						break;
 					}
 					NapiNPConnection *addressed_owner = nullptr;
@@ -2323,15 +2111,25 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// (@0x42e647). The host walks pool 0 and answers with the index of every
 				// EMPTY entry (`entry_dword[7] == 0`); the client destroys whatever it
 				// still holds in those slots (NapiNPClientMsg_DestroyEntityList
-				// @0x429730). The handler reads NO fields from the request, is
-				// authority-gated, and is SKIPPED while g_NetSpawnSuspended or
+				// @0x429730). The handler reads NO fields from the request. It answers
+				// on the authority only, is SKIPPED while g_NetSpawnSuspended or
 				// g_SpawnSuccessGate (round over) is set — our reachable analog of the
-				// latter is world->match.outcome().ended. The walk covers pool 0's used
+				// latter is world->match.outcome().ended — and answers only a requester
+				// whose session player (conn+0x160) and its server slot (+0xC0) are
+				// bound, which our PlayerAdded phase stands for (the 0x22 and 0x0F
+				// gates' analogue). The walk covers pool 0's used
 				// count, its allocation high-water mark (D-NET-417); its empty test is the
 				// ItemTypeIndex (+0x1C) alone, with no def test: a free row, or a live one
 				// of a type items.def lacks (the lookup's miss answers row 0).
-				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0,
-				//  the used read @0x5160FF, the +0x1C test @0x516123]
+				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600 — the authority
+				//  @0x51A600..0x51A607, g_NetSpawnSuspended @0x51A609..0x51A610
+				//  (unmodeled, D-NET-116), the round-over gate @0x51A612..0x51A619, the
+				//  session player @0x51A61F..0x51A627 and its slot @0x51A62A..0x51A632;
+				//  body builder Server_CollectEmptyPool0Slots @0x5160f0, the used read
+				//  @0x5160FF, the +0x1C test @0x516123]
+				if (inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority ||
+				    conn.phase < ConnectionPhase::PlayerAdded)
+					break;
 				std::size_t consumed = 0;
 				if (world == nullptr ||
 				    !decode_empty_slots_request(

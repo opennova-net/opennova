@@ -142,6 +142,22 @@ int main() {
 		if (!expect(seven.foliage_defs.size() == 1 &&
 						seven.foliage_defs[0].match == std::array<int, 4>{1, 2, 3, 4},
 				"only the first four match args are consumed")) return 1;
+		// A line stores its own codes and clears none (Terrain_ParseConfigCallback @0x60F4F3..0x60F556):
+		// a second line overwrites the codes it carries and keeps the rest, a bare `match` keeps all.
+		const auto block_codes = [&](const char *lines) {
+			opennova::TrnConfig two;
+			std::istringstream in(std::string("polytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\n"
+			                                  "polytrn_polydata p.cpt\r\nfoliage\r\n  graphic bush.3di\r\n") +
+			                      lines + "end\r\n");
+			std::string load_error;
+			if (!opennova::load_trn(in, two, load_error) || two.foliage_defs.size() != 1)
+				return std::array<int, 4>{-2, -2, -2, -2};
+			return two.foliage_defs[0].match;
+		};
+		if (!expect(block_codes("  match 254 253\r\n  match 1\r\n") == std::array<int, 4>{1, 253, -1, -1},
+				"a second match line overwrites its own codes alone")) return 1;
+		if (!expect(block_codes("  match 254 253\r\n  match\r\n") == std::array<int, 4>{254, 253, -1, -1},
+				"a bare match line keeps the codes")) return 1;
 		opennova::FoliageDef gapped;
 		gapped.graphic = "gap";
 		gapped.match = {-1, 7, 300, 3};
@@ -172,7 +188,7 @@ int main() {
 	// no `end` follows, still wrote its slot, which the runtime takes like a closed one,
 	// so a `foliage` line inside it is one of its keys and opens nothing.
 	// [orig: Terrain_ParseConfigCallback @0x60f330 — stricmp on tokens[1], the
-	// polytrn_sectors arm, the attrib ORs, dword_31BC904 / dword_31BC900;
+	// polytrn_sectors arm, the attrib ORs, g_TerrainCfgInFoliageBlock / g_TerrainCfgFoliageBlocksClosed;
 	// File_ParseASCIIFile @0x53D810, the tail @0x53D8E9 / @0x53D8EC; Terrain_Init's
 	// four-slot copy @0x60FD16]
 	{

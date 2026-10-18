@@ -434,7 +434,7 @@ void catalog_references(const Document &document, Extracted &out) {
 	if (catalog->kind() == AssetKind::ItemDefs) {
 		// A person's face: the game opens the face animation its model's name makes for an entity of a person's
 		// item, where the shadow quality is above 0 [orig: Entity_InitFromModel @ 0x40E211..0x40E22E, the type 3
-		// @ 0x40E1C3 / 0x40E21A -> sub_57FCE0 @ 0x57FCE0]; an entity's item is the first row of its id [orig:
+		// @ 0x40E1C3 / 0x40E21A -> FaceAnim_FindOrLoadFile @ 0x57FCE0]; an entity's item is the first row of its id [orig:
 		// ItemList_FindIndexByTypeId @ 0x49E100], so a later row of an id makes none. The name is derived, never
 		// written, so no rename rewrites it.
 		std::set<int> seen;
@@ -538,7 +538,7 @@ void DefCatalogDocument::refine_symbol(const NodeAddress &address, SymbolFacts &
 		facts.value = static_cast<const DefWeaponDef *>(native)->loadout_menu_textid;
 		// A later block of the name reopens this one's row, reset to its defaults, so the game keeps nothing of
 		// this block; "null" names no row [orig: WeaponDefs_ParseLineCallback @ 0x5436d7 ->
-		// AvatarDef_FindIndexByName @ 0x53fd80 (stricmp, "null" none), AdmDef_InitEntryDefaults @ 0x543722].
+		// AdmDef_FindIndexByName @ 0x53fd80 (stricmp, "null" none), AdmDef_InitEntryDefaults @ 0x543722].
 		const Node *node = row(address.row);
 		if (!node || node->name().empty() || strutil::iequals(node->name(), "null")) return;
 		bool after = false;

@@ -50,16 +50,6 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fog_end_distance", "overcast"), &EnvFile::get_fog_end_distance, DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("get_fog_end_underwater"), &EnvFile::get_fog_end_underwater);
 	ClassDB::bind_method(D_METHOD("get_day_phase", "time"), &EnvFile::get_day_phase);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("double_saturate_color", "color"), &EnvFile::double_saturate_color);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("combine_terrain_light", "light", "sky"), &EnvFile::combine_terrain_light);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("dome_reference_height"), &EnvFile::dome_reference_height);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_body_distance"), &EnvFile::celestial_body_distance);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_sun_alpha", "overcast_blend", "sun_dim_pct"), &EnvFile::celestial_sun_alpha);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_moon_alpha", "fog_distance", "overcast_blend"), &EnvFile::celestial_moon_alpha);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("glare_glow_alpha", "view_dot_sun", "brightness", "overcast_blend", "sun_dim_pct"), &EnvFile::glare_glow_alpha);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("get_field_consumption"), &EnvFile::get_field_consumption);
 	ClassDB::bind_method(D_METHOD("apply_mission_overrides", "overrides"), &EnvFile::apply_mission_overrides);
 	ClassDB::bind_method(D_METHOD("clear_mission_overrides"), &EnvFile::clear_mission_overrides);
 	ClassDB::bind_method(D_METHOD("has_mission_overrides"), &EnvFile::has_mission_overrides);
@@ -528,18 +518,6 @@ Ref<EnvDayPhase> EnvFile::get_day_phase(float p_time) const {
 	return result;
 }
 
-Color EnvFile::double_saturate_color(const Color &p_color) {
-	return opennova::color_from_env_rgb(opennova::env::double_saturate(opennova::env_rgb_from_color(p_color)));
-}
-
-Color EnvFile::combine_terrain_light(const Color &p_light, const Color &p_sky) {
-	return opennova::color_from_env_rgb(opennova::env::combine_terrain_light(opennova::env_rgb_from_color(p_light), opennova::env_rgb_from_color(p_sky)));
-}
-
-Color EnvFile::lit_water_color(const Color &p_water, const Color &p_light) {
-	return opennova::color_from_env_rgb(opennova::env::lit_water_color(opennova::env_rgb_from_color(p_water), opennova::env_rgb_from_color(p_light)));
-}
-
 Color EnvFile::horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 		float p_fog_distance, float p_fog_distance_reference) {
 	return opennova::color_from_env_rgb(opennova::env::horizon_blend_skyfog(
@@ -601,109 +579,12 @@ Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
 	return arrays;
 }
 
-float EnvFile::dome_reference_height() {
-	return static_cast<float>(opennova::env::kSkyDomeReferenceHeight);
-}
-
-float EnvFile::celestial_body_distance() {
-	return opennova::env::kCelestialBodyDistance;
-}
-
-namespace {
-
-
-} // namespace
-
-float EnvFile::celestial_sun_alpha(float p_overcast_blend, float p_sun_dim_pct) {
-	return static_cast<float>(opennova::env::celestial_sun_alpha_fixed(
-			opennova::io::float_to_fp16_16(p_overcast_blend), opennova::io::float_to_fp16_16(p_sun_dim_pct))) / 65536.0f;
-}
-
-float EnvFile::celestial_moon_alpha(float p_fog_distance, float p_overcast_blend) {
-	return static_cast<float>(opennova::env::celestial_moon_alpha_fixed(
-			p_fog_distance, opennova::io::float_to_fp16_16(p_overcast_blend), false)) / 65536.0f;
-}
-
-float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
-		float p_overcast_blend, float p_sun_dim_pct) {
-	// The base law (no FBEFFECTS quarter): the inspector surface shows the
-	// unscaled fold; the runtime frame builder owns the locked-profile
-	// quarter (celestial_frame.h).
-	return static_cast<float>(opennova::env::glare_glow_alpha_fixed(
-			opennova::io::float_to_fp16_16(p_view_dot_sun), p_brightness,
-			opennova::io::float_to_fp16_16(p_overcast_blend), opennova::io::float_to_fp16_16(p_sun_dim_pct),
-			false)) / 65536.0f;
-}
-
-Ref<EnvSunGlare> EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {
-	const opennova::env::GlareResult glare = opennova::env::compute_sun_glare(p_view_dot_sun, p_occlusion_brightness);
-	Ref<EnvSunGlare> result;
-	result.instantiate();
-	result->assign(glare);
-	return result;
-}
-
 int EnvFile::tod_start_fixed24(int p_start_time_q8_8) {
 	return opennova::env::tod_start_fixed24(p_start_time_q8_8);
 }
 
 int EnvFile::tod_advance(int p_time_fixed24, int p_ticks, int p_advance_per_tick) {
 	return opennova::env::tod_advance(p_time_fixed24, p_ticks, p_advance_per_tick);
-}
-
-Dictionary EnvFile::get_field_consumption() {
-	Dictionary table;
-	const auto add = [&table](const char *p_field, const char *p_status, bool p_faithful, const char *p_anchor, const char *p_note) {
-		Dictionary row;
-		row["status"] = String(p_status);
-		row["faithful"] = p_faithful;
-		row["anchor"] = String(p_anchor);
-		row["note"] = String(p_note);
-		table[String(p_field)] = row;
-	};
-
-	add("env_name", "unconsumed", true, "authoring extension; no retail keyword",
-			"A label for this file. The game never reads it.");
-	add("timeofday", "unconsumed", true, "classification string only",
-			"A label for this file. The game never reads it.");
-	add("curtime", "honored", false, "Environment_SetCurrentTime @ 0x57c4b0", "");
-	add("envscale", "honored", false, "g_EnvParseEnvScale @ 0x840950", "");
-	add("fog_level", "honored", false, "Render_SetFogState @ 0x58a950", "");
-	add("fog_type", "honored", false, "Render_SetFogState @ 0x58a950", "");
-	add("terrain_tint", "honored", false,
-			"PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d; EffectWorld_TickInstancesAndLightScale @ 0x5aa170; the dead bake PolyTrn_InitTextures @ 0x60b8cb",
-			"Tints the ground's tile overlays and the lighting of effects.");
-	add("vertex_tint", "unconsumed", true, "vestigial; retail modulator identity",
-			"The game itself never uses this value; it's kept so files save back unchanged.");
-	add("water_color", "honored", false, "TimeOfDay_ParseProperty @ 0x57c590", "");
-	add("water_height", "honored", false, "water_height << 15 parse", "");
-	add("water_murk", "honored", false, "Environment_SetWaterMurk @ 0x57d4f0", "");
-	add("iris_percent", "honored", false,
-			"Terrain_SectorComputeLighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
-			"The game's automatic exposure - how the view brightens in dark scenes, indoors and out.");
-	add("iris_center", "honored", false,
-			"Terrain_SectorComputeLighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
-			"The game's automatic exposure - how the view brightens in dark scenes, indoors and out.");
-	add("ceiling_color", "honored", false, "indoor exposure inputs @ 0x5c7646; g_EnvCeilingFloorBlend @ 0x5f7163",
-			"Indoor light color: lights things inside buildings and sets the indoor exposure.");
-	add("floor_color", "honored", false, "indoor exposure inputs @ 0x5c7646; g_EnvCeilingFloorBlend @ 0x5f7163",
-			"Indoor light color: lights things inside buildings and sets the indoor exposure.");
-	add("lightning_color", "honored", false, "Environment_SetLightningFlash @ 0x57d320",
-			"Lightning flash color.");
-	add("cloud_tint", "honored", false, "Render_Skybox @ 0x579b42",
-			"Colors the whole sky only when advanced clouds are off. With advanced clouds on, the sky uses the cloud keyframe colors instead.");
-	add("sky_speed", "honored", false, "Render_Skybox @ 0x5791de", "");
-	add("sky_height", "honored", false, "SkyDome_BuildMesh @ 0x578db0", "");
-	add("sky_map1", "honored", false, "Path_ReplaceOrAppendExtension @ 0x57cc4b", "");
-	add("sky_map2", "honored", false, "Path_ReplaceOrAppendExtension @ 0x57cc4b", "");
-	add("advanced_clouds", "honored", false, "Render_Skybox fixed-function pass @ 0x579b42", "");
-	add("sun_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
-	add("moon_3di", "honored", false, "EffectWorld_LoadCelestialModels @ 0x5adc50", "");
-	add("star_3di", "unconsumed", true,
-			"EffectWorld_LoadCelestialModels @ 0x5adcd6; Star_RenderField_Unused @ 0x5ad9c0 has no caller",
-			"The game loads the star model but never draws it.");
-	add("glare_3di", "honored", false, "Render_SkyboxSunGlow @ 0x5acd00", "");
-	return table;
 }
 
 void EnvFile::apply_mission_overrides(const Ref<MissionEnvironmentOverrides> &p_overrides) {

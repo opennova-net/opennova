@@ -173,8 +173,11 @@ FileKind file_kind_for_name(const std::string &logical_name);
 
 // The kind a required-resource row's file name implies without reading anything (base/gameprofile
 // required_resources): the `.bin` rows are string tables except the music scripts and the raw
-// markers, which are named. What a requirement compares a file found on disk against.
-FileKind file_kind_for_required_name(const std::string &name);
+// markers, which are named. What a requirement compares a file found on disk against. With
+// `expansion`, the name the files of an expansion of that name take too: its music scripts
+// M<expansion>.bin and G<expansion>.bin (by name alone they read as string tables, as the base
+// game's menutxt.bin and Gameerr.bin are).
+FileKind file_kind_for_required_name(const std::string &name, const std::string &expansion = std::string());
 
 // The boot table's archive of a slot: "language.pff", "localres.pff", "resource.pff" (base/vfs
 // kBootArchiveTable, in its order); "" for Loose and None.

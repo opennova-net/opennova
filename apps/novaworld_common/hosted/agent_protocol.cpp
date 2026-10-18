@@ -27,13 +27,6 @@ constexpr int64_t kMaxMemoryMb = 65536;
 constexpr int64_t kMinPids = 16;
 constexpr int64_t kMaxPids = 32768;
 
-bool all_of(std::string_view text, bool (*ok)(char)) {
-	for (const char c : text)
-		if (!ok(c))
-			return false;
-	return true;
-}
-
 bool is_printable_ascii(std::string_view text) {
 	return all_of(text, [](char c) { return c >= 0x20 && c <= 0x7E; });
 }

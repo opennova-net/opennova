@@ -4,6 +4,7 @@
 #include "object/model_light.h"
 #include "object/model_user_point.h"
 
+#include <base/io/fixed.h>
 #include <runtime/world/model_geometry.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
 #include <runtime/renderer/model_mesh_prepare.h>
 
@@ -177,8 +178,8 @@ Array ObjectData::get_collision_volumes() const {
 	for (size_t i = 0; i < col->volume_count; ++i) {
 		const ThreediBoundingVolume &v = col->volumes[i];
 		// (x, y, z) -> (y, z, x); the cyclic rotation has no sign flips, so min stays min.
-		const Vector3 gmin(v.min_y_fp16 / 65536.0f, v.min_z_fp16 / 65536.0f, v.min_x_fp16 / 65536.0f);
-		const Vector3 gmax(v.max_y_fp16 / 65536.0f, v.max_z_fp16 / 65536.0f, v.max_x_fp16 / 65536.0f);
+		const Vector3 gmin(opennova::io::fp16_16_to_float(v.min_y_fp16), opennova::io::fp16_16_to_float(v.min_z_fp16), opennova::io::fp16_16_to_float(v.min_x_fp16));
+		const Vector3 gmax(opennova::io::fp16_16_to_float(v.max_y_fp16), opennova::io::fp16_16_to_float(v.max_z_fp16), opennova::io::fp16_16_to_float(v.max_x_fp16));
 		Array planes;
 		// Plane windows are consecutive across the BVOL pool. plane_count comes
 		// straight from the on-disk model with no clamp, so a malformed file can

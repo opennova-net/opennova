@@ -309,11 +309,16 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	// authority's a registry entity; the max is the def hp (a row's player
 	// def) without the difficulty term, as the friendly tags read it.
 	// [orig: HUD_RenderOverlays @0x5a7bc5..0x5a7c25 — the gate
-	//  `dword_A860F4 && dword_A860F0` @0x5a7bdb; HUD_BuildEntityInfo @0x5a7bf3
+	//  `g_DeathScreenTarget && g_DeathScreenSubMode` @0x5a7bdb; HUD_BuildEntityInfo @0x5a7bf3
 	//  (team @0x4b8464, ratio @0x4b87a2..0x4b87d3); HUD_DrawTeamIdLine's name
 	//  @0x59ac3d]
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
+		// The friendly tag's spectated legs read the tracked target and the
+		// sub-mode as they stand [orig: HUD_DrawEntityLabel @0x5a3a05..0x5a3a2e,
+		// @0x5a3b0e, @0x5a3b62].
+		s.spectate_target = cs.spectate_target;
+		s.spectate_submode = cs.death_screen_submode;
 		if (cs.death_screen_active && cs.spectate_target != 0xFFFF &&
 				cs.death_screen_submode != 0) {
 			int64_t health = 0;
@@ -716,7 +721,8 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 			const auto live = runtime->zone_states().find(e->handle.packed);
 			if (live != runtime->zone_states().end())
 				zone.timer_ready = !(live->second.entry.value_target <
-						live->second.entry.value_limit);			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
+						live->second.entry.value_limit);
+			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
 			// [orig: ZoneTimerList_SetEntryWindow @0x537DE0 via the 0x53
 			//  handler @0x428AE0].
 			if (live != runtime->zone_states().end() && live->second.has_window)

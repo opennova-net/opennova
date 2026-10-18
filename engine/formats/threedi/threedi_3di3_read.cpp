@@ -13,6 +13,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <utility>
+#include <vector>
+
 #include <base/io/fixed.h>
 #include <formats/threedi/threedi_panm.h>
 
@@ -27,21 +30,42 @@ using opennova::io::read_f32_le;
 using opennova::io::read_fp_16_16;
 using opennova::io::read_fp_14;
 
+// Each chunk under `root` (`root` first), a parent before its children and children in file
+// order, until `visit` returns false; an explicit stack (the tree may nest up to the game's
+// 1999 chunks, threedi.cpp kMaxChunkNodes).
+template <class Visit>
+static void walk_chunks(const ThreediChunk *root, Visit &&visit)
+{
+    if (!root || !visit(root)) {
+        return;
+    }
+    std::vector<std::pair<const ThreediChunk *, size_t>> path;
+    path.push_back({root, 0});
+    while (!path.empty()) {
+        std::pair<const ThreediChunk *, size_t> &top = path.back();
+        if (top.second == top.first->child_count) {
+            path.pop_back();
+            continue;
+        }
+        const ThreediChunk *child = &top.first->children[top.second++];
+        if (!visit(child)) {
+            return;
+        }
+        path.push_back({child, 0});
+    }
+}
+
 static const ThreediChunk *find_first_chunk(const ThreediChunk *chunk, const char id[4])
 {
-    if (!chunk) {
-        return NULL;
-    }
-    if (memcmp(chunk->id, id, 4) == 0) {
-        return chunk;
-    }
-    for (size_t i = 0; i < chunk->child_count; ++i) {
-        const ThreediChunk *found = find_first_chunk(&chunk->children[i], id);
-        if (found) {
-            return found;
+    const ThreediChunk *found = NULL;
+    walk_chunks(chunk, [&](const ThreediChunk *c) {
+        if (memcmp(c->id, id, 4) == 0) {
+            found = c;
+            return false;
         }
-    }
-    return NULL;
+        return true;
+    });
+    return found;
 }
 
 static int append_chunk(const ThreediChunk ***list, size_t *count, size_t *cap, const ThreediChunk *chunk)
@@ -62,20 +86,15 @@ static int append_chunk(const ThreediChunk ***list, size_t *count, size_t *cap, 
 
 static int collect_chunks(const ThreediChunk *chunk, const char id[4], const ThreediChunk ***out_list, size_t *out_count, size_t *out_cap)
 {
-    if (!chunk) {
-        return 0;
-    }
-    if (memcmp(chunk->id, id, 4) == 0) {
-        if (append_chunk(out_list, out_count, out_cap, chunk) != 0) {
-            return -1;
+    int rc = 0;
+    walk_chunks(chunk, [&](const ThreediChunk *c) {
+        if (memcmp(c->id, id, 4) == 0 && append_chunk(out_list, out_count, out_cap, c) != 0) {
+            rc = -1;
+            return false;
         }
-    }
-    for (size_t i = 0; i < chunk->child_count; ++i) {
-        if (collect_chunks(&chunk->children[i], id, out_list, out_count, out_cap) != 0) {
-            return -1;
-        }
-    }
-    return 0;
+        return true;
+    });
+    return rc;
 }
 
 static void free_model_arrays(Threedi3di3 *model)

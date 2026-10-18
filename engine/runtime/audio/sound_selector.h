@@ -22,7 +22,7 @@
 
 namespace opennova::audio {
 
-// Mirrors the .lwf selection flags (and SoundBank.SELECTION_* / LwfData): the three the
+// Mirrors the .lwf selection flags (and LwfData.SELECTION_*): the three the
 // engine plays (selection_mode_for_flags).
 enum SelectionMode {
     kRandom = 1,     // a scaled-random member each time (the engine DEFAULT for unflagged layers)

@@ -38,7 +38,8 @@ concurrency:
 jobs:
   # A pull request that changes only the private docs pointer and markdown
   # builds and tests nothing: no build or test reads those paths, and the lint
-  # gates that do read them still run in `test`. Every other PR, and every
+  # gates that do read them still run in `gates` (reported through the required
+  # `test` check). Every other PR, and every
   # push, runs everything. The two required checks (`test`,
   # `godot-tests`) gate their steps on `code` instead of skipping the job: a
   # skipped matrix job reports under its bare name, which would leave the
@@ -164,6 +165,8 @@ jobs:
           python -B -m unittest discover -s scripts/ci -p test_test_suites.py
           # The cite image rule cite_census.py and scripts/ida/cite_sweep.py share.
           python -B -m unittest discover -s scripts/lint -p "test_*.py"
+          # cite_sweep.py's classifier (the sweep itself needs a live IDA).
+          python -B -m unittest discover -s scripts/ida -p "test_*.py"
           # The scripted game launch starts behind every window and never takes
           # the foreground (game_mcp.BehindLaunch; docs/mcp.md "Launching").
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
@@ -1046,8 +1049,8 @@ jobs:
     uses: ./.github/workflows/package-blender-windows.yml
 
   # The native apps (opennova-3di, opennova-extract, opennova-lan-probe,
-  # opennova-parity, opennova-serve and opennova-wire) in one zip, built for
-  # PRs and tagged releases alike. The NovaWorld server is Linux-only (its
+  # opennova-parity, opennova-serve, opennova-update-tool and opennova-wire)
+  # in one zip, built for PRs and tagged releases alike. The NovaWorld server is Linux-only (its
   # container image).
   package-apps-windows:
     needs: [changes]
@@ -1104,7 +1107,7 @@ jobs:
               `| Runtime: opennova.exe with the placeholder menu; PLAY RETAIL plays your own Joint Operations install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
-              `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server) and opennova-wire | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
+              `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
               `| Switcher: opennova-switcher.exe, a tray app that switches retail Joint Operations between OpenNova's NovaWorld and NovaLogic's through the hosts file; run it as administrator | [opennova-switcher-windows.zip](${process.env.SWITCHER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',

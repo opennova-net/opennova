@@ -3175,7 +3175,7 @@ void test_cursor_follows_the_claim(const fnt_font_t *font) {
 // width, of exactly 2 (RIGHT, TOP) by all of it; a list's edge pad is 0, so its
 // shown scrollbar never shortens a row (D-MNU-34) [orig: CListWnd_Construct
 // @ 0x643c08 / 0x643c50; CListWnd_ParseXMLDefinition @ 0x6457ef..0x645907 and
-// @ 0x6459b2..0x645b62; list_insert_row @ 0x6450c8..0x6450e8;
+// @ 0x6459b2..0x645b62; CListWnd_InsertRow @ 0x6450c8..0x6450e8;
 // CListWnd_DrawItems @ 0x6440f7..0x644345; CFontCache_DrawTextWithCursor
 // @ 0x65341f..0x653436].
 void test_list_rows_lay_out_by_the_items_justification(const fnt_font_t *font) {

@@ -5,9 +5,12 @@
 #include <formats/env/env_weather.h>
 #include <formats/env/env_weather_core.h>
 
+#include <base/io/fixed.h>
+
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace {
 
@@ -197,9 +200,11 @@ int main() {
 		const GlareResult full = compute_sun_glare(1.0f, 255);
 		if (!expect(full.glare == 192 && full.fog_whiten == 40, "dot 1.0 gives glare 192 / whiten 40")) return 1;
 
+		// [orig: @ 0x5ad7a5..0x5ad7b1 (the veil on dot^16), @ 0x5ad7c1..0x5ad7fc
+		//  (the whitening on dot^64)]
 		const GlareResult partial = compute_sun_glare(0.95f, 255);
-		if (!expect(partial.glare == 37, "dot 0.95: 0.95^32 * 192 = 37")) return 1;
-		if (!expect(partial.fog_whiten == 0, "dot 0.95: 0.95^128 * 40 truncates to 0")) return 1;
+		if (!expect(partial.glare == 84, "dot 0.95: 0.95^16 * 192 = 84")) return 1;
+		if (!expect(partial.fog_whiten == 1, "dot 0.95: 0.95^64 * 40 = 1.5 truncates to 1")) return 1;
 
 		const GlareResult occluded = compute_sun_glare(1.0f, 128);
 		if (!expect(occluded.glare == 96, "occlusion brightness scales glare (192*128/255)")) return 1;
@@ -1670,9 +1675,103 @@ int main() {
 		if (!expect(state.brightness == 96, "four dark pairs decay the brightness to 96")) return 1;
 	}
 
+	// --- EnvFile's retired statics' GUT vectors (review C-45) ----------------
+	// env_parity_vectors_test.gd's celestial/glare_sweep, celestial/glare_occlusion,
+	// celestial/body_distance, celestial/body_alpha, celestial/glow and envfile/derived keys,
+	// env_file_test.gd's derived-colour helper case and sky_dome_test.gd's reference height
+	// reached these engine functions through EnvFile's bound statics: a GDScript float narrowed
+	// to the binding's float (and to 16.16 by io::float_to_fp16_16 where the fixed law takes
+	// it), a Color's channels as env::Rgb, the bytes read back as int(v * 255 + 0.5). The same
+	// inputs pin the same bytes and floats here.
+	{
+		const auto glare_row = [](const float *dots, const int *brightness, int count) {
+			std::string out;
+			for (int i = 0; i < count; ++i) {
+				const GlareResult glare = compute_sun_glare(dots[i], brightness[i]);
+				char hex[8];
+				std::snprintf(hex, sizeof hex, "%s%02X%02X", i == 0 ? "" : " ", glare.glare,
+				              glare.fog_whiten);
+				out += hex;
+			}
+			return out;
+		};
+		// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610: the veil on dot^16
+		// @ 0x5ad7a5..0x5ad7b1, the whitening on dot^64 @ 0x5ad7c1..0x5ad7fc]
+		const float sweep_dots[] = {-1.0f, -0.5f, 0.0f, 0.25f, 0.5f, 0.75f, 0.9f, 0.95f, 0.975f, 0.99f, 1.0f};
+		const int sweep_brightness[] = {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255};
+		if (!expect(glare_row(sweep_dots, sweep_brightness, 11) ==
+		                    "0000 0000 0000 0000 0000 0100 2300 5401 8007 A315 C028",
+		            "celestial/glare_sweep")) return 1;
+		const float occlusion_dots[] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+		const int occlusion_brightness[] = {0, 32, 64, 128, 192, 255};
+		if (!expect(glare_row(occlusion_dots, occlusion_brightness, 6) == "0000 1805 300A 6014 901E C028",
+		            "celestial/glare_occlusion")) return 1;
+
+		// Bodies place at camera + direction * 64 [orig: Render_CelestialBodies @ 0x5acaa0].
+		if (!expect(kCelestialBodyDistance == 64.0f, "celestial/body_distance")) return 1;
+		// The body alphas [orig: @ 0x5acbc1..0x5acccd], as the statics returned them.
+		const auto sun = [](float overcast, float dim) {
+			return static_cast<float>(celestial_sun_alpha_fixed(opennova::io::float_to_fp16_16(overcast),
+			                                                    opennova::io::float_to_fp16_16(dim))) /
+			       65536.0f;
+		};
+		const auto moon = [](float fog, float overcast) {
+			return static_cast<float>(celestial_moon_alpha_fixed(
+			               fog, opennova::io::float_to_fp16_16(overcast), false)) /
+			       65536.0f;
+		};
+		const float body_alpha[] = {sun(0.0f, 0.0f),     sun(0.5f, 0.0f),     sun(0.0f, 50.0f),
+		                            moon(1024.0f, 0.0f), moon(700.0f, 0.0f), moon(400.0f, 0.0f),
+		                            moon(1024.0f, 1.0f)};
+		const float body_alpha_expected[] = {1.0f, 0.5f, 0.5f, 1.0f, 0.5f, 0.0f, 0.0f};
+		for (int i = 0; i < 7; ++i)
+			if (!expect(near(body_alpha[i], body_alpha_expected[i], 1e-4f), "celestial/body_alpha")) return 1;
+		// The glow chain, dot^4/2 x brightness x the folds, the base law (no FBEFFECTS quarter)
+		// [orig: Render_SkyboxSunGlow @ 0x5acfb8..0x5ad0a9].
+		const auto glow = [](float dot, int brightness, float overcast, float dim) {
+			return static_cast<float>(glare_glow_alpha_fixed(
+			               opennova::io::float_to_fp16_16(dot), brightness,
+			               opennova::io::float_to_fp16_16(overcast), opennova::io::float_to_fp16_16(dim),
+			               false)) /
+			       65536.0f;
+		};
+		const float glow_alpha[] = {glow(1.0f, 256, 0.0f, 0.0f), glow(0.5f, 256, 0.0f, 0.0f),
+		                            glow(1.0f, 128, 0.0f, 0.0f), glow(1.0f, 256, 0.5f, 0.0f),
+		                            glow(-0.5f, 256, 0.0f, 0.0f)};
+		const float glow_expected[] = {0.5f, 0.03125f, 0.25f, 0.25f, 0.0f};
+		for (int i = 0; i < 5; ++i)
+			if (!expect(near(glow_alpha[i], glow_expected[i], 1e-4f), "celestial/glow")) return 1;
+
+		// The derived render colours [orig: Environment_UpdateWeatherTick @ 0x57f0b3..0x57f1b1].
+		const auto hex = [](const Rgb &rgb) {
+			const auto byte = [](float v) { return static_cast<int>(static_cast<double>(v) * 255.0 + 0.5); };
+			char out[8];
+			std::snprintf(out, sizeof out, "%02X%02X%02X", byte(rgb.r), byte(rgb.g), byte(rgb.b));
+			return std::string(out);
+		};
+		const Rgb doubled = double_saturate({0.3f, 0.5f, 0.7f});
+		const Rgb combined = combine_terrain_light({0.5f, 0.5f, 0.5f}, {0.25f, 0.25f, 0.25f});
+		const Rgb lit = lit_water_color({0.4f, 0.31f, 0.22f}, combined);
+		if (!expect(hex(doubled) + " " + hex(combined) + " " + hex(lit) == "9AFFFF 9A9A9A 7A5F43",
+		            "envfile/derived")) return 1;
+		// env_file_test.gd's helper case: doubling with saturation, and water * light >> 7 the
+		// identity at mid-grey.
+		const Rgb doubled_helper = double_saturate({0.5f, 0.25f, 1.0f});
+		if (!expect(near(doubled_helper.r, 1.0f, 0.01f) && near(doubled_helper.g, 0.5f, 0.01f) &&
+		                    near(doubled_helper.b, 1.0f, 0.01f),
+		            "0.5 doubles to 1.0, 0.25 to 0.5, 1.0 saturates")) return 1;
+		const Rgb mid{0.5f, 0.5f, 0.5f};
+		if (!expect(near(lit_water_color(mid, mid).r, 0.5f, 0.02f), "water*light>>7 is identity at mid-grey"))
+			return 1;
+
+		// The dome's reference height, 3072 - sqrt(2^23) [orig: SkyDome_BuildMesh @ 0x578ed4].
+		if (!expect(near(static_cast<float>(kSkyDomeReferenceHeight), 175.690628f, 1e-4f),
+		            "the dome reference height is 3072 - sqrt(2^23)")) return 1;
+	}
+
 	std::printf(
 	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/recip/iris"
 	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial/waterstrip/weathercore"
-	    "/retired-binding-vectors\n");
+	    "/retired-binding-vectors/envfile-statics\n");
 	return 0;
 }

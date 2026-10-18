@@ -192,6 +192,8 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.tag_good = hud_color_argb(hud.tagcolor_good);
 	out.tag_middle = hud_color_argb(hud.tagcolor_middle);
 	out.tag_bad = hud_color_argb(hud.tagcolor_bad);
+	out.tag_blueteam = hud_color_argb(hud.tagcolor_blueteam);
+	out.tag_redteam = hud_color_argb(hud.tagcolor_redteam);
 	out.hud_text = hud_color_argb(hud.hud_textcolor);
 	out.weapon_text = hud_color_argb(hud.weapon_textcolor);
 	out.stance_tint = hud_color_argb(hud.stanceicon_color);
@@ -212,9 +214,13 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 
 	// HUDSTANCE's explicit id addresses the retail slot arrays; file order is
 	// irrelevant and a later record for the same id replaces the earlier one.
+	// The loader walks eight records (the six frames, then the team tiles 6
+	// and 7); the parse does not bound the id, so an id past 7 writes past the
+	// tables in retail, which the port ignores (D-HUD-65) [orig: the HUDSTANCE
+	// arm @0x5A0B62..0x5A0BBC; the records 0x27239E0..0x2723A60].
 	for (size_t i = 0; i < hud.stances_count; ++i) {
 		const DefHudStance &stance = hud.stances[i];
-		if (stance.id < 0 || stance.id >= 6) continue;
+		if (stance.id < 0 || stance.id >= kHudStanceRecords) continue;
 		const size_t slot = static_cast<size_t>(stance.id);
 		assets.stance_textures[slot] = stance.texture;
 		out.stance_offset_x[slot] = stance.offset_x;

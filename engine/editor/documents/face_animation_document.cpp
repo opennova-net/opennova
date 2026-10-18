@@ -45,15 +45,6 @@ Triangle &triangle_of(const RecordHandle &r) { return r.as<Triangle>(); }
 grm::Gesture &gesture_of(const RecordHandle &r) { return r.as<grm::Gesture>(); }
 grm::Parameter &parameter_of(const RecordHandle &r) { return r.as<grm::Parameter>(); }
 
-FieldSchema schema_of(const std::string &id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 // What keeps a name from reading back as written: a character the reader splits a line at (a space, a comma, a
 // tab, a quote; the writer writes a name bare [orig: the writer @ 0x588320]), one it reads as a format (it copies a
 // name through sprintf, the name its format [orig: FaceAnimConfig_ParseProperty @ 0x5886A0]), a control character.
@@ -100,18 +91,6 @@ bool number_of(const Value &value, double &out) {
 	if (const auto *real = std::get_if<double>(&value)) {
 		out = *real;
 		return std::isfinite(out);
-	}
-	return false;
-}
-
-bool whole_of(const Value &value, int64_t &out) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) {
-		out = *whole;
-		return true;
-	}
-	if (const auto *real = std::get_if<double>(&value); real && std::isfinite(*real) && *real == std::floor(*real)) {
-		out = int64_t(*real);
-		return true;
 	}
 	return false;
 }
@@ -309,7 +288,7 @@ RecordTable make_table() {
 		                  {[corner](const RecordHandle &r, Value &out) { return out = int64_t(triangle_of(r)[size_t(corner)]), true; },
 		                   [corner](const RecordHandle &r, const Value &v, std::string &e) {
 			                   int64_t index = 0;
-			                   if (!whole_of(v, index) || index < 0 || index > INT32_MAX) {
+			                   if (!whole_number(v, index) || index < 0 || index > INT32_MAX) {
 				                   e = "A triangle's corner is a vertex's index, a whole number from 0.";
 				                   return false;
 			                   }

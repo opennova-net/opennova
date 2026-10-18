@@ -76,7 +76,7 @@ constexpr RepeatedName kRepeatedNames[] = {
 	{DefRecordKind::Item,
 	 "An earlier item has this name (id {id}): the game keeps both, and a lookup by the name finds the earlier one."},
 	// A weapon block of a name the table has reopens that row, reset to its defaults [orig:
-	// WeaponDefs_ParseLineCallback @ 0x543680, AvatarDef_FindIndexByName @0x5436e1 -> AdmDef_InitEntryDefaults
+	// WeaponDefs_ParseLineCallback @ 0x543680, AdmDef_FindIndexByName @0x5436e1 -> AdmDef_InitEntryDefaults
 	// @0x543722].
 	{DefRecordKind::Weapon,
 	 "An earlier weapon has this name: the game reads this block in its place and keeps nothing of the earlier one."},

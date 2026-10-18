@@ -98,8 +98,12 @@ func test_stopped_playback_releases_its_bank_after_the_mixer_drains() -> void:
 	dir.bank = null
 	dir.load_mus_script(null)
 	bank = null
+	# The player drops its stream (and the bank with it) as it stops; the stopped
+	# built-in playback, which holds only the entry's decoded PCM, goes on the
+	# mixer's cleanup pass after its fade, which is the shutdown barrier's clear.
 	await wait_until(func(): return bank_ref.get_ref() == null, 2.0)
-	assert_null(bank_ref.get_ref(), "a stopped stream releases the bank on the mixer cleanup pass")
+	assert_null(bank_ref.get_ref(), "a stopped stream releases the bank")
+	await wait_until(func(): return not dir.has_pending_playback(), 2.0)
 	assert_false(dir.has_pending_playback(), "the shutdown barrier clears after playback destruction")
 
 

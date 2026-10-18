@@ -279,10 +279,12 @@ func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> vo
 
 	var detail_after := hud.hud_detail_level()
 	await _tap_with_shift(KEY_F6)
-	assert_eq(hud.hud_detail_level(), detail_after,
-			"Shift+F6 is consumed by the shell's debug picker.")
+	# Shift held gates no row: the key scan's fallback pass fires huddetail on
+	# Shift+F6 as on F6 (engine hud::HudKeyEdge carries the witness).
+	assert_eq(hud.hud_detail_level(), HudOverlay.next_hud_detail_level(detail_after),
+			"Shift+F6 cycles huddetail like a bare F6")
 	assert_eq(hud.hud_color_index(), color_before,
-			"a chorded press never cycles a HUD row")
+			"hudcolor's Ctrl+F6 wants Ctrl")
 	assert_not_null(shell.find_child("PickToast", true, false),
 			"the chord landed on the debug picker (every attempt confirms with a toast)")
 
@@ -306,3 +308,25 @@ func test_talk_keys_stay_closed_out_of_a_session() -> void:
 	await _tap(KEY_PAGEDOWN)
 	assert_ne(ControlsBindings.model().get_help_page_line(), page,
 			"out of a session PgDn passes the board to the help page")
+
+
+# A focus change clears the key state: a key held through it reads up until
+# its next key-down, a press or an OS repeat (engine controls::KeyStateReset
+# carries the witness).
+func test_focus_change_clears_the_key_state() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var model := ControlsBindings.model()
+	Input.parse_input_event(_key_event(KEY_W, true))
+	await get_tree().process_frame
+	assert_true(model.is_vk_down(0x57), "W reads down")
+	shell.notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
+	assert_false(model.is_vk_down(0x57), "held through the focus change, W reads up")
+	var echo := _key_event(KEY_W, true)
+	echo.echo = true
+	Input.parse_input_event(echo)
+	await get_tree().process_frame
+	assert_true(model.is_vk_down(0x57), "its next key-down sets it again")
+	Input.parse_input_event(_key_event(KEY_W, false))
+	await get_tree().process_frame

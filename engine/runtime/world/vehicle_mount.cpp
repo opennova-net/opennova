@@ -142,13 +142,19 @@ bool VehicleSystem::prepare_weapon_slot(Entity &vehicle) {
         //  @0x53EF2D..0x53EF44].
         vehicle.primary_weapon_slot.scope_zoom = weapon_slot_initial_zoom(weapon->scope_max_mag,
                 weapon->scope_initial_mag, weapon->scope_min_mag, /*sniper_lock=*/false);
-        if (weapon->clipsize < 0) {
-            vehicle.primary_weapon_slot.clip = -1;
-        } else {
-            vehicle.primary_weapon_slot.clip = weapon->clipsize;
-            vehicle.primary_weapon_slot.reserve = std::max<int32_t>(
-                    0, static_cast<int32_t>(weapon->startrounds) - weapon->clipsize);
-        }
+        // The MountSlot's 16-bit words: the clip is the def's clipsize, the
+        // reserve its raw startrounds when either word is 0xFFFF, else the
+        // unclamped 16-bit difference. [orig: WeaponSlot_InitFromEntityDef
+        //  +0x10 = def+0x58 @0x54670F..0x546713; +0x12 = def+0x5C @0x546725;
+        //  the 0xFFFF tests @0x546721 / @0x54672B, the difference
+        //  @0x546731..0x546733]
+        const uint16_t clip_word = static_cast<uint16_t>(weapon->clipsize);
+        const uint16_t start_word = static_cast<uint16_t>(weapon->startrounds);
+        uint16_t reserve_word = start_word;
+        if (clip_word != 0xFFFFu && start_word != 0xFFFFu)
+            reserve_word = static_cast<uint16_t>(start_word - clip_word);
+        vehicle.primary_weapon_slot.clip = static_cast<int16_t>(clip_word);
+        vehicle.primary_weapon_slot.reserve = static_cast<int16_t>(reserve_word);
     }
     return true;
 }
@@ -213,6 +219,24 @@ WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(Entity &mount) {
     return const_cast<WeaponSlotState *>(
             static_cast<const VehicleSystem *>(this)->resolve_mounted_ammo_slot(
                     static_cast<const Entity &>(mount)));
+}
+
+bool VehicleSystem::reload_weapon_slot(Entity &mount) {
+    World &world = world_;
+    const WeaponTableEntry *own_def = world.tables.weapons.by_index(mount.primary_weapon_slot_adm);
+    WeaponSlotState *routed = resolve_mounted_ammo_slot(mount);
+    if (own_def == nullptr || routed == nullptr) return false;
+    // The routed slot's def is the slot's own: the carrier's when the route bit
+    // sends the child to it [orig: slot+0x20 read @0x541797 / @0x5417EF].
+    const WeaponTableEntry *routed_def = own_def;
+    if (routed != &mount.primary_weapon_slot) {
+        const Entity *carrier = world.registry.get(mount.ground_target);
+        if (carrier == nullptr || routed != &carrier->primary_weapon_slot) return false;
+        routed_def = world.tables.weapons.by_index(carrier->primary_weapon_slot_adm);
+        if (routed_def == nullptr) return false;
+    }
+    weapon_mount_slot_reload(*routed_def, *routed, *own_def, mount.primary_weapon_slot);
+    return true;
 }
 
 void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle) {

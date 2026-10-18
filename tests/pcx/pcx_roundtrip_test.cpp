@@ -16,7 +16,7 @@ bool expect(bool condition, const char *message) {
 }
 
 // An indexed PCX's carried form (PcxIndexedForm): the header bytes the image does not decide, and the coding
-// of the rows, the shipped coder's or JO's mission editor's [orig: JOTACmed.exe sub_45EB60, sub_45E8A0].
+// of the rows, the shipped coder's or JO's mission editor's [orig: JOTACmed.exe sub_45EB60, PCX_WriteRleRow].
 int test_forms() {
 	// Rows that tell the coders apart: a row ending in a single byte below 0xC0, a row ending in a run, a row
 	// holding a run of 70 (63 + 7), a lone 0xC5.

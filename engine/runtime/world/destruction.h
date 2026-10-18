@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/rotating_prng.h>
 #include <base/io/bam.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
@@ -499,14 +500,7 @@ struct DestructionRng {
     static constexpr uint32_t kInitialState = 0x01234567u;
     uint32_t state = kInitialState;
 
-    uint16_t next16() noexcept {
-        auto rol32 = [](uint32_t value, int bits) {
-            return (value << bits) | (value >> (32 - bits));
-        };
-        const uint32_t value = rol32(state + rol32(state, 11), 4);
-        state = value ^ 1u;
-        return static_cast<uint16_t>(state);
-    }
+    uint16_t next16() noexcept { return io::rotating_prng_next16(state); }
 
     void reset() noexcept { state = kInitialState; }
 };

@@ -77,12 +77,13 @@ struct TrnLaterLine {
 // @ 0x57c5ac calls the hook on each] and which no pass removes. So a key a later file writes is the terrain's
 // (overcast.def's over the .trn's, the .env's over both), a `polytrn_sectors` line there adds a row after the
 // .trn's [orig: dword_31BCB30 not reset between the passes], and a foliage block the .trn leaves open reads the
-// next file's lines [orig: dword_31BC904, dword_31BC900]. The environment's keywords and the editor's that the .trn
+// next file's lines [orig: g_TerrainCfgInFoliageBlock, g_TerrainCfgFoliageBlocksClosed]. The environment's keywords and the editor's that the .trn
 // holds (TrnConfig's water_*, terrain_name, terrain_creator) are the .trn's as written: no arm of the
 // terrain's parser reads them (the environment's load reads them, env::load_mission_env). `taken`, where given,
-// lists the later files' lines the parser took. False (with `error`) where the gate refuses the result.
+// lists the later files' lines the parser took, and `refusal` the gate's leg (None where it takes the result). False
+// (with `error`) where the gate refuses the result.
 bool load_mission_trn(const std::string &terrain, const TrnLaterTexts &later, TrnConfig &out, std::string &error,
-		std::vector<TrnLaterLine> *taken = nullptr);
+		std::vector<TrnLaterLine> *taken = nullptr, TrnRefusal *refusal = nullptr);
 
 // The same load over a reader of the files by name (`read` false: no such file): the mission's .trn by
 // `terrain_file` (one that is not there fails the load, as it aborts retail's before every pass [orig:

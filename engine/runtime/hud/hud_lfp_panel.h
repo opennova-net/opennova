@@ -153,19 +153,14 @@ inline bool lfp_zone_under_attack(int zone_team, int viewer_team, int rate) {
 	return zone_team == viewer_team && rate < 0;
 }
 
-// THE BLINK PHASE. Retail's HUD frame counter advances once per main frame
-// (gated on no suicide / no epilog) and the marker tests `counter & 0x18`
-// [orig: g_HUDFrameCounter @0xA87064, ++ in Game_TickHudFrameCounters
-//  @0x434C00 from Game_ProcessMainFrame @0x5265d5; the tests @0x5988E8 /
-//  @0x5988FB / @0x59891D]. That mask is not a 50/50 blink: phase A is 8
-// counts of every 32 and phase B the remaining 24.
+// THE BLINK PHASE. Retail's HUD frame counter advances once per frame tick
+// outside the menu pause and the epilog screen (world::HudFrameCounters) and
+// the marker tests `counter & 0x18` [orig: g_HUDFrameCounter @0xA87064, ++ in
+// Game_TickHudFrameCounters @0x434C00 from Game_ProcessMainFrame @0x5265d5;
+// the tests @0x5988E8 / @0x5988FB / @0x59891D]. That mask is not a 50/50
+// blink: phase A is 8 counts of every 32 and phase B the remaining 24.
 inline bool lfp_blink_phase_a_counter(int frame_counter) {
 	return (frame_counter & 0x18) == 0;
-}
-// The millisecond-clock form (>>4, one count per 16 ms) for a device that
-// clocks the panel off wall time rather than the frame counter.
-inline bool lfp_blink_phase_a(int64_t now_ms) {
-	return lfp_blink_phase_a_counter(static_cast<int>(now_ms >> 4));
 }
 
 // IN THE CYLINDER: the 2D distance to the zone is within its capture radius

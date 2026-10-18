@@ -391,7 +391,8 @@ void HudFrameCompiler::element_map_legend(const HudFrameState &state, float w, f
 			// HUD_DrawRotatedTexturedQuad @0x497390 -> Render_DrawIconStripCell_Debug
 			// @0x67bae0, `color | 0xFF000000`].
 			const uint32_t color =
-					legend_icon_color(icon.name, icon.color, ml.frame_counter) | 0xFF000000u;
+					legend_icon_color(icon.name, icon.color, static_cast<int>(state.hud_frame)) |
+					0xFF000000u;
 			const int angle_fp =
 					std::strcmp(icon.name, "hud_icon_recentspeaker") == 0 ? 0x40000000 : 0;
 			// [orig: @0x497390 — angle (fp >> 16) * 0.000095873802, the four

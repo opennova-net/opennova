@@ -147,17 +147,21 @@ static void test_rounds_mark_their_shooter() {
     CHECK(!marked_after(2)); // a silenced round
     CHECK(marked_after(3));  // the shotgun fan
 
-    // The SM fire path: a silenced block leaves its gun unmarked.
+    // The SM fire path is Weapon_FireProcess: its shooter is the gun's occupant, whom
+    // an unsilenced round marks and a silenced one leaves unmarked
+    // [orig: Weapon_FireProcess @0x53F6D6; RoundData_SpawnRound's shooter mark].
     Entity gun{};
     gun.alive = true;
     gun.health = 100;
+    gun.primary_occupant = h;
     const EntityHandle gun_h = w.registry.spawn(1, gun);
-    AiEntity &sm = *w.ai.at(w.ai.attach(gun_h));
-    const int32_t origin[3] = {0, 0, 1 << 16};
-    CHECK(w.ai.fire_ai_round(w, sm, origin, 0, 0, 2));
+    Entity &shooter = *w.registry.get(h);
+    shooter.engine_flags &= ~kEntityFlagPriorityTarget;
+    w.round_sim.fire_source(w, w.registry.get(gun_h), FixedVec3{0, 0, 1 << 16}, 0, 0, 2);
+    CHECK((w.registry.get(h)->engine_flags & kEntityFlagPriorityTarget) == 0);
+    w.round_sim.fire_source(w, w.registry.get(gun_h), FixedVec3{0, 0, 1 << 16}, 0, 0, 1);
+    CHECK((w.registry.get(h)->engine_flags & kEntityFlagPriorityTarget) != 0);
     CHECK((w.registry.get(gun_h)->engine_flags & kEntityFlagPriorityTarget) == 0);
-    CHECK(w.ai.fire_ai_round(w, sm, origin, 0, 0, 1));
-    CHECK((w.registry.get(gun_h)->engine_flags & kEntityFlagPriorityTarget) != 0);
 }
 
 // R2-11: BERSERK is read live from AiSlot[1] & 0x200, so a scripted ChangeAI

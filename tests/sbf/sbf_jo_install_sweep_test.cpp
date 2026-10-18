@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 #include "common/retail_paths.h"
+#include "sbf/sbf_streaming_reference.h"
 
 using namespace opennova::sbf;
 
@@ -96,15 +97,23 @@ void round_trip(const std::string &path, const char *label) {
 	SbfArchive arc;
 	if (sbf_open_memory(&arc, bytes.data(), bytes.size()) != 0) return;
 	size_t streams_decoding = 0;
+	size_t streams_as_streamed = 0;
 	for (uint32_t i = 0; i < arc.header.entry_count && i < bank.streams.size(); ++i) {
 		const SbfRawEntry &e = arc.entries[i];
 		std::vector<int16_t> raw(e.total_size);
 		const int n = sbf_decode_all(bytes.data() + e.data_offset, e.total_size, raw.data(), raw.size());
 		raw.resize(n < 0 ? 0 : static_cast<size_t>(n));
 		if (sbf_decode_stream(bank.streams[i]) == raw) ++streams_decoding;
+		// The Godot player's PCM (C-164) is the deleted streaming playback's, sample for sample.
+		const std::vector<int16_t> entry = sbf_decode_entry(bytes.data() + e.data_offset, e.total_size, e.block_size);
+		if (!entry.empty() && entry == sbf_streaming_reference(bytes.data() + e.data_offset, e.total_size, e.block_size))
+			++streams_as_streamed;
 	}
 	CHECK(streams_decoding == arc.header.entry_count, "%s: every stream decodes as its raw entry (%zu of %u)\n", label,
 	      streams_decoding, arc.header.entry_count);
+	CHECK(streams_as_streamed == arc.header.entry_count,
+	      "%s: every entry's player PCM is the streaming playback's (%zu of %u)\n", label, streams_as_streamed,
+	      arc.header.entry_count);
 	sbf_close(&arc);
 	std::printf("%s: %zu streams through the bank model and back (%zu header words, %zu chunk reserved pairs and %zu "
 	            "tails not the writer's)\n", label, bank.streams.size(), layout.header_words_other, layout.reserved_other,

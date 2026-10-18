@@ -141,7 +141,9 @@ int weapon_name_x_nudge(bool narrow_surface, int align);
 // ---------------------------------------------------------------------------
 // The clip indicator's round-icon count [orig: HUD_DrawAmmoIndicator
 // @0x599b9c..0x599bc1]: the magazine count (the carried pool for capacity-1
-// weapons), ceil-divided by a >1 rounds-per-icon divisor, capped at 40.
+// weapons), (n + 1) / divisor for a >1 rounds-per-icon divisor (a ceiling only
+// for a divisor of 2) [orig: `add eax,1; idiv ecx` @0x599bae..0x599bba],
+// capped at 40.
 
 inline constexpr int kMaxRoundIcons = 40; // [orig: @0x599bbf]
 // The divisor as the draw reads it: the low byte of the HUDRNDGFX layout's
@@ -206,8 +208,9 @@ LoadingBarSpan loading_bar_fill_span(int x, int w, int displayed);
 // ---------------------------------------------------------------------------
 // The crosshair spread projection [orig: HUD_DrawCrosshair
 // @0x592b07..0x592bf5]: pixel = (spread_16.16 * screen_w / int(fov_deg)) >> 16
-// (the 2^31/180 degree factors cancel); the instability sum wraps int32 with
-// the two arithmetic >>7 recoil terms [orig: @0x592b07..0x592b28]; the ERROR
+// (the 2^31/180 degree factors cancel); the live ERROR is the row's authored
+// ERROR plus the two arithmetic >>7 recoil terms, summed in x87 (equal to the
+// int32 sum while it stays in range) [orig: @0x592b8e..0x592bc8]; the ERROR
 // row = stance (0 prone / 1 crouch / 2 stand) + 3 when scoped
 // [orig: @0x592b37..0x592b84]; aimed shots hide the reticle unless the
 // vehicle/gunner leg keeps it [orig: gate @0x592afa]. Taper 0.1
@@ -277,6 +280,9 @@ uint32_t friendly_tag_revive_pulse(uint32_t argb, int frame_counter);
 // gray; read @0x5a3deb / @0x5a3e77].
 inline constexpr uint32_t kFriendlyTagDownedLightBlue = 0xFF80A0FFu;
 inline constexpr uint32_t kFriendlyTagDownedGray = 0xFFA0A0A0u;
+// The death screen's colour for a tag of neither team [orig: dword_840A40 =
+// 0xFF208020, read by HUD_DrawEntityLabel @0x5a3c60].
+inline constexpr uint32_t kFriendlyTagDeathScreenNeutral = 0xFF208020u;
 // The radio-request icon beside a tag: TSDicon strip cell 0x17 in table[3]
 // light blue at FORCED full alpha, a half-size fontH*0.5 square centered on
 // (x, y) [orig: HUD_DrawEntityLabel `push 17h` @0x5a4189/@0x5a42b7/@0x5a43d0

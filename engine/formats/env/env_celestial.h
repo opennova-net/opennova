@@ -28,10 +28,10 @@ GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness);
 // The sun-glare screen veil + exposure stop-down pair — the exact integer
 // chain of [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610], consumed once
 // per main scene frame by [orig: Environment_ApplySunVeilAndExposureStopdown
-// @ 0x5ad8b0 (ex sub_5AD8B0)]: `glare` (dot^32 x 192 x brightness/256, SunDim
+// @ 0x5ad8b0 (ex sub_5AD8B0)]: `glare` (dot^16 x 192 x brightness/256, SunDim
 // and overcast folds) is the ALPHA byte of a fullscreen WHITE quad drawn over
 // the scene when > 2 ((glare << 24) + 0xFFFFFF -> Render_FullscreenDecalQuad
-// @ 0x5ad94f), and `stopdown` (dot^128 x 40 x brightness/256, same folds) is
+// @ 0x5ad94f), and `stopdown` (dot^64 x 40 x brightness/256, same folds) is
 // the modulator-2 exposure stop-down input (ModulatorChain::
 // set_sun_veil_stopdown). compute_sun_glare above is the earlier float
 // summary of the same curve, kept for the EnvFile tooling static.

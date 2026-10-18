@@ -1,6 +1,6 @@
 // The ConfigFile's text form and its accessors (config_file.h) [orig: ConfigFile_LoadFromFile @ 0x760a10 ->
-// ConfigFile_ParseText @ 0x7608a0; ConfigFile_FindSection @ 0x75eeb0; effect_get_param_value_0 @ 0x75fa00;
-// effect_get_param_value @ 0x75f580].
+// ConfigFile_ParseText @ 0x7608a0; ConfigFile_FindSection @ 0x75eeb0; Effect_GetParamValue_0 @ 0x75fa00;
+// Effect_GetParamValue @ 0x75f580].
 
 #include <formats/configfile/config_file.h>
 
@@ -422,7 +422,7 @@ bool walk_read(const ReaderText &r, Walk &w, const std::string &key, std::string
 	return false;
 }
 
-// A further value [orig: ini_read_key_value_from_current_line @ 0x75f780, its simple mode]: the line the walk
+// A further value [orig: IniFile_ReadKeyValueFromCurrentLine @ 0x75f780, its simple mode]: the line the walk
 // read last (+12), unread where it is a '[' line, holds no key and value, or its key (trailing spaces cut) is
 // not `key` without case; else its token `index`.
 bool current_read(const ReaderText &r, const Walk &w, const std::string &key, int index, std::string &token) {

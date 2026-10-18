@@ -14,15 +14,6 @@ namespace {
 
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
-int64_t param_of(const bms::Trigger &trigger, int slot) {
-	const int32_t params[4] = {trigger.param1, trigger.param2, trigger.param3, trigger.param4};
-	return params[slot];
-}
-int64_t param_of(const bms::Action &action, int slot) {
-	const int32_t params[4] = {action.param1, action.param2, action.param3, action.param4};
-	return params[slot];
-}
-
 // Each variable parameter of the events, in the events' order: its value and where it is.
 template <class Visit> void each_variable(const MissionDocument &document, Visit &&visit) {
 	size_t index = 0;
@@ -33,11 +24,11 @@ template <class Visit> void each_variable(const MissionDocument &document, Visit
 		for (size_t i = 0; i < event.native.triggers.size() && i < event.ids.lists[0].size(); ++i)
 			for (int slot = 0; slot < 4; ++slot)
 				if (mission::trigger_param_kind(event.native.triggers[i], slot) == mission::ParamKind::MissionVar)
-					visit(event, event_index, false, i, slot, param_of(event.native.triggers[i], slot));
+					visit(event, event_index, false, i, slot, event.native.triggers[i].param(slot));
 		for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i)
 			for (int slot = 0; slot < 4; ++slot)
 				if (mission::action_param_kind(event.native.actions[i], slot) == mission::ParamKind::MissionVar)
-					visit(event, event_index, true, i, slot, param_of(event.native.actions[i], slot));
+					visit(event, event_index, true, i, slot, event.native.actions[i].param(slot));
 	}
 }
 

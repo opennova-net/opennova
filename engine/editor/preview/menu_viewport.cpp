@@ -50,12 +50,6 @@ menu::MenuWidgetState &widget_state(menu::MenuFrameState &state, int index) {
 	return menu::frame_widget(state, index);
 }
 
-// The game's clock in milliseconds (GetTickCount's): what a double click is measured on.
-uint32_t try_now_ms() {
-	using namespace std::chrono;
-	return uint32_t(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
-
 // A point of the picture [x, y] in design units, as pointer_at takes one.
 bool design_point(const JsonValue &value, float &x, float &y) {
 	const bool point = value.is_array() && value.array.size() == 2 && value.array[0].is_number() &&
@@ -802,7 +796,7 @@ void MenuViewport::run_try_(const SessionView &view, const MnuDocument &document
 	for (const MenuTryInput &input : queue) {
 		switch (input.kind) {
 		case MenuTryInput::Kind::Reset: try_->reset(source, try_error_); break;
-		case MenuTryInput::Kind::Click: try_->click(source, input.x, input.y, try_now_ms()); break;
+		case MenuTryInput::Kind::Click: try_->click(source, input.x, input.y); break;
 		case MenuTryInput::Kind::Key: try_->key(source, input.key); break;
 		}
 	}
@@ -1035,9 +1029,10 @@ std::vector<MenuSoundFired> MenuViewport::fire_sounds(const ViewportInput &input
 		if (!trying()) return out;
 		const MenuTrySource source = try_source_(input.view, *document, *input.view.findings.assets);
 		if (canvas_mouse_.over)
-			try_->mouse(source, canvas_mouse_.x, canvas_mouse_.y, canvas_mouse_.down, try_now_ms());
+			try_->mouse(source, canvas_mouse_.x, canvas_mouse_.y, canvas_mouse_.down,
+					canvas_mouse_.double_click);
 		else if (pointer_.held)
-			try_->mouse(source, pointer_.x, pointer_.y, pointer_.down, try_now_ms());
+			try_->mouse(source, pointer_.x, pointer_.y, pointer_.down);
 		for (const MenuTrySound &played : try_->take_sounds()) {
 			mnu::Sound row;
 			row.state = menu::menu_sound_state_token(played.state);

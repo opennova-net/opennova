@@ -247,7 +247,7 @@ inline uint32_t scar_texture_strip_mode_word(int strip) {
 
 // THE STRIP'S CREATION FLAGS: the table's loadFlags@28 | 1 (CLAMP), the
 // archive loader's flags [orig: Scar_LoadTextures @0x5CC2F0..0x5CC302 —
-// `or eax, 1` @0x5CC2F3 into load_texture_from_archive @0x58B980]. The word
+// `or eax, 1` @0x5CC2F3 into Texture_LoadFromArchive @0x58B980]. The word
 // is 0 for scorch1..4 (strips 0..3) and bhole1 (27), 0x80000 for bigscar (4:
 // at most three mip levels) and 0x40000 for the glass holes (5..26: one
 // level) [orig: the 32-byte table @0x8413A8]; none carries 0x8, so every

@@ -41,6 +41,29 @@ bool Simulation::local_player_in_armory_zone() const {
 	return kernel_ && opennova::world::local_player_in_armory_zone(kernel_->world);
 }
 
+Simulation::UseItemArm Simulation::local_player_use_item_arm() const {
+	if (!kernel_) return USE_ITEM_ARM_MOUNT_CHAIN;
+	return static_cast<UseItemArm>(opennova::world::local_player_use_item_arm(
+			kernel_->world, kernel_->local.view_session_inputs));
+}
+
+Simulation::UseItemArm Simulation::take_use_item_press() {
+	if (!kernel_) return USE_ITEM_ARM_MOUNT_CHAIN;
+	return static_cast<UseItemArm>(kernel_->local.take_use_item_press());
+}
+
+void Simulation::release_use_item_key(bool p_system_key_up) {
+	if (kernel_) kernel_->local.release_use_item_key(p_system_key_up);
+}
+
+void Simulation::clear_deferred_input() {
+	if (kernel_) kernel_->local.clear_deferred_input();
+}
+
+bool Simulation::is_armory_press_latched() const {
+	return kernel_ && kernel_->local.armory_press_latched;
+}
+
 bool Simulation::local_player_in_vehicle_loadout_zone() const {
 	// The useitem vehicle-loadout arm's gate (engine local_player_in_vehicle_loadout_zone:
 	// unmounted + the type-11 volume touch).
@@ -187,14 +210,11 @@ bool Simulation::apply_local_player_loadout_rows(
 }
 
 void Simulation::respawn_local_player_loadout() {
-	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
-	// Player_InitPlayer clears both view effects and seeds NVG from the mission
-	// StartWithNVGOn bit on every respawn.
-	reset_local_player_view_effects();
-	// The respawn edge also returns the map state to its spawn defaults
-	// (witness at hud::HudMapControl — Game_InitRespawnState +
-	// Player_InitPlayer zoom seeds).
-	kernel_->local.hud_map_control.reset_spawn();
+	// The respawn resets are the engine's (LocalPlayer::respawn_init); the 0x2F
+	// seam re-arms once the rebuilt kit has settled.
+	if (!kernel_) return;
+	kernel_->local.respawn_init(/*rebuild_kit=*/true);
+	push_joiner_loadout_kit();
 }
 
 void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
@@ -226,23 +246,14 @@ bool Simulation::seed_session_kit_from_profile() {
 }
 
 // The loadout profile seams the joiner role keeps shell-side (the weapon.sav
-// page composition, the respawn's view/map resets); every other leg of the
-// joiner frame is the role's (ADR 0043 d3, slice E8b). The role is constructed
-// with them.
+// page composition); every other leg of the joiner frame is the role's (ADR
+// 0043 d3, slice E8b), the redeploy's respawn resets included
+// (LocalPlayer::respawn_init). The role is constructed with them.
 opennova::inmatch::JoinerRole::KitSeams Simulation::joiner_kit_seams() {
 	opennova::inmatch::JoinerRole::KitSeams seams;
 	seams.apply_authoritative = [this] { apply_joiner_authoritative_loadout(); };
 	seams.reseed_on_side_change = [this] { return reseed_session_kit_on_side_change(); };
 	seams.push = [this] { push_joiner_loadout_kit(); };
-	// A joiner's redeploy rebuilds no kit of its own: the release bundle's 0x5A,
-	// which the host built from the slot's loadout buffer, has already rebuilt the
-	// slots with its counts (apply_authoritative above), and retail's client runs
-	// Player_InitPlayer only at the mission start and a team change (D-NET-378;
-	// the witness is the JoinerRole::KitSeams note in runtime/inmatch/joiner_role.h).
-	seams.respawn = [this] {
-		reset_local_player_view_effects();
-		kernel_->local.hud_map_control.reset_spawn();
-	};
 	return seams;
 }
 

@@ -553,6 +553,14 @@ public:
 	bool initial_admission_complete() const {
 		return joiner_ && joiner_->initial_admission_complete();
 	}
+	// Whether the joiner's mission start owes its input reset (the world
+	// stream's S2C 0x1A, JoinerConnection::PollResult::game_start_acked);
+	// reading clears it. The embedder runs the reset over its devices.
+	bool take_input_reset() {
+		const bool due = input_reset_pending_;
+		input_reset_pending_ = false;
+		return due;
+	}
 	// The joiner's server-assigned team (the S2C 0x04 latch) — the deploy screen's
 	// row filter and color source [orig: g_LocalTeam].
 	uint8_t assigned_team() const { return joiner_ ? joiner_->assigned_team() : 0; }
@@ -861,6 +869,7 @@ private:
 	std::array<int32_t, kWorldStateAmmoPoolCount> authoritative_ammo_pools_{};
 	uint64_t authoritative_ammo_pools_revision_ = 0;
 	bool deployed_ = false;
+	bool input_reset_pending_ = false;
 	uint64_t deployment_release_revision_ = 0;
 	bool authoritative_spawn_released_ = false;
 	uint64_t authoritative_spawn_release_revision_ = 0;

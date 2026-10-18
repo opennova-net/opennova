@@ -19,6 +19,7 @@
 #include <system_error>
 #include <vector>
 
+#include <base/io/os_path.h>
 #include <formats/threedi/scene_text.h>
 
 namespace opennova::threedi_cli {
@@ -39,19 +40,17 @@ inline bool print_findings(const char *path, const std::vector<opennova::threedi
 // through fclose, then renamed over `path`. A full disk, a crash or a refused
 // model never leaves a truncated file where the last good one was.
 inline bool write_output(const char *path, const void *data, size_t size) {
-	const std::filesystem::path target(path);
-	std::filesystem::path part = target;
-	part += ".part";
-	FILE *f = std::fopen(part.string().c_str(), "wb");
+	const std::string part = std::string(path) + ".part";
+	FILE *f = opennova::io::fopen_utf8(part.c_str(), "wb");
 	bool ok = f != nullptr;
 	if (ok) {
 		ok = size == 0 || std::fwrite(data, 1, size, f) == size;
 		ok = std::fclose(f) == 0 && ok;
 	}
 	std::error_code ec;
-	if (ok) std::filesystem::rename(part, target, ec);
+	if (ok) std::filesystem::rename(opennova::io::os_path(part), opennova::io::os_path(path), ec);
 	if (!ok || ec) {
-		std::filesystem::remove(part, ec);
+		std::filesystem::remove(opennova::io::os_path(part), ec);
 		std::fprintf(stderr, "opennova-3di: cannot write %s\n", path);
 		return false;
 	}

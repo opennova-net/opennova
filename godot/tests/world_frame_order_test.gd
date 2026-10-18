@@ -57,9 +57,15 @@ func test_frozen_pose_replay_keeps_the_camera_producer_order() -> void:
 	assert_eq(replay, [
 		"celestial_settle", "sun_veil", "iris_stamp", "weather_settle",
 		"scene_environment", "terrain", "occlusion", "foliage", "sky_settle",
-		"water_settle", "particles", "lights", "slot_shadows", "scene_overlay",
-		"clear",
+		"water_settle", "particles", "lights", "framefx", "slot_shadows",
+		"scene_overlay", "clear",
 	])
+	# The bloom pass draws the Q3 frame this replay compiles: after the settled
+	# glare, stop-down and exposure (the gain its glare copy takes), never the
+	# last live frame's snapshot (review C-47).
+	for producer in ["celestial_settle", "sun_veil", "weather_settle", "occlusion", "water_settle"]:
+		assert_gt(replay.find("framefx"), replay.find(producer),
+				"the replay compiles Q3 after %s" % producer)
 	var live := Array(GameWorld.frame_leg_names())
 	for time_owner in ["session", "environment_nodes", "ragdolls", "materials", "audio", "network", "blink"]:
 		assert_true(live.has(time_owner))

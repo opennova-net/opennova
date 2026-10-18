@@ -60,13 +60,6 @@ public:
 		std::function<bool()> reseed_on_side_change;
 		// Re-arm the joiner 0x2F loadout-submission seam.
 		std::function<void()> push;
-		// L revived on an ACK-qualified redeploy release: the view/map resets.
-		// The kit is the release bundle's 0x5A, already folded by
-		// apply_authoritative: retail's client rebuilds no kit of its own at a
-		// redeploy (D-NET-378). [orig: Player_InitPlayer @0x4E15F0, called only
-		//  from Game_StartMission @0x525BBC and NapiNPClientMsg_TeamAssign
-		//  @0x431B14; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0]
-		std::function<void()> respawn;
 	};
 	KitSeams kit_seams;
 
@@ -99,8 +92,9 @@ public:
 	// endpoint the ordinary dial uses. All six fields set = the rendezvous is
 	// sent to the node every 3000 ms ahead of each announce while the hello is
 	// outstanding; any field missing = no proxy (LAN, or a .joi without them).
-	// The shell fills these from JoinTarget.proxy_node / proxy_relay /
-	// proxy_cookie. [orig: CNapiGameSession_InitTransportConnection @0x4c9e10
+	// The shell installs the engine's own build of them (the typed overload
+	// below, through JoinTarget's ProxyRendezvousConfig); this one takes the
+	// six as text. [orig: CNapiGameSession_InitTransportConnection @0x4c9e10
 	//  install @0x4ca051..0x4ca0c7; the all-six gate
 	//  CNapiNPConnection_PumpEnumeratorAndSend @0x62914f..0x629159]
 	struct JoinProxyOptions {

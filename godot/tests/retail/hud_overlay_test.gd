@@ -158,7 +158,8 @@ func test_overlay_draws_health_from_fixture_layout() -> void:
 	assert_eq(hp.load(RetailData.fixture("def/hudpos.def")), OK, "Fixture loads.")
 	hud.configure(hp, null) # null root -> layout only, no art/font
 	assert_true(hud.is_configured())
-	hud.set_player_state(0, 0.5, 1, 80.0)
+	hud.set_frame_clocks(0, 0, 0, 0)
+	hud.set_player_state(0.5, 1, 80.0)
 	# The fixture authors HUDDECLUT_DMGBAR 0 1 1 0: the authored mask hides
 	# the health bar at the default hud_detail level 0 and shows it at 1.
 	# (retail: CRenderState_SetLayerVisibility @0x59B0F0; the DMGBAR slot cmp

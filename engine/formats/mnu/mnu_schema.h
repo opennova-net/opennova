@@ -28,7 +28,7 @@ struct SchemaChoice {
 
 // The material flag tokens a FLAGS text names, each with the word it ORs in: the parse
 // splits the text on " ,|+" and matches each token, case aside, against this table; a
-// token it lacks adds nothing [orig: sub_646CC0 @ 0x646cc0 over g_UIMaterialFlagNames
+// token it lacks adds nothing [orig: UI_ParseMaterialFlagNamesW @ 0x646cc0 over g_UIMaterialFlagNames
 // @ 0x84a5d0, 43 rows; read for an APPEARANCE's FLAGS @ 0x6484fd and a CURSOR's
 // @ 0x649586 in CUIElement_ParseXMLDefinition @ 0x648120].
 const std::vector<SchemaChoice> &ui_material_flag_choices();

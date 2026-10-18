@@ -423,7 +423,7 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
            into the 24-slot table; a token WITHOUT an arm authors nothing (the
            retail JOX file ships a 25th row, HUDDECLUT_CTAPE, that is exactly
            such a dead token — the binary has no arm for it).
-           [orig: HUD_ParseHudposToken @0x59F370 -> byte_2723CE0[slot]]
+           [orig: HUD_ParseHudposToken @0x59F370 -> g_HUDDeclutterMasks[slot]]
            This parser keeps every row generically (flags normalized to 0/1);
            the consumer resolves token -> slot and drops unknown tokens
            (engine/runtime/hud/hud_declutter.cpp), which reproduces the

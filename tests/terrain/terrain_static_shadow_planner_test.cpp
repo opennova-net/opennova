@@ -147,6 +147,8 @@ opennova::terrain::TerrainStaticShadowPlannerCaster caster(int team) {
 	// Identity transform rows + origin inside the page below.
 	record.world_transform = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
 			1.0f, 8.0f, 4.0f, 8.0f};
+	// The placement's words for that origin: mission (8, -8).
+	record.origin_q16 = {8 << 16, -8 << 16};
 	record.geometry = box_geometry();
 	record.ground_y = 0.0f;
 	record.caster_identity = 7;
@@ -161,6 +163,7 @@ opennova::terrain::TerrainStaticShadowPlannerCaster caster_at(float origin_x,
 	record.entity_index = entity_index;
 	record.caster_identity = 7 + static_cast<uint64_t>(entity_index);
 	record.world_transform[9] = origin_x;
+	record.origin_q16[0] = static_cast<int32_t>(origin_x * 65536.0f);
 	return record;
 }
 
@@ -486,6 +489,7 @@ int main() {
 	// Scaled up so the cutout halves each cover many page samples.
 	scroll_caster.world_transform = {8.0f, 0.0f, 0.0f, 0.0f, 8.0f, 0.0f, 0.0f,
 			0.0f, 8.0f, 24.0f, 4.0f, 24.0f};
+	scroll_caster.origin_q16 = {24 << 16, -24 << 16};
 	scroll_planner.replace_casters({std::move(scroll_caster)}, false);
 	scroll_planner.reset_frame_diagnostics();
 	const uint64_t scroll_revision = scroll_planner.state_revision();
@@ -611,6 +615,38 @@ int main() {
 				"a caster the admission refuses names no reach")) {
 			return 1;
 		}
+		// The tile test keys on the entity's 16.16 words, not the float transform's round trip
+		// [orig: Terrain_CollectAndRenderTileModels @ 0x60D50A, 0x60D531]: x = 0x01000001's float
+		// image is 256.0, which rounds back to 0x01000000. A caster that moves by that one unit
+		// under the same float pose names where it was and where it is.
+		{
+			const auto reach_of = [](int32_t cx) {
+				TerrainStaticShadowReach reach;
+				const int32_t cy = -8 * 65536, r = 3 * (2 << 16) + 1;
+				reach.min_x = cx - r;
+				reach.max_x = cx + r;
+				reach.min_y = cy - r;
+				reach.max_y = cy + r;
+				return reach;
+			};
+			auto rounded = caster_at(256.0f, 4, 40);
+			if (!expect(rounded.origin_q16[0] == 0x01000000 &&
+							static_cast<float>(0x01000001) / 65536.0f == 256.0f,
+					"256.0 is 0x01000001's float image and 0x01000000's exactly")) {
+				return 1;
+			}
+			follow.replace_casters({caster_at(56.0f, 2, 20), rounded}, false);
+			(void)follow.take_changed_reaches();
+			auto words = rounded;
+			words.origin_q16[0] = 0x01000001;
+			follow.replace_casters({caster_at(56.0f, 2, 20), words}, false);
+			reaches = follow.take_changed_reaches();
+			if (!expect(reaches.size() == 2 && reaches[0] == reach_of(0x01000000) &&
+							reaches[1] == reach_of(0x01000001),
+					"the caster's reach is centred on its words, one unit from the float's")) {
+				return 1;
+			}
+		}
 		// Off again: pending reports are dropped and none are made.
 		follow.replace_casters({caster_at(56.0f, 2, 20)}, false);
 		follow.set_reports_caster_changes(false);
@@ -623,8 +659,8 @@ int main() {
 
 	// A caster stands on the terrain's POINT sample at its origin, not the bilinear one
 	// [orig: Terrain_CollectAndRenderTileModels @ 0x60d8d3..0x60d8ee ->
-	// Terrain_GetHeightAtPosition @ 0x606720]; the record's origin is the Godot plane's
-	// (x, z), the mission point (x, -z).
+	// Terrain_GetHeightAtPosition @ 0x606720]; the record's origin is the mission point's
+	// 16.16 words (the Godot plane's (x, -z)).
 	{
 		constexpr int kDim = 1024;
 		std::vector<uint16_t> heights(static_cast<size_t>(kDim) * kDim);
@@ -638,8 +674,9 @@ int main() {
 		field.layout.sector_grid = sector_grid.data();
 		field.layout.origin_x = -4;
 		field.layout.origin_y = -4;
-		std::array<float, 12> transform{1, 0, 0, 0, 1, 0, 0, 0, 1, 100.5f, 7.0f, -200.75f};
-		const float ground = static_shadow_caster_ground(field, transform);
+		const std::array<int32_t, 2> origin{static_cast<int32_t>(100.5 * 65536),
+				static_cast<int32_t>(200.75 * 65536)};
+		const float ground = static_shadow_caster_ground(field, origin);
 		if (!expect(ground == height_field_height_world(field, 100.5f, -200.75f) &&
 						ground == height_field_height_mission(field, 100.5f, 200.75f),
 				"the ground is the point sample at the origin, the mission point (x, -z)")) {
@@ -649,8 +686,25 @@ int main() {
 				"the ground is not the bilinear sample")) {
 			return 1;
 		}
-		if (!expect(static_shadow_caster_ground(TerrainHeightField{}, transform) == 0.0f,
+		if (!expect(static_shadow_caster_ground(TerrainHeightField{}, origin) == 0.0f,
 				"no terrain grounds a caster at 0")) {
+			return 1;
+		}
+		// The lookup routes the words, as Terrain_GetHeightAtPosition does ((x >> 16) & 0x1FF
+		// @ 0x60677C): x = 0x0100FFFF is texel 256, while its float image rounds to 257.0, the
+		// next texel. The ramp makes the two heights differ.
+		const std::array<int32_t, 2> edge{0x0100FFFF, static_cast<int32_t>(200.75 * 65536)};
+		const float edge_float = static_cast<float>(edge[0]) / 65536.0f;
+		if (!expect(edge_float == 257.0f, "0x0100FFFF's float image is 257.0")) return 1;
+		const float edge_ground = static_shadow_caster_ground(field, edge);
+		if (!expect(edge_ground == height_field_height_mission(field, 256.5f, 200.75f) &&
+						edge_ground != height_field_height_mission(field, edge_float, 200.75f),
+				"the ground is texel 256's, the word's, not the float image's texel 257")) {
+			return 1;
+		}
+		if (!expect(height_field_height_fixed(field, edge[0], edge[1]) ==
+						static_cast<int32_t>(edge_ground * 65536.0f),
+				"the fixed lookup is the raw16 shifted up by 8")) {
 			return 1;
 		}
 	}

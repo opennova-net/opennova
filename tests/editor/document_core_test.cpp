@@ -33,6 +33,7 @@
 // base to its rules (a snapshot and a blocked document take no edit, undo or redo, a blocked one
 // no save), holding no records.
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <functional>
 #include <map>
@@ -1069,6 +1070,24 @@ static int test_structural_edits() {
 // edits change nothing either; a coalesced group typed back to the value it found leaves no
 // step and no redo, and typing on starts a step from there. A Set of an optional field left
 // out, of the value it keeps, writes it: its presence changes, a step.
+// model/value.h's shared readers (review D-41): a whole number as it is, a real holding one within 9e15, nothing
+// else; the truncating read, 0 for a text and for a real no int64_t holds; a field's schema of its four parts.
+static int test_value_readers() {
+	int64_t out = 0;
+	TEST_EXPECT(whole_number(Value(int64_t(-7)), out) && out == -7);
+	TEST_EXPECT(whole_number(Value(42.0), out) && out == 42);
+	TEST_EXPECT(!whole_number(Value(42.5), out) && !whole_number(Value(9.0e15), out) &&
+	            !whole_number(Value(std::nan("")), out) && !whole_number(Value(std::string("4")), out));
+	TEST_EXPECT(whole(Value(int64_t(5))) == 5 && whole(Value(2.7)) == 2 && whole(Value(-2.7)) == -2 &&
+	            whole(Value(std::string("5"))) == 0);
+	TEST_EXPECT(whole(Value(1.0e19)) == 0 && whole(Value(-1.0e19)) == 0 && whole(Value(std::nan(""))) == 0 &&
+	            whole(Value(-9.0e18)) == int64_t(-9000000000000000000));
+	const FieldSchema schema = schema_of("speed", FieldType::Real, "Speed", "How fast it goes.");
+	TEST_EXPECT(schema.id == "speed" && schema.type == FieldType::Real && schema.label == "Speed" &&
+	            schema.description == "How fast it goes.");
+	return 0;
+}
+
 static int test_set_same_value() {
 	Loaded fake;
 	TEST_EXPECT(fake.load());
@@ -3131,6 +3150,7 @@ int main() {
 	failures += test_structure();
 	failures += test_structural_edits();
 	failures += test_add_with_a_value();
+	failures += test_value_readers();
 	failures += test_set_same_value();
 	failures += test_veto();
 	failures += test_batches_and_gestures();

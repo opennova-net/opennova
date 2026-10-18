@@ -6,9 +6,17 @@ namespace opennova::env {
 
 WaterHeightRungs mission_water_rungs(const BmsEnvOverrides &overrides,
 		float terrain_height, bool has_loaded_terrain) {
+	return water_height_rungs(overrides.has_water_height
+					? std::optional<float>(overrides.water_height * kWaterHeightUnit)
+					: std::nullopt,
+			terrain_height, has_loaded_terrain);
+}
+
+WaterHeightRungs water_height_rungs(std::optional<float> mission_override,
+		float terrain_height, bool has_loaded_terrain) {
 	WaterHeightRungs rungs;
-	rungs.has_mission_override = overrides.has_water_height;
-	rungs.mission_override = overrides.has_water_height ? overrides.water_height * kWaterHeightUnit : 0.0f;
+	rungs.has_mission_override = mission_override.has_value();
+	rungs.mission_override = mission_override.value_or(0.0f);
 	rungs.terrain_height = terrain_height;
 	rungs.has_loaded_terrain = has_loaded_terrain;
 	return rungs;

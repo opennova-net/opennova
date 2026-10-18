@@ -260,6 +260,39 @@ void test_health_bar_death_arm(const fnt_font_t *font) {
 	CHECK(half > 60.0f && half < 72.0f); // the target's ratio, not the local one
 }
 
+// THE DMGBAR FILL'S WIDTH (C-211): a whole pixel count, the scaled bar width
+// times the 16.16 ratio rounded, the clear from x0 + 1 to x0 + width. A 100-px
+// bar at 0.503 health: (100 * 32964 + 0x8000) >> 16 = 50, so the fill ends at
+// x0 + 50 (the unrounded product gave x0 + 50.3, one pixel centre more)
+// [orig: HUD_DrawHealthBar @0x5A2EC3..0x5A2EE3; sub_5D48E0 @0x5A2F7A].
+void test_health_bar_fill_rounds(const fnt_font_t *font) {
+	HudLayout layout;
+	layout.health_rect = {2.0f, 739.0f, 100.0f, 18.0f, true};
+	layout.tag_good = 0xFF00FF00u;
+	layout.tag_middle = 0xFFFFFF00u;
+	layout.tag_bad = 0xFFFF0000u;
+	HudFrameCompiler compiler;
+	configure(compiler, layout, font);
+	HudFrameState state;
+	state.health_fraction = 0.503f;
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	bool seen = false;
+	for (const HudQuad &q : list.quads) {
+		if (q.color != layout.tag_good && q.color != layout.tag_middle && q.color != layout.tag_bad)
+			continue;
+		seen = true;
+		CHECK(q.x0 == 3.0f && q.x1 == 52.0f);
+	}
+	CHECK(seen);
+	// A negative health word reads full in the good colour: the ratio's cap is
+	// unsigned [orig: HUD_BuildEntityInfo @0x4B87C9..0x4B87D3].
+	state.health_fraction = -0.25f;
+	bool full_good = false;
+	for (const HudQuad &q : compiler.compile(state, 1024.0f, 768.0f).quads)
+		if (q.color == layout.tag_good && q.x0 == 3.0f && q.x1 == 102.0f) full_good = true;
+	CHECK(full_good);
+}
+
 // THE HUDLS SLOT BAR: the HUDLS_SYSTEM gate, the 6,7,8,9,0 visit packing
 // from HUDLS_SLOT 6, the (0,0) stall, the MOREAV marker, the OR'd colour.
 void test_slot_bar(const fnt_font_t *font) {
@@ -341,6 +374,7 @@ void test_objectives_panel(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.box_texture_valid = true;
 	layout.box_tex_w = 128;
+	layout.box_tex_h = 128;
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
@@ -396,6 +430,7 @@ void test_no_hud(const fnt_font_t *font) {
 	layout.health_rect = {2.0f, 739.0f, 139.0f, 18.0f, true};
 	layout.box_texture_valid = true;
 	layout.box_tex_w = 128;
+	layout.box_tex_h = 128;
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
@@ -609,10 +644,10 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 	compiler.configure_label_fonts(font, font, font, 1.25f, 1.6f);
 	const float w = 1280.0f, h = 720.0f;
 	HudFrameState state;
-	state.ticks = 100;
-	compiler.push_chat_line("AB", 0xFFFFFFFFu, state.ticks);
-	compiler.push_chat_line("CD", 0xFFFFFFFFu, state.ticks);
-	compiler.push_message("EF", state.ticks);
+	state.main_frame = 100;
+	compiler.push_chat_line("AB", 0xFFFFFFFFu, 100);
+	compiler.push_chat_line("CD", 0xFFFFFFFFu, 100);
+	compiler.push_message("EF", 100);
 	{
 		const HudDrawList &list = compiler.compile(state, w, h);
 		CHECK(glyphs_on(list, kHudFontSlotHud).empty());
@@ -636,7 +671,9 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 	}
 	// The power-throw label: bold slot, the outline in the per-frame colour.
 	HudFrameState power;
-	power.ticks = 100000;
+	// Far past the feed lines above: their life runs on the main frame clock
+	// (g_MainFrameCounter), so they have expired and only the label is bold.
+	power.main_frame = 100000;
 	power.windup_active = true;
 	power.windup_held_ticks = 31;
 	power.hud_color_index = 0;
@@ -656,6 +693,24 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 	for (const HudQuad &q : list2.quads)
 		if (!q.filled) outline2 = q.color;
 	CHECK(outline0 != 0u && outline2 == (0xFF000000u | layout.hud_text) && outline0 != outline2);
+	// The fill at full charge (under 31 held ticks the progress is 1.0) clears
+	// from x + 1 to x + span = x + w, abutting the outline's right edge (C-212)
+	// [orig: HUD_DrawPowerThrowChargeBar -- the fld1 arm @0x5998AF for under
+	// 31 ticks, the span @0x599964, sub_5D48E0 @0x5999A4].
+	{
+		HudFrameState full = power;
+		full.windup_held_ticks = 30;
+		const HudDrawList &charged = compiler.compile(full, w, h);
+		const float px0 = static_cast<float>(scale_axis(14.0, w, 1024.0));
+		const float pw = static_cast<float>(scale_axis(160.0, w, 1024.0));
+		bool fill_seen = false;
+		for (const HudQuad &q : charged.quads) {
+			if (!q.filled) continue;
+			fill_seen = true;
+			CHECK(q.x0 == px0 + 1.0f && q.x1 == px0 + pw);
+		}
+		CHECK(fill_seen);
+	}
 	opennova::fnt::fnt_free(&hud_font);
 }
 
@@ -666,6 +721,7 @@ int main() {
 	test_clock(&font);
 	test_team_id_line(&font);
 	test_health_bar_death_arm(&font);
+	test_health_bar_fill_rounds(&font);
 	test_slot_bar(&font);
 	test_objectives_panel(&font);
 	test_no_hud(&font);

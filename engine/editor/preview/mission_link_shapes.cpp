@@ -9,6 +9,7 @@
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/view/session_view.h>
+#include <base/io/bam.h>
 #include <base/io/json.h>
 #include <editor/session/request_factories.h>
 
@@ -21,7 +22,6 @@ constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 // How many segments a reach's circle is drawn in, and the dark under a line (it reads on any ground).
 constexpr int kRingSegments = 64;
 constexpr uint8_t kShadowAlpha = 150;
-constexpr double kPi = 3.14159265358979323846;
 
 std::array<double, 3> position_of(const MissionEntityMark &entity) { return { entity.x, entity.y, entity.z }; }
 
@@ -38,7 +38,7 @@ MissionLinkSpot &spot_of(std::vector<MissionLinkSpot> &spots, const NodeAddress 
 
 // A point `metres` from `at` along a compass bearing (degrees: 0 north, 90 east), at its height.
 std::array<double, 3> along(const std::array<double, 3> &at, double bearing, double metres) {
-	const double r = bearing * kPi / 180.0;
+	const double r = bearing * io::kPi / 180.0;
 	return { at[0] + std::sin(r) * metres, at[1] + std::cos(r) * metres, at[2] };
 }
 

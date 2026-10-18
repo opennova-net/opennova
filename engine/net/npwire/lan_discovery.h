@@ -103,6 +103,21 @@ struct LanDiscoveryRow {
 	LanDiscoveryServer server;
 };
 
+// The LAN list's row text for a listed session, bytes in the host's code page:
+// "<name> - <expansion> (<players>/<max>)" when the session advertises an
+// expansion variant, else "<name> (<players>/<max>)". The list walks the
+// session record the 0x81 translate fills (SN -> +32, NP -> +580, MP -> +584,
+// SUS2 -> +1104); the row's copy holds the expansion's first 31 bytes, the test
+// is its first byte, and the row keeps the text's first 255 bytes
+// [orig: CNapiNetwork_OnSessionDiscovered @0x4c8470;
+//  UI_ProcessLANSessionStateMachine @0x558de0 -- the record copy
+//  Napi_CopyString(.., +0x450, 0x20) @0x559448..0x559458, the first-byte test
+//  @0x559471, sprintf("%s - %s (%ld/%ld)") @0x559493 / ("%s (%ld/%ld)") @0x5594b9
+//  over +0x20 and the counts +0x244 / +0x248, strncpy(row, text, 0xFF)
+//  @0x5594cc..0x5594dc, UIList_AddRow @0x559516].
+std::string lan_discovery_row_label(const std::string &server_name, const std::string &expansion,
+		int32_t players, int32_t max_players);
+
 enum class LanRowChange : uint8_t {
 	kNone = 0, // filtered, unparsable, or a repeat sighting of a listed host
 	kAdded,

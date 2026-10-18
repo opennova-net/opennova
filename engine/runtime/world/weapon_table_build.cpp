@@ -69,25 +69,6 @@ float table_clip_seconds(void *opaque, const char *key) {
 	return served.clip->seconds;
 }
 
-namespace {
-
-// The slot's TOTAL AMMO IN CLIPS [orig: WeaponSlot_GetTotalClips @0x5425F0]. The pool a fresh
-// 0x2F accept fills is `requested != 0xFF ? min(requested, maxclips) * clipsize : startrounds`
-// (§5.57 fill [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550]); the count divides it back
-// by clipsize. A negative result rides the signed byte to the wire (0xFF = the -1 "default /
-// no count" sentinel the client answers with its own startrounds fallback).
-int32_t clips_of(const world::WeaponTableEntry &e, uint8_t requested) {
-	if (e.clipsize < 0) return -1; // no-clip weapon (knife/medpack/emplaced) [orig: @0x542669]
-	const int32_t pool = requested != 0xFF
-			? std::min<int32_t>(requested, e.maxclips) * e.clipsize
-			: e.startrounds;
-	int32_t clips = e.clipsize > 0 ? pool / e.clipsize : pool; // 0 divisor skipped [orig: @0x542670]
-	if (clips > 127) clips = 127;                              // [orig: @0x542678]
-	return clips;
-}
-
-} // namespace
-
 uint8_t charfilter_bit(const char *token) {
 	// [orig: token table @0x830EB0]
 	if (token == nullptr) return 0;
@@ -131,31 +112,6 @@ bool loadout_entry_permitted(const world::WeaponTableEntry &entry, uint8_t team,
 	else if (player_class >= 1 && player_class <= 3)
 		char_mask = 0xFF; // the pre-MP persona classes pass everything [orig: @0x50269a]
 	return (team_mask & entry.teamfilter) != 0 && (char_mask & entry.charfilter) != 0;
-}
-
-LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t adm_index,
-                                      uint8_t requested) {
-	LoadoutAmmoBytes out;
-	const world::WeaponTableEntry *e = table.by_index(adm_index);
-	if (e == nullptr) return out;
-	const int32_t primary = clips_of(*e, requested);
-	out.primary = primary < 0 ? 0xFF : static_cast<uint8_t>(primary);
-	// The alt-ammo byte: the FIRST sub-variant (parent+1..parent+LSC) whose ammo class differs
-	// from the parent's — e.g. an M203HE under an M4M203AUTO — counted from its own startrounds
-	// fill. [orig: @0x5027c8 walk, class compare @0x5027f8, count @0x502830-@0x502847]
-	if (e->loadout_subclasses > 0) {
-		for (uint8_t k = 1; k <= e->loadout_subclasses; ++k) {
-			const world::WeaponTableEntry *sub =
-					table.by_index(static_cast<uint8_t>(adm_index + k));
-			if (sub == nullptr) continue;
-			if (!strutil::iequals(sub->ammo_class.c_str(), e->ammo_class.c_str())) {
-				const int32_t alt = clips_of(*sub, 0xFF);
-				out.secondary = alt < 0 ? 0xFF : static_cast<uint8_t>(alt);
-				break;
-			}
-		}
-	}
-	return out;
 }
 
 world::WeaponTable build_weapon_table(

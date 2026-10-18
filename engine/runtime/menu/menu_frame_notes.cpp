@@ -63,9 +63,7 @@ const CodeRow kCodes[kMenuFrameNoteCodeCount] = {
 	{ Code::MarqueeRuntimeContent, "marquee_runtime_content", Basis::PortPolicy },
 };
 
-bool iequals(const std::string &a, const char *b) {
-	return strutil::iequals(a, b);
-}
+using strutil::iequals;
 
 const char *state_token(int slot) {
 	switch (slot) {
@@ -476,7 +474,7 @@ std::vector<MenuFrameNote> MenuFrameCompiler::layout_notes(const MenuFrameState 
 			}
 		}
 		if (has_text && reads_string(w.type) && font_for(node) == nullptr) {
-			// [orig: font_cache_ensure_font_loaded @ 0x653de0 returns 0 for handle 0]
+			// [orig: CFontCache_EnsureFontLoaded @ 0x653de0 returns 0 for handle 0]
 			push(index, Code::TextNoFont, text, "", -1, "font.name");
 		} else if (label && !text.empty() && width > 0 && height > 0) {
 			const int edge = w.string_data.has_edge ? w.string_data.edge : 0;

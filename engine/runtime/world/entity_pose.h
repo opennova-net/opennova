@@ -110,6 +110,22 @@ public:
 			const std::string &muzzle_userpoint = std::string());
 	void remove_entity(world::EntityHandle entity);
 	bool has_skeletal_entity(world::EntityHandle entity) const;
+	// A wire-built person's skeletal source, by its item type: the same rig
+	// (the .adm against the model's bone table) a registered entity of that
+	// type takes. False registers nothing, as register_skeletal_entity.
+	bool register_skeletal_type(uint16_t type_id, int32_t model_id,
+			const std::string &adm_name, const assets::Model &model);
+	bool has_skeletal_type(uint16_t type_id) const {
+		return type_sources_.find(type_id) != type_sources_.end();
+	}
+	// The section matrices of a person of that type posed from `inputs`
+	// (pose_provider.h SkeletalPoseInputs): the composition build_skeletal
+	// runs for a registered entity.
+	bool build_skeletal_from_inputs(uint16_t type_id, int32_t model_id,
+			const world::SkeletalPoseInputs &inputs,
+			const world::CollisionMatrix &entity_world,
+			const world::CollisionModel &model,
+			std::vector<world::CollisionMatrix> &out) const;
 	// Whether a query for this model id has a registered pose source at all.
 	// A build_section_matrices false WITHOUT a source is the normal rigid
 	// path (CollisionWorld's identity sections); false WITH one is a real
@@ -177,6 +193,16 @@ private:
 			world::EntityHandle entity, std::vector<anim::PoseBone> &r_pose,
 			anim::AimOverlayAngles *r_angles, anim::AimOverlayInputs &r_inputs,
 			const world::Entity *&r_entity, world::AiEntity *&r_ai) const;
+	// The pose from gathered channel state, and the per-section composition
+	// of a pose into the final world-space matrices.
+	bool eval_pose_inputs(const SkeletalSource &source,
+			const world::SkeletalPoseInputs &inputs,
+			std::vector<anim::PoseBone> &r_pose, anim::AimOverlayAngles *r_angles) const;
+	bool compose_skeletal_sections(const SkeletalSource &source,
+			const std::vector<anim::PoseBone> &pose, const anim::AimOverlayAngles *angles,
+			bool collapse_right_hand, const world::CollisionMatrix &entity_world,
+			const world::CollisionModel &model,
+			std::vector<world::CollisionMatrix> &out) const;
 	bool build_skeletal_bone_matrix(world::World &, const SkeletalSource &,
 			world::EntityHandle, int bone_index, world::CollisionMatrix &) const;
 	bool build_skeletal(world::World &world, const SkeletalSource &source,
@@ -200,6 +226,7 @@ private:
 	std::unordered_map<int32_t, assets::Model> generic_models_;
 	std::unordered_map<int32_t, assets::Model> userpoint_models_;
 	std::unordered_map<uint64_t, SkeletalSource> skeletal_sources_;
+	std::unordered_map<uint16_t, SkeletalSource> type_sources_;
 };
 
 } // namespace opennova::world

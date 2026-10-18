@@ -659,6 +659,11 @@ protected:
 
 	NodeId allocate_id() { return next_id_++; }
 
+	// Whether `row` is a row the document holds as committed: its current version or its saved
+	// baseline's, neither of which ever changes (a batch changes a clone). What a type keeps of such
+	// a row's records (TableDocument::held) holds while the document's state stands.
+	bool committed(const Node &row) const;
+
 private:
 	// Every nested record of one row by identity, with its placement and its path (its steps in
 	// `steps`), built by one walk (S13 D8: the index stores each record's path, which the types kept
@@ -766,6 +771,18 @@ private:
 	mutable std::unordered_map<NodeId, RowIndex> staged_indexes_;
 	// path_in's last walk of a row the document does not hold.
 	mutable RowIndex walked_;
+	// record_path's owners' names for one state of the document (its load and its revision): a record
+	// nested thousands deep shares its owners' names with every record below it, each named once.
+	struct PathNames {
+		struct Hash {
+			size_t operator()(const NodeAddress &address) const {
+				return std::hash<uint64_t>()(address.row * 1000003u ^ address.child * 31u ^ uint64_t(address.kind));
+			}
+		};
+		uint64_t load_generation = 0, revision = 0;
+		std::unordered_map<NodeAddress, std::string, Hash> names;
+	};
+	mutable PathNames path_names_;
 	// targeted_collections', worked out once.
 	mutable bool targets_known_ = false;
 	mutable std::vector<TargetedCollection> targets_;

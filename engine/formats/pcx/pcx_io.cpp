@@ -1,5 +1,7 @@
 #include <formats/pcx/pcx_io.h>
 
+#include <base/io/le.h>
+
 #include <algorithm>
 #include <vector>
 
@@ -97,7 +99,7 @@ void append_rle_row(const uint8_t *row, int length, std::vector<uint8_t> &out) {
 }
 
 // JO's mission editor's row coder (PcxCoding::Med): the shipped coding but for the row's last run, which it
-// writes as a count pair whatever it holds [orig: JOTACmed.exe sub_45E8A0 @ 0x45E8A0: a full run of
+// writes as a count pair whatever it holds [orig: JOTACmed.exe PCX_WriteRleRow @ 0x45E8A0: a full run of
 // 63 written as 0xFF and the byte, the current byte opening the next run (@ 0x45E8EB..0x45E913); a
 // run of one below 0xC0 alone, any other a pair (@ 0x45E946..0x45E980); the tail pair
 // @ 0x45E9BF..0x45E9E7].
@@ -143,34 +145,25 @@ std::vector<uint8_t> coded_rows(const IndexedImage8 &image, PcxCoding coding) {
 	return out;
 }
 
-uint16_t u16_at(const uint8_t *data, size_t at) {
-	return static_cast<uint16_t>(data[at] | (data[at + 1] << 8));
-}
-
-void put_u16(uint8_t *data, size_t at, uint16_t value) {
-	data[at] = static_cast<uint8_t>(value & 0xFF);
-	data[at + 1] = static_cast<uint8_t>(value >> 8);
-}
-
 // The form a decoded indexed image's file holds: its header bytes, and the coding its rows show. The rows
 // can be either coder's only where the header says one 8-bit plane of RLE rows exactly the width long and
 // the palette follows them.
 PcxIndexedForm read_indexed_form(const uint8_t *data, size_t size, size_t rows_end, const IndexedImage8 &image) {
 	PcxIndexedForm form;
 	form.version = data[1];
-	form.window_x = u16_at(data, 4);
-	form.window_y = u16_at(data, 6);
-	form.hdpi = u16_at(data, 12);
-	form.vdpi = u16_at(data, 14);
+	form.window_x = io::read_u16_le(data + 4);
+	form.window_y = io::read_u16_le(data + 6);
+	form.hdpi = io::read_u16_le(data + 12);
+	form.vdpi = io::read_u16_le(data + 14);
 	for (size_t entry = 0; entry < form.ega.size(); ++entry)
 		std::copy(data + 16 + entry * 3, data + 19 + entry * 3, form.ega[entry].begin());
 	form.reserved = data[64];
-	form.palette_info = u16_at(data, 68);
-	form.hscreen = u16_at(data, 70);
-	form.vscreen = u16_at(data, 72);
+	form.palette_info = io::read_u16_le(data + 68);
+	form.hscreen = io::read_u16_le(data + 70);
+	form.vscreen = io::read_u16_le(data + 72);
 	form.coding = PcxCoding::Other;
 	const bool plain = data[2] == 1 && data[3] == 8 && data[65] == 1 &&
-	                   u16_at(data, 66) == static_cast<uint16_t>(image.width) && rows_end == size - 769;
+	                   io::read_u16_le(data + 66) == static_cast<uint16_t>(image.width) && rows_end == size - 769;
 	if (!plain) return form;
 	const size_t body = rows_end - 128;
 	const auto matches = [&](PcxCoding coding) {
@@ -237,6 +230,34 @@ PcxRowFit pcx_row_fit(const PcxHeader &header) {
 		return PcxRowFit::Overrun;
 	}
 	return header.bytes_per_line < width ? PcxRowFit::Short : PcxRowFit::Exact;
+}
+
+uint64_t pcx_indexed_write_end(const uint8_t *data, size_t size) {
+	PcxHeader header;
+	if (!pcx_read_header(data, size, header) || header.planes == 3 || header.width < 0 || header.height <= 0)
+		return 0;
+	// The stream: the file less its header and the palette's 768 bytes [orig: @ 0x56ED19, lea edi, [esi-380h]].
+	const size_t end = size > 128 + 768 ? size - 768 : 128;
+	size_t at = 128;
+	uint64_t furthest = 0;
+	for (int row = 0; row < header.height; ++row) {
+		uint64_t x = 0;
+		while (x < header.bytes_per_line) {
+			if (at >= end) {
+				x = header.bytes_per_line; // the bytes past the stream, a texel each at the least
+				break;
+			}
+			const uint8_t byte = data[at++];
+			if ((byte & 0xC0) == 0xC0) {
+				x += byte & 0x3F; // the whole run, its value the next byte [orig: @ 0x56EDA3..0x56EDD0]
+				++at;
+			} else {
+				x += 1; // [orig: @ 0x56EDD4..0x56EDDE]
+			}
+		}
+		furthest = std::max(furthest, uint64_t(header.width) * uint64_t(row) + x);
+	}
+	return furthest;
 }
 
 bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error,
@@ -435,7 +456,7 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 	return true;
 }
 
-// [orig: load_pcx_to_argb @ 0x664cc0 — the header read (0x46 bytes), the BPP check
+// [orig: PCX_LoadToARGB @ 0x664cc0 — the header read (0x46 bytes), the BPP check
 // (returns 3), width/height from the window, then the 8-bit path (Seek(-768, 2), the
 // 0xFF000000 | rgb palette, the RLE loop to BytesPerLine) or the NPlanes == 3 path]
 bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error, PcxIndexed *indexed) {
@@ -555,7 +576,7 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 }
 
 // [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31 — the 24-bit path, 3 * BytesPerLine RLE bytes a row, the
-// planes `width` apart; load_pcx_to_argb @ 0x664cc0 likewise]
+// planes `width` apart; PCX_LoadToARGB @ 0x664cc0 likewise]
 bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::string &error) {
 	out.clear();
 	if (image.width <= 0 || image.height <= 0 || image.width > 0xFFFF || image.height > 0xFFFF) {
@@ -610,27 +631,27 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 
 	// A row of exactly the image's width, odd or even: the game's readers decode BytesPerLine bytes a row at
 	// a stride of the width, so a padded odd row spills into the next and the last past the buffer [orig:
-	// Texture_LoadPCXFromPFF32 @ 0x56ED70..0x56EDFC; load_pcx_to_argb @ 0x664cc0], and every PCX the game
+	// Texture_LoadPCXFromPFF32 @ 0x56ED70..0x56EDFC; PCX_LoadToARGB @ 0x664cc0], and every PCX the game
 	// ships holds rows of its width.
 	uint8_t header[128] = {};
 	header[0] = 0x0A;
 	header[1] = f.version;
 	header[2] = 1;
 	header[3] = 8;
-	put_u16(header, 4, f.window_x);
-	put_u16(header, 6, f.window_y);
-	put_u16(header, 8, static_cast<uint16_t>(f.window_x + image.width - 1));
-	put_u16(header, 10, static_cast<uint16_t>(f.window_y + image.height - 1));
-	put_u16(header, 12, f.hdpi);
-	put_u16(header, 14, f.vdpi);
+	io::write_u16_le(header + 4, f.window_x);
+	io::write_u16_le(header + 6, f.window_y);
+	io::write_u16_le(header + 8, static_cast<uint16_t>(f.window_x + image.width - 1));
+	io::write_u16_le(header + 10, static_cast<uint16_t>(f.window_y + image.height - 1));
+	io::write_u16_le(header + 12, f.hdpi);
+	io::write_u16_le(header + 14, f.vdpi);
 	for (size_t entry = 0; entry < f.ega.size(); ++entry)
 		std::copy(f.ega[entry].begin(), f.ega[entry].end(), header + 16 + entry * 3);
 	header[64] = f.reserved;
 	header[65] = 1;
-	put_u16(header, 66, static_cast<uint16_t>(image.width));
-	put_u16(header, 68, f.palette_info);
-	put_u16(header, 70, f.hscreen);
-	put_u16(header, 72, f.vscreen);
+	io::write_u16_le(header + 66, static_cast<uint16_t>(image.width));
+	io::write_u16_le(header + 68, f.palette_info);
+	io::write_u16_le(header + 70, f.hscreen);
+	io::write_u16_le(header + 72, f.vscreen);
 	// Bytes 74..127, the filler: zero, as every shipped map and MED's writer hold it.
 
 	const std::vector<uint8_t> rows = coded_rows(image, f.coding);

@@ -341,37 +341,6 @@ int test_extended_uplink_short_body() {
 	return 0;
 }
 
-// C2S 0x06 hit_part is a PACKED word, not a bare sequence:
-// (roster slot << 9) | (shot seq & 0x1FF) [orig: Server_ClientFiredRound @0x50bda5].
-// Pinned against the two live captures taken 2026-07-26: a retail joiner at
-// mySlot=1 sent 0x0201/0x0202/0x0203 for shots 1/2/3, while our client sent
-// 0x0001/0x0002/0x0003 — slot bits zero, i.e. roster slot 0, which on a listen host
-// is the HOST ITSELF. The host copies the raw word into the global word_B7C670
-// (@0x50c2ba) and attributed our rounds to its own player, so its first-person
-// weapon reacted every time the joiner fired.
-static int test_fired_round_hit_part_packing() {
-	// The exact bytes a retail joiner at roster slot 1 put on the wire.
-	EXPECT(pack_fired_round_hit_part(1, 1) == 0x0201);
-	EXPECT(pack_fired_round_hit_part(1, 2) == 0x0202);
-	EXPECT(pack_fired_round_hit_part(1, 3) == 0x0203);
-	// Slot 0 must stay reachable — a listen host's own player legitimately packs 0.
-	EXPECT(pack_fired_round_hit_part(0, 1) == 0x0001);
-	// The sequence is 9 bits and wraps inside the field without disturbing the slot.
-	EXPECT(pack_fired_round_hit_part(1, 0x1FF) == 0x03FF);
-	EXPECT(pack_fired_round_hit_part(1, 0x200) == 0x0200);
-	EXPECT(pack_fired_round_hit_part(3, 5) == 0x0605);
-	// Round-trip both fields back out.
-	for (uint8_t slot = 0; slot < 8; ++slot) {
-		for (uint16_t seq = 0; seq < 0x200; seq += 37) {
-			const uint16_t packed = pack_fired_round_hit_part(slot, seq);
-			EXPECT(fired_round_hit_part_slot(packed) == slot);
-			EXPECT(fired_round_hit_part_seq(packed) == seq);
-		}
-	}
-	std::printf("PASS fired_round hit_part packing (slot << 9 | seq)\n");
-	return 0;
-}
-
 } // namespace
 
 int main() {
@@ -385,7 +354,6 @@ int main() {
 	rc |= test_client_fired_round_pose_deltas();
 	rc |= test_client_fired_round_angle_rounding_boundaries();
 	rc |= test_client_checksum_reply();
-	rc |= test_fired_round_hit_part_packing();
 	if (rc == 0) std::printf("nw_ingame_c2s_uplink_test: ALL PASS\n");
 	return rc;
 }

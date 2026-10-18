@@ -53,13 +53,6 @@ bool is_uri_char(char c) {
 	return is_alnum(c) || c == '/' || c == '-' || c == '_' || c == '.';
 }
 
-bool all_of(std::string_view text, bool (*ok)(char)) {
-	for (const char c : text)
-		if (!ok(c))
-			return false;
-	return true;
-}
-
 // `text` as a double-quoted curl config value ('\' and '"' escaped); nullopt
 // when it holds a control byte, which no line of the file may carry.
 std::optional<std::string> config_value(std::string_view text) {

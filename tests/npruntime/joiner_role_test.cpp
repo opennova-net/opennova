@@ -33,6 +33,7 @@
 #include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/infantry.h> // infantry_anim_flags (the crouched state)
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/player_loadout.h>
 #include <runtime/world/player_weapon.h>
@@ -141,7 +142,6 @@ struct Harness {
 			return false;
 		};
 		role.kit_seams.push = [this] { seams.push_back("push_kit"); };
-		role.kit_seams.respawn = [this] { seams.push_back("respawn"); };
 	}
 	w::LocalPlayerWeapon &weapon() { return kernel->local.weapon; }
 	w::WeaponInventory &inventory() { return kernel->local.inventory; }
@@ -218,6 +218,13 @@ bool run_in_match_spawn_edge() {
 			"in-match frame: cached.local_player published")) return false;
 	if (!expect(h.role.self_wire_handle() == 0x0005,
 			"in-match frame: H latched from the runtime")) return false;
+	// L is client-built: commandGroup 0, not the authority's 1
+	// [orig: NapiNPClientMsg_0x00C @0x42E7F1].
+	if (const w::Entity *body = h.kernel->world.registry.get(
+				h.kernel->world.cached.local_player)) {
+		if (!expect(body->group_id == 0, "in-match frame: L's commandGroup is 0"))
+			return false;
+	}
 	// The join-wait fire latches died at the spawn edge (the weapon pump ran
 	// gated open the same frame over the cleared latches).
 	if (!expect(!h.weapon().fire_held && !h.weapon().fire_pressed &&
@@ -1292,6 +1299,55 @@ bool run_flare_descriptor_carries_the_pilot_handheld() {
 	return ok;
 }
 
+// An S2C 0x49 naming a non-Person EWeap entity reloads that entity's own MountSlot:
+// the remaining clip is refunded through the slot's re-split, then a clip is drawn
+// from its reserve [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the
+//  non-Person WeaponSlot_ReloadAmmo call @0x42C109; WeaponSlot_ReloadAmmo's EWeap
+//  slot @0x54172D, the re-split @0x5462A0, sub_546200 / sub_5461D0, the clip store
+//  @0x541850].
+bool run_received_reload_refills_an_eweap_entity() {
+    Harness h;
+    h.role.poll_preload();
+    h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+            1, 0, 5, w::kPlayerInfantryTypeId);
+    w::World &world = h.kernel->world;
+    world.registry.configure_pool(1, 8);
+    world.tables.weapons.entries.resize(2);
+    w::WeaponTableEntry &gun = world.tables.weapons.entries[1];
+    gun.name = "WPN_TANKGUN";
+    gun.valid = true;
+    gun.clipsize = 4;
+    gun.startrounds = 12;
+    gun.ammo_class_count = 1;
+    w::Entity tank;
+    tank.kind = w::EntityKind::Item;
+    tank.has_item_def = true;
+    tank.item_type = 1;
+    tank.item_attrib = w::kItemAttribEweap;
+    tank.primary_weapon = gun.name;
+    const w::EntityHandle tank_h = world.registry.spawn(1, tank);
+    w::Entity *live = world.registry.get(tank_h);
+    if (!expect(live != nullptr && world.vehicles.prepare_weapon_slot(*live),
+            "reload: the tank's slot resolves")) return false;
+    live->primary_weapon_slot.clip = 1;
+    live->primary_weapon_slot.reserve = 8;
+    SessionSequencing tx = inmatch::make_jo_game_session_sequencing();
+    WeaponReload reload;
+    reload.entity_handle = tank_h.packed;
+    reload.reload_param = 0xFFFF;
+    std::vector<uint8_t> body;
+    if (!frame_session_packet(tx, SessionCrypto{kServerScrk, {}, kClientKey},
+            {make_protocol_message(s2c::WEAPON_RELOAD, encode_weapon_reload(reload))}, body))
+        return false;
+    const auto datagram = nw_encode_outbound(
+            SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+    h.role.runtime->receive(datagram.data(), datagram.size());
+    h.role.run_tick(h.input);
+    // 1 + 8 + 1 capped at 12: 4 / 6, then the draw of 4: 4 / 2.
+    return expect(live->primary_weapon_slot.clip == 4 && live->primary_weapon_slot.reserve == 2,
+            "reload: the EWeap entity refills its own slot from its reserve");
+}
+
 bool run_received_loadout_policy_and_sounds() {
     Harness h;
     h.role.poll_preload();
@@ -1901,6 +1957,9 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 	h.role.run_tick(h.input);
 	const uint64_t grants = h.role.runtime->authoritative_loadout_revision();
 	h.seams.clear();
+	// The respawn reset returns the map zoom to its spawn default (the round
+	// init leaves the zooms alone), so a moved zoom marks it.
+	h.kernel->local.hud_map_control.zoom_q16 = 1;
 	frame(100, 0x00); // the revive deploy: no 0x5A, the record alive again
 	frame(100, 0x00); // the next tail revives L
 	local = h.kernel->local.player();
@@ -1909,9 +1968,10 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 					!h.role.runtime->deployment_pick_pending(),
 			"revive: the record's respawn edge releases the deploy and L stands"))
 		return false;
-	bool respawned = false;
-	for (const std::string &seam : h.seams) respawned = respawned || seam == "respawn";
-	if (!expect(respawned, "revive: L runs the respawn reset")) return false;
+	if (!expect(h.kernel->local.hud_map_control.zoom_q16 ==
+					h.kernel->local.hud_map_control.spawn_zoom_q16,
+			"revive: L runs the respawn reset"))
+		return false;
 	if (!expect(local_ai->heading == static_cast<int32_t>(0xCC000000u),
 			"revive: L faces the record's heading byte"))
 		return false;
@@ -2368,10 +2428,197 @@ bool run_pool1_shooter_round_takes_its_indoors_state() {
 	return ok;
 }
 
+// A decoded shooter's stance row (A-27's joiner half): Parachute 0x20, Drowning
+// 0x8000 and LadderContact 0x100000 in the row's Flags dword force the standing
+// row 2, a crouched body otherwise keeps row 1; Drowning also takes the recoil's
+// x4 leg. Observed through the ammo recoil each row's spawn adds to the row.
+// [orig: RoundData_SpawnRound `test dword ptr [ebp+24h], 108020h` @0x4EC2D5,
+//  row 2 @0x4EC2EC; the single round's recoil row and `test ecx, 8000h`
+//  @0x4EC85B..0x4EC8A3]
+bool run_round_event_stance_reads_the_flags_legs() {
+	Harness h;
+	auto &world = h.kernel->world;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	ammo.recoil[0] = 1; // prone
+	ammo.recoil[1] = 2; // crouched / mounted
+	ammo.recoil[2] = 3; // standing / the override
+	world.tables.weapons.entries.resize(2);
+	world.tables.weapons.entries[1].valid = true;
+	world.tables.weapons.entries[1].ammo_index = 0;
+	int crouch = -1;
+	for (int st = 0; st < w::kInfantryAnimStateCount && crouch < 0; ++st)
+		if ((w::infantry_anim_flags(st) & (w::kAnimStanceFlagCrouched | w::kAnimStanceFlagProne)) ==
+				w::kAnimStanceFlagCrouched)
+			crouch = st;
+	if (!expect(crouch >= 0, "a crouched anim state exists")) return false;
+	// The row's Flags dword is the motor mirror with the latest record's byte
+	// folded in under 0xFD: a spawn word's stale Parachute or Drowning (0x8020
+	// seeded the mirror, the motor cleared 0x8000, the record carries 0) is gone.
+	// [orig: NetPacket_SerializePlayerState @0x4C1307..0x4C1311]
+	struct Case {
+		uint8_t state_flags;
+		uint32_t mirror_flags;
+		uint32_t spawn_flags;
+		int32_t recoil;
+		const char *what;
+	};
+	const Case cases[] = {
+		{0, 0, 0, 2 << 18, "a crouched shooter keeps the crouched row"},
+		{0x20, 0, 0, 3 << 18, "a parachuting shooter takes the standing row"},
+		{0, 0x100000, 0, 3 << 18, "a shooter on a ladder takes the standing row"},
+		{0, 0x8000, 0, 3 << 20, "a drowning shooter takes the standing row and the x4 leg"},
+		{0, 0x20, 0x8020, 2 << 18, "a spawn word's parachute and drowning do not outlive the record"},
+	};
+	bool ok = true;
+	constexpr uint16_t kShooter = 0x0003;
+	for (const Case &c : cases) {
+		auto &row = h.role.runtime->state().upsert(kShooter);
+		row.type_id = w::kPlayerInfantryTypeId;
+		row.cls = EntityClass::Player;
+		row.anim_state_id = crouch;
+		row.carrier_handle = 0xFFFF;
+		row.state_flags = c.state_flags;
+		row.state_flags_known = true;
+		row.rm_entity_flags = c.mirror_flags;
+		row.spawn_entity_flags = c.spawn_flags;
+		row.recoil_pitch = 0;
+		world.round_sim.reset();
+		FrameUpdate frame;
+		frame.carried_handle = 0xFFFF;
+		frame.health = 100;
+		RoundEventRecord ev;
+		ev.flags = kRoundEventFlagAdmIndexed;
+		ev.adm_index = 1;
+		ev.shooter_handle = kShooter;
+		frame.round_events.push_back(ev);
+		h.role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(frame));
+		const auto *after = h.role.runtime->state().find(kShooter);
+		ok &= expect(after != nullptr && after->recoil_pitch == c.recoil, c.what);
+	}
+	return ok;
+}
+
+// An alt-fire (bit 0) round event's byte is an ammo index: the joiner flies that
+// ammo with no weapon, so the spawn's spread takes the ammo's ERROR leg, never the
+// round of a weapon at that index. [orig: NetPacket_DeserializeRoundEvent @0x42F521,
+//  @0x42F52C..0x42F5BA; RoundData_SpawnRound's null-weapon test @0x4EC38D..0x4EC397,
+//  the ammo leg @0x4EC4BF..0x4EC4D2]
+bool run_alt_round_event_flies_its_ammo_byte() {
+	Harness h;
+	auto &world = h.kernel->world;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	world.tables.ammo.entries.resize(3);
+	for (w::AmmoTableEntry &ammo : world.tables.ammo.entries) {
+		ammo.valid = true;
+		ammo.velocity = 620;
+		ammo.max_age_ticks = 100;
+	}
+	world.tables.ammo.entries[2].spread_error_fp16 = 30 << 16;
+	// A loaded table's slot 0 is the engine's valid "null" def; weapon 2 flies ammo 0.
+	world.tables.weapons.entries.resize(3);
+	world.tables.weapons.entries[0].name = "null";
+	world.tables.weapons.entries[0].valid = true;
+	world.tables.weapons.entries[2].name = "ADM_TWO";
+	world.tables.weapons.entries[2].valid = true;
+	world.tables.weapons.entries[2].ammo_index = 0;
+	constexpr uint16_t kShooter = 0x0003;
+	auto &row = h.role.runtime->state().upsert(kShooter);
+	row.type_id = w::kPlayerInfantryTypeId;
+	row.cls = EntityClass::Player;
+	row.carrier_handle = 0xFFFF;
+	world.round_sim.reset();
+	FrameUpdate frame;
+	frame.carried_handle = 0xFFFF;
+	frame.health = 100;
+	RoundEventRecord ev;
+	ev.flags = kRoundEventFlagAltFire;
+	ev.adm_index = 2;
+	ev.shot_seq = 1;
+	ev.shooter_handle = kShooter;
+	frame.round_events.push_back(ev);
+	h.role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(frame));
+	const w::LiveRound *round = nullptr;
+	for (const w::LiveRound &r : world.round_sim.rounds)
+		if (r.active) round = &r;
+	if (!expect(round != nullptr && round->ammo_index == 2,
+			"the alt round event flies ammo 2, its byte"))
+		return false;
+	return expect(round->vel.y != 0.0f || round->vel.z != 0.0f,
+			"the weaponless alt round spreads by its ammo's ERROR");
+}
+
+// A round event whose shooter resolves to nothing on this client spawns nothing; the
+// same event from a decoded shooter flies. [orig: NetPacket_DeserializeRoundEvent
+//  @0x42F451..0x42F4A1]
+bool run_round_event_needs_a_resolved_shooter() {
+	Harness h;
+	auto &world = h.kernel->world;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	world.tables.ammo.entries.resize(1);
+	world.tables.ammo.entries[0].valid = true;
+	world.tables.ammo.entries[0].velocity = 620;
+	world.tables.ammo.entries[0].max_age_ticks = 100;
+	world.tables.weapons.entries.resize(2);
+	world.tables.weapons.entries[1].valid = true;
+	world.tables.weapons.entries[1].ammo_index = 0;
+	constexpr uint16_t kShooter = 0x0006;
+	const auto fire = [&]() {
+		world.round_sim.reset();
+		FrameUpdate frame;
+		frame.carried_handle = 0xFFFF;
+		frame.health = 100;
+		RoundEventRecord ev;
+		ev.flags = kRoundEventFlagAdmIndexed;
+		ev.adm_index = 1;
+		ev.shooter_handle = kShooter;
+		frame.round_events.push_back(ev);
+		h.role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(frame));
+		return world.round_sim.active_count;
+	};
+	if (!expect(fire() == 0, "an unresolved shooter's round event spawns nothing")) return false;
+	auto &row = h.role.runtime->state().upsert(kShooter);
+	row.type_id = w::kPlayerInfantryTypeId;
+	row.cls = EntityClass::Player;
+	row.carrier_handle = 0xFFFF;
+	return expect(fire() == 1, "a decoded shooter's round event flies");
+}
+
+// The joiner's sniper-zoom rule follows the S2C 0x08 flags dword's bit 16.
+// [orig: NapiNPClientMsg_HandleSessionConfig @0x42837A..0x428392]
+bool run_zoom_rule_follows_the_session_flags() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	w::World &world = h.kernel->world;
+	h.role.runtime->state().session_rules_flags = 0x10000u;
+	h.role.run_tick(h.input);
+	if (!expect(world.rules.allow_sniper_scope_zoom, "zoom rule: bit 16 allows the zoom"))
+		return false;
+	h.role.runtime->state().session_rules_flags = 0x8000u;
+	h.role.run_tick(h.input);
+	return expect(!world.rules.allow_sniper_scope_zoom, "zoom rule: bit 16 clear locks it");
+}
+
 int main() {
 	if (!run_local_replica_turret_channel()) return 1;
 	if (!run_replica_turret_channel()) return 1;
 	if (!run_received_loadout_policy_and_sounds()) return 1;
+	if (!run_received_reload_refills_an_eweap_entity()) return 1;
 	bool ok = true;
 	ok &= run_pre_match_frame();
 	ok &= run_preload_frame();
@@ -2412,6 +2659,10 @@ int main() {
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();
+	ok &= run_round_event_stance_reads_the_flags_legs();
+	ok &= run_alt_round_event_flies_its_ammo_byte();
+	ok &= run_round_event_needs_a_resolved_shooter();
+	ok &= run_zoom_rule_follows_the_session_flags();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

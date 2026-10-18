@@ -46,7 +46,7 @@ TerrainViewCull make_terrain_view_cull(const float view[16], float fov_deg,
 // setting as `(detail + 1) * 0.25`, the setter clamps it to [0, 1] and remaps
 // it to `x * 0.8 + 0.2`, and each frame multiplies the context's quality
 // scale by that. Detail 3 (the max-quality target) yields 1.0.
-// [orig: Terrain_Init @0x60fc33 -> sub_605D70 @0x605D70 (clamp, the
+// [orig: Terrain_Init @0x60fc33 -> Terrain_ApplyDetailSettings @0x605D70 (clamp, the
 //  `* 0.80000001 + 0.2` store to flt_8493D8); PolyTrn_RenderFrame @0x60eb4a
 //  `flt_319FB2C = ctx[5] * flt_8493D8`]
 inline constexpr int kTerrainMaxPolygonDetail = 3;

@@ -2361,6 +2361,41 @@ void test_use_item_armory_zone_gate() {
     CHECK(!local_player_in_armory_zone(empty));
 }
 
+// The arm a USE-ITEM press takes [orig: Input_HandleActionBinding_0 case 0xB1 --
+// parentSlot @0x4e0a91..0x4e0a98; the zone bit @0x4e0aa1 or g_ClientPreRoundTimer
+// @0x4e0aa6..0x4e0ab0 into the armory arm; outside the pre-round
+// `cmp g_ClientArmoryDelaySeconds, ecx; jnz done` @0x4e0b29..0x4e0b2f; Flags & 0x800
+// @0x4e0ab2; else the mount chain @0x4e0b5e].
+void test_use_item_arm_order() {
+    LocalWorld lw;
+    LocalViewSessionInputs s;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kMountChain);
+    // The armory volume opens weapon.mnu; a running countdown refuses it.
+    lw.entity().flags |= kEntityFlagArmoryZone;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kArmory);
+    s.armory_reuse_seconds = 30;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kArmoryRefused);
+    // The pre-round opens it anywhere, the countdown unread.
+    lw.entity().flags &= ~kEntityFlagArmoryZone;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kMountChain);
+    s.hud_service.preround_seconds = 12;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kArmory);
+    // The armory arm comes before the vehicle bay: a bay touch in the
+    // pre-round still opens the armory.
+    lw.entity().flags |= kEntityFlagVehicleLoadoutZone;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kArmory);
+    s.hud_service.preround_seconds = 0;
+    s.armory_reuse_seconds = 0;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kVehicleLoadout);
+    // A seated player takes the mount chain whatever else holds.
+    lw.entity().flags |= kEntityFlagArmoryZone;
+    s.hud_service.preround_seconds = 12;
+    lw.entity().mounted = true;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kMountChain);
+    World empty;
+    CHECK(local_player_use_item_arm(empty, s) == UseItemArm::kMountChain);
+}
+
 // The shell's class pick: 5..9 stamps L, a joiner without L latches it, the
 // rest change nothing; the resident kit is the spawn kit, else the default.
 void test_loadout_class_pick_and_resident_kit() {
@@ -2942,6 +2977,25 @@ void test_scope_zero_bake_max_range() {
     CHECK(zero.max_range_q16 == 655359); // below stable on the first tick
 }
 
+// The bake's launch turns its bisected BAM into radians with retail's x87
+// double, not the exact 2pi/2^32: each solve's Q22 (cos, sin) pair, and so the
+// baked rows, follow it [orig: WeaponSlot_CalcElevationTable `fild; fmul
+// ds:dbl_7C3608` @0x5451F2..0x5451FE, fsin / fcos x dbl_7C3600 @0x545204..0x545217].
+void test_scope_zero_bake_rows_follow_the_x87_scale() {
+    AmmoTableEntry ammo;
+    ammo.velocity = 853;
+    WeaponScopeZero zero;
+    zero.max_steps = 5; zero.step_metres = 100;
+    weapon_scope_zero_bake(zero, ammo);
+    // The exact scale baked 379892, 823348, 1266150, 1772514 and 2216134.
+    CHECK(zero.elevation[0] == 10);
+    CHECK(zero.elevation[1] == 379880);
+    CHECK(zero.elevation[2] == 823324);
+    CHECK(zero.elevation[3] == 1266112);
+    CHECK(zero.elevation[4] == 1772460);
+    CHECK(zero.elevation[5] == 2216066);
+}
+
 // Direct mounts retain the current pose and velocities. Published bias alone
 // clears, then the next step uses the newly bound def's hip reference.
 void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
@@ -3363,6 +3417,66 @@ void test_pack_drops_the_binocular_toggle_on_movement() {
     CHECK(!f.player.view.binoculars_raised);
 }
 
+// The armory press latch: a press that takes the armory arm latches it (a
+// countdown-refused one too), a latched press opens nothing, and only a
+// useitem release clears it. While it holds, each frame's input freezes after
+// the fold: the word clears, so no direction reaches MoveOrder or the
+// binocular refresh, MoveOrder keeps only its stance, and the X axis byte
+// packs 0. The latch survives a kernel replacement.
+// [orig: Input_HandleActionBinding_0 @0x4E0B12..0x4E0B21;
+//  Input_HandleMenuKeyRelease @0x4DE2F8; Game_ProcessMainFrame
+//  @0x526625..0x52666F; the X word @0x52663E]
+void test_armory_press_latch_freezes_input() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = 0;
+    f.player.view.scope_engaged = false;
+    f.player.view.scope_settled = false;
+    CHECK(f.player.take_use_item_press() == UseItemArm::kMountChain);
+    CHECK(!f.player.armory_press_latched);
+    f.entity().flags |= kEntityFlagArmoryZone;
+    CHECK(f.player.take_use_item_press() == UseItemArm::kArmory);
+    CHECK(f.player.armory_press_latched);
+    CHECK(f.player.take_use_item_press() == UseItemArm::kArmoryRefused);
+    CHECK(f.player.armory_press_latched);
+    // Forward + back held: no direction, an X word of +1023 (back's row lands
+    // last), so an unfrozen pack stores +127 on the X byte.
+    f.player.set_movement_keys(true, true, false, false, false, false, false);
+    CHECK(!f.player.view.movement_input);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.player.move_order.direction_bits == 0);
+    CHECK(f.entity().net_analog_x == 0);
+    // A frame without a pack strips the persisted MoveOrder to its stance.
+    f.player.move_order.stance = InfantryState::Stance::kCrouch;
+    f.player.move_order.lean_left = true;
+    f.player.move_order.direction_bits = PlayerBodyInput::kDirForward;
+    f.player.move_order.moving = true;
+    f.player.apply_player_input_pre_tick(/*pack_input=*/false);
+    CHECK(f.player.move_order.stance == InfantryState::Stance::kCrouch);
+    CHECK(!f.player.move_order.lean_left);
+    CHECK(f.player.move_order.direction_bits == 0 && !f.player.move_order.moving);
+    // A system key-up (WM_SYSKEYUP) leaves it; a plain release clears it, and
+    // the next frame's keys reach the pack [orig: Input_HandleMenuKeyRelease
+    // @0x4DE2D0..0x4DE2E2].
+    f.player.release_use_item_key(/*system_key_up=*/true);
+    CHECK(f.player.armory_press_latched);
+    f.player.release_use_item_key(/*system_key_up=*/false);
+    CHECK(!f.player.armory_press_latched);
+    f.player.set_movement_keys(true, true, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.player.move_order.direction_bits ==
+          (PlayerBodyInput::kDirForward | PlayerBodyInput::kDirBack));
+    CHECK(f.entity().net_analog_x == 127);
+    f.player.set_movement_keys(true, false, false, false, false, false, false);
+    CHECK(f.player.view.movement_input);
+    // A countdown-refused press latches as well.
+    f.player.view_session_inputs.armory_reuse_seconds = 30;
+    CHECK(f.player.take_use_item_press() == UseItemArm::kArmoryRefused);
+    CHECK(f.player.armory_press_latched);
+    ScopedAimFixture next;
+    next.player.carry_process_globals_from(f.player);
+    CHECK(next.player.armory_press_latched);
+}
+
 // The movement-held latch and the unscope-on-move run inside the pack, from
 // the packed word: a joiner between send boundaries keeps its settled scope
 // with a direction key down, and the boundary pack latches g_MovementKeyHeld
@@ -3741,6 +3855,7 @@ int main() {
     test_body_view_stamp_alone();
     test_pack_drops_the_binocular_toggle_on_movement();
     test_pack_owns_the_movement_latch_and_unscope();
+    test_armory_press_latch_freezes_input();
     test_pack_masks_movement_under_a_nomove_weapon();
     test_pack_analog_axes_and_their_hysteresis();
     test_authority_fire_gate_refuses_the_round();
@@ -3763,6 +3878,7 @@ int main() {
     test_scope_zero_install_seeds_the_yaw_term();
     test_scope_zero_yaw_term();
     test_scope_zero_bake_max_range();
+    test_scope_zero_bake_rows_follow_the_x87_scale();
     test_mounted_first_person_camera_belongs_to_the_carrier();
     test_seat_bone_pose_rider_legs();
     test_unadmitted_seat_takes_the_ground_or_person_leg();
@@ -3805,6 +3921,7 @@ int main() {
     test_frame_chase_shake_consumes_the_tick();
     test_use_item_vehicle_loadout_zone_gates();
     test_use_item_armory_zone_gate();
+    test_use_item_arm_order();
     test_loadout_class_pick_and_resident_kit();
     test_weapon_hand_frame_bit();
     test_view_uses_current_motor_offset_and_live_position();

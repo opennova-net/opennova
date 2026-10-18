@@ -96,9 +96,9 @@ inline constexpr uint32_t kTeamDColor = 0xFFFF027Fu;
 // The two teams a team-mode board columns this frame, with their colors.
 // Two sides configured: teams 1/2 in the palette pair, always. More than two:
 // the board ALTERNATES between the 1/2 page and a 3/4 page on bit 7 of the
-// HUD frame counter — a 128-frame period on the same per-main-frame clock
-// the blink masks read [orig: Game_TickHudFrameCounters @0x434c14
-// ++dword_A87060] — and the 3/4 page swaps in kTeamC/DColor
+// session frame counter (world::HudFrameCounters::session_frame, not the HUD
+// frame counter the blinks read) — a 128-frame period [orig:
+// Game_TickHudFrameCounters @0x434c14 ++dword_A87060] — and the 3/4 page swaps in kTeamC/DColor
 // [orig: HUD_DrawKillList @0x423cd0-0x423cf1: esi=1/edi=2 with the palette
 // pair, then `g_NumTeamsConfig > 2 && (dword_A87060 & 0x80)` -> esi=3,
 // edi=4, ecx=0xFFFFFF00, edx=0xFFFF027F].

@@ -258,13 +258,13 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(report.build_id.size() == 16);
 	TEST_EXPECT(report.archives_written.size() == 3 && report.archives_reused.empty());
 	TEST_EXPECT(report.loose_written.size() == 2);
-	TEST_EXPECT(fs::is_directory(report.build_dir));
-	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "language.pff"));
-	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "localres.pff"));
-	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "resource.pff"));
-	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "menumus.sbf"));
-	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / kBuildRecordFileName));
-	TEST_EXPECT(!fs::exists(fs::path(p.output_root()) / (report.build_id + ".tmp")));
+	TEST_EXPECT(fs::is_directory(system_path(report.build_dir)));
+	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/language.pff")));
+	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/localres.pff")));
+	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/resource.pff")));
+	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/menumus.sbf")));
+	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/" + kBuildRecordFileName)));
+	TEST_EXPECT(!fs::exists(system_path(p.output_root() + "/" + (report.build_id + ".tmp"))));
 	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == report.build_dir);
 
 	// The runtime's own mount, archive-only over the fixed boot table, resolves every name.
@@ -305,7 +305,7 @@ static int test_filled_project_builds_and_mounts() {
 	for (const BuiltFile &file : changed.built)
 		if (file.archive) TEST_EXPECT(file.reused == (file.name != "language.pff"));
 	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == changed.build_dir);
-	TEST_EXPECT(!fs::exists(report.build_dir)); // the older build is pruned
+	TEST_EXPECT(!fs::exists(system_path(report.build_dir))); // the older build is pruned
 	return 0;
 }
 
@@ -352,7 +352,7 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	TEST_EXPECT(p.fill());
 	const BuildReport first = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(first.ok);
-	TEST_EXPECT(!fs::exists(fs::path(first.build_dir) / kBuildStagingMarkerFileName));
+	TEST_EXPECT(!fs::exists(system_path(first.build_dir + "/" + kBuildStagingMarkerFileName)));
 
 	// The output root may be any folder (--out): pruning deletes only what proves it is a
 	// build, never a bystander, whatever its name looks like.
@@ -366,18 +366,18 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "two"));
 	const BuildReport second = run_build(p.plan(), p.output_root(), editor_test::protect_dirs({first.build_dir}));
 	TEST_EXPECT(second.ok && second.build_dir != first.build_dir);
-	TEST_EXPECT(fs::is_directory(first.build_dir)); // a running child's build is never pruned
-	TEST_EXPECT(fs::is_regular_file(out + "/my important documents/keep.txt"));
-	TEST_EXPECT(fs::is_regular_file(out + "/0123456789abcdef/keep.txt"));
-	TEST_EXPECT(fs::is_regular_file(out + "/fedcba9876543210.tmp/keep.txt"));
-	TEST_EXPECT(fs::is_regular_file(out + "/00000000000000aa/build.json"));
+	TEST_EXPECT(fs::is_directory(system_path(first.build_dir))); // a running child's build is never pruned
+	TEST_EXPECT(fs::is_regular_file(system_path(out + "/my important documents/keep.txt")));
+	TEST_EXPECT(fs::is_regular_file(system_path(out + "/0123456789abcdef/keep.txt")));
+	TEST_EXPECT(fs::is_regular_file(system_path(out + "/fedcba9876543210.tmp/keep.txt")));
+	TEST_EXPECT(fs::is_regular_file(system_path(out + "/00000000000000aa/build.json")));
 
 	// Once the child is gone the next build prunes its directory too.
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "three"));
 	const BuildReport third = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(third.ok);
-	TEST_EXPECT(!fs::exists(first.build_dir) && !fs::exists(second.build_dir));
-	TEST_EXPECT(fs::is_regular_file(out + "/my important documents/keep.txt"));
+	TEST_EXPECT(!fs::exists(system_path(first.build_dir)) && !fs::exists(system_path(second.build_dir)));
+	TEST_EXPECT(fs::is_regular_file(system_path(out + "/my important documents/keep.txt")));
 
 	// A .pff inside the project is left out with a plain explanation, the build going ahead: the game never
 	// mounts an archive packed inside another.
@@ -634,10 +634,10 @@ static int test_expansion_layout() {
 		root_only = root_only || (d.code() == "build.expansion.root_only" && d.asset == "cc.bin" &&
 		                          d.severity == DiagnosticSeverity::Warning && !blocks_build(d));
 	TEST_EXPECT(root_only);
-	const fs::path dir = fs::path(report.build_dir);
-	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/jxmL.pff") && fs::is_regular_file(dir / "expansion/jxm/jxm.pff"));
-	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/version.txt") && fs::is_regular_file(dir / "expansion/jxm/jxm.bin"));
-	TEST_EXPECT(!fs::exists(dir / "language.pff") && !fs::exists(dir / "header.bik") && !fs::exists(dir / "cc.bin"));
+	const std::string dir = report.build_dir;
+	TEST_EXPECT(fs::is_regular_file(system_path(dir + "/expansion/jxm/jxmL.pff")) && fs::is_regular_file(system_path(dir + "/expansion/jxm/jxm.pff")));
+	TEST_EXPECT(fs::is_regular_file(system_path(dir + "/expansion/jxm/version.txt")) && fs::is_regular_file(system_path(dir + "/expansion/jxm/jxm.bin")));
+	TEST_EXPECT(!fs::exists(system_path(dir + "/language.pff")) && !fs::exists(system_path(dir + "/header.bik")) && !fs::exists(system_path(dir + "/cc.bin")));
 	// S26 C10: the build's list names each loose file where it landed, with its size (they read 0 B).
 	for (const BuiltFile &file : report.built)
 		if (!file.archive)
@@ -659,7 +659,7 @@ static int test_expansion_layout() {
 	const BuildReport renamed = run_build(plan_as(other), p.paths.build_dir + "/renamed");
 	TEST_EXPECT(standalone.ok && renamed.ok);
 	TEST_EXPECT(standalone.build_id != report.build_id && renamed.build_id != report.build_id);
-	TEST_EXPECT(fs::is_regular_file(fs::path(renamed.build_dir) / "expansion/jxn/jxnL.pff"));
+	TEST_EXPECT(fs::is_regular_file(system_path(renamed.build_dir + "/expansion/jxn/jxnL.pff")));
 	return 0;
 }
 
@@ -679,8 +679,8 @@ static int test_expansion_empty_pair() {
 	const BuildReport report = run_build(plan, dir.file("out"));
 	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(report.ok && report.archives_written.size() == 2);
-	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "expansion/x1/x1L.pff"));
-	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "expansion/x1/x1.pff"));
+	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/expansion/x1/x1L.pff")));
+	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/expansion/x1/x1.pff")));
 	opennova::Vfs vfs;
 	opennova::LaunchFlags flags;
 	flags.expansion = "x1";
@@ -752,7 +752,7 @@ static int test_lean_packing() {
 	TEST_EXPECT(report.ok);
 	const std::string folder = report.build_dir + "/expansion/jxm";
 	TEST_EXPECT(!archive_has(folder + "/jxmL.pff", "gametext.bin") && !archive_has(folder + "/jxm.pff", "main.mnu"));
-	TEST_EXPECT(!fs::exists(folder + "/intro.bik") && fs::is_regular_file(folder + "/header.bik"));
+	TEST_EXPECT(!fs::exists(system_path(folder + "/intro.bik")) && fs::is_regular_file(system_path(folder + "/header.bik")));
 	TEST_EXPECT(archive_has(folder + "/jxm.pff", "m2.bms") && archive_has(folder + "/jxmL.pff", "m2.bin"));
 	// A map project lists as a mission does [orig: Mission_BuildMapListFromPFF @ 0x562910]: its table stays.
 	TEST_EXPECT(archive_has(folder + "/jxm.pff", "ASP_G7.npz") && archive_has(folder + "/jxmL.pff", "ASP_G7.bin"));
@@ -1012,7 +1012,7 @@ static int test_export() {
 	            record.get_string("build_id", "") == build.build_id);
 	std::error_code ec;
 	TEST_EXPECT(!fs::equivalent(request.export_dir + "/language.pff", build.build_dir + "/language.pff", ec)); // copied
-	TEST_EXPECT(!fs::exists(request.export_dir + kExportStagingSuffix) && !fs::exists(request.export_dir + kExportPreviousSuffix));
+	TEST_EXPECT(!fs::exists(system_path(request.export_dir + kExportStagingSuffix)) && !fs::exists(system_path(request.export_dir + kExportPreviousSuffix)));
 
 	// Again over its own export: what the person added there kept (and said), a file of the export they
 	// changed replaced by the build's (and said), the record naming the export's own files alone.
@@ -1040,8 +1040,8 @@ static int test_export() {
 	TEST_EXPECT(test_io::write_text(request.export_dir + kExportStagingSuffix + "/" + kExportRecordFileName, text) &&
 	            test_io::write_text(request.export_dir + kExportPreviousSuffix + "/" + kExportRecordFileName, text) &&
 	            test_io::write_text(request.export_dir + kExportPreviousSuffix + "/language.pff", "old"));
-	TEST_EXPECT(export_build(request).ok && !fs::exists(request.export_dir + kExportStagingSuffix) &&
-	            !fs::exists(request.export_dir + kExportPreviousSuffix));
+	TEST_EXPECT(export_build(request).ok && !fs::exists(system_path(request.export_dir + kExportStagingSuffix)) &&
+	            !fs::exists(system_path(request.export_dir + kExportPreviousSuffix)));
 	// A set-aside folder that cannot be removed (a file of it open elsewhere): the new export is in, and said.
 	const RemoveTree held = [](const std::string &, std::string &reason) {
 		reason = "a file of it is in use";
@@ -1049,15 +1049,15 @@ static int test_export() {
 	};
 	shipped = export_build(request, held);
 	TEST_EXPECT(shipped.ok && count_code(shipped.diagnostics, "export.cleanup") == 1 &&
-	            fs::is_regular_file(request.export_dir + kExportPreviousSuffix + "/" + kExportRecordFileName) &&
+	            fs::is_regular_file(system_path(request.export_dir + kExportPreviousSuffix + "/" + kExportRecordFileName)) &&
 	            files_under(request.export_dir) == with_notes);
-	TEST_EXPECT(export_build(request).ok && !fs::exists(request.export_dir + kExportPreviousSuffix));
+	TEST_EXPECT(export_build(request).ok && !fs::exists(system_path(request.export_dir + kExportPreviousSuffix)));
 	// A folder named with a trailing separator is the folder.
 	ExportRequest trailing = request;
 	trailing.export_dir = request.export_dir + "/";
 	shipped = export_build(trailing);
 	TEST_EXPECT(shipped.ok && shipped.export_dir == request.export_dir && files_under(request.export_dir) == with_notes &&
-	            !fs::exists(request.export_dir + "/" + kExportStagingSuffix) && !fs::exists(request.export_dir + "/.old"));
+	            !fs::exists(system_path(request.export_dir + "/" + kExportStagingSuffix)) && !fs::exists(system_path(request.export_dir + "/.old")));
 	// Stepped by a budget of bytes, progress only going up; cancelled before its folder is replaced, the
 	// folder as it was and the staging folder gone.
 	{
@@ -1071,10 +1071,10 @@ static int test_export() {
 			last = run.bytes_done();
 			++steps;
 		}
-		TEST_EXPECT(!run.done() && run.bytes_total() > 0 && fs::exists(request.export_dir + kExportStagingSuffix));
+		TEST_EXPECT(!run.done() && run.bytes_total() > 0 && fs::exists(system_path(request.export_dir + kExportStagingSuffix)));
 		run.cancel();
 		TEST_EXPECT(run.done() && !run.report().ok && count_code(run.report().diagnostics, "export.cancelled") == 1 &&
-		            !fs::exists(request.export_dir + kExportStagingSuffix) &&
+		            !fs::exists(system_path(request.export_dir + kExportStagingSuffix)) &&
 		            editor_test::tree_digest(request.export_dir) == before);
 		ExportRun whole(request);
 		int whole_steps = 0;
@@ -1096,7 +1096,7 @@ static int test_export() {
 	ExportRequest empty = request;
 	empty.export_dir = p.dir.file("empty");
 	fs::create_directories(empty.export_dir);
-	TEST_EXPECT(export_build(empty).ok && fs::is_regular_file(empty.export_dir + "/localres.pff"));
+	TEST_EXPECT(export_build(empty).ok && fs::is_regular_file(system_path(empty.export_dir + "/localres.pff")));
 
 	// Never over the person's files, another project's export, a foreign staging folder, the build.
 	ExportRequest theirs = request;
@@ -1105,7 +1105,7 @@ static int test_export() {
 	ExportReport refused = export_build(theirs);
 	TEST_EXPECT(!refused.ok && refused.diagnostics.size() == 1 && refused.diagnostics[0].code() == "export.folder");
 	TEST_EXPECT(files_under(theirs.export_dir) == std::vector<std::string>{"keep.txt"});
-	TEST_EXPECT(!fs::exists(theirs.export_dir + kExportStagingSuffix));
+	TEST_EXPECT(!fs::exists(system_path(theirs.export_dir + kExportStagingSuffix)));
 	ExportRequest other = request;
 	other.project_id = "another-project";
 	refused = export_build(other);
@@ -1115,10 +1115,10 @@ static int test_export() {
 	TEST_EXPECT(test_io::write_text(staged.export_dir + kExportStagingSuffix + "/keep.txt", "mine"));
 	refused = export_build(staged);
 	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.folder" &&
-	            fs::is_regular_file(staged.export_dir + kExportStagingSuffix + "/keep.txt") && !fs::exists(staged.export_dir));
+	            fs::is_regular_file(system_path(staged.export_dir + kExportStagingSuffix + "/keep.txt")) && !fs::exists(system_path(staged.export_dir)));
 	ExportRequest into = request;
 	into.export_dir = build.build_dir + "/shipped";
-	TEST_EXPECT(!export_build(into).ok && !fs::exists(into.export_dir));
+	TEST_EXPECT(!export_build(into).ok && !fs::exists(system_path(into.export_dir)));
 	TEST_EXPECT(editor_test::tree_digest(build.build_dir) == tree);
 
 	// The runtime's folder under runtime/ when asked; one not there refused.
@@ -1127,13 +1127,13 @@ static int test_export() {
 	runtime.runtime_dir = p.dir.file("runtime_package");
 	TEST_EXPECT(test_io::write_text(runtime.runtime_dir + "/opennova.exe", "exe") &&
 	            test_io::write_text(runtime.runtime_dir + "/data/opennova.pck", "pck"));
-	TEST_EXPECT(export_build(runtime).ok && fs::is_regular_file(runtime.export_dir + "/runtime/opennova.exe") &&
-	            fs::is_regular_file(runtime.export_dir + "/runtime/data/opennova.pck") &&
-	            fs::is_regular_file(runtime.export_dir + "/language.pff"));
+	TEST_EXPECT(export_build(runtime).ok && fs::is_regular_file(system_path(runtime.export_dir + "/runtime/opennova.exe")) &&
+	            fs::is_regular_file(system_path(runtime.export_dir + "/runtime/data/opennova.pck")) &&
+	            fs::is_regular_file(system_path(runtime.export_dir + "/language.pff")));
 	runtime.runtime_dir = p.dir.file("no_runtime");
 	runtime.export_dir = p.dir.file("without_runtime");
 	refused = export_build(runtime);
-	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.runtime" && !fs::exists(runtime.export_dir));
+	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.runtime" && !fs::exists(system_path(runtime.export_dir)));
 
 	// An expansion's, laid out as in an install.
 	const BaseInstall install = make_base(p.dir.file("install"), { { "basetable.bin", bytes_of("base") } }, {}, {});
@@ -1156,9 +1156,9 @@ static int test_export() {
 	mod.expansion = "jxm";
 	mod.export_dir = p.dir.file("mod");
 	TEST_EXPECT(export_build(mod).ok);
-	TEST_EXPECT(fs::is_regular_file(mod.export_dir + "/expansion/jxm/jxm.pff") &&
-	            fs::is_regular_file(mod.export_dir + "/expansion/jxm/jxmL.pff") &&
-	            fs::is_regular_file(mod.export_dir + "/expansion/jxm/intro.bik") && !fs::exists(mod.export_dir + "/language.pff"));
+	TEST_EXPECT(fs::is_regular_file(system_path(mod.export_dir + "/expansion/jxm/jxm.pff")) &&
+	            fs::is_regular_file(system_path(mod.export_dir + "/expansion/jxm/jxmL.pff")) &&
+	            fs::is_regular_file(system_path(mod.export_dir + "/expansion/jxm/intro.bik")) && !fs::exists(system_path(mod.export_dir + "/language.pff")));
 	TEST_EXPECT(opennova::io::read_file_text(mod.export_dir + "/" + kExportRecordFileName, text, error) &&
 	            opennova::io::json_parse(text, record, error) && record.get_string("expansion", "") == "jxm");
 	// The expansion over the standalone game's export: the earlier export's files the build no longer
@@ -1166,8 +1166,8 @@ static int test_export() {
 	ExportRequest over = mod;
 	over.export_dir = request.export_dir;
 	shipped = export_build(over);
-	TEST_EXPECT(shipped.ok && fs::is_regular_file(over.export_dir + "/expansion/jxm/jxm.pff") &&
-	            !fs::exists(over.export_dir + "/language.pff") && fs::is_regular_file(over.export_dir + "/notes.txt"));
+	TEST_EXPECT(shipped.ok && fs::is_regular_file(system_path(over.export_dir + "/expansion/jxm/jxm.pff")) &&
+	            !fs::exists(system_path(over.export_dir + "/language.pff")) && fs::is_regular_file(system_path(over.export_dir + "/notes.txt")));
 	TEST_EXPECT(std::find(shipped.removed.begin(), shipped.removed.end(), "language.pff") != shipped.removed.end() &&
 	            shipped.kept == std::vector<std::string>{"notes.txt"});
 	return 0;
@@ -1224,7 +1224,7 @@ static int test_steps_are_bounded() {
 	TEST_EXPECT(upward && largest <= budget);
 	TEST_EXPECT(run.bytes_done() == run.bytes_total());
 	TEST_EXPECT(run.items_done() == run.items_total());
-	TEST_EXPECT(fs::file_size(fs::path(run.report().build_dir) / "big.sbf") == big);
+	TEST_EXPECT(fs::file_size(system_path(run.report().build_dir + "/big.sbf")) == big);
 	return 0;
 }
 
@@ -1250,7 +1250,7 @@ static int test_cancel_publishes_nothing() {
 	run.cancel();
 	TEST_EXPECT(run.done() && run.cancelled() && !run.report().ok && run.report().diagnostics.empty());
 	TEST_EXPECT(run.report().build_dir.empty() && staging_dirs(p.output_root()) == 0);
-	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == first.build_dir && fs::is_directory(first.build_dir));
+	TEST_EXPECT(editor_test::last_good_build_dir(p.output_root()) == first.build_dir && fs::is_directory(system_path(first.build_dir)));
 	TEST_EXPECT(run.step(16) && run.cancelled()); // a cancelled run stays done
 	size_t builds = 0;
 	for (const fs::directory_entry &entry : fs::directory_iterator(p.output_root()))
@@ -1327,20 +1327,20 @@ static int test_cleanup_keeps_its_proof() {
 	const BuildReport second = run_build(p.plan(), p.output_root());
 	fs::current_path(was);
 	TEST_EXPECT(second.ok);
-	if (fs::exists(first.build_dir))
-		TEST_EXPECT(fs::is_regular_file(fs::path(first.build_dir) / kBuildRecordFileName));
+	if (fs::exists(system_path(first.build_dir)))
+		TEST_EXPECT(fs::is_regular_file(system_path(first.build_dir + "/" + kBuildRecordFileName)));
 	// Its content again, once it can go: pruned and built again, not refused.
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "a change, then another"));
 	const BuildReport third = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(third.ok);
 	// A staging name taken by what is no staging directory: the next name, the foreign one left as it is.
 	const std::string foreign = p.output_root() + "/" + third.build_id + kBuildStagingSuffix;
-	fs::remove_all(third.build_dir);
-	fs::create_directories(foreign);
+	fs::remove_all(system_path(third.build_dir));
+	fs::create_directories(system_path(foreign));
 	TEST_EXPECT(test_io::write_text(foreign + "/mine.txt", "not a build"));
 	const BuildReport again = run_build(p.plan(), p.output_root());
 	for (const Diagnostic &d : again.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
-	TEST_EXPECT(again.ok && again.build_id == third.build_id && fs::is_regular_file(foreign + "/mine.txt"));
+	TEST_EXPECT(again.ok && again.build_id == third.build_id && fs::is_regular_file(system_path(foreign + "/mine.txt")));
 	return 0;
 }
 
@@ -1392,7 +1392,7 @@ static int test_file_rewritten_mid_read_fails() {
 				offset = total;
 				source = entry.source_path;
 			}
-			total += fs::file_size(entry.source_path);
+			total += fs::file_size(system_path(entry.source_path));
 		};
 		bool packed = false;
 		for (const BuildArchive &archive : plan.archives)
@@ -1518,7 +1518,7 @@ static int test_unknown_kinds_are_left_out() {
 	const BuildPlan plan = p.plan();
 	TEST_EXPECT(plan.ok && !in_build(plan, notes) && !in_build(plan, "sketch.blend") && in_build(plan, "field.nq8"));
 	const BuildReport report = run_build(plan, p.output_root());
-	TEST_EXPECT(report.ok && !fs::exists(fs::path(report.build_dir) / notes));
+	TEST_EXPECT(report.ok && !fs::exists(system_path(report.build_dir + "/" + notes)));
 	opennova::Vfs vfs;
 	TEST_EXPECT(vfs.mount_game(report.build_dir, std::string(), opennova::VfsMountMode::Packed,
 	                           opennova::VfsArchiveDiscovery::RetailTable));
@@ -1567,9 +1567,9 @@ static int test_project_notes_are_left_out_silently() {
 	for (const char *name : {"README.md", "SOURCES.md", "LICENSE", "todo.txt", "blob"}) TEST_EXPECT(!in_build(plan, name));
 	TEST_EXPECT(in_build(plan, "earlyerr.txt") && in_build(plan, "_VIDTEST.TXT"));
 	const BuildReport report = run_build(plan, p.output_root());
-	TEST_EXPECT(report.ok && fs::exists(fs::path(report.build_dir) / "earlyerr.txt") &&
-	            fs::exists(fs::path(report.build_dir) / "_VIDTEST.TXT"));
-	TEST_EXPECT(!fs::exists(fs::path(report.build_dir) / "README.md") && !fs::exists(fs::path(report.build_dir) / "LICENSE"));
+	TEST_EXPECT(report.ok && fs::exists(system_path(report.build_dir + "/earlyerr.txt")) &&
+	            fs::exists(system_path(report.build_dir + "/_VIDTEST.TXT")));
+	TEST_EXPECT(!fs::exists(system_path(report.build_dir + "/README.md")) && !fs::exists(system_path(report.build_dir + "/LICENSE")));
 	return 0;
 }
 
@@ -1595,12 +1595,12 @@ static int test_hash_cache() {
 	for (const BuildArchive &archive : plan.archives)
 		for (const BuildEntry &entry : archive.entries) ++files, bytes += entry.size_bytes;
 	for (const BuildEntry &entry : plan.loose) ++files, bytes += entry.size_bytes;
-	TEST_EXPECT(!fs::exists(p.paths.build_cache_file));
+	TEST_EXPECT(!fs::exists(system_path(p.paths.build_cache_file)));
 	const BuildReport first = run_build(plan, p.output_root());
 	TEST_EXPECT(first.ok && first.files_hashed == files && first.bytes_hashed == bytes && files > 4);
 	std::printf("editor_project_build: a project of %zu files (%llu bytes) built, every file read; ", files,
 	            static_cast<unsigned long long>(bytes));
-	TEST_EXPECT(fs::is_regular_file(p.paths.build_cache_file));
+	TEST_EXPECT(fs::is_regular_file(system_path(p.paths.build_cache_file)));
 
 	const BuildReport again = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(again.ok && again.reused_existing && again.files_hashed == 0 && again.bytes_hashed == 0);
@@ -1609,7 +1609,7 @@ static int test_hash_cache() {
 	            editor_test::backdate(p.root + "/strings/menutxt.bin", std::chrono::minutes(50)));
 	const BuildReport changed = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(changed.ok && !changed.reused_existing && changed.build_id != first.build_id);
-	TEST_EXPECT(changed.files_hashed == 1 && changed.bytes_hashed == fs::file_size(p.root + "/strings/menutxt.bin"));
+	TEST_EXPECT(changed.files_hashed == 1 && changed.bytes_hashed == fs::file_size(system_path(p.root + "/strings/menutxt.bin")));
 	TEST_EXPECT(changed.archives_written == std::vector<std::string>{"language.pff"});
 	TEST_EXPECT(changed.archives_reused == std::vector<std::string>({"localres.pff", "resource.pff"}));
 	TEST_EXPECT(changed.archives_linked == changed.archives_reused);
@@ -1759,11 +1759,11 @@ static int test_export_removal_keeps_its_record() {
 		TEST_EXPECT(game.held());
 		removed = remove_tree(folder, reason);
 		if (!removed)
-			TEST_EXPECT(fs::is_regular_file(folder + "/" + kExportRecordFileName) && !fs::exists(folder + "/video") &&
+			TEST_EXPECT(fs::is_regular_file(system_path(folder + "/" + kExportRecordFileName)) && !fs::exists(system_path(folder + "/video")) &&
 			            !reason.empty());
 	}
 	TEST_EXPECT(removed || remove_tree(folder, reason));
-	TEST_EXPECT(!fs::exists(folder));
+	TEST_EXPECT(!fs::exists(system_path(folder)));
 	return 0;
 }
 
@@ -1908,16 +1908,16 @@ static int test_shared_folder() {
 	const BuildReport same = run_build(planned(b, "project-b"), shared);
 	bool said = false;
 	for (const Diagnostic &d : same.diagnostics) said = said || d.message.find("another project's build of the same files") != std::string::npos;
-	TEST_EXPECT(!same.ok && said && fs::is_directory(first_a.build_dir));
+	TEST_EXPECT(!same.ok && said && fs::is_directory(system_path(first_a.build_dir)));
 	// b with files of its own: built beside a's, which it names and leaves.
 	TEST_EXPECT(write_bank(b.root + "/music/menumus.sbf", 0, 0x21) != 0);
 	const BuildReport first_b = run_build(planned(b, "project-b"), shared);
-	TEST_EXPECT(first_b.ok && first_b.build_id != first_a.build_id && fs::is_directory(first_a.build_dir));
+	TEST_EXPECT(first_b.ok && first_b.build_id != first_a.build_id && fs::is_directory(system_path(first_a.build_dir)));
 	TEST_EXPECT(first_b.others == std::vector<std::string>({first_a.build_id}));
 	// a changed: its own last build pruned, b's left and named.
 	TEST_EXPECT(write_bank(a.root + "/music/menumus.sbf", 0, 0x3F) != 0);
 	const BuildReport second_a = run_build(planned(a, "project-a"), shared);
-	TEST_EXPECT(second_a.ok && !fs::exists(first_a.build_dir) && fs::is_directory(first_b.build_dir));
+	TEST_EXPECT(second_a.ok && !fs::exists(system_path(first_a.build_dir)) && fs::is_directory(system_path(first_b.build_dir)));
 	TEST_EXPECT(second_a.others == std::vector<std::string>({first_b.build_id}));
 	// Unchanged: handed back, b's named still.
 	const BuildReport again = run_build(planned(a, "project-a"), shared);

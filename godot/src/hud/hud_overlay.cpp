@@ -22,6 +22,7 @@
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
 #include <formats/def/def_hudpos_write.h> // hudpos_unauthored (the layout of a file with no key)
 #include <runtime/hud/feed_format.h> // kGameTextLineColor (the 0x32 join/leave lines)
+#include <runtime/hud/hud_combat.h> // frustum_clip_mask (the label projector's clip rule)
 #include <runtime/hud/hud_lfp_panel.h> // lfp_under_attack_text / lfp_ready_text (D-25)
 #include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
 
@@ -68,8 +69,6 @@ using opennova::hud::HudDrawList;
 using opennova::hud::HudLayout;
 using opennova::hud::HudPosRecord;
 using opennova::hud::HudRectRecord;
-
-constexpr int kMinimapFootprintFeedVersion = 1;
 
 constexpr const char *kMinimapWaterShader = R"(
 shader_type canvas_item;
@@ -161,7 +160,10 @@ void HudOverlay::_bind_methods() {
     ClassDB::bind_method(D_METHOD("reset_overlay_buffers"), &HudOverlay::reset_overlay_buffers);
 	ClassDB::bind_method(D_METHOD("push_feed_line", "text", "argb"),
 			&HudOverlay::push_feed_line);
-	ClassDB::bind_method(D_METHOD("set_player_state", "ticks", "health_fraction", "stance", "fov_deg"),
+	ClassDB::bind_method(D_METHOD("set_frame_clocks", "logic_tick", "main_frame", "session_frame",
+								 "hud_frame"),
+			&HudOverlay::set_frame_clocks);
+	ClassDB::bind_method(D_METHOD("set_player_state", "health_fraction", "stance", "fov_deg"),
 			&HudOverlay::set_player_state);
 	ClassDB::bind_method(D_METHOD("set_weapon_state", "active", "clip", "reserve", "heat",
 								  "hud_spread_fp16", "aimed_shot_available",
@@ -171,11 +173,11 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_view_state);
 	ClassDB::bind_method(D_METHOD("set_objectives_header", "text"), &HudOverlay::set_objectives_header);
 	ClassDB::bind_method(
-			D_METHOD("set_scoreboard", "shown", "frame_counter", "sim", "gametext"),
+			D_METHOD("set_scoreboard", "shown", "sim", "gametext"),
 			&HudOverlay::set_scoreboard);
 	ClassDB::bind_method(D_METHOD("scoreboard_page_key", "forward", "in_session", "board_open"),
 			&HudOverlay::scoreboard_page_key);
-	ClassDB::bind_method(D_METHOD("set_chat_input", "chat", "frame", "mp_session_peer"),
+	ClassDB::bind_method(D_METHOD("set_chat_input", "chat", "mp_session_peer"),
 			&HudOverlay::set_chat_input);
 	ClassDB::bind_method(D_METHOD("reset_scoreboard_page"), &HudOverlay::reset_scoreboard_page);
 	ClassDB::bind_method(D_METHOD("set_vehicle_panel", "shown", "block", "stance", "sim"),
@@ -184,7 +186,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::push_chat_line);
 	ClassDB::bind_method(D_METHOD("post_feed_lines", "sim", "gametext", "mp_verbose"),
 			&HudOverlay::post_feed_lines);
-	ClassDB::bind_method(D_METHOD("send_command_map_chat", "sim", "all", "text", "frame"),
+	ClassDB::bind_method(D_METHOD("send_command_map_chat", "sim", "all", "text"),
 			&HudOverlay::send_command_map_chat);
 	ClassDB::bind_method(D_METHOD("render_console_messages", "item"),
 			&HudOverlay::render_console_messages);
@@ -196,7 +198,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_help_screen", "shown", "title", "page_line", "footer",
 								 "keys", "texts"),
 			&HudOverlay::set_help_screen);
-	ClassDB::bind_method(D_METHOD("set_map_legend", "shown", "title", "labels", "frame_counter"),
+	ClassDB::bind_method(D_METHOD("set_map_legend", "shown", "title", "labels"),
 			&HudOverlay::set_map_legend);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("map_legend_keys"),
 			&HudOverlay::map_legend_keys);
@@ -209,7 +211,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_message_log_title", "title"),
 			&HudOverlay::set_message_log_title);
 	ClassDB::bind_method(D_METHOD("set_lfp_panel", "shown", "game_type", "local_team",
-			"frame_counter", "gametext", "sim"), &HudOverlay::set_lfp_panel);
+			"gametext", "sim"), &HudOverlay::set_lfp_panel);
 	ClassDB::bind_method(D_METHOD("set_waypoint", "name", "distance_m",
 			"mission_position", "altitude_wu"),
 			&HudOverlay::set_waypoint, DEFVAL(Vector2()), DEFVAL(0.0f));
@@ -621,6 +623,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// The piece size comes off the border atlas's own width, not a
 		// constant [orig: the 4x4 cell grid, see docs/interface/hud-re.md].
 		layout_.box_tex_w = border.is_valid() ? border->get_width() : 0;
+		layout_.box_tex_h = border.is_valid() ? border->get_height() : 0;
 		layout_.net_icon_texture_valid = icon.is_valid();
 		// The connection indicators' other two atlases: the T/R link-error
 		// pair and the NovaWorld N (hud_frame.h kHudTexNetLinkIcon carries the
@@ -645,6 +648,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		textures_[opennova::hud::kHudTexTipGameplay] = tip_gameplay;
 		layout_.tip_box_texture_valid = tip_box.is_valid();
 		layout_.tip_box_tex_w = tip_box.is_valid() ? tip_box->get_width() : 0;
+		layout_.tip_box_tex_h = tip_box.is_valid() ? tip_box->get_height() : 0;
 		layout_.tip_keyboard_texture_valid = tip_keyboard.is_valid();
 		layout_.tip_gameplay_texture_valid = tip_gameplay.is_valid();
 	}
@@ -691,18 +695,18 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		layout_.hudls.moreav_tex_h = moreav.is_valid() ? moreav->get_height() : 0;
 	}
 
-	// The six stance frames' textures by slot (the engine resolved the
-	// HUDSTANCE ids and offsets).
-	for (int i = 0; i < 6; ++i) {
-		const Ref<Texture2D> tex =
-				load_hud_texture_(opennova::to_gd(assets.stance_textures[static_cast<size_t>(i)]),
-						ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStanceRole));
+	// The eight HUDSTANCE records' textures by slot (the six stance frames,
+	// then the team tiles; the engine resolved the ids and offsets), each with
+	// its image's own size.
+	for (int i = 0; i < opennova::hud::kHudStanceRecords; ++i) {
+		const size_t r = static_cast<size_t>(i);
+		const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.stance_textures[r]),
+				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStanceRole));
 		textures_[opennova::hud::kHudTexStance0 + i] = tex;
-		layout_.stance_texture_valid[static_cast<size_t>(i)] = tex.is_valid();
+		layout_.stance_texture_valid[r] = tex.is_valid();
+		layout_.stance_frame_w[r] = tex.is_valid() ? tex->get_width() : 0;
+		layout_.stance_frame_h[r] = tex.is_valid() ? tex->get_height() : 0;
 	}
-	const Ref<Texture2D> frame0 = textures_[opennova::hud::kHudTexStance0];
-	layout_.stance_frame0_w = frame0.is_valid() ? frame0->get_width() : 0;
-	layout_.stance_frame0_h = frame0.is_valid() ? frame0->get_height() : 0;
 
 	load_crosshair_texture_();
 	apply_crosshair_options_();
@@ -877,7 +881,7 @@ void HudOverlay::set_kill_announcement(const String &text, int64_t tick) {
 }
 
 void HudOverlay::push_message(const String &p_text) {
-	compiler_.push_message(opennova::to_std(p_text), state_.ticks);
+	compiler_.push_message(opennova::to_std(p_text), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
 
@@ -885,7 +889,7 @@ void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	// The SYSTEM feed sink (kills, joins, system lines) — the packed ARGB is
 	// stored raw and drawn as stored (engine: runtime/hud/hud_frame.cpp).
 	compiler_.push_feed_line(opennova::to_std(p_text),
-			static_cast<uint32_t>(p_argb), state_.ticks);
+			static_cast<uint32_t>(p_argb), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
 
@@ -898,10 +902,10 @@ String HudOverlay::post_feed_lines(const Ref<Simulation> &p_sim,
 	for (const opennova::hud::FeedPost &post : posts) {
 		switch (post.sink) {
 			case opennova::hud::ChatSink::System:
-				compiler_.push_feed_line(post.text, post.argb, state_.ticks);
+				compiler_.push_feed_line(post.text, post.argb, static_cast<int>(state_.main_frame));
 				break;
 			case opennova::hud::ChatSink::Chat:
-				compiler_.push_chat_line(post.text, post.argb, state_.ticks);
+				compiler_.push_chat_line(post.text, post.argb, static_cast<int>(state_.main_frame));
 				break;
 			case opennova::hud::ChatSink::Queue:
 			case opennova::hud::ChatSink::Channel3:
@@ -914,28 +918,40 @@ String HudOverlay::post_feed_lines(const Ref<Simulation> &p_sim,
 }
 
 int HudOverlay::send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all,
-		const String &p_text, int64_t p_frame) {
+		const String &p_text) {
 	if (p_sim.is_null()) return static_cast<int>(opennova::hud::ChatSendResult::Refused);
 	const int dispatch =
 			p_all ? opennova::hud::kChatDispatchGlobal : opennova::hud::kChatDispatchTeam;
 	std::string text = opennova::to_std(p_text);
 	const opennova::hud::ChatSendResult result =
-			p_sim->send_chat_line(dispatch, text, static_cast<uint32_t>(p_frame));
+			p_sim->send_chat_line(dispatch, text, state_.main_frame);
 	if (result == opennova::hud::ChatSendResult::Flooded) {
 		compiler_.push_chat_line(text, opennova::hud::chat_dispatch_flood_color(dispatch),
-				state_.ticks);
+				static_cast<int>(state_.main_frame));
 		queue_redraw();
 	}
 	return static_cast<int>(result);
 }
 
-void HudOverlay::set_player_state(int p_ticks, float p_health_fraction, int p_stance,
-		float p_fov_deg) {
-	state_.ticks = p_ticks;
+void HudOverlay::set_frame_clocks(int64_t p_logic_tick, int64_t p_main_frame,
+		int64_t p_session_frame, int64_t p_hud_frame) {
+	state_.ticks = static_cast<int>(static_cast<uint32_t>(p_logic_tick));
+	// A mission start zeroes the main-frame counter; the message rings' held
+	// lines keep the frames they had left (HudFrameCompiler::rebase_message_clock).
+	const uint32_t main_frame = static_cast<uint32_t>(p_main_frame);
+	if (main_frame < state_.main_frame)
+		compiler_.rebase_message_clock(static_cast<int>(main_frame - state_.main_frame));
+	state_.main_frame = main_frame;
+	state_.session_frame = static_cast<uint32_t>(p_session_frame);
+	state_.hud_frame = static_cast<uint32_t>(p_hud_frame);
 	// The HUD item flash countdown runs once per HUD frame on the logic
 	// tick (hud_declutter.h HudItemFlash::tick).
-	item_flash_.tick(p_ticks);
+	item_flash_.tick(state_.ticks);
 	state_.item_flash = item_flash_.timers();
+	queue_redraw();
+}
+
+void HudOverlay::set_player_state(float p_health_fraction, int p_stance, float p_fov_deg) {
 	state_.health_fraction = p_health_fraction;
 	state_.stance = p_stance;
 	state_.fov_deg = p_fov_deg;
@@ -971,8 +987,8 @@ void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<R
         const auto &v = p_view->native_frame();
         scope.active = v.scope_details_active;
         scope.scoped = v.scope_details_scoped;
-        scope.rangefinder = (v.scope_weapon_flags & 0x400u) != 0;
-        scope.zeroable = (v.scope_weapon_flags & 0x800u) != 0;
+        scope.rangefinder = v.scope_rangefinder;
+        scope.zeroable = v.scope_zeroable;
         scope.range_q16 = v.aim_range_q16;
         scope.max_range_q16 = v.scope_max_range_q16;
         scope.zero_word = v.scope_zero_word;
@@ -1021,7 +1037,7 @@ void HudOverlay::set_objectives_header(const String &p_text) {
 	state_.objectives_header = opennova::to_std(p_text);
 }
 
-void HudOverlay::set_scoreboard(bool p_shown, int p_frame_counter, const Ref<Simulation> &p_sim,
+void HudOverlay::set_scoreboard(bool p_shown, const Ref<Simulation> &p_sim,
 		const Ref<RtxtStringFile> &p_gametext) {
 	// The feed resets what it owns and fills it over the board as it stood:
 	// rows and session facts come straight from the role feed, the session
@@ -1050,20 +1066,18 @@ void HudOverlay::set_scoreboard(bool p_shown, int p_frame_counter, const Ref<Sim
 	} else {
 		board = opennova::hud::HudScoreboardState();
 	}
-	set_scoreboard_board(p_shown, p_frame_counter, p_gametext, board);
+	set_scoreboard_board(p_shown, p_gametext, board);
 }
 
-void HudOverlay::set_scoreboard_board(bool p_shown, int p_frame_counter, const Ref<RtxtStringFile> &p_gametext,
+void HudOverlay::set_scoreboard_board(bool p_shown, const Ref<RtxtStringFile> &p_gametext,
 		const opennova::hud::HudScoreboardState &p_board) {
 	// The board as prepared, then what the overlay owns of it: whether it is
-	// up, the 4-team page clock (the shell's 62 Hz HUD tick, the same fold and
-	// the same frame-rate caveat as the LFP panel's blink counter below), and
-	// the drawers' own gametext (class names, the team-score labels, the
-	// flag-carrier label) through the engine's key table.
+	// up and the drawers' own gametext (class names, the team-score labels,
+	// the flag-carrier label) through the engine's key table. Its 4-team page
+	// alternates on the frame's session frame counter (set_frame_clocks).
 	opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	sb = p_board;
 	sb.shown = p_shown;
-	sb.frame_counter = p_frame_counter;
 	const opennova::hud::ScoreboardText text =
 			opennova::hud::scoreboard_text(game_text_lookup(p_gametext));
 	sb.class_names = text.class_names;
@@ -1080,8 +1094,7 @@ PackedStringArray HudOverlay::get_scoreboard_header_text() const {
 	return out;
 }
 
-void HudOverlay::set_chat_input(const Ref<HudChatEntry> &p_chat, int64_t p_frame,
-		bool p_mp_session_peer) {
+void HudOverlay::set_chat_input(const Ref<HudChatEntry> &p_chat, bool p_mp_session_peer) {
 	opennova::hud::HudChatInputState &ci = state_.chat_input;
 	const bool shown = p_chat.is_valid() && p_chat->is_capturing();
 	if (!shown && !ci.shown) return;
@@ -1091,7 +1104,6 @@ void HudOverlay::set_chat_input(const Ref<HudChatEntry> &p_chat, int64_t p_frame
 		ci.prompt = entry.prompt();
 		ci.text = entry.text();
 		ci.color = opennova::hud::chat_input_line_color(entry.open_dispatch(), p_mp_session_peer);
-		ci.frame = static_cast<uint32_t>(p_frame);
 	}
 	queue_redraw();
 }
@@ -1171,13 +1183,8 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 			silhouette->get_height() > 0;
 	vp.silhouette_w = vp.silhouette_valid ? silhouette->get_width() : 0;
 	vp.silhouette_h = vp.silhouette_valid ? silhouette->get_height() : 0;
-	// The base is the HUDVEHSTANCEPOS anchor plus the rider's HUDSTANCE
-	// offset — the panel rides the stance icon.
-	const int stance = CLAMP(p_stance, 0, 5);
-	vp.anchor_x = layout_.veh_stance_pos.x;
-	vp.anchor_y = layout_.veh_stance_pos.y;
-	vp.stance_offset_x = layout_.stance_offset_x[static_cast<size_t>(stance)];
-	vp.stance_offset_y = layout_.stance_offset_y[static_cast<size_t>(stance)];
+	// The base rides the stance icon (the engine's hud::set_vehicle_panel_anchor).
+	opennova::hud::set_vehicle_panel_anchor(layout_, p_stance, vp);
 	// Hull band + seat rows straight from the sim's feed, no script round-trip
 	// (the state from the args, the rows from the sim; a null sim leaves the
 	// rows empty). The panel's one witnessed gate
@@ -1199,7 +1206,7 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 
 void HudOverlay::push_chat_line(const String &p_text, int64_t p_argb) {
 	compiler_.push_chat_line(opennova::to_std(p_text),
-			static_cast<uint32_t>(p_argb), state_.ticks);
+			static_cast<uint32_t>(p_argb), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
 
@@ -1214,15 +1221,13 @@ void HudOverlay::set_message_log_title(const String &p_title) {
 }
 
 void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
-		int p_frame_counter, const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim) {
+		const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim) {
 	opennova::hud::HudLfpPanelState &lp = state_.lfp_panel;
 	lp.local_team = p_local_team;
-	// The blink clock the marker masks (`& 0x18`). The shell feeds the 62 Hz
-	// HUD tick here; retail's g_HUDFrameCounter increments once per MAIN FRAME
-	// [orig: Game_ProcessMainFrame @0x5265d5 -> Game_TickHudFrameCounters
-	// @0x434c23, see docs/interface/hud-re.md], so retail's blink is
-	// frame-rate dependent and matches this fold only at 62 fps.
-	lp.frame_counter = p_frame_counter;
+	// The marker's blink (`& 0x18`) reads the frame's HUD frame counter
+	// (set_frame_clocks), stepped once per logic tick outside the pause and
+	// the epilog screen [orig: Game_ProcessMainFrame @0x5265d5 ->
+	// Game_TickHudFrameCounters @0x434c23].
 	// The compiler's element branches on it (the unmodelled conquest arm).
 	lp.game_type = static_cast<uint32_t>(p_game_type);
 	const opennova::hud::GameTextLookup gametext = game_text_lookup(p_gametext);
@@ -1256,8 +1261,9 @@ void HudOverlay::clear_waypoint() {
 namespace {
 
 // The play camera's projection of a world point to overlay pixels: false when
-// the point is behind the near plane (Camera3D::is_position_behind's test),
-// else Camera3D::unproject_position's math over the viewport's visible size.
+// the point is behind the near plane (Camera3D::is_position_behind's test) or
+// past a side plane (any flag of the engine's hud::frustum_clip_mask), else
+// Camera3D::unproject_position's math over the viewport's visible size.
 bool project_to_overlay(const Transform3D &p_camera, const Projection &p_projection,
 		const Vector2 &p_viewport_size, const Vector3 &p_world, Vector2 &r_screen) {
 	const Vector3 eyedir = -p_camera.basis.get_column(2).normalized();
@@ -1270,6 +1276,9 @@ bool project_to_overlay(const Transform3D &p_camera, const Projection &p_project
 		return false;
 	}
 	p.normal /= p.d;
+	if (opennova::hud::frustum_clip_mask(p.normal.x, p.normal.y, false) != 0) {
+		return false;
+	}
 	r_screen = Vector2((p.normal.x * 0.5f + 0.5f) * p_viewport_size.x,
 			(-p.normal.y * 0.5f + 0.5f) * p_viewport_size.y);
 	return true;
@@ -1313,7 +1322,10 @@ void HudOverlay::set_attach_labels(const Transform3D &p_camera_xform,
 			Vector2 screen;
 			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
 						world_pos, screen)) {
-				continue; // [orig: HUD_ClipPointToFrustumAndProject nonzero = clipped @0x5a3655]
+				// [orig: HUD_DrawVehicleSeatAndArmoryLabels -- HUD_ClipPointToFrustumAndProject,
+				//  then `test eax,eax; jnz` past the label: the seat loop @0x5a3655..0x5a365f,
+				//  the armory loop @0x5a3879..0x5a3883]
+				continue;
 			}
 			opennova::hud::HudAttachLabel label;
 			label.screen_x = screen.x;
@@ -1377,18 +1389,21 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 			float anchor[3];
 			opennova::hud::friendly_tag_anchor(position, t.eye_offset_z, anchor);
 			const Vector3 world_pos = mission_to_godot(anchor);
+			// A clipped anchor bails in the compiler, unless the death screen pins
+			// it (HudFriendlyTag::projected) [orig: HUD_DrawEntityLabel
+			// @0x5a3b7e..0x5a3b80].
 			Vector2 screen;
-			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
-						world_pos, screen)) {
-				continue; // [orig: the nonzero-clip bail @0x5a3b80]
-			}
 			opennova::hud::HudFriendlyTag tag;
+			tag.projected = project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
+					world_pos, screen);
 			tag.screen_x = screen.x;
 			tag.screen_y = screen.y;
 			tag.dist_q16 = opennova::io::float_to_fp16_16_sat(
 					p_camera_xform.origin.distance_to(world_pos));
 			tag.name = t.name;
-			tag.entity_id = t.net_id;
+			tag.entity_id = t.fallback_name_id;
+			tag.handle = static_cast<uint16_t>(t.entity.packed);
+			tag.team = t.team;
 			tag.health_ratio_fp16 = t.health_ratio_fp16;
 			tag.medic = t.medic;
 			// The speaking pulse is the overlay's own env feed, not a sim fact.
@@ -1650,36 +1665,10 @@ int HudOverlay::get_radar_frame_gates() const {
 }
 
 void HudOverlay::set_minimap_footprints(const PackedInt32Array &p_feed) {
-	// {version, count} then per row {handle, fill_argb, fill_value_count,
-	// xy..., edge_value_count, xy...} — mission 16.16 world space, baked
+	// The engine's footprint feed (hud::minimap_footprint_feed_decode), baked
 	// once per mission by the sim feed.
-	state_.map_footprints.clear();
-	if (p_feed.size() < 2 || p_feed[0] != kMinimapFootprintFeedVersion) {
-		queue_redraw();
-		return;
-	}
-	const int64_t total = p_feed.size();
-	int64_t cursor = 2;
-	const int32_t rows = p_feed[1];
-	for (int32_t row = 0; row < rows; ++row) {
-		if (cursor + 3 > total) break;
-		opennova::hud::HudMinimapFootprint footprint;
-		footprint.handle = static_cast<uint16_t>(p_feed[cursor++]);
-		footprint.fill_argb = static_cast<uint32_t>(p_feed[cursor++]);
-		const int32_t fill_values = p_feed[cursor++];
-		if (fill_values < 0 || cursor + fill_values > total) break;
-		footprint.fill_xy_q16.reserve(static_cast<size_t>(fill_values));
-		for (int32_t i = 0; i < fill_values; ++i)
-			footprint.fill_xy_q16.push_back(p_feed[cursor++]);
-		if (cursor + 1 > total) break;
-		const int32_t edge_values = p_feed[cursor++];
-		if (edge_values < 0 || cursor + edge_values > total) break;
-		footprint.edge_xy_q16.reserve(static_cast<size_t>(edge_values));
-		for (int32_t i = 0; i < edge_values; ++i)
-			footprint.edge_xy_q16.push_back(p_feed[cursor++]);
-		opennova::hud::hud_minimap_finalize_footprint(footprint);
-		state_.map_footprints.push_back(std::move(footprint));
-	}
+	opennova::hud::minimap_footprint_feed_decode(p_feed.ptr(), static_cast<size_t>(p_feed.size()),
+			state_.map_footprints);
 	queue_redraw();
 }
 

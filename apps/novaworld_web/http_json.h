@@ -23,6 +23,11 @@ inline crow::response json_reply(int code, const crow::json::wvalue &body) {
 	return res;
 }
 
+// A path's id as a row id; 0 (no row's) past int64.
+inline int64_t path_id(uint64_t id) {
+	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
+}
+
 // A reply no cache may keep.
 inline crow::response no_store(crow::response res) {
 	res.set_header("Cache-Control", "no-store");

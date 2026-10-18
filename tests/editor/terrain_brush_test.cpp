@@ -254,7 +254,7 @@ int test_half() {
 	return 0;
 }
 
-// The original editor's depth pixel [orig: JOTACmed.exe sub_4228B0]: the column's texel in its sector, the second axis
+// The original editor's depth pixel [orig: JOTACmed.exe MapView_GetDepthPixelAtCursor]: the column's texel in its sector, the second axis
 // down the map one further (wrapping in the sector), the quadrant the sector's id places; (0, 0) over an empty sector.
 int test_depth_pixel() {
 	int grid[16 * 16] = {};

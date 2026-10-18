@@ -769,7 +769,7 @@ int main() {
 				"an open iris gate re-targets the modulator");
 	}
 
-	// --- sun veil: the dot^32 white-quad alpha + modulator-2 stop-down ------
+	// --- sun veil: the dot^16 white-quad alpha + dot^64 modulator-2 stop-down
 	// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610; the veil submit +
 	//  modulator-2 writer Environment_ApplySunVeilAndExposureStopdown
 	//  @ 0x5ad8b0].
@@ -787,6 +787,23 @@ int main() {
 				sun_veil_from_dot(0x10000, 176, 0, 0x8000);
 		ok &= expect(half_overcast.glare == 66,
 				"the overcast fold halves the veil at 0.5");
+		// Off-axis the powers matter: the veil reads dot^16 (`imul eax, ebp`
+		// @ 0x5ad7a5 on the fourth square @ 0x5ad7a1) and the stop-down dot^64
+		// (two more squares @ 0x5ad7c1..0x5ad7e9, scaled @ 0x5ad7ed..0x5ad7fc).
+		// The view dot 64788 is the 00TRa 09:00 sun pose, 8.7 degrees off
+		// axis: retail's bloom-pass glare there read UPL 5868 live (2026-10-17,
+		// g_CtrlGlobalUplIntensity @ 0x83FDE8), which Render_SkyboxSunGlow(0, 0)'s
+		// (fog_km + 1) x 0.5 x dot^4 / 2 >> 2 at the 500 u fog serves for this
+		// dot [orig: @ 0x5ad013..0x5ad03c]. At the settled occlusion brightness
+		// 128 (g_GlareOcclusionBrightness @ 0x27E2E30, read live) retail's
+		// modulator-2 target read 0x333333 (g_EnvModulator2Target @ 0x26C66A4):
+		// 64 - (3 * 9 >> 1) = 51, the stop-down 9 below.
+		const opennova::env::SunVeil sun_pose = sun_veil_from_dot(64788, 128, 0, 0);
+		ok &= expect(sun_pose.glare == 79 && sun_pose.stopdown == 9,
+				"8.7 degrees off axis at brightness 128 serves veil 79 / stop-down 9 "
+				"(dot^16 and dot^64, not dot^32 and dot^128's 66 / 4)");
+		ok &= expect(64 - ((3 * sun_pose.stopdown) >> 1) == 51,
+				"the stop-down targets modulator-2 at retail's live 0x333333");
 		const opennova::env::SunVeil away = sun_veil_from_dot(-0x8000, 256, 0, 0);
 		ok &= expect(away.glare == 0 && away.stopdown == 0,
 				"looking away from the sun serves no veil");
@@ -1351,6 +1368,13 @@ int main() {
 		rungs = opennova::env::mission_water_rungs(none, 0.0f, false);
 		ok &= expect(!rungs.has_mission_override && rungs.mission_override == 0.0f && !rungs.has_loaded_terrain,
 				"an unflagged header sets no override");
+		// The live Water node holds the override in world units (C-45): the same rungs.
+		const opennova::env::WaterHeightRungs held = opennova::env::water_height_rungs(12.0f, 10.5f, true);
+		ok &= expect(held.has_mission_override && held.mission_override == 12.0f && held.terrain_height == 10.5f &&
+						held.has_loaded_terrain,
+				"a held world-unit override makes the same rungs");
+		ok &= expect(!opennova::env::water_height_rungs(std::nullopt, 0.0f, false).has_mission_override,
+				"none held, no override");
 
 		opennova::env::Config with_height;
 		with_height.water_height = 30.0f;

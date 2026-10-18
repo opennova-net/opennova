@@ -831,7 +831,6 @@ public:
     std::vector<int32_t> target_set_calls; // recorded Entity_SetAITarget net-ids (@0x45d760)
     uint32_t prng_a = 0;    // [orig: dword_31BFBB8] engagement fire-delay jitter stream
 	int32_t aircraft_turn_sequence = -1; // [orig: dword_815190]
-	uint16_t fire_shot_seq = 0; // per-shot sequence word [orig: word_B7C670]
 
 	// dword_31BFBB8 owns this independent rotate LCG. PRNG_Next16's shared
     // dword_31BFBB0 owner lives on World so non-AI consumers cannot fork it.
@@ -943,13 +942,20 @@ public:
     // own AiSlot+136 = 2 and each ally's brain alert = 2.
     void alert_nearby_allies(World &world, AiEntity &e, int32_t radius);
 
-    // AI fire -> the authoritative round path (the Entity_FireWeaponAndSendPacket @0x42bd80
-    // authority leg): ring append (the S2C 0x0A tag-2 fan-out) + RoundSim spawn — the same
-    // pair the C2S 0x06 player path enters. Host-only (callers are authority-gated).
-    // [orig: WeaponSlot_FireAndSpawnEffects @0x53f440 -> Server_ClientFiredRound @0x50baa0
-    // ring append + RoundData_SpawnRound @0x4ec0d0; net-re §5.60]
+    // An AI gunner's slot fire -> the authoritative round path (the
+    // Entity_FireWeaponAndSendPacket @0x42bd80 authority leg): ring append (the S2C 0x0A
+    // tag-2 fan-out) + RoundSim spawn, the same pair the C2S 0x06 player path enters.
+    // The record takes the slot's fire action's adm-indexed arm: `fire_mode` the
+    // action's mode byte, `fire_adm` the slot's weapon, the gunner (the slot's owner)
+    // the shooter. Host-only (the caller is authority-gated). An aircraft's or a
+    // handler's fire is Weapon_FireProcess, RoundSim::fire_source.
+    // [orig: WeaponAction_Fire - the mode byte @0x542C11, the adm @0x542C1C..0x542C2F,
+    //  Entity_FireWeaponAndSendPacket @0x542C5E -> Server_ClientFiredRound's local pass
+    //  (the flags and adm into the ring @0x50C780..0x50C790) -> RoundData_AddRound
+    //  @0x4fdb40 + RoundData_SpawnRound @0x4ec0d0; net-re §5.60]
     bool fire_ai_round(World &world, AiEntity &e, const int32_t origin[3], int32_t yaw_bam,
-                       int32_t pitch_bam, int32_t ammo_index);
+                       int32_t pitch_bam, int32_t ammo_index, int32_t fire_mode,
+                       uint8_t fire_adm);
 
     // The SM/turret fire-transform solve [orig: Entity_ComputeWeaponFireTransform_0
     // @0x456980 — the D-AI-2 core]. Solves the muzzle origin + aim toward `target`

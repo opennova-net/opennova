@@ -684,7 +684,7 @@ void clamp_graphics_options(GameCfg &cfg) {
 			v = hi;
 	};
 	clamp(cfg.terrain_polydetail, 0, 3);
-	clamp(cfg.terrain_texdetail, 0, 3);
+	clamp(cfg.terrain_texdetail, 0, 3); // @0x54D4C2..0x54D4D7
 	clamp(cfg.object_polydetail, 0, 3);
 	clamp(cfg.object_texdetail, 0, 3);
 	clamp(cfg.water_quality, 1, 3);

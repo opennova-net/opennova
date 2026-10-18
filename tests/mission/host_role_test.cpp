@@ -109,6 +109,7 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 			inmatch::HostConfig cfg;
 			cfg.title = &kJo;
 			cfg.config = inmatch::singleplayer_game_config(options.game_type, nullptr);
+			cfg.config.allow_sniper_scope_zoom = true;
 			cfg.socket_mode = mode;
 			cfg.serve_and_play = true;
 			inmatch::HostBringup bringup;
@@ -128,6 +129,13 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		}
 		CHECK(kernel.world.rules.no_friendly_fire);
 		CHECK(!kernel.world.rules.auto_scope_zero);
+		// The sniper-zoom rule is the config's in a session alone [orig:
+		//  Game_ApplySessionSettingsToGlobals @0x552284 / @0x5522B9].
+		CHECK(kernel.world.rules.allow_sniper_scope_zoom ==
+				(mode != inmatch::SocketMode::Socketless));
+		// The fill reads the config's own value out of a session, the rule in one
+		// [orig: WeaponSlot_InitFromDef @0x53EF07..0x53EF25].
+		CHECK(kernel.world.rules.sniper_zoom_fill);
 	}
 }
 
@@ -353,6 +361,24 @@ int main() {
 		role.run_tick(tick_input(768));
 		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 768u);
 		CHECK(kernel.world.logic_tick == tick0 + 9);
+
+		// No input frame runs under a menu screen: the deferred ToSpecial queue
+		// is not flushed there, and is once the frame runs again.
+		// [orig: Game_ProcessMainFrame @0x52660D; Input_FlushDeferredEvents's one
+		//  caller @0x49D591]
+		{
+			kernel.local.to_special_queued = 2;
+			inmatch::TickInput menu = tick_input(0);
+			menu.consume_one_shots = true;
+			menu.player.held_action_bits = inmatch::HELD_MENU_OPEN;
+			role.apply_input(menu);
+			CHECK(kernel.local.to_special_queued == 2);
+			inmatch::TickInput live = tick_input(0);
+			live.consume_one_shots = true;
+			role.apply_input(live);
+			CHECK(kernel.local.to_special_queued < 2);
+			kernel.local.to_special_queued = 0;
+		}
 
 		// The local gameplay drain consumes reloads while preserving movement
 		// for Server_TickUpdate's dedicated uplink decoder.

@@ -24,7 +24,10 @@ in maturity_baseline.json:
                         no src/ level) with zero "[orig" citations, excluding
                         the allowlisted infra libs (citation is inapplicable
                         there) -- the faithful-port rule's coverage floor.
-  godot_orig_cites      "[orig:" citations across the whole Godot side --
+                        An allowlist row that exempts no uncited file is
+                        stale and fails --enforce (delete it): a file it
+                        names that loses its cites must be counted.
+  godot_orig_cites     "[orig:" citations across the whole Godot side --
                         godot/src C++ plus the godot/game, godot/editor and godot/probes GDScript -- as ONE count (ADR 0043 merged
                         the former adapter_cpp_orig_cites / gd_orig_cites
                         pair). A cite moves freely between the two Godot-side
@@ -67,11 +70,15 @@ in maturity_baseline.json:
                         ADR 0041 / ADR 0043 d12). Each is a record that
                         crosses untyped (ADR 0017); typed records burn it down.
   godot_src_dictionary_params
-                        Binding parameters (`p_` by Godot's convention) of type
-                        Dictionary or TypedArray<Dictionary> in godot/src/**/*.h:
+                        Parameters of type Dictionary or TypedArray<Dictionary>
+                        on the methods godot/src binds (ClassDB::bind_method /
+                        bind_static_method), whatever their names, found in
+                        the bound class's declaration in godot/src/**/*.h:
                         the INPUT half of godot_src_dictionary_returns, the
                         untyped records GDScript still hands a binding (ADR 0017,
-                        ADR 0042 d5). Non-increasing from its 2026-10-15 seed.
+                        ADR 0042 d5); a C++-only helper is no seam.
+                        Non-increasing from its 2026-10-15 seed (re-seeded
+                        2026-10-17 when it moved off the `p_` name convention).
   godot_src_dictionary_returns
                         Binding methods declared to return Dictionary or
                         TypedArray<Dictionary> in godot/src/**/*.h -- the seams
@@ -86,7 +93,8 @@ in maturity_baseline.json:
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
   --enforce         exit 1 if any counter exceeds its baseline (the ratchet)
-                    OR sits below it unbanked
+                    OR sits below it unbanked, or a
+                    citation_allowlist_engine row is stale
   --write-baseline  rewrite the baseline to current counts (maintainer
                     action for a bump, logged in docs/maturity-program.md;
                     the slice's own action for a decrease)
@@ -235,8 +243,10 @@ def count_gd_test_production_subclasses() -> int:
     return count
 
 
-def count_engine_uncited_src_files(allowlist: set[str]) -> int:
+def engine_uncited_src_files(allowlist: set[str]) -> tuple[int, list[str]]:
+    """(the uncited files no allowlist row covers, the rows that cover no uncited file)."""
     count = 0
+    live: set[str] = set()
     engine = REPO / "engine"
     # engine/<group>/<lib>: the libs are one level below the four group dirs.
     # Post-flatten (2026-08-10) sources sit directly in the lib dir (nested
@@ -247,21 +257,25 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
     # codec); docs/maturity-program.md records why each is there.
     prefixes = tuple(entry for entry in allowlist if "/" in entry)
     for lib_dir in sorted(p for p in engine.glob("*/*") if p.is_dir()):
-        if lib_dir.name in allowlist:
-            continue
         for path in lib_dir.rglob("*"):
             if path.suffix.lower() not in (".c", ".cc", ".cpp"):
-                continue
-            rel = path.relative_to(engine).as_posix()
-            if any(rel == prefix or rel.startswith(prefix.rstrip("/") + "/") for prefix in prefixes):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            if "[orig:" not in text:
+            if "[orig:" in text:
+                continue
+            rel = path.relative_to(engine).as_posix()
+            covering = [prefix for prefix in prefixes
+                        if rel == prefix or rel.startswith(prefix.rstrip("/") + "/")]
+            if lib_dir.name in allowlist:
+                covering.append(lib_dir.name)
+            if covering:
+                live.update(covering)
+            else:
                 count += 1
-    return count
+    return count, sorted(allowlist - live)
 
 
 # One cite marker, one count (ADR 0042 d7 + ADR 0043): a witness citation is
@@ -529,27 +543,91 @@ GODOT_FIXED_DICTIONARY_VIRTUALS = {"_get_line_syntax_highlighting"}
 GODOT_OVERRIDE_SPECIFIER = re.compile(r"\)\s*(const\s*)?override\s*;")
 
 
-GODOT_SRC_DICTIONARY_PARAM = re.compile(
-    r"(?:\(|,)\s*(?:const\s+)?(?:TypedArray<Dictionary>|Dictionary)\s*&?\s*p_\w+")
+GODOT_BIND_CALL = re.compile(r"ClassDB::bind_(?:static_)?method\s*\(")
+GODOT_BOUND_TARGET = re.compile(r"&\s*(\w+)::(\w+)")
+GODOT_CLASS_MACRO = re.compile(r"\bGDCLASS\s*\(\s*(\w+)\s*,")
+# A member named and opened (`name(`), not a call through an object or a qualified definition.
+GODOT_MEMBER_OPEN = re.compile(r"(?<![\w:.>])(\w+)\s*\(")
+GODOT_DICTIONARY_PARAM = re.compile(r"\s*(?:const\s+)?(?:TypedArray<Dictionary>|Dictionary)\s*&?\s*\w+")
+CPP_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def _parenthesized(text: str, start: int) -> str:
+    """The text from `start` (just past an opening parenthesis) to its matching close."""
+    depth, i = 1, start
+    while depth and i < len(text):
+        depth += (text[i] == "(") - (text[i] == ")")
+        i += 1
+    return text[start:i - 1]
+
+
+def _top_level_args(params: str) -> list[str]:
+    """A parameter list split at its top-level commas (`Vector3(0, 0, 0)` defaults and
+    template arguments stay whole)."""
+    out, depth, cur = [], 0, []
+    for c in params:
+        depth += (c in "(<{") - (c in ")>}")
+        if c == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+    out.append("".join(cur))
+    return out
+
+
+def godot_bound_methods(sources: list[str]) -> dict[str, set[str]]:
+    """Class -> the C++ methods `ClassDB::bind_method` / `bind_static_method` bind for it
+    (the `&Class::method` each call names), over comment-stripped sources."""
+    bound: dict[str, set[str]] = {}
+    for text in sources:
+        for call in GODOT_BIND_CALL.finditer(text):
+            targets = GODOT_BOUND_TARGET.findall(_parenthesized(text, call.end()))
+            if targets:
+                cls, method = targets[-1]
+                bound.setdefault(cls, set()).add(method)
+    return bound
+
+
+def godot_bound_dictionary_params(header: str, bound: dict[str, set[str]]) -> list[tuple[str, str]]:
+    """(Class::method, parameter) per Dictionary / TypedArray<Dictionary> parameter of a
+    bound method declared in this comment-stripped header: each class's span runs from its
+    GDCLASS to the next one, and a declaration wrapped over lines is one parameter list."""
+    out = []
+    classes = list(GODOT_CLASS_MACRO.finditer(header))
+    for k, macro in enumerate(classes):
+        names = bound.get(macro.group(1))
+        if not names:
+            continue
+        end = classes[k + 1].start() if k + 1 < len(classes) else len(header)
+        span = header[macro.end():end]
+        for member in GODOT_MEMBER_OPEN.finditer(span):
+            if member.group(1) not in names:
+                continue
+            for param in _top_level_args(_parenthesized(span, member.end())):
+                if GODOT_DICTIONARY_PARAM.match(param):
+                    out.append(("%s::%s" % (macro.group(1), member.group(1)), param.strip()))
+    return out
 
 
 def count_godot_src_dictionary_params() -> int:
-    """Binding parameters of type Dictionary / TypedArray<Dictionary> (`p_` names, Godot's
-    binding convention; an `r_` out-parameter or a helper's `d` is no input seam) in
-    godot/src/**/*.h, one per parameter: the untyped records GDScript hands a binding.
-    ADR 0043 G11 left two such setters; the gauge keeps the count from regrowing. A
-    declaration wrapped so a parameter opens its line counts too (the leading `(`)."""
-    count = 0
-    for path in (REPO / "godot" / "src").rglob("*.h"):
-        if _in_build_dir(path.relative_to(REPO).parts):
+    """Dictionary / TypedArray<Dictionary> parameters of the methods godot/src binds, one
+    per parameter, whatever its name (an unbound C++-only helper taking a Dictionary is no
+    seam): the untyped records GDScript hands a binding. ADR 0043 G11 left two such
+    setters; the gauge keeps the count from regrowing."""
+    headers, sources = [], []
+    for path in (REPO / "godot" / "src").rglob("*"):
+        if path.suffix not in (".h", ".cpp") or _in_build_dir(path.relative_to(REPO).parts):
             continue
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = CPP_COMMENT.sub("", path.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
-        for line in text.splitlines():
-            count += len(GODOT_SRC_DICTIONARY_PARAM.findall("(" + line.split("//", 1)[0]))
-    return count
+        sources.append(text)
+        if path.suffix == ".h":
+            headers.append(text)
+    bound = godot_bound_methods(sources)
+    return sum(len(godot_bound_dictionary_params(text, bound)) for text in headers)
 
 
 def count_godot_src_dictionary_returns() -> int:
@@ -618,11 +696,12 @@ def main() -> int:
     config = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     allowlist = set(config.get("citation_allowlist_engine", []))
     baseline = config.get("counters", {})
+    uncited, stale_allowlist = engine_uncited_src_files(allowlist)
 
     current = {
         "test_private_pokes": count_test_private_pokes(),
         "gd_test_production_subclasses": count_gd_test_production_subclasses(),
-        "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
+        "engine_uncited_src_files": uncited,
         "godot_orig_cites": count_godot_orig_cites(),
         "engine_stdout_prints": count_engine_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
@@ -697,13 +776,19 @@ def main() -> int:
             failed = True
             print(f"[ratchet]   improvement, bank it in this change: "
                   f"python scripts/lint/ratchet_counts.py --write-baseline")
+    print(f"[ratchet] citation_allowlist_engine: {len(allowlist)} rows, "
+          f"{len(stale_allowlist)} stale {'OK' if not stale_allowlist else 'STALE'}")
+    for entry in stale_allowlist:
+        print(f"[ratchet]   {entry}: exempts no uncited file (its files cite, or it is gone); "
+              f"delete the row from maturity_baseline.json")
+        failed = True
 
     if failed and args.enforce:
         print("[ratchet] FAIL: a counter increased, fell without being banked, lacks a "
-              "baseline, or sits above an absolute floor. Fix the regression, bank an "
-              "improvement with --write-baseline (named in the commit), or (baseline "
-              "counters only) a maintainer bumps the baseline and logs it in "
-              "docs/maturity-program.md.")
+              "baseline, or sits above an absolute floor, or a citation allowlist row is "
+              "stale. Fix the regression, bank an improvement with --write-baseline (named "
+              "in the commit), delete the stale row, or (baseline counters only) a "
+              "maintainer bumps the baseline and logs it in docs/maturity-program.md.")
         return 1
     return 0
 

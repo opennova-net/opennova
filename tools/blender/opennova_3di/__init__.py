@@ -1349,37 +1349,6 @@ class O3D_OT_preview_weapon(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class O3D_OT_merge_weapon_def(bpy.types.Operator, ImportHelper):
-    bl_idname = "opennova_3di.merge_weapon_def"
-    bl_label = "Merge into weapon.def"
-    bl_description = ("Set the weapon entries' timing and view keys in a copy of a weapon.def, written as a new file "
-                      "(opennova-3di weapon merge); every other byte of the def stays as it was")
-    filename_ext = ".def"
-    filter_glob: StringProperty(default="*.def", options={"HIDDEN"})
-    output: StringProperty(name="Write to", subtype="FILE_PATH", default="",
-                           description="The merged weapon.def; empty: <the def's name>_merged.def beside it")
-
-    @classmethod
-    def poll(cls, context):
-        model = clip_model(context)
-        return model is not None and len(model.o3d.weapons) > 0
-
-    def execute(self, context):
-        model = clip_model(context)
-        source = bpy.path.abspath(self.filepath)
-        stem, ext = os.path.splitext(source)
-        target = bpy.path.abspath(self.output) if self.output else f"{stem}_merged{ext}"
-        try:
-            said, notes = weapon.merge(context, model, source, target)
-        except ExportError as e:
-            self.report({"ERROR"}, str(e))
-            return {"CANCELLED"}
-        for note in notes:
-            self.report({"WARNING"}, note)
-        self.report({"INFO"}, said)
-        return {"FINISHED"}
-
-
 def draw_weapon(layout, model):
     """A first-person gun's weapon.def side: its entries, its view cameras,
     the last preview while it is current, and what writes the edits."""
@@ -1405,7 +1374,6 @@ def draw_weapon(layout, model):
             box.label(text=text, icon="ERROR" if warn else "NONE")
     elif weapon._previews.get(model.name_full) is not None:
         box.label(text="The timing changed: preview again", icon="INFO")
-    box.operator("opennova_3di.merge_weapon_def", icon="FILE_TEXT")
     box.label(text="Export Animations writes <table>_weapon_edits.txt")
 
 
@@ -1957,7 +1925,7 @@ CLASSES = (O3DTrack, O3DAdmVariant, O3DAdmRow, O3DWeaponEntry, O3DActionProps, O
            O3D_OT_export_anim, O3D_OT_export_all_anim, O3D_OT_import_anim, O3D_OT_add_row,
            O3D_OT_remove_row, O3D_OT_add_variant, O3D_OT_remove_variant,
            O3D_OT_assign_weapon_action, O3D_OT_timing_marker, O3D_OT_trigger_marker, O3D_OT_edit_clip,
-           O3D_OT_add_weapon_entry, O3D_OT_remove_weapon_entry, O3D_OT_preview_weapon, O3D_OT_merge_weapon_def,
+           O3D_OT_add_weapon_entry, O3D_OT_remove_weapon_entry, O3D_OT_preview_weapon,
            O3D_PT_action, O3D_PT_action_raw, O3D_PT_scene, O3D_PT_object, O3D_PT_bone, O3D_PT_light,
            O3D_PT_material)
 

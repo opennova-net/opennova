@@ -7,6 +7,8 @@
 #include "mission_records.h"
 #include "bms_edit.h"
 
+#include <formats/mission/mission_chains.h>
+
 #include <formats/mission/authoring.h> // entity_kind_for_item_type: items.def TYPE -> BMS pool
 
 #include <algorithm>
@@ -214,7 +216,8 @@ void set_header_packed_rgb(uint8_t rgb[3], uint32_t packed) {
 	rgb[2] = static_cast<uint8_t>(packed & 0xFF);
 }
 
-bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error) {
+bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, MisDefaultKit &kit,
+                                   std::string &error) {
 	bms::Header &header = file.header;
 	for (++pos; pos < lines.size(); ++pos) {
 		const MisLine &line = lines[pos];
@@ -313,6 +316,9 @@ bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &po
 		} else if (key == "bonus_expiration") {
 			if (!token_u32(line, 1, u32, error)) return false;
 			header.bonus_expiration = static_cast<uint16_t>(u32);
+		} else if (key == "default_primary" || key == "default_secondary" || key == "default_accessory") {
+			// The value as it stands, "" where the line gives none [orig: JOTACmed.exe MIS_ParseToken @ 0x451caa..0x451d4c].
+			kit[key == "default_primary" ? 0 : key == "default_secondary" ? 1 : 2] = t.size() > 1 ? t[1] : std::string();
 		} else if (key == "subgoals_win" && t.size() >= 9) {
 			for (size_t i = 0; i < 8; ++i) {
 				if (!token_i32(line, i + 1, i32, error)) return false;
@@ -428,7 +434,7 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 				                                         "\" is no group name: " + why});
 		} else if (t.size() >= 2 && t[0] == "attrib") {
 			// The record's flags @0 and its value @8, as the original editor's .bms writer stores a group's
-			// attrib and commander [orig: JOTACmed.exe sub_44F920 @0x44f920, the group @0x450940..0x4509b4].
+			// attrib and commander [orig: JOTACmed.exe MIS_ExportBmsFile @0x44f920, the group @0x450940..0x4509b4].
 			if (!token_i32(line, 1, value, error)) return false;
 			record.flags = value;
 		} else if (t.size() >= 2 && t[0] == "commander") {
@@ -447,7 +453,7 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 // JOTACmed.exe MIS_ParseToken
 // @0x450e50, the section @ 0x450faa -> @ 0x4510b3 (N unchecked), the description @ 0x453e61, the
 // file name
-// @ 0x453eb0, any other key failing the load @ 0x453e88; sub_44F920 @ 0x4509bc..0x450a14]. A slot
+// @ 0x453eb0, any other key failing the load @ 0x453e88; MIS_ExportBmsFile @ 0x4509bc..0x450a14]. A slot
 // outside 0..31 is none of the table's (the original's copy runs past its 32), and a file name past
 // the record's 16 bytes (the original's export runs into its stack; 16 characters fill it, no NUL
 // kept): each reported, the one skipped, the other cut.
@@ -508,9 +514,9 @@ bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, std::string
 // `begin areatrig N`: N is the area's zone id, the original editor's slot, and `attrib` its flags
 // (MISSION_AREA 1, constrain-Z 2), which the original's .bms writer stores at @28; `color` is the
 // editor's alone [orig: JOTACmed.exe MIS_ParseToken @0x450e50, the section @0x4510a9, its keys
-// @0x4540ac..0x454144; sub_44F920
+// @0x4540ac..0x454144; MIS_ExportBmsFile
 // @0x44f920, the area @0x450a16..0x450ab3]. The original's .mis has a slot per zone id 1..99 (its
-// writer's loop @0x454d11..0x454daf, its rebuild's range sub_44D240 @0x44d2a9): a number outside
+// writer's loop @0x454d11..0x454daf, its rebuild's range MissionDocument_RebuildAreasFromMarkers @0x44d2a9): a number outside
 // them makes no area, and a second section of a number goes to the first's area, as the original's
 // slot, each reported. The area has its bounds from the 6013 items of its id (rebuild_mis_areas,
 // D-MIS-14); one of none is made none.
@@ -551,25 +557,59 @@ bool parse_mis_area_trigger(const std::vector<MisLine> &lines, size_t &pos, bms:
 	return false;
 }
 
+// A triggers or actions section of an event: its rows up to its `end`, whatever its declared count. The original
+// editor's reader stores the declared count and fills a slot per row until the `end`, never comparing the two
+// [orig: JOTACmed.exe MIS_ParseToken, the count @ 0x453ac5, the slot index reset @ 0x453acd, a row's slot
+// @ 0x453b87, the `end` @ 0x453b59], and its .bms export writes the count's low byte and the full count's records
+// from the event's slots [orig: MIS_ExportBmsFile, the byte @ 0x450b78, the records @ 0x450c08]. So the run the event
+// keeps is the one the game reads of that byte (triggers_read, actions_read): the rows past it left out, the slots
+// past the rows as a fresh document's event holds them, zero. Its event holds 20 slots of each, 32 bytes apiece
+// [orig: MIS_ParseToken, the slot @ 0x453b84, the triggers' @ 0x453b99, the actions' 640 bytes on @ 0x453c6f, an
+// event's 1372 bytes @ 0x453b6a..0x453b8d], and a row's slot is never bounded (@ 0x453b81): a section past 20 runs
+// over the slots after it (a trigger's over the event's actions, an action's past the event), which the editor's
+// edits never make (kMaxEventChainEntries). `issues` (optional) names a section whose rows are not that run, and
+// one of more rows than the 20 slots.
 bool parse_mis_nested_records(const std::vector<MisLine> &lines,
                               size_t &pos,
                               const std::string &section,
-                              int32_t expected_count,
+                              int32_t declared,
                               bms::File &file,
-                              std::string &error) {
-	int32_t parsed = 0;
+                              std::string &error,
+                              std::vector<MisIssue> *issues) {
+	const bool triggers = section == "triggers";
+	std::vector<bms::Trigger> trigger_rows;
+	std::vector<bms::Action> action_rows;
+	const size_t begun = pos < lines.size() ? lines[pos].line_no : 0;
 	for (++pos; pos < lines.size(); ++pos) {
 		const MisLine &line = lines[pos];
 		const std::vector<std::string> &t = line.tokens;
 		if (t.size() >= 2 && t[0] == "end" && t[1] == section) {
-			if (parsed != expected_count) {
-				error = "MIS " + section + " count mismatch in line " + std::to_string(line.line_no);
-				return false;
+			const uint8_t byte = static_cast<uint8_t>(declared);
+			const size_t keep = triggers ? triggers_read(byte) : actions_read(byte);
+			const size_t rows = triggers ? trigger_rows.size() : action_rows.size();
+			if (rows != keep)
+				note(issues, begun,
+				     "the " + section + " section declares " + std::to_string(declared) + " and holds " +
+				             std::to_string(rows) + (rows == 1 ? " row" : " rows") + ": the original editor keeps the count, the "
+				             "game reading " + std::to_string(keep) + (keep == 1 ? " record" : " records") +
+				             (rows > keep ? " (the rows past them left out)" : " (the records past the rows zero)"));
+			if (rows > kMaxEventChainEntries)
+				note(issues, begun,
+				     "the " + section + " section runs past the original editor's 20 " +
+				             std::string(triggers ? "trigger" : "action") + " slots: it writes "
+				             "a row past them over " + (triggers ? "the event's actions" : "the event after it") +
+				             ", and its export the records from there; read here as the rows are written");
+			if (triggers) {
+				trigger_rows.resize(keep, bms::Trigger{});
+				file.triggers.insert(file.triggers.end(), trigger_rows.begin(), trigger_rows.end());
+			} else {
+				action_rows.resize(keep, bms::Action{});
+				file.actions.insert(file.actions.end(), action_rows.begin(), action_rows.end());
 			}
 			++pos;
 			return true;
 		}
-		if (section == "triggers") {
+		if (triggers) {
 			if (t.size() < 8) {
 				error = "MIS trigger row is too short in line " + std::to_string(line.line_no);
 				return false;
@@ -587,7 +627,7 @@ bool parse_mis_nested_records(const std::vector<MisLine> &lines,
 			trigger.param3 = values[5];
 			trigger.param4 = values[6];
 			trigger.unknown7 = values[7];
-			file.triggers.push_back(trigger);
+			trigger_rows.push_back(trigger);
 		} else {
 			if (t.size() < 8) {
 				error = "MIS action row is too short in line " + std::to_string(line.line_no);
@@ -606,9 +646,8 @@ bool parse_mis_nested_records(const std::vector<MisLine> &lines,
 			action.param4 = values[5];
 			action.action_sub_type = values[6];
 			action.reserved1 = values[7];
-			file.actions.push_back(action);
+			action_rows.push_back(action);
 		}
-		++parsed;
 	}
 	error = "MIS " + section + " block is missing its end marker";
 	return false;
@@ -620,12 +659,20 @@ bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 	bms::Event event = {};
 	event.trigger_index = static_cast<int32_t>(file.triggers.size());
 	event.action_index = static_cast<int32_t>(file.actions.size());
+	int32_t declared_triggers = 0, declared_actions = 0; // a section's count as written
+	bool triggers_declared = false, actions_declared = false;
 	for (++pos; pos < lines.size();) {
 		const MisLine &line = lines[pos];
 		const std::vector<std::string> &t = line.tokens;
 		if (t.size() >= 2 && t[0] == "end" && t[1] == "event") {
 			event.trigger_count = static_cast<uint8_t>(file.triggers.size() - static_cast<size_t>(event.trigger_index));
 			event.action_count = static_cast<uint8_t>(file.actions.size() - static_cast<size_t>(event.action_index));
+			// A section's declared count is the event's byte, as the original editor stores it and its export writes
+			// its low byte (parse_mis_nested_records): a byte of 128..255 over the run the game reads of it too (D-10:
+			// the zone resolvers read a trigger byte of 128..255 as no run, where 1 resolves the first trigger's zone
+			// [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000, @0x453029]).
+			if (triggers_declared) event.trigger_count = static_cast<uint8_t>(declared_triggers);
+			if (actions_declared) event.action_count = static_cast<uint8_t>(declared_actions);
 			file.events.push_back(event);
 			++pos;
 			return true;
@@ -645,10 +692,14 @@ bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 			++pos;
 		} else if (t.size() >= 3 && t[0] == "begin" && t[1] == "triggers") {
 			if (!token_i32(line, 2, value, error)) return false;
-			if (!parse_mis_nested_records(lines, pos, "triggers", value, file, error)) return false;
+			if (!parse_mis_nested_records(lines, pos, "triggers", value, file, error, issues)) return false;
+			declared_triggers = value;
+			triggers_declared = true;
 		} else if (t.size() >= 3 && t[0] == "begin" && t[1] == "actions") {
 			if (!token_i32(line, 2, value, error)) return false;
-			if (!parse_mis_nested_records(lines, pos, "actions", value, file, error)) return false;
+			if (!parse_mis_nested_records(lines, pos, "actions", value, file, error, issues)) return false;
+			declared_actions = value;
+			actions_declared = true;
 		} else {
 			if (t[0] != "name") unknown_key(issues, line, "event " + std::to_string(number));
 			++pos;
@@ -801,9 +852,9 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 		} else if (key == "waccuracy2") {
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.w_accuracy2 = static_cast<int16_t>(v);
-		} else if (key == "perception2" || key == "perception") { // one word each [orig: @0x452aad, @0x452b08]
+		} else if (key == "perception2" || key == "perception") { // one word each [orig: JOTACmed.exe MIS_ParseToken @0x452aad]
 			if (!token_i32(line, 1, entity.perception2, error)) return false;
-		} else if (key == "perfectionist2" || key == "perfectionist") {
+		} else if (key == "perfectionist2" || key == "perfectionist") { // [orig: JOTACmed.exe MIS_ParseToken @0x452b08]
 			if (!token_i32(line, 1, entity.perfectionist2, error)) return false;
 		} else if (key == "movetimer") {
 			if (!token_i32(line, 1, v, error)) return false;
@@ -870,8 +921,10 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 } // namespace
 
 bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &resolve_item_type,
-                           bms::File &out, std::string &error, std::vector<MisIssue> *issues) {
+                           bms::File &out, std::string &error, std::vector<MisIssue> *issues,
+                           const MisWeaponTable *weapons) {
 	initialize_mis_file(out);
+	MisDefaultKit kit = kMisResetKit; // a slot no line names keeps the original's reset kit
 	// The heights as the file holds them (bms::MisFrame::Mis): mis_items_to_bms_frame takes them
 	// to the .bms's over the terrain.
 	out.mis_frame = bms::MisFrame::Mis;
@@ -884,7 +937,7 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 		}
 		const std::string &section = t[1];
 		if (section == "general_information") {
-			if (!parse_mis_general_information(lines, pos, out, error)) return false;
+			if (!parse_mis_general_information(lines, pos, out, kit, error)) return false;
 		} else if (section == "weapon_availability") {
 			if (!skip_mis_section(lines, pos, "weapon_availability", error)) return false;
 		} else if (section == "briefing") {
@@ -916,6 +969,8 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 		}
 	}
 	rebuild_mis_areas(out);
+	// The loadout chunk the original's .bms export builds from the kit (D-MIS-19).
+	out.loadout = mis_default_loadout(kit, weapons);
 	return true;
 }
 

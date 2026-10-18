@@ -92,7 +92,7 @@ const ActionRow kRows[] = {
 	{"NVG", {Action::NightVision}, Gate::Active},
 	{"nvggainup", {Action::NvgGain, 1}, Gate::Active},
 	{"nvggaindown", {Action::NvgGain, -1}, Gate::Active},
-	// F7; the value is replaced by the Shift direction when the row fires.
+	// F7; the value is replaced by the fire's sign (fire_signed) when the row fires.
 	// [orig: row 51 = dispatch 23 @0x49b3de]
 	{"NextWaypoint", {Action::WaypointCycle, 1}, Gate::Active},
 };
@@ -114,8 +114,13 @@ PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
 
 // USE ages before the action rows: LAST frame's hold governs digit swallowing,
 // including a digit arriving on the release frame. A fresh press clears the
-// consumed flag; a shell chord applies after that clear. An inactive gameplay
-// frame cancels the chain, so closing an overlay cannot toggle a mount.
+// consumed flag; a shell chord applies after that clear. Every input frame
+// ages the latch and runs the release edge, an inactive one too (the death
+// and stat screens run input frames); only a menu screen runs none
+// (PlayerActionPoll::menu_open).
+// [orig: Game_ProcessMainFrame @0x52661D and UI_TeardownScene's tail
+//  @0x54E695 (the DEATH / STAT gate dword_2551128), the two callers of
+//  Input_ProcessFrame]
 // The special-key chain's digit arms, first open wins: the held-USE seat pick,
 // then the Emotes menu, then the Radio menu; a digit an arm takes never
 // reaches the binding rows (the swallow in poll()).
@@ -129,10 +134,27 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 		PlayerActionFrame &frame) {
 	use_held_prev_ = use_latched_;
 	use_latched_ = false;
-	if (!gate.active) use_held_prev_ = false;
-	if (gate.active && source.pressed("useitem")) {
-		if (!use_held_prev_) use_hold_consumed_ = false;
-		use_latched_ = true;
+	// The held row runs case 0xB1 on every frame a key is down, under the
+	// row's mode word (bit 1 alive, bit 2 the death screen): its arm comes
+	// through the press latch, and only the mount chain sets the hold latch,
+	// so a frame whose arm leaves the chain ends the hold as a release does
+	// (the armory opens first, then the release edge's toggle).
+	// [orig: Input_ProcessAnalogBindings @0x4995F0 -- the keys @0x499635, the
+	//  mode word @0x49963E..0x499650; case 0xB1 @0x4E0A82, the mount chain
+	//  @0x4E0B5E..0x4E0B71]
+	const bool use_admitted = !gate.death_screen || (row_modes("useitem") & 2u) != 0;
+	// A key held through a menu close's reset reads up in the device's key
+	// state (KeyStateReset), so the row reads it up too.
+	const bool use_down = source.pressed("useitem");
+	if (gate.active && use_admitted && use_down) {
+		const UseItemPressArm arm = gate.take_use_item_arm ? gate.take_use_item_arm()
+		                                                   : UseItemPressArm::kMountChain;
+		if (arm == UseItemPressArm::kMountChain) {
+			if (!use_held_prev_) use_hold_consumed_ = false;
+			use_latched_ = true;
+		} else if (arm == UseItemPressArm::kOpenArmory) {
+			frame.requests.push_back({Action::OpenArmory});
+		}
 	}
 	if (use_consume_pending_) {
 		use_hold_consumed_ = true;
@@ -168,6 +190,8 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 
 PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const PlayerActionPoll &gate) {
 	PlayerActionFrame frame;
+	// No input frame runs under a menu screen (PlayerActionPoll::menu_open).
+	if (gate.menu_open) return frame;
 	sample_use(source, gate, frame);
 	const bool captured = gate.active && gate.captured;
 	// Fire held+edge, reload raw edge (refusal belongs to the sim), ADS toggle
@@ -194,16 +218,28 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	//  (the index byte @0x49C3BA, the entry @0x49C32C) -> case 55 @0x49B20B]
 	frame.respawn_edge = world::latched_key_edge(
 			admitted("respawn") && source.pressed("respawn"), gate.active, respawn_was_down_);
-	// ToSpecial's held state is the binding sampler's, its keys under the
-	// scan's first match (BindingSet::pressed_key); the handler itself reads
-	// the keys raw (g_InputState.keyState), and a release whose press another
-	// row took is D-CTRL-9's. An edge dispatches only with captured gameplay
-	// input and under the death screen's binding scan, like the other weapon
-	// rows, and the latch follows the keys regardless.
-	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
-	frame.to_special_held = source.pressed("ToSpecial");
-	frame.to_special_edge = frame.to_special_held != to_special_was_down_ && captured &&
-			admitted("ToSpecial") && gate.simulation_available;
+	// ToSpecial's latch and held state follow its keys by the key state alone
+	// (keys_down), which the handler reads raw (g_InputState.keyState): a key
+	// held through the death (its row scan-gated, @0x49D332..0x49D348)
+	// releases at its key-up, not at the death, and a key held through an open
+	// text line (its events the line's) gives no press when the line closes.
+	// A press dispatches only on the sampler's fire (pressed(), which reads a
+	// keyboard key up under the line, never a mouse button), with captured
+	// gameplay input and under the death screen's binding scan, like the other
+	// weapon rows. The release pass has neither gate: a key whose press latch
+	// is set and that reads up dispatches its release row whenever the input
+	// frame runs, over a screen too, unless an open text line holds the
+	// keyboard, which clears the latch without the dispatch. A release whose
+	// press another row took is D-CTRL-9's.
+	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181;
+	//  Input_ProcessKeyboardEvents, the latch set @0x49D2ED, the release pass
+	//  @0x49D249..0x49D2B9 (the capture-mode skip of the queue @0x49D29F)]
+	frame.to_special_held = source.keys_down("ToSpecial");
+	if (frame.to_special_held && !to_special_was_down_)
+		frame.to_special_edge = source.pressed("ToSpecial") && captured &&
+				admitted("ToSpecial") && gate.simulation_available;
+	else if (!frame.to_special_held && to_special_was_down_)
+		frame.to_special_edge = !gate.keyboard_captured && gate.simulation_available;
 	to_special_was_down_ = frame.to_special_held;
 	for (std::size_t i = 0; i < std::size(kRows); ++i) {
 		const auto &row = kRows[i];
@@ -225,7 +261,10 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		if (world::latched_key_edge(down, active && !swallowed, rows_[i].down) &&
 				gate.simulation_available) {
 			PlayerActionRequest request = row.request;
-			if (request.action == Action::WaypointCycle && source.shift_down()) request.value = -1;
+			// NextWaypoint (code 23) reads the fire's sign: back when signed
+			// [orig: Input_HandleActionBinding case 23 @0x49B3DE..0x49B44D].
+			if (request.action == Action::WaypointCycle && source.fire_signed(row.token))
+				request.value = -1;
 			frame.requests.push_back(request);
 		}
 	}
@@ -262,6 +301,10 @@ void PlayerActions::reset() {
 
 void PlayerActions::consume_use_hold() {
 	use_consume_pending_ = true;
+}
+
+void PlayerActions::clear_key_press_latches() {
+	to_special_was_down_ = false;
 }
 
 int WheelRemainder::feed(int32_t delta) {

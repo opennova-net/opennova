@@ -86,7 +86,7 @@ int chat_talk_row_dispatch(int row) {
 	return row >= 0 && row < kChatTalkRowCount ? kTalkRows[row].dispatch : -1;
 }
 
-uint32_t ChatEntry::poll_rows(uint32_t rows_down, bool active, bool chorded,
+uint32_t ChatEntry::poll_rows(uint32_t rows_down, bool active,
 		const ChatEntryFacts &facts, const GameTextLookup &gametext) {
 	const bool open = active && !capturing() && !key_consumed_;
 	key_consumed_ = false;
@@ -95,7 +95,7 @@ uint32_t ChatEntry::poll_rows(uint32_t rows_down, bool active, bool chorded,
 		const bool down = (rows_down & (1u << row)) != 0u;
 		// The latch follows the ungated key state; once a row opened the
 		// capture, the later rows' keys belong to the editor.
-		if (rows_[static_cast<size_t>(row)].step(down, open, chorded) && !capturing())
+		if (rows_[static_cast<size_t>(row)].step(down, open) && !capturing())
 			events |= dispatch(kTalkRows[row].dispatch, facts, gametext);
 	}
 	return events;

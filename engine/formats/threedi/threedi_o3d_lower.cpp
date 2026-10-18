@@ -9,8 +9,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+#include <set>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <base/io/strutil.h>
@@ -55,7 +58,7 @@ ThreediTargetLimits threedi_retail_limits() {
 	// large: max(VRAM / 8, 8 MB) over at most eight), indices into the static
 	// pool's 0x100000-byte buffers or the dynamic pool's (at least 0x80000:
 	// max(VRAM / 64, 1.5 MB) over at most four). The lock refuses a range past
-	// its buffer, and the LOD is left unfilled [orig: allocate_lod_gpu_buffers
+	// its buffer, and the LOD is left unfilled [orig: CEffectWorld_AllocateLODGPUBuffers
 	// @ 0x5B2610, the requests @0x5B26CC, @0x5B2752, @0x5B27F3, @0x5B2882;
 	// CParticleSystem_Init_Wrapper @ 0x5876D0, the pool sizes; GStaticVB_Lock
 	// @ 0x6840D0, the bound @0x6840E0; the IB twin GStaticIB_Lock @ 0x684430, the bound
@@ -74,7 +77,7 @@ ThreediTargetLimits threedi_retail_limits() {
 	// GHDR's count, so a ninth LOD's pointer lands in the first threshold's
 	// slot [orig: ThreediGp_LoadFromFile @ 0x5B5B84..0x5B5BE5;
 	// GPM_LoadRenderModel @ 0x5B56F8, the block at loader + 0x204 + 56 x
-	// level; allocate_lod_gpu_buffers @ 0x5B2637]. A model's materials are one
+	// level; CEffectWorld_AllocateLODGPUBuffers @ 0x5B2637]. A model's materials are one
 	// allocation of the MTRL count, each strip naming its own by a dword
 	// index, so no count bounds them [orig: ThreediGp_LoadFromFile @ 0x5B59C3;
 	// GPM_LoadRenderModel @ 0x5B5184].
@@ -83,9 +86,12 @@ ThreediTargetLimits threedi_retail_limits() {
 	// bone table entry, LGHT and OOBJ), and a PANM parent of -1 is the byte
 	// 255.
 	l.parts = {255};
-	// GHDR and USRP give a name 16 bytes; 15 keeps the NUL the loader's C
-	// strings end on (no JO name is longer than 9, so nothing witnesses how
-	// an unterminated one reads).
+	// GHDR and USRP give a name 16 bytes, which the loader copies to its NUL:
+	// the model's with strcpy into 16 bytes before the LOD count it wrote
+	// first, which an unterminated name overruns [orig: ThreediGp_LoadFromFile
+	// @ 0x5b5780, the count @ 0x5b597b, the strcpy @ 0x5b597e]; each user
+	// point's byte by byte into its 48-byte record's last 16 [orig: @ 0x5b5b04
+	// ..0x5b5b1d]. So 15 characters and the NUL.
 	l.model_name = {15};
 	l.user_point_name = {15};
 	l.shader = {32};
@@ -108,11 +114,47 @@ ThreediTargetLimits threedi_retail_limits() {
 	// indices [orig: Physics_RaycastAgainstBoneCollision @ 0x4E5079].
 	l.section_vertices = {kWholePartReach};
 	l.section_normals = {kWholePartReach};
-	// An occlusion record's edge words index its vertices in 7 bits, and the
-	// runtime's occlusion clip mask is a 32-bit word per record
-	// (runtime/world/occlusion.cpp).
+	// An occlusion record's edge words index its vertices in 7 bits. An
+	// occluder's distinct front-facing planes go into a 128-entry stack list
+	// with no bound, its 129th over the frame's security cookie, which ends
+	// the game [orig: Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the
+	// list var_104 the store @ 0x5b3711 fills, the cookie checked @ 0x5b3a6b;
+	// reached from Terrain_BuildPortalOccluderPlanes @ 0x5c44c0]. The list
+	// takes a face's plane byte (@ 0x5b3580) once (@ 0x5b36f2..0x5b370a), so
+	// what bounds a record is the distinct planes its faces name, 128 (a plane
+	// no face names is never listed). (The portal walk's 32-bit clip mask is
+	// over the caller's planes, not the record's [orig:
+	// Render_VisibilityPortalTraversal @ 0x5c4ae0, @ 0x5c4c7c..0x5c4e05].) A
+	// face names its plane in a byte: planes 0..255.
 	l.occlusion_vertices = {128};
-	l.occlusion_planes = {32};
+	l.occlusion_planes = {128};
+	l.occlusion_face_plane = {256};
+	// A back-facing face's three edge words go into the silhouette list, a
+	// 128-word stack list var_204 below the front list: an edge already listed
+	// (its low 15 bits, the vertex pair) is taken out, any other appended with
+	// no bound [orig: Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the
+	// compare @ 0x5b3680..0x5b3690, the store @ 0x5b36b2], its 129th over the
+	// front list and its 257th over the frame's security cookie (@ 0x5b3a6b).
+	// The list never holds more than the distinct edges the record's faces
+	// name, so 128 of them a record. (No shipped record names more than 48:
+	// Cbunker1's, the 2026-10 review's sweep of the 806 JOCA records.)
+	l.occlusion_edges = {128};
+	// A frame keeps 14 portal occluders, the type 0 and 1 records in view (a
+	// slot takes no other type [orig: Terrain_CollectVisibleSectorUserpoints
+	// @ 0x5c6ddd], the count clamped to 14 after the priority sort [orig:
+	// Terrain_SortPortalSlotsByPriority @ 0x5c44a2..0x5c44a4, called before
+	// each build @ 0x5c9188 / @ 0x5c912c]). Their silhouette edges and front
+	// planes, 16-byte rows, go into two 0x1C00-byte arenas a frame, 448 rows
+	// each, one slot after another with no bound [orig:
+	// Terrain_BuildPortalOccluderPlanes @ 0x5c44c0: the arenas 0x2980570 and
+	// 0x2982170 @ 0x5c44d5 / @ 0x5c44d0, handed to the record's walk
+	// @ 0x5c4518 / @ 0x5c450c, stepped by its counts @ 0x5c4561 / @ 0x5c4563];
+	// the face arena's 449th row lands on the slots' occluder table
+	// (0x2983D70). So a model's 14 largest such records name 448 edges, and
+	// 448 planes, at most: it alone in view fills no more. (The JOCA models
+	// name 180 and 60 at most, IBlock02's.)
+	l.occlusion_slots = {14};
+	l.occlusion_frame_rows = {448};
 	// WriteLGHT packs the rate times 256 into a u16 and the cone into a byte
 	// of whole degrees [orig: WriteLGHT @ 0x456DF0 (ModSuperOed.exe)].
 	l.light_rate = {256};
@@ -677,20 +719,61 @@ void lower_points_and_lights(Lowering &lw) {
 }
 
 void lower_occlusion(Lowering &lw) {
+	// Each portal occluder's rows at most (its distinct edges, its distinct planes), for the frame's arenas.
+	std::vector<std::pair<long long, long long>> occluders;
+	int first_occluder = 0;
 	for (const ThreediO3dOcclusion &o : lw.in.occlusion) {
+		// The planes its faces name (given planes: the reader has each face name one; derived ones stay within
+		// the exporter's 32).
+		std::set<int> named;
+		std::set<std::pair<int, int>> edges; // each face's three, a vertex pair, its direction aside
+		for (const std::array<int, 4> &f : o.faces) {
+			if (f[3] >= 0) named.insert(f[3]);
+			for (int k = 0; k < 3; ++k) edges.insert({std::min(f[k], f[(k + 1) % 3]), std::max(f[k], f[(k + 1) % 3])});
+		}
+		const int highest = named.empty() ? -1 : *named.rbegin();
 		if (!lw.part_byte(o.section, o.line, "the occlusion record's section") ||
 				!lw.part_byte(o.connecting, o.line, "the occlusion record's connecting section") ||
 				!lw.within(lw.lim.occlusion_vertices, static_cast<long long>(o.vertices.size()), o.line,
 						"the occlusion record holds " + std::to_string(o.vertices.size()) + " vertices",
 						"its edge words index them in 7 bits") ||
-				!lw.within(lw.lim.occlusion_planes, static_cast<long long>(o.planes.size()), o.line,
-						"the occlusion record holds " + std::to_string(o.planes.size()) + " planes",
-						"the runtime's occlusion clip mask is a 32-bit word per record"))
+				(highest >= 0 && !lw.within(lw.lim.occlusion_face_plane, static_cast<long long>(highest) + 1, o.line,
+						"a face of the occlusion record names plane " + std::to_string(highest),
+						"a face names its plane in a byte, planes 0 to 255")) ||
+				!lw.within(lw.lim.occlusion_planes, static_cast<long long>(named.size()), o.line,
+						"the occlusion record's faces name " + std::to_string(named.size()) + " planes",
+						"the game's occluder walk lists 128 planes at most") ||
+				!lw.within(lw.lim.occlusion_edges, static_cast<long long>(edges.size()), o.line,
+						"the occlusion record's faces name " + std::to_string(edges.size()) + " edges",
+						"the game's silhouette-edge list holds 128 edges at most"))
 			continue;
 		if (!lw.out.add_occ_record(o.type, static_cast<int>(o.section), static_cast<int>(o.connecting), o.vertices,
-					o.faces, o.planes, o.sphere_given ? &o.sphere : nullptr, static_cast<size_t>(lw.lim.occlusion_planes.max)))
-			lw.error_at(o.line, "occ: the record needs more than " + std::to_string(lw.lim.occlusion_planes.max) +
-					" planes (the runtime's occlusion clip mask is a 32-bit word per record)");
+					o.faces, o.planes, o.sphere_given ? &o.sphere : nullptr, kOedPlaneTable))
+			lw.error_at(o.line, "occ: the record's faces need more than " + std::to_string(kOedPlaneTable) +
+					" planes by the exporter's rule, whose table holds " + std::to_string(kOedPlaneTable) +
+					" [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]: give the record its planes (op lines)");
+		if (o.type <= 1) {
+			// Derived planes: at most one a face, within the exporter's table.
+			const long long planes = o.planes.empty()
+			                                 ? std::min<long long>(static_cast<long long>(o.faces.size()), kOedPlaneTable)
+			                                 : static_cast<long long>(named.size());
+			if (occluders.empty()) first_occluder = o.line;
+			occluders.push_back({static_cast<long long>(edges.size()), planes});
+		}
+	}
+	// The model's largest occluders a frame keeps, their edge rows and their face rows summed apart.
+	const size_t kept = std::min(occluders.size(), static_cast<size_t>(lw.lim.occlusion_slots.max));
+	for (const bool edges_of : {true, false}) {
+		std::vector<long long> rows;
+		for (const auto &each : occluders) rows.push_back(edges_of ? each.first : each.second);
+		std::sort(rows.begin(), rows.end(), std::greater<long long>());
+		long long sum = 0;
+		for (size_t i = 0; i < kept; ++i) sum += rows[i];
+		if (!lw.within(lw.lim.occlusion_frame_rows, sum, first_occluder,
+				"the model's " + std::to_string(kept) + " largest portal occluders name " + std::to_string(sum) +
+						(edges_of ? " edges" : " planes"),
+				std::string("one frame's ") + (edges_of ? "edge" : "face") + " rows hold 448 at most"))
+			break;
 	}
 }
 

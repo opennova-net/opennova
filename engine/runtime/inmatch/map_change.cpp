@@ -8,6 +8,7 @@
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/server_message_dispatch.h> // build_tag7b_session_summary
+#include <runtime/inmatch/server_loadout_grant.h>    // PlayerSlot_RebuildKitForRound
 #include <runtime/inmatch/server_spawn.h>            // Server_BuildPlayerInfoAndAdd
 #include <runtime/inmatch/server_team_change.h>      // the auto-balance pair
 #include <runtime/mission/mission_kernel.h>
@@ -66,12 +67,17 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 	rotation.setnext_latch = false;
 }
 
+} // namespace
+
 // A kept slot's per-mission state, back to a fresh mission's, around the
 // identity the map change keeps: the connection's keys, sequencing, clocks,
 // admission and team; the link's transport, its spectator latch and the
 // client's medic preference; the reply state's name, roster slot, ping
-// history, team-change stamp and integrity salts, and the latches that make
-// the admission's 0x04 / 0x7B boundary and the join announcement one-shot.
+// history, team-change stamp and integrity salts, the latches that make
+// the admission's 0x04 / 0x7B boundary and the join announcement one-shot,
+// and the slot's kit: its loadout buffer, ammo pools, loaded-round buckets
+// and slot table, which the reset does not store to (the round init rebuilds
+// the slot table from them), and the retained list body.
 // The burst starts over at the kept slot's next C2S 0x37 (the 0x16 push),
 // as a stock joiner's reload asks for it.
 // [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 -- the entity
@@ -106,6 +112,13 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	reply.roster_seen_gen = kept.roster_seen_gen;
 	reply.player_name = kept.player_name;
 	reply.player_slot = kept.player_slot;
+	// The kit outlives the mission [orig: the reset's stores @0x5163B2..0x516417
+	//  leave +94408 (the buffer), +88664 (the pools) and +89176 (the buckets)].
+	reply.loadout_buffer = kept.loadout_buffer;
+	reply.loadout_buffer_set = kept.loadout_buffer_set;
+	reply.ammo_pools = kept.ammo_pools;
+	reply.shared_clips = kept.shared_clips;
+	reply.last_loadout_reply = kept.last_loadout_reply;
 	conn.reply = std::move(reply);
 
 	conn.score = 0;
@@ -122,9 +135,13 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	conn.world_stream_announced = false;
 	conn.spawned_announced = false;
 	conn.burst = InitialStateBurst{};
-	conn.weapon_slots.clear();
+	// The slot table (+0x1D0) is left as well; the round init rebuilds it
+	// [orig: the reset stores +0x1CC alone @0x5163B2..0x516417;
+	//  Server_InitAllPlayerEntitiesForRound @0x516BF3..0x516C20].
 	conn.equipped_slot = NapiNPConnection::EquippedSlotRef{};
 }
+
+namespace {
 
 // [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 -- for every
 //  active slot in states 2..7 the S2C 0x25 (mask 0x20, that slot, empty
@@ -254,7 +271,15 @@ void init_all_player_entities_for_round(HostRole &role) {
 		// The slot's new entity, with the slot's class [orig: the class load
 		// @0x516B56, Entity_SpawnFromAnimSlotProperty @0x516B67 and the slot's
 		// stamps @0x516B6C..0x516C20].
-		(void)Server_BuildPlayerInfoAndAdd(ctx, *conn, world, /*round_init=*/true);
+		const world::EntityHandle h =
+				Server_BuildPlayerInfoAndAdd(ctx, *conn, world, /*round_init=*/true);
+		// Then the slot's table, rebuilt from its kept buffer. The listen host's
+		// own slot is its local inventory, which the local kit rebuilds (retail
+		// copies the host's g_SpawnLoadoutBuffer into it first, @0x516BCA..0x516BE3).
+		// [orig: @0x516BF3..0x516C20]
+		if (h.valid() && h != world.cached.local_player)
+			if (world::Entity *player = world.registry.get(h))
+				PlayerSlot_RebuildKitForRound(*conn, world, *player);
 	}
 	// Every kept slot names a new entity: the roster every in-match client
 	// holds is stale.

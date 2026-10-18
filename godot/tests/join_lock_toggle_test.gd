@@ -12,18 +12,18 @@ extends GutTest
 func test_lockgame_row_fires_the_top_bit_on_an_authority() -> void:
 	var toggles := HudToggles.new()
 	var row := 1 << HudToggles.ROW_LOCK_GAME
-	# poll(rows, chorded, active, in_session, objective, local_alive, authority, peer)
-	assert_eq(toggles.poll(0, false, true, true, false, true, true, true), 0, "the key up")
-	var events := toggles.poll(row, false, true, true, false, true, true, true)
+	# poll(rows, active, in_session, objective, local_alive, authority, peer)
+	assert_eq(toggles.poll(0, true, true, false, true, true, true), 0, "the key up")
+	var events := toggles.poll(row, true, true, false, true, true, true)
 	assert_ne(events & HudToggles.EVENT_JOIN_LOCK_TOGGLED, 0,
 			"the press edge asks for the toggle")
 	assert_gt(events, 0, "the 32-bit word's top bit arrives as a positive 64-bit word")
 	assert_eq(events, HudToggles.EVENT_JOIN_LOCK_TOGGLED)
 	# A joiner (no authority) never toggles; out of a session neither does the host.
-	toggles.poll(0, false, true, true, false, true, false, true)
-	assert_eq(toggles.poll(row, false, true, true, false, true, false, true), 0, "a joiner")
-	toggles.poll(0, false, true, false, false, true, true, true)
-	assert_eq(toggles.poll(row, false, true, false, false, true, true, true), 0,
+	toggles.poll(0, true, true, false, true, false, true)
+	assert_eq(toggles.poll(row, true, true, false, true, false, true), 0, "a joiner")
+	toggles.poll(0, true, false, false, true, true, true)
+	assert_eq(toggles.poll(row, true, false, false, true, true, true), 0,
 			"single player")
 
 

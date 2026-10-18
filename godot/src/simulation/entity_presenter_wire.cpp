@@ -1325,7 +1325,7 @@ void EntityPresenter::update_wire_held_weapon(WireRow &row, Node3D *node,
 // build beside the body and follow its visibility (a culled or hidden body
 // draws none of them, like its held weapon). Nothing is allocated for a body
 // that has never published an overlay.
-// [retail BoneCallback_org0_World @ 0x4e3940]
+// (engine: runtime/world/person_overlays.h)
 void EntityPresenter::update_wire_person_overlays(const WireRow &row, ObjectModel *body,
 		PresentRowsView snap, bool body_visible) {
 	const opennova::world::PersonOverlays overlays =

@@ -70,7 +70,7 @@ struct FollowResult {
 // mission's own view takes, session/terrain_family, D-TERRAIN-18) follows it: each entity that is not height-locked,
 // and was not edited since the ground's window opened (`marks`), moves by the change of the ground under it, its z less
 // the ground's height there kept, as the original editor's terrain change keeps an unlocked item's height relative to
-// the ground and a locked one's absolute [orig: JOTACmed.exe sub_402770 @ 0x402c9f..0x402ccd], the ground sampled as
+// the ground and a locked one's absolute [orig: JOTACmed.exe MissionGeneralInfo_DialogProc @ 0x402c9f..0x402ccd], the ground sampled as
 // that editor samples it (mission::mis_terrain_height, with its scale: mission_base_terrain.h) over the sector grid the
 // game resolves for the mission. Each mission that moves takes one batch setting its entities' z, carrying the stroke's
 // link so one Undo takes the stroke, its bake and the entities that followed it, its step named "Followed the ground of

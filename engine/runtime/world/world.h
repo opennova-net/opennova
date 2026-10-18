@@ -662,13 +662,20 @@ struct SessionRules {
     // it outside a session, stamps the serving host's config value on the
     // authority and, on a joiner, bit 16 of the S2C 0x08 flags dword (the bit
     // server_initial_state.cpp emits from the option); offline it stays 0, which
-    // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom,
-    // joiners from their session-config bitflags.
+    // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom
+    // (HostRole::apply_rule_words), joiners from their session-config bitflags
+    // (JoinerRole's frame); the slot fills read sniper_zoom_fill below.
     // [orig: Game_ApplySessionSettingsToGlobals @0x552284 (the reset) / @0x5522b9
     //  (the authority stamp); NapiNPClientMsg_HandleSessionConfig @0x428392;
     //  readers Player_AdjustWeaponElevation @0x4dbe36, Player_MountWeaponSlot
     //  @0x4dfaf9, WeaponSlot_InitFromDef @0x53ef17]
     bool allow_sniper_scope_zoom = false;
+    // The value WeaponSlot_InitFromDef's fill reads for the same class-6 lock: the
+    // rule above in a session on a peer, else the config's own allowSniperScopeZoom
+    // (a dedicated host's, single player's game.cfg). [orig: WeaponSlot_InitFromDef
+    //  @0x53EF07..0x53EF25 - is_in_session @0x53EF07, is_mp_session_peer @0x53EF0F,
+    //  byte_A821F0 @0x53EF17, g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F]
+    bool sniper_zoom_fill = false;
     // Multiplayer blast damage to Building ItemDefs is disabled unless the
     // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
     // [orig: g_DestroyBuildings gate in Entity_ApplyWeaponDamage
@@ -699,7 +706,7 @@ struct SessionRules {
     // mission start out of a session then leaves it
     // at mission_start_difficulty's word (MissionKernel::complete_mission_start);
     // a session's is the config's byte, which no in-session reader of this
-    // word needs. [orig: dword_24D2110; Game_ApplySessionSettingsToGlobals
+    // word needs. [orig: g_SessionDifficulty; Game_ApplySessionSettingsToGlobals
     //  @0x551F75; Game_StartMission @0x525CDD / @0x525CFA;
     //  Entity_GetMaxHealthWithDifficulty @0x43B8C8]
     int32_t difficulty = 0;
@@ -758,6 +765,29 @@ struct WaterScopeLegs {
     int count = 0;
     void push(WaterScopeLeg::Kind kind, uint32_t flags, bool airborne) {
         if (count < kCapacity) legs[count++] = {kind, {flags, airborne}};
+    }
+};
+
+// The HUD's frame counters, each stepped once per frame tick (one Game_ProcessMainFrame, the 62 Hz
+// logic tick): the main-frame counter always, the session frame counter unless the menu pause
+// holds the game, the HUD frame counter unless the pause or the epilog screen does; the mission
+// start zeroes them. The port's menu pause runs no frame tick (inmatch::Session's Paused state),
+// so the pause gate holds only for an embedder that steps a paused frame.
+// [orig: Game_TickHudFrameCounters @0x434C00 -- ++g_MainFrameCounter (0xA8705C) @0x434C05;
+//  `cmp dword_A87050, 0; jnz` @0x434C0B, ++dword_A87060 @0x434C14; `cmp g_EpilogScreenActive,
+//  0; jnz` @0x434C1A, ++g_HUDFrameCounter (0xA87064) @0x434C23; called from Game_ProcessMainFrame
+//  @0x5265D5, ahead of the frame's input, server tick and entity update; Game_ResetSessionHudState
+//  @0x434BD0 from Game_StartMission @0x525BAA]
+struct HudFrameCounters {
+    uint32_t main_frame = 0;    // g_MainFrameCounter: the chat debounces, the chat cursor blink
+    uint32_t session_frame = 0; // dword_A87060: the kill list's page, the map blips' blinks
+    uint32_t hud_frame = 0;     // g_HUDFrameCounter: the HUD's blinks and pulses
+
+    void step(bool menu_paused, bool epilog_screen) {
+        ++main_frame;
+        if (menu_paused) return;
+        ++session_frame;
+        if (!epilog_screen) ++hud_frame;
     }
 };
 
@@ -1067,6 +1097,8 @@ public:
     //  (WacScript_AdvanceTick @0x4f81b1), the BMS normal-event quarter pass runs every 16th
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
     uint32_t logic_tick = 0;
+    // The HUD's frame counters, stepped at the head of every frame tick (begin_tick).
+    HudFrameCounters hud_frames;
     // The entity-update counter: the number of completed entity updates. Its
     // one writer is the tail of a non-epilog update_all_entities, and nothing
     // resets it, so it runs one behind logic_tick through the process's first

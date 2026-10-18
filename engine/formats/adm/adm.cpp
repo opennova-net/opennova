@@ -61,8 +61,8 @@ static void copy_trimmed(char *dst, size_t dst_size,
 // before the row ends) [orig: AnimMap_ParseConfigLine @0x40CB60, the slot test
 // @0x40CBA4, the clip loop @0x40CBAE..0x40CC05]; and, on a row the table
 // keeps, what follows a '/'-led token (@0x40CBD2) or a comment after its clips
-// (the tokenizer's cut, io/ascii_config.h). The game registers a clip past the
-// eighth too (its loop has no cap), but a parsed row holds 8: that line blocks.
+// (the tokenizer's cut, io/ascii_config.h). The row keeps every clip it names,
+// as the game registers every one (its loop has no cap but the line's tokens).
 // A blank line holds nothing and is not reported (the canonical form writes
 // some).
 int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out, std::vector<AdmDroppedLine> *dropped) {
@@ -96,14 +96,12 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out, std::vector<A
         }
         const char *key = row.token(0);
         AdmEntry entry;
-        memset(&entry, 0, sizeof(entry));
         copy_trimmed(entry.key, sizeof(entry.key), key, key + strlen(key));
         if (adm_slot_name(entry.key).empty()) {
             drop("The key names no animation slot: the game registers nothing for the line.", false, SIZE_MAX);
             return;
         }
-        int ended = 0;   // the '/'-led token that ends the row (0: none)
-        size_t over = 0; // clips past the eighth
+        int ended = 0; // the '/'-led token that ends the row (0: none)
         for (int i = 1; i < row.count; ++i) {
             const char *clip = row.token(i);
             if (clip[0] == '/') {
@@ -111,17 +109,11 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out, std::vector<A
                 break;
             }
             if (clip[0] == '\0') continue;
-            if (entry.variant_count >= ADM_MAX_VARIANTS) {
-                ++over;
-                continue;
-            }
-            copy_trimmed(entry.variants[entry.variant_count],
-                         sizeof(entry.variants[entry.variant_count]),
-                         clip, clip + strlen(clip));
-            if (entry.variants[entry.variant_count][0] != '\0')
-                ++entry.variant_count;
+            AdmClip variant;
+            copy_trimmed(variant.text, sizeof(variant.text), clip, clip + strlen(clip));
+            if (variant.text[0] != '\0') entry.variants.push_back(variant);
         }
-        if (entry.variant_count == 0) {
+        if (entry.variants.empty()) {
             drop(ended ? "The row ends at a token that starts with '/' before any clip: the game registers nothing for it."
                        : "The row names no clip: the game registers nothing for it.",
                  false, SIZE_MAX);
@@ -132,11 +124,7 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out, std::vector<A
         // The last token the row reads; a comment inside its value (a token the cut left
         // unterminated runs to the line's end) is the token's, not dropped.
         const int last = (ended ? ended : row.count) - 1;
-        if (over)
-            drop("The row names " + std::to_string(size_t(ADM_MAX_VARIANTS) + over) +
-                         " clips: the game registers every one, but a table row holds at most 8.",
-                 true, kept);
-        else if (ended)
+        if (ended)
             drop(std::string("The row ends at '") + row.token(ended) + "': the game ignores the rest of the line.", false,
                  kept);
         else if (comment && span.token_end[last] <= span.cut)
@@ -144,9 +132,8 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out, std::vector<A
     });
 
     if (!entries.empty()) {
-        out->entries = (AdmEntry *)malloc(entries.size() * sizeof(AdmEntry));
-        if (!out->entries) return -1;
-        memcpy(out->entries, entries.data(), entries.size() * sizeof(AdmEntry));
+        out->entries = new AdmEntry[entries.size()];
+        for (size_t i = 0; i < entries.size(); ++i) out->entries[i] = std::move(entries[i]);
         out->count = entries.size();
     }
     return 0;
@@ -184,7 +171,7 @@ int adm_parse(const char *path, AdmFile *out) {
 
 void adm_free(AdmFile *af) {
     if (!af) return;
-    free(af->entries);
+    delete[] af->entries;
     af->entries = NULL;
     af->count = 0;
 }

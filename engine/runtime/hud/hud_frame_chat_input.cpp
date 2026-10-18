@@ -40,7 +40,7 @@ void HudFrameCompiler::element_chat_input(const HudFrameState &state, float w, f
 	// .., 0x101) @0x5b8fe6 -> HUD_DrawTextLeft_HalfBright: flag 0x100 passes
 	// the tags-disabled bit @0x5804e1..0x5804e9].
 	std::string line = ci.text;
-	if ((ci.frame & 0x30u) != 0u) line.push_back('_');
+	if ((state.main_frame & 0x30u) != 0u) line.push_back('_');
 	if (line.empty()) {
 		++draw_list_.elements_drawn;
 		return;

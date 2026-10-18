@@ -47,7 +47,7 @@ enum class TrnSourceRule : uint8_t {
 	// color_upper, attrib and end are read there [orig: Terrain_ParseConfigCallback @ 0x60F36C..0x60F5F0].
 	BlockKeySkipped,
 	// A fifth foliage block: the reader opens it and reads nothing more of the file [orig:
-	// Terrain_ParseConfigCallback @ 0x60F330, `dword_31BC900 < 4` around every block key].
+	// Terrain_ParseConfigCallback @ 0x60F330, `g_TerrainCfgFoliageBlocksClosed < 4` around every block key].
 	FifthBlock,
 	// A grid row before the grid's width (polytrn_sectorcount): none of its sectors is read.
 	RowBeforeWidth,

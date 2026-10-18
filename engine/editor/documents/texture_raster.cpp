@@ -7,6 +7,7 @@
 #include <editor/model/core_finding.h>
 #include <formats/png/png_decode.h>
 #include <formats/png/png_encode.h>
+#include <formats/tga/tga_read.h>
 
 namespace opennova::editor {
 
@@ -38,64 +39,39 @@ bool read_pcx8(const std::vector<uint8_t> &bytes, RasterState &out) {
 	return true;
 }
 
-// An uncompressed true-colour TGA in a form its writer makes again: its texels the top row first, as the game's
-// reader takes the rows bottom up whatever the descriptor says (tga_read.h).
+// An uncompressed true-colour TGA in a form its writer makes again, its texels as the game's reader decodes them
+// (tga::tga_decode_retail: the top row first, the rows taken bottom up whatever the descriptor says), a 24-bit
+// one's in its own three channels.
 bool read_tga(const std::vector<uint8_t> &bytes, RasterState &out) {
 	tga::TgaForm form;
-	tga::TgaHeader header;
-	if (!tga::tga_read_form(bytes.data(), bytes.size(), form) || !tga::tga_read_header(bytes.data(), bytes.size(), header))
+	tga::TgaImage image;
+	std::string error;
+	if (!tga::tga_read_form(bytes.data(), bytes.size(), form) ||
+	    !tga::tga_decode_retail(bytes.data(), bytes.size(), image, error))
 		return false;
-	const int width = header.width, height = header.height, stride = form.bits / 8;
-	const RasterFormat format = form.bits == 32 ? RasterFormat::Rgba8 : RasterFormat::Rgb8;
-	std::vector<uint8_t> texels(size_t(width) * size_t(height) * size_t(stride));
-	const uint8_t *rows = bytes.data() + tga::TGA_HEADER_SIZE;
-	for (int y = 0; y < height; ++y) {
-		const uint8_t *row = rows + size_t(height - 1 - y) * size_t(width) * size_t(stride);
-		uint8_t *to = texels.data() + size_t(y) * size_t(width) * size_t(stride);
-		for (int x = 0; x < width; ++x) {
-			// B, G, R (, A) in the file; R, G, B (, A) in the plane.
-			to[x * stride + 0] = row[x * stride + 2];
-			to[x * stride + 1] = row[x * stride + 1];
-			to[x * stride + 2] = row[x * stride + 0];
-			if (stride == 4) to[x * stride + 3] = row[x * stride + 3];
-		}
+	if (form.bits == 32) {
+		out.planes.push_back(RasterPlane::from_bytes(RasterFormat::Rgba8, image.width, image.height, image.rgba.data()));
+	} else {
+		// R, G, B alone: the reader's opaque alpha is no channel of the file.
+		const size_t count = size_t(image.width) * size_t(image.height);
+		std::vector<uint8_t> rgb(count * 3);
+		for (size_t i = 0; i < count; ++i) std::copy_n(&image.rgba[i * 4], 3, &rgb[i * 3]);
+		out.planes.push_back(RasterPlane::from_bytes(RasterFormat::Rgb8, image.width, image.height, rgb.data()));
 	}
 	auto side = std::make_shared<TextureSide>();
 	side->form = TextureSide::Form::Tga;
 	side->tga = form;
-	out.planes.push_back(RasterPlane::from_bytes(format, width, height, texels.data()));
 	out.side = std::move(side);
 	return true;
 }
 
-// A PNG's first chunk of `type`: its data's offset and length (false for none), the chunks walked from the signature.
-bool png_chunk(const std::vector<uint8_t> &bytes, const char type[4], size_t &data, uint32_t &length) {
-	for (size_t at = 8; at + 12 <= bytes.size();) {
-		length = uint32_t(bytes[at]) << 24 | uint32_t(bytes[at + 1]) << 16 | uint32_t(bytes[at + 2]) << 8 | bytes[at + 3];
-		if (length > bytes.size() - at - 12) return false;
-		if (std::memcmp(bytes.data() + at + 4, type, 4) == 0) {
-			data = at + 8;
-			return true;
-		}
-		at += size_t(length) + 12;
-	}
-	return false;
-}
-
-// The entries a PNG's PLTE chunk holds (its length over 3), 0 for none.
-uint32_t png_palette_entries(const std::vector<uint8_t> &bytes) {
-	size_t data = 0;
-	uint32_t length = 0;
-	return png_chunk(bytes, "PLTE", data, length) ? std::min<uint32_t>(length / 3, 256) : 0;
-}
-
-// A PNG of 8-bit samples (an import's source image; IHDR's bit depth at byte 24, its colour type at 25): a true-colour
-// one its texels in its own channels (2 RGB, 6 RGBA: written again in that form, never an RGB source widened to RGBA);
-// a palette one (3) its indices and its palette; a grey one (0) its levels. A PNG of another depth (a heightmap's
-// 16-bit grey, lane A's) is no plane a texture's brush paints.
+// A PNG of 8-bit samples (an import's source image; its IHDR's bit depth and colour type, png::png_header_form): a
+// true-colour one its texels in its own channels (2 RGB, 6 RGBA: written again in that form, never an RGB source
+// widened to RGBA); a palette one (3) its indices and its palette; a grey one (0) its levels. A PNG of another depth (a
+// heightmap's 16-bit grey, lane A's) is no plane a texture's brush paints.
 bool read_png(const std::vector<uint8_t> &bytes, RasterState &out) {
-	if (bytes.size() < 26 || !png::is_png(bytes) || bytes[24] != 8) return false;
-	const uint8_t colour = bytes[25];
+	uint8_t depth = 0, colour = 0;
+	if (!png::png_header_form(bytes, depth, colour) || depth != 8) return false;
 	auto side = std::make_shared<TextureSide>();
 	side->form = TextureSide::Form::Png;
 	side->png_colour = colour;
@@ -116,15 +92,13 @@ bool read_png(const std::vector<uint8_t> &bytes, RasterState &out) {
 	} else if (colour == 3) {
 		RgbaImage image;
 		IndexedImage8 indexed;
-		side->png_entries = png_palette_entries(bytes);
-		if (!png::decode_png(bytes, image, error, &indexed) || indexed.empty() || side->png_entries == 0) return false;
+		png::PngPalette held;
+		if (!png::decode_png(bytes, image, error, &indexed, &held) || indexed.empty() || held.entries == 0) return false;
+		side->png_entries = held.entries;
 		std::memcpy(side->palette.data(), indexed.palette, side->palette.size());
 		// Its transparency, written back as it was (no reader of the maps' indices looks at it).
-		size_t data = 0;
-		uint32_t length = 0;
-		if (png_chunk(bytes, "tRNS", data, length))
-			side->png_alpha.assign(bytes.begin() + std::ptrdiff_t(data),
-			                       bytes.begin() + std::ptrdiff_t(data + std::min<uint32_t>(length, side->png_entries)));
+		side->png_alpha.assign(held.alpha.begin(),
+		                       held.alpha.begin() + std::ptrdiff_t(std::min<size_t>(held.alpha.size(), held.entries)));
 		out.planes.push_back(RasterPlane::from_bytes(RasterFormat::U8, indexed.width, indexed.height, indexed.indices.data()));
 	} else if (colour == 0) {
 		png::GrayImage grey;

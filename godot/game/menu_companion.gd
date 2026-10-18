@@ -23,6 +23,13 @@ var _populating := false
 # frame owns no per-widget Control nodes); freed and rebuilt per menu build.
 const WEAPON_ICON_SLOTS: Array[String] = ["PRIMARY", "SECONDARY", "ACCESSORY"]
 var _icon_mounts: Dictionary = {}
+# The loadout screens' weapon.def table and the mount it was read from
+# (LoadoutWeaponTable.mount_key): a loadout companion lives the whole session,
+# so a CHANGE FOLDER or a Mods switch reads weapon.def again; an injected table
+# stands (_set_weapons).
+var _weapons: WeaponDatabase = null
+var _weapons_mount := ""
+var _weapons_injected := false
 
 
 ## True when this companion drives the loaded document. Keyed on control names
@@ -57,6 +64,29 @@ func on_menu_released() -> void:
 ## Subclass hook: wire the owned screens' controls (by name) off _driver/_root.
 func _wire(_file: String, _screen: String) -> void:
 	pass
+
+
+# --- The loadout screens' weapon.def table ------------------------------------
+
+# Hold an injected table (tests, another shell-owned mount); null hands the
+# load back to the root.
+func _set_weapons(weapons: WeaponDatabase) -> void:
+	_weapons = weapons
+	_weapons_injected = weapons != null
+
+
+# Read weapon.def off the root unless a table was injected or the current one
+# came from this mount. A missing or empty file is an empty table, so each list
+# shows only NONE (D-MNU-27). True when this call read the table.
+func _ensure_weapons(owner_name: String, consequence: String) -> bool:
+	if _weapons_injected or _root == null:
+		return false
+	var mount := LoadoutWeaponTable.mount_key(_root)
+	if _weapons != null and mount == _weapons_mount:
+		return false
+	_weapons = LoadoutWeaponTable.load_weapon_database(_root, owner_name, consequence)
+	_weapons_mount = mount
+	return true
 
 
 # --- By-NAME helpers ----------------------------------------------------------
