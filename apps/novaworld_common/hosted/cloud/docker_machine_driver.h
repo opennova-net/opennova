@@ -7,7 +7,7 @@
 // token and nothing else; its agent (opennova-hostd, the image's own) redeems the
 // token at the fleet's internal listener (ONNET_INTERNAL_URL) and syncs
 // from the machine's own address, which the routes check against its row; the
-// supervisor places servers on the machine's slots at their fixed ports (slots.h);
+// supervisor places servers on the machine's slots at their fixed ports (hosted/protocol/slots.h);
 // the fleet's admin links reach each slot's admin port at the machine's
 // address; the servers list through the gate (ONNET_PUBLIC_HOST). What differs is
 // the machine: hostd runs each server as an opennova-serve child of its own
@@ -58,7 +58,7 @@
 // Every failure is logged and handled here, never thrown, but by list_tagged.
 // Platform plumbing for the development stack, not a port.
 
-#include "machine_driver.h"
+#include "hosted/model/machine_driver.h"
 
 #include <cstdint>
 #include <functional>

@@ -1,7 +1,7 @@
 #pragma once
 
 // opennova-hostd's agent: one machine's side of the agent protocol
-// (apps/novaworld_common/hosted/agent_protocol.h). It bootstraps once (the
+// (apps/novaworld_common/hosted/protocol/agent_protocol.h). It bootstraps once (the
 // one-time token from the machine's user-data redeemed for its long-lived
 // secret and the machine's slots, saved owner-only in a file of its own format,
 // saved_machine.h, so a restart of the agent, of this protocol or a later one,

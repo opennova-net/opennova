@@ -24,8 +24,8 @@
 //     finding in its own words and no credential.
 
 #include "accounts/auth.h"
-#include "hosted/fleet_repository.h"
 #include "hosted/hosted_routes.h"
+#include "hosted/model/fleet_repository.h"
 #include "http_listener.h"
 #include "infra/alarm_store.h"
 #include "net_http.h"

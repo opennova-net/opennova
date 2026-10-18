@@ -24,8 +24,8 @@
 
 #include "hosted_fleet_rig.h"
 
-#include "hosted/stats_jobs.h"
-#include "hosted/stats_repository.h"
+#include "hosted/model/stats_jobs.h"
+#include "hosted/model/stats_repository.h"
 #include "hosted/stats_sampler.h"
 #include "jobs/job_queue.h"
 #include "jobs/worker_pool.h"

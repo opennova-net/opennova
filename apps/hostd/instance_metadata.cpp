@@ -1,6 +1,6 @@
 #include "instance_metadata.h"
 
-#include "hosted/agent_protocol.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include "net_http.h"
 

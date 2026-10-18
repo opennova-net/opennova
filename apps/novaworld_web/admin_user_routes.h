@@ -9,8 +9,8 @@
 // HttpListener owns one beside its other route families.
 
 #include "accounts/auth.h"
-#include "hosted/placement.h"
-#include "hosted/sold_capacity.h"
+#include "hosted/model/placement.h"
+#include "hosted/model/sold_capacity.h"
 #include "web_access.h"
 
 #include <net/novaworld/db/database.h>
@@ -40,7 +40,7 @@ public:
 	AdminUserRoutes(const AdminUserRoutes &) = delete;
 	AdminUserRoutes &operator=(const AdminUserRoutes &) = delete;
 
-	// What the fleet sells (hosted/sold_capacity.h), which a user page's
+	// What the fleet sells (hosted/model/sold_capacity.h), which a user page's
 	// capacity is read against; before register_routes(). Unset, placement.h's
 	// defaults.
 	void set_fleet(const hosted::PlacementPolicy &policy) { sellable_ = hosted::sellable_of(policy); }

@@ -1,6 +1,6 @@
 #pragma once
 
-// Where a hosted server runs: which machine and which slot (slots.h). Pure
+// Where a hosted server runs: which machine and which slot (hosted/protocol/slots.h). Pure
 // functions over plain structs, so the supervisor decides from the rows it read
 // and the tests check every rule without a database or a cloud. Service policy,
 // not a port.
@@ -21,7 +21,7 @@
 // maximum: a fleet roll launches the machines it moves servers to while the old
 // ones drain.
 
-#include "slots.h"
+#include "hosted/protocol/slots.h"
 
 #include <cstdint>
 #include <optional>

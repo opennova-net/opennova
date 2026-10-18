@@ -154,7 +154,7 @@ std::map<int64_t, CompGrants> comp_grants_by_account(db::Database &db);
 bool set_comp_grants(db::Database &db, int64_t user_id, const CompGrants &grants);
 // An admin's comp addresses that count toward an account's entitlement
 // (hosted_addresses' comp rows allocating or ready;
-// hosted/address_repository.h): the account's, and every account's that has
+// hosted/model/address_repository.h): the account's, and every account's that has
 // some.
 int comp_addresses_of(db::Database &db, int64_t user_id);
 std::map<int64_t, int> comp_addresses_by_account(db::Database &db);
@@ -164,7 +164,7 @@ std::map<int64_t, int> comp_addresses_by_account(db::Database &db);
 // A checkout reserves the item it sells before Stripe makes its session, in
 // the transaction that judged it under the hosting-start lock (database.h
 // kHostedStartLock), so two checkouts at once never both take the last of
-// the fleet's room (hosted/sold_capacity.h). The reservation counts as a
+// the fleet's room (hosted/model/sold_capacity.h). The reservation counts as a
 // granting subscription of its item until it is dropped: by the sync that
 // writes the subscription its session made (the subscription's
 // opennova_reservation metadata, in the same transaction), by the session's

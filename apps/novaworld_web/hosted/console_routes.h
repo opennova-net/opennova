@@ -44,9 +44,9 @@
 // count stay each process's own, since what they guard is its handler threads. GET .../console reads the database alone and is not
 // admitted.
 
-#include "hosted/admin_link_status.h"
 #include "console_commands.h"
-#include "hosted/hosted_repository.h"
+#include "hosted/model/admin_link_status.h"
+#include "hosted/model/hosted_repository.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 

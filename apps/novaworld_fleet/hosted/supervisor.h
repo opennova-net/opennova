@@ -178,7 +178,7 @@
 // it locks what it shares with the pass, and reads the database outside that
 // lock.
 //
-// The static addresses (hosted/address_repository.h, ADR 0066): an own
+// The static addresses (hosted/model/address_repository.h, ADR 0066): an own
 // machine launched for a server that names an address carries it
 // (fleet_machines.address_id). Once the machine has a cloud id the pass
 // enqueues its address.associate (and asks a describe, at most every
@@ -224,12 +224,12 @@
 
 #include "billing/entitlement.h"
 #include "data_sets/data_set_repository.h"
-#include "hosted/address_repository.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/hosted_repository.h"
-#include "hosted/limits_hold.h"
-#include "hosted/machine_driver.h"
-#include "hosted/placement.h"
+#include "hosted/model/address_repository.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/limits_hold.h"
+#include "hosted/model/machine_driver.h"
+#include "hosted/model/placement.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>

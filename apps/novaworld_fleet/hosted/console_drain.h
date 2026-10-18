@@ -1,6 +1,6 @@
 #pragma once
 
-// The console queue's drain (hosted/console_queue.h, whose routes' side is
+// The console queue's drain (hosted/model/console_queue.h, whose routes' side is
 // common): the fleet leader's, which holds the admin links (admin_link.h) the
 // queued commands run on. Service policy, not a port.
 

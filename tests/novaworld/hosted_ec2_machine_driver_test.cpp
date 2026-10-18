@@ -1,5 +1,5 @@
-// The fleet's machine drivers (apps/novaworld_common/hosted/machine_driver.h)
-// and settings. The EC2 driver (hosted/ec2_machine_driver.h) on a stub
+// The fleet's machine drivers (apps/novaworld_common/hosted/model/machine_driver.h)
+// and settings. The EC2 driver (hosted/cloud/ec2_machine_driver.h) on a stub
 // CommandRunner that records every AWS CLI argv and answers it from a script:
 // the launch's run-instances (the exact argv, each kind's launch template and
 // a pinned version, the tags, the row's own client token, the user-data file
@@ -17,26 +17,27 @@
 // without both of this deployment's tags never ended) and its idempotence,
 // list_tagged's scope and its throw, the slots' ports, and every CLI failure,
 // timeout and malformed reply; its config checks and the data sets' volume
-// labels. The shipped machine script (hosted/machine/machine_user_data.sh):
+// labels. The shipped machine script (hosted/cloud/machine/machine_user_data.sh):
 // its blanks and their render, no xtrace, the token and the machine id written
 // owner-only in an owner-only directory, the slots' ports reserved, and the
 // ECS agent's config (the fleet cluster, the machine's id and kind as its
 // instance attributes, task roles in host mode, no privileged task, never the
 // cleanup of images ECS did not pull), with nothing of the machine set up
 // before (no docker install, no fence, no unit, no pull). The settings
-// (hosted/fleet_config.h): the defaults, every variable's read and its refusals. And the docker
-// driver, the local stack's (hosted/docker_machine_driver.h), against an engine in memory: its
-// config checks and profile, the machine's command line and create body, the token's archive,
-// a launch's calls in order, a launch run again, its failures (each leaving nothing behind),
-// describe's states, terminate's scope and list_tagged's filter. Crow-free and database-free:
-// compiles the sources it needs directly, so it runs on every service build.
+// (hosted/model/fleet_config.h): the defaults, every variable's read and its refusals. And
+// the docker driver, the local stack's (hosted/cloud/docker_machine_driver.h), against an
+// engine in memory: its config checks and profile, the machine's command line and create
+// body, the token's archive, a launch's calls in order, a launch run again, its failures
+// (each leaving nothing behind), describe's states, terminate's scope and list_tagged's
+// filter. Crow-free and database-free: compiles the sources it needs directly, so it runs
+// on every service build.
 
 #include "command_runner.h"
-#include "hosted/agent_protocol.h"
-#include "hosted/docker_machine_driver.h"
-#include "hosted/ec2_machine_driver.h"
-#include "hosted/fleet_config.h"
-#include "hosted/hosted_settings.h"
+#include "hosted/cloud/docker_machine_driver.h"
+#include "hosted/cloud/ec2_machine_driver.h"
+#include "hosted/model/fleet_config.h"
+#include "hosted/model/hosted_settings.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include <base/io/json.h>
 
@@ -278,7 +279,7 @@ std::string run_instances_reply(
 
 std::string machine_script() {
 	std::ifstream in(fs::u8path(std::string(OPENNOVA_SOURCE_DIR) +
-							 "/apps/novaworld_common/hosted/machine/machine_user_data.sh"),
+							 "/apps/novaworld_common/hosted/cloud/machine/machine_user_data.sh"),
 			std::ios::binary);
 	return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }

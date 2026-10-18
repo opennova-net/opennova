@@ -17,7 +17,7 @@
 
 #include "accounts/auth.h"
 #include "accounts/web_session.h"
-#include "hosted/fleet_repository.h"
+#include "hosted/model/fleet_repository.h"
 #include "http_listener.h"
 #include "infra/infra_status.h"
 #include "net_http.h"

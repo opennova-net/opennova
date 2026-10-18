@@ -1,7 +1,7 @@
 #include "hostd_options.h"
 #include "machine_identity.h"
 
-#include "hosted/agent_protocol.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include <base/io/strutil.h>
 

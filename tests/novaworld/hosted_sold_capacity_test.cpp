@@ -1,4 +1,4 @@
-// The sold capacity (apps/novaworld_common/hosted/sold_capacity.h) and the
+// The sold capacity (apps/novaworld_common/hosted/model/sold_capacity.h) and the
 // checkout reservations it counts (billing/billing_repository.h "A checkout's
 // hold"). The pure core first: what an entitlement holds (the larger of a comp
 // grant and a tier's, never the sum; an own machine no further than the
@@ -12,8 +12,8 @@
 
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
-#include "hosted/placement.h"
-#include "hosted/sold_capacity.h"
+#include "hosted/model/placement.h"
+#include "hosted/model/sold_capacity.h"
 
 #include <net/novaworld/db/database.h>
 

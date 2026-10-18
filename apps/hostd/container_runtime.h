@@ -8,7 +8,7 @@
 // agent's share of its pass, agent.h) and reads as a failure past it; a pull
 // runs in the background, polled, so no pass ever waits for one.
 
-#include "hosted/agent_protocol.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include <cstdint>
 #include <map>

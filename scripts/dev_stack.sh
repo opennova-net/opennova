@@ -143,14 +143,14 @@ stage_prebuilt() {
         cp "$tree/apps/novaworld_$program/opennova-novaworld-$program" "$ctx/src/build/apps/novaworld_$program/"
     done
     mkdir -p "$ctx/src/build/apps/serve" "$ctx/src/build/apps/hostd" "$ctx/src/build/tests" \
-        "$ctx/src/backend" "$ctx/src/apps/novaworld_web" "$ctx/src/apps/novaworld_common/hosted/machine"
+        "$ctx/src/backend" "$ctx/src/apps/novaworld_web" "$ctx/src/apps/novaworld_common/hosted/cloud/machine"
     cp "$tree/apps/serve/opennova-serve" "$ctx/src/build/apps/serve/"
     cp "$tree/apps/hostd/opennova-hostd" "$ctx/src/build/apps/hostd/"
     cp "$tree/tests/opennova-novaworld-stack-smoke" "$ctx/src/build/tests/"
     cp -r "$repo/backend/migrations" "$repo/backend/seed" "$ctx/src/backend/"
     cp -r "$repo/apps/novaworld_web/templates" "$repo/apps/novaworld_web/static" "$ctx/src/apps/novaworld_web/"
-    cp "$repo/apps/novaworld_common/hosted/machine/machine_user_data.sh" \
-        "$ctx/src/apps/novaworld_common/hosted/machine/"
+    cp "$repo/apps/novaworld_common/hosted/cloud/machine/machine_user_data.sh" \
+        "$ctx/src/apps/novaworld_common/hosted/cloud/machine/"
     printf '%s\n' "$ctx"
 }
 

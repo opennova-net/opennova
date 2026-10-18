@@ -1,7 +1,7 @@
 # Hosted game servers in the local stack, over the dev overlay: the fleet's
 # machines are containers of the hostd image (apps/serve/Dockerfile's hostd
 # target) that the worker's docker machine driver launches on the stack's
-# network (apps/novaworld_common/hosted/docker_machine_driver.h), as a
+# network (apps/novaworld_common/hosted/cloud/docker_machine_driver.h), as a
 # deployment's worker launches EC2 machines. Each runs the image's own
 # opennova-hostd with its process runtime (the image's opennova-serve its
 # servers): it redeems the one-time token its launch handed it at
@@ -35,10 +35,10 @@
 #                 read-write, for the machines' and their servers' logs.
 #   machine-image the machines' image, the hostd image, built and never run.
 #   zone          the static addresses' zone file the worker writes
-#                 (apps/novaworld_common/hosted/address_zone.h FileZone), which
+#                 (apps/novaworld_common/hosted/cloud/address_zone.h FileZone), which
 #                 the smoke test reads; an addressed machine starts at its
 #                 fixed address in the half of the stack's network Docker never
-#                 hands out (172.30.77.64/28, apps/novaworld_common/hosted/
+#                 hands out (172.30.77.64/28, apps/novaworld_common/hosted/cloud/
 #                 docker_address_driver.h).
 #
 # scripts/dev_stack.sh up --data <dir> (or --synthetic-data) adds this file.

@@ -148,7 +148,7 @@ export interface HostedEvent {
   at: string;
 }
 
-// Where a start stands, in its owner's words (hosted/server_phase.h): the
+// Where a start stands, in its owner's words (hosted/model/server_phase.h): the
 // states themselves, and within them what the fleet does for it.
 export type ServerPhaseName =
   | 'queued'

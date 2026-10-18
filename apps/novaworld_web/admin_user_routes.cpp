@@ -4,10 +4,10 @@
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
 #include "billing/tiers.h"
-#include "hosted/address_repository.h"
 #include "hosted/address_routes.h"
-#include "hosted/hosted_repository.h"
 #include "hosted/hosted_routes.h"
+#include "hosted/model/address_repository.h"
+#include "hosted/model/hosted_repository.h"
 #include "http_json.h"
 
 #include <cstdio>
@@ -67,7 +67,7 @@ crow::json::wvalue user_json(const UserRecord &u, const billing::Entitlement &en
 } // namespace
 
 // The hosting the service has sold against what its fleet sells
-// (hosted/sold_capacity.h), each of shared places, own machines and static
+// (hosted/model/sold_capacity.h), each of shared places, own machines and static
 // addresses as {sold, sellable}, and `oversold` when any is past it (an
 // admin's grant can take it there; the page warns).
 crow::json::wvalue AdminUserRoutes::capacity_json(db::Database &db) const {

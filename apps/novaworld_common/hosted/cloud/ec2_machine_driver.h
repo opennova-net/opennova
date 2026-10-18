@@ -77,13 +77,13 @@
 //   list_tagged a fresh describe-instances on both tags; pending, running,
 //               stopping and stopped machines. Throws std::runtime_error when
 //               the listing fails.
-//   profile     the supervisor's view (machine_driver.h MachineProfile, the
-//               fleet's): kBootTimeoutMs, and slot k's ports (slots.h:
+//   profile     the supervisor's view (hosted/model/machine_driver.h MachineProfile, the
+//               fleet's): kBootTimeoutMs, and slot k's ports (hosted/protocol/slots.h:
 //               32768 + k, 32800 + k) with the fleet's network
 //               (admin_pattern of admin_address) for admin.cfg's ip_restrict.
 
 #include "command_runner.h"
-#include "machine_driver.h"
+#include "hosted/model/machine_driver.h"
 
 #include <condition_variable>
 #include <cstdint>

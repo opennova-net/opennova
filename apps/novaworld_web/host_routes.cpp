@@ -2,7 +2,7 @@
 
 #include "accounts/auth.h"
 #include "core/loggable.h"
-#include "hosted/hosted_repository.h"
+#include "hosted/model/hosted_repository.h"
 #include "http_json.h"
 
 #include <base/io/cp1252.h>

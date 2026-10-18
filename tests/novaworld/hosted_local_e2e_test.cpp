@@ -1,6 +1,6 @@
 // Two hosted servers end to end on one machine's slots: an in-process NovaWorld
 // service (nw_service_harness.h, hosted servers on) with its supervisor and its
-// job workers (the fleet's jobs, hosted/fleet_jobs.h) over a machine driver of
+// job workers (the fleet's jobs, hosted/model/fleet_jobs.h) over a machine driver of
 // the test's whose machines are the real agent, opennova-hostd, each a process
 // on this system with its process runtime (as the local stack's machine
 // containers run it), launched with its token file and reaching the service's
@@ -57,12 +57,12 @@
 #include "core/local_object_store.h"
 #include "data_sets/data_set_repository.h"
 #include "hosted/admin_link.h"
-#include "hosted/fleet_config.h"
-#include "hosted/fleet_jobs.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/hosted_repository.h"
 #include "hosted/internal_listener.h"
-#include "hosted/machine_driver.h"
+#include "hosted/model/fleet_config.h"
+#include "hosted/model/fleet_jobs.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/machine_driver.h"
 #include "hosted/supervisor.h"
 #include "jobs/worker_pool.h"
 #include "serve/serve_test_support.h"

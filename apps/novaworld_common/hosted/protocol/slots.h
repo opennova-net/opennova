@@ -7,7 +7,7 @@
 // shared machine has up to kMaxSlots of them (ONNET_FLEET_SHARED_SLOTS), an own
 // machine one, slot 0: the ports and the user a machine of its own always had
 // (the serve image's user is 10001). Service policy, shared by the NovaWorld
-// service (placement.h, the rendered game.cfg) and opennova-hostd (apps/hostd:
+// service (hosted/model/placement.h, the rendered game.cfg) and opennova-hostd (apps/hostd:
 // the containers, the per-UID egress counters); the machine's user-data
 // reserves both port ranges out of Linux's ephemeral range and fences every
 // slot's user off the instance metadata service. Not a port.
@@ -56,7 +56,7 @@ inline std::string slot_dir(int slot) {
 // What opennova-serve leaves its machine's agent in the slot's working
 // directory (apps/serve/run_reports.h): the tick health it rewrites once a
 // minute (--stats-file) and the error a non-zero exit ended on (--exit-file).
-// The service names both on every hosted start (hosted_settings.h
+// The service names both on every hosted start (hosted/model/hosted_settings.h
 // render_serve_args); the agent reads them there.
 inline constexpr const char *kTickStatsFileName = "tick-stats.json";
 inline constexpr const char *kExitFileName = "exit.txt";

@@ -17,14 +17,14 @@ on:
     paths:
       - 'infra/**'
       - 'deploy/**'
-      - 'apps/novaworld_common/hosted/machine/**'
+      - 'apps/novaworld_common/hosted/cloud/machine/**'
       - 'web/docker-entrypoint.sh'
       - '.github/workflows/infra.yml'
   pull_request:
     paths:
       - 'infra/**'
       - 'deploy/**'
-      - 'apps/novaworld_common/hosted/machine/**'
+      - 'apps/novaworld_common/hosted/cloud/machine/**'
       - 'web/docker-entrypoint.sh'
       - '.github/workflows/infra.yml'
   workflow_dispatch:
@@ -95,7 +95,7 @@ jobs:
             deploy/backup/restore.sh \
             deploy/backup/list.sh \
             web/docker-entrypoint.sh \
-            apps/novaworld_common/hosted/machine/machine_user_data.sh
+            apps/novaworld_common/hosted/cloud/machine/machine_user_data.sh
       # The toolbox's deployment guard: no default deployment for a change,
       # prod's typed confirmation, data and images in their one direction.
       # (jq from Alpine's packages: the toolbox's commands read their JSON with it;

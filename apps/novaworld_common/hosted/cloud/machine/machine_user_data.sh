@@ -2,13 +2,13 @@
 # A machine of the hosted servers' fleet, an ECS container instance of the
 # fleet cluster on the ECS-optimized Amazon Linux 2023 image the deployment
 # pins (infra/aws/fleet.tf, fleet_agent.tf). The worker's Ec2MachineDriver
-# (apps/novaworld_common/hosted/ec2_machine_driver.h) renders this file as the
+# (apps/novaworld_common/hosted/cloud/ec2_machine_driver.h) renders this file as the
 # machine's user-data, filling in the values below, the only per-machine input
 # it carries; cloud-init runs it once, as root, at the first boot, before the
 # image's ECS agent starts (ecs.service runs after cloud-final.service). It
 # writes the one-time bootstrap token and the machine's id for the agent (each
 # 0600 in a 0700 directory, never on a command line), reserves the slots'
-# ports (32768-32831: hosted/slots.h's game UDP 32768 + k and admin TCP
+# ports (32768-32831: hosted/protocol/slots.h's game UDP 32768 + k and admin TCP
 # 32800 + k) out of Linux's ephemeral range, and points the ECS agent at the
 # fleet cluster with the machine's id and kind as instance attributes. The
 # cluster's daemon service then runs opennova-hostd here (apps/hostd), which

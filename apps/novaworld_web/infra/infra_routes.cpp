@@ -1,7 +1,7 @@
 #include "infra_routes.h"
 
-#include "hosted/fleet_repository.h"
-#include "hosted/stats_repository.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/stats_repository.h"
 #include "http_json.h"
 
 #include <net/novaworld/lobby_repository.h>

@@ -3,10 +3,10 @@
 #include "accounts/auth.h"
 #include "billing/entitlement.h"
 #include "core/loggable.h"
-#include "hosted/address_jobs.h"
-#include "hosted/address_names.h"
-#include "hosted/hosted_repository.h"
-#include "hosted/slots.h"
+#include "hosted/model/address_jobs.h"
+#include "hosted/model/address_names.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/protocol/slots.h"
 #include "http_json.h"
 
 #include <cstdio>

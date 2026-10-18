@@ -114,7 +114,7 @@ struct Heartbeat {
 	std::optional<int64_t> billing_sync_age_s; // -1 with billing off
 	std::optional<int64_t> webhook_rejects;
 	std::optional<int64_t>
-			limits_held; // 1 while the hosted servers' limits hold is on (hosted/limits_hold.h)
+			limits_held; // 1 while the hosted servers' limits hold is on (hosted/model/limits_hold.h)
 	std::optional<int64_t> probes_unanswered; // the gate's, since the last line
 	std::optional<int64_t> lobbies_live; // the lobby instances that take clients (gate)
 	// The fleet leader's alone (a standby's would be a stale pass): its findings'

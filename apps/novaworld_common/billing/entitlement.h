@@ -66,7 +66,7 @@ struct AccountFacts {
 	int comp_servers = 0;                  // comp_grants' servers
 	int comp_own_machines = 0;             // comp_grants' own_machine
 	// Its comp addresses that count (allocating or ready;
-	// hosted/address_repository.h count_comp_addresses_of).
+	// hosted/model/address_repository.h count_comp_addresses_of).
 	int comp_addresses = 0;
 };
 

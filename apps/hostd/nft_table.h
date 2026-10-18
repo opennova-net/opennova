@@ -2,7 +2,7 @@
 
 // The machine's firewall for its slots, in an nftables table the agent owns
 // (`table inet opennova`, IPv4 and IPv6 in one): the fences that keep a slot's
-// user (UIDs 10001..10032, hosted/slots.h) off what only the agent may reach,
+// user (UIDs 10001..10032, hosted/protocol/slots.h) off what only the agent may reach,
 // and each slot's traffic counters. The slots' containers run on the
 // machine's own network, so their packets leave through the output hook under
 // their own UID (`meta skuid`) and reach them through the input hook at their

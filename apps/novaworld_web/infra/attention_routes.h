@@ -2,7 +2,7 @@
 
 // What needs an admin, in one list (apps/novaworld_common/hosted/README.md "The fleet's
 // health"): GET /api/admin/attention, require_admin, the fleet's health read from the rows
-// at each request (hosted/fleet_health.h: the same findings the fleet leader's heartbeat
+// at each request (hosted/model/fleet_health.h: the same findings the fleet leader's heartbeat
 // counts) and the deployment's CloudWatch alarms that fire now (alarm_store.h, kept 20 s):
 //
 //   {"findings": [{"level" (danger, warn, info), "subject", "text", "since" (ISO 8601 UTC;
@@ -18,7 +18,7 @@
 // policy, not a port.
 
 #include "alarm_store.h"
-#include "hosted/fleet_health.h"
+#include "hosted/model/fleet_health.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 

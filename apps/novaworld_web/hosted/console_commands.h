@@ -40,7 +40,7 @@
 // and the index from the path as unsigned integers, so no command line ever
 // carries a caller's byte outside these rules.
 
-#include "hosted/hosted_settings.h"
+#include "hosted/model/hosted_settings.h"
 
 #include <cstddef>
 #include <cstdint>

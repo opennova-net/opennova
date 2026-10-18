@@ -31,9 +31,9 @@
 #include "hosted_fleet_rig.h"
 
 #include "accounts/web_session.h"
-#include "hosted/address_jobs.h"
-#include "hosted/address_repository.h"
 #include "hosted/admin_link.h"
+#include "hosted/model/address_jobs.h"
+#include "hosted/model/address_repository.h"
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/cp1252.h>
@@ -1016,7 +1016,7 @@ int test_own_restart_at_cap() {
 	return 0;
 }
 
-// A static address (hosted/address_repository.h): its own machine launched to carry
+// A static address (hosted/model/address_repository.h): its own machine launched to carry
 // it, the server's container held back (booting, its agent told to start nothing)
 // while the machine's row does not show the address, an address.associate asked for
 // meanwhile, then the start once a describe brings the address; the subscription
@@ -1956,7 +1956,7 @@ int test_owner_limits() {
 	return 0;
 }
 
-// The owners' limits' hold, its row (hosted/limits_hold.h) as the tests read
+// The owners' limits' hold, its row (hosted/model/limits_hold.h) as the tests read
 // and move it.
 struct HoldRow {
 	Database &db;

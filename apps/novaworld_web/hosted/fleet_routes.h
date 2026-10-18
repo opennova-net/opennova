@@ -6,7 +6,7 @@
 // machine (GET /api/admin/hosted/<id>), one machine with its moves and its trees (GET
 // /api/admin/fleet/machines/<id>), the machines' moves an admin makes: a
 // drain, an end and a fleet roll (POST /api/admin/fleet/...; GET
-// /api/admin/fleet/roll previews the roll, hosted/fleet_roll.h, each machine's
+// /api/admin/fleet/roll previews the roll, hosted/model/fleet_roll.h, each machine's
 // image read from EC2 through the infrastructure view's reader), and the force of
 // every outdated server onto its data sets' current data (POST
 // /api/admin/hosted/update-all, ADR 0064). Every one require_admin; they write
@@ -18,8 +18,8 @@
 // a machine row holds none (FleetMachineRow), a server's admin login is never
 // read here. The HttpListener owns one FleetRoutes beside its HostedRoutes.
 
-#include "hosted/fleet_health.h"
-#include "hosted/fleet_repository.h"
+#include "hosted/model/fleet_health.h"
+#include "hosted/model/fleet_repository.h"
 #include "infra/infra_status.h"
 #include "web_access.h"
 
@@ -27,7 +27,7 @@
 
 #include <crow.h>
 
-#include "hosted/fleet_roll.h"
+#include "hosted/model/fleet_roll.h"
 
 #include <cstddef>
 #include <cstdint>

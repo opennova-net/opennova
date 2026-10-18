@@ -1,4 +1,4 @@
-// The hosted servers' fleet in the database (apps/novaworld_common/hosted/
+// The hosted servers' fleet in the database (apps/novaworld_common/hosted/model/
 // fleet_repository.h, backend/migrations/0003_fleet.sql) on a migrated
 // database: a machine's row and its one-time token (only its SHA-256 stored),
 // the launch's answer, every lifecycle move as a compare-and-set (ready_at,
@@ -23,8 +23,8 @@
 // ended 14 days ago (the references a server keeps nulled, one a live server
 // names kept, the egress months outliving them).
 
-#include "hosted/agent_protocol.h"
-#include "hosted/fleet_repository.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include <net/novaworld/db/database.h>
 

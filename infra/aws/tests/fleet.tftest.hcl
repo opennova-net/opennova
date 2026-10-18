@@ -867,7 +867,7 @@ run "hostd_daemon" {
 }
 
 # The user data the worker renders for every machine
-# (apps/novaworld_common/hosted/machine/machine_user_data.sh): its
+# (apps/novaworld_common/hosted/cloud/machine/machine_user_data.sh): its
 # ecs.config turns privileged containers off and never ECS's cleanup of the
 # images it did not pull (the servers', which hostd runs and ECS never sees).
 run "machine_ecs_config" {
@@ -875,8 +875,8 @@ run "machine_ecs_config" {
 
   assert {
     condition = (
-      strcontains(file("${path.module}/../../apps/novaworld_common/hosted/machine/machine_user_data.sh"), "ECS_DISABLE_PRIVILEGED=true") &&
-      !strcontains(file("${path.module}/../../apps/novaworld_common/hosted/machine/machine_user_data.sh"), "ECS_ENABLE_UNTRACKED_IMAGE_CLEANUP")
+      strcontains(file("${path.module}/../../apps/novaworld_common/hosted/cloud/machine/machine_user_data.sh"), "ECS_DISABLE_PRIVILEGED=true") &&
+      !strcontains(file("${path.module}/../../apps/novaworld_common/hosted/cloud/machine/machine_user_data.sh"), "ECS_ENABLE_UNTRACKED_IMAGE_CLEANUP")
     )
     error_message = "the machines' ecs.config disables privileged containers and never sets ECS_ENABLE_UNTRACKED_IMAGE_CLEANUP (it would delete the servers' images)"
   }

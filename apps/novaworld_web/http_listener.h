@@ -1,8 +1,8 @@
 #pragma once
 
 #include "accounts/auth.h"
-#include "hosted/fleet_health.h"
-#include "hosted/placement.h"
+#include "hosted/model/fleet_health.h"
+#include "hosted/model/placement.h"
 #include "jobs/scheduler.h"
 #include "retail_pins.h"
 #include "session_store.h"
@@ -152,23 +152,23 @@ public:
 	void set_object_store(ObjectStore *store) { object_store_ = store; }
 	ObjectStore *object_store() const { return object_store_; }
 
-	// Each container's memory and CPUs (hosted/fleet_config.h's slot limits):
+	// Each container's memory and CPUs (hosted/model/fleet_config.h's slot limits):
 	// the admin usage view's limits. Set before start(); unset, the defaults.
 	void set_fleet_slots(int memory_mb, double cpus) {
 		fleet_slot_memory_mb_ = memory_mb;
 		fleet_slot_cpus_ = cpus;
 	}
 
-	// The fleet's placement policy (hosted/fleet_config.h) the hosted routes ask
+	// The fleet's placement policy (hosted/model/fleet_config.h) the hosted routes ask
 	// the supervisor's planner with (a start's at_capacity, the list's `full`)
 	// and the billing routes judge a checkout's sold capacity against
-	// (hosted/sold_capacity.h). Set before start(); unset, placement.h's
+	// (hosted/model/sold_capacity.h). Set before start(); unset, placement.h's
 	// defaults.
 	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
-	// The images the release pins (hosted/fleet_config.h ONNET_FLEET_IMAGE_ID,
+	// The images the release pins (hosted/model/fleet_config.h ONNET_FLEET_IMAGE_ID,
 	// the launch templates', which a fleet roll's preview holds each machine's
 	// against; ONNET_HOSTED_HOSTD_IMAGE), which the machines' JSON and the
-	// fleet's health (hosted/fleet_health.h) hold each machine's against. Set
+	// fleet's health (hosted/model/fleet_health.h) hold each machine's against. Set
 	// before start().
 	void set_fleet_release(hosted::ReleaseImages release) { fleet_release_ = std::move(release); }
 	// Whether the static addresses are on (parts.h HostedPolicy::addresses_on)

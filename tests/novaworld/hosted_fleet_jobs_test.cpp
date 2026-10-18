@@ -1,4 +1,4 @@
-// The fleet on the job queue (apps/novaworld_common/hosted/fleet_jobs.h): the
+// The fleet on the job queue (apps/novaworld_common/hosted/model/fleet_jobs.h): the
 // supervisor's pass never calls the machine driver; the job workers do. Over the
 // FakeDriver (hosted_fake_driver.h) whose every launch, describe and terminate can
 // be made slow, a migrated database and real worker threads:

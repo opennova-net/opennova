@@ -1,9 +1,9 @@
 #include "agent_route.h"
 
 #include "core/loggable.h"
-#include "hosted/fleet_config.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/hosted_settings.h"
+#include "hosted/model/fleet_config.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/hosted_settings.h"
 
 #include <cstdio>
 #include <exception>

@@ -1,6 +1,6 @@
 #include "saved_machine.h"
 
-#include "hosted/agent_protocol.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include <base/io/json.h>
 

@@ -1,7 +1,7 @@
 #include "console_routes.h"
 
 #include "core/loggable.h"
-#include "hosted/console_queue.h"
+#include "hosted/model/console_queue.h"
 #include "http_json.h"
 #include "redis_client.h"
 

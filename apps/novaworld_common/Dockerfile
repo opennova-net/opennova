@@ -51,7 +51,7 @@ RUN cmake -S . -B build -G Ninja \
         opennova_novaworld_data
 
 # ---- AWS CLI stage ---------------------------------------------------------
-# The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h), the
+# The hosted servers' ec2 machine driver (hosted/cloud/ec2_machine_driver.h), the
 # game data's S3 store (core/s3_object_store.h: s3 cp, sync and rm, s3api's objects
 # and multipart uploads) and the outbound mail (accounts/mailer.h, sesv2 send-email) run
 # the AWS CLI v2, their credentials the ECS task role's. A pinned release,
@@ -258,7 +258,7 @@ ENTRYPOINT ["/app/opennova-novaworld-fleet"]
 # ---- worker ----------------------------------------------------------------
 FROM runtime-aws AS worker
 COPY --from=build /src/build/apps/novaworld_worker/opennova-novaworld-worker /app/
-COPY --from=build /src/apps/novaworld_common/hosted/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
+COPY --from=build /src/apps/novaworld_common/hosted/cloud/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
 RUN ! ldd /app/opennova-novaworld-worker | grep -q 'not found'
 ENV ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh \
     ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws

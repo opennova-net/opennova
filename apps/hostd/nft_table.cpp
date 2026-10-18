@@ -1,6 +1,6 @@
 #include "nft_table.h"
 
-#include "hosted/slots.h"
+#include "hosted/protocol/slots.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>

@@ -77,7 +77,7 @@ export interface SoldItem {
   sellable: number;
 }
 
-// The service's sold capacity (hosted/sold_capacity.h): shared places, own
+// The service's sold capacity (hosted/model/sold_capacity.h): shared places, own
 // machines and static addresses. `oversold` when any is past what the fleet
 // sells (an admin's grant can take it there): new subscriptions of it are
 // paused.

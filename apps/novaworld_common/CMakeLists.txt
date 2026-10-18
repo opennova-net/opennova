@@ -65,36 +65,36 @@ if(BUILD_NOVAWORLD_HTTP)
         # address drivers, the Route 53 and file zones). The supervisor, the
         # admin links and the stats sampler are the fleet program's own
         # (apps/novaworld_fleet).
-        hosted/address_jobs.cpp
-        hosted/address_names.cpp
-        hosted/address_repository.cpp
-        hosted/address_zone.cpp
-        hosted/admin_link_status.cpp
-        hosted/agent_protocol.cpp
-        hosted/console_queue.cpp
+        hosted/model/address_jobs.cpp
+        hosted/model/address_names.cpp
+        hosted/model/address_repository.cpp
+        hosted/cloud/address_zone.cpp
+        hosted/model/admin_link_status.cpp
+        hosted/protocol/agent_protocol.cpp
+        hosted/model/console_queue.cpp
         data_sets/data_set_files.cpp
         data_sets/data_set_jobs.cpp
         data_sets/data_set_repository.cpp
-        hosted/docker_address_driver.cpp
-        hosted/docker_machine_driver.cpp
-        hosted/ec2_address_driver.cpp
-        hosted/ec2_machine_driver.cpp
-        hosted/fleet_config.cpp
-        hosted/fleet_health.cpp
-        hosted/fleet_jobs.cpp
-        hosted/fleet_repository.cpp
-        hosted/fleet_roll.cpp
-        hosted/host_limits.cpp
-        hosted/hosted_repository.cpp
-        hosted/hosted_settings.cpp
-        hosted/limits_hold.cpp
-        hosted/net_cidr.cpp
+        hosted/cloud/docker_address_driver.cpp
+        hosted/cloud/docker_machine_driver.cpp
+        hosted/cloud/ec2_address_driver.cpp
+        hosted/cloud/ec2_machine_driver.cpp
+        hosted/model/fleet_config.cpp
+        hosted/model/fleet_health.cpp
+        hosted/model/fleet_jobs.cpp
+        hosted/model/fleet_repository.cpp
+        hosted/model/fleet_roll.cpp
+        hosted/model/host_limits.cpp
+        hosted/model/hosted_repository.cpp
+        hosted/model/hosted_settings.cpp
+        hosted/model/limits_hold.cpp
+        hosted/model/net_cidr.cpp
         core/owner_file.cpp
-        hosted/placement.cpp
-        hosted/server_phase.cpp
-        hosted/sold_capacity.cpp
-        hosted/stats_jobs.cpp
-        hosted/stats_repository.cpp
+        hosted/model/placement.cpp
+        hosted/model/server_phase.cpp
+        hosted/model/sold_capacity.cpp
+        hosted/model/stats_jobs.cpp
+        hosted/model/stats_repository.cpp
         # Billing (monthly support tiers over Stripe Checkout and the Customer
         # Portal): the settings, the billing tables and the hosting entitlement
         # read from them, the sync keeping them in step with Stripe, the curl

@@ -109,7 +109,7 @@ struct LaunchFile {
 // Everything a slot needs to run hosted server `server_id`, rendered from
 // scratch at every start: the working directory's files and opennova-serve's
 // arguments, relative to that directory. The supervisor hands it to the
-// machine's agent as the container's files and arguments (agent_protocol.h
+// machine's agent as the container's files and arguments (hosted/protocol/agent_protocol.h
 // DesiredContainer, with the trees the server is pinned to beside them, which
 // the machine binds as the install the arguments' /game and /exp speak over).
 struct LaunchSpec {
@@ -149,7 +149,7 @@ std::string render_credentials(const std::string &username, const std::string &p
 // opennova-serve's arguments for a server whose data set speaks `title` (its
 // base row's gameprofile code) with the expansion `expansion_code` ("" for
 // none): /HOST, --credentials, --master-host, --master-gate-port, the status
-// page off with the tick-health and exit files (slots.h), /game with the
+// page off with the tick-health and exit files (hosted/protocol/slots.h), /game with the
 // title, and /exp with the code. They name the working directory's files and
 // carry no secret.
 std::vector<std::string> render_serve_args(const HostedSettings &settings, std::string_view title,

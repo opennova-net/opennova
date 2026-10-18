@@ -40,15 +40,15 @@
 #include "connection_routes.h"
 #include "core/health.h"
 #include "data_sets/data_set_repository.h"
-#include "hosted/address_jobs.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
 #include "hosted/console_drain.h"
-#include "hosted/console_queue.h"
-#include "hosted/hosted_repository.h"
-#include "hosted/limits_hold.h"
-#include "hosted/sold_capacity.h"
-#include "hosted/stats_repository.h"
+#include "hosted/model/address_jobs.h"
+#include "hosted/model/console_queue.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/limits_hold.h"
+#include "hosted/model/sold_capacity.h"
+#include "hosted/model/stats_repository.h"
 #include "hosted/supervisor.h"
 #include "hosted_fake_driver.h"
 #include "http_cookies.h"
@@ -7422,7 +7422,7 @@ int test_billing_checkout_guard(Harness &h) {
 	return 0;
 }
 
-// The capacity gate (hosted/sold_capacity.h) at checkout: the harness's fleet
+// The capacity gate (hosted/model/sold_capacity.h) at checkout: the harness's fleet
 // sells 2 x 12 shared places and 16 own machines (set_fleet_placement). An
 // admin's grants count as sold: filled to the last place, GET /api/billing/tiers
 // says which items are available, and a checkout past the fleet answers 409

@@ -37,8 +37,8 @@
 #include "billing/stripe_api.h"
 #include "command_runner.h"
 #include "core/object_store.h"
-#include "hosted/fleet_config.h"
-#include "hosted/machine_driver.h"
+#include "hosted/model/fleet_config.h"
+#include "hosted/model/machine_driver.h"
 #include "jobs/scheduler.h"
 #include "program/server_config.h"
 
@@ -87,7 +87,7 @@ struct HostedPolicy {
 	hosted::FleetConfig fleet;
 	// The supervisor's view of the driver's machines (the fleet's).
 	hosted::MachineProfile profile;
-	// The static addresses (hosted/address_repository.h) are on: hosting on,
+	// The static addresses (hosted/model/address_repository.h) are on: hosting on,
 	// ONNET_FLEET_MAX_ADDRESSES above 0 and ONNET_HOSTED_ADDRESS_ZONE a zone
 	// name (no name: a boot warning). Off, the fleet sells none
 	// (fleet.placement.max_addresses is 0). Their drivers' settings are the
@@ -101,13 +101,13 @@ struct HostedPolicy {
 // ONNET_PUBLIC_HOST (the servers list through the service's public address) or
 // a serve image that is no image reference (each but "none" logged as a
 // warning). The driver's own settings are no part of it (driver_setup). The
-// fleet's settings are the environment's (hosted/fleet_config.h), the internal
+// fleet's settings are the environment's (hosted/model/fleet_config.h), the internal
 // listener's bind the fleet found in its ECS task standing in for an unset
 // ONNET_INTERNAL_HTTP_BIND (config.internal_bind).
 HostedPolicy hosted_policy(const ServerConfig &config);
 
 // The machine driver's settings over a policy that is on (the worker's): the
-// drivers' own variables (hosted/fleet_config.h parse_driver_config) and, for
+// drivers' own variables (hosted/model/fleet_config.h parse_driver_config) and, for
 // the ec2 driver, its machine script's text, each driver's check_config passed;
 // with the static addresses on, their drivers' settings too (the play zone's
 // Route 53 id for ec2; the zone file and the addresses for docker).

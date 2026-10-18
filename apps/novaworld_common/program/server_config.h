@@ -115,7 +115,7 @@ struct ServerConfig {
 
 	// The fleet's internal listener bind its boot found in its ECS task
 	// (<private IPv4>:8070, core/ecs_metadata.h) with ONNET_INTERNAL_HTTP_BIND
-	// unset; empty: the environment's (hosted/fleet_config.h reads it). Not an
+	// unset; empty: the environment's (hosted/model/fleet_config.h reads it). Not an
 	// environment variable of its own.
 	std::string internal_bind;
 
@@ -223,7 +223,7 @@ struct ServerConfig {
 	// ONNET_HOSTED_AWS_CLI: the AWS CLI v2 every call of it runs (an absolute
 	// path, run as given, no PATH search): the S3 object store
 	// (core/s3_object_store.h), the mailer's SES calls (accounts/mailer.h); the fleet's EC2
-	// driver reads it with its settings (hosted/fleet_config.h).
+	// driver reads it with its settings (hosted/model/fleet_config.h).
 	std::string aws_cli = "/usr/local/bin/aws";
 
 	// ONNET_CD_KEY_AUTO_MINT (on unless set to 0): a DFX2 account that has never
@@ -268,7 +268,7 @@ struct ServerConfig {
 	// deploy/compose). ONNET_HOSTED_PROVIDER; any other value is "none", with a
 	// warning, as is a driver with no object store (below). The fleet's own
 	// settings (the internal listener, the machines' knobs, each driver's
-	// values, the serve and hostd images) are hosted/fleet_config.h's.
+	// values, the serve and hostd images) are hosted/model/fleet_config.h's.
 	std::string hosted_provider = "none";
 	// ONNET_HOSTED_CAP: the most hosted servers live at once, across every
 	// account, a backstop beside the fleet's own room.

@@ -4,7 +4,7 @@
 #include "billing/billing_jobs.h"
 #include "billing/tiers.h"
 #include "core/loggable.h"
-#include "hosted/hosted_repository.h"
+#include "hosted/model/hosted_repository.h"
 #include "http_json.h"
 #include "stripe_signature.h"
 
@@ -151,7 +151,7 @@ void BillingRoutes::register_routes(WebApp &app) {
 // set), else null}. The
 // amounts are Stripe's price objects', never the service's own. `available`
 // is whether the fleet takes one more of the item for an account that has
-// nothing yet (hosted/sold_capacity.h): false, the site says hosting is full
+// nothing yet (hosted/model/sold_capacity.h): false, the site says hosting is full
 // and a checkout of it answers sold_out (an account whose grant already
 // covers it may still buy it; the checkout judges each account's own).
 crow::response BillingRoutes::tiers() {
@@ -407,7 +407,7 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // address 403 payment_past_due while a payment of the account is past due and
 // 409 address_limit when its addresses would pass its own machines, 409
 // sold_out when the fleet has sold all it holds of what the item adds
-// (hosted/sold_capacity.h: shared places for a tier, own machines and
+// (hosted/model/sold_capacity.h: shared places for a tier, own machines and
 // addresses for the add-ons), 503 stripe_unavailable. Those rules are judged first as a quick
 // refusal, then again after the account's previous session is settled
 // (settle_previous_session: an open one is expired; a complete one has the
@@ -720,7 +720,7 @@ crow::response BillingRoutes::webhook(const crow::request &req) {
 	return json_reply(200, out);
 }
 
-// The hosted servers' limits hold (hosted/limits_hold.h) on an admin's view:
+// The hosted servers' limits hold (hosted/model/limits_hold.h) on an admin's view:
 // "limits_hold", "limits_hold_reason" (null when not held), and the stops it
 // keeps back as the supervisor's last pass counted them, "limits_hold_owners"
 // and "limits_hold_servers" (0 when not held).
@@ -832,7 +832,7 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 // POST /api/admin/billing/reconcile — no body or {}: a full reconcile, a
 // billing.reconcile job a worker runs at once: 202 {"reconcile": "requested", "force_limits":
 // false}. The hosted servers' limits hold releases itself after a clean one
-// when the same owners are still past their entitlements (hosted/limits_hold.h).
+// when the same owners are still past their entitlements (hosted/model/limits_hold.h).
 // {"force_limits": true}: the reconcile, and the supervisor's next pass applies
 // the stops the hold keeps back past the brake, once ("force_limits": true;
 // logged). require_admin; 400 invalid_json, invalid_field (force_limits not

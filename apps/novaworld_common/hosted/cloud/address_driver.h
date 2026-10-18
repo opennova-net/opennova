@@ -1,11 +1,11 @@
 #pragma once
 
-// The static addresses' seam to the cloud (ADR 0066; address_repository.h): a
+// The static addresses' seam to the cloud (ADR 0066; hosted/model/address_repository.h): a
 // driver finds, allocates, associates, describes, disassociates and releases
 // the addresses of this deployment, and lists the ones it holds. It decides
-// nothing: the worker's address jobs (address_jobs.h) call it and write what it
+// nothing: the worker's address jobs (hosted/model/address_jobs.h) call it and write what it
 // answered to the rows, and the fleet's pass decides when an address lapses.
-// Only the workers call a driver, as the machine drivers' (machine_driver.h).
+// Only the workers call a driver, as the machine drivers' (hosted/model/machine_driver.h).
 //
 // Drivers: Ec2AddressDriver (ec2_address_driver.h, an Elastic IP through the
 // AWS CLI, tagged opennova:hosted, opennova:deployment and

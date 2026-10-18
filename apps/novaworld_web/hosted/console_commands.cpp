@@ -1,7 +1,7 @@
 #include "console_commands.h"
 
 #include "core/loggable.h"
-#include "hosted/hosted_settings.h"
+#include "hosted/model/hosted_settings.h"
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>

@@ -20,11 +20,11 @@
 // answer leaves out; the test exits its containers. Nothing runs, nothing is
 // fetched: the container keeps the answer that started it, trees and all.
 
-#include "hosted/agent_protocol.h"
 #include "hosted/fleet_desired_state.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/machine_driver.h"
-#include "hosted/slots.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/machine_driver.h"
+#include "hosted/protocol/agent_protocol.h"
+#include "hosted/protocol/slots.h"
 
 #include <net/novaworld/db/database.h>
 

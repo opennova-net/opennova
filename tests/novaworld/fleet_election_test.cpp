@@ -20,7 +20,7 @@
 
 #include "election.h"
 #include "hosted/console_drain.h"
-#include "hosted/console_queue.h"
+#include "hosted/model/console_queue.h"
 #include "hosted_fleet_rig.h"
 
 #include "common/test_expect.h"

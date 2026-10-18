@@ -8,11 +8,11 @@
 // /api/admin/addresses/<id> (a rename), POST /api/admin/addresses/<id>/release (with
 // the address's name typed back) and POST /api/admin/users/<id>/addresses (a comp
 // address; require_admin). They write rows and enqueue the worker's address jobs in
-// the same transaction (hosted/address_jobs.h); the fleet's pass and the workers do
+// the same transaction (hosted/model/address_jobs.h); the fleet's pass and the workers do
 // the rest. Every reply is an error code with our own message, never database text.
 // The HttpListener owns one.
 
-#include "hosted/address_repository.h"
+#include "hosted/model/address_repository.h"
 #include "web_access.h"
 
 #include <net/novaworld/db/database.h>

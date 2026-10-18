@@ -18,7 +18,7 @@
 // remembers of each machine between its passes. Crow-free. Each function
 // throws db::Error on a database failure. Service policy, not a port.
 
-#include "agent_protocol.h"
+#include "hosted/protocol/agent_protocol.h"
 #include "hosted_repository.h"
 #include "machine_driver.h"
 #include "placement.h"
@@ -89,7 +89,7 @@ struct FleetMachineRow {
 	bool was_draining = false;
 	int64_t describe_asked_ms = 0;
 	// Its agent's envelope at its last sync, matched or not (0015_agent_envelope.sql,
-	// agent_protocol.h AgentEnvelope): the protocol it speaks (0 before any), the
+	// hosted/protocol/agent_protocol.h AgentEnvelope): the protocol it speaks (0 before any), the
 	// image its ECS task runs ("" off ECS), and since when its syncs speak another
 	// protocol than the service's (UTC 'YYYY-MM-DD HH:MM:SS'; "" while they match).
 	int agent_protocol = 0;
@@ -321,7 +321,7 @@ struct SlotReport {
 	std::optional<int64_t> exit_code;
 	bool oom = false;
 	std::optional<int64_t> started_at; // Unix seconds
-	std::string reason; // exited: why, when the agent knew (agent_protocol.h), else ""
+	std::string reason; // exited: why, when the agent knew (hosted/protocol/agent_protocol.h), else ""
 	double cpu_percent = 0.0;
 	uint64_t memory_bytes = 0;
 	uint64_t egress_bytes = 0; // the slot's, since the machine booted
@@ -340,14 +340,14 @@ struct SlotReport {
 std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 		const std::string &agent_version, const std::vector<ContainerReport> &containers,
 		const std::string &agent_image = {});
-// A sync whose agent could not list its containers (agent_protocol.h
+// A sync whose agent could not list its containers (hosted/protocol/agent_protocol.h
 // listing_failed): last_report_at and its envelope as record_sync's, the
 // bootstrap token spent, so the machine is heard from while its slot rows
 // stand and a booting one stays booting. The row after, or nullopt as
 // record_sync's.
 std::optional<FleetMachineRow> record_unlisted_sync(db::Database &db, int64_t id,
 		const std::string &agent_version, const std::string &agent_image = {});
-// A sync in another protocol than the service's (agent_protocol.h, the
+// A sync in another protocol than the service's (hosted/protocol/agent_protocol.h, the
 // envelope): last_report_at and `envelope` recorded, the bootstrap token spent,
 // protocol_mismatch_since kept from the first such sync, the slot rows and the
 // state left alone, so the machine is heard from (never lost) and acted on in

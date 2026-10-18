@@ -15,14 +15,14 @@
 // database's text. No Stripe call runs inside a db::Transaction. Behind
 // ONNET_API_PROXY_ONLY like every /api route (the webhook too: Stripe reaches it
 // through the site's proxy). The admin's view shows the hosted servers' limits
-// hold (hosted/limits_hold.h), billing on or off, and an admin's reconcile may
+// hold (hosted/model/limits_hold.h), billing on or off, and an admin's reconcile may
 // carry the override that applies its stops. The HttpListener owns one.
 
 #include "billing/billing.h"
 #include "billing/billing_repository.h"
-#include "hosted/limits_hold.h"
-#include "hosted/placement.h"
-#include "hosted/sold_capacity.h"
+#include "hosted/model/limits_hold.h"
+#include "hosted/model/placement.h"
+#include "hosted/model/sold_capacity.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 
@@ -78,7 +78,7 @@ public:
 
 	// Before register_routes(); null: billing off. It must outlive the routes.
 	void set_billing(Billing *billing) { billing_ = billing; }
-	// What the fleet sells (hosted/sold_capacity.h sellable_of of its
+	// What the fleet sells (hosted/model/sold_capacity.h sellable_of of its
 	// placement policy, fleet_config.h); before register_routes(). Unset,
 	// placement.h's defaults.
 	void set_fleet(const hosted::PlacementPolicy &policy) { sellable_ = hosted::sellable_of(policy); }

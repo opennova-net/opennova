@@ -1,7 +1,7 @@
 // A hosted server's states (hosted_repository.h State) for display: their
 // names (the service's own, and the owner's plainer ones), what each means to
 // the owner, the start's progression, and a badge; then where a start stands
-// within them (its phase, hosted/server_phase.h) and why a server's last run
+// within them (its phase, hosted/model/server_phase.h) and why a server's last run
 // ended, in its owner's words. An owner never sees a raw log or a machine's
 // figures: the phase and the server's own last line are all.
 

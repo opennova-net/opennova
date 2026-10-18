@@ -22,8 +22,8 @@
 // scene sees a mission other than the last such sample's (one that starts and
 // ends between two samples is missed). Service policy, not a port.
 
-#include "hosted/fleet_repository.h"
-#include "hosted/hosted_repository.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/hosted_repository.h"
 
 #include <net/novaworld/db/database.h>
 

@@ -2,7 +2,7 @@
 # fleet it runs the opennova-serve containers the NovaWorld service places on the machine's
 # slots (docker; or, on a machine that is itself a container, as its own child processes),
 # fences the slots' users and counts each slot's traffic (nftables) and reports them over
-# the agent protocol, apps/novaworld_common/hosted/agent_protocol.*, which it compiles
+# the agent protocol, apps/novaworld_common/hosted/protocol/agent_protocol.*, which it compiles
 # itself with the ECS metadata reader (Crow-free and database-free) so it builds without
 # the service. Linux only: it runs as root, the fleet cluster's ECS daemon, from an image
 # of its own (apps/serve/Dockerfile's hostd target). Every source but main.cpp builds as
@@ -28,7 +28,7 @@ add_library(opennova_hostd_core STATIC
     slot_files.cpp       # the slots' working directories
     stamped_output.cpp   # the process runtime's servers' lines, each after its time, into --log-dir
     tree_store.cpp       # the trees fetched on demand (aws s3 sync) and checked
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/protocol/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/ecs_metadata.cpp  # its own image and log stream on ECS
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/proc_stats.cpp  # the machine's CPU, memory, disk, network
 )
@@ -36,8 +36,8 @@ add_library(opennova_hostd_core STATIC
 target_include_directories(opennova_hostd_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
-        # hosted/agent_protocol.h and hosted/slots.h, the service's half of the protocol,
-        # core/ecs_metadata.h and core/proc_stats.h
+        # hosted/protocol/agent_protocol.h and hosted/protocol/slots.h, the
+        # service's half of the protocol, core/ecs_metadata.h and core/proc_stats.h
         ${CMAKE_SOURCE_DIR}/apps/novaworld_common
 )
 

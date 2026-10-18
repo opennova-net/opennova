@@ -2,7 +2,7 @@
 
 // The play zone a static address's name lives in (ADR 0066): an A record
 // <name>.<zone> at the address, TTL kAddressTtlS, written by the worker's
-// address jobs (address_jobs.h) when an address is ready and deleted before it
+// address jobs (hosted/model/address_jobs.h) when an address is ready and deleted before it
 // is released. The seam has two zones:
 //
 //   Route53Zone  the deployment's Route 53 public zone (infra/aws/edge.tf

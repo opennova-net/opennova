@@ -173,24 +173,24 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/accounts/web_session.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/address_jobs.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/address_names.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/address_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/admin_link_status.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/address_jobs.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/address_names.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/address_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/admin_link_status.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/protocol/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_jobs.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_roll.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/limits_hold.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_jobs.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_roll.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/limits_hold.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/stats_jobs.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/stats_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/stats_jobs.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/stats_repository.cpp
     # stats.prune rolls up and prunes the programs' own samples too.
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/program/program_usage.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/proc_stats.cpp
@@ -240,7 +240,7 @@ target_include_directories(db_locks_test PRIVATE
 target_compile_definitions(db_locks_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(db_locks COMMAND db_locks_test)
 
-# The fleet on the job queue (apps/novaworld_common/hosted/fleet_jobs.h): the supervisor's
+# The fleet on the job queue (apps/novaworld_common/hosted/model/fleet_jobs.h): the supervisor's
 # pass never calls the machine driver. Over a FakeDriver whose every call takes a while
 # and a worker pool of real threads: twenty servers started at once launch in about one
 # call's time (the launches in parallel, every pass short), a worker gone mid-launch has
@@ -277,7 +277,7 @@ add_executable(fleet_election_test
     novaworld/fleet_election_test.cpp
     ${OPENNOVA_HOSTED_SUPERVISOR_SOURCES}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/election.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/console_queue.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/console_queue.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/hosted/console_drain.cpp)
 target_link_libraries(fleet_election_test
     PRIVATE opennova_novaworld_service opennova_bcrypt opennova_app_common Threads::Threads)
@@ -377,15 +377,15 @@ add_executable(hosted_admin_link_test
     novaworld/hosted_admin_link_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/admin_link_status.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/admin_link_status.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/protocol/agent_protocol.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/hosted/admin_link.cpp)
 target_link_libraries(hosted_admin_link_test
     PRIVATE opennova_novaworld_service opennova_app_common Threads::Threads)
@@ -415,13 +415,13 @@ target_include_directories(command_runner_test PRIVATE
 add_test(NAME command_runner COMMAND command_runner_test $<TARGET_FILE:command_runner_test>)
 set_tests_properties(command_runner PROPERTIES TIMEOUT 120)
 
-# The fleet's IPv4 networks (apps/novaworld_common/hosted/net_cidr.h): the dotted quads and
+# The fleet's IPv4 networks (apps/novaworld_common/hosted/model/net_cidr.h): the dotted quads and
 # CIDRs read strictly, the peers admitted (IPv4-mapped IPv6 included), the private ranges
 # the agent routes' networks must lie in, and the refusal log's throttle. Pure functions.
 add_executable(hosted_net_cidr_test
     novaworld/hosted_net_cidr_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/health.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/net_cidr.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/net_cidr.cpp)
 target_compile_features(hosted_net_cidr_test PRIVATE cxx_std_17)
 target_include_directories(hosted_net_cidr_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -436,8 +436,8 @@ add_test(NAME hosted_net_cidr COMMAND hosted_net_cidr_test)
 add_executable(hosted_console_commands_test
     novaworld/hosted_console_commands_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_web/hosted/console_commands.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp)
 target_link_libraries(hosted_console_commands_test PRIVATE opennova_net)
 target_include_directories(hosted_console_commands_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -487,7 +487,7 @@ target_include_directories(billing_entitlement_test PRIVATE
 target_compile_definitions(billing_entitlement_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(billing_entitlement COMMAND billing_entitlement_test)
 
-# The sold capacity (apps/novaworld_common/hosted/sold_capacity.h) and the checkout
+# The sold capacity (apps/novaworld_common/hosted/model/sold_capacity.h) and the checkout
 # reservations it counts (billing/billing_repository.h): what an entitlement holds, what the
 # fleet sells, what one more subscription adds and whether it fits; every account's
 # holdings with its live reservations on a migrated database; and two checkouts for the
@@ -497,8 +497,8 @@ add_executable(hosted_sold_capacity_test
     novaworld/hosted_sold_capacity_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/sold_capacity.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/sold_capacity.cpp)
 target_link_libraries(hosted_sold_capacity_test PRIVATE opennova_novaworld_service Threads::Threads)
 target_include_directories(hosted_sold_capacity_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -1062,7 +1062,7 @@ target_include_directories(health_listener_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 add_test(NAME health_listener COMMAND health_listener_test)
 
 # Where a hosted server's start stands in its owner's words, and why its last run ended
-# (apps/novaworld_common/hosted/server_phase.h), over hand-made rows: each state's phase, a
+# (apps/novaworld_common/hosted/model/server_phase.h), over hand-made rows: each state's phase, a
 # provisioning server's wait by its last run's end or the fleet, a booting one's by its
 # machine and its container's report (the data's bytes so far of their total), the last
 # run's end for an ended server alone. Database-free.
@@ -1072,7 +1072,7 @@ target_link_libraries(hosted_server_phase_test PRIVATE
 target_include_directories(hosted_server_phase_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hosted_server_phase COMMAND hosted_server_phase_test)
 
-# The fleet's health (apps/novaworld_common/hosted/fleet_health.h) over hand-made rows:
+# The fleet's health (apps/novaworld_common/hosted/model/fleet_health.h) over hand-made rows:
 # each rule just under and just over its bound (stalled starts, stuck and flapping
 # machines, the brake's held machines, a protocol mismatch, outdated agents and images,
 # machine pressure, late ticks, held launches, no lobby, failed servers and addresses,
@@ -1140,28 +1140,28 @@ target_link_libraries(opennova_serve_lister_e2e_test PRIVATE
 add_test(NAME opennova_serve_lister_e2e COMMAND opennova_serve_lister_e2e_test)
 set_tests_properties(opennova_serve_lister_e2e PROPERTIES RUN_SERIAL TRUE)
 
-# Where a hosted server runs (apps/novaworld_common/hosted/placement.h) and what a slot
-# of a machine is (hosted/slots.h): best fit on the fullest shared machine that takes
+# Where a hosted server runs (apps/novaworld_common/hosted/model/placement.h) and what a slot
+# of a machine is (hosted/protocol/slots.h): best fit on the fullest shared machine that takes
 # servers, the ties, the launches below the fleet's maximums and the waits at them, the
 # own-machine add-on's machine, the states that count, the columns' words. Pure
 # functions: compiles the source directly, so it runs on every build.
 add_executable(hosted_placement_test
     novaworld/hosted_placement_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp)
 target_compile_features(hosted_placement_test PRIVATE cxx_std_17)
 target_include_directories(hosted_placement_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
 add_test(NAME hosted_placement COMMAND hosted_placement_test)
 
-# The machine agent's protocol (apps/novaworld_common/hosted/agent_protocol.h), the one
+# The machine agent's protocol (apps/novaworld_common/hosted/protocol/agent_protocol.h), the one
 # the service and opennova-hostd both build: every message's round trip through its
 # encoder and strict decoder, the wire's member names, the protocol check, every field's
 # shape and range, the routes' paths. Pure functions: compiles the source directly, so it
 # runs on every build.
 add_executable(hosted_agent_protocol_test
     novaworld/hosted_agent_protocol_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/protocol/agent_protocol.cpp)
 target_link_libraries(hosted_agent_protocol_test PRIVATE opennova_io)
 target_compile_features(hosted_agent_protocol_test PRIVATE cxx_std_17)
 target_include_directories(hosted_agent_protocol_test PRIVATE
@@ -1169,7 +1169,7 @@ target_include_directories(hosted_agent_protocol_test PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
 add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
 
-# The fleet in the database (apps/novaworld_common/hosted/fleet_repository.h, migration
+# The fleet in the database (apps/novaworld_common/hosted/model/fleet_repository.h, migration
 # 0003_fleet.sql): a machine's row and its one-time token (its SHA-256 alone), every lifecycle
 # move a compare-and-set, the bootstrap's redeem, the agent's secret, a sync's report and its
 # slots' rows, the silent machines, and the slots the live servers hold (assigned once, the
@@ -1215,14 +1215,14 @@ add_executable(hosted_fleet_repository_test
     novaworld/hosted_fleet_repository_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/protocol/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp)
 target_link_libraries(hosted_fleet_repository_test
     PRIVATE opennova_novaworld_service opennova_app_common Threads::Threads)
 target_include_directories(hosted_fleet_repository_test PRIVATE
@@ -1231,29 +1231,29 @@ target_include_directories(hosted_fleet_repository_test PRIVATE
 target_compile_definitions(hosted_fleet_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(hosted_fleet_repository COMMAND hosted_fleet_repository_test)
 
-# The fleet's machine drivers and settings: the EC2 driver (apps/novaworld_common/hosted/
+# The fleet's machine drivers and settings: the EC2 driver (apps/novaworld_common/hosted/cloud/
 # ec2_machine_driver.h) on a stub CommandRunner that checks every AWS CLI argv and answers it
 # (each kind's launch template, the tags, the client token, the user-data file with the
 # machine's values filled in and deleted after, the subnet of two a launch takes and a zone
 # without capacity handing it to the other, describe's states from one cached listing, a
 # failure reading Unknown and its back-off, terminate's idempotence, list_tagged's scope and its
 # throw, the slots' ports) and its config checks; the shipped
-# machine script (hosted/machine/machine_user_data.sh) and its render; the settings
-# (hosted/fleet_config.h); and the docker driver, the local stack's
-# (hosted/docker_machine_driver.h), against an engine in memory. Crow-free and database-free:
+# machine script (hosted/cloud/machine/machine_user_data.sh) and its render; the settings
+# (hosted/model/fleet_config.h); and the docker driver, the local stack's
+# (hosted/cloud/docker_machine_driver.h), against an engine in memory. Crow-free and database-free:
 # compiles the hosted sources it needs directly.
 add_executable(hosted_ec2_machine_driver_test
     novaworld/hosted_ec2_machine_driver_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/health.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/docker_machine_driver.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/ec2_machine_driver.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_config.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/net_cidr.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/protocol/agent_protocol.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/cloud/docker_machine_driver.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/cloud/ec2_machine_driver.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_config.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/net_cidr.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp)
 target_link_libraries(hosted_ec2_machine_driver_test PRIVATE opennova_app_common Threads::Threads)
 if(WIN32)
     target_link_libraries(hosted_ec2_machine_driver_test PRIVATE advapi32)

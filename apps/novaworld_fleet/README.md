@@ -7,7 +7,7 @@ supervisor with its admin links and its stats sampler, and the console drain. It
 cloud and runs and schedules no job: what it decides it writes as rows and jobs, which the
 worker runs. `GET /livez` on `ONNET_HEALTH_PORT` (8081). Built with `BUILD_NOVAWORLD_HTTP`.
 The leader's heartbeat carries the fleet's health over its rows (the shared library's
-`hosted/fleet_health.*`: its danger and warn findings, the machines stuck, the least free
+`hosted/model/fleet_health.*`: its danger and warn findings, the machines stuck, the least free
 disk) and the age of its supervisor's last pass that failed in nothing, which the
 deployment's `fleet-pass-age` alarm reads (`../novaworld_common/README.md`, "Health").
 
@@ -21,8 +21,8 @@ image is the `fleet` target of [`../novaworld_common/Dockerfile`](../novaworld_c
   hosted servers' supervisor, its per-minute stats sample and the answer each machine's
   sync gets.
 - `hosted/admin_link.*`: the admin links' threads (their states' rows, which web reads, are
-  the shared library's `hosted/admin_link_status.*`); `hosted/console_drain.*`: the console
-  queue's drain over them (the routes' side is the shared library's `hosted/console_queue.*`).
+  the shared library's `hosted/model/admin_link_status.*`); `hosted/console_drain.*`: the console
+  queue's drain over them (the routes' side is the shared library's `hosted/model/console_queue.*`).
 - `hosted/internal_listener.*`, `hosted/agent_route.*`: the machines' internal listener and
   the agents' routes on it.
 - These build as `opennova_novaworld_fleet_core`, which the tests drive in-process; `main.cpp`

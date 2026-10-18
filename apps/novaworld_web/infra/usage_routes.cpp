@@ -1,8 +1,8 @@
 #include "usage_routes.h"
 
 #include "core/text_util.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/stats_repository.h" // iso_utc
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/stats_repository.h" // iso_utc
 #include "http_json.h"
 #include "infra_routes.h"
 

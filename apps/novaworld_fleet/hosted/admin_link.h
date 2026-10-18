@@ -56,8 +56,8 @@
 // commands reach a link through a table the fleet drains (console_queue.h,
 // console_drain.h). Crow-free.
 
-#include "hosted/admin_link_status.h"
-#include "hosted/hosted_repository.h"
+#include "hosted/model/admin_link_status.h"
+#include "hosted/model/hosted_repository.h"
 
 #include "net_sockets.h"
 

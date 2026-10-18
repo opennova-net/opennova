@@ -21,7 +21,7 @@
 //     use now, the tasks gone in 24 h, each task with its ECS facts.
 
 #include "accounts/auth.h"
-#include "hosted/fleet_repository.h"
+#include "hosted/model/fleet_repository.h"
 #include "http_listener.h"
 #include "infra/infra_status.h"
 #include "infra/metrics_store.h"

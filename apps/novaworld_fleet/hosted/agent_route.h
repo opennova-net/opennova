@@ -45,8 +45,8 @@
 
 #include "fleet_desired_state.h"
 
-#include "hosted/fleet_config.h"
-#include "hosted/net_cidr.h"
+#include "hosted/model/fleet_config.h"
+#include "hosted/model/net_cidr.h"
 
 #include <crow.h>
 

@@ -37,7 +37,7 @@
 #     (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES in its environment) and hands each
 #     launch its user data: the token and machine-id files, the slots'
 #     reserved ports and /etc/ecs/ecs.config, which registers the machine in
-#     the fleet cluster (apps/novaworld_common/hosted/machine/);
+#     the fleet cluster (apps/novaworld_common/hosted/cloud/machine/);
 #   - the machines' security group: the slots' game ports to players, their
 #     admin ports to the fleet program alone; and the fleet program admitting
 #     the machines on its internal port (var.internal_http_port, its second
@@ -65,7 +65,7 @@
 # hosting is off and the programs' environment says so. Web's and the data
 # program's own store policies are programs.tf's.
 #
-# The ports are the service's and hostd's (apps/novaworld_common/hosted/slots.h):
+# The ports are the service's and hostd's (apps/novaworld_common/hosted/protocol/slots.h):
 # change them in both places or in neither.
 
 locals {
@@ -594,7 +594,7 @@ resource "aws_iam_role_policy" "fleet_service" {
 }
 
 # What the programs need of the fleet, in their environment (programs.tf), in
-# the service's two sets (apps/novaworld_common/hosted/fleet_config.h): the
+# the service's two sets (apps/novaworld_common/hosted/model/fleet_config.h): the
 # fleet's policy, which web, the fleet program and the worker read alike, and
 # the machine driver's own settings, the worker's alone (it alone launches the
 # machines into the fleet cluster). The store is the policy's and the data

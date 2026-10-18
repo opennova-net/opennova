@@ -6,7 +6,7 @@
 // over the minute in percent of its CPU limit, its memory and the most it may
 // use, and its network namespace's bytes in and out, through core/proc_stats.h's
 // readers (its own cgroup, /proc/net/dev), alike on ECS and in the local stack's
-// containers. The worker's stats.prune (hosted/stats_jobs.h) rolls the minutes
+// containers. The worker's stats.prune (hosted/model/stats_jobs.h) rolls the minutes
 // up by the hour and prunes both (48 hours, 400 days). The admin's usage view
 // reads them (apps/novaworld_web/infra/usage_routes.h).
 //

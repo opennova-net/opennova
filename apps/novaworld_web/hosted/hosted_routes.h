@@ -19,7 +19,7 @@
 // routes (http_listener.cpp). The HttpListener owns one HostedRoutes beside
 // its HostRoutes.
 
-#include "hosted/hosted_repository.h"
+#include "hosted/model/hosted_repository.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 

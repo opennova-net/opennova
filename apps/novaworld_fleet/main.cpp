@@ -20,12 +20,12 @@
 #include "core/object_store.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_drain.h"
-#include "hosted/fleet_health.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/hosted_repository.h"
 #include "hosted/internal_listener.h"
-#include "hosted/limits_hold.h"
-#include "hosted/net_cidr.h"
+#include "hosted/model/fleet_health.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/limits_hold.h"
+#include "hosted/model/net_cidr.h"
 #include "hosted/supervisor.h"
 
 #include <base/os_random/os_random.h>
@@ -199,7 +199,7 @@ int run(const program::Boot &boot) {
 	hosted::Supervisor *counted = supervisor.get();
 	// The leader's own fields: the age of its supervisor's last pass that failed
 	// in nothing (first, so a database that fails the rest still sends it), then
-	// the fleet's health over the rows (hosted/fleet_health.h) against the
+	// the fleet's health over the rows (hosted/model/fleet_health.h) against the
 	// release's images.
 	const hosted::ReleaseImages release{ fleet.image_id, fleet.hostd_image };
 	const hosted::PlacementPolicy placement = fleet.placement;

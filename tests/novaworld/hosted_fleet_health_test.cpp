@@ -1,4 +1,4 @@
-// The fleet's health (apps/novaworld_common/hosted/fleet_health.h) over hand-made rows:
+// The fleet's health (apps/novaworld_common/hosted/model/fleet_health.h) over hand-made rows:
 // each rule just under and just over its bound, the level, the subject, the admin page it
 // links (the site's paths, CONTRACT "Attention links") and its rule's name (a server whose
 // data cannot be fetched start after start among them); stale rows a
@@ -6,7 +6,7 @@
 // outdated by each image pair; the order (danger, warn, info, each oldest first, a finding
 // with no time after the rest) and the heartbeat's gauges. Pure functions: no database.
 
-#include "hosted/fleet_health.h"
+#include "hosted/model/fleet_health.h"
 
 #include "common/test_expect.h"
 

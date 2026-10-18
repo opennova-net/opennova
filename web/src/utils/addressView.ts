@@ -6,10 +6,10 @@ import type { Address, AddressState, ServerAddress } from '../types/addresses';
 import type { HostedServer } from '../types/hostedServer';
 
 // The game port an own machine's servers list at (its one slot, slot 0;
-// hosted/slots.h slot_game_port): a server JSON's address names no port.
+// hosted/protocol/slots.h slot_game_port): a server JSON's address names no port.
 export const ADDRESS_GAME_PORT = 32768;
 
-// hosted/address_names.h: 3 to 32 of lower-case letters, digits and '-', a
+// hosted/model/address_names.h: 3 to 32 of lower-case letters, digits and '-', a
 // letter or digit first and last. The reserved names are the service's to
 // judge (invalid_name).
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;

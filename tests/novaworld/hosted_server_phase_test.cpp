@@ -1,5 +1,5 @@
 // Where a hosted server's start stands in its owner's words, and why its last run ended
-// (apps/novaworld_common/hosted/server_phase.h), over hand-made rows: each state's
+// (apps/novaworld_common/hosted/model/server_phase.h), over hand-made rows: each state's
 // phase; a provisioning server's wait by why its last run ended (a crash or a timeout:
 // restarting n of the limit; its machine's cause or the owner's update: moving; its data
 // not fetched: data_unavailable, the agent's reason an admin's alone), else by
@@ -8,7 +8,7 @@
 // bytes so far of their total, its image, its start); and the last run's end for a
 // stopped or failed server alone. Pure functions: no database.
 
-#include "hosted/server_phase.h"
+#include "hosted/model/server_phase.h"
 
 #include "common/test_expect.h"
 

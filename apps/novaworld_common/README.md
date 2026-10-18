@@ -227,7 +227,7 @@ Service policy (`core/health.*`), what the container runtime and the uptime chec
     machines the mass-lost brake holds from their end; now), `hosted_failed` and
     `launch_failures` (since the last line), `limits_held` (1 while the owners' limits
     hold is on); and the leader alone (a standby's would be a stale pass): the fleet's
-    health (`hosted/fleet_health.h`) as `attention_danger` and `attention_warn` (its
+    health (`hosted/model/fleet_health.h`) as `attention_danger` and `attention_warn` (its
     findings of each level), `machines_stuck` (the machines a stuck or flapping finding
     names), `machine_disk_free_pct` (the least free share of a ready or draining
     machine's trees' disk; left out with none reporting), and `fleet_pass_age_s` (the
@@ -296,7 +296,7 @@ policy, not a port.
 
 | Kind | What | Enqueued by | Run by | Cap |
 | --- | --- | --- | --- | --- |
-| `machine.launch` | the row's launch (`hosted/fleet_jobs.*`) | the supervisor, with the machine's row | worker | 8 |
+| `machine.launch` | the row's launch (`hosted/model/fleet_jobs.*`) | the supervisor, with the machine's row | worker | 8 |
 | `machine.describe` | the cloud's word on a live machine, onto its row | the supervisor's boot and lost checks, deduped per machine | worker | 4 |
 | `machine.terminate` | a cloud machine ended | the supervisor's ends | worker | 4 |
 | `fleet.sweep` | the driver's machines against the rows | every 5 min (the worker's schedule), and at the supervisor's reconciliation | worker | 1 |
@@ -708,7 +708,7 @@ site. Everything here is service policy (`billing/`).
   listed as duplicates. It also checks the configured prices (monthly, recurring, the key's
   mode, the sold one active, one currency); until they check out, checkout answers 503
   `billing_misconfigured`.
-- **The capacity gate** (`hosted/sold_capacity.*`): a new subscription is never sold past
+- **The capacity gate** (`hosted/model/sold_capacity.*`): a new subscription is never sold past
   what the fleet holds. Every account holds what its entitlement grants, used or not (its
   servers less those on own machines are shared places, its own machines are own
   machines), an admin's comp grant included; the fleet sells `ONNET_FLEET_MAX_SHARED` x
@@ -927,7 +927,7 @@ local stack's directory store reads the same subjects' files (`servers/<id>/g<g>
 answers what needs an admin: `{"findings": [{"level", "subject", "text", "since", "link",
 "source"}], "alarms": [{"name", "state_since", "description"}], "alarms_read",
 "checked_at"}`. The findings are the fleet's health read from the rows at each request
-(`hosted/fleet_health.*`, the hosted README's "The fleet's health"; the fleet leader's
+(`hosted/model/fleet_health.*`, the hosted README's "The fleet's health"; the fleet leader's
 heartbeat counts the same ones), danger first, then warn, then info, each level's oldest
 first; `link` is the admin page that shows one (a site path) and `source` the rule. The
 alarms are the deployment's CloudWatch alarms in `ALARM` (`infra/alarm_store.*`,

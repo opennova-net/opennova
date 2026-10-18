@@ -23,7 +23,7 @@
 // last failure's reason then riding the container's report to the service.
 // Service policy, not a port.
 
-#include "hosted/agent_protocol.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include <base/proc/child_process.h>
 

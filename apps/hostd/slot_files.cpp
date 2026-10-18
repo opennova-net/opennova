@@ -1,7 +1,7 @@
 #include "slot_files.h"
 
-#include "hosted/agent_protocol.h"
-#include "hosted/slots.h"
+#include "hosted/protocol/agent_protocol.h"
+#include "hosted/protocol/slots.h"
 
 #include <cerrno>
 #include <cstring>

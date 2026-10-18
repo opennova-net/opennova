@@ -14,9 +14,9 @@
 // driver's name, its boot timeout, a slot's ports) is the driver's
 // MachineProfile, which needs no driver to make.
 //
-// Drivers: Ec2MachineDriver (ec2_machine_driver.h, an EC2 machine from the
+// Drivers: Ec2MachineDriver (hosted/cloud/ec2_machine_driver.h, an EC2 machine from the
 // launch template of its kind, whose user-data installs the agent) and
-// DockerMachineDriver (docker_machine_driver.h, the local stack's: a container
+// DockerMachineDriver (hosted/cloud/docker_machine_driver.h, the local stack's: a container
 // of the serve image on the stack's network, its agent the image's own, whose
 // servers are opennova-serve children of the agent).
 //
@@ -26,8 +26,8 @@
 // to run (POST /hosted/machines/<id>/sync). No server's file or credential is
 // in a launch.
 
+#include "hosted/protocol/slots.h"
 #include "placement.h"
-#include "slots.h"
 
 #include <cstdint>
 #include <functional>
@@ -115,7 +115,7 @@ struct MachineProfile {
 	uint64_t boot_timeout_ms = 0;
 	// The ports slot `slot` of one of its machines serves on, and the address
 	// its admin.cfg admits: no cloud call (each driver's are the slot's fixed
-	// ports, slots.h: every machine has an address of its own).
+	// ports, hosted/protocol/slots.h: every machine has an address of its own).
 	std::function<SlotPlan(int slot)> slot_plan;
 };
 

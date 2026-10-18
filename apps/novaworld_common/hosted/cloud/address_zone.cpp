@@ -138,7 +138,7 @@ FileZone::FileZone(std::string zone, std::string path) : zone_(std::move(zone)),
 std::string FileZone::render(
 		const std::string &zone, const std::map<std::string, std::string> &records, uint32_t serial) {
 	std::ostringstream out;
-	out << "; " << zone << ": the static addresses' names (apps/novaworld_common/hosted/address_zone.h FileZone)\n";
+	out << "; " << zone << ": the static addresses' names (apps/novaworld_common/hosted/cloud/address_zone.h FileZone)\n";
 	out << "$ORIGIN " << zone << ".\n";
 	out << "$TTL " << kAddressTtlS << "\n";
 	out << "@\tIN\tSOA\tns." << zone << ". hostmaster." << zone << ". ( " << serial << " 3600 600 86400 "

@@ -2,7 +2,7 @@
 
 #include "accounts/auth.h"
 #include "billing/entitlement.h"
-#include "hosted/fleet_repository.h"
+#include "hosted/model/fleet_repository.h"
 #include "http_json.h"
 
 #include <base/io/cp1252.h>

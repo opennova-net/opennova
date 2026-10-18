@@ -1,4 +1,4 @@
-// The machine agent's protocol (apps/novaworld_common/hosted/agent_protocol.h), the
+// The machine agent's protocol (apps/novaworld_common/hosted/protocol/agent_protocol.h), the
 // one opennova-hostd and the NovaWorld service both build: each message's round trip
 // through its encoder and its strict decoder (the bootstrap's hello and reply, the
 // sync's report, the reason a container ended or never started, what a starting one
@@ -14,7 +14,7 @@
 // container's trees among the reply's), the routes' paths, the container names and the
 // secret's digest. Pure functions: no listener, no docker.
 
-#include "hosted/agent_protocol.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include <base/io/json.h>
 #include <base/io/sha256.h>

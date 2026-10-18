@@ -1,6 +1,6 @@
 #include "attention_routes.h"
 
-#include "hosted/stats_repository.h" // iso_utc
+#include "hosted/model/stats_repository.h" // iso_utc
 #include "http_json.h"
 
 #include <cstdio>

@@ -28,7 +28,7 @@ this directory's.
   own machines (`comp_grants`, 0..16) adds to them while the account has servers (a tier's
   or a grant's), so an admin, the local stack and CI give an own machine without Stripe.
   What every account's entitlement holds is what the service has sold, and no checkout
-  sells past the fleet (`sold_capacity.*`; [`../README.md`](../README.md) "Billing").
+  sells past the fleet (`model/sold_capacity.*`; [`../README.md`](../README.md) "Billing").
   A start is still refused `at_capacity` when the fleet has no room for it now.
 - **Data sets** (`../data_sets/data_set_repository.*`, `../data_sets/data_set_files.*`,
   `backend/migrations/0011_data_sets.sql`). A data set is a row an admin makes: a **base**
@@ -39,7 +39,7 @@ this directory's.
   files (`../data_sets/data_set_files.h` names them) at `trees/<id>/`, uploaded by an admin or built by
   applying a published update release, with the multiplayer missions its archives list. A
   base is **offered** while it has a ready current tree, with each of its expansions that
-  has one; the host-screen limits are the title's (`host_limits.h`). Hosting is on only
+  has one; the host-screen limits are the title's (`model/host_limits.h`). Hosting is on only
   with a store. At its placement a server is **pinned** to its data sets' current trees
   (`base_tree_id`, `expansion_tree_id`), kept through a crash restart or a move, until its
   owner asks for the update (`update_requested`: placed again on the current trees, no
@@ -47,11 +47,11 @@ this directory's.
 
 ## The fleet
 
-- **Machines and slots** (`placement.*`, `fleet_repository.*`,
+- **Machines and slots** (`model/placement.*`, `model/fleet_repository.*`,
   `backend/migrations/0003_fleet.sql`). A **shared machine** packs up to
   `ONNET_FLEET_SHARED_SLOTS` servers of any account; an **own machine** runs exactly one,
   the add-on's, launched for it and ended when it stops. A **slot** is one server's
-  position on a machine (`slots.h`): slot k is the game's UDP port 32768 + k (open to
+  position on a machine (`protocol/slots.h`): slot k is the game's UDP port 32768 + k (open to
   everyone), the remote admin's TCP port 32800 + k (open to the service alone), the
   container's user 10001 + k and the working directory `/srv/slots/slot-k`. A
   `fleet_machines` row moves by compare-and-set: `launching` → `booting` (the cloud runs
@@ -66,7 +66,7 @@ this directory's.
   tree it holds: fetching, ready or failed, its bytes, its tries, the last failure). Two
   live servers never hold one slot (a unique index). An ended or failed machine's row is
   deleted 14 days after its end by `stats.prune`, its events and trees with it.
-- **Placement** (`placement.h`, pure functions): a shared server goes to the fullest
+- **Placement** (`model/placement.h`, pure functions): a shared server goes to the fullest
   shared machine that takes servers with a free slot, its lowest free slot, so machines
   fill one at a time and an emptied one can end; with none, a shared machine is launched
   while fewer than `ONNET_FLEET_MAX_SHARED` take servers, else the server waits in
@@ -103,7 +103,7 @@ this directory's.
   configured, has completed after it took its owners and a pass still finds them past
   their entitlements. An admin's override (`POST /api/admin/billing/reconcile` with
   `{"force_limits": true}`) applies the stops past the brake once. The hold is one row
-  (`hosted_limits_hold`, `limits_hold.*`), shown by `GET /api/admin/billing`.
+  (`hosted_limits_hold`, `model/limits_hold.*`), shown by `GET /api/admin/billing`.
 
 ## The supervisor
 
@@ -118,7 +118,7 @@ this directory's.
   wins. A pass reads and writes rows alone and never calls the cloud: a launch is the
   machine's row and its `machine.launch` job in one transaction, a check of a booting,
   lost or unaddressed machine a deduped `machine.describe`, an end a `machine.terminate`,
-  run by the workers (`fleet_jobs.*`; the service README's "Background jobs"), so a surge
+  run by the workers (`model/fleet_jobs.*`; the service README's "Background jobs"), so a surge
   of starts launches its machines side by side. What a pass remembers of a machine and
   each kind's launch backoff are rows too, so a supervisor started again resumes its
   timers.
@@ -198,7 +198,7 @@ this directory's.
 
 ## The fleet's health
 
-- **Findings over the rows** (`fleet_health.*`): `read_health` reads the rows in one
+- **Findings over the rows** (`model/fleet_health.*`): `read_health` reads the rows in one
   snapshot and `fleet_health` judges them, a pure function, into findings, each with a
   level (`danger`, `warn`, `info`), its subject, what is wrong, since when, the admin page
   that shows it and its rule: a start stalled past 15 min (one waiting for its static
@@ -221,7 +221,7 @@ this directory's.
 ## The machines
 
 - **The agents and the internal listener** (`agent_route.*`, `internal_listener.*`,
-  `agent_protocol.*`; the protocol is [`apps/hostd/README.md`](../../hostd/README.md)).
+  `protocol/agent_protocol.*`; the protocol is [`apps/hostd/README.md`](../../hostd/README.md)).
   Each machine runs `opennova-hostd` (on EC2 the fleet cluster's ECS daemon), whose
   machine's user-data carries a one-time bootstrap token (kept as its SHA-256 alone, 30
   minutes' life, spent at the agent's first sync) that it redeems for a long-lived secret
@@ -240,13 +240,13 @@ this directory's.
   `ONNET_HOSTED_BOOTSTRAP_CIDRS` (and loopback on a loopback bind) from the machine's own
   recorded address; every refusal is one bare 404, logged without the token or the secret
   at most once per peer per minute.
-- **Machine drivers** (`machine_driver.h`): the fleet's one seam to the cloud, called by
+- **Machine drivers** (`model/machine_driver.h`): the fleet's one seam to the cloud, called by
   the job workers alone. A driver launches the machine a row stands for (its id and
   one-time token), describes it, terminates it and lists the machines it runs for this
   deployment; what the supervisor knows of it without a call is its `MachineProfile`.
   Every driver's machine runs the real agent and has an address of its own, so each
   slot's ports are its fixed ones and the agent routes can check the peer.
-  - `ONNET_HOSTED_PROVIDER=docker` (`docker_machine_driver.*`, the local stack's,
+  - `ONNET_HOSTED_PROVIDER=docker` (`cloud/docker_machine_driver.*`, the local stack's,
     `deploy/compose/docker-compose.hosting.yml`): each machine a container of the hostd
     image (`ONNET_HOSTED_HOSTD_IMAGE`) as its serve user on the stack's network, over the Docker Engine API (the stack's socket proxy
     admits the containers API alone), named `<deployment>-machine-<id>` and labelled with
@@ -255,11 +255,11 @@ this directory's.
     `docker inspect` shows). Its process is the image's `opennova-hostd` with the process
     runtime, its servers `opennova-serve` children. Its servers list through
     `ONNET_PUBLIC_HOST`, the developer's LAN address there.
-  - `ONNET_HOSTED_PROVIDER=ec2` (`ec2_machine_driver.*`): EC2 machines from the launch
+  - `ONNET_HOSTED_PROVIDER=ec2` (`cloud/ec2_machine_driver.*`): EC2 machines from the launch
     template of their kind (`infra/aws`: the deployment's pinned ECS-optimized Amazon
     Linux 2023 image, the kind's type, the machines' security group and instance profile,
     IMDSv2 required), tagged with the deployment, the kind and the machine id, with the
-    machine script (`machine/machine_user_data.sh`) as user-data: it writes the token and
+    machine script (`cloud/machine/machine_user_data.sh`) as user-data: it writes the token and
     the machine id for the agent, reserves the slots' ports and points the image's ECS
     agent at the fleet cluster (`ONNET_HOSTED_EC2_CLUSTER`) with the machine's id and kind
     as instance attributes. The cluster's daemon service runs `opennova-hostd` on every
@@ -274,7 +274,7 @@ this directory's.
   `/NWJoin.dll` hands a joiner that `host:port`, and the lobby keys its sessions by both.
   Each slot's `game.cfg` pins `mpnovaworldportmin` = `max` to its game port, and the
   containers run on the machine's own network (`--network host`).
-- **The working directory** is rendered from scratch at every start (`hosted_settings.*`),
+- **The working directory** is rendered from scratch at every start (`model/hosted_settings.*`),
   in retail's formats: the host file (`server.host`: the owner's settings, `Replay 1` so
   the rotation never ends the session, the owner's first map last since the last line is
   the starting map; cp1252, CR LF), `game.cfg` (through the format's own writer, the
@@ -301,26 +301,26 @@ this directory's.
 
 ## Static addresses
 
-A **static address** (ADR 0066; `address_*.h`, `hosted_addresses`) is an own machine's
+A **static address** (ADR 0066; `model/address_*.h`, `cloud/address_*.h`, `hosted_addresses`) is an own machine's
 fixed public IPv4 with a name, `<name>.play.<domain>` (staging `play.staging.<domain>`),
 which its owner keeps for the own-machine servers it starts: every start of a server that
 names it runs on a machine carrying it, so the server lists at the same `address:32768`
 each time. Each is its own Stripe subscription (the static-address add-on, quantity 1,
 bought through Checkout once the account has an own machine for it, canceled through the
 Portal's cancel flow), or an admin's comp address (`POST /api/admin/users/<id>/addresses`).
-At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`sold_capacity.*`).
+At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`).
 
-- **The rows** (`address_repository.*`): `allocating` once named (the owner names a bought
+- **The rows** (`model/address_repository.*`): `allocating` once named (the owner names a bought
   one, `POST /api/me/addresses`; a name of 3 to 32 lower-case letters, digits and `-`, a
   letter or digit first and last, no `--`, not all digits, none the service keeps:
-  `address_names.*`), `ready` once allocated with its A record written, `lapsed` when its
+  `model/address_names.*`), `ready` once allocated with its A record written, `lapsed` when its
   grant is gone or an admin released it, `releasing`, then `released`; `failed` when the
   cloud refused it (its error code: an exhausted Elastic IP quota shows there). A name is
   unique for good: a released address keeps it until an admin renames the row. A start
   names an address (`address_id`, with `own_machine`): it must be the owner's, ready, and
   no other live server's (409 `address_unavailable`; the database's one live server per
   address). An own machine launched for such a server carries it (`fleet_machines.address_id`).
-- **The jobs** (`address_jobs.*`, the worker's): `address.allocate` (the address found by
+- **The jobs** (`model/address_jobs.*`, the worker's): `address.allocate` (the address found by
   its tag first, so a run cut short never allocates a second; then allocated with its tags
   in one call; its record written TTL 300; a ready one's run moves its record to a new
   name), `address.associate` (onto the machine launched to carry it, without reassociation
@@ -331,12 +331,12 @@ At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`sold_capacity.*`).
   keeps it), any association the cloud still shows ended, then released). `fleet.sweep`
   records the addresses the cloud holds for this deployment that no held row names
   (`hosted_address_orphans`, the admin's view), never releasing one.
-- **The drivers**: `ec2_address_driver.*` (Elastic IPs through the AWS CLI, tagged
+- **The drivers**: `cloud/ec2_address_driver.*` (Elastic IPs through the AWS CLI, tagged
   `opennova:hosted`, `opennova:deployment`, `opennova:address-id` and `Name` at
   allocation, the only tags the worker's policy admits; every other call on an address of
-  this deployment's tags alone) with `address_zone.*`'s `Route53Zone` (A records under the
+  this deployment's tags alone) with `cloud/address_zone.*`'s `Route53Zone` (A records under the
   deployment's play zone, UPSERT and DELETE alone, `get-change` until in sync); and the
-  local stack's `docker_address_driver.*` (the lowest free address of
+  local stack's `cloud/docker_address_driver.*` (the lowest free address of
   `ONNET_HOSTED_DOCKER_ADDRESSES`, which the docker machine driver starts the machine at;
   its association confirmed by inspect) with `FileZone` (a zone file the worker rewrites
   whole, which the smoke test reads).
@@ -363,7 +363,7 @@ At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`sold_capacity.*`).
   website session is ever minted for one, the admin users list hides them, the admin's
   user routes answer 404 for one, and no person may register or rename to a name starting
   with `srv-`.
-- **A hosted listing's owner.** One rule (`hosted_repository.h`): a listing belongs to the
+- **A hosted listing's owner.** One rule (`model/hosted_repository.h`): a listing belongs to the
   account whose HostKey it holds now (`hostdb::listing_owned_by`), except that a live
   hosted server's service account stands for that server's owner. `GET /api/me/hosts`
   lists the caller's own listings and its live hosted servers' (with `hosted_server_id`);
@@ -375,7 +375,7 @@ At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`sold_capacity.*`).
 
 ## Stats
 
-`stats_sampler.*`, `stats_repository.*`, `backend/migrations/0004_server_stats.sql`. The
+`stats_sampler.*`, `model/stats_repository.*`, `backend/migrations/0004_server_stats.sql`. The
 first supervisor pass of each minute samples every live server into
 `hosted_server_samples`: its state, its listing's players and mission, its admin link's
 scene, its container's CPU (a share of the slot's CPUs) and memory as its agent last
@@ -425,7 +425,7 @@ minutes and hours in the shape every subject shares ([`../README.md`](../README.
 
 ## Settings
 
-Two sets (`fleet_config.h`; `../parts.h` `hosted_policy`, `driver_setup`). The fleet's
+Two sets (`model/fleet_config.h`; `../parts.h` `hosted_policy`, `driver_setup`). The fleet's
 **policy**, which web, the fleet program and the worker read alike, so each decides alike
 whether hosting is on: the provider, the store, placement, the slots' limits, the cap, the
 serve image and the fleet's internal listener. The **driver's** own settings, which the
@@ -452,7 +452,7 @@ reads the store alone.
 | `ONNET_FLEET_SLOT_MEMORY_MB` | 512 | web, fleet, worker | Each container's memory (no swap). |
 | `ONNET_FLEET_SLOT_CPUS` | 1 | web, fleet, worker | Each container's CPUs (a decimal). |
 | `ONNET_HOSTED_SERVE_IMAGE` | none | web, fleet, worker | The serve image every start pins and the machines pull (pinned by digest at deploy). |
-| `ONNET_FLEET_IMAGE_ID` | none | web, fleet, worker | The image the launch templates pin (the deployment's `fleet_ami`, an `ami-...`), which a fleet roll's preview holds each machine's against (one on it is kept), and the fleet's health too (`fleet_health.h`: a machine's `outdated`, the `outdated_image` finding). |
+| `ONNET_FLEET_IMAGE_ID` | none | web, fleet, worker | The image the launch templates pin (the deployment's `fleet_ami`, an `ami-...`), which a fleet roll's preview holds each machine's against (one on it is kept), and the fleet's health too (`model/fleet_health.h`: a machine's `outdated`, the `outdated_image` finding). |
 | `ONNET_HOSTED_HOSTD_IMAGE` | none | web, fleet, worker | The hostd image the release pins (`app deploy` sets it, by digest): with `docker`, the image every machine container runs (`opennova-hostd` with `opennova-serve` beside it); everywhere, what the fleet's health holds each machine's agent image against (a machine's `outdated`, the `outdated_agent` finding). A cloud machine's hostd is the fleet cluster's daemon, of the revision `app deploy` rolls. |
 | `ONNET_INTERNAL_URL` | none | worker | The fleet's internal listener as the machines reach it, `http://<host>:<port>` (a deployment's Cloud Map name, `fleet.<deployment>.opennova.internal:8070`; the fleet's compose name locally): what a launch hands its machine. Required by both drivers. |
 | `ONNET_HOSTED_DEPLOYMENT` | none | worker | The deployment tag (`ec2`) or label (`docker`) every machine carries and every describe, list and terminate is scoped to, so two stacks in one account or one Docker never touch each other's machines. |
@@ -483,7 +483,7 @@ writes need the CSRF header.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `enabled`, `full`, the account's `entitlement`, the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3, `moving`, `launches_held`, `launching_machine`, `waiting_for_slot`, `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `server_phase.*`) and `stopped_because` (an ended server's last run: its cause, exit code, OOM flag and the server's own last line) |
+| `GET /api/me/servers` | a website session | `enabled`, `full`, the account's `entitlement`, the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3, `moving`, `launches_held`, `launching_machine`, `waiting_for_slot`, `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) and `stopped_because` (an ended server's last run: its cause, exit code, OOM flag and the server's own last line) |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
 | `POST /api/me/servers` | a website session | the settings (`game_name` required; `data_set_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit`, `no_own_machine`, `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
 | `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason and times) |
@@ -493,12 +493,12 @@ writes need the CSRF header.
 | `GET /api/me/servers/<id>/stats` | a website session | `?range=1h`, `24h` (the default), `7d`, `30d`: the server now (`live`), the range's `summary` (availability, players, egress, the `approximate` fields) and `series`; 400; 404; 429 (60, then two a second) |
 | `GET /api/me/servers/stats` | a website session | the account's servers together, as above |
 | `PUT /api/admin/users/<id>/comp` | admin | `{"servers": 0..16, "own_machines": 0..16}`, both: 200 `{"user", "entitlement"}`; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 (or a service account). An entitlement down to no server stops the account's hosted servers, as a ban does |
-| `GET /api/admin/hosted` | admin | the fleet: `enabled`, the provider, the cap, each kind's live servers and room, the live machines then the newest 10 ended (each with its state, cloud id, slots, the live servers on them (`slot_holders`: each slot's server and its state), addresses, agent and template versions, this month's egress, its `image_id` and `agent_log_stream`, its `stats` as its agent last reported them at `stats_at` with `net_in_bps` and `net_out_bps` between its two newest minutes, the `release`'s images, `outdated` (true, false, or null when nothing compares; `fleet_health.h` `machine_outdated`) and its static `address`) and the newest 100 servers (`?owner=`, `?state=live`, `ended`, `all`), each as the owner's plus its owner and tier, service account, container, place, generation, image, pins, players and `tick` (its last minute's `p99_ms` and `late` ticks from its slot's report, null with none); never the admin password or an agent's credential |
+| `GET /api/admin/hosted` | admin | the fleet: `enabled`, the provider, the cap, each kind's live servers and room, the live machines then the newest 10 ended (each with its state, cloud id, slots, the live servers on them (`slot_holders`: each slot's server and its state), addresses, agent and template versions, this month's egress, its `image_id` and `agent_log_stream`, its `stats` as its agent last reported them at `stats_at` with `net_in_bps` and `net_out_bps` between its two newest minutes, the `release`'s images, `outdated` (true, false, or null when nothing compares; `model/fleet_health.h` `machine_outdated`) and its static `address`) and the newest 100 servers (`?owner=`, `?state=live`, `ended`, `all`), each as the owner's plus its owner and tier, service account, container, place, generation, image, pins, players and `tick` (its last minute's `p99_ms` and `late` ticks from its slot's report, null with none); never the admin password or an agent's credential |
 | `GET /api/admin/hosted/<id>` | admin | one server with its `phase`, `stopped_because`, events and its machine; 404 |
 | `GET /api/admin/fleet/machines/<id>` | admin | one machine for its page: `machine` (as the fleet view's, each of its `slot_holders` also with its server's `name`, `game_port` and `tick`, so the page reads no fleet list), its newest 100 `events` oldest first (`from` null at its making; a note's `to` is its `from`), its `trees` (state, bytes so far, `total_bytes` from the tree's manifest or null, tries, error); 404 |
 | `POST /api/admin/fleet/machines/<id>/drain` | admin | the machine takes no new server and its servers move off one at a time (no restart counted), then it ends: 202; 404; 409 `not_live` |
 | `POST /api/admin/fleet/machines/<id>/end` | admin | the machine to `ending`, its servers placed again (no restart counted), its agent refused: 202; 404; 409 `not_live` |
-| `GET /api/admin/fleet/roll` | admin | a fleet roll's preview (`fleet_roll.h`): each machine that takes servers with its image (EC2's), its servers and `replace` (another image than `ONNET_FLEET_IMAGE_ID`, or one not known) or `keep`, and the ids to replace |
+| `GET /api/admin/fleet/roll` | admin | a fleet roll's preview (`model/fleet_roll.h`): each machine that takes servers with its image (EC2's), its servers and `replace` (another image than `ONNET_FLEET_IMAGE_ID`, or one not known) or `keep`, and the ids to replace |
 | `POST /api/admin/fleet/roll` | admin | `{"machines": [<id>, ...]}`: each drains onto machines launched for them from the templates as they are (a new image, template or user-data reaches those; hostd and the serve image reach machines in place): 202 with their ids; 400 `invalid_field` for no list, or a machine that takes no servers |
 | `POST /api/admin/hosted/update-all` | admin | `{}` or `{"data_set_id": n}`: every live server behind its data sets' current trees marked `update_requested`: 202 with how many; 400 |
 | `GET /api/admin/hosted/<id>/stats`, `GET /api/admin/hosted/stats` | admin | any server's stats, and the fleet's |

@@ -25,8 +25,8 @@
 
 #include "core/loggable.h"
 #include "hosted/admin_link.h"
-#include "hosted/hosted_repository.h"
-#include "hosted/hosted_settings.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/hosted_settings.h"
 #include "serve/serve_test_support.h"
 
 #include "net_sockets.h"

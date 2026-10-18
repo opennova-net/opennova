@@ -11,7 +11,7 @@ servers, pins their trees, counts restarts and ends machines; the agent does wha
 last reply said and keeps doing it while the service cannot be reached.
 
 Linux only. Target `opennova_hostd`, binary `opennova-hostd`, built from `apps/hostd` with
-the service's half of the protocol (`apps/novaworld_common/hosted/agent_protocol.*`,
+the service's half of the protocol (`apps/novaworld_common/hosted/protocol/agent_protocol.*`,
 `slots.h`) and the ECS metadata reader (`apps/novaworld_common/core/ecs_metadata.*`) compiled
 in. It ships in an image of its own, `opennova-hostd` (`apps/serve/Dockerfile`'s `hostd`
 target: the agent at `/usr/local/bin/opennova-hostd`, `opennova-serve` beside it, the static
@@ -27,7 +27,7 @@ the agent their own process, with the process runtime (below).
 
 A **machine** is the EC2 virtual machine; a **shared machine** packs up to K servers, an
 **own machine** runs exactly one (the paid add-on). A **slot** is one server's position on a
-machine (`hosted/slots.h`): slot k is the game's UDP port 32768 + k (open to everyone), the
+machine (`hosted/protocol/slots.h`): slot k is the game's UDP port 32768 + k (open to everyone), the
 remote admin's TCP port 32800 + k (open to the service alone), the container's user
 10001 + k and the working directory `/srv/slots/slot-k` (0700, that user's). At most 32
 slots; an own machine has slot 0 alone. A **tree** is one immutable version of a data
@@ -97,7 +97,7 @@ bootstrap and takes them over.
 
 Both routes are on the service's internal listener and answer every refusal with a bare
 404. The message shapes, their checks and their caps are
-`apps/novaworld_common/hosted/agent_protocol.h`; the agent and the service build the same
+`apps/novaworld_common/hosted/protocol/agent_protocol.h`; the agent and the service build the same
 encoders and strict decoders.
 
 **Bootstrap**, once per machine:
@@ -312,7 +312,7 @@ agent's (DEPLOY.md, "Hosted game servers").
 
 `--runtime process` (`process_runtime.h`) runs each server as a child process of the agent
 rather than a docker container: the runtime of a machine that is itself a container and runs
-no docker, the local stack's (`apps/novaworld_common/hosted/docker_machine_driver.h`, which
+no docker, the local stack's (`apps/novaworld_common/hosted/cloud/docker_machine_driver.h`, which
 starts the hostd image as its serve user with `--runtime process --nft none --log-dir
 /var/log/opennova`, the stack's log volume). A start
 is `<--serve> --resource-dir <the data set's mount path> <opennova-serve's arguments>` in the
@@ -366,7 +366,7 @@ does not hold. ECS starts it again; the machine's servers, if any, run on as the
 
 ## What the machine provides
 
-The machine (`apps/novaworld_common/hosted/machine/`, the user-data on the pinned
+The machine (`apps/novaworld_common/hosted/cloud/machine/`, the user-data on the pinned
 ECS-optimized Amazon Linux 2023 image) is the agent's contract with the machine: docker with
 no user-namespace remapping (the slot's UID in the container is the machine's, which the
 fences and the counters match) and the ECS agent, both the image's own; the token and the

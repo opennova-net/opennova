@@ -147,7 +147,7 @@ public:
 	// Called on the job's thread, with a connection of its own, after each full
 	// reconcile that completed with the prices checking out and no subscription
 	// of ours selling a price the configuration does not name (the hosted
-	// servers' limits hold, hosted/limits_hold.h, trusts the cache after one).
+	// servers' limits hold, hosted/model/limits_hold.h, trusts the cache after one).
 	void set_on_reconciled(std::function<void(db::Database &)> on_reconciled) {
 		on_reconciled_ = std::move(on_reconciled);
 	}

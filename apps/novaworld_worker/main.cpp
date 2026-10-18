@@ -17,15 +17,15 @@
 #include "accounts/account_jobs.h"
 #include "billing/billing_jobs.h"
 #include "billing/entitlement.h"
-#include "hosted/address_jobs.h"
-#include "hosted/address_zone.h"
-#include "hosted/docker_address_driver.h"
-#include "hosted/docker_machine_driver.h"
-#include "hosted/ec2_address_driver.h"
-#include "hosted/ec2_machine_driver.h"
-#include "hosted/fleet_jobs.h"
-#include "hosted/limits_hold.h"
-#include "hosted/stats_jobs.h"
+#include "hosted/cloud/address_zone.h"
+#include "hosted/cloud/docker_address_driver.h"
+#include "hosted/cloud/docker_machine_driver.h"
+#include "hosted/cloud/ec2_address_driver.h"
+#include "hosted/cloud/ec2_machine_driver.h"
+#include "hosted/model/address_jobs.h"
+#include "hosted/model/fleet_jobs.h"
+#include "hosted/model/limits_hold.h"
+#include "hosted/model/stats_jobs.h"
 #include "jobs/maintenance_jobs.h"
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
@@ -43,8 +43,8 @@ using namespace opennova;
 using namespace opennova::novaworld_server;
 
 // The machine driver over a driver setup (parts.h driver_setup), and with the
-// static addresses on their driver and their zone (hosted/address_driver.h,
-// hosted/address_zone.h) over the same runner. Its members go in reverse: the
+// static addresses on their driver and their zone (hosted/cloud/address_driver.h,
+// hosted/cloud/address_zone.h) over the same runner. Its members go in reverse: the
 // drivers first, then their runner, then the scratch directory.
 struct MachineDriverStack {
 	ScratchDir scratch; // the ec2 driver's

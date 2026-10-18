@@ -18,7 +18,7 @@
 # mass-stop guard; probes_unanswered counts the gate's probes it had no lobby
 # to hand out for, which no other light shows: that gate's loops turn and its
 # /livez says ok; the fleet leader alone logs the last three, from the
-# fleet's health over its rows (apps/novaworld_common/hosted/fleet_health.h):
+# fleet's health over its rows (apps/novaworld_common/hosted/model/fleet_health.h):
 # the machines stuck in a state or moving over and over, the least free share
 # of a ready machine's disk, and the seconds since its supervisor's last pass
 # that failed in nothing), and
@@ -219,7 +219,7 @@ locals {
       comparison  = "GreaterThanThreshold", threshold = 0, missing = "notBreaching",
       description = "A gate left probes unanswered in 5 minutes: it had no lobby to hand out (no lobby instance takes clients; LobbiesLive, app status, app logs lobby)."
     }
-    # The fleet's health (fleet_health.h): a machine launching or booting past
+    # The fleet's health (hosted/model/fleet_health.h): a machine launching or booting past
     # 20 minutes, draining past 60, ending past 15, lost past 10, or moving
     # more than 6 times in an hour. No data (hosting off, no leader) is none:
     # fleet-pass-age covers a silent leader.

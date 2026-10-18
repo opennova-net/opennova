@@ -1,7 +1,7 @@
 // opennova-hostd: the machine agent. On each machine of the hosted servers'
 // fleet it runs the opennova-serve containers the NovaWorld service places on
 // the machine's slots and reports them, over the agent protocol
-// (apps/novaworld_common/hosted/agent_protocol.h; agent.h). This file owns the
+// (apps/novaworld_common/hosted/protocol/agent_protocol.h; agent.h). This file owns the
 // command line, the machine's identity checks, the lock on the state
 // directory, the fences and their self-test, the log (and its copy under
 // --log-dir), what the agent reads of the machine once at its start (its

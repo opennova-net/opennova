@@ -3,9 +3,9 @@
 #include "accounts/auth.h"
 #include "billing/entitlement.h"
 #include "data_sets/data_set_repository.h"
-#include "hosted/address_repository.h"
-#include "hosted/hosted_repository.h"
-#include "hosted/stats_repository.h"
+#include "hosted/model/address_repository.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/stats_repository.h"
 #include "hosted_routes.h"
 #include "http_json.h"
 #include "infra/usage_routes.h"
@@ -483,7 +483,7 @@ std::vector<RollStep> FleetRoutes::plan_roll(db::Database &db) {
 	return plan_fleet_roll(machines, images, servers, release_.image_id);
 }
 
-// GET /api/admin/fleet/roll — a fleet roll's preview (hosted/fleet_roll.h):
+// GET /api/admin/fleet/roll — a fleet roll's preview (hosted/model/fleet_roll.h):
 // {"image_id" (the image the launch templates pin, null for none), "machines"
 // (each live machine that takes servers: {id, kind, state, image_id (its own,
 // null when not known), servers, action: "replace" or "keep", why}), "replace"

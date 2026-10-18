@@ -5,7 +5,7 @@
 //
 // - the fleet's internal listener bind (internal_bind, program/program.h's configure
 //   step): ONNET_INTERNAL_HTTP_BIND where set; on ECS, its task's private IPv4
-//   at the internal port (hosted/fleet_config.h), never a wildcard or public
+//   at the internal port (hosted/model/fleet_config.h), never a wildcard or public
 //   address. Neither: the fleet keeps the environment's bind;
 // - the release its tasks run (read_task_revision): its task definition's
 //   family and revision, alike in every task of one revision, and new with

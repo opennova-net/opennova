@@ -2,9 +2,9 @@
 
 // The static addresses' cloud and DNS calls as jobs (jobs/job_queue.h; ADR
 // 0066): the routes and the fleet's pass never call an AddressDriver
-// (address_driver.h) or a ZoneDriver (address_zone.h); they enqueue these, in
-// the transaction of the row change that causes them, and the workers run
-// them. Each is idempotent, and a step that must wait (a machine still
+// (hosted/cloud/address_driver.h) or a ZoneDriver (hosted/cloud/address_zone.h);
+// they enqueue these, in the transaction of the row change that causes them,
+// and the workers run them. Each is idempotent, and a step that must wait (a machine still
 // pending, a record still draining) is a retry at the wait. Service policy,
 // not a port.
 //
@@ -38,8 +38,8 @@
 // for this deployment that no held row names is recorded as an orphan
 // (hosted_address_orphans), never released.
 
-#include "address_driver.h"
-#include "address_zone.h"
+#include "hosted/cloud/address_driver.h"
+#include "hosted/cloud/address_zone.h"
 #include "jobs/worker_pool.h"
 
 #include <net/novaworld/db/database.h>

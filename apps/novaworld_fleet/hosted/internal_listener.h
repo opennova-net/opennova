@@ -16,7 +16,7 @@
 
 #include "fleet_desired_state.h"
 
-#include "hosted/fleet_config.h"
+#include "hosted/model/fleet_config.h"
 
 #include <net/novaworld/db/database.h>
 

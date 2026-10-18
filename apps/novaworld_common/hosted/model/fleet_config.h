@@ -7,8 +7,8 @@
 // (placement.h), the slots' limits every container gets and the serve image a
 // start pins. The machine drivers' own (DriverConfig, parse_driver_config; the
 // worker's alone, which launches the machines): what the drivers launch from
-// (ec2_machine_driver.h, docker_machine_driver.h) and where the machines reach
-// the fleet. The policy's variables:
+// (hosted/cloud/ec2_machine_driver.h, hosted/cloud/docker_machine_driver.h) and
+// where the machines reach the fleet. The policy's variables:
 //
 //   ONNET_INTERNAL_HTTP_BIND      <IPv4>:<port> (127.0.0.1:8070): the
 //                                 fleet's internal listener
@@ -69,19 +69,19 @@
 //                                 join (infra/aws/fleet_agent.tf's
 //                                 opennova-<deployment>-fleet)
 //   ONNET_HOSTED_ADDRESS_ZONE_ID  ec2, with static addresses on: the play
-//                                 zone's Route 53 id (Z...; address_zone.h
+//                                 zone's Route 53 id (Z...; hosted/cloud/address_zone.h
 //                                 Route53Zone)
 //   ONNET_HOSTED_ADDRESS_ZONE_FILE
 //                                 docker, with static addresses on: the zone
-//                                 file the worker writes (address_zone.h
+//                                 file the worker writes (hosted/cloud/address_zone.h
 //                                 FileZone), absolute
 //   ONNET_HOSTED_DOCKER_ADDRESSES docker, with static addresses on: the
 //                                 addresses it hands out (172.30.77.64/28;
-//                                 docker_address_driver.h)
+//                                 hosted/cloud/docker_address_driver.h)
 //
 // and, for the ec2 driver, ONNET_HOSTED_EC2_REGION, ONNET_HOSTED_EC2_SUBNETS
 // (comma-separated, a subnet per zone), ONNET_HOSTED_AWS_CLI and
-// ONNET_HOSTED_MACHINE_SCRIPT (the path of machine/machine_user_data.sh); for
+// ONNET_HOSTED_MACHINE_SCRIPT (the path of hosted/cloud/machine/machine_user_data.sh); for
 // the docker driver (the local stack's), ONNET_HOSTED_DOCKER_URL (the Docker
 // Engine API, http://<host>:<port>), ONNET_HOSTED_DOCKER_NETWORK (the network
 // its machines join), ONNET_HOSTED_DOCKER_DATA_FROM (the container holding
@@ -90,8 +90,8 @@
 // read as they are; its check_config decides whether they run. Service
 // policy, not a port.
 
-#include "docker_machine_driver.h"
-#include "ec2_machine_driver.h"
+#include "hosted/cloud/docker_machine_driver.h"
+#include "hosted/cloud/ec2_machine_driver.h"
 #include "net_cidr.h"
 #include "placement.h"
 

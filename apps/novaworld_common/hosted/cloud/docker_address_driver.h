@@ -23,7 +23,7 @@
 
 #include "address_driver.h"
 #include "docker_machine_driver.h"
-#include "net_cidr.h"
+#include "hosted/model/net_cidr.h"
 
 #include <cstdint>
 #include <string>

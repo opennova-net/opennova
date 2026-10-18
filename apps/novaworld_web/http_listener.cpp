@@ -16,7 +16,7 @@
 #include "hosted/console_routes.h"
 #include "hosted/fleet_routes.h"
 #include "hosted/hosted_routes.h"
-#include "hosted/net_cidr.h"
+#include "hosted/model/net_cidr.h"
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
 #include "infra/attention_routes.h"

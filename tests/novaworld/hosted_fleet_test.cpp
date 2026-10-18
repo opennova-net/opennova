@@ -22,7 +22,7 @@
 
 #include "hosted_fleet_rig.h"
 
-#include "hosted/fleet_roll.h"
+#include "hosted/model/fleet_roll.h"
 
 #include "common/test_expect.h"
 

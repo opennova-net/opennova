@@ -1,5 +1,5 @@
 // What needs an admin, as GET /api/admin/attention answers it
-// (apps/novaworld_common/hosted/fleet_health.h): the fleet's health findings
+// (apps/novaworld_common/hosted/model/fleet_health.h): the fleet's health findings
 // and the deployment's firing CloudWatch alarms.
 
 export type FindingLevel = 'danger' | 'warn' | 'info';
