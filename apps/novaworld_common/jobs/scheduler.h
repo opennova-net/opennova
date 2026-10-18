@@ -75,7 +75,7 @@ public:
 	static std::string start_schedule_key(const std::string &kind, const std::string &start_key);
 
 	// The scheduler thread's ticks so far, a database error's included (the
-	// stall watchdog's counter, health.h): it stands still only while a tick
+	// stall watchdog's counter, core/health.h): it stands still only while a tick
 	// hangs. Thread-safe.
 	uint64_t turns() const { return turns_.load(std::memory_order_relaxed); }
 

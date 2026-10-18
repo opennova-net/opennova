@@ -1,4 +1,4 @@
-// opennova-novaworld-worker: a worker (program.h). The job pool
+// opennova-novaworld-worker: a worker (program/program.h). The job pool
 // (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) and the handlers it runs:
 // the prunes (the service's, the website's, the hosted stats'), the mail it
 // sends, the billing sync, the fleet's machine driver calls and the static
@@ -10,9 +10,9 @@
 // (apps/novaworld_data). Its watchdog watches the pool's claim loop and the
 // scheduler's ticks: a slow job occupies its worker, never a watched loop.
 
-#include "ecs_metadata.h"
+#include "core/ecs_metadata.h"
 #include "parts.h"
-#include "program.h"
+#include "program/program.h"
 
 #include "billing/billing_jobs.h"
 #include "billing/entitlement.h"
@@ -164,7 +164,7 @@ int run(const program::Boot &boot) {
 
 	// Its periodic kinds, in every worker process. The at-start ones (the
 	// billing reconcile) are keyed by the release its tasks run, its ECS task
-	// definition's revision (ecs_metadata.h): every task of one release
+	// definition's revision (core/ecs_metadata.h): every task of one release
 	// enqueues each once between them. Off ECS (the local stack, the tests)
 	// they are keyed by their kind alone.
 	std::string release;

@@ -1,4 +1,4 @@
-// The six programs end to end (apps/novaworld_common/program.h): gate, lobby,
+// The six programs end to end (apps/novaworld_common/program/program.h): gate, lobby,
 // web, fleet, worker and data as six processes of their built binaries
 // (program_process.h), on one database of the test's own and one Redis
 // namespace, sharing nothing but those (ctest passes the six binaries). Every
@@ -32,7 +32,7 @@
 #include "lobby_client.h"
 #include "program_process.h"
 
-#include "health.h"
+#include "core/health.h"
 
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_repository.h>

@@ -2,7 +2,7 @@
 // (apps/novaworld_web/data_sets/data_set_routes.h, release_routes.h; ADR 0064), driven
 // in-process: a database of the run's own (common/test_database.h, migrated with the games
 // seed, so the four seeded data sets are there), a Redis namespace of its own
-// (common/test_redis.h), a local object store in a temp directory (local_object_store.h),
+// (common/test_redis.h), a local object store in a temp directory (core/local_object_store.h),
 // the Crow HttpListener from opennova_novaworld_web_core on a port the OS picks, and
 // requests through apps/common's http_exchange as the Bearer admin. The cases share the
 // listener and run in order: every route refused without the admin token; the list's
@@ -20,15 +20,15 @@
 // release.apply per section), retired, deleted with its package object (a published one
 // refused, an abandoned upload aborted).
 
+#include "core/local_object_store.h"
 #include "data_sets/data_set_routes.h"
 #include "hosted/data_set_files.h"
 #include "hosted/data_set_repository.h"
 #include "http_listener.h"
 #include "jobs/job_queue.h"
-#include "local_object_store.h"
 #include "net_http.h"
 #include "net_sockets.h"
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>

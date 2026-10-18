@@ -1,9 +1,9 @@
 #include "aws_api.h"
 
 #include "aws_xml.h"
-#include "hosted/owner_file.h"
-#include "loggable.h"
-#include "text_util.h"
+#include "core/loggable.h"
+#include "core/owner_file.h"
+#include "core/text_util.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>

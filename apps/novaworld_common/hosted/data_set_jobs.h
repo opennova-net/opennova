@@ -2,7 +2,7 @@
 
 // The hosted data sets' work as jobs (jobs/job_queue.h, ADR 0064): what the admin routes
 // enqueue in the transaction of the row change that causes it, and the data program's workers
-// (apps/novaworld_data) run against the object store (object_store.h) and the rows
+// (apps/novaworld_data) run against the object store (core/object_store.h) and the rows
 // (data_set_repository.h), the store's calls bounded by its own timeouts, so a 1 GB tree only
 // occupies a data worker, never the worker program's machine launches, and no watched loop waits
 // on it.
@@ -51,9 +51,9 @@
 // The routes' enqueues below return the job's id, 0 when one of its dedupe key is queued or
 // running already.
 
+#include "core/object_store.h"
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
-#include "object_store.h"
 
 #include <net/novaworld/db/database.h>
 

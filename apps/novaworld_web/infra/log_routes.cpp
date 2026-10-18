@@ -1,9 +1,9 @@
 #include "log_routes.h"
 
+#include "core/loggable.h"
+#include "core/text_util.h"
 #include "http_json.h"
 #include "infra_status.h"
-#include "loggable.h"
-#include "text_util.h"
 
 #include <base/io/strutil.h>
 

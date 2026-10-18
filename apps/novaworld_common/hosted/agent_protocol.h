@@ -285,7 +285,7 @@ struct ContainerReport {
 	std::optional<TickHealth> tick; // running, with a fresh --stats-file
 };
 
-// The machine's own use, as its agent read it (proc_stats.h).
+// The machine's own use, as its agent read it (core/proc_stats.h).
 struct MachineStats {
 	double cpu_percent = 0.0; // of the whole machine, 0..100
 	uint64_t memory_used_bytes = 0;

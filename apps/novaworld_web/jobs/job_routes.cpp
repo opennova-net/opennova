@@ -1,7 +1,7 @@
 #include "job_routes.h"
 
+#include "core/loggable.h"
 #include "http_json.h"
-#include "loggable.h"
 #include "jobs/maintenance_jobs.h"
 
 #include <base/io/strutil.h>

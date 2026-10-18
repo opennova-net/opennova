@@ -2,10 +2,10 @@
 
 #include "auth.h"
 #include "billing/billing_repository.h"
+#include "core/loggable.h"
 #include "hosted/address_jobs.h"
 #include "hosted/fleet_jobs.h"
 #include "hosted/hosted_settings.h"
-#include "loggable.h"
 
 #include <net/novaworld/lobby_repository.h>
 

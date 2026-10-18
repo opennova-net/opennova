@@ -2,7 +2,7 @@
 
 // What several programs build from the same settings, each deciding alike, so
 // no program needs another's memory to agree with it (the HTTP layer's;
-// program.h):
+// program/program.h):
 //
 // - The hosted servers' policy (hosted_policy): whether hosting is on, its
 //   provider, the fleet's policy settings (placement, the slots' limits, the
@@ -35,12 +35,12 @@
 #include "billing/billing_config.h"
 #include "billing/stripe_api.h"
 #include "command_runner.h"
+#include "core/object_store.h"
 #include "hosted/fleet_config.h"
 #include "hosted/machine_driver.h"
 #include "jobs/scheduler.h"
 #include "mailer.h"
-#include "object_store.h"
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <net/novaworld/db/database.h>
 
@@ -78,7 +78,7 @@ struct HostedPolicy {
 	bool on = false;
 	// The driver's name ("ec2" or "docker") while on, else "none".
 	std::string provider = "none";
-	// The object store (object_store.h) ONNET_OBJECT_STORE_URL names, when it
+	// The object store (core/object_store.h) ONNET_OBJECT_STORE_URL names, when it
 	// parses (store_ok): the data sets' trees live in it. Read whether or not
 	// hosting is on (web's data set routes and the data program's jobs run over
 	// it either way); hosting is on only with it.

@@ -1,6 +1,6 @@
 # opennova_novaworld_common: the NovaWorld service's shared library, what more
 # than one of its six programs uses (README.md "Programs"): the shared boot and
-# main loop (program.*), the config, the health (the watchdog, the heartbeat,
+# main loop (program/program.*), the config, the health (the watchdog, the heartbeat,
 # the /livez listener), the address an ECS task finds from its own metadata,
 # the games catalogue; with the HTTP layer, the accounts and sessions, the
 # Redis pool, the mail, the background jobs' queue, pool and scheduler, the
@@ -8,28 +8,28 @@
 # from the same settings (parts.*). Each program's own code and its main()
 # live in apps/novaworld_<program> (gate, lobby, web, fleet, worker, data).
 set(NOVAWORLD_COMMON_SOURCES
-    program.cpp
+    program/program.cpp
     # Each program's own minute of use (its program_samples rows), and where
     # the logs are (ONNET_LOG_STORE) with each line's copy into a local store.
-    program_usage.cpp
-    program_log.cpp
-    server_config.cpp
-    catalog_repository.cpp
-    # The stall watchdog and the heartbeat line (health.h), GET /livez on
+    program/program_usage.cpp
+    core/program_log.cpp
+    program/server_config.cpp
+    program/catalog_repository.cpp
+    # The stall watchdog and the heartbeat line (core/health.h), GET /livez on
     # ONNET_HEALTH_PORT for the programs with no HTTP of their own
-    # (health_listener.h), and an ECS task's own address (ecs_metadata.h:
+    # (core/health_listener.h), and an ECS task's own address (core/ecs_metadata.h:
     # the fleet's private bind).
-    health.cpp
-    health_listener.cpp
-    ecs_metadata.cpp
+    core/health.cpp
+    core/health_listener.cpp
+    core/ecs_metadata.cpp
     # What a Linux machine or container uses, from the kernel's files (hostd's
     # machine stats, each program's own samples; hostd compiles it in too).
-    proc_stats.cpp
+    core/proc_stats.cpp
     # The object store the game data lives in (ADR 0064): the seam, S3 through
     # the AWS CLI, and a directory for a developer's machine and the tests.
-    object_store.cpp
-    s3_object_store.cpp
-    local_object_store.cpp
+    core/object_store.cpp
+    core/s3_object_store.cpp
+    core/local_object_store.cpp
 )
 
 if(BUILD_NOVAWORLD_HTTP)
@@ -89,7 +89,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/hosted_settings.cpp
         hosted/limits_hold.cpp
         hosted/net_cidr.cpp
-        hosted/owner_file.cpp
+        core/owner_file.cpp
         hosted/placement.cpp
         hosted/server_phase.cpp
         hosted/sold_capacity.cpp
@@ -99,7 +99,7 @@ if(BUILD_NOVAWORLD_HTTP)
         # Portal): the settings, the billing tables and the hosting entitlement
         # read from them, the sync keeping them in step with Stripe, the curl
         # transport (apps/common/command_runner.h, its config file owner-only
-        # through hosted/owner_file.cpp) and the typed client.
+        # through core/owner_file.cpp) and the typed client.
         billing/billing_config.cpp
         billing/billing_jobs.cpp
         billing/billing_repository.cpp
@@ -164,6 +164,6 @@ target_compile_features(opennova_novaworld_common PUBLIC cxx_std_17)
 
 if(WIN32)
     # advapi32: the hosted servers' owner-only file DACLs (SetSecurityInfo,
-    # hosted/owner_file.cpp).
+    # core/owner_file.cpp).
     target_link_libraries(opennova_novaworld_common PUBLIC ws2_32 advapi32)
 endif()

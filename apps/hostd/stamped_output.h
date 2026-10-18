@@ -3,7 +3,7 @@
 // The process runtime's copy of each server's output into the log directory
 // (--log-dir, the local stack's log store), each line after the time it was
 // written ("2026-10-18T14:05:03.123Z <line>", as the programs' copies are,
-// apps/novaworld_common/program_log.h), so the site's log view reads a time for
+// apps/novaworld_common/core/program_log.h), so the site's log view reads a time for
 // every line. A server's output goes into a pipe of its own, which one thread
 // drains into the server's file; a line not ended by the server's exit is
 // written then. Linux only, as hostd. Platform plumbing, not a port.

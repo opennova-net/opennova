@@ -1,10 +1,10 @@
 #include "docker_machine_driver.h"
 
 #include "agent_protocol.h"
+#include "core/loggable.h"
+#include "core/text_util.h"
 #include "ec2_machine_driver.h"
-#include "loggable.h"
 #include "net_http.h"
-#include "text_util.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>

@@ -39,13 +39,13 @@
 // (ONNET_PUBLIC_HOST, ONNET_WEB_HOST with ONNET_HTTP_PORT,
 // ONNET_LOBBY_ENDPOINT, ONNET_INTERNAL_URL), never from a port another bound.
 // Each process logs {"boot":{"program":"<program>"}} once as it starts, its own
-// heartbeat ({"heartbeat":{"program":"<program>",...}}, health.h) with the
+// heartbeat ({"heartbeat":{"program":"<program>",...}}, core/health.h) with the
 // fields it knows, and runs its own stall watchdog over its own loops: a stall
 // exits that process alone (70). Every program but web answers GET /livez on
-// ONNET_HEALTH_PORT from that watchdog (health_listener.h); web answers it on
+// ONNET_HEALTH_PORT from that watchdog (core/health_listener.h); web answers it on
 // its own HTTP port. Service policy, not a port.
 
-#include "health.h"
+#include "core/health.h"
 #include "server_config.h"
 
 #include <net/novaworld/db/database.h>
@@ -79,7 +79,7 @@ struct Program {
 };
 
 // A program's whole process, main()'s body: the log sink (and with a directory
-// log store, ONNET_LOG_STORE=file://, its copy of every line: program_log.h),
+// log store, ONNET_LOG_STORE=file://, its copy of every line: core/program_log.h),
 // the config from the environment, the boot line, the configure step (its
 // FATAL: exit 1, nothing touched), the database pool, the migrations and the
 // seeds under the migration lock, then the run. Logs the stop line on a clean
@@ -91,7 +91,7 @@ int run_program(const Program &program);
 // tick; the unknown-message flushes); `heartbeat` fills the program's fields of
 // the line every kHeartbeatMs, `window_s` the seconds since the last one.
 // `health_listener`: whether the loop serves GET /livez on ONNET_HEALTH_PORT
-// (health_listener.h); web serves its own on its HTTP port.
+// (core/health_listener.h); web serves its own on its HTTP port.
 struct LoopHooks {
 	std::function<void(db::Database &db, uint64_t now_ms)> tick;
 	std::function<void(db::Database &db, Heartbeat &beat, int64_t window_s)> heartbeat;

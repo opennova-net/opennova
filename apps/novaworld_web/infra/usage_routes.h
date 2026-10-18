@@ -9,7 +9,7 @@
 //     slot's, its memory, its slot's network in and out, its tick health), a
 //     machine (fleet_machine_samples, _hourly: its CPU, memory, network and disk),
 //     a program's tasks together or one of them (program_samples, program_hourly,
-//     program_usage.h), each at 1-minute points for 48 h or hourly ones for 400
+//     program/program_usage.h), each at 1-minute points for 48 h or hourly ones for 400
 //     days with its limits and its newest minute; or an AWS resource (rds, cache,
 //     nlb) as CloudWatch keeps its metrics (metrics_store.h; none on the local
 //     stack, which the reply says)

@@ -1,8 +1,8 @@
 #include "console_routes.h"
 
+#include "core/loggable.h"
 #include "hosted/console_queue.h"
 #include "http_json.h"
-#include "loggable.h"
 #include "redis_client.h"
 
 #include <base/io/cp1252.h>

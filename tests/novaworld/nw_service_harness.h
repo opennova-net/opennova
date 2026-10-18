@@ -13,7 +13,7 @@
 #include "gate_listener.h"
 #include "http_listener.h"
 #include "nw_udp_listener.h"
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/db/database.h>

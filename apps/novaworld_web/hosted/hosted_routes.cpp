@@ -2,6 +2,7 @@
 
 #include "auth.h"
 #include "billing/entitlement.h"
+#include "core/loggable.h"
 #include "hosted/address_names.h"
 #include "hosted/address_repository.h"
 #include "hosted/data_set_repository.h"
@@ -9,8 +10,7 @@
 #include "hosted/host_limits.h"
 #include "hosted/server_phase.h"
 #include "http_json.h"
-#include "loggable.h"
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <base/io/cp1252.h>
 #include <net/novaworld/host_repository.h>

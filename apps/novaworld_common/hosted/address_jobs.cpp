@@ -4,9 +4,9 @@
 #include "address_repository.h"
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
+#include "core/loggable.h"
 #include "fleet_jobs.h"
 #include "fleet_repository.h"
-#include "loggable.h"
 
 #include <algorithm>
 #include <cstdio>

@@ -110,7 +110,7 @@ public:
 	// memory. Null is safe (no sighting is recorded).
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
-	// The stall watchdog GET /livez answers from (health.h), and GET /healthz
+	// The stall watchdog GET /livez answers from (core/health.h), and GET /healthz
 	// with Redis's PING (redis_answers()). Set before start(); it must outlive
 	// the HTTP listener. Null: /livez answers "ok", /healthz from the PING
 	// alone.
@@ -145,7 +145,7 @@ public:
 	void set_alarm_store(infra::AlarmStore *store) { alarm_store_ = store; }
 
 	// The object store the hosted data sets' trees and the update packages
-	// live in (object_store.h; parts.h make_object_store), which the admin's
+	// live in (core/object_store.h; parts.h make_object_store), which the admin's
 	// data set and release routes upload into and read. Set before start(); it
 	// must outlive the listener. Null: no store (those routes answer
 	// store_unavailable).

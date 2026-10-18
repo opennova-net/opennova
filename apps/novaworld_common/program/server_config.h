@@ -109,12 +109,12 @@ struct ServerConfig {
 	uint64_t tick_interval_ms = 500;
 
 	// ONNET_HEALTH_PORT: the TCP port GET /livez answers on
-	// (health_listener.h) in the gate, the lobby, the fleet and the
+	// (core/health_listener.h) in the gate, the lobby, the fleet and the
 	// worker; web answers it on http_port. 0: the OS picks (the tests).
 	uint16_t health_port = 8081;
 
 	// The fleet's internal listener bind its boot found in its ECS task
-	// (<private IPv4>:8070, ecs_metadata.h) with ONNET_INTERNAL_HTTP_BIND
+	// (<private IPv4>:8070, core/ecs_metadata.h) with ONNET_INTERNAL_HTTP_BIND
 	// unset; empty: the environment's (hosted/fleet_config.h reads it). Not an
 	// environment variable of its own.
 	std::string internal_bind;
@@ -222,7 +222,7 @@ struct ServerConfig {
 
 	// ONNET_HOSTED_AWS_CLI: the AWS CLI v2 every call of it runs (an absolute
 	// path, run as given, no PATH search): the S3 object store
-	// (s3_object_store.h), the mailer's SES calls (mailer.h); the fleet's EC2
+	// (core/s3_object_store.h), the mailer's SES calls (mailer.h); the fleet's EC2
 	// driver reads it with its settings (hosted/fleet_config.h).
 	std::string aws_cli = "/usr/local/bin/aws";
 
@@ -274,7 +274,7 @@ struct ServerConfig {
 	// account, a backstop beside the fleet's own room.
 	int hosted_cap = 24;
 	// The object store the hosted game data and the update packages live in
-	// (object_store.h, ADR 0064): ONNET_OBJECT_STORE_URL, `s3://<bucket>/data`
+	// (core/object_store.h, ADR 0064): ONNET_OBJECT_STORE_URL, `s3://<bucket>/data`
 	// (the deployment's own ops bucket) with ONNET_OBJECT_STORE_REGION, the
 	// bucket's region, or `file:///<dir>` for the local stack and the tests (its
 	// machines copy trees from that directory). Hosting is on only with a store

@@ -1,9 +1,9 @@
 #include "connection_routes.h"
 
 #include "auth.h"
+#include "core/loggable.h"
 #include "host_routes.h"
 #include "http_json.h"
-#include "loggable.h"
 
 #include <base/io/cp1252.h>
 #include <net/novaworld/lobby_repository.h>

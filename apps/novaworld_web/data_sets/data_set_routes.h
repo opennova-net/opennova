@@ -3,7 +3,7 @@
 // The hosted data sets' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md
 // "Game data"): the data sets an admin
 // creates as rows (hosted/data_set_repository.h), the trees the admin page uploads into the
-// deployment's object store (object_store.h: this program begins each file's multipart
+// deployment's object store (core/object_store.h: this program begins each file's multipart
 // upload, takes each part's PUT and hands it to the store, and completes the upload), their
 // finalize and delete. Each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY like
 // every /api route), its state change logged with its actor and status (AccessMiddleware):

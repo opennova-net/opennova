@@ -25,7 +25,7 @@
 #include "tree_store.h"
 
 #include "command_runner.h"
-#include "ecs_metadata.h"
+#include "core/ecs_metadata.h"
 #include "net_sockets.h"
 
 #include <base/io/file_io.h>

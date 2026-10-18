@@ -10,7 +10,7 @@
 // current_period_end on its item, a deleted customer, a list page's has_more) and its error
 // kinds; the typed client against the FakeStripeApi the later billing tests drive; and the
 // billing settings' checks. Crow-free and database-free: compiles the billing sources and
-// hosted/owner_file.cpp directly, so it runs on every build.
+// core/owner_file.cpp directly, so it runs on every build.
 
 #include "billing/billing_config.h"
 #include "billing/stripe_api.h"
@@ -18,7 +18,7 @@
 #include "billing/stripe_signature.h"
 #include "billing/tiers.h"
 #include "command_runner.h"
-#include "hosted/owner_file.h"
+#include "core/owner_file.h"
 
 #include <base/io/json.h>
 #include <base/io/sha256.h>

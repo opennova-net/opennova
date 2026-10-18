@@ -1,12 +1,12 @@
 #include "ec2_machine_driver.h"
 
 #include "agent_protocol.h"
-#include "health.h" // Watchdog::steady_now_ms
+#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/loggable.h"
+#include "core/owner_file.h"
+#include "core/text_util.h"
 #include "hosted_settings.h"
-#include "loggable.h"
 #include "net_cidr.h"
-#include "owner_file.h"
-#include "text_util.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>

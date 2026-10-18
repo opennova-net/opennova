@@ -15,7 +15,7 @@
 #include "nw_udp_listener.h"
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <net/napi/session.h>            // make_client_host_request, ClientVar
 #include <net/novaworld/client_session.h>

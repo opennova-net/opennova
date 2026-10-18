@@ -95,7 +95,7 @@ x-novaworld-env: &novaworld-env
   # the worker alone the ec2 driver's own settings (infra/aws/fleet.tf).
   ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
   ONNET_HOSTED_CAP: ${ONNET_HOSTED_CAP:-}
-  # The game data's store (apps/novaworld_common/object_store.h; ADR 0064):
+  # The game data's store (apps/novaworld_common/core/object_store.h; ADR 0064):
   # the data sets' trees and the update packages, which the site's Game data
   # page fills; hosting is on only with one. A deployment names its bucket in
   # S3 (s3://<bucket>/data, with the region); this stack a directory, the
@@ -104,7 +104,7 @@ x-novaworld-env: &novaworld-env
   # builds URLs under it and mounts nothing.
   ONNET_OBJECT_STORE_URL: ${ONNET_OBJECT_STORE_URL:-file:///var/lib/opennova/store}
   ONNET_OBJECT_STORE_REGION: ${ONNET_OBJECT_STORE_REGION:-}
-  # The logs' store (apps/novaworld_common/program_log.h): a deployment's
+  # The logs' store (apps/novaworld_common/core/program_log.h): a deployment's
   # CloudWatch groups (cloudwatch:/opennova/<deployment>); this stack the logs
   # volume below, where every program copies each line it writes
   # (programs/<program>/<container id>.log) and the hosting overlay's machines

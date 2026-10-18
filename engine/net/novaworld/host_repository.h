@@ -229,7 +229,7 @@ std::size_t prune_host_keys(db::Database &db);
 
 // What a game's listing shows in a column its host reported nothing for: the
 // game's own values, its `games` row's ver1 and exp_bits
-// (apps/novaworld_common/catalog_repository.h), the GSB route serving it
+// (apps/novaworld_common/program/catalog_repository.h), the GSB route serving it
 // passes them.
 struct GsbGameDefaults {
 	std::string ver1;

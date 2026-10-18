@@ -1,5 +1,5 @@
 #include "server_config.h"
-#include "text_util.h"
+#include "core/text_util.h"
 
 #include <base/io/strutil.h>
 

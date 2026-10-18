@@ -29,15 +29,15 @@ add_library(opennova_hostd_core STATIC
     stamped_output.cpp   # the process runtime's servers' lines, each after its time, into --log-dir
     tree_store.cpp       # the trees fetched on demand (aws s3 sync) and checked
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/ecs_metadata.cpp  # its own image and log stream on ECS
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/proc_stats.cpp  # the machine's CPU, memory, disk, network
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/ecs_metadata.cpp  # its own image and log stream on ECS
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/proc_stats.cpp  # the machine's CPU, memory, disk, network
 )
 
 target_include_directories(opennova_hostd_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         # hosted/agent_protocol.h and hosted/slots.h, the service's half of the protocol,
-        # ecs_metadata.h and proc_stats.h
+        # core/ecs_metadata.h and core/proc_stats.h
         ${CMAKE_SOURCE_DIR}/apps/novaworld_common
 )
 

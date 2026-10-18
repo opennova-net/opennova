@@ -23,8 +23,8 @@
 // metadata service (apps/hostd/instance_metadata.h) and the agent's own log stream
 // from a stand-in ECS container metadata endpoint. No docker and no nft run.
 
+#include "core/ecs_metadata.h"
 #include "docker_runtime.h"
-#include "ecs_metadata.h"
 #include "fence_probe.h"
 #include "hostd_options.h"
 #include "instance_metadata.h"

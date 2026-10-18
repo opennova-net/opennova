@@ -18,7 +18,7 @@ The hosted servers (the fleet, its supervisor, the data sets, the console) are
 | `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> PN dispatch: NOVAWORLDUDP containers or JointOperations game runtime |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 | `InternalListener` (`hosted/internal_listener.*`) | TCP 8070 | the machines' agent routes alone (`hosted/agent_route.*`), on a private address |
-| `HealthListener` (`health_listener.*`) | TCP 8081 | `GET /livez` alone, from the program's stall watchdog ("Health" below) |
+| `HealthListener` (`core/health_listener.*`) | TCP 8081 | `GET /livez` alone, from the program's stall watchdog ("Health" below) |
 
 The gate listener is the gate's (`apps/novaworld_gate`), the NW UDP listener the lobby's
 (`apps/novaworld_lobby`), the HTTP listener web's (`apps/novaworld_web`), the internal
@@ -31,7 +31,7 @@ Six programs, each its own binary (`opennova-novaworld-<program>`), its own imag
 (`ghcr.io/<owner>/opennova-novaworld-<program>`, a target of [`Dockerfile`](Dockerfile))
 and its own ECS service, over this shared library and the databases. Nothing selects
 what a process is: each binary is one program, constructs its own parts alone, and
-scales on its own. `program.*` is the boot every program shares
+scales on its own. `program/program.*` is the boot every program shares
 (`program::run_program`): the log sink, the config, the boot line, the program's own
 settings checked before the database is touched (a FATAL exit 1 when one is missing),
 the database pool, the migrations and the seeds under the migration lock (whichever
@@ -71,24 +71,24 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
   `ONNET_GATE_UDP_PORT` (every machine, a local stack's container included, lists through
   the gate's public address); the machines reach the fleet program at `ONNET_INTERNAL_URL`, a
   name that follows it.
-- **What an ECS task finds from itself** (`ecs_metadata.*`), where no setting can name
+- **What an ECS task finds from itself** (`core/ecs_metadata.*`), where no setting can name
   it before the task runs: the fleet program, with `ONNET_INTERNAL_HTTP_BIND` unset and the
   task metadata endpoint there (`ECS_CONTAINER_METADATA_URI_V4`), binds its task's
   private IPv4 at 8070.
-- **What a machine or container uses** (`proc_stats.*`) is read from the kernel's own
+- **What a machine or container uses** (`core/proc_stats.*`) is read from the kernel's own
   files: the host's CPU, memory and network (`/proc/stat`, `/proc/meminfo`,
   `/proc/net/dev` less loopback), a filesystem's room (statvfs) and a cgroup's CPU time and
   memory (v2, else v1). hostd compiles it in for its machine's stats.
-- **Each program samples its own task** (`program_usage.*`, `program_samples`): once a
+- **Each program samples its own task** (`program/program_usage.*`, `program_samples`): once a
   minute, beside its heartbeat, its main loop writes its task's CPU over the minute (in
   percent of its CPU limit), its memory and the most it may use, and its network
-  namespace's bytes in and out (cumulative counters), read with `proc_stats.*` from its own
+  namespace's bytes in and out (cumulative counters), read with `core/proc_stats.*` from its own
   cgroup and `/proc/net/dev`. A task is its ECS task id (the task metadata's ARN, with its
   Limits) or, off ECS, its hostname (a local container's id); its limits are its cgroup's
   where set, else the task's, else the machine's. The worker's `stats.prune` rolls the
   minutes up by the hour (`program_hourly`) and prunes both (48 h, 400 days); the admin's
   usage view reads them (Infrastructure below).
-- **Where the logs are** (`program_log.*`, `ONNET_LOG_STORE`): a deployment's are its
+- **Where the logs are** (`core/program_log.*`, `ONNET_LOG_STORE`): a deployment's are its
   CloudWatch groups under `/opennova/<deployment>` (`/service` for the programs, filled by
   ECS's driver; `/machines`, hostd's; `/servers`, the hosted servers'); the local stack's a
   directory, the `logs` volume at `/var/log/opennova`. With a directory, every program
@@ -190,7 +190,7 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
 
 ## Health: the watchdog, `/livez`, `/healthz` and the heartbeat
 
-Service policy (`health.*`), what the container runtime and the uptime checks read:
+Service policy (`core/health.*`), what the container runtime and the uptime checks read:
 
 - **The stall watchdog, one per process, over its program's loops alone**: the gate's
   and the lobby's receive loops (each wakes at least every 250 ms), the fleet's
@@ -204,7 +204,7 @@ Service policy (`health.*`), what the container runtime and the uptime checks re
   and the runtime starts it again. The other programs' processes are untouched.
 - **`GET /livez`**, the process's liveness: `ok`, or `503 stalled` while a watched loop
   (or the watchdog's last sample) is 30 s old. The gate, the lobby, the fleet program, the
-  worker and the data program answer it on their health port (`ONNET_HEALTH_PORT`; `health_listener.*`), web on
+  worker and the data program answer it on their health port (`ONNET_HEALTH_PORT`; `core/health_listener.*`), web on
   its HTTP port. Each program's ECS container health check and image `HEALTHCHECK` ask it
   (`curl -fsS --max-time 2`), and so does the gate's target group. A cache outage fails no
   web task's liveness, since no restart mends it.
@@ -377,7 +377,7 @@ program's own ("Background jobs" above). Service policy, not a port.
 
 ## Lobbies: one per title
 
-Each `games` row is a lobby ([`catalog_repository.h`](catalog_repository.h)). The rows
+Each `games` row is a lobby ([`program/catalog_repository.h`](program/catalog_repository.h)). The rows
 are `backend/seed/0001_games.sql`'s, which every boot applies after the migrations
 (`ON CONFLICT DO NOTHING`, so a row added there reaches every database at its next
 boot); `title` is the engine's game profile code the row's clients speak
@@ -952,7 +952,7 @@ answers.
 
 ## Configuration
 
-All via environment (`server_config.cpp`): `ONNET_WEB_HOST`, `ONNET_LOBBY_ENDPOINT`,
+All via environment (`program/server_config.cpp`): `ONNET_WEB_HOST`, `ONNET_LOBBY_ENDPOINT`,
 `ONNET_INTERNAL_URL`, `ONNET_HEALTH_PORT` ("Programs" above), `ONNET_PUBLIC_HOST`,
 `ONNET_{GATE_UDP,NW_UDP,HTTP}_PORT`, `DATABASE_URL`, `DATABASE_PASSWORD`,
 `DATABASE_POOL_MAX` ("Database" below), `ONNET_REDIS_URL`, `ONNET_REDIS_PASSWORD`
@@ -1142,7 +1142,7 @@ the known addresses and the credentials generation below.
   bytes, no control byte, the longest a stock host reads back whole (`auth.h`,
   `kHandleMaxBytes`), checked on registration, the admin create and every admin update
   (400 `invalid_field`). Every client-supplied string in any listener's log line goes
-  through `loggable()` (`loggable.h`): control bytes as `\xNN`, cut at 64 bytes.
+  through `loggable()` (`core/loggable.h`): control bytes as `\xNN`, cut at 64 bytes.
 - **Retail identity.** `/NWJoin.dll` (the joiner whose PCID and handle its PUB* cookies
   carry, and the expansion gate) and `/NWAccount.dll` / `/NWCharacter.dll` take the
   account from server-side state only: the request's own retail login, its

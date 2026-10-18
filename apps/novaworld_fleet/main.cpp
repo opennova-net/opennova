@@ -1,4 +1,4 @@
-// opennova-novaworld-fleet: the fleet program (program.h). Elected among the
+// opennova-novaworld-fleet: the fleet program (program/program.h). Elected among the
 // fleet processes on the database (election.h), it runs while it leads
 // the internal listener (the machines' agent routes, bound only by the leader,
 // so the deployment's internal name reaches the one that renders the start
@@ -8,15 +8,16 @@
 // standby waits for the election's lock; a leadership lost ends the process
 // (71), and its container starts it again. On ECS, with
 // ONNET_INTERNAL_HTTP_BIND unset, the internal listener binds the task's
-// private address (ecs_metadata.h), which the deployment's Cloud Map name
+// private address (core/ecs_metadata.h), which the deployment's Cloud Map name
 // (ONNET_INTERNAL_URL) points at.
 
-#include "ecs_metadata.h"
+#include "core/ecs_metadata.h"
+#include "core/program_log.h"
 #include "election.h"
 #include "parts.h"
-#include "program.h"
-#include "program_log.h"
+#include "program/program.h"
 
+#include "core/object_store.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_drain.h"
 #include "hosted/fleet_health.h"
@@ -26,7 +27,6 @@
 #include "hosted/limits_hold.h"
 #include "hosted/net_cidr.h"
 #include "hosted/supervisor.h"
-#include "object_store.h"
 
 #include <base/os_random/os_random.h>
 #include <net/napi/session.h>

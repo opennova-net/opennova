@@ -1,8 +1,8 @@
 #include "program_usage.h"
 
-#include "ecs_metadata.h"
-#include "proc_stats.h"
-#include "text_util.h"
+#include "core/ecs_metadata.h"
+#include "core/proc_stats.h"
+#include "core/text_util.h"
 
 #include <base/io/file_io.h>
 #include <base/io/strutil.h>

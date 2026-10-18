@@ -33,8 +33,7 @@
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
 #include "connection_routes.h"
-#include "novaworld/billing_fake_stripe.h"
-#include "health.h"
+#include "core/health.h"
 #include "hosted/address_jobs.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
@@ -52,12 +51,13 @@
 #include "jobs/account_jobs.h"
 #include "jobs/worker_pool.h"
 #include "mailer.h"
-#include "novaworld/fake_mailer.h"
-#include "password_reset.h"
 #include "net_http.h"
 #include "net_sockets.h"
+#include "novaworld/billing_fake_stripe.h"
+#include "novaworld/fake_mailer.h"
 #include "nw_udp_listener.h"
-#include "server_config.h"
+#include "password_reset.h"
+#include "program/server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
 #include "web_access.h"
@@ -4888,7 +4888,7 @@ int test_public_reads_fail_as_500(Harness &h) {
 	return 0;
 }
 
-// GET /livez and GET /healthz (health.h): outside /api, so a listener whose
+// GET /livez and GET /healthz (core/health.h): outside /api, so a listener whose
 // /api/ refuses the harness (a proxy it is not) still answers them; "ok" while
 // the stall watchdog finds its loops moving and main()'s checks coming and
 // Redis answers, 503 "stalled" (no detail) once its watched loop has not moved

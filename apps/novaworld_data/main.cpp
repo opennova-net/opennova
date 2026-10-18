@@ -1,4 +1,4 @@
-// opennova-novaworld-data: the data program (program.h). The job pool
+// opennova-novaworld-data: the data program (program/program.h). The job pool
 // (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) over the hosted data sets'
 // jobs alone (hosted/data_set_jobs.h: tree.finalize, release.validate,
 // release.apply, tree.prune) on the object store, and the scheduler of its one
@@ -12,7 +12,7 @@
 // ticks.
 
 #include "parts.h"
-#include "program.h"
+#include "program/program.h"
 
 #include "hosted/data_set_jobs.h"
 #include "jobs/scheduler.h"

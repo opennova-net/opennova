@@ -1,7 +1,7 @@
 #include "release_catalog.h"
 
+#include "core/object_store.h"
 #include "hosted/data_set_jobs.h"
-#include "object_store.h"
 
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>

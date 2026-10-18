@@ -1,6 +1,6 @@
 #pragma once
 
-#include "loggable.h"
+#include "core/loggable.h"
 
 #include <net/novaworld/db/database.h>
 

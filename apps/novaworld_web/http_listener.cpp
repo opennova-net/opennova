@@ -3,14 +3,14 @@
 #include "admin_user_routes.h"
 #include "auth.h"
 #include "billing/billing_routes.h"
-#include "hosted/address_routes.h"
-#include "catalog_repository.h"
 #include "cd_key_routes.h"
 #include "connection_routes.h"
+#include "core/health.h"
+#include "core/object_store.h"
 #include "data_sets/data_set_routes.h"
 #include "data_sets/release_routes.h"
-#include "health.h"
 #include "host_routes.h"
+#include "hosted/address_routes.h"
 #include "hosted/console_routes.h"
 #include "hosted/fleet_routes.h"
 #include "hosted/hosted_routes.h"
@@ -24,10 +24,10 @@
 #include "jobs/job_routes.h"
 #include "lobby_routes.h"
 #include "mailer.h"
-#include "object_store.h"
 #include "password_reset_routes.h"
+#include "program/catalog_repository.h"
+#include "program/server_config.h"
 #include "redis_client.h"
-#include "server_config.h"
 #include "template_engine.h"
 #include "web_access.h"
 
@@ -987,7 +987,7 @@ void HttpListener::register_public_api_routes() {
 		return out;
 	});
 
-	// The process's liveness (health.h), web's container health check (the ECS
+	// The process's liveness (core/health.h), web's container health check (the ECS
 	// task's, the image's HEALTHCHECK): the stall watchdog alone. "ok", or 503
 	// "stalled"; never another detail. A Redis outage fails no web task's
 	// liveness: no restart and no new task mends it, and while it lasts each new
@@ -1002,7 +1002,7 @@ void HttpListener::register_public_api_routes() {
 		return res;
 	});
 
-	// Whether the process serves a retail client now (health.h), the load
+	// Whether the process serves a retail client now (core/health.h), the load
 	// balancer's and the uptime checks' probe: outside /api, so
 	// ONNET_API_PROXY_ONLY never refuses it. "ok"; 503 "stalled" while the stall
 	// watchdog finds a loop stuck, else 503 "redis unreachable" while Redis does

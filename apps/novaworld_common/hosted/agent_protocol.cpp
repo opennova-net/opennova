@@ -1,5 +1,5 @@
 #include "agent_protocol.h"
-#include "text_util.h"
+#include "core/text_util.h"
 
 #include <base/io/base64.h>
 #include <base/io/json.h>

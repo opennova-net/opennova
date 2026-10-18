@@ -3,7 +3,7 @@
 // What a program running as an ECS task finds from its own task, which no
 // configuration can name ahead of the task's start:
 //
-// - the fleet's internal listener bind (internal_bind, program.h's configure
+// - the fleet's internal listener bind (internal_bind, program/program.h's configure
 //   step): ONNET_INTERNAL_HTTP_BIND where set; on ECS, its task's private IPv4
 //   at the internal port (hosted/fleet_config.h), never a wildcard or public
 //   address. Neither: the fleet keeps the environment's bind;
@@ -13,7 +13,7 @@
 //   worker's at-start jobs' key (jobs/scheduler.h);
 // - the task itself (read_task_facts): its id (its ARN's last segment) and its
 //   size (Limits), which each program's usage samples are keyed and measured
-//   by (program_usage.h).
+//   by (program/program_usage.h).
 //
 // The task metadata endpoint (version 4: the agent names it in every
 // container's ECS_CONTAINER_METADATA_URI_V4) gives them all: in awsvpc mode

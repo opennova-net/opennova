@@ -1,6 +1,6 @@
 #include "net_cidr.h"
 
-#include "health.h" // Watchdog::steady_now_ms
+#include "core/health.h" // Watchdog::steady_now_ms
 
 #include <chrono>
 #include <iterator>

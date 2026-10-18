@@ -23,10 +23,10 @@
 // The supervisor's side (a link up from running, down at stopping) is
 // hosted_supervisor's and hosted_local_e2e's.
 
+#include "core/loggable.h"
 #include "hosted/admin_link.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/hosted_settings.h"
-#include "loggable.h"
 #include "serve/serve_test_support.h"
 
 #include "net_sockets.h"

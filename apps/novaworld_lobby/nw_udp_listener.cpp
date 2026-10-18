@@ -1,7 +1,7 @@
 #include "nw_udp_listener.h"
 
-#include "loggable.h"
-#include "server_config.h"
+#include "core/loggable.h"
+#include "program/server_config.h"
 
 #include <net_datagram_socket.h>
 #include <base/io/tick_rate.h>

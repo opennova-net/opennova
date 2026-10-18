@@ -44,7 +44,7 @@
 // link's status lines (logged in, the session lost or refused, the server's
 // scene when it changes) go to an in-memory reply ring and from there to the
 // server's hosted_server_console ring (hosted_repository.h).
-// The admin password is a log secret (loggable.h's add_log_secret) for the
+// The admin password is a log secret (core/loggable.h's add_log_secret) for the
 // link's lifetime, and never reaches a log line, a console line or a reply.
 //
 // AdminLinks holds the live links, in the fleet leader alone. The supervisor

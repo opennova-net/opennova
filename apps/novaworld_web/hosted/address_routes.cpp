@@ -2,12 +2,12 @@
 
 #include "auth.h"
 #include "billing/entitlement.h"
+#include "core/loggable.h"
 #include "hosted/address_jobs.h"
 #include "hosted/address_names.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/slots.h"
 #include "http_json.h"
-#include "loggable.h"
 
 #include <cstdio>
 #include <optional>

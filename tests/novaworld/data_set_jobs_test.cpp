@@ -20,12 +20,12 @@
 #include "common/test_expect.h"
 #include "update/synthetic_trees.h"
 
+#include "core/local_object_store.h"
 #include "hosted/data_set_files.h"
 #include "hosted/data_set_jobs.h"
 #include "hosted/data_set_repository.h"
 #include "jobs/job_queue.h"
 #include "jobs/worker_pool.h"
-#include "local_object_store.h"
 #include "package_builder.h"
 
 #include <base/io/file_io.h>

@@ -32,12 +32,12 @@
 // whose files it lacks, keeps a container waiting (reported starting, nothing
 // started) on a tree whose URL is not there, and its own end ends its servers.
 
+#include "core/local_object_store.h"
 #include "hosted/agent_protocol.h"
 #include "hosted/data_set_repository.h"
 #include "hosted/fleet_desired_state.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/internal_listener.h"
-#include "local_object_store.h"
 #include "net_http.h"
 #include "net_sockets.h"
 

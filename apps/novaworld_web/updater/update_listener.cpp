@@ -1,7 +1,7 @@
 #include "update_listener.h"
 
+#include "core/object_store.h"
 #include "net_sockets.h"
-#include "object_store.h"
 
 #include <base/io/strutil.h>
 #include <net/update/update_wire.h>

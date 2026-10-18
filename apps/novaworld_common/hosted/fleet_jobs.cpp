@@ -1,7 +1,7 @@
 #include "fleet_jobs.h"
 
+#include "core/loggable.h"
 #include "fleet_repository.h"
-#include "loggable.h"
 
 #include <cstdio>
 #include <optional>

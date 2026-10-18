@@ -1,7 +1,7 @@
 #pragma once
 
 // GET /livez for the programs that serve no HTTP of their own (the gate, the
-// lobby, the fleet and the worker; program.h): one plain TCP port,
+// lobby, the fleet and the worker; program/program.h): one plain TCP port,
 // ONNET_HEALTH_PORT (8081), answered from the program's stall watchdog
 // (health.h), so the ECS container health check (curl, in every runtime image)
 // and the load balancer's check of the gate's target group read the process's

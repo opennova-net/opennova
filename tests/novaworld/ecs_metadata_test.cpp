@@ -1,4 +1,4 @@
-// What an ECS task finds from its own metadata (apps/novaworld_common/ecs_metadata.h):
+// What an ECS task finds from its own metadata (apps/novaworld_common/core/ecs_metadata.h):
 // the fleet's internal listener bind and a task's revision, against a fake task
 // metadata endpoint (an HTTP server in this test on loopback, answering GET <uri>/task
 // with a Fargate task's reply).
@@ -9,12 +9,12 @@
 //     definition's family and revision;
 //   - each refusal: the endpoint answering an error or not at all, a URI that is no
 //     http://, a body that is no JSON or names no address, no family or no revision;
-//   - the task's facts (program_usage.h): its id from its ARN and its Limits, none
+//   - the task's facts (program/program_usage.h): its id from its ARN and its Limits, none
 //     without them, the refusals.
 //
 // Database-free.
 
-#include "ecs_metadata.h"
+#include "core/ecs_metadata.h"
 
 #include "common/http_reply_server.h"
 #include "common/test_expect.h"

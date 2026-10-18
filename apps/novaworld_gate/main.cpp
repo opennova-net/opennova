@@ -1,4 +1,4 @@
-// opennova-novaworld-gate: the gate (program.h). Retail's first contact on
+// opennova-novaworld-gate: the gate (program/program.h). Retail's first contact on
 // UDP 7597 (ONNET_GATE_UDP_PORT): each probe answered with the lobby address
 // every lobby instance announces, while one takes clients (gate_listener.h),
 // this gate as POSTIPADDRESS (ONNET_PUBLIC_HOST) and the one web endpoint
@@ -10,9 +10,9 @@
 // goes unanswered (logged, and counted in the heartbeat's probes_unanswered,
 // which the deployment alarms on), and the client tries again.
 
+#include "core/loggable.h"
 #include "gate_listener.h"
-#include "loggable.h"
-#include "program.h"
+#include "program/program.h"
 
 #include <net/novaworld/unknown_tracker.h>
 

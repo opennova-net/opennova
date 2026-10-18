@@ -5,7 +5,7 @@
 // transaction of the row change that causes them, and reads what they found
 // from the machine rows (fleet_repository.h). The workers run them, the
 // driver's calls bounded by its own timeouts, so a slow cloud only occupies a
-// worker and no watched loop (health.h) waits on it. Each is idempotent.
+// worker and no watched loop (core/health.h) waits on it. Each is idempotent.
 // Service policy, not a port.
 //
 //   machine.launch     the row's launch (its id, kind and slots; its one-time

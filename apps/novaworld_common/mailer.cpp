@@ -1,8 +1,8 @@
 #include "mailer.h"
 
 #include "auth.h"
-#include "hosted/owner_file.h"
-#include "loggable.h"
+#include "core/loggable.h"
+#include "core/owner_file.h"
 #include "template_engine.h"
 
 #include <base/io/json.h>

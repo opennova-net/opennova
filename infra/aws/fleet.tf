@@ -74,7 +74,7 @@ locals {
 
   # The game data's store: the deployment's operations bucket under data/
   # (trees/<tree id>/<file> and updates/<sha256>.sfs,
-  # apps/novaworld_common/object_store.h), as the programs name it
+  # apps/novaworld_common/core/object_store.h), as the programs name it
   # (ONNET_OBJECT_STORE_URL) and the policies scope it. The bucket is the
   # deployment's own (ops_bucket.tf), so the prefix carries no deployment.
   data_prefix      = "data"

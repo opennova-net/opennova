@@ -6,7 +6,7 @@
 // secret and the machine's slots, saved owner-only in a file of its own format,
 // saved_machine.h, so a restart of the agent, of this protocol or a later one,
 // never needs the token again), then syncs: every pass it lists its
-// containers, reads their CPU and memory, the machine's own use (proc_stats.h)
+// containers, reads their CPU and memory, the machine's own use (core/proc_stats.h)
 // and each running server's tick health (its --stats-file in the slot's
 // directory; at most every kStatsIntervalMs, a file older than kTickStaleMs
 // none), each slot's counts (nft_table.h), an exited server's last line (its
@@ -40,8 +40,8 @@
 #include "slot_files.h"
 #include "tree_store.h"
 
+#include "core/proc_stats.h"
 #include "net_http.h"
-#include "proc_stats.h"
 
 #include <cstdint>
 #include <functional>
@@ -110,7 +110,7 @@ struct AgentConfig {
 	// ECS task's; "" off ECS).
 	std::string image_id;
 	std::string log_stream;
-	// The root the kernel's files are read under (proc_stats.h): "" on a
+	// The root the kernel's files are read under (core/proc_stats.h): "" on a
 	// machine, a fixture tree in the tests.
 	std::string proc_root;
 };

@@ -12,7 +12,7 @@ last reply said and keeps doing it while the service cannot be reached.
 
 Linux only. Target `opennova_hostd`, binary `opennova-hostd`, built from `apps/hostd` with
 the service's half of the protocol (`apps/novaworld_common/hosted/agent_protocol.*`,
-`slots.h`) and the ECS metadata reader (`apps/novaworld_common/ecs_metadata.*`) compiled
+`slots.h`) and the ECS metadata reader (`apps/novaworld_common/core/ecs_metadata.*`) compiled
 in. It ships in an image of its own, `opennova-hostd` (`apps/serve/Dockerfile`'s `hostd`
 target: the agent at `/usr/local/bin/opennova-hostd`, `opennova-serve` beside it, the static
 docker CLI, the AWS CLI v2 and nft, every one pinned). On a cloud machine it is the ECS
@@ -141,7 +141,7 @@ POST /hosted/machines/<id>/sync           Authorization: Bearer <agent secret>
 
 What the agent says of the machine: `image_id` (its AMI, `""` off EC2) and `log_stream`
 (its own ECS task's stream, `""` off ECS); `machine`, once it has read `/proc` twice
-(`apps/novaworld_common/proc_stats.h`: the CPU busy between the readings as a percent of
+(`apps/novaworld_common/core/proc_stats.h`: the CPU busy between the readings as a percent of
 the whole machine, the memory in use of the machine's, the trees root's filesystem, every
 interface's bytes but loopback's since the machine booted); `trees`, every tree its store
 holds (`fetching`, a failure with a try left among them, `ready`, or `failed` once its

@@ -1,4 +1,4 @@
-// Where the logs are and a program's copy of its own (apps/novaworld_common/program_log.h):
+// Where the logs are and a program's copy of its own (apps/novaworld_common/core/program_log.h):
 //
 //   - ONNET_LOG_STORE's two forms (a CloudWatch group prefix, a directory; a trailing '/'
 //     dropped), none, and every malformed one refused;
@@ -15,7 +15,7 @@
 //
 // Database-free.
 
-#include "program_log.h"
+#include "core/program_log.h"
 
 #include "common/temp_dir.h"
 #include "common/test_expect.h"

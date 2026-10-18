@@ -7,7 +7,7 @@
 // mode unless the service names one). Database-free.
 
 #include "command_runner.h"
-#include "hosted/owner_file.h"
+#include "core/owner_file.h"
 
 #include <base/proc/child_process.h>
 

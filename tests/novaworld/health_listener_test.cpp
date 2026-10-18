@@ -1,12 +1,12 @@
 // GET /livez on ONNET_HEALTH_PORT for the programs with no HTTP of their own
-// (apps/novaworld_common/health_listener.h): what each request is answered
+// (apps/novaworld_common/core/health_listener.h): what each request is answered
 // from a healthy watchdog and from a stalled one (a hand-stepped clock), then
 // the listener itself over loopback TCP on a port the OS picks: 200 "ok", 503
 // "stalled" once a watched loop stood still past the stall time, a probe that
 // never finishes its request answered within the request timeout (and the next
 // probe answered after it), the port let go at stop(). Database-free.
 
-#include "health_listener.h"
+#include "core/health_listener.h"
 
 #include <net_http.h>
 #include <net_sockets.h>

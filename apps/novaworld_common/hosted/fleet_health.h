@@ -3,7 +3,7 @@
 // The fleet's health (ADR 0065): what needs an admin, as findings read from the
 // rows alone, so the admin's attention list (GET /api/admin/attention,
 // apps/novaworld_web/infra/attention_routes.h) and the fleet leader's heartbeat
-// (apps/novaworld_fleet/main.cpp, health.h) say the same. read_health reads
+// (apps/novaworld_fleet/main.cpp, core/health.h) say the same. read_health reads
 // the rows in one snapshot; fleet_health judges them, a pure function, so every
 // rule is a test. Each finding has a level, its subject in words, what is wrong
 // and since when, the admin page that shows it (a site path) and the rule that
@@ -208,7 +208,7 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 // with no time after the rest), the order kept among equals.
 void sort_findings(std::vector<Finding> &findings);
 
-// What the fleet leader's heartbeat carries of them (health.h).
+// What the fleet leader's heartbeat carries of them (core/health.h).
 struct HealthGauges {
 	int danger = 0;
 	int warn = 0;

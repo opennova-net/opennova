@@ -3,7 +3,7 @@
 // The hosted data sets' rows (backend/migrations/0011_data_sets.sql and 0013_releases.sql,
 // ADR 0064): the data sets an admin created (one product each: a base game, or one expansion
 // of a base), their trees (each an immutable version of the data set's files in the object
-// store, object_store.h), the update releases (1SFS packages) and the sections each carries,
+// store, core/object_store.h), the update releases (1SFS packages) and the sections each carries,
 // and the trees each hosted server is pinned to. The routes, the supervisor, the worker's
 // jobs and the update listener share it; every write that spans statements is one
 // db::Transaction, and each state move a compare-and-set, so two writers never both win.

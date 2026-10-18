@@ -30,7 +30,7 @@
 #include "jobs/worker_pool.h"
 #include "net_http.h"
 #include "net_sockets.h"
-#include "server_config.h"
+#include "program/server_config.h"
 #include "web_session.h"
 
 #include <net/novaworld/db/database.h>

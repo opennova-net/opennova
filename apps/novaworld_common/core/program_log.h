@@ -18,7 +18,7 @@
 //
 // A program with a directory store copies everything it writes to stdout and stderr,
 // line by line with the time it was written ("2026-10-18T14:05:03.123Z <line>"), into
-// programs/<program>/<task>.log, its task the hostname (program_usage.h
+// programs/<program>/<task>.log, its task the hostname (program/program_usage.h
 // local_task_id): its two descriptors become pipes, which a thread drains into the
 // descriptors they were and into the file, so the container's own log (docker logs)
 // keeps every line as before. The file's lines are written by a thread of their own,

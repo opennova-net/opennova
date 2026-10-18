@@ -1,6 +1,10 @@
 #include "parts.h"
 
 #include "billing/billing_jobs.h"
+#include "core/local_object_store.h"
+#include "core/loggable.h"
+#include "core/owner_file.h"
+#include "core/s3_object_store.h"
 #include "hosted/address_zone.h"
 #include "hosted/agent_protocol.h"
 #include "hosted/data_set_jobs.h"
@@ -9,13 +13,9 @@
 #include "hosted/ec2_machine_driver.h"
 #include "hosted/fleet_jobs.h"
 #include "hosted/hosted_settings.h"
-#include "hosted/owner_file.h"
 #include "hosted/stats_jobs.h"
 #include "jobs/account_jobs.h"
 #include "jobs/maintenance_jobs.h"
-#include "local_object_store.h"
-#include "loggable.h"
-#include "s3_object_store.h"
 
 #include <cstdio>
 #include <optional>

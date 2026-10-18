@@ -1,5 +1,5 @@
 // Each of the NovaWorld service's five programs boots alone with its own parts
-// (apps/novaworld_common/program.h). Each real binary runs as a child process
+// (apps/novaworld_common/program/program.h). Each real binary runs as a child process
 // (program_process.h) on an empty database of its own, which its shared boot
 // migrates:
 //

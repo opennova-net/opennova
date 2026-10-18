@@ -187,14 +187,14 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/limits_hold.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/owner_file.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/stats_jobs.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/stats_repository.cpp
     # stats.prune rolls up and prunes the programs' own samples too.
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/program_usage.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/proc_stats.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/ecs_metadata.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/program/program_usage.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/proc_stats.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/ecs_metadata.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/hosted/admin_link.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/hosted/stats_sampler.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/hosted/supervisor.cpp
@@ -250,7 +250,7 @@ opennova_add_pg_test(db_locks COMMAND db_locks_test)
 add_executable(hosted_fleet_jobs_test
     novaworld/hosted_fleet_jobs_test.cpp
     ${OPENNOVA_HOSTED_SUPERVISOR_SOURCES}
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/health.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/health.cpp)
 target_link_libraries(hosted_fleet_jobs_test
     PRIVATE opennova_novaworld_service opennova_bcrypt opennova_app_common Threads::Threads)
 if(WIN32)
@@ -316,7 +316,7 @@ target_compile_definitions(hosted_fleet_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAK
 opennova_add_pg_test(hosted_fleet COMMAND hosted_fleet_test)
 set_tests_properties(hosted_fleet PROPERTIES TIMEOUT 300)
 
-# What each program's tasks use (apps/novaworld_common/program_usage.h; migration
+# What each program's tasks use (apps/novaworld_common/program/program_usage.h; migration
 # 0018_program_usage.sql) over fixture trees standing in for a container's kernel files and
 # a migrated database: the cgroup's CPU limit (v2, v1, none), the sampler (no CPU for its
 # first minute, then the percent of the task's limit; the memory's limit from the cgroup,
@@ -330,7 +330,7 @@ target_include_directories(program_usage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_definitions(program_usage_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(program_usage COMMAND program_usage_test)
 
-# Where the logs are and a program's copy of its own (apps/novaworld_common/program_log.h):
+# Where the logs are and a program's copy of its own (apps/novaworld_common/core/program_log.h):
 # ONNET_LOG_STORE's forms and refusals, and the tee in the test's own process (stdout's and
 # stderr's lines after their times in programs/<program>/<task>.log, an unended line at the
 # stop, the descriptors back after it, a directory it cannot make refused). Database-free.
@@ -404,7 +404,7 @@ set_tests_properties(hosted_admin_link PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 # environment (the AWS and system variables, never the service's own). Database-free.
 add_executable(command_runner_test
     novaworld/command_runner_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/owner_file.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp)
 target_link_libraries(command_runner_test PRIVATE opennova_app_common Threads::Threads)
 if(WIN32)
     target_link_libraries(command_runner_test PRIVATE advapi32)
@@ -420,7 +420,7 @@ set_tests_properties(command_runner PROPERTIES TIMEOUT 120)
 # the agent routes' networks must lie in, and the refusal log's throttle. Pure functions.
 add_executable(hosted_net_cidr_test
     novaworld/hosted_net_cidr_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/health.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/health.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/net_cidr.cpp)
 target_compile_features(hosted_net_cidr_test PRIVATE cxx_std_17)
 target_include_directories(hosted_net_cidr_test PRIVATE
@@ -453,7 +453,7 @@ add_test(NAME hosted_console_commands COMMAND hosted_console_commands_test)
 # success and after a failure, the status split, curl's failures, the retry rules); the typed
 # client's requests, its readers on basil-shaped JSON and its error kinds; the FakeStripeApi
 # (novaworld/billing_fake_stripe.h) the later billing tests drive; and the billing settings'
-# checks. Crow-free and database-free: compiles the billing sources and hosted/owner_file.cpp
+# checks. Crow-free and database-free: compiles the billing sources and core/owner_file.cpp
 # directly.
 add_executable(billing_stripe_test
     novaworld/billing_stripe_test.cpp
@@ -461,7 +461,7 @@ add_executable(billing_stripe_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/stripe_api.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/stripe_client.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_web/billing/stripe_signature.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/owner_file.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp)
 target_link_libraries(billing_stripe_test PRIVATE opennova_app_common opennova_base Threads::Threads)
 target_include_directories(billing_stripe_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -523,7 +523,7 @@ add_executable(billing_sync_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/stripe_api.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/stripe_client.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/owner_file.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp)
 target_link_libraries(billing_sync_test PRIVATE opennova_novaworld_service opennova_app_common Threads::Threads)
 if(WIN32)
     target_link_libraries(billing_sync_test PRIVATE advapi32)
@@ -1049,7 +1049,7 @@ if(UNIX AND BUILD_NOVAWORLD_HTTP)
     set_tests_properties(nw_programs_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 endif()
 
-# GET /livez on ONNET_HEALTH_PORT (apps/novaworld_common/health_listener.h): the
+# GET /livez on ONNET_HEALTH_PORT (apps/novaworld_common/core/health_listener.h): the
 # replies to each request line (the path, the method, HEAD's empty body, a request
 # that does not read) from a healthy watchdog and a stalled one on a hand-stepped
 # clock, then the listener itself over loopback TCP on a port the OS picks: 200 "ok",
@@ -1085,7 +1085,7 @@ target_link_libraries(hosted_fleet_health_test PRIVATE
 target_include_directories(hosted_fleet_health_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hosted_fleet_health COMMAND hosted_fleet_health_test)
 
-# What an ECS task finds from its own metadata (apps/novaworld_common/ecs_metadata.h):
+# What an ECS task finds from its own metadata (apps/novaworld_common/core/ecs_metadata.h):
 # the fleet's bind (the task's private IPv4) against a fake metadata endpoint (an
 # HTTP server in the test on loopback), the environment's bind standing where it is
 # set or there is no metadata; and every refusal: an endpoint that does not answer or
@@ -1200,8 +1200,8 @@ add_executable(data_set_jobs_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_jobs.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/object_store.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/local_object_store.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/object_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/local_object_store.cpp)
 target_link_libraries(data_set_jobs_test
     PRIVATE opennova_novaworld_service opennova_runtime opennova_update_tool_core Threads::Threads)
 target_include_directories(data_set_jobs_test PRIVATE
@@ -1244,7 +1244,7 @@ opennova_add_pg_test(hosted_fleet_repository COMMAND hosted_fleet_repository_tes
 # compiles the hosted sources it needs directly.
 add_executable(hosted_ec2_machine_driver_test
     novaworld/hosted_ec2_machine_driver_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/health.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/health.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/docker_machine_driver.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/ec2_machine_driver.cpp
@@ -1252,7 +1252,7 @@ add_executable(hosted_ec2_machine_driver_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/net_cidr.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/owner_file.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp)
 target_link_libraries(hosted_ec2_machine_driver_test PRIVATE opennova_app_common Threads::Threads)
 if(WIN32)
@@ -1265,15 +1265,15 @@ target_compile_definitions(hosted_ec2_machine_driver_test PRIVATE OPENNOVA_SOURC
 add_test(NAME hosted_ec2_machine_driver COMMAND hosted_ec2_machine_driver_test)
 set_tests_properties(hosted_ec2_machine_driver PROPERTIES TIMEOUT 120)
 
-# The object store seam (apps/novaworld_common/object_store.h, ADR 0064): the URL forms, the
+# The object store seam (apps/novaworld_common/core/object_store.h, ADR 0064): the URL forms, the
 # local store over a directory (its multipart uploads part by part), and the S3 store's argv
 # through a recording runner (a part's bytes handed to `upload-part` in a scratch file).
 # Crow-free and database-free.
 add_executable(object_store_test
     novaworld/object_store_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/object_store.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/s3_object_store.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/local_object_store.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/object_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/s3_object_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/local_object_store.cpp)
 target_link_libraries(object_store_test PRIVATE opennova_app_common Threads::Threads)
 if(WIN32)
     target_link_libraries(object_store_test PRIVATE advapi32)
@@ -1283,14 +1283,14 @@ target_include_directories(object_store_test PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
 add_test(NAME object_store COMMAND object_store_test)
 
-# What a Linux machine or container uses (apps/novaworld_common/proc_stats.h: hostd's machine
+# What a Linux machine or container uses (apps/novaworld_common/core/proc_stats.h: hostd's machine
 # stats, each program's own samples), read from fixture trees: /proc/stat's busy and total and
 # a percent between two readings, /proc/meminfo, /proc/net/dev less loopback, a cgroup v2 and a
 # v1 tree (CPU time, memory less the inactive file cache, the limit or none), statvfs.
 # Crow-free and database-free.
 add_executable(proc_stats_test
     novaworld/proc_stats_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/proc_stats.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/proc_stats.cpp)
 target_link_libraries(proc_stats_test PRIVATE opennova_base)
 target_include_directories(proc_stats_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

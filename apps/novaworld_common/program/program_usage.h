@@ -4,7 +4,7 @@
 // every program's task samples itself once a minute on its main loop
 // (program.h run_main_loop) and writes its own program_samples row: its CPU
 // over the minute in percent of its CPU limit, its memory and the most it may
-// use, and its network namespace's bytes in and out, through proc_stats.h's
+// use, and its network namespace's bytes in and out, through core/proc_stats.h's
 // readers (its own cgroup, /proc/net/dev), alike on ECS and in the local stack's
 // containers. The worker's stats.prune (hosted/stats_jobs.h) rolls the minutes
 // up by the hour and prunes both (48 hours, 400 days). The admin's usage view
@@ -37,7 +37,7 @@ struct UsageTask {
 
 // The hostname as a task id (a local container's: its 12-hex id): its letters,
 // digits, '.', '_' and '-', at most 64; "local" for none. The local log store's
-// program files are named by it too (program_log.h).
+// program files are named by it too (core/program_log.h).
 std::string local_task_id();
 
 // This process's task: on ECS (ECS_CONTAINER_METADATA_URI_V4 set) its metadata's

@@ -11,7 +11,7 @@
 
 #include "auth.h"
 #include "command_runner.h"
-#include "hosted/owner_file.h"
+#include "core/owner_file.h"
 #include "mailer.h"
 #include "novaworld/fake_mailer.h"
 

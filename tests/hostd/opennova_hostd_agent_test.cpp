@@ -530,7 +530,7 @@ public:
 	}
 };
 
-// The kernel's files a machine's use is read from (proc_stats.h): two CPUs that ran
+// The kernel's files a machine's use is read from (core/proc_stats.h): two CPUs that ran
 // `busy` of `total` ticks, 4 GiB of memory with `available` free, and two interfaces.
 void write_proc(const std::string &root, uint64_t busy, uint64_t total, uint64_t available_kb,
 		uint64_t net_in, uint64_t net_out) {

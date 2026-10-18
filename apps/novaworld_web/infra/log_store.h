@@ -1,7 +1,7 @@
 #pragma once
 
 // The logs the admin's pages read (log_routes.h, GET /api/admin/logs), from the
-// store ONNET_LOG_STORE names (apps/novaworld_common/program_log.h):
+// store ONNET_LOG_STORE names (apps/novaworld_common/core/program_log.h):
 //
 //   CloudWatchLogStore  a deployment's groups under its prefix, through web's task
 //                       role (aws_api.h): /servers (a hosted server's start, the
@@ -160,7 +160,7 @@ std::unique_ptr<LogStore> make_log_store(
 		proc::CommandRunner &runner, const std::string &scratch_dir, std::string &why);
 
 // The stamp the programs' copies put before each line ("2026-10-18T14:05:03.123Z ",
-// program_log.h) read off `line`: its time in Unix milliseconds and the text after
+// core/program_log.h) read off `line`: its time in Unix milliseconds and the text after
 // it; -1 and the whole line when it opens with none.
 LogLine parse_stamped_line(std::string_view line);
 

@@ -1,4 +1,4 @@
-// opennova-novaworld-lobby: one lobby instance (program.h), as many as the
+// opennova-novaworld-lobby: one lobby instance (program/program.h), as many as the
 // deployment runs. The NovaWorld UDP listener (ONNET_NW_UDP_PORT, 64206)
 // registers its instance, a row of its own, at the endpoint every instance
 // announces (ONNET_LOBBY_ENDPOINT: the deployment's one lobby address, on ECS
@@ -12,9 +12,9 @@
 // the stop's signal, and a host whose session it held reconnects to the same
 // address, which reaches a live lobby.
 
-#include "loggable.h"
+#include "core/loggable.h"
 #include "nw_udp_listener.h"
-#include "program.h"
+#include "program/program.h"
 
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/host_repository.h>
@@ -60,7 +60,7 @@ int run(const program::Boot &boot) {
 	// The endpoint advertised to joiners uses the client's NOVAWORLD session
 	// port (client_reflect_novaworld_port, 32768), NOT the gate port
 	// (client_reflect_gate_port, 49152 — that's only the gate's
-	// ReflectedPortNumber). See server_config.h.
+	// ReflectedPortNumber). See program/server_config.h.
 	nwudp.set_reflect_endpoint(config.client_reflect_ip, config.client_reflect_novaworld_port);
 	nwudp.set_unknown_tracker(&unknown_tracker);
 

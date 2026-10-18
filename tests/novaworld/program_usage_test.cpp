@@ -1,4 +1,4 @@
-// What each program's tasks use (apps/novaworld_common/program_usage.h), over fixture
+// What each program's tasks use (apps/novaworld_common/program/program_usage.h), over fixture
 // trees standing in for a container's kernel files and a migrated database of the run's own
 // (common/test_database.h):
 //
@@ -13,7 +13,7 @@
 //     that started over), twice alike; an hour whose minutes are partly pruned left as it
 //     was; the prunes at 48 hours and 400 days.
 
-#include "program_usage.h"
+#include "program/program_usage.h"
 
 #include <net/novaworld/db/database.h>
 

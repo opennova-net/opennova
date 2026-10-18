@@ -1,8 +1,8 @@
 #include "password_reset_routes.h"
 
 #include "auth.h"
+#include "core/loggable.h"
 #include "http_json.h"
-#include "loggable.h"
 #include "password_reset.h"
 
 #include <cstdio>

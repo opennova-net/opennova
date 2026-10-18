@@ -1,8 +1,8 @@
 #include "data_set_jobs.h"
 
+#include "core/loggable.h"
 #include "data_set_files.h"
 #include "data_set_repository.h"
-#include "loggable.h"
 
 #include <base/io/file_io.h>
 #include <base/io/json.h>

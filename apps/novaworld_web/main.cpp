@@ -1,4 +1,4 @@
-// opennova-novaworld-web: web (program.h). The HTTP listener on
+// opennova-novaworld-web: web (program/program.h). The HTTP listener on
 // ONNET_HTTP_PORT (8080: the retail NW*.dll routes, the website's API, GET
 // /livez and /healthz) over the database and the web state's Redis, billing's
 // routes, the mail it queues, and the first site admin. Any number of web
@@ -8,15 +8,15 @@
 // their tables. No supervisor, no admin link, no lobby.
 
 #include "auth.h"
+#include "core/loggable.h"
+#include "core/object_store.h"
 #include "http_listener.h"
 #include "infra/alarm_store.h"
 #include "infra/infra_status.h"
 #include "infra/log_store.h"
 #include "infra/metrics_store.h"
-#include "loggable.h"
-#include "object_store.h"
 #include "parts.h"
-#include "program.h"
+#include "program/program.h"
 #include "redis_client.h"
 #include "updater/update_listener.h"
 

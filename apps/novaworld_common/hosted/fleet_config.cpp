@@ -1,5 +1,5 @@
 #include "fleet_config.h"
-#include "text_util.h"
+#include "core/text_util.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>

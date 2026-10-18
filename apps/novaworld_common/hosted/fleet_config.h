@@ -15,7 +15,7 @@
 //                                 (internal_listener.h), on the fleet task's
 //                                 private address in a deployment (unset
 //                                 there: the fleet finds it in its ECS task's
-//                                 metadata, ecs_metadata.h); a private or
+//                                 metadata, core/ecs_metadata.h); a private or
 //                                 loopback address, never a public or
 //                                 wildcard one. Also the address the
 //                                 machines' admin.cfg admits (the fleet's

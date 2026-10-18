@@ -10,7 +10,7 @@
 // machine is never a host (CONTEXT.md "Machine").
 //
 // The pass never calls the cloud: it reads and writes rows alone, so it is
-// fast and bounded, and the stall watchdog (health.h) watches it. A launch is
+// fast and bounded, and the stall watchdog (core/health.h) watches it. A launch is
 // the machine's row and its machine.launch job, written together; a boot or
 // lost check enqueues a deduped machine.describe (at most every
 // describe_interval_ms) and reads its answer from the row (cloud_state); an end
@@ -257,7 +257,7 @@ struct SupervisorConfig {
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;
 	// Where a machine's agent fetches tree `tree_id` from: the object store's
-	// URL of trees/<id>/ (object_store.h url_of; the fleet holds no store,
+	// URL of trees/<id>/ (core/object_store.h url_of; the fleet holds no store,
 	// only this pure function of its config). Unset, the replies name no URL.
 	std::function<std::string(int64_t tree_id)> tree_url;
 	// The fleet (fleet_config.h): placement's knobs, how long a shared machine
@@ -376,7 +376,7 @@ public:
 	const MachineProfile &profile() const { return profile_; }
 
 	// The passes' progress (one per server stepped and one per pass): the stall
-	// watchdog's counter (health.h). Thread-safe.
+	// watchdog's counter (core/health.h). Thread-safe.
 	uint64_t pass_turns() const { return pass_turns_.load(std::memory_order_relaxed); }
 	// The machine launches that failed so far, refused or never booted, as this
 	// supervisor's passes counted them (the heartbeat's launch_failures counts

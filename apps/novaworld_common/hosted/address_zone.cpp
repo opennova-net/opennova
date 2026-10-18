@@ -1,8 +1,8 @@
 #include "address_zone.h"
 
+#include "core/loggable.h"
+#include "core/text_util.h"
 #include "ec2_machine_driver.h"
-#include "loggable.h"
-#include "text_util.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>

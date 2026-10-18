@@ -1,11 +1,11 @@
 #include "metrics_store.h"
 
 #include "aws_xml.h"
-#include "health.h" // Watchdog::steady_now_ms
+#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/loggable.h"
+#include "core/text_util.h"
 #include "hosted/stats_repository.h" // iso_utc
 #include "infra_status.h"
-#include "loggable.h"
-#include "text_util.h"
 
 #include <base/io/strutil.h>
 

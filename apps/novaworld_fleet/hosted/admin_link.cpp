@@ -1,6 +1,6 @@
 #include "admin_link.h"
 
-#include "loggable.h"
+#include "core/loggable.h"
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>

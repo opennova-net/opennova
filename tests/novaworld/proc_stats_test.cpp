@@ -1,4 +1,4 @@
-// What a Linux machine or container uses (apps/novaworld_common/proc_stats.h), read from
+// What a Linux machine or container uses (apps/novaworld_common/core/proc_stats.h), read from
 // fixture trees standing in for the kernel's files:
 //
 //   - /proc/stat's aggregate line: busy and total ticks, a percent between two readings
@@ -12,7 +12,7 @@
 //
 // Database-free.
 
-#include "proc_stats.h"
+#include "core/proc_stats.h"
 
 #include "common/temp_dir.h"
 #include "common/test_expect.h"

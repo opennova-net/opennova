@@ -4,7 +4,7 @@
 // (service policy, not a port):
 //
 // - The stall watchdog, one per process, over its program's loops alone
-//   (program.h): the gate's receive loop and the lobby's NovaWorld UDP receive
+//   (program/program.h): the gate's receive loop and the lobby's NovaWorld UDP receive
 //   loop (each wakes at least every 250 ms with nothing to read); the
 //   fleet's supervisor pass (every second; it never calls the cloud, its
 //   driver's calls being jobs) and job scheduler (every second), or its
@@ -13,7 +13,7 @@
 //   only a pool whose every thread stands still stalls); and in every program
 //   its main loop (its tick, its heartbeat). Each loop counts its turns, and a
 //   thread of the watchdog's own samples the counters every second (check(),
-//   program.cpp). A loop whose count has not moved for kStallMs is stalled,
+//   program/program.cpp). A loop whose count has not moved for kStallMs is stalled,
 //   and so is the process when the last check is that old: it logs which and
 //   exits 70, and the container runtime starts it again, the other programs'
 //   processes untouched. GET /livez answers from it, with no other detail:
@@ -103,7 +103,7 @@ private:
 // deltas. A field left unset is one the program does not know, and the line
 // leaves it out (a metric aggregated over the programs counts each once).
 struct Heartbeat {
-	std::string program; // the process's program (program.h)
+	std::string program; // the process's program (program/program.h)
 	std::optional<int64_t> nw_sessions;
 	std::optional<int64_t> listed_hosts;
 	std::optional<int64_t> hosted_live;

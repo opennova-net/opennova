@@ -53,6 +53,7 @@
 #include "lobby_client.h"
 #include "nw_service_harness.h"
 
+#include "core/local_object_store.h"
 #include "hosted/admin_link.h"
 #include "hosted/data_set_repository.h"
 #include "hosted/fleet_config.h"
@@ -63,7 +64,6 @@
 #include "hosted/machine_driver.h"
 #include "hosted/supervisor.h"
 #include "jobs/worker_pool.h"
-#include "local_object_store.h"
 #include "serve/serve_test_support.h"
 #include "web_session.h"
 

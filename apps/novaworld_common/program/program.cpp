@@ -1,8 +1,8 @@
 #include "program.h"
 
-#include "health_listener.h"
-#include "loggable.h"
-#include "program_log.h"
+#include "core/health_listener.h"
+#include "core/loggable.h"
+#include "core/program_log.h"
 #include "program_usage.h"
 
 #include <base/io/log.h>
@@ -140,7 +140,7 @@ int run_program(const Program &program) {
 #endif
 
 	// A directory log store (the local stack's) gets a copy of every line from
-	// the first (program_log.h); a cloud one is filled by ECS's log driver. Put
+	// the first (core/program_log.h); a cloud one is filled by ECS's log driver. Put
 	// back, every line copied, as the program returns (the tee outlives
 	// everything below).
 	std::string log_store_error;
@@ -298,7 +298,7 @@ int run_main_loop(
 		const uint64_t now = Watchdog::steady_now_ms();
 		if (hooks.tick)
 			hooks.tick(db, now);
-		// The heartbeat line (health.h), every kHeartbeatMs: the program's
+		// The heartbeat line (core/health.h), every kHeartbeatMs: the program's
 		// counts now, and what happened since the last line.
 		if (now - last_heartbeat_ms >= kHeartbeatMs) {
 			const auto window_s = static_cast<int64_t>((now - last_heartbeat_ms + 999) / 1000);

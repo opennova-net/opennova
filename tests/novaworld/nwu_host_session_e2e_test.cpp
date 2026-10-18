@@ -12,7 +12,7 @@
 #include "nw_udp_listener.h"
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include "net_datagram_socket.h"
 #include "net_sockets.h"

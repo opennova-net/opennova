@@ -19,7 +19,7 @@
 //   - a describe hands the driver its machine's launch age by the row (launched_at,
 //     the launch's answer by the database's clock), so any worker judges the cloud's
 //     launch grace alike;
-//   - a driver that stalls: the passes go on, so the stall watchdog (health.h) that
+//   - a driver that stalls: the passes go on, so the stall watchdog (core/health.h) that
 //     watches them never fires;
 //   - a launch past the fleet's maximum for its kind (a forged row beside the
 //     machine the cap allows) is refused before any cloud call, and its row fails.
@@ -29,7 +29,7 @@
 //
 // Compiles the hosted sources directly, as hosted_supervisor_test does.
 
-#include "health.h"
+#include "core/health.h"
 #include "hosted_fleet_rig.h"
 
 #include "common/test_expect.h"

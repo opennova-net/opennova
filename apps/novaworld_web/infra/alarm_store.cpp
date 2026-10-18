@@ -1,7 +1,7 @@
 #include "alarm_store.h"
 
 #include "aws_xml.h"
-#include "health.h" // Watchdog::steady_now_ms
+#include "core/health.h" // Watchdog::steady_now_ms
 #include "infra_status.h"
 
 #include <base/io/strutil.h>

@@ -1,7 +1,7 @@
 #include "billing_config.h"
 
-#include "loggable.h"
-#include "text_util.h"
+#include "core/loggable.h"
+#include "core/text_util.h"
 
 #include <base/io/strutil.h>
 

@@ -23,7 +23,7 @@
 #include "infra/log_store.h"
 #include "net_http.h"
 #include "net_sockets.h"
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <net/novaworld/db/database.h>
 

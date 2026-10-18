@@ -40,7 +40,7 @@
 #include "billing/stripe_api.h"
 #include "billing/stripe_client.h"
 #include "command_runner.h"
-#include "hosted/owner_file.h"
+#include "core/owner_file.h"
 #include "net_http.h"
 #include "net_sockets.h"
 #include "web_session.h"

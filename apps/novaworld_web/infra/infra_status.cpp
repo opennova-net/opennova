@@ -2,10 +2,10 @@
 
 #include "aws_xml.h"
 #include "billing/stripe_api.h"
-#include "health.h" // Watchdog::steady_now_ms
+#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/loggable.h"
+#include "core/text_util.h"
 #include "hosted/stats_repository.h"
-#include "loggable.h"
-#include "text_util.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>

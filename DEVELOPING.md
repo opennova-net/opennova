@@ -265,7 +265,7 @@ Avoid rebuilding images to test changes:
   incremental build.
 
 **Without Docker** (Linux), build and run the six programs directly. Each reads its
-config from env vars (`apps/novaworld_common/server_config.cpp`); their database is a
+config from env vars (`apps/novaworld_common/program/server_config.cpp`); their database is a
 local PostgreSQL that `scripts/dev_postgres.sh up` starts in Docker (and prints the
 settings for), and the other defaults boot a fresh checkout from the repo root:
 
