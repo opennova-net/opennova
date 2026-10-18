@@ -80,7 +80,7 @@ The fleet cluster's task definition (`infra/aws/fleet_agent.tf`) runs it as
 ```
 opennova-hostd --service http://fleet.prod.opennova.internal:8070 \
   --machine-file /etc/opennova/machine-id --ecs-config /etc/ecs/ecs.config \
-  --log-group /opennova/prod/machines --log-region us-east-1
+  --log-group /opennova/prod/servers --log-region us-east-1
 ```
 
 as user 0 with docker's default capabilities and `NET_ADMIN` added (never privileged), on

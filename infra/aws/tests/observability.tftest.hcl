@@ -308,9 +308,10 @@ run "observability" {
   assert {
     condition = (
       aws_cloudwatch_log_group.service.name == "/opennova/prod/service" && aws_cloudwatch_log_group.service.retention_in_days == 30 &&
-      aws_cloudwatch_log_group.machines.name == "/opennova/prod/machines" && aws_cloudwatch_log_group.machines.retention_in_days == 30
+      aws_cloudwatch_log_group.machines.name == "/opennova/prod/machines" && aws_cloudwatch_log_group.machines.retention_in_days == 30 &&
+      aws_cloudwatch_log_group.servers.name == "/opennova/prod/servers" && aws_cloudwatch_log_group.servers.retention_in_days == 14
     )
-    error_message = "the service's and the machines' logs, 30 days each"
+    error_message = "the service's and the machines' logs, 30 days each; the servers' own output 14"
   }
   assert {
     condition = (

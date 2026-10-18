@@ -37,6 +37,7 @@ locals {
       OPENNOVA_OPS_BUCKET         = local.ops_bucket_name
       OPENNOVA_LOG_GROUP          = aws_cloudwatch_log_group.service.name
       OPENNOVA_MACHINES_LOG_GROUP = aws_cloudwatch_log_group.machines.name
+      OPENNOVA_SERVERS_LOG_GROUP  = aws_cloudwatch_log_group.servers.name
       AWS_REGION                  = local.region
       BACKUP_BUCKET               = local.ops_bucket_name
       BACKUP_PREFIX               = local.backup_prefix

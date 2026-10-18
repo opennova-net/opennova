@@ -69,13 +69,24 @@ resource "aws_cloudwatch_log_group" "service" {
   tags = var.tags
 }
 
-# The game machines' (hostd and the slots), through the machine role: hostd's
-# task (fleet_agent.tf), a stream per task, hostd/hostd/<task id>, and a stream
-# per slot, <machine id>/slot-<k> (apps/hostd/README.md, "Logs").
-# `./deploy/run.sh fleet logs` reads it.
+# The game machines' agents (hostd), through the machine role: hostd's task
+# (fleet_agent.tf), a stream per task, hostd/hostd/<task id> (apps/hostd/README.md,
+# "Logs"). `./deploy/run.sh fleet logs` reads it.
 resource "aws_cloudwatch_log_group" "machines" {
   name              = "/opennova/${local.deployment}/machines"
   retention_in_days = var.log_retention_days
+
+  tags = var.tags
+}
+
+# The hosted game servers' output, through the machine role (hostd's
+# --log-group: docker's awslogs driver), a stream per start that the service
+# names, <server id>/g<generation>, kept on the start's row. The servers run with
+# their status page off, so this is their own lines alone; kept a shorter while
+# (server_log_retention_days).
+resource "aws_cloudwatch_log_group" "servers" {
+  name              = "/opennova/${local.deployment}/servers"
+  retention_in_days = var.server_log_retention_days
 
   tags = var.tags
 }

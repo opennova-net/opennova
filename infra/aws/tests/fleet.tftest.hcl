@@ -333,6 +333,11 @@ override_resource {
   override_during = plan
   values          = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/machines" }
 }
+override_resource {
+  target          = aws_cloudwatch_log_group.servers
+  override_during = plan
+  values          = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/servers" }
+}
 
 variables {
   deployment                = "prod"
@@ -387,6 +392,10 @@ run "hosting_off" {
   assert {
     condition     = strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_MACHINES_LOG_GROUP='/opennova/prod/machines'\n")
     error_message = "infra.env names the machines' log group whether or not hosting is on (fleet logs reads what machines wrote)"
+  }
+  assert {
+    condition     = strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_SERVERS_LOG_GROUP='/opennova/prod/servers'\n")
+    error_message = "infra.env names the servers' log group whether or not hosting is on"
   }
   assert {
     condition     = output.hosted_enabled == false && length(output.fleet_launch_templates) == 0 && output.hosted_subnet_cidrs == null && output.fleet_cluster == null && output.fleet_image_id == null
@@ -795,7 +804,7 @@ run "hostd_daemon" {
         "--service", "http://fleet.prod.opennova.internal:8070",
         "--machine-file", "/etc/opennova/machine-id",
         "--ecs-config", "/etc/ecs/ecs.config",
-        "--log-group", "/opennova/prod/machines",
+        "--log-group", "/opennova/prod/servers",
         "--log-region", "us-east-1",
       ] &&
       jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].healthCheck.command == ["CMD", "/usr/local/bin/opennova-hostd", "--check-alive"] &&
@@ -803,7 +812,7 @@ run "hostd_daemon" {
       jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].logConfiguration.options["awslogs-group"] == "/opennova/prod/machines" &&
       jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].logConfiguration.options["awslogs-stream-prefix"] == "hostd"
     )
-    error_message = "hostd reaches the fleet program by its name, reads its machine id from the user data's file, checks it against the ECS attributes, logs to the machines' group (stream hostd/hostd/<task id>) and is healthy while its loop turns"
+    error_message = "hostd reaches the fleet program by its name, reads its machine id from the user data's file, checks it against the ECS attributes, logs to the machines' group (stream hostd/hostd/<task id>), sends its servers' output to the servers' group and is healthy while its loop turns"
   }
   assert {
     condition = (
