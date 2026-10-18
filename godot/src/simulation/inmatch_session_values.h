@@ -59,6 +59,9 @@ public:
 	// The ToSpecial row after set_weapon_input: its keys' live state and a
 	// dispatch on this frame's press or release edge.
 	void set_to_special_input(bool p_held, bool p_dispatched);
+	// A menu screen is up, under which no input frame runs
+	// (opennova::inmatch::HELD_MENU_OPEN).
+	void set_menu_open(bool p_open);
 	// The Respawn row's press edge, after set_weapon_input
 	// (opennova::inmatch::PRESSED_RESPAWN).
 	void set_respawn_input(bool p_dispatched);

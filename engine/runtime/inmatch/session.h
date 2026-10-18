@@ -263,6 +263,11 @@ enum HeldAction : uint32_t {
 	// The ToSpecial keys' live state, which its dispatch reads (the hold-swap
 	// press or release; Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181).
 	HELD_TO_SPECIAL = 1u << 1,
+	// A menu screen (INGAME, WEAPON, CMAP) is up: no input frame runs, so the
+	// deferred input queue is not flushed (the close's reset then drops it)
+	// [orig: Game_ProcessMainFrame @0x52660D / @0x52661D; Input_ProcessFrame ->
+	//  Input_FlushDeferredEvents @0x49D591, its one caller].
+	HELD_MENU_OPEN = 1u << 2,
 };
 enum PressedAction : uint32_t {
 	PRESSED_FIRE = 1u << 0,

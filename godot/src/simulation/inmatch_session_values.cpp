@@ -115,6 +115,11 @@ void MissionFrameInput::set_to_special_input(bool p_held, bool p_dispatched) {
 			(p_dispatched ? PRESSED_TO_SPECIAL : 0u);
 }
 
+void MissionFrameInput::set_menu_open(bool p_open) {
+	value_.player.held_action_bits = (value_.player.held_action_bits & ~HELD_MENU_OPEN) |
+			(p_open ? HELD_MENU_OPEN : 0u);
+}
+
 void MissionFrameInput::set_respawn_input(bool p_dispatched) {
 	value_.player.pressed_action_bits =
 			(value_.player.pressed_action_bits & ~PRESSED_RESPAWN) |

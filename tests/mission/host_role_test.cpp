@@ -359,6 +359,24 @@ int main() {
 		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 768u);
 		CHECK(kernel.world.logic_tick == tick0 + 9);
 
+		// No input frame runs under a menu screen: the deferred ToSpecial queue
+		// is not flushed there, and is once the frame runs again.
+		// [orig: Game_ProcessMainFrame @0x52660D; Input_FlushDeferredEvents's one
+		//  caller @0x49D591]
+		{
+			kernel.local.to_special_queued = 2;
+			inmatch::TickInput menu = tick_input(0);
+			menu.consume_one_shots = true;
+			menu.player.held_action_bits = inmatch::HELD_MENU_OPEN;
+			role.apply_input(menu);
+			CHECK(kernel.local.to_special_queued == 2);
+			inmatch::TickInput live = tick_input(0);
+			live.consume_one_shots = true;
+			role.apply_input(live);
+			CHECK(kernel.local.to_special_queued < 2);
+			kernel.local.to_special_queued = 0;
+		}
+
 		// The local gameplay drain consumes reloads while preserving movement
 		// for Server_TickUpdate's dedicated uplink decoder.
 		const size_t s2c_before = host.host_loop.s2c_pending();

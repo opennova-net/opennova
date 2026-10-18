@@ -72,7 +72,7 @@ void Role::apply_input(const TickInput &input) {
 	//  @0x49ADC8..0x49ADD7, bit 0x1 with g_SpawnSuccessGate @0x49ADFD (in a
 	//  session) / @0x49AE16; the deferred re-queue Input_FlushDeferredEvents
 	//  @0x497AC0 -> Input_QueueEvent]
-	if (input.consume_one_shots) {
+	if (input.consume_one_shots && (input.player.held_action_bits & HELD_MENU_OPEN) == 0) {
 		const bool held = (input.player.held_action_bits & HELD_TO_SPECIAL) != 0;
 		const bool local_dead = joiner && runtime != nullptr ? runtime->local_player_dead()
 				: kernel.local.local_player_dead();
