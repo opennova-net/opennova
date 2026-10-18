@@ -1261,7 +1261,8 @@ int test_fleet_config() {
 		TEST_EXPECT(c.placement.shared_slots == 16 && c.placement.max_shared == 3 &&
 				c.placement.max_own == 0);
 		TEST_EXPECT(c.idle_minutes == 45 && c.slot_memory_mb == 768 && c.slot_cpus == 0.5);
-		TEST_EXPECT(c.serve_image == kImage && c.image_id == "ami-0123456789abcdef0");
+		TEST_EXPECT(c.serve_image == kImage && c.image_id == "ami-0123456789abcdef0" &&
+				c.hostd_image == kHostdImage);
 		// The static addresses' policy: how many are sold and the zone they are named in.
 		TEST_EXPECT(c.placement.max_addresses == 4 && c.address_zone == "play.opennova.net");
 		// What the agent routes take from it: its networks.

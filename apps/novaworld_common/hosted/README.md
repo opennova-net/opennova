@@ -196,6 +196,28 @@ this directory's.
   (`relist_grace_ms`) to list again before its health checks count. A driver that cannot
   list ends nothing. Every 5 min the sweep runs again.
 
+## The fleet's health
+
+- **Findings over the rows** (`fleet_health.*`): `read_health` reads the rows in one
+  snapshot and `fleet_health` judges them, a pure function, into findings, each with a
+  level (`danger`, `warn`, `info`), its subject, what is wrong, since when, the admin page
+  that shows it and its rule: a start stalled past 15 min (one waiting for its static
+  address says so); a machine launching or booting past 20 min, draining past 60, ending
+  past 15, lost past 10, or moving more than 6 times in an hour; a lost machine the brake
+  holds (danger); a protocol mismatch (danger); an agent on another hostd image than the
+  release's (`ONNET_HOSTED_HOSTD_IMAGE`), and the machines on another image than the
+  launch templates' (`ONNET_FLEET_IMAGE_ID`, one finding: a fleet roll); a machine's CPU
+  past 85 %, memory past 90 % or disk under 15 % free; a machine whose servers ran over
+  1 % of a minute's ticks late; a kind's launches held, with the last failure's cause; no
+  lobby that takes clients (danger); a server failed in the last 24 h; a server whose data
+  could not be fetched at its last 3 starts in a row, or for over 15 min (danger past an
+  hour: such a start costs no restart, so the server never fails of it), with its data set,
+  its trees and hostd's last reason; a failed or orphan
+  static address; the hosting sold past what the fleet sells. Rows too old to judge (a
+  machine's report or use, a server's ticks) are a warn `unknown`, never healthy. The
+  admin's attention list (`GET /api/admin/attention`) and the fleet leader's heartbeat
+  read the same findings.
+
 ## The machines
 
 - **The agents and the internal listener** (`agent_route.*`, `internal_listener.*`,
@@ -430,10 +452,10 @@ reads the store alone.
 | `ONNET_FLEET_SLOT_MEMORY_MB` | 512 | web, fleet, worker | Each container's memory (no swap). |
 | `ONNET_FLEET_SLOT_CPUS` | 1 | web, fleet, worker | Each container's CPUs (a decimal). |
 | `ONNET_HOSTED_SERVE_IMAGE` | none | web, fleet, worker | The serve image every start pins and the machines pull (pinned by digest at deploy). |
-| `ONNET_FLEET_IMAGE_ID` | none | web, fleet, worker | The image the launch templates pin (the deployment's `fleet_ami`, an `ami-...`), which a fleet roll's preview holds each machine's against: one on it is kept. |
+| `ONNET_FLEET_IMAGE_ID` | none | web, fleet, worker | The image the launch templates pin (the deployment's `fleet_ami`, an `ami-...`), which a fleet roll's preview holds each machine's against (one on it is kept), and the fleet's health too (`fleet_health.h`: a machine's `outdated`, the `outdated_image` finding). |
+| `ONNET_HOSTED_HOSTD_IMAGE` | none | web, fleet, worker | The hostd image the release pins (`app deploy` sets it, by digest): with `docker`, the image every machine container runs (`opennova-hostd` with `opennova-serve` beside it); everywhere, what the fleet's health holds each machine's agent image against (a machine's `outdated`, the `outdated_agent` finding). A cloud machine's hostd is the fleet cluster's daemon, of the revision `app deploy` rolls. |
 | `ONNET_INTERNAL_URL` | none | worker | The fleet's internal listener as the machines reach it, `http://<host>:<port>` (a deployment's Cloud Map name, `fleet.<deployment>.opennova.internal:8070`; the fleet's compose name locally): what a launch hands its machine. Required by both drivers. |
 | `ONNET_HOSTED_DEPLOYMENT` | none | worker | The deployment tag (`ec2`) or label (`docker`) every machine carries and every describe, list and terminate is scoped to, so two stacks in one account or one Docker never touch each other's machines. |
-| `ONNET_HOSTED_HOSTD_IMAGE` | none | worker | `docker`: the image every machine container runs (the hostd image: `opennova-hostd` with `opennova-serve` beside it). `app deploy` sets the release's on a deployment's worker too, which `ec2` ignores: a cloud machine's hostd is the fleet cluster's daemon, of the revision `app deploy` rolls. |
 | `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | worker | `ec2`: the launch templates by kind, `{"shared": "lt-...", "own": "lt-..."}` (`lt-<id>` or `lt-<id>:<version>`). |
 | `ONNET_HOSTED_EC2_REGION` | none | worker | `ec2`: the region every AWS CLI call names. |
 | `ONNET_HOSTED_EC2_CLUSTER` | none | worker | `ec2`: the fleet cluster every machine's ECS agent joins (`opennova-<deployment>-fleet`), whose daemon service runs `opennova-hostd`; required. |

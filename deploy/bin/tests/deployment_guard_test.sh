@@ -8,8 +8,8 @@
 # never takes `app down`'s zero counts for a first release (but starts a
 # program the down record names no count for, and `app up` the same), a
 # rollback refuses a release from before the program split, a release's
-# revisions hand the serve image to every container that reads the fleet's
-# policy and hostd's to the machine driver's alone, and the org
+# revisions hand the serve image and hostd's to every container that reads the
+# fleet's policy, and the org
 # stack's first run moves its state before the vault learns of the bucket. It
 # sources on-deploy (which then runs nothing) and stubs every command group,
 # the vault and AWS, so nothing is read or changed anywhere. It needs bash and
@@ -313,7 +313,7 @@ out="$( (set_deployment staging; app_rollback --to 20261016T000000Z-abc1234 --ye
   || { [[ "$out" == *"before the program split"* ]] && pass "a rollback to a release from before the split is refused" || fail "pre-split rollback: $out"; }
 unset -f release_manifest release_current_manifest
 
-echo "--- a release's revisions: the serve image where the policy is read, hostd's where the driver is"
+echo "--- a release's revisions: the serve image and hostd's where the policy is read"
 described='{"taskDefinition":{"family":"opennova-staging-x","containerDefinitions":[
   {"name":"worker","environment":[{"name":"ONNET_HOSTED_PROVIDER","value":"ec2"},{"name":"ONNET_HOSTED_DEPLOYMENT","value":"opennova-staging"}],"secrets":[]},
   {"name":"fleet","environment":[{"name":"ONNET_HOSTED_PROVIDER","value":"ec2"}],"secrets":[]},
@@ -322,9 +322,9 @@ revision="$(jq -c --argjson images '{"worker":"w@1","fleet":"f@1","data":"d@1"}'
   --arg hosting 1 --arg dep staging --argjson present '[]' --argjson tags '[]' "$REVISION_JQ" <<<"$described")"
 env_of() { jq -c --arg c "$1" '[.containerDefinitions[] | select(.name == $c) | .environment[]? | "\(.name)=\(.value)"]' <<<"$revision"; }
 if [[ "$(env_of worker)" == *'"ONNET_HOSTED_HOSTD_IMAGE=hostd@1"'* && "$(env_of worker)" == *'"ONNET_HOSTED_SERVE_IMAGE=serve@1"'* ]] &&
-   [[ "$(env_of fleet)" == *'"ONNET_HOSTED_SERVE_IMAGE=serve@1"'* && "$(env_of fleet)" != *HOSTD* ]] &&
+   [[ "$(env_of fleet)" == *'"ONNET_HOSTED_SERVE_IMAGE=serve@1"'* && "$(env_of fleet)" == *'"ONNET_HOSTED_HOSTD_IMAGE=hostd@1"'* ]] &&
    [[ "$(env_of data)" != *SERVE* && "$(env_of data)" != *HOSTD* ]]; then
-  pass "the worker gets both images, the fleet the serve image alone, the data program neither"
+  pass "the worker and the fleet get both images, the data program neither"
 else
   fail "revision images: worker $(env_of worker) fleet $(env_of fleet) data $(env_of data)"
 fi
