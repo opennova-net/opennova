@@ -224,13 +224,20 @@ void test_pixel_device_texture_levels() {
 		const auto thin_dxt = pixel_device_texture_levels(strip.data(), 8, 2, 0x500201u, kReferenceTextureDxtCaps, 0,
 				kReferenceMaxTextureSide, &blocks_out);
 		CHECK(thin_dxt.size() == 4 && thin_dxt[0].width == 8 && thin_dxt[0].height == 4 && thin_dxt[1].width == 4 &&
-						thin_dxt[1].height == 2 && thin_dxt[1].rgba == std::vector<uint8_t>(4 * 2 * 4, 0),
-				"the DXT chain at D3DX's sides, its levels 1+ likewise");
+						thin_dxt[1].height == 2,
+				"the DXT chain at D3DX's sides");
 		CHECK(thin_dxt.size() == 4 && thin_dxt[0].rgba[(2 * 8) * 4 + 3] == 0 && thin_dxt[0].rgba[3] == 255,
 				"the rounded rows transparent black under the strip");
 		CHECK(blocks_out.size() == 4 && blocks_out[0].width == 8 && blocks_out[0].height == 4 &&
 						blocks_out[3].blocks == std::vector<uint8_t>(8, 0),
 				"the blocks handed back, the unloaded levels zero blocks");
+		// Its levels 1+ are those zero blocks, the texels their decode (a zero DXT1 block is
+		// opaque black): both views are one image at every level.
+		bool same = blocks_out.size() == thin_dxt.size();
+		for (size_t i = 0; same && i < thin_dxt.size(); ++i)
+			same = thin_dxt[i].rgba == encode_rgba8(decode_dxt_surface(blocks_out[i]));
+		CHECK(same && thin_dxt.size() == 4 && thin_dxt[1].rgba[3] == 255 && thin_dxt[1].rgba[0] == 0,
+				"the DXT chain's levels 1+ unloaded: the zero blocks' opaque black");
 		// A side halved to 0 is D3DX's 1 (an A8R8G8B8 1 x 1, one level), loaded over the creator's
 		// own 2 x 2 rect from an empty buffer: 0 [orig: GTexture_DownsampleToLimits @0x687200;
 		// D3DXTex_ValidateAndAdjustTextureParams @0x690A2B / @0x690A37].

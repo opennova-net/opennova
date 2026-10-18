@@ -204,8 +204,9 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 		DeviceTextureLevel level;
 		level.width = std::max(1u, device_w >> i);
 		level.height = std::max(1u, device_h >> i);
-		level.rgba.assign(static_cast<size_t>(level.width) * level.height * 4, 0);
-		if (dxt != nullptr) {
+		if (format != TextureDxtFormat::None) {
+			// A DXT level's zero is its blocks', and the texels are those blocks decoded
+			// (a zero DXT1 block is opaque black), so both views stay one image.
 			DxtSurface blank;
 			blank.format = format;
 			blank.width = level.width;
@@ -213,7 +214,11 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 			blank.blocks.assign(static_cast<size_t>((level.width + 3) / 4) * ((level.height + 3) / 4) *
 							dxt_block_bytes(format),
 					0);
-			dxt->push_back(std::move(blank));
+			level.rgba = encode_rgba8(decode_dxt_surface(blank));
+			if (dxt != nullptr)
+				dxt->push_back(std::move(blank));
+		} else {
+			level.rgba.assign(static_cast<size_t>(level.width) * level.height * 4, 0);
 		}
 		levels.push_back(std::move(level));
 	}
