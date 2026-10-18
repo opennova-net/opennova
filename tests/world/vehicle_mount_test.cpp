@@ -813,6 +813,93 @@ void test_unarmed_usegun_needs_the_session() {
     }
 }
 
+// A UseGun round trip leaves the personal bucket rifle reading its own bucket: the
+// pump that stages the mount reads the rifle's bucket through the gunner seat (the
+// gun's clip), and the switch back reads it again off the seat the player no longer
+// holds, as every retail reader of a bucket weapon's rounds reads through the entity's
+// seat at the moment it reads (the GUT's simulation_test
+// test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot).
+// [orig: sub_5405F0 @0x5405F0 - seat 3 the carrier's clip @0x540611..0x54061A, else
+//  the entity's bucket @0x540657; HUD_BuildEntityInfo @0x4B85C7..0x4B85E1;
+//  WeaponSlot_CanFire @0x541C79]
+void test_usegun_round_trip_reads_the_personal_bucket() {
+    Rig r(2.0f);
+    arm_usegun_seat(r);
+    WeaponTable &t = r.w.tables.weapons;
+    t.ammo_class_names = {"CLASS_70MM", "CLASS_556MM"};
+    t.ammo_class_caps = {100, 1000};
+    const auto bake_switches = [](WeaponFsmDef &d) {
+        for (int a = 0; a < weapon_action::kCount; ++a) d.actions[a].id = a;
+        d.actions[weapon_action::kSwitchFrom].delay_start = 2;
+        d.actions[weapon_action::kSwitchFrom].delay_end = 2;
+        d.actions[weapon_action::kSwitchTo].delay_start = 2;
+        d.actions[weapon_action::kSwitchTo].delay_end = 2;
+    };
+    WeaponTableEntry &gun = t.entries[0];
+    gun.category = 9;
+    gun.clipsize = 8;
+    gun.startrounds = 8;
+    gun.flags = weapon_flag::kEmplaced;
+    gun.ammo_class_count = 1;
+    gun.ammo_class_id = 0;
+    bake_switches(gun.action_fsm);
+    WeaponTableEntry m4;
+    m4.name = "WPN_M4AUTO";
+    m4.valid = true;
+    m4.category = 3;
+    m4.clipsize = 30;
+    m4.startrounds = 300;
+    m4.maxclips = 10;
+    m4.ammo_class_count = 1;
+    m4.weapon_class_slot = 1;
+    m4.ammo_class_id = 1;
+    m4.ammo_bucket = 1;
+    bake_switches(m4.action_fsm);
+    t.entries.push_back(m4);
+    LocalPlayer local(r.w);
+    r.w.local_player_state = &local;
+    local.loadout.spawn_kit = {WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
+    local.loadout.spawn_kit_set = true;
+    local_loadout_rebuild(r.w, local.loadout, local.weapon, local.inventory,
+            local.inventory_valid, /*select_spawn_default=*/true);
+    r.veh().item_attrib |= kItemAttribEweap; // the UseGun's own slot
+    CHECK(r.w.vehicles.prepare_weapon_slot(r.veh()));
+    local.inventory.shared_clips[1] = 30;
+    // The shell's installs, as the switch events ask for them.
+    const auto install = [&](const char *name, int32_t clipsize, bool preserve) {
+        WeaponInstallData data;
+        data.name = name;
+        data.clipsize = clipsize;
+        data.table_baked = true;
+        local_weapon_install(r.w, local.weapon, data, preserve, false, &local.inventory,
+                local.view);
+    };
+    install("WPN_M4AUTO", 30, false);
+    const auto pump = [&]() {
+        ++r.w.logic_tick;
+        local.pump_local_weapon();
+    };
+    for (int i = 0; i < 8; ++i) pump();
+    CHECK(active_local_weapon_slot(r.w, local.weapon)->clip == 30);
+
+    CHECK(local.toggle_mount());
+    CHECK(r.player().mount_type == SeatType::Gunner && r.player().use_gun_slot_swapped);
+    for (int i = 0; i < 8 && !local.weapon.usegun_slot_active; ++i) pump();
+    CHECK(local.weapon.usegun_slot_active);
+    install("WPN_USEGUN", 8, true);
+    CHECK(active_local_weapon_slot(r.w, local.weapon)->clip == 8);
+    for (int i = 0; i < 8; ++i) pump();
+
+    CHECK(local.toggle_mount());
+    CHECK(!r.player().mounted);
+    for (int i = 0; i < 8 && local.weapon.usegun_slot_active; ++i) pump();
+    CHECK(!local.weapon.usegun_slot_active);
+    install("WPN_M4AUTO", 30, true);
+    CHECK(active_local_weapon_slot(r.w, local.weapon)->clip == 30);
+    CHECK(local.inventory.shared_clips[1] == 30);
+    r.w.local_player_state = nullptr;
+}
+
 // The gate reads the local player's EquippedSlot as it stands, not the shell's
 // weapon install: a single player whose spawn select equipped a slot at the
 // boot, ahead of the mission start's WAC pass and of any shell install, is
@@ -4612,6 +4699,7 @@ int main() {
     test_entity_pose_seat_bone_lookup();
     test_toggle_nearest_seat();
     test_unarmed_usegun_needs_the_session();
+    test_usegun_round_trip_reads_the_personal_bucket();
     test_script_mount_reads_the_boot_equipped_slot();
     test_binoculars_survive_all_but_the_camera_reset();
     test_best_seat_walks_vehicle_children();

@@ -1125,6 +1125,30 @@ LocalWeaponReloadWire local_reload_request_wire(const World &world,
 	return out;
 }
 
+namespace {
+
+// The personal slot's shared-bucket mirror: a bucket weapon's loaded rounds and its
+// pool read through the player's seat as it stands when they are read, on a
+// controller seat 0 and on a gunner seat the carrier's clip. [orig: sub_5405F0 from
+// WeaponSlot_CanFire @0x541C79, the reload gate @0x4E12A7 / @0x4E12C6,
+// WeaponAction_Idle @0x542990, WeaponAction_EmptyIdle @0x542A8C, WeaponAction_Recoil
+// @0x542E07, HUD_BuildEntityInfo @0x4B85D3; the pool from WeaponSlot_CanFire
+// @0x541C9B; Entity_GetScoreValueBySlotType @0x5406E0]
+void read_personal_bucket(const World &world, WeaponSlotState &slot,
+		const WeaponInventory &inventory, const WeaponAmmoSeat &seat) {
+	const auto *eq = inventory.slot(inventory.equipped_combo);
+	const auto *def = eq != nullptr && eq->adm_index >= 0
+			? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index)) : nullptr;
+	slot.shared_clip = def != nullptr && def->ammo_bucket != 0;
+	if (!slot.shared_clip) return;
+	slot.clip = weapon_seat_bucket(seat, weapon_inventory_loaded_rounds(world.tables.weapons,
+			inventory, inventory.equipped_combo));
+	slot.reserve = weapon_seat_pool(seat, def->ammo_class_id,
+			weapon_pool_get(inventory, def->ammo_class_id));
+}
+
+} // namespace
+
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
 	io.map_command = 0;
@@ -1154,26 +1178,11 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	const bool borrowed_usegun_slot = w.usegun_slot_active;
 	// The slot's ammo reads go through the player's seat: on a controller seat a
 	// shared bucket reads 0 and a pool 0 unless the carrier is EWeap, and the
-	// bucket is never written there. [orig: sub_5405F0 from WeaponSlot_CanFire
-	//  @0x541C79, the reload gate @0x4E12A7 / @0x4E12C6, WeaponAction_Idle
-	//  @0x542990, WeaponAction_EmptyIdle @0x542A8C, WeaponAction_Recoil @0x542E07;
-	//  the pool from WeaponSlot_CanFire @0x541C9B; Entity_GetScoreValueBySlotType
-	//  @0x5406E0; sub_540670 @0x540684..0x540692]
+	// bucket is never written there. [orig: sub_540670 @0x540684..0x540692]
 	const WeaponAmmoSeat ammo_seat =
 			player != nullptr ? entity_ammo_seat(world, *player) : WeaponAmmoSeat{};
-    if (io.inventory != nullptr && !borrowed_usegun_slot) {
-        const auto *eq = io.inventory->slot(io.inventory->equipped_combo);
-        const auto *def = eq != nullptr && eq->adm_index >= 0
-                ? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index)) : nullptr;
-        active_slot.shared_clip = def != nullptr && def->ammo_bucket != 0;
-        if (active_slot.shared_clip) {
-            active_slot.clip = weapon_seat_bucket(ammo_seat,
-                    weapon_inventory_loaded_rounds(world.tables.weapons,
-                            *io.inventory, io.inventory->equipped_combo));
-            active_slot.reserve = weapon_seat_pool(ammo_seat, def->ammo_class_id,
-                    weapon_pool_get(*io.inventory, def->ammo_class_id));
-        }
-    }
+	if (io.inventory != nullptr && !borrowed_usegun_slot)
+		read_personal_bucket(world, active_slot, *io.inventory, ammo_seat);
 	WeaponFsmInputs in;
 	// The action binding permits an armed controller's borrowed carrier slot.
 	// [orig: Input_HandleActionBinding_0 @0x4E09CB..0x4E09FF]
@@ -1569,8 +1578,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	//  per-ammo-class pool — one storage, two views; this port mirrors between the
 	//  single-slot FSM state and the inventory]
 	if (w.usegun_switch != LocalUseGunSwitch::kNone && ev.switch_completed &&
-			active_slot.current == w.usegun_switch_action)
+			active_slot.current == w.usegun_switch_action) {
 		commit_local_usegun_weapon_switch(world, w);
+		// The switch back hands the personal slot to its readers again, which read
+		// a bucket weapon's rounds through the seat as it now stands: the mirror the
+		// staging pump read through the gunner seat (the gun's clip) does not carry
+		// across the seat. [orig: sub_5405F0 @0x540611..0x540657, read at each use]
+		if (borrowed_usegun_slot && !w.usegun_slot_active && io.inventory != nullptr)
+			read_personal_bucket(world, w.slot, *io.inventory, ammo_seat);
+	}
 	if (io.inventory != nullptr && !borrowed_usegun_slot) {
 		WeaponInventory &inventory = *io.inventory;
 		WeaponInventorySlot *eq = inventory.slot(inventory.equipped_combo);
