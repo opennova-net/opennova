@@ -32,8 +32,10 @@
 # it sells and their zone's name among it) and the store's URL, the worker's
 # alone the machine driver's own settings (the fleet cluster and the play
 # zone's id among them), web the fleet cluster's name for its reads, infra.env
-# what the toolbox's fleet commands need. A t2 or Graviton type, a slot count
-# past 32, more than 64 addresses and hosting with no fleet_ami are refused.
+# what the toolbox's fleet commands need. The fleet leader's pass age alarms
+# (no data included) once hosting is on and a release names the fleet program,
+# never before. A t2 or Graviton type, a slot count past 32, more than 64
+# addresses and hosting with no fleet_ami are refused.
 
 mock_provider "aws" {
   override_during = plan
