@@ -17,7 +17,11 @@ void push_tag(World &world, const Entity &e, const PlayerSlotFacts *slot,
               std::vector<FriendlyTagSource> &out) {
     FriendlyTagSource src;
     src.entity = e.handle;
-    src.net_id = e.net_id;
+    // The fallback-name index is the entity's pool-encoded id, the pool the
+    // pointer falls in and its slot, never its SSN [orig: HUD_DrawEntityLabel
+    // @0x5a4047..0x5a40cf -- the g_PoolList walk @0x5a4053..0x5a4071, then
+    // `shl ecx, 0Ch; and eax, 0FFFh; or eax, ecx` @0x5a40c5..0x5a40cd].
+    src.fallback_name_id = e.handle.packed;
     src.team = e.team;
     src.position = e.position;
     // The anchor's eye lift rides along: z + entity[+116] + 0x4000

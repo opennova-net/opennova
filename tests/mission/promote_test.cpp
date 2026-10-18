@@ -465,9 +465,10 @@ static void test_unresolved_emplacement_preserves_streamed_pose() {
 
 // D-HUD-20: the authored display name rides name_index through the embedder's
 // [PeopleNames] resolver with the retail 15-char copy, and the friendly-tag
-// gather applies the witnessed pass gates (team, player flag, aliveness).
-// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a;
-//  HUD_DrawFriendlyTagsPass @0x5a4480]
+// gather applies the witnessed pass gates (team, player flag, aliveness). An
+// unnamed tag's fallback-name index is the entity's pool-encoded id, not its
+// SSN. [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a;
+//  HUD_DrawFriendlyTagsPass @0x5a4480; HUD_DrawEntityLabel @0x5a4047..0x5a40cf]
 static void test_friendly_tag_names_and_gather() {
     bms::File m{};
     m.organics.push_back(organic(10 << 16, 10 << 16, 0, /*team=*/1, 0, 0));
@@ -493,6 +494,7 @@ static void test_friendly_tag_names_and_gather() {
     if (named == nullptr || unnamed == nullptr || enemy == nullptr) return;
     CHECK(named->display_name == "123456789012345"); // the strncpy(_, _, 15)
     CHECK(unnamed->display_name.empty());
+    CHECK(unnamed->handle.packed != unnamed->net_id); // the two ids differ here
     // The production item-traits sweep stamps has_item_def; mirror it here.
     named->has_item_def = true;
     unnamed->has_item_def = true;
@@ -511,14 +513,15 @@ static void test_friendly_tag_names_and_gather() {
     bool saw_named = false;
     bool saw_unnamed = false;
     for (const FriendlyTagSource &t : tags) {
-        if (t.net_id == 21) {
+        if (t.entity == named->handle) {
             saw_named = true;
             CHECK(t.name == "123456789012345");
             CHECK(t.health_ratio_fp16 == 0x10000);
         }
-        if (t.net_id == 22) {
+        if (t.entity == unnamed->handle) {
             saw_unnamed = true;
             CHECK(t.name.empty()); // the compiler resolves '^' + table[id % 36]
+            CHECK(t.fallback_name_id == unnamed->handle.packed);
         }
         CHECK(!t.player);
         CHECK(!t.dead && !t.has_slot);
@@ -533,12 +536,12 @@ static void test_friendly_tag_names_and_gather() {
     collect_friendly_tags(*w, viewer, tags, ctx);
     CHECK(tags.size() == 2);
     for (const FriendlyTagSource &t : tags)
-        CHECK(t.dead == (t.net_id == 21));
+        CHECK(t.dead == (t.entity == named->handle));
     named->flags &= ~kEntityFlagDead;
     named->flags |= kEntityFlagCarried;
     tags.clear();
     collect_friendly_tags(*w, viewer, tags, ctx);
-    CHECK(tags.size() == 1 && tags[0].net_id == 22);
+    CHECK(tags.size() == 1 && tags[0].entity == unnamed->handle);
     named->flags &= ~kEntityFlagCarried;
 
     // The enemy is labelled only while the death screen is up
@@ -555,7 +558,7 @@ static void test_friendly_tag_names_and_gather() {
     unnamed->flags |= kEntityFlagPlayer;
     tags.clear();
     collect_friendly_tags(*w, viewer, tags, ctx);
-    CHECK(tags.size() == 1 && tags[0].net_id == 21);
+    CHECK(tags.size() == 1 && tags[0].entity == named->handle);
     const PlayerSlotLookup slots = [&](EntityHandle h, PlayerSlotFacts &f) {
         if (!(h == unnamed->handle)) return false;
         f.revive_seconds = 87;
@@ -567,7 +570,7 @@ static void test_friendly_tag_names_and_gather() {
     collect_friendly_tags(*w, viewer, tags, ctx);
     CHECK(tags.size() == 2);
     for (const FriendlyTagSource &t : tags) {
-        if (t.net_id != 22) continue;
+        if (t.entity != unnamed->handle) continue;
         CHECK(t.player && t.has_slot && t.revive_seconds == 87 && t.medic_request);
     }
     ctx.slot_lookup = nullptr;
