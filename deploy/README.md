@@ -34,9 +34,9 @@ the whole bring-up.
     (`infra/zone`: Full (strict), each deployment's edge authentication rule, the Stripe
     webhook's rule, Email Routing), no deployment, its state in prod's state bucket;
   - `github plan|apply|import|output|list`: the GitHub organization (`infra/github`;
-    DEPLOY.md, "GitHub"): its settings, members, CI runners, repositories, the deploy
-    environments, branch protection and Actions secrets, no deployment, its state in
-    prod's state bucket;
+    DEPLOY.md, "GitHub"): its settings, members, repositories, the deploy environments,
+    branch protection and Actions secrets, no deployment, its state in prod's state
+    bucket;
   - `app deploy|images|releases|rollback|converge|status|restart|down|up|logs|shell`:
     releases (each program's task definition revision with the images pinned by digest,
     the manifest in SSM and S3; `app deploy --deployment prod --promote staging` takes

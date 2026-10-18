@@ -1,11 +1,11 @@
 variable "owner" {
-  description = "The GitHub organization the runners belong to."
+  description = "The GitHub organization the stack manages."
   type        = string
   default     = "opennova-net"
 }
 
 variable "repository" {
-  description = "The repository (in owner) whose workflows may use the runners; it is public, so the runner group allows public repositories."
+  description = "The repository (in owner) whose Actions secrets and deploy environments the stack makes."
   type        = string
   default     = "opennova"
 }
@@ -35,45 +35,6 @@ variable "stripe_test_secret_key" {
   description = "The STRIPE_TEST_SECRET_KEY secret's value (secrets.tf): a Stripe test-mode key (rk_test_ restricted to Customers, Checkout Sessions, Subscriptions and Customer portal write and Prices and Products read; or sk_test_), or the vault's REPLACE_ME, with which the billing end-to-end test skips. The toolbox reads it from the vault item stripe-test, field restricted_key (deploy/env/github.env.tpl)."
   type        = string
   sensitive   = true
-}
-
-variable "size" {
-  description = "Both runners' machine size (GET /orgs/{org}/actions/hosted-runners/machine-sizes). It can change in place."
-  type        = string
-  default     = "16-core"
-}
-
-# The images the standard windows-latest and ubuntu-latest labels run (GET
-# /orgs/{org}/actions/hosted-runners/images/github-owned): the build legs on
-# these runners share compiler caches with jobs that stay on the standard ones
-# (package jobs, fork pull requests), and a cache entry only serves the same
-# compiler. An image cannot change in place: a new one replaces the runner.
-variable "windows_image_id" {
-  description = "The Windows runner's GitHub-owned image: 2307, Windows Latest (2025)."
-  type        = string
-  default     = "2307"
-}
-
-variable "linux_image_id" {
-  description = "The Linux runner's GitHub-owned image: 2306, Ubuntu Latest (24.04)."
-  type        = string
-  default     = "2306"
-}
-
-# The scale-up caps, which also cap the spend: a pull request's run takes up
-# to 6 Windows machines at once (the two core shards and the retail leg while
-# the Godot tests and the package follow the gdext build) and a master push 7
-# (the gdext build's release leg); jobs past the cap queue.
-variable "windows_maximum_runners" {
-  description = "How many Windows machines may run at once."
-  type        = number
-  default     = 10
-}
-
-variable "linux_maximum_runners" {
-  description = "How many Linux machines may run at once."
-  type        = number
-  default     = 5
 }
 
 variable "aws_account_id_prod" {

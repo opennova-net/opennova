@@ -99,10 +99,10 @@
 #   github plan|apply|import|output|list [args...]
 #                                 the GitHub organization opennova-net
 #                                 (infra/github; DEPLOY.md, "GitHub"): its
-#                                 settings, members, CI runners, repositories,
-#                                 the deploy environments, branch protection and
-#                                 Actions secrets; no --deployment; its state in
-#                                 prod's state bucket
+#                                 settings, members, repositories, the deploy
+#                                 environments, branch protection and Actions
+#                                 secrets; no --deployment; its state in prod's
+#                                 state bucket
 #   aws <args...>                 the AWS CLI in the deployment's account
 #   app deploy [--tag T] [--image NAME=T|NAME=@sha256:D]... [--serve-tag T]
 #              [--hostd-tag T] [--promote staging | --images-from FILE|-]

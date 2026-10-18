@@ -1,8 +1,7 @@
 # What existed before the stack, adopted rather than made again: the first
 # plan imports each of these, and once in the state an import block is a no-op.
 # They stay so a state rebuilt from nothing adopts the organization the same way.
-# (The runner group and the runners were the stack's own; the secret has no
-# value to import, and an apply writes it.)
+# (A secret has no value to import, and an apply writes it.)
 
 import {
   to = github_organization_settings.org

@@ -7,9 +7,6 @@
 mock_provider "github" {
   override_during = plan
 
-  mock_data "github_repository" {
-    defaults = { repo_id = 123456789 }
-  }
   mock_data "github_user" {
     defaults = { id = "4242" }
   }
