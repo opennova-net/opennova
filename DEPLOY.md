@@ -1,15 +1,15 @@
 # Deploying your own OpenNova NovaWorld instance
 
 This repository deploys a complete NovaWorld stack to AWS, behind Cloudflare: the gate,
-the lobby, the legacy HTTP services, the web portal, the fleet's controller and its
-background jobs, a PostgreSQL database, a Valkey cache, and the fleet of machines the
+the lobby, the legacy HTTP services, the web portal, the fleet program, the background
+jobs and the data sets' jobs, a PostgreSQL database, a Valkey cache, and the fleet of machines the
 hosted game servers run on. Anyone can stand up their own instance with the commands
 the project maintainers use. The original games reach your server through a
 hosts-file line that points `gs.novaworld.net` at its gate's Elastic IP (the OpenNova
 Switcher writes it; DEVELOPING.md, "Test with retail Joint Operations"). The stack, like
 the rest of OpenNova, is pre-1.0 and experimental.
 
-- **Try it locally first.** `scripts/dev_stack.sh up` runs the same five programs, the
+- **Try it locally first.** `scripts/dev_stack.sh up` runs the same six programs, the
   portal, PostgreSQL, Valkey and hosted game servers on one machine under Docker, with no
   account of any kind (DEVELOPING.md, "Run the NovaWorld servers locally").
 - **The whole bring-up, in order,** is the checklist "From zero, in order" below; the
@@ -17,7 +17,7 @@ the rest of OpenNova, is pre-1.0 and experimental.
 - **Under your own names** (your domain, your GitHub owner, your vault): "Running it
   under your own names" lists every place OpenNova's own names are written down.
 
-The stack in short: the NovaWorld service is five programs, each its own image and an ECS
+The stack in short: the NovaWorld service is six programs, each its own image and an ECS
 service on Fargate across two availability zones, whose tasks keep no state of their own:
 
 | Program | Runs | Tasks (default) | Reached at |
@@ -25,8 +25,9 @@ service on Fargate across two availability zones, whose tasks keep no state of t
 | gate | the gate (UDP 7597; the hosts' status blobs land there too) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP |
 | lobby | a lobby instance (UDP 64206) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP: one lobby address for every lobby task, which the gate hands out |
 | web | the retail HTTP routes and the website's API (8080) and the portal's nginx (443, and 8082 in front of the retail routes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone (to the portal's 8082) |
-| controller | the fleet's reconcile pass, job scheduling, the machines' internal listener (8070) | 1 (elected; a standby may wait beside it), 0.25 vCPU / 0.5 GiB | `controller.<deployment>.opennova.internal`, its Cloud Map name |
-| worker | the background jobs (the fleet's AWS calls, billing sync, mail, prunes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | nothing inbound |
+| fleet | the fleet's reconcile pass, the admin links, the console drain, the machines' internal listener (8070); no job and no cloud call | 1 (elected; a standby may wait beside it), 0.25 vCPU / 0.5 GiB | `fleet.<deployment>.opennova.internal`, its Cloud Map name |
+| worker | the background jobs and their schedules (the fleet's AWS calls, billing sync, mail, prunes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | nothing inbound |
+| data | the data sets' jobs over the game data's store (a tree's finalize, a release's validate and apply, the prune) | 1 (fixed: its jobs' caps are global), 0.25 vCPU / 1 GiB and 40 GiB of task storage | nothing inbound |
 
 Its database is RDS PostgreSQL 17 in private subnets, on a small burstable class in
 one zone while traffic is small; web's sessions and rate limits live in ElastiCache for Valkey beside it; its
@@ -45,7 +46,7 @@ There are three places the service runs, and nothing of one reaches another by a
 
 | | dev | staging | prod |
 |---|---|---|---|
-| What it is | a developer's local stack: the five programs, the portal, PostgreSQL and Valkey under docker compose (`scripts/dev_stack.sh`, `deploy/compose`, DEVELOPING.md) | the rehearsal: prod's shape, every change runs here first | the service players use |
+| What it is | a developer's local stack: the six programs, the portal, PostgreSQL and Valkey under docker compose (`scripts/dev_stack.sh`, `deploy/compose`, DEVELOPING.md) | the rehearsal: prod's shape, every change runs here first | the service players use |
 | Where | the developer's machine | its own AWS account, `opennova-staging`, in the Organization | its own AWS account, `opennova-prod` |
 | Site | `http://localhost:8000` | `https://staging.<domain>` | `https://<domain>` (and `www`) |
 | Retail gate | the developer's LAN address | its own Elastic IP | the Elastic IP retail hosts files name (`gs.novaworld.net`), which prod adopts and never releases |
@@ -553,7 +554,7 @@ in the region's list never moves a subnet.
 `infra apply` saves its plan to a file and applies that file, never a plan made again.
 It refuses a plan that destroys or replaces what no apply makes again or what the
 service runs on: an Elastic IP or an association, an instance or a network interface,
-the load balancer, the ECS cluster or a program's service, the controller's Cloud Map
+the load balancer, the ECS cluster or a program's service, the fleet program's Cloud Map
 namespace, the database, the cache, a bucket. Read the plan, then `infra apply
 --allow-destroy` if that is meant. A plan that would make prod a new gate address is
 refused whatever the flags. On prod it then prints what the plan does (`N to create, N
@@ -569,14 +570,14 @@ balancer and the machines, private a/b with no route out for the database and th
 cache); the ECS cluster; per program a security group (the gate: its UDP port and its
 health port from the load balancer alone; the lobby: its UDP port to everyone and its
 health port from the load balancer; web: 443 and 8082 from the load balancer alone; the
-controller: the internal port from the machines alone; the worker: nothing; no 22, no 80
-anywhere), a task role holding what
+fleet: the internal port from the machines alone; the worker and data: nothing; no 22, no
+80 anywhere), a task role holding what
 that program needs alone, a task definition (the template every deploy clones), an ECS
 service on Fargate in both public subnets with a public IPv4 per task, made with no task
-(nothing runs before the first release, below), and its task counts (Application Auto
-Scaling between the program's `min` and `max`, web and the worker on their CPU); the task
-execution role (the deployment's secrets and the log group); the controller's Cloud Map
-name; the public network load balancer with the gate's Elastic IP (adopted on prod) in
+(nothing runs before a release names the program, below), and its task counts
+(Application Auto Scaling between the program's `min` and `max`, web and the worker on
+their CPU); the task execution role (the deployment's secrets and the log group); the
+fleet program's Cloud Map name; the public network load balancer with the gate's Elastic IP (adopted on prod) in
 zone a and one of its own in zone b, carrying the gate, the lobby and web, and its own
 security group; the database and the cache (Valkey, one node by default); the backup task and its nightly schedule; the
 SSM parameters the toolbox reads; the operations bucket (`opennova-<deployment>-ops-<account
@@ -585,12 +586,13 @@ rules); the logs, metrics and alarms; the account's budgets; the deployment's
 Cloudflare records (its site's, proxied; the update service's and the gate's, unproxied), its origin
 certificate; its outbound mail's SES identities and records (with a sender); the update
 service's listeners; and (with `hosted_enabled`) the fleet's launch templates and image
-parameter, the machine role and web's and the worker's store policies (section 7). A new
-database takes 10 to 15 minutes, a new cache about as long. The services run no task until the deployment's first release: a
-template's images are unpinned (`image_tag`, `latest`), so no task starts from one, and
-each count's floor is 0 until then; the first `app deploy` starts each program at its
-`desired` count and raises its floor to its `min`, which the next `infra apply` keeps
-(section 5).
+parameter, the machine role and web's and the data program's store policies (section 7). A new
+database takes 10 to 15 minutes, a new cache about as long. A service runs no task until
+a release names its program (the release manifest's program list): a template's images
+are unpinned (`image_tag`, `latest`), so no task starts from one, and its count's floor
+is 0 and its heartbeat and running alarms off until then; the first `app deploy` naming
+it starts it at its `desired` count and raises its floor to its `min`, which the next
+`infra apply` keeps (section 5).
 
 The state lives in the deployment's own account: `s3://<aws-<deployment>/state_bucket>/infra/aws/terraform.tfstate`,
 versioned and encrypted, its lock S3's own lock file (`use_lockfile`), so two operators'
@@ -652,10 +654,10 @@ true`) adds a synchronous standby in the other private subnet's zone that RDS fa
 to on its own, the endpoint's name following it, in a minute or two.
 `max_connections` is sized rather than left to RDS's memory formula (about 100 for
 1 GiB): `db_pool_max` (7, the programs' `DATABASE_POOL_MAX`; at least 6, a worker's four
-job threads, its keeper and its main loop) for each of `db_service_processes` (10)
+job threads, its keeper and its main loop) for each of `db_service_processes` (12)
 program processes, plus 10 for the backup task, the operator's psql and the reserved
-connections (80). The 10 are every program's tasks at its `max`, doubled for the new
-tasks a deployment starts beside them: a task each (2 + 2 + 2 + 2 + 2); the plan refuses
+connections (94). The 12 are every program's tasks at its `max`, doubled for the new
+tasks a deployment starts beside them: a task each (2 + 2 + 2 + 2 + 2 + 2); the plan refuses
 a `max` past them (raise
 `db_service_processes` with it; the `db-connections` alarm says when more connect).
 A class change, a Multi-AZ change and `max_connections` (a static parameter) wait for
@@ -723,7 +725,7 @@ lobby address the gate first gave it, so a host whose lobby task went away lands
 live one at the same address (`apps/novaworld_common/README.md`, "Lobby instances"). A
 lobby task leaving (a deploy, a restart) is deregistered first: the balancer sends it no
 new flow, keeps its flows 10 s, then ends them, and ECS stops it only then. The
-controller's tasks register in Cloud Map as `controller.<deployment>.opennova.internal`
+fleet program's tasks register in Cloud Map as `fleet.<deployment>.opennova.internal`
 (an A record, TTL 10, private to the VPC); the leader alone binds the internal listener,
 where the machines' hostd and `ONNET_INTERNAL_URL` reach it.
 
@@ -734,11 +736,12 @@ balancer's check does). Web's `/healthz` also fails while the cache does not ans
 balancer routes around it, and no task is replaced for it, since `/livez` is what ECS
 asks.
 
-Each program's sizes are a var-file setting (`gate`, `lobby`, `web`, `controller`,
-`worker`: a `cpu` and `memory` of a Fargate size, `min`, `max` and `desired`, any left
-out keeping its default). `desired` is the count a new service starts with; Application
+Each program's sizes are a var-file setting (`gate`, `lobby`, `web`, `fleet`, `worker`,
+`data`: a `cpu` and `memory` of a Fargate size, `min`, `max` and `desired`, any left out
+keeping its default). `desired` is the count a new service starts with; Application
 Auto Scaling holds each count between `min` and `max`, web's and the worker's on their
-CPU (60% on average), the others where they start. The programs' maxima, with a
+CPU (60% on average), the others where they start (data's three are one fixed count:
+its jobs' caps are global, so more tasks would run none more at once). The programs' maxima, with a
 deployment's extra tasks, must fit the database's `db_service_processes`; the plan says
 when they do not. More lobbies are `lobby = { min = 2, max = 2, desired = 2 }`.
 
@@ -880,7 +883,7 @@ committed file: a name in a public file is one anybody can register first.
 
 The images publish to GHCR from CI (`.github/workflows/novaworld-images.yml`), under
 `image_registry` (`ghcr.io/opennova-net`): one per program, `opennova-novaworld-gate`,
-`-lobby`, `-web`, `-controller` and `-worker` (one Dockerfile, a target each); the
+`-lobby`, `-web`, `-fleet`, `-worker` and `-data` (one Dockerfile, a target each); the
 portal's nginx, `novaworld-web`; the backup task's, `opennova-novaworld-backup`
 (`deploy/backup`); and `opennova-serve` (the hosted servers, `serve-image.yml`; it also
 carries hostd, the machines' agent). Make each package public once: the tasks and the
@@ -894,9 +897,9 @@ credentials).
 
 `app deploy`:
 
-1. resolves each image to its digest now: `--tag` sets the five programs', the portal's
+1. resolves each image to its digest now: `--tag` sets the six programs', the portal's
    and the backup task's (all built from one commit), `--image NAME=TAG` one of them
-   (`gate`, `lobby`, `web`, `controller`, `worker`, `portal`, `backup`, `serve`, `hostd`;
+   (`gate`, `lobby`, `web`, `fleet`, `worker`, `data`, `portal`, `backup`, `serve`, `hostd`;
    `NAME=@sha256:<digest>` pins a digest as it is), `--serve-tag` and `--hostd-tag` the
    machines'. An image given no tag keeps the current release's digest; the first release
    takes `latest` for any tag not given. `--promote staging` (prod alone) takes, instead,
@@ -905,22 +908,24 @@ credentials).
    FILE|-` takes the same JSON, the deploy workflow's way), and records which release it
    promoted;
 2. registers each program's task definition revision: Terraform's task definition (the
-   template, `infra.env` names it) with the release's images, the serve and hostd images
-   in the environment of the programs that read hosting (web, the controller, the worker;
-   `--no-hosting` turns their provider off), every secret the template names (SSM must
+   template, `infra.env` names it) with the release's images, the serve image in the
+   environment of the programs that read the fleet's policy (web, the fleet, the worker;
+   `--no-hosting` turns their provider off) and the hostd image in the one that reads the
+   machine driver's own settings (the worker), every secret the template names (SSM must
    hold each) and each optional one its label names that SSM holds. A program whose
    revision would run exactly what it runs now keeps it, so a release that changes only
    web's image restarts web alone and never a lobby session;
 3. on prod, prints the images and asks (type `prod`, or `--yes`);
-4. rolls the services in turn: worker, controller, web, lobby, then gate, the players' way
-   in, last. It follows each service's new deployment until ECS calls it COMPLETED (its
+4. rolls the services in turn: worker, data, fleet, web, lobby, then gate, the players'
+   way in, last. It follows each service's new deployment until ECS calls it COMPLETED (its
    new tasks healthy, the old stopped) or FAILED: ECS's deployment circuit breaker rolls a
    deployment whose new tasks never turn healthy back to the old revision, after 10 failed
    launches, so the wait is bounded at 40 minutes (`OPENNOVA_ROLL_TIMEOUT`, seconds). A
    failed or unfinished one stops the deploy, leaving the rest on what they ran. A service
-   at no task before the deployment's first release starts at its `desired` count, and
-   its floor is raised to its `min` (the controller, up before any lobby, starts no
-   hosted server until a lobby runs: `apps/novaworld_common/hosted/README.md` "No lobby live");
+   at no task before a release names its program (and one `app down` recorded no count
+   for: a program added since) starts at its `desired` count, and its floor is raised to
+   its `min` (the fleet, up before any lobby, starts no hosted server until a lobby runs:
+   `apps/novaworld_common/hosted/README.md` "No lobby live");
 5. once every program runs it, registers the backup task's revision (the nightly run
    takes the newest) and records the release: its manifest (the images by digest, each
    revision, the previous release, the release it was promoted from) goes to
@@ -929,15 +934,15 @@ credentials).
    `app rollback --to <that id>` puts the programs it already moved back on it.
 
 How each program's tasks are replaced: every program starts the new task first and stops
-the old one once it is healthy, so a bad image stops nothing that runs (the controller's
+the old one once it is healthy, so a bad image stops nothing that runs (the fleet's
 new task waits as the standby, then leads once the old one lets the lock go; the
 balancer sends new lobby flows to the new lobby task once it passes, then drains the old
 one for 10 s before ECS stops it). A lobby's restart is the one that shows: its players
 sign in again through the gate, and the servers listed on it, hosted or retail players'
 own, leave the browser for up to about 4.5 min (a host's session drops the silent lobby
 after 240 s and reconnects to the one lobby address), then list again with no restart and
-their matches going on. The controller's and the workers' jobs wait out a restart in the
-database.
+their matches going on. The jobs (the worker's, the data program's) and the fleet's
+rows wait out a restart in the database.
 
 ```bash
 D='--deployment staging'                              # or prod
@@ -949,10 +954,10 @@ D='--deployment staging'                              # or prod
 ./deploy/run.sh $D app status                         # every program's counts, rollout and revision
 ./deploy/run.sh $D app restart web                    # new tasks for a program (every program without one)
 ./deploy/run.sh $D app logs lobby --follow            # CloudWatch, a stream per container and task
-./deploy/run.sh $D app shell controller               # a root shell in a running task (ECS Exec)
+./deploy/run.sh $D app shell fleet                    # a root shell in a running task (ECS Exec)
 ./deploy/run.sh $D app shell web portal               # web's second container, the portal's nginx
 ./deploy/run.sh $D app down                           # every program to 0 tasks (the counts recorded)
-./deploy/run.sh $D app up                             # the recorded counts back
+./deploy/run.sh $D app up                             # the recorded counts back (a program added since: its desired)
 ```
 
 `app converge` is a release of the same images: Terraform's task definitions as they are
@@ -971,8 +976,10 @@ servers off (the kill switch, section 7).
 **Rolling back.** `app rollback` points every service back at the previous release's
 revisions (or `--to` a named one's), in the same order, and once they all run them makes
 it the current release; the revisions stay registered, so any release made since the
-deployment's account was built can be rolled back to, with one limit: a rollback across a
-migration is the database's business (section 6). The nightly backup runs the current
+deployment's account was built can be rolled back to, with two limits: a rollback across a
+migration is the database's business (section 6), and a release from before the program
+split (its programs name no fleet and no data program: the controller's) is refused, since
+no service runs its controller any more; past the split, fix forward. The nightly backup runs the current
 release's backup revision (its image pinned by digest): `app deploy` and `app rollback`
 point its schedule at it as they record the release, and an `infra apply` reads the same
 from the release (never the family's newest revision, which an apply's template,
@@ -1084,8 +1091,8 @@ in the worker's jobs, with the worker's task role), in either public subnet:
 - **own machines**, `c7a.medium`, exactly one server: the own-machine add-on.
 
 Slot k of a machine is game UDP `32768+k` (to players) and admin TCP `32800+k` (to the
-controller alone); hostd, the agent on each machine, runs one container per slot and
-reports to the controller's internal listener (`controller.<deployment>.opennova.internal:8070`,
+fleet program alone); hostd, the agent on each machine, runs one container per slot and
+reports to the fleet program's internal listener (`fleet.<deployment>.opennova.internal:8070`,
 its Cloud Map name, admitted from the machines alone). A machine holds no volume of game
 data: its hostd fetches the trees its servers pin from the store (below), once each, onto
 its root volume (`machine_root_volume_gb`, 40 GiB), and keeps each while a server needs
@@ -1104,7 +1111,7 @@ command file retail `UPDATE.EXE` asks for when OpenNova's update service serves 
 data is a **tree**, one immutable version of its files: **Upload data** takes an install's folder
 from a folder picker, keeps only the files `opennova-serve` reads, sends them through the
 site in 32 MiB parts (each a request to web, which puts it in the bucket; the bucket needs
-no CORS rule), and **Finalize** has the worker check the names and sizes and list the
+no CORS rule), and **Finalize** has the data program check the names and sizes and list the
 missions, which are the data set's map rotation (there is no configured one):
 
 | File | Kind | Why |
@@ -1127,10 +1134,10 @@ so the prefix carries no deployment): `trees/<tree id>/<file>` with its `manifes
 (each file's name and size, the version line), `updates/<sha256>.sfs` (validated packages)
 and `updates/upload-<release id>.sfs` (before validation). `ONNET_OBJECT_STORE_URL`
 (`s3://opennova-<deployment>-ops-<account id>/data`) and `ONNET_OBJECT_STORE_REGION` name
-it to web, the controller and the worker. The machines' hostd fetches a tree with `aws s3
-sync` under the machine role, which reads `data/trees/` and nothing else of the bucket,
-and checks the names and sizes against the manifest; web's and the worker's task roles
-read, write and delete under `data/` alone. The bucket aborts an upload abandoned for 7
+it to web, the fleet, the worker and the data program. The machines' hostd fetches a tree
+with `aws s3 sync` under the machine role, which reads `data/trees/` and nothing else of
+the bucket, and checks the names and sizes against the manifest; web's and the data
+program's task roles read, write and delete under `data/` alone. The bucket aborts an upload abandoned for 7
 days, and keeps a deleted object's old version 7 days (a tree's) or 30 (a package's).
 Nothing of the game data
 goes in git, an image or the vault, and nothing of it crosses between the accounts: each
@@ -1142,7 +1149,7 @@ deployment's admins upload it on its own site, into its own bucket.
    `s3:ListBucketMultipartUploads` in `infra/aws/iam/opennova-role-boundary.json`, which
    the org stack applies in both accounts before the apply below (`./deploy/run.sh org
    plan`, then `org apply`; `infra/aws/iam/README.md`, "Changing a policy"); applied
-   after, every store call of web and the worker is refused until it is. The deploy user's
+   after, every store call of web and the data program is refused until it is. The deploy user's
    policies gain nothing.
 
 2. **`hosted_enabled = true`** in the deployment's var-file (`infra/aws/<deployment>.tfvars`;
@@ -1162,15 +1169,18 @@ deployment's admins upload it on its own site, into its own bucket.
 4. **Plan, then apply.** The plan adds the two launch templates
    (`aws_launch_template.fleet["shared"]`, `["own"]`), the fleet's image parameter, the
    machines' security group and its rules, the machine role (with its read of the trees)
-   and the worker's fleet policy, web's and the worker's store policies and the game data's
-   lifecycle rules; it changes web's, the controller's and the worker's task definitions
-   (the `ONNET_HOSTED_*` settings, the store's URL and region; `app converge` takes them).
+   and the worker's fleet policy, web's and the data program's store policies and the game
+   data's lifecycle rules; it changes web's, the fleet's, the worker's and the data
+   program's task definitions (the fleet's policy and the store's URL and region; the
+   worker's alone the machine driver's own settings; `app converge` takes them).
    The update service's listeners and record (below) are there whether or not hosting is on.
 
 5. **Deploy**, so the programs read them and pin the serve and hostd images:
    `./deploy/run.sh --deployment staging app deploy --serve-tag sha-<serve> --hostd-tag sha-<serve>`
-   (on prod, the next `--promote staging`). The controller and the worker log
-   `[boot] hosted servers: ec2 ...`.
+   (on prod, the next `--promote staging`). Web, the fleet and the worker log
+   `[boot] hosted servers: ec2, serve image ...`; the worker also its driver's
+   `[boot] hosted servers: ec2 in <region>, subnets ...` (a worker whose driver settings
+   are incomplete does not boot: `app logs worker` names what is missing).
 
 6. **Upload the data.** On Game data, make the data sets (JO in `jop_2_consumer`,
    Escalation `jox01` under it, DFX2, OpenNova); **Upload data** on each from its install's
@@ -1217,8 +1227,9 @@ D='--deployment staging'                        # or prod
 They call the service's admin API inside a web task over ECS Exec, from the task's
 loopback, with the admin token the web container holds. `fleet roll` after a new machine image or a new hostd: servers move
 without counting restarts. On prod `fleet end` and `fleet roll` ask first (type `prod`,
-or `--yes`). A deployment's worker launches and ends its own account's machines alone:
-the other account's are out of its reach.
+or `--yes`). A deployment's worker launches and ends its own account's machines alone
+(the fleet program decides, the worker's `machine.*` jobs call EC2, each launch refused
+past `fleet_max_shared` or `fleet_max_own`): the other account's are out of its reach.
 
 ### The kill switch
 
@@ -1256,7 +1267,7 @@ game data stays in the bucket).
   mid-way leaves the tree `uploading` with its parts in the bucket. Delete the tree on the
   page (its uploads are aborted), or leave it: the bucket aborts them after 7 days. A tree
   `failed` says why in its row; delete it and upload again.
-- **Pruning.** The worker's `tree.prune` (hourly, and after each finalize, validate and
+- **Pruning.** The data program's `tree.prune` (hourly, and after each finalize, validate and
   apply) removes a tree that is neither current nor the baseline and that no live server
   pins, an hour after it stopped being any of those; a running server's data is never
   deleted under it. A deleted release's package goes with the release.
@@ -1520,7 +1531,7 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   what `app status` does and more: each program's service (its counts, rollout and revision
   against the release), its tasks (health, zone, address, image, the recently stopped ones'
   exit codes) and events, the load balancer's targets, the database's and the cache's status,
-  the lobby instances, the controller and the machines. Web reads AWS for it with its task
+  the lobby instances, the fleet leader and the machines. Web reads AWS for it with its task
   role (read-only, `infra/aws/programs.tf`), at most every 20 s.
 - **Logs.** `./deploy/run.sh --deployment <deployment> app logs [PROGRAM|backup] [--follow] [--since 2h]` reads
   CloudWatch (`/opennova/<deployment>/service`, 30 days, a stream per container and task,
@@ -1567,7 +1578,7 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
 
 ### Cost
 
-About $145 a month for each deployment's service tier before the machines (approximate:
+About $160 a month for each deployment's service tier before the machines (approximate:
 us-east-1 on-demand list prices, rounded: Fargate Linux x86 $0.04048 a vCPU-hour and
 $0.004445 a GB-hour, a public IPv4 address $0.005 an hour, a network load balancer
 $0.0225 an hour and its LCUs, `db.t4g.micro` single-AZ $0.016 an hour, RDS gp3 $0.115 a
@@ -1578,8 +1589,9 @@ GB-month, `cache.t4g.micro` Valkey $0.0128 an hour, 730 hours a month):
 | the gate, a 0.25 vCPU / 0.5 GiB task and its public IPv4 | $13 |
 | the lobby, the same | $13 |
 | web, a 0.5 vCPU / 1 GiB task (the server and nginx) and its public IPv4 | $22 |
-| the controller, a 0.25 vCPU / 0.5 GiB task and its public IPv4 | $13 |
+| the fleet program, a 0.25 vCPU / 0.5 GiB task and its public IPv4 | $13 |
 | the worker, a 0.5 vCPU / 1 GiB task and its public IPv4 | $22 |
+| the data program, a 0.25 vCPU / 1 GiB task, 20 GiB of task storage past Fargate's 20 and its public IPv4 | $16 |
 | the load balancer, its LCUs at this traffic and its two Elastic IPs | $25 |
 | the database, `db.t4g.micro` in one zone, 20 GiB gp3, backups | $14 |
 | the cache, one `cache.t4g.micro` Valkey node | $9 |
@@ -1588,11 +1600,11 @@ GB-month, `cache.t4g.micro` Valkey $0.0128 an hour, 730 hours a month):
 
 Each further web or worker task adds about $22, a further lobby about $13; Multi-AZ
 doubles the database's $14, and each further cache node adds $9. Staging has prod's shape
-(about $145) and costs about $70 while `app down` (the database, the cache, the load
+(about $160) and costs about $70 while `app down` (the database, the cache, the load
 balancer and its addresses stay). A deployment's extra tasks (every
 program's new tasks start beside the old) run for minutes. The database adds its surplus CPU credits, if any (unlimited mode: about $0.075 a
 vCPU-hour past its baseline over a day), none while it stays under its baseline. The
-monthly budget of prod's account (`budget_monthly_usd`, 250) leaves about $105 for the
+monthly budget of prod's account (`budget_monthly_usd`, 250) leaves about $90 for the
 machines and their egress; staging's account has its own (200).
 
 The machines: a full shared machine (`t3a.medium`, its address and volume, about $34) is
@@ -1619,7 +1631,7 @@ every command).
   task; the `Heartbeat` metric has points for each `Program`; the SNS email subscription
   is confirmed; the Route 53 health check is green; the load balancer's five target
   groups (the gate's, the lobby's, 443, the retail port's, the update service's) are
-  healthy (EC2, Target groups); `app shell controller` opens a shell; `backup now` writes
+  healthy (EC2, Target groups); `app shell fleet` opens a shell; `backup now` writes
   a dump.
 - **C. Accounts.** Register, log in, log out; the admin pages open.
 - **D. Billing.** Stripe's "Send test webhook" answers 2xx; subscribe to Tier 1 ($5, test
@@ -1630,7 +1642,7 @@ every command).
   its steps land on both (web's logs show it): it completes.
 - **F. A shared machine.** With a data set uploaded on Game data, start a server from My
   servers: its timeline runs requested, provisioning (a shared machine launching from the
-  baked image, `fleet status`, its hostd reaching the controller by its Cloud Map name and
+  baked image, `fleet status`, its hostd reaching the fleet program by its Cloud Map name and
   fetching the server's trees from the store: a few minutes the first time), booting,
   listing, running. It lands on slot k, lists in its game's lobby in the OpenNova and the
   retail server browsers, and is joinable by a retail and an OpenNova client; the site's
@@ -1639,7 +1651,7 @@ every command).
 - **G. A second account** starts one: it lands on slot k+1 of the same machine.
 - **H. Deploys that keep the lobby.** With a server listed and a retail client in the
   lobby: `app deploy --image portal=<tag>` (nothing restarts but web's task), then `app
-  restart web`, `app restart worker`, `app restart controller` and `app restart gate`:
+  restart web`, `app restart worker`, `app restart data`, `app restart fleet` and `app restart gate`:
   the client stays in the lobby and the server stays listed through each.
 - **I. A lobby's replacement.** On staging, with a hosted server listed and a retail
   client hosting its own game: `app restart lobby`: the new lobby task starts beside the

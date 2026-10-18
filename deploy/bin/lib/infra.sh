@@ -64,7 +64,7 @@ tf_op() {
 # or takes the service down: an Elastic IP (the gate's retail clients use, the
 # load balancer's other) and an association, an instance and a network
 # interface, the load balancer (it holds the gate's address), the cluster and a
-# program's service, the controller's Cloud Map namespace, the database, the
+# program's service, the fleet program's Cloud Map namespace, the database, the
 # cache (every web session goes with it), the operations bucket.
 PRECIOUS_TYPES='["aws_eip","aws_eip_association","aws_network_interface","aws_instance","aws_lb","aws_ecs_cluster","aws_ecs_service","aws_service_discovery_private_dns_namespace","aws_db_instance","aws_elasticache_replication_group","aws_s3_bucket"]'
 

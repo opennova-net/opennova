@@ -5,7 +5,11 @@
 # prod unless told otherwise, the zone's, the organization's and the CI
 # runners' commands take none, prod's changes ask for the typed word, data and
 # images cross between the deployments in their one direction alone, a deploy
-# never takes `app down`'s zero counts for a first release, and the org
+# never takes `app down`'s zero counts for a first release (but starts a
+# program the down record names no count for, and `app up` the same), a
+# rollback refuses a release from before the program split, a release's
+# revisions hand the serve image to every container that reads the fleet's
+# policy and hostd's to the machine driver's alone, and the org
 # stack's first run moves its state before the vault learns of the bucket. It
 # sources on-deploy (which then runs nothing) and stubs every command group,
 # the vault and AWS, so nothing is read or changed anywhere. It needs bash and
@@ -170,7 +174,66 @@ if grep -q -- '--desired-count' "$calls"; then fail "app down's zero counts read
 SSM_DOWN_REPLY=missing
 ( set_deployment staging; service_roll web td:2 ) >/dev/null 2>&1
 if grep -q -- '--desired-count 1' "$calls"; then pass "zero counts with no marker are the first release's"; else fail "first release: $(cat "$calls")"; fi
+: >"$calls"
+SSM_DOWN_REPLY=down
+( set_deployment staging; service_roll data td:2 ) >/dev/null 2>&1
+if grep -q -- '--desired-count 1' "$calls"; then pass "a program the down record names no count for (added since) starts as a first release"; else fail "a program added since app down: $(cat "$calls")"; fi
 unset -f aws
+
+echo "--- app up starts a program the down record names no count for at its desired count"
+: >"$calls"
+program_counts() { case "$1" in data) echo '{"min":1,"desired":3,"max":3}' ;; *) echo '{"min":1,"desired":1,"max":1}' ;; esac; }
+scaling_suspended() { :; }
+aws() {
+  case "$1 $2" in
+    "ssm get-parameter") echo '{"since":"x","counts":{"worker":2,"fleet":1,"web":1,"lobby":1,"gate":1}}' ;;
+    "ecs update-service") echo "update-service $*" >>"$calls" ;;
+    *) : ;;
+  esac
+}
+( set_deployment staging; programs_up ) >/dev/null 2>&1
+if grep -q -- '--service worker --desired-count 2' "$calls" && grep -q -- '--service data --desired-count 3' "$calls"; then
+  pass "app up puts the recorded counts back and starts the program added since at its desired count"
+else
+  fail "app up: $(cat "$calls")"
+fi
+unset -f aws
+
+echo "--- a rollback refuses a release from before the program split"
+release_manifest() {
+  echo '{"id":"20261016T000000Z-abc1234","programs":["worker","controller","web","lobby","gate"],"task_definitions":{"controller":"td:5"}}'
+}
+release_current_manifest() { echo '{"id":"20261019T000000Z-def5678","previous":"20261016T000000Z-abc1234"}'; }
+aws_auth() { :; }
+infra_env_load() { :; }
+infra_get() { echo "stub-$1"; }
+out="$( (set_deployment staging; app_rollback --to 20261016T000000Z-abc1234 --yes) 2>&1)" \
+  && fail "a rollback to the controller's era went on" \
+  || { [[ "$out" == *"before the program split"* ]] && pass "a rollback to a release from before the split is refused" || fail "pre-split rollback: $out"; }
+unset -f release_manifest release_current_manifest
+
+echo "--- a release's revisions: the serve image where the policy is read, hostd's where the driver is"
+described='{"taskDefinition":{"family":"opennova-staging-x","containerDefinitions":[
+  {"name":"worker","environment":[{"name":"ONNET_HOSTED_PROVIDER","value":"ec2"},{"name":"ONNET_HOSTED_DEPLOYMENT","value":"opennova-staging"}],"secrets":[]},
+  {"name":"fleet","environment":[{"name":"ONNET_HOSTED_PROVIDER","value":"ec2"}],"secrets":[]},
+  {"name":"data","environment":[{"name":"ONNET_OBJECT_STORE_URL","value":"s3://b/data"}],"secrets":[]}]}}'
+revision="$(jq -c --argjson images '{"worker":"w@1","fleet":"f@1","data":"d@1"}' --arg serve "serve@1" --arg hostd "hostd@1" \
+  --arg hosting 1 --arg dep staging --argjson present '[]' --argjson tags '[]' "$REVISION_JQ" <<<"$described")"
+env_of() { jq -c --arg c "$1" '[.containerDefinitions[] | select(.name == $c) | .environment[]? | "\(.name)=\(.value)"]' <<<"$revision"; }
+if [[ "$(env_of worker)" == *'"ONNET_HOSTED_HOSTD_IMAGE=hostd@1"'* && "$(env_of worker)" == *'"ONNET_HOSTED_SERVE_IMAGE=serve@1"'* ]] &&
+   [[ "$(env_of fleet)" == *'"ONNET_HOSTED_SERVE_IMAGE=serve@1"'* && "$(env_of fleet)" != *HOSTD* ]] &&
+   [[ "$(env_of data)" != *SERVE* && "$(env_of data)" != *HOSTD* ]]; then
+  pass "the worker gets both images, the fleet the serve image alone, the data program neither"
+else
+  fail "revision images: worker $(env_of worker) fleet $(env_of fleet) data $(env_of data)"
+fi
+revision="$(jq -c --argjson images '{"worker":"w@1","fleet":"f@1","data":"d@1"}' --arg serve "" --arg hostd "" \
+  --arg hosting 0 --arg dep staging --argjson present '[]' --argjson tags '[]' "$REVISION_JQ" <<<"$described")"
+if [[ "$(env_of worker)" == *'"ONNET_HOSTED_PROVIDER=none"'* && "$(env_of fleet)" == *'"ONNET_HOSTED_PROVIDER=none"'* ]]; then
+  pass "--no-hosting turns the provider off in every container that reads it"
+else
+  fail "no hosting: worker $(env_of worker) fleet $(env_of fleet)"
+fi
 
 echo "--- fleet logs reads the machines' log group alone"
 # The real command (cmd_fleet alone is stubbed above) on a stub aws that records
