@@ -33,7 +33,6 @@ func after_each() -> void:
 func _frame() -> void:
 	var input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
 	_world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), input)
-	_presenter.after_world_tick()
 
 
 func _indoors(sim: Simulation) -> bool:

@@ -256,13 +256,13 @@ func _move_intent(forward: bool = false, lean_left: bool = false) -> PlayerMoveI
 
 
 # One shell frame, in main_game's order: input sample -> world tick (the engine
-# inmatch::Session batch + the fixed-tick weapon consumer) -> presentation.
+# inmatch::Session batch + the fixed-tick weapon consumer, then the local-view
+# leg's presentation, the frame's one camera compose).
 func _frame(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
 		ticks: int = 1, gameplay_active: bool = true) -> void:
 	for i in ticks:
 		var frame_input := presenter.before_world_tick(TICK, false, gameplay_active)
 		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
-		presenter.after_world_tick()
 
 
 # Frames until `predicate` (no arguments -> bool) holds; false when `max_frames`
@@ -337,7 +337,6 @@ func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive(
 	for i in 30:
 		var frame_input := presenter.before_world_tick(TICK, false, false)
 		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
-		presenter.after_world_tick()
 	assert_eq(String(sim.get_local_player_anim_key()), "anim_idle",
 			"the armory overlay's neutral submit keeps the player standing")
 	assert_gt(int(sim.get_logic_tick()), tick_before,
@@ -1288,7 +1287,6 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	var frame_input := presenter.before_world_tick(TICK, false, true)
 	frame_input.set_weapon_input(true, true, false)
 	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
-	presenter.after_world_tick()
 
 	assert_eq(String(world.local_player_weapon_view().anim_key), "anim_wpn_fire",
 			"the real FSM entered its fire action")
@@ -1306,7 +1304,6 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 		frame_input = presenter.before_world_tick(TICK, false, true)
 		frame_input.set_weapon_input(true, false, false)
 		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
-		presenter.after_world_tick()
 		if String(part0.get_active_body_clip()) == "anim_wpn_recoil":
 			reached_recoil = true
 			break
@@ -1342,7 +1339,6 @@ func _assert_fire_mode_change_frames(ticks_per_frame: int) -> void:
 		var frame_dt := TICK * float(ticks_per_frame)
 		var frame_input := presenter.before_world_tick(frame_dt, false, true)
 		world.tick(camera.global_position, camera.global_transform, frame_dt, frame_input)
-		presenter.after_world_tick()
 		var model := presenter.viewmodel()
 		assert_not_null(model, "frame %d retains the first-person weapon" % frame)
 		if is_instance_valid(previous_model) and model != previous_model:
@@ -1551,12 +1547,10 @@ func test_local_avatar_presents_the_parked_tick() -> void:
 	var frame_input := presenter.before_world_tick(TICK, false, true)
 	frame_input.set_weapon_input(true, true, false)
 	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
-	presenter.after_world_tick()
 	_frame(world, presenter, camera, 16)
 	frame_input = presenter.before_world_tick(TICK, false, true)
 	frame_input.set_weapon_input(false, false, true)
 	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
-	presenter.after_world_tick()
 	var weapon_parked := false
 	for i in 200:
 		_frame(world, presenter, camera, 1)

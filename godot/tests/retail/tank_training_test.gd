@@ -58,7 +58,6 @@ func _seat_target(handle: int, bone: int) -> Vector3:
 	# Independently read the rendered live userpoint, not the native USE scorer.
 	var frame := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
 	_world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame)
-	_presenter.after_world_tick()
 	var model := _world.get_runtime().get_entity_presenter().resolve_wire_handle(handle) as ObjectModel
 	var point := model.get_object_data().get_user_point_info(bone - 1)
 	# Stock emplacement models can carry userpoints without a render part.
@@ -302,8 +301,9 @@ func _tank_cannon(sim: Simulation, tank: EntityCard) -> EntityCard:
 	return null
 
 
+# The labels over the frame the last _advance presented (its after_world_tick
+# is that tick's one camera compose).
 func _visible_attach_texts(hud: HudOverlay, gametext: RtxtStringFile) -> Array[String]:
-	_presenter.after_world_tick()
 	hud.set_attach_labels(_camera.global_transform, _presenter.screen_projection(), gametext, _world.get_sim())
 	var texts: Array[String] = []
 	for i in hud.get_attach_label_count():

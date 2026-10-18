@@ -41,7 +41,6 @@ func _device_multimesh_rows_available() -> bool:
 func _frame() -> void:
 	var input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
 	_world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), input)
-	_presenter.after_world_tick()
 
 
 func _boot() -> bool:
