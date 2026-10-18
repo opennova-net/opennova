@@ -4666,7 +4666,7 @@ opennova_add_mixed_test(npruntime_integrity_sources COMMAND npruntime_integrity_
 # protection and its fire clear, the 1 Hz 0x2F flag refresh, the violation sweep's carry
 # limit, the team-mode 0x46 downed resend, the armory-reuse cooldown, the 744-tick
 # priority-target sweep, the kit-weight recompute, the spawn-wave eviction and the C2S 0x0E
-# C&C / handle-0 admission. [orig: Server_UpdateAllActivePlayerSlots @0x518820; sub_517B20
+# C&C / handle-0 admission. [orig: Server_UpdateAllActivePlayerSlots @0x518820; Server_RefreshNextFlagState
 # @0x517b20; Server_CheckPlayerViolations @0x51abd0; Server_TickUpdate @0x51e2d0;
 # NapiNPServerMsg_HandlePlayerLoadout @0x515790; EntityPool_ClearDirtyFlags @0x508e30;
 # Server_RecalculateAllPlayerScores @0x5014e0; SpawnWaveList_TryQueuePlayer @0x52a490;

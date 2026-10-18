@@ -22,7 +22,7 @@ bool vehicle_or_untyped(const Entity &e) {
 }
 } // namespace
 
-// [orig: Game_StartMission @0x52527A..0x525301; sub_529A80 @0x529A80;
+// [orig: Game_StartMission @0x52527A..0x525301; SpawnMarkerBudgetList_Add @0x529A80;
 // Spawn_BuildMarkerBudgetList @0x529B40]
 void VehicleSystem::build_spawn_markers() {
 	spawn_markers_enabled_ = false;

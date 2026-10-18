@@ -102,7 +102,7 @@ typedef struct MusChunkHeader {
     uint32_t frame_base;
     /* +0x40: chunk-relative code pointer of the MessageHandler entry, relocated
        when nonzero [orig: AudioVM_FixupPointers @ 0x672495 vmData[16]]; the
-       restart frame jumps the VM here [orig: sub_672E50 @ 0x672eba]. Retail
+       restart frame jumps the VM here [orig: AudioVM_RunContext @ 0x672eba]. Retail
        gamemus.bin carries 0x91 (`enter 2; method 4; empty; push_l 0x20;
        tablexec 3 [setstate 1 | setstate 2 | setstate 4]`), menumus.bin 0x94
        (= its bytecode start). 0 = no handler. */
@@ -178,7 +178,7 @@ typedef struct MusScript {
        to, from the chunk's +0x40 pointer; has_message_handler is 0 when the
        chunk carries none. MDEdit always writes one, and so does the compiler:
        its MessageHandler function's frame setup (gamemus.bin 0x09), else the
-       code's leading nop (menumus.bin 0). [orig: sub_672E50 @ 0x672e95..0x672ec1] */
+       code's leading nop (menumus.bin 0). [orig: AudioVM_RunContext @ 0x672e95..0x672ec1] */
     uint32_t    message_handler_offset;
     int         has_message_handler;
     /* The strings `pushstr` pushes, in the table's order (the chunk's +0x30/+0x34):
@@ -390,7 +390,7 @@ typedef struct MusVM MusVM;
 struct MusGlobals;
 // Compile-time access to the active context's actual globals, with lifetime retained
 // independently of the streaming VM. Raw writes do not signal AudioVM variable hooks.
-// [orig: sub_671FD0 @0x671FD0; WacScript_ResolveParameter @0x4F2A17..0x4F2A34]
+// [orig: AudioVM_GetVariablePtr @0x671FD0; WacScript_ResolveParameter @0x4F2A17..0x4F2A34]
 std::shared_ptr<MusGlobals> mus_vm_globals(MusVM *vm);
 int32_t mus_globals_read(const MusGlobals &globals, uint32_t index);
 void mus_globals_write_raw(MusGlobals &globals, uint32_t index, int32_t value);
@@ -474,7 +474,7 @@ void mus_vm_resume(MusVM *vm);
    on success, 0 if the VM is not RUNNING. */
 int mus_vm_tick(MusVM *vm, uint32_t dt_ms);
 
-/* The restart frame [orig: sub_672E50 @ 0x672e95..0x672ec1 -- the step the
+/* The restart frame [orig: AudioVM_RunContext @ 0x672e95..0x672ec1 -- the step the
    per-update pump (sub_672EE0) and MusicCtx_SelectEndTrack @ 0x672fd0 share]:
    when the context's restart byte (ctx+32) is set the step clears it, pushes
    the current IP on the return stack, pushes (value, 0) on the data stack,

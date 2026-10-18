@@ -27,7 +27,7 @@ Diagnostic refusal(CoreFinding code, const BlankRequest &request, const std::str
 // the interpreter's read @ 0x67274d]. The chunk's message handler points at the code's leading nop before that
 // `done`, as the compiler writes MDEdit's layout (menumus.bin's): the single-player round's end runs it whenever a
 // script is loaded, and without one it reads address 0x18 [orig: MusicCtx_SelectEndTrack @ 0x672fd0 from
-// Server_ProcessRoundEnd @ 0x51696b / 0x51698f; sub_672E50 @ 0x672eba..0x672ec1].
+// Server_ProcessRoundEnd @ 0x51696b / 0x51698f; AudioVM_RunContext @ 0x672eba..0x672ec1].
 bool music_script_bytes(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	mus::MusScript script{};
 	int line = 0, column = 0;

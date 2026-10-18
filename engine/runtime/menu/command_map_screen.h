@@ -82,7 +82,7 @@ struct CommandMapTabGates {
 // column 1's cell value the click mask (bit 0 recruit, bit 1 join). The gates:
 // ORDERS while a row names the local slot its leader, PLAYERS in a session,
 // TEAM / RULES in a session off the death screen.
-// [orig: CMap_PopulateTeamList @0x547a50 (from sub_54B320 @0x54b480)]
+// [orig: CMap_PopulateTeamList @0x547a50 (from CMap_OnScreenShow @0x54b480)]
 CommandMapTabGates command_map_populate_team_list(MenuRuntime &menu, int table,
 		const CommandMapRoster &roster, const CommandMapText &text);
 
@@ -91,7 +91,7 @@ CommandMapTabGates command_map_populate_team_list(MenuRuntime &menu, int table,
 // when missing; an existing row keeps its name), its other cells rewritten as
 // above; then every row whose slot is gone or a spectator is removed. The
 // ORDERS gate here also needs the death screen down; RULES is left alone.
-// [orig: CMap_PopulateTeamList_0 @0x548d80 (from sub_549240 @0x549265 and
+// [orig: CMap_PopulateTeamList_0 @0x548d80 (from CMap_OnRadioTabTeam @0x549265 and
 //  j_cmap_populate_team_list_0 @0x54e3c0)]
 CommandMapTabGates command_map_update_team_list(MenuRuntime &menu, int table,
 		const CommandMapRoster &roster, const CommandMapText &text);

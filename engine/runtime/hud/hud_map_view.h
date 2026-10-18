@@ -107,8 +107,8 @@ struct MapViewPan {
 	// [0.1, 10] [orig: @0x55447d..0x554504 (DEATH); @0x549cfe..0x549d72 (CMAP)].
 	void drag_zoom(int32_t x, int32_t y);
 	// One zoom step: direction > 0 zooms in (x0.85, floor 0.1), < 0 out
-	// (x1.1764705, ceiling 10), 0 nothing [orig: sub_5535D0 @0x5535d0 (the
-	// DEATH wheel); loc_548230 @0x548230 (the CMAP buttons and wheel)].
+	// (x1.1764705, ceiling 10), 0 nothing [orig: DeathScreen_ZoomStep @0x5535d0 (the
+	// DEATH wheel); CMap_ZoomStep @0x548230 (the CMAP buttons and wheel)].
 	void zoom_step(int direction);
 };
 
@@ -153,7 +153,7 @@ struct DeathMapView {
 	// 4.0 and a zero pan (a later load keeps the zoom). The three bytes the
 	// seed also sets (byte_25A39A0..A2) have no reader.
 	// [orig: HUD_InitDeathScreen @0x5546d0, from UI_DispatchScreenEvent event
-	//  3 @0x54eb94; the unload clears the latch, sub_553120 @0x553120 from
+	//  3 @0x54eb94; the unload clears the latch, DeathScreen_OnScreenUnload @0x553120 from
 	//  event 4 @0x54ee21]
 	void on_load();
 	void on_unload() { initialized = false; }
@@ -193,8 +193,8 @@ struct DeathMapView {
 // The CMAP screen's toggle bytes: GRID (the grid leg, bit 12), TEXT (bits
 // 11/14/17), WAYPOINTS (bit 17), and CREATE_WAYPOINTS (the left click places
 // a waypoint instead of panning).
-// [orig: byte_252DD60 GRID sub_547FF0 @0x547ff0; byte_252DD61 TEXT
-//  sub_5481A0 @0x5481a0; byte_252DD62 WAYPOINTS sub_548080 @0x548080;
+// [orig: byte_252DD60 GRID CMap_OnGridCheckbox @0x547ff0; byte_252DD61 TEXT
+//  CMap_OnTextCheckbox @0x5481a0; byte_252DD62 WAYPOINTS CMap_OnWaypointsCheckbox @0x548080;
 //  byte_252DD63 CREATE_WAYPOINTS Settings_BuildDefaultProfile @0x548180]
 struct CommandMapToggles {
 	bool grid = true;
@@ -223,7 +223,7 @@ struct CommandMapView {
 	// The screen's first open: zoom 4.0, every draw toggle on, a zero pan.
 	// The same init clears the waypoint table (world/user_waypoints.h, held
 	// per mission) and allocates the orders list (the presenter's).
-	// [orig: sub_54B280 @0x54b280]
+	// [orig: CMap_InitScreenOnce @0x54b280]
 	void on_load();
 	// The mouse-class events. A left press with CREATE_WAYPOINTS set asks for
 	// the waypoint-name dialog instead of panning (kPlaceWaypoint: the
@@ -236,13 +236,13 @@ struct CommandMapView {
 	EventResult on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t buttons,
 			int32_t wheel);
 	// The ZOOMIN / ZOOMOUT button pair (user data 1 / -1).
-	// [orig: loc_548230 registered by CCommandMap_RegisterAllControls]
+	// [orig: CMap_ZoomStep registered by CCommandMap_RegisterAllControls]
 	void zoom_button(int direction) { view.zoom_step(direction); }
 	// A toggle control's state-change event (0x3000001): GRID / TEXT /
 	// WAYPOINTS store the control's checked state (the embedder then checks
 	// both twins from the byte); CREATE_WAYPOINTS flips its byte.
-	// [orig: sub_547FF0 @0x548000..0x548011; sub_5481A0 @0x5481b0..0x5481c1;
-	//  sub_548080 @0x548090..0x5480a1; Settings_BuildDefaultProfile @0x548180
+	// [orig: CMap_OnGridCheckbox @0x548000..0x548011; CMap_OnTextCheckbox @0x5481b0..0x5481c1;
+	//  CMap_OnWaypointsCheckbox @0x548090..0x5480a1; Settings_BuildDefaultProfile @0x548180
 	//  (`byte_252DD63 = byte_252DD63 == 0`)]
 	void toggle_changed(int which, bool checked);
 	bool toggle(int which) const;
@@ -304,7 +304,7 @@ struct CommandMapWaypointAnchor {
 // its byte and ends the walk; the slots after it keep their bytes. The
 // device anchor divides by the menu scale into design units (truncated).
 // [orig: CMapWindow_HandleEvent @0x549da5..0x549e7b — Terrain_FixedPointToWorldFloat,
-//  HUD_MeasureTextWH(name, g_HUDLabelFont[1]), sub_63B1E0 @0x63b1e0]
+//  HUD_MeasureTextWH(name, g_HUDLabelFont[1]), CUIScene_ScalePointDeviceToDesign @0x63b1e0]
 void command_map_waypoint_hover(const CommandMapWaypointAnchor *anchors, bool *hover, int count,
 		int32_t mouse_x, int32_t mouse_y, float scale_x, float scale_y, int32_t close_w);
 
@@ -312,7 +312,7 @@ void command_map_waypoint_hover(const CommandMapWaypointAnchor *anchors, bool *h
 // device anchor less the button's width and 5 pixels, into design units (the
 // button takes that corner at its own square size). False: nothing hovered,
 // the button hides.
-// [orig: CMapWindow_HandleEvent @0x549b6e..0x549c23 — sub_646580 @0x646580]
+// [orig: CMapWindow_HandleEvent @0x549b6e..0x549c23 — CWnd_MoveToSquare @0x646580]
 bool command_map_close_button_position(const CommandMapWaypointAnchor *anchors,
 		const bool *hover, int count, float scale_x, float scale_y, int32_t close_w,
 		int32_t &out_x, int32_t &out_y);
@@ -333,7 +333,7 @@ struct DeathMapZone {
 	// The zone-timer entry is missing or its level has reached its limit.
 	bool timer_ready = true;
 	// The label anchor: the entity's Euler matrix applied to its bbox centre
-	// (+0x1FC) about its position, 16.16 mission units [orig: sub_59C300
+	// (+0x1FC) about its position, 16.16 mission units [orig: Entity_GetWorldBoundsCenter
 	// @0x59c300 — Math_BuildFixedPointMatrixFromEulerAngles @0x613f40,
 	// Math_FixedPointTransformPoint22 @0x615810].
 	int32_t anchor_x = 0;
@@ -345,7 +345,7 @@ struct DeathMapZone {
 	// @0x4299bf / @0x4299c5, no reset of an unlisted zone].
 	uint8_t queued = 0;
 	uint16_t countdown = 0;
-	// The entity reads the per-zone blip selector makes (sub_597FD0 and
+	// The entity reads the per-zone blip selector makes (Minimap_DrawEntityBlip and
 	// Minimap_GetCapturePointInfo; death_map_zone_blip below).
 	bool has_def = true;        // entity+0x20
 	uint32_t def_type = 0;      // ItemDef+0x5C
@@ -406,7 +406,7 @@ struct DeathMapFacts {
 // the next zone, so a later zone's blip covers an earlier zone's letters: one
 // segment per walked zone, each the half-open end of its blip overlays /
 // sprites / lines and of its labels inside `zones`.
-// [orig: MapOverlay_DrawView @0x5a5a4d..0x5a5d2c — sub_597FD0 @0x5a5adc then
+// [orig: MapOverlay_DrawView @0x5a5a4d..0x5a5d2c — Minimap_DrawEntityBlip @0x5a5adc then
 //  the HUD_DrawTextCentered_HalfBright calls @0x5a5c59..0x5a5d14 per slot]
 struct HudMapWindowSegment {
 	size_t overlay_end = 0;
@@ -421,7 +421,7 @@ struct HudMapWindowPass {
 	std::vector<HudMapLine> over_lines;
 };
 
-// sub_597FD0's pick for one zone: whether Minimap_DrawBlip runs, and its
+// Minimap_DrawEntityBlip's pick for one zone: whether Minimap_DrawBlip runs, and its
 // colour and cell (the size argument). By def type: 5 without attrib 0x20000
 // the team colour or 0xFF707070, cell 0; 3 (a person) the team colour, cell
 // 3, halved while it is the dead local player on the 0x10 blink phase; 2
@@ -432,7 +432,7 @@ struct HudMapWindowPass {
 // taker's colour on the 0x20 blink phase, or for a zone without a zone number
 // the halved colour on that phase. `frame` is the unpaused main-frame
 // counter (dword_A87060).
-// [orig: sub_597FD0 @0x597fd0 — type 5 @0x597fe1..0x598018, type 3
+// [orig: Minimap_DrawEntityBlip @0x597fd0 — type 5 @0x597fe1..0x598018, type 3
 //  @0x59801d..0x598060, type 2 @0x598065, attrib 0x20 @0x598071..0x59809e,
 //  Minimap_GetCapturePointInfo @0x5980ab, the team fallback @0x5980b7..0x5980e5,
 //  attrib 0x20000 @0x5980ef..0x598149, the halving `sar esi, 1; and esi,
@@ -471,7 +471,7 @@ inline constexpr uint32_t kDeathMapMask = 0x2022u;
 // Compiles the DEATH MAP window: the terrain + marker walk through the
 // spinmap compiler's windowed mode (the device rect, north-up, the caller's
 // float scale), then the zone walk — per zone, in bank-slot order, the blip
-// Minimap_DrawBlip draws from the zone entity with sub_597FD0's colour and
+// Minimap_DrawBlip draws from the zone entity with Minimap_DrawEntityBlip's colour and
 // cell (death_map_zone_blip), then that zone's letters with their colours /
 // pulse / score lines — and the player crosshair. Lives across frames so its
 // scratch keeps capacity. The tracked-target call draws only what the frame's

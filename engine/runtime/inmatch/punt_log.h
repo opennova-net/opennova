@@ -30,7 +30,7 @@
 //                whose setter has no direct reference; the port's servers have
 //                neither trigger (D-NET-357) [orig: Input_HandleActionBinding
 //                case 48 @0x49b833; Game_ShutdownSubsystems @0x4a53f9 ->
-//                sub_53C770 @0x53c770 gated on dword_24E5DD8].
+//                Server_DumpPuntLogIfErrorLogEnabled @0x53c770 gated on dword_24E5DD8].
 //
 // Every write goes through the embedder's file seam (server_files.h).
 

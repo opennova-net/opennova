@@ -175,7 +175,7 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 // at the body end) and a line that does not fit reads 0; a non-authority then
 // plays that line of the named dialog. False (the fields still filled) when
 // the body is not exactly that shape.
-// [orig: Server_SendEntityStateToAll @0x50A0D0 -> sub_5038A0 @0x5038A0 (the
+// [orig: Server_SendEntityStateToAll @0x50A0D0 -> NetPacket_WriteCStringAndShort @0x5038A0 (the
 //  writer); NapiNPClientMsg_0x028 @0x425B40 — the name @0x425b67..0x425b73,
 //  the line @0x425b7a..0x425b80]
 struct DialogLine {

@@ -20,7 +20,7 @@ std::string material_texture_query(std::string_view name) {
 
 // [orig: Texture_LoadByNameWithChannel @0x58B53C..0x58B598 — strrchr('.')
 // cut, then ".dds" @0x7D8AD0; Texture_LoadAsNormalMap @0x58C644;
-// sub_58A430 @0x58A4B4]
+// Texture_LoadTGAPreferDDS @0x58A4B4]
 std::string material_dds_sibling(std::string_view name) {
 	std::string result(name);
 	const size_t dot = result.rfind('.');
@@ -49,7 +49,7 @@ MaterialTextureSource plain_source(std::string_view file) {
 
 // A .TGA name's height source: its DDS sibling unless the name is a
 // loose-first hit or the files lack the sibling, else the name itself.
-// [orig: Texture_LoadAsNormalMap @0x58C635..0x58C6F8; sub_58A430
+// [orig: Texture_LoadAsNormalMap @0x58C635..0x58C6F8; Texture_LoadTGAPreferDDS
 // @0x58A4A8..0x58A556]
 MaterialTextureSource tga_or_sibling(std::string_view name, const MaterialTextureFileTest &exists,
 		const MaterialTextureFileTest &loose_first) {
@@ -86,7 +86,7 @@ MaterialTextureSource material_texture_source(std::string_view name, uint8_t typ
 		if (holds(upper, ".TGA")) return tga_or_sibling(name, exists, loose_first);
 		return {};
 	case 6: case 7:
-		// [orig: sub_58A430 @0x58A496]
+		// [orig: Texture_LoadTGAPreferDDS @0x58A496]
 		if (holds(upper, ".TGA")) return tga_or_sibling(name, exists, loose_first);
 		return {};
 	case 16: case 17: case 18:

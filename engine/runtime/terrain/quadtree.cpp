@@ -23,7 +23,7 @@ constexpr float kTraversalNearZoneUnit = 16.0f;
 // The retail terrain view/cull contract
 // ---------------------------------------------------------------------------
 
-// [orig: sub_603DA0 @0x603DA0 — halfH = fov * 0.5 @0x603db0, halfV =
+// [orig: Terrain_BuildFrustumPlanes @0x603DA0 — halfH = fov * 0.5 @0x603db0, halfV =
 //  0.5 * (fov * 0.83333331) @0x603dc4, deg->rad literal 0.01745327777777778,
 //  the four plane stores @0x603de8..0x603e4f]
 TerrainViewCull make_terrain_view_cull(const float view[16], float fov_deg,

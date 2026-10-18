@@ -70,7 +70,7 @@ uint32_t map_word() {
 }
 
 // The side GTexture_ComputeTileSize makes a tile of for an image side: its power of two, at most the card's
-// largest [orig: sub_679DF0 @ 0x679DF0].
+// largest [orig: GImage_FitTextureSizeToCaps @ 0x679DF0].
 uint32_t tile_side(uint32_t side) {
 	uint32_t out = 1;
 	while (out < side && out < renderer::kReferenceMaxTextureSide) out <<= 1;

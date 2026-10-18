@@ -101,12 +101,12 @@ constexpr RoleWords kRows[] = {
 	Role(R::ModelHorizon, "model_horizon", "model horizon volume", G::Model)
 	        .alpha("the height")
 	        .missing("the grey checkerboard")
-	        .witness("sub_58A430 @ 0x58A430 from sub_58A580 @ 0x58A5DA")
+	        .witness("Texture_LoadTGAPreferDDS @ 0x58A430 from Texture_LoadHorizonMap @ 0x58A5DA")
 	        .row,
 	Role(R::ModelOcclusion, "model_occlusion", "model occlusion map", G::Model)
 	        .alpha("the height")
 	        .missing("the grey checkerboard")
-	        .witness("sub_58A430 @ 0x58A430 from sub_58CE10 @ 0x58CE6A")
+	        .witness("Texture_LoadTGAPreferDDS @ 0x58A430 from Texture_LoadOcclusionMap @ 0x58CE6A")
 	        .row,
 	Role(R::ModelChunk, "model_chunk", "model chunk container", G::Model)
 	        .missing("nothing loads")
@@ -173,7 +173,7 @@ constexpr RoleWords kRows[] = {
 	        .alpha("none: each palette index is a surface class, its colour unused")
 	        .sampling("looked up by index, its side's power of two over the 1024-unit heightmap")
 	        .missing("surface 1 everywhere")
-	        .witness("sub_605A10 @ 0x605A31 (the 8-bit PCX reader), its side @ 0x605A82..0x605AA0; "
+	        .witness("Terrain_LoadCharmapPCX @ 0x605A31 (the 8-bit PCX reader), its side @ 0x605A82..0x605AA0; "
 	                 "Terrain_GetSurfaceTypeAtPosition @ 0x606519, @ 0x6065C6")
 	        .row,
 	// --- Environment --------------------------------------------------------------------------------
@@ -255,7 +255,7 @@ constexpr RoleWords kRows[] = {
 	        .row,
 	Role(R::HudMfd, "hud_mfd", "HUD MFD texture", G::Hud)
 	        .missing("no material is made")
-	        .witness("sub_59B120 @ 0x59B19F..0x59B1BD")
+	        .witness("HUD_LoadMfdTexture @ 0x59B19F..0x59B1BD")
 	        .row,
 	Role(R::MapOverview, "map_overview", "mission map overview", G::Hud)
 	        .witness("Minimap_InitOverviewTexture @ 0x573FA0")

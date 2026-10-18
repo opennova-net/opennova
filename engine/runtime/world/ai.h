@@ -917,7 +917,7 @@ public:
     // position raised 0.75 u (a model without that point), 3 = the raw position
     // (no item def or no model). Both retail readers, the target scan and the
     // single-target validator, take weapon_aim_origin for anything but 1
-    // [orig: Entity_FindTargets @0x53A658..0x53A679; sub_53AFC0 @0x53AFF8..0x53B013].
+    // [orig: Entity_FindTargets @0x53A658..0x53A679; AI_ComputeWeaponTargetMetrics @0x53AFF8..0x53B013].
     int weapon_fire_position(World &world, const AiEntity &e, int32_t out[3]) const;
 
     // LOS between two EXACT 16.16 endpoints, true = clear — callers supply the

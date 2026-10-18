@@ -383,7 +383,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
                 // row trunc(frame_count * t) and lerps it with the NEXT row by the fraction:
                 // at frame f that is row f at weight 0 against row f + 1, so the final frame
                 // reads row frame_count, the fence-post row the block carries like the keys.
-                // [orig: sub_4102D0 @0x4102d0 via BoneAnim_TransformBones @0x410360 --
+                // [orig: AnimChannel_GetTranslationRowAtTime @0x4102d0 via BoneAnim_TransformBones @0x410360 --
                 //  row = trunc(frame_count * t) under the 0xC00 control word @0x410317,
                 //  weight = the remainder @0x41034f, (1 - w) * row + w * next row with the
                 //  next row at +12 * bone_count @0x410497..0x4104cd.]

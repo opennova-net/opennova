@@ -631,7 +631,7 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
 }
 
 // The fire validator's full local-frame metrics, shared by the aircraft
-// movement visibility check and its weapon solver. [orig: sub_53AFC0 @0x53AFC0;
+// movement visibility check and its weapon solver. [orig: AI_ComputeWeaponTargetMetrics @0x53AFC0;
 // Entity_ValidateWeaponTarget @0x53A400; Entity_ComputeRelativePositionMetrics @0x545710]
 uint32_t AiSystem::weapon_relative_metrics(const int32_t pose[6], const int32_t aim[3],
                                             int32_t metrics[6]) {
@@ -710,7 +710,7 @@ bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &ta
 	if (skip_los)
 		return true;
 	// The ray starts at the weapon fire position, else the fire-origin recipe.
-	// [orig: sub_53AFC0 @0x53AFF8..0x53B013]
+	// [orig: AI_ComputeWeaponTargetMetrics @0x53AFF8..0x53B013]
 	int32_t start[3];
 	if (weapon_fire_position(world, e, start) != 1)
 		weapon_aim_origin(world, e, start);

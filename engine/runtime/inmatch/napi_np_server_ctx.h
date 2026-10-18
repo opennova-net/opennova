@@ -523,7 +523,7 @@ struct NapiNPServerCtx {
 	// Empty = no limit table loaded: the reply carries only its terminator and
 	// every spawn is refused, exactly as an empty g_EntityLimitTable.
 	// [orig: g_EntityLimitTable @0xC7B480 / g_EntityLimitCount @0xC84680;
-	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; sub_5104C0 @0x5104C0]
+	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; EntityLimit_TryConsume @0x5104C0]
 	struct VehicleSpawnLimitRow {
 		uint16_t type_id = 0;
 		int32_t type_cap = -1;                // row[1]

@@ -1435,7 +1435,7 @@ private:
 	// the integer (x*W + 512)/1024, (y*H + 384)/768 rounding, then the
 	// half-bright drawer the mode picks — 0 left, 1 right, 2 centred, any
 	// other mode draws nothing [orig: HUD_DrawTextAtVirtualPos @0x5d3ec0 ->
-	// sub_5D2EA0 @0x5d2ea0].
+	// HUD_DrawTextAligned_HalfBrightNoFlags @0x5d2ea0].
 	void emit_text_at_virtual_pos(const GameFont &slot, float slot_scale, const char *text,
 			int design_x, int design_y, float w, float h, uint32_t argb, int mode);
 	// A draw through HUD_DrawTextAligned: the same integer scaling, then the
@@ -1445,7 +1445,7 @@ private:
 	void emit_text_aligned(const GameFont &slot, float slot_scale, const char *text,
 			int design_x, int design_y, float w, float h, uint32_t argb, int mode,
 			uint32_t flags);
-	// The same half-bright drawer pick at a SCREEN point [orig: sub_5D2EA0].
+	// The same half-bright drawer pick at a SCREEN point [orig: HUD_DrawTextAligned_HalfBrightNoFlags].
 	void emit_half_bright_text(const GameFont &slot, float slot_scale, const char *text,
 			float screen_x, float screen_y, uint32_t argb, int mode);
 	float measure_text_w(const char *text) const;

@@ -672,7 +672,7 @@ bool test_gravitate_uses_converted_gravity_slot() {
 	// CParticleEmitter_UpdateParticles @ 0x5e6980 / UpdateAllParticles
 	// @ 0x5f3be0 path B: when move & 2 (GRAVITATE) is set,
 	//   delta = pos - emitter.pos
-	//   delta = D3DXVec3Normalize(delta)  // sub_68B032 @ 0x68B032
+	//   delta = D3DXVec3Normalize(delta)  // D3DXVec3Normalize @ 0x68B032
 	//   vel += delta * spring * dt
 	// Direction is AWAY from emitter (despite the misleading "GRAVITATE"
 	// name — authors flip via negative gravity_mask for attractive). Force

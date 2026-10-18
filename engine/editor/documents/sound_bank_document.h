@@ -17,9 +17,9 @@ namespace opennova::editor {
 // two tables in the file's order, the waves first, the sets after them:
 // - a wave is one of the bank's singles: the name the bank and a mission's dialog lines find it by
 //   (the first of the name, without case) [orig: SoundBank_FindEntryByName @ 0x75bba0], the `.wav`
-//   the game loads for it from the archives [orig: sub_75BC20 @ 0x75bc20, the path the filename
+//   the game loads for it from the archives [orig: SoundBank_LoadEntryWave @ 0x75bc20, the path the filename
 //   table gives slot by slot @ 0x75c700], and the volume a dialog line plays it at [orig:
-//   Dialog_LoadAudioClip @ 0x44dd10 -> sub_75BE10 @ 0x75be10, the entry's byte +33];
+//   Dialog_LoadAudioClip @ 0x44dd10 -> SoundBank_GetEntryVolumeByName @ 0x75be10, the entry's byte +33];
 // - a set is a Multi, found by its name across the loaded banks [orig: SoundBank_FindTriggerByName
 //   @ 0x75be90]: its pitch and pitch jitter, the range a positional play of it is heard within, its
 //   view gate, and its layers (at most 8 [orig: @ 0x75c648]), each a playlist that plays one of its

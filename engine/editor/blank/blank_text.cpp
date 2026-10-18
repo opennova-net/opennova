@@ -129,11 +129,11 @@ bool make_blank_avatars(const BlankRequest &request, std::vector<uint8_t> &out, 
 
 // A face of no texture, mesh or gesture, its eyes where the game puts them with none: the GRM writer's file of an
 // empty face (grm::write), which the game's reader loads as a face [orig: FaceAnimConfig_LoadFile @ 0x588BE0 takes a
-// file of no line; sub_5891E0 @ 0x5891E0 seeds the eyes, FaceAnimConfig_InitEyeDefaults @ 0x588D20] and its
+// file of no line; FaceAnimConfig_InitAndLoadFile @ 0x5891E0 seeds the eyes, FaceAnimConfig_InitEyeDefaults @ 0x588D20] and its
 // compositor draws with nothing to deform [orig: Render_ScarDebugOverlay @ 0x589220, the triangles under their count
-// @ 0x5892D4; sub_588FE0 @ 0x588FE0, no gesture]. The writer writes every count line, which a face loaded into a
+// @ 0x5892D4; FaceAnimConfig_SelectGestures @ 0x588FE0, no gesture]. The writer writes every count line, which a face loaded into a
 // slot another mission's face held needs: the mission's end frees the arrays and keeps their counts [orig:
-// sub_57FBB0 @ 0x57FBB0 -> sub_587C30 @ 0x587C30].
+// FaceAnim_FreeAllFiles @ 0x57FBB0 -> FaceAnimConfig_FreeArrays @ 0x587C30].
 bool make_blank_face_animation(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	std::string why;
 	if (!grm::write(grm::File{}, out, why)) {

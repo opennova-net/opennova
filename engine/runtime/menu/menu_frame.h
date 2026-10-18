@@ -130,7 +130,7 @@ struct MenuQuad {
 
 // The side of the power-of-two texture a menu image of `side` texels is copied into:
 // the image top-left, transparent black past it [orig: GImage_CreateTiledTextures_0
-// @ 0x67a830 — a zeroed tile buffer @ 0x67a96d, the side from sub_679DF0 @ 0x679df0
+// @ 0x67a830 — a zeroed tile buffer @ 0x67a96d, the side from GImage_FitTextureSizeToCaps @ 0x679df0
 // (rounded up to a power of two, clamped to the device's maximum texture side, the
 // image split into tiles past that); each tile created with its FLAGS word | 1, CLAMP
 // @ 0x67aa30]. No menu image reaches the maximum on any device this runs on, so the
@@ -362,7 +362,7 @@ struct MenuTableCellEvent {
 // pass, 2 the content), a device clear of a device rect, and a device line.
 // [orig: CTableWnd_DrawCell @0x640be0; CGfxDevice_SetClearColor @0x677050 +
 //  CGfxDevice_Clear @0x677100; CGfxDevice_SetQuadDiffuse @0x677060 +
-//  sub_678850 @0x678850]
+//  Line2D_DrawXY @0x678850]
 class MenuTableCellCanvas {
 public:
 	virtual ~MenuTableCellCanvas() = default;

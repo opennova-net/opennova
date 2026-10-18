@@ -22,7 +22,7 @@ const grm::Gesture *gesture(const grm::File &file, int32_t expression) {
 	const grm::Gesture *result = nullptr;
 	for (const auto &g : file.gestures)
 		if (strutil::iequals(g.name, kFacialExpressions[expression])) result = &g;
-	return result; // last match [orig: sub_588FE0]
+	return result; // last match [orig: FaceAnimConfig_SelectGestures]
 }
 
 grm::Point offset(const grm::Gesture *g, const std::string &name) {
@@ -97,7 +97,7 @@ std::vector<grm::Point> evaluate_facial_mesh(const grm::File &file,
 	for (const auto &v : file.vertices) {
 		grm::Point p = v.uv;
 		// "xxx" is the group-zero sentinel even when authored in a gesture.
-		// [orig: Model_CollectUniqueMaterialNames @0x588D90; sub_5890F0]
+		// [orig: Model_CollectUniqueMaterialNames @0x588D90; FaceAnimConfig_BlendVertex]
 		if (!strutil::iequals(v.group, "xxx")) {
 			const auto da = offset(a, v.group), db = offset(b, v.group);
 			p.x = static_cast<float>((1.0 - blend) * da.x + blend * db.x + p.x);
@@ -174,7 +174,7 @@ void FacialSystem::initialize_entity(World &world, Entity &entity) {
 		models_.emplace_back(binding->second, model);
 	}
 	// Original allocation is append-only, including after a slot is freed.
-	// [orig: FaceAnim_AllocEntitySlot @0x57FDF0; sub_57FCA0 @0x57FCA0]
+	// [orig: FaceAnim_AllocEntitySlot @0x57FDF0; FaceAnim_FreeEntitySlot @0x57FCA0]
 	FacialSlot slot;
 	slot.owner = entity.handle;
 	slot.spawn_id = entity.registry_spawn_id;
@@ -210,7 +210,7 @@ void FacialSystem::tick(World &world) {
 		if (!entity || entity->registry_spawn_id != slot.spawn_id) continue;
 		step_facial_animation(slot, ((entity->flags | entity->engine_flags) & 2u) != 0,
 				display_frame_, now_ms);
-		// [orig: sub_57FFD0 @0x57FFD0, caller @0x4C2617]
+		// [orig: FaceAnim_SetSlotPosition @0x57FFD0, caller @0x4C2617]
 		position_of(world, *entity, slot.position);
 	}
 }

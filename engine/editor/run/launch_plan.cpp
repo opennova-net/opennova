@@ -124,7 +124,7 @@ void add_staged(std::vector<std::string> *staged, const fs::path &relative) {
 // every run, never linked and never kept in a cache: a write through a link lands in the file it
 // names, the install's, the build's or the cache's. The game writes its configuration [orig:
 // Game_SaveConfig @ 0x54c4af, "game.cfg" "w"], its saves [orig: PlayerProfile_SaveToFiles @ 0x54be00],
-// the NovaWorld cookie jar over the install's own file [orig: sub_63BA60 @ 0x63ba9a "wb", from
+// the NovaWorld cookie jar over the install's own file [orig: CUIScene_SaveCookieJarFile @ 0x63ba9a "wb", from
 // Menu_TeardownShellAndCloseBinkVideos @ 0x54e4aa with "nw_cdata.coo"], `score.ini` when it has none
 // [orig: GameType_CreateDefaultSettings @ 0x52f528 -> ScoreConfig_SaveFile @ 0x52cdd0], and its logs
 // and lists [orig: ErrorLog_WriteTimestamped @ 0x53c6e7 "_errlog.txt" "a"; BanList_SaveToFile

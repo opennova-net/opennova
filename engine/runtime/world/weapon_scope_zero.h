@@ -48,7 +48,7 @@ int32_t weapon_scope_zero_pitch(const WeaponScopeZero &zero, int16_t step);
 // to BAM yaw and subtract MountSlot+4 from pitch (docs/interface/hud-re.md, D-HUD-27).
 // [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b; Player_AdjustWeaponZoomLevel
 //  @0x4dbd91..0x4dbde3; Render_ProcessMainSceneFrame @0x5ca452..0x5ca4a0;
-//  the unused predecessor sub_5D27F0 @0x5d2859..0x5d285c]
+//  the unused predecessor Render_OpticViewToTarget @0x5d2859..0x5d285c]
 int32_t weapon_scope_zero_yaw(const WeaponScopeZero &zero, int16_t step);
 // The fire descriptor's zero step: `fallback` unless the weapon can fire
 // through its optic. An optic weapon (Flags & 3) then reports 0 on a manual

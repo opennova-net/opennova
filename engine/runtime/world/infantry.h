@@ -1015,7 +1015,7 @@ inline InfantryBodyPose infantry_body_pose(const InfantryState &inf) {
 //   update's first test exits before anything [orig: @0x4B9931..0x4B993B];
 // - only for a body on the org1 physics row: Entity_UpdateAllEntities' pool-0 loop calls the move
 //   function's slot, entity+0x1C4 [orig: @0x4C2460..0x4C2472], and the org0 row's is a nullsub
-//   [orig: @0x82AC1C -> nullsub_28 @0x4AFF60], so an org0 body's channels never advance after the
+//   [orig: @0x82AC1C -> Entity_UpdateOrg0Movement @0x4AFF60], so an org0 body's channels never advance after the
 //   warmup (physics_class_from_move_function names the row);
 // - not for a body hidden at init (flags bit 0, the respawn zone of another team), which exits
 //   before the head [orig: @0x4B9A03];

@@ -4,7 +4,7 @@
 // overlay gate draws an idle or lit-phase timer, and the level-0 rebuild
 // leaves the stored hud_detail level alone.
 // [orig: RenderState_SetLayerVisibilityByIndex @0x5A3020 (@0x5A302A,
-//  CRenderState_SetLayerVisibility(0) @0x5A3031); sub_59A9E0 @0x59A9E0;
+//  CRenderState_SetLayerVisibility(0) @0x5A3031); HUD_TickItemFlashTimers @0x59A9E0;
 //  HUD_DrawMapOverlay @0x5A785B]
 #include <runtime/hud/hud_declutter.h>
 
@@ -39,7 +39,7 @@ static void test_timers_count_down_by_the_tick_delta() {
 static void test_a_tick_that_runs_backwards_grows_the_timer() {
 	// The last-tick static is never reset, so a clock that restarts lower (the
 	// next mission's tick 0) hands the countdown a negative delta; the signed
-	// compare keeps the timer and the subtraction grows it. [orig: sub_59A9E0
+	// compare keeps the timer and the subtraction grows it. [orig: HUD_TickItemFlashTimers
 	// — `sub edx, ecx` @0x59A9F0, `cmp eax, edx; jle` @0x59AA06]
 	HudItemFlash flash;
 	flash.tick(1000);

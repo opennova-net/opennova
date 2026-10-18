@@ -85,7 +85,7 @@ struct VehicleEffectEvent {
 	// Ensure creates it at the hit, Trigger re-spawns its children at a later
 	// hit, Release retires it before the surface effect changes.
 	// [orig: WeatherParticle_UpdateAllEmitters @0x5CB100, slot words +3/+4
-	//  @0x5CB407..0x5CB49B; sub_5F6C10 @0x5F6C10]
+	//  @0x5CB407..0x5CB49B; Effect_TriggerGroupAtFixedPointPos @0x5F6C10]
 	enum class Kind : uint8_t { Spawn, EnsureZoneGroup, TriggerZoneGroup, ReleaseZoneGroup };
 	std::string effect;
 	Vec3 position;

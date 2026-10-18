@@ -137,7 +137,7 @@ RecordTable make_table() {
 		               }}});
 		FieldSchema file = schema_of("file", FieldType::Text, "File",
 				"The .wav the game loads for this wave, by its name, from the archives the first time a member "
-				"plays it [orig: sub_75BC20 @ 0x75bc20].");
+				"plays it [orig: SoundBank_LoadEntryWave @ 0x75bc20].");
 		file.width = lwf::kPathSlotBytes;
 		file.reference = ReferenceKind::Wave;
 		wave.field(RF{file,
@@ -148,7 +148,7 @@ RecordTable make_table() {
 		wave.field(RF{ranged(schema_of("volume", FieldType::Integer, "Dialog volume",
 		                               "The volume, 0 to 255, a mission's dialog line plays this wave at when it names "
 		                               "it, 0 playing at full [orig: Dialog_LoadAudioClip @ 0x44dd10, the entry's byte +33 "
-		                               "through sub_75BE10 @ 0x75be10; the play hook Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527598]; a set's "
+		                               "through SoundBank_GetEntryVolumeByName @ 0x75be10; the play hook Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527598]; a set's "
 		                               "members carry their own."),
 		                     0, 255, 1),
 		              {[](const RecordHandle &r, Value &out) { return out = int64_t(wave_of(r).volume), true; },

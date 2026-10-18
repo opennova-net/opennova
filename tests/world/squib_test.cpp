@@ -8,7 +8,7 @@ using namespace opennova::world;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL %d: %s\n",__LINE__,#c); return 1; } } while(0)
 // The move-function row selects only the motor; the +0x2C8 spread (and the
 // +0x160/+0x26C ammo words) come from the ai_function class row's init slot.
-// [orig: sub_448CE0 @0x448CE0 via def+0x148; the move table row @0x82AC88]
+// [orig: Entity_InitSquibFromDef @0x448CE0 via def+0x148; the move table row @0x82AC88]
 static int test_squib_init_keys_on_ai_function() {
     const char text[]="begin AiOnly\r\n id 106034\r\n type marker\r\n ai_function squib\r\n"
         " move_function nade\r\n sqb_error 20\r\n end\r\n"

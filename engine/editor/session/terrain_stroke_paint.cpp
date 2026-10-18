@@ -63,7 +63,7 @@ bool form_fits(TerrainPlane plane, const RasterPlane &texels, int layer, bool so
 	return false;
 }
 
-// The game's class where a terrain names no char map [orig: sub_605A10], what an Erase of the surface map lays.
+// The game's class where a terrain names no char map [orig: Terrain_LoadCharmapPCX], what an Erase of the surface map lays.
 constexpr int kDefaultClass = 1;
 
 // The value a dab of weight `weight` leaves on a texel holding `texel` (bytes of the plane's format). An Erase lays the

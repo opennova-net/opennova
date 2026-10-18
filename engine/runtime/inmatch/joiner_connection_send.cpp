@@ -214,7 +214,7 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 // loop is WaitForGameStart's. The deploy stages, a death's re-pick included, are in-match.
 // [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 — state 4 queues 0x00 @0x56a53f and
 //  pumps @0x56a569, state 5 pumps @0x56a5bf..0x56a5dd, state 6 spins MultiPlayer_PumpJoinVerificationFrame @0x424740 (the call @0x56a685)
-//  (receive @0x42475d, send @0x424767) beside CUIScene_EndFrame/sub_568810 @0x56a66f..0x56a674;
+//  (receive @0x42475d, send @0x424767) beside CUIScene_EndFrame/PreMenu_RenderFrame @0x56a66f..0x56a674;
 //  Game_StartMission @0x524360 -> SaveFile_SendAndWaitForServerAck (the call @0x524801;
 //  `GetTickCount() - last > 50` before its pump), CNapiGameSession_InitRandomSeedOrRequest
 //  (@0x5248a7; ungated pump every pass), NapiClient_WaitForDisconnect (@0x524dab; `> 100`

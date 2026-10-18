@@ -72,7 +72,7 @@ uint32_t toggle_briefing(HudToggleState &s, bool in_session) {
 		s.briefing_mode = 0; // [orig: @0x49b61a..0x49b627]
 	} else {
 		s.briefing_mode = kBriefingModeOpen; // [orig: @0x49b640]
-		events |= kBriefingPagesReset;        // [orig: sub_5B9150(0) @0x49b645]
+		events |= kBriefingPagesReset;        // [orig: HUD_CycleBriefingPage(0) @0x49b645]
 	}
 	return events | respawn_init_keeping(s, &s.briefing_mode, in_session);
 }
@@ -410,7 +410,7 @@ uint32_t hud_toggles_quit_dialog_key(HudToggleState &s, const HudQuitDialogKeyIn
 	//  of a session (LABEL_8 @0x49c658)]
 	if (in.vk == in.restart_vk && !in.in_session) return kChainTaken | kConsumed | kRestartQueued;
 	// A digit 1..9 or ':' is taken; the numbered save it names loads only out
-	// of a session [orig: `keyCode - 49 <= 9` @0x49c688; sub_439680 @0x4396a0].
+	// of a session [orig: `keyCode - 49 <= 9` @0x49c688; Game_RequestLoadSaveFile @0x4396a0].
 	if (static_cast<unsigned>(in.vk - '1') <= 9u) return kChainTaken | kConsumed;
 	return kChainTaken;
 }

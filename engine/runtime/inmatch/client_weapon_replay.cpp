@@ -182,7 +182,7 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
 void apply_weapon_pickups(JoinerRole &role, ClientRuntime &rt, world::World &world,
         world::LocalPlayer &lp) {
     for (const WeaponPickupNotice &notice : rt.drain_weapon_pickups()) {
-        // Only the picker's own client acts [orig: sub_4E03D0 @0x4E03DC]
+        // Only the picker's own client acts [orig: Player_MountPickedUpWeapon @0x4E03DC]
         if (!rt.has_self_handle() || notice.picker_handle != rt.self_handle()) continue;
         world::EntityHandle row_handle;
         row_handle.packed = notice.powerup_handle;

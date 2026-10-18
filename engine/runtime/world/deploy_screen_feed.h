@@ -216,7 +216,7 @@ bool deploy_team_buttons_shown(const DeployTeamButtonsInput &in);
 // Both instruction widgets and the permanent-death status pair. A secured
 // spawn leaves the first widget's prior text intact and hides the second;
 // the later RESPawn1 assignment overwrites the intermediate RESPawn2 text.
-// [orig: UI_UpdateDeathScreenContent @ 0x5536A0; sub_43B910 @ 0x43B910]
+// [orig: UI_UpdateDeathScreenContent @ 0x5536A0; SpawnZoneList_HasAny @ 0x43B910]
 struct DeployInstructionsInput {
     uint32_t game_type = 0;
     uint8_t team = 0;

@@ -17,7 +17,7 @@ namespace opennova {
 // half-angle is a fixed 5/6 of the horizontal one), and depth is cut by a
 // mutable far scalar that defaults to 2000 and takes the frame's view
 // distance when that is positive.
-// [orig: sub_603DA0 @0x603DA0 (planes); PolyTrn_RenderFrame @0x60EAC0 — fov =
+// [orig: Terrain_BuildFrustumPlanes @0x603DA0 (planes); PolyTrn_RenderFrame @0x60EAC0 — fov =
 //  ctx[3] @0x60eaf6, far override `ctx[6] > 0` @0x60eb7e..0x60eb8d;
 //  flt_8493E8 = 2000.0 static initializer]
 inline constexpr float kTerrainDefaultFarDistance = 2000.0f;

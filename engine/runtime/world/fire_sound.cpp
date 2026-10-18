@@ -116,7 +116,7 @@ void FireSoundQueue::play_throttled_interface(const char *set_name, const Vec3 &
 }
 
 void FireSoundQueue::tick() {
-    // [orig: sub_5292D0 @ 0x5292D0] Only old countdown 1 clears a hold.
+    // [orig: Sound_TickTriggerHolds @ 0x5292D0] Only old countdown 1 clears a hold.
     for (auto &hold : trigger_holds_) {
         if (hold.name.empty()) continue;
         const int32_t old = hold.countdown;

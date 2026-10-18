@@ -191,7 +191,7 @@ struct DataStringsPool {
 inline constexpr uint32_t kFastMemStep = 64;        // [orig: FastMem_Alloc @ 0x7697d7]
 inline constexpr uint32_t kFastMemHeaderBytes = 36; // [orig: FastMem_Alloc @ 0x769840, block + 9 dwords]
 // Whether bytes written `past` a FastMem block's rounding reach a block header whatever the block: where the
-// allocator split the free block it took, the next block's header starts at once [orig: sub_7695C0 @ 0x7695d1,
+// allocator split the free block it took, the next block's header starts at once [orig: FastMem_SplitBlock @ 0x7695d1,
 // the taken block's size @ 0x76964a], whose pool pointer the next allocation and free read [orig: @ 0x769664,
 // @ 0x769709]; a block it gave whole (its rest a header's 36 bytes or fewer) holds up to 36 more of its own
 // [orig: FastMem_Alloc @ 0x7697b0, the split @ 0x769812..0x769819, the header @ 0x769840]. Past the 36 the game

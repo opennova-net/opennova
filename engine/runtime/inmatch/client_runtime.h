@@ -106,7 +106,7 @@ public:
 	// Queue one reliable C2S 0x1A door section request {handle, record state,
 	// section} the joiner world's door callback raised; it leaves inside the
 	// next open send boundary in queue order. False for HostClient or before
-	// in-match. [orig: NetPacket_SendWeaponSwitch @0x42D0C0 ->
+	// in-match. [orig: NetPacket_SendDoorSlotRequest @0x42D0C0 ->
 	// CNapiNetwork_QueueReliableMessage @0x42d169]
 	bool queue_door_request(uint16_t handle, int16_t state, uint8_t section);
 
@@ -297,10 +297,10 @@ public:
 	// over its loopback to its own server, which fans it like any peer's.
 	// `text` is cut to 59 characters in place by the flood check; `frame` is
 	// the per-main-frame counter.
-	// [orig: sub_49A840 @0x49A840 (13), Chat_SendTeamMessage @0x49A900 (IDB
+	// [orig: Chat_SendLocalMessage @0x49A840 (13), Chat_SendTeamMessage @0x49A900 (IDB
 	//  misnomer; 1), Chat_SendGlobalMessage @0x49A6B0 (IDB misnomer; 2),
 	//  Chat_SendSquadMessage @0x49AA50 (12), Chat_SendAdminMessage @0x49A780
-	//  (11), Chat_SendAllMessage @0x49AC70 (4), sub_49ABA0 @0x49ABA0 (5) ->
+	//  (11), Chat_SendAllMessage @0x49AC70 (4), Chat_SendBlueTeamMessage @0x49ABA0 (5) ->
 	//  CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
 	hud::ChatSendResult queue_chat_message(uint8_t channel, std::string &text, uint32_t frame);
 	// An Emotes / Radio menu pick (1..10): C2S 0x14 / C2S 0x13 [i16 value].
@@ -424,7 +424,7 @@ public:
 	// 0x17 (target 0xFF) [orig: @0x54a1be], each removed one's C2S 0x4F
 	// [orig: @0x5479e6; @0x548137]. A go-code button: C2S 0x4B [local
 	// slot][code], then the leader's own sound set and line with no mute
-	// [orig: sub_548290 @0x548290].
+	// [orig: CMap_OnGoCodeButton @0x548290].
 	bool place_user_waypoint(world::World &world, int32_t x, int32_t y, const std::string &name);
 	bool delete_hovered_user_waypoint(world::World &world);
 	void clear_user_waypoints(world::World &world);

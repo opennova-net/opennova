@@ -220,7 +220,7 @@ void BindingSet::clear(int index, Device device) {
       r.secondary_mod = 0;
       break;
     // CLEAR_KEY zeroes the device's binding AND its modifier word together
-    // [orig: sub_55BFD0 @0x55c046/@0x55c04d (mouse mask + modifier),
+    // [orig: Options_OnClearKeyButton @0x55c046/@0x55c04d (mouse mask + modifier),
     //  @0x55c030/@0x55c036 (joystick button + modifier); field map
     //  UI_BuildKeyBindingLoadoutTable @0x559ebe..0x559ef3].
     case Device::Mouse:

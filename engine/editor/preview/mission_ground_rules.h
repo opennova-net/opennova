@@ -38,7 +38,7 @@ class MissionScene;
 //   height: null (nullsub_2), envs (Entity_UpdateEnvSoundEmitter @0x4a8080), ewep
 //   (Entity_UpdateTransformAndTurret @0x440ca0, which writes its turret's transform, not its own), door
 //   (Entity_SetDefaultBoneCallbacks @0x4a91d0), genx (Entity_UpdateParentTransform @0x4a88b0: it moves only
-//   with the entity it stands on), upfx (Entity_UpdateWaterPhysicsAndEffects @0x4a92e0), org0 (nullsub_28)
+//   with the entity it stands on), upfx (Entity_UpdateWaterPhysicsAndEffects @0x4a92e0), org0 (Entity_UpdateOrg0Movement)
 //   and chld (nullsub_82). Every other row moves it (the vehicles' and aircraft's movers, the rounds', an
 //   elevator's fall and land, a toppling tower): the game places those itself, the player-controlled ones
 //   set down on the ground under them at the mission's start [orig: Game_StartMission @0x525F97..0x525FED:
@@ -64,7 +64,7 @@ class MissionScene;
 //   terrain [orig: Entity_MovementCollisionResolver @0x4B3D6E..0x4B3DA9], falling there under its class's
 //   gravity (org1 [orig: Entity_UpdateInfantryAI @0x4b9910], org2 [orig: Entity_UpdateInfantryPlayerBody
 //   @0x4b40e0]): the ground the game puts him on, no finding (a person a script mounts at the start stands
-//   in the air on purpose). Under a class with no update (org0's nullsub_28) he hangs there: a finding.
+//   in the air on purpose). Under a class with no update (org0's Entity_UpdateOrg0Movement) he hangs there: a finding.
 //
 // Each finding's fix sets the record's z where the rule stands it: a static's ground anchor on what lies
 // under it, as the original editor's placer sets an item down (the height alone, docs/world/

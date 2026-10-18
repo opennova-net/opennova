@@ -477,7 +477,7 @@ int def_parse_hudpos(const char *path, DefHudPosFile *out) {
        the pair is BSS (no file bytes) and its arm is the only writer -- the
        -1 / -1 an earlier reading took for its static value was IDA's read of
        unloaded bytes (D-HUD-54) [orig: dword_2723D84 / dword_2723D88, written
-       only by the HUDORDERS arm @0x5A04DB / @0x5A04F3, read by sub_59AEE0
+       only by the HUDORDERS arm @0x5A04DB / @0x5A04F3, read by HUD_DrawSquadOrderLines
        @0x59AF0A] */
     memset(out, 0, sizeof(*out));
     size_t file_len;

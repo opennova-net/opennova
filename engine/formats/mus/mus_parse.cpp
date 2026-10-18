@@ -230,7 +230,7 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
 
     /* The MessageHandler entry: the chunk's +0x40 code pointer, relocated when
        nonzero [orig: AudioVM_FixupPointers @ 0x672495 vmData[16]] and jumped
-       to by the restart frame [orig: sub_672E50 @ 0x672eba]. Normalised to a
+       to by the restart frame [orig: AudioVM_RunContext @ 0x672eba]. Normalised to a
        bytecode-relative PC like the section entries (retail gamemus 0x91 with
        bytecode at 0x88 -> 0x09; menumus 0x94 = its bytecode start -> 0). A
        pointer outside the bytecode region is treated as no handler. */
