@@ -158,7 +158,7 @@ resource "aws_iam_role" "hostd" {
   count                = local.hosted_enabled ? 1 : 0
   name                 = "${local.name}-hostd"
   assume_role_policy   = data.aws_iam_policy_document.ecs_tasks_assume_role.json
-  permissions_boundary = local.role_boundary_arn
+  permissions_boundary = local.machine_boundary_arn
 
   tags = merge(var.tags, {
     Name = "${local.name}-hostd"
@@ -269,7 +269,7 @@ resource "aws_ecs_service" "hostd" {
 # The admin's infrastructure view (apps/novaworld_web/infra/): the fleet
 # cluster's container instances (each machine's agent, its attributes, its
 # image) and the hostd service, read-only, the fleet cluster's alone
-# (ONNET_INFRA_FLEET_CLUSTER). The boundary holds the same.
+# (ONNET_INFRA_FLEET_CLUSTER). The role boundary holds the same.
 data "aws_iam_policy_document" "web_fleet_read" {
   count = local.hosted_enabled ? 1 : 0
 

@@ -31,11 +31,15 @@ data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  # Every role the stack makes carries this boundary (infra/aws/iam/opennova-role-boundary.json,
-  # which infra/org makes in the deployment's account): the deploy user may create and change
-  # opennova-* roles only under it, so no role it writes can hold more than OpenNova's own resources.
-  role_boundary_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/opennova-role-boundary"
-  partition         = data.aws_partition.current.partition
+  # Every role the stack makes carries one of two boundaries, which infra/org makes in the
+  # deployment's account: the deploy user may create and change opennova-* roles only under
+  # them, so no role it writes can hold more than OpenNova's own resources. The machines' two
+  # roles (the instance role, hostd's task role) carry the machine boundary
+  # (infra/aws/iam/opennova-machine-boundary.json), every other role the role boundary
+  # (opennova-role-boundary.json).
+  role_boundary_arn    = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/opennova-role-boundary"
+  machine_boundary_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/opennova-machine-boundary"
+  partition            = data.aws_partition.current.partition
 
   adopt_eip                 = var.service_eip_allocation_id != ""
   service_eip_allocation_id = local.adopt_eip ? data.aws_eip.gate[0].id : aws_eip.gate[0].allocation_id

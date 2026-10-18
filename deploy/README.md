@@ -28,9 +28,9 @@ the whole bring-up.
     account's `opennova-org` user (vault item `aws-org`), no deployment: the member
     accounts (each deployment's and the CI runners'), and in each deployment's account,
     through its `OrganizationAccountAccessRole`, the Terraform state bucket, the
-    role boundary, the deploy user `opennova-deploy` and its key, and the GitHub deploy
-    role; its state in prod's state bucket; an apply writes each deployment's bucket, key
-    and role into its vault item `aws-<deployment>`;
+    role boundary and the machine boundary, the deploy user `opennova-deploy` and its
+    key, and the GitHub deploy role; its state in prod's state bucket; an apply writes
+    each deployment's bucket, key and role into its vault item `aws-<deployment>`;
   - `zone plan|apply|import|output|list`: the Cloudflare zone's shared settings
     (`infra/zone`: Full (strict), each deployment's edge authentication rule, the Stripe
     webhook's rule, Email Routing), no deployment, its state in prod's state bucket;

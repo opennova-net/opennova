@@ -326,7 +326,7 @@ variables {
   service_eip_allocation_id = "eipalloc-0123456789abcdef0"
   db_master_password        = "0123456789abcdef0123456789abcdef"
   cache_auth_token          = "fedcba9876543210fedcba9876543210"
-  fleet_ami                 = "al2023-ami-ecs-hvm-2023.0.20260924-kernel-6.1-x86_64"
+  fleet_ami                 = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64"
 }
 
 run "hosting_off" {
@@ -476,7 +476,7 @@ run "hosting_on" {
     condition = (
       strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_PROVIDER='ec2'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET_CLUSTER='opennova-prod-fleet'\n") &&
-      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET_AMI_NAME='al2023-ami-ecs-hvm-2023.0.20260924-kernel-6.1-x86_64'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET_AMI_NAME='al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_DEPLOYMENT='opennova-prod'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_MACHINES_LOG_GROUP='/opennova/prod/machines'\n") &&
       jsondecode(regex("OPENNOVA_TASK_DEFINITIONS='([^']*)'", aws_ssm_parameter.infra_env.value)[0]).hostd == "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-hostd:1" &&
@@ -498,7 +498,7 @@ run "hosting_on" {
     condition = (
       alltrue([for t in aws_launch_template.fleet : t.image_id == "ami-0123456789abcdef0"]) &&
       data.aws_ami.fleet[0].owners == tolist(["amazon"]) && data.aws_ami.fleet[0].include_deprecated &&
-      length([for f in data.aws_ami.fleet[0].filter : f if f.name == "name" && toset(f.values) == toset(["al2023-ami-ecs-hvm-2023.0.20260924-kernel-6.1-x86_64"])]) == 1 &&
+      length([for f in data.aws_ami.fleet[0].filter : f if f.name == "name" && toset(f.values) == toset(["al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64"])]) == 1 &&
       length([for f in data.aws_ami.fleet[0].filter : f if f.name == "architecture" && toset(f.values) == toset(["x86_64"])]) == 1 &&
       output.fleet_image_id == "ami-0123456789abcdef0" && output.fleet_cluster == "opennova-prod-fleet"
     )
@@ -750,6 +750,18 @@ run "hostd_daemon" {
       length(data.aws_iam_policy_document.hostd[0].statement) == 2
     )
     error_message = "hostd's task role lists and reads the trees in the store (the deployment's bucket, data/trees/) and nothing else of the bucket, and opens ECS Exec's channels"
+  }
+  assert {
+    condition = (
+      aws_iam_role.machine[0].permissions_boundary == "arn:aws:iam::123456789012:policy/opennova-machine-boundary" &&
+      aws_iam_role.hostd[0].permissions_boundary == "arn:aws:iam::123456789012:policy/opennova-machine-boundary" &&
+      toset(flatten([for st in jsondecode(file("${path.module}/iam/opennova-machine-boundary.json")).Statement : st.Action])) ==
+      toset(flatten([
+        for d in [data.aws_iam_policy_document.machine[0], data.aws_iam_policy_document.hostd[0], data.aws_iam_policy_document.exec] :
+        [for st in d.statement : st.actions]
+      ]))
+    )
+    error_message = "the machines' two roles (the instance role, hostd's task role) carry the machine boundary, which names exactly the actions their policies do"
   }
   assert {
     condition = (

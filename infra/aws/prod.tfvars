@@ -34,4 +34,4 @@ hosted_enabled = true
 # ECS-optimized Amazon Linux 2023. A bump lands here, staging's first;
 # the newest: aws ssm get-parameters --names
 # /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_name
-fleet_ami = "al2023-ami-ecs-hvm-2023.0.20260924-kernel-6.1-x86_64"
+fleet_ami = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64"
