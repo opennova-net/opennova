@@ -221,14 +221,17 @@ bool test_shell_consume_and_overlay_cancel() {
 	keys.hold("useitem");
 	actions.poll(keys, kLive);
 	keys.digits[2] = true;
-	CHECK(actions.poll(keys, {false, false, true}).requests.empty());
-	CHECK(actions.poll(keys, kLive).requests.empty()); // inactive frame aged raw digits
+	// An inactive frame runs the input frame too: the held USE's digit picks a
+	// seat (the hold is consumed), and the arm is not asked.
+	CHECK(requests_are(actions.poll(keys, {false, false, true}), {{Action::SelectSeat, 1}}));
+	CHECK(actions.poll(keys, kLive).requests.empty()); // a fresh hold, the digit latched
 	keys.release("useitem");
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::ToggleMount}})); // fresh hold
 	keys.hold("useitem"); actions.poll(keys, kLive);
 	keys.release("useitem");
-	CHECK(actions.poll(keys, {false, false, true}).requests.empty());
-	CHECK(actions.poll(keys, kLive).requests.empty()); // overlay canceled the release
+	// The release edge runs on an inactive frame as on any input frame.
+	CHECK(requests_are(actions.poll(keys, {false, false, true}), {{Action::ToggleMount}}));
+	CHECK(actions.poll(keys, kLive).requests.empty());
 	return true;
 }
 
@@ -642,13 +645,14 @@ bool test_menu_freezes_the_use_hold() {
 	CHECK(actions.poll(keys, menu).requests.empty());
 	CHECK(requests_are(actions.poll(keys, gate), {{Action::ToggleMount}}));
 	CHECK(actions.poll(keys, gate).requests.empty());
-	// An inactive frame that is no menu (the input frame runs) still cancels it.
+	// An inactive frame that is no menu runs the input frame: the arm is not
+	// asked, so the hold ends there and the mount toggles.
 	PlayerActions overlay;
 	keys.hold("useitem", 0x10);
 	overlay.poll(keys, gate);
 	PlayerActionPoll inactive = gate;
 	inactive.active = false;
-	overlay.poll(keys, inactive);
+	CHECK(requests_are(overlay.poll(keys, inactive), {{Action::ToggleMount}}));
 	keys.release("useitem");
 	CHECK(overlay.poll(keys, gate).requests.empty());
 	return true;
