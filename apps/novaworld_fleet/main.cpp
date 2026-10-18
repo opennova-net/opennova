@@ -219,7 +219,8 @@ int run(const program::Boot &boot) {
 			return;
 		const uint64_t now_ms = counted->config().clock_ms();
 		const uint64_t good_ms = counted->last_good_pass_ms();
-		beat.fleet_pass_age_s = static_cast<int64_t>(now_ms > good_ms ? (now_ms - good_ms) / 1000 : 0);
+		beat.fleet_pass_age_s =
+				static_cast<int64_t>(now_ms > good_ms ? (now_ms - good_ms) / 1000 : 0);
 		const hosted::HealthInputs inputs = hosted::read_health(db, &placement);
 		const hosted::HealthGauges gauges =
 				hosted::health_gauges(inputs, hosted::fleet_health(inputs, release));
