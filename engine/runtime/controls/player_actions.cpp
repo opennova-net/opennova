@@ -139,14 +139,10 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 	//  mode word @0x49963E..0x499650; case 0xB1 @0x4E0A82, the mount chain
 	//  @0x4E0B5E..0x4E0B71]
 	const bool use_admitted = !gate.death_screen || (row_modes("useitem") & 2u) != 0;
-	// A keyboard key held through a menu close's reset reads up until its
-	// next key-down (reset_use_key); a mouse-bound USE, which the reset leaves
-	// alone, holds through it, and a released row needs none.
+	// A key held through a menu close's reset reads up in the device's key
+	// state (KeyStateReset), so the row reads it up too.
 	const bool use_down = source.pressed("useitem");
-	// Only a real release ends it: an open text line hides the held key.
-	if (!use_down && !gate.keyboard_captured) use_key_reset_ = false;
-	const bool keyboard_leg = source.pressed_key("useitem") != 0;
-	if (gate.active && use_admitted && use_down && !(use_key_reset_ && keyboard_leg)) {
+	if (gate.active && use_admitted && use_down) {
 		const UseItemPressArm arm = gate.take_use_item_arm ? gate.take_use_item_arm()
 		                                                   : UseItemPressArm::kMountChain;
 		if (arm == UseItemPressArm::kMountChain) {
@@ -286,12 +282,8 @@ void PlayerActions::consume_use_hold() {
 	use_consume_pending_ = true;
 }
 
-void PlayerActions::reset_use_key() {
-	use_key_reset_ = true;
-}
-
-void PlayerActions::use_key_down() {
-	use_key_reset_ = false;
+void PlayerActions::clear_key_press_latches() {
+	to_special_was_down_ = false;
 }
 
 int WheelRemainder::feed(int32_t delta) {

@@ -32,7 +32,10 @@ public:
 		return input != nullptr &&
 				input->is_physical_key_pressed(static_cast<Key>(KEY_0 + p_digit));
 	}
+	// Shift's sign bit reads the key-state array, which a menu close's reset
+	// clears (engine controls::KeyStateReset carries the witness).
 	bool shift_down() const override {
+		if (controls_.is_valid()) return controls_->is_vk_down(0x10);
 		Input *input = Input::get_singleton();
 		return input != nullptr && input->is_physical_key_pressed(KEY_SHIFT);
 	}
@@ -233,18 +236,18 @@ void PlayerInputRouter::consume_use_hold() {
 	actions_.consume_use_hold();
 }
 
-void PlayerInputRouter::reset_use_key() {
-	actions_.reset_use_key();
-}
-
-void PlayerInputRouter::use_key_down() {
-	actions_.use_key_down();
-}
 
 bool PlayerInputRouter::take_armory_request() {
 	const bool requested = armory_requested_;
 	armory_requested_ = false;
 	return requested;
+}
+
+void PlayerInputRouter::reset_input_state() {
+	if (controls_.is_valid()) controls_->reset_key_state();
+	actions_.clear_key_press_latches();
+	const Ref<Simulation> reset_sim = sim();
+	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
 
 // Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline

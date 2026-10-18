@@ -61,10 +61,10 @@ public:
 	// (controls::PlayerAction::OpenArmory); reading clears it. The shell
 	// opens weapon.mnu's WEAPON screen.
 	bool take_armory_request();
-	// The menu close's key-state reset for the USE row, and a useitem key's
-	// down event (press or OS repeat) that ends it (controls::PlayerActions).
-	void reset_use_key();
-	void use_key_down();
+	// A menu close's input reset: the key state (ControlsModel::reset_key_state),
+	// the key-press latch (controls::PlayerActions::clear_key_press_latches)
+	// and the deferred queue (Simulation::clear_deferred_input).
+	void reset_input_state();
 	// The HUD's key toggles, whose F9 Emotes / F10 Radio menus take a digit
 	// before the weapon rows do (controls::PlayerActions' menu arms); the HUD
 	// presenter hands its process-lifetime instance over. Null = no menus.

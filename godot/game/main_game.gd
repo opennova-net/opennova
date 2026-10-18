@@ -427,12 +427,11 @@ func _input(event: InputEvent) -> void:
 			release_sim.release_use_item_key(
 					(released.alt_pressed and not released.ctrl_pressed) \
 					or released.keycode == KEY_ALT or released.keycode == KEY_F10)
-	# A useitem key-down, a press or an OS repeat (echo), sets the key again
-	# after a menu close's reset (engine controls::PlayerActions::reset_use_key
-	# carries the witness).
-	if event is InputEventKey and (event as InputEventKey).pressed and _player_presenter != null \
-			and _is_use_item_key(ArmoryPresenter.bound_key_of(event as InputEventKey)):
-		_player_presenter.use_key_down()
+	# Every key-down, a press or an OS repeat (echo), sets its key again after a
+	# menu close's key-state reset (engine controls::KeyStateReset carries the
+	# witness).
+	if event is InputEventKey and (event as InputEventKey).pressed:
+		ControlsBindings.model().key_down_event(ArmoryPresenter.bound_key_of(event as InputEventKey))
 	# An open chat line takes every key (Esc included) before anything else
 	# sees it; only the shell's own window/tools keys pass.
 	if event is InputEventKey and _state == State.WORLD and _hud_presenter != null \
@@ -1492,15 +1491,18 @@ func _on_command_map_requested() -> void:
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
 	if _state == from_state:
 		_state = State.WORLD
-		_reset_use_key()
+		_reset_key_state()
 
 
-# Every menu screen's close resets the key state, so a useitem key held
-# through it reads up until its next key-down (engine
-# controls::PlayerActions::reset_use_key carries the witness).
-func _reset_use_key() -> void:
+# Every menu screen's close resets the input state: a key held through it
+# reads up until its next key-down and dispatches no release, and a deferred
+# dispatch is dropped (engine controls::KeyStateReset and
+# PlayerActions::clear_key_press_latches carry the witness).
+func _reset_key_state() -> void:
 	if _player_presenter != null:
-		_player_presenter.reset_use_key()
+		_player_presenter.reset_input_state()
+	else:
+		ControlsBindings.model().reset_key_state()
 
 
 func _pause() -> void:
@@ -1527,7 +1529,7 @@ func resume() -> void:
 			else State.WORLD
 	# Every resume leg lands here, so the session cannot stay stuck Paused.
 	_world.set_shell_paused(false)
-	_reset_use_key()
+	_reset_key_state()
 	if _hud_presenter != null:
 		_hud_presenter.set_menu_pause(false)
 

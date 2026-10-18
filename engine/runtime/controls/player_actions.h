@@ -141,18 +141,13 @@ public:
 	void reset();
 	// Deferred until after the next poll's fresh-USE-press reset.
 	void consume_use_hold();
-	// A menu close's key-state reset, for the USE row: a useitem KEYBOARD key
-	// held through it reads up until its next key-down, a fresh press or an OS
-	// repeat, which the embedder reports through use_key_down; the reset does
-	// not touch the mouse button state, so a mouse-bound USE keeps holding
-	// [orig: Input_PumpAndCenterCursor writes only the deltas and the cursor
-	//  @0x761724..0x76173A].
-	// [orig: WeaponLoadout_ApplyFromBuffer -> Input_ResetAllState @0x565D01;
-	//  UI_CloseMenuScreen @0x54E63F; Input_ClearKeyState @0x497ED5 (the
-	//  keyState memset @0x760DF4); only Input_HandleKeyPress sets a key again
-	//  @0x760CBB]
-	void reset_use_key();
-	void use_key_down();
+	// A menu close's reset clears the key-press latch, which gates the release
+	// dispatch: a key held through it dispatches no release, neither then nor
+	// at its physical release (ToSpecial's release arm is the one ported).
+	// [orig: Input_ResetAllState @0x497ED0 -- the g_KeyPressLatch memset
+	//  @0x497F08; Input_ProcessKeyboardEvents, the release pass's latch test
+	//  @0x49D249 and clear @0x49D2B9, the latch set on a key event @0x49D2ED]
+	void clear_key_press_latches();
 	// The death screen's spectator rows, the catalog's mode-2 rows 110..112
 	// (CycleSpectatorMode, IncSpectatorTarget, DecSpectatorTarget): the binding
 	// scan admits them only while the death screen is up, so the embedder
@@ -173,7 +168,6 @@ private:
 	bool use_held_prev_ = false;
 	bool use_hold_consumed_ = false;
 	bool use_consume_pending_ = false;
-	bool use_key_reset_ = false;
 	bool use_digit_was_down_[10] = {};
 	// This frame's menu digit arm: a menu was open while gameplay input ran.
 	bool menu_digits_ = false;

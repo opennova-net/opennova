@@ -440,13 +440,10 @@ bool LocalPlayerPresenter::take_use_item_armory_request() {
 	return input_router_.take_armory_request();
 }
 
-void LocalPlayerPresenter::reset_use_key() {
-	input_router_.reset_use_key();
+void LocalPlayerPresenter::reset_input_state() {
+	input_router_.reset_input_state();
 }
 
-void LocalPlayerPresenter::use_key_down() {
-	input_router_.use_key_down();
-}
 
 void LocalPlayerPresenter::set_hud_toggles(const Ref<HudToggles> &p_toggles) {
 	input_router_.set_hud_toggles(p_toggles);
@@ -1216,8 +1213,7 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("consume_use_hold"), &LocalPlayerPresenter::consume_use_hold);
 	ClassDB::bind_method(D_METHOD("take_use_item_armory_request"),
 			&LocalPlayerPresenter::take_use_item_armory_request);
-	ClassDB::bind_method(D_METHOD("reset_use_key"), &LocalPlayerPresenter::reset_use_key);
-	ClassDB::bind_method(D_METHOD("use_key_down"), &LocalPlayerPresenter::use_key_down);
+	ClassDB::bind_method(D_METHOD("reset_input_state"), &LocalPlayerPresenter::reset_input_state);
 	ClassDB::bind_method(D_METHOD("handle_input", "event", "active"), &LocalPlayerPresenter::handle_input);
 	ClassDB::bind_method(D_METHOD("has_player"), &LocalPlayerPresenter::has_player);
 	ClassDB::bind_method(D_METHOD("is_local_spectator"), &LocalPlayerPresenter::is_local_spectator);

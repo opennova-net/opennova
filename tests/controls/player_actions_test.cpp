@@ -2,6 +2,7 @@
 // binding sampler for modifier claims and remapping. No production-source pins.
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/player_actions.h>
+#include <runtime/controls/key_state_reset.h>
 
 #include <array>
 #include <cstdlib>
@@ -555,35 +556,65 @@ bool test_held_use_runs_the_arm_every_frame() {
 	keys.release("useitem");
 	CHECK(dead.poll(keys, dead_gate).requests.empty());
 
-	// The WEAPON screen's close resets the key state: Shift held through the
-	// ACCEPT reads up, no arm asked and no chain held, until its next key-down
-	// (an OS repeat here) [orig: Input_ResetAllState @0x565D01 / @0x54E63F;
-	// Input_ClearKeyState @0x497ED5; Input_HandleKeyPress @0x760CBB].
-	PlayerActions closed;
-	arms = {Arm::kOpenArmory, Arm::kOpenArmory};
-	asked = 0;
-	keys.hold("useitem", 0x10); // the stock key, Shift
-	closed.reset_use_key();
-	CHECK(closed.poll(keys, gate).requests.empty());
-	CHECK(closed.poll(keys, gate).requests.empty());
-	CHECK(asked == 0);
-	closed.use_key_down();
-	CHECK(requests_are(closed.poll(keys, gate), {{Action::OpenArmory}}));
-	CHECK(asked == 1);
-	// A release ends the reset as well: the next press is a fresh key-down.
-	closed.reset_use_key();
-	keys.release("useitem");
-	closed.poll(keys, gate);
-	keys.hold("useitem", 0x10);
-	CHECK(requests_are(closed.poll(keys, gate), {{Action::OpenArmory}}));
-	// The reset leaves a mouse-bound USE (no keyboard key) holding.
-	PlayerActions mouse;
-	arms = {Arm::kOpenArmory};
-	asked = 0;
-	keys.release("useitem");
-	keys.hold("useitem");
-	mouse.reset_use_key();
-	CHECK(requests_are(mouse.poll(keys, gate), {{Action::OpenArmory}}));
+	return true;
+}
+
+// Every menu close clears the key state: a key held through it (Shift as the
+// WEAPON screen's ACCEPT, a held W) reads up until its next key-down message,
+// a press or an OS repeat, or until its release; a key up at the reset is not
+// touched, and keys never held are not either.
+// [orig: UI_CloseMenuScreen @0x54E63F / WeaponLoadout_ApplyFromBuffer
+//  @0x565D01 -> Input_ResetAllState -> Input_ClearKeyState @0x497ED5;
+//  Input_HandleKeyPress @0x760CBB]
+bool test_key_state_reset() {
+	KeyStateReset reset;
+	const auto down_at_reset = [](int vk) { return vk == 0x10 || vk == 'W'; };
+	CHECK(reset.held(0x10, true)); // no reset yet: the device state
+	reset.reset(down_at_reset);
+	CHECK(!reset.held(0x10, true));
+	CHECK(!reset.held(0x10, true)); // still held, still up
+	CHECK(!reset.held('W', true));
+	CHECK(reset.held('A', true)); // up at the reset, pressed since
+	reset.key_down(0x10); // an OS repeat
+	CHECK(reset.held(0x10, true));
+	CHECK(!reset.held('W', true));
+	// A release ends it too: the next press reads down.
+	CHECK(!reset.held('W', false));
+	CHECK(reset.held('W', true));
+	// The extended keys are in the array: keypad Enter, VK 269.
+	reset.reset([](int vk) { return vk == 269; });
+	CHECK(!reset.held(269, true));
+	reset.key_down(269);
+	CHECK(reset.held(269, true));
+	// Out-of-range codes pass the device state through.
+	CHECK(reset.held(0, true));
+	CHECK(reset.held(KeyStateReset::kKeyCount, true));
+	return true;
+}
+
+// The reset clears the key-press latch: ToSpecial held through a close
+// dispatches no release, not when its key reads up after the reset nor at its
+// physical release; a fresh key-down presses it again.
+// [orig: Input_ResetAllState @0x497F08; Input_ProcessKeyboardEvents
+//  @0x49D249 / @0x49D2B9 / @0x49D2ED]
+bool test_reset_drops_the_held_release() {
+	Keys keys;
+	PlayerActionPoll gate;
+	gate.active = true;
+	gate.captured = true;
+	gate.simulation_available = true;
+	PlayerActions actions;
+	keys.hold("ToSpecial", 'F');
+	CHECK(actions.poll(keys, gate).to_special_edge); // the press
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	actions.clear_key_press_latches();
+	keys.release("ToSpecial"); // the key reads up after the reset
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	keys.hold("ToSpecial", 'F'); // its next key-down
+	CHECK(actions.poll(keys, gate).to_special_edge);
+	keys.release("ToSpecial");
+	CHECK(actions.poll(keys, gate).to_special_edge); // a latched release
 	return true;
 }
 
@@ -597,7 +628,7 @@ int main() {
 			test_live_binding_modifier_remap_and_use_stream,
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
 			test_wheel_remainder_dispatches_whole_notches,
-			test_spectator_rows_edge_to_their_codes,
+			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
 			test_held_use_runs_the_arm_every_frame})

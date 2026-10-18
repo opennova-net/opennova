@@ -2108,6 +2108,9 @@ public:
 	// A useitem key's release clears the press latch (engine
 	// LocalPlayer::release_use_item_key).
 	void release_use_item_key(bool p_system_key_up);
+	// A menu close's reset of the deferred input queue (engine
+	// LocalPlayer::clear_deferred_input).
+	void clear_deferred_input();
 	// Whether the press latch is held: the WEAPON screen's ACCEPT and CANCEL
 	// do nothing while it is (engine LocalPlayer::armory_press_latched).
 	bool is_armory_press_latched() const;

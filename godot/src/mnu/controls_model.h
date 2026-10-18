@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
+#include <runtime/controls/key_state_reset.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/help_screen.h>
 
@@ -116,6 +117,12 @@ public:
 	void consume_key_press(int p_vk);
 	// A VK's held state as the samplers read it (a consumed press reads up).
 	bool is_vk_down(int p_vk) const { return vk_down_(p_vk); }
+	// A menu close's key-state reset: every key held now reads up until its
+	// next key-down, which the shell reports through key_down_event for every
+	// key press and OS repeat, or its release (engine controls::KeyStateReset
+	// carries the witness). The mouse buttons and the joystick hold through it.
+	void reset_key_state();
+	void key_down_event(int p_godot_key);
 	bool is_keyboard_captured() const { return bindings_.keyboard_captured(); }
 	// The in-game display string of a token's binding — the death screen's
 	// "call a medic" hint formatter (engine: runtime/controls/binding_set.h,
@@ -173,6 +180,7 @@ private:
 	opennova::controls::BindingSet bindings_;
 	opennova::controls::HelpScreen help_screen_;
 	mutable std::array<bool, 256> consumed_vks_{};
+	mutable opennova::controls::KeyStateReset key_reset_;
 	Ref<ScriptedInput> scripted_input_;
 };
 

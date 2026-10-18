@@ -190,8 +190,9 @@ bool ControlsModel::is_token_fire_signed(const String &p_token) const {
 bool ControlsModel::vk_down_(int p_vk) const {
 	Input *input = Input::get_singleton();
 	const int key = godot_key_from_vk(p_vk);
-	const bool down = input != nullptr && key != 0 &&
-			input->is_physical_key_pressed(static_cast<Key>(key));
+	// A key held through a menu close's reset reads up (KeyStateReset).
+	const bool down = key_reset_.held(p_vk, input != nullptr && key != 0 &&
+			input->is_physical_key_pressed(static_cast<Key>(key)));
 	// A press the special-key handler took reads up until the key is
 	// released (consume_key_press).
 	if (p_vk > 0 && p_vk < static_cast<int>(consumed_vks_.size()) && consumed_vks_[p_vk]) {
@@ -199,6 +200,19 @@ bool ControlsModel::vk_down_(int p_vk) const {
 		consumed_vks_[p_vk] = false;
 	}
 	return down;
+}
+
+void ControlsModel::reset_key_state() {
+	Input *input = Input::get_singleton();
+	key_reset_.reset([input](int p_vk) {
+		const int key = godot_key_from_vk(p_vk);
+		return input != nullptr && key != 0 &&
+				input->is_physical_key_pressed(static_cast<Key>(key));
+	});
+}
+
+void ControlsModel::key_down_event(int p_godot_key) {
+	key_reset_.key_down(vk_from_godot_key(p_godot_key));
 }
 
 void ControlsModel::consume_key_press(int p_vk) {
@@ -449,6 +463,8 @@ void ControlsModel::_bind_methods() {
 			D_METHOD("mouse_mask_from_godot_button", "button"),
 			&ControlsModel::mouse_mask_from_godot_button);
 	ClassDB::bind_method(D_METHOD("consume_key_press", "vk"), &ControlsModel::consume_key_press);
+	ClassDB::bind_method(D_METHOD("reset_key_state"), &ControlsModel::reset_key_state);
+	ClassDB::bind_method(D_METHOD("key_down_event", "key"), &ControlsModel::key_down_event);
 	ClassDB::bind_static_method("ControlsModel",
 			D_METHOD("vk_from_godot_key", "key"),
 			&ControlsModel::vk_from_godot_key);

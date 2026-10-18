@@ -56,6 +56,10 @@ void Simulation::release_use_item_key(bool p_system_key_up) {
 	if (kernel_) kernel_->local.release_use_item_key(p_system_key_up);
 }
 
+void Simulation::clear_deferred_input() {
+	if (kernel_) kernel_->local.clear_deferred_input();
+}
+
 bool Simulation::is_armory_press_latched() const {
 	return kernel_ && kernel_->local.armory_press_latched;
 }

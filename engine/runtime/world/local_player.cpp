@@ -346,6 +346,10 @@ void LocalPlayer::set_weapon_input(bool fire_held, bool fire_pressed, bool reloa
 	w::local_weapon_set_input(weapon, view, fire_held, fire_pressed, reload_pressed);
 }
 
+void LocalPlayer::clear_deferred_input() {
+	to_special_queued = 0;
+}
+
 void LocalPlayer::queue_to_special() {
 	if (to_special_queued < 32) ++to_special_queued; // [orig: @0x4993E8]
 }

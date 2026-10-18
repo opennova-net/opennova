@@ -239,10 +239,8 @@ public:
 	// The held USE row's armory arm took its open this frame (PlayerInputRouter::
 	// take_armory_request); reading clears it.
 	bool take_use_item_armory_request();
-	// The WEAPON screen's close resets the USE row's key state; a useitem
-	// key-down event (press or echo) ends the reset (PlayerInputRouter).
-	void reset_use_key();
-	void use_key_down();
+	// A menu close's input reset (PlayerInputRouter::reset_input_state).
+	void reset_input_state();
 	// Mouse-look rides the input router: raw pixel deltas into the SIM's
 	// witnessed integer pipeline (engine: runtime/world/local_player.cpp).
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
