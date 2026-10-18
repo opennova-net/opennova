@@ -1,5 +1,7 @@
 #include "stats_repository.h"
 
+#include "hosted_repository.h"
+
 #include <cstdio>
 #include <map>
 #include <utility>
@@ -13,7 +15,16 @@ using db::BindValue;
 
 constexpr const char *kSampleColumns =
 		"server_id, CAST(extract(epoch FROM at) AS bigint), state, players, max_players, mission, scene, "
-		"link_up, cpu_percent, memory_bytes, egress_bytes, mission_started";
+		"link_up, cpu_percent, memory_bytes, egress_bytes, mission_started, net_in_bytes, net_out_bytes, "
+		"tick_p50_ms, tick_p99_ms, tick_max_ms, late_ticks";
+
+// A counter's growth between consecutive rows, `cur` and the one before it
+// `prev` (SQL over a LAG): none for the first, the whole count for one below the
+// last (a counter that started over).
+std::string counter_delta(const char *cur, const char *prev) {
+	return std::string("CASE WHEN ") + prev + " IS NULL OR " + cur + " IS NULL THEN 0 WHEN " + cur +
+			" >= " + prev + " THEN " + cur + " - " + prev + " ELSE " + cur + " END";
+}
 
 BindValue text_or_null(const std::string &text) {
 	return text.empty() ? BindValue(std::monostate{}) : BindValue(text);
@@ -80,6 +91,12 @@ ServerSample row_to_sample(const db::Row &r) {
 	s.memory_bytes = r.as_int(9);
 	s.egress_bytes = int_at(r, 10);
 	s.mission_started = r.as_int(11).value_or(0) != 0;
+	s.net_in_bytes = r.as_int(12);
+	s.net_out_bytes = r.as_int(13);
+	s.tick_p50_ms = double_at(r, 14);
+	s.tick_p99_ms = double_at(r, 15);
+	s.tick_max_ms = double_at(r, 16);
+	s.late_ticks = r.as_int(17);
 	return s;
 }
 
@@ -87,13 +104,17 @@ ServerSample row_to_sample(const db::Row &r) {
 
 void insert_sample(db::Database &db, const ServerSample &s) {
 	db.exec(std::string("INSERT INTO hosted_server_samples (server_id, at, state, players, max_players, mission, "
-						"scene, link_up, cpu_percent, memory_bytes, egress_bytes, mission_started) "
-						"VALUES ($1, to_timestamp($2::double precision), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) "
+						"scene, link_up, cpu_percent, memory_bytes, egress_bytes, mission_started, net_in_bytes, "
+						"net_out_bytes, tick_p50_ms, tick_p99_ms, tick_max_ms, late_ticks) "
+						"VALUES ($1, to_timestamp($2::double precision), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, "
+						"$13, $14, $15, $16, $17, $18) "
 						"ON CONFLICT (server_id, at) DO NOTHING;"),
 			{ BindValue(s.server_id), BindValue(s.at), BindValue(s.state), int_or_null(s.players),
 					int_or_null(s.max_players), text_or_null(s.mission), text_or_null(s.scene),
 					BindValue(db::Bool{ s.link_up }), double_or_null(s.cpu_percent), int_or_null(s.memory_bytes),
-					BindValue(s.egress_bytes < 0 ? 0 : s.egress_bytes), BindValue(db::Bool{ s.mission_started }) });
+					BindValue(s.egress_bytes < 0 ? 0 : s.egress_bytes), BindValue(db::Bool{ s.mission_started }),
+					int_or_null(s.net_in_bytes), int_or_null(s.net_out_bytes), double_or_null(s.tick_p50_ms),
+					double_or_null(s.tick_p99_ms), double_or_null(s.tick_max_ms), int_or_null(s.late_ticks) });
 }
 
 void add_machine_egress(db::Database &db, int64_t machine_id, int64_t at, int64_t bytes) {
@@ -106,26 +127,84 @@ void add_machine_egress(db::Database &db, int64_t machine_id, int64_t at, int64_
 }
 
 void rollup_hour(db::Database &db, int64_t server_id, int64_t at, int64_t unique_players) {
+	// The bytes in: the counters' differences, each minute's from the one
+	// before it (the hour's first from the hour before's last).
+	const std::string bytes_in = "(SELECT COALESCE(SUM(" + counter_delta("w.cur", "w.prev") +
+			"), 0) FROM (SELECT at, net_in_bytes AS cur, LAG(net_in_bytes) OVER (ORDER BY at) AS prev "
+			"FROM hosted_server_samples WHERE server_id = $1 AND net_in_bytes IS NOT NULL "
+			"AND at >= h.hour - interval '1 hour' AND at < h.hour + interval '1 hour') w "
+			"WHERE w.at >= h.hour)";
 	db.exec("INSERT INTO hosted_server_hourly (server_id, hour, live_minutes, running_minutes, player_minutes, "
-			"peak_players, max_players, unique_players, missions, egress_bytes, avg_cpu) "
+			"peak_players, max_players, unique_players, missions, egress_bytes, avg_cpu, peak_memory_bytes, "
+			"net_in_bytes, net_out_bytes, tick_p99_max_ms, late_ticks) "
 			"SELECT $1, h.hour, COUNT(s.at), COUNT(s.at) FILTER (WHERE s.state = 'running'), "
 			"COALESCE(SUM(s.players), 0), COALESCE(MAX(s.players), 0), COALESCE(MAX(s.max_players), 0), $3, "
-			"COUNT(s.at) FILTER (WHERE s.mission_started), COALESCE(SUM(s.egress_bytes), 0), AVG(s.cpu_percent) "
-			"FROM (SELECT date_trunc('hour', to_timestamp($2::double precision)) AS hour) h "
-			"LEFT JOIN hosted_server_samples s ON s.server_id = $1 AND s.at >= h.hour "
-			"AND s.at < h.hour + interval '1 hour' GROUP BY h.hour "
-			"ON CONFLICT (server_id, hour) DO UPDATE SET live_minutes = EXCLUDED.live_minutes, "
-			"running_minutes = EXCLUDED.running_minutes, player_minutes = EXCLUDED.player_minutes, "
-			"peak_players = EXCLUDED.peak_players, max_players = EXCLUDED.max_players, "
-			"unique_players = GREATEST(hosted_server_hourly.unique_players, EXCLUDED.unique_players), "
-			"missions = EXCLUDED.missions, egress_bytes = EXCLUDED.egress_bytes, avg_cpu = EXCLUDED.avg_cpu;",
+			"COUNT(s.at) FILTER (WHERE s.mission_started), COALESCE(SUM(s.egress_bytes), 0), AVG(s.cpu_percent), "
+			"MAX(s.memory_bytes), " +
+					bytes_in +
+					", COALESCE(SUM(s.egress_bytes), 0), MAX(s.tick_p99_ms), COALESCE(SUM(s.late_ticks), 0) "
+					"FROM (SELECT date_trunc('hour', to_timestamp($2::double precision)) AS hour) h "
+					"LEFT JOIN hosted_server_samples s ON s.server_id = $1 AND s.at >= h.hour "
+					"AND s.at < h.hour + interval '1 hour' GROUP BY h.hour "
+					"ON CONFLICT (server_id, hour) DO UPDATE SET live_minutes = EXCLUDED.live_minutes, "
+					"running_minutes = EXCLUDED.running_minutes, player_minutes = EXCLUDED.player_minutes, "
+					"peak_players = EXCLUDED.peak_players, max_players = EXCLUDED.max_players, "
+					"unique_players = GREATEST(hosted_server_hourly.unique_players, EXCLUDED.unique_players), "
+					"missions = EXCLUDED.missions, egress_bytes = EXCLUDED.egress_bytes, avg_cpu = EXCLUDED.avg_cpu, "
+					"peak_memory_bytes = EXCLUDED.peak_memory_bytes, net_in_bytes = EXCLUDED.net_in_bytes, "
+					"net_out_bytes = EXCLUDED.net_out_bytes, tick_p99_max_ms = EXCLUDED.tick_p99_max_ms, "
+					"late_ticks = EXCLUDED.late_ticks;",
 			{ BindValue(server_id), BindValue(at), BindValue(unique_players) });
+}
+
+size_t sample_machines(db::Database &db, int64_t minute) {
+	db.exec(std::string("INSERT INTO fleet_machine_samples (machine_id, at, cpu_percent, memory_used_bytes, "
+						"memory_total_bytes, disk_free_bytes, net_in_bytes, net_out_bytes, servers) "
+						"SELECT m.id, to_timestamp($1::double precision), m.cpu_percent, m.memory_used_bytes, "
+						"m.memory_total_bytes, m.disk_free_bytes, m.net_in_bytes, m.net_out_bytes, "
+						"(SELECT COUNT(*) FROM hosted_servers s WHERE s.machine_ref = m.id AND s.slot IS NOT NULL "
+						"AND s.") +
+					kLiveServerSql +
+					") FROM fleet_machines m WHERE m.state NOT IN ('ended', 'failed') AND m.stats_at >= now() - "
+					"make_interval(secs => $2) ON CONFLICT (machine_id, at) DO NOTHING;",
+			{ BindValue(minute), BindValue(static_cast<double>(kMachineStatsFreshSeconds)) });
+	return static_cast<size_t>(db.changes());
+}
+
+void rollup_machine_hours(db::Database &db, int64_t now) {
+	// Every hour whose minutes are all still kept, from the first after
+	// kSampleKeepSeconds back to `now`'s own (as program/program_usage.h
+	// rollup_usage_hours does), so a pass that never ran leaves no hour
+	// unwritten; each minute's counters taken from the minute before it (the
+	// window opens an hour earlier for the first's).
+	const int64_t kept = now - kSampleKeepSeconds;
+	const int64_t first = kept - ((kept % 3600) + 3600) % 3600 + 3600;
+	db.exec("INSERT INTO fleet_machine_hourly (machine_id, hour, cpu_avg, cpu_max, memory_peak_bytes, "
+			"disk_free_min_bytes, net_in_bytes, net_out_bytes) "
+			"SELECT machine_id, date_trunc('hour', at), AVG(cpu_percent), MAX(cpu_percent), MAX(memory_used_bytes), "
+			"MIN(disk_free_bytes), COALESCE(SUM(" +
+					counter_delta("net_in_bytes", "prev_in") + "), 0), COALESCE(SUM(" +
+					counter_delta("net_out_bytes", "prev_out") +
+					"), 0) FROM (SELECT *, LAG(net_in_bytes) OVER w AS prev_in, LAG(net_out_bytes) OVER w AS "
+					"prev_out FROM fleet_machine_samples WHERE at >= to_timestamp($1::double precision) - "
+					"interval '1 hour' WINDOW w AS (PARTITION BY machine_id ORDER BY at)) minutes "
+					"WHERE at >= to_timestamp($1::double precision) "
+					"GROUP BY machine_id, date_trunc('hour', at) "
+					"ON CONFLICT (machine_id, hour) DO UPDATE SET cpu_avg = EXCLUDED.cpu_avg, "
+					"cpu_max = EXCLUDED.cpu_max, memory_peak_bytes = EXCLUDED.memory_peak_bytes, "
+					"disk_free_min_bytes = EXCLUDED.disk_free_min_bytes, net_in_bytes = EXCLUDED.net_in_bytes, "
+					"net_out_bytes = EXCLUDED.net_out_bytes;",
+			{ BindValue(first) });
 }
 
 void prune_stats(db::Database &db, int64_t now) {
 	db.exec("DELETE FROM hosted_server_samples WHERE at < to_timestamp($1::double precision);",
 			{ BindValue(now - kSampleKeepSeconds) });
 	db.exec("DELETE FROM hosted_server_hourly WHERE hour < to_timestamp($1::double precision);",
+			{ BindValue(now - kHourlyKeepSeconds) });
+	db.exec("DELETE FROM fleet_machine_samples WHERE at < to_timestamp($1::double precision);",
+			{ BindValue(now - kSampleKeepSeconds) });
+	db.exec("DELETE FROM fleet_machine_hourly WHERE hour < to_timestamp($1::double precision);",
 			{ BindValue(now - kHourlyKeepSeconds) });
 	db.exec("DELETE FROM fleet_machine_egress WHERE month < CAST(date_trunc('month', "
 			"to_timestamp($1::double precision) AT TIME ZONE 'UTC') - interval '13 months' AS date);",
@@ -230,11 +309,12 @@ StatsSummary stats_summary(db::Database &db, const StatsScope &scope, const Stat
 		out.unique_players = rows.empty() ? 0 : int_at(rows[0], 0);
 	}
 	{
-		// The crash restarts (their events' "; restart <n> of <m>").
+		// The crash restarts: the starts the server's own cause ended (a crash, a
+		// start or a listing that did not come in time).
 		auto binds = window_binds();
 		const std::string scope_test = scope_sql(scope, binds);
-		const auto rows = db.query("SELECT COUNT(*) FROM hosted_server_events WHERE " + window_sql("at") + " AND " +
-						scope_test + " AND detail LIKE '%; restart % of %';",
+		const auto rows = db.query("SELECT COUNT(*) FROM hosted_server_starts WHERE " + window_sql("ended_at") +
+						" AND " + scope_test + " AND cause IN ('crash', 'timeout');",
 				binds);
 		out.restarts = rows.empty() ? 0 : int_at(rows[0], 0);
 	}

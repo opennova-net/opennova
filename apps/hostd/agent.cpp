@@ -735,10 +735,12 @@ void Agent::act(
 	}
 	// A tree the store gave up on: its containers never ran, reported exited
 	// 125, as any start that failed (nothing of theirs is on the machine yet),
-	// with the fetch's reason, which the service shows the owner.
+	// with the fetch's reason (kDataUnavailableReason first), which the service
+	// reads as its data's cause and shows an admin.
 	for (const auto &failed_data : plan.data_failed) {
 		const hosted::DesiredContainer &d = desired[failed_data.first];
-		const std::string reason = "its data could not be fetched: " + failed_data.second;
+		const std::string reason =
+				std::string(hosted::kDataUnavailableReason) + ": " + failed_data.second;
 		io::logf(LogLevel::kError, "%s did not start on slot %d: %s", d.name.c_str(), d.slot,
 				reason.c_str());
 		failed_starts_[d.name] = { d.slot, 125, reason_text(reason) };

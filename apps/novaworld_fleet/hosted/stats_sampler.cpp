@@ -60,22 +60,37 @@ bool StatsSampler::sample(db::Database &db, int64_t now, const LinkLookup &links
 			mission_mark = sample.mission;
 		}
 
-		// Its container's CPU, memory and its slot's egress, as the agent last
-		// reported them (only its own container's).
-		std::optional<EgressMark> egress_mark;
+		// Its container's CPU, memory, ticks and its slot's network, as the agent
+		// last reported them (only its own container's).
+		std::optional<SlotMark> egress_mark;
 		const auto report = slot_report_of(db, s.id);
 		if (report && s.machine_ref && report->container == s.container) {
 			sample.cpu_percent = std::clamp(report->cpu_percent / slot_cpus_, 0.0, 100.0);
 			sample.memory_bytes = static_cast<int64_t>(report->memory_bytes);
+			if (report->tick) {
+				sample.tick_p50_ms = report->tick->p50_ms;
+				sample.tick_p99_ms = report->tick->p99_ms;
+				sample.tick_max_ms = report->tick->max_ms;
+				sample.late_ticks = static_cast<int64_t>(report->tick->late);
+			}
+			// A count below the last one is a counter that started over.
+			const auto delta = [](uint64_t now, uint64_t last) { return now >= last ? now - last : now; };
+			SlotMark mark{ *s.machine_ref, s.slot, report->egress_bytes, report->net_in_bytes, 0, 0 };
 			const auto known = egress_.find(s.id);
 			if (known != egress_.end() && known->second.machine_id == *s.machine_ref &&
 					known->second.slot == s.slot) {
-				// A count below the last one is a counter that started over.
-				const uint64_t last = known->second.cumulative;
-				const uint64_t delta = report->egress_bytes >= last ? report->egress_bytes - last : report->egress_bytes;
-				sample.egress_bytes = static_cast<int64_t>(delta);
+				const uint64_t sent = delta(report->egress_bytes, known->second.egress);
+				sample.egress_bytes = static_cast<int64_t>(sent);
+				mark.out_total = known->second.out_total + sent;
+				mark.in_total = known->second.in_total + delta(report->net_in_bytes, known->second.ingress);
+			} else if (known != egress_.end()) {
+				// Moved to another slot: its counters carry on from where they were.
+				mark.out_total = known->second.out_total;
+				mark.in_total = known->second.in_total;
 			}
-			egress_mark = EgressMark{ *s.machine_ref, s.slot, report->egress_bytes };
+			sample.net_out_bytes = static_cast<int64_t>(mark.out_total);
+			sample.net_in_bytes = static_cast<int64_t>(mark.in_total);
+			egress_mark = mark;
 		}
 
 		insert_sample(db, sample);
@@ -84,6 +99,9 @@ bool StatsSampler::sample(db::Database &db, int64_t now, const LinkLookup &links
 		if (mission_mark) last_mission_[s.id] = *mission_mark;
 		rollup_hour(db, s.id, minute, static_cast<int64_t>(names.size()));
 	}
+
+	// Every live machine's minute, from its agent's last report.
+	sample_machines(db, minute);
 
 	// What it keeps of the servers that ended, and of the hours gone.
 	for (auto it = egress_.begin(); it != egress_.end();)

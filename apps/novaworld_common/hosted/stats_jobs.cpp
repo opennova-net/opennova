@@ -12,7 +12,9 @@ void register_stats_jobs(jobs::JobRegistry &registry, std::function<int64_t()> n
 	registry.add({ kJobStatsPrune,
 			[now_s = std::move(now_s)](jobs::JobContext &ctx) {
 				auto lease = ctx.pool.acquire();
-				prune_stats(*lease, now_s());
+				const int64_t now = now_s();
+				rollup_machine_hours(*lease, now);
+				prune_stats(*lease, now);
 				if (const size_t pruned = prune_ended_machines(*lease); pruned > 0)
 					std::printf("[sweep] pruned %zu ended fleet machine(s)\n", pruned);
 				return jobs::JobResult::done();

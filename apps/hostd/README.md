@@ -150,8 +150,9 @@ the last failure's reason). Of each container: `state` is `starting`, `running` 
 `exited`, and a starting one's `waiting` says what for (`image`, `trees`, or `""`);
 `started_at` Unix seconds; `reason` rides an exited container when the agent knows why:
 the line `opennova-serve` wrote at its non-zero exit (its `--exit-file`, `exit.txt` in the
-slot's directory), or why one never started (its data could not be fetched: the owner reads
-it in the server's events); `egress_bytes` and `net_in_bytes` the slot's counts since the
+slot's directory), or why one never started (`its data could not be fetched: ` and the
+fetch's error: the service counts no restart for it, and shows the line to an admin alone);
+`egress_bytes` and `net_in_bytes` the slot's counts since the
 machine booted, what its user sent to the internet and what reached its ports (a lower
 count than the last is a counter that started over); `tick` a running server's last minute
 of ticks (its `--stats-file`, `tick-stats.json` in the slot's directory, read at most every

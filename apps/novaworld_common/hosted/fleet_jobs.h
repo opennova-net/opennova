@@ -20,9 +20,10 @@
 //                      (mark_launched); the row left launching meanwhile: the
 //                      cloud machine is ended, unless another run of this job
 //                      recorded it. Refused: the row failed with the refusal
-//                      left for the supervisor to count (fail_refused_launch;
-//                      the driver's own text goes to the log alone), the job
-//                      failed for good. A run cut short (a worker gone, a
+//                      left for the supervisor to count (fail_refused_launch,
+//                      its end reason and event naming the cloud's error code,
+//                      launch_failure_reason; the driver's own text goes to the
+//                      log alone), the job failed for good. A run cut short (a worker gone, a
 //                      database error) runs again with the same machine id, so
 //                      the same client token in each subnet (told it runs
 //                      again, the driver reads where its first run launched
@@ -55,6 +56,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova::novaworld_server::hosted {
@@ -96,5 +98,13 @@ void register_fleet_jobs(jobs::JobRegistry &registry, MachineDriver &driver,
 		std::function<void(db::ConnectionPool &)> also_sweep = {});
 // The periodic sweep, every `sweep_interval_ms`.
 std::vector<jobs::PeriodicJob> fleet_schedule(int64_t sweep_interval_ms = kFleetSweepIntervalMs);
+
+// The cloud's error code a failure's text names: the AWS CLI's "An error
+// occurred (<Code>) when calling ..." (VcpuLimitExceeded,
+// InsufficientInstanceCapacity, UnauthorizedOperation, ...); "" for none.
+std::string cloud_error_code(std::string_view text);
+// A refused launch's end reason and event: "the launch failed (<code>)" with the
+// cloud's error code (cloud_error_code), else "the launch failed".
+std::string launch_failure_reason(std::string_view error);
 
 } // namespace opennova::novaworld_server::hosted

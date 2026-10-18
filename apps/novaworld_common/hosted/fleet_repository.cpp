@@ -24,8 +24,10 @@ constexpr const char *kMachineColumns =
 		"idle_since_ms, "
 		"drain_moving, was_draining, describe_asked_ms, launch_subnet, "
 		"COALESCE(agent_protocol, 0), agent_image, protocol_mismatch_since, lost_held_since_ms, "
-		"COALESCE(address_id, 0)";
-constexpr size_t kMachineColumnCount = 34;
+		"COALESCE(address_id, 0), image_id, agent_log_stream, cpu_percent, memory_used_bytes, "
+		"memory_total_bytes, disk_free_bytes, disk_total_bytes, net_in_bytes, net_out_bytes, "
+		"stats_at";
+constexpr size_t kMachineColumnCount = 44;
 
 // The SQL test for a live machine (a live hosted server's is hosted_repository.h's).
 constexpr const char *kLiveMachineSql = "state NOT IN ('ended', 'failed')";
@@ -102,6 +104,20 @@ FleetMachineRow row_to_machine(const db::Row &r) {
 	m.protocol_mismatch_since = r.as_text(31).value_or("");
 	m.lost_held_since_ms = r.as_int(32).value_or(0);
 	m.address_id = r.as_int(33).value_or(0);
+	m.image_id = r.as_text(34).value_or("");
+	m.agent_log_stream = r.as_text(35).value_or("");
+	m.stats_at = r.as_text(43).value_or("");
+	if (!m.stats_at.empty()) {
+		MachineStats s;
+		s.cpu_percent = as_double(r, 36);
+		s.memory_used_bytes = as_count(r, 37);
+		s.memory_total_bytes = as_count(r, 38);
+		s.disk_free_bytes = as_count(r, 39);
+		s.disk_total_bytes = as_count(r, 40);
+		s.net_in_bytes = as_count(r, 41);
+		s.net_out_bytes = as_count(r, 42);
+		m.stats = s;
+	}
 	return m;
 }
 
@@ -112,6 +128,15 @@ std::vector<FleetMachineRow> query_machines(
 				 std::string("SELECT ") + kMachineColumns + " FROM fleet_machines " + tail, binds))
 		out.push_back(row_to_machine(r));
 	return out;
+}
+
+// The event every move of a machine writes beside it: the tail of a statement
+// whose `moved` CTE returns (id, from_state, to_state), the detail bound at
+// `$<detail_param>`.
+std::string event_insert(int detail_param) {
+	return "INSERT INTO fleet_machine_events (machine_id, from_state, to_state, detail) "
+		   "SELECT id, from_state, to_state, $" +
+			std::to_string(detail_param) + "::text FROM moved";
 }
 
 // "'a', 'b'": the states' words, for an IN list (fixed words, never input).
@@ -162,10 +187,16 @@ CreatedMachine create_machine(
 		db::Database &db, const NewMachine &machine, int64_t token_lifetime_s) {
 	CreatedMachine out;
 	out.bootstrap_token = random_secret(kMachineTokenChars);
+	const std::string detail = machine.launched_for > 0
+			? "launched for server " + std::to_string(machine.launched_for)
+			: std::string();
 	const auto rows = db.query(
-			"INSERT INTO fleet_machines (provider, kind, slots, serve_image, reserved_for, "
-			"bootstrap_token_hash, bootstrap_expires_at, launched_for, address_id) "
-			"VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7), $8, $9) RETURNING id;",
+			"WITH moved AS (INSERT INTO fleet_machines (provider, kind, slots, serve_image, "
+			"reserved_for, bootstrap_token_hash, bootstrap_expires_at, launched_for, address_id) "
+			"VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7), $8, $9) "
+			"RETURNING id, NULL::text AS from_state, state AS to_state), "
+			"event AS (" +
+					event_insert(10) + ") SELECT id FROM moved;",
 			{ BindValue(machine.provider), BindValue(std::string(machine_kind_text(machine.kind))),
 					BindValue(static_cast<int64_t>(machine.slots)), BindValue(machine.serve_image),
 					machine.reserved_for > 0 ? BindValue(machine.reserved_for)
@@ -174,7 +205,8 @@ CreatedMachine create_machine(
 					BindValue(static_cast<double>(token_lifetime_s)),
 					machine.launched_for > 0 ? BindValue(machine.launched_for)
 											 : BindValue(std::monostate{}),
-					machine.address_id > 0 ? BindValue(machine.address_id) : BindValue(std::monostate{}) });
+					machine.address_id > 0 ? BindValue(machine.address_id) : BindValue(std::monostate{}),
+					BindValue(detail) });
 	out.id = rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 	return out;
 }
@@ -187,12 +219,18 @@ std::string carried_address_ip(db::Database &db, int64_t id) {
 }
 
 bool mark_launched(db::Database &db, int64_t id, const LaunchedMachine &launched) {
-	db.exec("UPDATE fleet_machines SET state = 'booting', cloud_id = $2, private_address = $3, "
-			"public_address = $4, instance_type = $5, template_version = $6, launched_at = now() "
-			"WHERE id = $1 AND state = 'launching';",
+	db.exec("WITH moved AS (UPDATE fleet_machines SET state = 'booting', cloud_id = $2, "
+			"private_address = $3, public_address = $4, instance_type = $5, template_version = $6, "
+			"launched_at = now() WHERE id = $1 AND state = 'launching' "
+			"RETURNING id, 'launching'::text AS from_state, state AS to_state) " +
+					event_insert(7) + ";",
 			{ BindValue(id), BindValue(launched.cloud_id), BindValue(launched.private_address),
 					BindValue(launched.public_address), BindValue(launched.instance_type),
-					BindValue(launched.template_version) });
+					BindValue(launched.template_version),
+					BindValue("launched as " + launched.cloud_id +
+							(launched.instance_type.empty()
+											? ""
+											: " (" + launched.instance_type + ")")) });
 	return db.changes() > 0;
 }
 
@@ -219,8 +257,12 @@ bool transition_machine(db::Database &db, int64_t id, const std::vector<FleetMac
 	const bool spends = gone || to == FleetMachineState::Ending;
 	const bool takes_reason =
 			!ready && to != FleetMachineState::Booting && to != FleetMachineState::Launching;
-	// A move off lost lets go of the mass-lost brake's hold.
-	std::string sql = "UPDATE fleet_machines SET state = $2";
+	// The row locked first, so the event names the state it moved from (a move
+	// another made meanwhile is waited for and read); a move off lost lets go
+	// of the mass-lost brake's hold.
+	std::string sql =
+			"WITH old AS (SELECT id, state FROM fleet_machines WHERE id = $1 AND state IN (" +
+			state_list(from) + ") FOR UPDATE), moved AS (UPDATE fleet_machines m SET state = $2";
 	if (to != FleetMachineState::Lost)
 		sql += ", lost_held_since_ms = 0";
 	if (ready)
@@ -228,14 +270,12 @@ bool transition_machine(db::Database &db, int64_t id, const std::vector<FleetMac
 	if (gone)
 		sql += ", ended_at = now()";
 	if (takes_reason)
-		sql += ", end_reason = CASE WHEN $3::text <> '' THEN $3::text ELSE end_reason END";
+		sql += ", end_reason = CASE WHEN $3::text <> '' THEN $3::text ELSE m.end_reason END";
 	if (spends)
 		sql += ", bootstrap_token_hash = '', bootstrap_expires_at = NULL, agent_secret_hash = ''";
-	sql += " WHERE id = $1 AND state IN (" + state_list(from) + ")";
-	std::vector<BindValue> binds = { BindValue(id), BindValue(target) };
-	if (takes_reason)
-		binds.push_back(BindValue(reason));
-	db.exec(sql + ";", binds);
+	sql += " FROM old WHERE m.id = old.id RETURNING m.id, old.state AS from_state, m.state AS "
+		   "to_state) ";
+	db.exec(sql + event_insert(3) + ";", { BindValue(id), BindValue(target), BindValue(reason) });
 	return db.changes() > 0;
 }
 
@@ -301,10 +341,14 @@ std::vector<int64_t> drain_machines(
 		db::Database &db, const std::vector<int64_t> &ids, const std::string &reason) {
 	std::vector<int64_t> out;
 	for (const int64_t id : ids) {
-		db.exec("UPDATE fleet_machines SET state = 'draining', end_reason = $2 "
-				"WHERE id = $1 AND state IN ('launching', 'booting', 'ready');",
+		const auto moved = db.query(
+				"WITH old AS (SELECT id, state FROM fleet_machines WHERE id = $1 AND state IN "
+				"('launching', 'booting', 'ready') FOR UPDATE), moved AS (UPDATE fleet_machines m "
+				"SET state = 'draining', end_reason = $2 FROM old WHERE m.id = old.id RETURNING "
+				"m.id, old.state AS from_state, m.state AS to_state), event AS (" +
+						event_insert(2) + ") SELECT id FROM moved;",
 				{ BindValue(id), BindValue(reason) });
-		if (db.changes() > 0)
+		if (!moved.empty())
 			out.push_back(id);
 	}
 	std::sort(out.begin(), out.end());
@@ -372,13 +416,14 @@ bool record_cloud_state(
 	return db.changes() > 0;
 }
 
-bool fail_refused_launch(db::Database &db, int64_t id) {
-	db.exec("UPDATE fleet_machines SET state = 'failed', ended_at = now(), end_reason = 'the "
-			"launch failed', "
-			"launch_refused = true, bootstrap_token_hash = '', bootstrap_expires_at = NULL, "
-			"agent_secret_hash = '' "
-			"WHERE id = $1 AND state = 'launching';",
-			{ BindValue(id) });
+bool fail_refused_launch(db::Database &db, int64_t id, const std::string &reason) {
+	db.exec("WITH moved AS (UPDATE fleet_machines SET state = 'failed', ended_at = now(), "
+			"end_reason = $2, launch_refused = true, bootstrap_token_hash = '', "
+			"bootstrap_expires_at = NULL, agent_secret_hash = '' "
+			"WHERE id = $1 AND state = 'launching' "
+			"RETURNING id, 'launching'::text AS from_state, state AS to_state) " +
+					event_insert(2) + ";",
+			{ BindValue(id), BindValue(reason) });
 	return db.changes() > 0;
 }
 
@@ -386,11 +431,12 @@ std::vector<RefusedLaunch> take_refused_launches(db::Database &db) {
 	std::vector<RefusedLaunch> out;
 	for (const db::Row &r :
 			db.query("UPDATE fleet_machines SET launch_refused = false WHERE launch_refused "
-					 "RETURNING id, kind, COALESCE(launched_for, 0);")) {
+					 "RETURNING id, kind, COALESCE(launched_for, 0), end_reason;")) {
 		RefusedLaunch l;
 		l.machine_id = r.as_int(0).value_or(0);
 		l.kind = parse_machine_kind(r.as_text(1).value_or("")).value_or(MachineKind::Shared);
 		l.launched_for = r.as_int(2).value_or(0);
+		l.reason = r.as_text(3).value_or("");
 		out.push_back(l);
 	}
 	std::sort(out.begin(), out.end(), [](const RefusedLaunch &a, const RefusedLaunch &b) {
@@ -410,11 +456,15 @@ void save_machine_runtime(db::Database &db, const FleetMachineRow &m) {
 }
 
 bool mark_machine_lost(db::Database &db, int64_t id, const std::string &reason, int64_t now_ms) {
-	db.exec("UPDATE fleet_machines SET was_draining = (state = 'draining'), state = 'lost', "
+	// was_draining names the state it left.
+	db.exec("WITH moved AS (UPDATE fleet_machines SET was_draining = (state = 'draining'), "
+			"state = 'lost', "
 			"end_reason = CASE WHEN $2::text <> '' THEN $2::text ELSE end_reason END, "
 			"seen_state = 'lost', seen_since_ms = $3, idle_since_ms = 0, drain_moving = 0, "
 			"cloud_state = '', lost_held_since_ms = 0 "
-			"WHERE id = $1 AND state IN ('ready', 'draining');",
+			"WHERE id = $1 AND state IN ('ready', 'draining') RETURNING id, CASE WHEN was_draining "
+			"THEN 'draining' ELSE 'ready' END AS from_state, state AS to_state) " +
+					event_insert(2) + ";",
 			{ BindValue(id), BindValue(reason), BindValue(now_ms) });
 	return db.changes() > 0;
 }
@@ -587,17 +637,23 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 	const auto booting = db.query(
 			"SELECT kind FROM fleet_machines WHERE id = $1 AND state = 'booting' FOR UPDATE;",
 			{ BindValue(id) });
-	// The agent's first sync spends the bootstrap token (redeem_bootstrap_token).
+	// The agent's first sync spends the bootstrap token (redeem_bootstrap_token);
+	// a booting machine's (its row locked above) moves to ready with its event.
 	const auto updated = db.query(
-			"UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
+			"WITH moved AS (UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
 			"agent_image = $3, agent_protocol = $4, protocol_mismatch_since = NULL, "
 			"bootstrap_token_hash = '', bootstrap_expires_at = NULL, "
 			"ready_at = CASE WHEN state = 'booting' THEN now() ELSE ready_at END, "
 			"end_reason = CASE WHEN state = 'booting' THEN '' ELSE end_reason END, "
 			"state = CASE WHEN state = 'booting' THEN 'ready' ELSE state END "
-			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost') RETURNING slots;",
+			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost') "
+			"RETURNING id, slots, 'booting'::text AS from_state, state AS to_state), "
+			"event AS (INSERT INTO fleet_machine_events (machine_id, from_state, to_state, detail) "
+			"SELECT id, from_state, to_state, 'its agent reports' FROM moved WHERE $5) "
+			"SELECT slots FROM moved;",
 			{ BindValue(id), BindValue(agent_version), BindValue(agent_image),
-					BindValue(static_cast<int64_t>(kAgentProtocol)) });
+					BindValue(static_cast<int64_t>(kAgentProtocol)),
+					BindValue(db::Bool{ !booting.empty() }) });
 	if (updated.empty())
 		return std::nullopt;
 	if (!booting.empty()) {
@@ -617,15 +673,24 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 	}
 	db.exec("DELETE FROM fleet_slot_reports WHERE machine_id = $1;", { BindValue(id) });
 	for (const auto &[slot, c] : by_slot) {
-		db.exec("INSERT INTO fleet_slot_reports (machine_id, slot, container, state, exit_code, "
-				"oom, started_at, reason, cpu_percent, memory_bytes, egress_bytes) "
-				"VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7::double precision), $8, $9, $10, "
-				"$11);",
+		const auto tick = [&c](double TickHealth::*field) {
+			return c->tick ? BindValue((*c->tick).*field) : BindValue(std::monostate{});
+		};
+		db.exec("INSERT INTO fleet_slot_reports (machine_id, slot, container, state, waiting, "
+				"exit_code, oom, started_at, reason, cpu_percent, memory_bytes, egress_bytes, "
+				"net_in_bytes, tick_p50_ms, tick_p99_ms, tick_max_ms, late_ticks) "
+				"VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8::double precision), $9, $10, "
+				"$11, $12, $13, $14, $15, $16, $17);",
 				{ BindValue(id), BindValue(static_cast<int64_t>(slot)), BindValue(c->name),
 						BindValue(std::string(container_state_text(c->state))),
+						BindValue(std::string(container_wait_text(c->waiting))),
 						optional_int(c->exit_code), BindValue(db::Bool{ c->oom }),
-						optional_int(c->started_at), BindValue(c->reason), BindValue(c->cpu_percent),
-						count_value(c->memory_bytes), count_value(c->egress_bytes) });
+						optional_int(c->started_at), BindValue(c->reason),
+						BindValue(c->cpu_percent), count_value(c->memory_bytes),
+						count_value(c->egress_bytes), count_value(c->net_in_bytes),
+						tick(&TickHealth::p50_ms), tick(&TickHealth::p99_ms),
+						tick(&TickHealth::max_ms),
+						c->tick ? count_value(c->tick->late) : BindValue(std::monostate{}) });
 	}
 	auto row = find_machine(db, id);
 	tx.commit();
@@ -662,6 +727,93 @@ std::optional<FleetMachineRow> record_held_sync(
 	return find_machine(db, id);
 }
 
+bool record_machine_report(db::Database &db, int64_t id, const SyncRequest &report) {
+	db::Transaction tx(db);
+	const MachineStats stats = report.machine.value_or(MachineStats{});
+	const auto measured = [&report](uint64_t value) {
+		return report.machine ? count_value(value) : BindValue(std::monostate{});
+	};
+	// A new log stream (an ECS task's restart names another): its own event, in
+	// the statement that records it.
+	const auto moved = db.query(
+			"WITH before AS (SELECT agent_log_stream FROM fleet_machines WHERE id = $1), "
+			"moved AS (UPDATE fleet_machines SET "
+			"image_id = CASE WHEN $2::text <> '' THEN $2::text ELSE image_id END, "
+			"agent_log_stream = CASE WHEN $3::text <> '' THEN $3::text ELSE agent_log_stream END, "
+			"cpu_percent = CASE WHEN $4 THEN $5 ELSE cpu_percent END, "
+			"memory_used_bytes = CASE WHEN $4 THEN $6 ELSE memory_used_bytes END, "
+			"memory_total_bytes = CASE WHEN $4 THEN $7 ELSE memory_total_bytes END, "
+			"disk_free_bytes = CASE WHEN $4 THEN $8 ELSE disk_free_bytes END, "
+			"disk_total_bytes = CASE WHEN $4 THEN $9 ELSE disk_total_bytes END, "
+			"net_in_bytes = CASE WHEN $4 THEN $10 ELSE net_in_bytes END, "
+			"net_out_bytes = CASE WHEN $4 THEN $11 ELSE net_out_bytes END, "
+			"stats_at = CASE WHEN $4 THEN now() ELSE stats_at END "
+			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost') "
+			"RETURNING id, state), "
+			"event AS (INSERT INTO fleet_machine_events (machine_id, from_state, to_state, detail) "
+			"SELECT moved.id, moved.state, moved.state, 'log stream ' || $3::text "
+			"FROM moved, before WHERE $3::text <> '' AND before.agent_log_stream <> $3::text) "
+			"SELECT id FROM moved;",
+			{ BindValue(id), BindValue(report.image_id), BindValue(report.log_stream),
+					BindValue(db::Bool{ report.machine.has_value() }),
+					report.machine ? BindValue(stats.cpu_percent) : BindValue(std::monostate{}),
+					measured(stats.memory_used_bytes), measured(stats.memory_total_bytes),
+					measured(stats.disk_free_bytes), measured(stats.disk_total_bytes),
+					measured(stats.net_in_bytes), measured(stats.net_out_bytes) });
+	if (moved.empty())
+		return false;
+	db.exec("DELETE FROM fleet_machine_trees WHERE machine_id = $1;", { BindValue(id) });
+	for (const auto &[tree_id, tree] : report.trees) {
+		db.exec("INSERT INTO fleet_machine_trees (machine_id, tree_id, state, bytes, tries, error) "
+				"VALUES ($1, $2, $3, $4, $5, $6);",
+				{ BindValue(id), BindValue(tree_id),
+						BindValue(std::string(tree_report_state_text(tree.state))),
+						count_value(tree.bytes), BindValue(static_cast<int64_t>(tree.tries)),
+						BindValue(tree.reason) });
+	}
+	tx.commit();
+	return true;
+}
+
+std::vector<MachineTree> machine_trees(db::Database &db, int64_t machine_id) {
+	std::vector<MachineTree> out;
+	for (const db::Row &r :
+			db.query("SELECT tree_id, state, bytes, tries, error, reported_at "
+					 "FROM fleet_machine_trees WHERE machine_id = $1 ORDER BY tree_id;",
+					{ BindValue(machine_id) })) {
+		MachineTree t;
+		t.tree_id = r.as_int(0).value_or(0);
+		t.state = parse_tree_report_state(r.as_text(1).value_or(""))
+						  .value_or(TreeReportState::Failed);
+		t.bytes = as_count(r, 2);
+		t.tries = static_cast<int>(r.as_int(3).value_or(0));
+		t.error = r.as_text(4).value_or("");
+		t.reported_at = r.as_text(5).value_or("");
+		out.push_back(std::move(t));
+	}
+	return out;
+}
+
+std::vector<FleetMachineEvent> list_machine_events(
+		db::Database &db, int64_t machine_id, size_t limit) {
+	std::vector<FleetMachineEvent> out;
+	for (const db::Row &r :
+			db.query("SELECT id, machine_id, COALESCE(from_state, ''), to_state, "
+					 "detail, at FROM (SELECT * FROM fleet_machine_events WHERE "
+					 "machine_id = $1 ORDER BY id DESC LIMIT $2) newest ORDER BY id;",
+					{ BindValue(machine_id), BindValue(static_cast<int64_t>(limit)) })) {
+		FleetMachineEvent e;
+		e.id = r.as_int(0).value_or(0);
+		e.machine_id = r.as_int(1).value_or(0);
+		e.from_state = r.as_text(2).value_or("");
+		e.to_state = r.as_text(3).value_or("");
+		e.detail = r.as_text(4).value_or("");
+		e.at = r.as_text(5).value_or("");
+		out.push_back(std::move(e));
+	}
+	return out;
+}
+
 namespace {
 
 std::vector<SlotReport> query_slot_reports(
@@ -670,7 +822,9 @@ std::vector<SlotReport> query_slot_reports(
 	for (const db::Row &r :
 			db.query("SELECT r.slot, r.container, r.state, r.exit_code, r.oom, "
 					 "CAST(extract(epoch FROM r.started_at) AS bigint), r.reason, r.cpu_percent, "
-					 "r.memory_bytes, r.egress_bytes, r.reported_at FROM fleet_slot_reports r " +
+					 "r.memory_bytes, r.egress_bytes, r.reported_at, r.waiting, r.net_in_bytes, "
+					 "r.tick_p50_ms, r.tick_p99_ms, r.tick_max_ms, r.late_ticks "
+					 "FROM fleet_slot_reports r " +
 							tail,
 					binds)) {
 		SlotReport s;
@@ -685,6 +839,16 @@ std::vector<SlotReport> query_slot_reports(
 		s.memory_bytes = as_count(r, 8);
 		s.egress_bytes = as_count(r, 9);
 		s.reported_at = r.as_text(10).value_or("");
+		s.waiting = parse_container_wait(r.as_text(11).value_or("")).value_or(ContainerWait::None);
+		s.net_in_bytes = as_count(r, 12);
+		if (!r.is_null(13)) {
+			TickHealth t;
+			t.p50_ms = as_double(r, 13);
+			t.p99_ms = as_double(r, 14);
+			t.max_ms = as_double(r, 15);
+			t.late = as_count(r, 16);
+			s.tick = t;
+		}
 		out.push_back(std::move(s));
 	}
 	return out;
@@ -781,15 +945,25 @@ std::optional<int64_t> assign_slot(
 		return std::nullopt;
 	try {
 		// Its own transaction (a savepoint inside the caller's), so a slot another
-		// server holds undoes this write alone.
+		// server holds undoes this write alone. The new generation is a start of
+		// its own (hosted_server_starts), made in the same statement; one an
+		// earlier start left open is ended there (the machine's cause).
 		db::Transaction tx(db);
-		const auto rows = db.query(std::string("UPDATE hosted_servers SET machine_ref = $2, "
-											   "slot = $3, game_port = $4, generation = "
-											   "generation + 1, updated_at = now() "
+		const auto rows = db.query(std::string("WITH placed AS (UPDATE hosted_servers SET "
+											   "machine_ref = $2, slot = $3, game_port = $4, "
+											   "generation = generation + 1, updated_at = now() "
 											   "WHERE id = $1 AND machine_ref IS NULL AND ") +
 						kLiveServerSql +
 						" AND EXISTS (SELECT 1 FROM fleet_machines WHERE id = $2 AND $3 < slots "
-						"AND state IN ('launching', 'booting', 'ready')) RETURNING generation;",
+						"AND state IN ('launching', 'booting', 'ready')) "
+						"RETURNING id, generation, machine_ref, slot), "
+						"left_open AS (UPDATE hosted_server_starts SET ended_at = now(), "
+						"cause = COALESCE(cause, 'fleet') WHERE server_id = $1 AND ended_at IS "
+						"NULL "
+						"AND EXISTS (SELECT 1 FROM placed)), "
+						"started AS (INSERT INTO hosted_server_starts (server_id, generation, "
+						"machine_id, slot) SELECT id, generation, machine_ref, slot FROM placed) "
+						"SELECT generation FROM placed;",
 				{ BindValue(server_id), BindValue(machine_id),
 						BindValue(static_cast<int64_t>(slot)),
 						BindValue(static_cast<int64_t>(game_port)) });

@@ -285,6 +285,88 @@ int count_failed_since(db::Database &db, int64_t seconds) {
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
+const char *start_cause_text(StartCause cause) {
+	switch (cause) {
+		case StartCause::Crash: return "crash";
+		case StartCause::Fleet: return "fleet";
+		case StartCause::Stop: return "stop";
+		case StartCause::Update: return "update";
+		case StartCause::Limits: return "limits";
+		case StartCause::NoData: return "no_data";
+		case StartCause::Timeout: return "timeout";
+		case StartCause::LinkLost: return "link_lost";
+		case StartCause::DataUnavailable: return "data_unavailable";
+	}
+	return "fleet";
+}
+
+std::optional<StartCause> parse_start_cause(std::string_view text) {
+	for (const StartCause cause : { StartCause::Crash, StartCause::Fleet, StartCause::Stop,
+				 StartCause::Update, StartCause::Limits, StartCause::NoData, StartCause::Timeout,
+				 StartCause::LinkLost, StartCause::DataUnavailable }) {
+		if (text == start_cause_text(cause)) return cause;
+	}
+	return std::nullopt;
+}
+
+void set_start_files(db::Database &db, int64_t server_id, int64_t generation, const std::string &serve_image,
+		int64_t base_tree_id, std::optional<int64_t> expansion_tree_id, const std::string &log_stream) {
+	db.exec("UPDATE hosted_server_starts SET serve_image = $3, base_tree_id = $4, expansion_tree_id = $5, "
+			"log_stream = $6 WHERE server_id = $1 AND generation = $2;",
+			{ BindValue(server_id), BindValue(generation), BindValue(serve_image), BindValue(base_tree_id),
+					expansion_tree_id ? BindValue(*expansion_tree_id) : BindValue(std::monostate{}),
+					BindValue(log_stream) });
+}
+
+void mark_start_running(db::Database &db, int64_t server_id, int64_t generation) {
+	db.exec("UPDATE hosted_server_starts SET running_at = now() WHERE server_id = $1 AND generation = $2 "
+			"AND running_at IS NULL;",
+			{ BindValue(server_id), BindValue(generation) });
+}
+
+bool end_start(db::Database &db, int64_t server_id, int64_t generation, StartCause cause, const StartExit &exit) {
+	db.exec("UPDATE hosted_server_starts SET ended_at = now(), cause = COALESCE(cause, $3), exit_code = $4, "
+			"oom = $5, reason = $6 WHERE server_id = $1 AND generation = $2 AND ended_at IS NULL;",
+			{ BindValue(server_id), BindValue(generation), BindValue(std::string(start_cause_text(cause))),
+					exit.exit_code ? BindValue(*exit.exit_code) : BindValue(std::monostate{}),
+					BindValue(db::Bool{ exit.oom }), BindValue(exit.reason) });
+	return db.changes() > 0;
+}
+
+void set_start_cause(db::Database &db, int64_t server_id, StartCause cause) {
+	db.exec("UPDATE hosted_server_starts SET cause = $2 WHERE server_id = $1 AND ended_at IS NULL AND "
+			"cause IS NULL;",
+			{ BindValue(server_id), BindValue(std::string(start_cause_text(cause))) });
+}
+
+std::vector<ServerStart> list_starts(db::Database &db, int64_t server_id, size_t limit) {
+	std::vector<ServerStart> out;
+	for (const db::Row &r : db.query("SELECT server_id, generation, machine_id, slot, serve_image, base_tree_id, "
+									 "expansion_tree_id, log_stream, placed_at, running_at, ended_at, exit_code, "
+									 "oom, reason, cause FROM hosted_server_starts WHERE server_id = $1 "
+									 "ORDER BY generation DESC LIMIT $2;",
+				 { BindValue(server_id), BindValue(static_cast<int64_t>(limit)) })) {
+		ServerStart s;
+		s.server_id = r.as_int(0).value_or(0);
+		s.generation = r.as_int(1).value_or(0);
+		s.machine_id = r.as_int(2).value_or(0);
+		s.slot = static_cast<int>(r.as_int(3).value_or(0));
+		s.serve_image = r.as_text(4).value_or("");
+		s.base_tree_id = r.as_int(5);
+		s.expansion_tree_id = r.as_int(6);
+		s.log_stream = r.as_text(7).value_or("");
+		s.placed_at = r.as_text(8).value_or("");
+		s.running_at = r.as_text(9).value_or("");
+		s.ended_at = r.as_text(10).value_or("");
+		s.exit_code = r.as_int(11);
+		s.oom = r.as_int(12).value_or(0) != 0;
+		s.reason = r.as_text(13).value_or("");
+		if (const auto cause = r.as_text(14)) s.cause = parse_start_cause(*cause);
+		out.push_back(std::move(s));
+	}
+	return out;
+}
+
 std::vector<HostedEvent> list_events(db::Database &db, int64_t id, size_t limit) {
 	std::vector<HostedEvent> out;
 	const auto rows = db.query("SELECT id, from_state, to_state, detail, at FROM ("

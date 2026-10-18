@@ -1,9 +1,10 @@
 #pragma once
 
 // The hosted servers' stats in the database (backend/migrations/
-// 0004_server_stats.sql): the per-minute samples the sampler writes
-// (stats_sampler.h), their hourly rollups, each machine's egress by the
-// calendar month, and the reads the stats routes answer from (stats_routes.h):
+// 0004_server_stats.sql, 0016_fleet_observability.sql): the per-minute samples
+// the sampler writes (stats_sampler.h), their hourly rollups, each machine's
+// egress by the calendar month, each machine's own minutes and hours (its
+// agent's reports of its use), and the reads the stats routes answer from (stats_routes.h):
 // one server's, an account's servers' together, or the whole fleet's, over a
 // range, as a summary and a series of points; and every server's newest
 // sample with its last hour summed up (the admin's usage view). Counts alone:
@@ -23,9 +24,12 @@
 
 namespace opennova::novaworld_server::hosted {
 
-// How long the samples and the hourly rollups are kept.
+// How long the samples and the hourly rollups are kept (the servers' and the
+// machines' alike).
 inline constexpr int64_t kSampleKeepSeconds = 48 * 60 * 60;
-inline constexpr int64_t kHourlyKeepSeconds = 90 * 24 * 60 * 60;
+inline constexpr int64_t kHourlyKeepSeconds = 400 * 24 * 60 * 60;
+// A machine whose last report of its use is older than this has no minute.
+inline constexpr int64_t kMachineStatsFreshSeconds = 2 * 60;
 
 // One server's minute.
 struct ServerSample {
@@ -41,6 +45,15 @@ struct ServerSample {
 	std::optional<int64_t> memory_bytes;
 	int64_t egress_bytes = 0;           // sent this minute
 	bool mission_started = false;
+	// Its slot's network as counters since its first sample on the slot (a
+	// reader takes the differences; a count below the last starts over), and
+	// its server's last minute of ticks; unset without a report.
+	std::optional<int64_t> net_in_bytes;
+	std::optional<int64_t> net_out_bytes;
+	std::optional<double> tick_p50_ms;
+	std::optional<double> tick_p99_ms;
+	std::optional<double> tick_max_ms;
+	std::optional<int64_t> late_ticks;
 };
 
 // Writes the sample; a second one of the same server and minute is ignored.
@@ -50,11 +63,25 @@ void insert_sample(db::Database &db, const ServerSample &sample);
 void add_machine_egress(db::Database &db, int64_t machine_id, int64_t at, int64_t bytes);
 // Server `server_id`'s hour (UTC) holding `at` written again from its samples,
 // its unique players at least `unique_players` (the sampler's count; a
-// smaller one, the service's restart having lost its names, keeps the larger).
+// smaller one, the service's restart having lost its names, keeps the larger):
+// its peak memory, its bytes in (the counters' differences) and out, its worst
+// minute's p99 and its late ticks among the rest.
 void rollup_hour(db::Database &db, int64_t server_id, int64_t at, int64_t unique_players);
+// Every live machine's minute `minute` (Unix seconds), from its agent's last
+// report of its use (fleet_machines: none older than kMachineStatsFreshSeconds
+// by the database's clock) with how many live servers hold a slot on it; a
+// second one of the same machine and minute is ignored. How many it wrote.
+size_t sample_machines(db::Database &db, int64_t minute);
+// Every machine hour still wholly kept as minutes at `now` (kSampleKeepSeconds),
+// the running one among them, written again from its minutes
+// (fleet_machine_hourly: the CPU's mean and peak, the memory's peak, the least
+// disk room, the bytes in and out, each the counters' differences, a count
+// below the last one starting over); stats.prune's, every hour, so a pass that
+// did not run leaves no hour unwritten.
+void rollup_machine_hours(db::Database &db, int64_t now);
 // The samples older than kSampleKeepSeconds, the hours older than
-// kHourlyKeepSeconds and the machine months more than 13 months back, at `now`
-// (Unix seconds).
+// kHourlyKeepSeconds (the servers' and the machines') and the machine months
+// more than 13 months back, at `now` (Unix seconds).
 void prune_stats(db::Database &db, int64_t now);
 
 // A range the routes take: its name, its length, its points' step, and whether
@@ -80,7 +107,7 @@ struct StatsScope {
 struct StatsSummary {
 	int64_t live_seconds = 0;    // server-seconds live in the range
 	int64_t running_seconds = 0; // of them, running
-	int64_t restarts = 0;        // crash restarts counted in the range
+	int64_t restarts = 0;        // crash restarts: starts its crashes and timeouts ended in the range
 	int64_t peak_players = 0;    // the most at once (the scope's servers together)
 	std::optional<double> avg_players; // players at a time while any of them ran
 	double player_hours = 0.0;

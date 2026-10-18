@@ -281,6 +281,13 @@ int test_bootstrap() {
 
 int test_protocol() {
 	TEST_EXPECT(hosted::kAgentProtocol == 3 && hosted::kProtocolMismatchEndS == 600);
+	// The agent's reason for a start whose data could not be fetched, as the
+	// service reads it.
+	TEST_EXPECT(hosted::is_data_unavailable_reason(
+			std::string(hosted::kDataUnavailableReason) + ": aws s3 sync exited 1: NoSuchKey"));
+	TEST_EXPECT(hosted::is_data_unavailable_reason(hosted::kDataUnavailableReason) &&
+			!hosted::is_data_unavailable_reason("its data could not") &&
+			!hosted::is_data_unavailable_reason("the session ended: its data could not be fetched"));
 	const std::string json = hosted::encode_machine_bootstrap(sample_bootstrap());
 	const std::string other = with_member(json, "protocol", "1");
 	// The envelope: read in any protocol, before the protocol is checked, every

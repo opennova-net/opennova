@@ -50,7 +50,7 @@ jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver, const Place
 				static_cast<long long>(row->launched_for), of_kind, machine_kind_text(row->kind),
 				max, own ? "ONNET_FLEET_MAX_OWN" : "ONNET_FLEET_MAX_SHARED");
 		auto lease = ctx.pool.acquire();
-		fail_refused_launch(*lease, id);
+		fail_refused_launch(*lease, id, "past the fleet's maximum");
 		return jobs::JobResult::fail("past the fleet's maximum");
 	}
 	MachineLaunch request;
@@ -89,8 +89,9 @@ jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver, const Place
 		std::fprintf(stderr, "[fleet] machine %lld (%s, for server %lld): the launch failed: %s\n",
 				static_cast<long long>(id), machine_kind_text(row->kind),
 				static_cast<long long>(row->launched_for), error.c_str());
-		fail_refused_launch(db, id);
-		return jobs::JobResult::fail("the launch failed");
+		const std::string reason = launch_failure_reason(error);
+		fail_refused_launch(db, id, reason);
+		return jobs::JobResult::fail(reason);
 	}
 	if (mark_launched(db, id, *launched)) {
 		std::printf("[fleet] machine %lld (%s, %d slot%s) launched as %s for server %lld\n",
@@ -268,6 +269,29 @@ std::vector<jobs::PeriodicJob> fleet_schedule(int64_t sweep_interval_ms) {
 	p.kind = kJobFleetSweep;
 	p.period_ms = sweep_interval_ms;
 	return { std::move(p) };
+}
+
+std::string cloud_error_code(std::string_view text) {
+	static constexpr std::string_view kOpen = "An error occurred (";
+	const size_t at = text.find(kOpen);
+	if (at == std::string_view::npos)
+		return {};
+	const size_t start = at + kOpen.size();
+	const size_t end = text.find(')', start);
+	if (end == std::string_view::npos || end == start || end - start > 64)
+		return {};
+	const std::string_view code = text.substr(start, end - start);
+	for (const char c : code) {
+		if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+					c == '.'))
+			return {};
+	}
+	return std::string(code);
+}
+
+std::string launch_failure_reason(std::string_view error) {
+	const std::string code = cloud_error_code(error);
+	return code.empty() ? "the launch failed" : "the launch failed (" + code + ")";
 }
 
 } // namespace opennova::novaworld_server::hosted

@@ -201,9 +201,17 @@
 // syncing the links with the servers in running, at their machine's private
 // address and their slot's admin port.
 //
+// The starts (hosted_repository.h hosted_server_starts): each generation's row
+// is made with its slot, given its image, trees and log stream when it renders,
+// marked running when its agent first reports it so, and ended with its cause
+// wherever the pass lets go of the slot or ends the server (a crash or a start
+// that timed out, the machine's or NovaWorld's cause, a stop, the owner's
+// update, the owner's limits, no data, the admin link lost), an exited
+// container's code, OOM flag and exit line kept.
+//
 // The stats (stats_sampler.h): the first pass of each minute of the wall clock
-// (wall_clock_s) samples every live server, its link's scene among the rest,
-// and rolls its hour up.
+// (wall_clock_s) samples every live server and every live machine, its link's
+// scene among the rest, and rolls the servers' hours up.
 //
 // The routes only write requests, stops and machine moves (hosted_repository.h,
 // fleet_repository.h); every transition past them is the supervisor's, a
@@ -459,19 +467,26 @@ private:
 	// Tree `tree_id` as the reply carries it (tree_url and its manifest), from
 	// the cache or its row; nullopt for a tree with no manifest.
 	std::optional<TreeSpec> tree_spec(db::Database &db, int64_t tree_id);
-	// Its container exited while it should run: a crash.
+	// Its container exited while it should run: a crash (or, one that never
+	// started because its data could not be fetched, placed again after the
+	// backoff with no restart counted).
 	void on_exit(db::Database &db, const HostedServer &server, Runtime &rt, uint64_t now_ms,
 			const SlotReport &report);
-	// A crash (the server's cause): its slot let go, then a restart while the
-	// server has some left (after the backoff), else failed.
+	// A crash (the server's cause: `cause` Crash or Timeout, its start ended so):
+	// its slot let go, then a restart while the server has some left (after the
+	// backoff), else failed.
 	void attempt_failed(db::Database &db, const HostedServer &server, Runtime &rt, uint64_t now_ms,
-			const std::string &reason);
-	// The machine's cause: its slot let go and placed again at once, no restart
-	// counted (a stopping server's stop ends instead).
-	void replace(db::Database &db, const HostedServer &server, uint64_t now_ms, const std::string &reason);
+			const std::string &reason, StartCause cause);
+	// The machine's cause (or the owner's update, `cause`): its slot let go and
+	// placed again at once, no restart counted (a stopping server's stop ends
+	// instead).
+	void replace(db::Database &db, const HostedServer &server, uint64_t now_ms,
+			const std::string &reason, StartCause cause = StartCause::Fleet);
 	// The end: the row stopped or failed with its service account deleted, in
-	// one transaction; its container no longer wanted.
-	void finish(db::Database &db, const HostedServer &server, State to, const std::string &detail);
+	// one transaction, its start ended with `cause`; its container no longer
+	// wanted.
+	void finish(db::Database &db, const HostedServer &server, State to, const std::string &detail,
+			StartCause cause);
 	// A transition the pass made, logged and mirrored in `rt`.
 	bool move(db::Database &db, const HostedServer &server, Runtime &rt, uint64_t now_ms, State to,
 			const std::string &detail, TransitionOptions options = {});

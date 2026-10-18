@@ -825,9 +825,11 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 	rig.fake.set(m.id, hosted::FleetDecision{});
 	TEST_EXPECT(wait_for([&] { return hosted::slot_reports(rig.db, m.id).empty(); }));
 
-	// A tree whose URL leads nowhere: the fetch fails at once and the container
-	// waits (reported starting, nothing started, no partial directory left) for
-	// the tries the store has left; dropped, it is forgotten. (The three tries a
+	// A tree whose URL leads nowhere: the copy fails at once and the container
+	// waits (reported starting, nothing started) for the tries the store has
+	// left; the failure read at the agent's next pass (a fetch's outcome is
+	// polled there, after that pass's report), no partial directory is left;
+	// dropped, it is forgotten. (The three tries a
 	// minute apart that end in the container's exit 125 with the fetch's reason
 	// are the agent's and the tree store's own tests', on a hand-stepped clock:
 	// too slow here; the supervisor test reads that reason into the server's
@@ -843,11 +845,18 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 		return rows.size() == 1 && rows[0].container == "srv-6-g2" &&
 				rows[0].state == ContainerState::Starting;
 	}));
-	TEST_EXPECT(reported(rig.fake, "srv-6-g2", ContainerState::Starting, 1));
-	TEST_EXPECT(!fs::exists(markers / "srv-6-g2.started") && !fs::exists(game / (std::to_string(kMissingTree) + ".partial")));
+	// The fake reads the report after the rows are written: waited for too.
+	TEST_EXPECT(
+			wait_for([&] { return reported(rig.fake, "srv-6-g2", ContainerState::Starting, 1); }));
+	// The report that says it waits precedes the act that reads the copy's
+	// failure (the same pass, once the reply is in): the failure logged, then its
+	// partial directory goes.
 	TEST_EXPECT(wait_for([&] {
 		return read_file(root / "hostd.log").find("is no directory") != std::string::npos;
 	}));
+	TEST_EXPECT(wait_for(
+			[&] { return !fs::exists(game / (std::to_string(kMissingTree) + ".partial")); }));
+	TEST_EXPECT(!fs::exists(markers / "srv-6-g2.started"));
 	rig.fake.set(m.id, hosted::FleetDecision{});
 	TEST_EXPECT(wait_for([&] { return hosted::slot_reports(rig.db, m.id).empty(); }));
 	TEST_EXPECT(!fs::exists(markers / "srv-6-g2.started"));

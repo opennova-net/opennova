@@ -15,7 +15,8 @@
 // constant time), reads its envelope first (agent_protocol.h: the protocol,
 // the agent's build and image), stores its report with the envelope
 // (record_sync: the first one spends the token and makes a booting machine
-// ready), asks the supervisor what the machine should run (FleetDesiredState)
+// ready; record_machine_report: what it says of the machine itself), asks the
+// supervisor what the machine should run (FleetDesiredState)
 // and answers it: the containers with the trees they use, the files of a
 // container this report names running or exited left out, each container's
 // uid its slot's, one whose slot is past the machine's dropped, and drain set

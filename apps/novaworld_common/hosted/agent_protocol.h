@@ -84,8 +84,9 @@
 // or the docker CLI's (125) when its start failed (its image did not pull among
 // the causes); such a container is reported as exited until the service drops
 // it. An exited container may carry `reason`, why: the line opennova-serve
-// wrote at its non-zero exit (its --exit-file), or why one never started (its
-// data could not be fetched: the owner reads it in the server's events), at
+// wrote at its non-zero exit (its --exit-file), or why one never started
+// (kDataUnavailableReason and the fetch's error: the service counts no restart
+// for it and shows the line to an admin alone), at
 // most kMaxContainerReasonBytes of printable ASCII, present only with an exit
 // code. One waiting for its image's pull or its trees' fetch is reported
 // starting, `waiting` saying which ("" for none). A running container carries
@@ -145,6 +146,13 @@ inline constexpr int kAgentProtocol = 3;
 inline constexpr int64_t kProtocolMismatchEndS = 10 * 60;
 inline constexpr int kSyncIntervalMs = 5000;
 inline constexpr int kBusySyncIntervalMs = 1000;
+// The reason an agent gives a container that never started because its trees
+// could not be fetched (the store's tries spent): this, then ": " and the last
+// fetch's error.
+inline constexpr std::string_view kDataUnavailableReason = "its data could not be fetched";
+inline bool is_data_unavailable_reason(std::string_view reason) {
+	return reason.substr(0, kDataUnavailableReason.size()) == kDataUnavailableReason;
+}
 // The bootstrap token and the agent's secret: letters and digits from the OS
 // CSPRNG (~285 bits each).
 inline constexpr size_t kMachineTokenChars = 48;

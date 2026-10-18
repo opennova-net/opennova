@@ -1,14 +1,14 @@
 #pragma once
 
 // The hosted servers' stats prune as a periodic job (jobs/scheduler.h), once
-// the sampler's own on the supervisor's pass: every hour, stats.prune deletes
-// the samples past kSampleKeepSeconds, the hours past kHourlyKeepSeconds and
-// the machine months more than 13 months back (stats_repository.h
-// prune_stats), then the fleet's machines ended or failed more than 14 days
-// ago (fleet_repository.h prune_ended_machines), on a worker, so the
-// supervisor's watched pass never waits on the deletes. Scheduled and handled
-// with the HTTP layer whether or not hosting is on, so the rows of a fleet
-// that was turned off still age out. Service policy, not a port.
+// the sampler's own on the supervisor's pass: every hour, stats.prune rolls the
+// machines' minutes up into their hours (every hour still kept as minutes,
+// stats_repository.h rollup_machine_hours), deletes the samples past
+// kSampleKeepSeconds, the hours past kHourlyKeepSeconds and the machine months
+// more than 13 months back (prune_stats), then the fleet's machines ended or failed more than 14
+// days ago (fleet_repository.h prune_ended_machines), on a worker, so the supervisor's watched pass
+// never waits on the deletes. Scheduled and handled with the HTTP layer whether or not hosting is
+// on, so the rows of a fleet that was turned off still age out. Service policy, not a port.
 
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"

@@ -218,6 +218,70 @@ void set_serve_image(db::Database &db, int64_t id, const std::string &image);
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password);
 
+// --- A server's starts (hosted_server_starts, 0016_fleet_observability.sql) ---
+//
+// A row is one owner's request; a generation is one of its runs: made with its
+// slot (fleet_repository.h assign_slot), its image, trees and log stream written
+// when it renders, running once its agent reports it so, and ended with its
+// cause. The restarts the stats count are its crash and timeout ends.
+
+// Why a start ended.
+enum class StartCause : uint8_t {
+	Crash, // the server exited, or never came up (its own cause)
+	Fleet, // its machine's cause, or NovaWorld's: a move, no restart counted
+	Stop, // an owner's, an admin's or the service's stop
+	Update, // the owner's update to its data sets' current data
+	Limits, // its owner's entitlement no longer covers it
+	NoData, // its data set has none
+	Timeout, // it did not start, or did not list, in time
+	LinkLost, // its admin link stopped answering
+	DataUnavailable, // its machine could not fetch its data: no restart counted
+};
+const char *start_cause_text(StartCause cause); // "crash", "fleet", ... "data_unavailable"
+std::optional<StartCause> parse_start_cause(std::string_view text);
+
+struct ServerStart {
+	int64_t server_id = 0;
+	int64_t generation = 0;
+	int64_t machine_id = 0;
+	int slot = 0;
+	std::string serve_image;
+	std::optional<int64_t> base_tree_id;
+	std::optional<int64_t> expansion_tree_id;
+	std::string log_stream;
+	// UTC 'YYYY-MM-DD HH:MM:SS'; running_at / ended_at empty until set.
+	std::string placed_at;
+	std::string running_at;
+	std::string ended_at;
+	std::optional<int64_t> exit_code;
+	bool oom = false;
+	std::string reason; // the server's exit line, or why it never started ("" for none)
+	std::optional<StartCause> cause; // set at its end (limits: when its stop was asked)
+};
+
+// How a start's container ended, as its agent reported it.
+struct StartExit {
+	std::optional<int64_t> exit_code;
+	bool oom = false;
+	std::string reason;
+};
+
+// What start `generation` of server `server_id` runs, written when it renders.
+void set_start_files(db::Database &db, int64_t server_id, int64_t generation,
+		const std::string &serve_image, int64_t base_tree_id,
+		std::optional<int64_t> expansion_tree_id, const std::string &log_stream);
+// Its agent reports it running: running_at, once.
+void mark_start_running(db::Database &db, int64_t server_id, int64_t generation);
+// The start ended with `cause` (one already set, a stop's limits, stands) and
+// how its container ended; false when it had ended already.
+bool end_start(db::Database &db, int64_t server_id, int64_t generation, StartCause cause,
+		const StartExit &exit = {});
+// The cause server `server_id`'s open start will end with, set now unless one is
+// (a stop for its owner's limits, asked before the stop ends it).
+void set_start_cause(db::Database &db, int64_t server_id, StartCause cause);
+// The server's newest `limit` starts, newest first.
+std::vector<ServerStart> list_starts(db::Database &db, int64_t server_id, size_t limit);
+
 // --- The remote-admin console (hosted_server_console) ---
 //
 // One line of a hosted server's console: a command the service's admin link
