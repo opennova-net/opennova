@@ -11,16 +11,50 @@ endfunction()
 # Mixed binaries expose synthetic cases without resolving either retail root.
 # The separately labeled compatibility entry also runs their retail assertions.
 # Serialize each pair because some legacy format tests share scratch filenames.
+# RETAIL_PARTS <first> <part>... splits the compatibility entry by the program's
+# parts (tests/common/test_parts.h): <name>_retail runs <first> (the program's
+# synthetic cases among them) and <name>_retail_<part> each other part, a part
+# of retail legs alone, side by side; the ordinary entry runs as before.
 function(opennova_add_mixed_test name)
-    cmake_parse_arguments(TEST "" "WORKING_DIRECTORY" "COMMAND" ${ARGN})
+    cmake_parse_arguments(TEST "" "WORKING_DIRECTORY" "COMMAND;RETAIL_PARTS" ${ARGN})
     add_test(NAME ${name} COMMAND ${TEST_COMMAND})
-    add_test(NAME ${name}_retail COMMAND ${TEST_COMMAND} --retail)
-    set_tests_properties(${name}_retail PROPERTIES LABELS retail)
+    set(retail_rows ${name}_retail)
+    if(TEST_RETAIL_PARTS)
+        list(GET TEST_RETAIL_PARTS 0 first)
+        add_test(NAME ${name}_retail COMMAND ${TEST_COMMAND} --retail
+                 --part ${first} --parts ${TEST_RETAIL_PARTS})
+        foreach(part IN LISTS TEST_RETAIL_PARTS)
+            if(NOT part STREQUAL first)
+                add_test(NAME ${name}_retail_${part} COMMAND ${TEST_COMMAND} --retail
+                         --part ${part} --parts ${TEST_RETAIL_PARTS})
+                list(APPEND retail_rows ${name}_retail_${part})
+            endif()
+        endforeach()
+    else()
+        add_test(NAME ${name}_retail COMMAND ${TEST_COMMAND} --retail)
+    endif()
+    set_tests_properties(${retail_rows} PROPERTIES LABELS retail)
     set_tests_properties(${name} ${name}_retail PROPERTIES RESOURCE_LOCK mixed_${name})
     if(TEST_WORKING_DIRECTORY)
-        set_tests_properties(${name} ${name}_retail PROPERTIES
+        set_tests_properties(${name} ${retail_rows} PROPERTIES
                              WORKING_DIRECTORY "${TEST_WORKING_DIRECTORY}")
     endif()
+endfunction()
+
+# opennova_add_parts(<name> PARTS <part>... [GATED] COMMAND <command>...): a row
+# per part of a program split with tests/common/test_parts.h, <name>_<part>
+# running `<command> --part <part> --parts <part>...`, so the parts run side by
+# side and each row checks the list is the program's own; GATED registers each
+# row through opennova_add_gated_test (the retail label, exit 77 a skip).
+function(opennova_add_parts name)
+    cmake_parse_arguments(P "GATED" "" "PARTS;COMMAND" ${ARGN})
+    foreach(part IN LISTS P_PARTS)
+        if(P_GATED)
+            opennova_add_gated_test(${name}_${part} COMMAND ${P_COMMAND} --part ${part} --parts ${P_PARTS})
+        else()
+            add_test(NAME ${name}_${part} COMMAND ${P_COMMAND} --part ${part} --parts ${P_PARTS})
+        endif()
+    endforeach()
 endfunction()
 
 # The retail-mission rig the asset-gated world/mission ctests share
@@ -39,6 +73,13 @@ add_executable(retail_paths_test common/retail_paths_test.cpp)
 target_compile_features(retail_paths_test PRIVATE cxx_std_17)
 target_include_directories(retail_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME retail_paths COMMAND retail_paths_test)
+
+# The parts seam the split programs share (common/test_parts.h, opennova_add_parts): a
+# row runs its part only when the registration's list of parts is the program's own.
+add_executable(test_parts_test common/test_parts_test.cpp)
+target_compile_features(test_parts_test PRIVATE cxx_std_17)
+target_include_directories(test_parts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME test_parts COMMAND test_parts_test)
 
 # Shared io infrastructure unit tests
 add_executable(io_test io/io_test.cpp)
@@ -1526,9 +1567,7 @@ add_test(NAME cpt_roundtrip COMMAND cpt_roundtrip_test)
 add_executable(cpt_trngen_bake_test cpt/trngen_bake_test.cpp)
 target_link_libraries(cpt_trngen_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-foreach(part island hills flat refusals)
-    add_test(NAME cpt_trngen_bake_${part} COMMAND cpt_trngen_bake_test --part ${part})
-endforeach()
+opennova_add_parts(cpt_trngen_bake PARTS island hills flat refusals COMMAND cpt_trngen_bake_test)
 
 # A heightmap image (a PNG at any depth, TrnGen's .raw, the game's raw16) made
 # into the depth the bake takes (formats/cpt/trngen heightmap_depth.h).
@@ -1554,9 +1593,7 @@ add_test(NAME cpt_trngen_leaf_taps COMMAND cpt_trngen_leaf_taps_test)
 add_executable(cpt_trngen_region_bake_test cpt/trngen_region_bake_test.cpp)
 target_link_libraries(cpt_trngen_region_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_region_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-foreach(part state regions locks walk)
-    add_test(NAME cpt_trngen_region_bake_${part} COMMAND cpt_trngen_region_bake_test --part ${part})
-endforeach()
+opennova_add_parts(cpt_trngen_region_bake PARTS state regions locks walk COMMAND cpt_trngen_region_bake_test)
 # Over the shipped .cpt files (a cold bake's state from the atlas; the W3 draw-back report).
 add_executable(cpt_region_bake_retail_test cpt/trngen_region_bake_retail_test.cpp)
 target_link_libraries(cpt_region_bake_retail_test PRIVATE opennova_formats)
