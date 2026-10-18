@@ -9,6 +9,7 @@
 #include <net/npwire/wire_handle.h>   // is_batch_end_sentinel
 #include <runtime/inmatch/server_tick.h> // Server_AcceptsPlayerFireTick
 #include <runtime/world/entity.h>
+#include <runtime/world/player_weapon.h> // controller_fire_pose
 #include <runtime/world/round_sim.h>
 #include <runtime/world/weapon_fire_gate.h>
 #include <runtime/world/weapon_inventory.h> // the slot-ammo seat legs (WeaponAmmoSeat)
@@ -35,6 +36,9 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 	if (!decode_client_fired_round(payload, size, fr,
 	                               fire_consumed))
 		return;
+	// The request's fire direction, BAM-extended [orig: @0x513436 / @0x513449].
+	int32_t fire_yaw = int32_t(uint32_t(fr.dir_x) << 16);
+	int32_t fire_pitch = int32_t(uint32_t(fr.dir_y) << 16);
 	// Handle validity [orig: @0x513543], then anti-spoof: the claimed shooter must
 	// BE this connection's own entity [orig: @0x51358d, doubled at @0x50bf37 -> -9].
 	if (wire_handle::is_batch_end_sentinel(fr.shooter_handle))
@@ -127,8 +131,9 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		//  Weapon_ConsumeAmmo @0x542C75) -> Entity_FireWeaponAndSendPacket's
 		//  fire_cmd+12 @0x42BE80 -> roundParams[2] @0x50C786 -> ring+30
 		//  @0x4FDCDE]
-		fired_mode = ((static_cast<int16_t>(mounted_slot != nullptr
-				? mounted_slot->clip : personal->clip) & 3) << 4) | 2;
+		const int32_t slot_clip_before = static_cast<int16_t>(mounted_slot != nullptr
+				? mounted_slot->clip : personal->clip);
+		fired_mode = ((slot_clip_before & 3) << 4) | 2;
         world::WeaponFsmInputs fire_inputs;
         world::weapon_fire_environment_inputs(*world, *shooter, fire_inputs);
         world::WeaponFsmDef fire_def = slot_def->action_fsm;
@@ -205,6 +210,41 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		//  local pass - the owner checks @0x50C083..0x50C0B9, the reach
 		//  @0x50C33C..0x50C6FA; Weapon_ConsumeAmmo @0x542C75; the 0x06
 		//  handler's stamp @0x51370E..0x513740]
+		// On a controller seat under an EWeap carrier the network arm rebuilds the
+		// fire pose when the carrier names a weapon userpoint for the request's
+		// barrel (its flags' bits 4-5): the request's pose is zeroed and replaced
+		// by the transform, which the slot latches and the second pass, the ring
+		// and the round then read. The transform poses that barrel's record only
+		// when the slot's own pre-spend barrel (its clip & 3, at the column its next
+		// action selects: 1 after a RECOIL chain, else 0) names a point too;
+		// otherwise it is the carrier's raw pose. [orig: Server_ClientFiredRound -
+		//  the controller test @0x50C1EB..0x50C1F4, Entity_GetWeaponSlotByte(carrier,
+		//  flags >> 4 & 3, 0) @0x50C1FA..0x50C219, the record @0x50C21B..0x50C23C,
+		//  the pose zeroed @0x50C239..0x50C250, slot+0x2C = 2 @0x50C259,
+		//  Entity_ComputeUserpointTransform @0x50C275 - the column
+		//  @0x545B09..0x545B31, the slot's byte @0x545B46..0x545B4B, the posed leg
+		//  @0x545BA5..0x545C09, the raw copy @0x545C1B..0x545C41; the latch from the
+		//  request @0x50C2C8..0x50C2E9]
+		if (mounted_route && shooter->mount_type == world::SeatType::Controller) {
+			world::Entity *carrier = world->registry.get(shooter->mount_target);
+			const int barrel = (fr.fire_flags >> 4) & 3;
+			if (carrier != nullptr && world::weapon_userpoint_byte(*carrier, barrel, 0) != 0) {
+				int32_t pose[6] = {};
+				const int column = mounted_slot != nullptr &&
+						mounted_slot->next == world::weapon_action::kRecoil ? 1 : 0;
+				if (world::weapon_userpoint_byte(*carrier,
+						int(uint32_t(slot_clip_before) & 3u), column) != 0)
+					world::controller_fire_pose(*world, *carrier, slot_def, barrel, pose);
+				else
+					(void)world::carrier_weapon_world_pose(*world, *carrier, nullptr, 0, 0,
+							pose); // no slot def: the raw leg
+				fr.pos_x = pose[0];
+				fr.pos_y = pose[1];
+				fr.pos_z = pose[2];
+				fire_yaw = pose[3];
+				fire_pitch = pose[4];
+			}
+		}
 		const world::FixedVec3 claimed{fr.pos_x, fr.pos_y, fr.pos_z};
 		round_lands =
 				world::weapon_fire_owner_status(*world, *shooter, slot_def, false) == 0 &&
@@ -245,8 +285,8 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 	ev.origin_x = fr.pos_x;
 	ev.origin_y = fr.pos_y;
 	ev.origin_z = fr.pos_z;
-	ev.dir_yaw = int32_t(uint32_t(fr.dir_x) << 16);   // [orig: @0x513436]
-	ev.dir_pitch = int32_t(uint32_t(fr.dir_y) << 16); // [orig: @0x513449]
+	ev.dir_yaw = fire_yaw;
+	ev.dir_pitch = fire_pitch;
 	// The round's sequence word: the client's hit_part on the primary
 	// path, recomposed with the slot's roster index on the alt path
 	// [orig: word_B7C670 = hit_part @0x50c2ba / @0x50C774; the alt

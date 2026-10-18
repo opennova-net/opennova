@@ -36,6 +36,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/player_weapon.h> // controller_fire_pose
 #include <runtime/world/world.h>
 
 #include <cmath>
@@ -898,7 +899,89 @@ bool check_a_ffff_sequence_word_takes_a_fresh_id() {
 			"a fan's ring takes its last pellet's id");
 }
 
+// A controller seat under an EWeap carrier fires from the carrier's weapon userpoint for
+// the request's barrel: the ring and the round take the posed record when the slot's own
+// pre-spend barrel names a point too, else the carrier's raw pose; a request barrel with
+// no point keeps the claim. [orig: Server_ClientFiredRound @0x50C1FA..0x50C275;
+//  Entity_ComputeUserpointTransform @0x545B46..0x545B4B, @0x545C1B..0x545C41]
+struct CarrierPoints final : w::IPoseProvider {
+	w::EntityHandle carrier;
+	bool resolve_userpoint_frame(w::World &, w::EntityHandle h, const opennova::threedi::Threedi3di3 *,
+			int index, int32_t out[6], int32_t *) override {
+		if (h != carrier) return false;
+		out[0] = index << 12; // a point near the shooter, keyed on the record
+		out[1] = 0x1000;
+		out[2] = 0;
+		out[3] = int32_t(0x1000u << 16);
+		out[4] = 0;
+		out[5] = 0;
+		return true;
+	}
+};
+
+bool check_a_controller_seat_fires_from_the_userpoint() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
+	world.tables.weapons.entries.resize(7);
+	w::WeaponTableEntry &gun = world.tables.weapons.entries[6];
+	gun.name = "WPN_HULL_GUN";
+	gun.category = 4;
+	gun.rank = 3;
+	gun.clipsize = 9;
+	gun.startrounds = 9;
+	gun.ammo_index = 1;
+	gun.valid = true;
+	w::Entity hull;
+	hull.kind = w::EntityKind::Item;
+	hull.has_item_def = true;
+	hull.item_type = 1;
+	hull.item_attrib = w::kItemAttribEweap;
+	hull.primary_weapon = gun.name;
+	hull.position = {1.0f, 0.5f, 0.0f};
+	hull.weapon_userpoint_bytes[0][0] = 5; // the slot's barrel after one shot (clip 8)
+	hull.weapon_userpoint_bytes[2][0] = 4; // the request's barrel
+	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
+	w::Entity *live_hull = world.registry.get(hull_h);
+	if (!expect(world.vehicles.prepare_weapon_slot(*live_hull), "the hull's slot binds"))
+		return false;
+	CarrierPoints points;
+	points.carrier = hull_h;
+	world.pose_provider = &points;
+	w::Entity *player = world.registry.get(shooter);
+	player->mounted = true;
+	player->mount_target = hull_h;
+	player->mount_type = w::SeatType::Controller;
+	player->use_gun_slot_swapped = true;
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(2, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	int32_t raw_pose[6] = {};
+	(void)w::carrier_weapon_world_pose(world, *live_hull, nullptr, 0, 0, raw_pose);
+	// Clip 9: the slot's barrel 1 names no point, so the request's barrel 2 fires from
+	// the carrier's raw pose.
+	dispatch_fire(roster[0], roster, world,
+			fire_body(shooter.packed, 0x22, 6, 0, 0, 0, 0x4000, 0, 0xFFFF, 1, 0, 0));
+	// Clip 8: the slot's barrel 0 names one, so barrel 2's record (point 4) is posed.
+	dispatch_fire(roster[0], roster, world,
+			fire_body(shooter.packed, 0x22, 6, 0, 0, 0, 0x4000, 0, 0xFFFF, 2, 0, 0));
+	// Barrel 3 names no point: the claim stands.
+	dispatch_fire(roster[0], roster, world,
+			fire_body(shooter.packed, 0x32, 6, 0, 0, 0, 0x4000, 0, 0xFFFF, 3, 0, 0));
+	world.pose_provider = nullptr;
+	if (!expect(world.out.rounds.count == 3, "all three rounds land")) return false;
+	const w::RoundEvent &raw = world.out.rounds.records[0];
+	const w::RoundEvent &posed = world.out.rounds.records[1];
+	const w::RoundEvent &claimed = world.out.rounds.records[2];
+	return expect(raw.origin_x == raw_pose[0] && raw.origin_x == 0x10000 &&
+					raw.dir_yaw == raw_pose[3] && posed.origin_x == (4 << 12) &&
+					posed.origin_y == 0x1000 && claimed.origin_x == 0 &&
+					claimed.dir_yaw == int32_t(0x4000u << 16),
+			"the slot's barrel gates the posed record; a bare request barrel keeps the claim");
+}
+
 int main() {
+	if (!check_a_controller_seat_fires_from_the_userpoint()) return 1;
 	if (!check_a_ffff_sequence_word_takes_a_fresh_id()) return 1;
 	if (!check_an_alt_round_takes_its_ammo_byte()) return 1;
 	if (!check_the_ring_takes_the_fire_actions_words()) return 1;
