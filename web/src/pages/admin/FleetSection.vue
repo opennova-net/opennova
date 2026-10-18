@@ -23,6 +23,8 @@
     <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
     <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
 
+    <AttentionList />
+
     <dl v-if="fleet" class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
       <StatTile label="Hosting" :value="fleet.enabled ? 'On' : 'Off'" :detail="fleet.enabled ? 'Owners can start servers' : 'No server can start'" />
       <StatTile label="Live servers" :value="`${fleet.shared.live} of ${fleet.shared.room} shared`" :detail="`${fleet.own.live} of ${fleet.own.room} own`" />
@@ -298,6 +300,7 @@
 // of every outdated server (POST /api/admin/hosted/update-all); and the kill
 // switch (POST /api/admin/hosted/stop-all) behind a typed confirmation. The
 // page polls, faster while a server changes state.
+import AttentionList from '../../components/AttentionList.vue';
 import HistoryToggle from '../../components/HistoryToggle.vue';
 import { replacedMachines, replacedServers } from '../../utils/history';
 import { computed, nextTick, ref } from 'vue';

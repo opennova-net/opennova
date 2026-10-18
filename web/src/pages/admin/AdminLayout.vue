@@ -30,6 +30,14 @@
                 :aria-current="isActive(item) ? 'page' : undefined"
               >
                 {{ item.label }}
+                <!-- What needs an admin, counted on the page that lists it. -->
+                <span
+                  v-if="item.to === '/admin/overview' && needing > 0"
+                  class="admin-attention-count ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger px-1.5 text-xs font-semibold text-on-accent"
+                  :title="`${needing} ${needing === 1 ? 'thing needs' : 'things need'} you`"
+                >
+                  {{ needing }}<span class="sr-only"> {{ needing === 1 ? 'thing needs' : 'things need' }} you</span>
+                </span>
               </RouterLink>
             </li>
           </ul>
@@ -44,10 +52,12 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import AdminGate from '../../components/AdminGate.vue';
+import { attentionCount } from '../../api/attention';
 import { clearAdminToken, hasAdminToken } from '../../api/authToken';
+import { provideAttention } from '../../composables/useAttention';
 import { useSession } from '../../composables/useSession';
 
 interface AdminSection {
@@ -82,6 +92,12 @@ function isActive(item: AdminSection): boolean {
 }
 
 const { isAdmin } = useSession();
+
+// What needs an admin (GET /api/admin/attention), read every 60 s while the
+// gate is open and shared with the pages that list it (useAttention.ts); the
+// nav counts the danger and warn findings and the firing alarms.
+const attention = provideAttention(computed(() => isAdmin.value || hasAdminToken.value));
+const needing = computed(() => (attention.attention.value ? attentionCount(attention.attention.value) : 0));
 
 // On a phone the menu is one scrolling row: the current section is scrolled
 // into it (the row, not the page).

@@ -14,6 +14,10 @@ vi.mock('../../api/admin', () => ({
   stopFleetServer: vi.fn(),
 }));
 vi.mock('../../api/dataSets', () => ({ updateAllServers: vi.fn() }));
+vi.mock('../../api/attention', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/attention')>()),
+  fetchAttention: vi.fn(async () => ({ ok: true, value: { findings: [], alarms: [], alarms_read: true, checked_at: '' } })),
+}));
 
 const fleet = vi.mocked(fetchHostedFleet);
 const machine = vi.mocked(machineAction);
