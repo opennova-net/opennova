@@ -194,7 +194,7 @@
   `threedi_gp_migrate.h` the migration `opennova-3di migrate` and the editor's import run),
   and a rigid 3DI3 is lowered and written back as GP only for BHD (`threedi_gp_lower.h`,
   `threedi_gp_write.h`: `opennova-3di gp` and the Blender add-on's 3DI version); nothing at
-  runtime walks a GP model (ADR 0027 as amended, docs/threedi/3di-gp-format-re.md §5, §6). Shared derivations are
-  3DI3-native helpers in that header (userpoint decode, collision run prefix sums +
+  runtime walks a GP model (ADR 0027 as amended, docs/threedi/3di-gp-format-re.md §5, §6).
+  Shared derivations are 3DI3-native helpers in that header (userpoint decode, collision run prefix sums +
   runtime-safety validation, `threedi_3di3_ground_anchor`); load-time fixups (the CFAC
   normal-run resolve) happen at the consumer, where retail's loader performs them.
