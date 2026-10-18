@@ -32,13 +32,11 @@ endfunction()
 # opennova_add_editor_test(<stem> [MIXED] [NAME <ctest name>] [SOURCES <files...>] [LIBS <libs...>]):
 # the ctest row NAME (editor_<stem> unless given) running the executable <NAME>_test, built from
 # SOURCES (<stem>_test.cpp unless given) and linked against LIBS (opennova_editor unless given).
-# MIXED registers it through opennova_add_mixed_test: the row and its _retail twin. SERIAL runs the
-# row (and its twin) alone, for a row whose own work takes every core (a terrain bake's threads) or
-# the disk (a build's hashing), which ctest's parallel legs would starve past its timeout; TIMEOUT
-# gives such a row its own bound in seconds (600 for the serial rows: more than three times the 163 s one
-# took alone on CI).
+# MIXED registers it through opennova_add_mixed_test: the row and its _retail twin. TIMEOUT gives a row
+# its own bound in seconds, under ctest's default (600 for the rows whose bakes or build take every core
+# and run beside the others: the longest took 51 s on CI).
 function(opennova_add_editor_test stem)
-    cmake_parse_arguments(T "MIXED;SERIAL" "NAME;TIMEOUT" "SOURCES;LIBS" ${ARGN})
+    cmake_parse_arguments(T "MIXED" "NAME;TIMEOUT" "SOURCES;LIBS" ${ARGN})
     if(T_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "opennova_add_editor_test(${stem}): unknown arguments ${T_UNPARSED_ARGUMENTS}")
     endif()
@@ -61,9 +59,6 @@ function(opennova_add_editor_test stem)
     set(rows ${T_NAME})
     if(T_MIXED)
         list(APPEND rows ${T_NAME}_retail)
-    endif()
-    if(T_SERIAL)
-        set_tests_properties(${rows} PROPERTIES RUN_SERIAL TRUE)
     endif()
     if(T_TIMEOUT)
         set_tests_properties(${rows} PROPERTIES TIMEOUT ${T_TIMEOUT})
@@ -102,7 +97,7 @@ opennova_add_editor_test(terrain_import MIXED)
 
 opennova_add_editor_test(create_missing)
 
-opennova_add_editor_test(project_build SERIAL TIMEOUT 600)
+opennova_add_editor_test(project_build TIMEOUT 600)
 
 opennova_add_editor_test(play_session)
 
@@ -865,10 +860,10 @@ opennova_add_editor_test(raster_document)
 opennova_add_editor_test(terrain_heights_document MIXED)
 
 # The heights brushes (S25).
-opennova_add_editor_test(heights_brushes SERIAL TIMEOUT 600)
+opennova_add_editor_test(heights_brushes TIMEOUT 600)
 
 # The heights' bake rules (S25): no loop over a redo or a refused bake, Save settling first, the follow's edits.
-opennova_add_editor_test(heights_bake_rules SERIAL TIMEOUT 600)
+opennova_add_editor_test(heights_bake_rules TIMEOUT 600)
 
 # Unlocked entities following the ground at a bake's landing, locked ones staying (S25).
 opennova_add_editor_test(height_lock_follow)
