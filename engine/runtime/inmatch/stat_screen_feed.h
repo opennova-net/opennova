@@ -40,13 +40,13 @@ struct StatScreenColumn {
 // The fill [orig: StatScreen_PopulateStatResultsList @0x562240]: the rows cleared
 // @0x56227a, the width split read off the table's design rect [orig: CWnd_GetRect
 // @0x5622c3], the column count set through the table's vtable +0x6C @0x5622fa,
-// then one init_table_row per column. How init_table_row sets every column up
+// then one CTableWnd_InitRow per column. How CTableWnd_InitRow sets every column up
 // [orig: @0x562346 / 0x56237a / 0x56242b — justify -1 (read as 1, centred),
 // vjustify 32 (bottom)], and the sort the fill
 // ends with [orig: sub_63EC30(table, 2, 0) then CTableWnd_SortByColumn(table, 2)
 // @0x5626e6..0x5626f9]: the first stat column, descending. Between them the rows
 // go in with their colours, a team row's replacing the table's [orig: the row
-// colour override sub_640110 @0x5625a9]; after it the local player's row is
+// colour override CTableWnd_SetRowColor @0x5625a9]; after it the local player's row is
 // selected.
 inline constexpr int kStatScreenColumnJustify = 1;
 inline constexpr int kStatScreenColumnVJustify = 32;

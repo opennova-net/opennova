@@ -891,7 +891,7 @@ struct HudSessionState {
 	int32_t zone_coverage = 0;
 	int team = 0;                        // byte_27234FE (hudInfo+0x176)
 	uint32_t attack_defend = 0;          // g_AttackDefendRole: 1 defending, 2 attacking
-	// The death screen's spectate arm (dword_A860F4 && dword_A860F0): the HUD
+	// The death screen's spectate arm (g_DeathScreenTarget && g_DeathScreenSubMode): the HUD
 	// info rebuilt for the target feeds the health bar and the TEAMID line —
 	// `team` above carries the target's team byte then — plus the target's
 	// name (+0xF4) and its health ratio (hudInfo+92, Health << 16 over the
@@ -901,9 +901,9 @@ struct HudSessionState {
 	bool spectating = false;
 	std::string spectated_name;
 	float spectated_health_fraction = 0.0f;
-	// The tracked spectate target's wire handle (dword_A860F4; 0xFFFF none,
+	// The tracked spectate target's wire handle (g_DeathScreenTarget; 0xFFFF none,
 	// left stale past the death screen as retail's pointer is) and the death
-	// screen's sub-mode (dword_A860F0): the friendly tag's spectated legs.
+	// screen's sub-mode (g_DeathScreenSubMode): the friendly tag's spectated legs.
 	uint16_t spectate_target = 0xFFFF;
 	uint8_t spectate_submode = 0;
 	HudSessionText text;
@@ -954,7 +954,7 @@ struct HudFrameState {
 	// deploy screen, the end-round board, the command map): the preround
 	// armory line yields to it (element_service_prompt). [orig: dword_255110C,
 	// set by UI_OpenMenuScreen @0x54E59E, cleared by its close @0x54E60A,
-	// read through sub_54B970 @0x54B970]
+	// read through UI_IsMenuScreenOpen @0x54B970]
 	bool menu_screen_open = false;
 	HudSessionState session;
 	// The two squad order lines S2C 0x72 wrote (replication ClientState

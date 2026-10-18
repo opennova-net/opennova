@@ -192,7 +192,7 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading) 
 		}
 		// ATTRIBUTES: its first value through the accessor, then each further value of the same entry, each
 		// word's flag ORed in, a word the table does not have adding none [orig: @ 0x412365 FindSection,
-		// @ 0x412381 ConfigFile_ReadKeyValue(index 1), @ 0x4123de ini_read_key_value_from_current_line from
+		// @ 0x412381 ConfigFile_ReadKeyValue(index 1), @ 0x4123de IniFile_ReadKeyValueFromCurrentLine from
 		// index 2; the words as strings into a 0x7F-byte buffer: a number reads as "%d" or "%f"].
 		configfile::find_config_section(sections, label);
 		std::string word;

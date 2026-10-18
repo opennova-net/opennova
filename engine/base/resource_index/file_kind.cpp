@@ -19,7 +19,7 @@ constexpr const char *kAiProfile[] = {".aip", nullptr};
 // .tga [orig: Texture_LoadByNameWithChannel @ 0x58B66F..0x58B6E6; Texture_LoadAndRegister @
 // 0x58B80E..0x58B881], no DDS sibling taken for it [orig: Texture_LoadAsNormalMap @ 0x58C480]
 // (renderer::material_texture_source). A PNG is one too: retail's menu loader decodes it [orig:
-// CTextureManager_LoadOrFindTexture @ 0x654980 -> load_png_from_file @ 0x6654d0], so one with no
+// CTextureManager_LoadOrFindTexture @ 0x654980 -> PNG_LoadFromFile @ 0x6654d0], so one with no
 // import record is a texture as it is (one with its record beside it is an import source).
 constexpr const char *kTexture[] = {".tga", ".pcx", ".dds", ".mdt", ".png", nullptr};
 constexpr const char *kRawBin[] = {".bin", nullptr};

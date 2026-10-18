@@ -660,7 +660,7 @@ bool check_the_slot_weapon_fires() {
 // A controller seat (under a carrier that is no EWeap item, so the personal route)
 // reads every loaded-round bucket as 0 and every pool as 0: a bucket rifle and a
 // clipless weapon with a cost refuse, a clip weapon fires from its slot.
-// [orig: WeaponSlot_CanFire @0x541C6D..0x541C89 / @0x541CC7..0x541CF6 -> sub_5405F0
+// [orig: WeaponSlot_CanFire @0x541C6D..0x541C89 / @0x541CC7..0x541CF6 -> WeaponSlot_GetSharedLoadedRounds
 //  @0x540624..0x540627, Entity_GetScoreValueBySlotType @0x54078F..0x540799]
 bool check_controller_seat_reads_no_bucket() {
 	w::World world;

@@ -700,7 +700,7 @@ struct SessionRules {
     // mission start out of a session then leaves it
     // at mission_start_difficulty's word (MissionKernel::complete_mission_start);
     // a session's is the config's byte, which no in-session reader of this
-    // word needs. [orig: dword_24D2110; Game_ApplySessionSettingsToGlobals
+    // word needs. [orig: g_SessionDifficulty; Game_ApplySessionSettingsToGlobals
     //  @0x551F75; Game_StartMission @0x525CDD / @0x525CFA;
     //  Entity_GetMaxHealthWithDifficulty @0x43B8C8]
     int32_t difficulty = 0;

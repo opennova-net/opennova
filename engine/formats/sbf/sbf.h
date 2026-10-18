@@ -114,7 +114,7 @@ int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
    @ 0x7BD205 -- the shifts @ 0x7BD23E / 0x7BD241, the width @ 0x7BD24A /
    0x7BD24D, the bias @ 0x7BD258 / 0x7BD25A]. The mixer reads an 8-bit buffer at
    the 16-bit scale, its four taps summed and shifted left 6, their average
-   times 256 [orig: sub_7BD671 @ 0x7BD6A1, the patched `shl ebx, 6`], and shifts
+   times 256 [orig: AudioChannel_BindSampleBuffer @ 0x7BD6A1, the patched `shl ebx, 6`], and shifts
    the channel's mix coefficients right by the shift byte, any count, so 15 or
    more plays silent [orig: AudioChannel_ComputeMixCoefficients
    @ 0x7BD5E6..0x7BD5F3, psraw]. Ours folds the shift onto the sample,

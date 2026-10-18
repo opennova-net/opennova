@@ -960,7 +960,7 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::FaceVertex, "face_vertex", "the vertex", "vertex").record("vertex").row,
 	// The face a person's model animates, opened by the name the model's makes; a person whose face the archives
 	// lack shows none, which the game never reports, and most of the game's people have none, so its edges are
-	// optional (no finding) [orig: Entity_InitFromModel @ 0x40E21A..0x40E22E -> sub_57FCE0 @ 0x57FCE0, its load
+	// optional (no finding) [orig: Entity_InitFromModel @ 0x40E21A..0x40E22E -> FaceAnim_FindOrLoadFile @ 0x57FCE0, its load
 	// failing @ 0x57FDA7].
 	Row(ReferenceKind::FaceAnimation, "face_animation", "the face animation", "face animation")
 	        .loads(AssetKind::FaceAnimation, nullptr)

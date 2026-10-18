@@ -1148,15 +1148,15 @@ struct ClientState {
 	// header's flags1 bit 0 EDGES — a rising edge opens it and zeroes the
 	// sub-mode / kill-cam target and arms the enemy-tag grant; a falling edge
 	// closes it and clears the grant [orig: NapiNPClientMsg_0x00A
-	// @0x42ff88..0x43002b — dword_A860F0/A860F4 = 0 @0x42ffa6, g_EnemyTagsVisible
+	// @0x42ff88..0x43002b — g_DeathScreenSubMode/g_DeathScreenTarget = 0 @0x42ffa6, g_EnemyTagsVisible
 	// @0x42ffb2/@0x430025]. S2C 0x75 writes the same latch, sub-mode and
 	// target [orig: NapiNPClientMsg_SetSpectatorMode @0x4259e0]; the
 	// spectate actions cycle them (client_replica_spectate.cpp).
 	uint8_t hud_hit_feedback_frames = 0; // [orig: dword_A8235C @0x42FF60..0x42FF74]
 	bool death_screen_active = false;
-	// 0 free, 1 chase, 2 first person [orig: dword_A860F0].
+	// 0 free, 1 chase, 2 first person [orig: g_DeathScreenSubMode].
 	std::uint8_t death_screen_submode = 0;
-	// The spectated entity's wire handle, 0xFFFF none [orig: dword_A860F4, a
+	// The spectated entity's wire handle, 0xFFFF none [orig: g_DeathScreenTarget, a
 	// pool pointer]. The falling edge leaves it stale, as retail's does; every
 	// reader gates on the death screen.
 	std::uint16_t spectate_target = 0xFFFF;
@@ -1197,7 +1197,7 @@ struct ClientState {
 	// triggers clear @0x5cac8e..0x5cac9c]
 	bool death_menu_open_latch = false;
 	// The frame loop's open decision, once per frame: true exactly once per
-	// arming while no other menu is up (sub_54B970 @0x5cab67), the latch
+	// arming while no other menu is up (UI_IsMenuScreenOpen @0x5cab67), the latch
 	// stamped whether or not the shell's open succeeds; untriggered, the latch
 	// clears.
 	bool take_death_menu_open(bool triggered, bool menu_open) {

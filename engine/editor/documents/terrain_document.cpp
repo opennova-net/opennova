@@ -666,7 +666,7 @@ RecordTable make_table() {
 	foliage.spec.max = size_t(FOLIAGE_MAX_DEFS);
 	foliage.ops = vector_list<TerrainRow, FoliageDef>(
 			kFoliage, [](TerrainRow &row) -> std::vector<FoliageDef> & { return row.config.foliage_defs; }, fresh_foliage);
-	// The parser keeps four blocks [orig: Terrain_ParseConfigCallback @ 0x60F330, `dword_31BC900 < 4`].
+	// The parser keeps four blocks [orig: Terrain_ParseConfigCallback @ 0x60F330, `g_TerrainCfgFoliageBlocksClosed < 4`].
 	const auto insert = foliage.ops.insert;
 	foliage.ops.insert = [insert](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
 		if (row_of(owner).config.foliage_defs.size() >= size_t(FOLIAGE_MAX_DEFS)) {

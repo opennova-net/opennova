@@ -20,7 +20,7 @@ namespace opennova {
 namespace {
 
 // The terrain parser's state, which lives across every file one load walks: inside a `foliage` block, the
-// blocks an `end` has closed [orig: dword_31BC904, dword_31BC900, zeroed once @0x6109b4..0x6109ba before the
+// blocks an `end` has closed [orig: g_TerrainCfgInFoliageBlock, g_TerrainCfgFoliageBlocksClosed, zeroed once @0x6109b4..0x6109ba before the
 // three passes], the block being read, the `polytrn_sectors` lines read [orig: dword_31BCB30], and the
 // tokenizer's slots, which retail's static tokenizer carries from file to file (ascii_config.h).
 struct TrnWalk {
@@ -57,7 +57,7 @@ void walk_trn(const std::string &text, TrnConfig &out, TrnWalk &walk, bool own, 
 		// Inside a block every line is the block's (a `foliage` line too): the
 		// first four blocks read their keys into their slots, and from the fifth
 		// on nothing closes the block, so the rest of the load is read by no arm
-		// [orig: the dword_31BC904 test, then `dword_31BC900 < 4` around every
+		// [orig: the g_TerrainCfgInFoliageBlock test, then `g_TerrainCfgFoliageBlocksClosed < 4` around every
 		// block key, `end` bumping the count].
 		if (in_foliage) {
 			if (foliage_closed >= 4) return;
@@ -224,7 +224,7 @@ bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error, TrnRefusal *r
 	// unterminated last line, read `en`) still wrote its keys into its slot, and
 	// the runtime takes all four slots whose graphic is named, not the closed
 	// count, so the block is a definition [orig: the block keys write slot
-	// dword_31BC900 directly; Terrain_Init copies all four 0x218-byte slots
+	// g_TerrainCfgFoliageBlocksClosed directly; Terrain_Init copies all four 0x218-byte slots
 	// @0x60FD11..0x60FD16 (sub_5FF4C0); Foliage_RemapPixelToDefMask @0x5FF4E0
 	// gates each slot on its graphic's first byte]. JO:CA's Dvxi4.trn and
 	// Dvxi4_c.trn end on such a block.
@@ -401,7 +401,7 @@ std::vector<TrnKeyLine> read_trn_key_lines(const std::string &text, std::vector<
 std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys) {
 	// The terrain's parser's block state over the file's own lines: inside a block every line is the block's, the
 	// first four blocks read their keys, `end` closes one, and from the fifth on nothing closes it [orig:
-	// Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904, `dword_31BC900 < 4` around every block
+	// Terrain_ParseConfigCallback @ 0x60F330, its block test of g_TerrainCfgInFoliageBlock, `g_TerrainCfgFoliageBlocksClosed < 4` around every block
 	// key, the block's arms @ 0x60F36C..0x60F5F0]. A terrain may close blocks before the file, or leave one open into
 	// it; what the file alone shows is said.
 	std::vector<std::string> out(keys.size());
@@ -414,14 +414,14 @@ std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys) {
 			if (closed >= 4) {
 				out[i] = "This line is inside a fifth foliage block, which the terrain's reader opens but reads nothing of: "
 				         "no end closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
-				         "`dword_31BC900 < 4` around every block key].";
+				         "`g_TerrainCfgFoliageBlocksClosed < 4` around every block key].";
 			} else if (key == "end") {
 				in_block = false;
 				++closed;
 			} else if (!block_key) {
 				out[i] = "This line is inside the foliage block a foliage line above opens: the terrain's reader reads a "
 				         "block's lines as the block's, so it skips this one until an end closes the block [orig: "
-				         "Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
+				         "Terrain_ParseConfigCallback @ 0x60F330, its block test of g_TerrainCfgInFoliageBlock].";
 			}
 			continue;
 		}
@@ -430,12 +430,12 @@ std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys) {
 			if (closed >= 4)
 				out[i] = "A fifth foliage block: the terrain's reader opens it but reads none of its lines, and nothing "
 				         "closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
-				         "`dword_31BC900 < 4` around every block key].";
+				         "`g_TerrainCfgFoliageBlocksClosed < 4` around every block key].";
 		} else if (block_key) {
 			out[i] = "'" + key +
 			         "' is a foliage block's keyword: the terrain's reader reads it only inside a block, and no foliage "
 			         "line above opens one in this file, so the game takes it only on a terrain whose .trn ends inside "
-			         "a block [orig: Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
+			         "a block [orig: Terrain_ParseConfigCallback @ 0x60F330, its block test of g_TerrainCfgInFoliageBlock].";
 		} else if (key == "polytrn_sectors") {
 			out[i] = "A grid row here is a row after the terrain's own, not in place of one: the terrain's reader counts "
 			         "every polytrn_sectors line of the load, the .trn's first, and refuses the terrain where the count "

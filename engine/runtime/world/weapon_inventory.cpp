@@ -49,7 +49,7 @@ int32_t ammo_score(const WeaponTable &table, const WeaponInventory &inv, int32_t
 
 } // namespace
 
-// [orig: sub_5405F0 @0x5405F0 / sub_540670 @0x540670; carried-player legs]
+// [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0 / WeaponSlot_SetSharedLoadedRounds @0x540670; carried-player legs]
 int32_t weapon_inventory_loaded_rounds(const WeaponTable &table,
         const WeaponInventory &inv, int32_t combo) {
     const auto *def = entry_at(table, inv, combo);
@@ -320,7 +320,7 @@ int32_t combo_of(const WeaponTableEntry &def) {
 // the loaded rounds zeroed (the shared bucket's when the def names one), the
 // class pool set to the def's startrounds, one reload drawn.
 // [orig: WeaponSlot_InitFromAvatarDef — the child leg @0x542848..0x542883, the
-//  tail @0x5428CE..0x542909: sub_540670(bucket, picker, 0) or slot+0x10 = 0,
+//  tail @0x5428CE..0x542909: WeaponSlot_SetSharedLoadedRounds(bucket, picker, 0) or slot+0x10 = 0,
 //  WeaponSlot_SetAmmoCount(def+0x5C, def+0xD8, picker), WeaponSlot_ReloadAmmo
 //  (picker, slotIndex)]
 void refill_slot(const WeaponTable &table, WeaponInventory &inv, const WeaponTableEntry &def,
@@ -576,7 +576,7 @@ int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own) 
 }
 
 int32_t weapon_seat_bucket(const WeaponAmmoSeat &seat, int32_t own) {
-    // [orig: sub_5405F0 @0x5405F0 - seat 3 -> sub_5461A0(carrier) @0x540608..0x540623,
+    // [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0 - seat 3 -> Entity_GetMountSlotClip(carrier) @0x540608..0x540623,
     //  seat 2 -> 0 @0x540624..0x540627]
     if (seat.parent_slot == 3) return seat.carrier ? seat.carrier_clip : 0;
     if (seat.parent_slot == 2) return 0;
@@ -623,7 +623,7 @@ void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &in
         if (!controller && def->ammo_class_id >= 0 &&
             def->ammo_class_id < static_cast<int>(inv.pools.size()))
             inv.pools[static_cast<size_t>(def->ammo_class_id)] -= clamped;
-        // A controller seat writes no bucket [orig: sub_540670 @0x540684..0x540692].
+        // A controller seat writes no bucket [orig: WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692].
         if (!bucket || weapon_seat_writes_buckets(seat))
             weapon_inventory_set_loaded_rounds(table, inv, combo, clamped / units);
     }

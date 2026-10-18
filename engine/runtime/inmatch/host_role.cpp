@@ -195,7 +195,7 @@ GameConfig singleplayer_game_config(uint32_t game_type,
 		// g_SessionNoWeaponRecoil, +0x554 -> g_SessionNoCrossHairSpread,
 		// +0x550 -> g_SessionNoScopeDrift [orig:
 		// Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F], and +0x564
-		// -> the difficulty word (dword_24D2110 @0x551F6F..0x551F75).
+		// -> the difficulty word (g_SessionDifficulty @0x551F6F..0x551F75).
 		config.no_char_abilities = profile->sp_no_char_abilities;
 		config.no_weapon_recoil = profile->sp_no_weapon_recoil;
 		config.no_crosshair_spread = profile->sp_no_crosshair_spread;

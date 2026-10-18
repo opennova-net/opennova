@@ -379,7 +379,7 @@ std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document) {
 			            "' is no attribute (AutoScope, SpreadBonus, KnifeBonus, Medic, WaterGirl): the class gets nothing for it.",
 			    word.offset);
 		}
-		// A number key's value the reader classifies as text reads 0 [orig: effect_get_param_value_0 @ 0x75fb3d].
+		// A number key's value the reader classifies as text reads 0 [orig: Effect_GetParamValue_0 @ 0x75fb3d].
 		for (const KeyWords &key : kKeyWords) {
 			const charattr::ValueSource &value = source.values[key.property];
 			if (!value.read || configfile::classify_numeric(value.written) != 0) continue;

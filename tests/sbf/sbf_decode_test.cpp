@@ -36,7 +36,7 @@ static int test_decode_sample_silence(void) {
 /* The 8-bit buffer the stereo split makes of a chunk, at the mixer's 16-bit
    scale: ((byte - 128) * 256) >> shift, as an 8-bit AUD1 wave of the same
    bytes decodes (C-162) [orig: Audio_SubmitStereoSampleSplit @ 0x7BD205;
-   sub_7BD671 @ 0x7BD6A1]. */
+   AudioChannel_BindSampleBuffer @ 0x7BD6A1]. */
 static int test_decode_sample_extremes(void) {
     /* scale 0: byte 0xFF -> 127 * 256 = 32512, the loudest a stream plays */
     CHECK(sbf_decode_sample(0xFF, 0) == 32512, "0xFF scale 0");

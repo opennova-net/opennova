@@ -235,7 +235,7 @@ static void combat_text_font_slots() {
 
 	// An open menu screen hides the preround armory line (prompt 1) alone;
 	// the bay and FARP lines (2, 3, 4) still draw.
-	// [orig: HUD_DrawGameplayOverlays @0x5BDF09..0x5BDF10 (sub_54B970 =
+	// [orig: HUD_DrawGameplayOverlays @0x5BDF09..0x5BDF10 (UI_IsMenuScreenOpen =
 	//  dword_255110C, set by UI_OpenMenuScreen @0x54E59E)]
 	for (int service = 1; service <= 4; ++service) {
 		s = {};

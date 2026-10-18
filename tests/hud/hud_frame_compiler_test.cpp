@@ -190,8 +190,8 @@ void test_format_tags(const fnt_font_t *font) {
 }
 
 // The HUD declutter model: HUDDECLUT masks x hud_detail level -> visible[]
-// [orig: HUD_ParseHudposToken @ 0x59F370 -> byte_2723CE0;
-//  CRenderState_SetLayerVisibility @ 0x59B0F0 -> dword_2723C80; the huddetail
+// [orig: HUD_ParseHudposToken @ 0x59F370 -> g_HUDDeclutterMasks;
+//  CRenderState_SetLayerVisibility @ 0x59B0F0 -> g_HUDDeclutterVisible; the huddetail
 //  cycle @ 0x4E0601..0x4E0624].
 void test_declutter_rebuild_and_cycle() {
 	using namespace opennova::hud;

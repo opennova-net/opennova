@@ -5,7 +5,7 @@
 // @ 0x65c5a0, reading the file through the ConfigFile's reader of its form
 // (ConfigFile_LoadFromFile @ 0x760a10 -> ConfigFile_ParseText @ 0x7608a0, or
 // ConfigFile_ParseBinary @ 0x75e8a0 for a CBIN file; ConfigFile_ReadKeyValue
-// @ 0x75fc90 -> effect_get_param_value_0 @ 0x75fa00)] and
+// @ 0x75fc90 -> Effect_GetParamValue_0 @ 0x75fa00)] and
 // the per-frame scroll the frame compiler draws them with [orig:
 // CMarqueeWnd_RenderScrollingCredits @ 0x65ca00].
 // Witness record: docs/mnu/menu-re.md ("Marquee credits").

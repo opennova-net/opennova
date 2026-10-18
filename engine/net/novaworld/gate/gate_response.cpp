@@ -26,7 +26,7 @@ bool is_line_break(char c) { return c == '\n' || c == '\r'; }
 // 0xB3 and 0xB9 count as digits whose value is the signed byte less '0' (-126, -125,
 // -119). True with `value` and `end` (the first non-digit) set; false, writing
 // nothing, when the first byte is no digit. The string is NUL-terminated.
-// [orig: parse_simple_decimal @0x62DB90 — the first test @0x62DBAB..0x62DBBB (movsx,
+// [orig: NapiScript_ParseSimpleDecimal @0x62DB90 — the first test @0x62DBAB..0x62DBBB (movsx,
 //  _isdigit), the loop @0x62DBC0..0x62DBDC (`lea esi, [edx+ecx*2-30h]` over the movsx
 //  byte), the stores @0x62DBE0 / @0x62DBE5, return 1 @0x62DBEA or 0 @0x62DC06]
 bool parse_simple_decimal(const char *s, int32_t &value, const char *&end) {

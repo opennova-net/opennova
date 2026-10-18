@@ -104,7 +104,7 @@ Entry text(const char *path, size_t width, std::string *(*slot)(void *), Presenc
 	return e;
 }
 
-// A FLAGS word [orig: sub_646CC0 @ 0x646cc0], shown and set as the table's names of it (mnu::ui_material_flags_text,
+// A FLAGS word [orig: UI_ParseMaterialFlagNamesW @ 0x646cc0], shown and set as the table's names of it (mnu::ui_material_flags_text,
 // ui_material_flags_of: a token the table lacks sets no bit); written where it is not the default,
 // STANDARD_TRANSPARENT, which none reads as.
 Entry material_flags(const char *path, uint32_t *(*slot)(void *)) {

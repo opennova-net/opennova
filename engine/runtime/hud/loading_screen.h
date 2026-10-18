@@ -209,7 +209,7 @@ inline constexpr int kSplashBlinkMaskMs = 0x200;
 // 128, 128) (docs/interface/loading-screen-re.md D-LOADSCR-10). Not the session block's text: the
 // loading screen blends that into the background's pixels on the CPU, texel times colour over the
 // pixel by the texel's alpha, no material [orig: Render_LoadingScreen, its two fonts aimed at the
-// background's pixels @ 0x521f1a..0x521f42 / 0x521f86..0x521fa8 -> render_draw_wrapped_text_block_ex @
+// background's pixels @ 0x521f1a..0x521f42 / 0x521f86..0x521fa8 -> Render_DrawWrappedTextBlockEx @
 // 0x580eb0 -> CGameFont_RenderText @ 0x675e40 -> CGameFont_DrawBlendedGlyph @ 0x6744a0].
 GameFontRun splash_continue_run(const GameFont &font, const char *text, int surface_w, int surface_h,
 		bool phase_on);

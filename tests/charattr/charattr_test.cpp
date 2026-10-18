@@ -152,7 +152,7 @@ void synthetic_loader() {
 	// A key the first entries of the section shadow: the first of a key is read.
 	charattr::Table twice;
 	CHECK(read(crlf("[CHARACTER1]\nSTEALTH = 1\nSTEALTH = 2\n"), twice) && twice.rows[0].stealth == 1.0f);
-	// An entry with no value stops a lookup past it [orig: effect_get_param_value_0 @ 0x75faa3].
+	// An entry with no value stops a lookup past it [orig: Effect_GetParamValue_0 @ 0x75faa3].
 	charattr::Table stopped;
 	CHECK(read(crlf("[CHARACTER1]\nNOTE = ,\nSTEALTH = 3\n"), stopped) && stopped.rows[0].stealth == 0.0f);
 	std::printf("loader: classes in order to the first missing, the first section of a label, values and words\n");

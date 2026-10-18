@@ -954,7 +954,7 @@ bool test_typed_parts() {
 
 // What the game reads of a keyword, a number, a flag word and a key, held as it reads it (the #1098
 // review, round 3): a token a table lacks is none, a JUSTIFY another token the offset wcstol reads, a
-// VALUE its number, FLAGS the word sub_646CC0 ORs [orig: @ 0x646cc0], a SORT its first character, a
+// VALUE its number, FLAGS the word UI_ParseMaterialFlagNamesW ORs [orig: @ 0x646cc0], a SORT its first character, a
 // HOTKEY the key.
 bool test_held_as_read() {
   mnu::Document doc;

@@ -53,7 +53,7 @@ struct GrantedWeaponLoadout {
 	// accepted request writes its ammo class in wire order, so a later weapon
 	// sharing that class wins exactly as retail does.
 	std::array<int32_t, 128> ammo_pools{};
-    // Loaded-round buckets [orig: player+89176; sub_540670 @0x540670].
+    // Loaded-round buckets [orig: player+89176; WeaponSlot_SetSharedLoadedRounds @0x540670].
     std::array<int32_t, 128> shared_clips{};
 	// The accept's player+89688 stores, in request order: each accepted entry's
 	// weapon round ammo index (adm+4; -1 unresolved) and its raw fourth byte, the

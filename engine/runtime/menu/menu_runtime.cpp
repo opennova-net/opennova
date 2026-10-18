@@ -897,9 +897,9 @@ bool MenuRuntime::table_multiselect_(int id) const {
 }
 
 // The COLUMN COUNT the row operations bound (1 without an authored count of
-// 1 or more) [orig: resize_column_count @0x63f6c0].
+// 1 or more) [orig: CTableWnd_ResizeColumnCount @0x63f6c0].
 int MenuRuntime::table_column_count_(int id) const {
-	// Columns code installed resized the table to theirs [orig: resize_column_count
+	// Columns code installed resized the table to theirs [orig: CTableWnd_ResizeColumnCount
 	// @0x63f6c0 from StatScreen_PopulateStatResultsList @ 0x562240].
 	const MenuWidgetRuntimeState *state = saved_state_(id);
 	if (state != nullptr && state->has_table_columns)
@@ -1203,7 +1203,7 @@ void MenuRuntime::activate(int id) {
 	pending_requests_.clear();
 	// The class handler's own step for the click event 0x3000001 [orig:
 	// CCheckboxWnd_HandleNamedEvent @ 0x64ab80 toggles +0x304;
-	// radio_button_on_click @ 0x656cd0 checks; CComboWnd_HandleEvent
+	// CRadioWnd_OnClick @ 0x656cd0 checks; CComboWnd_HandleEvent
 	// @ 0x65c190 opens or closes the list, the single open dropdown].
 	switch (widget_kind_of(id)) {
 		case kKindCheckBox: set_widget_checked(id, !is_widget_checked(id)); break;
@@ -1778,7 +1778,7 @@ void MenuRuntime::press_(int index, float x, float y, bool double_click) {
 		}
 		case kKindTable: {
 			// [orig: CTableWnd_HandleNamedEvent @ 0x642400 — the activation, then
-			// table_hit_test @ 0x63fe90: a row selects when 0 <= row < count; the
+			// CTableWnd_HitTest @ 0x63fe90: a row selects when 0 <= row < count; the
 			// header strip sorts (not ported: docs/mnu/menu-re.md "Table input")]
 			activate(id);
 			if (open_generation_ != generation || frame_ == nullptr || frame_index(id) != index) return;
@@ -1956,7 +1956,7 @@ void MenuRuntime::drop_focus_() {
 
 // Enter in an edit [orig: CEditWnd_HandleKeyEvent @ 0x6623a0 case 0xD — the
 // focus and the capture clear, the commit event 0x7000002, then the VK_RETURN
-// scan with no focus gate (dispatch_key_event @ 0x63ac30, @ 0x6624ef)]. The
+// scan with no focus gate (UI_DispatchKeyEvent @ 0x63ac30, @ 0x6624ef)]. The
 // keydown then still runs the edit's GLB filter rows [orig:
 // CEditWnd_HandleInputEvent @ 0x661510 falls from the key handler into the
 // filter walk], and the scan's winner only clicks on the next pump [orig:
@@ -2114,14 +2114,14 @@ void MenuRuntime::tab_rows_(int id) {
 
 // ---- hotkeys ------------------------------------------------------------------
 
-// The screen's hotkey table [orig: parse_script_block @ 0x63b800 calls
+// The screen's hotkey table [orig: CUIScene_ParseScriptBlock @ 0x63b800 calls
 // CWnd_RegisterHotkeysRecursive @ 0x649d90 (vtable+40) on every root in document
 // order: a window's own rows, then its children's, pre-order]. A window's rows:
 // its HOTKEYs in document order (VIRTUAL by the name, else the text's first
 // character), then its label's {hot} mnemonic [orig: CButtonWnd_SetLabel
 // @ 0x6572F0 — the byte after the marker, a signed char]. A row whose key is 0 is
 // skipped and a (key, widget) pair registers once [orig:
-// scene_add_widget_event_callback @ 0x63a8e0].
+// CUIScene_AddWidgetEventCallback @ 0x63a8e0].
 void MenuRuntime::build_hotkeys_() {
 	hotkeys_.clear();
 	const mnu::Document *doc = index_.document();

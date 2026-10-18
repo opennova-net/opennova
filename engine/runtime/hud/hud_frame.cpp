@@ -1830,11 +1830,11 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state, float s
 		return;
 	}
 	for (HudFriendlyTag tag : state.friendly_tags) {
-		// The tracked spectate target (dword_A860F4), whatever the screen.
+		// The tracked spectate target (g_DeathScreenTarget), whatever the screen.
 		const bool target = state.session.spectate_target != 0xFFFF &&
 				tag.handle == state.session.spectate_target;
 		// The target's slot under a death-screen sub-mode takes the large label
-		// font [orig: @0x5a3a05..0x5a3a2e — dword_A860F4, dword_A860F0, the
+		// font [orig: @0x5a3a05..0x5a3a2e — g_DeathScreenTarget, g_DeathScreenSubMode, the
 		// slot's +0x24 entity against the target; g_HUDLabelFontLarge @0xB4C3A0
 		// (slot +0x18, Impac22b) loaded @0x5a3a29].
 		const bool large = target && tag.has_slot && state.session.spectate_submode != 0 &&
@@ -1846,7 +1846,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state, float s
 		// multiplies by the slot's scale_y @ 0x580a80].
 		const float font_h = lf.char_height('0', ls);
 		// Too close to draw, unless it is the target [orig: dist >= 0x8000
-		// gate @ 0x5a3b0c, `cmp dword_A860F4, ebx; jnz` @0x5a3b0e..0x5a3b14],
+		// gate @ 0x5a3b0c, `cmp g_DeathScreenTarget, ebx; jnz` @0x5a3b0e..0x5a3b14],
 		// and the fog cull [orig: dist <= g_EnvFogDistCurrent @ 0x5a3b28].
 		if (tag.dist_q16 < kFriendlyTagMinDistQ16 && !target) {
 			continue;

@@ -2069,8 +2069,8 @@ bool check_loadout_sub_variant_rows() {
 	// From a controller seat under an EWeap carrier each draw reads the carrier's
 	// reserve and spends nothing, and no bucket is written: the launcher's slot takes
 	// min(2, 1) rounds, the rifle's bucket none. [orig: Entity_GetScoreValueBySlotType
-	//  @0x540727..0x540769; WeaponSlot_DecrementAmmo @0x540920; sub_5405F0 @0x540624;
-	//  sub_540670 @0x540684..0x540692]
+	//  @0x540727..0x540769; WeaponSlot_DecrementAmmo @0x540920; WeaponSlot_GetSharedLoadedRounds @0x540624;
+	//  WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692]
 	w::Entity carrier;
 	carrier.has_item_def = true;
 	carrier.item_attrib = w::kItemAttribEweap;

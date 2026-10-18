@@ -174,7 +174,7 @@ void FacialSystem::initialize_entity(World &world, Entity &entity) {
 		models_.emplace_back(binding->second, model);
 	}
 	// Original allocation is append-only, including after a slot is freed.
-	// [orig: sub_57FDF0 @0x57FDF0; sub_57FCA0 @0x57FCA0]
+	// [orig: FaceAnim_AllocEntitySlot @0x57FDF0; sub_57FCA0 @0x57FCA0]
 	FacialSlot slot;
 	slot.owner = entity.handle;
 	slot.spawn_id = entity.registry_spawn_id;

@@ -71,7 +71,7 @@ void HudFrameCompiler::element_service_prompt(const HudFrameState &s, float w, f
 	// The armory line alone yields to an open menu screen: the preround branch
 	// tests the flag before it formats STROVER_ARMORY_INFO, and the bay and
 	// FARP lines never test it. [orig: HUD_DrawGameplayOverlays, `call
-	//  sub_54B970` @0x5BDF09, `jnz` past the draw @0x5BDF10]
+	//  UI_IsMenuScreenOpen` @0x5BDF09, `jnz` past the draw @0x5BDF10]
 	if (c.service_prompt == 1 && s.menu_screen_open)
 		return;
 	if (c.service_prompt && (s.hud_detail_level < 3 || c.service_above_declutter))

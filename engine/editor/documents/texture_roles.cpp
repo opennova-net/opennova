@@ -217,7 +217,7 @@ constexpr RoleWords kRows[] = {
 	        .row,
 	// A character's face animation (.grm): its base texture, the base's .MDT twin and its two eye textures,
 	// each name's extension made .TGA (the base's .MDT) and loaded by STAGE. The loader the IDB calls a shadow
-	// decal's runs only over the GRM slots (sub_57FC00 over sub_57FCE0's).
+	// decal's runs only over the GRM slots (sub_57FC00 over FaceAnim_FindOrLoadFile's).
 	Role(R::FaceTexture, "face_texture", "face animation texture (.grm)", G::Model)
 	        .alpha("as the face's materials make it (NEEDS-RE: their blend)")
 	        .sampling("as a model's diffuse")

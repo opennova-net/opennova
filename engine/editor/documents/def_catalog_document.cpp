@@ -434,7 +434,7 @@ void catalog_references(const Document &document, Extracted &out) {
 	if (catalog->kind() == AssetKind::ItemDefs) {
 		// A person's face: the game opens the face animation its model's name makes for an entity of a person's
 		// item, where the shadow quality is above 0 [orig: Entity_InitFromModel @ 0x40E211..0x40E22E, the type 3
-		// @ 0x40E1C3 / 0x40E21A -> sub_57FCE0 @ 0x57FCE0]; an entity's item is the first row of its id [orig:
+		// @ 0x40E1C3 / 0x40E21A -> FaceAnim_FindOrLoadFile @ 0x57FCE0]; an entity's item is the first row of its id [orig:
 		// ItemList_FindIndexByTypeId @ 0x49E100], so a later row of an id makes none. The name is derived, never
 		// written, so no rename rewrites it.
 		std::set<int> seen;

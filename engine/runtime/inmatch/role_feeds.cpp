@@ -309,7 +309,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	// authority's a registry entity; the max is the def hp (a row's player
 	// def) without the difficulty term, as the friendly tags read it.
 	// [orig: HUD_RenderOverlays @0x5a7bc5..0x5a7c25 — the gate
-	//  `dword_A860F4 && dword_A860F0` @0x5a7bdb; HUD_BuildEntityInfo @0x5a7bf3
+	//  `g_DeathScreenTarget && g_DeathScreenSubMode` @0x5a7bdb; HUD_BuildEntityInfo @0x5a7bf3
 	//  (team @0x4b8464, ratio @0x4b87a2..0x4b87d3); HUD_DrawTeamIdLine's name
 	//  @0x59ac3d]
 	if (view.runtime != nullptr) {

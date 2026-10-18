@@ -112,7 +112,7 @@ std::vector<std::string> slot_name_table(const world::WeaponTable &table,
 
 // Each listed weapon's slot initialized again and its loaded-round bucket zeroed,
 // which a controller or UseGun seat skips.
-// [orig: sub_4FE260 @0x4FE260 - WeaponSlot_InitFromDef, sub_540670(def+0xDC, 0), its
+// [orig: PlayerSlot_ReinitListedSlots @0x4FE260 - WeaponSlot_InitFromDef, WeaponSlot_SetSharedLoadedRounds(def+0xDC, 0), its
 //  seat test @0x540684..0x540692]
 void reinit_listed_slots(const world::WeaponTable &table, world::WeaponInventory &inv,
                          const std::vector<std::string> &display, uint8_t player_class,
@@ -150,7 +150,7 @@ void seed_and_recalc(const world::WeaponTable &table, world::WeaponInventory &in
 // slot word, or its def's bucket, which a controller seat does not write), unless the
 // entity sits a UseGun seat (+0x168 3).
 // [orig: WeaponOverlay_UpdateAllPerFrame @0x5423C0 (a misnomer) - the seat test
-//  @0x5423C5, the def[56] gate @0x5423E6, sub_540670(bucket, 0) (its seat test
+//  @0x5423C5, the def[56] gate @0x5423E6, WeaponSlot_SetSharedLoadedRounds(bucket, 0) (its seat test
 //  @0x540684..0x540692) or slot+16 = 0]
 void clear_loaded_rounds(const world::WeaponTable &table, world::WeaponInventory &inv,
                          const world::WeaponAmmoSeat &seat) {
@@ -425,7 +425,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	// damage-class table, no carry-bit clear beyond the fills' own.
 	// [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 - the fills @0x515571..0x515581
 	//  / @0x5155B8..0x5155C2, the seed and draw @0x515595..0x5155A9,
-	//  PlayerSlot_BuildNameTable @0x5155AF / @0x5155CB, sub_4FE260 @0x5155D1,
+	//  PlayerSlot_BuildNameTable @0x5155AF / @0x5155CB, PlayerSlot_ReinitListedSlots @0x5155D1,
 	//  PlayerSlot_SeedAmmoPoolsAndRecalc @0x5155D7, WeaponOverlay_UpdateAllPerFrame
 	//  @0x5155E1, the buffer walk @0x5155EB..0x515761 (each name resolved @0x51560D),
 	//  the recalc @0x51577C]
@@ -468,7 +468,7 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 	// deploy applies them. [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 -
 	//  AvatarDef_BuildDisplayList @0x516BF3, WeaponSlotPool_ResetAllEntries @0x516C03,
 	//  WeaponSlotTable_LoadAllFromDefs @0x516C0E, PlayerSlot_BuildNameTable @0x516C14,
-	//  sub_4FE260 @0x516C1A, PlayerSlot_SeedAmmoPoolsAndRecalc @0x516C20]
+	//  PlayerSlot_ReinitListedSlots @0x516C1A, PlayerSlot_SeedAmmoPoolsAndRecalc @0x516C20]
 	world::WeaponInventory inv = slot_inventory(table, conn);
 	reload_slots(table, inv, kit_display_list(entries, table), cls, allow_zoom);
 	const std::vector<std::string> display = slot_name_table(table, inv);

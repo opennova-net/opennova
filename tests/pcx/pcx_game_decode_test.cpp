@@ -1,6 +1,6 @@
 // The game's PCX decode keeping an 8-bit image's indices and palette beside its colours (engine/formats/pcx
 // decode_pcx_menu_rgba's PcxIndexed, the 8-bit path of Texture_LoadPCXFromPFF32 @ 0x56EA30 and
-// load_pcx_to_argb @ 0x664cc0) over images the writer mints (encode_pcx_indexed): every texel's index and
+// PCX_LoadToARGB @ 0x664cc0) over images the writer mints (encode_pcx_indexed): every texel's index and
 // the palette as written, an odd width included (the writer's rows hold the width exactly, as every PCX
 // the game ships does, so the game's decode lays no padding onto the next row); each texel's colour its
 // index's palette entry, opaque; a row's pad bytes landing on the next row's start, the indices as the

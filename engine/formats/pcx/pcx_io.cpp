@@ -456,7 +456,7 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 	return true;
 }
 
-// [orig: load_pcx_to_argb @ 0x664cc0 — the header read (0x46 bytes), the BPP check
+// [orig: PCX_LoadToARGB @ 0x664cc0 — the header read (0x46 bytes), the BPP check
 // (returns 3), width/height from the window, then the 8-bit path (Seek(-768, 2), the
 // 0xFF000000 | rgb palette, the RLE loop to BytesPerLine) or the NPlanes == 3 path]
 bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error, PcxIndexed *indexed) {
@@ -576,7 +576,7 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 }
 
 // [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31 — the 24-bit path, 3 * BytesPerLine RLE bytes a row, the
-// planes `width` apart; load_pcx_to_argb @ 0x664cc0 likewise]
+// planes `width` apart; PCX_LoadToARGB @ 0x664cc0 likewise]
 bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::string &error) {
 	out.clear();
 	if (image.width <= 0 || image.height <= 0 || image.width > 0xFFFF || image.height > 0xFFFF) {
@@ -631,7 +631,7 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 
 	// A row of exactly the image's width, odd or even: the game's readers decode BytesPerLine bytes a row at
 	// a stride of the width, so a padded odd row spills into the next and the last past the buffer [orig:
-	// Texture_LoadPCXFromPFF32 @ 0x56ED70..0x56EDFC; load_pcx_to_argb @ 0x664cc0], and every PCX the game
+	// Texture_LoadPCXFromPFF32 @ 0x56ED70..0x56EDFC; PCX_LoadToARGB @ 0x664cc0], and every PCX the game
 	// ships holds rows of its width.
 	uint8_t header[128] = {};
 	header[0] = 0x0A;

@@ -115,7 +115,7 @@ constexpr TextureRole kRoles[] = {
 	Role(R::TracerSmoke, L::ArchiveSelfAlpha, kArchiveFormats).row,
 	// A character's face animation (.grm): its base texture, the base's .MDT twin and its two eye
 	// textures, each name's extension made .TGA (the base's .MDT) and loaded by STAGE. The loader the
-	// IDB calls a shadow decal's runs only over the GRM slots (sub_57FC00 over sub_57FCE0's).
+	// IDB calls a shadow decal's runs only over the GRM slots (sub_57FC00 over FaceAnim_FindOrLoadFile's).
 	// [orig: Shadow_DecalLoadTextures @ 0x588040 (the base @ 0x5880EA, its .MDT @ 0x588117, the eyes
 	// @ 0x58814A, @ 0x588180); FaceAnimConfig_ParseProperty @ 0x5886A0]
 	Role(R::FaceTexture, L::Stage, kStageFormats).row,

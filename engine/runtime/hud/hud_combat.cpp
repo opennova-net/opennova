@@ -166,7 +166,7 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 		return;
 	// Each a bordered quad of its image size [orig: HUD_DrawTexturedQuadWithBorder
 	// @0x590C40 from HUD_DrawTargetEntityOverlay @0x59A68C, sub_59A710 @0x59A7C9,
-	// HUD_DrawParachuteAndArmorIcons @0x5925FA / @0x592635, sub_599C20 @0x599C91,
+	// HUD_DrawParachuteAndArmorIcons @0x5925FA / @0x592635, HUD_DrawCargoIcon @0x599C91,
 	// each passing its record's +8 / +0xC as both the texture and the quad extent].
 	auto sprite = [&](const HudSprite &r, int x, int y, int tex, uint32_t color) {
 		if (!r.valid)

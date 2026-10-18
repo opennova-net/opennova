@@ -36,7 +36,7 @@ under their own rules (`sound/README.md`), and its music in `music/`
 | Brightness | a lit surface's texel at about half its seen value | Retail lights in gamma space as texture x (hemisphere + sun) x 2, so mid grey under full light reads as white |
 | Sides | powers of two; TGAs stored bottom row first | Every model texture the original ships is a power of two (a height map must be); retail's TGA reader ignores the origin bit, so a top-left TGA draws upside down |
 | Triangles | LOD 0 about 3 to 5 times the original's; keep the LOD chain | Retail lights fixed-function shaders per vertex; more vertices light better |
-| Vertices per LOD | at most 2 MiB of vertex data: 52,428 static, 32,768 static with tangents (the bump shaders), 37,449 skinned, 26,214 skinned with tangents | Retail uploads a LOD into one 2 MiB pool buffer and drops a larger one (`allocate_lod_gpu_buffers @ 0x5B2610`); strides 40, 64, 56, 80 bytes |
+| Vertices per LOD | at most 2 MiB of vertex data: 52,428 static, 32,768 static with tangents (the bump shaders), 37,449 skinned, 26,214 skinned with tangents | Retail uploads a LOD into one 2 MiB pool buffer and drops a larger one (`CEffectWorld_AllocateLODGPUBuffers @ 0x5B2610`); strides 40, 64, 56, 80 bytes |
 | Indices per LOD | at most 262,144 (512 KiB) | The index pool's smallest buffer |
 | LODs | at most 8 | The loader's eight-slot tables |
 | Strips and materials | near the original's count (materials have no hard limit) | Each is a draw call |

@@ -16,7 +16,7 @@ namespace opennova::editor {
 // through the engine's own reader and writer (grm::parse, grm::write: the writer from scratch, ADR 0003) over the
 // engine's own record, grm::File (docs/world/world-wac-ai-re.md section 33.30). The game opens `<model>.GRM` for a
 // person (an item of type 3) through the archives when the shadow quality is above 0 [orig: Entity_InitFromModel @
-// 0x40E211..0x40E236 -> sub_57FDF0 @ 0x57FDF0 -> sub_57FCE0 @ 0x57FCE0 (the model's name, its path and extension
+// 0x40E211..0x40E236 -> FaceAnim_AllocEntitySlot @ 0x57FDF0 -> FaceAnim_FindOrLoadFile @ 0x57FCE0 (the model's name, its path and extension
 // stripped, .GRM added) -> sub_5891E0 @ 0x5891E0 -> FaceAnimConfig_LoadFile @ 0x588BE0]: no file names one.
 //
 // One row, the face: its base texture and its two eye textures (each name made .TGA, the base's .MDT twin too, and

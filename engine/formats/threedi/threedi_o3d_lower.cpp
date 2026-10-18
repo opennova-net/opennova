@@ -58,7 +58,7 @@ ThreediTargetLimits threedi_retail_limits() {
 	// large: max(VRAM / 8, 8 MB) over at most eight), indices into the static
 	// pool's 0x100000-byte buffers or the dynamic pool's (at least 0x80000:
 	// max(VRAM / 64, 1.5 MB) over at most four). The lock refuses a range past
-	// its buffer, and the LOD is left unfilled [orig: allocate_lod_gpu_buffers
+	// its buffer, and the LOD is left unfilled [orig: CEffectWorld_AllocateLODGPUBuffers
 	// @ 0x5B2610, the requests @0x5B26CC, @0x5B2752, @0x5B27F3, @0x5B2882;
 	// CParticleSystem_Init_Wrapper @ 0x5876D0, the pool sizes; GStaticVB_Lock
 	// @ 0x6840D0, the bound @0x6840E0; the IB twin GStaticIB_Lock @ 0x684430, the bound
@@ -77,7 +77,7 @@ ThreediTargetLimits threedi_retail_limits() {
 	// GHDR's count, so a ninth LOD's pointer lands in the first threshold's
 	// slot [orig: ThreediGp_LoadFromFile @ 0x5B5B84..0x5B5BE5;
 	// GPM_LoadRenderModel @ 0x5B56F8, the block at loader + 0x204 + 56 x
-	// level; allocate_lod_gpu_buffers @ 0x5B2637]. A model's materials are one
+	// level; CEffectWorld_AllocateLODGPUBuffers @ 0x5B2637]. A model's materials are one
 	// allocation of the MTRL count, each strip naming its own by a dword
 	// index, so no count bounds them [orig: ThreediGp_LoadFromFile @ 0x5B59C3;
 	// GPM_LoadRenderModel @ 0x5B5184].

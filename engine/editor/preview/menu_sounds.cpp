@@ -116,7 +116,7 @@ MenuSoundFired plan_menu_sound(const mnu::Sound &row, MenuSoundBanks &banks, con
 	sound.slot = -1;
 	sound.set = row.trigger;
 	sound.bank = row.file;
-	// Its own bank alone [orig: sound_collection_play_trigger @ 0x652de0 plays from the row's bank entry].
+	// Its own bank alone [orig: Sound_CollectionPlayTrigger @ 0x652de0 plays from the row's bank entry].
 	int32_t key = 0;
 	const lwf::File *bank = banks.bank(files, row.file, &key);
 	if (!bank) {

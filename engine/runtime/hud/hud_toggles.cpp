@@ -265,7 +265,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// player; the case then needs the local entity and no open menu screen
 	// (the gameplay gate here), runs the full respawn init and opens CMAP.
 	// [orig: the row flag test @0x49ad8a..0x49ada0 (Flags & 2); case 221
-	//  @0x49b8fa — sub_54B970 @0x49b902 (dword_255110C), Game_InitRespawnState
+	//  @0x49b8fa — UI_IsMenuScreenOpen @0x49b902 (dword_255110C), Game_InitRespawnState
 	//  @0x49b90f, UI_OpenMenuScreen("cmap.mnu", "CMAP", 0) @0x49b920,
 	//  g_CmapScreenOpen = 1 @0x49b928]
 	if (s.commander.step(k.commander_menu, bit0_active && k.local_alive))

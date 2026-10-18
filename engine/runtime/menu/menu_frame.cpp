@@ -25,7 +25,7 @@ using strutil::iequals;
 // The texture-cache key of an IMAGE load: the name and the FLAGS word it was
 // loaded with [orig: CTextureManager_LoadOrFindTexture @ 0x654980 — stricmp on
 // the name, then the subtype compare] and the FLAGS word (mnu::ui_material_flags_of,
-// sub_646CC0 @ 0x646cc0).
+// UI_ParseMaterialFlagNamesW @ 0x646cc0).
 std::string texture_load_key(const std::string &name, uint32_t flags) {
 	return opennova::strutil::to_lower(name) + '\n' + std::to_string(flags);
 }
@@ -699,8 +699,8 @@ void MenuFrameCompiler::measure_with_(const fnt_font_t *font,
 	*out_w = 0;
 	*out_h = 0;
 	if (font == nullptr) {
-		// [orig: font_cache_ensure_font_loaded @ 0x653de0 returns 0 for handle 0:
-		// font_cache_measure_text @ 0x6532a0 writes nothing]
+		// [orig: CFontCache_EnsureFontLoaded @ 0x653de0 returns 0 for handle 0:
+		// CFontCache_MeasureText @ 0x6532a0 writes nothing]
 		return;
 	}
 	hud::GameFont gf;
@@ -911,7 +911,7 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 	const float bottom_edge = emit_x(rect.bottom, s.y);
 	// The fill: the cell-sized copy of stencil cell (3, 0), at UV (x + 0.5) / cell
 	// over the rect, in diffuse 0xFF7F7F7F through the material's MODULATE2X: the
-	// texel times 254/255 [orig: @ 0x64a281..0x64a2b3 -> draw_textured_quad_from_rect
+	// texel times 254/255 [orig: @ 0x64a281..0x64a2b3 -> CUIElement_DrawTexturedQuadFromRect
 	// @ 0x64a000, UV (pos + 0.5) / size @ 0x64a0cb; border_fill_material made with
 	// mode 0x651 by CUIElement_InitBorderMaterials @ 0x64715a].
 	const mnu::FrameTileRect fill_uv = mnu::frame_tile_rect(tile, 3, 0);
@@ -1026,7 +1026,7 @@ void MenuFrameCompiler::emit_glyph_run(const WidgetNode &node,
 void MenuFrameCompiler::emit_glyph_run_with_(int32_t font_slot,
 		const std::string &text, int design_x, int design_y,
 		const WalkScale &s, uint32_t color, int caret) {
-	// No font up the chain: nothing drawn [orig: font_cache_ensure_font_loaded
+	// No font up the chain: nothing drawn [orig: CFontCache_EnsureFontLoaded
 	// @ 0x653de0 returns 0 for handle 0, gating CFontCache_DrawTextScaled].
 	const fnt_font_t *font = font_at_(font_slot);
 	if (font == nullptr || text.empty()) {
@@ -1730,7 +1730,7 @@ void MenuFrameCompiler::emit_cursor(const MenuFrameState &state) {
 // level up its chain (CWnd_IsVisibleInHierarchy @ 0x646290, the gate
 // @ 0x647a27): a disabled window never takes it and a window behind it may
 // (D-MNU-33). GLB_TABLE's pump slot pumps its children alone, so it never takes
-// the claim (update_table_cell_values @ 0x65e0b0). A widget's own windows are
+// the claim (GLBTableWnd_UpdateCellValues @ 0x65e0b0). A widget's own windows are
 // its last children: a spin list's arrows, and a scrollbar's windows (a SCROLL
 // widget's buttons; the scroll window of a LIST, LAN_LIST or TABLE, its
 // buttons in front of its track; menu_click.h), which take the claim as their

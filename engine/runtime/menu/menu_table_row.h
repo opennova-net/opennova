@@ -31,7 +31,7 @@ inline constexpr int32_t kTableRowSelected = 3;
 // the visible count), bit 2 swaps the row colour (+32) into the row state's
 // colour slot around the row's draw.
 // [orig: CUITable_Render @0x64159d (`& 0xA`), @0x6416c9 (`& 4`); the
-//  CTableWnd_DrawCell state pick @0x641048 (`& 1`); sub_640110 @0x640110]
+//  CTableWnd_DrawCell state pick @0x641048 (`& 1`); CTableWnd_SetRowColor @0x640110]
 inline constexpr uint32_t kTableRowFlagState1Color = 0x1u;
 inline constexpr uint32_t kTableRowFlagColor = 0x4u;
 inline constexpr uint32_t kTableRowHiddenMask = 0xAu;
@@ -106,7 +106,7 @@ bool table_click_select(std::vector<MenuTableRow> &rows, int row, bool multisele
 
 // The row colour override: enable stores the colour and sets flag bit 2,
 // disable clears the bit; -1 applies to every row.
-// [orig: sub_640110 @0x640110]
+// [orig: CTableWnd_SetRowColor @0x640110]
 void table_set_row_color(std::vector<MenuTableRow> &rows, int row, bool enable, uint32_t color);
 
 } // namespace opennova::menu

@@ -319,7 +319,7 @@ struct SessionReplyState {
 	// full by S2C 0x0F after loadout acceptance. Indices are the weapon table's
 	// retail ammo-class ids; unused classes remain zero.
 	std::array<int32_t, 128> ammo_pools{};
-    // Loaded-round buckets [orig: player+89176; sub_540670 @0x540670].
+    // Loaded-round buckets [orig: player+89176; WeaponSlot_SetSharedLoadedRounds @0x540670].
     std::array<int32_t, 128> shared_clips{};
 	// The last GRANTED 0x5A loadout body, retained for the deploy-release re-send: the retail
 	// deploy leg re-sends the player's loadout, and the client's 0x5A handler is the deploy

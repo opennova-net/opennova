@@ -54,9 +54,9 @@ WindowType parse_window_type(const std::string &type_str);
 // The factory token of a type ("window" for the generic one).
 const char *window_type_name(WindowType type);
 
-// The FLAGS word a texture loads with: the OR of the flag names sub_646CC0 finds in its token
+// The FLAGS word a texture loads with: the OR of the flag names UI_ParseMaterialFlagNamesW finds in its token
 // list (split on " ,|+", each name compared without case, a name the table lacks adding nothing)
-// [orig: sub_646CC0 @ 0x646cc0 over g_UIMaterialFlagNames @ 0x84a5d0]; STANDARD_TRANSPARENT
+// [orig: UI_ParseMaterialFlagNamesW @ 0x646cc0 over g_UIMaterialFlagNames @ 0x84a5d0]; STANDARD_TRANSPARENT
 // (0x300651) where no FLAGS is authored [orig: CUIElement_ParseXMLDefinition @ 0x648120, the
 // APPEARANCE's and the CURSOR's 3147345; the same default in the LIST and TABLE parses].
 inline constexpr uint32_t kDefaultUiMaterialFlags = 0x300651;
@@ -67,7 +67,7 @@ struct UiMaterialFlag {
 };
 // The table, in its order (43 rows) [orig: g_UIMaterialFlagNames @ 0x84a5d0].
 const std::vector<UiMaterialFlag> &ui_material_flags();
-// sub_646CC0's read of a FLAGS text.
+// UI_ParseMaterialFlagNamesW's read of a FLAGS text.
 uint32_t ui_material_flags_of(const std::string &text);
 // The writer's text of a FLAGS word: the table's names whose bits OR to it (the widest first, a
 // name only where all its bits are the word's), joined by '|'; AFUNC_NONE for 0; empty where the
@@ -399,14 +399,14 @@ struct TableColumn {
   int tertiary_sort = -1;
 };
 
-// What retail's HEADER walk hands init_table_row for one HEADER [orig:
-// CTableWnd_ParseXMLContentDefinition @ 0x6427d0 -> init_table_row @ 0x63f9c0]: the
+// What retail's HEADER walk hands CTableWnd_InitRow for one HEADER [orig:
+// CTableWnd_ParseXMLContentDefinition @ 0x6427d0 -> CTableWnd_InitRow @ 0x63f9c0]: the
 // column index, the width (100 at the COLUMN element, then carried from HEADER to
 // HEADER until one authors WIDTH) and the column's sort-compare flag (+112: 0 at the
 // COLUMN element, carried the same way; SORT '1' sets it, 'A' or 'a' clears it): set,
 // the rows compare numerically, else by text [orig: CTableWnd_CompareRows @ 0x63e9c0
 // reads it as the compare mode; the direction is the column's +120, which
-// init_table_row sets to 1]. `set_up` is false for an index retail's init_table_row
+// CTableWnd_InitRow sets to 1]. `set_up` is false for an index retail's CTableWnd_InitRow
 // refuses (below 0, or not below the table's column count: the authored COUNT when it
 // is 1 or more, else 1).
 struct TableHeaderSetup {

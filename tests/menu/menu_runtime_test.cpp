@@ -820,7 +820,7 @@ void test_radio_spin_tables_scroll() {
 // SetRowSelected's single-select clear and locked-row immunity, the colour
 // override, RemoveRow(-1).
 // [orig: CTableWnd_InsertRow @0x641c30; CTableWnd_SetCellText @0x63edf0;
-//  CTableWnd_SetRowSelected @0x63f5f0; sub_640110 @0x640110;
+//  CTableWnd_SetRowSelected @0x63f5f0; CTableWnd_SetRowColor @0x640110;
 //  CTableWnd_RemoveRow @0x641a40]
 void test_table_row_operations() {
 	std::vector<MenuTableRow> rows;

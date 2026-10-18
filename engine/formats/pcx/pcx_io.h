@@ -105,7 +105,7 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
                         const PcxIndexedForm *form = nullptr);
 // A 24-bit PCX (8 bits a plane, three planes): each row the red, green and blue planes of `width`
 // bytes each, run-length coded a plane at a time, no palette. The shape the game's 24-bit path reads
-// [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31; load_pcx_to_argb @ 0x664cc0's NPlanes == 3 path]: 3 x
+// [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31; PCX_LoadToARGB @ 0x664cc0's NPlanes == 3 path]: 3 x
 // BytesPerLine bytes a row, the planes `width` apart, so its bytes a line are its width exactly.
 bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::string &error);
 
@@ -123,7 +123,7 @@ bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::strin
 // describe (decode_pcx_menu_rgba's bound).
 bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out, std::string &error);
 
-// The menu texture loader's PCX decode, a structural port [orig: load_pcx_to_argb
+// The menu texture loader's PCX decode, a structural port [orig: PCX_LoadToARGB
 // @ 0x664cc0 via CTextureManager_LoadOrFindTexture @ 0x654980]: the header's bits
 // per pixel (byte 3) must be 8; NPlanes (byte 0x41) 3 takes the 24-bit path, which
 // reads 3 * BytesPerLine RLE bytes a row and takes the red, green and blue planes

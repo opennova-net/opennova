@@ -261,7 +261,7 @@ struct MenuKeyInput {
 	bool shift = false;
 };
 
-// One row of the current screen's hotkey table [orig: scene_add_widget_event_callback
+// One row of the current screen's hotkey table [orig: CUIScene_AddWidgetEventCallback
 // @ 0x63a8e0 — {isVirtual, key, widget}].
 struct MenuHotkeyRow {
 	bool virtual_key = false;
@@ -299,7 +299,7 @@ struct MenuWidgetRuntimeState {
 	std::vector<uint8_t> disabled_items;
 	bool has_table_rows = false;
 	std::vector<MenuTableRow> table_rows;
-	// The columns code installed [orig: init_table_row @ 0x63f9c0 from the shell],
+	// The columns code installed [orig: CTableWnd_InitRow @ 0x63f9c0 from the shell],
 	// the sort-key stack and the sorted column [orig: CTableWnd_SortByColumn
 	// @ 0x640900].
 	bool has_table_columns = false;
@@ -520,7 +520,7 @@ public:
 		return table_row_state(id, row) == kTableRowSelected;
 	}
 	// A row's colour override; `enable` false drops it, row -1 is every row
-	// [orig: sub_640110 — the row's +28 bit 4 and +32].
+	// [orig: CTableWnd_SetRowColor — the row's +28 bit 4 and +32].
 	void table_set_row_color(int id, int row, bool enable, uint32_t color);
 	// The rows in state 3, ascending.
 	std::vector<int> table_selected_rows(int id) const;
@@ -559,7 +559,7 @@ public:
 	// order. A row or observer that swaps the document stops the rest.
 	void activate(int id);
 	// Check a radio and uncheck the radios beside it (the same parent) of the
-	// same nonzero GROUP [orig: radio_button_on_click @ 0x656cd0].
+	// same nonzero GROUP [orig: CRadioWnd_OnClick @ 0x656cd0].
 	void select_radio(int id);
 	// The spin list's step: +1 SelectNext, -1 SelectPrevious, wrapping past every
 	// disabled row; emits the value change [orig: CSpinListWnd_SelectNext @ 0x64b910,
@@ -722,7 +722,7 @@ private:
 	void edit_filter_rows_(int id);
 	void tab_rows_(int id);
 	// The hotkey scan [orig: UI_DispatchKeyboardEventToChildren @ 0x63ad10,
-	// dispatch_key_event @ 0x63ac30]; true when a row fired.
+	// UI_DispatchKeyEvent @ 0x63ac30]; true when a row fired.
 	bool scan_hotkeys_(bool virtual_key, int key);
 	void build_hotkeys_();
 

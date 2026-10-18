@@ -30,7 +30,7 @@ class ProjectAssetSource;
 // MOUSEIN under the mouse, MOUSEOUT where it leaves, SELECTED on a click and MOUSEIN again after it, each the
 // window's SOUND row of that state (menu::menu_window_sound). The row's set is found in the bank the row's
 // text names alone and played as the menu plays it, each layer at the menu's master volume [orig:
-// CWnd_ProcessMouseEvent @ 0x647a00 -> sound_collection_play_trigger @ 0x652de0 -> SoundBank_FindTriggerAndPlay
+// CWnd_ProcessMouseEvent @ 0x647a00 -> Sound_CollectionPlayTrigger @ 0x652de0 -> SoundBank_FindTriggerAndPlay
 // @ 0x75d010]. A screen plays nothing of its own: the pump's call is the only one into the menu's bank
 // collection (its one caller @ 0x647c59); a screen's MUSICVAR is the music script's.
 

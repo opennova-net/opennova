@@ -188,7 +188,7 @@ int main() {
 	// no `end` follows, still wrote its slot, which the runtime takes like a closed one,
 	// so a `foliage` line inside it is one of its keys and opens nothing.
 	// [orig: Terrain_ParseConfigCallback @0x60f330 — stricmp on tokens[1], the
-	// polytrn_sectors arm, the attrib ORs, dword_31BC904 / dword_31BC900;
+	// polytrn_sectors arm, the attrib ORs, g_TerrainCfgInFoliageBlock / g_TerrainCfgFoliageBlocksClosed;
 	// File_ParseASCIIFile @0x53D810, the tail @0x53D8E9 / @0x53D8EC; Terrain_Init's
 	// four-slot copy @0x60FD16]
 	{

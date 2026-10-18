@@ -142,7 +142,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
         fire_def.ammo_cost = slot_def->ammo_class_count;
         // The can-fire reads its pool and bucket through the shooter's seat
         // [orig: WeaponSlot_CanFire @0x541BA0 - the bucket @0x541C6D..0x541C79
-        //  (sub_5405F0), the pool @0x541CC7 (Entity_GetScoreValueBySlotType)].
+        //  (WeaponSlot_GetSharedLoadedRounds), the pool @0x541CC7 (Entity_GetScoreValueBySlotType)].
         const world::WeaponAmmoSeat seat = world::entity_ammo_seat(*world, *shooter);
         world::WeaponSlotState fire_slot;
         const int pool = slot_def->ammo_class_id;
@@ -163,7 +163,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 				const bool own_bucket = bucket < st.shared_clips.size() &&
 						bucket < world->tables.weapons.ammo_class_names.size();
 				// A bucket past the class count reads 0 at any seat
-				// [orig: sub_5405F0 @0x5405FC..0x540603].
+				// [orig: WeaponSlot_GetSharedLoadedRounds @0x5405FC..0x540603].
 				if (!own_bucket ||
 						world::weapon_seat_bucket(seat, st.shared_clips[bucket]) == 0)
 					return;

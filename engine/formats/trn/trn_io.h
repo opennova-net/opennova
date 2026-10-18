@@ -77,7 +77,7 @@ struct TrnLaterLine {
 // @ 0x57c5ac calls the hook on each] and which no pass removes. So a key a later file writes is the terrain's
 // (overcast.def's over the .trn's, the .env's over both), a `polytrn_sectors` line there adds a row after the
 // .trn's [orig: dword_31BCB30 not reset between the passes], and a foliage block the .trn leaves open reads the
-// next file's lines [orig: dword_31BC904, dword_31BC900]. The environment's keywords and the editor's that the .trn
+// next file's lines [orig: g_TerrainCfgInFoliageBlock, g_TerrainCfgFoliageBlocksClosed]. The environment's keywords and the editor's that the .trn
 // holds (TrnConfig's water_*, terrain_name, terrain_creator) are the .trn's as written: no arm of the
 // terrain's parser reads them (the environment's load reads them, env::load_mission_env). `taken`, where given,
 // lists the later files' lines the parser took, and `refusal` the gate's leg (None where it takes the result). False

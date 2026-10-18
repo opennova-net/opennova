@@ -327,7 +327,7 @@ DeviceTexture model_row_device_texture(TextureLoader loader, uint8_t slot, int l
 	return pixel_device_texture(file.width, file.height, flags);
 }
 
-// [orig: convert_dxt_alpha_blocks @ 0x687AC0 — the blocks counted @ 0x687B28..0x687B44 (each side over 4, at
+// [orig: GTexture_ConvertDXTAlphaBlocks @ 0x687AC0 — the blocks counted @ 0x687B28..0x687B44 (each side over 4, at
 // least 1); the first word of each block from the level's start, 16 bytes apart, while it is 0xFFFF
 // (@ 0x687B56..0x687B6A)]
 bool dxt5_first_level_opaque(const uint8_t *blocks, size_t size, uint32_t width, uint32_t height) {

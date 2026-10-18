@@ -600,7 +600,7 @@ void test_disabled_window_over_a_button() {
 }
 
 // GLB_TABLE's pump slot pumps its children alone: it never takes the claim, so the button under it does
-// (D-MNU-33) [orig: update_table_cell_values @ 0x65e0b0].
+// (D-MNU-33) [orig: GLBTableWnd_UpdateCellValues @ 0x65e0b0].
 void test_glb_table_never_claims() {
 	Run run;
 	CHECK(run.open());

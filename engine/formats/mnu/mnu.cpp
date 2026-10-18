@@ -378,7 +378,7 @@ private:
   // A VALUE the parse reads with wcstol: the number's decimal; empty when absent (and, `zero_none`,
   // for 0, the parse's default).
   std::string number_value(const Node &node, const char *name, bool zero_none);
-  // A FLAGS word [orig: sub_646CC0 @ 0x646cc0]; kDefaultUiMaterialFlags when absent.
+  // A FLAGS word [orig: UI_ParseMaterialFlagNamesW @ 0x646cc0]; kDefaultUiMaterialFlags when absent.
   uint32_t flags_attr(const Node &node, const char *name);
   std::string string_attr(const Node &node, const char *name);
   bool number_attr(const Node &node, const char *name, int &out);
@@ -741,7 +741,7 @@ void TreeReader::unread_rest(const Node &parent, size_t from, const char *const 
   }
 }
 
-// [orig: parse_script_block @ 0x63b800 -> CUIScene_ParseNodeAttributes @ 0x639630]
+// [orig: CUIScene_ParseScriptBlock @ 0x63b800 -> CUIScene_ParseNodeAttributes @ 0x639630]
 void TreeReader::read_document(const mnu_xml::Document &xml, Document &out) {
   for (const auto &root : xml.roots) {
     if (!tag_is(*root, "SCREEN")) {
@@ -1464,7 +1464,7 @@ void TreeReader::read_cursor(const Node &node, Cursor &cursor) {
     if (tag_is(c, "FILE")) {
       cursor.file = text_of(c);
     } else if (tag_is(c, "FLAGS")) {
-      cursor.flags = ui_material_flags_of(text_of(c)); // [orig: sub_646CC0 @ 0x649586]
+      cursor.flags = ui_material_flags_of(text_of(c)); // [orig: UI_ParseMaterialFlagNamesW @ 0x649586]
       if (cursor.flags == kDefaultUiMaterialFlags) {
         c.read = false;
         because(&c, "FLAGS reads the default word (STANDARD_TRANSPARENT), as none does; it is left out.");
@@ -1592,7 +1592,7 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
   node.read = true;
   int number = 0;
   // Each COUNT of 1 or more resizes the column array; fewer is refused and the table
-  // keeps its one column [orig: resize_column_count @ 0x63f6c0]. The walk (last
+  // keeps its one column [orig: CTableWnd_ResizeColumnCount @ 0x63f6c0]. The walk (last
   // authored first) leaves the first authored COUNT of 1 or more.
   const Attribute *count = nullptr;
   for (const Attribute &a : node.attributes) {
@@ -1703,7 +1703,7 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       // [orig: CUIStringTable_LookupString call @ 0x6434df].
       header.type = keyword(c, "TYPE", kStringTypes);
       header.text = text_of(c);
-      // [orig: init_table_row @ 0x63f9c0] sets up only 0 <= index < the column count.
+      // [orig: CTableWnd_InitRow @ 0x63f9c0] sets up only 0 <= index < the column count.
       if (header.column < 0 || header.column >= columns) {
         because(&c, "A HEADER whose COLUMN is below 0 or not below the table's column count (its COUNT, or 1 "
                     "without a COUNT of 1 or more) is not set up by retail.");
@@ -1916,7 +1916,7 @@ const std::vector<UiMaterialFlag> &ui_material_flags() {
 }
 
 uint32_t ui_material_flags_of(const std::string &text) {
-  // [orig: sub_646CC0 @ 0x646cc0] wcstok on " ,|+"; each token the first row of its name, without case.
+  // [orig: UI_ParseMaterialFlagNamesW @ 0x646cc0] wcstok on " ,|+"; each token the first row of its name, without case.
   uint32_t flags = 0;
   size_t at = 0;
   while (at < text.size()) {

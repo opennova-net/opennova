@@ -20,7 +20,7 @@ namespace opennova::editor {
 // the repeats over 512 texels, a water height in half metres, the grid in sectors of 512 units) and the
 // environment's water keywords a terrain carries, which the environment's reader takes in the terrain's
 // pass (trn.h); its sector grid's rows, at most 16, each a row's sixteen sector ids; and its foliage
-// definitions, at most four [orig: Terrain_ParseConfigCallback @ 0x60F330, `dword_31BC900 < 4`]. Each map
+// definitions, at most four [orig: Terrain_ParseConfigCallback @ 0x60F330, `g_TerrainCfgFoliageBlocksClosed < 4`]. Each map
 // and texture names a file through the loader of its role (the asset graph's edges, each a Go to), the
 // definitions' models too. What the reader reads otherwise than written is a source finding of its line (the
 // parse's, from formats/trn trn_source_issues); what the game refuses or ignores in the record is a finding with

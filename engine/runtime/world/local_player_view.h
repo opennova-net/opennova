@@ -96,7 +96,7 @@ struct LocalViewSessionInputs {
     bool joiner = false;
     bool death_screen_active = false;
     int death_screen_submode = 0;
-    // The spectate target (dword_A860F4) as the camera's tracked-entity key
+    // The spectate target (g_DeathScreenTarget) as the camera's tracked-entity key
     // (kCameraTrackedTargetKey | its wire handle; 0 none) and its dead bit
     // (Flags & 2, the decoded row's state flags).
     uint32_t spectate_target_key = 0;

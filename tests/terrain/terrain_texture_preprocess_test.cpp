@@ -247,7 +247,7 @@ int main() {
 
 	// The terrain texture detail's halving word (C-391): two halvings at 0, one at 1 or 2, none
 	// at 3 (or any other), ORed into the layers' word; either creator halves its pixels first,
-	// the far with the base [orig: sub_605D70 @ 0x605DBF..0x605E0A; PolyTrn_InitTextures
+	// the far with the base [orig: Terrain_ApplyDetailSettings @ 0x605DBF..0x605E0A; PolyTrn_InitTextures
 	// @ 0x60AB95..0x60ABE5; GTexture_DownsampleToLimits @ 0x687170 from
 	// GTexture_CreateFromPixelData_0 @ 0x687785 and GTexture_CreateFromPixelDataWithAlphaBlend
 	// @ 0x68735B / @ 0x68736D].

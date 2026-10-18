@@ -230,7 +230,7 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 		}
 		if (key == "foliage") {
 			// The game reads four blocks; a fifth reads the rest of its file into nothing [orig:
-			// Terrain_ParseConfigCallback @ 0x60F330, `dword_31BC900 < 4`].
+			// Terrain_ParseConfigCallback @ 0x60F330, `g_TerrainCfgFoliageBlocksClosed < 4`].
 			if (out.foliage.size() >= size_t(FOLIAGE_MAX_DEFS)) {
 				why = at + " opens a fifth foliage block: a terrain holds four foliage definitions";
 				return false;

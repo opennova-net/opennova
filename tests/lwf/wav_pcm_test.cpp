@@ -435,10 +435,10 @@ int main() {
 
 	// The loader's own buffer, AUD1 (bytes 41 55 44 31), copied unchecked
 	// [orig: Audio_LoadWavFileFromArchive @ 0x7664e2, @ 0x7664e9..0x766511], read
-	// as the mixer reads it: the count at +4 (sub_7BD671 @ 0x7bd67f), the Q16
+	// as the mixer reads it: the count at +4 (AudioChannel_BindSampleBuffer @ 0x7bd67f), the Q16
 	// pitch at +8 (AudioChannel_ComputeMixCoefficients @ 0x7bd603), signed
 	// samples from +16, 16-bit where +12 is 2 and 8-bit for any other byte there
-	// (sub_7BD671 @ 0x7bd692). An AOA1 buffer falls to the RIFF compare and is
+	// (AudioChannel_BindSampleBuffer @ 0x7bd692). An AOA1 buffer falls to the RIFF compare and is
 	// refused (@ 0x766523), as is either form under the strict and the lenient decode.
 	for (const uint8_t width : {uint8_t(1), uint8_t(2)}) {
 		std::vector<uint8_t> aud;
@@ -655,7 +655,7 @@ int main() {
 		if (!expect(walk_of(make_wav(1, 2, 0xAC440000u, 4, 16, data)).refusal ==
 				opennova::lwf::WaveRefusal::Channels, "the channel test precedes the ratio")) return 1;
 	}
-	// The width byte: 2 is 16-bit, any other 8-bit [orig: sub_7BD671 @ 0x7bd692].
+	// The width byte: 2 is 16-bit, any other 8-bit [orig: AudioChannel_BindSampleBuffer @ 0x7bd692].
 	for (const uint8_t width : {uint8_t(0), uint8_t(3), uint8_t(0xFF)}) {
 		std::vector<uint8_t> aud;
 		push_tag(aud, "AUD1"); push_u32(aud, 2); push_u32(aud, 16384);

@@ -392,7 +392,7 @@ struct GameConfig {
 	                                  //   read by Entity_ApplyWeaponDamage @0x4e6820
 	uint32_t death_messages = 0;      // [orig: g_DeathMessages @0x24D2168 <- g_GameConfigState.deathMessages_418 @0x2550AD0, cfg `deathmes`]    dword[9];
 	                                  //   read x3 by GameEvent_PlayerDeath @0x516dd0
-	uint8_t config_bytes[7] = {0, 0, 0, 0, 0, 0, 0}; // [orig byte_24D234C..byte_24D2360 + dword_24D2110 low byte]
+	uint8_t config_bytes[7] = {0, 0, 0, 0, 0, 0, 0}; // [orig byte_24D234C..byte_24D2360 + g_SessionDifficulty low byte]
 
 	// S2C 0x58's 39 signed STROVER_STATVAR point values. Retail initializes the
 	// per-game-type table, then overlays score.ini VERSION 40 before answering

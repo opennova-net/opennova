@@ -100,7 +100,7 @@ inline float menu_text_anchor(int design, float scale) {
 // is a frame fill: stencil atlas cell (3, 0) (u0..v1), copied by retail into the
 // cell-sized border_fill_material and drawn at UV (x + 0.5) / cell at every window
 // coordinate x, wrapped [orig: CUIElement_DrawFrame @ 0x64a2b3 ->
-// draw_textured_quad_from_rect @ 0x64a000]. A valid `texture2` is a frame border
+// CUIElement_DrawTexturedQuadFromRect @ 0x64a000]. A valid `texture2` is a frame border
 // piece in retail's two-stage material: stage 0 the stencil at u0..v1 across the
 // quad (no half texel), stage 1 the brush SCREEN-anchored, UV ((x + 0.5) /
 // texture2_period_x, (y + 0.5) / texture2_period_y) at window coordinate (x, y),
@@ -108,7 +108,7 @@ inline float menu_text_anchor(int design, float scale) {
 // each saturated, the alpha the stencil's times the brush's
 // [orig: CUIElement_InitBorderMaterials @ 0x646f70 creates border_material from the
 // STENCIL and BRUSH handles with mode 0x651 / two stages; CUIElement_DrawFrame
-// @ 0x64a392.. -> draw_textured_quad @ 0x649e80]. A frame piece's corners are
+// @ 0x64a392.. -> CUIElement_DrawTexturedQuad @ 0x649e80]. A frame piece's corners are
 // floats, so the device covers what Direct3D 9 does: the pixels whose centres lie
 // in [x0, x1) x [y0, y1).
 struct MenuQuad {
@@ -142,7 +142,7 @@ inline int menu_image_texture_side(int side) {
 }
 
 // One 1px line between two window coordinates, drawn as Direct3D 9 draws a
-// line list [orig: draw_line_2d @ 0x6786d0 — the two points verbatim, D3DPT_LINELIST]:
+// line list [orig: Line2D_Draw @ 0x6786d0 — the two points verbatim, D3DPT_LINELIST]:
 // for the menus' axis-aligned lines on the integers, the pixels from the first
 // point's up to the one before the second's (renderer::d3d9_line_pixels).
 // [orig: CUIElement_DrawOutlineRect @ 0x647fc0 —
@@ -660,7 +660,7 @@ public:
 	bool table_hit(int index, const MenuFrameState &state, float mx, float my,
 			float sx, float sy, int *row, int *column) const;
 	// The table's COLUMN COUNT (1 without an authored count of 1 or more),
-	// 0 for a widget that is not a table [orig: resize_column_count @0x63f6c0].
+	// 0 for a widget that is not a table [orig: CTableWnd_ResizeColumnCount @0x63f6c0].
 	int table_column_count(int index) const;
 	// Bind (or clear, with an empty function) the custom-draw handler of the
 	// table at `index`; kept across configure() while the index stays a table.
@@ -1017,7 +1017,7 @@ private:
 	class TableCanvas;
 	void build_table_columns_(WidgetNode &node);
 	// The columns a table draws: the records code set up (over the XML ones a count
-	// kept), else the XML set-up [orig: init_table_row @ 0x63f9c0 per HEADER, the BODY stores
+	// kept), else the XML set-up [orig: CTableWnd_InitRow @ 0x63f9c0 per HEADER, the BODY stores
 	// @ 0x6427d0; StatScreen_PopulateStatResultsList @ 0x562240 installs its own].
 	std::vector<TableColumnSetup> table_columns_(const WidgetNode &node,
 			const MenuWidgetState *ws) const;

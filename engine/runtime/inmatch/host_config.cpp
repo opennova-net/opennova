@@ -226,7 +226,7 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.destroy_buildings = static_cast<uint32_t>(cfg.destroybuild);
 	config.death_messages = static_cast<uint32_t>(cfg.deathmes);
 	// The session difficulty word, the S2C 0x08 block's seventh byte
-	// [orig: dword_24D2110 = multiplayerDifficulty_484 on the authority
+	// [orig: g_SessionDifficulty = multiplayerDifficulty_484 on the authority
 	// @0x551E80 / @0x551F75].
 	config.config_bytes[6] = static_cast<uint8_t>(cfg.mp_difficulty);
 	// [orig: g_SessionPermanentDeath = permanentDeath_5E4 @0x5522AA, byte_A821F0 =

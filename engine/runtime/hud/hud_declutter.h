@@ -7,10 +7,10 @@ struct DefHudPosFile;  // formats/def/def.h
 // The HUD declutter system: hudpos.def HUDDECLUT_* masks x the persisted
 // hud_detail level -> the 24-slot per-element visibility table the overlay
 // walk consults before each gated draw.
-// [orig: masks byte_2723CE0 built by HUD_ParseHudposToken @ 0x59F370; level
+// [orig: masks g_HUDDeclutterMasks built by HUD_ParseHudposToken @ 0x59F370; level
 //  @ 0x24D20BC (cfg int "hud_detail", parse @ 0x550339, default 0 @ 0x54d3d8,
 //  apply @ 0x55154d, saved @ 0x54c80d); rebuild
-//  CRenderState_SetLayerVisibility @ 0x59B0F0 -> dword_2723C80]
+//  CRenderState_SetLayerVisibility @ 0x59B0F0 -> g_HUDDeclutterVisible]
 // BMS action 28 sub 37 (the HUD item flash, HudItemFlash below) rebuilds the
 // table at level 0 through a side path WITHOUT touching the stored level
 // (HudDeclutter::apply_level) [orig: RenderState_SetLayerVisibilityByIndex
@@ -26,7 +26,7 @@ namespace opennova::hud {
 // The 24 HUDDECLUT slots in retail's parse-arm order. Slots 0/1/5/9/10/11/12/
 // 14/15/16 are parsed but have NO retail draw-site reader — nothing may gate
 // on them. [orig: the HUD_ParseHudposToken arm table @ 0x59F370; the read
-// sites are the per-slot dword_2723C80 cmps cited at each element]
+// sites are the per-slot g_HUDDeclutterVisible cmps cited at each element]
 enum HudDeclutterSlot : int {
 	kDeclutterMsnTitle = 0,
 	kDeclutterFarpInfo = 1,
@@ -75,8 +75,8 @@ class HudDeclutter;
 // crosshair, the corner map, the chat rings...). Each row stores its slot's
 // mask in file order, so a later row for a slot replaces an earlier one; a
 // row without an arm (JOX's HUDDECLUT_CTAPE) authors nothing.
-// [orig: HUD_ParseHudposToken @0x59F370 -> byte_2723CE0 (the MSNTITLE arm's
-//  `mov byte_2723CE0, bl` @0x5A1683 stores the mask built in ebx);
+// [orig: HUD_ParseHudposToken @0x59F370 -> g_HUDDeclutterMasks (the MSNTITLE arm's
+//  `mov g_HUDDeclutterMasks, bl` @0x5A1683 stores the mask built in ebx);
 //  File_ParseASCIIFile @0x53D810 returns 1 for a missing file before any
 //  callback, and HUD_InitOverlaySystem @0x5A4931 ignores the result]
 HudDeclutter declutter_from_hudpos(const opennova::def::DefHudPosFile &file);
@@ -86,7 +86,7 @@ HudDeclutter declutter_from_hudpos(const opennova::def::DefHudPosFile &file);
 // feeds no hudpos at all (the layout-only harnesses); every hudpos feed, an
 // empty or missing file included, starts from begin_authoring()
 // (declutter_from_hudpos), where retail's zeroed table makes an UNAUTHORED
-// slot hidden at every level. [orig: byte_2723CE0 is BSS-zero; only an
+// slot hidden at every level. [orig: g_HUDDeclutterMasks is BSS-zero; only an
 // authored HUDDECLUT_* arm stores a nonzero mask @ 0x59F370]
 class HudDeclutter {
 public:
@@ -98,7 +98,7 @@ public:
 
 	// One authored row's mask byte: bit i (1/2/4/8 for detail level 0..3) set
 	// iff value i is nonzero. [orig: each HUD_ParseHudposToken arm @ 0x59F370
-	//  ors 1/2/4/8 per nonzero atof result into byte_2723CE0[slot]]
+	//  ors 1/2/4/8 per nonzero atof result into g_HUDDeclutterMasks[slot]]
 	static uint8_t mask_from_flags(const int flags[4]);
 
 	void set_mask(int slot, uint8_t mask);
@@ -114,7 +114,7 @@ public:
 	// visible[slot] = ((uint8_t)(1 << (level & 31)) & mask[slot]) != 0, rebuilt
 	// on every mask or level change — retail's 32-bit `shl` narrowed to the
 	// mask byte by the following `and cl, dl`.
-	// [orig: CRenderState_SetLayerVisibility @ 0x59B0F0 -> dword_2723C80]
+	// [orig: CRenderState_SetLayerVisibility @ 0x59B0F0 -> g_HUDDeclutterVisible]
 	const std::array<bool, kDeclutterSlotCount> &visible() const {
 		return visible_;
 	}

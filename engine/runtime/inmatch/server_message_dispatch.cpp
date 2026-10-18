@@ -539,16 +539,16 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 
 // tag=0x04 join/slot-assignment body (24 B) [orig: NetPacket_WriteSlotAssignment @0x502b30, sent from
 // CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]: [4x u32 netPlayer+60..72 stat dwords (0 on a fresh
-// join)][u8 g_difficulty dword_24D2110][u8 player_slot (slot+20)][u8 slot capacity @0x24c0ca4][u32 0]
+// join)][u8 g_difficulty g_SessionDifficulty][u8 player_slot (slot+20)][u8 slot capacity @0x24c0ca4][u32 0]
 // [u8 team (slot+416)]. The retail reader skips the four leading dwords and the
 // pad and stores bytes 16/17/18/23; byte 16 lands in the joiner's own
-// dword_24D2110, the difficulty word its max-health and score tallies read.
+// g_SessionDifficulty, the difficulty word its max-health and score tallies read.
 // [orig: NapiNPClientMsg_SessionSlotConfig @0x425410 (@0x4254A8 byte 16);
 //  Entity_GetMaxHealthWithDifficulty @0x43B8A0; Score_TallyKillByLocalPlayer @0x4FD160]
 std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t player_slot,
                                                  uint8_t slot_capacity, uint8_t team) {
 	std::vector<uint8_t> payload(24, 0);
-	payload[16] = difficulty;    // [orig: dword_24D2110's low byte, NetPacket_WriteSlotAssignment @0x502B96]
+	payload[16] = difficulty;    // [orig: g_SessionDifficulty's low byte, NetPacket_WriteSlotAssignment @0x502B96]
 	payload[17] = player_slot;   // the joiner's assigned slot index [orig slot+20]
 	payload[18] = slot_capacity; // player-slot array capacity [orig: g_PlayerSlotCapacity @0x24c0ca4]
 	payload[23] = team;          // [orig slot+416]
@@ -782,7 +782,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 	messages.push_back(make_protocol_message(s2c::SYNC_TICK, {0x00}));
 	append_connection_settings(config, messages);
 	messages.push_back(make_protocol_message(s2c::GAME_START_SIGNAL, {0x01}));
-	// config_bytes[6] is the session's dword_24D2110 low byte (the S2C 0x08
+	// config_bytes[6] is the session's g_SessionDifficulty low byte (the S2C 0x08
 	// record's seventh byte) — the same word the 0x04 hands the joiner.
 	messages.push_back(make_protocol_message(
 			0x04, build_tag04_slot_assignment(

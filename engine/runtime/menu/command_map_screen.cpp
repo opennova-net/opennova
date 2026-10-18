@@ -46,7 +46,7 @@ constexpr uint32_t kTeam2Map = 0xFF802020u;
 constexpr uint32_t kOtherMap = 0xFF208020u;
 
 // The PLAYERLIST row colours by team [orig: CMap_UpdatePlayerListUI
-// @0x547f99..0x547fc4 — sub_640110(row, 1, colour)].
+// @0x547f99..0x547fc4 — CTableWnd_SetRowColor(row, 1, colour)].
 constexpr uint32_t kPlayerTeam0 = 0xFF00FF00u;
 constexpr uint32_t kPlayerTeam1 = 0xFF00AFFFu;
 constexpr uint32_t kPlayerTeam2 = 0xFFFF0000u;

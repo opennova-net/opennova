@@ -486,7 +486,7 @@ struct Header {
     uint8_t win_scores[8];
     uint8_t lose_scores[8];
     float map_zoom;
-    int16_t area_trigger_count;        // [orig: word_A76410 @hdr+0x240] count of 32-byte area-trigger records
+    int16_t area_trigger_count;        // [orig: g_AreaTriggerCount @hdr+0x240] count of 32-byte area-trigger records
     uint16_t weapon_loadout_chunk_len; // [orig: word_A76412 @hdr+0x242] length of the weapon-loadout chunk
     uint16_t bonus_expiration;
     // [orig: word_A76416 @hdr+0x246] length of a SECOND chunk after the weapon loadout. The engine always
@@ -732,7 +732,7 @@ struct WavListRecord {
 };
 
 // 32-byte area-trigger / restriction-zone record.
-// [orig: read raw into unk_A32D10 by Mission_LoadBMSFile @0x40fc45 (no field interpretation at load).
+// [orig: read raw into g_AreaTriggers by Mission_LoadBMSFile @0x40fc45 (no field interpretation at load).
 //  The byte layout comes from the bounds-check consumers: Entity_IsTeamInTriggerBounds @0x43c75c,
 //  Entity_IsBmsRefInTriggerBounds @0x43e53b, Entity_IsLocalPlayerOutOfBounds @0x439d40 (zone_ptr =
 //  &unk_A32D14 = base+4; zone_ptr[6]&1 is the @28 flags). Bounds are INTERLEAVED per axis

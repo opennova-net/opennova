@@ -58,7 +58,7 @@ inline constexpr int kTerrainTexDetailFull = 3;
 inline constexpr int kTerrainTexDetailFreshProfile = kTerrainTexDetailFull;
 
 // The halving flag the terrain's detail (splat) layers load with at terrain texture detail `level`:
-// two halvings at 0, one at 1 or 2, none at any other [orig: sub_605D70 @ 0x605DBF (0x20000),
+// two halvings at 0, one at 1 or 2, none at any other [orig: Terrain_ApplyDetailSettings @ 0x605DBF (0x20000),
 // @ 0x605DE4 (0x10000), @ 0x605DF4..0x605E0A (2 -> 0x10000, else 0) into g_TerrainDetailTextureFlags
 // @ 0x31A1820, which PolyTrn_InitTextures ORs into the layers' word @ 0x60AB95..0x60ABE5].
 uint32_t terrain_texdetail_flags(int level);
@@ -91,7 +91,7 @@ struct DeviceTexture {
 	// A DDS loaded whole although the detail asked for a smaller one: its chain held too few levels to
 	// skip (GTexture_InitFromMemory @ 0x68820A).
 	bool whole = false;
-	// A DXT5 the game stores as DXT1, every block of its first level opaque (convert_dxt_alpha_blocks).
+	// A DXT5 the game stores as DXT1, every block of its first level opaque (GTexture_ConvertDXTAlphaBlocks).
 	bool dxt5_as_dxt1 = false;
 	// Every level's bytes: what the texture holds in the game's memory.
 	uint64_t bytes = 0;
@@ -162,7 +162,7 @@ struct DdsSource {
 
 // The device texture of a DDS the game loads through D3DX (a model row's `.dds`, the archive loader's):
 // an all-opaque DXT5 stored as DXT1 on a card that takes DXT1 and keeps no DXT5 [orig:
-// GTexture_InitFromMemory @ 0x687E90..0x687EB9; convert_dxt_alpha_blocks @ 0x687AC0]; the detail's
+// GTexture_InitFromMemory @ 0x687E90..0x687EB9; GTexture_ConvertDXTAlphaBlocks @ 0x687AC0]; the detail's
 // halvings skip the top levels of its chain (0x20000 two, 0x10000 one [orig: @ 0x687E3B..0x687E49]), and
 // once a skip is taken so does each halving the cap or the card asks for [orig: @ 0x6881AC..0x6881FC]; a
 // chain too short for the skip loads whole [orig: @ 0x68820A, @ 0x6882DE]; with no skip the file goes
@@ -204,9 +204,9 @@ uint32_t model_row_texture_flags(TextureLoader loader, uint8_t slot, int level);
 DeviceTexture model_row_device_texture(TextureLoader loader, uint8_t slot, int level, const DdsSource &file,
 		bool dds);
 
-// convert_dxt_alpha_blocks's test of a DXT5's first level: the first word of each of its blocks (both
+// GTexture_ConvertDXTAlphaBlocks's test of a DXT5's first level: the first word of each of its blocks (both
 // alpha endpoints) 0xFFFF, over max(1, width / 4) x max(1, height / 4) blocks from the level's start
-// [orig: convert_dxt_alpha_blocks @ 0x687B28..0x687B6A]. False for bytes too few to hold them.
+// [orig: GTexture_ConvertDXTAlphaBlocks @ 0x687B28..0x687B6A]. False for bytes too few to hold them.
 bool dxt5_first_level_opaque(const uint8_t *blocks, size_t size, uint32_t width, uint32_t height);
 
 } // namespace opennova::renderer

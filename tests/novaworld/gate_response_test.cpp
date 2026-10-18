@@ -187,7 +187,7 @@ bool check_retail_port_literal_radixes() {
 // stores nothing (the line still counts). The digit test is the CRT isdigit under the game's
 // ".ACP" LC_CTYPE, pinned to cp1252 (D-NET-388), so 0xB2 / 0xB3 / 0xB9 are digits worth
 // their signed byte less '0'.
-// [orig: Network_ParseIPv4AddressOctets @0x62DC10 -> parse_simple_decimal @0x62DB90, from
+// [orig: Network_ParseIPv4AddressOctets @0x62DC10 -> NapiScript_ParseSimpleDecimal @0x62DB90, from
 //  CNapiGateManager_ProcessResponse @0x4CF159 / @0x4CF395, the stores @0x4CF16D / @0x4CF3A9]
 bool parses_post_ip(const std::string &text, const std::array<uint8_t, 4> &expected) {
 	const std::string body = "VAR \"POSTIPADDRESS\" \"" + text + "\"\n";
