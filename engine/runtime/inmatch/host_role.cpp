@@ -128,6 +128,11 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// mode: set for the SP/listen HostClient, clear for a HostOnly dedicated
 	// host. [orig: g_NapiNPCtx +0x64; napi_np_server_ctx.h connection modes]
 	kernel.world.rules.mp_session_peer = serve_and_play;
+	// The session's sniper-zoom rule (byte_A821F0): the authority's config value in a
+	// session, 0 out of one [orig: Game_ApplySessionSettingsToGlobals - the reset
+	//  @0x552284, the session test @0x55222A / @0x55228B, the authority test
+	//  @0x55228D, the stamp @0x5522A4..0x5522B9].
+	kernel.world.rules.allow_sniper_scope_zoom = in_session && config.allow_sniper_scope_zoom;
 	// Out of a session a fresh start's session settings copy the current
 	// profile's +0x564 into the difficulty word, which the player's spawn
 	// raises read before the mission start resets it (D-PWR-6); the SP

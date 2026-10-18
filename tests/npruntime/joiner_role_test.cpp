@@ -2541,6 +2541,23 @@ bool run_round_event_needs_a_resolved_shooter() {
 	return expect(fire() == 1, "a decoded shooter's round event flies");
 }
 
+// The joiner's sniper-zoom rule follows the S2C 0x08 flags dword's bit 16.
+// [orig: NapiNPClientMsg_HandleSessionConfig @0x42837A..0x428392]
+bool run_zoom_rule_follows_the_session_flags() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	w::World &world = h.kernel->world;
+	h.role.runtime->state().session_rules_flags = 0x10000u;
+	h.role.run_tick(h.input);
+	if (!expect(world.rules.allow_sniper_scope_zoom, "zoom rule: bit 16 allows the zoom"))
+		return false;
+	h.role.runtime->state().session_rules_flags = 0x8000u;
+	h.role.run_tick(h.input);
+	return expect(!world.rules.allow_sniper_scope_zoom, "zoom rule: bit 16 clear locks it");
+}
+
 int main() {
 	if (!run_local_replica_turret_channel()) return 1;
 	if (!run_replica_turret_channel()) return 1;
@@ -2588,6 +2605,7 @@ int main() {
 	ok &= run_round_event_stance_reads_the_flags_legs();
 	ok &= run_alt_round_event_flies_its_ammo_byte();
 	ok &= run_round_event_needs_a_resolved_shooter();
+	ok &= run_zoom_rule_follows_the_session_flags();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

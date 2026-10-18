@@ -84,11 +84,15 @@ world::WeaponInventory slot_inventory(const world::WeaponTable &table,
 // The 780 slots reset and filled from a display list, the first weapon on a combo
 // keeping it. [orig: WeaponSlotPool_ResetAllEntries @0x53F240 +
 //  WeaponSlotTable_LoadAllFromDefs @0x5414E0, the incumbent kept @0x5415D6]
+// The fill's sniper lock reads the session's zoom rule [orig: WeaponSlot_InitFromDef
+//  @0x53EF07..0x53EF25 - byte_A821F0 in a session on a peer, else the config's
+//  allowSniperScopeZoom, the same value on a host].
 void reload_slots(const world::WeaponTable &table, world::WeaponInventory &inv,
-                  const std::vector<std::string> &display, uint8_t player_class) {
+                  const std::vector<std::string> &display, uint8_t player_class,
+                  bool allow_sniper_scope_zoom) {
 	inv.slots.fill(world::WeaponInventorySlot{});
 	world::weapon_inventory_load_from_display(table, display, inv, player_class,
-			/*allow_sniper_scope_zoom=*/true);
+			allow_sniper_scope_zoom);
 }
 
 // The display list rebuilt from the table: every populated slot's weapon, in combo
@@ -112,7 +116,7 @@ std::vector<std::string> slot_name_table(const world::WeaponTable &table,
 //  seat test @0x540684..0x540692]
 void reinit_listed_slots(const world::WeaponTable &table, world::WeaponInventory &inv,
                          const std::vector<std::string> &display, uint8_t player_class,
-                         const world::WeaponAmmoSeat &seat) {
+                         const world::WeaponAmmoSeat &seat, bool allow_sniper_scope_zoom) {
 	for (const std::string &name : display) {
 		const int adm = table.index_of(name.c_str());
 		const world::WeaponTableEntry *def =
@@ -122,7 +126,7 @@ void reinit_listed_slots(const world::WeaponTable &table, world::WeaponInventory
 				inv.slot(def->rank + world::weapon_combo::kRanksPerCategory * def->category);
 		if (slot == nullptr) continue;
 		world::weapon_slot_init_from_def(*def, static_cast<int16_t>(adm), *slot, player_class,
-				/*allow_sniper_scope_zoom=*/true);
+				allow_sniper_scope_zoom);
 		const uint32_t bucket = static_cast<uint32_t>(def->ammo_bucket);
 		if (world::weapon_seat_writes_buckets(seat) && bucket < inv.shared_clips.size())
 			inv.shared_clips[bucket] = 0;
@@ -267,7 +271,9 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  uint16_t class_allow_mask,
 										  const world::WeaponTable *table,
 										  const NapiNPConnection &conn,
-										  const world::WeaponAmmoSeat &seat) {
+										  const world::WeaponAmmoSeat &seat,
+										  bool allow_sniper_scope_zoom) {
+	const bool allow_zoom = allow_sniper_scope_zoom;
 	GrantedWeaponLoadout grant;
 	WeaponLoadout &reply = grant.reply;
 	// Class 0 passes the envelope and applies with no fix-up: its soldier-type mask is 0, so
@@ -306,13 +312,13 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 		//  (@0x50BA60), WeaponOverlay_UpdateAllPerFrame @0x515DFF, the entry loop
 		//  @0x515E0D..0x515F33, the recalc @0x515F4D]
 		world::WeaponInventory inv = slot_inventory(*table, conn);
-		reload_slots(*table, inv, kit_display_list(entries, *table), cls);
+		reload_slots(*table, inv, kit_display_list(entries, *table), cls, allow_zoom);
 		world::weapon_inventory_seed_pools(*table, inv, cls);
 		world::weapon_inventory_recalc_clips(*table, inv, seat);
 		std::vector<std::string> display = slot_name_table(*table, inv);
-		reload_slots(*table, inv, display, cls);
+		reload_slots(*table, inv, display, cls, allow_zoom);
 		display = slot_name_table(*table, inv);
-		reinit_listed_slots(*table, inv, display, cls, seat);
+		reinit_listed_slots(*table, inv, display, cls, seat, allow_zoom);
 		seed_and_recalc(*table, inv, cls, conn.reply.revive_pose_valid, seat);
 		clear_loaded_rounds(*table, inv, seat);
 		for (const KitEntry &e : entries) {
@@ -406,6 +412,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	//  @0x5155EB skips the entry walk alone].
 	if (table.empty()) return;
 	const world::WeaponAmmoSeat seat = world::entity_ammo_seat(world, player);
+	const bool allow_zoom = world.rules.allow_sniper_scope_zoom;
 	const LoadoutSubmit &buffer = conn.reply.loadout_buffer;
 	const uint8_t cls = static_cast<uint8_t>(conn.slot_class);
 	const std::vector<KitEntry> entries = admitted_entries(buffer, buffer.player_class, table);
@@ -423,13 +430,13 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	//  @0x5155E1, the buffer walk @0x5155EB..0x515761 (each name resolved @0x51560D),
 	//  the recalc @0x51577C]
 	world::WeaponInventory inv = slot_inventory(table, conn);
-	reload_slots(table, inv, kit_display_list(entries, table), cls);
+	reload_slots(table, inv, kit_display_list(entries, table), cls, allow_zoom);
 	world::weapon_inventory_seed_pools(table, inv, cls);
 	world::weapon_inventory_recalc_clips(table, inv, seat);
 	std::vector<std::string> display = slot_name_table(table, inv);
-	reload_slots(table, inv, display, cls);
+	reload_slots(table, inv, display, cls, allow_zoom);
 	display = slot_name_table(table, inv);
-	reinit_listed_slots(table, inv, display, cls, seat);
+	reinit_listed_slots(table, inv, display, cls, seat, allow_zoom);
 	seed_and_recalc(table, inv, cls, conn.reply.revive_pose_valid, seat);
 	clear_loaded_rounds(table, inv, seat);
 	for (const KitEntry &e : entries) set_kit_pools(table, inv, e, /*accept=*/false);
@@ -454,6 +461,7 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 	const uint8_t cls = static_cast<uint8_t>(conn.slot_class);
 	const std::vector<KitEntry> entries = admitted_entries(buffer, buffer.player_class, table);
 	const world::WeaponAmmoSeat seat = world::entity_ammo_seat(world, player);
+	const bool allow_zoom = world.rules.allow_sniper_scope_zoom;
 	// The round init's rebuild of a kept slot from its buffer: the display list, a
 	// fill, the list rebuilt, every listed slot initialized again with its bucket
 	// zeroed, and the seed and the draw. No entry count is applied; the slot's next
@@ -462,9 +470,9 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 	//  WeaponSlotTable_LoadAllFromDefs @0x516C0E, PlayerSlot_BuildNameTable @0x516C14,
 	//  sub_4FE260 @0x516C1A, PlayerSlot_SeedAmmoPoolsAndRecalc @0x516C20]
 	world::WeaponInventory inv = slot_inventory(table, conn);
-	reload_slots(table, inv, kit_display_list(entries, table), cls);
+	reload_slots(table, inv, kit_display_list(entries, table), cls, allow_zoom);
 	const std::vector<std::string> display = slot_name_table(table, inv);
-	reinit_listed_slots(table, inv, display, cls, seat);
+	reinit_listed_slots(table, inv, display, cls, seat, allow_zoom);
 	seed_and_recalc(table, inv, cls, conn.reply.revive_pose_valid, seat);
 	GrantedWeaponLoadout grant;
 	grant.reply.avatar_class = cls;

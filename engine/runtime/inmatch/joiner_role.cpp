@@ -770,6 +770,9 @@ void JoinerRole::pump() {
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
     // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
 	world.rules.mpattrib = rt.view().mp_attributes();
+	// The session's sniper-zoom rule is the S2C 0x08 flags dword's bit 16
+	// [orig: NapiNPClientMsg_HandleSessionConfig @0x42837A..0x428392 -> byte_A821F0].
+	world.rules.allow_sniper_scope_zoom = (rt.state().session_rules_flags & 0x10000u) != 0;
     world.rules.auto_scope_zero =
             (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
     world.rules.no_friendly_fire =

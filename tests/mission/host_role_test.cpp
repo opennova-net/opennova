@@ -109,6 +109,7 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 			inmatch::HostConfig cfg;
 			cfg.title = &kJo;
 			cfg.config = inmatch::singleplayer_game_config(options.game_type, nullptr);
+			cfg.config.allow_sniper_scope_zoom = true;
 			cfg.socket_mode = mode;
 			cfg.serve_and_play = true;
 			inmatch::HostBringup bringup;
@@ -128,6 +129,10 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		}
 		CHECK(kernel.world.rules.no_friendly_fire);
 		CHECK(!kernel.world.rules.auto_scope_zero);
+		// The sniper-zoom rule is the config's in a session alone [orig:
+		//  Game_ApplySessionSettingsToGlobals @0x552284 / @0x5522B9].
+		CHECK(kernel.world.rules.allow_sniper_scope_zoom ==
+				(mode != inmatch::SocketMode::Socketless));
 	}
 }
 

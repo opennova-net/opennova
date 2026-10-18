@@ -662,8 +662,9 @@ struct SessionRules {
     // it outside a session, stamps the serving host's config value on the
     // authority and, on a joiner, bit 16 of the S2C 0x08 flags dword (the bit
     // server_initial_state.cpp emits from the option); offline it stays 0, which
-    // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom,
-    // joiners from their session-config bitflags.
+    // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom
+    // (HostRole::apply_rule_words), joiners from their session-config bitflags
+    // (JoinerRole's frame), and the 0x2F grant's fills read it.
     // [orig: Game_ApplySessionSettingsToGlobals @0x552284 (the reset) / @0x5522b9
     //  (the authority stamp); NapiNPClientMsg_HandleSessionConfig @0x428392;
     //  readers Player_AdjustWeaponElevation @0x4dbe36, Player_MountWeaponSlot
