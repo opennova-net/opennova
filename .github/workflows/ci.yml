@@ -284,10 +284,24 @@ jobs:
         shell: bash
         run: sccache --show-stats
 
+      # ctest starts the shard's longest rows first (.github/actions/ctest-costs).
+      - name: Restore the ctest cost data
+        uses: ./.github/actions/ctest-costs
+        with:
+          leg: core-${{ matrix.shard }}
+          mode: restore
+
       # The build is up to date, so the second call goes straight to the tests.
       - name: Test (core, ${{ matrix.shard }})
         shell: bash
         run: scripts/build.sh --no-godot --suite core --shard ${{ matrix.shard }}
+
+      - name: Save the ctest cost data
+        if: always()
+        uses: ./.github/actions/ctest-costs
+        with:
+          leg: core-${{ matrix.shard }}
+          mode: save
 
       # build/.ninja_log carries each compile's and link's time.
       - name: Upload native core test reports
@@ -374,9 +388,23 @@ jobs:
           token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
           enabled: 'true'
 
+      # ctest starts the suite's longest rows first (.github/actions/ctest-costs).
+      - name: Restore the ctest cost data
+        uses: ./.github/actions/ctest-costs
+        with:
+          leg: retail
+          mode: restore
+
       - name: Test (retail)
         shell: bash
         run: scripts/build.sh --no-godot --suite retail
+
+      - name: Save the ctest cost data
+        if: always()
+        uses: ./.github/actions/ctest-costs
+        with:
+          leg: retail
+          mode: save
 
       - name: Upload native retail test reports
         if: always()
@@ -508,6 +536,13 @@ jobs:
           flavour: linux-root
           mode: restore
 
+      # ctest starts the suite's longest rows first (.github/actions/ctest-costs).
+      - name: Restore the ctest cost data
+        uses: ./.github/actions/ctest-costs
+        with:
+          leg: linux-core
+          mode: restore
+
       - name: Build and test
         shell: bash
         # billing_stripe_e2e's Stripe test-mode key (infra/github, secrets.tf). A
@@ -520,6 +555,13 @@ jobs:
           --cmake-arg -DOPENNOVA_NOVAWORLD_SERVICE=ON --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON
           --cmake-arg -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
           --cmake-arg -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
+
+      - name: Save the ctest cost data
+        if: always()
+        uses: ./.github/actions/ctest-costs
+        with:
+          leg: linux-core
+          mode: save
 
       - name: sccache stats
         if: always()

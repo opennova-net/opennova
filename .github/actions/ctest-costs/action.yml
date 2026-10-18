@@ -1,0 +1,57 @@
+name: ctest cost data
+description: >-
+  ctest's record of each row's time (build/Testing/Temporary/CTestCostData.txt)
+  carried between runs as one Actions cache entry per test leg, so a fresh
+  build tree's parallel ctest starts its longest rows first.
+
+# Without the record ctest starts the rows in the order they are registered
+# (tests/CMakeLists.txt's own, then tests/editor/'s last), whatever each costs,
+# so a long row registered late starts late and ends the leg alone: on run
+# 39164272183 test-linux started editor_terrain_import 36 s and
+# editor_terrain_map_paint 64 s into its tests, and the editor shard's
+# parallel phase kept 10 of its 16 slots busy on average. With the record ctest
+# starts the rows in falling order of their average time (a row that failed
+# last time first, a row it has no time for last).
+#
+# Restore (`mode: restore`, before the tests) takes the newest entry of the leg
+# in the nearest scope the run can read (its own branch, a pull request's base
+# branch, master; compiler-cache's note). Save (`mode: save`, after the tests,
+# pass or fail) writes this run's record. Every run saves, pull requests
+# included, unlike the compiler cache: an entry is a few tens of KB, and a
+# pull request that adds, renames or splits rows reads its own record on its
+# next run.
+
+inputs:
+  leg:
+    description: The test leg's name (core-editor, core-rest, retail, linux-core).
+    required: true
+  mode:
+    description: "'restore' before the tests, 'save' after them."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the ctest cost data
+      if: inputs.mode == 'restore'
+      uses: actions/cache/restore@v4
+      with:
+        path: build/Testing/Temporary/CTestCostData.txt
+        key: ctest-costs-${{ inputs.leg }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: ctest-costs-${{ inputs.leg }}-
+
+    - name: Find the ctest cost data
+      id: record
+      if: inputs.mode == 'save'
+      shell: bash
+      run: |
+        made=false
+        [[ -s build/Testing/Temporary/CTestCostData.txt ]] && made=true
+        echo "made=${made}" >> "$GITHUB_OUTPUT"
+
+    - name: Save the ctest cost data
+      if: inputs.mode == 'save' && steps.record.outputs.made == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: build/Testing/Temporary/CTestCostData.txt
+        key: ctest-costs-${{ inputs.leg }}-${{ github.run_id }}-${{ github.run_attempt }}
