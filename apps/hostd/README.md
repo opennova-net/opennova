@@ -312,14 +312,16 @@ agent's (DEPLOY.md, "Hosted game servers").
 `--runtime process` (`process_runtime.h`) runs each server as a child process of the agent
 rather than a docker container: the runtime of a machine that is itself a container and runs
 no docker, the local stack's (`apps/novaworld_common/hosted/docker_machine_driver.h`, which
-starts the hostd image as its serve user with `--runtime process --nft none`). A start
+starts the hostd image as its serve user with `--runtime process --nft none --log-dir
+/var/log/opennova`, the stack's log volume). A start
 is `<--serve> --resource-dir <the data set's mount path> <opennova-serve's arguments>` in the
 slot's directory, its environment the system's variables (`PATH`, `HOME`, `LANG`, `LC_*`,
 `TZ`, `TMPDIR`) and the env file's, its output where the agent's own goes (the machine
 container's log), or with `--log-dir` (the local stack's log volume) to that start's own
 file, `<dir>/servers/<server id>/g<generation>.log`, beside the agent's own lines in
 `<dir>/machines/<machine id>/hostd.log` (each after its time, `2026-10-18T14:05:03.123Z`),
-which the site's admin pages read. The rest of the agent is the same: the bootstrap, the syncs, the slots'
+which the site's admin pages read as another user (web's), so the agent makes each directory
+there 0755 and each file 0644 whatever its umask (`stamped_output.h` open_log_file). The rest of the agent is the same: the bootstrap, the syncs, the slots'
 directories, the starts, stops (SIGTERM), kills (SIGKILL) and removals the reply asks for,
 each server reported by name with its exit code (one a signal ended reads 128 plus the
 signal) until the reply drops it. What a container gave and a process does not: no slot user

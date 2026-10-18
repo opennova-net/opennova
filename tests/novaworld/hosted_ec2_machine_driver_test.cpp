@@ -1594,7 +1594,8 @@ int test_docker_config_and_profile(const std::string &) {
 			(std::vector<std::string>{ "--runtime", "process", "--serve",
 					"/usr/local/bin/opennova-serve", "--service", kDevServiceUrl, "--machine", "7",
 					"--token-file", "/run/opennova/hostd.token", "--state-dir", "/srv/serve/hostd",
-					"--slots-root", "/srv/serve/slots", "--nft", "none" }));
+					"--slots-root", "/srv/serve/slots", "--nft", "none", "--log-dir",
+					"/var/log/opennova" }));
 	hosted::MachineLaunch launch = launch_of(7, MachineKind::Own);
 	opennova::io::JsonValue body;
 	std::string error;

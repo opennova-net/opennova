@@ -12,7 +12,8 @@
 // standard error, so the servers' lines are the machine's log), or with a
 // `log_dir` (--log-dir, the local stack's log directory) to
 // <log_dir>/servers/<its log stream>.log, the file the stream the service names
-// it ("<server id>/g<generation>") is there. Nothing isolates
+// it ("<server id>/g<generation>") is there, each line after its time
+// (stamped_output.h). Nothing isolates
 // it beyond what the machine itself is: no user of the slot's (the uid, the CPUs,
 // the memory and the pids cap are not applied), the machine's own network. What
 // the agent sees is docker's: each one listed by name until it is removed,
@@ -25,6 +26,7 @@
 // plumbing, not a port.
 
 #include "container_runtime.h"
+#include "stamped_output.h"
 
 #include <base/proc/child_process.h>
 
@@ -89,6 +91,7 @@ private:
 	std::string output_path_;
 	Clock now_s_;
 	std::string log_dir_;
+	StampedOutput stamped_; // the servers' output into the log directory
 	std::map<std::string, Server> servers_; // by name
 };
 

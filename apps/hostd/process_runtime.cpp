@@ -6,6 +6,8 @@
 #include <ctime>
 #include <utility>
 
+#include <unistd.h>
+
 namespace opennova::hostd {
 
 std::vector<std::string> read_env_file_lines(const std::string &text) {
@@ -137,18 +139,21 @@ bool ProcessRuntime::run(const ContainerSpec &spec, int, int &exit_code, std::st
 	proc::SpawnOptions options;
 	options.argv = run_argv(spec);
 	options.working_dir = spec.work_dir;
-	options.output_path = output_of(spec);
-	if (options.output_path != output_path_) {
-		// Its stream's directory, which the log directory's readers walk.
-		std::error_code ec;
-		std::filesystem::create_directories(
-				std::filesystem::path(options.output_path).parent_path(), ec);
-	}
+	const std::string output = output_of(spec);
+	options.output_path = output;
+	// Into the log directory: through a pipe whose lines are stamped with their
+	// time, its write end the child's alone once it holds it.
+	int write_fd = -1;
+	if (output != output_path_ && !stamped_.open(output, options.output_path, write_fd, error))
+		return false;
 	options.environment = std::move(environment);
 	options.end_with_parent = true;
 	Server server;
 	server.slot = spec.slot;
-	if (!server.process.spawn(options, error))
+	const bool spawned = server.process.spawn(options, error);
+	if (write_fd >= 0)
+		::close(write_fd);
+	if (!spawned)
 		return false;
 	server.started_at = now_s_();
 	servers_.emplace(spec.name, std::move(server));

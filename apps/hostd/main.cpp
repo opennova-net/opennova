@@ -21,6 +21,7 @@
 #include "nft_table.h"
 #include "process_runtime.h"
 #include "slot_files.h"
+#include "stamped_output.h"
 #include "tree_store.h"
 
 #include "command_runner.h"
@@ -204,15 +205,20 @@ int main(int argc, char **argv) {
 
 	if (!options.log_dir.empty()) {
 		// The local stack's log directory (the machine known by now): this
-		// machine's own lines beside its servers' (the process runtime's).
-		const std::filesystem::path dir = std::filesystem::path(options.log_dir) / "machines" /
-				std::to_string(options.machine_id);
-		std::error_code ec;
-		std::filesystem::create_directories(dir, ec);
-		g_log_copy = std::fopen((dir / "hostd.log").c_str(), "a");
-		if (!g_log_copy)
-			std::fprintf(stderr, "opennova-hostd: warning: cannot write %s\n",
-					(dir / "hostd.log").c_str());
+		// machine's own lines beside its servers' (the process runtime's),
+		// readable by the site's log reader (open_log_file).
+		const std::string path = (std::filesystem::path(options.log_dir) / "machines" /
+				std::to_string(options.machine_id) / "hostd.log")
+				.string();
+		std::string why;
+		const int fd = open_log_file(path, why);
+		g_log_copy = fd < 0 ? nullptr : ::fdopen(fd, "a");
+		if (!g_log_copy) {
+			if (fd >= 0)
+				::close(fd);
+			std::fprintf(stderr, "opennova-hostd: warning: cannot write %s: %s\n", path.c_str(),
+					fd < 0 ? why.c_str() : "fdopen failed");
+		}
 	}
 
 	const bool root = ::geteuid() == 0;

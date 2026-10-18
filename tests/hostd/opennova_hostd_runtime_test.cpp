@@ -15,7 +15,8 @@
 // slot's directory over its data set with its arguments and the env file's
 // variables alone, listed running then exited with its code, stopped by SIGTERM,
 // killed, removed once ended, a start that cannot run exit 125; with a log
-// directory each server's output in its stream's file), the command line
+// directory each server's output in its stream's file, each line after its
+// time), the command line
 // (apps/hostd/hostd_options.h: its log group and region among them, which send the
 // containers' output to CloudWatch, the stream the service names each, and the
 // process runtime's log directory), the machine's image from a stand-in instance
@@ -838,7 +839,9 @@ int test_process_runtime() {
 
 	// With a log directory (the local stack's), each server's output goes to its
 	// stream's file under servers/, the directories made; the shared file gets none.
+	// The directory stands as the stack's log volume does: 1777.
 	const std::string logs = temp.file("logs");
+	TEST_EXPECT(::mkdir(logs.c_str(), 0700) == 0 && ::chmod(logs.c_str(), 01777) == 0);
 	hostd::ProcessRuntime logged(
 			serve, { "PATH=/usr/bin:/bin" }, log, [] { return int64_t{ 1760000000 }; }, logs);
 	hostd::ContainerSpec chatty = exits;
@@ -852,7 +855,19 @@ int test_process_runtime() {
 	hostd::ProcessRuntime echoing(
 			serve + "-echo", { "PATH=/usr/bin:/bin" }, log, [] { return int64_t{ 1760000000 }; },
 			logs);
-	TEST_EXPECT(echoing.run(chatty, 1000, exit_code, error));
+	// Under an owner-only umask what it makes is still readable by the site's
+	// log reader, another user (directories 0755, the file 0644); the log
+	// volume's own mode stands.
+	const mode_t umask_was = ::umask(077);
+	const bool ran = echoing.run(chatty, 1000, exit_code, error);
+	::umask(umask_was);
+	TEST_EXPECT(ran);
+	const auto mode_of = [](const std::string &path) {
+		struct stat st {};
+		return ::stat(path.c_str(), &st) == 0 ? static_cast<int>(st.st_mode & 07777) : -1;
+	};
+	TEST_EXPECT(mode_of(logs + "/servers") == 0755 && mode_of(logs + "/servers/5") == 0755);
+	TEST_EXPECT(mode_of(logs + "/servers/5/g7.log") == 0644 && mode_of(logs) == 01777);
 	std::string written;
 	for (int i = 0; i < 200 && written.find("hello from") == std::string::npos; ++i) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(25));
@@ -860,6 +875,35 @@ int test_process_runtime() {
 	}
 	TEST_EXPECT(written.find("hello from") != std::string::npos);
 	TEST_EXPECT(read(log).find("hello from") == std::string::npos);
+	// Each line after the time it was written, as the programs' copies are.
+	TEST_EXPECT(written.size() > 25 && written[4] == '-' && written[10] == 'T' &&
+			written[19] == '.' && written[23] == 'Z' &&
+			written.compare(24, 11, " hello from") == 0);
+	// The agent's own copy (main.cpp's machines/<id>/hostd.log) opens the same way,
+	// and a file an earlier agent made owner-only is made readable again.
+	{
+		const mode_t was = ::umask(077);
+		const std::string own = logs + "/machines/12/hostd.log";
+		std::string why;
+		const int fd = hostd::open_log_file(own, why);
+		TEST_EXPECT(fd >= 0 && ::close(fd) == 0);
+		TEST_EXPECT(mode_of(logs + "/machines") == 0755 &&
+				mode_of(logs + "/machines/12") == 0755 && mode_of(own) == 0644);
+		TEST_EXPECT(::chmod(own.c_str(), 0600) == 0);
+		const int again = hostd::open_log_file(own, why);
+		TEST_EXPECT(again >= 0 && ::close(again) == 0 && mode_of(own) == 0644);
+		// A directory where a file stands: no file, and why.
+		std::ofstream(logs + "/plain") << "x";
+		TEST_EXPECT(hostd::open_log_file(logs + "/plain/sub/f.log", why) < 0 && !why.empty());
+		::umask(was);
+	}
+	TEST_EXPECT(hostd::line_stamp().size() == 24 && hostd::line_stamp()[23] == 'Z');
+	std::string partial;
+	std::string stamped;
+	hostd::stamp_lines("one\r\ntwo\nthr", "T", partial, stamped);
+	TEST_EXPECT(stamped == "T one\nT two\n" && partial == "thr");
+	hostd::stamp_lines("ee\n", "U", partial, stamped);
+	TEST_EXPECT(stamped == "T one\nT two\nU three\n" && partial.empty());
 	// A stream that is no stream name falls back to the shared file.
 	chatty.log_stream = "../x";
 	TEST_EXPECT(logged.output_of(chatty) == log);

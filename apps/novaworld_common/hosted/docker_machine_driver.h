@@ -107,6 +107,10 @@ public:
 	static constexpr const char *kTokenFile = "/run/opennova/hostd.token";
 	static constexpr const char *kStateDir = "/srv/serve/hostd";
 	static constexpr const char *kSlotsRoot = "/srv/serve/slots";
+	// The local stack's log store (its logs volume, ONNET_LOG_STORE's
+	// directory): the agent writes its servers' output and its own lines there
+	// (hostd --log-dir).
+	static constexpr const char *kLogDir = "/var/log/opennova";
 	static constexpr const char *kHostd = "/usr/local/bin/opennova-hostd";
 	static constexpr const char *kServe = "/usr/local/bin/opennova-serve";
 	// The image's serve user, which the agent runs as and which owns the token
