@@ -2096,7 +2096,9 @@ bool check_sub_variant_fire_after_the_grant() {
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_sub_variant_armory(world);
-	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(3, 0, 0));
+	// The shooter stands at the fire's claimed origin (fire_body claims 0, 0, 0), inside
+	// the fire action's two-metre reach (D-NET-XB11).
+	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0, 0, 0));
 	std::vector<inmatch::NapiNPConnection> roster;
 	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
 	inmatch::NapiNPConnection &conn = roster.front();
