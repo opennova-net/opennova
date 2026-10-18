@@ -1008,7 +1008,6 @@ void AiSystem::on_load(World &) {
     target_set_calls.clear();
     scan_candidates_.clear();
     find_target_calls = 0;
-    fire_shot_seq = 0;
 }
 
 // [orig: Entity_CalcAverageGroundHeight @0x457230] 5-tap weighted ground height (16.16 fixed).

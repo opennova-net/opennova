@@ -761,11 +761,28 @@ public:
     // [orig: CEntityManager_AllocateSlot @0x4EAAD0 - the 0xFFFF test @0x4EAAD7,
     //  the counter @0x4EAAE8..0x4EAB04, the store @0x4EABD5]
     uint16_t allocate_round_id(uint16_t sequence_word);
-    // The id of the last round allocated: a fan's last pellet, whose slot the
-    // pellet walks leave as the pool cursor that RoundData_SpawnRound returns.
-    // [orig: Weapon_SpawnProjectileBurst / ...WithSpread return dword_B7E1A0
-    //  @0x4EBB98 / @0x4EBE6D]
-    uint16_t last_allocated_round_id() const { return last_allocated_round_id_; }
+    // The word a fire hands the pool when it carries no id of its own, so the pool
+    // mints a fresh one from its one counter: the host's own fire, an AI gunner's
+    // and a joiner's own. [orig: word_B7C670's .data 0xFFFF and the resets ahead of
+    //  each action's first call, WeaponAction_ProcessFrame @0x5413F0 / @0x541473;
+    //  Entity_FireWeaponAndSendPacket's authority copy @0x42BED5]
+    static constexpr uint16_t kFreshRoundWord = 0xFFFF;
+    // The word the ammo-def arm hands the pool for a shooter with no player slot (an
+    // AI, a script or a mine): 0xF600 over the low nine bits of the fresh word; a
+    // slotted shooter's carries its slot in bits 9.. [orig: Server_ClientFiredRound
+    //  @0x50BDAE..0x50BDBC; @0x50BD91..0x50BDA5].
+    static constexpr uint16_t kSlotlessAmmoArmWord =
+            static_cast<uint16_t>((kFreshRoundWord & 0x1FFu) | 0xF600u);
+    // The word the ring record (and a joiner's C2S 0x06 hit_part) takes from the
+    // last spawn: the id it allocated, a fan's last pellet's, and for a spawn that
+    // allocated nothing (an instantkillzone, Detonatesatchels or DesignateTarget
+    // ammo) pool slot 0's. [orig: RoundData_AddRound - ring+28 =
+    //  pool[RoundData_SpawnRound()]+0x78 @0x4FDC58..0x4FDCF5;
+    //  Entity_FireWeaponAndSendPacket @0x42C030; RoundData_SpawnRound's null
+    //  returns @0x4EC230 / @0x4EC248 / @0x4EC281, its cursor return @0x4EC907]
+    uint16_t spawned_round_word() const {
+        return spawn_allocated_ ? last_allocated_round_id_ : rounds[0].shot_seq;
+    }
     // The local player's roster slot the fresh id carries: 0 on a host, a joiner's
     // own S2C 0x04 slot. [orig: g_LocalPlayerSlotId @0xA860D0 -
     // Server_InitPlayerSlotSystem @0x4243CF, NapiNPClientMsg_SessionSlotConfig
@@ -776,6 +793,7 @@ private:
     uint64_t next_presentation_generation_ = 1;
     uint32_t round_id_counter_ = 0; // [orig: dword_B7E1A4]
     uint16_t last_allocated_round_id_ = 0;
+    bool spawn_allocated_ = false; // the last spawn allocated an id
     // Retail advances tracer cadence on each remote shooter's weapon slot. A
     // visual tag-2 round has wire H but no local Entity owner, so this is that
     // per-remote presentation field projected onto the decoded identity.

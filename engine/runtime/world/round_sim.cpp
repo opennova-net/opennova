@@ -839,6 +839,7 @@ int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_
 }
 
 uint16_t RoundSim::allocate_round_id(uint16_t sequence_word) {
+    spawn_allocated_ = true;
     if (sequence_word != 0xFFFFu) return last_allocated_round_id_ = sequence_word; // @0x4EAB12
     round_id_counter_ = (round_id_counter_ + 1u) & 0x1FFu;           // @0x4EAAF5..0x4EAB04
     return last_allocated_round_id_ = static_cast<uint16_t>(
@@ -872,8 +873,15 @@ void RoundSim::present_fire(World &world, const RoundSpawnParams &params) {
 
 int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     RoundConsequenceMode mode) {
+    spawn_allocated_ = false;
     const AmmoTableEntry *ammo = world.tables.ammo.by_index(descriptor.ammo_index);
-    if (ammo == nullptr) return -1;
+    if (ammo == nullptr) {
+        // A row the table does not hold reads as retail's zeroed record: no flag
+        // leg, so the allocation still takes its id [orig: g_AmmoDefTable
+        //  + 276 * index @0x4EC146; CEntityManager_AllocateSlot @0x4EC388].
+        allocate_round_id(descriptor.shot_seq);
+        return -1;
+    }
     // The descriptor's pitch takes the shooter's zero elevation ahead of every
     // dispatch leg; the ring/presentation record keeps the angles it copied
     // before the spawn ran.
@@ -1028,6 +1036,12 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         apply_round_recoil(*ammo, source);
         return first;
     }
+    // The allocation stamps the round's id, which seeds its spread below; it
+    // follows the shotgun leg and precedes everything else, so the legs below
+    // that fly nothing here still take their id [orig: RoundData_SpawnRound ->
+    // CEntityManager_AllocateSlot @0x4EC388, which never fails; the seed
+    // round+0x78 @0x4EC394].
+    const uint16_t round_id = allocate_round_id(params.shot_seq);
     // Null/non-ballistic ammo spawns nothing at this altitude: the Knife(1)/Medic(3)
     // kill zones are the immediate-raycast leaves [orig: kztype dispatch @0x4ec21f],
     // `hasitem` ammo places an item entity instead of flying.
@@ -1043,10 +1057,6 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         }
     }
     if (slot < 0) return -1; // pool exhausted [orig: allocator scan @0xB7DFA0 flags]
-    // The allocation stamps the round's id, which seeds its spread below
-    // [orig: RoundData_SpawnRound -> CEntityManager_AllocateSlot @0x4EC388; the
-    //  seed round+0x78 @0x4EC394].
-    const uint16_t round_id = allocate_round_id(params.shot_seq);
 
     int32_t final_yaw = params.dir_yaw_bam;
     int32_t final_pitch = params.dir_pitch_bam;
@@ -1266,6 +1276,14 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
     const uint32_t base_pitch = static_cast<uint32_t>(params.dir_pitch_bam) & 0xFFFF0000u;
     int first_slot = -1;
     for (int n = 0; n < count; ++n) {
+        // Each pellet is its own allocation, whose id the fan's return hands the
+        // ring [orig: CEntityManager_AllocateSlot from Weapon_SpawnProjectileBurst
+        //  @0x4EB957 / ...WithSpread @0x4EBC10; the cursor returns @0x4EBB98 /
+        //  @0x4EBE6D].
+        const uint16_t pellet_id = allocate_round_id(params.shot_seq);
+        const int64_t pieslice = ammo.kz_pieslice_bam;
+        const uint16_t r1 = world.throwables.fan_prng();
+        const uint16_t r2 = world.throwables.fan_prng();
         int slot = -1;
         for (int i = 0; i < kCapacity; ++i) {
             if (!rounds[static_cast<size_t>(i)].active) {
@@ -1273,10 +1291,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
                 break;
             }
         }
-        if (slot < 0) break;
-        const int64_t pieslice = ammo.kz_pieslice_bam;
-        const uint16_t r1 = world.throwables.fan_prng();
-        const uint16_t r2 = world.throwables.fan_prng();
+        if (slot < 0) continue;
         int32_t yaw;
         int32_t pitch;
         if (shotgun_spread) {
@@ -1306,9 +1321,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.ammo_index = params.ammo_index;
         r.adm_index = params.adm_index;
         r.mass_q16 = signed_from_u32(uint32_t(ammo.weight_in_grains) << 16) / 250;
-        // Each pellet is its own allocation [orig: CEntityManager_AllocateSlot from
-        //  Weapon_SpawnProjectileBurst @0x4EB957 / ...WithSpread @0x4EBC10].
-        r.shot_seq = allocate_round_id(params.shot_seq);
+        r.shot_seq = pellet_id;
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
         r.prev_z_q16 = to_fixed(params.origin.z); // [orig: the spawn's +0x80 copy @0x4ec655]

@@ -498,13 +498,17 @@ void JoinerRole::tick_local_weapon() {
 		const world::AiEntity *pilot = kernel.world.ai.for_handle(params.owner);
 		if (pilot == nullptr)
 			continue;
-		params.shot_seq = ++lp.weapon.round_sequence;
+		// The client's spawn mints the round's id from the fresh word, and the
+		// descriptor's hit_part is the spawned round's [orig:
+		//  Entity_FireWeaponAndSendPacket's client leg RoundData_SpawnRound
+		//  @0x42C02B, pool[ret]+0x78 @0x42C030].
+		params.shot_seq = world::RoundSim::kFreshRoundWord;
 		params.shooter_handle = self_wire_handle();
 		params.shooter_carrier_handle = io.carrier_exclusion();
 		kernel.world.round_sim.spawn(kernel.world, params, world::RoundConsequenceMode::VisualOnly);
 		world::LocalWeaponFiredWire fired;
 		fired.valid = true;
-		fired.shot_seq = params.shot_seq;
+		fired.shot_seq = kernel.world.round_sim.spawned_round_word();
 		// The descriptor's off32 is the PILOT's entity+0x160 — his handheld
 		// ammo-def index, the same source the on-foot pump reads (the equipped
 		// adm's ammo row) — NOT the flare's: the writer's flags byte is
@@ -550,8 +554,10 @@ void JoinerRole::tick_local_weapon() {
 		fire.fire_flags = fired.round.mode_flags;
 		fire.adm_index = fired.adm_index;
 		fire.target_handle = fired.target_handle;
-		// hit_part is NOT a bare sequence: it is
-		// (own roster slot << 9) | (shot_seq & 0x1FF). The host copies the
+		// hit_part is NOT a bare sequence: it is the spawned round's id, which
+		// the pool mints as (own roster slot << 9) | (its counter & 0x1FF)
+		// [orig: CEntityManager_AllocateSlot @0x4EAAE6..0x4EAB0C, with
+		// g_LocalPlayerSlotId the S2C 0x04 slot]. The host copies the
 		// raw word straight into the GLOBAL word_B7C670 on the network arm
 		// [orig: Server_ClientFiredRound @0x50BAA0 @0x50c2ba / @0x50c774],
 		// and its own composition of the same word packs the shooter's
@@ -570,7 +576,7 @@ void JoinerRole::tick_local_weapon() {
 		// comment ALSO blamed it for a retail host's own first-person weapon
 		// reacting to our shots; that was WRONG, and the symptom survived this
 		// fix. The actual mechanism is D-NET-184 and is not packet-driven.
-		fire.hit_part = opennova::pack_fired_round_hit_part(rt.local_player_slot(), fired.shot_seq);
+		fire.hit_part = fired.shot_seq;
 		// entity+0x160 — the shooter's current AMMO-DEFINITION index, a u16 index
 		// into g_AmmoDefTable (stride 276). The host stores it onto the remote
 		// shooter's entity [orig: the send-side read Entity_FireWeaponAndSendPacket

@@ -1201,7 +1201,6 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     d.owner = round.owner;
     d.owner_spawn_id = owner_ent != nullptr ? owner_ent->registry_spawn_id : 0;
     d.owner_handle = round.shooter_handle;
-    d.hit_word = round.shot_seq;
     d.ammo_index = round.ammo_index;
     d.item_id = item_id;
     d.item_friendly = ammo.tracer_item_friendly;
@@ -1322,7 +1321,12 @@ void ThrowableSim::detonate_device(World &world, PlacedDevice &device,
         p.dir_yaw_bam = device.yaw_bam;
         p.dir_pitch_bam = device.pitch_bam;
         p.ammo_index = boom_index;
-        p.shot_seq = device.hit_word;
+        // The think's descriptor reaches the pool with the word as last written,
+        // which the think never writes; the port hands the fresh word (D-NET-XB34)
+        // [orig: Entity_ClaymoreThink @0x4438C0 / Entity_SatchelThink @0x443670 /
+        //  Entity_AVMineThink @0x443BB0 -> RoundData_SpawnRound;
+        //  CEntityManager_AllocateSlot @0x4EAAE6].
+        p.shot_seq = RoundSim::kFreshRoundWord;
         world.round_sim.spawn(world, p);
     }
     remove_device(world, device);
@@ -1452,7 +1456,7 @@ void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
                 p.dir_yaw_bam = d.yaw_bam;
                 p.dir_pitch_bam = d.pitch_bam;
                 p.ammo_index = shrap;
-                p.shot_seq = d.hit_word;
+                p.shot_seq = RoundSim::kFreshRoundWord; // each pellet mints its id
                 world.round_sim.spawn(world, p);
             }
             detonate_device(world, d, "claymorekillzone");

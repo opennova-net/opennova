@@ -2249,9 +2249,14 @@ bool run_ai_round_reaches_the_joiner() {
 			"an occupied craft's round reaches the joiner"))
 		return false;
 	const nw::RoundEventRecord &re = fp.round_events[0];
-	return expect((re.flags & 0x03) == 0x01 && re.adm_index == 3 &&
+	if (!expect((re.flags & 0x03) == 0x01 && re.adm_index == 3 &&
 					re.shooter_handle == pilot_h.packed,
-			"the AI round rides the ammo-def arm with its ammo index and the occupant");
+			"the AI round rides the ammo-def arm with its ammo index and the occupant"))
+		return false;
+	// A slotless shooter's ammo arm hands the pool 0xF600 over the fresh word's low
+	// nine bits, which the round keeps as its id and the ring carries
+	// [orig: Server_ClientFiredRound @0x50BDAE..0x50BDBC; RoundData_AddRound @0x4FDCF5].
+	return expect(re.shot_seq == 0xF7FF, "the AI round's word is the slotless 0xF7FF");
 }
 
 // (i4) The drive-authority chain (net-re §5.13 witness 2026-07-04): vehicles have NO wire

@@ -1416,8 +1416,6 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                 const EntityHandle fire_target{p->slot.f[3] != 0
                     ? uint16_t(p->slot.f[3] - 1) : EntityHandle::kInvalid};
                 shooter->last_fire_target = fire_target;
-				w.round_sequence = static_cast<uint16_t>(w.round_sequence + 1u);
-				const uint16_t shot_seq = w.round_sequence;
 				// The fire tail reads the gun's point for the slot as the FSM
 				// leaves it: next = RECOIL (the mflash column), the clip spent.
 				// [orig: WeaponAction_Fire tail @0x542D1F..0x542D5B]
@@ -1434,7 +1432,6 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				round_event.origin_z = pose[2];
 				round_event.dir_yaw = dir_yaw;
 				round_event.dir_pitch = dir_pitch;
-				round_event.shot_seq = shot_seq;
 				const uint32_t clip_before_consume = static_cast<uint32_t>(
 						std::max(0, ev.fired_clip_before_consume));
 				round_event.mode_flags = static_cast<uint8_t>(
@@ -1475,8 +1472,6 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					const MatchPlayer *row = world.match.player(world.cached.local_player);
 					if (row == nullptr || !row->spectator) shooter->damage_state = 0;
 				}
-				if (io.is_authority) world.out.rounds.add(round_event);
-
 				RoundSpawnParams round;
 				round.owner = world.cached.local_player;
 				round.shooter_handle = round_event.shooter_handle;
@@ -1485,7 +1480,14 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				round.dir_pitch_bam = dir_pitch;
 				round.ammo_index = adm->ammo_index;
 				round.adm_index = adm_index;
-				round.shot_seq = shot_seq;
+				// The fire carries the fresh word: the pool mints the round's id from
+				// its one counter, and the ring record (the host's) or the C2S 0x06
+				// hit_part (a joiner's) takes the spawned round's word.
+				// [orig: Entity_FireWeaponAndSendPacket - the authority copy
+				//  @0x42BED5 into Server_ClientFiredRound @0x50C774 ->
+				//  RoundData_AddRound ring+28 @0x4FDCF5; the client's
+				//  RoundData_SpawnRound and pool[ret]+0x78 @0x42C030]
+				round.shot_seq = RoundSim::kFreshRoundWord;
 				round.subtype = round_event.subtype;
 				round.charge = w.pending_throw_charge;
 				// The firing slot's tracer cadence byte (MountSlot+0x80) — the
@@ -1505,6 +1507,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				world.round_sim.spawn(world, round,
 						!io.is_authority ? RoundConsequenceMode::VisualOnly
 						                 : RoundConsequenceMode::Authoritative);
+				const uint16_t shot_seq = world.round_sim.spawned_round_word();
+				round_event.shot_seq = shot_seq;
+				if (io.is_authority) world.out.rounds.add(round_event);
 
 				// The wire half of Entity_FireWeaponAndSendPacket: the embedder's
 				// net layer builds the fixed C2S 0x06 descriptor from this record.

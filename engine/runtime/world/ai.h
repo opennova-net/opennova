@@ -831,7 +831,6 @@ public:
     std::vector<int32_t> target_set_calls; // recorded Entity_SetAITarget net-ids (@0x45d760)
     uint32_t prng_a = 0;    // [orig: dword_31BFBB8] engagement fire-delay jitter stream
 	int32_t aircraft_turn_sequence = -1; // [orig: dword_815190]
-	uint16_t fire_shot_seq = 0; // per-shot sequence word [orig: word_B7C670]
 
 	// dword_31BFBB8 owns this independent rotate LCG. PRNG_Next16's shared
     // dword_31BFBB0 owner lives on World so non-AI consumers cannot fork it.

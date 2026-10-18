@@ -169,7 +169,6 @@ struct LocalPlayerWeapon {
     // is its step past 1 (0 fps = a channel that never steps).
     anim::ClipTimeline anim_clock;
     uint32_t fired_serial = 0;
-    uint16_t round_sequence = 0;
     uint32_t dry_serial = 0;
     uint32_t reload_serial = 0;
     uint32_t reload_applied_serial = 0;

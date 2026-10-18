@@ -353,12 +353,13 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			// PowerThrow charge from fireRequest+80; RoundData_SpawnRound
 			// scales velocity for bytes 1..254 [orig: @0x4ec5bb].
 			rp.charge = fr.misc_byte;
-			// The ring takes the spawned round's id, the pool's fresh one for a
-			// 0xFFFF word, a fan's last pellet's [orig: RoundData_AddRound -
-			//  RoundData_SpawnRound @0x4FDC58, ring+28 = round+0x78
-			//  @0x4FDCF1..0x4FDCF5; the fans return the cursor @0x4EBE6D].
-			if (world->round_sim.spawn(*world, rp) >= 0)
-				ev.shot_seq = world->round_sim.last_allocated_round_id();
+			// The ring takes the spawned round's word: its id, a fan's last
+			// pellet's, pool slot 0's for a spawn that allocated nothing
+			// [orig: RoundData_AddRound - RoundData_SpawnRound @0x4FDC58, ring+28
+			//  = pool[ret]+0x78 @0x4FDCF1..0x4FDCF5; the fans return the cursor
+			//  @0x4EBE6D].
+			world->round_sim.spawn(*world, rp);
+			ev.shot_seq = world->round_sim.spawned_round_word();
 		}
 	}
 	if (round_lands) world->out.rounds.add(ev);
