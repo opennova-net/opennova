@@ -378,6 +378,13 @@ int count_held_machines(db::Database &db) {
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
+bool machine_launching_for(db::Database &db, int64_t server_id) {
+	return !db.query("SELECT 1 FROM fleet_machines WHERE launched_for = $1 AND state IN "
+					 "('launching', 'booting');",
+					  { BindValue(server_id) })
+					.empty();
+}
+
 // --- what the cloud answered ---
 
 bool record_launch_subnet(db::Database &db, int64_t id, const std::string &subnet) {

@@ -7,6 +7,7 @@
 #include "hosted/data_set_repository.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/host_limits.h"
+#include "hosted/server_phase.h"
 #include "http_json.h"
 #include "loggable.h"
 #include "server_config.h"
@@ -274,6 +275,7 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	text_or_null(e, "running_at", s.running_at);
 	text_or_null(e, "ended_at", s.ended_at);
 	put_listing(e, db, s, admin);
+	if (!admin) put_phase(e, db, s, billing::unix_now() * 1000);
 	if (admin) {
 		put_owner(e, db, s.owner_user_id);
 		put_account(e, "service_account", db, s.service_user_id);
@@ -300,6 +302,60 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		e["outdated"] = outdated;
 	}
 	return e;
+}
+
+void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, int64_t now_ms) {
+	PhaseInputs in;
+	in.state = s.state;
+	in.restarts = s.restarts;
+	const std::vector<ServerStart> starts = list_starts(db, s.id, 1);
+	if (!starts.empty()) in.last_start = starts.front();
+	if (is_live(s.state)) {
+		const auto machine = s.machine_ref ? find_machine(db, *s.machine_ref) : std::nullopt;
+		if (machine) in.machine_state = machine->state;
+		in.machine_launching = machine_launching_for(db, s.id);
+		in.launches_held =
+				launch_not_before_ms(db, s.own_machine ? MachineKind::Own : MachineKind::Shared) > now_ms;
+		// Its own container's report, and its pinned trees as its machine holds them
+		// with their manifests' bytes.
+		const auto report = slot_report_of(db, s.id);
+		if (report && report->container == s.container) in.report = report;
+		for (const std::optional<int64_t> id : { s.base_tree_id, s.expansion_tree_id }) {
+			if (!id) continue;
+			if (const auto tree = find_tree(db, *id)) {
+				for (const TreeFile &f : tree->files) in.data_bytes_total += f.size;
+			}
+			if (!machine) continue;
+			for (const MachineTree &t : machine_trees(db, machine->id)) {
+				if (t.tree_id == *id) in.trees.push_back(t);
+			}
+		}
+	}
+	const ServerPhase phase = server_phase(in);
+	crow::json::wvalue p;
+	p["name"] = phase_text(phase.phase);
+	if (phase.phase == Phase::DownloadingData) {
+		p["bytes_done"] = phase.bytes_done;
+		p["bytes_total"] = phase.bytes_total;
+	}
+	if (phase.phase == Phase::Restarting) {
+		p["restart"] = phase.restart;
+		p["restart_limit"] = phase.restart_limit;
+	}
+	e["phase"] = std::move(p);
+	if (const auto why = stopped_because(s.state, in.last_start)) {
+		crow::json::wvalue b;
+		b["cause"] = start_cause_text(why->cause);
+		if (why->exit_code)
+			b["exit_code"] = *why->exit_code;
+		else
+			b["exit_code"] = nullptr;
+		b["oom"] = why->oom;
+		b["line"] = why->line;
+		e["stopped_because"] = std::move(b);
+	} else {
+		e["stopped_because"] = nullptr;
+	}
 }
 
 void HostedRoutes::configure(const ServerConfig &config, const PlacementPolicy &fleet) {
@@ -355,8 +411,15 @@ void HostedRoutes::register_routes(WebApp &app) {
 // (newer data than its pins, while live), update_requested, restarts,
 // failure_reason, created_at, updated_at, running_at, ended_at (UTC, null until
 // set), listing ({rid, server_name, mission_name, players, max_players,
-// host_ip, host_port} while listed, else null)}, without its events. 401 with
-// no live session.
+// host_ip, host_port} while listed, else null), phase ({name: queued,
+// restarting, moving, launches_held, launching_machine, waiting_for_slot,
+// downloading_data, downloading_server, starting_server, signing_in, running,
+// stopping, stopped or failed; bytes_done and bytes_total with
+// downloading_data, restart and restart_limit with restarting}: where its
+// start stands, server_phase.h), stopped_because ({cause: crash, timeout,
+// fleet, stop, update, limits, no_data or link_lost, exit_code, oom, line: the
+// server's own last line} for a stopped or failed server, else null)}, without
+// its events. 401 with no live session.
 crow::response HostedRoutes::me_servers(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);

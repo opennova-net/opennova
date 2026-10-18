@@ -204,6 +204,8 @@ std::vector<int64_t> drain_machines(
 int count_machines(db::Database &db, FleetMachineState state);
 // How many lost machines the mass-lost brake holds (the heartbeat's machines_held).
 int count_held_machines(db::Database &db);
+// Whether a machine launched for server `server_id` is launching or booting.
+bool machine_launching_for(db::Database &db, int64_t server_id);
 // How long an ended or failed machine's row stays after its end (the admin's
 // fleet view lists the newest of them), as long as a finished job's.
 inline constexpr int64_t kEndedMachineKeepS = 14 * 24 * 60 * 60;

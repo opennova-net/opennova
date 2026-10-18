@@ -44,9 +44,18 @@ namespace hosted {
 // its support tier), its service account, its container and machine address,
 // its place in the fleet (machine_ref, slot, game_port, generation,
 // serve_image), its pins and whether it is outdated, and its listing's
-// players besides. Never its admin password. Without its events.
+// players besides. Never its admin password. Without its events. The owner's
+// views carry its phase and why its last run ended besides (phase_json).
 // With `zone` (the play zone, "" for none), its address's hostname too.
 crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin, const std::string &zone = {});
+
+// Where server `s`'s start stands and why its last run ended (server_phase.h),
+// read from its rows at `now_ms` (Unix milliseconds: the launch backoff's
+// clock) into `e`: "phase" {name, and with downloading_data bytes_done and
+// bytes_total, with restarting restart and restart_limit}, "stopped_because"
+// ({cause, exit_code, oom, line} for a stopped or failed server whose last run
+// ended, else null).
+void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, int64_t now_ms);
 
 // An offered data set (data_set_repository.h) as GET /api/me/servers lists it:
 // {id, display_name, title, version, missions [{file, title}], limits, expansions
