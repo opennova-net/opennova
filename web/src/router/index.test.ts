@@ -3,6 +3,7 @@ import router from './index';
 import AddressesPage from '../pages/account/AddressesPage.vue';
 import AddressesSection from '../pages/admin/AddressesSection.vue';
 import LobbyServerPage from '../pages/LobbyServerPage.vue';
+import MachineDetailSection from '../pages/admin/MachineDetailSection.vue';
 import NotFoundPage from '../pages/NotFoundPage.vue';
 
 // The routes whose paths take a numeric id resolve a real one: a pattern's
@@ -13,6 +14,7 @@ describe('router', () => {
     // The billing portal's cancel flow for an address returns here.
     ['/me/addresses', AddressesPage],
     ['/admin/addresses', AddressesSection],
+    ['/admin/fleet/machines/3', MachineDetailSection],
   ])('resolves %s', (path, page) => {
     const matched = router.resolve(path).matched;
     expect(matched.at(-1)?.components?.default).toBe(page);

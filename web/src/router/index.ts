@@ -28,6 +28,7 @@ import OverviewSection from '../pages/admin/OverviewSection.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
 import UserDetailSection from '../pages/admin/UserDetailSection.vue';
 import FleetSection from '../pages/admin/FleetSection.vue';
+import MachineDetailSection from '../pages/admin/MachineDetailSection.vue';
 import UsageSection from '../pages/admin/UsageSection.vue';
 import BillingSection from '../pages/admin/BillingSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
@@ -100,6 +101,7 @@ const router = createRouter({
         { path: 'users', component: UsersSection, meta: { title: 'Admin: Users' } },
         { path: 'users/:id(\\d+)', component: UserDetailSection, meta: { title: 'Admin: User' } },
         { path: 'fleet', component: FleetSection, meta: { title: 'Admin: Fleet' } },
+        { path: 'fleet/machines/:id(\\d+)', component: MachineDetailSection, meta: { title: 'Admin: Machine' } },
         { path: 'addresses', component: AddressesSection, meta: { title: 'Admin: Static addresses' } },
         {
           path: 'fleet/:id(\\d+)',
