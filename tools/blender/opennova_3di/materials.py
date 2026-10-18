@@ -740,6 +740,11 @@ def file_size(path):
     return None
 
 
+# The largest side of a model texture Black Hawk Down ships (its 639 .dds, each
+# DXT5 with its full mip chain).
+BHD_TEXTURE_SIDE = 512
+
+
 def sides(size):
     return f"{size[0]} x {size[1]}"
 
@@ -768,8 +773,12 @@ def convert(exporter, source, out_path, out):
     """`opennova-3di texture` over a source TGA, .mdt or PNG file: `out_path`
     written as `out` plans it (a .dds by the CLI's auto rule, DXT1 for an
     opaque image and DXT5 otherwise, with its full mip chain; or a 32-bit TGA),
-    halved while a side exceeds its cap."""
+    halved while a side exceeds its cap. A model written for Black Hawk Down
+    writes every .dds as DXT5, the form of each of the 639 model textures BHD
+    ships (none DXT1)."""
     args = ["texture", source, "-o", out_path]
+    if out_path.lower().endswith(".dds") and exporter.props.threedi_version == "GP":
+        args += ["--format", "dxt5"]
     if out.cap:
         args += ["--max-size", str(out.cap)]
     o3dtext.run_cli(exporter.context, args, ExportError)
@@ -1172,6 +1181,9 @@ class ModelMaterials:
                 self.exporter.note(f"{what}: its texture {name} is {sides(out.size)}, whose sides are not powers of "
                                    "two, so it is written as a TGA: the game pads a .dds of such sides to the next "
                                    "powers of two, and the model's UVs would reach the padding")
+        if props.threedi_version == "GP" and max(out.size) > BHD_TEXTURE_SIDE:
+            self.exporter.note(f"{what}: its texture {name} is {sides(out.size)}; Black Hawk Down ships no model "
+                               f"texture over {BHD_TEXTURE_SIDE} a side (the model's Max texture size halves it)")
         if any(runtime_type(t) in (4, 5) for _, t in out.rows) and max(out.size) > NORMAL_MAP_SIDE:
             self.exporter.note(f"{what}: its normal map {name} is {sides(out.size)}; the game halves a normal map "
                                f"until it fits {NORMAL_MAP_SIDE} a side when it loads it, so the file carries texels "

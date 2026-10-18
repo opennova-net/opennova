@@ -231,8 +231,11 @@ Black Hawk Down loads. A GP export builds the model as 3DI3 first, then
 `opennova-3di gp` writes it as GP, named after its file as BHD's own model
 tool names a model, so a model exported as `mp5_1st.3di` replaces BHD's MP5.
 Its textures are written as for 3DI3 (BHD reads the `.dds` of a row's name
-first too), and its animations export unchanged: BHD reads the same `.adm`
-and `.bad` files.
+first too), but every `.dds` as DXT5 with its full mip chain, the form of each
+model texture BHD ships, and a texture over 512 a side, which BHD never ships,
+is noted. Its animations export unchanged: BHD reads the same `.adm` and
+`.bad` files. A model past the vertices or triangles of the largest BHD ships
+(a first-person gun, named `*_1st`, against BHD's guns) is noted too.
 
 Only a rigid model writes as GP; a skinned one is refused. BHD finds a bump
 material's normal map by its texture's name, `<texture>.mdt` beside the
