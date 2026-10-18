@@ -915,8 +915,8 @@ void test_total_clips_seat_legs() {
 // The local pump reads a shared bucket and its pool through the player's seat: on a
 // controller seat under a carrier with no EWeap bit both read 0 and the bucket keeps
 // its rounds; off the seat they read the player's own.
-// [orig: sub_5405F0 @0x540604..0x540627 from WeaponAction_Idle @0x542990;
-//  Entity_GetScoreValueBySlotType @0x54078F..0x540799; sub_540670 @0x540684..0x540692]
+// [orig: WeaponSlot_GetSharedLoadedRounds @0x540604..0x540627 from WeaponAction_Idle @0x542990;
+//  Entity_GetScoreValueBySlotType @0x54078F..0x540799; WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692]
 void test_pump_reads_the_bucket_through_the_seat() {
     Fixture f;
     auto &m4 = f.t.entries[f.m4];

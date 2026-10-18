@@ -38,7 +38,7 @@ void Server_RouteGuidance(NapiNPServerCtx &ctx, world::World &world);
 // literally. The record's resulting state goes back to the sender alone
 // (mask 0x30) as S2C 0x37 {handle, state, number}; nothing else moves (no
 // sound, no phase: the host's door tick carries an opening record on).
-// [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20 (ex NapiNPServerMsg_HandleVoteUpdate) — the
+// [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20 (ex NapiNPServerMsg_HandleDoorSlotRequest) — the
 //  authority @0x514b24, the player slot @0x514b31..0x514b40, the reads
 //  @0x514b5f..0x514b91, the pool/def/index gates @0x514ba8..0x514c08, the
 //  record switch @0x514c20..0x514c35, the reply NetPacket_WriteTwoShortsAndByte

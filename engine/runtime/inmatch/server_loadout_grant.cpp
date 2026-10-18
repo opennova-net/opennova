@@ -149,7 +149,7 @@ void seed_and_recalc(const world::WeaponTable &table, world::WeaponInventory &in
 // Every populated slot whose def draws pool units has its loaded rounds zeroed (the
 // slot word, or its def's bucket, which a controller seat does not write), unless the
 // entity sits a UseGun seat (+0x168 3).
-// [orig: WeaponSlots_ClearLoadedRounds @0x5423C0 (ex WeaponOverlay_UpdateAllPerFrame) - the seat test
+// [orig: WeaponSlots_ClearLoadedRounds @0x5423C0 (ex WeaponSlots_ClearLoadedRounds) - the seat test
 //  @0x5423C5, the def[56] gate @0x5423E6, WeaponSlot_SetSharedLoadedRounds(bucket, 0) (its seat test
 //  @0x540684..0x540692) or slot+16 = 0]
 void clear_loaded_rounds(const world::WeaponTable &table, world::WeaponInventory &inv,

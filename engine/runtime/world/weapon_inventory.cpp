@@ -338,7 +338,7 @@ void refill_slot(const WeaponTable &table, WeaponInventory &inv, const WeaponTab
     WeaponInventorySlot *slot = inv.slot(slot_combo);
     if (slot == nullptr) return;
     if (def.ammo_bucket != 0) {
-        // The bucket write skips a controller or UseGun seat [orig: sub_540670
+        // The bucket write skips a controller or UseGun seat [orig: WeaponSlot_SetSharedLoadedRounds
         //  @0x542858 / @0x5428DE, its seat test @0x540684..0x540692].
         const uint32_t bucket = static_cast<uint32_t>(def.ammo_bucket);
         if (weapon_seat_writes_buckets(seat) && bucket < inv.shared_clips.size())
@@ -688,7 +688,7 @@ void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotStat
     // Only an authored `ammoclass <class> 0` leaves it 0, where retail divides by
     // it (@0x541832); the defaults give 1 (AdmDef_InitEntryDefaults @0x53FF5B).
     if (units == 0) return;
-    // A bucket weapon's rounds read through sub_5405F0, which an EWeap owner
+    // A bucket weapon's rounds read through WeaponSlot_GetSharedLoadedRounds, which an EWeap owner
     // answers with its own slot's clip [orig: @0x5417B0..0x5417C5;
     //  @0x540634..0x540637]; otherwise the routed slot's word (@0x5417C9).
     const int32_t loaded = routed_def.ammo_bucket != 0 ? static_cast<int16_t>(own.clip)
@@ -711,7 +711,7 @@ void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotStat
         if (word < 0) word = 0;
         own.reserve = static_cast<int16_t>(word);
     }
-    // The bucket's write skips an EWeap owner [orig: sub_540670 @0x540694..0x54069F].
+    // The bucket's write skips an EWeap owner [orig: WeaponSlot_SetSharedLoadedRounds @0x540694..0x54069F].
     if (routed_def.ammo_bucket == 0)
         routed.clip = static_cast<int16_t>(cost / units); // @0x541832 / @0x541850
 }

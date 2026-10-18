@@ -819,7 +819,7 @@ void test_unarmed_usegun_needs_the_session() {
 // holds, as every retail reader of a bucket weapon's rounds reads through the entity's
 // seat at the moment it reads (the GUT's simulation_test
 // test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot).
-// [orig: sub_5405F0 @0x5405F0 - seat 3 the carrier's clip @0x540611..0x54061A, else
+// [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0 - seat 3 the carrier's clip @0x540611..0x54061A, else
 //  the entity's bucket @0x540657; HUD_BuildEntityInfo @0x4B85C7..0x4B85E1;
 //  WeaponSlot_CanFire @0x541C79]
 void test_usegun_round_trip_reads_the_personal_bucket() {

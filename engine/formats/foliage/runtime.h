@@ -120,7 +120,7 @@ struct WorldSamplers {
 	// Detail grass samples the flat, 1024-wrapped foliage map at the
 	// candidate's ATLAS position (DetailCell::atlas_x/atlas_z plus the local
 	// offsets; z on the render plane, -y). The IDB's
-	// Foliage_SampleFoliageMapFlat (ex Terrain_GetSurfaceTypeAtFixedPoint, a misnomer); its backing
+	// Foliage_SampleFoliageMapFlat (ex Foliage_SampleFoliageMapFlat, a misnomer); its backing
 	// buffer is the authored foliage map remapped to definition slots.
 	std::function<uint32_t(int32_t atlas_x_fixed, int32_t atlas_z_fixed)>
 	    detail_foliage_mask_at;

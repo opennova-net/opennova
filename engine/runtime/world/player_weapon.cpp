@@ -936,7 +936,7 @@ bool local_held_weapon_visible(const World &world, const Entity &entity,
 	// only for a one-round clip, both read through the entity's seat; a zero total
 	// hides the weapon. [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType
 	// @0x4dcbf5; the clip legs clipsize != -1 @0x4dcc08 and == 1 @0x4dcc0d, the bucket
-	// sub_5405F0 @0x4dcc1b or slot+0x10 @0x4dcc25; the zero test @0x4dcc2b]
+	// WeaponSlot_GetSharedLoadedRounds @0x4dcc1b or slot+0x10 @0x4dcc25; the zero test @0x4dcc2b]
 	if ((def->flags & weapon_flag::kNoClipsNoDraw) != 0) {
 		const WeaponAmmoSeat seat = entity_ammo_seat(world, entity);
 		int32_t total = weapon_seat_pool(seat, def->ammo_class_id,
@@ -1137,7 +1137,7 @@ namespace {
 
 // The personal slot's shared-bucket mirror: a bucket weapon's loaded rounds and its
 // pool read through the player's seat as it stands when they are read, on a
-// controller seat 0 and on a gunner seat the carrier's clip. [orig: sub_5405F0 from
+// controller seat 0 and on a gunner seat the carrier's clip. [orig: WeaponSlot_GetSharedLoadedRounds from
 // WeaponSlot_CanFire @0x541C79, the reload gate @0x4E12A7 / @0x4E12C6,
 // WeaponAction_Idle @0x542990, WeaponAction_EmptyIdle @0x542A8C, WeaponAction_Recoil
 // @0x542E07, HUD_BuildEntityInfo @0x4B85D3; the pool from WeaponSlot_CanFire
@@ -1186,7 +1186,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	const bool borrowed_usegun_slot = w.usegun_slot_active;
 	// The slot's ammo reads go through the player's seat: on a controller seat a
 	// shared bucket reads 0 and a pool 0 unless the carrier is EWeap, and the
-	// bucket is never written there. [orig: sub_540670 @0x540684..0x540692]
+	// bucket is never written there. [orig: WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692]
 	const WeaponAmmoSeat ammo_seat =
 			player != nullptr ? entity_ammo_seat(world, *player) : WeaponAmmoSeat{};
 	if (io.inventory != nullptr && !borrowed_usegun_slot)
@@ -1596,7 +1596,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		// The switch back hands the personal slot to its readers again, which read
 		// a bucket weapon's rounds through the seat as it now stands: the mirror the
 		// staging pump read through the gunner seat (the gun's clip) does not carry
-		// across the seat. [orig: sub_5405F0 @0x540611..0x540657, read at each use]
+		// across the seat. [orig: WeaponSlot_GetSharedLoadedRounds @0x540611..0x540657, read at each use]
 		if (borrowed_usegun_slot && !w.usegun_slot_active && io.inventory != nullptr)
 			read_personal_bucket(world, w.slot, *io.inventory, ammo_seat);
 	}
