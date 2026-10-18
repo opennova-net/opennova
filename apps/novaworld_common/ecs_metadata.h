@@ -1,17 +1,21 @@
 #pragma once
 
-// The address a program running as an ECS task finds from its own task, one no
-// configuration can name ahead of the task's start (program.h's configure
-// step): the fleet's internal listener bind (internal_bind),
-// ONNET_INTERNAL_HTTP_BIND where set; on ECS, its task's private IPv4 at the
-// internal port (hosted/fleet_config.h), never a wildcard or public address.
-// Neither: the fleet keeps the environment's bind.
+// What a program running as an ECS task finds from its own task, which no
+// configuration can name ahead of the task's start:
+//
+// - the fleet's internal listener bind (internal_bind, program.h's configure
+//   step): ONNET_INTERNAL_HTTP_BIND where set; on ECS, its task's private IPv4
+//   at the internal port (hosted/fleet_config.h), never a wildcard or public
+//   address. Neither: the fleet keeps the environment's bind;
+// - the release its tasks run (read_task_revision): its task definition's
+//   family and revision, alike in every task of one revision, and new with
+//   each release that changes the program (`app deploy` registers it): the
+//   worker's at-start jobs' key (jobs/scheduler.h).
 //
 // The task metadata endpoint (version 4: the agent names it in every
-// container's ECS_CONTAINER_METADATA_URI_V4) gives the task's private IPv4: in
-// awsvpc mode (Fargate's) the task's containers share one network interface,
-// so any container's first IPv4 address is the task's. Service policy, not a
-// port.
+// container's ECS_CONTAINER_METADATA_URI_V4) gives both: in awsvpc mode
+// (Fargate's) the task's containers share one network interface, so any
+// container's first IPv4 address is the task's. Service policy, not a port.
 
 #include <cstdint>
 #include <string>
@@ -33,6 +37,15 @@ bool parse_task_address(const std::string &json, std::string &out, std::string &
 // into `out`: false with `error` when the endpoint does not answer 200 or its
 // reply does not read (parse_task_address).
 bool read_task_address(
+		const std::string &uri, std::string &out, std::string &error, int timeout_ms = 3000);
+
+// The task's definition, "<family>:<revision>", from the text of a GET
+// <uri>/task reply: false with `error` when it does not read as JSON or names
+// no family and revision.
+bool parse_task_revision(const std::string &json, std::string &out, std::string &error);
+
+// GET <uri>/task read into `out` (parse_task_revision), as read_task_address.
+bool read_task_revision(
 		const std::string &uri, std::string &out, std::string &error, int timeout_ms = 3000);
 
 // Where the bind comes from.

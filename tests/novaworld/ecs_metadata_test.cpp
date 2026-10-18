@@ -1,13 +1,14 @@
 // What an ECS task finds from its own metadata (apps/novaworld_common/ecs_metadata.h):
-// the fleet's internal listener bind, against a fake task metadata endpoint (an
-// HTTP server in this test on loopback, answering GET <uri>/task with a Fargate task's
-// reply).
+// the fleet's internal listener bind and a task's revision, against a fake task
+// metadata endpoint (an HTTP server in this test on loopback, answering GET <uri>/task
+// with a Fargate task's reply).
 //
 //   - a configured ONNET_INTERNAL_HTTP_BIND stands (the metadata never asked);
 //   - no metadata: the environment's bind stands;
-//   - the metadata: the task's private IPv4 at the internal port;
+//   - the metadata: the task's private IPv4 at the internal port, and its task
+//     definition's family and revision;
 //   - each refusal: the endpoint answering an error or not at all, a URI that is no
-//     http://, a body that is no JSON or names no address.
+//     http://, a body that is no JSON or names no address, no family or no revision.
 //
 // Database-free.
 
@@ -32,6 +33,7 @@ constexpr const char *kTask = R"({
   "Cluster": "arn:aws:ecs:us-east-1:111122223333:cluster/opennova-prod",
   "TaskARN": "arn:aws:ecs:us-east-1:111122223333:task/opennova-prod/0123456789abcdef",
   "Family": "opennova-prod-fleet",
+  "Revision": "12",
   "Containers": [
     {
       "Name": "fleet",
@@ -141,6 +143,27 @@ int exercise_refusals() {
 	return 0;
 }
 
+// The task's definition: its family and revision, alike in every task of one
+// revision; a reply that names either not is refused.
+int exercise_revision() {
+	FakeMetadata metadata(200, kTask);
+	std::string revision;
+	std::string error;
+	TEST_EXPECT(ecs::read_task_revision(metadata.uri(), revision, error, 1000));
+	TEST_EXPECT(revision == "opennova-prod-fleet:12" && error.empty());
+	TEST_EXPECT(metadata.last_line() == "GET /v4/abc-123/task HTTP/1.0");
+	TEST_EXPECT(!ecs::parse_task_revision(R"({"Family":"opennova-prod-fleet"})", revision, error));
+	TEST_EXPECT(contains(error, "no task definition family and revision"));
+	TEST_EXPECT(!ecs::parse_task_revision(R"({"Family":"","Revision":"3"})", revision, error));
+	TEST_EXPECT(
+			!ecs::parse_task_revision("not json", revision, error) && contains(error, "is no JSON"));
+	FakeMetadata failing(500, "{}");
+	TEST_EXPECT(!ecs::read_task_revision(failing.uri(), revision, error, 1000));
+	TEST_EXPECT(contains(error, "answers HTTP 500"));
+	std::printf("  the task's revision: opennova-prod-fleet:12, a reply without one refused\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -150,8 +173,10 @@ int main() {
 		rc = exercise_discovered();
 	if (rc == 0)
 		rc = exercise_refusals();
+	if (rc == 0)
+		rc = exercise_revision();
 	net::shutdown();
 	if (rc == 0)
-		std::printf("OK: an ECS task's own address\n");
+		std::printf("OK: an ECS task's own address and revision\n");
 	return rc;
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The whole NovaWorld service on this machine, in Docker (deploy/compose): the
-# five programs (gate, lobby, web, fleet, worker), each its own container
+# six programs (gate, lobby, web, fleet, worker, data), each its own container
 # as a deployment runs each as its own ECS service, PostgreSQL, Valkey, the
 # portal (prod's nginx image in web's network, as in web's ECS task) and, with
 # a data set, hosted game servers on machines the worker launches as containers
@@ -133,7 +133,7 @@ stage_prebuilt() {
     local tree="$1" ctx="$state/prebuilt"
     local program
     rm -rf "$ctx"
-    for program in gate lobby web fleet worker; do
+    for program in gate lobby web fleet worker data; do
         mkdir -p "$ctx/src/build/apps/novaworld_$program"
         cp "$tree/apps/novaworld_$program/opennova-novaworld-$program" "$ctx/src/build/apps/novaworld_$program/"
     done
@@ -154,14 +154,14 @@ stage_prebuilt() {
 build_images() {
     local prebuilt="$1"
     if [[ -z "$prebuilt" ]]; then
-        say "building the images (the five programs, the portal, the smoke test)"
+        say "building the images (the six programs, the portal, the smoke test)"
         stack_compose --profile smoke build
         return
     fi
     local ctx target
     ctx="$(host_path "$(stage_prebuilt "$prebuilt")")"
     say "building the images from $prebuilt's binaries"
-    for target in gate lobby web fleet worker smoke; do
+    for target in gate lobby web fleet worker data smoke; do
         local tag="opennova-novaworld-$target:local"
         MSYS_NO_PATHCONV=1 docker build -q -f "$(host_path "$repo/apps/novaworld_common/Dockerfile")" \
             --target "$target" --build-context "build=$ctx" --build-context "smoke-build=$ctx" \
@@ -263,7 +263,7 @@ upload_file() {
 # The data set of lobby $2 (its games slug) from the folder $1, through the
 # admin API as the Game data page does: the row (made once; an `up` run again
 # finds it), a tree of the folder's base files, each uploaded, the finalize,
-# then the worker's verdict (ready, or failed with why). $3 names a mission
+# then the data program's verdict (ready, or failed with why). $3 names a mission
 # the data must hold. Writes the data set's id and the rotation to the state.
 seed_data_set() {
     local dir="$1" game="$2" mission="$3"
@@ -323,7 +323,7 @@ seed_data_set() {
     done
     reply="$(admin_api POST "/api/admin/data-sets/$id/trees/$tree/finalize")"
     [[ "$(reply_code)" == 202 ]] || die "finalizing the tree failed: HTTP $(reply_code) $reply"
-    say "finalizing (the worker checks the files and lists the missions)..."
+    say "finalizing (the data program checks the files and lists the missions)..."
     waited=0
     while :; do
         reply="$(admin_api GET /api/admin/data-sets)"
@@ -337,7 +337,7 @@ seed_data_set() {
                 die "the tree failed: $error" ;;
             "") die "tree $tree of data set $id is gone" ;;
         esac
-        [[ "$waited" -lt 300 ]] || die "the tree is still $state_now after 300 s (scripts/dev_stack.sh logs novaworld-worker)"
+        [[ "$waited" -lt 300 ]] || die "the tree is still $state_now after 300 s (scripts/dev_stack.sh logs novaworld-data)"
         sleep 2
         waited=$((waited + 2))
     done
@@ -429,7 +429,7 @@ cmd_up() {
         || { stack_compose ps; die "the stack did not come up healthy (scripts/dev_stack.sh logs)"; }
 
     # The data set reaches the stack as it reaches a deployment: uploaded into
-    # the store through the admin API, finalized by the worker.
+    # the store through the admin API, finalized by the data program.
     [[ "$hosting" == 0 ]] || seed_data_set "$dir" "$data_set" "$mission"
 
     cat << EOF
@@ -459,7 +459,7 @@ cmd_smoke() {
     [[ -f "$env_file" ]] || die "no stack (scripts/dev_stack.sh up first)"
     local args=(run --web novaworld-web:8082 --site novaworld-web:80 --gate novaworld-gate:7597
         --livez novaworld-gate:8081 --livez novaworld-lobby:8081
-        --livez novaworld-fleet:8081 --livez novaworld-worker:8081
+        --livez novaworld-fleet:8081 --livez novaworld-worker:8081 --livez novaworld-data:8081
         --admin-token "$(state_value ADMIN_API_TOKEN)" --timeout 300)
     if [[ "$(state_value STACK_HOSTING)" == "1" ]]; then
         local id mission
@@ -475,7 +475,7 @@ cmd_smoke() {
         echo
         say "the smoke test failed; the last lines of each program (and machine):"
         stack_compose logs --no-color --tail 40 novaworld-gate novaworld-lobby novaworld-web \
-            novaworld-fleet novaworld-worker || true
+            novaworld-fleet novaworld-worker novaworld-data || true
         local id
         for id in $(machine_ids); do
             echo "---- machine $(docker inspect --format '{{.Name}}' "$id")"

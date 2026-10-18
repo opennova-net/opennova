@@ -14,12 +14,13 @@ int64_t Scheduler::wall_now_ms() {
 			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
 }
 
-Scheduler::Scheduler(
-		db::ConnectionPool &pool, std::vector<PeriodicJob> jobs, Clock now_ms, int64_t tick_ms) :
+Scheduler::Scheduler(db::ConnectionPool &pool, std::vector<PeriodicJob> jobs, Clock now_ms,
+		int64_t tick_ms, std::string start_key) :
 		pool_(pool),
 		jobs_(std::move(jobs)),
 		now_(std::move(now_ms)),
-		tick_ms_(std::max<int64_t>(tick_ms, 1)) {}
+		tick_ms_(std::max<int64_t>(tick_ms, 1)),
+		start_key_(std::move(start_key)) {}
 
 Scheduler::~Scheduler() {
 	stop();
@@ -27,6 +28,10 @@ Scheduler::~Scheduler() {
 
 std::string Scheduler::schedule_key(const std::string &kind, int64_t now_ms, int64_t period_ms) {
 	return kind + "@" + std::to_string(now_ms / std::max<int64_t>(period_ms, 1));
+}
+
+std::string Scheduler::start_schedule_key(const std::string &kind, const std::string &start_key) {
+	return kind + "@start:" + start_key;
 }
 
 void Scheduler::enqueue_at_start(db::Database &db, int64_t now_ms) {
@@ -37,6 +42,8 @@ void Scheduler::enqueue_at_start(db::Database &db, int64_t now_ms) {
 		job.kind = p.kind;
 		job.payload = p.payload;
 		job.dedupe_key = p.kind;
+		if (!start_key_.empty())
+			job.schedule_key = start_schedule_key(p.kind, start_key_);
 		job.max_attempts = p.max_attempts;
 		// It stands for this bucket: this scheduler adds none beside it.
 		if (enqueue(db, job) != 0)
@@ -45,8 +52,6 @@ void Scheduler::enqueue_at_start(db::Database &db, int64_t now_ms) {
 }
 
 size_t Scheduler::tick(db::Database &db, int64_t now_ms) {
-	if (guard_ && !guard_(db))
-		return 0;
 	size_t enqueued = 0;
 	for (const PeriodicJob &p : jobs_) {
 		const int64_t period = std::max<int64_t>(p.period_ms, 1);
@@ -84,8 +89,7 @@ void Scheduler::start() {
 	}
 	try {
 		auto lease = pool_.acquire();
-		if (!guard_ || guard_(*lease))
-			enqueue_at_start(*lease, now_());
+		enqueue_at_start(*lease, now_());
 	} catch (const std::exception &e) {
 		std::fprintf(stderr, "[jobs] WARN the scheduler's start: %s\n", e.what());
 	}

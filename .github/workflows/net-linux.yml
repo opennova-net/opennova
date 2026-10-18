@@ -105,7 +105,7 @@ jobs:
         run: |
           cmake --build build -j "$(nproc)" --target opennova_novaworld_gate \
             opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_fleet \
-            opennova_novaworld_worker opennova_service_tests \
+            opennova_novaworld_worker opennova_novaworld_data opennova_service_tests \
             url_cipher_test crc32_test nwu_test pubcrypto_test epask_test \
             envelope_test tlv_test session_test \
             registration_url_test gate_response_test gate_probe_test lobby_update_test \

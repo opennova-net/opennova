@@ -283,7 +283,7 @@
     </section>
 
     <!-- The uploader: a data set's files, through the site to the store, then
-         the worker's finalize. -->
+         the data program's finalize. -->
     <section
       v-if="uploader"
       id="ds-uploader"
@@ -369,7 +369,7 @@
             Uploading: {{ formatBytes(uploadedBytes) }} of {{ formatBytes(pickedBytes) }} ({{ percent(uploadedBytes, pickedBytes) }}%).
           </template>
           <template v-else-if="uploader.phase === 'finalizing'">
-            Every file is stored. The worker checks the files and lists the missions; this takes a little while for a large tree.
+            Every file is stored. The data program checks the files and lists the missions; this takes a little while for a large tree.
           </template>
           <template v-else-if="uploader.phase === 'ready'">
             <span class="text-online">Ready:</span> tree {{ uploader.treeId }}, version {{ uploadedTree?.version || 'unknown' }},
@@ -634,7 +634,7 @@ function shortSha(sha: string): string {
 
 function creatorLabel(createdBy: string): string {
   if (createdBy === 'token') return 'by the admin token';
-  if (createdBy === 'worker') return 'by the worker';
+  if (createdBy === 'worker') return 'by the data program';
   return createdBy.startsWith('admin ') ? `by ${createdBy.slice(6)}` : createdBy;
 }
 
@@ -1007,7 +1007,7 @@ async function startUpload() {
     u.phase = 'finalizing';
     const finalized = await finalizeTree(dataSet.id, treeId);
     if (!finalized.ok) throw new Error(finalized.error.message);
-    flash(`Every file of ${dataSet.display_name} is stored; the worker finalizes tree ${treeId}.`);
+    flash(`Every file of ${dataSet.display_name} is stored; the data program finalizes tree ${treeId}.`);
     await poll.readAgain();
   } catch (err) {
     const cancelled = isAbortError(err);
@@ -1029,7 +1029,7 @@ function cancelUpload() {
   uploader.value?.controller?.abort();
 }
 
-// The tree's outcome once the worker finalized it: the page says so and
+// The tree's outcome once the data program finalized it: the page says so and
 // stops polling fast.
 function followUpload() {
   const u = uploader.value;
@@ -1041,7 +1041,7 @@ function followUpload() {
     flash(`${u.dataSet.display_name} ${tree.version || `tree ${tree.id}`} is ready: new servers start on it.`);
   } else if (tree.state === 'failed') {
     u.phase = 'failed';
-    u.error = tree.error || 'the worker refused the tree.';
+    u.error = tree.error || 'the data program refused the tree.';
   }
 }
 
@@ -1067,7 +1067,7 @@ function onReleasePicked(event: Event) {
 }
 
 // The package opened as a release, sent in parts through the site and
-// completed; the worker validates it. A failure or a cancel deletes the
+// completed; the data program validates it. A failure or a cancel deletes the
 // half-uploaded release.
 async function uploadRelease() {
   const file = releaseFile.value;
@@ -1104,7 +1104,7 @@ async function uploadRelease() {
     releaseName.value = '';
     const input = document.getElementById('ds-release-file') as HTMLInputElement | null;
     if (input) input.value = '';
-    flash(`${name || file.name} is uploaded; the worker checks the package.`);
+    flash(`${name || file.name} is uploaded; the data program checks the package.`);
     await poll.readAgain();
   } catch (err) {
     const cancelled = isAbortError(err);
@@ -1135,7 +1135,7 @@ async function publish(r: Release) {
     fail(result.error.message);
     return;
   }
-  flash(`${name} is published; the worker builds each data set's tree.`);
+  flash(`${name} is published; the data program builds each data set's tree.`);
   await poll.readAgain();
 }
 

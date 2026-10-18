@@ -1,21 +1,22 @@
-# Base compose for the OpenNova NovaWorld service's five programs, each its own
+# Base compose for the OpenNova NovaWorld service's six programs, each its own
 # image (one Dockerfile, a runtime target per program), plus the web portal:
 #   novaworld-gate        the gate (UDP 7597; the hosts' status blobs land there)
 #   novaworld-lobby       a lobby instance (UDP 64206)
 #   novaworld-web         the HTTP routes (8080: the retail NW*.dll and .gsb
 #                         routes, the website's API behind the portal)
-#   novaworld-fleet       the fleet's reconcile pass, the jobs' scheduling, the
-#                         machines' internal listener (8070, the leader alone)
-#   novaworld-worker      the background jobs (the fleet's machine driver calls
-#                         among them)
+#   novaworld-fleet       the fleet's reconcile pass, the machines' internal
+#                         listener (8070, the leader alone)
+#   novaworld-worker      the background jobs and their schedules (the fleet's
+#                         machine driver calls among them)
+#   novaworld-data        the data sets' jobs over the store and their prune
 #   portal                the website (web/): nginx in its image
 # Every program answers GET /livez on ONNET_HEALTH_PORT (8081), web on its HTTP
 # port as well. No program keeps state of its own: the database is
 # PostgreSQL, named by DATABASE_URL (a libpq URI) with DATABASE_PASSWORD beside
 # it, web's ephemeral state Valkey (ONNET_REDIS_URL, with ONNET_REDIS_PASSWORD
 # beside it), and the hosted servers' game data the object store (a deployment's
-# S3; here the `store` volume, a directory web and the worker share: the data
-# sets' trees and the update packages the site's Game data page uploads). The
+# S3; here the `store` volume, a directory web and the data program share: the
+# data sets' trees and the update packages the site's Game data page uploads). The
 # dev overlay (docker-compose.dev.yml) makes
 # this the local stack: a local PostgreSQL and Valkey, the published ports and
 # the dev environment; the hosting overlay (docker-compose.hosting.yml) adds the
@@ -101,7 +102,7 @@ x-novaworld-env: &novaworld-env
   # page fills; hosting is on only with one. A deployment names its bucket in
   # S3 (s3://<bucket>/data, with the region); this stack a directory, the
   # store volume below, shared by web (the page's uploads, which it puts there
-  # part by part) and the worker (the trees it builds); the fleet only
+  # part by part) and the data program (the trees it builds); the fleet only
   # builds URLs under it and mounts nothing.
   ONNET_OBJECT_STORE_URL: ${ONNET_OBJECT_STORE_URL:-file:///var/lib/opennova/store}
   ONNET_OBJECT_STORE_REGION: ${ONNET_OBJECT_STORE_REGION:-}
@@ -193,6 +194,15 @@ services:
       <<: *novaworld-env
       # Job threads (unset: 4; at most DATABASE_POOL_MAX less 2).
       ONNET_WORKER_THREADS: ${ONNET_WORKER_THREADS:-}
+
+  novaworld-data:
+    <<: *novaworld
+    image: ${DATA_IMAGE:-opennova-novaworld-data:local}
+    build:
+      <<: *novaworld-build
+      target: data
+    environment:
+      <<: *novaworld-env
     volumes:
       - store:/var/lib/opennova/store
 

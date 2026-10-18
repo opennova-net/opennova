@@ -1,9 +1,9 @@
-// The five programs end to end (apps/novaworld_common/program.h): gate, lobby,
-// web, fleet and worker as five processes of their built binaries
+// The six programs end to end (apps/novaworld_common/program.h): gate, lobby,
+// web, fleet, worker and data as six processes of their built binaries
 // (program_process.h), on one database of the test's own and one Redis
-// namespace, sharing nothing but those (ctest passes the five binaries). Every
+// namespace, sharing nothing but those (ctest passes the six binaries). Every
 // address a program announces comes from the config, every port fixed up
-// front. Hosted servers across the five (the fleet's supervisor, the
+// front. Hosted servers across them (the fleet's supervisor, the
 // worker's machine driver, a machine's agent and its servers) are the local
 // stack's smoke test's (scripts/dev_stack.sh smoke, its machines containers of
 // their own); hosted_local_e2e runs them in process over the real agent.
@@ -13,8 +13,9 @@
 //      second client sits in its lobby;
 //   2. an admin's push through web (POST /api/admin/hosts/<rid>/command)
 //      reaches the host, as a lobby command the lobby takes;
-//   3. web, the worker and the gate are stopped (SIGTERM, as a redeploy stops
-//      them) and the fleet killed (SIGKILL), then all four started again:
+//   3. web, the worker, the data program and the gate are stopped (SIGTERM, as
+//      a redeploy stops them) and the fleet killed (SIGKILL), then all five
+//      started again:
 //      the lobby never restarts, the host's listing and both lobby sessions
 //      survive (the same session rows, still verified), the new gate hands out
 //      the same lobby, and a push through the new web still reaches the host;
@@ -302,7 +303,7 @@ int run(const Binaries &bin) {
 	const test_db::TestDatabase database({ /*migrate=*/false });
 
 	// Every port the programs' config names, fixed up front: the programs are
-	// five processes, none of which learns another's bound port.
+	// six processes, none of which learns another's bound port.
 	const uint16_t gate_port = free_udp_port();
 	const uint16_t nw_port = free_udp_port();
 	const uint16_t http_port = free_tcp_port();
@@ -344,7 +345,8 @@ int run(const Binaries &bin) {
 	Program web{ "web", bin.web };
 	Program fleet{ "fleet", bin.fleet };
 	Program worker{ "worker", bin.worker };
-	const std::vector<Program *> all = { &lobby, &gate, &web, &fleet, &worker };
+	Program data{ "data", bin.data };
+	const std::vector<Program *> all = { &lobby, &gate, &web, &fleet, &worker, &data };
 	const auto start_program = [&](Program &p) {
 		const std::string url = &p == &fleet ? proxied_url : database.conninfo();
 		std::vector<std::string> env = common;
@@ -421,13 +423,15 @@ int run(const Binaries &bin) {
 	const auto before = host.wait_notice(Notice::Kind::Command, seen, 5000);
 	E2E_EXPECT(before && before->command.args == std::vector<std::string>{ "Pushed Before" });
 
-	// --- 3. web, the worker and the gate stopped as a redeploy stops them, the
-	// fleet killed; all four started again. The lobby never restarts.
+	// --- 3. web, the worker, the data program and the gate stopped as a
+	// redeploy stops them, the fleet killed; all five started again. The lobby
+	// never restarts.
 	E2E_EXPECT(stop_program(web, SIGTERM));
 	E2E_EXPECT(stop_program(fleet, SIGKILL));
 	E2E_EXPECT(stop_program(worker, SIGTERM));
+	E2E_EXPECT(stop_program(data, SIGTERM));
 	E2E_EXPECT(stop_program(gate, SIGTERM));
-	for (Program *p : { &gate, &web, &fleet, &worker }) {
+	for (Program *p : { &gate, &web, &fleet, &worker, &data }) {
 		if (!start_program(*p))
 			return fail((std::string("the ") + p->name + " boots again").c_str());
 	}
@@ -449,7 +453,7 @@ int run(const Binaries &bin) {
 	E2E_EXPECT(site.push(rid, "Pushed After") == 202);
 	const auto after = host.wait_notice(Notice::Kind::Command, seen, 5000);
 	E2E_EXPECT(after && after->command.args == std::vector<std::string>{ "Pushed After" });
-	std::printf("  web, fleet, worker and gate restarted; the listing and the lobby "
+	std::printf("  web, fleet, worker, data and gate restarted; the listing and the lobby "
 				"sessions survived; a push lands\n");
 
 	// --- 4. the fleet's database freezes: its watchdog ends it alone.
@@ -505,8 +509,8 @@ int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	test_redis::init(argc, argv);
 	Binaries bin;
-	if (!bin.read(argc, argv, 1) || argc < 6) {
-		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <fleet> <worker>\n", argv[0]);
+	if (!bin.read(argc, argv, 1)) {
+		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <fleet> <worker> <data>\n", argv[0]);
 		return 2;
 	}
 	TEST_EXPECT(net::startup() == 0);
@@ -514,7 +518,7 @@ int main(int argc, char **argv) {
 	net::shutdown();
 	if (rc == 0)
 		std::printf(
-				"OK: five programs, five processes: a redeploy and a stalled fleet process leave "
+				"OK: six programs, six processes: a redeploy and a stalled fleet process leave "
 				"the lobby serving, and only the lobby's restart drops its sessions\n");
 	return rc;
 }

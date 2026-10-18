@@ -15,8 +15,10 @@
 //          set id> (as GET /api/me/servers offers it, once its tree is ready): the
 //          admin grants the account a server, the account starts one on that data
 //          set (POST /api/me/servers, with --mission's rotation or the data's
-//          whole one) on a machine the worker launches, which reaches running and
-//          is listed in the lobby (its listing's RID), takes console commands
+//          whole one) on a machine the worker launches (its machine.launch job
+//          done by a worker process, never the fleet or the data program), which
+//          reaches running and is listed in the lobby (its listing's RID), takes
+//          console commands
 //          through the fleet's admin link (PLAYER LIST, CHAT SEND), and
 //          stops.
 //   data-set <dir>
@@ -298,6 +300,17 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 	wait_for(read, o.timeout_s);
 	if (!check(state == "running", "it reaches running on a machine the worker launched", why))
 		return;
+	// The launch was a worker's job: each program runs its own kinds alone.
+	reply = site.admin("GET", "/api/admin/jobs?kind=machine.launch&state=done");
+	const auto launches = json_of(reply);
+	const io::JsonValue *done = launches ? launches->get("jobs") : nullptr;
+	std::string launched_by;
+	if (done != nullptr && done->is_array() && !done->array.empty())
+		launched_by = text_at(done->array.front(), { "worker_id" });
+	check(launched_by.rfind("worker-", 0) == 0,
+			"its machine.launch was done by a worker process (" +
+					(launched_by.empty() ? std::string("none") : launched_by) + ")",
+			status_text(reply));
 	const bool listed = rid > 0 ||
 			wait_for(
 					[&] {

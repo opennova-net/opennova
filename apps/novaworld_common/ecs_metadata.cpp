@@ -24,6 +24,27 @@ bool is_ipv4(const std::string &text) {
 	return !text.empty() && net::resolve_ipv4(text, ep, /*allow_names=*/false);
 }
 
+// GET <uri>/task's body into `body`; false with `error` when the endpoint does
+// not answer 200.
+bool read_task(const std::string &uri, std::string &body, std::string &error, int timeout_ms) {
+	if (uri.rfind("http://", 0) != 0) {
+		error = std::string(kMetadataUriVariable) + " is no http:// URI";
+		return false;
+	}
+	const net::HttpReply reply = net::http_exchange("GET", uri + "/task", {}, {}, timeout_ms,
+			[](const std::string &host, net::Endpoint &ep) { return net::resolve_ipv4(host, ep); });
+	if (!reply.transport_ok) {
+		error = "the task metadata endpoint does not answer (" + loggable(reply.error, 120) + ")";
+		return false;
+	}
+	if (reply.code != 200) {
+		error = "the task metadata endpoint answers HTTP " + std::to_string(reply.code);
+		return false;
+	}
+	body.assign(reply.body.begin(), reply.body.end());
+	return true;
+}
+
 } // namespace
 
 std::string metadata_uri_from_env() {
@@ -64,21 +85,32 @@ bool parse_task_address(const std::string &json, std::string &out, std::string &
 
 bool read_task_address(
 		const std::string &uri, std::string &out, std::string &error, int timeout_ms) {
-	if (uri.rfind("http://", 0) != 0) {
-		error = std::string(kMetadataUriVariable) + " is no http:// URI";
+	std::string body;
+	return read_task(uri, body, error, timeout_ms) && parse_task_address(body, out, error);
+}
+
+bool parse_task_revision(const std::string &json, std::string &out, std::string &error) {
+	io::JsonValue task;
+	std::string parse_error;
+	if (!io::json_parse(json, task, parse_error)) {
+		error = "the task metadata is no JSON (" + loggable(parse_error, 120) + ")";
 		return false;
 	}
-	const net::HttpReply reply = net::http_exchange("GET", uri + "/task", {}, {}, timeout_ms,
-			[](const std::string &host, net::Endpoint &ep) { return net::resolve_ipv4(host, ep); });
-	if (!reply.transport_ok) {
-		error = "the task metadata endpoint does not answer (" + loggable(reply.error, 120) + ")";
+	const io::JsonValue *family = member(task, "Family", io::JsonValue::Type::String);
+	const io::JsonValue *revision = member(task, "Revision", io::JsonValue::Type::String);
+	if (family == nullptr || family->string.empty() || revision == nullptr ||
+			revision->string.empty()) {
+		error = "the task metadata names no task definition family and revision";
 		return false;
 	}
-	if (reply.code != 200) {
-		error = "the task metadata endpoint answers HTTP " + std::to_string(reply.code);
-		return false;
-	}
-	return parse_task_address(std::string(reply.body.begin(), reply.body.end()), out, error);
+	out = family->string + ":" + revision->string;
+	return true;
+}
+
+bool read_task_revision(
+		const std::string &uri, std::string &out, std::string &error, int timeout_ms) {
+	std::string body;
+	return read_task(uri, body, error, timeout_ms) && parse_task_revision(body, out, error);
 }
 
 std::string internal_bind(const Sources &sources, std::string &error) {

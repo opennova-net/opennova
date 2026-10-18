@@ -302,7 +302,7 @@ export function completeTreeFile(
 }
 
 // POST /api/admin/data-sets/<id>/trees/<t>/finalize: every file complete,
-// the worker checks and lists the tree (202, state finalizing). 409
+// the data program checks and lists the tree (202, state finalizing). 409
 // not_uploading.
 export function finalizeTree(dataSetId: number, treeId: number): Promise<AdminResult<Tree>> {
   return call(
@@ -334,7 +334,7 @@ export function updateAllServers(dataSetId?: number): Promise<AdminResult<number
 // ---------------------------------------------------------------------------
 // Releases: one uploaded 1SFS package each, with a section per product it
 // carries. POST releases (the size) -> each part PUT through the site
-// (utils/partUpload.ts) -> POST complete, which starts the worker's
+// (utils/partUpload.ts) -> POST complete, which starts the data program's
 // validation.
 
 // GET /api/admin/releases.
@@ -382,14 +382,14 @@ export function putReleasePart(id: number, uploadId: string, partNumber: number,
   );
 }
 
-// POST /api/admin/releases/<id>/complete: the parts joined and the worker's
+// POST /api/admin/releases/<id>/complete: the parts joined and the data program's
 // validation queued (202, status validating).
 export function completeRelease(id: number, body: { upload_id: string; parts: UploadedPart[] }): Promise<AdminResult<Release>> {
   return call(() => adminClient.post<unknown>(`/releases/${id}/complete`, body), pickReleaseReply);
 }
 
 // POST /api/admin/releases/<id>/publish: a draft release published (202): the
-// worker builds each section's data set a new tree from its baseline. 409
+// data program builds each section's data set a new tree from its baseline. 409
 // not_draft.
 export function publishRelease(id: number): Promise<AdminResult<Release>> {
   return call(() => adminClient.post<unknown>(`/releases/${id}/publish`), pickReleaseReply);

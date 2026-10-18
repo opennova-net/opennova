@@ -165,16 +165,17 @@ game is the sole live mission runtime (ADR 0025).
 _Avoid_: NovaWorld (that name now belongs to the service), world scene
 
 **NovaWorld**:
-NovaLogic's online matchmaking and account service, and our reimplementation of it (its five **programs**, `apps/novaworld_*`, over `engine/net/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
+NovaLogic's online matchmaking and account service, and our reimplementation of it (its **programs**, `apps/novaworld_*`, over `engine/net/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
 _Avoid_: emulator, lobby server
 
 **Program (of the NovaWorld service)**:
-One of the service's five binaries, each its own image and ECS service: the **gate**, the
-**lobby**, **web** (the retail HTTP routes and the website's API), the **controller** (the
-hosted servers' supervisor and the job schedules, one elected leader) and the **worker**
-(the **jobs**). Each scales on its own and shares nothing with the others but PostgreSQL
-(and web's Redis); what more than one uses is the shared library (`apps/novaworld_common`).
-There is no all-in-one binary.
+One of the service's binaries, each its own image and ECS service: the **gate**, the
+**lobby**, **web** (the retail HTTP routes and the website's API), the **fleet program** (the
+hosted servers' supervisor, one elected leader), the **worker** (its **jobs** and their
+schedules) and **data** (the data sets' jobs over the game data's store). Each scales on its
+own and shares nothing with the others but PostgreSQL (and web's Redis); what more than one
+uses is the shared library (`apps/novaworld_common`). Each runs only its own job kinds and
+schedules only those. There is no all-in-one binary.
 _Avoid_: role, service (for one program), tier, microservice, pod
 
 **Gate**:
@@ -206,22 +207,35 @@ owner); the owning **lobby instance** takes and runs it within 250 ms, recheckin
 owner. Nothing outside the lobby touches the lobby's memory.
 _Avoid_: push queue (the old in-memory one), message
 
-**Controller**:
-The program that runs the hosted servers' supervisor pass, the console drain, the machine
-agents' internal listener and the periodic **job** schedules, while it holds the election
-lock (`controller_leader`, a generation fencing a stale leader). It never calls the cloud
-itself: its pass enqueues jobs.
-_Avoid_: scheduler (for the program), master, leader (alone)
+**Fleet program**:
+The program (`apps/novaworld_fleet`, ECS service `fleet`) that runs the hosted servers'
+supervisor pass with its admin links, the console drain and the machine agents' internal
+listener (`fleet.<deployment>.opennova.internal:8070`), while it holds the election lock
+(`fleet_leader`, a generation fencing a stale leader). It never calls the cloud and runs and
+schedules no **job** itself: its pass enqueues them for the worker.
+_Avoid_: controller (that word is the in-match **Controller Kind**'s), scheduler, master,
+leader (alone)
 
 **Worker**:
-The program that runs **jobs**, a pool of threads claiming them from PostgreSQL
-(`ONNET_WORKER_THREADS`).
+The program that runs the **jobs** it registers and their schedules: a pool of threads
+claiming them from PostgreSQL (`ONNET_WORKER_THREADS`), and in every worker process a
+scheduler of its own periodic kinds (no election: a schedule key is unique, so a bucket gets
+one job). It alone holds the fleet's cloud calls (`machine.*`, `fleet.sweep`), the billing
+sync and the mail.
 _Avoid_: consumer, executor
+
+**Data program**:
+The program (`apps/novaworld_data`) that runs the data sets' jobs (a tree's finalize, a
+release's validate and apply, the trees' prune) over the game data's store, and schedules
+their prune; one task, its own disk for the files a job passes through. An admin's upload
+never queues a machine launch behind it.
+_Avoid_: data worker, uploader
 
 **Job**:
 One piece of background work in the `jobs` table (a machine launch, describe or terminate,
-a billing sync, a mail, a prune), enqueued in the same transaction as the change that
-causes it, claimed with `SKIP LOCKED` under a lease, retried with backoff, idempotent.
+a billing sync, a mail, a prune, a data set's tree), enqueued in the same transaction as the
+change that causes it, claimed with `SKIP LOCKED` under a lease by the one program that runs
+its kind, retried with backoff, idempotent.
 _Avoid_: task, message, event
 
 **Realm**:
@@ -575,7 +589,7 @@ _Avoid_: seat, position (for the place on the machine), player slot (that is a m
 
 **opennova-hostd**:
 The machine agent (`apps/hostd`, target `opennova_hostd`): one per **machine**, it
-redeems the machine's one-time bootstrap token, then syncs with the **controller**'s internal
+redeems the machine's one-time bootstrap token, then syncs with the **fleet program**'s internal
 listener (by its name, `ONNET_INTERNAL_URL`) every few seconds, reporting each container (its state, CPU, memory, its slot's
 egress) and running the containers the reply wants (a local stack's machine runs them as
 its own processes, `--runtime process`). It decides nothing itself.

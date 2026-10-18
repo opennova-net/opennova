@@ -2,9 +2,9 @@
 // fleet processes on the database (election.h), it runs while it leads
 // the internal listener (the machines' agent routes, bound only by the leader,
 // so the deployment's internal name reaches the one that renders the start
-// files), the hosted servers' supervisor with its admin links, the console
-// drain and the periodic jobs' scheduler. It calls no cloud and runs no job:
-// what it decides it writes as rows and jobs, which the workers' pools run. A
+// files), the hosted servers' supervisor with its admin links and the console
+// drain. It calls no cloud, runs no job and schedules none: what it decides it
+// writes as rows and jobs, which the workers' pools run. A
 // standby waits for the election's lock; a leadership lost ends the process
 // (71), and its container starts it again. On ECS, with
 // ONNET_INTERNAL_HTTP_BIND unset, the internal listener binds the task's
@@ -24,7 +24,6 @@
 #include "hosted/limits_hold.h"
 #include "hosted/net_cidr.h"
 #include "hosted/supervisor.h"
-#include "jobs/scheduler.h"
 #include "object_store.h"
 
 #include <base/os_random/os_random.h>
@@ -72,12 +71,6 @@ int run(const program::Boot &boot) {
 					"(ONNET_INTERNAL_HTTP_BIND, or its ECS task's): the machines' admin.cfg admits "
 					"that address");
 	}
-	// The periodic jobs it enqueues (the workers run them): the prunes, the
-	// website's and the hosted stats' among them, billing's and the fleet's
-	// (parts.h, which web's jobs page reads alike). The fleet builds none of
-	// billing (no transport, no Stripe call).
-	jobs::Scheduler scheduler(boot.pool, periodic_jobs(config, hosting));
-
 	// The admin links to the running hosted servers (hosted/admin_link.h): the
 	// supervisor keeps them in step with its rows and publishes their states
 	// (the routes read those rows), and the console drain runs the routes'
@@ -149,7 +142,6 @@ int run(const program::Boot &boot) {
 		std::_Exit(fleet::kLeadershipLostExitCode);
 	};
 	fleet::Election leader(boot.db_options, election_config);
-	const auto leads = [&leader](db::Database &db) { return leader.still_leads(db); };
 	if (supervisor) {
 		// The machines' agent routes, bound only while this process leads and
 		// before the supervisor's first pass launches a machine whose agent
@@ -170,7 +162,8 @@ int run(const program::Boot &boot) {
 					std::_Exit(1);
 				},
 				[internal] { internal->stop(); } });
-		supervisor->set_pass_guard(leads);
+		supervisor->set_pass_guard(
+				[&leader](db::Database &db) { return leader.still_leads(db); });
 		hosted::Supervisor *sup = supervisor.get();
 		hosted::AdminLinks *links = admin_links.get();
 		hosted::ConsoleDrain *drain = console_drain.get();
@@ -182,24 +175,20 @@ int run(const program::Boot &boot) {
 		leader.add_part(
 				{ "the console drain", [drain] { drain->start(); }, [drain] { drain->stop(); } });
 	}
-	scheduler.set_guard(leads);
-	leader.add_part({ "the scheduler", [&scheduler] { scheduler.start(); },
-			[&scheduler] { scheduler.stop(); } });
 	leader.start();
 
-	// The fleet's watchdog: its supervisor's passes and its scheduler's
-	// ticks while it leads, the election's turns while it waits as a standby
-	// (no stall).
+	// The fleet's watchdog: its supervisor's passes while it leads, the
+	// election's turns while it waits as a standby (no stall), and with
+	// hosting off the election's turns alone.
 	Watchdog watchdog;
 	if (supervisor) {
 		hosted::Supervisor *watched = supervisor.get();
 		watchdog.watch("hosted servers' supervisor", [watched, &leader] {
 			return leader.leading() ? watched->pass_turns() : leader.turns();
 		});
+	} else {
+		watchdog.watch("election", [&leader] { return leader.turns(); });
 	}
-	watchdog.watch("job scheduler", [&scheduler, &leader] {
-		return leader.leading() ? scheduler.turns() : leader.turns();
-	});
 
 	program::LoopHooks hooks;
 	uint64_t launch_failures_reported = 0;
@@ -218,11 +207,10 @@ int run(const program::Boot &boot) {
 	};
 	const int exit_code = program::run_main_loop("fleet", boot, watchdog, hooks);
 
-	// Its parts in reverse (the scheduler, so nothing is enqueued from here
-	// on; the console drain; the supervisor's thread, so no pass runs, and the
-	// admin links while their servers still run, each logged-in session ending
-	// with QUIT; the internal listener), then its lock goes, and a standby
-	// leads. The rows keep their states; the cloud machines and their
+	// Its parts in reverse (the console drain; the supervisor's thread, so no
+	// pass runs, and the admin links while their servers still run, each
+	// logged-in session ending with QUIT; the internal listener), then its lock
+	// goes, and a standby leads. The rows keep their states; the cloud machines and their
 	// containers run on, and the next leader's reconciliation resumes them.
 	std::printf("[shutdown] stopping the fleet\n");
 	leader.stop();

@@ -1,9 +1,9 @@
-# The NovaWorld service's seven images as one bake, run from the repository
+# The NovaWorld service's eight images as one bake, run from the repository
 # root (.github/workflows/novaworld-images.yml builds and publishes them with
 # it; the image names live there):
 #   docker buildx bake -f apps/novaworld_common/docker-bake.hcl
-# The five programs are one target each of this directory's Dockerfile, so the
-# one solve compiles their shared build stage once and finishes the five
+# The six programs are one target each of this directory's Dockerfile, so the
+# one solve compiles their shared build stage once and finishes the six
 # together; beside them the web portal's nginx (web/Dockerfile) and the backup
 # task's (deploy/backup).
 #
@@ -31,7 +31,7 @@ function "cache_to" {
 }
 
 group "default" {
-  targets = ["gate", "lobby", "web", "fleet", "worker", "portal", "backup"]
+  targets = ["gate", "lobby", "web", "fleet", "worker", "data", "portal", "backup"]
 }
 
 target "meta-gate" {}
@@ -39,6 +39,7 @@ target "meta-lobby" {}
 target "meta-web" {}
 target "meta-fleet" {}
 target "meta-worker" {}
+target "meta-data" {}
 target "meta-portal" {}
 target "meta-backup" {}
 
@@ -80,6 +81,13 @@ target "worker" {
   target     = "worker"
   cache-from = cache_from("opennova-novaworld-worker")
   cache-to   = cache_to("opennova-novaworld-worker")
+}
+
+target "data" {
+  inherits   = ["_program", "meta-data"]
+  target     = "data"
+  cache-from = cache_from("opennova-novaworld-data")
+  cache-to   = cache_to("opennova-novaworld-data")
 }
 
 # The web portal (nginx), web's second container.

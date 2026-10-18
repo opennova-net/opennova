@@ -1,9 +1,9 @@
-# The NovaWorld service's five programs (README.md "Programs"), one image each,
+# The NovaWorld service's six programs (README.md "Programs"), one image each,
 # from one shared build stage. Build context is the repo root, one target per
 # program:
 #   docker build -f apps/novaworld_common/Dockerfile --target gate -t opennova-novaworld-gate .
-# and alike for lobby, web, fleet and worker (.github/workflows/novaworld-images.yml
-# publishes them as ghcr.io/<owner>/opennova-novaworld-<program>, all five in one bake:
+# and alike for lobby, web, fleet, worker and data (.github/workflows/novaworld-images.yml
+# publishes them as ghcr.io/<owner>/opennova-novaworld-<program>, all six in one bake:
 # docker-bake.hcl beside this file). One more target, smoke, is the local stack's
 # smoke test (scripts/dev_stack.sh), never published.
 #
@@ -18,8 +18,8 @@
 # worker the machine script (every program that decides whether hosting is on
 # checks it; the worker renders it); the lobby (its own public address, from
 # EC2), web (the game data's store: the admin page's uploads, the update
-# service's packages) and the worker (the fleet's machines, the store, the
-# outbound mail) the AWS CLI v2. No image keeps state: the database is
+# service's packages), the worker (the fleet's machines, the outbound mail) and
+# data (the store: the trees it builds, the packages it reads) the AWS CLI v2. No image keeps state: the database is
 # PostgreSQL (DATABASE_URL, DATABASE_PASSWORD), web's state Redis
 # (ONNET_REDIS_URL, ONNET_REDIS_PASSWORD), the game data the store (S3 on a
 # deployment; the compose stack's directory volume mounts under
@@ -37,10 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
-# Configure the whole tree (cheap) but compile only the five programs and
+# Configure the whole tree (cheap) but compile only the six programs and
 # their lib deps. OPENNOVA_NOVAWORLD_SERVICE=ON defines the service and its
 # programs; BUILD_NOVAWORLD_HTTP=ON pulls Crow + standalone Asio via
-# FetchContent (web, the fleet and the worker build with it).
+# FetchContent (web, the fleet, the worker and data build with it).
 # GDExtension is never touched (godot/src is its own project). Mirrors the
 # flags of ci.yml's `test-linux` job and of .github/workflows/net-linux.yml.
 RUN cmake -S . -B build -G Ninja \
@@ -48,7 +48,8 @@ RUN cmake -S . -B build -G Ninja \
         -DOPENNOVA_NOVAWORLD_SERVICE=ON \
         -DBUILD_NOVAWORLD_HTTP=ON \
     && cmake --build build --target opennova_novaworld_gate opennova_novaworld_lobby \
-        opennova_novaworld_web opennova_novaworld_fleet opennova_novaworld_worker
+        opennova_novaworld_web opennova_novaworld_fleet opennova_novaworld_worker \
+        opennova_novaworld_data
 
 # ---- AWS CLI stage ---------------------------------------------------------
 # The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h), the
@@ -168,8 +169,8 @@ RUN useradd --uid 10002 --user-group --no-create-home --home-dir /nonexistent \
 # a second SIGTERM ends a stuck shutdown only when the program is not PID 1,
 # which the kernel shields from default-action signals (program.cpp).
 
-# The AWS CLI, at the absolute path the programs run it by: web's and the
-# worker's. The local store's mount point beside it (the compose stack's volume:
+# The AWS CLI, at the absolute path the programs run it by: web's, the
+# worker's and data's. The local store's mount point beside it (the compose stack's volume:
 # a named volume takes the image directory's owner and mode on its first mount,
 # so the program, UID 10002, can write it, and the local stack's machines, whose
 # hostd runs as the serve image's UID 10001, can read the trees through it; a
@@ -250,6 +251,20 @@ EXPOSE 8081/tcp
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
     CMD curl -fsS --max-time 2 "http://127.0.0.1:${ONNET_HEALTH_PORT}/livez" || exit 1
 ENTRYPOINT ["/app/opennova-novaworld-worker"]
+
+# ---- data ------------------------------------------------------------------
+# The data sets' jobs over the game data's store (S3 through the AWS CLI in a
+# deployment; the compose stack's directory volume at /var/lib/opennova/store):
+# a tree's files and a release's package pass through its disk.
+FROM runtime-aws AS data
+COPY --from=build /src/build/apps/novaworld_data/opennova-novaworld-data /app/
+RUN ! ldd /app/opennova-novaworld-data | grep -q 'not found'
+ENV ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
+USER 10002
+EXPOSE 8081/tcp
+HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
+    CMD curl -fsS --max-time 2 "http://127.0.0.1:${ONNET_HEALTH_PORT}/livez" || exit 1
+ENTRYPOINT ["/app/opennova-novaworld-data"]
 
 # ---- the local stack's smoke test ------------------------------------------
 # No program and never published: the smoke test scripts/dev_stack.sh runs
