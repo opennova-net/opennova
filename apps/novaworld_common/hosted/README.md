@@ -17,14 +17,19 @@ this directory's.
 - **The hosting entitlement** (`billing/entitlement.*`): how many hosted servers an
   account may have live, the larger of its support tier's servers (a monthly Stripe
   subscription: tier 1, 2 or 3 grants 1, 2 or 3; `billing/tiers.h`) and an admin's comp
-  grant (`players.comp_servers`, 0..16). Only an active player's account has one. It is
+  grant of servers (`comp_grants`, 0..16). Only an active player's account has one. It is
   read from the billing tables (the cache of Stripe the billing sync keeps), whether or
   not billing is configured, so a deploy that breaks billing never stops a payer's
   servers. A subscription grants while Stripe calls it `active`, `trialing` or `past_due`,
   until 48 h past its period's end; `past_due` keeps the account's servers running but
   starts no new one. The own-machine add-on (one subscription of quantity 1 per machine)
   lets that many of the account's servers run on a machine of their own
-  (`hosted_servers.own_machine`), only while a tier also grants.
+  (`hosted_servers.own_machine`), only while a tier also grants; an admin's comp grant of
+  own machines (`comp_grants`, 0..16) adds to them while the account has servers (a tier's
+  or a grant's), so an admin, the local stack and CI give an own machine without Stripe.
+  What every account's entitlement holds is what the service has sold, and no checkout
+  sells past the fleet (`sold_capacity.*`; [`../README.md`](../README.md) "Billing").
+  A start is still refused `at_capacity` when the fleet has no room for it now.
 - **Data sets** (`data_set_repository.*`, `data_set_files.*`,
   `backend/migrations/0011_data_sets.sql`). A data set is a row an admin makes: a **base**
   game (its `title`, the `gameprofile` code `opennova-serve` speaks with `/game`, `jo` or
@@ -366,7 +371,7 @@ writes need the CSRF header.
 | `POST /api/me/servers/<id>/update` | a website session | `update_requested` (placed again on the current trees; players drop): 202; 404; 409 `not_live`, `up_to_date` |
 | `GET /api/me/servers/<id>/stats` | a website session | `?range=1h`, `24h` (the default), `7d`, `30d`: the server now (`live`), the range's `summary` (availability, players, egress, the `approximate` fields) and `series`; 400; 404; 429 (60, then two a second) |
 | `GET /api/me/servers/stats` | a website session | the account's servers together, as above |
-| `PUT /api/admin/users/<id>/comp-servers` | admin | `{"comp_servers": 0..16}`: 200 `{"user"}`; 400; 404 (or a service account). An entitlement down to no server stops the account's hosted servers, as a ban does |
+| `PUT /api/admin/users/<id>/comp` | admin | `{"servers": 0..16, "own_machines": 0..16}`, both: 200 `{"user", "entitlement"}`; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 (or a service account). An entitlement down to no server stops the account's hosted servers, as a ban does |
 | `GET /api/admin/hosted` | admin | the fleet: `enabled`, the provider, the cap, each kind's live servers and room, the live machines then the newest 10 ended (each with its state, cloud id, slots, addresses, agent and template versions, this month's egress) and the newest 100 servers (`?owner=`, `?state=live`, `ended`, `all`), each as the owner's plus its owner and tier, service account, container, place, generation, image, pins and players; never the admin password or an agent's credential |
 | `GET /api/admin/hosted/<id>` | admin | one server with its events and its machine; 404 |
 | `POST /api/admin/fleet/machines/<id>/drain` | admin | the machine takes no new server and its servers move off one at a time (no restart counted), then it ends: 202; 404; 409 `not_live` |

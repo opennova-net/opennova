@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import UserDetailSection from './UserDetailSection.vue';
 import { fetchAccountCdKeys } from '../../api/cdKeys';
-import { deleteUser, fetchUser, listUsers, setCompServers, updateUser } from '../../api/users';
+import { deleteUser, fetchUser, listUsers, setCompGrants, updateUser } from '../../api/users';
 import { user, userDetail, userEntry } from '../../test/adminFixtures';
 import { hostedServer } from '../../test/hostedFixtures';
 import { testRouter } from '../../test/router';
@@ -11,7 +11,7 @@ vi.mock('../../api/users', () => ({
   fetchUser: vi.fn(),
   listUsers: vi.fn(),
   updateUser: vi.fn(),
-  setCompServers: vi.fn(),
+  setCompGrants: vi.fn(),
   deleteUser: vi.fn(),
 }));
 vi.mock('../../api/cdKeys', () => ({ fetchAccountCdKeys: vi.fn() }));
@@ -19,7 +19,7 @@ vi.mock('../../api/cdKeys', () => ({ fetchAccountCdKeys: vi.fn() }));
 const detail = vi.mocked(fetchUser);
 const list = vi.mocked(listUsers);
 const update = vi.mocked(updateUser);
-const comp = vi.mocked(setCompServers);
+const comp = vi.mocked(setCompGrants);
 const remove = vi.mocked(deleteUser);
 const keys = vi.mocked(fetchAccountCdKeys);
 
@@ -81,25 +81,29 @@ describe('UserDetailSection', () => {
     expect(wrapper.text()).not.toMatch(/can host|approve/i);
   });
 
-  it('grants comp servers from 0 to 16, confirming a cut below what runs', async () => {
+  it('grants comp servers and own machines from 0 to 16, confirming a cut below what runs', async () => {
     const { wrapper } = await mountSection();
-    comp.mockResolvedValue({ ok: true, value: user(7, { comp_servers: 3, max_servers: 3 }) });
+    comp.mockResolvedValue({ ok: true, value: user(7, { comp_servers: 3, comp_own_machines: 1, max_servers: 3 }) });
     await wrapper.get('#user-comp-servers').setValue(17);
     expect(wrapper.get('#user-comp-hint').text()).toBe('Enter a whole number from 0 to 16.');
     await wrapper.get('#user-comp-servers').setValue(3);
+    await wrapper.get('#user-comp-own').setValue(-1);
+    expect(wrapper.get('#user-comp-hint').text()).toBe('Enter a whole number from 0 to 16.');
+    await wrapper.get('#user-comp-own').setValue(1);
     await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(confirm).not.toHaveBeenCalled();
-    expect(comp).toHaveBeenCalledWith(7, 3);
-    expect(wrapper.get('[role="status"]').text()).toContain('may now run 3 hosted servers free of charge');
+    expect(comp).toHaveBeenCalledWith(7, { servers: 3, own_machines: 1 });
+    expect(wrapper.get('[role="status"]').text()).toContain('now has 3 hosted servers, 1 on an own machine free of charge');
 
     // A tier of 2 servers, 2 live: a grant of 0 stops none; the tier still covers them.
     comp.mockClear();
     await wrapper.get('#user-comp-servers').setValue(0);
+    await wrapper.get('#user-comp-own').setValue(0);
     await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(confirm).not.toHaveBeenCalled();
-    expect(comp).toHaveBeenCalledWith(7, 0);
+    expect(comp).toHaveBeenCalledWith(7, { servers: 0, own_machines: 0 });
   });
 
   it('confirms a cut that stops servers', async () => {
@@ -107,7 +111,7 @@ describe('UserDetailSection', () => {
       ok: true,
       value: userDetail(7, {
         user: user(7, { comp_servers: 3, max_servers: 3 }),
-        entitlement: { max_servers: 3, source: 'comp', tier: null, comp_servers: 3, tier_servers: 0, own_machines: 0, can_start: true },
+        entitlement: { max_servers: 3, source: 'comp', tier: null, comp_servers: 3, comp_own_machines: 0, tier_servers: 0, own_machines: 0, can_start: true },
         servers: [hostedServer(31), hostedServer(32), hostedServer(33)],
       }),
     });
@@ -127,7 +131,7 @@ describe('UserDetailSection', () => {
       ok: true,
       value: userDetail(7, {
         user: user(7, { comp_servers: 3, max_servers: 3 }),
-        entitlement: { max_servers: 3, source: 'comp', tier: 1, comp_servers: 3, tier_servers: 1, own_machines: 0, can_start: true },
+        entitlement: { max_servers: 3, source: 'comp', tier: 1, comp_servers: 3, comp_own_machines: 0, tier_servers: 1, own_machines: 0, can_start: true },
         servers: [hostedServer(31), hostedServer(32), hostedServer(33, { state: 'stopping' })],
       }),
     });

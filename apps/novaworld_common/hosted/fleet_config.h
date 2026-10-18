@@ -27,6 +27,8 @@
 //   ONNET_FLEET_SHARED_SLOTS      a new shared machine's slots (12; 1..32)
 //   ONNET_FLEET_MAX_SHARED        the most shared machines taking servers (2)
 //   ONNET_FLEET_MAX_OWN           the most own machines taking servers (2)
+//   ONNET_FLEET_MAX_ADDRESSES     the static addresses the fleet sells (0: the
+//                                 add-on is off; sold_capacity.h)
 //   ONNET_FLEET_IDLE_MINUTES      how long a shared machine with no server lives
 //                                 on before it ends (30)
 //   ONNET_FLEET_SLOT_MEMORY_MB    each container's memory, swap none (512)

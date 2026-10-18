@@ -108,8 +108,10 @@
       </section>
 
       <p v-if="billing.comp_servers > 0" class="rounded-panel border border-border bg-panel p-4 text-sm text-ink">
-        An admin granted your account {{ billing.comp_servers }} hosted server{{ billing.comp_servers === 1 ? '' : 's' }}.
-        A support tier covering more raises your limit to the tier's.
+        An admin granted your account {{ billing.comp_servers }} hosted server{{ billing.comp_servers === 1 ? '' : 's' }}<template
+          v-if="billing.comp_own_machines > 0"
+          >, {{ billing.comp_own_machines }} of them on an own machine</template
+        >. A support tier covering more raises your limit to the tier's.
       </p>
 
       <section class="space-y-4" aria-labelledby="support-tiers">

@@ -44,6 +44,7 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 		int64_t now) {
 	Entitlement e;
 	e.comp_servers = std::clamp(account.comp_servers, 0, kMaxCompServers);
+	e.comp_own_machines = std::clamp(account.comp_own_machines, 0, kMaxCompOwnMachines);
 	if (const SubscriptionRow *shown = shown_tier(subscriptions, now)) {
 		e.status = shown->status;
 		e.current_period_end = shown->current_period_end;
@@ -68,20 +69,22 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 	else if (e.comp_servers > 0)
 		e.source = "comp";
 	// The add-on moves one of the tier's servers onto a machine of its own: no
-	// tier, nothing to move.
+	// tier, nothing to move. An admin's own machines move any of its servers.
 	e.own_machines = e.tier > 0 ? static_cast<int>(std::min<int64_t>(own_quantity, int64_t{ 1 } << 16)) : 0;
+	if (e.max_servers > 0) e.own_machines += e.comp_own_machines;
 	e.can_start = e.max_servers > 0 && !past_due;
 	return e;
 }
 
 Entitlement entitlement_of(db::Database &db, int64_t user_id, int64_t now) {
-	const auto rows = db.query("SELECT kind, account_status, comp_servers FROM players WHERE id = $1;",
-			{ db::BindValue(user_id) });
+	const auto rows = db.query("SELECT kind, account_status FROM players WHERE id = $1;", { db::BindValue(user_id) });
 	if (rows.empty()) return Entitlement{};
 	AccountFacts account;
 	account.kind = rows.front().as_text(0).value_or("");
 	account.account_status = rows.front().as_text(1).value_or("");
-	account.comp_servers = static_cast<int>(rows.front().as_int(2).value_or(0));
+	const CompGrants grants = comp_grants_of(db, user_id);
+	account.comp_servers = grants.servers;
+	account.comp_own_machines = grants.own_machines;
 	return entitlement_from(account, subscriptions_of(db, user_id), now);
 }
 

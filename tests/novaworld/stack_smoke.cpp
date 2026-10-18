@@ -229,8 +229,8 @@ std::string session_cookie(const net::HttpReply &reply) {
 }
 
 void check_hosting(const Site &site, int64_t user_id, const Options &o) {
-	auto reply = site.admin("PUT", "/api/admin/users/" + std::to_string(user_id) + "/comp-servers",
-			"{\"comp_servers\":1}");
+	auto reply = site.admin("PUT", "/api/admin/users/" + std::to_string(user_id) + "/comp",
+			"{\"servers\":1,\"own_machines\":0}");
 	if (!check(reply.code == 200, "the admin grants the account a hosted server (comp grant)",
 				status_text(reply)))
 		return;

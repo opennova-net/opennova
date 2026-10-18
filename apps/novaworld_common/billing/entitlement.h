@@ -2,12 +2,13 @@
 
 // An account's hosting entitlement: how many hosted servers it may have live
 // at once (max_servers = the larger of its support tier's servers and an
-// admin's comp grant, players.comp_servers), how many of them may run on an
+// admin's comp grant of servers, comp_grants), how many of them may run on an
 // own machine (the own-machine add-on's quantity, counted only while a tier
-// also grants), and whether a new one may start now. Computed from the billing
-// tables (billing_repository.h), the cache of Stripe the sync worker keeps,
-// whether or not billing is configured, so a deploy that breaks billing never
-// stops a payer's servers. Crow-free. Service policy, not a port.
+// also grants, plus an admin's comp grant of own machines, counted while the
+// account has servers), and whether a new one may start now. Computed from the
+// billing tables (billing_repository.h), the cache of Stripe the sync worker
+// keeps, whether or not billing is configured, so a deploy that breaks billing
+// never stops a payer's servers. Crow-free. Service policy, not a port.
 //
 // A subscription grants while Stripe calls it active, trialing or past_due
 // (Stripe still retries the card: the servers stay up, but no new one starts),
@@ -35,9 +36,13 @@ inline constexpr int64_t kPeriodNetSeconds = 48 * 60 * 60;
 
 struct Entitlement {
 	int max_servers = 0;   // max(comp_servers, the granting tier's servers); 0 locks hosting
-	int own_machines = 0;  // the granting add-on quantities, while a tier grants
+	// The granting add-on quantities while a tier grants, plus
+	// comp_own_machines while max_servers > 0.
+	int own_machines = 0;
 	bool can_start = false; // max_servers > 0 and no granting subscription past_due
-	int comp_servers = 0;  // the admin's grant (the column, also on an account that gets nothing)
+	// The admin's grants (comp_grants; also on an account that gets nothing).
+	int comp_servers = 0;
+	int comp_own_machines = 0;
 	int tier = 0;          // the highest granting tier, 0 for none
 	// The tier subscription the account's page shows: the granting one of the
 	// highest tier, else the newest one; "" with none.
@@ -51,7 +56,8 @@ struct Entitlement {
 struct AccountFacts {
 	std::string kind = "player";           // players.kind
 	std::string account_status = "active"; // players.account_status
-	int comp_servers = 0;                  // players.comp_servers
+	int comp_servers = 0;                  // comp_grants' servers
+	int comp_own_machines = 0;             // comp_grants' own_machine
 };
 
 // Whether Stripe's `status` is one that grants (active, trialing, past_due).

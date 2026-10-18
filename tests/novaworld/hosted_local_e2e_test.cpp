@@ -16,7 +16,7 @@
 //
 //   * no lobby live (the service's lobby drained): the first start below waits
 //     in provisioning, no machine launched, until the lobby takes clients again;
-//   * the owner, granted a server (players.comp_servers), starts a Joint
+//   * the owner, granted a server (comp_grants), starts a Joint
 //     Operations server with POST /api/me/servers (its data_set_id and the
 //     mission its tree lists); the supervisor launches a shared machine, whose
 //     agent bootstraps and syncs, places the server on its first slot, pins it
@@ -539,7 +539,7 @@ int main(int argc, char **argv) {
 					config.object_store_url = store.url_of("");
 				});
 		expect(up, "the service starts");
-		expect(nws::set_comp_servers(*service.pool.acquire(), service.owner_id, 1).ok, "the owner is granted a server");
+		expect(nws::billing::set_comp_grants(*service.pool.acquire(), service.owner_id, { 1, 0 }), "the owner is granted a server");
 
 		// The machines: opennova-hostd processes.
 		const fs::path work = temp.path / "work";
@@ -655,7 +655,7 @@ int main(int argc, char **argv) {
 			p.nwhandle = "Owner2Handle";
 			const auto created = nws::create_user(*service.pool.acquire(), p);
 			second_owner = created.ok ? created.id : 0;
-			expect(second_owner > 0 && nws::set_comp_servers(*service.pool.acquire(), second_owner, 1).ok,
+			expect(second_owner > 0 && nws::billing::set_comp_grants(*service.pool.acquire(), second_owner, { 1, 0 }),
 					"a second owner is granted a server");
 		}
 		const std::string second = second_owner > 0 ? site_login(service, "owner2", "pw-owner2") : std::string();

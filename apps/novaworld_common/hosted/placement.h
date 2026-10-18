@@ -78,6 +78,9 @@ struct PlacementPolicy {
 	int shared_slots = 12; // a new shared machine's slots (ONNET_FLEET_SHARED_SLOTS)
 	int max_shared = 2; // ONNET_FLEET_MAX_SHARED
 	int max_own = 2; // ONNET_FLEET_MAX_OWN
+	// The static addresses the fleet sells (ONNET_FLEET_MAX_ADDRESSES; 0: the
+	// add-on is off). Placement never reads it: sold_capacity.h does.
+	int max_addresses = 0;
 };
 
 // "" when `policy` holds (shared_slots 1..kMaxSlots, each maximum 0 or more),

@@ -165,6 +165,7 @@ bool parse_fleet_config(const EnvLookup &env, FleetConfig &out, std::vector<std:
 	read.whole("ONNET_FLEET_SHARED_SLOTS", 1, kMaxSlots, placement.shared_slots);
 	read.whole("ONNET_FLEET_MAX_SHARED", 0, 64, placement.max_shared);
 	read.whole("ONNET_FLEET_MAX_OWN", 0, 64, placement.max_own);
+	read.whole("ONNET_FLEET_MAX_ADDRESSES", 0, 64, placement.max_addresses);
 	if (check_placement_policy(placement).empty())
 		out.placement = placement;
 	read.whole("ONNET_FLEET_IDLE_MINUTES", 1, 7 * 24 * 60, out.idle_minutes);

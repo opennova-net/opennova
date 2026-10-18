@@ -15,7 +15,7 @@
 // Every reply is an error code with our own message, never database text.
 // Behind ONNET_API_PROXY_ONLY like every /api route. A start needs the
 // account's hosting entitlement (billing/entitlement.h); an admin's comp
-// grant, PUT /api/admin/users/<id>/comp-servers, sits with the admin user
+// grants, PUT /api/admin/users/<id>/comp, sit with the admin user
 // routes (http_listener.cpp). The HttpListener owns one HostedRoutes beside
 // its HostRoutes.
 

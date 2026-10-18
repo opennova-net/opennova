@@ -230,7 +230,7 @@ the repository or an image. With no data set hosting stays off (web logs
 `hosted servers: off (provider none ...)` and `up` prints it).
 
 To start one by hand: log in to the site as `test`, grant an account a server (the admin's
-comp grant, `PUT /api/admin/users/<id>/comp-servers` with `{"comp_servers": 1}`), and start it
+comp grant, `PUT /api/admin/users/<id>/comp` with `{"servers": 1, "own_machines": 0}`), and start it
 from that account's servers page (`POST /api/me/servers`). It lists in the lobby a retail
 client browses; its listing's address is the machine's as the lobby sees it through Docker,
 so joining it is for a client on the stack's network, not a retail client on this machine.

@@ -34,6 +34,7 @@ export function myBilling(overrides: Partial<MyBilling> = {}): MyBilling {
     enabled: true,
     max_servers: 0,
     comp_servers: 0,
+    comp_own_machines: 0,
     own_machines: 0,
     used: 0,
     stopping: 0,
