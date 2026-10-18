@@ -10,7 +10,13 @@
 //
 //   machine.launch     the row's launch (its id, kind and slots; its one-time
 //                      bootstrap token the job's secret), skipped once the row
-//                      left launching. Launched: launching -> booting
+//                      left launching, and refused before any cloud call when
+//                      the machines of its kind that take servers (placement.h
+//                      machine_takes_servers, the row itself among them) run
+//                      past the fleet's maximum for the kind
+//                      (ONNET_FLEET_MAX_SHARED, ONNET_FLEET_MAX_OWN): a runaway
+//                      pass or a forged row launches nothing past the cap, and
+//                      the row fails as a refused launch. Launched: launching -> booting
 //                      (mark_launched); the row left launching meanwhile: the
 //                      cloud machine is ended, unless another run of this job
 //                      recorded it. Refused: the row failed with the refusal
@@ -39,6 +45,7 @@
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
 #include "machine_driver.h"
+#include "placement.h"
 
 #include <net/novaworld/db/database.h>
 
@@ -75,9 +82,11 @@ int64_t enqueue_fleet_sweep(db::Database &db);
 // Whether machine `machine_id`'s launch is queued or running.
 bool machine_launch_pending(db::Database &db, int64_t machine_id);
 
-// The handlers over `driver`, which must outlive the workers.
-void register_fleet_jobs(
-		jobs::JobRegistry &registry, MachineDriver &driver, FleetJobCaps caps = {});
+// The handlers over `driver`, which must outlive the workers; `limits` holds
+// the fleet's maximums the launch checks (placement.h PlacementPolicy, the
+// fleet's policy settings).
+void register_fleet_jobs(jobs::JobRegistry &registry, MachineDriver &driver,
+		PlacementPolicy limits, FleetJobCaps caps = {});
 // The periodic sweep, every `sweep_interval_ms`.
 std::vector<jobs::PeriodicJob> fleet_schedule(int64_t sweep_interval_ms = kFleetSweepIntervalMs);
 

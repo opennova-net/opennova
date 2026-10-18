@@ -562,7 +562,7 @@ int main(int argc, char **argv) {
 		hosted::Supervisor supervisor(service.pool, HostdMachines::profile(), config);
 		// The job workers that run the driver's calls (the launch, the describes, the ends).
 		nws::jobs::JobRegistry job_registry;
-		hosted::register_fleet_jobs(job_registry, driver);
+		hosted::register_fleet_jobs(job_registry, driver, hosted::PlacementPolicy{});
 		nws::jobs::WorkerPoolConfig worker_config;
 		worker_config.threads = 4;
 		worker_config.poll_ms = 50;

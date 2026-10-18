@@ -20,7 +20,9 @@
 //     the launch's answer by the database's clock), so any worker judges the cloud's
 //     launch grace alike;
 //   - a driver that stalls: the passes go on, so the stall watchdog (health.h) that
-//     watches them never fires.
+//     watches them never fires;
+//   - a launch past the fleet's maximum for its kind (a forged row beside the
+//     machine the cap allows) is refused before any cloud call, and its row fails.
 //
 // Compiles the hosted sources directly, as hosted_supervisor_test does.
 
@@ -67,7 +69,8 @@ int test_parallel_launches() {
 	rig.config.placement.max_shared = 20;
 	rig.make_supervisor();
 	jobs::JobRegistry registry;
-	hosted::register_fleet_jobs(registry, rig.fake, hosted::FleetJobCaps{ 20, 20, 20 });
+	hosted::register_fleet_jobs(
+			registry, rig.fake, rig.config.placement, hosted::FleetJobCaps{ 20, 20, 20 });
 	std::vector<int64_t> ids;
 	for (int i = 0; i < 20; ++i) {
 		const int64_t id = rig.request("parallel_" + std::to_string(i));
@@ -303,7 +306,7 @@ int test_rerun_after_failed_mark() {
 int test_stalled_driver() {
 	Rig rig("fleet_jobs_stalled");
 	jobs::JobRegistry registry;
-	hosted::register_fleet_jobs(registry, rig.fake);
+	hosted::register_fleet_jobs(registry, rig.fake, rig.config.placement);
 	const int64_t a = rig.request("stalled_a");
 	const int64_t b = rig.request("stalled_b");
 	TEST_EXPECT(a > 0 && b > 0);
@@ -330,6 +333,41 @@ int test_stalled_driver() {
 	return 0;
 }
 
+// The fleet's maximum held by the launch itself: with one shared machine allowed,
+// the first row launches; a second shared row (forged, no placement made it) gets
+// no cloud call, its row fails as a refused launch, and its job fails for good.
+int test_launch_past_cap() {
+	Rig rig("fleet_jobs_cap");
+	hosted::PlacementPolicy limits = rig.config.placement;
+	limits.max_shared = 1;
+	jobs::JobRegistry registry;
+	hosted::register_fleet_jobs(registry, rig.fake, limits);
+	const auto launch_row = [&rig] {
+		hosted::NewMachine m;
+		m.provider = rig.fake.name();
+		m.kind = hosted::MachineKind::Shared;
+		m.slots = 4;
+		const hosted::CreatedMachine created = hosted::create_machine(rig.db, m);
+		hosted::enqueue_machine_launch(
+				rig.db, created.id, hosted::MachineKind::Shared, 4, created.bootstrap_token);
+		return created.id;
+	};
+	const int64_t first = launch_row();
+	TEST_EXPECT(jobs::run_due(rig.pool, registry) == 1);
+	TEST_EXPECT(rig.fake.launches == 1);
+	TEST_EXPECT(rig.machine(first)->state == FleetMachineState::Booting);
+	const int64_t forged = launch_row();
+	jobs::run_due(rig.pool, registry);
+	TEST_EXPECT(rig.fake.launches == 1);
+	TEST_EXPECT(rig.machine(forged)->state == FleetMachineState::Failed);
+	TEST_EXPECT(rig.db.query("SELECT state FROM jobs WHERE kind = 'machine.launch' ORDER BY id DESC "
+							 "LIMIT 1;")
+						.front()
+						.as_text(0)
+						.value_or("") == "failed");
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -344,6 +382,7 @@ int main(int argc, char **argv) {
 		{ "describe_grace_from_row", test_describe_grace_from_row },
 		{ "rerun_after_failed_mark", test_rerun_after_failed_mark },
 		{ "stalled_driver", test_stalled_driver },
+		{ "launch_past_cap", test_launch_past_cap },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);
