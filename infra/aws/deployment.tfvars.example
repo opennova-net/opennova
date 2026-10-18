@@ -2,8 +2,8 @@
 #
 # The toolbox passes infra/aws/<deployment>.tfvars to every `infra` run of that
 # deployment (prod.tfvars for --deployment prod, staging.tfvars for
-# --deployment staging), with the deployment's name (TF_VAR_deployment):
-#   cp infra/aws/deployment.tfvars.example infra/aws/prod.tfvars
+# --deployment staging; it takes no other deployment), with the deployment's
+# name (TF_VAR_deployment). This file names every knob those two may set.
 # It holds no secret, so committing it keeps every operator on the same knobs.
 # No account id, ARN, bucket name or other account resource id goes here: the
 # toolbox fills those and the region from the deployment's vault item,
@@ -36,9 +36,9 @@
 # vault item. Terraform adopts it and never manages it: it is the load
 # balancer's zone-a address. Staging names none and gets an address of its own.
 
-# The two availability zones, pinned once the stack exists (public a keeps the
-# zone the single-host stack's subnet was made in; ./deploy/run.sh infra output
-# public_subnet_ids, then aws ec2 describe-subnets).
+# The two availability zones, pinned once the stack exists so a change in the
+# region's list never moves a subnet (./deploy/run.sh --deployment <deployment>
+# infra output public_subnet_ids, then aws ec2 describe-subnets).
 # azs = ["us-east-1a", "us-east-1b"]
 
 # The database (database.tf): PostgreSQL 17 on RDS. Its master password comes
