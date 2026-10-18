@@ -8,7 +8,7 @@
 #include <filesystem>
 #include <string>
 
-namespace opennova::novaworld_server::hosted {
+namespace opennova::novaworld_server {
 
 // Writes `content` to a new `path` (replacing a file there). A `secret` file is
 // made the owner's alone before a byte is written: mode 0600 on POSIX, a
@@ -24,4 +24,4 @@ bool write_owner_file(const std::filesystem::path &path, const std::string &cont
 // not be made or restricted.
 bool make_owner_directory(const std::filesystem::path &dir, std::string &error);
 
-} // namespace opennova::novaworld_server::hosted
+} // namespace opennova::novaworld_server

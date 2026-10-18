@@ -40,7 +40,7 @@ struct AwsApiConfig {
 	// AWS_CONTAINER_CREDENTIALS_RELATIVE_URI, which the ECS agent sets in every
 	// container of a task with a role ("/v2/credentials/<id>"); "" off ECS.
 	std::string credentials_uri;
-	std::string scratch_dir; // owner-only (hosted::make_owner_directory)
+	std::string scratch_dir; // owner-only (core/owner_file.h make_owner_directory)
 	int timeout_ms = 15000; // the runner's bound on one curl run
 };
 

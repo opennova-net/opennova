@@ -188,6 +188,7 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/limits_hold.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/random_secret.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/stats_jobs.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/stats_repository.cpp
@@ -385,6 +386,7 @@ add_executable(hosted_admin_link_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/random_secret.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/hosted/admin_link.cpp)
 target_link_libraries(hosted_admin_link_test
@@ -1221,6 +1223,7 @@ add_executable(hosted_fleet_repository_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/random_secret.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp)
 target_link_libraries(hosted_fleet_repository_test
@@ -1253,6 +1256,7 @@ add_executable(hosted_ec2_machine_driver_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/net_cidr.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/random_secret.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp)
 target_link_libraries(hosted_ec2_machine_driver_test PRIVATE opennova_app_common Threads::Threads)
 if(WIN32)

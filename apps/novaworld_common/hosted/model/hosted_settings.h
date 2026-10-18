@@ -160,7 +160,4 @@ std::vector<std::string> render_serve_args(const HostedSettings &settings, std::
 LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
 		std::string_view expansion_code, const RenderInputs &inputs);
 
-// `length` letters and digits from the OS CSPRNG.
-std::string random_secret(size_t length);
-
 } // namespace opennova::novaworld_server::hosted

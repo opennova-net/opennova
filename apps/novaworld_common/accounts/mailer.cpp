@@ -135,7 +135,7 @@ MailResult SesMailer::send(const MailMessage &message) {
 			fs::u8path(config_.scratch_dir) / ("ses-" + strutil::bytes_to_hex(raw.data(), raw.size()) + ".json");
 	std::string error;
 	std::error_code ec;
-	if (!hosted::write_owner_file(file, request_json(config_, message), true, error)) {
+	if (!write_owner_file(file, request_json(config_, message), true, error)) {
 		fs::remove(file, ec);
 		out.error = "the request file: " + error;
 		return out;

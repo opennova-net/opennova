@@ -3,6 +3,7 @@
 #include "accounts/auth.h"
 #include "billing/billing_repository.h"
 #include "core/loggable.h"
+#include "core/random_secret.h"
 #include "hosted/model/address_jobs.h"
 #include "hosted/model/fleet_jobs.h"
 #include "hosted/model/hosted_settings.h"

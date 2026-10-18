@@ -30,6 +30,12 @@ set(NOVAWORLD_COMMON_SOURCES
     core/object_store.cpp
     core/s3_object_store.cpp
     core/local_object_store.cpp
+    # The owner-only files and scratch directories the programs' AWS CLI, curl
+    # and SES calls use, and the random secrets (its names, the machines'
+    # tokens, the hosted servers' passwords).
+    core/owner_file.cpp
+    core/random_secret.cpp
+    core/scratch_dir.cpp
 )
 
 if(BUILD_NOVAWORLD_HTTP)
@@ -86,7 +92,6 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/model/hosted_settings.cpp
         hosted/model/limits_hold.cpp
         hosted/model/net_cidr.cpp
-        core/owner_file.cpp
         hosted/model/placement.cpp
         hosted/model/server_phase.cpp
         hosted/model/sold_capacity.cpp

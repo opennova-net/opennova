@@ -21,7 +21,7 @@
 #include <unistd.h>
 #endif
 
-namespace opennova::novaworld_server::hosted {
+namespace opennova::novaworld_server {
 
 namespace fs = std::filesystem;
 
@@ -133,4 +133,4 @@ bool make_owner_directory(const fs::path &dir, std::string &error) {
 	return true;
 }
 
-} // namespace opennova::novaworld_server::hosted
+} // namespace opennova::novaworld_server

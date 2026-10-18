@@ -261,7 +261,7 @@ int main() {
 	test_temp::TempDir temp("mailer");
 	const fs::path scratch_path = temp.path / "scratch";
 	std::string error;
-	if (!nws::hosted::make_owner_directory(scratch_path, error)) {
+	if (!nws::make_owner_directory(scratch_path, error)) {
 		std::fprintf(stderr, "cannot make the scratch directory: %s\n", error.c_str());
 		return 1;
 	}

@@ -214,7 +214,7 @@ StripeReply CurlStripeApi::run_config(const std::string &text) {
 	const fs::path file = fs::u8path(config_.scratch_dir) / ("stripe-" + random_hex(8) + ".cfg");
 	std::string error;
 	std::error_code ec;
-	if (!hosted::write_owner_file(file, text, true, error)) {
+	if (!write_owner_file(file, text, true, error)) {
 		fs::remove(file, ec);
 		return unreachable("cannot write the request file: " + scrub(error, config_.secret_key));
 	}

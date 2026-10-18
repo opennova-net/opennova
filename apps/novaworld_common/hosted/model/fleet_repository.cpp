@@ -1,5 +1,6 @@
 #include "fleet_repository.h"
 
+#include "core/random_secret.h"
 #include "hosted_settings.h"
 
 #include <base/io/sha256.h>

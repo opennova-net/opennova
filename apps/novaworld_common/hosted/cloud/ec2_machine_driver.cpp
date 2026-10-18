@@ -3,6 +3,7 @@
 #include "core/health.h" // Watchdog::steady_now_ms
 #include "core/loggable.h"
 #include "core/owner_file.h"
+#include "core/random_secret.h"
 #include "core/text_util.h"
 #include "hosted/model/hosted_settings.h"
 #include "hosted/model/net_cidr.h"

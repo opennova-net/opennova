@@ -190,7 +190,7 @@ int run(const std::string &secret_key) {
 	test_temp::TempDir temp("billing_stripe_e2e");
 	const std::filesystem::path scratch = temp.path / "stripe";
 	std::string error;
-	TEST_EXPECT(opennova::novaworld_server::hosted::make_owner_directory(scratch, error));
+	TEST_EXPECT(nws::make_owner_directory(scratch, error));
 
 	// The transport as main() makes it (make_billing): curl through the runner, the key
 	// in an owner-only config file per call.

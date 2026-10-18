@@ -31,6 +31,7 @@
 #include "hosted_fleet_rig.h"
 
 #include "accounts/web_session.h"
+#include "core/random_secret.h"
 #include "hosted/admin_link.h"
 #include "hosted/model/address_jobs.h"
 #include "hosted/model/address_repository.h"
@@ -263,7 +264,7 @@ int test_renders() {
 	TEST_EXPECT(cfg.cfg.remote_admin_port == 32803);
 	TEST_EXPECT(cfg.cfg.mp_novaworld_host_lan_only == 0);
 
-	const std::string admin_password = hosted::random_secret(hosted::kAdminPasswordChars);
+	const std::string admin_password = nws::random_secret(hosted::kAdminPasswordChars);
 	const std::string admin_text = hosted::render_admin_cfg(plan, admin_password);
 	const auto admin = opennova::admincfg::parse(admin_text.data(), admin_text.size());
 	TEST_EXPECT(admin.users.size() == 1);
@@ -275,8 +276,8 @@ int test_renders() {
 	TEST_EXPECT(credential(creds, "NOVAWORLD_USER") == "srv-12");
 	TEST_EXPECT(credential(creds, "NOVAWORLD_PASS") == "pw");
 
-	const std::string a = hosted::random_secret(31);
-	const std::string b = hosted::random_secret(31);
+	const std::string a = nws::random_secret(31);
+	const std::string b = nws::random_secret(31);
 	TEST_EXPECT(a.size() == 31 && a != b);
 	TEST_EXPECT(std::all_of(a.begin(), a.end(), [](char c) {
 		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');

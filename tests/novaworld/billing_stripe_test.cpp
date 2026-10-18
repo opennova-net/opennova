@@ -44,7 +44,7 @@
 
 namespace fs = std::filesystem;
 namespace billing = opennova::novaworld_server::billing;
-namespace hosted = opennova::novaworld_server::hosted;
+namespace nws = opennova::novaworld_server;
 namespace proc = opennova::proc;
 using billing::SignatureCheck;
 using billing::StripeError;
@@ -1100,7 +1100,7 @@ int main() {
 	test_temp::TempDir temp("billing_stripe");
 	const fs::path scratch_path = temp.path / "scratch";
 	std::string error;
-	if (!hosted::make_owner_directory(scratch_path, error)) {
+	if (!nws::make_owner_directory(scratch_path, error)) {
 		std::fprintf(stderr, "cannot make the scratch directory: %s\n", error.c_str());
 		return 1;
 	}

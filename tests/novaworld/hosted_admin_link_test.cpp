@@ -24,6 +24,7 @@
 // hosted_supervisor's and hosted_local_e2e's.
 
 #include "core/loggable.h"
+#include "core/random_secret.h"
 #include "hosted/admin_link.h"
 #include "hosted/model/hosted_repository.h"
 #include "hosted/model/hosted_settings.h"
@@ -54,6 +55,7 @@
 
 namespace fs = std::filesystem;
 namespace net = opennova::net;
+namespace nws = opennova::novaworld_server;
 namespace hosted = opennova::novaworld_server::hosted;
 
 namespace {
@@ -143,7 +145,7 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "FAIL: net::startup\n");
 		return 1;
 	}
-	const std::string password = hosted::random_secret(hosted::kAdminPasswordChars);
+	const std::string password = nws::random_secret(hosted::kAdminPasswordChars);
 	{
 		// Declared first, so the files go last.
 		test_temp::TempDir temp("hosted_admin_link");

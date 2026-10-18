@@ -1,6 +1,7 @@
 #include "agent_route.h"
 
 #include "core/loggable.h"
+#include "core/random_secret.h"
 #include "hosted/model/fleet_config.h"
 #include "hosted/model/fleet_repository.h"
 #include "hosted/model/hosted_settings.h"

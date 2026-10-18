@@ -38,7 +38,7 @@
 // port.
 
 #include "aws_api.h"
-#include "parts.h"
+#include "core/scratch_dir.h"
 
 #include <condition_variable>
 #include <cstdint>

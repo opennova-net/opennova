@@ -37,6 +37,7 @@
 #include "billing/stripe_api.h"
 #include "command_runner.h"
 #include "core/object_store.h"
+#include "core/scratch_dir.h"
 #include "hosted/model/fleet_config.h"
 #include "hosted/model/machine_driver.h"
 #include "jobs/scheduler.h"
@@ -50,29 +51,6 @@
 #include <vector>
 
 namespace opennova::novaworld_server {
-
-// An owner-only scratch directory under the system's temporary one, removed
-// with its owner; a move hands it on (the source then owns none).
-class ScratchDir {
-public:
-	ScratchDir() = default;
-	ScratchDir(ScratchDir &&other) noexcept;
-	ScratchDir &operator=(ScratchDir &&other) noexcept;
-	ScratchDir(const ScratchDir &) = delete;
-	ScratchDir &operator=(const ScratchDir &) = delete;
-	~ScratchDir();
-
-	// A new one named `prefix` and a random tail; empty with `error` when it
-	// cannot be made.
-	static ScratchDir make(const char *prefix, std::string &error);
-
-	const std::filesystem::path &path() const { return path_; }
-	bool empty() const { return path_.empty(); }
-
-private:
-	void remove();
-	std::filesystem::path path_;
-};
 
 struct HostedPolicy {
 	bool on = false;

@@ -33,6 +33,7 @@
 // on every service build.
 
 #include "command_runner.h"
+#include "core/random_secret.h"
 #include "hosted/cloud/docker_machine_driver.h"
 #include "hosted/cloud/ec2_machine_driver.h"
 #include "hosted/model/fleet_config.h"
@@ -69,6 +70,7 @@
 #endif
 
 namespace fs = std::filesystem;
+namespace nws = opennova::novaworld_server;
 namespace hosted = opennova::novaworld_server::hosted;
 using hosted::CloudState;
 using hosted::MachineKind;
@@ -307,7 +309,7 @@ hosted::MachineLaunch launch_of(int64_t machine_id, MachineKind kind = MachineKi
 	launch.machine_id = machine_id;
 	launch.kind = kind;
 	launch.slots = kind == MachineKind::Own ? 1 : 12;
-	launch.bootstrap_token = hosted::random_secret(hosted::kMachineTokenChars);
+	launch.bootstrap_token = nws::random_secret(hosted::kMachineTokenChars);
 	return launch;
 }
 
@@ -517,7 +519,7 @@ int test_machine_script(const std::string &) {
 	values.cluster = kCluster;
 	values.machine_id = 12;
 	values.kind = MachineKind::Own;
-	values.bootstrap_token = hosted::random_secret(hosted::kMachineTokenChars);
+	values.bootstrap_token = nws::random_secret(hosted::kMachineTokenChars);
 	const auto rendered = Ec2MachineDriver::render_user_data(script, values);
 	TEST_EXPECT(rendered);
 	TEST_EXPECT(rendered->find("@OPENNOVA_") == std::string::npos);
