@@ -63,7 +63,7 @@ public:
 	// The C string a slot points at now (its bytes as the buffer holds them).
 	std::string text(int at) const { return at == kEmpty ? std::string() : std::string(buffer_.data() + at); }
 
-	// The strip of ';' ',' '=' from the token at `at`, in place, `c` the last it took [orig: sub_5DFF00 @ 0x5DFF00].
+	// The strip of ';' ',' '=' from the token at `at`, in place, `c` the last it took [orig: CParticleDefEntry_StripSeparators @ 0x5DFF00].
 	void strip(int at, char &c) {
 		if (at == kEmpty) return;
 		char *token = buffer_.data() + at;

@@ -23,7 +23,7 @@ inline constexpr size_t kUsernameMaxBytes = 64;
 // into a 32-byte buffer with an output size of 31, and the copy takes the
 // handle's NUL only when the handle is 30 bytes or fewer, so a longer one
 // reaches the host unterminated [orig: NapiNPServer_HandleNewConnection
-// @0x4c8238..0x4c8249, outputSize 0x1F; the copy, sub_64EA90 @0x64eb3e..0x64eb59].
+// @0x4c8238..0x4c8249, outputSize 0x1F; the copy, CookieJar_GetValueByName @0x64eb3e..0x64eb59].
 inline constexpr size_t kHandleMaxBytes = 30;
 
 // The longest email address an account may have (RFC 5321's path limit, less

@@ -190,7 +190,7 @@ public:
     // then the local entity takes its view pose — the position less the
     // CameraOffset, the yaw (the look yaw too), the pitch and the roll — so
     // free flight starts where the camera was.
-    // [orig: sub_52AFF0 — Camera_ComputeThirdPersonView @0x52b082, the
+    // [orig: Spectator_CycleMode — Camera_ComputeThirdPersonView @0x52b082, the
     //  stores @0x52b087..0x52b0ee]
     void place_on_composed_view();
     // Point the look straight at a mission-space target from a mission-space

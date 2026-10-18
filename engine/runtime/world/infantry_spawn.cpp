@@ -263,7 +263,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
     // @0x4B9610 writes no fade/destroy state. destroy_phases_q16 /
     // destroy_progress are derived values update_item_destroy_fade zeroes and
     // recomputes every call, and objective_death_scored is this port's
-    // once-per-life scoring latch (retail sub_50C840 re-dispatches on the def
+    // once-per-life scoring latch (retail Server_SendItemDeathState re-dispatches on the def
     // flag alone). The +0x1B0 destroy timer is NOT re-seeded here -- retail's
     // only re-seed is Entity_RespawnVehicle (VehicleSystem::respawn).
     entity.destroy_phases_q16.fill(0);

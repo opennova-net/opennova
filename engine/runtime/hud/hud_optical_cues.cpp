@@ -67,7 +67,7 @@ void HudFrameCompiler::element_service_prompt(const HudFrameState &s, float w, f
 	// (Impac22b), draw mode 2 = the centred half-bright drawer.
 	// [orig: HUD_DrawGameplayOverlays -- slot 0xB4C3A0 pushed @0x5BDFD7 (armory /
 	//  vehicle bay), @0x5BE0AA (FARP wait), @0x5BE0F7 (FARP reloading);
-	//  HUD_DrawTextAtVirtualPos @0x5D3EC0 -> sub_5D2EA0 mode 2 @0x5D2ECE]
+	//  HUD_DrawTextAtVirtualPos @0x5D3EC0 -> HUD_DrawTextAligned_HalfBrightNoFlags mode 2 @0x5D2ECE]
 	// The armory line alone yields to an open menu screen: the preround branch
 	// tests the flag before it formats STROVER_ARMORY_INFO, and the bay and
 	// FARP lines never test it. [orig: HUD_DrawGameplayOverlays, `call

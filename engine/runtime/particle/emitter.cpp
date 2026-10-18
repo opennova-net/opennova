@@ -298,7 +298,7 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 	const bool gravitate = (def.move & move_flag::Gravitate) != 0;
 	if (gravitate) {
 		// Engine [orig: CParticleEmitter_UpdateParticles @ 0x5e6980, move&2]:
-		// `delta = pos - emitter.pos`, D3DXVec3Normalize FIRST (`sub_68B032
+		// `delta = pos - emitter.pos`, D3DXVec3Normalize FIRST (`D3DXVec3Normalize
 		// @ 0x68B032` thunks the off_85072C IAT entry — constant-magnitude
 		// force, NOT a distance-proportional spring), THEN `gravity_mask`
 		// (def+3916) scales the unit vector per axis with no renormalize —

@@ -167,7 +167,7 @@ static void impact_impulse(World &world, Entity &e, const VehicleTraits &t,
 
 // Projectile+680 is the wrapped ammo weight converted to Q16 / 250, not
 // the health damage. This reaction runs on both authority and predicting peers.
-// [orig: Projectile_HandleEntityImpact @0x4E9390 -> sub_43C0C0 @0x43C0C0;
+// [orig: Projectile_HandleEntityImpact @0x4E9390 -> Vehicle_HandleProjectileImpactShove @0x43C0C0;
 // RoundData_SpawnRound @0x4EC69B..0x4EC6B7]
 void VehicleSystem::projectile_impact(
 		Entity &target, int32_t weight, const int32_t normal[3], const int32_t hit[3]) {

@@ -142,7 +142,7 @@ void append_rules_and_briefing_text(std::string &out, const RulesBriefingInputs 
 																   : "STROVER_RULES_AD";
 		out += overlays(gametext, team_suffixed(key, team).c_str(), "!");
 		// The protected-spawn-point games add their PSP paragraph while the
-		// mission has a spawn zone [orig: sub_43B910 — g_SpawnZoneCount > 0;
+		// mission has a spawn zone [orig: SpawnZoneList_HasAny — g_SpawnZoneCount > 0;
 		// @0x5b995d..0x5b99a5].
 		if (inputs.spawn_zones) {
 			out += "\r\n\r\n";

@@ -4,7 +4,7 @@
 // track, the destroyed-target re-pick and the S2C 0x75 spectator-mode fold —
 // over the replica rows, which hold every peer's pool-0 players for both the
 // joiner and the listen host's own client.
-// [orig: Spectator_CycleTarget_0 @0x52ac20; sub_52AFF0 @0x52aff0;
+// [orig: Spectator_CycleTarget_0 @0x52ac20; Spectator_CycleMode @0x52aff0;
 //  Entity_TrySetMinimapTrackTarget @0x52abc0; Entity_Destroy @0x43e820..0x43e838;
 //  NapiNPClientMsg_SetSpectatorMode @0x4259e0]
 
@@ -76,7 +76,7 @@ void ClientReplicaPipeline::spectate_cycle_target(int direction) {
 }
 
 bool ClientReplicaPipeline::spectate_cycle_mode(int direction) {
-	// [orig: sub_52AFF0 @0x52aff0]
+	// [orig: Spectator_CycleMode @0x52aff0]
 	if (direction == 0) return false;
 	const uint16_t local = spectate_local_handle_;
 	const auto without_target = [&] {
@@ -110,7 +110,7 @@ bool ClientReplicaPipeline::spectate_cycle_mode(int direction) {
 
 bool ClientReplicaPipeline::spectate_action(int code) {
 	switch (code) {
-	case kSpectateActionCycleMode: // [orig: `push 1; call sub_52AFF0` @0x49bd58]
+	case kSpectateActionCycleMode: // [orig: `push 1; call Spectator_CycleMode` @0x49bd58]
 		return spectate_cycle_mode(1);
 	case kSpectateActionNextTarget: // [orig: @0x49bd67..0x49bd7c]
 	case kSpectateActionPrevTarget: // [orig: @0x49bd89..0x49bd9e]

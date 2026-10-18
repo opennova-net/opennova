@@ -374,7 +374,7 @@ int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &
 //  @0x5417E7 -> the re-split @0x5462A0..0x5462FF on the entity's own words
 //  (@0x540A85..0x540AB0), the reserve read Entity_GetMountSlotReserve @0x546120
 //  from @0x541805 (@0x540780..0x54078E), WeaponSlot_DecrementAmmo @0x541821 ->
-//  sub_5461D0 @0x5461D0, the clip store @0x541850]
+//  Entity_SpendMountSlotReserve @0x5461D0, the clip store @0x541850]
 void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotState &routed,
                               const WeaponTableEntry &own_def, WeaponSlotState &own);
 

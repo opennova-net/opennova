@@ -183,7 +183,7 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 	}
 	// The .trn by the terrain's name, then the files it names, as the game reads them for the mission: the .trn, then
 	// overcast.def and the mission's .env through one parser (D-TERRAIN-18), the .cpt the .trn names (D-TERRAIN-17)
-	// [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> sub_603CC0 @ 0x603D0A; Environment_LoadTimeOfDayConfig @
+	// [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> Terrain_ConfigureAndLoadLodStorage @ 0x603D0A; Environment_LoadTimeOfDayConfig @
 	// 0x57db44].
 	if (out.terrain.empty() && view.project.scan)
 		if (const AssetEntry *entry = view.project.scan->find(out.terrain_name + ".trn")) out.terrain = entry->relative_path;

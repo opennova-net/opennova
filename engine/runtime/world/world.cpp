@@ -738,7 +738,7 @@ void World::process_round_end(int32_t winning_team) {
     // (Cine_StartPlayback @0x577840) + MusicCtx_SelectEndTrack(2) @0x51698f. The
     // cine is the world's (world/epilog_cine.h); the entity update steps it from
     // this frame on. The end track is the value the gamemus MessageHandler
-    // receives through the VM's restart frame (mus_vm_signal: sub_672E50
+    // receives through the VM's restart frame (mus_vm_signal: AudioVM_RunContext
     // @0x672e95; retail gamemus.bin dispatches 1 -> Missionwin, 2 ->
     // Missionlose); the gamemus context is open in SP (Game_StartMission
     // @0x525581 opens it on the is_client bit, which mode 3 single player
@@ -913,7 +913,7 @@ void World::restore(const Snapshot &s) {
     facials = s.facials;
     match = s.match;
     // The cine's drawn flag is process-lifetime (only the cine render pass
-    // writes it), so the rewind keeps it. [orig: dword_26970F4 — sub_570BB0
+    // writes it), so the rewind keeps it. [orig: dword_26970F4 — Cine_RenderOverlays
     //  @0x570C66]
     const bool cine_frame_drawn = epilog.frame_drawn;
     epilog = s.epilog;

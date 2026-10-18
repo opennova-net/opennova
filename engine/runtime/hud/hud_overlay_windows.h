@@ -107,7 +107,7 @@ struct HudBriefingState {
 // The briefing pages: the current page and each page's first wrapped line;
 // the drawer writes the next page's start when the page overflows, and the
 // page keys walk them [orig: dword_28E3D6C (page), g_BriefingPageLineOffsets
-// @0x28E3D70 (ten starts); sub_5B9150 @0x5B9150 (the reset and the cycle)].
+// @0x28E3D70 (ten starts); HUD_CycleBriefingPage @0x5B9150 (the reset and the cycle)].
 struct HudBriefingPages {
 	static constexpr int kPages = 10;
 	int page = 0;

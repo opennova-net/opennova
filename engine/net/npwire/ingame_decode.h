@@ -1720,7 +1720,7 @@ bool decode_weapon_reload(const uint8_t *body, size_t len,
 // powerup row's +0x2B0 byte names (its own copy of the row, written by its own
 // pickup) in its slot table and mounts it. This decoder takes exactly the four
 // bytes a stock host writes; retail's handler reads a short body as handle 0.
-// [orig: NapiNPClientMsg_0x035 @0x4261A0 -> sub_4E03D0 @0x4E03D0; sender
+// [orig: NapiNPClientMsg_0x035 @0x4261A0 -> Player_MountPickedUpWeapon @0x4E03D0; sender
 //  Server_BroadcastWeaponOverlayUpdate @0x509FC0]
 struct WeaponPickupNotice {
 	uint16_t picker_handle = 0;
@@ -2072,7 +2072,7 @@ bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch
 //     transition or not (DoorClass_HandleEvent @0x43f462).
 //   C2S 0x1A (non-authority -> host): the same command sites queue it reliable
 //     with the row's CURRENT state when row > -1 && idx != 0 && idx <= count
-//     [orig: NetPacket_SendWeaponSwitch @0x42D0C0 — gate @0x42d0f9, payload
+//     [orig: NetPacket_SendDoorSlotRequest @0x42D0C0 — gate @0x42d0f9, payload
 //      @0x42d138, queue @0x42d169]. The host: authority + sender player + its
 //     entity, pool lookup, the same gate, then state 0/3 -> 1 iff value == 1;
 //     state 1/2 -> value iff number == 3 (the SECTION number, @0x514c2a); reply
@@ -2127,7 +2127,7 @@ bool decode_clan_roster_update(const uint8_t *body, size_t len, ClanRosterUpdate
 // action 3 (@0x43266c). The host answers with the smallest node id strictly
 // greater than the value as 0x6A action 3, or nothing when none exists.
 // [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210 — read @0x511245,
-//  sub_52B190 @0x511253, NetPacket_SerializeMinimapSlot(3) @0x51127c, send @0x51129e]
+//  CLinkedList_FindNextByNetId @0x511253, NetPacket_SerializeMinimapSlot(3) @0x51127c, send @0x51129e]
 struct ClanRosterWalkRequest {
 	uint32_t after_account_id = 0;
 };
@@ -2139,7 +2139,7 @@ bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
 // The host keeps a 128-row EntityLimit table (23 rows at mission start: per
 // type the cap, the initial per-team allotment and 70 per-team counters)
 // [orig: EntityLimit_InitTable @0x509A70, EntityLimit_SetEntry @0x500E50,
-//  the availability gate sub_5104C0 @0x5104C0, Server_CountEntitiesByTypeAndTeam
+//  the availability gate EntityLimit_TryConsume @0x5104C0, Server_CountEntitiesByTypeAndTeam
 //  @0x510460]; this is that table's wire face.
 // ===========================================================================
 

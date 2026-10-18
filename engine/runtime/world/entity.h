@@ -917,7 +917,7 @@ struct Entity {
     // [orig: Entity_SpawnDeathPieces @ 0x493983]
     uint32_t spawned_piece_mask = 0;
     DeathMotionMode death_motion = DeathMotionMode::None;
-    // The +0x1C4 callback is nullsub_28 while AINODEPATH is enabled.
+    // The +0x1C4 callback is Entity_UpdateOrg0Movement while AINODEPATH is enabled.
     // Independent +0x1C8 brain events remain active. [orig: @0x43B22A]
     bool motor_suspended = false;
     // FIND_AND_USE's attachment is independent of the seated parentEntity.

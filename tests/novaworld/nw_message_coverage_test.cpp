@@ -2109,7 +2109,7 @@ int check_S_4C_visible_players() {
 
 // S2C 0x28 — the co-op dialog line [cstr name][i16 line]; the reader clamps
 // the name at the body end and defaults a short line to 0.
-// [orig: sub_5038A0 @0x5038A0; NapiNPClientMsg_0x028 @0x425B40]
+// [orig: NetPacket_WriteCStringAndShort @0x5038A0; NapiNPClientMsg_0x028 @0x425B40]
 int check_S_28_dialog_line() {
 	DialogLine line;
 	line.dialog_name = "dlg012";

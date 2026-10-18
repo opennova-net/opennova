@@ -241,7 +241,7 @@ int main(void) {
     mus_vm_destroy(vm6);
 
     /* ---- Script 7: the MessageHandler restart frame ----
-       [orig: sub_672E50 @0x672e95..0x672ec1 (push IP on the return stack, push
+       [orig: AudioVM_RunContext @0x672e95..0x672ec1 (push IP on the return stack, push
        (value, 0), IP = chunk+0x40, dispatch); MusicCtx_SelectEndTrack
        @0x672fd0; Server_ProcessRoundEnd SP tail @0x51696b (1) / @0x51698f (2)].
        The sections mirror the retail gamemus.bin shape (Start/Idle, the
@@ -324,7 +324,7 @@ int main(void) {
           "value 0 -> setstate 1 (Idle)");
 
     /* The frame ignores the embedder's streaming state: a stopped VM with a
-       loaded script still takes it [orig: sub_672E50 tests only ctx+32 and the
+       loaded script still takes it [orig: AudioVM_RunContext tests only ctx+32 and the
        chunk pointer; MusicCtx_SelectEndTrack @0x672fd0 tests chunk_04 alone].
        Retail's context stop is not this state: AudioVM_StopMusicContext
        @0x671e00 frees the instance and zeroes chunk_04 (AudioVM_FreeSoundBuffer

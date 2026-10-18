@@ -394,7 +394,7 @@ func advance(delta: float) -> void:
 	# Hover by mouse-position-over-this-pane, not the PLAYER_PREVIEW widget's mouse_entered
 	# signal: the menu's anamorphic scaling + the IGNORE mouse filters (which let the button
 	# keep its clicks) stop that signal from firing. This matches the original's cursor-over-
-	# widget position test [orig: sub_6467D0 @ 0x6467d0].
+	# widget position test [orig: CWnd_IsMouseOver @ 0x6467d0].
 	# Only when this pane has a real laid-out rect (true in the live menu; a bare unit-test
 	# preview has a zero rect, where an explicit set_hovered() drives the zoom instead).
 	if is_inside_tree():

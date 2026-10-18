@@ -196,8 +196,8 @@ int main() {
 	// A first start flags the cine running over an empty timeline (the
 	// <mission>.cin intro leg; no shipped mission has one); the first render
 	// pass stops it without drawing, so no cine frame has been drawn yet.
-	// [orig: Game_StartMission @0x525DA8..0x525DD6; sub_578270 @0x578296;
-	//  sub_575A50 @0x575A6B]
+	// [orig: Game_StartMission @0x525DA8..0x525DD6; Cine_StartScriptPlayback @0x578296;
+	//  Cine_RenderOrEndPlayback @0x575A6B]
 	{
 		SpMission m;
 		CHECK(m.boot(files, /*restart=*/false));
@@ -302,8 +302,8 @@ int main() {
 		// The live state the timeline walk advances: the opening bars faded in
 		// over 62 frames and are held; the white fade climbs 1/48 a frame from
 		// its start; the screen's fade-out letterbox clears the bars over 100
-		// frames; a line fades in over its fade_in frames [orig: sub_56FF40;
-		// sub_571020; CCineEventFade_StepAlpha @0x5712D0; sub_571330; sub_572F90].
+		// frames; a line fades in over its fade_in frames [orig: Cine_AdvanceTimelineFrame;
+		// CCineEventImageFade_Step; CCineEventFade_StepAlpha @0x5712D0; CCineEventLetterbox_Finish; CCineEventTextFade_Step].
 		auto near = [](float a, float b) { return a - b < 1e-3f && b - a < 1e-3f; };
 		CHECK(!cine.bars_fading && cine.bars_held);
 		const size_t fade1_index = static_cast<size_t>(fade1 - cine.events.data());

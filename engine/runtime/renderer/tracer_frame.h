@@ -32,7 +32,7 @@ inline constexpr const char *kEmitterPoolTexture = "smoktest.pcx";
 enum class TracerShader : std::uint8_t {
 	// The device's stock slot 6 (mode word 0x222): ONE/ONE, colour = alpha =
 	// DIFFUSE, untextured [orig: CD3DDevice_GetRenderStateByIndex(6) @ 0x5DB1D6;
-	// the stock block built by sub_6780A0 @ 0x678113]. std/rapid/sniper/df1.
+	// the stock block built by CGfxDevice_CreateDefaultRenderStates @ 0x678113]. std/rapid/sniper/df1.
 	Stock = 0,
 	// pool+0x3004 (rocket/at4/grenade): smoktest.pcx twice, SRCALPHA/INVSRCALPHA,
 	// colour = DIFFUSE, alpha = sat(sat(DIFFUSE.a - T0.a) - T1.a) (T1 on uv1).

@@ -11,7 +11,7 @@ inline constexpr const char *kWakeTexture = "wake5.tga";
 inline constexpr const char *kWakeGradientTexture = "wakegrad.tga";
 
 // The bounded surface-ring bank. Coordinates are mission-frame Q16.
-// [orig: sub_5DDC60 @ 0x5DDC60 (the bank allocation); WaterRing_InitSlot
+// [orig: WaterRing_AllocSlot @ 0x5DDC60 (the bank allocation); WaterRing_InitSlot
 //  @ 0x5DDD80 (it initialises one surface-ring row); WaterRing_LoadResources
 //  @ 0x5DDC90 loads wake5.tga / wakegrad.tga and sets the ring shader's FFP
 //  lighting sources (GfxShader_SetFfpLightingSources); the draw-side 128-slot scanner over the bank @ 0x5DE340 feeds

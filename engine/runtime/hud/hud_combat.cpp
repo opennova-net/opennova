@@ -165,7 +165,7 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 	if (c.death_screen)
 		return;
 	// Each a bordered quad of its image size [orig: HUD_DrawTexturedQuadWithBorder
-	// @0x590C40 from HUD_DrawTargetEntityOverlay @0x59A68C, sub_59A710 @0x59A7C9,
+	// @0x590C40 from HUD_DrawTargetEntityOverlay @0x59A68C, HUD_DrawWeaponSilhouette @0x59A7C9,
 	// HUD_DrawParachuteAndArmorIcons @0x5925FA / @0x592635, HUD_DrawCargoIcon @0x599C91,
 	// each passing its record's +8 / +0xC as both the texture and the quad extent].
 	auto sprite = [&](const HudSprite &r, int x, int y, int tex, uint32_t color) {
@@ -175,7 +175,7 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 		++draw_list_.elements_drawn;
 	};
 	// Weapon and control-seat silhouettes share the original flash stamp.
-	// [orig: HUD_RenderOverlays @0x5A7CBE..0x5A7D64; sub_59A710 @0x59A710]
+	// [orig: HUD_RenderOverlays @0x5A7CBE..0x5A7D64; HUD_DrawWeaponSilhouette @0x59A710]
 	const int ramp = layout_.alpha_fade_ramp_ticks;
 	const int base = layout_.alpha_fade_base_alpha;
 	const int maximum = layout_.alpha_fade_max_alpha;
@@ -238,7 +238,7 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 	// This rectangle is a colour-target CLEAR, not the readout's wire outline:
 	// a device clear ignores the authored alpha (stock AGLCOLOR carries 0x41) and
 	// writes the colour opaque.
-	// [orig: sub_5D48E0 @0x5D48E0 -> CGfxDevice_Clear(rect, 1) @0x5D493D ->
+	// [orig: Render_FillViewportRect @0x5D48E0 -> CGfxDevice_Clear(rect, 1) @0x5D493D ->
 	//  the device vtbl+0xAC clear @0x67719B]
 	emit_rect(sx(float(l.agl_left), w), float(marker - bar_height), float(right), float(marker),
 			l.agl_color | 0xFF000000u, true);

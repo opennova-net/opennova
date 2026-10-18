@@ -34,7 +34,7 @@ namespace opennova::editor {
 // - `<stem>_m.pcx`: the surface map (the .trn's polytrn_charmap, retail's `_m` name), when the set names
 //   one: 8-bit, each index the surface class the game reads there (footsteps, impact effects, the physics
 //   of rounds and throwables), the char map legend (formats/trn/charmap_legend.h) its palette; with none
-//   the game reads surface 1 everywhere [orig: sub_605A10 @ 0x605A31; Terrain_GetSurfaceTypeAtPosition @
+//   the game reads surface 1 everywhere [orig: Terrain_LoadCharmapPCX @ 0x605A31; Terrain_GetSurfaceTypeAtPosition @
 //   0x606519];
 // - `<stem>_f.pcx`: the foliage map (the .trn's polytrn_foliagemap, retail's `_f` name), when the set names
 //   one: 8-bit, each index a foliage code, its palette the source's (the game keeps the indices alone and

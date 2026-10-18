@@ -394,7 +394,7 @@ void test_index_and_frameless() {
 			rt.index().screen_root_id(2) == -1 && rt.index().node(0) == nullptr &&
 			rt.index().node(24) == nullptr);
 	// A part is numbered after every window, its owner's and no child the frame walks, found by its
-	// fixed NAME [orig: CWnd_FindChildByName @ 0x646850; sub_65BF60 @ 0x65bf8f;
+	// fixed NAME [orig: CWnd_FindChildByName @ 0x646850; CComboWnd_CreateChildWindows @ 0x65bf8f;
 	// CSpinListWnd_CreateUpDownChildren @ 0x64b8fe].
 	CHECK(rt.index().node(21)->parent_id == 8 && rt.index().window(21) == rt.index().window(8)->list_box.get() &&
 			rt.index().node(8)->child_ids.empty());
@@ -1850,7 +1850,7 @@ void test_options_screen() {
 // [orig: UI_BuildKeyBindingLoadoutTable @0x559e50; UI_OptionsScreenInit
 //  @0x554ba0..0x554d6e; Options_HandleAcceptOrBack @0x55ab5f..0x55ace5;
 //  UI_IngameOptionsDialogEventHandler @0x554e74, @0x5550de..0x5552bc;
-//  sub_55BD90 @0x55be93..0x55beca; sub_55B010 @0x55b010]
+//  Options_OnDefaultsButton @0x55be93..0x55beca; Options_OnEnableJoystick @0x55b010]
 void test_options_profile() {
 	auto doc = flow_document(true);
 	mnu::Window &root = doc.screens[0].roots[0];

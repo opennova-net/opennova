@@ -1303,7 +1303,7 @@ bool run_flare_descriptor_carries_the_pilot_handheld() {
 // the remaining clip is refunded through the slot's re-split, then a clip is drawn
 // from its reserve [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the
 //  non-Person WeaponSlot_ReloadAmmo call @0x42C109; WeaponSlot_ReloadAmmo's EWeap
-//  slot @0x54172D, the re-split @0x5462A0, sub_546200 / sub_5461D0, the clip store
+//  slot @0x54172D, the re-split @0x5462A0, sub_546200 / Entity_SpendMountSlotReserve, the clip store
 //  @0x541850].
 bool run_received_reload_refills_an_eweap_entity() {
     Harness h;

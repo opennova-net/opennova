@@ -275,7 +275,7 @@ void ClientReplicaPipeline::apply_minimap_overlay_batch(
 // transient, persistent and special banks), sets each slot's handle word to
 // -1, and zeroes the 251-row linked table (0x1F80 bytes from 0x28E1B30); no
 // authority gate, no body read. [orig: NapiNPClientMsg_0x03E @0x4226D0 ->
-// sub_5BE8D0 @0x5be8de..0x5be90b]
+// MapOverlay_ResetAllSlots @0x5be8de..0x5be90b]
 void ClientReplicaPipeline::reset_minimap_overlays() {
 	state_.minimap.transient.fill(ClientMinimapOverlaySlot{});
 	state_.minimap.persistent.fill(ClientMinimapOverlaySlot{});

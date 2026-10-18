@@ -37,7 +37,7 @@ struct ServerBanLists {
 // The round init's PCID leg: the list freed, then, only for an authority in a session on the
 // NovaWorld network type, banlist.txt loaded; a missing file or a VERSION other than 1 yields
 // a fresh empty list, saved over the file.
-// [orig: Server_InitNewRoundState @0x51C92F -> sub_436EB0 @0x436EB0 -> BanList_InitFromMission
+// [orig: Server_InitNewRoundState @0x51C92F -> Server_ReloadBanListAndResetNetStats @0x436EB0 -> BanList_InitFromMission
 //  @0x5098F0]
 void Server_ReloadPcidBanList(NapiNPServerCtx &ctx);
 

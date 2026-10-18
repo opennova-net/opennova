@@ -122,7 +122,7 @@ double music_stream_seconds(const MusicBankStream &stream);
 
 // The streams a music script plays (DocumentType::record_references): each stream a symbol of its place ("0",
 // "1", ...), scoped to the bank's file name upper case ("GAMEMUS.SBF"), as the script's play names it [orig:
-// AudioVM_StartSound @ 0x671FF0 -> sub_671BC0 @ 0x671BC0, the bank's stream by that index].
+// AudioVM_StartSound @ 0x671FF0 -> AudioVM_SelectStream @ 0x671BC0, the bank's stream by that index].
 void music_bank_references(const Document &document, Extracted &out);
 
 // The music bank type's validator (DocumentType::validate_file): its source findings (a layout the writer lays out

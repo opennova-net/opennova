@@ -155,7 +155,7 @@ SessionVars scoreboard_session_vars(const RoleView &view);
 // the record is not valid, or on the bare local role (retail's single player
 // builds a valid report, but out of a session its RULES tab is disabled, so
 // the text is never shown).
-// [orig: sub_54B320 @0x54b490 -> Overlay_BuildEndGameStatsText @0x54a240; the
+// [orig: CMap_OnScreenShow @0x54b490 -> Overlay_BuildEndGameStatsText @0x54a240; the
 //  authority's report Server_BuildStatusReport @0x530a60, rebuilt at
 //  Game_StartMission @0x524871 / @0x525b95, Render_LoadingScreen @0x521ecd and
 //  Server_BuildAndSerializeSessionStatus @0x4fc990]
@@ -207,9 +207,9 @@ struct HudRoleFacts {
 	// radio) and its text the vmacros macrotext entry, the key itself on a
 	// miss; the titles are macrotext EMOTES_TITLE / RADIO_TITLE, else the
 	// literal fallbacks. No local player resolves nothing.
-	// [orig: HUD_DrawEmotesMenu @0x5bff00 (sub_5BFB00(buf, i, 0xC, local)
+	// [orig: HUD_DrawEmotesMenu @0x5bff00 (VMacros_BuildRemappedName(buf, i, 0xC, local)
 	//  @0x5bff9e, the title @0x5bff25..0x5bff57); HUD_DrawRadioTitleMenu
-	//  @0x5bfb90 (sub_5BFB00(buf, i, 6, local) @0x5bfc2e, the title
+	//  @0x5bfb90 (VMacros_BuildRemappedName(buf, i, 6, local) @0x5bfc2e, the title
 	//  @0x5bfbb5..0x5bfbe7); the dword_24C1930 & 0x10000 arms are dead: no
 	//  writer sets that bit]
 	hud::HudVoiceMacroMenuState emotes_menu;
@@ -347,7 +347,7 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 // DWORD 9 >= DWORD 10 — the same image collect_lfp_zones reads), the label
 // anchor and the 0x6E queued count / countdown. False without a kernel.
 // [orig: MapOverlay_DrawView @0x5a58e0 — CProximityList_FindEntryById
-//  @0x5a5b6e, EntryById[9] >= [10] @0x5a5b77; the anchor sub_59C300
+//  @0x5a5b6e, EntryById[9] >= [10] @0x5a5b77; the anchor Entity_GetWorldBoundsCenter
 //  @0x59c300; entity+550/+548 from the 0x6E fold @0x429880]
 bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		hud::DeathMapFacts &out);

@@ -34,7 +34,7 @@ inline constexpr int clamp_particle_density(int32_t density) {
 // is), the preset offset 0. The reference machine's CPU is past the mark, and
 // the Steam JO:CA install's own game.cfg carries 2.
 // [orig: Renderer_ComputeQualityLevels @ 0x586242..0x58625D (caps +0x0, the
-//  CPU mark from sub_587790 @ 0x5877F5), @ 0x5862F0..0x586301 (the clamp)]
+//  CPU mark from Renderer_ComputeHardwareQualityLevels @ 0x5877F5), @ 0x5862F0..0x586301 (the clamp)]
 inline constexpr int kParticleDensityFreshProfile = 2;
 
 // The page halving: 0x10000 at a density of 1 or less, one

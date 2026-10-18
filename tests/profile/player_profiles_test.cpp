@@ -324,7 +324,7 @@ int test_name_rules() {
     TEST_EXPECT(p.name_changed("{HOT}") == "{HOT");
     TEST_EXPECT(p.name_changed("AB{hot}!") == "AB{hot}");
     TEST_EXPECT(p.current().name == "AB{hot}C");
-    // [orig: sub_561400 @0x561400]
+    // [orig: PlayerInfo_OnDeleteQueryYes @0x561400]
     p.current().sp_no_scope_drift = 1;
     p.current_weapons().red.player_class = 5;
     p.reset_current(defaults());
@@ -370,7 +370,7 @@ int test_session_steps() {
     // [orig: SinglePlayer_StartMission @0x561b99]
     p.record_mission_start(-1);
     TEST_EXPECT(p.current().last_campaign == -1);
-    // [orig: sub_54D6A0]: outside a session the round must be over.
+    // [orig: PlayerProfile_SaveRoundEndProgress]: outside a session the round must be over.
     p.current().word_1460 = 5;
     p.begin_session();
     p.current().word_1460 = 9;
@@ -482,7 +482,7 @@ int test_controls_words() {
     r.auto_medic_off = 7;  // any nonzero word shows the box clear
     TEST_EXPECT(!profile::auto_medic_checked(r));
 
-    // DEFAULTS [orig: sub_55BD90 @0x55be93..0x55beca].
+    // DEFAULTS [orig: Options_OnDefaultsButton @0x55be93..0x55beca].
     r.mouse_sensitivity = 5;
     r.invert_mouse = r.joystick_enabled = r.invert_joystick = r.force_feedback = 1;
     profile::restore_controls_defaults(r);

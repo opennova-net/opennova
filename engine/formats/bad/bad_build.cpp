@@ -257,7 +257,7 @@ bool bad_build_assemble(const BadBuildClip &clip, const BadBuildClip *reset, con
     // exactly one it shows its first frame for ever, past one its time runs on
     // past the clip's rows. [orig: AnimChannel_InitFromData @0x410560, the step
     // fps / 62 / frames @0x4105BA; AnimChannel_AdvancePlayback @0x40B140, t -= 1
-    // once @0x40B199; sub_4102D0 @0x4102D0 reads row trunc(frames * t) unbounded]
+    // once @0x40B199; AnimChannel_GetTranslationRowAtTime @0x4102D0 reads row trunc(frames * t) unbounded]
     if ((clip.flags & BAD_FLAG_LOOP) != 0 &&
             static_cast<uint64_t>(clip.fps) >=
                     static_cast<uint64_t>(io::kTicksPerSecondInt) * clip.frame_count)

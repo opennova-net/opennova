@@ -34,7 +34,7 @@ constexpr int kCharMapSide = 512;
 constexpr int kFoliageMapSide = 256;
 constexpr int kBlendMapSide = 1024;
 
-// The class every texel of a new char map holds: the game's own where a terrain names none [orig: sub_605A10].
+// The class every texel of a new char map holds: the game's own where a terrain names none [orig: Terrain_LoadCharmapPCX].
 constexpr uint8_t kDefaultClass = 1;
 
 // The .trn's field naming each plane's map, and the terrain set's key [orig: Terrain_ParseConfigCallback @ 0x60f330].

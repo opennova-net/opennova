@@ -187,7 +187,7 @@ static std::string file_in(const std::string &dir, const std::string &name) {
 /* Every shipped script's plays (mus_compile_plays over its MUS text) against the bank it plays from
    (mus_bank_name, a loose file beside the install's archives, an expansion's in its folder): every play's index
    below the bank's count of streams. One past would play the bank's first stream's data in its place [orig:
-   AudioVM_StartSound @ 0x671FF0 -> sub_671BC0 @ 0x671BC4..0x671BCC, an index past the entries made 0], which no
+   AudioVM_StartSound @ 0x671FF0 -> AudioVM_SelectStream @ 0x671BC4..0x671BCC, an index past the entries made 0], which no
    shipped script does. The counts are pinned. */
 static int test_install_plays(void) {
     const std::string install = retail::install();

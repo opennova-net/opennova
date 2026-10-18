@@ -121,7 +121,7 @@ bool Role::request_respawn() {
 	//  bit 0 @0x49AD95..0x49ADA0; 0x400 @0x49ADB3..0x49ADC2 (g_ClientPreRoundTimer);
 	//  0x8000000 @0x49ADC8..0x49ADD7 (g_DeployScreenActive); the pause
 	//  @0x49ADDD..0x49ADE8; g_SpawnSuccessGate @0x49ADEE..0x49AE16; DeathScreen_FilterInputAction
-	//  @0x49AE4C, sub_4A3E50 @0x49AE68, Cine_FilterInputAction @0x49AE84, the
+	//  @0x49AE4C, Input_NullActionFilter @0x49AE68, Cine_FilterInputAction @0x49AE84, the
 	//  def+0x170 callback @0x49AEB6 (Input_HandleActionBinding_0's default
 	//  @0x4E13F9)]
 	if (!kernel.world.cached.local_player.valid()) return false;
@@ -416,7 +416,7 @@ void Session::step_cine_render_frame() {
 	// The rendered frame's cine pass, after the frame's logic updates: the SP
 	// end-of-round cine marks its frame drawn, or stops past its last event
 	// (world/epilog_cine.h) [orig: Game_MainLoop's Game_ProcessMainFrame
-	// drain, then Render_ProcessMainSceneFrame @0x5CADFC -> sub_575A50].
+	// drain, then Render_ProcessMainSceneFrame @0x5CADFC -> Cine_RenderOrEndPlayback].
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
 	role_->kernel()->world.epilog.render_pass();
 }

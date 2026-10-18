@@ -1,7 +1,7 @@
 // The key-toggled overlay windows (hud/hud_overlay_windows.h +
 // hud_frame_overlay_windows.cpp): the block wrapper's line breaks, skips and
 // page overflow [orig: HUD_DrawWrappedText @0x580C00], the briefing pages
-// [orig: sub_5B9150 @0x5B9150], and the briefing / help / map-legend
+// [orig: HUD_CycleBriefingPage @0x5B9150], and the briefing / help / map-legend
 // elements riding the draw list's top layer even at the blank level
 // [orig: HUD_DrawGameplayOverlays @0x5BDE60; HelpScreen_Draw @0x497800;
 // HUD_DrawHelpScreenIcons @0x497480].

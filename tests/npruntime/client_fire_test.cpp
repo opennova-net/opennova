@@ -228,7 +228,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 	// (min(9, 8) = 8: its reserve 0). The parent reads 8 / 21, the child 4 / 0.
 	// [orig: WeaponSlot_ReloadAmmo @0x541730 -> Entity_GetWeaponSlots
 	//  @0x54610E..0x546113; WeaponSlot_AddAmmo @0x540AB0 -> @0x5462A0 on the
-	//  child; Entity_GetMountSlotReserve @0x54078E; sub_5461D0 @0x5409C3; the
+	//  child; Entity_GetMountSlotReserve @0x54078E; Entity_SpendMountSlotReserve @0x5409C3; the
 	//  clip store @0x541850]
 	if (!expect(live_parent->primary_weapon_slot.clip == 8 &&
 					live_parent->primary_weapon_slot.reserve == 21 &&

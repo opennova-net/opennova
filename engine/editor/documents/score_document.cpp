@@ -32,7 +32,7 @@ bool whole_of(const Value &value, int64_t &out) {
 std::string name_of(const char *name) { return name ? std::string(name) : std::string(); }
 
 // The GAMETYPE lines of a name no row has, which the reader reads for nothing with every FIELD and VAR line after
-// them [orig: sub_52D850 @ 0x52D850; ScoreConfig_LoadFile @ 0x52DB7C, @ 0x52DC05], each line cut as the reader cuts
+// them [orig: ScoreConfig_FindGameTypeRow @ 0x52D850; ScoreConfig_LoadFile @ 0x52DB7C, @ 0x52DC05], each line cut as the reader cuts
 // it (a CR LF, an LF or a lone CR ends it; one whose first or second character is '/' read for nothing) and split
 // into its tokens (white space between them, a quote toggling a quoted run, the quotes dropped) [orig:
 // Text_ReadLine @ 0x52D110; Text_SplitIntoTokens @ 0x52D1B0]; at a version other than 40 the reader reads none.
@@ -69,7 +69,7 @@ void unknown_game_types(const std::vector<uint8_t> &bytes, int32_t version, std:
 		issue.blocks = false;
 		issue.line = line;
 		issue.message = "No game type is named '" + tokens[1] + "': the game finds no row for the block and reads its "
-		                "lines for nothing [orig: sub_52D850 @ 0x52D850]; a save writes the table without them.";
+		                "lines for nothing [orig: ScoreConfig_FindGameTypeRow @ 0x52D850]; a save writes the table without them.";
 		issues.push_back(std::move(issue));
 	}
 }
@@ -110,7 +110,7 @@ RecordTable make_table() {
 	{
 		FieldSchema name = schema_of("name", FieldType::Text, "Game type",
 				"The row the block's lines go into, by its name: the first of the twelve of the name, without case [orig: "
-				"sub_52D850 @ 0x52D850]. The writer puts down the row's own name [orig: ScoreConfig_SaveFile @ 0x52CF81].");
+				"ScoreConfig_FindGameTypeRow @ 0x52D850]. The writer puts down the row's own name [orig: ScoreConfig_SaveFile @ 0x52CF81].");
 		for (size_t row = 1; row < score::game_type_names().size(); ++row)
 			name.choices.push_back({score::game_type_names()[row], int64_t(row), ""});
 		block.field(RF{name,
@@ -128,7 +128,7 @@ RecordTable make_table() {
 			                return true;
 		                }}});
 		TableList fields;
-		// A row holds 34 [orig: sub_52CD70 @ 0x52CD70]: the reader keeps no more, and the writer writes no more.
+		// A row holds 34 [orig: ScoreConfig_AddRowField @ 0x52CD70]: the reader keeps no more, and the writer writes no more.
 		fields.spec = Document::CollectionSpec{kField, "Scoreboard columns", "name", false, Applicability::Reads,
 		                                       score::kMaxFields};
 		fields.ops = vector_list<score::GameTypeBlock, score::Entry>(
@@ -146,7 +146,7 @@ RecordTable make_table() {
 		FieldSchema name = schema_of("name", FieldType::Text, "Column",
 				"A statistic of the FIELD table, compared without case [orig: the FIELD names @ 0x830240]: the first FIELD "
 				"line of a block clears its row's list and each appends its column, 34 at most [orig: ScoreConfig_LoadFile "
-				"@ 0x52DBC3; sub_52CD70 @ 0x52CD70]. The end-of-round scoreboard shows a configured column where a player "
+				"@ 0x52DBC3; ScoreConfig_AddRowField @ 0x52CD70]. The end-of-round scoreboard shows a configured column where a player "
 				"has any of it (net-re, \"Configured columns and ordering\").");
 		for (const score::Name &row : score::field_names()) name.choices.push_back({row.name, row.id, ""});
 		field.field(RF{name,

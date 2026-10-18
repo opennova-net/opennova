@@ -5,7 +5,7 @@
 // draws what this state holds (hud/hud_minimap_radar.cpp); the HUD reads it
 // through a once-per-frame snapshot (radar_hud_frame -> hud::HudMinimapRadar).
 // [orig: Radar_AddBlip @0x59b280; Radar_UpdateContacts @0x59a7e0;
-//  sub_59B200 @0x59b200 (the missile list); HUD_ResetAllOverlayBuffers
+//  Radar_TrackMissile @0x59b200 (the missile list); HUD_ResetAllOverlayBuffers
 //  @0x59dd40 (the reset); the state @0x2721EEC..0x2721F3C, @0x2721F40,
 //  @0x2722B40, @0x2723EAC]
 #pragma once
@@ -86,7 +86,7 @@ struct RadarContactState {
 	// (index count + 1), so row 0 stays null and the newest row sits outside
 	// the [0, count) range every reader walks; the 64th append writes past the
 	// 64-row table into its neighbour, which the extra row stands for
-	// (nothing here reads it) [orig: sub_59B200 @0x59b236..0x59b258].
+	// (nothing here reads it) [orig: Radar_TrackMissile @0x59b236..0x59b258].
 	std::array<RadarMissile, kRadarMissileRows + 1> missiles{};
 	int32_t missile_count = 0; // [orig: dword_2721F3C]
 	// The incoming-lock tone word: every lock note stores 31, the logic tick
@@ -128,7 +128,7 @@ void radar_add_blip(RadarContactState &state, uint32_t rules, const int32_t loca
 // @0x59a9ce].
 int32_t radar_update_contacts(RadarContactState &state, uint32_t tick,
 		const int32_t viewer_pos[3], uint32_t viewer_yaw);
-// [orig: sub_59B200 @0x59b200]
+// [orig: Radar_TrackMissile @0x59b200]
 void radar_note_missile(RadarContactState &state, uint32_t source, const int32_t pos[3]);
 // [orig: HUD_ResetAllOverlayBuffers @0x59dd40 — the missile rows @0x59dd49,
 //  the contact rows @0x59dd59, the edge timers @0x59dd65/@0x59dd6a, the tick
@@ -179,7 +179,7 @@ void resolve_ammo_whiz_radii(AmmoTable &ammo, const audio::SoundSetIndex *sets);
 // The Stinger motor's lock note: a missile whose target is the local player,
 // or a vehicle the local player is the first occupant of, stores the lock
 // tone and rides the missile list [orig: Entity_UpdateGuidedMissile_0
-// @0x4465db..0x446622 -> dword_B764C0 = 31, sub_59B200]. On a joiner the
+// @0x4465db..0x446622 -> dword_B764C0 = 31, Radar_TrackMissile]. On a joiner the
 // target is a wire handle the client resolves to its own pool slot
 // [orig: Entity_SerializeGuidedMissileState @0x447ece]: the local player's
 // own wire handle is the target-is-local arm (RoundSim::wire_actor_provider).

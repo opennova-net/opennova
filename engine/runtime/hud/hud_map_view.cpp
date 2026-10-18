@@ -88,7 +88,7 @@ void clear_window_zones(HudMapWindowPass &out) {
 	out.segments.clear();
 }
 
-// sub_597FD0's darkened blink: an arithmetic halving of the whole ARGB word
+// Minimap_DrawEntityBlip's darkened blink: an arithmetic halving of the whole ARGB word
 // with every byte's top bit cleared [orig: `sar esi, 1; and esi, 7F7F7F7Fh`
 // @0x598147..0x598149].
 uint32_t halve_argb(uint32_t argb) {
@@ -271,7 +271,7 @@ void MapViewPan::drag_zoom(int32_t x, int32_t y) {
 
 void MapViewPan::zoom_step(int direction) {
 	// One-sided: an in step only floors, an out step only caps.
-	// [orig: sub_5535D0 @0x5535d6..0x553625; loc_548230 @0x548230..0x548287]
+	// [orig: DeathScreen_ZoomStep @0x5535d6..0x553625; CMap_ZoomStep @0x548230..0x548287]
 	if (direction > 0) {
 		zoom = pc24(static_cast<double>(zoom) * static_cast<double>(kMapViewZoomInStep));
 		if (zoom < kMapViewZoomMin) zoom = kMapViewZoomMin;
@@ -400,7 +400,7 @@ bool DeathMapView::on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t b
 		view.right_drag = false; // [orig: @0x55457e]
 		return false;
 	case MapViewEvent::kWheel:
-		// [orig: sub_5535D0(event, 0, g_MouseState.wheelRemainder) @0x5545c6]
+		// [orig: DeathScreen_ZoomStep(event, 0, g_MouseState.wheelRemainder) @0x5545c6]
 		view.zoom_step(wheel > 0 ? 1 : (wheel < 0 ? -1 : 0));
 		return false;
 	case MapViewEvent::kMove:
@@ -427,7 +427,7 @@ bool DeathMapView::on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t b
 }
 
 void CommandMapView::on_load() {
-	// [orig: sub_54B280 @0x54b280 — the latch dword_252DD7C, zoom 4.0
+	// [orig: CMap_InitScreenOnce @0x54b280 — the latch dword_252DD7C, zoom 4.0
 	//  @0x54b293, the three toggles @0x54b2ab..0x54b2b7, the pan zero
 	//  @0x54b2bd..0x54b2c7]
 	if (initialized) return;
@@ -536,7 +536,7 @@ void command_map_waypoint_world(const CommandMapView &cmap, int32_t player_x, in
 
 namespace {
 
-// sub_63B1E0: a device point into the menu design space, truncated.
+// CUIScene_ScalePointDeviceToDesign: a device point into the menu design space, truncated.
 int32_t to_design(int32_t device, float scale) {
 	if (scale == 0.0f) return 0;
 	return static_cast<int32_t>(static_cast<double>(device) / static_cast<double>(scale));
@@ -550,7 +550,7 @@ void command_map_waypoint_hover(const CommandMapWaypointAnchor *anchors, bool *h
 		hover[i] = false; // [orig: @0x549dc0]
 		const CommandMapWaypointAnchor &a = anchors[i];
 		if (!a.live) continue;
-		// [orig: @0x549e28..0x549e63 — sub_63B1E0 on the anchor, then
+		// [orig: @0x549e28..0x549e63 — CUIScene_ScalePointDeviceToDesign on the anchor, then
 		//  `mouse > x - (R - L) - 5 && mouse < x + text_w` and
 		//  `mouse > y && mouse < y + text_h`]
 		const int32_t x = to_design(a.x, scale_x);
@@ -569,7 +569,7 @@ bool command_map_close_button_position(const CommandMapWaypointAnchor *anchors,
 	for (int i = 0; i < count; ++i) {
 		if (!anchors[i].live || !hover[i]) continue;
 		// [orig: @0x549ba5..0x549c01 — x + (rect.left - rect.right) - 5, then
-		//  sub_63B1E0, then sub_646580 at that corner]
+		//  CUIScene_ScalePointDeviceToDesign, then CWnd_MoveToSquare at that corner]
 		out_x = to_design(anchors[i].x - close_w - 5, scale_x);
 		out_y = to_design(anchors[i].y, scale_y);
 		return true;
@@ -715,7 +715,7 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 	const int32_t label_h = static_cast<int32_t>(
 			scale_axis(16.0, input.surface_h, kDesignHeight));
 	// The zone blips blink on the session frame counter, the letters and the
-	// crosshair pulse on the HUD frame counter [orig: sub_597FD0's dword_A87060
+	// crosshair pulse on the HUD frame counter [orig: Minimap_DrawEntityBlip's dword_A87060
 	// @0x598059 / @0x59810C / @0x59813E; MapOverlay_DrawView's g_HUDFrameCounter
 	// @0x5A5B30 / @0x5A5D5A].
 	const int32_t session_frame = static_cast<int32_t>(input.session_frame);
@@ -731,13 +731,13 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 	};
 	for (const ZoneSlot &slot : walk_) {
 		const DeathMapZone &zone = *slot.zone;
-		// The blip first: sub_597FD0 picks the colour and cell from the zone
+		// The blip first: Minimap_DrawEntityBlip picks the colour and cell from the zone
 		// entity (not from its bank slot) and calls Minimap_DrawBlip at the
 		// view angle 0x40000000 less the heading with alpha arg 0; the draw
 		// batch is flushed before the letters.
-		// [orig: sub_597FD0(entity, rect, 0x40000000 - heading, 0)
+		// [orig: Minimap_DrawEntityBlip(entity, rect, 0x40000000 - heading, 0)
 		//  @0x5a5ab9..0x5a5adc; Minimap_DrawBlip @0x597890; the flush
-		//  sub_596780 @0x5a5ae4]
+		//  HUD_FlushWireBatches @0x5a5ae4]
 		const DeathMapZoneBlip blip = death_map_zone_blip(zone, facts, session_frame);
 		if (blip.draw) {
 			HudMinimapMarker entity = *slot.marker;
@@ -762,7 +762,7 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 		}
 		color = brighten(color, phase);
 		// The letter at the anchor less half the 8 x 16 cell
-		// [orig: sprintf("%c", idx + 'A') @0x5a5bfa; sub_59C300 @0x5a5c05;
+		// [orig: sprintf("%c", idx + 'A') @0x5a5bfa; Entity_GetWorldBoundsCenter @0x5a5c05;
 		//  @0x5a5c0a..0x5a5c59, HUD_DrawTextCentered_HalfBright(g_HUDLabelFontBold)]
 		float anchor_x = 0.0f, anchor_y = 0.0f;
 		project_spinmap_point(input, zone.anchor_x, zone.anchor_y, false, anchor_x, anchor_y);

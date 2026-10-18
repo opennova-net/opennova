@@ -264,7 +264,7 @@ void test_health_bar_death_arm(const fnt_font_t *font) {
 // times the 16.16 ratio rounded, the clear from x0 + 1 to x0 + width. A 100-px
 // bar at 0.503 health: (100 * 32964 + 0x8000) >> 16 = 50, so the fill ends at
 // x0 + 50 (the unrounded product gave x0 + 50.3, one pixel centre more)
-// [orig: HUD_DrawHealthBar @0x5A2EC3..0x5A2EE3; sub_5D48E0 @0x5A2F7A].
+// [orig: HUD_DrawHealthBar @0x5A2EC3..0x5A2EE3; Render_FillViewportRect @0x5A2F7A].
 void test_health_bar_fill_rounds(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.health_rect = {2.0f, 739.0f, 100.0f, 18.0f, true};
@@ -591,7 +591,7 @@ void test_overlay_panel_menus(const fnt_font_t *font) {
 // its rung), palette[4] less one alpha step through the half-bright drawer;
 // a detail level above 1 hides them, and no HUDDECLUT slot does (D-HUD-54:
 // the CHAT slot is the console rings' alone).
-// [orig: sub_59AEE0 @0x59aee0]
+// [orig: HUD_DrawSquadOrderLines @0x59aee0]
 void test_squad_orders(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.squad_orders = {1000, 300, 0, 0, true};
@@ -696,7 +696,7 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 	// The fill at full charge (under 31 held ticks the progress is 1.0) clears
 	// from x + 1 to x + span = x + w, abutting the outline's right edge (C-212)
 	// [orig: HUD_DrawPowerThrowChargeBar -- the fld1 arm @0x5998AF for under
-	// 31 ticks, the span @0x599964, sub_5D48E0 @0x5999A4].
+	// 31 ticks, the span @0x599964, Render_FillViewportRect @0x5999A4].
 	{
 		HudFrameState full = power;
 		full.windup_held_ticks = 30;

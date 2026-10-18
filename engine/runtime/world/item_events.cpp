@@ -105,15 +105,15 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"palm", ItemDeathClass::kPalm},   // @0x813270 -> 0x53C4C0
 		{"psec", ItemDeathClass::kNull},          // @0x813288 -> 0x406FF0
 		{"CHel", ItemDeathClass::kUnwitnessed},   // @0x8132A0 -> 0x4581B0
-		// [orig: sub_443630 @0x443630 == the Entity null row body @0x406FF0
+		// [orig: MissileClass_HandleEvent @0x443630 == the Entity null row body @0x406FF0
 		//  (`+0x2AC = 0x1000000; return`), byte-identical]
 		{"rokt", ItemDeathClass::kNull},          // @0x8132B8 -> 0x443630
 		{"stng", ItemDeathClass::kNull},          // @0x8132D0 -> 0x443630
 		{"hlfr", ItemDeathClass::kNull},          // @0x8132E8 -> 0x443630
 		{"jvln", ItemDeathClass::kNull},          // @0x813300 -> 0x443630
-		// [orig: sub_443640 @0x443640 == the Entity null row body @0x406FF0]
+		// [orig: ArtyClass_HandleEvent @0x443640 == the Entity null row body @0x406FF0]
 		{"arty", ItemDeathClass::kNull},          // @0x813318 -> 0x443640
-		// [orig: nullsub_65 @0x443650 / nullsub_66 @0x443660 — a bare retn]
+		// [orig: AflrClass_HandleEvent @0x443650 / GflrClass_HandleEvent @0x443660 — a bare retn]
 		{"aflr", ItemDeathClass::kNone},          // @0x813330 -> 0x443650
 		{"gflr", ItemDeathClass::kNone},          // @0x813348 -> 0x443660
 		{"pwrp", ItemDeathClass::kNull},          // @0x813360 -> 0x406FF0
@@ -130,7 +130,7 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 
 namespace {
 
-// [orig: sub_50C840 @0x50C840]
+// [orig: Server_SendItemDeathState @0x50C840]
 void emit_item_death_state(World &world, Entity &entity) {
     if (!world.rules.mp_session || !world.rules.logic_authority || !entity.has_item_def) return;
     emit_item_state(world, entity, 0);
@@ -201,7 +201,7 @@ void gnrl_death_event(World &world, Entity &target, int phase, int32_t section) 
 		if (target.health > 0) { target.class_think_ticks = 1860; return; } // alive: +0x2AC = 0x744 [orig: @0x4080ba]
 		// The authority kill leg [orig: @0x4080bd..0x4080f4]: scar clear,
 		// Flags |= 6, +0x2AC = 0x20 (its expiry meets the Husk gate above),
-		// the death tick (unconditional), sub_50C840 @0x4080e3 — the S2C 0x26
+		// the death tick (unconditional), Server_SendItemDeathState @0x4080e3 — the S2C 0x26
 		// entity-state send + the def-attrib-0x8000 kill scoring, both staged
 		// on the net track / the damage sites (tracked §24) — then the
 		// sound/effect tail.
@@ -264,7 +264,7 @@ void gnrc_death_event(World &world, Entity &target, int phase, int32_t section,
 	// The first authority kill leg [orig: @0x4070b2..0x4070e2]: scar clear,
 	// Flags |= 2 (dead, NOT yet husked), +0x2AC = 4 — the expiry above runs
 	// on its next expired pool visit (tick_item_event_pool) — the death tick
-	// (unconditional), sub_50C840 @0x4070d9 (the 0x26 send + kill scoring,
+	// (unconditional), Server_SendItemDeathState @0x4070d9 (the 0x26 send + kill scoring,
 	// staged on the net track / the damage sites, tracked §24).
 	world.out.scars.clear_entity(target.handle);
 	mark_class_dead(target);
@@ -321,7 +321,7 @@ void gnl2_death_event(World &world, Entity &target, int phase, int32_t section) 
 	if (target.health > 0) { update_item_ambient_sound(world, target); target.class_think_ticks = 1920; return; }
 	// The first authority kill leg [orig: @0x407279..0x4072dd]: scar clear,
 	// Flags |= 2, +0x2AC = 0x20 — the expiry above runs 32 ticks on — the
-	// death tick (unconditional), sub_50C840 @0x40729f (0x26 + scoring,
+	// death tick (unconditional), Server_SendItemDeathState @0x40729f (0x26 + scoring,
 	// staged), the death sound and the one particledeath effect.
 	world.out.scars.clear_entity(target.handle);
 	mark_class_dead(target);
@@ -379,7 +379,7 @@ void ewep_death_event(World &world, Entity &target, int phase, int32_t section) 
 			world.vehicles.detach(occupant);
 		// Then the kill leg [orig: @0x440c23..0x440c87]: scar clear, Flags |=
 		// 6, +0x2AC = 0x1F (its expiry meets the Husk gate above), the death
-		// tick (unconditional), sub_50C840 @0x440c49 (0x26 + scoring,
+		// tick (unconditional), Server_SendItemDeathState @0x440c49 (0x26 + scoring,
 		// staged), the sound/effect tail.
 		world.out.scars.clear_entity(target.handle);
 		mark_class_dead(target);
@@ -563,7 +563,7 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
             queue_class_blast(world, entity, kAmmoKzMItemBlast, traits->kz);
             world.out.scars.clear_entity(entity.handle);
             emit_item_state(world, entity, 0);
-            // The direct send is followed by sub_50C840's second send.
+            // The direct send is followed by Server_SendItemDeathState's second send.
             emit_item_death_state(world, entity);
             mark_class_dead(entity);
             land_class_husk(world, entity);
@@ -733,7 +733,7 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
         target.class_think_ticks = 0x1000000;
 		return; // [orig: 0x406FF0 — +0x2AC = 0x1000000 and nothing else]
 	case ItemDeathClass::kNone:
-		return; // [orig: nullsub_65 @0x443650 / nullsub_66 @0x443660 — retn]
+		return; // [orig: AflrClass_HandleEvent @0x443650 / GflrClass_HandleEvent @0x443660 — retn]
 	case ItemDeathClass::kGnrc:
 		gnrc_death_event(world, target, phase, hit.section, hit.event_flags);
 		return;
@@ -756,7 +756,7 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
         regional_sound_event(world, target, phase);
         return;
     case ItemDeathClass::kElevator:
-        target.class_think_ticks = 62; // [orig: sub_4A20D0 @0x4A20D0]
+        target.class_think_ticks = 62; // [orig: ElevatorClass_HandleEvent @0x4A20D0]
         return;
     case ItemDeathClass::kDoor:
         world.doors.command(world, target, phase);

@@ -310,9 +310,9 @@ uint32_t hud_color_material_argb(uint32_t texel, uint32_t diffuse) {
 }
 
 // [orig: Material_LoadStageTexture @ 0x5B16F0 — flag 0x1000 ORed in for types 4/5
-//  @ 0x5B1782, 6 @ 0x5B17A4 and 7 @ 0x5B17C1; type 7's sub_58CE10 @ 0x58CE10 hands it to
+//  @ 0x5B1782, 6 @ 0x5B17A4 and 7 @ 0x5B17C1; type 7's Texture_LoadOcclusionMap @ 0x58CE10 hands it to
 //  GTexture_FindOrCreateFromData, whose GTexture_DownsampleToLimits @ 0x687170 caps the
-//  side at 512; type 6's sub_58A580 @ 0x58A580 makes a volume through
+//  side at 512; type 6's Texture_LoadHorizonMap @ 0x58A580 makes a volume through
 //  GTexture_CreateFromPixelData @ 0x686950, which never downsamples]
 uint32_t material_texture_side_cap(uint8_t runtime_type) {
 	return runtime_type == 4 || runtime_type == 5 || runtime_type == 7 ? kNormalMapSideCap : 0u;

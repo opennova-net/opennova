@@ -1,7 +1,7 @@
 // The death screen's spectate state over the replica rows: the target walk,
 // the sub-mode cycle, the three spectator actions, the SPECTATORTARGET track,
 // the destroyed-target re-pick and the S2C 0x75 fold.
-// [orig: Spectator_CycleTarget_0 @0x52ac20; sub_52AFF0 @0x52aff0;
+// [orig: Spectator_CycleTarget_0 @0x52ac20; Spectator_CycleMode @0x52aff0;
 //  Input_HandleActionBinding cases 500..502 @0x49bd58..0x49bd9e;
 //  Entity_TrySetMinimapTrackTarget @0x52abc0; Entity_Destroy @0x43e820;
 //  NapiNPClientMsg_SetSpectatorMode @0x4259e0]
