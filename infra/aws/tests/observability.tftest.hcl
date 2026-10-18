@@ -10,7 +10,9 @@
 # tasks under its min, its CPU and memory, an unhealthy target behind the load
 # balancer, failed servers, lost machines, failed launches, a stale billing
 # sync, refused webhooks, entitlement stops held for 5 minutes, a gate probe
-# left unanswered for want of a lobby, the database's
+# left unanswered for want of a lobby, a stuck machine, a machine's disk under
+# 15 % free, the servers' log group's ingest past its allowance (the fleet
+# leader's pass age, with hosting on, is fleet.tftest's), the database's
 # CPU, CPU credits (a burstable class), connections and storage and the
 # /healthz health check at the gate's address; every alarm notifies the one
 # topic, which emails the alert address. Each deployment makes its account's
