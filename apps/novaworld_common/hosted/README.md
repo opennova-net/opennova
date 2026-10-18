@@ -292,6 +292,18 @@ At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`sold_capacity.*`).
   `ONNET_HOSTED_DOCKER_ADDRESSES`, which the docker machine driver starts the machine at;
   its association confirmed by inspect) with `FileZone` (a zone file the worker rewrites
   whole, which the smoke test reads).
+- **The fleet's pass** (`apps/novaworld_fleet/hosted/supervisor.*`): an own machine
+  launched for a server that names an address carries it; once the machine has a cloud id
+  the pass asks its `address.associate` and a describe, and holds the server's container
+  back (booting, its clock waiting) until the machine's public address is the address, so
+  the lobby lists it at `<address>:32768` from its first packet (an own machine's public
+  address never changes while it runs a server). A subscription's address whose
+  subscription no longer grants lapses only once a clean reconcile with Stripe has
+  completed since the pass first saw it so, and never more at once than max(2, half the
+  subscription addresses) (the owners' limits' brake: it logs an ERROR and lapses none;
+  an admin may release one). A lapsed address's machine ends (the association goes with
+  it) and its server is placed again without it, no restart counted, its event saying
+  why; once no live machine carries the address it goes releasing.
 
 ## Service accounts and the listing's owner
 

@@ -28,6 +28,8 @@
 
 #include "hosted_fleet_rig.h"
 
+#include "hosted/address_jobs.h"
+#include "hosted/address_repository.h"
 #include "hosted/admin_link.h"
 #include "web_session.h"
 
@@ -45,6 +47,7 @@
 #include <vector>
 
 using namespace hosted_rig;
+using opennova::novaworld_server::hosted::AddressState;
 
 namespace {
 
@@ -931,6 +934,119 @@ int test_own_machine() {
 	TEST_EXPECT(rig.machine(own_machine->id)->state == hosted::FleetMachineState::Ended);
 	TEST_EXPECT(rig.machine(own_machine->id)->end_reason == "its server ended");
 	TEST_EXPECT(rig.state(shared) == State::Running);
+	return 0;
+}
+
+// A static address (hosted/address_repository.h): its own machine launched to carry
+// it, the server's container held back (booting, its agent told to start nothing)
+// while the machine's row does not show the address, an address.associate asked for
+// meanwhile, then the start once a describe brings the address; the subscription
+// ended, the address lapses only after a clean reconcile with Stripe, its machine
+// ends and the server is placed again without it (no restart counted), and the
+// address goes releasing once no machine carries it.
+int test_static_address() {
+	namespace billing = opennova::novaworld_server::billing;
+	Rig rig("hosted_address");
+	Database *db = &rig.db;
+	const int64_t owner = make_player(*db, "addr_owner", 0);
+	subscribe(*db, owner, 1, "active", "sub_addr_tier");
+	subscribe_machines(*db, owner, 1, "sub_addr_machine");
+	billing::SubscriptionRow address_sub;
+	address_sub.stripe_subscription_id = "sub_addr_address";
+	address_sub.stripe_customer_id = "cus_addr";
+	address_sub.user_id = owner;
+	address_sub.status = "active";
+	address_sub.item = billing::ItemKind::StaticAddress;
+	address_sub.price_id = "price_address";
+	address_sub.current_period_end = kWall + 30 * 24 * 60 * 60;
+	billing::upsert_subscription(*db, address_sub);
+	const auto named = hosted::name_subscription_address(*db, owner, "rig-place", rig.wall);
+	TEST_EXPECT(named.outcome == hosted::NameOutcome::Created);
+	const int64_t address = named.id;
+	const std::string ip = "203.0.113.50";
+	TEST_EXPECT(hosted::record_allocation(*db, address, "eipalloc-rig", ip) &&
+			hosted::record_dns_upsert(*db, address, "rig-place", "c1"));
+	const auto r = hosted::request_server(*db, owner, rig.settings(), rig.offered(), rig.config.cap, rig.wall, true,
+			&rig.config.placement, address);
+	TEST_EXPECT(r.outcome == hosted::RequestOutcome::Created);
+	const int64_t id = r.id;
+
+	// Its machine carries the address, and starts nothing while it shows another.
+	for (int i = 0; i < 6; ++i) rig.step();
+	const int64_t machine = rig.machine_of(id);
+	TEST_EXPECT(machine > 0 && rig.machine(machine)->address_id == address &&
+			rig.machine(machine)->state == hosted::FleetMachineState::Ready);
+	TEST_EXPECT(rig.machine(machine)->public_address != ip && rig.state(id) == State::Booting);
+	TEST_EXPECT(rig.agent_of(id) != nullptr && rig.agent_of(id)->last.desired.empty() &&
+			rig.running_container(id) == nullptr);
+	TEST_EXPECT(hosted::address_associate_pending(*db, machine));
+	// The association's describe brings the address: the server starts at it.
+	rig.fake.machines.at(rig.machine(machine)->cloud_id).public_address = ip;
+	TEST_EXPECT(!rig.to_running(id, 5301).empty());
+	TEST_EXPECT(rig.machine(machine)->public_address == ip);
+
+	// Its subscription ends: nothing lapses before a clean reconcile confirms it.
+	address_sub.status = "canceled";
+	billing::upsert_subscription(*db, address_sub);
+	rig.step();
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, address)->state == AddressState::Ready && rig.state(id) == State::Running);
+	hosted::limits_hold::reconciled(*db);
+	rig.step();
+	// Lapsed: its machine ended, the server placed again without it, no restart counted.
+	TEST_EXPECT(hosted::find_address(*db, address)->state != AddressState::Ready);
+	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Ended);
+	const auto replaced = rig.server(id);
+	TEST_EXPECT(replaced && !replaced->address_id && replaced->restarts == 0 && is_live(replaced->state) &&
+			has_event(*db, id, "its static address rig-place lapsed"));
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, address)->state == AddressState::Releasing);
+	TEST_EXPECT(jobs::job_pending(*db, std::string(hosted::kJobAddressRelease) + ":" + std::to_string(address)));
+	// It runs again on a machine of its own with no address.
+	TEST_EXPECT(!rig.to_running(id, 5302).empty());
+	TEST_EXPECT(rig.machine(rig.machine_of(id))->address_id == 0);
+	return 0;
+}
+
+// The lapses' brake: more subscriptions' addresses lapsing in one pass than
+// max(2, half of them) is the cache in doubt, and none lapses.
+int test_static_address_brake() {
+	namespace billing = opennova::novaworld_server::billing;
+	Rig rig("hosted_address_brake");
+	Database *db = &rig.db;
+	std::vector<int64_t> addresses;
+	for (int i = 0; i < 3; ++i) {
+		const std::string n = std::to_string(i);
+		const int64_t owner = make_player(*db, "brake_owner" + n, 0);
+		subscribe(*db, owner, 1, "active", "sub_brake_tier" + n);
+		subscribe_machines(*db, owner, 1, "sub_brake_machine" + n);
+		billing::SubscriptionRow sub;
+		sub.stripe_subscription_id = "sub_brake_address" + n;
+		sub.stripe_customer_id = "cus_brake" + n;
+		sub.user_id = owner;
+		sub.status = "active";
+		sub.item = billing::ItemKind::StaticAddress;
+		sub.price_id = "price_address";
+		sub.current_period_end = kWall + 30 * 24 * 60 * 60;
+		billing::upsert_subscription(*db, sub);
+		const auto named = hosted::name_subscription_address(*db, owner, "brake-" + n, rig.wall);
+		TEST_EXPECT(named.outcome == hosted::NameOutcome::Created);
+		addresses.push_back(named.id);
+		sub.status = "canceled";
+		billing::upsert_subscription(*db, sub);
+	}
+	rig.step();
+	hosted::limits_hold::reconciled(*db);
+	rig.step();
+	for (const int64_t a : addresses) TEST_EXPECT(hosted::find_address(*db, a)->state == AddressState::Allocating);
+	// An admin's release of one goes through all the same.
+	TEST_EXPECT(hosted::lapse_address(*db, addresses[0], hosted::kLapseAdmin, "released by an admin"));
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, addresses[0])->state == AddressState::Releasing);
+	// Two left of three: within the brake, they lapse.
+	rig.step();
+	for (size_t i = 1; i < addresses.size(); ++i)
+		TEST_EXPECT(hosted::find_address(*db, addresses[i])->state != AddressState::Allocating);
 	return 0;
 }
 
@@ -2074,6 +2190,8 @@ int main(int argc, char **argv) {
 		{ "lifecycle_and_stop", test_lifecycle_and_stop },
 		{ "two_servers_one_machine", test_two_servers_one_machine },
 		{ "own_machine", test_own_machine },
+		{ "static_address", test_static_address },
+		{ "static_address_brake", test_static_address_brake },
 		{ "stop_paths", test_stop_paths },
 		{ "exits_and_crash_restarts", test_exits_and_crash_restarts },
 		{ "launch_failure", test_launch_failure },

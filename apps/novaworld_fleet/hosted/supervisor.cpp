@@ -1,6 +1,8 @@
 #include "supervisor.h"
 
 #include "auth.h"
+#include "billing/billing_repository.h"
+#include "hosted/address_jobs.h"
 #include "hosted/fleet_jobs.h"
 #include "hosted/hosted_settings.h"
 #include "loggable.h"
@@ -235,6 +237,11 @@ void Supervisor::tick(uint64_t now_ms) {
 		step_machines(db, now_ms);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[fleet] WARN the machines: %s\n", e.what());
+	}
+	try {
+		step_addresses(db, now_ms);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[fleet] WARN the static addresses: %s\n", e.what());
 	}
 
 	// The servers, as the machines' moves left them.
@@ -648,6 +655,8 @@ bool Supervisor::launch_machine(db::Database &db, const HostedServer &s, Machine
 	wanted.serve_image = config_.serve_image;
 	wanted.reserved_for = kind == MachineKind::Own ? s.id : 0;
 	wanted.launched_for = s.id;
+	// The static address the server runs at, which its own machine carries.
+	if (kind == MachineKind::Own && s.address_id) wanted.address_id = *s.address_id;
 	// The row and its launch job, together: no row without its launch, no
 	// launch without its row. A worker runs the launch (fleet_jobs.h); the
 	// machine takes servers as it launches, and the next pass places them once
@@ -813,6 +822,12 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 	}
 	if (machine->state != FleetMachineState::Ready) {
 		// Its machine boots (or is lost, or drains): the container's clock waits.
+		rt.since_ms = now_ms;
+		return;
+	}
+	if (address_held(db, *machine) && !report_of(fleet, s)) {
+		// Its machine does not show its static address yet: the container waits
+		// (sync answers none), so it lists at the address from its first packet.
 		rt.since_ms = now_ms;
 		return;
 	}
@@ -1203,6 +1218,7 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 			case FleetMachineState::Booting:
 				// Its describes fill in its addresses and say when it is gone.
 				ask_describe(db, m, now_ms);
+				if (m.address_id > 0) carry_address(db, m, now_ms);
 				if (in_state >= boot_timeout) {
 					launch_failed(db, m.kind, now_ms);
 					end(FleetMachineState::Failed,
@@ -1212,6 +1228,7 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 			case FleetMachineState::Ready:
 				if (m.public_address.empty())
 					ask_describe(db, m, now_ms);
+				if (m.address_id > 0) carry_address(db, m, now_ms);
 				if (m.kind == MachineKind::Own) {
 					// Launched for one server: it ends with that server.
 					if (m.reserved_for == 0 || live_ids.count(m.reserved_for) == 0)
@@ -1293,6 +1310,113 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 	}
 }
 
+// --- the static addresses -------------------------------------------------------------
+
+bool Supervisor::address_held(db::Database &db, const FleetMachineRow &machine) const {
+	if (machine.address_id <= 0) return false;
+	const std::string ip = carried_address_ip(db, machine.id);
+	return ip.empty() || machine.public_address != ip;
+}
+
+void Supervisor::carry_address(db::Database &db, const FleetMachineRow &m, uint64_t now_ms) {
+	const auto address = find_address(db, m.address_id);
+	if (m.cloud_id.empty() || !address || address->state != AddressState::Ready) return;
+	if (m.public_address == address->public_ip) {
+		associate_asked_ms_.erase(m.id);
+		return;
+	}
+	const auto asked = associate_asked_ms_.find(m.id);
+	if (asked != associate_asked_ms_.end() && elapsed(now_ms, asked->second) < config_.describe_interval_ms) return;
+	{
+		// Cloud work, fenced as a launch is.
+		db::Transaction tx(db);
+		if (pass_guard_ && !pass_guard_(db)) return;
+		if (enqueue_address_associate(db, address->id, m.id) != 0)
+			std::printf("[fleet] machine %lld: static address %lld (%s) to associate\n", static_cast<long long>(m.id),
+					static_cast<long long>(address->id), loggable(address->name, 40).c_str());
+		tx.commit();
+	}
+	// Only a describe moves the row's public address (the association's own
+	// describe may have been answered before it took).
+	ask_describe(db, m, now_ms);
+	associate_asked_ms_[m.id] = now_ms;
+}
+
+void Supervisor::step_addresses(db::Database &db, uint64_t now_ms) {
+	// The subscriptions' addresses whose grant is gone, each confirmed once a
+	// clean reconcile with Stripe completed after the pass first saw it so.
+	const uint64_t reconciles = limits_hold::reconciles(db);
+	const int64_t wall = config_.wall_clock_s();
+	std::vector<HostedAddress> confirmed;
+	std::set<int64_t> seen;
+	size_t subscribed = 0;
+	for (const AddressState state : { AddressState::Allocating, AddressState::Ready, AddressState::Failed }) {
+		for (HostedAddress &a : addresses_in(db, state)) {
+			if (a.source != "subscription") continue;
+			++subscribed;
+			seen.insert(a.id);
+			const auto row = billing::find_subscription(db, a.stripe_subscription_id);
+			if (row && billing::subscription_grants(*row, wall)) {
+				lapse_seen_.erase(a.id);
+				continue;
+			}
+			const auto first = lapse_seen_.emplace(a.id, reconciles).first;
+			if (reconciles > first->second) confirmed.push_back(std::move(a));
+		}
+	}
+	for (auto it = lapse_seen_.begin(); it != lapse_seen_.end();)
+		it = seen.count(it->first) == 0 ? lapse_seen_.erase(it) : std::next(it);
+	// The owners' limits' brake: more at once reads as the cache gone wrong.
+	const size_t threshold = std::max<size_t>(2, subscribed / 2);
+	if (confirmed.size() > threshold) {
+		if (!address_brake_held_)
+			std::fprintf(stderr,
+					"[hosted] ERROR the static addresses' lapses held: %zu of %zu would lapse at once; none lapses "
+					"(an admin may release one)\n",
+					confirmed.size(), subscribed);
+		address_brake_held_ = true;
+	} else {
+		address_brake_held_ = false;
+		for (const HostedAddress &a : confirmed) {
+			if (!lapse_address(db, a.id, kLapseGrant, "its subscription ended")) continue;
+			lapse_seen_.erase(a.id);
+			std::printf("[hosted] static address %lld (%s) lapsed: its subscription ended\n",
+					static_cast<long long>(a.id), loggable(a.name, 40).c_str());
+		}
+	}
+
+	// A lapsed address leaves its server and its machine, then goes.
+	for (const HostedAddress &a : addresses_in(db, AddressState::Lapsed)) {
+		const std::string why = "its static address " + a.name + " lapsed";
+		if (const auto server_id = server_of_address(db, a.id)) {
+			const auto s = find_server(db, *server_id);
+			if (s && clear_server_address(db, s->id) && s->state == State::Provisioning)
+				transition(db, s->id, s->state, s->state, why + "; it runs without it");
+		}
+		std::vector<FleetMachineRow> carrying = live_machines_carrying(db, a.id);
+		for (const FleetMachineRow &m : carrying) {
+			if (m.state == FleetMachineState::Ending) continue;
+			end_machine(db, m, FleetMachineState::Ended, why, now_ms);
+		}
+		if (!live_machines_carrying(db, a.id).empty()) continue;
+		db::Transaction tx(db);
+		if (pass_guard_ && !pass_guard_(db)) return;
+		if (begin_release(db, a.id)) {
+			enqueue_address_release(db, a.id);
+			std::printf("[hosted] static address %lld (%s) releasing\n", static_cast<long long>(a.id),
+					loggable(a.name, 40).c_str());
+		}
+		tx.commit();
+	}
+	// A release whose job is gone (its attempts used up) runs again.
+	for (const HostedAddress &a : addresses_in(db, AddressState::Releasing)) {
+		db::Transaction tx(db);
+		if (pass_guard_ && !pass_guard_(db)) return;
+		enqueue_address_release(db, a.id);
+		tx.commit();
+	}
+}
+
 // --- the desired state ---------------------------------------------------------------
 
 FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
@@ -1308,6 +1432,9 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 			started.insert(c.name);
 	}
 	const std::vector<SlotHolder> holders = slot_holders(db, machine.id);
+	// A machine that does not show its static address yet starts nothing (the
+	// class comment); what it runs already stays.
+	const bool address_wait = address_held(db, machine);
 	// What the starts in memory answer, in the holders' order; the containers no
 	// start answers for are read from their rows after, with no database work
 	// under starts_mu_ (the pass takes it too).
@@ -1336,6 +1463,7 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 				}
 				// A stopping server's container that never started stays unstarted.
 				if (h.state == State::Stopping && !start.acknowledged) continue;
+				if (address_wait && !start.acknowledged) continue;
 				wanted[i] = start.container;
 				continue;
 			}

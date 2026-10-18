@@ -20,7 +20,8 @@
 //          reaches running and is listed in the lobby (its listing's RID), takes
 //          console commands
 //          through the fleet's admin link (PLAYER LIST, CHAT SEND), and
-//          stops.
+//          stops. Then the static addresses (check_static_address), with
+//          --zone-file the zone the worker writes.
 //   data-set <dir>
 //          writes the synthetic Joint Operations data set the stack's machines can
 //          serve without licensed data: the serve tests' deathmatch map
@@ -48,8 +49,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -178,6 +181,7 @@ struct Options {
 	std::string admin_token;
 	std::string hosting; // the id of a data set to host on, "" for none
 	std::string mission; // the start's rotation; "" for the data's whole one
+	std::string zone_file; // the static addresses' zone file the worker writes, "" for none
 	int timeout_s = 300;
 };
 
@@ -346,6 +350,126 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 			"it ends stopped", why);
 }
 
+// The static addresses (with --zone-file, the zone the worker writes): the admin
+// grants the account an own machine and a comp address, which the worker allocates
+// from the stack's fixed range and names in the zone file; an own-machine server
+// started at it runs on a machine at that address and lists there; stopped and
+// started again, it keeps it. With billing on, a checkout past the fleet's shared
+// places (an admin's grant fills them) is refused sold_out.
+void check_static_address(const Site &site, int64_t user_id, const Options &o) {
+	auto reply = site.admin("GET", "/api/admin/addresses");
+	const auto view = json_of(reply);
+	const io::JsonValue *enabled = view ? at(*view, { "enabled" }) : nullptr;
+	if (!enabled || !enabled->is_bool() || !enabled->boolean) {
+		note("static addresses not checked: off (" + status_text(reply) + ")");
+		return;
+	}
+	reply = site.admin("PUT", "/api/admin/users/" + std::to_string(user_id) + "/comp",
+			"{\"servers\":1,\"own_machines\":1}");
+	if (!check(reply.code == 200, "the admin grants the account an own machine (comp grant)", status_text(reply)))
+		return;
+	const std::string name = "smoke-" + random_hex(3);
+	reply = site.admin("POST", "/api/admin/users/" + std::to_string(user_id) + "/addresses",
+			"{\"name\":\"" + name + "\"}");
+	const auto made = json_of(reply);
+	const int64_t address = reply.code == 201 && made ? number_at(*made, { "address", "id" }) : 0;
+	if (!check(address > 0, "the admin gives it a comp static address " + name, status_text(reply)))
+		return;
+	std::string ip;
+	std::string why;
+	const bool ready = wait_for(
+			[&] {
+				const auto r = site.user("GET", "/api/me/addresses");
+				const auto v = json_of(r);
+				const io::JsonValue *list = v ? at(*v, { "addresses" }) : nullptr;
+				why = status_text(r);
+				if (!list || !list->is_array()) return false;
+				for (const io::JsonValue &a : list->array) {
+					if (number_at(a, { "id" }) != address) continue;
+					ip = text_at(a, { "public_ip" });
+					why = "state " + text_at(a, { "state" });
+					return text_at(a, { "state" }) == "ready" && !ip.empty();
+				}
+				return false;
+			},
+			60);
+	if (!check(ready, "the worker allocates it (ready at " + ip + ")", why))
+		return;
+	if (!o.zone_file.empty()) {
+		std::ifstream in(o.zone_file);
+		std::stringstream text;
+		text << in.rdbuf();
+		check(text.str().find(name + "\t300\tIN\tA\t" + ip + "\n") != std::string::npos,
+				"the zone file names it (" + o.zone_file + ")", "no A record " + name + " " + ip);
+	}
+	// Twice: a start at the address runs and lists there, then stops.
+	for (int round = 1; round <= 2; ++round) {
+		const std::string label = round == 1 ? "an own-machine server" : "started again, it";
+		reply = site.user("POST", "/api/me/servers",
+				"{\"data_set_id\":" + o.hosting + ",\"game_name\":\"Smoke at " + name +
+						"\",\"own_machine\":true,\"address_id\":" + std::to_string(address) + "}");
+		const auto started = json_of(reply);
+		const int64_t id = reply.code == 202 && started ? number_at(*started, { "server", "id" }) : 0;
+		if (!check(id > 0, label + " starts at the address (POST /api/me/servers: 202)", status_text(reply)))
+			return;
+		const std::string path = "/api/me/servers/" + std::to_string(id);
+		std::string state;
+		std::string listed;
+		const auto read = [&] {
+			const auto r = site.user("GET", path);
+			const auto v = json_of(r);
+			if (r.code != 200 || !v) return false;
+			state = text_at(*v, { "server", "state" });
+			listed = text_at(*v, { "server", "listing", "host_ip" });
+			why = "state " + state + ", " + text_at(*v, { "server", "failure_reason" });
+			return (state == "running" && !listed.empty()) || state == "failed" || state == "stopped";
+		};
+		wait_for(read, o.timeout_s);
+		// Its machine is at the address (the listing's is the machine's as the lobby
+		// sees it through Docker).
+		const auto admin_view = json_of(site.admin("GET", "/api/admin/hosted/" + std::to_string(id)));
+		const std::string machine_at = admin_view ? text_at(*admin_view, { "machine", "public_address" }) : "";
+		check(state == "running" && machine_at == ip, label + " runs on a machine at its static address (" + ip + ")",
+				why + ", its machine at " + machine_at);
+		note("its listing names " + listed);
+		reply = site.user("POST", path + "/stop");
+		check(reply.code == 202 &&
+						wait_for(
+								[&] {
+									read();
+									return state == "stopped";
+								},
+								120),
+				"it stops", why);
+	}
+
+	// The capacity gate, with billing on: the fleet's shared places granted away,
+	// a new account's tier is sold out.
+	reply = http("GET", o.site, "/api/billing/tiers");
+	const auto tiers = json_of(reply);
+	const io::JsonValue *billing_on = tiers ? at(*tiers, { "enabled" }) : nullptr;
+	if (!billing_on || !billing_on->is_bool() || !billing_on->boolean) {
+		note("the capacity gate not checked at checkout: billing is off");
+		return;
+	}
+	reply = site.admin("PUT", "/api/admin/users/" + std::to_string(user_id) + "/comp",
+			"{\"servers\":16,\"own_machines\":0}");
+	check(reply.code == 200, "the admin's grant fills the fleet's shared places", status_text(reply));
+	const std::string other = "smoke_" + random_hex(4);
+	const std::string password = "pw-" + random_hex(8);
+	http("POST", o.site, "/api/register", { "Content-Type: application/json", "X-OpenNova-Request: 1" },
+			"{\"username\":\"" + other + "\",\"password\":\"" + password + "\",\"email\":\"" + other +
+					"@example.com\"}");
+	reply = http("POST", o.site, "/api/login", { "Content-Type: application/json", "X-OpenNova-Request: 1" },
+			"{\"username\":\"" + other + "\",\"password\":\"" + password + "\"}");
+	Site second{ o.site, session_cookie(reply), o.admin_token };
+	reply = second.user("POST", "/api/billing/checkout", "{\"item\":\"tier1\"}");
+	const auto refused = json_of(reply);
+	check(reply.code == 409 && refused && text_at(*refused, { "error" }) == "sold_out",
+			"a checkout past the fleet is refused (409 sold_out)", status_text(reply));
+	site.admin("PUT", "/api/admin/users/" + std::to_string(user_id) + "/comp", "{\"servers\":1,\"own_machines\":1}");
+}
+
 int run(const Options &o) {
 	// Each program's liveness and web's readiness.
 	for (const std::string &target : o.livez) {
@@ -404,8 +528,10 @@ int run(const Options &o) {
 	check(reply.code == 200 && json_of(reply).has_value(),
 			"the jobs admin API answers (GET /api/admin/jobs/overview)", status_text(reply));
 
-	if (!o.hosting.empty() && user_id > 0)
+	if (!o.hosting.empty() && user_id > 0) {
 		check_hosting(site, user_id, o);
+		check_static_address(site, user_id, o);
+	}
 	else if (o.hosting.empty())
 		note("hosting not checked: no data set (dev_stack.sh up --data <dir> or --synthetic-data)");
 	std::printf("%s: %d failure(s)\n", g_failures == 0 ? "PASSED" : "FAILED", g_failures);
@@ -468,7 +594,8 @@ int usage() {
 	std::fprintf(stderr,
 			"usage: opennova-novaworld-stack-smoke run [--web <host:port>] [--site <host:port>]\n"
 			"           [--gate <host:port>] [--livez <host:port>]... --admin-token <token>\n"
-			"           [--hosting <data set id> [--mission <name.bms>]] [--timeout <seconds>]\n"
+			"           [--hosting <data set id> [--mission <name.bms>] [--zone-file <path>]]\n"
+			"           [--timeout <seconds>]\n"
 			"       opennova-novaworld-stack-smoke data-set <dir>\n");
 	return 2;
 }
@@ -500,6 +627,8 @@ int main(int argc, char **argv) {
 			o.hosting = value;
 		else if (arg == "--mission")
 			o.mission = value;
+		else if (arg == "--zone-file")
+			o.zone_file = value;
 		else if (arg == "--timeout")
 			o.timeout_s = std::atoi(value.c_str());
 		else
