@@ -41,6 +41,17 @@ function(opennova_add_mixed_test name)
     endif()
 endfunction()
 
+# opennova_bakes(<row>...): rows that run whole TrnGen terrain bakes, each on as
+# many threads as the machine has (TerrainBakeInput::for_hardware, the editor's
+# bake_threads). scripts/build.sh runs ctest over tests/ctest_resources.json,
+# whose `bakes` resource lets three such rows run at once; the other rows run
+# beside them as before. Twelve at once (ctest starting its longest rows first)
+# kept a 16-core runner's cores so busy that a row beside them with a timeout
+# of its own ran past it. A ctest run without the file runs them unbounded.
+function(opennova_bakes)
+    set_tests_properties(${ARGN} PROPERTIES RESOURCE_GROUPS "bakes:1")
+endfunction()
+
 # opennova_add_parts(<name> PARTS <part>... [GATED] COMMAND <command>...): a row
 # per part of a program split with tests/common/test_parts.h, <name>_<part>
 # running `<command> --part <part> --parts <part>...`, so the parts run side by
@@ -1568,6 +1579,7 @@ add_executable(cpt_trngen_bake_test cpt/trngen_bake_test.cpp)
 target_link_libraries(cpt_trngen_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_parts(cpt_trngen_bake PARTS island hills flat refusals COMMAND cpt_trngen_bake_test)
+opennova_bakes(cpt_trngen_bake_island cpt_trngen_bake_hills cpt_trngen_bake_flat cpt_trngen_bake_refusals)
 
 # A heightmap image (a PNG at any depth, TrnGen's .raw, the game's raw16) made
 # into the depth the bake takes (formats/cpt/trngen heightmap_depth.h).
@@ -1594,12 +1606,15 @@ add_executable(cpt_trngen_region_bake_test cpt/trngen_region_bake_test.cpp)
 target_link_libraries(cpt_trngen_region_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_region_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_parts(cpt_trngen_region_bake PARTS state regions locks walk COMMAND cpt_trngen_region_bake_test)
+opennova_bakes(cpt_trngen_region_bake_state cpt_trngen_region_bake_regions cpt_trngen_region_bake_locks)
 # Over the shipped .cpt files (a cold bake's state from the atlas; the W3 draw-back report).
 add_executable(cpt_region_bake_retail_test cpt/trngen_region_bake_retail_test.cpp)
 target_link_libraries(cpt_region_bake_retail_test PRIVATE opennova_formats)
 target_include_directories(cpt_region_bake_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_parts(cpt_region_bake_retail PARTS draw_back dvxi5 dvxg3 g14 dvxi4 dvxg9 GATED
                    COMMAND cpt_region_bake_retail_test)
+opennova_bakes(cpt_region_bake_retail_dvxi5 cpt_region_bake_retail_dvxg3 cpt_region_bake_retail_g14
+               cpt_region_bake_retail_dvxi4 cpt_region_bake_retail_dvxg9)
 # By hand: the region bake's cost per node level (`trngen_region_bake_bench [threads]`).
 add_executable(trngen_region_bake_bench EXCLUDE_FROM_ALL cpt/trngen_region_bake_bench.cpp)
 target_link_libraries(trngen_region_bake_bench PRIVATE opennova_formats)

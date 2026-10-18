@@ -161,7 +161,7 @@ SET_CALL = re.compile(r"set\s*\(\s*([A-Za-z0-9_]+)\s+([^)]+)\)", re.DOTALL)
 # [NAME <name>] [SOURCES ...] [LIBS ...]) builds <name, else editor_<stem>>_test linked against LIBS (else
 # opennova_editor); opennova_add_editor_executable(<target> SOURCES ... LIBS ...) builds <target>.
 EDITOR_TEST_CALL = re.compile(r"\bopennova_add_editor_(test|executable)\s*\(([^)]*)\)", re.DOTALL)
-EDITOR_TEST_KEYWORDS = {"MIXED", "RETAIL_PARTS", "NAME", "TIMEOUT", "SOURCES", "LIBS"}
+EDITOR_TEST_KEYWORDS = {"MIXED", "RETAIL_PARTS", "BAKES", "NAME", "TIMEOUT", "SOURCES", "LIBS"}
 
 
 def graph_from_graphviz(build_dir: Path) -> tuple[dict[str, set[str]], set[str]] | None:
