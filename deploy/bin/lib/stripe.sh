@@ -33,6 +33,7 @@ STRIPE_CATALOG=(
   "price_tier2|opennova_tier2_monthly|OpenNova support tier 2|Monthly support for OpenNova: 2 hosted game servers|tier2|1000"
   "price_tier3|opennova_tier3_monthly|OpenNova support tier 3|Monthly support for OpenNova: 3 hosted game servers|tier3|1500"
   "price_own_machine|opennova_own_machine_monthly|OpenNova own machine|A machine of its own for one of your hosted servers, monthly add-on|own_machine|4500"
+  "price_static_address|opennova_static_address_monthly|OpenNova static address|A static IPv4 address and a DNS name for one own machine, monthly add-on|static_address|500"
 )
 # The Customer Portal configuration this toolbox owns carries this metadata.
 STRIPE_PORTAL_TAG=support_tiers
@@ -113,7 +114,9 @@ usd_cents() {
 
 # The portal's settings, as curl data arguments, for the tier products $@
 # (product:price each): switching among them prorates, a downgrade waits for
-# the period's end, a cancel ends the subscription at the period's end; the
+# the period's end, a cancel ends the subscription at the period's end (a
+# tier's or an add-on's; the site opens a static address's cancel straight at
+# its subscription, a subscription_cancel flow, which this setting allows); the
 # card, the invoices, the email and the address are the customer's to see and
 # change.
 stripe_portal_args() {
@@ -184,17 +187,18 @@ stripe_setup() {
   local entry field lookup name desc meta cents
   while [ $# -gt 0 ]; do
     case "$1" in
-      --tier1|--tier2|--tier3|--own-machine)
+      --tier1|--tier2|--tier3|--own-machine|--static-address)
         [ $# -ge 2 ] || die "$1 needs an amount in US dollars"
         case "$1" in
           --tier1) field=price_tier1 ;; --tier2) field=price_tier2 ;;
           --tier3) field=price_tier3 ;; --own-machine) field=price_own_machine ;;
+          --static-address) field=price_static_address ;;
         esac
         amounts[$field]="$(usd_cents "$1" "$2")" || exit 1
         explicit[$field]=1
         shift 2 ;;
       --yes) yes=1; shift ;;
-      *) die "unknown: stripe setup $1 (try: --tier1 USD, --tier2 USD, --tier3 USD, --own-machine USD, --yes)" ;;
+      *) die "unknown: stripe setup $1 (try: --tier1 USD, --tier2 USD, --tier3 USD, --own-machine USD, --static-address USD, --yes)" ;;
     esac
   done
   confirm_prod "make or change Stripe's live-mode objects and the stripe-live item" "$yes"
@@ -255,7 +259,12 @@ stripe_setup() {
       VAULT_VALUES[$field]="$want"
       wrote+=("$field:STRING")
     fi
-    [ "$field" = price_own_machine ] || tier_pairs+=("$product_id:$price_id")
+    # The add-ons are no tier the portal switches among: each is a
+    # subscription of its own (quantity 1), bought through Checkout.
+    case "$field" in
+      price_own_machine|price_static_address) ;;
+      *) tier_pairs+=("$product_id:$price_id") ;;
+    esac
   done
   rm -f "$products"
   if [ "${#wrote[@]}" -gt 0 ]; then

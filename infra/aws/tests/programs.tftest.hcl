@@ -467,9 +467,11 @@ run "environments" {
     condition = (
       toset(keys(jsondecode(jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].dockerLabels["opennova.optional-secrets"]))) == toset([
         "ONNET_BOOTSTRAP_ADMIN", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE",
+        "STRIPE_PRICE_STATIC_ADDRESS",
       ]) &&
       toset(keys(jsondecode(jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].dockerLabels["opennova.optional-secrets"]))) == toset([
         "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE",
+        "STRIPE_PRICE_STATIC_ADDRESS",
       ]) &&
       alltrue([for p in ["gate", "lobby", "fleet", "data"] : jsondecode(jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].dockerLabels["opennova.optional-secrets"]) == {}]) &&
       jsondecode(jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].dockerLabels["opennova.optional-secrets"])["STRIPE_SECRET_KEY"] == "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/secret/STRIPE_SECRET_KEY"

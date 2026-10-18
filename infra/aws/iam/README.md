@@ -64,7 +64,7 @@ hand.
 | `opennova-deploy-ecs` | the ECS clusters (the programs' and the fleet's, where hostd runs), their services, task definitions and tasks (one-off tasks, ECS Exec), Application Auto Scaling, Cloud Map, EventBridge Scheduler (the nightly backup) |
 | `opennova-deploy-iam` | the stack's roles (under either boundary), instance profiles, the GitHub OIDC provider, `iam:PassRole` to EC2, ECS's tasks and EventBridge Scheduler, the service-linked roles RDS, ElastiCache, Elastic Load Balancing, ECS, Application Auto Scaling and CloudWatch's alarm actions make on first use, the policy simulator; nothing about IAM users |
 | `opennova-deploy-data` | RDS, ElastiCache, the operations bucket (its versioning, lifecycle and encryption; its releases read and written, its dumps read and written, never deleted; the game data, `data/*`, is the tasks' roles' alone, never the deploy user's), SSM parameters, its own sessions (ECS Exec), CloudWatch Logs |
-| `opennova-deploy-observability` | alarms and metrics, the alerts topic, the Route 53 health check and the private zone Cloud Map keeps for the fleet program, budgets, Cost Anomaly Detection, Service Quotas and cost reads, SES identities |
+| `opennova-deploy-observability` | alarms and metrics, the alerts topic, the Route 53 health check, the private zone Cloud Map keeps for the fleet program and the static addresses' public zone (`play.<domain>`, `infra/aws/edge.tf`), budgets, Cost Anomaly Detection, Service Quotas and cost reads, SES identities |
 
 Beside them the org stack gives the user two inline policies: its Terraform states (in its
 account's state bucket, `infra/aws/*`; prod's also `infra/zone/*` and `infra/github/*`, the shared
@@ -88,7 +88,7 @@ refused at run time (an AccessDenied naming the boundary).
 | Boundary | Carried by | Holds |
 | --- | --- | --- |
 | `opennova-machine-boundary` | the machines' two roles: the instance role (`opennova-<deployment>-machine`) and hostd's task role (`opennova-<deployment>-hostd`) | the ECS agent's calls on the fleet clusters (`opennova-*-fleet`) and their container instances (registering the machine, reporting its tasks and containers, polling for its work, its telemetry session; finding the poll endpoint), ECS Exec's session channels (`fleet shell`), the log streams of the `/opennova/*/machines` and `/opennova/*/servers` groups (written by the docker daemon's awslogs driver: hostd's own and the slots'), and the trees of the store (`data/trees/` of an `opennova-*` bucket, listed and read) |
-| `opennova-role-boundary` | every other role `infra/aws` makes (the programs' task roles, the execution role, the backup task's and its schedule's), and the GitHub deploy role | the session channels (ECS Exec), `/opennova/*` parameters and their names, the operations bucket (its objects read, written and deleted, its uploads in flight listed and aborted: the game data's store, `data/`, which web's and the data program's task roles narrow to), `/opennova/*` logs, the AWS-managed keys through SSM and EC2, launching and ending machines tagged `opennova:hosted=1` from OpenNova-tagged subnets, groups and templates, passing `opennova-*` roles to EC2, ECS's tasks and EventBridge Scheduler, sending mail through the account's SES identities, running `opennova-*` task definitions in an `opennova-*` cluster and tagging their tasks, registering task definitions, pointing `opennova-*` services at them (the fleet cluster's hostd among them) and the backup schedule at a release's revision, and the admin's infrastructure view's reads (web's: listing and describing `opennova-*` clusters' tasks and container instances, the fleet cluster's among them, describing `opennova-*` databases and cache replication groups, the target groups' health) |
+| `opennova-role-boundary` | every other role `infra/aws` makes (the programs' task roles, the execution role, the backup task's and its schedule's), and the GitHub deploy role | the session channels (ECS Exec), `/opennova/*` parameters and their names, the operations bucket (its objects read, written and deleted, its uploads in flight listed and aborted: the game data's store, `data/`, which web's and the data program's task roles narrow to), `/opennova/*` logs, the AWS-managed keys through SSM and EC2, launching and ending machines tagged `opennova:hosted=1` from OpenNova-tagged subnets, groups and templates, the static addresses (Elastic IPs allocated tagged `opennova:hosted=1` and an `opennova-*` deployment, tagged only as they are allocated, associated with such machines, disassociated and released only while they carry both tags, and described) and their names (A records, by UPSERT and DELETE alone, named `*.play.*` in a hosted zone, and a change's state read: the worker's policy narrows them to its own play zone), passing `opennova-*` roles to EC2, ECS's tasks and EventBridge Scheduler, sending mail through the account's SES identities, running `opennova-*` task definitions in an `opennova-*` cluster and tagging their tasks, registering task definitions, pointing `opennova-*` services at them (the fleet cluster's hostd among them) and the backup schedule at a release's revision, and the admin's infrastructure view's reads (web's: listing and describing `opennova-*` clusters' tasks and container instances, the fleet cluster's among them, describing `opennova-*` databases and cache replication groups, the target groups' health) |
 
 What goes where: a permission only the machines' roles use goes in the machine boundary, and
 nothing a program, the backup or the deploy workflow uses goes there; a permission both sides
@@ -103,7 +103,11 @@ boundary is the one near the limit, so it is kept compact: the actions it allows
 resource, under no condition, share one statement (`Unscoped`), its statement ids are short,
 and two statements of the same action and resource are one (`PassRoles` names the three
 services). Compacting never widens a scoped resource and never drops or loosens a condition:
-two statements become one only when the one grants exactly what the two did. A permission
+two statements become one only when the one grants exactly what the two did. Statements under
+the same conditions share one where no action of one applies to the other's resources
+(`LaunchTagged`: `ec2:RunInstances` makes instances, never Elastic IPs, and
+`ec2:AllocateAddress` the reverse; `TagAtLaunch`: a tag at creation is under
+`ec2:CreateAction`, the action that made what it tags). A permission
 that would push it past the limit and belongs to one kind of role alone is the moment for a
 boundary of its own, as the machines' was.
 
@@ -115,7 +119,11 @@ every store call of web's and the data program's task roles is refused until it 
 machine role or hostd task role can be made under a boundary IAM does not hold yet (the apply
 fails on them), so no machine registers in the fleet cluster. The deploy user's policies gain
 nothing for the store; the fleet cluster, hostd's service and task definition and hostd's task
-role fall under their `opennova-*` names and the deployment's tag as the programs' do.
+role fall under their `opennova-*` names and the deployment's tag as the programs' do. So too
+before raising `fleet_max_addresses` above 0 (DEPLOY.md, "Turning it on"): the role boundary
+holds the worker's address and record rights, or every allocation is refused (the worker's
+policy names them whenever hosting is on, and the deploy user's already cover the play zone
+itself).
 
 ## Changing a policy
 
@@ -150,3 +158,11 @@ AccessDenied naming the action):
   that machine's ECS agent registering in the fleet cluster and polling (the instance role's ECS
   calls under the machine boundary, and the awslogs streams of hostd and the slots), hostd's ECS
   Exec (`fleet shell`), and web's reads of the fleet cluster's container instances.
+- the first `infra apply` with `fleet_max_addresses` above 0: the deploy user's making of the
+  public play zone (`route53:CreateHostedZone`, its tags, `GetChange` while it syncs) and the
+  Cloudflare NS records; then the worker's first static address: `ec2:AllocateAddress` with its
+  tag specifications (and `ec2:CreateTags` under `ec2:CreateAction`), `ec2:AssociateAddress`
+  naming the machine (whether EC2 also evaluates the machine's network interface, which carries
+  no tag), its first `route53:ChangeResourceRecordSets` under the record-name condition, and a
+  release's `ec2:DisassociateAddress` (whether EC2 evaluates more than the address) and
+  `ec2:ReleaseAddress`.

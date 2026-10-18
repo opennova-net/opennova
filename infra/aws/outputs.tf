@@ -173,6 +173,26 @@ output "hosted_deployment" {
   description = "The opennova:deployment tag of this stack's machines (ONNET_HOSTED_DEPLOYMENT); null while hosting is off"
 }
 
+output "fleet_capacity" {
+  value = {
+    max_shared    = var.fleet_max_shared
+    shared_slots  = var.shared_slots
+    max_own       = var.fleet_max_own
+    max_addresses = var.fleet_max_addresses
+  }
+  description = "What the fleet holds and sells at its most (fleet_max_shared, shared_slots, fleet_max_own, fleet_max_addresses): infra plan and infra apply warn when a plan lowers one"
+}
+
+output "play_zone" {
+  value       = local.play_zone_enabled ? local.play_zone_name : null
+  description = "The static addresses' Route 53 zone, delegated from the Cloudflare zone (ONNET_HOSTED_ADDRESS_ZONE; an address's name is <name>.<zone>); null while the add-on is off"
+}
+
+output "play_zone_id" {
+  value       = one(aws_route53_zone.play[*].zone_id)
+  description = "Its hosted zone id (ONNET_HOSTED_ADDRESS_ZONE_ID); null while the add-on is off"
+}
+
 output "machines_log_group" {
   value       = aws_cloudwatch_log_group.machines.name
   description = "The machines' logs"

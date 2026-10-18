@@ -452,6 +452,17 @@ variable "fleet_max_own" {
   default     = 2
 }
 
+variable "fleet_max_addresses" {
+  description = "The most static addresses the service sells (ONNET_FLEET_MAX_ADDRESSES): the own machines' add-on, an Elastic IP each with its name in the play zone (edge.tf). 0 (the default) turns the add-on off; above 0, with hosting on and a Cloudflare zone, the stack makes the play zone and its delegation. The account's Elastic IP quota (L-0263D0A3, 5 per Region by default, the load balancer's two among them) is raised first (DEPLOY.md, \"Turning it on\")."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.fleet_max_addresses >= 0 && var.fleet_max_addresses <= 64 && floor(var.fleet_max_addresses) == var.fleet_max_addresses
+    error_message = "fleet_max_addresses must be a whole number 0..64."
+  }
+}
+
 variable "fleet_idle_minutes" {
   description = "How long a shared machine with no server runs before the service ends it (ONNET_FLEET_IDLE_MINUTES)."
   type        = number

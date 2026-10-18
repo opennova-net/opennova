@@ -12,7 +12,10 @@
 # goes only without a zone; so does the gate's (nw, an A record at the
 # gate's zone-a address; nw.staging off prod). The zone's own settings and rules (Full strict,
 # edge authentication, the webhook's WAF skip) are infra/zone's: none of them
-# is made here.
+# is made here. The static addresses' Route 53 zone (play, play.staging off
+# prod) and the four NS records delegating it exist only while the add-on is
+# sold (fleet_max_addresses above 0) with hosting on and Cloudflare, and the
+# programs' environment names it then alone.
 
 mock_provider "aws" {
   override_during = plan
@@ -96,6 +99,14 @@ mock_provider "aws" {
   }
   mock_resource "aws_service_discovery_service" {
     defaults = { id = "srv-0123456789abcdef", arn = "arn:aws:servicediscovery:us-east-1:123456789012:service/srv-0123456789abcdef" }
+  }
+  # Route 53's answer for a new zone: its id and its four name servers.
+  mock_resource "aws_route53_zone" {
+    defaults = {
+      zone_id      = "Z0123456789PLAYZONE"
+      arn          = "arn:aws:route53:::hostedzone/Z0123456789PLAYZONE"
+      name_servers = ["ns-1.awsdns-01.com", "ns-2.awsdns-02.net", "ns-3.awsdns-03.org", "ns-4.awsdns-04.co.uk"]
+    }
   }
 }
 
@@ -292,6 +303,8 @@ variables {
   cache_auth_token          = "fedcba9876543210fedcba9876543210"
   cloudflare_zone_id        = "0123456789abcdef0123456789abcdef"
   cloudflare_domain         = "example.com"
+  # The image hosting needs (fleet_agent.tf), for the runs that turn it on.
+  fleet_ami = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64"
 }
 
 run "edge" {
@@ -342,6 +355,85 @@ run "edge" {
       output.novaworld_host == "nw.example.com"
     )
     error_message = "the gate's record is nw, an unproxied A record at the gate's own address (the gate speaks UDP; zone b never answers for it)"
+  }
+  assert {
+    condition = (
+      length(aws_route53_zone.play) == 0 && length(cloudflare_record.play_ns) == 0 &&
+      output.play_zone == null && output.play_zone_id == null &&
+      !strcontains(aws_ecs_task_definition.program["web"].container_definitions, "ONNET_HOSTED_ADDRESS_ZONE")
+    )
+    error_message = "the static-address add-on off (fleet_max_addresses 0, the default): no play zone, no delegation, no zone in the environment"
+  }
+}
+
+# The static-address add-on sold: prod's play zone, delegated by its four name
+# servers, named to web, the fleet and the worker (the fleet's policy) and its
+# id to the worker alone (the addresses' driver's).
+run "play_zone" {
+  command = plan
+
+  variables {
+    hosted_enabled      = true
+    fleet_max_addresses = 4
+  }
+
+  assert {
+    condition     = aws_route53_zone.play[0].name == "play.example.com" && output.play_zone == "play.example.com" && output.play_zone_id == "Z0123456789PLAYZONE"
+    error_message = "prod's static addresses' zone is play.<domain>"
+  }
+  assert {
+    condition = (
+      length(cloudflare_record.play_ns) == 4 &&
+      alltrue([for r in cloudflare_record.play_ns : r.name == "play" && r.type == "NS" && r.zone_id == "0123456789abcdef0123456789abcdef"]) &&
+      [for r in cloudflare_record.play_ns : r.content] == ["ns-1.awsdns-01.com", "ns-2.awsdns-02.net", "ns-3.awsdns-03.org", "ns-4.awsdns-04.co.uk"]
+    )
+    error_message = "the Cloudflare zone delegates play to the zone's four Route 53 name servers"
+  }
+  assert {
+    condition = alltrue([
+      for p in ["web", "fleet", "worker"] :
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_ADDRESS_ZONE"] == "play.example.com" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_MAX_ADDRESSES"] == "4"
+      ]) && (
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_ADDRESS_ZONE_ID"] == "Z0123456789PLAYZONE" &&
+      alltrue([for p in ["web", "fleet"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_ADDRESS_ZONE_ID")])
+    )
+    error_message = "web, the fleet and the worker get the zone's name (no trailing dot) and the addresses the fleet sells; the worker alone its id"
+  }
+}
+
+# Staging's: a zone of its own under its own name, play.staging.<domain>.
+run "staging_play_zone" {
+  command = plan
+
+  variables {
+    deployment                = "staging"
+    service_eip_allocation_id = ""
+    hosted_enabled            = true
+    fleet_max_addresses       = 4
+  }
+
+  assert {
+    condition = (
+      aws_route53_zone.play[0].name == "play.staging.example.com" && output.play_zone == "play.staging.example.com" &&
+      length(cloudflare_record.play_ns) == 4 && alltrue([for r in cloudflare_record.play_ns : r.name == "play.staging" && r.type == "NS"]) &&
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_ADDRESS_ZONE"] == "play.staging.example.com"
+    )
+    error_message = "staging's static addresses' zone is play.staging.<domain>, delegated from play.staging, and is staging's worker's zone"
+  }
+}
+
+# Sold, but with hosting off: no zone (no machine would hold an address).
+run "play_zone_hosting_off" {
+  command = plan
+
+  variables {
+    fleet_max_addresses = 4
+  }
+
+  assert {
+    condition     = length(aws_route53_zone.play) == 0 && length(cloudflare_record.play_ns) == 0 && output.play_zone == null
+    error_message = "hosting off: no play zone, whatever fleet_max_addresses says"
   }
 }
 
@@ -408,8 +500,10 @@ run "no_cloudflare" {
   command = plan
 
   variables {
-    cloudflare_zone_id = ""
-    cloudflare_domain  = ""
+    cloudflare_zone_id  = ""
+    cloudflare_domain   = ""
+    hosted_enabled      = true
+    fleet_max_addresses = 4
   }
 
   assert {
@@ -420,5 +514,12 @@ run "no_cloudflare" {
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == ""
     )
     error_message = "without Cloudflare: none of it, no update or gate record, and web's update host empty (its listener stays off)"
+  }
+  assert {
+    condition = (
+      length(aws_route53_zone.play) == 0 && length(cloudflare_record.play_ns) == 0 && output.play_zone == null &&
+      !strcontains(aws_ecs_task_definition.program["worker"].container_definitions, "ONNET_HOSTED_ADDRESS_ZONE")
+    )
+    error_message = "without Cloudflare: no play zone (nothing would delegate it), and none in the environment, even with the add-on sold"
   }
 }

@@ -77,6 +77,7 @@ cloudflare_web_proxied = true
 # shared_slots           = 6             # K servers per shared machine (1..32)
 # fleet_max_shared       = 2
 # fleet_max_own          = 2
+# fleet_max_addresses    = 0             # static addresses sold; above 0 makes the play zone (raise the EIP quota first)
 # fleet_idle_minutes     = 30
 # machine_root_volume_gb = 40            # the OS, docker, the images and the data trees
 # fleet_ami              = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64" # the exact ECS-optimized AL2023 image name, required with hosting

@@ -54,7 +54,12 @@
 #     volume the templates make, the pinned image, the public subnets, this
 #     deployment's tags and no other tag; tag only at launch, end only
 #     machines carrying both of this deployment's tags, describe, and pass the
-#     machine role to EC2.
+#     machine role to EC2; and the static addresses (the own machines'
+#     add-on): allocate an Elastic IP only with this deployment's tags and no
+#     other tag, tag it only as it is allocated, associate one carrying both
+#     tags only with a machine carrying both, disassociate and release only
+#     those, and (while edge.tf's play zone exists) write and delete A records
+#     under that zone alone.
 #
 # All of it exists only while var.hosted_enabled is on; off (the default),
 # hosting is off and the programs' environment says so. Web's and the data
@@ -85,6 +90,8 @@ locals {
 
   # The only tags a launch may carry (the service's run-instances names these).
   fleet_tag_keys = ["opennova:hosted", "opennova:deployment", "opennova:machine-kind", "opennova:machine-id", "opennova:server-id", "Name"]
+  # And the only tags an allocated static address may carry.
+  address_tag_keys = ["opennova:hosted", "opennova:deployment", "opennova:address-id", "Name"]
 
   # The largest volume a launch may make: the root volume (the one volume the
   # templates make).
@@ -448,9 +455,137 @@ data "aws_iam_policy_document" "fleet_service" {
       values   = ["ec2.amazonaws.com"]
     }
   }
+
+  # A static address is allocated with this deployment's tags and no other
+  # tag (the service's allocate-address names them in its tag
+  # specifications), so the statements below know it by them.
+  statement {
+    sid       = "AllocateAddresses"
+    effect    = "Allow"
+    actions   = ["ec2:AllocateAddress"]
+    resources = ["${local.fleet_arn_prefix}:${local.account_id}:elastic-ip/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/opennova:hosted"
+      values   = ["1"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/opennova:deployment"
+      values   = [local.hosted_deployment]
+    }
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = local.address_tag_keys
+    }
+  }
+
+  # Tags only as part of an allocation.
+  statement {
+    sid       = "TagAddressesAtAllocation"
+    effect    = "Allow"
+    actions   = ["ec2:CreateTags"]
+    resources = ["${local.fleet_arn_prefix}:${local.account_id}:elastic-ip/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["AllocateAddress"]
+    }
+  }
+
+  # Moves and releases only the addresses carrying both of this deployment's
+  # tags: never the load balancer's (they carry the deployment's tag alone).
+  statement {
+    sid       = "AssociateReleaseAddresses"
+    effect    = "Allow"
+    actions   = ["ec2:AssociateAddress", "ec2:DisassociateAddress", "ec2:ReleaseAddress"]
+    resources = ["${local.fleet_arn_prefix}:${local.account_id}:elastic-ip/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/opennova:hosted"
+      values   = ["1"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/opennova:deployment"
+      values   = [local.hosted_deployment]
+    }
+  }
+
+  # An association names its machine, which carries both tags too.
+  statement {
+    sid       = "AssociateAddressesWithMachines"
+    effect    = "Allow"
+    actions   = ["ec2:AssociateAddress"]
+    resources = ["${local.fleet_arn_prefix}:${local.account_id}:instance/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/opennova:hosted"
+      values   = ["1"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/opennova:deployment"
+      values   = [local.hosted_deployment]
+    }
+  }
+
+  # No resource scope exists for it.
+  statement {
+    sid       = "DescribeAddresses"
+    effect    = "Allow"
+    actions   = ["ec2:DescribeAddresses"]
+    resources = ["*"]
+  }
+
+  # The addresses' names, while edge.tf's play zone exists: A records under
+  # it alone, made or replaced (UPSERT) and deleted, and nothing else of it.
+  dynamic "statement" {
+    for_each = aws_route53_zone.play[*].arn
+    content {
+      sid       = "WriteAddressRecords"
+      effect    = "Allow"
+      actions   = ["route53:ChangeResourceRecordSets"]
+      resources = [statement.value]
+
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "route53:ChangeResourceRecordSetsRecordTypes"
+        values   = ["A"]
+      }
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "route53:ChangeResourceRecordSetsActions"
+        values   = ["UPSERT", "DELETE"]
+      }
+      condition {
+        test     = "ForAllValues:StringLike"
+        variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
+        values   = ["*.${local.play_zone_name}"]
+      }
+    }
+  }
+
+  # A change's state, while the play zone exists (a release waits for its
+  # DELETE to be INSYNC before it gives the address back).
+  dynamic "statement" {
+    for_each = aws_route53_zone.play[*].arn
+    content {
+      sid       = "ReadAddressRecordChanges"
+      effect    = "Allow"
+      actions   = ["route53:GetChange"]
+      resources = ["arn:${local.partition}:route53:::change/*"]
+    }
+  }
 }
 
-# The worker runs the jobs that launch, describe and end machines.
+# The worker runs the jobs that launch, describe and end machines, and those
+# that allocate, associate and release the static addresses.
 resource "aws_iam_role_policy" "fleet_service" {
   count  = local.hosted_enabled ? 1 : 0
   name   = "${local.name}-fleet"
@@ -471,10 +606,11 @@ resource "aws_iam_role_policy" "fleet_service" {
 # name it is pinned to.
 locals {
   fleet_env = {
-    ONNET_FLEET_SHARED_SLOTS = tostring(var.shared_slots)
-    ONNET_FLEET_MAX_SHARED   = tostring(var.fleet_max_shared)
-    ONNET_FLEET_MAX_OWN      = tostring(var.fleet_max_own)
-    ONNET_FLEET_IDLE_MINUTES = tostring(var.fleet_idle_minutes)
+    ONNET_FLEET_SHARED_SLOTS  = tostring(var.shared_slots)
+    ONNET_FLEET_MAX_SHARED    = tostring(var.fleet_max_shared)
+    ONNET_FLEET_MAX_OWN       = tostring(var.fleet_max_own)
+    ONNET_FLEET_MAX_ADDRESSES = tostring(var.fleet_max_addresses)
+    ONNET_FLEET_IDLE_MINUTES  = tostring(var.fleet_idle_minutes)
     # The live servers the service takes: what the fleet holds at its most.
     ONNET_HOSTED_CAP = tostring(var.fleet_max_shared * var.shared_slots + var.fleet_max_own)
   }
@@ -487,8 +623,11 @@ locals {
     ONNET_OBJECT_STORE_REGION = var.region
   } : {}
 
-  # The fleet's policy.
-  hosted_policy_env = merge(local.fleet_env, local.store_env, local.hosted_enabled ? {
+  # The fleet's policy, with the static addresses' zone (edge.tf) while it
+  # exists: the name each address is shown at, <name>.<zone>.
+  hosted_policy_env = merge(local.fleet_env, local.store_env, local.play_zone_enabled ? {
+    ONNET_HOSTED_ADDRESS_ZONE = local.play_zone_name
+    } : {}, local.hosted_enabled ? {
     ONNET_HOSTED_PROVIDER        = "ec2"
     ONNET_HOSTED_BOOTSTRAP_CIDRS = join(",", [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].cidr_block])
     # The image the templates launch (var.fleet_ami's id): what a fleet roll's
@@ -498,8 +637,10 @@ locals {
     ONNET_HOSTED_PROVIDER = "none"
   })
 
-  # The ec2 machine driver's own settings: the worker's.
-  hosted_driver_env = local.hosted_enabled ? {
+  # The ec2 machine driver's own settings, the worker's, and the static
+  # addresses' driver's while the play zone exists: the zone's id, where the
+  # worker writes each address's A record.
+  hosted_driver_env = merge(local.hosted_enabled ? {
     ONNET_HOSTED_EC2_REGION           = local.region
     ONNET_HOSTED_EC2_LAUNCH_TEMPLATES = jsonencode({ for kind, t in aws_launch_template.fleet : kind => t.id })
     # The fleet cluster a machine's ecs.config names (its user data), which
@@ -509,7 +650,9 @@ locals {
     ONNET_HOSTED_EC2_SUBNETS = join(",", [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].id])
     ONNET_HOSTED_DEPLOYMENT  = local.hosted_deployment
     ONNET_INTERNAL_URL       = local.internal_url
-  } : {}
+    } : {}, local.play_zone_enabled ? {
+    ONNET_HOSTED_ADDRESS_ZONE_ID = aws_route53_zone.play[0].zone_id
+  } : {})
 
   # The fleet cluster and the image name it is pinned to: "" while hosting
   # is off (the toolbox then has no hostd to roll).

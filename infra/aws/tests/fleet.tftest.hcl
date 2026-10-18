@@ -14,7 +14,13 @@
 # the fleet's internal port to the machines alone. The worker's task role's
 # policy pins a launch to the two templates and their two types, IMDSv2, this
 # deployment's tags, gp3 volumes no larger than the root volume, the pinned
-# image by id; it ends only machines carrying both tags. The fleet cluster
+# image by id; it ends only machines carrying both tags. It allocates a static
+# address only with this deployment's tags and no other tag, tags one only as
+# it is allocated, associates one carrying both tags only with a machine
+# carrying both, disassociates and releases only those, and describes them;
+# while the play zone exists (edge.tf) it writes A records under that zone
+# alone (UPSERT and DELETE) and reads a change's state, and holds no Route 53
+# action without it. The fleet cluster
 # runs hostd as a DAEMON service on the EC2 launch type: host network, user 0,
 # NET_ADMIN beside the defaults, never privileged, the machine's paths bound
 # at their own paths (the docker socket among them), a task role reading the
@@ -22,11 +28,12 @@
 # ECS agent's calls on that cluster and the machines' and servers' logs alone.
 # The user data's ecs.config disables privileged containers and never turns on
 # ECS's cleanup of images it did not pull. Web's, the fleet's and the worker's
-# environment carry the fleet's policy (the pinned image's id among it) and the
-# store's URL, the worker's alone the machine driver's own settings (the fleet
-# cluster among them), web the fleet cluster's name for its reads, infra.env
+# environment carry the fleet's policy (the pinned image's id, the addresses
+# it sells and their zone's name among it) and the store's URL, the worker's
+# alone the machine driver's own settings (the fleet cluster and the play
+# zone's id among them), web the fleet cluster's name for its reads, infra.env
 # what the toolbox's fleet commands need. A t2 or Graviton type, a slot count
-# past 32 and hosting with no fleet_ami are refused.
+# past 32, more than 64 addresses and hosting with no fleet_ami are refused.
 
 mock_provider "aws" {
   override_during = plan
@@ -110,6 +117,14 @@ mock_provider "aws" {
   }
   mock_resource "aws_service_discovery_service" {
     defaults = { id = "srv-0123456789abcdef", arn = "arn:aws:servicediscovery:us-east-1:123456789012:service/srv-0123456789abcdef" }
+  }
+  # Route 53's answer for a new zone: its id and its four name servers.
+  mock_resource "aws_route53_zone" {
+    defaults = {
+      zone_id      = "Z0123456789PLAYZONE"
+      arn          = "arn:aws:route53:::hostedzone/Z0123456789PLAYZONE"
+      name_servers = ["ns-1.awsdns-01.com", "ns-2.awsdns-02.net", "ns-3.awsdns-03.org", "ns-4.awsdns-04.co.uk"]
+    }
   }
 }
 
@@ -357,6 +372,8 @@ run "hosting_off" {
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "none" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "6" &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_URL") &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_MAX_ADDRESSES"] == "0" &&
+      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_ADDRESS_ZONE") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_HTTP_BIND") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_EC2_") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_FLEET_IMAGE_ID") &&
@@ -365,7 +382,7 @@ run "hosting_off" {
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET_CLUSTER=''\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET_AMI_NAME=''\n") &&
     !strcontains(aws_ssm_parameter.infra_env.value, "hostd"))
-    error_message = "hosting off: the programs' environment turns the provider off, names no store, no machine driver and no image, and still names the fleet's knobs (the fleet binds its own task's address); infra.env says so to the toolbox: no fleet cluster, no hostd"
+    error_message = "hosting off: the programs' environment turns the provider off, names no store, no machine driver, no image and no address zone, and still names the fleet's knobs, the addresses it sells (0) among them (the fleet binds its own task's address); infra.env says so to the toolbox: no fleet cluster, no hostd"
   }
   assert {
     condition     = strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_MACHINES_LOG_GROUP='/opennova/prod/machines'\n")
@@ -613,6 +630,61 @@ run "fleet_policy" {
     error_message = "the service ends only machines carrying both of this deployment's tags"
   }
   assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.fleet_service[0].statement : st
+      if st.sid == "AllocateAddresses" && toset(st.actions) == toset(["ec2:AllocateAddress"]) &&
+      toset(st.resources) == toset(["arn:aws:ec2:us-east-1:123456789012:elastic-ip/*"]) && length([
+        for c in st.condition : c
+        if(c.test == "StringEquals" && c.variable == "aws:RequestTag/opennova:hosted" && toset(c.values) == toset(["1"])) ||
+        (c.test == "StringEquals" && c.variable == "aws:RequestTag/opennova:deployment" && toset(c.values) == toset(["opennova-prod"])) ||
+        (c.test == "ForAllValues:StringEquals" && c.variable == "aws:TagKeys" && toset(c.values) == toset(["opennova:hosted", "opennova:deployment", "opennova:address-id", "Name"]))
+      ]) == 3
+    ]) == 1
+    error_message = "a static address is allocated with this deployment's tags and no other tag"
+  }
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.fleet_service[0].statement : st
+      if st.sid == "TagAddressesAtAllocation" && toset(st.actions) == toset(["ec2:CreateTags"]) &&
+      toset(st.resources) == toset(["arn:aws:ec2:us-east-1:123456789012:elastic-ip/*"]) && length([
+        for c in st.condition : c if c.test == "StringEquals" && c.variable == "ec2:CreateAction" && toset(c.values) == toset(["AllocateAddress"])
+      ]) == 1
+    ]) == 1
+    error_message = "an address is tagged only as it is allocated"
+  }
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.fleet_service[0].statement : st
+      if st.sid == "AssociateReleaseAddresses" &&
+      toset(st.actions) == toset(["ec2:AssociateAddress", "ec2:DisassociateAddress", "ec2:ReleaseAddress"]) &&
+      toset(st.resources) == toset(["arn:aws:ec2:us-east-1:123456789012:elastic-ip/*"]) && length([
+        for c in st.condition : c
+        if(c.test == "StringEquals" && c.variable == "aws:ResourceTag/opennova:hosted" && toset(c.values) == toset(["1"])) ||
+        (c.test == "StringEquals" && c.variable == "aws:ResourceTag/opennova:deployment" && toset(c.values) == toset(["opennova-prod"]))
+      ]) == 2
+      ]) == 1 && length([
+      for st in data.aws_iam_policy_document.fleet_service[0].statement : st
+      if st.sid == "AssociateAddressesWithMachines" && toset(st.actions) == toset(["ec2:AssociateAddress"]) &&
+      toset(st.resources) == toset(["arn:aws:ec2:us-east-1:123456789012:instance/*"]) && length([
+        for c in st.condition : c
+        if(c.variable == "aws:ResourceTag/opennova:hosted" && toset(c.values) == toset(["1"])) ||
+        (c.variable == "aws:ResourceTag/opennova:deployment" && toset(c.values) == toset(["opennova-prod"]))
+      ]) == 2
+    ]) == 1
+    error_message = "the service associates, disassociates and releases only addresses carrying both of this deployment's tags (never the load balancer's), and associates them only with its machines"
+  }
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.fleet_service[0].statement : st
+      if st.sid == "DescribeAddresses" && toset(st.actions) == toset(["ec2:DescribeAddresses"]) && toset(st.resources) == toset(["*"])
+    ]) == 1
+    error_message = "the service describes the addresses (no resource scope exists)"
+  }
+  assert {
+    condition     = length([for st in data.aws_iam_policy_document.fleet_service[0].statement : st if anytrue([for a in st.actions : startswith(a, "route53:")])]) == 0
+    error_message = "no play zone (no Cloudflare here, no addresses sold): no Route 53 action"
+  }
+  assert {
     condition = toset(flatten([for st in data.aws_iam_policy_document.machine[0].statement : st.actions])) == toset([
       "ecs:RegisterContainerInstance",
       "ecs:DeregisterContainerInstance",
@@ -797,6 +869,89 @@ run "machine_ecs_config" {
     )
     error_message = "the machines' ecs.config disables privileged containers and never sets ECS_ENABLE_UNTRACKED_IMAGE_CLEANUP (it would delete the servers' images)"
   }
+}
+
+# The static-address add-on sold, with Cloudflare: the play zone (edge.tf),
+# whose A records under it the worker alone writes.
+run "address_policy" {
+  command = plan
+
+  # The machines' group and templates by id, known at plan.
+  override_resource {
+    target          = aws_security_group.machines[0]
+    override_during = plan
+    values          = { id = "sg-0machines" }
+  }
+  override_resource {
+    target          = aws_launch_template.fleet["shared"]
+    override_during = plan
+    values          = { id = "lt-0shared", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0shared" }
+  }
+  override_resource {
+    target          = aws_launch_template.fleet["own"]
+    override_during = plan
+    values          = { id = "lt-0own", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0own" }
+  }
+
+  variables {
+    hosted_enabled      = true
+    fleet_max_addresses = 4
+    cloudflare_zone_id  = "0123456789abcdef0123456789abcdef"
+    cloudflare_domain   = "example.com"
+  }
+
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.fleet_service[0].statement : st
+      if st.sid == "WriteAddressRecords" && toset(st.actions) == toset(["route53:ChangeResourceRecordSets"]) &&
+      toset(st.resources) == toset(["arn:aws:route53:::hostedzone/Z0123456789PLAYZONE"]) && length([
+        for c in st.condition : c
+        if(c.test == "ForAllValues:StringEquals" && c.variable == "route53:ChangeResourceRecordSetsRecordTypes" && toset(c.values) == toset(["A"])) ||
+        (c.test == "ForAllValues:StringEquals" && c.variable == "route53:ChangeResourceRecordSetsActions" && toset(c.values) == toset(["UPSERT", "DELETE"])) ||
+        (c.test == "ForAllValues:StringLike" && c.variable == "route53:ChangeResourceRecordSetsNormalizedRecordNames" && toset(c.values) == toset(["*.play.example.com"]))
+      ]) == 3
+    ]) == 1
+    error_message = "the worker writes the play zone's A records under it alone, by UPSERT and DELETE alone"
+  }
+  assert {
+    condition = length([
+      for st in data.aws_iam_policy_document.fleet_service[0].statement : st
+      if st.sid == "ReadAddressRecordChanges" && toset(st.actions) == toset(["route53:GetChange"]) &&
+      toset(st.resources) == toset(["arn:aws:route53:::change/*"])
+    ]) == 1
+    error_message = "the worker reads a change's state"
+  }
+  assert {
+    condition = toset(flatten([
+      for st in data.aws_iam_policy_document.fleet_service[0].statement : [for a in st.actions : a if startswith(a, "route53:")]
+    ])) == toset(["route53:ChangeResourceRecordSets", "route53:GetChange"])
+    error_message = "the worker's Route 53 actions are those two alone"
+  }
+  assert {
+    condition = alltrue([
+      for p in ["web", "fleet", "worker"] :
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_MAX_ADDRESSES"] == "4" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_ADDRESS_ZONE"] == "play.example.com"
+    ])
+    error_message = "the fleet's policy names the addresses the fleet sells and the zone they are named in, to web, the fleet and the worker alike"
+  }
+  assert {
+    condition = (
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_ADDRESS_ZONE_ID"] == "Z0123456789PLAYZONE" &&
+      alltrue([for p in ["web", "fleet", "gate", "lobby", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_ADDRESS_ZONE_ID")])
+    )
+    error_message = "the play zone's id, the addresses' driver's own, is the worker's alone"
+  }
+}
+
+run "too_many_addresses_refused" {
+  command = plan
+
+  variables {
+    fleet_max_addresses = 65
+  }
+
+  expect_failures = [var.fleet_max_addresses]
 }
 
 run "four_slots" {

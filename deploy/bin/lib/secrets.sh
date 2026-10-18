@@ -10,7 +10,7 @@
 # secrets
 # ---------------------------------------------------------------------------
 
-STRIPE_FIELDS=(secret_key webhook_secret price_tier1 price_tier2 price_tier3 price_own_machine)
+STRIPE_FIELDS=(secret_key webhook_secret price_tier1 price_tier2 price_tier3 price_own_machine price_static_address)
 
 # Whether a Stripe item's field value has its form ($3: the item's mode).
 stripe_field_ok() {
@@ -60,7 +60,7 @@ stripe_check_item() {
     STRIPE_DETAIL="placeholders: $(IFS=,; printf '%s' "${placeholders[*]}" | sed 's/,/, /g') (billing off)"
   else
     STRIPE_STATE=ok
-    STRIPE_DETAIL="OK ($mode mode, 3 tiers + own machine)"
+    STRIPE_DETAIL="OK ($mode mode, 3 tiers + own machine + static address)"
   fi
 }
 
@@ -115,7 +115,8 @@ ensure_item() {
 stripe_placeholder_specs() {
   printf '%s\n' secret_key:value:REPLACE_ME:CONCEALED webhook_secret:value:REPLACE_ME:CONCEALED \
     price_tier1:value:REPLACE_ME:STRING price_tier2:value:REPLACE_ME:STRING \
-    price_tier3:value:REPLACE_ME:STRING price_own_machine:value:REPLACE_ME:STRING
+    price_tier3:value:REPLACE_ME:STRING price_own_machine:value:REPLACE_ME:STRING \
+    price_static_address:value:REPLACE_ME:STRING
 }
 
 secrets_init() {
