@@ -18,6 +18,7 @@
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
 #include "infra/infra_routes.h"
+#include "infra/log_routes.h"
 #include "jobs/job_routes.h"
 #include "lobby_routes.h"
 #include "mailer.h"
@@ -299,6 +300,7 @@ struct HttpListener::Impl {
 			resets(access, pool, redis),
 			jobs(access, pool),
 			infra(access, pool),
+			logs(access, pool, redis),
 			data_sets(access, pool),
 			releases(access, pool) {}
 
@@ -343,6 +345,8 @@ struct HttpListener::Impl {
 	jobs::JobRoutes jobs;
 	// The admin's infrastructure view (infra/infra_routes.h).
 	infra::InfraRoutes infra;
+	// Every log on the site (infra/log_routes.h).
+	infra::LogRoutes logs;
 	// The hosted data sets' and the update releases' routes over the object store
 	// (data_sets/data_set_routes.h, data_sets/release_routes.h).
 	hosted::DataSetRoutes data_sets;
@@ -436,6 +440,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->infra.configure(
 			infra_, impl_->hosted_servers.hosting_on(), impl_->hosted_servers.provider());
 	impl_->infra.register_routes(impl_->app);
+	impl_->logs.configure(log_store_, log_store_none_);
+	impl_->logs.register_routes(impl_->app);
 	impl_->data_sets.set_store(object_store_);
 	impl_->data_sets.register_routes(impl_->app);
 	impl_->releases.set_store(object_store_);

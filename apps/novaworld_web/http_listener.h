@@ -37,7 +37,7 @@ class ObjectStore;
 
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
-namespace infra { class InfraStatus; }
+namespace infra { class InfraStatus; class LogStore; }
 
 // Crow-backed HTTP listener. start() registers its route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -71,7 +71,8 @@ namespace infra { class InfraStatus; }
 //                         read-only view of the deployment as it runs (the
 //                         programs' ECS services and tasks, the balancer, the
 //                         database, the cache, the lobbies, the fleet,
-//                         the machines)
+//                         the machines); LogRoutes (infra/log_routes.h):
+//                         every log on the site
 //   game data           — DataSetRoutes and ReleaseRoutes (data_sets/): the
 //                         hosted data sets, their tree uploads into the object
 //                         store and the update releases, each part through
@@ -123,6 +124,13 @@ public:
 	// (infra/infra_status.h). Set before start(); it must outlive the HTTP
 	// listener. Null: the view says no cloud is read here.
 	void set_infra(infra::InfraStatus *status) { infra_ = status; }
+	// The store the admin's log view reads (infra/log_store.h), or null with why
+	// there is none (the view's 503). Set before start(); it must outlive the
+	// listener.
+	void set_log_store(infra::LogStore *store, std::string none_why) {
+		log_store_ = store;
+		log_store_none_ = std::move(none_why);
+	}
 
 	// The object store the hosted data sets' trees and the update packages
 	// live in (object_store.h; parts.h make_object_store), which the admin's
@@ -284,6 +292,9 @@ private:
 	billing::Billing *billing_ = nullptr;
 	// The infrastructure view's cloud reader (set_infra); null: none.
 	infra::InfraStatus *infra_ = nullptr;
+	// The log view's store (set_log_store); null: none, for log_store_none_.
+	infra::LogStore *log_store_ = nullptr;
+	std::string log_store_none_ = "no log store";
 	// The object store (set_object_store); null: none.
 	ObjectStore *object_store_ = nullptr;
 	// The slots' limits (set_fleet_slots).

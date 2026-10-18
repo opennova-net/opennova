@@ -161,8 +161,8 @@ int run_program(const Program &program) {
 	if (!log_store_error.empty())
 		std::fprintf(stderr, "[boot] WARN %s: no log store\n", log_store_error.c_str());
 	if (!tee_error.empty())
-		std::fprintf(stderr, "[boot] WARN the log's copy into %s: %s\n",
-				log_store.location.c_str(), tee_error.c_str());
+		std::fprintf(stderr, "[boot] WARN the log's copy into %s: %s\n", log_store.location.c_str(),
+				tee_error.c_str());
 
 	ServerConfig config = ServerConfig::from_env();
 	// The program's own settings, before the database is touched: a program

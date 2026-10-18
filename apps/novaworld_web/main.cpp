@@ -10,6 +10,7 @@
 #include "auth.h"
 #include "http_listener.h"
 #include "infra/infra_status.h"
+#include "infra/log_store.h"
 #include "loggable.h"
 #include "object_store.h"
 #include "parts.h"
@@ -126,6 +127,16 @@ int run(const program::Boot &boot) {
 	// deployment's ECS services, balancer, database and cache through web's task
 	// role; none on the local stack, which the view says.
 	const infra::InfraStack infra_stack = infra::make_infra();
+	// The admin's log view's store (infra/log_store.h, ONNET_LOG_STORE): the
+	// deployment's CloudWatch groups, through the same task role and curl, or
+	// the local stack's directory.
+	std::string log_store_none;
+	const std::unique_ptr<infra::LogStore> log_store = infra::make_log_store(
+			*infra_stack.runner, infra_stack.scratch.path().u8string(), log_store_none);
+	if (log_store)
+		std::printf("[boot] logs: read from the %s store\n", log_store->source());
+	else
+		std::printf("[boot] logs: none read (%s)\n", log_store_none.c_str());
 
 	// The 404s the routes record, flushed by the main loop into
 	// unknown_messages (GET /api/unknowns reads them there).
@@ -140,6 +151,7 @@ int run(const program::Boot &boot) {
 	http.set_watchdog(&watchdog);
 	http.set_billing(billing_stack->billing.get());
 	http.set_infra(infra_stack.status.get());
+	http.set_log_store(log_store.get(), log_store_none);
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
 	// A fleet roll's preview: the image the launch templates pin.

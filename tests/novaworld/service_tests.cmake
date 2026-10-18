@@ -750,6 +750,30 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(infra_routes REDIS COMMAND infra_routes_test)
     set_tests_properties(infra_routes PROPERTIES TIMEOUT 120)
 
+    # The logs the admin's pages read (apps/novaworld_web/infra/log_store.h), no database:
+    # CloudWatch Logs behind a scripted CommandRunner (GetLogEvents' bodies and tokens for a
+    # known stream, FilterLogEvents' windows walking back for a program's every task and a
+    # filter, a millisecond kept whole at a page's cut, a dense window narrowed, the calls
+    # bounded, the cache, AWS's words, no credential on argv), a directory's files paged
+    # backwards and merged by time, the programs' stamps.
+    add_executable(log_store_test novaworld/log_store_test.cpp)
+    target_link_libraries(log_store_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(log_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME log_store COMMAND log_store_test)
+
+    # Its route (infra/log_routes.h) on the in-process Crow listener over a migrated database
+    # and a Redis namespace: refusals, a server's starts, a machine's hostd and a program's
+    # tasks from a directory store, the stream a start's row names read from CloudWatch (a
+    # stub), AWS's refusal a 502, no store a 503.
+    add_executable(log_routes_test novaworld/log_routes_test.cpp)
+    target_link_libraries(log_routes_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(log_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(log_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(log_routes REDIS COMMAND log_routes_test)
+    set_tests_properties(log_routes PROPERTIES TIMEOUT 120)
+
     # The hosted data sets' admin routes (apps/novaworld_web/data_sets/, ADR 0064) on the
     # in-process Crow listener over a migrated database, a Redis namespace and a local
     # object store in a temp directory: every route refused without the admin, the list's

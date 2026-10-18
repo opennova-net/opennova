@@ -848,6 +848,30 @@ task role holds these reads alone, scoped to the deployment's resources
 | `ONNET_INFRA_RELEASE_PARAMETER` | none | Web: the SSM parameter holding the release (`/opennova/<deployment>/release`), whose revisions say whether each program runs the release's. |
 | `ONNET_INFRA_FLEET_CLUSTER` | none | Web: the fleet cluster (`opennova-<deployment>-fleet`), whose hostd service and container instances the view reads; unset or empty with hosting off, and nothing of it is read. |
 
+### Logs
+
+`GET /api/admin/logs` (admin; `Cache-Control: no-store`; `infra/log_routes.*`) answers a
+page of one log, newest last, from the store `ONNET_LOG_STORE` names (`infra/log_store.*`):
+`?subject=server&id=<id>[&generation=<g>]` (a hosted server's start, its newest without a
+number), `?subject=machine&id=<id>` (a machine's hostd) or
+`?subject=program&id=<program>[&task=<task id>]` (a program's task, or every task of it),
+with `&before=<cursor>` (the page before an earlier one), `&limit=` (1 to 500, 200) and
+`&q=` (the lines holding that text). The reply: `{"subject", "id", "generation", "task",
+"source"` (`cloudwatch` or `file`), `"group", "stream"` (where it read), `"lines"` (each
+`{"at", "text"}`, `at` ISO 8601 with milliseconds or null), `"before"` (the older page's
+cursor, null for none)`}`; 404 for no such server, start, machine, program or task, 502
+`logs_unavailable` with AWS's words, 503 `no_log_store`. What it reads comes from rows:
+the stream a start's row names (`hosted_server_starts.log_stream`, in `/servers`), the
+machine's (`fleet_machines.agent_log_stream`, in `/machines`), a program's task that
+sampled itself (`program_samples`; `<program>/<program>/<task id>` in `/service`); no
+request names a group, a stream or a path. A known stream's newest lines are CloudWatch
+Logs' `GetLogEvents`, a text filter or a program's every task `FilterLogEvents` over
+windows walking back from the newest (15 minutes, then four times as long, to 31 days); a
+read makes at most 8 calls in 10 s, a read like one in the last 3 s is answered from
+memory, and an admin has two reads in flight at most (60 at once, then two a second). The
+local stack's directory store reads the same subjects' files (`servers/<id>/g<g>.log`,
+`machines/<id>/hostd.log`, `programs/<program>/<task>.log`) backwards from their end.
+
 ## The switcher's address
 
 `GET /api/server-info` answers `{"novaworld_ip": "<ONNET_PUBLIC_HOST>"}` with

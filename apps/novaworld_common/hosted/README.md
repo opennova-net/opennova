@@ -440,6 +440,7 @@ reads the store alone.
 | `ONNET_HOSTED_ADDRESS_ZONE_FILE` | none | worker | `docker`, with static addresses on: the zone file the worker writes, an absolute path (the local stack's `/var/lib/opennova/zone/play.localhost.zone`). |
 | `ONNET_HOSTED_DOCKER_ADDRESSES` | none | worker | `docker`, with static addresses on: the addresses it hands out, a private /24 to /30 the stack's network holds but Docker never assigns (the local stack's `172.30.77.64/28`). |
 | `ONNET_HOSTED_MACHINE_SCRIPT` | `/app/hosted/machine_user_data.sh` | worker | `ec2`: the user-data template, in the worker's image alone; a run outside the image names it. |
+| `ONNET_LOG_STORE` | none | web | Where the admin's pages read a machine's hostd log and a server start's log from (`GET /api/admin/logs`, [`../README.md`](../README.md) "Logs"): the deployment's `/machines` and `/servers` groups (`cloudwatch:/opennova/<deployment>`), or the local stack's directory (`file:///var/log/opennova`, its `machines/` and `servers/`). |
 
 The deploy toolbox sets every `ec2` setting from the Terraform outputs (DEPLOY.md,
 "Hosted game servers"); nobody copies an id by hand.
