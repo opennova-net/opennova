@@ -443,7 +443,7 @@ export function pickMachine(value: unknown): FleetMachine | null {
   if (typeof v !== 'object' || v === null) return null;
   if ((typeof v.id !== 'string' && typeof v.id !== 'number') || (v.kind !== 'shared' && v.kind !== 'own')) return null;
   if (typeof v.state !== 'string' || !isCount(v.slots) || !isCount(v.slots_used)) return null;
-  const release = isFields(v.release) ? v.release : {};
+  const release: Record<string, unknown> = isFields(v.release) ? v.release : {};
   return {
     id: String(v.id),
     cloud_id: typeof v.cloud_id === 'string' ? v.cloud_id : '',
