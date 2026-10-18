@@ -43,6 +43,13 @@ struct Entitlement {
 	// The admin's grants (comp_grants; also on an account that gets nothing).
 	int comp_servers = 0;
 	int comp_own_machines = 0;
+	// Its static addresses: the granting static-address subscriptions'
+	// quantities plus the admin's comp addresses (address_grants, each one
+	// the cloud holds), and of them the ones its own machines can use
+	// (static_addresses, at most own_machines).
+	int address_grants = 0;
+	int static_addresses = 0;
+	int comp_addresses = 0;
 	int tier = 0;          // the highest granting tier, 0 for none
 	// The tier subscription the account's page shows: the granting one of the
 	// highest tier, else the newest one; "" with none.
@@ -58,13 +65,16 @@ struct AccountFacts {
 	std::string account_status = "active"; // players.account_status
 	int comp_servers = 0;                  // comp_grants' servers
 	int comp_own_machines = 0;             // comp_grants' own_machine
+	// Its comp addresses that count (allocating or ready;
+	// hosted/address_repository.h count_comp_addresses_of).
+	int comp_addresses = 0;
 };
 
 // Whether Stripe's `status` is one that grants (active, trialing, past_due).
 bool status_grants(std::string_view status);
 // Whether the subscription grants at `now` (Unix seconds): a granting status,
-// a tier (1..3) or the add-on, and now < current_period_end + kPeriodNetSeconds
-// (no period end: no grant).
+// a tier (1..3) or an add-on (an own machine, a static address), and now <
+// current_period_end + kPeriodNetSeconds (no period end: no grant).
 bool subscription_grants(const SubscriptionRow &row, int64_t now);
 
 // The pure core: 0 servers unless the account is a player's and active.

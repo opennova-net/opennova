@@ -64,6 +64,11 @@ jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver, const Place
 	// claim lapsed) calls there first, under the same client token, though the
 	// cloud may not list this run's machine yet.
 	request.subnet = row->launch_subnet;
+	// The static address it carries, which the docker driver starts it at.
+	if (row->address_id > 0) {
+		auto lease = ctx.pool.acquire();
+		request.address = carried_address_ip(*lease, id);
+	}
 	request.record_subnet = [&ctx, id](const std::string &subnet) {
 		try {
 			auto lease = ctx.pool.acquire();
@@ -130,7 +135,8 @@ jobs::JobResult terminate(jobs::JobContext &ctx, MachineDriver &driver) {
 	return jobs::JobResult::done();
 }
 
-jobs::JobResult sweep(jobs::JobContext &ctx, MachineDriver &driver) {
+jobs::JobResult sweep(jobs::JobContext &ctx, MachineDriver &driver,
+		const std::function<void(db::ConnectionPool &)> &also_sweep) {
 	std::vector<TaggedCloudMachine> tagged;
 	try {
 		tagged = driver.list_tagged();
@@ -182,6 +188,8 @@ jobs::JobResult sweep(jobs::JobContext &ctx, MachineDriver &driver) {
 		auto lease = ctx.pool.acquire();
 		record_cloud_state(*lease, m.id, m.cloud_id, cloud);
 	}
+	// The static addresses' orphans (reported, never released).
+	if (also_sweep) also_sweep(ctx.pool);
 	return jobs::JobResult::done();
 }
 
@@ -233,7 +241,8 @@ bool machine_launch_pending(db::Database &db, int64_t machine_id) {
 }
 
 void register_fleet_jobs(jobs::JobRegistry &registry, MachineDriver &driver,
-		PlacementPolicy limits, FleetJobCaps caps) {
+		PlacementPolicy limits, FleetJobCaps caps,
+		std::function<void(db::ConnectionPool &)> also_sweep) {
 	jobs::JobKind launch_kind{ kJobMachineLaunch,
 		[&driver, limits](jobs::JobContext &ctx) { return launch(ctx, driver, limits); },
 		caps.launch };
@@ -247,8 +256,11 @@ void register_fleet_jobs(jobs::JobRegistry &registry, MachineDriver &driver,
 	registry.add(std::move(describe_kind));
 	registry.add({ kJobMachineTerminate,
 			[&driver](jobs::JobContext &ctx) { return terminate(ctx, driver); }, caps.terminate });
-	registry.add(
-			{ kJobFleetSweep, [&driver](jobs::JobContext &ctx) { return sweep(ctx, driver); }, 1 });
+	registry.add({ kJobFleetSweep,
+			[&driver, also_sweep = std::move(also_sweep)](jobs::JobContext &ctx) {
+				return sweep(ctx, driver, also_sweep);
+			},
+			1 });
 }
 
 std::vector<jobs::PeriodicJob> fleet_schedule(int64_t sweep_interval_ms) {

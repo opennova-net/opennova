@@ -249,6 +249,48 @@ this directory's.
   fails leaves the server running without its console, as retail ignores its listen's
   result; the health check, which counts the admin link, then fails the server.
 
+## Static addresses
+
+A **static address** (ADR 0066; `address_*.h`, `hosted_addresses`) is an own machine's
+fixed public IPv4 with a name, `<name>.play.<domain>` (staging `play.staging.<domain>`),
+which its owner keeps for the own-machine servers it starts: every start of a server that
+names it runs on a machine carrying it, so the server lists at the same `address:32768`
+each time. Each is its own Stripe subscription (the static-address add-on, quantity 1,
+bought through Checkout once the account has an own machine for it, canceled through the
+Portal's cancel flow), or an admin's comp address (`POST /api/admin/users/<id>/addresses`).
+At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`sold_capacity.*`).
+
+- **The rows** (`address_repository.*`): `allocating` once named (the owner names a bought
+  one, `POST /api/me/addresses`; a name of 3 to 32 lower-case letters, digits and `-`, a
+  letter or digit first and last, no `--`, not all digits, none the service keeps:
+  `address_names.*`), `ready` once allocated with its A record written, `lapsed` when its
+  grant is gone or an admin released it, `releasing`, then `released`; `failed` when the
+  cloud refused it (its error code: an exhausted Elastic IP quota shows there). A name is
+  unique for good: a released address keeps it until an admin renames the row. A start
+  names an address (`address_id`, with `own_machine`): it must be the owner's, ready, and
+  no other live server's (409 `address_unavailable`; the database's one live server per
+  address). An own machine launched for such a server carries it (`fleet_machines.address_id`).
+- **The jobs** (`address_jobs.*`, the worker's): `address.allocate` (the address found by
+  its tag first, so a run cut short never allocates a second; then allocated with its tags
+  in one call; its record written TTL 300; a ready one's run moves its record to a new
+  name), `address.associate` (onto the machine launched to carry it, without reassociation
+  and only once the machine that held it before has ended; retried while the machine is
+  pending; then a `machine.describe`, so the machine's public address follows),
+  `address.release` (once no live machine carries it: its record deleted and in sync, the
+  TTL and a minute waited out, its grant read again (a subscription granting once more
+  keeps it), any association the cloud still shows ended, then released). `fleet.sweep`
+  records the addresses the cloud holds for this deployment that no held row names
+  (`hosted_address_orphans`, the admin's view), never releasing one.
+- **The drivers**: `ec2_address_driver.*` (Elastic IPs through the AWS CLI, tagged
+  `opennova:hosted`, `opennova:deployment`, `opennova:address-id` and `Name` at
+  allocation, the only tags the worker's policy admits; every other call on an address of
+  this deployment's tags alone) with `address_zone.*`'s `Route53Zone` (A records under the
+  deployment's play zone, UPSERT and DELETE alone, `get-change` until in sync); and the
+  local stack's `docker_address_driver.*` (the lowest free address of
+  `ONNET_HOSTED_DOCKER_ADDRESSES`, which the docker machine driver starts the machine at;
+  its association confirmed by inspect) with `FileZone` (a zone file the worker rewrites
+  whole, which the smoke test reads).
+
 ## Service accounts and the listing's owner
 
 - **Service accounts.** Each hosted server lists itself with an account of its own,
@@ -331,6 +373,8 @@ reads the store alone.
 | `ONNET_FLEET_SHARED_SLOTS` | 12 | web, fleet, worker | A new shared machine's slots (1..32). |
 | `ONNET_FLEET_MAX_SHARED` | 2 | web, fleet, worker | The most shared machines taking servers at once (the worker's launch refuses a machine past it). |
 | `ONNET_FLEET_MAX_OWN` | 2 | web, fleet, worker | The most own machines taking servers at once (the same). |
+| `ONNET_FLEET_MAX_ADDRESSES` | 0 | web, fleet, worker | The static addresses the fleet sells (0: the add-on is off). Above 0 with hosting on, `ONNET_HOSTED_ADDRESS_ZONE` must name the zone (else a boot warning and none sold), and the worker needs its driver's address settings below (else its boot FATAL). |
+| `ONNET_HOSTED_ADDRESS_ZONE` | none | web, fleet, worker | The play zone the addresses are named in, no trailing dot (`play.opennova.net`; infra/aws/edge.tf's): the site shows each one as `<name>.<zone>`. |
 | `ONNET_FLEET_IDLE_MINUTES` | 30 | web, fleet, worker | How long a shared machine with no server lives on before it ends. |
 | `ONNET_FLEET_SLOT_MEMORY_MB` | 512 | web, fleet, worker | Each container's memory (no swap). |
 | `ONNET_FLEET_SLOT_CPUS` | 1 | web, fleet, worker | Each container's CPUs (a decimal). |
@@ -342,11 +386,14 @@ reads the store alone.
 | `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | worker | `ec2`: the launch templates by kind, `{"shared": "lt-...", "own": "lt-..."}` (`lt-<id>` or `lt-<id>:<version>`). |
 | `ONNET_HOSTED_EC2_REGION` | none | worker | `ec2`: the region every AWS CLI call names. |
 | `ONNET_HOSTED_EC2_CLUSTER` | none | worker | `ec2`: the fleet cluster every machine's ECS agent joins (`opennova-<deployment>-fleet`), whose daemon service runs `opennova-hostd`; required. |
+| `ONNET_HOSTED_ADDRESS_ZONE_ID` | none | worker | `ec2`, with static addresses on: the play zone's Route 53 id (`Z...`). |
 | `ONNET_HOSTED_EC2_SUBNETS` | none | worker | `ec2`: the subnets machines launch into, one per zone, each giving a public IPv4; a launch takes the one with fewer live machines and, when that zone cannot take it, the next. |
 | `ONNET_HOSTED_AWS_CLI` | `/usr/local/bin/aws` | web, worker, data | The AWS CLI v2, an absolute path (no `PATH` search): the `ec2` driver's, the S3 object store's and the mailer's SES calls. |
 | `ONNET_HOSTED_DOCKER_URL` | none | worker | `docker`: the Docker Engine API, `http://<host>:<port>` (the local stack's socket proxy). |
 | `ONNET_HOSTED_DOCKER_NETWORK` | none | worker | `docker`: the network every machine joins. |
 | `ONNET_HOSTED_DOCKER_DATA_FROM` | none | worker | `docker`: the container whose mounts every machine takes, read-only. |
+| `ONNET_HOSTED_ADDRESS_ZONE_FILE` | none | worker | `docker`, with static addresses on: the zone file the worker writes, an absolute path (the local stack's `/var/lib/opennova/zone/play.localhost.zone`). |
+| `ONNET_HOSTED_DOCKER_ADDRESSES` | none | worker | `docker`, with static addresses on: the addresses it hands out, a private /24 to /30 the stack's network holds but Docker never assigns (the local stack's `172.30.77.64/28`). |
 | `ONNET_HOSTED_MACHINE_SCRIPT` | `/app/hosted/machine_user_data.sh` | worker | `ec2`: the user-data template, in the worker's image alone; a run outside the image names it. |
 
 The deploy toolbox sets every `ec2` setting from the Terraform outputs (DEPLOY.md,
@@ -364,7 +411,9 @@ writes need the CSRF header.
 | --- | --- | --- |
 | `GET /api/me/servers` | a website session | `enabled`, `full`, the account's `entitlement`, the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times and `listing` |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
-| `POST /api/me/servers` | a website session | the settings (`game_name` required; `data_set_id`, `expansion_id` and `missions` defaulted) and `own_machine`: 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit`, `no_own_machine`, `at_capacity`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
+| `POST /api/me/servers` | a website session | the settings (`game_name` required; `data_set_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit`, `no_own_machine`, `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
+| `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason and times) |
+| `POST /api/me/addresses` | a website session | `{"name"}`: the account's next bought address named, then allocated by a worker: 201 `{"address"}`; 400 `invalid_json`, `invalid_field`, `invalid_name`; 404; 409 `name_taken`, `no_address`; 503 `addresses_disabled` |
 | `POST /api/me/servers/<id>/stop` | a website session | 202 `stopping` (or `stopped`); 404; 409 `not_live`; 429 |
 | `POST /api/me/servers/<id>/update` | a website session | `update_requested` (placed again on the current trees; players drop): 202; 404; 409 `not_live`, `up_to_date` |
 | `GET /api/me/servers/<id>/stats` | a website session | `?range=1h`, `24h` (the default), `7d`, `30d`: the server now (`live`), the range's `summary` (availability, players, egress, the `approximate` fields) and `series`; 400; 404; 429 (60, then two a second) |
@@ -381,6 +430,10 @@ writes need the CSRF header.
 | `GET /api/admin/hosted/usage` | admin | every live server's use of its slot (its newest sample within 3 min and its last hour summed), by machine and slot, with each machine's and the fleet's totals and the slots' limits; 429 |
 | `POST /api/admin/hosted/<id>/stop` | admin | 202; 404; 409 `not_live` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`: 200 with how many |
+| `GET /api/admin/addresses` | admin | `enabled`, the `zone`, how many the cloud `held` of the `sellable`, every address with its owner, allocation, record and lapse cause, and the `orphans` the last sweep found |
+| `PUT /api/admin/addresses/<id>` | admin | `{"name"}`: a rename (any state: a released one's frees its old name; a ready one's record moves): 200; 400 `invalid_name`; 404; 409 `name_taken` |
+| `POST /api/admin/addresses/<id>/release` | admin | `{"confirm": "<its name>"}`: lapsed by an admin, then released (its server placed again without it): 202; 400 `confirm_mismatch`; 404; 409 `not_releasable` |
+| `POST /api/admin/users/<id>/addresses` | admin | `{"name"}`: a comp address for the account, at most its own machines: 201; 400 `invalid_name`; 404; 409 `name_taken`, `address_limit`; 503 `addresses_disabled` |
 
 ## Game data
 

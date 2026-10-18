@@ -661,6 +661,20 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(opennova_novaworld_web_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(opennova_novaworld_web_http_routes REDIS
         COMMAND opennova_novaworld_web_http_routes_test)
+
+    # The static addresses (apps/novaworld_common/hosted/address_*.h): the name rules, the
+    # file and Route 53 zones, the EC2 and docker address drivers' calls on stub runners;
+    # then on a migrated database the names, the comp addresses, the entitlement's
+    # addresses, a start naming one, and the address jobs run by hand over a recording
+    # driver (allocate, associate after the previous holder's end, release after the
+    # machine's end, the record's sync and TTL, the grant read again) and fleet.sweep's
+    # orphans.
+    add_executable(hosted_address_test novaworld/hosted_address_test.cpp)
+    target_link_libraries(hosted_address_test PRIVATE
+        opennova_novaworld_fleet_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(hosted_address_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(hosted_address_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(hosted_address COMMAND hosted_address_test)
     # The concurrent case gives each request up to 30 s; this bounds a hang
     # below ctest's 1500 s default.
     set_tests_properties(opennova_novaworld_web_http_routes PROPERTIES TIMEOUT 120)

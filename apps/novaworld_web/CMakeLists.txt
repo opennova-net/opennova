@@ -30,6 +30,7 @@ add_library(opennova_novaworld_web_core STATIC
     jobs/job_routes.cpp
     # The hosted servers' routes: the owners' and the admin's, the console,
     # the per-server stats, the fleet.
+    hosted/address_routes.cpp
     hosted/console_commands.cpp
     hosted/console_routes.cpp
     hosted/fleet_routes.cpp

@@ -38,7 +38,10 @@
 //                      row's machine the listing lacks is described (one that
 //                      is gone ends at the next pass). A listing that fails
 //                      ends nothing and fails the job (the next sweep tries
-//                      again). Periodic (fleet_schedule, every
+//                      again). Then the static addresses the cloud holds
+//                      that no held row names are recorded as orphans
+//                      (address_jobs.h sweep_addresses; never released).
+//                      Periodic (fleet_schedule, every
 //                      kFleetSweepIntervalMs), and at the supervisor's
 //                      reconciliation.
 
@@ -50,6 +53,7 @@
 #include <net/novaworld/db/database.h>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -84,9 +88,12 @@ bool machine_launch_pending(db::Database &db, int64_t machine_id);
 
 // The handlers over `driver`, which must outlive the workers; `limits` holds
 // the fleet's maximums the launch checks (placement.h PlacementPolicy, the
-// fleet's policy settings).
+// fleet's policy settings). Each fleet.sweep whose machines' listing read also
+// runs `also_sweep` (set: the static addresses' orphan report, address_jobs.h
+// sweep_addresses).
 void register_fleet_jobs(jobs::JobRegistry &registry, MachineDriver &driver,
-		PlacementPolicy limits, FleetJobCaps caps = {});
+		PlacementPolicy limits, FleetJobCaps caps = {},
+		std::function<void(db::ConnectionPool &)> also_sweep = {});
 // The periodic sweep, every `sweep_interval_ms`.
 std::vector<jobs::PeriodicJob> fleet_schedule(int64_t sweep_interval_ms = kFleetSweepIntervalMs);
 

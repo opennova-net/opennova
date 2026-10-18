@@ -3,6 +3,7 @@
 #include "admin_user_routes.h"
 #include "auth.h"
 #include "billing/billing_routes.h"
+#include "hosted/address_routes.h"
 #include "catalog_repository.h"
 #include "cd_key_routes.h"
 #include "connection_routes.h"
@@ -287,6 +288,7 @@ struct HttpListener::Impl {
 			hosts(access, pool, redis),
 			connections(access, pool),
 			hosted_servers(access, pool, redis),
+			addresses(access, pool),
 			fleet(access, pool),
 			stats(access, pool, redis),
 			console(access, pool, redis),
@@ -319,6 +321,8 @@ struct HttpListener::Impl {
 	ConnectionRoutes connections;
 	// The hosted servers' routes (hosted/hosted_routes.h), over `access`.
 	hosted::HostedRoutes hosted_servers;
+	// The static addresses' routes (hosted/address_routes.h).
+	hosted::AddressRoutes addresses;
 	// The admin's fleet view and the machines' routes (hosted/fleet_routes.h).
 	hosted::FleetRoutes fleet;
 	// The hosted servers' stats (hosted/stats_routes.h).
@@ -410,7 +414,10 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->hosts.register_routes(impl_->app);
 	impl_->connections.register_routes(impl_->app, config.heartbeat_timeout_ms);
 	impl_->hosted_servers.configure(config, fleet_placement_);
+	impl_->hosted_servers.set_address_zone(address_zone_);
 	impl_->hosted_servers.register_routes(impl_->app);
+	impl_->addresses.configure(addresses_on_, address_zone_, fleet_placement_.max_addresses);
+	impl_->addresses.register_routes(impl_->app);
 	impl_->fleet.configure(impl_->hosted_servers.hosting_on(), impl_->hosted_servers.provider(),
 			impl_->hosted_servers.cap(), fleet_placement_);
 	impl_->fleet.configure_roll(fleet_image_, infra_);
@@ -819,6 +826,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 
 	// The admin user routes (admin_user_routes.h).
 	impl_->users.set_fleet(fleet_placement_);
+	impl_->users.set_address_zone(address_zone_);
 	impl_->users.register_routes(
 			app, [this](db::Database &db, int64_t id) { forget_revoked_account(db, id); });
 }

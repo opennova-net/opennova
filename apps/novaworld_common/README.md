@@ -628,7 +628,9 @@ account's hosting entitlement ([`hosted/README.md`](hosted/README.md)): tier 1, 
 3 hosted servers (`billing/tiers.h`), and the own-machine add-on, one subscription of
 quantity 1 per own machine (bought through Checkout, canceled in the Portal, which
 changes no quantity), moves that many of them onto machines of their own while a tier
-also grants. The service makes Stripe Checkout and Customer Portal
+also grants, and the static-address add-on, one subscription per address, gives an own
+machine a fixed public address and a name ([`hosted/README.md`](hosted/README.md) "Static
+addresses"). The service makes Stripe Checkout and Customer Portal
 sessions and hands the browser their URL; no publishable key and no Stripe.js reach the
 site. Everything here is service policy (`billing/`).
 
@@ -642,8 +644,8 @@ site. Everything here is service policy (`billing/`).
   more on no answer, a 429 or a 5xx. The key and the webhook secret are log secrets.
 - **The cache** (`billing/billing_repository.*`, `backend/migrations/0002_billing.sql`):
   each account's Stripe customer (`billing_customers`), every subscription of it as
-  Stripe last answered (`billing_subscriptions`: its item, `tier`, `own_machine` or
-  `unknown` for a price no setting names, read from its price; its status and since when;
+  Stripe last answered (`billing_subscriptions`: its item, `tier`, `own_machine`,
+  `static_address` or `unknown` for a price no setting names, read from its price; its status and since when;
   its period end and whether it cancels at it), the webhook events
   (`billing_events`) and the database's instance id (`service_meta`, 32 hex digits from
   the OS CSPRNG at the first boot). The entitlement reads only this cache, so it holds
@@ -678,7 +680,8 @@ site. Everything here is service policy (`billing/`).
   what the fleet holds. Every account holds what its entitlement grants, used or not (its
   servers less those on own machines are shared places, its own machines are own
   machines), an admin's comp grant included; the fleet sells `ONNET_FLEET_MAX_SHARED` x
-  `ONNET_FLEET_SHARED_SLOTS` shared places and `ONNET_FLEET_MAX_OWN` own machines. A
+  `ONNET_FLEET_SHARED_SLOTS` shared places, `ONNET_FLEET_MAX_OWN` own machines and
+  `ONNET_FLEET_MAX_ADDRESSES` static addresses (each one granted, used or not). A
   checkout is judged, and its item reserved (`billing_checkout_reservations`, an hour and
   a quarter), in one transaction under the hosting-start lock, before Stripe makes its
   session, so two checkouts at once never both take the last place; the reservation
@@ -693,6 +696,7 @@ site. Everything here is service policy (`billing/`).
 | `STRIPE_SECRET_KEY` | none | `sk_` or `rk_` (a restricted key is the recommended one), `test` or `live`: the mode everything else must match. |
 | `STRIPE_WEBHOOK_SECRET` | none | The webhook endpoint's signing secret, `whsec_...`. |
 | `STRIPE_PRICE_TIER1`..`3`, `STRIPE_PRICE_OWN_MACHINE` | none | Comma lists of `price_...` ids: the first one sold, the rest still recognized (grandfathered); each price in one list alone. The amounts are Stripe's, never the service's. |
+| `STRIPE_PRICE_STATIC_ADDRESS` | none | The static-address add-on's prices, the same way; required only while `ONNET_FLEET_MAX_ADDRESSES` is above 0 (else it may stay unset or `REPLACE_ME`). |
 | `ONNET_SITE_URL` | none | The site's origin (no path): Checkout returns to `/me/support?checkout=success&session_id=...` or `?checkout=cancel` there, the portal to `/me/support`. `https://` with a live key. The dev compose stack sets `http://localhost:8000`. |
 | `ONNET_STRIPE_CURL` | `/usr/bin/curl` | The curl binary, an absolute path. |
 | `ONNET_BILLING_AUTOMATIC_TAX` | off | `1` turns Stripe Tax on in Checkout (it collects the customer's address). |
@@ -716,10 +720,10 @@ compose stack takes the test-mode set from the vault through
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the own-machine add-on's amount, and each one's `available` (the fleet takes one more for an account that has nothing yet; false: hosting is full) |
-| `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `comp_servers`, `comp_own_machines`, `own_machines`, `used`, `stopping`, `can_start`), the support tier and add-on subscriptions shown, `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
-| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine"}`: 200 `{"url"}`; 400; 403 `not_eligible`; 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `own_machine_limit`, `sold_out` (the fleet has sold all it holds of what the item adds); 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. The account's previous session is settled first (a completed one synced), then the item judged and reserved under the hosting-start lock, so nothing is sold twice or past the fleet; the session asks for the terms of service and stamps the instance, the account and the reservation on the subscription |
-| `POST /api/billing/portal` | a website session, the CSRF header | 200 `{"url"}`; 404 `no_billing_account`; 429; 503 |
+| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the own-machine add-on's amount, the static-address add-on's while the fleet sells addresses, and each one's `available` (the fleet takes one more for an account that has nothing yet; false: hosting is full) |
+| `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `comp_servers`, `comp_own_machines`, `own_machines`, `static_addresses`, `used`, `stopping`, `can_start`), the support tier and add-on subscriptions shown, each static address's subscription (`address_subscriptions`, with its address once named), `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
+| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine" \| "static_address"}`: 200 `{"url"}`; 400; 403 `not_eligible`, `payment_past_due` (an address while a payment is past due); 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `own_machine_limit`, `address_limit` (an address for every own machine already), `sold_out` (the fleet has sold all it holds of what the item adds); 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. The account's previous session is settled first (a completed one synced), then the item judged and reserved under the hosting-start lock, so nothing is sold twice or past the fleet; the session asks for the terms of service and stamps the instance, the account and the reservation on the subscription |
+| `POST /api/billing/portal` | a website session, the CSRF header | 200 `{"url"}`; with `{"cancel_subscription": "sub_..."}` (a static address's) the Portal's cancel flow for it, returning to `/me/addresses`; 400; 404 `no_billing_account`, `not_found`; 429; 503 |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook): as `GET /api/me/billing`; 404; 429 (3, then one every 10 s); 503 |
 | `POST /api/billing/webhook` | Stripe's signature | above |
 | `GET /api/admin/billing` | admin | the mode, the price check, the last reconcile, the pending events, every subscription with its account, the duplicates, `unknown_prices`, the orphans, the newest 50 events and the owners' limits hold (`limits_hold*`); with billing off `{"enabled": false}` and the hold alone |

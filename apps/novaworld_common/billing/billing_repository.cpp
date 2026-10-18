@@ -136,6 +136,7 @@ const char *item_kind_name(ItemKind kind) {
 	switch (kind) {
 		case ItemKind::Tier: return "tier";
 		case ItemKind::OwnMachine: return "own_machine";
+		case ItemKind::StaticAddress: return "static_address";
 		case ItemKind::Unknown: break;
 	}
 	return "unknown";
@@ -144,6 +145,7 @@ const char *item_kind_name(ItemKind kind) {
 ItemKind item_kind_from_name(std::string_view name) {
 	if (name == "tier") return ItemKind::Tier;
 	if (name == "own_machine") return ItemKind::OwnMachine;
+	if (name == "static_address") return ItemKind::StaticAddress;
 	return ItemKind::Unknown;
 }
 
@@ -337,6 +339,27 @@ bool set_comp_grants(db::Database &db, int64_t user_id, const CompGrants &grants
 	put("own_machine", grants.own_machines);
 	tx.commit();
 	return true;
+}
+
+namespace {
+
+constexpr const char *kCompAddressesSql =
+		"FROM hosted_addresses WHERE source = 'comp' AND state IN ('allocating', 'ready')";
+
+} // namespace
+
+int comp_addresses_of(db::Database &db, int64_t user_id) {
+	return static_cast<int>(
+			count_of(db.query(std::string("SELECT COUNT(*) ") + kCompAddressesSql + " AND owner_user_id = $1;",
+					{ BindValue(user_id) })));
+}
+
+std::map<int64_t, int> comp_addresses_by_account(db::Database &db) {
+	std::map<int64_t, int> out;
+	for (const auto &r : db.query(std::string("SELECT owner_user_id, COUNT(*) ") + kCompAddressesSql +
+				 " AND owner_user_id IS NOT NULL GROUP BY owner_user_id;"))
+		out[r.as_int(0).value_or(0)] = static_cast<int>(r.as_int(1).value_or(0));
+	return out;
 }
 
 namespace {

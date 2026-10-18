@@ -180,6 +180,7 @@ bool parse_fleet_config(const EnvLookup &env, FleetConfig &out, std::vector<std:
 
 	read.text("ONNET_HOSTED_SERVE_IMAGE", out.serve_image);
 	read.text("ONNET_FLEET_IMAGE_ID", out.image_id);
+	read.text("ONNET_HOSTED_ADDRESS_ZONE", out.address_zone);
 	return errors.size() == errors_before;
 }
 
@@ -222,6 +223,10 @@ bool parse_driver_config(const EnvLookup &env, const FleetConfig &fleet, DriverC
 	docker.deployment = ec2.deployment;
 	docker.service_url = out.internal_url;
 	docker.admin_address = fleet.internal_address;
+
+	read.text("ONNET_HOSTED_ADDRESS_ZONE_ID", out.addresses.zone_id);
+	read.text("ONNET_HOSTED_ADDRESS_ZONE_FILE", out.addresses.zone_file);
+	read.text("ONNET_HOSTED_DOCKER_ADDRESSES", out.addresses.docker_range);
 	return errors.size() == errors_before;
 }
 

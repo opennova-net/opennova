@@ -167,8 +167,11 @@ public:
 	StripeResult<CheckoutSession> expire_checkout_session(const std::string &id);
 	StripeResult<CheckoutSession> get_checkout_session(const std::string &id);
 
-	// A Customer Portal session's URL.
-	StripeResult<std::string> create_portal_session(const std::string &customer, const std::string &return_url);
+	// A Customer Portal session's URL; with `cancel_subscription` (sub_...),
+	// the Portal's cancel flow for that subscription
+	// (flow_data[type]=subscription_cancel).
+	StripeResult<std::string> create_portal_session(const std::string &customer, const std::string &return_url,
+			const std::string &cancel_subscription = {});
 
 	// One page of GET /v1/subscriptions.
 	StripeResult<SubscriptionPage> list_subscriptions(const SubscriptionQuery &query);

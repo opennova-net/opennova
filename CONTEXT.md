@@ -557,9 +557,12 @@ _Avoid_: plan, package, premium, donation, membership
 
 **Hosting entitlement**:
 How many **hosted servers** an account may have live at once: the larger of its **support tier**'s
-servers and an admin's comp grant, plus how many may run on an own machine (the add-on's quantity,
-while a tier grants). A past-due tier keeps the servers but starts no new one. Read from the
-service's cache of Stripe, whether or not billing is configured (`billing/entitlement.h`).
+servers and an admin's comp grant of servers, plus how many may run on an own machine (the add-on's
+quantity while a tier grants, and an admin's comp grant of own machines while the account has
+servers), and its **static addresses**. A past-due tier keeps the servers but starts no new one.
+Read from the service's cache of Stripe, whether or not billing is configured
+(`billing/entitlement.h`). What every account's entitlement holds is what the service has sold,
+and no new subscription is sold past what the fleet holds (`hosted/sold_capacity.h`).
 _Avoid_: quota, allowance (in code; the site's meter may say "N of M servers used"), approval
 (the retired admin flag)
 
@@ -583,6 +586,14 @@ A **machine** that runs exactly one **hosted server**, its owner's, with the own
 add-on (a paid monthly subscription beside the **support tier**): launched for that server,
 reserved for it (one slot, slot 0), and ended when it stops.
 _Avoid_: dedicated machine, dedicated server (retail's Serve Only term), private host
+
+**Static address**:
+An **own machine**'s fixed public IPv4 with a name in the deployment's play zone
+(`<name>.play.opennova.net`), which its owner keeps for the own-machine servers it starts, so a
+server lists at the same address and port on every start (ADR 0066,
+`apps/novaworld_common/hosted/address_repository.h`). Each is a monthly add-on of its own (or an
+admin's comp address), at most one per own machine; on EC2 it is an Elastic IP.
+_Avoid_: Elastic IP (but naming the AWS resource), dedicated IP, fixed IP, vanity address
 
 **Slot**:
 One **hosted server**'s position on a **machine** (`hosted/slots.h`): its index fixes the

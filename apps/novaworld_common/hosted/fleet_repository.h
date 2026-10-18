@@ -72,6 +72,9 @@ struct FleetMachineRow {
 	// The subnet its launch last called the cloud in, written before the call
 	// (record_launch_subnet); "" until one did.
 	std::string launch_subnet;
+	// The static address it was launched to carry (address_repository.h; an
+	// own machine's): 0 for none.
+	int64_t address_id = 0;
 	// What the supervisor remembers of it between passes (supervisor.h, on its
 	// clock): the state its pass last saw and since when, since when it has
 	// held no server (0: it holds one), the server its drain moved last, a lost
@@ -109,6 +112,7 @@ struct NewMachine {
 	std::string serve_image;
 	int64_t reserved_for = 0; // own: the server it is launched for
 	int64_t launched_for = 0; // the server whose placement launched it
+	int64_t address_id = 0; // own: the static address it carries (0: none)
 };
 
 struct CreatedMachine {
@@ -127,6 +131,9 @@ CreatedMachine create_machine(db::Database &db, const NewMachine &machine,
 // answer, by the database's clock). False (nothing written) when the row is no
 // longer launching.
 bool mark_launched(db::Database &db, int64_t id, const LaunchedMachine &launched);
+// The public IPv4 of the static address machine `id` carries (its row's
+// address_id), "" for none or one not allocated.
+std::string carried_address_ip(db::Database &db, int64_t id);
 // What a describe read of a live machine's addresses: the private one only
 // fills an empty one (it is what the agent routes admit the machine from, so
 // nothing moves it once set), the public one follows the cloud. False when
@@ -149,6 +156,9 @@ std::optional<FleetMachineRow> find_machine_by_cloud_id(
 		db::Database &db, const std::string &provider, const std::string &cloud_id);
 // Every live machine (machine_is_live), oldest first.
 std::vector<FleetMachineRow> list_live_machines(db::Database &db);
+// The live machines launched to carry static address `address_id`, oldest
+// first (one, but while the last one ends).
+std::vector<FleetMachineRow> live_machines_carrying(db::Database &db, int64_t address_id);
 // The live machines, then the newest `ended_limit` ended and failed ones (the
 // admin's fleet view).
 std::vector<FleetMachineRow> list_machines(db::Database &db, size_t ended_limit);

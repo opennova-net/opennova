@@ -54,8 +54,8 @@ void mark_customer_synced(db::Database &db, const std::string &stripe_customer_i
 void delete_customer(db::Database &db, const std::string &stripe_customer_id);
 
 // What a subscription's price sells.
-enum class ItemKind : uint8_t { Tier, OwnMachine, Unknown };
-const char *item_kind_name(ItemKind kind);          // "tier", "own_machine", "unknown"
+enum class ItemKind : uint8_t { Tier, OwnMachine, StaticAddress, Unknown };
+const char *item_kind_name(ItemKind kind);          // "tier", "own_machine", "static_address", "unknown"
 ItemKind item_kind_from_name(std::string_view name); // Unknown for any other text
 
 struct SubscriptionRow {
@@ -152,6 +152,12 @@ std::map<int64_t, CompGrants> comp_grants_by_account(db::Database &db);
 // transaction; false (nothing written) when no player account has `user_id`
 // (a service account included). The caller checks the ranges.
 bool set_comp_grants(db::Database &db, int64_t user_id, const CompGrants &grants);
+// An admin's comp addresses that count toward an account's entitlement
+// (hosted_addresses' comp rows allocating or ready;
+// hosted/address_repository.h): the account's, and every account's that has
+// some.
+int comp_addresses_of(db::Database &db, int64_t user_id);
+std::map<int64_t, int> comp_addresses_by_account(db::Database &db);
 
 // --- A checkout's hold on what it sells (billing_checkout_reservations) ---
 //
@@ -172,7 +178,7 @@ inline constexpr const char *kMetaReservation = "opennova_reservation";
 struct CheckoutReservation {
 	int64_t id = 0;
 	int64_t user_id = 0;
-	ItemKind item = ItemKind::Unknown; // Tier, OwnMachine
+	ItemKind item = ItemKind::Unknown; // Tier, OwnMachine, StaticAddress
 	int tier = 0; // 1..3 for a tier
 	std::string checkout_session; // "" until its session is made
 };

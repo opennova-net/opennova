@@ -52,16 +52,24 @@ if(BUILD_NOVAWORLD_HTTP)
         # per-server stats (samples, hourly rollups); the fleet (its rows,
         # placement on the machines' slots, its jobs, the EC2 machine driver and
         # the local stack's docker one, the AWS CLI through apps/common's
-        # command runner, the machine agents' protocol, its settings). The
-        # supervisor, the admin links and the stats sampler are the fleet
-        # program's own (apps/novaworld_fleet).
+        # command runner, the machine agents' protocol, its settings, the
+        # capacity it sells); the static addresses (their rows and names, their
+        # jobs, the EC2 and docker address drivers, the Route 53 and file
+        # zones). The supervisor, the admin links and the stats sampler are the
+        # fleet program's own (apps/novaworld_fleet).
+        hosted/address_jobs.cpp
+        hosted/address_names.cpp
+        hosted/address_repository.cpp
+        hosted/address_zone.cpp
         hosted/admin_link_status.cpp
         hosted/agent_protocol.cpp
         hosted/console_queue.cpp
         hosted/data_set_files.cpp
         hosted/data_set_jobs.cpp
         hosted/data_set_repository.cpp
+        hosted/docker_address_driver.cpp
         hosted/docker_machine_driver.cpp
+        hosted/ec2_address_driver.cpp
         hosted/ec2_machine_driver.cpp
         hosted/fleet_config.cpp
         hosted/fleet_jobs.cpp

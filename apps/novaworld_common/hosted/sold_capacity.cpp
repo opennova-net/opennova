@@ -38,6 +38,8 @@ Capacity held_by(const billing::Entitlement &e) {
 	// more own machines than servers, and each it holds is a shared place less.
 	out.own = std::min(e.own_machines, e.max_servers);
 	out.shared = e.max_servers - out.own;
+	// Every address granted is one the cloud holds, used or not.
+	out.addresses = e.address_grants;
 	return out;
 }
 
@@ -80,6 +82,7 @@ Capacity sold_now(db::Database &db, int64_t now, const std::string &except_sessi
 	const auto subscriptions = billing::subscriptions_by_account(db);
 	const auto grants = billing::comp_grants_by_account(db);
 	const auto reservations = billing::live_reservations_by_account(db);
+	const auto addresses = billing::comp_addresses_by_account(db);
 	Capacity out;
 	for (const auto &r : db.query("SELECT id, account_status FROM players WHERE kind = 'player';")) {
 		const int64_t user = r.as_int(0).value_or(0);
@@ -89,6 +92,7 @@ Capacity sold_now(db::Database &db, int64_t now, const std::string &except_sessi
 			facts.comp_servers = g->second.servers;
 			facts.comp_own_machines = g->second.own_machines;
 		}
+		if (const auto a = addresses.find(user); a != addresses.end()) facts.comp_addresses = a->second;
 		std::vector<billing::SubscriptionRow> rows;
 		if (const auto s = subscriptions.find(user); s != subscriptions.end()) rows = s->second;
 		if (const auto held = reservations.find(user); held != reservations.end()) {
@@ -111,6 +115,7 @@ AccountHoldings holdings_of(db::Database &db, int64_t user_id, int64_t now, cons
 	const billing::CompGrants grants = billing::comp_grants_of(db, user_id);
 	out.facts.comp_servers = grants.servers;
 	out.facts.comp_own_machines = grants.own_machines;
+	out.facts.comp_addresses = billing::comp_addresses_of(db, user_id);
 	out.subscriptions = billing::subscriptions_of(db, user_id);
 	for (const billing::CheckoutReservation &c : billing::live_reservations_of(db, user_id)) {
 		if (except_session.empty() || c.checkout_session != except_session)

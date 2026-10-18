@@ -1,8 +1,10 @@
 #include "parts.h"
 
 #include "billing/billing_jobs.h"
+#include "hosted/address_zone.h"
 #include "hosted/agent_protocol.h"
 #include "hosted/data_set_jobs.h"
+#include "hosted/docker_address_driver.h"
 #include "hosted/docker_machine_driver.h"
 #include "hosted/ec2_machine_driver.h"
 #include "hosted/fleet_jobs.h"
@@ -76,6 +78,58 @@ bool setup_docker(const hosted::DriverConfig &driver, std::string &error) {
 	return true;
 }
 
+// The static addresses' policy over a hosting policy that is on: on
+// (addresses_on) with ONNET_FLEET_MAX_ADDRESSES above 0 and a zone name in
+// ONNET_HOSTED_ADDRESS_ZONE, else none sold (no name: a boot warning).
+void address_policy(HostedPolicy &policy) {
+	hosted::PlacementPolicy &placement = policy.fleet.placement;
+	if (placement.max_addresses <= 0)
+		return;
+	if (!hosted::is_zone_name(policy.fleet.address_zone)) {
+		std::fprintf(stderr,
+				"[boot] WARN static addresses: ONNET_HOSTED_ADDRESS_ZONE is no zone name "
+				"(play.<domain>); none sold (ONNET_FLEET_MAX_ADDRESSES %d ignored)\n",
+				placement.max_addresses);
+		placement.max_addresses = 0;
+		return;
+	}
+	policy.addresses_on = true;
+	std::printf("[boot] static addresses: up to %d, named in %s\n", placement.max_addresses,
+			policy.fleet.address_zone.c_str());
+}
+
+// The static addresses' drivers' settings checked over a policy with them on
+// (the play zone's Route 53 id for ec2; the zone file and the addresses for
+// docker): false with `error`.
+bool setup_addresses(const HostedPolicy &policy, const hosted::DriverConfig &driver,
+		std::string &error) {
+	const hosted::DriverConfig::Addresses &a = driver.addresses;
+	std::string why;
+	if (policy.provider == "ec2") {
+		hosted::Route53ZoneConfig zone;
+		zone.aws_cli = driver.ec2.aws_cli;
+		zone.region = driver.ec2.region;
+		zone.zone = policy.fleet.address_zone;
+		zone.zone_id = a.zone_id;
+		why = hosted::Route53Zone::check_config(zone);
+	} else if (a.zone_file.empty() || a.zone_file[0] != '/') {
+		why = "ONNET_HOSTED_ADDRESS_ZONE_FILE is no absolute path";
+	} else {
+		hosted::DockerAddressDriver::parse_range(a.docker_range, why);
+	}
+	if (!why.empty()) {
+		error = "the static addresses' driver is not configured: " + why +
+				" (ONNET_FLEET_MAX_ADDRESSES " + std::to_string(policy.fleet.placement.max_addresses) +
+				")";
+		return false;
+	}
+	const std::string from = policy.provider == "ec2"
+			? "Elastic IPs, their records in Route 53 zone " + a.zone_id
+			: "from " + a.docker_range + ", their records in " + loggable(a.zone_file, 260);
+	std::printf("[boot] static addresses: %s\n", from.c_str());
+	return true;
+}
+
 } // namespace
 
 ScratchDir::ScratchDir(ScratchDir &&other) noexcept : path_(std::exchange(other.path_, {})) {}
@@ -114,7 +168,10 @@ ScratchDir ScratchDir::make(const char *prefix, std::string &error) {
 	return dir;
 }
 
-HostedPolicy hosted_policy(const ServerConfig &config) {
+namespace {
+
+// The hosted servers' policy but the static addresses' (hosted_policy).
+HostedPolicy servers_policy(const ServerConfig &config) {
 	HostedPolicy setup;
 	// The store first, driver or none: web's data set routes and the worker's
 	// data set jobs run over it whether or not hosting is on.
@@ -195,15 +252,29 @@ HostedPolicy hosted_policy(const ServerConfig &config) {
 	return setup;
 }
 
+} // namespace
+
+HostedPolicy hosted_policy(const ServerConfig &config) {
+	HostedPolicy policy = servers_policy(config);
+	// Hosting off sells no static address, whatever ONNET_FLEET_MAX_ADDRESSES says.
+	if (policy.on)
+		address_policy(policy);
+	else
+		policy.fleet.placement.max_addresses = 0;
+	return policy;
+}
+
 bool driver_setup(const HostedPolicy &policy, DriverSetup &out, std::string &error) {
 	std::vector<std::string> errors;
 	if (!hosted::parse_driver_config(hosted::process_env(), policy.fleet, out.driver, errors)) {
 		error = "the driver's settings do not read: " + loggable(errors.front(), 300);
 		return false;
 	}
-	if (policy.provider == "ec2")
-		return setup_ec2(out.driver, error);
-	return setup_docker(out.driver, error);
+	const bool machines = policy.provider == "ec2" ? setup_ec2(out.driver, error)
+												   : setup_docker(out.driver, error);
+	if (!machines)
+		return false;
+	return !policy.addresses_on || setup_addresses(policy, out.driver, error);
 }
 
 ObjectStoreStack make_object_store(

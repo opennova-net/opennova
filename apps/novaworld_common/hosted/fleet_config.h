@@ -29,6 +29,10 @@
 //   ONNET_FLEET_MAX_OWN           the most own machines taking servers (2)
 //   ONNET_FLEET_MAX_ADDRESSES     the static addresses the fleet sells (0: the
 //                                 add-on is off; sold_capacity.h)
+//   ONNET_HOSTED_ADDRESS_ZONE     the play zone the addresses' names live in
+//                                 (play.<domain>; infra/aws/edge.tf), no
+//                                 trailing dot: the site shows each address
+//                                 as <name>.<zone>
 //   ONNET_FLEET_IDLE_MINUTES      how long a shared machine with no server lives
 //                                 on before it ends (30)
 //   ONNET_FLEET_SLOT_MEMORY_MB    each container's memory, swap none (512)
@@ -58,6 +62,16 @@
 //   ONNET_HOSTED_EC2_CLUSTER      the fleet cluster the ec2 driver's machines
 //                                 join (infra/aws/fleet_agent.tf's
 //                                 opennova-<deployment>-fleet)
+//   ONNET_HOSTED_ADDRESS_ZONE_ID  ec2, with static addresses on: the play
+//                                 zone's Route 53 id (Z...; address_zone.h
+//                                 Route53Zone)
+//   ONNET_HOSTED_ADDRESS_ZONE_FILE
+//                                 docker, with static addresses on: the zone
+//                                 file the worker writes (address_zone.h
+//                                 FileZone), absolute
+//   ONNET_HOSTED_DOCKER_ADDRESSES docker, with static addresses on: the
+//                                 addresses it hands out (172.30.77.64/28;
+//                                 docker_address_driver.h)
 //
 // and, for the ec2 driver, ONNET_HOSTED_EC2_REGION, ONNET_HOSTED_EC2_SUBNETS
 // (comma-separated, a subnet per zone), ONNET_HOSTED_AWS_CLI and
@@ -104,6 +118,9 @@ struct FleetConfig {
 	int slot_pids = kSlotPids;
 	// ONNET_HOSTED_SERVE_IMAGE ("" when unset).
 	std::string serve_image;
+	// ONNET_HOSTED_ADDRESS_ZONE: the play zone the static addresses' names
+	// live in ("" when unset; the setup checks it, parts.h).
+	std::string address_zone;
 };
 
 // The machine drivers' own settings (the worker's).
@@ -116,6 +133,13 @@ struct DriverConfig {
 	std::string machine_script_path = "/app/hosted/machine_user_data.sh";
 	// The docker driver's.
 	DockerMachineConfig docker;
+	// The static addresses' drivers' own (the variables above; the zone's name
+	// is the policy's): read as they are, checked by the setup (parts.h).
+	struct Addresses {
+		std::string zone_id;
+		std::string zone_file;
+		std::string docker_range;
+	} addresses;
 };
 
 // What the agent routes (agent_route.h) are built with.

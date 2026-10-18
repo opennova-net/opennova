@@ -19,6 +19,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
+#include <utility>
 
 namespace opennova::novaworld_server {
 
@@ -42,6 +44,8 @@ public:
 	// capacity is read against; before register_routes(). Unset, placement.h's
 	// defaults.
 	void set_fleet(const hosted::PlacementPolicy &policy) { sellable_ = hosted::sellable_of(policy); }
+	// The play zone the static addresses are named in (a user page's addresses).
+	void set_address_zone(std::string zone) { address_zone_ = std::move(zone); }
 	void register_routes(WebApp &app, ForgetAccount forget);
 
 private:
@@ -52,6 +56,7 @@ private:
 	db::ConnectionPool &pool_;
 	ForgetAccount forget_;
 	hosted::Capacity sellable_ = hosted::sellable_of(hosted::PlacementPolicy{});
+	std::string address_zone_;
 };
 
 } // namespace opennova::novaworld_server

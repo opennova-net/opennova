@@ -80,6 +80,12 @@ BillingConfig billing_config_from(const std::function<const char *(const char *)
 	if (const std::string curl = read("ONNET_STRIPE_CURL"); !curl.empty()) c.curl_path = curl;
 	for (int tier = 1; tier <= kTierCount; ++tier) c.tier_prices[tier] = split_list(read(tier_variable(tier).c_str()));
 	c.own_machine_prices = split_list(read("STRIPE_PRICE_OWN_MACHINE"));
+	c.static_address_prices = split_list(read("STRIPE_PRICE_STATIC_ADDRESS"));
+	// The vault's placeholder stands for no list, as for any unset variable.
+	if (is_unset(c.static_address_prices)) c.static_address_prices.clear();
+	const std::string max_addresses = read("ONNET_FLEET_MAX_ADDRESSES");
+	c.sells_addresses = !max_addresses.empty() && strutil::all_digits(max_addresses) &&
+			strutil::parse_int(max_addresses).value_or(0) > 0;
 	const std::string tax = read("ONNET_BILLING_AUTOMATIC_TAX");
 	c.automatic_tax = !tax.empty() && std::string_view("1tTyY").find(tax[0]) != std::string_view::npos;
 	if (const std::string minutes = read("ONNET_BILLING_RECONCILE_MINUTES"); !minutes.empty()) {
@@ -118,6 +124,10 @@ std::string check_billing_config(const BillingConfig &config) {
 		if (std::string why = take(tier_variable(tier), config.tier_prices[tier]); !why.empty()) return why;
 	}
 	if (std::string why = take("STRIPE_PRICE_OWN_MACHINE", config.own_machine_prices); !why.empty()) return why;
+	if (config.sells_addresses || !config.static_address_prices.empty()) {
+		if (std::string why = take("STRIPE_PRICE_STATIC_ADDRESS", config.static_address_prices); !why.empty())
+			return why;
+	}
 
 	if (std::string why = site_url_refusal(config.site_url, config.live()); !why.empty()) return why;
 	// An absolute path: a POSIX root or a drive letter.
@@ -145,6 +155,12 @@ bool is_own_machine_price(const BillingConfig &config, std::string_view price) {
 	return std::find(list.begin(), list.end(), price) != list.end();
 }
 
+bool is_static_address_price(const BillingConfig &config, std::string_view price) {
+	if (price.empty()) return false;
+	const std::vector<std::string> &list = config.static_address_prices;
+	return std::find(list.begin(), list.end(), price) != list.end();
+}
+
 std::string tier_price_for_sale(const BillingConfig &config, int tier) {
 	if (tier < 1 || tier > kTierCount || config.tier_prices[tier].empty()) return {};
 	return config.tier_prices[tier].front();
@@ -152,6 +168,10 @@ std::string tier_price_for_sale(const BillingConfig &config, int tier) {
 
 std::string own_machine_price_for_sale(const BillingConfig &config) {
 	return config.own_machine_prices.empty() ? std::string() : config.own_machine_prices.front();
+}
+
+std::string static_address_price_for_sale(const BillingConfig &config) {
+	return config.static_address_prices.empty() ? std::string() : config.static_address_prices.front();
 }
 
 } // namespace opennova::novaworld_server::billing

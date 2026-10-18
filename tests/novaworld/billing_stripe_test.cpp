@@ -1020,6 +1020,29 @@ int test_billing_config() {
 	TEST_EXPECT(refused_with("STRIPE_PRICE_OWN_MACHINE", "REPLACE_ME", "STRIPE_PRICE_OWN_MACHINE is not set"));
 	TEST_EXPECT(refused_with("STRIPE_PRICE_OWN_MACHINE", "price_t2", "listed twice"));
 	TEST_EXPECT(refused_with("STRIPE_PRICE_TIER2", "price_t1old", "listed twice"));
+	// The static-address add-on's prices: needed while the fleet sells addresses alone.
+	{
+		Env addresses = complete_env();
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).empty() &&
+				!config_of(addresses).sells_addresses);
+		addresses["STRIPE_PRICE_STATIC_ADDRESS"] = "REPLACE_ME";
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).empty() &&
+				config_of(addresses).static_address_prices.empty());
+		addresses["ONNET_FLEET_MAX_ADDRESSES"] = "4";
+		TEST_EXPECT(config_of(addresses).sells_addresses);
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).find("STRIPE_PRICE_STATIC_ADDRESS is not set") !=
+				std::string::npos);
+		addresses["STRIPE_PRICE_STATIC_ADDRESS"] = "price_own";
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).find("listed twice") != std::string::npos);
+		addresses["STRIPE_PRICE_STATIC_ADDRESS"] = "price_addr, price_addrold";
+		c = config_of(addresses);
+		TEST_EXPECT(billing::check_billing_config(c).empty() && c.static_address_prices.size() == 2);
+		TEST_EXPECT(billing::static_address_price_for_sale(c) == "price_addr" &&
+				billing::is_static_address_price(c, "price_addrold") && !billing::is_static_address_price(c, "price_own"));
+		addresses["ONNET_FLEET_MAX_ADDRESSES"] = "0";
+		addresses["STRIPE_PRICE_STATIC_ADDRESS"] = "prod_x";
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).find("prod_x") != std::string::npos);
+	}
 	TEST_EXPECT(refused_with("ONNET_SITE_URL", nullptr, "ONNET_SITE_URL is not set"));
 	TEST_EXPECT(refused_with("ONNET_SITE_URL", "localhost:8080", "ONNET_SITE_URL"));
 	TEST_EXPECT(refused_with("ONNET_SITE_URL", "https://nw.test/app", "ONNET_SITE_URL"));
