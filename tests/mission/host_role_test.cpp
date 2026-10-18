@@ -133,6 +133,9 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		//  Game_ApplySessionSettingsToGlobals @0x552284 / @0x5522B9].
 		CHECK(kernel.world.rules.allow_sniper_scope_zoom ==
 				(mode != inmatch::SocketMode::Socketless));
+		// The fill reads the config's own value out of a session, the rule in one
+		// [orig: WeaponSlot_InitFromDef @0x53EF07..0x53EF25].
+		CHECK(kernel.world.rules.sniper_zoom_fill);
 	}
 }
 

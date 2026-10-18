@@ -42,7 +42,7 @@ Vec3 local_player_mission_position(const World &world) {
 bool local_slot_zoom_sniper_lock(const World &world, int32_t def_category) {
 	const Entity *player = world.registry.get(world.cached.local_player);
 	return player != nullptr && weapon_slot_zoom_sniper_lock(player->player_class,
-			def_category, world.rules.allow_sniper_scope_zoom);
+			def_category, world.rules.sniper_zoom_fill);
 }
 
 } // namespace

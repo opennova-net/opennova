@@ -120,14 +120,14 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     const std::vector<std::string> display =
             weapon_kit_expand_display_list(kit, table);
     // The local player owns every slot the fill seeds: its class feeds the
-    // zoom seed's sniper lock. The permission is World::rules'
-    // session byte (byte_A821F0); offline retail reads the config's own
-    // g_mp_allowsniperscopezoom instead, zero by default like the rule
-    // [orig: Config_SetDefaults @ 0x54D364; Game_ApplySessionSettingsToGlobals
-    //  @ 0x552284].
+    // zoom seed's sniper lock. The permission is the fill's value: the
+    // session byte (byte_A821F0) on an in-session peer, else the config's own
+    // allowSniperScopeZoom (World::rules.sniper_zoom_fill) [orig:
+    //  WeaponSlot_InitFromDef @ 0x53EF07..0x53EF25; Config_SetDefaults
+    //  @ 0x54D364].
     const uint8_t seed_class = loadout_seed_class(world, loadout);
     const WeaponFillResult fill = weapon_inventory_load_from_display(table, display,
-            inventory, seed_class, world.rules.allow_sniper_scope_zoom);
+            inventory, seed_class, world.rules.sniper_zoom_fill);
     for (const std::string &w : fill.warnings)
         io::logf(io::LogLevel::kWarn, "%s", w.c_str()); // [orig: ErrorLog_WriteTimestamped]
     weapon_inventory_seed_pools(table, inventory, seed_class);

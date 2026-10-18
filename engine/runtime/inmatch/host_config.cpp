@@ -82,6 +82,10 @@ HostConfig shell_host_config(const ShellHostSource &source) {
 		host.network_type = source.lan_network_type;
 	} else {
 		host.config = singleplayer_game_config(source.sp_game_type, source.profile);
+		// Single player's fill reads game.cfg's own zoom option
+		// [orig: g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F].
+		if (source.cfg_block != nullptr)
+			host.config.allow_sniper_scope_zoom = source.cfg_block->mp_allowsniperscopezoom != 0;
 		host.socket_mode = SocketMode::Socketless;
 		host.serve_and_play = true;
 		host.network_type = NetworkType::Lan;

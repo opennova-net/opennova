@@ -173,7 +173,7 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
             //  (g_WeaponSlotArrayBase, picker, row) @0x442912]
             const WeaponAvatarGrant landed = weapon_inventory_init_from_avatar_def(table, *inv,
                     powerup.powerup_weapon, picker.player_class,
-                    world.rules.allow_sniper_scope_zoom, entity_ammo_seat(world, picker));
+                    world.rules.sniper_zoom_fill, entity_ammo_seat(world, picker));
             powerup_sync_local_weapon_grant(world, *lp, picker, landed);
         }
         // The authority's slot-table copy and S2C 0x35, for every picker
@@ -453,7 +453,7 @@ bool powerup_weapon_grant_received(World &world, LocalPlayer &lp, const Entity *
     if (!lp.inventory_valid) return false;
     const WeaponTable &table = world.tables.weapons;
     const WeaponAvatarGrant landed = weapon_inventory_init_from_avatar_def(table, lp.inventory,
-            row->powerup_weapon, player->player_class, world.rules.allow_sniper_scope_zoom,
+            row->powerup_weapon, player->player_class, world.rules.sniper_zoom_fill,
             entity_ammo_seat(world, *player));
     if (landed.combo < 0) return false;                          // @0x4E040B
     powerup_sync_local_weapon_grant(world, lp, *player, landed);

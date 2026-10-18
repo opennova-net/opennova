@@ -424,7 +424,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	//  @0x5155EB skips the entry walk alone].
 	if (table.empty()) return;
 	const world::WeaponAmmoSeat seat = world::entity_ammo_seat(world, player);
-	const bool allow_zoom = world.rules.allow_sniper_scope_zoom;
+	const bool allow_zoom = world.rules.sniper_zoom_fill;
 	const LoadoutSubmit &buffer = conn.reply.loadout_buffer;
 	const uint8_t cls = static_cast<uint8_t>(conn.slot_class);
 	const std::vector<KitEntry> entries = admitted_entries(buffer, buffer.player_class, table);
@@ -473,7 +473,7 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 	const uint8_t cls = static_cast<uint8_t>(conn.slot_class);
 	const std::vector<KitEntry> entries = admitted_entries(buffer, buffer.player_class, table);
 	const world::WeaponAmmoSeat seat = world::entity_ammo_seat(world, player);
-	const bool allow_zoom = world.rules.allow_sniper_scope_zoom;
+	const bool allow_zoom = world.rules.sniper_zoom_fill;
 	// The round init's rebuild of a kept slot from its buffer: the display list, a
 	// fill, the list rebuilt, every listed slot initialized again with its bucket
 	// zeroed, and the seed and the draw. No entry count is applied; the slot's next

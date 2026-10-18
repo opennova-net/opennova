@@ -133,6 +133,11 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	//  @0x552284, the session test @0x55222A / @0x55228B, the authority test
 	//  @0x55228D, the stamp @0x5522A4..0x5522B9].
 	kernel.world.rules.allow_sniper_scope_zoom = in_session && config.allow_sniper_scope_zoom;
+	// The fill's value: the rule on an in-session peer, else the config's own
+	// [orig: WeaponSlot_InitFromDef @0x53EF07..0x53EF25].
+	kernel.world.rules.sniper_zoom_fill = in_session && serve_and_play
+			? kernel.world.rules.allow_sniper_scope_zoom
+			: config.allow_sniper_scope_zoom;
 	// Out of a session a fresh start's session settings copy the current
 	// profile's +0x564 into the difficulty word, which the player's spawn
 	// raises read before the mission start resets it (D-PWR-6); the SP

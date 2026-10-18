@@ -664,12 +664,18 @@ struct SessionRules {
     // server_initial_state.cpp emits from the option); offline it stays 0, which
     // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom
     // (HostRole::apply_rule_words), joiners from their session-config bitflags
-    // (JoinerRole's frame), and the 0x2F grant's fills read it.
+    // (JoinerRole's frame); the slot fills read sniper_zoom_fill below.
     // [orig: Game_ApplySessionSettingsToGlobals @0x552284 (the reset) / @0x5522b9
     //  (the authority stamp); NapiNPClientMsg_HandleSessionConfig @0x428392;
     //  readers Player_AdjustWeaponElevation @0x4dbe36, Player_MountWeaponSlot
     //  @0x4dfaf9, WeaponSlot_InitFromDef @0x53ef17]
     bool allow_sniper_scope_zoom = false;
+    // The value WeaponSlot_InitFromDef's fill reads for the same class-6 lock: the
+    // rule above in a session on a peer, else the config's own allowSniperScopeZoom
+    // (a dedicated host's, single player's game.cfg). [orig: WeaponSlot_InitFromDef
+    //  @0x53EF07..0x53EF25 - is_in_session @0x53EF07, is_mp_session_peer @0x53EF0F,
+    //  byte_A821F0 @0x53EF17, g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F]
+    bool sniper_zoom_fill = false;
     // Multiplayer blast damage to Building ItemDefs is disabled unless the
     // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
     // [orig: g_DestroyBuildings gate in Entity_ApplyWeaponDamage
