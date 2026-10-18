@@ -82,8 +82,9 @@
 #                                 the Organization (infra/org), as the
 #                                 management account's opennova-org user (vault
 #                                 item aws-org); no --deployment: the
-#                                 Organization and both member accounts, and in
-#                                 each account (through its
+#                                 Organization and its member accounts (each
+#                                 deployment's and ci), and in each
+#                                 deployment's account (through its
 #                                 OrganizationAccountAccessRole) its state
 #                                 bucket, the role boundary, the deploy user
 #                                 opennova-deploy and its key, the GitHub deploy

@@ -1469,11 +1469,13 @@ Once, in order:
 3. **The license**: RunsOn's license key (runs-on.com) into the vault item `runs-on`, field
    `key` (the toolbox finds the item's title in any case).
 4. **[admin] The account's EC2 quotas** (the access portal, `OpenNovaAdmin` in
-   `opennova-ci`, Service Quotas): a run takes about 100 vCPUs at once (six 16-vCPU legs),
-   so raise "All Standard (A, C, D, H, I, M, R, T, Z) Spot Instance Requests" (L-34B43A08)
-   and "Running On-Demand Standard (A, C, D, H, I, M, R, T, Z) instances" (L-1216C47A, for
-   when spot is short) to 256 vCPUs each, room for two runs at once. A new account's are
-   far lower, and a job past them waits.
+   `opennova-ci`, Service Quotas): a run takes 96 vCPUs at once (six 16-vCPU legs). The
+   quotas are the runners' spending ceiling: "All Standard (A, C, D, H, I, M, R, T, Z) Spot
+   Instance Requests" (L-34B43A08; OpenNova's account was given 96, one run at once) and
+   "Running On-Demand Standard (A, C, D, H, I, M, R, T, Z) instances" (L-1216C47A, for
+   when spot is short). A leg past them waits for an earlier run's instances to end;
+   raise them (192 for two runs at once) only when that waiting costs more than the
+   minutes do. A new account's can be lower than one run: check both.
 5. **The stack:**
 
    ```bash

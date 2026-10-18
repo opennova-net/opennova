@@ -232,7 +232,7 @@ stack_run_body() {
 ORG_OVERRIDE="$ORG_TF_DIR/backend_override.tf"
 cmd_org() {
   local action="${1:-plan}"
-  STACK_LABEL="the Organization (the management account and both deployments' accounts)"
+  STACK_LABEL="the Organization (the management account and its member accounts)"
   STACK_DIR="$ORG_TF_DIR"
   STACK_DATA_DIR="$ORG_TF_DIR/.terraform"
   STACK_KEY="org/terraform.tfstate"
