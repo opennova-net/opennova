@@ -1152,15 +1152,26 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// active selection, but this tick's ammo bridge still belongs to the slot the
 	// FSM actually pumped.
 	const bool borrowed_usegun_slot = w.usegun_slot_active;
+	// The slot's ammo reads go through the player's seat: on a controller seat a
+	// shared bucket reads 0 and a pool 0 unless the carrier is EWeap, and the
+	// bucket is never written there. [orig: sub_5405F0 from WeaponSlot_CanFire
+	//  @0x541C79, the reload gate @0x4E12A7 / @0x4E12C6, WeaponAction_Idle
+	//  @0x542990, WeaponAction_EmptyIdle @0x542A8C, WeaponAction_Recoil @0x542E07;
+	//  the pool from WeaponSlot_CanFire @0x541C9B; Entity_GetScoreValueBySlotType
+	//  @0x5406E0; sub_540670 @0x540684..0x540692]
+	const WeaponAmmoSeat ammo_seat =
+			player != nullptr ? entity_ammo_seat(world, *player) : WeaponAmmoSeat{};
     if (io.inventory != nullptr && !borrowed_usegun_slot) {
         const auto *eq = io.inventory->slot(io.inventory->equipped_combo);
         const auto *def = eq != nullptr && eq->adm_index >= 0
                 ? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index)) : nullptr;
         active_slot.shared_clip = def != nullptr && def->ammo_bucket != 0;
         if (active_slot.shared_clip) {
-            active_slot.clip = weapon_inventory_loaded_rounds(world.tables.weapons,
-                    *io.inventory, io.inventory->equipped_combo);
-            active_slot.reserve = weapon_pool_get(*io.inventory, def->ammo_class_id);
+            active_slot.clip = weapon_seat_bucket(ammo_seat,
+                    weapon_inventory_loaded_rounds(world.tables.weapons,
+                            *io.inventory, io.inventory->equipped_combo));
+            active_slot.reserve = weapon_seat_pool(ammo_seat, def->ammo_class_id,
+                    weapon_pool_get(*io.inventory, def->ammo_class_id));
         }
     }
 	WeaponFsmInputs in;
@@ -1577,12 +1588,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 						inventory.equipped_combo);
 				active_slot.clip = weapon_inventory_loaded_rounds(
                         world.tables.weapons, inventory, inventory.equipped_combo);
-			} else {
+			} else if (eq_def->ammo_bucket == 0 || weapon_seat_writes_buckets(ammo_seat)) {
 				weapon_inventory_set_loaded_rounds(world.tables.weapons, inventory,
                         inventory.equipped_combo, active_slot.clip);
 			}
-			active_slot.reserve =
-					weapon_pool_get(inventory, eq_def->ammo_class_id);
+			active_slot.reserve = weapon_seat_pool(ammo_seat, eq_def->ammo_class_id,
+					weapon_pool_get(inventory, eq_def->ammo_class_id));
 			// The post-recoil auto-switch [orig: WeaponAction_Recoil tail @ 0x543062:
 			// def+0x168 -> Player_SwitchToWeaponByHandle(def[+0x164]*65) — the
 			// grenade/LAW switchback, unconditional per throw].

@@ -898,8 +898,60 @@ void test_total_clips_seat_legs() {
     CHECK(weapon_inventory_loadout_weight_fp16(t, inv, seat) == 0x10000);
 }
 
+// The local pump reads a shared bucket and its pool through the player's seat: on a
+// controller seat under a carrier with no EWeap bit both read 0 and the bucket keeps
+// its rounds; off the seat they read the player's own.
+// [orig: sub_5405F0 @0x540604..0x540627 from WeaponAction_Idle @0x542990;
+//  Entity_GetScoreValueBySlotType @0x54078F..0x540799; sub_540670 @0x540684..0x540692]
+void test_pump_reads_the_bucket_through_the_seat() {
+    Fixture f;
+    auto &m4 = f.t.entries[f.m4];
+    m4.ammo_bucket = 1;
+    World world;
+    world.tables.weapons = f.t;
+    WeaponInventory inv;
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv, 8, false);
+    inv.equipped_combo = 3 * 65;
+    inv.shared_clips[1] = 12;
+    inv.pools[static_cast<size_t>(m4.ammo_class_id)] = 90;
+    world.registry.configure_pool(0, 1);
+    world.registry.configure_pool(1, 1);
+    Entity seed;
+    seed.alive = true;
+    seed.health = 100;
+    world.cached.local_player = world.registry.spawn(0, seed);
+    Entity hull;
+    hull.has_item_def = true;
+    const EntityHandle carrier = world.registry.spawn(1, hull);
+
+    WeaponInstallData data;
+    data.name = "WPN_M4AUTO";
+    data.clipsize = 30;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    local_weapon_install(world, weapon, data, false, false, &inv, view);
+    LocalWeaponPumpIO io;
+    io.view = &view;
+    io.inventory = &inv;
+    ++world.logic_tick;
+    local_weapon_pump_tick(world, weapon, io);
+    CHECK(weapon.slot.clip == 12 && weapon.slot.reserve == 90);
+
+    Entity *player = world.registry.get(world.cached.local_player);
+    player->mounted = true;
+    player->mount_type = SeatType::Controller;
+    player->mount_target = carrier;
+    ++world.logic_tick;
+    local_weapon_pump_tick(world, weapon, io);
+    CHECK(weapon.slot.clip == 0 && weapon.slot.reserve == 0);
+    CHECK(inv.shared_clips[1] == 12);
+    std::printf("PASS the pump reads the bucket through the seat\n");
+}
+
 int main() {
     test_recalc_seat_legs();
+    test_pump_reads_the_bucket_through_the_seat();
     test_total_clips_seat_legs();
     test_slot_bar_scan();
     test_fill_seeds_the_slot_zoom();
