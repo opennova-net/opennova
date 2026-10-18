@@ -85,7 +85,7 @@ resource "aws_ssm_parameter" "infra_env" {
 }
 
 # The release as it stands (the toolbox's writes, which the resource ignores):
-# whether the programs have one decides whether their services run tasks
+# the programs it names are the ones whose services run tasks and alarm
 # (programs.tf, local.released). Read by path, so a stack's first plan, before
 # the parameter exists, reads none.
 data "aws_ssm_parameters_by_path" "deployment" {

@@ -7,7 +7,7 @@
 # backup/ for the backup task) and the machines', 30 days each. Metrics: from
 # each program's heartbeat, a JSON line it logs every 60 s, carrying its program
 # and the fields that program knows,
-#   {"heartbeat":{"program":"gate|lobby|web|controller|worker","nw_sessions":N,
+#   {"heartbeat":{"program":"gate|lobby|web|fleet|worker|data","nw_sessions":N,
 #     "listed_hosts":N,"hosted_live":N,"hosted_failed":N,"machines_lost":N,
 #     "launch_failures":N,"billing_sync_age_s":N,"webhook_rejects":N,
 #     "limits_held":0|1,"probes_unanswered":N,"lobbies_live":N}}
@@ -20,8 +20,8 @@
 # from its boot line, {"boot":{"program":"..."}}. Alarms, to one SNS topic
 # emailing var.alert_email:
 #   per program: no heartbeat for 5 minutes (no data is an alarm: a dead
-#   process logs nothing; before the first release, when no task runs, it is
-#   none), more boots in 15 minutes than its max and 3 (a
+#   process logs nothing; before a release names the program, when no task of
+#   it runs, it is none), more boots in 15 minutes than its max and 3 (a
 #   crash loop), fewer tasks running than its min for 5 minutes, its CPU or its
 #   memory over 80% for 15 minutes; a load balancer target group with an
 #   unhealthy target for 10 minutes; a failed hosted server or a lost machine,
@@ -218,9 +218,10 @@ resource "aws_cloudwatch_metric_alarm" "server" {
 # ---- alarms on each program -------------------------------------------------------
 
 # No heartbeat from any of a program's processes for 5 minutes (no data is an
-# alarm: a dead process logs nothing). Before the first release no task runs
-# and none should log: no data is none (local.released, programs.tf), so a
-# fresh deployment mails nothing.
+# alarm: a dead process logs nothing). Before a release names the program no
+# task of it runs and none should log: no data is none (local.released,
+# programs.tf), so a fresh deployment, or a program a newer service added,
+# mails nothing until a deploy names it.
 resource "aws_cloudwatch_metric_alarm" "program_heartbeat" {
   for_each = local.programs
 
@@ -234,7 +235,7 @@ resource "aws_cloudwatch_metric_alarm" "program_heartbeat" {
   evaluation_periods  = 1
   comparison_operator = "LessThanThreshold"
   threshold           = 1
-  treat_missing_data  = local.released ? "breaching" : "notBreaching"
+  treat_missing_data  = local.released[each.key] ? "breaching" : "notBreaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
 
@@ -266,8 +267,8 @@ resource "aws_cloudwatch_metric_alarm" "program_crash_loop" {
 # Fewer tasks running than the program's min, every minute for 5 minutes:
 # ECS's service CPU metric takes one sample a minute from each running task,
 # so its SampleCount is the running count (no data, none running, is an
-# alarm). Before the first release no task runs: the floor is 0 and no data is
-# none.
+# alarm). Before a release names the program no task of it runs: the floor is
+# 0 and no data is none.
 resource "aws_cloudwatch_metric_alarm" "program_running" {
   for_each = local.programs
 
@@ -280,8 +281,8 @@ resource "aws_cloudwatch_metric_alarm" "program_running" {
   period              = 60
   evaluation_periods  = 5
   comparison_operator = "LessThanThreshold"
-  threshold           = local.released ? each.value.min : 0
-  treat_missing_data  = local.released ? "breaching" : "notBreaching"
+  threshold           = local.released[each.key] ? each.value.min : 0
+  treat_missing_data  = local.released[each.key] ? "breaching" : "notBreaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
 

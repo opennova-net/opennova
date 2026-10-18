@@ -63,7 +63,7 @@ hand.
 | `opennova-deploy-ecs` | the ECS cluster, its services, task definitions and tasks (one-off tasks, ECS Exec), Application Auto Scaling, Cloud Map, EventBridge Scheduler (the nightly backup) |
 | `opennova-deploy-iam` | the stack's roles (under the boundary), instance profiles, the GitHub OIDC provider, `iam:PassRole` to EC2, ECS's tasks and EventBridge Scheduler, the service-linked roles RDS, ElastiCache, Elastic Load Balancing, ECS, Application Auto Scaling and CloudWatch's alarm actions make on first use, the policy simulator; nothing about IAM users |
 | `opennova-deploy-data` | RDS, ElastiCache, the operations bucket (its versioning, lifecycle and encryption; its releases read and written, its dumps read and written, never deleted; the game data, `data/*`, is the tasks' roles' alone, never the deploy user's), SSM parameters, Session Manager (the machines' break-glass), CloudWatch Logs |
-| `opennova-deploy-observability` | alarms and metrics, the alerts topic, the Route 53 health check and the private zone Cloud Map keeps for the controller, budgets, Cost Anomaly Detection, Service Quotas and cost reads, SES identities |
+| `opennova-deploy-observability` | alarms and metrics, the alerts topic, the Route 53 health check and the private zone Cloud Map keeps for the fleet program, budgets, Cost Anomaly Detection, Service Quotas and cost reads, SES identities |
 
 Beside them the org stack gives the user two inline policies: its Terraform states (in its
 account's state bucket, `infra/aws/*`; prod's also `infra/zone/*` and `infra/github/*`, the shared

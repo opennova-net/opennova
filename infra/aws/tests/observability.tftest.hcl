@@ -156,14 +156,19 @@ override_resource {
   values          = { id = "sg-0web" }
 }
 override_resource {
-  target          = aws_security_group.program["controller"]
+  target          = aws_security_group.program["fleet"]
   override_during = plan
-  values          = { id = "sg-0controller" }
+  values          = { id = "sg-0fleet" }
 }
 override_resource {
   target          = aws_security_group.program["worker"]
   override_during = plan
   values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.program["data"]
+  override_during = plan
+  values          = { id = "sg-0data" }
 }
 override_resource {
   target          = aws_security_group.lb
@@ -216,14 +221,19 @@ override_resource {
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1" }
 }
 override_resource {
-  target          = aws_ecs_task_definition.program["controller"]
+  target          = aws_ecs_task_definition.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1" }
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.backup
@@ -246,14 +256,19 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-web" }
 }
 override_resource {
-  target          = aws_iam_role.program["controller"]
+  target          = aws_iam_role.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-controller" }
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-fleet" }
 }
 override_resource {
   target          = aws_iam_role.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-worker" }
+}
+override_resource {
+  target          = aws_iam_role.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-data" }
 }
 override_resource {
   target          = aws_iam_role.execution
@@ -299,7 +314,7 @@ run "observability" {
   }
   assert {
     condition = (
-      toset(keys(aws_cloudwatch_log_metric_filter.heartbeat)) == toset(["gate", "lobby", "web", "controller", "worker"]) &&
+      toset(keys(aws_cloudwatch_log_metric_filter.heartbeat)) == toset(["gate", "lobby", "web", "fleet", "worker", "data"]) &&
       aws_cloudwatch_log_metric_filter.heartbeat["lobby"].pattern == "{ $.heartbeat.program = \"lobby\" }" &&
       aws_cloudwatch_log_metric_filter.heartbeat["lobby"].metric_transformation[0].name == "Heartbeat" &&
       aws_cloudwatch_log_metric_filter.heartbeat["lobby"].metric_transformation[0].namespace == "OpenNova/prod" &&
@@ -326,7 +341,7 @@ run "observability" {
       aws_cloudwatch_log_metric_filter.boots["worker"].pattern == "{ $.boot.program = \"worker\" }" &&
       aws_cloudwatch_log_metric_filter.boots["worker"].metric_transformation[0].name == "Boots" &&
       aws_cloudwatch_log_metric_filter.boots["worker"].metric_transformation[0].dimensions == tomap({ Program = "$.boot.program" }) &&
-      length(aws_cloudwatch_log_metric_filter.boots) == 5
+      length(aws_cloudwatch_log_metric_filter.boots) == 6
     )
     error_message = "each process's boot line counts a boot of its program"
   }
@@ -335,7 +350,7 @@ run "observability" {
       for program, a in aws_cloudwatch_metric_alarm.program_heartbeat :
       a.treat_missing_data == "notBreaching" && a.comparison_operator == "LessThanThreshold" && a.threshold == 1 &&
       a.period == 300 && a.metric_name == "Heartbeat" && a.dimensions == tomap({ Program = program })
-    ]) && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 5
+    ]) && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 6
     error_message = "a program's heartbeat missing for 5 minutes is an alarm; before the first release (no task runs) no data is none"
   }
   assert {
@@ -379,7 +394,7 @@ run "observability" {
   }
   assert {
     condition = (
-      length(aws_cloudwatch_metric_alarm.program_utilization) == 10 &&
+      length(aws_cloudwatch_metric_alarm.program_utilization) == 12 &&
       aws_cloudwatch_metric_alarm.program_utilization["gate-cpu"].namespace == "AWS/ECS" &&
       aws_cloudwatch_metric_alarm.program_utilization["gate-cpu"].metric_name == "CPUUtilization" &&
       aws_cloudwatch_metric_alarm.program_utilization["worker-memory"].metric_name == "MemoryUtilization" &&
@@ -390,7 +405,7 @@ run "observability" {
   }
   assert {
     condition = (
-      length(aws_cloudwatch_metric_alarm.program_running) == 5 &&
+      length(aws_cloudwatch_metric_alarm.program_running) == 6 &&
       aws_cloudwatch_metric_alarm.program_running["lobby"].namespace == "AWS/ECS" &&
       aws_cloudwatch_metric_alarm.program_running["lobby"].metric_name == "CPUUtilization" &&
       aws_cloudwatch_metric_alarm.program_running["lobby"].statistic == "SampleCount" &&
@@ -414,7 +429,7 @@ run "observability" {
   assert {
     condition = (
       aws_cloudwatch_metric_alarm.db_cpu.namespace == "AWS/RDS" && aws_cloudwatch_metric_alarm.db_cpu.threshold == 80 &&
-      aws_cloudwatch_metric_alarm.db_connections.metric_name == "DatabaseConnections" && aws_cloudwatch_metric_alarm.db_connections.threshold == 64 &&
+      aws_cloudwatch_metric_alarm.db_connections.metric_name == "DatabaseConnections" && aws_cloudwatch_metric_alarm.db_connections.threshold == 75 &&
       aws_cloudwatch_metric_alarm.db_free_storage.threshold == 2147483648
     )
     error_message = "the database's CPU, its connections at 80% of max_connections (80), and its free storage alarm"
@@ -477,7 +492,7 @@ run "released" {
     override_during = plan
     values = {
       names  = ["/opennova/prod/release"]
-      values = ["{\"id\":\"20261016T000000Z-abc1234\",\"programs\":[\"worker\",\"controller\",\"web\",\"lobby\",\"gate\"]}"]
+      values = ["{\"id\":\"20261016T000000Z-abc1234\",\"programs\":[\"worker\",\"data\",\"fleet\",\"web\",\"lobby\",\"gate\"]}"]
     }
   }
 
@@ -485,7 +500,7 @@ run "released" {
     condition = alltrue(concat(
       [for a in aws_cloudwatch_metric_alarm.program_heartbeat : a.treat_missing_data == "breaching"],
       [for a in aws_cloudwatch_metric_alarm.program_running : a.treat_missing_data == "breaching"],
-    )) && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 5 && length(aws_cloudwatch_metric_alarm.program_running) == 5
+    )) && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 6 && length(aws_cloudwatch_metric_alarm.program_running) == 6
     error_message = "released, a program's missing heartbeat and its missing tasks are alarms, no data included"
   }
   assert {
@@ -506,7 +521,7 @@ run "placeholder_email" {
     error_message = "a placeholder address subscribes nothing"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.server) == 7 && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 5 && length(aws_ce_anomaly_monitor.services) == 1
+    condition     = length(aws_cloudwatch_metric_alarm.server) == 7 && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 6 && length(aws_ce_anomaly_monitor.services) == 1
     error_message = "the alarms and the monitor exist all the same"
   }
 }

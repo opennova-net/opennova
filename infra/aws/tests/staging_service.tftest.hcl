@@ -150,14 +150,19 @@ override_resource {
   values          = { id = "sg-0web" }
 }
 override_resource {
-  target          = aws_security_group.program["controller"]
+  target          = aws_security_group.program["fleet"]
   override_during = plan
-  values          = { id = "sg-0controller" }
+  values          = { id = "sg-0fleet" }
 }
 override_resource {
   target          = aws_security_group.program["worker"]
   override_during = plan
   values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.program["data"]
+  override_during = plan
+  values          = { id = "sg-0data" }
 }
 override_resource {
   target          = aws_security_group.lb
@@ -210,14 +215,19 @@ override_resource {
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-staging-web:1" }
 }
 override_resource {
-  target          = aws_ecs_task_definition.program["controller"]
+  target          = aws_ecs_task_definition.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-staging-controller:1" }
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-staging-fleet:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-staging-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-staging-data:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.backup
@@ -240,14 +250,19 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-staging-web" }
 }
 override_resource {
-  target          = aws_iam_role.program["controller"]
+  target          = aws_iam_role.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:iam::123456789012:role/opennova-staging-controller" }
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-staging-fleet" }
 }
 override_resource {
   target          = aws_iam_role.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-staging-worker" }
+}
+override_resource {
+  target          = aws_iam_role.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-staging-data" }
 }
 override_resource {
   target          = aws_iam_role.execution
@@ -297,9 +312,9 @@ run "own_address" {
       { for e in jsondecode(aws_ecs_task_definition.program["gate"].container_definitions)[0].environment : e.name => e.value }["ONNET_PUBLIC_HOST"] == "3.3.3.3" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_WEB_HOST"] == "3.3.3.3" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_SITE_URL"] == "https://staging.example.com" &&
-      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://controller.staging.opennova.internal:8070"
+      output.internal_url == "http://fleet.staging.opennova.internal:8070"
     )
-    error_message = "staging's programs announce staging's own address, its site and its controller's name"
+    error_message = "staging's programs announce staging's own address and its site, and its fleet program is named in staging's own zone"
   }
   assert {
     condition = (
@@ -412,7 +427,7 @@ run "hosting_on" {
 
   assert {
     condition = alltrue([
-      for p in ["web", "controller", "worker"] :
+      for p in ["web", "fleet", "worker", "data"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_URL"] == "s3://opennova-staging-ops-123456789012/data"
     ])
     error_message = "staging's programs name staging's own bucket under data/"

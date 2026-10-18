@@ -71,8 +71,8 @@ variable "web" {
   default = {}
 }
 
-variable "controller" {
-  description = "The controller: the fleet's reconcile pass, the jobs' scheduling and the internal listener the machines' hostd reach at its Cloud Map name. Elected: one leads, another waits as its standby (a deployment's new task does, then leads)."
+variable "fleet" {
+  description = "The fleet program: the hosted servers' supervisor, its admin links, the console drain and the internal listener the machines' hostd reach at its Cloud Map name. Elected: one leads, another waits as its standby (a deployment's new task does, then leads). It runs no job and calls no cloud."
   type = object({
     cpu     = optional(number, 256)
     memory  = optional(number, 512)
@@ -84,7 +84,7 @@ variable "controller" {
 }
 
 variable "worker" {
-  description = "The worker: the background jobs (the fleet's AWS calls, billing sync, mail, prunes). Scales on its CPU between min and max (one task at the defaults): more tasks, more jobs at once."
+  description = "The worker: the background jobs and their schedules (the fleet's AWS calls, billing sync, mail, prunes). Scales on its CPU between min and max (one task at the defaults): more tasks, more jobs at once."
   type = object({
     cpu     = optional(number, 512)
     memory  = optional(number, 1024)
@@ -93,6 +93,23 @@ variable "worker" {
     desired = optional(number, 1)
   })
   default = {}
+}
+
+variable "data" {
+  description = "The data program: the data sets' jobs over the game data's store (a tree's finalize, a release's validate and apply, the trees' prune), on 40 GiB of task storage. One task: its jobs' caps are global, so it never scales (min = max = desired)."
+  type = object({
+    cpu     = optional(number, 256)
+    memory  = optional(number, 1024)
+    min     = optional(number, 1)
+    max     = optional(number, 1)
+    desired = optional(number, 1)
+  })
+  default = {}
+
+  validation {
+    condition     = var.data.min == var.data.max && var.data.min == var.data.desired
+    error_message = "data runs one fixed count (min = max = desired): its jobs' caps are global, so more tasks run none more at once."
+  }
 }
 
 variable "image_registry" {
@@ -263,9 +280,9 @@ variable "db_pool_max" {
 }
 
 variable "db_service_processes" {
-  description = "The most program processes connected to the database at once: every program's tasks at its max, and the extra tasks a deployment runs beside them (a deployment's maximum percent, 200: every program starts its new tasks first), so 2 + 2 + 2 + 2 + 2 = 10 at the defaults; the plan refuses less than that. The database's max_connections is db_pool_max for each of them, plus 10 for the backup task, the operator's psql and the reserved superuser and RDS connections. Changing it is a parameter group change RDS applies at the next reboot."
+  description = "The most program processes connected to the database at once: every program's tasks at its max, and the extra tasks a deployment runs beside them (a deployment's maximum percent, 200: every program starts its new tasks first), so 2 + 2 + 2 + 2 + 2 + 2 = 12 at the defaults; the plan refuses less than that. The database's max_connections is db_pool_max for each of them, plus 10 for the backup task, the operator's psql and the reserved superuser and RDS connections. Changing it is a parameter group change RDS applies at the next reboot."
   type        = number
-  default     = 10
+  default     = 12
 
   validation {
     condition     = var.db_service_processes >= 1 && var.db_service_processes <= 64 && floor(var.db_service_processes) == var.db_service_processes
@@ -454,7 +471,7 @@ variable "machine_root_volume_gb" {
 }
 
 variable "internal_http_port" {
-  description = "The controller's internal listener's port, on its task's private address (the leader alone binds it; ONNET_INTERNAL_URL names it by its Cloud Map name): the machines' hostd bootstrap and sync, admitted from the machines' security group alone."
+  description = "The fleet program's internal listener's port, on its task's private address (the leader alone binds it; ONNET_INTERNAL_URL names it by its Cloud Map name): the machines' hostd bootstrap and sync, admitted from the machines' security group alone."
   type        = number
   default     = 8070
 }

@@ -23,7 +23,7 @@ locals {
   arn_iam   = "arn:aws:iam::${var.account_id}"
   arn_ssm   = "arn:aws:ssm:${var.region}:${var.account_id}:parameter/opennova/${var.deployment}"
   ops_arn   = "arn:aws:s3:::${local.name}-ops-${var.account_id}"
-  programs  = ["controller", "gate", "lobby", "web", "worker"]
+  programs  = ["data", "fleet", "gate", "lobby", "web", "worker"]
   families  = concat([for p in local.programs : "${local.name}-${p}"], ["${local.name}-backup"])
   task_role = concat(["${local.name}-execution", "${local.name}-backup"], [for p in local.programs : "${local.name}-${p}"])
 }
