@@ -202,9 +202,10 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
             /*select_spawn_default=*/true);
     // The ACCEPT leg applies the REQUESTED ammo over the default seed: pool =
     // min(req, maxclips) * clipsize when requested, else startrounds RAW on
-    // the main leg; the first different-class sub-variant takes ammo_secondary
+    // the main leg; every sub-variant of another ammo class takes ammo_secondary
     // with the x clipsize fallback [orig: @ 0x566166 vs @ 0x566209;
-    // WeaponSlot_SetAmmoCount @ 0x540b50].
+    // WeaponSlot_SetAmmoCount @ 0x540b50; the walk over every sub-variant
+    // @ 0x56621D..0x566233].
     const WeaponTable &table = world.tables.weapons;
     for (const WeaponKitEntry &entry : loadout.spawn_kit) {
         const int adm = table.index_of(entry.name.c_str());
@@ -219,9 +220,10 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
             weapon_pool_set(table, inventory, def->ammo_class_id, total);
         }
         for (int k = 1; k <= def->loadout_subclasses; ++k) {
-            const WeaponTableEntry *sub = (adm + k < 256)
-                    ? table.by_index(static_cast<uint8_t>(adm + k))
-                    : nullptr;
+            // The sub-variant's index wraps at 256: AdmDef_GetEntryByIndex reads only
+            // its low byte [orig: WeaponLoadout_ApplyFromBuffer @ 0x5661CA (and the
+            //  name-list leg @ 0x566008) -> @ 0x53FC80].
+            const WeaponTableEntry *sub = table.by_index(static_cast<uint8_t>(adm + k));
             if (sub == nullptr) continue;
             if (strutil::iequals(sub->ammo_class, def->ammo_class)) continue;
             int32_t total = entry.ammo_secondary >= 0
@@ -234,7 +236,6 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
             // @ 0x5661E8..0x566215]
             if (total >= 0) total *= sub->clipsize;
             weapon_pool_set(table, inventory, sub->ammo_class_id, total);
-            break; // the FIRST different-class sub-variant [orig: @ 0x5027c8 shape]
         }
     }
     // Both read through the player's seat; a joiner applying before L

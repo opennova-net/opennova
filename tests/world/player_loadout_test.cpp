@@ -271,7 +271,36 @@ static void test_slot_list_skips_an_unclosed_entry() {
     CHECK(indices.size() == 1 && indices[0] == 0);
 }
 
+// A sub-variant index past 255 wraps to the table's start in the accept's ammo leg,
+// as the display list's does (D-NET-XB17), and the walk runs on past the "null" def
+// the wrap reaches to every sub-variant of another class: the grenade launcher takes
+// the requested 5 rounds. [orig: WeaponLoadout_ApplyFromBuffer @0x5661CA ->
+//  AdmDef_GetEntryByIndex @0x53FC80; the walk @0x56621D..0x566233]
+void test_accept_sub_variant_index_wraps() {
+    Rig r;
+    WeaponTable &t = r.world.tables.weapons;
+    t.entries.clear();
+    t.ammo_class_names.clear();
+    t.ammo_class_caps.clear();
+    t.ammo_class_names.emplace_back("");
+    t.ammo_class_caps.push_back(0);
+    WeaponTableEntry null_e;
+    null_e.name = "null";
+    null_e.valid = true;
+    null_e.ammo_class_id = 0;
+    t.entries.push_back(std::move(null_e));
+    const int sub = add_entry(t, "WPN_EDGE_GL", 3, 40, 1, 3, "AMMO_40MM", 1);
+    t.entries.resize(254);
+    const int edge = add_entry(t, "WPN_EDGE", 3, 0, 30, 210, "AMMO_556", 1, 3);
+    CHECK(edge == 254);
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit_of("WPN_EDGE", 3, 5), 8, /*validate_banned=*/false));
+    const WeaponTableEntry &gl = t.entries[static_cast<size_t>(sub)];
+    CHECK(r.inventory.pools[static_cast<size_t>(gl.ammo_class_id)] == 5);
+}
+
 int main() {
+    test_accept_sub_variant_index_wraps();
     test_slot_list_skips_an_unclosed_entry();
     test_promotion_gate_skips_in_session();
     test_promotion_applies_availability_then_filters_kit();
