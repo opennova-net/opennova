@@ -526,7 +526,7 @@ The instance is `db.t4g.micro` (`db_instance_class`: 2 vCPUs, 1 GiB), a burstabl
 RDS runs in unlimited mode: a load past its baseline spends surplus CPU credits, billed
 by the vCPU-hour, and is never throttled (the `db-cpu-credits` alarm says when its
 balance runs low: a larger class such as `db.t4g.small`, or Performance Insights' top
-statements). It runs in private subnet a's zone alone while traffic is small: a zone's
+statements). It runs in one zone, which RDS picks, while traffic is small: a zone's
 loss or a patch takes it, and the service, down for minutes. Multi-AZ (`db_multi_az =
 true`) adds a synchronous standby in the other private subnet's zone that RDS fails over
 to on its own, the endpoint's name following it, in a minute or two.
