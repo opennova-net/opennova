@@ -1,6 +1,7 @@
 #include "parts.h"
 
 #include "billing/billing_jobs.h"
+#include "hosted/agent_protocol.h"
 #include "hosted/data_set_jobs.h"
 #include "hosted/docker_machine_driver.h"
 #include "hosted/ec2_machine_driver.h"
@@ -37,28 +38,17 @@ bool loopback_host(const std::string &host) {
 	return host.empty() || host == "localhost" || host.rfind("127.", 0) == 0;
 }
 
-// The ec2 driver's settings checked, into `setup` (on), or a boot warning
-// naming what it lacks (off).
-void setup_ec2(const ServerConfig &config, HostedSetup &setup) {
-	const auto off = [](const std::string &why) {
-		std::fprintf(stderr, "[boot] WARN hosted servers: the ec2 driver %s; hosting off\n",
-				why.c_str());
-	};
-	// The servers list through the service's public address, so the listing
-	// records each machine's own public address (ADR 0053).
-	if (loopback_host(config.public_host)) {
-		off("needs ONNET_PUBLIC_HOST, the public address its servers list on");
-		return;
+// The ec2 driver's settings checked, into `setup`: false with `error`.
+bool setup_ec2(hosted::DriverConfig &driver, std::string &error) {
+	hosted::Ec2MachineConfig &ec2 = driver.ec2;
+	std::string why;
+	if (!hosted::load_machine_script(driver.machine_script_path, ec2.machine_script, why)) {
+		error = "the ec2 driver: " + loggable(why, 300) + " (ONNET_HOSTED_MACHINE_SCRIPT)";
+		return false;
 	}
-	hosted::Ec2MachineConfig &ec2 = setup.fleet.ec2;
-	std::string error;
-	if (!hosted::load_machine_script(setup.fleet.machine_script_path, ec2.machine_script, error)) {
-		off(loggable(error, 300) + " (ONNET_HOSTED_MACHINE_SCRIPT)");
-		return;
-	}
-	if (const std::string why = hosted::Ec2MachineDriver::check_config(ec2); !why.empty()) {
-		off("is not configured: " + why);
-		return;
+	if (const std::string bad = hosted::Ec2MachineDriver::check_config(ec2); !bad.empty()) {
+		error = "the ec2 driver is not configured: " + bad;
+		return false;
 	}
 	std::string subnets;
 	for (const std::string &subnet : ec2.subnets)
@@ -67,42 +57,25 @@ void setup_ec2(const ServerConfig &config, HostedSetup &setup) {
 				"from %s, own from %s\n",
 			ec2.region.c_str(), subnets.c_str(), ec2.deployment.c_str(),
 			ec2.shared_template.c_str(), ec2.own_template.c_str());
-	std::printf("[boot] hosted servers: serve image %s, hostd image %s, the machines reach %s "
-				"and log to %s\n",
-			loggable(ec2.serve_image, 255).c_str(),
+	std::printf("[boot] hosted servers: hostd image %s, the machines reach %s and log to %s\n",
 			loggable(ec2.hostd_image.empty() ? ec2.serve_image : ec2.hostd_image, 255).c_str(),
 			loggable(ec2.service_url, 255).c_str(), loggable(ec2.log_group, 255).c_str());
-	setup.profile = hosted::Ec2MachineDriver::profile(ec2);
-	setup.provider = "ec2";
-	setup.on = true;
+	return true;
 }
 
-// The docker driver's settings checked (the local stack's machines), into
-// `setup` (on), or a boot warning naming what it lacks (off).
-void setup_docker(const ServerConfig &config, HostedSetup &setup) {
-	const auto off = [](const std::string &why) {
-		std::fprintf(stderr, "[boot] WARN hosted servers: the docker driver %s; hosting off\n",
-				why.c_str());
-	};
-	// Its machines are containers of their own: they reach the gate at the
-	// service's public address, never at their own loopback.
-	if (loopback_host(config.public_host)) {
-		off("needs ONNET_PUBLIC_HOST, an address its machines reach the gate at (not loopback)");
-		return;
-	}
-	hosted::DockerMachineConfig &docker = setup.fleet.docker;
+// The docker driver's settings checked (the local stack's machines): false
+// with `error`.
+bool setup_docker(const hosted::DriverConfig &driver, std::string &error) {
+	const hosted::DockerMachineConfig &docker = driver.docker;
 	if (const std::string why = hosted::DockerMachineDriver::check_config(docker); !why.empty()) {
-		off("is not configured: " + why);
-		return;
+		error = "the docker driver is not configured: " + why;
+		return false;
 	}
-	std::printf("[boot] hosted servers: docker machines of %s on network %s, the store's mounts "
+	std::printf("[boot] hosted servers: docker machines on network %s, the store's mounts "
 				"from %s, deployment %s; the machines reach %s\n",
-			loggable(docker.image, 255).c_str(), docker.network.c_str(),
-			docker.data_from.c_str(), docker.deployment.c_str(),
+			docker.network.c_str(), docker.data_from.c_str(), docker.deployment.c_str(),
 			loggable(docker.service_url, 255).c_str());
-	setup.profile = hosted::DockerMachineDriver::profile(docker);
-	setup.provider = "docker";
-	setup.on = true;
+	return true;
 }
 
 } // namespace
@@ -143,8 +116,8 @@ ScratchDir ScratchDir::make(const char *prefix, std::string &error) {
 	return dir;
 }
 
-HostedSetup hosted_setup(const ServerConfig &config) {
-	HostedSetup setup;
+HostedPolicy hosted_policy(const ServerConfig &config) {
+	HostedPolicy setup;
 	// The store first, driver or none: web's data set routes and the worker's
 	// data set jobs run over it whether or not hosting is on.
 	if (!config.object_store_url.empty()) {
@@ -188,17 +161,55 @@ HostedSetup hosted_setup(const ServerConfig &config) {
 				"hosting off\n");
 		return setup;
 	}
-	if (config.hosted_provider == "ec2")
-		setup_ec2(config, setup);
-	else
-		setup_docker(config, setup);
-	if (setup.on)
-		std::printf("[boot] hosted servers: the data sets' trees in %s\n", store_text(setup.store).c_str());
+	// The servers list through the service's public address, so the listing
+	// records each machine's own (ADR 0053); a local stack's machines are
+	// containers of their own, which reach the gate there, never at their own
+	// loopback.
+	if (loopback_host(config.public_host)) {
+		std::fprintf(stderr,
+				"[boot] WARN hosted servers: %s needs ONNET_PUBLIC_HOST, the public address "
+				"the servers list on (not loopback); hosting off\n",
+				config.hosted_provider.c_str());
+		return setup;
+	}
+	if (!hosted::is_image_reference(setup.fleet.serve_image)) {
+		std::fprintf(stderr,
+				"[boot] WARN hosted servers: ONNET_HOSTED_SERVE_IMAGE is no image reference; "
+				"hosting off\n");
+		return setup;
+	}
+	// What the supervisor knows of the driver's machines needs no driver: the
+	// address their admin.cfg admits is the fleet's bind.
+	if (config.hosted_provider == "ec2") {
+		hosted::Ec2MachineConfig ec2;
+		ec2.admin_address = setup.fleet.internal_address;
+		setup.profile = hosted::Ec2MachineDriver::profile(ec2);
+	} else {
+		hosted::DockerMachineConfig docker;
+		docker.admin_address = setup.fleet.internal_address;
+		setup.profile = hosted::DockerMachineDriver::profile(docker);
+	}
+	setup.provider = config.hosted_provider;
+	setup.on = true;
+	std::printf("[boot] hosted servers: %s, serve image %s, the data sets' trees in %s\n",
+			setup.provider.c_str(), loggable(setup.fleet.serve_image, 255).c_str(),
+			store_text(setup.store).c_str());
 	return setup;
 }
 
+bool driver_setup(const HostedPolicy &policy, DriverSetup &out, std::string &error) {
+	std::vector<std::string> errors;
+	if (!hosted::parse_driver_config(hosted::process_env(), policy.fleet, out.driver, errors)) {
+		error = "the driver's settings do not read: " + loggable(errors.front(), 300);
+		return false;
+	}
+	if (policy.provider == "ec2")
+		return setup_ec2(out.driver, error);
+	return setup_docker(out.driver, error);
+}
+
 ObjectStoreStack make_object_store(
-		const HostedSetup &setup, const ServerConfig &config, std::string &error) {
+		const HostedPolicy &setup, const ServerConfig &config, std::string &error) {
 	ObjectStoreStack s;
 	if (!setup.store_ok) {
 		error = "no object store (ONNET_OBJECT_STORE_URL)";
@@ -311,7 +322,7 @@ MailStack make_mail(const ServerConfig &config) {
 }
 
 std::vector<jobs::PeriodicJob> worker_schedule(
-		const ServerConfig &config, const HostedSetup &hosting) {
+		const ServerConfig &config, const HostedPolicy &hosting) {
 	jobs::MaintenanceConfig maintenance;
 	maintenance.sweep_interval_ms = static_cast<int64_t>(config.host_sweep_interval_ms);
 	maintenance.host_stale_window_ms = static_cast<int64_t>(config.host_stale_window_ms);
@@ -335,7 +346,7 @@ std::vector<jobs::PeriodicJob> worker_schedule(
 	return out;
 }
 
-std::vector<jobs::PeriodicJob> data_schedule(const HostedSetup &hosting) {
+std::vector<jobs::PeriodicJob> data_schedule(const HostedPolicy &hosting) {
 	// The data sets' prune of the trees nothing needs, while there is a store.
 	if (!hosting.store_ok)
 		return {};
@@ -343,7 +354,7 @@ std::vector<jobs::PeriodicJob> data_schedule(const HostedSetup &hosting) {
 }
 
 std::vector<jobs::PeriodicJob> periodic_jobs(
-		const ServerConfig &config, const HostedSetup &hosting) {
+		const ServerConfig &config, const HostedPolicy &hosting) {
 	std::vector<jobs::PeriodicJob> out = worker_schedule(config, hosting);
 	for (jobs::PeriodicJob &p : data_schedule(hosting))
 		out.push_back(std::move(p));

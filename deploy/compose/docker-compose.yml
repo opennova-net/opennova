@@ -64,10 +64,8 @@ x-novaworld-env: &novaworld-env
   ONNET_HTTP_PORT: ${ONNET_HTTP_PORT:-}
   ONNET_HEALTH_PORT: ${ONNET_HEALTH_PORT:-}
   # Web's address as the gate and the lobby announce it (the startup URL, the
-  # web domain, HOST_URL, GSB_SERVER), and the fleet's internal listener
-  # as the machines' hostd and the other programs reach it.
+  # web domain, HOST_URL, GSB_SERVER).
   ONNET_WEB_HOST: ${ONNET_WEB_HOST:-}
-  ONNET_INTERNAL_URL: ${ONNET_INTERNAL_URL:-}
   # The database (apps/novaworld_common/README.md "Database"): the libpq
   # URI, the role's password kept apart from it (a secret; the URI is
   # not), and the most connections a program opens.
@@ -93,8 +91,8 @@ x-novaworld-env: &novaworld-env
   ONNET_MAIL_REGION: ${ONNET_MAIL_REGION:-}
   # Hosted game servers: unset, hosting is off. The hosting overlay turns it on
   # with the docker driver (the local stack's machines); a deployment's web,
-  # fleet and worker get the ec2 driver's settings from their task
-  # definitions (infra/aws/fleet.tf).
+  # fleet and worker get the fleet's policy from their task definitions, and
+  # the worker alone the ec2 driver's own settings (infra/aws/fleet.tf).
   ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
   ONNET_HOSTED_CAP: ${ONNET_HOSTED_CAP:-}
   # The game data's store (apps/novaworld_common/object_store.h; ADR 0064):
@@ -194,6 +192,9 @@ services:
       <<: *novaworld-env
       # Job threads (unset: 4; at most DATABASE_POOL_MAX less 2).
       ONNET_WORKER_THREADS: ${ONNET_WORKER_THREADS:-}
+      # The fleet's internal listener as the machines' hostd reach it: what the
+      # machine driver hands each machine it launches.
+      ONNET_INTERNAL_URL: ${ONNET_INTERNAL_URL:-}
 
   novaworld-data:
     <<: *novaworld

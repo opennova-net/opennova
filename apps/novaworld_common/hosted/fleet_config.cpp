@@ -137,16 +137,6 @@ bool parse_fleet_config(const EnvLookup &env, FleetConfig &out, std::vector<std:
 		}
 	}
 
-	if (const auto url = env("ONNET_INTERNAL_URL")) {
-		const std::string text = strutil::trim(*url);
-		std::string host;
-		uint16_t port = 0;
-		if (Ec2MachineDriver::parse_service_url(text, host, port))
-			out.internal_url = text;
-		else
-			errors.push_back("ONNET_INTERNAL_URL is no http://<host>:<port>");
-	}
-
 	std::vector<Ipv4Cidr> cidrs;
 	bool cidrs_read = true;
 	if (const auto list = env("ONNET_HOSTED_BOOTSTRAP_CIDRS")) {
@@ -187,6 +177,25 @@ bool parse_fleet_config(const EnvLookup &env, FleetConfig &out, std::vector<std:
 			errors.push_back("ONNET_FLEET_SLOT_CPUS is no decimal above 0 and at most 64");
 	}
 
+	read.text("ONNET_HOSTED_SERVE_IMAGE", out.serve_image);
+	return errors.size() == errors_before;
+}
+
+bool parse_driver_config(const EnvLookup &env, const FleetConfig &fleet, DriverConfig &out,
+		std::vector<std::string> &errors) {
+	const size_t errors_before = errors.size();
+	Reader read{ env, errors };
+
+	if (const auto url = env("ONNET_INTERNAL_URL")) {
+		const std::string text = strutil::trim(*url);
+		std::string host;
+		uint16_t port = 0;
+		if (Ec2MachineDriver::parse_service_url(text, host, port))
+			out.internal_url = text;
+		else
+			errors.push_back("ONNET_INTERNAL_URL is no http://<host>:<port>");
+	}
+
 	Ec2MachineConfig &ec2 = out.ec2;
 	if (const auto templates = env("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES")) {
 		std::string why;
@@ -198,21 +207,21 @@ bool parse_fleet_config(const EnvLookup &env, FleetConfig &out, std::vector<std:
 	if (const auto subnets = env("ONNET_HOSTED_EC2_SUBNETS"))
 		ec2.subnets = split_list(*subnets);
 	read.text("ONNET_HOSTED_DEPLOYMENT", ec2.deployment);
-	read.text("ONNET_HOSTED_SERVE_IMAGE", ec2.serve_image);
 	read.text("ONNET_HOSTED_HOSTD_IMAGE", ec2.hostd_image);
 	read.text("ONNET_HOSTED_AWS_CLI", ec2.aws_cli);
 	read.text("ONNET_HOSTED_MACHINE_SCRIPT", out.machine_script_path);
+	ec2.serve_image = fleet.serve_image;
 	ec2.service_url = out.internal_url;
-	ec2.admin_address = out.internal_address;
+	ec2.admin_address = fleet.internal_address;
 
 	DockerMachineConfig &docker = out.docker;
 	read.text("ONNET_HOSTED_DOCKER_URL", docker.engine_url);
 	read.text("ONNET_HOSTED_DOCKER_NETWORK", docker.network);
 	read.text("ONNET_HOSTED_DOCKER_DATA_FROM", docker.data_from);
 	docker.deployment = ec2.deployment;
-	docker.image = ec2.serve_image;
+	docker.image = fleet.serve_image;
 	docker.service_url = out.internal_url;
-	docker.admin_address = out.internal_address;
+	docker.admin_address = fleet.internal_address;
 	return errors.size() == errors_before;
 }
 
@@ -223,12 +232,6 @@ EnvLookup process_env() {
 			return std::nullopt;
 		return std::string(value);
 	};
-}
-
-FleetConfig fleet_config_from_env(std::vector<std::string> &errors) {
-	FleetConfig config;
-	parse_fleet_config(process_env(), config, errors);
-	return config;
 }
 
 bool load_machine_script(const std::string &path, std::string &out, std::string &error) {

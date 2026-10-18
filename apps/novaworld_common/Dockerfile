@@ -14,9 +14,8 @@
 # container health check, and the image's HEALTHCHECK, ask GET /livez) and the
 # shell tools ECS Exec sessions use (sh, base64, tr, sed, head, mktemp). Beyond
 # that base: web hiredis (the one program that links it) and the retail pages
-# (templates, static); web, the fleet and the
-# worker the machine script (every program that decides whether hosting is on
-# checks it; the worker renders it); the lobby (its own public address, from
+# (templates, static); the worker the machine script (its machine driver alone
+# renders it); the lobby (its own public address, from
 # EC2), web (the game data's store: the admin page's uploads, the update
 # service's packages), the worker (the fleet's machines, the outbound mail) and
 # data (the store: the trees it builds, the packages it reads) the AWS CLI v2. No image keeps state: the database is
@@ -213,11 +212,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends libhiredis1.1.0
 COPY --from=build /src/build/apps/novaworld_web/opennova-novaworld-web /app/
 COPY --from=build /src/apps/novaworld_web/templates /app/templates
 COPY --from=build /src/apps/novaworld_web/static /app/static
-COPY --from=build /src/apps/novaworld_common/hosted/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
 RUN ! ldd /app/opennova-novaworld-web | grep -q 'not found'
 ENV TEMPLATES_DIR=/app/templates \
     STATIC_DIR=/app/static \
-    ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh \
     ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
 USER 10002
 EXPOSE 8080/tcp 20044/tcp 20556/tcp 21068/tcp 21580/tcp
@@ -230,9 +227,7 @@ ENTRYPOINT ["/app/opennova-novaworld-web"]
 # ---- fleet -----------------------------------------------------------------
 FROM runtime AS fleet
 COPY --from=build /src/build/apps/novaworld_fleet/opennova-novaworld-fleet /app/
-COPY --from=build /src/apps/novaworld_common/hosted/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
 RUN ! ldd /app/opennova-novaworld-fleet | grep -q 'not found'
-ENV ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh
 USER 10002
 EXPOSE 8070/tcp 8081/tcp
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \

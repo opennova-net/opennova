@@ -289,33 +289,43 @@ and its last hour. The agents report what each slot sends, not what it receives.
 
 ## Settings
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `ONNET_HOSTED_PROVIDER` | `none` | The machine driver: `ec2`, `docker` (the local stack's) or `none`. Any other value, fleet settings or data sets that do not read, or a driver missing one of its settings (or with a loopback `ONNET_PUBLIC_HOST`) is `none` with a boot warning naming why. |
-| `ONNET_HOSTED_CAP` | 24 | The most hosted servers live at once, across every account: a backstop beside the fleet's room. |
-| `ONNET_OBJECT_STORE_URL` | none | The object store of the data sets' trees and the update packages (`../object_store.h`, ADR 0064): `s3://<bucket>/data` (the deployment's ops bucket, through the program's role) or `file:///<dir>` (a developer's machine, the tests). Required for hosting; read by web, the data program, the worker and the fleet program whether or not hosting is on. |
-| `ONNET_OBJECT_STORE_REGION` | none | The S3 store's region (required with an `s3://` URL). |
-| `ONNET_INTERNAL_HTTP_BIND` | `127.0.0.1:8070` | The fleet's internal listener, `<IPv4>:<port>`, a private or loopback address: unset in a deployment, where the fleet program binds its task's private address at 8070. With `ec2`, a fleet program whose bind is not private does not boot. |
-| `ONNET_INTERNAL_URL` | none | The internal listener as the machines reach it, `http://<host>:<port>` (a deployment's Cloud Map name; the fleet's compose name locally). Required by both drivers. |
-| `ONNET_HOSTED_BOOTSTRAP_CIDRS` | none | Comma-separated private IPv4 CIDRs the agent routes answer (the machines' subnet); 127.0.0.0/8 is admitted besides on a loopback bind. |
-| `ONNET_FLEET_SHARED_SLOTS` | 12 | A new shared machine's slots (1..32). |
-| `ONNET_FLEET_MAX_SHARED` | 2 | The most shared machines taking servers at once. |
-| `ONNET_FLEET_MAX_OWN` | 2 | The most own machines taking servers at once. |
-| `ONNET_FLEET_IDLE_MINUTES` | 30 | How long a shared machine with no server lives on before it ends. |
-| `ONNET_FLEET_SLOT_MEMORY_MB` | 512 | Each container's memory (no swap). |
-| `ONNET_FLEET_SLOT_CPUS` | 1 | Each container's CPUs (a decimal). |
-| `ONNET_HOSTED_SERVE_IMAGE` | none | The serve image every start pins and the machines pull (pinned by digest at deploy); for `docker`, the image every machine container runs. |
-| `ONNET_HOSTED_HOSTD_IMAGE` | the serve image | `ec2`: the image `opennova-hostd` is copied out of. |
-| `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | `ec2`: the launch templates by kind, `{"shared": "lt-...", "own": "lt-..."}` (`lt-<id>` or `lt-<id>:<version>`). |
-| `ONNET_HOSTED_EC2_REGION` | none | `ec2`: the region every AWS CLI call names. |
-| `ONNET_HOSTED_EC2_LOG_GROUP` | none | `ec2`: the machines' CloudWatch log group (`apps/hostd/README.md`, "Logs"); required. |
-| `ONNET_HOSTED_EC2_SUBNETS` | none | `ec2`: the subnets machines launch into, one per zone, each giving a public IPv4; a launch takes the one with fewer live machines and, when that zone cannot take it, the next. |
-| `ONNET_HOSTED_DEPLOYMENT` | none | The deployment tag (`ec2`) or label (`docker`) every machine carries and every describe, list and terminate is scoped to, so two stacks in one account or one Docker never touch each other's machines. |
-| `ONNET_HOSTED_AWS_CLI` | `/usr/local/bin/aws` | The AWS CLI v2, an absolute path (no `PATH` search): the `ec2` driver's, the S3 object store's and the mailer's SES calls. |
-| `ONNET_HOSTED_DOCKER_URL` | none | `docker`: the Docker Engine API, `http://<host>:<port>` (the local stack's socket proxy). |
-| `ONNET_HOSTED_DOCKER_NETWORK` | none | `docker`: the network every machine joins. |
-| `ONNET_HOSTED_DOCKER_DATA_FROM` | none | `docker`: the container whose mounts every machine takes, read-only. |
-| `ONNET_HOSTED_MACHINE_SCRIPT` | `/app/hosted/machine_user_data.sh` | `ec2`: the user-data template; a run outside the image names it. |
+Two sets (`fleet_config.h`; `../parts.h` `hosted_policy`, `driver_setup`). The fleet's
+**policy**, which web, the fleet program and the worker read alike, so each decides alike
+whether hosting is on: the provider, the store, placement, the slots' limits, the cap, the
+serve image and the fleet's internal listener. The **driver's** own settings, which the
+worker alone reads (it alone launches machines): with hosting on, a driver whose settings do
+not read or are incomplete is the worker's boot FATAL (exit 1), never hosting off, while web
+and the fleet take starts on the policy. Web, the fleet and the data program never read the
+driver's settings, and only the worker's image carries the machine script. The data program
+reads the store alone.
+
+| Setting | Default | Read by | Meaning |
+| --- | --- | --- | --- |
+| `ONNET_HOSTED_PROVIDER` | `none` | web, fleet, worker | The machine driver: `ec2`, `docker` (the local stack's) or `none`. Any other value, fleet settings or a store that do not read, a serve image that is no image reference, or a loopback `ONNET_PUBLIC_HOST` is `none` with a boot warning naming why. |
+| `ONNET_HOSTED_CAP` | 24 | web, fleet, worker | The most hosted servers live at once, across every account: a backstop beside the fleet's room. |
+| `ONNET_OBJECT_STORE_URL` | none | web, fleet, worker, data | The object store of the data sets' trees and the update packages (`../object_store.h`, ADR 0064): `s3://<bucket>/data` (the deployment's ops bucket, through the program's role) or `file:///<dir>` (a developer's machine, the tests). Required for hosting; read whether or not hosting is on. |
+| `ONNET_OBJECT_STORE_REGION` | none | web, fleet, worker, data | The S3 store's region (required with an `s3://` URL). |
+| `ONNET_INTERNAL_HTTP_BIND` | `127.0.0.1:8070` | fleet (web, worker: the policy's default) | The fleet's internal listener, `<IPv4>:<port>`, a private or loopback address: unset in a deployment, where the fleet program binds its task's private address at 8070. With `ec2`, a fleet program whose bind is not private does not boot. |
+| `ONNET_HOSTED_BOOTSTRAP_CIDRS` | none | fleet | Comma-separated private IPv4 CIDRs the agent routes answer (the machines' subnet); 127.0.0.0/8 is admitted besides on a loopback bind. |
+| `ONNET_FLEET_SHARED_SLOTS` | 12 | web, fleet, worker | A new shared machine's slots (1..32). |
+| `ONNET_FLEET_MAX_SHARED` | 2 | web, fleet, worker | The most shared machines taking servers at once (the worker's launch refuses a machine past it). |
+| `ONNET_FLEET_MAX_OWN` | 2 | web, fleet, worker | The most own machines taking servers at once (the same). |
+| `ONNET_FLEET_IDLE_MINUTES` | 30 | web, fleet, worker | How long a shared machine with no server lives on before it ends. |
+| `ONNET_FLEET_SLOT_MEMORY_MB` | 512 | web, fleet, worker | Each container's memory (no swap). |
+| `ONNET_FLEET_SLOT_CPUS` | 1 | web, fleet, worker | Each container's CPUs (a decimal). |
+| `ONNET_HOSTED_SERVE_IMAGE` | none | web, fleet, worker | The serve image every start pins and the machines pull (pinned by digest at deploy); for `docker`, the image every machine container runs. |
+| `ONNET_INTERNAL_URL` | none | worker | The fleet's internal listener as the machines reach it, `http://<host>:<port>` (a deployment's Cloud Map name, `fleet.<deployment>.opennova.internal:8070`; the fleet's compose name locally): what a launch hands its machine. Required by both drivers. |
+| `ONNET_HOSTED_DEPLOYMENT` | none | worker | The deployment tag (`ec2`) or label (`docker`) every machine carries and every describe, list and terminate is scoped to, so two stacks in one account or one Docker never touch each other's machines. |
+| `ONNET_HOSTED_HOSTD_IMAGE` | the serve image | worker | `ec2`: the image `opennova-hostd` is copied out of. |
+| `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | worker | `ec2`: the launch templates by kind, `{"shared": "lt-...", "own": "lt-..."}` (`lt-<id>` or `lt-<id>:<version>`). |
+| `ONNET_HOSTED_EC2_REGION` | none | worker | `ec2`: the region every AWS CLI call names. |
+| `ONNET_HOSTED_EC2_LOG_GROUP` | none | worker | `ec2`: the machines' CloudWatch log group (`apps/hostd/README.md`, "Logs"); required. |
+| `ONNET_HOSTED_EC2_SUBNETS` | none | worker | `ec2`: the subnets machines launch into, one per zone, each giving a public IPv4; a launch takes the one with fewer live machines and, when that zone cannot take it, the next. |
+| `ONNET_HOSTED_AWS_CLI` | `/usr/local/bin/aws` | web, worker, data | The AWS CLI v2, an absolute path (no `PATH` search): the `ec2` driver's, the S3 object store's and the mailer's SES calls. |
+| `ONNET_HOSTED_DOCKER_URL` | none | worker | `docker`: the Docker Engine API, `http://<host>:<port>` (the local stack's socket proxy). |
+| `ONNET_HOSTED_DOCKER_NETWORK` | none | worker | `docker`: the network every machine joins. |
+| `ONNET_HOSTED_DOCKER_DATA_FROM` | none | worker | `docker`: the container whose mounts every machine takes, read-only. |
+| `ONNET_HOSTED_MACHINE_SCRIPT` | `/app/hosted/machine_user_data.sh` | worker | `ec2`: the user-data template, in the worker's image alone; a run outside the image names it. |
 
 The deploy toolbox sets every `ec2` setting from the Terraform outputs (DEPLOY.md,
 "Hosted game servers"); nobody copies an id by hand.
