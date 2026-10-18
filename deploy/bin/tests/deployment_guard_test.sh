@@ -2,13 +2,14 @@
 # The toolbox's deployment guard (deploy/bin/on-deploy; DEPLOY.md,
 # "Deployments: dev, staging and prod"), offline: a command that changes a
 # deployment acts only on the one --deployment names, a read-only one reads
-# prod unless told otherwise, the zone's and the organization's commands take
-# none, prod's changes ask for the typed word, data and images cross
-# between the deployments in their one direction alone, a deploy never takes
-# `app down`'s zero counts for a first release, and the org stack's first run
-# moves its state before the vault learns of the bucket. It sources on-deploy
-# (which then runs nothing) and stubs every command group, the vault and AWS,
-# so nothing is read or changed anywhere. It needs bash and jq;
+# prod unless told otherwise, the zone's, the organization's and the CI
+# runners' commands take none, prod's changes ask for the typed word, data and
+# images cross between the deployments in their one direction alone, a deploy
+# never takes `app down`'s zero counts for a first release, and the org
+# stack's first run moves its state before the vault learns of the bucket. It
+# sources on-deploy (which then runs nothing) and stubs every command group,
+# the vault and AWS, so nothing is read or changed anywhere. It needs bash and
+# jq;
 # .github/workflows/infra.yml runs it:
 #   bash deploy/bin/tests/deployment_guard_test.sh
 # pass and fail never fail, so `cond && pass || fail` is the if-then-else it reads as.
@@ -29,7 +30,7 @@ set +e
 trap 'rm -rf "$scratch"' EXIT
 
 # Every command group answers with the deployment it was handed.
-for group in secrets stripe infra org zone github aws app db backup fleet; do
+for group in secrets stripe infra org zone github ci aws app db backup fleet; do
   eval "cmd_$group() { echo \"ran DEP=\${DEP:-none} DEFAULTED=\$DEP_DEFAULTED\"; }"
 done
 
@@ -93,13 +94,15 @@ expect_run "--deployment staging app status" "ran DEP=staging DEFAULTED=0" --dep
 banner_out="$( (set_deployment prod; DEP_DEFAULTED=1; banner "app status") 2>&1)"
 if [[ "$banner_out" == *"prod"*"the default for a read-only command"* ]]; then pass "the banner names the defaulted deployment"; else fail "banner: $banner_out"; fi
 
-echo "--- the zone's and the organization's take no deployment"
+echo "--- the zone's, the organization's and the CI runners' take no deployment"
 expect_run "zone plan" "ran DEP=none DEFAULTED=0" zone plan
 expect_run "github apply" "ran DEP=none DEFAULTED=0" github apply
 expect_refused "--deployment prod zone apply" "no deployment's" --deployment prod zone apply
 expect_refused "--deployment staging github plan" "no deployment's" --deployment staging github plan
 expect_run "org apply" "ran DEP=none DEFAULTED=0" org apply
 expect_refused "--deployment prod org apply" "no deployment's" --deployment prod org apply
+expect_run "ci apply" "ran DEP=none DEFAULTED=0" ci apply
+expect_refused "--deployment prod ci apply" "no deployment's" --deployment prod ci apply
 expect_refused "the old vault state commands are gone" "unknown command" state pull github
 
 echo "--- prod's changes ask for the typed word"

@@ -8,7 +8,7 @@
 # console, in the stack's region (DEPLOY.md, "The Organization and the accounts"); this stack reads
 # it and makes two permission sets (administrator, 4-hour sessions; read only),
 # one user (the maintainer: name and address from the vault), and both sets
-# assigned to that user in both member accounts. No groups, no service control
+# assigned to that user in every member account. No groups, no service control
 # policies.
 
 data "aws_ssoadmin_instances" "org" {}

@@ -2,8 +2,9 @@
 # providers: offline, no credentials, nothing reaches AWS. From the repo root:
 #   docker run --rm -v "$PWD:/w" -w /w/infra/org hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/org hashicorp/terraform:<the toolbox's> test
-# The organization and both accounts adopted as they are (every feature, never
-# closed); per member account, through its own provider: the state bucket
+# The organization and its three accounts adopted as they are (every feature,
+# never closed; ci, the CI runners' account, with no baseline here: infra/ci);
+# per deployment account, through its own provider: the state bucket
 # named after the account, versioned, encrypted, private, TLS only and reached
 # by its deploy user, its administrator role and its root alone; the deploy
 # user with the six policies (each under IAM's 6,144 characters, naming its own
@@ -13,7 +14,7 @@
 # under the boundary, naming its own deployment's resources alone. And
 # opennova-org's own policy: Organizations, Identity Center and the member
 # accounts' administrator roles, nothing else. Identity Center: two permission
-# sets, the maintainer, both sets in both accounts, and no group.
+# sets, the maintainer, both sets in every member account, and no group.
 
 mock_provider "aws" {
   override_during = plan
@@ -97,6 +98,11 @@ override_resource {
   override_during = plan
   values          = { id = "222222222222" }
 }
+override_resource {
+  target          = aws_organizations_account.member["ci"]
+  override_during = plan
+  values          = { id = "444444444444" }
+}
 
 variables {
   region                 = "us-east-1"
@@ -104,10 +110,13 @@ variables {
   management_account_id  = "999999999999"
   aws_account_id_prod    = "111111111111"
   aws_account_id_staging = "222222222222"
+  aws_account_id_ci      = "444444444444"
   account_name_prod      = "opennova-prod"
   account_name_staging   = "opennova-staging"
+  account_name_ci        = "opennova-ci"
   root_email_prod        = "aws-prod@example.com"
   root_email_staging     = "aws-staging@example.com"
+  root_email_ci          = "aws-ci@example.com"
   sso_given_name         = "Mock"
   sso_family_name        = "Maintainer"
   sso_email              = "maintainer@mail.example.org"
@@ -125,7 +134,9 @@ run "organization_and_accounts" {
       aws_organizations_account.member["prod"].name == "opennova-prod" &&
       aws_organizations_account.member["prod"].email == "aws-prod@example.com" &&
       aws_organizations_account.member["staging"].name == "opennova-staging" &&
-      aws_organizations_account.member["staging"].email == "aws-staging@example.com"
+      aws_organizations_account.member["staging"].email == "aws-staging@example.com" &&
+      aws_organizations_account.member["ci"].name == "opennova-ci" &&
+      aws_organizations_account.member["ci"].email == "aws-ci@example.com"
     )
     error_message = "each account carries the vault's name and root address"
   }
@@ -134,8 +145,12 @@ run "organization_and_accounts" {
     error_message = "an account leaving the stack is never closed"
   }
   assert {
-    condition     = aws_organizations_account.member["prod"].tags["opennova:deployment"] == "opennova-prod" && aws_organizations_account.member["staging"].tags["opennova:deployment"] == "opennova-staging"
+    condition     = aws_organizations_account.member["prod"].tags["opennova:deployment"] == "opennova-prod" && aws_organizations_account.member["staging"].tags["opennova:deployment"] == "opennova-staging" && aws_organizations_account.member["ci"].tags["opennova:deployment"] == "opennova-ci"
     error_message = "each account is tagged with its deployment"
+  }
+  assert {
+    condition     = toset(keys(output.deployments)) == toset(["prod", "staging"])
+    error_message = "the ci account holds no deployment: no state bucket, deploy user or deploy role of its own"
   }
   assert {
     condition     = output.deployments.prod.account_id == "111111111111" && output.deployments.staging.account_id == "222222222222"
@@ -352,6 +367,7 @@ run "org_user_policy" {
     condition = one([for s in jsondecode(output.org_user_policy).Statement : s.Resource if s.Sid == "MemberAccountAdministrators"]) == [
       "arn:aws:iam::111111111111:role/OrganizationAccountAccessRole",
       "arn:aws:iam::222222222222:role/OrganizationAccountAccessRole",
+      "arn:aws:iam::444444444444:role/OrganizationAccountAccessRole",
     ]
     error_message = "opennova-org assumes the member accounts' OrganizationAccountAccessRole alone"
   }
@@ -387,12 +403,13 @@ run "identity_center" {
   }
   assert {
     condition = (
-      toset(keys(aws_ssoadmin_account_assignment.maintainer)) == toset(["admin/prod", "admin/staging", "readonly/prod", "readonly/staging"]) &&
+      toset(keys(aws_ssoadmin_account_assignment.maintainer)) == toset(["admin/prod", "admin/staging", "admin/ci", "readonly/prod", "readonly/staging", "readonly/ci"]) &&
       alltrue([for a in aws_ssoadmin_account_assignment.maintainer : a.principal_type == "USER" && a.target_type == "AWS_ACCOUNT" && a.principal_id == "90670000-0000-0000-0000-000000000000"]) &&
       aws_ssoadmin_account_assignment.maintainer["admin/prod"].target_id == "111111111111" &&
-      aws_ssoadmin_account_assignment.maintainer["readonly/staging"].target_id == "222222222222"
+      aws_ssoadmin_account_assignment.maintainer["readonly/staging"].target_id == "222222222222" &&
+      aws_ssoadmin_account_assignment.maintainer["admin/ci"].target_id == "444444444444"
     )
-    error_message = "both sets are the maintainer's in both member accounts, assigned to the user (no group)"
+    error_message = "both sets are the maintainer's in every member account, assigned to the user (no group)"
   }
   assert {
     condition     = output.sso_portal_url == "https://d-0123456789.awsapps.com/start"

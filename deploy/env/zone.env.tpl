@@ -3,7 +3,7 @@
 # webhook's rule, Email Routing). One stack for the whole zone, so it reads
 # every deployment's edge secret: prod's from app-prod, staging's from
 # app-staging (`secrets init` makes each). Email Routing forwards support@
-# and the member accounts' root addresses (aws-prod@, aws-staging@) to
+# and the member accounts' root addresses (aws-prod@, aws-staging@, aws-ci@) to
 # email/forward_to. The toolbox resolves them from its run's
 # cache of the vault (each item read once per run; on-deploy, "The vault");
 # the values reach terraform's environment alone. The

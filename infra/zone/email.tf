@@ -3,8 +3,8 @@
 # ---------------------------------------------------------------------------
 #
 # Mail to each local part var.email_routes names, support@<domain> and the
-# deployment accounts' root addresses aws-prod@<domain> and aws-staging@<domain>,
-# forwards to one mailbox, var.email_forward_to (from the vault: item email,
+# member accounts' root addresses aws-prod@<domain>, aws-staging@<domain> and
+# aws-ci@<domain>, forwards to one mailbox, var.email_forward_to (from the vault: item email,
 # field forward_to). Turning Email Routing on makes Cloudflare add and lock the
 # zone's MX and SPF records; the destination receives a verification email
 # from Cloudflare, and nothing is forwarded until its link is clicked.

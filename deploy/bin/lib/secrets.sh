@@ -146,6 +146,12 @@ secrets_init() {
     account_id:value:REPLACE_ME:STRING organization_id:value:REPLACE_ME:STRING \
     region:value:us-east-1:STRING sso_given_name:value:REPLACE_ME:STRING \
     sso_family_name:value:REPLACE_ME:STRING sso_email:value:REPLACE_ME:STRING
+  # The CI runners' account (infra/ci): its id and its root user's address
+  # (filled in by hand once the account is made), its name and region. It has
+  # no deploy user and no state bucket: the ci stack runs as opennova-org.
+  ensure_item aws-ci SECURE_NOTE \
+    account_id:value:REPLACE_ME:STRING account_name:value:opennova-ci:STRING \
+    region:value:us-east-1:STRING root_email:value:REPLACE_ME:STRING
   # Shared on purpose: where the alarms write, where support@<domain> forwards
   # (infra/zone; REPLACE_ME keeps email routing off), and Stripe's two modes.
   ensure_item alerts SECURE_NOTE \

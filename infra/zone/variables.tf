@@ -77,9 +77,9 @@ variable "email_forward_to" {
 }
 
 variable "email_routes" {
-  description = "The domain's local parts that forward to email_forward_to: support@<domain>, and aws-prod@ and aws-staging@, the deployment accounts' root addresses (AWS mails each account's root user there: billing, security, recovery). Lowercase; every other address is refused."
+  description = "The domain's local parts that forward to email_forward_to: support@<domain>, and aws-prod@, aws-staging@ and aws-ci@, the member accounts' root addresses (AWS mails each account's root user there: billing, security, recovery). Lowercase; every other address is refused."
   type        = list(string)
-  default     = ["support", "aws-prod", "aws-staging"]
+  default     = ["support", "aws-prod", "aws-staging", "aws-ci"]
 
   validation {
     condition     = alltrue([for l in var.email_routes : can(regex("^[a-z0-9]([a-z0-9._+-]{0,62}[a-z0-9])?$", l))])
