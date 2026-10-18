@@ -26,15 +26,12 @@
 
 #include <cmath>
 #include <cstring>
-#include <unordered_map>
 #include <vector>
 
 #include <runtime/replication/client_state.h> // minimap_team_argb (the ONE palette home)
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
 #include <runtime/world/zone_chain.h> // zone_chain_zone_info_byte
 #include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
-#include <runtime/world/minimap_footprint.h> // the OOBJ occlusion ground-slice footprint mesh
-#include <runtime/world/minimap_overlay.h>   // classifier + the blip draw policy
 #include <runtime/renderer/tracer_frame.h> // the styled tracer-ribbon compile
 #include <runtime/world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/present_drains.h> // the present-pass row fills (ADR 0040 ladder E0)
@@ -217,56 +214,15 @@ PackedInt32Array Simulation::get_hud_radar() const {
 }
 
 PackedInt32Array Simulation::get_hud_minimap_footprints() const {
-	// Static footprint polygons for every visible footprint-class entity:
-	// the OOBJ occlusion ground-slice mesh transformed by the entity pose, in
-	// the witnessed fill colors and the overlay ctx alpha (witness at
-	// world::minimap_footprint_fill_argb) with the occlusion ground-slice
-	// mesh placed by the entity pose (world::minimap_footprint_place).
+	// The engine gathers the footprints (inmatch::build_minimap_footprints) and
+	// owns the feed's layout (hud::minimap_footprint_feed_encode).
+	std::vector<opennova::hud::HudMinimapFootprint> footprints;
+	if (kernel_) opennova::inmatch::build_minimap_footprints(kernel_->world, kernel_->occlusion, footprints);
+	std::vector<int32_t> feed;
+	opennova::hud::minimap_footprint_feed_encode(footprints, feed);
 	PackedInt32Array out;
-	out.push_back(1); // feed version
-	out.push_back(0); // row count, patched below
-	if (!kernel_) return out;
-	int count = 0;
-	std::unordered_map<int32_t, opennova::world::MinimapFootprintMesh> meshes;
-	kernel_->world.registry.for_each([&](const opennova::world::Entity &entity) {
-		if (!opennova::world::minimap_overlay_entity_enabled(entity)) return;
-		const opennova::world::MinimapOverlayClassification row =
-				opennova::world::classify_minimap_overlay(entity, &kernel_->world);
-		if (!row.visible) return;
-		const opennova::world::MinimapBlipDrawPolicy policy =
-				opennova::world::minimap_blip_draw_policy(entity, row.icon, -1); // the footprint alone
-		if (!policy.footprint) return;
-		const int32_t model_id = kernel_->occlusion.instance_model_id(
-				entity.handle);
-		if (model_id < 0) return;
-		auto mesh_it = meshes.find(model_id);
-		if (mesh_it == meshes.end()) {
-			const opennova::world::OcclusionModel *model =
-					kernel_->occlusion.model(model_id);
-			if (model == nullptr) return;
-			mesh_it = meshes.emplace(model_id,
-					opennova::world::minimap_footprint_from_occlusion(
-							*model)).first;
-		}
-		const opennova::world::MinimapFootprintMesh &mesh = mesh_it->second;
-		if (mesh.empty()) return;
-		// Color + placement live engine-side (world::minimap_footprint_*):
-		// the same yaw-degree -> BAM placement matrix the collision instance
-		// uses, so footprint, model, and shell agree.
-		std::vector<int32_t> fill_xy;
-		std::vector<int32_t> edge_xy;
-		opennova::world::minimap_footprint_place(mesh, entity, fill_xy,
-				edge_xy);
-		out.push_back(entity.handle.packed);
-		out.push_back(static_cast<int32_t>(
-				opennova::world::minimap_footprint_fill_argb(entity)));
-		out.push_back(static_cast<int32_t>(fill_xy.size()));
-		for (const int32_t value : fill_xy) out.push_back(value);
-		out.push_back(static_cast<int32_t>(edge_xy.size()));
-		for (const int32_t value : edge_xy) out.push_back(value);
-		++count;
-	});
-	out.set(1, count);
+	out.resize(static_cast<int64_t>(feed.size()));
+	std::copy(feed.begin(), feed.end(), out.ptrw());
 	return out;
 }
 

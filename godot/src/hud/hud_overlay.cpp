@@ -70,8 +70,6 @@ using opennova::hud::HudLayout;
 using opennova::hud::HudPosRecord;
 using opennova::hud::HudRectRecord;
 
-constexpr int kMinimapFootprintFeedVersion = 1;
-
 constexpr const char *kMinimapWaterShader = R"(
 shader_type canvas_item;
 render_mode unshaded, blend_mix;
@@ -1667,36 +1665,10 @@ int HudOverlay::get_radar_frame_gates() const {
 }
 
 void HudOverlay::set_minimap_footprints(const PackedInt32Array &p_feed) {
-	// {version, count} then per row {handle, fill_argb, fill_value_count,
-	// xy..., edge_value_count, xy...} — mission 16.16 world space, baked
+	// The engine's footprint feed (hud::minimap_footprint_feed_decode), baked
 	// once per mission by the sim feed.
-	state_.map_footprints.clear();
-	if (p_feed.size() < 2 || p_feed[0] != kMinimapFootprintFeedVersion) {
-		queue_redraw();
-		return;
-	}
-	const int64_t total = p_feed.size();
-	int64_t cursor = 2;
-	const int32_t rows = p_feed[1];
-	for (int32_t row = 0; row < rows; ++row) {
-		if (cursor + 3 > total) break;
-		opennova::hud::HudMinimapFootprint footprint;
-		footprint.handle = static_cast<uint16_t>(p_feed[cursor++]);
-		footprint.fill_argb = static_cast<uint32_t>(p_feed[cursor++]);
-		const int32_t fill_values = p_feed[cursor++];
-		if (fill_values < 0 || cursor + fill_values > total) break;
-		footprint.fill_xy_q16.reserve(static_cast<size_t>(fill_values));
-		for (int32_t i = 0; i < fill_values; ++i)
-			footprint.fill_xy_q16.push_back(p_feed[cursor++]);
-		if (cursor + 1 > total) break;
-		const int32_t edge_values = p_feed[cursor++];
-		if (edge_values < 0 || cursor + edge_values > total) break;
-		footprint.edge_xy_q16.reserve(static_cast<size_t>(edge_values));
-		for (int32_t i = 0; i < edge_values; ++i)
-			footprint.edge_xy_q16.push_back(p_feed[cursor++]);
-		opennova::hud::hud_minimap_finalize_footprint(footprint);
-		state_.map_footprints.push_back(std::move(footprint));
-	}
+	opennova::hud::minimap_footprint_feed_decode(p_feed.ptr(), static_cast<size_t>(p_feed.size()),
+			state_.map_footprints);
 	queue_redraw();
 }
 

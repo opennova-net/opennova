@@ -19,6 +19,7 @@
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/replication/client_state.h>
+#include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
 
 namespace opennova::inmatch {
@@ -44,5 +45,15 @@ struct MinimapOverlayInputs {
 
 // Fills `out` (replaced).
 void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverlays &out);
+
+// The footprint polygons of every visible footprint-class entity, in registry order: an entity
+// the overlay classifier admits whose draw policy is the footprint (a building whose model
+// carries the occlusion block), its OOBJ ground-slice mesh placed by its pose in its fill colour
+// (world::minimap_footprint_from_occlusion, minimap_footprint_place, minimap_footprint_fill_argb;
+// each occlusion model's mesh built once). `out` is replaced.
+// [orig: Minimap_DrawBlip's Building leg @0x597a84..0x597b2d -> Render_CollisionWireframe
+//  @0x596800]
+void build_minimap_footprints(const world::World &world, const world::OcclusionWorld &occlusion,
+		std::vector<hud::HudMinimapFootprint> &out);
 
 } // namespace opennova::inmatch

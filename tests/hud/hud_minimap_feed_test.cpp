@@ -179,12 +179,42 @@ void test_a_wider_stride_skips_the_extra_columns() {
 
 } // namespace
 
+// The footprint feed's layout is the engine's (C-492): an exact round trip, each
+// row finalized; a foreign header draws none; a short row ends the walk.
+void test_footprint_feed_round_trip() {
+    std::vector<HudMinimapFootprint> in(2);
+    in[0].handle = 0x2042;
+    in[0].fill_argb = 0xFF60A060u;
+    in[0].fill_xy_q16 = {20 << 16, -(4 << 16), 24 << 16, -(4 << 16), 22 << 16, 4 << 16};
+    in[0].edge_xy_q16 = {20 << 16, -(4 << 16), 24 << 16, -(4 << 16)};
+    in[1].handle = 7;
+    in[1].fill_argb = 0xFFA0A0A0u;
+    std::vector<int32_t> feed;
+    minimap_footprint_feed_encode(in, feed);
+    CHECK(feed.size() == 2 + (3 + 6 + 1 + 4) + (3 + 0 + 1 + 0));
+    CHECK(feed[0] == kMinimapFootprintFeedVersion && feed[1] == 2);
+    std::vector<HudMinimapFootprint> out;
+    CHECK(minimap_footprint_feed_decode(feed.data(), feed.size(), out));
+    CHECK(out.size() == 2 && out[0].handle == 0x2042 && out[0].fill_argb == 0xFF60A060u &&
+          out[0].fill_xy_q16 == in[0].fill_xy_q16 && out[0].edge_xy_q16 == in[0].edge_xy_q16 &&
+          out[1].handle == 7 && out[1].fill_xy_q16.empty());
+    HudMinimapFootprint finalized = in[0];
+    hud_minimap_finalize_footprint(finalized);
+    CHECK(!out.empty() && out[0].bound_x_q16 == finalized.bound_x_q16 &&
+          out[0].bound_radius_q16 == finalized.bound_radius_q16 && finalized.bound_radius_q16 > 0);
+    std::vector<int32_t> foreign = feed;
+    foreign[0] = kMinimapFootprintFeedVersion + 1;
+    CHECK(!minimap_footprint_feed_decode(foreign.data(), foreign.size(), out) && out.empty());
+    CHECK(minimap_footprint_feed_decode(feed.data(), 2 + 3 + 6, out) && out.empty());
+}
+
 int main() {
     test_round_trip_is_exact();
     test_empty_feed_round_trips_to_no_markers();
     test_foreign_headers_yield_no_markers();
     test_declared_count_is_clamped_to_the_buffer();
     test_a_wider_stride_skips_the_extra_columns();
+    test_footprint_feed_round_trip();
     if (failures == 0) std::printf("hud_minimap_feed_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

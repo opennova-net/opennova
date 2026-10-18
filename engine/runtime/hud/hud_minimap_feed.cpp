@@ -194,4 +194,45 @@ bool radar_feed_decode(const int32_t *data, std::size_t size, HudMinimapRadar &o
     return true;
 }
 
+void minimap_footprint_feed_encode(const std::vector<HudMinimapFootprint> &footprints,
+		std::vector<int32_t> &out) {
+	out.clear();
+	out.push_back(kMinimapFootprintFeedVersion);
+	out.push_back(static_cast<int32_t>(footprints.size()));
+	for (const HudMinimapFootprint &f : footprints) {
+		out.push_back(f.handle);
+		out.push_back(static_cast<int32_t>(f.fill_argb));
+		out.push_back(static_cast<int32_t>(f.fill_xy_q16.size()));
+		out.insert(out.end(), f.fill_xy_q16.begin(), f.fill_xy_q16.end());
+		out.push_back(static_cast<int32_t>(f.edge_xy_q16.size()));
+		out.insert(out.end(), f.edge_xy_q16.begin(), f.edge_xy_q16.end());
+	}
+}
+
+bool minimap_footprint_feed_decode(const int32_t *data, std::size_t size,
+		std::vector<HudMinimapFootprint> &out) {
+	out.clear();
+	if (data == nullptr || size < 2 || data[0] != kMinimapFootprintFeedVersion || data[1] < 0)
+		return false;
+	std::size_t cursor = 2;
+	for (int32_t row = 0; row < data[1]; ++row) {
+		if (cursor + 3 > size) break;
+		HudMinimapFootprint footprint;
+		footprint.handle = static_cast<uint16_t>(data[cursor++]);
+		footprint.fill_argb = static_cast<uint32_t>(data[cursor++]);
+		const int32_t fill_values = data[cursor++];
+		if (fill_values < 0 || cursor + static_cast<std::size_t>(fill_values) > size) break;
+		footprint.fill_xy_q16.assign(data + cursor, data + cursor + fill_values);
+		cursor += static_cast<std::size_t>(fill_values);
+		if (cursor + 1 > size) break;
+		const int32_t edge_values = data[cursor++];
+		if (edge_values < 0 || cursor + static_cast<std::size_t>(edge_values) > size) break;
+		footprint.edge_xy_q16.assign(data + cursor, data + cursor + edge_values);
+		cursor += static_cast<std::size_t>(edge_values);
+		hud_minimap_finalize_footprint(footprint);
+		out.push_back(std::move(footprint));
+	}
+	return true;
+}
+
 } // namespace opennova::hud
