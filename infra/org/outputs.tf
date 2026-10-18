@@ -36,13 +36,15 @@ output "deploy_keys" {
 # opennova-org's own policy (infra/aws/iam/opennova-org.json) filled for this
 # organization, for the management account's administrator to apply by hand
 # (opennova-org cannot change its own permissions): after a new account, an
-# apply prints the policy that names it too.
+# apply prints the policy that names it too. opennova-org also runs infra/ci
+# as the ci account's OrganizationAccountAccessRole.
 output "org_user_policy" {
   value = jsonencode(jsondecode(templatefile("${path.module}/../aws/iam/opennova-org.json", {
     management_account_id = var.management_account_id
     organization_id       = var.organization_id
     prod_account_id       = var.aws_account_id_prod
     staging_account_id    = var.aws_account_id_staging
+    ci_account_id         = var.aws_account_id_ci
   })))
   description = "opennova-org's IAM policy as the administrator applies it"
 }

@@ -6,8 +6,8 @@
 # deployment, each stamping its own secret on its own hostnames alone (prod's
 # never on staging's, staging's never on prod's), and one secret for both
 # refused; Stripe's webhook skipping the WAF on every deployment's site; Email
-# Routing to the destination (support@ and each deployment account's root
-# address, aws-prod@ and aws-staging@), off with a placeholder, refusing a loop.
+# Routing to the destination (support@ and each member account's root
+# address, aws-prod@, aws-staging@ and aws-ci@), off with a placeholder, refusing a loop.
 
 mock_provider "cloudflare" {
   override_during = plan
@@ -126,17 +126,18 @@ run "email" {
   }
   assert {
     condition = (
-      toset(keys(cloudflare_email_routing_rule.route)) == toset(["support", "aws-prod", "aws-staging"]) &&
+      toset(keys(cloudflare_email_routing_rule.route)) == toset(["support", "aws-prod", "aws-staging", "aws-ci"]) &&
       one([for m in cloudflare_email_routing_rule.route["support"].matcher : m.type == "literal" && m.field == "to" && m.value == "support@example.com"]) &&
       one([for m in cloudflare_email_routing_rule.route["aws-prod"].matcher : m.type == "literal" && m.field == "to" && m.value == "aws-prod@example.com"]) &&
       one([for m in cloudflare_email_routing_rule.route["aws-staging"].matcher : m.type == "literal" && m.field == "to" && m.value == "aws-staging@example.com"]) &&
+      one([for m in cloudflare_email_routing_rule.route["aws-ci"].matcher : m.type == "literal" && m.field == "to" && m.value == "aws-ci@example.com"]) &&
       alltrue([for r in cloudflare_email_routing_rule.route : one([for a in r.action : a.type == "forward" && toset(a.value) == toset(["maintainer@mail.example.org"])])])
     )
-    error_message = "support@<domain> and the deployment accounts' root addresses (aws-prod@, aws-staging@) forward to the destination, and no other"
+    error_message = "support@<domain> and the member accounts' root addresses (aws-prod@, aws-staging@, aws-ci@) forward to the destination, and no other"
   }
   assert {
-    condition     = toset(output.email_routing) == toset(["support@example.com", "aws-prod@example.com", "aws-staging@example.com"])
-    error_message = "the forwarded addresses are support@, aws-prod@ and aws-staging@"
+    condition     = toset(output.email_routing) == toset(["support@example.com", "aws-prod@example.com", "aws-staging@example.com", "aws-ci@example.com"])
+    error_message = "the forwarded addresses are support@, aws-prod@, aws-staging@ and aws-ci@"
   }
 }
 

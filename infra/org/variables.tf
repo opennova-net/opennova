@@ -51,6 +51,16 @@ variable "aws_account_id_staging" {
   }
 }
 
+variable "aws_account_id_ci" {
+  description = "opennova-ci's account id (vault item aws-ci, field account_id): the account of the CI runners (infra/ci), adopted like the deployments' accounts."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.aws_account_id_ci))
+    error_message = "aws_account_id_ci is a 12-digit AWS account id."
+  }
+}
+
 variable "account_name_prod" {
   description = "opennova-prod's account name (vault item aws-prod, field account_name)."
   type        = string
@@ -71,6 +81,16 @@ variable "account_name_staging" {
   }
 }
 
+variable "account_name_ci" {
+  description = "opennova-ci's account name (vault item aws-ci, field account_name)."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9 ._-]{0,49}$", var.account_name_ci))
+    error_message = "account_name_ci is an account name (letters, digits, space, '.', '_', '-'; at most 50)."
+  }
+}
+
 variable "root_email_prod" {
   description = "opennova-prod's root user's address (vault item aws-prod, field root_email; infra/zone forwards it)."
   type        = string
@@ -88,6 +108,16 @@ variable "root_email_staging" {
   validation {
     condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.root_email_staging))
     error_message = "root_email_staging is an email address."
+  }
+}
+
+variable "root_email_ci" {
+  description = "opennova-ci's root user's address (vault item aws-ci, field root_email; infra/zone forwards it)."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.root_email_ci))
+    error_message = "root_email_ci is an email address."
   }
 }
 
