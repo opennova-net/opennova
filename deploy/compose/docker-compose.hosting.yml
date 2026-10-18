@@ -29,7 +29,9 @@
 #                 mount of this container (ONNET_HOSTED_DOCKER_DATA_FROM), so a
 #                 machine's hostd copies a tree from
 #                 file:///var/lib/opennova/store/trees/<id>/, the URL the
-#                 fleet hands it, into its own /opt/game.
+#                 fleet hands it, into its own /opt/game; and the log store
+#                 (the base file's `logs` volume) at /var/log/opennova,
+#                 read-write, for the machines' and their servers' logs.
 #   machine-image the machines' image, the hostd image, built and never run.
 #   zone          the static addresses' zone file the worker writes
 #                 (apps/novaworld_common/hosted/address_zone.h FileZone), which
@@ -122,16 +124,22 @@ services:
       - docker-api
 
   # A container of no image of ours: the machines take every mount it has
-  # (VolumesFrom), so it holds the store alone, read-only, at the path web and
-  # the data program mount it at (ONNET_OBJECT_STORE_URL names it).
+  # (VolumesFrom), so it holds the store, read-only, at the path web and the
+  # data program mount it at (ONNET_OBJECT_STORE_URL names it), and the log
+  # store, read-write, where each machine's hostd writes its own log and its
+  # servers' (ONNET_LOG_STORE; its --log-dir). The log store is world-writable
+  # with the sticky bit, as /tmp, whoever mounts it first: the programs (UID
+  # 10002) and the machines' hostd (the serve user, UID 10001) each make their
+  # own directories there.
   machine-data:
     image: alpine:3.20
     container_name: opennova-dev-machine-data
     restart: unless-stopped
     init: true
-    command: ["sleep", "infinity"]
+    command: ["sh", "-c", "chmod 1777 /var/log/opennova && exec sleep infinity"]
     volumes:
       - store:/var/lib/opennova/store:ro
+      - logs:/var/log/opennova
 
   # The machines' image (apps/serve/Dockerfile's hostd target: opennova-hostd
   # with opennova-serve beside it), which the worker's driver starts each

@@ -330,6 +330,16 @@ target_include_directories(program_usage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_definitions(program_usage_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(program_usage COMMAND program_usage_test)
 
+# Where the logs are and a program's copy of its own (apps/novaworld_common/program_log.h):
+# ONNET_LOG_STORE's forms and refusals, and the tee in the test's own process (stdout's and
+# stderr's lines after their times in programs/<program>/<task>.log, an unended line at the
+# stop, the descriptors back after it, a directory it cannot make refused). Database-free.
+add_executable(program_log_test novaworld/program_log_test.cpp)
+target_link_libraries(program_log_test PRIVATE
+    opennova_novaworld_common opennova_novaworld_service Threads::Threads)
+target_include_directories(program_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME program_log COMMAND program_log_test)
+
 # The hosted servers' stats (apps/novaworld_fleet/hosted/stats_sampler.h,
 # stats_repository.h; migration 0004_server_stats.sql) on a migrated database and a
 # hand-stepped wall clock: one sample a minute of each live server (its listing's players

@@ -78,11 +78,12 @@ struct Program {
 	std::function<int(const Boot &boot)> run;
 };
 
-// A program's whole process, main()'s body: the log sink, the config from the
-// environment, the boot line, the configure step (its FATAL: exit 1, nothing
-// touched), the database pool, the migrations and the seeds under the
-// migration lock, then the run. Logs the stop line on a clean exit. The exit
-// code.
+// A program's whole process, main()'s body: the log sink (and with a directory
+// log store, ONNET_LOG_STORE=file://, its copy of every line: program_log.h),
+// the config from the environment, the boot line, the configure step (its
+// FATAL: exit 1, nothing touched), the database pool, the migrations and the
+// seeds under the migration lock, then the run. Logs the stop line on a clean
+// exit. The exit code.
 int run_program(const Program &program);
 
 // What a program's main loop does besides the watchdog. `tick` runs every

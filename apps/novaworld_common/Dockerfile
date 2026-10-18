@@ -163,6 +163,14 @@ ENV ONNET_GATE_UDP_PORT=7597 \
 RUN useradd --uid 10002 --user-group --no-create-home --home-dir /nonexistent \
         --shell /usr/sbin/nologin novaworld
 
+# The local log store's mount point (the compose stack's `logs` volume,
+# ONNET_LOG_STORE=file:///var/log/opennova): world-writable with the sticky bit,
+# as /tmp, so a named volume first mounted here takes that mode and each
+# program (UID 10002) and the local stack's machines (hostd, UID 10001) make
+# their own directories in it. A deployment's logs are CloudWatch's: nothing
+# mounts it there.
+RUN install -d -m 1777 /var/log/opennova
+
 # Run each program under an init as PID 1 (the ECS task definitions'
 # initProcessEnabled, the compose files' `init: true`, or `docker run --init`):
 # a second SIGTERM ends a stuck shutdown only when the program is not PID 1,

@@ -2,6 +2,7 @@
 
 #include "health_listener.h"
 #include "loggable.h"
+#include "program_log.h"
 #include "program_usage.h"
 
 #include <base/io/log.h>
@@ -138,10 +139,30 @@ int run_program(const Program &program) {
 	std::signal(SIGPIPE, SIG_IGN);
 #endif
 
+	// A directory log store (the local stack's) gets a copy of every line from
+	// the first (program_log.h); a cloud one is filled by ECS's log driver. Put
+	// back, every line copied, as the program returns (the tee outlives
+	// everything below).
+	std::string log_store_error;
+	const LogStoreSetting log_store = log_store_from_env(log_store_error);
+	LogTee tee;
+	std::string tee_error;
+	if (log_store.kind == LogStoreSetting::Kind::Directory &&
+			tee.start(log_store.location, program.name, local_task_id(), tee_error))
+		set_log_tee(&tee);
+	const struct TeeUnset {
+		~TeeUnset() { set_log_tee(nullptr); }
+	} tee_unset;
+
 	// One boot line per process start, before anything can fail, which the log
 	// pipeline counts per program (the crash-loop alarms).
 	std::printf("{\"boot\":{\"program\":\"%s\"}}\n", program.name);
 	std::printf("==== opennova-novaworld-%s booting ====\n", program.name);
+	if (!log_store_error.empty())
+		std::fprintf(stderr, "[boot] WARN %s: no log store\n", log_store_error.c_str());
+	if (!tee_error.empty())
+		std::fprintf(stderr, "[boot] WARN the log's copy into %s: %s\n",
+				log_store.location.c_str(), tee_error.c_str());
 
 	ServerConfig config = ServerConfig::from_env();
 	// The program's own settings, before the database is touched: a program
@@ -241,6 +262,8 @@ int run_main_loop(
 						static_cast<unsigned long long>(watchdog.stall_ms() / 1000),
 						Watchdog::kStallExitCode);
 				std::fflush(nullptr);
+				// The line reaches the log's copy, if any, before the exit.
+				drain_log_tee(500);
 				std::_Exit(Watchdog::kStallExitCode);
 			}
 		}
