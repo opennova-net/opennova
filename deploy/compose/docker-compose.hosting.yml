@@ -31,6 +31,12 @@
 #                 file:///var/lib/opennova/store/trees/<id>/, the URL the
 #                 fleet hands it, into its own /opt/game.
 #   machine-image the machines' image, the hostd image, built and never run.
+#   zone          the static addresses' zone file the worker writes
+#                 (apps/novaworld_common/hosted/address_zone.h FileZone), which
+#                 the smoke test reads; an addressed machine starts at its
+#                 fixed address in the half of the stack's network Docker never
+#                 hands out (172.30.77.64/28, apps/novaworld_common/hosted/
+#                 docker_address_driver.h).
 #
 # scripts/dev_stack.sh up --data <dir> (or --synthetic-data) adds this file.
 # The machines are no compose service: `scripts/dev_stack.sh down` removes them
@@ -55,6 +61,13 @@ x-hosting-env: &hosting-env
   ONNET_FLEET_SHARED_SLOTS: ${ONNET_FLEET_SHARED_SLOTS:-4}
   ONNET_FLEET_MAX_SHARED: ${ONNET_FLEET_MAX_SHARED:-1}
   ONNET_FLEET_MAX_OWN: ${ONNET_FLEET_MAX_OWN:-1}
+  # The static addresses: up to 4, named in play.localhost.
+  ONNET_FLEET_MAX_ADDRESSES: ${ONNET_FLEET_MAX_ADDRESSES:-4}
+  ONNET_HOSTED_ADDRESS_ZONE: play.localhost
+
+# The zone file's volume: the worker writes it, the smoke test reads it.
+volumes:
+  zone: {}
 
 services:
   novaworld-web:
@@ -77,6 +90,12 @@ services:
       # The machines' image (a server's start pins the serve image by name
       # alone: the machines run their own binary).
       ONNET_HOSTED_HOSTD_IMAGE: ${HOSTD_IMAGE:-opennova-hostd:local}
+      # The static addresses' driver's own: the addresses it hands out and
+      # the zone file it writes.
+      ONNET_HOSTED_DOCKER_ADDRESSES: 172.30.77.64/28
+      ONNET_HOSTED_ADDRESS_ZONE_FILE: /var/lib/opennova/zone/play.localhost.zone
+    volumes:
+      - zone:/var/lib/opennova/zone
     networks:
       default: {}
       docker-api: {}
@@ -85,6 +104,11 @@ services:
         condition: service_started
       machine-data:
         condition: service_started
+
+  # The smoke test reads the zone the worker writes (its --zone-file).
+  smoke:
+    volumes:
+      - zone:/var/lib/opennova/zone:ro
 
   docker-api:
     image: tecnativa/docker-socket-proxy:0.3.0
