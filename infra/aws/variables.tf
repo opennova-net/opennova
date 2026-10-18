@@ -199,6 +199,17 @@ variable "server_log_retention_days" {
   default     = 14
 }
 
+variable "log_ingest_alarm_gib_per_day" {
+  description = "The hosted game servers' log ingest the servers-log-ingest alarm allows, GiB a day (judged an hour at a time)."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.log_ingest_alarm_gib_per_day > 0
+    error_message = "log_ingest_alarm_gib_per_day must be above 0."
+  }
+}
+
 variable "tags" {
   description = "Additional resource tags"
   type        = map(string)

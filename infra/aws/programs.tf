@@ -237,8 +237,10 @@ resource "aws_iam_role_policy" "exec" {
 # GetMetricData (web asks for its database's, cache's and balancer's metrics
 # alone). The logs are this deployment's three groups' (the programs', the
 # machines' and the servers', observability.tf), read for the admin's log
-# view. The boundary (infra/aws/iam/opennova-role-boundary.json) holds the
-# same, so the org stack applies it first.
+# view; the alarms are this deployment's (every name starts with its own,
+# observability.tf), whose firing ones the attention list reads. The boundary
+# (infra/aws/iam/opennova-role-boundary.json) holds the same, so the org stack
+# applies it first.
 locals {
   log_group_prefix = "/opennova/${local.deployment}"
   # Every group the log view reads, and each one's streams.
@@ -325,6 +327,13 @@ data "aws_iam_policy_document" "infra_read" {
     effect    = "Allow"
     actions   = ["cloudwatch:GetMetricData"]
     resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadAlarms"
+    effect    = "Allow"
+    actions   = ["cloudwatch:DescribeAlarms"]
+    resources = ["arn:${local.partition}:cloudwatch:${local.region}:${local.account_id}:alarm:${local.name}-*"]
   }
 }
 
@@ -431,8 +440,9 @@ locals {
   # what web reads with its task role (the policy below, and fleet_agent.tf's),
   # each setting naming this deployment's own: the cluster and its services,
   # the fleet cluster ("" while hosting is off), the balancer's target groups
-  # by listener, the database, the cache and the release parameter; and the
-  # balancer by its metrics' dimension (the usage view's, metrics_store.h).
+  # by listener, the database, the cache and the release parameter; the
+  # balancer by its metrics' dimension (the usage view's, metrics_store.h); and
+  # the start of every alarm's name (the attention list's, alarm_store.h).
   infra_status_env = {
     ONNET_INFRA_REGION            = local.region
     ONNET_INFRA_CLUSTER           = aws_ecs_cluster.main.name
@@ -442,6 +452,7 @@ locals {
     ONNET_INFRA_CACHE             = aws_elasticache_replication_group.cache.replication_group_id
     ONNET_INFRA_RELEASE_PARAMETER = aws_ssm_parameter.release.name
     ONNET_INFRA_LOAD_BALANCER     = aws_lb.public.arn_suffix
+    ONNET_INFRA_ALARM_PREFIX      = "${local.name}-"
   }
 
   # The update service (ADR 0061, 0064): web serves retail UPDATE.EXE on the

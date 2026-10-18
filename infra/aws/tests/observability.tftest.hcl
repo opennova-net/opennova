@@ -10,7 +10,9 @@
 # tasks under its min, its CPU and memory, an unhealthy target behind the load
 # balancer, failed servers, lost machines, failed launches, a stale billing
 # sync, refused webhooks, entitlement stops held for 5 minutes, a gate probe
-# left unanswered for want of a lobby, the database's
+# left unanswered for want of a lobby, a stuck machine, a machine's disk under
+# 15 % free, the servers' log group's ingest past its allowance (the fleet
+# leader's pass age, with hosting on, is fleet.tftest's), the database's
 # CPU, CPU credits (a burstable class), connections and storage and the
 # /healthz health check at the gate's address; every alarm notifies the one
 # topic, which emails the alert address. Each deployment makes its account's
@@ -326,7 +328,10 @@ run "observability" {
   }
   assert {
     condition = (
-      length(aws_cloudwatch_log_metric_filter.heartbeat_field) == 11 &&
+      length(aws_cloudwatch_log_metric_filter.heartbeat_field) == 14 &&
+      aws_cloudwatch_log_metric_filter.heartbeat_field["MachinesStuck"].metric_transformation[0].value == "$.heartbeat.machines_stuck" &&
+      aws_cloudwatch_log_metric_filter.heartbeat_field["MachineDiskFreePct"].pattern == "{ $.heartbeat.machine_disk_free_pct >= 0 }" &&
+      aws_cloudwatch_log_metric_filter.heartbeat_field["FleetPassAgeS"].metric_transformation[0].value == "$.heartbeat.fleet_pass_age_s" &&
       aws_cloudwatch_log_metric_filter.heartbeat_field["LimitsHeld"].metric_transformation[0].value == "$.heartbeat.limits_held" &&
       aws_cloudwatch_log_metric_filter.heartbeat_field["ProbesUnanswered"].pattern == "{ $.heartbeat.probes_unanswered >= 0 }" &&
       aws_cloudwatch_log_metric_filter.heartbeat_field["ProbesUnanswered"].metric_transformation[0].value == "$.heartbeat.probes_unanswered" &&
@@ -392,6 +397,41 @@ run "observability" {
       aws_cloudwatch_metric_alarm.server["probes-unanswered"].treat_missing_data == "notBreaching"
     )
     error_message = "a gate probe left unanswered for want of a lobby in 5 minutes (Sum > 0) is an alarm; no data (no gate) is the heartbeat alarm's"
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.server["machines-stuck"].metric_name == "MachinesStuck" &&
+      aws_cloudwatch_metric_alarm.server["machines-stuck"].statistic == "Maximum" &&
+      aws_cloudwatch_metric_alarm.server["machines-stuck"].period == 300 && aws_cloudwatch_metric_alarm.server["machines-stuck"].evaluation_periods == 1 &&
+      aws_cloudwatch_metric_alarm.server["machines-stuck"].comparison_operator == "GreaterThanThreshold" &&
+      aws_cloudwatch_metric_alarm.server["machines-stuck"].threshold == 0 &&
+      aws_cloudwatch_metric_alarm.server["machines-stuck"].treat_missing_data == "notBreaching" &&
+      aws_cloudwatch_metric_alarm.server["machine-disk"].metric_name == "MachineDiskFreePct" &&
+      aws_cloudwatch_metric_alarm.server["machine-disk"].statistic == "Minimum" &&
+      aws_cloudwatch_metric_alarm.server["machine-disk"].period == 300 && aws_cloudwatch_metric_alarm.server["machine-disk"].evaluation_periods == 2 &&
+      aws_cloudwatch_metric_alarm.server["machine-disk"].comparison_operator == "LessThanThreshold" &&
+      aws_cloudwatch_metric_alarm.server["machine-disk"].threshold == 15 &&
+      aws_cloudwatch_metric_alarm.server["machine-disk"].treat_missing_data == "notBreaching"
+    )
+    error_message = "a stuck machine (5 minutes) and a machine's disk under 15 % free (10 minutes) alarm; no data (hosting off, no leader) is none"
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.servers_log_ingest.namespace == "AWS/Logs" &&
+      aws_cloudwatch_metric_alarm.servers_log_ingest.metric_name == "IncomingBytes" &&
+      aws_cloudwatch_metric_alarm.servers_log_ingest.dimensions == tomap({ LogGroupName = "/opennova/prod/servers" }) &&
+      aws_cloudwatch_metric_alarm.servers_log_ingest.statistic == "Sum" && aws_cloudwatch_metric_alarm.servers_log_ingest.period == 3600 &&
+      aws_cloudwatch_metric_alarm.servers_log_ingest.evaluation_periods == 1 &&
+      aws_cloudwatch_metric_alarm.servers_log_ingest.comparison_operator == "GreaterThanThreshold" &&
+      aws_cloudwatch_metric_alarm.servers_log_ingest.threshold == 89478485 &&
+      aws_cloudwatch_metric_alarm.servers_log_ingest.treat_missing_data == "notBreaching" &&
+      contains(aws_cloudwatch_metric_alarm.servers_log_ingest.alarm_actions, "arn:aws:sns:us-east-1:123456789012:opennova-prod-alerts")
+    )
+    error_message = "the servers' log group taking in more than 2 GiB a day's rate (89,478,485 bytes) in an hour alarms"
+  }
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.fleet_pass_age) == 0
+    error_message = "with hosting off there is no fleet pass to age: no fleet-pass-age alarm"
   }
   assert {
     condition = (
@@ -508,6 +548,24 @@ run "released" {
     condition     = aws_cloudwatch_metric_alarm.program_running["lobby"].threshold == 1 && aws_cloudwatch_metric_alarm.program_running["web"].threshold == 1
     error_message = "released, the running floor is each program's min"
   }
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.fleet_pass_age) == 0
+    error_message = "released with hosting off: still no fleet-pass-age alarm"
+  }
+}
+
+# A higher ingest allowance moves the servers' log alarm's hourly threshold.
+run "log_ingest_allowance" {
+  command = plan
+
+  variables {
+    log_ingest_alarm_gib_per_day = 24
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.servers_log_ingest.threshold == 1073741824
+    error_message = "24 GiB a day is 1 GiB an hour"
+  }
 }
 
 run "placeholder_email" {
@@ -522,7 +580,7 @@ run "placeholder_email" {
     error_message = "a placeholder address subscribes nothing"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.server) == 7 && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 6 && length(aws_ce_anomaly_monitor.services) == 1
+    condition     = length(aws_cloudwatch_metric_alarm.server) == 9 && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 6 && length(aws_ce_anomaly_monitor.services) == 1
     error_message = "the alarms and the monitor exist all the same"
   }
 }

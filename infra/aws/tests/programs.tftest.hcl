@@ -516,6 +516,7 @@ run "environments" {
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_CACHE"] == "opennova-prod-cache" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_RELEASE_PARAMETER"] == "/opennova/prod/release" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_LOAD_BALANCER"] == "net/opennova-prod/0123456789abcdef" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_ALARM_PREFIX"] == "opennova-prod-" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_LOG_STORE"] == "cloudwatch:/opennova/prod" &&
       jsondecode({ for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_TARGET_GROUPS"]) == {
         gate   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef"
@@ -668,6 +669,7 @@ run "task_roles" {
         "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTasks", "elasticloadbalancing:DescribeTargetHealth",
         "rds:DescribeDBInstances", "elasticache:DescribeReplicationGroups", "ssm:GetParameter", "ec2:DescribeInstances",
         "logs:GetLogEvents", "logs:FilterLogEvents", "logs:DescribeLogStreams", "cloudwatch:GetMetricData",
+        "cloudwatch:DescribeAlarms",
       ]) &&
       alltrue([for st in data.aws_iam_policy_document.infra_read.statement : !anytrue([for a in st.actions : !can(regex("^[a-z0-9]+:(Describe|List|Get|Filter)", a))])])
     )
@@ -681,9 +683,10 @@ run "task_roles" {
           "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/${g}:*",
         ]
       ])) &&
-      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadMetrics"]) == toset(["*"])
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadMetrics"]) == toset(["*"]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadAlarms"]) == toset(["arn:aws:cloudwatch:us-east-1:123456789012:alarm:opennova-prod-*"])
     )
-    error_message = "web reads the events of this deployment's three log groups alone (the programs', the machines', the servers'), and CloudWatch's metrics, which take no resource"
+    error_message = "web reads the events of this deployment's three log groups alone (the programs', the machines', the servers'), CloudWatch's metrics, which take no resource, and this deployment's alarms alone"
   }
   assert {
     condition = (
