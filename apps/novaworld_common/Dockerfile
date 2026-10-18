@@ -173,11 +173,12 @@ RUN useradd --uid 10002 --user-group --no-create-home --home-dir /nonexistent \
 # a named volume takes the image directory's owner and mode on its first mount,
 # so the program, UID 10002, can write it, and the local stack's machines, whose
 # hostd runs as the serve image's UID 10001, can read the trees through it; a
-# deployment's store is S3 and nothing mounts it).
+# deployment's store is S3 and nothing mounts it), and the local stack's
+# static-address zone file's (the worker writes it, the same way).
 FROM runtime AS runtime-aws
 COPY --from=awscli /usr/local/aws-cli /usr/local/aws-cli
 RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws && aws --version \
-    && install -d -o 10002 -g 10002 -m 0755 /var/lib/opennova/store
+    && install -d -o 10002 -g 10002 -m 0755 /var/lib/opennova/store /var/lib/opennova/zone
 
 # ---- gate ------------------------------------------------------------------
 FROM runtime AS gate
