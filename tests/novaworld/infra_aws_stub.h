@@ -110,6 +110,9 @@ inline std::string key_of(const std::string &config) {
 		std::string key = service + " " + name;
 		if (name == "ListTasks")
 			key += data.find("\"STOPPED\"") != std::string::npos ? " STOPPED" : " RUNNING";
+		// The fleet cluster's calls (hostd's daemon, the container instances).
+		if (data.find("\"cluster\":\"opennova-prod-fleet\"") != std::string::npos)
+			key += " fleet";
 		return key;
 	}
 	const size_t action = data.find("Action=");
@@ -422,6 +425,33 @@ constexpr const char *kMachines = R"(<?xml version="1.0" encoding="UTF-8"?>
     </reservationSet>
 </DescribeInstancesResponse>)";
 
+// The fleet cluster: hostd's daemon service, and two machines registered there.
+constexpr const char *kFleetServices = R"({"services": [{
+  "serviceName": "hostd", "status": "ACTIVE", "desiredCount": 2, "runningCount": 2,
+  "pendingCount": 0, "schedulingStrategy": "DAEMON",
+  "taskDefinition": "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-hostd:5",
+  "deployments": [{"id": "ecs-svc/2", "status": "PRIMARY", "rolloutState": "COMPLETED",
+    "taskDefinition": "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-hostd:5",
+    "desiredCount": 2, "runningCount": 2, "pendingCount": 0, "failedTasks": 0,
+    "createdAt": 1792231200.0, "updatedAt": 1792231500.0}],
+  "events": []}], "failures": []})";
+constexpr const char *kContainerInstanceArns = R"({"containerInstanceArns": [
+  "arn:aws:ecs:us-east-1:123456789012:container-instance/opennova-prod-fleet/aaaa1111",
+  "arn:aws:ecs:us-east-1:123456789012:container-instance/opennova-prod-fleet/bbbb2222"]})";
+constexpr const char *kContainerInstances = R"({"containerInstances": [
+  {"containerInstanceArn": "arn:aws:ecs:us-east-1:123456789012:container-instance/opennova-prod-fleet/aaaa1111",
+   "ec2InstanceId": "i-0aaaaaaaaaaaaaaa1", "status": "ACTIVE", "agentConnected": true,
+   "runningTasksCount": 1, "pendingTasksCount": 0,
+   "versionInfo": {"agentVersion": "1.98.0", "dockerVersion": "DockerVersion: 25.0.8"},
+   "attributes": [{"name": "ecs.ami-id", "value": "ami-0123456789abcdef0"},
+     {"name": "machine-id", "value": "12"}, {"name": "kind", "value": "shared"},
+     {"name": "ecs.instance-type", "value": "t3a.medium"}]},
+  {"containerInstanceArn": "arn:aws:ecs:us-east-1:123456789012:container-instance/opennova-prod-fleet/bbbb2222",
+   "ec2InstanceId": "i-0bbbbbbbbbbbbbbb2", "status": "DRAINING", "agentConnected": false,
+   "runningTasksCount": 0, "pendingTasksCount": 1,
+   "attributes": [{"name": "machine-id", "value": "13"}]}],
+  "failures": []})";
+
 // The calls of a read of the deployment above and their replies.
 inline std::map<std::string, CommandResult> deployment_replies() {
 	std::map<std::string, CommandResult> r;
@@ -447,6 +477,9 @@ inline std::map<std::string, CommandResult> deployment_replies() {
 	r["rds DescribeDBInstances"] = answer(200, kDatabase);
 	r["elasticache DescribeReplicationGroups"] = answer(200, kCache);
 	r["ec2 DescribeInstances"] = answer(200, kMachines);
+	r["ecs DescribeServices fleet"] = answer(200, kFleetServices);
+	r["ecs ListContainerInstances fleet"] = answer(200, kContainerInstanceArns);
+	r["ecs DescribeContainerInstances fleet"] = answer(200, kContainerInstances);
 	return r;
 }
 

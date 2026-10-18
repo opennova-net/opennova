@@ -66,6 +66,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/fleet_config.cpp
         hosted/fleet_jobs.cpp
         hosted/fleet_repository.cpp
+        hosted/fleet_roll.cpp
         hosted/host_limits.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_settings.cpp

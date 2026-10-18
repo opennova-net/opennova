@@ -1,7 +1,7 @@
 #pragma once
 
 // The local stack's MachineDriver (ONNET_HOSTED_PROVIDER=docker): each fleet
-// machine is a container of the serve image on the stack's own network, as each
+// machine is a container of the hostd image on the stack's own network, as each
 // cloud machine is an EC2 machine (ec2_machine_driver.h), so the local stack runs
 // prod's flow end to end: the launch hands the machine its id and its one-time
 // token and nothing else; its agent (opennova-hostd, the image's own) redeems the
@@ -21,8 +21,10 @@
 // <deployment>-machine-<id> (ONNET_HOSTED_DEPLOYMENT), labelled opennova.hosted=1,
 // opennova.deployment, opennova.machine-id and opennova.machine-kind:
 //
-//   launch      POST /containers/create of the serve image (ONNET_HOSTED_SERVE_IMAGE)
-//               running opennova-hostd (machine_command) on the network
+//   launch      POST /containers/create of the hostd image (ONNET_HOSTED_HOSTD_IMAGE,
+//               apps/serve/Dockerfile's hostd target: opennova-hostd with
+//               opennova-serve beside it) running opennova-hostd
+//               (machine_command) as the image's serve user (kMachineUid) on the network
 //               ONNET_HOSTED_DOCKER_NETWORK, the mounts of the container
 //               ONNET_HOSTED_DOCKER_DATA_FROM taken read-only (the local object
 //               store's directory, at the path the programs see it: the agent
@@ -70,8 +72,8 @@ struct DockerMachineConfig {
 	// store's directory, where the trees are) every machine takes, read-only.
 	std::string data_from;
 	std::string deployment; // ONNET_HOSTED_DEPLOYMENT: the label that scopes every call
-	// ONNET_HOSTED_SERVE_IMAGE: the machines' image, opennova-hostd and
-	// opennova-serve in it (apps/serve/Dockerfile).
+	// ONNET_HOSTED_HOSTD_IMAGE: the machines' image, opennova-hostd and
+	// opennova-serve in it (apps/serve/Dockerfile's hostd target).
 	std::string image;
 	// ONNET_INTERNAL_URL: the fleet's internal listener as the machines
 	// reach it (the agent's --service).
@@ -98,14 +100,15 @@ public:
 	static constexpr const char *kLabelMachineId = "opennova.machine-id";
 	static constexpr const char *kLabelMachineKind = "opennova.machine-kind";
 	// Where the machine's agent finds its token (written by the launch), keeps
-	// its state and its slots: paths the serve image's user (10001) owns.
+	// its state and its slots: paths the image's serve user (10001) owns.
 	static constexpr const char *kTokenDir = "/run/opennova";
 	static constexpr const char *kTokenFile = "/run/opennova/hostd.token";
 	static constexpr const char *kStateDir = "/srv/serve/hostd";
 	static constexpr const char *kSlotsRoot = "/srv/serve/slots";
 	static constexpr const char *kHostd = "/usr/local/bin/opennova-hostd";
 	static constexpr const char *kServe = "/usr/local/bin/opennova-serve";
-	// The serve image's user, which owns the token file.
+	// The image's serve user, which the agent runs as and which owns the token
+	// file.
 	static constexpr uint32_t kMachineUid = 10001;
 	// From the launch to the agent's first report: a container's start and a
 	// bootstrap.

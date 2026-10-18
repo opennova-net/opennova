@@ -191,15 +191,16 @@ Service policy (`health.*`), what the container runtime and the uptime checks re
 - **The heartbeat**, one line on stdout every 60 s, for the log pipeline's metric
   filters: `{"heartbeat":{"program":"<program>",...}}`, the program first, then the
   fields that program knows in this order, then every program's lock failures:
-  `{"heartbeat":{"program":"fleet","hosted_live":N,"hosted_failed":N,"machines_lost":N,"launch_failures":N,"limits_held":N,"db_lock_timeouts":N,"db_deadlocks":N}}`.
+  `{"heartbeat":{"program":"fleet","hosted_live":N,"hosted_failed":N,"machines_lost":N,"machines_held":N,"launch_failures":N,"limits_held":N,"db_lock_timeouts":N,"db_deadlocks":N}}`.
   "Since the last line" counts reset each line; a deployment-wide count every process of
   a program logs alike is aggregated with the maximum, not the sum.
   - lobby: `nw_sessions` (its own NovaWorld UDP sessions), `listed_hosts` (the
     deployment's listed servers; aggregate with the maximum);
   - web, with billing on: `webhook_rejects` (deliveries refused since the last line);
-  - fleet, with hosting on: `hosted_live` and `machines_lost` (now),
-    `hosted_failed` and `launch_failures` (since the last line), `limits_held` (1 while
-    the owners' limits hold is on);
+  - fleet, with hosting on: `hosted_live`, `machines_lost` and `machines_held` (the lost
+    machines the mass-lost brake holds from their end; now), `hosted_failed` and
+    `launch_failures` (since the last line), `limits_held` (1 while the owners' limits
+    hold is on);
   - worker: `billing_sync_age_s` (the oldest unsynced webhook event's age; 0 with none,
     -1 with billing off);
   - gate: `probes_unanswered` (since the last line, for want of a lobby: what the
@@ -774,7 +775,11 @@ fleet process that leads and the fleet's machines. From AWS, with web's task rol
 (`infra/infra_status.*`): each program's ECS service (its counts, deployments, task
 definition against the recorded release, newest events), its running and recently stopped
 tasks, the one-off tasks, the load balancer's target groups and their targets' health, the
-database's and the cache's status and each machine's EC2 state.
+database's and the cache's status, each machine's EC2 state and image, and, with hosting
+on, the fleet cluster: hostd's daemon service and each machine as its container instance
+(its EC2 instance, its `machine-id` and `kind` attributes, its image, whether its ECS agent
+is connected, its tasks). A fleet roll's preview reads each machine's image from the same
+read (`GET /api/admin/fleet/roll`, `hosted/README.md`).
 
 The AWS calls are curl's, signed by curl itself (`--aws-sigv4`), run the way billing's
 Stripe calls are (`infra/aws_api.*`, XML replies read by `infra/aws_xml.*`), not the AWS
@@ -785,7 +790,7 @@ many admins look. A call that fails leaves its section's error (AWS's own code a
 message) and the others stand. Without AWS (the local stack: no `ONNET_INFRA_CLUSTER`, or
 no task role) nothing is called and the page says why; it never shows made-up data. Web's
 task role holds these reads alone, scoped to the deployment's resources
-(`infra/aws/programs.tf`, `infra_read`).
+(`infra/aws/programs.tf`, `infra_read`; the fleet cluster's, `infra/aws/fleet_agent.tf`).
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -795,6 +800,7 @@ task role holds these reads alone, scoped to the deployment's resources
 | `ONNET_INFRA_DATABASE` | none | Web: the RDS instance's identifier. |
 | `ONNET_INFRA_CACHE` | none | Web: the ElastiCache replication group's id. |
 | `ONNET_INFRA_RELEASE_PARAMETER` | none | Web: the SSM parameter holding the release (`/opennova/<deployment>/release`), whose revisions say whether each program runs the release's. |
+| `ONNET_INFRA_FLEET_CLUSTER` | none | Web: the fleet cluster (`opennova-<deployment>-fleet`), whose hostd service and container instances the view reads; unset or empty with hosting off, and nothing of it is read. |
 
 ## The switcher's address
 

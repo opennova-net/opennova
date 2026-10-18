@@ -175,7 +175,9 @@ hosted servers' supervisor, one elected leader), the **worker** (its **jobs** an
 schedules) and **data** (the data sets' jobs over the game data's store). Each scales on its
 own and shares nothing with the others but PostgreSQL (and web's Redis); what more than one
 uses is the shared library (`apps/novaworld_common`). Each runs only its own job kinds and
-schedules only those. There is no all-in-one binary.
+schedules only those. There is no all-in-one binary. Beside them, **opennova-hostd** is a
+program of the fleet cluster (`opennova-<deployment>-fleet`): an ECS daemon service, one task
+per **machine**, rolled by the same releases, before the fleet program.
 _Avoid_: role, service (for one program), tier, microservice, pod
 
 **Gate**:
@@ -562,10 +564,11 @@ _Avoid_: quota, allowance (in code; the site's meter may say "N of M servers use
 (the retired admin flag)
 
 **Machine**:
-A virtual machine **hosted servers** run on, each in a **slot** of its own (an EC2 instance, ADR
-0053; in the local stack, a container of the serve image): a **shared machine** or an **own
+A virtual machine **hosted servers** run on, each in a **slot** of its own (an EC2 instance on
+the deployment's pinned ECS-optimized image, a container instance of the fleet cluster, ADR
+0053; in the local stack, a container of the hostd image): a **shared machine** or an **own
 machine**. The service launches it, places servers on it and ends it; **opennova-hostd** runs its
-containers. Never "host": that word is the authoritative session side alone.
+containers (docker's, never ECS tasks). Never "host": that word is the authoritative session side alone.
 _Avoid_: host, server (for the VM), box, node, pod; "instance" alone (say "EC2 instance"
 when naming the AWS resource)
 
@@ -588,7 +591,8 @@ server's game and remote-admin ports, its container user and its working directo
 _Avoid_: seat, position (for the place on the machine), player slot (that is a match's)
 
 **opennova-hostd**:
-The machine agent (`apps/hostd`, target `opennova_hostd`): one per **machine**, it
+The machine agent (`apps/hostd`, target `opennova_hostd`, image `opennova-hostd`): one per
+**machine**, the fleet cluster's ECS daemon on a cloud machine, it fences the slots' users,
 redeems the machine's one-time bootstrap token, then syncs with the **fleet program**'s internal
 listener (by its name, `ONNET_INTERNAL_URL`) every few seconds, reporting each container (its state, CPU, memory, its slot's
 egress) and running the containers the reply wants (a local stack's machine runs them as

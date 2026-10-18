@@ -22,8 +22,9 @@ constexpr const char *kMachineColumns =
 		"COALESCE(reserved_for, 0), last_report_at, launched_at, ready_at, ended_at, end_reason, "
 		"cloud_state, described_at, COALESCE(launched_for, 0), seen_state, seen_since_ms, "
 		"idle_since_ms, "
-		"drain_moving, was_draining, describe_asked_ms, launch_subnet";
-constexpr size_t kMachineColumnCount = 29;
+		"drain_moving, was_draining, describe_asked_ms, launch_subnet, "
+		"COALESCE(agent_protocol, 0), agent_image, protocol_mismatch_since, lost_held_since_ms";
+constexpr size_t kMachineColumnCount = 33;
 
 // The SQL test for a live machine (a live hosted server's is hosted_repository.h's).
 constexpr const char *kLiveMachineSql = "state NOT IN ('ended', 'failed')";
@@ -95,6 +96,10 @@ FleetMachineRow row_to_machine(const db::Row &r) {
 	m.was_draining = r.as_int(26).value_or(0) != 0;
 	m.describe_asked_ms = r.as_int(27).value_or(0);
 	m.launch_subnet = r.as_text(28).value_or("");
+	m.agent_protocol = static_cast<int>(r.as_int(29).value_or(0));
+	m.agent_image = r.as_text(30).value_or("");
+	m.protocol_mismatch_since = r.as_text(31).value_or("");
+	m.lost_held_since_ms = r.as_int(32).value_or(0);
 	return m;
 }
 
@@ -204,7 +209,10 @@ bool transition_machine(db::Database &db, int64_t id, const std::vector<FleetMac
 	const bool spends = gone || to == FleetMachineState::Ending;
 	const bool takes_reason =
 			!ready && to != FleetMachineState::Booting && to != FleetMachineState::Launching;
+	// A move off lost lets go of the mass-lost brake's hold.
 	std::string sql = "UPDATE fleet_machines SET state = $2";
+	if (to != FleetMachineState::Lost)
+		sql += ", lost_held_since_ms = 0";
 	if (ready)
 		sql += ", ready_at = COALESCE(ready_at, now()), end_reason = ''";
 	if (gone)
@@ -274,12 +282,16 @@ bool machine_reported_within(db::Database &db, int64_t id, int64_t seconds) {
 					.empty();
 }
 
-std::vector<int64_t> drain_machines(db::Database &db, const std::string &reason) {
+std::vector<int64_t> drain_machines(
+		db::Database &db, const std::vector<int64_t> &ids, const std::string &reason) {
 	std::vector<int64_t> out;
-	for (const db::Row &r : db.query("UPDATE fleet_machines SET state = 'draining', end_reason = $1 "
-									 "WHERE state IN ('launching', 'booting', 'ready') RETURNING id;",
-				 { BindValue(reason) }))
-		out.push_back(r.as_int(0).value_or(0));
+	for (const int64_t id : ids) {
+		db.exec("UPDATE fleet_machines SET state = 'draining', end_reason = $2 "
+				"WHERE id = $1 AND state IN ('launching', 'booting', 'ready');",
+				{ BindValue(id), BindValue(reason) });
+		if (db.changes() > 0)
+			out.push_back(id);
+	}
 	std::sort(out.begin(), out.end());
 	return out;
 }
@@ -298,6 +310,12 @@ size_t prune_ended_machines(db::Database &db, int64_t keep_s) {
 int count_machines(db::Database &db, FleetMachineState state) {
 	const auto rows = db.query("SELECT COUNT(*) FROM fleet_machines WHERE state = $1;",
 			{ BindValue(std::string(fleet_machine_state_text(state))) });
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
+}
+
+int count_held_machines(db::Database &db) {
+	const auto rows = db.query(
+			"SELECT COUNT(*) FROM fleet_machines WHERE state = 'lost' AND lost_held_since_ms > 0;");
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
@@ -380,9 +398,16 @@ bool mark_machine_lost(db::Database &db, int64_t id, const std::string &reason, 
 	db.exec("UPDATE fleet_machines SET was_draining = (state = 'draining'), state = 'lost', "
 			"end_reason = CASE WHEN $2::text <> '' THEN $2::text ELSE end_reason END, "
 			"seen_state = 'lost', seen_since_ms = $3, idle_since_ms = 0, drain_moving = 0, "
-			"cloud_state = '' "
+			"cloud_state = '', lost_held_since_ms = 0 "
 			"WHERE id = $1 AND state IN ('ready', 'draining');",
 			{ BindValue(id), BindValue(reason), BindValue(now_ms) });
+	return db.changes() > 0;
+}
+
+bool hold_lost_machine(db::Database &db, int64_t id, int64_t now_ms) {
+	db.exec("UPDATE fleet_machines SET lost_held_since_ms = CASE WHEN lost_held_since_ms > 0 "
+			"THEN lost_held_since_ms ELSE $2 END WHERE id = $1 AND state = 'lost';",
+			{ BindValue(id), BindValue(now_ms) });
 	return db.changes() > 0;
 }
 
@@ -539,7 +564,8 @@ std::optional<FleetMachineRow> authenticate_agent(
 // --- the agent's reports ---
 
 std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
-		const std::string &agent_version, const std::vector<ContainerReport> &containers) {
+		const std::string &agent_version, const std::vector<ContainerReport> &containers,
+		const std::string &agent_image) {
 	db::Transaction tx(db);
 	// A booting machine's row, locked until this sync moves it to ready: its
 	// launch succeeded, so its kind's launch backoff ends with it.
@@ -549,12 +575,14 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 	// The agent's first sync spends the bootstrap token (redeem_bootstrap_token).
 	const auto updated = db.query(
 			"UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
+			"agent_image = $3, agent_protocol = $4, protocol_mismatch_since = NULL, "
 			"bootstrap_token_hash = '', bootstrap_expires_at = NULL, "
 			"ready_at = CASE WHEN state = 'booting' THEN now() ELSE ready_at END, "
 			"end_reason = CASE WHEN state = 'booting' THEN '' ELSE end_reason END, "
 			"state = CASE WHEN state = 'booting' THEN 'ready' ELSE state END "
 			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost') RETURNING slots;",
-			{ BindValue(id), BindValue(agent_version) });
+			{ BindValue(id), BindValue(agent_version), BindValue(agent_image),
+					BindValue(static_cast<int64_t>(kAgentProtocol)) });
 	if (updated.empty())
 		return std::nullopt;
 	if (!booting.empty()) {
@@ -589,14 +617,33 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 	return row;
 }
 
-std::optional<FleetMachineRow> record_unlisted_sync(
-		db::Database &db, int64_t id, const std::string &agent_version) {
+std::optional<FleetMachineRow> record_unlisted_sync(db::Database &db, int64_t id,
+		const std::string &agent_version, const std::string &agent_image) {
 	db.exec("UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
+			"agent_image = $3, agent_protocol = $4, protocol_mismatch_since = NULL, "
 			"bootstrap_token_hash = '', bootstrap_expires_at = NULL "
 			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost');",
-			{ BindValue(id), BindValue(agent_version) });
+			{ BindValue(id), BindValue(agent_version), BindValue(agent_image),
+					BindValue(static_cast<int64_t>(kAgentProtocol)) });
 	if (db.changes() == 0)
 		return std::nullopt;
+	return find_machine(db, id);
+}
+
+std::optional<FleetMachineRow> record_held_sync(
+		db::Database &db, int64_t id, const AgentEnvelope &envelope, int64_t &mismatch_s) {
+	const auto updated = db.query(
+			"UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
+			"agent_image = $3, agent_protocol = $4, "
+			"protocol_mismatch_since = COALESCE(protocol_mismatch_since, now()), "
+			"bootstrap_token_hash = '', bootstrap_expires_at = NULL "
+			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost') "
+			"RETURNING CAST(extract(epoch FROM now() - protocol_mismatch_since) AS bigint);",
+			{ BindValue(id), BindValue(envelope.agent_version), BindValue(envelope.agent_image),
+					BindValue(static_cast<int64_t>(envelope.protocol)) });
+	if (updated.empty())
+		return std::nullopt;
+	mismatch_s = updated.front().as_int(0).value_or(0);
 	return find_machine(db, id);
 }
 

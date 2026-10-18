@@ -142,6 +142,8 @@ int run(const program::Boot &boot) {
 	http.set_infra(infra_stack.status.get());
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
+	// A fleet roll's preview: the image the launch templates pin.
+	http.set_fleet_image(hosting.fleet.image_id);
 	// The admin usage view's limits: each container's memory and CPUs.
 	http.set_fleet_slots(hosting.fleet.slot_memory_mb, hosting.fleet.slot_cpus);
 	// The admin jobs page's schedules: every program's (the worker's and the

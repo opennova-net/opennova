@@ -15,7 +15,10 @@
 // The task metadata endpoint (version 4: the agent names it in every
 // container's ECS_CONTAINER_METADATA_URI_V4) gives both: in awsvpc mode
 // (Fargate's) the task's containers share one network interface, so any
-// container's first IPv4 address is the task's. Service policy, not a port.
+// container's first IPv4 address is the task's. It also gives a container its
+// own image as the task definition names it (machine agent opennova-hostd
+// reports its own in every sync, apps/hostd; it compiles this file itself).
+// Service policy, not a port.
 
 #include <cstdint>
 #include <string>
@@ -46,6 +49,17 @@ bool parse_task_revision(const std::string &json, std::string &out, std::string 
 
 // GET <uri>/task read into `out` (parse_task_revision), as read_task_address.
 bool read_task_revision(
+		const std::string &uri, std::string &out, std::string &error, int timeout_ms = 3000);
+
+// The container's own image (its metadata's "Image": the reference its task
+// definition names, a release's pinned by digest) from the text of a GET <uri>
+// reply: false with `error` when it does not read or names none.
+bool parse_container_image(const std::string &json, std::string &out, std::string &error);
+
+// GET <uri> (the container's own metadata) read into `out`
+// (parse_container_image): false with `error` when the endpoint does not
+// answer 200 or its reply does not read.
+bool read_container_image(
 		const std::string &uri, std::string &out, std::string &error, int timeout_ms = 3000);
 
 // Where the bind comes from.

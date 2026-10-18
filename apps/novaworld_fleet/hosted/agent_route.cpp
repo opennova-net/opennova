@@ -168,28 +168,48 @@ crow::response AgentRoutes::sync(const crow::request &req, uint64_t raw_id) {
 			return refuse(peer, "sync", id, why);
 		if (!from_machine(peer, *machine))
 			return refuse(peer, "sync", id, "a request from an address that is not the machine's");
-		const auto protocol = protocol_of(req.body);
-		if (protocol && *protocol != kAgentProtocol) {
-			const std::string reason = "its agent speaks protocol " + std::to_string(*protocol) +
-					", not " + std::to_string(kAgentProtocol);
-			// A lost machine stays lost: its agent is never heard, so the
-			// supervisor's describe and lost_end_ms end it and its servers move.
-			// Drained again at every call, it went lost and back for good.
-			if (transition_machine(db, id, { FleetMachineState::Booting, FleetMachineState::Ready },
-						FleetMachineState::Draining, reason))
-				std::fprintf(stderr, "[fleet] WARN machine %lld drains: %s\n",
-						static_cast<long long>(id), reason.c_str());
+		// The envelope first, in whatever protocol the agent speaks.
+		AgentEnvelope envelope;
+		std::string error;
+		if (!decode_agent_envelope(req.body, envelope, error))
+			return refuse(peer, "sync", id, "a sync whose envelope does not read: " + error);
+		if (envelope.protocol != kAgentProtocol) {
+			// Held: heard, acted on in nothing, drained only once it lasts.
+			int64_t mismatch_s = 0;
+			const auto held = record_held_sync(db, id, envelope, mismatch_s);
+			if (!held)
+				return refuse(peer, "sync", id, "a machine that no longer syncs");
+			const std::string reason = "its agent speaks protocol " +
+					std::to_string(envelope.protocol) + ", not " + std::to_string(kAgentProtocol);
+			if (mismatch_s >= kProtocolMismatchDrainS &&
+					transition_machine(db, id,
+							{ FleetMachineState::Booting, FleetMachineState::Ready },
+							FleetMachineState::Draining,
+							reason + " for " + std::to_string(mismatch_s / 60) + " min")) {
+				std::fprintf(stderr, "[fleet] WARN machine %lld drains: %s for %lld s\n",
+						static_cast<long long>(id), reason.c_str(),
+						static_cast<long long>(mismatch_s));
+			} else if (throttle_->admit(peer)) {
+				std::fprintf(stderr,
+						"[fleet] WARN machine %lld holds: %s (agent %s, image %s); it drains after "
+						"%lld s of it\n",
+						static_cast<long long>(id), reason.c_str(),
+						loggable(envelope.agent_version).c_str(),
+						loggable(envelope.agent_image.empty() ? "none" : envelope.agent_image)
+								.c_str(),
+						static_cast<long long>(kProtocolMismatchDrainS));
+			}
 			return not_found();
 		}
 		SyncRequest request;
-		std::string error;
 		if (!decode_sync_request(req.body, request, error))
 			return refuse(peer, "sync", id, "a report that does not read: " + error);
 		// A listing that failed: the agent is heard from, the slots' reports stand,
 		// and the answer is one the agent acts on nothing of.
 		const std::optional<FleetMachineRow> after = request.listing_failed
-				? record_unlisted_sync(db, id, request.agent_version)
-				: record_sync(db, id, request.agent_version, request.containers);
+				? record_unlisted_sync(db, id, request.agent_version, request.agent_image)
+				: record_sync(
+						  db, id, request.agent_version, request.containers, request.agent_image);
 		if (!after)
 			return refuse(peer, "sync", id, "a machine that no longer syncs");
 		if (request.listing_failed && throttle_->admit(peer))
@@ -201,9 +221,12 @@ crow::response AgentRoutes::sync(const crow::request &req, uint64_t raw_id) {
 					loggable(after->agent_version).c_str());
 
 		const FleetDecision decision = desired_.sync(db, *after, request.containers);
+		// The containers whose files the agent no longer needs: reported running or
+		// exited (one reported starting waits, and a replaced agent needs them again).
 		std::set<std::string> reported;
 		for (const ContainerReport &c : request.containers)
-			reported.insert(c.name);
+			if (c.state != ContainerState::Starting)
+				reported.insert(c.name);
 		SyncReply reply;
 		reply.drain = decision.drain || after->state == FleetMachineState::Draining;
 		reply.trees = decision.trees;

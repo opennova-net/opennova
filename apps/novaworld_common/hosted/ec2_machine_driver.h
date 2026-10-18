@@ -3,27 +3,21 @@
 // The cloud MachineDriver (ONNET_HOSTED_PROVIDER=ec2): each fleet machine is
 // an EC2 machine launched from the launch template of its kind
 // (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, {"shared": "lt-...", "own": "lt-..."};
-// infra/aws/fleet.tf: the deployment's fleet image, Canonical's Ubuntu or one
-// `fleet bake-image` made with docker and the AWS CLI installed, the kind's
-// machine type, its root volume (the trees the agent fetches live there), the
-// machines' security group, their instance profile (which reads the
-// deployment's trees in the object store), IMDSv2 required and
-// InstanceInitiatedShutdownBehavior=terminate; no user-data). Its user-data is
-// machine/machine_user_data.sh with the machine's values filled in: the
-// fleet's internal listener by its URL (ONNET_INTERNAL_URL, a name the
-// deployment's Cloud Map namespace keeps on whichever fleet task leads) and
-// that URL's port, the machine's id and one-time bootstrap
-// token, the serve image its containers run, the hostd image the agent is
-// copied out of, and the machines' CloudWatch log group
-// (ONNET_HOSTED_EC2_LOG_GROUP) with the region. The script installs docker and
-// the AWS CLI, makes the trees root (/opt/game, where the agent fetches each
-// tree the service names into its own directory, ADR 0064), fences the slots'
-// users off the instance metadata and off the internal port on every
-// destination (no address of the fleet's is pinned in a firewall rule),
-// starts opennova-hostd (apps/hostd), which redeems the token, and ships the
-// agent's log and its containers' output to that log group (a stream per slot,
-// <machine id>/slot-<k>, and <machine id>/hostd). A machine is terminated at
-// its end, never stopped.
+// infra/aws/fleet.tf: the ECS-optimized Amazon Linux 2023 image the
+// deployment pins by name (fleet_ami), the kind's machine type, its root
+// volume (the trees the agent fetches live there), the machines' security
+// group, their instance profile (the ECS agent's registration and the logs),
+// IMDSv2 required and InstanceInitiatedShutdownBehavior=terminate; no
+// user-data). Its user-data is machine/machine_user_data.sh with the
+// machine's values filled in: the fleet cluster it joins
+// (ONNET_HOSTED_EC2_CLUSTER, infra/aws/fleet_agent.tf's), the machine's id and
+// kind, and its one-time bootstrap token. The script writes the token and the
+// machine id for the agent, reserves the slots' ports and points the image's
+// ECS agent at the cluster with the machine's id and kind as its instance
+// attributes; the cluster's daemon service then runs opennova-hostd
+// (apps/hostd) on the machine, which fences the slots, redeems the token at
+// the fleet's internal listener and runs the servers. A machine is terminated
+// at its end, never stopped.
 //
 // The driver runs the AWS CLI v2 through a CommandRunner (an argv array, no
 // shell, a timeout), its credentials the worker task's IAM role. Every call
@@ -115,25 +109,18 @@ struct Ec2MachineConfig {
 	// and "own"): "lt-<id>", or "lt-<id>:<version>" to pin one.
 	std::string shared_template;
 	std::string own_template;
-	// The serve image the machines' containers run, pre-pulled at their boot
-	// and named by their bootstrap (ONNET_HOSTED_SERVE_IMAGE, pinned at deploy).
+	// The serve image the machines' containers run, named by their bootstrap
+	// (ONNET_HOSTED_SERVE_IMAGE, pinned at deploy).
 	std::string serve_image;
-	// The image opennova-hostd is copied out of (ONNET_HOSTED_HOSTD_IMAGE,
-	// pinned at deploy: an opennova-serve build); empty, the serve image.
-	std::string hostd_image;
-	// The fleet's internal listener as the machines reach it
-	// (ONNET_INTERNAL_URL, http://<host>:<port>; in a deployment the name its
-	// Cloud Map namespace keeps on the fleet leader, never a fixed address): the
-	// agent's --service, and its port the one the slots are fenced off.
-	std::string service_url;
+	// The fleet cluster the machines join as ECS container instances
+	// (ONNET_HOSTED_EC2_CLUSTER, opennova-<deployment>-fleet), whose daemon
+	// service runs opennova-hostd on each.
+	std::string cluster;
 	// The fleet's private IPv4, its internal listener's bind
 	// (ONNET_INTERNAL_HTTP_BIND), which its admin links connect from: the
 	// machines' admin.cfg admits its network (admin_pattern). The
 	// supervisor's profile alone reads it; check_config does not.
 	std::string admin_address;
-	// The log group the machines write (ONNET_HOSTED_EC2_LOG_GROUP; fleet.tf's
-	// /opennova/<deployment>/machines, which the machine role may write alone).
-	std::string log_group;
 	std::string machine_script; // machine/machine_user_data.sh's text (ONNET_HOSTED_MACHINE_SCRIPT)
 	// Owner-only: the user-data files the CLI reads. The worker's, made before
 	// it constructs the driver (check_config does not ask for it).
@@ -150,14 +137,10 @@ struct Ec2MachineConfig {
 
 // The values one machine's user-data carries.
 struct MachineUserData {
-	std::string service_url; // the internal listener's, http://<host>:<port>
-	uint16_t service_port = 0; // that URL's port
+	std::string cluster; // the fleet cluster its ECS agent joins
 	int64_t machine_id = 0;
+	MachineKind kind = MachineKind::Shared;
 	std::string bootstrap_token;
-	std::string serve_image;
-	std::string hostd_image;
-	std::string log_group; // the machines' CloudWatch log group
-	std::string region; // its region (the machine's own)
 };
 
 class Ec2MachineDriver : public MachineDriver {
@@ -167,21 +150,17 @@ public:
 	static constexpr const char *kTagMachineKind = "opennova:machine-kind";
 	static constexpr const char *kTagMachineId = "opennova:machine-id";
 	// The machine script's blanks, each filled in single quotes.
-	static constexpr const char *kBlankServiceUrl = "@OPENNOVA_SERVICE_URL@";
-	static constexpr const char *kBlankServicePort = "@OPENNOVA_SERVICE_PORT@";
+	static constexpr const char *kBlankCluster = "@OPENNOVA_ECS_CLUSTER@";
 	static constexpr const char *kBlankMachineId = "@OPENNOVA_MACHINE_ID@";
+	static constexpr const char *kBlankMachineKind = "@OPENNOVA_MACHINE_KIND@";
 	static constexpr const char *kBlankMachineToken = "@OPENNOVA_MACHINE_TOKEN@";
-	static constexpr const char *kBlankServeImage = "@OPENNOVA_SERVE_IMAGE@";
-	static constexpr const char *kBlankHostdImage = "@OPENNOVA_HOSTD_IMAGE@";
-	static constexpr const char *kBlankLogGroup = "@OPENNOVA_LOG_GROUP@";
-	static constexpr const char *kBlankRegion = "@OPENNOVA_REGION@";
 	// EC2's raw user-data cap.
 	static constexpr size_t kMaxUserDataBytes = 16 * 1024;
 	// ONNET_HOSTED_DEPLOYMENT's longest: its client tokens then fit EC2's 64.
 	static constexpr size_t kMaxDeploymentBytes = 32;
 	// From the launch to the agent's first report: EC2's pending, cloud-init,
-	// the docker and AWS CLI installs (their retries), the serve image's pull
-	// and the agent's bootstrap.
+	// the ECS agent's registration, the hostd image's pull, the agent's start
+	// and its bootstrap.
 	static constexpr uint64_t kBootTimeoutMs = 15 * 60 * 1000;
 
 	using Clock = std::function<uint64_t()>;
@@ -202,6 +181,8 @@ public:
 	// a blank, or the result passes kMaxUserDataBytes.
 	static std::optional<std::string> render_user_data(
 			const std::string &script, const MachineUserData &values);
+	// An ECS cluster's name: 1..255 letters, digits, '-' and '_'.
+	static bool is_cluster_name(std::string_view name);
 
 	// The supervisor's view of the machines `config` launches: no driver needed.
 	static MachineProfile profile(const Ec2MachineConfig &config);

@@ -18,13 +18,12 @@
 // list_tagged's scope and its throw, the slots' ports, and every CLI failure,
 // timeout and malformed reply; its config checks and the data sets' volume
 // labels. The shipped machine script (hosted/machine/machine_user_data.sh):
-// its blanks and their render, no xtrace, the slots' ports reserved before
-// anything runs, the data sets mounted by label read-only, the fences (the
-// metadata service and the internal port on every destination, for every
-// slot's user) applied and checked before the agent starts, the agent copied
-// out of the serve image and its unit reaching the fleet by its URL, sending
-// the containers' output to the machines' log group, and the agent's own journal
-// relayed there through docker's awslogs driver. The settings
+// its blanks and their render, no xtrace, the token and the machine id written
+// owner-only in an owner-only directory, the slots' ports reserved, and the
+// ECS agent's config (the fleet cluster, the machine's id and kind as its
+// instance attributes, task roles in host mode, no privileged task, never the
+// cleanup of images ECS did not pull), with nothing of the machine set up
+// before (no docker install, no fence, no unit, no pull). The settings
 // (hosted/fleet_config.h): the defaults, every variable's read and its refusals. And the docker
 // driver, the local stack's (hosted/docker_machine_driver.h), against an engine in memory: its
 // config checks and profile, the machine's command line and create body, the token's archive,
@@ -78,7 +77,7 @@ namespace {
 
 constexpr const char *kAws = "/usr/local/bin/aws";
 constexpr const char *kRegion = "us-east-1";
-constexpr const char *kLogGroup = "/opennova/server/machines";
+constexpr const char *kCluster = "opennova-server-fleet";
 constexpr const char *kShared = "lt-0123456789abcdef0";
 constexpr const char *kOwn = "lt-0abcdef0123456789";
 constexpr const char *kSubnet = "subnet-0123456789abcdef0";
@@ -88,7 +87,7 @@ constexpr const char *kDeployment = "opennova-server";
 constexpr const char *kImage = "ghcr.io/opennova-net/opennova-serve@sha256:"
 							   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 constexpr const char *kHostdImage =
-		"ghcr.io/opennova-net/opennova-serve@sha256:"
+		"ghcr.io/opennova-net/opennova-hostd@sha256:"
 		"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 // The fleet's private address (its internal listener's bind, what admin.cfg
 // admits) and its internal listener's URL by name, as the machines reach it.
@@ -293,9 +292,8 @@ hosted::Ec2MachineConfig config_in(const std::string &scratch) {
 	c.shared_template = kShared;
 	c.own_template = std::string(kOwn) + ":7";
 	c.serve_image = kImage;
-	c.service_url = kServiceUrl;
+	c.cluster = kCluster;
 	c.admin_address = kService;
-	c.log_group = kLogGroup;
 	c.machine_script = machine_script();
 	c.scratch_dir = scratch;
 	c.describe_ttl_ms = kTtl;
@@ -412,10 +410,12 @@ int test_config_checks(const std::string &scratch) {
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.aws_cli = "aws"; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.region = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.region = "US East 1"; }));
-	// The machines' log group: required, and nothing that could leave its quotes.
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.log_group = ""; }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.log_group = "/opennova/x y"; }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.log_group = "/opennova/'x"; }));
+	// The fleet cluster: required, and nothing that could leave its quotes.
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.cluster = ""; }));
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.cluster = "opennova x"; }));
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.cluster = "opennova'x"; }));
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.cluster = std::string(256, 'c'); }));
+	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.cluster = "opennova_dev-fleet"; }));
 	TEST_EXPECT(
 			refused([](hosted::Ec2MachineConfig &c) { c.subnets = { "sg-0123456789abcdef0" }; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.subnets.clear(); }));
@@ -444,27 +444,18 @@ int test_config_checks(const std::string &scratch) {
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.serve_image = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.serve_image = "--privileged"; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.serve_image = "ghcr.io/x y"; }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.hostd_image = "--privileged"; }));
-	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.hostd_image = kHostdImage; }));
-	// The internal listener the machines reach: http://<host>:<port>, by name or address,
-	// nothing a shell word or a URL would read otherwise.
-	TEST_EXPECT(!refused(
-			[](hosted::Ec2MachineConfig &c) { c.service_url = "http://10.44.0.10:8070"; }));
-	for (const char *url : { "", "fleet:8070", "https://fleet:8070", "http://fleet",
-				 "http://fleet:", "http://fleet:0", "http://fleet:70000", "http://user@fleet:8070",
-				 "http://fleet:8070/", "http://con troller:8070", "http://con'troller:8070",
-				 "http://:8070", "http://-fleet:8070", "http://fleet:80x" }) {
-		hosted::Ec2MachineConfig c = good;
-		c.service_url = url;
-		if (hosted::Ec2MachineDriver::check_config(c).empty())
-			std::fprintf(stderr, "  ONNET_INTERNAL_URL %s was taken\n", url);
-		TEST_EXPECT(!hosted::Ec2MachineDriver::check_config(c).empty());
-	}
 	{
+		// The internal listener's URL as the docker driver reads it.
 		std::string host;
 		uint16_t port = 0;
 		TEST_EXPECT(hosted::Ec2MachineDriver::parse_service_url(kServiceUrl, host, port) &&
 				host == "fleet.prod.opennova.internal" && port == 8070);
+		for (const char *url : { "", "fleet:8070", "https://fleet:8070", "http://fleet",
+					 "http://fleet:", "http://fleet:0", "http://fleet:70000",
+					 "http://user@fleet:8070", "http://fleet:8070/", "http://con troller:8070",
+					 "http://con'troller:8070", "http://:8070", "http://-fleet:8070",
+					 "http://fleet:80x" })
+			TEST_EXPECT(!hosted::Ec2MachineDriver::parse_service_url(url, host, port));
 	}
 	// The admin address is the fleet's to check (its profile), and the scratch
 	// directory the worker's to make (the driver): every program asks check_config alike.
@@ -480,131 +471,59 @@ int test_machine_script(const std::string &) {
 	using hosted::Ec2MachineDriver;
 	const std::string script = machine_script();
 	TEST_EXPECT(!script.empty());
-	for (const char *blank : { Ec2MachineDriver::kBlankServiceUrl,
-				 Ec2MachineDriver::kBlankServicePort, Ec2MachineDriver::kBlankMachineId,
-				 Ec2MachineDriver::kBlankMachineToken, Ec2MachineDriver::kBlankServeImage,
-				 Ec2MachineDriver::kBlankHostdImage,
-				 Ec2MachineDriver::kBlankLogGroup, Ec2MachineDriver::kBlankRegion })
+	for (const char *blank : { Ec2MachineDriver::kBlankCluster, Ec2MachineDriver::kBlankMachineId,
+				 Ec2MachineDriver::kBlankMachineKind, Ec2MachineDriver::kBlankMachineToken })
 		TEST_EXPECT(script.find(blank) != std::string::npos);
-	TEST_EXPECT(script.find("@OPENNOVA_DATA_SETS@") == std::string::npos);
 	TEST_EXPECT(!traces_commands(script));
 	TEST_EXPECT(traces_commands("set -euxo pipefail\n") && traces_commands("  set -o xtrace\n"));
-	// The token: written by a builtin to an owner-only file, then forgotten.
-	TEST_EXPECT(runs_line(script, "printf '%s\\n' \"$MACHINE_TOKEN\" > \"$TOKEN_FILE\""));
-	TEST_EXPECT(runs_line(script, "readonly TOKEN_FILE=/etc/opennova/hostd.token"));
-	TEST_EXPECT(runs_line(script, "chmod 0600 \"$TOKEN_FILE\"") &&
-			runs_line(script, "unset MACHINE_TOKEN"));
 	TEST_EXPECT(runs_line(script, "umask 077"));
-	// Every slot's ports leave the ephemeral range before anything runs (the
-	// apt and pull sockets), and at every boot.
-	const size_t reserve =
-			line_at(script, "sysctl -w \"net.ipv4.ip_local_reserved_ports=$SLOT_PORTS\"");
+	// The token and the machine id: written by a builtin to owner-only files in an
+	// owner-only directory, the token then forgotten.
+	TEST_EXPECT(runs_line(script, "install -d -m 0700 /etc/opennova"));
+	TEST_EXPECT(runs_line(script, "printf '%s\\n' \"$MACHINE_TOKEN\" > /etc/opennova/hostd.token"));
+	TEST_EXPECT(runs_line(script, "printf '%s\\n' \"$MACHINE_ID\" > /etc/opennova/machine-id"));
+	TEST_EXPECT(
+			runs_line(script, "chmod 0600 /etc/opennova/hostd.token /etc/opennova/machine-id") &&
+			runs_line(script, "unset MACHINE_TOKEN"));
+	// Every slot's ports leave the ephemeral range, now and at every boot.
 	TEST_EXPECT(runs_line(script, "readonly SLOT_PORTS=32768-32831"));
-	TEST_EXPECT(reserve != std::string::npos && reserve < line_at(script, "apt_get update"));
+	TEST_EXPECT(runs_line(script, "sysctl -w \"net.ipv4.ip_local_reserved_ports=$SLOT_PORTS\""));
 	TEST_EXPECT(runs_line(script, "/etc/sysctl.d/60-opennova-slots.conf"));
 	// The two port ranges are slots.h's, all 32 slots of both.
 	TEST_EXPECT(hosted::slot_game_port(0) == 32768 &&
 			hosted::slot_admin_port(hosted::kMaxSlots - 1) == 32831);
 	TEST_EXPECT(hosted::slot_uid(0) == 10001 && hosted::slot_uid(hosted::kMaxSlots - 1) == 10032);
-	// Docker with no user-namespace remapping, and unzip for the AWS CLI's zip.
-	TEST_EXPECT(runs_line(script, "install --no-install-recommends docker.io iptables curl unzip"));
-	// A baked image (docker there and held) skips the install and its apt-get update.
-	TEST_EXPECT(runs_line(script, "command -v unzip >/dev/null && grep -qx docker.io <<<\"$held\"; then") &&
-			line_at(script, "grep -qx docker.io") < line_at(script, "apt_get update"));
-	TEST_EXPECT(runs_line(script, "end_machine \"docker remaps user namespaces\""));
-	// The AWS CLI v2 the agent syncs the trees with: the release the service's images carry
-	// (apps/novaworld_common/Dockerfile), its zip checked against its SHA-256, skipped where an
-	// image has one.
-	TEST_EXPECT(runs_line(script, "readonly AWSCLI_VERSION=2.36.50"));
+	// The ECS agent's config, written before the agent starts: the fleet cluster, the
+	// machine's id and kind as instance attributes (hostd checks its id against them),
+	// task roles in host mode, no privileged task.
+	TEST_EXPECT(runs_line(script, "cat > /etc/ecs/ecs.config <<CONFIG"));
+	TEST_EXPECT(runs_line(script, "ECS_CLUSTER=$CLUSTER"));
 	TEST_EXPECT(runs_line(script,
-			"readonly AWSCLI_SHA256=0f15318b3edc4133ad71ce550303babdf2b5dc66bee6b91b4ac8bf05407a78bf"));
-	TEST_EXPECT(runs_line(script, "if command -v aws >/dev/null; then"));
-	TEST_EXPECT(runs_line(script,
-			"\"https://awscli.amazonaws.com/awscli-exe-linux-x86_64-$AWSCLI_VERSION.zip\" -o /tmp/awscliv2.zip"));
-	TEST_EXPECT(runs_line(script, "echo \"$AWSCLI_SHA256  /tmp/awscliv2.zip\" | sha256sum -c -"));
-	TEST_EXPECT(runs_line(script, "/tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin"));
-	TEST_EXPECT(runs_line(script, "readonly AWS_CLI=/usr/local/bin/aws"));
-	// The trees root, made and nothing mounted: no volume, no label, no data set.
-	TEST_EXPECT(runs_line(script, "readonly TREES_ROOT=/opt/game"));
-	TEST_EXPECT(runs_line(script, "install -d -m 0755 \"$TREES_ROOT\""));
-	for (const char *gone : { "DATA_SETS", "by-label", "LABEL=", "fstab", "mount \"", "blkid", "/dev/sd", "lsblk", "UUID=",
-				 "jox01" })
-		TEST_EXPECT(script.find(gone) == std::string::npos);
-	// The fences: every slot's UID refused the metadata service and the internal port on
-	// every destination (the fleet's address moves with it: no rule names one), at
-	// every start of the agent, and checked for the first and the last slot before it.
-	TEST_EXPECT(runs_line(script, "-m owner --uid-owner 10001-10032 -j REJECT"));
-	TEST_EXPECT(runs_line(script, "fence -d 169.254.169.254"));
-	TEST_EXPECT(runs_line(script, "fence -p tcp --dport \"$SERVICE_PORT\""));
-	// And every slot's admin port (admin.cfg admits the fleet's network, the
-	// machine's own address included): no slot reaches a sibling's remote admin.
-	TEST_EXPECT(runs_line(script, "fence -p tcp --dport 32800:32831"));
-	TEST_EXPECT(script.find("SERVICE_ADDRESS") == std::string::npos);
-	TEST_EXPECT(runs_line(script, "printf 'SERVICE_PORT=%s\\n' \"$SERVICE_PORT\""));
-	TEST_EXPECT(runs_line(script,
-			"ip6tables -w 5 -I OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001-10032 -j "
-			"REJECT"));
-	TEST_EXPECT(runs_line(script, "ExecStartPre=/usr/local/sbin/opennova-machine-fence"));
-	TEST_EXPECT(runs_line(script, "for uid in \"$FIRST_SLOT_UID\" \"$LAST_SLOT_UID\"; do"));
-	TEST_EXPECT(runs_line(script, "readonly FIRST_SLOT_UID=10001") &&
-			runs_line(script, "readonly LAST_SLOT_UID=10032"));
-	TEST_EXPECT(runs_line(script, "\"$SERVICE_URL/\""));
-	TEST_EXPECT(runs_line(script, "[ \"$rc\" -eq 7 ] || end_machine"));
-	const size_t check = line_at(script, "[ \"$rc\" -eq 7 ] || end_machine");
-	const size_t agent = line_at(script, "systemctl enable --now opennova-hostd.service");
-	TEST_EXPECT(agent != std::string::npos && check < agent);
-	// The serve image pulled, the agent out of the hostd image, under systemd, restarted always.
-	TEST_EXPECT(runs_line(script, "pull \"$SERVE_IMAGE\""));
-	TEST_EXPECT(
-			runs_line(script, "[ \"$HOSTD_IMAGE\" = \"$SERVE_IMAGE\" ] || pull \"$HOSTD_IMAGE\""));
-	TEST_EXPECT(runs_line(
-			script, "docker create --entrypoint /usr/local/bin/opennova-hostd \"$HOSTD_IMAGE\""));
-	TEST_EXPECT(runs_line(
-			script, "docker cp \"$container:/usr/local/bin/opennova-hostd\" \"$HOSTD.new\""));
-	TEST_EXPECT(runs_line(script, "readonly HOSTD=/usr/local/bin/opennova-hostd"));
-	// The agent with its trees root, the CLI it syncs with, and its log group.
-	TEST_EXPECT(runs_line(script,
-			"ExecStart=$HOSTD --service $SERVICE_URL --machine $MACHINE_ID "
-			"--trees-root $TREES_ROOT --aws $AWS_CLI --log-group $LOG_GROUP --log-region $REGION"));
-	TEST_EXPECT(runs_line(script, "Restart=always"));
-	// The agent's own journal to the same log group, its stream <machine id>/hostd,
-	// through docker's awslogs driver, never blocking, and never ending the machine.
-	TEST_EXPECT(runs_line(script,
-			"journalctl --unit=opennova-hostd.service --boot --lines=all "
-			"--follow --quiet"));
-	TEST_EXPECT(runs_line(script, "--cursor-file=/var/lib/opennova-hostd-log/cursor |"));
-	TEST_EXPECT(runs_line(script,
-			"--log-driver awslogs --log-opt \"awslogs-region=$REGION\" "
-			"--log-opt \"awslogs-group=$LOG_GROUP\""));
-	TEST_EXPECT(runs_line(script,
-			"--log-opt \"awslogs-stream=$MACHINE_ID/hostd\" --log-opt "
-			"mode=non-blocking"));
-	TEST_EXPECT(runs_line(script, "--entrypoint /usr/bin/cat \"$HOSTD_IMAGE\" >/dev/null"));
-	TEST_EXPECT(runs_line(script, "--network none --read-only --cap-drop ALL"));
-	TEST_EXPECT(runs_line(script, "systemctl enable --now opennova-hostd-log.service || log"));
-	TEST_EXPECT(agent < line_at(script, "systemctl enable --now opennova-hostd-log.service"));
+			"ECS_INSTANCE_ATTRIBUTES={\"machine-id\": \"$MACHINE_ID\", \"kind\": "
+			"\"$MACHINE_KIND\"}"));
+	TEST_EXPECT(runs_line(script, "ECS_ENABLE_TASK_IAM_ROLE=true"));
+	TEST_EXPECT(runs_line(script, "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true"));
+	TEST_EXPECT(runs_line(script, "ECS_DISABLE_PRIVILEGED=true"));
+	// Never the cleanup of images ECS did not pull: it would delete the serve images.
+	TEST_EXPECT(script.find("ECS_ENABLE_UNTRACKED_IMAGE_CLEANUP") == std::string::npos);
+	// Nothing of the old machine: the image and its ECS daemon bring the rest.
+	for (const char *gone : { "apt", "docker ", "iptables", "systemctl enable", "awscli",
+				 "opennova-hostd.service", "journalctl", "docker pull", "fence" })
+		TEST_EXPECT(!runs_line(script, gone));
 	TEST_EXPECT(script.size() < Ec2MachineDriver::kMaxUserDataBytes - 1024);
 
 	hosted::MachineUserData values;
-	values.service_url = kServiceUrl;
-	values.service_port = 8070;
+	values.cluster = kCluster;
 	values.machine_id = 12;
+	values.kind = MachineKind::Own;
 	values.bootstrap_token = hosted::random_secret(hosted::kMachineTokenChars);
-	values.serve_image = kImage;
-	values.hostd_image = kHostdImage;
-	values.log_group = kLogGroup;
-	values.region = kRegion;
 	const auto rendered = Ec2MachineDriver::render_user_data(script, values);
 	TEST_EXPECT(rendered);
 	TEST_EXPECT(rendered->find("@OPENNOVA_") == std::string::npos);
-	TEST_EXPECT(assigned(*rendered, "SERVICE_URL") == kServiceUrl);
-	TEST_EXPECT(assigned(*rendered, "SERVICE_PORT") == "8070");
+	TEST_EXPECT(assigned(*rendered, "CLUSTER") == kCluster);
 	TEST_EXPECT(assigned(*rendered, "MACHINE_ID") == "12");
+	TEST_EXPECT(assigned(*rendered, "MACHINE_KIND") == "own");
 	TEST_EXPECT(assigned(*rendered, "MACHINE_TOKEN") == values.bootstrap_token);
-	TEST_EXPECT(assigned(*rendered, "SERVE_IMAGE") == kImage);
-	TEST_EXPECT(assigned(*rendered, "HOSTD_IMAGE") == kHostdImage);
-	TEST_EXPECT(assigned(*rendered, "LOG_GROUP") == kLogGroup);
-	TEST_EXPECT(assigned(*rendered, "REGION") == kRegion);
 	// The token appears once, in its assignment.
 	TEST_EXPECT(rendered->find(values.bootstrap_token) == rendered->rfind(values.bootstrap_token));
 	// A value that could leave its quotes, or one outside its shape, is refused.
@@ -615,20 +534,9 @@ int test_machine_script(const std::string &) {
 	};
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.bootstrap_token[3] = '\''; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.bootstrap_token.pop_back(); }));
-	TEST_EXPECT(refuses(
-			[](hosted::MachineUserData &v) { v.service_url = "http://x'; reboot; ':8070"; }));
-	TEST_EXPECT(
-			refuses([](hosted::MachineUserData &v) { v.service_url = "http://10.0.0.1:8070/x"; }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.service_port = 0; }));
-	// The fence's port is the URL's own.
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.service_port = 8071; }));
+	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.cluster = "x'; reboot; '"; }));
+	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.cluster = ""; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.machine_id = 0; }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.serve_image = "img'"; }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.hostd_image = ""; }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.hostd_image = "-x"; }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.log_group = ""; }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.log_group = "/x'; reboot; '"; }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.region = "us east 1"; }));
 	TEST_EXPECT(!Ec2MachineDriver::render_user_data("#!/bin/bash\n", values));
 	return 0;
 }
@@ -692,14 +600,9 @@ int test_launch(const std::string &scratch) {
 	// The user-data: the machine script with this machine's values, and the file gone after.
 	TEST_EXPECT(assigned(call.user_data, "MACHINE_ID") == "12");
 	TEST_EXPECT(assigned(call.user_data, "MACHINE_TOKEN") == launch.bootstrap_token);
-	TEST_EXPECT(assigned(call.user_data, "SERVICE_URL") == kServiceUrl);
-	TEST_EXPECT(assigned(call.user_data, "SERVICE_PORT") == "8070");
-	TEST_EXPECT(assigned(call.user_data, "SERVE_IMAGE") == kImage);
-	// No hostd image of its own: the serve image's agent.
-	TEST_EXPECT(assigned(call.user_data, "HOSTD_IMAGE") == kImage);
-	// The machines' log group, in the driver's own region.
-	TEST_EXPECT(assigned(call.user_data, "LOG_GROUP") == kLogGroup);
-	TEST_EXPECT(assigned(call.user_data, "REGION") == kRegion);
+	// The fleet cluster its ECS agent joins, and its kind.
+	TEST_EXPECT(assigned(call.user_data, "CLUSTER") == kCluster);
+	TEST_EXPECT(assigned(call.user_data, "MACHINE_KIND") == "shared");
 	TEST_EXPECT(!call.user_data.empty() && !fs::exists(fs::u8path(call.user_data_path)));
 	// The token is in the user-data alone, never on the command line.
 	for (const std::string &arg : argv)
@@ -963,7 +866,6 @@ int test_launch_zones(const std::string &scratch) {
 
 int test_launch_per_kind(const std::string &scratch) {
 	hosted::Ec2MachineConfig config = config_in(scratch);
-	config.hostd_image = kHostdImage;
 	uint64_t now = 1000;
 	StubRunner runner;
 	hosted::Ec2MachineDriver driver(config, runner, [&now] { return now; });
@@ -989,9 +891,9 @@ int test_launch_per_kind(const std::string &scratch) {
 	TEST_EXPECT(
 			rig.runner.calls[1].argv[12].find(
 					"{\"Key\":\"opennova:machine-kind\",\"Value\":\"own\"}") != std::string::npos);
-	// A hostd image of its own: the agent comes out of it, the containers run the serve image.
-	TEST_EXPECT(assigned(rig.runner.calls[1].user_data, "HOSTD_IMAGE") == kHostdImage);
-	TEST_EXPECT(assigned(rig.runner.calls[1].user_data, "SERVE_IMAGE") == kImage);
+	// Each machine's ECS attributes name its kind.
+	TEST_EXPECT(assigned(rig.runner.calls[0].user_data, "MACHINE_KIND") == "shared");
+	TEST_EXPECT(assigned(rig.runner.calls[1].user_data, "MACHINE_KIND") == "own");
 	return 0;
 }
 
@@ -1307,11 +1209,11 @@ int test_fleet_config() {
 		TEST_EXPECT(c.placement.shared_slots == 12 && c.placement.max_shared == 2 &&
 				c.placement.max_own == 2);
 		TEST_EXPECT(c.idle_minutes == 30 && c.slot_memory_mb == 512 && c.slot_cpus == 1.0);
-		TEST_EXPECT(c.slot_pids == 128 && c.serve_image.empty());
+		TEST_EXPECT(c.slot_pids == 128 && c.serve_image.empty() && c.image_id.empty());
 		hosted::DriverConfig d;
 		TEST_EXPECT(hosted::parse_driver_config(env_of({}), c, d, errors) && errors.empty());
 		TEST_EXPECT(d.machine_script_path == "/app/hosted/machine_user_data.sh");
-		TEST_EXPECT(d.internal_url.empty() && d.ec2.service_url.empty() &&
+		TEST_EXPECT(d.internal_url.empty() && d.ec2.cluster.empty() &&
 				d.docker.service_url.empty() && d.docker.engine_url.empty());
 		TEST_EXPECT(d.ec2.admin_address == "127.0.0.1");
 	}
@@ -1327,7 +1229,8 @@ int test_fleet_config() {
 				{ "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES",
 						"{\"own\": \" lt-0abcdef0123456789:3 \", \"shared\": \"" +
 								std::string(kShared) + "\"}" },
-				{ "ONNET_HOSTED_EC2_REGION", kRegion }, { "ONNET_HOSTED_EC2_LOG_GROUP", kLogGroup },
+				{ "ONNET_HOSTED_EC2_REGION", kRegion }, { "ONNET_HOSTED_EC2_CLUSTER", kCluster },
+				{ "ONNET_FLEET_IMAGE_ID", "ami-0123456789abcdef0" },
 				{ "ONNET_HOSTED_EC2_SUBNETS", std::string(" ") + kSubnet + " , " + kSubnetB + "," },
 				{ "ONNET_HOSTED_DEPLOYMENT", kDeployment }, { "ONNET_HOSTED_SERVE_IMAGE", kImage },
 				{ "ONNET_HOSTED_HOSTD_IMAGE", kHostdImage },
@@ -1349,7 +1252,7 @@ int test_fleet_config() {
 		TEST_EXPECT(c.placement.shared_slots == 16 && c.placement.max_shared == 3 &&
 				c.placement.max_own == 0);
 		TEST_EXPECT(c.idle_minutes == 45 && c.slot_memory_mb == 768 && c.slot_cpus == 0.5);
-		TEST_EXPECT(c.serve_image == kImage);
+		TEST_EXPECT(c.serve_image == kImage && c.image_id == "ami-0123456789abcdef0");
 		// What the agent routes take from it: its networks.
 		const hosted::AgentRouteConfig routes = hosted::agent_route_config(c);
 		TEST_EXPECT(routes.admitted.size() == 2);
@@ -1361,16 +1264,17 @@ int test_fleet_config() {
 				d.ec2.subnets == std::vector<std::string>({ kSubnet, kSubnetB }) &&
 				d.ec2.deployment == kDeployment);
 		TEST_EXPECT(d.ec2.serve_image == kImage && d.ec2.aws_cli == "/opt/aws/bin/aws");
-		TEST_EXPECT(d.ec2.hostd_image == kHostdImage && d.ec2.log_group == kLogGroup);
-		// The machines reach the fleet by its URL; its admin links come from its bind.
-		TEST_EXPECT(d.internal_url == kServiceUrl && d.ec2.service_url == kServiceUrl);
+		TEST_EXPECT(d.ec2.cluster == kCluster);
+		// The local machines reach the fleet by its URL; its admin links come from its bind.
+		TEST_EXPECT(d.internal_url == kServiceUrl);
 		TEST_EXPECT(d.ec2.admin_address == "10.44.0.10");
 		TEST_EXPECT(d.machine_script_path == "/srv/machine.sh");
-		// The docker driver's: its own three, the deployment, image, URL and bind as ec2's.
+		// The docker driver's: its own three and its image (the hostd image), the
+		// deployment, URL and bind as ec2's.
 		TEST_EXPECT(d.docker.engine_url == "http://docker-api:2375" &&
 				d.docker.network == "opennova-dev" &&
 				d.docker.data_from == "opennova-dev-machine-data-1");
-		TEST_EXPECT(d.docker.deployment == kDeployment && d.docker.image == kImage &&
+		TEST_EXPECT(d.docker.deployment == kDeployment && d.docker.image == kHostdImage &&
 				d.docker.service_url == kServiceUrl && d.docker.admin_address == "10.44.0.10");
 	}
 	// Every refusal names its variable and keeps the default, the policy's and the
@@ -1454,7 +1358,7 @@ constexpr const char *kEngineUrl = "http://docker-api:2375";
 constexpr const char *kNetwork = "opennova-dev";
 constexpr const char *kDataFrom = "opennova-dev-machine-data-1";
 constexpr const char *kDevDeployment = "dev";
-constexpr const char *kMachineImage = "opennova-serve:local";
+constexpr const char *kMachineImage = "opennova-hostd:local";
 constexpr const char *kDevServiceUrl = "http://novaworld-fleet:8070";
 
 hosted::DockerMachineConfig docker_config() {
@@ -1657,7 +1561,7 @@ int test_docker_config_and_profile(const std::string &) {
 	TEST_EXPECT(refused([](auto &c) { c.deployment.clear(); }, "ONNET_HOSTED_DEPLOYMENT"));
 	TEST_EXPECT(refused(
 			[](auto &c) { c.deployment = std::string(33, 'd'); }, "ONNET_HOSTED_DEPLOYMENT"));
-	TEST_EXPECT(refused([](auto &c) { c.image = "-v"; }, "ONNET_HOSTED_SERVE_IMAGE"));
+	TEST_EXPECT(refused([](auto &c) { c.image = "-v"; }, "ONNET_HOSTED_HOSTD_IMAGE"));
 	TEST_EXPECT(refused([](auto &c) { c.service_url = "fleet:8070"; }, "ONNET_INTERNAL_URL"));
 
 	// The slots' fixed ports (every machine has an address of its own), admitting
@@ -1674,14 +1578,15 @@ int test_docker_config_and_profile(const std::string &) {
 			(std::vector<std::string>{ "--runtime", "process", "--serve",
 					"/usr/local/bin/opennova-serve", "--service", kDevServiceUrl, "--machine", "7",
 					"--token-file", "/run/opennova/hostd.token", "--state-dir", "/srv/serve/hostd",
-					"--slots-root", "/srv/serve/slots", "--iptables", "none", "--ip6tables",
-					"none" }));
+					"--slots-root", "/srv/serve/slots", "--nft", "none" }));
 	hosted::MachineLaunch launch = launch_of(7, MachineKind::Own);
 	opennova::io::JsonValue body;
 	std::string error;
 	TEST_EXPECT(
 			opennova::io::json_parse(Driver::create_body(docker_config(), launch), body, error));
 	TEST_EXPECT(body.get_string("Image", "") == kMachineImage);
+	// The image's serve user, not its root.
+	TEST_EXPECT(body.get_string("User", "") == "10001:10001");
 	const auto *entrypoint = body.get("Entrypoint");
 	TEST_EXPECT(entrypoint && entrypoint->array.size() == 1 &&
 			entrypoint->array[0].string == "/usr/local/bin/opennova-hostd");

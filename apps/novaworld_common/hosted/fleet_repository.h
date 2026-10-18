@@ -82,6 +82,16 @@ struct FleetMachineRow {
 	int64_t drain_moving = 0;
 	bool was_draining = false;
 	int64_t describe_asked_ms = 0;
+	// Its agent's envelope at its last sync, matched or not (0015_agent_envelope.sql,
+	// agent_protocol.h AgentEnvelope): the protocol it speaks (0 before any), the
+	// image its ECS task runs ("" off ECS), and since when its syncs speak another
+	// protocol than the service's (UTC 'YYYY-MM-DD HH:MM:SS'; "" while they match).
+	int agent_protocol = 0;
+	std::string agent_image;
+	std::string protocol_mismatch_since;
+	// Since when the supervisor's mass-lost brake holds this lost machine from its
+	// end (supervisor.h, on its clock; 0: not held).
+	int64_t lost_held_since_ms = 0;
 };
 
 // The words CloudState is stored as (fleet_machines.cloud_state).
@@ -149,12 +159,16 @@ std::vector<FleetMachineRow> list_silent_machines(db::Database &db, int64_t seco
 // Whether machine `id`'s agent reported within the last `seconds` (a lost
 // machine's agent reporting again).
 bool machine_reported_within(db::Database &db, int64_t id, int64_t seconds);
-// A fleet roll: every machine that takes servers (launching, booting, ready)
-// moves to draining with `reason`, so the supervisor moves their servers to new
-// machines one machine's server at a time; the ids it moved.
-std::vector<int64_t> drain_machines(db::Database &db, const std::string &reason);
+// A fleet roll (fleet_roll.h): each of `ids` that takes servers (launching,
+// booting, ready) moves to draining with `reason`, so the supervisor moves
+// their servers to new machines one machine's server at a time; the ids it
+// moved, in order.
+std::vector<int64_t> drain_machines(
+		db::Database &db, const std::vector<int64_t> &ids, const std::string &reason);
 // How many machines are in `state` (the heartbeat's machines_lost).
 int count_machines(db::Database &db, FleetMachineState state);
+// How many lost machines the mass-lost brake holds (the heartbeat's machines_held).
+int count_held_machines(db::Database &db);
 // How long an ended or failed machine's row stays after its end (the admin's
 // fleet view lists the newest of them), as long as a finished job's.
 inline constexpr int64_t kEndedMachineKeepS = 14 * 24 * 60 * 60;
@@ -204,8 +218,13 @@ std::vector<RefusedLaunch> take_refused_launches(db::Database &db);
 void save_machine_runtime(db::Database &db, const FleetMachineRow &m);
 // A ready or draining machine whose agent fell silent: lost with `reason`,
 // seen lost from `now_ms`, whether it was draining kept, its cloud state
-// cleared (only a describe after it counts). False when it was neither.
+// cleared (only a describe after it counts), held by no brake. False when it
+// was neither.
 bool mark_machine_lost(db::Database &db, int64_t id, const std::string &reason, int64_t now_ms);
+// The mass-lost brake holds lost machine `id` from its end since `now_ms`
+// (lost_held_since_ms; kept when it holds already). False when it is not lost.
+// Any move off lost (transition_machine) lets go of it.
+bool hold_lost_machine(db::Database &db, int64_t id, int64_t now_ms);
 // The pass asked for a describe of machine `id` at `now_ms`.
 void note_describe_asked(db::Database &db, int64_t id, int64_t now_ms);
 
@@ -268,21 +287,31 @@ struct SlotReport {
 	std::string reported_at; // UTC 'YYYY-MM-DD HH:MM:SS'
 };
 
-// One sync's report, in one transaction: last_report_at and agent_version, the
-// bootstrap token spent, a booting machine ready (its agent reports: its kind's
-// launch backoff cleared), and the machine's slot rows
-// replaced by `containers` (one per slot: the running one where a slot holds
-// several, else the last; a slot past the machine's is dropped). The row
-// after, or nullopt when the machine is no longer one that syncs (booting,
-// ready, draining, lost).
+// One sync's report, in one transaction: last_report_at and its envelope (its
+// agent's version and image, this protocol, no mismatch), the bootstrap token
+// spent, a booting machine ready (its agent reports: its kind's launch backoff
+// cleared), and the machine's slot rows replaced by `containers` (one per
+// slot: the running one where a slot holds several, else the last; a slot past
+// the machine's is dropped). The row after, or nullopt when the machine is no
+// longer one that syncs (booting, ready, draining, lost).
 std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
-		const std::string &agent_version, const std::vector<ContainerReport> &containers);
+		const std::string &agent_version, const std::vector<ContainerReport> &containers,
+		const std::string &agent_image = {});
 // A sync whose agent could not list its containers (agent_protocol.h
-// listing_failed): last_report_at and agent_version, the bootstrap token
-// spent, so the machine is heard from while its slot rows stand and a booting
-// one stays booting. The row after, or nullopt as record_sync's.
-std::optional<FleetMachineRow> record_unlisted_sync(
-		db::Database &db, int64_t id, const std::string &agent_version);
+// listing_failed): last_report_at and its envelope as record_sync's, the
+// bootstrap token spent, so the machine is heard from while its slot rows
+// stand and a booting one stays booting. The row after, or nullopt as
+// record_sync's.
+std::optional<FleetMachineRow> record_unlisted_sync(db::Database &db, int64_t id,
+		const std::string &agent_version, const std::string &agent_image = {});
+// A sync in another protocol than the service's (agent_protocol.h, the
+// envelope): last_report_at and `envelope` recorded, the bootstrap token spent,
+// protocol_mismatch_since kept from the first such sync, the slot rows and the
+// state left alone, so the machine is heard from (never lost) and acted on in
+// nothing. The row after with `mismatch_s` the seconds its syncs have spoken
+// another protocol, or nullopt as record_sync's.
+std::optional<FleetMachineRow> record_held_sync(
+		db::Database &db, int64_t id, const AgentEnvelope &envelope, int64_t &mismatch_s);
 // The machine's slot rows, by slot.
 std::vector<SlotReport> slot_reports(db::Database &db, int64_t machine_id);
 // The slot row of the slot server `server_id` holds, when its machine's agent

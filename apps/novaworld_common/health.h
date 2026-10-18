@@ -105,6 +105,7 @@ struct Heartbeat {
 	std::optional<int64_t> hosted_live;
 	std::optional<int64_t> hosted_failed;
 	std::optional<int64_t> machines_lost;
+	std::optional<int64_t> machines_held; // the lost machines the mass-lost brake holds (fleet)
 	std::optional<int64_t> launch_failures;
 	std::optional<int64_t> billing_sync_age_s; // -1 with billing off
 	std::optional<int64_t> webhook_rejects;

@@ -12,16 +12,21 @@
 // launched with and its slots; until the agent's first sync spends the token,
 // a redeem again (a lost reply's retry) mints a fresh secret in place of the
 // last. The sync authenticates the agent's secret (its digest compared in
-// constant time), stores its report (record_sync: the first one spends the
-// token and makes a booting machine ready), asks
-// the supervisor what the machine should run (FleetDesiredState) and answers
-// it: the containers with the trees they use, the files of a container this
-// report names left out, each container's uid its slot's, one whose slot is
-// past the machine's dropped, and drain set whenever the machine's row is
-// draining. A sync in another protocol version
-// is not read: its machine is drained (a lost one stays lost, ended by the
-// supervisor). A sync whose agent could not list its
-// containers (listing_failed) records that the agent was heard from alone
+// constant time), reads its envelope first (agent_protocol.h: the protocol,
+// the agent's build and image), stores its report with the envelope
+// (record_sync: the first one spends the token and makes a booting machine
+// ready), asks the supervisor what the machine should run (FleetDesiredState)
+// and answers it: the containers with the trees they use, the files of a
+// container this report names running or exited left out, each container's
+// uid its slot's, one whose slot is past the machine's dropped, and drain set
+// whenever the machine's row is draining. A sync in another protocol, in
+// either direction, is held (record_held_sync: heard, so the machine is never
+// lost for it, its envelope recorded, its slots' reports kept), answered with
+// the bare 404 its agent acts on nothing of, and logged at most once per peer
+// per minute; once its syncs have spoken another protocol for
+// kProtocolMismatchDrainS the machine drains (a lost one is heard again, so it
+// is lost no longer). A sync whose agent could not list its containers
+// (listing_failed) records that the agent was heard from alone
 // (record_unlisted_sync), logged at most once per peer per minute.
 //
 // Who is answered. A request is read only from a TCP peer (the socket's own

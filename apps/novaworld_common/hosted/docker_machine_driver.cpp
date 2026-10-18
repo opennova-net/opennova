@@ -133,7 +133,7 @@ std::string DockerMachineDriver::check_config(const DockerMachineConfig &c) {
 		return "ONNET_HOSTED_DEPLOYMENT is not 1.." + std::to_string(kMaxDeploymentBytes) +
 				" letters, digits, '.', '_' and '-', a letter or digit first";
 	if (!is_image_reference(c.image))
-		return "ONNET_HOSTED_SERVE_IMAGE is no image reference";
+		return "ONNET_HOSTED_HOSTD_IMAGE is no image reference";
 	if (!Ec2MachineDriver::parse_service_url(c.service_url, host, port))
 		return "ONNET_INTERNAL_URL is no http://<host>:<port> the machines can reach";
 	if (c.call_timeout_ms <= 0)
@@ -163,13 +163,16 @@ std::vector<std::string> DockerMachineDriver::machine_command(
 		const DockerMachineConfig &config, int64_t machine_id) {
 	return { "--runtime", "process", "--serve", kServe, "--service", config.service_url,
 		"--machine", std::to_string(machine_id), "--token-file", kTokenFile, "--state-dir",
-		kStateDir, "--slots-root", kSlotsRoot, "--iptables", "none", "--ip6tables", "none" };
+		kStateDir, "--slots-root", kSlotsRoot, "--nft", "none" };
 }
 
 std::string DockerMachineDriver::create_body(
 		const DockerMachineConfig &config, const MachineLaunch &launch) {
 	JsonValue body = JsonValue::make_object();
 	body.set("Image", io::json_string(config.image));
+	// The image's serve user, not its root: the process runtime has no slot users.
+	body.set("User",
+			io::json_string(std::to_string(kMachineUid) + ":" + std::to_string(kMachineUid)));
 	JsonValue entrypoint = JsonValue::make_array();
 	entrypoint.push(io::json_string(kHostd));
 	body.set("Entrypoint", std::move(entrypoint));

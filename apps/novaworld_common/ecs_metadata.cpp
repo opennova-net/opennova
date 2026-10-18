@@ -24,14 +24,14 @@ bool is_ipv4(const std::string &text) {
 	return !text.empty() && net::resolve_ipv4(text, ep, /*allow_names=*/false);
 }
 
-// GET <uri>/task's body into `body`; false with `error` when the endpoint does
-// not answer 200.
-bool read_task(const std::string &uri, std::string &body, std::string &error, int timeout_ms) {
-	if (uri.rfind("http://", 0) != 0) {
+// GET `url` of the metadata endpoint (<uri>/task, or <uri> for the container's
+// own) into `body`; false with `error` when the endpoint does not answer 200.
+bool get_metadata(const std::string &url, std::string &body, std::string &error, int timeout_ms) {
+	if (url.rfind("http://", 0) != 0) {
 		error = std::string(kMetadataUriVariable) + " is no http:// URI";
 		return false;
 	}
-	const net::HttpReply reply = net::http_exchange("GET", uri + "/task", {}, {}, timeout_ms,
+	const net::HttpReply reply = net::http_exchange("GET", url, {}, {}, timeout_ms,
 			[](const std::string &host, net::Endpoint &ep) { return net::resolve_ipv4(host, ep); });
 	if (!reply.transport_ok) {
 		error = "the task metadata endpoint does not answer (" + loggable(reply.error, 120) + ")";
@@ -86,7 +86,8 @@ bool parse_task_address(const std::string &json, std::string &out, std::string &
 bool read_task_address(
 		const std::string &uri, std::string &out, std::string &error, int timeout_ms) {
 	std::string body;
-	return read_task(uri, body, error, timeout_ms) && parse_task_address(body, out, error);
+	return get_metadata(uri + "/task", body, error, timeout_ms) &&
+			parse_task_address(body, out, error);
 }
 
 bool parse_task_revision(const std::string &json, std::string &out, std::string &error) {
@@ -110,7 +111,30 @@ bool parse_task_revision(const std::string &json, std::string &out, std::string 
 bool read_task_revision(
 		const std::string &uri, std::string &out, std::string &error, int timeout_ms) {
 	std::string body;
-	return read_task(uri, body, error, timeout_ms) && parse_task_revision(body, out, error);
+	return get_metadata(uri + "/task", body, error, timeout_ms) &&
+			parse_task_revision(body, out, error);
+}
+
+bool parse_container_image(const std::string &json, std::string &out, std::string &error) {
+	io::JsonValue container;
+	std::string parse_error;
+	if (!io::json_parse(json, container, parse_error)) {
+		error = "the container metadata is no JSON (" + loggable(parse_error, 120) + ")";
+		return false;
+	}
+	const io::JsonValue *image = member(container, "Image", io::JsonValue::Type::String);
+	if (image == nullptr || image->string.empty()) {
+		error = "the container metadata names no image";
+		return false;
+	}
+	out = image->string;
+	return true;
+}
+
+bool read_container_image(
+		const std::string &uri, std::string &out, std::string &error, int timeout_ms) {
+	std::string body;
+	return get_metadata(uri, body, error, timeout_ms) && parse_container_image(body, out, error);
 }
 
 std::string internal_bind(const Sources &sources, std::string &error) {

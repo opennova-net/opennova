@@ -23,7 +23,13 @@
 //   cache      ElastiCache DescribeReplicationGroups: status, Multi-AZ,
 //              failover, its nodes' roles and zones
 //   machines   EC2 DescribeInstances of the fleet's instance ids (the rows'
-//              cloud ids): each one's zone and state as EC2 has it
+//              cloud ids): each one's zone, state and image as EC2 has them
+//   fleet      on the fleet cluster (ONNET_INFRA_FLEET_CLUSTER, with hosting
+//              on): ECS DescribeServices of hostd's daemon service, and
+//              ListContainerInstances then DescribeContainerInstances of the
+//              machines registered there: each one's EC2 instance, machine-id
+//              and kind attributes, image (ecs.ami-id), status, whether its ECS
+//              agent is connected, its running tasks and the agent's version
 //
 // The calls of one read run at once, each on a thread of its own; one that
 // fails leaves its section's error and the others stand. Without AWS (the local
@@ -50,6 +56,9 @@ namespace opennova::novaworld_server::infra {
 struct InfraConfig {
 	AwsApiConfig aws;
 	std::string cluster; // ONNET_INFRA_CLUSTER: the deployment's ECS cluster
+	// ONNET_INFRA_FLEET_CLUSTER: the fleet cluster (hostd's daemon, the machines
+	// as its container instances); "" with hosting off, and nothing read of it.
+	std::string fleet_cluster;
 	// The services, the programs' names.
 	std::vector<std::string> programs = { "gate", "lobby", "web", "fleet", "worker", "data" };
 	// ONNET_INFRA_TARGET_GROUPS, {"<listener>": "<target group ARN>"}: the
@@ -191,6 +200,21 @@ struct MachineInstance {
 	std::string state; // pending, running, shutting-down, terminated, stopping, stopped
 	std::string zone;
 	std::string type;
+	std::string image_id; // the image it was launched from (ami-...)
+};
+
+// A machine as the fleet cluster has it: an ECS container instance.
+struct ContainerInstance {
+	std::string id; // its ARN's last segment
+	std::string ec2_instance_id;
+	std::string machine_id; // its machine-id attribute (the user-data's)
+	std::string kind; // its kind attribute
+	std::string image_id; // its ecs.ami-id attribute
+	std::string status; // ACTIVE, DRAINING, REGISTERING, ...
+	bool agent_connected = false;
+	int64_t running_tasks = 0;
+	int64_t pending_tasks = 0;
+	std::string agent_version; // the ECS agent's
 };
 
 struct CloudSnapshot {
@@ -218,6 +242,11 @@ struct CloudSnapshot {
 	std::string release_error;
 	std::map<std::string, MachineInstance> machines; // by instance id
 	std::string machines_error;
+	// The fleet cluster ("" when none is read: hosting off).
+	std::string fleet_cluster;
+	std::optional<EcsService> hostd; // its daemon service
+	std::vector<ContainerInstance> container_instances;
+	std::string fleet_error;
 };
 
 class InfraStatus {

@@ -57,9 +57,7 @@ bool setup_ec2(hosted::DriverConfig &driver, std::string &error) {
 				"from %s, own from %s\n",
 			ec2.region.c_str(), subnets.c_str(), ec2.deployment.c_str(),
 			ec2.shared_template.c_str(), ec2.own_template.c_str());
-	std::printf("[boot] hosted servers: hostd image %s, the machines reach %s and log to %s\n",
-			loggable(ec2.hostd_image.empty() ? ec2.serve_image : ec2.hostd_image, 255).c_str(),
-			loggable(ec2.service_url, 255).c_str(), loggable(ec2.log_group, 255).c_str());
+	std::printf("[boot] hosted servers: the machines join ECS cluster %s\n", ec2.cluster.c_str());
 	return true;
 }
 

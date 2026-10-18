@@ -1,11 +1,12 @@
 # opennova-hostd: the machine agent (README.md). On each machine of the hosted servers'
 # fleet it runs the opennova-serve containers the NovaWorld service places on the machine's
 # slots (docker; or, on a machine that is itself a container, as its own child processes),
-# counts each slot's egress (iptables) and reports them over the agent
-# protocol, apps/novaworld_common/hosted/agent_protocol.*, which it compiles itself (Crow-free
-# and database-free) so it builds without the service. Linux only: it runs as root under
-# systemd, shipped inside the opennova-serve image (apps/serve/Dockerfile). Every source but
-# main.cpp builds as opennova_hostd_core, so tests/hostd drives the agent in-process.
+# fences the slots' users and counts each slot's traffic (nftables) and reports them over
+# the agent protocol, apps/novaworld_common/hosted/agent_protocol.*, which it compiles
+# itself with the ECS metadata reader (Crow-free and database-free) so it builds without
+# the service. Linux only: it runs as root, the fleet cluster's ECS daemon, from an image
+# of its own (apps/serve/Dockerfile's hostd target). Every source but main.cpp builds as
+# opennova_hostd_core, so tests/hostd drives the agent in-process.
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     return()
 endif()
@@ -16,19 +17,24 @@ set(OPENNOVA_HOSTD_VERSION "dev" CACHE STRING "opennova-hostd's reported build")
 add_library(opennova_hostd_core STATIC
     agent.cpp            # the bootstrap and the sync passes
     docker_runtime.cpp   # the containers through the docker CLI
-    egress_counters.cpp  # each slot's egress: iptables owner-UID counters
+    fence_probe.cpp      # the fences' self-test as a slot's user
     hostd_options.cpp    # the command line
+    machine_identity.cpp # the machine id file, the ECS attribute check, the alive file
+    nft_table.cpp        # the slots' fences and counters: table inet opennova
     process_runtime.cpp  # the servers as child processes (a machine that is a container)
     reconcile.cpp        # what a sync does, decided as a pure function
+    saved_machine.cpp    # the saved bootstrap, a format of the agent's own
     slot_files.cpp       # the slots' working directories
     tree_store.cpp       # the trees fetched on demand (aws s3 sync) and checked
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/ecs_metadata.cpp
 )
 
 target_include_directories(opennova_hostd_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
-        # hosted/agent_protocol.h and hosted/slots.h, the service's half of the protocol
+        # hosted/agent_protocol.h and hosted/slots.h, the service's half of the protocol,
+        # and ecs_metadata.h
         ${CMAKE_SOURCE_DIR}/apps/novaworld_common
 )
 

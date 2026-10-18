@@ -178,6 +178,7 @@ bool parse_fleet_config(const EnvLookup &env, FleetConfig &out, std::vector<std:
 	}
 
 	read.text("ONNET_HOSTED_SERVE_IMAGE", out.serve_image);
+	read.text("ONNET_FLEET_IMAGE_ID", out.image_id);
 	return errors.size() == errors_before;
 }
 
@@ -203,23 +204,21 @@ bool parse_driver_config(const EnvLookup &env, const FleetConfig &fleet, DriverC
 			errors.push_back("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES " + why);
 	}
 	read.text("ONNET_HOSTED_EC2_REGION", ec2.region);
-	read.text("ONNET_HOSTED_EC2_LOG_GROUP", ec2.log_group);
+	read.text("ONNET_HOSTED_EC2_CLUSTER", ec2.cluster);
 	if (const auto subnets = env("ONNET_HOSTED_EC2_SUBNETS"))
 		ec2.subnets = split_list(*subnets);
 	read.text("ONNET_HOSTED_DEPLOYMENT", ec2.deployment);
-	read.text("ONNET_HOSTED_HOSTD_IMAGE", ec2.hostd_image);
 	read.text("ONNET_HOSTED_AWS_CLI", ec2.aws_cli);
 	read.text("ONNET_HOSTED_MACHINE_SCRIPT", out.machine_script_path);
 	ec2.serve_image = fleet.serve_image;
-	ec2.service_url = out.internal_url;
 	ec2.admin_address = fleet.internal_address;
 
 	DockerMachineConfig &docker = out.docker;
 	read.text("ONNET_HOSTED_DOCKER_URL", docker.engine_url);
 	read.text("ONNET_HOSTED_DOCKER_NETWORK", docker.network);
 	read.text("ONNET_HOSTED_DOCKER_DATA_FROM", docker.data_from);
+	read.text("ONNET_HOSTED_HOSTD_IMAGE", docker.image);
 	docker.deployment = ec2.deployment;
-	docker.image = fleet.serve_image;
 	docker.service_url = out.internal_url;
 	docker.admin_address = fleet.internal_address;
 	return errors.size() == errors_before;

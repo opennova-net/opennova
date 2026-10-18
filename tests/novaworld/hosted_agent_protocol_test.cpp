@@ -3,8 +3,10 @@
 // through its encoder and its strict decoder (the bootstrap's hello and reply, the
 // sync's report, the reason a container never started and a listing that failed among
 // them, and its reply, the files' bytes in base64, cp1252 and NUL included, the trees each
-// container uses and their manifests), the exact member names on the wire, the protocol
-// check every decoder makes first (protocol_of reads it alone), every field's shape (names,
+// container uses and their manifests), the exact member names on the wire, the
+// envelope a sync opens with (decode_agent_envelope, read in any protocol: the protocol,
+// the agent's build and its own image), the protocol check every decoder makes first,
+// every field's shape (names,
 // images, tree ids, URLs and file names, expansion codes, file names, environment names and
 // values, the uid its slot's, the limits' ranges, one container per slot and per name, a
 // container's trees among the reply's), the routes' paths, the container names and the
@@ -196,11 +198,11 @@ int test_hello() {
 	hello.agent_version = "abc1234";
 	const std::string json = hosted::encode_agent_hello(hello);
 	TEST_EXPECT(json.find("\"agent_version\": \"abc1234\"") != std::string::npos);
-	TEST_EXPECT(json.find("\"protocol\": 2") != std::string::npos);
+	TEST_EXPECT(json.find("\"protocol\": 3") != std::string::npos);
 	hosted::AgentHello back;
 	std::string error;
 	TEST_EXPECT(hosted::decode_agent_hello(json, back, error));
-	TEST_EXPECT(back.protocol == 2 && back.agent_version == "abc1234");
+	TEST_EXPECT(back.protocol == 3 && back.agent_version == "abc1234");
 	TEST_EXPECT(
 			!hosted::decode_agent_hello(with_member(json, "agent_version", "\"\""), back, error));
 	TEST_EXPECT(!hosted::decode_agent_hello(
@@ -249,22 +251,44 @@ int test_bootstrap() {
 }
 
 int test_protocol() {
+	TEST_EXPECT(hosted::kAgentProtocol == 3 && hosted::kProtocolMismatchDrainS == 600);
 	const std::string json = hosted::encode_machine_bootstrap(sample_bootstrap());
-	TEST_EXPECT(hosted::protocol_of(json) == 2);
 	const std::string other = with_member(json, "protocol", "1");
-	TEST_EXPECT(hosted::protocol_of(other) == 1);
-	TEST_EXPECT(!hosted::protocol_of("{}") && !hosted::protocol_of("[1]") &&
-			!hosted::protocol_of("nope") && !hosted::protocol_of("{\"protocol\":\"1\"}") &&
-			!hosted::protocol_of("{\"protocol\":1.5}"));
+	// The envelope: read in any protocol, before the protocol is checked, every
+	// member past its three ignored; agent_image optional ("" when absent).
+	hosted::SyncRequest sync;
+	sync.agent_version = "0123abcd";
+	sync.agent_image = "ghcr.io/opennova-net/opennova-hostd@sha256:0011";
+	hosted::AgentEnvelope envelope;
+	std::string error;
+	TEST_EXPECT(hosted::decode_agent_envelope(hosted::encode_sync_request(sync), envelope, error));
+	TEST_EXPECT(envelope.protocol == 3 && envelope.agent_version == "0123abcd" &&
+			envelope.agent_image == sync.agent_image);
+	const std::string newer =
+			"{\"protocol\": 4, \"agent_version\": \"next\", \"agent_image\": "
+			"\"ghcr.io/opennova-net/opennova-hostd@sha256:0022\", \"machine\": {}}";
+	TEST_EXPECT(hosted::decode_agent_envelope(newer, envelope, error) && envelope.protocol == 4 &&
+			envelope.agent_version == "next");
+	TEST_EXPECT(hosted::decode_agent_envelope(
+						"{\"protocol\": 2, \"agent_version\": \"old\", \"containers\": []}",
+						envelope, error) &&
+			envelope.protocol == 2 && envelope.agent_image.empty());
+	TEST_EXPECT(!hosted::decode_agent_envelope("{}", envelope, error) &&
+			!hosted::decode_agent_envelope("[1]", envelope, error) &&
+			!hosted::decode_agent_envelope("nope", envelope, error));
+	TEST_EXPECT(!hosted::decode_agent_envelope(
+			"{\"protocol\":1.5,\"agent_version\":\"x\"}", envelope, error));
+	TEST_EXPECT(!hosted::decode_agent_envelope("{\"protocol\":3}", envelope, error));
+	TEST_EXPECT(!hosted::decode_agent_envelope(
+			"{\"protocol\":3,\"agent_version\":\"x\",\"agent_image\":\"-v\"}", envelope, error));
 	// Every decoder reads no further than another protocol.
 	hosted::MachineBootstrap b;
-	std::string error;
-	TEST_EXPECT(!hosted::decode_machine_bootstrap(other, b, error) && error == "protocol 1, not 2");
+	TEST_EXPECT(!hosted::decode_machine_bootstrap(other, b, error) && error == "protocol 1, not 3");
 	hosted::SyncRequest request;
 	hosted::SyncReply reply;
 	hosted::AgentHello hello;
 	TEST_EXPECT(!hosted::decode_sync_request("{\"protocol\":1}", request, error) &&
-			error == "protocol 1, not 2");
+			error == "protocol 1, not 3");
 	TEST_EXPECT(!hosted::decode_sync_reply(
 			"{\"protocol\":0,\"desired\":[],\"trees\":{},\"drain\":false}", reply, error));
 	TEST_EXPECT(!hosted::decode_agent_hello("{\"agent_version\":\"x\"}", hello, error) &&
@@ -275,6 +299,7 @@ int test_protocol() {
 int test_sync_request() {
 	hosted::SyncRequest request;
 	request.agent_version = "0123abcd";
+	request.agent_image = "ghcr.io/opennova-net/opennova-hostd@sha256:0011";
 	request.containers = { sample_report(0, ContainerState::Running),
 		sample_report(1, ContainerState::Exited), sample_report(2, ContainerState::Starting) };
 	const std::string json = hosted::encode_sync_request(request);
@@ -291,6 +316,9 @@ int test_sync_request() {
 	std::string error;
 	TEST_EXPECT(hosted::decode_sync_request(json, back, error));
 	TEST_EXPECT(back.agent_version == "0123abcd" && back.containers.size() == 3);
+	TEST_EXPECT(back.agent_image == request.agent_image &&
+			json.find("\"agent_image\": \"ghcr.io/opennova-net/opennova-hostd@sha256:0011\"") !=
+					std::string::npos);
 	for (size_t i = 0; i < 3; ++i) {
 		const hosted::ContainerReport &a = request.containers[i];
 		const hosted::ContainerReport &b = back.containers[i];
@@ -360,6 +388,12 @@ int test_sync_request() {
 	request.containers.push_back(sample_report(0, ContainerState::Running));
 	TEST_EXPECT(!hosted::decode_sync_request(hosted::encode_sync_request(request), back, error));
 	TEST_EXPECT(!hosted::decode_sync_request(without_member(one, "agent_version"), back, error));
+	// The agent's own image: required in the sync, "" off ECS, else an image reference.
+	TEST_EXPECT(!hosted::decode_sync_request(without_member(one, "agent_image"), back, error));
+	TEST_EXPECT(hosted::decode_sync_request(with_member(one, "agent_image", "\"\""), back, error) &&
+			back.agent_image.empty());
+	TEST_EXPECT(
+			!hosted::decode_sync_request(with_member(one, "agent_image", "\"-v\""), back, error));
 
 	// A listing that failed: the member only then, true, and no container with it.
 	TEST_EXPECT(one.find("listing_failed") == std::string::npos);

@@ -1,6 +1,7 @@
 #include "agent.h"
 
 #include "reconcile.h"
+#include "saved_machine.h"
 #include "steady_clock.h"
 
 #include "net_sockets.h"
@@ -67,6 +68,18 @@ bool is_token_text(const std::string &token) {
 	return true;
 }
 
+// An image reference's repository: what comes before its digest or its tag.
+std::string image_repository(const std::string &image) {
+	const size_t at = image.find('@');
+	if (at != std::string::npos)
+		return image.substr(0, at);
+	const size_t colon = image.rfind(':');
+	const size_t slash = image.rfind('/');
+	if (colon != std::string::npos && (slash == std::string::npos || colon > slash))
+		return image.substr(0, colon);
+	return image;
+}
+
 std::string http_failure(const net::HttpReply &reply) {
 	if (!reply.transport_ok)
 		return "the service is unreachable (" + reply.error + ")";
@@ -120,13 +133,13 @@ net::HttpReply HttpServiceLink::post(
 // --- the agent -----------------------------------------------------------------
 
 Agent::Agent(AgentConfig config, ServiceLink &link, ContainerRuntime &runtime, SlotFiles &slots,
-		TreeStore &trees, EgressFactory make_egress, Clock now_ms) :
+		TreeStore &trees, SlotCounters *counters, Clock now_ms) :
 		config_(std::move(config)),
 		link_(link),
 		runtime_(runtime),
 		slots_(slots),
 		trees_(trees),
-		make_egress_(std::move(make_egress)),
+		counters_(counters),
 		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
 
 Agent::~Agent() = default;
@@ -154,17 +167,32 @@ bool Agent::load_saved() {
 	std::string error;
 	if (!io::read_file_text(saved_path(), text, error))
 		return false;
-	hosted::MachineBootstrap saved;
-	if (!hosted::decode_machine_bootstrap(text, saved, error)) {
+	// The agent's own format, whatever protocol saved it (saved_machine.h).
+	SavedMachine saved;
+	if (!decode_saved_machine(text, saved, error)) {
 		warn("saved", "the saved bootstrap " + saved_path() + " does not read (" + error + ")");
 		return false;
 	}
-	machine_ = std::move(saved);
+	if (saved.machine_id != config_.machine_id) {
+		warn("saved",
+				"the saved bootstrap " + saved_path() + " is machine " +
+						std::to_string(saved.machine_id) + "'s");
+		return false;
+	}
+	machine_ = hosted::MachineBootstrap{};
+	machine_.agent_secret = std::move(saved.agent_secret);
+	machine_.serve_image = std::move(saved.serve_image);
+	machine_.slots = saved.slots;
 	return true;
 }
 
 bool Agent::save(std::string &error) const {
-	return write_owner_only(saved_path(), hosted::encode_machine_bootstrap(machine_), error);
+	SavedMachine saved;
+	saved.machine_id = config_.machine_id;
+	saved.agent_secret = machine_.agent_secret;
+	saved.serve_image = machine_.serve_image;
+	saved.slots = machine_.slots;
+	return write_owner_only(saved_path(), encode_saved_machine(saved), error);
 }
 
 bool Agent::bootstrap() {
@@ -241,9 +269,6 @@ bool Agent::bootstrap() {
 
 void Agent::bootstrapped_now() {
 	bootstrapped_ = true;
-	egress_ = make_egress_ ? make_egress_(machine_.slots) : nullptr;
-	egress_ready_ = false;
-	egress_attempted_ = false;
 }
 
 int Agent::call_ms(uint64_t deadline) const {
@@ -277,39 +302,40 @@ void Agent::refresh_stats(
 	stats_ = std::move(read);
 }
 
-void Agent::refresh_egress(uint64_t now, uint64_t deadline) {
-	if (!egress_ || call_ms(deadline) == 0)
+void Agent::refresh_counts(uint64_t now, uint64_t deadline) {
+	if (!counters_ || call_ms(deadline) == 0)
 		return;
 	std::string error;
-	std::map<int, uint64_t> read;
-	bool ok = egress_ready_ && egress_->read(read, error);
+	std::map<int, SlotCount> read;
+	bool ok = counters_ready_ && counters_->read(read, error);
 	// Put in place at the first pass, and again (at most every
-	// kEgressEnsureMs) whenever a read fails.
-	if (!ok && (!egress_attempted_ || now - egress_attempt_at_ >= kEgressEnsureMs)) {
-		egress_attempted_ = true;
-		egress_attempt_at_ = now;
-		if (egress_->ensure(error)) {
-			egress_ready_ = true;
+	// kCountersEnsureMs) whenever a read fails.
+	if (!ok && (!counters_attempted_ || now - counters_attempt_at_ >= kCountersEnsureMs)) {
+		counters_attempted_ = true;
+		counters_attempt_at_ = now;
+		if (counters_->ensure(error)) {
+			counters_ready_ = true;
 			read.clear();
-			ok = egress_->read(read, error);
+			ok = counters_->read(read, error);
 		}
 	}
-	// What did read counts; a slot that did not keeps its last count.
+	// What did read counts; a slot that did not keeps its last counts.
 	for (const auto &slot : read)
-		egress_bytes_[slot.first] = slot.second;
+		counts_[slot.first] = slot.second;
 	if (!ok) {
-		warn("egress", "the egress counters do not read: " + error);
+		warn("counters", "the slots' counters do not read: " + error);
 		return;
 	}
-	recovered("egress", "the egress counters read again");
+	recovered("counters", "the slots' counters read again");
 }
 
 hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) const {
 	hosted::SyncRequest request;
 	request.agent_version = config_.agent_version;
+	request.agent_image = config_.agent_image;
 	const auto egress_of = [this](int slot) -> uint64_t {
-		const auto it = egress_bytes_.find(slot);
-		return it == egress_bytes_.end() ? 0 : it->second;
+		const auto it = counts_.find(slot);
+		return it == counts_.end() ? 0 : it->second.egress_bytes;
 	};
 	std::set<std::string> reported;
 	for (const ContainerInfo &c : observed) {
@@ -377,6 +403,7 @@ int Agent::step() {
 		warn("runtime", "the containers cannot be listed: " + error);
 		hosted::SyncRequest unlisted;
 		unlisted.agent_version = config_.agent_version;
+		unlisted.agent_image = config_.agent_image;
 		unlisted.listing_failed = true;
 		const net::HttpReply reply = link_.post(hosted::machine_sync_path(config_.machine_id),
 				machine_.agent_secret, hosted::encode_sync_request(unlisted));
@@ -387,7 +414,7 @@ int Agent::step() {
 	}
 	recovered("runtime", "the containers list again");
 	refresh_stats(observed, now, deadline);
-	refresh_egress(now, deadline);
+	refresh_counts(now, deadline);
 
 	const net::HttpReply reply = link_.post(hosted::machine_sync_path(config_.machine_id),
 			machine_.agent_secret, hosted::encode_sync_request(report(observed)));
@@ -415,7 +442,62 @@ int Agent::step() {
 	}
 	int delay = hosted::kSyncIntervalMs;
 	act(desired, observed, delay);
+	if (delay != hosted::kBusySyncIntervalMs)
+		prune_images(desired, observed);
 	return delay;
+}
+
+void Agent::prune_images(
+		const hosted::SyncReply &reply, const std::vector<ContainerInfo> &observed) {
+	for (const hosted::DesiredContainer &d : reply.desired)
+		if (std::find(named_images_.begin(), named_images_.end(), d.image) == named_images_.end())
+			named_images_.push_back(d.image);
+	const uint64_t now = now_();
+	if (named_images_.empty() || (pruned_ && now - pruned_at_ < kImagePruneIntervalMs))
+		return;
+	pruned_ = true;
+	pruned_at_ = now;
+	// What a container uses, or will (a pull under way, a start waiting), and
+	// the newest the replies named.
+	std::set<std::string> keep;
+	for (const hosted::DesiredContainer &d : reply.desired)
+		keep.insert(d.image);
+	for (const ContainerInfo &c : observed)
+		keep.insert(c.image);
+	for (const auto &w : waiting_)
+		keep.insert(w.second.image);
+	for (const auto &p : pulls_)
+		keep.insert(p.first);
+	for (size_t i = 0; i < kImagesKept && i < named_images_.size(); ++i)
+		keep.insert(named_images_[named_images_.size() - 1 - i]);
+	std::set<std::string> repositories;
+	for (const std::string &image : named_images_)
+		repositories.insert(image_repository(image));
+	const uint64_t deadline = now + kActBudgetMs;
+	std::string error;
+	for (const std::string &repository : repositories) {
+		std::vector<std::string> held;
+		int ms = call_ms(deadline);
+		if (ms == 0)
+			return;
+		if (!runtime_.list_images(repository, held, ms, error)) {
+			warn("prune", "the machine's images do not list: " + error);
+			return;
+		}
+		recovered("prune", "the machine's images list again");
+		for (const std::string &image : held) {
+			if (keep.count(image) || (ms = call_ms(deadline)) == 0)
+				continue;
+			if (!runtime_.remove_image(image, ms, error)) {
+				io::logf(LogLevel::kWarn, "%s", error.c_str());
+				continue;
+			}
+			images_.erase(image);
+			named_images_.erase(std::remove(named_images_.begin(), named_images_.end(), image),
+					named_images_.end());
+			io::logf(LogLevel::kInfo, "removed the image %s: no container uses it", image.c_str());
+		}
+	}
 }
 
 void Agent::poll_pulls(uint64_t now) {

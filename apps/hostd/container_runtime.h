@@ -43,6 +43,7 @@ struct ContainerSpec {
 struct ContainerInfo {
 	std::string name;
 	int slot = -1; // -1: its slot label is missing or wrong
+	std::string image; // the reference it was run from ("" when unknown)
 	hosted::ContainerState state = hosted::ContainerState::Starting;
 	std::optional<int64_t> exit_code; // once it exited
 	bool oom = false;
@@ -96,6 +97,14 @@ public:
 	virtual bool kill(const std::string &name, int timeout_ms, std::string &error) = 0;
 	// Removes a container that is not running (ended, or never started).
 	virtual bool remove(const std::string &name, int timeout_ms, std::string &error) = 0;
+	// The images of `repository` the machine holds, each as
+	// `<repository>@<digest>` (one held by a tag alone is none of these).
+	// False with `error` when the runtime cannot tell.
+	virtual bool list_images(const std::string &repository, std::vector<std::string> &out,
+			int timeout_ms, std::string &error) = 0;
+	// Removes image `image` (a list_images reference) from the machine; the
+	// runtime refuses one a container still uses (false, `error`).
+	virtual bool remove_image(const std::string &image, int timeout_ms, std::string &error) = 0;
 };
 
 } // namespace opennova::hostd

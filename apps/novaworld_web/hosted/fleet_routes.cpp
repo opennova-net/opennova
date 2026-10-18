@@ -10,6 +10,7 @@
 
 #include <climits>
 #include <cstdio>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -44,6 +45,13 @@ crow::json::wvalue machine_json(db::Database &db, const FleetMachineRow &m) {
 	text_or_null(out, "public_address", m.public_address);
 	out["bootstrapped"] = m.bootstrapped;
 	text_or_null(out, "agent_version", m.agent_version);
+	if (m.agent_protocol > 0)
+		out["agent_protocol"] = m.agent_protocol;
+	else
+		out["agent_protocol"] = nullptr;
+	text_or_null(out, "agent_image", m.agent_image);
+	text_or_null(out, "protocol_mismatch_since", m.protocol_mismatch_since);
+	out["lost_held"] = m.lost_held_since_ms > 0;
 	text_or_null(out, "template_version", m.template_version);
 	text_or_null(out, "serve_image", m.serve_image);
 	if (m.reserved_for > 0)
@@ -67,6 +75,11 @@ void FleetRoutes::configure(bool hosting_on, std::string provider, int cap, cons
 	policy_ = policy;
 }
 
+void FleetRoutes::configure_roll(std::string pinned_image, infra::InfraStatus *infra) {
+	pinned_image_ = std::move(pinned_image);
+	infra_ = infra;
+}
+
 void FleetRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/hosted")
 			.methods("GET"_method)([this](const crow::request &req) { return fleet(req); });
@@ -77,7 +90,9 @@ void FleetRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/fleet/machines/<uint>/end")
 			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return end(req, id); });
 	CROW_ROUTE(app, "/api/admin/fleet/roll")
-			.methods("POST"_method)([this](const crow::request &req) { return roll(req); });
+			.methods("GET"_method, "POST"_method)([this](const crow::request &req) {
+				return req.method == crow::HTTPMethod::Get ? roll_plan(req) : roll(req);
+			});
 	CROW_ROUTE(app, "/api/admin/hosted/update-all")
 			.methods("POST"_method)([this](const crow::request &req) { return update_all(req); });
 }
@@ -281,16 +296,100 @@ crow::response FleetRoutes::update_all(const crow::request &req) {
 	}
 }
 
-// POST /api/admin/fleet/roll — a fleet roll: every machine that takes servers
-// (launching, booting, ready) drains, so its servers move, one at a time per
-// machine and no restart counted, to machines launched for them (a new serve
-// image or launch template reaches the whole fleet). 202 {"draining": how many,
-// "machines": their ids}.
+std::vector<RollStep> FleetRoutes::plan_roll(db::Database &db) {
+	std::vector<FleetMachineRow> machines = list_live_machines(db);
+	std::map<int64_t, int> servers;
+	for (const FleetMachineRow &m : machines)
+		servers[m.id] = static_cast<int>(slot_holders(db, m.id).size());
+	// Each machine's image as EC2 has it (the infrastructure view's reader,
+	// cached), no lease held while AWS answers.
+	std::map<int64_t, std::string> images;
+	if (infra_ != nullptr && infra_->configured()) {
+		std::vector<std::string> ids;
+		for (const FleetMachineRow &m : machines)
+			if (!m.cloud_id.empty())
+				ids.push_back(m.cloud_id);
+		if (const auto cloud = infra_->snapshot(ids))
+			for (const FleetMachineRow &m : machines)
+				if (const auto it = cloud->machines.find(m.cloud_id); it != cloud->machines.end())
+					images[m.id] = it->second.image_id;
+	}
+	return plan_fleet_roll(machines, images, servers, pinned_image_);
+}
+
+// GET /api/admin/fleet/roll — a fleet roll's preview (hosted/fleet_roll.h):
+// {"image_id" (the image the launch templates pin, null for none), "machines"
+// (each live machine that takes servers: {id, kind, state, image_id (its own,
+// null when not known), servers, action: "replace" or "keep", why}), "replace"
+// (the ids to POST)}. No-store.
+crow::response FleetRoutes::roll_plan(const crow::request &req) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal)
+		return std::move(*caller.refusal);
+	try {
+		const std::vector<RollStep> plan = plan_roll(*pool_.acquire());
+		crow::json::wvalue out;
+		text_or_null(out, "image_id", pinned_image_);
+		std::vector<crow::json::wvalue> machines;
+		std::vector<crow::json::wvalue> replace;
+		for (const RollStep &step : plan) {
+			crow::json::wvalue j;
+			j["id"] = step.machine_id;
+			j["kind"] = machine_kind_text(step.kind);
+			j["state"] = fleet_machine_state_text(step.state);
+			text_or_null(j, "image_id", step.image_id);
+			j["servers"] = step.servers;
+			j["action"] = step.replace ? "replace" : "keep";
+			j["why"] = step.why;
+			machines.push_back(std::move(j));
+			if (step.replace) {
+				crow::json::wvalue id;
+				id = step.machine_id;
+				replace.push_back(std::move(id));
+			}
+		}
+		out["machines"] = std::move(machines);
+		out["replace"] = std::move(replace);
+		crow::response res = json_reply(200, out);
+		res.set_header("Cache-Control", "no-store");
+		return res;
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] GET /api/admin/fleet/roll failed: %s\n", e.what());
+		return json_error(500, "db_error");
+	}
+}
+
+// POST /api/admin/fleet/roll {"machines": [<id>, ...]} — a fleet roll of the
+// machines named (the preview's "replace", or the admin's own choice): each
+// drains, so its servers move, one at a time per machine and no restart
+// counted, to machines launched for them from the templates as they are now
+// (a new image, template or user-data reaches those). 202 {"draining": how
+// many, "machines": their ids}; 400 invalid_field for a body that names no
+// machine, or one that is no live machine taking servers.
 crow::response FleetRoutes::roll(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
+	const auto body = crow::json::load(req.body);
+	if (!body || body.t() != crow::json::type::Object || !body.has("machines") ||
+			body["machines"].t() != crow::json::type::List || body["machines"].size() == 0 ||
+			body["machines"].size() > 1000)
+		return json_error(400, "invalid_field", "machines is a list of machine ids");
+	std::vector<int64_t> ids;
+	for (const auto &v : body["machines"]) {
+		if (v.t() != crow::json::type::Number || v.nt() != crow::json::num_type::Unsigned_integer)
+			return json_error(400, "invalid_field", "machines is a list of machine ids");
+		ids.push_back(static_cast<int64_t>(v.u()));
+	}
 	try {
-		const std::vector<int64_t> drained = drain_machines(*pool_.acquire(), "rolled by an admin");
+		auto lease = pool_.acquire();
+		db::Database &db = *lease;
+		for (const int64_t id : ids) {
+			const auto machine = find_machine(db, id);
+			if (!machine || !machine_rollable(machine->state))
+				return json_error(400, "invalid_field",
+						"machine " + std::to_string(id) + " is no machine taking servers");
+		}
+		const std::vector<int64_t> drained = drain_machines(db, ids, "rolled by an admin");
 		std::printf("[fleet] roll: %zu machine(s) draining\n", drained.size());
 		crow::json::wvalue out;
 		out["draining"] = drained.size();

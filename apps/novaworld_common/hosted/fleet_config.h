@@ -32,8 +32,11 @@
 //   ONNET_FLEET_SLOT_MEMORY_MB    each container's memory, swap none (512)
 //   ONNET_FLEET_SLOT_CPUS         each container's CPUs (1; a decimal)
 //   ONNET_HOSTED_SERVE_IMAGE      the serve image every start pins (the
-//                                 deploy's pinned digest; for docker, the image
-//                                 every machine container runs)
+//                                 deploy's pinned digest)
+//   ONNET_FLEET_IMAGE_ID          the image the launch templates pin (the
+//                                 deployment's fleet_ami, an ami-...), which
+//                                 a fleet roll's preview holds each machine's
+//                                 against; "" with none
 //
 // The drivers' variables:
 //
@@ -50,19 +53,20 @@
 //                                 kind, {"shared": "lt-...", "own": "lt-..."}
 //                                 (infra/aws/fleet.tf's; a template may name a
 //                                 version, lt-<id>:<version>)
-//   ONNET_HOSTED_HOSTD_IMAGE      the image opennova-hostd is copied out of
-//                                 (the deploy's pinned digest; unset, the
-//                                 serve image)
+//   ONNET_HOSTED_EC2_CLUSTER      the fleet cluster the ec2 driver's machines
+//                                 join (infra/aws/fleet_agent.tf's
+//                                 opennova-<deployment>-fleet)
 //
 // and, for the ec2 driver, ONNET_HOSTED_EC2_REGION, ONNET_HOSTED_EC2_SUBNETS
-// (comma-separated, a subnet per zone), ONNET_HOSTED_EC2_LOG_GROUP (the
-// machines' CloudWatch log group), ONNET_HOSTED_AWS_CLI and
+// (comma-separated, a subnet per zone), ONNET_HOSTED_AWS_CLI and
 // ONNET_HOSTED_MACHINE_SCRIPT (the path of machine/machine_user_data.sh); for
 // the docker driver (the local stack's), ONNET_HOSTED_DOCKER_URL (the Docker
 // Engine API, http://<host>:<port>), ONNET_HOSTED_DOCKER_NETWORK (the network
-// its machines join) and ONNET_HOSTED_DOCKER_DATA_FROM (the container holding
-// the data sets' mounts). Each driver's settings are read as they are; its
-// check_config decides whether they run. Service policy, not a port.
+// its machines join), ONNET_HOSTED_DOCKER_DATA_FROM (the container holding
+// the data sets' mounts) and ONNET_HOSTED_HOSTD_IMAGE (the machines' image:
+// opennova-hostd with opennova-serve beside it). Each driver's settings are
+// read as they are; its check_config decides whether they run. Service
+// policy, not a port.
 
 #include "docker_machine_driver.h"
 #include "ec2_machine_driver.h"
@@ -90,6 +94,8 @@ struct FleetConfig {
 	// 127.0.0.0/8 for a loopback bind.
 	std::vector<Ipv4Cidr> agent_cidrs = { Ipv4Cidr{ 0x7F000000u, 0xFF000000u } };
 	PlacementPolicy placement;
+	// ONNET_FLEET_IMAGE_ID: the image the launch templates pin ("": none).
+	std::string image_id;
 	int idle_minutes = 30;
 	int slot_memory_mb = 512;
 	double slot_cpus = 1.0;

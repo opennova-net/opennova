@@ -140,6 +140,10 @@ public:
 	// the supervisor's planner with: a start's at_capacity, the list's `full`.
 	// Set before start(); unset, placement.h's defaults.
 	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
+	// The image the fleet's launch templates pin (hosted/fleet_config.h
+	// ONNET_FLEET_IMAGE_ID), which a fleet roll's preview holds each machine's
+	// against. Set before start().
+	void set_fleet_image(std::string image_id) { fleet_image_ = std::move(image_id); }
 
 	// The periodic jobs the deployment's programs schedule (parts.h
 	// periodic_jobs, from the same settings): the admin's jobs page shows each
@@ -273,6 +277,8 @@ private:
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
 	double fleet_slot_cpus_ = 1.0;
+	// The fleet roll's pinned image (set_fleet_image).
+	std::string fleet_image_;
 	// The hosted routes' placement policy (set_fleet_placement).
 	hosted::PlacementPolicy fleet_placement_;
 	// The outbound mail (set_mail_enabled).

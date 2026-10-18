@@ -136,7 +136,14 @@
 //   ready -> lost          its agent silent for machine_silence_s (60): the
 //                          cloud is asked; gone, it ends now, running, it is
 //                          terminated lost_end_ms (3 min) on, and an agent that
-//                          reports again first makes it ready again
+//                          reports again first makes it ready again. The
+//                          mass-lost brake: while more than max(2, half) of the
+//                          live machines are lost at once (a bad hostd rolled
+//                          to every machine, the fleet's network gone), a lost
+//                          machine's lost_end_ms holds instead (its row's
+//                          lost_held_since_ms, an ERROR, the heartbeat's
+//                          machines_held), each until it reports again or an
+//                          admin ends it, the brake let go of or not
 //   ready -> draining      an admin's drain or a fleet roll: its servers move
 //                          off one at a time (the next once the last moved one
 //                          runs again elsewhere), and once it holds none it ends
@@ -148,7 +155,9 @@
 // launch job is gone fails, a fleet.sweep is enqueued (a cloud machine no live
 // row names is terminated, a live row whose cloud machine is gone ends at the
 // next pass), a server whose machine is gone (or whose files went with the
-// supervisor: booting and never reported) is placed again, and the rest resume
+// supervisor: booting and reported neither running nor exited, so an agent
+// that waits for its image or its trees may lack them too) is placed again (a
+// new generation, its files rendered afresh, no restart counted), and the rest resume
 // where they were (a running one gets relist_grace_ms for its lister to
 // re-host before the health checks count). The sweep runs again every
 // kFleetSweepIntervalMs (fleet_jobs.h fleet_schedule). A driver that cannot list its
@@ -156,8 +165,10 @@
 //
 // The desired state (sync): the containers of the live servers placed on the
 // machine that are booting, listing, running or stopping (a stopping one only
-// once its agent has reported it), each with the files rendered at its start
-// until the agent has reported it once; the service keeps those files in
+// once its agent has reported it running or exited), each with the files
+// rendered at its start until the agent reports it running or exited (one it
+// reports starting waits for its image or its trees, and an agent replaced
+// meanwhile, a hostd rolled, needs them again); the service keeps those files in
 // memory alone, so a server whose start the service's restart cut short is
 // rendered again (a new generation, new credentials); the trees those
 // containers are pinned to, each with its URL in the object store (tree_url)
@@ -275,7 +286,8 @@ struct SupervisorConfig {
 	// 10 s anyway).
 	uint64_t describe_interval_ms = 10 * 1000;
 	// A machine whose agent last reported longer ago than this is lost; a lost
-	// one still running is terminated lost_end_ms later.
+	// one still running is terminated lost_end_ms later, unless the mass-lost
+	// brake holds it (the class comment).
 	int64_t machine_silence_s = 60;
 	uint64_t lost_end_ms = 3 * 60 * 1000;
 	// After a failed launch of a kind (the cloud refused it, or its machine
@@ -374,7 +386,8 @@ private:
 		bool launch_failure_noted = false; // its machine's failed launch, in its events once
 	};
 	// A start the supervisor rendered: the container it wants on the server's
-	// slot, its files kept until the machine's agent has reported it.
+	// slot, its files kept until the machine's agent reports it running or
+	// exited.
 	struct Start {
 		int64_t machine_id = 0;
 		DesiredContainer container;

@@ -187,17 +187,10 @@ std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	// docker would read as an option).
 	if (!is_image_reference(c.serve_image))
 		return "ONNET_HOSTED_SERVE_IMAGE is no image reference";
-	if (!c.hostd_image.empty() && !is_image_reference(c.hostd_image))
-		return "ONNET_HOSTED_HOSTD_IMAGE is no image reference";
-	std::string service_host;
-	uint16_t service_port = 0;
-	if (!parse_service_url(c.service_url, service_host, service_port))
-		return "ONNET_INTERNAL_URL is no http://<host>:<port> the machines can reach";
-	if (!is_log_group_name(c.log_group))
-		return "ONNET_HOSTED_EC2_LOG_GROUP is no log group name";
-	for (const char *blank : { kBlankServiceUrl, kBlankServicePort, kBlankMachineId,
-				 kBlankMachineToken, kBlankServeImage, kBlankHostdImage,
-				 kBlankLogGroup, kBlankRegion })
+	if (!is_cluster_name(c.cluster))
+		return "ONNET_HOSTED_EC2_CLUSTER is no ECS cluster name";
+	for (const char *blank :
+			{ kBlankCluster, kBlankMachineId, kBlankMachineKind, kBlankMachineToken })
 		if (c.machine_script.find(blank) == std::string::npos)
 			return std::string(
 						   "the machine script (ONNET_HOSTED_MACHINE_SCRIPT) lacks its blank ") +
@@ -232,25 +225,22 @@ bool Ec2MachineDriver::parse_service_url(std::string_view url, std::string &host
 	return true;
 }
 
+bool Ec2MachineDriver::is_cluster_name(std::string_view name) {
+	return !name.empty() && name.size() <= 255 &&
+			all_of(name, [](char c) { return is_alnum(c) || c == '-' || c == '_'; });
+}
+
 std::optional<std::string> Ec2MachineDriver::render_user_data(
 		const std::string &script, const MachineUserData &values) {
-	std::string service_host;
-	uint16_t service_port = 0;
-	if (!parse_service_url(values.service_url, service_host, service_port) ||
-			values.service_port != service_port || values.machine_id <= 0 ||
+	if (!is_cluster_name(values.cluster) || values.machine_id <= 0 ||
 			values.bootstrap_token.size() != kMachineTokenChars ||
-			!all_of(values.bootstrap_token, is_alnum) || !is_image_reference(values.serve_image) ||
-			!is_image_reference(values.hostd_image) ||
-			!is_log_group_name(values.log_group) || !is_aws_region(values.region))
+			!all_of(values.bootstrap_token, is_alnum))
 		return std::nullopt;
 	std::string out = script;
-	const bool filled = fill(out, kBlankServiceUrl, values.service_url) &
-			fill(out, kBlankServicePort, std::to_string(values.service_port)) &
+	const bool filled = fill(out, kBlankCluster, values.cluster) &
 			fill(out, kBlankMachineId, std::to_string(values.machine_id)) &
-			fill(out, kBlankMachineToken, values.bootstrap_token) &
-			fill(out, kBlankServeImage, values.serve_image) &
-			fill(out, kBlankHostdImage, values.hostd_image) &
-			fill(out, kBlankLogGroup, values.log_group) & fill(out, kBlankRegion, values.region);
+			fill(out, kBlankMachineKind, machine_kind_text(values.kind)) &
+			fill(out, kBlankMachineToken, values.bootstrap_token);
 	if (!filled || out.size() > kMaxUserDataBytes)
 		return std::nullopt;
 	return out;
@@ -372,15 +362,10 @@ std::optional<LaunchedMachine> Ec2MachineDriver::launch(
 	if (!subnets)
 		return std::nullopt;
 	MachineUserData values;
-	values.service_url = config_.service_url;
-	std::string service_host;
-	parse_service_url(config_.service_url, service_host, values.service_port);
+	values.cluster = config_.cluster;
 	values.machine_id = launch.machine_id;
+	values.kind = launch.kind;
 	values.bootstrap_token = launch.bootstrap_token;
-	values.serve_image = config_.serve_image;
-	values.hostd_image = config_.hostd_image.empty() ? config_.serve_image : config_.hostd_image;
-	values.log_group = config_.log_group;
-	values.region = config_.region;
 	const std::optional<std::string> user_data = render_user_data(config_.machine_script, values);
 	if (!user_data) {
 		error = "the machine script did not render";

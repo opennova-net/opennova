@@ -1,7 +1,9 @@
 #pragma once
 
-// opennova-hostd's command line. Every setting is a flag (the machine's
-// systemd unit names them); the agent reads no environment variable.
+// opennova-hostd's command line. Every setting is a flag (the fleet cluster's
+// task definition names them, the same for every machine; the local stack's
+// machine driver its own); the one variable the agent reads is the ECS
+// agent's metadata endpoint (its own image, for the sync's envelope).
 
 #include <cstdint>
 #include <string>
@@ -16,7 +18,13 @@ enum class RuntimeKind : uint8_t { Docker, Process };
 
 struct HostdOptions {
 	std::string service_url; // --service: http://<the fleet's private name or address>:<port>
-	int64_t machine_id = 0; // --machine
+	// --machine <id>, or --machine-file <path> (its one line: the user-data's
+	// /etc/opennova/machine-id), read at the start: machine_identity.h.
+	int64_t machine_id = 0;
+	std::string machine_file;
+	// --ecs-config: the ECS agent's config, whose ECS_INSTANCE_ATTRIBUTES
+	// machine-id must be this machine's ("": no check).
+	std::string ecs_config;
 	std::string token_file = "/etc/opennova/hostd.token";
 	std::string state_dir = "/var/lib/opennova-hostd";
 	std::string slots_root = "/srv/slots";
@@ -25,8 +33,9 @@ struct HostdOptions {
 	std::string docker = "/usr/bin/docker";
 	std::string serve = "/usr/local/bin/opennova-serve"; // --serve: the process runtime's
 	std::string aws = "/usr/local/bin/aws"; // --aws: the CLI a tree's `s3 sync` runs
-	std::string iptables = "/usr/sbin/iptables"; // "none": no egress counters
-	std::string ip6tables = "/usr/sbin/ip6tables"; // "none", or used where the kernel has IPv6
+	// --nft: the slots' fences and counters (nft_table.h), or "none" for neither
+	// (the process runtime's machine, which has no slot users).
+	std::string nft = "/usr/sbin/nft";
 	// --log-group and --log-region, both or neither, the docker runtime's: the
 	// CloudWatch log group the containers' output goes to (docker_runtime.h
 	// ContainerLogs); neither, the machine's journal.
@@ -36,11 +45,16 @@ struct HostdOptions {
 	bool verbose = false;
 };
 
-enum class ParseOutcome : uint8_t { Run, Help, Version, Error };
+// CheckAlive: --check-alive, the ECS health check (exit 0 while the pass loop
+// turns: machine_identity.h alive_within).
+enum class ParseOutcome : uint8_t { Run, Help, Version, CheckAlive, Error };
 
 ParseOutcome parse_hostd_options(
 		const std::vector<std::string> &args, HostdOptions &out, std::string &error);
 const char *hostd_usage();
+// The host and port of a --service URL ("http://<host>[:<port>]", port 80 when
+// none); false when it is not one.
+bool service_host_port(const std::string &url, std::string &host, uint16_t &port);
 // The agent's build (OPENNOVA_HOSTD_VERSION at configure time; "dev" without it).
 const char *hostd_version();
 

@@ -131,7 +131,12 @@ this directory's.
   or draining machine whose agent has been silent 60 s is `lost`: gone, it ends; still
   running, it is terminated 3 min later, unless its agent reports again first. A shared
   machine with no server ends after `ONNET_FLEET_IDLE_MINUTES`; an own machine once its
-  server has ended. A draining machine moves its servers off one at a time and ends once
+  server has ended. The **mass-lost brake**: while more than max(2, half) of the live
+  machines are lost at once (a bad hostd on every machine, the fleet's network gone: the
+  fleet's fault, not the machines'), a lost machine is not terminated at its 3 min but
+  held (`fleet_machines.lost_held_since_ms`, an ERROR line, the heartbeat's
+  `machines_held`), each until it reports again or an admin ends it, whether or not the
+  brake still holds by then. A draining machine moves its servers off one at a time and ends once
   it holds none, counting toward neither maximum, so a roll launches the machines it moves
   to. A refused launch or a machine that never booted holds every launch of its kind for
   1, 2, 4, 8, 16, then 30 minutes (`fleet_launch_backoff`), until a machine of that kind
@@ -141,10 +146,12 @@ this directory's.
   or stopping, each with its slot, user, pinned image, trees (the base at `/opt/game`, the
   expansion at `/opt/game/expansion/<code>`), `opennova-serve`'s arguments, the slot's
   limits (`ONNET_FLEET_SLOT_CPUS`, `ONNET_FLEET_SLOT_MEMORY_MB`, 128 processes) and its
-  working directory's files until the agent has reported it once; and every tree they use,
-  with its store URL and manifest. The files live in the fleet's memory alone and are
-  dropped once reported: a start a restart cut short is placed again with new
-  credentials. The reply sends `drain` while the machine's row is draining.
+  working directory's files until the agent reports it running or exited (one reported
+  `starting` waits for its image or its trees, and a hostd replaced meanwhile needs them
+  again); and every tree they use, with its store URL and manifest. The files live in the
+  fleet's memory alone and are dropped once the container runs or exited: a start a
+  restart cut short is placed again with new credentials. The reply sends `drain` while
+  the machine's row is draining.
 - **Health.** While `running`, every pass reads its agent's report and every 20 s checks
   the listing and the admin link. Three checks in a row with no answer on the link fail
   the server. A listing no check has found for 8 min places the server again, no restart
@@ -156,7 +163,9 @@ this directory's.
   is gone fails; a `fleet.sweep` job runs (every cloud machine the driver lists that no
   live row names is terminated, but one whose row still launches; a live row the listing
   lacks is described, and ends if its machine is gone); a server whose files went with
-  the fleet program is placed again; the rest resume, a running one given 8 min
+  the fleet program (booting, its container reported neither running nor exited) is
+  placed again, a new generation with its files rendered afresh and no restart counted;
+  the rest resume, a running one given 8 min
   (`relist_grace_ms`) to list again before its health checks count. A driver that cannot
   list ends nothing. Every 5 min the sweep runs again.
 
@@ -164,10 +173,15 @@ this directory's.
 
 - **The agents and the internal listener** (`agent_route.*`, `internal_listener.*`,
   `agent_protocol.*`; the protocol is [`apps/hostd/README.md`](../../hostd/README.md)).
-  Each machine runs `opennova-hostd`, whose user-data carries a one-time bootstrap token
-  (kept as its SHA-256 alone, 30 minutes' life, spent at the agent's first sync) that it
-  redeems for a long-lived secret (stored hashed); then it syncs every 5 s (1 s with
-  work). Both routes are on the **internal listener**, the fleet's second HTTP
+  Each machine runs `opennova-hostd` (on EC2 the fleet cluster's ECS daemon), whose
+  machine's user-data carries a one-time bootstrap token (kept as its SHA-256 alone, 30
+  minutes' life, spent at the agent's first sync) that it redeems for a long-lived secret
+  (stored hashed); then it syncs every 5 s (1 s with work). Every sync opens with its
+  envelope (the protocol, the agent's build and its image), recorded on the machine's row
+  matched or not (`agent_protocol`, `agent_version`, `agent_image`): a sync of another
+  protocol, older or newer, is held (the bare 404, the machine heard, its slots' reports
+  kept, `protocol_mismatch_since` set) and drained only after 10 minutes of it, so hostd
+  rolls ahead of the fleet program (or behind it) and no server restarts. Both routes are on the **internal listener**, the fleet's second HTTP
   server, bound while it leads to its task's private address at 8070 (from the ECS task
   metadata, with `ONNET_INTERNAL_HTTP_BIND` unset), which the machines' security group
   alone reaches; the agents reach it at `ONNET_INTERNAL_URL`, resolved at each request, so
@@ -182,8 +196,8 @@ this directory's.
   Every driver's machine runs the real agent and has an address of its own, so each
   slot's ports are its fixed ones and the agent routes can check the peer.
   - `ONNET_HOSTED_PROVIDER=docker` (`docker_machine_driver.*`, the local stack's,
-    `deploy/compose/docker-compose.hosting.yml`): each machine a container of the serve
-    image on the stack's network, over the Docker Engine API (the stack's socket proxy
+    `deploy/compose/docker-compose.hosting.yml`): each machine a container of the hostd
+    image (`ONNET_HOSTED_HOSTD_IMAGE`) as its serve user on the stack's network, over the Docker Engine API (the stack's socket proxy
     admits the containers API alone), named `<deployment>-machine-<id>` and labelled with
     the deployment and machine, taking the local store's directory read-only from a data
     container, its one-time token put in it as a file (never an argument or a variable
@@ -191,13 +205,15 @@ this directory's.
     runtime, its servers `opennova-serve` children. Its servers list through
     `ONNET_PUBLIC_HOST`, the developer's LAN address there.
   - `ONNET_HOSTED_PROVIDER=ec2` (`ec2_machine_driver.*`): EC2 machines from the launch
-    template of their kind (`infra/aws`: the fleet image, the kind's type, the machines'
-    security group and instance profile, IMDSv2 required), tagged with the deployment, the
-    kind and the machine id, with the machine script (`machine/machine_user_data.sh`) as
-    user-data: it installs docker and the AWS CLI v2 (checked), reserves the slots' ports,
-    fences the slots' users off the instance metadata and the fleet's internal port,
-    installs `opennova-hostd` copied out of the serve image and ships its log and its
-    containers' output to the machines' log group. The driver runs the AWS CLI through a
+    template of their kind (`infra/aws`: the deployment's pinned ECS-optimized Amazon
+    Linux 2023 image, the kind's type, the machines' security group and instance profile,
+    IMDSv2 required), tagged with the deployment, the kind and the machine id, with the
+    machine script (`machine/machine_user_data.sh`) as user-data: it writes the token and
+    the machine id for the agent, reserves the slots' ports and points the image's ECS
+    agent at the fleet cluster (`ONNET_HOSTED_EC2_CLUSTER`) with the machine's id and kind
+    as instance attributes. The cluster's daemon service runs `opennova-hostd` on every
+    machine that registers (`infra/aws/fleet_agent.tf`): it fences the slots' users,
+    redeems the token and runs the servers (`apps/hostd/README.md`). The driver runs the AWS CLI through a
     `CommandRunner` (`apps/common/command_runner.*`: an argv, no shell, a 20 s timeout,
     only the system's and the `AWS_*` variables) on the worker task's role, describes from
     one cached `describe-instances` every 10 s, and terminates a machine at its end, never
@@ -313,13 +329,14 @@ reads the store alone.
 | `ONNET_FLEET_IDLE_MINUTES` | 30 | web, fleet, worker | How long a shared machine with no server lives on before it ends. |
 | `ONNET_FLEET_SLOT_MEMORY_MB` | 512 | web, fleet, worker | Each container's memory (no swap). |
 | `ONNET_FLEET_SLOT_CPUS` | 1 | web, fleet, worker | Each container's CPUs (a decimal). |
-| `ONNET_HOSTED_SERVE_IMAGE` | none | web, fleet, worker | The serve image every start pins and the machines pull (pinned by digest at deploy); for `docker`, the image every machine container runs. |
+| `ONNET_HOSTED_SERVE_IMAGE` | none | web, fleet, worker | The serve image every start pins and the machines pull (pinned by digest at deploy). |
+| `ONNET_FLEET_IMAGE_ID` | none | web, fleet, worker | The image the launch templates pin (the deployment's `fleet_ami`, an `ami-...`), which a fleet roll's preview holds each machine's against: one on it is kept. |
 | `ONNET_INTERNAL_URL` | none | worker | The fleet's internal listener as the machines reach it, `http://<host>:<port>` (a deployment's Cloud Map name, `fleet.<deployment>.opennova.internal:8070`; the fleet's compose name locally): what a launch hands its machine. Required by both drivers. |
 | `ONNET_HOSTED_DEPLOYMENT` | none | worker | The deployment tag (`ec2`) or label (`docker`) every machine carries and every describe, list and terminate is scoped to, so two stacks in one account or one Docker never touch each other's machines. |
-| `ONNET_HOSTED_HOSTD_IMAGE` | the serve image | worker | `ec2`: the image `opennova-hostd` is copied out of. |
+| `ONNET_HOSTED_HOSTD_IMAGE` | none | worker | `docker`: the image every machine container runs (the hostd image: `opennova-hostd` with `opennova-serve` beside it). A deployment's hostd image is its task definition's (`app deploy`), no setting. |
 | `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | worker | `ec2`: the launch templates by kind, `{"shared": "lt-...", "own": "lt-..."}` (`lt-<id>` or `lt-<id>:<version>`). |
 | `ONNET_HOSTED_EC2_REGION` | none | worker | `ec2`: the region every AWS CLI call names. |
-| `ONNET_HOSTED_EC2_LOG_GROUP` | none | worker | `ec2`: the machines' CloudWatch log group (`apps/hostd/README.md`, "Logs"); required. |
+| `ONNET_HOSTED_EC2_CLUSTER` | none | worker | `ec2`: the fleet cluster every machine's ECS agent joins (`opennova-<deployment>-fleet`), whose daemon service runs `opennova-hostd`; required. |
 | `ONNET_HOSTED_EC2_SUBNETS` | none | worker | `ec2`: the subnets machines launch into, one per zone, each giving a public IPv4; a launch takes the one with fewer live machines and, when that zone cannot take it, the next. |
 | `ONNET_HOSTED_AWS_CLI` | `/usr/local/bin/aws` | web, worker, data | The AWS CLI v2, an absolute path (no `PATH` search): the `ec2` driver's, the S3 object store's and the mailer's SES calls. |
 | `ONNET_HOSTED_DOCKER_URL` | none | worker | `docker`: the Docker Engine API, `http://<host>:<port>` (the local stack's socket proxy). |
@@ -352,7 +369,8 @@ writes need the CSRF header.
 | `GET /api/admin/hosted/<id>` | admin | one server with its events and its machine; 404 |
 | `POST /api/admin/fleet/machines/<id>/drain` | admin | the machine takes no new server and its servers move off one at a time (no restart counted), then it ends: 202; 404; 409 `not_live` |
 | `POST /api/admin/fleet/machines/<id>/end` | admin | the machine to `ending`, its servers placed again (no restart counted), its agent refused: 202; 404; 409 `not_live` |
-| `POST /api/admin/fleet/roll` | admin | every machine that takes servers drains onto machines launched for them, so a new serve image or launch template reaches the fleet: 202 with their ids |
+| `GET /api/admin/fleet/roll` | admin | a fleet roll's preview (`fleet_roll.h`): each machine that takes servers with its image (EC2's), its servers and `replace` (another image than `ONNET_FLEET_IMAGE_ID`, or one not known) or `keep`, and the ids to replace |
+| `POST /api/admin/fleet/roll` | admin | `{"machines": [<id>, ...]}`: each drains onto machines launched for them from the templates as they are (a new image, template or user-data reaches those; hostd and the serve image reach machines in place): 202 with their ids; 400 `invalid_field` for no list, or a machine that takes no servers |
 | `POST /api/admin/hosted/update-all` | admin | `{}` or `{"data_set_id": n}`: every live server behind its data sets' current trees marked `update_requested`: 202 with how many; 400 |
 | `GET /api/admin/hosted/<id>/stats`, `GET /api/admin/hosted/stats` | admin | any server's stats, and the fleet's |
 | `GET /api/admin/hosted/usage` | admin | every live server's use of its slot (its newest sample within 3 min and its last hour summed), by machine and slot, with each machine's and the fleet's totals and the slots' limits; 429 |
