@@ -295,7 +295,7 @@ int test_signed_counts() {
 	if (back.triggers.size() == 6)
 		TEST_EXPECT(back.triggers[1].param1 == 100 && back.triggers[2].param1 == 101 && back.triggers[3].param1 == 0 &&
 		            static_cast<int32_t>(back.triggers[5].main_type) == 0);
-	// 21 rows declared 21: more than the original editor's 20 slots, noted [orig: MIS_ParseToken @ 0x453b81,
+	// 21 rows declared 21: more than the original editor's 20 slots, noted [orig: JOTACmed.exe MIS_ParseToken @ 0x453b81,
 	// @ 0x453b99, @ 0x453c6f]; the rows read as written.
 	std::string over = text;
 	const size_t over_at = over.find("  begin triggers 2\r\n", over.find("begin event 1\r\n"));
