@@ -6,8 +6,8 @@
 # Under /opennova/<deployment>/:
 #   infra.env   (String, here) what Terraform knows that the toolbox needs (it
 #               runs no Terraform for a deploy, and neither does the deploy
-#               workflow): the cluster, each program's task definition (the
-#               template a deploy clones) and the backup task's, the subnets
+#               workflow): the clusters, each program's task definition (the
+#               template a deploy clones), the backup task's and hostd's, the subnets
 #               and security group of the toolbox's one-off tasks, the image
 #               registry, the database's names, the hosted machines' settings,
 #               the account, the operations bucket and the log groups; one
@@ -41,9 +41,15 @@ locals {
       BACKUP_BUCKET               = local.ops_bucket_name
       BACKUP_PREFIX               = local.backup_prefix
       # The cluster and its services (the programs' names), each program's
-      # task definition as Terraform made it and the backup task's, as JSON.
-      OPENNOVA_CLUSTER          = aws_ecs_cluster.main.name
-      OPENNOVA_TASK_DEFINITIONS = jsonencode(merge({ for p, d in aws_ecs_task_definition.program : p => d.arn }, { backup = aws_ecs_task_definition.backup.arn }))
+      # task definition as Terraform made it, the backup task's and, with
+      # hosting on, hostd's (the fleet cluster's, OPENNOVA_FLEET_CLUSTER), as
+      # JSON.
+      OPENNOVA_CLUSTER = aws_ecs_cluster.main.name
+      OPENNOVA_TASK_DEFINITIONS = jsonencode(merge(
+        { for p, d in aws_ecs_task_definition.program : p => d.arn },
+        { backup = aws_ecs_task_definition.backup.arn },
+        { for d in aws_ecs_task_definition.hostd : "hostd" => d.arn },
+      ))
       # Each program's task counts: the first deploy starts each service at
       # its desired count and raises its floor to its min (Terraform's next
       # apply sets the same).

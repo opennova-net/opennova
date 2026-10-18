@@ -415,14 +415,10 @@ run "hosting_on" {
     override_during = plan
     values          = { id = "lt-0own", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0own" }
   }
-  override_resource {
-    target          = terraform_data.fleet_seed_image[0]
-    override_during = plan
-    values          = { output = "ami-0123456789abcdef0" }
-  }
 
   variables {
     hosted_enabled = true
+    fleet_ami      = "al2023-ami-ecs-hvm-2023.0.20260924-kernel-6.1-x86_64"
   }
 
   assert {
@@ -439,11 +435,11 @@ run "hosting_on" {
         if st.sid == "DataStoreObjects" && toset(st.resources) == toset(["arn:aws:s3:::opennova-staging-ops-123456789012/data/*"])
       ]) == 1 &&
       length([
-        for st in data.aws_iam_policy_document.machine[0].statement : st
+        for st in data.aws_iam_policy_document.hostd[0].statement : st
         if st.sid == "ReadDataTrees" && toset(st.resources) == toset(["arn:aws:s3:::opennova-staging-ops-123456789012/data/trees/*"])
       ]) == 1 &&
       alltrue([for p, r in aws_iam_role_policy.data_store : r.name == "opennova-staging-${p}-data-store"])
     )
-    error_message = "web's, the worker's and the machines' store access is staging's bucket alone"
+    error_message = "web's, the worker's and hostd's store access is staging's bucket alone"
   }
 }

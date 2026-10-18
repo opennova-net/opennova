@@ -28,10 +28,14 @@
 #   data        nothing inbound; the data sets' jobs over the game data's
 #               store (data_store), on 40 GiB of task storage
 #
+# The machines' agent, hostd, is no program here: a DAEMON service of the
+# fleet cluster on the machines themselves (fleet_agent.tf), rolled with each
+# release before the fleet program.
+#
 # Every program reaches the database (database.tf); web alone reaches the
 # cache (cache.tf), and reads what the admin's infrastructure view shows (the
 # services, tasks, target groups, database, cache, release and machines below,
-# "web's infrastructure reads"). Each container answers /livez (its stall watchdog) on
+# "web's infrastructure reads", and the fleet cluster's, fleet_agent.tf). Each container answers /livez (its stall watchdog) on
 # health_port (web on game_http_port too, beside /healthz), which its ECS
 # health check asks; a task failing it is replaced. A deployment rolls with
 # the circuit breaker on (a deployment that never turns healthy rolls back)
@@ -394,12 +398,14 @@ locals {
   }
 
   # The admin's infrastructure view (apps/novaworld_web/infra/infra_status.h):
-  # what web reads with its task role (the policy below), each setting naming
-  # this deployment's own: the cluster and its services, the balancer's target
-  # groups by listener, the database, the cache and the release parameter.
+  # what web reads with its task role (the policy below, and fleet_agent.tf's),
+  # each setting naming this deployment's own: the cluster and its services,
+  # the fleet cluster ("" while hosting is off), the balancer's target groups
+  # by listener, the database, the cache and the release parameter.
   infra_status_env = {
     ONNET_INFRA_REGION            = local.region
     ONNET_INFRA_CLUSTER           = aws_ecs_cluster.main.name
+    ONNET_INFRA_FLEET_CLUSTER     = local.hosted_enabled ? aws_ecs_cluster.fleet[0].name : ""
     ONNET_INFRA_TARGET_GROUPS     = jsonencode({ for k, g in aws_lb_target_group.public : k => g.arn })
     ONNET_INFRA_DATABASE          = aws_db_instance.main.identifier
     ONNET_INFRA_CACHE             = aws_elasticache_replication_group.cache.replication_group_id

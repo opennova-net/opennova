@@ -113,7 +113,7 @@ variable "data" {
 }
 
 variable "image_registry" {
-  description = "Where the service's images are published: <registry>/opennova-novaworld-<program>, <registry>/novaworld-web (the portal's nginx), <registry>/opennova-novaworld-backup, and the machines' <registry>/opennova-serve (.github/workflows/novaworld-images.yml, serve-image.yml). Public packages: the tasks and the machines pull anonymously."
+  description = "Where the service's images are published: <registry>/opennova-novaworld-<program>, <registry>/novaworld-web (the portal's nginx), <registry>/opennova-novaworld-backup, and the machines' <registry>/opennova-serve and <registry>/opennova-hostd (.github/workflows/novaworld-images.yml, serve-image.yml). Public packages: the tasks and the machines pull anonymously."
   type        = string
   default     = "ghcr.io/opennova-net"
 
@@ -458,8 +458,8 @@ variable "fleet_idle_minutes" {
   default     = 30
 }
 
-variable "hosted_ami_id" {
-  description = "Override the fleet's seed image (an Ubuntu 24.04 x86_64 AMI), what the machines launch from until `fleet bake-image` bakes one. Empty: Canonical's newest when the image parameter is made; a later seed waits for a -replace of terraform_data.fleet_seed_image[0] and aws_ssm_parameter.fleet_image[0]."
+variable "fleet_ami" {
+  description = "The exact name of the image the machines launch: an ECS-optimized Amazon Linux 2023 x86_64 AMI, Amazon's (fleet_agent.tf). Pinned per deployment, so a bump shows in the plan and in git: staging's first, then prod's, then `fleet roll` moves the servers of the machines on the old image (DEPLOY.md). The newest: aws ssm get-parameters --names /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_name. Required with hosted_enabled."
   type        = string
   default     = ""
 }

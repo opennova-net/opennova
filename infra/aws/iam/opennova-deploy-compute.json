@@ -84,8 +84,7 @@
             "CreateNetworkInterface",
             "AuthorizeSecurityGroupIngress",
             "AuthorizeSecurityGroupEgress",
-            "RunInstances",
-            "CreateImage"
+            "RunInstances"
           ]
         }
       }
@@ -109,31 +108,6 @@
       "Effect": "Allow",
       "Action": "kms:DescribeKey",
       "Resource": "arn:aws:kms:${region}:${account_id}:key/*"
-    },
-    {
-      "Sid": "BakeFleetImageOfTagged",
-      "Effect": "Allow",
-      "Action": "ec2:CreateImage",
-      "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
-      "Condition": {
-        "StringLike": {
-          "aws:ResourceTag/opennova:deployment": "opennova-*"
-        }
-      }
-    },
-    {
-      "Sid": "BakeFleetImageTagged",
-      "Effect": "Allow",
-      "Action": "ec2:CreateImage",
-      "Resource": [
-        "arn:aws:ec2:${region}::image/*",
-        "arn:aws:ec2:${region}::snapshot/*"
-      ],
-      "Condition": {
-        "StringLike": {
-          "aws:RequestTag/opennova:deployment": "opennova-*"
-        }
-      }
     }
   ]
 }

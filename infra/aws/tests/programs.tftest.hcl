@@ -509,6 +509,7 @@ run "environments" {
     condition = (
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_REGION"] == "us-east-1" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_CLUSTER"] == "opennova-prod" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_FLEET_CLUSTER"] == "" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_DATABASE"] == "opennova-prod-db" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_CACHE"] == "opennova-prod-cache" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_RELEASE_PARAMETER"] == "/opennova/prod/release" &&
@@ -521,7 +522,7 @@ run "environments" {
       } &&
       alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INFRA_")])
     )
-    error_message = "web alone is told what the admin's infrastructure view reads: this deployment's cluster, its target groups by listener, its database, cache and release parameter, in its region"
+    error_message = "web alone is told what the admin's infrastructure view reads: this deployment's cluster (and no fleet cluster with hosting off), its target groups by listener, its database, cache and release parameter, in its region"
   }
 }
 
@@ -716,14 +717,10 @@ run "hosting_on" {
     override_during = plan
     values          = { id = "lt-0own", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0own" }
   }
-  override_resource {
-    target          = terraform_data.fleet_seed_image[0]
-    override_during = plan
-    values          = { output = "ami-0123456789abcdef0" }
-  }
 
   variables {
     hosted_enabled = true
+    fleet_ami      = "al2023-ami-ecs-hvm-2023.0.20260924-kernel-6.1-x86_64"
   }
 
   assert {

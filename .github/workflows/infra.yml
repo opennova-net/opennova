@@ -92,7 +92,6 @@ jobs:
             deploy/bin/on-deploy \
             deploy/bin/lib/*.sh \
             deploy/bin/tests/*.sh \
-            deploy/host/fleet-image.sh \
             deploy/backup/backup.sh \
             deploy/backup/restore.sh \
             deploy/backup/list.sh \

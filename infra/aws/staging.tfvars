@@ -17,6 +17,11 @@ cloudflare_web_proxied = true
 hosted_enabled   = true
 fleet_max_shared = 1
 fleet_max_own    = 1
+# The machines' image, pinned by its exact name (fleet_agent.tf): Amazon's
+# ECS-optimized Amazon Linux 2023. A bump lands here, staging's first;
+# the newest: aws ssm get-parameters --names
+# /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_name
+fleet_ami = "al2023-ami-ecs-hvm-2023.0.20260924-kernel-6.1-x86_64"
 
 # Staging's account's budgets (observability.tf): its service tier runs about
 # $145 a month, about $70 while `app down`.
