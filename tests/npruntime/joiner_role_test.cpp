@@ -2450,6 +2450,58 @@ bool run_round_event_stance_reads_the_flags_legs() {
 	return ok;
 }
 
+// An alt-fire (bit 0) round event's byte is an ammo index: the joiner flies that
+// ammo with no weapon, so the spawn's spread takes the ammo's ERROR leg, never the
+// round of a weapon at that index. [orig: NetPacket_DeserializeRoundEvent @0x42F521,
+//  @0x42F52C..0x42F5BA; RoundData_SpawnRound's null-weapon test @0x4EC38D..0x4EC397,
+//  the ammo leg @0x4EC4BF..0x4EC4D2]
+bool run_alt_round_event_flies_its_ammo_byte() {
+	Harness h;
+	auto &world = h.kernel->world;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	world.tables.ammo.entries.resize(3);
+	for (w::AmmoTableEntry &ammo : world.tables.ammo.entries) {
+		ammo.valid = true;
+		ammo.velocity = 620;
+		ammo.max_age_ticks = 100;
+	}
+	world.tables.ammo.entries[2].spread_error_fp16 = 30 << 16;
+	// A loaded table's slot 0 is the engine's valid "null" def; weapon 2 flies ammo 0.
+	world.tables.weapons.entries.resize(3);
+	world.tables.weapons.entries[0].name = "null";
+	world.tables.weapons.entries[0].valid = true;
+	world.tables.weapons.entries[2].name = "ADM_TWO";
+	world.tables.weapons.entries[2].valid = true;
+	world.tables.weapons.entries[2].ammo_index = 0;
+	constexpr uint16_t kShooter = 0x0003;
+	auto &row = h.role.runtime->state().upsert(kShooter);
+	row.type_id = w::kPlayerInfantryTypeId;
+	row.cls = EntityClass::Player;
+	row.carrier_handle = 0xFFFF;
+	world.round_sim.reset();
+	FrameUpdate frame;
+	frame.carried_handle = 0xFFFF;
+	frame.health = 100;
+	RoundEventRecord ev;
+	ev.flags = kRoundEventFlagAltFire;
+	ev.adm_index = 2;
+	ev.shot_seq = 1;
+	ev.shooter_handle = kShooter;
+	frame.round_events.push_back(ev);
+	h.role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(frame));
+	const w::LiveRound *round = nullptr;
+	for (const w::LiveRound &r : world.round_sim.rounds)
+		if (r.active) round = &r;
+	if (!expect(round != nullptr && round->ammo_index == 2,
+			"the alt round event flies ammo 2, its byte"))
+		return false;
+	return expect(round->vel.y != 0.0f || round->vel.z != 0.0f,
+			"the weaponless alt round spreads by its ammo's ERROR");
+}
+
 int main() {
 	if (!run_local_replica_turret_channel()) return 1;
 	if (!run_replica_turret_channel()) return 1;
@@ -2495,6 +2547,7 @@ int main() {
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();
 	ok &= run_round_event_stance_reads_the_flags_legs();
+	ok &= run_alt_round_event_flies_its_ammo_byte();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

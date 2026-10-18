@@ -1537,9 +1537,24 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 	// enter RoundData_SpawnRound.
 	if ((ev.flags & (kRoundEventFlagAltFire | kRoundEventFlagAdmIndexed)) == 0)
 		return;
-	const world::WeaponTableEntry *adm =
-			world.tables.weapons.by_index(ev.adm_index);
-	if (adm == nullptr || adm->ammo_index < 0) return;
+	// Bit 0 is tested first: the ammo-def arm reads the byte as the round's ammo
+	// index and spawns with no weapon. Only with bit 0 clear does the adm-indexed
+	// arm resolve the byte as a weapon and fly that weapon's round.
+	// [orig: NetPacket_DeserializeRoundEvent - the arm test @0x42F521, the ammo
+	//  bound @0x42F52C..0x42F53E, the null weapon @0x42F582 into
+	//  RoundData_SpawnRound @0x42F5BA; the adm arm's AdmDef_GetEntryByIndex
+	//  @0x42F6D9 and its ammo byte @0x42F6F9]
+	const bool ammo_arm = (ev.flags & kRoundEventFlagAltFire) != 0;
+	int32_t round_ammo = -1;
+	if (ammo_arm) {
+		if (world.tables.ammo.by_index(ev.adm_index) == nullptr) return;
+		round_ammo = ev.adm_index;
+	} else {
+		const world::WeaponTableEntry *adm =
+				world.tables.weapons.by_index(ev.adm_index);
+		if (adm == nullptr || adm->ammo_index < 0) return;
+		round_ammo = adm->ammo_index;
+	}
 	world::RoundSpawnParams round;
 	world::RoundSourceState source;
 	round.owner = world::EntityHandle{};
@@ -1637,8 +1652,9 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 	round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;
 	round.dir_yaw_bam = ev.dir_yaw_bam;
 	round.dir_pitch_bam = ev.dir_pitch_bam;
-	round.ammo_index = adm->ammo_index;
+	round.ammo_index = round_ammo;
 	round.adm_index = ev.adm_index;
+	round.no_weapon = ammo_arm;
 	round.shot_seq = ev.shot_seq;
 	round.subtype = ev.subtype;
 	round.charge = ev.slot_byte;
