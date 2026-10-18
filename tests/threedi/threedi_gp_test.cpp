@@ -1,15 +1,21 @@
-// The GP reader and its migration to 3DI3 (engine/formats/threedi_gp).
+// The GP reader, its migration to 3DI3, and the way back: the lowering of a 3DI3 and the GP
+// writer (engine/formats/threedi_gp).
 //
-// Synthetic legs: the GP models common/gp_model_bytes.h builds byte by byte (no GP fixture is
-// committed: nothing of ours writes GP, so none can be minted), read, migrated and read back
-// through the 3DI3 reader; and the loader's gates refused. The retail leg migrates every GP
-// model BHD ships, which the reference tree mirrors under fixtures/bhd/3di: each parses,
-// migrates, reads back as 3DI3 with a runtime-safe collision block, and keeps its LOD,
-// primitive and section counts.
+// Synthetic legs: the GP models common/gp_model_bytes.h builds byte by byte, read, migrated and
+// read back through the 3DI3 reader; the loader's gates refused; the writer a fixed point of the
+// reader (read, write, read, write: the two writes agree) on both models; the synthetic GPM
+// lowered back from its migration, the lowering a fixed point after one step, and a skinned
+// model or a technique BHD has no form for refused. The retail leg takes every GP model BHD
+// ships, which the reference tree mirrors under fixtures/bhd/3di: each parses, migrates, reads
+// back as 3DI3 with a runtime-safe collision block and keeps its LOD, primitive and section
+// counts; the writer is a fixed point on each; and every rigid one (GPM) lowers back to the GP
+// whose migration is the first migration byte for byte.
 
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi_gp/threedi_gp.h>
+#include <formats/threedi_gp/threedi_gp_lower.h>
 #include <formats/threedi_gp/threedi_gp_migrate.h>
+#include <formats/threedi_gp/threedi_gp_write.h>
 #include "common/file_io.h"
 #include "common/gp_model_bytes.h"
 #include "common/retail_paths.h"
@@ -215,12 +221,128 @@ int files_beside() {
 	return 0;
 }
 
+// Read, write, read, write: the writer puts back every word the reader takes.
+bool writer_fixed_point(const std::vector<uint8_t> &bytes, std::vector<uint8_t> &written, std::string &error) {
+	gp::File a, b;
+	std::vector<uint8_t> again;
+	if (!gp::parse(bytes.data(), bytes.size(), a, error) || !gp::write(a, written, error)) return false;
+	if (!gp::parse(written.data(), written.size(), b, error) || !gp::write(b, again, error)) return false;
+	if (again != written) {
+		error = "the writer is not a fixed point of the reader";
+		return false;
+	}
+	return true;
+}
+
+// The 3DI3 bytes a migration wrote, lowered back to GP and written.
+bool lower_bytes(const std::vector<uint8_t> &threedi3, std::vector<uint8_t> &gp_bytes, gp::File &file,
+		std::vector<gp::MigrateNote> &notes, std::string &error) {
+	Threedi3di3 m{};
+	if (threedi_3di3_read_memory(threedi3.data(), threedi3.size(), &m) != 0) {
+		error = "the 3DI3 does not read";
+		return false;
+	}
+	const bool ok = gp::lower(m, file, notes, error) && gp::write(file, gp_bytes, error);
+	threedi_3di3_free(&m);
+	return ok;
+}
+
+bool migrate_bytes(const std::vector<uint8_t> &gp_bytes, std::vector<uint8_t> &out, std::string &error) {
+	gp::File file;
+	std::vector<gp::MigrateNote> notes;
+	return gp::parse(gp_bytes.data(), gp_bytes.size(), file, error) && gp::migrate(file, out, notes, error);
+}
+
+int synthetic_write() {
+	for (const std::vector<uint8_t> &bytes : {gpm_model(), gpp_model()}) {
+		std::vector<uint8_t> written;
+		std::string error;
+		if (!writer_fixed_point(bytes, written, error)) {
+			std::fprintf(stderr, "write: %s\n", error.c_str());
+			return 1;
+		}
+		gp::File file;
+		TEST_EXPECT(gp::parse(written.data(), written.size(), file, error));
+		TEST_EXPECT(written.size() == bytes.size());
+		// The vertex colour the loader drops, 0xFF000000 from the tool [orig: GP_WriteModel
+		// @ 0x4490EF..0x449238 (df4oed)].
+		const size_t first_vertex = gp::kHeaderSize + file.user_points.size() * 48 + 4 + file.textures.size() * 60 + 0x88 +
+				file.collision.vertices.size() * 8 + file.collision.normals.size() * 8 + file.collision.faces.size() * 44 +
+				file.collision.sections.size() * 128 + file.collision.translations.size() * 12 +
+				file.collision.planes.size() * 16 + file.collision.volumes.size() * 96;
+		uint32_t colour = 0;
+		std::memcpy(&colour, written.data() + first_vertex + (file.header.kind == gp::Kind::Gpm ? 24 : 40), 4);
+		TEST_EXPECT(colour == 0xFF000000u);
+	}
+	return 0;
+}
+
+// The synthetic GPM through migrate -> lower -> write: the GP it writes carries what the
+// migration keeps, with each record's words, and one step makes it a fixed point (the synthetic
+// model streams tangents no bump material reads, which the lowering leaves out).
+int synthetic_lower() {
+	std::vector<uint8_t> m1, gp1, m2, gp2, m3;
+	gp::File file;
+	std::vector<gp::MigrateNote> notes;
+	std::string error;
+	if (!migrate_bytes(gpm_model(), m1, error) || !lower_bytes(m1, gp1, file, notes, error) ||
+			!migrate_bytes(gp1, m2, error)) {
+		std::fprintf(stderr, "lower: %s\n", error.c_str());
+		return 1;
+	}
+	TEST_EXPECT(file.header.kind == gp::Kind::Gpm && file.header.name == "crate" && file.header.revision == 0x103);
+	TEST_EXPECT(file.header.tags[0] == 0x676E7263u && file.header.thresholds[0] == 200 * kOne);
+	TEST_EXPECT(file.header.flags == (gp::kFlagLights | gp::kFlagOcclusion));
+	TEST_EXPECT(file.user_points.size() == 1 && file.user_points[0].name == "eye" && file.user_points[0].type == 'S');
+	TEST_EXPECT(file.textures.size() == 2 && file.textures[0].name == "box.tga" && file.textures[0].flags == 0x207);
+	TEST_EXPECT(file.textures[0].width == 256 && has_note(notes, "size was not found"));
+	const gp::RenderModel &rm = file.lods[0];
+	TEST_EXPECT(rm.parts.size() == 2 && rm.batches.size() == 2 && rm.primitives.size() == 2);
+	TEST_EXPECT(rm.batches[0].opaque_count == 1 && rm.batches[1].alpha_count == 1 && rm.primitives[1].alpha);
+	TEST_EXPECT(rm.primitives[0].vertex_word == 2 && rm.primitives[1].topology == 1);
+	TEST_EXPECT(rm.attach_points.size() == 1 && near(rm.attach_points[0][0], 1.0f));
+	TEST_EXPECT(rm.materials.size() == 2 && rm.materials[0].attributes == 0x3 && rm.materials[0].alpha_ref == 128);
+	TEST_EXPECT(rm.materials[0].alpha_source == 2 && rm.materials[0].blend == 1 && rm.materials[0].name == "box.tga");
+	TEST_EXPECT(rm.materials[1].attributes == 0x140 && rm.materials[1].blend == 4 && rm.materials[1].rgb.style == 113);
+	TEST_EXPECT((rm.flags & gp::kRenderPartAnimations) && rm.part_animations.size() == 2);
+	TEST_EXPECT(rm.part_animations[1].flags == 5 && rm.part_animations[1].tracks[0].style == 113);
+	TEST_EXPECT(file.control_registers.size() == 1 && file.matrices.size() == 2);
+	TEST_EXPECT(file.lights.size() == 1 && file.occlusion.size() == 1 && file.occlusion[0].vertices.size() == 3);
+	const gp::Collision &c = file.collision;
+	TEST_EXPECT(c.sections.size() == 1 && c.volumes.size() == 1 && c.planes.size() == 6 && c.faces[0].flags == 0x2);
+	TEST_EXPECT(c.planes[0].normal[0] == -65532); // JO's Q14 keeps two bits fewer than BHD's 16.16
+	if (!lower_bytes(m2, gp2, file, notes, error) || !migrate_bytes(gp2, m3, error)) {
+		std::fprintf(stderr, "lower again: %s\n", error.c_str());
+		return 1;
+	}
+	TEST_EXPECT(gp2 == gp1 && m3 == m2);
+	return 0;
+}
+
+int lower_refusals() {
+	std::vector<uint8_t> skinned, out;
+	gp::File file;
+	std::vector<gp::MigrateNote> notes;
+	std::string error;
+	TEST_EXPECT(migrate_bytes(gpp_model(), skinned, error));
+	TEST_EXPECT(!lower_bytes(skinned, out, file, notes, error) && error.find("skinned") != std::string::npos);
+	std::vector<uint8_t> rigid;
+	TEST_EXPECT(migrate_bytes(gpm_model(), rigid, error));
+	Threedi3di3 m{};
+	TEST_EXPECT(threedi_3di3_read_memory(rigid.data(), rigid.size(), &m) == 0);
+	std::strcpy(m.materials[0].shader_name, "FFP_GLASS");
+	TEST_EXPECT(!gp::lower(m, file, notes, error) && error.find("FFP_GLASS") != std::string::npos);
+	threedi_3di3_free(&m);
+	return 0;
+}
+
 int retail_corpus() {
 	const std::vector<std::string> files = retail::reference_fixture_files("bhd/3di", ".3di");
 	if (files.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bhd/3di (the models BHD ships)");
 	std::map<gp::Kind, int> kinds;
 	std::map<std::string, int> notes_seen;
-	int other = 0, failed = 0;
+	int other = 0, failed = 0, rewritten = 0, retail_bytes = 0, lowered = 0;
+	std::vector<std::string> rewritten_apart;
 	for (const std::string &path : files) {
 		const std::vector<uint8_t> bytes = test_io::read_file(path);
 		const gp::Kind kind = gp::detect(bytes.data(), bytes.size());
@@ -256,12 +378,43 @@ int retail_corpus() {
 		threedi_3di3_free(&m);
 		++kinds[kind];
 		for (const gp::MigrateNote &n : notes) notes_seen[n.text] += n.count;
+		// The writer: a fixed point of the reader, and how many files it writes back byte for
+		// byte (the others differ in words no loader reads, the tool's leftovers there).
+		std::vector<uint8_t> written;
+		if (!writer_fixed_point(bytes, written, error)) {
+			std::fprintf(stderr, "%s: %s\n", path.c_str(), error.c_str());
+			++failed;
+			continue;
+		}
+		++rewritten;
+		if (written == bytes) ++retail_bytes;
+		else rewritten_apart.push_back(std::filesystem::path(path).filename().string());
+		// A rigid model lowers back to a GP whose migration is the first one.
+		if (kind != gp::Kind::Gpm) continue;
+		std::vector<uint8_t> gp_bytes, again;
+		gp::File lowered_file;
+		std::vector<gp::MigrateNote> lower_notes;
+		if (!lower_bytes(out, gp_bytes, lowered_file, lower_notes, error) || !migrate_bytes(gp_bytes, again, error)) {
+			std::fprintf(stderr, "%s: lower: %s\n", path.c_str(), error.c_str());
+			++failed;
+			continue;
+		}
+		if (again != out) {
+			std::fprintf(stderr, "%s: the lowered model migrates to another 3DI3\n", path.c_str());
+			++failed;
+			continue;
+		}
+		++lowered;
 	}
 	std::printf("threedi_gp: %d GPM, %d GPS, %d GPP migrated; %d not GP; %d failed\n", kinds[gp::Kind::Gpm],
 			kinds[gp::Kind::Gps], kinds[gp::Kind::Gpp], other, failed);
+	std::printf("threedi_gp: %d written back (%d byte for byte); %d GPM lowered back to their migration\n", rewritten,
+			retail_bytes, lowered);
+	for (const std::string &name : rewritten_apart) std::printf("  written back apart from retail: %s\n", name.c_str());
 	for (const auto &n : notes_seen) std::printf("  %6d  %s\n", n.second, n.first.c_str());
 	TEST_EXPECT(failed == 0);
 	TEST_EXPECT(kinds[gp::Kind::Gpm] + kinds[gp::Kind::Gps] + kinds[gp::Kind::Gpp] > 0);
+	TEST_EXPECT(lowered == kinds[gp::Kind::Gpm]);
 	return 0;
 }
 
@@ -273,5 +426,8 @@ int main(int argc, char **argv) {
 	if (synthetic_gpp() != 0) return 1;
 	if (rejections() != 0) return 1;
 	if (files_beside() != 0) return 1;
+	if (synthetic_write() != 0) return 1;
+	if (synthetic_lower() != 0) return 1;
+	if (lower_refusals() != 0) return 1;
 	return retail_corpus();
 }

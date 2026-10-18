@@ -109,6 +109,7 @@ struct CollisionFace {
 	std::array<int32_t, 6> box{};     // INTERLEAVED: min x, max x, min y, max y, min z, max z
 	uint32_t flags = 0;
 	uint8_t surface = 0;              // the poly type (surface id)
+	int16_t aux = 0;                  // +0x2A: no reader found (0 from the tool; 830 BHD faces hold others)
 };
 
 // A section, 128 bytes.
@@ -248,9 +249,15 @@ struct Material {
 	int16_t frame_rate = 0;       // +0x14: a flipbook's, scaled at load [orig: @ 0x515CFD..0x515D12 (dfbhd)]
 	int8_t frame_count = 0;       // +0x16: a flipbook's frames
 	uint8_t frame_counter = 0;    // +0x17: the counter that picks the frame
+	// +0x1C: four RGB triplets, the material's flat colour four times over; the loader takes
+	// triplet 1 + q as region q's (colour source 1) [orig: GP_LoadRenderModel @ 0x515D38..0x515D57
+	// (dfbhd); GP_WriteRenderModel @ 0x4479CD..0x447A11 (df4oed)].
+	std::array<uint8_t, 12> colours{};
 	std::array<int8_t, 3> region_textures{}; // +0x28: the texture row id per mission region (-1 none)
 	int8_t alpha_texture = 0;     // +0x2B: the row id when only the alpha source is the texture
+	uint32_t env_tint = 0;        // +0x2C: the environment pass's colour [orig: @ 0x447A92 (df4oed)]
 	uint8_t env_pass = 0;         // +0x30: the environment pass
+	uint8_t env_form = 0;         // +0x31: [orig: @ 0x447A96 (df4oed)]
 	uint8_t shader = 0;           // +0x32: 0 fixed function, else a bump technique
 	uint8_t colour_source = 0;    // +0x38: 1 the region colour, 2 the texture
 	uint8_t alpha_source = 0;     // +0x39: 0/1 the material's, 2 the texture's
@@ -258,6 +265,7 @@ struct Material {
 	uint8_t alpha_ref = 0;        // +0x3B
 	uint8_t blend = 0;            // +0x3C: 0/1 opaque, 2 alpha, 3 one/srcalpha, 4 additive, 5 multiply
 	uint8_t paired = 0;           // +0x3D: the next record is its second stage
+	std::array<float, 2> tiling{1.0f, 1.0f}; // +0x48: no reader found; 1 from the tool unless set
 	Generator u, v;               // +0x50, +0x58
 	RgbGenerator rgb;             // +0x60
 	Generator alpha_gen;          // +0x6C
@@ -290,6 +298,9 @@ struct PartAnimation {
 inline constexpr uint32_t kRenderGlobalBatch = 0x1;
 inline constexpr uint32_t kRenderPartAnimations = 0x2;
 struct RenderModel {
+	// +0x20, +0x38: twelve words each the tool writes from the materials by an index they hold
+	// [orig: GP_WriteRenderModel @ 0x447031..0x447065 (df4oed)]; no dfbhd reader found.
+	std::array<uint16_t, 24> material_words{};
 	uint32_t flags = 0;                  // +0x50: kRender*
 	uint32_t extra_count = 0;            // +0x60: 88-byte primitives (none in BHD's corpus)
 	uint32_t record_count = 0;           // +0x68: 232-byte records (none in BHD's corpus)
