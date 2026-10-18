@@ -721,7 +721,8 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 			const auto live = runtime->zone_states().find(e->handle.packed);
 			if (live != runtime->zone_states().end())
 				zone.timer_ready = !(live->second.entry.value_target <
-						live->second.entry.value_limit);			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
+						live->second.entry.value_limit);
+			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
 			// [orig: ZoneTimerList_SetEntryWindow @0x537DE0 via the 0x53
 			//  handler @0x428AE0].
 			if (live != runtime->zone_states().end() && live->second.has_window)
