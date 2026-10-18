@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import router from './index';
+import AddressesPage from '../pages/account/AddressesPage.vue';
+import AddressesSection from '../pages/admin/AddressesSection.vue';
 import LobbyServerPage from '../pages/LobbyServerPage.vue';
 import NotFoundPage from '../pages/NotFoundPage.vue';
 
@@ -8,6 +10,9 @@ import NotFoundPage from '../pages/NotFoundPage.vue';
 describe('router', () => {
   it.each([
     ['/lobby/167772175', LobbyServerPage],
+    // The billing portal's cancel flow for an address returns here.
+    ['/me/addresses', AddressesPage],
+    ['/admin/addresses', AddressesSection],
   ])('resolves %s', (path, page) => {
     const matched = router.resolve(path).matched;
     expect(matched.at(-1)?.components?.default).toBe(page);

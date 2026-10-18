@@ -55,6 +55,8 @@
         :data-sets="data.data_sets"
         :retry="from?.state === 'failed'"
         :own-machines-free="ownMachinesFree(data.entitlement)"
+        :addresses="free"
+        :preferred-address-id="preferredAddress(free, data.servers, from)"
         @started="onStarted"
         @refused="onRefused"
       />
@@ -67,14 +69,19 @@
 // (HostedSettingsForm, POST /api/me/servers), offered only while the
 // account's entitlement has room (GET /api/me/servers). `from` names one of
 // the account's ended servers to start again: the form begins with its
-// settings (its try again, after a failure). A start that went in goes to the
-// new server's page.
+// settings (its try again, after a failure). On an own machine the form
+// offers the account's free static addresses (GET /api/me/addresses), the one
+// `from` (else the newest server) ran at first, so a server started again
+// keeps its address. A start that went in goes to the new server's page.
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import HostedSettingsForm from '../../components/HostedSettingsForm.vue';
+import { fetchMyAddresses } from '../../api/addresses';
 import { fetchMyServer, fetchMyServers, linksToSupportTier, type HostedError } from '../../api/hostedServer';
 import { useSession } from '../../composables/useSession';
+import type { Address } from '../../types/addresses';
 import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
+import { freeAddresses, preferredAddress } from '../../utils/addressView';
 import { ownMachinesFree, startBlock } from '../../utils/myServersView';
 
 const route = useRoute();
@@ -82,6 +89,9 @@ const router = useRouter();
 const { refresh: refreshSession } = useSession();
 
 const data = ref<HostedServersResponse | null>(null);
+// The static addresses a new server may take; none when the read failed (the
+// form then offers none).
+const free = ref<Address[]>([]);
 const from = ref<HostedServer | null>(null);
 const fromGone = ref(false);
 const loadError = ref('');
@@ -122,7 +132,7 @@ async function onSessionEnded() {
 
 async function load() {
   loadError.value = '';
-  const result = await fetchMyServers();
+  const [result, addresses] = await Promise.all([fetchMyServers(), fetchMyAddresses()]);
   if (!result.ok) {
     if (result.error.code === 'unauthorized') return onSessionEnded();
     loadError.value = result.error.message;
@@ -140,6 +150,7 @@ async function load() {
       else fromGone.value = true;
     }
   }
+  free.value = addresses.ok ? freeAddresses(addresses.value.addresses) : [];
   data.value = result.value;
 }
 
@@ -150,13 +161,14 @@ function onStarted(server: HostedServer) {
 // A refusal that means the page's picture is out of date (the entitlement,
 // the payment or hosting changed): read it again, which takes the form away
 // when no start is allowed, so the refusal's sentence stays above it. An own
-// machine taken meanwhile only takes the checkbox away (the form says why).
+// machine or a static address taken meanwhile only takes it from the form
+// (the form says why).
 function onRefused(error: HostedError) {
   if (error.code === 'unauthorized') {
     void onSessionEnded();
     return;
   }
-  if (error.code === 'no_own_machine') {
+  if (error.code === 'no_own_machine' || error.code === 'address_unavailable') {
     void load();
     return;
   }

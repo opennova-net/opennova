@@ -20,7 +20,8 @@
 // (no tier yet, or a visitor not logged in), or manage (the account's tier
 // is marked, and every action opens the billing portal, where a tier is
 // changed or canceled). A tier below the account's warns which of its live
-// servers a move there would stop: the service stops the newest first.
+// servers a move there would stop: the service stops the newest first. A tier
+// the fleet is sold out of cannot be picked (TierCard), but the account's own.
 import TierCard from './TierCard.vue';
 import type { TierNumber, TierOffer } from '../types/billing';
 

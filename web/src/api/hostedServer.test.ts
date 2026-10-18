@@ -85,7 +85,8 @@ describe('fetchMyServers', () => {
     const result = await fetchMyServers();
     expect(result.ok && result.value.servers[0]).toEqual(server);
 
-    const { data_set: _d, expansion: _e, data: _t, update_available: _a, update_requested: _r, ...bare } = hostedServer(4);
+    const { data_set: _d, expansion: _e, data: _t, update_available: _a, update_requested: _r, address: _s, ...bare } =
+      hostedServer(4);
     get.mockResolvedValue(reply(serversResponse([bare as typeof server])));
     const filled = await fetchMyServers();
     expect(filled.ok && filled.value.servers[0]).toMatchObject({
@@ -94,7 +95,22 @@ describe('fetchMyServers', () => {
       data: { base: null, expansion: null },
       update_available: false,
       update_requested: false,
+      address: null,
     });
+  });
+
+  it('reads the static address a server runs at', async () => {
+    const at = { id: 5, name: 'smoke', hostname: 'smoke.play.opennova.net', public_ip: '203.0.113.9', state: 'ready' };
+    const server = hostedServer(3, { own_machine: true, address: at });
+    get.mockResolvedValue(reply(serversResponse([server, hostedServer(4, { address: { ...at, id: 'x' } as never })])));
+    const result = await fetchMyServers();
+    expect(result.ok && result.value.servers[0]).toEqual(server);
+    // A malformed one reads as none; the server still shows.
+    expect(result.ok && result.value.servers[1].address).toBeNull();
+    // A service with no zone names no host.
+    get.mockResolvedValue(reply(serversResponse([hostedServer(3, { address: { ...at, hostname: null, public_ip: null } })])));
+    const bare = await fetchMyServers();
+    expect(bare.ok && bare.value.servers[0].address).toEqual({ ...at, hostname: null, public_ip: null });
   });
 });
 
@@ -110,6 +126,14 @@ describe('the start, the stop and one server', () => {
     const started = await startHostedServer({ ...settings(), game_name: 'Night Ops' }, true);
     expect(started.ok && started.value.id).toBe(8);
     expect(post).toHaveBeenLastCalledWith('/me/servers', expect.objectContaining({ game_name: 'Night Ops', own_machine: true }));
+
+    // A static address goes with an own machine alone.
+    await startHostedServer({ ...settings(), game_name: 'Night Ops' }, true, 5);
+    expect(post).toHaveBeenLastCalledWith('/me/servers', expect.objectContaining({ own_machine: true, address_id: 5 }));
+    await startHostedServer({ ...settings(), game_name: 'Night Ops' }, false, 5);
+    expect(post.mock.lastCall?.[1]).not.toHaveProperty('address_id');
+    await startHostedServer({ ...settings(), game_name: 'Night Ops' }, true);
+    expect(post.mock.lastCall?.[1]).not.toHaveProperty('address_id');
 
     post.mockResolvedValue(reply({ server: hostedServer(8, { state: 'stopping' }) }, 202));
     await stopHostedServer(8);
@@ -151,6 +175,12 @@ describe('the start, the stop and one server', () => {
     const full = await startHostedServer(settings());
     expect(!full.ok && full.error.code).toBe('at_capacity');
     expect(linksToSupportTier('at_capacity')).toBe(false);
+
+    post.mockRejectedValue(refusal(409, { error: 'address_unavailable', message: 'raw server text' }));
+    const taken = await startHostedServer(settings(), true, 5);
+    expect(!taken.ok && taken.error.code).toBe('address_unavailable');
+    expect(!taken.ok && taken.error.message).toContain('That static address is not ready');
+    expect(!taken.ok && taken.error.message).not.toContain('raw server text');
 
     post.mockRejectedValue(refusal(400, { error: 'invalid_settings', field: 'max_players' }));
     const bad = await startHostedServer(settings());

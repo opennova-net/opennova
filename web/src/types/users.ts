@@ -1,6 +1,7 @@
 // Player accounts as the admin routes answer them (snake_case;
 // apps/novaworld_web/admin_user_routes.cpp).
 
+import type { AdminAddress } from './addresses';
 import type { AdminSubscription, TierNumber } from './billing';
 import type { EntitlementSource, HostedServer } from './hostedServer';
 
@@ -62,12 +63,41 @@ export interface CompGrants {
   own_machines: number;
 }
 
+// PUT /api/admin/users/<id>/comp's reply: the account, and the sold capacity
+// with the grant counted.
+export interface CompGrantsReply {
+  user: User;
+  capacity: SoldCapacity | null;
+}
+
+// What the service has sold of one item (admin grants, subscriptions and
+// open checkouts together) against what the fleet sells of it.
+export interface SoldItem {
+  sold: number;
+  sellable: number;
+}
+
+// The service's sold capacity (hosted/sold_capacity.h): shared places, own
+// machines and static addresses. `oversold` when any is past what the fleet
+// sells (an admin's grant can take it there): new subscriptions of it are
+// paused.
+export interface SoldCapacity {
+  shared: SoldItem;
+  own_machines: SoldItem;
+  addresses: SoldItem;
+  oversold: boolean;
+}
+
 // GET /api/admin/users/<id>.
 export interface UserDetail {
   user: User;
   entitlement: UserEntitlement;
+  // The service's sold capacity; null when the reply named none.
+  capacity: SoldCapacity | null;
   // Its hosted servers: the live ones, then the newest ended ones.
   servers: HostedServer[];
+  // Its static addresses, the held ones first.
+  addresses: AdminAddress[];
   billing: {
     // The Stripe mode the ids belong to (the dashboard links follow it).
     livemode: boolean;

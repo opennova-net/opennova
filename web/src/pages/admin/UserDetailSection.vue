@@ -99,6 +99,13 @@
             {{ detail.entitlement.can_start ? 'May start' : 'Cannot start (no entitlement, or a payment past due)' }}
           </dd>
         </dl>
+        <p
+          v-if="detail.capacity?.oversold"
+          id="user-oversold"
+          class="rounded-panel border border-warn/40 bg-warn/10 p-4 text-sm text-warn"
+        >
+          {{ oversoldText(detail.capacity) }}
+        </p>
         <form class="space-y-2" @submit.prevent="saveComp">
           <div class="flex flex-wrap items-end gap-4">
             <div class="space-y-1">
@@ -170,6 +177,55 @@
         </ul>
       </section>
 
+      <!-- Static addresses, with an admin's comp address. -->
+      <section class="space-y-3" aria-labelledby="user-addresses">
+        <h2 id="user-addresses" class="text-xl font-semibold text-ink">Static addresses</h2>
+        <p v-if="detail.addresses.length === 0" class="text-sm text-ink-muted">None.</p>
+        <ul v-else class="divide-y divide-border rounded-panel border border-border bg-panel">
+          <li v-for="a in detail.addresses" :key="a.id" class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+            <span class="min-w-0">
+              <span class="break-all font-mono text-ink">{{ a.hostname }}</span>
+              <span class="block text-xs text-ink-muted">
+                {{ addressEndpoint(a) || 'No IP yet' }}, {{ a.source === 'comp' ? 'an admin grant' : 'its own subscription' }}
+              </span>
+            </span>
+            <span class="flex items-center gap-2 text-ink-muted">
+              <span :class="addressStateClass(a.state)">{{ addressStateLabel(a.state) }}</span>
+              <RouterLink v-if="a.server" :to="`/admin/fleet/${a.server.id}`" class="text-accent hover:text-ink-bright">
+                {{ a.server.game_name || `Server ${a.server.id}` }}
+              </RouterLink>
+            </span>
+          </li>
+        </ul>
+        <form v-if="!addressesOff" class="space-y-2" novalidate @submit.prevent="addAddress">
+          <label for="user-comp-address" :class="labelClass">Comp address</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <input
+              id="user-comp-address"
+              v-model="compAddress"
+              type="text"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+              maxlength="32"
+              aria-describedby="user-comp-address-hint"
+              :aria-invalid="compAddressProblem ? 'true' : undefined"
+              :class="[fieldClass, 'w-48 font-mono']"
+            />
+            <button type="submit" :disabled="busy" :class="primaryButton">Add comp address</button>
+          </div>
+          <p id="user-comp-address-hint" class="text-xs" :class="compAddressProblem ? 'text-danger' : 'text-ink-muted'">
+            {{
+              compAddressProblem ||
+              `A static address free of charge, one for each of the account's own machines; it counts as sold. ${ADDRESS_NAME_RULE}`
+            }}
+          </p>
+        </form>
+        <RouterLink to="/admin/addresses" class="inline-block text-sm text-accent hover:text-ink-bright">
+          Rename or release addresses on the Static addresses page
+        </RouterLink>
+      </section>
+
       <!-- Billing ids. -->
       <section class="space-y-3" aria-labelledby="user-billing">
         <h2 id="user-billing" class="text-xl font-semibold text-ink">Billing</h2>
@@ -206,9 +262,7 @@
                       class="break-all font-mono text-xs text-accent hover:text-ink-bright"
                     >{{ sub.stripe_subscription_id }}</a>
                   </td>
-                  <td class="whitespace-nowrap px-4 py-2">
-                    {{ sub.item === 'own_machine' ? `Own machines: ${sub.quantity}` : `Tier ${sub.tier ?? '?'}` }}
-                  </td>
+                  <td class="whitespace-nowrap px-4 py-2">{{ subscriptionItemLabel(sub) }}</td>
                   <td class="whitespace-nowrap px-4 py-2">
                     {{ subscriptionStatusLabel(sub.status) }}<template v-if="sub.cancel_at_period_end">, ends at the period's end</template>
                   </td>
@@ -258,15 +312,19 @@
 // /admin/users/<id>: one account (GET /api/admin/users/<id>): its profile and
 // edit (PUT /api/admin/users/<id>), its role (a demotion of the last admin
 // who can log in says how one comes back), its hosting entitlement with the
-// admin's comp grants (PUT .../comp: servers and own machines, 0 to 16 each), its hosted servers
-// (each to its fleet page), its Stripe ids (to Stripe's dashboard, in the
-// key's mode), its CD keys (GET .../cd-keys) and its deletion (409
-// active_subscription while a tier grants).
+// admin's comp grants (PUT .../comp: servers and own machines, 0 to 16 each)
+// and a warning while grants and subscriptions oversell the fleet (the
+// service's sold capacity, also in the grant's reply), its hosted servers
+// (each to its fleet page), its static addresses with a comp one (POST
+// .../addresses), its Stripe ids (to Stripe's dashboard, in the key's mode),
+// its CD keys (GET .../cd-keys) and its deletion (409 active_subscription
+// while a tier grants).
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
 import HistoryToggle from '../../components/HistoryToggle.vue';
 import { hasAdminToken } from '../../api/authToken';
+import { addCompAddress } from '../../api/adminAddresses';
 import { stripeDashboardUrl } from '../../api/adminBilling';
 import { fetchAccountCdKeys } from '../../api/cdKeys';
 import { deleteUser, fetchUser, listUsers, setCompGrants, updateUser } from '../../api/users';
@@ -276,13 +334,21 @@ import {
   COMP_OWN_MACHINES_MAX,
   COMP_SERVERS_MAX,
   type Role,
+  type SoldCapacity,
   type User,
   type UserDetail,
   type UserListEntry,
 } from '../../types/users';
 import { replacedServers } from '../../utils/history';
+import {
+  ADDRESS_NAME_RULE,
+  addressEndpoint,
+  addressNameProblem,
+  addressStateClass,
+  addressStateLabel,
+} from '../../utils/addressView';
 import { accountStatusLabel, entitlementLabel, isActiveAccount } from '../../utils/adminView';
-import { subscriptionStatusLabel } from '../../utils/billingView';
+import { subscriptionItemLabel, subscriptionStatusLabel } from '../../utils/billingView';
 import { stateBadgeClass, stateLabel } from '../../utils/hostedState';
 
 const badge = 'inline-flex rounded-control px-2 py-0.5 text-xs font-semibold';
@@ -317,6 +383,11 @@ const error = ref('');
 const now = ref(Date.now());
 const comp = ref<number | string>(0);
 const compOwn = ref<number | string>(0);
+const compAddress = ref('');
+const compAddressTried = ref(false);
+// The service sells no static address (it answered addresses_disabled): the
+// comp address form goes.
+const addressesOff = ref(false);
 const edit = reactive({ username: '', nwhandle: '', pcid: '', nwh: '', password: '' });
 
 const id = computed(() => Number(route.params.id));
@@ -338,6 +409,17 @@ const compChanged = computed(
     !!detail.value &&
     (Number(comp.value) !== detail.value.user.comp_servers || Number(compOwn.value) !== detail.value.user.comp_own_machines),
 );
+const compAddressProblem = computed(() => (compAddressTried.value ? addressNameProblem(compAddress.value.trim()) : ''));
+
+// What the service has sold past the fleet, item by item.
+function oversoldText(c: SoldCapacity): string {
+  return (
+    'Admin grants and subscriptions exceed what the fleet sells: ' +
+    `shared places ${c.shared.sold} of ${c.shared.sellable}, ` +
+    `own machines ${c.own_machines.sold} of ${c.own_machines.sellable}, ` +
+    `addresses ${c.addresses.sold} of ${c.addresses.sellable}. New subscriptions of those items are paused.`
+  );
+}
 
 function flash(text: string) {
   message.value = text;
@@ -495,12 +577,34 @@ async function saveComp() {
     fail(result.error.message);
     return;
   }
+  // The sold capacity with the grant counted: the warning follows it at once.
+  if (detail.value && result.value.capacity) detail.value = { ...detail.value, capacity: result.value.capacity };
   const machines = own === 0 ? '' : `, ${own} on an own machine`;
   flash(
     n === 0 && own === 0
       ? `${u.username} has no admin grant now.`
       : `${u.username} now has ${n} hosted server${n === 1 ? '' : 's'}${machines} free of charge.`,
   );
+  await load();
+}
+
+async function addAddress() {
+  if (!detail.value || busy.value) return;
+  compAddressTried.value = true;
+  const name = compAddress.value.trim();
+  if (addressNameProblem(name)) return;
+  const u = detail.value.user;
+  busy.value = true;
+  const result = await addCompAddress(u.id, name);
+  busy.value = false;
+  if (!result.ok) {
+    if (result.error.code === 'addresses_disabled') addressesOff.value = true;
+    fail(result.error.message);
+    return;
+  }
+  compAddress.value = '';
+  compAddressTried.value = false;
+  flash(`${u.username} has the comp address ${result.value.hostname}; a worker sets it up now.`);
   await load();
 }
 

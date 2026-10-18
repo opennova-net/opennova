@@ -22,11 +22,12 @@
       hosted server{{ offer.max_servers === 1 ? '' : 's' }} at once
     </p>
     <p v-if="note" :id="`${baseId}-tier-${offer.tier}-note`" class="text-sm text-warn">{{ note }}</p>
+    <p v-if="soldOut" :id="`${baseId}-tier-${offer.tier}-full`" class="text-sm text-warn">{{ HOSTING_FULL }}</p>
     <div class="mt-auto">
       <button
         type="button"
-        :disabled="actionDisabled || offer.amount === null"
-        :aria-describedby="note ? `${baseId}-tier-${offer.tier}-note` : undefined"
+        :disabled="actionDisabled || offer.amount === null || soldOut"
+        :aria-describedby="describedBy"
         class="w-full rounded-control px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40"
         :class="current ? 'border border-border bg-raised text-ink hover:bg-hover' : 'bg-accent text-on-accent hover:bg-accent/90'"
         @click="emit('choose', offer.tier)"
@@ -40,11 +41,15 @@
 <script setup lang="ts">
 // One support tier: its price a month, the hosted servers it covers and its
 // one action (Subscribe, Manage, Change), the account's own tier marked
-// (aria-current). A note under it warns what a change to it would stop.
+// (aria-current). A note under it warns what a change to it would stop. A tier
+// the fleet is sold out of (`available` false) cannot be picked and says so;
+// the account's own tier keeps its Manage.
+import { computed } from 'vue';
 import type { TierNumber, TierOffer } from '../types/billing';
+import { HOSTING_FULL } from '../utils/billingView';
 import { formatMoney } from '../utils/format';
 
-defineProps<{
+const props = defineProps<{
   offer: TierOffer;
   currency: string;
   // The base of the card's ids.
@@ -59,4 +64,12 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'choose', tier: TierNumber): void;
 }>();
+
+const soldOut = computed(() => !props.offer.available && !props.current);
+const describedBy = computed(() => {
+  const ids: string[] = [];
+  if (props.note) ids.push(`${props.baseId}-tier-${props.offer.tier}-note`);
+  if (soldOut.value) ids.push(`${props.baseId}-tier-${props.offer.tier}-full`);
+  return ids.length > 0 ? ids.join(' ') : undefined;
+});
 </script>
