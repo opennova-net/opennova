@@ -214,6 +214,6 @@ export function infraWarnings(o: InfraOverview): string[] {
   if (!o.lobbies.some((l) => l.live && l.state === 'active')) {
     out.push('No lobby instance has been seen taking clients in the last 15 seconds.');
   }
-  if (!o.fleet.leader) out.push('No fleet process has been elected yet: nothing schedules the periodic jobs or runs the fleet.');
+  if (!o.fleet.leader) out.push('No fleet process has been elected yet: nothing runs the fleet.');
   return out;
 }

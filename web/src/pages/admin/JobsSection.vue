@@ -168,7 +168,7 @@ const warnings = computed(() => {
   if (wait !== null && wait >= LATENCY_WARN_S) {
     out.push(`The oldest due job has waited ${secondsLabel(wait)} for a worker: the workers are busy, or none runs.`);
   }
-  // The fleet leader schedules every periodic kind; none enqueued for three of the
+  // The worker and the data program schedule every periodic kind; none enqueued for three of the
   // shortest intervals (two minutes at least) is one not leading.
   if (o.schedules.length > 0) {
     const shortest = Math.min(...o.schedules.map((s) => s.interval_seconds));
@@ -176,9 +176,9 @@ const warnings = computed(() => {
     const last = o.last_scheduled_at ? timeMs(o.last_scheduled_at) : Number.NaN;
     const at = timeMs(o.at);
     if (Number.isNaN(last)) {
-      out.push('No schedule has enqueued a job yet. Is a fleet process leading?');
+      out.push('No schedule has enqueued a job yet. Is a worker running?');
     } else if (at - last > allowed) {
-      out.push(`No schedule has enqueued a job for ${formatDuration(at - last)}. Is a fleet process leading?`);
+      out.push(`No schedule has enqueued a job for ${formatDuration(at - last)}. Is a worker running?`);
     }
   }
   return out;

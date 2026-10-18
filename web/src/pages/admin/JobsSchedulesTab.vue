@@ -2,8 +2,10 @@
   <section class="space-y-4" aria-labelledby="jobs-schedules">
     <h2 id="jobs-schedules" class="text-xl font-semibold text-ink">Schedules</h2>
     <p v-if="overview" class="jobs-fleet text-sm text-ink-muted">
+      Each program schedules its own kinds: the worker and the data program, in every one of their
+      tasks.
       <template v-if="overview.fleet.leader">
-        The fleet leader <span class="font-mono">{{ overview.fleet.leader }}</span> enqueues them<template
+        The fleet leader is <span class="font-mono">{{ overview.fleet.leader }}</span><template
           v-if="overview.fleet.elected_at"
         >, leading since <RelativeTime :value="overview.fleet.elected_at" :now="now" /></template>.
       </template>
@@ -39,7 +41,7 @@
             <td class="px-4 py-3">
               {{ capitalized(everyLabel(s.interval_seconds)) }}
               <span v-if="s.conditional" class="block text-xs text-ink-muted">only while there is work for it</span>
-              <span v-if="s.at_start" class="block text-xs text-ink-muted">and when a fleet leader starts</span>
+              <span v-if="s.at_start" class="block text-xs text-ink-muted">and once at each release's start</span>
             </td>
             <td class="px-4 py-3">
               <template v-if="s.last">
@@ -73,8 +75,8 @@
 </template>
 
 <script setup lang="ts">
-// The background jobs page's Schedules tab (JobsSection.vue): the fleet leader
-// that enqueues them, and each periodic kind (how often, its last run and its
+// The background jobs page's Schedules tab (JobsSection.vue): who schedules
+// them (each program its own) and the fleet leader, and each periodic kind (how often, its last run and its
 // result, the next, run now: POST /api/admin/jobs/run, asked first).
 import { ref } from 'vue';
 import { RouterLink } from 'vue-router';

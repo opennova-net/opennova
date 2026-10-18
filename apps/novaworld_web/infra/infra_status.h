@@ -9,7 +9,7 @@
 // every call scoped to the deployment's own resources (infra/aws/programs.tf
 // grants web these reads alone):
 //
-//   programs   ECS DescribeServices of the five services: their counts,
+//   programs   ECS DescribeServices of the six services: their counts,
 //              status, deployments (each one's rollout state) and task
 //              definition, and their newest events; and SSM GetParameter of
 //              the release (the manifest `app deploy` records, DEPLOY.md),
@@ -51,7 +51,7 @@ struct InfraConfig {
 	AwsApiConfig aws;
 	std::string cluster; // ONNET_INFRA_CLUSTER: the deployment's ECS cluster
 	// The services, the programs' names.
-	std::vector<std::string> programs = { "gate", "lobby", "web", "controller", "worker" };
+	std::vector<std::string> programs = { "gate", "lobby", "web", "fleet", "worker", "data" };
 	// ONNET_INFRA_TARGET_GROUPS, {"<listener>": "<target group ARN>"}: the
 	// balancer's target groups (gate, lobby, http, https), shown in that order.
 	std::vector<std::pair<std::string, std::string>> target_groups;
