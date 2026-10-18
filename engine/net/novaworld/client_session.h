@@ -148,7 +148,7 @@ public:
 		std::vector<CuVar> cu_vars;
 
 		// The "Cookie" var-list (NW-S5, witnessed byte-for-byte in the genuine
-		// .204 capture, fixtures/novaworld/nw204_lobby.hexcap frame 10166): the
+		// .204 capture, docs/net/novaworld-net-re.md Wave 5, frame 10166): the
 		// browser's cookie jar for the NovaWorld host plus the locale trio, which
 		// CNapiSession_ReadLocaleInfo @ 0x4ce390 rebuilds into session+388 before
 		// EVERY statement that serializes it — the verify reply, the host

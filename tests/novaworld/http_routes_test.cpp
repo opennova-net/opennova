@@ -3873,7 +3873,7 @@ int test_name_and_value_rules(Harness &h) {
 	for (const char *value : { "3", "2345", "jop:cus2", "us", "127.0.0.1", "::ffff:10.0.0.7",
 				 "65537:3233:ABCDEFGHIJKLMNOP", "NWServer:NWLogin.dll:SESSIONTAG:123:0a1b2c3d",
 				 "A-A02-085D18", "5e550001", "ljim", "Space Handle", "Jim's \"quoted\"",
-				 "JT:0a000013143f1efe6c8000767fd748e1127304c5b6d728", "" }) {
+				 "JT:0a00001314cb0071078000767fd748e1127304c5b6d728", "" }) {
 		TEST_EXPECT(nws::cookie_value_ok(value));
 		TEST_EXPECT(nws::set_cookie_text("NWHANDLE", value, "Path=/") ==
 				std::string("NWHANDLE=") + value + "; Path=/");
