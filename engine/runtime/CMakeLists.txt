@@ -501,6 +501,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_vehicle_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_visible_players.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_emote.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_fired_round.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_radio_call.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_designations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp

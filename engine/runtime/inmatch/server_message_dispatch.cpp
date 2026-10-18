@@ -1,4 +1,3 @@
-#include <runtime/world/weapon_fire_gate.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_visible_players.h>
 #include <runtime/inmatch/server_entity_routes.h> // Server_HandleDoorRowRequest (C2S 0x1A)
@@ -8,6 +7,7 @@
 #include <runtime/inmatch/server_radio_call.h>
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
 #include <runtime/inmatch/server_join_check.h>    // the 0x00 JOIN's validation ladder
+#include <runtime/inmatch/server_fired_round.h>   // the C2S 0x06 fired round
 
 
 #include <runtime/inmatch/integrity_sources.h>
@@ -21,7 +21,6 @@
 #include <runtime/inmatch/server_vehicle_spawn.h> // the 0x40 / 0x42 handlers
 #include <runtime/inmatch/napi_np_server_ctx.h>  // ServerDispatchInputs::server_ctx
 #include <runtime/inmatch/session_status.h>
-#include <runtime/world/weapon_inventory.h> // the slot-ammo seat legs (WeaponAmmoSeat)
 #include <runtime/world/weapon_table_build.h> // loadout_entry_permitted (D-NET-141)
 
 #include <runtime/replication/connection_fan.h>     // apply_connection_uplink — the in-order 0x0C read-apply
@@ -58,7 +57,6 @@
 #include <cstring>
 #include <iterator>
 #include <utility>
-#include <base/io/fixed.h> // fp16_16_to_float
 #include <base/io/le.h>
 #include <cstddef>
 #include <cstdint>
@@ -1919,308 +1917,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
 				Server_HandlePlayerJoinRequest(conn, world);
 				break;
-			case c2s::FIRED_ROUND: { // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
-				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310, slot lookup @0x513338]
-				// Residual Server_ClientFiredRound compensation (D-NET-152): saved-live-pose
-				// subtraction @0x50BBAC and moving-carrier re-anchor branch @0x50BC41.
-				// Cease-fire and spectator gates precede the clock, ammo, and round
-				// effects. Freshness is checked on this host, never on a joiner's
-				// predicted-fire path [orig: Entity_FireWeaponAndSendPacket @0x42BD80].
-				if (world == nullptr || !conn.burst.spawned ||
-						world->rules.cease_fire || conn.link.spectator) break;
-				// The host's own loopback fire is a net-path no-op [orig: @0x50c18d returns 0
-				// for the local player — its fire already ran locally].
-				if (conn.link.mode == replication::TransportMode::Loopback) break;
-				ClientFiredRound fr;
-				size_t fire_consumed = 0;
-				if (!decode_client_fired_round(msg.payload.data(), msg.payload.size(), fr,
-				                               fire_consumed))
-					break;
-				// Handle validity [orig: @0x513543], then anti-spoof: the claimed shooter must
-				// BE this connection's own entity [orig: @0x51358d, doubled at @0x50bf37 -> -9].
-				if (wire_handle::is_batch_end_sentinel(fr.shooter_handle))
-					break;
-				if (!conn.link.owned_entity.valid() ||
-				    conn.link.owned_entity.packed != fr.shooter_handle)
-					break;
-				world::Entity *shooter = world->registry.get(conn.link.owned_entity);
-				if (shooter == nullptr) break;
-				if (!Server_AcceptsPlayerFireTick(conn, fr.current_tick, world->logic_tick,
-						config.effective_send_holdoff_ticks())) break;
-
-				if (((shooter->flags | shooter->engine_flags) & 0x102u) == 0x102u) break;
-				const bool alt_fire = (fr.fire_flags & 0x01) != 0; // [orig: @0x50bb0d]
-				// The weapon whose round fires: the request's, or the slot's.
-				uint8_t fired_adm = fr.adm_index;
-				// Whether the round clears the fire action's re-entry (below).
-				bool round_lands = true;
-				// The fire action's mode byte for an armory-fed primary round: the
-				// firing slot's word before the spend, low two bits << 4, | 2.
-				int32_t fired_mode = -1;
-				// ADM + ammo authority — armory-fed hosts only (a table-less host accepts,
-				// mirroring the 0x5A echo fallback, D-NET-141). Alt fire skips the adm lookup,
-				// the clip, and the equipped mirror [orig: @0x50bb0f / the @0x50be2b alt path].
-				if (!world->tables.weapons.empty() && !alt_fire) {
-					const world::WeaponTableEntry *adm = world->tables.weapons.by_index(fr.adm_index);
-					if (adm == nullptr) break; // [orig: "Tried to fire NULL wpn, %i" @0x50bb49]
-					// Primary fire mirrors the fired weapon onto the entity ahead of every
-					// later refusal (the owner checks, the can-fire's NO AMMO), so a refused
-					// round still moves it. The same leg's entity+352 word (the client's
-					// ammo-def byte) is D-WPN-8's, unmodeled [orig: Server_ClientFiredRound
-					//  @0x50BD2D..0x50BD56, +352 @0x50BD48, entity+688 = adm @0x50BD56 - the
-					//  §5.10 off-16 source; the -8 / -9 / -12 / -14 / -15 returns follow
-					//  @0x50BF37..0x50C169].
-					shooter->equipped_adm_index = fr.adm_index;
-
-                    if (world::weapon_fire_owner_status(*world, *shooter, adm, false) != 0)
-                        break;
-					// Off a mount the round fires through the player's own slot of the
-					// fired combo, and the can-fire tests that slot under the def it holds.
-					// A combo the player was never granted holds no def, which the can-fire
-					// refuses ("NO AMMO!", -15) before any clip leg, clipless weapons too; a
-					// slot granted to another weapon of the combo fires that weapon.
-					// [orig: Server_ClientFiredRound - the combo @0x50C0C2..0x50C0D7, the
-					//  personal slot @0x50C104..0x50C116 -> WeaponSlot_CanFire @0x541BA0
-					//  (the def test @0x541BB3, the slot def's legs @0x541BE1..0x541D08),
-					//  the refusal @0x50C13A..0x50C169; the slot's def fires @0x50C27F /
-					//  @0x50C297 / @0x50C30D]
-					const bool mounted_route =
-							shooter->use_gun_slot_swapped && shooter->mount_target.valid();
-					WeaponSlotState *personal = nullptr;
-					world::WeaponSlotState *mounted_slot = nullptr;
-					const world::WeaponTableEntry *slot_def = nullptr;
-					if (mounted_route) {
-						// On a UseGun seat, or a controller seat under an EWeap carrier, the
-						// can-fire and the fire take the carrier's slot under the def it
-						// holds, whatever weapon the request names; a carrier with no slot
-						// refuses, never a fallback into the player's personal combo map.
-						// [orig: Server_ClientFiredRound - the seat test @0x50C0CF..0x50C102,
-						//  Entity_GetWeaponSlots @0x50C127 -> WeaponSlot_CanFire @0x50C12E;
-						//  the network arm's seat test @0x50C197..0x50C1CE, the slot
-						//  @0x50C1E3..0x50C1F2, its def @0x50C297, the fire action
-						//  @0x50C300..0x50C30D]
-						uint8_t mounted_adm = 0xFF;
-						world::Entity *mount = world->registry.get(shooter->mount_target);
-						if (mount != nullptr) {
-							mounted_slot = world->vehicles.resolve_mounted_ammo_slot(*mount);
-							if (mounted_slot == &mount->primary_weapon_slot) {
-								mounted_adm = mount->primary_weapon_slot_adm;
-							} else if (mounted_slot != nullptr) {
-								world::Entity *parent = world->registry.get(mount->ground_target);
-								if (parent != nullptr && mounted_slot == &parent->primary_weapon_slot)
-									mounted_adm = parent->primary_weapon_slot_adm;
-							}
-						}
-						if (mounted_slot == nullptr) break;
-						slot_def = world->tables.weapons.by_index(mounted_adm);
-						if (slot_def == nullptr) break;
-						fired_adm = mounted_adm;
-					} else {
-						const auto found = conn.weapon_slots.find(
-								static_cast<uint16_t>(uint16_t(adm->category) * 65u + adm->rank));
-						if (found == conn.weapon_slots.end()) break;
-						personal = &found->second;
-						slot_def = world->tables.weapons.by_index(personal->adm_index);
-						if (slot_def == nullptr) break;
-						fired_adm = personal->adm_index;
-					}
-					// [orig: WeaponAction_Fire @0x542C11 (slot+0x10 ahead of
-					//  Weapon_ConsumeAmmo @0x542C75) -> Entity_FireWeaponAndSendPacket's
-					//  fire_cmd+12 @0x42BE80 -> roundParams[2] @0x50C786 -> ring+30
-					//  @0x4FDCDE]
-					fired_mode = ((static_cast<int16_t>(mounted_slot != nullptr
-							? mounted_slot->clip : personal->clip) & 3) << 4) | 2;
-                    world::WeaponFsmInputs fire_inputs;
-                    world::weapon_fire_environment_inputs(*world, *shooter, fire_inputs);
-                    world::WeaponFsmDef fire_def = slot_def->action_fsm;
-                    fire_def.flags = slot_def->flags;
-                    fire_def.clip_capacity = slot_def->clipsize;
-                    fire_def.ammo_cost = slot_def->ammo_class_count;
-                    // The can-fire reads its pool and bucket through the shooter's seat
-                    // [orig: WeaponSlot_CanFire @0x541BA0 - the bucket @0x541C6D..0x541C79
-                    //  (sub_5405F0), the pool @0x541CC7 (Entity_GetScoreValueBySlotType)].
-                    const world::WeaponAmmoSeat seat = world::entity_ammo_seat(*world, *shooter);
-                    world::WeaponSlotState fire_slot;
-                    const int pool = slot_def->ammo_class_id;
-                    fire_slot.reserve = world::weapon_seat_pool(seat, pool,
-                            pool >= 0 && pool < 128 ? st.ammo_pools[pool] : 0);
-                    fire_slot.clip = 1; // the real mounted/personal clip is checked below
-                    if (!world::weapon_fsm_can_fire(fire_def, fire_slot, fire_inputs)) break;
-					if (slot_def->clipsize != -1) {
-						// A bucket weapon's loaded rounds read through the seat: a UseGun
-						// seat reads the carrier's MountSlot clip and spends its +710 word, a
-						// controller seat reads 0 (so refuses); otherwise the player's own
-						// bucket. [orig: WeaponSlot_CanFire @0x541C6D..0x541C89;
-						//  Weapon_ConsumeAmmo @0x540850 - the seat legs @0x54086B..0x540894,
-						//  the bucket @0x5408B5..0x5408C9, the slot word @0x540907..0x540913;
-						//  sub_5461D0 @0x5461D0]
-						if (slot_def->ammo_bucket != 0) {
-							const uint32_t bucket = static_cast<uint32_t>(slot_def->ammo_bucket);
-							const bool own_bucket = bucket < st.shared_clips.size() &&
-									bucket < world->tables.weapons.ammo_class_names.size();
-							// A bucket past the class count reads 0 at any seat
-							// [orig: sub_5405F0 @0x5405FC..0x540603].
-							if (!own_bucket ||
-									world::weapon_seat_bucket(seat, st.shared_clips[bucket]) == 0)
-								break;
-							if (seat.parent_slot == 3) {
-								world::Entity *carrier = world->registry.get(shooter->mount_target);
-								if (carrier != nullptr) {
-									int32_t word = static_cast<int16_t>(carrier->primary_weapon_slot.reserve);
-									if (word != -1) {
-										word -= slot_def->ammo_class_count;
-										if (word < 0) word = 0;
-										carrier->primary_weapon_slot.reserve = static_cast<int16_t>(word);
-									}
-								}
-							} else if (st.shared_clips[bucket] != 0) {
-								--st.shared_clips[bucket];
-							}
-						} else if (mounted_slot != nullptr) {
-							if (static_cast<int16_t>(mounted_slot->clip) == 0) break;
-							--mounted_slot->clip;
-						} else {
-							WeaponSlotState &slot = *personal;
-							if (slot.clip == 0) break;
-							--slot.clip;
-						}
-					}
-					// The accepted fire re-points the shooter's EquippedSlot: the borrowed
-					// mount slot it fired through, else the personal slot of the fired
-					// combo. [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d]
-					if (shooter->use_gun_slot_swapped && shooter->mount_target.valid()) {
-						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kMount;
-						conn.equipped_slot.mount = shooter->mount_target;
-					} else {
-						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
-						conn.equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
-					}
-					// The slot's fire action re-enters the handler with the weapon that
-					// fires, whose local pass judges the round again: the owner checks
-					// on that weapon, then the claimed origin's reach from the shooter.
-					// A refusal there drops the round, its score and the spawn-protection
-					// clear; the clip is spent either way (the spend follows the
-					// re-entry) and the fire-tick floor still stamps (the network pass
-					// returned 0). [orig: WeaponAction_Fire @0x542C5E ->
-					//  Entity_FireWeaponAndSendPacket @0x42BF34 -> Server_ClientFiredRound's
-					//  local pass - the owner checks @0x50C083..0x50C0B9, the reach
-					//  @0x50C33C..0x50C6FA; Weapon_ConsumeAmmo @0x542C75; the 0x06
-					//  handler's stamp @0x51370E..0x513740]
-					const world::FixedVec3 claimed{fr.pos_x, fr.pos_y, fr.pos_z};
-					round_lands =
-							world::weapon_fire_owner_status(*world, *shooter, slot_def, false) == 0 &&
-							world::weapon_fire_origin_status(*world, *shooter, *slot_def, claimed,
-									/*replay_client_action=*/false) == 0;
-				}
-				// Stamp the claimed target on the shooter; the tag-2 serializer reads it LIVE
-				// [orig: @0x50c2ad shooter+104->+12; NetPacket_SerializeRoundEvent @0x50485a].
-				world::EntityHandle fire_target{};
-				if (!wire_handle::is_batch_end_sentinel(fr.target_handle)) {
-					const world::EntityHandle th{fr.target_handle};
-					if (world->registry.get(th) != nullptr) fire_target = th; // [orig: @0x5135d2]
-				}
-				shooter->last_fire_target = fire_target;
-				// A primary round re-enters through the adm fire action, whose
-				// local pass scores the shot (scorer event 1) once it clears the
-				// pose checks; alt fire returns through RoundData_AddRound first.
-				// [orig: Server_ClientFiredRound @0x50BAA0 — alt @0x50BB0D, the
-				//  event-1 call @0x50C727]
-				if (!alt_fire && round_lands)
-					world->match.record_shot(*world, conn.link.owned_entity);
-				// The landed primary round ends the shooter's spawn protection: an
-				// in-session authority clears entity+292 for a non-spectator slot whose
-				// value is nonzero, on the same local pass, so alt fire never clears it.
-				// The listen host's own fire takes the same clear through
-				// Entity_FireWeaponAndSendPacket's authority leg (world/player_weapon.cpp
-				// local commit). [orig: Server_ClientFiredRound @0x50BAA0
-				//  @0x50c736..0x50c75d; the alt return @0x50BE4B..0x50BE65]
-				if (!alt_fire && round_lands && world->rules.mp_session &&
-				    shooter->damage_state != 0 && !conn.link.spectator)
-					shooter->damage_state = 0;
-
-				// Ring append [orig: RoundData_AddRound @0x4fdb40]. The ring stores the
-				// PRE-SPREAD origin/direction — exactly the client's claimed fire pose
-				// [orig: @0x4fdbce reads the request before RoundData_SpawnRound's spread].
-				world::RoundEvent ev;
-				ev.shooter_handle = fr.shooter_handle;
-				ev.origin_x = fr.pos_x;
-				ev.origin_y = fr.pos_y;
-				ev.origin_z = fr.pos_z;
-				ev.dir_yaw = int32_t(uint32_t(fr.dir_x) << 16);   // [orig: @0x513436]
-				ev.dir_pitch = int32_t(uint32_t(fr.dir_y) << 16); // [orig: @0x513449]
-				// The round's sequence word: the client's hit_part on the primary
-				// path, recomposed with the slot's roster index on the alt path
-				// [orig: word_B7C670 = hit_part @0x50c2ba / @0x50C774; the alt
-				//  (slot+20 << 9) | (hit_part & 0x1FF) @0x50BD8F..0x50BDA5 -> the round's
-				//  +120 word -> ring+28 @0x4fdcf5].
-				const uint16_t shot_seq = alt_fire
-						? uint16_t((uint32_t(conn.reply.player_slot) << 9) | (fr.hit_part & 0x1FFu))
-						: fr.hit_part;
-				ev.shot_seq = shot_seq;
-				// ring+30: the fire action's mode byte for an armory-fed primary round,
-				// else the request's fire-flags byte (alt fire's AddRound, a
-				// table-less host) [orig: @0x4fdcde; the alt path @0x50BDFC].
-				ev.mode_flags = fired_mode >= 0 ? uint8_t(fired_mode) : fr.fire_flags;
-				// Shooter fire-context composite [orig: ctx & 0x3F @0x50bd83, recombined
-				// | (ctx >> 7) << 7 into roundParams[4] @0x50c7bd -> ring+31].
-				ev.subtype = uint8_t((fr.extra_byte2 & 0x3F) | ((fr.extra_byte2 >> 7) << 7));
-				ev.slot_byte = fr.misc_byte; // [orig: ring+32 <- fireRequest+80 @0x4fdcfc]
-				ev.adm_index = fired_adm;
-				if (round_lands) world->out.rounds.add(ev);
-				// The authoritative round spawns SYNCHRONOUSLY with the ring append
-				// [orig: RoundData_AddRound @0x4fdb40 inline-calls RoundData_SpawnRound
-				// @0x4ec0d0 — the ring is only the tag-2 fan-out log; §5.60]. Ammo = the
-				// adm's load-time-resolved round_type (+4; +84 is the stat id); an
-				// armory- or ammo-less host skips the sim (fire still echoes).
-				if (round_lands && !world->tables.ammo.empty()) {
-					// The round's ammo: the fired weapon's round on the primary path;
-					// on the alt path the request's byte is the ammo index itself, and
-					// the weapon rides only under the adm-indexed flag bit.
-					// [orig: Server_ClientFiredRound - the alt read of +81 @0x50BB0F,
-					//  deltaZ @0x50BB7B into roundParams[3] @0x50BDF1; RoundData_AddRound
-					//  @0x4FDB95..0x4FDBB5 (the flags & 2 adm entry), the ammo
-					//  hit_params[2] @0x4FDC10]
-					const world::WeaponTableEntry *fire_adm =
-							world->tables.weapons.by_index(fired_adm);
-					int32_t round_ammo = fire_adm != nullptr ? fire_adm->ammo_index : -1;
-					if (alt_fire) {
-						round_ammo = fr.adm_index < world->tables.ammo.entries.size() &&
-										world->tables.ammo.entries[fr.adm_index].valid
-								? int32_t(fr.adm_index)
-								: -1;
-					}
-					if (round_ammo >= 0) {
-						world::RoundSpawnParams rp;
-						rp.owner = conn.link.owned_entity;
-						rp.shooter_handle = fr.shooter_handle;
-						rp.origin.x = opennova::io::fp16_16_to_float(fr.pos_x);
-						rp.origin.y = opennova::io::fp16_16_to_float(fr.pos_y);
-						rp.origin.z = opennova::io::fp16_16_to_float(fr.pos_z);
-						rp.dir_yaw_bam = ev.dir_yaw;
-						rp.dir_pitch_bam = ev.dir_pitch;
-						rp.ammo_index = round_ammo;
-						rp.adm_index = fired_adm;
-						rp.no_weapon = alt_fire && (fr.fire_flags & 0x02) == 0;
-						rp.shot_seq = shot_seq;
-						rp.subtype = ev.subtype;
-						// PowerThrow charge from fireRequest+80; RoundData_SpawnRound
-						// scales velocity for bytes 1..254 [orig: @0x4ec5bb].
-						rp.charge = fr.misc_byte;
-						world->round_sim.spawn(*world, rp);
-					}
-				}
-				// A rejected shot leaves this floor untouched. Alt fire stamps only
-				// its tick; primary adds the baked ADM action interval.
-				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310, stamp @0x513740]
-				if (conn.fire_tick_mode) {
-					const auto *adm = world->tables.weapons.by_index(fr.adm_index);
-					conn.fire_tick_floor = fr.current_tick +
-							(!alt_fire && adm != nullptr ? adm->fire_interval_ticks() : 0u);
-				}
-				// No reactive reply — the echo rides the per-frame 0x0A fan (replication
-				// select_round_events), reaching every OTHER in-match recipient.
+			case c2s::FIRED_ROUND: // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
+				Server_HandleClientFiredRound(config, conn, msg.payload.data(), msg.payload.size(), world);
 				break;
-			}
 			case c2s::WEAPON_RELOAD_REQUEST: { // reload request -> S2C 0x49 BROADCAST [orig: NapiNPServerMsg_HandleReloadRequest
 				// @0x514DF0 — validates the [u16 entityHandle][u16 weaponSlotCombo] body, then relays it
 				// verbatim as S2C 0x49 via two NapiNPServer_SendFiltered @0x4C87E0 sends that together
