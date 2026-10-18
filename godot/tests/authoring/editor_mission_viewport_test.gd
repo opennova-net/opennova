@@ -563,6 +563,7 @@ func test_two_missions_keep_two_devices() -> void:
 func test_a_device_given_up_mid_build() -> void:
 	if _app == null:
 		return
+	var budget_ms: int = _app.build_budget_ms
 	_app.build_budget_ms = 0
 	assert_true(_open_mission(true, PackedStringArray(["a.bms", "b.bms"])))
 	for _frame in 12:
@@ -574,6 +575,8 @@ func test_a_device_given_up_mid_build() -> void:
 	assert_true(_seam.open_document("missions/b.bms"))
 	_app.pump()
 	assert_null(_app.get_viewport_device("missions/synth_logic.bms", "mission"), "the first's device given up mid-build")
+	# The third's build to ready at the editor's own budget: a unit a frame was for the two given up mid-build.
+	_app.build_budget_ms = budget_ms
 	var state := await _await_ready("missions/b.bms")
 	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
 	assert_true(bool(state.get("body", {}).get("ground", false)), "the third built whole")
@@ -940,10 +943,11 @@ func test_no_global_written_outside_a_publication() -> void:
 func test_a_rebuild_keeps_the_last_scene_until_its_units_run() -> void:
 	if _app == null:
 		return
-	_app.build_budget_ms = 0
 	assert_true(_open_mission())
 	var state := await _await_ready()
 	assert_eq(String(state.get("status", "")), "ready", str(state))
+	# The Rebuild's units a frame each (the first build's pace is not what this reads).
+	_app.build_budget_ms = 0
 	var device := _device(state)
 	var container: Node = device.find_child("MissionObjects", true, false)
 	assert_not_null(container)
@@ -975,10 +979,11 @@ func test_a_rebuild_keeps_the_last_scene_until_its_units_run() -> void:
 func test_a_placement_cut_short_places_whole() -> void:
 	if _app == null:
 		return
-	_app.build_budget_ms = 0
 	assert_true(_open_mission())
 	var state := await _await_ready()
 	assert_eq(String(state.get("status", "")), "ready", str(state))
+	# The Rebuild's units a frame each (the first build's pace is not what this reads).
+	_app.build_budget_ms = 0
 	var item := _first_item(state)
 	_touch_the_crate()
 	# Into the placement: its second unit run.
