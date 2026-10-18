@@ -57,6 +57,9 @@ scripts/build.sh
 - Both scripts configure their build tree once and skip that step on later runs; the build
   re-runs CMake by itself when a `CMakeLists.txt` changes.
 - `scripts/test_godot.sh --keep-user-dir` leaves the suite's isolated `user://` in place.
+- `scripts/test_godot.sh --suite core --shard shells|world` runs one of CI's two Windows
+  GUT shards (the scripts under `tests/authoring`, `game`, `mcp` and `probes`, or the
+  others) with its own attestation.
 - On Windows, keeping the build trees out of real-time antivirus scanning (a Defender
   exclusion, or a Dev Drive) speeds up compiling, linking and the first launch of each
   freshly linked test.
