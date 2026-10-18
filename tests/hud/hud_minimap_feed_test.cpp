@@ -60,6 +60,10 @@ HudMinimapMarker sample(uint16_t handle) {
     m.timer_value = 31 * 65536;
     m.timer_limit = 62 * 65536;
     m.timer_rate = -1057;
+    // v8: the change-team class's cell and the zone's taker.
+    m.change_team = 1;
+    m.cell = 27;
+    m.capture_team = 2;
     return m;
 }
 
@@ -78,7 +82,8 @@ bool same(const HudMinimapMarker &a, const HudMinimapMarker &b) {
            a.bay_groups == b.bay_groups && a.timer_known == b.timer_known &&
            a.timer_active == b.timer_active && a.timer_team == b.timer_team &&
            a.timer_bar_team == b.timer_bar_team && a.timer_value == b.timer_value &&
-           a.timer_limit == b.timer_limit && a.timer_rate == b.timer_rate;
+           a.timer_limit == b.timer_limit && a.timer_rate == b.timer_rate &&
+           a.change_team == b.change_team && a.cell == b.cell && a.capture_team == b.capture_team;
 }
 
 void test_round_trip_is_exact() {
@@ -94,9 +99,10 @@ void test_round_trip_is_exact() {
     CHECK(feed[0] == kMinimapFeedVersion);
     CHECK(feed[1] == kMinimapFeedStride);
     CHECK(feed[2] == 2);
-    CHECK(feed[kMinimapFeedHeaderSize + 12] == 2); // bit1 footprint, bit0 rotate clear
+    CHECK(feed[kMinimapFeedHeaderSize + 12] == 6); // bit1 footprint, bit2 change team, bit0 rotate clear
     CHECK(feed[kMinimapFeedHeaderSize + 16] == 1); // v4 medic
-    CHECK(kMinimapFeedVersion == 7 && kMinimapFeedStride == 36);
+    CHECK(kMinimapFeedVersion == 8 && kMinimapFeedStride == 38);
+    CHECK(feed[kMinimapFeedHeaderSize + 36] == 27 && feed[kMinimapFeedHeaderSize + 37] == 2); // v8
     CHECK(feed[kMinimapFeedHeaderSize + 30] == 3); // v7 timer flags: known | active
     CHECK(feed[kMinimapFeedHeaderSize + kMinimapFeedStride + 30] == 1);
     CHECK(feed[kMinimapFeedHeaderSize + 35] == -1057); // the signed rate rides as is

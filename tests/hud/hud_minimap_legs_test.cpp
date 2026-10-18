@@ -377,6 +377,54 @@ void test_blip_flash_gates() {
 	CHECK(count_icon_sprites(compiler.compile(in)) == 0, "timer 10 lit hides cell 3");
 }
 
+// The change-team blip blinks on the session frame clock: half-bright in the lit
+// phase, a neutral zone being taken to the taker's colour; its cell replaces the
+// slot's. [orig: Minimap_DrawBlip @0x597CC7..0x597D42]
+void test_change_team_blink() {
+	HudMinimapInput in = corner();
+	HudMinimapMarker m = live(0, 0, 10, 0xFF208020u, HudMinimapBank::kTransient);
+	m.change_team = 1;
+	m.team = 1;
+	in.markers.push_back(m);
+	HudMinimapCompiler compiler;
+	auto blip_color = [&]() -> uint32_t {
+		for (const HudMapSprite &s : compiler.compile(in).sprites)
+			if (s.texture == 0) return s.color;
+		return 0u;
+	};
+	in.session_frame = 0x1F;
+	CHECK(blip_color() == 0xFF208020u, "the dark phase keeps the colour");
+	in.session_frame = 0x20;
+	CHECK(blip_color() == 0xFF104010u, "the lit phase halves it, the alpha arg opaque");
+	in.markers[0].team = 0;
+	in.markers[0].capture_team = 2;
+	CHECK(blip_color() == 0xFF802020u, "a neutral zone being taken blinks to the taker's colour");
+	in.markers[0].capture_team = 1;
+	CHECK(blip_color() == 0xFF304080u, "team 1's taker colour");
+	// A numbered zone (its slot colour the zone palette's, quartered: Render_MinimapSlotBlip)
+	// halves instead, and only in the lit phase.
+	in.markers[0].zone_number = 4;
+	in.session_frame = 0x40;
+	const uint32_t dark = blip_color();
+	in.session_frame = 0x60;
+	CHECK(dark != 0u && blip_color() == (0xFF000000u | ((dark >> 1) & 0x007F7F7Fu)),
+			"a numbered zone halves instead");
+	// The cell: the policy's 26 / 27 draws in place of the slot's.
+	HudMinimapInput plain = in;
+	plain.markers[0].change_team = 0;
+	plain.markers[0].icon = 27;
+	in.markers[0].cell = 27;
+	const HudMapPass &a = compiler.compile(in);
+	float au = -1.0f, av = -1.0f;
+	for (const HudMapSprite &s : a.sprites)
+		if (s.texture == 0) { au = s.u0; av = s.v0; }
+	HudMinimapCompiler other;
+	float bu = -2.0f, bv = -2.0f;
+	for (const HudMapSprite &s : other.compile(plain).sprites)
+		if (s.texture == 0) { bu = s.u0; bv = s.v0; }
+	CHECK(au == bu && av == bv, "the change-team cell replaces the slot's");
+}
+
 HudMinimapMarker zone_marker(uint8_t zone_number, uint8_t source, uint8_t team) {
 	HudMinimapMarker z = live(0, 0, 0, 0xFF304080u, HudMinimapBank::kTransient);
 	z.entity_bits = static_cast<uint8_t>(kMarkerEntityHasModel | kMarkerEntityZoneDef);
@@ -697,6 +745,7 @@ int main() {
 	test_bank_walk_gates();
 	test_blip_crop();
 	test_blip_flash_gates();
+	test_change_team_blink();
 	test_objective_tethers();
 	test_farp_chevron();
 	test_waypoint_nub_raw_state_colour();

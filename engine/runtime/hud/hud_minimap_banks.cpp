@@ -269,6 +269,26 @@ void draw_blip(MapCompile &c, const HudMinimapMarker &marker, uint32_t color,
 		draw_cell = 8;
 		quad_angle = 0;
 	}
+	if (marker.change_team != 0) {
+		// The change-team class blinks on the session frame clock: a neutral zone
+		// being taken (no team, a taker, no zone number) to the taker's colour,
+		// any other half-bright; its cell and size are the policy's.
+		// [orig: Minimap_DrawBlip @0x597CC7..0x597D13 (entity+0x162, +0x223,
+		//  +0x21A; `test byte ptr dword_A87060, bl` (0x20) @0x597CEB / @0x597D09,
+		//  `sar edi, 1; and edi, 7F7F7F7Fh` @0x597D11..0x597D13); the cell
+		//  @0x597D3D..0x597D40]
+		if ((input.session_frame & 0x20u) != 0) {
+			if (marker.team == 0 && marker.capture_team != 0 && marker.zone_number == 0) {
+				if (marker.capture_team == 1)
+					color = 0xFF304080u;
+				else if (marker.capture_team == 2)
+					color = 0xFF802020u;
+			} else {
+				color = (color >> 1) & 0x7F7F7F7Fu;
+			}
+		}
+		if (marker.cell != 0) draw_cell = marker.cell;
+	}
 	const float floor_px = static_cast<float>(
 			marker.floor_px != 0 ? marker.floor_px : 6);
 	hx = std::max(floor_px, hx);

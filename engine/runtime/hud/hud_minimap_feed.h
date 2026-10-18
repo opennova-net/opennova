@@ -28,9 +28,9 @@
 
 namespace opennova::hud {
 
-inline constexpr int32_t kMinimapFeedVersion = 7;
+inline constexpr int32_t kMinimapFeedVersion = 8;
 inline constexpr int32_t kMinimapFeedHeaderSize = 3;
-inline constexpr int32_t kMinimapFeedStride = 36;
+inline constexpr int32_t kMinimapFeedStride = 38;
 
 // {version, stride, count} + count rows.
 void minimap_feed_encode(const std::vector<HudMinimapMarker> &markers,

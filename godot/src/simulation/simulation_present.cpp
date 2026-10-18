@@ -234,7 +234,7 @@ PackedInt32Array Simulation::get_hud_minimap_footprints() const {
 				opennova::world::classify_minimap_overlay(entity, &kernel_->world);
 		if (!row.visible) return;
 		const opennova::world::MinimapBlipDrawPolicy policy =
-				opennova::world::minimap_blip_draw_policy(entity, row.icon);
+				opennova::world::minimap_blip_draw_policy(entity, row.icon, -1); // the footprint alone
 		if (!policy.footprint) return;
 		const int32_t model_id = kernel_->occlusion.instance_model_id(
 				entity.handle);

@@ -191,8 +191,22 @@ bool minimap_overlay_entity_enabled(const Entity &entity) {
 }
 
 MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
-		uint8_t icon) {
+		uint8_t icon, int local_team) {
 	MinimapBlipDrawPolicy out;
+	// The classes from the emplacements on join the walk's change-team legs
+	// before the size floors [orig: @0x597CBB..0x597D42]; a cell 26 / 27 is no
+	// cell 9, so it takes no x1.2 [orig: @0x597D57].
+	const auto joined = [&](MinimapBlipDrawPolicy p) {
+		if ((entity.item_attrib & kItemAttribChangeTeam) == 0) return finish_blip_policy(p, icon);
+		p.change_team = true;
+		p.floor_px = 12;
+		if (entity.zone_number == 0) return finish_blip_policy(p, icon);
+		p.half_x_q16 *= 2;
+		p.half_y_q16 *= 2;
+		p.cell = static_cast<uint8_t>(26 + (static_cast<int>(entity.team) == local_team ? 1 : 0));
+		p.rotate = false;
+		return p;
+	};
 	// Model halves when stamped, the 10-wu class fallback otherwise.
 	// [orig: @0x5979a2..0x5979cb]
 	const bool has_model_halves =
@@ -245,7 +259,7 @@ MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
 		out.half_x_q16 = out.half_y_q16 = 0x40000;
 		out.floor_px = 4;
 		out.rotate = false;
-		return finish_blip_policy(out, icon);
+		return joined(out);
 	}
 	if ((entity.item_attrib & 2u) != 0) {
 		// The attrib-bit1 class: 2 wu, floor 4, rotated (the entity+692
@@ -253,7 +267,7 @@ MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
 		// [orig: @0x597bac..0x597bf9]
 		out.half_x_q16 = out.half_y_q16 = 0x20000;
 		out.floor_px = 4;
-		return finish_blip_policy(out, icon);
+		return joined(out);
 	}
 	if (icon == 6 || icon == 2) {
 		// Cells 6/2 draw UPRIGHT at 4 wu; cell 6 floors at 12 px.
@@ -261,7 +275,7 @@ MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
 		out.half_x_q16 = out.half_y_q16 = 0x40000;
 		out.floor_px = icon == 6 ? 12 : 6;
 		out.rotate = false;
-		return finish_blip_policy(out, icon);
+		return joined(out);
 	}
 	if ((entity.item_attrib & kItemAttribSpawnPoint) != 0 &&
 			entity.item_type != 1) {
@@ -272,7 +286,7 @@ MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
 		const int32_t half = std::min<int32_t>(model_min, 0x40000);
 		out.half_x_q16 = out.half_y_q16 = half > 0 ? half : 0x40000;
 		out.floor_px = 16;
-		return finish_blip_policy(out, icon);
+		return joined(out);
 	}
 	if ((entity.item_attrib2 & 1u) != 0) {
 		// The attrib2-bit0 class: 8 wu, floor 8, UPRIGHT.
@@ -280,10 +294,10 @@ MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
 		out.half_x_q16 = out.half_y_q16 = 0x80000;
 		out.floor_px = 8;
 		out.rotate = false;
-		return finish_blip_policy(out, icon);
+		return joined(out);
 	}
 	// Default: model halves (or the 10-wu fallback), floor 6, rotated.
-	return finish_blip_policy(out, icon);
+	return joined(out);
 }
 
 } // namespace opennova::world

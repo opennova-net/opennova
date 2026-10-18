@@ -96,12 +96,15 @@ SlotEntityFacts slot_entity(const replication::ClientState &cs, world::World &w,
         blip.handle = handle;
         blip.icon = 3;
         blip.entity_known = e->has_item_def ? 1 : 0;
-        const world::MinimapBlipDrawPolicy policy = world::minimap_blip_draw_policy(*e, 3);
+        const world::MinimapBlipDrawPolicy policy =
+                world::minimap_blip_draw_policy(*e, 3, local != nullptr ? local->team : -1);
         blip.rotate = policy.rotate ? 1 : 0;
         blip.footprint = policy.footprint ? 1 : 0;
         blip.half_x_q16 = policy.half_x_q16;
         blip.half_y_q16 = policy.half_y_q16;
         blip.floor_px = policy.floor_px;
+        blip.change_team = policy.change_team ? 1 : 0;
+        blip.cell = policy.cell;
         stamp_minimap_entity_facts(blip, *e, local, nullptr);
         int32_t euler[3] = {};
         world::entity_live_euler_bam(*e, euler);
@@ -153,12 +156,15 @@ void tracked_blip(const world::Entity &e, const world::Entity *local,
     blip.handle = e.handle.packed;
     blip.icon = 28;
     blip.entity_known = e.has_item_def ? 1 : 0;
-    const world::MinimapBlipDrawPolicy policy = world::minimap_blip_draw_policy(e, 28);
+    const world::MinimapBlipDrawPolicy policy =
+            world::minimap_blip_draw_policy(e, 28, local != nullptr ? local->team : -1);
     blip.rotate = policy.rotate ? 1 : 0;
     blip.footprint = policy.footprint ? 1 : 0;
     blip.half_x_q16 = policy.half_x_q16;
     blip.half_y_q16 = policy.half_y_q16;
     blip.floor_px = policy.floor_px;
+    blip.change_team = policy.change_team ? 1 : 0;
+    blip.cell = policy.cell;
     stamp_minimap_entity_facts(blip, e, local, nullptr);
 }
 
