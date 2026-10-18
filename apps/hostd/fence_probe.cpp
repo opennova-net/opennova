@@ -78,7 +78,10 @@ bool probe_as(uint32_t uid, const std::vector<ProbeTarget> &targets, int timeout
 		return false;
 	}
 	if (pid == 0) {
-		if (::setgroups(0, nullptr) != 0 || ::setgid(uid) != 0 || ::setuid(uid) != 0)
+		// A child that is `uid` already probes as it is (dropping groups needs
+		// CAP_SETGID); hostd, root, drops to the slots' user.
+		if (::geteuid() != uid &&
+				(::setgroups(0, nullptr) != 0 || ::setgid(uid) != 0 || ::setuid(uid) != 0))
 			::_exit(255);
 		for (size_t i = 0; i < targets.size() && i < 250; ++i)
 			if (connects(targets[i].endpoint, timeout_ms))
