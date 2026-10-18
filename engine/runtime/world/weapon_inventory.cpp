@@ -136,7 +136,17 @@ std::vector<WeaponKitEntry> weapon_kit_filter_by_availability(
     //  unresolved names (@ 0x40f830) and availability-0 entries (@ 0x40f834)]
     std::vector<WeaponKitEntry> out;
     for (const WeaponKitEntry &e : kit) {
-        int idx = table.index_of(e.name.c_str());
+        // The walk is over the armory's weapon catalog, whose entry 0 is "None" (the
+        // weapon table's is the "null" def), so a kit name "None" resolves to index 0
+        // [orig: the stricmp walk over g_WeaponDefTable @ 0x40f80e..0x40f830; its entry
+        //  0 named by WeaponDef_LoadAll @ 0x54dd10].
+        static constexpr char kNone[] = "none";
+        size_t k = 0;
+        while (kNone[k] != '\0' &&
+               std::tolower(static_cast<unsigned char>(e.name.c_str()[k])) == kNone[k])
+            ++k;
+        const bool none = kNone[k] == '\0' && e.name.c_str()[k] == '\0';
+        int idx = none ? 0 : table.index_of(e.name.c_str());
         if (idx < 0) continue;
         if (avail.value_for(idx) == weapon_availability_value::kBanned) continue;
         out.push_back(e);

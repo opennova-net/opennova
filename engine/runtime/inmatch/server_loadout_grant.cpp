@@ -175,14 +175,26 @@ void clear_loaded_rounds(const world::WeaponTable &table, world::WeaponInventory
 //  PlayerSlot_InitWeaponsFromLoadout @0x5156C1..0x5156EA, @0x5156EF..0x515752]
 void set_kit_pools(const world::WeaponTable &table, world::WeaponInventory &inv,
                    const KitEntry &e, bool accept) {
+	// The accept takes the entry's def by its index; the deploy looks the buffered
+	// name up again, and a name that names no weapon sets no pool [orig: the accept's
+	//  AdmDef_GetEntryByIndex @0x515E20; PlayerSlot_InitWeaponsFromLoadout's
+	//  AvatarDef_FindIndexByName @0x515608, its def gate @0x5156AF].
+	const world::WeaponTableEntry *def = e.def;
+	uint8_t base = e.adm_index;
+	if (!accept) {
+		const int found = table.index_of(e.def->name.c_str());
+		def = found >= 0 ? table.by_index(static_cast<uint8_t>(found)) : nullptr;
+		if (def == nullptr) return;
+		base = static_cast<uint8_t>(found);
+	}
 	int32_t count = e.count;
-	if (count > e.def->maxclips) count = e.def->maxclips;
-	world::weapon_pool_set(table, inv, e.def->ammo_class_id,
-			count >= 0 ? count * e.def->clipsize : e.def->startrounds);
-	for (int32_t k = 1; k < e.def->loadout_subclasses + 1; ++k) {
+	if (count > def->maxclips) count = def->maxclips;
+	world::weapon_pool_set(table, inv, def->ammo_class_id,
+			count >= 0 ? count * def->clipsize : def->startrounds);
+	for (int32_t k = 1; k < def->loadout_subclasses + 1; ++k) {
 		const world::WeaponTableEntry *sub =
-				table.by_index(static_cast<uint8_t>(e.adm_index + k));
-		if (sub == nullptr || sub->ammo_class_id == e.def->ammo_class_id) continue;
+				table.by_index(static_cast<uint8_t>(base + k));
+		if (sub == nullptr || sub->ammo_class_id == def->ammo_class_id) continue;
 		int32_t count2 = e.count2;
 		if (count2 > sub->maxclips) count2 = sub->maxclips;
 		int32_t pool = 0;

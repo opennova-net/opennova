@@ -1710,6 +1710,35 @@ bool check_deploy_leaves_the_listen_hosts_kit() {
 			"the listen host's deploy keeps its kit's carry bits and rows");
 }
 
+// The deploy's pool leg looks the buffered name up again: of two weapons sharing a name,
+// the first takes the entry's count, as the fill does, not the one the index named.
+// [orig: PlayerSlot_InitWeaponsFromLoadout @0x515608 / @0x5156AF]
+bool check_deploy_pools_follow_the_buffered_name() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	install_rifle_armory(world);
+	w::WeaponTable &table = world.tables.weapons;
+	table.ammo_class_names = {"CLS_A", "CLS_B"};
+	table.ammo_class_caps = {1000, 1000};
+	table.entries.resize(7);
+	table.entries[6] = table.entries[5]; // the same name, another ammo class
+	table.entries[6].ammo_class = "CLS_B";
+	table.entries[6].ammo_class_id = 1;
+	const w::EntityHandle remote = w::spawn_remote_player(world, player_spawn(0, 0, 0));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, remote, true));
+	inmatch::NapiNPConnection &conn = roster.front();
+	conn.slot_class = 8;
+	conn.reply.loadout_buffer.team = 1;
+	conn.reply.loadout_buffer.player_class = 8;
+	conn.reply.loadout_buffer.entries.push_back(LoadoutSubmitEntry{6, 2, 0xFF, 0xFF});
+	conn.reply.loadout_buffer_set = true;
+	inmatch::PlayerSlot_InitWeaponsFromLoadout(conn, world, *world.registry.get(remote));
+	return expect(conn.reply.ammo_pools[0] != 0 && conn.reply.ammo_pools[1] == 0,
+			"the deploy's pools follow the buffered name's first weapon");
+}
+
 // The map change keeps a slot's kit, and the round init rebuilds the slot's table from
 // it: the kit's rows, the pools seeded from the defs and one clip drawn, before any
 // count (the rifle's 90 start rounds, not the one granted magazine).
@@ -2936,6 +2965,7 @@ int main() {
 	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
 	ok = check_deploy_rebuilds_an_unsubmitted_slot_empty() && ok;
 	ok = check_deploy_leaves_the_listen_hosts_kit() && ok;
+	ok = check_deploy_pools_follow_the_buffered_name() && ok;
 	ok = check_round_init_rebuilds_the_kept_kit() && ok;
 	ok = check_loadout_damage_class_bytes() && ok;
 	ok = check_loadout_sub_variant_rows() && ok;

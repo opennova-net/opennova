@@ -1038,7 +1038,19 @@ void test_mount_slot_reload() {
     std::printf("PASS the mount slot reload\n");
 }
 
+// A kit name "None" resolves to the catalog's entry 0 and survives the filter, so the
+// knife fallback does not run [orig: Mission_LoadBMSFile @0x40f80e..0x40f830; the
+//  fallback @0x40f899].
+void test_kit_filter_keeps_none() {
+    Fixture f;
+    WeaponAvailability avail;
+    auto kept = weapon_kit_filter_by_availability({{"None", -1, -1, -1}}, f.t, avail);
+    CHECK(kept.size() == 1);
+    CHECK(kept.size() == 1 && kept[0].name == "None");
+}
+
 int main() {
+    test_kit_filter_keeps_none();
     test_mount_slot_reload();
     test_recalc_seat_legs();
     test_reload_takes_the_seat();
