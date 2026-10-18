@@ -288,6 +288,21 @@ terraform() {
   return 0
 }
 
+# packer: the variables an image build sees land in STUB_TF_ENV/<NAME>, as
+# terraform's do.
+packer() {
+  local v
+  echo "packer $*" >>"$STUB_TF_CALLS"
+  case " $* " in
+    *" build "*)
+      rm -f "${STUB_TF_ENV:?}"/*
+      for v in $(compgen -e); do
+        case "$v" in PKR_VAR_*|AWS_ACCESS_KEY_ID) printf '%s' "${!v}" >"$STUB_TF_ENV/$v" ;; esac
+      done ;;
+  esac
+  return 0
+}
+
 # curl: Stripe's answers for a complete test-mode setup, to the key the vault
 # holds alone (the one curl's config file must carry).
 curl() {
@@ -480,6 +495,18 @@ done
 expect_tf_var AWS_ACCESS_KEY_ID aws-org access_key_id
 grep -q -- "-chdir=$root/infra/ci init .*-reconfigure" "$STUB_TF_CALLS" \
   && pass "ci plan inits infra/ci on prod's state bucket" || fail "ci plan's init: $(head -n 1 "$STUB_TF_CALLS")"
+expect_requests "ci image --yes" 2 ci image --yes
+expect_tf_var PKR_VAR_account_id aws-ci account_id
+expect_tf_var PKR_VAR_region aws-ci region
+expect_tf_var AWS_ACCESS_KEY_ID aws-org access_key_id
+pw="$(cat "$STUB_TF_ENV/PKR_VAR_winrm_password" 2>/dev/null)"
+if [ "${#pw}" -ge 32 ] && [[ "$RUN_OUT" != *"$pw"* ]]; then
+  pass "ci image hands packer a build password of its own, never printed"
+else
+  fail "ci image's build password: ${#pw} characters$([[ -n "$pw" && "$RUN_OUT" == *"$pw"* ]] && echo ', printed')"
+fi
+grep -q -- "^packer build -color=false $root/infra/ci/image\$" "$STUB_TF_CALLS" \
+  && pass "ci image builds infra/ci/image" || fail "ci image's packer calls: $(grep packer "$STUB_TF_CALLS" | tr '\n' ';')"
 
 fresh_run
 jq '.title = "Cloudflare" | .fields |= map(if .label == "api_token" then .label = "API_Token" | .id = "f0123456789" else . end)' \

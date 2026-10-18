@@ -111,6 +111,11 @@
 #                                 account's OrganizationAccountAccessRole; no
 #                                 --deployment; its state in prod's state
 #                                 bucket
+#   ci image [--yes]              the runners' Windows image (infra/ci/image:
+#                                 RunsOn's windows25-full-x64 plus Visual
+#                                 Studio 2026's C++ build tools), built by
+#                                 Packer in the ci account; prints the AMI
+#                                 ci.yml's Windows legs name
 #   aws <args...>                 the AWS CLI in the deployment's account
 #   app deploy [--tag T] [--image NAME=T|NAME=@sha256:D]... [--serve-tag T]
 #              [--hostd-tag T] [--promote staging | --images-from FILE|-]
@@ -209,6 +214,7 @@ ORG_TF_DIR="$ROOT/infra/org"
 ZONE_TF_DIR="$ROOT/infra/zone"
 GH_TF_DIR="$ROOT/infra/github"
 CI_TF_DIR="$ROOT/infra/ci"
+CI_IMAGE_DIR="$ROOT/infra/ci/image"
 ENV_DIR="$ROOT/deploy/env"
 TF_ENV_TPL="$ENV_DIR/terraform.env.tpl"
 ZONE_ENV_TPL="$ENV_DIR/zone.env.tpl"

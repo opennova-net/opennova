@@ -362,6 +362,11 @@ cmd_ci() {
   STACK_WORD=ci
   require_op
   org_auth
+  if [ "${1:-}" = image ]; then
+    shift
+    ci_image "$@"
+    return
+  fi
   local prod_json prod_account prod_bucket
   prod_json="$(item_json aws-prod)"
   prod_account="$(json_field "$prod_json" account_id)"
@@ -372,6 +377,31 @@ cmd_ci() {
     || die "terraform init of $STACK_DIR failed (state s3://$prod_bucket/$STACK_KEY)"
   log "$STACK_LABEL: state s3://$prod_bucket/$STACK_KEY"
   stack_run_body "$@"
+}
+
+# The runners' Windows image (infra/ci/image/windows.pkr.hcl): Packer builds
+# it in the ci account, as opennova-org through that account's
+# OrganizationAccountAccessRole (the template's assume_role), with an
+# Administrator password made for the build alone (the image's last step
+# replaces it). About an hour; it prints the AMI, which ci.yml's Windows legs
+# then name (image=ami-...).
+ci_image() {
+  local json account ci_region
+  take_yes "$@"
+  json="$(item_json aws-ci)"
+  account="$(json_field "$json" account_id)"
+  ci_region="$(json_field "$json" region)"
+  [[ "$account" =~ ^[0-9]{12}$ ]] || die "aws-ci names no account_id (DEPLOY.md, \"CI runners\")"
+  [[ "$ci_region" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || die "aws-ci names no region ('$ci_region')"
+  confirm_word ci "build the CI runners' Windows image in account $account (about an hour; a new private AMI)" "$OPT_YES"
+  (
+    # A Windows password's three character classes, on top of 192 random bits.
+    PKR_VAR_winrm_password="$(openssl rand -base64 24 | tr -d '\n')aA1!"
+    export PKR_VAR_winrm_password PKR_VAR_account_id="$account" PKR_VAR_region="$ci_region"
+    packer init "$CI_IMAGE_DIR" >/dev/null || die "packer init of $CI_IMAGE_DIR failed"
+    packer build -color=false ${OPT_REST[@]+"${OPT_REST[@]}"} "$CI_IMAGE_DIR"
+  ) || die "the image build failed; Packer removed what it made"
+  log "put the AMI above into ci.yml's Windows legs (image=ami-...)"
 }
 
 # A shared stack (the zone's, the organization's), its state in prod's state

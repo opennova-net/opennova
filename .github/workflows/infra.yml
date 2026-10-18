@@ -43,6 +43,8 @@ jobs:
     env:
       # The toolbox's Terraform (deploy/Dockerfile TERRAFORM_VERSION).
       TERRAFORM_IMAGE: hashicorp/terraform:1.11.4
+      # The toolbox's Packer (deploy/Dockerfile PACKER_VERSION).
+      PACKER_IMAGE: hashicorp/packer:1.16.1
     steps:
       - uses: actions/checkout@v4
       - name: terraform fmt
@@ -80,6 +82,12 @@ jobs:
           docker run --rm -v "$PWD:/w" -w /w/infra/ci "$TERRAFORM_IMAGE" init -backend=false -input=false
           docker run --rm -v "$PWD:/w" -w /w/infra/ci "$TERRAFORM_IMAGE" validate
           docker run --rm --network none -v "$PWD:/w" -w /w/infra/ci "$TERRAFORM_IMAGE" test
+      # The runners' Windows image (Packer): formatted and valid, its plugin
+      # from the registry, placeholder inputs (nothing reaches AWS).
+      - name: packer fmt and validate (infra/ci/image)
+        run: |
+          docker run --rm --entrypoint sh -v "$PWD:/w" -w /w/infra/ci/image "$PACKER_IMAGE" -c \
+            'packer init . >/dev/null && packer fmt -check -diff . && packer validate -var account_id=000000000000 -var region=us-east-1 -var winrm_password=placeholder .'
 
   shellcheck:
     runs-on: ubuntu-latest
