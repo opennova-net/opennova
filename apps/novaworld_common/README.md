@@ -214,7 +214,7 @@ Service policy (`health.*`), what the container runtime and the uptime checks re
 - **The heartbeat**, one line on stdout every 60 s, for the log pipeline's metric
   filters: `{"heartbeat":{"program":"<program>",...}}`, the program first, then the
   fields that program knows in this order, then every program's lock failures:
-  `{"heartbeat":{"program":"fleet","hosted_live":N,"hosted_failed":N,"machines_lost":N,"machines_held":N,"launch_failures":N,"limits_held":N,"db_lock_timeouts":N,"db_deadlocks":N}}`.
+  `{"heartbeat":{"program":"fleet","hosted_live":N,"hosted_failed":N,"machines_lost":N,"machines_held":N,"launch_failures":N,"limits_held":N,"attention_danger":N,"attention_warn":N,"machines_stuck":N,"machine_disk_free_pct":N,"fleet_pass_age_s":N,"db_lock_timeouts":N,"db_deadlocks":N}}`.
   "Since the last line" counts reset each line; a deployment-wide count every process of
   a program logs alike is aggregated with the maximum, not the sum.
   - lobby: `nw_sessions` (its own NovaWorld UDP sessions), `listed_hosts` (the
@@ -223,7 +223,13 @@ Service policy (`health.*`), what the container runtime and the uptime checks re
   - fleet, with hosting on: `hosted_live`, `machines_lost` and `machines_held` (the lost
     machines the mass-lost brake holds from their end; now), `hosted_failed` and
     `launch_failures` (since the last line), `limits_held` (1 while the owners' limits
-    hold is on);
+    hold is on); and the leader alone (a standby's would be a stale pass): the fleet's
+    health (`hosted/fleet_health.h`) as `attention_danger` and `attention_warn` (its
+    findings of each level), `machines_stuck` (the machines a stuck or flapping finding
+    names), `machine_disk_free_pct` (the least free share of a ready or draining
+    machine's trees' disk; left out with none reporting), and `fleet_pass_age_s` (the
+    seconds since its supervisor's last pass that failed in nothing; from its start
+    before one);
   - worker: `billing_sync_age_s` (the oldest unsynced webhook event's age; 0 with none,
     -1 with billing off);
   - gate: `probes_unanswered` (since the last line, for want of a lobby: what the

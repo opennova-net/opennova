@@ -4993,6 +4993,19 @@ int test_healthz(Harness &h) {
 			"\"machines_lost\":0,\"machines_held\":0,\"launch_failures\":0,\"limits_held\":1,"
 			"\"db_lock_timeouts\":2,"
 			"\"db_deadlocks\":1}}");
+	// The fleet leader's own: its health's counts, the machines stuck, the least
+	// free disk, its last good pass's age.
+	fleet.attention_danger = 1;
+	fleet.attention_warn = 4;
+	fleet.machines_stuck = 2;
+	fleet.machine_disk_free_pct = 12;
+	fleet.fleet_pass_age_s = 3;
+	TEST_EXPECT(nws::heartbeat_line(fleet) ==
+			"{\"heartbeat\":{\"program\":\"fleet\",\"hosted_live\":2,\"hosted_failed\":1,"
+			"\"machines_lost\":0,\"machines_held\":0,\"launch_failures\":0,\"limits_held\":1,"
+			"\"attention_danger\":1,\"attention_warn\":4,\"machines_stuck\":2,"
+			"\"machine_disk_free_pct\":12,\"fleet_pass_age_s\":3,\"db_lock_timeouts\":2,"
+			"\"db_deadlocks\":1}}");
 	nws::Heartbeat gate;
 	gate.program = "gate";
 	gate.probes_unanswered = 4;

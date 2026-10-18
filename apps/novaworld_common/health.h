@@ -29,11 +29,15 @@
 //   the webhook deliveries refused since the last line (web, billing on); the
 //   hosted servers live and failed since the last line, the machines lost,
 //   the launch failures since the last line and the limits hold (fleet,
-//   hosting on); the age of the oldest webhook event the billing sync has not
-//   synced yet, -1 with billing off (worker); the probes left unanswered for
-//   want of a lobby since the last line and the lobby instances that take
-//   clients (gate: a gate with no lobby to hand out answers no one while its
-//   loops turn and its /livez says ok); and every program's database
+//   hosting on), and the leader's own: the fleet's health (hosted/
+//   fleet_health.h: its danger and warn findings, the machines stuck, the
+//   least free share of a machine's disk) and the age of its supervisor's last
+//   pass that failed in nothing; the age of the oldest webhook event the
+//   billing sync has not synced yet, -1 with billing off (worker); the probes
+//   left unanswered for want of a lobby since the last line and the lobby
+//   instances that take clients (gate: a gate with no lobby to hand out
+//   answers no one while its loops turn and its /livez says ok); and every
+//   program's database
 //   statements that failed on a lock since the last line (a lock timeout or a
 //   deadlock, db::lock_failures()).
 //
@@ -113,6 +117,15 @@ struct Heartbeat {
 			limits_held; // 1 while the hosted servers' limits hold is on (hosted/limits_hold.h)
 	std::optional<int64_t> probes_unanswered; // the gate's, since the last line
 	std::optional<int64_t> lobbies_live; // the lobby instances that take clients (gate)
+	// The fleet leader's alone (a standby's would be a stale pass): its findings'
+	// danger and warn counts, the machines a stuck or flapping finding names, the
+	// least free share of a ready machine's disk (percent), and the seconds since
+	// its supervisor's last pass that failed in nothing.
+	std::optional<int64_t> attention_danger;
+	std::optional<int64_t> attention_warn;
+	std::optional<int64_t> machines_stuck;
+	std::optional<int64_t> machine_disk_free_pct;
+	std::optional<int64_t> fleet_pass_age_s;
 	int64_t db_lock_timeouts = 0;
 	int64_t db_deadlocks = 0;
 };
