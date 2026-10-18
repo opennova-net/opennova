@@ -91,3 +91,4 @@ cloudflare_web_proxied = true
 # cost_anomaly_threshold_usd = 20
 # log_retention_days         = 30
 # server_log_retention_days  = 14      # the hosted servers' output (the servers log group)
+# log_ingest_alarm_gib_per_day = 2     # the servers group's ingest past this rate in an hour alarms

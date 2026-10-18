@@ -1073,3 +1073,51 @@ run "too_many_slots_refused" {
 
   expect_failures = [var.shared_slots]
 }
+
+# The fleet leader's pass age alarms only with hosting on and a release naming
+# the fleet program: no data is then an alarm (no leader logs it), which before
+# a release (no fleet task runs) it never is.
+run "fleet_pass_age_unreleased" {
+  command = plan
+
+  variables {
+    hosted_enabled = true
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.fleet_pass_age) == 0
+    error_message = "hosting on, no release names the fleet program: no fleet-pass-age alarm"
+  }
+}
+
+run "fleet_pass_age_released" {
+  command = plan
+
+  variables {
+    hosted_enabled = true
+  }
+  override_data {
+    target          = data.aws_ssm_parameters_by_path.deployment
+    override_during = plan
+    values = {
+      names  = ["/opennova/prod/release"]
+      values = ["{\"id\":\"20261018T000000Z-abc1234\",\"programs\":[\"worker\",\"data\",\"fleet\",\"web\",\"lobby\",\"gate\"]}"]
+    }
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_metric_alarm.fleet_pass_age) == 1 &&
+      aws_cloudwatch_metric_alarm.fleet_pass_age[0].alarm_name == "opennova-prod-fleet-pass-age" &&
+      aws_cloudwatch_metric_alarm.fleet_pass_age[0].namespace == "OpenNova/prod" &&
+      aws_cloudwatch_metric_alarm.fleet_pass_age[0].metric_name == "FleetPassAgeS" &&
+      aws_cloudwatch_metric_alarm.fleet_pass_age[0].statistic == "Maximum" &&
+      aws_cloudwatch_metric_alarm.fleet_pass_age[0].period == 300 &&
+      aws_cloudwatch_metric_alarm.fleet_pass_age[0].evaluation_periods == 2 &&
+      aws_cloudwatch_metric_alarm.fleet_pass_age[0].comparison_operator == "GreaterThanThreshold" &&
+      aws_cloudwatch_metric_alarm.fleet_pass_age[0].threshold == 120 &&
+      aws_cloudwatch_metric_alarm.fleet_pass_age[0].treat_missing_data == "breaching"
+    )
+    error_message = "hosting on and the fleet released: its leader's last good pass over 2 minutes old for 10 minutes alarms, no data included"
+  }
+}

@@ -10,13 +10,18 @@
 #   {"heartbeat":{"program":"gate|lobby|web|fleet|worker|data","nw_sessions":N,
 #     "listed_hosts":N,"hosted_live":N,"hosted_failed":N,"machines_lost":N,
 #     "launch_failures":N,"billing_sync_age_s":N,"webhook_rejects":N,
-#     "limits_held":0|1,"probes_unanswered":N,"lobbies_live":N}}
+#     "limits_held":0|1,"probes_unanswered":N,"lobbies_live":N,
+#     "machines_stuck":N,"machine_disk_free_pct":N,"fleet_pass_age_s":N}}
 # (gauges, but launch_failures, webhook_rejects and probes_unanswered count
 # the minute since the last line; billing_sync_age_s is -1 with billing off;
 # limits_held is 1 while the supervisor holds back the entitlement stops, its
 # mass-stop guard; probes_unanswered counts the gate's probes it had no lobby
 # to hand out for, which no other light shows: that gate's loops turn and its
-# /livez says ok), and
+# /livez says ok; the fleet leader alone logs the last three, from the
+# fleet's health over its rows (apps/novaworld_common/hosted/fleet_health.h):
+# the machines stuck in a state or moving over and over, the least free share
+# of a ready machine's disk, and the seconds since its supervisor's last pass
+# that failed in nothing), and
 # from its boot line, {"boot":{"program":"..."}}. Alarms, to one SNS topic
 # emailing var.alert_email:
 #   per program: no heartbeat for 5 minutes (no data is an alarm: a dead
@@ -27,7 +32,12 @@
 #   unhealthy target for 10 minutes; a failed hosted server or a lost machine,
 #   3 failed launches in 15 minutes, a billing sync older than an hour, 5
 #   refused webhooks in 15 minutes, the entitlement stops held for 5 minutes,
-#   a gate probe left unanswered for want of a lobby in 5 minutes;
+#   a gate probe left unanswered for want of a lobby in 5 minutes; a machine
+#   stuck (5 minutes), a machine's disk under 15 % free (10 minutes), the
+#   servers' log group taking in more than log_ingest_alarm_gib_per_day's rate
+#   in an hour, and with hosting on and the fleet released, no fleet leader
+#   whose last good pass is under 2 minutes old for 10 minutes (no data is an
+#   alarm: no leader logs it);
 #   the database's CPU, CPU credits (a burstable class), connections and free
 #   storage, each cache node's evictions and CPU credits, and (in us-east-1,
 #   where Route 53's metrics live) a health check of web's /healthz at the
@@ -53,6 +63,10 @@ locals {
     LimitsHeld       = "limits_held"
     ProbesUnanswered = "probes_unanswered"
     LobbiesLive      = "lobbies_live" # every gate logs the deployment-wide count: read it with Maximum, never Sum
+    # The fleet leader's alone (a standby logs none of them).
+    MachinesStuck      = "machines_stuck"
+    MachineDiskFreePct = "machine_disk_free_pct"
+    FleetPassAgeS      = "fleet_pass_age_s"
   }
 
   alarm_actions = [aws_sns_topic.alerts.arn]
@@ -205,6 +219,22 @@ locals {
       comparison  = "GreaterThanThreshold", threshold = 0, missing = "notBreaching",
       description = "A gate left probes unanswered in 5 minutes: it had no lobby to hand out (no lobby instance takes clients; LobbiesLive, app status, app logs lobby)."
     }
+    # The fleet's health (fleet_health.h): a machine launching or booting past
+    # 20 minutes, draining past 60, ending past 15, lost past 10, or moving
+    # more than 6 times in an hour. No data (hosting off, no leader) is none:
+    # fleet-pass-age covers a silent leader.
+    machines-stuck = {
+      metric      = "MachinesStuck", statistic = "Maximum", period = 300, periods = 1,
+      comparison  = "GreaterThanThreshold", threshold = 0, missing = "notBreaching",
+      description = "A game machine has been launching, booting, draining, ending or lost past its time, or moved state over and over (the admin Attention list names it; fleet status, fleet logs machine <id>, fleet console <id>)."
+    }
+    # The least free share of a ready machine's trees' disk, under 15 % for 10
+    # minutes: a fetch fails and the servers' data cannot grow.
+    machine-disk = {
+      metric      = "MachineDiskFreePct", statistic = "Minimum", period = 300, periods = 2,
+      comparison  = "LessThanThreshold", threshold = 15, missing = "notBreaching",
+      description = "A game machine's disk is under 15 % free for 10 minutes (the admin Attention list names it; old trees prune as hostd moves on, else fleet drain <id> replaces it)."
+    }
   }
 }
 
@@ -221,6 +251,51 @@ resource "aws_cloudwatch_metric_alarm" "server" {
   comparison_operator = each.value.comparison
   threshold           = each.value.threshold
   treat_missing_data  = each.value.missing
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+
+  tags = var.tags
+}
+
+# The fleet leader's last good pass (fleet_pass_age_s, leader-only) over 2
+# minutes old for 10 minutes: its passes fail (the database, a bug) while its
+# loop turns, so the watchdog keeps it up, or no fleet leads. No data is an
+# alarm (a dead or absent leader logs nothing), so it exists only while hosting
+# is on and a release names the fleet program (before that no fleet task runs).
+resource "aws_cloudwatch_metric_alarm" "fleet_pass_age" {
+  count = local.hosted_enabled && local.released["fleet"] ? 1 : 0
+
+  alarm_name          = "${local.name}-fleet-pass-age"
+  alarm_description   = "No fleet leader passed cleanly for over 2 minutes in 10: no machine is watched or launched and no server placed or stopped (app logs fleet, app status; the Attention list's findings go stale)."
+  namespace           = local.metric_namespace
+  metric_name         = "FleetPassAgeS"
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 2
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 120
+  treat_missing_data  = "breaching"
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+
+  tags = var.tags
+}
+
+# The servers' log group taking in more than log_ingest_alarm_gib_per_day's
+# rate in an hour (CloudWatch bills each GiB ingested): a server logging in a
+# loop.
+resource "aws_cloudwatch_metric_alarm" "servers_log_ingest" {
+  alarm_name          = "${local.name}-servers-log-ingest"
+  alarm_description   = "The game servers' logs took in more than ${var.log_ingest_alarm_gib_per_day} GiB a day's rate in an hour: a server logging in a loop (the CloudWatch console's /opennova/${local.deployment}/servers streams by size, fleet logs server <id>)."
+  namespace           = "AWS/Logs"
+  metric_name         = "IncomingBytes"
+  dimensions          = { LogGroupName = aws_cloudwatch_log_group.servers.name }
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = floor(var.log_ingest_alarm_gib_per_day * 1073741824 / 24)
+  treat_missing_data  = "notBreaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
 
