@@ -37,10 +37,35 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace opennova::novaworld_server::infra {
+
+// Two minutes further apart than this give no rate between them.
+inline constexpr int64_t kRateGapSeconds = 5 * 60;
+
+// A cumulative counter's rate since its last reading, one counter's readings
+// in order (Unix seconds, its bytes): none for the first, across a gap past
+// kRateGapSeconds or where it went back (it started over). The usage series'
+// and the machine JSON's (hosted/fleet_routes.h) one rate.
+class CounterRate {
+public:
+	std::optional<double> next(int64_t at, std::optional<int64_t> bytes);
+
+private:
+	std::optional<int64_t> prev_;
+	int64_t prev_at_ = 0;
+};
+
+// A machine's network in and out, bytes a second, between its two newest
+// minutes (fleet_machine_samples); none without such a pair. Throws db::Error.
+struct NetRates {
+	std::optional<double> in_bps;
+	std::optional<double> out_bps;
+};
+NetRates machine_net_rates(db::Database &db, int64_t machine_id);
 
 class UsageRoutes {
 public:
@@ -50,7 +75,7 @@ public:
 	// A subject whose newest minute is at most this old reports now.
 	static constexpr int64_t kLiveSeconds = 3 * 60;
 	// Two minutes further apart than this give no rate between them.
-	static constexpr int64_t kGapSeconds = 5 * 60;
+	static constexpr int64_t kGapSeconds = kRateGapSeconds;
 
 	UsageRoutes(WebAccess &access, db::ConnectionPool &pool, RedisPool &redis);
 	UsageRoutes(const UsageRoutes &) = delete;

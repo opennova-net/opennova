@@ -797,6 +797,20 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(usage_routes REDIS COMMAND usage_routes_test)
     set_tests_properties(usage_routes PROPERTIES TIMEOUT 120)
 
+    # The fleet's health on the admin's pages (apps/novaworld_web/hosted/fleet_routes.h)
+    # on the in-process Crow listener over a migrated database and a Redis namespace, the
+    # release pinning its images: the machine JSON's use (the network's rates between its
+    # two newest minutes), images, outdated and static address in the fleet view, one
+    # machine's page (its moves, its trees with their manifests' totals), a server's ticks
+    # in the admin's view alone.
+    add_executable(fleet_health_routes_test novaworld/fleet_health_routes_test.cpp)
+    target_link_libraries(fleet_health_routes_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(fleet_health_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(fleet_health_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(fleet_health_routes REDIS COMMAND fleet_health_routes_test)
+    set_tests_properties(fleet_health_routes PROPERTIES TIMEOUT 120)
+
     # The hosted data sets' admin routes (apps/novaworld_web/data_sets/, ADR 0064) on the
     # in-process Crow listener over a migrated database, a Redis namespace and a local
     # object store in a temp directory: every route refused without the admin, the list's

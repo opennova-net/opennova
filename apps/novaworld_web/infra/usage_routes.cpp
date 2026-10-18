@@ -52,25 +52,6 @@ struct Point {
 	std::optional<int64_t> disk_free_bytes; // a machine's
 };
 
-// A cumulative counter's rate since its last reading, one counter's readings
-// in order: none for the first, across a gap or where it went back.
-class Rate {
-public:
-	std::optional<double> next(int64_t at, std::optional<int64_t> bytes) {
-		std::optional<double> out;
-		if (bytes && prev_ && at > prev_at_ && at - prev_at_ <= UsageRoutes::kGapSeconds &&
-				*bytes >= *prev_)
-			out = static_cast<double>(*bytes - *prev_) / static_cast<double>(at - prev_at_);
-		prev_ = bytes;
-		prev_at_ = at;
-		return out;
-	}
-
-private:
-	std::optional<int64_t> prev_;
-	int64_t prev_at_ = 0;
-};
-
 // An hour's bytes a second: over the hour, or what of it has passed by `now`.
 std::optional<double> hour_rate(int64_t hour, int64_t now, std::optional<int64_t> bytes) {
 	if (!bytes)
@@ -100,8 +81,8 @@ crow::json::wvalue point_json(const Point &p, bool server, bool machine) {
 // A server's minutes since `since` (one earlier read for the first rate).
 std::vector<Point> server_minutes(db::Database &db, int64_t id, int64_t since) {
 	std::vector<Point> out;
-	Rate in;
-	Rate sent;
+	CounterRate in;
+	CounterRate sent;
 	for (const db::Row &r : db.query("SELECT CAST(extract(epoch FROM at) AS bigint), cpu_percent, "
 									 "memory_bytes, net_in_bytes, net_out_bytes, tick_p99_ms, "
 									 "late_ticks FROM hosted_server_samples WHERE server_id = $1 "
@@ -144,8 +125,8 @@ std::vector<Point> server_hours(db::Database &db, int64_t id, int64_t since, int
 
 std::vector<Point> machine_minutes(db::Database &db, int64_t id, int64_t since) {
 	std::vector<Point> out;
-	Rate in;
-	Rate sent;
+	CounterRate in;
+	CounterRate sent;
 	for (const db::Row &r : db.query("SELECT CAST(extract(epoch FROM at) AS bigint), cpu_percent, "
 									 "memory_used_bytes, net_in_bytes, net_out_bytes, "
 									 "disk_free_bytes FROM fleet_machine_samples WHERE "
@@ -211,8 +192,8 @@ std::vector<Point> program_minutes(
 		db::Database &db, const std::string &program, const std::string &task, int64_t since) {
 	std::map<int64_t, Sum> by_minute;
 	std::string last_task;
-	Rate in;
-	Rate sent;
+	CounterRate in;
+	CounterRate sent;
 	for (const db::Row &r :
 			db.query("SELECT task_id, CAST(extract(epoch FROM at) AS bigint), cpu_percent, "
 					 "cpu_limit, memory_used_bytes, net_in_bytes, net_out_bytes FROM "
@@ -222,8 +203,8 @@ std::vector<Point> program_minutes(
 							BindValue(since - UsageRoutes::kGapSeconds) })) {
 		const std::string t = r.as_text(0).value_or("");
 		if (t != last_task) {
-			in = Rate();
-			sent = Rate();
+			in = CounterRate();
+			sent = CounterRate();
 			last_task = t;
 		}
 		const int64_t at = r.as_int(1).value_or(0);
@@ -307,8 +288,8 @@ struct TaskNow {
 std::vector<TaskNow> tasks_now(db::Database &db, const std::string &program, int64_t now) {
 	std::vector<TaskNow> out;
 	std::string last;
-	Rate in;
-	Rate sent;
+	CounterRate in;
+	CounterRate sent;
 	for (const db::Row &r :
 			db.query("SELECT program, task_id, CAST(extract(epoch FROM at) AS bigint), "
 					 "cpu_percent, cpu_limit, memory_used_bytes, memory_limit_bytes, "
@@ -319,8 +300,8 @@ std::vector<TaskNow> tasks_now(db::Database &db, const std::string &program, int
 					{ BindValue(now - 24 * 60 * 60), BindValue(program) })) {
 		const std::string key = r.as_text(0).value_or("") + "/" + r.as_text(1).value_or("");
 		if (key != last) {
-			in = Rate();
-			sent = Rate();
+			in = CounterRate();
+			sent = CounterRate();
 			last = key;
 			out.emplace_back();
 		}
@@ -398,6 +379,31 @@ std::optional<int64_t> id_param(const std::string &v) {
 }
 
 } // namespace
+
+std::optional<double> CounterRate::next(int64_t at, std::optional<int64_t> bytes) {
+	std::optional<double> out;
+	if (bytes && prev_ && at > prev_at_ && at - prev_at_ <= kRateGapSeconds && *bytes >= *prev_)
+		out = static_cast<double>(*bytes - *prev_) / static_cast<double>(at - prev_at_);
+	prev_ = bytes;
+	prev_at_ = at;
+	return out;
+}
+
+NetRates machine_net_rates(db::Database &db, int64_t machine_id) {
+	const auto rows = db.query("SELECT CAST(extract(epoch FROM at) AS bigint), net_in_bytes, "
+							   "net_out_bytes FROM fleet_machine_samples WHERE machine_id = $1 "
+							   "ORDER BY at DESC LIMIT 2;",
+			{ BindValue(machine_id) });
+	NetRates out;
+	CounterRate in;
+	CounterRate sent;
+	for (auto r = rows.rbegin(); r != rows.rend(); ++r) {
+		const int64_t at = r->as_int(0).value_or(0);
+		out.in_bps = in.next(at, r->as_int(1));
+		out.out_bps = sent.next(at, r->as_int(2));
+	}
+	return out;
+}
 
 UsageRoutes::UsageRoutes(WebAccess &access, db::ConnectionPool &pool, RedisPool &redis) :
 		access_(access),

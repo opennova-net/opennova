@@ -43,8 +43,9 @@ namespace hosted {
 // page) or, with `admin`, for the fleet view (fleet_routes.h): its owner (with
 // its support tier), its service account, its container and machine address,
 // its place in the fleet (machine_ref, slot, game_port, generation,
-// serve_image), its pins and whether it is outdated, and its listing's
-// players besides. Never its admin password. Without its events. The owner's
+// serve_image), its pins and whether it is outdated, its last minute of ticks
+// (`tick`: {p99_ms, late} from its slot's report, null with none) and its
+// listing's players besides. Never its admin password. Without its events. The owner's
 // views carry its phase and why its last run ended besides (phase_json).
 // With `zone` (the play zone, "" for none), its address's hostname too.
 crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin, const std::string &zone = {});
