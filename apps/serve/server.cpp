@@ -40,6 +40,7 @@ const char kUsage[] =
 		"                      [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] [--log-debug]\n"
 		"                      [--master-host <gate>] [--master-gate-port <n>]\n"
 		"                      [--credentials <file>] [--allow-public]\n"
+		"                      [--status-page on|off] [--stats-file <file>] [--exit-file <file>]\n"
 		"  --resource-dir   the game install to serve from (its PFF set, as opennova.exe takes it)\n"
 		"  /HOST            the host file: retail's `/HOST <file>` format, one `Key value` per line\n"
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
@@ -65,6 +66,12 @@ const char kUsage[] =
 		"  --allow-public   allow NovaLogic's NovaWorld (novaworld.net and its hosts), a live\n"
 		"                   shared service: use it sparingly. Loopback and any other host are\n"
 		"                   allowed without it\n"
+		"  --status-page    on (the default) prints the status page on stdout and takes stdin\n"
+		"                   as its chat input; off does neither (a supervised server's)\n"
+		"  --stats-file     rewrite this file once a minute with the last minute's tick health\n"
+		"                   (frame time p50, p99 and longest, late frames), one JSON line\n"
+		"  --exit-file      at a non-zero exit, write the error that ended the server there,\n"
+		"                   one line\n"
 		"  /PROFILE <path>  record each mission to <path>.sph (retail's server log)\n"
 		"  /PUNTLOG, /PUNT.TXT, /CHEATLOG\n"
 		"                   log punts to _PUNT.TXT, start _CHEAT.TXT (the working directory)\n"
@@ -180,6 +187,18 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			if (!value(out.credentials_path)) return 1;
 		} else if (a == "--allow-public") {
 			out.allow_public = true;
+		} else if (a == "--status-page") {
+			std::string text;
+			if (!value(text)) return 1;
+			if (text != "on" && text != "off") {
+				error = "--status-page takes on or off";
+				return 1;
+			}
+			out.status_page = text == "on";
+		} else if (a == "--stats-file") {
+			if (!value(out.stats_file)) return 1;
+		} else if (a == "--exit-file") {
+			if (!value(out.exit_file)) return 1;
 		} else {
 			error = "unknown option '" + a + "'";
 			return 1;
