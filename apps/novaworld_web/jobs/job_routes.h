@@ -42,7 +42,7 @@ public:
 	JobRoutes(const JobRoutes &) = delete;
 	JobRoutes &operator=(const JobRoutes &) = delete;
 
-	// The periodic jobs this deployment's fleet schedules (its settings
+	// The periodic jobs this deployment's programs schedule (their settings
 	// read alike, parts.h periodic_jobs): what the schedules show and the
 	// kinds POST /api/admin/jobs/run takes. Before register_routes().
 	void set_schedules(std::vector<PeriodicJob> schedules) { schedules_ = std::move(schedules); }

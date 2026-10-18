@@ -144,8 +144,8 @@ int run(const program::Boot &boot) {
 	http.set_fleet_placement(hosting.fleet.placement);
 	// The admin usage view's limits: each container's memory and CPUs.
 	http.set_fleet_slots(hosting.fleet.slot_memory_mb, hosting.fleet.slot_cpus);
-	// The admin jobs page's schedules: the fleet's, read from the same
-	// settings.
+	// The admin jobs page's schedules: every program's (the worker's and the
+	// data program's), read from the same settings.
 	http.set_job_schedules(periodic_jobs(config, hosting));
 	// The game data routes (data_sets/) work on the deployment's object store
 	// (ONNET_OBJECT_STORE_URL, ADR 0064), built above: none without one, and those

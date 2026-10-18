@@ -107,7 +107,8 @@ jobs:
         run: >-
           cmake --build build -j "$(nproc)" --target opennova_novaworld_gate
           opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_fleet
-          opennova_novaworld_worker opennova_serve opennova_hostd opennova_novaworld_stack_smoke
+          opennova_novaworld_worker opennova_novaworld_data opennova_serve opennova_hostd
+          opennova_novaworld_stack_smoke
 
       - name: Bring the stack up (hosted servers on the synthetic data set)
         run: scripts/dev_stack.sh up --synthetic-data --prebuilt build

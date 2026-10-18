@@ -1,6 +1,6 @@
 #pragma once
 
-// The NovaWorld service is five programs (README.md "Programs"), each its own
+// The NovaWorld service is six programs (README.md "Programs"), each its own
 // binary and image (apps/novaworld_<program>), over this shared library and the
 // databases, constructing only its own parts:
 //
@@ -16,11 +16,14 @@
 //               Redis pool, the mail it queues        apps/novaworld_web
 //   fleet       elected: while it leads, the internal listener (the machines'
 //               agent routes), the hosted servers' supervisor with its admin
-//               links, the console drain and the periodic jobs' scheduler
+//               links and the console drain; it runs and schedules no job
 //                                                     apps/novaworld_fleet
 //   worker      the job pool and its handlers: the prunes, the account jobs, the
-//               mail it sends, the billing sync, the fleet's machine driver
-//                                                     apps/novaworld_worker
+//               mail it sends, the billing sync, the fleet's machine driver;
+//               the scheduler of its periodic kinds   apps/novaworld_worker
+//   data        the job pool over the data sets' jobs on the object store
+//               (the trees, the releases) and the scheduler of their prune
+//                                                     apps/novaworld_data
 //
 // Each program's main() hands run_program its name, its configure step and its
 // run. run_program is the boot every program shares: the log sink, the config,
@@ -64,7 +67,7 @@ struct Boot {
 
 struct Program {
 	// Its name: the boot line's, the heartbeat's and its binary's
-	// (opennova-novaworld-<name>). One of the five: no escaping needed.
+	// (opennova-novaworld-<name>). One of the six: no escaping needed.
 	const char *name = "";
 	// Its own settings checked, and completed where its environment leaves one
 	// to be found (the fleet's bind, from the ECS task metadata), before

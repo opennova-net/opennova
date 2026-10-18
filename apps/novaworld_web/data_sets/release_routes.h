@@ -3,7 +3,7 @@
 // The update releases' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md
 // "Game data"): the 1SFS packages an
 // admin uploads into the object store (one multipart upload each, every part PUT through
-// this program as the trees' are, data_set_routes.h), validated by the worker
+// this program as the trees' are, data_set_routes.h), validated by the data program
 // (release.validate), published to the updater (the update listener serves them,
 // updater/release_catalog.h) and applied to their data sets (one release.apply job per
 // section), retired and deleted. Each behind WebAccess::require_admin (and

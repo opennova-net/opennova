@@ -1,12 +1,12 @@
 # opennova_novaworld_common: the NovaWorld service's shared library, what more
-# than one of its five programs uses (README.md "Programs"): the shared boot and
+# than one of its six programs uses (README.md "Programs"): the shared boot and
 # main loop (program.*), the config, the health (the watchdog, the heartbeat,
 # the /livez listener), the address an ECS task finds from its own metadata,
 # the games catalogue; with the HTTP layer, the accounts and sessions, the
 # Redis pool, the mail, the background jobs' queue, pool and scheduler, the
 # hosted servers' and billing's logic, and what several programs build alike
 # from the same settings (parts.*). Each program's own code and its main()
-# live in apps/novaworld_<program> (gate, lobby, web, fleet, worker).
+# live in apps/novaworld_<program> (gate, lobby, web, fleet, worker, data).
 set(NOVAWORLD_COMMON_SOURCES
     program.cpp
     server_config.cpp

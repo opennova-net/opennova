@@ -24,7 +24,7 @@
 #                 data sets' trees the site's Game data page uploads, which
 #                 scripts/dev_stack.sh up --data or --synthetic-data seeds
 #                 through the admin API) at /var/lib/opennova/store, the path
-#                 the programs see it at, read-only; the machines take every
+#                 web and the data program see it at, read-only; the machines take every
 #                 mount of this container (ONNET_HOSTED_DOCKER_DATA_FROM), so a
 #                 machine's hostd copies a tree from
 #                 file:///var/lib/opennova/store/trees/<id>/, the URL the
@@ -93,7 +93,7 @@ services:
 
   # A container of no image of ours: the machines take every mount it has
   # (VolumesFrom), so it holds the store alone, read-only, at the path web and
-  # the worker mount it at (ONNET_OBJECT_STORE_URL names it).
+  # the data program mount it at (ONNET_OBJECT_STORE_URL names it).
   machine-data:
     image: alpine:3.20
     container_name: opennova-dev-machine-data

@@ -11,17 +11,17 @@
 //   worker's fleet jobs read the same environment the same way; the worker
 //   alone builds the machine driver over it (apps/novaworld_worker/main.cpp),
 //   its scratch directory and its runner.
-// - The object store (make_object_store): web's data set routes and the
-//   worker's data set jobs, each over a store of its own (S3 through the AWS
+// - The object store (make_object_store): web's data set routes and the data
+//   program's data set jobs, each over a store of its own (S3 through the AWS
 //   CLI, or the local directory); the fleet holds none (its supervisor
 //   gets the store's URL of a tree as a pure function).
 // - Billing (make_billing): web's routes and webhook and the worker's sync,
-//   each over a curl transport of its own. The fleet schedules billing's
-//   jobs from the settings alone (check_billing_config), building none of it.
+//   each over a curl transport of its own.
 // - Outbound mail (make_mail): whether mail is on (web queues mail.send jobs
 //   only then) and the worker's SES mailer that sends them.
-// - The periodic jobs (periodic_jobs): what the fleet's scheduler
-//   enqueues, and what web's jobs page shows and runs on request.
+// - The periodic jobs: each program that runs jobs schedules its own kinds
+//   alone (worker_schedule, data_schedule), and web's jobs page shows and
+//   runs on request every one of them (periodic_jobs).
 //
 // Each holds its owner-only scratch directory (ScratchDir) and removes it as
 // it goes, after what used it. Service policy, not a port.
@@ -140,12 +140,17 @@ struct MailStack {
 // or mail off, logged: unset (no sender), else a warning naming what is wrong.
 MailStack make_mail(const ServerConfig &config);
 
-// The periodic jobs (jobs/scheduler.h) of a deployment over `config` and
-// `hosting`: the prunes (the service's and the website's, every
-// HOST_SWEEP_INTERVAL_MS; the hosted stats' and the finished jobs', hourly),
-// billing's while its settings are complete (check_billing_config), the
-// fleet's sweep while hosting is on, and the data sets' tree.prune while the
-// store is there.
+// The worker's periodic jobs (jobs/scheduler.h) over `config` and `hosting`:
+// the prunes (the service's and the website's, every HOST_SWEEP_INTERVAL_MS;
+// the hosted stats' and the finished jobs', hourly), billing's while its
+// settings are complete (check_billing_config), and the fleet's sweep while
+// hosting is on. Every one of the worker's kinds that is periodic.
+std::vector<jobs::PeriodicJob> worker_schedule(
+		const ServerConfig &config, const HostedSetup &hosting);
+// The data program's: the data sets' tree.prune while the store is there.
+std::vector<jobs::PeriodicJob> data_schedule(const HostedSetup &hosting);
+// Every program's together (the worker's, then the data program's): what
+// web's jobs page shows and runs on request.
 std::vector<jobs::PeriodicJob> periodic_jobs(
 		const ServerConfig &config, const HostedSetup &hosting);
 

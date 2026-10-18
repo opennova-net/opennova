@@ -841,12 +841,12 @@ if(BUILD_NOVAWORLD_HTTP)
     set_tests_properties(billing_stripe_e2e PROPERTIES TIMEOUT 300)
 endif()
 
-# The five programs' binaries run whole, as child processes
+# The six programs' binaries run whole, as child processes
 # (novaworld/program_process.h), on a database and a Redis namespace of the test's
-# own; ctest passes each binary (gate, lobby, web, fleet, worker, in that order).
-# POSIX only (fork, kill); each TIMEOUT bounds a run should a child hang, and the
-# children die with it. With the HTTP layer, which web, the fleet and the worker are
-# built with.
+# own; ctest passes each binary (gate, lobby, web, fleet, worker, data, in that
+# order). POSIX only (fork, kill); each TIMEOUT bounds a run should a child hang, and
+# the children die with it. With the HTTP layer, which web, the fleet, the worker and
+# the data program are built with.
 #
 #   programs         each program boots alone with its own parts: its boot line, the
 #                    ports it binds (its health listener's GET /livez among them),
@@ -860,11 +860,11 @@ endif()
 #                    listeners in order, the database closed): a lobby's, and a web
 #                    process's past Crow and a held-open request; the second signal;
 #                    and web's boot stopped by a Redis it cannot reach.
-#   nw_programs_e2e  the five end to end on one database and one Redis: a
+#   nw_programs_e2e  the six end to end on one database and one Redis: a
 #                    retail-protocol host lists through the gate and the lobby and a
 #                    client sits in its lobby, an admin's push through web reaches
-#                    the host; then web, the worker and the gate
-#                    stopped and the fleet killed, all four started again, the
+#                    the host; then web, the worker, the data program and the
+#                    gate stopped and the fleet killed, all five started again, the
 #                    listing and the lobby sessions survive and a push still lands;
 #                    then the fleet's database frozen (a proxy that stops
 #                    forwarding): its watchdog exits it alone (70), the others serve
@@ -874,7 +874,7 @@ endif()
 if(UNIX AND BUILD_NOVAWORLD_HTTP)
     set(OPENNOVA_NOVAWORLD_PROGRAMS
         opennova_novaworld_gate opennova_novaworld_lobby opennova_novaworld_web
-        opennova_novaworld_fleet opennova_novaworld_worker)
+        opennova_novaworld_fleet opennova_novaworld_worker opennova_novaworld_data)
     set(OPENNOVA_NOVAWORLD_PROGRAM_FILES)
     foreach(program ${OPENNOVA_NOVAWORLD_PROGRAMS})
         list(APPEND OPENNOVA_NOVAWORLD_PROGRAM_FILES $<TARGET_FILE:${program}>)

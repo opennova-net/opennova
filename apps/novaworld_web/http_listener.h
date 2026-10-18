@@ -141,7 +141,7 @@ public:
 	// Set before start(); unset, placement.h's defaults.
 	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
 
-	// The periodic jobs the deployment's fleet schedules (parts.h
+	// The periodic jobs the deployment's programs schedule (parts.h
 	// periodic_jobs, from the same settings): the admin's jobs page shows each
 	// one's schedule, and runs one now on request (jobs/job_routes.h). Set
 	// before start(); unset, none.

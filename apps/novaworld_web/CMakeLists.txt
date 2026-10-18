@@ -36,7 +36,7 @@ add_library(opennova_novaworld_web_core STATIC
     hosted/hosted_routes.cpp
     hosted/stats_routes.cpp
     # The hosted data sets' and the update releases' admin routes over the object store
-    # (ADR 0064), and the jobs they enqueue for the worker.
+    # (ADR 0064), and the jobs they enqueue for the data program.
     data_sets/data_set_routes.cpp
     data_sets/release_routes.cpp
     # The update listener (ADR 0061 d3): UPDATE.EXE's gateway and update server over the

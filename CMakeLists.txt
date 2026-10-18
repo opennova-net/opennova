@@ -8,15 +8,16 @@ if(POLICY CMP0168)
 endif()
 
 # The NovaWorld service (the server-side lobby and persistence leg: the
-# opennova_novaworld_service target, its five programs under apps/novaworld_*
+# opennova_novaworld_service target, its six programs under apps/novaworld_*
 # and their tests) builds only when asked. It runs on Linux (the programs'
 # images, the Linux CI jobs) over PostgreSQL through the system libpq
 # (libpq-dev to build, libpq5 to run); the game, the tools and opennova-serve
 # never need it.
 option(OPENNOVA_NOVAWORLD_SERVICE
     "Build the NovaWorld service (opennova_novaworld_service, apps/novaworld_*, their tests)" OFF)
-# Its HTTP layer: Crow and Asio, fetched at configure time. Web, the fleet and
-# the worker build only with it; the gate and the lobby without it too.
+# Its HTTP layer: Crow and Asio, fetched at configure time. Web, the fleet, the
+# worker and the data program build only with it; the gate and the lobby
+# without it too.
 option(BUILD_NOVAWORLD_HTTP "Fetch + build Crow for the novaworld HTTP layer" OFF)
 if(BUILD_NOVAWORLD_HTTP AND NOT OPENNOVA_NOVAWORLD_SERVICE)
     message(FATAL_ERROR "BUILD_NOVAWORLD_HTTP is the NovaWorld service's HTTP layer: "
@@ -48,7 +49,7 @@ endif()
 add_subdirectory(engine)
 
 # The NovaWorld service's HTTP layer (apps/novaworld_common, novaworld_web,
-# novaworld_fleet, novaworld_worker).
+# novaworld_fleet, novaworld_worker, novaworld_data).
 if(BUILD_NOVAWORLD_HTTP)
     include(FetchContent)
     FetchContent_Declare(asio
@@ -76,7 +77,7 @@ add_subdirectory(apps/extract)
 add_subdirectory(apps/hostd)  # Linux only
 add_subdirectory(apps/lan_probe)
 if(OPENNOVA_NOVAWORLD_SERVICE)
-    # The shared library first, then the five programs over it
+    # The shared library first, then the six programs over it
     # (apps/novaworld_common/README.md "Programs").
     add_subdirectory(apps/novaworld_common)
     add_subdirectory(apps/novaworld_gate)
@@ -85,6 +86,7 @@ if(OPENNOVA_NOVAWORLD_SERVICE)
         add_subdirectory(apps/novaworld_web)
         add_subdirectory(apps/novaworld_fleet)
         add_subdirectory(apps/novaworld_worker)
+        add_subdirectory(apps/novaworld_data)
     endif()
 endif()
 add_subdirectory(apps/parity)

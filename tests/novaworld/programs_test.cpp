@@ -28,9 +28,13 @@
 //   - web: one with no ONNET_WEB_HOST does not boot; booted, the HTTP listener
 //     alone (and no health listener of its own: GET /livez and /healthz answer
 //     on its HTTP port), its menus' HOST_URL naming the web endpoint;
-//   - fleet: no listener but its health one, elected (it leads), its parts
-//     stopped at the signal;
-//   - worker: its job pool, its health listener.
+//   - fleet: no listener but its health one, elected (it leads), stopped at the
+//     signal; with hosting off no part to run, and never a job pool or a
+//     scheduler;
+//   - worker: its job pool over its own kinds (no data set's), its health
+//     listener;
+//   - data: its job pool over the data sets' kinds alone (a store given), its
+//     health listener.
 //
 // Every program then stops on SIGTERM with exit 0 and every database
 // connection closed. POSIX only.
@@ -496,12 +500,14 @@ int exercise_fleet(const Binaries &bin, const test_temp::TempDir &temp,
 			!has(log, "[jobs] ") && !has(log, "internal listener on"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
+	// It schedules nothing: no periodic job in a few seconds of leading.
+	std::this_thread::sleep_for(std::chrono::seconds(2));
+	TEST_EXPECT(database.open().query("SELECT 1 FROM jobs LIMIT 1;").empty());
 	if (stop_cleanly(process, "fleet", database, log_path) != 0)
 		return 1;
-	TEST_EXPECT(logged_in_order(
-			read_text(log_path), { "[shutdown] stopping the fleet", " stopped its parts" }));
-	std::printf("  fleet: elected, no listener but its health one, its parts stopped at the "
-				"signal\n");
+	TEST_EXPECT(has(read_text(log_path), "[shutdown] stopping the fleet"));
+	std::printf("  fleet: elected, no listener but its health one, no job scheduled, stopped at "
+				"the signal\n");
 	return 0;
 }
 
@@ -513,14 +519,49 @@ int exercise_worker(const Binaries &bin, const test_temp::TempDir &temp,
 		return 1;
 	const std::string log = read_text(log_path);
 	TEST_EXPECT(has(log, boot_line("worker")));
-	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s)"));
+	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) worker-"));
+	TEST_EXPECT(has(log, "jobs.prune") && !has(log, "tree.finalize") && !has(log, "tree.prune"));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
 			!has(log, "[fleet]"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
+	// Its scheduler: the prunes' first buckets, enqueued by the worker itself.
+	const auto scheduled_by = Clock::now() + std::chrono::seconds(10);
+	while (database.open()
+					.query("SELECT 1 FROM jobs WHERE kind = 'jobs.prune' AND schedule_key IS NOT "
+						   "NULL;")
+					.empty() &&
+			Clock::now() < scheduled_by)
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	TEST_EXPECT(!database.open()
+						 .query("SELECT 1 FROM jobs WHERE kind = 'jobs.prune' AND schedule_key IS "
+								"NOT NULL;")
+						 .empty());
 	if (stop_cleanly(process, "worker", database, log_path) != 0)
 		return 1;
-	std::printf("  worker: its job pool alone\n");
+	std::printf("  worker: its job pool over its own kinds and their schedule\n");
+	return 0;
+}
+
+int exercise_data(const Binaries &bin, const test_temp::TempDir &temp,
+		const test_db::TestDatabase &database, const std::string &log_path) {
+	ProgramProcess process;
+	const std::string store = "ONNET_OBJECT_STORE_URL=file://" + temp.file("store");
+	if (!boot(process, bin.data, env_of(temp, database.conninfo(), { "ONNET_WORKER_THREADS=2", store }),
+				temp.root(), log_path))
+		return 1;
+	const std::string log = read_text(log_path);
+	TEST_EXPECT(has(log, boot_line("data")));
+	TEST_EXPECT(has(log, "[boot] data sets: jobs over the local store"));
+	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) data-") &&
+			has(log, "for release.apply, release.validate, tree.finalize, tree.prune"));
+	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
+			!has(log, "[fleet]") && !has(log, "jobs.prune"));
+	if (livez_ok(process, log_path) != 0)
+		return 1;
+	if (stop_cleanly(process, "data", database, log_path) != 0)
+		return 1;
+	std::printf("  data: its job pool over the data sets' kinds alone\n");
 	return 0;
 }
 
@@ -546,7 +587,7 @@ int main(int argc, char **argv) {
 	test_redis::init(argc, argv);
 	Binaries bin;
 	if (!bin.read(argc, argv, 1)) {
-		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <fleet> <worker>\n", argv[0]);
+		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <fleet> <worker> <data>\n", argv[0]);
 		return 2;
 	}
 	TEST_EXPECT(net::startup() == 0);
@@ -561,6 +602,8 @@ int main(int argc, char **argv) {
 		rc = run_case(bin, exercise_fleet, "fleet");
 	if (rc == 0)
 		rc = run_case(bin, exercise_worker, "worker");
+	if (rc == 0)
+		rc = run_case(bin, exercise_data, "data");
 	net::shutdown();
 	if (rc == 0)
 		std::printf("OK: each program boots with its own parts alone\n");

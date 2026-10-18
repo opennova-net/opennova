@@ -1,9 +1,11 @@
 #pragma once
 
 // The hosted data sets' work as jobs (jobs/job_queue.h, ADR 0064): what the admin routes
-// enqueue in the transaction of the row change that causes it, and the workers run against the
-// object store (object_store.h) and the rows (data_set_repository.h), the store's calls bounded
-// by its own timeouts, so a 1 GB tree only occupies a worker and no watched loop waits on it.
+// enqueue in the transaction of the row change that causes it, and the data program's workers
+// (apps/novaworld_data) run against the object store (object_store.h) and the rows
+// (data_set_repository.h), the store's calls bounded by its own timeouts, so a 1 GB tree only
+// occupies a data worker, never the worker program's machine launches, and no watched loop waits
+// on it.
 // Pattern of fleet_jobs.h: payload ints, dedupe keys, a state guard first, each idempotent.
 // Service policy, not a port.
 //
@@ -89,7 +91,7 @@ int64_t enqueue_tree_prune(db::Database &db);
 // downloads what it works on (one directory of its own per job, removed when it ends).
 void register_data_set_jobs(
 		jobs::JobRegistry &registry, ObjectStore &store, std::string scratch_dir);
-// The periodic prune, hourly (the fleet's scheduler).
+// The periodic prune, hourly (the data program's scheduler, parts.h data_schedule).
 std::vector<jobs::PeriodicJob> data_set_schedule();
 
 } // namespace opennova::novaworld_server::hosted

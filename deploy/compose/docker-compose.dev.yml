@@ -182,6 +182,11 @@ services:
     environment:
       <<: *dev-env
 
+  novaworld-data:
+    depends_on: *dev-depends
+    environment:
+      <<: *dev-env
+
   # The site via the Vite dev server, for web/ work: edits hot-reload at
   # http://localhost:5173 with no image rebuild. Vite proxies /api to the
   # portal (see web/vite.config.ts; its polling watch makes file changes

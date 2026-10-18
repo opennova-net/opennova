@@ -310,7 +310,7 @@ MailStack make_mail(const ServerConfig &config) {
 	return s;
 }
 
-std::vector<jobs::PeriodicJob> periodic_jobs(
+std::vector<jobs::PeriodicJob> worker_schedule(
 		const ServerConfig &config, const HostedSetup &hosting) {
 	jobs::MaintenanceConfig maintenance;
 	maintenance.sweep_interval_ms = static_cast<int64_t>(config.host_sweep_interval_ms);
@@ -332,9 +332,21 @@ std::vector<jobs::PeriodicJob> periodic_jobs(
 	// The sweep of the driver's machines (fleet_jobs.h kFleetSweepIntervalMs).
 	if (hosting.on)
 		add(hosted::fleet_schedule());
+	return out;
+}
+
+std::vector<jobs::PeriodicJob> data_schedule(const HostedSetup &hosting) {
 	// The data sets' prune of the trees nothing needs, while there is a store.
-	if (hosting.store_ok)
-		add(hosted::data_set_schedule());
+	if (!hosting.store_ok)
+		return {};
+	return hosted::data_set_schedule();
+}
+
+std::vector<jobs::PeriodicJob> periodic_jobs(
+		const ServerConfig &config, const HostedSetup &hosting) {
+	std::vector<jobs::PeriodicJob> out = worker_schedule(config, hosting);
+	for (jobs::PeriodicJob &p : data_schedule(hosting))
+		out.push_back(std::move(p));
 	return out;
 }
 

@@ -293,7 +293,7 @@ and its last hour. The agents report what each slot sends, not what it receives.
 | --- | --- | --- |
 | `ONNET_HOSTED_PROVIDER` | `none` | The machine driver: `ec2`, `docker` (the local stack's) or `none`. Any other value, fleet settings or data sets that do not read, or a driver missing one of its settings (or with a loopback `ONNET_PUBLIC_HOST`) is `none` with a boot warning naming why. |
 | `ONNET_HOSTED_CAP` | 24 | The most hosted servers live at once, across every account: a backstop beside the fleet's room. |
-| `ONNET_OBJECT_STORE_URL` | none | The object store of the data sets' trees and the update packages (`../object_store.h`, ADR 0064): `s3://<bucket>/data` (the deployment's ops bucket, through the program's role) or `file:///<dir>` (a developer's machine, the tests). Required for hosting; read by web, the worker and the fleet program whether or not hosting is on. |
+| `ONNET_OBJECT_STORE_URL` | none | The object store of the data sets' trees and the update packages (`../object_store.h`, ADR 0064): `s3://<bucket>/data` (the deployment's ops bucket, through the program's role) or `file:///<dir>` (a developer's machine, the tests). Required for hosting; read by web, the data program, the worker and the fleet program whether or not hosting is on. |
 | `ONNET_OBJECT_STORE_REGION` | none | The S3 store's region (required with an `s3://` URL). |
 | `ONNET_INTERNAL_HTTP_BIND` | `127.0.0.1:8070` | The fleet's internal listener, `<IPv4>:<port>`, a private or loopback address: unset in a deployment, where the fleet program binds its task's private address at 8070. With `ec2`, a fleet program whose bind is not private does not boot. |
 | `ONNET_INTERNAL_URL` | none | The internal listener as the machines reach it, `http://<host>:<port>` (a deployment's Cloud Map name; the fleet's compose name locally). Required by both drivers. |
@@ -355,10 +355,10 @@ writes need the CSRF header.
 (`data_set_repository.h`, migrations 0011 and 0013), the trees the admin page uploads into
 the object store (web begins each file's multipart upload, takes each part's PUT, 32 MiB
 a part, inside Cloudflare's request limits, and completes it), and the update releases
-(1SFS packages, uploaded the same way) the worker validates and applies and the update
-listener serves. The jobs a route enqueues (`tree.finalize`, `release.validate`,
+(1SFS packages, uploaded the same way) the data program validates and applies and the
+update listener serves. The jobs a route enqueues (`tree.finalize`, `release.validate`,
 `release.apply`, `tree.prune`; the service README's "Background jobs") commit with the
-state move that causes them. Every route is the admin's, each state change logged with
+state move that causes them, and the data program (`apps/novaworld_data`) alone runs them. Every route is the admin's, each state change logged with
 its actor; without a store the store routes answer 503 `store_unavailable`, and a store
 call that fails mid-way 502 `store_error` (its own text to the log alone). The shapes
 (`DataSet`, `Tree`, `Release`) are `apps/novaworld_web/data_sets/`'s.

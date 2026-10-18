@@ -304,15 +304,17 @@ std::vector<ScheduleView> schedules(db::Database &db, const std::vector<Periodic
 		if (!finished.empty())
 			s.last_finished = finished.front();
 		// This bucket has its job once its key does, or (a kind the scheduler's
-		// start enqueues) once a job of the kind with no key came in it.
+		// start enqueues) once a job of the kind came in it from a start: keyed by
+		// its release (<kind>@start:<release>), or by no key off ECS.
 		const int64_t bucket = now_ms / period;
 		const bool enqueued =
 				!db.query("SELECT 1 FROM jobs WHERE schedule_key = $1 OR ($2 AND kind = $3 AND "
-						  "schedule_key IS NULL AND created_at >= to_timestamp($4::double "
-						  "precision)) LIMIT 1;",
+						  "(schedule_key IS NULL OR strpos(schedule_key, $5) = 1) AND created_at "
+						  ">= to_timestamp($4::double precision)) LIMIT 1;",
 						   { BindValue(Scheduler::schedule_key(p.kind, now_ms, period)),
 								   BindValue(db::Bool{ p.at_start }), BindValue(p.kind),
-								   BindValue(static_cast<double>(bucket * period) / 1000.0) })
+								   BindValue(static_cast<double>(bucket * period) / 1000.0),
+								   BindValue(Scheduler::start_schedule_key(p.kind, "")) })
 						 .empty();
 		s.next_at = iso_from_ms((enqueued ? bucket + 1 : bucket) * period);
 		s.pending = job_pending(db, p.kind);

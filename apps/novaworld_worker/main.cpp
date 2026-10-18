@@ -1,19 +1,21 @@
 // opennova-novaworld-worker: a worker (program.h). The job pool
 // (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) and the handlers it runs:
 // the prunes (the service's, the website's, the hosted stats'), the mail it
-// sends, the billing sync, the fleet's machine driver calls and the hosted
-// data sets' jobs over the object store. What it runs
-// is what the other programs enqueued (the fleet's scheduler and
-// supervisor, web's routes); any number of worker processes share the queue.
-// Its watchdog watches the pool alone: a slow job occupies its worker, never a
-// watched loop.
+// sends, the billing sync and the fleet's machine driver calls; and the
+// scheduler of its own periodic kinds (parts.h worker_schedule), in every
+// worker process with no election (the schedule keys keep each bucket
+// single). What it runs is what its scheduler, the fleet's supervisor and
+// web's routes enqueued; any number of worker processes share the queue. The
+// data sets' jobs are the data program's (apps/novaworld_data). Its watchdog
+// watches the pool's claim loop and the scheduler's ticks: a slow job occupies
+// its worker, never a watched loop.
 
+#include "ecs_metadata.h"
 #include "parts.h"
 #include "program.h"
 
 #include "billing/billing_jobs.h"
 #include "billing/entitlement.h"
-#include "hosted/data_set_jobs.h"
 #include "hosted/docker_machine_driver.h"
 #include "hosted/ec2_machine_driver.h"
 #include "hosted/fleet_jobs.h"
@@ -21,6 +23,7 @@
 #include "hosted/stats_jobs.h"
 #include "jobs/account_jobs.h"
 #include "jobs/maintenance_jobs.h"
+#include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
 
 #include <cstdio>
@@ -85,15 +88,6 @@ int run(const program::Boot &boot) {
 	}
 	MailStack mail = make_mail(config);
 	const HostedSetup hosting = hosted_setup(config);
-	// The object store the data sets' jobs run over (whether or not hosting is on).
-	ObjectStoreStack store;
-	if (hosting.store_ok) {
-		std::string error;
-		store = make_object_store(hosting, config, error);
-		if (!store.store)
-			return program::fatal("the object store: " + error);
-		std::printf("[boot] data sets: jobs over the %s store\n", store.store->kind());
-	}
 	MachineDriverStack machines;
 	if (hosting.on) {
 		std::string error;
@@ -114,17 +108,37 @@ int run(const program::Boot &boot) {
 	}
 	if (machines.driver)
 		hosted::register_fleet_jobs(registry, *machines.driver);
-	if (store.store)
-		hosted::register_data_set_jobs(registry, *store.store, store.scratch.path().u8string());
 
 	jobs::WorkerPoolConfig worker_config;
 	worker_config.threads = config.worker_threads;
 	jobs::WorkerPool workers(boot.pool, registry, worker_config);
 	workers.start();
 
-	// The worker's watchdog: its pool's claim loop.
+	// Its periodic kinds, in every worker process. The at-start ones (the
+	// billing reconcile) are keyed by the release its tasks run, its ECS task
+	// definition's revision (ecs_metadata.h): every task of one release
+	// enqueues each once between them. Off ECS (the local stack, the tests)
+	// they are keyed by their kind alone.
+	std::string release;
+	if (const std::string uri = ecs::metadata_uri_from_env(); !uri.empty()) {
+		std::string error;
+		if (ecs::read_task_revision(uri, release, error))
+			std::printf("[boot] worker: release %s (its at-start jobs once per release)\n",
+					release.c_str());
+		else
+			std::fprintf(stderr,
+					"[boot] WARN worker: its release: %s; its at-start jobs are keyed by their "
+					"kind alone\n",
+					error.c_str());
+	}
+	jobs::Scheduler scheduler(boot.pool, worker_schedule(config, hosting),
+			jobs::Scheduler::wall_now_ms, 1000, release);
+	scheduler.start();
+
+	// The worker's watchdog: its pool's claim loop and its scheduler's ticks.
 	Watchdog watchdog;
 	watchdog.watch("job pool", [&workers] { return workers.loop_turns(); });
+	watchdog.watch("job scheduler", [&scheduler] { return scheduler.turns(); });
 
 	program::LoopHooks hooks;
 	hooks.heartbeat = [billing](db::Database &db, Heartbeat &beat, int64_t) {
@@ -133,10 +147,11 @@ int run(const program::Boot &boot) {
 	};
 	const int exit_code = program::run_main_loop("worker", boot, watchdog, hooks);
 
-	// Each worker ends once its job has (a job cut short runs again on the
-	// next lease's worker); then the parts, the driver last. The machines run
-	// on for the fleet to resume.
+	// The scheduler first, so nothing more is enqueued; each worker ends once
+	// its job has (a job cut short runs again on the next lease's worker); then
+	// the parts, the driver last. The machines run on for the fleet to resume.
 	std::printf("[shutdown] stopping the job workers\n");
+	scheduler.stop();
 	workers.stop();
 	return exit_code;
 }
