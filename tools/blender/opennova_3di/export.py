@@ -61,6 +61,7 @@
 import math
 import os
 import re
+import shutil
 from array import array
 
 import bpy
@@ -69,7 +70,7 @@ from mathutils import Matrix, Vector
 
 from . import assembly, materials
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, Notes, at_world_origin, cli_notes,
-                      export_text, flipbook_reads_register, fmt, quoted)
+                      export_text, flipbook_reads_register, fmt, quoted, run_cli, scratch)
 from .rig import (PART_RE, WEIGHT_EPS, clean_name, descendants, hung_elsewhere, ignored, is_lod_root, is_model_root,
                   lod_of, lod_parts, lod_roots, model_of, model_roots, part_bones, part_of, rig_of)
 
@@ -1356,23 +1357,65 @@ class Exporter(Notes):
             (["uv1 1"] if self.uv1 else []) + [f"register {quoted(r)}" for r in self.registers] + frame_lines + \
             material_lines + lod_lines + tail_lines
         os.makedirs(out_dir, exist_ok=True)
-        # The scene text is the CLI's input only; a refusal names the object
-        # its line came from (the `# name` comment above it).
-        try:
-            result = export_text(self.context, ["build"], text, "scene.o3d", "scene text", out_path)
-        except ExportError as e:
-            raise ExportError(name_sections(name_lines(str(e), text), self.sections)) from None
-        # The textures only once the model is built: a refused model writes
-        # nothing.
-        self.materials.write_textures(out_dir)
+        if self.props.threedi_version == "GP":
+            result, gp_notes = self.write_gp(text, out_path, out_dir)
+        else:
+            result, gp_notes = self.build(text, out_path), []
+            # The textures only once the model is built: a refused model
+            # writes nothing.
+            self.materials.write_textures(out_dir)
         tris = sum(1 for line in lod_lines if line.startswith("t "))
         # The builder's notes (a non-convex volume, collinear faces, ...), one
         # on a scene line told by the object that line came from, as a
         # refusal is.
-        notes = [name_lines(n, text) for n in cli_notes(result, "note: ")]
+        notes = [name_lines(n, text) for n in cli_notes(result, "note: ")] + gp_notes
         message = (f"{result.stdout.strip()} ({len(lods)} LODs, {tris} triangles total, "
                    f"{len(self.materials.textures)} textures)")
         return message, self.notes + notes
+
+    def build(self, text, out_path):
+        """`opennova-3di build` of the scene text into `out_path`; a refusal
+        names the object its line came from (the `# name` comment above it)."""
+        try:
+            return export_text(self.context, ["build"], text, "scene.o3d", "scene text", out_path)
+        except ExportError as e:
+            raise ExportError(name_sections(name_lines(str(e), text), self.sections)) from None
+
+    def write_gp(self, text, out_path, out_dir):
+        """The model as Black Hawk Down's GP: built as 3DI3 into a scratch
+        file, lowered by `opennova-3di gp` once into the scratch folder (so a
+        refusal still writes nothing), then, its textures written, into
+        `out_path`, where the rows take the texture files' sizes. Returns the
+        build's output (its notes) and the lowering's notes."""
+        with scratch() as tmp:
+            built = os.path.join(tmp, "model.3di")
+            result = self.build(text, built)
+            hide = ((built, "the built 3DI3"),)
+            # The same file name: the GP header names the model after it.
+            staged = os.path.join(tmp, "gp", os.path.basename(out_path))
+            os.makedirs(os.path.dirname(staged))
+            run_cli(self.context, ["gp", built, "-o", staged], ExportError, hide=hide)
+            self.materials.write_textures(out_dir)
+            gp = run_cli(self.context, ["gp", built, "-o", out_path], ExportError, hide=hide)
+        result.stdout = gp.stdout
+        notes = []
+        for note in cli_notes(gp, "note: "):
+            # BHD finds a bump material's normal map by its texture's name
+            # (<texture>.mdt beside the model): the map export wrote is copied
+            # under that name.
+            m = GP_NORMAL_NAME.search(note)
+            source = os.path.join(out_dir, m.group(1)) if m else ""
+            if m and os.path.isfile(source):
+                shutil.copyfile(source, os.path.join(out_dir, m.group(2)))
+                notes.append(f"{m.group(1)} copied as {m.group(2)}, the name BHD reads a bump material's normal map by")
+            else:
+                notes.append(note)
+        return result, notes
+
+
+# The lowering's note naming a bump material's normal map and the name BHD
+# reads it by (formats/threedi_gp/threedi_gp_lower.cpp).
+GP_NORMAL_NAME = re.compile(r"give (\S+) the name (\S+) beside the model")
 
 
 def name_lines(message, text):

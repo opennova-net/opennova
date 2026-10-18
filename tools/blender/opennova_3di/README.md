@@ -223,6 +223,24 @@ ITEMS.DEF `addeweap` child does (the M1A1's turret `m1trret` on the hull
 `dM1A1`'s `ewep01`). Posing or moving the parent carries the child. An unknown
 point puts the child on the parent's root, as in game.
 
+## The 3DI version
+
+A model root's **3DI version** picks the file export writes: **3DI3 (JO and
+newer)**, the default, or **GP (Black Hawk Down)**, the model Delta Force:
+Black Hawk Down loads. A GP export builds the model as 3DI3 first, then
+`opennova-3di gp` writes it as GP, named after its file as BHD's own model
+tool names a model, so a model exported as `mp5_1st.3di` replaces BHD's MP5.
+Its textures are written as for 3DI3 (BHD reads the `.dds` of a row's name
+first too), and its animations export unchanged: BHD reads the same `.adm`
+and `.bad` files.
+
+Only a rigid model writes as GP; a skinned one is refused. BHD finds a bump
+material's normal map by its texture's name, `<texture>.mdt` beside the
+model, so export copies the normal map it wrote under that name. A technique
+BHD has no form for (glass, a skinned shader) is refused, naming the
+material. `opennova-3di migrate` reads a GP model back as 3DI3, as the
+OpenNova Editor's import does.
+
 ## Materials
 
 A material exports the way Blender 5.0 or newer draws it, through its
@@ -352,7 +370,7 @@ Culling, the Math node, the render method and Emission.
 
 - **3D viewport sidebar > OpenNova**: Import .3di, Import Animations and Add
   Model, Write textures, then the active object's model: its name, output
-  `.3di`, the collision LOD (whose meshes also become the bullet faces; 0 = the
+  `.3di` and 3DI version, the collision LOD (whose meshes also become the bullet faces; 0 = the
   most detailed), Generate bullet faces, Texture files and Max texture size (and
   Larger textures under a max), Mesh part (a skinned model), Mount on,
   Add LOD, Add Part from Selection or Add Animation Rig (a static model),
