@@ -1316,9 +1316,17 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             // The client built this person as its own pool-0 entity and walks
             // its posed bone spheres like any other: the provider poses the
             // row's model from the row's channels; without a pose the torso
-            // stand-in serves. A wire-built body carries no hidden sections.
+            // stand-in serves. The walk skips the sections set in the body's
+            // sectionMask (+0x134), which a client-built person holds clear:
+            // the 0x0C slot memset and Entity_ResetToSpawnState zero it, and
+            // its one person writer, the dismemberment cut, is the
+            // authority's (the other +0x134 writers serve items: the 0x0D /
+            // 0x10 spawns, the glass and blast section breaks, the landmine).
             // [orig: Physics_RaycastAgainstProximityList @ 0x4e4a30 ->
-            //  Physics_RaycastAgainstBoneSections @ 0x4e4670]
+            //  Physics_RaycastAgainstBoneSections @ 0x4e4670; NapiNPClientMsg_0x00C
+            //  @ 0x42e7f1; Entity_ResetToSpawnState @ 0x4b9797; the cut
+            //  @ 0x407684 / @ 0x407a27 behind the authority tests @ 0x407598 /
+            //  @ 0x40793b]
             bool live_pose = false;
             const CollisionModel *person_model =
                 proxy.model_id >= 0 ? model(proxy.model_id) : nullptr;
