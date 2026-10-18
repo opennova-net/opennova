@@ -244,6 +244,40 @@ printf 'td:1' >"$current"
 : >"$calls"
 out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" \
   && [[ "$out" == *"no machine to confirm"* ]] && pass "with no hostd task there is no machine to confirm" || fail "no machine: $out"
+# The exec into web refused: the log names the refused call, and the deploy goes on.
+HOSTD_RUNNING=2
+# shellcheck disable=SC2317
+admin_api_json() {
+  echo "An error occurred (AccessDeniedException) when calling the ExecuteCommand operation: User: arn:aws:sts::222222222222:assumed-role/opennova-staging-github-deploy/run is not authorized to perform: ecs:ExecuteCommand" >&2
+  return 1
+}
+printf 'td:1' >"$current"
+: >"$calls"
+out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" \
+  && [[ "$out" == *"AWS refused the ExecuteCommand call of ECS Exec into a web task"* ]] && ! grep -q 'task-definition td:1' "$calls" \
+  && pass "an exec into web refused says so, and the deploy goes on" || fail "exec refused: $out"
+# The first ask finds an old agent, the later ones fail: the timeout names the
+# last ask's failure, never the machines an earlier ask found.
+HOSTD_CONFIRM_TIMEOUT=15
+asks="$scratch/asks"
+: >"$asks"
+# shellcheck disable=SC2317
+admin_api_json() {
+  echo ask >>"$asks"
+  if [ "$(wc -l <"$asks")" -eq 1 ]; then
+    echo '{"machines":[{"id":12,"state":"ready","agent_image":"ghcr.io/o/opennova-hostd@sha256:old"}]}'
+    return 0
+  fi
+  echo "An error occurred (AccessDeniedException) when calling the ExecuteCommand operation: User: arn:aws:sts::222222222222:assumed-role/opennova-staging-github-deploy/run is not authorized to perform: ecs:ExecuteCommand" >&2
+  return 1
+}
+printf 'td:1' >"$current"
+: >"$calls"
+out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" \
+  && fail "a confirmation whose last ask failed went on" \
+  || { [[ "$out" == *"the last ask failed: AWS refused the ExecuteCommand call"* && "$out" != *"still report another agent image"* ]] \
+       && pass "a later ask that fails is the reason the timeout gives" || fail "late failure: $out"; }
+HOSTD_CONFIRM_TIMEOUT=0
 unset -f aws sleep admin_api_json
 
 

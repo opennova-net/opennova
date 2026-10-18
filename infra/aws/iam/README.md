@@ -88,7 +88,7 @@ refused at run time (an AccessDenied naming the boundary).
 | Boundary | Carried by | Holds |
 | --- | --- | --- |
 | `opennova-machine-boundary` | the machines' two roles: the instance role (`opennova-<deployment>-machine`) and hostd's task role (`opennova-<deployment>-hostd`) | the ECS agent's calls on the fleet clusters (`opennova-*-fleet`) and their container instances (registering the machine, reporting its tasks and containers, polling for its work, its telemetry session; finding the poll endpoint), ECS Exec's session channels (`fleet shell`), the log streams of the `/opennova/*/machines` and `/opennova/*/servers` groups (written by the docker daemon's awslogs driver: hostd's own and the slots'), and the trees of the store (`data/trees/` of an `opennova-*` bucket, listed and read) |
-| `opennova-role-boundary` | every other role `infra/aws` makes (the programs' task roles, the execution role, the backup task's and its schedule's), and the GitHub deploy role | the session channels (ECS Exec), `/opennova/*` parameters and their names, the operations bucket (its objects read, written and deleted, its uploads in flight listed and aborted: the game data's store, `data/`, which web's and the data program's task roles narrow to), `/opennova/*` logs, the AWS-managed keys through SSM and EC2, launching and ending machines tagged `opennova:hosted=1` from OpenNova-tagged subnets, groups and templates, the static addresses (Elastic IPs allocated tagged `opennova:hosted=1` and an `opennova-*` deployment, tagged only as they are allocated, associated with such machines, disassociated and released only while they carry both tags, and described) and their names (A records, by UPSERT and DELETE alone, named `*.play.*` in a hosted zone, and a change's state read: the worker's policy narrows them to its own play zone), passing `opennova-*` roles to EC2, ECS's tasks and EventBridge Scheduler, sending mail through the account's SES identities, running `opennova-*` task definitions in an `opennova-*` cluster and tagging their tasks, registering task definitions, pointing `opennova-*` services at them (the fleet cluster's hostd among them) and the backup schedule at a release's revision, and the admin's infrastructure view's reads (web's: listing and describing `opennova-*` clusters' tasks and container instances, the fleet cluster's among them, describing `opennova-*` databases and cache replication groups, the target groups' health) |
+| `opennova-role-boundary` | every other role `infra/aws` makes (the programs' task roles, the execution role, the backup task's and its schedule's), and the GitHub deploy role | the session channels (ECS Exec), `/opennova/*` parameters and their names, the operations bucket (its objects read, written and deleted, its uploads in flight listed and aborted: the game data's store, `data/`, which web's and the data program's task roles narrow to), `/opennova/*` logs, the AWS-managed keys through SSM and EC2, launching and ending machines tagged `opennova:hosted=1` from OpenNova-tagged subnets, groups and templates, the static addresses (Elastic IPs allocated tagged `opennova:hosted=1` and an `opennova-*` deployment, tagged only as they are allocated, associated with such machines, disassociated and released only while they carry both tags, and described) and their names (A records, by UPSERT and DELETE alone, named `*.play.*` in a hosted zone, and a change's state read: the worker's policy narrows them to its own play zone), passing `opennova-*` roles to EC2, ECS's tasks and EventBridge Scheduler, sending mail through the account's SES identities, running `opennova-*` task definitions in an `opennova-*` cluster and tagging their tasks, registering task definitions, pointing `opennova-*` services at them (the fleet cluster's hostd among them) and the backup schedule at a release's revision, ECS Exec into `opennova-*` clusters' tasks (the deploy workflow's, which its own policy narrows to its deployment's web container: `app deploy`'s check of the machines' hostd image), and the admin's infrastructure view's reads (web's: listing and describing `opennova-*` clusters' tasks and container instances, the fleet cluster's among them, describing `opennova-*` databases and cache replication groups, the target groups' health) |
 
 What goes where: a permission only the machines' roles use goes in the machine boundary, and
 nothing a program, the backup or the deploy workflow uses goes there; a permission both sides
@@ -107,7 +107,9 @@ two statements become one only when the one grants exactly what the two did. Sta
 the same conditions share one where no action of one applies to the other's resources
 (`LaunchTagged`: `ec2:RunInstances` makes instances, never Elastic IPs, and
 `ec2:AllocateAddress` the reverse; `TagAtLaunch`: a tag at creation is under
-`ec2:CreateAction`, the action that made what it tags). A permission
+`ec2:CreateAction`, the action that made what it tags; `Clusters` and `TasksDbCache`:
+`ecs:ExecuteCommand` acts on a cluster and its task, never a database or a cache, and the
+reads beside it never exec). A permission
 that would push it past the limit and belongs to one kind of role alone is the moment for a
 boundary of its own, as the machines' was.
 
@@ -147,7 +149,11 @@ AccessDenied naming the action):
   `ec2:AcceptAddressTransfer` of one transferred in), its tag and its association with the load
   balancer;
 - the first deploy workflow run: its role's `scheduler:UpdateSchedule` under the role boundary,
-  and its roll of hostd (the fleet cluster's service, hostd's revision and task role);
+  its roll of hostd (the fleet cluster's service, hostd's revision and task role), and its ECS
+  Exec into a web task after it (`ecs:ListTasks`, `ecs:DescribeTasks`, `ecs:ExecuteCommand`
+  under `ecs:container-name` `web`, the session plugin's `ssmmessages:OpenDataChannel`; no
+  `ssm:StartSession`, which ECS makes itself): the deploy's log says "every ready machine's
+  agent reports ..." rather than naming a refused call;
 - the first `infra apply` with `hosted_enabled`: the game data's lifecycle rules; then, at
   the first upload on the Game data page, web's `s3:PutObject` of the parts the browser
   sends it (as its task role, under the role boundary); at the first tree deleted on the page or

@@ -233,15 +233,16 @@ run "deploy_users" {
         st.Sid == "ListTasks" ? (
           st.Action == "ecs:ListTasks" && st.Resource == "*" &&
           st.Condition.ArnLike["ecs:cluster"] == "arn:aws:ecs:us-east-1:111111111111:cluster/opennova-*"
-          ) : st.Sid == "ReadInfra" ? (
-          toset(st.Action) == toset(["ecs:DescribeTasks", "rds:DescribeDBInstances", "elasticache:DescribeReplicationGroups"]) &&
+          ) : st.Sid == "TasksDbCache" ? (
+          toset(st.Action) == toset(["ecs:DescribeTasks", "ecs:ExecuteCommand", "rds:DescribeDBInstances", "elasticache:DescribeReplicationGroups"]) &&
           toset(st.Resource) == toset([
             "arn:aws:ecs:us-east-1:111111111111:task/opennova-*/*",
             "arn:aws:rds:us-east-1:111111111111:db:opennova-*",
             "arn:aws:elasticache:us-east-1:111111111111:replicationgroup:opennova-*",
           ])
-          ) : st.Sid == "ListFleet" ? (
-          st.Action == "ecs:ListContainerInstances" && st.Resource == "arn:aws:ecs:us-east-1:111111111111:cluster/opennova-*"
+          ) : st.Sid == "Clusters" ? (
+          toset(st.Action) == toset(["ecs:ListContainerInstances", "ecs:ExecuteCommand"]) &&
+          st.Resource == "arn:aws:ecs:us-east-1:111111111111:cluster/opennova-*"
           ) : st.Sid == "ReadFleet" ? (
           st.Action == "ecs:DescribeContainerInstances" && st.Resource == "arn:aws:ecs:us-east-1:111111111111:container-instance/opennova-*/*"
           ) : st.Sid == "Unscoped" ? (
@@ -249,8 +250,8 @@ run "deploy_users" {
         ) : true
       )
       ]) && length([for st in jsondecode(module.prod.documents.boundary).Statement : st
-    if contains(["ListTasks", "ReadInfra", "ListFleet", "ReadFleet", "Unscoped"], st.Sid)]) == 5
-    error_message = "the boundary holds web's infrastructure reads (infra/aws/programs.tf, fleet_agent.tf): OpenNova's clusters' tasks and container instances, its database and cache, the target groups' health"
+    if contains(["ListTasks", "TasksDbCache", "Clusters", "ReadFleet", "Unscoped"], st.Sid)]) == 5
+    error_message = "the boundary holds web's infrastructure reads (infra/aws/programs.tf, fleet_agent.tf): OpenNova's clusters' tasks and container instances, its database and cache, the target groups' health; and the deploy workflow's ECS Exec on OpenNova's clusters and tasks"
   }
   assert {
     condition = alltrue([for m in [module.prod.documents, module.staging.documents] :
@@ -435,6 +436,23 @@ run "github_deploy_roles" {
   assert {
     condition     = !strcontains(module.staging.documents.github, "opennova-prod") && !strcontains(module.staging.documents.github, "111111111111")
     error_message = "staging's GitHub deploy role names nothing of prod's"
+  }
+  assert {
+    condition = (
+      one([for s in jsondecode(module.prod.documents.github).Statement : s.Action if s.Sid == "ExecIntoWeb"]) == "ecs:ExecuteCommand" &&
+      one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "ExecIntoWeb"]) == [
+        "arn:aws:ecs:us-east-1:111111111111:cluster/opennova-prod",
+        "arn:aws:ecs:us-east-1:111111111111:task/opennova-prod/*",
+      ] &&
+      one([for s in jsondecode(module.prod.documents.github).Statement : s.Condition if s.Sid == "ExecIntoWeb"]) == { StringEquals = { "ecs:container-name" = "web" } } &&
+      length([for s in jsondecode(module.prod.documents.github).Statement : s if contains(flatten([s.Action]), "ecs:ExecuteCommand")]) == 1 &&
+      one([for s in jsondecode(module.prod.documents.github).Statement : s.Action if s.Sid == "FindWebTask"]) == "ecs:ListTasks" &&
+      one([for s in jsondecode(module.prod.documents.github).Statement : s.Condition if s.Sid == "FindWebTask"]) == { ArnEquals = { "ecs:cluster" = "arn:aws:ecs:us-east-1:111111111111:cluster/opennova-prod" } } &&
+      one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "DescribeTasks"]) == "arn:aws:ecs:us-east-1:111111111111:task/opennova-prod/*" &&
+      one([for s in jsondecode(module.prod.documents.github).Statement : s.Action if s.Sid == "ExecChannel"]) == "ssmmessages:OpenDataChannel" &&
+      !strcontains(module.prod.documents.github, "ssm:StartSession")
+    )
+    error_message = "prod's GitHub deploy role execs into prod's web container alone (app deploy's check of the machines' hostd image), finding and describing prod's tasks first, and starts no Session Manager session of its own"
   }
   assert {
     condition     = output.deployments.prod.github_deploy_role_arn == "arn:aws:iam::111111111111:role/opennova-prod-github-deploy"

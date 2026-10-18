@@ -184,6 +184,28 @@ admin_api_json() {
   printf '%s\n' "$json"
 }
 
+# Why an admin_api call failed, in one line, from what it wrote to stderr ($1,
+# a file): AWS refusing a call ECS Exec into a web task makes (its ListTasks,
+# DescribeTasks or ExecuteCommand), the admin API's own status, or the first
+# line naming an error.
+admin_api_failure() {
+  local text op code line
+  text="$(tr -d '\r' <"$1" 2>/dev/null || true)"
+  op="$(grep -oE -m 1 'AccessDenied[A-Za-z]*\) when calling the [A-Za-z]+ operation' <<<"$text" \
+          | sed 's/.* when calling the \([A-Za-z]*\) operation/\1/' || true)"
+  if [ -n "$op" ]; then
+    printf 'AWS refused the %s call of ECS Exec into a web task' "$op"
+    return
+  fi
+  code="$(sed -n 's/^HTTP \([0-9][0-9]*\)$/\1/p' <<<"$text" | tail -n 1)"
+  if [ -n "$code" ]; then
+    printf 'the admin API answered HTTP %s' "$code"
+    return
+  fi
+  line="$(grep -m 1 -iE 'error|denied|not authorized|no running|failed|holds no' <<<"$text" || true)"
+  printf '%s' "${line:-ECS Exec into a web task failed and said nothing}"
+}
+
 # ---- one-off tasks -----------------------------------------------------------------
 
 # The backup task definition the toolbox's one-off tasks run: the current
@@ -527,11 +549,14 @@ HOSTD_CONFIRM_TIMEOUT=180
 # Whether every ready machine's agent reports hostd image $1 (the release's
 # reference, as its ECS task definition names it: the admin fleet view's
 # agent_image, which hostd reads from its task's metadata), asked every 15 s
-# up to HOSTD_CONFIRM_TIMEOUT. With no hostd task running (no machine) or no
-# answer from the service's admin API (the cutover: no web, or no fleet program
-# yet), there is no machine to confirm, and it says so.
+# up to HOSTD_CONFIRM_TIMEOUT. With no hostd task running (no machine) there
+# is no machine to confirm; when the first ask fails (the cutover: no web, or
+# no fleet program yet; or ECS Exec into web refused) nothing is confirmed, and
+# it says which failed. Either way the deploy goes on. A later ask that fails
+# is asked again; at the timeout the last ask's own outcome is the reason: its
+# failure, or the machines it found on another image.
 hostd_confirm() {
-  local image="$1" running json stale waited=0
+  local image="$1" running json stale waited=0 errors failed=""
   [ -n "$image" ] || { err "hostd: the release names no hostd image to confirm"; return 1; }
   running="$(aws ecs describe-services --cluster "$(fleet_cluster)" --services hostd \
                --query 'services[0].runningCount' --output text 2>/dev/null || echo 0)"
@@ -539,20 +564,31 @@ hostd_confirm() {
     log "hostd: no machine to confirm (no hostd task runs)"
     return 0
   fi
+  errors="$(mktemp)"
   while :; do
-    if json="$(admin_api_json GET /api/admin/hosted 2>/dev/null)"; then
+    if json="$(admin_api_json GET /api/admin/hosted 2>"$errors")"; then
+      failed=""
       stale="$(jq -r --arg i "$image" '[.machines[]? | select(.state == "ready" and .agent_image != $i) | .id | tostring] | join(" ")' <<<"$json" 2>/dev/null)" \
         || stale="?"
       if [ -z "$stale" ]; then
         log "hostd: every ready machine's agent reports ${image##*@}"
+        rm -f "$errors"
         return 0
       fi
     elif [ "$waited" -eq 0 ]; then
-      log "hostd: no machine to confirm (the service's admin API does not answer)"
+      log "hostd: the machines' agents are not confirmed on ${image##*@}, the service could not be asked: $(admin_api_failure "$errors")"
+      rm -f "$errors"
       return 0
+    else
+      failed="$(admin_api_failure "$errors")"
     fi
     if [ "$waited" -ge "$HOSTD_CONFIRM_TIMEOUT" ]; then
-      err "hostd: after ${waited}s, machine(s) ${stale:-?} still report another agent image than ${image##*@} (fleet status, app logs hostd)"
+      if [ -n "$failed" ]; then
+        err "hostd: after ${waited}s the machines' agents are not confirmed on ${image##*@}: the last ask failed: $failed (app logs web, fleet status)"
+      else
+        err "hostd: after ${waited}s, machine(s) ${stale:-?} still report another agent image than ${image##*@} (fleet status, app logs hostd)"
+      fi
+      rm -f "$errors"
       return 1
     fi
     sleep 15

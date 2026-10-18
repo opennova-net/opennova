@@ -268,10 +268,11 @@
       }
     },
     {
-      "Sid": "ReadInfra",
+      "Sid": "TasksDbCache",
       "Effect": "Allow",
       "Action": [
         "ecs:DescribeTasks",
+        "ecs:ExecuteCommand",
         "rds:DescribeDBInstances",
         "elasticache:DescribeReplicationGroups"
       ],
@@ -282,9 +283,12 @@
       ]
     },
     {
-      "Sid": "ListFleet",
+      "Sid": "Clusters",
       "Effect": "Allow",
-      "Action": "ecs:ListContainerInstances",
+      "Action": [
+        "ecs:ListContainerInstances",
+        "ecs:ExecuteCommand"
+      ],
       "Resource": "arn:aws:ecs:${region}:${account_id}:cluster/opennova-*"
     },
     {
