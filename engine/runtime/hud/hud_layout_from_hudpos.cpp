@@ -192,6 +192,8 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.tag_good = hud_color_argb(hud.tagcolor_good);
 	out.tag_middle = hud_color_argb(hud.tagcolor_middle);
 	out.tag_bad = hud_color_argb(hud.tagcolor_bad);
+	out.tag_blueteam = hud_color_argb(hud.tagcolor_blueteam);
+	out.tag_redteam = hud_color_argb(hud.tagcolor_redteam);
 	out.hud_text = hud_color_argb(hud.hud_textcolor);
 	out.weapon_text = hud_color_argb(hud.weapon_textcolor);
 	out.stance_tint = hud_color_argb(hud.stanceicon_color);

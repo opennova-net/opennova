@@ -314,6 +314,11 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	//  @0x59ac3d]
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
+		// The friendly tag's spectated legs read the tracked target and the
+		// sub-mode as they stand [orig: HUD_DrawEntityLabel @0x5a3a05..0x5a3a2e,
+		// @0x5a3b0e, @0x5a3b62].
+		s.spectate_target = cs.spectate_target;
+		s.spectate_submode = cs.death_screen_submode;
 		if (cs.death_screen_active && cs.spectate_target != 0xFFFF &&
 				cs.death_screen_submode != 0) {
 			int64_t health = 0;

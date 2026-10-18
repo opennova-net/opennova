@@ -64,6 +64,7 @@ void collect_roster_tags(const ClientState &state, uint16_t self_handle,
 		world::FriendlyTagSource src;
 		src.entity = handle;
 		src.net_id = handle.packed; // the fallback-name index [orig: (pool<<12)|slot]
+		src.team = team;
 		src.position.x = static_cast<float>(row->x) / 65536.0f;
 		src.position.y = static_cast<float>(row->y) / 65536.0f;
 		src.position.z = static_cast<float>(row->z) / 65536.0f;

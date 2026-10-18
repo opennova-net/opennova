@@ -1203,6 +1203,103 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	}
 }
 
+// The death screen's spectated legs of the friendly tag (C-491): the tracked
+// target is spared the near cull, the death screen pins its tag at (surface
+// width / 2, 2 x fontH) whatever the projection said, and its slot under a
+// sub-mode takes the large label font (here at scale 2) [orig:
+// HUD_DrawEntityLabel @0x5a3b0e..0x5a3b14, @0x5a3b59..0x5a3b7c,
+// @0x5a3a05..0x5a3a2e].
+void test_friendly_tag_spectated_legs(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 2.0f);
+	HudFrameState state;
+	opennova::hud::HudFriendlyTag tag;
+	tag.screen_x = 200.0f;
+	tag.screen_y = 100.0f;
+	tag.dist_q16 = 0x4000; // inside the 0.5 u near cull
+	tag.entity_id = 0; // a player's SSN: never the key
+	tag.handle = 0x1007;
+	tag.has_slot = true;
+	state.friendly_tags.push_back(tag);
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "a near tag culls");
+	state.session.spectate_target = 0;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "the SSN is not the target's key");
+	state.session.spectate_target = 0x1007;
+	const HudDrawList &near = compiler.compile(state, 1024.0f, 768.0f);
+	float near_left = 1e9f, near_right = -1e9f;
+	for (const auto &g : near.glyphs) {
+		near_left = std::min(near_left, g.x_top_left);
+		near_right = std::max(near_right, g.x_top_right);
+	}
+	CHECK(!near.glyphs.empty() && std::fabs((near_left + near_right) * 0.5f - 200.0f) < 6.0f,
+			"the target's near tag draws, at its projection off the death screen");
+	const float normal_h = near.glyphs.empty() ? 0.0f : near.glyphs[0].y_bottom - near.glyphs[0].y_top;
+	// Clipped off the death screen: it bails.
+	state.friendly_tags[0].projected = false;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "a clipped tag bails");
+	// On the death screen: pinned top-centre, clipped or not.
+	state.combat.death_screen = true;
+	{
+		const HudDrawList &pinned = compiler.compile(state, 1024.0f, 768.0f);
+		float left = 1e9f, right = -1e9f;
+		for (const auto &g : pinned.glyphs) {
+			left = std::min(left, g.x_top_left);
+			right = std::max(right, g.x_top_right);
+		}
+		CHECK(!pinned.glyphs.empty() && std::fabs((left + right) * 0.5f - 512.0f) < 6.0f &&
+						pinned.glyphs[0].y_top < 100.0f,
+				"the death screen pins the target's tag at the top centre");
+		CHECK(!pinned.glyphs.empty() &&
+						std::fabs((pinned.glyphs[0].y_bottom - pinned.glyphs[0].y_top) - normal_h) < 0.01f,
+				"with no sub-mode the normal font");
+	}
+	// Under a sub-mode the target's slot takes the large font (scale 2 here).
+	state.session.spectate_submode = 2;
+	{
+		const HudDrawList &large = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(!large.glyphs.empty() &&
+						std::fabs((large.glyphs[0].y_bottom - large.glyphs[0].y_top) - 2.0f * normal_h) < 0.6f,
+				"a sub-mode draws the target's tag in the large font");
+	}
+	// Another entity keeps every ordinary rule.
+	state.friendly_tags[0].handle = 0x1008;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "only the target is spared");
+}
+
+// On the death screen a tag takes its team's colour past the health tiers and
+// the downed legs [orig: HUD_DrawEntityLabel @0x5a3c33..0x5a3c66].
+void test_friendly_tag_death_screen_team_colours(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.tag_blueteam = 0xFF4678FFu;
+	layout.tag_redteam = 0xFFFF4040u;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	opennova::hud::HudFriendlyTag tag;
+	tag.screen_x = 200.0f;
+	tag.screen_y = 100.0f;
+	tag.dist_q16 = 100 << 16; // alpha 217
+	tag.entity_id = 24;
+	tag.health_ratio_fp16 = 0x4000; // the bad tier
+	tag.dead = true;
+	tag.team = 1;
+	state.friendly_tags.push_back(tag);
+	auto colour = [&]() -> uint32_t {
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		return list.glyphs.empty() ? 0u : list.glyphs[0].color;
+	};
+	CHECK(colour() == opennova::hud::half_bright_keep_alpha((217u << 24) | (opennova::hud::kFriendlyTagDownedGray & 0xFFFFFFu)),
+			"off the death screen the downed gray");
+	state.combat.death_screen = true;
+	CHECK(colour() == opennova::hud::half_bright_keep_alpha((217u << 24) | 0x4678FFu), "team 1: tagcolor_blueteam");
+	state.friendly_tags[0].team = 2;
+	CHECK(colour() == opennova::hud::half_bright_keep_alpha((217u << 24) | 0xFF4040u), "team 2: tagcolor_redteam");
+	state.friendly_tags[0].team = 0;
+	CHECK(colour() == opennova::hud::half_bright_keep_alpha((217u << 24) | 0x208020u), "any other: 0xFF208020");
+}
+
 // Friendly tags (D-HUD-20) [orig: HUD_DrawEntityLabel @ 0x5a39b0]: the
 // witnessed gates, tier colors, distance alpha, fallback name, medic plate,
 // and the BRIEF tick form, over the default (retail) tag colors.
@@ -3338,6 +3435,8 @@ int main() {
 	test_spinmap_compass_screen_rotation_matches_retail_heading();
 	test_spinmap_mesh_layers_and_waypoint(&font);
 	test_compiler_friendly_tags(&font);
+	test_friendly_tag_spectated_legs(&font);
+	test_friendly_tag_death_screen_team_colours(&font);
 	test_compiler_label_fonts(&font);
 	test_compiler_hud_font_falls_back_to_bold(&font);
 	test_compiler_waypoint_uses_bold_slot(&font);

@@ -655,7 +655,7 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// Friendly tags draw after the overlay cluster and before the console
 	// messages, exactly the retail pass order [orig: HUD_DrawFriendlyTagsPass
 	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
-	element_(HudElement::FriendlyTags, [&] { element_friendly_tags(state); });
+	element_(HudElement::FriendlyTags, [&] { element_friendly_tags(state, surface_w); });
 	// The mounted-vehicle panel sits with the overlay cluster, BEFORE the feed
 	// and the Tab board -- both of those are held-open surfaces that should
 	// cover it, not the other way round. The panel rides the seat dispatch's
@@ -1816,31 +1816,52 @@ uint32_t friendly_tag_squad_color(int band, bool has_slot, uint8_t squad_index,
 			(chop((squad >> 8) & 0xFFu) << 8) | chop(squad & 0xFFu);
 }
 
-void HudFrameCompiler::element_friendly_tags(const HudFrameState &state) {
+void HudFrameCompiler::element_friendly_tags(const HudFrameState &state, float surface_w) {
 	// D-HUD-20 [orig: HUD_DrawEntityLabel @ 0x5a39b0]. Screen-pixel anchors
 	// like the attach labels — the presenter projects, the compiler draws.
 	// Friendly tags draw with the NORMAL Arial label font at the slot scale
-	// [orig: @0x5a3a0c loads g_HUDLabelFont @0xB4C388 (slot +0); the spectated
-	// leg @0x5a3a29 loads g_HUDLabelFontLarge @0xB4C3A0 (slot +0x18, Impac22b)
-	// and rides the unported death screen].
+	// [orig: @0x5a3a0c loads g_HUDLabelFont @0xB4C388 (slot +0)], the death
+	// screen's spectate target with the large one below.
 	const bool have_label = label_font_.font() != nullptr;
-	const GameFont &lf = have_label ? label_font_ : font_;
-	const float ls = have_label ? label_scale_ : hud_font_scale_;
+	const GameFont &normal_font = have_label ? label_font_ : font_;
+	const float normal_scale = have_label ? label_scale_ : hud_font_scale_;
 	if (state.friendly_tag_mode == 0 || state.friendly_tags.empty() ||
-			lf.font() == nullptr) {
+			normal_font.font() == nullptr) {
 		return;
 	}
-	// The line metric is the '0' glyph's height at the slot scale
-	// [orig: GameFont_MeasureCharHeight ('0', font) @ 0x5a3a36 — the helper
-	// multiplies by the slot's scale_y @ 0x580a80].
-	const float font_h = lf.char_height('0', ls);
-	for (const HudFriendlyTag &tag : state.friendly_tags) {
-		// Too close to draw [orig: dist >= 0x8000 gate @ 0x5a3b0c] and the fog
-		// cull [orig: dist <= g_EnvFogDistCurrent @ 0x5a3b28].
-		if (tag.dist_q16 < kFriendlyTagMinDistQ16) {
+	for (HudFriendlyTag tag : state.friendly_tags) {
+		// The tracked spectate target (dword_A860F4), whatever the screen.
+		const bool target = state.session.spectate_target != 0xFFFF &&
+				tag.handle == state.session.spectate_target;
+		// The target's slot under a death-screen sub-mode takes the large label
+		// font [orig: @0x5a3a05..0x5a3a2e — dword_A860F4, dword_A860F0, the
+		// slot's +0x24 entity against the target; g_HUDLabelFontLarge @0xB4C3A0
+		// (slot +0x18, Impac22b)].
+		const bool large = target && tag.has_slot && state.session.spectate_submode != 0 &&
+				label_font_large_.font() != nullptr;
+		const GameFont &lf = large ? label_font_large_ : normal_font;
+		const float ls = large ? label_large_scale_ : normal_scale;
+		// The line metric is the '0' glyph's height at the slot scale
+		// [orig: GameFont_MeasureCharHeight ('0', font) @ 0x5a3a36 — the helper
+		// multiplies by the slot's scale_y @ 0x580a80].
+		const float font_h = lf.char_height('0', ls);
+		// Too close to draw, unless it is the target [orig: dist >= 0x8000
+		// gate @ 0x5a3b0c, `cmp dword_A860F4, ebx; jnz` @0x5a3b0e..0x5a3b14],
+		// and the fog cull [orig: dist <= g_EnvFogDistCurrent @ 0x5a3b28].
+		if (tag.dist_q16 < kFriendlyTagMinDistQ16 && !target) {
 			continue;
 		}
 		if (tag.dist_q16 > state.fog_dist_q16) {
+			continue;
+		}
+		// On the death screen the target's tag is pinned at (surface width / 2,
+		// 2 x fontH), past the clip test; any other clipped tag bails
+		// [orig: @0x5a3b59..0x5a3b7c (dword_A78394 sar 1, `lea ecx, [edi+edi]`),
+		// the clip test @0x5a3b7e..0x5a3b80].
+		if (state.combat.death_screen && target) {
+			tag.screen_x = static_cast<float>(static_cast<int32_t>(surface_w) >> 1);
+			tag.screen_y = 2.0f * font_h;
+		} else if (!tag.projected) {
 			continue;
 		}
 		// Health tier -> the hudpos tag colors. The GOOD tier is scheme-
@@ -1848,28 +1869,36 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state) {
 		// scheme table entry; middle/bad never swap [orig:
 		// HUD_ClassifyHealthBand @ 0x5a3c2b; the index test + colors
 		// @ 0x5a3c9e..0x5a3cf5; cfg default 2 @ 0x54d2a6].
+		// On the death screen the colour is the team's, past the health tiers, the
+		// squad override and the downed legs [orig: @0x5a3c33..0x5a3c66 (team 1
+		// g_HudposTagcolorBlueteam, team 2 g_HudposTagcolorRedteam, else
+		// dword_840A40 = 0xFF208020), the jump to @0x5a3e85].
 		const int band = health_color_band_fp16(tag.health_ratio_fp16);
-		uint32_t rgb = band == 0
-				? (state.hud_color_index == 2 ? layout_.tag_good
-											  : active_color(state))
-				: band == 1 ? layout_.tag_middle
-							: layout_.tag_bad;
-		// The squad colour override of the good and middle tiers.
-		rgb = friendly_tag_squad_color(band, tag.has_slot, tag.squad_color_index, rgb);
-		// The bad tier's DOWNED legs: a dead entity with a slot still inside
-		// its revive window is light blue (table[3]), pulsing toward white
-		// while a medic request stands; dead without that is gray (table[8]);
-		// alive-but-bad keeps tagcolor_bad [orig: @0x5a3dc9..0x5a3e85 —
-		// `Flags & 2` -> slot && slot+0x10 ? (slot+0x2C ? pulse : light blue)
-		// : gray, else tagcolor_bad].
-		if (band == 2 && tag.dead) {
-			if (tag.has_slot && tag.revive_seconds != 0) {
-				rgb = tag.medic_request
-						? friendly_tag_revive_pulse(kFriendlyTagDownedLightBlue,
-								  static_cast<int>(state.hud_frame))
-						: kFriendlyTagDownedLightBlue;
-			} else {
-				rgb = kFriendlyTagDownedGray;
+		uint32_t rgb = 0;
+		if (state.combat.death_screen) {
+			rgb = tag.team == 1 ? layout_.tag_blueteam
+					: (tag.team == 2 ? layout_.tag_redteam : kFriendlyTagDeathScreenNeutral);
+		} else {
+			rgb = band == 0 ? (state.hud_color_index == 2 ? layout_.tag_good : active_color(state))
+					: band == 1 ? layout_.tag_middle
+								: layout_.tag_bad;
+			// The squad colour override of the good and middle tiers.
+			rgb = friendly_tag_squad_color(band, tag.has_slot, tag.squad_color_index, rgb);
+			// The bad tier's DOWNED legs: a dead entity with a slot still inside
+			// its revive window is light blue (table[3]), pulsing toward white
+			// while a medic request stands; dead without that is gray (table[8]);
+			// alive-but-bad keeps tagcolor_bad [orig: @0x5a3dc9..0x5a3e85 —
+			// `Flags & 2` -> slot && slot+0x10 ? (slot+0x2C ? pulse : light blue)
+			// : gray, else tagcolor_bad].
+			if (band == 2 && tag.dead) {
+				if (tag.has_slot && tag.revive_seconds != 0) {
+					rgb = tag.medic_request
+							? friendly_tag_revive_pulse(kFriendlyTagDownedLightBlue,
+									  static_cast<int>(state.hud_frame))
+							: kFriendlyTagDownedLightBlue;
+				} else {
+					rgb = kFriendlyTagDownedGray;
+				}
 			}
 		}
 		// The speaking pulse rides the voice output level [orig: @ 0x5a3e8f].

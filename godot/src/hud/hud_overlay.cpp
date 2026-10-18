@@ -1391,18 +1391,21 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 			float anchor[3];
 			opennova::hud::friendly_tag_anchor(position, t.eye_offset_z, anchor);
 			const Vector3 world_pos = mission_to_godot(anchor);
+			// A clipped anchor bails in the compiler, unless the death screen pins
+			// it (HudFriendlyTag::projected) [orig: HUD_DrawEntityLabel
+			// @0x5a3b7e..0x5a3b80].
 			Vector2 screen;
-			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
-						world_pos, screen)) {
-				continue; // [orig: HUD_DrawEntityLabel @0x5a3b7e..0x5a3b80 -- any clip flag bails]
-			}
 			opennova::hud::HudFriendlyTag tag;
+			tag.projected = project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
+					world_pos, screen);
 			tag.screen_x = screen.x;
 			tag.screen_y = screen.y;
 			tag.dist_q16 = opennova::io::float_to_fp16_16_sat(
 					p_camera_xform.origin.distance_to(world_pos));
 			tag.name = t.name;
 			tag.entity_id = t.net_id;
+			tag.handle = static_cast<uint16_t>(t.entity.packed);
+			tag.team = t.team;
 			tag.health_ratio_fp16 = t.health_ratio_fp16;
 			tag.medic = t.medic;
 			// The speaking pulse is the overlay's own env feed, not a sim fact.

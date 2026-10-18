@@ -18,6 +18,7 @@ void push_tag(World &world, const Entity &e, const PlayerSlotFacts *slot,
     FriendlyTagSource src;
     src.entity = e.handle;
     src.net_id = e.net_id;
+    src.team = e.team;
     src.position = e.position;
     // The anchor's eye lift rides along: z + entity[+116] + 0x4000
     // [orig: HUD_DrawEntityLabel @0x5a3a84..0x5a3a98].

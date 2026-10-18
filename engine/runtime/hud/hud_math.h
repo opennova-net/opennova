@@ -280,6 +280,9 @@ uint32_t friendly_tag_revive_pulse(uint32_t argb, int frame_counter);
 // gray; read @0x5a3deb / @0x5a3e77].
 inline constexpr uint32_t kFriendlyTagDownedLightBlue = 0xFF80A0FFu;
 inline constexpr uint32_t kFriendlyTagDownedGray = 0xFFA0A0A0u;
+// The death screen's colour for a tag of neither team [orig: dword_840A40 =
+// 0xFF208020, read by HUD_DrawEntityLabel @0x5a3c60].
+inline constexpr uint32_t kFriendlyTagDeathScreenNeutral = 0xFF208020u;
 // The radio-request icon beside a tag: TSDicon strip cell 0x17 in table[3]
 // light blue at FORCED full alpha, a half-size fontH*0.5 square centered on
 // (x, y) [orig: HUD_DrawEntityLabel `push 17h` @0x5a4189/@0x5a42b7/@0x5a43d0

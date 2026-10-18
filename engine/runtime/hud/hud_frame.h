@@ -464,6 +464,11 @@ struct HudLayout {
 	uint32_t tag_good = 0xFF05FA0Du;
 	uint32_t tag_middle = 0xFFFAA608u;
 	uint32_t tag_bad = 0xFFB00A0Au;
+	// tagcolor_blueteam / tagcolor_redteam: the death screen's team colours
+	// (0 unparsed, as retail's BSS globals) [orig: g_HudposTagcolorBlueteam
+	// @0x2723AC8, g_HudposTagcolorRedteam @0x2723ACC].
+	uint32_t tag_blueteam = 0xFF000000u;
+	uint32_t tag_redteam = 0xFF000000u;
 	uint32_t hud_text = 0xFFFAD605u;
 	uint32_t weapon_text = 0xFFFAD605u;
 	uint32_t stance_tint = 0xFFFFFFFFu;
@@ -600,9 +605,17 @@ std::string attach_label_text(const GameTextLookup &gametext, world::SeatType se
 struct HudFriendlyTag {
 	float screen_x = 0.0f;
 	float screen_y = 0.0f;
+	// The anchor projected with no clip flag; a clipped tag bails unless the
+	// death screen pins it [orig: HUD_ClipPointToFrustumAndProject @0x5a3b51,
+	// `test eax, eax; jnz` @0x5a3b7e..0x5a3b80].
+	bool projected = true;
 	int32_t dist_q16 = 0;   // |anchor - view position|, 16.16 world units
 	std::string name;       // authored/callsign; empty resolves the fallback
 	uint16_t entity_id = 0; // the fallback-name index [orig: (pool<<12)|slot]
+	// The entity's (pool << 12) | slot handle, the spectate target's key (the
+	// wire handle; entity_id is the SSN on the world walk), and its team byte.
+	uint16_t handle = 0xFFFF;
+	uint8_t team = 0;
 	int32_t health_ratio_fp16 = 0x10000;
 	bool medic = false;     // CharAttr class flag 8 [orig: charattr.def Medic]
 	bool speaking = false;  // entity == g_VoicePlaybackEntity @ 0xC6EC38
@@ -888,6 +901,11 @@ struct HudSessionState {
 	bool spectating = false;
 	std::string spectated_name;
 	float spectated_health_fraction = 0.0f;
+	// The tracked spectate target's wire handle (dword_A860F4; 0xFFFF none,
+	// left stale past the death screen as retail's pointer is) and the death
+	// screen's sub-mode (dword_A860F0): the friendly tag's spectated legs.
+	uint16_t spectate_target = 0xFFFF;
+	uint8_t spectate_submode = 0;
 	HudSessionText text;
 };
 
@@ -1452,7 +1470,7 @@ private:
 	bool corner_spinmap_visible(const HudFrameState &state) const;
 	void element_objectives(const HudFrameState &state, float w, float h);
 	void element_attach_labels(const HudFrameState &state);
-	void element_friendly_tags(const HudFrameState &state);
+	void element_friendly_tags(const HudFrameState &state, float surface_w);
 	// The MP session lines (hud_frame_session_lines.cpp) and the HUDLS bar
 	// (hud_frame_slot_bar.cpp).
 	void element_game_info(const HudFrameState &state, float w, float h);

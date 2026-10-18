@@ -24,6 +24,9 @@ class World;
 struct FriendlyTagSource {
     EntityHandle entity;
     uint16_t net_id = 0; // the fallback-name index [orig: (pool<<12)|slot]
+    // The entity's team byte (entity+0x162), the death screen's team colours
+    // [orig: HUD_DrawEntityLabel @0x5a3c3c].
+    uint8_t team = 0;
     Vec3 position;       // raw entity position; the presenter lifts + projects
     std::string name;    // authored display name; empty -> the compiled-in table
     int32_t health_ratio_fp16 = 0x10000;
