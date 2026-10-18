@@ -568,8 +568,8 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 }
 
 // One piece slot's model: the def's piece graphic, the LOADED huskFinal model
-// else the husk model (runtime/world/present_passes.h death_piece_graphic;
-// retail Entity_SpawnDeathPieces @ 0x4934af stores that pointer at piece+0).
+// else the husk model (engine: runtime/world/present_passes.h death_piece_graphic;
+// the spawn stores that pointer at piece+0).
 // Every level is retained and the draws select it; the reflection draws it too
 // (retail Water_RenderReflectedWorldScene @ 0x5c85b7..0x5c85c1 runs the same
 // collect and draw at the shipped water detail). Hidden until a draw shows it.
@@ -615,7 +615,7 @@ ObjectModel *DestructionPresenter::piece_model(int p_slot) const {
 	return id != nullptr ? Object::cast_to<ObjectModel>(live_node3d(*id)) : nullptr;
 }
 
-// retail DeathPiece_RenderSection @ 0x57b690: EulerScale(piece pose,
+// The section draw (engine: runtime/world/death_piece_draw.h): EulerScale(piece pose,
 // ftol(scale * 65536)) * T(-centre of the drawn section's COBJ row), every
 // bone matrix the same. The pose converts like every entity's (the BAM heading
 // is 90 - the mission yaw); the COBJ centre is in the model's own axes, (x, y,

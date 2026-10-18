@@ -100,6 +100,10 @@ void stamp_zone_timer(hud::HudMinimapMarker &m,
     m.timer_value = entry.value_current;
     m.timer_limit = entry.value_limit;
     m.timer_rate = entry.value_rate;
+    // The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays [orig:
+    // NapiNPClientMsg_ZoneTimerWindow @0x428BE2, after ZoneTimerList_SetEntryWindow
+    // @0x537DE0].
+    if (found->second.has_window) m.capture_team = found->second.window.mode_b;
 }
 
 template <typename Bank>
@@ -132,7 +136,8 @@ void append_bank(const Bank &bank, hud::HudMinimapBank bank_id, world::World *wo
         const world::Entity *entity =
             world != nullptr ? world->registry.get(world::EntityHandle{slot.handle}) : nullptr;
         if (entity != nullptr) {
-            policy = world::minimap_blip_draw_policy(*entity, slot.param);
+            policy = world::minimap_blip_draw_policy(*entity, slot.param,
+                                                     local_player != nullptr ? local_player->team : -1);
             // v4: the map medic marker -- a LOCAL-TEAM entity whose class
             // carries the charattr Medic attribute; the other team's bit is
             // forced off at the producer [orig: HUD_DrawEntityLabelsAndMarkers
@@ -153,6 +158,8 @@ void append_bank(const Bank &bank, hud::HudMinimapBank bank_id, world::World *wo
         m.half_x_q16 = policy.half_x_q16;
         m.half_y_q16 = policy.half_y_q16;
         m.floor_px = policy.floor_px;
+        m.change_team = policy.change_team ? 1 : 0;
+        m.cell = policy.cell;
         m.medic = static_cast<uint8_t>(medic);
         stamp_zone_timer(m, timers);
         out.push_back(m);
@@ -199,7 +206,8 @@ void build_minimap_markers(const MinimapMarkerInputs &in,
     if (local_player == nullptr || local_marker_handle == world::EntityHandle::kInvalid ||
         retained_local_player)
         return;
-    const world::MinimapBlipDrawPolicy policy = world::minimap_blip_draw_policy(*local_player, 3);
+    const world::MinimapBlipDrawPolicy policy =
+        world::minimap_blip_draw_policy(*local_player, 3, local_player->team);
     hud::HudMinimapMarker m;
     m.bank = static_cast<uint8_t>(hud::HudMinimapBank::kPersistent);
     m.handle = local_marker_handle;
@@ -218,6 +226,8 @@ void build_minimap_markers(const MinimapMarkerInputs &in,
     m.half_x_q16 = policy.half_x_q16;
     m.half_y_q16 = policy.half_y_q16;
     m.floor_px = policy.floor_px;
+    m.change_team = policy.change_team ? 1 : 0;
+    m.cell = policy.cell;
     // The restored local row is a local-team player by definition; its medic
     // bit is its own class attribute.
     m.medic = in.world->tables.class_has_attribute(local_player->player_class,

@@ -65,17 +65,19 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
                                            uint32_t roll_bam);
 
-// Project a WORLD position into a carrier's local frame — the exact inverse of
-// network_transform_local_to_world. [orig: Entity_TransformWorldToLocal @ 0x43BB50 —
-// the op1/op3 write paths of NetPacket_SerializePlayerState @ 0x4C09C0 run it against
-// the mount (+0x16C) or ground entity (+0x28) before compressing a carrier-relative
-// record]: delta = world - carrier position, then the transposed rotation in reverse
-// order — yaw about Z, pitch about Y, roll about X — in 22-bit fixed-point sin/cos.
-// The binary folds the inverse-rotation sign into a -2^22 sine scale (dbl_7C57B0);
-// this port keeps +2^22 sines and writes the subtractions out, which is the same
-// arithmetic. The original is a 6-dword pose transform: out[3] = heading - carrier
-// heading, out[4]/out[5] pitch/roll pass through untouched (@0x43bb7b-0x43bb8d) —
-// callers compose headings with plain BAM subtraction, so this returns position only.
+// Project a WORLD position into a carrier's local frame — the inverse, within the
+// fixed-point rounding, of network_transform_local_to_world.
+// [orig: Entity_TransformWorldToLocal @ 0x43BB50 — the op1/op3 write paths of
+// NetPacket_SerializePlayerState @ 0x4C09C0 run it against the mount (+0x16C) or
+// ground entity (+0x28) before compressing a carrier-relative record]: delta = world -
+// carrier position, then the transposed rotation in reverse order — yaw about Z,
+// pitch about Y, roll about X — in 22-bit fixed-point sin/cos. The binary folds the
+// inverse-rotation sign into a -2^22 sine scale (dbl_7C57B0) and the port multiplies
+// by those negated sines as it does (the products floor, so flipping the sign outside
+// them can differ by one LSB). The original is a 6-dword pose transform: out[3] =
+// heading - carrier heading, out[4]/out[5] pitch/roll pass through untouched
+// (@0x43bb7b-0x43bb8d) — callers compose headings with plain BAM subtraction, so this
+// returns position only.
 WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
                                            int32_t px, int32_t py, int32_t pz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
@@ -1332,19 +1334,6 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 // [orig: NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310]
 // ===========================================================================
 
-// C2S 0x06 hit_part packing: `(roster slot << 9) | (shot seq & 0x1FF)`
-// [orig: Server_ClientFiredRound @0x50bda5]. The 9-bit split is the witnessed one; the
-// roster slot is the S2C 0x04 body byte 17 the host assigned this client
-// [orig: NetPacket_WriteSlotAssignment @0x502b30]. Named because sending a bare
-// sequence (slot bits 0) makes a retail host attribute the round to its OWN slot 0.
-inline uint16_t pack_fired_round_hit_part(uint8_t roster_slot, uint16_t shot_seq)
-{
-	return static_cast<uint16_t>((static_cast<uint16_t>(roster_slot) << 9) |
-	                             (shot_seq & 0x1FFu));
-}
-inline uint8_t fired_round_hit_part_slot(uint16_t hit_part) { return static_cast<uint8_t>(hit_part >> 9); }
-inline uint16_t fired_round_hit_part_seq(uint16_t hit_part) { return static_cast<uint16_t>(hit_part & 0x1FFu); }
-
 struct ClientFiredRound {
 	uint32_t current_tick = 0;        // client network-role currentTick; host cooldown/freshness anchor
 	uint16_t shooter_handle = 0xFFFF; // pool<<12|slot; >= 0x5000 high nibble = invalid
@@ -1364,8 +1353,10 @@ struct ClientFiredRound {
 	// is the roster id the S2C 0x04 hands the client in body byte 17
 	// [orig: NetPacket_WriteSlotAssignment @0x502b30].
 	// Leaving bits 9.. zero names roster slot 0 — on a listen host, the HOST ITSELF —
-	// and a live retail host then attributed our rounds to its own player. Build it with
-	// npwire::pack_fired_round_hit_part.
+	// and a live retail host then attributed our rounds to its own player. A client sends
+	// its spawned round's id, which the pool mints in this shape
+	// [orig: Entity_FireWeaponAndSendPacket @0x42C030; CEntityManager_AllocateSlot
+	//  @0x4EAAE6..0x4EAB0C].
 	uint16_t hit_part = 0;
 	uint8_t  extra_byte1 = 0;         // shooter entity+352 low byte → dest[18]
 	uint8_t  extra_byte2 = 0;         // → dword_C86FB4 global (last-fire context)
@@ -2086,7 +2077,7 @@ bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch
 //     entity, pool lookup, the same gate, then state 0/3 -> 1 iff value == 1;
 //     state 1/2 -> value iff number == 3 (the SECTION number, @0x514c2a); reply
 //     S2C 0x37 {handle, row.state, number} to the requester
-//     [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20 — switch @0x514c20..
+//     [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20 — switch @0x514c20..
 //      0x514c35, reply @0x514c46..0x514c74].
 struct DoorSlotAction {
 	uint16_t entity_handle = 0;  // (pool<<12)|slot; 0xFFFF when the sender's entity is in no pool

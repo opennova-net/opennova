@@ -178,6 +178,7 @@ func test_fresh_profile_seeds_the_video_test_words_once() -> void:
 	assert_eq(state.texfilter_level, GameWorld.texfilter_level_fresh_profile())
 	assert_eq(state.particle_density, GameWorld.particle_density_fresh_profile())
 	assert_eq(state.texcompression_level, GameWorld.texcompression_level_fresh_profile())
+	assert_eq(state.terrain_texdetail, GameWorld.terrain_texdetail_fresh_profile())
 	var text := _saved_cfg()
 	assert_string_contains(
 		text,
@@ -280,6 +281,28 @@ func test_texture_compression_lives_as_the_unclamped_cfg_word() -> void:
 		PlayerOptions.new().current().texcompression_level,
 		7,
 		"the load keeps a word past the rows as written"
+	)
+
+
+func test_terrain_texture_detail_lives_and_clamps_as_the_cfg_word() -> void:
+	# game.cfg's terrain_texdetail: the video test's 3 (full detail) on a fresh
+	# profile; the block's read clamps a saved word into 0..3, so a -1 reads as
+	# 0, two halvings (the engine's gamecfg clamp_graphics_options,
+	# renderer/device_texture.h).
+	assert_eq(GameWorld.terrain_texdetail_fresh_profile(), 3)
+	var options := PlayerOptions.new()
+	var state := options.current()
+	state.terrain_texdetail = 1
+	options.update(state)
+	assert_eq(PlayerOptions.new().current().terrain_texdetail, 1)
+	assert_eq(state.copy().terrain_texdetail, 1, "the snapshot copy carries the word")
+	_write_cfg(["terrain_texdetail = -1"])
+	assert_eq(PlayerOptions.new().current().terrain_texdetail, 0, "a saved -1 loads as 0")
+	_write_cfg(["terrain_texdetail = 9"])
+	assert_eq(
+		PlayerOptions.new().current().terrain_texdetail,
+		3,
+		"a saved word past the top rung loads as 3"
 	)
 
 

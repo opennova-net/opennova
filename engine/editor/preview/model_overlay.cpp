@@ -91,8 +91,10 @@ std::vector<ModelOverlay> model_overlays(const threedi::Threedi3di3 &model, int 
 			row.name = "Light " + std::to_string(i);
 			const bool spot = (light.flags & threedi::THREEDI_LIGHT_FLAG_TYPE_TARGET) != 0;
 			const float axis[3] = {light.rotation[0], light.rotation[1], light.rotation[2]};
-			place(light.subobj_index > 0 ? drawn : std::vector<ThreediMatrix4x4>(), light.subobj_index, light.offset,
-			      spot ? axis : nullptr, row);
+			// By the model's matrix alone: the subobject byte names the light's owner group, never a part it rides
+			// [orig: Entity_SpawnGlowEffects @ 0x56c7c0: the record's offset through the entity's matrix
+			// @ 0x56c838..0x56c84e; the byte @ 0x56c89a only LightInstance_SetOwnerGroup's @ 0x56c8ae].
+			place(std::vector<ThreediMatrix4x4>(), -1, light.offset, spot ? axis : nullptr, row);
 			row.radius = light.atten_end;
 			row.cone = spot ? std::acos(std::clamp(light.rotation[3], -1.0f, 1.0f)) : 0.0f;
 			row.color = (uint32_t(light.color_start[2]) << 16) | (uint32_t(light.color_start[1]) << 8) | light.color_start[0];

@@ -23,8 +23,8 @@ struct AiEntity;
 // client and a joiner alike).
 struct SpectatorMotorState {
 	bool death_screen = false; // g_DeathScreenActive @0xA860EC
-	int32_t submode = 0;       // dword_A860F0: 0 free, 1 chase, 2 first person
-	// dword_A860F4. A target the world's own registry holds (the authority's
+	int32_t submode = 0;       // g_DeathScreenSubMode: 0 free, 1 chase, 2 first person
+	// g_DeathScreenTarget. A target the world's own registry holds (the authority's
 	// replica rows name its own entities) is read at motor time; a decoded
 	// remote person (a joiner's, which has no registry entity) carries the
 	// pose its row held when the role stamped it.
@@ -46,7 +46,7 @@ struct SpectatorMotorState {
 	uint32_t death_screen_opens_seen = 0;
 
 	// The motor's follow arm: a sub-mode with a target [orig: @0x4b2994
-	// `cmp dword_A860F0,0`, @0x4b29c7 `test eax,eax`].
+	// `cmp g_DeathScreenSubMode,0`, @0x4b29c7 `test eax,eax`].
 	bool follows_target() const { return death_screen && submode != 0 && has_target; }
 };
 

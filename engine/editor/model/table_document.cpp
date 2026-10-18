@@ -58,9 +58,9 @@ TableDocument::Located TableDocument::owner_of(const Located &record) const {
 }
 
 RecordHandle TableDocument::record_in(const Node &row, const NodeAddress &address) const {
-	Located at;
-	if (!locate(row, address.child, at) || at.record.kind != address.kind) return {};
-	return at.record;
+	RecordHandle record;
+	bool present = true;
+	return record_at(row, address, record, present) ? record : RecordHandle{};
 }
 
 bool TableDocument::list_of(const Located &owner, NodeKind kind, size_t &list) const {
@@ -104,42 +104,81 @@ std::vector<Document::Collection> TableDocument::collections(const Node &row, co
 }
 
 bool TableDocument::walk(const Node &row, Located &owner, const NodeAddress &self, const RecordVisitor &visit) const {
-	const TableKind *kind = table().kind(owner.record.kind);
-	if (!kind) return true;
-	for (size_t l = 0; l < kind->lists().size() && l < owner.ids->lists.size(); ++l) {
-		const TableList &list = kind->lists()[l];
-		CollectionSpec spec = list.spec;
-		spec.applies = list_applies(row, owner, l);
-		if (!list.kinds.empty()) {
-			spec.kinds = list.kinds.data();
-			spec.kind_count = list.kinds.size();
-		}
-		const bool written = owner.present && (!list.ops.present || list.ops.present(owner.record));
-		std::vector<RecordIds> &held = owner.ids->lists[l];
-		for (size_t i = 0; i < held.size(); ++i) {
-			const RecordHandle child = list.ops.at(owner.record, i);
-			if (!child || !list.holds(child.kind)) return false;
-			// A list of several kinds places each record as the kind its handle says.
-			spec.kind = child.kind;
-			const NodeAddress address{row.id, child.kind, held[i].id};
-			if (!visit(address, Placement{self, spec, i, l})) return false;
-			// Down one step and back: the walk keeps one trail.
-			const RecordHandle record = owner.record;
-			RecordIds *ids = owner.ids;
-			const bool present = owner.present;
-			owner.trail.push_back({record, l, i});
-			owner.owner_ids.push_back(ids);
-			owner.record = child;
-			owner.ids = &held[i];
-			owner.present = written;
-			const bool more = walk(row, owner, address, visit);
+	// From an explicit stack, a level an owner, never a call a level (a menu nests its windows
+	// thousands deep): each owner's lists in order, each record before what it holds. The walk keeps
+	// one trail, down one step and back, and gives `owner` back as it took it.
+	struct Level {
+		NodeAddress self;
+		RecordHandle record;
+		RecordIds *ids = nullptr;
+		bool present = true;
+		const TableKind *kind = nullptr;
+		size_t list = 0, index = 0;
+		CollectionSpec spec;
+		bool written = false, open = false;
+	};
+	std::vector<Level> stack;
+	stack.push_back({self, owner.record, owner.ids, owner.present, table().kind(owner.record.kind)});
+	const size_t trail = owner.trail.size();
+	const auto give_back = [&] {
+		owner.trail.resize(trail);
+		owner.owner_ids.resize(trail);
+		owner.record = stack.front().record;
+		owner.ids = stack.front().ids;
+		owner.present = stack.front().present;
+	};
+	while (!stack.empty()) {
+		Level &at = stack.back();
+		if (!at.kind || at.list >= at.kind->lists().size() || at.list >= at.ids->lists.size()) {
+			// Every list of this owner walked: back up one step.
+			if (stack.size() == 1) break;
+			stack.pop_back();
 			owner.trail.pop_back();
 			owner.owner_ids.pop_back();
-			owner.record = record;
-			owner.ids = ids;
-			owner.present = present;
-			if (!more) return false;
+			const Level &up = stack.back();
+			owner.record = up.record;
+			owner.ids = up.ids;
+			owner.present = up.present;
+			continue;
 		}
+		const TableList &list = at.kind->lists()[at.list];
+		if (!at.open) {
+			at.spec = list.spec;
+			at.spec.applies = list_applies(row, owner, at.list);
+			if (!list.kinds.empty()) {
+				at.spec.kinds = list.kinds.data();
+				at.spec.kind_count = list.kinds.size();
+			}
+			at.written = at.present && (!list.ops.present || list.ops.present(at.record));
+			at.open = true;
+		}
+		std::vector<RecordIds> &held = at.ids->lists[at.list];
+		if (at.index >= held.size()) {
+			++at.list;
+			at.index = 0;
+			at.open = false;
+			continue;
+		}
+		const size_t i = at.index++;
+		const RecordHandle child = list.ops.at(at.record, i);
+		if (!child || !list.holds(child.kind)) {
+			give_back();
+			return false;
+		}
+		// A list of several kinds places each record as the kind its handle says.
+		at.spec.kind = child.kind;
+		const NodeAddress address{row.id, child.kind, held[i].id};
+		if (!visit(address, Placement{at.self, at.spec, i, at.list})) {
+			give_back();
+			return false;
+		}
+		owner.trail.push_back({at.record, at.list, i});
+		owner.owner_ids.push_back(at.ids);
+		owner.record = child;
+		owner.ids = &held[i];
+		owner.present = at.written;
+		const bool written = at.written;
+		stack.push_back({address, child, &held[i], written, table().kind(child.kind)});
 	}
 	return true;
 }
@@ -148,6 +187,81 @@ void TableDocument::walk_records(const Node &row, const RecordVisitor &visit) co
 	Located at;
 	if (!locate(row, 0, at)) return;
 	walk(row, at, {row.id, row.kind, 0}, visit);
+}
+
+// --- the records of a committed row -------------------------------------------------------------------
+
+const TableDocument::Held *TableDocument::held(const Node &node, NodeId record) const {
+	if (!committed(node)) return nullptr;
+	if (held_.load_generation != load_generation() || held_.revision != revision()) {
+		held_.rows.clear();
+		held_.load_generation = load_generation();
+		held_.revision = revision();
+	}
+	auto found = held_.rows.find(&node);
+	if (found == held_.rows.end()) found = held_.rows.emplace(&node, find_held(node)).first;
+	const auto entry = found->second.find(record == node.id ? 0 : record);
+	return entry == found->second.end() ? nullptr : &entry->second;
+}
+
+std::unordered_map<NodeId, TableDocument::Held> TableDocument::find_held(const Node &node) const {
+	std::unordered_map<NodeId, Held> out;
+	const TableRow &row = static_cast<const TableRow &>(node);
+	Held own;
+	own.record = row.record();
+	own.ids = const_cast<RecordIds *>(&row.ids);
+	if (!own.record) return out;
+	out.emplace(0, own);
+	// walk's order, and its end: a record its list does not hold ends the walk, so what comes after it
+	// is no record the path index reaches either (locate finds none).
+	struct Level {
+		NodeId id;
+		RecordHandle record;
+		RecordIds *ids;
+		bool present;
+		const TableKind *kind;
+		size_t list = 0, index = 0;
+		bool written = false;
+	};
+	std::vector<Level> stack;
+	stack.push_back({0, own.record, own.ids, true, table().kind(own.record.kind)});
+	while (!stack.empty()) {
+		Level &at = stack.back();
+		if (!at.kind || at.list >= at.kind->lists().size() || at.list >= at.ids->lists.size()) {
+			stack.pop_back();
+			continue;
+		}
+		const TableList &list = at.kind->lists()[at.list];
+		std::vector<RecordIds> &ids = at.ids->lists[at.list];
+		if (at.index >= ids.size()) {
+			++at.list;
+			at.index = 0;
+			continue;
+		}
+		if (at.index == 0) at.written = at.present && (!list.ops.present || list.ops.present(at.record));
+		const size_t i = at.index++;
+		const RecordHandle child = list.ops.at(at.record, i);
+		if (!child || !list.holds(child.kind)) break;
+		const NodeId id = ids[i].id;
+		out.emplace(id, Held{child, &ids[i], at.written, at.id, at.record.kind, at.list, i});
+		const bool written = at.written;
+		stack.push_back({id, child, &ids[i], written, table().kind(child.kind)});
+	}
+	return out;
+}
+
+bool TableDocument::record_at(const Node &row, const NodeAddress &address, RecordHandle &record, bool &present) const {
+	if (const Held *at = held(row, address.child)) {
+		if (at->record.kind != address.kind) return false;
+		record = at->record;
+		present = at->present;
+		return true;
+	}
+	Located at;
+	if (!locate(row, address.child, at) || at.record.kind != address.kind) return false;
+	record = at.record;
+	present = at.present;
+	return true;
 }
 
 Applicability TableDocument::list_applies(const Node &, const Located &owner, size_t list) const {
@@ -189,22 +303,24 @@ const FieldSchema *TableDocument::find_field(NodeKind kind, const std::string &i
 }
 
 bool TableDocument::read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const {
-	Located at;
-	if (!locate(row, address.child, at) || at.record.kind != address.kind) return false;
+	RecordHandle record;
+	bool written = true;
+	if (!record_at(row, address, record, written)) return false;
 	const TableKind *kind = resolve_kind(address.kind);
 	const size_t place = kind ? resolve_field(*kind, field) : TableKind::npos;
-	return place != TableKind::npos && kind->value(place).get(at.record, out);
+	return place != TableKind::npos && kind->value(place).get(record, out);
 }
 
 bool TableDocument::read_present(const Node &row, const NodeAddress &address, const std::string &field) const {
-	Located at;
-	if (!locate(row, address.child, at) || at.record.kind != address.kind) return false;
-	if (field.empty()) return at.present;
+	RecordHandle record;
+	bool written = true;
+	if (!record_at(row, address, record, written)) return false;
+	if (field.empty()) return written;
 	const TableKind *kind = resolve_kind(address.kind);
 	const size_t place = kind ? resolve_field(*kind, field) : TableKind::npos;
 	if (place == TableKind::npos) return false;
 	const FieldValue &value = kind->value(place);
-	return !value.present || value.present(at.record);
+	return !value.present || value.present(record);
 }
 
 bool TableDocument::set_value(Node &, const Located &at, size_t field, const Value &value, std::string &error) {
@@ -269,8 +385,15 @@ void TableDocument::refine_field(const NodeAddress &address, FieldUse &use) cons
 	}
 	if (place == TableKind::npos || (!kind->applies(place) && !kind->reference(place))) return;
 	const Node *node = row(address.row);
+	if (!node) return;
+	// A type that answers a held record's functions itself reads no owners.
+	if (const Held *held_at = held(*node, address.child);
+	    held_at && held_at->record.kind == address.kind && refine_held(*node, address, *held_at, *kind, place, use)) {
+		count_field(kind->fields()[place]);
+		return;
+	}
 	Located at;
-	if (!node || !locate(*node, address.child, at) || at.record.kind != address.kind) return;
+	if (!locate(*node, address.child, at) || at.record.kind != address.kind) return;
 	count_field(kind->fields()[place]);
 	const RecordOwners owners = at.owners();
 	if (kind->applies(place)) use.applies = kind->applies(place)(at.record, owners);

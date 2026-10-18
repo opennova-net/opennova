@@ -187,6 +187,18 @@ func test_the_shell_quit_saves_the_block() -> void:
 	assert_string_contains(_saved_cfg(), "music_volume         = 77\r\n")
 
 
+func test_the_terrain_texture_detail_reaches_the_world_as_read() -> void:
+	# The shell hands the world game.cfg's terrain_texdetail as the block read
+	# it, clamped into 0..3 (a -1 is 0), through its options listener; the world
+	# copies it at its next mission start (engine renderer/device_texture.h).
+	_write_cfg("version = 29\r\nterrain_texdetail = -1\r\n")
+	var shell := await _boot_shell()
+	if shell == null:
+		return
+	assert_eq(GameCfgStore.block().get_word("terrain_texdetail"), 0, "the read clamps -1 to 0")
+	assert_eq(shell.get_world().get_terrain_texdetail(), 0, "the shell hands the world the word")
+
+
 func test_an_exit_at_the_return_to_menu_read() -> void:
 	# Every main-menu entry reads game.cfg (the MainMenu scene's init), the
 	# return from a mission's included: a file that sets mpreset ends the

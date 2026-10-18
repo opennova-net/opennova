@@ -4,6 +4,7 @@
 
 #include <base/io/le.h>
 
+#include <cstdint>
 #include <cstring>
 #include <string>
 
@@ -209,15 +210,24 @@ void decode_masked_level(const uint8_t *data, const FormatRow &row, const std::v
 	}
 }
 
+// a * b, or UINT64_MAX where the product does not fit in 64 bits: more bytes than any file holds,
+// so a header whose sides multiply past it reads as data that stops short.
+uint64_t saturating_mul(uint64_t a, uint64_t b) {
+	return a != 0 && b > UINT64_MAX / a ? UINT64_MAX : a * b;
+}
+
 // One level's bytes as D3DX sizes them: a DXT1's 8 bytes a block, DXT2 to DXT5's 16, the packed
-// pairs' 4 bytes a two-texel pair, every other format its bits a texel, row after row.
+// pairs' 4 bytes a two-texel pair, every other format its bits a texel, row after row. Counted in
+// 64 bits and saturating, so no 32-bit side wraps the count (a block count of a side past
+// 0xFFFFFFFC, a product of two large sides) to a small level a short file holds.
 // [orig: D3DXTex::CImage::LoadDDS @ 0x6DDA66, the per-format pitch and size]
-size_t level_bytes(const FormatRow &row, uint32_t width, uint32_t height) {
+uint64_t level_bytes(const FormatRow &row, uint32_t width, uint32_t height) {
 	if (row.flags == DDPF_FOURCC && is_dxt(row.fourcc))
-		return size_t(dxt_block_bytes(row.fourcc)) * ((width + 3) / 4) * ((height + 3) / 4);
+		return saturating_mul(saturating_mul(dxt_block_bytes(row.fourcc), (uint64_t(width) + 3) / 4),
+		                      (uint64_t(height) + 3) / 4);
 	if (row.flags == DDPF_FOURCC && row.bits == 16 && row.d3d > 0xFFFF)
-		return size_t(4) * ((width + 1) / 2) * height;
-	return size_t(width) * (row.bits / 8) * height;
+		return saturating_mul(4 * ((uint64_t(width) + 1) / 2), height);
+	return saturating_mul(uint64_t(width) * (row.bits / 8), height);
 }
 
 } // namespace
@@ -332,9 +342,8 @@ bool dds_read(const uint8_t *bytes, size_t size, DdsImage &out, std::string &err
 	for (uint32_t face = 0; face < out.faces; ++face) {
 		uint32_t width = h.width, height = h.height, depth = out.depth;
 		for (uint32_t mip = 0; mip < mips; ++mip) {
-			const size_t one = level_bytes(*row, width, height);
-			const size_t all = one * depth;
-			if (size - at < all) {
+			const uint64_t all = saturating_mul(level_bytes(*row, width, height), depth);
+			if (uint64_t(size - at) < all) {
 				out.refusal = "Its data stops short of " +
 				              (out.faces > 1 ? "face " + std::to_string(face + 1) + ", " : std::string()) + "level " +
 				              std::to_string(mip) + " (" + std::to_string(width) + " x " + std::to_string(height) + ").";
@@ -346,10 +355,10 @@ bool dds_read(const uint8_t *bytes, size_t size, DdsImage &out, std::string &err
 				level.width = width;
 				level.height = height;
 				level.offset = at;
-				level.bytes = all;
+				level.bytes = size_t(all);
 				out.levels.push_back(std::move(level));
 			}
-			at += all;
+			at += size_t(all);
 			width = width == 1 ? 1 : width >> 1;
 			height = height == 1 ? 1 : height >> 1;
 			depth = depth == 1 ? 1 : depth >> 1;
@@ -377,7 +386,7 @@ bool dds_write_dxt(uint32_t fourcc, uint32_t width, uint32_t height, const std::
 	}
 	uint32_t w = width, h = height;
 	for (size_t i = 0; i < levels.size(); ++i) {
-		if (levels[i].size() != size_t(block) * ((w + 3) / 4) * ((h + 3) / 4)) {
+		if (uint64_t(levels[i].size()) != saturating_mul(saturating_mul(block, (uint64_t(w) + 3) / 4), (uint64_t(h) + 3) / 4)) {
 			error = "Level " + std::to_string(i) + "'s bytes are not its blocks'.";
 			return false;
 		}

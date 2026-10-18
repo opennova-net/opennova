@@ -45,10 +45,10 @@ struct MissionItemFacts {
 	// words give (1, 2, Evil over Good; 0 neither) [orig: @ 0x44dd51..0x44dd86 (JOTACmed.exe)]; its AI class,
 	// its sid up to
 	// its first '.', eight characters at most, which the original's writer takes from the row on every save
-	// (MissionDocument::set_item_classes) [orig: JOTACmed.exe ItemsDef_ParseToken's sid arm, sub_462CB0 @
+	// (MissionDocument::set_item_classes) [orig: JOTACmed.exe ItemsDef_ParseToken's sid arm, Path_ReplaceOrAppendExtension @
 	// 0x462cb0 giving it
-	// "iai" and the four characters cut; sub_44C8E0 @ 0x44cabe..0x44caf2]; its AI script, its default_aip's where
-	// the project has the profile's .aip [orig: JOTACmed.exe, @ 0x44dccc..0x44dd2e; sub_44C8E0 @ 0x44c8e0, the
+	// "iai" and the four characters cut; MissionItem_PackBmsRecord @ 0x44cabe..0x44caf2]; its AI script, its default_aip's where
+	// the project has the profile's .aip [orig: JOTACmed.exe, @ 0x44dccc..0x44dd2e; MissionItem_PackBmsRecord @ 0x44c8e0, the
 	// eight bytes]; and its four AI keys [orig: @ 0x44dc46..0x44dcc2 (JOTACmed.exe)].
 	bool seeded = false;
 	int team = 0;
@@ -101,6 +101,10 @@ public:
 	// what a refresh reads).
 	size_t files_read() const { return files_read_; }
 	size_t items_asked() const { return items_asked_; }
+	// The original editor's weapon table over the project's weapon.def, which stands in for the original's
+	// medwep.def (mission::mis_weapon_table), read again where the file moved; null where the project has none
+	// that reads (MissionDocument::set_weapon_table, D-MIS-19).
+	std::shared_ptr<const mission::MisWeaponTable> weapon_table(const SessionView &view);
 
 private:
 	struct Model {
@@ -141,6 +145,9 @@ private:
 	std::map<std::string, Catalog> catalogs_;
 	size_t files_read_ = 0;
 	size_t items_asked_ = 0;
+	bool weapons_read_ = false;
+	uint64_t weapons_stamp_ = 0;
+	std::shared_ptr<const mission::MisWeaponTable> weapons_;
 };
 
 // The pool a record of TYPE `type` is placed in, as the game's editor places it

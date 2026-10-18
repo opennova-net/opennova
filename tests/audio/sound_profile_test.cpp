@@ -1,6 +1,6 @@
 // opennova::audio::SoundProfileTable — the SndProf.def parser + lookup semantics,
 // and write_sound_profiles, the from-scratch writer it reads back
-// [orig: SoundProfile_LoadAll @ 0x527490, sound_profile_xml_callback @ 0x526fc0,
+// [orig: SoundProfile_LoadAll @ 0x527490, SoundProfile_ParseLineCallback @ 0x526fc0,
 // SoundProfile_FindSlotByName @ 0x526e30]. The inline fixture mirrors the retail
 // file's shapes (quoted begin names + trailing comment text, tab/space runs,
 // float param columns, the med/crs percent rows). The retail-corpus spot check

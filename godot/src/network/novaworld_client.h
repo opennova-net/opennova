@@ -37,6 +37,7 @@
 namespace godot {
 
 class HostSessionOptions;
+class JoinTarget;
 
 // Godot-side novaworld client. One instance per game client.
 // Wraps the C++ libs (engine/net/novacrypto + engine/net/napi + engine/net/novaworld) via
@@ -197,16 +198,13 @@ public:
 	// in-match ClientHello itself (one joiner seam for LAN / NW / env joins).
 	void join(int rid);
 
-	// The proxy-assisted join fields of the last resolved .joi (NI/NP/BK next to
-	// NK): the game node "ip:port" the rendezvous targets, the relay cookie, and
-	// the relay "ip:port" (the NK endpoint). has_join_proxy() is false when the join
-	// carried none. The in-match joiner installs them as its ProxyRendezvousConfig
-	// (engine/net/novaworld/proxy_rendezvous.h) and sends the 48-byte rendezvous on
-	// its enumerator cadence.
+	// The proxy-assisted join of the last resolved .joi (NI/NP/BK next to NK), the
+	// engine's ProxyRendezvousConfig (engine/net/novaworld/proxy_rendezvous.h):
+	// has_join_proxy() is false when the join carried none; copy_join_proxy_to
+	// hands it to the join target, whose in-match joiner sends the 48-byte
+	// rendezvous on its enumerator cadence.
 	bool has_join_proxy() const { return join_proxy_.enabled(); }
-	String get_join_proxy_node() const;
-	int64_t get_join_proxy_cookie() const { return static_cast<int64_t>(join_proxy_.cookie); }
-	String get_join_proxy_relay() const;
+	void copy_join_proxy_to(const Ref<JoinTarget> &p_target) const;
 	// The LN lobby number of the last resolved .joi (0 = none): nonzero means the
 	// in-match dial targets the LAN-discovered endpoint instead of the NK relay,
 	// and the play leg reports it as the "Lan" session var.
@@ -355,8 +353,6 @@ private:
 	bool play_in_flight_ = false;
 	uint32_t play_started_ms_ = 0;
 	opennova::ProxyRendezvousConfig join_proxy_;
-	std::string join_proxy_node_ip_;
-	std::string join_proxy_relay_ip_;
 };
 
 } // namespace godot

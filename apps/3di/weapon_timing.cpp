@@ -14,6 +14,7 @@
 #include <set>
 #include <sstream>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <formats/threedi/scene_text.h>
@@ -429,8 +430,7 @@ bool plan_weapon_timing(const WeaponTimingRequest &request, WeaponTimingPlan &ou
 std::string weapon_edits_text(const WeaponTimingPlan &plan) {
 	std::ostringstream s;
 	s << "weapon_edits 1\n"
-	  << "# opennova-3di weapon timing: the weapon.def keys each entry sets, and no others.\n"
-	  << "# Apply them with: opennova-3di weapon merge <weapon.def> <this file> -o <out.def>\n";
+	  << "# opennova-3di weapon timing: the weapon.def keys each entry sets, and no others.\n";
 	for (const auto &e : plan.entries) {
 		s << "\nentry " << e.name << " " << e.mode << "\n"
 		  << "# " << e.cycle_ticks << " ticks a shot at " << io::kTickHz << " Hz: " << rpm_text(e.cycle_ticks)
@@ -453,7 +453,7 @@ std::string weapon_edits_text(const WeaponTimingPlan &plan) {
 }
 
 int cmd_weapon_timing(const char *input, const char *output) {
-	std::ifstream file(input);
+	std::ifstream file(opennova::io::os_path(input));
 	if (!file) {
 		std::fprintf(stderr, "opennova-3di: cannot read %s\n", input);
 		return 1;

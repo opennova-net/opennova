@@ -237,7 +237,9 @@ std::string feed_format_row(const FeedRow &, const std::string &tmpl,
 std::string feed_row_line(const FeedRow &, const GameTextLookup &gametext);
 
 // Retained involved-event line; expiry clears its clock but preserves the death-screen text.
-// [orig: NetPacket_HandleGameEvent @ 0x427B8B; HUD_DrawKillAnnounceBanner @ 0x59DC90]
+// `tick` and every `now` are the logic tick: the stamp copies g_CurrentTick and the 186-tick
+// life reads it [orig: NetPacket_HandleGameEvent @ 0x427B8B, the stamp @0x427B90 / @0x427B96;
+// HUD_DrawKillAnnounceBanner @ 0x59DC90, the read @0x59DCAD]
 struct KillAnnouncement {
 	std::string text;
 	uint32_t tick = 0;

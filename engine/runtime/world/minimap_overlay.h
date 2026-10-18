@@ -51,8 +51,18 @@ struct MinimapBlipDrawPolicy {
 	int32_t half_x_q16 = 655360; // 10 wu class fallback
 	int32_t half_y_q16 = 655360;
 	uint8_t floor_px = 6;
+	// The change-team (capture) class's legs where the class walk joins: a 12 px floor; with a
+	// zone number the halves doubled, cell 26 + (its team is the local player's), upright. Its
+	// colour blinks at draw time on the session frame clock (hud draw_blip). A change-team
+	// footprint carries the bit for its own taker blink (Render_CollisionWireframe @0x5968C9).
+	// [orig: Minimap_DrawBlip @0x597CBB..0x597CC5 (the def's +0x54 & 0x20000), the floor
+	//  flt_7C4600 @0x597CD1, @0x597D19..0x597D42 (the zone number, the doubling, the cell
+	//  against g_LocalPlayerEntity's team, the angle 0)]
+	bool change_team = false;
+	uint8_t cell = 0; // 0: the slot's own cell
 };
+// `local_team`: the local player's team byte (-1 with no local player).
 MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
-		uint8_t icon);
+		uint8_t icon, int local_team);
 
 } // namespace opennova::world

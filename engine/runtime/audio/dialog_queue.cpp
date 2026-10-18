@@ -55,9 +55,9 @@ const dbf::Group *dialog_of(const dbf::File *dialog_bank, int32_t dialog_index) 
 	return find_dialog(*dialog_bank, name);
 }
 
-// Every line of the dialog, in order, each with the wave the bank's sounds
-// give it.
-std::vector<DialogLineRef> lines_of(const dbf::Group &group, const lwf::File *dialog_sounds) {
+} // namespace
+
+std::vector<DialogLineRef> dialog_line_refs(const dbf::Group &group, const lwf::File *dialog_sounds) {
 	std::vector<DialogLineRef> out;
 	for (size_t i = 0; i < group.lines.size(); ++i) {
 		const dbf::Line &line = group.lines[i];
@@ -75,8 +75,6 @@ std::vector<DialogLineRef> lines_of(const dbf::Group &group, const lwf::File *di
 	return out;
 }
 
-} // namespace
-
 // [orig: Dialog_ExistsByIndex "dlg%.3d" @ 0x44e190; sub_44E220 @ 0x44e23f]
 std::string trigger_dialog_name(int32_t dialog_index) {
 	char name[32];
@@ -87,7 +85,7 @@ std::string trigger_dialog_name(int32_t dialog_index) {
 std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
 		const lwf::File *dialog_sounds, int32_t dialog_index) {
 	const dbf::Group *group = dialog_of(dialog_bank, dialog_index);
-	return group != nullptr ? lines_of(*group, dialog_sounds) : std::vector<DialogLineRef>();
+	return group != nullptr ? dialog_line_refs(*group, dialog_sounds) : std::vector<DialogLineRef>();
 }
 
 std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &line) {
@@ -157,7 +155,7 @@ bool DialogQueue::play(const dbf::File *dialog_bank, const lwf::File *dialog_sou
 		int32_t dialog_index) {
 	const dbf::Group *group = dialog_of(dialog_bank, dialog_index);
 	if (group == nullptr) return false;
-	return enqueue(group->group_name, lines_of(*group, dialog_sounds));
+	return enqueue(group->group_name, dialog_line_refs(*group, dialog_sounds));
 }
 
 // The history takes the dialog first, whatever the slots hold, its count

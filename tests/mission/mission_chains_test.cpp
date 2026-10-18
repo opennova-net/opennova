@@ -3,7 +3,8 @@
 // file whose runs partition its tables in another order joins canonical and reparses with every
 // event holding the records it held; a record shared by two runs, one in no run and a run past its
 // table are refused, the event or the record named; an empty run's index is the running offset, at
-// the front, in the middle and at the end.
+// the front, in the middle and at the end; a count byte of 128..255 holds the records the game reads of
+// it (the first trigger, no action) and is written back as read.
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -11,6 +12,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_chains.h>
+#include <formats/mission/mission_mis.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -216,6 +218,107 @@ int test_event_references() {
 	return 0;
 }
 
+int test_signed_counts() {
+	// The walks read a count byte signed [orig: EventTrigger_EvaluateChain @0x45405f/@0x45408f;
+	// EventTrigger_UpdateEntry @0x454c95]: 128..255 reads the run's first trigger alone and no action.
+	TEST_EXPECT(triggers_read(0) == 0 && triggers_read(1) == 1 && triggers_read(127) == 127 &&
+	            triggers_read(128) == 1 && triggers_read(200) == 1 && triggers_read(255) == 1);
+	TEST_EXPECT(actions_read(0) == 0 && actions_read(127) == 127 && actions_read(128) == 0 && actions_read(255) == 0);
+	std::vector<EventChain> chains;
+	RunReport report;
+	std::string error;
+	// A trigger count of 200 at the front of a table of 10, the 9 after it in no run: the game evaluates the
+	// first and never reads the rest, so the run is not past the table (it was, read as 200 records).
+	bms::File front = made({{10, 0}});
+	front.events[0].trigger_count = 200;
+	TEST_EXPECT(!split_event_chains(front, chains, report) && report.triggers == RunLayout::Unowned &&
+	            report.record == 1);
+	// The first record alone in its run: the chains hold it, split then join is the identity, the byte written
+	// back as read (its size, 1, would have the game resolve the trigger's zone).
+	bms::File held_one = made({{1, 1}, {2, 0}});
+	held_one.events[0].trigger_count = 200;
+	held_one.events[1].action_count = 255;
+	const std::vector<uint8_t> before = written(held_one);
+	TEST_EXPECT(split_event_chains(held_one, chains, report) && report.canonical() && chains.size() == 2);
+	TEST_EXPECT(chains[0].triggers.size() == 1 && chains[0].triggers[0].param1 == 0 && chains[1].actions.empty());
+	bms::File joined = held_one;
+	join_event_chains(chains, joined);
+	TEST_EXPECT(joined.events[0].trigger_count == 200 && joined.events[1].action_count == 255 &&
+	            written(joined) == before);
+	// A chain edited to another size is written with its size.
+	chains[0].triggers.push_back(chains[0].triggers[0]);
+	join_event_chains(chains, joined);
+	TEST_EXPECT(joined.events[0].trigger_count == 2);
+	// No action read, so an action index past the table is never dereferenced: reordered, not out of range.
+	bms::File stray = held_one;
+	stray.events[1].action_index = 999;
+	TEST_EXPECT(split_event_chains(stray, chains, report) && report.actions == RunLayout::Reordered);
+	// The first trigger is read, so a 200-count run starting past its table is.
+	bms::File past = held_one;
+	past.events[0].trigger_index = 3;
+	TEST_EXPECT(!split_event_chains(past, chains, report) && report.triggers == RunLayout::OutOfRange &&
+	            report.event == 0);
+	// The event's chain (bms_edit) and the .mis writer read the runs alike: the first trigger and no action.
+	MissionEventChain chain;
+	TEST_EXPECT(event_chain(held_one, 0, chain) && chain.diagnostics.empty() && chain.triggers.size() == 1);
+	TEST_EXPECT(event_chain(stray, 1, chain) && chain.diagnostics.empty() && chain.actions.empty());
+	std::string text;
+	TEST_EXPECT(write_mis_text(held_one, text, error));
+	const size_t second = text.find("begin event 1\r\n");
+	TEST_EXPECT(second != std::string::npos && text.find("  begin triggers 200\r\n") < second &&
+	            text.find("begin actions", second) == std::string::npos);
+	// Read back: the trigger byte as written over its one row (the zone resolvers read 200 as no run, 1 as one),
+	// the action byte 0, as every action reader reads 255.
+	bms::File back;
+	TEST_EXPECT(parse_mis_text(text, {}, back, error) && back.events.size() == 2 && back.events[0].trigger_count == 200 &&
+	            back.triggers.size() == 3 && back.events[1].action_count == 0);
+	// The rows up to a section's `end`, whatever its declared count, as the original editor reads them
+	// [orig: JOTACmed.exe MIS_ParseToken @ 0x453ac5, @ 0x453b59]: the event keeps the declared byte and the run the
+	// game reads of it, the rows past it left out, the records past the rows zero, each noted.
+	std::string two = text;
+	const size_t at = two.find("  begin triggers 200\r\n");
+	const size_t row = two.find("\r\n", at + 4) + 2;
+	const size_t row_end = two.find("\r\n", row) + 2;
+	two.insert(row_end, two.substr(row, row_end - row));
+	std::vector<MisIssue> issues;
+	TEST_EXPECT(parse_mis_text(two, {}, back, error, &issues) && back.events[0].trigger_count == 200 &&
+	            back.triggers.size() == 3 && issues.size() == 1 &&
+	            issues[0].message.find("declares 200 and holds 2 rows") != std::string::npos);
+	// Event 1's triggers declared 5 over its 2 rows: the byte 5, its two rows and three zero records after them.
+	std::string five = text;
+	const size_t second_triggers = five.find("  begin triggers 2\r\n", five.find("begin event 1\r\n"));
+	TEST_EXPECT(second_triggers != std::string::npos);
+	if (second_triggers != std::string::npos) five.replace(second_triggers, 20, "  begin triggers 5\r\n");
+	issues.clear();
+	TEST_EXPECT(parse_mis_text(five, {}, back, error, &issues) && back.events.size() == 2 &&
+	            back.events[1].trigger_count == 5 && back.triggers.size() == 6 && issues.size() == 1);
+	if (back.triggers.size() == 6)
+		TEST_EXPECT(back.triggers[1].param1 == 100 && back.triggers[2].param1 == 101 && back.triggers[3].param1 == 0 &&
+		            static_cast<int32_t>(back.triggers[5].main_type) == 0);
+	// 21 rows declared 21: more than the original editor's 20 slots, noted [orig: JOTACmed.exe MIS_ParseToken @ 0x453b81,
+	// @ 0x453b99, @ 0x453c6f]; the rows read as written.
+	std::string over = text;
+	const size_t over_at = over.find("  begin triggers 2\r\n", over.find("begin event 1\r\n"));
+	TEST_EXPECT(over_at != std::string::npos);
+	if (over_at != std::string::npos) {
+		const size_t first = over_at + 20, first_end = over.find("\r\n", first) + 2;
+		const std::string row_line = over.substr(first, first_end - first);
+		over.replace(over_at, 20, "  begin triggers 21\r\n");
+		for (int k = 0; k < 19; ++k) over.insert(first + 1, row_line);
+	}
+	issues.clear();
+	TEST_EXPECT(parse_mis_text(over, {}, back, error, &issues) && back.events[1].trigger_count == 21 &&
+	            back.triggers.size() == 22 && issues.size() == 1 &&
+	            issues[0].message.find("20 trigger slots") != std::string::npos);
+	// Declared 1 over the 2: the byte 1 and the first row alone.
+	std::string one = text;
+	const size_t one_at = one.find("  begin triggers 2\r\n", one.find("begin event 1\r\n"));
+	if (one_at != std::string::npos) one.replace(one_at, 20, "  begin triggers 1\r\n");
+	TEST_EXPECT(parse_mis_text(one, {}, back, error) && back.events[1].trigger_count == 1 && back.triggers.size() == 2 &&
+	            back.triggers[1].param1 == 100);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -223,5 +326,6 @@ int main() {
 	if (test_empty_runs() != 0) return 1;
 	if (test_reordered() != 0) return 1;
 	if (test_refused() != 0) return 1;
+	if (test_signed_counts() != 0) return 1;
 	return test_event_references();
 }

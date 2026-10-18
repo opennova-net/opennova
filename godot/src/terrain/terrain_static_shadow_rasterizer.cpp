@@ -315,11 +315,12 @@ public:
 			record.active = source.active;
 			record.graphic = source.graphic;
 			record.world_transform = source.world_transform;
+			record.origin_q16 = source.origin_q16;
 			record.geometry = geometry;
 			// The engine's grounding rule (engine: runtime/terrain/
 			// terrain_static_shadow_planner.h static_shadow_caster_ground).
 			record.ground_y = ground_field.valid()
-					? opennova::terrain::static_shadow_caster_ground(ground_field, source.world_transform)
+					? opennova::terrain::static_shadow_caster_ground(ground_field, source.origin_q16)
 					: 0.0f;
 			record.caster_identity = source.asset_id;
 			records.push_back(std::move(record));

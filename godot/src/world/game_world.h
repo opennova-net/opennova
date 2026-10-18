@@ -21,6 +21,7 @@
 
 #include <runtime/renderer/object_lod.h> // the object detail rungs
 #include <runtime/renderer/particle_density.h> // the particle_density rungs
+#include <runtime/renderer/device_texture.h> // the terrain_texdetail word
 #include <runtime/renderer/texture_compression.h> // the texcompression_level word
 #include <runtime/renderer/texture_filter.h> // the texfilter rungs
 
@@ -226,6 +227,13 @@ public:
 	void set_texcompression_level(int p_level) { texcompression_level_ = p_level; }
 	int get_texcompression_level() const { return texcompression_level_; }
 	int get_session_texcompression_level() const { return session_texcompression_level_; }
+	// game.cfg's terrain_texdetail (0..3; engine: renderer/device_texture.h, which cites the
+	// session copy), handed over and copied at each mission start as texcompression_level is:
+	// the terrain's detail layers this mission builds are halved by the session's copy.
+	void set_terrain_texdetail(int p_level) { terrain_texdetail_ = p_level; }
+	int get_terrain_texdetail() const { return terrain_texdetail_; }
+	int get_session_terrain_texdetail() const { return session_terrain_texdetail_; }
+	static int terrain_texdetail_fresh_profile();
 	void set_particle_density(int p_density);
 	int get_particle_density() const { return particle_density_; }
 	int get_session_particle_density() const { return session_particle_density_; }
@@ -865,6 +873,8 @@ private:
 	// take the copies (publish_session_render_settings).
 	int texcompression_level_ = opennova::renderer::kTexCompressionLevelFreshProfile;
 	int session_texcompression_level_ = opennova::renderer::kTexCompressionLevelFreshProfile;
+	int terrain_texdetail_ = opennova::renderer::kTerrainTexDetailFreshProfile;
+	int session_terrain_texdetail_ = opennova::renderer::kTerrainTexDetailFreshProfile;
 	int particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
 	int session_particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
 	CorpseRagdollPresenter ragdolls_;

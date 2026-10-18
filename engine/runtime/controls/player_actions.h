@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -16,10 +17,24 @@ public:
 	virtual bool pressed(const char *token) const = 0;
 	virtual int pressed_key(const char *token) const = 0;
 	virtual bool digit_down(int digit) const = 0;
-	// Shift held: a fallback-pass row fires with the direction bit
-	// [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d470 — Shift or row
-	//  flag 0x200 ORs 0x80000000 into the queued action].
-	virtual bool shift_down() const = 0;
+	// The sign bit the fire of the token's row carries: Shift held on a
+	// modifier-less key's fire (the fallback pass) or a held mouse button,
+	// never a fire through the row's held modifier (the modifier pass) or a
+	// joystick button (controls::BindingSet::fire_signed).
+	// [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d470 (the fallback's
+	//  sign) vs @0x49d41e..0x49d42f (the modifier pass, unsigned);
+	//  Input_TryDispatchBindingByWeaponType @0x499180..0x4991a4;
+	//  Input_TryTriggerJoystickButton @0x497B7A / @0x497BA9 (unsigned)]
+	virtual bool fire_signed(const char *token) const = 0;
+	// Whether a key bound to the token's row is down by the key state alone:
+	// no scan gate, no keyboard capture, a special-key take included. Retail's
+	// key-press latch is set on every key event (a captured or consumed one
+	// too) and its release pass reads only the latch and the key state; the
+	// ToSpecial handler reads the keys raw.
+	// [orig: Input_ProcessKeyboardEvents -- the latch set @0x49D2ED ahead of
+	//  the capture and special-key branches, the release pass @0x49D240 /
+	//  @0x49D249; Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
+	virtual bool keys_down(const char *token) const { return pressed(token); }
 };
 
 enum class PlayerAction {
@@ -44,7 +59,17 @@ enum class PlayerAction {
 	// menu (hud::hud_toggles_close_voice_menu).
 	EmotePick,
 	RadioPick,
+	// The USE-ITEM armory arm's open (weapon.mnu WEAPON): the embedder's shell
+	// opens the screen.
+	OpenArmory,
 };
+
+// The arm a frame's held USE takes, as the embedder's press latch decides it
+// (world::LocalPlayer::take_use_item_press): the mount chain's hold, the
+// armory's open, or a press the arm takes with nothing to open (a latched or
+// refused armory press, the vehicle bay, whose vehicle.mnu is unported,
+// D-HUD-14).
+enum class UseItemPressArm : uint8_t { kMountChain, kOpenArmory, kTaken };
 
 struct PlayerActionRequest {
 	PlayerAction action = PlayerAction::ToggleMount;
@@ -67,6 +92,22 @@ struct PlayerActionPoll {
 	// medic rows and the weapon/seat/scope rows stay silent
 	// [orig: Input_IsBindingActiveForMode @0x497ea0].
 	bool death_screen = false;
+	// A menu screen (INGAME, WEAPON, CMAP) is up: retail runs no input frame
+	// under it, so the poll neither ages a latch nor dispatches. A USE hold
+	// latched when the menu opened therefore ends on the first frame after
+	// the close, whose key-state reset reads the key up: the release edge's
+	// mount toggle runs then, unless a seat pick consumed the hold.
+	// [orig: Game_ProcessMainFrame -- the menu branch @0x52660D, the input
+	//  frame only in the no-menu branch @0x52661D; Input_ProcessFrame's latch
+	//  aging @0x49D57F..0x49D585 and release edge @0x49D6C1..0x49D6DC]
+	bool menu_open = false;
+	// The held USE row's arm, asked once on every frame either of its keys is
+	// down: the row is a held row (flags 0x0C000805, bit 4), which the analog
+	// pass queues each frame, so case 0xB1 runs each frame the key is held.
+	// Unset = the mount chain.
+	// [orig: Input_ProcessAnalogBindings @0x4995F0, run from
+	//  Input_ProcessPlayerFrame @0x49D50C]
+	std::function<UseItemPressArm()> take_use_item_arm;
 };
 
 struct PlayerActionFrame {
@@ -123,6 +164,13 @@ public:
 	void reset();
 	// Deferred until after the next poll's fresh-USE-press reset.
 	void consume_use_hold();
+	// A menu close's reset clears the key-press latch, which gates the release
+	// dispatch: a key held through it dispatches no release, neither then nor
+	// at its physical release (ToSpecial's release arm is the one ported).
+	// [orig: Input_ResetAllState @0x497ED0 -- the g_KeyPressLatch memset
+	//  @0x497F08; Input_ProcessKeyboardEvents, the release pass's latch test
+	//  @0x49D249 and clear @0x49D2B9, the latch set on a key event @0x49D2ED]
+	void clear_key_press_latches();
 	// The death screen's spectator rows, the catalog's mode-2 rows 110..112
 	// (CycleSpectatorMode, IncSpectatorTarget, DecSpectatorTarget): the binding
 	// scan admits them only while the death screen is up, so the embedder

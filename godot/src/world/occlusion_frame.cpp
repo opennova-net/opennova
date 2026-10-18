@@ -270,9 +270,8 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	// wire identities share this feed; wire rays use the separately keyed
 	// 17-tick candidate arena, and the entity presenter retains the context for
 	// cold bodies/weapons (inmatch/role_feeds.h EntityLightingFeed carries the
-	// witnesses: retail Terrain_SetupEffectForEntity @0x5c74a0, the per
-	// entity stack push @0x5c7bff, the 0x80 submit flag @0x5c7c05 /
-	// @0x5c7fb6 and the person wave's daylight aux @0x5c7f93).
+	// witnesses: the per-entity setup, its stack push, the 0x80 submit flag
+	// and the person wave's daylight aux).
 	if (env != nullptr) {
 		const int64_t light_query_start = timing ? ticks_usec() : 0;
 		const std::vector<opennova::inmatch::EntityLightingChange> &changes =

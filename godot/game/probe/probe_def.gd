@@ -409,14 +409,6 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"mode": { "type": "string", "enum": ["attach", "debris", "glass"] },
 					"output_dir": { "type": "string", "default": "" },
 				}, ["mode"], true, false, 120_000),
-		ProbeDef.make("foliage_flicker_regression",
-				"The asset-free foliage regression loop on probe stages: the MODEL "
-				+ "ONE/ONE blend + depth contract, the detail D3DCMP_GREATER alpha "
-				+ "equality, then near/detail and distant MODEL tiers through the real "
-				+ "dispatcher: non-black, frame-stable, no exact-black blob.",
-				STAGE + "foliage_flicker_regression_probe.gd", {
-					"output_dir": { "type": "string", "default": "" },
-				}, [], true, false, 300_000),
 		ProbeDef.make("loading_screen_stage",
 				"The mission loading screen on a probe stage: session_hold (the MP session "
 				+ "composite held at a fixed progress, then the SP start-mission splash) or "

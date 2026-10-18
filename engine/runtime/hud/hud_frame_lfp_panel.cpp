@@ -26,10 +26,15 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 		float h) {
 	const HudLfpPanelState &lp = state.lfp_panel;
 	if (!lp.shown || !layout_.lfp_anchor_present) return;
-	// The conquest arm (one row per marker, text per marker) is unmodelled
-	// [orig: g_GameType == 0x50010 @0x5a24a1]; nothing draws under it here.
-	if (lp.game_type == game_type::kConquerAndControl) return;
 	if (font_.font() == nullptr) return;
+	// The conquest arm (g_GameType 0x50010, a BMS task-type-10 mission's mode
+	// [orig: Game_StartMission @0x524CE1..0x524D01]): no group breaks on a team
+	// change, every contested marker on its own row at the seed group's x, its
+	// status kind cleared before it and its text drawn right after it
+	// [orig: HUD_DrawZoneStatusPanel `cmp g_GameType, 50010h; setz`
+	//  @0x5a248d..0x5a24a1, the skipped break @0x5a25e7..0x5a25f6, the marker leg
+	//  @0x5a2711..0x5a2786].
+	const bool conquest = lp.game_type == game_type::kConquerAndControl;
 
 	// Pass 1: zones per team [orig: @0x5a24c5..0x5a24ea — team byte & 0x1F,
 	// nonzero and < 30].
@@ -58,7 +63,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	}
 	if (start >= lp.zones.size()) return;
 
-	const bool phase_a = lfp_blink_phase_a_counter(lp.frame_counter);
+	const bool phase_a = lfp_blink_phase_a_counter(static_cast<int>(state.hud_frame));
 	const bool have_bold = label_font_bold_.font() != nullptr;
 	const GameFont &bf = have_bold ? label_font_bold_ : font_;
 	const float bscale = have_bold ? label_scale_ : 1.0f;
@@ -107,7 +112,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 		if (z.team == 0) continue;
 		// A team change closes the group: its text, then the next row
 		// [orig: @0x5a25f6..0x5a2679].
-		if (z.team != current_team) {
+		if (!conquest && z.team != current_team) {
 			flush_status();
 			++group;
 			current_team = z.team;
@@ -115,13 +120,17 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 			status_kind = 0;
 		}
 		if (!contested(z)) continue;
+		// [orig: `mov g_HUDZoneStatusKind, 0` @0x5a2711]
+		if (conquest) status_kind = 0;
 
 		// ---- HUD_DrawZoneMarker @0x5986f0 ----
 		int mx = 0, my = 0;
 		lfp_marker_origin(layout_.lfp_anchor_x, layout_.lfp_anchor_y,
 				per_team[static_cast<size_t>(current_team)], index_in_group, group,
 				mx, my);
-		++index_in_group;
+		// The AAS arm steps the next marker 98 across; the conquest arm keeps
+		// its x [orig: `add y_offset, 62h` @0x5a27a3, the AAS leg alone].
+		if (!conquest) ++index_in_group;
 
 		const bool ready = lfp_zone_ready(z.team, lp.local_team, z.control);
 		const bool attacked = lfp_zone_under_attack(z.timer_team, lp.local_team,
@@ -236,7 +245,16 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 			status_kind = 2;
 			status_color = point | 0xFF000000u;
 		}
+		// The conquest marker's own text, then the next row [orig:
+		//  @0x5a272e..0x5a2779, `add x_base, 56h` @0x5a2781].
+		if (conquest) {
+			flush_status();
+			++group;
+		}
 	}
+	// The closing text. Under the conquest arm the kind still holds the last
+	// marker's, so its text draws again one row below that marker
+	// [orig: @0x5a27c6..0x5a281a, no clear after the marker leg].
 	flush_status();
 	++draw_list_.elements_drawn;
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-// A TABLE's columns and its row sort [orig: init_table_row @ 0x63f9c0 (a column's
+// A TABLE's columns and its row sort [orig: CTableWnd_InitRow @ 0x63f9c0 (a column's
 // setup); CTableWnd_SortByColumn @ 0x640900 -> CTableWnd_CompareRows @ 0x63e9c0 (the
 // sort)]. The frame compiler draws the columns; the runtime keeps the rows and
 // sorts them, as menu_table_row.h's records (a row's colour override and selection
@@ -14,7 +14,7 @@
 
 namespace opennova::menu {
 
-// One table column as init_table_row sets it up [orig: init_table_row @ 0x63f9c0,
+// One table column as CTableWnd_InitRow sets it up [orig: CTableWnd_InitRow @ 0x63f9c0,
 // the 180-byte column at table+780]: the header label, the width (+124; 0 is not
 // drawn), the header justification (+128: 0 left, 1 centre, 2 right) and vertical
 // justification (+132: 0 top, 16 centre, 32 bottom), the cell justification a BODY

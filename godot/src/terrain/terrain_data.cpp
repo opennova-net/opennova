@@ -1305,7 +1305,7 @@ bool TerrainData::replace_tile_lods(const PackedInt32Array &p_indices, const Arr
 
 int TerrainData::get_detail_foliage_index_fixed(int32_t atlas_x_fixed,
                                                     int32_t atlas_z_fixed) const {
-	// [orig: Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0, see docs/terrain/terrain-re.md]
+	// [orig: Foliage_SampleFoliageMapFlat @ 0x6066d0, see docs/terrain/terrain-re.md]
 	if (!loaded || foliage_map_resource.is_null()) {
 		return 0;
 	}

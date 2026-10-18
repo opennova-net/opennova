@@ -261,7 +261,7 @@ struct MenuKeyInput {
 	bool shift = false;
 };
 
-// One row of the current screen's hotkey table [orig: scene_add_widget_event_callback
+// One row of the current screen's hotkey table [orig: CUIScene_AddWidgetEventCallback
 // @ 0x63a8e0 — {isVirtual, key, widget}].
 struct MenuHotkeyRow {
 	bool virtual_key = false;
@@ -299,7 +299,7 @@ struct MenuWidgetRuntimeState {
 	std::vector<uint8_t> disabled_items;
 	bool has_table_rows = false;
 	std::vector<MenuTableRow> table_rows;
-	// The columns code installed [orig: init_table_row @ 0x63f9c0 from the shell],
+	// The columns code installed [orig: CTableWnd_InitRow @ 0x63f9c0 from the shell],
 	// the sort-key stack and the sorted column [orig: CTableWnd_SortByColumn
 	// @ 0x640900].
 	bool has_table_columns = false;
@@ -326,10 +326,6 @@ struct MenuWidgetRuntimeState {
 
 class MenuRuntime {
 public:
-	// The list/table double-click window, milliseconds (the embedder's
-	// platform default; retail's is the OS double-click time).
-	static constexpr uint32_t kDoubleClickMs = 400;
-
 	void set_frame(MenuFrameSeam *frame) { frame_ = frame; }
 	MenuFrameSeam *frame() const { return frame_; }
 	void set_sink(MenuEventSink sink) { sink_ = std::move(sink); }
@@ -524,7 +520,7 @@ public:
 		return table_row_state(id, row) == kTableRowSelected;
 	}
 	// A row's colour override; `enable` false drops it, row -1 is every row
-	// [orig: sub_640110 — the row's +28 bit 4 and +32].
+	// [orig: CTableWnd_SetRowColor — the row's +28 bit 4 and +32].
 	void table_set_row_color(int id, int row, bool enable, uint32_t color);
 	// The rows in state 3, ascending.
 	std::vector<int> table_selected_rows(int id) const;
@@ -563,7 +559,7 @@ public:
 	// order. A row or observer that swaps the document stops the rest.
 	void activate(int id);
 	// Check a radio and uncheck the radios beside it (the same parent) of the
-	// same nonzero GROUP [orig: radio_button_on_click @ 0x656cd0].
+	// same nonzero GROUP [orig: CRadioWnd_OnClick @ 0x656cd0].
 	void select_radio(int id);
 	// The spin list's step: +1 SelectNext, -1 SelectPrevious, wrapping past every
 	// disabled row; emits the value change [orig: CSpinListWnd_SelectNext @ 0x64b910,
@@ -597,8 +593,15 @@ public:
 	// picks, a press outside its cell and its list closes it [orig: CComboWnd_HandleEvent
 	// @ 0x65c261..0x65c2bc], the press consumed (D-MNU-11); else the windows under the point take it,
 	// front to back: an edit takes the focus; a list, a table and a spin list's body are activated and
-	// then pick (a row, or the spin's next value). False when no frame is configured.
-	bool press_mouse(float x, float y, uint32_t now_ms);
+	// then pick (a row, or the spin's next value). `double_click` is the platform's own answer
+	// for this press: retail's window class asks Windows for double clicks (CS_DBLCLKS) and takes
+	// the second press of one as WM_LBUTTONDBLCLK, the press form 0x1000004 a list or table
+	// activates its row on, by the user's double-click time and box, with no latch of its own
+	// [orig: WinMain @ 0x763A80, the class style 8 @ 0x763AFC; Game_WindowProc @ 0x7624C0 ->
+	// Input_DispatchMouseEvent @ 0x761470 (0x201 -> mask 2 @ 0x76151A, 0x203 -> mask 0x400
+	// @ 0x761556) -> Menu_ShellMouseCallback (@ 0x54B88E / @ 0x54B8BF) -> UI_DispatchMouseEvent
+	// @ 0x63AB00 (0x1000002 @ 0x63AB33, 0x1000004 @ 0x63AB41)]. False when no frame is configured.
+	bool press_mouse(float x, float y, bool double_click = false);
 	// The release, as its message arrives: it lets the capture go [orig:
 	// CWnd_DispatchMouseEventToChildren @ 0x64793f; CButtonWnd_HandleNamedEvent @ 0x6583ed], so a
 	// press after it inside the same frame is a press of its own; the click is the pump's. False when
@@ -607,8 +610,9 @@ public:
 	// The frame's pump, over the last message's point and button (nothing before the first message).
 	void pump_mouse();
 	// One raw-mouse sample (a scripted pump, the tests): the button's edge as its message (press_mouse,
-	// release_mouse), then the move and the pump at the point.
-	void process_mouse(float x, float y, bool button_down, uint32_t now_ms);
+	// release_mouse; a press edge with `double_click` is the platform's double click), then the
+	// move and the pump at the point.
+	void process_mouse(float x, float y, bool button_down, bool double_click = false);
 	// One wheel tick (+1 rows-down, -1 rows-up); true when a target claimed it.
 	bool process_wheel(float x, float y, int steps);
 	// The frame reported a click on widget `index` (the claim let go over that
@@ -690,16 +694,15 @@ private:
 	void sample_sounds_(int claim, bool button_down);
 	bool sound_reached_(int id) const;
 	// The press's reach at (x, y): the windows its message reaches, front to back.
-	void press_reach_(float x, float y, uint32_t now_ms);
+	void press_reach_(float x, float y, bool double_click);
 	// The open dropdown's press (press_mouse); false when no dropdown is open.
 	bool dropdown_press_(float x, float y);
 	// The press (WM_LBUTTONDOWN) of the widget at `index`.
-	// A widget's own press; `again` the captured window's press a root behind its own hands it
-	// (MenuFrameCompiler::press_reach), the same message: a double click's form is the first's.
-	void press_(int index, float x, float y, uint32_t now_ms, bool again);
-	void list_press_(int id, int row, uint32_t now_ms, bool again);
-	void table_press_(int id, int row, int column, uint32_t now_ms, bool again);
-	bool register_click_(int id, int row, uint32_t now_ms);
+	// A widget's own press, in the message's form: a press a root behind the captured window
+	// hands it again (MenuFrameCompiler::press_reach) is the same message, so the same form.
+	void press_(int index, float x, float y, bool double_click);
+	void list_press_(int id, int row, bool double_click);
+	void table_press_(int id, int row, int column, bool double_click);
 	// A spin arrow's click: its own SELECTED sound and ACTION rows, then the spin
 	// list's step [orig: CSpinListWnd_HandleEvent @ 0x64c370 on
 	// SPINLISTWND_UP / SPINLISTWND_DOWN].
@@ -719,7 +722,7 @@ private:
 	void edit_filter_rows_(int id);
 	void tab_rows_(int id);
 	// The hotkey scan [orig: UI_DispatchKeyboardEventToChildren @ 0x63ad10,
-	// dispatch_key_event @ 0x63ac30]; true when a row fired.
+	// UI_DispatchKeyEvent @ 0x63ac30]; true when a row fired.
 	bool scan_hotkeys_(bool virtual_key, int key);
 	void build_hotkeys_();
 
@@ -766,10 +769,6 @@ private:
 	bool mouse_seen_ = false;
 	float mouse_x_ = 0.0f;
 	float mouse_y_ = 0.0f;
-	int last_click_id_ = -1;
-	int last_click_row_ = -1;
-	uint32_t last_click_ms_ = 0;
-	bool last_click_double_ = false; // the last press's form, which a press handed again keeps
 };
 
 } // namespace opennova::menu

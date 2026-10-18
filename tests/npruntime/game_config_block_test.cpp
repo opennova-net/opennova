@@ -168,6 +168,7 @@ int main() {
 		TEST_EXPECT(block.cfg().display_16x9 == 1); // a widescreen desktop's row
 		TEST_EXPECT(block.cfg().object_polydetail == 2 && block.cfg().texfilter_level == 1);
 		TEST_EXPECT(block.cfg().particle_density == 2 && block.cfg().texcompression_level == 1);
+		TEST_EXPECT(block.cfg().terrain_texdetail == 3); // full detail
 		TEST_EXPECT(block.cfg().game_name == "Untitled");
 		TEST_EXPECT(block.file_read() && !block.version_reset()); // the entry read the saved file
 		const std::string saved = read_text(dir.file("game.cfg"));

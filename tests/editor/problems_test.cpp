@@ -1581,10 +1581,18 @@ static int test_plan_refusals_are_rows() {
 	TEST_EXPECT(opennova::pff::pff_write_archive((v.project.root + "/extra.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
 	TEST_EXPECT(test_io::write_text(v.project.root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
-	// A closed animation map with a row of nine clips: the game registers every one, and a build packs the file as
-	// stored, so its finding refuses nothing, in the result's words as in the gate.
+	// A closed animation map with a row of nine clips: the game registers every one, and the table holds them all,
+	// so it raises nothing of its own (its clips' files are not there, which are their references' findings). One
+	// of thirty quoted clips: the line reader's 30th token is never closed, so its 29th clip reads with the quotes
+	// and the 30th inside it; the writer cannot write that row back, so its finding is an error, and a build packs
+	// the file as stored, so it refuses nothing, in the result's words as in the gate.
 	TEST_EXPECT(test_io::write_text(v.project.root + "/anims/nine.adm",
 	                                    "\r\nanim_reset\t\t\t\t\"a\" \"b\" \"c\" \"d\" \"e\" \"f\" \"g\" \"h\" \"i\"\r\n\r\n\r\n"));
+	{
+		std::string thirty = "\r\nanim_reset\t\t\t\t";
+		for (int i = 0; i < 30; ++i) thirty += std::string(i ? " " : "") + "\"c" + std::to_string(i) + "\"";
+		TEST_EXPECT(test_io::write_text(v.project.root + "/anims/thirty.adm", thirty + "\r\n\r\n\r\n"));
+	}
 	editor_test::handle_to_end(session, request::rescan());
 	const auto rows_of = [&v](const char *code) {
 		std::vector<size_t> rows;
@@ -1594,9 +1602,14 @@ static int test_plan_refusals_are_rows() {
 	};
 	std::vector<size_t> rows = rows_of("build.name_unstorable");
 	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v));
-	const std::vector<size_t> nine = rows_of("animation_map.invalid_input");
-	TEST_EXPECT(nine.size() == 1 && v.findings.diagnostics[nine[0]].severity == DiagnosticSeverity::Error &&
-	            !blocks_the_build(nine[0], v));
+	TEST_EXPECT(rows_of("animation_map.invalid_input").empty());
+	size_t nine_rows = 0;
+	for (const Diagnostic &d : v.findings.diagnostics)
+		nine_rows += d.asset == "anims/nine.adm" && d.code().rfind("animation_map.", 0) == 0 ? 1 : 0;
+	TEST_EXPECT(nine_rows == 0);
+	const std::vector<size_t> thirty = rows_of("animation_map.row");
+	TEST_EXPECT(thirty.size() == 1 && v.findings.diagnostics[thirty[0]].asset == "anims/thirty.adm" &&
+	            v.findings.diagnostics[thirty[0]].severity == DiagnosticSeverity::Error && !blocks_the_build(thirty[0], v));
 	const std::vector<size_t> archives = rows_of("build.archive_in_project");
 	TEST_EXPECT(archives.size() == 1 && !blocks_the_build(archives[0], v) &&
 	            v.findings.diagnostics[archives[0]].severity == DiagnosticSeverity::Warning);

@@ -83,11 +83,7 @@ inline int32_t read_i32_at(const uint8_t *bytes, size_t offset) {
 }
 
 inline void write_i32_at(uint8_t *bytes, size_t offset, int32_t value) {
-	const uint32_t v = static_cast<uint32_t>(value);
-	bytes[offset] = static_cast<uint8_t>(v & 0xFF);
-	bytes[offset + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
-	bytes[offset + 2] = static_cast<uint8_t>((v >> 16) & 0xFF);
-	bytes[offset + 3] = static_cast<uint8_t>((v >> 24) & 0xFF);
+	io::write_u32_le(bytes + offset, static_cast<uint32_t>(value));
 }
 
 inline std::string four_digit(int value) {
@@ -161,7 +157,7 @@ inline void resize_waypoint_padding(bms::WaypointRecord &record, bool preserve_o
 	}
 	// The slot words past the stops as they stand where they already fill the record's 128 bytes (a record
 	// read, whose stale word a save keeps, 09TR.bms's path 13: the original's rebuild writes a path's stops
-	// over its first slots alone [orig: JOTACmed.exe sub_44CFD0 @ 0x44cfd0]); zeros for a record made from
+	// over its first slots alone [orig: JOTACmed.exe MissionDocument_RebuildWaypointPaths @ 0x44cfd0]); zeros for a record made from
 	// nothing or one whose slots changed without its padding.
 	const size_t used = slots * sizeof(uint32_t);
 	if (record.padding.size() != 128 - used) record.padding.assign(128 - used, 0);
@@ -176,7 +172,7 @@ inline bool validate_waypoint_path(const bms::File &file,
 		return false;
 	}
 	// A path holds as many stops as waypoint markers carry it (the original's count has no bound [orig:
-	// JOTACmed.exe sub_44CFD0 @ 0x44cfd0, the 6005 item's markers, a number of 0 none]); a marker carries
+	// JOTACmed.exe MissionDocument_RebuildWaypointPaths @ 0x44cfd0, the 6005 item's markers, a number of 0 none]); a marker carries
 	// one place on one path.
 	if (index == 0 && !marker_indices.empty()) {
 		error = "Path 0 holds no stops: a marker carrying 0 is on no path.";

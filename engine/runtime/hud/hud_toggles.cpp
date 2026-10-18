@@ -5,7 +5,7 @@
 
 namespace opennova::hud {
 
-bool HudKeyEdge::step(bool down, bool active, bool chorded) {
+bool HudKeyEdge::step(bool down, bool active) {
 	// Ours fires once per press edge. Retail's key scan fires a keyboard row on
 	// every key-down event it dequeues, Windows auto-repeat included: the queue
 	// marks a repeat 0x80 and the action dispatch never tests it, so a held
@@ -15,7 +15,7 @@ bool HudKeyEdge::step(bool down, bool active, bool chorded) {
 	//  @0x760c10, the repeat bit @0x760c7b; the window procedure's pre-hook
 	//  g_WindowProcHook (read @0x7624c0), whose one setter
 	//  Game_SetWindowProcHook @0x761ec0 has no caller]
-	const bool edge = down && !was_down && active && !chorded;
+	const bool edge = down && !was_down && active;
 	was_down = down;
 	return edge;
 }
@@ -131,7 +131,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// (controls::BindingSet::pressed_key, the sampler) gives it to hudcolor
 	// (code 10) before huddetail (19) [orig: the first-match key scan
 	// @0x49d42f / @0x49d488].
-	if (s.huddetail.step(k.huddetail, k.active, k.chorded)) {
+	if (s.huddetail.step(k.huddetail, k.active)) {
 		// The huddetail cycle: level + 1, wrapping past 3 to 0, on the LIVE
 		// level only (game.cfg keeps the config value) [orig:
 		// Input_HandleActionBinding_0 @0x4E0601..0x4E0624 ->
@@ -139,22 +139,22 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		s.hud_detail_level = next_hud_detail_level(s.hud_detail_level);
 		events |= kHudDetailCycled;
 	}
-	if (s.hudcolor.step(k.hudcolor, k.active, k.chorded)) {
+	if (s.hudcolor.step(k.hudcolor, k.active)) {
 		// The color-scheme cycle 0..5 with wrap; deliberately NO toast — the
 		// retail case only cycles and restamps the color [orig: the `hudcolor`
 		// action, dispatch code 10 @0x49afc7 — idx+1, >5 wraps to 0]
 		s.hud_color_index = next_hud_color_index(s.hud_color_index);
 		events |= kHudColorCycled;
 	}
-	if (s.showhud.step(k.showhud, k.active, k.chorded)) {
+	if (s.showhud.step(k.showhud, k.active)) {
 		// flags = (flags + 1) & 3: bit 1 the corner spinmap block, bit 0 the FP
 		// gun [orig: g_FpWeaponViewFlags cycle @0x4E0561; bit0 @0x4DEDEA; bit1
 		// @0x5A8635]
 		s.showhud_flags = next_showhud_flags(s.showhud_flags);
 		events |= kShowHudCycled;
 	}
-	if (s.dotsize.step(k.dotsize, bit0_active, k.chorded)) events |= kDotsizeCycled;
-	if (s.goals.step(k.goals, k.active, k.chorded)) {
+	if (s.dotsize.step(k.dotsize, bit0_active)) events |= kDotsizeCycled;
+	if (s.goals.step(k.goals, k.active)) {
 		if (!k.in_session || k.objective_game) {
 			// The objectives panel toggle, then the respawn init keeping it
 			// [orig: case 31 @0x49b65f; dword_24C18CC ^= 0xFF @0x49b68b; the
@@ -168,7 +168,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 			events |= toggle_briefing(s, k.in_session);
 		}
 	}
-	if (s.briefing.step(k.briefing, k.active, k.chorded)) events |= toggle_briefing(s, k.in_session);
+	if (s.briefing.step(k.briefing, k.active)) events |= toggle_briefing(s, k.in_session);
 	// The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,
 	// viewchase F4): first person clears the FP-gun bit, gun view sets it, and
 	// both select first person; chase selects the chase preference. Each row
@@ -185,15 +185,15 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// @0x818738 / @0x8187A4 (keys F2/F3/F4) — their row flag gates (0x1 /
 	// 0x40 / 0x400 / 0x8000000) ride the unported binding layer, D-CTRL-3;
 	// g_FpWeaponViewFlags bit 0 cleared @0x49c073, set @0x49c0d9]
-	if (s.view1st.step(k.view1st, bit0_active, k.chorded)) {
+	if (s.view1st.step(k.view1st, bit0_active)) {
 		s.showhud_flags &= ~kShowHudFlagGun;
 		events |= kGunBitChanged | kFirstPersonSelected;
 	}
-	if (s.viewwithgun.step(k.viewwithgun, bit0_active, k.chorded)) {
+	if (s.viewwithgun.step(k.viewwithgun, bit0_active)) {
 		s.showhud_flags |= kShowHudFlagGun;
 		events |= kGunBitChanged | kGunViewSelected;
 	}
-	if (s.viewchase.step(k.viewchase, k.active, k.chorded)) events |= kThirdPersonSelected;
+	if (s.viewchase.step(k.viewchase, k.active)) events |= kThirdPersonSelected;
 	// The playerlist action (case 102) does nothing out of a session. In one,
 	// the authority's status page takes it — a dedicated host always, a
 	// listen host while its view is up — and flips the page's score list;
@@ -205,7 +205,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	//  Server_ToggleStatusScoreList @0x500580; Scoreboard_TogglePlayerList
 	//  @0x4244c0 from @0x49bb68; Game_InitRespawnState @0x4244df on the 0 -> 1
 	//  edge, then page = 0 @0x4244e4]
-	if (s.playerlist.step(k.playerlist, k.active, k.chorded) && k.in_session) {
+	if (s.playerlist.step(k.playerlist, k.active) && k.in_session) {
 		const bool status_page = k.mp_session_peer ? (k.authority && s.server_status_view)
 												   : k.authority;
 		if (status_page) {
@@ -221,7 +221,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	}
 	// The Recent Messages window, then the respawn init keeping it [orig:
 	// `xor g_ShowMessageLog, 1` @0x49b55a; the wrapper call @0x49b566]
-	if (s.old_messages.step(k.old_messages, k.active, k.chorded)) {
+	if (s.old_messages.step(k.old_messages, k.active)) {
 		s.message_log_open = !s.message_log_open;
 		events |= kMessageLogToggled | respawn_init_keeping(s, &s.message_log_open, k.in_session);
 	}
@@ -229,19 +229,19 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// the respawn-init wrapper, which clears the other overlay windows and
 	// keeps this one [orig: case 422 @0x49bd29 (the !is_in_session gate) ->
 	// Game_InitRespawnStateKeepingToggle @0x4993c0 @0x49bd4b]
-	if (s.show_score.step(k.show_score, k.active && !k.in_session, k.chorded)) {
+	if (s.show_score.step(k.show_score, k.active && !k.in_session)) {
 		s.end_round_stats_open = !s.end_round_stats_open;
 		events |= kShowScoreToggled | respawn_init_keeping(s, &s.end_round_stats_open, false);
 	}
 	// The friendly-tags cycle [orig: case 30 @0x49b573; catalog row 100
 	// ShowFriendly, default K]; the embedder posts the toast.
-	if (s.friendly_tags.step(k.friendly_tags, bit0_active, k.chorded)) {
+	if (s.friendly_tags.step(k.friendly_tags, bit0_active)) {
 		s.friendly_tag_mode = next_friendly_tag_mode(s.friendly_tag_mode);
 		events |= kFriendlyTagsCycled;
 	}
 	// The F1 key-binding help, then the keeping init [orig: case 8
 	// `xor dword_24C18B0, 1` @0x49af73; the wrapper @0x49af7f]
-	if (s.help.step(k.help, k.active, k.chorded)) {
+	if (s.help.step(k.help, k.active)) {
 		s.help_open = !s.help_open;
 		events |= kHelpToggled | respawn_init_keeping(s, &s.help_open, k.in_session);
 	}
@@ -249,14 +249,14 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// server-status view is up [orig: case 234 @0x49af8c -- is_authority &&
 	// dword_24C1914 skips @0x49af95; `xor dword_24C18B4, 1` @0x49afa2; the
 	// wrapper @0x49afae]
-	if (s.helpmap.step(k.helpmap, k.active, k.chorded) &&
+	if (s.helpmap.step(k.helpmap, k.active) &&
 			!(k.authority && s.server_status_view)) {
 		s.map_legend_open = !s.map_legend_open;
 		events |= kMapLegendToggled | respawn_init_keeping(s, &s.map_legend_open, k.in_session);
 	}
 	// The verbose flip; the embedder posts the toast [orig: case 37
 	// `g_MpVerbose2 ^= 1` @0x49b78f -> Chat_AddMessageChannel2(text, -1, 930)]
-	if (s.verbose.step(k.verbose, k.active, k.chorded)) {
+	if (s.verbose.step(k.verbose, k.active)) {
 		s.mp_verbose = !s.mp_verbose;
 		events |= kVerboseToggled;
 	}
@@ -265,10 +265,10 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// player; the case then needs the local entity and no open menu screen
 	// (the gameplay gate here), runs the full respawn init and opens CMAP.
 	// [orig: the row flag test @0x49ad8a..0x49ada0 (Flags & 2); case 221
-	//  @0x49b8fa — sub_54B970 @0x49b902 (dword_255110C), Game_InitRespawnState
+	//  @0x49b8fa — UI_IsMenuScreenOpen @0x49b902 (dword_255110C), Game_InitRespawnState
 	//  @0x49b90f, UI_OpenMenuScreen("cmap.mnu", "CMAP", 0) @0x49b920,
 	//  g_CmapScreenOpen = 1 @0x49b928]
-	if (s.commander.step(k.commander_menu, bit0_active && k.local_alive, k.chorded))
+	if (s.commander.step(k.commander_menu, bit0_active && k.local_alive))
 		events |= kCommandMapOpened | respawn_init(s, k.in_session);
 	// The single-player pause: out of a session the word flips and the quit
 	// dialog closes; the embedder applies the word to the session and stops
@@ -278,7 +278,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	//  dword_A87050, 1` @0x49b52d, g_QuitDialogOpen = 0 @0x49b534,
 	//  Input_ResetKeyQueue @0x49b53e, Audio_ShutdownChannelsAndDeviceTable
 	//  @0x49b550]
-	if (s.pause.step(k.pause, k.active, k.chorded) && !k.in_session) {
+	if (s.pause.step(k.pause, k.active) && !k.in_session) {
 		s.paused = !s.paused;
 		s.quit_dialog_open = false;
 		events |= kPauseToggled;
@@ -288,11 +288,11 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// [orig: case 33 `xor dword_24C18D4, 1` @0x49b6c9 + the wrapper @0x49b6d5;
 	//  case 54 `xor dword_24C18D8, 1` @0x49b6e2 + the wrapper @0x49b6ee; the
 	//  row flag test @0x49ad8a..0x49ada0]
-	if (s.audio_emote.step(k.audio_emote, bit0_active && k.local_alive, k.chorded)) {
+	if (s.audio_emote.step(k.audio_emote, bit0_active && k.local_alive)) {
 		s.emotes_menu_open = !s.emotes_menu_open;
 		events |= respawn_init_keeping(s, &s.emotes_menu_open, k.in_session);
 	}
-	if (s.radio_macro.step(k.radio_macro, bit0_active && k.local_alive, k.chorded)) {
+	if (s.radio_macro.step(k.radio_macro, bit0_active && k.local_alive)) {
 		s.radio_menu_open = !s.radio_menu_open;
 		events |= respawn_init_keeping(s, &s.radio_menu_open, k.in_session);
 	}
@@ -301,7 +301,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// [orig: case 11 @0x49aff1 — is_in_session @0x49aff1, is_authority
 	//  @0x49affe, is_mp_session_peer @0x49b00b, `xor dword_24C1914, 1`
 	//  @0x49b018; catalog row 83, default VK 0xDC]
-	if (s.toggle_server.step(k.toggle_server, k.active, k.chorded) && k.in_session &&
+	if (s.toggle_server.step(k.toggle_server, k.active) && k.in_session &&
 			k.authority && k.mp_session_peer) {
 		s.server_status_view = !s.server_status_view;
 		events |= kServerStatusViewToggled;
@@ -310,11 +310,11 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// steps the sensitivity with the fire's sign; the embedder applies both
 	// to the session's look and posts the scale toast. Both rows ship unbound
 	// (flags 0x04000000: no gate bit, mode 3, alive or dead). Shift is the
-	// step's sign, so neither row takes the Shift/Alt chord guard.
+	// step's sign.
 	// [orig: case 9 `xor g_MouseInvertY, 1` @0x49afbb; case 17
 	//  @0x49b185..0x49b1fe; catalog rows 79 @0x817AFC / 82 @0x817C40]
-	if (s.flipmouse.step(k.flipmouse, k.active, false)) events |= kMouseFlipped;
-	if (s.mousescale.step(k.mousescale, k.active, false))
+	if (s.flipmouse.step(k.flipmouse, k.active)) events |= kMouseFlipped;
+	if (s.mousescale.step(k.mousescale, k.active))
 		events |= kMouseScaleStepped | (k.mouse_scale_negative ? kMouseScaleNegative : 0u);
 	// lockgame: an authority in a session, a listen host or a dedicated one, toggles its join
 	// lock. The row ships unbound (flags 0x04000000: no gate bit, mode 3, alive or dead), and
@@ -323,7 +323,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	//  Server_ToggleJoinLock @0x49BC36; catalog row 84; the filters @0x52AD50 (codes
 	//  151..167 @0x52AD91 / @0x52AE9F, 405..410 @0x52AEBF), @0x4A3E50 (none), @0x56FC30 (the
 	//  cine editor's table, 119 its pass-through entry @0x56FCF5)]
-	if (s.lockgame.step(k.lockgame, k.active, k.chorded) && k.in_session && k.authority)
+	if (s.lockgame.step(k.lockgame, k.active) && k.in_session && k.authority)
 		events |= kJoinLockToggled;
 	return events;
 }

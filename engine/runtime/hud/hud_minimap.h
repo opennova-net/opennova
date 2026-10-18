@@ -143,6 +143,10 @@ struct HudMinimapMarker {
 	int32_t half_x_q16 = 0;
 	int32_t half_y_q16 = 0;
 	uint8_t floor_px = 6;
+	// The change-team class (world::MinimapBlipDrawPolicy::change_team, cell): its colour
+	// blinks on the session frame clock; `cell` replaces the slot's when not 0.
+	uint8_t change_team = 0;
+	uint8_t cell = 0;
 	// A LOCAL-TEAM player whose class carries the charattr Medic attribute
 	// draws the red-cross plate IN PLACE of its blip. The producer resolves it
 	// (enemies never carry it — retail forces the bit off for the other team)
@@ -157,6 +161,7 @@ struct HudMinimapMarker {
 	//  @0x597890; Render_MinimapSlotBlip @0x5be490..0x5be57b]
 	uint8_t team = 0;         // entity+354
 	uint8_t zone_number = 0;  // entity+538 (live)
+	uint8_t capture_team = 0; // entity+0x223, the S2C 0x53 mode_b (the zone's window)
 	uint8_t def_type = 0;     // ItemDef+0x5C (0 with no def)
 	uint8_t entity_bits = 0;  // kMarkerEntity* below
 	int16_t zone_index = -1;  // SpawnZoneList_IndexOf(entity), -1 = not listed
@@ -400,7 +405,12 @@ struct HudMinimapInput {
 	// [orig: HUD_InitOverlaySystem @0x5a49bc — g_BmsAttribFlags & 0x20 ->
 	//  g_MapYaw180(0x2723EB0) = 0x80000000]
 	bool flip_180 = false;
+	// The frame's clocks (HudFrameState's): the logic tick the radar's marks
+	// blink on, the HUD frame counter the pulses and the pointers' halving read,
+	// the session frame counter the map view's zone blips blink on.
 	int ticks = 0;
+	uint32_t hud_frame = 0;
+	uint32_t session_frame = 0;
 	// The sixteen HUD item flash timers (hud_declutter.h HudItemFlash): [5]
 	// blinks the waypoint pointer, [14] the FARP chevron, [10]..[13]/[15]
 	// hide blips by cell/colour on their lit phase [orig: HUD_DrawMapOverlay

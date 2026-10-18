@@ -422,6 +422,7 @@ static void test_initial_wac_binds_the_preopened_music_context() {
         auto audio = std::unique_ptr<mus::MusVM, decltype(&mus::mus_vm_destroy)>(
                 mus::mus_vm_create(), mus::mus_vm_destroy);
         mus::MusScript music_script{};
+        music_script.globals_size = 64;   // MDEdit's Var00..Var15, every script's area
         if (context_active) CHECK(mus::mus_vm_load_script(audio.get(), &music_script) == 0);
         mus::mus_vm_set_var(audio.get(), 7, 99);
         ms::MissionKernel kernel;
@@ -434,7 +435,9 @@ static void test_initial_wac_binds_the_preopened_music_context() {
         CHECK(kernel.wac.runs() == 1);
         CHECK(kernel.world.script.vars.get_mission(1) == (context_active ? 99 : 0));
         CHECK(kernel.world.script.vars.get_mission(2) == 55);
-        CHECK(mus::mus_vm_get_var(audio.get(), 7) == (context_active ? 55 : 99));
+        // With no context the game's setter writes nothing and its reader reads 0 [orig: AudioVM_SetVariable @
+        // 0x671FA0, the g_AudioVMContextActive test; sub_671FB0 @ 0x672660].
+        CHECK(mus::mus_vm_get_var(audio.get(), 7) == (context_active ? 55 : 0));
     }
 }
 

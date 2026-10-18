@@ -19,7 +19,7 @@ func after_all() -> void:
 const TICK := 1.0 / 62.0
 
 
-func _make_fixture(water_height: float) -> Dictionary:
+func _make_fixture(water_height: float, terrain_texdetail: int = 3) -> Dictionary:
 	var vp := SubViewport.new()
 	vp.size = Vector2i(320, 180)
 	add_child_autofree(vp)
@@ -30,6 +30,7 @@ func _make_fixture(water_height: float) -> Dictionary:
 
 	var terrain: Terrain = Terrain.new()
 	vp.add_child(terrain)
+	terrain.set_terrain_texdetail(terrain_texdetail)
 	terrain.set_terrain_data(data)
 	terrain.build()
 
@@ -148,6 +149,30 @@ func test_runtime_publishes_one_shared_retail_tile_page_array() -> void:
 	assert_gt(int(second["cache_hits"]), int(first["cache_hits"]))
 
 
+# The page tier follows the session's terrain texture detail: 256-texel pages at
+# 3, 128 below it (TerrainTileCompositionCache::page_dimension) [orig:
+# Terrain_LoadEnvironmentConfig @ 0x610966..0x61099F; PolyTrn_LoadTerrainConfig
+# @ 0x60E41D..0x60E446].
+func test_the_page_tier_follows_the_terrain_texture_detail() -> void:
+	for word in [0, 1, 2, 3]:
+		var fixture := _make_fixture(7.0, word)
+		var terrain: Terrain = fixture["terrain"]
+		var cam: Camera3D = fixture["camera"]
+		cam.global_position = Vector3(64.0, 27.0, 64.0)
+		terrain.render_frame()
+		terrain.render_frame()
+		var side := 256 if word >= 3 else 128
+		var page_array: TextureLayered = terrain.get_tile_cache_texture()
+		assert_not_null(page_array, "terrain_texdetail %d publishes the page array" % word)
+		if page_array != null:
+			assert_eq(page_array.get_width(), side, "terrain_texdetail %d: the page side" % word)
+			assert_eq(page_array.get_height(), side)
+			assert_eq(page_array.get_layers(), 128, "128 records at every tier")
+		var diagnostics: Dictionary = terrain.get_tile_cache_diagnostics()
+		assert_eq(int(diagnostics.get("dimension", 0)), side)
+		assert_gt(int(diagnostics["frame_compose_jobs"]), 0, "terrain_texdetail %d composes" % word)
+
+
 func test_visible_pages_compose_before_their_frame_draws() -> void:
 	var fixture := _make_fixture(7.0)
 	var terrain: Terrain = fixture["terrain"]
@@ -173,8 +198,7 @@ func test_visible_pages_compose_before_their_frame_draws() -> void:
 	assert_eq(int(composed["frame_capacity_fallbacks"]), 0)
 	assert_between(int(composed.get("worker_count", 0)), 2, 8,
 			"half the hardware threads compose the pages, 2..8")
-	assert_eq(int(composed.get("dimension", 0)), 256,
-			"The sole highest-quality retail page path.")
+	assert_eq(int(composed.get("dimension", 0)), 256, "A fresh profile's high tier.")
 
 
 func test_live_tile_info_mutation_invalidates_resident_page_sources() -> void:

@@ -764,12 +764,14 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 				entries.push_back(std::move(e));
 			}
 		} catch (const db::Error &e) {
+			// A failed read is an error, not an empty listing (the public reads' rule).
 			std::fprintf(stderr, "[http] /api/hosts list failed: %s\n", e.what());
+			return json_error(500, "db_error");
 		}
 		crow::json::wvalue out;
 		out["count"] = entries.size();
-		out["hosts"] = std::move(entries);
 		std::printf("[http] /api/hosts -> %zu host(s)\n", entries.size());
+		out["hosts"] = std::move(entries);
 		return json_reply(200, out);
 	});
 

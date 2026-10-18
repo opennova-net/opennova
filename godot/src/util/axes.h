@@ -80,9 +80,9 @@ inline Vector3 godot_from_fixed3(const std::array<int32_t, 3> &p) {
 // (the int conversion of the scaled float), the rule every binding site that
 // rebuilds a 16.16 point from a Godot position uses.
 inline void fixed3_from_godot(const Vector3 &v, int32_t out[3]) {
-	out[0] = static_cast<int32_t>(v.x * 65536.0f);
-	out[1] = static_cast<int32_t>(-v.z * 65536.0f);
-	out[2] = static_cast<int32_t>(v.y * 65536.0f);
+	out[0] = static_cast<int32_t>(v.x * opennova::io::kFp16One);
+	out[1] = static_cast<int32_t>(-v.z * opennova::io::kFp16One);
+	out[2] = static_cast<int32_t>(v.y * opennova::io::kFp16One);
 }
 
 // The inverse, into any {x, y, z} float struct: env::Vec3 by default,

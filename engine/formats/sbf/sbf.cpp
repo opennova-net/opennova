@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -154,9 +155,6 @@ int sbf_decode_chunk(const uint8_t *chunk_bytes, size_t chunk_size,
 
     SbfChunkHeader h;
     memcpy(&h, chunk_bytes, SBF_CHUNK_HEADER);
-    if (h.scale_a > 7 || h.scale_b > 7) {
-        return -4;
-    }
 
     uint32_t want = h.valid_samples;
     if (want > chunk_size - SBF_CHUNK_HEADER) want = (uint32_t)(chunk_size - SBF_CHUNK_HEADER);
@@ -188,8 +186,39 @@ int sbf_decode_all(const uint8_t *raw, size_t raw_size,
     return (int)produced;
 }
 
+/* The samples the stereo split keeps of a chunk that decoded `samples`: its
+   whole frames (samples >> 1), none for under 4 frames or over 2048 [orig:
+   Audio_SubmitStereoSampleSplit @ 0x7BD222..0x7BD233]. */
+static size_t sbf_split_kept_samples(size_t samples) {
+    const size_t frames = samples >> 1;
+    return (frames <= 3 || frames > 0x800) ? 0 : frames * 2;
+}
+
+std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
+                                      uint32_t block_size) {
+    std::vector<int16_t> out;
+    if (!entry_bytes || block_size < (uint32_t)SBF_CHUNK_HEADER) return out;
+    out.resize(size);
+    size_t produced = 0;
+    for (size_t off = 0; off + SBF_CHUNK_HEADER <= size; off += block_size) {
+        const size_t this_chunk = std::min<size_t>(block_size, size - off);
+        const int n = sbf_decode_chunk(entry_bytes + off, this_chunk, out.data() + produced,
+                                       out.size() - produced);
+        if (n < 0) break;
+        /* The split's rule reads the header's own count, past the block's bytes
+           too (retail's static block buffer holds stale bytes there); the port
+           plays the bytes the block holds [orig: AudioStream_Update @ 0x671D24 /
+           @ 0x671D41, ecx = the block's first dword]. */
+        uint32_t header_count = 0;
+        memcpy(&header_count, entry_bytes + off, sizeof(header_count));
+        produced += std::min(sbf_split_kept_samples(header_count), (size_t)n & ~(size_t)1);
+    }
+    out.resize(produced);
+    return out;
+}
+
 /* Witnessed: jointops!Audio_StreamNextChunk @ 0x004ED7D0 (per-chunk ReadFile of
-   block_size bytes). Hot path for streaming AudioStreamPlayback. */
+   block_size bytes). */
 int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
                                uint32_t chunk_index, uint8_t *out_buf,
                                size_t buf_size) {
@@ -224,7 +253,7 @@ uint8_t sbf_pick_scale(const int16_t *s, size_t count) {
         if (a > max_abs) max_abs = a;
     }
     for (int scale = 7; scale >= 0; --scale) {
-        int32_t enc = ((max_abs << 1) << scale) / 256;
+        int32_t enc = (max_abs << scale) / 256;
         if (enc <= 127) return (uint8_t)scale;
     }
     return 0;
@@ -475,12 +504,17 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
 std::vector<int16_t> sbf_decode_stream(const SbfStream &stream) {
     std::vector<int16_t> out;
     for (const SbfChunk &chunk : stream.chunks) {
-        /* A shift past 7 stops the stream at its chunk, as the Godot player
-           does (sbf_decode_chunk refuses the chunk; what the original's mixer
-           does with such a shift is not witnessed, and no shipped chunk has
-           one). */
-        if (chunk.scale_a > 7 || chunk.scale_b > 7) break;
         for (size_t i = 0; i < chunk.audio.size(); ++i)
+            out.push_back(sbf_decode_sample(chunk.audio[i], (i & 1) ? chunk.scale_b : chunk.scale_a));
+    }
+    return out;
+}
+
+std::vector<int16_t> sbf_play_stream(const SbfStream &stream) {
+    std::vector<int16_t> out;
+    for (const SbfChunk &chunk : stream.chunks) {
+        const size_t kept = sbf_split_kept_samples(chunk.audio.size());
+        for (size_t i = 0; i < kept; ++i)
             out.push_back(sbf_decode_sample(chunk.audio[i], (i & 1) ? chunk.scale_b : chunk.scale_a));
     }
     return out;

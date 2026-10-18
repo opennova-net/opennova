@@ -39,9 +39,9 @@ using TemplateVars = std::map<std::string, std::string>;
 // `text` with each of & < > " ' as its entity (&amp; &lt; &gt; &quot; &#39;)
 // and every other byte as it is. In a page's text a stock client's page
 // parser turns those entities back into the characters they name [orig:
-// xml_decode_entity_reference @0x655330, the named table at 0x84C1E8 holding
+// XML_DecodeEntityReference @0x655330, the named table at 0x84C1E8 holding
 // &quot; &amp; &lt; &gt;, and &#NN; through atol, whose one caller is the
-// text loop of build_content_node_from_html @0x656080 (the call @0x656161),
+// text loop of CUIHTMLParser_BuildContentNodeFromHTML @0x656080 (the call @0x656161),
 // for each '&' outside a tag], so a value there shows as itself. Inside a
 // tag (an attribute value, such as the login form's VALUE="{{IN}}") nothing
 // decodes them, so an escaped character would arrive as its entity; the

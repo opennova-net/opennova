@@ -714,6 +714,12 @@ void OcclusionWorld::build_occluder_planes(World &world, const OcclusionFrameCam
         const OcclusionPortalFace &rec = m->records[slot.record_index];
         const RenderMatrix world_mat = render_matrix_from_entity_pose(*e);
 
+        // Retail's two 128-word lists, which it does not bound: an edge past 128
+        // runs into the front list and a front past the work buffer's end; the
+        // caps below are the port's (D-OCC-11) [orig:
+        // Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, work_buffer[129] at
+        // ebp-0x208: the edges from +4 appended @ 0x5b36b2, the fronts from
+        // +0x104 appended @ 0x5b370c, neither count tested].
         uint16_t edges[128];
         int32_t edge_count = 0;
         uint16_t fronts[128];
@@ -911,6 +917,9 @@ void OcclusionWorld::traverse(TraverseCtx &ctx, int32_t current_section,
         ctx.section_mask |= 1u << (far_section & 31);
 
         // Boundary edges (low-15 cancellation). [orig: @ 0x5c4e3a-0x5c4ed9]
+        // Retail's 128-word list (esp+0x4BC up to the frame's cookie), which it
+        // does not bound; the cap below is the port's (D-OCC-11) [orig: the
+        // appends @ 0x5c4e89 / @ 0x5c4eb4, the count untested].
         uint16_t edges[128];
         int32_t edge_count = 0;
         for (int32_t f = 0; f < rec.face_count; ++f) {

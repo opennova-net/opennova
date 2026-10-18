@@ -92,7 +92,11 @@ struct ThreediTargetLimits {
 	ThreediLimit section_vertices;   // [field] corners a bullet face's indices reach
 	ThreediLimit section_normals;    // [field] normals a bullet face's index reaches
 	ThreediLimit occlusion_vertices; // [field] vertices of an occlusion record
-	ThreediLimit occlusion_planes;   // [engine] planes of an occlusion record
+	ThreediLimit occlusion_planes;   // [engine] distinct planes an occlusion record's faces name
+	ThreediLimit occlusion_face_plane; // [field] the plane an occlusion face names (exclusive)
+	ThreediLimit occlusion_edges;      // [engine] distinct edges an occlusion record's faces name
+	ThreediLimit occlusion_slots;        // [engine] the portal occluders one frame keeps
+	ThreediLimit occlusion_frame_rows;   // [engine] the edge rows, and the face rows, one frame's occluders hold
 	// --- lights -----------------------------------------------------------
 	ThreediLimit light_rate; // [field] a colour generator's rate (exclusive)
 	ThreediLimit light_cone; // [field] a spot cone's half-angle in degrees (exclusive)

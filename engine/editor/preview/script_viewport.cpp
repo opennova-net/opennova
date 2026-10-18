@@ -141,7 +141,7 @@ namespace {
 // The ConfigFile reader's words over a text it reads (a credits file's): each section's label
 // line from its '[' to its ']' (a keyword), each entry's key (a command), each value as written (an operand), at
 // the places the reader read them [orig: ConfigFile_ParseText @ 0x7608A0; ConfigFile_BuildSectionLabels
-// @ 0x75DF20; ini_parse_section_entries @ 0x75DB80; ConfigFile_ParseValues @ 0x7606F0]. The reader is handed
+// @ 0x75DF20; IniFile_ParseSectionEntries @ 0x75DB80; ConfigFile_ParseValues @ 0x7606F0]. The reader is handed
 // the text as Save writes it, an LF alone CR LF (the reader ends a line at CR LF alone: TextLineEnds::CrLf), each
 // place it read taken back to the document's.
 void config_file_highlights(const TextDocument &document, std::vector<TextHighlight> &out) {

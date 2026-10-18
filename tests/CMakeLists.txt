@@ -106,6 +106,13 @@ target_link_libraries(threedi_utf8_path_test PRIVATE opennova_formats)
 target_include_directories(threedi_utf8_path_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_utf8_path COMMAND threedi_utf8_path_test)
 
+# The formats' fstream opens (RTXT, CPT, .bms, .mnu, particles) under a UTF-8 path no ANSI code
+# page spells (io::os_path).
+add_executable(utf8_format_paths_test io/utf8_format_paths_test.cpp)
+target_link_libraries(utf8_format_paths_test PRIVATE opennova_formats)
+target_include_directories(utf8_format_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME utf8_format_paths COMMAND utf8_format_paths_test)
+
 # Every retail model through the reader and the writer the editor saves by:
 # byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
 add_executable(threedi_retail_rewrite_test threedi/retail_rewrite_test.cpp)
@@ -186,7 +193,7 @@ add_test(NAME anim_o3a_commands COMMAND anim_o3a_commands_test ${CMAKE_CURRENT_B
 add_executable(weapon_timing_test anim/weapon_timing_test.cpp)
 target_link_libraries(weapon_timing_test PRIVATE opennova_3di_commands)
 target_include_directories(weapon_timing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(weapon_timing COMMAND weapon_timing_test ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME weapon_timing COMMAND weapon_timing_test ${CMAKE_CURRENT_BINARY_DIR})
 # The Blender add-on's tests, headless, when Blender is found (set
 # BLENDER_EXECUTABLE when it is not on PATH): every tests/blender/*_test.py
 # loads the source tree's add-on through tests/blender/addon_harness.py and
@@ -1636,6 +1643,14 @@ add_executable(hud_math_test hud/hud_math_test.cpp)
 target_link_libraries(hud_math_test PRIVATE opennova_runtime)
 add_test(NAME hud_math COMMAND hud_math_test)
 
+# The local player's per-frame HUD info record (hud/hud_entity_info.h): the
+# health fraction, the stance and fov defaults, the ammo pair, the live-FSM
+# gates, the SIGHTS card gate, the selector clear ahead of the overlay fork and
+# the circle mask's inputs [orig: HUD_BuildEntityInfo @0x4b8440].
+add_executable(hud_entity_info_test hud/hud_entity_info_test.cpp)
+target_link_libraries(hud_entity_info_test PRIVATE opennova_runtime)
+add_test(NAME hud_entity_info COMMAND hud_entity_info_test)
+
 # Which hudpos.def values place each HUD element (hud/hud_element_layout.h): the element -> key
 # table, its HUDDECLUT rows, the positioned texts' hidden / alignment indices and a coordinate's
 # value as the game reads it (the NETWORKINDICATOR reset corners, PAUSEDPOS's fallback).
@@ -1696,6 +1711,13 @@ add_executable(hud_loading_screen_test hud/loading_screen_test.cpp)
 target_link_libraries(hud_loading_screen_test PRIVATE opennova_runtime)
 target_include_directories(hud_loading_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_loading_screen COMMAND hud_loading_screen_test)
+
+# The loading screen's background pick, band edge and SP splash gate
+# (hud/loading_background.h) [orig: Render_LoadingScreen @0x521db5..0x521e94;
+# Game_StartMission @0x525d38..0x525d48].
+add_executable(hud_loading_background_test hud/loading_background_test.cpp)
+target_link_libraries(hud_loading_background_test PRIVATE opennova_runtime)
+add_test(NAME hud_loading_background COMMAND hud_loading_background_test)
 
 add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
 target_link_libraries(jo_env_sweep_test PRIVATE opennova_formats opennova_base)
@@ -1852,6 +1874,13 @@ target_include_directories(lan_discovery_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(lan_discovery_test PRIVATE cxx_std_17)
 add_test(NAME lan_discovery COMMAND lan_discovery_test)
 
+# The LAN list's row text (npwire/lan_discovery.h lan_discovery_row_label): the
+# two forms, the expansion test and copy, the row cap
+# [orig: UI_ProcessLANSessionStateMachine @0x559493 / @0x5594b9].
+add_executable(lan_row_label_test npruntime/lan_row_label_test.cpp)
+target_link_libraries(lan_row_label_test PRIVATE opennova_net)
+add_test(NAME lan_row_label COMMAND lan_row_label_test)
+
 add_executable(minimap_markers_test npruntime/minimap_markers_test.cpp)
 target_link_libraries(minimap_markers_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(minimap_markers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1871,6 +1900,13 @@ add_test(NAME minimap_overlays COMMAND minimap_overlays_test)
 add_executable(character_registry_test npruntime/character_registry_test.cpp)
 target_link_libraries(character_registry_test PRIVATE opennova_runtime)
 add_test(NAME character_registry COMMAND character_registry_test)
+
+# The PLAYER_INFO character memory (runtime/inmatch/player_info_character.h):
+# the side selection, the per-side default, the class rule and the dialog
+# save's shared class [orig: PlayerInfo_SaveFromDialog @0x55ee10].
+add_executable(player_info_character_test npruntime/player_info_character_test.cpp)
+target_link_libraries(player_info_character_test PRIVATE opennova_runtime)
+add_test(NAME player_info_character COMMAND player_info_character_test)
 
 # The role feeds (inmatch/role_feeds.h): the end-round state, overlay input and stat
 # rows off a joiner's replica state, the DEATH screen status, the bare-role fallbacks.
@@ -2074,6 +2110,15 @@ add_test(NAME loadout_labels COMMAND loadout_labels_test)
 add_executable(loadout_screen_test menu/loadout_screen_test.cpp)
 target_link_libraries(loadout_screen_test PRIVATE opennova_runtime)
 add_test(NAME loadout_screen COMMAND loadout_screen_test)
+
+# The loadout dialogs' list and state model (menu/loadout_screen.h's list fill,
+# reselects, clip count and accept pick; menu/player_info_loadout.h): the rows
+# under NONE, the restore's catalog rows, the handlers' picks, the kit page's
+# selection [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430;
+# WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0].
+add_executable(loadout_dialog_test menu/loadout_dialog_test.cpp)
+target_link_libraries(loadout_dialog_test PRIVATE opennova_runtime)
+add_test(NAME loadout_dialog COMMAND loadout_dialog_test)
 
 add_executable(player_info_kit_test menu/player_info_kit_test.cpp)
 target_link_libraries(player_info_kit_test PRIVATE opennova_runtime)
@@ -2912,6 +2957,19 @@ target_link_libraries(projectile_combat_test PRIVATE opennova_runtime)
 target_include_directories(projectile_combat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(projectile_combat_test PRIVATE cxx_std_17)
 add_test(NAME projectile_combat COMMAND projectile_combat_test)
+
+# The client damage leg over a wire-built person: a joiner's round striking a
+# remote person row (the friendly-fire gate, the hit record, the attacker stamp).
+add_executable(wire_person_hit_test world/wire_person_hit_test.cpp)
+target_link_libraries(wire_person_hit_test PRIVATE opennova_runtime)
+target_compile_features(wire_person_hit_test PRIVATE cxx_std_17)
+add_test(NAME wire_person_hit COMMAND wire_person_hit_test)
+
+add_executable(hud_frame_counters_test world/hud_frame_counters_test.cpp)
+target_link_libraries(hud_frame_counters_test PRIVATE opennova_runtime)
+target_include_directories(hud_frame_counters_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_frame_counters_test PRIVATE cxx_std_17)
+add_test(NAME hud_frame_counters COMMAND hud_frame_counters_test)
 
 add_executable(fire_sound_test world/fire_sound_test.cpp)
 target_link_libraries(fire_sound_test PRIVATE opennova_runtime)

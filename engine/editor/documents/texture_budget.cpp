@@ -58,12 +58,6 @@ DeviceTexture times(DeviceTexture texture, uint32_t count) {
 	return texture;
 }
 
-// The terrain texture detail's halving word at `level` (terrain_texdetail 0 to 3) [orig: sub_605D70
-// @ 0x605DBF..0x605E0A].
-uint32_t terrain_texdetail_flags(int level) {
-	return level <= 0 ? 0x20000u : level <= 2 ? 0x10000u : 0u;
-}
-
 // The compression word the terrain's DXT maps take at the fresh profile's texcompression_level [orig:
 // PolyTrn_InitTextures @ 0x60ABAD..0x60ABC6]: the splat layers' (0x400100 at 0, else 0x400200) and the colour and
 // blend maps' (0x400200 at 1 or less, else none).
@@ -136,7 +130,7 @@ TextureBudget texture_role_budget(const TextureHeader &header, const std::string
 			source.dxt5_opaque = header.dds_dxt5_opaque;
 		}
 		for (int level = 0; level < renderer::kObjectTexDetailLevels; ++level) {
-			const uint32_t flags = word | 0x8u | terrain_texdetail_flags(level);
+			const uint32_t flags = word | 0x8u | renderer::terrain_texdetail_flags(level);
 			out.detail[level] = dds ? renderer::dds_device_texture(source, flags) : made_texture(w, h, flags);
 		}
 	};

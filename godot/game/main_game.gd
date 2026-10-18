@@ -34,14 +34,6 @@ const DEV_TOOLS_KEY := KEY_INSERT
 # with the retail-configurable binding rows (huddetail's default; hudcolor's is
 # Ctrl+F6, D-CTRL-4).
 const PICK_KEY := KEY_F6
-# `-- --boot-smoke` (the package boot smoke, scripts/package_godot_windows.ps1):
-# once the bundled menu is up and its music plays, quit through request_quit(),
-# the window close's path, after BOOT_SMOKE_FRAMES frames. A forced quit
-# (`--quit-after`) with the menu music streaming crashes in Godot's shutdown
-# (audio/mus-sbf-re.md, "Godot playback shutdown"), so the smoke exits as a
-# player does instead, and exercises the music drain.
-const BOOT_SMOKE_FLAG := "--boot-smoke"
-const BOOT_SMOKE_FRAMES := 120
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing
 # host would freeze every peer), only the mouse is released and player input idles.
@@ -154,10 +146,12 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 	if _world != null:
 		_world.set_object_polydetail(state.object_polydetail)
 		_world.set_texfilter_level(state.texfilter_level)
-		# The particle density and the texture compression reach the next
-		# mission the world starts (its session copies, D-RMAT-24).
+		# The particle density, the texture compression and the terrain
+		# texture detail reach the next mission the world starts (its session
+		# copies, D-RMAT-24, D-RMAT-20).
 		_world.set_particle_density(state.particle_density)
 		_world.set_texcompression_level(state.texcompression_level)
+		_world.set_terrain_texdetail(state.terrain_texdetail)
 	if _hud_presenter != null:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
 		_hud_presenter.set_crosshair_color(state.crosshair_color)
@@ -169,6 +163,11 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		request_quit()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		# The window procedure clears the key state on gaining and on losing the
+		# focus, the key state alone (engine controls::KeyStateReset carries the
+		# witness).
+		ControlsBindings.model().reset_key_state()
 	elif what == NOTIFICATION_EXIT_TREE:
 		begin_runtime_shutdown()
 		finish_runtime_shutdown()
@@ -418,6 +417,26 @@ func _ready() -> void:
 # reports unhandled even after emitting pressed; without this early claim the same
 # Esc closes ARMORY and then immediately opens PAUSE.
 func _input(event: InputEvent) -> void:
+	# A useitem key's release clears the engine's armory press latch whatever
+	# is up (the original's key-message hook; engine LocalPlayer::
+	# release_use_item_key carries the witness), the event left for the other
+	# handlers.
+	if event is InputEventKey and not (event as InputEventKey).pressed and _world != null \
+			and _is_use_item_key(ArmoryPresenter.bound_key_of(event as InputEventKey)):
+		var release_sim: Simulation = _world.get_sim()
+		if release_sim != null:
+			# Windows posts a release with Alt held (without Ctrl, which AltGr
+			# also carries), or Alt's or F10's own, as WM_SYSKEYUP, which the
+			# hook ignores.
+			var released := event as InputEventKey
+			release_sim.release_use_item_key(
+					(released.alt_pressed and not released.ctrl_pressed) \
+					or released.keycode == KEY_ALT or released.keycode == KEY_F10)
+	# Every key-down, a press or an OS repeat (echo), sets its key again after a
+	# menu close's key-state reset (engine controls::KeyStateReset carries the
+	# witness).
+	if event is InputEventKey and (event as InputEventKey).pressed:
+		ControlsBindings.model().key_down_event(ArmoryPresenter.bound_key_of(event as InputEventKey))
 	# An open chat line takes every key (Esc included) before anything else
 	# sees it; only the shell's own window/tools keys pass.
 	if event is InputEventKey and _state == State.WORLD and _hud_presenter != null \
@@ -437,7 +456,10 @@ func _input(event: InputEvent) -> void:
 		return
 	var key := event as InputEventKey
 	if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
-		resume()
+		# Esc is the WEAPON screen's CANCEL, which does nothing while the press
+		# latch is held (ArmoryPresenter.can_dismiss).
+		if _armory_presenter == null or _armory_presenter.can_dismiss():
+			resume()
 		get_viewport().set_input_as_handled()
 
 
@@ -483,32 +505,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_player_presenter.consume_use_hold()
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
-		return
-	# The USE-ITEM key's armory arm: in-world, standing in an armory volume, the
-	# press opens weapon.mnu [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d].
-	# Every other arm of the key is the input router's per-frame chain over the
-	# polled `useitem` row -- the hold latch, the USE+digit seat pick, the mount
-	# toggle on the release edge (PlayerInputRouter::sample_use_item); the screen
-	# this arm opens leaves gameplay input inactive, which resets that chain.
-	if is_gameplay_input_active() and _is_use_item_key(ArmoryPresenter.bound_key_of(key)):
-		if _try_open_armory():
-			get_viewport().set_input_as_handled()
-			return
-		# The vehicle-loadout-volume arm @0x4e0bfe (the engine's
-		# local_player_in_vehicle_loadout_zone: an unmounted local player carrying
-		# the type-11 volume touch): the press is consumed here and never latches
-		# the router's chain -- no mount toggle on the release, no USE+digit chord.
-		# The bay's team gate (local_player_vehicle_zone_team_matches: the ground
-		# entity's team 0 or the player's own) selects vehicle.mnu's VEHICLE
-		# screen, unported (D-HUD-14). A mounted player never reaches this arm (the
-		# predicate rejects a seated player), so the seat chain stays unconditional.
-		var use_sim: Simulation = _world.get_sim() if _world != null else null
-		if use_sim != null and use_sim.local_player_in_vehicle_loadout_zone():
-			if _player_presenter != null:
-				_player_presenter.consume_use_hold()
-			if use_sim.local_player_vehicle_zone_team_matches():
-				pass  # vehicle.mnu VEHICLE (D-HUD-14)
-			get_viewport().set_input_as_handled()
 		return
 
 
@@ -761,17 +757,7 @@ func _enter_bundled_menu() -> bool:
 				+ "or the OpenNova Editor's Export)") % BootRootMount.bundled_project_dir())
 	# The boot marker the CLI startup contract test and the package smoke read (--verbose).
 	print_verbose("OpenNova: bundled menu up from %s (%s)" % [root.get_root_dir(), "build" if built else "loose"])
-	if OS.get_cmdline_user_args().has(BOOT_SMOKE_FLAG):
-		_quit_boot_smoke()
 	return true
-
-
-# The package boot smoke's exit (BOOT_SMOKE_FLAG): the menu runs its frames, its
-# music among them, then the runtime quits as a window close does.
-func _quit_boot_smoke() -> void:
-	for _frame in BOOT_SMOKE_FRAMES:
-		await get_tree().process_frame
-	request_quit()
 
 
 ## PLAY RETAIL: the saved retail install when it still mounts, else the picker.
@@ -939,19 +925,18 @@ func set_local_player_profile(profile: Dictionary) -> void:
 		_player_info_companion.set_persisted_profile(_chosen_avatar)
 
 
-# The armory key while in-world: the shared ArmoryPresenter opens weapon.mnu's
-# WEAPON screen over LIVE play when the player stands in an armory zone — the
-# world keeps ticking underneath (State.ARMORY rides the presenter's opened signal)
-# [orig: useitem action 177 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON")
-# @0x4e0b44, gated on Flags & 0x400000 @0x4e0b4d + the host weapons rule
-# (dword_A85B6C, BSS 0 in SP = allowed); no world-stop leg]. Returns false when
-# out of zone (key ignored, the original's silent gate). The ACCEPT apply and
-# the class/current-loadout open protocol live on the host.
-func _try_open_armory() -> bool:
+# The held USE row's armory arm (engine controls::PlayerActions): the shared
+# ArmoryPresenter opens weapon.mnu's WEAPON screen over LIVE play, the world
+# ticking underneath (State.ARMORY rides the presenter's opened signal). It
+# opens what the engine named, unre-gated: the same frame's release-edge toggle
+# may mount the player after the open, as retail's dispatch opens the screen
+# before that edge runs. The ACCEPT apply and the class/current-loadout open
+# protocol live on the host.
+func _open_armory() -> bool:
 	if _armory_presenter == null:
 		return false
 	_armory_presenter.set_player_team(int(_chosen_avatar.get("team", 0)))
-	return _armory_presenter.try_open()
+	return _armory_presenter.open()
 
 
 # Whether a key event is the `useitem` row's (retail default Shift; catalog row
@@ -1259,6 +1244,12 @@ func _on_world_loaded() -> void:
 	if sim != null and bool(sim.is_joiner()) \
 			and not bool(sim.is_joined_in_match()):
 		return
+	# Every mission start, a restart's included, runs the whole input reset; a
+	# joiner's runs later, after its game-start wait (the frame loop's
+	# Simulation.take_input_reset; engine controls::KeyStateReset carries the
+	# witness).
+	if sim == null or not bool(sim.is_joiner()):
+		_reset_key_state()
 	# The SP start-mission splash holds the reveal until its dismissal edge;
 	# the gate + device legs live on the coordinator
 	# [orig: Game_ShowStartMissionSplash @ 0x520820 precedes the release @ 0x525d45].
@@ -1511,6 +1502,18 @@ func _on_command_map_requested() -> void:
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
 	if _state == from_state:
 		_state = State.WORLD
+		_reset_key_state()
+
+
+# Every menu screen's close resets the input state: a key held through it
+# reads up until its next key-down and dispatches no release, and a deferred
+# dispatch is dropped (engine controls::KeyStateReset and
+# PlayerActions::clear_key_press_latches carry the witness).
+func _reset_key_state() -> void:
+	if _player_presenter != null:
+		_player_presenter.reset_input_state()
+	else:
+		ControlsBindings.model().reset_key_state()
 
 
 func _pause() -> void:
@@ -1537,6 +1540,7 @@ func resume() -> void:
 			else State.WORLD
 	# Every resume leg lands here, so the session cannot stay stuck Paused.
 	_world.set_shell_paused(false)
+	_reset_key_state()
 	if _hud_presenter != null:
 		_hud_presenter.set_menu_pause(false)
 
@@ -1573,8 +1577,9 @@ func mcp_open_armory() -> Error:
 		return OK
 	if _state != State.WORLD:
 		return ERR_UNAVAILABLE
-	# The armory key's leg minus the zone gate: standing in a type-6 volume is
-	# the useitem key's gameplay rule [orig: Flags & 0x400000 @0x4e0b4d], not a
+	# The armory key's leg minus the arm's gate: a type-6 volume or the pre-round
+	# is the useitem key's gameplay rule (Simulation.local_player_use_item_arm)
+	# [orig: Input_HandleActionBinding_0 Flags & 0x400000 @0x4e0aa1], not a
 	# screen precondition — open() is the presenter's staged direct-open seam.
 	_armory_presenter.set_player_team(int(_chosen_avatar.get("team", 0)))
 	return OK if _armory_presenter.open() else ERR_UNAVAILABLE
@@ -1813,11 +1818,25 @@ func _process(delta: float) -> void:
 		return
 	if _state == State.PAUSED and not _world.is_net_session():
 		return
+	# A joiner's mission start owes its input reset once its game-start wait
+	# ends (engine inmatch::ClientRuntime::take_input_reset).
+	var reset_sim: Simulation = _world.get_sim()
+	if reset_sim != null and reset_sim.take_input_reset():
+		_reset_key_state()
 	var frame_input: MissionFrameInput
 	if _player_presenter != null:
 		var player_live := is_gameplay_input_active()
+		# No input frame runs under the INGAME (pause), WEAPON (armory) or CMAP
+		# (command map) screen (engine controls::PlayerActionPoll::menu_open
+		# carries the witness).
 		frame_input = _player_presenter.before_world_tick(
-				delta, player_live, player_live)
+				delta, player_live, player_live,
+				_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP)
+		# The held USE row's armory arm took its open in that poll (engine
+		# controls::PlayerActions, through the sim's press latch); the shell
+		# opens what it names.
+		if _player_presenter.take_use_item_armory_request():
+			_open_armory()
 	else:
 		frame_input = MissionFrameInput.new()
 		frame_input.delta_seconds = delta

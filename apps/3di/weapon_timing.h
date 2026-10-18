@@ -1,16 +1,15 @@
 // opennova-3di weapon: the weapon.def half of a first-person weapon.
 //
 //   weapon timing <timing.txt> -o <edits.txt>
-//   weapon merge  <weapon.def> <edits.txt> -o <out.def>
 //
 // `timing` compiles a rig's authored action windows (the Blender add-on's
 // Action-local markers, as seconds), the weapon.def entries that share its
 // clips (each with its fire mode and shot period) and the eye positions an
 // author placed, into the weapon.def keys to set, and measures every entry
-// with the engine's own weapon FSM (runtime/world/weapon_fsm.h). `merge` sets
-// those keys in a copy of a weapon.def and leaves every other byte as it was.
-// No imported weapon or animation is an input (ADR 0047 decision 14). Both
-// grammars and the JSON `timing` prints are docs/anim/weapon-timing-format.md.
+// with the engine's own weapon FSM (runtime/world/weapon_fsm.h); the author sets
+// those keys in the entries' weapon.def. No imported weapon or animation is an
+// input (ADR 0047 decision 14). Both grammars and the JSON `timing` prints are
+// docs/anim/weapon-timing-format.md.
 #pragma once
 
 #include <cstdint>
@@ -118,35 +117,9 @@ struct WeaponTimingPlan {
 void weapon_def_view_from_eye(const double metres[3], double units[3]);
 
 bool plan_weapon_timing(const WeaponTimingRequest &request, WeaponTimingPlan &out, std::string &error);
-// The edits file `timing` writes and `merge` reads.
+// The edits file `timing` writes: the keys an author sets in the entries' weapon.def.
 std::string weapon_edits_text(const WeaponTimingPlan &plan);
 
-// One entry of an edits file: the keys to set and nothing else.
-struct WeaponEditKey {
-	int action = 0;
-	std::string key;   // anim, delaystart, delayend or function
-	std::string value; // as the def will hold it
-};
-
-struct WeaponEditEntry {
-	std::string name;
-	std::string mode;
-	bool pos_given = false;
-	bool tpos_given = false;
-	std::string pos[3];
-	std::string tpos[3];
-	std::vector<WeaponEditKey> keys;
-};
-
-bool parse_weapon_edits(const std::string &text, std::vector<WeaponEditEntry> &out, std::string &error);
-
-// Set `edits` in a copy of the weapon.def `def`: every other byte is kept.
-// `notes` receives what the author should know about an entry the edits do
-// not change (a SIGHTS card that replaces the aimed model).
-bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry> &edits,
-		std::string &out, std::vector<std::string> &notes, std::string &error);
-
 int cmd_weapon_timing(const char *input, const char *output);
-int cmd_weapon_merge(const char *def_path, const char *edits_path, const char *output);
 
 } // namespace opennova::threedi_cli

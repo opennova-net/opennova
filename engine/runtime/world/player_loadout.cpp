@@ -120,21 +120,25 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     const std::vector<std::string> display =
             weapon_kit_expand_display_list(kit, table);
     // The local player owns every slot the fill seeds: its class feeds the
-    // zoom seed's sniper lock. The permission is World::rules'
-    // session byte (byte_A821F0); offline retail reads the config's own
-    // g_mp_allowsniperscopezoom instead, zero by default like the rule
-    // [orig: Config_SetDefaults @ 0x54D364; Game_ApplySessionSettingsToGlobals
-    //  @ 0x552284].
+    // zoom seed's sniper lock. The permission is the fill's value: the
+    // session byte (byte_A821F0) on an in-session peer, else the config's own
+    // allowSniperScopeZoom (World::rules.sniper_zoom_fill) [orig:
+    //  WeaponSlot_InitFromDef @ 0x53EF07..0x53EF25; Config_SetDefaults
+    //  @ 0x54D364].
     const uint8_t seed_class = loadout_seed_class(world, loadout);
     const WeaponFillResult fill = weapon_inventory_load_from_display(table, display,
-            inventory, seed_class, world.rules.allow_sniper_scope_zoom);
+            inventory, seed_class, world.rules.sniper_zoom_fill);
     for (const std::string &w : fill.warnings)
         io::logf(io::LogLevel::kWarn, "%s", w.c_str()); // [orig: ErrorLog_WriteTimestamped]
     weapon_inventory_seed_pools(table, inventory, seed_class);
-    weapon_inventory_recalc_clips(table, inventory);
+    // The redraw and the weight read through the player's seat (an unseated
+    // spawn reads its own tables) [orig: WeaponSlots_RecalculateAmmoFromCapacity
+    //  @0x54228D; WeaponSlot_GetTotalClips @0x542638 / @0x542651].
+    const WeaponAmmoSeat seat = e != nullptr ? entity_ammo_seat(world, *e) : WeaponAmmoSeat{};
+    weapon_inventory_recalc_clips(table, inventory, seat);
     // The loadout weight the next 0x5A apply would stamp into entity+0x37C
     // [orig: Terrain_AccumulateSectorScores @0x425220 via @0x4296f9].
-    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory);
+    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory, seat);
     if (e != nullptr) e->carry_flags = (e->carry_flags & ~0x18u) | inventory.carry_flags;
     inventory_valid = true;
     weapon.switch_in_flight = false;
@@ -198,9 +202,10 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
             /*select_spawn_default=*/true);
     // The ACCEPT leg applies the REQUESTED ammo over the default seed: pool =
     // min(req, maxclips) * clipsize when requested, else startrounds RAW on
-    // the main leg; the first different-class sub-variant takes ammo_secondary
+    // the main leg; every sub-variant of another ammo class takes ammo_secondary
     // with the x clipsize fallback [orig: @ 0x566166 vs @ 0x566209;
-    // WeaponSlot_SetAmmoCount @ 0x540b50].
+    // WeaponSlot_SetAmmoCount @ 0x540b50; the walk over every sub-variant
+    // @ 0x56621D..0x566233].
     const WeaponTable &table = world.tables.weapons;
     for (const WeaponKitEntry &entry : loadout.spawn_kit) {
         const int adm = table.index_of(entry.name.c_str());
@@ -215,9 +220,10 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
             weapon_pool_set(table, inventory, def->ammo_class_id, total);
         }
         for (int k = 1; k <= def->loadout_subclasses; ++k) {
-            const WeaponTableEntry *sub = (adm + k < 256)
-                    ? table.by_index(static_cast<uint8_t>(adm + k))
-                    : nullptr;
+            // The sub-variant's index wraps at 256: AdmDef_GetEntryByIndex reads only
+            // its low byte [orig: WeaponLoadout_ApplyFromBuffer @ 0x5661CA (and the
+            //  name-list leg @ 0x566008) -> @ 0x53FC80].
+            const WeaponTableEntry *sub = table.by_index(static_cast<uint8_t>(adm + k));
             if (sub == nullptr) continue;
             if (strutil::iequals(sub->ammo_class, def->ammo_class)) continue;
             int32_t total = entry.ammo_secondary >= 0
@@ -230,14 +236,19 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
             // @ 0x5661E8..0x566215]
             if (total >= 0) total *= sub->clipsize;
             weapon_pool_set(table, inventory, sub->ammo_class_id, total);
-            break; // the FIRST different-class sub-variant [orig: @ 0x5027c8 shape]
         }
     }
-    weapon_inventory_recalc_clips(table, inventory);
+    // Both read through the player's seat; a joiner applying before L
+    // exists reads its own tables [orig: WeaponSlots_RecalculateAmmoFromCapacity
+    //  @0x54228D; WeaponSlot_GetTotalClips @0x542638 / @0x542651].
+    const Entity *seated = world.registry.get(world.cached.local_player);
+    const WeaponAmmoSeat seat =
+            seated != nullptr ? entity_ammo_seat(world, *seated) : WeaponAmmoSeat{};
+    weapon_inventory_recalc_clips(table, inventory, seat);
     // The S2C 0x5A apply's last leg: the loadout weight into the local
     // entity's +0x37C (the run-promotion band) [orig:
     // NapiNPClientMsg_HandleWeaponLoadoutSync @0x4296f9 -> @0x425220].
-    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory);
+    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory, seat);
     return true;
 }
 

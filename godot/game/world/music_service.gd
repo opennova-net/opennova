@@ -95,8 +95,8 @@ static func _pair_from_names(root, names: MusicPairNames) -> MusicPair:
 		# The expansion bank lives inside the expansion folder, streamed loose
 		# (the subdir witness lives at the engine home, audio/music_policy.h).
 		# Resolve its spelling case-insensitively, as retail did on Windows. Keep
-		# the actual on-disk spelling for case-sensitive filesystems, and poison an
-		# ambiguous duplicate instead of choosing by enumeration order.
+		# the actual on-disk spelling for case-sensitive filesystems, two spellings
+		# of one name resolving as the engine's loose index resolves them.
 		var expansion_dir: String = root.get_root_dir().path_join(subdir)
 		var bank_path := _resolve_loose_file(expansion_dir, bank_file)
 		# Retail writes both expansion names immediately after the expansion PFF
@@ -110,18 +110,27 @@ static func _pair_from_names(root, names: MusicPairNames) -> MusicPair:
 	return pair
 
 
+# A file of `dir_path` named `filename` without case, by the engine's one loose rule:
+# the first spelling the directory's listing gives wins, as the VFS's loose index
+# (engine/base/vfs/vfs.cpp, scan_loose) and the material texture resolver's
+# (godot/src/util/texture_path_resolver.cpp) keep it. On Windows a folder holds one
+# spelling alone.
 static func _resolve_loose_file(dir_path: String, filename: String) -> String:
 	if dir_path.is_empty() or filename.is_empty():
 		return ""
-	var resolved_path := ""
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return ""
 	var wanted := filename.to_lower()
-	for entry in DirAccess.get_files_at(dir_path):
-		var actual := String(entry)
-		if actual.to_lower() != wanted:
-			continue
-		if not resolved_path.is_empty():
-			return ""  # duplicate case variants are ambiguous
-		resolved_path = dir_path.path_join(actual)
+	var resolved_path := ""
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while not entry.is_empty():
+		if not dir.current_is_dir() and entry.to_lower() == wanted:
+			resolved_path = dir_path.path_join(entry)
+			break
+		entry = dir.get_next()
+	dir.list_dir_end()
 	return resolved_path
 
 

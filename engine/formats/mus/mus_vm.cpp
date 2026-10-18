@@ -33,20 +33,33 @@ namespace {
    any sane authored MUS script and keeps the per-VM allocation small. */
 constexpr int kDataStackCap = 256;
 constexpr int kCallStackCap = 64;
-constexpr int kLocalsCap    = 256;
 constexpr int kTickBudget   = 32;   /* witnessed: dword_3246B24 = 0x20 */
 
-/* Globals area is byte-addressable per the witness (inc_g/dec_g operate on
-   1 byte at the indexed offset, NOT on a full int32). MUS_GLOBALS_BYTES is
-   68 to fit Var00..Var15 + 1 user var. We expose it as a byte buffer here
-   and read int32s out via memcpy for stack interop. */
-constexpr int kGlobalsBytes = MUS_GLOBALS_BYTES;
-constexpr int kLocalsBytes  = kLocalsCap * 4;
+/* The instance's block and the strings' copy the VM holds: at most what a tagged
+   address's 28-bit offset reaches (D-MUS-22). */
+constexpr size_t kRegionCap = 0x10000000;
+
+/* The block the game's allocator gives the instance: the size, 1 at least, rounded up to 64
+   [orig: FastMem_Alloc @ 0x7697BD..0x7697D7, from AudioMem_AllocWithLabel @ 0x759DB7]; its
+   bytes past the size are the instance's own, which the game leaves as the heap held them and
+   the VM zeroes (D-MUS-22). */
+uint64_t instance_block_bytes(uint64_t size) {
+    if (size < 1) size = 1;
+    return (size + 63) & ~uint64_t(63);
+}
 
 }   /* anonymous namespace */
 
+/* The instance's data: one block of the script's globals_size then its locals_size,
+   the globals at its start and the locals after them [orig: ScriptInstance_Init @
+   0x672F78..0x672FA3: AudioMem_AllocWithLabel of the two sizes, memset of them,
+   globals = the block, locals = the block + globals_size], as the allocator rounds it
+   (instance_block_bytes). Byte-addressable (inc_g/dec_g step one byte); a global past
+   its area reads the locals after it, and past them the block's rounding, as the
+   game's does. */
 struct MusGlobals {
-    uint8_t bytes[MUS_GLOBALS_BYTES]{};
+    std::vector<uint8_t> block;
+    uint32_t globals_size = 0;
 };
 
 /* A method's handler (an intrinsic of the game's registered table). */
@@ -65,9 +78,15 @@ struct MusVM {
     uint32_t call_stack[kCallStackCap];
     int      csp;
 
-    /* Globals + locals as raw bytes for byte-granular access. */
+    /* The instance's block, globals then locals (MusGlobals). */
     std::shared_ptr<MusGlobals> globals = std::make_shared<MusGlobals>();
-    uint8_t  locals [kLocalsBytes];
+
+    /* The script's strings as the chunk lays them out (MDEdit's layout): string_count words, each
+       the tagged address of its string (the relocated pointers [orig: AudioVM_FixupPointers @
+       0x6724C5..0x6724D8]), then the strings, each to its NUL, then the zeros to the debug section's
+       place at the next 16 of the chunk (MDEdit.exe sub_40DF30 @ 0x40E23C..0x40E24B). `pushstr`
+       pushes the word at its index [orig: AudioVM_Op_PushStr @ 0x672836]. */
+    std::vector<uint8_t> strings;
 
     /* Flag bitmap (FSet/FClear/FIsSet). 64 flags. */
     uint64_t flags;
@@ -130,6 +149,23 @@ uint32_t mus_vm_pc(const MusVM *vm) {
     return vm ? vm->pc : 0;
 }
 
+/* ---- Addresses --------------------------------------------------------- */
+
+/* A pushed address: the game pushes a pointer into the instance's block or the script's chunk
+   (`push_ga`, `push_la`, `pushstr`); the VM, in its own address space, pushes the region and the
+   offset in it, tagged, and the handlers that take an address read and write through it. */
+static constexpr int32_t kAddrTagBit    = (int32_t)0x40000000;   /* large flag */
+static constexpr int32_t kAddrLocalBit  = (int32_t)0x20000000;
+static constexpr int32_t kAddrStringBit = (int32_t)0x10000000;
+static constexpr int32_t kStringAddrTag = kAddrTagBit | kAddrStringBit;
+static constexpr int32_t kAddrOffsetMask = (int32_t)0x0FFFFFFF;
+
+enum class Region { Globals, Locals, Strings };
+
+/* `n` bytes at `off` in a region, or NULL past it: past the instance's block (or the strings' copy)
+   the game reads and writes the heap after its allocation, which the VM does not (D-MUS-22). */
+static uint8_t *region_at(MusVM *vm, Region region, int64_t off, size_t n);
+
 /* ---- E2: load + start/stop/pause/resume -------------------------------- */
 
 static Intrinsic resolve_method(const char *name);
@@ -147,11 +183,36 @@ int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     if (!vm || !s) return -1;
     // A fresh context owns fresh storage. Existing compiled operands retain the
     // old context rather than following a replacement or borrowing freed memory.
+    /* The instance's block and the strings' copy, made before anything of the VM changes. */
+    const uint64_t block_size = instance_block_bytes((uint64_t)s->globals_size + s->locals_size);
+    uint64_t image = 4ull * s->string_count;
+    for (uint32_t i = 0; i < s->string_count && image <= kRegionCap; ++i)
+        image += strlen(s->strings && s->strings[i] ? s->strings[i] : "") + 1;
+    /* The table sits where the writer puts it, at the code's end past the chunk's 0x68 bytes of header
+       and zeros and its section table (mus_encode_file), so the zeros run to that place's next 16. */
+    const uint64_t strings_end = 0x68ull + 4ull * s->section_count + s->code_size + image;
+    image += (16 - strings_end % 16) % 16;
+    if (block_size > kRegionCap || image > kRegionCap) return -2;
+    std::shared_ptr<MusGlobals> globals;
+    std::vector<uint8_t> strings;
     try {
-        vm->globals = std::make_shared<MusGlobals>();
+        globals = std::make_shared<MusGlobals>();
+        globals->globals_size = s->globals_size;
+        globals->block.assign((size_t)block_size, 0);
+        strings.assign((size_t)image, 0);
     } catch (const std::bad_alloc &) {
         return -1;
     }
+    size_t at = 4ull * s->string_count;
+    for (uint32_t i = 0; i < s->string_count; ++i) {
+        const char *text = s->strings && s->strings[i] ? s->strings[i] : "";
+        const int32_t address = kStringAddrTag | (int32_t)at;
+        memcpy(strings.data() + 4ull * i, &address, 4);
+        memcpy(strings.data() + at, text, strlen(text) + 1);
+        at += strlen(text) + 1;
+    }
+    vm->globals = std::move(globals);
+    vm->strings = std::move(strings);
     vm->script = s;
     vm->state  = MUS_VM_STOPPED;
     vm->sp     = 0;
@@ -160,7 +221,6 @@ int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     vm->halt_latch = 0;
     memset(vm->data_stack, 0, sizeof(vm->data_stack));
     memset(vm->call_stack, 0, sizeof(vm->call_stack));
-    memset(vm->locals,     0, sizeof(vm->locals));
     vm->last_error[0] = 0;
     vm->current_section_name[0] = 0;
     /* Each method name resolved by name, as the loader does [orig: AudioVM_LoadScriptFile @ 0x672DE0..0x672E01]. */
@@ -201,6 +261,12 @@ void mus_vm_unload_script(MusVM *vm) {
     vm->halt_latch = 0;
     vm->current_section_name[0] = 0;
     vm->methods.clear();
+    vm->strings.clear();
+    /* The block freed, as the game's context teardown zeroes its globals pointer [orig:
+       AudioVM_FreeSoundBuffer @ 0x672E2B]: a variable's write is dropped and its read is 0
+       [orig: the NULL tests @ 0x672645, @ 0x672665]. A compiled mission script keeps the
+       block it took (mus_vm_globals). */
+    vm->globals.reset();
 }
 
 void mus_vm_pause(MusVM *vm) {
@@ -233,31 +299,37 @@ static int32_t vm_pop(MusVM *vm) {
     return vm->data_stack[--vm->sp];
 }
 
-/* Read int32 from globals at byte_offset (little-endian). The globals area
-   is byte-addressable (witnessed: inc_g/dec_g operate on a byte). */
-static int32_t globals_read32(const MusVM *vm, int byte_off) {
-    if (byte_off < 0 || byte_off + 4 > kGlobalsBytes) return 0;
+static uint8_t *region_at(MusVM *vm, Region region, int64_t off, size_t n) {
+    if (off < 0 || (region != Region::Strings && !vm->globals)) return NULL;
+    std::vector<uint8_t> &bytes = region == Region::Strings ? vm->strings : vm->globals->block;
+    const uint64_t at = (uint64_t)off + (region == Region::Locals ? vm->globals->globals_size : 0);
+    if (at + n > bytes.size()) return NULL;
+    return bytes.data() + at;
+}
+
+/* A word, byte by byte: one at a region's end takes the bytes in it, 0 for those past it (D-MUS-22). */
+static int32_t region_read32(const MusVM *vm, Region region, int64_t off) {
+    uint8_t bytes[4] = {0, 0, 0, 0};
+    for (int k = 0; k < 4; ++k)
+        if (const uint8_t *at = region_at(const_cast<MusVM *>(vm), region, off + k, 1)) bytes[k] = *at;
     int32_t v;
-    memcpy(&v, vm->globals->bytes + byte_off, 4);
+    memcpy(&v, bytes, 4);
     return v;
 }
 
-static void globals_write32(MusVM *vm, int byte_off, int32_t v) {
-    if (byte_off < 0 || byte_off + 4 > kGlobalsBytes) return;
-    memcpy(vm->globals->bytes + byte_off, &v, 4);
+static void region_write32(MusVM *vm, Region region, int64_t off, int32_t v) {
+    uint8_t bytes[4];
+    memcpy(bytes, &v, 4);
+    for (int k = 0; k < 4; ++k)
+        if (uint8_t *at = region_at(vm, region, off + k, 1)) *at = bytes[k];
 }
 
-static int32_t locals_read32(const MusVM *vm, int byte_off) {
-    if (byte_off < 0 || byte_off + 4 > kLocalsBytes) return 0;
-    int32_t v;
-    memcpy(&v, vm->locals + byte_off, 4);
-    return v;
-}
-
-static void locals_write32(MusVM *vm, int byte_off, int32_t v) {
-    if (byte_off < 0 || byte_off + 4 > kLocalsBytes) return;
-    memcpy(vm->locals + byte_off, &v, 4);
-}
+/* A global at a byte offset of the globals area, a local at one of the locals area: both in the
+   instance's one block (MusGlobals), little-endian, byte-addressable (inc_g/dec_g step a byte). */
+static int32_t globals_read32(const MusVM *vm, int byte_off) { return region_read32(vm, Region::Globals, byte_off); }
+static void globals_write32(MusVM *vm, int byte_off, int32_t v) { region_write32(vm, Region::Globals, byte_off, v); }
+static int32_t locals_read32(const MusVM *vm, int byte_off) { return region_read32(vm, Region::Locals, byte_off); }
+static void locals_write32(MusVM *vm, int byte_off, int32_t v) { region_write32(vm, Region::Locals, byte_off, v); }
 
 /* Notify on_var_changed for a globals byte_offset -> var_index conversion.
    The hook reports var_index = byte_offset / 4 so Var00..Var15 (offsets 0..60)
@@ -350,9 +422,6 @@ static void op_pop_local(MusVM *vm) {
    Operand width: the original reads ONE byte as the offset but ADVANCES THE IP BY TWO
    (`movzx eax, byte ptr [esi]; inc esi; inc esi`) -- the 2nd operand byte is reserved
    and ignored. We consume both so the IP stays aligned when running real bytecode. */
-static constexpr int32_t kAddrTagBit  = (int32_t)0x40000000;   /* large flag */
-static constexpr int32_t kAddrLocalBit= (int32_t)0x20000000;
-
 static void op_push_global_addr(MusVM *vm) {
     int byte_off = read_u8(vm);
     (void)read_u8(vm);                 /* reserved 2nd operand byte (engine advances 2) */
@@ -389,20 +458,16 @@ static void op_nop(MusVM *vm) { (void)vm; }
    does NOT raise the globals-dirty signal (dword_3246B28) and fires no embedder
    notification here, so we deliberately omit notify_var_changed to match. */
 static void op_inc_g(MusVM *vm) {
-    int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kGlobalsBytes) ++vm->globals->bytes[byte_off];
+    if (uint8_t *at = region_at(vm, Region::Globals, read_u8(vm), 1)) ++*at;
 }
 static void op_dec_g(MusVM *vm) {
-    int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kGlobalsBytes) --vm->globals->bytes[byte_off];
+    if (uint8_t *at = region_at(vm, Region::Globals, read_u8(vm), 1)) --*at;
 }
 static void op_inc_l(MusVM *vm) {
-    int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kLocalsBytes) ++vm->locals[byte_off];
+    if (uint8_t *at = region_at(vm, Region::Locals, read_u8(vm), 1)) ++*at;
 }
 static void op_dec_l(MusVM *vm) {
-    int byte_off = read_u8(vm);
-    if (byte_off >= 0 && byte_off < kLocalsBytes) --vm->locals[byte_off];
+    if (uint8_t *at = region_at(vm, Region::Locals, read_u8(vm), 1)) --*at;
 }
 
 /* ---- Halt opcodes (forward decl; bodies in later tasks) --------------- */
@@ -454,9 +519,8 @@ static void init_handlers(void) {
     kHandlers[0x05] = op_push_global_addr;
     kHandlers[0x06] = op_push_local_addr;
     /* D-MUS-2 fixed: 0x07 pushstr, 0x0A pop_global_block, 0x0B pop_local_block are now
-       implemented at the original's operand widths (see handler bodies). They appear in
-       real Jointops bytecode; the reimpl compiler never emits them, so this only affects
-       running real .mus data. */
+       implemented at the original's operand widths (see handler bodies). The compiler
+       writes pushstr for a string parameter (D-MUS-20) and never the block pops. */
     kHandlers[0x07] = op_push_str;
     kHandlers[0x08] = op_pop_global;
     kHandlers[0x09] = op_pop_local;
@@ -779,44 +843,48 @@ static void intrinsic_ggrnd(MusVM *vm) {
     vm_push(vm, lo + rnd);
 }
 
-/* Helper: decode an address tag value back to (is_local, byte_offset).
+/* Helper: decode an address tag value back to (region, byte_offset).
    Returns -1 byte_offset if not a tagged address. */
-static int decode_tag_addr(int32_t tagged, int *out_local) {
+static int decode_tag_addr(int32_t tagged, Region *out_region) {
     if (!(tagged & kAddrTagBit)) return -1;
-    *out_local = (tagged & kAddrLocalBit) ? 1 : 0;
-    return (int)(tagged & 0x00FFFFFF);
+    *out_region = (tagged & kAddrStringBit) ? Region::Strings
+                : (tagged & kAddrLocalBit)  ? Region::Locals
+                                            : Region::Globals;
+    return (int)(tagged & kAddrOffsetMask);
 }
 
-/* Read int32 from a tagged address (globals or locals). */
+/* Read int32 from a tagged address (a global's, a local's or a string's). */
 static int32_t read_tagged(MusVM *vm, int32_t tagged) {
-    int local = 0;
-    int off = decode_tag_addr(tagged, &local);
+    Region region = Region::Globals;
+    int off = decode_tag_addr(tagged, &region);
     if (off < 0) return tagged;     /* not a tag -> treat as raw value */
-    return local ? locals_read32(vm, off) : globals_read32(vm, off);
+    return region_read32(vm, region, off);
 }
 static void write_tagged(MusVM *vm, int32_t tagged, int32_t v) {
-    int local = 0;
-    int off = decode_tag_addr(tagged, &local);
+    Region region = Region::Globals;
+    int off = decode_tag_addr(tagged, &region);
     if (off < 0) return;
-    if (local) locals_write32(vm, off, v);
-    else { globals_write32(vm, off, v); notify_var_changed(vm, off, v); }
+    region_write32(vm, region, off, v);
+    if (region == Region::Globals) notify_var_changed(vm, off, v);
 }
 
 /* Read a dword from a tagged source region at a sub-offset (for the block-copy ops). */
 static int32_t read_tagged_at(MusVM *vm, int32_t tagged, int sub_off) {
-    int local = 0;
-    int off = decode_tag_addr(tagged, &local);
+    Region region = Region::Globals;
+    int off = decode_tag_addr(tagged, &region);
     if (off < 0) return 0;            /* untagged source: no region to copy from */
-    return local ? locals_read32(vm, off + sub_off) : globals_read32(vm, off + sub_off);
+    return region_read32(vm, region, (int64_t)off + sub_off);
 }
 
 /* Jointops.exe!AudioVM_Op_PushStr @ 0x672830: reads a u8 index (IP advances 1) and
-   pushes context[+0x30][index] from the script's string/aux table. The single-context
-   reimpl does not model that table, so we push 0 -- the key fix is that the IP advances
-   correctly (1 byte) so the rest of a real script keeps decoding. */
+   pushes the word at the string table's index, `mov ebx, [ecx+eax*4]` @ 0x67283D: the
+   index-th string's address, or past the table the raw bytes the chunk holds after it
+   (its strings' own). The VM pushes the word at that place of its copy of the table and
+   the strings (MusVM::strings); past them 0, where the game pushes the chunk's zero padding
+   or the debug section's bytes (D-MUS-22). */
 static void op_push_str(MusVM *vm) {
-    (void)read_u8(vm);
-    vm_push(vm, 0);
+    const int index = read_u8(vm);
+    vm_push(vm, region_read32(vm, Region::Strings, 4ll * index));
 }
 
 /* Jointops.exe!AudioVM_Op_PopGlobalBlock @ 0x672890 (0x0A): pops a source address
@@ -1082,14 +1150,29 @@ std::shared_ptr<MusGlobals> mus_vm_globals(MusVM *vm) {
     return vm != nullptr && vm->script != nullptr ? vm->globals : nullptr;
 }
 
+/* The game reads and writes the area by index unbounded [orig: sub_671FB0 @ 0x672660, sub_671FD0 @ 0x672680:
+   globals + index * 4]: past the globals, the locals after them in the block; past the block nothing (D-MUS-22). */
 int32_t mus_globals_read(const MusGlobals &globals, uint32_t index) {
     int32_t value = 0;
-    if (index < MUS_GLOBALS_BYTES / 4) memcpy(&value, globals.bytes + index * 4, 4);
+    if (4ull * index + 4 <= globals.block.size()) memcpy(&value, globals.block.data() + 4ull * index, 4);
     return value;
 }
 
 void mus_globals_write_raw(MusGlobals &globals, uint32_t index, int32_t value) {
-    if (index < MUS_GLOBALS_BYTES / 4) memcpy(globals.bytes + index * 4, &value, 4);
+    if (4ull * index + 4 <= globals.block.size()) memcpy(globals.block.data() + 4ull * index, &value, 4);
+}
+
+uint32_t mus_globals_count(const MusGlobals &globals) { return globals.globals_size / 4; }
+
+const char *mus_vm_string(const MusVM *vm, int32_t value) {
+    if (!vm || !vm->script) return NULL;
+    Region region = Region::Globals;
+    const int off = decode_tag_addr(value, &region);
+    if (off < 0 || region != Region::Strings) return NULL;
+    if ((uint64_t)off < 4ull * vm->script->string_count || (size_t)off >= vm->strings.size()) return NULL;
+    /* Its NUL within the copy (a flag method may have written over it, as the game's writes the chunk). */
+    const char *text = (const char *)vm->strings.data() + off;
+    return memchr(text, 0, vm->strings.size() - (size_t)off) ? text : NULL;
 }
 
 int32_t mus_vm_get_var(const MusVM *vm, uint8_t var_index) {
@@ -1103,7 +1186,7 @@ int32_t mus_vm_get_var(const MusVM *vm, uint8_t var_index) {
 void mus_vm_set_var(MusVM *vm, uint8_t var_index, int32_t value) {
     if (!vm) return;
     int byte_off = (int)var_index * 4;
-    if (byte_off + 4 > kGlobalsBytes) return;
+    if (!region_at(vm, Region::Globals, byte_off, 4)) return;
     globals_write32(vm, byte_off, value);
     notify_var_changed(vm, byte_off, value);
 }

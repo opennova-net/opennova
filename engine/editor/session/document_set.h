@@ -271,9 +271,14 @@ private:
 	void update_step_next();
 	void release_scope(const std::string &path);
 
-	// A mission's records of an item take its catalog row (D-MIS-10): the AI class a save writes handed to the
-	// document, before an edit and a save (MissionDocument::set_item_classes); the rows read through `rows_`.
-	void hand_item_classes(DocumentBase &document);
+	// What a mission takes of the project's catalogs, handed to the document before an edit and a save, the rows
+	// read through `rows_`: the AI class a save writes for each item's records (D-MIS-10,
+	// MissionDocument::set_item_classes) and the weapon table its .mis's default kit is written over (D-MIS-19,
+	// MissionDocument::set_weapon_table).
+	void hand_catalog_rows(DocumentBase &document);
+	// What a save stores back into a mission's records first, as the original editor's writers do: the clamps
+	// MissionDocument::save_clamps names, applied as one edit step (none where there are none).
+	void apply_save_clamps(DocumentBase &document);
 	// A document's companion (DocumentType::companions, S24 Names: a mission's .mis): where it is (beside the
 	// document's file, in its folder: the project's file there of the document's base name and its extension, in
 	// any case, else that name), "" for a type with none; read and handed to the document before it reads its file

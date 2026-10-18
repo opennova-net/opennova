@@ -197,7 +197,7 @@ std::string texture_load_name(const std::string &written, const char *extension)
 }
 
 std::string face_file_name(const std::string &model) {
-	// [orig: sub_57FCE0 @ 0x57FCE0, the same strip as the textures' then ".GRM" @ 0x57FD2E]
+	// [orig: FaceAnim_FindOrLoadFile @ 0x57FCE0, the same strip as the textures' then ".GRM" @ 0x57FD2E]
 	return texture_load_name(model, kFaceExtension);
 }
 

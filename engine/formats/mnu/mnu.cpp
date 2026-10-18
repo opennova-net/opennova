@@ -17,8 +17,10 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 #include <base/io/cp1252.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 namespace opennova::mnu {
@@ -206,6 +208,104 @@ struct ReadScope {
   std::map<const WindowPart *, ReadScope> parts;
 };
 
+// The game creates nested WINDOWs recursively on its main thread's 1 MiB stack (Jointops.exe's
+// SizeOfStackReserve 0x100000): each WINDOW's base parse calls the widget factory for each child
+// WINDOW [orig: CUIElement_ParseXMLDefinition @ 0x648120, the call @ 0x649789], which builds the
+// widget, calls its init (vtable +4) and its type's parse chain down to the child's own base parse
+// [orig: CUIScene_CreateWidgetByType @ 0x64f630]; the XML reader before it is a loop
+// [orig: NapiXML_ParseElementTree @ 0x769d70]. After its parse each init raises the create event,
+// named the window's own NAME, which runs the window's handler and forwards to its parent's, up the
+// chain [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970, the name @ 0x646980; the forward
+// @ 0x649c7d in CUIWidget_HandleScriptedAction @ 0x6497f0]. Each forward names the event by the
+// forwarding window's own NAME [orig: the push @ 0x649c76; CMEditWnd_HandleEvent @ 0x660f40, the push
+// @ 0x66100b], "" where none is authored (the factory's [orig: CUIScene_CreateWidgetByType, g_EmptyStr
+// @ 0x64f777]), and a MULTILINE_EDIT forwards no event named its own NAME [orig: CMEditWnd_HandleEvent,
+// the _stricmp @ 0x660f58]: never its own create event, nor one its child forwards under the edit's
+// name. Nothing caps the nesting, so a menu nested deep enough runs the stack out and the game crashes
+// loading it.
+//
+// One level's bytes by type, the stack drop from a parent's factory call to the child's own
+// @ 0x649789 (the factory 64, the init 40 or the table's 56, each parse's frame, the base parse
+// 344; the TABLE parse's `and esp, -8` @ 0x6427d3 taken at its 0 pad), the init's frame at its
+// create event (44 bytes, a TABLE's 60: the emitter called @ 0x64a201, @ 0x6613b9, @ 0x644db9,
+// @ 0x65be29, @ 0x6408f3), and the type's create-event handler frame:
+// [orig: CWnd_CreateFromXml @ 0x64a140; CUIButtonWidget_ParseXMLAttributes @ 0x657c30;
+// CButtonWnd_ParseTooltipXML @ 0x658170; CEditWnd_ParseXMLProperties @ 0x661d10;
+// CMEditWnd_Init @ 0x6612f0; CRadioWnd_ParseXMLDefinition @ 0x656c40; CCheckWnd_ParseXMLDefinition
+// @ 0x64ad90; CListWnd_Init @ 0x644cf0; CListWnd_ParseXMLDefinition @ 0x645770; CSpinListWnd_Create
+// @ 0x64bc40; CUISpinList_ParseXMLDefinition @ 0x64bd10; CTableWnd_Init @ 0x640790;
+// CTableWnd_ParseXMLContentDefinition @ 0x6427d0; CScrollWnd_Initialize @ 0x64d540;
+// CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0; CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0;
+// CWnd_Create @ 0x65d780; CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0;
+// CRadioEditWnd_Create @ 0x65d470; CComboWnd_Init @ 0x65c350; CLanListWnd_Init @ 0x65bd60;
+// CLanListWnd_ParseXMLDefinition @ 0x65b9d0; CGopherWnd_Initialize @ 0x659b50;
+// CGopherWnd_ParseXMLDefinition @ 0x65b130]. A RADIOEDIT's WINDOWs are also created by its two parts
+// (their base parses 52 and 76 bytes deeper); the cost here is its own path's. Every figure is the
+// least the game spends and the stack its caller already holds is not counted, so a menu the bound
+// refuses surely runs the game's stack out.
+constexpr size_t kGameStackBytes = 0x100000;
+constexpr size_t kFactoryBytes = 64;     // [orig: CUIScene_CreateWidgetByType @ 0x64f630, its SEH frame included]
+constexpr size_t kCreateEventBytes = 32; // [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970]
+struct WindowStackCost {
+  size_t level;   // a level's bytes, factory call to factory call
+  size_t init;    // the init's frame at its create event
+  size_t handler; // its create-event handler's frame
+};
+WindowStackCost window_stack_cost(WindowType type) {
+  switch (type) {
+  case WindowType::Window: return {448, 44, 72};
+  case WindowType::Static: return {476, 44, 72};
+  case WindowType::Button: return {504, 44, 100};
+  case WindowType::Edit: return {500, 44, 124};
+  case WindowType::MultilineEdit: return {516, 44, 32};
+  case WindowType::List: return {1132, 44, 208};
+  case WindowType::CheckBox: return {520, 44, 128};
+  case WindowType::Radio: return {524, 44, 128};
+  case WindowType::Combo: return {496, 44, 120};
+  case WindowType::Scroll: return {764, 44, 56};
+  case WindowType::Table: return {1192, 60, 288};
+  case WindowType::SpinList: return {1084, 44, 136};
+  case WindowType::Marquee: return {748, 44, 72};
+  case WindowType::GlbTable: return {492, 44, 684};
+  case WindowType::RadioEdit: return {464, 44, 116};
+  case WindowType::LanList: return {1148, 44, 252};
+  case WindowType::Gopher: return {516, 44, 32};
+  }
+  return {448, 44, 72};
+}
+
+// Where a part's embedded widget runs its base parse, relative to its owner's (a window's or another
+// part widget's): the owner's parse dispatches the part element to it and its base parse creates the
+// element's own WINDOWs [orig: CUISpinList_ParseXMLDefinition @ 0x64c33b; CComboWnd_ParseXMLDefinition
+// @ 0x65c16e; the SCROLLBAR parts @ 0x646062 (a list's), @ 0x643b22 (a table's), @ 0x6608c9 (a
+// multiline edit's); CLanListWnd_ParseXMLDefinition @ 0x65ba21; CLanGameBrowser_ParseExtendedXMLDefinition
+// @ 0x65db54, @ 0x65dd56, @ 0x65dd8a, @ 0x65df93, @ 0x65e009; CGopherWnd_ParseXMLDefinition @ 0x65b2d6;
+// a CATEGORY's LABEL through CGopherWnd_ParseCategoryXML @ 0x65a710]. A part the game builds none for
+// sits at its owner's depth. A part's WINDOWs raise their create events only up to the part widget,
+// whose parent is not yet set while it parses.
+long part_stack_offset(WindowType owner, const Node &part) {
+  const auto is = [&part](const char *tag) { return tag_is(part, tag); };
+  switch (owner) {
+  case WindowType::SpinList: return is("SPINUP") || is("SPINDOWN") ? 4 : 0;
+  case WindowType::Combo: return is("LIST_BOX") ? 656 : 0;
+  case WindowType::List:
+  case WindowType::Table: return is("SCROLLBAR") ? 240 : 0;
+  case WindowType::LanList:
+    if (is("SCROLLBAR")) return 240;
+    return is("JOIN_BUTTON") || is("SEARCH_BUTTON") ? -628 : 0;
+  case WindowType::MultilineEdit: return is("SCROLLBAR") ? 264 : 0;
+  case WindowType::GlbTable:
+    if (is("GLB_TABLE") || is("GLB_INFO_PLAYER_DETAILS")) return 728;
+    if (is("GLB_INFO_BUTTON")) return 56;
+    if (is("GLB_INFO_SERVER_DETAILS")) return 68;
+    return is("GLB_NW_INFO") ? 28 : 0;
+  case WindowType::Gopher:
+    if (is("GOPHER_BACK")) return 56;
+    return is("LABEL") ? 184 : 0;
+  default: return 0;
+  }
+}
+
 class TreeReader {
 public:
   explicit TreeReader(SourceEncoding encoding) : encoding_(encoding) {}
@@ -228,6 +328,13 @@ private:
   void fatal_because(const void *what, const std::string &why) {
     reasons_[what] = why;
     if (reads_) fatal_.insert(what);
+  }
+  // A fatal note on a read element the model keeps, where retail reads it: retail crashes on what the
+  // element (or its window, through it) holds (docs/mnu/menu-re.md, "Crash and hang cases").
+  void crash_note(const Node &node, const std::string &why) {
+    if (!reads_) return;
+    text_notes_[&node] = why;
+    fatal_.insert(&node);
   }
   // An attribute with no token (an empty or bare value): retail's comparison or
   // conversion faults on it where its parse reads it.
@@ -271,7 +378,7 @@ private:
   // A VALUE the parse reads with wcstol: the number's decimal; empty when absent (and, `zero_none`,
   // for 0, the parse's default).
   std::string number_value(const Node &node, const char *name, bool zero_none);
-  // A FLAGS word [orig: sub_646CC0 @ 0x646cc0]; kDefaultUiMaterialFlags when absent.
+  // A FLAGS word [orig: UI_ParseMaterialFlagNamesW @ 0x646cc0]; kDefaultUiMaterialFlags when absent.
   uint32_t flags_attr(const Node &node, const char *name);
   std::string string_attr(const Node &node, const char *name);
   bool number_attr(const Node &node, const char *name, int &out);
@@ -291,9 +398,18 @@ private:
   bool singleton(ReadScope &frame, const Node &node, const char *tag, bool merge);
 
   bool read_screen(const Node &node, Screen &out);
-  bool read_created_window(const Node &node, Window &out);
+  // Whether the factory creates `node`, and its type; false leaves it out with its note.
+  bool creatable_window(const Node &node, WindowType &out_type);
+  // The NAME a created window holds (the body's read notes it): "" where none is authored.
+  std::string created_name(const Node &node) const;
+  // The WINDOWs the factory creates from `nodes`, in order, appended to `into` and queued for
+  // their bodies (read_pending_windows), so creation never recurses however deep the menu nests;
+  // one whose creation runs the game's stack out is left out with a fatal note.
+  void create_windows(const std::vector<const Node *> &nodes, std::vector<Window> &into);
+  void read_pending_windows();
   void read_window_body(const Node &node, Window &w, ReadScope &frame);
-  void read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner);
+  // A part read by an owner of type `owner` into its embedded widget of type `type`.
+  void read_part(const Node &node, WindowPart &part, WindowType type, WindowType owner, ReadScope &frame);
   bool read_appearance(const Node &node, Appearance &out, const char *const *types);
   bool read_sound(const Node &node, Sound &out);
   void read_position(const Node &node, Position &pos);
@@ -317,12 +433,32 @@ private:
   SourceEncoding encoding_;
   std::map<const void *, std::string> reasons_;
   std::set<const void *> fatal_;
-  // A read element of which retail reads part of the text (a colour's): its note.
+  // A read element's own note: a colour of which retail reads part of the text, or what retail
+  // crashes on (crash_note).
   std::map<const Node *, std::string> text_notes_;
   // Each FONT colour's element by its window's element and the colour's place in the FONT, so a later
   // one (of any FONT of that window) takes the earlier's note with it.
   std::map<std::pair<const Node *, size_t>, const Node *> font_colour_nodes_;
   bool reads_ = true; // retail reads what is being read now
+  // The widget whose body is being read (null for a SCREEN's), the game's stack at its base parse, and
+  // the handlers' bytes its forward of an event reaches up its chain (window_stack_cost).
+  const Window *owner_ = nullptr;
+  size_t stack_ = 0;
+  size_t forward_ = 0;
+  // A created WINDOW whose body is still to read, by its place among its owner's (a part's widget is its
+  // own allocation and a window's children stop growing before any of them is read, so the vector
+  // holds; its elements may move while a repeated part element creates more into the same widget), with
+  // the read state its creation saw.
+  struct PendingWindow {
+    const Node *node;
+    std::vector<Window> *into;
+    size_t index;
+    bool reads;
+    bool glb_header_fields;
+    size_t stack;
+    size_t forward;
+  };
+  std::vector<PendingWindow> pending_;
   // A GLB_TABLE's browser reads its tables' HEADER FIELDs (read_column) [orig: @ 0x65dac0].
   bool glb_header_fields_ = false;
 };
@@ -605,7 +741,7 @@ void TreeReader::unread_rest(const Node &parent, size_t from, const char *const 
   }
 }
 
-// [orig: parse_script_block @ 0x63b800 -> CUIScene_ParseNodeAttributes @ 0x639630]
+// [orig: CUIScene_ParseScriptBlock @ 0x63b800 -> CUIScene_ParseNodeAttributes @ 0x639630]
 void TreeReader::read_document(const mnu_xml::Document &xml, Document &out) {
   for (const auto &root : xml.roots) {
     if (!tag_is(*root, "SCREEN")) {
@@ -628,6 +764,7 @@ bool TreeReader::read_screen(const Node &node, Screen &out) {
     because(&a, "SCREEN attributes are not read (NAME and MUSICVAR are child elements); " +
                     mnu_xml::ascii(a.name) + " is left out.");
   ReadScope frame;
+  std::vector<const Node *> roots;
   for (const auto &child_ptr : node.children) {
     const Node &child = *child_ptr;
     if (tag_is(child, "NAME")) {
@@ -649,20 +786,33 @@ bool TreeReader::read_screen(const Node &node, Screen &out) {
       out.music_var = static_cast<int>(mnu_xml::wcstol(tok, 10));
       out.has_music_var = true;
     } else if (tag_is(child, "WINDOW")) {
-      Window window;
-      if (read_created_window(child, window)) out.roots.push_back(std::move(window));
+      roots.push_back(&child);
     } else if (tag_is(child, "TEXT_RSRC") || tag_is(child, "CURSOR")) {
       because(&child, "A SCREEN reads only NAME, MUSICVAR and WINDOW: " + mnu_xml::ascii(child.tag) +
                           " belongs in a root WINDOW; this one is left out.");
     }
   }
+  // The root WINDOWs, each created with parent 0 [orig: CUIScene_ParseNodeAttributes @ 0x639630], from the
+  // top of the stack this reading counts; every window's body read before the screen returns.
+  owner_ = nullptr;
+  stack_ = 0;
+  forward_ = 0;
+  create_windows(roots, out.roots);
+  read_pending_windows();
+  // No NAME leaves the screen's name null, which each created root window copies [orig:
+  // CUIScene_ParseNodeAttributes @ 0x639630, the name cleared @ 0x639642; the copy 0x646c10 called
+  // @ 0x639791]; an empty NAME element's text is "" [orig: NapiXML_ParseElementTree @ 0x769d70, the close
+  // tag's empty text].
+  if (!frame.seen.count("NAME") && !out.roots.empty())
+    crash_note(node, "A SCREEN with no NAME crashes retail as it creates the screen's first window (the window "
+                     "copies the null name).");
   return true;
 }
 
 // [orig: CUIScene_CreateWidgetByType @ 0x64f630] The factory takes the WINDOW's
 // first child element and the TYPE its attribute walk meets first (the last
 // authored); no child element or no TYPE creates nothing.
-bool TreeReader::read_created_window(const Node &node, Window &out) {
+bool TreeReader::creatable_window(const Node &node, WindowType &out_type) {
   if (node.children.empty()) {
     because(&node, "A WINDOW with no child element is not created by retail; it is left out.");
     return false;
@@ -682,16 +832,93 @@ bool TreeReader::read_created_window(const Node &node, Window &out) {
   }
   // The factory's match of the token (a generic window for a token it does not match); the writer
   // puts the type's own name down.
-  out.type = parse_window_type(token_text);
-  ReadScope frame;
-  read_window_body(node, out, frame);
+  out_type = parse_window_type(token_text);
   return true;
+}
+
+std::string TreeReader::created_name(const Node &node) const {
+  // The base parse's NAME [orig: CUIElement_ParseXMLDefinition @ 0x648120, the WideCharToMultiByte
+  // @ 0x6481fe], else the factory's "" [orig: CUIScene_CreateWidgetByType, g_EmptyStr @ 0x64f777].
+  const Attribute *name = node.attr("NAME");
+  Text tok;
+  return name && name->token(tok) ? narrow(tok) : std::string();
+}
+
+void TreeReader::create_windows(const std::vector<const Node *> &nodes, std::vector<Window> &into) {
+  struct Made {
+    const Node *node;
+    WindowType type;
+    size_t forward;
+  };
+  std::vector<Made> made;
+  for (const Node *node : nodes) {
+    WindowType type = WindowType::Window;
+    if (!creatable_window(*node, type)) continue;
+    // What the window's forward reaches: its owner's handler and, unless the owner is a MULTILINE_EDIT
+    // of the window's own name (compared as _stricmp does, case aside), the owner's own forward; a
+    // root's reaches nothing (it is created with parent 0).
+    const size_t forward =
+        !owner_ ? 0
+                : window_stack_cost(owner_->type).handler +
+                      (owner_->type == WindowType::MultilineEdit && iequals(created_name(*node), owner_->name)
+                           ? 0
+                           : forward_);
+    // The game's stack at the child's own base parse, and at its create event: the factory, the init,
+    // the event, the window's own handler and what its forward reaches (a MULTILINE_EDIT's own event
+    // goes no further than its handler).
+    const WindowStackCost cost = window_stack_cost(type);
+    const size_t at_parse = stack_ + cost.level;
+    const size_t at_event = stack_ + kFactoryBytes + cost.init + kCreateEventBytes + cost.handler +
+                            (type == WindowType::MultilineEdit ? 0 : forward);
+    if (std::max(at_parse, at_event) > kGameStackBytes) {
+      fatal_because(node, "Nested this deep, the game's window creation runs past its 1 MiB stack here (" +
+                              std::to_string(std::max(at_parse, at_event)) + " bytes at least): the game crashes "
+                              "loading this menu; the window is left out.");
+      continue;
+    }
+    made.push_back({node, type, forward});
+  }
+  const size_t first = into.size();
+  for (const Made &m : made) {
+    into.emplace_back();
+    into.back().type = m.type;
+  }
+  // Queued last first, so each creation's bodies read in document order.
+  for (size_t i = made.size(); i-- > 0;) {
+    const WindowStackCost cost = window_stack_cost(made[i].type);
+    pending_.push_back({made[i].node, &into, first + i, reads_, glb_header_fields_, stack_ + cost.level,
+                        made[i].forward});
+  }
+}
+
+void TreeReader::read_pending_windows() {
+  const bool reads = reads_, glb = glb_header_fields_;
+  const size_t stack = stack_, forward = forward_;
+  const Window *owner = owner_;
+  while (!pending_.empty()) {
+    const PendingWindow next = pending_.back();
+    pending_.pop_back();
+    Window &w = (*next.into)[next.index];
+    reads_ = next.reads;
+    glb_header_fields_ = next.glb_header_fields;
+    stack_ = next.stack;
+    forward_ = next.forward;
+    owner_ = &w;
+    ReadScope frame;
+    read_window_body(*next.node, w, frame);
+  }
+  reads_ = reads;
+  glb_header_fields_ = glb;
+  stack_ = stack;
+  forward_ = forward;
+  owner_ = owner;
 }
 
 // A part's own embedded widget parses the element's children with its own chain
 // (the attributes are the element's); an empty one hands the parse no node, which
 // faults. A repeated part element parses into the same widget.
-void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner) {
+void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, WindowType owner_type,
+                           ReadScope &owner) {
   if (node.children.empty()) {
     if (reads_)
       fatal_because(&node, "An empty " + mnu_xml::ascii(node.tag) +
@@ -709,7 +936,17 @@ void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, 
   for (const Attribute &a : node.attributes)
     if (mnu_xml::iequals(a.name, "TYPE"))
       because(&a, "A " + mnu_xml::ascii(node.tag) + " is always its owner's own widget; TYPE is left out.");
+  // The widget's base parse where its owner's dispatches the element; it has no parent while that
+  // parse runs, so its forward reaches nothing.
+  const size_t stack = stack_, forward = forward_;
+  const Window *saved_owner = owner_;
+  stack_ = size_t(long(stack_) + part_stack_offset(owner_type, node));
+  forward_ = 0;
+  owner_ = &w;
   read_window_body(node, w, owner.parts[&part]);
+  stack_ = stack;
+  forward_ = forward;
+  owner_ = saved_owner;
   if (!first_time) node.read = false; // the note covers the element; its content is read
 }
 
@@ -749,6 +986,12 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
   } else {
     for (const char *name : {"PASSWORD", "NUMBER", "READONLY", "MAXCHAR", "MAXVAL", "MINVAL"}) not_read(node, name, w.type);
   }
+  // GLOBAL_VAR reads the scene, still unset while the parse runs, on an edit window and on a CHECKED
+  // checkbox [orig: CEditWnd_ParseXMLProperties @ 0x661e5f; CCheckWnd_ParseXMLDefinition @ 0x64ae05].
+  if (w.global_var && (reads_edit_attributes(w.type) || (w.type == WindowType::CheckBox && w.checked)))
+    crash_note(node, reads_edit_attributes(w.type)
+                         ? "GLOBAL_VAR on an edit window faults when retail parses it (the scene is not set yet)."
+                         : "GLOBAL_VAR on a CHECKED checkbox faults when retail parses it (the scene is not set yet).");
   // PLAYERLIST sets the browser's list mode, SERVERLIST clears it, by presence, over the attribute
   // list last authored first: the first authored of the two decides [orig:
   // CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dadf..0x65db16, self[3658]].
@@ -870,10 +1113,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         child->read = false;
         because(child.get(), "Not created: an APPEARANCE or SOUND stopped this window's parse in retail.");
       }
-  for (const Node *child : windows) {
-    Window window;
-    if (read_created_window(*child, window)) w.children.push_back(std::move(window));
-  }
+  create_windows(windows, w.children);
 
   // The type's own elements, in document order.
   const bool list_rule = w.type == WindowType::List || w.type == WindowType::LanList;
@@ -919,9 +1159,9 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       }
       if (!first_one) child.read = false;
     } else if (tag_is(child, "SPINUP")) {
-      read_part(child, w.spinup, WindowType::Button, frame);
+      read_part(child, w.spinup, WindowType::Button, w.type, frame);
     } else if (tag_is(child, "SPINDOWN")) {
-      read_part(child, w.spindown, WindowType::Button, frame);
+      read_part(child, w.spindown, WindowType::Button, w.type, frame);
     } else if (tag_is(child, "LIST_BOX")) {
       // [orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0] sb_edge_pad is the combo's;
       // every other attribute and the content are the embedded list's.
@@ -929,13 +1169,20 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         w.sb_edge_pad = number;
         w.has_sb_edge_pad = true;
       }
-      read_part(child, w.list_box, WindowType::List, frame);
+      read_part(child, w.list_box, WindowType::List, w.type, frame);
     } else if (tag_is(child, "SCROLLBAR")) {
-      read_part(child, w.scrollbar, WindowType::Scroll, frame);
+      read_part(child, w.scrollbar, WindowType::Scroll, w.type, frame);
     } else if (tag_is(child, "MIN_ITEM_HEIGHT")) {
       singleton(frame, child, "MIN_ITEM_HEIGHT", false);
       w.table_data.min_item_height = number_text(child);
       w.table_data.has_min_item_height = true;
+      // [orig: CTableWnd_RecalcLayout @ 0x63f1a0, idiv @ 0x63f26b: 0 stays 0, only below 0 is replaced
+      //  @ 0x63f1ee]; a list's (every CListWnd: LIST, LAN_LIST, a combo's LIST_BOX) divides by it as its row
+      //  height [orig: CListWnd_ParseXMLDefinition @ 0x645770, the store @ 0x646032; CListWnd_RecalcLayout
+      //  @ 0x6443d0, taken where not below 0 @ 0x6443e0, the idiv @ 0x644444]
+      if (child.read && w.table_data.min_item_height == 0 && (w.type == WindowType::Table || list_rule))
+        crash_note(child, std::string("MIN_ITEM_HEIGHT 0 divides by zero when retail lays the ") +
+                              (list_rule ? "list" : "table") + " out.");
     } else if (tag_is(child, "FIXED_HEADER_HEIGHT")) {
       singleton(frame, child, "FIXED_HEADER_HEIGHT", false);
       w.table_data.fixed_header_height = number_text(child);
@@ -995,29 +1242,29 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       // Every one loads and appends its credits [orig: @ 0x65ceeb -> CMarqueeWnd_LoadCreditsFromIni].
       w.datasources.push_back(text_of(child));
     } else if (tag_is(child, "JOIN_BUTTON")) {
-      read_part(child, w.join_button, WindowType::Button, frame);
+      read_part(child, w.join_button, WindowType::Button, w.type, frame);
     } else if (tag_is(child, "SEARCH_BUTTON")) {
-      read_part(child, w.search_button, WindowType::Button, frame);
+      read_part(child, w.search_button, WindowType::Button, w.type, frame);
     } else if (tag_is(child, "GLB_TABLE") || tag_is(child, "GLB_INFO_PLAYER_DETAILS")) {
       // An embedded table parses the element's children; the browser then reads its HEADERs'
       // FIELDs [orig: @ 0x65dac0; CTableWnd at +184 / +1422 of CLanWnd_Construct @ 0x65ec30].
       const bool saved = glb_header_fields_;
       glb_header_fields_ = true;
       read_part(child, tag_is(child, "GLB_TABLE") ? w.glb_table : w.glb_info_player_details, WindowType::Table,
-                frame);
+                w.type, frame);
       glb_header_fields_ = saved;
     } else if (tag_is(child, "GLB_INFO_BUTTON")) {
-      read_part(child, w.glb_info_button, WindowType::Button, frame);
+      read_part(child, w.glb_info_button, WindowType::Button, w.type, frame);
     } else if (tag_is(child, "GLB_INFO_SERVER_DETAILS")) {
       // A multiline edit parses the children; the browser reads the first FIELDS child's slots.
-      read_part(child, w.glb_info_server_details, WindowType::MultilineEdit, frame);
+      read_part(child, w.glb_info_server_details, WindowType::MultilineEdit, w.type, frame);
       for (const auto &grand : child.children)
         if (tag_is(*grand, "FIELDS")) {
           read_glb_fields(*grand, w.glb_server_fields);
           break;
         }
     } else if (tag_is(child, "GLB_NW_INFO")) {
-      read_part(child, w.glb_nw_info, WindowType::Static, frame);
+      read_part(child, w.glb_nw_info, WindowType::Static, w.type, frame);
     } else if (tag_is(child, "TARGET")) {
       if (w.type == WindowType::GlbTable) {
         // The last TARGET's text is the browser's [orig: @ 0x65dac0, self[3668]].
@@ -1040,7 +1287,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         if (read_gopher_category(*grand, category, frame)) w.gopher_categories.push_back(std::move(category));
       }
     } else if (tag_is(child, "GOPHER_BACK")) {
-      read_part(child, w.gopher_back, WindowType::Button, frame);
+      read_part(child, w.gopher_back, WindowType::Button, w.type, frame);
     }
   }
 }
@@ -1199,6 +1446,11 @@ void TreeReader::read_action(const Node &node, Action &out) {
       because(&a, "ACTION reads its target from the element text; " + mnu_xml::ascii(a.name) +
                       " is left out.");
   out.target = text_of(node);
+  // A SCREEN action's FILE is the file activation reads, null with none [orig: PFF_FindEntry @ 0x7685d0, the
+  // strncpy @ 0x7685f3]; an empty FILE is empty_value's.
+  if (iequals(out.type, "SCREEN") && !node.attr("FILE"))
+    crash_note(node, "A SCREEN action with no FILE crashes retail when it is activated (it reads a null file "
+                     "name).");
 }
 
 // [orig: @ 0x6494f0] FILE and FLAGS children; the last of each wins.
@@ -1212,7 +1464,7 @@ void TreeReader::read_cursor(const Node &node, Cursor &cursor) {
     if (tag_is(c, "FILE")) {
       cursor.file = text_of(c);
     } else if (tag_is(c, "FLAGS")) {
-      cursor.flags = ui_material_flags_of(text_of(c)); // [orig: sub_646CC0 @ 0x649586]
+      cursor.flags = ui_material_flags_of(text_of(c)); // [orig: UI_ParseMaterialFlagNamesW @ 0x649586]
       if (cursor.flags == kDefaultUiMaterialFlags) {
         c.read = false;
         because(&c, "FLAGS reads the default word (STANDARD_TRANSPARENT), as none does; it is left out.");
@@ -1340,7 +1592,7 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
   node.read = true;
   int number = 0;
   // Each COUNT of 1 or more resizes the column array; fewer is refused and the table
-  // keeps its one column [orig: resize_column_count @ 0x63f6c0]. The walk (last
+  // keeps its one column [orig: CTableWnd_ResizeColumnCount @ 0x63f6c0]. The walk (last
   // authored first) leaves the first authored COUNT of 1 or more.
   const Attribute *count = nullptr;
   for (const Attribute &a : node.attributes) {
@@ -1451,7 +1703,7 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       // [orig: CUIStringTable_LookupString call @ 0x6434df].
       header.type = keyword(c, "TYPE", kStringTypes);
       header.text = text_of(c);
-      // [orig: init_table_row @ 0x63f9c0] sets up only 0 <= index < the column count.
+      // [orig: CTableWnd_InitRow @ 0x63f9c0] sets up only 0 <= index < the column count.
       if (header.column < 0 || header.column >= columns) {
         because(&c, "A HEADER whose COLUMN is below 0 or not below the table's column count (its COUNT, or 1 "
                     "without a COUNT of 1 or more) is not set up by retail.");
@@ -1561,7 +1813,7 @@ bool TreeReader::read_gopher_category(const Node &node, GopherCategory &category
   for (const auto &child_ptr : node.children) {
     const Node &c = *child_ptr;
     if (tag_is(c, "LABEL")) {
-      read_part(c, category.label, WindowType::Static, owner);
+      read_part(c, category.label, WindowType::Static, WindowType::Gopher, owner);
     } else if (tag_is(c, "ITEM") || tag_is(c, "INFO")) {
       c.read = true;
       GopherEntry entry;
@@ -1602,8 +1854,15 @@ std::string note_locator(const Node &node) {
 
 // A note covers everything under it; beneath it only a fatal note still comes out (a
 // repeated element merged into the first, or a replaced one, is content retail parses).
+// The walk is a loop over an explicit stack (each element before its children, the
+// children in order), so its depth is not the call stack's.
 void TreeReader::sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &notes) const {
-  std::function<void(const Node &, bool)> visit = [&](const Node &node, bool covered) {
+  std::vector<std::pair<const Node *, bool>> pending;
+  for (auto root = xml.roots.rbegin(); root != xml.roots.rend(); ++root) pending.push_back({root->get(), false});
+  while (!pending.empty()) {
+    const Node &node = *pending.back().first;
+    bool covered = pending.back().second;
+    pending.pop_back();
     const auto text_note = text_notes_.find(&node);
     if (node.read && text_note != text_notes_.end())
       notes.push_back({node.line, mnu_xml::path_key(node), text_note->second, fatal_.count(&node) != 0,
@@ -1627,9 +1886,9 @@ void TreeReader::sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &not
                                  "> is not read by retail's parse; it is left out.",
                        fatal_.count(&a) != 0, note_locator(node)});
     }
-    for (const auto &child : node.children) visit(*child, covered);
-  };
-  for (const auto &root : xml.roots) visit(*root, false);
+    for (auto child = node.children.rbegin(); child != node.children.rend(); ++child)
+      pending.push_back({child->get(), covered});
+  }
 }
 
 }  // namespace
@@ -1657,7 +1916,7 @@ const std::vector<UiMaterialFlag> &ui_material_flags() {
 }
 
 uint32_t ui_material_flags_of(const std::string &text) {
-  // [orig: sub_646CC0 @ 0x646cc0] wcstok on " ,|+"; each token the first row of its name, without case.
+  // [orig: UI_ParseMaterialFlagNamesW @ 0x646cc0] wcstok on " ,|+"; each token the first row of its name, without case.
   uint32_t flags = 0;
   size_t at = 0;
   while (at < text.size()) {
@@ -1859,14 +2118,21 @@ std::vector<PartWindow> part_windows(const Window &window) {
 namespace {
 
 // The walk under a window whose NAME, as the search compares it, is `own`: the part's fixed one
-// for a part [orig: CWnd_FindChildByName @ 0x646850].
+// for a part [orig: CWnd_FindChildByName @ 0x646850]. A window of no NAME ends the walk under it; each
+// window, then its child windows' walks, then its parts'. An explicit stack, never a recursion a level
+// (a menu nests its windows as deep as the game's stack takes them).
 const Window *find_window_named(const Window &window, const std::string &own, const std::string &name) {
-  if (name.empty() || own.empty()) return nullptr;
-  if (iequals(name, own)) return &window;
-  for (const Window &child : window.children)
-    if (const Window *found = find_window_named(child, child.name, name)) return found;
-  for (const PartWindow &part : part_windows(window))
-    if (const Window *found = find_window_named(*part.window, part.name, name)) return found;
+  if (name.empty()) return nullptr;
+  std::vector<std::pair<const Window *, std::string_view>> walk{{&window, own}};
+  while (!walk.empty()) {
+    const auto [w, own_name] = walk.back();
+    walk.pop_back();
+    if (own_name.empty()) continue;
+    if (iequals(name, own_name)) return w;
+    const std::vector<PartWindow> parts = part_windows(*w);
+    for (size_t i = parts.size(); i-- > 0;) walk.push_back({parts[i].window, parts[i].name});
+    for (size_t i = w->children.size(); i-- > 0;) walk.push_back({&w->children[i], w->children[i].name});
+  }
   return nullptr;
 }
 
@@ -1915,7 +2181,7 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
 
 bool parse_file(const std::string &path, Document &out, std::string &error,
                 std::vector<ParseNote> *notes) {
-  std::ifstream file(path, std::ios::binary);
+  std::ifstream file(io::os_path(path), std::ios::binary); // UTF-8, long-path safe
   if (!file) {
     error = "Failed to open file: " + path;
     return false;
@@ -2058,15 +2324,65 @@ private:
                     same(x.table == y.table, "table") && same(x.text == y.text, "text");
            });
   }
+  // A part's presence; its window is compared after its owner's own fields (window).
   bool part(const WindowPart &a, const WindowPart &b, const char *name) {
-    if (!same(a.present() == b.present(), std::string(name) + " present")) return false;
-    if (!a.present()) return true;
-    path_.push_back(name);
-    const bool ok = window(*a, *b);
-    path_.pop_back();
-    return ok;
+    return same(a.present() == b.present(), std::string(name) + " present");
   }
+  // Two windows and everything under them: each pair's own fields, then its parts' windows (a
+  // CATEGORY's LABEL with the parts, in the fields' order) and its child windows', the path to the
+  // first difference kept. An explicit stack, never a recursion a level (a menu nests its windows as
+  // deep as the game's stack takes them).
   bool window(const Window &a, const Window &b) {
+    struct Pair {
+      const Window *a;
+      const Window *b;
+      size_t depth; // path_'s size before its steps
+      std::string step, label_step;
+    };
+    const size_t base = path_.size();
+    std::vector<Pair> walk{{&a, &b, base, std::string(), std::string()}};
+    std::vector<Pair> under;
+    while (!walk.empty()) {
+      Pair pair = std::move(walk.back());
+      walk.pop_back();
+      path_.resize(pair.depth);
+      if (!pair.step.empty()) path_.push_back(pair.step);
+      if (!pair.label_step.empty()) path_.push_back(pair.label_step);
+      const Window &x = *pair.a, &y = *pair.b;
+      if (!window_fields(x, y)) {
+        path_.resize(base);
+        return false;
+      }
+      const size_t depth = path_.size();
+      under.clear();
+      const auto part_pair = [&](const WindowPart &p, const WindowPart &q, const char *name) {
+        if (p.present()) under.push_back({p.get(), q.get(), depth, name, std::string()});
+      };
+      part_pair(x.list_box, y.list_box, "list_box");
+      part_pair(x.spinup, y.spinup, "spinup");
+      part_pair(x.spindown, y.spindown, "spindown");
+      part_pair(x.scrollbar, y.scrollbar, "scrollbar");
+      part_pair(x.join_button, y.join_button, "join_button");
+      part_pair(x.search_button, y.search_button, "search_button");
+      part_pair(x.glb_table, y.glb_table, "glb_table");
+      part_pair(x.glb_info_button, y.glb_info_button, "glb_info_button");
+      part_pair(x.glb_info_player_details, y.glb_info_player_details, "glb_info_player_details");
+      part_pair(x.glb_info_server_details, y.glb_info_server_details, "glb_info_server_details");
+      part_pair(x.glb_nw_info, y.glb_nw_info, "glb_nw_info");
+      for (size_t i = 0; i < x.gopher_categories.size(); ++i)
+        if (x.gopher_categories[i].label.present())
+          under.push_back({x.gopher_categories[i].label.get(), y.gopher_categories[i].label.get(), depth,
+                           "gopher_category:" + std::to_string(i), "label"});
+      part_pair(x.gopher_back, y.gopher_back, "gopher_back");
+      for (size_t i = 0; i < x.children.size(); ++i)
+        under.push_back({&x.children[i], &y.children[i], depth, "window:" + std::to_string(i), std::string()});
+      for (size_t i = under.size(); i-- > 0;) walk.push_back(std::move(under[i]));
+    }
+    path_.resize(base);
+    return true;
+  }
+  // A window's own fields, its parts' presence and its child windows' count.
+  bool window_fields(const Window &a, const Window &b) {
     const Font &f = a.font, &g = b.font;
     const Frame &r = a.frame, &q = b.frame;
     return same(a.name == b.name, "name") && same(a.type == b.type, "type") && same(a.hidden == b.hidden, "hidden") &&
@@ -2150,7 +2466,7 @@ private:
            list(a.gopher_categories, b.gopher_categories, "gopher_category",
                 [this](const GopherCategory &x, const GopherCategory &y) { return category(x, y); }) &&
            part(a.gopher_back, b.gopher_back, "gopher_back") &&
-           list(a.children, b.children, "window", [this](const Window &x, const Window &y) { return window(x, y); });
+           same(a.children.size() == b.children.size(), "window count");
   }
 };
 

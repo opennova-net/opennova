@@ -5,6 +5,7 @@
 #include <runtime/world/player_weapon.h>
 
 #include <base/io/bam.h>
+#include <runtime/hud/hud_math.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
@@ -116,10 +117,20 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	v.kick = static_cast<int>(active_slot.kick);
 	// Crosshair spread remains in retail's exact integer domains through the
 	// presentation edge: choose the stance triplet, then add the two arithmetic
-	// shifts. Category order is prone/crouch/stand; airborne or submerged forces
+	// shifts. Category order is prone/crouch/stand; the parachute, drowning and
+	// ladder-contact bits (Flags & 0x108020) or an eye below the water force
 	// stand, and a parent attachment finally forces crouch. The +3 triplet is the
 	// shared Player_IsOpticalViewVisible verdict stamped before the body tick.
-	// [orig: HUD_DrawCrosshair @0x592b07..0x592b87]
+	// The drawer reads g_HUDInfoCurrentEntity, which is the local player
+	// whenever it draws: the pass builds the HUD info from g_LocalPlayerEntity
+	// at its head, and the one rebuild for a spectated entity (the death
+	// screen's HUD_RenderOverlays) runs after the crosshair and restores the
+	// info before it returns; the drawer itself returns on the death screen.
+	// [orig: HUD_DrawCrosshair @0x592b07..0x592b87, the death-screen return
+	//  @0x592646..0x59264d, called @0x5a84e5; HUD_RenderAllOverlays's
+	//  HUD_BuildEntityInfo(g_LocalPlayerEntity) @0x5a80b6..0x5a80bc;
+	//  HUD_RenderOverlays @0x5a84eb, its rebuild @0x5a7bf3, the restore
+	//  @0x5a7c17..0x5a7c25]
 	{
 		int32_t recoil_pitch = 0;
 		int32_t weapon_weight_spread = 0;
@@ -137,17 +148,20 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 			aimed_shot_available = body->inf.aimed_shot_available;
 			// The shared witnessed eye-projection classifier
 			// (world/round_sim.h entity_eye_below_water)
-			// [orig: HUD_DrawCrosshair @0x592b35]
+			// [orig: HUD_DrawCrosshair @0x592b59..0x592b65]
 			const bool below_water = entity_eye_below_water(
 					world, body->pos[2], local != nullptr ? local->eye_offset_z : 0);
 			if (body->inf.stance == InfantryState::Stance::kProne)
 				category = 0;
 			else if (body->inf.stance == InfantryState::Stance::kCrouch)
 				category = 1;
-			if (body->inf.airborne || below_water ||
+			// The parachute, drowning and ladder-contact bits or the eye
+			// below the water force the standing row; an airborne body keeps
+			// its stance row [orig: HUD_DrawCrosshair @0x592b50..0x592b65].
+			if (below_water ||
 					(local != nullptr &&
 					 ((local->flags | local->engine_flags) &
-							(kEntityFlagInAir | kEntityFlagDrowning)) != 0))
+							kStanceRowStandingFlags) != 0))
 				category = 2;
 		}
 		if (local != nullptr && local->mounted) category = 1;
@@ -155,8 +169,8 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 		const WeaponTableEntry *weapon =
 				local != nullptr ? world.tables.weapons.by_index(local->equipped_adm_index) : nullptr;
 		const int32_t authored_error = weapon != nullptr ? weapon->error_fp16[row] : 0;
-		const int32_t live_error = io::bam_add(authored_error,
-				io::bam_add(io::bam_sar(recoil_pitch, 7), io::bam_sar(weapon_weight_spread, 7)));
+		const int32_t live_error =
+				hud::crosshair_total_spread_fp16(authored_error, recoil_pitch, weapon_weight_spread);
 		v.recoil_pitch_bam = recoil_pitch;
 		v.weapon_weight_spread_bam = weapon_weight_spread;
 		v.aimed_shot_available = aimed_shot_available;

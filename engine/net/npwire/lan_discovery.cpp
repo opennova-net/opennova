@@ -5,9 +5,25 @@
 #include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace opennova {
+
+std::string lan_discovery_row_label(const std::string &server_name, const std::string &expansion,
+		int32_t players, int32_t max_players) {
+	// A %s stops at its first NUL; the row's copy of the expansion is 32 bytes.
+	const std::string name = server_name.substr(0, server_name.find('\0'));
+	const std::string variant =
+			expansion.substr(0, std::min<size_t>(expansion.find('\0'), 31));
+	const std::string counts =
+			" (" + std::to_string(players) + "/" + std::to_string(max_players) + ")";
+	std::string label = variant.empty() ? name + counts : name + " - " + variant + counts;
+	if (label.size() > 255) {
+		label.resize(255);
+	}
+	return label;
+}
 
 std::vector<uint8_t> build_lan_discovery_probe(const TitleIdentity &title, uint32_t client_index,
                                                uint32_t target_ip, uint32_t target_port) {

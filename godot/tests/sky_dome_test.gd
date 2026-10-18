@@ -203,7 +203,9 @@ func test_dome_mesh_comes_from_the_libs_builder() -> void:
 	assert_eq(normals.size(), 441, "the witnessed FVF 0x212 normals ride along")
 	# The witnessed winding head (i, i+22, i+21), (i, i+1, i+22).
 	assert_eq(Array(indices.slice(0, 6)), [0, 22, 21, 0, 1, 22], "witnessed quad winding")
-	assert_almost_eq(positions[0].y, EnvFile.dome_reference_height(), 0.001,
+	# The reference height 3072 - sqrt(2^23) (engine: formats/env/env_celestial.h
+	# kSkyDomeReferenceHeight, which the env_render_unit ctest pins).
+	assert_almost_eq(positions[0].y, 3072.0 - sqrt(float(1 << 23)), 0.001,
 		"built at the reference height - the Y scale lives in the vertex shader (env #20)")
 
 

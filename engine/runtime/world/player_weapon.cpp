@@ -42,7 +42,7 @@ Vec3 local_player_mission_position(const World &world) {
 bool local_slot_zoom_sniper_lock(const World &world, int32_t def_category) {
 	const Entity *player = world.registry.get(world.cached.local_player);
 	return player != nullptr && weapon_slot_zoom_sniper_lock(player->player_class,
-			def_category, world.rules.allow_sniper_scope_zoom);
+			def_category, world.rules.sniper_zoom_fill);
 }
 
 } // namespace
@@ -932,14 +932,22 @@ bool local_held_weapon_visible(const World &world, const Entity &entity,
 	const WeaponTableEntry *def =
 			world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
 	if (def == nullptr) return false;             // no Def [orig: @0x4dcbda]
-	// The ammo leg, for defs that carry the flag: an empty pool hides the
-	// weapon. [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType @0x5406E0,
-	// ported as weapon_pool_get]
-	if ((def->flags & weapon_flag::kNoClipsNoDraw) != 0 &&
-			weapon_pool_get(inventory, def->ammo_class_id) == 0 &&
-			weapon_inventory_loaded_rounds(world.tables.weapons, inventory,
-                    inventory.equipped_combo) <= 0)
-		return false;
+	// The ammo leg, for defs that carry the flag: the pool, plus the loaded rounds
+	// only for a one-round clip, both read through the entity's seat; a zero total
+	// hides the weapon. [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType
+	// @0x4dcbf5; the clip legs clipsize != -1 @0x4dcc08 and == 1 @0x4dcc0d, the bucket
+	// WeaponSlot_GetSharedLoadedRounds @0x4dcc1b or slot+0x10 @0x4dcc25; the zero test @0x4dcc2b]
+	if ((def->flags & weapon_flag::kNoClipsNoDraw) != 0) {
+		const WeaponAmmoSeat seat = entity_ammo_seat(world, entity);
+		int32_t total = weapon_seat_pool(seat, def->ammo_class_id,
+				weapon_pool_get(inventory, def->ammo_class_id));
+		if (def->clipsize == 1) {
+			const int32_t own = weapon_inventory_loaded_rounds(world.tables.weapons, inventory,
+					inventory.equipped_combo);
+			total += def->ammo_bucket != 0 ? weapon_seat_bucket(seat, own) : own;
+		}
+		if (total == 0) return false;
+	}
 	// A weapon with no FIRST-person model is hidden on your OWN body even
 	// though every observer still sees it — retail asymmetry, not a bug.
 	// [orig: @0x4dcc32]
@@ -1125,6 +1133,30 @@ LocalWeaponReloadWire local_reload_request_wire(const World &world,
 	return out;
 }
 
+namespace {
+
+// The personal slot's shared-bucket mirror: a bucket weapon's loaded rounds and its
+// pool read through the player's seat as it stands when they are read, on a
+// controller seat 0 and on a gunner seat the carrier's clip. [orig: WeaponSlot_GetSharedLoadedRounds from
+// WeaponSlot_CanFire @0x541C79, the reload gate @0x4E12A7 / @0x4E12C6,
+// WeaponAction_Idle @0x542990, WeaponAction_EmptyIdle @0x542A8C, WeaponAction_Recoil
+// @0x542E07, HUD_BuildEntityInfo @0x4B85D3; the pool from WeaponSlot_CanFire
+// @0x541C9B; Entity_GetScoreValueBySlotType @0x5406E0]
+void read_personal_bucket(const World &world, WeaponSlotState &slot,
+		const WeaponInventory &inventory, const WeaponAmmoSeat &seat) {
+	const auto *eq = inventory.slot(inventory.equipped_combo);
+	const auto *def = eq != nullptr && eq->adm_index >= 0
+			? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index)) : nullptr;
+	slot.shared_clip = def != nullptr && def->ammo_bucket != 0;
+	if (!slot.shared_clip) return;
+	slot.clip = weapon_seat_bucket(seat, weapon_inventory_loaded_rounds(world.tables.weapons,
+			inventory, inventory.equipped_combo));
+	slot.reserve = weapon_seat_pool(seat, def->ammo_class_id,
+			weapon_pool_get(inventory, def->ammo_class_id));
+}
+
+} // namespace
+
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
 	io.map_command = 0;
@@ -1152,17 +1184,13 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// active selection, but this tick's ammo bridge still belongs to the slot the
 	// FSM actually pumped.
 	const bool borrowed_usegun_slot = w.usegun_slot_active;
-    if (io.inventory != nullptr && !borrowed_usegun_slot) {
-        const auto *eq = io.inventory->slot(io.inventory->equipped_combo);
-        const auto *def = eq != nullptr && eq->adm_index >= 0
-                ? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index)) : nullptr;
-        active_slot.shared_clip = def != nullptr && def->ammo_bucket != 0;
-        if (active_slot.shared_clip) {
-            active_slot.clip = weapon_inventory_loaded_rounds(world.tables.weapons,
-                    *io.inventory, io.inventory->equipped_combo);
-            active_slot.reserve = weapon_pool_get(*io.inventory, def->ammo_class_id);
-        }
-    }
+	// The slot's ammo reads go through the player's seat: on a controller seat a
+	// shared bucket reads 0 and a pool 0 unless the carrier is EWeap, and the
+	// bucket is never written there. [orig: WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692]
+	const WeaponAmmoSeat ammo_seat =
+			player != nullptr ? entity_ammo_seat(world, *player) : WeaponAmmoSeat{};
+	if (io.inventory != nullptr && !borrowed_usegun_slot)
+		read_personal_bucket(world, active_slot, *io.inventory, ammo_seat);
 	WeaponFsmInputs in;
 	// The action binding permits an armed controller's borrowed carrier slot.
 	// [orig: Input_HandleActionBinding_0 @0x4E09CB..0x4E09FF]
@@ -1388,8 +1416,6 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                 const EntityHandle fire_target{p->slot.f[3] != 0
                     ? uint16_t(p->slot.f[3] - 1) : EntityHandle::kInvalid};
                 shooter->last_fire_target = fire_target;
-				w.round_sequence = static_cast<uint16_t>(w.round_sequence + 1u);
-				const uint16_t shot_seq = w.round_sequence;
 				// The fire tail reads the gun's point for the slot as the FSM
 				// leaves it: next = RECOIL (the mflash column), the clip spent.
 				// [orig: WeaponAction_Fire tail @0x542D1F..0x542D5B]
@@ -1406,7 +1432,6 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				round_event.origin_z = pose[2];
 				round_event.dir_yaw = dir_yaw;
 				round_event.dir_pitch = dir_pitch;
-				round_event.shot_seq = shot_seq;
 				const uint32_t clip_before_consume = static_cast<uint32_t>(
 						std::max(0, ev.fired_clip_before_consume));
 				round_event.mode_flags = static_cast<uint8_t>(
@@ -1447,8 +1472,6 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					const MatchPlayer *row = world.match.player(world.cached.local_player);
 					if (row == nullptr || !row->spectator) shooter->damage_state = 0;
 				}
-				if (io.is_authority) world.out.rounds.add(round_event);
-
 				RoundSpawnParams round;
 				round.owner = world.cached.local_player;
 				round.shooter_handle = round_event.shooter_handle;
@@ -1457,7 +1480,14 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				round.dir_pitch_bam = dir_pitch;
 				round.ammo_index = adm->ammo_index;
 				round.adm_index = adm_index;
-				round.shot_seq = shot_seq;
+				// The fire carries the fresh word: the pool mints the round's id from
+				// its one counter, and the ring record (the host's) or the C2S 0x06
+				// hit_part (a joiner's) takes the spawned round's word.
+				// [orig: Entity_FireWeaponAndSendPacket - the authority copy
+				//  @0x42BED5 into Server_ClientFiredRound @0x50C774 ->
+				//  RoundData_AddRound ring+28 @0x4FDCF5; the client's
+				//  RoundData_SpawnRound and pool[ret]+0x78 @0x42C030]
+				round.shot_seq = RoundSim::kFreshRoundWord;
 				round.subtype = round_event.subtype;
 				round.charge = w.pending_throw_charge;
 				// The firing slot's tracer cadence byte (MountSlot+0x80) — the
@@ -1477,6 +1507,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				world.round_sim.spawn(world, round,
 						!io.is_authority ? RoundConsequenceMode::VisualOnly
 						                 : RoundConsequenceMode::Authoritative);
+				const uint16_t shot_seq = world.round_sim.spawned_round_word();
+				round_event.shot_seq = shot_seq;
+				if (io.is_authority) world.out.rounds.add(round_event);
 
 				// The wire half of Entity_FireWeaponAndSendPacket: the embedder's
 				// net layer builds the fixed C2S 0x06 descriptor from this record.
@@ -1558,8 +1591,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	//  per-ammo-class pool — one storage, two views; this port mirrors between the
 	//  single-slot FSM state and the inventory]
 	if (w.usegun_switch != LocalUseGunSwitch::kNone && ev.switch_completed &&
-			active_slot.current == w.usegun_switch_action)
+			active_slot.current == w.usegun_switch_action) {
 		commit_local_usegun_weapon_switch(world, w);
+		// The switch back hands the personal slot to its readers again, which read
+		// a bucket weapon's rounds through the seat as it now stands: the mirror the
+		// staging pump read through the gunner seat (the gun's clip) does not carry
+		// across the seat. [orig: WeaponSlot_GetSharedLoadedRounds @0x540611..0x540657, read at each use]
+		if (borrowed_usegun_slot && !w.usegun_slot_active && io.inventory != nullptr)
+			read_personal_bucket(world, w.slot, *io.inventory, ammo_seat);
+	}
 	if (io.inventory != nullptr && !borrowed_usegun_slot) {
 		WeaponInventory &inventory = *io.inventory;
 		WeaponInventorySlot *eq = inventory.slot(inventory.equipped_combo);
@@ -1573,16 +1613,14 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// §5.58] — overriding the FSM's single-class transfer (D-WPN-2).
 				// eq->clip still holds the pre-reload remaining rounds (mirrored on
 				// the previous tick); the refund below consumes it.
-				weapon_inventory_reload_slot(world.tables.weapons, inventory,
-						inventory.equipped_combo);
-				active_slot.clip = weapon_inventory_loaded_rounds(
-                        world.tables.weapons, inventory, inventory.equipped_combo);
-			} else {
+				active_slot.clip = weapon_inventory_reload_slot(world.tables.weapons, inventory,
+						inventory.equipped_combo, ammo_seat);
+			} else if (eq_def->ammo_bucket == 0 || weapon_seat_writes_buckets(ammo_seat)) {
 				weapon_inventory_set_loaded_rounds(world.tables.weapons, inventory,
                         inventory.equipped_combo, active_slot.clip);
 			}
-			active_slot.reserve =
-					weapon_pool_get(inventory, eq_def->ammo_class_id);
+			active_slot.reserve = weapon_seat_pool(ammo_seat, eq_def->ammo_class_id,
+					weapon_pool_get(inventory, eq_def->ammo_class_id));
 			// The post-recoil auto-switch [orig: WeaponAction_Recoil tail @ 0x543062:
 			// def+0x168 -> Player_SwitchToWeaponByHandle(def[+0x164]*65) — the
 			// grenade/LAW switchback, unconditional per throw].

@@ -208,7 +208,7 @@ class BindingSet {
   // fires unsigned. The row flag 0x200 the two signed sites also test rides no
   // catalog row, and no file reaches the flag word: player.sav's load and
   // default.key merge +24..+37 alone over the default table [orig:
-  // KeyBinding_MergeWeaponSlotParams @0x54c3f0 - @0x54c444..0x54c479, from
+  // KeyBinding_MergeSavedBindings @0x54c3f0 - @0x54c444..0x54c479, from
   // PlayerProfile_LoadAllFromDisk @0x54f60f; the default.key callback
   // @0x54bf40].
   // [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d483 (the fallback's
@@ -230,7 +230,7 @@ class BindingSet {
   //  axis/button and toggle passes gated only on the playback file @0x49d4d5,
   //  the held keyboard pass Input_ProcessAnalogBindings behind
   //  !g_InputCaptureMode @0x49d509; the click/wheel callback
-  //  process_input_bindings @0x4dda50 gated on the open menu @0x4dda76]
+  //  Input_ProcessBindings @0x4dda50 gated on the open menu @0x4dda76]
   void set_keyboard_captured(bool captured) { keyboard_captured_ = captured; }
   bool keyboard_captured() const { return keyboard_captured_; }
 

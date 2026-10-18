@@ -62,19 +62,30 @@ void Role::apply_input(const TickInput &input) {
 	// The ToSpecial dispatches, with the deferred ones, once per outer frame
 	// on its first tick, as retail's input frame precedes the logic tick
 	// [orig: Input_ProcessFrame @0x49D520 -> Input_FlushDeferredEvents @0x49D591].
-	// The row's flag 1 keeps a dead player's PRESS out of the queue; its
-	// release is dispatched regardless [orig: Input_ProcessKeyboardEvents
-	// @0x49D330..0x49D339 (the press pass), the release pass @0x49D249 has no
-	// such gate; ToSpecial's row flags 0x8C000801].
-	if (input.consume_one_shots) {
+	// Every queued dispatch, a press, a release or a deferred one queued
+	// again, passes the dispatcher's head, which drops the row (flags
+	// 0x8C000801) for a dead local player, under the deploy hold and once the
+	// round is over; a dropped deferred dispatch is gone. (The press scan's
+	// own dead gate, @0x49D330..0x49D339, takes the same press first.)
+	// [orig: Input_HandleActionBinding @0x49AD40 -- bit 0x1 with the dead
+	//  read @0x49AD8A..0x49ADA0, 0x8000000 with g_DeployScreenActive
+	//  @0x49ADC8..0x49ADD7, bit 0x1 with g_SpawnSuccessGate @0x49ADFD (in a
+	//  session) / @0x49AE16; the deferred re-queue Input_FlushDeferredEvents
+	//  @0x497AC0 -> Input_QueueEvent]
+	if (input.consume_one_shots && (input.player.held_action_bits & HELD_MENU_OPEN) == 0) {
 		const bool held = (input.player.held_action_bits & HELD_TO_SPECIAL) != 0;
-		if ((input.player.pressed_action_bits & PRESSED_TO_SPECIAL) != 0) {
-			const bool local_dead = kind() == RoleKind::Joiner && client_runtime() != nullptr
-					? client_runtime()->local_player_dead()
-					: kernel.local.local_player_dead();
-			if (!held || !local_dead) kernel.local.queue_to_special();
+		const bool local_dead = joiner && runtime != nullptr ? runtime->local_player_dead()
+				: kernel.local.local_player_dead();
+		const bool round_over = joiner ? runtime != nullptr && runtime->state().spawn_success_gate
+				: kernel.world.match.outcome().ended;
+		const bool deploy_hold = runtime != nullptr && runtime->state().deploy_overlay_active;
+		if (local_dead || round_over || deploy_hold) {
+			kernel.local.clear_deferred_input();
+		} else {
+			if ((input.player.pressed_action_bits & PRESSED_TO_SPECIAL) != 0)
+				kernel.local.queue_to_special();
+			kernel.local.dispatch_to_special(held);
 		}
-		kernel.local.dispatch_to_special(held);
 	}
 }
 
@@ -173,6 +184,7 @@ world::LocalViewSessionInputs Role::view_session_inputs_for(
 	s.hud_hit_feedback_frames = runtime != nullptr ? runtime->state().hud_hit_feedback_frames : 0;
 	if (runtime) {
 		s.hud_service.preround_seconds = runtime->state().preround_delay_seconds;
+		s.armory_reuse_seconds = runtime->state().armory_reuse_seconds;
 		s.hud_service.reload_seconds = runtime->state().vehicle_reload_seconds;
 		s.hud_service.owned_zone_mask = runtime->state().owned_zone_mask;
 		// Keep link order: an equal-distance designation retains the first.
@@ -409,6 +421,19 @@ void Session::step_cine_render_frame() {
 	role_->kernel()->world.epilog.render_pass();
 }
 
+void Session::step_paused_frame_counters(const FrameInput &input) {
+	// Under the menu pause retail's frames still run, their pause-gated legs
+	// held: each banked frame steps the main-frame counter alone (the session
+	// and HUD counters wait on the pause, as the tick does) [orig:
+	// Game_ProcessMainFrame -- `cmp dword_A87050, 0` @0x5265A6 around the tick's
+	// ++g_CurrentTick, Game_TickHudFrameCounters @0x5265D5 every frame].
+	if (role_ == nullptr || role_->kernel() == nullptr) return;
+	world::World &world = role_->kernel()->world;
+	const int32_t due = accumulator_.bank(input.delta_seconds);
+	for (int32_t i = 0; i < due; ++i)
+		world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
+}
+
 void Session::step_hud_radar_frame() {
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
 	static_assert(kHudRadarGatesDefault == hud::HudFrameCompiler::kRadarGatePass,
@@ -434,6 +459,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		// The paused frame still renders and runs its HUD pass: no tick ran,
 		// so nothing ages, and the menu pause holds the lock tone.
 		if (state_ == State::Paused) {
+			step_paused_frame_counters(input);
 			step_cine_render_frame();
 			step_hud_radar_frame();
 		}

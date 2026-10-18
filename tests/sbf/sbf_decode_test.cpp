@@ -7,6 +7,10 @@
 #include <string.h>
 #include <formats/sbf/sbf.h>
 
+#include <vector>
+
+#include "sbf/sbf_streaming_reference.h"
+
 using namespace opennova::sbf;
 
 static int passed = 0, failed = 0;
@@ -29,32 +33,47 @@ static int test_decode_sample_silence(void) {
     return 1;
 }
 
+/* The 8-bit buffer the stereo split makes of a chunk, at the mixer's 16-bit
+   scale: ((byte - 128) * 256) >> shift, as an 8-bit AUD1 wave of the same
+   bytes decodes (C-162) [orig: Audio_SubmitStereoSampleSplit @ 0x7BD205;
+   AudioChannel_BindSampleBuffer @ 0x7BD6A1]. */
 static int test_decode_sample_extremes(void) {
-    /* scale 0: byte 0xFF -> ((127) * 256) >> 0 >> 1 = 16256 */
-    CHECK(sbf_decode_sample(0xFF, 0) == 16256, "0xFF scale 0");
-    /* scale 0: byte 0x00 -> ((-128) * 256) >> 0 >> 1 = -16384 */
-    CHECK(sbf_decode_sample(0x00, 0) == -16384, "0x00 scale 0");
-    /* scale 7: byte 0xFF -> ((127) * 256) >> 7 >> 1 = 127 */
-    CHECK(sbf_decode_sample(0xFF, 7) == 127, "0xFF scale 7");
+    /* scale 0: byte 0xFF -> 127 * 256 = 32512, the loudest a stream plays */
+    CHECK(sbf_decode_sample(0xFF, 0) == 32512, "0xFF scale 0");
+    /* scale 0: byte 0x00 -> -128 * 256 = -32768 */
+    CHECK(sbf_decode_sample(0x00, 0) == -32768, "0x00 scale 0");
+    /* scale 7: byte 0xFF -> (127 * 256) >> 7 = 254 */
+    CHECK(sbf_decode_sample(0xFF, 7) == 254, "0xFF scale 7");
+    CHECK(sbf_decode_sample(0x00, 7) == -256, "0x00 scale 7");
+    /* an 8-bit AUD1 sample's 16-bit value at the same shift */
+    CHECK(sbf_decode_sample(0x81, 3) == (1 * 256) >> 3, "0x81 scale 3");
     return 1;
 }
 
-static int test_decode_chunk_rejects_invalid_scales(void) {
+/* Any shift byte plays: the mixer shifts the channel's coefficients by it,
+   any count, so past 7 a chunk plays quieter and from 15 on silent [orig:
+   AudioChannel_ComputeMixCoefficients @ 0x7BD5E6..0x7BD5F3, psraw]. */
+static int test_decode_chunk_takes_any_shift(void) {
     uint8_t chunk[SBF_CHUNK_HEADER + 2] = {0};
     int16_t decoded[2] = {0};
     SbfChunkHeader h = {};
     h.valid_samples = 2;
+    chunk[SBF_CHUNK_HEADER] = 0x00;
+    chunk[SBF_CHUNK_HEADER + 1] = 0xFF;
 
     h.scale_a = 8;
+    h.scale_b = 14;
     memcpy(chunk, &h, SBF_CHUNK_HEADER);
-    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) < 0,
-          "scale_a above 7 is rejected");
+    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) == 2,
+          "a chunk with shifts past 7 decodes");
+    CHECK(decoded[0] == -128 && decoded[1] == 1, "shift 8 and 14");
 
-    h.scale_a = 0;
+    h.scale_a = 15;
     h.scale_b = 255;
     memcpy(chunk, &h, SBF_CHUNK_HEADER);
-    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) < 0,
-          "scale_b above 7 is rejected");
+    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) == 2,
+          "a chunk with shifts of 15 and more decodes");
+    CHECK(decoded[0] == 0 && decoded[1] == 0, "from 15 on silent");
     return 1;
 }
 
@@ -149,14 +168,90 @@ static int test_decode_all_tone01_multichunk(void) {
     return 1;
 }
 
+/* The entry decode the Godot player hands the mixer (C-164) is sample for sample
+   the PCM the deleted streaming playback produced, for every entry of the
+   synthetic bank (each full chunk, then its one short last chunk). */
+static int test_decode_entry_matches_streaming(void) {
+    FILE *f = fopen(SYNTH_BANK, "rb");
+    CHECK(f != NULL, "open the fixture");
+    fseek(f, 0, SEEK_END);
+    const long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<uint8_t> bytes((size_t)size);
+    const size_t got = fread(bytes.data(), 1, bytes.size(), f);
+    fclose(f);
+    CHECK(got == bytes.size(), "read the fixture whole");
+    SbfArchive arc;
+    CHECK(sbf_open_memory(&arc, bytes.data(), bytes.size()) == 0, "open memory");
+    for (uint32_t i = 0; i < arc.header.entry_count; ++i) {
+        const SbfRawEntry &e = arc.entries[i];
+        const std::vector<int16_t> entry =
+                sbf_decode_entry(bytes.data() + e.data_offset, e.total_size, e.block_size);
+        CHECK(!entry.empty(), "every entry decodes to samples");
+        CHECK(entry == sbf_streaming_reference(bytes.data() + e.data_offset, e.total_size, e.block_size),
+              "the entry decode is the streaming playback's PCM");
+    }
+    const SbfRawEntry *tone01 = sbf_find_by_name(&arc, "TONE01");
+    CHECK(tone01 != NULL &&
+                  sbf_decode_entry(bytes.data() + tone01->data_offset, tone01->total_size, tone01->block_size).size() ==
+                          4096 + 4096 + 1000,
+          "TONE01's three chunks");
+    sbf_close(&arc);
+    return 1;
+}
+
+/* Chunk by chunk to the entry's end, each chunk's whole frames, a chunk of under
+   4 frames queueing nothing: an odd count's last byte is not played, and neither
+   it nor a short chunk ends the stream (the split counts frames as count >> 1 and
+   returns before any store under 4 frames or over 2048; the pump reads the next
+   block until the entry's bytes run out) [orig: Audio_SubmitStereoSampleSplit
+   @ 0x7BD222..0x7BD233; AudioStream_Update @ 0x671D61]. */
+static int test_decode_entry_walks_every_chunk(void) {
+    const uint32_t block = SBF_CHUNK_HEADER + 10;
+    uint8_t entry[3 * (SBF_CHUNK_HEADER + 10)] = {0};
+    SbfChunkHeader h = {};
+    h.valid_samples = 9; /* 4 frames and an odd byte */
+    memcpy(entry, &h, SBF_CHUNK_HEADER);
+    for (int i = 0; i < 10; ++i) entry[SBF_CHUNK_HEADER + i] = (uint8_t)(0x81 + i);
+    h.valid_samples = 6; /* 3 frames: the split queues nothing */
+    memcpy(entry + block, &h, SBF_CHUNK_HEADER);
+    for (int i = 0; i < 10; ++i) entry[block + SBF_CHUNK_HEADER + i] = (uint8_t)(0xA1 + i);
+    h.valid_samples = 8; /* 4 frames */
+    memcpy(entry + 2 * block, &h, SBF_CHUNK_HEADER);
+    for (int i = 0; i < 10; ++i) entry[2 * block + SBF_CHUNK_HEADER + i] = (uint8_t)(0x91 + i);
+    const std::vector<int16_t> pcm = sbf_decode_entry(entry, sizeof(entry), block);
+    CHECK(pcm.size() == 16, "four whole frames from the first and the last chunk, none from the 3-frame one");
+    CHECK(pcm.size() == 16 && pcm[7] == sbf_decode_sample(0x88, 0) && pcm[8] == sbf_decode_sample(0x91, 0),
+          "the odd byte dropped, the short chunk skipped, the last chunk on the left again");
+    return 1;
+}
+
+/* The bank model's stream as the game plays it (the editor's preview): the same
+   split rule over its chunks [orig: Audio_SubmitStereoSampleSplit
+   @ 0x7BD222..0x7BD233]. */
+static int test_play_stream_takes_the_split_rule(void) {
+    SbfStream stream;
+    for (size_t count : {(size_t)9, (size_t)6, (size_t)8}) {
+        SbfChunk chunk;
+        chunk.audio.assign(count, 0x90);
+        stream.chunks.push_back(chunk);
+    }
+    CHECK(sbf_decode_stream(stream).size() == 23, "the model's decode keeps every byte");
+    CHECK(sbf_play_stream(stream).size() == 16, "the played stream keeps the split's whole frames");
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_decode_sample_silence);
     RUN_TEST(test_decode_sample_extremes);
-    RUN_TEST(test_decode_chunk_rejects_invalid_scales);
+    RUN_TEST(test_decode_chunk_takes_any_shift);
     RUN_TEST(test_decode_chunk_tone01);
     RUN_TEST(test_decode_chunk_silence_partial);
     RUN_TEST(test_decode_all_silence);
     RUN_TEST(test_decode_all_tone01_multichunk);
+    RUN_TEST(test_decode_entry_matches_streaming);
+    RUN_TEST(test_decode_entry_walks_every_chunk);
+    RUN_TEST(test_play_stream_takes_the_split_rule);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

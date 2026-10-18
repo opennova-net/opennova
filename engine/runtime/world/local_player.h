@@ -111,6 +111,29 @@ public:
     //  @0x4ae090 and Entity_UpdateInfantryPlayerBody @0x4b40e0 read it per tick;
     //  the merges @0x48b897 / @0x490d6d]
     PlayerBodyInput move_order;
+    // The USE-ITEM armory arm's press latch (g_WeaponScreenOpenDebounce): a
+    // press that takes the armory arm sets it ahead of the countdown test, and
+    // only the release of a useitem key clears it. While it is set a further
+    // press takes the arm and opens nothing, the WEAPON screen's ACCEPT and
+    // CANCEL do nothing, and with no menu screen open every frame's input
+    // freezes after its fold (the input-flag word and the X axis word clear,
+    // MoveOrder keeps its stance bits). A process global, it survives a kernel
+    // replacement.
+    // [orig: Input_HandleActionBinding_0 @0x4E0B12..0x4E0B21;
+    //  Input_HandleMenuKeyRelease @0x4DE2D0..0x4DE309;
+    //  WeaponLoadout_ApplyFromBuffer @0x565CE4..0x565CEB;
+    //  Game_ProcessMainFrame @0x526625..0x52666F]
+    bool armory_press_latched = false;
+    // The USE-ITEM press: the arm local_player_use_item_arm names over
+    // view_session_inputs, through the press latch.
+    UseItemArm take_use_item_press();
+    // A useitem key's release clears the press latch; a system key-up
+    // (WM_SYSKEYUP: a release with Alt held, or Alt's or F10's own) does not.
+    void release_use_item_key(bool system_key_up);
+    // A menu close's reset empties the deferred input queue: a deferred
+    // ToSpecial dispatch is dropped [orig: Input_ResetAllState @0x497ED0 --
+    // the deferred queue's clear @0x497EF7].
+    void clear_deferred_input();
     // One frame of movement keys: stores the keys plus the sim-owned stance
     // latch onto `input` and refreshes the view aggregates, whose binocular
     // suppression reads the input word this frame's fold will leave. The
@@ -321,6 +344,15 @@ public:
     // Retains NVG, camera-shake filters, map zoom, and physical held keys.
     // [orig: Game_InitNewRound @0x422740]
     void reset_for_new_round();
+    // The respawn's Player_InitPlayer resets, in order: with `rebuild_kit` the
+    // weapon leg (local_loadout_rebuild with the spawn-default select), then the
+    // view effects (local_player_view_reset: both cleared, NVG seeded from the
+    // mission's StartWithNVGOn bit) and the map state back to its spawn
+    // defaults (HudMapControl::reset_spawn). A joiner's redeploy runs it
+    // without the kit, which the release bundle's 0x5A already rebuilt
+    // (D-NET-378). [orig: Player_InitPlayer @0x4E15F0 -- the zoom seeds
+    // @0x4e1741..0x4e1763; Game_InitRespawnState @0x499360]
+    void respawn_init(bool rebuild_kit);
     // The same reset with an explicit heading (the joiner's spawn/redeploy
     // edges hand the authoritative facing in).
     void reset_local_player_input(int32_t look_heading_bam);
@@ -360,11 +392,12 @@ private:
     AnalogPackState analog_pack_;
     // The pack's analog legs onto the local player's entity+0x130..+0x133.
     // [orig: Player_PackInputStateToEntity @0x4df793..0x4df8f8]
-    void pack_analog_axes(Entity &entity, bool moving);
+    // x_frozen: the press latch's freeze zeroed the X axis word this frame.
+    void pack_analog_axes(Entity &entity, bool moving, bool x_frozen);
     // The pack itself: the input-flag word onto MoveOrder, its movement legs
     // and analog axes, then the word saved and cleared
     // [orig: Player_PackInputStateToEntity @0x4df450].
-    void pack_input_word();
+    void pack_input_word(bool x_frozen = false);
 };
 
 } // namespace opennova::world

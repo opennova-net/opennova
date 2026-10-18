@@ -487,7 +487,9 @@ func _submit_chat(all: bool) -> void:
 	var hud: HudOverlay = _hud_source.call() if _hud_source.is_valid() else null
 	var sim: Simulation = _view.sim() if _view != null else null
 	if hud != null and sim != null:
-		hud.send_command_map_chat(sim, all, text, Simulation.ticks_from_ms(_view.frame_clock_ms))
+		# The flood check reads the main-frame counter the HUD's frame set
+		# (HudOverlay.set_frame_clocks; engine inmatch/chat_flood.h).
+		hud.send_command_map_chat(sim, all, text)
 
 
 # The screen's authored hotkeys (the OK button's Escape, ZOOMIN's `=`) run

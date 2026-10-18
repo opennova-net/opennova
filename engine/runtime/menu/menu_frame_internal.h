@@ -105,7 +105,7 @@ struct MenuFrameCompiler::WidgetNode {
 	int32_t cursor = kMenuTexNone;
 	// A list row's layout: its justify word (+20: the low nibble 1 CENTER, 2 RIGHT, else LEFT; the
 	// high 0x10 VCENTER, 0x20 BOTTOM, else TOP) and its text offsets (+24 / +28), the list's own at
-	// the row's insert, an authored ITEM's over them [orig: list_insert_row @ 0x6450c8..0x6450e8;
+	// the row's insert, an authored ITEM's over them [orig: CListWnd_InsertRow @ 0x6450c8..0x6450e8;
 	// CListWnd_ParseXMLDefinition @ 0x645c74..0x645c9d]. The list's start CENTER and VCENTER with
 	// no offset [orig: CListWnd_Construct @ 0x643c08 (+0x330 = 1), @ 0x643c50 (+0x334 = 0x10),
 	// +0x328 / +0x32C zeroed].
@@ -129,7 +129,7 @@ struct MenuFrameCompiler::WidgetNode {
 	std::vector<ItemVisual> items;
 	std::vector<ItemVisual> popup_items; // combo LIST_BOX rows when authored
 	// What a row the game adds takes: the ITEMS block's (a combo's dropdown: its LIST_BOX's)
-	// [orig: UIList_AddRow @ 0x6453c0 -> list_insert_row @ 0x644f20].
+	// [orig: UIList_AddRow @ 0x6453c0 -> CListWnd_InsertRow @ 0x644f20].
 	RowLayout row_layout;
 	RowLayout popup_row_layout;
 	StatePass popup_states[4]; // LIST_BOX background appearances

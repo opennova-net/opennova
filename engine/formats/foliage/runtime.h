@@ -11,6 +11,21 @@
 
 namespace opennova::foliage {
 
+// A detail patch's cell key: HIGH15 the cell's X-min and LOW15 its Z-min (the
+// render plane's z), each the low 15 bits of the world coordinate, and the
+// signed decode of either half (bit 14 the sign) [orig:
+// Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a the pack;
+// Foliage_GenerateInstances_0 @ 0x5fff84..0x5fffa2 the decode]. The packer,
+// the generator, the frame and the Godot draw all read it through these; the
+// model tiles' key halves decode the same way (model_candidate).
+constexpr uint32_t pack_detail_cell_key(int32_t min_x, int32_t min_z) {
+	return ((static_cast<uint32_t>(min_x) & 0x7FFFu) << 16) | (static_cast<uint32_t>(min_z) & 0x7FFFu);
+}
+constexpr int32_t decode_detail_cell_axis(uint32_t half) {
+	return (half & 0x4000u) != 0u ? static_cast<int32_t>((half & 0x7FFFu) | 0xFFFF8000u)
+	                              : static_cast<int32_t>(half & 0x7FFFu);
+}
+
 // Portable render intent for both retail foliage tiers. Callers provide the
 // visible terrain cells / sector anchors and world samplers; the module hides
 // deterministic candidate generation, key decoding, quadrant walks, and the
@@ -104,8 +119,8 @@ struct FrameRequest {
 struct WorldSamplers {
 	// Detail grass samples the flat, 1024-wrapped foliage map at the
 	// candidate's ATLAS position (DetailCell::atlas_x/atlas_z plus the local
-	// offsets; z on the render plane, -y). The recovered
-	// Terrain_GetSurfaceTypeAtFixedPoint name is a misnomer; its backing
+	// offsets; z on the render plane, -y). The IDB's
+	// Foliage_SampleFoliageMapFlat (ex Foliage_SampleFoliageMapFlat, a misnomer); its backing
 	// buffer is the authored foliage map remapped to definition slots.
 	std::function<uint32_t(int32_t atlas_x_fixed, int32_t atlas_z_fixed)>
 	    detail_foliage_mask_at;

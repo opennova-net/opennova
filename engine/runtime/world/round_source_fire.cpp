@@ -14,7 +14,26 @@ RoundSpawnParams ammo_fire_params(EntityHandle owner, FixedVec3 p,
     params.dir_pitch_bam = pitch;
     params.ammo_index = ammo_index;
     params.adm_index = ammo_index;
+    // The ammo-def arm (targetId 1) spawns with no weapon [orig:
+    //  Entity_FireWeaponAndSendPacket @0x42BF53..0x42BF5D; the authority leg's
+    //  re-entry reaches RoundData_AddRound with flags 1, @0x4FDB95].
+    params.no_weapon = true;
     return params;
+}
+
+// The word the ammo-def arm hands the pool: a shooter that owns a player slot
+// (its roster row stands in for Entity_ValidatePtr's record, single player's
+// local player included) packs its slot over the fresh word's low nine bits; any
+// other (an AI, a script, a mine) takes 0xF600 there.
+// [orig: Entity_FireWeaponAndSendPacket - Entity_ValidatePtr @0x42BE0A (the slot
+//  table Server_AllocatePlayerSlotTable @0x51C180 builds on any authority);
+//  Server_ClientFiredRound - the record's +0x14 word @0x50BD91..0x50BDA5, the
+//  slotless 0xF600 @0x50BDAE..0x50BDBC]
+uint16_t ammo_arm_word(const World &world, EntityHandle shooter) {
+    if (const MatchPlayer *row = world.match.player(shooter))
+        return static_cast<uint16_t>((uint32_t(row->identity.slot) << 9) |
+                (RoundSim::kFreshRoundWord & 0x1FFu));
+    return RoundSim::kSlotlessAmmoArmWord;
 }
 
 // [orig: Entity_FireWeaponAndSendPacket @0x42BD80]
@@ -26,6 +45,8 @@ void emit_ammo_round(World &world, RoundSpawnParams params, FixedVec3 p) {
         world.out.source_fires.push_back(params);
         return;
     }
+    params.shot_seq = ammo_arm_word(world, params.owner);
+    world.round_sim.spawn(world, params);
     RoundEvent event;
     event.shooter_handle = params.shooter_handle;
     event.origin_x = p.x;
@@ -35,8 +56,9 @@ void emit_ammo_round(World &world, RoundSpawnParams params, FixedVec3 p) {
     event.dir_pitch = params.dir_pitch_bam;
     event.adm_index = params.adm_index;
     event.mode_flags = 1;
+    // ring+28: the spawned round's word [orig: RoundData_AddRound @0x4FDCF5].
+    event.shot_seq = world.round_sim.spawned_round_word();
     world.out.rounds.add(event);
-    world.round_sim.spawn(world, params);
 }
 } // namespace
 

@@ -203,6 +203,54 @@ void test_pixel_device_texture_levels() {
 	const auto halved = pixel_device_texture_levels(rgba.data(), 16, 16, kTextureFlagHalveOnce);
 	CHECK(!halved.empty() && halved[0].width == 8 && halved.size() == 2, "0x10000 halves first");
 	CHECK(pixel_device_texture_levels(nullptr, 16, 16, 0).empty(), "no pixels, no levels");
+	// C-43: a smaller side of 2 or less asks D3DXCreateTexture for 0 levels, its
+	// full chain, and the game loads level 0 alone: D3DXFilterTexture runs only
+	// for a count above 1, so levels 1+ are not the box filter's (the port leaves
+	// them zero) [orig: GTexture_CreateFromPixelData_0 @0x6877C7..0x6877E0,
+	// @0x6878B5..0x6878BE]. An 8 x 2 texture keeps its 4 levels, 8x2 to 1x1.
+	{
+		std::vector<uint8_t> strip(8 * 2 * 4, 0xC8);
+		const auto thin = pixel_device_texture_levels(strip.data(), 8, 2, 0x100001u);
+		CHECK(thin.size() == 4 && thin[0].rgba == strip && thin[3].width == 1 && thin[3].height == 1,
+				"the full chain, level 0 the pixels");
+		bool zero = thin.size() == 4;
+		for (size_t i = 1; zero && i < thin.size(); ++i)
+			for (uint8_t b : thin[i].rgba) zero = zero && b == 0;
+		CHECK(zero, "levels 1+ unfilled (zero), not box-filtered");
+		// D-RMAT-28: as DXT the texture is D3DX's 8 x 4, the strip on top and the rest transparent
+		// black, then 4 x 2, 2 x 1, 1 x 1 [orig: D3DXTex_ValidateAndAdjustTextureParams
+		// @0x690B99..0x690BCE; BltNone @0x6E0D57].
+		std::vector<DxtSurface> blocks_out;
+		const auto thin_dxt = pixel_device_texture_levels(strip.data(), 8, 2, 0x500201u, kReferenceTextureDxtCaps, 0,
+				kReferenceMaxTextureSide, &blocks_out);
+		CHECK(thin_dxt.size() == 4 && thin_dxt[0].width == 8 && thin_dxt[0].height == 4 && thin_dxt[1].width == 4 &&
+						thin_dxt[1].height == 2,
+				"the DXT chain at D3DX's sides");
+		CHECK(thin_dxt.size() == 4 && thin_dxt[0].rgba[(2 * 8) * 4 + 3] == 0 && thin_dxt[0].rgba[3] == 255,
+				"the rounded rows transparent black under the strip");
+		CHECK(blocks_out.size() == 4 && blocks_out[0].width == 8 && blocks_out[0].height == 4 &&
+						blocks_out[3].blocks == std::vector<uint8_t>(8, 0),
+				"the blocks handed back, the unloaded levels zero blocks");
+		// Its levels 1+ are those zero blocks, the texels their decode (a zero DXT1 block is
+		// opaque black): both views are one image at every level.
+		bool same = blocks_out.size() == thin_dxt.size();
+		for (size_t i = 0; same && i < thin_dxt.size(); ++i)
+			same = thin_dxt[i].rgba == encode_rgba8(decode_dxt_surface(blocks_out[i]));
+		CHECK(same && thin_dxt.size() == 4 && thin_dxt[1].rgba[3] == 255 && thin_dxt[1].rgba[0] == 0,
+				"the DXT chain's levels 1+ unloaded: the zero blocks' opaque black");
+		// A side halved to 0 is D3DX's 1 (an A8R8G8B8 1 x 1, one level), loaded over the creator's
+		// own 2 x 2 rect from an empty buffer: 0 [orig: GTexture_DownsampleToLimits @0x687200;
+		// D3DXTex_ValidateAndAdjustTextureParams @0x690A2B / @0x690A37].
+		std::vector<uint8_t> tiny(2 * 2 * 4, 0xC8);
+		const auto gone = pixel_device_texture_levels(tiny.data(), 2, 2, kTextureFlagHalveTwice);
+		CHECK(gone.size() == 1 && gone[0].width == 1 && gone[0].height == 1 &&
+						gone[0].rgba == std::vector<uint8_t>(4, 0),
+				"a side halved to 0: a 1 x 1 of 0");
+		// An 8 x 8 asks for 2 levels and filters level 1.
+		std::vector<uint8_t> square(8 * 8 * 4, 0xC8);
+		const auto eight = pixel_device_texture_levels(square.data(), 8, 8, 0x100001u);
+		CHECK(eight.size() == 2 && eight[1].rgba != std::vector<uint8_t>(4 * 4 * 4, 0), "a count above 1 is filtered");
+	}
 }
 
 void test_model_row_device_texture() {

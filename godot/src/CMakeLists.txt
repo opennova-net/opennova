@@ -191,6 +191,8 @@ add_library(opennova_bindings OBJECT
     hud/end_round_transition.cpp
     hud/hud_inset_scope.cpp
     hud/player_hud_weapon_def.cpp
+    hud/hud_entity_info.cpp
+    hud/loading_background.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
     devtools/dev_tools_overlay.cpp
@@ -282,7 +284,6 @@ add_library(opennova_bindings OBJECT
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
     audio/sbf_audio_stream.cpp
-    audio/sbf_audio_stream_playback.cpp
     audio/music_script.cpp
     audio/music_director.cpp
     audio/music_pair_names.cpp
@@ -293,6 +294,8 @@ add_library(opennova_bindings OBJECT
     mnu/menu_frame.cpp
     mnu/menu_audio.cpp
     mnu/menu_driver.cpp
+    mnu/player_info_loadout.cpp
+    mnu/armory_loadout_pick.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp
@@ -303,6 +306,7 @@ add_library(opennova_bindings OBJECT
     player/player_input_router.cpp
     player/player_move_intent.cpp
     player/player_info_kit_restore.cpp
+    player/player_info_character_state.cpp
     player/player_profiles.cpp
     player/player_spawn_loadout.cpp
     player/player_viewmodel_def.cpp

@@ -383,10 +383,10 @@ func test_settle_glare_occlusion_reaches_the_dead_band_hold() -> void:
 			"the glare model is shown once its alpha is non-zero")
 
 
-func test_sun_veil_publishes_the_dot32_alpha_global_when_facing_the_sun() -> void:
+func test_sun_veil_publishes_the_dot16_alpha_global_when_facing_the_sun() -> void:
 	# The sun-glare screen veil [orig:
 	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0]: with the glare
-	# occlusion settled and the camera facing the sun, the dot^32 chain must
+	# occlusion settled and the camera facing the sun, the dot^16 chain must
 	# publish a non-zero white-veil alpha through the opennova_sun_veil_alpha
 	# shader global and expose the modulator-2 stop-down for the world's veil
 	# leg. Facing away serves zero (the dot <= 0 gate).

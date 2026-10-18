@@ -2,6 +2,7 @@
 
 #include <runtime/inmatch/server_kill_page.h>
 
+#include <base/io/le.h>
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
@@ -73,11 +74,6 @@ uint16_t walk_advance(const world::World &world, PoolWalk &walk) {
 	return walk.current;
 }
 
-void put_u16(std::vector<uint8_t> &out, size_t at, uint16_t v) {
-	out[at] = static_cast<uint8_t>(v & 0xFFu);
-	out[at + 1] = static_cast<uint8_t>(v >> 8);
-}
-
 } // namespace
 
 bool kill_page_entity_eligible(const world::World &world, uint32_t window_min,
@@ -113,7 +109,7 @@ std::vector<uint8_t> Server_CollectKillPage(const world::World &world, bool spaw
 		}
 		current = walk_advance(world, walk);
 	} while (current != 0xFFFF && count <= 32);
-	put_u16(out, 0, current);
+	io::write_u16_le(out.data(), current);
 	return out;
 }
 

@@ -36,6 +36,7 @@ extends Control
 
 var _texture: Texture2D = null
 var _has_custom_bg := false
+var _band_right := 0      # the session text band's right edge over this background
 var _in_session := false
 var _title := ""          # server name [orig: g_SessionVarServerName -> title buf @ 0x51f533]
 var _mission_name := ""   # [orig: g_SessionVarMissionName -> mission buf @ 0x51f53a]
@@ -73,32 +74,6 @@ var _splash_blink_on := true
 var _splash_frames_until_emit := 0
 
 
-## The background image pick: the image name and whether it is the mission's
-## own sidecar (the retail custom-background flag the SP splash gate reads).
-class BackgroundPick:
-	var name := ""
-	var custom := false
-
-	static func make(name: String, custom: bool) -> BackgroundPick:
-		var pick := BackgroundPick.new()
-		pick.name = name
-		pick.custom = custom
-		return pick
-
-
-## Resolve the background image for a mission: the sidecar if present, else the
-## stock fallback [orig: FileSystem_FileExists probe @ 0x521db5; fallback
-## @ 0x521e20].
-static func resolve_background(root: ResourceRoot, mission_file: String) -> BackgroundPick:
-	var sidecar := HudPos.loading_sidecar_image_name(mission_file)
-	# UI image probes force loose-first for this lookup, independent of /d.
-	# [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
-	if root != null and not sidecar.is_empty() and root.has_file(
-			sidecar, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST):
-		return BackgroundPick.make(sidecar, true)
-	return BackgroundPick.make(HudPos.loading_fallback_image(), false)
-
-
 ## Public texture-load seam for owners/tests; avoids private-state inspection (ADR 0018).
 ## The background reads through the PCX reader alone (ResourceRoot.TEXTURE_LOADER_PCX).
 ## [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
@@ -118,8 +93,11 @@ static func load_background_texture(root: ResourceRoot, image_name: String) -> T
 ##   game_type — the numeric session game type [orig: GAMETYPE]; not carried
 ##     (negative) reads as 0
 func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
-	var bg := resolve_background(root, info.mission_file)
+	# The background pick: the mission's sidecar if the probe finds it, else
+	# the stock image (engine: runtime/hud/loading_background.h).
+	var bg := LoadingBackground.resolve(root, info.mission_file)
 	_has_custom_bg = bg.custom
+	_band_right = bg.band_right
 	_texture = load_background_texture(root, bg.name)
 	_in_session = info.in_session
 	if not _in_session:
@@ -144,10 +122,11 @@ func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 ## @ 0x51f533/0x51f53a]. Empty values keep the current ones.
 func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	if not info.mission_file.is_empty():
-		var bg := resolve_background(root, info.mission_file)
+		var bg := LoadingBackground.resolve(root, info.mission_file)
 		var texture := load_background_texture(root, bg.name)
 		if texture != null:
 			_has_custom_bg = bg.custom
+			_band_right = bg.band_right
 			_texture = texture
 	if _in_session:
 		if not info.server_name.is_empty():
@@ -559,9 +538,7 @@ func _draw_session_text() -> void:
 	if tex_size.x <= 0.0 or tex_size.y <= 0.0:
 		return
 	draw_set_transform(Vector2.ZERO, 0.0, size / tex_size)
-	var band_right: int = HudPos.LOADING_BAND_RIGHT_CUSTOM if _has_custom_bg \
-			else HudPos.LOADING_BAND_RIGHT_STOCK
-	var band_width: int = band_right - HudPos.LOADING_BAND_LEFT
+	var band_width: int = _band_right - HudPos.LOADING_BAND_LEFT
 	# Title / mission / game type share one band: left-, center- and
 	# right-aligned [orig: alignment 3/4/5 @ 0x52200f/0x52202e/0x522050 ->
 	# left/center/right @ 0x58106c/0x581071]. All white (<cFFFFFF> @ 0x51f42d).

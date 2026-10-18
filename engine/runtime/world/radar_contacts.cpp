@@ -3,6 +3,7 @@
 
 #include <runtime/world/radar_contacts.h>
 
+#include <base/io/bam.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/world/ai.h>
@@ -26,10 +27,6 @@ constexpr uint32_t kRadarSourceEntity = 0x10000u;
 constexpr uint32_t kRadarSourceRound = 0x20000u;
 constexpr uint32_t kRadarSourceWire = 0x40000u; // a joiner's wire proxy
 constexpr uint32_t kRadarSourceIndexMask = 0xFFFFu;
-
-int32_t wrap_sub(int32_t a, int32_t b) {
-	return static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b));
-}
 
 // `cdq; xor eax, edx; sub eax, edx` — INT32_MIN stays negative.
 int32_t abs32(int32_t v) {
@@ -62,8 +59,8 @@ void radar_add_blip(RadarContactState &state, uint32_t rules, const int32_t loca
 	if ((rules & kRadarRulesNoTracers) != 0) return; // [orig: @0x59b283..0x59b28a]
 	// The add's bearing picks one of four compass-edge timers, the quadrant
 	// biased by 0x1FFFFFE0 [orig: @0x59b290..0x59b2e3].
-	const uint32_t bearing = hud::radar_bearing_raw(wrap_sub(pos[0], local_pos[0]),
-			wrap_sub(local_pos[1], pos[1]), hud::kRadarBearingScale);
+	const uint32_t bearing = hud::radar_bearing_raw(io::bam_sub(pos[0], local_pos[0]),
+			io::bam_sub(local_pos[1], pos[1]), hud::kRadarBearingScale);
 	state.edge[(bearing - local_yaw - 0x1FFFFFE0u) >> 30] = kRadarEdgeTimer;
 	// The first free row takes the add; a full table drops it
 	// [orig: @0x59b2ed..0x59b306, the row stores @0x59b30e..0x59b32e].
@@ -101,8 +98,8 @@ int32_t radar_update_contacts(RadarContactState &state, uint32_t tick,
 			row->life = 0;                                  // [orig: @0x59a983]
 			continue;
 		}
-		const uint32_t raw = hud::radar_bearing_raw(wrap_sub(row->pos[0], viewer_pos[0]),
-				wrap_sub(viewer_pos[1], row->pos[1]), -hud::kRadarBearingScale);
+		const uint32_t raw = hud::radar_bearing_raw(io::bam_sub(row->pos[0], viewer_pos[0]),
+				io::bam_sub(viewer_pos[1], row->pos[1]), -hud::kRadarBearingScale);
 		row->life -= elapsed;                               // [orig: @0x59a89a]
 		switch (row->kind) {
 		case kRadarKindRed12:                               // [orig: @0x59a8dc..0x59a8eb]
@@ -222,7 +219,7 @@ void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *amm
 	const int32_t ly = to_fixed(listener.y);
 	const int32_t lz = to_fixed(listener.z);
 	const int32_t radius = ammo->whiz_radius_q16; // [orig: ammo +0x8C @0x4ea9a8]
-	const auto within = [radius](int32_t a, int32_t b) { return abs32(wrap_sub(a, b)) < radius; };
+	const auto within = [radius](int32_t a, int32_t b) { return abs32(io::bam_sub(a, b)) < radius; };
 	if (!within(start.x, lx) && !within(end.x, lx)) return;
 	if (!within(start.y, ly) && !within(end.y, ly)) return;
 
@@ -235,9 +232,9 @@ void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *amm
 	const int32_t dir[3] = {retail_q16_mul_rhu(velocity.x, inverse),
 			retail_q16_mul_rhu(velocity.y, inverse), retail_q16_mul_rhu(velocity.z, inverse)};
 	const int32_t t = static_cast<int32_t>(
-			static_cast<uint32_t>(retail_q16_mul_rhu(dir[0], wrap_sub(lx, start.x))) +
-			static_cast<uint32_t>(retail_q16_mul_rhu(dir[1], wrap_sub(ly, start.y))) +
-			static_cast<uint32_t>(retail_q16_mul_rhu(dir[2], wrap_sub(lz, start.z))));
+			static_cast<uint32_t>(retail_q16_mul_rhu(dir[0], io::bam_sub(lx, start.x))) +
+			static_cast<uint32_t>(retail_q16_mul_rhu(dir[1], io::bam_sub(ly, start.y))) +
+			static_cast<uint32_t>(retail_q16_mul_rhu(dir[2], io::bam_sub(lz, start.z))));
 	const Entity *local = world.registry.get(world.cached.local_player);
 	// The projectile's +0x170 shooter: a registry entity, or on a joiner the
 	// wire proxy its round event named, resolved as the retail client

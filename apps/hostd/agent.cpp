@@ -1,6 +1,7 @@
 #include "agent.h"
 
 #include "reconcile.h"
+#include "steady_clock.h"
 
 #include "net_sockets.h"
 
@@ -24,12 +25,6 @@ namespace opennova::hostd {
 namespace {
 
 using io::LogLevel;
-
-uint64_t steady_now_ms() {
-	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch())
-					.count());
-}
 
 // `bytes` at `path`, owner-only, whole or not at all: a file of its own
 // written, flushed and renamed over `path`.

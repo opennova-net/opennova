@@ -149,7 +149,7 @@ bool plan_tile_command(const TerrainViewContext &view, const ViewportCommand &co
 		words = "Removed " + tiles_words(edits.size());
 	} else if (command.name == "tile_nudge") {
 		// MED's arrows: each press a whole unit, 16 with the modifier, a positive move rounding up [orig: JOTACmed.exe
-		// sub_43F0B0 @ 0x43F0DE..0x43F1A7] (tile_tools tile_nudged).
+		// MissionSelection_Translate @ 0x43F0DE..0x43F1A7] (tile_tools tile_nudged).
 		if (command.by.size() != 2 || (command.by[0] == 0.0 && command.by[1] == 0.0)) {
 			error = "tile_nudge's \"by\" is [east, north]: whole steps (16 units each with \"value\": \"16\").";
 			return false;

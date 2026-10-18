@@ -121,7 +121,8 @@ func test_hud_overlay_draws_pcx_and_suffixed_stance_art() -> void:
 		hud.size = Vector2(1024, 768)
 		add_child_autofree(hud)
 		hud.configure(_stance_layout(dir, stance_name), _loose(dir))
-		hud.set_player_state(100, 1.0, 2, 80.0)
+		hud.set_frame_clocks(100, 100, 100, 100)
+		hud.set_player_state(1.0, 2, 80.0)
 		assert_eq(hud.get_draw_list_stats().quads, 1,
 				"the HUD loader loads stance art named %s" % stance_name)
 
@@ -144,7 +145,8 @@ func test_alpha_mode_art_draws_twice_the_vertex_colour() -> void:
 		add_child_autofree(hud)
 		hud.configure(_stance_layout(dir, stance_name,
 				PackedStringArray(["stanceicon_color 255 80 40 20"])), _loose(dir))
-		hud.set_player_state(100, 1.0, 2, 80.0)
+		hud.set_frame_clocks(100, 100, 100, 100)
+		hud.set_player_state(1.0, 2, 80.0)
 		var compiled := hud.get_textured_quad_colors(false)
 		var drawn := hud.get_textured_quad_colors(true)
 		assert_eq(drawn.size(), 1, "one stance quad")

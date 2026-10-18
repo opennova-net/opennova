@@ -54,15 +54,47 @@ inline constexpr TextureDxtCaps kReferenceTextureDxtCaps{};
 TextureDxtFormat select_texture_dxt_format(
 		uint32_t creation_flags, const TextureDxtCaps &caps);
 
-// The level count GTexture_CreateFromPixelData_0 asks D3DXCreateTexture for:
-// one level per halving while the smaller side exceeds 2, so the chain ends at
-// 4 texels; flag 0x40000 keeps one level and 0x80000 at most three. A count of
-// 0 is D3DX's full chain to 1x1. A chain of more than one level is BOX-filtered, each level from
-// the one before.
-// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BA..0x687801; the filter D3DX_FILTER_BOX
-// (`push 5`) @ 0x6878B9 for D3DXFilterTexture @ 0x6878BE]
-uint32_t texture_level_count(uint32_t width, uint32_t height,
+// The level count GTexture_CreateFromPixelData_0 stores and asks D3DXCreateTexture for, as
+// asked: one level per halving while the smaller side exceeds 2, so the chain ends at 4 texels;
+// flag 0x40000 keeps one level and 0x80000 at most three. 0 (a smaller side of 2 or less, without
+// 0x40000) asks D3DX for its full chain to 1x1. Only a request above 1 is BOX-filtered, each level
+// from the one before: the filter's gate reads this stored request, not the levels D3DX made, so
+// a full chain asked as 0 is not filtered.
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BA..0x687801, the request stored at +0x70
+// @ 0x6877E0 / @ 0x687801; the gate `cmp [esi+70h], 1; jle` @ 0x6878B1..0x6878B5 before
+// D3DX_FILTER_BOX (`push 5`) @ 0x6878B9 for D3DXFilterTexture @ 0x6878BE]
+uint32_t texture_requested_level_count(uint32_t width, uint32_t height,
 		uint32_t creation_flags);
+
+// D3DX's side for a texture it creates in `format`: a side of 0 made 1, then a DXT side rounded up to
+// a multiple of 4 in every pool (the reference device asks no power-of-two rounding and its caps
+// clamp nothing a texture here reaches).
+// [orig: D3DXTex_ValidateAndAdjustTextureParams @ 0x690919 -- 0 -> 1 @ 0x690A2B / @ 0x690A37,
+// the DXT1..DXT5 rounding (s + 3) & ~3 @ 0x690B99..0x690BCE]
+uint32_t d3dx_texture_side(uint32_t side, TextureDxtFormat format);
+
+// The levels D3DXCreateTexture makes at D3DX's sides for a request: the larger side's bit length,
+// unless asked for fewer (0 asks for all).
+// [orig: D3DXTex_ValidateAndAdjustTextureParams @ 0x690C32..0x690C64 (the bit lengths, the
+// larger), @ 0x690C72..0x690C7D ((asked == 0 || asked > bits) ? bits : asked)]
+uint32_t d3dx_texture_level_count(uint32_t width, uint32_t height, uint32_t requested);
+
+// The levels that request makes in `format`: texture_requested_level_count over the sides, resolved
+// by D3DX at its own sides (d3dx_texture_side, d3dx_texture_level_count).
+uint32_t texture_level_count(uint32_t width, uint32_t height, uint32_t creation_flags,
+		TextureDxtFormat format = TextureDxtFormat::None);
+
+// D3DXLoadSurfaceFromMemory's D3DX_FILTER_NONE load of a level from RGBA8 texels: `dest_w` x
+// `dest_h` texels, each inside the source rect `rect_w` x `rect_h` the source's texel
+// y * `pitch` + x, transparent black past the rect. A texel past the source's `texels` written
+// ones reads 0 (retail reads the halving buffer's unwritten heap there; no witness fixes it,
+// D-RMAT-27's convention).
+// [orig: CBlt::Blt @ 0x6E30B5 -> BltNone @ 0x6E0D57 (filter byte 1 @ 0x6E0D66): the zero row
+// @ 0x6E0E41 and pad row @ 0x6E0E5D, a source row of the rect's width per destination row below
+// the shorter height @ 0x6E0E9B / @ 0x6E0EAA, the pad row below it @ 0x6E0EC8; each side from its
+// rect, CCodec::CCodec @ 0x6E4E1E..0x6E4E3C]
+std::vector<uint8_t> load_rgba8_filter_none(const uint8_t *rgba, size_t texels, uint32_t pitch,
+		uint32_t rect_w, uint32_t rect_h, uint32_t dest_w, uint32_t dest_h);
 
 size_t dxt_block_bytes(TextureDxtFormat format);
 
@@ -152,10 +184,12 @@ void extend_box_chain(std::vector<Level> &levels, size_t count) {
 // dds_read decoded them, or this did.
 bool decode_dds_levels(const uint8_t *bytes, size_t size, dds::DdsImage &image, size_t max_levels = 0);
 
-// The full level set of a pixel-data texture created in `format`: level 0 is
-// the source loaded through D3DXLoadSurfaceFromMemory with D3DX_FILTER_NONE,
-// every later level is D3DXFilterTexture's box filter of the level before it,
-// decoded from that level's own blocks.
+// The first `level_count` levels of a pixel-data texture created in `format`
+// from `width` x `height` texels: level 0 at D3DX's sides (d3dx_texture_side),
+// the source loaded top-left through D3DXLoadSurfaceFromMemory with
+// D3DX_FILTER_NONE (load_rgba8_filter_none, the rest transparent black), every
+// later level D3DXFilterTexture's box filter of the level before it at the
+// rounded sides, decoded from that level's own blocks.
 // [orig: GTexture_CreateFromPixelData_0 @ 0x6878A0 (load, filter 1) and
 // @ 0x6878BE (D3DXFilterTexture, filter 5); D3DXFilterTexture @ 0x6910C9
 // (each level from the previous one @ 0x6912AD..0x6912F9)]

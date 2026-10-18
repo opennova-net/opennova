@@ -82,3 +82,17 @@ func test_late_spawned_models_share_one_panm_epoch() -> void:
 		"spawn time does not create a second animation epoch")
 	assert_true(first_part.transform.is_equal_approx(pose_b[target] as Transform3D),
 		"visual PANM consumes the clock value passed to the evaluator")
+
+
+# A model with no PanmClock keeps its own DWORD clock at wall rate: sixty
+# frames of 1/60 s advance it 1000 ms, each frame's sub-millisecond rest carried
+# (dropping it gave 960, 4% slow) (C-392).
+func test_private_clock_keeps_the_sub_millisecond_carry() -> void:
+	var data := _open_pmp()
+	var model: Node3D = add_child_autofree(ObjectModel.new())
+	model.set_object_data(data)
+	var start: int = model.get_animation_time_ms()
+	for i in range(60):
+		model.advance_runtime_frame(1.0 / 60.0)
+	assert_eq(model.get_animation_time_ms() - start, 1000,
+			"the private clock advances real time")

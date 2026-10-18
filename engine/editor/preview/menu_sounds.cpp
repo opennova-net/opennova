@@ -1,5 +1,6 @@
 #include <editor/preview/menu_sounds.h>
 
+#include <algorithm>
 #include <cstdio>
 
 #include <base/io/os_path.h>
@@ -59,39 +60,34 @@ bool read_menu_sound_options(const io::JsonValue &json, MenuSoundOptions &held, 
 
 // --- MenuSoundBanks ----------------------------------------------------------------------------------
 
-const PreviewBank *MenuSoundBanks::bank(const ProjectAssetSource &files, const std::string &name, int32_t *key) {
+const lwf::File *MenuSoundBanks::bank(const ProjectAssetSource &files, const std::string &name, int32_t *key) {
 	if (key) *key = 0;
 	if (name.empty()) return nullptr;
-	// The menu's collection holds a bank once, its names compared without case [orig:
-	// SoundBank_CollectionAddOrRef @ 0x652b40, stricmp].
-	Held *held = nullptr;
-	for (Held &each : held_)
-		if (strutil::iequals(each.name, name)) held = &each;
+	// The file a name was asked of moved: every bank opened again, as a menu loaded again opens them.
 	const uint64_t stamp = files.stamp(name);
-	if (held && held->stamp == stamp) {
-		if (key && held->read) *key = int32_t(held->index + 1);
-		return held->read ? &banks_[held->index] : nullptr;
+	const auto held = std::find_if(stamps_.begin(), stamps_.end(),
+	                               [&name](const auto &each) { return strutil::iequals(each.first, name); });
+	if (held == stamps_.end()) {
+		stamps_.emplace_back(name, stamp);
+	} else if (held->second != stamp) {
+		collection_.clear();
+		stamps_.assign(1, {name, stamp});
+		key_base_ += last_key_; // fresh playlist records: no key a bank had before
+		last_key_ = 0;
 	}
-	if (!held) {
-		held_.push_back(Held());
-		held = &held_.back();
-		held->name = name;
-		held->index = banks_.size();
-		banks_.push_back(PreviewBank());
-	}
-	held->stamp = stamp;
-	held->read = false;
-	PreviewBank &bank = banks_[held->index];
-	bank.name = name;
-	bank.path = files.path_of(name);
-	bank.file = lwf::File();
-	std::vector<uint8_t> bytes;
-	std::string error;
-	held->read = files.read(name, bytes) && !bytes.empty() &&
-	             lwf::parse_lwf_buffer(bytes.data(), bytes.size(), bank.file, error);
-	if (!held->read) bank.file = lwf::File();
-	if (key && held->read) *key = int32_t(held->index + 1);
-	return held->read ? &bank : nullptr;
+	int32_t opened = 0;
+	const lwf::File *file = collection_.bank(
+	        name,
+	        [&files](const std::string &named, lwf::File &out) {
+		        std::vector<uint8_t> bytes;
+		        std::string error;
+		        return files.read(named, bytes) && !bytes.empty() &&
+		               lwf::parse_lwf_buffer(bytes.data(), bytes.size(), out, error);
+	        },
+	        &opened);
+	last_key_ = std::max(last_key_, opened);
+	if (key) *key = opened == 0 ? 0 : key_base_ + opened;
+	return file;
 }
 
 // --- a window's sound ----------------------------------------------------------------------------------
@@ -120,9 +116,9 @@ MenuSoundFired plan_menu_sound(const mnu::Sound &row, MenuSoundBanks &banks, con
 	sound.slot = -1;
 	sound.set = row.trigger;
 	sound.bank = row.file;
-	// Its own bank alone [orig: sound_collection_play_trigger @ 0x652de0 plays from the row's bank entry].
+	// Its own bank alone [orig: Sound_CollectionPlayTrigger @ 0x652de0 plays from the row's bank entry].
 	int32_t key = 0;
-	const PreviewBank *bank = banks.bank(files, row.file, &key);
+	const lwf::File *bank = banks.bank(files, row.file, &key);
 	if (!bank) {
 		sound.state = "no_bank";
 		sound.words = row.trigger + ": " +
@@ -134,20 +130,20 @@ MenuSoundFired plan_menu_sound(const mnu::Sound &row, MenuSoundBanks &banks, con
 	// The bank's first set of the name, without case [orig: SoundBank_FindTriggerByName @ 0x75be90], played as
 	// the menu plays it: menu::plan_menu_sound, the game's own (no listener view filters its layers, no jitter
 	// draws) [orig: SoundBank_PlayTriggerEntries @ 0x75ccd0].
-	const int32_t index = row.trigger.empty() ? -1 : audio::find_bank_set(bank->file, row.trigger);
+	const int32_t index = row.trigger.empty() ? -1 : audio::find_bank_set(*bank, row.trigger);
 	if (index < 0) {
 		sound.state = "missing";
 		sound.words = row.trigger.empty() ? std::string("No set is named: the game plays nothing.")
 		                                  : row.file + " has no set named " + row.trigger + ": the game plays nothing.";
 		return fired;
 	}
-	sound.set = bank->file.multis[size_t(index)].name;
+	sound.set = bank->multis[size_t(index)].name;
 	std::string words;
 	for (const menu::MenuSoundVoice &voice :
-	     menu::plan_menu_sound(bank->file, key, row.trigger, menu::kMenuMasterVolumeDefault, selector)) {
+	     menu::plan_menu_sound(*bank, key, row.trigger, menu::kMenuMasterVolumeDefault, selector)) {
 		if (voice.path.empty()) continue; // a member naming no wave: nothing plays
 		ClipSoundFired::Voice out;
-		for (const lwf::Single &single : bank->file.singles)
+		for (const lwf::Single &single : bank->singles)
 			if (single.path == voice.path) {
 				out.wave = single.name;
 				break;
@@ -160,7 +156,7 @@ MenuSoundFired plan_menu_sound(const mnu::Sound &row, MenuSoundBanks &banks, con
 		words += (words.empty() ? "" : "; ") + out.file + " at pitch " + pitch + ", volume " + std::to_string(out.volume);
 		sound.voices.push_back(std::move(out));
 	}
-	sound.words = sound.set + " in " + bank->name +
+	sound.words = sound.set + " in " + row.file +
 	              (words.empty() ? std::string(": no layer has a member to play.") : ": " + words + ".");
 	sound.state = sound.voices.empty() ? "silent" : mute ? "muted" : "played";
 	if (scan) find_clip_sound_waves(sound, *scan);

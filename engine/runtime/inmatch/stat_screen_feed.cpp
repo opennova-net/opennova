@@ -80,7 +80,7 @@ std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 		sr.squad = p.squad.empty() ? "-" : p.squad;
 		// The row colour by the slot's team: 1 blue, 2 red, any other the table's
 		// [orig: the team switch @0x56258a..0x562596, push 0FF00AFFFh @0x56259f,
-		// push 0FFFF0000h @0x562598, then sub_640110 @0x5625a9].
+		// push 0FFFF0000h @0x562598, then CTableWnd_SetRowColor @0x5625a9].
 		if (p.team == 1) sr.color_argb = 0xFF00AFFFu;
 		else if (p.team == 2) sr.color_argb = 0xFFFF0000u;
 		for (size_t i = 0; i < board.team_fields.size(); ++i) {
@@ -132,7 +132,7 @@ void fill_stat_results(menu::MenuRuntime &menu, int table,
 		c.vjustify = kStatScreenColumnVJustify;
 		c.body_justify = c.justify;
 		c.body_vjustify = c.vjustify;
-		// NAME and Squad compare as text; a stat field numerically (init_table_row's
+		// NAME and Squad compare as text; a stat field numerically (CTableWnd_InitRow's
 		// sort argument 0 / 1 @ 0x562346 / 0x56237a / 0x56242b).
 		c.numeric_sort = column.field_id != 0;
 		set.push_back(std::move(c));
@@ -144,14 +144,14 @@ void fill_stat_results(menu::MenuRuntime &menu, int table,
 		// with the slot's team as its column-0 value, the flags 0 [orig: the
 		// CTableWnd_AddRow call @0x562565, the team pushed @0x562550..0x56255a];
 		// the slot id as column 1's value [orig: the value call @0x562576, the
-		// byte +0x0C @0x56256a; the IDB's CEffectCompiler_HasErrors @0x6420f0, a
-		// misnomer: SetCellValue] beside the squad [orig: @0x562585], then the
+		// byte +0x0C @0x56256a; CTableWnd_SetCellValue @0x6420f0 (ex
+		// CTableWnd_SetCellValue)] beside the squad [orig: @0x562585], then the
 		// formatted fields [orig: CTableWnd_SetCellText @0x5626b1].
 		const int index = menu.table_insert_row(table, row.name, row.team, 0, -1);
 		menu.table_set_cell_value(table, index, 1, row.slot);
 		menu.table_set_cell_text(table, index, 1, row.squad);
 		// A team row takes its colour; any other keeps the table's (the feed's
-		// white) [orig: sub_640110 @0x5625a9].
+		// white) [orig: CTableWnd_SetRowColor @0x5625a9].
 		if (row.color_argb != 0xFFFFFFFFu)
 			menu.table_set_row_color(table, index, true, row.color_argb);
 		for (size_t i = 0; i < row.cells.size(); ++i)

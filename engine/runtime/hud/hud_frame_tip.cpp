@@ -97,8 +97,9 @@ void HudFrameCompiler::element_tip(const HudFrameState &state, bool alternate, f
 		const float cell = static_cast<float>(layout_.tip_box_tex_w >> 2) * box_scale;
 		const uint32_t box_color = a24 | 0x7F7F7Fu;
 		emit_stdbox_piece(bx0 + cell, by0 + cell, bx1 - cell, by1 - cell, 1, 1, false, box_color,
-				kHudTexTipBox);
-		emit_box_pieces(bx0, by0, bx1, by1, cell, cell, box_color, 0.0f, kHudTexTipBox);
+				kHudTexTipBox, layout_.tip_box_tex_w, layout_.tip_box_tex_h);
+		emit_box_pieces(bx0, by0, bx1, by1, cell, cell, box_color, 0.0f, kHudTexTipBox,
+				layout_.tip_box_tex_w, layout_.tip_box_tex_h);
 	}
 
 	// The icon: 48 design px square at (x + 28, y + 32), the whole texture,

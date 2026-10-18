@@ -420,55 +420,6 @@ func test_day_phase_selects_night_and_day() -> void:
 	assert_true(env.get_day_phase(1845.0).night, "18:45 is the sunset switch into night.")
 
 
-func test_double_saturate_and_lit_water_helpers() -> void:
-	var doubled := EnvFile.double_saturate_color(Color(0.5, 0.25, 1.0))
-	assert_almost_eq(doubled.r, 1.0, 0.01, "0.5 doubles to 1.0.")
-	assert_almost_eq(doubled.g, 0.5, 0.01, "0.25 doubles to 0.5.")
-	assert_almost_eq(doubled.b, 1.0, 0.01, "1.0 saturates at 1.0.")
-	var mid := Color(0.5, 0.5, 0.5)
-	var lit := EnvFile.lit_water_color(mid, mid)
-	assert_almost_eq(lit.r, 0.5, 0.02, "water*light>>7 is identity at mid-gray.")
-
-
-func test_field_consumption_table_mirrors_the_matrix() -> void:
-	var table := EnvFile.get_field_consumption()
-	assert_false(table.is_empty(), "the consumption table is populated")
-
-	# env-honored-matrix.md: terrain_rgb is honored through the .til tile overlay
-	# (divergence #19 FIXED) [retail PolyTrn_RenderTile @ 0x60df0d].
-	var terrain: Dictionary = table.get("terrain_tint", {})
-	assert_eq(String(terrain.get("status", "")), "honored", "terrain_tint is honored (divergence #19 FIXED)")
-	assert_string_contains(String(terrain.get("anchor", "")), "0x60df0d", "anchored to the tile-overlay consumer")
-	assert_false(String(terrain.get("note", "")).is_empty(), "honored-with-scope rows explain themselves")
-
-	# The matrix's other rows the pass settled: ceiling/floor, lightning and
-	# glare are honored; the star model is faithfully unconsumed (env #33,
-	# retail Star_RenderField_Unused @ 0x5ad9c0 has no caller).
-	for field in ["ceiling_color", "floor_color", "lightning_color", "glare_3di"]:
-		assert_eq(String((table.get(field, {}) as Dictionary).get("status", "")), "honored",
-				"%s is honored in the matrix" % field)
-	var star: Dictionary = table.get("star_3di", {})
-	assert_eq(String(star.get("status", "")), "unconsumed", "star_3di loads but never draws")
-	assert_true(bool(star.get("faithful", false)), "retail never draws the star model either")
-
-	# The modulator chain landed at REN-5 (divergence #17 FIXED) — the outdoor
-	# exposure runs; the row keeps its interior-sampling caveat as the note
-	# (docs/render/render-lighting-re.md D-RLIT-2).
-	assert_eq(String((table.get("iris_percent", {}) as Dictionary).get("status", "")), "honored",
-		"iris is honored since REN-5 (the modulator chain is live, divergence #17)")
-	assert_false(String((table.get("iris_percent", {}) as Dictionary).get("note", "")).is_empty(),
-		"the iris row explains itself")
-	assert_true(bool((table.get("vertex_tint", {}) as Dictionary).get("faithful", false)),
-		"vertex_tint is faithfully unconsumed (retail ignores it too)")
-
-	var cloud: Dictionary = table.get("cloud_tint", {})
-	assert_eq(String(cloud.get("status", "")), "honored", "cloud_tint is honored after the C7 flat pass")
-	assert_false(String(cloud.get("note", "")).is_empty(), "honored-with-scope rows keep their caveat")
-
-	assert_eq(String((table.get("fog_level", {}) as Dictionary).get("status", "")), "honored",
-		"plainly honored fields are in the table too")
-
-
 func test_weather_releases_a_freed_simulation_before_the_environment_reads_it() -> void:
 	var mount := Node3D.new()
 	add_child_autofree(mount)

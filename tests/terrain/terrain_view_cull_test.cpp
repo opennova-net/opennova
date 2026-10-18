@@ -3,7 +3,7 @@
 // far-straddle subdivide arms, the sphere-then-AABB plane refinement, and the
 // settings-derived LOD multiplier.
 // [orig: sub_603DA0 @0x603DA0; Terrain_TraverseQuadtreeNode @0x608A00;
-//  Terrain_TestAABBOutsideFrustumPlane @0x6086C0; sub_605D70 @0x605D70;
+//  Terrain_TestAABBOutsideFrustumPlane @0x6086C0; Terrain_ApplyDetailSettings @0x605D70;
 //  Terrain_Init @0x60fc33; PolyTrn_RenderFrame @0x60EAC0]
 #include <runtime/terrain/quadtree.h>
 

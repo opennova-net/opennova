@@ -4,7 +4,8 @@
 // (the blocks left to the D3DX codec's port), the mip count read whatever the header's flags say; the
 // masked forms the table matches (R5G6B5, X8R8G8B8, L8, A8, A4R4G4B4) decoded; and what the loader
 // refuses: a pixel format its table lacks, a partial cube map, data that stops short of a level, a
-// palette cut short. A cube map of six faces reads its first face's chain; bytes past the last level
+// palette cut short, sides whose level size wraps (a 2^31-square A8R8G8B8, a DXT1 0xFFFFFFFD wide).
+// A cube map of six faces reads its first face's chain; bytes past the last level
 // are counted, never read; no magic, or a short header, is no DDS.
 #include <cstdint>
 #include <cstdio>
@@ -142,6 +143,28 @@ int main() {
 	std::vector<uint8_t> p8 = masked_header(1, 1, DDPF_PALETTEINDEXED8, 8, 0, 0, 0, 0);
 	p8.resize(p8.size() + 100, 0);
 	TEST_EXPECT(dds_read(p8.data(), p8.size(), image, error) && !image.loads && image.refusal.find("palette") != std::string::npos);
+
+	// Sides whose level size passes 64 bits or wraps 32: refused as data that stops short, never sized
+	// from a wrapped count. An A8R8G8B8 of 0x80000000 x 0x80000000 (2^31 * 4 * 2^31 = 2^64 bytes)
+	// with 64 bytes of data: 192 bytes in all.
+	std::vector<uint8_t> huge = masked_header(0x80000000u, 0x80000000u, DDPF_RGB | DDPF_ALPHAPIXELS, 32, 0xFF0000, 0xFF00,
+	                                          0xFF, 0xFF000000);
+	huge.resize(huge.size() + 64, 0);
+	TEST_EXPECT(huge.size() == 192);
+	TEST_EXPECT(dds_read(huge.data(), huge.size(), image, error) && !image.loads && image.levels.empty() &&
+	            image.refusal.find("level 0") != std::string::npos);
+	// A DXT1 of width 0xFFFFFFFD (its block count once wrapped to 0 across) and height 4, one level, 64
+	// bytes of data.
+	std::vector<std::vector<uint8_t>> one_block = {std::vector<uint8_t>(8, 0)};
+	std::vector<uint8_t> wide;
+	TEST_EXPECT(dds_write_dxt(dds_fourcc('D', 'X', 'T', '1'), 4, 4, one_block, wide, error));
+	opennova::io::write_u32_le(wide.data() + 16, 0xFFFFFFFDu);
+	wide.resize(DDS_HEADER_SIZE + 64, 0);
+	TEST_EXPECT(dds_read(wide.data(), wide.size(), image, error) && !image.loads && image.levels.empty() &&
+	            image.refusal.find("level 0") != std::string::npos);
+	// The DXT writer counts the same blocks: no level is the blocks of that width.
+	std::vector<std::vector<uint8_t>> none = {std::vector<uint8_t>()};
+	TEST_EXPECT(!dds_write_dxt(dds_fourcc('D', 'X', 'T', '1'), 0xFFFFFFFDu, 4, none, file, error));
 
 	// No DDS at all.
 	TEST_EXPECT(!dds_read(rgba.data(), rgba.size(), image, error));

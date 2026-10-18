@@ -123,7 +123,8 @@ void fragment() {
 	vec4 tile = vec4(0.5, 0.5, 0.5, 1.0);
 	if (u_has_tile_cache && u_instance_tile_cache_ready) {
 		vec2 page_uv = v_tile_cache_uv;
-		vec2 half_texel = vec2(0.5 / 256.0);
+		// Half a texel of the page tier's side (TerrainTileCompositionCache::page_dimension).
+		vec2 half_texel = vec2(0.5) / vec2(textureSize(u_tile_cache, 0).xy);
 		page_uv = clamp(page_uv, half_texel, vec2(1.0) - half_texel);
 		tile = texture(u_tile_cache, vec3(
 			page_uv, u_instance_tile_cache_layer));

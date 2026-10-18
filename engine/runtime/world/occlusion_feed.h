@@ -29,6 +29,23 @@ constexpr bool building_visibility_visible(int64_t packed) {
     return ((packed >> kBuildingVisibleBit) & 1) != 0;
 }
 
+// Whether a model's part `section` draws. Retail hides part i when bit (i & 31)
+// of the entity's destroyed mask (+0x138) or of g_HiddenSectionMask (@0xB7965C)
+// is set; that mask is ~(raw | forced) for a batched building and 0 for every
+// other sector entity, so a model with no verdict (`occlusion_mask` -1, the
+// port's "no verdict") hides only its destroyed sections [orig:
+// BoneCallback_bldg_World @0x4E22CF..0x4E22E2 -- `mov edi,[ebp+138h]`,
+// `shl ebx,cl` (the count masked to 5 bits), `or edi,esi` with the hidden mask
+// loaded @0x4E22C2, `test ebx,edi`; Terrain_RenderSectorModels
+// @0x5C5D72..0x5C5E4F the building's mask, @0x5C7B6B the others' 0].
+constexpr bool section_visible(uint32_t destroyed_mask, int64_t occlusion_mask, uint32_t forced_mask,
+                               int section) {
+    const uint32_t bit = 1u << (static_cast<uint32_t>(section) & 31u);
+    if ((destroyed_mask & bit) != 0) return false;
+    if (occlusion_mask == -1) return true;
+    return ((static_cast<uint32_t>(occlusion_mask) | forced_mask) & bit) != 0;
+}
+
 // The delta between the current culled-id set and the one a presenter already
 // applied: `added` = now - applied, `removed` = applied - now (both sorted),
 // after which the current set becomes the applied baseline. No engine witness:

@@ -22,15 +22,6 @@ const char *const kParams[4] = {"param1", "param2", "param3", "param4"};
 // The most steps a delay or a repeat holds: ten bits on disk (bms.h's Event: the upper 10 bits of its word).
 constexpr int64_t kMostSteps = 1023;
 
-int64_t param_of(const bms::Trigger &trigger, int slot) {
-	const int32_t params[4] = {trigger.param1, trigger.param2, trigger.param3, trigger.param4};
-	return params[slot];
-}
-int64_t param_of(const bms::Action &action, int slot) {
-	const int32_t params[4] = {action.param1, action.param2, action.param3, action.param4};
-	return params[slot];
-}
-
 // A parameter's value named as the sentence names it, through a record holding only it: the
 // sentence's own words for the kind.
 std::string named(ParamKind kind, int64_t value, const MissionNames &names) {
@@ -80,11 +71,6 @@ bool locate(const MissionDocument &document, const NodeAddress &record, Located 
 const EventRow *event_row(const MissionDocument &document, NodeId event) {
 	const Node *row = document.row(event);
 	return row && row->kind == k(MissionKind::Event) ? static_cast<const EventRow *>(row) : nullptr;
-}
-
-const bms::Header *header_of(const MissionDocument &document) {
-	const MissionRow *mission = document.mission_row();
-	return mission ? &mission->native.header : nullptr;
 }
 
 ParamKind kind_of(bool action, int32_t type, int32_t sub, int slot) {
@@ -152,7 +138,7 @@ bool logic_form(const MissionDocument &document, const NodeAddress &record, cons
 	out.record = record;
 	out.event = {at.event->id, at.event->kind, 0};
 	out.index = at.index;
-	const bms::Header *header = header_of(document);
+	const bms::Header *header = document.header();
 	const auto param = [&](int slot, ParamKind kind, const char *label, int64_t value) {
 		LogicParam p;
 		p.slot = slot;
@@ -174,7 +160,7 @@ bool logic_form(const MissionDocument &document, const NodeAddress &record, cons
 		out.type = logic_type(true, int32_t(action.action_type), action.action_sub_type);
 		for (int slot = 0; slot < 4; ++slot) {
 			const ParamKind kind = mission::action_param_kind(action, slot);
-			const int64_t value = param_of(action, slot);
+			const int64_t value = action.param(slot);
 			if (kind == K::Unused) {
 				if (value != kUnreadParam) out.unread.push_back(param(slot, K::Raw, "", value));
 				continue;
@@ -192,7 +178,7 @@ bool logic_form(const MissionDocument &document, const NodeAddress &record, cons
 		out.join = trigger_join(trigger);
 		for (int slot = 0; slot < 4; ++slot) {
 			const ParamKind kind = mission::trigger_param_kind(trigger, slot);
-			const int64_t value = param_of(trigger, slot);
+			const int64_t value = trigger.param(slot);
 			if (kind == K::Unused) {
 				if (value != kUnreadParam) out.unread.push_back(param(slot, K::Raw, "", value));
 				continue;
@@ -231,7 +217,7 @@ bool logic_event_form(const MissionDocument &document, NodeId event, const Missi
 		if (other.get() == row) break;
 		out.index += other->kind == k(MissionKind::Event);
 	}
-	out.words = event_words(row->native, names, header_of(document));
+	out.words = event_words(row->native, names, document.header());
 	const uint32_t flags = uint32_t(row->native.event.flags);
 	out.repeats = (flags & uint32_t(bms::EventFlags::ResetAfter)) != 0;
 	out.at_start = (flags & uint32_t(bms::EventFlags::PreMission)) != 0;
@@ -311,12 +297,12 @@ bool logic_retype_edits(const MissionDocument &document, const NodeAddress &reco
 		const bms::Action &action = at.event->native.actions[at.index];
 		was_type = int32_t(action.action_type);
 		was_sub = action.action_sub_type;
-		for (int slot = 0; slot < 4; ++slot) values[slot] = param_of(action, slot);
+		for (int slot = 0; slot < 4; ++slot) values[slot] = action.param(slot);
 	} else {
 		const bms::Trigger &trigger = at.event->native.triggers[at.index];
 		was_type = int32_t(trigger.main_type);
 		was_sub = trigger.sub_type;
-		for (int slot = 0; slot < 4; ++slot) values[slot] = param_of(trigger, slot);
+		for (int slot = 0; slot < 4; ++slot) values[slot] = trigger.param(slot);
 	}
 	if (was_type == type.type && was_sub == type.sub) return true;
 	if (was_type != type.type) out.push_back(set_of(record, type.action ? "action_type" : "main_type", type.type));
@@ -371,7 +357,7 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
 		out.push_back(add);
 		if (action.action_sub_type) out.push_back(set_of(made, "action_sub_type", action.action_sub_type));
 		for (int slot = 0; slot < 4; ++slot)
-			if (param_of(action, slot) != kUnreadParam) out.push_back(set_of(made, kParams[slot], param_of(action, slot)));
+			if (action.param(slot) != kUnreadParam) out.push_back(set_of(made, kParams[slot], action.param(slot)));
 	} else {
 		const bms::Trigger &trigger = at.event->native.triggers[at.index];
 		add.field = "main_type";
@@ -380,7 +366,7 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
 		if (trigger.condition_flags) out.push_back(set_of(made, "condition_flags", trigger.condition_flags));
 		if (trigger.sub_type) out.push_back(set_of(made, "sub_type", trigger.sub_type));
 		for (int slot = 0; slot < 4; ++slot)
-			if (param_of(trigger, slot) != kUnreadParam) out.push_back(set_of(made, kParams[slot], param_of(trigger, slot)));
+			if (trigger.param(slot) != kUnreadParam) out.push_back(set_of(made, kParams[slot], trigger.param(slot)));
 	}
 	Edit remove;
 	remove.operation = EditOperation::Remove;
@@ -405,7 +391,7 @@ std::string logic_move_sentence(const MissionDocument &document, const NodeAddre
 	};
 	if (at.action) place(chain.actions, at.event->native.actions[at.index]);
 	else place(chain.triggers, at.event->native.triggers[at.index]);
-	return event_words(chain, names, header_of(document)).sentence;
+	return event_words(chain, names, document.header()).sentence;
 }
 
 std::string logic_move_left_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event,
@@ -426,7 +412,7 @@ std::string logic_move_left_sentence(const MissionDocument &document, const Node
 	if (untriggered)
 		*untriggered = !at.action && chain.triggers.empty() &&
 		               !(flags & (uint32_t(bms::EventFlags::PreMission) | uint32_t(bms::EventFlags::PostMission)));
-	return event_words(chain, names, header_of(document)).sentence;
+	return event_words(chain, names, document.header()).sentence;
 }
 
 bool logic_negate_edit(const MissionDocument &document, const NodeAddress &trigger, bool negated, Edit &out) {

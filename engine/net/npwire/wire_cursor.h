@@ -25,16 +25,20 @@ struct Cursor {
 	const uint8_t *end = nullptr;
 	bool ok = true;
 
+	// The bytes left. Every read tests its size against this count, so a short
+	// buffer never makes the cursor form a pointer past `end` (undefined even
+	// unread).
+	size_t left() const { return static_cast<size_t>(end - p); }
 	uint8_t u8() {
-		if (!ok || p + 1 > end) { ok = false; return 0; }
+		if (!ok || left() < 1) { ok = false; return 0; }
 		return *p++;
 	}
 	uint16_t u16() {
-		if (!ok || p + 2 > end) { ok = false; return 0; }
+		if (!ok || left() < 2) { ok = false; return 0; }
 		uint16_t v = uint16_t(p[0]) | uint16_t(p[1]) << 8; p += 2; return v;
 	}
 	uint32_t u32() {
-		if (!ok || p + 4 > end) { ok = false; return 0; }
+		if (!ok || left() < 4) { ok = false; return 0; }
 		uint32_t v = uint32_t(p[0]) | uint32_t(p[1]) << 8 |
 		             uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 		p += 4; return v;
@@ -42,7 +46,7 @@ struct Cursor {
 	int16_t i16() { return int16_t(u16()); }
 	int32_t i32() { return int32_t(u32()); }
 	void skip(size_t n) {
-		if (!ok || p + n > end) { ok = false; p = end; return; }
+		if (!ok || left() < n) { ok = false; p = end; return; }
 		p += n;
 	}
 	std::string cstr() {

@@ -154,7 +154,7 @@ struct WeaponLoadoutEntry {
 };
 
 // Typed view of a 32-byte group record. The field WIDTHS are witnessed
-// ([orig: dfx2med.exe Med_WriteBmsFile @0x44f920]) but their in-engine MEANING is still
+// ([orig: dfx2med.exe MIS_ExportBmsFile @0x44f920]) but their in-engine MEANING is still
 // ungrilled (the open question is docs/mission/bms-event-runtime-re.md §3a, the
 // group record's runtime reads), so the names stay offset
 // placeholders: field0 = 2-bit flags, field8 = the one free int,

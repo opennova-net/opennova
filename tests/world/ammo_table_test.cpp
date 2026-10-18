@@ -31,15 +31,19 @@ int main() {
     CHECK(passing == 5);
 
     // A surface class plays row class + 4: a bullet face's byte past the table the
-    // obj row, the terrain's class past it the dirt row.
-    // [orig: Weapon_RaycastAndSpawnImpact @0x4e8867; AmmoDef_ProcessImpactEffect
-    //  @0x40a1bf; Terrain_GetSurfaceTypeAtPosition @0x606510 result + 4]
+    // obj row, and the terrain's class past it the obj row too (both bullet legs
+    // pass through the impact presenter's clamp; the knife's leaf has none).
+    // [orig: Projectile_HandleEntityImpact @0x4e9564..0x4e9569;
+    //  Projectile_HandleTerrainImpact @0x4e92f9..0x4e9303 (Terrain_GetSurfaceTypeAtPosition
+    //  @0x606510 result + 4); AmmoDef_ProcessImpactEffect @0x40a1bc..0x40a1c1, a tag of
+    //  28 or more -> 4]
     CHECK(kSurfaceImpactTagOffset == 4);
     CHECK(surface_impact_effect_tag(0) == 4 && surface_impact_effect_tag(19) == 23);
     CHECK(surface_impact_effect_tag(23) == 27 && surface_impact_effect_tag(24) == 4);
     CHECK(surface_impact_effect_tag(-1) == 4 && surface_impact_effect_tag(255) == 4);
     CHECK(terrain_impact_effect_tag(1) == 5 && terrain_impact_effect_tag(7) == kWaterImpactEffectTag);
-    CHECK(terrain_impact_effect_tag(24) == 5 && terrain_impact_effect_tag(-1) == 5);
+    CHECK(terrain_impact_effect_tag(23) == 27 && terrain_impact_effect_tag(24) == 4);
+    CHECK(terrain_impact_effect_tag(255) == 4);
     CHECK(std::string(kImpactEffectTagNames[surface_impact_effect_tag(19)]) == "flesh");
     if (failures == 0) {
         std::printf("ammo_table_test: OK\n");

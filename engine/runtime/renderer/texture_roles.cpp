@@ -89,7 +89,7 @@ constexpr TextureRole kRoles[] = {
 	Role(R::TerrainTileAtlas, L::Tga, kTextureTga).size(S::MultipleOf, TIL_ATLAS_TILE_PIXELS).row,
 	// [orig: Terrain_LoadScorchTextures @ 0x604CE0]
 	Role(R::TerrainScorch, L::Stage, kStageFormats).no_alpha().row,
-	// [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0; Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066D0]
+	// [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0; Foliage_SampleFoliageMapFlat @ 0x6066D0]
 	Role(R::TerrainFoliageMap, L::Pcx8, kTexturePcx).size(S::SquarePowerOfTwoAtMost, 1024).no_alpha().row,
 	// [orig: sub_605A10 @ 0x605A31 (the 8-bit PCX reader), its side @ 0x605A82..0x605AA0;
 	// Terrain_GetSurfaceTypeAtPosition @ 0x606519, @ 0x6065C6]
@@ -115,7 +115,7 @@ constexpr TextureRole kRoles[] = {
 	Role(R::TracerSmoke, L::ArchiveSelfAlpha, kArchiveFormats).row,
 	// A character's face animation (.grm): its base texture, the base's .MDT twin and its two eye
 	// textures, each name's extension made .TGA (the base's .MDT) and loaded by STAGE. The loader the
-	// IDB calls a shadow decal's runs only over the GRM slots (sub_57FC00 over sub_57FCE0's).
+	// IDB calls a shadow decal's runs only over the GRM slots (sub_57FC00 over FaceAnim_FindOrLoadFile's).
 	// [orig: Shadow_DecalLoadTextures @ 0x588040 (the base @ 0x5880EA, its .MDT @ 0x588117, the eyes
 	// @ 0x58814A, @ 0x588180); FaceAnimConfig_ParseProperty @ 0x5886A0]
 	Role(R::FaceTexture, L::Stage, kStageFormats).row,

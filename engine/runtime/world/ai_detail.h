@@ -15,6 +15,7 @@
 #include <cstdint>
 
 #include <base/io/bam.h>
+#include <base/io/rotating_prng.h>
 
 namespace opennova::world {
 
@@ -118,16 +119,11 @@ inline void wp_dist_bearing(int32_t dx, int32_t dz, int32_t dy, int32_t &dist, i
         std::atan2(static_cast<double>(dz), static_cast<double>(dx)) * io::kBamPerRadian)); // chop toward zero
 }
 
-// 32-bit rotate-left. [orig: __ROL4__.]
-inline uint32_t rotl32(uint32_t x, int n) {
-    return (x << n) | (x >> (32 - n));
-}
-
-// One step of the shared rotate-LCG. [orig: __ROL4__(s + __ROL4__(s,11), 4) ^ 1.] Returns the
-// new state; the low 16 bits are PRNG_Next16's value and the engagement jitter source.
+// One step of the shared rotate-LCG (io::rotating_prng_next16's recurrence,
+// __ROL4__(s + __ROL4__(s,11), 4) ^ 1). Returns the new state; the low 16 bits
+// are PRNG_Next16's value and the engagement jitter source.
 inline uint32_t prng_step(uint32_t &s) {
-    uint32_t r = rotl32(s + rotl32(s, 11), 4);
-    s = r ^ 1u;
+    io::rotating_prng_next16(s);
     return s;
 }
 

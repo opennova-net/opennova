@@ -76,7 +76,7 @@ struct SurfaceTypeMap {
 // map's lookups alike: each reads (c & 1023) >> surface_sample_shift on both axes, so a map up to
 // 1024 wide is read over its width's power of two below it (a map shorter than that is read past
 // its last row), and one wider reads its first texel alone, the negative shift taken modulo 32
-// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510; Terrain_GetSurfaceTypeAtFixedPoint
+// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510; Foliage_SampleFoliageMapFlat
 // @ 0x6066D0, the foliage map's log2 @ 0x605B4B..0x605B5B; Foliage_SampleFoliageMapMask
 // @ 0x606620].
 inline int32_t surface_sample_extent(int32_t width) {

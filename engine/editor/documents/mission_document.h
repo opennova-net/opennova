@@ -141,6 +141,11 @@ public:
 
 	// The mission row (null before a load); the rows of each kind in their band's order.
 	const MissionRow *mission_row() const;
+	// Its header (null before a load).
+	const bms::Header *header() const {
+		const MissionRow *mission = mission_row();
+		return mission ? &mission->native.header : nullptr;
+	}
 	std::vector<const Node *> rows_of(MissionKind kind) const;
 	// The row the game's lookups find for an SSN (the first in pool order: organics, items, buildings,
 	// markers [orig: Entity_KillByNetId @0x43DBD0]) and for a zone id (the first in file order [orig:
@@ -173,6 +178,10 @@ public:
 	// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the 128 cap @0x502efc; runtime/mission/promote.cpp's
 	// waypoint track], whose names the waypoint HUD shows.
 	bool on_player_route(const Node &row) const;
+	// The words the game's walk of the player's route reads over the table a save lays out, each a marker's pool
+	// slot (bms::player_route_stops), and the path whose record it starts at (0 for none).
+	const std::vector<uint32_t> &player_route_words() const;
+	NodeId player_route_path() const;
 	// What the windows show for a record (S15): the mission's own words without the project's names
 	// (mission_record_label, documents/mission_labels.h): an event as its sentence, "When <trigger> and
 	// <trigger>, then <action>; <action>." (documents/mission_sentence.h, Events and scripts), a trigger as
@@ -186,13 +195,25 @@ public:
 	bool compose(bms::File &out) const;
 	// The AI class each item's records are written with (name1), by item id: its catalog row's sid up to its
 	// first '.', eight characters at most, which the original editor's writer takes from its item table on
-	// every save, never from the record [orig: JOTACmed.exe sub_44C8E0 @ 0x44cabe..0x44caf2, the def's +0x450
+	// every save, never from the record [orig: JOTACmed.exe MissionItem_PackBmsRecord @ 0x44cabe..0x44caf2, the def's +0x450
 	// copied over the record's +0x68]. The session hands it over (DocumentSet: on an edit and before a save);
 	// an item it names none for keeps its record's own. Such a record's name1 reads as its item's and is set
 	// on the item's row, never on the record.
 	void set_item_classes(std::shared_ptr<const MissionItemClasses> classes) { item_classes_ = std::move(classes); }
+	// The original editor's weapon table over the project's weapon.def (standing in for the original's medwep.def,
+	// mission::mis_weapon_table), which the .mis's default kit is written over (mission_names_text: the kit the
+	// mission's loadout leads with, mission::mis_default_kit; D-MIS-19). The session hands it with the item
+	// classes; null where it has none, each loadout record then standing alone.
+	void set_weapon_table(std::shared_ptr<const mission::MisWeaponTable> table) { weapon_table_ = std::move(table); }
+	const mission::MisWeaponTable *weapon_table() const { return weapon_table_.get(); }
 	// The AI class a save writes for `entity` from its item's row; null where the classes name none.
 	const std::string *item_class(const bms::Entity &entity) const;
+	// The Sets a save makes of the records before it writes, as both of the original editor's writers store
+	// their clamp back into the item: each entity's w_accuracy1 (field "accuracy") above its w_accuracy2 set to
+	// it [orig: JOTACmed.exe MissionItem_PackBmsRecord @ 0x44c95d, the .bms writer's store; MIS_SaveDocument
+	// @ 0x455600..0x455602, the .mis writer's]. The session applies them, one step, before each save
+	// (DocumentSet); compose clamps the bytes alike.
+	std::vector<Edit> save_clamps() const;
 	// The code of each source finding (issues(), in their order): what the parse made of the file.
 	const std::vector<MissionFinding> &issue_codes() const { return issue_codes_; }
 
@@ -269,7 +290,7 @@ protected:
 	// The markers or the events moved: every stop's marker, every Event trigger's and ResetEvent
 	// action's event and every waypoint marker's advance trigger renumbered (RecordShift::now), the
 	// events the step put in included, as the original editor renumbers them [orig: JOTACmed.exe
-	// sub_44D460 @ 0x44d460]; a reference to a record the edit removed refuses the edit with its site.
+	// MissionEvent_InsertAt @ 0x44d460]; a reference to a record the edit removed refuses the edit with its site.
 	bool renumber_references(const StagedRows &rows, const RecordShift &shift,
 	                         std::vector<Edit> &sites, std::string &error) const override;
 	// A path's stops, which records name by their place (mission_stop_namers), never by an index the
@@ -308,6 +329,8 @@ private:
 		std::unordered_map<NodeId, size_t> places;
 		std::vector<size_t> groups;
 		std::unordered_set<NodeId> route; // the markers the player's route stops at
+		std::vector<uint32_t> route_words; // the words its walk reads (bms::player_route_stops)
+		NodeId route_path = 0;              // the first path with the player-route flag
 		std::unordered_map<int32_t, NodeId> numbered; // the first type-6088 marker of each wp_number
 		std::unordered_map<NodeId, std::vector<StopPlace>> stops; // each marker's stops
 	};
@@ -330,6 +353,7 @@ private:
 	uint64_t names_state_ = 0;
 	mutable Lookups lookups_;
 	std::shared_ptr<const MissionItemClasses> item_classes_;
+	std::shared_ptr<const mission::MisWeaponTable> weapon_table_;
 };
 
 // The SSN a new entity takes over `rows` (an Add, a Duplicate, a paste's copy told apart): one past

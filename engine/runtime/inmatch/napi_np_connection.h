@@ -319,7 +319,7 @@ struct SessionReplyState {
 	// full by S2C 0x0F after loadout acceptance. Indices are the weapon table's
 	// retail ammo-class ids; unused classes remain zero.
 	std::array<int32_t, 128> ammo_pools{};
-    // Loaded-round buckets [orig: player+89176; sub_540670 @0x540670].
+    // Loaded-round buckets [orig: player+89176; WeaponSlot_SetSharedLoadedRounds @0x540670].
     std::array<int32_t, 128> shared_clips{};
 	// The last GRANTED 0x5A loadout body, retained for the deploy-release re-send: the retail
 	// deploy leg re-sends the player's loadout, and the client's 0x5A handler is the deploy
@@ -333,11 +333,13 @@ struct SessionReplyState {
 	// The per-player loadout buffer: the last accepted C2S 0x2F's entries with
 	// their requested counts, under the class that accept stamped. Every deploy
 	// that is not a medic revive rebuilds the slot's weapon table, ammo pools and
-	// clips from it before the 0x5A re-send (D-NET-378). A slot with no accepted
-	// submission has none here (retail seeds it from the host's own kit then).
+	// clips from it before the 0x5A re-send (D-NET-378), and the map change keeps
+	// it for the round init's rebuild. A human slot with no accepted submission
+	// has an empty one (only a robot slot is seeded from the host's own kit).
 	// [orig: slot+94408, written by NapiNPServerMsg_HandlePlayerLoadout
 	//  @0x515CBD..0x515D83, read by PlayerSlot_InitWeaponsFromLoadout @0x515550;
-	//  the host-kit seed Server_PlayerAdd @0x51D12A]
+	//  Server_PlayerAdd's robot-only copy @0x51D11C..0x51D135, its source
+	//  g_SpawnLoadoutBuffer @0x51D12A]
 	LoadoutSubmit loadout_buffer;
 	bool loadout_buffer_set = false;
 	bool mission_status_received = false; // an accepted 0x0B (Server_HandlePlayerJoinRequest)
@@ -789,13 +791,15 @@ struct NapiNPConnection {
 	std::array<uint8_t, kAmmoDamageClassBytes> ammo_damage_classes{};
 
 	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
-	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
+	// by the loadout grant's rebuild (the kit and its sub-variants) and the powerup grants; a
+	// combo with no row holds no weapon, and the 0x06 refuses it. Refilled by the 0x25 relay.
+	// (D-NET-152)
 	std::map<uint16_t, WeaponSlotState> weapon_slots;
 
 	// This player's entity EquippedSlot (entity+0x118) as the host points it: the personal
 	// slot of the last accepted network fire's combo or the borrowed mount slot it fired
-	// through, else the 0x2F loadout's submitted slot when that slot's def is NoSelect, else
-	// none. The C2S 0x0C weapon echo moves only entity+0x2B0, so the slot can name a weapon
+	// through, else the 0x2F loadout's submitted slot unless that slot holds no def or a
+	// NoSelect one, else none. The C2S 0x0C weapon echo moves only entity+0x2B0, so the slot can name a weapon
 	// the player no longer holds — exactly what the remote held-weapon draw gate's ammo leg
 	// then reads. [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d;
 	//  NapiNPServerMsg_HandlePlayerLoadout @0x515f52..0x515f8a; Entity_CanFireWeapon

@@ -1,5 +1,5 @@
 // The client-local spectate state: the death screen's spectate sub-mode
-// (dword_A860F0: 0 free, 1 chase, 2 first person) and target (dword_A860F4),
+// (g_DeathScreenSubMode: 0 free, 1 chase, 2 first person) and target (g_DeathScreenTarget),
 // their writers — the target walk, the sub-mode cycle, the SPECTATORTARGET
 // track, the destroyed-target re-pick and the S2C 0x75 spectator-mode fold —
 // over the replica rows, which hold every peer's pool-0 players for both the

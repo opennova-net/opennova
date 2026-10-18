@@ -358,7 +358,7 @@ std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout);
 // (ex-NetPacket_SendWeaponRestrictionMask misnomer) — team = g_LocalTeam, the
 // S2C 0x04 tail byte; playerClass = the profile's per-side class byte 5..9;
 // rows from the 2048-B {name\0 ammoPri\0 ammoSec\0 flags\0}* kit tuple buffer
-// via AvatarDef_FindIndexByName + atol, terminator @0x42d076.]
+// via AdmDef_FindIndexByName + atol, terminator @0x42d076.]
 std::vector<uint8_t> encode_loadout_submit(const LoadoutSubmit &submit);
 
 // S2C 0x49 WEAPON-RELOAD — [u16 entityHandle][u16 weaponSlotCombo] (4 B): the host's broadcast

@@ -94,17 +94,75 @@ int main(void) {
     CHECK(mus_vm_state(vm2) == MUS_VM_ERROR, "empty fully drains stack (add underflows)");
     mus_vm_destroy(vm2);
 
-    /* ---- Script 3: pushstr (0x07) does not fault, IP stays aligned ----
-       pushstr 0; pop_g Var00; done. Must reach done cleanly (no unknown-opcode). */
-    uint8_t code3[] = { 0x07, 0x00, 0x08, 0x00, 0x3F };
+    /* ---- Script 3: pushstr (0x07) pushes the word at its index of the string table ----
+       [orig: AudioVM_Op_PushStr @ 0x672836: mov ebx, [ecx+eax*4]] the index-th string's address,
+       past the table the raw bytes after it (the strings' own), one operand byte (the IP stays
+       aligned). pushstr 1; pop_g Var00; pushstr 0; pop_g Var01; pushstr 2; pop_g Var02; done:
+       Var00 points at "world", Var01 at "hello", Var02 is the table's next word, "hell". */
+    uint8_t code3[] = { 0x07, 0x01, 0x08, 0x00, 0x07, 0x00, 0x08, 0x04, 0x07, 0x02, 0x08, 0x08, 0x3F };
     MusScript s3 = make_script(code3, sizeof(code3), &sec);
+    char hello[] = "hello", world[] = "world";
+    char *texts[] = {hello, world};
+    s3.strings = texts; s3.string_count = 2;
     MusVM *vm3 = mus_vm_create();
     mus_vm_load_script(vm3, &s3);
     mus_vm_start(vm3);
     mus_vm_tick(vm3, 16);
-    CHECK(mus_vm_state(vm3) != MUS_VM_ERROR, "0x07 pushstr handled (no unknown-opcode error)");
-    CHECK(mus_vm_get_var(vm3, 0) == 0, "pushstr pushes 0 placeholder");
+    CHECK(mus_vm_state(vm3) != MUS_VM_ERROR, "0x07 pushstr ran (no unknown-opcode error)");
+    const char *first = mus_vm_string(vm3, mus_vm_get_var(vm3, 0));
+    const char *second = mus_vm_string(vm3, mus_vm_get_var(vm3, 1));
+    CHECK(first && strcmp(first, "world") == 0, "pushstr 1 pushes the address of the second string");
+    CHECK(second && strcmp(second, "hello") == 0, "pushstr 0 the first's");
+    CHECK(mus_vm_get_var(vm3, 2) == 0x6C6C6568, "past the table, the word after it: the strings' bytes \"hell\"");
+    CHECK(mus_vm_string(vm3, 5) == NULL && mus_vm_string(vm3, mus_vm_get_var(vm3, 2)) == NULL,
+          "a raw value points into no string");
     mus_vm_destroy(vm3);
+
+    /* Past the table and its strings the game pushes the chunk's zero padding or its debug section's
+       bytes; the VM pushes 0 and runs on (D-MUS-22). */
+    uint8_t code3b[] = { 0x01, 0x05, 0x08, 0x00, 0x07, 0xFF, 0x08, 0x00, 0x3F };
+    MusScript s3b = make_script(code3b, sizeof(code3b), &sec);
+    s3b.strings = texts; s3b.string_count = 2;
+    MusVM *vm3b = mus_vm_create();
+    mus_vm_load_script(vm3b, &s3b);
+    mus_vm_start(vm3b);
+    mus_vm_tick(vm3b, 16);
+    CHECK(mus_vm_state(vm3b) != MUS_VM_ERROR && mus_vm_get_var(vm3b, 0) == 0,
+          "pushstr past the strings pushes 0 and runs on");
+    mus_vm_destroy(vm3b);
+
+    /* A word that runs past the strings takes the chunk's zeros after them (to the debug section's
+       place at the next 16, MDEdit.exe sub_40DF30 @ 0x40E23C): pushstr 1 over {"ab"} is "ab", its NUL
+       and a zero, 0x00006261, as the game reads it. */
+    uint8_t code3c[] = { 0x07, 0x01, 0x08, 0x00, 0x3F };
+    MusScript s3c = make_script(code3c, sizeof(code3c), &sec);
+    char ab[] = "ab";
+    char *ab_texts[] = {ab};
+    s3c.strings = ab_texts; s3c.string_count = 1;
+    MusVM *vm3c = mus_vm_create();
+    mus_vm_load_script(vm3c, &s3c);
+    mus_vm_start(vm3c);
+    mus_vm_tick(vm3c, 16);
+    CHECK(mus_vm_get_var(vm3c, 0) == 0x00006261, "the word past the strings' end takes the chunk's zeros");
+    mus_vm_destroy(vm3c);
+
+    /* FSet writes through a string's address as the game's writes its chunk [orig: AudioVM_Intrinsic_FSet
+       @ 0x67236F]: OR-ing 0x01000000 into "abc" takes its NUL, and with no zeros after it (the strings end
+       at the chunk's next 16 here: 0x68 + 4 + 28 + 8) mus_vm_string finds no NUL and gives none. */
+    uint8_t code3d[28] = { 0x02, 0x00, 0x00, 0x00, 0x01,  0x07, 0x00,  0x40, 0x05,  0x0F,
+                           0x07, 0x00,  0x08, 0x00,  0x3F };
+    MusScript s3d = make_script(code3d, sizeof(code3d), &sec);
+    char abc[] = "abc";
+    char *abc_texts[] = {abc};
+    s3d.strings = abc_texts; s3d.string_count = 1;
+    MusVM *vm3d = mus_vm_create();
+    mus_vm_load_script(vm3d, &s3d);
+    mus_vm_start(vm3d);
+    mus_vm_tick(vm3d, 16);
+    CHECK(mus_vm_state(vm3d) != MUS_VM_ERROR && mus_vm_get_var(vm3d, 0) != 0 &&
+              mus_vm_string(vm3d, mus_vm_get_var(vm3d, 0)) == NULL,
+          "a string whose NUL a write took reads as none");
+    mus_vm_destroy(vm3d);
 
     /* ---- Script 4: enter (0x38) pops N dwords + frame offset (D-NEW-2 / D-MUS-6)
        [orig: AudioVM_Op_Enter @ 0x672C20: sub ebp,N*4 (pop) + dst=LocalsBase+
@@ -117,6 +175,7 @@ int main(void) {
     uint8_t code4[] = { 0x01,5, 0x01,7, 0x01,99, 0x38,0x02, 0x04,0x20,
                         0x08,0x04, 0x08,0x00, 0x3F };
     MusScript s4 = make_script(code4, sizeof(code4), &sec);
+    s4.locals_size = 0x28;   /* the frame base and the function's two parameters, as MDEdit sizes it */
     MusVM *vm4 = mus_vm_create();
     mus_vm_load_script(vm4, &s4);
     mus_vm_start(vm4);

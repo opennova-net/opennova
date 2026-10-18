@@ -52,6 +52,10 @@ struct TerrainStaticShadowPlannerCaster {
 	// Presentation-world transform, rows-major: rows[0][0..2], rows[1][0..2],
 	// rows[2][0..2], origin[0..2].
 	std::array<float, 12> world_transform{};
+	// The entity's mission-plane position in 16.16 (x east, y north = Godot -z), the placement's own
+	// words (mission::StaticSourceOrigin): what the tile test and the ground probe read [orig:
+	// Terrain_CollectAndRenderTileModels @ 0x60D50A, 0x60D531; @ 0x60D8D3..0x60D8DA].
+	std::array<int32_t, 2> origin_q16{};
 	std::shared_ptr<const TerrainStaticShadowResolvedGeometry> geometry;
 	// Terrain height under the caster origin; retail subtracts it before
 	// rendering the selected shadow LOD.
@@ -62,12 +66,12 @@ struct TerrainStaticShadowPlannerCaster {
 };
 
 // The ground a static caster stands on, the planner record's ground_y: the terrain's height at the
-// caster's origin, a point sample, not a bilinear one [orig: Terrain_CollectAndRenderTileModels
-// @ 0x60d8d3..0x60d8ee -> Terrain_GetHeightAtPosition @ 0x606720, subtracted from the entity's
-// height]. `world_transform` is the record's (rows-major, the origin at [9..11], the Godot plane's
-// x and z, so the mission point is (x, -z)). 0 over an invalid field.
+// caster's origin, a point sample, not a bilinear one, looked up on the origin's own words
+// (height_field_height_fixed) [orig: Terrain_CollectAndRenderTileModels @ 0x60d8d3..0x60d8ee ->
+// Terrain_GetHeightAtPosition @ 0x606720, subtracted from the entity's height]. `origin_q16` is the
+// record's (the mission point in 16.16). 0 over an invalid field.
 float static_shadow_caster_ground(const TerrainHeightField &field,
-		const std::array<float, 12> &world_transform);
+		const std::array<int32_t, 2> &origin_q16);
 
 struct TerrainStaticShadowPagePlanResult {
 	bool valid = false;

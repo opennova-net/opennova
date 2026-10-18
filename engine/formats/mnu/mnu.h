@@ -54,9 +54,9 @@ WindowType parse_window_type(const std::string &type_str);
 // The factory token of a type ("window" for the generic one).
 const char *window_type_name(WindowType type);
 
-// The FLAGS word a texture loads with: the OR of the flag names sub_646CC0 finds in its token
+// The FLAGS word a texture loads with: the OR of the flag names UI_ParseMaterialFlagNamesW finds in its token
 // list (split on " ,|+", each name compared without case, a name the table lacks adding nothing)
-// [orig: sub_646CC0 @ 0x646cc0 over g_UIMaterialFlagNames @ 0x84a5d0]; STANDARD_TRANSPARENT
+// [orig: UI_ParseMaterialFlagNamesW @ 0x646cc0 over g_UIMaterialFlagNames @ 0x84a5d0]; STANDARD_TRANSPARENT
 // (0x300651) where no FLAGS is authored [orig: CUIElement_ParseXMLDefinition @ 0x648120, the
 // APPEARANCE's and the CURSOR's 3147345; the same default in the LIST and TABLE parses].
 inline constexpr uint32_t kDefaultUiMaterialFlags = 0x300651;
@@ -67,7 +67,7 @@ struct UiMaterialFlag {
 };
 // The table, in its order (43 rows) [orig: g_UIMaterialFlagNames @ 0x84a5d0].
 const std::vector<UiMaterialFlag> &ui_material_flags();
-// sub_646CC0's read of a FLAGS text.
+// UI_ParseMaterialFlagNamesW's read of a FLAGS text.
 uint32_t ui_material_flags_of(const std::string &text);
 // The writer's text of a FLAGS word: the table's names whose bits OR to it (the widest first, a
 // name only where all its bits are the word's), joined by '|'; AFUNC_NONE for 0; empty where the
@@ -399,14 +399,14 @@ struct TableColumn {
   int tertiary_sort = -1;
 };
 
-// What retail's HEADER walk hands init_table_row for one HEADER [orig:
-// CTableWnd_ParseXMLContentDefinition @ 0x6427d0 -> init_table_row @ 0x63f9c0]: the
+// What retail's HEADER walk hands CTableWnd_InitRow for one HEADER [orig:
+// CTableWnd_ParseXMLContentDefinition @ 0x6427d0 -> CTableWnd_InitRow @ 0x63f9c0]: the
 // column index, the width (100 at the COLUMN element, then carried from HEADER to
 // HEADER until one authors WIDTH) and the column's sort-compare flag (+112: 0 at the
 // COLUMN element, carried the same way; SORT '1' sets it, 'A' or 'a' clears it): set,
 // the rows compare numerically, else by text [orig: CTableWnd_CompareRows @ 0x63e9c0
 // reads it as the compare mode; the direction is the column's +120, which
-// init_table_row sets to 1]. `set_up` is false for an index retail's init_table_row
+// CTableWnd_InitRow sets to 1]. `set_up` is false for an index retail's CTableWnd_InitRow
 // refuses (below 0, or not below the table's column count: the authored COUNT when it
 // is 1 or more, else 1).
 struct TableHeaderSetup {
@@ -421,7 +421,10 @@ std::vector<TableHeaderSetup> table_header_setup(const TableColumn &column);
 struct TableData {
   TableColumn column;
   bool has_min_item_height = false;
-  int min_item_height = 0;      // MIN_ITEM_HEIGHT (LIST and TABLE)
+  // MIN_ITEM_HEIGHT (LIST and TABLE). Absent, the game's default: -1, a row measured from the font
+  // [orig: CListWnd_Construct @ 0x643c34; CTableWnd_Construct @ 0x63e92b; taken where not below 0,
+  // CListWnd_RecalcLayout @ 0x6443e0, CTableWnd_RecalcLayout @ 0x63f1ee].
+  int min_item_height = -1;
   bool has_fixed_header_height = false;
   int fixed_header_height = 0;  // FIXED_HEADER_HEIGHT (TABLE)
 };
@@ -755,8 +758,18 @@ struct WriteIssue {
   std::string message;
 };
 
+// A menu's screens where a caller keeps them (an editor's rows, a screen each), read in place:
+// write_issues and serialize_bytes check and write them as they do a Document of those screens,
+// with no copy of their windows (a copy recurses a window level, and a menu nests its windows
+// thousands deep).
+struct ScreensView {
+  std::vector<const Screen *> screens;
+  SourceEncoding source_encoding = SourceEncoding::CodePage;
+};
+
 // Every WriteIssue of a document; serialization refuses while there is one.
 std::vector<WriteIssue> write_issues(const Document &doc);
+std::vector<WriteIssue> write_issues(const ScreensView &view);
 
 // Element text as the writer puts it: '<' and '&' as the entities retail's reader decodes
 // back, everything else as it is.
@@ -772,6 +785,9 @@ std::string serialize(const Document &doc, bool pretty = true,
 // Serialize using Document::source_encoding. False, with `error` (the first write
 // issue), when the document has a write issue.
 bool serialize_bytes(const Document &doc, std::vector<uint8_t> &out,
+                     std::string &error, bool pretty = true,
+                     int indent_size = 2);
+bool serialize_bytes(const ScreensView &view, std::vector<uint8_t> &out,
                      std::string &error, bool pretty = true,
                      int indent_size = 2);
 

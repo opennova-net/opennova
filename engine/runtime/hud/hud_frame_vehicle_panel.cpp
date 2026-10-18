@@ -15,9 +15,18 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_vehicle_panel.h>
 
+#include <algorithm>
 #include <string>
 
 namespace opennova::hud {
+
+void set_vehicle_panel_anchor(const HudLayout &layout, int stance, HudVehiclePanelState &panel) {
+	const size_t row = static_cast<size_t>(std::clamp(stance, 0, 5));
+	panel.anchor_x = layout.veh_stance_pos.x;
+	panel.anchor_y = layout.veh_stance_pos.y;
+	panel.stance_offset_x = layout.stance_offset_x[row];
+	panel.stance_offset_y = layout.stance_offset_y[row];
+}
 
 namespace {
 

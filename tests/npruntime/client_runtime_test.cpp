@@ -1478,6 +1478,12 @@ bool run_retail_post_auth_prelude() {
 			"(team from the 0x04 tail, slots 195/212)")) {
 		return false;
 	}
+	// The same 0x1A ends the game-start wait: the mission start's input reset
+	// is due [orig: Game_StartMission @0x524E29 / @0x525C66].
+	if (!expect(world_end_result.game_start_acked,
+			"world-stream 0x1A owes the mission start's input reset")) {
+		return false;
+	}
 
 	// The player's named organic record arrives during the world stream. Knowing
 	// the wire handle is necessary but must not release gameplay while retail's

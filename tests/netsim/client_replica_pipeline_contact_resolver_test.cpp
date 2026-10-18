@@ -453,6 +453,19 @@ int main() {
 		                     static_cast<uint32_t>(heading0) + 0x40000000u),
 		             "the rider heading adopts the carrier yaw delta");
 		restamp();
+		// The ride's trig is at retail's dbl_7C3608 scale (B-11): over a
+		// 0x40000000 -> 0xC0000000 half turn a rider 2 u off on +x lands at
+		// (-131073, +12) about the carrier, where the exact 2pi/2^32 scale gives
+		// (-131073, -1).
+		// [orig: Entity_UpdateInfantryPlayerBody `fld dbl_7C3608` @0x4B528B,
+		//  the re-rotate @0x4B54FF..0x4B5653]
+		row_a->x = carrier.pos[0] + (2 << 16);
+		row_a->y = carrier.pos[1];
+		carrier.yaw = static_cast<int32_t>(static_cast<uint32_t>(carrier.yaw) + 0x80000000u);
+		tick_fresh(view);
+		ok &= expect(row_a->x - carrier.pos[0] == -131073 && row_a->y - carrier.pos[1] == 12,
+		             "a half-turned carrier carries the rider at retail's BAM scale");
+		restamp();
 		// The out-of-radius drop: the ride zeroes resolved_ground before the
 		// probe echo re-lands it, and the rider holds still that tick.
 		carrier.bound_radius = 1 << 14;

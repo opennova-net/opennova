@@ -1265,6 +1265,7 @@ void test_knife_instant_kill_zone_raycast() {
     knife.flags = kAmmoFlagInstantKillZone;
     knife.kztype = ammo_kz::kKnife;
     knife.kz_maxradius = 3.0f;
+    knife.scar_type = 1; // a ring-scar kind: a scarring leg would lease a ring
     world.tables.ammo.entries.push_back(knife);
 
     RoundSpawnParams params;
@@ -1367,6 +1368,36 @@ void test_knife_instant_kill_zone_raycast() {
         CHECK(impact_x >= 32768 - 2 && impact_x <= 32768);
         CHECK(impact.effect_tag == 5);
     }
+
+    // The leaf adds 4 to the face byte with no clamp (it never passes through
+    // AmmoDef_ProcessImpactEffect's), so a byte past the table keeps its tag
+    // and its own-row read finds no row, not the obj row
+    // [orig: Weapon_RaycastAndSpawnImpact `lea esi, [ebx+4]` @0x4e8867, the
+    //  own-table read @0x4e88c3..0x4e88dc].
+    collision.assign_entity(ih, collision.add_model(knife_person_face_model(/*material=*/30)));
+    CHECK(collision.publish_entity_section_matrices(
+        ih, {collision_matrix_from_heading(0, item_pose)}));
+    collision.build_tick_tables(world);
+    world.round_sim.impacts.clear();
+    world.explosions.queue.clear();
+    CHECK(world.round_sim.spawn(world, params) < 0);
+    CHECK(world.round_sim.impacts.size() == 1);
+    if (!world.round_sim.impacts.empty()) {
+        const RoundImpact &impact = world.round_sim.impacts[0];
+        CHECK(impact.effect_tag == 34 && impact.own_row);
+        const ImpactRowPick row = round_impact_row(world.tables.ammo, impact);
+        CHECK(row.effect.empty() && row.sound.empty());
+    }
+
+    // No stab leaves a scar, whatever the ammo's scar_type: the leaf never
+    // reaches the impact presenter that scars [orig: Weapon_RaycastAndSpawnImpact
+    // @0x4e88c3..0x4e896b; AmmoDef_ProcessImpactEffect @0x40a170, its
+    // Impact_SpawnGlassEffectsOrScar call @0x40a264].
+    CHECK(world.out.scars.leased_count() == 0);
+    bool world_ring_live = false;
+    for (const ScarSlot &slot : world.out.scars.world_ring().slots)
+        world_ring_live = world_ring_live || slot.live;
+    CHECK(!world_ring_live);
 }
 
 // Moving decoded pool-1 movers collide through their wire-keyed authored
@@ -1596,8 +1627,11 @@ void test_visual_dynamic_proxy_excludes_shooter_self_slot() {
 }
 
 // A visual client's decoded remote throwable sweeps the wire dyn proxies like
-// the bullet walk: the motor rides through the shooter's own carrier, stops on
-// (and reflects off) an unrelated decoded mover instead of flying through it.
+// the bullet walk, but its ray context excludes the owner alone: the motors
+// zero ray[18..20], so the shooter's own carrier stops (and reflects) the
+// round like any other decoded mover, where a bullet rides through it.
+// [orig: Entity_UpdateGrenadePhysics -- the ray memset @0x444522, ray[17] the
+// owner (+0x170) @0x44454E..0x444554]
 void test_visual_throwable_motor_sweeps_wire_proxies() {
     World world;
     world.registry.configure_pool(0, 4);
@@ -1671,10 +1705,10 @@ void test_visual_throwable_motor_sweeps_wire_proxies() {
         if (!r.active) break;
     }
     // The sweep found the wire geometry (a fly-through regression records no
-    // bounce at all), and the FIRST contact is the unrelated mover's plane at
-    // X=9 — the shooter's own carrier plane at X=5 was ridden through.
-    CHECK(first_bounce_x > 8.0f);
-    CHECK(first_bounce_x < 9.6f);
+    // bounce at all), and the FIRST contact is the shooter's own carrier plane
+    // at X=5, not the unrelated mover's at X=9.
+    CHECK(first_bounce_x > 4.0f);
+    CHECK(first_bounce_x < 5.6f);
     // The contact reflected the motor: retail's 0.35 impact-speed retention
     // [orig: Physics_ComputeReflectionForce @ 0x4e4310].
     CHECK(speed_after >= 0.0f

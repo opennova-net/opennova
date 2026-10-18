@@ -7,9 +7,10 @@ extends GutTest
 # SECONDARY / ACCESSORY / *_AMMO / ACCEPT / CANCEL on the "WEAPON" screen; population
 # UI_PopulateThreeCategoryLists @0x566db0 (sorted rows, NONE at 0); class resolution
 # Armory_ResolveSelectedClass @0x5642f0; weight UI_UpdateWeaponWeightDisplay @0x565640;
-# ACCEPT WeaponLoadout_ApplyFromBuffer @0x565cd0]. The zone-gated OPEN path (the
-# useitem key, action 177, on entity Flags 0x400000 @0x4e0b4d) lives in main_game +
-# the collision resolver (ctest collision_test) — here the screen itself is the unit.
+# ACCEPT WeaponLoadout_ApplyFromBuffer @0x565cd0]. The gated OPEN path (the useitem
+# key, action 177, on entity Flags 0x400000 @0x4e0aa1 or the pre-round) lives in the
+# engine's local_player_use_item_arm (ctest local_player_view) + the collision
+# resolver (ctest collision_test) — here the screen itself is the unit.
 
 # The retail weapon.def, weapon.mnu and gametext.bin come from the reference
 # fixture set (docs/asset-gated-tests.md); the whole script skips without it.

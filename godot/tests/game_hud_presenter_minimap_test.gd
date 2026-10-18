@@ -39,30 +39,26 @@ func test_presenter_refreshes_an_existing_hud_when_the_water_mask_changes() -> v
 			"the existing overlay adopts the rebuilt mask")
 
 
-func test_hud_color_poll_edges_gate_and_chord() -> void:
+func test_hud_color_poll_edges_and_gate() -> void:
 	var presenter: GameHudPresenter = autofree(GameHudPresenter.new())
 	var start := presenter.hud_color_index()
 
 	# A plain down edge cycles once; holding the key does not repeat.
-	presenter.poll_hud_color_edge(true, false, true)
+	presenter.poll_hud_color_edge(true, true)
 	assert_eq(presenter.hud_color_index(), (start + 1) % 6,
 			"the down edge cycles the scheme once")
-	presenter.poll_hud_color_edge(true, false, true)
+	presenter.poll_hud_color_edge(true, true)
 	assert_eq(presenter.hud_color_index(), (start + 1) % 6,
 			"holding the key does not re-cycle")
 
 	# Held across a closed gate window: the latch rides the UNGATED state,
 	# so reopening the gate with the key still down cannot re-fire.
-	presenter.poll_hud_color_edge(true, false, false)
-	presenter.poll_hud_color_edge(true, false, true)
+	presenter.poll_hud_color_edge(true, false)
+	presenter.poll_hud_color_edge(true, true)
 	assert_eq(presenter.hud_color_index(), (start + 1) % 6,
 			"a press held across a gate window cannot re-fire")
 
-	# A chorded press (our debug picks ride Shift+F6) never cycles.
-	presenter.poll_hud_color_edge(false, false, true)
-	presenter.poll_hud_color_edge(true, true, true)
-	assert_eq(presenter.hud_color_index(), (start + 1) % 6,
-			"a chorded press never cycles")
+	presenter.poll_hud_color_edge(false, true)
 
 	# Wrap the persisted config token back to its starting value (six
 	# cycles are the identity), so the shared user:// settings survive.

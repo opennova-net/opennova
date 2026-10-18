@@ -31,8 +31,8 @@ void nile_height_map(const uint16_t *atlas, int width, int height, std::vector<u
 // quadrant-major copy with a 1024-word row (so a "row" of it is two rows of a quadrant, and its neighbours above and
 // below two rows away), wrapped.
 void nile_delta_map(const uint16_t *atlas, int width, int height, std::vector<uint32_t> &out);
-// The original mission editor's flatness view ([orig: JOTACmed.exe sub_44C2B0 @ 0x44c7e9..0x44c8ac], drawn
-// by its sub_4222A0 in its third mode): black where the texel equals its four neighbours, wrapped at the 1024
+// The original mission editor's flatness view ([orig: JOTACmed.exe MissionDocument_LoadTerrain @ 0x44c7e9..0x44c8ac], drawn
+// by its MapView_RenderTerrain in its third mode): black where the texel equals its four neighbours, wrapped at the 1024
 // edges, else 0x404040.
 void med_flatness_map(const uint16_t *atlas, std::vector<uint32_t> &out);
 // The char map's surface classes over the atlas (an editor view, no tool's: the 3D view's surfaces overlay's colours):
@@ -41,7 +41,7 @@ void med_flatness_map(const uint16_t *atlas, std::vector<uint32_t> &out);
 // map (`classes` null), as the sampler reads one], in the legend's colour (formats/trn/charmap_legend.h; white past
 // it). The placed tiles' classes are not in it: the map draws the tiles over it (the 3D view's overlay reads them).
 void surface_class_map(const uint8_t *classes, int width, int height, std::vector<uint32_t> &out);
-// Its water overlay over any picture [orig: JOTACmed.exe sub_4222A0 @ 0x422508..0x422525, toggled by its Water
+// Its water overlay over any picture [orig: JOTACmed.exe MapView_RenderTerrain @ 0x422508..0x422525, toggled by its Water
 // button @ 0x4434f3]: where the texel's height byte (bits 8..15 of twice its depth word, as the original holds
 // it) is below the water's (its 16.16 height >> 15), the pixel's channels halved and 128 added to its low byte.
 void med_water_overlay(const uint16_t *atlas, int32_t water_1616, std::vector<uint32_t> &pixels);

@@ -1,5 +1,7 @@
 #include "docker_runtime.h"
 
+#include "steady_clock.h"
+
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 
@@ -46,12 +48,6 @@ std::string failure(const char *what, const proc::CommandResult &result) {
 	if (!err.empty())
 		out += ": " + err;
 	return out;
-}
-
-uint64_t steady_now_ms() {
-	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch())
-					.count());
 }
 
 // docker's word for an image it does not hold ("Error: No such image: x",

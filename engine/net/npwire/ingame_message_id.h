@@ -247,8 +247,8 @@ inline constexpr uint8_t ENTITY_REMOVE_REQUEST = 0x19;
 // A non-authority's door-row request: the same [u16 handle][i16 state][u8 number]
 // body as s2c::DOOR_SLOT_ACTION, queued reliable per selected section of a
 // door command; the host answers s2c::DOOR_SLOT_ACTION to the requester only.
-// [orig: NetPacket_SendWeaponSwitch @0x42D0C0 -> NapiNPServerMsg_HandleVoteUpdate
-//  @0x514B20 (both IDB misnomers)]
+// [orig: NetPacket_SendWeaponSwitch @0x42D0C0 -> NapiNPServerMsg_HandleDoorSlotRequest
+//  @0x514B20 (the sender's IDB name a misnomer)]
 inline constexpr uint8_t DOOR_SLOT_REQUEST = 0x1A;
 inline constexpr uint8_t PLAYER_CLASS_SELECT = 0x1B;
 inline constexpr uint8_t BAN_PUNT_COMMAND = 0x24;

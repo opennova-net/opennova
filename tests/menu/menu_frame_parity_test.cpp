@@ -249,7 +249,7 @@ void test_cursor() {
 
 // No default font: a widget draws with the nearest self-or-ancestor FONT that
 // loaded, in THAT widget's colors; none up the chain draws and measures nothing
-// [orig: CWnd_GetFontAndColors @ 0x646a70; font_cache_ensure_font_loaded
+// [orig: CWnd_GetFontAndColors @ 0x646a70; CFontCache_EnsureFontLoaded
 // @ 0x653de0].
 void test_fonts(const fnt_font_t *font) {
 	const std::string xml = screen(
@@ -533,7 +533,7 @@ void test_spin_arrows(const fnt_font_t *font) {
 
 // ---- tables ------------------------------------------------------------------
 
-// [orig: CUITable_Render @ 0x6411d0; the HEADER walk @ 0x6427d0 -> init_table_row]
+// [orig: CUITable_Render @ 0x6411d0; the HEADER walk @ 0x6427d0 -> CTableWnd_InitRow]
 void test_table_columns(const fnt_font_t *font) {
 	const std::string xml = screen(
 			"<FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>"
@@ -647,7 +647,7 @@ void test_marquee_credits() {
 
 // ---- menu textures -------------------------------------------------------------
 
-// [orig: CTextureManager_LoadOrFindTexture @ 0x654980; load_pcx_to_argb @ 0x664cc0]
+// [orig: CTextureManager_LoadOrFindTexture @ 0x654980; PCX_LoadToARGB @ 0x664cc0]
 void test_texture_files() {
 	using opennova::menu::MenuTextureFormat;
 	const auto has = [](const std::string &name) { return name == "here.tga"; };
@@ -723,7 +723,7 @@ void test_mnemonics(const fnt_font_t *font) {
 			"a generic window, a SCROLL and a MARQUEE register none");
 }
 
-// [orig: table_hit_test @ 0x63fe90]
+// [orig: CTableWnd_HitTest @ 0x63fe90]
 void test_table_hit(const fnt_font_t *font) {
 	// No HEADER: one zero-width column. Rows 20 tall under the "W" header (16).
 	const std::string bare = screen("<FONT><NAME>f.fnt</NAME></FONT>"

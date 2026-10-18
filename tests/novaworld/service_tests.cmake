@@ -5,6 +5,13 @@
 # (OPENNOVA_NOVAWORLD_SERVICE, off by default; the Linux CI jobs and the programs' images
 # turn it on), so its paths are the including file's: ${CMAKE_CURRENT_SOURCE_DIR} is tests/.
 
+# Every test this file adds carries the `service` ctest label, and every target it adds
+# builds under the one aggregate target opennova_service_tests: the images' gate
+# (.github/workflows/net-linux.yml) builds and runs the service rows by those two, so a row
+# added here is in the gate with no hand list to keep (the end of this file applies them).
+get_directory_property(OPENNOVA_SERVICE_TESTS_BEFORE TESTS)
+get_directory_property(OPENNOVA_SERVICE_TARGETS_BEFORE BUILDSYSTEM_TARGETS)
+
 # The database tests run against a real PostgreSQL server: OPENNOVA_TEST_PG names
 # it (a libpq URI whose role may create and drop databases), and each test case
 # gets a database of its own there (tests/common/test_database.h). ctest hands
@@ -369,6 +376,7 @@ set_tests_properties(command_runner PROPERTIES TIMEOUT 120)
 # the agent routes' networks must lie in, and the refusal log's throttle. Pure functions.
 add_executable(hosted_net_cidr_test
     novaworld/hosted_net_cidr_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/health.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/net_cidr.cpp)
 target_compile_features(hosted_net_cidr_test PRIVATE cxx_std_17)
 target_include_directories(hosted_net_cidr_test PRIVATE
@@ -1071,6 +1079,7 @@ opennova_add_pg_test(hosted_fleet_repository COMMAND hosted_fleet_repository_tes
 # compiles the hosted sources it needs directly.
 add_executable(hosted_ec2_machine_driver_test
     novaworld/hosted_ec2_machine_driver_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/health.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/docker_machine_driver.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/ec2_machine_driver.cpp
@@ -1108,3 +1117,13 @@ target_include_directories(object_store_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
 add_test(NAME object_store COMMAND object_store_test)
+
+# The `service` label and the aggregate target over everything this file added (the head of
+# this file says why).
+get_directory_property(OPENNOVA_SERVICE_TESTS TESTS)
+list(REMOVE_ITEM OPENNOVA_SERVICE_TESTS ${OPENNOVA_SERVICE_TESTS_BEFORE})
+set_property(TEST ${OPENNOVA_SERVICE_TESTS} APPEND PROPERTY LABELS service)
+get_directory_property(OPENNOVA_SERVICE_TARGETS BUILDSYSTEM_TARGETS)
+list(REMOVE_ITEM OPENNOVA_SERVICE_TARGETS ${OPENNOVA_SERVICE_TARGETS_BEFORE})
+add_custom_target(opennova_service_tests)
+add_dependencies(opennova_service_tests ${OPENNOVA_SERVICE_TARGETS})

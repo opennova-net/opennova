@@ -28,7 +28,7 @@ void minimap_feed_encode(const std::vector<HudMinimapMarker> &markers,
         dst[9] = m.source;
         dst[10] = m.remaining_ticks;
         dst[11] = m.entity_known ? 1 : 0;
-        dst[12] = (m.rotate ? 1 : 0) | (m.footprint ? 2 : 0);
+        dst[12] = (m.rotate ? 1 : 0) | (m.footprint ? 2 : 0) | (m.change_team ? 4 : 0);
         dst[13] = m.half_x_q16;
         dst[14] = m.half_y_q16;
         dst[15] = m.floor_px;
@@ -59,6 +59,10 @@ void minimap_feed_encode(const std::vector<HudMinimapMarker> &markers,
         dst[33] = m.timer_value;
         dst[34] = m.timer_limit;
         dst[35] = m.timer_rate;
+        // v8: the change-team class's cell and the zone's taker (entity+0x223)
+        // [orig: Minimap_DrawBlip @0x597CBB..0x597D42].
+        dst[36] = m.cell;
+        dst[37] = m.capture_team;
         dst += kMinimapFeedStride;
     }
 }
@@ -93,6 +97,7 @@ bool minimap_feed_decode(const int32_t *data, std::size_t size,
         marker.entity_known = row[11] != 0 ? 1 : 0;
         marker.rotate = (row[12] & 1) != 0 ? 1 : 0;
         marker.footprint = (row[12] & 2) != 0 ? 1 : 0;
+        marker.change_team = (row[12] & 4) != 0 ? 1 : 0;
         marker.half_x_q16 = row[13];
         marker.half_y_q16 = row[14];
         marker.floor_px = static_cast<uint8_t>(row[15]);
@@ -117,6 +122,8 @@ bool minimap_feed_decode(const int32_t *data, std::size_t size,
         marker.timer_value = row[33];
         marker.timer_limit = row[34];
         marker.timer_rate = row[35];
+        marker.cell = static_cast<uint8_t>(row[36]);
+        marker.capture_team = static_cast<uint8_t>(row[37]);
         out.push_back(marker);
     }
     return true;
@@ -185,6 +192,47 @@ bool radar_feed_decode(const int32_t *data, std::size_t size, HudMinimapRadar &o
         out.threats[i].y = row[2];
     }
     return true;
+}
+
+void minimap_footprint_feed_encode(const std::vector<HudMinimapFootprint> &footprints,
+		std::vector<int32_t> &out) {
+	out.clear();
+	out.push_back(kMinimapFootprintFeedVersion);
+	out.push_back(static_cast<int32_t>(footprints.size()));
+	for (const HudMinimapFootprint &f : footprints) {
+		out.push_back(f.handle);
+		out.push_back(static_cast<int32_t>(f.fill_argb));
+		out.push_back(static_cast<int32_t>(f.fill_xy_q16.size()));
+		out.insert(out.end(), f.fill_xy_q16.begin(), f.fill_xy_q16.end());
+		out.push_back(static_cast<int32_t>(f.edge_xy_q16.size()));
+		out.insert(out.end(), f.edge_xy_q16.begin(), f.edge_xy_q16.end());
+	}
+}
+
+bool minimap_footprint_feed_decode(const int32_t *data, std::size_t size,
+		std::vector<HudMinimapFootprint> &out) {
+	out.clear();
+	if (data == nullptr || size < 2 || data[0] != kMinimapFootprintFeedVersion || data[1] < 0)
+		return false;
+	std::size_t cursor = 2;
+	for (int32_t row = 0; row < data[1]; ++row) {
+		if (cursor + 3 > size) break;
+		HudMinimapFootprint footprint;
+		footprint.handle = static_cast<uint16_t>(data[cursor++]);
+		footprint.fill_argb = static_cast<uint32_t>(data[cursor++]);
+		const int32_t fill_values = data[cursor++];
+		if (fill_values < 0 || cursor + static_cast<std::size_t>(fill_values) > size) break;
+		footprint.fill_xy_q16.assign(data + cursor, data + cursor + fill_values);
+		cursor += static_cast<std::size_t>(fill_values);
+		if (cursor + 1 > size) break;
+		const int32_t edge_values = data[cursor++];
+		if (edge_values < 0 || cursor + static_cast<std::size_t>(edge_values) > size) break;
+		footprint.edge_xy_q16.assign(data + cursor, data + cursor + edge_values);
+		cursor += static_cast<std::size_t>(edge_values);
+		hud_minimap_finalize_footprint(footprint);
+		out.push_back(std::move(footprint));
+	}
+	return true;
 }
 
 } // namespace opennova::hud

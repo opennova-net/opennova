@@ -1,6 +1,6 @@
 // The game's PCX decode keeping an 8-bit image's indices and palette beside its colours (engine/formats/pcx
 // decode_pcx_menu_rgba's PcxIndexed, the 8-bit path of Texture_LoadPCXFromPFF32 @ 0x56EA30 and
-// load_pcx_to_argb @ 0x664cc0) over images the writer mints (encode_pcx_indexed): every texel's index and
+// PCX_LoadToARGB @ 0x664cc0) over images the writer mints (encode_pcx_indexed): every texel's index and
 // the palette as written, an odd width included (the writer's rows hold the width exactly, as every PCX
 // the game ships does, so the game's decode lays no padding onto the next row); each texel's colour its
 // index's palette entry, opaque; a row's pad bytes landing on the next row's start, the indices as the
@@ -103,6 +103,35 @@ int main() {
 	std::vector<uint8_t> marked = file;
 	marked[0] = 0x0B;
 	TEST_EXPECT(!pcx_read_header(marked.data(), marked.size(), header));
+	// Where the reader stops writing: each row's runs whole from width x row, to its bytes a line at least
+	// [orig: Texture_LoadPCXFromPFF32 @ 0x56EDC0..0x56EDD0, the row's test @ 0x56EDE9]. The writer's rows end at
+	// the width; a 64 x 64 image whose last row ends with a run of 63 at texel 63 writes 62 texels past its buffer.
+	TEST_EXPECT(pcx_indexed_write_end(file.data(), file.size()) == 4);
+	{
+		std::vector<uint8_t> runs(file.begin(), file.begin() + 128);
+		runs[8] = runs[10] = 63;
+		runs[9] = runs[11] = 0;
+		runs[66] = 64;
+		runs[67] = 0;
+		for (int row = 0; row < 63; ++row) runs.insert(runs.end(), {0xFF, 5, 5}); // 63 texels, then one
+		runs.insert(runs.end(), {0xFF, 5, 0xFF, 5});                              // 63, then 63 more
+		runs.insert(runs.end(), file.end() - 769, file.end());
+		TEST_EXPECT(pcx_indexed_write_end(runs.data(), runs.size()) == 64 * 64 + 62);
+		// The stream ends before the rows do: the rest of a row a texel a byte, its bytes a line.
+		std::vector<uint8_t> cut(runs.begin(), runs.begin() + 128 + 3 * 10);
+		cut.insert(cut.end(), file.end() - 769, file.end());
+		TEST_EXPECT(pcx_indexed_write_end(cut.data(), cut.size()) == 64 * 64);
+		runs[65] = 3;
+		TEST_EXPECT(pcx_indexed_write_end(runs.data(), runs.size()) == 0);
+		// A width of 0 (xmin past xmax): every row from the buffer's start, its bytes a line long.
+		std::vector<uint8_t> narrow(file.begin(), file.begin() + 128);
+		narrow[4] = 1;
+		narrow[8] = 0;
+		narrow[66] = 30;
+		narrow.insert(narrow.end(), size_t(30) * 2, 0); // two rows of 30 single texels
+		narrow.insert(narrow.end(), file.end() - 769, file.end());
+		TEST_EXPECT(pcx_indexed_write_end(narrow.data(), narrow.size()) == 30);
+	}
 	std::printf("pcx_game_decode: the writer's indices and palette as the game reads them beside its colours, a row's "
 	            "pad on the next, a 24-bit image's none, an odd width's rows of its width, the refusals\n");
 	return 0;

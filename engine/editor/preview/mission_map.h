@@ -73,7 +73,7 @@ MissionMapView mission_map_view(const MissionMapCamera &camera, int width, int h
 // The zoom that shows `metres` across a picture `width` pixels wide (the CMAP's law inverted), in the map's range.
 float mission_map_zoom_for(double metres, int width);
 // The tile set's texels (RGBA8) as MED's 2D view draws a placed tile: a texel whose alpha byte is not 0 drawn opaque,
-// one whose alpha is 0 not drawn (each alpha byte made 255 or 0) [orig: JOTACmed.exe sub_417D30, the texel test and the
+// one whose alpha is 0 not drawn (each alpha byte made 255 or 0) [orig: JOTACmed.exe MapView_DrawMapTile, the texel test and the
 // & 0x00FFFFFF; docs/tiles/til-re.md "The editors' tile tools"].
 void mission_map_tile_texels(std::vector<uint8_t> &rgba);
 

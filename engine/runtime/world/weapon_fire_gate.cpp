@@ -65,9 +65,12 @@ int weapon_fire_owner_status(const World &world, const Entity &owner,
 
 // Direct round submission checks horizontal and vertical reach separately on
 // foot; a gunner uses full 3-D distance and the mount's doubled bound radius.
-// The replay arm returns before this block. Carriers whose saved pose moved
-// and WeaponDef flag 0x200 also bypass it.
-// [orig: Server_ClientFiredRound @0x50c172..0x50c6fe]
+// The network arm (a client's replayed action) returns before this block, but
+// the slot fire action it invokes re-enters on the local pass, which runs it
+// with the client's claimed origin. Carriers whose saved pose moved and
+// WeaponDef flag 0x200 also bypass it.
+// [orig: Server_ClientFiredRound @0x50c172..0x50c6fe; the re-entry
+//  Entity_FireWeaponAndSendPacket @0x42BF34]
 int weapon_fire_origin_status(const World &world, const Entity &owner,
                               const WeaponTableEntry &weapon, const FixedVec3 &origin,
                               bool replay_client_action) {

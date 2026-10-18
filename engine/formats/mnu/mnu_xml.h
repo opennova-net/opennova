@@ -18,6 +18,12 @@
 //   text inside a tag name or a RAW_TEXT body (retail's E_FAIL: the file loads
 //   nothing). Where retail crashes or hangs instead, the reader stops gracefully:
 //   parse() fails, or keeps what it built with a note, as each case says.
+// - Elements nest as deep as the game survives: its reader is a loop and takes any depth
+//   [orig: NapiXML_ParseElementTree @ 0x769d70], but its free of the tree recurses once a
+//   level [orig: XML_FreeNodeTree @ 0x76a5c0] and runs its 1 MiB stack out at 43,689 levels,
+//   where this reader stops with a note, keeping what it built (mnu_xml.cpp). The tree is
+//   freed and walked here with explicit stacks, never a recursion a level. (The depth the
+//   game's window creation runs its stack out at is the menu parse's, mnu.cpp.)
 #pragma once
 
 #include <cstddef>
@@ -54,6 +60,12 @@ struct Node {
 	int screen_ordinal = -1;            // a top-level SCREEN's index among the top-level SCREENs
 	mutable bool read = false;          // set when the typed layer consumes it
 
+	Node() = default;
+	Node(const Node &) = delete;
+	Node &operator=(const Node &) = delete;
+	// Frees the subtree without recursing once a level.
+	~Node();
+
 	// The attribute a consumer that walks the whole list and overwrites keeps: the
 	// first authored of that name (retail's list is in reverse order). Null when absent.
 	const Attribute *attr(const char *name) const;
@@ -62,7 +74,8 @@ struct Node {
 	const Attribute *last_attr(const char *name) const;
 };
 
-// What the reader kept going past: a retail crash or hang it stops at gracefully.
+// What the reader kept going past: a retail crash or hang it stops at gracefully (an element
+// nested past the depth the game's free of the tree survives among them).
 struct Note {
 	size_t line = 0;
 	std::string message;

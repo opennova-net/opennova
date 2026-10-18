@@ -45,7 +45,7 @@ TerrainViewCull make_terrain_view_cull(const float view[16], float fov_deg,
 }
 
 float terrain_lod_quality_scale(float context_scale, int polygon_detail) {
-	// [orig: Terrain_Init @0x60fc33 `(detail + 1) * 0.25`; sub_605D70 @0x605D70
+	// [orig: Terrain_Init @0x60fc33 `(detail + 1) * 0.25`; Terrain_ApplyDetailSettings @0x605D70
 	//  clamp @0x605d7c..0x605d8c, `* 0.80000001 + 0.2` @0x605d9a]
 	float detail = static_cast<float>(polygon_detail + 1) * 0.25f;
 	if (detail < 0.0f) detail = 0.0f;

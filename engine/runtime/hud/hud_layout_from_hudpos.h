@@ -35,8 +35,8 @@ struct HudLayoutAssets {
 	// line); "" when no StaticFrame line is authored, and then
 	// HudLayout::frame_pos stays absent.
 	std::string static_frame;
-	// The six HUDSTANCE frames by their explicit id.
-	std::array<std::string, 6> stance_textures{};
+	// The eight HUDSTANCE records (six frames, then the team tiles 6 and 7) by their explicit id.
+	std::array<std::string, kHudStanceRecords> stance_textures{};
 	std::string parachute_icon;
 	std::string armor_icon;
 	// The HUDLS bar's two hudpos-named textures, loaded alpha mode 0 and only
@@ -69,7 +69,7 @@ uint32_t hud_color_argb(const def::DefHudColor &c);
 
 // Fill `out` from the parsed file. Only the fields the parse authors are
 // written; the texture-derived ones (`*_texture_valid`, `*_tex_w/h`,
-// `stance_frame0_*`, `box_*`, `lfp_*_texture_valid`, the crosshair pair) and
+// `stance_frame_w/h`, `box_*`, `lfp_*_texture_valid`, the crosshair pair) and
 // `sights` are the device's and are left as they are.
 void hud_layout_from_hudpos(const def::DefHudPosFile &file, HudLayout &out,
 		HudLayoutAssets &assets);

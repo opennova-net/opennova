@@ -90,16 +90,17 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	#  medic, team, zone_number, def_type, entity_bits, zone_index,
 	#  zone_radius, entity_x, entity_y, anchor_x, anchor_y, bound_radius,
 	#  entity_z, bay_groups, timer_flags, timer_team, timer_bar_team,
-	#  timer_value, timer_limit, timer_rate}.
+	#  timer_value, timer_limit, timer_rate, cell, capture_team}.
 	# entity_bits 1: the slot entity carries a model (the persistent bank
 	# draws only those); the blip centres on its anchor.
 	var snapshot := PackedInt32Array([
-		7, 36, 1,
+		8, 38, 1,
 		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 		1, 0, 0, 6, 0,
 		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
 		0, 0,
 		0, 0, 0, 0, 0, 0,
+		0, 0,
 	])
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, snapshot)
 	var stats := hud.get_draw_list_stats()
@@ -147,12 +148,13 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	#  @0x5a4cd6..0x5a4d48 replacing the blip].
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
-				7, 36, 1,
+				8, 38, 1,
 				0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 				1, 0, 0, 6, 1,
 				0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
 				0, 0,
 				0, 0, 0, 0, 0, 0,
+				0, 0,
 			]))
 	stats = hud.get_draw_list_stats()
 	assert_eq(stats.map_sprites, 2,
@@ -172,12 +174,13 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	]))
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
-				7, 36, 1,
+				8, 38, 1,
 				0, 0x2042, 0, 0, 0, 0, 0, -6250336, 0, 0, 1984, 1,
 				2, 0, 0, 6, 0,
 				0, 0, 0, 1, -1, 0, 0, 0, 0, 0, 0,
 				0, 0,
 				0, 0, 0, 0, 0, 0,
+				0, 0,
 			]))
 	stats = hud.get_draw_list_stats()
 	assert_gt(stats.map_footprint_tris, 0,
@@ -223,12 +226,13 @@ func test_map_sprites_submit_their_materials_modulate2x_flag() -> void:
 	hud.configure(fixture.layout, fixture.root)
 	# One live marker in a half-bright blue the device doubles.
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, PackedInt32Array([
-		7, 36, 1,
+		8, 38, 1,
 		0, 0x1001, 64 << 16, 0, 0, 0, 10, 0xFF20407F - 0x100000000, 0, 0, 1984, 1,
 		1, 0, 0, 6, 0,
 		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
 		0, 0,
 		0, 0, 0, 0, 0, 0,
+		0, 0,
 	]))
 	await get_tree().process_frame
 	var blips := 0
@@ -267,7 +271,8 @@ func test_overlay_unconfigured_draws_nothing() -> void:
 	hud.size = Vector2(800, 600)
 	add_child_autofree(hud)
 	assert_false(hud.is_configured())
-	hud.set_player_state(0, 1.0, 0, 80.0)
+	hud.set_frame_clocks(0, 0, 0, 0)
+	hud.set_player_state(1.0, 0, 80.0)
 	var stats := hud.get_draw_list_stats()
 	assert_eq(stats.quads, 0)
 	assert_eq(stats.elements_drawn, 0)
@@ -294,7 +299,8 @@ func test_stance_assets_use_explicit_ids_for_slots() -> void:
 	]))
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, fixture.root)
-	hud.set_player_state(100, 1.0, 2, 80.0)
+	hud.set_frame_clocks(100, 100, 100, 100)
+	hud.set_player_state(1.0, 2, 80.0)
 	var stats := hud.get_draw_list_stats()
 	assert_eq(stats.quads, 1, "one stance frame quad (no ghost at elapsed 0)")
 	hud.queue_redraw()
@@ -322,11 +328,13 @@ func test_stance_index_bounds_safe() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, fixture.root)
 	# Out-of-range stance must not crash the compile (including the cross-fade ghost).
-	hud.set_player_state(10, 0.9, 99, 80.0)
+	hud.set_frame_clocks(10, 10, 10, 10)
+	hud.set_player_state(0.9, 99, 80.0)
 	var stats := hud.get_draw_list_stats()
 	assert_eq(stats.quads, 0, "an out-of-range stance frame draws nothing")
 	await get_tree().process_frame
-	hud.set_player_state(20, 0.9, 1, 80.0)
+	hud.set_frame_clocks(20, 20, 20, 20)
+	hud.set_player_state(0.9, 1, 80.0)
 	stats = hud.get_draw_list_stats()
 	assert_eq(stats.quads, 1, "returning in range draws the current frame only")
 	await get_tree().process_frame
@@ -401,7 +409,8 @@ func test_a_hudpos_with_no_key_hides_every_gated_element() -> void:
 		var hud := _make_overlay()
 		hud.configure(layout, root)
 		assert_true(hud.is_configured(), "%s: the HUD runs without a layout" % text)
-		hud.set_player_state(100, 1.0, 0, 80.0)
+		hud.set_frame_clocks(100, 100, 100, 100)
+		hud.set_player_state(1.0, 0, 80.0)
 		hud.set_weapon_state(true, 30, 90, 0, 0, false, false, false, 0)
 		var shown := text.begins_with("HUDDECLUT_XHAIRS")
 		assert_eq(hud.get_draw_list_stats().tris, 14 if shown else 0,
@@ -486,7 +495,8 @@ func test_glyph_runs_draw_through_the_font_pages_modulate2x() -> void:
 	assert_eq(root.set_root_dir(fixture.dir), OK)
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, root)
-	hud.set_player_state(50, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50, 50, 50, 50)
+	hud.set_player_state(1.0, 0, 80.0)
 	hud.push_message("Move to the extraction point")
 	await get_tree().process_frame
 	var runs := 0
@@ -514,12 +524,13 @@ func test_glyph_runs_draw_through_the_font_pages_modulate2x() -> void:
 	hud.set_minimap_terrain(terrain)
 	hud.set_waypoint("Target", 1024, Vector2(100, 0), 20.0)
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, PackedInt32Array([
-		7, 36, 1,
+		8, 38, 1,
 		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 		1, 0, 0, 6, 0,
 		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
 		0, 0,
 		0, 0, 0, 0, 0, 0,
+		0, 0,
 	]))
 	assert_gt(hud.get_draw_list_stats().map_labels, 0, "the distance and grid labels compile")
 	await get_tree().process_frame
@@ -590,7 +601,8 @@ func test_colour_mode_static_frame_draws_under_modulate2x() -> void:
 	]), PackedStringArray(["frame.tga"]), {"frame.tga": Vector2i(16, 8)})
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, fixture.root)
-	hud.set_player_state(100, 1.0, 0, 80.0)
+	hud.set_frame_clocks(100, 100, 100, 100)
+	hud.set_player_state(1.0, 0, 80.0)
 	var rows := _flat_rows(hud, Vector2i(16, 8))
 	assert_eq(rows.size(), 1, "the static frame quad submits once")
 	if rows.size() == 1:
@@ -649,7 +661,8 @@ func test_alpha_mode_stance_keeps_the_alpha_material() -> void:
 	]), PackedStringArray(["s1.tga", "s2.tga", "s3.tga", "s4.tga", "s5.tga", "s6.tga"]))
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, fixture.root)
-	hud.set_player_state(100, 1.0, 2, 80.0)
+	hud.set_frame_clocks(100, 100, 100, 100)
+	hud.set_player_state(1.0, 2, 80.0)
 	assert_eq(hud.get_draw_list_stats().quads, 1, "one stance frame quad")
 	var rows := hud.get_flat_submissions()
 	assert_eq(rows.size(), 1, "the stance quad submits once")
@@ -750,13 +763,15 @@ func test_message_feed_draws_and_expires() -> void:
 	assert_eq(root.set_root_dir(fixture.dir), OK)
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, root)
-	hud.set_player_state(50, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50, 50, 50, 50)
+	hud.set_player_state(1.0, 0, 80.0)
 	hud.push_message("Move to the extraction point")
 	assert_gt(hud.get_draw_list_stats().glyphs, 0,
 		"A pushed triggered-text line lays out glyph quads through the real .fnt.")
 	await get_tree().process_frame
 	# [orig: Chat_AddMessageChannel2 930-tick life] — the line is gone at push+930.
-	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50 + 930, 50 + 930, 50 + 930, 50 + 930)
+	hud.set_player_state(1.0, 0, 80.0)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 		"The 930-tick life expires the line.")
 	assert_true(is_instance_valid(hud), "A pushed triggered-text line draws safely.")
@@ -842,7 +857,8 @@ func test_waypoint_label_draws_each_alignment() -> void:
 		assert_eq(root.set_root_dir(fixture.dir), OK)
 		var hud := _make_overlay()
 		hud.configure(fixture.layout, root)
-		hud.set_player_state(0, 1.0, 0, 80.0)
+		hud.set_frame_clocks(0, 0, 0, 0)
+		hud.set_player_state(1.0, 0, 80.0)
 		# No waypoint entry: the label hides.
 		assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"no waypoint entry draws nothing (align %s)" % align)
@@ -1033,13 +1049,15 @@ func test_message_log_lists_expired_lines() -> void:
 	assert_eq(root.set_root_dir(fixture.dir), OK)
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, root)
-	hud.set_player_state(50, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50, 50, 50, 50)
+	hud.set_player_state(1.0, 0, 80.0)
 	hud.push_chat_line("Taylor: moving to bravo", -1)
 	assert_gt(hud.get_draw_list_stats().glyphs, 0,
 			"A pushed chat line lays out glyph quads on the HUDCHATTEXT feed.")
 	await get_tree().process_frame
 	# Past the 930-tick life the feed loop drops the line...
-	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50 + 930, 50 + 930, 50 + 930, 50 + 930)
+	hud.set_player_state(1.0, 0, 80.0)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"The 930-tick life expires the chat line off the feed.")
 	# ...but the window still lists it.
@@ -1068,7 +1086,8 @@ func test_stdbox_pieces_carry_the_camo_stage() -> void:
 	assert_eq(root.set_root_dir(fixture.dir), OK)
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, root)
-	hud.set_player_state(50, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50, 50, 50, 50)
+	hud.set_player_state(1.0, 0, 80.0)
 	assert_eq(hud.get_draw_list_stats().quads_stage2, 0, "No box, no camo stage.")
 	hud.set_message_log_title("")
 	hud.set_message_log_shown(true)
@@ -1117,26 +1136,27 @@ func test_lfp_panel_device_seam() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, root)
 	var before := hud.get_draw_list_stats()
-	hud.set_lfp_panel(true, NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE, 1, 0, null, null)
+	hud.set_lfp_panel(true, NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE, 1, null, null)
 	var shown := hud.get_draw_list_stats()
 	assert_eq(shown.elements_drawn, before.elements_drawn,
 			"With no zone rows the panel draws nothing.")
 	await get_tree().process_frame
-	hud.set_lfp_panel(false, 0, 0, 0, null, null)
+	hud.set_lfp_panel(false, 0, 0, null, null)
 	assert_true(is_instance_valid(hud), "Hiding the zone panel is safe.")
 
 
-# One v7 marker row: a spawn-point zone (entity_bits 4) with zone number 0x41
+# One v8 marker row: a spawn-point zone (entity_bits 4) with zone number 0x41
 # (a capture bit in the slot's source byte), team 1, at mission (0, 10, 0),
 # with a zone-timer entry when `timer_flags` is nonzero.
 func _capture_zone_snapshot(timer_flags: int) -> PackedInt32Array:
 	return PackedInt32Array([
-		7, 36, 1,
+		8, 38, 1,
 		0, 0x3001, 0, 10 << 16, 0, 0, 0, -1, 0, 0x41, 0, 1, 0, 0, 0, 6,
 		0, 1, 0x41, 0, 4,
 		0, 0, 0, 10 << 16, 0, 10 << 16, 0,
 		0, 0,
 		timer_flags, 1, 1, 0, 62, 0,
+		0, 0,
 	])
 
 
@@ -1243,11 +1263,11 @@ func test_the_scoreboard_draws_over_a_simulation() -> void:
 	gametext.add_entry("STROVER_KILLLIST", "Player List", overlays, Vector2i.ZERO)
 	var client := gametext.add_section("Client")
 	gametext.add_entry("STRCLI04", "Players:", client, Vector2i.ZERO)
-	hud.set_scoreboard(true, 0, Simulation.new(), gametext)
+	hud.set_scoreboard(true, Simulation.new(), gametext)
 	assert_gt(hud.get_draw_list_stats().glyphs, bare, "over a Simulation: its title, rungs and hint draw")
-	hud.set_scoreboard(true, 0, null, gametext)
+	hud.set_scoreboard(true, null, gametext)
 	assert_eq(hud.get_draw_list_stats().glyphs, bare, "over none: a blank board")
-	hud.set_scoreboard(false, 0, null, null)
+	hud.set_scoreboard(false, null, null)
 	assert_eq(hud.get_draw_list_stats().glyphs, bare, "hidden, the board draws nothing")
 	# The two inputs the entry hands the engine's composer, read back as the header the board draws: whether a
 	# gametext is loaded (p_gametext.is_valid()) and keyhelp's raw lookup (its marker kept, as the drawer reads it).
@@ -1257,7 +1277,7 @@ func test_the_scoreboard_draws_over_a_simulation() -> void:
 	var keyhelp := RtxtStringFile.new()
 	keyhelp.add_entry("CHANGE_SCREEN", "!Turn the pages", keyhelp.add_section("Text"), Vector2i.ZERO)
 	keyhelp.install_key_strings()
-	hud.set_scoreboard(true, 0, Simulation.new(), gametext)
+	hud.set_scoreboard(true, Simulation.new(), gametext)
 	var loaded: PackedStringArray = hud.get_scoreboard_header_text()
 	assert_eq(loaded.size(), 5)
 	if loaded.size() == 5:
@@ -1265,7 +1285,7 @@ func test_the_scoreboard_draws_over_a_simulation() -> void:
 		assert_eq(loaded[2], "Players: 0", "the players' line, gametext's STRCLI04 and the count")
 		assert_eq(loaded[3], "", "no spectators, no line")
 		assert_eq(loaded[4], "!Turn the pages", "the paging hint, keyhelp's raw CHANGE_SCREEN")
-	hud.set_scoreboard(true, 0, Simulation.new(), null)
+	hud.set_scoreboard(true, Simulation.new(), null)
 	var bare_strings: PackedStringArray = hud.get_scoreboard_header_text()
 	assert_eq(bare_strings.size(), 5)
 	if bare_strings.size() == 5:
@@ -1276,12 +1296,12 @@ func test_the_scoreboard_draws_over_a_simulation() -> void:
 	# A gametext and no keyhelp table: keyhelp asked, its raw fallback with the marker kept (the stripped lookup's
 	# would drop it).
 	RtxtStringFile.clear_key_strings()
-	hud.set_scoreboard(true, 0, Simulation.new(), gametext)
+	hud.set_scoreboard(true, Simulation.new(), gametext)
 	var unkeyed: PackedStringArray = hud.get_scoreboard_header_text()
 	assert_eq(unkeyed.size(), 5)
 	if unkeyed.size() == 5:
 		assert_eq(unkeyed[4], "!PgUp and PgDn to change pages", "no keyhelp table: the raw fallback")
-	hud.set_scoreboard(false, 0, null, null)
+	hud.set_scoreboard(false, null, null)
 
 
 # A terrain picture (the editor's map backgrounds) takes the colour map's texture slot, which null gives back; a new

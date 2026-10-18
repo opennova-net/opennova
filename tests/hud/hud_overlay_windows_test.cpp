@@ -102,6 +102,7 @@ void configure(HudFrameCompiler &compiler, const fnt_font_t *font) {
 	HudLayout layout;
 	layout.box_texture_valid = true;
 	layout.box_tex_w = 128;
+	layout.box_tex_h = 128;
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 }

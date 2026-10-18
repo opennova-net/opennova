@@ -108,7 +108,7 @@ const std::string &config_value_text(const ConfigSection &section, const ConfigV
 // opening with '[' and one or more of A-Z, '_' and the digits is a section, its label lowercased
 // [orig: ConfigFile_BuildSectionLabels @ 0x75df20]. A section's entries are its lines up to the next
 // line opening with '[' that match "%[^;\n\r=]=%[^\n\r;]" with both parts: the key with its spaces
-// trimmed, the value up to ';' or the line end [orig: ini_parse_section_entries @ 0x75db80]; the
+// trimmed, the value up to ';' or the line end [orig: IniFile_ParseSectionEntries @ 0x75db80]; the
 // value's tokens split on ',' and ' ' [orig: ConfigFile_CountCommaSeparatedValues @ 0x75de30], each
 // an integer, a float or a string by String_ClassifyNumeric @ 0x75d830 [orig: ConfigFile_ParseValues
 // @ 0x7606f0; an integer through atol, a float through atof]. A line is read up to its first NUL.
@@ -127,7 +127,7 @@ int classify_numeric(const std::string &text);
 //  +16 = the first entry, +20 = 0 @ 0x75ef41..0x75ef44]
 ConfigSection *find_config_section(std::vector<ConfigSection> &sections, const char *name);
 
-// A read the way the section's accessor reads [orig: effect_get_param_value_0 @ 0x75fa00, which
+// A read the way the section's accessor reads [orig: Effect_GetParamValue_0 @ 0x75fa00, which
 // ConfigFile_ReadKeyValue @ 0x75fc90 takes for a parsed file]: from the next entry (else the current
 // one) to the first whose key matches without case, stopping at an entry with no values (and no value
 // pointer, ConfigEntry::value_pointer_set); `index` is 1-based. Each output is set first (a number 0, a
@@ -139,8 +139,8 @@ ConfigSection *find_config_section(std::vector<ConfigSection> &sections, const c
 bool read_config_value(ConfigSection &section, const char *key, int index, std::string *text, float *real,
 		int32_t *integer);
 
-// The current entry's value `index`, when its key still matches [orig: effect_get_param_value @ 0x75f580,
-// which ini_read_key_value_from_current_line @ 0x75f780 takes for a parsed file]: a key's further values
+// The current entry's value `index`, when its key still matches [orig: Effect_GetParamValue @ 0x75f580,
+// which IniFile_ReadKeyValueFromCurrentLine @ 0x75f780 takes for a parsed file]: a key's further values
 // after read_config_value found it.
 bool read_current_config_value(ConfigSection &section, const char *key, int index, std::string *text,
 		float *real, int32_t *integer);
@@ -171,7 +171,7 @@ bool read_binary_entry(ConfigSection &section, const char *key, int32_t *integer
 // rounded pool zeroes the bytes past it, the next heap block's header first (a crash later, at a
 // mission start in the witness). The count reads each value back from its entry's own line as the
 // accessors' line walk does [orig: ConfigFile_CountCommaSeparatedValues @ 0x75de30 sets the walk's cursor to
-// the line; ConfigFile_ReadKeyValue @ 0x75fc90 for the first value, ini_read_key_value_from_current_line @
+// the line; ConfigFile_ReadKeyValue @ 0x75fc90 for the first value, IniFile_ReadKeyValueFromCurrentLine @
 // 0x75f780 after it]: the line's first 255 bytes [orig: String_CopyN @ 0x75eca0], the key matched as written
 // (its first character exactly, the rest without case [orig: @ 0x75fdfd]; a key written with leading spaces
 // does not match its own line, and the walk goes on through the lines after it to a '[' line), a value
@@ -190,6 +190,16 @@ struct DataStringsPool {
 };
 inline constexpr uint32_t kFastMemStep = 64;        // [orig: FastMem_Alloc @ 0x7697d7]
 inline constexpr uint32_t kFastMemHeaderBytes = 36; // [orig: FastMem_Alloc @ 0x769840, block + 9 dwords]
+// Whether bytes written `past` a FastMem block's rounding reach a block header whatever the block: where the
+// allocator split the free block it took, the next block's header starts at once [orig: sub_7695C0 @ 0x7695d1,
+// the taken block's size @ 0x76964a], whose pool pointer the next allocation and free read [orig: @ 0x769664,
+// @ 0x769709]; a block it gave whole (its rest a header's 36 bytes or fewer) holds up to 36 more of its own
+// [orig: FastMem_Alloc @ 0x7697b0, the split @ 0x769812..0x769819, the header @ 0x769840]. Past the 36 the game
+// fails whatever the block (a gate); 1..36 where the block was split, or given whole with less spare than that
+// (a warning). Witnessed on charattr.def's pool: 41 bytes past crashed the mission start, 8 past started it
+// (docs/mnu/menu-re.md). The one rule of every FastMem overrun the editor measures (the ConfigFile pool, the
+// PCX reader's rows).
+inline constexpr bool fastmem_overrun_reaches_header(uint64_t past) { return past > kFastMemHeaderBytes; }
 // The bytes FastMem_Alloc gives a request of `size` [orig: FastMem_Alloc @ 0x7697c4..0x7697d7].
 uint32_t fastmem_block_bytes(uint32_t size);
 // The pool and its clear for a file of these bytes, as ConfigFile_LoadFromFile -> ConfigFile_ParseText sizes
@@ -202,7 +212,7 @@ size_t data_strings_overrun_offset(const std::vector<ConfigSection> &sections, c
 
 // `text` with the reader's comment, ';', put before each line that starts at one of `line_starts` (each a
 // byte offset into the text; one past it, or one given twice, puts none): a line opening with ';' is no
-// entry to the reader [orig: ini_parse_section_entries @ 0x75dc04, its key "%[^;\n\r=]" of no character].
+// entry to the reader [orig: IniFile_ParseSectionEntries @ 0x75dc04, its key "%[^;\n\r=]" of no character].
 std::string config_commented(const std::string &text, std::vector<size_t> line_starts);
 
 } // namespace opennova::configfile

@@ -457,14 +457,12 @@ void Water::_recompute_terrain_water_fallback() {
 
 void Water::_apply_environment_water_height() {
 	MissionEnvironment *env = _env_node();
-	opennova::env::WaterHeightRungs rungs;
-	rungs.has_mission_override = !std::isnan(mission_water_height_override_);
-	rungs.mission_override = rungs.has_mission_override
-			? mission_water_height_override_
-			: 0.0f;
-	rungs.terrain_height = terrain_water_height_;
-	rungs.has_loaded_terrain =
-			terrain_data_.is_valid() && terrain_data_->is_loaded();
+	// The rungs the mission load assembles (env::water_height_rungs, the
+	// header's override held here in world units, NaN for none).
+	const opennova::env::WaterHeightRungs rungs = opennova::env::water_height_rungs(
+			std::isnan(mission_water_height_override_) ? std::nullopt
+														: std::optional<float>(mission_water_height_override_),
+			terrain_water_height_, terrain_data_.is_valid() && terrain_data_->is_loaded());
 	const float resolved = opennova::env::resolve_water_height(rungs,
 			env != nullptr ? &env->state() : nullptr, water_height_);
 	if (resolved != water_height_) {
@@ -516,8 +514,8 @@ void Water::build() {
 	mesh_instance_->set_layer_mask(VISUAL_LAYER_WATER);
 	add_child(mesh_instance_);
 	// The FrameFX bloom pass redraws the strip with the nightvision row
-	// colors into the Q3 target (retail FrameFX_RenderGlowSource @ 0x582a59..
-	// 0x582a5d -> Render_WaterSurface(0, 1)): its own surface, drawn by no
+	// colors into the Q3 target (engine: runtime/environment/water_frame.h, the glow
+	// source's Render_WaterSurface(0, 1)): its own surface, drawn by no
 	// camera (layer mask 0), only by the typed Q3 WaterNightVision pass.
 	Ref<ArrayMesh> night_vision_mesh;
 	night_vision_mesh.instantiate();

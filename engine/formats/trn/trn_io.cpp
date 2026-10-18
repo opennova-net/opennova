@@ -20,7 +20,7 @@ namespace opennova {
 namespace {
 
 // The terrain parser's state, which lives across every file one load walks: inside a `foliage` block, the
-// blocks an `end` has closed [orig: dword_31BC904, dword_31BC900, zeroed once @0x6109b4..0x6109ba before the
+// blocks an `end` has closed [orig: g_TerrainCfgInFoliageBlock, g_TerrainCfgFoliageBlocksClosed, zeroed once @0x6109b4..0x6109ba before the
 // three passes], the block being read, the `polytrn_sectors` lines read [orig: dword_31BCB30], and the
 // tokenizer's slots, which retail's static tokenizer carries from file to file (ascii_config.h).
 struct TrnWalk {
@@ -57,7 +57,7 @@ void walk_trn(const std::string &text, TrnConfig &out, TrnWalk &walk, bool own, 
 		// Inside a block every line is the block's (a `foliage` line too): the
 		// first four blocks read their keys into their slots, and from the fifth
 		// on nothing closes the block, so the rest of the load is read by no arm
-		// [orig: the dword_31BC904 test, then `dword_31BC900 < 4` around every
+		// [orig: the g_TerrainCfgInFoliageBlock test, then `g_TerrainCfgFoliageBlocksClosed < 4` around every
 		// block key, `end` bumping the count].
 		if (in_foliage) {
 			if (foliage_closed >= 4) return;
@@ -72,11 +72,13 @@ void walk_trn(const std::string &text, TrnConfig &out, TrnWalk &walk, bool own, 
 			} else if (key == "color_upper") {
 				def.color_upper = io::retail_atol(value);
 			} else if (key == "match") {
-				// Up to 7 args as bytes, to the line's count; only the first
-				// FOLIAGE_MATCH_CODES are ever consumed (foliage.h), so the rest
-				// are read and dropped here [orig: the match arm, `idx < 8` and
-				// `idx >= count` @0x60f330].
-				def.match.fill(FOLIAGE_MATCH_UNSET);
+				// Up to 7 args as bytes, to the line's count, each into its own code: a line
+				// stores codes 1..count-1 and clears none, so a later line keeps the codes past
+				// its own and a bare `match` changes nothing [orig: Terrain_ParseConfigCallback
+				// @0x60F4F3..0x60F556: no store ahead of the loop, the byte store @0x60F53D under
+				// `idx < 8` @0x60F520 and `idx < count` @0x60F50D / @0x60F54D]. Only the first
+				// FOLIAGE_MATCH_CODES are ever consumed (foliage.h), so the rest are read and
+				// dropped here.
 				for (int i = 1; i < tokens.count && i < 8; ++i)
 					if (i - 1 < FOLIAGE_MATCH_CODES)
 						def.match[static_cast<size_t>(i - 1)] =
@@ -217,12 +219,12 @@ std::string values_of(const io::ConfigTokens &tokens) {
 
 void ignore_line(const std::string &, int, const io::ConfigTokens &) {}
 
-bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error) {
+bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error, TrnRefusal *refusal = nullptr) {
 	// A block no `end` closed (the load ran out, or its `end` is the
 	// unterminated last line, read `en`) still wrote its keys into its slot, and
 	// the runtime takes all four slots whose graphic is named, not the closed
 	// count, so the block is a definition [orig: the block keys write slot
-	// dword_31BC900 directly; Terrain_Init copies all four 0x218-byte slots
+	// g_TerrainCfgFoliageBlocksClosed directly; Terrain_Init copies all four 0x218-byte slots
 	// @0x60FD11..0x60FD16 (sub_5FF4C0); Foliage_RemapPixelToDefMask @0x5FF4E0
 	// gates each slot on its graphic's first byte]. JO:CA's Dvxi4.trn and
 	// Dvxi4_c.trn end on such a block.
@@ -233,7 +235,9 @@ bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error) {
 	// parsed grid to 16 columns and rows (periodically under wrap, else the
 	// last column and row copied outward) and returns 0 on every path
 	// [orig: @0x60F2A5..0x60F317, @0x60F31A]; trn_extend_sector_grid below is it.
-	switch (trn_refusal(out, walk.seen_sector_rows)) {
+	const TrnRefusal leg = trn_refusal(out, walk.seen_sector_rows);
+	if (refusal != nullptr) *refusal = leg;
+	switch (leg) {
 	case TrnRefusal::None: break;
 	case TrnRefusal::NoColormap: error = "TRN rejected: polytrn_colormap is empty"; return false;
 	case TrnRefusal::NoDetailmap: error = "TRN rejected: polytrn_detailmap is empty"; return false;
@@ -301,7 +305,7 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 }
 
 bool load_mission_trn(const std::string &terrain, const TrnLaterTexts &later, TrnConfig &out, std::string &error,
-		std::vector<TrnLaterLine> *taken) {
+		std::vector<TrnLaterLine> *taken, TrnRefusal *refusal) {
 	out = TrnConfig();
 	if (taken != nullptr) taken->clear();
 	TrnWalk walk;
@@ -315,7 +319,7 @@ bool load_mission_trn(const std::string &terrain, const TrnLaterTexts &later, Tr
 	// overcast.def after the .trn, then the .env [orig: Environment_LoadTimeOfDayConfig @ 0x57dc3b, @ 0x57dcbf].
 	pass(later.overcast, TrnLaterLine::File::Overcast);
 	pass(later.environment, TrnLaterLine::File::Environment);
-	return finish_trn(out, walk, error);
+	return finish_trn(out, walk, error, refusal);
 }
 
 bool read_mission_trn(const TrnTextReader &read, const std::string &terrain_file, const std::string &environment_file,
@@ -397,7 +401,7 @@ std::vector<TrnKeyLine> read_trn_key_lines(const std::string &text, std::vector<
 std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys) {
 	// The terrain's parser's block state over the file's own lines: inside a block every line is the block's, the
 	// first four blocks read their keys, `end` closes one, and from the fifth on nothing closes it [orig:
-	// Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904, `dword_31BC900 < 4` around every block
+	// Terrain_ParseConfigCallback @ 0x60F330, its block test of g_TerrainCfgInFoliageBlock, `g_TerrainCfgFoliageBlocksClosed < 4` around every block
 	// key, the block's arms @ 0x60F36C..0x60F5F0]. A terrain may close blocks before the file, or leave one open into
 	// it; what the file alone shows is said.
 	std::vector<std::string> out(keys.size());
@@ -410,14 +414,14 @@ std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys) {
 			if (closed >= 4) {
 				out[i] = "This line is inside a fifth foliage block, which the terrain's reader opens but reads nothing of: "
 				         "no end closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
-				         "`dword_31BC900 < 4` around every block key].";
+				         "`g_TerrainCfgFoliageBlocksClosed < 4` around every block key].";
 			} else if (key == "end") {
 				in_block = false;
 				++closed;
 			} else if (!block_key) {
 				out[i] = "This line is inside the foliage block a foliage line above opens: the terrain's reader reads a "
 				         "block's lines as the block's, so it skips this one until an end closes the block [orig: "
-				         "Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
+				         "Terrain_ParseConfigCallback @ 0x60F330, its block test of g_TerrainCfgInFoliageBlock].";
 			}
 			continue;
 		}
@@ -426,12 +430,12 @@ std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys) {
 			if (closed >= 4)
 				out[i] = "A fifth foliage block: the terrain's reader opens it but reads none of its lines, and nothing "
 				         "closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
-				         "`dword_31BC900 < 4` around every block key].";
+				         "`g_TerrainCfgFoliageBlocksClosed < 4` around every block key].";
 		} else if (block_key) {
 			out[i] = "'" + key +
 			         "' is a foliage block's keyword: the terrain's reader reads it only inside a block, and no foliage "
 			         "line above opens one in this file, so the game takes it only on a terrain whose .trn ends inside "
-			         "a block [orig: Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
+			         "a block [orig: Terrain_ParseConfigCallback @ 0x60F330, its block test of g_TerrainCfgInFoliageBlock].";
 		} else if (key == "polytrn_sectors") {
 			out[i] = "A grid row here is a row after the terrain's own, not in place of one: the terrain's reader counts "
 			         "every polytrn_sectors line of the load, the .trn's first, and refuses the terrain where the count "

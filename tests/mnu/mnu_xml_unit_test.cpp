@@ -5,6 +5,7 @@
 #include <climits>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <string>
 
 #include <formats/mnu/mnu_xml.h>
@@ -184,6 +185,59 @@ bool test_end_of_text() {
   return true;
 }
 
+// Elements nest as deep as the game survives. Its reader is a loop and takes any depth [orig:
+// NapiXML_ParseElementTree @ 0x769d70], but its free of the tree recurses once a level, 24 bytes a level
+// on a 1 MiB stack [orig: XML_FreeNodeTree @ 0x76a5c0, the self-call @ 0x76a5dd; from
+// XML_ParseWithBOMDetection @ 0x76a690]: 43,688 levels take it 1,048,572 bytes down, 43,689 run it out.
+// So 43,688 nested elements read whole; the 43,689th stops the reader with a note, the tree kept. The
+// Document frees them without recursing (destroying it once ran the stack out), as a node does a deep
+// subtree.
+bool test_nesting_depth() {
+  auto nested = [](size_t levels) {
+    std::string xml;
+    for (size_t i = 0; i < levels; ++i) xml += "<A>";
+    for (size_t i = 0; i < levels; ++i) xml += "</A>";
+    return xml;
+  };
+  auto depth_of = [](const Document &doc) {
+    size_t depth = 0;
+    for (const Node *node = doc.roots.empty() ? nullptr : doc.roots[0].get(); node;
+         node = node->children.empty() ? nullptr : node->children[0].get())
+      ++depth;
+    return depth;
+  };
+  Document doc;
+  std::string err;
+  CHECK(read(nested(65).c_str(), doc, err) && doc.notes.empty() && depth_of(doc) == 65, "65 levels read whole");
+  {
+    Document deep;
+    CHECK(read(nested(30000).c_str(), deep, err) && deep.notes.empty() && depth_of(deep) == 30000,
+          "30,000 levels read whole");
+  }
+  {
+    Document deepest;
+    CHECK(read(nested(43688).c_str(), deepest, err) && deepest.notes.empty() && depth_of(deepest) == 43688,
+          "43,688 levels read whole");
+  }
+  {
+    Document past;
+    CHECK(read(nested(43689).c_str(), past, err) && past.notes.size() == 1 &&
+              past.notes[0].message.find("43689 levels deep") != std::string::npos &&
+              past.notes[0].message.find("1048596 bytes") != std::string::npos && depth_of(past) == 43688,
+          "the 43,689th level runs the game's free out: a note, 43,688 kept");
+  }
+  {
+    auto top = std::make_unique<Node>();
+    Node *at = top.get();
+    for (int i = 0; i < 200000; ++i) {
+      at->children.push_back(std::make_unique<Node>());
+      at->children.back()->parent = at;
+      at = at->children.back().get();
+    }
+  } // 200,000 levels freed here
+  return true;
+}
+
 // The CRT primitives [orig: CRT_iswctype @ 0x77f5b1; CRT_wcsicmp @ 0x77085b;
 // CRT_wcstoxl @ 0x76e93b; CRT_wchartodigit @ 0x77fd43].
 bool test_crt_primitives() {
@@ -240,6 +294,7 @@ int main() {
   RUN_TEST(test_entities);
   RUN_TEST(test_raw_text);
   RUN_TEST(test_end_of_text);
+  RUN_TEST(test_nesting_depth);
   RUN_TEST(test_crt_primitives);
   RUN_TEST(test_path_key);
 

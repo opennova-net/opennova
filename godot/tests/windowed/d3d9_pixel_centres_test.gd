@@ -89,7 +89,8 @@ func test_the_hud_samples_its_textures_where_d3d9_does() -> void:
 	hud.size = Vector2(1024, 768)
 	viewport.add_child(hud)
 	hud.configure(layout, root)
-	hud.set_player_state(100, 1.0, 0, 80.0)
+	hud.set_frame_clocks(100, 100, 100, 100)
+	hud.set_player_state(1.0, 0, 80.0)
 	var image: Image = await _render(viewport)
 	# The frame's footprint (authored at 100, 100 of the 1024 x 768 design, drawn
 	# 1:1 on this surface): every pixel the quad lit around it.

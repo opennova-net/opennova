@@ -151,11 +151,6 @@ void put_owner(crow::json::wvalue &out, db::Database &db, std::optional<int64_t>
 	out["owner"] = std::move(owner);
 }
 
-// A path's server id; 0 (no server's) past int64.
-int64_t server_id_of(uint64_t id) {
-	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
-}
-
 crow::response server_reply(int code, db::Database &db, int64_t id, bool admin) {
 	crow::json::wvalue out;
 	if (const auto server = find_server(db, id))
@@ -397,7 +392,7 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		const auto server = owned_server(*db_conn, server_id_of(id), access.user->id);
+		const auto server = owned_server(*db_conn, path_id(id), access.user->id);
 		if (!server) return json_error(404, "not_found", "this account has no hosted server with this id");
 		crow::json::wvalue e = server_json(*db_conn, *server, false);
 		std::vector<crow::json::wvalue> events;
@@ -567,7 +562,7 @@ crow::response HostedRoutes::me_stop(const crow::request &req, uint64_t id) {
 	}
 	try {
 		auto db_conn = pool_.acquire();
-		const auto server = owned_server(*db_conn, server_id_of(id), user.id);
+		const auto server = owned_server(*db_conn, path_id(id), user.id);
 		if (!server) {
 			log_owner(user, "stop", "not_found");
 			return json_error(404, "not_found", "this account has no hosted server with this id");
@@ -600,7 +595,7 @@ crow::response HostedRoutes::me_update(const crow::request &req, uint64_t id) {
 	const WebSessionUser &user = *access.user;
 	try {
 		auto db_conn = pool_.acquire();
-		const auto server = owned_server(*db_conn, server_id_of(id), user.id);
+		const auto server = owned_server(*db_conn, path_id(id), user.id);
 		if (!server) {
 			log_owner(user, "update", "not_found");
 			return json_error(404, "not_found", "this account has no hosted server with this id");
@@ -651,7 +646,7 @@ crow::response HostedRoutes::admin_stop(const crow::request &req, uint64_t id) {
 	if (caller.refusal) return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const int64_t server_id = server_id_of(id);
+		const int64_t server_id = path_id(id);
 		const auto server = find_server(*db_conn, server_id);
 		if (!server) return json_error(404, "not_found", "no hosted server has this id");
 		if (!is_live(server->state)) return json_error(409, "not_live", "this hosted server has ended");

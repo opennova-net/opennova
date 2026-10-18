@@ -58,14 +58,8 @@ void WeaponDatabase::_bind_methods() {
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("player_info_class_mask", "playerclass_value"),
 			&WeaponDatabase::player_info_class_mask);
-	ClassDB::bind_method(D_METHOD("player_info_kit_entries", "team", "player_class", "slot_indices",
-								 "slot_ammo_primary", "slot_ammo_secondary", "slot_flags",
-								 "grenade_indices", "grenade_ammo_primary", "grenade_ammo_secondary"),
-			&WeaponDatabase::player_info_kit_entries);
 	ClassDB::bind_method(D_METHOD("weapon_label", "index", "gametext"),
 			&WeaponDatabase::weapon_label);
-	ClassDB::bind_static_method("WeaponDatabase", D_METHOD("armory_slot_order", "labels"),
-			&WeaponDatabase::armory_slot_order);
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("loadout_weight_line", "total", "menutxt", "gameui"),
 			&WeaponDatabase::loadout_weight_line);
@@ -223,15 +217,6 @@ String WeaponDatabase::weapon_label(int p_index, const Ref<RtxtStringFile> &p_ga
 	return opennova::to_gd(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)));
 }
 
-PackedInt32Array WeaponDatabase::armory_slot_order(const PackedStringArray &p_labels) {
-	std::vector<std::string> labels;
-	labels.reserve(static_cast<size_t>(p_labels.size()));
-	for (int i = 0; i < p_labels.size(); ++i) labels.push_back(opennova::to_std(p_labels[i]));
-	PackedInt32Array out;
-	for (int index : opennova::menu::armory_slot_order(labels)) out.push_back(index);
-	return out;
-}
-
 String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
 		const Ref<RtxtStringFile> &p_gameui) {
 	return opennova::to_gd(opennova::menu::loadout_weight_line(p_total,
@@ -241,33 +226,7 @@ String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringF
 static_assert(godot::WeaponDatabase::DEFAULT_VOICE_VALUE == opennova::menu::kDefaultVoiceValue,
 		"DEFAULT_VOICE_VALUE mirrors the engine's PLAYERVOICE default");
 
-Array WeaponDatabase::player_info_kit_entries(int p_team, int p_player_class,
-		const PackedInt32Array &p_slot_indices, const PackedInt32Array &p_slot_ammo_primary,
-		const PackedInt32Array &p_slot_ammo_secondary, const PackedInt32Array &p_slot_flags,
-		const PackedInt32Array &p_grenade_indices, const PackedInt32Array &p_grenade_ammo_primary,
-		const PackedInt32Array &p_grenade_ammo_secondary) const {
-	// The picks name this table's rows (WeaponDef.index, -1 = NONE); the page
-	// names the game's catalog rows, its seeded "None" at 0.
-	const auto pick = [](const PackedInt32Array &idx, const PackedInt32Array &pri,
-							  const PackedInt32Array &sec, const PackedInt32Array *flags,
-							  int i) {
-		opennova::menu::KitSlotPick p;
-		if (i < idx.size()) p.weapon_index = opennova::menu::catalog_index_of_row(idx[i]);
-		if (i < pri.size()) p.ammo_primary = pri[i];
-		if (i < sec.size()) p.ammo_secondary = sec[i];
-		if (flags != nullptr && i < flags->size()) p.flags = (*flags)[i];
-		return p;
-	};
-	opennova::menu::PlayerInfoKitSelection sel;
-	sel.team_mask = opennova::world::player_info_team_mask(p_team);
-	sel.player_class = p_player_class;
-	sel.primary = pick(p_slot_indices, p_slot_ammo_primary, p_slot_ammo_secondary, &p_slot_flags, 0);
-	sel.secondary = pick(p_slot_indices, p_slot_ammo_primary, p_slot_ammo_secondary, &p_slot_flags, 1);
-	sel.accessory = pick(p_slot_indices, p_slot_ammo_primary, p_slot_ammo_secondary, &p_slot_flags, 2);
-	for (int i = 0; i < 3; ++i) {
-		sel.grenades[i] = pick(p_grenade_indices, p_grenade_ammo_primary, p_grenade_ammo_secondary,
-				nullptr, i);
-	}
+Array WeaponDatabase::kit_entry_rows(const opennova::menu::PlayerInfoKitSelection &sel) const {
 	const opennova::menu::WeaponNameLookup name = [this](int32_t p_row) -> std::string {
 		const opennova::def::DefWeaponDef *w = row(p_row);
 		return w != nullptr ? std::string(w->weapon_name) : std::string();

@@ -1719,7 +1719,23 @@ void test_decoration_rows_are_entity_collected() {
     CHECK(!rig.ow.building_visible(crate_as_building));
 }
 
+// The section rule both of a model's views take (C-232 / C-493): a destroyed
+// bit hides the part whatever the verdict, no verdict (-1) shows every other
+// part, a verdict shows the raw mask's parts and the forced ones, the section
+// index masked to 5 bits [orig: BoneCallback_bldg_World @0x4E22CF..0x4E22E2].
+void test_section_visible() {
+    using opennova::world::section_visible;
+    CHECK(section_visible(0, -1, 0, 3));
+    CHECK(!section_visible(1u << 3, -1, 0, 3));
+    CHECK(!section_visible(1u << 3, 0xFFFFFFFFll, 0, 3));
+    CHECK(section_visible(0, 1u << 3, 0, 3));
+    CHECK(!section_visible(0, 1u << 4, 0, 3));
+    CHECK(section_visible(0, 0, 1u << 3, 3));
+    CHECK(section_visible(0, 1u << 3, 0, 35));
+}
+
 int main() {
+    test_section_visible();
     test_bound_sphere();
     test_render_math();
     test_weld_and_flags();

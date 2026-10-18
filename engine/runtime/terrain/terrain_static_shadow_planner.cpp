@@ -83,6 +83,8 @@ uint64_t caster_set_stamp(
 		hash = io::fnv1a64_value(hash, record.graphic.size());
 		hash = io::fnv1a64_bytes(hash, record.graphic.data(), record.graphic.size());
 		hash = hash_transform(hash, record.world_transform);
+		hash = io::fnv1a64_value(hash, record.origin_q16[0]);
+		hash = io::fnv1a64_value(hash, record.origin_q16[1]);
 		hash = io::fnv1a64_value(hash, record.geometry->key);
 		hash = io::fnv1a64_value(hash, record.ground_y);
 		hash = io::fnv1a64_value(hash, record.caster_identity);
@@ -205,8 +207,9 @@ void TerrainStaticShadowPlanner::set_light(
 }
 
 float static_shadow_caster_ground(const TerrainHeightField &field,
-		const std::array<float, 12> &world_transform) {
-	return height_field_height_mission(field, world_transform[9], -world_transform[11]);
+		const std::array<int32_t, 2> &origin_q16) {
+	return static_cast<float>(height_field_height_fixed(field, origin_q16[0], origin_q16[1])) /
+			io::kFp16One;
 }
 
 void TerrainStaticShadowPlanner::replace_casters(
@@ -247,17 +250,16 @@ void TerrainStaticShadowPlanner::replace_casters(
 		candidate.item_attrib = record.item_attrib;
 		candidate.item_attrib2 = record.item_attrib2;
 		candidate.active = record.active;
-		// Mission axes: x east = Godot x, y north = -Godot z (the origin
-		// sits at rows-major [9..11]).
-		candidate.position_fixed = {
-			io::float_to_fp16_16_round_sat(record.world_transform[9]),
-			io::float_to_fp16_16_round_sat(-record.world_transform[11])};
+		// The entity's own 16.16 words, never the float transform's round trip.
+		candidate.position_fixed = record.origin_q16;
 		candidate.model_radius_fixed = record.geometry->model_radius_fixed;
 		candidate.geometry.geometry_key = record.geometry->key;
 		candidate.geometry.render_object_counts =
 				record.geometry->render_object_counts;
 		uint64_t revision = hash_transform(io::kFnv1a64Offset,
 				record.world_transform);
+		revision = io::fnv1a64_value(revision, record.origin_q16[0]);
+		revision = io::fnv1a64_value(revision, record.origin_q16[1]);
 		revision = io::fnv1a64_value(revision, record.geometry->key);
 		revision = io::fnv1a64_value(revision, record.caster_identity);
 		// Team participates: TEX_TEAM flipbooks select alpha frames by team,

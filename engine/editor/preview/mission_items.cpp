@@ -152,6 +152,23 @@ const MissionItemCache::Catalog &MissionItemCache::catalog_(const SessionView &v
 	return catalog;
 }
 
+std::shared_ptr<const mission::MisWeaponTable> MissionItemCache::weapon_table(const SessionView &view) {
+	const uint64_t stamp = stamp_of(view, "weapon.def");
+	if (weapons_read_ && stamp == weapons_stamp_ && stamp != 0) return weapons_;
+	weapons_read_ = true;
+	weapons_stamp_ = stamp;
+	weapons_.reset();
+	std::vector<uint8_t> bytes;
+	if (!view.findings.assets || !view.findings.assets->read(io::utf8_file_name("weapon.def"), bytes) || bytes.empty())
+		return weapons_;
+	++files_read_;
+	def::DefWeaponsFile weapons{};
+	if (def::def_parse_weapons_memory(bytes.data(), bytes.size(), &weapons) == 0)
+		weapons_ = std::make_shared<const mission::MisWeaponTable>(mission::mis_weapon_table(weapons));
+	def::def_free_weapons(&weapons);
+	return weapons_;
+}
+
 bool MissionItemCache::row(const SessionView &view, int64_t item, MissionItemFacts &out) {
 	out = MissionItemFacts();
 	out.item = item;
@@ -173,7 +190,7 @@ bool MissionItemCache::row(const SessionView &view, int64_t item, MissionItemFac
 			const std::string &sid = seed->second.sid;
 			out.ai_class = sid.substr(0, sid.find('.')).substr(0, 8);
 			// The profile as the original names its file: the name's extension made .aip [orig: JOTACmed.exe
-			// sub_462CB0 @ 0x462cb0 with "aip" @ 0x5b2d40, the file asked for by sub_529FA0 @ 0x529fa0].
+			// Path_ReplaceOrAppendExtension @ 0x462cb0 with "aip" @ 0x5b2d40, the file asked for by sub_529FA0 @ 0x529fa0].
 			const std::string &aip = seed->second.default_aip;
 			if (!aip.empty() && graph->has_file(aip.substr(0, aip.find('.')) + ".aip")) out.ai_script = aip.substr(0, 8);
 			out.min_engagement = seed->second.min_engagement;

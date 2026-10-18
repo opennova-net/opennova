@@ -12,7 +12,7 @@ namespace {
 
 const uint8_t kSignature[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 // The largest image the reader takes, per side: far past any texture the game
-// draws, small enough that a corrupt header cannot ask for gigabytes.
+// draws.
 constexpr uint32_t kMaxSidePixels = 16384;
 
 uint32_t read_be32(const uint8_t *p) {
@@ -88,6 +88,15 @@ bool png_header_size(const std::vector<uint8_t> &bytes, uint32_t &width, uint32_
 	return true;
 }
 
+bool png_header_form(const std::vector<uint8_t> &bytes, uint8_t &bit_depth, uint8_t &color_type) {
+	// The IHDR's bit depth and colour type follow its width and height.
+	if (!is_png(bytes) || bytes.size() < 26 || std::memcmp(bytes.data() + 12, "IHDR", 4) != 0)
+		return false;
+	bit_depth = bytes[24];
+	color_type = bytes[25];
+	return true;
+}
+
 namespace {
 
 // A PNG read to its unfiltered scanlines: its header, its palette (RGB triples) and the palette's
@@ -120,7 +129,9 @@ bool read_scanlines(const std::vector<uint8_t> &bytes, Scanlines &image, std::st
 		}
 		const uint32_t length = read_be32(&bytes[pos]);
 		const uint8_t *type = &bytes[pos + 4];
-		if (length > bytes.size() - pos - 12) {
+		// The chunk's header, data and CRC: fewer than the 12 framing bytes left is a cut-off chunk
+		// too (the subtraction below would wrap).
+		if (bytes.size() - pos < 12 || length > bytes.size() - pos - 12) {
 			error = "Truncated PNG: a chunk runs past the end of the file.";
 			return false;
 		}
@@ -214,8 +225,10 @@ uint16_t sample16_at(const uint8_t *row, size_t index) {
 
 } // namespace
 
-bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error, IndexedImage8 *indexed) {
+bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error, IndexedImage8 *indexed,
+                PngPalette *held) {
 	if (indexed) *indexed = IndexedImage8();
+	if (held) *held = PngPalette();
 	Scanlines image;
 	if (!read_scanlines(bytes, image, error)) return false;
 	const Header &header = image.header;
@@ -226,6 +239,11 @@ bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &
 	out.height = int(header.height);
 	out.pixels.assign(size_t(out.width) * size_t(out.height) * 4, 255);
 	const size_t palette_entries = palette.size() / 3;
+	// The palette's chunks as the file holds them, where the caller asks them of a palette image.
+	if (held && header.color_type == 3) {
+		held->entries = uint32_t(palette_entries);
+		held->alpha = palette_alpha;
+	}
 	// The indices beside the colours, where the caller asks them of a palette image.
 	if (indexed && header.color_type == 3) {
 		indexed->width = out.width;

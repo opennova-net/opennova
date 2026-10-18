@@ -166,7 +166,15 @@ void test_halving() {
 	uint32_t sw = 2, sh = 2;
 	halve_rgba_to_cap(small, sw, sh, kNormalMapSideCap);
 	CHECK(sw == 2 && sh == 2 && small.size() == 16, "under the cap nothing changes");
-	// A count of halvings, each the truncated 2x2 mean (101 and 102 make 101), while both sides exceed 1.
+	// The cap loop tests the sides alone: a 2048 x 1 under 512 halves twice, its short side 0 after
+	// the first [orig: GTexture_DownsampleToLimits @ 0x6871B1..0x6871B7].
+	std::vector<uint8_t> narrow(2048 * 1 * 4, 7);
+	uint32_t nw = 2048, nh = 1;
+	halve_rgba_to_cap(narrow, nw, nh, kNormalMapSideCap);
+	CHECK(nw == 512 && nh == 0 && narrow.empty(), "a narrow side halves on past 0");
+	// A count of halvings, each the truncated 2x2 mean (101 and 102 make 101), each shifting both sides
+	// with no floor, so a side reaches 0 and the pixels empty [orig: GTexture_DownsampleToLimits
+	// @ 0x687200 / @ 0x687203].
 	std::vector<uint8_t> odd(4 * 4 * 4, 255);
 	for (size_t i = 0; i < odd.size(); i += 4) odd[i] = static_cast<uint8_t>((i / 4) % 2 ? 102 : 101);
 	std::vector<uint8_t> once = odd;
@@ -176,11 +184,11 @@ void test_halving() {
 	std::vector<uint8_t> twice = odd;
 	uint32_t tw = 4, th = 4;
 	halve_rgba_times(twice, tw, th, 5);
-	CHECK(tw == 1 && th == 1 && twice.size() == 4, "halvings stop at a side of 1");
+	CHECK(tw == 0 && th == 0 && twice.empty(), "every halving runs: the sides reach 0");
 	std::vector<uint8_t> strip(8 * 2 * 4, 9);
 	uint32_t pw = 8, ph = 2;
 	halve_rgba_times(strip, pw, ph, 3);
-	CHECK(pw == 4 && ph == 1, "a side of 1 stops the halvings, the other side halved once");
+	CHECK(pw == 1 && ph == 0 && strip.empty(), "a side halved past 1 is 0, the other halved on");
 }
 
 void test_loaders_past_particle() {

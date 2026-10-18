@@ -1,6 +1,7 @@
 // Round flight and presentation, with authoritative consequences carried explicitly
 // per round. See round_sim.h and docs/net/novaworld-net-re.md §5.60.
 #include <runtime/world/round_sim.h>
+#include <base/io/bits.h>
 #include <base/io/tick_rate.h>
 #include <base/io/fixed.h>
 
@@ -48,20 +49,12 @@ constexpr int32_t kDragTableSize = 1220;
 // @ 0x527687 resolves every row at load].
 constexpr const char *kGlassSmashSound = "GLASS_SMASH";
 
-constexpr uint32_t rotl32(uint32_t value, unsigned count) {
-    return (value << count) | (value >> (32u - count));
-}
-
-constexpr uint32_t rotr32(uint32_t value, unsigned count) {
-    return (value >> count) | (value << (32u - count));
-}
-
 uint32_t spread_hash(uint32_t seed) {
     const uint64_t square = static_cast<uint64_t>(seed) * seed;
     const uint32_t low = static_cast<uint32_t>(square) - seed;
     uint32_t high = static_cast<uint32_t>(square >> 32);
-    high = rotr32((high ^ 0xCC1CDC1Du) + 0xC11ABB09u, 16);
-    uint32_t hash = rotl32(low + high, 18);
+    high = io::rotr32((high ^ 0xCC1CDC1Du) + 0xC11ABB09u, 16);
+    uint32_t hash = io::rotl32(low + high, 18);
     if ((hash & 0x80000000u) != 0) hash += 0x001ABB09u;
     return hash;
 }
@@ -74,7 +67,7 @@ RandomSpreadOffset weapon_calc_random_spread_offset(
     if (spread_fp16 == 0) return {};
 
     const uint32_t hash = spread_hash(seed);
-    uint32_t mixed = rotl32(hash, 12);
+    uint32_t mixed = io::rotl32(hash, 12);
     if ((mixed & 0x80000000u) != 0) mixed += 0x001ABB09u;
     const uint32_t a = mixed & 0xFFFFu;
     const uint32_t b = (hash >> 8) & 0xFFFFu;
@@ -235,12 +228,7 @@ void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
 //  -0x05B05B00 @0x407575; Entity_HandleDamageAndTriggerZones gate @0x4078c6;
 //  @0x4078cc / @0x407918]
 void apply_hit_body_roll(AiEntity *body, int32_t bone, int quadrant) {
-    if (body == nullptr || bone >= 5) return;
-    if (quadrant == 0) {
-        body->roll = 0x05B05B00;
-    } else if (quadrant == 2) {
-        body->roll = -0x05B05B00;
-    }
+    if (body != nullptr) hit_body_roll(body->roll, bone, quadrant);
 }
 
 Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
@@ -480,20 +468,6 @@ Vec3 vec_from_fixed(const FixedVec3 &v) {
 // [orig: Projectile_CopyEntityToHitRecord @0x4E7010: memset
 //  @0x4E7015..0x4E701A, position and angles @0x4E7023..0x4E7043, velocity
 //  @0x4E7046..0x4E7079, the round @0x4E707C, its owner @0x4E707F..0x4E7085]
-void copy_round_to_hit_record(HitRecord &record, const LiveRound &r,
-                              const FixedVec3 &velocity_q16) {
-    record = HitRecord{};
-    record.has_round = true;
-    record.round_pos = r.pos;
-    record.round_vel_q16 = velocity_q16;
-    record.round_yaw_bam = r.yaw_bam;
-    record.round_pitch_bam = r.pitch_bam;
-    record.round_roll_bam = r.roll_bam;
-    record.round_ammo_index = r.ammo_index;
-    record.round_owner = r.owner;
-    record.owner = r.owner;
-}
-
 // `surface_normal` is Entity_ApplyDragAndBounceForce's third argument: 0 for
 // the flight call, a positive multiplier for the person-hit call.
 void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
@@ -648,10 +622,9 @@ RoundSourceState resolve_round_source(World &world,
     const int32_t source_z =
             body != nullptr ? body->pos[2] : to_fixed(entity->position.z);
     // The below-water classifier projects the per-tick EYE height (the shared
-    // entity_eye_below_water witness) wherever the drowning bit is clear;
-    // retail's stance leg folds the ladder/parachute bits with it (Flags &
-    // 0x108020 [orig: @0x4ec2d5]). eye_offset_z is the ported +0x74 channel
-    // (0 when never stamped, the retail spawn value).
+    // entity_eye_below_water witness) wherever the drowning bit is clear.
+    // eye_offset_z is the ported +0x74 channel (0 when never stamped, the
+    // retail spawn value).
     source.underwater = source.underwater ||
                         entity_eye_below_water(world, source_z,
                                                entity->eye_offset_z);
@@ -662,9 +635,15 @@ RoundSourceState resolve_round_source(World &world,
 
     source.recoil_pitch = &body->inf.recoil_pitch;
     source.weapon_weight_spread = &body->inf.weapon_weight_spread;
+    source.prone = body->inf.stance == InfantryState::Stance::kProne;
     source.scope_raised = source.scope_raised || body->inf.scope_raised;
-    const bool forced_standing = body->inf.airborne || source.underwater ||
-                                 (flags & kEntityFlagInAir) != 0;
+    // The standing row is forced by the parachute, drowning and ladder-contact
+    // bits or the eye below the water, then a mount forces row 1; an airborne
+    // body keeps its stance row. [orig: RoundData_SpawnRound
+    // `test [ebp+24h], 108020h` @0x4ec2d5, the eye @0x4ec2de..0x4ec2ea, row 2
+    // @0x4ec2ec, +0x16C -> row 1 @0x4ec2f4..0x4ec2fd]
+    const bool forced_standing =
+            source.underwater || (flags & kStanceRowStandingFlags) != 0;
     if (entity->mounted) {
         source.stance_category = 1;
     } else if (forced_standing) {
@@ -758,6 +737,7 @@ void record_round_fire(World &world, RoundSim &sim,
     event.yaw_bam = params.dir_yaw_bam;
     event.pitch_bam = params.dir_pitch_bam;
     event.wire_round_flags = params.wire_round_flags;
+    event.action_leg_presentation = params.action_leg_presentation;
     event.adm_index = params.adm_index;
     sim.fired.push_back(event);
 	// Received ADM fire executes the action row on every peer, including its
@@ -787,6 +767,21 @@ void record_round_fire(World &world, RoundSim &sim,
 }
 
 } // namespace
+
+void copy_round_to_hit_record(HitRecord &record, const LiveRound &r,
+                              const FixedVec3 &velocity_q16) {
+    record = HitRecord{};
+    record.has_round = true;
+    record.round_pos = r.pos;
+    record.round_vel_q16 = velocity_q16;
+    record.round_yaw_bam = r.yaw_bam;
+    record.round_pitch_bam = r.pitch_bam;
+    record.round_roll_bam = r.roll_bam;
+    record.round_ammo_index = r.ammo_index;
+    record.round_owner = r.owner;
+    record.owner = r.owner;
+    record.round_shooter_wire = r.shooter_handle;
+}
 
 bool entity_eye_below_water(const World &world, int32_t body_z_q16,
                             int32_t eye_offset_z) {
@@ -836,6 +831,21 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
                                       /*was_alive=*/true);
 }
 
+int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_bam) {
+    const Vec3 vel = vec_from_fixed(record.round_vel_q16);
+    return compute_death_anim_state(record.section,
+            death_quadrant_from_round(victim_heading_bam, vel.x, vel.y),
+            death_cause::kBullet);
+}
+
+uint16_t RoundSim::allocate_round_id(uint16_t sequence_word) {
+    spawn_allocated_ = true;
+    if (sequence_word != 0xFFFFu) return last_allocated_round_id_ = sequence_word; // @0x4EAB12
+    round_id_counter_ = (round_id_counter_ + 1u) & 0x1FFu;           // @0x4EAAF5..0x4EAB04
+    return last_allocated_round_id_ = static_cast<uint16_t>(
+            (uint32_t(local_slot_id) << 9) | round_id_counter_);
+}
+
 void RoundSim::reset() noexcept {
 	rounds.assign(kCapacity, LiveRound{});
 	active_count = 0;
@@ -863,8 +873,15 @@ void RoundSim::present_fire(World &world, const RoundSpawnParams &params) {
 
 int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     RoundConsequenceMode mode) {
+    spawn_allocated_ = false;
     const AmmoTableEntry *ammo = world.tables.ammo.by_index(descriptor.ammo_index);
-    if (ammo == nullptr) return -1;
+    if (ammo == nullptr) {
+        // A row the table does not hold reads as retail's zeroed record: no flag
+        // leg, so the allocation still takes its id [orig: g_AmmoDefTable
+        //  + 276 * index @0x4EC146; CEntityManager_AllocateSlot @0x4EC388].
+        allocate_round_id(descriptor.shot_seq);
+        return -1;
+    }
     // The descriptor's pitch takes the shooter's zero elevation ahead of every
     // dispatch leg; the ring/presentation record keeps the angles it copied
     // before the spawn ran.
@@ -925,13 +942,19 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     imp.direction = direction;
                     imp.ammo_index = params.ammo_index;
                     // The leaf reads the ammo's own row at the tag's place
-                    // [orig: @0x4e88c3..0x4e88dc].
+                    // [orig: @0x4e88c3..0x4e88dc]. Its tag is the class or
+                    // the face byte + 4 with no clamp: the leaf never calls
+                    // AmmoDef_ProcessImpactEffect, and a tag past the table
+                    // reads no row (impact_effect_own_row) where retail reads
+                    // past the compacted bank.
                     imp.own_row = true;
                     if (hit.hit_class == ProjectileHitClass::Terrain) {
+                        // [orig: Weapon_RaycastAndSpawnImpact case 0
+                        //  @0x4e8858..0x4e8862]
                         const int32_t surface = terrain::surface_type_at_fixed(
                             world.tables.surface_map, hit.position_q16.x,
                             hit.position_q16.y);
-                        imp.effect_tag = terrain_impact_effect_tag(surface);
+                        imp.effect_tag = surface + kSurfaceImpactTagOffset;
                     } else if (hit.hit_class == ProjectileHitClass::Water) {
                         imp.effect_tag = kWaterImpactEffectTag;
                     } else if (hit.hit_class == ProjectileHitClass::Person &&
@@ -944,19 +967,28 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                         //  vs @0x4e8867]
                         imp.effect_tag = 23;
                     } else {
-                        imp.effect_tag = surface_impact_effect_tag(hit.surface_type);
+                        // [orig: `lea esi, [ebx+4]` @0x4e8867 (cases 1, 2)
+                        //  and @0x4e8880 (case 3)]
+                        imp.effect_tag = hit.surface_type + kSurfaceImpactTagOffset;
                     }
                     imp.tick = world.logic_tick;
                     imp.source_order = next_impact_order++;
                     play_round_impact_sound(world, imp);
                     impacts.push_back(imp);
-                    // The knife leaf feeds the same impact-effect processor,
-                    // so a stab into an entity leaves the same scar by the
-                    // ammo's `scar_type` [orig: Weapon_RaycastAndSpawnImpact
-                    // @0x4e8460 -> AmmoDef_ProcessImpactEffect @0x40a170 ->
-                    // Impact_SpawnGlassEffectsOrScar @0x5cf1b0].
-                    if (const Entity *struck = world.registry.get(hit.geometry_entity))
-                        scar_add_entry(world, hit, *struck, ammo->scar_type);
+                    // The leaf spawns its row's emitter and plays its sound,
+                    // and nothing more: it never reaches
+                    // AmmoDef_ProcessImpactEffect, Impact_SpawnGlassEffectsOrScar's
+                    // one caller; and the knife's kill zone strikes persons
+                    // only and skips the pool-1/2 walks the glass userpoint
+                    // scars sit in, so a stab leaves no scar
+                    // [orig: Weapon_RaycastAndSpawnImpact @0x4e88c3..0x4e896b,
+                    //  its CEffectWorld_SpawnEmitterAtPosition call @0x4e8950
+                    //  and Entity_PlaySound3D_FullVolume call @0x4e896b;
+                    //  AmmoDef_ProcessImpactEffect @0x40a170 (its
+                    //  Impact_SpawnGlassEffectsOrScar call @0x40a264);
+                    //  Projectile_ProcessExplosionQueue's type-1 skip
+                    //  @0x4eb340..0x4eb343; Entity_ApplyVehicleCollisionDamage
+                    //  @0x4e6620].
                 }
             }
         } else {
@@ -992,7 +1024,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         return spawn_burst(world, params, *ammo, mode);
     }
     const RoundSourceState source = resolve_round_source(world, params);
-    const WeaponTableEntry *weapon = world.tables.weapons.by_index(params.adm_index);
+    const WeaponTableEntry *weapon =
+            params.no_weapon ? nullptr : world.tables.weapons.by_index(params.adm_index);
     if ((ammo->flags & kAmmoFlagShotgun) != 0) {
         // Shotgun is a separate pellet-fan leaf: it never reads weapon ERROR or
         // the rules gate, but the ordinary ammo recoil is applied after the fan.
@@ -1003,6 +1036,12 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         apply_round_recoil(*ammo, source);
         return first;
     }
+    // The allocation stamps the round's id, which seeds its spread below; it
+    // follows the shotgun leg and precedes everything else, so the legs below
+    // that fly nothing here still take their id [orig: RoundData_SpawnRound ->
+    // CEntityManager_AllocateSlot @0x4EC388, which never fails; the seed
+    // round+0x78 @0x4EC394].
+    const uint16_t round_id = allocate_round_id(params.shot_seq);
     // Null/non-ballistic ammo spawns nothing at this altitude: the Knife(1)/Medic(3)
     // kill zones are the immediate-raycast leaves [orig: kztype dispatch @0x4ec21f],
     // `hasitem` ammo places an item entity instead of flying.
@@ -1040,13 +1079,18 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                 spread = io::bam_add(
                         spread, io::bam_sar(*source.weapon_weight_spread, 7));
             }
+            // The up/down limit keys on the raw prone bit, not the row: a
+            // prone body whose row a mask bit or a mount overrode still takes
+            // +0xD0 [orig: `cmp outZ, 0; jnz` @0x4EC44E, `cmp outX, 0; jnz`
+            // @0x4EC454 -> push +0xD0 @0x4EC493, else +0xCC @0x4EC46E /
+            // @0x4EC477, the two loaded @0x4EC3DD..0x4EC3ED].
             const int32_t vertical =
-                    (vertical_spread || category == 0)
+                    (vertical_spread || source.prone)
                             ? weapon->error_up_theta_fp16
                             : weapon->error_hip_theta_fp16;
             const RandomSpreadOffset offset =
                     weapon_calc_random_spread_offset(
-                            spread, params.shot_seq, vertical,
+                            spread, round_id, vertical,
                             (weapon->flags & weapon_flag::kUseSpreadTwo) != 0);
             final_yaw = io::bam_add(final_yaw, offset.yaw_bam);
             final_pitch = io::bam_add(final_pitch, offset.pitch_bam);
@@ -1056,7 +1100,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         // weapon-rule check and always uses the ordinary helper.
         // [orig: RoundData_SpawnRound @0x4EC0D0]
         const RandomSpreadOffset offset = weapon_calc_random_spread_offset(
-                ammo->spread_error_fp16, params.shot_seq, 0, false);
+                ammo->spread_error_fp16, round_id, 0, false);
         final_yaw = io::bam_add(final_yaw, offset.yaw_bam);
         final_pitch = io::bam_add(final_pitch, offset.pitch_bam);
     }
@@ -1095,7 +1139,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.ammo_index = params.ammo_index;
     r.adm_index = params.adm_index;
     r.mass_q16 = signed_from_u32(uint32_t(ammo->weight_in_grains) << 16) / 250;
-    r.shot_seq = params.shot_seq;
+    r.shot_seq = round_id;
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
     r.prev_z_q16 = to_fixed(params.origin.z); // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
@@ -1232,6 +1276,14 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
     const uint32_t base_pitch = static_cast<uint32_t>(params.dir_pitch_bam) & 0xFFFF0000u;
     int first_slot = -1;
     for (int n = 0; n < count; ++n) {
+        // Each pellet is its own allocation, whose id the fan's return hands the
+        // ring [orig: CEntityManager_AllocateSlot from Weapon_SpawnProjectileBurst
+        //  @0x4EB957 / ...WithSpread @0x4EBC10; the cursor returns @0x4EBB98 /
+        //  @0x4EBE6D].
+        const uint16_t pellet_id = allocate_round_id(params.shot_seq);
+        const int64_t pieslice = ammo.kz_pieslice_bam;
+        const uint16_t r1 = world.throwables.fan_prng();
+        const uint16_t r2 = world.throwables.fan_prng();
         int slot = -1;
         for (int i = 0; i < kCapacity; ++i) {
             if (!rounds[static_cast<size_t>(i)].active) {
@@ -1239,10 +1291,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
                 break;
             }
         }
-        if (slot < 0) break;
-        const int64_t pieslice = ammo.kz_pieslice_bam;
-        const uint16_t r1 = world.throwables.fan_prng();
-        const uint16_t r2 = world.throwables.fan_prng();
+        if (slot < 0) continue;
         int32_t yaw;
         int32_t pitch;
         if (shotgun_spread) {
@@ -1272,7 +1321,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.ammo_index = params.ammo_index;
         r.adm_index = params.adm_index;
         r.mass_q16 = signed_from_u32(uint32_t(ammo.weight_in_grains) << 16) / 250;
-        r.shot_seq = params.shot_seq;
+        r.shot_seq = pellet_id;
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
         r.prev_z_q16 = to_fixed(params.origin.z); // [orig: the spawn's +0x80 copy @0x4ec655]
@@ -1301,6 +1350,14 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
 // [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0]
 void RoundSim::process_damage_hit(World &world, LiveRound &r,
         const ProjectileHit &collision, FixedVec3 &velocity_q16) {
+    // A person the joiner keeps as a replica row: the client leg over the
+    // body retail's client built for it (world/wire_person_hit.cpp).
+    if (collision.hit_class == ProjectileHitClass::Person &&
+            !collision.geometry_entity.valid() &&
+            collision.wire_person_handle != EntityHandle::kInvalid) {
+        process_wire_person_hit(world, r, collision, velocity_q16);
+        return;
+    }
     const bool authoritative = r.consequence_mode == RoundConsequenceMode::Authoritative &&
             (!world.rules.mp_session || world.rules.projectile_authority);
     const bool not_armed = false;

@@ -94,7 +94,7 @@ protected:
 // A wave's audio as a stream's chunks (the music_stream_audio request): its samples made byte-paired stereo at 22050 a
 // second as the stream plays them (lwf::wave_stereo_pcm16: one channel on both sides, two kept, another rate
 // resampled as the wave importer resamples), the wave's full scale the stream's (an offset byte's whole range at
-// shift 0, which the decoder sounds at half the 16-bit range), encoded chunk by chunk (sbf::sbf_encode_stream).
+// shift 0, which the decoder sounds at +-127 * 256), encoded chunk by chunk (sbf::sbf_encode_stream).
 // `out.words` says what it was made from ("tone.wav (16-bit PCM, mono, 44100 Hz: the channel on both sides, resampled to 22050 Hz),
 // 2.0 s"). False, with `why`, for a wave that does not read, holds no sample, or has more than two channels.
 bool music_stream_audio_from_wave(const std::string &wave_name, const std::vector<uint8_t> &wave, MusicStreamAudioEdit &out,

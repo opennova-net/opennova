@@ -1,5 +1,5 @@
 // Mission-owned facial slots and GRM texture animation.
-// [orig: CScarDecal_Init @0x57F900; sub_57FDF0; CScarDecal_Update @0x57FA50]
+// [orig: CScarDecal_Init @0x57F900; FaceAnim_AllocEntitySlot; CScarDecal_Update @0x57FA50]
 #pragma once
 
 #include <formats/grm/grm.h>

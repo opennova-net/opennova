@@ -146,14 +146,15 @@ TextBlock layout_text_block(const TextExtent &extent, int line_height, const std
 	return out;
 }
 
-LoadingBarRects loading_bar_rects(float surface_w, float surface_h, int displayed) {
-	// The ratio in float (the shell's Vector2 division), the product truncated.
-	const float sx = surface_w / static_cast<float>(kDesignWidth);
-	const float sy = surface_h / static_cast<float>(kDesignHeight);
-	const int x = static_cast<int>(kLoadingBarX * static_cast<double>(sx));
-	const int y = static_cast<int>(kLoadingBarY * static_cast<double>(sy));
-	const int w = static_cast<int>(kLoadingBarW * static_cast<double>(sx));
-	const int h = static_cast<int>(kLoadingBarH * static_cast<double>(sy));
+LoadingBarRects loading_bar_rects(int surface_w, int surface_h, int displayed) {
+	// The placement and the extent each through the integer scaler [orig:
+	// LoadingScreen_UpdateAndPresent -- x, y stored @ 0x586c88 / @ 0x586c90 and scaled @ 0x586c98,
+	// w, h stored @ 0x586c78 / @ 0x586c80 and scaled @ 0x586cac, each through
+	// Viewport_ScaleToVirtualCoords @ 0x5d2b20].
+	const int x = design_to_screen_x(kLoadingBarX, surface_w);
+	const int y = design_to_screen_y(kLoadingBarY, surface_h);
+	const int w = design_to_screen_x(kLoadingBarW, surface_w);
+	const int h = design_to_screen_y(kLoadingBarH, surface_h);
 	LoadingBarRects out;
 	out.outer = {x, y, w + 6, h + 6};
 	out.gray = {x + 1, y + 1, w + 4, h + 4};

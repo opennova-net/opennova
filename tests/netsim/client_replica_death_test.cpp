@@ -47,11 +47,15 @@ void test_sub_block_0_timers_fold_and_retain() {
 	// The breath samples ride the same sub-block
 	// [orig: NapiNPClientMsg_0x00A @0x430104 -> word_A85B7C].
 	first.weapon.slot_state460 = 40;
+	// And the armory countdown, the USE-ITEM armory arm's refusal
+	// [orig: NapiNPClientMsg_0x00A @0x4300E3 -> g_ClientArmoryDelaySeconds].
+	first.weapon.slot_state356 = 30;
 	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(first));
 	CHECK(view.state().respawn_penalty_seconds == 7);
 	CHECK(view.state().local_revive_seconds == 120);
 	CHECK(view.state().spawn_hold_seconds == 3);
 	CHECK(view.state().breath_samples == 40);
+	CHECK(view.state().armory_reuse_seconds == 30);
 	// A phase-1 frame (the timer sub-block) leaves the phase-0 landings alone.
 	FrameUpdate timer;
 	timer.carried_handle = 0xFFFF;
@@ -64,12 +68,14 @@ void test_sub_block_0_timers_fold_and_retain() {
 	CHECK(view.state().local_revive_seconds == 120);
 	CHECK(view.state().spawn_hold_seconds == 3);
 	CHECK(view.state().breath_samples == 40);
+	CHECK(view.state().armory_reuse_seconds == 30);
 	// The next phase-0 frame replaces them.
 	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(phase0_frame(0, 119, 0)));
 	CHECK(view.state().respawn_penalty_seconds == 0);
 	CHECK(view.state().local_revive_seconds == 119);
 	CHECK(view.state().spawn_hold_seconds == 0);
 	CHECK(view.state().breath_samples == 0);
+	CHECK(view.state().armory_reuse_seconds == 0);
 }
 
 // [u8 groupCount] then { u16 zone, u16 index, u8 count, u16 countdown, u16 × count }.

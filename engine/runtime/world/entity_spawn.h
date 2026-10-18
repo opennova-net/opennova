@@ -19,7 +19,7 @@ class AiSystem;
 // the entity's health_max) as a signed 16-bit word. Outside a session
 // (@0x43B8AD) the local player's (@0x43B8C0) doubles at the difficulty word -1
 // (a 16-bit sum, @0x43B8CE..0x43B8D8) and halves toward zero at 1
-// (@0x43B8DC..0x43B8E9) [SessionRules::difficulty, dword_24D2110 @0x43B8C8].
+// (@0x43B8DC..0x43B8E9) [SessionRules::difficulty, g_SessionDifficulty @0x43B8C8].
 int32_t max_health_with_difficulty(const World &world, const Entity &e);
 // The same over a def hp the caller holds apart from the entity (the deploy's
 // player-table hp), the entity's definition taken as present.

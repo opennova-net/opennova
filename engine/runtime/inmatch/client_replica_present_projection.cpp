@@ -267,6 +267,67 @@ void project_client_replica_present_row(
 	world::write_present_person_overlays(row, world::person_overlays(overlay_inputs));
 }
 
+bool skeletal_pose_inputs_for_client(
+		const replication::ClientEntityState &entity,
+		const replication::ClientState &state,
+		const ClientReplicaPresentContext &context,
+		world::SkeletalPoseInputs &out) {
+	out = world::SkeletalPoseInputs{};
+	static const std::vector<mission::ItemSeatSpec> kNoSeatSpecs;
+	const auto &seat_specs = context.item_seat_specs != nullptr
+			? *context.item_seat_specs : kNoSeatSpecs;
+	bool collapse_right_hand = false;
+	if (!aim_overlay_inputs_for_client(
+				entity, state, seat_specs, out.overlay, &collapse_right_hand))
+		return false;
+	out.collapse_right_hand = collapse_right_hand;
+	// The projection's armed branch: the row's own primary channel, current,
+	// playhead and the blending source pair (variant 0, never parked).
+	if (entity.rm_adm_id < 0 || entity.rm_state < 0) return false;
+	out.primary_state = entity.rm_state;
+	out.primary_phase = entity.rm_phase;
+	if (entity.rm_blend_weight < 1.0f && entity.rm_prev_state >= 0) {
+		out.blend = true;
+		out.source_state = entity.rm_prev_state;
+		out.source_phase = entity.rm_prev_phase;
+		out.blend_weight = entity.rm_blend_weight;
+	}
+	// A player row's secondary channel, where the projection presents one.
+	if (entity.cls != EntityClass::Player || collapse_right_hand ||
+			(world::infantry_anim_flags(entity.anim_state_id) & 0x40u) == 0)
+		return true;
+	out.weapon = true;
+	if (entity.wpn_playing >= 0) {
+		out.weapon_state = entity.wpn_playing;
+		out.weapon_phase = entity.wpn_phase;
+		out.weapon_parked = entity.wpn_blend_weight >= 1.0f && entity.wpn_deferred != 0 &&
+				entity.wpn_deferred_boundary >= 0 &&
+				entity.wpn_deferred_boundary != world::kEndNotifyNeverLatches &&
+				entity.wpn_phase == entity.wpn_deferred_boundary;
+		if (entity.wpn_blend_weight < 1.0f && entity.wpn_prev >= 0) {
+			out.weapon_blend = true;
+			out.weapon_prev_state = entity.wpn_prev;
+			out.weapon_prev_phase = entity.wpn_prev_phase;
+			out.weapon_blend_weight = entity.wpn_blend_weight;
+		}
+		return true;
+	}
+	// Unarmed: the hold ladder's pose at frame 0.
+	int hold_kind = 0;
+	if (context.weapons != nullptr) {
+		if (const world::WeaponTableEntry *held =
+					context.weapons->by_index(entity.equipped_adm_index))
+			hold_kind = held->special_hold;
+	}
+	out.weapon_state = world::infantry_weapon_hold_state(
+			hold_kind, entity.anim_state_id,
+			(entity.state_flags & world::kEntityFlagScopeRaised) != 0,
+			(entity.state_flags & world::kEntityFlagBinoculars) != 0,
+			/*reloading=*/false);
+	out.weapon_phase = 0;
+	return true;
+}
+
 std::unordered_map<uint16_t, uint16_t> carried_object_types_by_carrier(
 		const replication::ClientState &state) {
 	std::unordered_map<uint16_t, uint16_t> out;

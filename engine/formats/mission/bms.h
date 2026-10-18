@@ -66,7 +66,7 @@ enum class ClimateType : uint32_t {
 
 // Mission attribute flags. A single 32-bit field (header offset 0x88) holding render/option flags plus
 // the game mode. The 11 game-mode bits are single-select; their union mask is 0xFF830000.
-// [orig: dfx2med.exe (DFX2 mission editor) sub_402770 — decode @0x4050c7 tests the bits in priority
+// [orig: dfx2med.exe (DFX2 mission editor) MissionGeneralInfo_DialogProc — decode @0x4050c7 tests the bits in priority
 // order to pick the armory combobox item; encode @0x4031cd does `and [x+0x1D4],0x7CFFFF` (== clear the
 // game-mode bits) then OR's exactly one. The option bits 0x1/0x2/0x4/0x8/0x20/0x40/0x100000/0x400000
 // read/write the SAME dword (some via byte accesses at +0x1D6), confirming one field, not two.]
@@ -108,12 +108,12 @@ inline bool has_flag(AttribFlags flags, AttribFlags test) {
 
 // --- Game mode: a single-select among the 11 attrib_flags mode bits ---------
 // kGameModeMask is their union — the complement of the editor's `and 0x7CFFFF`
-// clear. [orig: dfx2med.exe sub_402770 — encode @0x4031cd clears with
+// clear. [orig: dfx2med.exe MissionGeneralInfo_DialogProc — encode @0x4031cd clears with
 // `and [x+0x1D4],0x7CFFFF` then ORs exactly one bit]
 inline constexpr uint32_t kGameModeMask = 0xFF830000u;
 
 // The editor's decode priority: the combobox item is the FIRST set bit in this
-// order (none set = Single Player). [orig: sub_402770 decode @0x4050c7 tests
+// order (none set = Single Player). [orig: MissionGeneralInfo_DialogProc decode @0x4050c7 tests
 // the bits in exactly this order, dfx2med.exe]
 inline constexpr AttribFlags kGameModeDecodePriority[11] = {
     AttribFlags::Coop,
@@ -444,7 +444,7 @@ struct Header {
     char magic[4];                     // 'B','M','S', version byte (shipped JO = 19/0x13); gated by kMinVersion
     char mission_name[32];
     char designer[32];
-    char terrain[48];                  // [orig editor: 3x char[16] packed by Med_WriteBmsFile @0x44f920 (RAM a1+416/432/448)]
+    char terrain[48];                  // [orig editor: 3x char[16] packed by MIS_ExportBmsFile @0x44f920 (RAM a1+416/432/448)]
     char default_str[16];
     ClimateType climate;
     AttribFlags attrib_flags;
@@ -482,11 +482,11 @@ struct Header {
     int16_t unknown6;
     MissionType mission_type;
     uint8_t max_saves;
-    // [orig editor: win_scores[8] + lose_scores[8], each = value/100; Med_WriteBmsFile @0x44f920 Buffer[556..571]]
+    // [orig editor: win_scores[8] + lose_scores[8], each = value/100; MIS_ExportBmsFile @0x44f920 Buffer[556..571]]
     uint8_t win_scores[8];
     uint8_t lose_scores[8];
     float map_zoom;
-    int16_t area_trigger_count;        // [orig: word_A76410 @hdr+0x240] count of 32-byte area-trigger records
+    int16_t area_trigger_count;        // [orig: g_AreaTriggerCount @hdr+0x240] count of 32-byte area-trigger records
     uint16_t weapon_loadout_chunk_len; // [orig: word_A76412 @hdr+0x242] length of the weapon-loadout chunk
     uint16_t bonus_expiration;
     // [orig: word_A76416 @hdr+0x246] length of a SECOND chunk after the weapon loadout. The engine always
@@ -539,8 +539,8 @@ inline int32_t to_fixed_16_16(double v) {
     return static_cast<int32_t>(v * 65536.0);
 }
 
-// [orig editor: dfx2med.exe. Every offset CONFIRMED byte-exact by the packer Med_PackEntityRecord @0x44c8e0
-//  (RAM 448B -> disk 172B); canonical field NAMES come from the .mis text writer Med_WriteMisFile @0x454630
+// [orig editor: dfx2med.exe. Every offset CONFIRMED byte-exact by the packer MissionItem_PackBmsRecord @0x44c8e0
+//  (RAM 448B -> disk 172B); canonical field NAMES come from the .mis text writer MIS_SaveDocument @0x454630
 //  (literal keywords). Notes: yaw/pitch/roll stored % 360; w_accuracy1 clamped <= w_accuracy2; iai_name (name1)
 //  is from the graphic .def table (not per-entity); ai_textfile = name2; unk42b@166/unk43@168 are NEVER written
 //  (zero-filled) -> reserved/pad. write_mis_items in mission_mis_writer.cpp already uses the canonical names below; this is
@@ -661,16 +661,24 @@ struct WaypointRecord {
 };
 
 // The player's waypoint route is the FIRST waypoint path whose flags carry PlayerRoute, the pick the
-// world-state writer serializes for a team-1 recipient, over its first stops: min(marker_count, the
-// slots read, 128) compared as signed ints (a count of 2^31 or more walks none), each a marker's
-// index as the slot holds it (one past the markers names none) [orig:
-// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the scan stopping on the first hit @0x502e53, the
-// count capped at 128 @0x502efc].
+// world-state writer serializes for a team-1 recipient [orig: NetPacket_WriteWorldStateLoad0x0F
+// @0x502e50, the scan stopping on the first hit @0x502e53]. Its stops are the words the writer walks:
+// min(marker_count, 128) compared as signed ints (a count of 2^31 or more walks none) [orig: the cap
+// @0x502efc, @0x502f01, the walk's test @0x502f13..0x502f18], read 4 bytes a stop from the record's
+// slots on with no 32 bound (@0x502f1e, the step @0x502f70) through the 136-byte records the load
+// reads whole and end to end [orig: g_BmsWaypointPathTable @0xA71DD0, the stride 0x88 @0x502e59;
+// Mission_LoadBMSFile, the read @0x40fb60..0x40fb6a, a record of one stop flagged one-shot
+// @0x40fb72..0x40fbb2]: past the 32 slots the next record's flags as the load leaves them, its count
+// and its slots, and past the last record the header block the load read before the table [orig:
+// g_BmsHeaderBlock @0xA761D0, @0x502e61; read @0x40f56f..0x40f574]. Each word is a marker's index
+// looked up unchecked [orig: Pool_GetEntryUnchecked @0x441fc0, called @0x502f2d] (one past the markers
+// names none).
 inline constexpr size_t kPlayerRouteMaxStops = 128;
+struct File;
 bool is_player_route(const WaypointRecord& record);
-size_t player_route_stop_count(const WaypointRecord& record);
+std::vector<uint32_t> player_route_stops(const File& file);
 
-// [orig editor: Med_WriteBmsFile @0x44f920 packs each 32-byte group as: @0 flags (bit0/bit1 from the editor
+// [orig editor: MIS_ExportBmsFile @0x44f920 packs each 32-byte group as: @0 flags (bit0/bit1 from the editor
 //  group flags), @4=0, @8 = a value, @12 = constant 10, @16..28 = 0. The JO loader keeps @0/@8/@12; @12 is
 //  the literal 10, @0 a 2-bit flags, @8 the only free int (2026-06-06 grill).]
 // The loader reads each record into a stack buffer and copies only @0, @8 and @12 into the 48-byte runtime
@@ -683,7 +691,7 @@ size_t player_route_stop_count(const WaypointRecord& record);
 // hold, as the game loads such a file, and they hold the group's NAME (ADR 0046 S24 "Names"): a fixed-width
 // name, NUL-padded, the first 4 characters at @4..7 and the next 16 at @16..31, a full 20 with no terminator.
 // The original editor's .bms writer writes those bytes as zero on every save (@4 and @16..31, @12 the 10,
-// @0 its attrib's two bits, @8 its commander) [orig: JOTACmed.exe sub_44F920 @0x44f920, the group
+// @0 its attrib's two bits, @8 its commander) [orig: JOTACmed.exe MIS_ExportBmsFile @0x44f920, the group
 // @0x450940..0x4509b4], so a name survives the original editor in the .mis `description` it reads and
 // writes back (mission_mis.h), not in its .bms.
 constexpr size_t kGroupNameSize = 20;
@@ -695,7 +703,7 @@ struct GroupRecord {
 // A character a quoted .mis value carries as written: no control character, no double quote (both
 // stock readers toggle their quoting at one, with no escape) and no ';' (they cut the line at the
 // first, quoted or not) [orig: sub_10007AB0 @0x10007ab0 (the ';' @0x10007b25, the quote
-// @0x10007b81), misldr.dll; sub_463050 @0x463050 (@0x4630c9, @0x463131), JOTACmed.exe]. The one
+// @0x10007b81), misldr.dll; Config_TokenizeLine @0x463050 (@0x4630c9, @0x463131), JOTACmed.exe]. The one
 // rule every name the .mis carries keeps: a group's (set_group_name), a variable's, a wav list
 // slot's and an event's, area's or path's (mission_mis.h mis_name_allowed).
 bool mis_value_char(char ch);
@@ -712,7 +720,7 @@ bool set_group_name(GroupRecord& record, const std::string& name, std::string& e
 
 // The table after the groups: the original editor's wav list, a record per slot 0..31, each a
 // zeroed record with the slot's file name copied in at +4, 16 bytes of it reaching the file [orig:
-// JOTACmed.exe sub_44F920 @ 0x4509bc..0x450a14: the 32 records @ 0x4509c8, zeroed @
+// JOTACmed.exe MIS_ExportBmsFile @ 0x4509bc..0x450a14: the 32 records @ 0x4509c8, zeroed @
 // 0x4509d2..0x4509e2, the name's strcpy
 // @ 0x4509e8..0x4509f2, written @ 0x4509fb]; its slot's description never reaches it. The game
 // reads the table and drops it [orig: Mission_LoadBMSFile @0x40f4e0, the loop @0x40fc05..0x40fc38].
@@ -724,7 +732,7 @@ struct WavListRecord {
 };
 
 // 32-byte area-trigger / restriction-zone record.
-// [orig: read raw into unk_A32D10 by Mission_LoadBMSFile @0x40fc45 (no field interpretation at load).
+// [orig: read raw into g_AreaTriggers by Mission_LoadBMSFile @0x40fc45 (no field interpretation at load).
 //  The byte layout comes from the bounds-check consumers: Entity_IsTeamInTriggerBounds @0x43c75c,
 //  Entity_IsBmsRefInTriggerBounds @0x43e53b, Entity_IsLocalPlayerOutOfBounds @0x439d40 (zone_ptr =
 //  &unk_A32D14 = base+4; zone_ptr[6]&1 is the @28 flags). Bounds are INTERLEAVED per axis
@@ -830,6 +838,21 @@ struct Trigger {
         if (is_xor()) return "xor";
         return "and";
     }
+
+    // The parameter in `slot`, 0..3 for param1..param4; a slot past them holds none: it reads 0
+    // and takes nothing.
+    int32_t param(int slot) const {
+        return slot == 0 ? param1 : slot == 1 ? param2 : slot == 2 ? param3 : slot == 3 ? param4 : 0;
+    }
+    void set_param(int slot, int32_t value) {
+        switch (slot) {
+        case 0: param1 = value; break;
+        case 1: param2 = value; break;
+        case 2: param3 = value; break;
+        case 3: param4 = value; break;
+        default: break;
+        }
+    }
 };
 
 // [orig: EventAction_Dispatch @0x4542e0 — switch(action_type) reads param1..4 as actionEntry[3..6]]
@@ -847,6 +870,20 @@ struct Action {
     int32_t param3;
     int32_t param4;
     int32_t reserved1;
+
+    // The parameter in `slot`, as Trigger::param and Trigger::set_param.
+    int32_t param(int slot) const {
+        return slot == 0 ? param1 : slot == 1 ? param2 : slot == 2 ? param3 : slot == 3 ? param4 : 0;
+    }
+    void set_param(int slot, int32_t value) {
+        switch (slot) {
+        case 0: param1 = value; break;
+        case 1: param2 = value; break;
+        case 2: param3 = value; break;
+        case 3: param4 = value; break;
+        default: break;
+        }
+    }
 };
 
 // What a bounding box is to the game: its type, read by the player body's walk over the boxes (the
@@ -935,7 +972,7 @@ struct MisAreaMarker {
 enum class MisFrame : uint8_t {
 	// The .bms's: each entity's z absolute (the game's), its mis_extra_bheight a locked entity's
 	// base absolute, as the original editor keeps a locked item's through a terrain change
-	// (sub_402770 @ 0x402c9f..0x402ccd), an unlocked one's relative. A parsed .bms, a new File,
+	// (MissionGeneralInfo_DialogProc @ 0x402c9f..0x402ccd), an unlocked one's relative. A parsed .bms, a new File,
 	// and one mission::mis_items_to_bms_frame took here.
 	Bms,
 	// The .mis's as written: an unlocked entity's z and base relative to the terrain under it, a
@@ -948,7 +985,7 @@ struct File {
     Header header;
     WeaponLoadout loadout;
     // [orig: word_A76416 @hdr+0x246 bytes] second chunk after the weapon loadout (the engine seeks past it).
-    // [orig editor: Med_WriteBmsFile @0x44f920 builds it via Med_BuildItemAvailabilityChunk @0x432c00 — an
+    // [orig editor: MIS_ExportBmsFile @0x44f920 builds it via MIS_BuildWeaponAvailabilityChunk @0x432c00 — an
     //  ITEM-AVAILABILITY list: for each enabled entry in the item/weapon table, one record = name\0 + 1 status
     //  byte, terminated by an empty name. Sibling of the weapon-loadout chunk. Usually empty in
     //  shipped JO missions.]

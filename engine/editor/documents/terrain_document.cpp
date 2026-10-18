@@ -37,16 +37,9 @@ int *cells_of(const RecordHandle &record) { return &record.as<int>(); }
 
 // --- values -------------------------------------------------------------------------------------
 
+// A whole number from a Value (model/value.h whole_number: a real holding one within 9e15).
 bool whole_of(const Value &value, int64_t &out, std::string &error) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) {
-		out = *whole;
-		return true;
-	}
-	if (const auto *real = std::get_if<double>(&value); real && std::isfinite(*real) && std::floor(*real) == *real &&
-	                                                    std::fabs(*real) < 9.0e15) {
-		out = static_cast<int64_t>(*real);
-		return true;
-	}
+	if (whole_number(value, out)) return true;
 	error = "A whole number.";
 	return false;
 }
@@ -673,7 +666,7 @@ RecordTable make_table() {
 	foliage.spec.max = size_t(FOLIAGE_MAX_DEFS);
 	foliage.ops = vector_list<TerrainRow, FoliageDef>(
 			kFoliage, [](TerrainRow &row) -> std::vector<FoliageDef> & { return row.config.foliage_defs; }, fresh_foliage);
-	// The parser keeps four blocks [orig: Terrain_ParseConfigCallback @ 0x60F330, `dword_31BC900 < 4`].
+	// The parser keeps four blocks [orig: Terrain_ParseConfigCallback @ 0x60F330, `g_TerrainCfgFoliageBlocksClosed < 4`].
 	const auto insert = foliage.ops.insert;
 	foliage.ops.insert = [insert](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
 		if (row_of(owner).config.foliage_defs.size() >= size_t(FOLIAGE_MAX_DEFS)) {
@@ -944,6 +937,9 @@ constexpr FindingCodeEntry<TerrainFinding> kFindingEntries[] = {
 	// Save refused).
 	{ TerrainFinding::InvalidInput, unwritable_code("terrain.invalid_input") },
 	{ TerrainFinding::IgnoredInput, { "terrain.ignored_input", FindingFix::Rewrite, "with each line as the game reads it" } },
+	// The gate over the .trn alone here; over each mission's load (the .trn, overcast.def, the mission's .env) the
+	// use check's (graph/use_checks check_terrain_admission), which takes this row back where every mission
+	// reading the .trn loads it.
 	{ TerrainFinding::Refused,
 	  game_fails_code("terrain.refused",
 	                  "the terrain's load refuses the config, and the mission does not start [orig: Game_StartMission "

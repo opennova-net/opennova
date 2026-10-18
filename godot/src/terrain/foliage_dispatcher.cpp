@@ -19,6 +19,8 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/io/bam.h>
+#include <base/io/fixed.h>
+#include <formats/foliage/runtime.h>
 #include <runtime/terrain/foliage_detail_collector.h>
 
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -59,31 +61,11 @@ namespace godot {
 namespace {
 
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
-// The witnessed detail trio (limit / cell / cap) is engine-owned:
-// terrain/foliage_detail_collector.h carries the [orig] witness.
-constexpr float DETAIL_DISTANCE_LIMIT = opennova::kFoliageDetailDistanceLimit;
-constexpr float PREVIEW_CELL_SIZE =
-		static_cast<float>(opennova::kFoliageDetailCellSize);
-constexpr int PREVIEW_CELL_RADIUS = 4;
-constexpr int PREVIEW_CELL_LIMIT = opennova::kFoliageDetailPatchCapacity;
-
-bool valid_height(float p_height) {
-  return std::isfinite(p_height) && p_height > INVALID_HEIGHT_THRESHOLD;
-}
 
 bool finite_vector(const Vector3 &p_value) {
   return std::isfinite(static_cast<float>(p_value.x)) &&
          std::isfinite(static_cast<float>(p_value.y)) &&
          std::isfinite(static_cast<float>(p_value.z));
-}
-
-uint32_t pack_preview_detail_key(int p_cell_min_x, int p_cell_min_z) {
-  // The same packing as the runtime collector: HIGH15 = the cell's X-min,
-  // LOW15 = its Z-min (engine/runtime/terrain/foliage_detail_collector.cpp
-  // carries the witness).
-  const uint32_t x = static_cast<uint32_t>(p_cell_min_x) & 0x7FFFu;
-  const uint32_t z = static_cast<uint32_t>(p_cell_min_z) & 0x7FFFu;
-  return (x << 16u) | z;
 }
 
 // The pass names and per-draw uniform names the applier writes every frame.
@@ -123,11 +105,6 @@ const DrawUniformNames &draw_uniform_names() {
   return names;
 }
 
-int32_t decode_foliage_cell_axis(uint32_t p_packed) {
-  const int32_t value = static_cast<int32_t>(p_packed & 0x7FFFu);
-  return (value & 0x4000) != 0 ? value - 0x8000 : value;
-}
-
 // The material set of one water side: 0 = the far side, 1 = the camera's.
 size_t side_index(bool p_far_side) { return p_far_side ? 0u : 1u; }
 
@@ -139,8 +116,9 @@ static_assert(sizeof(opennova::renderer::FoliageModelInstance) ==
               "a MultiMesh TRANSFORM_3D + custom instance is the block");
 
 Vector2 foliage_detail_cell_center(uint32_t p_cell_key) {
-  const int32_t minimum_x = decode_foliage_cell_axis(p_cell_key >> 16u);
-  const int32_t minimum_z = decode_foliage_cell_axis(p_cell_key);
+  const int32_t minimum_x =
+      opennova::foliage::decode_detail_cell_axis(p_cell_key >> 16u);
+  const int32_t minimum_z = opennova::foliage::decode_detail_cell_axis(p_cell_key);
   return Vector2(static_cast<float>(minimum_x) + 8.0f,
                  static_cast<float>(minimum_z) + 8.0f);
 }
@@ -225,8 +203,6 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::get_silhouette_anchors);
   ClassDB::bind_method(D_METHOD("render_frame", "camera_xform", "time_ms"),
                        &FoliageDispatcher::render_frame);
-  ClassDB::bind_method(D_METHOD("render_preview", "camera_xform", "time_ms"),
-                       &FoliageDispatcher::render_preview);
   ClassDB::bind_method(
       D_METHOD("render_inset_frame", "camera", "anchors", "time_ms"),
       &FoliageDispatcher::render_inset_frame);
@@ -255,9 +231,6 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::clear_asset_cache);
   ClassDB::bind_method(D_METHOD("asset_cache_entry_count"),
                        &FoliageDispatcher::asset_cache_entry_count);
-  ClassDB::bind_method(
-      D_METHOD("list_graphics", "resource_root", "force_refresh"),
-      &FoliageDispatcher::list_graphics, DEFVAL(false));
   ClassDB::bind_method(D_METHOD("resolve_slot_meshes", "resource_root", "defs"),
                        &FoliageDispatcher::resolve_slot_meshes);
   ClassDB::bind_method(
@@ -613,20 +586,6 @@ bool FoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
 
 // --- The vegetation asset resolver (the former veg_assets.gd) ---------------
 
-void VegGraphicRow::_bind_methods() {
-  ClassDB::bind_method(D_METHOD("get_basename"), &VegGraphicRow::get_basename);
-  ClassDB::bind_method(D_METHOD("set_basename", "value"),
-                       &VegGraphicRow::set_basename);
-  ClassDB::bind_method(D_METHOD("get_model_path"),
-                       &VegGraphicRow::get_model_path);
-  ClassDB::bind_method(D_METHOD("set_model_path", "value"),
-                       &VegGraphicRow::set_model_path);
-  ADD_PROPERTY(PropertyInfo(Variant::STRING, "basename"), "set_basename",
-               "get_basename");
-  ADD_PROPERTY(PropertyInfo(Variant::STRING, "model_path"), "set_model_path",
-               "get_model_path");
-}
-
 void FoliageDispatcher::configure_slots_from_defs(
     const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
   check_asset_cache_epoch();
@@ -656,7 +615,7 @@ void FoliageDispatcher::clear_asset_cache() {
   asset_mesh_cache_.clear();
   asset_fd_texture_cache_.clear();
   asset_model_path_cache_.clear();
-  asset_graphics_cache_by_root_.clear();
+  asset_listed_roots_.clear();
 }
 
 void FoliageDispatcher::check_asset_cache_epoch() {
@@ -673,23 +632,20 @@ int FoliageDispatcher::asset_cache_entry_count() {
   return static_cast<int>(asset_mesh_cache_.size() +
                           asset_fd_texture_cache_.size() +
                           asset_model_path_cache_.size() +
-                          asset_graphics_cache_by_root_.size());
+                          asset_listed_roots_.size());
 }
 
-TypedArray<VegGraphicRow>
-FoliageDispatcher::list_graphics(const Ref<ResourceRoot> &p_resource_root,
-                                 bool p_force_refresh) {
-  check_asset_cache_epoch();
+void FoliageDispatcher::_list_graphics(
+    const Ref<ResourceRoot> &p_resource_root) {
   if (p_resource_root.is_null() ||
       p_resource_root->get_root_dir().is_empty()) {
-    return TypedArray<VegGraphicRow>();
+    return;
   }
   const String key = _asset_root_key(p_resource_root);
-  if (!p_force_refresh && asset_graphics_cache_by_root_.has(key)) {
-    return asset_graphics_cache_by_root_[key].duplicate();
+  if (asset_listed_roots_.has(key)) {
+    return;
   }
 
-  TypedArray<VegGraphicRow> out;
   HashMap<String, bool> seen;
   const Array entries = p_resource_root->list_file_entries(".3di");
   for (int64_t i = 0; i < entries.size(); ++i) {
@@ -705,25 +661,8 @@ FoliageDispatcher::list_graphics(const Ref<ResourceRoot> &p_resource_root,
     }
     seen[basename] = true;
     asset_model_path_cache_[_asset_cache_key(key, basename)] = model_ref;
-    Ref<VegGraphicRow> row;
-    row.instantiate();
-    row->set_basename(basename);
-    row->set_model_path(model_ref);
-    out.push_back(row);
   }
-  // Sorted by basename (the former sort_custom over `a.basename < b.basename`).
-  for (int64_t i = 1; i < out.size(); ++i) {
-    const Ref<VegGraphicRow> key_row = out[i];
-    int64_t j = i - 1;
-    while (j >= 0 &&
-           key_row->get_basename() < Ref<VegGraphicRow>(out[j])->get_basename()) {
-      out[j + 1] = out[j];
-      --j;
-    }
-    out[j + 1] = key_row;
-  }
-  asset_graphics_cache_by_root_[key] = out;
-  return out.duplicate();
+  asset_listed_roots_[key] = true;
 }
 
 Array FoliageDispatcher::resolve_slot_meshes(
@@ -945,7 +884,7 @@ String FoliageDispatcher::_find_model_path(
   if (asset_model_path_cache_.has(path_key)) {
     return asset_model_path_cache_[path_key];
   }
-  list_graphics(p_resource_root);
+  _list_graphics(p_resource_root);
   if (asset_model_path_cache_.has(path_key)) {
     return asset_model_path_cache_[path_key];
   }
@@ -1741,16 +1680,6 @@ void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform, int64_t 
   _compile_and_apply(view);
 }
 
-void FoliageDispatcher::render_preview(const Transform3D &p_camera_xform, int64_t p_time_ms) {
-  frame_stats_ = FrameStats{};
-  frame_stats_.frame_calls = ++total_frame_calls_;
-  frame_stats_.preview_detail_source = true;
-
-  opennova::renderer::FoliageViewInput view = _view_input(p_camera_xform, p_time_ms);
-  view.detail_cells = _preview_cells(p_camera_xform.origin);
-  _compile_and_apply(view);
-}
-
 opennova::renderer::FoliageViewInput
 FoliageDispatcher::_view_input(const Transform3D &p_camera_xform, int64_t p_time_ms) const {
   opennova::renderer::FoliageViewInput input;
@@ -1790,79 +1719,6 @@ FoliageDispatcher::_view_input(const Transform3D &p_camera_xform, int64_t p_time
     });
   }
   return input;
-}
-
-std::vector<opennova::foliage::DetailCell>
-FoliageDispatcher::_preview_cells(const Vector3 &p_camera_position) const {
-  std::vector<opennova::foliage::DetailCell> cells;
-  const int camera_cell_x = static_cast<int>(
-      std::floor(static_cast<float>(p_camera_position.x) / PREVIEW_CELL_SIZE));
-  const int camera_cell_z = static_cast<int>(
-      std::floor(static_cast<float>(p_camera_position.z) / PREVIEW_CELL_SIZE));
-
-  for (int cell_z = camera_cell_z - PREVIEW_CELL_RADIUS;
-       cell_z <= camera_cell_z + PREVIEW_CELL_RADIUS; ++cell_z) {
-    for (int cell_x = camera_cell_x - PREVIEW_CELL_RADIUS;
-         cell_x <= camera_cell_x + PREVIEW_CELL_RADIUS; ++cell_x) {
-      const float min_x = static_cast<float>(cell_x) * PREVIEW_CELL_SIZE;
-      const float min_z = static_cast<float>(cell_z) * PREVIEW_CELL_SIZE;
-      const float max_x = min_x + PREVIEW_CELL_SIZE;
-      const float max_z = min_z + PREVIEW_CELL_SIZE;
-      const float closest_x =
-          std::clamp(static_cast<float>(p_camera_position.x), min_x, max_x);
-      const float closest_z =
-          std::clamp(static_cast<float>(p_camera_position.z), min_z, max_z);
-      const float dx = static_cast<float>(p_camera_position.x) - closest_x;
-      const float dz = static_cast<float>(p_camera_position.z) - closest_z;
-      const float horizontal_distance_squared = dx * dx + dz * dz;
-      if (horizontal_distance_squared >
-          DETAIL_DISTANCE_LIMIT * DETAIL_DISTANCE_LIMIT) {
-        continue;
-      }
-      // Runtime's Terrain_CollectNearFoliagePatches measures the camera in
-      // three dimensions against each 16-unit patch's representative terrain
-      // height. The editor has no live height mipchain, so use the surface at
-      // the patch center as a live approximation instead of treating every
-      // camera as ground-level. This is especially important for Mission's
-      // default aerial framing: XZ-only distance expanded thousands of cards.
-      const float center_y =
-          _sample_height((min_x + max_x) * 0.5f, (min_z + max_z) * 0.5f);
-      if (!valid_height(center_y)) {
-        continue;
-      }
-      const float dy = static_cast<float>(p_camera_position.y) - center_y;
-      const float distance =
-          std::sqrt(horizontal_distance_squared + dy * dy);
-      if (distance > DETAIL_DISTANCE_LIMIT) {
-        continue;
-      }
-
-      // The preview's one sampled height stands in for the leaf's maximum,
-      // and without a sector routing its world minimum stands in for the
-      // atlas minimum.
-      cells.push_back(opennova::foliage::DetailCell{
-          pack_preview_detail_key(static_cast<int>(min_x),
-                                  static_cast<int>(min_z)),
-          distance,
-          center_y,
-          static_cast<int32_t>(min_x),
-          static_cast<int32_t>(min_z),
-      });
-    }
-  }
-
-  std::sort(cells.begin(), cells.end(),
-            [](const opennova::foliage::DetailCell &p_left,
-               const opennova::foliage::DetailCell &p_right) {
-              if (p_left.camera_distance != p_right.camera_distance) {
-                return p_left.camera_distance < p_right.camera_distance;
-              }
-              return p_left.key < p_right.key;
-            });
-  if (cells.size() > PREVIEW_CELL_LIMIT) {
-    cells.resize(PREVIEW_CELL_LIMIT);
-  }
-  return cells;
 }
 
 opennova::foliage::WorldSamplers FoliageDispatcher::_world_samplers() {
@@ -1919,14 +1775,14 @@ int FoliageDispatcher::_sample_detail_foliage_index(
   }
   if (detail_foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / opennova::io::kFp16OneD);
+    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / opennova::io::kFp16OneD);
     return static_cast<int>(detail_foliage_sampler_.callv(arguments));
   }
   if (foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / opennova::io::kFp16OneD);
+    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / opennova::io::kFp16OneD);
     return static_cast<int>(foliage_sampler_.callv(arguments));
   }
   if (colormap_source_.is_valid()) {
@@ -1947,8 +1803,8 @@ int FoliageDispatcher::_sample_model_foliage_index(
   }
   if (foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_world_x_fixed) / opennova::io::kFp16OneD);
+    arguments.push_back(static_cast<double>(p_world_z_fixed) / opennova::io::kFp16OneD);
     return static_cast<int>(foliage_sampler_.callv(arguments));
   }
   if (colormap_source_.is_valid()) {
@@ -2183,9 +2039,8 @@ void FoliageDispatcher::_apply_draw_list(
     }
     // A detail patch borrows its t1 from the terrain page the point lookup
     // finds for it; a patch with no resident page is not drawn at all (the
-    // lookup's null result skips the patch's slot draw), so under a Terrain
-    // there is no cold fallback. Only a terrain-less preview draws through
-    // the analytic colormap. Retail Foliage_RenderDetailPatches @ 0x609de0:
+    // lookup's null result skips the patch's slot draw), so there is no cold
+    // fallback. Retail Foliage_RenderDetailPatches @ 0x609de0:
     // the Terrain_FindSectorPatchRT lookup (the call @ 0x60a1de), the null
     // skip @ 0x60a1e6..0x60a1e8 to the slot loop's next iteration @ 0x60a6a2.
     // The lookup reads the patch key's source-atlas halves and the routed

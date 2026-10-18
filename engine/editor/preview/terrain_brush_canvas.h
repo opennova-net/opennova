@@ -104,7 +104,7 @@ private:
 
 // The original editor's depth pixel under a mission point (x east, y north, metres) over the terrain's sector grid
 // `layout`: the atlas texel of its column, the second axis down the map one further, the quadrant its sector places
-// added; (0, 0) over an empty sector [orig: JOTACmed.exe sub_4228B0 @ 0x4228b0, shown by sub_417B30 @ 0x417c57 as
+// added; (0, 0) over an empty sector [orig: JOTACmed.exe MapView_GetDepthPixelAtCursor @ 0x4228b0, shown by MapView_Present @ 0x417c57 as
 // "Depth Pixel X: %3d Y: %3d"]. The sector is the game's own lookup's (coords_resolve_sector: past the grid, & 15 on
 // an axis the terrain wraps, else clamped to 0..15, as MED's index is clamped where its extent mask meets it @
 // 0x4229ae..0x4229c6). False where the layout has no grid.

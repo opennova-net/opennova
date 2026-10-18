@@ -74,9 +74,9 @@ public:
 private:
 	// The options applied to the overlay as it last applied them (a configure applies them all again).
 	void apply_options_(const opennova::editor::HudViewport &hud);
-	// The sights' frame (the scope readouts, the card, the mask), and the Tab board on the clock's tick.
+	// The sights' frame (the scope readouts, the card, the mask), and the Tab board.
 	void apply_sights_(const opennova::editor::HudViewport &hud);
-	void apply_board_(const opennova::editor::HudViewport &hud, int64_t ticks);
+	void apply_board_(const opennova::editor::HudViewport &hud);
 	// The backdrop's pixels scaled by the screen's stretch over the picture (preview_backdrop's backdrop_pixel_scale).
 	void scale_backdrop_();
 

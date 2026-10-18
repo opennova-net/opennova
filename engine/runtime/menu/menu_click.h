@@ -71,7 +71,7 @@ inline bool menu_pump_part_scroll(int part) {
 
 // Whether a press reaching a widget of the type takes the capture: the classes whose own-name press
 // reaches CButtonWnd_HandleNamedEvent [orig: BUTTON's own handler @ 0x658340; CHECKBOX
-// CCheckboxWnd_HandleNamedEvent @ 0x64ac4e; RADIO radio_button_on_click @ 0x656e0a; LIST and
+// CCheckboxWnd_HandleNamedEvent @ 0x64ac4e; RADIO CRadioWnd_OnClick @ 0x656e0a; LIST and
 // LAN_LIST list_wnd_on_command @ 0x643f19 (lan_browser_button_click_handler @ 0x65bbba); TABLE
 // CTableWnd_HandleNamedEvent @ 0x642734; SPINLIST CSpinListWnd_HandleEvent @ 0x64c43e]. STATIC, the
 // generic window, EDIT, MULTILINE_EDIT, COMBOBOX, MARQUEE, GOPHER, RADIOEDIT, GLB_TABLE and SCROLL's

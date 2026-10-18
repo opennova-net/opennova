@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <base/io/fixed.h>
 
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/mission_camera.h>
@@ -192,6 +193,12 @@ String MissionViewportApplier::graphic_of_(int64_t item) {
 	const Ref<ItemDatabase> items = placer_->get_item_db();
 	if (items.is_null() || !items->has_item(int(item))) return String();
 	return placer_->graphic_for(int(item));
+}
+
+// The entity's own x / y words: the scene's positions are the document's 16.16 words as doubles
+// (exact), so rounding gives the words back.
+static opennova::mission::StaticSourceOrigin origin_words_of(const MissionEntityMark &entity) {
+	return { opennova::io::float_to_fp16_16_round_sat(entity.x), opennova::io::float_to_fp16_16_round_sat(entity.y) };
 }
 
 Transform3D MissionViewportApplier::transform_of_(const MissionEntityMark &entity) const {
@@ -481,6 +488,7 @@ void MissionViewportApplier::run_place_begin_(const MissionScene &scene, Build &
 		row.ai_flags = entity.attributes;
 		row.position = Vector3(float(entity.x), float(entity.y), float(entity.z));
 		row.rotation_deg = Vector3(float(entity.pitch), float(entity.yaw), float(entity.roll));
+		row.origin_q16 = origin_words_of(entity);
 		rows.push_back(row);
 		Placed placed;
 		placed.item = entity.item;
@@ -539,6 +547,7 @@ ObjectModel *MissionViewportApplier::lift_(const MissionEntityMark &entity, int 
 	row.ai_flags = entity.attributes;
 	row.position = Vector3(float(entity.x), float(entity.y), float(entity.z));
 	row.rotation_deg = Vector3(float(entity.pitch), float(entity.yaw), float(entity.roll));
+	row.origin_q16 = origin_words_of(entity);
 	return placer_->build_entity_model(row, lifted_root_, vformat("Lifted_%d", int64_t(entity.row)));
 }
 
@@ -853,7 +862,7 @@ void MissionViewportApplier::flush_shadows_(const MissionScene &scene) {
 		if (found == entities_.end() || !entity) continue;
 		// A placed entity's source by its pool and index at the placement, a lifted one's by its key.
 		placer_->update_static_terrain_shadow_source_transform(static_cast<MissionData::EntityKind>(found->second.kind),
-				found->second.index, transform_of_(*entity));
+				found->second.index, transform_of_(*entity), origin_words_of(*entity));
 	}
 	shadow_pending_.clear();
 	// The moved entities' lights where they stand now (the game's are spawn-fixed: spawned again).

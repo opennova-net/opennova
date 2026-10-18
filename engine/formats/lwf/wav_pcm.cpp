@@ -62,7 +62,7 @@ uint32_t loader_pitch_q16(uint32_t rate) {
 // (((play * factor) >> 16) * pitch + 0x400000) >> 23, the factor (44100 << 16) / device, and forces a
 // step of 0 to 1 [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd5f6..0x7bd60e, @ 0x7bd619..0x7bd61d;
 // AudioMixer_Init @ 0x7bd381..0x7bd393], a step counted in 1/512 of a sample: the position starts at
-// -(count << 9) - step [orig: sub_7BD671 @ 0x7bd684..0x7bd689], the mix loop adds the step to it each
+// -(count << 9) - step [orig: AudioChannel_BindSampleBuffer @ 0x7bd684..0x7bd689], the mix loop adds the step to it each
 // device frame (channel 0's self-patched `add eax, step` @ 0x7bdd9e, the step stored through
 // off_79CBFC at 0x7bdd9f) and reads the sample at the position >> 9 (`sar eax, 9` @ 0x7bddc6). A
 // pitch of 0 plays 1/512 of a sample a device frame, whatever the play factor. The device runs at
@@ -87,10 +87,10 @@ constexpr uint32_t kDeviceFactor = 0x10000u;
 // [orig: Audio_LoadWavFileFromArchive @ 0x766480, the magic @ 0x7664e2, the copy @ 0x7664e9..0x766511]:
 // the header its RIFF decodes write (@ 0x766603..0x76663c, @ 0x766708..0x766745,
 // @ 0x7667b4..0x7667f0), read as the mixer's channel set-up reads it, the sample count at +4
-// [orig: sub_7BD671 @ 0x7bd67f], the pitch ratio to the 44100 Hz device in Q16 at +8
+// [orig: AudioChannel_BindSampleBuffer @ 0x7bd67f], the pitch ratio to the 44100 Hz device in Q16 at +8
 // [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd603] and the samples from +16, signed (the
 // RIFF form's 8-bit bias already taken off), 16-bit where the byte at +12 is 2 and 8-bit for any
-// other byte there [orig: sub_7BD671 @ 0x7bd692], their volume shifted down by the byte at +13 [orig:
+// other byte there [orig: AudioChannel_BindSampleBuffer @ 0x7bd692], their volume shifted down by the byte at +13 [orig:
 // AudioChannel_ComputeMixCoefficients @ 0x7bd5e6]. The copy is the bytes' own size; where they end inside
 // the header or before the count's samples the loader's pad and the mixer read on past them
 // (unwitnessed): ours refuses the first and plays the samples present of the second, the count

@@ -219,7 +219,7 @@ public:
 	Node *world() const;
 
 	Ref<MissionFrameInput> before_world_tick(double p_delta, bool p_capture_mouse = false,
-			bool p_gameplay_input_active = true);
+			bool p_gameplay_input_active = true, bool p_menu_open = false);
 	void after_world_tick();
 	// Present one simulation tick's weapon batch before EffectWorld advances
 	// that same tick (the ex fixed-tick consumer: GameWorld's effect fan-out calls it
@@ -236,6 +236,11 @@ public:
 	// debug pick rides Shift+F6; the tools window opening mid-hold): the
 	// router's release edge then runs no mount toggle.
 	void consume_use_hold();
+	// The held USE row's armory arm took its open this frame (PlayerInputRouter::
+	// take_armory_request); reading clears it.
+	bool take_use_item_armory_request();
+	// A menu close's input reset (PlayerInputRouter::reset_input_state).
+	void reset_input_state();
 	// Mouse-look rides the input router: raw pixel deltas into the SIM's
 	// witnessed integer pipeline (engine: runtime/world/local_player.cpp).
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);

@@ -24,15 +24,6 @@ constexpr NodeKind kClass = node_kind(CharAttrKind::Class);
 
 const charattr::ClassRow &class_of(const RecordHandle &r) { return r.as<charattr::ClassRow>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 // The camouflage keys, by the mission's camouflage they serve (charattr::cammo_property_for_camouflage: the BMS
 // camouflage selector 1 JUNGLE_CAMMO (10), 2 ARCTIC_CAMMO (12), any other DESERT_CAMMO (11) [orig:
 // Entity_SpawnFromAnimSlotProperty @ 0x43c399..0x43c3be]).
@@ -388,7 +379,7 @@ std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document) {
 			            "' is no attribute (AutoScope, SpreadBonus, KnifeBonus, Medic, WaterGirl): the class gets nothing for it.",
 			    word.offset);
 		}
-		// A number key's value the reader classifies as text reads 0 [orig: effect_get_param_value_0 @ 0x75fb3d].
+		// A number key's value the reader classifies as text reads 0 [orig: Effect_GetParamValue_0 @ 0x75fb3d].
 		for (const KeyWords &key : kKeyWords) {
 			const charattr::ValueSource &value = source.values[key.property];
 			if (!value.read || configfile::classify_numeric(value.written) != 0) continue;
@@ -428,8 +419,11 @@ std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document) {
 		if (!doc->dirty() && composed && pool_of(saved).overrun() == 0)
 			words += " Saving it writes the table in the editor's form, from what the game reads of it, which holds " +
 			         std::to_string(pool_of(saved).values) + " values: under the line.";
-		Diagnostic d = make_finding(CoreFinding::DocumentConfigOverrun, DiagnosticSeverity::Error, std::move(words),
-		                            document.path());
+		// Past the block's 36-byte slack it gates; within it, a warning (configfile::fastmem_overrun_reaches_header).
+		Diagnostic d = make_finding(CoreFinding::DocumentConfigOverrun,
+		                            configfile::fastmem_overrun_reaches_header(pool.overrun()) ? DiagnosticSeverity::Error
+		                                                                                       : DiagnosticSeverity::Warning,
+		                            std::move(words), document.path());
 		d.line = line_of(packed, configfile::data_strings_overrun_offset(sections, pool));
 		findings.push_back(std::move(d));
 	}

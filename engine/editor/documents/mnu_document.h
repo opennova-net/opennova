@@ -150,6 +150,10 @@ protected:
 	Applicability list_applies(const Node &row, const Located &owner, size_t list) const override;
 	// A text of a code-page menu read as UTF-8 (the model holds the code page's bytes).
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
+	// A held record's applies (by its context, context_of) and reference (the record alone): the menu's
+	// functions read no owners of it (mnu_table's labelled).
+	bool refine_held(const Node &row, const NodeAddress &address, const Held &at, const TableKind &kind, size_t place,
+	                 FieldUse &use) const override;
 	// A text stored as the model holds it (a code-page menu's in Windows-1252, a character it lacks
 	// refused), its width counted in the game's characters (the reader narrows every text to the code
 	// page). A window's TYPE makes the window what the new type reads of it (menu_set_window_type): what
@@ -182,6 +186,36 @@ private:
 	// Whether the model holds the code page's bytes (a menu with no byte order mark, mnu.h's
 	// SourceEncoding::CodePage) rather than UTF-8.
 	bool code_page_model() const;
+	// Where a held record of a committed row sits (menu_context), worked out once from its owner's and
+	// kept while the document's state stands: a window thousands of levels deep is read without walking
+	// the windows above it.
+	const MenuContext &context_of(const Node &row, NodeId record, const Held &at) const;
+	// The record an address names on a screen row, of the kind it says, and where it sits: held for a
+	// committed row (context_of), else found by its path.
+	bool sited(const NodeAddress &address, RecordHandle &record, MenuContext &context) const;
+	// The document windows of a screen row in pre-order (the frame compiler's widget order), with each
+	// window's place among them: a committed row's kept while the document's state stands, any other
+	// row's walked at each ask.
+	struct Preorder {
+		std::vector<NodeId> windows;
+		std::unordered_map<NodeId, size_t> places;
+	};
+	const Preorder &preorder(const Node &screen) const;
+	struct Preorders {
+		uint64_t load_generation = 0, revision = 0;
+		std::unordered_map<const Node *, Preorder> rows;
+		Preorder walked; // the last row walked that the document does not hold as committed
+	};
+	mutable Preorders preorders_;
+	struct Contexts {
+		uint64_t load_generation = 0, revision = 0;
+		struct Entry {
+			MenuContext context;
+			bool rooted = false; // under a root window (a screen's records hold no context)
+		};
+		std::unordered_map<const Node *, std::unordered_map<NodeId, Entry>> rows;
+	};
+	mutable Contexts contexts_;
 	struct SavedImage {
 		bool made = false;
 		uint64_t load_generation = 0, revision = 0;

@@ -13,6 +13,7 @@
 #include "common/file_io.h"
 #include "common/gp_model_bytes.h"
 #include "common/retail_paths.h"
+#include "common/temp_dir.h"
 #include "common/test_expect.h"
 
 #include <cmath>
@@ -160,6 +161,13 @@ int synthetic_gpp() {
 	TEST_EXPECT(lod.render_objects[0].num_strips == 1 && lod.render_objects[1].num_strips == 0);
 	TEST_EXPECT(std::strcmp(m.materials[0].shader_name, "VS_SKBASIC") == 0);
 	threedi_3di3_free(&m);
+	// A palette length past the 16 matrices a strip's table holds (the +47 byte takes any value): refused,
+	// never written as a 3DI3 our reader refuses; 16 still migrates.
+	file.lods[0].primitives[0].palette_length = 16;
+	TEST_EXPECT(gp::migrate(file, out, notes, error));
+	file.lods[0].primitives[0].palette_length = 17;
+	out.clear();
+	TEST_EXPECT(!gp::migrate(file, out, notes, error) && error.find("more than 16") != std::string::npos);
 	return 0;
 }
 
@@ -196,17 +204,14 @@ int rejections() {
 
 // The files beside a model, listed once, found without case; a folder that is not there holds none.
 int files_beside() {
-	std::error_code ec;
-	const std::filesystem::path dir = std::filesystem::temp_directory_path(ec) / "opennova_threedi_gp_beside";
-	std::filesystem::remove_all(dir, ec);
-	std::filesystem::create_directories(dir, ec);
+	test_temp::TempDir temp("opennova_threedi_gp_beside");
+	const std::filesystem::path dir = temp.path;
 	std::FILE *f = std::fopen((dir / "Bump.MDT").string().c_str(), "wb");
 	TEST_EXPECT(f != nullptr);
 	std::fclose(f);
 	const auto beside = gp::names_beside((dir / "model.3di").string());
 	TEST_EXPECT(beside("bump.mdt") && beside("BUMP.MDT") && !beside("other.mdt"));
 	TEST_EXPECT(!gp::names_beside((dir / "missing" / "model.3di").string())("bump.mdt"));
-	std::filesystem::remove_all(dir, ec);
 	return 0;
 }
 

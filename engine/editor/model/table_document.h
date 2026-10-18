@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <editor/model/document.h>
@@ -176,6 +178,40 @@ protected:
 	size_t resolve_field(const TableKind &kind, const std::string &id) const;
 	const TableKind *resolve_kind(NodeKind kind) const;
 
+	// A record of a row the document holds as committed (Document::committed), found by its identity
+	// with no walk down its path: the native record, its identities, whether the file writes it (every
+	// list it lies in, at every depth, is written: Located::present), and where it sits (its owner, 0
+	// the row, the owner's kind, the list of the owner's kind that holds it and its index there). One
+	// walk of the row finds them all, the records walk_records reaches in its order, kept while the
+	// document's state stands (its load and its revision): a menu nests its windows thousands deep,
+	// and a record read down its path is a step a level.
+	struct Held {
+		RecordHandle record;
+		RecordIds *ids = nullptr;
+		bool present = true;
+		NodeId owner = 0;
+		NodeKind owner_kind = 0;
+		size_t list = 0, index = 0;
+	};
+	// The record `record` of `row` (0, or the row's own identity: the row's own record) when the
+	// document holds `row` as committed; null for a row it does not (a batch's clone), or a record the
+	// row's walk does not reach.
+	const Held *held(const Node &row, NodeId record) const;
+	// What the labelled field at `place` of `kind` decides on a record held (held), answered without
+	// its owners by a type whose applies and reference functions it answers itself (a menu's from where
+	// the record sits). False, the default: the base finds the record's owners by its path and asks the
+	// functions.
+	virtual bool refine_held(const Node &row, const NodeAddress &address, const Held &at, const TableKind &kind,
+	                         size_t place, FieldUse &use) const {
+		(void)row;
+		(void)address;
+		(void)at;
+		(void)kind;
+		(void)place;
+		(void)use;
+		return false;
+	}
+
 private:
 	// Follows a row's path from `out` (the row's own Located) down its steps.
 	bool descend(const PathStep *steps, size_t size, Located &out) const;
@@ -183,8 +219,19 @@ private:
 	// a time).
 	bool walk(const Node &row, Located &owner, const NodeAddress &self, const RecordVisitor &visit) const;
 	void count_field(const FieldSchema &field) const;
+	// The record an address names in `row`, of the kind it says, and whether the file writes it: held
+	// for a committed row, else found by its path.
+	bool record_at(const Node &row, const NodeAddress &address, RecordHandle &record, bool &present) const;
+	// Every record of a committed row (held), by one walk.
+	std::unordered_map<NodeId, Held> find_held(const Node &row) const;
 
 	mutable TableStats stats_;
+	// held's records, of each committed row, for one state of the document (a copy keeps none).
+	struct HeldRows {
+		uint64_t load_generation = 0, revision = 0;
+		std::unordered_map<const Node *, std::unordered_map<NodeId, Held>> rows;
+	};
+	mutable HeldRows held_;
 };
 
 // The table document a document is, null for one of another kind: what a caller that reads a record

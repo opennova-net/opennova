@@ -22,10 +22,6 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-int64_t id_of(uint64_t id) {
-	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
-}
-
 template <typename T>
 void value_or_null(crow::json::wvalue &out, const char *key, const std::optional<T> &value) {
 	if (value)
@@ -256,7 +252,7 @@ crow::response StatsRoutes::me_server(const crow::request &req, uint64_t id) {
 	if (auto refused = take(access)) return std::move(*refused);
 	std::optional<HostedServer> server;
 	try {
-		server = owned_server(*pool_.acquire(), id_of(id), access.user->id);
+		server = owned_server(*pool_.acquire(), path_id(id), access.user->id);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/me/servers/%llu/stats failed: %s\n", static_cast<unsigned long long>(id),
 				e.what());
@@ -286,7 +282,7 @@ crow::response StatsRoutes::admin_server(const crow::request &req, uint64_t id) 
 	if (auto refused = take(access)) return std::move(*refused);
 	std::optional<HostedServer> server;
 	try {
-		server = find_server(*pool_.acquire(), id_of(id));
+		server = find_server(*pool_.acquire(), path_id(id));
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/admin/hosted/%llu/stats failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());

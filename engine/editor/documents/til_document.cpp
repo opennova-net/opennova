@@ -21,15 +21,6 @@ constexpr NodeKind kTile = node_kind(TilKind::Tile);
 
 const TilOverlayEntry &entry_of(const RecordHandle &r) { return r.as<TilOverlayEntry>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 // A position in mission units as the record holds it, 16.16: the nearest 1/65536, within a 32-bit word.
 bool fixed_of(const Value &value, int32_t &out, std::string &error) {
 	double number = 0.0;

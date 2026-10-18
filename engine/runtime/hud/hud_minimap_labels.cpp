@@ -124,7 +124,7 @@ void draw_zone_waypoint_labels(MapCompile &c) {
 		if (!m.entity_known || (m.entity_bits & kMarkerEntityZoneDef) == 0) return;
 		uint32_t color = m.team == 1 ? kMapOverlayTeam1
 				: (m.team == 2 ? kMapOverlayTeam2 : kMapOverlayNeutral);
-		uint32_t phase = pulse_phase(c.input.ticks);
+		uint32_t phase = pulse_phase(static_cast<int>(c.input.hud_frame));
 		if (ov != nullptr && ov->zone_timer != 0) phase = 0;
 		std::string text;
 		if (m.zone_number != 0) {
@@ -246,7 +246,7 @@ void draw_entity_labels_and_markers(MapCompile &c) {
 				if (!slot.medic_request) {
 					body = slot.own_slot && ov->own_revive_profile;
 				} else {
-					const uint32_t ph = pulse_phase(c.input.ticks);
+					const uint32_t ph = pulse_phase(static_cast<int>(c.input.hud_frame));
 					uint32_t v = 0xFF304080u;
 					const uint32_t r = ((207u * ph) >> 5) + 48u;
 					const uint32_t g = 0x40u + ((ph * (255u - 0x40u)) >> 5);

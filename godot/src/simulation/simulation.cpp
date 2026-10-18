@@ -336,7 +336,7 @@ bool Simulation::native_environment_snapshot(
 	if (!world_installed_ || kernel_ == nullptr) return false;
 	const opennova::world::WeatherState &w = kernel_->world.weather;
 	const opennova::env::WeatherCore &core = w.core;
-	// (retail Debug_DrawEnvironmentValues @ 0x4ef000 — the rows' sources)
+	// (engine: runtime/devtools/environment_snapshot.h — the rows' sources)
 	out.valid = true;
 	out.logic_tick = kernel_->world.logic_tick;
 	out.env_name = kernel_->mission.get_environment();
@@ -1160,6 +1160,18 @@ int64_t Simulation::get_logic_tick() const {
 	return kernel_ ? static_cast<int64_t>(kernel_->world.logic_tick) : 0;
 }
 
+int64_t Simulation::get_main_frame_counter() const {
+	return kernel_ ? static_cast<int64_t>(kernel_->world.hud_frames.main_frame) : 0;
+}
+
+int64_t Simulation::get_session_frame_counter() const {
+	return kernel_ ? static_cast<int64_t>(kernel_->world.hud_frames.session_frame) : 0;
+}
+
+int64_t Simulation::get_hud_frame_counter() const {
+	return kernel_ ? static_cast<int64_t>(kernel_->world.hud_frames.hud_frame) : 0;
+}
+
 void Simulation::set_panm_time_ms(int64_t p_time_ms) {
 	kernel_->panm_time_override_ms = p_time_ms < 0
 			? -1
@@ -1210,7 +1222,7 @@ PackedInt32Array Simulation::get_music_variables_snapshot() const {
 	PackedInt32Array values;
 	const auto &globals = kernel_->wac.program().music_globals;
 	if (globals) {
-		values.resize(opennova::mus::MUS_GLOBALS_BYTES / 4);
+		values.resize(static_cast<int64_t>(opennova::mus::mus_globals_count(*globals)));
 		for (int i = 0; i < values.size(); ++i)
 			values.set(i, opennova::mus::mus_globals_read(*globals, static_cast<uint32_t>(i)));
 	}

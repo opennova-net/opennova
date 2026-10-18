@@ -22,10 +22,6 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-int64_t id_of(uint64_t id) {
-	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
-}
-
 std::string creator_of(const RouteAccess &caller) {
 	return caller.user ? "admin " + caller.user->username : std::string("token");
 }
@@ -236,7 +232,7 @@ crow::response ReleaseRoutes::part(const crow::request &req, uint64_t id, uint64
 		return json_error(413, "too_large", "a part is at most 32 MiB");
 	try {
 		auto db_conn = pool_.acquire();
-		const auto release = find_release(*db_conn, id_of(id));
+		const auto release = find_release(*db_conn, path_id(id));
 		if (!release)
 			return no_such_release();
 		if (release->status != ReleaseStatus::Uploading)
@@ -289,7 +285,7 @@ crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 		return field_error(400, "invalid_field", "parts", "parts names at least one part");
 	try {
 		auto db_conn = pool_.acquire();
-		const auto release = find_release(*db_conn, id_of(id));
+		const auto release = find_release(*db_conn, path_id(id));
 		if (!release)
 			return no_such_release();
 		if (release->status != ReleaseStatus::Uploading)
@@ -327,7 +323,7 @@ crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
 		return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const auto release = find_release(*db_conn, id_of(id));
+		const auto release = find_release(*db_conn, path_id(id));
 		if (!release)
 			return no_such_release();
 		size_t applies = 0;
@@ -360,7 +356,7 @@ crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 		return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const auto release = find_release(*db_conn, id_of(id));
+		const auto release = find_release(*db_conn, path_id(id));
 		if (!release)
 			return no_such_release();
 		if (!retire_release(*db_conn, release->id))
@@ -386,7 +382,7 @@ crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 		return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const auto release = find_release(*db_conn, id_of(id));
+		const auto release = find_release(*db_conn, path_id(id));
 		if (!release)
 			return no_such_release();
 		if (release->status == ReleaseStatus::Published)

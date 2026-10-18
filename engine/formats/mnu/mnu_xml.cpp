@@ -4,12 +4,26 @@
 
 #include <climits>
 #include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace opennova::mnu_xml {
 
 namespace {
 
 constexpr char32_t kNul = 0;
+
+// The game frees a menu's element tree once it has built the menu [orig: XML_ParseWithBOMDetection
+// @ 0x76a690, the call @ 0x76a742, 44 bytes into its frame] with a walk that recurses once an element
+// level and loops over siblings [orig: XML_FreeNodeTree @ 0x76a5c0, the self-call on the first child
+// @ 0x76a5dd: 24 bytes a level, 12 more in the call on a childless element's null list], on its main
+// thread's 1 MiB stack (Jointops.exe's SizeOfStackReserve 0x100000). An element at depth d (a top-level
+// one at 1) takes it 48 + 24 d + 12 bytes down, the least the free spends (the stack the loader's
+// callers hold is not counted): the game survives 43,688 levels and crashes freeing an element at
+// 43,689.
+constexpr size_t kGameStackBytes = 0x100000;
+size_t free_stack_bytes(size_t depth) { return 48 + 24 * depth + 12; }
 
 // The named-entity table [orig: off_85A628, lengths filled once per load by
 // NapiXML_ParserCtor @ 0x769c70]: each full name (the '&' and the ';' included) is
@@ -117,6 +131,7 @@ private:
 	size_t line_pos_ = 0, line_ = 1;
 	Node *current_ = nullptr; // where text and children go
 	Node *created_ = nullptr; // where attributes go: the element created last
+	size_t depth_ = 0;        // current_'s depth: 0 at the top level
 	int screens_ = 0;         // top-level SCREENs so far
 };
 
@@ -217,6 +232,7 @@ bool Reader::run(std::string &error) {
 				if (!current_)
 					return fail(error, "A close tag at the top level: retail crashes loading this file.");
 				current_ = current_->parent;
+				--depth_;
 			} else if (starts_with(tag_start, "!--")) {
 				// The terminator search starts where the tag name stopped, so <!--x-->
 				// with no whitespace runs on to the next "-->".
@@ -249,6 +265,14 @@ bool Reader::run(std::string &error) {
 					if (!at(pos_)) return fail(error, "The file ends inside RAW_TEXT.");
 				}
 			} else {
+				if (free_stack_bytes(depth_ + 1) > kGameStackBytes) {
+					note("An element nested " + std::to_string(depth_ + 1) +
+					     " levels deep: the game's free of the menu's elements runs past its 1 MiB stack here (" +
+					     std::to_string(free_stack_bytes(depth_ + 1)) +
+					     " bytes at least), so the game crashes after loading this menu; the rest of the file is not "
+					     "read.");
+					return true;
+				}
 				auto node = std::make_unique<Node>();
 				node->tag.assign(s_, tag_start, pos_ - tag_start);
 				node->parent = current_;
@@ -258,6 +282,7 @@ bool Reader::run(std::string &error) {
 				(current_ ? current_->children : out_.roots).push_back(std::move(node));
 				current_ = raw;
 				created_ = raw;
+				++depth_;
 			}
 			if (!attributes()) return true;
 		} else if (ch == '&') {
@@ -286,6 +311,18 @@ bool Reader::run(std::string &error) {
 }
 
 } // namespace
+
+Node::~Node() {
+	// The subtree's nodes taken one at a time, each emptied of its children before it
+	// goes, so no destructor recurses into the next level.
+	std::vector<std::unique_ptr<Node>> pending = std::move(children);
+	while (!pending.empty()) {
+		std::unique_ptr<Node> node = std::move(pending.back());
+		pending.pop_back();
+		for (std::unique_ptr<Node> &child : node->children) pending.push_back(std::move(child));
+		node->children.clear();
+	}
+}
 
 bool Attribute::token(Text &out) const {
 	out.clear();

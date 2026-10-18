@@ -321,7 +321,7 @@ int main() {
 		// -1 target, so neither TEXT_END nor HEADSHOTTONE plays (the counter
 		// class whose step plays HEADSHOTTONE, CineEventEpilogCounterFont, is
 		// never constructed) [orig: @0x5765F6..0x5765F8; the dead constructor
-		// @0x5735d0, its step cinematic_node_color_fade_update @0x5736fe].
+		// @0x5735d0, its step CineNode_ColorFadeUpdate @0x5736fe].
 		const w::CineEvent *first_line = find_event(cine, w::CineEventKind::EpilogCounter, 0);
 		CHECK(first_line != nullptr && first_line->points > 0);
 		CHECK(count_sounds(world, "TEXT_END") == 0);

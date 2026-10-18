@@ -224,7 +224,7 @@ func test_object_records_revision_tracks_placed_objects() -> void:
 
 # Game mode is single-select: set_game_mode keeps exactly one mode bit (or none), clears the rest,
 # preserves the non-mode option bits, decodes by priority, and rejects invalid bits.
-# [orig: sub_402770 decode @0x4050c7 / encode @0x4031cd, dfx2med.exe]
+# [orig: MissionGeneralInfo_DialogProc decode @0x4050c7 / encode @0x4031cd, dfx2med.exe]
 func test_game_mode_single_select_and_priority() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)

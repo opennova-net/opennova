@@ -221,9 +221,17 @@ struct WeaponTable {
         return (idx < entries.size() && entries[idx].valid) ? &entries[idx] : nullptr;
     }
 
-    // Case-insensitive, first match [orig: AvatarDef_FindIndexByName @0x53FD80 stricmp walk].
+    // Case-insensitive, first match; "null" names no entry, though entry 0 is the
+    // engine's valid "null" def [orig: AdmDef_FindIndexByName @0x53FD80 - the
+    // "null" stricmp @0x53FD85..0x53FD97 returning 0xFF, then the stricmp walk].
     int index_of(const char *weapon_name) const {
         if (weapon_name == nullptr) return -1;
+        static constexpr char kNull[] = "null";
+        size_t k = 0;
+        while (kNull[k] != '\0' &&
+               std::tolower(static_cast<unsigned char>(weapon_name[k])) == kNull[k])
+            ++k;
+        if (kNull[k] == '\0' && weapon_name[k] == '\0') return -1;
         for (size_t i = 0; i < entries.size(); ++i) {
             if (!entries[i].valid) continue;
             const std::string &n = entries[i].name;

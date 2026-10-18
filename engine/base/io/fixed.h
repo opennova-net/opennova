@@ -29,6 +29,12 @@ inline float fp16_16_to_float(int32_t raw)
     return (float)raw / 65536.0f;
 }
 
+// The double form: a double divide, exact for every int32_t.
+inline constexpr double fp16_16_to_double(int32_t raw)
+{
+    return (double)raw / kFp16OneD;
+}
+
 inline int32_t float_to_fp16_16(float f)
 {
     return (int32_t)(f * 65536.0f);

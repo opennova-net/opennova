@@ -174,15 +174,8 @@ bool admin_reply_is_error(std::string_view reply) {
 	return strutil::starts_with_icase(reply, "ERROR - ") || strutil::starts_with_icase(reply, "USAGE - ");
 }
 
-namespace {
-
-// DispatchCommand's split, the one the server console makes (admin_console.cpp): the CRT
-// isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252 (the six C-locale spaces plus
-// 0xA0, D-NET-381 / D-NET-382; the sign-extended byte reads the CRT's mirrored rows), at most
-// 25 tokens, the 25th running to the line's end, so the plan counts the replies the server
-// sends. [orig: CAdminServer_DispatchCommand @0x4067A0..0x4067EB - `movsx` @0x4067AD, isspace
-//  @0x4067B5]
-std::vector<std::string_view> split_command(std::string_view line) {
+// [orig: CAdminServer_DispatchCommand @0x4067A0..0x4067EB] — see admin_protocol.h.
+std::vector<std::string_view> admin_split_command(std::string_view line) {
 	const auto is_space = [](char c) { return cp1252_isspace(static_cast<uint8_t>(c)); };
 	std::vector<std::string_view> tokens;
 	size_t i = 0;
@@ -197,6 +190,8 @@ std::vector<std::string_view> split_command(std::string_view line) {
 	}
 	return tokens;
 }
+
+namespace {
 
 // The keys SET writes; any other key with a value draws the usage and then
 // `ERROR - Setting Not Found.`. [orig: CAdminServer_HandleSetCommand @0x405A60 — the compares
@@ -218,7 +213,7 @@ AdminReplyPlan exact(int count) {
 
 // Each row is §6.9's: a handler sends one packet per arm unless noted.
 AdminReplyPlan admin_reply_plan(std::string_view command) {
-	const std::vector<std::string_view> t = split_command(command);
+	const std::vector<std::string_view> t = admin_split_command(command);
 	if (t.empty()) return exact(1); // the usage
 	const std::string_view verb = t[0];
 	// QUIT returns 0 and the slot closes, with no reply. [orig: @0x406811]

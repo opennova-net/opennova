@@ -759,8 +759,8 @@ func test_open_voice_menu_takes_the_digit_before_the_rows() -> void:
 	var sim := world.get_sim()
 	var zoom := sim.get_hud_radar_zoom_q16()
 	# F9's row opens the menu (the HUD presenter's poll, here by hand).
-	toggles.poll(1 << HudToggles.ROW_AUDIO_EMOTE, false, true, false, false)
-	toggles.poll(0, false, true, false, false)
+	toggles.poll(1 << HudToggles.ROW_AUDIO_EMOTE, true, false, false)
+	toggles.poll(0, true, false, false)
 	assert_true(toggles.is_emotes_menu_open(), "the emotes menu is open")
 
 	_hold(KEY_0, true)

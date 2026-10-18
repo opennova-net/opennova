@@ -48,6 +48,12 @@ const TEXFILTER_LEVEL_KEY := "texfilter_level"
 # words and the density's load clamp).
 const PARTICLE_DENSITY_KEY := "particle_density"
 const TEXCOMPRESSION_LEVEL_KEY := "texcompression_level"
+# The terrain texture detail persists as retail's game.cfg word
+# `terrain_texdetail` (0..3, the block's read clamping it: a -1 reads as 0, two
+# halvings; engine gamecfg clamp_graphics_options), which the front-end row
+# TERRAINTEX edits; the world copies it at each mission start (engine
+# renderer/device_texture.h; GameWorld re-exports the fresh profile's word).
+const TERRAIN_TEXDETAIL_KEY := "terrain_texdetail"
 
 # The slider ranges are the engine's witnessed Options ranges
 # (options_policy.h kOptionsScrollRanges through MenuFrame), read by control
@@ -94,6 +100,7 @@ class State extends RefCounted:
 	var texfilter_level: int
 	var particle_density: int
 	var texcompression_level: int
+	var terrain_texdetail: int
 
 	func _init(p_sound_fx_volume := DEFAULT_VOLUME,
 			p_dialog_volume := DEFAULT_VOLUME,
@@ -107,7 +114,8 @@ class State extends RefCounted:
 			p_object_polydetail := GameWorld.object_detail_fresh_profile(),
 			p_texfilter_level := GameWorld.texfilter_level_fresh_profile(),
 			p_particle_density := GameWorld.particle_density_fresh_profile(),
-			p_texcompression_level := GameWorld.texcompression_level_fresh_profile()) -> void:
+			p_texcompression_level := GameWorld.texcompression_level_fresh_profile(),
+			p_terrain_texdetail := GameWorld.terrain_texdetail_fresh_profile()) -> void:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
@@ -121,12 +129,13 @@ class State extends RefCounted:
 		texfilter_level = p_texfilter_level
 		particle_density = p_particle_density
 		texcompression_level = p_texcompression_level
+		terrain_texdetail = p_terrain_texdetail
 
 	func copy() -> State:
 		return State.new(sound_fx_volume, dialog_volume, music_volume, crosshair_style,
 				crosshair_color, crosshair_spread, aspect_mode,
 				keyboard_tips, gameplay_tips, object_polydetail, texfilter_level,
-				particle_density, texcompression_level)
+				particle_density, texcompression_level, terrain_texdetail)
 
 
 signal changed(state: State)
@@ -167,6 +176,7 @@ func update(state: State) -> void:
 	config.set_word(TEXFILTER_LEVEL_KEY, _state.texfilter_level)
 	config.set_word(PARTICLE_DENSITY_KEY, _state.particle_density)
 	config.set_word(TEXCOMPRESSION_LEVEL_KEY, _state.texcompression_level)
+	config.set_word(TERRAIN_TEXDETAIL_KEY, _state.terrain_texdetail)
 	apply()
 	changed.emit(current())
 
@@ -228,7 +238,8 @@ func _load_state() -> State:
 			config.get_word(OBJECT_POLYDETAIL_KEY),
 			config.get_word(TEXFILTER_LEVEL_KEY),
 			config.get_word(PARTICLE_DENSITY_KEY),
-			config.get_word(TEXCOMPRESSION_LEVEL_KEY)
+			config.get_word(TEXCOMPRESSION_LEVEL_KEY),
+			config.get_word(TERRAIN_TEXDETAIL_KEY)
 		)
 	)
 
@@ -246,7 +257,7 @@ static func _normalized(state: State) -> State:
 			GameWorld.clamp_object_detail(state.object_polydetail),
 			GameWorld.clamp_texfilter_level(state.texfilter_level),
 			GameWorld.clamp_particle_density(state.particle_density),
-			state.texcompression_level)
+			state.texcompression_level, state.terrain_texdetail)
 
 
 # Clamp to the engine's witnessed range for an Options slider, by control

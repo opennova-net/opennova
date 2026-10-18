@@ -531,6 +531,7 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 	mouse.y = tools_->design_y;
 	// Trying, a press is the game's (DI-35); editing, the canvas's press begun on the picture.
 	mouse.down = mouse.over && (trying ? tools_->try_down : half() && half()->gesture().pressed());
+	mouse.double_click = trying && mouse.down && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 	workspace.canvas_mouse(mouse);
 	// The zoom (the Zoom list's, Ctrl+wheel's) and the snap as the canvas has them now: the viewport's, sent
 	// where they moved from what it holds, once.

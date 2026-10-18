@@ -5,6 +5,8 @@
 // the spawn-loadout projection.
 
 #include <runtime/world/player_present.h>
+#include <runtime/world/present_drains.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 #include <cstring>
@@ -279,6 +281,32 @@ void test_spawn_loadout_projection() {
 	CHECK(!cleared.set_player_class && cleared.player_class == 0);
 }
 
+// The host's own copy of a slot fire action's round (an AI gunner's, a remote client's
+// primary) presents the fired def's FIRE row, its glow gated on that row's effect, not the
+// ammo's. [orig: WeaponAction_Fire @0x542CB4 -> ActionSlot_SpawnEffect @0x401F27 / @0x402080]
+void test_host_slot_fire_presents_its_fire_row() {
+	w::World world;
+	world.tables.weapons.entries.resize(3);
+	w::WeaponTableEntry &gun = world.tables.weapons.entries[2];
+	gun.valid = true;
+	std::strcpy(gun.action_fsm.actions[w::weapon_action::kFire].particle, "Effect_MiniMuz");
+	world.tables.ammo.entries.resize(2);
+	world.tables.ammo.entries[1].valid = true;
+	world.tables.ammo.entries[1].mf_light = 1; // MF_Light, no launch effect
+	w::FireEvent fe;
+	fe.ammo_index = 1;
+	fe.adm_index = 2;
+	fe.action_leg_presentation = true;
+	world.round_sim.fired.push_back(fe);
+	std::vector<w::FirePresentationRow> rows;
+	w::drain_fire_presentation_rows(world, rows);
+	CHECK(rows.size() == 1);
+	if (rows.size() != 1) return;
+	CHECK(rows[0].adm_arm && rows[0].action_effect == "Effect_MiniMuz");
+	const w::FireEffectPlan plan = w::fire_effect_plan(rows[0]);
+	CHECK(plan.glow && plan.glow_at_muzzle && plan.effect == "Effect_MiniMuz");
+}
+
 // The remote fire's effect admission [orig: arms @0x42f521 / @0x42f6ce;
 // WeaponSlot_FireAndSpawnEffects @0x53f597 / ActionSlot_SpawnEffect
 // @0x402080 for the glow].
@@ -300,11 +328,19 @@ void test_fire_effect_plan() {
 	CHECK(plan.glow && plan.glow_at_muzzle);
 	CHECK(plan.spawn && plan.spawn_at_muzzle);
 	CHECK(plan.effect == "flash_m4");
-	// The adm arm never falls back to the ammo effect.
+	// The adm arm never falls back to the ammo effect, and with no effect id its
+	// spawner draws no glow [orig: ActionSlot_SpawnEffect @0x401f27].
 	row.action_effect.clear();
 	plan = w::fire_effect_plan(row);
 	CHECK(!plan.spawn && plan.effect.empty());
-	CHECK(plan.glow_at_muzzle);
+	CHECK(!plan.glow && !plan.glow_at_muzzle);
+	// The ammo arm with no ammo effect draws no glow either [orig:
+	//  WeaponSlot_FireAndSpawnEffects @0x53f4a9].
+	row.adm_arm = false;
+	row.effect.clear();
+	CHECK(!w::fire_effect_plan(row).glow);
+	row.adm_arm = true;
+	row.effect = "muzzle_rifle";
 	// No MF_Light, no glow; the local player's own fire spawns no effect here
 	// but its glow still re-arms.
 	row.action_effect = "flash_m4";
@@ -314,12 +350,20 @@ void test_fire_effect_plan() {
 	row.is_local_player = true;
 	plan = w::fire_effect_plan(row);
 	CHECK(plan.glow && !plan.spawn && plan.effect.empty());
+	// A received round event's ammo-def arm draws its effect but no glow
+	// [orig: NetPacket_DeserializeRoundEvent @0x42f527..0x42f6c7].
+	row.is_local_player = false;
+	row.adm_arm = false;
+	row.wire_ammo_arm = true;
+	plan = w::fire_effect_plan(row);
+	CHECK(!plan.glow && plan.spawn && plan.effect == "muzzle_rifle");
 }
 
 } // namespace
 
 int main() {
 	test_fire_effect_plan();
+	test_host_slot_fire_presents_its_fire_row();
 	test_camera_mode_split();
 	test_fp_submit_is_the_and_of_its_gates();
 	test_lighting_context_splits_body_and_fp();

@@ -39,7 +39,7 @@ public:
 	// One frame's talk-row poll (a mask of 1 << row over row_token(row)'s
 	// pressed state); returns the Event bits. `frame` is the per-main-frame
 	// counter (the HUD tick).
-	int poll_rows(int p_rows_down, bool p_active, bool p_chorded, const Ref<Simulation> &p_sim,
+	int poll_rows(int p_rows_down, bool p_active, const Ref<Simulation> &p_sim,
 			const Ref<RtxtStringFile> &p_gametext, int64_t p_frame);
 	// One key event while the capture is open: true = the editor took it
 	// (every key does while capturing, releases included). Returns the Event

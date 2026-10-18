@@ -75,9 +75,9 @@ var _nvg_scene_card_published := false
 var _scope_circle_mask: HudScopeCircleMask = null # child of the overlay (the scoped annulus)
 var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
-# The HUD clock's tick the tip countdown last advanced to (-1 = not yet this
-# mission): each frame advances the countdown by the main frames since.
-var _tip_ticks_seen := -1
+# The main-frame counter the tip countdown last advanced to (-1 = not yet
+# this mission): each frame advances the countdown by the main frames since.
+var _tip_frames_seen := -1
 # The binding revision the HUDLS key labels were last formatted at (-1 = not
 # yet for this HUD): the labels rebuild only on a binding change or a new HUD.
 var _slot_bar_key_labels_revision := -1
@@ -220,7 +220,7 @@ func teardown(restart := false) -> void:
 		_toggles.restart_round()
 	else:
 		_toggles.reset_mission()
-	_tip_ticks_seen = -1
+	_tip_frames_seen = -1
 	_slot_bar_key_labels_revision = -1
 	_chat.reset()
 	_scoreboard.reset()
@@ -495,6 +495,13 @@ func tick(gameplay_input_active: bool = false) -> void:
 	ensure_game_hud()
 	if _game_hud == null:
 		return
+	# The frame's four clocks ahead of every setter and push, each HUD reader
+	# on the one its original reads: the logic tick and the world's
+	# main-frame, session-frame and HUD-frame counters (HudOverlay
+	# set_frame_clocks; engine world/world.h HudFrameCounters carries the
+	# witnesses).
+	_game_hud.set_frame_clocks(sim.get_logic_tick(), sim.get_main_frame_counter(),
+			sim.get_session_frame_counter(), sim.get_hud_frame_counter())
 	if stats_on:
 		# HudOverlay._draw runs in Godot's deferred flush after this tick; the
 		# previous frame's compile + canvas emit land here. Timing arms only
@@ -506,12 +513,6 @@ func tick(gameplay_input_active: bool = false) -> void:
 	elif _hud_draw_timing_armed:
 		_game_hud.set_draw_timing_enabled(false)
 	_hud_draw_timing_armed = stats_on
-	var max_h: int = sim.get_local_player_max_health()
-	var frac := float(sim.get_local_player_health()) / float(max_h) if max_h > 0 else 0.0
-	# The view frame supplies the HUD stance, including seat/weapon overrides.
-	# [orig: HUD_BuildEntityInfo @0x4b860c..0x4b8786]
-	var stance := 0
-
 	# The equipped weapon's HUD slice: re-resolve on weapon change only. The
 	# overlay takes the record's fields typed; the card takes the authored
 	# SIGHTS rows. [orig: HUD_BuildEntityInfo @0x4b8561 weapon-def pointer;
@@ -529,40 +530,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 					_world.get_resource_root() if _world != null else null,
 					_session_texcompression_level())
 
-	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info
-	# struct's ammo fields; an infinite-capacity weapon reads clip -1
-	# (hud_math.displayed_clip carries the witness).
-	var clip := -1
-	var reserve := -1
-	var weapon_active := false
-	var wv: PlayerWeaponView = _world.local_player_weapon_view()
-	if wv != null and wv.active:
-		weapon_active = true
-		clip = HudPos.displayed_clip(wv.clip, weapon.clipsize) if weapon != null else wv.clip
-		# Capacity-1 weapons fold the chambered round into the displayed reserve
-		# (hud_math.folded_reserve carries the witness).
-		# (engine: runtime/hud/hud_math.cpp)
-		reserve = HudPos.folded_reserve(clip, wv.reserve,
-				weapon.clipsize if weapon != null else -1)
 	var probe_t0 := Time.get_ticks_usec() if stats_on else 0
-	var scope_card := false
-	var fov_deg := float(Simulation.DEFAULT_PLAYER_FOV_H_DEG)
-	var binoculars_view_active := false
-	var binocular_range := 1
-	var nvg_mask := false
-	var nvg_lens := false
-	var nvg_sights_in_scene := false
-	var nvg_gain := 0
-	var vehicle_attack_context := false
-	var keep_crosshair_while_aimed := false
-	# The three fullscreen damage-feedback quads plus the HUD-overlay early
-	# return that rides the white one. The engine reduces the raw words to these
-	# draw values (engine/runtime/world/player_view.h carries the witnesses).
-	var flash_white := 0
-	var flash_red := 0
-	var flash_revive := 0
-	var flash_revive_channel := 255
-	var hud_overlays_suppressed := false
 	# The live HUD consumes the frame the player presenter composed and
 	# stamped this display frame. A standalone HUD without a camera presenter
 	# observes the last composed view; neither read composes a camera.
@@ -570,23 +538,14 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var lv: PlayerLocalView = _player_presenter.presented_view() \
 			if _player_presenter != null else _world.local_player_view()
 	if lv != null:
-		scope_card = lv.scope_card_active
 		_sight_slide_multiplier = lv.sight_slide_multiplier
-		binocular_range = lv.aim_range_units
-		fov_deg = lv.fov_h_deg
-		binoculars_view_active = lv.binoculars_view_active
-		nvg_mask = lv.nvg_mask_visible
-		nvg_lens = lv.nvg_lens_active
-		nvg_sights_in_scene = lv.nvg_sights_in_scene
-		nvg_gain = lv.nvg_gain
-		vehicle_attack_context = lv.vehicle_attack_context
-		stance = lv.hud_stance
-		keep_crosshair_while_aimed = lv.hud_keep_crosshair_while_aimed
-		flash_white = lv.screen_flash_white_alpha
-		flash_red = lv.screen_flash_red_alpha
-		flash_revive = lv.screen_flash_revive
-		flash_revive_channel = lv.screen_flash_revive_channel
-		hud_overlays_suppressed = lv.hud_overlays_suppressed
+	# The frame's HUD info record, the shell's mirror of the original
+	# rebuilding its 576-byte info struct each frame: the engine fills it from
+	# that view, the equipped weapon's FSM view, the def slice and the health
+	# pair (engine: runtime/hud/hud_entity_info.h carries the witnesses); this
+	# presenter writes its fields into the overlay and its children.
+	var info := HudEntityInfo.build(sim.get_local_player_health(),
+			sim.get_local_player_max_health(), lv, _world.local_player_weapon_view(), weapon)
 
 	var probe_t1 := Time.get_ticks_usec() if stats_on else 0
 	_apply_attach_labels()
@@ -596,17 +555,19 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_toggles.is_radio_menu_open(), _toggles.is_paused())
 	_game_hud.set_menu_screen_open(_menu_screen_open)
 	# The tip (engine hud/tip_system.h): the world's producer events in the
-	# order they were raised, then the countdown by the HUD clock's main
-	# frames since the last frame (paused or not), then the draw feed.
+	# order they were raised, then the countdown by the main frames since the
+	# last frame (paused or not), then the draw feed: the countdown steps once
+	# a main frame, the frame that steps the main-frame counter (engine
+	# hud/tip_system.h, world/world.h HudFrameCounters).
 	_toggles.apply_tip_events(sim.take_tip_events())
 	# The 0x0F's death-screen HUD blank: the replica fold queues it only with
 	# the death screen up (the engine's gate); this drain applies it.
 	if sim.take_hud_detail_blank():
 		apply_death_screen_hud_detail()
-	var tip_ticks := _hud_ticks()
-	if _tip_ticks_seen >= 0:
-		_toggles.advance_tip_frames(maxi(tip_ticks - _tip_ticks_seen, 0))
-	_tip_ticks_seen = tip_ticks
+	var tip_frames := sim.get_main_frame_counter()
+	if _tip_frames_seen >= 0:
+		_toggles.advance_tip_frames(maxi(tip_frames - _tip_frames_seen, 0))
+	_tip_frames_seen = tip_frames
 	_game_hud.set_tip(_toggles.get_tip(), _toggles.get_tip_countdown(),
 			bool(sim.is_local_player_dead()), Strings.get_table(Strings.TABLE_GAMETEXT),
 			ControlsBindings.model())
@@ -623,10 +584,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var probe_t2 := Time.get_ticks_usec() if stats_on else 0
 	var waypoint := _build_waypoint_entry()
 	var probe_t3 := Time.get_ticks_usec() if stats_on else 0
-	# The typed per-frame state feed — the shell's mirror of the original
-	# rebuilding its 576-byte HUD info struct each frame.
-	# [orig: HUD_BuildEntityInfo @0x4b8440]
-	_game_hud.set_player_state(_hud_ticks(), clampf(frac, 0.0, 1.0), stance, fov_deg)
+	_game_hud.set_player_state(info.health_fraction, info.stance, info.fov_h_deg)
 	_game_hud.set_player_context(lv)
 	# The radar-contact legs (spinmap content-mask bit 10): the session steps
 	# the contact table once per frame behind the overlay pass's gates and ages
@@ -681,23 +639,24 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# apart (Ctrl+F6 fires only hudcolor, F6 only huddetail), and its first
 	# match gives a key both rows carry to hudcolor alone (code 10 before 19;
 	# engine BindingSet::pressed_key). showhud (row 27) ships unbound. Ctrl is a
-	# binding modifier, never a chord guard here; Shift/Alt chords stay ours
-	# (the debug pick rides Shift+F6).
+	# binding modifier; Shift or Alt held gates nothing, as the key scan has no
+	# such gate (engine hud::HudKeyEdge carries the witness).
 	# [orig: the key scan's fire @0x49d42f (the modifier pass) and @0x49d488
 	#  (the fallback); huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
 	# The key sampling is this presenter's (a shared key's first match is the
 	# sampler's, engine BindingSet::pressed_key); the edge latches, the cycles
 	# and the window toggles are the engine's poll.
-	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_ALT)
 	# The talk rows ride the same sampler; the dispatch gates, the capture and
-	# the line editor are the engine's chat entry.
+	# the line editor are the engine's chat entry, its talk-key debounce and
+	# flood on the main-frame counter (engine hud/hud_chat_entry.h
+	# ChatEntryFacts::frame, inmatch/chat_flood.h).
 	var talk_rows := 0
 	for row in HudChatEntry.ROW_COUNT:
 		if ControlsBindings.pressed(HudChatEntry.row_token(row)):
 			talk_rows |= 1 << row
-	_chat.poll_rows(talk_rows, gameplay_input_active, hud_keys_chorded, sim,
-			Strings.get_table(Strings.TABLE_GAMETEXT), _hud_ticks())
-	_game_hud.set_chat_input(_chat, _hud_ticks(), sim.is_mp_session())
+	_chat.poll_rows(talk_rows, gameplay_input_active, sim,
+			Strings.get_table(Strings.TABLE_GAMETEXT), sim.get_main_frame_counter())
+	_game_hud.set_chat_input(_chat, sim.is_mp_session())
 	var rows_down := 0
 	for row in HudToggles.ROW_COUNT:
 		if ControlsBindings.pressed(HudToggles.row_token(row)):
@@ -705,7 +664,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# The mousescale row's step direction is its fire's sign bit (Shift on a
 	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
 	var toggle_events := _toggles.poll(rows_down,
-			hud_keys_chorded, gameplay_input_active, sim.is_mp_session(),
+			gameplay_input_active, sim.is_mp_session(),
 			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
 			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
 			ControlsBindings.model().is_token_fire_signed(
@@ -723,28 +682,14 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_authority(sim), status_gametext)
 	_game_hud.set_server_status_page(_toggles.is_server_status_view(),
 			_toggles.is_server_status_score_list_open(), status_gametext, sim)
-	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
-	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
-	# foot [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780,
-	# @0x4b8533]); the exact crosshair dispersion including both live body
-	# accumulators — the simulation owns the stance/aimed-shot row (body-state
-	# predicates), the HUD owns only projection [orig: @0x592b07..0x592bf5];
-	# the sim's promoted aimed-shot verdict gates the reticle [orig: the
-	# @0x4de4f7 promoter; Player_IsOpticalViewVisible @0x5cf780], with the equipped
-	# weapon's Inset keep-up predicate from the native view frame; and
-	# the PowerThrow windup driving the charge bar [orig: g_FireChargeStartTick
-	# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
-	var live := wv != null and wv.active
-	_game_hud.set_weapon_state(weapon_active and weapon != null, clip, reserve,
-			wv.heat if live else 0,
-			wv.hud_spread_fp16 if live else 0,
-			wv.aimed_shot_available if live else false,
-			keep_crosshair_while_aimed,
-			live and wv.windup_active,
-			wv.windup_held_ticks if live else 0)
-	# The clip-flash key's def halves (HudOverlay.set_weapon_ammo_key).
-	_game_hud.set_weapon_ammo_key(wv.ammo_bucket if live else 0,
-			wv.ammo_class_id if live else 0)
+	# The weapon cluster as the info record carries it: the ammo pair, heat,
+	# the crosshair dispersion, the aimed-shot verdict with the Inset keep-up
+	# predicate, the PowerThrow charge, then the clip-flash key's def halves
+	# (HudOverlay.set_weapon_ammo_key).
+	_game_hud.set_weapon_state(info.weapon_drawn, info.clip, info.reserve, info.heat,
+			info.spread_fp16, info.aimed_shot_available, info.keep_crosshair_while_aimed,
+			info.windup_active, info.windup_held_ticks)
+	_game_hud.set_weapon_ammo_key(info.ammo_bucket, info.ammo_class_id)
 	# The crosshair's witnessed anchor: Vector2.INF in first person (the overlay
 	# pins the design center @0x5928a0), the projected aim in 3P/spectate
 	# (@0x592910).
@@ -758,71 +703,58 @@ func tick(gameplay_input_active: bool = false) -> void:
 			hud_view_projection(combat_camera) if combat_camera != null else Projection.IDENTITY,
 			combat_camera != null, Strings.get_table(Strings.TABLE_GAMETEXT),
 			ControlsBindings.model().display_text_for_token("useitem"))
-	_game_hud.set_view_state(binoculars_view_active,
+	_game_hud.set_view_state(info.binoculars_view_active,
 			_player_presenter.aim_screen_point() \
 					if _player_presenter != null else Vector2.INF)
 	_vehicle_panel.update(_game_hud, _hud_pos,
-			_world.get_item_db() if _world != null else null, sim, stance)
+			_world.get_item_db() if _world != null else null, sim, info.stance)
 	if waypoint != null:
 		_game_hud.set_waypoint(waypoint.text_name, waypoint.distance_m,
 				waypoint.mission_position, waypoint.altitude_wu)
 	else:
 		_game_hud.clear_waypoint()
 	_apply_objectives()
-	# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80],
-	# suppressed by the binocular view like the ported shell HUD folded it.
-	# The NVG Sighted arm draws the card into the NVG scene instead of over the
-	# frame (lv.nvg_sights_in_scene, the engine's frame_fx_nvg_view).
+	# The SIGHTS card (over the frame, or drawn into the NVG scene), the
+	# scoped-view circle mask the overlay fork chains (the def parser never
+	# adds a row whose texture is not on the mount, so JO:CA's Colt .45 draws
+	# the reticle) and the view effects, as the info record decides them.
 	if _sights_card != null:
-		_sights_card.set_card_up(scope_card and not binoculars_view_active
-				and not nvg_sights_in_scene)
-		_publish_nvg_scene_card(nvg_sights_in_scene)
-	# The scoped-view circle mask. retail: the scene frame's overlay fork picks
-	# binoculars, then the Sighted card, then the Scoped card -- and only the
-	# Scoped arm chains the mask, unconditionally, with one argument saying the
-	# record holds no SIGHTS row (the def parser never adds a row whose texture
-	# is not on the mount, so JO:CA's Colt .45 has none).
-	# The fork itself is the engine's (HudPos.scoped_view_overlay ->
-	# runtime/hud/scope_circle_mask.h); the vehicle-attack context clears both
-	# selector bytes before it. See docs/interface/hud-re.md. Under the NVG
-	# composite's Scoped arm the lens draws its own ring, so only the
-	# unit-scale reticle rides here (lv.nvg_lens_active, the engine's
-	# frame_fx_nvg_view).
+		_sights_card.set_card_up(info.sights_card_up)
+		_publish_nvg_scene_card(info.nvg_sights_in_scene)
 	if _scope_circle_mask != null:
-		var card_selectors := scope_card and not vehicle_attack_context \
-				and weapon != null
-		var overlay_branch := HudPos.scoped_view_overlay(binoculars_view_active,
-				card_selectors and weapon.sighted_selector,
-				card_selectors and weapon.scoped_selector)
-		_scope_circle_mask.set_mask_state(overlay_branch == 3 or nvg_lens,
-				weapon == null or weapon.sights.is_empty(), nvg_lens)
+		_scope_circle_mask.set_mask_state(info.scope_mask_up, info.scope_mask_draw_crosshair,
+				info.scope_mask_nvg_lens)
 	if _view_effects != null:
-		_view_effects.update_view(binoculars_view_active, binocular_range,
-				nvg_mask, nvg_gain)
-		_view_effects.update_damage_feedback(flash_white, flash_red,
-				flash_revive, flash_revive_channel)
+		_view_effects.update_view(info.binoculars_view_active, info.binocular_range,
+				info.nvg_mask, info.nvg_gain)
+		_view_effects.update_damage_feedback(info.flash_white, info.flash_red,
+				info.flash_revive, info.flash_revive_channel)
 	# retail: while the white hit flash burns, the whole HUD overlay pass
 	# early-returns, so a collision or explosion blanks the gameplay HUD for up
 	# to 64 ticks. The overlay's own draw list is what that pass covers; its
 	# children (this node's view effects, the SIGHTS card) belong to the scene
 	# frame and keep drawing, which is exactly what self_modulate leaves alone.
 	# The addressed witness lives in docs/interface/hud-re.md.
-	_game_hud.self_modulate = Color(1.0, 1.0, 1.0, 0.0) if hud_overlays_suppressed \
+	_game_hud.self_modulate = Color(1.0, 1.0, 1.0, 0.0) if info.overlays_suppressed \
 			else Color.WHITE
 	var probe_t4 := Time.get_ticks_usec() if stats_on else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
-	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
+	# Flush afterward so GameHud.push_message stamps this frame's main-frame
+	# counter.
 	_flush_pending_hud_messages()
 	_flush_feed_lines()
-	_game_hud.set_kill_announcement(sim.get_kill_announcement_text(), sim.get_kill_announcement_tick(_hud_ticks()))
+	# The banner's life is on the logic tick (engine hud/feed_format.h
+	# KillAnnouncement).
+	_game_hud.set_kill_announcement(sim.get_kill_announcement_text(),
+			sim.get_kill_announcement_tick(sim.get_logic_tick()))
 	_score_fanfare.update(sim, _world)
 	# The three overlay windows follow the engine's toggle flags (the ShowScore
 	# gate, the sibling close and the respawn clears are its rules).
 	_message_log.update(_game_hud, _toggles.is_message_log_open())
 	_update_overlay_windows(sim)
 	_end_round_stats.update(_game_hud, sim, _toggles.is_end_round_stats_open())
-	_lfp_panel.update(_game_hud, sim, _hud_ticks())
-	_scoreboard.update(_game_hud, _world, _toggles.is_scoreboard_open(), _hud_ticks())
+	_lfp_panel.update(_game_hud, sim)
+	_scoreboard.update(_game_hud, _world, _toggles.is_scoreboard_open())
 	if stats_on:
 		var probe_t5 := Time.get_ticks_usec()
 		_frame_stats.add(FrameStats.HUD_SCALARS, probe_t1 - probe_t0)
@@ -832,10 +764,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 		_frame_stats.add(FrameStats.HUD_FLUSH, probe_t5 - probe_t4)
 
 
-# The HUD's presentation clock driving the fade/message timers — the engine's
-# ms -> tick quantum count (world/tick_accumulator.h ticks_from_ms carries the
-# (engine: runtime/world/world.cpp) witness). Adopting the engine's exact 16 ms
-# quantum corrects the old 0.062 ticks/ms approximation (62 Hz vs 62.5 Hz).
+# The wall clock in ticks the map queries' ~1 Hz retry reads (a shell
+# throttle; every HUD reader takes its retail clock from set_frame_clocks) —
+# the engine's ms -> tick quantum count (world/tick_accumulator.h
+# ticks_from_ms; engine: runtime/world/world.cpp).
 func _hud_ticks() -> int:
 	return Simulation.ticks_from_ms(_world.frame_clock_ms)
 
@@ -1068,7 +1000,7 @@ func _update_overlay_windows(sim: Simulation) -> void:
 		_game_hud.set_help_screen(false, "", "", "", PackedStringArray(), PackedStringArray())
 	if legend_open and _map_legend_labels.is_empty():
 		_map_legend_labels = _resolve_map_legend_labels()
-	_game_hud.set_map_legend(legend_open, _map_legend_title, _map_legend_labels, _hud_ticks())
+	_game_hud.set_map_legend(legend_open, _map_legend_title, _map_legend_labels)
 	_game_hud.set_briefing(_toggles.get_briefing_mode() != 0 and not sim.is_mp_session(), sim)
 
 
@@ -1095,12 +1027,14 @@ func is_chat_capturing() -> bool:
 ## A flooded repeat echoes into the CHAT ring in its sender's color.
 func handle_chat_key(key: InputEventKey) -> bool:
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if not _chat.key_event(key, sim, Strings.get_table(Strings.TABLE_GAMETEXT), _hud_ticks()):
+	# The flood check reads the main-frame counter (engine inmatch/chat_flood.h).
+	var main_frame := sim.get_main_frame_counter() if sim != null else 0
+	if not _chat.key_event(key, sim, Strings.get_table(Strings.TABLE_GAMETEXT), main_frame):
 		return false
 	if _game_hud != null:
 		if _chat.last_events() & HudChatEntry.EVENT_FLOOD_ECHO:
 			_game_hud.push_chat_line(_chat.get_echo_text(), _chat.get_echo_argb())
-		_game_hud.set_chat_input(_chat, _hud_ticks(), sim != null and sim.is_mp_session())
+		_game_hud.set_chat_input(_chat, sim != null and sim.is_mp_session())
 	return true
 
 
@@ -1314,9 +1248,9 @@ func set_menu_pause(paused: bool) -> void:
 
 ## One hudcolor poll step over pre-sampled device state (the seam the tests
 ## drive); every other row idle.
-func poll_hud_color_edge(color_down: bool, chorded: bool, active: bool) -> void:
+func poll_hud_color_edge(color_down: bool, active: bool) -> void:
 	_apply_toggle_events(_toggles.poll(
-			(1 << HudToggles.ROW_HUD_COLOR) if color_down else 0, chorded, active,
+			(1 << HudToggles.ROW_HUD_COLOR) if color_down else 0, active,
 			false, false))
 
 
@@ -1330,14 +1264,14 @@ func cycle_hud_color() -> void:
 func poll_look_rows(flip_down: bool, scale_down: bool, negative: bool, active: bool) -> void:
 	var rows_down := ((1 << HudToggles.ROW_FLIP_MOUSE) if flip_down else 0) \
 			| ((1 << HudToggles.ROW_MOUSE_SCALE) if scale_down else 0)
-	_apply_toggle_events(_toggles.poll(rows_down, false, active, false, false, true,
+	_apply_toggle_events(_toggles.poll(rows_down, active, false, false, true,
 			false, false, negative))
 
 
 ## One huddetail poll step (the seam the tests drive); every other row idle.
-func poll_hud_detail_edge(detail_down: bool, chorded: bool, active: bool) -> void:
+func poll_hud_detail_edge(detail_down: bool, active: bool) -> void:
 	_apply_toggle_events(_toggles.poll(
-			(1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0, chorded, active,
+			(1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0, active,
 			false, false))
 
 
@@ -1565,7 +1499,8 @@ func _flush_feed_lines() -> void:
 	var announcement := _game_hud.post_feed_lines(sim,
 			Strings.get_table(Strings.TABLE_GAMETEXT), _toggles.is_mp_verbose())
 	if not announcement.is_empty():
-		sim.retain_feed_announcement(announcement, _hud_ticks())
+		# Stamped with the logic tick (engine hud/feed_format.h KillAnnouncement).
+		sim.retain_feed_announcement(announcement, sim.get_logic_tick())
 
 
 func _flush_pending_hud_messages() -> void:

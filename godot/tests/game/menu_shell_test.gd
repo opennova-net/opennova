@@ -13,6 +13,9 @@ const MenuShellScript := preload("res://game/menu_shell.gd")
 const MAIN_FIXTURE := "mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "mnu/jo_loadout.mnu"  # the cross-.mnu target
 const OPTIONS_FIXTURE := "mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
+# A menu music pair the shell opens as MENUMUS.BIN / MENUMUS.SBF (the synthetic script and bank).
+const MENU_MUSIC_SCRIPT_FIXTURE := "res://../fixtures/mus/synth_menumus.bin"
+const MENU_MUSIC_BANK_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"
 
 
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
@@ -119,7 +122,7 @@ func test_hidden_menu_suspends_shell_frame_processing() -> void:
 
 
 func _cleanup(dir: String) -> void:
-	for f in ["main.mnu", "sp.mnu", "options.mnu", "game.mnu", "test.bms"]:
+	for f in ["main.mnu", "sp.mnu", "options.mnu", "game.mnu", "test.bms", "menumus.bin", "menumus.sbf"]:
 		DirAccess.remove_absolute(dir.path_join(f))
 	DirAccess.remove_absolute(dir)
 
@@ -166,17 +169,40 @@ func test_startup_screen_shows_the_version() -> void:
 # UI_PopulateRenderAndAudioSettings @ 0x55c830]
 func test_startup_drives_music_var() -> void:
 	var dir := _make_dir()
+	# The menu context the shell opens before it shows a screen [orig: AudioVM_InitMenuMusicStreaming
+	# @ 0x56aa60]: the script's instance holds the var the MUSICVAR lands in.
+	TestFs.write_bytes(self, dir.path_join("menumus.bin"), FileAccess.get_file_as_bytes(MENU_MUSIC_SCRIPT_FIXTURE))
+	TestFs.write_bytes(self, dir.path_join("menumus.sbf"), FileAccess.get_file_as_bytes(MENU_MUSIC_BANK_FIXTURE))
 	var shell = _make_shell(dir)
 	if shell == null:
 		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
+	assert_eq(MusicService.current_context(), "menu", "the menu music context is open")
 	# jo_main STARTUP declares MUSICVAR 1; the menu pushes it into the menumus
 	# discriminator var (MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives
 	# at the engine home, audio/music_policy.h kMenuMusicVarSlot); at index 0
 	# the MUSICVAR was inert and the menu played the wrong section.
 	var idx: int = MusicDirector.MENU_MUSIC_VAR_SLOT
 	assert_eq(MusicService.director().get_var(idx), 1, "STARTUP MUSICVAR -> director var %d" % idx)
+	MusicService.stop_context()
+	_cleanup(dir)
+
+
+# With no menu music pair the context does not open (the bank's open bails first, and only a
+# loaded script sets the context active [orig: AudioVM_OpenContextFile @ 0x672177..0x6721a3;
+# AudioVM_OpenMusicContext @ 0x6722db]), so the game's variable write finds no context and drops
+# the MUSICVAR [orig: AudioVM_SetVariable @ 0x671fa0, the g_AudioVMContextActive test].
+func test_startup_music_var_without_a_context_is_dropped() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_eq(MusicService.current_context(), "", "no menu music pair: no context")
+	assert_eq(MusicService.director().get_var(MusicDirector.MENU_MUSIC_VAR_SLOT), 0,
+			"the STARTUP MUSICVAR is dropped with no context open")
 	_cleanup(dir)
 
 
@@ -750,6 +776,46 @@ func test_particle_and_compression_rows_seed_by_value_and_write_the_words_back()
 	var reloaded := PlayerOptions.new().current()
 	assert_eq(reloaded.particle_density, 2, "the density persists")
 	assert_eq(reloaded.texcompression_level, 2, "the compression persists")
+	_cleanup(dir)
+
+
+# The terrain-texture-detail row is game.cfg's terrain_texdetail, served the
+# same way (engine runtime/menu/options_policy.h kTerrainTexDetailControls):
+# the combobox selects the row whose value is the persisted word (a profile
+# below full detail shows its own rung), stays editable, and a pick writes the
+# row's value back at once. The seeded 1 is neither row 0 (a list's unselected
+# read) nor the fresh profile's 3.
+func test_terrain_texture_row_seeds_by_value_and_writes_the_word_back() -> void:
+	var options := PlayerOptions.new()
+	var seeded := options.current()
+	seeded.terrain_texdetail = 1
+	options.update(seeded)
+	var dir := _make_dir()
+	var list_box := ('<LIST_BOX><POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT>'
+			+ '<BOTTOM>100</BOTTOM></POSITION><ITEMS>%s</ITEMS></LIST_BOX>')
+	var rows := ""
+	for level in 4:
+		rows += '<ITEM value="%d">Level %d</ITEM>' % [level, level]
+	var body := MenuDriverFixture.wnd("scroll", "MUSICVOLUME", 20)
+	body += MenuDriverFixture.wnd("combobox", "TERRAINTEX", 60, list_box % rows)
+	TestFs.write_bytes(self, dir.path_join("options.mnu"),
+			MenuDriverFixture.screen_xml("OPTIONS", body).to_utf8_buffer())
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "the options document opens")
+	var driver: MenuDriver = shell.get_driver()
+	assert_true(driver.is_options_surface())
+	var terrain := driver.widget_id("TERRAINTEX")
+	assert_gte(terrain, 0)
+	assert_eq(driver.item_value(terrain, driver.selected_row(terrain)), "1",
+			"the row whose value is the persisted word is selected")
+	assert_false(driver.is_widget_disabled(terrain), "the terrain-texture row is editable")
+	driver.select_row(terrain, 0)
+	assert_eq(options.current().terrain_texdetail, 0, "the pick writes the word")
+	assert_eq(PlayerOptions.new().current().terrain_texdetail, 0, "the word persists")
 	_cleanup(dir)
 
 
