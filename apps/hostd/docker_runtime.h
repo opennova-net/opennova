@@ -51,12 +51,13 @@
 namespace opennova::hostd {
 
 // Where the containers' output goes. With a group (a cloud machine; its
-// user-data passes --log-group and --log-region): that CloudWatch log group, a
-// stream per slot, "<machine id>/slot-<k>", which each server on the slot
-// writes in turn, through docker's awslogs driver:
+// command line passes --log-group and --log-region): that CloudWatch log group,
+// the servers', a stream per start, the one the service names in the
+// container's desired entry ("<server id>/g<generation>", which the server's
+// start row keeps), through docker's awslogs driver:
 //
 //     --log-driver awslogs --log-opt awslogs-region=<region>
-//     --log-opt awslogs-group=<group> --log-opt awslogs-stream=<machine id>/slot-<k>
+//     --log-opt awslogs-group=<group> --log-opt awslogs-stream=<its log stream>
 //     --log-opt mode=non-blocking --log-opt max-buffer-size=4m
 //
 // Non-blocking: CloudWatch slow or out of reach never holds up a write of the
@@ -70,7 +71,6 @@ namespace opennova::hostd {
 struct ContainerLogs {
 	std::string group;
 	std::string region;
-	int64_t machine_id = 0;
 };
 
 class DockerRuntime : public ContainerRuntime {
@@ -114,8 +114,6 @@ public:
 
 	// The argv run() runs for `spec`.
 	std::vector<std::string> run_argv(const ContainerSpec &spec) const;
-	// Slot `slot`'s CloudWatch stream on machine `machine_id`: "<id>/slot-<k>".
-	static std::string slot_log_stream(int64_t machine_id, int slot);
 
 private:
 	struct Pull {

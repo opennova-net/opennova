@@ -3,8 +3,10 @@
 // the machine's slots and reports them, over the agent protocol
 // (apps/novaworld_common/hosted/agent_protocol.h; agent.h). This file owns the
 // command line, the machine's identity checks, the lock on the state
-// directory, the fences and their self-test, the log, the stop signals and the
-// pass loop (which keeps the alive file fresh for the ECS health check).
+// directory, the fences and their self-test, the log (and its copy under
+// --log-dir), what the agent reads of the machine once at its start (its
+// image, its own log stream), the stop signals and the pass loop (which keeps
+// the alive file fresh for the ECS health check).
 // Linux only: on a cloud machine it is the fleet cluster's ECS daemon, its own
 // image (opennova-hostd, apps/serve/Dockerfile), root on the machine's network
 // (README.md); in the local stack it is the machine container's own process,
@@ -14,6 +16,7 @@
 #include "docker_runtime.h"
 #include "fence_probe.h"
 #include "hostd_options.h"
+#include "instance_metadata.h"
 #include "machine_identity.h"
 #include "nft_table.h"
 #include "process_runtime.h"
@@ -35,6 +38,7 @@
 #include <csignal>
 #include <cstdio>
 #include <ctime>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <thread>
@@ -55,8 +59,11 @@ void on_signal(int) {
 }
 
 bool g_verbose = false;
+// --log-dir's copy of the agent's lines (machines/<machine id>/hostd.log).
+std::FILE *g_log_copy = nullptr;
 
-// One line per message on stderr (the journal keeps the time).
+// One line per message on stderr (the journal keeps the time), and with
+// --log-dir the same line after its time in the copy.
 void log_sink(io::LogLevel level, const char *message) {
 	if (level == io::LogLevel::kDebug && !g_verbose)
 		return;
@@ -64,6 +71,20 @@ void log_sink(io::LogLevel level, const char *message) {
 			: level == io::LogLevel::kWarn			? "warning: "
 													: "";
 	std::fprintf(stderr, "opennova-hostd: %s%s\n", tag, message);
+	if (g_log_copy) {
+		const auto now = std::chrono::system_clock::now();
+		const std::time_t seconds = std::chrono::system_clock::to_time_t(now);
+		using std::chrono::milliseconds;
+		const int64_t ms =
+				std::chrono::duration_cast<milliseconds>(now.time_since_epoch()).count() % 1000;
+		std::tm utc{};
+		gmtime_r(&seconds, &utc);
+		char at[32];
+		std::strftime(at, sizeof(at), "%Y-%m-%dT%H:%M:%S", &utc);
+		std::fprintf(g_log_copy, "%s.%03dZ opennova-hostd: %s%s\n", at, static_cast<int>(ms), tag,
+				message);
+		std::fflush(g_log_copy);
+	}
 }
 
 bool make_private_dir(const std::string &path) {
@@ -181,6 +202,19 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	if (!options.log_dir.empty()) {
+		// The local stack's log directory (the machine known by now): this
+		// machine's own lines beside its servers' (the process runtime's).
+		const std::filesystem::path dir = std::filesystem::path(options.log_dir) / "machines" /
+				std::to_string(options.machine_id);
+		std::error_code ec;
+		std::filesystem::create_directories(dir, ec);
+		g_log_copy = std::fopen((dir / "hostd.log").c_str(), "a");
+		if (!g_log_copy)
+			std::fprintf(stderr, "opennova-hostd: warning: cannot write %s\n",
+					(dir / "hostd.log").c_str());
+	}
+
 	const bool root = ::geteuid() == 0;
 	if (!root)
 		io::logf(io::LogLevel::kWarn, "not running as root: the slots' files stay this user's");
@@ -220,10 +254,10 @@ int main(int argc, char **argv) {
 		// file's; its lines go where the agent's own do.
 		runtime = std::make_unique<ProcessRuntime>(options.serve,
 				proc::filter_environment({ "PATH", "HOME", "LANG", "LC_*", "TZ", "TMPDIR" }),
-				"/proc/self/fd/2");
+				"/proc/self/fd/2", ProcessRuntime::Clock{}, options.log_dir);
 	} else {
 		runtime = std::make_unique<DockerRuntime>(runner, options.docker, environment, scratch,
-				ContainerLogs{ options.log_group, options.log_region, options.machine_id });
+				ContainerLogs{ options.log_group, options.log_region });
 	}
 	// The trees the servers' game data comes in (tree_store.h): fetched from the
 	// store on demand, an s3:// one through the AWS CLI, a file:// one copied.
@@ -268,10 +302,25 @@ int main(int argc, char **argv) {
 	config.scratch_dir = scratch;
 	config.token_file = options.token_file;
 	// On ECS, the image this task runs (its task definition's pinned
-	// reference), the envelope's agent_image.
+	// reference), the envelope's agent_image, and the agent's own log stream.
 	if (const std::string uri = novaworld_server::ecs::metadata_uri_from_env(); !uri.empty()) {
 		if (!novaworld_server::ecs::read_container_image(uri, config.agent_image, error))
 			io::logf(io::LogLevel::kWarn, "its own image does not read: %s", error.c_str());
+		std::string stream;
+		if (novaworld_server::ecs::read_container_log_stream(uri, stream, error) &&
+				hosted::is_log_stream_name(stream))
+			config.log_stream = stream;
+		else
+			io::logf(io::LogLevel::kWarn, "the agent's log stream is not known: %s",
+					stream.empty() ? error.c_str() : "its name is not one");
+	}
+	// A cloud machine's image (the instance metadata, read as root, which no
+	// fence holds back), what every report says it runs.
+	if (options.runtime == RuntimeKind::Docker) {
+		if (read_image_id(kInstanceMetadataUrl, config.image_id, error))
+			io::logf(io::LogLevel::kInfo, "the machine's image: %s", config.image_id.c_str());
+		else
+			io::logf(io::LogLevel::kInfo, "no machine image to report: %s", error.c_str());
 	}
 	Agent agent(config, link, *runtime, slots, trees, table.get());
 
@@ -282,9 +331,11 @@ int main(int argc, char **argv) {
 			config.agent_image.empty() ? "" : ", image ", config.agent_image.c_str());
 	if (!options.log_group.empty())
 		io::logf(io::LogLevel::kInfo,
-				"the containers' output: CloudWatch %s (%s), streams %lld/slot-<k>",
-				options.log_group.c_str(), options.log_region.c_str(),
-				static_cast<long long>(options.machine_id));
+				"the containers' output: CloudWatch %s (%s), a stream per start",
+				options.log_group.c_str(), options.log_region.c_str());
+	if (!options.log_dir.empty())
+		io::logf(io::LogLevel::kInfo, "the servers' output and the agent's lines: %s",
+				options.log_dir.c_str());
 	int code = 0;
 	while (!g_stop.load()) {
 		touch_alive(g_alive);
@@ -300,5 +351,7 @@ int main(int argc, char **argv) {
 				options.runtime == RuntimeKind::Process ? "stopping; the servers end with the agent"
 														: "stopping; the containers keep running");
 	net::shutdown();
+	if (g_log_copy)
+		std::fclose(g_log_copy);
 	return code;
 }

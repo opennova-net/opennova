@@ -3,7 +3,8 @@
 // opennova-hostd's command line. Every setting is a flag (the fleet cluster's
 // task definition names them, the same for every machine; the local stack's
 // machine driver its own); the one variable the agent reads is the ECS
-// agent's metadata endpoint (its own image, for the sync's envelope).
+// agent's metadata endpoint (its own image, for the sync's envelope, and its
+// own log stream).
 
 #include <cstdint>
 #include <string>
@@ -37,10 +38,14 @@ struct HostdOptions {
 	// (the process runtime's machine, which has no slot users).
 	std::string nft = "/usr/sbin/nft";
 	// --log-group and --log-region, both or neither, the docker runtime's: the
-	// CloudWatch log group the containers' output goes to (docker_runtime.h
-	// ContainerLogs); neither, the machine's journal.
+	// CloudWatch log group the containers' output goes to, the servers' group
+	// (docker_runtime.h ContainerLogs); neither, the machine's journal.
 	std::string log_group;
 	std::string log_region;
+	// --log-dir, the process runtime's: the local stack's log directory, where
+	// each server's output goes (servers/<server id>/g<generation>.log) and a
+	// copy of the agent's own lines (machines/<machine id>/hostd.log).
+	std::string log_dir;
 	bool once = false;
 	bool verbose = false;
 };

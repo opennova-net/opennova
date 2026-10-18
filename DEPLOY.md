@@ -1363,13 +1363,14 @@ game data stays in the bucket).
   apply) removes a tree that is neither current nor the baseline and that no live server
   pins, an hour after it stopped being any of those; a running server's data is never
   deleted under it. A deleted release's package goes with the release.
-- **A machine's logs.** Every machine writes CloudWatch `/opennova/<deployment>/machines`
-  (30 days): a stream per slot, named by the machine's id (the admin fleet view's
-  "Machine N, slot k"), `<id>/slot-<k>`, which holds the output of each server that ran
-  on slot k, in turn (`opennova-serve`'s standard output and error: why a server exited);
-  and one per hostd task, `hostd/hostd/<task id>` (ECS's awslogs driver: the agent's
-  lines, its starts and failures, docker's refusals). The deploy user reads them, with no
-  shell on the machine:
+- **A machine's logs.** Every server's start writes CloudWatch
+  `/opennova/<deployment>/servers` (14 days), a stream per start, `<server id>/g<generation>`
+  (`opennova-serve`'s standard output and error, its status page off: why a server exited;
+  the server's start rows name each stream), and every machine's agent writes
+  `/opennova/<deployment>/machines` (30 days), one stream per hostd task,
+  `hostd/hostd/<task id>` (ECS's awslogs driver: the agent's lines, its starts and
+  failures, docker's refusals; the admin fleet view's "Machine N" names the machine). The
+  deploy user reads them, with no shell on the machine:
 
   ```bash
   ./deploy/run.sh $D fleet logs 12 3                # machine 12, slot 3: the last hour

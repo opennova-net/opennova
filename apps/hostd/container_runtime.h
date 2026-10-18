@@ -37,6 +37,7 @@ struct ContainerSpec {
 	double cpus = 1.0;
 	int memory_mb = 512;
 	int pids = 128;
+	std::string log_stream; // where its output goes, as the service names it
 };
 
 // One of the agent's containers as the runtime sees it.

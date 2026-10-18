@@ -6,8 +6,13 @@
 // secret and the machine's slots, saved owner-only in a file of its own format,
 // saved_machine.h, so a restart of the agent, of this protocol or a later one,
 // never needs the token again), then syncs: every pass it lists its
-// containers, reads their CPU and memory (at most every kStatsIntervalMs) and
-// each slot's counts (nft_table.h), reports them to the service and does what the reply asks
+// containers, reads their CPU and memory, the machine's own use (proc_stats.h)
+// and each running server's tick health (its --stats-file in the slot's
+// directory; at most every kStatsIntervalMs, a file older than kTickStaleMs
+// none), each slot's counts (nft_table.h), an exited server's last line (its
+// --exit-file; both files read as SlotFiles::read_written reads what a slot's
+// user controls) and where each tree stands, reports them to the service with
+// the machine's image and its own log stream, and does what the reply asks
 // (reconcile.h): fetches the trees the reply names (tree_store.h), starts the
 // containers the machine lacks, stops and removes the ones the reply leaves
 // out. A sync that fails (the service down,
@@ -36,16 +41,23 @@
 #include "tree_store.h"
 
 #include "net_http.h"
+#include "proc_stats.h"
 
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova::hostd {
+
+// A server's --stats-file line (apps/serve/run_reports.h) as its tick health:
+// nullopt when it does not read.
+std::optional<hosted::TickHealth> parse_tick_stats(std::string_view text);
 
 // How the agent reaches the service's internal listener.
 class ServiceLink {
@@ -93,6 +105,14 @@ struct AgentConfig {
 	std::string scratch_dir;
 	// The one-time bootstrap token; deleted once redeemed.
 	std::string token_file;
+	// What every report says of the machine: its image (the instance's AMI,
+	// read once at the start; "" off EC2) and the agent's own log stream (its
+	// ECS task's; "" off ECS).
+	std::string image_id;
+	std::string log_stream;
+	// The root the kernel's files are read under (proc_stats.h): "" on a
+	// machine, a fixture tree in the tests.
+	std::string proc_root;
 };
 
 class Agent {
@@ -104,6 +124,8 @@ public:
 	// up to this.
 	static constexpr int kBootstrapBackoffMaxMs = 5 * 60 * 1000;
 	static constexpr uint64_t kStatsIntervalMs = 5 * 1000;
+	// A server's tick file (written once a minute) older than this says nothing.
+	static constexpr uint64_t kTickStaleMs = 3 * 60 * 1000;
 	// How often counters that do not read are put in place again, at most.
 	static constexpr uint64_t kCountersEnsureMs = 60 * 1000;
 	// A warning that repeats unchanged is logged again only this much later.
@@ -157,6 +179,12 @@ private:
 		int exit_code = 125;
 		std::string reason; // reported with the exit: why ("" for docker's own failures)
 	};
+	// A desired container that waits for its image's pull or its trees' fetch,
+	// as the reply that started it gave it (its files with it).
+	struct Waiting {
+		hosted::DesiredContainer desired;
+		hosted::ContainerWait cause = hosted::ContainerWait::Image;
+	};
 
 	bool load_saved();
 	bool save(std::string &error) const;
@@ -165,19 +193,26 @@ private:
 	// most kDockerCallMs, 0 with less than kMinCallMs left.
 	int call_ms(uint64_t deadline) const;
 	void refresh_stats(const std::vector<ContainerInfo> &observed, uint64_t now, uint64_t deadline);
+	// The machine's own use and the running servers' tick health, at most
+	// every kStatsIntervalMs.
+	void refresh_machine(const std::vector<ContainerInfo> &observed, uint64_t now);
 	void refresh_counts(uint64_t now, uint64_t deadline);
 	// The pulls under way: a finished one's image held, a failed or overdue
 	// one's waiting containers failed.
 	void poll_pulls(uint64_t now);
 	hosted::SyncRequest report(const std::vector<ContainerInfo> &observed) const;
+	// What every report says of the machine itself: its image, the agent's
+	// log stream, its use and its trees.
+	void describe_machine(hosted::SyncRequest &request) const;
 	void act(
 			const hosted::SyncReply &reply, const std::vector<ContainerInfo> &observed, int &delay);
 	// Starts `desired` (its image pulled first when the machine lacks it);
 	// false when `deadline` left no time for it (the next pass tries).
 	bool start(const hosted::DesiredContainer &desired, uint64_t deadline);
-	// `desired` waits for its image's pull or its trees' fetch (`what` says
-	// which, for the log), its files kept here.
-	void wait(const hosted::DesiredContainer &desired, const std::string &what);
+	// `desired` waits for its image's pull or its trees' fetch (`cause`; `what`
+	// says it for the log), its files kept here.
+	void wait(const hosted::DesiredContainer &desired, hosted::ContainerWait cause,
+			const std::string &what);
 	// The start failed: reported exited `exit_code`, never made again, and
 	// what the runtime made of it removed, its slot's files too.
 	void start_failed(const hosted::DesiredContainer &desired, int exit_code,
@@ -208,6 +243,13 @@ private:
 	std::map<std::string, ContainerStats> stats_; // by name, the last good read
 	uint64_t stats_at_ = 0;
 	bool stats_read_ = false;
+	// The machine's use: the last CPU reading (a percent needs two), the last
+	// good read of the rest, and the running servers' fresh tick health by name.
+	std::optional<novaworld_server::proc_stats::CpuTimes> cpu_mark_;
+	std::optional<hosted::MachineStats> machine_stats_;
+	uint64_t machine_at_ = 0;
+	bool machine_read_ = false;
+	std::map<std::string, hosted::TickHealth> ticks_;
 	std::map<std::string, uint64_t> stop_requested_; // by name: when its SIGTERM went
 	std::map<std::string, FailedStart> failed_starts_; // by name
 	std::map<std::string, uint64_t> pulls_; // image -> when its pull began
@@ -217,9 +259,8 @@ private:
 	std::vector<std::string> named_images_;
 	bool pruned_ = false;
 	uint64_t pruned_at_ = 0;
-	// By name: the desired containers whose image pulls or whose trees fetch,
-	// as the reply that started them gave them (their files with them).
-	std::map<std::string, hosted::DesiredContainer> waiting_;
+	// By name: the desired containers whose image pulls or whose trees fetch.
+	std::map<std::string, Waiting> waiting_;
 	std::set<std::string> refused_logged_; // the desired names whose refusal was logged
 	std::map<std::string, std::pair<std::string, uint64_t>> warnings_; // key -> text, when
 	bool last_sync_ok_ = false;
