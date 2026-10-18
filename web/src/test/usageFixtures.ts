@@ -29,7 +29,7 @@ function point(secondsAgo: number, overrides: Partial<UsagePoint> = {}): UsagePo
 
 // A hosted server's last three minutes, its slot's limits (1 vCPU, 512 MiB).
 export function serverUsage(overrides: Partial<Usage> = {}): Usage {
-  const tick = { tick_p99_ms: 14.2, late_ticks: 0 };
+  const tick = { memory_bytes: 312 * MIB, tick_p99_ms: 14.2, late_ticks: 0 };
   const series = [point(120, { ...tick, net_in_bps: null, net_out_bps: null }), point(60, tick), point(0, { ...tick, late_ticks: 3 })];
   return {
     subject: 'server',
