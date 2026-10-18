@@ -1433,7 +1433,7 @@ int test_listing_waits_while_lost() {
 	return 0;
 }
 
-// No lobby live (a lobby outage; a deployment's first release, whose controller
+// No lobby live (a lobby outage; a deployment's first release, whose fleet program
 // rolls before any lobby: prod's cutover of 2026-10-17 failed both restored
 // servers, their restarts used up, when each opennova-serve gave up on a gate
 // that handed it no lobby): nothing is placed and no machine launched, an exit

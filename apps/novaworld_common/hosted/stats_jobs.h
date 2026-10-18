@@ -27,7 +27,7 @@ inline constexpr int64_t kStatsPruneIntervalMs = 60 * 60 * 1000;
 void register_stats_jobs(
 		jobs::JobRegistry &registry,
 		std::function<int64_t()> now_s = [] { return jobs::Scheduler::wall_now_ms() / 1000; });
-// Its schedule (the controller's): hourly.
+// Its schedule (the fleet's): hourly.
 std::vector<jobs::PeriodicJob> stats_schedule();
 
 } // namespace opennova::novaworld_server::hosted

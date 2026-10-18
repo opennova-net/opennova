@@ -1,4 +1,4 @@
-// The service's admin link (apps/novaworld_common/hosted/admin_link.h) against a
+// The service's admin link (apps/novaworld_fleet/hosted/admin_link.h) against a
 // real opennova-serve child (ctest passes the binary) with its remote-admin port
 // open, over the synthetic loose game directory the hosted e2e serves
 // (serve_test_support.h's deathmatch map), its admin.cfg and host file rendered

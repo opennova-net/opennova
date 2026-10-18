@@ -1,8 +1,8 @@
 #include "supervisor.h"
 
 #include "auth.h"
-#include "fleet_jobs.h"
-#include "hosted_settings.h"
+#include "hosted/fleet_jobs.h"
+#include "hosted/hosted_settings.h"
 #include "loggable.h"
 
 #include <net/novaworld/lobby_repository.h>
@@ -201,7 +201,7 @@ void Supervisor::reconcile(uint64_t now_ms) {
 void Supervisor::tick(uint64_t now_ms) {
 	auto lease = pool_.acquire();
 	db::Database &db = *lease;
-	// A controller that no longer leads runs no pass (it is on its way out).
+	// A fleet process that no longer leads runs no pass (it is on its way out).
 	if (pass_guard_ && !pass_guard_(db))
 		return;
 	pass_reserved_.clear();
@@ -649,12 +649,12 @@ bool Supervisor::launch_machine(db::Database &db, const HostedServer &s, Machine
 	CreatedMachine created;
 	{
 		db::Transaction tx(db);
-		// The leadership fenced inside the write: a controller another has
+		// The leadership fenced inside the write: a fleet process another has
 		// replaced since its pass began launches nothing (a new leader's election
 		// waits for this transaction, then reads the row it wrote).
 		if (pass_guard_ && !pass_guard_(db)) {
 			std::fprintf(stderr,
-					"[fleet] no machine launched for server %lld: this controller no longer "
+					"[fleet] no machine launched for server %lld: this fleet process no longer "
 					"leads\n",
 					static_cast<long long>(s.id));
 			return false;

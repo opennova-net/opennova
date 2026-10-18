@@ -1,5 +1,5 @@
 // What an ECS task finds from its own metadata (apps/novaworld_common/ecs_metadata.h):
-// the controller's internal listener bind, against a fake task metadata endpoint (an
+// the fleet's internal listener bind, against a fake task metadata endpoint (an
 // HTTP server in this test on loopback, answering GET <uri>/task with a Fargate task's
 // reply).
 //
@@ -31,10 +31,10 @@ namespace {
 constexpr const char *kTask = R"({
   "Cluster": "arn:aws:ecs:us-east-1:111122223333:cluster/opennova-prod",
   "TaskARN": "arn:aws:ecs:us-east-1:111122223333:task/opennova-prod/0123456789abcdef",
-  "Family": "opennova-prod-controller",
+  "Family": "opennova-prod-fleet",
   "Containers": [
     {
-      "Name": "controller",
+      "Name": "fleet",
       "Networks": [
         {
           "NetworkMode": "awsvpc",
@@ -88,7 +88,7 @@ int exercise_discovered() {
 	std::string error;
 	TEST_EXPECT(ecs::internal_bind(sources, error) == "10.44.1.37:8070" && error.empty());
 	TEST_EXPECT(metadata.last_line() == "GET /v4/abc-123/task HTTP/1.0");
-	std::printf("  discovered: the controller binds 10.44.1.37:8070\n");
+	std::printf("  discovered: the fleet binds 10.44.1.37:8070\n");
 	return 0;
 }
 

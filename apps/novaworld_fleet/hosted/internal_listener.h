@@ -1,10 +1,10 @@
 #pragma once
 
 // The service's internal listener: a second HTTP server of its own (a Crow app
-// apart from web's public HttpListener), the controller's, bound while it
-// leads to one address, the controller task's private one in a deployment
-// (<its private IPv4>:8070, from its ECS task's metadata, which the
-// deployment's Cloud Map name for the controller follows; the machines'
+// apart from web's public HttpListener), the fleet's, bound while it leads
+// to one address, the fleet task's private one in a deployment (<its private
+// IPv4>:8070, from its ECS task's metadata, which the deployment's Cloud Map
+// name for the fleet follows; the machines'
 // security group alone reaches it) or loopback in development
 // (ONNET_INTERNAL_HTTP_BIND, 127.0.0.1:8070). It serves the machine agents' routes
 // alone (agent_route.h); every other path and method gets their one bare 404. The retail client,
@@ -14,8 +14,9 @@
 // ends it and joins. Its handlers run on kHandlerThreads threads of Crow's,
 // each leasing one connection of the service's pool for its request.
 
+#include "fleet_desired_state.h"
+
 #include "hosted/fleet_config.h"
-#include "hosted/fleet_desired_state.h"
 
 #include <net/novaworld/db/database.h>
 

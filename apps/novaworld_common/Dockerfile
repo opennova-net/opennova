@@ -2,7 +2,7 @@
 # from one shared build stage. Build context is the repo root, one target per
 # program:
 #   docker build -f apps/novaworld_common/Dockerfile --target gate -t opennova-novaworld-gate .
-# and alike for lobby, web, controller and worker (.github/workflows/novaworld-images.yml
+# and alike for lobby, web, fleet and worker (.github/workflows/novaworld-images.yml
 # publishes them as ghcr.io/<owner>/opennova-novaworld-<program>, all five in one bake:
 # docker-bake.hcl beside this file). One more target, smoke, is the local stack's
 # smoke test (scripts/dev_stack.sh), never published.
@@ -14,7 +14,7 @@
 # container health check, and the image's HEALTHCHECK, ask GET /livez) and the
 # shell tools ECS Exec sessions use (sh, base64, tr, sed, head, mktemp). Beyond
 # that base: web hiredis (the one program that links it) and the retail pages
-# (templates, static); web, the controller and the
+# (templates, static); web, the fleet and the
 # worker the machine script (every program that decides whether hosting is on
 # checks it; the worker renders it); the lobby (its own public address, from
 # EC2), web (the game data's store: the admin page's uploads, the update
@@ -40,7 +40,7 @@ COPY . .
 # Configure the whole tree (cheap) but compile only the five programs and
 # their lib deps. OPENNOVA_NOVAWORLD_SERVICE=ON defines the service and its
 # programs; BUILD_NOVAWORLD_HTTP=ON pulls Crow + standalone Asio via
-# FetchContent (web, the controller and the worker build with it).
+# FetchContent (web, the fleet and the worker build with it).
 # GDExtension is never touched (godot/src is its own project). Mirrors the
 # flags of ci.yml's `test-linux` job and of .github/workflows/net-linux.yml.
 RUN cmake -S . -B build -G Ninja \
@@ -48,7 +48,7 @@ RUN cmake -S . -B build -G Ninja \
         -DOPENNOVA_NOVAWORLD_SERVICE=ON \
         -DBUILD_NOVAWORLD_HTTP=ON \
     && cmake --build build --target opennova_novaworld_gate opennova_novaworld_lobby \
-        opennova_novaworld_web opennova_novaworld_controller opennova_novaworld_worker
+        opennova_novaworld_web opennova_novaworld_fleet opennova_novaworld_worker
 
 # ---- AWS CLI stage ---------------------------------------------------------
 # The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h), the
@@ -226,17 +226,17 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
     CMD curl -fsS --max-time 2 "http://127.0.0.1:${ONNET_HTTP_PORT}/livez" || exit 1
 ENTRYPOINT ["/app/opennova-novaworld-web"]
 
-# ---- controller ------------------------------------------------------------
-FROM runtime AS controller
-COPY --from=build /src/build/apps/novaworld_controller/opennova-novaworld-controller /app/
+# ---- fleet -----------------------------------------------------------------
+FROM runtime AS fleet
+COPY --from=build /src/build/apps/novaworld_fleet/opennova-novaworld-fleet /app/
 COPY --from=build /src/apps/novaworld_common/hosted/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
-RUN ! ldd /app/opennova-novaworld-controller | grep -q 'not found'
+RUN ! ldd /app/opennova-novaworld-fleet | grep -q 'not found'
 ENV ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh
 USER 10002
 EXPOSE 8070/tcp 8081/tcp
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
     CMD curl -fsS --max-time 2 "http://127.0.0.1:${ONNET_HEALTH_PORT}/livez" || exit 1
-ENTRYPOINT ["/app/opennova-novaworld-controller"]
+ENTRYPOINT ["/app/opennova-novaworld-fleet"]
 
 # ---- worker ----------------------------------------------------------------
 FROM runtime-aws AS worker

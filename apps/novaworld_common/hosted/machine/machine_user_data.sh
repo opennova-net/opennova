@@ -27,14 +27,14 @@
 #      own directory and binds it read-only into that tree's containers;
 #   5. fences the slots' users (UIDs 10001-10032) off the instance metadata
 #      service (the machine role's credentials, this user-data with its token)
-#      and off the controller's internal port on every destination (the
-#      agents' routes: only the agent, root, may reach it; the controller is
+#      and off the fleet's internal port on every destination (the
+#      agents' routes: only the agent, root, may reach it; the fleet program is
 #      reached by a name whose address moves with it, so no rule names an
 #      address), checks both, and keeps both at every start of the agent;
 #   6. pulls the serve image (the containers' first start pulls nothing),
 #      copies opennova-hostd out of the hostd image to /usr/local/bin and
 #      starts it under systemd (Restart=always): it redeems the token over the
-#      controller's internal listener (SERVICE_URL, resolved at each request),
+#      fleet's internal listener (SERVICE_URL, resolved at each request),
 #      then fetches the trees the service names and runs what the service
 #      places on the machine's slots (apps/hostd/README.md), each container's
 #      output going to the machines' CloudWatch log group (LOG_GROUP), stream
@@ -54,7 +54,7 @@
 set -euo pipefail
 umask 077
 
-# The controller's internal listener, http://<name>:<port>, and that port.
+# The fleet's internal listener, http://<name>:<port>, and that port.
 SERVICE_URL='@OPENNOVA_SERVICE_URL@'
 SERVICE_PORT='@OPENNOVA_SERVICE_PORT@'
 MACHINE_ID='@OPENNOVA_MACHINE_ID@'
@@ -156,12 +156,12 @@ cat > /usr/local/sbin/opennova-machine-fence <<'FENCE'
 # opennova-hostd.service's ExecStartPre, at every start of the agent: the
 # slots' containers run as UIDs 10001-10032 on the machine's own network, which
 # reaches the instance metadata service (the machine role's credentials, the
-# user-data) and the controller's internal port (the agents' routes). These
+# user-data) and the fleet's internal port (the agents' routes). These
 # rules refuse those UIDs every packet to both, where missing (IPv4, and Nitro's
 # IPv6 metadata address where the kernel has IPv6 at all): the port on every
-# destination, since the controller's address moves with its instance. They
+# destination, since the fleet's address moves with its instance. They
 # also refuse them the slots' remote-admin ports (TCP 32800-32831) on every
-# destination: a server's admin.cfg admits the controller's whole network now
+# destination: a server's admin.cfg admits the fleet's whole network now
 # that its address moves, and the machine's own address is in it, so without
 # this a slot could reach a sibling's admin port (its password still guards it).
 set -eu

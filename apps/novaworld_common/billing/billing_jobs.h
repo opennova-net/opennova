@@ -3,7 +3,7 @@
 // The billing sync's jobs (billing_sync.h) on the service's queue
 // (jobs/job_queue.h):
 //
-//   billing.reconcile  BillingSync::reconcile_all: at a controller's start,
+//   billing.reconcile  BillingSync::reconcile_all: at a fleet leader's start,
 //                      every ONNET_BILLING_RECONCILE_MINUTES and when an admin
 //                      asks; one that did not complete runs again
 //                      kReconcileRetryS later (the job's retries).

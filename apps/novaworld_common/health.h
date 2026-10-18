@@ -6,7 +6,7 @@
 // - The stall watchdog, one per process, over its program's loops alone
 //   (program.h): the gate's receive loop and the lobby's NovaWorld UDP receive
 //   loop (each wakes at least every 250 ms with nothing to read); the
-//   controller's supervisor pass (every second; it never calls the cloud, its
+//   fleet's supervisor pass (every second; it never calls the cloud, its
 //   driver's calls being jobs) and job scheduler (every second), or its
 //   election's turns while it waits as a standby; the worker's job pool (its
 //   workers' claims and its keeper; a slow job occupies its worker alone, so
@@ -19,7 +19,7 @@
 //   processes untouched. GET /livez answers from it, with no other detail:
 //   "ok", or 503 "stalled" while healthy() is false (the container's health
 //   check; health_listener.h on ONNET_HEALTH_PORT for the gate, the lobby, the
-//   controller and the worker, http_listener.cpp on web's own port). Web's
+//   fleet and the worker, http_listener.cpp on web's own port). Web's
 //   GET /healthz, whether it serves a retail client (the load balancer's), is
 //   the same, else 503 "redis unreachable" while Redis does not answer its PING.
 // - The heartbeat: one JSON line on stdout every kHeartbeatMs,
@@ -28,7 +28,7 @@
 //   knows (Heartbeat): the NovaWorld sessions and the listed servers (lobby);
 //   the webhook deliveries refused since the last line (web, billing on); the
 //   hosted servers live and failed since the last line, the machines lost,
-//   the launch failures since the last line and the limits hold (controller,
+//   the launch failures since the last line and the limits hold (fleet,
 //   hosting on); the age of the oldest webhook event the billing sync has not
 //   synced yet, -1 with billing off (worker); the probes left unanswered for
 //   want of a lobby since the last line and the lobby instances that take

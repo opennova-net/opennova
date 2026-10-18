@@ -38,7 +38,7 @@ opennova-hostd --service http://<host>:<port> --machine <id> [options]
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--service` | required | The controller's internal listener as the machine reaches it (`ONNET_INTERNAL_URL`: the deployment's private name for the controller, resolved at each request, so the agent follows the controller to a new instance; each request tries every address the name lists until one takes the connection, since during a controller's replacement it lists the standby, which does not listen, beside the leader), `http://` only. |
+| `--service` | required | The fleet's internal listener as the machine reaches it (`ONNET_INTERNAL_URL`: the deployment's private name for the fleet program, resolved at each request, so the agent follows the fleet program to a new instance; each request tries every address the name lists until one takes the connection, since during a fleet leader's replacement it lists the standby, which does not listen, beside the leader), `http://` only. |
 | `--machine` | required | This machine's id, the service's `fleet_machines` row. |
 | `--token-file` | `/etc/opennova/hostd.token` | The one-time bootstrap token the machine's user-data wrote (0600). Deleted once redeemed. |
 | `--state-dir` | `/var/lib/opennova-hostd` | The saved bootstrap (`machine-<id>.json`, 0600) and `scratch/` (the CLIs' output files, a pull's error file, a start's environment file). Made 0700. |
@@ -72,7 +72,7 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/local/sbin/opennova-machine-fence
-ExecStart=/usr/local/bin/opennova-hostd --service http://controller.prod.opennova.internal:8070 --machine 12 --trees-root /opt/game --aws /usr/local/bin/aws --log-group /opennova/prod/machines --log-region us-east-1
+ExecStart=/usr/local/bin/opennova-hostd --service http://fleet.prod.opennova.internal:8070 --machine 12 --trees-root /opt/game --aws /usr/local/bin/aws --log-group /opennova/prod/machines --log-region us-east-1
 Restart=always
 RestartSec=5
 

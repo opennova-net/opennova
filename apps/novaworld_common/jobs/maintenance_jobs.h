@@ -46,7 +46,7 @@ struct MaintenanceConfig {
 
 // The handlers (the worker's).
 void register_maintenance_jobs(JobRegistry &registry, const MaintenanceConfig &config);
-// Their schedule (the controller's).
+// Their schedule (the fleet's).
 std::vector<PeriodicJob> maintenance_schedule(const MaintenanceConfig &config);
 
 } // namespace opennova::novaworld_server::jobs

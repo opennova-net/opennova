@@ -27,8 +27,8 @@
 // The route sets each container's uid to its slot's and drops one whose slot
 // is past the machine's.
 
-#include "agent_protocol.h"
-#include "fleet_repository.h"
+#include "hosted/agent_protocol.h"
+#include "hosted/fleet_repository.h"
 
 #include <net/novaworld/db/database.h>
 

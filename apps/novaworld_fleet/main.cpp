@@ -1,5 +1,5 @@
-// opennova-novaworld-controller: the controller (program.h). Elected among the
-// controller processes on the database (controller.h), it runs while it leads
+// opennova-novaworld-fleet: the fleet program (program.h). Elected among the
+// fleet processes on the database (election.h), it runs while it leads
 // the internal listener (the machines' agent routes, bound only by the leader,
 // so the deployment's internal name reaches the one that renders the start
 // files), the hosted servers' supervisor with its admin links, the console
@@ -11,13 +11,13 @@
 // private address (ecs_metadata.h), which the deployment's Cloud Map name
 // (ONNET_INTERNAL_URL) points at.
 
-#include "controller.h"
 #include "ecs_metadata.h"
+#include "election.h"
 #include "parts.h"
 #include "program.h"
 
 #include "hosted/admin_link.h"
-#include "hosted/console_queue.h"
+#include "hosted/console_drain.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/internal_listener.h"
@@ -61,21 +61,21 @@ int run(const program::Boot &boot) {
 
 	const HostedSetup hosting = hosted_setup(config);
 	const hosted::FleetConfig &fleet = hosting.fleet;
-	// The machines' admin.cfg admits the address the controller's admin links
+	// The machines' admin.cfg admits the address the fleet's admin links
 	// connect from, its internal listener's bind: on a cloud machine's
-	// network, the controller's private address.
+	// network, the fleet task's private address.
 	if (hosting.provider == "ec2") {
 		const auto address = hosted::parse_ipv4(fleet.internal_address);
 		if (!address || !hosted::ipv4_cidr_private(hosted::Ipv4Cidr{ *address, ~uint32_t{ 0 } }))
 			return program::fatal(
-					"the ec2 driver needs the controller's internal listener on its private IPv4 "
+					"the ec2 driver needs the fleet's internal listener on its private IPv4 "
 					"(ONNET_INTERNAL_HTTP_BIND, or its ECS task's): the machines' admin.cfg admits "
 					"that address");
 	}
 	// The periodic jobs it enqueues (the workers run them): the prunes, the
 	// website's and the hosted stats' among them, billing's and the fleet's
-	// (parts.h, which web's jobs page reads alike). The controller builds none
-	// of billing (no transport, no Stripe call).
+	// (parts.h, which web's jobs page reads alike). The fleet builds none of
+	// billing (no transport, no Stripe call).
 	jobs::Scheduler scheduler(boot.pool, periodic_jobs(config, hosting));
 
 	// The admin links to the running hosted servers (hosted/admin_link.h): the
@@ -100,7 +100,7 @@ int run(const program::Boot &boot) {
 		hosted_config.master_host = config.public_host;
 		hosted_config.master_gate_port = config.gate_udp_port;
 		// Where the machines fetch each tree from: the store's URL of trees/<id>/,
-		// a pure function of the store's config (the controller holds no store).
+		// a pure function of the store's config (the fleet holds no store).
 		hosted_config.tree_url = [store = hosting.store](int64_t tree_id) {
 			return object_store_url(store, "trees/" + std::to_string(tree_id) + "/");
 		};
@@ -135,20 +135,20 @@ int run(const program::Boot &boot) {
 				boot.pool, *supervisor, hosted::agent_route_config(fleet));
 	}
 
-	// The election (controller.h): while it leads, its parts run in order, each
+	// The election (election.h): while it leads, its parts run in order, each
 	// pass asking that it still does; a leadership lost ends the process, and
 	// its container starts it again as a standby.
-	controller::ControllerConfig controller_config;
+	fleet::ElectionConfig election_config;
 	{
 		char tag[16];
 		std::snprintf(tag, sizeof(tag), "%08x", os_random_u32());
-		controller_config.holder = std::string("controller-") + tag;
+		election_config.holder = std::string("fleet-") + tag;
 	}
-	controller_config.on_lost = [](const std::string &) {
+	election_config.on_lost = [](const std::string &) {
 		std::fflush(nullptr);
-		std::_Exit(controller::kLeadershipLostExitCode);
+		std::_Exit(fleet::kLeadershipLostExitCode);
 	};
-	controller::Controller leader(boot.db_options, controller_config);
+	fleet::Election leader(boot.db_options, election_config);
 	const auto leads = [&leader](db::Database &db) { return leader.still_leads(db); };
 	if (supervisor) {
 		// The machines' agent routes, bound only while this process leads and
@@ -163,7 +163,7 @@ int run(const program::Boot &boot) {
 					if (internal->start(bind_address, bind_port))
 						return;
 					std::fprintf(stderr,
-							"[controller] FATAL: the internal listener could not bind %s:%u "
+							"[fleet] FATAL: the internal listener could not bind %s:%u "
 							"(ONNET_INTERNAL_HTTP_BIND)\n",
 							bind_address.c_str(), static_cast<unsigned>(bind_port));
 					std::fflush(nullptr);
@@ -187,7 +187,7 @@ int run(const program::Boot &boot) {
 			[&scheduler] { scheduler.stop(); } });
 	leader.start();
 
-	// The controller's watchdog: its supervisor's passes and its scheduler's
+	// The fleet's watchdog: its supervisor's passes and its scheduler's
 	// ticks while it leads, the election's turns while it waits as a standby
 	// (no stall).
 	Watchdog watchdog;
@@ -216,7 +216,7 @@ int run(const program::Boot &boot) {
 		beat.machines_lost = hosted::count_machines(db, hosted::FleetMachineState::Lost);
 		beat.limits_held = hosted::limits_hold::held(db) ? 1 : 0;
 	};
-	const int exit_code = program::run_main_loop("controller", boot, watchdog, hooks);
+	const int exit_code = program::run_main_loop("fleet", boot, watchdog, hooks);
 
 	// Its parts in reverse (the scheduler, so nothing is enqueued from here
 	// on; the console drain; the supervisor's thread, so no pass runs, and the
@@ -224,7 +224,7 @@ int run(const program::Boot &boot) {
 	// with QUIT; the internal listener), then its lock goes, and a standby
 	// leads. The rows keep their states; the cloud machines and their
 	// containers run on, and the next leader's reconciliation resumes them.
-	std::printf("[shutdown] stopping the controller\n");
+	std::printf("[shutdown] stopping the fleet\n");
 	leader.stop();
 	return exit_code;
 }
@@ -232,5 +232,5 @@ int run(const program::Boot &boot) {
 } // namespace
 
 int main() {
-	return opennova::novaworld_server::program::run_program({ "controller", configure, run });
+	return opennova::novaworld_server::program::run_program({ "fleet", configure, run });
 }

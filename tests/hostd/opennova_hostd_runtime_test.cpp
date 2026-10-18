@@ -722,7 +722,7 @@ int test_options() {
 			o.docker == "/opt/docker");
 	o = {};
 	TEST_EXPECT(
-			hostd::parse_hostd_options({ "--machine", "4", "--service", "http://controller:8070",
+			hostd::parse_hostd_options({ "--machine", "4", "--service", "http://fleet:8070",
 											   "--runtime", "process", "--serve", "/opt/serve", "--trees-root",
 											   "/tmp/trees", "--aws", "/opt/aws" },
 					o, error) == ParseOutcome::Run);
@@ -731,7 +731,7 @@ int test_options() {
 	TEST_EXPECT(o.log_group.empty() && o.log_region.empty());
 	o = {};
 	TEST_EXPECT(hostd::parse_hostd_options(
-						{ "--service", "http://controller:8070", "--machine", "12", "--log-group",
+						{ "--service", "http://fleet:8070", "--machine", "12", "--log-group",
 								"/opennova/prod/machines", "--log-region", "eu-west-1" },
 						o, error) == ParseOutcome::Run);
 	TEST_EXPECT(o.log_group == "/opennova/prod/machines" && o.log_region == "eu-west-1");

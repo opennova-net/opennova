@@ -15,8 +15,8 @@ endif()
 # never need it.
 option(OPENNOVA_NOVAWORLD_SERVICE
     "Build the NovaWorld service (opennova_novaworld_service, apps/novaworld_*, their tests)" OFF)
-# Its HTTP layer: Crow and Asio, fetched at configure time. Web, the controller
-# and the worker build only with it; the gate and the lobby without it too.
+# Its HTTP layer: Crow and Asio, fetched at configure time. Web, the fleet and
+# the worker build only with it; the gate and the lobby without it too.
 option(BUILD_NOVAWORLD_HTTP "Fetch + build Crow for the novaworld HTTP layer" OFF)
 if(BUILD_NOVAWORLD_HTTP AND NOT OPENNOVA_NOVAWORLD_SERVICE)
     message(FATAL_ERROR "BUILD_NOVAWORLD_HTTP is the NovaWorld service's HTTP layer: "
@@ -48,7 +48,7 @@ endif()
 add_subdirectory(engine)
 
 # The NovaWorld service's HTTP layer (apps/novaworld_common, novaworld_web,
-# novaworld_controller, novaworld_worker).
+# novaworld_fleet, novaworld_worker).
 if(BUILD_NOVAWORLD_HTTP)
     include(FetchContent)
     FetchContent_Declare(asio
@@ -83,7 +83,7 @@ if(OPENNOVA_NOVAWORLD_SERVICE)
     add_subdirectory(apps/novaworld_lobby)
     if(BUILD_NOVAWORLD_HTTP)
         add_subdirectory(apps/novaworld_web)
-        add_subdirectory(apps/novaworld_controller)
+        add_subdirectory(apps/novaworld_fleet)
         add_subdirectory(apps/novaworld_worker)
     endif()
 endif()

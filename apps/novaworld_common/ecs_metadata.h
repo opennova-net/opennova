@@ -2,10 +2,10 @@
 
 // The address a program running as an ECS task finds from its own task, one no
 // configuration can name ahead of the task's start (program.h's configure
-// step): the controller's internal listener bind (internal_bind),
+// step): the fleet's internal listener bind (internal_bind),
 // ONNET_INTERNAL_HTTP_BIND where set; on ECS, its task's private IPv4 at the
 // internal port (hosted/fleet_config.h), never a wildcard or public address.
-// Neither: the controller keeps the environment's bind.
+// Neither: the fleet keeps the environment's bind.
 //
 // The task metadata endpoint (version 4: the agent names it in every
 // container's ECS_CONTAINER_METADATA_URI_V4) gives the task's private IPv4: in
@@ -43,7 +43,7 @@ struct Sources {
 	int metadata_timeout_ms = 3000;
 };
 
-// The controller's internal listener bind, <IPv4>:<port>, from the task when
+// The fleet's internal listener bind, <IPv4>:<port>, from the task when
 // `configured` is unset and the task metadata is there; "" with no `error`
 // when the environment's is to stand (set, or not on ECS), "" with `error`
 // when the task's metadata does not give an address.

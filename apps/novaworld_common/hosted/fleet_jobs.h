@@ -32,8 +32,9 @@
 //                      row's machine the listing lacks is described (one that
 //                      is gone ends at the next pass). A listing that fails
 //                      ends nothing and fails the job (the next sweep tries
-//                      again). Periodic (fleet_schedule), and at the
-//                      supervisor's reconciliation.
+//                      again). Periodic (fleet_schedule, every
+//                      kFleetSweepIntervalMs), and at the supervisor's
+//                      reconciliation.
 
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
@@ -51,6 +52,9 @@ inline constexpr const char *kJobMachineLaunch = "machine.launch";
 inline constexpr const char *kJobMachineDescribe = "machine.describe";
 inline constexpr const char *kJobMachineTerminate = "machine.terminate";
 inline constexpr const char *kJobFleetSweep = "fleet.sweep";
+
+// The fleet.sweep job's period (fleet_schedule).
+inline constexpr int64_t kFleetSweepIntervalMs = 5 * 60 * 1000;
 
 // The most of each running at once, across every worker (the AWS API's rate
 // limits).
@@ -74,7 +78,7 @@ bool machine_launch_pending(db::Database &db, int64_t machine_id);
 // The handlers over `driver`, which must outlive the workers.
 void register_fleet_jobs(
 		jobs::JobRegistry &registry, MachineDriver &driver, FleetJobCaps caps = {});
-// The periodic sweep, every `sweep_interval_ms` and at the controller's start.
-std::vector<jobs::PeriodicJob> fleet_schedule(int64_t sweep_interval_ms);
+// The periodic sweep, every `sweep_interval_ms`.
+std::vector<jobs::PeriodicJob> fleet_schedule(int64_t sweep_interval_ms = kFleetSweepIntervalMs);
 
 } // namespace opennova::novaworld_server::hosted

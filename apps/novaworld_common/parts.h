@@ -7,20 +7,20 @@
 // - The hosted servers' setup (hosted_setup): whether hosting is on, its
 //   provider, its fleet settings, the object store its data sets' trees live
 //   in and the supervisor's MachineProfile. Web's routes (a start's
-//   at_capacity, the list's `full`), the controller's supervisor and the
+//   at_capacity, the list's `full`), the fleet's supervisor and the
 //   worker's fleet jobs read the same environment the same way; the worker
 //   alone builds the machine driver over it (apps/novaworld_worker/main.cpp),
 //   its scratch directory and its runner.
 // - The object store (make_object_store): web's data set routes and the
 //   worker's data set jobs, each over a store of its own (S3 through the AWS
-//   CLI, or the local directory); the controller holds none (its supervisor
+//   CLI, or the local directory); the fleet holds none (its supervisor
 //   gets the store's URL of a tree as a pure function).
 // - Billing (make_billing): web's routes and webhook and the worker's sync,
-//   each over a curl transport of its own. The controller schedules billing's
+//   each over a curl transport of its own. The fleet schedules billing's
 //   jobs from the settings alone (check_billing_config), building none of it.
 // - Outbound mail (make_mail): whether mail is on (web queues mail.send jobs
 //   only then) and the worker's SES mailer that sends them.
-// - The periodic jobs (periodic_jobs): what the controller's scheduler
+// - The periodic jobs (periodic_jobs): what the fleet's scheduler
 //   enqueues, and what web's jobs page shows and runs on request.
 //
 // Each holds its owner-only scratch directory (ScratchDir) and removes it as
@@ -80,7 +80,7 @@ struct HostedSetup {
 	ObjectStoreConfig store;
 	bool store_ok = false;
 	hosted::FleetConfig fleet;
-	// The supervisor's view of the driver's machines (the controller's).
+	// The supervisor's view of the driver's machines (the fleet's).
 	hosted::MachineProfile profile;
 };
 
@@ -89,7 +89,7 @@ struct HostedSetup {
 // that do not read, no store or one that does not parse (the local driver's
 // must be a file:// one), or a driver missing what it needs (each but "none"
 // logged as a warning). The fleet's settings are the environment's
-// (hosted/fleet_config.h), the internal listener's bind the controller found
+// (hosted/fleet_config.h), the internal listener's bind the fleet found
 // in its ECS task standing in for an unset ONNET_INTERNAL_HTTP_BIND
 // (config.internal_bind).
 HostedSetup hosted_setup(const ServerConfig &config);

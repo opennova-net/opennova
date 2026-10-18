@@ -28,8 +28,8 @@
 //   - web: one with no ONNET_WEB_HOST does not boot; booted, the HTTP listener
 //     alone (and no health listener of its own: GET /livez and /healthz answer
 //     on its HTTP port), its menus' HOST_URL naming the web endpoint;
-//   - controller: no listener but its health one, elected (it leads), its
-//     parts stopped at the signal;
+//   - fleet: no listener but its health one, elected (it leads), its parts
+//     stopped at the signal;
 //   - worker: its job pool, its health listener.
 //
 // Every program then stops on SIGTERM with exit 0 and every database
@@ -221,7 +221,7 @@ int exercise_gate(const Binaries &bin, const test_temp::TempDir &temp,
 		TEST_EXPECT(gate_port != 0);
 		// Its parts alone.
 		TEST_EXPECT(!has(log, kNwUdpLine) && !has(log, kHttpLine) && !has(log, "[jobs]") &&
-				!has(log, "[controller]"));
+				!has(log, "[fleet]"));
 		if (livez_ok(process, log_path) != 0)
 			return 1;
 		opennova::GateResponse reply;
@@ -299,7 +299,7 @@ int exercise_lobby(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(logged_port(log, kNwUdpLine) == nw_port);
 	// Its parts alone.
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kHttpLine) && !has(log, "[jobs]") &&
-			!has(log, "[controller]"));
+			!has(log, "[fleet]"));
 	TEST_EXPECT(has(log, "[lobby] instance ") && has(log, " at " + lobby + " registered;"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
@@ -465,7 +465,7 @@ int exercise_web(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(has(log, boot_line("web")));
 	TEST_EXPECT(logged_port(log, kHttpLine) == http_port);
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHealthLine) &&
-			!has(log, "[jobs]") && !has(log, "[controller]"));
+			!has(log, "[jobs]") && !has(log, "[fleet]"));
 	// The menus name the one web endpoint (ONNET_WEB_HOST) and the port, as the
 	// gate does.
 	TEST_EXPECT(has(log,
@@ -480,29 +480,28 @@ int exercise_web(const Binaries &bin, const test_temp::TempDir &temp,
 	return 0;
 }
 
-int exercise_controller(const Binaries &bin, const test_temp::TempDir &temp,
+int exercise_fleet(const Binaries &bin, const test_temp::TempDir &temp,
 		const test_db::TestDatabase &database, const std::string &log_path) {
 	ProgramProcess process;
-	if (!boot(process, bin.controller, env_of(temp, database.conninfo(), {}), temp.root(),
-				log_path))
+	if (!boot(process, bin.fleet, env_of(temp, database.conninfo(), {}), temp.root(), log_path))
 		return 1;
-	TEST_EXPECT(wait_for_log(process, log_path, "[controller] controller-", kBootDeadline));
+	TEST_EXPECT(wait_for_log(process, log_path, "[fleet] fleet-", kBootDeadline));
 	const auto leads_by = Clock::now() + std::chrono::seconds(10);
 	while (!has(read_text(log_path), " leads (generation ") && Clock::now() < leads_by)
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	const std::string log = read_text(log_path);
-	TEST_EXPECT(has(log, boot_line("controller")));
+	TEST_EXPECT(has(log, boot_line("fleet")));
 	TEST_EXPECT(has(log, " leads (generation "));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
 			!has(log, "[jobs] ") && !has(log, "internal listener on"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
-	if (stop_cleanly(process, "controller", database, log_path) != 0)
+	if (stop_cleanly(process, "fleet", database, log_path) != 0)
 		return 1;
 	TEST_EXPECT(logged_in_order(
-			read_text(log_path), { "[shutdown] stopping the controller", " stopped its parts" }));
-	std::printf("  controller: elected, no listener but its health one, its parts stopped at "
-				"the signal\n");
+			read_text(log_path), { "[shutdown] stopping the fleet", " stopped its parts" }));
+	std::printf("  fleet: elected, no listener but its health one, its parts stopped at the "
+				"signal\n");
 	return 0;
 }
 
@@ -516,7 +515,7 @@ int exercise_worker(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(has(log, boot_line("worker")));
 	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s)"));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
-			!has(log, "[controller]"));
+			!has(log, "[fleet]"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
 	if (stop_cleanly(process, "worker", database, log_path) != 0)
@@ -547,7 +546,7 @@ int main(int argc, char **argv) {
 	test_redis::init(argc, argv);
 	Binaries bin;
 	if (!bin.read(argc, argv, 1)) {
-		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <controller> <worker>\n", argv[0]);
+		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <fleet> <worker>\n", argv[0]);
 		return 2;
 	}
 	TEST_EXPECT(net::startup() == 0);
@@ -559,7 +558,7 @@ int main(int argc, char **argv) {
 	if (rc == 0)
 		rc = run_case(bin, exercise_web, "web");
 	if (rc == 0)
-		rc = run_case(bin, exercise_controller, "controller");
+		rc = run_case(bin, exercise_fleet, "fleet");
 	if (rc == 0)
 		rc = run_case(bin, exercise_worker, "worker");
 	net::shutdown();

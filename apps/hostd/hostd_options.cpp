@@ -55,7 +55,7 @@ const char *hostd_usage() {
 		   "Runs as root (systemd). The containers keep running when the agent or the service\n"
 		   "stops (with the process runtime they end with it).\n"
 		   "\n"
-		   "  --service <url>        the controller's internal listener, http://<private "
+		   "  --service <url>        the fleet's internal listener, http://<private "
 		   "name or address>:<port>\n"
 		   "  --machine <id>         this machine's id (the service's fleet_machines row)\n"
 		   "  --token-file <path>    the one-time bootstrap token, deleted once redeemed\n"

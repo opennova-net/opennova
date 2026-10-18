@@ -6,7 +6,11 @@ servers for it as the entitlement allows, each in a slot of one of the fleet's m
 directory; the `hosted_servers`, `hosted_server_events` and `fleet_machines` tables). Each
 server runs the data set its owner picks (and an expansion of it), pinned to the data it
 started on (ADR 0064). Everything here is service policy. The service around it (the
-programs, the jobs, the database) is [`../README.md`](../README.md).
+programs, the jobs, the database) is [`../README.md`](../README.md). The fleet program's
+own sources (the supervisor, the stats sampler, the admin links, the console drain, the
+internal listener and the agents' routes) live in
+[`../../novaworld_fleet/hosted/`](../../novaworld_fleet/README.md); the rest named here is
+this directory's.
 
 ## The entitlement and the data sets
 
@@ -81,8 +85,8 @@ programs, the jobs, the database) is [`../README.md`](../README.md).
 
 ## The supervisor
 
-- **The supervisor** (`supervisor.*`) is a thread of its own, started once the controller
-  leads. Each pass (every second) asks that the controller still leads, steps every live
+- **The supervisor** (`supervisor.*`) is a thread of its own, started once the fleet program
+  leads. Each pass (every second) asks that the fleet program still leads, steps every live
   machine, then walks every live server: `requested` → `provisioning` (placed; the trees
   pinned, the service account's and the admin's passwords minted, the files rendered for
   the slot) → `booting` (its container wanted until its machine's agent, the trees
@@ -115,7 +119,7 @@ programs, the jobs, the database) is [`../README.md`](../README.md).
   gone, ended or drained (the server is placed again at once). The brake on a fleet that
   cannot launch is the launch backoff and the heartbeat's `launch_failures`.
 - **No lobby live.** While no lobby instance takes clients (`lobbydb::live_lobbies`: a
-  lobby outage, or a deployment's first release, whose controller rolls before any
+  lobby outage, or a deployment's first release, whose fleet program rolls before any
   lobby), a gate hands a starting `opennova-serve` no lobby and it exits past its 30 s
   probe (retail's). So the supervisor starts nothing then: a server due to be placed waits
   in `provisioning` (`[hosted] server <id> waits for a live lobby`), an exit places the
@@ -138,7 +142,7 @@ programs, the jobs, the database) is [`../README.md`](../README.md).
   expansion at `/opt/game/expansion/<code>`), `opennova-serve`'s arguments, the slot's
   limits (`ONNET_FLEET_SLOT_CPUS`, `ONNET_FLEET_SLOT_MEMORY_MB`, 128 processes) and its
   working directory's files until the agent has reported it once; and every tree they use,
-  with its store URL and manifest. The files live in the controller's memory alone and are
+  with its store URL and manifest. The files live in the fleet's memory alone and are
   dropped once reported: a start a restart cut short is placed again with new
   credentials. The reply sends `drain` while the machine's row is draining.
 - **Health.** While `running`, every pass reads its agent's report and every 20 s checks
@@ -152,7 +156,7 @@ programs, the jobs, the database) is [`../README.md`](../README.md).
   is gone fails; a `fleet.sweep` job runs (every cloud machine the driver lists that no
   live row names is terminated, but one whose row still launches; a live row the listing
   lacks is described, and ends if its machine is gone); a server whose files went with
-  the controller is placed again; the rest resume, a running one given 8 min
+  the fleet program is placed again; the rest resume, a running one given 8 min
   (`relist_grace_ms`) to list again before its health checks count. A driver that cannot
   list ends nothing. Every 5 min the sweep runs again.
 
@@ -163,11 +167,11 @@ programs, the jobs, the database) is [`../README.md`](../README.md).
   Each machine runs `opennova-hostd`, whose user-data carries a one-time bootstrap token
   (kept as its SHA-256 alone, 30 minutes' life, spent at the agent's first sync) that it
   redeems for a long-lived secret (stored hashed); then it syncs every 5 s (1 s with
-  work). Both routes are on the **internal listener**, the controller's second HTTP
+  work). Both routes are on the **internal listener**, the fleet's second HTTP
   server, bound while it leads to its task's private address at 8070 (from the ECS task
   metadata, with `ONNET_INTERNAL_HTTP_BIND` unset), which the machines' security group
   alone reaches; the agents reach it at `ONNET_INTERNAL_URL`, resolved at each request, so
-  they follow a replaced controller. The routes answer only a peer inside
+  they follow a replaced fleet leader. The routes answer only a peer inside
   `ONNET_HOSTED_BOOTSTRAP_CIDRS` (and loopback on a loopback bind) from the machine's own
   recorded address; every refusal is one bare 404, logged without the token or the secret
   at most once per peer per minute.
@@ -191,7 +195,7 @@ programs, the jobs, the database) is [`../README.md`](../README.md).
     security group and instance profile, IMDSv2 required), tagged with the deployment, the
     kind and the machine id, with the machine script (`machine/machine_user_data.sh`) as
     user-data: it installs docker and the AWS CLI v2 (checked), reserves the slots' ports,
-    fences the slots' users off the instance metadata and the controller's internal port,
+    fences the slots' users off the instance metadata and the fleet's internal port,
     installs `opennova-hostd` copied out of the serve image and ships its log and its
     containers' output to the machines' log group. The driver runs the AWS CLI through a
     `CommandRunner` (`apps/common/command_runner.*`: an argv, no shell, a 20 s timeout,
@@ -208,7 +212,7 @@ programs, the jobs, the database) is [`../README.md`](../README.md).
   the rotation never ends the session, the owner's first map last since the last line is
   the starting map; cp1252, CR LF), `game.cfg` (through the format's own writer, the
   NovaWorld network type and the slot's ports), `admin.cfg` (user `svc`, a 31-character
-  random password, rights `7F`, `ip_restrict` the controller's network) and the
+  random password, rights `7F`, `ip_restrict` the fleet's network) and the
   `--credentials` file. All but `game.cfg` are secret: sent to the agent only until it
   has reported the container, written owner-only, never logged; the admin login lives in
   the row's own columns, read by `hosted::admin_login_of` alone. `opennova-serve` runs
@@ -263,8 +267,8 @@ and its last hour. The agents report what each slot sends, not what it receives.
 ## The admin link and the console
 
 - **The admin link** (`admin_link.*`; ADR 0053 d5). A running server opens retail's remote
-  admin on its slot's admin port, its `admin.cfg` granting `svc` to the controller's
-  network alone (its private address's /16, since a replaced controller comes back on a
+  admin on its slot's admin port, its `admin.cfg` granting `svc` to the fleet's
+  network alone (its private address's /16, since a replaced fleet leader comes back on a
   new address; on a cloud machine its security group too). The service is that console's
   only client: owners never get the port or the login. The supervisor keeps one
   `AdminLink` per server in `running` (up once it runs, replaced when a restart rendered a
@@ -289,10 +293,10 @@ and its last hour. The agents report what each slot sends, not what it receives.
 | --- | --- | --- |
 | `ONNET_HOSTED_PROVIDER` | `none` | The machine driver: `ec2`, `docker` (the local stack's) or `none`. Any other value, fleet settings or data sets that do not read, or a driver missing one of its settings (or with a loopback `ONNET_PUBLIC_HOST`) is `none` with a boot warning naming why. |
 | `ONNET_HOSTED_CAP` | 24 | The most hosted servers live at once, across every account: a backstop beside the fleet's room. |
-| `ONNET_OBJECT_STORE_URL` | none | The object store of the data sets' trees and the update packages (`../object_store.h`, ADR 0064): `s3://<bucket>/data` (the deployment's ops bucket, through the program's role) or `file:///<dir>` (a developer's machine, the tests). Required for hosting; read by web, the worker and the controller whether or not hosting is on. |
+| `ONNET_OBJECT_STORE_URL` | none | The object store of the data sets' trees and the update packages (`../object_store.h`, ADR 0064): `s3://<bucket>/data` (the deployment's ops bucket, through the program's role) or `file:///<dir>` (a developer's machine, the tests). Required for hosting; read by web, the worker and the fleet program whether or not hosting is on. |
 | `ONNET_OBJECT_STORE_REGION` | none | The S3 store's region (required with an `s3://` URL). |
-| `ONNET_INTERNAL_HTTP_BIND` | `127.0.0.1:8070` | The controller's internal listener, `<IPv4>:<port>`, a private or loopback address: unset in a deployment, where the controller binds its task's private address at 8070. With `ec2`, a controller whose bind is not private does not boot. |
-| `ONNET_INTERNAL_URL` | none | The internal listener as the machines reach it, `http://<host>:<port>` (a deployment's Cloud Map name; the controller's compose name locally). Required by both drivers. |
+| `ONNET_INTERNAL_HTTP_BIND` | `127.0.0.1:8070` | The fleet's internal listener, `<IPv4>:<port>`, a private or loopback address: unset in a deployment, where the fleet program binds its task's private address at 8070. With `ec2`, a fleet program whose bind is not private does not boot. |
+| `ONNET_INTERNAL_URL` | none | The internal listener as the machines reach it, `http://<host>:<port>` (a deployment's Cloud Map name; the fleet's compose name locally). Required by both drivers. |
 | `ONNET_HOSTED_BOOTSTRAP_CIDRS` | none | Comma-separated private IPv4 CIDRs the agent routes answer (the machines' subnet); 127.0.0.0/8 is admitted besides on a loopback bind. |
 | `ONNET_FLEET_SHARED_SLOTS` | 12 | A new shared machine's slots (1..32). |
 | `ONNET_FLEET_MAX_SHARED` | 2 | The most shared machines taking servers at once. |
@@ -402,13 +406,13 @@ under `[update]`.
 ## The console routes
 
 **The console routes** (`console_routes.*`) run the curated commands on a hosted server's
-admin link, which the controller holds: a route writes its command to
+admin link, which the fleet program holds: a route writes its command to
 `hosted_console_commands` with the deadline its budget allows and reads its row until it
-is done; the controller's console drain (`console_queue.*`) claims the queued commands
+is done; the fleet's console drain (`apps/novaworld_fleet/hosted/console_drain.*`) claims the queued commands
 (`FOR UPDATE SKIP LOCKED`), runs each on its link and writes the outcome and each reply
 packet (`hosted_console_replies`); the route reads them and deletes the row. A command
 still queued when the route's wait ends is withdrawn, never sent; only a done row says a
-command went out; one whose controller went away is answered link down by the next
+command went out; one whose fleet leader went away is answered link down by the next
 leader's drain. The owner's routes act on the caller's own servers by id (another
 account's answers as no server's does); the admin's (`/api/admin/hosted/<id>/...`) on any.
 In order: the session or admin check (401; 403 without the CSRF header on a `POST`); the

@@ -22,7 +22,7 @@
 // anything runs, the data sets mounted by label read-only, the fences (the
 // metadata service and the internal port on every destination, for every
 // slot's user) applied and checked before the agent starts, the agent copied
-// out of the serve image and its unit reaching the controller by its URL, sending
+// out of the serve image and its unit reaching the fleet by its URL, sending
 // the containers' output to the machines' log group, and the agent's own journal
 // relayed there through docker's awslogs driver. The settings
 // (hosted/fleet_config.h): the defaults, every variable's read and its refusals. And the docker
@@ -90,10 +90,10 @@ constexpr const char *kImage = "ghcr.io/opennova-net/opennova-serve@sha256:"
 constexpr const char *kHostdImage =
 		"ghcr.io/opennova-net/opennova-serve@sha256:"
 		"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
-// The controller's private address (its internal listener's bind, what admin.cfg
+// The fleet's private address (its internal listener's bind, what admin.cfg
 // admits) and its internal listener's URL by name, as the machines reach it.
 constexpr const char *kService = "10.44.0.10";
-constexpr const char *kServiceUrl = "http://controller.opennova-server.opennova.internal:8070";
+constexpr const char *kServiceUrl = "http://fleet.prod.opennova.internal:8070";
 constexpr const char *kMachineA = "i-0aaaaaaaaaaaaaaa1";
 constexpr const char *kMachineB = "i-0bbbbbbbbbbbbbbb2";
 constexpr uint64_t kTtl = 10 * 1000;
@@ -450,11 +450,10 @@ int test_config_checks(const std::string &scratch) {
 	// nothing a shell word or a URL would read otherwise.
 	TEST_EXPECT(!refused(
 			[](hosted::Ec2MachineConfig &c) { c.service_url = "http://10.44.0.10:8070"; }));
-	for (const char *url : { "", "controller:8070", "https://controller:8070", "http://controller",
-				 "http://controller:", "http://controller:0", "http://controller:70000",
-				 "http://user@controller:8070", "http://controller:8070/",
-				 "http://con troller:8070", "http://con'troller:8070", "http://:8070",
-				 "http://-controller:8070", "http://controller:80x" }) {
+	for (const char *url : { "", "fleet:8070", "https://fleet:8070", "http://fleet",
+				 "http://fleet:", "http://fleet:0", "http://fleet:70000", "http://user@fleet:8070",
+				 "http://fleet:8070/", "http://con troller:8070", "http://con'troller:8070",
+				 "http://:8070", "http://-fleet:8070", "http://fleet:80x" }) {
 		hosted::Ec2MachineConfig c = good;
 		c.service_url = url;
 		if (hosted::Ec2MachineDriver::check_config(c).empty())
@@ -465,9 +464,9 @@ int test_config_checks(const std::string &scratch) {
 		std::string host;
 		uint16_t port = 0;
 		TEST_EXPECT(hosted::Ec2MachineDriver::parse_service_url(kServiceUrl, host, port) &&
-				host == "controller.opennova-server.opennova.internal" && port == 8070);
+				host == "fleet.prod.opennova.internal" && port == 8070);
 	}
-	// The admin address is the controller's to check (its profile), and the scratch
+	// The admin address is the fleet's to check (its profile), and the scratch
 	// directory the worker's to make (the driver): every program asks check_config alike.
 	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.admin_address = "127.0.0.1"; }));
 	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.scratch_dir = ""; }));
@@ -532,12 +531,12 @@ int test_machine_script(const std::string &) {
 				 "jox01" })
 		TEST_EXPECT(script.find(gone) == std::string::npos);
 	// The fences: every slot's UID refused the metadata service and the internal port on
-	// every destination (the controller's address moves with it: no rule names one), at
+	// every destination (the fleet's address moves with it: no rule names one), at
 	// every start of the agent, and checked for the first and the last slot before it.
 	TEST_EXPECT(runs_line(script, "-m owner --uid-owner 10001-10032 -j REJECT"));
 	TEST_EXPECT(runs_line(script, "fence -d 169.254.169.254"));
 	TEST_EXPECT(runs_line(script, "fence -p tcp --dport \"$SERVICE_PORT\""));
-	// And every slot's admin port (admin.cfg admits the controller's network, the
+	// And every slot's admin port (admin.cfg admits the fleet's network, the
 	// machine's own address included): no slot reaches a sibling's remote admin.
 	TEST_EXPECT(runs_line(script, "fence -p tcp --dport 32800:32831"));
 	TEST_EXPECT(script.find("SERVICE_ADDRESS") == std::string::npos);
@@ -644,7 +643,7 @@ int test_slot_plan(const std::string &scratch) {
 	for (int slot : { 0, 5, hosted::kMaxSlots - 1 }) {
 		const hosted::SlotPlan plan = profile.slot_plan(slot);
 		TEST_EXPECT(plan.game_port == 32768 + slot && plan.admin_port == 32800 + slot);
-		// The controller's network, not its one address: a replaced controller's new
+		// The fleet's network, not its one address: a replaced leader's new
 		// address is in it, and the server keeps the admin.cfg its start rendered.
 		TEST_EXPECT(plan.admin_allowed_ip == "10.44.*");
 	}
@@ -1358,7 +1357,7 @@ int test_fleet_config() {
 				c.ec2.deployment == kDeployment);
 		TEST_EXPECT(c.ec2.serve_image == kImage && c.ec2.aws_cli == "/opt/aws/bin/aws");
 		TEST_EXPECT(c.ec2.hostd_image == kHostdImage && c.ec2.log_group == kLogGroup);
-		// The machines reach the controller by its URL; its admin links come from its bind.
+		// The machines reach the fleet by its URL; its admin links come from its bind.
 		TEST_EXPECT(c.internal_url == kServiceUrl && c.ec2.service_url == kServiceUrl);
 		TEST_EXPECT(c.ec2.admin_address == "10.44.0.10");
 		TEST_EXPECT(c.machine_script_path == "/srv/machine.sh");
@@ -1403,9 +1402,9 @@ int test_fleet_config() {
 	TEST_EXPECT(refused("ONNET_INTERNAL_HTTP_BIND", "0.0.0.0:8070"));
 	TEST_EXPECT(refused("ONNET_INTERNAL_HTTP_BIND", "54.1.2.3:8070"));
 	TEST_EXPECT(refused("ONNET_INTERNAL_HTTP_BIND", "localhost:8070"));
-	TEST_EXPECT(refused("ONNET_INTERNAL_URL", "controller:8070"));
-	TEST_EXPECT(refused("ONNET_INTERNAL_URL", "http://controller"));
-	TEST_EXPECT(refused("ONNET_INTERNAL_URL", "http://controller:8070/agent"));
+	TEST_EXPECT(refused("ONNET_INTERNAL_URL", "fleet:8070"));
+	TEST_EXPECT(refused("ONNET_INTERNAL_URL", "http://fleet"));
+	TEST_EXPECT(refused("ONNET_INTERNAL_URL", "http://fleet:8070/agent"));
 	TEST_EXPECT(refused("ONNET_HOSTED_BOOTSTRAP_CIDRS", "0.0.0.0/0"));
 	TEST_EXPECT(refused("ONNET_HOSTED_BOOTSTRAP_CIDRS", "10.44.0.0/16,54.0.0.0/8"));
 	TEST_EXPECT(refused("ONNET_HOSTED_BOOTSTRAP_CIDRS", "10.44.0.1/16"));
@@ -1451,7 +1450,7 @@ constexpr const char *kNetwork = "opennova-dev";
 constexpr const char *kDataFrom = "opennova-dev-machine-data-1";
 constexpr const char *kDevDeployment = "dev";
 constexpr const char *kMachineImage = "opennova-serve:local";
-constexpr const char *kDevServiceUrl = "http://novaworld-controller:8070";
+constexpr const char *kDevServiceUrl = "http://novaworld-fleet:8070";
 
 hosted::DockerMachineConfig docker_config() {
 	hosted::DockerMachineConfig c;
@@ -1654,10 +1653,10 @@ int test_docker_config_and_profile(const std::string &) {
 	TEST_EXPECT(refused(
 			[](auto &c) { c.deployment = std::string(33, 'd'); }, "ONNET_HOSTED_DEPLOYMENT"));
 	TEST_EXPECT(refused([](auto &c) { c.image = "-v"; }, "ONNET_HOSTED_SERVE_IMAGE"));
-	TEST_EXPECT(refused([](auto &c) { c.service_url = "controller:8070"; }, "ONNET_INTERNAL_URL"));
+	TEST_EXPECT(refused([](auto &c) { c.service_url = "fleet:8070"; }, "ONNET_INTERNAL_URL"));
 
 	// The slots' fixed ports (every machine has an address of its own), admitting
-	// the controller's network.
+	// the fleet's network.
 	const hosted::MachineProfile profile = Driver::profile(docker_config());
 	TEST_EXPECT(profile.provider == "docker" && profile.boot_timeout_ms == Driver::kBootTimeoutMs);
 	const hosted::SlotPlan plan = profile.slot_plan(3);

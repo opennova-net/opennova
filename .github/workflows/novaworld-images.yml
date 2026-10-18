@@ -3,7 +3,7 @@ name: NovaWorld images
 # Builds and publishes the NovaWorld service's container images to GHCR, all
 # public (the ECS task definitions pull them with no registry credentials):
 # its five programs from apps/novaworld_common/Dockerfile, one target each
-# (ghcr.io/<owner>/opennova-novaworld-gate, -lobby, -web, -controller and
+# (ghcr.io/<owner>/opennova-novaworld-gate, -lobby, -web, -fleet and
 # -worker), the web portal's nginx image (ghcr.io/<owner>/novaworld-web, the
 # second container in web's task) and the nightly backup task's
 # (ghcr.io/<owner>/opennova-novaworld-backup, deploy/backup). Each is tagged
@@ -116,7 +116,7 @@ jobs:
           - { target: gate, image: opennova-novaworld-gate }
           - { target: lobby, image: opennova-novaworld-lobby }
           - { target: web, image: opennova-novaworld-web }
-          - { target: controller, image: opennova-novaworld-controller }
+          - { target: fleet, image: opennova-novaworld-fleet }
           - { target: worker, image: opennova-novaworld-worker }
           # The web portal (nginx), web's second container.
           - { target: portal, image: novaworld-web }

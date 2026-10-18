@@ -281,10 +281,10 @@ MachineProfile Ec2MachineDriver::profile(const Ec2MachineConfig &config) {
 	return out;
 }
 
-std::string Ec2MachineDriver::admin_pattern(const std::string &controller_address) {
-	const auto address = parse_ipv4(controller_address);
+std::string Ec2MachineDriver::admin_pattern(const std::string &fleet_address) {
+	const auto address = parse_ipv4(fleet_address);
 	if (!address)
-		return controller_address;
+		return fleet_address;
 	return std::to_string(*address >> 24) + "." + std::to_string((*address >> 16) & 0xFFu) + ".*";
 }
 

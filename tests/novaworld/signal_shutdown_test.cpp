@@ -229,7 +229,7 @@ int main(int argc, char **argv) {
 	test_redis::init(argc, argv);
 	Binaries bin;
 	if (!bin.read(argc, argv, 1)) {
-		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <controller> <worker>\n", argv[0]);
+		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <fleet> <worker>\n", argv[0]);
 		return 2;
 	}
 	TEST_EXPECT(net::startup() == 0);

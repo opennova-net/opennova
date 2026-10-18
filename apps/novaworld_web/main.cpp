@@ -4,7 +4,7 @@
 // routes, the mail it queues, and the first site admin. Any number of web
 // processes serve the same clients behind one load-balanced endpoint
 // (ONNET_WEB_HOST): what a later request reads back lives in Redis or the
-// database, and what the lobby or the controller must act on goes through
+// database, and what the lobby or the fleet must act on goes through
 // their tables. No supervisor, no admin link, no lobby.
 
 #include "auth.h"
@@ -144,7 +144,7 @@ int run(const program::Boot &boot) {
 	http.set_fleet_placement(hosting.fleet.placement);
 	// The admin usage view's limits: each container's memory and CPUs.
 	http.set_fleet_slots(hosting.fleet.slot_memory_mb, hosting.fleet.slot_cpus);
-	// The admin jobs page's schedules: the controller's, read from the same
+	// The admin jobs page's schedules: the fleet's, read from the same
 	// settings.
 	http.set_job_schedules(periodic_jobs(config, hosting));
 	// The game data routes (data_sets/) work on the deployment's object store

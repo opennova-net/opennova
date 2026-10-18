@@ -6,7 +6,7 @@
 # Redis pool, the mail, the background jobs' queue, pool and scheduler, the
 # hosted servers' and billing's logic, and what several programs build alike
 # from the same settings (parts.*). Each program's own code and its main()
-# live in apps/novaworld_<program> (gate, lobby, web, controller, worker).
+# live in apps/novaworld_<program> (gate, lobby, web, fleet, worker).
 set(NOVAWORLD_COMMON_SOURCES
     program.cpp
     server_config.cpp
@@ -14,7 +14,7 @@ set(NOVAWORLD_COMMON_SOURCES
     # The stall watchdog and the heartbeat line (health.h), GET /livez on
     # ONNET_HEALTH_PORT for the programs with no HTTP of their own
     # (health_listener.h), and an ECS task's own address (ecs_metadata.h:
-    # the controller's private bind).
+    # the fleet's private bind).
     health.cpp
     health_listener.cpp
     ecs_metadata.cpp
@@ -47,13 +47,15 @@ if(BUILD_NOVAWORLD_HTTP)
         jobs/scheduler.cpp
         jobs/worker_pool.cpp
         jobs/account_jobs.cpp
-        # Hosted servers (ADR 0053): the supervisor, its rows and renders, the
-        # admin link and the console queue, the per-server stats (samples,
-        # hourly rollups); the fleet (its rows, placement on the machines'
-        # slots, the EC2 machine driver and the local stack's docker one, the
-        # AWS CLI through apps/common's command runner, the machine agents'
-        # protocol, its settings).
-        hosted/admin_link.cpp
+        # Hosted servers (ADR 0053): their rows and renders, the admin links'
+        # states and the console queue as the web routes read them, the
+        # per-server stats (samples, hourly rollups); the fleet (its rows,
+        # placement on the machines' slots, its jobs, the EC2 machine driver and
+        # the local stack's docker one, the AWS CLI through apps/common's
+        # command runner, the machine agents' protocol, its settings). The
+        # supervisor, the admin links and the stats sampler are the fleet
+        # program's own (apps/novaworld_fleet).
+        hosted/admin_link_status.cpp
         hosted/agent_protocol.cpp
         hosted/console_queue.cpp
         hosted/data_set_files.cpp
@@ -73,8 +75,6 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/placement.cpp
         hosted/stats_jobs.cpp
         hosted/stats_repository.cpp
-        hosted/stats_sampler.cpp
-        hosted/supervisor.cpp
         # Billing (monthly support tiers over Stripe Checkout and the Customer
         # Portal): the settings, the billing tables and the hosting entitlement
         # read from them, the sync keeping them in step with Stripe, the curl

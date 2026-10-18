@@ -72,8 +72,8 @@ ctest --test-dir build --output-on-failure -C Release
 When you are working on the NovaWorld service (Linux only), configure with
 `-DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON`: the first defines the
 service, its five programs (`apps/novaworld_common`, the shared library, and
-`apps/novaworld_gate`, `_lobby`, `_web`, `_controller`, `_worker`) and their tests, the
-second fetches Asio + Crow and adds the HTTP layer, which web, the controller and the
+`apps/novaworld_gate`, `_lobby`, `_web`, `_fleet`, `_worker`) and their tests, the
+second fetches Asio + Crow and adds the HTTP layer, which web, the fleet and the
 worker need (without it only the gate and the lobby build).
 Both are OFF by default, so the game and tool builds stay lean. The service's database
 tests make their databases on a PostgreSQL server named by
@@ -180,7 +180,7 @@ reach the published ports there too. It prints what to point a client at when it
 | `novaworld-lobby` | `64206/udp` | a lobby instance: sessions, the server browser, listings |
 | `novaworld-web` | `8080/tcp` | the retail `NW*.dll` and `.gsb` routes, through the portal's retail server (its 8082, in front of web's own 8080, as deployed) |
 | `portal` | `http://localhost:8000` | the site (prod's nginx in web's network, as in web's ECS task) and its `/api` |
-| `novaworld-controller`, `novaworld-worker` | none | the supervisor and the jobs; the machines' internal listener at `172.30.77.10:8070` |
+| `novaworld-fleet`, `novaworld-worker` | none | the supervisor and the jobs; the machines' internal listener at `172.30.77.10:8070` |
 | `postgres`, `valkey` | none | the database (the `pg_data` volume), web's state |
 | `docker-api`, `machine-data`, `dev-machine-<id>` | none | hosted servers (below) |
 
@@ -208,10 +208,10 @@ worker's docker machine driver launches each fleet machine as a container of the
 container of this machine, which is root-equivalent on it: the proxy sits on an internal
 network that the worker alone joins, and the stack is for a developer's machine, never a
 deployment), whose
-own `opennova-hostd` redeems the one-time token its launch handed it at the controller's
-internal listener, syncs from the machine's address, and runs each server the controller
+own `opennova-hostd` redeems the one-time token its launch handed it at the fleet's
+internal listener, syncs from the machine's address, and runs each server the fleet
 places on its slots as an `opennova-serve` child (`apps/hostd/README.md`, "The process
-runtime"); the controller's admin links reach the slots' admin ports at the machine's
+runtime"); the fleet's admin links reach the slots' admin ports at the machine's
 address, and the servers list through the gate at the announced address.
 
 ```bash
@@ -244,7 +244,7 @@ programs' and machines' last log lines. It checks every program's `GET /livez` a
 /api/me`; the gate's answer to a retail probe naming a live lobby and a NovaWorld session
 verified there (the engine's own codecs); the jobs admin API; and, with a data set, a hosted
 server started through the site that reaches `running` on a machine the worker launched, is
-listed in the lobby, answers console commands through the controller's admin link (`PLAYER
+listed in the lobby, answers console commands through the fleet's admin link (`PLAYER
 LIST`, `CHAT SEND`) and stops. CI's `local-stack.yml` runs `up --synthetic-data --prebuilt`
 and the smoke test on every change to the service, its images, the compose files or `web/`.
 
@@ -273,7 +273,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOPENNOVA_NOVAWORLD_SERVICE=ON -
     -DOPENNOVA_TEST_PG=postgresql://novaworld:dev@127.0.0.1:5432/postgres \
     -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
 cmake --build build --config Release --target opennova_novaworld_gate opennova_novaworld_lobby \
-    opennova_novaworld_web opennova_novaworld_controller opennova_novaworld_worker
+    opennova_novaworld_web opennova_novaworld_fleet opennova_novaworld_worker
 # run from the repo root so the default relative paths resolve; the five programs, each in
 # its own terminal (or with &), each its own health port (8081 is every one's default):
 export DATABASE_PASSWORD=dev ADMIN_API_TOKEN=dev-admin-token ONNET_PUBLIC_HOST=127.0.0.1 \
@@ -281,7 +281,7 @@ export DATABASE_PASSWORD=dev ADMIN_API_TOKEN=dev-admin-token ONNET_PUBLIC_HOST=1
 ONNET_HEALTH_PORT=8081 ONNET_LOBBY_ENDPOINT=127.0.0.1:64206 ./build/apps/novaworld_lobby/opennova-novaworld-lobby
 ONNET_HEALTH_PORT=8082 ./build/apps/novaworld_gate/opennova-novaworld-gate
 ./build/apps/novaworld_web/opennova-novaworld-web
-ONNET_HEALTH_PORT=8083 ./build/apps/novaworld_controller/opennova-novaworld-controller
+ONNET_HEALTH_PORT=8083 ./build/apps/novaworld_fleet/opennova-novaworld-fleet
 ONNET_HEALTH_PORT=8084 ./build/apps/novaworld_worker/opennova-novaworld-worker
 ```
 

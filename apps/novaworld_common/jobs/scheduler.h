@@ -6,10 +6,10 @@
 // many schedulers tick, and however often, a bucket gets one job; and keyed
 // by its kind as its dedupe key, so a job still queued or running when the
 // next bucket comes is not joined by another. A kind marked at_start also gets
-// one when the scheduler starts (the billing reconcile at a controller's
+// one when the scheduler starts (the billing reconcile at a fleet leader's
 // start, the fleet's sweep). A `wanted` test leaves a bucket with nothing to do
 // unqueued (the billing sync with no customer waiting). The scheduler is the
-// controller's; it enqueues and runs nothing itself, and the workers'
+// fleet's; it enqueues and runs nothing itself, and the workers'
 // pools run what it enqueued. Service policy, not a port.
 
 #include "job_queue.h"
@@ -52,7 +52,7 @@ public:
 	Scheduler(const Scheduler &) = delete;
 	Scheduler &operator=(const Scheduler &) = delete;
 
-	// A guard each tick asks first (a controller still leading); unset, always.
+	// A guard each tick asks first (a fleet process still leading); unset, always.
 	void set_guard(std::function<bool(db::Database &)> guard) { guard_ = std::move(guard); }
 
 	// The at_start jobs enqueued, then a tick every tick_ms on the scheduler's

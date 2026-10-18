@@ -56,9 +56,9 @@ public:
 };
 
 // The real link: one HTTP exchange per call (apps/common/net_http.h) to
-// `base_url`, "http://<host>:<port>" (the controller's internal name, or a
+// `base_url`, "http://<host>:<port>" (the fleet program's internal name, or a
 // private address). Each call tries every IPv4 address the host resolves to,
-// in turn, until one takes the connection: while the controller is replaced,
+// in turn, until one takes the connection: while the fleet leader is replaced,
 // its name lists the standby beside the leader (Cloud Map, MULTIVALUE), and
 // the standby does not listen. Only a connection never made moves on to the
 // next address; a request that reached a server is never sent again.
