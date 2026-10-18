@@ -75,6 +75,16 @@ struct MenuContext {
 	const mnu::Window *text_fallback = nullptr;
 };
 MenuContext menu_context(const RecordHandle &record, const RecordOwners &owners);
+// menu_context a step at a time, for a caller that keeps each record's context and works each out once
+// from its owner's: a record the screen holds (a root window) from the record alone, any other from its
+// owner's context, the owner's kind and the list of the owner's kind that holds it.
+MenuContext menu_root_context(const RecordHandle &record);
+MenuContext menu_context_in(const MenuContext &owner, NodeKind owner_kind, size_t list, const RecordHandle &record);
+// What menu_list_reads, the applies functions of the menu's fields (menu_field_reads, by the field's
+// element path) and menu_type_tokens answer, given the record's context.
+mnu::SchemaApplies menu_list_reads_in(const MenuContext &owner, NodeKind owner_kind, size_t list);
+Applicability menu_field_applies_in(const MenuContext &context, const RecordHandle &record, const char *path);
+const char *const *menu_type_tokens_in(const MenuContext &context, const RecordHandle &record);
 // Whether the game reads list `list` of a window (or a part, or a record under one) where it sits.
 mnu::SchemaApplies menu_list_reads(const RecordHandle &owner, const RecordOwners &owners, size_t list);
 // The format's answer as the editor's.

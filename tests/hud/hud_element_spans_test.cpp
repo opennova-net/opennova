@@ -44,8 +44,8 @@ HudLayout soldier_layout() {
 	layout.health_rect = {25.0f, 741.0f, 152.0f, 10.0f, true};
 	layout.stance_pos = {30, 639, 0, 0, true};
 	layout.stance_texture_valid = {true, true, true, true, true, true}; // the drawer wants all six
-	layout.stance_frame0_w = 32;
-	layout.stance_frame0_h = 32;
+	layout.stance_frame_w.fill(32);
+	layout.stance_frame_h.fill(32);
 	layout.alpha_fade_base_alpha = 102;
 	layout.alpha_fade_max_alpha = 178;
 	layout.alpha_fade_ramp_ticks = 186;

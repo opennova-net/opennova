@@ -781,9 +781,10 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         auto it = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             it != instances_.end() ? model(it->second.model_id) : nullptr;
-        // Projectile proximity also retains the bounded compatibility entry for
-        // an item whose graphic could not resolve a collision instance. Other
-        // collision consumers still reject it later at target_view().
+        // The proximity table keeps a bounded entry whose graphic could not
+        // resolve a collision instance, as retail's slot tables keep every
+        // entity; the face walk then misses it, as it misses every model-less
+        // entity (CollisionWorld::trace_projectile_impl).
         if (attached == nullptr && e.bound_radius <= 0.0f) return;
         StaticSlot s;
         int32_t p[3];

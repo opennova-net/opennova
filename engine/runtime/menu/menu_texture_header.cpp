@@ -21,7 +21,7 @@ bool menu_texture_header_size(MenuTextureFormat format, const std::vector<uint8_
 		if (!png::png_header_size(bytes, w, h)) return false;
 		break;
 	case MenuTextureFormat::Pcx: {
-		// The game's own decode, its size what the menu's load comes to [orig: load_pcx_to_argb
+		// The game's own decode, its size what the menu's load comes to [orig: PCX_LoadToARGB
 		// @ 0x664cc0 via CTextureManager_LoadOrFindTexture @ 0x654980].
 		RgbaImage image;
 		std::string error;

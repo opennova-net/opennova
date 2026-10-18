@@ -1,6 +1,7 @@
 #include "ec2_machine_driver.h"
 
 #include "agent_protocol.h"
+#include "health.h" // Watchdog::steady_now_ms
 #include "hosted_settings.h"
 #include "loggable.h"
 #include "net_cidr.h"
@@ -24,27 +25,11 @@ namespace fs = std::filesystem;
 
 namespace {
 
-uint64_t steady_now_ms() {
-	using namespace std::chrono;
-	return static_cast<uint64_t>(
-			duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
-
-bool all_of(std::string_view text, bool (*ok)(char)) {
-	for (const char c : text)
-		if (!ok(c))
-			return false;
-	return true;
-}
-
 bool is_digit(char c) {
 	return c >= '0' && c <= '9';
 }
 bool is_lower_hex(char c) {
 	return is_digit(c) || (c >= 'a' && c <= 'f');
-}
-bool is_name_char(char c) {
-	return is_alnum(c) || c == '.' || c == '_' || c == '-';
 }
 
 // An id EC2 spells `<prefix>` and 8 to 17 lower-case hex digits.
@@ -168,7 +153,7 @@ Ec2MachineDriver::Ec2MachineDriver(
 		Ec2MachineConfig config, proc::CommandRunner &runner, Clock now_ms) :
 		config_(std::move(config)),
 		runner_(runner),
-		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
+		now_(now_ms ? std::move(now_ms) : Clock(Watchdog::steady_now_ms)) {}
 
 std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	if (c.aws_cli.empty() || c.aws_cli[0] != '/')
@@ -185,7 +170,7 @@ std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	}
 	// At most kMaxDeploymentBytes, so every launch's client token fits EC2's 64.
 	if (c.deployment.empty() || c.deployment.size() > kMaxDeploymentBytes ||
-			!all_of(c.deployment, is_name_char))
+			!all_of(c.deployment, is_object_name_char))
 		return "ONNET_HOSTED_DEPLOYMENT is not 1.." + std::to_string(kMaxDeploymentBytes) +
 				" letters, digits, '.', '_' and '-'";
 	if (c.launch_attempts < 1 || c.launch_timeout_ms <= 0)

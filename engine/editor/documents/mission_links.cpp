@@ -37,15 +37,6 @@ NodeAddress group_record(const MissionDocument &document, int64_t group) {
 // EventTrigger_EvaluateCondition @0x453620: cat 2 cases 43 @0x453842, 44 @0x45388c, 45 @0x4538d6].
 constexpr int32_t kNear = 43, kInSight = 44, kSees = 45;
 
-int32_t param_of(const bms::Trigger &trigger, int slot) {
-	const int32_t params[4] = {trigger.param1, trigger.param2, trigger.param3, trigger.param4};
-	return params[slot];
-}
-int32_t param_of(const bms::Action &action, int slot) {
-	const int32_t params[4] = {action.param1, action.param2, action.param3, action.param4};
-	return params[slot];
-}
-
 // The pool-3 markers of record type 6088 whose wp_number is `number`, in their order; the first alone
 // where `first`.
 std::vector<NodeId> numbered_markers(const MissionDocument &document, int64_t number, bool first) {
@@ -141,10 +132,10 @@ void link_record(const MissionDocument &document, const NodeAddress &from, const
 		link.action = action;
 		link.slot = slot;
 		link.kind = kinds[slot];
-		link.value = param_of(record, slot);
+		link.value = record.param(slot);
 		if (kinds[slot] == ParamKind::PathNode) {
 			if (path_slot < 0) continue;
-			resolve_stop(document, param_of(record, path_slot), link.value, link);
+			resolve_stop(document, record.param(path_slot), link.value, link);
 		} else if (!resolve(document, kinds[slot], link.value, every_marker, link)) {
 			continue;
 		}
@@ -317,7 +308,7 @@ bool mission_pick_slot(const MissionDocument &document, const NodeAddress &recor
 		const bms::Trigger &trigger = event.native.triggers[at.index];
 		out.kind = mission::trigger_param_kind(trigger, slot);
 		out.label = mission::trigger_param_label(trigger, slot);
-		for (int i = 0; i < 4; ++i) params[i] = param_of(trigger, i);
+		for (int i = 0; i < 4; ++i) params[i] = trigger.param(i);
 		for (int i = 0; i < 4; ++i)
 			if (mission::trigger_param_kind(trigger, i) == ParamKind::Path && out.path < 0) out.path = params[i];
 		if (const mission::ParamRow *type = mission::trigger_params(int32_t(trigger.main_type), trigger.sub_type))
@@ -327,7 +318,7 @@ bool mission_pick_slot(const MissionDocument &document, const NodeAddress &recor
 		const bms::Action &action = event.native.actions[at.index];
 		out.kind = mission::action_param_kind(action, slot);
 		out.label = mission::action_param_label(action, slot);
-		for (int i = 0; i < 4; ++i) params[i] = param_of(action, i);
+		for (int i = 0; i < 4; ++i) params[i] = action.param(i);
 		for (int i = 0; i < 4; ++i)
 			if (mission::action_param_kind(action, i) == ParamKind::Path && out.path < 0) out.path = params[i];
 		// The stop slot its type's row reads beside a path (a Redirect's third parameter names a stop once its

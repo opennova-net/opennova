@@ -201,6 +201,13 @@ std::vector<TextureLevel> texture_game_chain(const TextureLevel &first, uint32_t
 TextureLevel texture_halved(const TextureLevel &level, uint32_t halvings) {
 	TextureLevel out = level;
 	renderer::halve_rgba_times(out.rgba, out.width, out.height, halvings);
+	// The device's level 0: D3DX's sides (a side halved to 0 made 1) loaded over the un-halved rect.
+	const uint32_t device_w = renderer::d3dx_texture_side(out.width, renderer::TextureDxtFormat::None);
+	const uint32_t device_h = renderer::d3dx_texture_side(out.height, renderer::TextureDxtFormat::None);
+	out.rgba = renderer::load_rgba8_filter_none(out.rgba.data(), size_t(out.width) * out.height, out.width,
+			level.width, level.height, device_w, device_h);
+	out.width = device_w;
+	out.height = device_h;
 	return out;
 }
 

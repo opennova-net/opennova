@@ -15,15 +15,6 @@ constexpr NodeKind kLine = node_kind(HudFxKind::Line);
 
 const def::HudFxLine &line_of(const RecordHandle &r) { return r.as<def::HudFxLine>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 RecordTable make_table() {
 	using RF = LabelledField;
 	TableKind line(RecordKindRow{kLine, "line", "Model line", "Add model line", true});

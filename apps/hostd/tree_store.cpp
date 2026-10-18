@@ -1,5 +1,7 @@
 #include "tree_store.h"
 
+#include "steady_clock.h"
+
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
@@ -20,12 +22,6 @@ namespace {
 
 namespace fs = std::filesystem;
 using io::LogLevel;
-
-uint64_t steady_now_ms() {
-	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch())
-					.count());
-}
 
 // The first line of a CLI's standard error, at most 200 bytes.
 std::string first_line(const std::string &text) {

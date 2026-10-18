@@ -181,11 +181,17 @@ std::optional<TerrainTileCompositionDecision> TerrainTileCompositionCache::reque
 	job.tile_index = request_value.tile_index;
 	job.source_origin_x = request_value.source_origin_x;
 	job.source_origin_z = request_value.source_origin_z;
-	job.layout.texture_dimension = kDimension;
+	job.layout.texture_dimension = dimension_;
 	job.layout.world_span = span;
 	job.layout.texels_per_world_unit =
-			static_cast<float>(kDimension) / static_cast<float>(span);
+			static_cast<float>(dimension_) / static_cast<float>(span);
 	return TerrainTileCompositionDecision{job.target, job};
+}
+
+void TerrainTileCompositionCache::set_dimension(int dimension) noexcept {
+	if (dimension == dimension_) return;
+	dimension_ = dimension;
+	invalidate_all();
 }
 
 bool TerrainTileCompositionCache::evict_one_tod_stale() noexcept {

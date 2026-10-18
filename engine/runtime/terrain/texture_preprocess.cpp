@@ -1,6 +1,9 @@
 #include <runtime/terrain/texture_preprocess.h>
+#include <base/io/bits.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_compression.h>
+#include <runtime/renderer/texture_load_rules.h>
 
 #include <algorithm>
 #include <cmath>
@@ -10,10 +13,6 @@
 namespace opennova::terrain {
 
 namespace {
-
-bool is_power_of_two(uint32_t value) noexcept {
-	return value != 0 && (value & (value - 1)) == 0;
-}
 
 uint8_t encode_coefficient(double value) noexcept {
 	const int encoded = static_cast<int>((value + 1.0) * 127.5);
@@ -52,8 +51,8 @@ bool Rgba8Image::is_valid() const noexcept {
 }
 
 Rgba8Image build_detail_coefficient_map(const Rgba8Image &detailmap) {
-	if (!detailmap.is_valid() || !is_power_of_two(detailmap.width) ||
-			!is_power_of_two(detailmap.height)) {
+	if (!detailmap.is_valid() || !io::is_power_of_two(detailmap.width) ||
+			!io::is_power_of_two(detailmap.height)) {
 		return {};
 	}
 
@@ -153,7 +152,7 @@ Rgba8Image build_heightfield_normal_map(
 		uint32_t width,
 		uint32_t height,
 		const TerrainQuadrantLocks &locks) {
-	if (!is_power_of_two(width) || !is_power_of_two(height) ||
+	if (!io::is_power_of_two(width) || !io::is_power_of_two(height) ||
 			width < 2 || height < 2 ||
 			depth.size() != static_cast<size_t>(width) * height) {
 		return {};
@@ -179,7 +178,7 @@ bool refresh_heightfield_normal_map(
 		const terrain::CoordsRect &rect,
 		std::vector<terrain::CoordsRect> *written) {
 	if (written != nullptr) written->clear();
-	if (!is_power_of_two(width) || !is_power_of_two(height) ||
+	if (!io::is_power_of_two(width) || !io::is_power_of_two(height) ||
 			width < 2 || height < 2 ||
 			depth.size() != static_cast<size_t>(width) * height ||
 			normals.width != width || normals.height != height ||
@@ -289,7 +288,7 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 		const Rgba8Image &far_detail) {
 	if (!base.is_valid() || !far_detail.is_valid() ||
 			base.width != far_detail.width || base.height != far_detail.height ||
-			!is_power_of_two(base.width) || !is_power_of_two(base.height)) {
+			!io::is_power_of_two(base.width) || !io::is_power_of_two(base.height)) {
 		return {};
 	}
 
@@ -332,35 +331,50 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 std::vector<renderer::DxtSurface> build_detail_layer_levels(
 		const Rgba8Image &base,
 		const Rgba8Image *far_detail,
-		int32_t session_texcompression_level) {
-	// The session's compression word and full terrain detail.
-	// [orig: PolyTrn_InitTextures @ 0x60AB9B..0x60ABBC (0x400100 / 0x400200),
-	//  @ 0x60ABA0 (| 8)]
+		int32_t session_texcompression_level,
+		int32_t terrain_texdetail) {
+	// The session's compression word, the terrain detail's halving word and 8.
+	// [orig: PolyTrn_InitTextures @ 0x60AB95 (g_TerrainDetailTextureFlags),
+	//  @ 0x60AB9B..0x60ABBC (0x400100 / 0x400200), @ 0x60ABA0 (| 8), @ 0x60ABE5]
 	const uint32_t kDetailLayerFlags =
-			renderer::terrain_detail_layer_compression_flags(session_texcompression_level) | 8u;
+			renderer::terrain_detail_layer_compression_flags(session_texcompression_level) | 8u |
+			renderer::terrain_texdetail_flags(terrain_texdetail);
 	const renderer::TextureDxtFormat format = renderer::select_texture_dxt_format(
 			kDetailLayerFlags, renderer::kReferenceTextureDxtCaps);
 	std::vector<renderer::DxtSurface> levels;
 	if (!base.is_valid() || format == renderer::TextureDxtFormat::None) return levels;
+	// Either creator halves its pixels first as the word asks, the far with the
+	// base [orig: GTexture_DownsampleToLimits @ 0x687170, from
+	// GTexture_CreateFromPixelData_0 @ 0x687785 and from
+	// GTexture_CreateFromPixelDataWithAlphaBlend @ 0x68735B (the base) and
+	// @ 0x68736D (the far)].
+	const auto halved = [kDetailLayerFlags](const Rgba8Image &image) {
+		Rgba8Image out = image;
+		renderer::halve_rgba_times(out.pixels, out.width, out.height,
+				renderer::pixel_texture_halvings(out.width, out.height, kDetailLayerFlags));
+		return out;
+	};
 	if (far_detail != nullptr) {
-		for (const Rgba8Image &level : build_paired_detail_mip_chain(base, *far_detail)) {
+		for (const Rgba8Image &level : build_paired_detail_mip_chain(halved(base), halved(*far_detail))) {
 			levels.push_back(renderer::encode_dxt_surface(
 					renderer::decode_rgba8(level.pixels.data(), level.width, level.height),
 					level.width, level.height, format));
 		}
 		return levels;
 	}
-	return renderer::build_dxt_texture_levels(base.pixels.data(), base.width,
-			base.height, format,
-			renderer::texture_level_count(base.width, base.height, kDetailLayerFlags));
+	// The plain creator: its halvings, count, level-0 load and box chain
+	// (renderer::pixel_device_texture_levels) [orig: GTexture_CreateFromPixelData_0 @ 0x6876C0].
+	renderer::pixel_device_texture_levels(base.pixels.data(), base.width, base.height, kDetailLayerFlags,
+			renderer::kReferenceTextureDxtCaps, 0, renderer::kReferenceMaxTextureSide, &levels);
+	return levels;
 }
 
 // [orig: GTexture_CreateFromPixelDataWithAlphaBlend @0x687270 — the custom mip builder stops
 //  after the 4x4 level, each level a GTexture_Downsample2x2_RGBA8 @0x687000 box reduction]
 std::vector<Rgba8Image> build_box_mip_chain_to_4x4(
 		const Rgba8Image &base) {
-	if (!base.is_valid() || !is_power_of_two(base.width) ||
-			!is_power_of_two(base.height)) {
+	if (!base.is_valid() || !io::is_power_of_two(base.width) ||
+			!io::is_power_of_two(base.height)) {
 		return {};
 	}
 	std::vector<Rgba8Image> result;

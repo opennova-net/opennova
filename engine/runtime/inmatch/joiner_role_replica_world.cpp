@@ -144,6 +144,14 @@ void JoinerRole::spawn_and_arm_local_player() {
 		const world::PlayerSpawn spawn = spawn_from_self(sp);
 		const world::EntityHandle h = world::spawn_player(world, spawn);
 		local_spawned_ = h.valid();
+		// A client builds its own body from the host's 0x0C like every
+		// pool-0 entity: the slot memset leaves commandGroup (+0x11C) 0 and no
+		// client message stores it. The 1 spawn_player stamps is the
+		// authority's (Entity_SpawnFromAnimSlotProperty @0x43C50F, reached
+		// from Server_PlayerAdd @0x51D056 and
+		// Server_InitAllPlayerEntitiesForRound @0x516B67).
+		// [orig: NapiNPClientMsg_0x00C @0x42E7F1]
+		if (world::Entity *body = world.registry.get(h)) body->group_id = 0;
 		// L is born after the boot's definition sweeps: bind its items.def row
 		// now, as the host's L was at boot (without it L kept the "default"
 		// sound profile, which authors no slots: no footsteps, foley, landings
@@ -344,11 +352,16 @@ void JoinerRole::apply_authoritative_health() {
 					// The embedder clears its device-input latches, seeds the
 					// look heading and resets its view and map; the kit is the
 					// release's 0x5A, already folded (D-NET-378), or after a medic
-					// revive, which sends none, the kit L died with (D-NET-379).
+					// revive, which sends none, the kit L died with (D-NET-379):
+					// retail's client runs Player_InitPlayer only at the mission
+					// start and a team change [orig: Player_InitPlayer @0x4E15F0,
+					// called from Game_StartMission @0x525BBC and
+					// NapiNPClientMsg_TeamAssign @0x431B14;
+					// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0].
 					lp.reset_local_player_input(heading);
                     lp.reset_for_new_round();
                     rt.reset_local_round_state();
-					if (kit_seams.respawn) kit_seams.respawn();
+					lp.respawn_init(/*rebuild_kit=*/false);
 					redeploy_release_pending_ = false;
 					redeploy_health_updates_at_release_ = 0;
 				}
@@ -889,6 +902,14 @@ void JoinerRole::refresh_wire_collision_proxies() {
 				proxy.bound_radius_q16 = shape.bound_radius_q16;
 				proxy.uniform_scale_q16 = shape.uniform_scale_q16;
 				proxy.bbox_center_q16 = shape.bbox_center_q16;
+				// The posed bone walk's model and person_extra_radius's
+				// inputs: the Flags word's Player bit, a seat mount and the
+				// movement byte's moving bit.
+				proxy.model_id = shape.model_id;
+				proxy.player = (entity.rm_entity_flags & world::kEntityFlagPlayer) != 0;
+				proxy.mounted = entity.carrier_handle != world::EntityHandle::kInvalid &&
+						entity.mount_bone != 0;
+				proxy.moving = (entity.move_input & world::Entity::kMoveOrderMoving) != 0;
 				person_proxies.push_back(proxy);
 				continue;
 			}

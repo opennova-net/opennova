@@ -136,7 +136,8 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	// The two teams (and colors) a team-mode board columns this frame: 1/2,
 	// or the 3/4 page on the frame counter's bit 7 once more than two sides
 	// are configured [orig: @0x423cd0-0x423cf1].
-	const ScoreboardTeamPage page = scoreboard_team_page(sb.team_count, sb.frame_counter);
+	const ScoreboardTeamPage page =
+			scoreboard_team_page(sb.team_count, static_cast<int>(state.session_frame));
 
 	// The pre-pass: the column counts size the pages and seed the spectator
 	// cursor below the LONGER player column [orig: @0x423af1..0x423c3a]. The

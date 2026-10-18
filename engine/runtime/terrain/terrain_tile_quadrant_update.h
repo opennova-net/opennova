@@ -52,11 +52,10 @@ unsigned update_terrain_tile_quadrants(TerrainTileQuadrantSource &source, const 
 // 512-unit quadrant's span it draws; the flat page (level 0 of the page key) reads texel (0, 0) of its quadrant.
 // [orig: PolyTrn_RenderTile UV build @ 0x60DB62..0x60DC16, flat page @ 0x60DC08..0x60DC16]
 bool terrain_tile_page_samples(const TerrainTileQuadrantChange &change, const TerrainTileQuadrantSource &source,
-		uint8_t page_lod_level, int32_t source_origin_x, int32_t source_origin_z,
-		int dimension = TerrainTileCompositionCache::kDimension);
+		uint8_t page_lod_level, int32_t source_origin_x, int32_t source_origin_z, int dimension);
 // Whether a page samples a texel any of `changes` made again (terrain_tile_page_samples over each).
 bool terrain_tile_page_samples_any(const std::vector<TerrainTileQuadrantChange> &changes,
 		const TerrainTileQuadrantSource &source, uint8_t page_lod_level, int32_t source_origin_x,
-		int32_t source_origin_z, int dimension = TerrainTileCompositionCache::kDimension);
+		int32_t source_origin_z, int dimension);
 
 } // namespace opennova::terrain

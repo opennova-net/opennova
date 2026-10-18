@@ -353,7 +353,7 @@ bool decode_end_round_stats(const uint8_t *data, size_t len, EndRoundStats &out)
 // [orig: NapiNPClientMsg_SessionSlotConfig @ 0x425410]
 struct SessionSlotConfig {
 	uint32_t skipped[4] = {};   // on the wire, not read by the handler
-	uint8_t  session_config = 0; // → dword_24D2110
+	uint8_t  session_config = 0; // → g_SessionDifficulty
 	uint8_t  local_player_slot = 0; // → g_LocalPlayerSlotId = g_LocalPlayerSlotId, the recipient's
 	                                // OWN roster slot [orig: the write side is slot+20,
 	                                // NetPacket_WriteSlotAssignment @0x502b30; the old
@@ -373,7 +373,7 @@ bool decode_session_slot_config(const uint8_t *body, size_t len, SessionSlotConf
 // [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]
 struct SessionConfig {
 	int32_t  fields[10] = {};  // → dword_A821BC..A821E0; fields[3] = gameType
-	uint8_t  bytes[7] = {};    // → byte_A821E8..ED + dword_24D2110
+	uint8_t  bytes[7] = {};    // → byte_A821E8..ED + g_SessionDifficulty
 	uint32_t bitflags = 0;     // → dword_A821E4 (bits 13/15/16 latched)
 };
 bool decode_session_config(const uint8_t *body, size_t len, SessionConfig &out);

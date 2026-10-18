@@ -397,7 +397,7 @@ const MissionField kHeaderFields[] = {
 	{MissionRecord::Header, "map_zoom", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_map_zoom,
 	 set_map_zoom},
 	// The eight win and eight lose sub-goal conditions, and their scores (each the score / 100: the .mis
-	// writer's win_scores / lose_scores) [orig editor: Med_WriteBmsFile @0x44f920 Buffer[556..571]].
+	// writer's win_scores / lose_scores) [orig editor: MIS_ExportBmsFile @0x44f920 Buffer[556..571]].
 #define MISSION_HEADER_BYTE(array, index)                                                                       \
 	{MissionRecord::Header, #array "[" #index "]", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false, \
 	 get_array_byte<H, 8, &H::array, index>, set_array_byte<H, 8, &H::array, index>}
@@ -498,8 +498,8 @@ bool set_group_rel(void *record, const MissionValue &value, std::string &error) 
 // the fixed 8-byte AI class / AI script slots (name1 = iai_name, name2 = ai_textfile, copied at full
 // width: a NUL-forcing copy would truncate an 8-char name at byte 7 on every edit), its transform
 // (the 16.16 position in mission units, the integer-degree eulers), and every other member the writer
-// takes from it, by the .mis writer's names [orig editor: Med_PackEntityRecord @0x44c8e0 packs each,
-// Med_WriteMisFile @0x454630 names it] (bms.h's Entity).
+// takes from it, by the .mis writer's names [orig editor: MissionItem_PackBmsRecord @0x44c8e0 packs each,
+// MIS_SaveDocument @0x454630 names it] (bms.h's Entity).
 const MissionField kEntityFields[] = {
 	{MissionRecord::Entity, "item", MissionFieldType::Integer, 0, kI32Min + kItemIdOffset, kI32Max + kItemIdOffset,
 	 nullptr, 0, false, get_item, set_item},
@@ -651,7 +651,7 @@ const MissionField kStopFields[] = {
 
 using G = bms::GroupRecord;
 
-// [orig editor: Med_WriteBmsFile @0x44f920 packs each 32-byte group as: @0 flags (bit0/bit1 from the
+// [orig editor: MIS_ExportBmsFile @0x44f920 packs each 32-byte group as: @0 flags (bit0/bit1 from the
 // editor group flags), @8 the one free int, @12 the constant 10 the writer emits.] The flags take bits
 // 0 and 1 alone.
 bool set_group_flags(void *record, const MissionValue &value, std::string &error) {

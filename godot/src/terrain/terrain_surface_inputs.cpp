@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <runtime/terrain/texture_preprocess.h>
+#include <runtime/renderer/device_texture.h>
 
 #include <algorithm>
 #include <cmath>
@@ -154,6 +155,10 @@ void TerrainSurfaceInputs::_bind_methods() {
 		&TerrainSurfaceInputs::set_texcompression_level);
 	ClassDB::bind_method(D_METHOD("get_texcompression_level"),
 		&TerrainSurfaceInputs::get_texcompression_level);
+	ClassDB::bind_method(D_METHOD("set_terrain_texdetail", "level"),
+		&TerrainSurfaceInputs::set_terrain_texdetail);
+	ClassDB::bind_method(D_METHOD("get_terrain_texdetail"),
+		&TerrainSurfaceInputs::get_terrain_texdetail);
 	ClassDB::bind_method(D_METHOD("get_tile_info_override"),
 		&TerrainSurfaceInputs::get_tile_info_override);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override",
@@ -389,13 +394,14 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 		terrain_data->get_detailmap_c3(),
 	};
 	// Every layer is the DXT texture retail creates from it, paired with the
-	// far texture when one is authored.
+	// far texture when one is authored, at the session's terrain texture detail.
 	for (int layer = 0; layer < 3; ++layer) {
 		opennova::terrain::Rgba8Image base_source;
 		if (texture_to_rgba8(authored_layers[layer], base_source)) {
 			detail_layer_textures[layer] = texture_from_dxt_levels(
 				opennova::terrain::build_detail_layer_levels(
-					base_source, have_far ? &far_source : nullptr, texcompression_level));
+					base_source, have_far ? &far_source : nullptr, texcompression_level,
+					terrain_texdetail));
 		}
 	}
 

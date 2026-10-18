@@ -65,7 +65,7 @@ HudDeclutter::HudDeclutter() {
 }
 
 void HudDeclutter::begin_authoring() {
-	// [orig: byte_2723CE0 BSS-zero — an unauthored slot stays mask 0 = hidden
+	// [orig: g_HUDDeclutterMasks BSS-zero — an unauthored slot stays mask 0 = hidden
 	// at every level]
 	masks_.fill(0);
 	rebuild();
@@ -139,13 +139,13 @@ void HudItemFlash::tick(int32_t now) {
 
 void HudDeclutter::rebuild_at(int level) {
 	// [orig: CRenderState_SetLayerVisibility @ 0x59B0F0 — for slot 0..23,
-	//  dword_2723C80[slot] = ((uint8_t)(1 << level) & byte_2723CE0[slot]) != 0]
+	//  g_HUDDeclutterVisible[slot] = ((uint8_t)(1 << level) & g_HUDDeclutterMasks[slot]) != 0]
 	// The shift is x86's `shl edx, cl`, so the count is taken modulo 32, and
 	// the `and cl, dl` that follows keeps only the LOW BYTE of the result:
 	// levels 4..7 test bits no HUDDECLUT arm ever authors (everything hides),
 	// levels 8..31 leave a zero byte (everything hides), and level 32 aliases
 	// level 0 again. A negative level lands the same way through cl.
-	// [orig: `shl edx, cl` @0x59B0FB; `mov cl, byte_2723CE0[eax]; and cl, dl`
+	// [orig: `shl edx, cl` @0x59B0FB; `mov cl, g_HUDDeclutterMasks[eax]; and cl, dl`
 	//  @0x59B100..0x59B106]
 	const unsigned shift = static_cast<unsigned>(level) & 31u;
 	const uint8_t bit = static_cast<uint8_t>(1u << shift);
@@ -156,11 +156,11 @@ void HudDeclutter::rebuild_at(int level) {
 }
 
 HudDeclutter declutter_from_hudpos(const DefHudPosFile &file) {
-	// [orig: byte_2723CE0 BSS-zero; nothing but the parse arms writes it]
+	// [orig: g_HUDDeclutterMasks BSS-zero; nothing but the parse arms writes it]
 	HudDeclutter table;
 	table.begin_authoring();
 	// One arm per known token, each storing the mask it builds (`_stricmp`
-	// on the key, then `mov byte_2723CE0[slot], bl`), so the rows apply in
+	// on the key, then `mov g_HUDDeclutterMasks[slot], bl`), so the rows apply in
 	// file order and the last row for a slot is the one that stands.
 	// [orig: HUD_ParseHudposToken @0x59F370 — the MSNTITLE arm
 	//  @0x5A15F5..0x5A1683]

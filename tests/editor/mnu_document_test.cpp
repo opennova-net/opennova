@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -1346,6 +1347,20 @@ int parse_notes() {
 	                                    "<SCREEN><NAME>M</NAME><WINDOW type=\"window\" name=\"MAIN\"><WINDOW type=\"button\" "
 	                                    "name=\"A\"><POSITION><LEFT>0</LEFT></POSITION></WINDOW>" +
 	                                            window + "</WINDOW></WINDOW></SCREEN>"));
+	// The four crashes the model holds as read (docs/mnu/menu-re.md, "Crash and hang cases"): a SCREEN action with
+	// no FILE, a TABLE MIN_ITEM_HEIGHT of 0, GLOBAL_VAR on an edit window, a SCREEN with no NAME.
+	const std::string place = "<POSITION><LEFT>0</LEFT></POSITION>";
+	const std::pair<const char *, std::string> crashes[] = {
+	        {"crash_file.mnu", "<SCREEN><NAME>F</NAME><WINDOW type=\"button\" name=\"B\">" + place +
+	                                   "<ACTION type=\"SCREEN\">N</ACTION></WINDOW></SCREEN>"},
+	        {"crash_height.mnu", "<SCREEN><NAME>T</NAME><WINDOW type=\"table\" name=\"T\">" + place +
+	                                     "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT></WINDOW></SCREEN>"},
+	        {"crash_global.mnu", "<SCREEN><NAME>G</NAME><WINDOW type=\"edit\" name=\"E\" GLOBAL_VAR>" + place +
+	                                     "</WINDOW></SCREEN>"},
+	        {"crash_name.mnu", "<SCREEN><WINDOW type=\"static\" name=\"W\">" + place + "</WINDOW></SCREEN>"},
+	};
+	for (const auto &[file, text] : crashes)
+		TEST_EXPECT(test_io::write_text(dir.file((std::string("project/menus/") + file).c_str()), text));
 	editor_test::handle_to_end(session, request::rescan());
 	const SessionView &view = session.view();
 	auto finding = [&](const char *asset, const char *code) -> const Diagnostic * {
@@ -1369,6 +1384,18 @@ int parse_notes() {
 	            variable->message.find("a save, which would write the number in place of the variable, is refused") !=
 	                    std::string::npos);
 	TEST_EXPECT(crash->row()->gates_build && hang->row()->gates_build);
+	// Each of the four on a closed file: menu.invalid_input on its element, gating the build (it was the writer's
+	// menu.unserializable alone, which a closed file never raises).
+	const std::pair<const char *, const char *> crash_keys[] = {{"crash_file.mnu", "/ACTION"},
+	                                                            {"crash_height.mnu", "/MIN_ITEM_HEIGHT"},
+	                                                            {"crash_global.mnu", "/WINDOW[E]"},
+	                                                            {"crash_name.mnu", "/SCREEN[0]"}};
+	for (const auto &[file, key] : crash_keys) {
+		const Diagnostic *held_crash = finding(file, "menu.invalid_input");
+		TEST_EXPECT(held_crash && held_crash->severity == DiagnosticSeverity::Error && held_crash->row()->gates_build &&
+		            held_crash->field.size() >= std::strlen(key) &&
+		            held_crash->field.compare(held_crash->field.size() - std::strlen(key), std::strlen(key), key) == 0);
+	}
 	editor_test::handle_to_end(session, request::open_document("variable.mnu"));
 	const Document *held = session.document_for("variable.mnu");
 	TEST_EXPECT(held && held->blocked() && !held->serialize().ok());

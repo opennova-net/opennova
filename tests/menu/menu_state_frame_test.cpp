@@ -93,9 +93,9 @@ struct Run {
 		return rt.open_document(&doc, file, std::string());
 	}
 	void click(float x, float y) {
-		rt.process_mouse(x, y, false, 1000);
-		rt.process_mouse(x, y, true, 1000);
-		rt.process_mouse(x, y, false, 1000);
+		rt.process_mouse(x, y, false);
+		rt.process_mouse(x, y, true);
+		rt.process_mouse(x, y, false);
 	}
 	std::vector<const MenuEvent *> of(MenuEvent::Kind kind) const {
 		std::vector<const MenuEvent *> out;
@@ -121,7 +121,7 @@ void test_runtime_over_the_state_frame() {
 	CHECK(run.frame.is_configured() && run.rt.current_screen() == "STARTUP" && run.frame.configures() == 1);
 	// Onto GO: the pump hovers it, and its MOUSEIN names GO by its id, state and NAME.
 	const uint64_t before = run.frame.serial();
-	run.rt.process_mouse(150, 120, false, 1000);
+	run.rt.process_mouse(150, 120, false);
 	const MenuWidgetState *go = run.row("GO");
 	CHECK(go && go->hovered && run.frame.serial() != before);
 	std::vector<const MenuEvent *> sounds = run.of(MenuEvent::Kind::Sound);

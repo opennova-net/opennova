@@ -271,9 +271,64 @@ void test_limits() {
 		std::string occ = "o3d 2\nmodel L\nlod 0\npart 0 0 0 0\nocc 0 0 0\n";
 		for (int i = 0; i < 129; ++i) occ += "ov " + num(i) + " 0 0\n";
 		refuses_at("occlusion-vertices", occ, 5, "the occlusion record holds 129 vertices");
-		occ = "o3d 2\nmodel L\nlod 0\npart 0 0 0 0\nocc 0 0 0\nov 0 0 0\n";
-		for (int i = 0; i < 33; ++i) occ += "op 0 0 1 " + num(i) + "\n";
-		refuses_at("occlusion-planes", occ, 5, "the occlusion record holds 33 planes");
+		// The game's occluder walk lists the distinct planes a record's faces name, 128 at most [orig:
+		// Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the 128-entry list @ 0x5b3711]: 128 planes given build,
+		// 129 planes given build where the faces name fewer, 129 faces naming 129 do not; a face names its plane
+		// in a byte.
+		const std::string mesh = "o3d 2\nmodel L\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
+		                         "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"
+		                         "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
+		occ = mesh;
+		for (int i = 0; i < 128; ++i) occ += "op 0 0 1 " + num(i) + "\n";
+		std::vector<SceneFinding> findings;
+		check(build(occ + "of 0 1 2 127\n", findings), "occlusion-planes: 128 given build" + dump(findings));
+		occ = mesh;
+		for (int i = 0; i < 129; ++i) occ += "op 0 0 1 " + num(i) + "\n";
+		findings.clear();
+		check(build(occ + "of 0 1 2 0\n", findings), "occlusion-planes: 129 given, one named, build" + dump(findings));
+		std::string all = occ;
+		for (int i = 0; i < 129; ++i) all += "of 0 1 2 " + num(i) + "\n";
+		refuses_at("occlusion-planes", all, 11, "the occlusion record's faces name 129 planes");
+		for (int i = 129; i < 257; ++i) occ += "op 0 0 1 " + num(i) + "\n";
+		refuses_at("occlusion-face-plane", occ + "of 0 1 2 256\n", 11, "names plane 256");
+		// The silhouette-edge list holds 128 words [orig: Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the store
+		// @ 0x5b36b2]: a fan of 63 faces names 127 edges and builds, one of 64 names 129 and is refused.
+		const auto fan = [&mesh](int faces) {
+			std::string text = mesh.substr(0, mesh.find("occ 0 0 0\n")) + "occ 0 0 0\nov 0 0 0\n";
+			for (int i = 0; i <= faces; ++i) {
+				const double a = 3.0 * i / faces;
+				text += "ov " + std::to_string(2 * std::cos(a)) + " " + std::to_string(2 * std::sin(a)) + " 0\n";
+			}
+			text += "op 0 0 1 0\n";
+			for (int i = 1; i <= faces; ++i) text += "of 0 " + num(i) + " " + num(i + 1) + " 0\n";
+			return text;
+		};
+		findings.clear();
+		check(build(fan(63), findings), "occlusion-edges: 127 build" + dump(findings));
+		refuses_at("occlusion-edges", fan(64), 11, "the occlusion record's faces name 129 edges");
+		// A frame's 14 occluders fill 448 edge rows at most [orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0]: four
+		// fans of 127 edges (508) are refused at the first occ line, three (381) build; a type-2 record is no occluder.
+		const auto fans = [&](int count, int type) {
+			std::string text = fan(63);
+			const std::string block = text.substr(text.find("occ 0 0 0\n"));
+			for (int i = 1; i < count; ++i) text += block;
+			if (type != 0) text.replace(text.rfind("occ 0 0 0\n"), 9, "occ " + num(type) + " 0 0");
+			return text;
+		};
+		findings.clear();
+		check(build(fans(3, 0), findings), "occlusion-frame: three occluders build" + dump(findings));
+		refuses_at("occlusion-frame", fans(4, 0), 11, "largest portal occluders name 508 edges");
+		findings.clear();
+		check(build(fans(4, 2), findings), "occlusion-frame: the fourth of type 2 is no occluder" + dump(findings));
+		// The exporter's rule derives at most 32 [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]: a cone of
+		// 40 faces (the box's six planes and each face's own) is refused, saying to give the planes.
+		occ = mesh.substr(0, mesh.find("occ 0 0 0\n")) + "occ 0 0 0\nov 0 0 1\n";
+		for (int i = 0; i < 40; ++i) {
+			const double a = 6.283185307179586 * i / 40;
+			occ += "ov " + std::to_string(2 * std::cos(a)) + " " + std::to_string(2 * std::sin(a)) + " 0\n";
+		}
+		for (int i = 0; i < 40; ++i) occ += "of 0 " + num(1 + i) + " " + num(1 + (i + 1) % 40) + "\n";
+		refuses_at("occlusion-derived-planes", occ, 11, "planes by the exporter's rule");
 	}
 	// A render vertex 32,768 m out overflows GHDR's 16.16 radius.
 	refuses_at("model-radius", kRigid + "v 40000 0 0 0 0 1 0 0\nv 0 1 0 0 0 1 0 1\nv 0 0 1 0 0 1 0 1\nt 0 1 2\n", 8,

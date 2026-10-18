@@ -338,7 +338,34 @@ int test_hit_and_inspector() {
 
 } // namespace
 
+// The banks as the game's collection keys them (menu::MenuBankCollection): a first SOUND naming a bank that does
+// not open takes no key, the bank that opens next takes 1 [orig: SoundBank_CollectionAddOrRef @ 0x652b40, the
+// failed open @ 0x652c95..0x652caf]; one bank per name without case; the bank's file written again, every bank
+// is opened again.
+static int test_bank_keys() {
+	MenuProject project;
+	TEST_EXPECT(project.made && project.session.view().findings.assets);
+	if (!project.made || !project.session.view().findings.assets) return 1;
+	MenuSoundBanks banks;
+	int32_t key = -1;
+	TEST_EXPECT(!banks.bank(*project.session.view().findings.assets, "nowhere.lwf", &key) && key == 0);
+	const lwf::File *menu = banks.bank(*project.session.view().findings.assets, "menu.lwf", &key);
+	TEST_EXPECT(menu && key == 1 && menu->multis.size() == 4);
+	TEST_EXPECT(banks.bank(*project.session.view().findings.assets, "MENU.LWF", &key) == menu && key == 1);
+	TEST_EXPECT(test_io::write_file(project.root + "/sounds/menu.lwf", menu_bank({"ONLY"})));
+	editor_test::handle_to_end(project.session, request::rescan());
+	while (project.session.view().activity.validation.running) project.session.poll();
+	menu = banks.bank(*project.session.view().findings.assets, "menu.lwf", &key);
+	// Read again into fresh playlist records: a key no bank had, so no selection state of the old bank carries over.
+	TEST_EXPECT(menu && key == 2 && menu->multis.size() == 1 && menu->multis[0].name == "ONLY");
+	TEST_EXPECT(banks.bank(*project.session.view().findings.assets, "menu.lwf", &key) == menu && key == 2);
+	std::printf("bank keys: a bank that does not open takes none, the next 1; read again once its file moves, under "
+	            "a key no bank had\n");
+	return 0;
+}
+
 int main() {
+	TEST_EXPECT(test_bank_keys() == 0);
 	TEST_EXPECT(test_hover_click_leave() == 0);
 	TEST_EXPECT(test_canvas_mouse() == 0);
 	TEST_EXPECT(test_hit_and_inspector() == 0);

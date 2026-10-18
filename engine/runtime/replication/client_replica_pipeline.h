@@ -24,6 +24,7 @@ namespace opennova::world {
 class IRootMotionSource;
 struct WeaponTable;
 struct LiveRound;
+struct HitRecord;
 } // namespace opennova::world
 
 namespace opennova::terrain {
@@ -225,6 +226,20 @@ public:
 			std::function<bool(uint16_t type_id, ReplicaDeathTraits &out)>;
 	void set_replica_death_traits_resolver(ReplicaDeathTraitsResolver resolver) {
 		replica_death_traits_resolver_ = std::move(resolver);
+	}
+	// The embedder's global hit record, which the 0x13's class callback reads
+	// [orig: g_ProjectileHitRecord @0xB7C620 via Projectile_GetHitRecord
+	// @0x4E7000]. No resolver, or a null record, reads as one with no round.
+	using ReplicaHitRecordResolver = std::function<const world::HitRecord *()>;
+	void set_replica_hit_record_resolver(ReplicaHitRecordResolver resolver) {
+		replica_hit_record_resolver_ = std::move(resolver);
+	}
+	// The 0x26 / 0x4E kill's store of its section into that record, run at
+	// the fold; the embedder gates it on its own entity (a typed, live row)
+	// [orig: Entity_KillBySlotId @0x42BD29..0x42BD47].
+	using ReplicaKillSectionStore = std::function<void(uint16_t handle, int16_t section)>;
+	void set_replica_kill_section_store(ReplicaKillSectionStore store) {
+		replica_kill_section_store_ = std::move(store);
 	}
 	// A corpse whose dead tail reached 186 this tick: the embedder spawns the
 	// def's decay effect at its body origin [orig: CEffectWorld_SpawnEmitterAtPosition
@@ -526,6 +541,8 @@ private:
 	std::vector<ReplicaCorpseDecay> corpse_decays_;
 	std::vector<ReplicaSlotSound> slot_sounds_;
 	ReplicaDeathTraitsResolver replica_death_traits_resolver_;
+	ReplicaHitRecordResolver replica_hit_record_resolver_;
+	ReplicaKillSectionStore replica_kill_section_store_;
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]

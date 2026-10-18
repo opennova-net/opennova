@@ -37,12 +37,6 @@ int64_t magnitude_i32(int32_t value) {
                      : static_cast<int64_t>(value);
 }
 
-int32_t clamp_i32(int64_t value) {
-    return static_cast<int32_t>(std::clamp(
-            value, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
-            static_cast<int64_t>(std::numeric_limits<int32_t>::max())));
-}
-
 int64_t rounded_q16_product(int64_t value) {
     // Arithmetic `(value + 0x8000) >> 16` without relying on a
     // negative-right-shift implementation choice.
@@ -182,13 +176,13 @@ int32_t interpolated_pitch(const audio::SoundProfile *profile, int slot,
         const int64_t remainder = speed % band;
         if (gear > 0) {
             const int64_t divisor = 4LL * gears;
-            low = clamp_i32(low - gear * (low / divisor));
+            low = io::saturate_i32(low - gear * (low / divisor));
             // Sequential on purpose: retail computes the high endpoint from
             // the already-adjusted low endpoint.
-            high = clamp_i32(high - gear * (low / divisor));
+            high = io::saturate_i32(high - gear * (low / divisor));
         }
         const int64_t ratio = (remainder << 16) / band;
-        return clamp_i32(low + rounded_q16_product(ratio * (high - low)));
+        return io::saturate_i32(low + rounded_q16_product(ratio * (high - low)));
     }
 
     // The straight interpolation caps only the numerator at 0xFFFF; it does
@@ -198,7 +192,7 @@ int32_t interpolated_pitch(const audio::SoundProfile *profile, int slot,
     const int64_t ratio = std::min(
             (speed << 16) / speed_denominator,
             static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
-    return clamp_i32(low + rounded_q16_product(ratio * (high - low)));
+    return io::saturate_i32(low + rounded_q16_product(ratio * (high - low)));
 }
 
 } // namespace

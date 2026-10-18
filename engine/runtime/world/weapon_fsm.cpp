@@ -851,7 +851,7 @@ bool weapon_fsm_can_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
     }
     if (def.clip_capacity != -1) {
         // The pump resolves carried shared buckets before entering the FSM;
-        // mounted slots retain their own word [orig: sub_5405F0 @0x5405F0].
+        // mounted slots retain their own word [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0].
         if ((slot.shared_clip ? slot.clip : static_cast<int16_t>(slot.clip)) != 0)
             return true;
         slot.next = slot.reserve != 0 ? weapon_action::kRecoil : weapon_action::kEmptyIdle;

@@ -59,9 +59,9 @@ struct ModelOverlayOptions {
 // Every marker of `model` posed at `time_ms` with the register bus: a user point rides its
 // part's PANM matrix of the first level while that level animates, else it is where it is
 // authored (the attachment resolve [orig: the record transform @ 0x56c4f2..0x56c513, as
-// world::EntityPoseProvider ports it]); a light rides its part on the drawn level `lod`
-// when its part is not 0 (the unattached sentinel, ObjectModel::get_model_light_world_
-// position's rule); a pivot is its part's origin on level `lod`, posed. A part's matrix
+// world::EntityPoseProvider ports it]); a light is where it is authored, by the model's
+// matrix alone, its subobject byte only its owner group [orig: Entity_SpawnGlowEffects
+// @ 0x56c7c0, @ 0x56c838..0x56c8ae]; a pivot is its part's origin on level `lod`, posed. A part's matrix
 // turns about its pivot, so it is the identity at rest: model-space points go through it
 // as they are.
 std::vector<ModelOverlay> model_overlays(const threedi::Threedi3di3 &model, int lod, uint32_t time_ms,

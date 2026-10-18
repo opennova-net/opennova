@@ -13,6 +13,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include "util/color_convert.h"
+
 namespace godot {
 
 using opennova::editor::PreviewBackdrop;
@@ -63,7 +65,8 @@ void fragment() {
 )";
 
 Vector3 rgb(uint32_t color) {
-	return Vector3(float((color >> 16) & 0xFF) / 255.0f, float((color >> 8) & 0xFF) / 255.0f, float(color & 0xFF) / 255.0f);
+	const Color c = opennova::color_from_rgb24(color);
+	return Vector3(c.r, c.g, c.b);
 }
 
 Ref<ShaderMaterial> material_of(const char *head, const char *body) {

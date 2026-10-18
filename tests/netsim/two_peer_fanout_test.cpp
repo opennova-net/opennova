@@ -2034,6 +2034,36 @@ bool run_pose_transform_roundtrip() {
 		if (!expect(near_eq(l2.x, lx) && near_eq(l2.y, ly) && near_eq(l2.z, lz),
 		            "arbitrary-pose round-trip within fixed-point rounding")) return false;
 	}
+	// The trig samples a BAM at retail's dbl_7C3608 scale, 30.5 ppm above the exact
+	// 2pi/2^32 [orig: Entity_TransformLocalToWorld @0x43BD0E] [orig:
+	// Entity_TransformWorldToLocal @0x43BB93], and the inverse multiplies by its sines
+	// negated (-2^22, dbl_7C57B0 @0x43BBE0) into flooring products: a half turn's sine is
+	// 402/2^22, not 0, so a 5-unit offset under a half-turned carrier gains a cross term
+	// of 31/65536 lifted and -32/65536 projected (the exact scale gives 0: the projected
+	// word compresses to 0x0000 where retail's compresses to 0x0011). The values are
+	// retail's chains evaluated at its scale.
+	{
+		const nw::WorldPose l = nw::network_transform_world_to_local(327680, 0, 0, 0, 0, 0,
+		                                                             0x80000000u, 0u, 0u);
+		if (!expect(l.x == -327680 && l.y == -32 && l.z == 0,
+		            "half-turn world_to_local at retail's BAM scale")) return false;
+		const nw::WorldPose w = nw::network_transform_local_to_world(327680, 0, 0, 0, 0, 0,
+		                                                             0x80000000u, 0u, 0u);
+		if (!expect(w.x == -327680 && w.y == 31 && w.z == 0,
+		            "half-turn local_to_world at retail's BAM scale")) return false;
+		const nw::WorldPose lq = nw::network_transform_world_to_local(
+				327680, 131072, 65536, 0, 0, 0, 0x40000000u, 0u, 0u);
+		if (!expect(lq.x == 131056 && lq.y == -327687 && lq.z == 65536,
+		            "quarter-turn world_to_local at retail's BAM scale")) return false;
+		const nw::WorldPose lp = nw::network_transform_world_to_local(
+				655360, -327680, 0, 0, 0, 0, 0xC0000000u, 0x10000000u, 0u);
+		if (!expect(lp.x == 302705 && lp.y == 655374 && lp.z == -125390,
+		            "yaw+pitch world_to_local at retail's BAM scale")) return false;
+		const nw::WorldPose wp = nw::network_transform_local_to_world(
+				655360, -327680, 0, 0, 0, 0, 0xC0000000u, 0x10000000u, 0u);
+		if (!expect(wp.x == -327709 && wp.y == -605455 && wp.z == 250802,
+		            "yaw+pitch local_to_world at retail's BAM scale")) return false;
+	}
 	std::printf("PASS pose_transform_roundtrip\n");
 	return true;
 }
@@ -2156,6 +2186,77 @@ bool run_round_event_fanout() {
 	}
 	std::printf("PASS round_event_fanout\n");
 	return true;
+}
+
+// An aircraft's or a handler's fire is Weapon_FireProcess, the ammo-def arm whose
+// shooter is the hull's occupant: an occupied craft's round reaches the joiner with
+// flags 1, the ammo index and the occupant; a pilotless one names no shooter, so no
+// record goes out. [orig: Weapon_FireProcess @0x53F6D6, @0x53F705; RoundData_AddRound
+//  ring+4 0xFFFF @0x4FDC6C..0x4FDC70; Server_BuildRoundEventListForPlayer @0x4FFF4C;
+//  NetPacket_DeserializeRoundEvent @0x42F521]
+bool run_ai_round_reaches_the_joiner() {
+	w::World world;
+	world.rules.logic_authority = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	world.tables.ammo.entries.resize(4);
+	world.tables.ammo.entries[3].name = "AI_ROUND";
+	world.tables.ammo.entries[3].velocity = 300;
+	world.tables.ammo.entries[3].max_age_ticks = 62;
+	world.tables.ammo.entries[3].valid = true;
+	const w::EntityHandle host_h =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	const w::EntityHandle peer_h =
+			w::spawn_remote_player(world, player_spawn({4.0f, 5.0f, 6.0f}, 0, 0xFFF1));
+	const w::EntityHandle pilot_h =
+			w::spawn_remote_player(world, player_spawn({8.0f, 8.0f, 9.0f}, 0, 0xFFF2));
+	w::Entity craft;
+	craft.alive = true;
+	craft.health = 100;
+	const w::EntityHandle craft_h = world.registry.spawn(1, craft);
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch_host;
+	ns::LoopbackChannel ch_peer;
+	conns.push_back(ns::Connection{&ch_host, ns::TransportMode::Loopback, host_h, 0});
+	conns.push_back(ns::Connection{&ch_peer, ns::TransportMode::Client, peer_h, 0});
+	auto next_frame = [&](ns::LoopbackChannel &ch, nw::FrameUpdate &fu) {
+		ns::Datagram dg;
+		if (!ch.client_recv(dg) || dg.tag != nw::s2c::PER_FRAME_UPDATE) return false;
+		return nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id,
+		                               fu);
+	};
+	ns::test::emit_all(world, conns); // arm both watermarks
+	{
+		nw::FrameUpdate fh, fp;
+		(void)next_frame(ch_host, fh);
+		(void)next_frame(ch_peer, fp);
+	}
+	const w::FixedVec3 origin{w::to_fixed(4.0), w::to_fixed(5.0), w::to_fixed(7.0)};
+	const auto fire_and_read = [&](nw::FrameUpdate &fp) {
+		world.round_sim.fire_source(world, world.registry.get(craft_h), origin, 0, 0, 3);
+		ns::test::emit_all(world, conns);
+		nw::FrameUpdate fh;
+		(void)next_frame(ch_host, fh);
+		return next_frame(ch_peer, fp);
+	};
+	nw::FrameUpdate pilotless;
+	if (!expect(fire_and_read(pilotless) && pilotless.round_events.empty(),
+			"a pilotless craft's round names no shooter and never goes out"))
+		return false;
+	world.registry.get(craft_h)->primary_occupant = pilot_h;
+	nw::FrameUpdate fp;
+	if (!expect(fire_and_read(fp) && fp.round_events.size() == 1,
+			"an occupied craft's round reaches the joiner"))
+		return false;
+	const nw::RoundEventRecord &re = fp.round_events[0];
+	if (!expect((re.flags & 0x03) == 0x01 && re.adm_index == 3 &&
+					re.shooter_handle == pilot_h.packed,
+			"the AI round rides the ammo-def arm with its ammo index and the occupant"))
+		return false;
+	// A slotless shooter's ammo arm hands the pool 0xF600 over the fresh word's low
+	// nine bits, which the round keeps as its id and the ring carries
+	// [orig: Server_ClientFiredRound @0x50BDAE..0x50BDBC; RoundData_AddRound @0x4FDCF5].
+	return expect(re.shot_seq == 0xF7FF, "the AI round's word is the slotless 0xF7FF");
 }
 
 // (i4) The drive-authority chain (net-re §5.13 witness 2026-07-04): vehicles have NO wire
@@ -2506,6 +2607,43 @@ bool run_0a_tail_carries_the_armor_word() {
 	return expect(frame_armor(armor) && armor == 40, "armor: a dead recipient's word still rides");
 }
 
+// The tail's Health i16 is the recipient's entity+0x11E word, raw, alive or dead:
+// the drowning and the flag timeout store -1 there and a retail host sends 0xFFFF
+// for it. It was clamped to 0..32767 (B-14).
+// [orig: NetPacket_WritePlayerState @0x4FFD56..0x4FFD6A; the drowning's
+//  `mov word ptr [eax+11Eh],0FFFFh`, Server_UpdatePlayerBreathTimers @0x50D819]
+bool run_0a_tail_carries_the_health_word_raw() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle h =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *e = world.registry.get(h);
+	if (!expect(e != nullptr, "health: player entity resolvable")) return false;
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, h, 0});
+	auto frame_health = [&](int16_t &health) {
+		ns::test::emit_all(world, conns);
+		ns::Datagram dg;
+		if (!ch.client_recv(dg)) return false;
+		nw::FrameUpdate fu;
+		if (!nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu) ||
+				!fu.local_tail_present)
+			return false;
+		health = fu.health;
+		return true;
+	};
+	int16_t health = 0;
+	e->health = 150;
+	if (!expect(frame_health(health) && health == 150, "health: the tail carries entity+0x11E"))
+		return false;
+	// A drowned body: Health -1 with the dead bit, the word raw (0xFFFF).
+	e->health = -1;
+	e->flags |= 2u;
+	return expect(frame_health(health) && health == -1,
+	              "health: a drowned recipient's -1 crosses raw");
+}
+
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
@@ -2519,13 +2657,14 @@ int main() {
 	                run_0a_anchor_is_the_recipient_eye() &&
 	                run_0a_round_score_and_los_read_the_body() &&
 	                run_0a_deploy_hold_and_tail_stance() && run_0a_tail_carries_the_armor_word() &&
+	                run_0a_tail_carries_the_health_word_raw() &&
 	                run_0a_priority_caches_hold_every_pool1_slot() &&
 	                run_0a_phase1_gate_reads_the_whole_countdown() &&
 	                run_0x26_attach_mounted_echo() &&
 	                run_mounted_g_slot_route_echo() &&
 	                run_vehicle_drive_authority() &&
 	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip() &&
-	                run_round_event_fanout();
+	                run_round_event_fanout() && run_ai_round_reaches_the_joiner();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

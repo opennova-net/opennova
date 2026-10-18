@@ -6,6 +6,19 @@
 #include <runtime/hud/hud_frame.h>
 
 namespace opennova::hud {
+uint8_t frustum_clip_mask(float ndc_x, float ndc_y, bool short_of_near) {
+	uint8_t clip = short_of_near ? 16 : 0;
+	if (ndc_x < -1)
+		clip |= 1;
+	if (ndc_x > 1)
+		clip |= 2;
+	if (ndc_y > 1)
+		clip |= 4;
+	if (ndc_y < -1)
+		clip |= 8;
+	return clip;
+}
+
 int hud_silhouette_alpha(int elapsed, int ramp, int base, int maximum) {
 	if (ramp <= 0)
 		return 0;
@@ -92,9 +105,12 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 		// Four diagonal corner strokes around the MAIN aim anchor, not the
 		// tracked target point. [orig: @0x592D32..0x592DD7]
 		if (c.target_brackets) {
-			// [orig: the anchor's Viewport_ScreenToVirtual @0x592D32]
-			const float x = s.aim_valid ? float(design_x(s.aim_screen_x)) : 512;
-			const float y = s.aim_valid ? float(design_y(s.aim_screen_y)) : 384;
+			// [orig: the anchor's Viewport_ScreenToVirtual @0x592D32; the 1P anchor
+			//  the centre pixel (w / 2, h / 2) @0x592896..0x5928AE]
+			const float x = float(s.aim_valid ? design_x(s.aim_screen_x)
+											  : screen_to_design_x(surface_w / 2, surface_w));
+			const float y = float(s.aim_valid ? design_y(s.aim_screen_y)
+											  : screen_to_design_y(surface_h / 2, surface_h));
 			for (int dx : { -1, 1 })
 				for (int dy : { -1, 1 }) {
 					float x0 = x + dx * 13, y0 = y + dy * 13;
@@ -148,11 +164,14 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 	const auto &l = layout_.combat;
 	if (c.death_screen)
 		return;
+	// Each a bordered quad of its image size [orig: HUD_DrawTexturedQuadWithBorder
+	// @0x590C40 from HUD_DrawTargetEntityOverlay @0x59A68C, sub_59A710 @0x59A7C9,
+	// HUD_DrawParachuteAndArmorIcons @0x5925FA / @0x592635, HUD_DrawCargoIcon @0x599C91,
+	// each passing its record's +8 / +0xC as both the texture and the quad extent].
 	auto sprite = [&](const HudSprite &r, int x, int y, int tex, uint32_t color) {
 		if (!r.valid)
 			return;
-		emit_rect(sx(float(x), w), sy(float(y), h), sx(float(x + r.width), w),
-				sy(float(y + r.height), h), color, true, tex);
+		emit_bordered_quad(float(x), float(y), r.width, r.height, color, tex, w, h);
 		++draw_list_.elements_drawn;
 	};
 	// Weapon and control-seat silhouettes share the original flash stamp.

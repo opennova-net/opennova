@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include <formats/def/def.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_inventory.h>
@@ -130,6 +131,41 @@ void test_display_expand_and_fill() {
     CHECK(display[1] == "WPN_M4AUTO");
     CHECK(display[2] == "WPN_M203HE"); // [orig: sub append @ 0x54bb07]
 
+    // A sub-variant index past 254 wraps to the table's start, a byte add; the
+    // 255-slot table holds no index 255, and the wrapped "null" row (entry 0) is
+    // listed but names no weapon, so the fill skips it with the loader's warning.
+    // [orig: AvatarDef_BuildDisplayList @ 0x54bae6..0x54bae9; AdmDef_GetEntryByIndex
+    //  @ 0x53fc84 (0xFF is none); AdmDef_FindIndexByName @ 0x53fd85..0x53fd97;
+    //  WeaponSlotTable_LoadAllFromDefs @ 0x541532 / @ 0x541553]
+    {
+        WeaponTable wrap;
+        wrap.entries.resize(255);
+        auto def = [&](size_t i, const char *name) -> WeaponTableEntry & {
+            wrap.entries[i].name = name;
+            wrap.entries[i].valid = true;
+            return wrap.entries[i];
+        };
+        WeaponTableEntry &edge = def(254, "WPN_EDGE");
+        edge.loadout_subclasses = 3;
+        edge.category = 2;
+        def(0, "null");
+        WeaponTableEntry &sub = def(1, "WPN_SUB1");
+        sub.category = 3;
+        sub.rank = 1;
+        const auto wrapped =
+                weapon_kit_expand_display_list({{"WPN_EDGE", -1, -1, -1}}, wrap);
+        CHECK(wrapped.size() == 3);
+        CHECK(wrapped.size() == 3 && wrapped[1] == "null" && wrapped[2] == "WPN_SUB1");
+        CHECK(wrap.index_of("null") == -1 && wrap.index_of("NULL") == -1 &&
+                wrap.index_of("WPN_SUB1") == 1);
+        WeaponInventory winv;
+        winv.reset(wrap);
+        const auto wfill = weapon_inventory_load_from_display(wrap, wrapped, winv, 8, false);
+        CHECK(winv.slot(0)->adm_index == -1);
+        CHECK(winv.slot(3 * 65 + 1)->adm_index == 1);
+        CHECK(wfill.warnings.size() == 1);
+    }
+
     WeaponInventory inv;
     inv.reset(f.t);
     auto fill = weapon_inventory_load_from_display(f.t, display, inv, 8, false);
@@ -188,7 +224,7 @@ void test_pools_and_recalc() {
 
     // Reload: refund + redraw [orig: WeaponSlot_ReloadAmmo §5.58].
     inv.slot(3 * 65 + 0)->clip = 5;
-    int32_t loaded = weapon_inventory_reload_slot(f.t, inv, 3 * 65 + 0);
+    int32_t loaded = weapon_inventory_reload_slot(f.t, inv, 3 * 65 + 0, WeaponAmmoSeat{});
     CHECK(loaded == 30);
     CHECK(weapon_pool_get(inv, m4_class) == 155); // 180 + 5 - 30
 
@@ -668,6 +704,19 @@ static int test_local_held_weapon_visible() {
 	CHECK(!local_held_weapon_visible(world, player, weapon, inv, true));
 	player.mount_type = SeatType::Passenger;
 	CHECK(local_held_weapon_visible(world, player, weapon, inv, true));
+	// NoClipsNoDraw adds the loaded rounds only for a one-round clip: an empty pool
+	// hides a rifle with rounds in its clip, while a one-round weapon's loaded round
+	// keeps it drawn [orig: Entity_CanFireWeapon @0x4dcbea..0x4dcc2d].
+	player.mounted = false;
+	player.mount_type = SeatType::None;
+	auto &m4 = world.tables.weapons.entries[static_cast<size_t>(f.m4)];
+	m4.flags |= weapon_flag::kNoClipsNoDraw;
+	inv.pools[static_cast<size_t>(m4.ammo_class_id)] = 0;
+	inv.slot(3 * 65)->clip = 5;
+	CHECK(!local_held_weapon_visible(world, player, weapon, inv, false));
+	m4.clipsize = 1;
+	inv.slot(3 * 65)->clip = 1;
+	CHECK(local_held_weapon_visible(world, player, weapon, inv, false));
 	std::printf("PASS local held-weapon draw gate\n");
 	return 0;
 }
@@ -692,7 +741,7 @@ void test_two_weapons_share_loaded_ammo() {
     CHECK(weapon_inventory_total_clips(f.t, inv, 196) == 3);
     weapon_inventory_set_loaded_rounds(f.t, inv, 195, 23);
     CHECK(weapon_inventory_loaded_rounds(f.t, inv, 196) == 23);
-    CHECK(weapon_inventory_reload_slot(f.t, inv, 196) == 30);
+    CHECK(weapon_inventory_reload_slot(f.t, inv, 196, WeaponAmmoSeat{}) == 30);
     CHECK(weapon_pool_get(inv, a.ammo_class_id) == 63);
 }
 
@@ -782,7 +831,231 @@ void test_slot_bar_scan() {
     CHECK(scan[7].def_category == -1);
 }
 
+// The redraw's seat legs: a UseGun seat redraws nothing; a controller seat spends
+// nothing, reads ammo class 1 as 0 and every other class as the EWeap carrier's
+// reserve. [orig: WeaponSlots_RecalculateAmmoFromCapacity @0x54228D..0x542294;
+//  Entity_GetScoreValueBySlotType @0x54073F..0x540769; WeaponSlot_DecrementAmmo
+//  @0x540920]
+void test_recalc_seat_legs() {
+    WeaponTable t;
+    t.ammo_class_names = {"", "CLASS_MANA", "CLS_B"};
+    t.ammo_class_caps = {1000, 1000, 1000};
+    t.entries.resize(3);
+    for (int adm : {1, 2}) {
+        WeaponTableEntry &e = t.entries[static_cast<size_t>(adm)];
+        e.name = adm == 1 ? "WPN_CLASSONE" : "WPN_CLASSTWO";
+        e.valid = true;
+        e.category = 3;
+        e.rank = static_cast<uint8_t>(adm);
+        e.clipsize = 10;
+        e.ammo_class_id = adm;
+        e.ammo_class_count = 1;
+    }
+    WeaponInventory inv;
+    inv.reset(t);
+    inv.slots[3 * 65 + 1].adm_index = 1;
+    inv.slots[3 * 65 + 2].adm_index = 2;
+    inv.pools[1] = 50;
+    inv.pools[2] = 50;
+    WeaponAmmoSeat seat;
+    seat.parent_slot = 3;
+    weapon_inventory_recalc_clips(t, inv, seat);
+    CHECK(inv.slot(3 * 65 + 1)->clip == 0 && inv.slot(3 * 65 + 2)->clip == 0 &&
+          inv.pools[1] == 50 && inv.pools[2] == 50);
+    seat.parent_slot = 2;
+    seat.carrier = true;
+    seat.carrier_eweap = true;
+    seat.carrier_reserve = 4;
+    weapon_inventory_recalc_clips(t, inv, seat);
+    CHECK(inv.slot(3 * 65 + 1)->clip == 0);
+    CHECK(inv.slot(3 * 65 + 2)->clip == 4);
+    CHECK(inv.pools[1] == 50 && inv.pools[2] == 50);
+}
+
+// The clip counts and the loadout weight read through the seat: a UseGun seat counts
+// the carrier's MountSlot reserve against the slot's own loaded rounds, a controller
+// seat under a carrier that is no EWeap item counts no pool.
+// [orig: WeaponSlot_GetTotalClips @0x5425F0 - the pool @0x542638, the slot word
+//  @0x54265B; Entity_GetScoreValueBySlotType @0x540707..0x540799;
+//  Terrain_AccumulateSectorScores @0x425220]
+void test_total_clips_seat_legs() {
+    WeaponTable t;
+    t.ammo_class_names = {"", "CLASS_MANA", "CLS_B"};
+    t.ammo_class_caps = {1000, 1000, 1000};
+    t.entries.resize(3);
+    WeaponTableEntry &e = t.entries[2];
+    e.name = "WPN_SEATED";
+    e.valid = true;
+    e.category = 3;
+    e.rank = 2;
+    e.clipsize = 10;
+    e.ammo_class_id = 2;
+    e.ammo_class_count = 1;
+    e.weaponweight_fp16 = 0x10000;
+    e.clipweight_fp16 = 0x10000;
+    WeaponInventory inv;
+    inv.reset(t);
+    inv.slots[3 * 65 + 2].adm_index = 2;
+    inv.slots[3 * 65 + 2].clip = 5;
+    inv.pools[2] = 25;
+    CHECK(weapon_inventory_total_clips(t, inv, 3 * 65 + 2) == 3);
+    CHECK(weapon_inventory_loadout_weight_fp16(t, inv) == 0x40000);
+    WeaponAmmoSeat seat;
+    seat.parent_slot = 3;
+    seat.carrier = true;
+    seat.carrier_reserve = 40;
+    seat.carrier_clip = 7;
+    CHECK(weapon_inventory_total_clips(t, inv, 3 * 65 + 2, seat) == 4);
+    CHECK(weapon_inventory_loadout_weight_fp16(t, inv, seat) == 0x50000);
+    seat.parent_slot = 2;
+    CHECK(weapon_inventory_total_clips(t, inv, 3 * 65 + 2, seat) == 0);
+    CHECK(weapon_inventory_loadout_weight_fp16(t, inv, seat) == 0x10000);
+}
+
+// The local pump reads a shared bucket and its pool through the player's seat: on a
+// controller seat under a carrier with no EWeap bit both read 0 and the bucket keeps
+// its rounds; off the seat they read the player's own.
+// [orig: WeaponSlot_GetSharedLoadedRounds @0x540604..0x540627 from WeaponAction_Idle @0x542990;
+//  Entity_GetScoreValueBySlotType @0x54078F..0x540799; WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692]
+void test_pump_reads_the_bucket_through_the_seat() {
+    Fixture f;
+    auto &m4 = f.t.entries[f.m4];
+    m4.ammo_bucket = 1;
+    World world;
+    world.tables.weapons = f.t;
+    WeaponInventory inv;
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv, 8, false);
+    inv.equipped_combo = 3 * 65;
+    inv.shared_clips[1] = 12;
+    inv.pools[static_cast<size_t>(m4.ammo_class_id)] = 90;
+    world.registry.configure_pool(0, 1);
+    world.registry.configure_pool(1, 1);
+    Entity seed;
+    seed.alive = true;
+    seed.health = 100;
+    world.cached.local_player = world.registry.spawn(0, seed);
+    Entity hull;
+    hull.has_item_def = true;
+    const EntityHandle carrier = world.registry.spawn(1, hull);
+
+    WeaponInstallData data;
+    data.name = "WPN_M4AUTO";
+    data.clipsize = 30;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    local_weapon_install(world, weapon, data, false, false, &inv, view);
+    LocalWeaponPumpIO io;
+    io.view = &view;
+    io.inventory = &inv;
+    ++world.logic_tick;
+    local_weapon_pump_tick(world, weapon, io);
+    CHECK(weapon.slot.clip == 12 && weapon.slot.reserve == 90);
+
+    Entity *player = world.registry.get(world.cached.local_player);
+    player->mounted = true;
+    player->mount_type = SeatType::Controller;
+    player->mount_target = carrier;
+    ++world.logic_tick;
+    local_weapon_pump_tick(world, weapon, io);
+    CHECK(weapon.slot.clip == 0 && weapon.slot.reserve == 0);
+    CHECK(inv.shared_clips[1] == 12);
+    std::printf("PASS the pump reads the bucket through the seat\n");
+}
+
+// The reload refill takes the owner's seat: on a controller seat under a carrier with
+// no EWeap bit a bucket rifle refunds and draws nothing, and a clip weapon empties its
+// clip into the pool and draws none back; off the seat the bucket rifle reloads.
+// [orig: WeaponSlot_ReloadAmmo @0x5417C5, @0x5417E7, @0x541805, @0x541821, @0x541842;
+//  WeaponSlot_DecrementAmmo @0x540994]
+void test_reload_takes_the_seat() {
+    Fixture f;
+    auto &m4 = f.t.entries[f.m4];
+    m4.ammo_bucket = 1;
+    WeaponInventory inv;
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_KNIFE", "WPN_AK47AUTO"}, inv, 8,
+            false);
+    const int32_t m4_combo = 3 * 65;
+    const size_t m4_pool = static_cast<size_t>(m4.ammo_class_id);
+    inv.shared_clips[1] = 5;
+    inv.pools[m4_pool] = 90;
+    WeaponAmmoSeat seat;
+    seat.parent_slot = 2;
+    seat.carrier = true;
+    CHECK(weapon_inventory_reload_slot(f.t, inv, m4_combo, seat) == 0);
+    CHECK(inv.shared_clips[1] == 5 && inv.pools[m4_pool] == 90);
+    const auto &ak = f.t.entries[static_cast<size_t>(f.ak)];
+    const int32_t ak_combo = ak.rank + 65 * ak.category;
+    const size_t ak_pool = static_cast<size_t>(ak.ammo_class_id);
+    inv.slot(ak_combo)->clip = 4;
+    const int32_t ak_before = inv.pools[ak_pool];
+    CHECK(weapon_inventory_reload_slot(f.t, inv, ak_combo, seat) == 0);
+    CHECK(inv.slot(ak_combo)->clip == 0 &&
+            inv.pools[ak_pool] == ak_before + 4 * ak.ammo_class_count);
+    const WeaponAmmoSeat unseated;
+    CHECK(weapon_inventory_reload_slot(f.t, inv, m4_combo, unseated) == m4.clipsize);
+    CHECK(inv.pools[m4_pool] == 90 + 5 * m4.ammo_class_count - m4.clipsize * m4.ammo_class_count);
+    std::printf("PASS the reload takes the seat\n");
+}
+
+// An EWeap mount's reload: the re-split, the draw from the reserve, the clip the draw;
+// an empty reserve leaves the clip empty. [orig: WeaponSlot_ReloadAmmo @0x541720;
+//  the re-split @0x5462A0; sub_5461D0]
+void test_mount_slot_reload() {
+    WeaponTableEntry gun;
+    gun.clipsize = 10;
+    gun.startrounds = 100;
+    gun.ammo_class_count = 1;
+    WeaponSlotState slot;
+    slot.clip = 4;
+    slot.reserve = 50;
+    weapon_mount_slot_reload(gun, slot, gun, slot);
+    CHECK(slot.clip == 10 && slot.reserve == 38); // 4 + 50 + 4 = 58 -> 10 / 48 -> 10 / 38
+    slot.clip = 7;
+    slot.reserve = 0;
+    weapon_mount_slot_reload(gun, slot, gun, slot);
+    CHECK(slot.clip == 4 && slot.reserve == 0);   // 14 -> 10 / 4 -> draw 4 -> 4 / 0
+    gun.startrounds = 9;
+    slot.clip = 7;
+    slot.reserve = 0;
+    weapon_mount_slot_reload(gun, slot, gun, slot);
+    CHECK(slot.clip == 0 && slot.reserve == 0);   // 14 capped at 9 -> 9 / 0 -> draw 0
+    // A def with no `ammoclass` line holds one unit a round: a 1-round tank gun
+    // with 40 start rounds reloads from its reserve [orig: AdmDef_InitEntryDefaults
+    // +0xE0 = 1 @0x53FF5B; WPN_M1TURRET].
+    opennova::def::DefWeaponDef row;
+    opennova::def::def_init_weapon(row);
+    CHECK(row.ammo_class_count == 1);
+    WeaponTableEntry turret;
+    turret.clipsize = 1;
+    turret.startrounds = 40;
+    turret.ammo_class_count = static_cast<int16_t>(row.ammo_class_count);
+    slot.clip = 0;
+    slot.reserve = 39;
+    weapon_mount_slot_reload(turret, slot, turret, slot);
+    CHECK(slot.clip == 1 && slot.reserve == 38);
+    std::printf("PASS the mount slot reload\n");
+}
+
+// A kit name "None" resolves to the catalog's entry 0 and survives the filter, so the
+// knife fallback does not run [orig: Mission_LoadBMSFile @0x40f80e..0x40f830; the
+//  fallback @0x40f899].
+void test_kit_filter_keeps_none() {
+    Fixture f;
+    WeaponAvailability avail;
+    auto kept = weapon_kit_filter_by_availability({{"None", -1, -1, -1}}, f.t, avail);
+    CHECK(kept.size() == 1);
+    CHECK(kept.size() == 1 && kept[0].name == "None");
+}
+
 int main() {
+    test_kit_filter_keeps_none();
+    test_mount_slot_reload();
+    test_recalc_seat_legs();
+    test_reload_takes_the_seat();
+    test_pump_reads_the_bucket_through_the_seat();
+    test_total_clips_seat_legs();
     test_slot_bar_scan();
     test_fill_seeds_the_slot_zoom();
     test_two_weapons_share_loaded_ammo();

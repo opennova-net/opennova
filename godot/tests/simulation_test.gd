@@ -472,13 +472,13 @@ func test_hud_minimap_snapshot_and_controls_have_a_stable_contract() -> void:
 			"A fresh Simulation publishes an empty minimap snapshot.")
 	assert_eq(snapshot[0], int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION),
 			"Snapshot version leads the header.")
-	assert_eq(int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION), 7,
-			"Row layout v7: the draw-policy tail, the medic bit, the live entity facts, the vehicle-bay logo facts and the zone-timer entry ride each row.")
+	assert_eq(int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION), 8,
+			"Row layout v8: the draw-policy tail, the medic bit, the live entity facts, the vehicle-bay logo facts, the zone-timer entry and the change-team cell and taker ride each row.")
 	assert_eq(snapshot[1], int(Simulation.HUD_MINIMAP_STRIDE))
 	assert_eq(snapshot[2], 0, "No retained rows without a mission.")
 	assert_eq(int(Simulation.HUD_MINIMAP_HEADER_SIZE), 3)
-	assert_eq(int(Simulation.HUD_MINIMAP_STRIDE), 36,
-			"v7 appends the zone-timer entry (flags, team, bar team, value, limit, rate) the capture-point labels read.")
+	assert_eq(int(Simulation.HUD_MINIMAP_STRIDE), 38,
+			"v8 appends the change-team cell and the zone's taker the blip's session-clock blink reads.")
 	assert_eq(sim.get_local_player_heading_bam(), 0,
 			"No local player -> heading zero.")
 	assert_eq(sim.get_hud_radar_zoom_q16(), 65536,
@@ -3616,6 +3616,20 @@ func test_vehicle_loadout_zone_gates_off_a_bay() -> void:
 			"the demo mission authors no vehicle-loadout volume")
 	assert_true(sim.local_player_vehicle_zone_team_matches(),
 			"a free-standing player reads ground team 0 = open")
+
+
+# The USE-ITEM press's arm (the engine's local_player_use_item_arm): no kernel
+# and an SP player off every volume (no pre-round, no countdown) both take the
+# mount chain. The armory, refused and bay orders are the local_player_view ctest.
+func test_use_item_arm_off_every_volume_is_the_mount_chain() -> void:
+	var sim := Simulation.new()
+	assert_eq(sim.local_player_use_item_arm(), Simulation.USE_ITEM_ARM_MOUNT_CHAIN,
+			"no world: the mount chain")
+	sim.build_demo_mission()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.step()
+	assert_eq(sim.local_player_use_item_arm(), Simulation.USE_ITEM_ARM_MOUNT_CHAIN,
+			"the demo mission authors no armory or bay volume")
 
 
 # The view actions' producers of the BMS input-action word (the cat-7 player

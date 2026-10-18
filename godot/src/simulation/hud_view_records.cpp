@@ -1,5 +1,6 @@
 #include "simulation/hud_view_records.h"
 
+#include "util/axes.h"
 #include "util/record_bind.h"
 #include "util/string_convert.h"
 
@@ -11,8 +12,8 @@ using opennova::to_gd;
 Vector3 WaypointHudView::get_position() const {
 	if (value_.current < 0) return Vector3();
 	// Fixed 16.16 mission (x,y,z) -> Godot (x, z, -y), like every entity read.
-	return Vector3(value_.entry.x / 65536.0f, value_.entry.z / 65536.0f,
-			-(value_.entry.y / 65536.0f));
+	const int32_t p[3] = {value_.entry.x, value_.entry.y, value_.entry.z};
+	return godot_from_fixed3(p);
 }
 
 void WaypointHudView::_bind_methods() {
@@ -28,9 +29,9 @@ void WaypointHudView::_bind_methods() {
 // --- HudMapGridOrigin -------------------------------------------------------
 
 Vector3 HudMapGridOrigin::get_position() const {
-	return value_.present
-			? Vector3(value_.x_q16 / 65536.0f, 0.0f, -(value_.y_q16 / 65536.0f))
-			: Vector3();
+	if (!value_.present) return Vector3();
+	const int32_t p[3] = {value_.x_q16, value_.y_q16, 0};
+	return godot_from_fixed3(p);
 }
 
 void HudMapGridOrigin::_bind_methods() {

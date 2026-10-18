@@ -8,6 +8,7 @@
 #include <vector>
 #include <base/io/bit_stream.h>
 #include <base/io/log.h>
+#include <base/io/os_path.h>
 
 // [orig: Terrain_LoadLodStorage @0x603550 — the CDEP/DPTH/POLY/NMAP chunk reader with the CBitStream
 //  variable-width tile-index codec; DPTH magic @0x6037b2, CDEP magic @0x60361f]
@@ -345,7 +346,7 @@ bool load_cpt(const uint8_t *data, size_t size, CptFile &out, std::string &error
 }
 
 CptFile CptFile::read(const std::string &path) {
-	std::ifstream file(path, std::ios::binary | std::ios::ate);
+	std::ifstream file(io::os_path(path), std::ios::binary | std::ios::ate); // UTF-8, long-path safe
 	if (!file.is_open()) {
 		throw std::runtime_error("Failed to open CPT: " + path);
 	}
@@ -393,7 +394,7 @@ std::vector<uint8_t> CptFile::write_bytes() const {
 
 void CptFile::write(const std::string &path) const {
 	const std::vector<uint8_t> bytes = write_bytes();
-	std::ofstream out(path, std::ios::binary);
+	std::ofstream out(io::os_path(path), std::ios::binary); // UTF-8, long-path safe
 	if (!out.is_open()) {
 		throw std::runtime_error("Failed to create file: " + path);
 	}

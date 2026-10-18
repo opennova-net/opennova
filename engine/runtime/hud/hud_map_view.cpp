@@ -1,5 +1,6 @@
 #include <runtime/hud/hud_map_view.h>
 
+#include <base/io/bam.h>
 #include <base/io/crt_ftol.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_minimap_view.h>
@@ -16,14 +17,6 @@ namespace {
 // precision. [orig: CGfxDevice_CreateDevice @0x67e9fd / @0x67ea35]
 float pc24(double value) {
 	return static_cast<float>(value);
-}
-
-// Wrapping 32-bit add/sub (the handlers' plain `add`/`sub` on the globals).
-int32_t wrap_add(int32_t a, int32_t b) {
-	return static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b));
-}
-int32_t wrap_sub(int32_t a, int32_t b) {
-	return static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b));
 }
 
 // The two-sided fcom/fnstsw clamp the drag-zoom and the fit run on the
@@ -236,8 +229,8 @@ void MapViewPan::stamp_window(const MapViewRect &rect, int32_t scaled_800) {
 	// [orig: dword_25A3998 = R - L, dword_25A399C = B - T @0x554336..0x554356;
 	//  flt_25A3994 = scaled(800) x 0.00125 @0x554369..0x55437f (flt_7D2294);
 	//  the CMAP twins dword_252DD58/5C, flt_252DD54 @0x549861..0x5498b3]
-	window_w = wrap_sub(rect.right, rect.left);
-	window_h = wrap_sub(rect.bottom, rect.top);
+	window_w = io::bam_sub(rect.right, rect.left);
+	window_h = io::bam_sub(rect.bottom, rect.top);
 	pixel_ratio = pc24(static_cast<double>(scaled_800) * static_cast<double>(0.00125f));
 }
 
@@ -249,8 +242,8 @@ float MapViewPan::draw_scale() const {
 }
 
 void MapViewPan::drag_pan(int32_t x, int32_t y, int32_t &out_dx, int32_t &out_dy) {
-	const int32_t dx = wrap_sub(x, last_x);
-	const int32_t dy = wrap_sub(y, last_y);
+	const int32_t dx = io::bam_sub(x, last_x);
+	const int32_t dy = io::bam_sub(y, last_y);
 	last_x = x;
 	last_y = y;
 	// K = Z x 65536 / ((W / S) x 200), each step at single precision
@@ -268,7 +261,7 @@ void MapViewPan::drag_pan(int32_t x, int32_t y, int32_t &out_dx, int32_t &out_dy
 }
 
 void MapViewPan::drag_zoom(int32_t x, int32_t y) {
-	const int32_t dx = wrap_sub(x, last_x);
+	const int32_t dx = io::bam_sub(x, last_x);
 	last_x = x;
 	last_y = y;
 	// zoom x= 1.005^(-dx), stored, then clamped [orig: @0x55447d..0x5544b4].
@@ -326,18 +319,18 @@ void DeathMapView::fit(const DeathMapFitInput &in) {
 	int32_t max_x = in.bounds_max_x;
 	int32_t max_y = in.bounds_max_y;
 	if (min_x != 0 || min_y != 0 || max_x != 0 || max_y != 0) {
-		const int32_t lo_x = wrap_add(in.player_x, -0x140000);
-		const int32_t lo_y = wrap_add(in.player_y, -0x140000);
-		const int32_t hi_x = wrap_add(in.player_x, 0x140000);
-		const int32_t hi_y = wrap_add(in.player_y, 0x140000);
+		const int32_t lo_x = io::bam_add(in.player_x, -0x140000);
+		const int32_t lo_y = io::bam_add(in.player_y, -0x140000);
+		const int32_t hi_x = io::bam_add(in.player_x, 0x140000);
+		const int32_t hi_y = io::bam_add(in.player_y, 0x140000);
 		if (min_x > lo_x) min_x = lo_x;
 		if (min_y > lo_y) min_y = lo_y;
 		if (max_x < hi_x) max_x = hi_x;
 		if (max_y < hi_y) max_y = hi_y;
 	}
 	// The larger AABB side [orig: @0x55330a..0x553322].
-	const int32_t span_x = wrap_sub(max_x, min_x);
-	const int32_t span_y = wrap_sub(max_y, min_y);
+	const int32_t span_x = io::bam_sub(max_x, min_x);
+	const int32_t span_y = io::bam_sub(max_y, min_y);
 	const int32_t extent = span_x > span_y ? span_x : span_y;
 	if (extent == 0) {
 		// [orig: @0x553328..0x553342 — zoom 4.0, pan 0, the 10.0 test skipped]
@@ -357,16 +350,16 @@ void DeathMapView::fit(const DeathMapFitInput &in) {
 			static_cast<double>(1.5f));
 	view.zoom = clamp_zoom(zoom);
 	// The pan centres the AABB [orig: @0x5533bb..0x5533cf].
-	view.pan_x = wrap_sub(wrap_add(min_x, max_x) >> 1, in.player_x);
-	view.pan_y = wrap_sub(wrap_add(min_y, max_y) >> 1, in.player_y);
+	view.pan_x = io::bam_sub(io::bam_add(min_x, max_x) >> 1, in.player_x);
+	view.pan_y = io::bam_sub(io::bam_add(min_y, max_y) >> 1, in.player_y);
 	reset_on_max(view.zoom);
 }
 
 void DeathMapView::ease_frame() {
 	// [orig: DeathScreen_UpdateShroudReveal @0x554784..0x5547b4 — pan +=
 	//  (target - pan) >> 3 on both axes]
-	view.pan_x = wrap_add(view.pan_x, wrap_sub(target_x, view.pan_x) >> 3);
-	view.pan_y = wrap_add(view.pan_y, wrap_sub(target_y, view.pan_y) >> 3);
+	view.pan_x = io::bam_add(view.pan_x, io::bam_sub(target_x, view.pan_x) >> 3);
+	view.pan_y = io::bam_add(view.pan_y, io::bam_sub(target_y, view.pan_y) >> 3);
 }
 
 DeathMapFrame DeathMapView::render(const MapViewRect &rect, int32_t scaled_800,
@@ -377,8 +370,8 @@ DeathMapFrame DeathMapView::render(const MapViewRect &rect, int32_t scaled_800,
 	view.stamp_window(rect, scaled_800);
 	DeathMapFrame frame;
 	frame.rect = rect;
-	frame.center_x = wrap_add(view.pan_x, player_x);
-	frame.center_y = wrap_add(view.pan_y, player_y);
+	frame.center_x = io::bam_add(view.pan_x, player_x);
+	frame.center_y = io::bam_add(view.pan_y, player_y);
 	frame.scale = view.draw_scale();
 	return frame;
 }
@@ -416,10 +409,10 @@ bool DeathMapView::on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t b
 			// [orig: @0x554449..0x55445b].
 			int32_t dx = 0, dy = 0;
 			view.drag_pan(x, y, dx, dy);
-			view.pan_x = wrap_add(view.pan_x, dx);
-			view.pan_y = wrap_add(view.pan_y, dy);
-			target_x = wrap_add(target_x, dx);
-			target_y = wrap_add(target_y, dy);
+			view.pan_x = io::bam_add(view.pan_x, dx);
+			view.pan_y = io::bam_add(view.pan_y, dy);
+			target_x = io::bam_add(target_x, dx);
+			target_y = io::bam_add(target_y, dy);
 		} else if (view.right_drag && (buttons & kMapViewButtonRight) != 0) {
 			view.drag_zoom(x, y);
 		} else {
@@ -481,8 +474,8 @@ CommandMapView::EventResult CommandMapView::on_event(MapViewEvent event, int32_t
 			// [orig: @0x549c64..0x549cd3]
 			int32_t dx = 0, dy = 0;
 			view.drag_pan(x, y, dx, dy);
-			view.pan_x = wrap_add(view.pan_x, dx);
-			view.pan_y = wrap_add(view.pan_y, dy);
+			view.pan_x = io::bam_add(view.pan_x, dx);
+			view.pan_y = io::bam_add(view.pan_y, dy);
 			return EventResult::kNone;
 		}
 		if (view.right_drag && (buttons & kMapViewButtonRight) != 0) {
@@ -501,18 +494,18 @@ MapViewRect command_map_waypoint_dialog_rect(int32_t click_x, int32_t click_y,
 	// [orig: @0x549f1f..0x549f7d — half = (R - L) >> 1 per axis, the rect
 	//  centred on the click, then OffsetRect by (map.left - left) when the
 	//  left overhangs, else by (map.right - right) when the right does]
-	const int32_t half_w = wrap_sub(dialog.right, dialog.left) >> 1;
-	const int32_t half_h = wrap_sub(dialog.bottom, dialog.top) >> 1;
+	const int32_t half_w = io::bam_sub(dialog.right, dialog.left) >> 1;
+	const int32_t half_h = io::bam_sub(dialog.bottom, dialog.top) >> 1;
 	MapViewRect out;
-	out.left = wrap_sub(click_x, half_w);
-	out.right = wrap_add(half_w, click_x);
-	out.top = wrap_sub(click_y, half_h);
-	out.bottom = wrap_add(half_h, click_y);
+	out.left = io::bam_sub(click_x, half_w);
+	out.right = io::bam_add(half_w, click_x);
+	out.top = io::bam_sub(click_y, half_h);
+	out.bottom = io::bam_add(half_h, click_y);
 	int32_t dx = 0;
-	if (out.left < map.left) dx = wrap_sub(map.left, out.left);
-	else if (out.right > map.right) dx = wrap_sub(map.right, out.right);
-	out.left = wrap_add(out.left, dx);
-	out.right = wrap_add(out.right, dx);
+	if (out.left < map.left) dx = io::bam_sub(map.left, out.left);
+	else if (out.right > map.right) dx = io::bam_sub(map.right, out.right);
+	out.left = io::bam_add(out.left, dx);
+	out.right = io::bam_add(out.right, dx);
 	return out;
 }
 
@@ -537,8 +530,8 @@ void command_map_waypoint_world(const CommandMapView &cmap, int32_t player_x, in
 	const float dy = pc24(static_cast<double>(pc24(static_cast<double>(half_h) -
 			static_cast<double>(v.last_y))) * static_cast<double>(p));
 	// [orig: @0x54a172..0x54a193 — x = X - dx + pan x; y = dy + Y + pan y]
-	out_x = wrap_add(wrap_sub(player_x, io::retail_ftol_sse2(static_cast<double>(dx))), v.pan_x);
-	out_y = wrap_add(wrap_add(io::retail_ftol_sse2(static_cast<double>(dy)), player_y), v.pan_y);
+	out_x = io::bam_add(io::bam_sub(player_x, io::retail_ftol_sse2(static_cast<double>(dx))), v.pan_x);
+	out_y = io::bam_add(io::bam_add(io::retail_ftol_sse2(static_cast<double>(dy)), player_y), v.pan_y);
 }
 
 namespace {
@@ -623,8 +616,8 @@ void CommandMapView::render(const MapViewRect &rect, int32_t scaled_800, int32_t
 	// The params block: mode 4, custom position (player + pan, player Z),
 	// custom zoom, custom rect [orig: @0x5498c7..0x549912].
 	base.map_mode = 4;
-	base.player_x = wrap_add(player_x, view.pan_x);
-	base.player_y = wrap_add(player_y, view.pan_y);
+	base.player_x = io::bam_add(player_x, view.pan_x);
+	base.player_y = io::bam_add(player_y, view.pan_y);
 	base.player_z = player_z;
 	base.flags = command_map_mask(toggles);
 	// The payload rect into the 1024x768 virtual space [orig:
@@ -648,7 +641,7 @@ void CommandMapView::render(const MapViewRect &rect, int32_t scaled_800, int32_t
 	const int32_t x2 = static_cast<int32_t>(scale_axis(vx2, base.surface_w, kDesignWidth));
 	const double zoom = static_cast<double>(view.zoom) * 65536.0;
 	base.window_scale = pc24(zoom / static_cast<double>(pc24(
-			static_cast<double>(wrap_sub(x2, x1)) * 200.0)));
+			static_cast<double>(io::bam_sub(x2, x1)) * 200.0)));
 	base.window_marker_angle_bias_bam = 0;
 }
 
@@ -721,7 +714,12 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 			scale_axis(8.0, input.surface_w, kDesignWidth));
 	const int32_t label_h = static_cast<int32_t>(
 			scale_axis(16.0, input.surface_h, kDesignHeight));
-	const int32_t frame_counter = input.ticks;
+	// The zone blips blink on the session frame counter, the letters and the
+	// crosshair pulse on the HUD frame counter [orig: sub_597FD0's dword_A87060
+	// @0x598059 / @0x59810C / @0x59813E; MapOverlay_DrawView's g_HUDFrameCounter
+	// @0x5A5B30 / @0x5A5D5A].
+	const int32_t session_frame = static_cast<int32_t>(input.session_frame);
+	const int32_t hud_frame = static_cast<int32_t>(input.hud_frame);
 	char text[16];
 	const auto close_segment = [&zones, &out]() {
 		HudMapWindowSegment segment;
@@ -740,7 +738,7 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 		// [orig: sub_597FD0(entity, rect, 0x40000000 - heading, 0)
 		//  @0x5a5ab9..0x5a5adc; Minimap_DrawBlip @0x597890; the flush
 		//  sub_596780 @0x5a5ae4]
-		const DeathMapZoneBlip blip = death_map_zone_blip(zone, facts, frame_counter);
+		const DeathMapZoneBlip blip = death_map_zone_blip(zone, facts, session_frame);
 		if (blip.draw) {
 			HudMinimapMarker entity = *slot.marker;
 			entity.icon = blip.cell;
@@ -753,7 +751,7 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 			color = 0xFFC8C814u;
 		// Own-team zones pulse; the others brighten a fixed 20/32 unless the
 		// spawn-target hold runs [orig: @0x5a5b30..0x5a5b65].
-		int32_t phase = pulse_phase(frame_counter);
+		int32_t phase = pulse_phase(hud_frame);
 		if (zone.team != facts.player_team) phase = facts.hold_seconds != 0 ? 0 : 20;
 		// Drawn only on game type 0x50010 or a ready zone timer
 		// [orig: CProximityList_FindEntryById(g_ZoneTimerList, e) @0x5a5b6e;
@@ -792,7 +790,7 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 	}
 
 	// The player crosshair [orig: MapOverlay_DrawView @0x5a5d32..0x5a5ed6].
-	map_view_crosshair(input, frame.rect, facts, frame_counter, out.over_lines);
+	map_view_crosshair(input, frame.rect, facts, hud_frame, out.over_lines);
 }
 
 void map_view_crosshair(const HudMinimapInput &view, const MapViewRect &rect,
@@ -851,8 +849,9 @@ void CommandMapCompiler::compile(HudMinimapInput &input, CommandMapView &cmap,
 		{{x1, y1, 0.0f, 0.0f}, {x2, y2, 0.0f, 0.0f}, {x1, y2, 0.0f, 0.0f}, kClear},
 	};
 	out.map.clear.insert(out.map.clear.begin(), clear, clear + 2);
-	// The crosshair [orig: CMapWindow_HandleEvent @0x54999e..0x549b4a].
-	map_view_crosshair(input, rect, facts, input.ticks, out.over_lines);
+	// The crosshair, pulsing on the HUD frame counter [orig: CMapWindow_HandleEvent
+	// @0x54999e..0x549b4a, the counter @0x5499BF].
+	map_view_crosshair(input, rect, facts, static_cast<int32_t>(input.hud_frame), out.over_lines);
 }
 
 } // namespace opennova::hud

@@ -37,6 +37,7 @@ void SbfBank::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entries"), &SbfBank::get_entries);
 	ClassDB::bind_method(D_METHOD("has_entry", "name"), &SbfBank::has_entry);
 	ClassDB::bind_method(D_METHOD("get_entry_name", "index"), &SbfBank::get_entry_name);
+	ClassDB::bind_method(D_METHOD("get_stream_at", "index"), &SbfBank::get_stream_at);
 	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &SbfBank::load_from_path);
 	ClassDB::bind_static_method("SbfBank", D_METHOD("create_empty"), &SbfBank::create_empty);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &SbfBank::get_raw_file_bytes);

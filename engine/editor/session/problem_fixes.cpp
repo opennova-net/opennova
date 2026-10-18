@@ -207,6 +207,17 @@ std::string install_file_name(const SessionView &view, const std::string &name) 
 			: std::string();
 }
 
+std::unordered_set<int64_t> project_item_ids(const AssetGraph &graph) {
+	std::unordered_set<int64_t> used;
+	for (const GraphSymbol *symbol : graph.symbols_of_kind(ReferenceKind::Item))
+		if (const std::optional<int> id = strutil::parse_int(symbol->name)) used.insert(*id);
+	graph.for_each_edge([&](const GraphEdge &edge) {
+		if (edge.kind != ReferenceKind::Item) return;
+		if (const std::optional<int> id = strutil::parse_int(edge.value)) used.insert(*id);
+	});
+	return used;
+}
+
 const AssetEntry *defining_file(const ReferenceSubject &missing, const SessionView &view) {
 	if (!view.project.scan) return nullptr;
 	if (reference_row(missing.kind).scope_names_file) {
@@ -592,15 +603,9 @@ void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<Pr
 }
 
 // The first item id the engine keeps for nothing that no item of the project has and no file names
-// (free_item_id over the graph's item definitions and the ids its edges name).
+// (free_item_id past project_item_ids).
 int project_free_item_id(const AssetGraph &graph) {
-	std::set<int> used;
-	for (const GraphSymbol *symbol : graph.symbols_of_kind(ReferenceKind::Item))
-		if (const std::optional<int> id = strutil::parse_int(symbol->name)) used.insert(*id);
-	graph.for_each_edge([&](const GraphEdge &edge) {
-		if (edge.kind != ReferenceKind::Item) return;
-		if (const std::optional<int> id = strutil::parse_int(edge.value)) used.insert(*id);
-	});
+	const std::unordered_set<int64_t> used = project_item_ids(graph);
 	return free_item_id([&](int id) { return used.count(id) != 0; });
 }
 

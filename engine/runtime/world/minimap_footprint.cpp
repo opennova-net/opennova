@@ -91,10 +91,10 @@ MinimapFootprintMesh minimap_footprint_from_occlusion(
 }
 
 uint32_t minimap_footprint_fill_argb(const Entity &entity) {
-	// [orig: Render_CollisionWireframe @0x596848..0x596880]
+	// [orig: Render_CollisionWireframe @0x596884..0x5968C5]
 	if (entity.team == 1) return 0xFF4050A0u;
 	if (entity.team == 2) return 0xFFA05040u;
-	if ((entity.item_attrib & kItemAttribChangeTeam) != 0) return 0xFF609F60u;
+	if ((entity.item_attrib & kItemAttribChangeTeam) != 0) return 0xFF60A060u;
 	return 0xFFA0A0A0u;
 }
 

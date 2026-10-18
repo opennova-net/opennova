@@ -144,7 +144,7 @@ bool ObjectLodFrame::project(const Vector3 &p_center, float p_radius,
 
 bool ObjectLodFrame::project_q16(const Vector3 &p_center, int32_t p_radius_q16,
 		int32_t &r_projected_q16) const {
-	if (!sphere_in_frustum(p_center, static_cast<float>(p_radius_q16) / 65536.0f)) {
+	if (!sphere_in_frustum(p_center, opennova::io::fp16_16_to_float(p_radius_q16))) {
 		return false;
 	}
 	const float depth = (p_center - origin).dot(forward);

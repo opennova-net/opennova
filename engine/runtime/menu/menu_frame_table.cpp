@@ -62,8 +62,8 @@ int vjustify_word(const std::string &token, int current) {
 // index restarts per kind (every shipped row authors its COLUMN).
 // [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0 — the BODY stores
 //  +108 / +144 / +148 / +152 / +156 / +168 / +172, the SUBST node
-//  {value, file, URL, FILE, next} prepended at column +164; init_table_row
-//  @ 0x63f9c0; resize_column_count @ 0x63f6c0]
+//  {value, file, URL, FILE, next} prepended at column +164; CTableWnd_InitRow
+//  @ 0x63f9c0; CTableWnd_ResizeColumnCount @ 0x63f6c0]
 void MenuFrameCompiler::build_table_columns_(WidgetNode &node) {
 	const mnu::TableColumn &xml = node.window->table_data.column;
 	const int count = xml.has_count && xml.count >= 1 ? xml.count : 1;

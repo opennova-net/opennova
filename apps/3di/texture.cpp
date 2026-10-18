@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include <base/io/os_path.h>
+#include <base/io/bits.h>
 #include <base/io/strutil.h>
 #include <formats/dds/dds.h>
 #include <runtime/renderer/texture_authoring.h>
@@ -21,8 +23,6 @@
 namespace opennova::threedi_cli {
 
 namespace {
-
-bool power_of_two(uint32_t side) { return side != 0 && (side & (side - 1)) == 0; }
 
 std::string extension_of(const std::string &path) {
 	const size_t slash = path.find_last_of("/\\");
@@ -46,7 +46,7 @@ int cmd_texture(const TextureCommand &command) {
 		std::fprintf(stderr, "opennova-3di: --format and --mips are a .dds's; %s is a 32-bit TGA\n", out.c_str());
 		return 2;
 	}
-	std::ifstream file(in, std::ios::binary);
+	std::ifstream file(opennova::io::os_path(in), std::ios::binary);
 	if (!file) {
 		std::fprintf(stderr, "opennova-3di: cannot open %s\n", in.c_str());
 		return 1;
@@ -82,7 +82,7 @@ int cmd_texture(const TextureCommand &command) {
 		// texels placed top left with transparent black past them, so a model's UVs reach the padding
 		// [orig: GTexture_InitFromMemory @ 0x68830E..0x688310; D3DXCreateTextureFromFileInMemoryEx_Internal @
 		// 0x6914D9..0x6914EE, @ 0x69150B..0x691520; CBlt::BltNone @ 0x6E0D57] (render-material-re D-RMAT-18).
-		if (!power_of_two(width) || !power_of_two(height)) {
+		if (!io::is_power_of_two(width) || !io::is_power_of_two(height)) {
 			std::fprintf(stderr,
 			             "opennova-3di: %s would be %s: the game pads a .dds whose sides are not powers of two up to the next "
 			             "ones (D3DX_DEFAULT sides), so a model's UVs reach the padding; make each side a power of two, "

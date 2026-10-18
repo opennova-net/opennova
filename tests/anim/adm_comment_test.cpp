@@ -39,7 +39,7 @@ int main(void) {
         fprintf(stderr, "FAIL: expected 4 entries, got %zu\n", adm.count);
         for (size_t i = 0; i < adm.count; ++i)
             fprintf(stderr, "  %zu: %s -> %s\n", i, adm.entries[i].key,
-                    adm.entries[i].variant_count ? adm.entries[i].variants[0] : "");
+                    adm.entries[i].variants.size() ? adm.entries[i].variants[0] : "");
         adm_free(&adm);
         remove(temp_path);
         return 1;
@@ -48,7 +48,7 @@ int main(void) {
     if (strcmp(adm.entries[0].key, "anim_idle") != 0 ||
         strcmp(adm.entries[0].variants[0], "IdleAnim.bad") != 0) {
         fprintf(stderr, "FAIL: entry 0 mismatch: '%s' -> '%s'\n",
-                adm.entries[0].key, adm.entries[0].variants[0]);
+                adm.entries[0].key, adm.entries[0].variants[0].text);
         adm_free(&adm);
         remove(temp_path);
         return 1;
@@ -57,7 +57,7 @@ int main(void) {
     if (strcmp(adm.entries[1].key, "anim_run") != 0 ||
         strcmp(adm.entries[1].variants[0], "RunAnim.bad") != 0) {
         fprintf(stderr, "FAIL: entry 1 mismatch: '%s' -> '%s'\n",
-                adm.entries[1].key, adm.entries[1].variants[0]);
+                adm.entries[1].key, adm.entries[1].variants[0].text);
         adm_free(&adm);
         remove(temp_path);
         return 1;
@@ -66,7 +66,7 @@ int main(void) {
     if (strcmp(adm.entries[2].key, "anim_walk") != 0 ||
         strcmp(adm.entries[2].variants[0], "WalkAnim.bad") != 0) {
         fprintf(stderr, "FAIL: entry 2 mismatch: '%s' -> '%s'\n",
-                adm.entries[2].key, adm.entries[2].variants[0]);
+                adm.entries[2].key, adm.entries[2].variants[0].text);
         adm_free(&adm);
         remove(temp_path);
         return 1;
@@ -75,7 +75,7 @@ int main(void) {
     if (strcmp(adm.entries[3].key, "anim_jump") != 0 ||
         strcmp(adm.entries[3].variants[0], "JumpAnim.bad") != 0) {
         fprintf(stderr, "FAIL: entry 3 mismatch: '%s' -> '%s'\n",
-                adm.entries[3].key, adm.entries[3].variants[0]);
+                adm.entries[3].key, adm.entries[3].variants[0].text);
         adm_free(&adm);
         remove(temp_path);
         return 1;

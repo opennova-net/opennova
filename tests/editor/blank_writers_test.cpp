@@ -107,7 +107,7 @@ static int test_animation() {
 	const std::vector<uint8_t> map = blank_of("tank.adm", AssetKind::AnimationMap);
 	adm::AdmFile table{};
 	TEST_EXPECT(!map.empty() && adm::adm_parse_buffer(reinterpret_cast<const char *>(map.data()), map.size(), &table) == 0);
-	TEST_EXPECT(table.count == 1 && std::string(table.entries[0].key) == "anim_reset" && table.entries[0].variant_count == 1 &&
+	TEST_EXPECT(table.count == 1 && std::string(table.entries[0].key) == "anim_reset" && table.entries[0].variants.size() == 1 &&
 	            std::string(table.entries[0].variants[0]) == "tank_rst.bad");
 	adm::adm_free(&table);
 	TEST_EXPECT(opens_clean("tank.adm", AssetKind::AnimationMap, map));

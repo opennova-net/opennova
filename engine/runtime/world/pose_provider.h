@@ -10,6 +10,7 @@
 // entity matrix for collision sections.
 #pragma once
 
+#include <runtime/anim/aim_overlay.h>
 #include <runtime/world/entity.h>
 
 #include <cstdint>
@@ -26,6 +27,37 @@ struct Seat;
 struct MountedPose;
 struct CollisionMatrix;
 struct CollisionModel;
+
+// A person's skeletal channel state as the pose chain reads it: the primary
+// (body) channel's playing state, playhead (half-frame ticks), served variant
+// and armed park, its cross-fade source, the secondary (weapon) channel and
+// its own cross-fade, the aim-overlay inputs and the right-hand collapse. The
+// world's own bodies gather it from their infantry state; a joiner's
+// wire-built person from its replica row's channels.
+// [orig: Entity_BuildBoneTransformMatrices @0x4B1290]
+struct SkeletalPoseInputs {
+	int primary_state = -1;
+	int32_t primary_phase = 0;
+	int primary_variant = 0;
+	bool primary_parked = false;
+	bool blend = false;
+	int source_state = -1;
+	int32_t source_phase = 0;
+	int source_variant = 0;
+	float blend_weight = 1.0f;
+	bool weapon = false;
+	int weapon_state = -1;
+	int32_t weapon_phase = 0;
+	int weapon_variant = 0;
+	bool weapon_parked = false;
+	bool weapon_blend = false;
+	int weapon_prev_state = -1;
+	int32_t weapon_prev_phase = 0;
+	int weapon_prev_variant = 0;
+	float weapon_blend_weight = 1.0f;
+	anim::AimOverlayInputs overlay;
+	bool collapse_right_hand = false;
+};
 
 // Optional matrices returned by Entity_BuildBoneTransformMatrices @0x4B1290.
 // The weapon anchor includes its hand-pivot nudge; Head includes the face offset.
@@ -137,6 +169,17 @@ public:
 	virtual bool build_section_matrices(World &, EntityHandle, int32_t /*model_id*/,
 			const CollisionMatrix & /*entity_world*/, const CollisionModel &,
 			std::vector<CollisionMatrix> & /*out*/) {
+		return false;
+	}
+	// The same matrix array for a wire-built person (a joiner's replica row,
+	// which has no registry entity), posed from its own channel state as the
+	// client poses the entity it built for it. False keeps the torso stand-in.
+	// [orig: Physics_RaycastAgainstBoneSections @0x4E4670 -> BoneCallback_org0_Bone
+	//  @0x4E34B0 (the call @0x4E46E9) -> Entity_BuildBoneTransformMatrices
+	//  @0x4B1290, over the client-built pool-0 entity]
+	virtual bool build_wire_person_section_matrices(World &, uint16_t /*wire_handle*/,
+			int32_t /*model_id*/, const CollisionMatrix & /*entity_world*/,
+			const CollisionModel &, std::vector<CollisionMatrix> & /*out*/) {
 		return false;
 	}
 };

@@ -174,3 +174,20 @@ func test_server_info_empty_before_connect() -> void:
 	var client := NovaWorldClient.new()
 	assert_null(client.get_server_info(), "no server info before a gate response")
 	client.free()
+
+
+# The proxy-assisted join crosses the shell typed (copy_join_proxy_to hands the
+# engine's ProxyRendezvousConfig to the JoinTarget the mission root installs):
+# with no resolved join the client has none and the copy leaves the target's
+# disabled, and the "ip:port" string form is gone. The engine half
+# (proxy_rendezvous_from_join, the 48-byte rendezvous, the all-six gate) is
+# the http_flow and joiner_role ctests.
+func test_join_proxy_crosses_typed_and_starts_disabled() -> void:
+	var client := NovaWorldClient.new()
+	var target := JoinTarget.new()
+	assert_false(client.has_join_proxy(), "no resolved join: no proxy")
+	client.copy_join_proxy_to(target)
+	assert_false(target.has_join_proxy(), "the copy of no proxy is no proxy")
+	assert_false("proxy_node" in target, "no string endpoint property")
+	assert_false("proxy_relay" in target, "no string relay property")
+	client.free()

@@ -39,13 +39,13 @@ void translate_key(const InputEventKey &event, int &key_char, int &vk) {
 
 } // namespace
 
-int HudChatEntry::poll_rows(int p_rows_down, bool p_active, bool p_chorded,
+int HudChatEntry::poll_rows(int p_rows_down, bool p_active,
 		const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext, int64_t p_frame) {
 	const uint32_t frame = static_cast<uint32_t>(p_frame);
 	const opennova::hud::ChatEntryFacts facts =
 			p_sim.is_valid() ? p_sim->chat_entry_facts(frame) : opennova::hud::ChatEntryFacts{};
 	last_events_ = static_cast<int>(entry_.poll_rows(static_cast<uint32_t>(p_rows_down),
-			p_active, p_chorded, facts, game_text_lookup(p_gametext)));
+			p_active, facts, game_text_lookup(p_gametext)));
 	if ((last_events_ & EVENT_DENIED_SOUND) != 0 && p_sim.is_valid())
 		p_sim->raise_chat_denied_sound();
 	return last_events_;
@@ -93,7 +93,7 @@ void HudChatEntry::set_preset(int p_index, const String &p_text) {
 }
 
 void HudChatEntry::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("poll_rows", "rows_down", "active", "chorded", "sim",
+	ClassDB::bind_method(D_METHOD("poll_rows", "rows_down", "active", "sim",
 								 "gametext", "frame"),
 			&HudChatEntry::poll_rows);
 	ClassDB::bind_method(D_METHOD("key_event", "event", "sim", "gametext", "frame"),

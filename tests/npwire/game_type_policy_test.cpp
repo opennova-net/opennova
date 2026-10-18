@@ -4,7 +4,7 @@
 // single-select. The values were previously pinned by a GUT test against
 // GDScript twins; the engine home is the truth now.
 // [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0; EntitySlot_LookupAndPackEntry
-//  @ 0x57AD40; Config_SetDefaults] [orig: dfx2med.exe sub_402770]
+//  @ 0x57AD40; Config_SetDefaults] [orig: dfx2med.exe MissionGeneralInfo_DialogProc]
 
 #include <formats/mission/bms.h>
 #include <runtime/inmatch/game_config.h>
@@ -82,7 +82,7 @@ int main() {
 	CHECK(inmatch::kMaxPlayersCap == 65, "player cap [orig: the 1..65 clamp]");
 
 	// The BMS game-mode decode priority + single-select encode
-	// [orig: dfx2med sub_402770 decode @ 0x4050c7 / encode @ 0x4031cd].
+	// [orig: dfx2med MissionGeneralInfo_DialogProc decode @ 0x4050c7 / encode @ 0x4031cd].
 	CHECK(bms::selected_game_mode(AttribFlags::Coop | AttribFlags::Deathmatch) ==
 					static_cast<uint32_t>(AttribFlags::Coop),
 			"co-op wins the decode priority over deathmatch");

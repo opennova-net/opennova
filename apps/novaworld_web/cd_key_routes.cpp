@@ -75,10 +75,6 @@ std::vector<crow::json::wvalue> titles_json() {
 	return out;
 }
 
-int64_t id_of(uint64_t id) {
-	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
-}
-
 // A non-negative decimal query value; nullopt when absent, `bad` set when
 // present and not one.
 std::optional<int> query_count(const crow::request &req, const char *name, bool &bad) {
@@ -250,7 +246,7 @@ crow::response CdKeyRoutes::assign(const crow::request &req, uint64_t id) {
 												 : get_user_by_username(*db_conn, *username);
 		if (!user || user->kind != "player")
 			return json_error(404, "no_such_account", "no player account by that name");
-		switch (cdkeys::assign_key(*db_conn, id_of(id), user->id)) {
+		switch (cdkeys::assign_key(*db_conn, path_id(id), user->id)) {
 			case cdkeys::AssignOutcome::Assigned:
 				break;
 			case cdkeys::AssignOutcome::NoSuchKey:
@@ -266,7 +262,7 @@ crow::response CdKeyRoutes::assign(const crow::request &req, uint64_t id) {
 						"the account already holds a live key for this title");
 		}
 		crow::json::wvalue out;
-		out["key"] = key_json(*cdkeys::find_key(*db_conn, id_of(id)));
+		out["key"] = key_json(*cdkeys::find_key(*db_conn, path_id(id)));
 		return json_reply(200, out);
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/cd-keys/<id>/assign", e);
@@ -282,7 +278,7 @@ crow::response CdKeyRoutes::revoke(const crow::request &req, uint64_t id) {
 		return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		switch (cdkeys::revoke_key(*db_conn, id_of(id))) {
+		switch (cdkeys::revoke_key(*db_conn, path_id(id))) {
 			case cdkeys::RevokeOutcome::Revoked:
 				break;
 			case cdkeys::RevokeOutcome::NoSuchKey:
@@ -291,7 +287,7 @@ crow::response CdKeyRoutes::revoke(const crow::request &req, uint64_t id) {
 				return json_error(409, "already_revoked", "this key is already revoked");
 		}
 		crow::json::wvalue out;
-		out["key"] = key_json(*cdkeys::find_key(*db_conn, id_of(id)));
+		out["key"] = key_json(*cdkeys::find_key(*db_conn, path_id(id)));
 		return json_reply(200, out);
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/cd-keys/<id>/revoke", e);
@@ -308,7 +304,7 @@ crow::response CdKeyRoutes::key_activations(const crow::request &req, uint64_t i
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		const auto key = cdkeys::find_key(*db_conn, id_of(id));
+		const auto key = cdkeys::find_key(*db_conn, path_id(id));
 		if (!key)
 			return no_such_key();
 		out["key"] = key_json(*key);
@@ -340,7 +336,7 @@ crow::response CdKeyRoutes::activate(const crow::request &req, uint64_t id) {
 	if (!nwpssk)
 		return json_error(400, "missing_field", "nwpssk is required");
 	try {
-		const auto result = cdkeys::activate_key(*pool_.acquire(), id_of(id), *nwpssk);
+		const auto result = cdkeys::activate_key(*pool_.acquire(), path_id(id), *nwpssk);
 		switch (result.outcome) {
 			case cdkeys::ActivateOutcome::Activated:
 			case cdkeys::ActivateOutcome::Reactivated:

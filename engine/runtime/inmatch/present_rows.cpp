@@ -91,7 +91,7 @@ PersonOverlayInputs pool_person_overlay_inputs(const World &w, const Entity &e,
 // The debug no-ammo-cost bit answers every class with its carry cap.
 // [orig: Entity_CanFireWeapon @0x4dcb5f..0x4dcbc6 — EquippedSlot @0x4dcb30;
 //  Entity_GetScoreValueBySlotType @0x5406E0 (the cap @0x5406fc, the validated
-//  player's pools @0x5407b3); sub_5405F0 @0x5405F0 (its loaded buckets @0x540657)]
+//  player's pools @0x5407b3); WeaponSlot_GetSharedLoadedRounds @0x5405F0 (its loaded buckets @0x540657)]
 bool remote_held_weapon_out_of_ammo(const World &w, const NapiNPServerCtx &server,
 		const Entity &e) {
 	for (const NapiNPConnection &conn : server.np_protocol.connection_list) {

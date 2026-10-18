@@ -134,6 +134,29 @@ func test_compression_and_density_reach_the_next_mission_start() -> void:
 			"a change made mid-mission waits for the next mission start")
 
 
+# The terrain texture detail (game.cfg's terrain_texdetail; engine
+# renderer/device_texture.h): a fresh profile starts at full detail, and the options
+# word reaches the terrain the mission builds only through the copy each mission
+# start takes (D-RMAT-20).
+func test_terrain_texdetail_reaches_the_next_mission_start() -> void:
+	assert_eq(GameWorld.terrain_texdetail_fresh_profile(), 3, "a fresh profile is full detail")
+	var world := WorldFixture.make_world(self)
+	assert_eq(world.get_session_terrain_texdetail(), GameWorld.terrain_texdetail_fresh_profile())
+	world.set_terrain_texdetail(1)
+	assert_eq(world.get_session_terrain_texdetail(),
+			GameWorld.terrain_texdetail_fresh_profile(), "the options word waits for a mission start")
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	assert_eq(world.get_session_terrain_texdetail(), 1, "the mission start copies the word")
+	var terrain: Terrain = world.get_terrain_node()
+	assert_not_null(terrain)
+	if terrain != null:
+		assert_eq(terrain.get_terrain_texdetail(), 1, "the terrain builds under the copy")
+	world.set_terrain_texdetail(3)
+	assert_eq(world.get_session_terrain_texdetail(), 1,
+			"a change made mid-mission waits for the next mission start")
+
+
 func _append_to_file(path: String, text: String) -> void:
 	var file := FileAccess.open(path, FileAccess.READ_WRITE)
 	assert_not_null(file, "the staged root carries %s to append to" % path.get_file())
@@ -1189,26 +1212,23 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 			"an eye exactly on the plane stays dry: retail's side test is strict <")
 	assert_true(env.is_underwater_overlay_view(),
 			"the later retail murk scissor includes exact waterline equality")
-	var lit_water := func() -> Color:
-		var light := EnvFile.combine_terrain_light(
-				Color(env.get_sun_light().x, env.get_sun_light().y, env.get_sun_light().z),
-				Color(env.get_sky_ambient().x, env.get_sky_ambient().y, env.get_sky_ambient().z))
-		return EnvFile.lit_water_color(
-				Color(env.get_water_color().x, env.get_water_color().y, env.get_water_color().z),
-				light)
-	# The clear's `jle` keeps the lit water color AT the waterline too
-	# [orig: Render_ProcessMainSceneFrame @ 0x5ca785..0x5ca790].
-	var at_line: Color = lit_water.call()
-	assert_eq(world.get_current_frame_clear_color(),
-			Color(at_line.r, at_line.g, at_line.b).linear_to_srgb(),
-			"the frame clear shares the murk's inclusive waterline side")
+	var at_line_clear := world.get_current_frame_clear_color()
 	camera.v_offset = -1.0
 	assert_lt(camera.get_camera_transform().origin.y, water.water_height)
 	world.tick(camera.global_position, camera.get_global_transform())
 	assert_true(env.is_underwater_overlay_view())
-	var lit: Color = lit_water.call()
-	assert_eq(world.get_current_frame_clear_color(), Color(lit.r, lit.g, lit.b).linear_to_srgb(),
+	# Below the plane the scene fog is Env_WaterColorLit, the lit water colour the
+	# environment state builds from the water, sun and sky blocks (its arithmetic:
+	# the env_render_unit and environment_state ctests).
+	assert_true(env.is_underwater_view(), "below the plane the scene fogs underwater")
+	var lit_fog: Vector3 = env.get_scene_fog_color()
+	var lit := Color(lit_fog.x, lit_fog.y, lit_fog.z)
+	assert_eq(world.get_current_frame_clear_color(), lit.linear_to_srgb(),
 			"v_offset below water selects the underwater clear even when the node origin is above")
+	# The clear's `jle` keeps the lit water color AT the waterline too
+	# [orig: Render_ProcessMainSceneFrame @ 0x5ca785..0x5ca790].
+	assert_eq(at_line_clear, lit.linear_to_srgb(),
+			"the frame clear shares the murk's inclusive waterline side")
 	# Environment_ApplyFogAndAmbient selects one pass payload from the same
 	# render-eye classification as the clear: underwater the lit water color,
 	# murk-derived visibility end, and linear fog must reach both the terrain

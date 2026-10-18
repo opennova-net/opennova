@@ -90,35 +90,35 @@ jobs:
           -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
 
       - name: Build the service's programs + net tests + the kernel embedders
+        # opennova_service_tests builds every test tests/novaworld/service_tests.cmake
+        # adds; the rest are the net and kernel-embedder tests outside it.
         run: |
           cmake --build build -j "$(nproc)" --target opennova_novaworld_gate \
             opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_controller \
-            opennova_novaworld_worker \
+            opennova_novaworld_worker opennova_service_tests \
             url_cipher_test crc32_test nwu_test pubcrypto_test epask_test \
             envelope_test tlv_test session_test \
             registration_url_test gate_response_test gate_probe_test lobby_update_test \
-            gate_server_loopback_test gate_listener_test gsb_roundtrip_test protocol_message_test \
-            connection_registry_test connection_manager_test \
-            db_test db_concurrency_test db_locks_test web_session_test rate_limiter_test redis_state_test child_process_test jobs_test controller_test hosted_supervisor_test hosted_fleet_test hosted_fleet_jobs_test hosted_stats_test hosted_admin_link_test hosted_console_commands_test command_runner_test hosted_net_cidr_test hosted_agent_protocol_test hosted_placement_test admin_protocol_test billing_stripe_test billing_entitlement_test billing_sync_test hosted_fleet_repository_test hosted_ec2_machine_driver_test hosted_agent_route_test \
-            session_hello_roundtrip_test lobby_session_test \
-            backend_schema_test opennova_novaworld_web_http_routes_test job_routes_test \
-            host_key_test lobby_repository_test lobby_instances_e2e_test nw_host_ownership_e2e_test nw_owner_admin_e2e_test hosted_local_e2e_test \
-            opennova_novaworld_signal_shutdown_test opennova_novaworld_programs_test nw_programs_e2e_test \
-            health_listener_test ecs_metadata_test \
-            nw_codec_identity_test nw_self_capture_test \
-            unknown_tracker_test nwmsg_replay_test nwmsg_codec_parity_test \
+            gate_server_loopback_test gsb_roundtrip_test protocol_message_test \
+            child_process_test admin_protocol_test session_hello_roundtrip_test \
+            nw_codec_identity_test nw_self_capture_test nwmsg_replay_test nwmsg_codec_parity_test \
             opennova_extract opennova_wire opennova_serve opennova_hostd opennova_hostd_runtime_test opennova_hostd_agent_test opennova_project \
-            opennova_serve_test opennova_serve_game_cfg_test opennova_serve_novaworld_test serve_registration_parity_test nwu_demux_test opennova_serve_lister_options_test npruntime_host_file_test \
-            opennova_serve_server_command_push_test nw_server_command_push_e2e_test \
+            opennova_serve_test opennova_serve_game_cfg_test serve_registration_parity_test nwu_demux_test opennova_serve_lister_options_test npruntime_host_file_test \
             npruntime_host_config_test opennova_serve_status_console_test opennova_serve_admin_test \
             npruntime_server_log_recorder_test npruntime_punt_log_test \
             mission_kernel_test mission_kernel_lifecycle_test host_role_test \
             inspect_test terrain_field_store_test sha256_test os_random_test nwu_lobby_draws_test
 
+      # The service rows by their `service` label (every test service_tests.cmake adds),
+      # then the net and kernel-embedder rows outside that file by name. A known-flaky
+      # e2e row is rerun with the job, as on ci.yml's test-linux.
+      - name: Run the service ctests
+        run: ctest --test-dir build --output-on-failure --parallel "$(nproc)" -L '^service$'
+
       - name: Run net ctests + the kernel smoke
         run: |
           ctest --test-dir build --output-on-failure --parallel "$(nproc)" -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gate_listener|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db|db_concurrency|db_locks|web_session|rate_limiter|redis_state|child_process|jobs|controller|hosted_supervisor|hosted_fleet|hosted_fleet_jobs|hosted_stats|hosted_admin_link|hosted_console_commands|command_runner|hosted_net_cidr|hosted_agent_protocol|hosted_placement|admin_protocol|billing_stripe|billing_entitlement|billing_sync|session_hello_roundtrip|lobby_session|backend_schema|opennova_novaworld_web_http_routes|job_routes|host_key|nw_host_ownership_e2e|nw_owner_admin_e2e|hosted_local_e2e|opennova_novaworld_signal_shutdown|opennova_novaworld_programs|nw_programs_e2e|health_listener|ecs_metadata|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store|opennova_serve_lan_join|opennova_serve_game_cfg|opennova_serve_novaworld|opennova_serve_server_command_push|nw_server_command_push_e2e|serve_registration_parity|nwu_demux|opennova_serve_lister_options|npruntime_host_file|npruntime_host_config|opennova_serve_status_console|opennova_serve_admin|npruntime_server_log_recorder|npruntime_punt_log|sha256|os_random|nwu_lobby_draws|opennova_hostd_runtime|opennova_hostd_agent|hosted_fleet_repository|hosted_ec2_machine_driver|hosted_agent_route|lobby_repository|lobby_instances_e2e)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|child_process|admin_protocol|session_hello_roundtrip|nw_codec_identity|nw_self_capture|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store|opennova_serve_lan_join|opennova_serve_game_cfg|serve_registration_parity|nwu_demux|opennova_serve_lister_options|npruntime_host_file|npruntime_host_config|opennova_serve_status_console|opennova_serve_admin|npruntime_server_log_recorder|npruntime_punt_log|sha256|os_random|nwu_lobby_draws|opennova_hostd_runtime|opennova_hostd_agent)$"
 
       - name: sccache stats
         if: always()

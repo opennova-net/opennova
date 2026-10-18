@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -18,6 +19,16 @@ namespace opennova::mission {
 using StaticSourceTransform = std::array<float, 12>;
 inline constexpr StaticSourceTransform kStaticSourceIdentity{
 	1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0};
+
+// An entity's mission-plane position in 16.16 (x east = Godot x, y north = Godot -z): the words the
+// static shadow collector's tile test and its ground probe read off the entity [orig:
+// Terrain_CollectAndRenderTileModels @ 0x60D50A (X) and 0x60D531 (Y), entity+4 / +8; the ground's
+// pushes @ 0x60D8D3..0x60D8DA]. A placement carries the .bms record's own x and y.
+using StaticSourceOrigin = std::array<int32_t, 2>;
+
+// The origin of a pose that came without 16.16 words (a Godot transform: a moved model's, a
+// script's): its x and -z rounded to nearest (io::float_to_fp16_16_round_sat).
+StaticSourceOrigin static_source_origin_of(const StaticSourceTransform &transform);
 
 struct StaticEffectSource {
 	int kind = -1;
@@ -61,6 +72,7 @@ struct StaticTerrainShadowSource {
 	uint32_t item_attrib2 = 0;
 	std::string graphic;
 	StaticSourceTransform world_transform = kStaticSourceIdentity;
+	StaticSourceOrigin origin_q16{};
 	uint64_t asset_id = 0;
 	bool active = true;
 };
@@ -71,6 +83,7 @@ struct StaticInstance {
 	std::string batch_key;
 	int index = -1;
 	StaticSourceTransform xform = kStaticSourceIdentity;
+	StaticSourceOrigin origin_q16{};
 	bool casts_static_shadow = false;
 	bool mirror_reflected = false;
 	int lod_instance = -1;
@@ -103,8 +116,14 @@ public:
 	bool is_hidden(int bms_id) const { return hidden_.count(bms_id) != 0; }
 	bool hide_instance(int bms_id);
 	bool show_instance(int bms_id);
-	bool update_shadow_transform(int kind, int index, const StaticSourceTransform &transform);
+	// A pose moves a row's origin only on an axis whose float moved: the float is the word's image
+	// (bms::Entity::get_x), so an axis that stands keeps the word it was placed with. A caller
+	// that holds the words (the editor's document) hands them as `origin`, which the rows take.
+	bool update_shadow_transform(int kind, int index, const StaticSourceTransform &transform,
+			const std::optional<StaticSourceOrigin> &origin = std::nullopt);
 	bool accepts_replacement(int bms_id, const std::string &graphic) const;
+	// A replacement swaps the graphic an entity draws, not the entity: its row keeps the entity's
+	// origin.
 	bool set_shadow_replacement(int bms_id, const std::string &graphic,
 			const StaticSourceTransform &transform, bool active, uint64_t asset_id);
 	bool clear_shadow_replacement(int bms_id);

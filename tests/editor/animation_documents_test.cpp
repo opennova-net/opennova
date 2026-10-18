@@ -3,10 +3,10 @@
 // (frame rate, loop flag, bone names, each frame's step, triggers and heights) edits
 // round-trip through the writer; the motion's fields and structure are refused. A table
 // (fixtures/anim/soldier.adm) saves in the canonical form and reads back its rows; rows
-// and clips add, move and remove, at most 8 clips; a table with no anim_reset row or a
+// and clips add, move and remove, at most 29 clips; a table with no anim_reset row or a
 // row the writer refuses does not save; the validator's findings; a row's clip is the
 // graph's edge to a .bad. S12: a table's rows duplicate, move and remove; the lines a table
-// leaves out are findings Save drops (a ten-clip row blocks); a slot two rows name is a note;
+// leaves out are findings Save drops (a ten-clip row reads whole); a slot two rows name is a note;
 // a bone's parent is named by the parent bone, and one numbered after it is a warning.
 // A SKIP-LEG opens every retail clip and table and saves each untouched field-equal /
 // row-equal.
@@ -306,8 +306,9 @@ int tables() {
 	TEST_EXPECT(document.serialize().ok());
 	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, {added, kRow, 0}, 0, 0), error));
 	TEST_EXPECT(document.rows()[0]->id == added);
-	for (int i = 0; i < 7; ++i) TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {added, kMapClip, 0}), error));
-	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {added, kMapClip, 0}), error)); // a ninth
+	// A ninth clip and on, as the game registers every one; past 29 the line reader takes no more (adm::ADM_MAX_VARIANTS).
+	for (int i = 0; i < 28; ++i) TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {added, kMapClip, 0}), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {added, kMapClip, 0}), error)); // a thirtieth
 	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, {added, kRow, 0}), error));
 	// No anim_reset row: the game cannot load the table.
 	const NodeId reset = document.rows()[0]->id;
@@ -338,8 +339,8 @@ int tables() {
 
 // S12: the lines a table leaves out. A comment line and a comment after a row's clips are
 // input the game ignores: source findings on their lines (the second on its row) that the
-// toolbar counts and Save drops; the save's text reports none. A row naming ten clips blocks
-// the file: no edit, no save.
+// toolbar counts and Save drops; the save's text reports none. A row naming ten clips reads
+// whole, as the game registers every clip.
 // S17 review: a map's slots left out are its own kind's. A weapon's map (only first-person slots
 // past its reset) leaves out first-person slots, wpn_reset among them; a body's map that names a
 // first-person slot too stays a body's.
@@ -412,9 +413,8 @@ int table_lines() {
 	TEST_EXPECT(test_io::write_text(dir.file("ten.adm"), "anim_reset\t\"idle.bad\"\r\nanim_idle a b c d e f g h i j\r\n"));
 	AnimationMapDocument ten;
 	TEST_EXPECT(ten.load(dir.file("ten.adm"), "ten.adm", AssetKind::AnimationMap, "jo", error));
-	TEST_EXPECT(ten.blocked() && ten.issues().size() == 1 && ten.issues()[0].blocks && ten.issues()[0].line == 2);
-	TEST_EXPECT(!ten.serialize().ok() && !ten.apply(op_edit(EditOperation::Add, {0, kRow, 0}), error));
-	std::printf("lines: comments dropped on save and reported, a ten-clip row blocks\n");
+	TEST_EXPECT(!ten.blocked() && ten.issues().empty() && ten.rows().size() == 2 && ten.serialize().ok());
+	std::printf("lines: comments dropped on save and reported, a ten-clip row read whole\n");
 	return 0;
 }
 
@@ -498,9 +498,22 @@ int validation_and_graph() {
 	TEST_EXPECT(test_io::write_text(root + "/soldier.adm",
 	                                    "anim_reset\t\"idle.bad\"\r\nanim_nosuchslot\t\"idle.bad\"\r\nanim_idle\t\"gone.bad\"\r\n"));
 	TEST_EXPECT(test_io::write_file(root + "/idle.bad", test_io::read_file(anim_dir() + "/idle.bad")));
+	// A clip whose file loads under a name the game's 40-byte node cannot hold (32 characters with ".bad"), one of
+	// the same length whose file is not there and one whose file is over the 500,000 bytes the load refuses (the game
+	// takes failsafe.bad's node for both, which fits).
+	TEST_EXPECT(test_io::write_text(root + "/long.adm", "anim_reset\t\"idle.bad\"\r\n"
+	                                                    "anim_idle\t\"a_clip_name_twenty_eight_xxx.bad\"\r\n"
+	                                                    "anim_walk\t\"a_clip_name_twenty_eight_yyy.bad\"\r\n"
+	                                                    "anim_run\t\"a_clip_name_twenty_eight_zzz.bad\"\r\n"));
+	TEST_EXPECT(test_io::write_file(root + "/a_clip_name_twenty_eight_xxx.bad", test_io::read_file(anim_dir() + "/idle.bad")));
+	{
+		std::vector<uint8_t> big = test_io::read_file(anim_dir() + "/idle.bad");
+		big.resize(500001, 0);
+		TEST_EXPECT(test_io::write_file(root + "/a_clip_name_twenty_eight_zzz.bad", big));
+	}
 	TEST_EXPECT(test_io::write_text(root + "/noreset.adm", "anim_idle\t\"idle.bad\"\r\n"));
 	// S12: a comment line, a comment after a row, a slot two rows name, a second reset row; a
-	// row of ten clips.
+	// row of ten clips (no finding: the game registers every one).
 	TEST_EXPECT(test_io::write_text(root + "/twice.adm", "; the rig\r\nanim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\n"
 	                                                         "ANIM_IDLE\t\"idle.bad\" // again\r\nanim_reset\t\"idle.bad\"\r\n"));
 	TEST_EXPECT(test_io::write_text(root + "/ten.adm", "anim_reset\t\"idle.bad\"\r\nanim_idle a b c d e f g h i j\r\n"));
@@ -543,8 +556,17 @@ int validation_and_graph() {
 	            ring->message.find("row 2") != std::string::npos && ring->message.find("one ring") != std::string::npos);
 	TEST_EXPECT(reset && reset->record == "anim_reset" && reset->message.find("last reset clip") != std::string::npos);
 	TEST_EXPECT(!find("animation_map.slot_repeated", "twice.adm", 2) && !has("animation_map.slot_repeated", "soldier.adm"));
-	const Diagnostic *ten = find("animation_map.invalid_input", "ten.adm");
-	TEST_EXPECT(ten && ten->severity == DiagnosticSeverity::Error && ten->line == 2 && ten->row_id != 0);
+	TEST_EXPECT(!find("animation_map.invalid_input", "ten.adm"));
+	// The clip whose file loads under 32 characters gates; the one whose file is not there does not.
+	{
+		const Diagnostic *long_name = find("animation_map.clip_name_long", "long.adm");
+		TEST_EXPECT(long_name && long_name->severity == DiagnosticSeverity::Error && long_name->row() &&
+		            long_name->row()->gates_build && long_name->message.find("32 characters") != std::string::npos);
+		// On the row whose clip's file is there.
+		TEST_EXPECT(long_name && long_name->record.rfind("anim_idle", 0) == 0 &&
+		            long_name->message.find("_xxx.bad") != std::string::npos);
+		TEST_EXPECT(!find("animation_map.clip_name_long", "long.adm", 1));
+	}
 	// A bone whose parent comes after it: on that bone's parent (the rule the runtime's rig is
 	// FK-safe by); a retail clip has none.
 	const Diagnostic *order = find("animation.parent_order", "late.bad");

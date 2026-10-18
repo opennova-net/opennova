@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <unordered_map>
 
 #include <formats/def/reserved_items.h>
 #include <runtime/hud/hud_math.h>
@@ -13,6 +14,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/minimap_footprint.h>
 #include <runtime/world/minimap_overlay.h>
 #include <runtime/world/spawn_select.h>
 
@@ -96,12 +98,15 @@ SlotEntityFacts slot_entity(const replication::ClientState &cs, world::World &w,
         blip.handle = handle;
         blip.icon = 3;
         blip.entity_known = e->has_item_def ? 1 : 0;
-        const world::MinimapBlipDrawPolicy policy = world::minimap_blip_draw_policy(*e, 3);
+        const world::MinimapBlipDrawPolicy policy =
+                world::minimap_blip_draw_policy(*e, 3, local != nullptr ? local->team : -1);
         blip.rotate = policy.rotate ? 1 : 0;
         blip.footprint = policy.footprint ? 1 : 0;
         blip.half_x_q16 = policy.half_x_q16;
         blip.half_y_q16 = policy.half_y_q16;
         blip.floor_px = policy.floor_px;
+        blip.change_team = policy.change_team ? 1 : 0;
+        blip.cell = policy.cell;
         stamp_minimap_entity_facts(blip, *e, local, nullptr);
         int32_t euler[3] = {};
         world::entity_live_euler_bam(*e, euler);
@@ -153,12 +158,15 @@ void tracked_blip(const world::Entity &e, const world::Entity *local,
     blip.handle = e.handle.packed;
     blip.icon = 28;
     blip.entity_known = e.has_item_def ? 1 : 0;
-    const world::MinimapBlipDrawPolicy policy = world::minimap_blip_draw_policy(e, 28);
+    const world::MinimapBlipDrawPolicy policy =
+            world::minimap_blip_draw_policy(e, 28, local != nullptr ? local->team : -1);
     blip.rotate = policy.rotate ? 1 : 0;
     blip.footprint = policy.footprint ? 1 : 0;
     blip.half_x_q16 = policy.half_x_q16;
     blip.half_y_q16 = policy.half_y_q16;
     blip.floor_px = policy.floor_px;
+    blip.change_team = policy.change_team ? 1 : 0;
+    blip.cell = policy.cell;
     stamp_minimap_entity_facts(blip, e, local, nullptr);
 }
 
@@ -356,6 +364,33 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
                 out.names.push_back(std::move(name));
         }
     }
+}
+
+void build_minimap_footprints(const world::World &world, const world::OcclusionWorld &occlusion,
+		std::vector<hud::HudMinimapFootprint> &out) {
+	out.clear();
+	std::unordered_map<int32_t, world::MinimapFootprintMesh> meshes;
+	world.registry.for_each([&](const world::Entity &entity) {
+		if (!world::minimap_overlay_entity_enabled(entity)) return;
+		const world::MinimapOverlayClassification row = world::classify_minimap_overlay(entity, &world);
+		if (!row.visible) return;
+		if (!world::minimap_blip_draw_policy(entity, row.icon, -1).footprint) return;
+		const int32_t model_id = occlusion.instance_model_id(entity.handle);
+		if (model_id < 0) return;
+		auto mesh_it = meshes.find(model_id);
+		if (mesh_it == meshes.end()) {
+			const world::OcclusionModel *model = occlusion.model(model_id);
+			if (model == nullptr) return;
+			mesh_it = meshes.emplace(model_id, world::minimap_footprint_from_occlusion(*model)).first;
+		}
+		if (mesh_it->second.empty()) return;
+		hud::HudMinimapFootprint footprint;
+		// The marker walk keys a footprint by the slot's 16-bit handle.
+		footprint.handle = static_cast<uint16_t>(entity.handle.packed);
+		footprint.fill_argb = world::minimap_footprint_fill_argb(entity);
+		world::minimap_footprint_place(mesh_it->second, entity, footprint.fill_xy_q16, footprint.edge_xy_q16);
+		out.push_back(std::move(footprint));
+	});
 }
 
 } // namespace opennova::inmatch

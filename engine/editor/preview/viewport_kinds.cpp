@@ -183,12 +183,6 @@ constexpr bool kinds_apart(ViewportRole role, bool shows_only) {
 static_assert(kinds_apart(ViewportRole::Preview, false), "a document type feeds one Preview-role viewport kind at most");
 static_assert(kinds_apart(ViewportRole::Main, true), "a document type is shown by one Main-role viewport kind at most");
 
-const DocumentBase *open_at(const DocumentsView &documents, const std::string &path) {
-	for (const auto &document : documents.open)
-		if (document && document->path() == path) return document.get();
-	return nullptr;
-}
-
 } // namespace
 
 const ViewportKindRow &viewport_kind_row(ViewportKind kind) {
@@ -286,7 +280,7 @@ ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {
 	};
 	if (!asked(last)) last = ViewportKind::kCount;
 	ViewportKind kind = last;
-	if (const DocumentBase *active = open_at(documents, documents.active)) {
+	if (const DocumentBase *active = documents.open_at(documents.active)) {
 		const ViewportKind fed = preview_kind_of(asset_kind_row(active->kind()).document);
 		if (fed != ViewportKind::kCount && asked(fed)) kind = fed;
 	}
@@ -312,7 +306,7 @@ void update_preview_targets(DocumentsView &documents) {
 	}
 	// The Map tool's ask holds while its document stays active.
 	if (documents.beside != documents.active) documents.beside.clear();
-	const DocumentBase *shown = open_at(documents, documents.active);
+	const DocumentBase *shown = documents.open_at(documents.active);
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const auto kind = static_cast<ViewportKind>(i);
 		const ViewportKindRow &row = viewport_kind_row(kind);
@@ -331,7 +325,7 @@ void update_preview_targets(DocumentsView &documents) {
 			else if (documents.selection.primary.row) target = {shown->path(), documents.selection.primary.row};
 		}
 		// A target whose document closed, or whose row is gone, clears.
-		const DocumentBase *document = open_at(documents, target.path);
+		const DocumentBase *document = documents.open_at(target.path);
 		const Document *records = document ? records_of(*document) : nullptr;
 		if (!document || (row.part && (!records || !records->row(target.part)))) target = PreviewTarget();
 	}

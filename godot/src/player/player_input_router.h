@@ -42,8 +42,10 @@ public:
 	// poll the live bindings again.
 	void set_input_override(const Ref<PlayerMoveIntent> &p_intent);
 
+	// `p_menu_open`: a menu screen (INGAME, WEAPON, CMAP) is up, under which
+	// no input frame runs (controls::PlayerActionPoll::menu_open).
 	Ref<MissionFrameInput> before_world_tick(double p_delta, bool p_capture_mouse,
-			bool p_gameplay_input_active);
+			bool p_gameplay_input_active, bool p_menu_open = false);
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	// Drop the trigger latches (the presenter's reset-state path). The
@@ -57,6 +59,14 @@ public:
 	// release edge then runs no mount toggle. Applied after this frame's
 	// fresh-press reset so a same-frame chord sticks.
 	void consume_use_hold();
+	// The held USE row's armory arm took its open on the last frame's poll
+	// (controls::PlayerAction::OpenArmory); reading clears it. The shell
+	// opens weapon.mnu's WEAPON screen.
+	bool take_armory_request();
+	// A menu close's input reset: the key state (ControlsModel::reset_key_state),
+	// the key-press latch (controls::PlayerActions::clear_key_press_latches)
+	// and the deferred queue (Simulation::clear_deferred_input).
+	void reset_input_state();
 	// The HUD's key toggles, whose F9 Emotes / F10 Radio menus take a digit
 	// before the weapon rows do (controls::PlayerActions' menu arms); the HUD
 	// presenter hands its process-lifetime instance over. Null = no menus.
@@ -76,6 +86,7 @@ private:
 	Ref<PlayerMoveIntent> input_override_;
 	Ref<HudToggles> hud_toggles_;
 	opennova::controls::PlayerActions actions_;
+	bool armory_requested_ = false;
 	// The wheel notch remainder. Retail clears it only at process start, so it
 	// survives the reset-state path like the switch latches.
 	opennova::controls::WheelRemainder wheel_;

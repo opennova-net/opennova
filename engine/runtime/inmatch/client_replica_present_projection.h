@@ -2,6 +2,7 @@
 
 #include <runtime/mission/promote.h>
 #include <runtime/replication/client_state.h>
+#include <runtime/world/pose_provider.h>
 #include <runtime/world/weapon_table.h>
 
 #include <cstdint>
@@ -42,5 +43,19 @@ void project_client_replica_present_row(
 		const replication::ClientEntityState &entity,
 		const replication::ClientState &state,
 		const ClientReplicaPresentContext &context = {});
+
+// The skeletal channel state the presenter poses a person row with, for the
+// collision walk's posed bone spheres (world/pose_provider.h): the armed
+// primary channel the projection presents (its playing state, playhead and
+// cross-fade source), a player row's secondary channel where the projection
+// presents one, the aim-overlay inputs and the right-hand collapse. False for
+// a row the projection does not present from its own channels (a non-person,
+// an unarmed row the model-side remote FSM poses): the walk keeps the torso
+// stand-in there.
+bool skeletal_pose_inputs_for_client(
+		const replication::ClientEntityState &entity,
+		const replication::ClientState &state,
+		const ClientReplicaPresentContext &context,
+		world::SkeletalPoseInputs &out);
 
 } // namespace opennova::inmatch

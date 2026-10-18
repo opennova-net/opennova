@@ -3584,10 +3584,11 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 }
 
 // Armory-fed loadout resolve (D-NET-141): with world.tables.weapons built from the committed fixture,
-// the 0x5A reply resolves REAL ammo counts through the witnessed rules instead of echoing —
+// the 0x5A reply resolves REAL ammo counts from the rebuilt slot table instead of echoing —
 // filters drop unfiltered (emplaced) request entries, counts come from startrounds/clipsize
 // (min(req,maxclips) on an explicit request), the alt byte carries the first different-ammoclass
-// sub-variant, and the reply sorts by weapon-slot combo (category*65+rank).
+// sub-variant, and the reply walks the table by weapon-slot combo (category*65+rank), skipping
+// each row's sub-variant slots (D-NET-509).
 // [orig: Server_SendWeaponSlotListToPlayer @0x502550 / WeaponSlot_GetTotalClips @0x5425F0]
 // NOTE fixture truth ≠ live-install truth: a real JO:CA root resolves a larger weapon.def whose
 // indices reproduce the golden bytes end-to-end — that equality is the live v16 wire gate.
@@ -3645,6 +3646,11 @@ bool run_loadout_resolve_with_armory() {
 
 	auto loadout_reply = [&](const std::vector<uint8_t> &req, uint32_t now,
 	                         WeaponLoadout &lo) -> bool {
+		// The reply walk filters by the slot's own team (+416), the accept by the request's
+		// team byte: each case here submits from a slot on the team it names.
+		// [orig: Server_SendWeaponSlotListToPlayer @0x502666; the accept's mask @0x51593C]
+		for (inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
+			if (candidate.peer == peer && !req.empty()) candidate.assigned_team = req[0];
 		std::vector<ProtocolMessage> msgs;
 		if (!expect(send_session({make_protocol_message(0x2F, req)}, now, msgs) &&
 		            reply_has_tag(msgs, 0x5A), "0x2F -> 0x5A loadout"))
@@ -3848,8 +3854,9 @@ bool run_loadout_resolve_with_armory() {
 			return false;
 	}
 
-	// Repeating the same category*65+rank does not create a second granted slot: the load
-	// table entry is replaced. Its later ammo count and damage-class byte are retained.
+	// Repeating the same category*65+rank does not create a second granted slot: the fill
+	// keeps the first weapon on the combo, and the later entry's count sets the shared pool
+	// and its damage-class byte is the one stored.
 	{
 		std::vector<uint8_t> req = {
 				0x01, 0x08, 0, 0, 0, 0,
@@ -3860,7 +3867,7 @@ bool run_loadout_resolve_with_armory() {
 		if (!loadout_reply(req, 170, lo)) return false;
 		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == m4_auto &&
 		                    lo.slots[0].ammo_primary == 4,
-		            "duplicate weapon slot serializes once with its last accepted values"))
+		            "a duplicate weapon serializes once, its pool from the later count"))
 			return false;
 		if (!damage_bytes_follow_the_slot_table(lo,
 		            {{static_cast<uint8_t>(m4_auto), 2}, {static_cast<uint8_t>(m4_auto), 1}},

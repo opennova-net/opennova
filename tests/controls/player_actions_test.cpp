@@ -2,6 +2,7 @@
 // binding sampler for modifier claims and remapping. No production-source pins.
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/player_actions.h>
+#include <runtime/controls/key_state_reset.h>
 
 #include <array>
 #include <cstdlib>
@@ -10,6 +11,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 using namespace opennova::controls;
 using Action = PlayerAction;
@@ -23,7 +25,7 @@ namespace {
 	} \
 } while (false)
 
-constexpr PlayerActionPoll kLive{true, true, true};
+const PlayerActionPoll kLive{true, true, true};
 
 struct Keys : PlayerActionSource {
 	std::map<std::string, int> held;
@@ -37,7 +39,12 @@ struct Keys : PlayerActionSource {
 	}
 	bool digit_down(int digit) const override { return digits[digit]; }
 	bool shift = false;
-	bool shift_down() const override { return shift; }
+	bool fire_signed(const char *) const override { return shift; }
+	// The key state alone, for a held key the scan or a text line hides.
+	std::set<std::string> raw;
+	bool keys_down(const char *token) const override {
+		return raw.count(token) != 0 || pressed(token);
+	}
 };
 
 bool requests_are(const PlayerActionFrame &frame, const std::vector<PlayerActionRequest> &expected) {
@@ -153,7 +160,7 @@ bool test_reset_preserves_switch_hud_medic_and_use_state() {
 // [orig: Input_HandleSpecialKeys @0x49c5c0 runs only with g_InputCaptureMode
 // clear].
 bool test_captured_keyboard_keeps_the_use_digits() {
-	constexpr PlayerActionPoll kTyping{true, true, true, true};
+	const PlayerActionPoll kTyping{true, true, true, true};
 	PlayerActions actions;
 	Keys keys;
 	keys.hold("useitem");
@@ -219,14 +226,17 @@ bool test_shell_consume_and_overlay_cancel() {
 	keys.hold("useitem");
 	actions.poll(keys, kLive);
 	keys.digits[2] = true;
-	CHECK(actions.poll(keys, {false, false, true}).requests.empty());
-	CHECK(actions.poll(keys, kLive).requests.empty()); // inactive frame aged raw digits
+	// An inactive frame runs the input frame too: the held USE's digit picks a
+	// seat (the hold is consumed), and the arm is not asked.
+	CHECK(requests_are(actions.poll(keys, {false, false, true}), {{Action::SelectSeat, 1}}));
+	CHECK(actions.poll(keys, kLive).requests.empty()); // a fresh hold, the digit latched
 	keys.release("useitem");
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::ToggleMount}})); // fresh hold
 	keys.hold("useitem"); actions.poll(keys, kLive);
 	keys.release("useitem");
-	CHECK(actions.poll(keys, {false, false, true}).requests.empty());
-	CHECK(actions.poll(keys, kLive).requests.empty()); // overlay canceled the release
+	// The release edge runs on an inactive frame as on any input frame.
+	CHECK(requests_are(actions.poll(keys, {false, false, true}), {{Action::ToggleMount}}));
+	CHECK(actions.poll(keys, kLive).requests.empty());
 	return true;
 }
 
@@ -260,7 +270,10 @@ struct BoundKeys : PlayerActionSource {
 				[this](int vk) { return down.count(vk) != 0; });
 	}
 	bool digit_down(int digit) const override { return down.count('0' + digit) != 0; }
-	bool shift_down() const override { return down.count(16) != 0; }
+	bool fire_signed(const char *token) const override {
+		return bindings.fire_signed(bindings.index_of_token(token), 0,
+				[this](int vk) { return down.count(vk) != 0; });
+	}
 };
 
 bool test_live_binding_modifier_remap_and_use_stream() {
@@ -312,6 +325,13 @@ bool test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint() {
 	keys.down = {16}; actions.poll(keys, kLive);
 	keys.down.insert(0x76);
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WaypointCycle, -1}}));
+	keys.down.clear(); actions.poll(keys, kLive);
+	// Rebound to Ctrl+F7 the row fires through the modifier pass, unsigned:
+	// Shift held still cycles forward [orig: @0x49d41e..0x49d42f].
+	const int waypoint = keys.bindings.index_of_token("NextWaypoint");
+	CHECK(keys.bindings.assign_key(waypoint, 0x76, true, false, false, false));
+	keys.down = {16, 17, 0x76};
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WaypointCycle, 1}}));
 	keys.down.clear(); actions.poll(keys, kLive);
 	keys.down = {'B'};
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::Binoculars}}));
@@ -506,6 +526,217 @@ bool test_to_special_dispatches_both_edges() {
 	return true;
 }
 
+// The held USE row runs its arm on every frame a key is down, through the
+// embedder's press latch, and only the mount chain holds the chain's latch:
+// walking into an armory with USE held opens it, and the chain the earlier
+// frames held ends there as a release does (the open first, then the
+// toggle); a latched press takes the arm with nothing to open, and its
+// release toggles nothing. The death screen admits no USE row (its mode word
+// carries bit 1 alone).
+// [orig: Input_ProcessAnalogBindings @0x4995F0 -- the keys @0x499635, the
+//  mode word @0x49963E..0x499650; Input_HandleActionBinding_0 case 0xB1
+//  @0x4E0A82, the mount chain @0x4E0B5E..0x4E0B71; Input_ProcessFrame's
+//  release edge @0x49D6C1..0x49D6DC]
+bool test_held_use_runs_the_arm_every_frame() {
+	using Arm = UseItemPressArm;
+	std::vector<Arm> arms;
+	std::size_t asked = 0;
+	PlayerActionPoll gate = kLive;
+	gate.take_use_item_arm = [&]() { return asked < arms.size() ? arms[asked++] : Arm::kTaken; };
+	PlayerActions actions;
+	Keys keys;
+	arms = {Arm::kMountChain, Arm::kMountChain, Arm::kOpenArmory, Arm::kTaken};
+	keys.hold("useitem");
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(requests_are(actions.poll(keys, gate), {{Action::OpenArmory}, {Action::ToggleMount}}));
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(asked == 4);
+	keys.release("useitem");
+	CHECK(actions.poll(keys, gate).requests.empty());
+	CHECK(asked == 4);
+
+	PlayerActions fresh;
+	arms = {Arm::kOpenArmory};
+	asked = 0;
+	keys.hold("useitem");
+	CHECK(requests_are(fresh.poll(keys, gate), {{Action::OpenArmory}}));
+	keys.release("useitem");
+	CHECK(fresh.poll(keys, gate).requests.empty());
+
+	PlayerActions dead;
+	PlayerActionPoll dead_gate = gate;
+	dead_gate.death_screen = true;
+	asked = 0;
+	keys.hold("useitem");
+	CHECK(dead.poll(keys, dead_gate).requests.empty());
+	CHECK(asked == 0);
+	keys.release("useitem");
+	CHECK(dead.poll(keys, dead_gate).requests.empty());
+
+	return true;
+}
+
+// Every menu close clears the key state: a key held through it (Shift as the
+// WEAPON screen's ACCEPT, a held W) reads up until its next key-down message,
+// a press or an OS repeat, or until its release; a key up at the reset is not
+// touched, and keys never held are not either.
+// [orig: UI_CloseMenuScreen @0x54E63F / WeaponLoadout_ApplyFromBuffer
+//  @0x565D01 -> Input_ResetAllState -> Input_ClearKeyState @0x497ED5;
+//  Input_HandleKeyPress @0x760CBB]
+bool test_key_state_reset() {
+	KeyStateReset reset;
+	const auto down_at_reset = [](int vk) { return vk == 0x10 || vk == 'W'; };
+	CHECK(reset.held(0x10, true)); // no reset yet: the device state
+	reset.reset(down_at_reset);
+	CHECK(!reset.held(0x10, true));
+	CHECK(!reset.held(0x10, true)); // still held, still up
+	CHECK(!reset.held('W', true));
+	CHECK(reset.held('A', true)); // up at the reset, pressed since
+	reset.key_down(0x10); // an OS repeat
+	CHECK(reset.held(0x10, true));
+	CHECK(!reset.held('W', true));
+	// A release ends it too: the next press reads down.
+	CHECK(!reset.held('W', false));
+	CHECK(reset.held('W', true));
+	// The extended keys are in the array: keypad Enter, VK 269.
+	reset.reset([](int vk) { return vk == 269; });
+	CHECK(!reset.held(269, true));
+	reset.key_down(269);
+	CHECK(reset.held(269, true));
+	// Out-of-range codes pass the device state through.
+	CHECK(reset.held(0, true));
+	CHECK(reset.held(KeyStateReset::kKeyCount, true));
+	return true;
+}
+
+// The reset clears the key-press latch: ToSpecial held through a close
+// dispatches no release, not when its key reads up after the reset nor at its
+// physical release; a fresh key-down presses it again.
+// [orig: Input_ResetAllState @0x497F08; Input_ProcessKeyboardEvents
+//  @0x49D249 / @0x49D2B9 / @0x49D2ED]
+bool test_reset_drops_the_held_release() {
+	Keys keys;
+	PlayerActionPoll gate;
+	gate.active = true;
+	gate.captured = true;
+	gate.simulation_available = true;
+	PlayerActions actions;
+	keys.hold("ToSpecial", 'F');
+	CHECK(actions.poll(keys, gate).to_special_edge); // the press
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	actions.clear_key_press_latches();
+	keys.release("ToSpecial"); // the key reads up after the reset
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	keys.hold("ToSpecial", 'F'); // its next key-down
+	CHECK(actions.poll(keys, gate).to_special_edge);
+	keys.release("ToSpecial");
+	CHECK(actions.poll(keys, gate).to_special_edge); // a latched release
+	return true;
+}
+
+// No input frame runs under a menu screen: a USE hold latched on the mount
+// chain when the menu opened is not aged under it, so the first frame after
+// the close, its key read up by the reset, ends the hold and toggles the
+// mount. A seat pick made in the hold consumes it as before.
+// [orig: Game_ProcessMainFrame @0x52660D / @0x52661D; Input_ProcessFrame
+//  @0x49D57F..0x49D585, @0x49D6C1..0x49D6DC]
+bool test_menu_freezes_the_use_hold() {
+	Keys keys;
+	PlayerActionPoll gate;
+	gate.active = true;
+	gate.captured = true;
+	gate.simulation_available = true;
+	PlayerActions actions;
+	keys.hold("useitem", 0x10);
+	CHECK(actions.poll(keys, gate).requests.empty()); // the chain holds
+	PlayerActionPoll menu = gate;
+	menu.active = false;
+	menu.captured = false;
+	menu.menu_open = true;
+	CHECK(actions.poll(keys, menu).requests.empty());
+	keys.release("useitem"); // read up after the close's reset
+	CHECK(actions.poll(keys, menu).requests.empty());
+	CHECK(requests_are(actions.poll(keys, gate), {{Action::ToggleMount}}));
+	CHECK(actions.poll(keys, gate).requests.empty());
+	// An inactive frame that is no menu runs the input frame: the arm is not
+	// asked, so the hold ends there and the mount toggles.
+	PlayerActions overlay;
+	keys.hold("useitem", 0x10);
+	overlay.poll(keys, gate);
+	PlayerActionPoll inactive = gate;
+	inactive.active = false;
+	CHECK(requests_are(overlay.poll(keys, inactive), {{Action::ToggleMount}}));
+	keys.release("useitem");
+	CHECK(overlay.poll(keys, gate).requests.empty());
+	return true;
+}
+
+// The ToSpecial release pass has no capture or mode gate: a release made over
+// a screen that holds the mouse still queues its edge (the session's
+// dispatcher head then drops it for a dead player, under the deploy hold and
+// once the round is over); an open text line drops it. The press keeps its
+// gates. [orig: Input_ProcessKeyboardEvents @0x49D249..0x49D2B9, @0x49D29F]
+bool test_to_special_release_over_a_screen() {
+	Keys keys;
+	PlayerActionPoll gate;
+	gate.active = true;
+	gate.captured = true;
+	gate.simulation_available = true;
+	PlayerActions actions;
+	keys.hold("ToSpecial", 'F');
+	CHECK(actions.poll(keys, gate).to_special_edge);
+	PlayerActionPoll screen = gate;
+	screen.active = false;
+	screen.captured = false;
+	CHECK(!actions.poll(keys, screen).to_special_edge);
+	keys.release("ToSpecial");
+	CHECK(actions.poll(keys, screen).to_special_edge); // the release, over the screen
+	keys.hold("ToSpecial", 'F');
+	CHECK(!actions.poll(keys, screen).to_special_edge); // no press there
+	keys.release("ToSpecial");
+	PlayerActionPoll typing = gate;
+	typing.keyboard_captured = true;
+	CHECK(!actions.poll(keys, typing).to_special_edge); // the text line drops it
+	return true;
+}
+
+// ToSpecial's latch follows its keys by the key state alone: held through the
+// death (the row scan-gated, so the sampler reads it up) it releases at its
+// key-up, not at the death; held through an open text line it gives no press
+// when the line closes, its key events having been the line's.
+// [orig: Input_ProcessKeyboardEvents, the latch set @0x49D2ED, the release
+//  pass @0x49D240 / @0x49D249, the press pass's gate @0x49D332..0x49D348]
+bool test_to_special_latch_reads_the_key_state() {
+	Keys keys;
+	PlayerActionPoll gate;
+	gate.active = true;
+	gate.captured = true;
+	gate.simulation_available = true;
+	PlayerActions actions;
+	keys.hold("ToSpecial", 'F');
+	CHECK(actions.poll(keys, gate).to_special_edge); // the press
+	// The death: the sampler drops the row, the key is still down.
+	keys.release("ToSpecial");
+	keys.raw.insert("ToSpecial");
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	keys.raw.clear(); // the key-up
+	CHECK(actions.poll(keys, gate).to_special_edge);
+	// A text line opens over the held key and closes with it still down.
+	keys.hold("ToSpecial", 'F');
+	CHECK(actions.poll(keys, gate).to_special_edge);
+	PlayerActionPoll typing = gate;
+	typing.keyboard_captured = true;
+	keys.release("ToSpecial");
+	keys.raw.insert("ToSpecial");
+	CHECK(!actions.poll(keys, typing).to_special_edge);
+	keys.raw.clear();
+	keys.hold("ToSpecial", 'F'); // the line closed: the sampler sees it again
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
@@ -516,9 +747,10 @@ int main() {
 			test_live_binding_modifier_remap_and_use_stream,
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
 			test_wheel_remainder_dispatches_whole_notches,
-			test_spectator_rows_edge_to_their_codes,
+			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release, test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen, test_to_special_latch_reads_the_key_state,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
-			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r})
+			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
+			test_held_use_runs_the_arm_every_frame})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

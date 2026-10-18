@@ -123,6 +123,7 @@ void EntityPoseProvider::clear() {
 	generic_models_.clear();
 	userpoint_models_.clear();
 	skeletal_sources_.clear();
+	type_sources_.clear();
 }
 
 void EntityPoseProvider::register_generic_model(int32_t model_id,
@@ -176,6 +177,37 @@ bool EntityPoseProvider::register_skeletal_entity(
 
 void EntityPoseProvider::remove_entity(world::EntityHandle entity) {
 	skeletal_sources_.erase(entity.packed);
+}
+
+bool EntityPoseProvider::register_skeletal_type(uint16_t type_id, int32_t model_id,
+		const std::string &adm_name, const assets::Model &model) {
+	type_sources_.erase(type_id);
+	if (assets_ == nullptr || !model || adm_name.empty()) return false;
+	std::vector<anim::Vec3> origins;
+	std::vector<int> parents;
+	if (!model_bone_table(*model, origins, parents)) return false;
+	auto rig = assets_->skeletal_rig(adm_name, origins, parents);
+	if (rig == nullptr || !rig->loaded() || !rig->fk_valid()) return false;
+	SkeletalSource source;
+	source.model_id = model_id;
+	source.rig = std::move(rig);
+	source.model = model;
+	type_sources_[type_id] = std::move(source);
+	return true;
+}
+
+bool EntityPoseProvider::build_skeletal_from_inputs(uint16_t type_id, int32_t model_id,
+		const world::SkeletalPoseInputs &inputs,
+		const world::CollisionMatrix &entity_world,
+		const world::CollisionModel &model,
+		std::vector<world::CollisionMatrix> &out) const {
+	const auto found = type_sources_.find(type_id);
+	if (found == type_sources_.end() || found->second.model_id != model_id) return false;
+	std::vector<anim::PoseBone> pose;
+	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
+	if (!eval_pose_inputs(found->second, inputs, pose, angles)) return false;
+	return compose_skeletal_sections(found->second, pose, angles, inputs.collapse_right_hand,
+			entity_world, model, out);
 }
 
 void EntityPoseProvider::register_userpoint_model(int32_t model_id,
@@ -549,12 +581,49 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 		std::vector<anim::PoseBone> &r_pose, anim::AimOverlayAngles *r_angles,
 		anim::AimOverlayInputs &r_inputs, const world::Entity *&r_entity,
 		world::AiEntity *&r_ai) const {
-	const anim::SkeletalClips *rig = source.rig.get();
 	r_ai = world.ai.for_handle(entity);
 	r_entity = world.registry.get(entity);
-	if (rig == nullptr || !rig->loaded() || !rig->fk_valid() ||
-			r_ai == nullptr || r_entity == nullptr)
-		return false;
+	if (r_ai == nullptr || r_entity == nullptr) return false;
+	// The body's channel state, gathered from its infantry state.
+	world::SkeletalPoseInputs in;
+	in.primary_state = r_ai->inf.body_clip_state();
+	in.primary_phase = r_ai->inf.clip_phase;
+	in.primary_variant = r_ai->inf.anim_variant;
+	in.primary_parked = r_ai->inf.body_phase_parked();
+	in.blend = r_ai->inf.body_blend_active();
+	in.source_state = r_ai->inf.anim_prev;
+	in.source_phase = r_ai->inf.anim_prev_clip_phase;
+	in.source_variant = r_ai->inf.anim_prev_variant;
+	in.blend_weight = r_ai->inf.anim_blend_weight;
+	in.overlay = aim_overlay_inputs_for(*r_ai, *r_entity);
+	if (world.cached.local_player.valid() &&
+			entity.packed == world.cached.local_player.packed &&
+			world::infantry_weapon_channel_visible(
+					r_ai->inf, weapon_active,
+					mount_blocks_weapon_channel(*r_entity))) {
+		in.weapon = true;
+		in.weapon_state = r_ai->inf.weapon_clip_state();
+		in.weapon_phase = r_ai->inf.wpn_clip_phase;
+		in.weapon_variant = r_ai->inf.wpn_variant;
+		in.weapon_parked = r_ai->inf.weapon_phase_parked();
+		// The secondary channel's own cross-fade rides into the authoritative pose
+		// exactly as it does into presentation, so hitboxes and the drawn body
+		// agree through the window [orig: the shared AnimMap_UpdateEntity re-init].
+		in.weapon_blend = r_ai->inf.weapon_blend_active();
+		in.weapon_prev_state = r_ai->inf.wpn_prev;
+		in.weapon_prev_phase = r_ai->inf.wpn_prev_clip_phase;
+		in.weapon_prev_variant = r_ai->inf.wpn_prev_variant;
+		in.weapon_blend_weight = r_ai->inf.wpn_blend_weight;
+	}
+	r_inputs = in.overlay;
+	return eval_pose_inputs(source, in, r_pose, r_angles);
+}
+
+bool EntityPoseProvider::eval_pose_inputs(const SkeletalSource &source,
+		const world::SkeletalPoseInputs &in, std::vector<anim::PoseBone> &r_pose,
+		anim::AimOverlayAngles *r_angles) const {
+	const anim::SkeletalClips *rig = source.rig.get();
+	if (rig == nullptr || !rig->loaded() || !rig->fk_valid()) return false;
 
 	const std::string reset_key("anim_reset");
 	const auto resolve_primary_key = [&](const std::string &key) {
@@ -562,30 +631,25 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 		return rig->has_clip(reset_key) ? reset_key : key;
 	};
 	const std::string primary_key =
-			resolve_primary_key(opennova::world::infantry_anim_key(r_ai->inf.body_clip_state()));
+			resolve_primary_key(opennova::world::infantry_anim_key(in.primary_state));
 	if (primary_key.empty()) return false;
 	// Each primary channel samples its served ring entry, as root motion does,
 	// and a tick the armed end-notify parks it on samples the parked last frame.
 	// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778; AnimChannel_AdvancePlayback
 	//  @0x40B19E..0x40B1B1]
-	const int primary_variant = r_ai->inf.anim_variant;
 	const double primary_seconds = rig->clip_seconds_at_tick(
-			primary_key, r_ai->inf.clip_phase, primary_variant,
-			r_ai->inf.body_phase_parked() ? r_ai->inf.clip_phase : -1);
+			primary_key, in.primary_phase, in.primary_variant,
+			in.primary_parked ? in.primary_phase : -1);
 	std::string source_key;
 	double source_seconds = 0.0;
-	int source_variant = 0;
-	const bool primary_blend = r_ai->inf.body_blend_active();
-	if (primary_blend) {
+	if (in.blend) {
 		source_key = resolve_primary_key(
-				opennova::world::infantry_anim_key(r_ai->inf.anim_prev));
-		source_variant = r_ai->inf.anim_prev_variant;
+				opennova::world::infantry_anim_key(in.source_state));
 		source_seconds = rig->clip_seconds_at_tick(
-				source_key, r_ai->inf.anim_prev_clip_phase, source_variant);
+				source_key, in.source_phase, in.source_variant);
 	}
 
-	r_inputs = aim_overlay_inputs_for(*r_ai, *r_entity);
-	anim::compute_aim_overlay_angles(r_inputs, r_angles);
+	anim::compute_aim_overlay_angles(in.overlay, r_angles);
 	anim::Quat deltas[anim::kOverlayClassCount];
 	const anim::Quat body_inv =
 			anim::quat_inv(overlay_model_quat(r_angles[anim::kOverlayBody]));
@@ -598,41 +662,48 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 	std::string weapon_prev_key;
 	double weapon_prev_seconds = 0.0;
 	float weapon_blend = 1.0f;
-	int weapon_variant = 0;
-	int weapon_prev_variant = 0;
-	if (world.cached.local_player.valid() &&
-			entity.packed == world.cached.local_player.packed &&
-			world::infantry_weapon_channel_visible(
-					r_ai->inf, weapon_active,
-					mount_blocks_weapon_channel(*r_entity))) {
-		weapon_key = opennova::world::infantry_anim_key(r_ai->inf.weapon_clip_state());
-		weapon_variant = r_ai->inf.wpn_variant;
+	if (in.weapon) {
+		weapon_key = opennova::world::infantry_anim_key(in.weapon_state);
 		weapon_seconds = rig->clip_seconds_at_tick(
-				weapon_key, r_ai->inf.wpn_clip_phase, weapon_variant,
-				r_ai->inf.weapon_phase_parked() ? r_ai->inf.wpn_clip_phase : -1);
-		// The secondary channel's own cross-fade rides into the authoritative pose
-		// exactly as it does into presentation, so hitboxes and the drawn body
-		// agree through the window [orig: the shared AnimMap_UpdateEntity re-init].
-		if (r_ai->inf.weapon_blend_active()) {
-			weapon_prev_key = opennova::world::infantry_anim_key(r_ai->inf.wpn_prev);
-			weapon_prev_variant = r_ai->inf.wpn_prev_variant;
-			weapon_blend = r_ai->inf.wpn_blend_weight;
+				weapon_key, in.weapon_phase, in.weapon_variant,
+				in.weapon_parked ? in.weapon_phase : -1);
+		if (in.weapon_blend) {
+			weapon_prev_key = opennova::world::infantry_anim_key(in.weapon_prev_state);
+			weapon_blend = in.weapon_blend_weight;
 			weapon_prev_seconds = rig->clip_seconds_at_tick(
-					weapon_prev_key, r_ai->inf.wpn_prev_clip_phase, weapon_prev_variant);
+					weapon_prev_key, in.weapon_prev_phase, in.weapon_prev_variant);
 		}
 	}
 
-	rig->eval_composed_pose(primary_key, primary_seconds, primary_blend,
-			source_key, source_seconds, r_ai->inf.anim_blend_weight,
+	rig->eval_composed_pose(primary_key, primary_seconds, in.blend,
+			source_key, source_seconds, in.blend_weight,
 			deltas, weapon_key, weapon_seconds, r_pose,
 			weapon_prev_key, weapon_prev_seconds, weapon_blend,
-			weapon_variant, weapon_prev_variant, primary_variant, source_variant);
+			in.weapon_variant, in.weapon_prev_variant, in.primary_variant,
+			in.source_variant);
 	return true;
 }
 
 bool EntityPoseProvider::build_skeletal(world::World &world,
 		const SkeletalSource &source, world::EntityHandle entity,
 		const world::CollisionMatrix &entity_world,
+		const world::CollisionModel &model,
+		std::vector<world::CollisionMatrix> &out) const {
+	std::vector<anim::PoseBone> pose;
+	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
+	anim::AimOverlayInputs inputs;
+	const world::Entity *e = nullptr;
+	world::AiEntity *ai_entity = nullptr;
+	if (!eval_entity_pose(world, source, entity, pose, angles, inputs, e,
+				ai_entity))
+		return false;
+	return compose_skeletal_sections(source, pose, angles,
+			mount_collapses_right_hand_row(*e), entity_world, model, out);
+}
+
+bool EntityPoseProvider::compose_skeletal_sections(const SkeletalSource &source,
+		const std::vector<anim::PoseBone> &pose, const anim::AimOverlayAngles *angles,
+		bool collapse_right_hand, const world::CollisionMatrix &entity_world,
 		const world::CollisionModel &model,
 		std::vector<world::CollisionMatrix> &out) const {
 	const anim::SkeletalClips *rig = source.rig.get();
@@ -642,16 +713,6 @@ bool EntityPoseProvider::build_skeletal(world::World &world,
 			rig->rest_global().size() < section_count ||
 			rig->overlay_classes().size() < section_count)
 		return false;
-
-	std::vector<anim::PoseBone> pose;
-	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
-	anim::AimOverlayInputs inputs;
-	const world::Entity *e = nullptr;
-	world::AiEntity *ai_entity = nullptr;
-	if (!eval_entity_pose(world, source, entity, pose, angles, inputs, e,
-				ai_entity))
-		return false;
-	const bool collapse_right_hand = mount_collapses_right_hand_row(*e);
 	if (pose.size() < section_count) return false;
 
 	// The callback result is FINAL world-space. Build the body placement from

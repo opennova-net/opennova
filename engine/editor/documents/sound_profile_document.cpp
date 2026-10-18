@@ -95,15 +95,6 @@ bool set_q16(int32_t &field, const Value &value, std::string &error) {
 	return true;
 }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 RecordTable make_table() {
 	using RF = LabelledField;
 	TableKind profile(RecordKindRow{kProfile, "profile", "Sound profile", "Add sound profile", true});

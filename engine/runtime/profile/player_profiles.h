@@ -78,14 +78,14 @@ void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
 // The table a loaded record keeps: the defaults, each entry whose action code
 // and token (without case) a saved entry matches taking that entry's eight
 // binding fields; saved entries no default carries are dropped
-// [orig: merge_weapon_slot_params @0x54c3f0, run per record by the load
+// [orig: KeyBinding_MergeSavedBindings @0x54c3f0, run per record by the load
 // @0x54f600..0x54f62a, which then stores the default count @0x54f62a].
 std::vector<playersav::BindingEntry> merge_bindings(
 		const std::vector<playersav::BindingEntry> &defaults,
 		const std::vector<playersav::BindingEntry> &saved);
 
 // Whether the name edit keeps a typed character at the end of its text: a
-// letter, a digit, a space, '-' or '.' [orig: handle_player_name_change
+// letter, a digit, a space, '-' or '.' [orig: PlayerInfo_HandlePlayerNameChange
 // @0x55fbf9..0x55fc29].
 bool name_char_allowed(char c);
 
@@ -158,7 +158,7 @@ public:
 	// reads it].
 	bool first_run() const { return first_run_; }
 
-	// The PLAYERNAME edit's change [orig: handle_player_name_change @0x55fbb0]:
+	// The PLAYERNAME edit's change [orig: PlayerInfo_HandlePlayerNameChange @0x55fbb0]:
 	// text whose last character the edit keeps (or no text) names the current
 	// record with its first 16 characters and clears the no-name flag; false
 	// when the last character is refused, which the screen then cuts from the

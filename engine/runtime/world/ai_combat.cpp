@@ -581,17 +581,17 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/
     }
 }
 
-// AI fire -> the same authoritative round pair the C2S 0x06 player path enters: ring
-// append (the S2C 0x0A tag-2 fan-out every remote client re-simulates the round from)
-// + the RoundSim spawn. [orig: WeaponSlot_FireAndSpawnEffects @0x53f440 ->
-// Entity_FireWeaponAndSendPacket @0x42bd80 authority leg -> Server_ClientFiredRound
-// @0x50baa0 (RoundData_AddRound @0x4fdb40 + RoundData_SpawnRound @0x4ec0d0); §5.60.
-// The ammo id rides the ring's adm byte as in the retail fire_cmd; the fire sound and
-// muzzle effect (g_AmmoDefTable +64/+68) ride the spawn's FireEvent.]
+// An AI gunner's slot fire -> the same authoritative round pair the C2S 0x06 player
+// path enters: ring append (the S2C 0x0A tag-2 fan-out every remote client
+// re-simulates the round from) + the RoundSim spawn. [orig: WeaponAction_Fire
+// @0x542B10 -> Entity_FireWeaponAndSendPacket @0x42bd80 authority leg ->
+// Server_ClientFiredRound's slotless adm leg @0x50BE8A (RoundData_AddRound @0x4fdb40
+// + RoundData_SpawnRound @0x4ec0d0); §5.60. The ring carries the fire action's mode
+// byte and the slot's adm; the host presents the FIRE row (action_leg_presentation).]
 bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
-                             int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index) {
+                             int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index,
+                             int32_t fire_mode, uint8_t fire_adm) {
     if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
-    ++fire_shot_seq; // [orig: word_B7C670 round-trips into the ring +28 word]
 
     RoundEvent ev;
     ev.shooter_handle = e.handle.packed;
@@ -600,15 +600,10 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     ev.origin_z = origin[2];
     ev.dir_yaw = yaw_bam;
     ev.dir_pitch = pitch_bam;
-    ev.shot_seq = fire_shot_seq;
-    const Entity *shooter = world.registry.get(e.handle);
-    const uint8_t adm_index = shooter != nullptr &&
-                                      world.tables.weapons.by_index(
-                                              shooter->equipped_adm_index) != nullptr
-            ? shooter->equipped_adm_index
-            : static_cast<uint8_t>(ammo_index & 0xFF);
+    // The adm-indexed arm: the action's mode byte and the slot's weapon.
+    const uint8_t adm_index = fire_adm;
+    ev.mode_flags = static_cast<uint8_t>(fire_mode);
     ev.adm_index = adm_index;
-    world.out.rounds.add(ev);
 
     RoundSpawnParams rp;
     rp.owner = e.handle;
@@ -620,10 +615,18 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     rp.dir_pitch_bam = pitch_bam;
     rp.ammo_index = ammo_index;
     rp.adm_index = adm_index;
-    rp.shot_seq = fire_shot_seq;
+    // A slotless gunner's adm arm hands the pool the fresh word, the ring the
+    // spawned round's [orig: Server_ClientFiredRound's `!v91` leg @0x50BE8A ->
+    //  RoundData_AddRound ring+28 @0x4FDCF5].
+    rp.shot_seq = RoundSim::kFreshRoundWord;
+    // The gunner's slot fire action presents its FIRE row on the host
+    // [orig: WeaponAction_Fire @0x542CB4 -> ActionSlot_SpawnEffect @0x401F20].
+    rp.action_leg_presentation = true;
     // The spawn marks the shooter (Flags 0x4000, the §16.2 x6 scoring flag)
     // unless the ammo is SILENCED.
     world.round_sim.spawn(world, rp);
+    ev.shot_seq = world.round_sim.spawned_round_word();
+    world.out.rounds.add(ev);
     return true;
 }
 
@@ -1007,7 +1010,7 @@ bool AiSystem::ai_handle_command(World &world, AiEntity &e, const AiEventEntry &
         // fadd 2^32 when negative [orig: flt_7C3288 @0x4658a4/@0x4658da],
         // fmul 1000.0 [orig: flt_7C6EC0], fmul the stored float32 of
         // 1/225000 [orig: flt_7C6EBC = 4.444444584805751e-06], fmul 65536
-        // [orig: flt_7C32BC], ftol2_sse @0x76bc00 (out-of-range converts to
+        // [orig: flt_7C32BC], _ftol2_sse @0x76bc00 (out-of-range converts to
         // the x87 indefinite 0x80000000 — the branch below).
         double value = static_cast<double>(ev.f[3]);
         if (value < 0.0) value += 4294967296.0;

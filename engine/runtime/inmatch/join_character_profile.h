@@ -6,7 +6,8 @@
 // (CTA/CTB) and the two avatar bytes (VCA/VCB, each the profile's voice
 // override for the side where nonzero, else the selected combo's head voice).
 // A side that is absent or no longer resolves takes the retail default: the
-// first combo of its alignment, class 8 (rifleman).
+// first combo of its alignment, else entry 0 (an Avatars.def with no combo of
+// that side's), class 8 (rifleman).
 // [orig: PlayerProfile_InitDefaults @0x54BB40 (the fresh profile),
 //  EntitySlot_LookupAndPackEntry @0x57AD40 (the per-side default),
 //  Avatars_ResolveSelectionIndex @0x57AE60,
@@ -97,9 +98,14 @@ inline JoinCharacterProfile join_character_profile(
 		const CharacterRegistry &registry, const JoinSideSelection saved[2], bool in_session) {
 	JoinCharacterProfile profile;
 	for (int side = 0; side < 2; ++side) {
-		// The retail default: the first combo of the side's alignment.
+		// The retail default: the first combo of the side's alignment, else
+		// entry 0 whatever its side (an Avatars.def with no combo of this
+		// side's alignment packs the other side's first entry), so the id
+		// resolves with no side filter [orig: EntitySlot_LookupAndPackEntry
+		// @0x57ad40 - the side loop @0x57ad6b..0x57ad80, the entry-0 fallback
+		// @0x57ad84..0x57adda].
 		const CharacterEntry *first = registry.find_by_packed_id(
-				registry.first_character_id(side), side);
+				registry.first_character_id(side));
 		if (first != nullptr) {
 			profile.character_ids[side] = first->packed_id;
 			profile.avatars[side] = first->head_voice;

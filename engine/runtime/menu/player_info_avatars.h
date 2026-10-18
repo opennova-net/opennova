@@ -30,4 +30,15 @@ struct PlayerInfoAvatars {
 			const avatars::AvatarsFile &file, int saved_voice) const;
 };
 inline constexpr const char *kPlayerInfoVoiceBank = "menu.lwf";
+
+// The preview model's initial facing, a BAM word: the preview init reseeds the
+// CRT stream from the clock word `seed`, then draws rand() % 180 whole degrees
+// at 0xB60B60 BAM a degree (formats/avatars/preview_animation.h
+// kPreviewInitialYawRangeDeg). The draw rides the render/menu CRT stream
+// (base/crt/crt_rng.h), so the reseed and the draw step it as retail's
+// per-thread stream steps
+// [orig: PlayerInfo_InitPreviewModel @0x5600d0 -- srand(_time64(0))
+//  @0x560120..0x560128, rand() @0x5601a2, cdq / idiv 0B4h @0x5601a7..0x5601ad,
+//  imul 0B60B60h into dword_25DC53C @0x5601b1..0x5601b7].
+int32_t player_info_preview_initial_yaw_bam(uint32_t seed);
 } // namespace opennova::menu

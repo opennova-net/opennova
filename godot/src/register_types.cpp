@@ -105,6 +105,8 @@
 #include "simulation/present_event_records.h"
 #include "object/skeletal_anim.h"
 #include "hud/player_hud_weapon_def.h"
+#include "hud/hud_entity_info.h"
+#include "hud/loading_background.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
 #include "hud/map_view_state.h"
@@ -172,7 +174,6 @@
 #include "resource_index/resource_root.h"
 #include "audio/sbf_bank.h"
 #include "audio/sbf_audio_stream.h"
-#include "audio/sbf_audio_stream_playback.h"
 #include "audio/music_script.h"
 #include "audio/music_director.h"
 #include "audio/music_pair_names.h"
@@ -183,6 +184,8 @@
 #include "mnu/menu_frame.h"
 #include "mnu/menu_audio.h"
 #include "mnu/menu_driver.h"
+#include "mnu/player_info_loadout.h"
+#include "mnu/armory_loadout_pick.h"
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
@@ -192,6 +195,7 @@
 #include "player/local_player_visuals.h"
 #include "player/player_move_intent.h"
 #include "player/player_info_kit_restore.h"
+#include "player/player_info_character_state.h"
 #include "player/player_profiles.h"
 #include "player/player_spawn_loadout.h"
 #include "player/player_viewmodel_def.h"
@@ -225,7 +229,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TerrainFoliageDef);
 	GDREGISTER_CLASS(TerrainFoliageMap);
 	GDREGISTER_CLASS(FoliageFrameStats);
-	GDREGISTER_CLASS(VegGraphicRow);
 	GDREGISTER_CLASS(FoliageDispatcher);
 	GDREGISTER_CLASS(FoliageMaskCompositorEffect);
 	GDREGISTER_CLASS(TerrainTileEntry);
@@ -250,7 +253,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ObjectData);
 	GDREGISTER_CLASS(EnvLightValues);
 	GDREGISTER_CLASS(EnvDayPhase);
-	GDREGISTER_CLASS(EnvSunGlare);
 	GDREGISTER_CLASS(EnvironmentSnapshot);
 	GDREGISTER_CLASS(EnvLightState);
 	GDREGISTER_CLASS(PanmClock);
@@ -309,6 +311,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponProfileSide);
 	GDREGISTER_CLASS(WeaponProfileSummary);
 	GDREGISTER_CLASS(PlayerInfoKitRestore);
+	GDREGISTER_CLASS(PlayerInfoSideSelection);
+	GDREGISTER_CLASS(PlayerInfoCharacterState);
 	GDREGISTER_CLASS(PlayerProfiles);
 	GDREGISTER_CLASS(GameConfigBlock);
 	GDREGISTER_CLASS(ThrowableVisualRow);
@@ -336,6 +340,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EndRoundTransition);
 	GDREGISTER_CLASS(HudInsetScope);
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
+	GDREGISTER_CLASS(HudEntityInfo);
+	GDREGISTER_CLASS(LoadingBackground);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);
@@ -432,7 +438,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ResourceRoot);
 	GDREGISTER_CLASS(LaunchFlags);
 	GDREGISTER_CLASS(SbfAudioStream);
-	GDREGISTER_CLASS(SbfAudioStreamPlayback);
 	GDREGISTER_CLASS(SbfBank);
 	GDREGISTER_CLASS(MusicScript);
 	GDREGISTER_CLASS(MusicPairNames);
@@ -446,6 +451,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuAudio);
 	GDREGISTER_CLASS(MenuScrollRange);
 	GDREGISTER_CLASS(MenuDriver);
+	GDREGISTER_CLASS(PlayerInfoLoadout);
+	GDREGISTER_CLASS(ArmoryLoadoutPick);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	// The scenario driver's scripted input device (inert until a probe arms
 	// it), ahead of the binding model it attaches to.

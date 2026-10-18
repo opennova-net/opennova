@@ -408,6 +408,7 @@ std::vector<MissionObjectPlacer::PlacementRow> MissionObjectPlacer::placement_ro
 			row.ai_flags = static_cast<uint32_t>(entity.bmsi_attributes);
 			row.position = Vector3(transform.x, transform.y, transform.z);
 			row.rotation_deg = Vector3(transform.pitch, transform.yaw, transform.roll);
+			row.origin_q16 = opennova::mission::StaticSourceOrigin{ entity.x, entity.y };
 			rows.push_back(row);
 		}
 	}

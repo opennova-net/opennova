@@ -35,15 +35,6 @@ const AvatarNationalityRecord &nationality_of(const RecordHandle &r) { return r.
 const AvatarDivisionRecord &division_of(const RecordHandle &r) { return r.as<AvatarDivisionRecord>(); }
 const AvatarComboRecord &combo_of(const RecordHandle &r) { return r.as<AvatarComboRecord>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 // A word of a line the walk cuts into one token: no blank, comma, quote, `;` or `//`, within the bytes its field
 // keeps (an empty one ends the line's fields: the writer refuses one before a filled field).
 bool set_word(std::string &field, size_t bytes, const Value &value, std::string &error) {
@@ -309,9 +300,10 @@ constexpr FindingCodeEntry<AvatarsFinding> kFindingEntries[] = {
 	// The reader stopping (the document's game_stops issue, or the text a save writes): it gates, the game's failure.
 	{ AvatarsFinding::ReaderStops,
 	  game_stops_code("avatars.reader_stops",
-	                  "the avatar table's reader stops at a 513th part or a 129th combination and the game fails "
-	                  "(ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; CAvatarDefs_AllocCombo @ 0x579E10; "
-	                  "D-PLAYERINFO-2]") },
+	                  "the avatar table's reader stops at a 513th part with a ComboObj Parse Error box, and a 129th "
+	                  "combination faults, written through the null row its allocation returns past 128 [orig: "
+	                  "CAvatarDefs_ParseConfigLine @ 0x57A456, the box @ 0x57A46E, the write @ 0x57A91C; "
+	                  "CAvatarDefs_AllocCombo @ 0x579E1A; D-PLAYERINFO-2]") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(AvatarsFinding::kCount),
 		"every AvatarsFinding has exactly one row");
@@ -446,18 +438,20 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		read = avatars::AvatarsFile{};
 		if (!stop || avatars::avatars_parse_memory(bytes.data(), before, &read) != 0) {
 			error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error,
-			                     "The avatar table's reader stops: 512 parts or 129 combinations (the game's walk ends "
-			                     "there, ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; CAvatarDefs_AllocCombo "
-			                     "@ 0x579E10].",
+			                     "The avatar table's reader stops: at a 513th part with a ComboObj Parse Error box, at a "
+			                     "129th combination with a fault (written through the null row its allocation returns) "
+			                     "[orig: CAvatarDefs_ParseConfigLine @ 0x57A456, @ 0x57A91C; CAvatarDefs_AllocCombo @ "
+			                     "0x579E1A].",
 			                     path());
 			return false;
 		}
 		reader_stops_line_ = stop;
 		issues.push_back({true, stop, std::string(), std::string(),
-		                  "The game's avatar reader stops at this line, a 513th part or a 129th combination, and the game "
-		                  "fails (ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; CAvatarDefs_AllocCombo @ "
-		                  "0x579E10; D-PLAYERINFO-2]. The editor holds what the reader reads before it, read only: fix the "
-		                  "file outside the editor."});
+		                  "The game's avatar reader stops at this line: a 513th part, with a ComboObj Parse Error box, or a "
+		                  "129th combination, a fault (written through the null row its allocation returns past 128) "
+		                  "[orig: CAvatarDefs_ParseConfigLine @ 0x57A456, the box @ 0x57A46E, the write @ 0x57A91C; "
+		                  "CAvatarDefs_AllocCombo @ 0x579E1A; D-PLAYERINFO-2]. The editor holds what the reader reads before "
+		                  "it, read only: fix the file outside the editor."});
 		issues.back().game_stops = true;
 	}
 	for (size_t i = 0; i < read.diagnostics_count; ++i) {
@@ -751,8 +745,9 @@ void AvatarsDocument::saved_text_findings(std::vector<Diagnostic> &out) const {
 	if (avatars::avatars_parse_memory(saved.text.data(), saved.text.size(), &reread) != 0) {
 		out.push_back(make_finding(finding_code(AvatarsFinding::ReaderStops), DiagnosticSeverity::Error,
 		                           "The table as a save writes it holds a 513th part or a 129th combination: the game's "
-		                           "reader stops there and the game fails (ComboObj Parse Error) [orig: "
-		                           "CAvatarDefs_ParseConfigLine @ 0x57A456; CAvatarDefs_AllocCombo @ 0x579E10; D-PLAYERINFO-2].",
+		                           "reader stops at the part with a ComboObj Parse Error box, and faults at the combination, "
+		                           "written through the null row its allocation returns [orig: CAvatarDefs_ParseConfigLine @ "
+		                           "0x57A456, @ 0x57A46E, @ 0x57A91C; CAvatarDefs_AllocCombo @ 0x579E1A; D-PLAYERINFO-2].",
 		                           path()));
 		return;
 	}

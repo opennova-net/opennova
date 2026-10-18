@@ -200,17 +200,17 @@ void MenuTry::prepare_() {
 	}
 }
 
-void MenuTry::mouse(const MenuTrySource &source, float x, float y, bool down, uint32_t now_ms) {
+void MenuTry::mouse(const MenuTrySource &source, float x, float y, bool down, bool double_click) {
 	if (!started_) return;
 	source_ = &source;
-	runtime_.process_mouse(x, y, down, now_ms);
+	runtime_.process_mouse(x, y, down, double_click);
 	source_ = nullptr;
 }
 
-void MenuTry::click(const MenuTrySource &source, float x, float y, uint32_t now_ms) {
-	mouse(source, x, y, false, now_ms);
-	mouse(source, x, y, true, now_ms);
-	mouse(source, x, y, false, now_ms);
+void MenuTry::click(const MenuTrySource &source, float x, float y) {
+	mouse(source, x, y, false);
+	mouse(source, x, y, true);
+	mouse(source, x, y, false);
 }
 
 bool MenuTry::wheel(const MenuTrySource &source, float x, float y, int steps) {

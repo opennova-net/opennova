@@ -16,12 +16,6 @@ using io::JsonValue;
 using io::json_number;
 using io::json_string;
 
-const DocumentBase *open_at(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents.open)
-		if (document && document->path() == path) return document.get();
-	return nullptr;
-}
-
 // The preview clock the view's viewports run on (a still one in a view no session made).
 const PreviewClock &clock_of(const SessionView &view) {
 	static const PreviewClock kStill;
@@ -30,7 +24,7 @@ const PreviewClock &clock_of(const SessionView &view) {
 
 // What the viewport reads of its document as it followed.
 ViewportInput input_of(const SessionView &view, const ViewportModel &model, const PreviewClock &clock) {
-	const DocumentBase *document = model.path().empty() ? nullptr : open_at(view, model.path());
+	const DocumentBase *document = model.path().empty() ? nullptr : view.documents.open_at(model.path());
 	return ViewportInput{ view, clock, document, ChangeClass::None };
 }
 

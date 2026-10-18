@@ -31,6 +31,7 @@
 
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/infantry.h> // IRootMotionSource stub for the root-motion legs
+#include <runtime/world/round_sim.h> // HitRecord (the 0x13 class callback's input)
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -1224,6 +1225,108 @@ bool run_root_rotation_follows_heading() {
 	return ok;
 }
 
+// The replica's root rotation is the world motor's pair (B-11): org2 (a Player
+// row) reads the Q22 sine table at the heading's rounded top ten bits, org1 (an
+// Infantry row) takes the Q22 trig at retail's dbl_7C3608 scale. Off a table
+// step and at a quarter turn the exact 2pi/2^32 trig the replica used gives
+// (-6433, 4194299) and (0, 4194304) instead.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4206 (the table);
+//  Entity_UpdateInfantryAI `fmul dbl_7C3608` @0x4BF007 (the trig)]
+bool run_root_rotation_pair_is_the_world_motors() {
+	const opennova::world::RootRotationQ22 org2 =
+			opennova::world::root_rotation_q22(0x40100000, true);
+	bool ok = expect(org2.c == 0 && org2.s == 4194304,
+	                 "org2 rotates by the sine table's entry 256");
+	const opennova::world::RootRotationQ22 org1 =
+			opennova::world::root_rotation_q22(0x40100000, false);
+	ok &= expect(org1.c == -6635 && org1.s == 4194298,
+	             "org1 rotates by the trig at retail's BAM scale");
+	const opennova::world::RootRotationQ22 quarter =
+			opennova::world::root_rotation_q22(0x40000000, false);
+	ok &= expect(quarter.c == -201 && quarter.s == 4194303,
+	             "org1's quarter turn keeps retail's 30.5 ppm cosine");
+	return ok;
+}
+
+// The replica's root step goes through that pair (B-11). A Player row whose
+// body heading is off a table step (0x40100000) walks its +Y clip with X held
+// exactly, the sine table's entry 256 having a zero cosine, where the exact trig
+// (cosine -6433/2^22 there) would drag X back 7/65536 a tick; an Infantry row
+// facing +Y drifts X back by retail's 30.5 ppm cosine (-201/2^22: one 65536th a
+// tick for the clip's 4096 step, Y 4095 a tick), where the exact trig holds X and
+// walks Y 4096. Each heading is set on the row (a first record does not swing it).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4255;
+//  Entity_UpdateInfantryAI @0x4BF001..0x4BF074]
+bool run_replica_root_step_takes_the_world_pair() {
+	bool ok = true;
+	{
+		ns::ClientReplicaPipeline view(class_of);
+		view.set_remote_motion_mode(true);
+		WalkSource src;
+		view.set_root_motion_source(&src);
+		const uint16_t handle = 0x0046;
+		seed_row(view, handle, kPlayerType);
+		const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+		nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
+		fu.records[0].player.anim_state_id = opennova::world::anim_state::kWalkForward;
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+		view.state().find(handle)->rm_adm_id = 0;
+		view.tick_remote_motion(0xFFFF); // snap-arm
+		ns::ClientEntityState *es = view.state().find(handle);
+		es->heading_bam = 0x40100000;
+		es->rm_body_heading = 0x40100000;
+		es->net_target_heading_bam = 0x40100000;
+		const int32_t x0 = es->x;
+		const int32_t y0 = es->y;
+		for (int t = 0; t < 16; ++t) view.tick_remote_motion(0xFFFF);
+		es = view.state().find(handle);
+		std::fprintf(stderr, "[root-pair] org2 dX=%d dY=%d heading=%08x\n", es->x - x0,
+		             es->y - y0, static_cast<uint32_t>(es->rm_body_heading));
+		ok &= expect(es->y - y0 == 16 * 4096 && es->x == x0,
+		             "an off-step Player heading walks +Y on the table's zero cosine");
+	}
+	{
+		ns::ClientReplicaPipeline view([](uint16_t type_id) {
+			return type_id == 0x0777 ? nw::EntityClass::Infantry : nw::EntityClass::Unknown;
+		});
+		view.set_remote_motion_mode(true);
+		WalkSource src;
+		view.set_root_motion_source(&src);
+		const uint16_t handle = 0x0047;
+		seed_row(view, handle, 0x0777);
+		nw::FrameUpdate fu = header_only_frame();
+		fu.anchor_x = 100 << 16;
+		fu.anchor_y = 20 << 16;
+		fu.anchor_z = -50 << 16;
+		nw::FrameUpdateRecord r;
+		r.handle = handle;
+		r.type_id = 0x0777;
+		r.cls = nw::EntityClass::Infantry;
+		r.infantry.vehicle_slot_handle = 0xFFFF;
+		r.infantry.pos_x_compressed = nw::network_compress_fixedpoint(0);
+		r.infantry.pos_y_compressed = nw::network_compress_fixedpoint(0);
+		r.infantry.pos_z_compressed = nw::network_compress_fixedpoint(0);
+		r.infantry.yaw_byte = 0x40; // +Y
+		r.infantry.anim_byte = opennova::world::anim_state::kWalkForward;
+		r.infantry.flags_byte = 0;
+		fu.records.push_back(r);
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+		view.state().find(handle)->rm_adm_id = 0;
+		view.tick_remote_motion(0xFFFF);
+		ns::ClientEntityState *row = view.state().find(handle);
+		row->heading_bam = 0x40000000; // a first record does not swing the heading
+		row->net_target_heading_bam = 0x40000000;
+		const int32_t x0 = row->x;
+		const int32_t y0 = row->y;
+		for (int t = 0; t < 16; ++t) view.tick_remote_motion(0xFFFF);
+		const ns::ClientEntityState *es = view.state().find(handle);
+		std::fprintf(stderr, "[root-pair] org1 dX=%d dY=%d\n", es->x - x0, es->y - y0);
+		ok &= expect(es->y - y0 == 16 * 4095 && es->x - x0 == -16,
+		             "an Infantry row facing +Y drifts X back by retail's cosine");
+	}
+	return ok;
+}
+
 // The org1 (Infantry) root path: the AI row dead-reckons by its clip too.
 bool run_infantry_root_motion_dead_reckons() {
 	ns::ClientReplicaPipeline view([](uint16_t type_id) {
@@ -1460,6 +1563,70 @@ bool run_entity_death_parks_the_death_anim() {
 	es = view.state().find(handle);
 	ok &= expect(es->net_anim_current == death && (es->rm_entity_flags & 0x2u) != 0u,
 	             "the death edge commits the 0x13 state and latches the bit");
+	return ok;
+}
+
+// The 0x13's class callback (event 4): while the joiner's global hit record
+// holds a round, an org row's callback restages the death state over the wire
+// word from the record's section and the round's approach quadrant against
+// the row's heading, which the death edge then commits; with no round the
+// wire word stands. A +X round reaches a heading-0 body from behind
+// (quadrant 2). [orig: NapiNPClientMsg_EntityDeath @0x42EBF5 ->
+// OrganicClass_HandleEvent @0x40734C..0x4073B1]
+bool run_entity_death_restages_from_the_hit_record() {
+	ns::ClientReplicaPipeline view([](uint16_t type_id) {
+		return type_id == 0x0777 ? nw::EntityClass::Infantry
+		                         : nw::EntityClass::Unknown;
+	});
+	view.set_remote_motion_mode(true);
+	opennova::world::HitRecord record;
+	view.set_replica_hit_record_resolver(
+			[&record]() -> const opennova::world::HitRecord * { return &record; });
+	const uint16_t handle = 0x0033;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	seed_row(view, handle, 0x0777);
+	nw::FrameUpdate fu = header_only_frame();
+	fu.anchor_x = ax; fu.anchor_y = ay; fu.anchor_z = az;
+	nw::FrameUpdateRecord r;
+	r.handle = handle;
+	r.type_id = 0x0777;
+	r.cls = nw::EntityClass::Infantry;
+	r.infantry.vehicle_slot_handle = 0xFFFF;
+	r.infantry.anim_byte = opennova::world::anim_state::kIdle;
+	fu.records.push_back(r);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.tick_remote_motion(0xFFFF);
+	const int16_t wire = opennova::world::anim_state::kDeathBulletBase + 6;
+	const std::vector<uint8_t> body = {
+			static_cast<uint8_t>(handle & 0xFF), static_cast<uint8_t>(handle >> 8),
+			static_cast<uint8_t>(wire & 0xFF), static_cast<uint8_t>(wire >> 8)};
+	// No round recorded: the wire word stands.
+	view.apply(nw::s2c::ENTITY_DEATH, body);
+	const ns::ClientEntityState *es = view.state().find(handle);
+	bool ok = expect(es->heading_bam == 0, "the row faces heading 0");
+	ok &= expect(es->net_death_anim == wire,
+	             "with no round recorded the 0x13 word stands");
+	record.has_round = true;
+	record.section = 3;
+	record.round_vel_q16 = opennova::world::FixedVec3{10 << 16, 0, 0};
+	// A 0x26 earlier in the same pump stores its section into the record at
+	// the fold, through the embedder's gate [orig: Entity_KillBySlotId
+	// @0x42BD47]; here the gate admits slot 0x1005.
+	view.set_replica_kill_section_store([&record](uint16_t slot, int16_t section) {
+		if (slot == 0x1005) record.section = section;
+	});
+	view.apply(nw::s2c::KILL_SYNC, {0x05, 0x10, 14, 0});
+	ok &= expect(record.section == 14, "the 0x26 fold stores its section");
+	view.apply(nw::s2c::ENTITY_DEATH, body);
+	es = view.state().find(handle);
+	const int16_t restaged = static_cast<int16_t>(opennova::world::compute_death_anim_state(
+			14, 2, opennova::world::death_cause::kBullet));
+	ok &= expect(restaged != wire && es->net_death_anim == restaged,
+	             "a recorded round restages the death state from its section and quadrant");
+	view.tick_remote_motion(0xFFFF);
+	es = view.state().find(handle);
+	ok &= expect(es->net_anim_current == restaged && (es->rm_entity_flags & 0x2u) != 0u,
+	             "the death edge commits the restaged state");
 	return ok;
 }
 
@@ -1739,11 +1906,14 @@ int main() {
 	ok &= run_starved_rows_hold_their_pose();
 	ok &= run_self_row_gets_no_root_add();
 	ok &= run_root_rotation_follows_heading();
+	ok &= run_root_rotation_pair_is_the_world_motors();
+	ok &= run_replica_root_step_takes_the_world_pair();
 	ok &= run_infantry_root_motion_dead_reckons();
 	ok &= run_root_transition_blends();
 	ok &= run_dead_row_takes_its_death_clip_and_respawn_rearms();
 	ok &= run_corpse_follows_its_records();
 	ok &= run_entity_death_parks_the_death_anim();
+	ok &= run_entity_death_restages_from_the_hit_record();
 	ok &= run_dead_tail_counts_down_and_decays();
 	ok &= run_org1_corpse_is_destroyed_at_zero();
 	ok &= run_player_death_edge_drops_the_carried_flag();

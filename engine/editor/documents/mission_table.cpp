@@ -325,7 +325,7 @@ constexpr AppliesRow kApplies[] = {
 	{MissionRecord::Group, "flags", Applicability::Unverified},
 	{MissionRecord::Group, "value", Applicability::Unverified},
 	// Read and discarded [orig: Mission_LoadBMSFile @0x40fc05..0x40fc38]; the original editor's wav list's file
-	// names [orig: JOTACmed.exe sub_44F920 @0x4509bc..0x450a14].
+	// names [orig: JOTACmed.exe MIS_ExportBmsFile @0x4509bc..0x450a14].
 	{MissionRecord::WavList, "file_name", Applicability::Unverified},
 	{MissionRecord::Entity, "next_ssn", Applicability::Unverified},
 	// Read on a waypoint marker alone, a type-6005 or 6006 one: the spawn reads the record's +0x60 in
@@ -602,8 +602,8 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 		// linked event [orig: Entity_SpawnFromBMSRecord @0x40f0b3 -> entity+0x210], an event of that index
 		// completing the waypoint when it fires and one below 0 naming none [orig:
 		// EventTrigger_MarkLinkedSpawnPoints @0x452ce0; Player_UpdatePerFrame @0x4de649], and the original
-		// editor renumbers it with the events [orig: JOTACmed.exe sub_44D460 @ 0x44d460, the paste;
-		// sub_455B20 @ 0x455b20, the delete (-1, WP_EVENT_DELETED); sub_411C90 @ 0x411c90, the move].
+		// editor renumbers it with the events [orig: JOTACmed.exe MissionEvent_InsertAt @ 0x44d460, the paste;
+		// MissionEvent_RemoveAt @ 0x455b20, the delete (-1, WP_EVENT_DELETED); sub_411C90 @ 0x411c90, the move].
 		if (strutil::same_text(field.key, "wp_adv_trigger")) {
 			out.reference = [](const RecordHandle &record, const RecordOwners &) {
 				const bms::Entity &entity = record.as<bms::Entity>();

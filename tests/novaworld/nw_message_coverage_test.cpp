@@ -650,7 +650,7 @@ int check_C_28_loadout_request() {
 // S2C 0x37 / C2S 0x1A — the shared 5-byte door-row body [u16 handle][i16 state][u8 number];
 // a short body zero-fills (the retail readers' defaults) and reports false. One decoder
 // serves both directions; cover() each so the drift guard balances.
-// [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250; NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+// [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250; NapiNPServerMsg_HandleDoorSlotRequest @0x514B20]
 int check_door_slot_action_pair() {
 	LE w;
 	w.u16(0x2005);   // pool 2 (static) slot 5

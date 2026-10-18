@@ -8,13 +8,13 @@
 // landing thumps, cloth foley, engine loops, impacts, chute and tumble
 // sounds. Witnessed 2026-07-17 (docs/audio/lwf-dbf-sound-re.md §SndProf):
 // [orig: SoundProfile_LoadAll @ 0x527490 (128 x 2152-byte slots, grow-on-
-// demand), sound_profile_xml_callback @ 0x526fc0 (the begin/end line parser;
+// demand), SoundProfile_ParseLineCallback @ 0x526fc0 (the begin/end line parser;
 // the 51-entry name->slot table @ 0x82F3B0 runs slot 0..50 in order),
 // SoundProfile_AllocSlot @ 0x526f80, SoundProfile_FindSlotByName @ 0x526e30
 // (first stricmp match; miss returns the FIRST profile)].
 //
 // Slot resolution to playable sound-set ids happens at mission start against
-// the loaded .lwf banks [orig: resolve_sound_profile_triggers @ 0x528210 ->
+// the loaded .lwf banks [orig: SoundProfile_ResolveAllTriggers @ 0x528210 ->
 // SoundBank_FindTriggerByName]. The embedder resolves by NAME at play time
 // (SoundBank is name-keyed), so this store keeps the authored set names
 // and the world emits them directly; an empty slot name is the id-0 no-op.

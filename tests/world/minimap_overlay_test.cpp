@@ -235,23 +235,23 @@ int main(int argc, char **argv) {
 	{
 		world::Entity e = base_entity();
 		e.item_attrib = world::kItemAttribArmory;
-		auto policy = world::minimap_blip_draw_policy(e, 13);
+		auto policy = world::minimap_blip_draw_policy(e, 13, -1);
 		CHECK(!policy.rotate && policy.half_x_q16 == 0x40000 &&
 						policy.half_y_q16 == 0x40000 && policy.floor_px == 6,
 				"the armory badge draws upright at 4 wu");
 
 		e = base_entity();
 		e.item_type = 3;
-		policy = world::minimap_blip_draw_policy(e, 3);
+		policy = world::minimap_blip_draw_policy(e, 3, -1);
 		CHECK(policy.rotate && policy.half_x_q16 == 0x20000,
 				"a live person rotates at 2 wu");
 		e.engine_flags |= world::kEntityFlagDead;
-		policy = world::minimap_blip_draw_policy(e, 8);
+		policy = world::minimap_blip_draw_policy(e, 8, -1);
 		CHECK(!policy.rotate, "the dead-person body draws upright");
 
 		e = base_entity();
 		e.item_attrib = world::kItemAttribEweap;
-		policy = world::minimap_blip_draw_policy(e, 4);
+		policy = world::minimap_blip_draw_policy(e, 4, -1);
 		CHECK(!policy.rotate && policy.floor_px == 4 &&
 						policy.half_x_q16 == 0x40000,
 				"non-vehicle emplacements draw upright at 4 wu, floor 4");
@@ -260,43 +260,75 @@ int main(int argc, char **argv) {
 		e.item_attrib = world::kItemAttribSpawnPoint;
 		e.minimap_half_x_q16 = 0x80000;
 		e.minimap_half_y_q16 = 0x80000;
-		policy = world::minimap_blip_draw_policy(e, 0);
+		policy = world::minimap_blip_draw_policy(e, 0, -1);
 		CHECK(policy.rotate && policy.floor_px == 16 &&
 						policy.half_x_q16 == 0x40000,
 				"spawn points floor at 16 px on min(model, 4 wu)");
 
 		e = base_entity();
 		e.item_attrib2 = 1;
-		policy = world::minimap_blip_draw_policy(e, 0);
+		policy = world::minimap_blip_draw_policy(e, 0, -1);
 		CHECK(!policy.rotate && policy.half_x_q16 == 0x80000 &&
 						policy.floor_px == 8,
 				"the attrib2-bit0 class draws upright at 8 wu, floor 8");
 
 		e = base_entity();
-		policy = world::minimap_blip_draw_policy(e, 6);
+		policy = world::minimap_blip_draw_policy(e, 6, -1);
 		CHECK(!policy.rotate && policy.floor_px == 12,
 				"cell 6 draws upright with the 12 px floor");
-		policy = world::minimap_blip_draw_policy(e, 2);
+		policy = world::minimap_blip_draw_policy(e, 2, -1);
 		CHECK(!policy.rotate && policy.floor_px == 6,
 				"cell 2 draws upright with the 6 px floor");
 
 		e = base_entity();
 		e.minimap_half_x_q16 = 0x50000;
 		e.minimap_half_y_q16 = 0x30000;
-		policy = world::minimap_blip_draw_policy(e, 10);
+		policy = world::minimap_blip_draw_policy(e, 10, -1);
 		CHECK(policy.rotate && policy.half_x_q16 == 0x50000 &&
 						policy.half_y_q16 == 0x30000,
 				"the default class takes the stamped model halves, rotated");
-		policy = world::minimap_blip_draw_policy(e, 9);
+		policy = world::minimap_blip_draw_policy(e, 9, -1);
 		CHECK(policy.half_x_q16 == 0x50000 * 6 / 5,
 				"cell 9 scales the halves x1.2");
+
+		// The change-team class joins the walk's last legs: a 12 px floor; with a
+		// zone number the halves doubled, cell 26 + (its team is the local
+		// player's), upright [orig: Minimap_DrawBlip @0x597CBB..0x597D42].
+		e = base_entity();
+		e.item_attrib = world::kItemAttribChangeTeam;
+		e.zone_number = 0;
+		e.minimap_half_x_q16 = 0x50000;
+		e.minimap_half_y_q16 = 0x30000;
+		policy = world::minimap_blip_draw_policy(e, 9, 1);
+		CHECK(policy.change_team && policy.floor_px == 12 && policy.cell == 0 && policy.rotate &&
+						policy.half_x_q16 == 0x50000 * 6 / 5,
+				"a change-team blip floors at 12 px, its cell and form the class's");
+		e.zone_number = 3;
+		e.team = 1;
+		policy = world::minimap_blip_draw_policy(e, 9, 1);
+		CHECK(policy.change_team && policy.cell == 27 && !policy.rotate &&
+						policy.half_x_q16 == 0x50000 * 2 && policy.half_y_q16 == 0x30000 * 2,
+				"a numbered zone of the local team: cell 27, doubled, upright, no x1.2");
+		policy = world::minimap_blip_draw_policy(e, 9, 2);
+		CHECK(policy.cell == 26, "another team's: cell 26");
+		e.item_attrib = world::kItemAttribChangeTeam | world::kItemAttribArmory;
+		policy = world::minimap_blip_draw_policy(e, 13, 1);
+		CHECK(!policy.change_team && policy.cell == 0, "the armory badge leaves before the change-team legs");
+		e.item_attrib = world::kItemAttribChangeTeam;
+		e.item_type = 3;
+		policy = world::minimap_blip_draw_policy(e, 3, 1);
+		CHECK(!policy.change_team, "so does a person");
 
 		e = base_entity();
 		e.item_type = 5;
 		e.has_minimap_model_marker = true;
-		policy = world::minimap_blip_draw_policy(e, 0);
+		policy = world::minimap_blip_draw_policy(e, 0, -1);
 		CHECK(policy.footprint && !policy.rotate,
 				"a marked building leaves the icon path for its footprint");
+		e.item_attrib = world::kItemAttribChangeTeam;
+		policy = world::minimap_blip_draw_policy(e, 0, -1);
+		CHECK(policy.footprint && policy.change_team,
+				"a change-team building's footprint carries the bit for its taker blink");
 	}
 
 	// The map-overlay caller passes a zero color-alpha override, which the
@@ -317,7 +349,7 @@ int main(int argc, char **argv) {
 				"team-two footprints are opaque red");
 		e.team = 0;
 		e.item_attrib = world::kItemAttribChangeTeam;
-		CHECK(world::minimap_footprint_fill_argb(e) == 0xFF609F60u,
+		CHECK(world::minimap_footprint_fill_argb(e) == 0xFF60A060u,
 				"change-team footprints are opaque green");
 	}
 

@@ -33,19 +33,19 @@ int main(void) {
     CHECK(adm.count == 4);
 
     // Single-clip rows have one variant.
-    CHECK(adm.entries[0].variant_count == 1);
+    CHECK(adm.entries[0].variants.size() == 1);
     CHECK(strcmp(adm.entries[0].variants[0], "m4_RST") == 0);
 
     // Triple-clip row keeps every token IN ORDER — the authored duplication is the
     // rotation weighting (r plays twice per r2 cycle).
     CHECK(strcmp(adm.entries[2].key, "anim_wpn_reload") == 0);
-    CHECK(adm.entries[2].variant_count == 3);
+    CHECK(adm.entries[2].variants.size() == 3);
     CHECK(strcmp(adm.entries[2].variants[0], "m4_1r") == 0);
     CHECK(strcmp(adm.entries[2].variants[1], "m4_1r") == 0);
     CHECK(strcmp(adm.entries[2].variants[2], "m4_1r2") == 0);
 
     // Double-clip row (extra whitespace between tokens).
-    CHECK(adm.entries[3].variant_count == 2);
+    CHECK(adm.entries[3].variants.size() == 2);
     CHECK(strcmp(adm.entries[3].variants[0], "m4_1f") == 0);
     CHECK(strcmp(adm.entries[3].variants[1], "m4_1f2") == 0);
 
@@ -84,21 +84,21 @@ int main(void) {
     }
     if (adm.count == 6) {
         CHECK(strcmp(adm.entries[0].key, "anim_walk_forward") == 0);
-        CHECK(adm.entries[0].variant_count == 1);
+        CHECK(adm.entries[0].variants.size() == 1);
         CHECK(strcmp(adm.entries[0].variants[0], "Dt1RunF.bad") == 0);
-        CHECK(adm.entries[1].variant_count == 2);
+        CHECK(adm.entries[1].variants.size() == 2);
         CHECK(strcmp(adm.entries[1].variants[1], "second.bad") == 0);
-        CHECK(adm.entries[2].variant_count == 1);
+        CHECK(adm.entries[2].variants.size() == 1);
         CHECK(strcmp(adm.entries[2].variants[0], "dir/idle.bad") == 0);
         // BIRD1.ADM's shape: the unquoted /no token is the row's break.
-        CHECK(adm.entries[3].variant_count == 3);
+        CHECK(adm.entries[3].variants.size() == 3);
         CHECK(strcmp(adm.entries[3].variants[2], "B_FORWA1.bad") == 0);
         CHECK(strcmp(adm.entries[4].key, "anim_jog_forward") == 0);
-        CHECK(adm.entries[4].variant_count == 1);
+        CHECK(adm.entries[4].variants.size() == 1);
         // A quoted token that starts with '/' also ends the row, so
         // anim_stop, anim_emote_10 and anim_crouch register nothing.
         CHECK(strcmp(adm.entries[5].key, "anim_prone") == 0);
-        CHECK(adm.entries[5].variant_count == 2);
+        CHECK(adm.entries[5].variants.size() == 2);
     }
     adm_free(&adm);
 
@@ -106,7 +106,7 @@ int main(void) {
     // byte. [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5]
     const char *tail = "anim_idle \"x.bad\"Z";
     CHECK(adm_parse_buffer(tail, strlen(tail), &adm) == 0);
-    CHECK(adm.count == 1 && adm.entries[0].variant_count == 1);
+    CHECK(adm.count == 1 && adm.entries[0].variants.size() == 1);
     if (adm.count == 1) CHECK(strcmp(adm.entries[0].variants[0], "x.bad") == 0);
     adm_free(&adm);
 
@@ -135,7 +135,7 @@ int main(void) {
 
     // The lines the walk never hands the row parser: a "//" or ';' comment, a first
     // token that starts with '/', a line of delimiters alone; a blank line holds
-    // nothing and is not reported. A row naming ten clips keeps 8 and blocks: the
+    // nothing and is not reported. A row naming ten clips keeps all ten: the
     // game registers every one. [orig: File_ParseASCIIFile @0x53D915, @0x53D91E;
     // AnimMap_ParseConfigLine @0x40CBAE..0x40CC05]
     const char *skipped =
@@ -147,17 +147,57 @@ int main(void) {
         "anim_idle a b c d e f g h i j\r\n";
     dropped.clear();
     CHECK(adm_parse_buffer(skipped, strlen(skipped), &adm, &dropped) == 0);
-    CHECK(adm.count == 1 && dropped.size() == 5);
-    if (adm.count == 1) CHECK(adm.entries[0].variant_count == ADM_MAX_VARIANTS);
-    if (dropped.size() == 5) {
+    CHECK(adm.count == 1 && dropped.size() == 4);
+    // Every clip the row names, as the game registers every one (D-26): ten here.
+    if (adm.count == 1) CHECK(adm.entries[0].variants.size() == 10 && strcmp(adm.entries[0].variants[9], "j") == 0);
+    if (dropped.size() == 4) {
         CHECK(dropped[0].line == 1 && dropped[0].what.find("comment") != std::string::npos);
         CHECK(dropped[1].line == 2 && dropped[1].what.find("comment") != std::string::npos);
         CHECK(dropped[2].line == 3 && dropped[2].key == "/x");
         CHECK(dropped[3].line == 5 && dropped[3].row == SIZE_MAX && !dropped[3].blocks);
-        CHECK(dropped[4].line == 6 && dropped[4].row == 0 && dropped[4].blocks &&
-              dropped[4].what.find("10 clips") != std::string::npos);
     }
     adm_free(&adm);
+    // A row of nine clips keeps all nine and writes them back; the line reader's 30 tokens hold 29 clips, which the
+    // writer takes, and it refuses a thirtieth [orig: AnimMap_ParseConfigLine @0x40CBAE..0x40CC05; Config_TokenizeLine
+    // @0x53CC8C..0x53CC93].
+    {
+        const char *nine = "anim_reset a\r\nanim_idle c1 c2 c3 c4 c5 c6 c7 c8 c9\r\n";
+        AdmFile rows{};
+        CHECK(adm_parse_buffer(nine, strlen(nine), &rows) == 0 && rows.count == 2);
+        if (rows.count == 2) {
+            CHECK(rows.entries[1].variants.size() == 9 && strcmp(rows.entries[1].variants[8], "c9") == 0);
+            std::string written;
+            CHECK(adm_write_buffer(&rows, written) == 0 && written.find("\"c8\" \"c9\"") != std::string::npos);
+            const auto filled = [&rows](size_t count) {
+                rows.entries[1].variants.resize(count);
+                for (AdmClip &clip : rows.entries[1].variants)
+                    if (clip.text[0] == 0) strcpy(clip.text, "x");
+            };
+            // 29 clips write, the 29th bare (the line's 30th token, never closed), and read back as written.
+            filled(ADM_MAX_VARIANTS);
+            CHECK(adm_write_buffer(&rows, written) == 0);
+            AdmFile back{};
+            CHECK(adm_parse_buffer(written.data(), written.size(), &back) == 0 && back.count == 2);
+            if (back.count == 2) {
+                CHECK(back.entries[1].variants.size() == size_t(ADM_MAX_VARIANTS));
+                for (size_t v = 0; v < back.entries[1].variants.size() && v < rows.entries[1].variants.size(); ++v)
+                    CHECK(strcmp(back.entries[1].variants[v], rows.entries[1].variants[v]) == 0);
+            }
+            adm_free(&back);
+            // A 29th clip that a bare token cannot carry, a 30th clip, a line past 1000 characters: refused.
+            strcpy(rows.entries[1].variants.back().text, "a b");
+            CHECK(adm_write_buffer(&rows, written) != 0);
+            filled(ADM_MAX_VARIANTS + 1);
+            CHECK(adm_write_buffer(&rows, written) != 0);
+            filled(20);
+            for (AdmClip &clip : rows.entries[1].variants) {
+                memset(clip.text, 'x', 60);
+                clip.text[60] = 0;
+            }
+            CHECK(adm_write_buffer(&rows, written) != 0);
+        }
+        adm_free(&rows);
+    }
 
     if (failures == 0) printf("adm_variants_test: all passed\n");
     return failures == 0 ? 0 : 1;

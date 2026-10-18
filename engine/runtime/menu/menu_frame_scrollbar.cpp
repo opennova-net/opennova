@@ -537,7 +537,7 @@ int MenuFrameCompiler::scroll_window_part_(const ScrollParts &parts, float mx,
 
 // Whether a widget's scrollbar is a window the pump and the press reach: a
 // SCROLL widget's own buttons, or the shown scroll window of a LIST, LAN_LIST
-// or TABLE (shown while its rows overflow [orig: list_insert_row @ 0x645125;
+// or TABLE (shown while its rows overflow [orig: CListWnd_InsertRow @ 0x645125;
 // CTableWnd_RecalcLayout @ 0x63f1a0]). A combo's dropdown is the dropdown
 // pump's (pump_popup_mouse).
 bool MenuFrameCompiler::scroll_windows_(int index, const MenuFrameState &state,

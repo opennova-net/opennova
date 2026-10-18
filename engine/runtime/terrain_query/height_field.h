@@ -124,6 +124,14 @@ struct TerrainHeightGradient {
 	int32_t dy = 0;
 };
 
+// The nearest height at a fixed-point (16.16) mission position, the game's own lookup: the atlas
+// texel the shared routing takes (terrain_atlas_texel_at: NEG/SAR on the words, the grid clamp or
+// wrap, the quadrant), its raw16 shifted up by 8 into 16.16 [orig: Terrain_GetHeightAtPosition
+// @ 0x606720..0x606796]. 0 with no grid and on an empty cell (@ 0x606770..0x606772). The float
+// height_field_height_world reads the same texel except where the float image of a word past 24
+// significant bits rounds across a texel edge.
+int32_t height_field_height_fixed(const TerrainHeightField &f, int32_t mission_x, int32_t mission_y);
+
 // Fixed-point mission X/Y, with retail's NEG/SAR, global wrap/clamp and
 // quadrant-local tap locks. Empty terrain/cells return zero differences, as
 // the two motor callers initialize the retail out-parameters to zero.

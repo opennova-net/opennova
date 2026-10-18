@@ -42,13 +42,6 @@ std::string mission_drawing(const SessionView &view, const std::string &file) {
 	return first;
 }
 
-// A field's whole number.
-int64_t whole(const Value &value) {
-	if (const int64_t *i = std::get_if<int64_t>(&value)) return *i;
-	if (const double *d = std::get_if<double>(&value)) return int64_t(*d);
-	return 0;
-}
-
 // The frame a flipbook shows at `time_ms` with every register at `ctrl`: the engine's frame law.
 int frame_at(const threedi::ThreediMaterial &material, const std::vector<std::string> &names, uint32_t time_ms,
 		int32_t ctrl) {

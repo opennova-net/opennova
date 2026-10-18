@@ -24,6 +24,13 @@ inline int32_t spawn_angle_bam(int32_t deg) {
 constexpr double kBamPerDegree = kBamFullTurn / 360.0;
 constexpr double kDegreesPerBam = 360.0 / kBamFullTurn;
 
+// A BAM as the whole degrees of an Entity's int16 pitch / roll mirror, rounded
+// half away from zero: (bam * 360) / 2^32 in a double, both steps exact. Ours
+// alone (a presentation mirror, not a retail immediate).
+inline int16_t degrees_i16_from_bam(int32_t bam) {
+    return static_cast<int16_t>(std::lround(double(bam) * 360.0 / kBamFullTurn));
+}
+
 inline double normalize_mission_yaw_deg(double degrees) {
     double out = std::fmod(degrees, 360.0);
     if (out < 0.0) out += 360.0;

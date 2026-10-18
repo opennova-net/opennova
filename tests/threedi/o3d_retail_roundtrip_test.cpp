@@ -10,6 +10,10 @@
 // past their strip's table, which the scene cannot name).
 // The CXLT table the scene carries must also come back row for row (US01,
 // ArmsG and Mp5b_1st ship rows that are not their sections' offsets).
+// The rebuild is a fixed point: build(scene(x)) byte for byte
+// build(scene(build(scene(x)))), over the six and SASBODY1 and sasmg (skinned
+// vertices whose fourth slot's rest a scene once printed into the first
+// pair's weight, so the second rebuild stored other floats).
 //
 // Nothing is excused. Any line `compare` calls a difference fails the model,
 // and so does DRIFT (a value within its tolerance) outside the categories
@@ -25,6 +29,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 #include <formats/threedi/threedi_3di3.h>
@@ -95,6 +100,12 @@ bool same_cxlt(const std::string &a_path, const std::string &b_path) {
 	return same;
 }
 
+// A file's bytes ("" where it does not read).
+std::string bytes_of(const std::string &path) {
+	std::ifstream in(path, std::ios::binary);
+	return in ? std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()) : std::string();
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -105,7 +116,7 @@ int main(int argc, char **argv) {
 	const std::string cli = quoted(argv[1]);
 	const std::string dir = argv[2];
 	int failures = 0, ran = 0;
-	for (const char *name : {"Armry01", "Dblkhwk1", "US01", "ArmsG", "Mp5b_1st", "FSldr03"}) {
+	for (const char *name : {"Armry01", "Dblkhwk1", "US01", "ArmsG", "Mp5b_1st", "FSldr03", "SASBODY1", "sasmg"}) {
 		const std::string model = retail::asset_file((std::string(name) + ".3di").c_str());
 		if (model.empty()) {
 			std::printf("SKIP-LEG: needs %s.3di in OPENNOVA_JO_ASSETS\n", name);
@@ -121,6 +132,16 @@ int main(int argc, char **argv) {
 			++failures;
 			continue;
 		}
+		// The fixed point: the rebuild's scene builds the rebuild again, byte for byte.
+		const std::string again_o3d = dir + "/" + name + ".rt2.o3d", again = dir + "/" + name + ".rt2.3di";
+		if (run(cli + " scene " + quoted(rebuilt) + " -o " + quoted(again_o3d)) != 0 ||
+				run(cli + " build " + quoted(again_o3d) + " -o " + quoted(again)) != 0 || bytes_of(again).empty() ||
+				bytes_of(again) != bytes_of(rebuilt)) {
+			std::fprintf(stderr, "%s: build(scene(x)) is not a fixed point\n", name);
+			++failures;
+			continue;
+		}
+		if (std::string(name) == "SASBODY1" || std::string(name) == "sasmg") continue; // the fixed point alone
 		const int compared = run(cli + " compare " + quoted(model) + " " + quoted(rebuilt) + " > " + quoted(report));
 		const bool derived = only_derived_drift(name, report);
 		if (compared != 0 || !derived) {
@@ -132,7 +153,8 @@ int main(int argc, char **argv) {
 		}
 	}
 	if (ran == 0)
-		return retail::skip("OPENNOVA_JO_ASSETS with Armry01.3di, Dblkhwk1.3di, US01.3di, ArmsG.3di, Mp5b_1st.3di, FSldr03.3di");
+		return retail::skip("OPENNOVA_JO_ASSETS with Armry01.3di, Dblkhwk1.3di, US01.3di, ArmsG.3di, Mp5b_1st.3di, FSldr03.3di, "
+		                    "SASBODY1.3di, sasmg.3di");
 	if (failures == 0) std::printf("o3d_retail_roundtrip_test: ok (%d models)\n", ran);
 	return failures == 0 ? 0 : 1;
 }

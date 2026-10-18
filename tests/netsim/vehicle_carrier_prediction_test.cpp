@@ -85,7 +85,6 @@ struct Harness {
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };
 		role.kit_seams.push = [] {};
-		role.kit_seams.respawn = [] {};
 	}
 };
 

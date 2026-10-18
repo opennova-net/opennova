@@ -278,9 +278,12 @@ inline constexpr uint32_t kTextureFlagOneLevel = 0x40000;
 inline constexpr uint32_t kTextureFlagThreeLevels = 0x80000;
 
 // The last level a stage samples on a texture the game builds from pixels,
-// `width` x `height` (after its halvings) under its creation flags.
+// `width` x `height` (after its halvings) under its creation flags: D3DX's
+// levels at its own sides in the format the flags pick on the reference card
+// (texture_level_count, select_texture_dxt_format).
 inline uint32_t pixel_texture_last_level(uint32_t width, uint32_t height, uint32_t creation_flags) {
-	const uint32_t levels = texture_level_count(width, height, creation_flags);
+	const uint32_t levels = texture_level_count(width, height, creation_flags,
+			select_texture_dxt_format(creation_flags, kReferenceTextureDxtCaps));
 	return levels == 0 ? 0 : levels - 1;
 }
 

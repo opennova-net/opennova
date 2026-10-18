@@ -158,7 +158,7 @@ w::EntityHandle spawn_door(w::World &world, int count) {
 // or open record takes the value only for number 3, and the record's state
 // goes back to the sender; number 0, a number past the count, an unknown row
 // and a sender without a slot draw nothing.
-// [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+// [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20]
 void test_host_answers_door_requests() {
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;

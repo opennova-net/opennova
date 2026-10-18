@@ -30,15 +30,16 @@
 namespace opennova::hud {
 
 // One action row's down-edge latch with the witnessed gate: the row fires
-// on the press edge while gameplay input is active and no Shift/Alt chord is
-// held (our debug picks ride Shift+F6; Ctrl is a binding modifier the sampler
-// already resolved). Retail re-fires a held keyboard row on every auto-repeat
-// key-down (D-CTRL-6). The latch follows the UNGATED key state, so a press held
-// across an armory or F3 window cannot re-fire when the gate reopens.
+// on the press edge while gameplay input is active (a modifier is a binding
+// matter the sampler already resolved; Shift or Alt held is no gate, as the
+// key scan has none). Retail re-fires a held keyboard row on every
+// auto-repeat key-down (D-CTRL-6). The latch follows the UNGATED key state,
+// so a press held across an armory or F3 window cannot re-fire when the gate
+// reopens [orig: Input_ProcessKeyboardEvents @0x49D327..0x49D488].
 struct HudKeyEdge {
 	bool was_down = false;
 	// Advances the latch; true on the gated press edge.
-	bool step(bool down, bool active, bool chorded);
+	bool step(bool down, bool active);
 	void reset() { was_down = false; }
 };
 
@@ -125,7 +126,7 @@ inline constexpr int kBriefingModeOpen = 2;
 // as the binding sampler resolves it (one key event fires one row: retail's
 // scan is first-match by action code, so a key huddetail and hudcolor share
 // reaches hudcolor, code 10, alone; controls::BindingSet::pressed_key), the
-// chord and gate bits, and whether an MP session is live
+// gate bit, and whether an MP session is live
 // (the ShowScore toggle is SP-only [orig: the !is_in_session gate @0x49bd29];
 // the respawn init closes the player list only for a session peer
 // [orig: is_in_session && is_mp_session_peer @0x4993a4..0x4993ae] — every
@@ -169,7 +170,6 @@ struct HudKeyPoll {
 	//  queue @0x49d41e..0x49d42f; Input_TryDispatchBindingByWeaponType
 	//  @0x499180..0x4991a4]
 	bool mouse_scale_negative = false;
-	bool chorded = false;
 	bool active = false;
 	bool in_session = false;
 	// The connection mode's two bits [orig: g_NapiNPCtx.is_authority /

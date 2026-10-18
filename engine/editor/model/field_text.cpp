@@ -86,4 +86,8 @@ std::string counted(size_t count, const char *one, const char *many) {
 	return strutil::grouped(count) + " " + (count == 1 ? one : many);
 }
 
+std::string counted_digits(size_t count, const char *one, const char *many) {
+	return std::to_string(count) + " " + (count == 1 ? one : many);
+}
+
 } // namespace opennova::editor

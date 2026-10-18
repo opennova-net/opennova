@@ -37,6 +37,7 @@ class ResourceRoot;
 class RtxtStringFile;
 class AvatarDatabase;
 class AvatarComboRow;
+class ArmoryLoadoutPick;
 class DeployListRow;
 class EndRoundColumn;
 class EndRoundRow;
@@ -176,18 +177,27 @@ public:
 	String options_control_text(int p_action, int p_device) const;
 	void show_ingame_main() { opennova::menu::OptionsScreen::show_ingame_main(runtime_); }
 
-	int fill_player_info_ammo(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
-			int p_parent, int p_primary, int p_secondary, int p_type, const Ref<RtxtStringFile> &p_text);
 	void fill_armory_ammo(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
 			int p_parent, const String &p_current_name, int p_current_clips, const Ref<RtxtStringFile> &p_text);
-	TypedArray<WeaponDef> fill_player_info_grenades(const Ref<WeaponDatabase> &p_weapons,
-			int p_class_mask, int p_team_mask, const Dictionary &p_counts, const Ref<RtxtStringFile> &p_text);
+	// The loadout screens' category lists (engine loadout_screen.h carries the
+	// witnesses): a list filled under the NONE row `p_none_label` with the
+	// weapon.def row each list row carries back (row 0 NONE, -1), the map
+	// availability term when `p_availability` is valid (weapon name -> 0 drops
+	// it); the weapon.def row a selection carries; the WEAPON screen's reselect
+	// by name, its clip count and its ACCEPT pick.
+	PackedInt32Array fill_loadout_slot(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
+			int p_slot, int p_class_mask, int p_team_mask, const Callable &p_availability,
+			const String &p_none_label, const Ref<RtxtStringFile> &p_text);
+	int loadout_selected_weapon(const String &p_control, const PackedInt32Array &p_rows) const;
+	void select_loadout_weapon_name(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
+			const PackedInt32Array &p_rows, const String &p_name);
+	int armory_selected_clips(const String &p_control) const;
+	Ref<ArmoryLoadoutPick> armory_loadout_pick(const Ref<WeaponDatabase> &p_weapons,
+			const PackedInt32Array &p_primary, const PackedInt32Array &p_secondary,
+			const PackedInt32Array &p_accessory, const TypedArray<WeaponDef> &p_grenades) const;
 	TypedArray<WeaponDef> fill_armory_grenades(const Ref<WeaponDatabase> &p_weapons,
 			int p_class_mask, int p_team_mask, const Array &p_current, const Callable &p_availability,
 			const Ref<RtxtStringFile> &p_text);
-	double player_info_loadout_weight(const Ref<WeaponDatabase> &p_weapons,
-			const TypedArray<WeaponDef> &p_parents, const TypedArray<WeaponDef> &p_grenades,
-			const Dictionary &p_primary, const Dictionary &p_secondary) const;
 	double armory_loadout_weight(const Ref<WeaponDatabase> &p_weapons,
 			const TypedArray<WeaponDef> &p_parents, const TypedArray<WeaponDef> &p_grenades) const;
 
@@ -327,7 +337,8 @@ public:
 	// frame after them (pump_mouse). process_mouse is one whole sample (a scripted pump).
 	void process_mouse(const Vector2 &p_position, bool p_button_down);
 	void move_mouse(const Vector2 &p_position, bool p_button_down);
-	bool press_mouse(const Vector2 &p_position);
+	// `p_double_click`: the platform's double click (InputEventMouseButton::double_click).
+	bool press_mouse(const Vector2 &p_position, bool p_double_click = false);
 	bool release_mouse(const Vector2 &p_position);
 	void pump_mouse();
 	// A mouse event as its message: a motion's point and left button, the left button's press or

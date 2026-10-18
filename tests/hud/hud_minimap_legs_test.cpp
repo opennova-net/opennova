@@ -224,6 +224,50 @@ void test_pointer_geometry_and_race() {
 			"a sideways waypoint leaves only the MAPCOORDS label");
 }
 
+// C-350 — the pointer's d^2 goes through _ftol2_sse unclamped: at the
+// zoom-in clamp (4096 / (210 x 200) world units per pixel) a waypoint 4400 u
+// ahead projects 45,117 px out (d^2 under 2^31: the clamped chevron), one
+// 5000 u ahead 51,270 px (d^2 past int32: the integer indefinite compares
+// below (R - span)^2, so the INSIDE leg puts the tip at the off-map target and
+// the line runs to the rect edge). The tracked callout's outside test reads
+// the same conversion. [orig: HUD_DrawMapTargetPointer @0x599337..0x599351;
+// Render_LaserSightEffect @0x59D269..0x59D289]
+void test_pointer_far_target_indefinite() {
+	HudMinimapInput in = corner();
+	in.zoom_q16 = kSpinmapZoomMin;
+	in.waypoint_present = true;
+	in.waypoint_x = 4400 << 16;
+	HudMinimapCompiler compiler;
+	const HudMapPass &near = compiler.compile(in);
+	const HudMapSprite *tip = nullptr;
+	for (const HudMapSprite &s : near.sprites)
+		if (s.layer == 4) tip = &s;
+	CHECK(tip != nullptr && std::fabs(tip->half_w - 10.0f) < 1e-4f &&
+			std::fabs(tip->center_y - (kCy - (kR - 10.0f))) < 0.05f,
+			"under 2^31 the chevron clamps at R - span");
+	in.waypoint_x = 5000 << 16;
+	const HudMapPass &far = compiler.compile(in);
+	bool chevron = false;
+	for (const HudMapSprite &s : far.sprites)
+		if (s.layer == 4 && std::fabs(s.half_w - 10.0f) < 1e-4f) chevron = true;
+	CHECK(!chevron, "past int32 no clamped chevron draws");
+	CHECK(far.lines.size() == 1 && far.lines[0].y1 < kCy - kR,
+			"past int32 the line runs past the disc toward the off-map target");
+
+	HudMinimapOverlays ov;
+	ov.tracked.ticks = 186;
+	ov.tracked.serial = 1;
+	ov.tracked.friendly = true; // no snapshot blip on the inside leg
+	ov.tracked.snap_x = 4400 << 16;
+	HudMinimapInput t = corner();
+	t.zoom_q16 = kSpinmapZoomMin;
+	t.overlays = &ov;
+	HudMinimapCompiler tracked;
+	CHECK(tracked.compile(t).lines.size() == 1, "the tracked callout's outside leg under 2^31");
+	ov.tracked.snap_x = 5000 << 16;
+	CHECK(tracked.compile(t).lines.empty(), "past int32 the callout takes its inside leg");
+}
+
 // A5 — rings are Render_DrawRingOverlay's anti-aliased band: 253's main ring
 // (R = 4 px -> 16 segments x 6 tris) and its filled 1-px dot (4 x 7), each
 // special drawn on three layer passes.
@@ -238,7 +282,7 @@ void test_ring_band() {
 	ring.color = 0xFF208020u;
 	ring.remaining_ticks = 10;
 	in.markers.push_back(ring);
-	in.ticks = 8; // pulse phase 0: the colour stays
+	in.hud_frame = 8; // pulse phase 0: the colour stays
 	HudMinimapCompiler compiler;
 	const HudMapPass &p = compiler.compile(in);
 	int bands = 0;
@@ -331,6 +375,91 @@ void test_blip_flash_gates() {
 	in.markers[0].icon = 3;
 	in.item_flash[10] = 0x30;
 	CHECK(count_icon_sprites(compiler.compile(in)) == 0, "timer 10 lit hides cell 3");
+}
+
+// The change-team blip blinks on the session frame clock: half-bright in the lit
+// phase, a neutral zone being taken to the taker's colour; its cell replaces the
+// slot's. [orig: Minimap_DrawBlip @0x597CC7..0x597D42]
+void test_change_team_blink() {
+	HudMinimapInput in = corner();
+	HudMinimapMarker m = live(0, 0, 10, 0xFF208020u, HudMinimapBank::kTransient);
+	m.change_team = 1;
+	m.team = 1;
+	in.markers.push_back(m);
+	HudMinimapCompiler compiler;
+	auto blip_color = [&]() -> uint32_t {
+		for (const HudMapSprite &s : compiler.compile(in).sprites)
+			if (s.texture == 0) return s.color;
+		return 0u;
+	};
+	in.session_frame = 0x1F;
+	CHECK(blip_color() == 0xFF208020u, "the dark phase keeps the colour");
+	in.session_frame = 0x20;
+	CHECK(blip_color() == 0xFF104010u, "the lit phase halves it, the alpha arg opaque");
+	in.markers[0].team = 0;
+	in.markers[0].capture_team = 2;
+	CHECK(blip_color() == 0xFF802020u, "a neutral zone being taken blinks to the taker's colour");
+	in.markers[0].capture_team = 1;
+	CHECK(blip_color() == 0xFF304080u, "team 1's taker colour");
+	// A numbered zone (its slot colour the zone palette's, quartered: Render_MinimapSlotBlip)
+	// halves instead, and only in the lit phase.
+	in.markers[0].zone_number = 4;
+	in.session_frame = 0x40;
+	const uint32_t dark = blip_color();
+	in.session_frame = 0x60;
+	CHECK(dark != 0u && blip_color() == (0xFF000000u | ((dark >> 1) & 0x007F7F7Fu)),
+			"a numbered zone halves instead");
+	// The cell: the policy's 26 / 27 draws in place of the slot's.
+	HudMinimapInput plain = in;
+	plain.markers[0].change_team = 0;
+	plain.markers[0].icon = 27;
+	in.markers[0].cell = 27;
+	const HudMapPass &a = compiler.compile(in);
+	float au = -1.0f, av = -1.0f;
+	for (const HudMapSprite &s : a.sprites)
+		if (s.texture == 0) { au = s.u0; av = s.v0; }
+	HudMinimapCompiler other;
+	float bu = -2.0f, bv = -2.0f;
+	for (const HudMapSprite &s : other.compile(plain).sprites)
+		if (s.texture == 0) { bu = s.u0; bv = s.v0; }
+	CHECK(au == bu && av == bv, "the change-team cell replaces the slot's");
+}
+
+// A neutral change-team footprint being taken blinks to the taker's colour on the
+// session frame clock; a held one keeps its fill. [orig: Render_CollisionWireframe
+// @0x5968C9..0x5968FA]
+void test_change_team_footprint_blink() {
+	HudMinimapInput in = corner();
+	HudMinimapMarker m = live(0, 0, 0, 0xFF208020u, HudMinimapBank::kTransient);
+	m.footprint = 1;
+	m.rotate = 0;
+	m.change_team = 1;
+	m.capture_team = 1;
+	in.markers.push_back(m);
+	std::vector<HudMinimapFootprint> footprints(1);
+	footprints[0].handle = m.handle;
+	footprints[0].fill_argb = 0xFF60A060u;
+	footprints[0].fill_xy_q16 = {-(4 << 16), -(4 << 16), 4 << 16, -(4 << 16), 0, 4 << 16};
+	hud_minimap_finalize_footprint(footprints[0]);
+	in.footprints = &footprints;
+	HudMinimapCompiler compiler;
+	auto fill = [&]() -> uint32_t {
+		const HudMapPass &p = compiler.compile(in);
+		return p.overlays.empty() ? 0u : p.overlays.front().color;
+	};
+	in.session_frame = 0x10;
+	CHECK(fill() == 0xFF60A060u, "the dark phase keeps the change-team green");
+	in.session_frame = 0x20;
+	CHECK(fill() == 0xFF304080u, "the lit phase blinks to taker 1's colour");
+	in.markers[0].capture_team = 2;
+	CHECK(fill() == 0xFF802020u, "taker 2's");
+	in.markers[0].zone_number = 5;
+	CHECK(fill() == 0xFF802020u, "the footprint has no zone-number test");
+	in.markers[0].team = 1;
+	CHECK(fill() == 0xFF60A060u, "a held zone keeps its fill");
+	in.markers[0].team = 0;
+	in.markers[0].change_team = 0;
+	CHECK(fill() == 0xFF60A060u, "only the change-team class blinks");
 }
 
 HudMinimapMarker zone_marker(uint8_t zone_number, uint8_t source, uint8_t team) {
@@ -443,7 +572,7 @@ void test_zone_waypoint_labels() {
 	ov.defensive_position_format = "DEF %s";
 	HudMinimapInput in = big(3);
 	in.overlays = &ov;
-	in.ticks = 8; // phase 0
+	in.hud_frame = 8; // phase 0
 	in.markers = {zone_marker(1, 0x80, 1)};
 	HudMinimapCompiler compiler;
 	const HudMapLabel *obj = find_label(compiler.compile(in), "OBJ Alpha");
@@ -648,10 +777,13 @@ int main() {
 	test_bit16_squaring_and_width_scale();
 	test_mask_and_missing_sector_tiles();
 	test_pointer_geometry_and_race();
+	test_pointer_far_target_indefinite();
 	test_ring_band();
 	test_bank_walk_gates();
 	test_blip_crop();
 	test_blip_flash_gates();
+	test_change_team_blink();
+	test_change_team_footprint_blink();
 	test_objective_tethers();
 	test_farp_chevron();
 	test_waypoint_nub_raw_state_colour();

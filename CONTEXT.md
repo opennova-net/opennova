@@ -457,7 +457,7 @@ _Avoid_: animation file, clip file (a `.bad` is one clip)
 **`opennova-3di`**:
 The command-line tool (`apps/3di`) over the engine's one `.3di` reader and writer: the
 `.o3d` and `.o3a` texts' `build` and `scene`, `info`, `compare` and `catalog`, and `weapon
-timing` / `weapon merge` (`docs/anim/weapon-timing-format.md`). The Blender add-on bundles it.
+timing` (`docs/anim/weapon-timing-format.md`). The Blender add-on bundles it.
 _Avoid_: the exporter (the add-on is the front end; the CLI mints the files)
 
 **Blender add-on**:

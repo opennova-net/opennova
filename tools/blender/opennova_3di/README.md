@@ -565,10 +565,7 @@ reads an existing weapon definition or imported timing.
 6. **Export Animations** writes `<table>_weapon_edits.txt` beside the table:
    per entry only the keys to set (ANIM, DELAYSTART, DELAYEND, POS, TPOS,
    and FUNCTION for a draw timed by its clip), never sounds, effects or flags. A table without a fire row still
-   writes its clips, and no edits. **Merge into weapon.def** sets those keys
-   in a copy of a `weapon.def` you pick (`opennova-3di weapon merge`), written
-   beside it as `<name>_merged.def` unless you name another file; every other
-   byte stays as it was.
+   writes its clips, and no edits. Set those keys in the entries' `weapon.def`.
 
 | Marker | Times |
 | --- | --- |

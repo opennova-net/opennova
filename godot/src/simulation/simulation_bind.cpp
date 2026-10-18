@@ -33,15 +33,6 @@
 using namespace sim_internal;
 using namespace opennova::threedi;
 
-// The GDScript-facing seat codes are the SAME values engine/runtime/world computes with —
-// a drifted copy here would silently corrupt every binding-side seat-spec walk.
-static_assert(Simulation::SEAT_NONE == static_cast<int>(opennova::world::SeatType::None));
-static_assert(Simulation::SEAT_PASSENGER == static_cast<int>(opennova::world::SeatType::Passenger));
-static_assert(Simulation::SEAT_CONTROLLER == static_cast<int>(opennova::world::SeatType::Controller));
-static_assert(Simulation::SEAT_GUNNER == static_cast<int>(opennova::world::SeatType::Gunner));
-static_assert(Simulation::SEAT_ARMORY_POINT == static_cast<int>(opennova::world::SeatType::ArmoryPoint));
-static_assert(Simulation::SEAT_DRIVER == static_cast<int>(opennova::world::SeatType::Driver));
-
 // Values the class enum cannot assign straight from the engine home: the
 // userpoint scan limit lives in a C header macro, and the integral fov mirror
 // pins against the engine float.
@@ -134,6 +125,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("round_over_key", "vk", "restart_vk"), &Simulation::round_over_key);
 	ClassDB::bind_method(D_METHOD("ingame_restart"), &Simulation::ingame_restart);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &Simulation::is_joined_in_match);
+	ClassDB::bind_method(D_METHOD("take_input_reset"), &Simulation::take_input_reset);
 	ClassDB::bind_method(D_METHOD("is_joiner_network_diagnostics_enabled"),
 	                     &Simulation::is_joiner_network_diagnostics_enabled);
 	ClassDB::bind_method(D_METHOD("set_joiner_network_diagnostics_enabled", "enabled"),
@@ -317,6 +309,10 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_event_fired", "index"), &Simulation::has_event_fired);
 	ClassDB::bind_method(D_METHOD("get_event_count"), &Simulation::get_event_count);
 	ClassDB::bind_method(D_METHOD("get_logic_tick"), &Simulation::get_logic_tick);
+	ClassDB::bind_method(D_METHOD("get_main_frame_counter"), &Simulation::get_main_frame_counter);
+	ClassDB::bind_method(D_METHOD("get_session_frame_counter"),
+			&Simulation::get_session_frame_counter);
+	ClassDB::bind_method(D_METHOD("get_hud_frame_counter"), &Simulation::get_hud_frame_counter);
 	ClassDB::bind_method(D_METHOD("get_panm_time_ms"),
 			&Simulation::get_panm_time_ms);
 	ClassDB::bind_method(D_METHOD("debug_set_panm_time_ms", "time_ms"),
@@ -438,6 +434,11 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("compute_iris_samples", "cam_pos", "cam_forward", "light_dir"),
 	                     &Simulation::compute_iris_samples);
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &Simulation::local_player_in_armory_zone);
+	ClassDB::bind_method(D_METHOD("local_player_use_item_arm"), &Simulation::local_player_use_item_arm);
+	ClassDB::bind_method(D_METHOD("take_use_item_press"), &Simulation::take_use_item_press);
+	ClassDB::bind_method(D_METHOD("release_use_item_key", "system_key_up"),
+			&Simulation::release_use_item_key);
+	ClassDB::bind_method(D_METHOD("is_armory_press_latched"), &Simulation::is_armory_press_latched);
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"),
 	                     &Simulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("local_player_vehicle_zone_team_matches"),
@@ -633,12 +634,6 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_COUNT);
 
-	BIND_ENUM_CONSTANT(SEAT_NONE);
-	BIND_ENUM_CONSTANT(SEAT_PASSENGER);
-	BIND_ENUM_CONSTANT(SEAT_CONTROLLER);
-	BIND_ENUM_CONSTANT(SEAT_GUNNER);
-	BIND_ENUM_CONSTANT(SEAT_ARMORY_POINT);
-	BIND_ENUM_CONSTANT(SEAT_DRIVER);
 
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_ABSENT);
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_RECEIVING);
@@ -647,6 +642,10 @@ void Simulation::_bind_methods() {
 
 	BIND_CONSTANT(WEAPON_ACTION_FIRE);
 
+	BIND_ENUM_CONSTANT(USE_ITEM_ARM_MOUNT_CHAIN);
+	BIND_ENUM_CONSTANT(USE_ITEM_ARM_ARMORY);
+	BIND_ENUM_CONSTANT(USE_ITEM_ARM_ARMORY_REFUSED);
+	BIND_ENUM_CONSTANT(USE_ITEM_ARM_VEHICLE_LOADOUT);
 	BIND_ENUM_CONSTANT(STANCE_STAND);
 	BIND_ENUM_CONSTANT(STANCE_CROUCH);
 	BIND_ENUM_CONSTANT(STANCE_PRONE);

@@ -266,6 +266,72 @@ std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
 // the #276 trace_projectile restructure dropped it, leaving every round to
 // resolve a target view (and its per-section matrix vector) for every table
 // entity each tick.
+// The line distance retail's pools-2/1 gates take along the ray context's
+// direction, which a throwable motor's context carries as its velocity over
+// its speed (not a unit vector): dot = (dir . (c - s)) >> 16, the point
+// s + (dir * dot + 0x8000) >> 16 per axis, and its distance from the center,
+// the x87 sqrt clamped to flt_7C19E0 (2147418112.0) and truncated.
+static int32_t retail_line_distance(const int32_t s[3], const int32_t dir[3],
+                                    const int32_t c[3]) {
+    const int32_t dot = static_cast<int32_t>(
+            (static_cast<int64_t>(dir[1]) * (c[1] - s[1]) +
+             static_cast<int64_t>(dir[0]) * (c[0] - s[0]) +
+             static_cast<int64_t>(dir[2]) * (c[2] - s[2])) >> 16);
+    double sum = 0.0;
+    for (int axis = 0; axis < 3; ++axis) {
+        const int32_t p = s[axis] + static_cast<int32_t>(
+                (static_cast<int64_t>(dir[axis]) * dot + 0x8000) >> 16);
+        const double d = static_cast<double>(p - c[axis]);
+        sum += d * d;
+    }
+    double dist = std::sqrt(sum);
+    if (dist > 2147418112.0) dist = 2147418112.0;
+    return static_cast<int32_t>(dist);
+}
+
+// The slot gate under a ray context: |segment center - c| <= radius + half
+// extent per axis, then the line distance against the radius.
+// [orig: Projectile_RaycastProximitySlots @0x4E5340 -- the box test and
+//  projection on each pool's leg, e.g. the static leg @0x4E53D4..0x4E54C2]
+static bool retail_slot_line_gate(const int32_t s[3], const int32_t e[3],
+                                  const int32_t dir[3], const int32_t c[3],
+                                  int32_t radius) {
+    // abs32 of the wrapping dword difference against the wrapping sum, signed.
+    const auto wrap = [](uint32_t v) { return static_cast<int32_t>(v); };
+    for (int axis = 0; axis < 3; ++axis) {
+        const int32_t lo = std::min(s[axis], e[axis]);
+        const int32_t hi = std::max(s[axis], e[axis]);
+        const int32_t half = wrap(static_cast<uint32_t>(hi) - static_cast<uint32_t>(lo)) >> 1;
+        const int32_t center = wrap(static_cast<uint32_t>(half) + static_cast<uint32_t>(lo));
+        const uint32_t diff = static_cast<uint32_t>(center) - static_cast<uint32_t>(c[axis]);
+        const int32_t distance = wrap(diff) < 0 ? wrap(0u - diff) : wrap(diff);
+        if (distance > wrap(static_cast<uint32_t>(radius) + static_cast<uint32_t>(half)))
+            return false;
+    }
+    return retail_line_distance(s, dir, c) <= radius;
+}
+
+// The entity's own gate ahead of its face walk under a ray context: a zero
+// bound radius skips the entity, then the segment's box against the center
+// +/- the radius per axis, then the line distance against the radius.
+// [orig: Physics_RaycastAgainstBoneCollision @0x4E4CB0 -- the zero test
+//  @0x4E4CD6, the box @0x4E4CEB..0x4E4D3A, the projection
+//  @0x4E4D9F..0x4E4E76, the compare @0x4E4E7A..0x4E4EB4]
+static bool retail_entity_line_gate(const int32_t s[3], const int32_t e[3],
+                                    const int32_t dir[3], const int32_t c[3],
+                                    int32_t radius) {
+    if (radius == 0) return false;
+    const auto wrap = [](uint32_t v) { return static_cast<int32_t>(v); };
+    for (int axis = 0; axis < 3; ++axis) {
+        const int32_t lo = std::min(s[axis], e[axis]);
+        const int32_t hi = std::max(s[axis], e[axis]);
+        const uint32_t c_u = static_cast<uint32_t>(c[axis]);
+        const uint32_t r_u = static_cast<uint32_t>(radius);
+        if (lo > wrap(c_u + r_u) || hi < wrap(c_u - r_u)) return false;
+    }
+    return retail_line_distance(s, dir, c) <= radius;
+}
+
 static bool round_broad_phase(const float p0[3], const float p1[3], const float c[3],
                               float r) {
     const float hx = std::fabs(p1[0] - p0[0]) * 0.5f;
@@ -459,6 +525,13 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     if (delta[0] == 0 && delta[1] == 0 && delta[2] == 0) return best;
     const int32_t segment_length = vec_len_ftol(delta[0], delta[1], delta[2]);
     if (segment_length <= 0) return best;
+    // A caller's own ray context (ProjectileTrace::ray_length_q16), for a
+    // pools-2/1 walk alone: every distance below is in its length's units.
+    const bool context_ray = trace.ray_length_q16 > 0 && !trace.walk_terrain &&
+                             !trace.walk_water && !trace.walk_persons;
+    const int32_t ray_length = context_ray ? trace.ray_length_q16 : segment_length;
+    const int32_t context_dir[3] = {trace.ray_dir_q16.x, trace.ray_dir_q16.y,
+                                    trace.ray_dir_q16.z};
     int32_t best_distance = 0x7FFFFFFF;
 
     // Trace attribution is deliberately cold unless an F3/probe consumer opts
@@ -486,7 +559,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         return p;
     };
     auto t_for_distance = [&](int32_t distance) {
-        int64_t t = (static_cast<int64_t>(distance) << 16) / segment_length;
+        int64_t t = (static_cast<int64_t>(distance) << 16) / ray_length;
         if (t < 0) t = 0;
         if (t > 0x10000) t = 0x10000;
         return static_cast<int32_t>(t);
@@ -573,7 +646,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     const Entity *owner = world.registry.get(trace.owner);
     EntityHandle ignored_mount = trace.mount_ignore;
     EntityHandle ignored_mount_parent;
-    if (owner != nullptr && owner->mounted) {
+    if (trace.owner_mount_exclusion && owner != nullptr && owner->mounted) {
         if (owner->mount_type == SeatType::Controller ||
             owner->mount_type == SeatType::Gunner ||
             owner->mount_type == SeatType::Driver) {
@@ -611,36 +684,8 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     ray.end[1] = trace.end.y;
     ray.end[2] = trace.end.z;
     ray.refresh();
-
-    // Compatibility sphere for an item whose graphic has no resolved collision
-    // instance. An assigned BVOL-only model is deliberately NOT substituted:
-    // gameplay volumes (CB/CL/CA/VC/BB/etc.) are not projectile CFAC geometry.
-    auto sphere_distance = [&](const int32_t center[3], int32_t radius,
-                               int32_t &out_distance) {
-        if (radius <= 0) return false;
-        const long double fx = static_cast<long double>(trace.start.x) -
-                               static_cast<long double>(center[0]);
-        const long double fy = static_cast<long double>(trace.start.y) -
-                               static_cast<long double>(center[1]);
-        const long double fz = static_cast<long double>(trace.start.z) -
-                               static_cast<long double>(center[2]);
-        const long double dx = delta[0], dy = delta[1], dz = delta[2];
-        const long double a = dx * dx + dy * dy + dz * dz;
-        const long double c = fx * fx + fy * fy + fz * fz -
-                              static_cast<long double>(radius) * radius;
-        if (c <= 0.0L) {
-            out_distance = 0;
-            return true;
-        }
-        const long double b = fx * dx + fy * dy + fz * dz;
-        const long double discriminant = b * b - a * c;
-        if (a <= 0.0L || discriminant < 0.0L) return false;
-        const long double t = (-b - std::sqrt(discriminant)) / a;
-        if (t < 0.0L || t > 1.0L) return false;
-        out_distance = static_cast<int32_t>(
-            t * static_cast<long double>(segment_length));
-        return true;
-    };
+    if (context_ray)
+        for (int axis = 0; axis < 3; ++axis) ray.dir[axis] = context_dir[axis];
 
     // Segment endpoints in slot-table units for the witnessed broad phase.
     const float p0f[3] = {
@@ -666,20 +711,30 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         const bool q8_mesh = !model_ref.faces.empty() &&
                              !model_ref.face_vertices.empty();
         if (indexed_mesh) {
-            return collision_raycast_polygons(target, ray, segment_length,
+            return collision_raycast_polygons(target, ray, ray_length,
                                               trace.ammo_flags, model_hit);
         }
         if (q8_mesh) {
             RayFaceHit face_hit;
             if (!collision_raycast_faces(target, ray.start, ray.end,
-                                         trace.ammo_flags, face_hit))
+                                         trace.ammo_flags, face_hit,
+                                         context_ray ? context_dir : nullptr,
+                                         context_ray ? ray_length : 0))
                 return false;
             model_hit.distance_q16 = face_hit.dist;
-            const int32_t t = t_for_distance(face_hit.dist);
-            const FixedVec3 p = point_at(t);
-            model_hit.position_q16[0] = p.x;
-            model_hit.position_q16[1] = p.y;
-            model_hit.position_q16[2] = p.z;
+            if (context_ray) {
+                // The context's test point, start + dir * dist.
+                for (int axis = 0; axis < 3; ++axis)
+                    model_hit.position_q16[axis] = ray.start[axis] + static_cast<int32_t>(
+                            (static_cast<int64_t>(context_dir[axis]) * face_hit.dist +
+                             0x8000) >> 16);
+            } else {
+                const int32_t t = t_for_distance(face_hit.dist);
+                const FixedVec3 p = point_at(t);
+                model_hit.position_q16[0] = p.x;
+                model_hit.position_q16[1] = p.y;
+                model_hit.position_q16[2] = p.z;
+            }
             model_hit.section_index = face_hit.section;
             model_hit.section_face_index = face_hit.face;
             model_hit.poly_type = face_hit.material;
@@ -700,6 +755,8 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                     };
                     target.matrices[face_hit.section].rotate_point(
                         local_normal, model_hit.normal_q16);
+                    for (int axis = 0; axis < 3; ++axis)
+                        model_hit.local_normal_q16[axis] = local_normal[axis];
                 }
             }
             return true;
@@ -715,6 +772,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     // static slots are signed whole-unit coordinates carried in u16 storage
     // (their +1.707u radius pad absorbs the rounding [orig: the u16 tables
     // built @ 0x4b94cb]); dynamic slots store signed full 16.16.
+    // Pool 1's walk's best, kept or not: the shared ray record's last writer
+    // (ProjectileTrace::shared_ray_record).
+    ProjectileHit pool1_record;
+    bool pool1_walk_hit = false;
     auto trace_polygon_table = [&](const auto &slots, ProjectileHitClass hit_class,
                                    float slot_to_units, bool signed_word_coords,
                                    bool tie_wins = false) {
@@ -736,9 +797,29 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             };
             const float sc[3] = {coord_to_units(slot.x), coord_to_units(slot.y),
                                  coord_to_units(slot.z)};
-            if (!round_broad_phase(p0f, p1f, sc,
-                                   static_cast<float>(slot.radius) * slot_to_units))
+            if (trace.only_entity.valid()) {
+                // The single-entity walk skips the slot gate (the entity's own
+                // gate below still runs).
+                if (h != trace.only_entity) continue;
+            } else if (context_ray) {
+                // The table's words in retail's Q16: a static slot's u16
+                // coordinates and radius << 16, a dynamic slot's dwords as is
+                // [orig: @0x4E53E5..0x4E5414 (static), the dword reads of the
+                // dyn leg].
+                const auto q16 = [&](auto value) {
+                    if (signed_word_coords)
+                        return static_cast<int32_t>(
+                                static_cast<uint32_t>(static_cast<uint16_t>(value)) << 16);
+                    return static_cast<int32_t>(value);
+                };
+                const int32_t c[3] = {q16(slot.x), q16(slot.y), q16(slot.z)};
+                if (!retail_slot_line_gate(ray.start, ray.end, context_dir, c,
+                                           q16(slot.radius)))
+                    continue;
+            } else if (!round_broad_phase(p0f, p1f, sc,
+                                          static_cast<float>(slot.radius) * slot_to_units)) {
                 continue;
+            }
             if (profile_trace) {
                 if (hit_class == ProjectileHitClass::StaticEntity)
                     trace_profile_.static_survivors++;
@@ -788,24 +869,17 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                     trace_profile_.dynamic_faces += faces;
             }
             if (target == nullptr) {
-                // Weapon_RaycastAndSpawnImpact feeds every pool through the
-                // CFAC walker. A model-less person/item is a miss here, never
-                // the bounded sphere compatibility used by ordinary bullets.
-                // [orig: Weapon_RaycastAndSpawnImpact @0x4e8460;
-                // Physics_RaycastAgainstBoneCollision @0x4e4cb0]
-                if (person_faces_only || aim) continue;
-                const int32_t center[3] = {to_fixed(entity->position.x),
-                                           to_fixed(entity->position.y),
-                                           to_fixed(entity->position.z)};
-                const int32_t radius = entity->bound_radius > 0.0f
-                    ? to_fixed(entity->bound_radius)
-                    : 0;
-                if (!sphere_distance(center, radius, model_hit.distance_q16)) continue;
-                const int32_t t = t_for_distance(model_hit.distance_q16);
-                const FixedVec3 p = point_at(t);
-                model_hit.position_q16[0] = p.x;
-                model_hit.position_q16[1] = p.y;
-                model_hit.position_q16[2] = p.z;
+                // The face walk tests the entity's model before anything else:
+                // an entity without a collision model is never hit, by any
+                // walk [orig: Physics_RaycastAgainstBoneCollision @0x4E4CB0 --
+                // the model pick and its null test @0x4E4D68..0x4E4D73;
+                // Weapon_RaycastAndSpawnImpact @0x4E8460 feeds every pool
+                // through it].
+                continue;
+            } else if (context_ray &&
+                       !retail_entity_line_gate(ray.start, ray.end, context_dir,
+                                                target->pos, target->bound_radius)) {
+                continue;
             } else if (!narrow_phase(*target, model_hit)) {
                 continue;
             }
@@ -824,11 +898,19 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                                     table_hit.position_q16[2]};
         eh.normal_q16 = FixedVec3{table_hit.normal_q16[0], table_hit.normal_q16[1],
                                   table_hit.normal_q16[2]};
+        eh.local_normal_q16 = FixedVec3{table_hit.local_normal_q16[0],
+                                        table_hit.local_normal_q16[1],
+                                        table_hit.local_normal_q16[2]};
         eh.section_index = table_hit.section_index;
         eh.bone_index = table_hit.section_index;
         eh.face_index = table_hit.section_face_index;
         eh.surface_type = table_hit.poly_type;
         eh.material_flags = table_hit.material_flags;
+        eh.face_normal_found = table_hit.section_index >= 0;
+        if (hit_class == ProjectileHitClass::DynamicEntity) {
+            pool1_record = eh;
+            pool1_walk_hit = true;
+        }
         consider(eh, table_hit.distance_q16, tie_wins);
     };
     // A visual-only MP client (mp_session && !projectile_authority) uses decoded
@@ -886,7 +968,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             // compare before Physics_RaycastAgainstBoneCollision @ 0x4e5572].
             if (proxy.wire_handle == trace.shooter_wire_handle) continue;
             if (aim && proxy.registry_twin == trace.owner) continue;
-            if (proxy.wire_handle == trace.shooter_carrier_wire_handle) continue;
+            if (trace.owner_mount_exclusion &&
+                proxy.wire_handle == trace.shooter_carrier_wire_handle)
+                continue;
+            const bool only_this = trace.only_entity.valid();
+            if (only_this && proxy.registry_twin != trace.only_entity) continue;
             const float sc[3] = {
                 static_cast<float>(proxy.position_q16.x) / io::kFp16One,
                 static_cast<float>(proxy.position_q16.y) / io::kFp16One,
@@ -895,9 +981,18 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             const int32_t broad_radius = proxy.bound_radius_q16 > 0
                 ? proxy.bound_radius_q16
                 : 0x10000;
-            if (!round_broad_phase(p0f, p1f, sc,
-                                   static_cast<float>(broad_radius) / io::kFp16One))
+            if (only_this) {
+                // the slot gate skipped, as above
+            } else if (context_ray) {
+                const int32_t c[3] = {proxy.position_q16.x, proxy.position_q16.y,
+                                      proxy.position_q16.z};
+                if (!retail_slot_line_gate(ray.start, ray.end, context_dir, c,
+                                           broad_radius))
+                    continue;
+            } else if (!round_broad_phase(p0f, p1f, sc,
+                                          static_cast<float>(broad_radius) / io::kFp16One)) {
                 continue;
+            }
             if (profile_trace) trace_profile_.dynamic_survivors++;
             CollisionPolygonHit model_hit;
             const CollisionModel *proxy_model = model(proxy.model_id);
@@ -932,6 +1027,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 view.pool_index = proxy.wire_handle & 0xFFF;
                 view.uniform_scale_q16 = proxy.uniform_scale_q16;
                 view.live_section_pose = false;
+                if (context_ray &&
+                    !retail_entity_line_gate(ray.start, ray.end, context_dir, view.pos,
+                                             view.bound_radius))
+                    continue;
                 if (!narrow_phase(view, model_hit)) continue;
             } else {
                 // Retail's pool-1 projectile pass walks client entities only
@@ -961,12 +1060,44 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             eh.normal_q16 = FixedVec3{table_hit.normal_q16[0],
                                       table_hit.normal_q16[1],
                                       table_hit.normal_q16[2]};
+            eh.local_normal_q16 = FixedVec3{table_hit.local_normal_q16[0],
+                                            table_hit.local_normal_q16[1],
+                                            table_hit.local_normal_q16[2]};
             eh.section_index = table_hit.section_index;
             eh.bone_index = table_hit.section_index;
             eh.face_index = table_hit.section_face_index;
             eh.surface_type = table_hit.poly_type;
             eh.material_flags = table_hit.material_flags;
+            eh.face_normal_found = table_hit.section_index >= 0;
+            pool1_record = eh;
+            pool1_walk_hit = true;
             consider(eh, table_hit.distance_q16);
+        }
+    }
+
+    // The motors' shared ray record: a kept pool-2 hit takes the record pool
+    // 1's walk wrote after it, and its normals read that section and face on
+    // the kept entity's model, none past its bounds (the reflection's
+    // negated-velocity fallback) [orig: Physics_RaycastAgainstBoneCollision
+    // @0x4E5254..0x4E5276; Physics_ComputeReflectionForce @0x4E4416..0x4E449D].
+    if (trace.shared_ray_record && pool1_walk_hit && best.hit() &&
+        best.hit_class == ProjectileHitClass::StaticEntity) {
+        best.surface_type = pool1_record.surface_type;
+        best.material_flags = pool1_record.material_flags;
+        best.section_index = pool1_record.section_index;
+        best.bone_index = pool1_record.bone_index;
+        best.face_index = pool1_record.face_index;
+        best.normal_q16 = FixedVec3{};
+        best.local_normal_q16 = FixedVec3{};
+        const CollisionTargetView *kept = trace_target_view(world, best.geometry_entity);
+        int32_t local_n[3] = {};
+        int32_t world_n[3] = {};
+        best.face_normal_found =
+                kept != nullptr && collision_section_face_normal(*kept, best.section_index,
+                                                                 best.face_index, local_n, world_n);
+        if (best.face_normal_found) {
+            best.normal_q16 = FixedVec3{world_n[0], world_n[1], world_n[2]};
+            best.local_normal_q16 = FixedVec3{local_n[0], local_n[1], local_n[2]};
         }
     }
 
@@ -1071,6 +1202,60 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         uint32_t index = 0;
     };
     std::vector<PersonWalkEntry> person_walk;
+    // The bone-section walk over one posed person: bones descend, the first
+    // qualifying (highest-index) bone is primary, and its COBJ radius
+    // controls both tolerance and hit distance; the final overlap is ray[32].
+    // [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]
+    const auto walk_posed_bones = [&](const CollisionModel &person_model,
+                                      const CollisionMatrix *matrices,
+                                      uint32_t section_mask, int32_t target_radius,
+                                      ProjectileHit &eh, int32_t &hit_distance) {
+        bool person_hit = false;
+        for (int32_t bone = static_cast<int32_t>(person_model.sections.size()) - 1;
+             bone >= 0; --bone) {
+            const uint32_t bit = 1u << (static_cast<uint32_t>(bone) & 31u);
+            if ((section_mask & bit) != 0) continue;
+            const CollisionSection &sec = person_model.sections[bone];
+            if (sec.radius < 0) continue; // host/test sentinel; authored zero is valid
+            int32_t center[3] = {};
+            matrices[bone].transform_point(sec.center, center);
+            const int32_t projection = static_cast<int32_t>(
+                (static_cast<int64_t>(ray.dir[0]) * (center[0] - ray.start[0]) +
+                 static_cast<int64_t>(ray.dir[1]) * (center[1] - ray.start[1]) +
+                 static_cast<int64_t>(ray.dir[2]) * (center[2] - ray.start[2])) >> 16);
+            if (projection < 0 || projection > segment_length) continue;
+            int32_t closest[3] = {};
+            for (int axis = 0; axis < 3; ++axis) {
+                closest[axis] = ray.start[axis] + static_cast<int32_t>(
+                    (static_cast<int64_t>(ray.dir[axis]) * projection + 0x8000) >> 16);
+            }
+            const int32_t center_distance =
+                vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
+                             closest[2] - center[2]);
+            const int32_t hit_radius =
+                person_effective_radius(bone, sec.radius, target_radius);
+            if (center_distance > hit_radius) continue;
+
+            if (!person_hit) {
+                hit_distance = projection - (sec.radius >> 1);
+                eh.section_index = bone;
+                eh.bone_index = bone;
+                if (sec.face_count > 0 && sec.face_start >= 0 &&
+                    sec.face_start < static_cast<int32_t>(person_model.faces.size())) {
+                    const CollisionFace &face = person_model.faces[sec.face_start];
+                    eh.material_flags = face.normal_index >= 0
+                        ? face.material_flags
+                        : face.flags;
+                }
+            }
+            // The reverse walk retains the first/highest overlap in ray[31]
+            // for reactions, but ray[32] is overwritten through the final/
+            // lowest overlap and drives normal-infantry damage.
+            eh.hit_zone = bone;
+            person_hit = true;
+        }
+        return person_hit;
+    };
     if (trace.walk_persons && !person_faces_only) {
         const bool merge_proxies =
             trace.include_wire_proxies && !wire_person_proxies_.empty();
@@ -1128,7 +1313,45 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             if (profile_trace) trace_profile_.person_survivors++;
             ProjectileHit eh;
             int32_t hit_distance = 0;
-            if (!trace_torso_fallback(proxy.position_q16,
+            // The client built this person as its own pool-0 entity and walks
+            // its posed bone spheres like any other: the provider poses the
+            // row's model from the row's channels; without a pose the torso
+            // stand-in serves. The walk skips the sections set in the body's
+            // sectionMask (+0x134), which a client-built person holds clear:
+            // the 0x0C slot memset and Entity_ResetToSpawnState zero it, and
+            // its one person writer, the dismemberment cut, is the
+            // authority's (the other +0x134 writers serve items: the 0x0D /
+            // 0x10 spawns, the glass and blast section breaks, the landmine).
+            // [orig: Physics_RaycastAgainstProximityList @ 0x4e4a30 ->
+            //  Physics_RaycastAgainstBoneSections @ 0x4e4670; NapiNPClientMsg_0x00C
+            //  @ 0x42e7f1; Entity_ResetToSpawnState @ 0x4b9797; the cut
+            //  @ 0x407684 / @ 0x407a27 behind the authority tests @ 0x407598 /
+            //  @ 0x40793b]
+            bool live_pose = false;
+            const CollisionModel *person_model =
+                proxy.model_id >= 0 ? model(proxy.model_id) : nullptr;
+            if (person_model != nullptr && person_model->valid() &&
+                pose_provider_ != nullptr) {
+                const int32_t proxy_pos[3] = {proxy.position_q16.x,
+                                              proxy.position_q16.y,
+                                              proxy.position_q16.z};
+                const CollisionMatrix proxy_world =
+                    collision_matrix_from_euler(0, 0, 0, proxy_pos);
+                std::vector<CollisionMatrix> mats;
+                live_pose = pose_provider_->build_wire_person_section_matrices(
+                                const_cast<World &>(world), proxy.wire_handle,
+                                proxy.model_id, proxy_world, *person_model, mats) &&
+                            mats.size() == person_model->sections.size();
+                if (live_pose &&
+                    !walk_posed_bones(*person_model, mats.data(), 0u,
+                                      person_extra_radius(world.rules.title, proxy.player,
+                                                          proxy.mounted, proxy.moving,
+                                                          effective_radius),
+                                      eh, hit_distance))
+                    continue;
+            }
+            if (!live_pose &&
+                !trace_torso_fallback(proxy.position_q16,
                                       proxy.uniform_scale_q16, eh, hit_distance))
                 continue;
             eh.victim_bound_radius_q16 = person_park_radius(proxy.bound_radius_q16);
@@ -1191,50 +1414,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             live_pose_available = true;
             const int32_t target_radius =
                     person_extra_radius(world.rules.title, *e, effective_radius);
-            const CollisionModel &person_model = *posed->model;
-            for (int32_t bone = static_cast<int32_t>(person_model.sections.size()) - 1;
-                 bone >= 0; --bone) {
-                const uint32_t bit = 1u << (static_cast<uint32_t>(bone) & 31u);
-                if ((e->section_mask & bit) != 0) continue;
-                const CollisionSection &sec = person_model.sections[bone];
-                if (sec.radius < 0) continue; // host/test sentinel; authored zero is valid
-                int32_t center[3] = {};
-                posed->matrices[bone].transform_point(sec.center, center);
-                const int32_t projection = static_cast<int32_t>(
-                    (static_cast<int64_t>(ray.dir[0]) * (center[0] - ray.start[0]) +
-                     static_cast<int64_t>(ray.dir[1]) * (center[1] - ray.start[1]) +
-                     static_cast<int64_t>(ray.dir[2]) * (center[2] - ray.start[2])) >> 16);
-                if (projection < 0 || projection > segment_length) continue;
-                int32_t closest[3] = {};
-                for (int axis = 0; axis < 3; ++axis) {
-                    closest[axis] = ray.start[axis] + static_cast<int32_t>(
-                        (static_cast<int64_t>(ray.dir[axis]) * projection + 0x8000) >> 16);
-                }
-                const int32_t center_distance =
-                    vec_len_ftol(closest[0] - center[0], closest[1] - center[1],
-                                 closest[2] - center[2]);
-                const int32_t hit_radius =
-                    person_effective_radius(bone, sec.radius, target_radius);
-                if (center_distance > hit_radius) continue;
-
-                if (!person_hit) {
-                    hit_distance = projection - (sec.radius >> 1);
-                    eh.section_index = bone;
-                    eh.bone_index = bone;
-                    if (sec.face_count > 0 && sec.face_start >= 0 &&
-                        sec.face_start < static_cast<int32_t>(person_model.faces.size())) {
-                        const CollisionFace &face = person_model.faces[sec.face_start];
-                        eh.material_flags = face.normal_index >= 0
-                            ? face.material_flags
-                            : face.flags;
-                    }
-                }
-                // The reverse walk retains the first/highest overlap in ray[31]
-                // for reactions, but ray[32] is overwritten through the final/
-                // lowest overlap and drives normal-infantry damage.
-                eh.hit_zone = bone;
-                person_hit = true;
-            }
+            person_hit = walk_posed_bones(*posed->model, posed->matrices,
+                                          e->section_mask, target_radius, eh,
+                                          hit_distance);
         }
 
         if (live_pose_available && !person_hit) continue;

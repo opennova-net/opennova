@@ -82,6 +82,10 @@ HostConfig shell_host_config(const ShellHostSource &source) {
 		host.network_type = source.lan_network_type;
 	} else {
 		host.config = singleplayer_game_config(source.sp_game_type, source.profile);
+		// Single player's fill reads game.cfg's own zoom option
+		// [orig: g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F].
+		if (source.cfg_block != nullptr)
+			host.config.allow_sniper_scope_zoom = source.cfg_block->mp_allowsniperscopezoom != 0;
 		host.socket_mode = SocketMode::Socketless;
 		host.serve_and_play = true;
 		host.network_type = NetworkType::Lan;
@@ -226,7 +230,7 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.destroy_buildings = static_cast<uint32_t>(cfg.destroybuild);
 	config.death_messages = static_cast<uint32_t>(cfg.deathmes);
 	// The session difficulty word, the S2C 0x08 block's seventh byte
-	// [orig: dword_24D2110 = multiplayerDifficulty_484 on the authority
+	// [orig: g_SessionDifficulty = multiplayerDifficulty_484 on the authority
 	// @0x551E80 / @0x551F75].
 	config.config_bytes[6] = static_cast<uint8_t>(cfg.mp_difficulty);
 	// [orig: g_SessionPermanentDeath = permanentDeath_5E4 @0x5522AA, byte_A821F0 =

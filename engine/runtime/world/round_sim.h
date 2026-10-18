@@ -70,6 +70,7 @@ namespace opennova::world {
 
 struct FixedVec3;
 struct ProjectileHit;
+struct WirePersonBody; // world/wire_person_hit.h
 
 class CollisionWorld;
 
@@ -137,6 +138,10 @@ struct RoundSourceState {
     bool person_with_item_def = false;
     bool player = false;
     uint8_t stance_category = 2; // 0 prone, 1 crouch/mounted, 2 standing/air/water
+    // The raw prone bit (+0x12C & 0x100), kept apart from the overridden row:
+    // the spread's up/down limit keys on it [orig: RoundData_SpawnRound
+    // @0x4EC129..0x4EC137, read @0x4EC454].
+    bool prone = false;
     bool scope_raised = false;
     bool underwater = false;
     bool indoors = false; // entity+0x24 & 0x800000, the bit the spawn stamps into its round
@@ -162,6 +167,14 @@ struct RoundSourceState {
 bool entity_eye_below_water(const World &world, int32_t body_z_q16,
                             int32_t eye_offset_z);
 
+// The Flags bits that force the standing stance row (2) on a shot and on the
+// crosshair, beside the below-water eye: Parachute 0x20 | Drowning 0x8000 |
+// LadderContact 0x100000. Neither site tests InAir 0x2000.
+// [orig: RoundData_SpawnRound `test [ebp+24h], 108020h` @0x4ec2d5;
+//  HUD_DrawCrosshair `test [edx+24h], 108020h` @0x592b50]
+inline constexpr uint32_t kStanceRowStandingFlags =
+        kEntityFlagParachute | kEntityFlagDrowning | kEntityFlagLadderContact;
+
 struct RandomSpreadOffset {
     int32_t yaw_bam = 0;
     int32_t pitch_bam = 0;
@@ -182,6 +195,12 @@ RandomSpreadOffset weapon_calc_shotgun_spread_offset(
 
 struct RoundSpawnParams {
     bool launch_presented = false; // Weapon_FireProcess already emitted ammo launch effects
+    // The host's own copy of a slot fire action's round (an AI gunner's FSM fire, a
+    // remote client's primary 0x06): its launch effect and glow are the fired def's
+    // FIRE row's at the gun, as WeaponAction_Fire's ActionSlot_ExecuteActionTick
+    // presents them, not the ammo's. [orig: WeaponAction_Fire @0x542CB4 ->
+    //  ActionSlot_ExecuteActionTick @0x541A70 -> ActionSlot_SpawnEffect @0x401F20]
+    bool action_leg_presentation = false;
     EntityHandle owner;               // the shooter entity (skipped in the hit test)
     uint16_t shooter_handle = 0xFFFF; // pool<<12|slot, for death credit
     // The decoded shooter's carrier at fire time (visual-only rounds): keeps a
@@ -199,6 +218,12 @@ struct RoundSpawnParams {
     int32_t dir_pitch_bam = 0;
     int32_t ammo_index = -1;          // resolved adm round_type -> AmmoTable index
     uint8_t adm_index = 0;
+    // The ammo-def arm's round carries no weapon: RoundData_AddRound resolves its
+    // byte as a weapon only under the flags' adm-indexed bit, so the spawn's spread
+    // takes the ammo's ERROR leg. [orig: RoundData_AddRound @0x4FDB95..0x4FDBB5;
+    //  RoundData_SpawnRound's null-weapon test @0x4EC38D..0x4EC397, the ammo leg
+    //  @0x4EC4BF..0x4EC4D2]
+    bool no_weapon = false;
     uint16_t shot_seq = 0;
     // Shooter fire-context composite (ring+31). Bit 7 selects the vertical
     // projectile ERROR row; the remaining bits are opaque here.
@@ -297,6 +322,13 @@ struct LiveRound {
     // Entity_InterpolateFromParentDelta @ 0x4a8d60 keeps no rider-side copy].
     EntityHandle parent;
     uint64_t parent_spawn_id = 0;
+    // The charge motors' rest leg on a non-authority peer: the round's +452
+    // update callback becomes the parent follow (a parented round) or nothing,
+    // and the round lingers 248 ticks [orig: Entity_UpdateSatchelPhysics
+    // @0x4489F6..0x448A10, @0x448C1A..0x448C24; Entity_UpdateClaymorePhysics
+    // @0x447981..0x44799B, @0x447B9B..0x447BA5]. motor reads kNone then, and
+    // this bit marks the follow.
+    bool rest_follows_parent = false;
     // Armed at 2 ticks remaining above water; the expiry queues the kill zone
     // [orig: the runtime 0x1000 flag @ 0x444a29 consumed by the update head].
     bool det_at_expiry = false;
@@ -495,7 +527,19 @@ struct HitRecord {
     int32_t section = 0;          // +0x38 (hitRecord[14])
     EntityHandle owner;           // +0x44 (hitRecord[17])
     EntityHandle target;          // +0x48
+    // The round's owner and the struck person by their wire identity, for a
+    // joiner whose remote persons are replica rows with no registry entity
+    // (world/wire_person_hit.h): retail's client holds them as its own pool
+    // entities, so the round's +0x170 owner and +0x48 are those entities.
+    uint16_t round_shooter_wire = 0xFFFF;
+    uint16_t target_wire = 0xFFFF;
 };
+
+// Projectile_CopyEntityToHitRecord: zero the record, then copy the striking
+// round [orig: @0x4E7010 -- the memset @0x4E701A, the round @0x4E707C, its
+// owner @0x4E7085].
+void copy_round_to_hit_record(HitRecord &record, const LiveRound &round,
+                              const FixedVec3 &velocity_q16);
 
 // The person class callbacks' round legs, run on event 1 while the hit record
 // holds a round: the death clip from the record's section and the round's
@@ -505,6 +549,13 @@ struct HitRecord {
 // [orig: OrganicClass_HandleEvent @0x40740F..0x4076D5; the plyr twin
 //  Entity_HandleDamageAndTriggerZones @0x407777..0x407A7C]
 void person_class_round_legs(World &world, Entity &victim, const HitRecord &record);
+
+// The death clip the org class callback's event 4 restages while the hit
+// record holds a round: the record's section and the round's approach
+// quadrant against the victim's heading (entity+0x10), cause 1. The event-1
+// round legs select the same clip.
+// [orig: OrganicClass_HandleEvent @0x40735E..0x4073B1; event 1 @0x407478..0x407483]
+int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_bam);
 
 // One presented fire — the origin/direction/ammo of a spawned round, drained by the
 // HOST present layer for the fire sound + muzzle effect (+ the MF-light deferral).
@@ -536,6 +587,8 @@ struct FireEvent {
     // observed shooter's equipped weapon — conflating them is a port bug.
     // [orig: AdmDef_GetEntryByIndex @0x42f6d9]
     uint8_t adm_index = 0;
+    // RoundSpawnParams::action_leg_presentation, carried to the presentation drain.
+    bool action_leg_presentation = false;
 };
 
 // One resolved hit-test outcome, kept in a persistent ring for the F3 Rounds
@@ -649,9 +702,18 @@ public:
         int32_t player_class = 0; // entity+0x294
         uint8_t equipped_adm_index = 0xFF; // entity+0x2B0
         int32_t pos[3] = {};      // entity+4..+0xC, 16.16
+        uint32_t flags = 0;       // entity+0x24, the row's Flags word
         bool is_local = false;    // the handle is the local player's own
     };
     std::function<bool(uint16_t wire_handle, WireActor &out)> wire_actor_provider;
+    // A joiner's wire-built persons as the damage pass sees them: the role
+    // loads the row's WirePersonBody, hands it to `visit` and stores it back,
+    // synchronously, so the leg runs in retail's order inside the round tick.
+    // False when the handle names no person row. Host and single-player worlds
+    // leave it empty. [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0 over the
+    //  client-built pool-0 entity; world/wire_person_hit.h]
+    std::function<bool(uint16_t wire_handle,
+            const std::function<void(WirePersonBody &)> &visit)> wire_person_body;
     struct GuidedUpdate { uint16_t shooter, net_id; uint8_t groups; GuidedFlightState state; };
     std::vector<GuidedUpdate> guided_updates;
     void init_guided(World &, LiveRound &, const AmmoTableEntry &);
@@ -685,12 +747,53 @@ public:
 
     void process_damage_hit(World &world, LiveRound &round,
             const ProjectileHit &hit, FixedVec3 &velocity_q16);
+    // The client leg of the damage pass over a wire-built person
+    // (world/wire_person_hit.cpp).
+    void process_wire_person_hit(World &world, LiveRound &round,
+            const ProjectileHit &hit, const FixedVec3 &velocity_q16);
 
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;
 
+    // The id the round pool stamps on each allocated round (its +0x78): the
+    // fire's sequence word, or for 0xFFFF a fresh (local slot << 9) | counter,
+    // the 9-bit counter a process-wide word no reset clears.
+    // [orig: CEntityManager_AllocateSlot @0x4EAAD0 - the 0xFFFF test @0x4EAAD7,
+    //  the counter @0x4EAAE8..0x4EAB04, the store @0x4EABD5]
+    uint16_t allocate_round_id(uint16_t sequence_word);
+    // The word a fire hands the pool when it carries no id of its own, so the pool
+    // mints a fresh one from its one counter: the host's own fire, an AI gunner's
+    // and a joiner's own. [orig: word_B7C670's .data 0xFFFF and the resets ahead of
+    //  each action's first call, WeaponAction_ProcessFrame @0x5413F0 / @0x541473;
+    //  Entity_FireWeaponAndSendPacket's authority copy @0x42BED5]
+    static constexpr uint16_t kFreshRoundWord = 0xFFFF;
+    // The word the ammo-def arm hands the pool for a shooter with no player slot (an
+    // AI, a script or a mine): 0xF600 over the low nine bits of the fresh word; a
+    // slotted shooter's carries its slot in bits 9.. [orig: Server_ClientFiredRound
+    //  @0x50BDAE..0x50BDBC; @0x50BD91..0x50BDA5].
+    static constexpr uint16_t kSlotlessAmmoArmWord =
+            static_cast<uint16_t>((kFreshRoundWord & 0x1FFu) | 0xF600u);
+    // The word the ring record (and a joiner's C2S 0x06 hit_part) takes from the
+    // last spawn: the id it allocated, a fan's last pellet's, and for a spawn that
+    // allocated nothing (an instantkillzone, Detonatesatchels or DesignateTarget
+    // ammo) pool slot 0's. [orig: RoundData_AddRound - ring+28 =
+    //  pool[RoundData_SpawnRound()]+0x78 @0x4FDC58..0x4FDCF5;
+    //  Entity_FireWeaponAndSendPacket @0x42C030; RoundData_SpawnRound's null
+    //  returns @0x4EC230 / @0x4EC248 / @0x4EC281, its cursor return @0x4EC907]
+    uint16_t spawned_round_word() const {
+        return spawn_allocated_ ? last_allocated_round_id_ : rounds[0].shot_seq;
+    }
+    // The local player's roster slot the fresh id carries: 0 on a host, a joiner's
+    // own S2C 0x04 slot. [orig: g_LocalPlayerSlotId @0xA860D0 -
+    // Server_InitPlayerSlotSystem @0x4243CF, NapiNPClientMsg_SessionSlotConfig
+    // @0x4254A2]
+    uint8_t local_slot_id = 0;
+
 private:
     uint64_t next_presentation_generation_ = 1;
+    uint32_t round_id_counter_ = 0; // [orig: dword_B7E1A4]
+    uint16_t last_allocated_round_id_ = 0;
+    bool spawn_allocated_ = false; // the last spawn allocated an id
     // Retail advances tracer cadence on each remote shooter's weapon slot. A
     // visual tag-2 round has wire H but no local Entity owner, so this is that
     // per-remote presentation field projected onto the decoded identity.

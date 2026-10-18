@@ -13,11 +13,6 @@ namespace opennova::devtools {
 
 namespace {
 
-world::Vec3 from_fixed(const int32_t p[3]) {
-	return {static_cast<float>(p[0] / io::kFp16OneD), static_cast<float>(p[1] / io::kFp16OneD),
-			static_cast<float>(p[2] / io::kFp16OneD)};
-}
-
 world::Vec3 lifted(const world::Vec3 &p, float dz) { return {p.x, p.y, p.z + dz}; }
 
 float distance_sq(const world::Vec3 &a, const float eye[3]) {
@@ -125,7 +120,7 @@ void AiOverlayLayer::draw_labels(OverlayCanvas &canvas) const {
 	int drawn = 0;
 	for (const world::inspect::AiOverlayRow &row : snapshot_.report.rows) {
 		if (drawn >= kLabelMax) break;
-		const world::Vec3 pos = from_fixed(row.pos);
+		const world::Vec3 pos = overlay_point(row.pos);
 		if (distance_sq(pos, canvas.camera().eye) > range_sq) continue;
 		++drawn;
 		const uint32_t color = row.alive ? alert_color(row.alert) : overlay_rgba(0.55f, 0.55f, 0.55f);
@@ -144,15 +139,15 @@ void AiOverlayLayer::draw_routes(OverlayCanvas &canvas) const {
 		const uint32_t line_color = overlay_fade(color, 0.45f);
 		const size_t n = channel.nodes.size();
 		for (size_t k = 0; k + 1 < n; ++k) {
-			canvas.line(from_fixed(channel.nodes[k].pos), from_fixed(channel.nodes[k + 1].pos), line_color);
+			canvas.line(overlay_point(channel.nodes[k].pos), overlay_point(channel.nodes[k + 1].pos), line_color);
 		}
 		// A looping path (loopflag bit0 clear) closes back on node 0.
 		if ((channel.loopflag & 1) == 0 && n > 2) {
-			canvas.line(from_fixed(channel.nodes[n - 1].pos), from_fixed(channel.nodes[0].pos), line_color);
+			canvas.line(overlay_point(channel.nodes[n - 1].pos), overlay_point(channel.nodes[0].pos), line_color);
 		}
 		for (const world::inspect::AiNavNodeRow &node : channel.nodes) {
 			const float radius = static_cast<float>(node.radius_q16 / io::kFp16OneD);
-			canvas.diamond(from_fixed(node.pos), radius > 0.35f ? radius : 0.35f, color);
+			canvas.diamond(overlay_point(node.pos), radius > 0.35f ? radius : 0.35f, color);
 		}
 	}
 	// Each follower's current node: a line from the brain and a bright cross.
@@ -163,8 +158,8 @@ void AiOverlayLayer::draw_routes(OverlayCanvas &canvas) const {
 		const auto &nodes = it->second->nodes;
 		if (row.wp_node < 0 || row.wp_node >= static_cast<int32_t>(nodes.size())) continue;
 		const uint32_t color = overlay_index_color(row.wp_channel);
-		const world::Vec3 node = from_fixed(nodes[static_cast<size_t>(row.wp_node)].pos);
-		canvas.line(from_fixed(row.pos), node, overlay_fade(color, 0.8f));
+		const world::Vec3 node = overlay_point(nodes[static_cast<size_t>(row.wp_node)].pos);
+		canvas.line(overlay_point(row.pos), node, overlay_fade(color, 0.8f));
 		canvas.cross(node, 0.5f, color);
 	}
 }
@@ -174,9 +169,9 @@ void AiOverlayLayer::draw_targets(OverlayCanvas &canvas) const {
 	const uint32_t aim_color = overlay_rgba(0.3f, 0.9f, 1.0f);
 	for (const world::inspect::AiOverlayRow &row : snapshot_.report.rows) {
 		if (!row.alive) continue;
-		const world::Vec3 eye = lifted(from_fixed(row.pos), 1.5f);
-		if (row.target_valid) canvas.line(eye, from_fixed(row.target_pos), target_color);
-		const world::Vec3 muzzle = row.muzzle_valid ? from_fixed(row.muzzle) : eye;
+		const world::Vec3 eye = lifted(overlay_point(row.pos), 1.5f);
+		if (row.target_valid) canvas.line(eye, overlay_point(row.target_pos), target_color);
+		const world::Vec3 muzzle = row.muzzle_valid ? overlay_point(row.muzzle) : eye;
 		if (row.muzzle_valid) canvas.cross(muzzle, 0.15f, aim_color);
 		if (row.aim_valid) {
 			// The aim angles are BAM32 in the mission frame: bearing from +x
@@ -199,7 +194,7 @@ void AiOverlayLayer::draw_rings(OverlayCanvas &canvas) const {
 	int rings = 0;
 	for (const world::inspect::AiOverlayRow &row : snapshot_.report.rows) {
 		if (!row.alive) continue;
-		const world::Vec3 pos = from_fixed(row.pos);
+		const world::Vec3 pos = overlay_point(row.pos);
 		const bool is_selected = row.handle == selected && selected != world::EntityHandle::kInvalid;
 		// The selection always; otherwise only engaged brains near the
 		// camera, capped (a battlefield of circles is noise).

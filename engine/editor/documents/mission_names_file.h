@@ -98,7 +98,7 @@ struct MissionNamesFile {
 	// measured against, as `kept` is for the names. A lock is the int the file holds, any nonzero one a lock, kept as
 	// read and written back so (the original editor's atol, tested nonzero: mission_mis.h).
 	// A locked item's base comes with its lock: absolute, as the original editor keeps it through a terrain change
-	// [orig: JOTACmed.exe sub_402770 @ 0x402c9f..0x402ccd] and writes it (master #1095, D-MIS-4); kept_bases each
+	// [orig: JOTACmed.exe MissionGeneralInfo_DialogProc @ 0x402c9f..0x402ccd] and writes it (master #1095, D-MIS-4); kept_bases each
 	// entity's in the writer's order, none for one the .mis gives no lock (a base of 0 is one: the .mis holds it).
 	// `locks` of a write (MissionDocument::names_file_written) are what it wrote, each base it chose kept so: a save
 	// after it takes its base from them, never from the ground again.
@@ -181,8 +181,9 @@ std::vector<int32_t> mission_locks(const MissionDocument &document);
 bool same_locks(const std::vector<int32_t> &a, const std::vector<int32_t> &b);
 bool mission_holds_locks(const MissionDocument &document);
 // The .mis a save writes from the mission (its file as the writer takes it, its names, each entity's base height
-// from `base_heights` where it has one, in the writer's order: mission::write_mis_text): false with the writer's
-// refusal. A locked entity's base is the one the .mis as the mission knows it keeps for it (MissionNamesFile::
+// from `base_heights` where it has one, in the writer's order: mission::write_mis_text; its default kit the one
+// the mission's loadout leads with over MissionDocument::weapon_table): false with the writer's refusal. A
+// locked entity's base is the one the .mis as the mission knows it keeps for it (MissionNamesFile::
 // kept_bases over the mission as it stands), else the ground under it from `base_heights`; `written` takes each
 // entity's lock and base as written, in the writer's order (MissionNamesFile::locks).
 bool mission_names_text(const MissionDocument &document, const std::vector<int32_t> *base_heights, std::string &text,

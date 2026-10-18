@@ -654,10 +654,8 @@ static int test_parse_method_table(void) {
 }
 
 /* A section the file names none keeps no name in the model (the game reads no label) and is written so; its label,
-   "Section_N", is for display alone (mus_section_label: the decompiler's text, the VM's section names). A script
-   holding strings `pushstr` reads [orig: AudioVM_Op_PushStr @ 0x672836] is not written (-6): the model holds their
-   count alone. */
-static int test_unnamed_sections_and_strings(void) {
+   "Section_N", is for display alone (mus_section_label: the decompiler's text, the VM's section names). */
+static int test_unnamed_sections(void) {
     const char *src = "script test\nsection Begin\n{\n  done\n}\nsection Next\n{\n  done\n}\n";
     MusScript script = {};
     int err_line = 0, err_col = 0;
@@ -696,29 +694,402 @@ static int test_unnamed_sections_and_strings(void) {
     CHECK(named, "the model keeps the name empty; the label is Section_1");
     CHECK(text.find("section Section_1") != std::string::npos, "the text names it by its label");
     CHECK(jumped, "the VM names and finds it by its label");
-
-    /* The chunk's string count (+0x34) made 1: read, and the writer refuses it. */
-    std::vector<uint8_t> strings = bytes;
-    uint32_t chunk = 0;
-    memcpy(&chunk, &strings[0x2C], 4);   /* the chunk table's one entry, past the 44-byte header */
-    const uint32_t count = 1;
-    memcpy(&strings[chunk + 0x34], &count, 4);
-    mf = {};
-    CHECK(mus_open_memory(&mf, strings.data(), strings.size()) == 0 && mf.scripts[0].string_count == 1,
-          "a chunk holding a string reads its count");
-    const MusScript *held[1] = {&mf.scripts[0]};
-    uint8_t *buf = NULL;
-    size_t size = 0;
-    const int rc = mus_encode_file(held, 1, &buf, &size);
-    mus_free(buf);
-    mus_close(&mf);
-    CHECK(rc == -6, "and is not written: the model holds no string");
     mus_script_free(&script);
     return 1;
 }
 
+/* The strings `pushstr` pushes [orig: AudioVM_Op_PushStr @ 0x672836]. A literal compiles as MDEdit's
+   compiler makes one (MDEdit.exe sub_408660 @ 0x408660): its text's index, the first use the next one, so
+   "hello", "world", "hello" are 0, 1, 0. The writer lays them out as MDEdit's chunk writer does (sub_40DF30
+   @ 0x40E183..0x40E231): the table at the code's end, a chunk-relative offset a string, the strings packed
+   after it each to its NUL, the debug section at the next 16; the reader takes them back and the file writes
+   again as its own bytes. The text names each by its literal and compiles back to the same program; the VM
+   pushes each string's address (mus_vm_string). The reader refuses a table past the file (-25) and a string
+   outside it or with no NUL before its end (-26); a table in another order reads, and writes in MDEdit's. */
+static int g_echo_count = 0;
+static std::string g_echoed[8];
+static MusVM *g_echo_vm = NULL;
+static void echo_hook(void *, int32_t arg) {
+    const char *text = mus_vm_string(g_echo_vm, arg);
+    if (g_echo_count < 8) g_echoed[g_echo_count] = text ? text : "?";
+    ++g_echo_count;
+}
+
+static int test_strings(void) {
+    const char *src = "script strings\nsection Begin\n{\n  Echo(\"hello\")\n  Echo(\"world\")\n"
+                      "  Echo(\"hello\")\n  Echo(\"world\")\n  done\n}\n";
+    MusScript script = {};
+    int err_line = 0, err_col = 0;
+    const char *err_msg = NULL;
+    CHECK(mus_compile(src, &script, &err_line, &err_col, &err_msg) == 0, "compile");
+    CHECK(script.string_count == 2 && strcmp(script.strings[0], "hello") == 0 &&
+              strcmp(script.strings[1], "world") == 0,
+          "two strings, in the order of first use");
+    const std::string code(reinterpret_cast<const char *>(script.code), script.code_size);
+    std::vector<int> pushed;
+    for (size_t i = 0; i + 1 < code.size(); ++i)
+        if (code[i] == 0x07) pushed.push_back((uint8_t)code[i + 1]);
+    CHECK((pushed == std::vector<int>{0, 1, 0, 1}), "pushstr 0, 1, 0, 1: a text's own index");
+
+    const MusScript *one[1] = {&script};
+    MusFile mf = {};
+    std::vector<uint8_t> bytes;
+    CHECK(encode_and_open(one, 1, mf, bytes) == 0, "written and read back");
+    uint32_t chunk = 0;
+    memcpy(&chunk, &bytes[0x2C], 4);
+    MusChunkHeader ch;
+    memcpy(&ch, &bytes[chunk], sizeof(ch));
+    const uint32_t table = ch.strings_offset;
+    uint32_t first = 0, second = 0;
+    memcpy(&first, &bytes[chunk + table], 4);
+    memcpy(&second, &bytes[chunk + table + 4], 4);
+    CHECK(table == ch.bytecode_offset + script.code_size && table % 4 == 0 && ch.string_count == 2,
+          "the table at the code's end, two entries");
+    CHECK(first == table + 8 && memcmp(&bytes[chunk + first], "hello", 6) == 0 && second == first + 6 &&
+              memcmp(&bytes[chunk + second], "world", 6) == 0,
+          "the strings packed after it, each to its NUL");
+    CHECK(ch.debug_offset == ((second + 6 + 15) & ~15u), "the debug section at the next 16");
+    CHECK(mf.scripts[0].string_count == 2 && strcmp(mf.scripts[0].strings[0], "hello") == 0 &&
+              strcmp(mf.scripts[0].strings[1], "world") == 0,
+          "the reader takes them back");
+    {
+        const MusScript *read[1] = {&mf.scripts[0]};
+        MusFile again = {};
+        std::vector<uint8_t> rewritten;
+        CHECK(encode_and_open(read, 1, again, rewritten) == 0 && rewritten == bytes, "and writes its own bytes");
+        mus_close(&again);
+    }
+    std::string text;
+    CHECK(round_trips(src, &text), "the text compiles back to the same program");
+    CHECK(text.find("\"hello\"") != std::string::npos && text.find("\"world\"") != std::string::npos,
+          "the text names each string by its literal");
+
+    MusVM *vm = mus_vm_create();
+    MusVMHooks hooks = {};
+    hooks.on_echo = echo_hook;
+    mus_vm_set_hooks(vm, &hooks);
+    g_echo_vm = vm;
+    g_echo_count = 0;
+    mus_vm_load_script(vm, &mf.scripts[0]);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    CHECK(mus_vm_state(vm) != MUS_VM_ERROR && g_echo_count == 4 && g_echoed[0] == "hello" &&
+              g_echoed[1] == "world" && g_echoed[2] == "hello" && g_echoed[3] == "world",
+          "Echo receives each string's address");
+    mus_vm_destroy(vm);
+    g_echo_vm = NULL;
+
+    /* The table in the other order: it reads (the game takes any), and is written in MDEdit's layout. */
+    std::vector<uint8_t> swapped = bytes;
+    memcpy(&swapped[chunk + table], &second, 4);
+    memcpy(&swapped[chunk + table + 4], &first, 4);
+    MusFile other = {};
+    CHECK(mus_open_memory(&other, swapped.data(), swapped.size()) == 0 &&
+              strcmp(other.scripts[0].strings[0], "world") == 0 && strcmp(other.scripts[0].strings[1], "hello") == 0,
+          "a table in another order reads in its order");
+    {
+        const MusScript *read[1] = {&other.scripts[0]};
+        MusFile again = {};
+        std::vector<uint8_t> rewritten;
+        CHECK(encode_and_open(read, 1, again, rewritten) == 0 && rewritten != swapped &&
+                  mus_reads_the_same(&other, &again),
+              "and is written in MDEdit's layout, each string its own text");
+        mus_close(&again);
+    }
+    mus_close(&other);
+
+    std::vector<uint8_t> bad = bytes;
+    const uint32_t past = (uint32_t)bad.size();
+    memcpy(&bad[chunk + table], &past, 4);
+    other = {};
+    CHECK(mus_open_memory(&other, bad.data(), bad.size()) == -26, "a string outside the file is refused");
+    bad = bytes;
+    const uint32_t many = 0x10000000u;
+    memcpy(&bad[chunk + 0x34], &many, 4);
+    other = {};
+    CHECK(mus_open_memory(&other, bad.data(), bad.size()) == -25, "a table past the file is refused");
+    bad = bytes;
+    bad.resize(chunk + second + 3);   /* "wor": no NUL before the file's end */
+    other = {};
+    CHECK(mus_open_memory(&other, bad.data(), bad.size()) == -26, "a string with no NUL before the end is refused");
+
+    /* A count the game's loop reads as negative relocates none: no string. */
+    bad = bytes;
+    const uint32_t negative = 0x80000001u;
+    memcpy(&bad[chunk + 0x34], &negative, 4);
+    other = {};
+    CHECK(mus_open_memory(&other, bad.data(), bad.size()) == 0 && other.scripts[0].string_count == 0,
+          "a negative count reads no string");
+    mus_close(&other);
+
+    /* MDEdit's reach: a literal of 62 characters, not 63 (its parameter token's 64 bytes, the opening quote and the
+       NUL among them: `Echo("<62>)` with no closing quote is MDEdit's spelling of it). */
+    const std::string sixty_two(62, 'x');
+    MusScript longest = {};
+    CHECK(mus_compile(("script s\nsection B\n{\n  Echo(\"" + sixty_two + "\")\n  done\n}\n").c_str(), &longest,
+                      &err_line, &err_col, &err_msg) == 0,
+          "62 characters compile");
+    std::string long_text;
+    CHECK(round_trips(("script s\nsection B\n{\n  Echo(\"" + sixty_two + "\")\n  done\n}\n").c_str(), &long_text),
+          "and decompile back");
+    mus_script_free(&longest);
+    MusScript too_long = {};
+    CHECK(mus_compile(("script s\nsection B\n{\n  Echo(\"" + sixty_two + "y\")\n  done\n}\n").c_str(), &too_long,
+                      &err_line, &err_col, &err_msg) != 0,
+          "63 do not");
+    MusScript comma = {};
+    CHECK(mus_compile("script s\nsection B\n{\n  Echo(\"a,b\")\n  done\n}\n", &comma, &err_line, &err_col, &err_msg) != 0,
+          "nor a comma, which ends MDEdit's parameter");
+    /* Nor anything else that ends MDEdit's text, line or parameter first (a Ctrl-Z in its text-mode read,
+       sub_40D6F0's ; and //, sub_409E30's CR and LF, a `)` closing sub_40C930's call), nor a `(` left open (which
+       MDEdit takes or refuses by a stale byte: D-MUS-22), nor an empty literal (sub_408660 scans none), nor a string
+       anywhere but a method call's parameter. */
+    for (const char *other : {"Echo(\"a\nb\")", "Echo(\"a\rb\")", "Echo(\"a;b\")", "Echo(\"a//b\")", "Echo(\"a)b\")",
+                              "Echo(\"a(b\")", "Echo(\")(\")", "Echo(\"a\x1a\")", "Echo(\"\")", "Var00 = \"x\""}) {
+        MusScript refused = {};
+        CHECK(mus_compile(("script s\nsection B\n{\n  " + std::string(other) + "\n  done\n}\n").c_str(), &refused,
+                          &err_line, &err_col, &err_msg) != 0,
+              std::string("refused: ") + other);
+    }
+    /* Balanced parentheses are the literal's: MDEdit's scan counts their depth from the call's own. A `(` the literal
+       leaves open closes with a `)` after it, before the call's own, as MDEdit compiles it: "a(" is Echo("a(")). */
+    CHECK(round_trips("script s\nsection B\n{\n  Echo(\"a(b)c\")\n  Echo(\"((x))\")\n  done\n}\n"),
+          "a(b)c and ((x)) compile and round-trip");
+    std::string open_text;
+    CHECK(round_trips("script s\nsection B\n{\n  Echo(\"a(\"))\n  Echo(\"x(y(z)\"))\n  done\n}\n", &open_text),
+          "a( and x(y(z) spelled with their closing ) compile and round-trip");
+    CHECK(open_text.find("Echo(\"a(\"))") != std::string::npos, "the text spells a( with its closing )");
+    /* The bound is the string's, whatever it leaves open (MDEdit spells `Echo("<text>;` too): 62 characters with two
+       open compile, 63 do not. */
+    const std::string open62 = std::string(60, 'o') + "((";
+    MusScript fits = {};
+    CHECK(mus_compile(("script s\nsection B\n{\n  Echo(\"" + open62 + "\")))\n  done\n}\n").c_str(), &fits, &err_line,
+                      &err_col, &err_msg) == 0,
+          "62 characters with two open compile");
+    mus_script_free(&fits);
+    MusScript over = {};
+    CHECK(mus_compile(("script s\nsection B\n{\n  Echo(\"o" + open62 + "\")))\n  done\n}\n").c_str(), &over, &err_line,
+                      &err_col, &err_msg) != 0,
+          "63 with two open do not");
+    /* A string of the file no literal spells (here 70 characters) decompiles as pushstr(0), no method's name, so the
+       text does not compile and the editor holds the file as it is. */
+    {
+        MusScript wide = {};
+        CHECK(mus_compile("script s\nsection B\n{\n  Echo(\"x\")\n  done\n}\n", &wide, &err_line, &err_col, &err_msg) == 0,
+              "compile");
+        free(wide.strings[0]);
+        wide.strings[0] = (char *)malloc(71);
+        memset(wide.strings[0], 'w', 70);
+        wide.strings[0][70] = 0;
+        const int needed = mus_decompile(&wide, NULL, 0);
+        std::string wide_text(size_t(needed > 0 ? needed : 0) + 1, '\0');
+        if (needed > 0) mus_decompile(&wide, &wide_text[0], wide_text.size());
+        CHECK(needed > 0 && wide_text.find("pushstr(0)") != std::string::npos, "a 70-character string prints as none");
+        MusScript again = {};
+        CHECK(mus_compile(wide_text.c_str(), &again, &err_line, &err_col, &err_msg) != 0, "and that text does not compile");
+        mus_script_free(&again);
+        mus_script_free(&wide);
+    }
+    /* MDEdit's count is a signed byte: 127 strings, not 128. */
+    std::string strings127 = "script s\nsection B\n{\n";
+    for (int i = 0; i < 127; ++i) strings127 += "  Echo(\"s" + std::to_string(i) + "\")\n";
+    MusScript most = {};
+    CHECK(mus_compile((strings127 + "  done\n}\n").c_str(), &most, &err_line, &err_col, &err_msg) == 0 &&
+              most.string_count == 127,
+          "127 strings compile");
+    mus_script_free(&most);
+    MusScript the_128th = {};
+    CHECK(mus_compile((strings127 + "  Echo(\"s127\")\n  done\n}\n").c_str(), &the_128th, &err_line, &err_col, &err_msg) != 0,
+          "a 128th does not");
+
+    /* Two scripts written together, as MDEdit's linker puts its chunks down one after the other (sub_40E6E0): each
+       chunk's debug section and end at its own next 16, the names right after the last; and the words the VM
+       pushes past each table are the file's, its strings and the chunk's zeros after them. */
+    MusScript one_more = {}, two_more = {};
+    CHECK(mus_compile("script a\nsection B\n{\n  Echo(\"x\")\n  done\n}\n", &one_more, &err_line, &err_col, &err_msg) == 0 &&
+              mus_compile("script b\nsection B\n{\n  play sound_1\n  Echo(\"long enough\")\n  done\n}\n", &two_more,
+                          &err_line, &err_col, &err_msg) == 0,
+          "two scripts compile");
+    const MusScript *both[2] = {&one_more, &two_more};
+    MusFile two = {};
+    std::vector<uint8_t> pair;
+    CHECK(encode_and_open(both, 2, two, pair) == 0, "written together and read back");
+    uint32_t chunks[2] = {0, 0};
+    memcpy(chunks, &pair[0x2C], 8);
+    MusFileHeader fh;
+    memcpy(&fh, pair.data(), sizeof(fh));
+    bool laid_out = chunks[0] == 0x2C + 8;
+    int probed = 0;
+    for (int c = 0; c < 2; ++c) {
+        MusChunkHeader hc;
+        memcpy(&hc, &pair[chunks[c]], sizeof(hc));
+        const uint32_t end = c == 0 ? chunks[1] - chunks[0] : fh.name_resolve_table_offset - chunks[1];
+        laid_out = laid_out && hc.debug_offset % 16 == 0 && end % 16 == 0;
+        MusVM *each = mus_vm_create();
+        mus_vm_load_script(each, &two.scripts[c]);
+        for (uint32_t index = 0; index < 64; ++index) {
+            const uint32_t at = hc.strings_offset + 4 * index;
+            if (at < hc.strings_offset + 4 * hc.string_count) continue;   /* the table's own words: addresses */
+            if (at + 4 > hc.debug_offset) break;
+            /* The program's own size and sections (the copy's layout is the program's), its code this probe:
+               pushstr index; pop_g Var00; done, at the entry. */
+            MusScript probe = two.scripts[c];
+            const uint32_t entry = probe.sections[probe.entry_section_index].code_offset;
+            std::vector<uint8_t> code(probe.code_size + 8, 0);
+            const uint8_t ops[] = {0x07, (uint8_t)index, 0x08, 0x00, 0x3F};
+            memcpy(code.data() + entry, ops, sizeof(ops));
+            probe.code = code.data();
+            if (entry + sizeof(ops) > probe.code_size) { laid_out = false; break; }
+            mus_vm_load_script(each, &probe);
+            mus_vm_start(each);
+            mus_vm_tick(each, 16);
+            int32_t file_word = 0;
+            memcpy(&file_word, &pair[chunks[c] + at], 4);
+            laid_out = laid_out && mus_vm_get_var(each, 0) == file_word;
+            ++probed;
+        }
+        mus_vm_destroy(each);
+    }
+    CHECK(laid_out && probed >= 4, "each chunk at its own 16s, the names after the last, the VM's words past the strings the file's");
+    mus_close(&two);
+    mus_script_free(&one_more);
+    mus_script_free(&two_more);
+
+    mus_close(&mf);
+    mus_script_free(&script);
+    return 1;
+}
+
+/* The instance's globals are the chunk's own size [orig: ScriptInstance_Init @ 0x672F78..0x672FA3: one block of
+   globals_size + locals_size, the locals after the globals]: ten user globals make 104 bytes, the tenth at 100,
+   which the VM holds (it had kept 68). A global past the area is the locals' word after it in the block; past the
+   block nothing (D-MUS-22). */
+static int test_globals_past_68(void) {
+    std::string src = "script globals\n";
+    for (int i = 0; i < 10; ++i) src += "global INT user" + std::to_string(i) + "\n";
+    src += "section Begin\n{\n  user9 = 7\n  done\n}\n";
+    MusScript script = {};
+    int err_line = 0, err_col = 0;
+    const char *err_msg = NULL;
+    CHECK(mus_compile(src.c_str(), &script, &err_line, &err_col, &err_msg) == 0, "compile");
+    CHECK(script.globals_size == 104, "64 bytes and ten user globals");
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &script);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    CHECK(mus_vm_state(vm) != MUS_VM_ERROR && mus_vm_get_var(vm, 25) == 7, "user9 at byte 100 holds 7");
+    const std::shared_ptr<MusGlobals> globals = mus_vm_globals(vm);
+    CHECK(globals && mus_globals_count(*globals) == 26 && mus_globals_read(*globals, 25) == 7,
+          "the area holds 26 globals; the tenth user global reads 7");
+    mus_vm_destroy(vm);
+    mus_script_free(&script);
+
+    /* globals 64, locals 8: pop_g 64 writes the locals' first word, push_l 0 reads it back; the block the
+       allocator rounds to 128 [orig: FastMem_Alloc @ 0x7697D7] holds a write at 100 past both; a global past the
+       block reads 0. */
+    uint8_t code[] = {0x01, 9, 0x08, 64, 0x04, 0x00, 0x08, 0x00, 0x03, 200, 0x08, 0x04,
+                      0x01, 11, 0x08, 100, 0x03, 100, 0x08, 0x08, 0x3F};
+    MusSection sec = {};
+    MusScript hand = {};
+    strcpy(hand.name, "t");
+    hand.code = code;
+    hand.code_size = sizeof(code);
+    hand.sections = &sec;
+    hand.section_count = 1;
+    hand.globals_size = 64;
+    hand.locals_size = 8;
+    MusVM *vm2 = mus_vm_create();
+    mus_vm_load_script(vm2, &hand);
+    mus_vm_set_var(vm2, 1, 5);
+    mus_vm_start(vm2);
+    mus_vm_tick(vm2, 16);
+    CHECK(mus_vm_get_var(vm2, 0) == 9, "a global past the area is the locals' first word");
+    CHECK(mus_vm_get_var(vm2, 1) == 0, "a global past the block reads 0");
+    CHECK(mus_vm_get_var(vm2, 2) == 11, "the block's rounding past the locals holds a write");
+    const std::shared_ptr<MusGlobals> rounded = mus_vm_globals(vm2);
+    CHECK(rounded && mus_globals_read(*rounded, 25) == 11 && mus_globals_count(*rounded) == 16,
+          "the mission script's music variable 25 is that word; the area holds 16 globals");
+    mus_vm_unload_script(vm2);
+    mus_vm_set_var(vm2, 0, 3);
+    CHECK(mus_vm_get_var(vm2, 0) == 0, "with no context a variable's write is dropped and it reads 0");
+    mus_vm_destroy(vm2);
+    return 1;
+}
+
+/* A `done` statement and a section's closing brace both compile to done (0x3F): the decompiler prints
+   the brace for the done the section's code ends on and the statement for any other, so the minimal
+   script (play, done, brace) decompiles to text that compiles back to its bytes. It printed every done
+   as a brace, and `play / } / }` does not compile. */
+static int test_done_statement_round_trips(void) {
+    std::string text;
+    CHECK(round_trips("script test\nsection Begin\n{\n  play sound_0\n  done\n}\n", &text),
+          "the minimal script round-trips");
+    CHECK(text.find("done\n}") != std::string::npos, "its done a statement before the brace");
+    CHECK(round_trips("script t\nsection A\n{\n  done\n  play sound_1\n}\nsection B\n{\n  play sound_2\n  done\n}\n"),
+          "a done ahead of a statement, then the next section's");
+    CHECK(round_trips("script t\nsection A\n{\n  if ((Var01 == 1))\n  {\n    done\n  }\n  play sound_1\n}\n"),
+          "a done in an if body");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_1\n}\n"), "a section closed by its brace alone");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_0\n}\nplay sound_1\n"),
+          "a top-level statement after a section's brace");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_0\n}\ndone\nsection B\n{\n  play sound_2\n}\n"),
+          "a top-level done after a section's brace");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_0\n}\nif ((Var01 == 1))\n{\n  done\n}\n"),
+          "a top-level if whose body holds a done, after a section's brace");
+    return 1;
+}
+
+/* An expression the compiler takes whose text runs past the decompiler's 255 characters a slot, or
+   that holds more than 32 pending operands: the decompile fails rather than cut the text (a cut
+   text compiled to other bytes, or not at all). Shorter ones still round-trip. */
+static int test_long_expression_fails_to_decompile(void) {
+    const auto left = [](int n) {
+        std::string expr = "(Var02 + Var03)";
+        for (int i = 1; i < n; ++i) expr = "(" + expr + " + Var03)";
+        return "script t\nsection Begin\n{\n  Var01 = " + expr + "\n}\n";
+    };
+    const auto right = [](int n) {
+        std::string expr = "1";
+        for (int i = 0; i < n; ++i) expr = "(1 + " + expr + ")";
+        return "script t\nsection Begin\n{\n  Var01 = " + expr + "\n}\n";
+    };
+    CHECK(round_trips(left(3).c_str()), "a short left-nested sum round-trips");
+    CHECK(round_trips(right(31).c_str()), "31 right-nested sums round-trip");
+    for (const std::string &src : {left(26), left(40), right(33), right(36)}) {
+        MusScript script = {};
+        int el = 0, ec = 0;
+        const char *em = NULL;
+        CHECK(mus_compile(src.c_str(), &script, &el, &ec, &em) == 0, "the compiler takes it");
+        CHECK(mus_decompile(&script, NULL, 0) < 0, "the decompiler gives no cut text");
+        mus_script_free(&script);
+    }
+    return 1;
+}
+
+/* A literal is read unsigned, the push's 32 bits: one past 4294967295 is refused (it compiled as
+   another number: 4294967297 as 1), and one of 2^31 or more decompiles as itself (it printed
+   negative, which compiles to a neg over the magnitude, other bytes). */
+static int test_literal_range(void) {
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = 7\n}\n"), "7 round-trips");
+    std::string text;
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = 3000000000\n}\n", &text), "3000000000 round-trips");
+    CHECK(text.find("3000000000") != std::string::npos, "printed as itself");
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = 4294967295\n}\n"), "4294967295 round-trips");
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = -5\n}\n"), "a negative literal (neg over 5) round-trips");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var01 = 4294967296\n}\n"), "4294967296 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var01 = 4294967297\n}\n"), "4294967297 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var01 = 99999999999\n}\n"), "99999999999 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  frame 3000000000\n}\n"), "a frame count past 255 read unsigned");
+    return 1;
+}
+
 int main(void) {
-    RUN_TEST(test_unnamed_sections_and_strings);
+    RUN_TEST(test_done_statement_round_trips);
+    RUN_TEST(test_long_expression_fails_to_decompile);
+    RUN_TEST(test_literal_range);
+    RUN_TEST(test_unnamed_sections);
+    RUN_TEST(test_strings);
+    RUN_TEST(test_globals_past_68);
     RUN_TEST(test_encode_model_fields);
     RUN_TEST(test_parse_method_table);
     RUN_TEST(test_function_rules);

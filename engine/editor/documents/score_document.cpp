@@ -23,15 +23,6 @@ const ScoreHeader &header_of(const RecordHandle &r) { return r.as<ScoreHeader>()
 const score::GameTypeBlock &block_of(const RecordHandle &r) { return r.as<score::GameTypeBlock>(); }
 const score::Entry &entry_of(const RecordHandle &r) { return r.as<score::Entry>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 bool whole_of(const Value &value, int64_t &out) {
 	if (const auto *whole = std::get_if<int64_t>(&value)) return out = *whole, true;
 	return false;

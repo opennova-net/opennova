@@ -40,7 +40,8 @@ func _font_overlay() -> HudOverlay:
 	hud.size = Vector2(1024, 768)
 	add_child_autofree(hud)
 	hud.configure(layout, root)
-	hud.set_player_state(50, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50, 50, 50, 50)
+	hud.set_player_state(1.0, 0, 80.0)
 	return hud
 
 
@@ -52,25 +53,22 @@ func _font_overlay() -> HudOverlay:
 # @0x49939a].
 func test_message_log_toggle_edge() -> void:
 	var toggles := HudToggles.new()
-	var poll := func(down: bool, chorded: bool, active: bool) -> int:
+	var poll := func(down: bool, active: bool) -> int:
 		return toggles.poll((1 << HudToggles.ROW_OLD_MESSAGES) if down else 0,
-				chorded, active, false, false)
-	assert_eq(poll.call(true, false, true),
+				active, false, false)
+	assert_eq(poll.call(true, true),
 			HudToggles.EVENT_MESSAGE_LOG_TOGGLED | HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED)
 	assert_true(toggles.is_message_log_open(), "The first down-edge opens the window.")
-	assert_eq(poll.call(true, false, true), 0, "A held key does not re-toggle.")
-	poll.call(false, false, true)
-	poll.call(true, true, true)
-	assert_true(toggles.is_message_log_open(), "A chorded press is ignored.")
-	poll.call(false, false, true)
-	poll.call(true, false, false)
+	assert_eq(poll.call(true, true), 0, "A held key does not re-toggle.")
+	poll.call(false, true)
+	poll.call(true, false)
 	assert_true(toggles.is_message_log_open(),
 			"A press while gameplay input is inactive is ignored.")
-	poll.call(false, false, true)
-	poll.call(true, false, true)
+	poll.call(false, true)
+	poll.call(true, true)
 	assert_false(toggles.is_message_log_open(), "The next down-edge closes the window.")
-	poll.call(false, false, true)
-	poll.call(true, false, true)
+	poll.call(false, true)
+	poll.call(true, true)
 	assert_true(toggles.is_message_log_open())
 	toggles.reset_mission()
 	assert_false(toggles.is_message_log_open(), "reset_mission() clears the flag.")
@@ -82,7 +80,8 @@ func test_message_log_lane_shows_history() -> void:
 	var hud := _font_overlay()
 	var lane := MessageLogPresenter.new()
 	hud.push_chat_line("Taylor: moving to bravo", -1)
-	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50 + 930, 50 + 930, 50 + 930, 50 + 930)
+	hud.set_player_state(1.0, 0, 80.0)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"The feed has expired the line.")
 	lane.update(hud, true)
@@ -104,13 +103,31 @@ func test_vehicle_and_zone_lanes_null_paths() -> void:
 	vehicle.update(hud, null, null, null, 0)
 	vehicle.update(null, null, null, null, 0)
 	var zones := LfpPanelPresenter.new()
-	zones.update(hud, null, 0)
-	zones.update(null, null, 0)
+	zones.update(hud, null)
+	zones.update(null, null)
 	var after := hud.get_draw_list_stats()
 	assert_eq(after.elements_drawn, before.elements_drawn,
 			"The null paths draw nothing and crash nothing.")
 	vehicle.reset()
 	zones.reset()
+	assert_true(is_instance_valid(hud))
+
+
+# The zone lane keeps no game-type rule of its own: it pushes the panel for
+# every session game type and the engine element picks the arm (retail calls
+# HUD_DrawZoneStatusPanel every HUD frame, its one game-type test the conquest
+# arm @0x5a248d..0x5a24a1). A sessionless sim's game type is 0, not AAS: the
+# lane still pushes, and the zone fill finds nothing to draw.
+func test_zone_lane_pushes_every_game_type() -> void:
+	var hud := _font_overlay()
+	var sim := Simulation.new()
+	assert_ne(int(sim.get_session_game_type()), NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE,
+			"A sessionless sim reads a non-AAS game type.")
+	var zones := LfpPanelPresenter.new()
+	zones.update(hud, sim)
+	assert_true(zones.is_pushed(), "A non-AAS game type still pushes the panel.")
+	zones.update(hud, null)
+	assert_false(zones.is_pushed(), "No sim hides the pushed panel once.")
 	assert_true(is_instance_valid(hud))
 
 
@@ -128,11 +145,12 @@ func test_board_page_keys_and_chat_line_gates() -> void:
 	hud.reset_scoreboard_page()
 	var chat := HudChatEntry.new()
 	var every_row := (1 << HudChatEntry.ROW_COUNT) - 1
-	chat.poll_rows(0, true, false, null, null, 100)
-	chat.poll_rows(every_row, true, false, null, null, 101)
+	chat.poll_rows(0, true, null, null, 100)
+	chat.poll_rows(every_row, true, null, null, 101)
 	assert_false(chat.is_capturing(), "No session, no chat line.")
 	var before := hud.get_draw_list_stats().glyphs
-	hud.set_chat_input(chat, 101, false)
+	hud.set_frame_clocks(101, 101, 101, 101)
+	hud.set_chat_input(chat, false)
 	assert_eq(hud.get_draw_list_stats().glyphs, before, "A closed chat line draws nothing.")
 	var key := InputEventKey.new()
 	key.keycode = KEY_A

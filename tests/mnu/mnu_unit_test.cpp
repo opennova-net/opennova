@@ -541,8 +541,208 @@ bool test_fatal_notes() {
               "WINDOW[W]") == 1,
         "a WINDOW with an empty TYPE");
   CHECK(fatal("<SCREEN><NAME>S</NAME><MUSICVAR></MUSICVAR></SCREEN>", "/MUSICVAR") == 1, "an empty MUSICVAR");
+  {
+    // Nested WINDOWs. The game creates them recursively and each create event runs up the window's
+    // chain, on a 1 MiB stack with nothing capping the nesting: a generic window's level takes 448
+    // bytes and its event 64 + 44 + 32 bytes plus 72 a handler up the chain, so the 2018th nested
+    // generic window runs the stack out (520 * 2017 + 212 > 1 MiB) and the game crashes loading the
+    // menu. The reader creates windows from a queue, never recursing: 2017 levels read whole; the
+    // 2018th is left out with a fatal note. The finding's 400 nested STATIC WINDOWs (23,231 bytes),
+    // which ran the old recursive parse out, read whole.
+    const auto nested = [](int levels, const char *type, const char *content, const char *last) {
+      std::string xml = "<SCREEN><NAME>S</NAME>";
+      for (int i = 0; i < levels; ++i)
+        xml += std::string("<WINDOW TYPE=\"") + type + "\" NAME=\"" + (i + 1 == levels ? last : "W") + "\">" +
+               content;
+      for (int i = 0; i < levels; ++i) xml += "</WINDOW>";
+      return xml + "</SCREEN>";
+    };
+    const auto depth_of = [](const mnu::Document &doc) {
+      size_t windows = 0;
+      for (const mnu::Window *w = doc.screens.empty() || doc.screens[0].roots.empty() ? nullptr
+                                                                                    : &doc.screens[0].roots[0];
+           w; w = w->children.empty() ? nullptr : &w->children[0])
+        ++windows;
+      return windows;
+    };
+    const auto stack_notes = [](const std::vector<mnu::ParseNote> &notes) {
+      size_t found = 0;
+      for (const mnu::ParseNote &n : notes)
+        if (n.fatal && n.message.find("runs past its 1 MiB stack") != std::string::npos) ++found;
+      return found;
+    };
+    // The deepest a menu nests, written and read back the same: the writer, the write check, the
+    // comparison and the search walk with explicit stacks too.
+    const auto round_trip = [](const mnu::Document &doc) {
+      std::vector<uint8_t> bytes;
+      std::string why;
+      if (!mnu::serialize_bytes(doc, bytes, why, false)) return "written: " + why;
+      mnu::Document back;
+      if (!mnu::parse(bytes.data(), bytes.size(), back, why)) return "read back: " + why;
+      return mnu::equal(doc, back, &why) ? std::string() : "differs at " + why;
+    };
+    const std::string statics = nested(400, "STATIC", "<STRING>t</STRING>", "W");
+    CHECK(statics.size() == 23231, "the 23,231-byte menu");
+    mnu::Document doc;
+    std::vector<mnu::ParseNote> notes;
+    std::string error;
+    CHECK(mnu::parse(statics, doc, error, &notes), error);
+    CHECK(depth_of(doc) == 400 && stack_notes(notes) == 0, "400 nested STATIC windows read whole");
+    const char *const kAt = "<POSITION><LEFT>1</LEFT></POSITION>";
+    CHECK(mnu::parse(nested(2017, "X", kAt, "DEEP"), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 2017 && stack_notes(notes) == 0, "2017 nested generic windows read whole");
+    {
+      const mnu::Window *deepest = &doc.screens[0].roots[0];
+      while (!deepest->children.empty()) deepest = &deepest->children[0];
+      CHECK(mnu::find_window(doc.screens[0], "DEEP") == deepest, "the search finds the deepest window");
+      const std::string trip = round_trip(doc);
+      CHECK(trip.empty(), "2017 nested windows round-trip: " + trip);
+    }
+    CHECK(mnu::parse(nested(2018, "X", kAt, "DEEP"), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 2017 && stack_notes(notes) == 1, "the 2018th runs the game's stack out: a fatal note");
+
+    // A part's widget has no parent while its owner parses, so its windows' events end at it, and a
+    // LAN_LIST's JOIN_BUTTON parses 628 bytes above the list's own base parse: 520 bytes a list and its
+    // button, so 2015 nested lists read (520 * 2014 + 1148 bytes), 4031 windows of the model deep, and
+    // the 2016th is left out (520 * 2015 + 1148 > 1 MiB).
+    const auto lan_chain = [](int levels) {
+      std::string xml = "<SCREEN><NAME>S</NAME>";
+      for (int i = 0; i < levels; ++i) xml += "<WINDOW TYPE=\"LAN_LIST\" NAME=\"L\"><JOIN_BUTTON>";
+      xml += "<WINDOW TYPE=\"STATIC\" NAME=\"DEEP\"><STRING>t</STRING></WINDOW>";
+      for (int i = 0; i < levels; ++i) xml += "</JOIN_BUTTON></WINDOW>";
+      return xml + "</SCREEN>";
+    };
+    const auto lan_depth = [](const mnu::Document &doc, bool &leaf) {
+      size_t windows = 0;
+      leaf = false;
+      const mnu::Window *w = doc.screens.empty() || doc.screens[0].roots.empty() ? nullptr : &doc.screens[0].roots[0];
+      while (w) {
+        ++windows;
+        if (w->type == mnu::WindowType::Static) leaf = true;
+        if (w->join_button) {
+          ++windows;
+          w = w->join_button->children.empty() ? nullptr : &w->join_button->children[0];
+        } else {
+          w = nullptr;
+        }
+      }
+      return windows;
+    };
+    bool leaf = false;
+    CHECK(mnu::parse(lan_chain(2015), doc, error, &notes), error);
+    CHECK(lan_depth(doc, leaf) == 4031 && leaf && stack_notes(notes) == 0, "2015 nested lists read, 4031 deep");
+    {
+      const std::string trip = round_trip(doc);
+      CHECK(trip.empty(), "4031 windows deep round-trip: " + trip);
+    }
+    CHECK(mnu::parse(lan_chain(2016), doc, error, &notes), error);
+    CHECK(lan_depth(doc, leaf) == 4030 && !leaf && stack_notes(notes) == 1, "the 2016th list runs it out");
+
+    // A MULTILINE_EDIT forwards no event named its own NAME [orig: CMEditWnd_HandleEvent @ 0x660f40, the
+    // _stricmp @ 0x660f58], and each forward names the event by the forwarding window's NAME [orig: @ 0x649c76,
+    // @ 0x66100b]. An edit's own create event goes no further than its handler, so its 516-byte level binds:
+    // 2032 nested edits read, the 2033rd is left out (516 * 2033 > 1 MiB). A STATIC under nested edits
+    // forwards up each one of another name: under 1913 of distinct names it reads (548 * 1913 + 212 bytes),
+    // under 1914 its event runs the stack out; under 1914 of its own name its event stops at the first.
+    const auto edits = [](int levels, bool one_name, bool leaf_static) {
+      std::string xml = "<SCREEN><NAME>S</NAME>";
+      for (int i = 0; i < levels; ++i)
+        xml += "<WINDOW TYPE=\"MULTILINE_EDIT\" NAME=\"" + (one_name ? std::string("W") : "W" + std::to_string(i)) +
+               "\"><STRING>t</STRING>";
+      if (leaf_static)
+        xml += std::string("<WINDOW TYPE=\"STATIC\" NAME=\"") + (one_name ? "w" : "LEAF") +
+               "\"><STRING>t</STRING></WINDOW>";
+      for (int i = 0; i < levels; ++i) xml += "</WINDOW>";
+      return xml + "</SCREEN>";
+    };
+    CHECK(mnu::parse(edits(2032, true, false), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 2032 && stack_notes(notes) == 0, "2032 nested edits read");
+    CHECK(mnu::parse(edits(2033, true, false), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 2032 && stack_notes(notes) == 1, "the 2033rd edit's base parse runs it out");
+    CHECK(mnu::parse(edits(1913, false, true), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 1914 && stack_notes(notes) == 0, "a STATIC under 1913 edits of other names reads");
+    CHECK(mnu::parse(edits(1914, false, true), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 1914 && stack_notes(notes) == 1, "under 1914 its event runs the stack out");
+    CHECK(mnu::parse(edits(1914, true, true), doc, error, &notes), error);
+    CHECK(depth_of(doc) == 1915 && stack_notes(notes) == 0, "under edits of its name (case aside) its event stops");
+
+    // A repeated part element parses into the same widget, so its WINDOWs join the earlier one's: a LIST's
+    // two SCROLLBARs give the scrollbar all four windows, each read whole.
+    std::string twice = "<SCREEN><NAME>S</NAME><WINDOW TYPE=\"LIST\" NAME=\"L\"><STRING>x</STRING><SCROLLBAR>";
+    for (int i = 0; i < 3; ++i)
+      twice += "<WINDOW TYPE=\"STATIC\" NAME=\"A" + std::to_string(i) + "\"><STRING>a</STRING></WINDOW>";
+    twice += "</SCROLLBAR><SCROLLBAR><WINDOW TYPE=\"STATIC\" NAME=\"B\"><STRING>b</STRING></WINDOW></SCROLLBAR>"
+             "</WINDOW></SCREEN>";
+    CHECK(mnu::parse(twice, doc, error, &notes), error);
+    {
+      const mnu::Window *bar = doc.screens[0].roots[0].scrollbar.get();
+      std::string read;
+      for (const mnu::Window &w : bar ? bar->children : std::vector<mnu::Window>())
+        read += w.name + "=" + w.string_data.value + " ";
+      CHECK(read == "A0=a A1=a A2=a B=b ", "both SCROLLBARs' windows, read whole: " + read);
+    }
+
+    // Other nested elements are a loop's in the game's reader, and its free of the tree takes them 43,688
+    // deep (mnu_xml_unit): 3,000 inside a window read.
+    std::string elements = "<SCREEN><NAME>S</NAME><WINDOW TYPE=\"STATIC\" NAME=\"W\"><STRING>t</STRING>";
+    for (int i = 0; i < 3000; ++i) elements += "<A>";
+    for (int i = 0; i < 3000; ++i) elements += "</A>";
+    elements += "</WINDOW></SCREEN>";
+    CHECK(mnu::parse(elements, doc, error, &notes), error);
+    CHECK(depth_of(doc) == 1 && stack_notes(notes) == 0, "3,000 nested unknown elements read");
+  }
   CHECK(fatal(screen_of("type=\"radio\" name=\"W\"", std::string(kPos) + "<GROUP>1</GROUP>"), "/GROUP") == -2,
         "a note-free menu");
+  // The four crashes the model holds as read, each a fatal note on its element (docs/mnu/menu-re.md, "Crash
+  // and hang cases"), so a menu holding one cannot ship: a SCREEN action with no FILE [orig: PFF_FindEntry
+  // @ 0x7685f3], a TABLE MIN_ITEM_HEIGHT of 0 [orig: CTableWnd_RecalcLayout @ 0x63f26b], GLOBAL_VAR on an edit
+  // window or a CHECKED checkbox [orig: @ 0x661e5f, @ 0x64ae05], a SCREEN with no NAME [orig: @ 0x639791].
+  CHECK(fatal(screen_of("type=\"button\" name=\"B\"", std::string(kPos) + "<ACTION type=\"SCREEN\">N</ACTION>"),
+              "/ACTION") == 1,
+        "a SCREEN action with no FILE");
+  CHECK(fatal(screen_of("type=\"button\" name=\"B\"",
+                        std::string(kPos) + "<ACTION type=\"SCREEN\" FILE=\"a.mnu\">N</ACTION>"),
+              "/ACTION") == -2,
+        "a SCREEN action with a FILE");
+  CHECK(fatal(screen_of("type=\"table\" name=\"T\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "a TABLE MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"table\" name=\"T\"",
+                        std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT><MIN_ITEM_HEIGHT>9</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 0,
+        "a TABLE MIN_ITEM_HEIGHT of 0 a later one replaces");
+  CHECK(fatal(screen_of("type=\"static\" name=\"T\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 0,
+        "MIN_ITEM_HEIGHT 0 where it is not read");
+  // Every CListWnd divides by it as its row height [orig: CListWnd_RecalcLayout @ 0x6443d0, idiv @ 0x644444]:
+  // a LIST, a LAN_LIST, a combo's LIST_BOX.
+  CHECK(fatal(screen_of("type=\"list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "a LIST MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"lan_list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "a LAN_LIST MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"combobox\" name=\"C\"",
+                        std::string(kPos) + "<LIST_BOX>" + kPos + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT></LIST_BOX>"),
+              "/LIST_BOX/MIN_ITEM_HEIGHT") == 1,
+        "a combo's LIST_BOX MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>1</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == -2,
+        "a LIST MIN_ITEM_HEIGHT of 1");
+  CHECK(fatal(screen_of("type=\"edit\" name=\"E\" GLOBAL_VAR", kPos), "WINDOW[E]") == 1, "GLOBAL_VAR on an edit");
+  CHECK(fatal(screen_of("type=\"static\" name=\"E\" GLOBAL_VAR", kPos), "WINDOW[E]") == -2,
+        "GLOBAL_VAR on a static");
+  CHECK(fatal(screen_of("type=\"checkbox\" name=\"C\" GLOBAL_VAR", kPos), "WINDOW[C]") == -2,
+        "GLOBAL_VAR on an unchecked checkbox");
+  CHECK(fatal(screen_of("type=\"checkbox\" name=\"C\" CHECKED GLOBAL_VAR", kPos), "WINDOW[C]") == 1,
+        "GLOBAL_VAR on a CHECKED checkbox");
+  CHECK(fatal("<SCREEN><WINDOW type=\"static\" name=\"W\">" + std::string(kPos) + "</WINDOW></SCREEN>",
+              "/SCREEN[0]") == 1,
+        "a SCREEN with no NAME");
+  CHECK(fatal("<SCREEN><NAME></NAME><WINDOW type=\"static\" name=\"W\">" + std::string(kPos) + "</WINDOW></SCREEN>",
+              "/SCREEN[0]") == -2,
+        "a SCREEN with an empty NAME (its text is empty, not null)");
+  CHECK(fatal("<SCREEN><MUSICVAR>1</MUSICVAR></SCREEN>", "/SCREEN[0]") == -2, "a SCREEN with no NAME and no window");
   // A number holding a stylesheet variable: retail reads the variable's value, the model
   // only the number wcstol reads here, so a save would lose it (D-MNU-1).
   CHECK(fatal(screen_of("type=\"static\" name=\"W\"", "<POSITION><LEFT>%X%</LEFT></POSITION>"),
@@ -754,7 +954,7 @@ bool test_typed_parts() {
 
 // What the game reads of a keyword, a number, a flag word and a key, held as it reads it (the #1098
 // review, round 3): a token a table lacks is none, a JUSTIFY another token the offset wcstol reads, a
-// VALUE its number, FLAGS the word sub_646CC0 ORs [orig: @ 0x646cc0], a SORT its first character, a
+// VALUE its number, FLAGS the word UI_ParseMaterialFlagNamesW ORs [orig: @ 0x646cc0], a SORT its first character, a
 // HOTKEY the key.
 bool test_held_as_read() {
   mnu::Document doc;
@@ -868,6 +1068,25 @@ bool test_write_issues() {
   CHECK(issue_for(d).empty(), "GLOBAL_VAR on an unchecked checkbox writes");
   d.screens[0].roots[0].checked = true;
   CHECK(!issue_for(d).empty(), "GLOBAL_VAR on a checked checkbox");
+  d = base;
+  d.screens[0].roots[0].type = mnu::WindowType::List;
+  d.screens[0].roots[0].table_data.has_min_item_height = true;
+  d.screens[0].roots[0].table_data.min_item_height = 0;
+  CHECK(issue_for(d).find("MIN_ITEM_HEIGHT 0") != std::string::npos, "a LIST MIN_ITEM_HEIGHT of 0");
+  d.screens[0].roots[0].table_data.min_item_height = 1;
+  CHECK(issue_for(d).empty(), "a LIST MIN_ITEM_HEIGHT of 1 writes");
+  // Absent, the field holds the game's default, -1 (a row measured from the font) [orig: CListWnd_Construct
+  // @ 0x643c34; CTableWnd_Construct @ 0x63e92b]: none is an issue, and that latent value written again is
+  // none either (D-12 follow-up).
+  for (const mnu::WindowType type : {mnu::WindowType::List, mnu::WindowType::LanList, mnu::WindowType::Table}) {
+    d = base;
+    d.screens[0].roots[0].type = type;
+    d.screens[0].roots[0].table_data = mnu::TableData();
+    CHECK(d.screens[0].roots[0].table_data.min_item_height == -1 && issue_for(d).empty(),
+          "an absent MIN_ITEM_HEIGHT is the default, no issue");
+    d.screens[0].roots[0].table_data.has_min_item_height = true;
+    CHECK(issue_for(d).empty(), "the default written again writes");
+  }
   d = base;
   d.screens[0].name.clear();
   CHECK(issue_for(d).find("NAME") != std::string::npos, "a SCREEN with no NAME");

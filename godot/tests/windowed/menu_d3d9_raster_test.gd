@@ -8,7 +8,7 @@ extends GutTest
 # - The edges: each the float product of the design point and the scale pair, truncated
 #   (the x87 unit at Direct3D 9's single precision), and an outline lit as Direct3D 9's
 #   line list lights it, every corner included
-#   [orig: CUIElement_DrawOutlineRect @ 0x647fc0; draw_line_2d @ 0x6786d0].
+#   [orig: CUIElement_DrawOutlineRect @ 0x647fc0; Line2D_Draw @ 0x6786d0].
 # - An image: the strip's half texel at both ends of its UVs, so a 1:1 image samples each
 #   texel's centre and draws crisp [orig: Render_DrawTiledTextureStrip @ 0x67b058].
 # - A glyph: the drawer's half-texel bottom bias in the quad's height too, so its last ink

@@ -310,7 +310,7 @@ std::vector<HudField> hud_element_fields(HudElement element, const def::DefHudPo
 			field.words = key + " level " + std::to_string(level);
 			field.range = "0 or 1: shown at HUD detail level " + std::to_string(level) +
 			              " when 1 (level 3 hides the HUD whatever it says) " + row->detail_cite;
-			field.cite = "[orig: HUD_ParseHudposToken ORs the level's bit per value read nonzero into byte_2723CE0; "
+			field.cite = "[orig: HUD_ParseHudposToken ORs the level's bit per value read nonzero into g_HUDDeclutterMasks; "
 			             "CRenderState_SetLayerVisibility @ 0x59B0F0]";
 			field.value = values[level];
 			out.push_back(std::move(field));

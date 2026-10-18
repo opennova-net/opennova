@@ -405,7 +405,7 @@ struct ModulatorChain {
 	// The sun-veil exposure stop-down — modulator-2's ONLY witnessed target
 	// writer [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0
 	// (ex sub_5AD8B0), per main scene frame]: a positive stop-down (the
-	// dot^128 sun-veil output, clamped 40) dims modulator-2 toward
+	// dot^64 sun-veil output, clamped 40) dims modulator-2 toward
 	// 64 - (3 * stopdown) >> 1 chased over 8 ticks (@ 0x5ad96a..0x5ad989);
 	// zero releases it back to identity over 124 ticks (@ 0x5ad996..0x5ad9a7).
 	// Every color block then modulates through modulator-2 via the modulator,

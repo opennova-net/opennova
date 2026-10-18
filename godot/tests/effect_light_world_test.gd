@@ -276,9 +276,14 @@ func _round_glow(id: int, pos: Vector3) -> RoundGlowRow:
 	return RoundGlowRow.make(id, pos, 6.0, Color(0.5, 0.47, 0.31))
 
 
-# A local-player fire event carrying only the muzzle-glow leg.
+# A local-player fire event carrying the muzzle-glow leg. The local fire's glow
+# rides ActionSlot_SpawnEffect, which glows only past its FIRE row's effect id
+# test, so the event carries the row's effect as WPN_M4AUTO's FIRE row authors it
+# (particle Effect_CAR15MF at mflash01). [orig: ActionSlot_SpawnEffect @0x401F27 /
+#  @0x40206C / @0x402080]
 func _muzzle_fire(shooter_handle: int, origin: Vector3, mf_light: int) -> FirePresentationEvent:
-	return FirePresentationEvent.make(origin, 0, shooter_handle, true, mf_light)
+	return FirePresentationEvent.make(origin, 0, shooter_handle, true, mf_light,
+			Vector3(0, 0, -1), false, 0, "", "Effect_CAR15MF", "mflash01")
 
 
 func test_destruction_present_dictionary_routes_death_light_into_output() -> void:
@@ -677,9 +682,12 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 		return
 	part.position += Vector3(2.0, 0.0, 0.0)
 	var spawn_position := node.global_transform * authored_position
-	var attached_position := node.get_model_light_world_position(0)
+	# The control: the position the moved ROBJ would carry the light to.
+	var attached_position := part.global_transform * authored_position
 	assert_false(attached_position.is_equal_approx(spawn_position),
 			"the control ROBJ transform differs from the entity placement matrix")
+	assert_true(node.get_model_light_world_position(0).is_equal_approx(spawn_position),
+			"the model's light position is the placement matrix's, the subobject an owner group")
 	node.entity_ref = EntityRef.make(-1, -1, 0, 0, 33)
 	var director := EffectLightDirector.new()
 	director.setup(world, null)

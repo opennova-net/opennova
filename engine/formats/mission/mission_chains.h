@@ -9,12 +9,13 @@
 // actions are records the event holds, and its two first indexes and two counts are what the writer
 // derives.
 //
-// What the original editor writes for an edited mission is not witnessed (Med_WriteBmsFile @0x44f920,
+// What the original editor writes for an edited mission is not witnessed (MIS_ExportBmsFile @0x44f920,
 // D-MIS-3); the layout join_event_chains writes is the corpus's. An empty run's index is never
 // dereferenced [orig: EventTrigger_EvaluateChain @0x454050: zero triggers is TRUE], so a file whose
 // runs partition its tables in another order (Reordered) loses nothing but its byte layout when it is
 // joined.
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -22,8 +23,18 @@
 
 namespace opennova::mission {
 
-// An event and the records it owns. The event's trigger_index, trigger_count, action_index and
-// action_count are not read from here: join_event_chains derives them.
+// The records of an event's run the game reads, from the run's count byte, which every walk reads signed.
+// The trigger walk evaluates the first record whenever the byte is not zero and the next ones while their
+// index is below the signed count, so 128..255 evaluates the first alone [orig: EventTrigger_EvaluateChain
+// @0x454050, the first @0x45405f, the rest @0x45408f/@0x4540d3]; the action walks dispatch while the index
+// is below the signed count, so 128..255 dispatches none [orig: EventTrigger_UpdateEntry @0x454c30, @0x454c95
+// and @0x454d04].
+inline size_t triggers_read(uint8_t count) { return count < 128 ? count : 1; }
+inline size_t actions_read(uint8_t count) { return count < 128 ? count : 0; }
+
+// An event and the records it owns, the run the game reads of each table (triggers_read, actions_read). The
+// event's trigger_index and action_index are not read from here, nor its two counts but a count byte of
+// 128..255 (join_event_chains): join_event_chains derives them.
 struct EventChain {
 	bms::Event event;
 	std::vector<bms::Trigger> triggers;
@@ -62,12 +73,17 @@ bool split_event_chains(const bms::File &file, std::vector<EventChain> &out, Run
 
 // The three tables from the chains: each run where its event stands, its first index the running
 // offset (an empty run's too), its count the list's size; the file's three counts and the header's
-// event count with them. [corpus: 115 of 115 shipped missions]
+// event count with them. [corpus: 115 of 115 shipped missions] A count byte of 128..255 is written as
+// the chain's event holds it while the chain holds what the game reads of it (the first trigger, no
+// action): the size would read otherwise (at a trigger count of 1 the zone resolver walks the trigger,
+// rewriting a zone trigger's zone, which at 128..255 it never does [orig: EventTrigger_ResolveZoneTriggerRefs
+// @0x453000, the signed test @0x453029]).
 void join_event_chains(const std::vector<EventChain> &chains, bms::File &file);
 
-// The most triggers, and the most actions, an event's chain is given by an edit. The counts are bytes;
-// the shipped missions hold 16 triggers and 20 actions at most [corpus], and the original editor's
-// ceiling is not witnessed (D-MIS-3): an edit past what a shipped mission holds is refused.
+// The most triggers, and the most actions, an event's chain is given by an edit: the original editor's event
+// holds 20 slots of each [orig: JOTACmed.exe MIS_ParseToken, the triggers' @ 0x453b99, the actions' @ 0x453c6f],
+// whose rows past them run over the slots after (parse_mis_nested_records). The counts are bytes; the shipped
+// missions hold 16 triggers and 20 actions at most [corpus].
 inline constexpr size_t kMaxEventChainEntries = 20;
 
 } // namespace opennova::mission

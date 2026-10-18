@@ -66,7 +66,7 @@ var _armory := ArmoryMenuCompanion.new()
 
 func _init() -> void:
 	_armory.loadout_accepted.connect(_on_loadout_accepted)
-	_armory.armory_closed.connect(close)
+	_armory.armory_closed.connect(_on_cancel)
 
 
 ## Wire the presenter to its world view + player presenter and the node the menu
@@ -95,21 +95,17 @@ func get_menu_driver() -> MenuDriver:
 	return _driver
 
 
-## The armory key: open weapon.mnu's WEAPON screen over LIVE play when the player
-## stands in an armory zone. Returns false when out of zone or the menu cannot
-## build (the key is then ignored, matching the original's silent gate).
-func try_open() -> bool:
-	if _view == null:
-		return false
-	var sim: Simulation = _view.sim()
-	if sim == null or not sim.local_player_in_armory_zone():
-		return false  # [orig: Flags & 0x400000 gate @0x4e0b4d]
-	return open()
+## Whether the WEAPON screen's ACCEPT and CANCEL act: neither does while the
+## engine's armory press latch is held (Simulation.is_armory_press_latched;
+## engine LocalPlayer::armory_press_latched carries the witness).
+func can_dismiss() -> bool:
+	var sim: Simulation = _view.sim() if _view != null else null
+	return sim == null or not sim.is_armory_press_latched()
 
 
-## The post-zone-gate open leg: build + populate the WEAPON screen over live
-## play. The shells arrive through try_open()'s zone gate; tests that stage the
-## world without a type-6 volume drive this directly.
+## Build + populate the WEAPON screen over live play. The engine decides when
+## (the held USE row's armory arm, engine controls::PlayerActions and
+## world::LocalPlayer::take_use_item_press); the shell and the tests call this.
 func open() -> bool:
 	if is_open() or _view == null or _ui_parent == null:
 		return false
@@ -232,17 +228,25 @@ func _process(_delta: float) -> void:
 	_driver.tick(_view.frame_clock_ms)
 
 
-# Route the armory-key edges to the companion's debounced ACCEPT accelerator
-# while the screen is open (the companion owns the armed state — its
-# on_menu_built stamp is the original's open-debounce [orig: @0x4e0b21]).
+# A useitem key's press while the screen is open is the ACCEPT accelerator,
+# unless the engine's armory press latch holds it: the press that opened the
+# screen latched it, and only a useitem release clears it (MainGame._input;
+# engine LocalPlayer::armory_press_latched carries the witness).
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_open():
 		return
 	var key := event as InputEventKey
-	if key == null or key.echo or not is_accept_hotkey(bound_key_of(key)):
+	if key == null or key.echo or not key.pressed or not is_accept_hotkey(bound_key_of(key)):
 		return
-	if _armory.accept_hotkey_edge(key.pressed):
+	if can_dismiss():
+		_armory.trigger_accept()
 		get_viewport().set_input_as_handled()
+
+
+# The screen's CANCEL: a close unless the press latch holds it open.
+func _on_cancel() -> void:
+	if can_dismiss():
+		close()
 
 
 func teardown() -> void:
@@ -303,6 +307,8 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 #  expansion + WeaponSlot rebuild chain + Player_SelectWeaponSlot @0x4dd680 /
 #  Player_MountWeaponSlot @0x4dfa40]
 func _on_loadout_accepted(loadout: Dictionary) -> void:
+	if not can_dismiss():
+		return
 	var primary := String(loadout.get("primary", ""))
 	_player_class = int(loadout.get("player_class", _player_class))
 	if _view != null:

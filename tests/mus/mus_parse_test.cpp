@@ -152,6 +152,39 @@ static int test_open_file(void) {
     return 1;
 }
 
+/* mus_reads_the_same: two reads of one file hold the same in what the game reads; a change to a
+   field it reads (a code byte, a section's entry, a method name, the MessageHandler's entry, the
+   globals' size) tells them apart; a NULL file is never the same. */
+static int test_reads_the_same(void) {
+    MusFile a, b;
+    CHECK(mus_open(&a, SYNTH_GAMEMUS) == 0 && mus_open(&b, SYNTH_GAMEMUS) == 0, "open twice");
+    CHECK(mus_reads_the_same(&a, &b), "two reads of one file");
+    CHECK(!mus_reads_the_same(&a, NULL) && !mus_reads_the_same(NULL, &b), "a NULL file");
+    MusScript &s = b.scripts[0];
+    CHECK(s.code_size > 0 && s.section_count > 0, "the script has code and sections");
+    s.code[0] ^= 0xFF;
+    CHECK(!mus_reads_the_same(&a, &b), "a code byte");
+    s.code[0] ^= 0xFF;
+    s.sections[0].code_offset += 1;
+    CHECK(!mus_reads_the_same(&a, &b), "a section's entry");
+    s.sections[0].code_offset -= 1;
+    s.globals_size += 4;
+    CHECK(!mus_reads_the_same(&a, &b), "the globals' size");
+    s.globals_size -= 4;
+    s.has_message_handler = !s.has_message_handler;
+    CHECK(!mus_reads_the_same(&a, &b), "the MessageHandler entry");
+    s.has_message_handler = !s.has_message_handler;
+    if (b.intrinsic_count > 0) {
+        b.intrinsic_names[0][0] ^= 0x20;
+        CHECK(!mus_reads_the_same(&a, &b), "a method name");
+        b.intrinsic_names[0][0] ^= 0x20;
+    }
+    CHECK(mus_reads_the_same(&a, &b), "the same again once restored");
+    mus_close(&a);
+    mus_close(&b);
+    return 1;
+}
+
 static int test_open_missing_file(void) {
     MusFile mf;
     memset(&mf, 0xCD, sizeof(mf));
@@ -207,6 +240,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_open_synth_gamemus);
     RUN_TEST(test_close_idempotent);
     RUN_TEST(test_open_file);
+    RUN_TEST(test_reads_the_same);
     RUN_TEST(test_open_missing_file);
     RUN_TEST(test_find_section_synth);
 

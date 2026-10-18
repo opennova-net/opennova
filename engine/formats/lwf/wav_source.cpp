@@ -151,7 +151,7 @@ bool decode_wave_source(const std::vector<uint8_t> &bytes, WaveSamples &out, std
 	if (tag_at(data, 0, "AUD1")) {
 		WaveFormat format;
 		format.aud1 = true;
-		// 16-bit where the width byte is 2, else 8-bit, as the mixer reads it [orig: sub_7BD671 @ 0x7bd692].
+		// 16-bit where the width byte is 2, else 8-bit, as the mixer reads it [orig: AudioChannel_BindSampleBuffer @ 0x7bd692].
 		format.bits = data.size() > 12 && data[12] == 2 ? 16 : 8;
 		return through_game(format);
 	}

@@ -663,6 +663,21 @@ int test_import_choices() {
 	facts.clear();
 	const std::vector<ImportChoice> members = list_import_choices({install + "/resource.pff"}, findings, &facts);
 	TEST_EXPECT(members.size() == 3 && facts.size() == 3 && facts[0].kind == AssetKind::Texture && facts[0].size == 4);
+	// An expansion's archive in its own folder, expansion\<n>\<n>.pff (JO:CA's jox01.pff): its music scripts
+	// M<n>.bin and G<n>.bin by the expansion's name, a string table such as menutxt.bin as it is (by name alone
+	// the two read alike). An archive anywhere else names no expansion: ame.pff's Game.bin stays a string table.
+	const std::string expansion_archive = dir.file("exp") + "/expansion/jox01/jox01.pff";
+	TEST_EXPECT(write_archive(expansion_archive, {"MJox01.bin", "GJox01.bin", "menutxt.bin"}));
+	facts.clear();
+	const std::vector<ImportChoice> expansion = list_import_choices({expansion_archive}, findings, &facts);
+	TEST_EXPECT(expansion.size() == 3 && facts.size() == 3);
+	for (size_t i = 0; i < expansion.size() && i < facts.size(); ++i)
+		TEST_EXPECT(facts[i].kind == (expansion[i].entry == "menutxt.bin" ? AssetKind::Strings : AssetKind::MusicScript));
+	const std::string loose_archive = dir.file("exp") + "/other/ame.pff";
+	TEST_EXPECT(write_archive(loose_archive, {"Game.bin"}));
+	facts.clear();
+	TEST_EXPECT(list_import_choices({loose_archive}, findings, &facts).size() == 1 && facts.size() == 1 &&
+	            facts[0].kind == AssetKind::Strings);
 	// Through the session: the game data listed to choose from, each with its kind and size.
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;

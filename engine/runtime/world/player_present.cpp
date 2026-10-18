@@ -211,15 +211,26 @@ SpawnLoadoutPlan spawn_loadout_plan(const SpawnLoadoutInput &input,
 FireEffectPlan fire_effect_plan(const FirePresentationRow &row) {
     FireEffectPlan plan;
     plan.userpoint = row.action_userpoint;
-    // The MF_Light muzzle glow re-arms per shot for EVERY shooter — retail
-    // spawns it on both fire arms, the local player's included [orig:
-    // WeaponSlot_FireAndSpawnEffects @ 0x53f597 at the fire position;
-    // ActionSlot_SpawnEffect @ 0x402080 at the action-transform muzzle;
-    // both gate on ammo +36 MF_Light]. Owner = shooter, so the witnessed
+    // The MF_Light muzzle glow re-arms per shot for every shooter whose fire
+    // runs one of its two spawners, the local player's included [orig:
+    // WeaponSlot_FireAndSpawnEffects @ 0x53f597 at the fire position (the
+    // host's own ammo-def fire); ActionSlot_SpawnEffect @ 0x402080 at the
+    // action-transform muzzle (the adm arm); both gate on ammo +36 MF_Light,
+    // and they are Entity_UpdateMuzzleGlowEffect's only callers]. A received
+    // round event's ammo-def arm runs neither: it plays the ammo's sound and
+    // submits its +68 effect alone [orig: NetPacket_DeserializeRoundEvent
+    // @ 0x42f5dc, Effect_SubmitDescriptor @ 0x42f6c2 -> @ 0x5f6f80, which
+    // spawns the emitter and nothing else]. Owner = shooter, so the witnessed
     // group gate scopes it to the shooter's own skinned person draws
     // (renderer::submit_owner_group). The adm arm anchors it
     // on the rendered gun's userpoint.
-    plan.glow = row.mf_light != 0;
+    // Each spawner glows only with the effect it spawns: WeaponSlot_FireAndSpawnEffects
+    // inside its ammo +68 effect test, ActionSlot_SpawnEffect past its action's effect
+    // id test (and on the FIRE row, whose ammo MF_Light it reads) [orig: @ 0x53f4a9 /
+    // @ 0x53f4ad; @ 0x401f27 / @ 0x401f31, @ 0x402058, @ 0x40206c].
+    const bool action_leg = row.adm_arm || row.is_local_player;
+    const std::string &spawned_effect = action_leg ? row.action_effect : row.effect;
+    plan.glow = row.mf_light != 0 && !row.wire_ammo_arm && !spawned_effect.empty();
     plan.glow_at_muzzle = plan.glow && row.adm_arm;
     // The local player's own fire is presented by the action-slot legs
     // [orig: ActionSlot_ExecuteActionTick @ 0x541A70 routing]; everyone

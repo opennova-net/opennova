@@ -18,20 +18,7 @@ func after_each() -> void:
 	_temp_dirs.clear()
 
 
-# --- sidecar image name [orig: 0x521d66/0x521dab] -----------------------------
-
-func test_sidecar_name_replaces_bms_extension() -> void:
-	assert_eq(HudPos.loading_sidecar_image_name("00TRg.bms"), "00TRg.pcx")
-	assert_eq(HudPos.loading_sidecar_image_name("TDH_I5A.BMS"), "TDH_I5A.pcx")
-
-
-func test_sidecar_name_appends_when_no_extension() -> void:
-	# Path_ReplaceOrAppendExtension appends when there is nothing to replace.
-	assert_eq(HudPos.loading_sidecar_image_name("dvxi5"), "dvxi5.pcx")
-
-
-func test_sidecar_name_uses_the_file_part_only() -> void:
-	assert_eq(HudPos.loading_sidecar_image_name("maps/ASH_I5A.bms"), "ASH_I5A.pcx")
+# The sidecar name rule is the engine's (ctest hud_loading_screen).
 
 
 # --- background resolution [orig: exists probe @ 0x521db5, fallback @ 0x521e20] ---
@@ -42,10 +29,10 @@ func test_background_prefers_mission_sidecar_then_falls_back() -> void:
 	_touch(dir.path_join("loadscrn.pcx"))
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
-	var bg := LoadingScreen.resolve_background(root, "00TRg.bms")
+	var bg := LoadingBackground.resolve(root, "00TRg.bms")
 	assert_eq(bg.name.to_lower(), "00trg.pcx", "sidecar wins when present")
 	assert_true(bg.custom)
-	bg = LoadingScreen.resolve_background(root, "OTHER.bms")
+	bg = LoadingBackground.resolve(root, "OTHER.bms")
 	assert_eq(bg.name, "loadscrn.pcx", "missing sidecar falls back")
 	assert_false(bg.custom)
 

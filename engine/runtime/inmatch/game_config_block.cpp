@@ -1,6 +1,7 @@
 #include <runtime/inmatch/game_config_block.h>
 
 #include <runtime/renderer/aspect_ratio.h>
+#include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/renderer/particle_density.h>
 #include <runtime/renderer/texture_compression.h>
@@ -14,6 +15,7 @@ void run_video_test(gamecfg::GameCfg &cfg, int32_t desktop_width, int32_t deskto
 	cfg.texfilter_level = renderer::kTexFilterLevelFreshProfile;
 	cfg.particle_density = renderer::kParticleDensityFreshProfile;
 	cfg.texcompression_level = renderer::kTexCompressionLevelFreshProfile;
+	cfg.terrain_texdetail = renderer::kTerrainTexDetailFreshProfile;
 }
 
 GameConfigBlock::GameConfigBlock(std::string path) : path_(std::move(path)) {}

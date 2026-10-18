@@ -55,6 +55,8 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_tile_info_override", "tile_info"), &Terrain::set_tile_info_override);
 	ClassDB::bind_method(D_METHOD("set_texcompression_level", "level"), &Terrain::set_texcompression_level);
 	ClassDB::bind_method(D_METHOD("get_texcompression_level"), &Terrain::get_texcompression_level);
+	ClassDB::bind_method(D_METHOD("set_terrain_texdetail", "level"), &Terrain::set_terrain_texdetail);
+	ClassDB::bind_method(D_METHOD("get_terrain_texdetail"), &Terrain::get_terrain_texdetail);
 	ClassDB::bind_method(D_METHOD("get_tile_info_override"), &Terrain::get_tile_info_override);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override", PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
 		"set_tile_info_override", "get_tile_info_override");
@@ -425,6 +427,14 @@ void Terrain::set_texcompression_level(int p_level) {
 
 int Terrain::get_texcompression_level() const {
 	return surface_inputs->get_texcompression_level();
+}
+
+void Terrain::set_terrain_texdetail(int p_level) {
+	surface_inputs->set_terrain_texdetail(p_level);
+}
+
+int Terrain::get_terrain_texdetail() const {
+	return surface_inputs->get_terrain_texdetail();
 }
 
 void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {

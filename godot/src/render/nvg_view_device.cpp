@@ -459,7 +459,7 @@ bool NvgViewDevice::draw(RenderingDevice *p_rd, const Inputs &p_inputs, std::siz
 	}
 
 	// The polar unwrap: the target cleared to 0xFFFF0000, then the eight
-	// passes, blending off (retail NVG_RenderSceneToTarget @0x5d0a1e..0x5d0e7f).
+	// passes, blending off (engine: runtime/renderer/nvg_scope_lens.h).
 	PackedColorArray polar_clear;
 	polar_clear.push_back(opennova::color_from_argb(r::kNvgPolarClearColor));
 	const Vector2i polar_size(r::kNvgPolarWidth, r::kNvgPolarHeight);

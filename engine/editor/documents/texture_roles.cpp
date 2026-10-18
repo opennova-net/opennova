@@ -167,7 +167,7 @@ constexpr RoleWords kRows[] = {
 	        .alpha("none: each palette index is a foliage code, its colour unused")
 	        .sampling("looked up by index")
 	        .missing("no detail foliage")
-	        .witness("Foliage_LoadFoliageMapPCX @ 0x605AD0; Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066D0")
+	        .witness("Foliage_LoadFoliageMapPCX @ 0x605AD0; Foliage_SampleFoliageMapFlat @ 0x6066D0")
 	        .row,
 	Role(R::TerrainCharMap, "terrain_char_map", "terrain char map", G::Terrain)
 	        .alpha("none: each palette index is a surface class, its colour unused")
@@ -217,7 +217,7 @@ constexpr RoleWords kRows[] = {
 	        .row,
 	// A character's face animation (.grm): its base texture, the base's .MDT twin and its two eye textures,
 	// each name's extension made .TGA (the base's .MDT) and loaded by STAGE. The loader the IDB calls a shadow
-	// decal's runs only over the GRM slots (sub_57FC00 over sub_57FCE0's).
+	// decal's runs only over the GRM slots (sub_57FC00 over FaceAnim_FindOrLoadFile's).
 	Role(R::FaceTexture, "face_texture", "face animation texture (.grm)", G::Model)
 	        .alpha("as the face's materials make it (NEEDS-RE: their blend)")
 	        .sampling("as a model's diffuse")

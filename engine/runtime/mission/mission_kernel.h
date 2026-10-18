@@ -481,6 +481,15 @@ public:
 	bool resolve_seat_bone(world::World &w, const world::Entity &carrier,
 			int bone_index) override;
 	bool ensure_collision_instance(world::World &w, world::EntityHandle entity) override;
+	bool build_wire_person_section_matrices(world::World &w, uint16_t wire_handle,
+			int32_t model_id, const world::CollisionMatrix &entity_world,
+			const world::CollisionModel &model,
+			std::vector<world::CollisionMatrix> &out) override;
+	// The joiner's wire-built persons for that pose: the row's item type and
+	// its channel state (world/pose_provider.h SkeletalPoseInputs). Unset off a
+	// joiner; false for a row the presenter does not pose from its channels.
+	std::function<bool(uint16_t wire_handle, uint16_t &type_id,
+			world::SkeletalPoseInputs &inputs)> wire_person_pose;
 	bool build_section_matrices(world::World &w, world::EntityHandle entity,
 			int32_t model_id, const world::CollisionMatrix &entity_world,
 			const world::CollisionModel &model,
@@ -540,6 +549,8 @@ private:
 	// gate for the re-sweeps and the wire collision shapes.
 	bool collision_items_resolved_ = false;
 	std::unordered_map<uint16_t, world::ResolvedCollisionShape> wire_collision_shape_by_type_;
+	// The wire-built person types whose rig did not load.
+	std::unordered_map<uint16_t, bool> wire_person_skeletal_failed_;
 	std::unordered_map<uint16_t, int> adm_by_runtime_type_;
 	// The asset store infantry .adm registrations resolve through (the install/
 	// re-arm seam's; defaults to the kernel's asset store).

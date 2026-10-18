@@ -2,6 +2,7 @@
 
 #include <net/npwire/wire_handle.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/round_sim.h>
 
 #include <utility>
 #include <cstddef>
@@ -22,6 +23,12 @@ void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
 			static_cast<std::size_t>(handle.slot()) >=
 					world::retail_pool_capacity(handle.pool()))
 		return;
+	// The 0x26 route's kill stores its section into the global hit record
+	// for a live entity before its callback, which the embedder gates on its
+	// own entity as apply_item_state_event does; a 0x13 later in this pump
+	// reads it. [orig: Entity_KillBySlotId hitRecord[14] = section @0x42BD47]
+	if (item_state && replica_kill_section_store_)
+		replica_kill_section_store_(handle_packed, value);
 	if (ClientEntityState *row = state_.find(handle_packed)) {
 		row->health_word = 0;
 		row->health_known = true;
@@ -32,6 +39,23 @@ void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
 		if (row->cls == EntityClass::Player || row->cls == EntityClass::Infantry) {
 			row->net_health_zero = true;
 			if (!item_state) row->net_death_anim = value;
+		}
+		// The 0x13 then runs the body's class callback with event 4: an org
+		// row's (the Infantry class) zeroes Health again and, while the global
+		// hit record holds a round, restages deathAnimStateId over the wire
+		// word (0 for every death edge's send, @0x4B9D38 -> @0x503733) from
+		// the record's section and the round's approach quadrant against the
+		// body's heading. A plyr row's callback has its own event-4 arm,
+		// which reads no record.
+		// [orig: the callback @0x42EBF5 -> OrganicClass_HandleEvent
+		//  @0x40733F..0x4073B1 (the org0/org1 rows @0x813018 / @0x813030);
+		//  Entity_HandleDamageAndTriggerZones @0x407A8B..0x407B5E (plyr)]
+		if (!item_state && row->cls == EntityClass::Infantry) {
+			const world::HitRecord *record =
+					replica_hit_record_resolver_ ? replica_hit_record_resolver_() : nullptr;
+			if (record != nullptr && record->has_round)
+				row->net_death_anim = static_cast<int16_t>(
+						world::hit_record_death_anim_state(*record, row->heading_bam));
 		}
 		state_.mark_changed();
 	}

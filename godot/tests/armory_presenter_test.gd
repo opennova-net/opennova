@@ -3,12 +3,16 @@ extends GutTest
 # ArmoryPresenter on the typed surfaces (ADR 0034): a REAL Simulation owns the
 # player/loadout state (mission boot + spawn + weapon table — the same recipe
 # the satchel/grenade tests always used), the world seam is an ArmoryWorldView
-# interface harness, and the zone gate is exercised through try_open() while the
-# staged tests drive the post-gate open() directly (no armory volume is
-# authored in the in-memory mission).
+# interface harness, and the staged tests drive open() directly (the arm that
+# opens it is the engine's, ctests local_player_view and player_actions).
 
 const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_presenter_test"
+# A music context for the armory's MUSICVAR to land in (the synthetic menu script and bank): the game
+# writes a menu's MUSICVAR into the open context's globals and drops it with none open [orig:
+# AudioVM_SetVariable @ 0x671fa0].
+const MUSIC_SCRIPT_FIXTURE := "res://../fixtures/mus/synth_menumus.bin"
+const MUSIC_BANK_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"
 
 # ArmoryFixture authors the small menu, catalog and string tables used here.
 const STAGED_FIXTURES: Array[String] = [
@@ -51,6 +55,19 @@ func before_each() -> void:
 func after_each() -> void:
 	Strings.clear()
 	ControlsBindings.model().restore_defaults()
+	MusicService.stop_context()
+
+
+# Open a music context on the service's director, its script's instance holding the vars.
+func _open_music_context() -> void:
+	var bank := SbfBank.new()
+	bank.load_from_path(MUSIC_BANK_FIXTURE)
+	var script := MusicScript.new()
+	script.load_from_path(MUSIC_SCRIPT_FIXTURE)
+	var director := MusicService.director()
+	director.set_bank(bank)
+	director.load_mus_script(script)
+	director.start()
 
 
 func after_all() -> void:
@@ -148,9 +165,6 @@ func test_accept_hotkey_follows_the_use_item_binding() -> void:
 	await _key_edge(KEY_SHIFT, false)
 	assert_true(presenter.is_open(), "Shift is no accelerator once Use Item moved")
 	await _key_edge(KEY_E, true)
-	assert_true(presenter.is_open(), "the opener's press is debounced until its release")
-	await _key_edge(KEY_E, false)
-	await _key_edge(KEY_E, true)
 	assert_false(presenter.is_open(), "the rebound Use Item key ACCEPTs")
 	await _key_edge(KEY_E, false)
 
@@ -189,27 +203,37 @@ func test_accept_hotkey_matches_the_physical_key() -> void:
 	await _key_edge(KEY_F, false, KEY_E)
 	assert_true(presenter.is_open(), "the logical E on another physical key is no accelerator")
 	await _key_edge(KEY_E, true, KEY_F)
-	assert_true(presenter.is_open(), "the opener's press is debounced until its release")
-	await _key_edge(KEY_E, false, KEY_F)
-	await _key_edge(KEY_E, true, KEY_F)
 	assert_false(presenter.is_open(), "the physical E ACCEPTs whatever it types")
 	await _key_edge(KEY_E, false, KEY_F)
 
 
-func test_out_of_zone_try_open_is_the_silent_gate() -> void:
-	# No type-6 armory volume exists in the in-memory mission, so the spawned
-	# player is out of zone and the armory key is silently ignored
-	# [orig: Flags & 0x400000 gate @0x4e0b4d].
-	var sim := _real_sim()
+# The ACCEPT accelerator reads the engine's armory press latch, not a debounce
+# of the screen's own: a screen opened with no USE-ITEM press taking the arm
+# (open() directly; off every armory volume the press takes the mount chain
+# and latches nothing) leaves the latch clear, so its very first press, with no
+# release before it, ACCEPTs (the show stamps nothing). The latch's set, hold
+# and release are the engine's (ctest local_player_view
+# test_armory_press_latch_freezes_input).
+func test_accept_hotkey_reads_the_engine_press_latch() -> void:
+	var sim := _real_sim(2)
+	assert_eq(sim.take_use_item_press(), Simulation.USE_ITEM_ARM_MOUNT_CHAIN,
+			"off every armory volume the press takes the mount chain")
+	assert_false(sim.is_armory_press_latched(), "and latches nothing")
 	var world := _make_world(sim, _make_weapons())
 	var overlay := Control.new()
 	add_child_autofree(overlay)
+	overlay.size = Vector2(800, 600)
 	var presenter := ArmoryPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, null, overlay)
-
-	assert_false(presenter.try_open(), "out of zone the key is ignored")
-	assert_null(overlay.get_node_or_null("ArmoryMenu"))
+	assert_true(presenter.open(), "the staged player opens the armory")
+	assert_true(presenter.can_dismiss(), "an unlatched screen's ACCEPT and CANCEL act")
+	await _key_edge(KEY_SHIFT, true)
+	assert_false(presenter.is_open(), "the first Use Item press ACCEPTs")
+	await _key_edge(KEY_SHIFT, false)
+	assert_true(presenter.open(), "the armory reopens")
+	await _key_edge(KEY_SHIFT, false)
+	assert_true(presenter.is_open(), "a release accepts nothing")
 
 
 func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
@@ -234,6 +258,7 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	var presenter := ArmoryPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, player_presenter, overlay)
+	_open_music_context()
 
 	assert_true(presenter.open(), "the staged player opens the armory")
 	var frame := overlay.get_node_or_null("ArmoryMenu") as MenuFrame

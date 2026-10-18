@@ -43,7 +43,10 @@ void weapon_scope_zero_bake(WeaponScopeZero &zero, const AmmoTableEntry &ammo) {
         for (;;) {
             // Retail seeds a zeroed synthetic projectile 100 units above water,
             // with Q22 trig and gravity regardless of the ammo's runtime flags.
-            const double radians = double(angle) * (2.0 * io::kPi / 4294967296.0);
+            // The angle turns into radians by retail's x87 double, not the
+            // exact 2pi/2^32 [orig: `fild; fmul ds:dbl_7C3608` @0x5451F2..0x5451FE,
+            // fsin / fcos x dbl_7C3600 (Q22) @0x545204..0x545217].
+            const double radians = double(angle) * io::kRadiansPerBamX87;
             const int32_t cosine = static_cast<int32_t>(std::cos(radians) * 4194304.0);
             const int32_t sine = static_cast<int32_t>(std::sin(radians) * 4194304.0);
             FixedVec3 velocity{static_cast<int32_t>((int64_t(speed) * cosine) >> 22),

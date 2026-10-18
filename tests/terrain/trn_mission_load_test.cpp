@@ -120,10 +120,11 @@ int run() {
 	const std::string row = crlf("polytrn_sectors 0 0 0 0 0 0 0 0\n");
 	later = TrnLaterTexts();
 	later.environment = &row;
-	TEST_EXPECT(!opennova::load_mission_trn(trn, later, mission, error));
-	TEST_EXPECT(error.find("row count 9") != std::string::npos);
+	opennova::TrnRefusal leg = opennova::TrnRefusal::None;
+	TEST_EXPECT(!opennova::load_mission_trn(trn, later, mission, error, nullptr, &leg));
+	TEST_EXPECT(error.find("row count 9") != std::string::npos && leg == opennova::TrnRefusal::SectorRows);
 
-	// A foliage block the .trn leaves open reads the next file's lines [orig: dword_31BC904 carried]: here
+	// A foliage block the .trn leaves open reads the next file's lines [orig: g_TerrainCfgInFoliageBlock carried]: here
 	// overcast.def names its graphic and closes it, and the .env's foliage is a second block.
 	const std::string open_block = trn + crlf("foliage\ncolor_lower 1\n");
 	const std::string closes = crlf("graphic tree9.3di\ncolor_upper 2\nend\n");

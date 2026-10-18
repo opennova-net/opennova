@@ -711,7 +711,7 @@ static int test_vm_intrinsic_ggrnd_in_range(void) {
     s.sections = &sec;
     s.section_count = 1;
     s.entry_section_index = 0;
-    s.globals_size = MUS_GLOBALS_BYTES;
+    s.globals_size = 68;
 
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &s);
@@ -754,7 +754,7 @@ static int test_vm_intrinsic_fset(void) {
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
-    s.entry_section_index = 0; s.globals_size = MUS_GLOBALS_BYTES;
+    s.entry_section_index = 0; s.globals_size = 68;
 
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &s);
@@ -783,7 +783,7 @@ static int test_vm_intrinsic_fclear(void) {
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
-    s.entry_section_index = 0; s.globals_size = MUS_GLOBALS_BYTES;
+    s.entry_section_index = 0; s.globals_size = 68;
 
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &s);
@@ -818,7 +818,7 @@ static int test_vm_intrinsic_fisset(void) {
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
-    s.entry_section_index = 0; s.globals_size = MUS_GLOBALS_BYTES;
+    s.entry_section_index = 0; s.globals_size = 68;
 
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &s);
@@ -857,7 +857,7 @@ static int test_vm_intrinsic_fisclear(void) {
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
-    s.entry_section_index = 0; s.globals_size = MUS_GLOBALS_BYTES;
+    s.entry_section_index = 0; s.globals_size = 68;
 
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &s);
@@ -928,7 +928,7 @@ static int test_vm_method_resolves_by_name(void) {
     memset(&s, 0, sizeof(s));
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
-    s.sections = &sec; s.section_count = 1; s.globals_size = MUS_GLOBALS_BYTES;
+    s.sections = &sec; s.section_count = 1; s.globals_size = 68;
     s.intrinsic_names = table; s.intrinsic_count = 2;
 
     int32_t echoed = -1;
@@ -958,7 +958,7 @@ static int test_vm_method_past_table_errors(void) {
     memset(&s, 0, sizeof(s));
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
-    s.sections = &sec; s.section_count = 1; s.globals_size = MUS_GLOBALS_BYTES;
+    s.sections = &sec; s.section_count = 1; s.globals_size = 68;
     s.intrinsic_names = table; s.intrinsic_count = 1;
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &s);
@@ -989,7 +989,7 @@ static int test_vm_enter_frame_base_as_held(void) {
         memset(&s, 0, sizeof(s));
         strncpy(s.name, "t", sizeof(s.name) - 1);
         s.code = code; s.code_size = sizeof(code);
-        s.sections = &sec; s.section_count = 1; s.globals_size = MUS_GLOBALS_BYTES; s.locals_size = 0x28;
+        s.sections = &sec; s.section_count = 1; s.globals_size = 68; s.locals_size = 0x28;
         s.locals_frame_offset = base;
         MusVM *vm = mus_vm_create();
         mus_vm_load_script(vm, &s);
@@ -1024,7 +1024,7 @@ static int test_vm_intrinsic_tstart_tstop_noop(void) {
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
-    s.entry_section_index = 0; s.globals_size = MUS_GLOBALS_BYTES;
+    s.entry_section_index = 0; s.globals_size = 68;
 
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &s);
@@ -1095,7 +1095,7 @@ static int test_vm_playw_fires_hook_wait(void) {
     strncpy(s.name, "t", sizeof(s.name) - 1);
     s.code = code; s.code_size = sizeof(code);
     s.sections = &sec; s.section_count = 1;
-    s.entry_section_index = 0; s.globals_size = MUS_GLOBALS_BYTES;
+    s.entry_section_index = 0; s.globals_size = 68;
 
     MusVM *vm = mus_vm_create();
     uint32_t got_idx = 0;

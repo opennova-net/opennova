@@ -108,7 +108,7 @@ public:
 	// `mouse_scale_negative` is the mousescale fire's sign bit
 	// (ControlsModel.is_token_fire_signed). The bits are the engine's unsigned
 	// 32-bit word, EVENT_JOIN_LOCK_TOGGLED its top bit, so the result is 64-bit.
-	int64_t poll(int p_rows_down, bool p_chorded, bool p_active,
+	int64_t poll(int p_rows_down, bool p_active,
 			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
 			bool p_authority = false, bool p_mp_session_peer = false,
 			bool p_mouse_scale_negative = false);

@@ -6,6 +6,7 @@
 // names] tail — so rid, ip, the named fields, AND the player list all survive
 // the wire.
 
+#include <net/novacrypto/nwu.h>
 #include <net/novaworld/gsb.h>
 
 #include <cstdio>
@@ -137,6 +138,32 @@ int main() {
 		GsbResponse forged_parsed;
 		expect(!gsb_parse_response(forged.data(), forged.size(), forged_parsed),
 		       "forged oversized chunk length rejected");
+	}
+
+	// Truncated records inside whole chunks: an SVRS payload that says one server and
+	// ends after its count, and a stream cut a few bytes into the next chunk header,
+	// are refused at the short read (the protocol cursor tests each read's size
+	// against the bytes left).
+	{
+		const auto chunk = [](const char (&magic)[5], std::vector<uint8_t> payload) {
+			std::vector<uint8_t> out(magic, magic + 4);
+			const uint32_t n = static_cast<uint32_t>(payload.size());
+			for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(n >> (8 * i)));
+			if (!payload.empty()) nwu_decrypt(payload.data(), payload.size(), GSB_NWU_KEY);
+			out.insert(out.end(), payload.begin(), payload.end());
+			return out;
+		};
+		std::vector<uint8_t> short_row = chunk("SVRS", {0x01, 0x00});
+		const std::vector<uint8_t> end = chunk("XXXX", {});
+		short_row.insert(short_row.end(), end.begin(), end.end());
+		GsbResponse short_parsed;
+		expect(!gsb_parse_response(short_row.data(), short_row.size(), short_parsed),
+		       "an SVRS row cut after its count rejected");
+		std::vector<uint8_t> cut_header = chunk("GSB ", {0x00, 0x00, 0x01, 0x00});
+		cut_header.insert(cut_header.end(), {'X', 'X', 'X'});
+		GsbResponse cut_parsed;
+		expect(!gsb_parse_response(cut_header.data(), cut_header.size(), cut_parsed),
+		       "a chunk header cut short rejected");
 	}
 
 	// A row says at most GSB_ROW_NAMES_MAX (0x7FFF) names, the most a stock browser

@@ -131,7 +131,7 @@ int test_waves() {
 	}
 	// The loader's own buffer, AUD1, is taken unchecked; an AOA1 one is refused at the RIFF compare [orig:
 	// Audio_LoadWavFileFromArchive @ 0x7664e2, @ 0x766523]. Its samples read as the mixer reads them: 16-bit
-	// where its width byte is 2, else 8-bit [orig: sub_7BD671 @ 0x7bd692].
+	// where its width byte is 2, else 8-bit [orig: AudioChannel_BindSampleBuffer @ 0x7bd692].
 	std::vector<uint8_t> aud = text_bytes("AUD1");
 	io::append_u32_le(aud, 2);
 	io::append_u32_le(aud, 32768);

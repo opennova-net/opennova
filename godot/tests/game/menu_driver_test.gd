@@ -516,7 +516,7 @@ func test_vk_names() -> void:
 
 # With an edit focused the hotkey scan is off: ESC does nothing; Enter commits
 # the edit, drops the focus and then presses the VK_RETURN button
-# [orig: CEditWnd_HandleKeyEvent @ 0x6623a0 -> dispatch_key_event @ 0x63ac30].
+# [orig: CEditWnd_HandleKeyEvent @ 0x6623a0 -> UI_DispatchKeyEvent @ 0x63ac30].
 func test_edit_focus_esc_and_enter() -> void:
 	var driver := _framed_driver(KEYS_XML)
 	var edit := driver.widget_id("PLAYERNAME")

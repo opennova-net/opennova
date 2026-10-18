@@ -247,6 +247,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// stride, follow them until the next mission start (engine:
 	// renderer/texture_compression.h, renderer/particle_density.h).
 	session_texcompression_level_ = texcompression_level_;
+	session_terrain_texdetail_ = terrain_texdetail_;
 	session_particle_density_ = particle_density_;
 	publish_session_render_settings();
 	// The same copy of NoBlood's ragdoll bit: this mission's corpses ragdoll
@@ -1173,7 +1174,7 @@ void GameWorld::start_effect_world() {
 		effect_world->set_particles_hidden(true);
 	}
 	// The mission header's wind drives GLOBALWIND particles
-	// (retail Game_StartMission @ 0x524aff -> Weather_SetMissionWind @ 0x5de970).
+	// (engine: runtime/particle/emitter.h).
 	if (loaded_mission_.is_valid()) {
 		if (const Ref<MissionInfo> info = loaded_mission_->get_info(); info.is_valid()) {
 			effect_world->set_mission_wind(info->get_wind_speed(), info->get_wind_direction());

@@ -28,10 +28,6 @@ namespace {
 // The titles a base data set may speak (the gameprofile codes opennova-serve's /game takes).
 constexpr std::array<const char *, 2> kTitles = { "jo", "dfx2" };
 
-int64_t id_of(uint64_t id) {
-	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
-}
-
 // Who made a row: the admin session's account, or the Bearer token.
 std::string creator_of(const RouteAccess &caller) {
 	return caller.user ? "admin " + caller.user->username : std::string("token");
@@ -440,7 +436,7 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 				"display_name is 1 to 64 characters with no control characters");
 	try {
 		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, id_of(id));
+		const auto row = find_data_set(*db_conn, path_id(id));
 		if (!row)
 			return no_such_data_set();
 		if (patch.game) {
@@ -493,7 +489,7 @@ crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 		return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, id_of(id));
+		const auto row = find_data_set(*db_conn, path_id(id));
 		if (!row)
 			return no_such_data_set();
 		if (count_live_servers_of(*db_conn, row->id) > 0 ||
@@ -567,7 +563,7 @@ crow::response DataSetRoutes::begin_tree(const crow::request &req, uint64_t id) 
 		return field_error(400, "invalid_field", "files", "files names at least one file");
 	try {
 		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, id_of(id));
+		const auto row = find_data_set(*db_conn, path_id(id));
 		if (!row)
 			return no_such_data_set();
 		std::vector<std::string> names;
@@ -656,10 +652,10 @@ crow::response DataSetRoutes::tree_file_part(const crow::request &req, uint64_t 
 		return json_error(413, "too_large", "a part is at most 32 MiB");
 	try {
 		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, id_of(id));
+		const auto row = find_data_set(*db_conn, path_id(id));
 		if (!row)
 			return no_such_data_set();
-		const auto t = tree_of(*db_conn, row->id, id_of(tree));
+		const auto t = tree_of(*db_conn, row->id, path_id(tree));
 		if (!t)
 			return no_such_tree();
 		const std::string canonical = canonical_tree_file(row->kind, row->expansion_code, name);
@@ -716,10 +712,10 @@ crow::response DataSetRoutes::tree_file_complete(
 		return field_error(400, "invalid_field", "parts", "parts names at least one part");
 	try {
 		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, id_of(id));
+		const auto row = find_data_set(*db_conn, path_id(id));
 		if (!row)
 			return no_such_data_set();
-		const auto t = tree_of(*db_conn, row->id, id_of(tree));
+		const auto t = tree_of(*db_conn, row->id, path_id(tree));
 		if (!t)
 			return no_such_tree();
 		if (t->state != TreeState::Uploading)
@@ -751,10 +747,10 @@ crow::response DataSetRoutes::tree_finalize(const crow::request &req, uint64_t i
 		return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, id_of(id));
+		const auto row = find_data_set(*db_conn, path_id(id));
 		if (!row)
 			return no_such_data_set();
-		const auto t = tree_of(*db_conn, row->id, id_of(tree));
+		const auto t = tree_of(*db_conn, row->id, path_id(tree));
 		if (!t)
 			return no_such_tree();
 		{
@@ -787,10 +783,10 @@ crow::response DataSetRoutes::tree_remove(const crow::request &req, uint64_t id,
 		return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, id_of(id));
+		const auto row = find_data_set(*db_conn, path_id(id));
 		if (!row)
 			return no_such_data_set();
-		const auto t = tree_of(*db_conn, row->id, id_of(tree));
+		const auto t = tree_of(*db_conn, row->id, path_id(tree));
 		if (!t)
 			return no_such_tree();
 		switch (t->state) {

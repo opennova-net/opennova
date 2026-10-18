@@ -4,7 +4,6 @@
     "core_script": "godot/tests/armory_menu_seam_test.gd",
     "core_methods": [
       "test_accept_emits_loadout_and_cancel_closes",
-      "test_armory_accept_hotkey_debounces_until_release",
       "test_banned_grenade_keeps_its_table_order_control_as_zero_only",
       "test_class_change_refilters_slots",
       "test_degrades_without_weapon_def",
@@ -31,7 +30,6 @@
       "test_multiplayer_open_uses_retail_server_class_allow_mask",
       "test_open_populates_the_authored_grenade_combo_from_weapon_def",
       "test_open_preselects_the_authoritative_satchel_loadout",
-      "test_out_of_zone_try_open_is_the_silent_gate",
       "test_sp_open_uses_authoritative_context_and_full_menu_protocol"
     ],
     "retail_script": null,

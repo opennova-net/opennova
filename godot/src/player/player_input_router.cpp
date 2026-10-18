@@ -32,9 +32,13 @@ public:
 		return input != nullptr &&
 				input->is_physical_key_pressed(static_cast<Key>(KEY_0 + p_digit));
 	}
-	bool shift_down() const override {
-		Input *input = Input::get_singleton();
-		return input != nullptr && input->is_physical_key_pressed(KEY_SHIFT);
+	bool keys_down(const char *p_token) const override {
+		return pressed(p_token) || (controls_.is_valid() && controls_->is_token_key_down(p_token));
+	}
+	// Shift's sign bit reads the key-state array, which a menu close's reset
+	// clears (engine controls::KeyStateReset carries the witness).
+	bool fire_signed(const char *p_token) const override {
+		return controls_.is_valid() && controls_->is_token_fire_signed(String(p_token));
 	}
 
 private:
@@ -66,6 +70,8 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		// Sent over the session; the router closes the menu beside it.
 		case Action::EmotePick: p_sim.send_voice_menu_pick(false, p_request.value); break;
 		case Action::RadioPick: p_sim.send_voice_menu_pick(true, p_request.value); break;
+		// The shell opens the screen (PlayerInputRouter::take_armory_request).
+		case Action::OpenArmory: break;
 	}
 }
 
@@ -109,7 +115,7 @@ void PlayerInputRouter::set_input_override(const Ref<PlayerMoveIntent> &p_intent
 }
 
 Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool p_capture_mouse,
-		bool p_gameplay_input_active) {
+		bool p_gameplay_input_active, bool p_menu_open) {
 	Ref<MissionFrameInput> frame_input;
 	frame_input.instantiate();
 	frame_input->set_delta_seconds(p_delta);
@@ -189,10 +195,23 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	gate.emotes_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
 	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
 	gate.death_screen = spectating;
+	gate.menu_open = p_menu_open;
+	// The held USE row's arm through the sim's press latch (engine
+	// LocalPlayer::take_use_item_press).
+	gate.take_use_item_arm = [&action_sim]() {
+		using Arm = opennova::controls::UseItemPressArm;
+		if (action_sim.is_null()) return Arm::kMountChain;
+		switch (action_sim->take_use_item_press()) {
+			case Simulation::USE_ITEM_ARM_MOUNT_CHAIN: return Arm::kMountChain;
+			case Simulation::USE_ITEM_ARM_ARMORY: return Arm::kOpenArmory;
+			default: return Arm::kTaken;
+		}
+	};
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
 	frame_input->set_weapon_input(actions.fire_held, actions.fire_edge,
 			actions.reload_edge, actions.medic_edge);
 	frame_input->set_to_special_input(actions.to_special_held, actions.to_special_edge);
+	frame_input->set_menu_open(p_menu_open);
 	frame_input->set_respawn_input(actions.respawn_edge);
 	for (const auto &request : actions.requests) {
 		// A menu pick closes its menu whether or not a session carries it
@@ -201,6 +220,10 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		if ((request.action == opennova::controls::PlayerAction::EmotePick || radio) &&
 				hud_toggles_.is_valid())
 			hud_toggles_->close_voice_menu(radio);
+		if (request.action == opennova::controls::PlayerAction::OpenArmory) {
+			armory_requested_ = true;
+			continue;
+		}
 		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
 	}
 	// The death screen's own rows (the spectate sub-mode and target).
@@ -214,6 +237,20 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 
 void PlayerInputRouter::consume_use_hold() {
 	actions_.consume_use_hold();
+}
+
+
+bool PlayerInputRouter::take_armory_request() {
+	const bool requested = armory_requested_;
+	armory_requested_ = false;
+	return requested;
+}
+
+void PlayerInputRouter::reset_input_state() {
+	if (controls_.is_valid()) controls_->reset_key_state();
+	actions_.clear_key_press_latches();
+	const Ref<Simulation> reset_sim = sim();
+	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
 }
 
 // Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline

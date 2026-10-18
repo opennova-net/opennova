@@ -440,7 +440,7 @@ bool clip_segment_rect(const MapView &view, float &x0, float &y0,
 // black outlines absent from retail.
 // [orig: Render_CollisionWireframe @0x596800; flush @0x596780]
 void emit_footprint(const MapView &view, const HudMinimapInput &input,
-		const HudMinimapFootprint &footprint, Polygon &poly, Polygon &scratch,
+		const HudMinimapFootprint &footprint, uint32_t fill_argb, Polygon &poly, Polygon &scratch,
 		HudMapPass &pass, bool disc) {
 	// Whole-footprint reject on the feed-time bounding circle: a mission's
 	// far-side buildings must not cost triangle math every frame.
@@ -476,7 +476,7 @@ void emit_footprint(const MapView &view, const HudMinimapInput &input,
 			clip_circle32(poly, scratch, view.center_x, view.center_y,
 					view.disc_radius, view.disc_radius);
 		}
-		emit_fan(poly, footprint.fill_argb, pass.overlays);
+		emit_fan(poly, fill_argb, pass.overlays);
 	}
 }
 

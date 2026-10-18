@@ -210,7 +210,7 @@ void DoorSystem::apply_wire_row(const Entity &entity, int number, int32_t state)
         row.phase = 65536;
 }
 
-// [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20 — the def gate @0x514be5,
+// [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20 — the def gate @0x514be5,
 //  index = first + number - 1 @0x514bf2, the gates `index > -1 && number <=
 //  count && number` @0x514c08, the switch @0x514c20: 0/3 -> 1 iff value == 1
 //  @0x514c33, 1/2 -> value iff number == 3 @0x514c2a, the read-back @0x514c37]

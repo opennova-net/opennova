@@ -62,7 +62,7 @@ void slot_blip(MapCompile &c, const HudMinimapMarker &marker, uint8_t layer) {
 			//  (@0x5be46a main ring, z := 0 @0x5be47a, dot @0x5be482),
 			//  254 arm @0x5be2a8..0x5be3b5 (main ring @0x5be337, z := 0
 			//  @0x5be34f, rings @0x5be357 / @0x5be393 / @0x5be3ca)]
-			const uint32_t pulse = pulse_color(marker.color, input.ticks);
+			const uint32_t pulse = pulse_color(marker.color, static_cast<int>(input.hud_frame));
 			ring_blip(c, marker.x, marker.y, marker.z, pulse, 0, 4, layer);
 			if (marker.icon == 253) {
 				ring_blip(c, marker.x, marker.y, 0, pulse, pulse, 1, layer);
@@ -254,11 +254,22 @@ void draw_blip(MapCompile &c, const HudMinimapMarker &marker, uint32_t color,
 				px - ext > view.px_x2 || py - ext > view.px_y2)
 			return;
 		for (const HudMinimapFootprint *candidate : c.footprint_index) {
-			if (candidate->handle == marker.handle) {
-				emit_footprint(view, input, *candidate, c.clip_a, c.clip_b,
-						c.out, c.disc_crop);
-				break;
+			if (candidate->handle != marker.handle) continue;
+			// A neutral change-team footprint being taken blinks to the taker's
+			// colour on the session frame clock (no zone-number test here)
+			// [orig: Render_CollisionWireframe @0x5968C9..0x5968FA (the def's
+			//  +0x54 & 0x20000, entity+0x162 == 0, +0x223, `test byte ptr
+			//  dword_A87060, 20h` @0x5968DF, 0xFF304080 / 0xFF802020)].
+			uint32_t fill = candidate->fill_argb;
+			if (marker.change_team != 0 && marker.team == 0 && marker.capture_team != 0 &&
+					(input.session_frame & 0x20u) != 0) {
+				if (marker.capture_team == 1)
+					fill = 0xFF304080u;
+				else if (marker.capture_team == 2)
+					fill = 0xFF802020u;
 			}
+			emit_footprint(view, input, *candidate, fill, c.clip_a, c.clip_b, c.out, c.disc_crop);
+			break;
 		}
 		return;
 	}
@@ -268,6 +279,26 @@ void draw_blip(MapCompile &c, const HudMinimapMarker &marker, uint32_t color,
 		// def_flags2 = 0].
 		draw_cell = 8;
 		quad_angle = 0;
+	}
+	if (marker.change_team != 0) {
+		// The change-team class blinks on the session frame clock: a neutral zone
+		// being taken (no team, a taker, no zone number) to the taker's colour,
+		// any other half-bright; its cell and size are the policy's.
+		// [orig: Minimap_DrawBlip @0x597CC7..0x597D13 (entity+0x162, +0x223,
+		//  +0x21A; `test byte ptr dword_A87060, bl` (0x20) @0x597CEB / @0x597D09,
+		//  `sar edi, 1; and edi, 7F7F7F7Fh` @0x597D11..0x597D13); the cell
+		//  @0x597D3D..0x597D40]
+		if ((input.session_frame & 0x20u) != 0) {
+			if (marker.team == 0 && marker.capture_team != 0 && marker.zone_number == 0) {
+				if (marker.capture_team == 1)
+					color = 0xFF304080u;
+				else if (marker.capture_team == 2)
+					color = 0xFF802020u;
+			} else {
+				color = (color >> 1) & 0x7F7F7F7Fu;
+			}
+		}
+		if (marker.cell != 0) draw_cell = marker.cell;
 	}
 	const float floor_px = static_cast<float>(
 			marker.floor_px != 0 ? marker.floor_px : 6);

@@ -176,8 +176,13 @@ void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow>
 		// A zero flags byte is host/AI-originated fire, which keeps the ammo-def
 		// legs because retail presents those inline at the shooter instead.
 		// [orig: @0x42f521 / @0x42f6ce; ammo legs @0x42f5dc / @0x42f6c2]
-		d.adm_arm = (fe.wire_round_flags & round_event_flag::kAltFire) == 0 &&
-				(fe.wire_round_flags & round_event_flag::kAdmIndexed) != 0;
+		// The host's own copy of a slot fire action's round presents through the
+		// same FIRE-row leg [orig: WeaponAction_Fire @0x542CB4 ->
+		//  ActionSlot_SpawnEffect @0x401F20].
+		d.adm_arm = ((fe.wire_round_flags & round_event_flag::kAltFire) == 0 &&
+				(fe.wire_round_flags & round_event_flag::kAdmIndexed) != 0) ||
+				fe.action_leg_presentation;
+		d.wire_ammo_arm = (fe.wire_round_flags & round_event_flag::kAltFire) != 0;
 		d.adm_index = fe.adm_index;
 		// Retail's radians-per-BAM double on both presenting arms [orig:
 		//  WeaponSlot_FireAndSpawnEffects `fld dbl_7C3608` @0x53F4C7;

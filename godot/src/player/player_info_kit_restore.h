@@ -29,6 +29,7 @@ public:
 	}
 
 	int get_page_class() const { return page_class_; }
+	const opennova::menu::PlayerInfoKitRestore &native() const { return value_; }
 	// The interleaved count pairs by catalog row, -1 where the page set none.
 	PackedInt32Array get_ammo_primary() const;
 	PackedInt32Array get_ammo_secondary() const;

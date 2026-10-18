@@ -7,6 +7,7 @@
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
+#include <editor/preview/preview_units.h>
 #include <formats/def/def.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/inmatch/game_config.h>
@@ -86,12 +87,6 @@ std::string upper(const std::string &text) {
 	std::string out = text;
 	for (char &c : out) c = char(std::toupper(static_cast<unsigned char>(c)));
 	return out;
-}
-
-std::string metres(float v) {
-	char text[32];
-	std::snprintf(text, sizeof(text), "%.2f m", double(v));
-	return text;
 }
 
 } // namespace
@@ -803,7 +798,7 @@ void WeaponRange::drain_() {
 		sound.set = ready.set_name;
 		sound.at = from_eye(ready.pos);
 		const float distance = std::sqrt(sound.at.x * sound.at.x + sound.at.y * sound.at.y + sound.at.z * sound.at.z);
-		sound.words = ready.set_name + " heard " + metres(distance) + " from the shooter.";
+		sound.words = ready.set_name + " heard " + metres(distance, 2) + " from the shooter.";
 		events_.push_back(sound);
 	}
 }

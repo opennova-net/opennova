@@ -243,7 +243,7 @@ static void synthetic() {
 	// no presence gate.
 	CHECK(layout.breath_time.x == 0 && layout.breath_time.y == 0 && layout.breath_time.align == 0);
 	// The device-owned fields are untouched by the fill.
-	CHECK(!layout.frame_texture_valid && layout.stance_frame0_w == 0 && !layout.box_texture_valid);
+	CHECK(!layout.frame_texture_valid && layout.stance_frame_w[0] == 0 && !layout.box_texture_valid);
 	// No NETWORKINDICATOR line: the connection indicators keep the reset corners.
 	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
 	def_free_hudpos(&file);
@@ -341,7 +341,7 @@ static void compile_from(const DefHudPosFile &file, const fnt_font_t *font, Comp
 // at (0, 0) through the old all-visible fallback, where retail draws nothing);
 // a partial file shows what its rows show, a later row for a slot replacing an
 // earlier one; an unauthored HUDORDERS is (0, 0).
-// [orig: HUD_ParseHudposToken @0x59F370 -> byte_2723CE0 (the MSNTITLE arm's
+// [orig: HUD_ParseHudposToken @0x59F370 -> g_HUDDeclutterMasks (the MSNTITLE arm's
 //  store @0x5A1683); CRenderState_SetLayerVisibility @0x59B0F0; the WPNGRP
 //  cmp HUD_RenderOverlays @0x5A7CC8; dword_2723D84 / dword_2723D88]
 static void unauthored_hud() {

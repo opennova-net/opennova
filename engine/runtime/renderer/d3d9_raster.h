@@ -80,7 +80,7 @@ inline PixelRect d3d9_quad_pixels(float x0, float y0, float x1, float y1) {
 // False for a segment that is diagonal, off the integers or of no length, which a
 // device draws its own way. A raster that draws a line as a one-pixel-wide quad
 // centred on it covers both ends alike, so an outline drawn that way loses the corner
-// its last segment ends on [orig: draw_line_2d @ 0x6786d0 — the points verbatim,
+// its last segment ends on [orig: Line2D_Draw @ 0x6786d0 — the points verbatim,
 // D3DPT_LINELIST; CUIElement_DrawOutlineRect @ 0x647fc0 strings four such segments
 // round a rect].
 inline bool d3d9_axis_line_pixels(float ax, float ay, float bx, float by, PixelRect *out) {

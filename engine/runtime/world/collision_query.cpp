@@ -307,7 +307,8 @@ bool point_in_triangle_2d(const int32_t p[3], const CollisionFace &face,
 // @ 0x4e4cb0 — see the header note for the witnessed gate-by-gate map.]
 // ----------------------------------------------------------------------------
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
-                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out) {
+                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out,
+                             const int32_t *ray_dir, int32_t ray_length) {
     if (target.model == nullptr || target.matrices == nullptr) return false;
     const CollisionModel &model = *target.model;
     if (model.faces.empty()) return false;
@@ -320,9 +321,13 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
                                   static_cast<double>(d[1]) * d[1] +
                                   static_cast<double>(d[2]) * d[2]);
     if (dlen <= 0.0) return false;
-    const int32_t seg_len = static_cast<int32_t>(dlen);
+    int32_t seg_len = static_cast<int32_t>(dlen);
     const double ninv = 65536.0 / dlen;
     for (int i = 0; i < 3; ++i) ndir[i] = static_cast<int32_t>(d[i] * ninv);
+    if (ray_dir != nullptr && ray_length > 0) {
+        seg_len = ray_length;
+        for (int i = 0; i < 3; ++i) ndir[i] = ray_dir[i];
+    }
 
     int32_t best = seg_len; // [orig: rayState[29] preseeded with rayState[9] @ 0x4e534f]
     bool hit = false;
@@ -573,6 +578,38 @@ static bool point_in_collision_triangle(const int32_t point[3],
     return crossings == 1;
 }
 
+bool collision_section_face_normal(const CollisionTargetView &target, int32_t section,
+                                   int32_t section_face, int32_t local_out[3],
+                                   int32_t world_out[3]) {
+    if (target.model == nullptr || target.matrices == nullptr) return false;
+    const CollisionModel &model = *target.model;
+    if (section < 0 || section >= static_cast<int32_t>(model.sections.size())) return false;
+    const CollisionSection &sec = model.sections[static_cast<size_t>(section)];
+    if (section_face < 0 || section_face >= sec.face_count) return false;
+    const int32_t face_index = sec.face_start + section_face;
+    if (face_index < 0 || face_index >= static_cast<int32_t>(model.faces.size()))
+        return false;
+    const CollisionFace &face = model.faces[static_cast<size_t>(face_index)];
+    // The two mesh forms the narrow phases read: the indexed normal table, or
+    // the face's own embedded normal.
+    const bool indexed = !model.vertices.empty() && !model.normals.empty();
+    int16_t n[3] = {};
+    if (indexed) {
+        const int32_t normal_index = sec.normal_start + face.normal_index;
+        if (face.normal_index < 0 || normal_index < 0 ||
+            normal_index >= static_cast<int32_t>(model.normals.size()))
+            return false;
+        for (int axis = 0; axis < 3; ++axis)
+            n[axis] = model.normals[static_cast<size_t>(normal_index)].n[axis];
+    } else {
+        for (int axis = 0; axis < 3; ++axis) n[axis] = face.normal[axis];
+    }
+    for (int axis = 0; axis < 3; ++axis)
+        local_out[axis] = static_cast<int32_t>(n[axis]) << 2;
+    target.matrices[section].rotate_point(local_out, world_out);
+    return true;
+}
+
 bool collision_raycast_polygons(const CollisionTargetView &target,
                                 const CollisionRay &ray,
                                 int32_t segment_length_q16,
@@ -688,6 +725,8 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
                 static_cast<int32_t>(normal.n[2]) << 2,
             };
             mat.rotate_point(local_normal, out_hit.normal_q16);
+            for (int axis = 0; axis < 3; ++axis)
+                out_hit.local_normal_q16[axis] = local_normal[axis];
             out_hit.section_index = static_cast<int32_t>(si);
             out_hit.face_index = face_index;
             out_hit.section_face_index = local_face;

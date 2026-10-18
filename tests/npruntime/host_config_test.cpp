@@ -301,6 +301,12 @@ int main() {
 		TEST_EXPECT(host.local_auto_medic_disabled == 1u);
 		sp.profile = nullptr;
 		TEST_EXPECT(shell_host_config(sp).local_auto_medic_disabled == 0u);
+		// Single player carries game.cfg's zoom option for the fill
+		// [orig: g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F].
+		gamecfg::GameCfg zoom_block;
+		zoom_block.mp_allowsniperscopezoom = 1;
+		sp.cfg_block = &zoom_block;
+		TEST_EXPECT(shell_host_config(sp).config.allow_sniper_scope_zoom);
 	}
 
 	std::printf("host_config: ok\n");

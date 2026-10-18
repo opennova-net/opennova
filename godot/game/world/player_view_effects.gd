@@ -38,7 +38,7 @@ func _ready() -> void:
 	# view's post-particle overlay pass, before the frame effects
 	# (SceneOverlayCompositorEffect).
 	# The sun-glare screen veil: a fullscreen white quad whose alpha is the
-	# dot^32 glare byte, drawn over the complete scene [orig:
+	# dot^16 glare byte, drawn over the complete scene [orig:
 	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0 from
 	# Render_ProcessMainSceneFrame @ 0x5cac4b]. Celestial pushes the
 	# opennova_sun_veil_alpha shader global every advanced frame, so the rect

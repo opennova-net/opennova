@@ -22,20 +22,47 @@ struct RecordIds {
 
 // Every identity in one fixed order: the record, then each of its lists in order, each record of a
 // list with everything it holds before the next. A load assigns identities in this order, so a reload
-// of the same file gives every record the same place in it.
+// of the same file gives every record the same place in it. Walked from an explicit stack, never a
+// call a level (a menu nests its windows thousands deep).
 inline void for_each_identity(RecordIds &ids, const std::function<void(NodeId &)> &fn) {
+	struct Level {
+		RecordIds *ids;
+		size_t list, index;
+	};
 	fn(ids.id);
-	for (auto &list : ids.lists)
-		for (RecordIds &entry : list) for_each_identity(entry, fn);
+	std::vector<Level> stack{{&ids, 0, 0}};
+	while (!stack.empty()) {
+		Level &top = stack.back();
+		if (top.list == top.ids->lists.size()) {
+			stack.pop_back();
+			continue;
+		}
+		std::vector<RecordIds> &list = top.ids->lists[top.list];
+		if (top.index == list.size()) {
+			++top.list;
+			top.index = 0;
+			continue;
+		}
+		RecordIds &entry = list[top.index++];
+		fn(entry.id);
+		stack.push_back({&entry, 0, 0});
+	}
 }
 
 // What the identities of a record and of everything it holds add to a row's footprint
-// (Node::footprint): each list's entries and what each holds, not the record's own object.
+// (Node::footprint): each list's entries and what each holds, not the record's own object. Summed
+// over an explicit stack.
 inline size_t footprint_of(const RecordIds &ids) {
-	size_t bytes = footprint_of(ids.lists);
-	for (const std::vector<RecordIds> &list : ids.lists) {
-		bytes += footprint_of(list);
-		for (const RecordIds &entry : list) bytes += footprint_of(entry);
+	size_t bytes = 0;
+	std::vector<const RecordIds *> stack{&ids};
+	while (!stack.empty()) {
+		const RecordIds &at = *stack.back();
+		stack.pop_back();
+		bytes += footprint_of(at.lists);
+		for (const std::vector<RecordIds> &list : at.lists) {
+			bytes += footprint_of(list);
+			for (const RecordIds &entry : list) stack.push_back(&entry);
+		}
 	}
 	return bytes;
 }

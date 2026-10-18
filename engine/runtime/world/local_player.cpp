@@ -85,9 +85,31 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	// down. The movement-held latch and the unscope-on-move are the pack's
 	// (apply_player_input_pre_tick). [orig: Player_UpdatePerFrame
 	//  `test byte ptr g_InputFlags, 1Eh` @0x4de3ae, ahead of the pack]
-	view.movement_input =
+	// The press latch's freeze leaves that word empty.
+	view.movement_input = !armory_press_latched &&
 			(input_flags.folded(w::player_input_flags(input, false)) & w::kInputFlagDirectionMask) != 0;
 	w::local_player_view_refresh(&world, view);
+}
+
+UseItemArm LocalPlayer::take_use_item_press() {
+	const UseItemArm arm = w::local_player_use_item_arm(world_, view_session_inputs);
+	if (arm != UseItemArm::kArmory && arm != UseItemArm::kArmoryRefused) return arm;
+	// A latched press does nothing; an unlatched one latches before the
+	// countdown test. [orig: Input_HandleActionBinding_0 the latch test
+	// @0x4E0B12..0x4E0B19 (to done), the set @0x4E0B21]
+	if (armory_press_latched) return UseItemArm::kArmoryRefused;
+	armory_press_latched = true;
+	return arm;
+}
+
+void LocalPlayer::release_use_item_key(bool system_key_up) {
+	// The hook takes WM_KEYUP (0x101) alone; the window procedure hands it
+	// WM_SYSKEYUP (0x105) too, through the key release's hook walk
+	// [orig: Game_WindowProc @0x7627C6..0x7627C9; Input_HandleKeyRelease
+	// @0x760BF0; Input_HandleMenuKeyRelease `cmp msgType, 101h`
+	// @0x4DE2D0..0x4DE2E2, the clears @0x4DE2F8 / @0x4DE309].
+	if (system_key_up) return;
+	armory_press_latched = false;
 }
 
 // [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0 -- the CanFire, equipped-slot
@@ -324,6 +346,10 @@ void LocalPlayer::set_weapon_input(bool fire_held, bool fire_pressed, bool reloa
 	w::local_weapon_set_input(weapon, view, fire_held, fire_pressed, reload_pressed);
 }
 
+void LocalPlayer::clear_deferred_input() {
+	to_special_queued = 0;
+}
+
 void LocalPlayer::queue_to_special() {
 	if (to_special_queued < 32) ++to_special_queued; // [orig: @0x4993E8]
 }
@@ -417,10 +443,9 @@ void apply_main_scene_optics(World &world, LocalPlayerWeapon &weapon,
 		f.camera.yaw_deg += f.binocular_yaw_offset_deg;
 		f.camera.pitch_deg += f.binocular_pitch_offset_deg;
 	} else if (f.camera_pose_valid && slot != nullptr && f.scope_camera_zero_active) {
-		constexpr double degrees_per_bam = 360.0 / 4294967296.0;
 		// Mission yaw is 90 - BAM heading.
-		f.camera.yaw_deg -= static_cast<float>(slot->zero_yaw * degrees_per_bam);
-		f.camera.pitch_deg -= static_cast<float>(slot->zero_pitch * degrees_per_bam);
+		f.camera.yaw_deg -= static_cast<float>(slot->zero_yaw * kDegreesPerBam);
+		f.camera.pitch_deg -= static_cast<float>(slot->zero_pitch * kDegreesPerBam);
 	}
 }
 
@@ -556,9 +581,10 @@ void LocalPlayer::carry_process_globals_from(const LocalPlayer &previous) {
 	scope_yaw_ = previous.scope_yaw_;
 	scope_pitch_ = previous.scope_pitch_;
 	analog_pack_ = previous.analog_pack_;
+	armory_press_latched = previous.armory_press_latched;
 }
 
-void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving) {
+void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving, bool x_frozen) {
 	AnalogPackState &a = analog_pack_;
 	// The axis words, shifted to bytes. The keyboard's only writers are the
 	// forward and back handlers on the X word (-1023 / +1023); back's binding
@@ -568,7 +594,14 @@ void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving) {
 	//  @0x4e0c75, case 152 `= -1023` @0x4e0cc5; rows 2/3 of the binding table
 	//  @0x8159A8 enter g_InputAnalogBindingIndices in row order
 	//  (Input_InitBindingSystem @0x499b6a..); the shifts @0x4df79a..0x4df7cd]
-	const int16_t word_x = input.back ? int16_t(1023) : (input.forward ? int16_t(-1023) : int16_t(0));
+	// The press latch's freeze zeroes the X word (and the joystick-only Y and
+	// Z words) after the handlers wrote it; the throttle's word survives (the
+	// pack reads dword_B3B75C's low word, the freeze clears its high word).
+	// [orig: Game_ProcessMainFrame word_B3B750 @0x52663E, word_B3B752
+	//  @0x526645, word_B3B75A @0x52665A, dword_B3B75C+2 @0x526661; the
+	//  throttle read @0x4df7a0]
+	const int16_t word_x = x_frozen ? int16_t(0)
+			: input.back ? int16_t(1023) : (input.forward ? int16_t(-1023) : int16_t(0));
 	const int8_t x = static_cast<int8_t>(word_x >> 3);
 	const int8_t y = 0;
 	const int8_t z = 0;
@@ -612,7 +645,7 @@ void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving) {
 	}
 }
 
-void LocalPlayer::pack_input_word() {
+void LocalPlayer::pack_input_word(bool x_frozen) {
 	World &world = world_;
 	// The pack: the accumulated word onto MoveOrder, then the word is
 	// saved as the previous pack's and cleared. The analog throttle is
@@ -648,7 +681,7 @@ void LocalPlayer::pack_input_word() {
 			w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
 	}
 	if (w::Entity *entity = world.registry.get(world.cached.local_player))
-		pack_analog_axes(*entity, move_order.moving);
+		pack_analog_axes(*entity, move_order.moving, x_frozen);
 	input_flags.clear_after_pack();
 }
 
@@ -695,12 +728,32 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// [orig: Input_ProcessFrame @0x49d541, then the handler dispatch
 	//  Input_HandleActionBinding_0 @0x4e0420]
 	input_flags.fold(w::player_input_flags(input, absorb));
+	// The armory press latch freezes the frame's input after the fold: the
+	// word clears and MoveOrder keeps only its stance bits (the X axis word's
+	// clear rides the pack below). A menu screen open skips the input pass and
+	// this freeze with it, and the STAT and DEATH (deploy) screens run the
+	// pass without the freeze; the shell feeds no keys behind any of them, so
+	// the ungated freeze leaves the same empty word.
+	// [orig: Game_ProcessMainFrame -- the menu test @0x52660D..0x526614,
+	//  Input_ProcessFrame @0x52661D, the block @0x526625..0x526679: the latch
+	//  test @0x526625, g_InputFlags = 0 @0x526632, MoveOrder (entity+0x12C)
+	//  &= 0x300 @0x52666F; UI_TeardownScene's pass @0x54E68D..0x54E695 under
+	//  sub_54B980's flag from StatScreen_ShowCallback @0x56287D and
+	//  DeathScreen_UpdateUI @0x55316E]
+	if (armory_press_latched) {
+		input_flags.flags = 0;
+		w::PlayerBodyInput held;
+		held.stance = move_order.stance;
+		held.look_heading = move_order.look_heading;
+		held.look_pitch = move_order.look_pitch;
+		move_order = held;
+	}
 	// The per-frame binocular refresh reads that folded word, ahead of the
 	// pack [orig: Client_ProcessNetworkFrame -> Player_UpdatePerFrame @0x42c18e,
 	// `test byte ptr g_InputFlags, 1Eh` @0x4de3ae; the pack follows @0x42c3e9].
 	view.movement_input = (input_flags.flags & w::kInputFlagDirectionMask) != 0;
 	w::local_player_view_refresh(&world, view);
-	if (pack_input) pack_input_word();
+	if (pack_input) pack_input_word(armory_press_latched);
     // The keyboard turn/look rotation reads the MoveOrder bits the last pack
     // wrote; the prone halving reads its stance bit. Both pitch limits follow
     // body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090 -- MoveOrder
@@ -803,6 +856,14 @@ void LocalPlayer::tick_view() {
 	w::PlayerCameraPose composed;
 	bool mounted_camera = false;
 	w::local_player_camera_compose(world, view, view_tracker, composed, mounted_camera);
+}
+
+void LocalPlayer::respawn_init(bool rebuild_kit) {
+    if (rebuild_kit)
+        local_loadout_rebuild(world_, loadout, weapon, inventory, inventory_valid,
+                              /*select_spawn_default=*/true);
+    local_player_view_reset(&world_, weapon, view, view_tracker);
+    hud_map_control.reset_spawn();
 }
 
 void LocalPlayer::reset_for_new_round() {

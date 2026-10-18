@@ -162,20 +162,10 @@ DialogPlay plan_dialog_play(const DialogSources &sources, const std::string &dia
 	const rtxt::File *text = sources.text_read ? &sources.text : nullptr;
 	// Its lines as the game's register takes them, each with the wave the bank's sounds give it (the one line alone
 	// where one is asked); the game's queue run on an idle channel until the dialog leaves its slot.
-	std::vector<audio::DialogLineRef> refs;
-	for (size_t i = 0; i < group->lines.size(); ++i) {
-		if (line >= 0 && size_t(line) != i) continue;
-		const dbf::Line &entry = group->lines[i];
-		audio::DialogLineRef ref;
-		ref.wave = entry.def_id_name;
-		ref.delay = entry.delay;
-		ref.dialog_name = group->group_name;
-		ref.line = int(i);
-		if (const lwf::Single *wave = sounds ? audio::find_dialog_wave(*sounds, entry.def_id_name) : nullptr) {
-			ref.file = wave->path;
-			ref.volume = audio::dialog_wave_volume(*wave);
-		}
-		refs.push_back(std::move(ref));
+	std::vector<audio::DialogLineRef> refs = audio::dialog_line_refs(*group, sounds);
+	if (line >= 0) {
+		audio::DialogLineRef one = std::move(refs[size_t(line)]);
+		refs.assign(1, std::move(one));
 	}
 	DialogChannel channel;
 	channel.enqueue(group->group_name, refs);

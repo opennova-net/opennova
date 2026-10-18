@@ -165,7 +165,6 @@ struct PlacedDevice {
     EntityHandle owner;           // [orig: +368] kill credit / detonator / cleanup key
     uint64_t owner_spawn_id = 0;
     uint16_t owner_handle = 0xFFFF;
-    uint16_t hit_word = 0;        // [orig: +442] rides the detonation descriptor
     int32_t ammo_index = -1;      // [orig: +620] the PLACED ammo (satchel/claymore/AV_Mine)
     int32_t item_id = 0;          // itemDef id: same-type key for the owner cap
     int32_t item_friendly = 0;    // [orig: ammo +16] the frndlyTrcrID/base item

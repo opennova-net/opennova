@@ -117,7 +117,8 @@ void fragment() {
 		vec2 page_uv = (v_world_pos.xz -
 			u_instance_tile_cache_projection.xy) *
 			u_instance_tile_cache_projection.z;
-		vec2 half_texel = vec2(0.5 / 256.0);
+		// Half a texel of the page tier's side (TerrainTileCompositionCache::page_dimension).
+		vec2 half_texel = vec2(0.5) / vec2(textureSize(u_tile_cache, 0).xy);
 		page_uv = clamp(page_uv, half_texel, vec2(1.0) - half_texel);
 		colormap = texture(u_tile_cache,
 			vec3(page_uv, u_instance_tile_cache_layer));

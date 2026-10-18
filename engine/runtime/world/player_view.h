@@ -434,7 +434,7 @@ struct PlayerViewState {
     int camera_mode = 0;
     // The arbiter's remaining inputs [orig: Render_ProcessMainSceneFrame
     // @0x5ca1f4..0x5ca24b]: the client-local death screen and its sub-mode
-    // (dword_A860F0: 0 free / 1 chase / 2 first person on the target; the
+    // (g_DeathScreenSubMode: 0 free / 1 chase / 2 first person on the target; the
     // writers are the replica's spectate state), the local dead bit (`Flags & 2`), the
     // end-of-round gate (g_SpawnSuccessGate) with the on-foot test
     // (parentEntity == 0), and the two g_RulesFlags bits (bit 0 = no death

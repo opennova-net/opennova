@@ -26,7 +26,7 @@ struct InputPacket;
 // registry entity (its replica rows name its world's handles) or, on a
 // joiner, the decoded row's pose. A death-screen rising edge the replica
 // counted seats the local entity's eye. A null runtime clears the state.
-// [orig: g_DeathScreenActive @0xA860EC, dword_A860F0, dword_A860F4,
+// [orig: g_DeathScreenActive @0xA860EC, g_DeathScreenSubMode, g_DeathScreenTarget,
 //  g_ScoreboardStatusSuffixEnabled @0xA85B49 — the reads
 //  @0x4b40f8 / @0x4b2994 / @0x4b29c0 / @0x4b2a35;
 //  NapiNPClientMsg_0x00A @0x42ffb8..0x42ffc9 (the eye)]

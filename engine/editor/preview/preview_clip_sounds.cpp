@@ -37,9 +37,8 @@ std::string slot_keyword(int slot) {
 // The bank of the game's search the set is found in, without case (the first bank's first set of the
 // name [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0]); null for none.
 const PreviewBank *bank_holding(const ClipSoundSources &sources, const std::string &set) {
-	for (const PreviewBank *bank : chain_banks(sources.banks(), sources.expansion()))
-		if (audio::find_bank_set(bank->file, set) >= 0) return bank;
-	return nullptr;
+	int32_t index = -1;
+	return chain_set(sources.banks(), sources.expansion(), set, index);
 }
 
 } // namespace

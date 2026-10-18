@@ -56,7 +56,8 @@ MissionObjectPlacer::get_static_terrain_shadow_sources() {
 void MissionObjectPlacer::_record_static_terrain_shadow_source(int p_kind,
 		int p_index, int p_bms_id, int p_team, uint32_t p_entity_attrib,
 		int p_item_id, const String &p_graphic,
-		const Transform3D &p_xform, const Ref<ObjectData> &p_data) {
+		const Transform3D &p_xform, const opennova::mission::StaticSourceOrigin &p_origin_q16,
+		const Ref<ObjectData> &p_data) {
 	opennova::mission::StaticTerrainShadowSource source;
 	source.bms_id = p_bms_id;
 	source.item_id = p_item_id;
@@ -70,6 +71,7 @@ void MissionObjectPlacer::_record_static_terrain_shadow_source(int p_kind,
 	}
 	source.graphic = opennova::to_std(p_graphic);
 	source.world_transform = to_static_source_transform(p_xform);
+	source.origin_q16 = p_origin_q16;
 	source.asset_id = p_data.is_valid() ? static_cast<uint64_t>(p_data->get_instance_id()) : 0;
 	if (static_sources_.record_shadow(std::move(source))) _retain_static_source_asset(p_data);
 }
@@ -121,6 +123,7 @@ void MissionObjectPlacer::register_static_instance(int p_bms_id,
 	inst.batch_key = inst.graphic;
 	inst.index = p_index;
 	inst.xform = to_static_source_transform(p_xform);
+	inst.origin_q16 = opennova::mission::static_source_origin_of(inst.xform);
 	inst.casts_static_shadow = p_casts_static_shadow;
 	inst.mirror_reflected = p_mirror_reflected;
 	static_sources_.register_instance(std::move(inst), true);
@@ -313,10 +316,11 @@ bool MissionObjectPlacer::item_places_static(int p_item_id) {
 }
 
 bool MissionObjectPlacer::update_static_terrain_shadow_source_transform(
-		MissionData::EntityKind p_kind, int p_index, const Transform3D &p_xform) {
+		MissionData::EntityKind p_kind, int p_index, const Transform3D &p_xform,
+		const std::optional<opennova::mission::StaticSourceOrigin> &p_origin_q16) {
 	_check_epoch();
 	return static_sources_.update_shadow_transform(p_kind, p_index,
-			to_static_source_transform(p_xform));
+			to_static_source_transform(p_xform), p_origin_q16);
 }
 
 bool MissionObjectPlacer::set_static_terrain_shadow_replacement(

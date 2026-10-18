@@ -348,8 +348,9 @@ void LocalPlayerPresenter::restamp_viewmodel_at_camera() {
 }
 
 Ref<MissionFrameInput> LocalPlayerPresenter::before_world_tick(double p_delta, bool p_capture_mouse,
-		bool p_gameplay_input_active) {
-	return input_router_.before_world_tick(p_delta, p_capture_mouse, p_gameplay_input_active);
+		bool p_gameplay_input_active, bool p_menu_open) {
+	return input_router_.before_world_tick(p_delta, p_capture_mouse, p_gameplay_input_active,
+			p_menu_open);
 }
 
 void LocalPlayerPresenter::after_world_tick() {
@@ -435,6 +436,15 @@ void LocalPlayerPresenter::present_fixed_weapon_tick(const TypedArray<PlayerWeap
 void LocalPlayerPresenter::consume_use_hold() {
 	input_router_.consume_use_hold();
 }
+
+bool LocalPlayerPresenter::take_use_item_armory_request() {
+	return input_router_.take_armory_request();
+}
+
+void LocalPlayerPresenter::reset_input_state() {
+	input_router_.reset_input_state();
+}
+
 
 void LocalPlayerPresenter::set_hud_toggles(const Ref<HudToggles> &p_toggles) {
 	input_router_.set_hud_toggles(p_toggles);
@@ -1196,12 +1206,16 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restamp_viewmodel_at_camera"),
 			&LocalPlayerPresenter::restamp_viewmodel_at_camera);
 	ClassDB::bind_method(D_METHOD("world"), &LocalPlayerPresenter::world);
-	ClassDB::bind_method(D_METHOD("before_world_tick", "delta", "capture_mouse", "gameplay_input_active"),
-			&LocalPlayerPresenter::before_world_tick, DEFVAL(false), DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("before_world_tick", "delta", "capture_mouse", "gameplay_input_active",
+								 "menu_open"),
+			&LocalPlayerPresenter::before_world_tick, DEFVAL(false), DEFVAL(true), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("after_world_tick"), &LocalPlayerPresenter::after_world_tick);
 	ClassDB::bind_method(D_METHOD("fixed_weapon_batches_consumed"),
 			&LocalPlayerPresenter::fixed_weapon_batches_consumed);
 	ClassDB::bind_method(D_METHOD("consume_use_hold"), &LocalPlayerPresenter::consume_use_hold);
+	ClassDB::bind_method(D_METHOD("take_use_item_armory_request"),
+			&LocalPlayerPresenter::take_use_item_armory_request);
+	ClassDB::bind_method(D_METHOD("reset_input_state"), &LocalPlayerPresenter::reset_input_state);
 	ClassDB::bind_method(D_METHOD("handle_input", "event", "active"), &LocalPlayerPresenter::handle_input);
 	ClassDB::bind_method(D_METHOD("has_player"), &LocalPlayerPresenter::has_player);
 	ClassDB::bind_method(D_METHOD("is_local_spectator"), &LocalPlayerPresenter::is_local_spectator);

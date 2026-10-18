@@ -35,18 +35,20 @@ static int test_encode_inverts_decode(void) {
     return 1;
 }
 
-/* Public sample helpers accept caller-provided scales. Out-of-range values
-   clamp to the narrowest supported scale instead of entering undefined
-   signed-shift behavior. */
+/* Public sample helpers accept caller-provided scales: the decoder plays any
+   shift (15 and up silent, never a signed shift past the width), the encoder
+   writes 0..7 alone and clamps a larger one to 7. */
 static int test_sample_helpers_bound_invalid_scales(void) {
-    CHECK(sbf_decode_sample(0x00, UINT8_MAX) == -128,
-          "decode clamps invalid scale to 7");
-    CHECK(sbf_decode_sample(0xFF, UINT8_MAX) == 127,
-          "decode high rail stays bounded");
-    CHECK(sbf_encode_sample(-128, UINT8_MAX) == 0,
+    CHECK(sbf_decode_sample(0x00, UINT8_MAX) == 0,
+          "decode: a shift of 15 or more is silent");
+    CHECK(sbf_decode_sample(0xFF, 15) == 0,
+          "decode: silent from 15 on");
+    CHECK(sbf_encode_sample(-256, UINT8_MAX) == 0,
           "encode clamps invalid scale to 7");
-    CHECK(sbf_encode_sample(127, UINT8_MAX) == 255,
+    CHECK(sbf_encode_sample(254, UINT8_MAX) == 255,
           "encode high rail stays bounded");
+    CHECK(sbf_encode_sample(32767, 0) == 255 && sbf_encode_sample(-32768, 0) == 0,
+          "scale 0 holds the full 16-bit range");
     return 1;
 }
 

@@ -234,12 +234,16 @@ uint32_t hud_color_material_argb(uint32_t texel, uint32_t diffuse);
 // height are updated.
 void halve_rgba(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height);
 
-// `halvings` of them while both sides exceed 1 (the halvings pixel_texture_halvings counts,
-// before the game makes its device texture).
+// `halvings` of them (the halvings pixel_texture_halvings counts, before the game makes its device
+// texture), each shifting both sides with no floor, so a side can reach 0 and the pixels then empty
+// [orig: GTexture_DownsampleToLimits @ 0x687200 / @ 0x687203 (sar, no floor), the allocation
+// @ 0x68720C..0x687224 taken even for an empty side; GTexture_Downsample2x2_RGBA8's guards
+// @ 0x687018 / @ 0x68704E].
 void halve_rgba_times(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t halvings);
 
 // GTexture_DownsampleToLimits's cap halving: while either side exceeds `cap`, both
-// sides halve with a 2x2 box (halve_rgba).
+// sides halve with a 2x2 box (halve_rgba), a side reaching 0 as the others do
+// (the loop tests only `w > cap || h > cap`).
 inline constexpr uint32_t kNormalMapSideCap = 512;
 void halve_rgba_to_cap(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t cap);
 

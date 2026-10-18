@@ -53,7 +53,7 @@ int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
 		// registered in file order (authored duplication is the rotation
 		// weighting) [orig: AnimMap_ParseConfigLine @ 0x40cb60;
 		// AnimMap_RegisterBoneNode @ 0x40c2d0].
-		const size_t variant_count = adm.entries[i].variant_count;
+		const size_t variant_count = adm.entries[i].variants.size();
 		std::vector<AdmClipFacts> &clips = clips_[key];
 		for (size_t v = 0; v < variant_count; ++v) {
 			const char *value = adm.entries[i].variants[v];

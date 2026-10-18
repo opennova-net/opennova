@@ -35,6 +35,12 @@ struct PreviewBank {
 // another name (menu.lwf, a mission's own) is no part of the search.
 std::vector<const PreviewBank *> chain_banks(const std::vector<PreviewBank> &banks, const std::string &expansion);
 
+// The set named `name` in the game's search over `banks`: the first bank of chain_banks' order holding a
+// set of the name, without case, and its first set of the name there [orig: SoundBank_FindSetByNameAnyBank
+// @ 0x5274f0]. The bank, `index` its set in the bank's file; null and -1 for none.
+const PreviewBank *chain_set(const std::vector<PreviewBank> &banks, const std::string &expansion,
+                             const std::string &name, int32_t &index);
+
 // One sound the preview starts: the layer it is for, the bank's wave (its name and the file it names),
 // the pitch (Q16, 0x10000 as recorded) and the volume (0..255).
 struct PreviewVoice {

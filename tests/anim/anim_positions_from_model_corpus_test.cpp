@@ -110,7 +110,7 @@ bool load_rig(const FileMap &files, const char *name, Rig &out) {
     std::string reset;
     for (size_t i = 0; i < af.count; ++i) {
         if (ascii_lower(trimmed(af.entries[i].key)) == "anim_reset") {
-            if (af.entries[i].variant_count >= 1) {
+            if (af.entries[i].variants.size() >= 1) {
                 reset = first_token_unquoted(af.entries[i].variants[0]);
             }
             break;

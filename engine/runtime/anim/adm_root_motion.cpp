@@ -95,8 +95,8 @@ int AdmRootMotion::parse_adm(const RigFiles *files, const std::string &adm_name,
 		const std::string key = adm_slot_key(adm.entries[i].key);
 		if (key.empty()) continue;
 		std::vector<std::string> &ring = values[key];
-		for (size_t v = 0; v < adm.entries[i].variant_count; ++v) {
-			const std::string value = adm.entries[i].variants[v];
+		for (size_t v = 0; v < adm.entries[i].variants.size(); ++v) {
+			const std::string value = adm.entries[i].variants[v].text;
 			if (!value.empty()) ring.push_back(value);
 		}
 	}

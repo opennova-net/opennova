@@ -30,18 +30,16 @@ HudKeyPoll keys() {
 
 void test_edge_latch() {
 	HudKeyEdge e;
-	CHECK(e.step(true, true, false));   // the press edge fires
-	CHECK(!e.step(true, true, false));  // a held key does not re-fire
-	CHECK(!e.step(false, true, false));
-	CHECK(!e.step(true, true, true));   // a chorded press never fires ...
-	CHECK(!e.step(true, true, false));  // ... and the latch followed the ungated key
-	CHECK(!e.step(false, true, false));
-	CHECK(!e.step(true, false, false)); // inactive input: ignored, latch set
-	CHECK(!e.step(true, true, false));  // so reopening the gate cannot re-fire it
-	CHECK(!e.step(false, true, false));
-	CHECK(e.step(true, true, false));
+	CHECK(e.step(true, true));   // the press edge fires
+	CHECK(!e.step(true, true));  // a held key does not re-fire
+	CHECK(!e.step(false, true));
+	CHECK(!e.step(false, true));
+	CHECK(!e.step(true, false)); // inactive input: ignored, latch set
+	CHECK(!e.step(true, true));  // so reopening the gate cannot re-fire it
+	CHECK(!e.step(false, true));
+	CHECK(e.step(true, true));
 	e.reset();
-	CHECK(e.step(true, true, false)); // reset forgets the held key
+	CHECK(e.step(true, true)); // reset forgets the held key
 }
 
 // The rows' down states arrive resolved: a key both rows carry reaches one of
@@ -582,17 +580,11 @@ void test_lockgame_row() {
 	k.mp_session_peer = false;
 	CHECK(press(k) == kJoinLockToggled);
 	CHECK(kJoinLockToggled == 0x80000000u);
-	// A held key fires once; a chorded press and inactive input never.
+	// A held key fires once; inactive input never.
 	HudKeyPoll held = k;
 	held.lockgame = true;
 	CHECK(hud_toggles_poll(s, held) == 0);
 	held.lockgame = false;
-	hud_toggles_poll(s, held);
-	held.lockgame = true;
-	held.chorded = true;
-	CHECK(hud_toggles_poll(s, held) == 0);
-	held.lockgame = false;
-	held.chorded = false;
 	hud_toggles_poll(s, held);
 	held.lockgame = true;
 	held.active = false;
@@ -618,8 +610,6 @@ void test_mouse_rows() {
 	CHECK(hud_toggles_poll(s, k) == 0);
 	k.flipmouse = false;
 	hud_toggles_poll(s, k);
-	// A Shift/Alt chord does not hold either row back.
-	k.chorded = true;
 	k.flipmouse = true;
 	CHECK(hud_toggles_poll(s, k) == kMouseFlipped);
 	k.flipmouse = false;

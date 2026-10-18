@@ -186,6 +186,10 @@ int GameWorld::texcompression_level_fresh_profile() {
 	return opennova::renderer::kTexCompressionLevelFreshProfile;
 }
 
+int GameWorld::terrain_texdetail_fresh_profile() {
+	return opennova::renderer::kTerrainTexDetailFreshProfile;
+}
+
 int GameWorld::particle_density_fresh_profile() {
 	return opennova::renderer::kParticleDensityFreshProfile;
 }
@@ -204,6 +208,7 @@ void GameWorld::set_particle_density(int p_density) {
 void GameWorld::publish_session_render_settings() {
 	if (terrain_ != nullptr) {
 		terrain_->set_texcompression_level(session_texcompression_level_);
+		terrain_->set_terrain_texdetail(session_terrain_texdetail_);
 	}
 	if (EffectWorld *effects = get_effect_world()) {
 		effects->set_session_render_settings(session_texcompression_level_, session_particle_density_);
@@ -794,6 +799,12 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_texcompression_level"), &GameWorld::get_texcompression_level);
 	ClassDB::bind_method(D_METHOD("get_session_texcompression_level"),
 			&GameWorld::get_session_texcompression_level);
+	ClassDB::bind_method(D_METHOD("set_terrain_texdetail", "level"), &GameWorld::set_terrain_texdetail);
+	ClassDB::bind_method(D_METHOD("get_terrain_texdetail"), &GameWorld::get_terrain_texdetail);
+	ClassDB::bind_method(D_METHOD("get_session_terrain_texdetail"),
+			&GameWorld::get_session_terrain_texdetail);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("terrain_texdetail_fresh_profile"),
+			&GameWorld::terrain_texdetail_fresh_profile);
 	ClassDB::bind_method(D_METHOD("set_particle_density", "density"), &GameWorld::set_particle_density);
 	ClassDB::bind_method(D_METHOD("get_particle_density"), &GameWorld::get_particle_density);
 	ClassDB::bind_method(D_METHOD("get_session_particle_density"),

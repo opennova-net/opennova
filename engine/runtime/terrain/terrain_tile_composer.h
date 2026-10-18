@@ -92,7 +92,7 @@ TerrainTileQuadrantChain build_terrain_tile_quadrant_chain(
 
 // The colormap as the map's terrain pass samples it: the four quadrants'
 // first levels under the session's texcompression_level, put back together.
-// [orig: render_terrain_decal @ 0x6071C0 (the passes over Colormap0..3,
+// [orig: Render_TerrainDecal @ 0x6071C0 (the passes over Colormap0..3,
 // dword_319F940 @ 0x607765)]
 Rgba8Image terrain_colormap_device_image(const Rgba8Image &atlas,
 		int32_t session_texcompression_level);

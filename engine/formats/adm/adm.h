@@ -8,11 +8,18 @@
 #include <string_view>
 #include <vector>
 
+#include <base/io/ascii_config.h>
 #include <base/io/strutil.h>
 
 namespace opennova::adm {
 
-inline constexpr int ADM_MAX_VARIANTS = 8;
+// The clips a row can name: as many as its line's tokens after the key. The
+// game registers every clip on a row [orig: AnimMap_ParseConfigLine @0x40CB60,
+// the clip loop @0x40CBAE..0x40CC05, bounded by the token count alone], and
+// its line reader hands a row 30 tokens at most [orig: Config_TokenizeLine
+// @0x53CB60, the 30 cap @0x53CC8C..0x53CC93], so a row names 29 clips at
+// most: the writer refuses more, which would not read back.
+inline constexpr int ADM_MAX_VARIANTS = io::kConfigMaxTokens - 1;
 
 // The slot a row's key names: the key past its first five characters,
 // whatever those are (`anim_` in every retail table), which the runtime
@@ -44,12 +51,20 @@ inline std::string adm_slot_key(std::string_view key) {
     return name.empty() ? std::string() : "anim_" + strutil::to_lower(name);
 }
 
-typedef struct AdmEntry {
-    char key[64];
-    // Every quoted clip on a row is one variant in the slot's circular ring.
-    size_t variant_count;
-    char variants[ADM_MAX_VARIANTS][64];
-} AdmEntry;
+// One clip a row names, its text in 64 bytes with its NUL (the parse's
+// width), read as a C string.
+struct AdmClip {
+    char text[64] = {};
+    operator const char *() const { return text; }
+    operator char *() { return text; }
+};
+
+struct AdmEntry {
+    char key[64] = {};
+    // Every quoted clip on a row is one variant in the slot's circular ring, as
+    // many as the row names (ADM_MAX_VARIANTS at most).
+    std::vector<AdmClip> variants;
+};
 
 typedef struct AdmFile {
     AdmEntry *entries;
@@ -64,7 +79,7 @@ struct AdmDroppedLine {
     size_t row = SIZE_MAX; // the table row the line keeps (an index into entries), else SIZE_MAX
     std::string key;       // the line's first token ("" for none)
     std::string what;      // a sentence: what is left out and why
-    bool blocks = false;   // input the table would lose that the game reads (a ninth clip)
+    bool blocks = false;   // input the table would lose that the game reads
 };
 
 int adm_parse(const char *path, AdmFile *out);
@@ -74,18 +89,24 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out,
 void adm_free(AdmFile *af);
 
 // The canonical-form writer (adm_write.cpp): one leading blank line, rows of
-// `key<4 tabs>"variant" "variant"`, CRLF line ends and the CRLF x3 + NUL
-// trailer the stock tables end with. Parity with retail's hand-edited files is
-// parse-equality over this form. Returns -1 for a row the parser could not
+// `key<4 tabs>"variant" "variant"` (a 29th variant bare: the line's 30th
+// token, which the line reader never closes), CRLF line ends and the CRLF x3 +
+// NUL trailer the stock tables end with. Parity with retail's hand-edited files
+// is parse-equality over this form. Returns -1 for a row the parser could not
 // read back as written: a key of five characters or fewer (it names no slot)
 // or that is not one plain token (a space, tab, comma, quote, ';' or "//"
-// splits or cuts it), no variants, or a variant holding a quote or a control
-// character, starting with '/' (which ends a row) or with edge whitespace
-// (which the parser trims).
+// splits or cuts it), no variants or more than 29, a variant holding a quote or
+// a control character, starting with '/' (which ends a row) or with edge
+// whitespace (which the parser trims), a 29th variant that is not one plain
+// token, or a line past the line reader's 1000 characters.
 int adm_write_buffer(const AdmFile *af, std::string &out);
 int adm_write(const char *path, const AdmFile *af);
 // Why the writer refuses a row (the reasons above, as a sentence), or null when
 // it writes it.
 const char *adm_row_problem(const AdmEntry &entry);
+// Whether `text` is written bare as one token that reads back as written: no
+// control character, space, tab, comma, quote, ';' or "//" (a row's key, and a
+// 29th clip, the line's 30th token the line reader never closes).
+bool adm_bare_token(const char *text);
 
 } // namespace opennova::adm

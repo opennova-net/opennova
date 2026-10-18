@@ -40,11 +40,6 @@ enum class AdminScene : uint8_t {
 	Other, // the pre and post menus, a load
 };
 
-// DispatchCommand's split: `isspace` separates, at most 25 tokens, and the split stops
-// writing terminators at the cap, so the 25th token runs to the end of the line.
-// [orig: CAdminServer_DispatchCommand @0x40676B..0x4067EB, the cap @0x4067A3]
-std::vector<std::string> admin_split_command(std::string_view line);
-
 // The usage reply for a rights word: `USAGE - [QUIT`, then each listed verb by its usage bit
 // (CHAT, ADMIN and BANLIST by 0x80, 0x100 and 0x200, though the dispatch opens them on 0x40),
 // then `]`. [orig: CAdminServer_DispatchCommand @0x406A8D..0x406D58]

@@ -340,7 +340,7 @@ bool set_entity_transform(bms::File &file, EntityKind kind, size_t index,
 // A new record holds what the original editor's holds when it places an item: the item zeroed, then its
 // initializer's values, as its BMS writer lays them into the record [orig: JOTACmed.exe
 // MissionItem_AppendByTypeId @ 0x455900 (the memset, then MissionItem_InitFromDefinition @ 0x44dbf0,
-// whose bytes jomed.exe and dfx2med.exe carry too); the record's layout sub_44C8E0 @ 0x44c8e0]: the
+// whose bytes jomed.exe and dfx2med.exe carry too); the record's layout MissionItem_PackBmsRecord @ 0x44c8e0]: the
 // waypoint distance 10 (+28), perception and perfectionist 100 (+32, +36), both accuracies 100 (+52, +54),
 // the obliqueness 15, the crouch timer 3, the shoot timer 5 and the attention 30, the waypoint advance
 // trigger -1 (+68) and the generic string "null" (+120) [orig: JOTACmed.exe @ 0x44dc29..0x44dca6,
@@ -352,7 +352,7 @@ bool set_entity_transform(bms::File &file, EntityKind kind, size_t index,
 // none, which the shipped records most often hold [orig: JOTACmed.exe sub_4096D0 @ 0x4096d0]. The team, the
 // AI class (name1) and the AI profile (name2) are the item's: its items.def good or evil attribute, its
 // sid, its default_aip where that profile exists [orig: JOTACmed.exe @ 0x44dd51..0x44dd86, @ 0x44dcdc..
-// 0x44dd2e, sub_44C8E0's name1 copy]; zero and empty here, as an item without them leaves them (D-MIS-10,
+// 0x44dd2e, MissionItem_PackBmsRecord's name1 copy]; zero and empty here, as an item without them leaves them (D-MIS-10,
 // docs/mission/mis-format-re.md).
 bms::Entity new_entity(EntityKind kind, int item_id, int id) {
 	bms::Entity entity = {};
@@ -401,7 +401,7 @@ bool remove_entity(bms::File &file, EntityKind kind, size_t index, std::string &
 	list->erase(list->begin() + static_cast<std::ptrdiff_t>(index));
 	if (kind == EntityKind::Marker) {
 		// The markers past it moved down one: every path laid out again from its markers, as the original's
-		// writer lays them all out [orig: JOTACmed.exe sub_44CFD0 @ 0x44cfd0].
+		// writer lays them all out [orig: JOTACmed.exe MissionDocument_RebuildWaypointPaths @ 0x44cfd0].
 		for (size_t path = 0; path < file.waypoint_records.size(); ++path) lay_out_waypoint_path(file, path);
 	}
 	sync_counts(file);
@@ -459,7 +459,7 @@ void lay_out_waypoint_path(bms::File &file, size_t index) {
 	const size_t slots = std::min<size_t>(stops.size(), kMaxWaypointPathMarkers);
 	// The 32 slot words as they stand: the original's rebuild zeroes a path's count alone and writes its stops
 	// over the first slots, so a word past them keeps what the path held before (09TR.bms's path 13 ships
-	// one) [orig: JOTACmed.exe sub_44CFD0 @ 0x44cfd0, the counts cleared, the slots appended over].
+	// one) [orig: JOTACmed.exe MissionDocument_RebuildWaypointPaths @ 0x44cfd0, the counts cleared, the slots appended over].
 	std::vector<uint8_t> region(128, 0);
 	for (size_t i = 0; i < record.waypoint_numbers.size() && i < kMaxWaypointPathMarkers; ++i)
 		io::write_u32_le(region.data() + i * 4, record.waypoint_numbers[i]);
@@ -930,14 +930,18 @@ bool event_chain(const bms::File &file, size_t index, MissionEventChain &out) {
 		return false;
 	}
 	out.event = to_event_record(file.events[index], index);
-	if (!valid_range(out.event.trigger_index, out.event.trigger_count, file.triggers.size())) {
+	// The runs the game reads, its count bytes signed (triggers_read, actions_read: 128..255 reads the first
+	// trigger alone and no action; D-10).
+	const int trigger_run = static_cast<int>(triggers_read(file.events[index].trigger_count));
+	const int action_run = static_cast<int>(actions_read(file.events[index].action_count));
+	if (!valid_range(out.event.trigger_index, trigger_run, file.triggers.size())) {
 		out.diagnostics.push_back(logic_diagnostic(
 				"logic.trigger_range_out_of_range",
 				"Event trigger range is outside the mission trigger table.",
 				"event",
 				static_cast<int>(index)));
 	} else {
-		for (int i = 0; i < out.event.trigger_count; ++i) {
+		for (int i = 0; i < trigger_run; ++i) {
 			const size_t trigger_index = static_cast<size_t>(out.event.trigger_index + i);
 			MissionTriggerRecord trig = to_trigger_record(file.triggers[trigger_index], trigger_index);
 			out.triggers.push_back(trig);
@@ -958,14 +962,14 @@ bool event_chain(const bms::File &file, size_t index, MissionEventChain &out) {
 			}
 		}
 	}
-	if (!valid_range(out.event.action_index, out.event.action_count, file.actions.size())) {
+	if (!valid_range(out.event.action_index, action_run, file.actions.size())) {
 		out.diagnostics.push_back(logic_diagnostic(
 				"logic.action_range_out_of_range",
 				"Event action range is outside the mission action table.",
 				"event",
 				static_cast<int>(index)));
 	} else {
-		for (int i = 0; i < out.event.action_count; ++i) {
+		for (int i = 0; i < action_run; ++i) {
 			const size_t action_index = static_cast<size_t>(out.event.action_index + i);
 			MissionActionRecord act = to_action_record(file.actions[action_index], action_index);
 			out.actions.push_back(act);

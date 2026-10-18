@@ -79,7 +79,7 @@ controls::BindingSet options_bindings(const playersav::ProfileRecord &record);
 // The Options screen's records back into the record's table: each entry, in
 // the table's own order, takes the eight binding fields of its row's record;
 // the count and the identity fields stand [orig:
-// sort_and_copy_weapon_loadout_to_session @0x559d50 — the qsort by the
+// KeyBinding_SortAndStoreProfileBindings @0x559d50 — the qsort by the
 // entry's table index (+40, sub_559D40 @0x559d40) restores the table order
 // before the copy @0x559d90..0x559e2a; callers the front-end ACCEPT
 // @0x55ace5 and the in-game Accept @0x554e74].

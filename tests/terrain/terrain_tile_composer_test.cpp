@@ -169,7 +169,7 @@ opennova::TerrainTileCompositionJob cold_job(uint8_t page_lod,
 	job.source_origin_x = source_origin_x;
 	job.source_origin_z = source_origin_z;
 	const int span = opennova::TerrainTileCompositionCache::page_world_span(page_lod);
-	job.layout.texture_dimension = opennova::TerrainTileCompositionCache::kDimension;
+	job.layout.texture_dimension = opennova::TerrainTileCompositionCache::kDimensionHigh;
 	job.layout.world_span = span;
 	job.layout.texels_per_world_unit =
 			static_cast<float>(job.layout.texture_dimension) / static_cast<float>(span);
@@ -1180,8 +1180,8 @@ bool test_quadrant_update_rects() {
 			"the quadrants no rect touches keep their chains")) return false;
 	// A level-1 page (64 units, its quadrant's level 0 over 512 x 512) whose origin routes to the middle of
 	// quadrant 0's x span, rows 100..106: neither column change reaches it.
-	const bool middle = opennova::terrain::terrain_tile_page_samples_any(changes, source, 4, 256, 96);
-	const bool edge = opennova::terrain::terrain_tile_page_samples_any(changes, source, 4, 0, 96);
+	const bool middle = opennova::terrain::terrain_tile_page_samples_any(changes, source, 4, 256, 96, 256);
+	const bool edge = opennova::terrain::terrain_tile_page_samples_any(changes, source, 4, 0, 96, 256);
 	if (!expect(!middle && edge, "a page samples the rects it reads, never the span between two of them")) return false;
 	TerrainTileQuadrantSource untouched = before;
 	std::vector<CoordsRect> refused = rects;
@@ -1206,7 +1206,7 @@ bool test_page_samples() {
 			opennova::terrain::update_terrain_tile_quadrants(source, atlas, 300, 100, 8, 8, &middle) == 1u,
 			"the rects change quadrant 0 alone")) return false;
 	const auto samples = [&](const opennova::terrain::TerrainTileQuadrantChange &change, uint8_t lod, int sx, int sz) {
-		return opennova::terrain::terrain_tile_page_samples(change, source, lod, sx, sz);
+		return opennova::terrain::terrain_tile_page_samples(change, source, lod, sx, sz, 256);
 	};
 	return expect(samples(corner, 0, 0, 0), "the flat page reads texel (0, 0) of quadrant 0") &&
 			expect(!samples(middle, 0, 0, 0), "and nothing past it") &&

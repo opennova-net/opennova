@@ -3,11 +3,14 @@
 // §5.57/§5.58 + the 2026-07-18 loadout grill for the witness record.
 #include <runtime/world/weapon_inventory.h>
 
+#include <algorithm>
 #include <cstdio>
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <formats/playersav/weapon_sav.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 
@@ -46,7 +49,7 @@ int32_t ammo_score(const WeaponTable &table, const WeaponInventory &inv, int32_t
 
 } // namespace
 
-// [orig: sub_5405F0 @0x5405F0 / sub_540670 @0x540670; carried-player legs]
+// [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0 / WeaponSlot_SetSharedLoadedRounds @0x540670; carried-player legs]
 int32_t weapon_inventory_loaded_rounds(const WeaponTable &table,
         const WeaponInventory &inv, int32_t combo) {
     const auto *def = entry_at(table, inv, combo);
@@ -133,7 +136,17 @@ std::vector<WeaponKitEntry> weapon_kit_filter_by_availability(
     //  unresolved names (@ 0x40f830) and availability-0 entries (@ 0x40f834)]
     std::vector<WeaponKitEntry> out;
     for (const WeaponKitEntry &e : kit) {
-        int idx = table.index_of(e.name.c_str());
+        // The walk is over the armory's weapon catalog, whose entry 0 is "None" (the
+        // weapon table's is the "null" def), so a kit name "None" resolves to index 0
+        // [orig: the stricmp walk over g_WeaponDefTable @ 0x40f80e..0x40f830; its entry
+        //  0 named by WeaponDef_LoadAll @ 0x54dd10].
+        static constexpr char kNone[] = "none";
+        size_t k = 0;
+        while (kNone[k] != '\0' &&
+               std::tolower(static_cast<unsigned char>(e.name.c_str()[k])) == kNone[k])
+            ++k;
+        const bool none = kNone[k] == '\0' && e.name.c_str()[k] == '\0';
+        int idx = none ? 0 : table.index_of(e.name.c_str());
         if (idx < 0) continue;
         if (avail.value_for(idx) == weapon_availability_value::kBanned) continue;
         out.push_back(e);
@@ -173,9 +186,9 @@ std::vector<std::string> weapon_kit_expand_display_list(
         const WeaponTableEntry *pdef = table.by_index(static_cast<uint8_t>(parent));
         if (pdef == nullptr) continue;
         for (int k = 1; k <= pdef->loadout_subclasses && out.size() < 255; ++k) {
-            const WeaponTableEntry *sub =
-                    (parent + k < 256) ? table.by_index(static_cast<uint8_t>(parent + k))
-                                       : nullptr;
+            // The sub-variant's index is a byte add, wrapping at 256
+            // [orig: `movzx ecx, bl; add cl, [index]` @ 0x54bae6..0x54bae9].
+            const WeaponTableEntry *sub = table.by_index(static_cast<uint8_t>(parent + k));
             if (sub == nullptr) continue; // [orig: null sub skipped @ 0x54baf8]
             out.push_back(sub->name);
         }
@@ -317,28 +330,31 @@ int32_t combo_of(const WeaponTableEntry &def) {
 // the loaded rounds zeroed (the shared bucket's when the def names one), the
 // class pool set to the def's startrounds, one reload drawn.
 // [orig: WeaponSlot_InitFromAvatarDef — the child leg @0x542848..0x542883, the
-//  tail @0x5428CE..0x542909: sub_540670(bucket, picker, 0) or slot+0x10 = 0,
+//  tail @0x5428CE..0x542909: WeaponSlot_SetSharedLoadedRounds(bucket, picker, 0) or slot+0x10 = 0,
 //  WeaponSlot_SetAmmoCount(def+0x5C, def+0xD8, picker), WeaponSlot_ReloadAmmo
 //  (picker, slotIndex)]
 void refill_slot(const WeaponTable &table, WeaponInventory &inv, const WeaponTableEntry &def,
-                 int32_t slot_combo, int32_t reload_combo) {
+                 int32_t slot_combo, int32_t reload_combo, const WeaponAmmoSeat &seat) {
     WeaponInventorySlot *slot = inv.slot(slot_combo);
     if (slot == nullptr) return;
     if (def.ammo_bucket != 0) {
+        // The bucket write skips a controller or UseGun seat [orig: WeaponSlot_SetSharedLoadedRounds
+        //  @0x542858 / @0x5428DE, its seat test @0x540684..0x540692].
         const uint32_t bucket = static_cast<uint32_t>(def.ammo_bucket);
-        if (bucket < inv.shared_clips.size()) inv.shared_clips[bucket] = 0;
+        if (weapon_seat_writes_buckets(seat) && bucket < inv.shared_clips.size())
+            inv.shared_clips[bucket] = 0;
     } else {
         slot->clip = 0;
     }
     weapon_pool_set(table, inv, def.ammo_class_id, def.startrounds);
-    weapon_inventory_reload_slot(table, inv, reload_combo);
+    weapon_inventory_reload_slot(table, inv, reload_combo, seat);
 }
 
 } // namespace
 
 WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table,
         WeaponInventory &inv, int32_t adm_index, int32_t owner_class,
-        bool allow_sniper_scope_zoom) {
+        bool allow_sniper_scope_zoom, const WeaponAmmoSeat &seat) {
     // [orig: WeaponSlot_InitFromAvatarDef @ 0x542730]
     WeaponAvatarGrant out;
     if ((adm_index & 0xFF) == 0xFF) return out;                  // @0x542753
@@ -349,7 +365,7 @@ WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table
     // HELD one takes the grant as its own def [orig: @0x542779..0x5427C8].
     int32_t slot_combo = -1; // retail's null slot pointer
     if (!cur->sameas.empty()) {
-        const int parent = table.index_of(cur->sameas.c_str()); // AvatarDef_FindIndexByName
+        const int parent = table.index_of(cur->sameas.c_str()); // AdmDef_FindIndexByName
         const WeaponTableEntry *pdef =
                 parent >= 0 && parent != 0xFF ? table.by_index(static_cast<uint8_t>(parent))
                                               : nullptr;
@@ -383,7 +399,7 @@ WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table
             weapon_slot_init_from_def(*child, static_cast<int16_t>(child_adm), *child_slot,
                                       owner_class, allow_sniper_scope_zoom); // @0x542839
             if (child->clipsize != -1) {                         // @0x542848
-                refill_slot(table, inv, *child, combo_of(*child), own_combo);
+                refill_slot(table, inv, *child, combo_of(*child), own_combo, seat);
                 out.reloaded = true;
             }
         }
@@ -395,7 +411,7 @@ WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table
             ? table.by_index(static_cast<uint8_t>(slot->adm_index))
             : nullptr;
     if (slot_def != nullptr && slot_def->ammo_class_count != 0 && slot_def->clipsize != -1) {
-        refill_slot(table, inv, *slot_def, slot_combo, own_combo);
+        refill_slot(table, inv, *slot_def, slot_combo, own_combo, seat);
         out.reloaded = true;
     }
     out.combo = slot_combo;
@@ -410,7 +426,7 @@ bool weapon_inventory_weapon_full(const WeaponTable &table, const WeaponInventor
     if (def == nullptr || def->name.empty()) return false;       // @0x5424AB..0x5424BC
     int32_t combo = combo_of(*def);                              // @0x5424BE..0x5424D0
     if (!def->sameas.empty()) {                                  // @0x5424D2
-        // AdmDef_GetEntryByIndex(AvatarDef_FindIndexByName(sameas)): a hit
+        // AdmDef_GetEntryByIndex(AdmDef_FindIndexByName(sameas)): a hit
         // names its slot whether or not it is held [orig: @0x5424D7..0x5424F9]
         const int parent = table.index_of(def->sameas.c_str());
         const WeaponTableEntry *pdef =
@@ -444,9 +460,11 @@ bool weapon_inventory_all_full(const WeaponTable &table, const WeaponInventory &
 
 void weapon_inventory_seed_pools(const WeaponTable &table, WeaponInventory &inv,
                                  int player_class) {
-    // [orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x541690 — for every populated slot:
+    // [orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x541690 — the 128-entry table
+    //  zeroed first (rep stosd @0x54169C..0x5416A5), then for every populated slot:
     //  pools[def ammoclass] = classrounds override (when nonzero) else startrounds;
     //  raw table writes, later slots overwrite, NO cap clamp]
+    std::fill(inv.pools.begin(), inv.pools.end(), 0);
     int cls_idx = classrounds_index(player_class);
     for (int32_t combo = 0; combo < weapon_combo::kSlotCount; ++combo) {
         const WeaponTableEntry *def = entry_at(table, inv, combo);
@@ -463,16 +481,24 @@ void weapon_inventory_seed_pools(const WeaponTable &table, WeaponInventory &inv,
 
 int32_t weapon_inventory_total_clips(const WeaponTable &table, const WeaponInventory &inv,
                                      int32_t combo) {
+    return weapon_inventory_total_clips(table, inv, combo, WeaponAmmoSeat{});
+}
+
+int32_t weapon_inventory_total_clips(const WeaponTable &table, const WeaponInventory &inv,
+                                     int32_t combo, const WeaponAmmoSeat &seat) {
     // [orig: WeaponSlot_GetTotalClips @ 0x5425F0 — null def -> 0 @0x5425fc;
     //  pool = Entity_GetScoreValueBySlotType(def+216) @0x542640 + the loaded
     //  rounds slot+16 @0x54265b; clipsize -1 -> -1 @0x542669; /= clipsize
-    //  @0x542673; clamp 127 @0x54267a]
+    //  @0x542673, a 0 divisor skipped @0x542670; clamp 127 @0x542678..0x54267a]
     const WeaponTableEntry *def = entry_at(table, inv, combo);
     const WeaponInventorySlot *slot = inv.slot(combo);
     if (def == nullptr || slot == nullptr) return 0;
     if (static_cast<uint32_t>(def->ammo_bucket) >= table.ammo_class_names.size()) return 0;
-    int32_t result = weapon_pool_get(inv, def->ammo_class_id) +
-            weapon_inventory_loaded_rounds(table, inv, combo);
+    const int32_t loaded = def->ammo_bucket != 0
+            ? weapon_seat_bucket(seat, weapon_inventory_loaded_rounds(table, inv, combo))
+            : weapon_inventory_loaded_rounds(table, inv, combo);
+    int32_t result = weapon_seat_pool(seat, def->ammo_class_id,
+                                      weapon_pool_get(inv, def->ammo_class_id)) + loaded;
     if (def->clipsize == -1) return -1;
     if (def->clipsize != 0) result /= def->clipsize;
     if (result > 127) return 127;
@@ -481,6 +507,12 @@ int32_t weapon_inventory_total_clips(const WeaponTable &table, const WeaponInven
 
 int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
                                              const WeaponInventory &inv) {
+    return weapon_inventory_loadout_weight_fp16(table, inv, WeaponAmmoSeat{});
+}
+
+int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
+                                             const WeaponInventory &inv,
+                                             const WeaponAmmoSeat &seat) {
     // [orig: Terrain_AccumulateSectorScores @ 0x425220 (misnamed): the slot walk
     //  @0x425233..0x425304, weaponweight @0x425252, clips x clipweight @0x42525e..
     //  0x425272, the +0x3AC sub-entry loop @0x425286..0x4252c8 keyed on the
@@ -491,7 +523,7 @@ int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
         const WeaponInventorySlot *slot = inv.slot(combo);
         if (def == nullptr || slot == nullptr) continue;
         weight += def->weaponweight_fp16 +
-                  weapon_inventory_total_clips(table, inv, combo) * def->clipweight_fp16;
+                  weapon_inventory_total_clips(table, inv, combo, seat) * def->clipweight_fp16;
         const int32_t subs = def->loadout_subclasses;
         for (int32_t k = 1; k <= subs; ++k) {
             // The sub-variant entries follow the main's adm index
@@ -505,7 +537,8 @@ int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
             // clips ride the MAIN def's clipweight, then the loop breaks — a
             // second differing sub-entry never counts [orig: the `jnz` out of
             // the loop @0x4252b8 into the single add @0x4252d1..0x4252e2].
-            weight += weapon_inventory_total_clips(table, inv, sub_combo) * def->clipweight_fp16;
+            weight += weapon_inventory_total_clips(table, inv, sub_combo, seat) *
+                      def->clipweight_fp16;
             break;
         }
         combo += subs; // the walk skips the sub-variant slots [orig: @0x4252ec]
@@ -522,12 +555,65 @@ void weapon_inventory_apply_authority_pools(const WeaponTable &table, WeaponInve
     weapon_inventory_recalc_clips(table, inv);
 }
 
+WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity) {
+    WeaponAmmoSeat seat;
+    if (!entity.mounted) return seat;
+    seat.parent_slot = static_cast<int32_t>(entity.mount_type);
+    const Entity *carrier = world.registry.get(entity.mount_target);
+    if (carrier == nullptr) return seat;
+    seat.carrier = true;
+    seat.carrier_eweap = carrier->has_item_def && (carrier->item_attrib & kItemAttribEweap) != 0;
+    if (carrier->has_item_def) {
+        seat.carrier_reserve = static_cast<int16_t>(carrier->primary_weapon_slot.reserve);
+        seat.carrier_clip = static_cast<int16_t>(carrier->primary_weapon_slot.clip);
+    }
+    seat.carrier_class1 = carrier->mana;
+    return seat;
+}
+
+int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own) {
+    // [orig: Entity_GetScoreValueBySlotType @0x5406E0 - its dword_24C1930 & 0x100 cap
+    //  leg @0x5406E3 is the infinite-ammo cheat's bit (Server_ToggleDedicatedFlag
+    //  @0x4DC9C5 from action 121), which the port's cheat bindings do not set (its
+    //  World::rules.ignore_weapon_ammo_cost mirror stays clear)]
+    const bool carrier_reads = (seat.carrier && seat.parent_slot == 3) ||
+            (seat.parent_slot == 2 && seat.carrier_eweap); // @0x540707..0x540739
+    if (class_id == 1) {                                     // @0x54073F..0x540763
+        if (seat.parent_slot == 3) return seat.carrier ? seat.carrier_class1 : 0;
+        if (seat.parent_slot == 2) return 0;
+        return own;
+    }
+    if (carrier_reads) return seat.carrier_reserve;          // @0x540764..0x540774
+    if (seat.parent_slot == 2) return 0;                     // @0x54078F..0x540799
+    return own;
+}
+
+int32_t weapon_seat_bucket(const WeaponAmmoSeat &seat, int32_t own) {
+    // [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0 - seat 3 -> Entity_GetMountSlotClip(carrier) @0x540608..0x540623,
+    //  seat 2 -> 0 @0x540624..0x540627]
+    if (seat.parent_slot == 3) return seat.carrier ? seat.carrier_clip : 0;
+    if (seat.parent_slot == 2) return 0;
+    return own;
+}
+
+bool weapon_seat_writes_buckets(const WeaponAmmoSeat &seat) {
+    return seat.parent_slot != 2 && seat.parent_slot != 3;
+}
+
 void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv) {
+    weapon_inventory_recalc_clips(table, inv, WeaponAmmoSeat{});
+}
+
+void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv,
+                                   const WeaponAmmoSeat &seat) {
     // [orig: WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280 — return the clip to
     //  the pool, then draw one full clip clamped by what the pool affords. The
     //  arithmetic is ported literally, including the negative-pool degeneration the
     //  record notes for shipped -1 startrounds (§5.57 "the v15 ammo issues"). The
-    //  def+0xDC selects the shared loaded-round bucket.]
+    //  def+0xDC selects the shared loaded-round bucket. The seat legs: see
+    //  WeaponAmmoSeat.]
+    if (seat.parent_slot == 3) return; // [orig: `entity[90] != 3` @0x54228D..0x542294]
+    const bool controller = seat.parent_slot == 2;
     for (int32_t combo = 0; combo < weapon_combo::kSlotCount; ++combo) {
         const WeaponTableEntry *def = entry_at(table, inv, combo);
         WeaponInventorySlot *slot = inv.slot(combo);
@@ -535,18 +621,24 @@ void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &in
         if (def->ammo_class_count == 0) continue; // [orig: def[56] gate @ 0x5422ba]
         if (def->clipsize == -1) continue;        // [orig: def+88 != -1 @ 0x542304]
         int32_t units = def->ammo_class_count;
-        const int32_t loaded = weapon_inventory_loaded_rounds(table, inv, combo);
+        const bool bucket = def->ammo_bucket != 0;
+        const int32_t loaded = bucket
+                ? weapon_seat_bucket(seat, weapon_inventory_loaded_rounds(table, inv, combo))
+                : weapon_inventory_loaded_rounds(table, inv, combo);
         if (loaded != 0)
             weapon_pool_add(table, inv, def->ammo_class_id, loaded * units);
         int32_t clamped = static_cast<int32_t>(def->clipsize) * units;
-        int32_t pool = weapon_pool_get(inv, def->ammo_class_id);
+        const int32_t pool = weapon_seat_pool(seat, def->ammo_class_id,
+                                              weapon_pool_get(inv, def->ammo_class_id));
         if (clamped > pool) clamped = pool; // [orig: @ 0x542364]
         // [orig: WeaponSlot_DecrementAmmo @ 0x540920 call @ 0x542374 — the drawn
-        //  amount never exceeds the pool by construction]
-        if (def->ammo_class_id >= 0 &&
+        //  amount never exceeds the pool by construction; seat 2 spends nothing]
+        if (!controller && def->ammo_class_id >= 0 &&
             def->ammo_class_id < static_cast<int>(inv.pools.size()))
             inv.pools[static_cast<size_t>(def->ammo_class_id)] -= clamped;
-        weapon_inventory_set_loaded_rounds(table, inv, combo, clamped / units);
+        // A controller seat writes no bucket [orig: WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692].
+        if (!bucket || weapon_seat_writes_buckets(seat))
+            weapon_inventory_set_loaded_rounds(table, inv, combo, clamped / units);
     }
 }
 
@@ -556,26 +648,72 @@ int32_t weapon_slot_ammo_score(const WeaponTable &table, const WeaponInventory &
 }
 
 int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &inv,
-                                     int32_t combo) {
+                                     int32_t combo, const WeaponAmmoSeat &seat) {
     // [orig: WeaponSlot_ReloadAmmo @ 0x541720 (net-re §5.58) — refund the remaining
     //  clip into the def's ammo-class pool, then refill to clipsize clamped by the
-    //  pool]
+    //  pool]. Its ammo accessors take the owner's seat: a shared bucket's loaded
+    //  rounds read through it (@ 0x5417c5) where a slot's own word does not
+    //  (@ 0x5417c9); the refund's add has no seat leg (WeaponSlot_AddAmmo
+    //  @ 0x5417e7); the pool reads through it (@ 0x541805); the spend
+    //  (WeaponSlot_DecrementAmmo @ 0x541821) takes nothing on a controller seat
+    //  (@ 0x540994); the bucket write skips both seats (@ 0x541842). A UseGun seat's
+    //  carrier spend is the borrowed slot's, which never reaches this inventory.
     const WeaponTableEntry *def = entry_at(table, inv, combo);
     WeaponInventorySlot *slot = inv.slot(combo);
     if (def == nullptr || slot == nullptr) return 0;
-    const int32_t loaded = weapon_inventory_loaded_rounds(table, inv, combo);
+    const int32_t own = weapon_inventory_loaded_rounds(table, inv, combo);
+    const bool bucket = def->ammo_bucket != 0;
+    const int32_t loaded = bucket ? weapon_seat_bucket(seat, own) : own;
     if (def->clipsize == -1 || def->ammo_class_count == 0) return loaded;
     int32_t units = def->ammo_class_count;
     if (loaded != 0)
         weapon_pool_add(table, inv, def->ammo_class_id, loaded * units);
     int32_t draw = static_cast<int32_t>(def->clipsize) * units;
-    int32_t pool = weapon_pool_get(inv, def->ammo_class_id);
+    const int32_t pool = weapon_seat_pool(seat, def->ammo_class_id,
+            weapon_pool_get(inv, def->ammo_class_id));
     if (draw > pool) draw = pool;
-    if (def->ammo_class_id >= 0 &&
+    if (seat.parent_slot != 2 && seat.parent_slot != 3 && def->ammo_class_id >= 0 &&
         def->ammo_class_id < static_cast<int>(inv.pools.size()))
         inv.pools[static_cast<size_t>(def->ammo_class_id)] -= draw;
-    weapon_inventory_set_loaded_rounds(table, inv, combo, draw / units);
-    return weapon_inventory_loaded_rounds(table, inv, combo);
+    if (!bucket || weapon_seat_writes_buckets(seat))
+        weapon_inventory_set_loaded_rounds(table, inv, combo, draw / units);
+    const int32_t after = weapon_inventory_loaded_rounds(table, inv, combo);
+    return bucket ? weapon_seat_bucket(seat, after) : after;
+}
+
+void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotState &routed,
+                              const WeaponTableEntry &own_def, WeaponSlotState &own) {
+    if (routed_def.clipsize == -1) return;               // @0x5417aa
+    const int32_t units = routed_def.ammo_class_count;   // the slot def's +0xE0
+    // Only an authored `ammoclass <class> 0` leaves it 0, where retail divides by
+    // it (@0x541832); the defaults give 1 (AdmDef_InitEntryDefaults @0x53FF5B).
+    if (units == 0) return;
+    // A bucket weapon's rounds read through WeaponSlot_GetSharedLoadedRounds, which an EWeap owner
+    // answers with its own slot's clip [orig: @0x5417B0..0x5417C5;
+    //  @0x540634..0x540637]; otherwise the routed slot's word (@0x5417C9).
+    const int32_t loaded = routed_def.ammo_bucket != 0 ? static_cast<int16_t>(own.clip)
+                                                       : static_cast<int16_t>(routed.clip);
+    if (loaded != 0 && own_def.startrounds != -1 && own_def.clipsize != -1) { // @0x5462AE..0x5462B8
+        int32_t total = static_cast<int16_t>(own.clip) + static_cast<int16_t>(own.reserve) +
+                loaded * units;                          // @0x5462BA..0x5462CD
+        if (total > own_def.startrounds) total = own_def.startrounds;
+        int32_t clip = own_def.clipsize;                 // @0x5462D6..0x5462DA
+        if (clip > total) clip = total;                  // @0x5462E4..0x5462E8
+        own.clip = static_cast<int16_t>(clip);
+        own.reserve = static_cast<int16_t>(total - clip); // @0x5462F6..0x5462F8
+    }
+    int32_t cost = static_cast<int32_t>(routed_def.clipsize) * units; // @0x5417FF
+    const int32_t avail = static_cast<int16_t>(own.reserve);         // @0x546140
+    if (cost > avail) cost = avail;                      // @0x54180F..0x541811
+    int32_t word = static_cast<int16_t>(own.reserve);    // sub_5461D0
+    if (word != -1) {
+        word -= cost;
+        if (word < 0) word = 0;
+        own.reserve = static_cast<int16_t>(word);
+    }
+    // The bucket's write skips an EWeap owner [orig: WeaponSlot_SetSharedLoadedRounds @0x540694..0x54069F].
+    if (routed_def.ammo_bucket == 0)
+        routed.clip = static_cast<int16_t>(cost / units); // @0x541832 / @0x541850
 }
 
 bool weapon_select_slot(const WeaponTable &table, WeaponInventory &inv, int32_t combo,

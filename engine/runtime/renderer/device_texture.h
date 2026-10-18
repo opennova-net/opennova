@@ -42,6 +42,27 @@ inline constexpr int kObjectTexDetailFull = 3;
 // @ 0x5B181C].
 uint32_t object_texdetail_flags(int level, uint8_t slot);
 
+// The terrain texture detail: game.cfg `terrain_texdetail` (0..3, 3 full detail) [orig:
+// Config_ParseSettingsLine @ 0x551135], copied into the session's settings with the rest [orig:
+// Game_ApplySessionSettingsToGlobals @ 0x551565..0x551574, g_TerrainTexDetail @ 0x24D2044], which
+// Terrain_Init loads and hands the terrain's settings setter [orig: Terrain_Init @ 0x60FC0D, the push
+// @ 0x60FC2A..0x60FC36]; nothing writes it mid-mission.
+inline constexpr int kTerrainTexDetailFull = 3;
+// The word a fresh profile starts at: the first-launch quality pass writes quality_levels[1] = 3 on a
+// card with the shader-model-2 mark and a CPU past 2980 MHz, else 2, one less without more than 120 MB
+// of video memory, plus the preset offset (0 on the first launch), then the 0..3 clamp; the reference
+// machine has all three, so full detail [orig: Renderer_ComputeQualityLevels @0x58617E..0x586193
+// (caps[8] && caps[0] ? 3 : 2, --without caps[3]), the clamp @0x58629A..0x5862A9; sub_587790's caps
+// @0x5877F5 (CPU > 2980 MHz), @0x587834 (display memory > 0x7800000), @0x58787A (the SM2 mark);
+// the first launch's offset 0 @0x53ED0D].
+inline constexpr int kTerrainTexDetailFreshProfile = kTerrainTexDetailFull;
+
+// The halving flag the terrain's detail (splat) layers load with at terrain texture detail `level`:
+// two halvings at 0, one at 1 or 2, none at any other [orig: Terrain_ApplyDetailSettings @ 0x605DBF (0x20000),
+// @ 0x605DE4 (0x10000), @ 0x605DF4..0x605E0A (2 -> 0x10000, else 0) into g_TerrainDetailTextureFlags
+// @ 0x31A1820, which PolyTrn_InitTextures ORs into the layers' word @ 0x60AB95..0x60ABE5].
+uint32_t terrain_texdetail_flags(int level);
+
 // The largest side the reference card takes (D3DCAPS9 MaxTextureWidth, which CD3DDevice_InitializeDisplay
 // stores for the halvings [orig: @ 0x679AC2..0x679ACA, dword_32A623C]); a card that takes less halves a
 // texture past its side. Not a witness: the reference machine, as kReferenceTextureDxtCaps is.
@@ -70,7 +91,7 @@ struct DeviceTexture {
 	// A DDS loaded whole although the detail asked for a smaller one: its chain held too few levels to
 	// skip (GTexture_InitFromMemory @ 0x68820A).
 	bool whole = false;
-	// A DXT5 the game stores as DXT1, every block of its first level opaque (convert_dxt_alpha_blocks).
+	// A DXT5 the game stores as DXT1, every block of its first level opaque (GTexture_ConvertDXTAlphaBlocks).
 	bool dxt5_as_dxt1 = false;
 	// Every level's bytes: what the texture holds in the game's memory.
 	uint64_t bytes = 0;
@@ -107,16 +128,27 @@ struct DeviceTextureLevel {
 
 // The levels of the device texture the game builds from `width` x `height` RGBA8 pixels under
 // `flags`, as their texels decode: halved as pixel_texture_halvings asks (each halving
-// GTexture_Downsample2x2_RGBA8), in the format select_texture_dxt_format picks for `caps`, with
-// texture_level_count's levels over the halved sides (at most `level_limit` of them when it is not 0).
-// An A8R8G8B8 texture's level 0 is the halved pixels and every later level D3DX's box filter of the
-// bytes the level before was stored as; a DXT texture's levels are build_dxt_texture_levels' blocks,
-// decoded [orig: GTexture_CreateFromPixelData_0 @ 0x687717..0x687766 (the format), @ 0x687785 (the
-// halvings), @ 0x6877BA..0x687801 (the count), @ 0x6878A0 (level 0, D3DXLoadSurfaceFromMemory),
-// @ 0x6878B5..0x6878BE (D3DXFilterTexture, D3DX_FILTER_BOX, each level from the one before)].
+// GTexture_Downsample2x2_RGBA8, a side able to reach 0), in the format select_texture_dxt_format
+// picks for `caps`, at D3DX's sides (d3dx_texture_side: a 0 side made 1, a DXT side rounded up to a
+// multiple of 4) with D3DX's levels for the request over the halved sides (texture_level_count; at
+// most `level_limit` of them when it is not 0). Level 0 is the creator's FILTER_NONE load: its
+// source rect the creator's own un-halved sides, at the halved pitch (load_rgba8_filter_none), so a
+// halved texture widened by the rounding reads on into the next halved row and its unwritten tail
+// as zero. When the count it asked for is above 1 every later level is D3DX's box filter of the
+// level before (an A8R8G8B8 level of the bytes it was stored as, a DXT level of its blocks); a
+// texture that asked for 0 levels (the smaller side 2 or less, no 0x40000) gets D3DX's full chain
+// with level 0 alone loaded and its levels 1+ zero here (D-RMAT-27). A DXT texture's blocks go to
+// `dxt` too when it is given (its unloaded levels zero blocks).
+// [orig: GTexture_CreateFromPixelData_0 @ 0x687717..0x687766 (the format), @ 0x687785 (the
+// halvings), @ 0x6877BA..0x6877E0 (the count), @ 0x68781A (D3DXCreateTexture), @ 0x6878A0 (level 0,
+// D3DXLoadSurfaceFromMemory: no destination rect @ 0x687895, the source rect {0, 0, width, height}
+// of the creator's arguments @ 0x687869..0x68789C, the pitch 4 x the halved width
+// @ 0x687876..0x68788A, D3DX_FILTER_NONE @ 0x68787E), @ 0x6878B1..0x6878BE (D3DXFilterTexture,
+// D3DX_FILTER_BOX, each level from the one before, for a count above 1)].
 std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba, uint32_t width,
 		uint32_t height, uint32_t flags, const TextureDxtCaps &caps = kReferenceTextureDxtCaps,
-		uint32_t level_limit = 0, uint32_t max_side = kReferenceMaxTextureSide);
+		uint32_t level_limit = 0, uint32_t max_side = kReferenceMaxTextureSide,
+		std::vector<DxtSurface> *dxt = nullptr);
 
 // What a DDS file states of itself, as GTexture_InitFromMemory reads it.
 struct DdsSource {
@@ -130,7 +162,7 @@ struct DdsSource {
 
 // The device texture of a DDS the game loads through D3DX (a model row's `.dds`, the archive loader's):
 // an all-opaque DXT5 stored as DXT1 on a card that takes DXT1 and keeps no DXT5 [orig:
-// GTexture_InitFromMemory @ 0x687E90..0x687EB9; convert_dxt_alpha_blocks @ 0x687AC0]; the detail's
+// GTexture_InitFromMemory @ 0x687E90..0x687EB9; GTexture_ConvertDXTAlphaBlocks @ 0x687AC0]; the detail's
 // halvings skip the top levels of its chain (0x20000 two, 0x10000 one [orig: @ 0x687E3B..0x687E49]), and
 // once a skip is taken so does each halving the cap or the card asks for [orig: @ 0x6881AC..0x6881FC]; a
 // chain too short for the skip loads whole [orig: @ 0x68820A, @ 0x6882DE]; with no skip the file goes
@@ -172,9 +204,9 @@ uint32_t model_row_texture_flags(TextureLoader loader, uint8_t slot, int level);
 DeviceTexture model_row_device_texture(TextureLoader loader, uint8_t slot, int level, const DdsSource &file,
 		bool dds);
 
-// convert_dxt_alpha_blocks's test of a DXT5's first level: the first word of each of its blocks (both
+// GTexture_ConvertDXTAlphaBlocks's test of a DXT5's first level: the first word of each of its blocks (both
 // alpha endpoints) 0xFFFF, over max(1, width / 4) x max(1, height / 4) blocks from the level's start
-// [orig: convert_dxt_alpha_blocks @ 0x687B28..0x687B6A]. False for bytes too few to hold them.
+// [orig: GTexture_ConvertDXTAlphaBlocks @ 0x687B28..0x687B6A]. False for bytes too few to hold them.
 bool dxt5_first_level_opaque(const uint8_t *blocks, size_t size, uint32_t width, uint32_t height);
 
 } // namespace opennova::renderer

@@ -550,6 +550,14 @@ bool render_lod(const File &gp, size_t li, const std::vector<std::vector<int>> &
 		s.num_vertices = vertex_count(kind, *p);
 		indices.insert(indices.end(), p->indices.begin(), p->indices.end());
 		if (kind == Kind::Gpp) {
+			// The +47 byte can count past the 16 matrices a strip's table holds, which our reader refuses
+			// and JO's batch uploads from a 16-entry table [orig: CRenderBatchQueue_FlushBatches @ 0x5D9F50,
+			// the table byte read @0x5DA170, SetMatrixArray @ 0x5DA1B2]: no 3DI3 holds such a strip.
+			if (p->palette_length > kThreediStripBoneTableMax) {
+				error = "a primitive's bone palette counts more than " + std::to_string(kThreediStripBoneTableMax) +
+				        " matrices, which no 3DI3 strip holds";
+				return false;
+			}
 			std::memcpy(s.bone_table, p->palette.data(), sizeof(s.bone_table));
 			s.bone_table_length = p->palette_length;
 		} else if (kind == Kind::Gps) {

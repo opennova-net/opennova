@@ -36,6 +36,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_file_set.h>
+#include <editor/documents/mission_names_file.h>
 #include <editor/documents/mission_reads.h>
 #include <editor/documents/mission_validation.h>
 #include <editor/graph/asset_graph.h>
@@ -734,6 +735,129 @@ int test_item_classes() {
 	return 0;
 }
 
+// The player's route as the game walks the record a save lays out (bms::player_route_stops over the path's
+// stops, its first 32 slots) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50]: the first path with the flag, each
+// of its stops' markers on it, no other marker.
+int test_player_route() {
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document);
+	if (!document) return 1;
+	const MissionDocument &m = as_mission(*document);
+	const NodeAddress path = row_at(*document, MissionKind::WaypointPath, 1);
+	Diagnostic error;
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, path, "flags", int64_t(bms::WaypointFlags::PlayerRoute)), error));
+	const MissionPath &held = static_cast<const PathRow &>(*document->row(path.row)).native;
+	const std::vector<const Node *> markers = m.rows_of(MissionKind::Marker);
+	TEST_EXPECT(!held.stops.empty());
+	std::set<uint32_t> stops(held.stops.begin(), held.stops.end());
+	for (size_t i = 0; i < markers.size(); ++i) TEST_EXPECT(m.on_player_route(*markers[i]) == (stops.count(uint32_t(i)) != 0));
+	std::printf("player route: the first flagged path's stops as a save lays them out\n");
+	return 0;
+}
+
+// The player's route past its 32 slots, as the game walks the table a save lays out (bms::player_route_stops)
+// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502f1e..0x502f7a]: a route of 35 stops on path 5 reads path 6's flags,
+// its count and its first slot after its 32; one of 33 on the last path reads the header past its slots, whose
+// first word (the magic) is past the marker pool, which gates (mission.route_past_pool).
+int test_player_route_past_slots() {
+	const DocumentType &type = *document_type_for(AssetKind::Mission);
+	const std::vector<uint8_t> bytes = fixture_bytes();
+	bms::File file;
+	std::string message;
+	TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message) && file.waypoint_records.size() == 128);
+	if (file.waypoint_records.size() != 128) return 1;
+	for (bms::WaypointRecord &record : file.waypoint_records) record.flags = bms::WaypointFlags::None;
+	const int item = int(mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT);
+	bool added = true;
+	const auto add = [&](size_t path, int count) {
+		std::vector<uint32_t> made;
+		for (int i = 0; i < count; ++i) {
+			size_t at = 0;
+			added = mission::add_waypoint_marker(file, path, item, {}, -1, message, &at) && added;
+			made.push_back(uint32_t(at));
+		}
+		return made;
+	};
+	const std::vector<uint32_t> route = add(5, 35);
+	const std::vector<uint32_t> next = add(6, 2);
+	TEST_EXPECT(added);
+	file.waypoint_records[5].flags = bms::WaypointFlags::PlayerRoute;
+	mission::sync_counts(file);
+	std::vector<uint8_t> out;
+	TEST_EXPECT(bms::write(file, out, message));
+	std::unique_ptr<Document> document = open(out, "route.bms");
+	TEST_EXPECT(document);
+	if (!document) return 1;
+	const MissionDocument &m = as_mission(*document);
+	// The route's 32 slots, then path 6's flags word (none set), its count (2) and its first stop.
+	std::set<uint32_t> walked(route.begin(), route.begin() + 32);
+	walked.insert(uint32_t(file.waypoint_records[6].flags));
+	walked.insert(2);
+	walked.insert(next[0]);
+	TEST_EXPECT(m.player_route_words().size() == 35);
+	const std::vector<const Node *> markers = m.rows_of(MissionKind::Marker);
+	for (size_t i = 0; i < markers.size(); ++i) TEST_EXPECT(m.on_player_route(*markers[i]) == (walked.count(uint32_t(i)) != 0));
+	for (const Diagnostic &d : type.validate_file(*document)) TEST_EXPECT(d.code() != "mission.route_past_pool");
+	// The route on the last path, 33 stops: its 33rd word the header's first, "BMS" and the version, past the pool.
+	file.waypoint_records[5].flags = bms::WaypointFlags::None;
+	add(127, 33);
+	TEST_EXPECT(added);
+	file.waypoint_records[127].flags = bms::WaypointFlags::PlayerRoute;
+	mission::sync_counts(file);
+	TEST_EXPECT(bms::write(file, out, message));
+	std::unique_ptr<Document> last = open(out, "last.bms");
+	TEST_EXPECT(last);
+	if (!last) return 1;
+	size_t gated = 0;
+	for (const Diagnostic &d : type.validate_file(*last))
+		if (d.code() == "mission.route_past_pool") {
+			++gated;
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Error && d.message.find("stop 33") != std::string::npos);
+			// On the route's path, the last.
+			const std::vector<const Node *> paths = as_mission(*last).rows_of(MissionKind::WaypointPath);
+			TEST_EXPECT(paths.size() == 128 && d.row_id == paths.back()->id);
+		}
+	TEST_EXPECT(gated == 1);
+	std::printf("player route: past its 32 slots into the next record, and past the marker pool from the header gated\n");
+	return 0;
+}
+
+// The original editor's .bms packer writes every record with w_accuracy1 no more than w_accuracy2 and yaw, pitch and
+// roll % 360, the sign kept [orig: MissionItem_PackBmsRecord @ 0x44c94f..0x44c975, @ 0x44c905..0x44c924 (JOTACmed.exe)] (the field
+// "accuracy" is w_accuracy1): a save writes 80/20 as 20/20 and 400 as 40, -400 as -40; the .mis writer clamps alike
+// and writes the facing as held [orig: MIS_SaveDocument @ 0x455600..0x455602, @ 0x455321..0x455353
+// (JOTACmed.exe)]; the row keeps what it holds.
+int test_record_pack() {
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document && !as_mission(*document).rows_of(MissionKind::Item).empty());
+	if (!document || as_mission(*document).rows_of(MissionKind::Item).empty()) return 1;
+	const std::string unedited = bytes_of(*document);
+	const NodeAddress item = row_at(*document, MissionKind::Item, 0);
+	Diagnostic error;
+	for (const auto &[field, value] : std::vector<std::pair<const char *, int64_t>>{
+	             {"accuracy", 80}, {"w_accuracy2", 20}, {"yaw", 400}, {"pitch", -400}, {"roll", 359}})
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, item, field, value), error));
+	bms::File saved;
+	std::string message;
+	const std::string written = bytes_of(*document);
+	TEST_EXPECT(bms::parse(reinterpret_cast<const uint8_t *>(written.data()), written.size(), saved, message) &&
+	            !saved.items.empty());
+	if (!saved.items.empty()) {
+		const bms::Entity &packed = saved.items[0];
+		TEST_EXPECT(packed.w_accuracy1 == 20 && packed.w_accuracy2 == 20 && packed.yaw == 40 && packed.pitch == -40 &&
+		            packed.roll == 359);
+	}
+	std::string mis, why;
+	TEST_EXPECT(mission_names_text(as_mission(*document), nullptr, mis, why) &&
+	            mis.find("  facing 400 -400 359") != std::string::npos && mis.find("  waccuracy1 20") != std::string::npos);
+	Value held;
+	TEST_EXPECT(document->get(item, "accuracy", held) && std::get<int64_t>(held) == 80);
+	while (document->can_undo()) document->undo();
+	TEST_EXPECT(bytes_of(*document) == unedited);
+	std::printf("record pack: a save clamps w_accuracy1 to w_accuracy2 and writes yaw, pitch and roll %% 360\n");
+	return 0;
+}
+
 // The weapon loadout as Save writes it reads back as the same entries (the game's reader takes a
 // fourth string as the damage class only when it is a nonzero number or holds no letter): an edit
 // that would make it read otherwise is refused; one that keeps it is written and read back the same.
@@ -1033,6 +1157,51 @@ int test_parse_findings() {
 		TEST_EXPECT(findings.size() == 1 && findings[0].code() == "mission.runs_past_table" &&
 		            findings[0].severity == DiagnosticSeverity::Error && findings[0].row()->blocks_save &&
 		            findings[0].row()->gates_build && findings[0].row()->game_refusal);
+	}
+	// A count byte the game reads signed [orig: EventTrigger_EvaluateChain @ 0x45405f, @ 0x45408f;
+	// EventTrigger_UpdateEntry @ 0x454c95]: 128..255 evaluates the run's first trigger alone and dispatches no
+	// action, so nothing is read past a table. The first event holding its first trigger alone and no action, both
+	// counts 200: no finding, and Save writes both bytes back as read.
+	{
+		std::vector<mission::EventChain> chains;
+		mission::RunReport report;
+		TEST_EXPECT(mission::split_event_chains(file, chains, report) && !chains.empty() &&
+		            !chains[0].triggers.empty());
+		chains[0].triggers.resize(1);
+		chains[0].actions.clear();
+		chains[0].event.trigger_count = 200;
+		chains[0].event.action_count = 200;
+		bms::File high = file;
+		mission::join_event_chains(chains, high);
+		TEST_EXPECT(high.events[0].trigger_count == 200 && high.events[0].action_count == 200);
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::write(high, out, message));
+		std::unique_ptr<Document> document = open(out, "signed.bms");
+		TEST_EXPECT(document && !document->blocked() && document->issues().empty());
+		TEST_EXPECT(type.validate_file(*document).empty());
+		TEST_EXPECT(bytes_of(*document) == std::string(out.begin(), out.end()));
+	}
+	// The same count of 200 over a table of fewer records, one past the runs in none: the game reads the first and
+	// never the rest, so listed, a closed mission packed as it stands (read as 200 records, it was
+	// mission.runs_past_table, the build refused).
+	{
+		std::vector<mission::EventChain> chains;
+		mission::RunReport report;
+		TEST_EXPECT(mission::split_event_chains(file, chains, report) && !chains[0].triggers.empty());
+		chains[0].triggers.resize(1);
+		chains[0].event.trigger_count = 200;
+		bms::File high = file;
+		mission::join_event_chains(chains, high);
+		high.triggers.push_back(high.triggers.back());
+		high.trigger_count = int32_t(high.triggers.size());
+		TEST_EXPECT(high.triggers.size() < 200 && high.events[0].trigger_index == 0);
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::write(high, out, message));
+		std::unique_ptr<Document> document = open(out, "unowned.bms");
+		TEST_EXPECT(document && document->blocked());
+		const std::vector<Diagnostic> findings = type.validate_file(*document);
+		TEST_EXPECT(findings.size() == 1 && findings[0].code() == "mission.invalid_input" &&
+		            !findings[0].row()->gates_build);
 	}
 	// Bytes the writer writes otherwise (two zero bytes inside the loadout chunk's length, as the
 	// shipped missions with a damaged chunk hold): noted by the section, Save writes the chunk as the
@@ -1379,6 +1548,39 @@ int test_pool_check() {
 	TEST_EXPECT(session.last_edit_ok() && pools() == 0);
 	editor_test::handle_to_end(session, request::undo(mission->path()));
 	TEST_EXPECT(pools() == 1);
+	return 0;
+}
+
+// A save stores the writers' clamp back into the record, as the original editor's writers store it into the item on
+// both writes [orig: JOTACmed.exe MissionItem_PackBmsRecord @ 0x44c95d; MIS_SaveDocument @ 0x455600..0x455602]: an item whose
+// w_accuracy1 an edit set above its w_accuracy2 holds the clamped value after the save, the file and the row alike.
+int test_save_clamp() {
+	test_temp::TempDir dir("opennova_mission_save_clamp");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Clamp"));
+	editor_test::create_missing_files(session);
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(test_io::write_file(root + "/missions/clamp.bms", fixture_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("missions/clamp.bms"));
+	Document *mission = session.document_for("missions/clamp.bms");
+	TEST_EXPECT(mission && !as_mission(*mission).rows_of(MissionKind::Item).empty());
+	if (!mission || as_mission(*mission).rows_of(MissionKind::Item).empty()) return 1;
+	const NodeAddress item = row_at(*mission, MissionKind::Item, 0);
+	editor_test::handle_to_end(session, request::edit_record(mission->path(), edit_of(EditOperation::Set, item, "w_accuracy2", int64_t(20))));
+	editor_test::handle_to_end(session, request::edit_record(mission->path(), edit_of(EditOperation::Set, item, "accuracy", int64_t(80))));
+	Value held;
+	TEST_EXPECT(mission->get(item, "accuracy", held) && std::get<int64_t>(held) == 80);
+	editor_test::handle_to_end(session, request::save(mission->path()));
+	TEST_EXPECT(mission->get(item, "accuracy", held) && std::get<int64_t>(held) == 20 && !mission->dirty());
+	bms::File saved;
+	std::string message;
+	const std::vector<uint8_t> bytes = test_io::read_file(root + "/missions/clamp.bms");
+	TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), saved, message) && !saved.items.empty() &&
+	            saved.items[0].w_accuracy1 == 20);
+	std::printf("save clamp: a save stores w_accuracy1's clamp back into the record\n");
 	return 0;
 }
 
@@ -1876,6 +2078,10 @@ int main(int argc, char **argv) {
 	if (test_stop_numbers() != 0) return 1;
 	if (test_stop_places() != 0) return 1;
 	if (test_item_classes() != 0) return 1;
+	if (test_record_pack() != 0) return 1;
+	if (test_save_clamp() != 0) return 1;
+	if (test_player_route() != 0) return 1;
+	if (test_player_route_past_slots() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
 	if (test_item_type_on_symbol() != 0) return 1;

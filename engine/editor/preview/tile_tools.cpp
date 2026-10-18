@@ -56,7 +56,7 @@ void sets_to(const TilRow &row, const TilOverlayEntry &to, std::vector<Edit> &ou
 }
 
 // MED's step on one axis of its frame: `step` 16.16, positive rounding up first, then snapped down to whole units
-// [orig: JOTACmed.exe sub_43F0B0 @ 0x43F169..0x43F1A0].
+// [orig: JOTACmed.exe MissionSelection_Translate @ 0x43F169..0x43F1A0].
 int32_t med_step(int32_t value, int32_t step) {
 	int64_t v = value;
 	if (step > 0) v += 0xFFFF;
@@ -121,7 +121,7 @@ uint8_t tile_flipped(uint8_t flags, bool across) {
 }
 
 TilOverlayEntry tile_nudged(const TilOverlayEntry &entry, int dx, int dy, bool big) {
-	// MED's step: 0x100 or 0x10000 scaled by 16 [orig: JOTACmed.exe sub_440FD0 @ 0x44162E..0x44166B; sub_43F0B0 @
+	// MED's step: 0x100 or 0x10000 scaled by 16 [orig: JOTACmed.exe MED_MainWndProc @ 0x44162E..0x44166B; MissionSelection_Translate @
 	// 0x43F0E2..0x43F0E4], so a press moves one whole unit (by the rounding) or sixteen. Its frame's second axis
 	// is the stored z, the plane's y: a step north is a positive step there.
 	const int32_t unit = big ? 0x100000 : 0x1000;
@@ -136,7 +136,7 @@ std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOv
 	if (entries.empty() || direction == 0) return out;
 	// MED keeps a tile by its centre, in its frame (x, the stored z less 8 units: the plane's x east and y north)
 	// [orig: JOTACmed.exe MapTileStore_Serialize @ 0x433FA0..0x433FA6]; the centroid is the centres' integer mean, the
-	// sum over 64 bits divided toward zero [orig: JOTACmed.exe sub_43E910 @ 0x43E9C4..0x43EA12].
+	// sum over 64 bits divided toward zero [orig: JOTACmed.exe MissionSelection_RotateFacing2 @ 0x43E9C4..0x43EA12].
 	int64_t sum_x = 0, sum_s = 0;
 	for (const TilOverlayEntry &e : entries) {
 		sum_x += int64_t(e.x_fixed) + 0x80000;

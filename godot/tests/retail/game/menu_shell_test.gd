@@ -210,6 +210,9 @@ func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 	_cleanup(dir)
 
 func test_video_options_are_highest_quality_and_read_only() -> void:
+	# A terrain texture detail below full and off row 0, so its served row's
+	# seed is observable.
+	_write_cfg(["terrain_texdetail = 2"])
 	var dir := _make_dir()
 	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
 	var shell = _make_shell(dir)
@@ -221,7 +224,6 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	var driver: MenuDriver = shell.get_driver()
 	var expected := {
 		"TERRAINPOLY": "3",
-		"TERRAINTEX": "3",
 		"OBJECTTEX": "3",
 		"ANTIALIAS": "2",
 		"SHADERUSAGE": "2",
@@ -269,6 +271,14 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 			str(PlayerOptions.new().current().texcompression_level),
 			"TEXCOMPRESSION shows the persisted texture compression")
 	assert_false(driver.is_widget_disabled(compression), "TEXCOMPRESSION is editable")
+	# The terrain texture detail is served: game.cfg's terrain_texdetail, seeded
+	# by value and editable (options_policy.h kTerrainTexDetailControls).
+	var terrain_tex := driver.widget_id("TERRAINTEX")
+	assert_gte(terrain_tex, 0, "TERRAINTEX exists")
+	assert_eq(PlayerOptions.new().current().terrain_texdetail, 2, "the profile's word")
+	assert_eq(driver.item_value(terrain_tex, driver.selected_row(terrain_tex)), "2",
+			"TERRAINTEX shows the persisted terrain texture detail")
+	assert_false(driver.is_widget_disabled(terrain_tex), "TERRAINTEX is editable")
 	_cleanup(dir)
 
 

@@ -457,14 +457,16 @@ void halve_rgba(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height) {
 }
 
 void halve_rgba_times(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t halvings) {
-	for (uint32_t i = 0; i < halvings && width > 1 && height > 1; ++i) halve_rgba(rgba, width, height);
+	for (uint32_t i = 0; i < halvings; ++i) halve_rgba(rgba, width, height);
 }
 
 // [orig: GTexture_DownsampleToLimits @ 0x687170 — the cap (flag 0x1000 -> 512, 0x2000 ->
 //  256, 0x4000 -> 128) halving both sides while either exceeds it (@ 0x6871B7..0x6871BD);
-//  a model normal map loads with 0x1000, Material_LoadStageTexture @ 0x5B1782]
+//  a model normal map loads with 0x1000, Material_LoadStageTexture @ 0x5B1782; the
+//  loop's only test `w > cap || h > cap` @ 0x6871B1..0x6871B7, so a narrow side
+//  halves on past 0]
 void halve_rgba_to_cap(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t cap) {
-	while ((width > cap || height > cap) && width > 0 && height > 0) {
+	while (width > cap || height > cap) {
 		halve_rgba(rgba, width, height);
 	}
 }
