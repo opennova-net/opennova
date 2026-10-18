@@ -4,8 +4,11 @@
 // apps/hostd/saved_machine.h, and read back by the next agent with no token, the spent
 // token file gone; a service of the next protocol refusing the restarted agent's syncs
 // never strands it), the sync (its envelope, the agent's own image among it; every
-// container reported with its stats and its slot's egress; the desired ones started on
-// their slots with
+// container reported with its stats and its slot's counts; the machine's image, the
+// agent's log stream, its use from fixture /proc files once read twice, every tree it
+// holds; a running server's tick health from its fresh --stats-file, an exited one's
+// --exit-file line, what a starting one waits for; the desired ones started on their
+// slots with
 // their files written 0600 and their environment in a file that lives for the start
 // alone; the ones left out stopped, killed past the stop timeout, removed and their
 // directories wiped; a slot's next container started only once its previous one is
@@ -207,6 +210,7 @@ hosted::DesiredContainer desired(int64_t server, int64_t generation, int slot) {
 	d.args = { "/HOST", "server.host", "--credentials", "credentials.txt", "/game", "jo" };
 	d.files = std::map<std::string, std::string>{ { "server.host", "GameName \"Caf\xE9\"\r\n" },
 		{ "credentials.txt", kCredentials } };
+	d.log_stream = hosted::hosted_log_stream(server, generation);
 	return d;
 }
 
@@ -522,11 +526,25 @@ public:
 	}
 };
 
+// The kernel's files a machine's use is read from (proc_stats.h): two CPUs that ran
+// `busy` of `total` ticks, 4 GiB of memory with `available` free, and two interfaces.
+void write_proc(const std::string &root, uint64_t busy, uint64_t total, uint64_t available_kb,
+		uint64_t net_in, uint64_t net_out) {
+	fs::create_directories(root + "/proc/net");
+	std::ofstream(root + "/proc/stat")
+			<< "cpu  " << busy << " 0 0 " << total - busy << " 0 0 0 0 0 0\n";
+	std::ofstream(root + "/proc/meminfo")
+			<< "MemTotal: 4194304 kB\nMemFree: 1 kB\nMemAvailable: " << available_kb << " kB\n";
+	std::ofstream(root + "/proc/net/dev")
+			<< "Inter-|\n face |\n    lo: 99 1 0 0 0 0 0 0 99 1 0 0 0 0 0 0\n  ens5: " << net_in
+			<< " 1 0 0 0 0 0 0 " << net_out << " 1 0 0 0 0 0 0\n";
+}
+
 // One machine: the dirs, the fakes and an agent over them. Tree 1 is on the
 // machine from the start (found by the store's scan).
 struct Rig {
 	test_temp::TempDir temp;
-	std::string state_dir, scratch_dir, slots_root, trees_root, token_file;
+	std::string state_dir, scratch_dir, slots_root, trees_root, token_file, proc_root;
 	FakeService service;
 	FakeLink link{ service };
 	FakeRuntime runtime;
@@ -543,6 +561,8 @@ struct Rig {
 		slots_root = temp.file("slots");
 		trees_root = temp.file("trees");
 		token_file = temp.file("hostd.token");
+		proc_root = temp.file("proc-root");
+		write_proc(proc_root, 100, 1000, 3145728, 5000, 7000);
 		fs::create_directories(scratch_dir);
 		if (with_token)
 			std::ofstream(token_file) << kToken << "\n";
@@ -565,6 +585,9 @@ struct Rig {
 		config.state_dir = state_dir;
 		config.scratch_dir = scratch_dir;
 		config.token_file = token_file;
+		config.image_id = "ami-0123456789abcdef0";
+		config.log_stream = "hostd/hostd/0123456789abcdef";
+		config.proc_root = proc_root;
 		agent = std::make_unique<hostd::Agent>(
 				config, link, runtime, *slots, *trees, &counters, [this] { return clock_ms; });
 	}
@@ -861,6 +884,8 @@ int test_sync() {
 	TEST_EXPECT(rig.fetcher.starts.empty());
 	TEST_EXPECT(a.spec.args == rig.service.desired[0].args && a.spec.env_file.empty());
 	TEST_EXPECT(a.spec.cpus == 1.0 && a.spec.memory_mb == 512 && a.spec.pids == 128);
+	// Its output goes to the stream the service named.
+	TEST_EXPECT(a.spec.log_stream == "1/g1" && rig.runtime.started[1].spec.log_stream == "2/g1");
 	TEST_EXPECT(a.dir_mode == 0700 && a.files.size() == 2 &&
 			a.files.at("credentials.txt") == kCredentials);
 	TEST_EXPECT(a.file_modes.at("server.host") == 0600 &&
@@ -884,10 +909,17 @@ int test_sync() {
 	TEST_EXPECT(
 			ra->cpu_percent == 12.5 && ra->memory_bytes == 47710208u && ra->egress_bytes == 1000u);
 	TEST_EXPECT(rb->egress_bytes == 2000u && rb->cpu_percent == 0.0 && !rb->exit_code);
-	// The machine's one tree stands present in its store; the report says nothing of it.
+	TEST_EXPECT(ra->net_in_bytes == 10u && rb->net_in_bytes == 20u &&
+			ra->waiting == hosted::ContainerWait::None);
+	// The machine's one tree stands present in its store, and the report says so.
 	TEST_EXPECT(rig.trees->state_of(1) && rig.trees->state_of(1)->state == hostd::TreeFetchState::Present &&
 			rig.trees->state_of(1)->bytes == 26u);
-	TEST_EXPECT(rig.service.bodies.back().find("trees") == std::string::npos);
+	TEST_EXPECT(rig.service.last.trees.size() == 1 &&
+			rig.service.last.trees.at(1).state == hosted::TreeReportState::Ready &&
+			rig.service.last.trees.at(1).bytes == 26u &&
+			rig.service.last.trees.at(1).reason.empty());
+	TEST_EXPECT(rig.service.last.image_id == "ami-0123456789abcdef0" &&
+			rig.service.last.log_stream == "hostd/hostd/0123456789abcdef");
 	rig.clock_ms += 5000;
 	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs && rig.runtime.calls.size() == 2);
 
@@ -901,7 +933,8 @@ int test_sync() {
 	rig.counters.values = { { 0, { 1500, 15 } }, { 1, { 2500, 25 } } };
 	rig.clock_ms += 5000;
 	rig.step();
-	TEST_EXPECT(rig.service.reported("srv-1-g1")->egress_bytes == 1500u);
+	TEST_EXPECT(rig.service.reported("srv-1-g1")->egress_bytes == 1500u &&
+			rig.service.reported("srv-1-g1")->net_in_bytes == 15u);
 
 	// The service drops srv-2: asked to stop once, killed once the stop timeout passed,
 	// then removed with its directory.
@@ -1008,7 +1041,8 @@ int test_pull() {
 	const hosted::ContainerReport *a = rig.service.reported("srv-1-g1");
 	const hosted::ContainerReport *b = rig.service.reported("srv-2-g1");
 	TEST_EXPECT(a && b && a->state == ContainerState::Starting && a->slot == 0 && b->slot == 1);
-	TEST_EXPECT(!a->exit_code && !a->started_at);
+	TEST_EXPECT(!a->exit_code && !a->started_at && a->waiting == hosted::ContainerWait::Image &&
+			b->waiting == hosted::ContainerWait::Image);
 	rig.clock_ms += 60 * 1000;
 	rig.step();
 	TEST_EXPECT(rig.runtime.count("pull " + newer) == 1 && rig.runtime.started.empty());
@@ -1195,9 +1229,17 @@ int test_trees() {
 	// Reported starting on its slot, the tree fetching in the store.
 	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
 	const hosted::ContainerReport *a = rig.service.reported("srv-1-g1");
-	TEST_EXPECT(a && a->state == ContainerState::Starting && a->slot == 0 && !a->exit_code);
+	TEST_EXPECT(a && a->state == ContainerState::Starting && a->slot == 0 && !a->exit_code &&
+			a->waiting == hosted::ContainerWait::Trees);
 	TEST_EXPECT(rig.trees->state_of(1) && rig.trees->state_of(2) &&
 			rig.trees->state_of(2)->state == hostd::TreeFetchState::Fetching);
+	// The report names the fetch, its bytes so far and its try.
+	TEST_EXPECT(rig.service.last.trees.count(2) == 1 &&
+			rig.service.last.trees.at(2).state == hosted::TreeReportState::Fetching &&
+			rig.service.last.trees.at(2).tries == 1 && rig.service.last.trees.at(2).bytes == 0u);
+	std::ofstream(rig.trees_root + "/2.partial/jox01.pff") << "ESCAL";
+	rig.step();
+	TEST_EXPECT(rig.service.last.trees.at(2).bytes == 5u);
 	TEST_EXPECT(g_log.find("srv-1-g1 waits for its data (tree 1 and tree 2) to fetch") !=
 			std::string::npos);
 	// Fetched: checked, and the container starts with both binds.
@@ -1232,6 +1274,11 @@ int test_trees() {
 	const hosted::ContainerReport *b = rig.service.reported("srv-2-g1");
 	TEST_EXPECT(b && b->state == ContainerState::Starting && b->slot == 1 && !b->exit_code &&
 			b->reason.empty());
+	// A failure with a try left is still a fetch, its reason riding along.
+	TEST_EXPECT(rig.service.last.trees.at(3).state == hosted::TreeReportState::Fetching &&
+			rig.service.last.trees.at(3).tries == 1 &&
+			rig.service.last.trees.at(3).reason ==
+					"aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey)");
 	TEST_EXPECT(rig.trees->state_of(3) &&
 			rig.trees->state_of(3)->state == hostd::TreeFetchState::Failed &&
 			rig.trees->state_of(3)->error ==
@@ -1260,6 +1307,8 @@ int test_trees() {
 					"its data could not be fetched: aws s3 sync exited 1: fatal error: An error "
 					"occurred (NoSuchKey) again");
 	TEST_EXPECT(rig.runtime.count("run srv-2-g1") == 0 && rig.fetcher.starts.size() == 4);
+	TEST_EXPECT(rig.service.last.trees.at(3).state == hosted::TreeReportState::Failed &&
+			rig.service.last.trees.at(3).tries == 3);
 	TEST_EXPECT(rig.trees->state_of(3)->error ==
 			"aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey) again");
 	TEST_EXPECT(
@@ -1294,6 +1343,73 @@ int test_trees() {
 	TEST_EXPECT(!fs::exists(rig.trees_root + "/2") && fs::is_directory(rig.trees_root + "/1"));
 	rig.step();
 	TEST_EXPECT(rig.trees->standings().size() == 1 && rig.trees->state_of(1));
+	TEST_EXPECT(rig.service.bad_reports == 0);
+	return 0;
+}
+
+// What the reports say of the machine and of each server beyond the runtime's view: the
+// machine's use once read twice (the CPU busy between the readings), a running server's
+// tick health while its --stats-file is fresh, an exited one's --exit-file line.
+int test_machine_report() {
+	Rig rig("hostd_agent_machine");
+	rig.service.desired = { desired(1, 1, 0), desired(2, 1, 1) };
+	rig.step();
+	// One reading: no percent yet, so no machine in the report.
+	TEST_EXPECT(!rig.service.last.machine);
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	write_proc(rig.proc_root, 1100, 3000, 2097152, 9000, 15000);
+	rig.step();
+	const std::optional<hosted::MachineStats> m = rig.service.last.machine;
+	TEST_EXPECT(m && m->cpu_percent == 50.0 && m->memory_total_bytes == 4294967296ull &&
+			m->memory_used_bytes == 2147483648ull && m->net_in_bytes == 9000u &&
+			m->net_out_bytes == 15000u);
+	TEST_EXPECT(m && m->disk_total_bytes > 0 && m->disk_free_bytes <= m->disk_total_bytes);
+	// Read again only kStatsIntervalMs on: the last stands between.
+	write_proc(rig.proc_root, 3000, 4000, 2097152, 9500, 15500);
+	rig.clock_ms += 1000;
+	rig.step();
+	TEST_EXPECT(rig.service.last.machine && rig.service.last.machine->net_in_bytes == 9000u);
+	// A file that no longer reads keeps the last good read, and warns once.
+	fs::remove(rig.proc_root + "/proc/meminfo");
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	TEST_EXPECT(rig.service.last.machine && rig.service.last.machine->net_in_bytes == 9000u);
+	TEST_EXPECT(g_log.find("the machine's use does not read") != std::string::npos);
+
+	// The servers' tick health, written in their slots' directories.
+	std::ofstream(rig.slots_root + "/slot-0/tick-stats.json")
+			<< "{\"at\":1792000000,\"p50_ms\":1.25,\"p99_ms\":15.50,\"max_ms\":31.75,"
+			   "\"late\":4,\"frames\":3750}\n";
+	std::ofstream(rig.slots_root + "/slot-1/tick-stats.json") << "not json\n";
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	const hosted::ContainerReport *a = rig.service.reported("srv-1-g1");
+	const hosted::ContainerReport *b = rig.service.reported("srv-2-g1");
+	TEST_EXPECT(a && a->tick && a->tick->p50_ms == 1.25 && a->tick->p99_ms == 15.5 &&
+			a->tick->max_ms == 31.75 && a->tick->late == 4u);
+	TEST_EXPECT(b && !b->tick);
+	// A file left minutes behind (a server stuck) says nothing.
+	fs::last_write_time(rig.slots_root + "/slot-0/tick-stats.json",
+			fs::file_time_type::clock::now() - std::chrono::minutes(4));
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	TEST_EXPECT(!rig.service.reported("srv-1-g1")->tick);
+	TEST_EXPECT(
+			hostd::parse_tick_stats("{\"p50_ms\":1,\"p99_ms\":2,\"max_ms\":3}") == std::nullopt);
+	TEST_EXPECT(hostd::parse_tick_stats("{\"p50_ms\":-1,\"p99_ms\":2,\"max_ms\":3,\"late\":0}") ==
+			std::nullopt);
+
+	// An exit: its --exit-file line rides the report; one that exited 0 wrote none.
+	std::ofstream(rig.slots_root + "/slot-0/exit.txt")
+			<< "the session ended: the NovaWorld service stopped the hosting\n";
+	rig.runtime.end("srv-1-g1", 3);
+	rig.runtime.end("srv-2-g1", 0);
+	rig.step();
+	a = rig.service.reported("srv-1-g1");
+	b = rig.service.reported("srv-2-g1");
+	TEST_EXPECT(a && a->state == ContainerState::Exited && a->exit_code == 3 && !a->tick &&
+			a->reason == "the session ended: the NovaWorld service stopped the hosting");
+	TEST_EXPECT(b && b->exit_code == 0 && b->reason.empty());
 	TEST_EXPECT(rig.service.bad_reports == 0);
 	return 0;
 }
@@ -1421,6 +1537,7 @@ int main() {
 		{ "pass_budget", test_pass_budget },
 		{ "refusals", test_refusals },
 		{ "trees", test_trees },
+		{ "machine_report", test_machine_report },
 		{ "sync_failures", test_sync_failures },
 		{ "log_hygiene", test_log_hygiene },
 		{ "link_addresses", test_link_addresses },

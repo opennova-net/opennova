@@ -19,6 +19,7 @@ add_library(opennova_hostd_core STATIC
     docker_runtime.cpp   # the containers through the docker CLI
     fence_probe.cpp      # the fences' self-test as a slot's user
     hostd_options.cpp    # the command line
+    instance_metadata.cpp # the machine's image, from the instance metadata service
     machine_identity.cpp # the machine id file, the ECS attribute check, the alive file
     nft_table.cpp        # the slots' fences and counters: table inet opennova
     process_runtime.cpp  # the servers as child processes (a machine that is a container)
@@ -27,7 +28,7 @@ add_library(opennova_hostd_core STATIC
     slot_files.cpp       # the slots' working directories
     tree_store.cpp       # the trees fetched on demand (aws s3 sync) and checked
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/ecs_metadata.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/ecs_metadata.cpp  # its own image and log stream on ECS
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/proc_stats.cpp  # the machine's CPU, memory, disk, network
 )
 

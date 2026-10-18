@@ -104,8 +104,11 @@ const char *hostd_usage() {
 		   "  --nft <path>           the slots' fences and counters (table inet opennova), or\n"
 		   "                         none (default /usr/sbin/nft)\n"
 		   "  --log-group <group>    with --log-region <region>: the containers' output to that\n"
-		   "                         CloudWatch log group, a stream <machine>/slot-<k> each\n"
-		   "                         (docker's awslogs driver; unset, the journal)\n"
+		   "                         CloudWatch log group (the servers'), the stream the service\n"
+		   "                         names each (docker's awslogs driver; unset, the journal)\n"
+		   "  --log-dir <path>       the process runtime's: each server's output to\n"
+		   "                         <path>/servers/<server>/g<generation>.log, and a copy of\n"
+		   "                         the agent's own lines to <path>/machines/<machine>/hostd.log\n"
 		   "  --once                 one pass, then exit (0 when the sync was answered)\n"
 		   "  --check-alive          exit 0 while a running agent's pass loop turns (the\n"
 		   "                         ECS health check)\n"
@@ -165,6 +168,8 @@ ParseOutcome parse_hostd_options(
 			target = &out.log_group;
 		else if (arg == "--log-region")
 			target = &out.log_region;
+		else if (arg == "--log-dir")
+			target = &out.log_dir;
 		else if (arg != "--machine") {
 			error = "unknown argument " + arg;
 			return ParseOutcome::Error;
@@ -241,6 +246,17 @@ ParseOutcome parse_hostd_options(
 		}
 		if (!hosted::is_aws_region(out.log_region)) {
 			error = "--log-region takes an AWS region (a-z, 0-9, -)";
+			return ParseOutcome::Error;
+		}
+	}
+	if (!out.log_dir.empty()) {
+		if (out.runtime != RuntimeKind::Process) {
+			error = "--log-dir is the process runtime's (the docker runtime's servers log through "
+					"docker)";
+			return ParseOutcome::Error;
+		}
+		if (!absolute(out.log_dir)) {
+			error = "every path is absolute: " + out.log_dir;
 			return ParseOutcome::Error;
 		}
 	}

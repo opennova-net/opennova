@@ -14,20 +14,26 @@
 // (apps/hostd/process_runtime.h: a stand-in opennova-serve script started in its
 // slot's directory over its data set with its arguments and the env file's
 // variables alone, listed running then exited with its code, stopped by SIGTERM,
-// killed, removed once ended, a start that cannot run exit 125) and the command
-// line (apps/hostd/hostd_options.h: its log group and region among them, which
-// send the containers' output to CloudWatch, a stream per slot). No docker and no
-// nft run.
+// killed, removed once ended, a start that cannot run exit 125; with a log
+// directory each server's output in its stream's file), the command line
+// (apps/hostd/hostd_options.h: its log group and region among them, which send the
+// containers' output to CloudWatch, the stream the service names each, and the
+// process runtime's log directory), the machine's image from a stand-in instance
+// metadata service (apps/hostd/instance_metadata.h) and the agent's own log stream
+// from a stand-in ECS container metadata endpoint. No docker and no nft run.
 
 #include "docker_runtime.h"
+#include "ecs_metadata.h"
 #include "fence_probe.h"
 #include "hostd_options.h"
+#include "instance_metadata.h"
 #include "machine_identity.h"
 #include "nft_table.h"
 #include "process_runtime.h"
 
 #include "net_sockets.h"
 
+#include "common/http_reply_server.h"
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 
@@ -108,6 +114,7 @@ hostd::ContainerSpec sample_spec() {
 	spec.cpus = 1.0;
 	spec.memory_mb = 512;
 	spec.pids = 128;
+	spec.log_stream = "41/g2";
 	return spec;
 }
 
@@ -185,22 +192,19 @@ int test_run_argv() {
 	runner.replies.push_back(not_started);
 	TEST_EXPECT(!docker.run(sample_spec(), 7000, code, error) && code == 125);
 
-	// A cloud machine's: the output to the machines' log group, the slot's own
-	// stream, never blocking the server; the rest of the start the same.
+	// A cloud machine's: the output to the servers' log group, the stream the service
+	// named for this start, never blocking the server; the rest of the start the same.
 	hostd::DockerRuntime cloud(
-			runner, kDocker, {}, "/tmp", { "/opennova/staging/machines", "us-east-1", 12 });
+			runner, kDocker, {}, "/tmp", { "/opennova/staging/servers", "us-east-1" });
 	std::vector<std::string> logged = expected;
 	const auto journald = std::find(logged.begin(), logged.end(), "--log-driver");
 	TEST_EXPECT(journald != logged.end() && *(journald + 1) == "journald");
 	const auto at = logged.erase(journald, journald + 4);
 	logged.insert(at,
 			{ "--log-driver", "awslogs", "--log-opt", "awslogs-region=us-east-1", "--log-opt",
-					"awslogs-group=/opennova/staging/machines", "--log-opt",
-					"awslogs-stream=12/slot-3", "--log-opt", "mode=non-blocking", "--log-opt",
-					"max-buffer-size=4m" });
+					"awslogs-group=/opennova/staging/servers", "--log-opt", "awslogs-stream=41/g2",
+					"--log-opt", "mode=non-blocking", "--log-opt", "max-buffer-size=4m" });
 	TEST_EXPECT(cloud.run_argv(sample_spec()) == logged);
-	TEST_EXPECT(hostd::DockerRuntime::slot_log_stream(12, 0) == "12/slot-0" &&
-			hostd::DockerRuntime::slot_log_stream(7, 31) == "7/slot-31");
 	return 0;
 }
 
@@ -830,7 +834,87 @@ int test_process_runtime() {
 	// The env file's lines: NAME=value each, CR LF read, a line with no name skipped.
 	TEST_EXPECT(hostd::read_env_file_lines("A=1\r\nB=two words\n=x\nnoequals\nC=\n") ==
 			(std::vector<std::string>{ "A=1", "B=two words", "C=" }));
+	TEST_EXPECT(read(log).find("started") == std::string::npos);
+
+	// With a log directory (the local stack's), each server's output goes to its
+	// stream's file under servers/, the directories made; the shared file gets none.
+	const std::string logs = temp.file("logs");
+	hostd::ProcessRuntime logged(
+			serve, { "PATH=/usr/bin:/bin" }, log, [] { return int64_t{ 1760000000 }; }, logs);
+	hostd::ContainerSpec chatty = exits;
+	chatty.name = "srv-5-g7";
+	chatty.log_stream = "5/g7";
+	chatty.args = { "exit", "0" };
+	TEST_EXPECT(logged.output_of(chatty) == logs + "/servers/5/g7.log");
+	TEST_EXPECT(runtime.output_of(chatty) == log);
+	std::ofstream(serve + "-echo") << "#!/bin/sh\necho \"hello from $PWD\"\nexit 0\n";
+	::chmod((serve + "-echo").c_str(), 0755);
+	hostd::ProcessRuntime echoing(
+			serve + "-echo", { "PATH=/usr/bin:/bin" }, log, [] { return int64_t{ 1760000000 }; },
+			logs);
+	TEST_EXPECT(echoing.run(chatty, 1000, exit_code, error));
+	std::string written;
+	for (int i = 0; i < 200 && written.find("hello from") == std::string::npos; ++i) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(25));
+		written = read(logs + "/servers/5/g7.log");
+	}
+	TEST_EXPECT(written.find("hello from") != std::string::npos);
+	TEST_EXPECT(read(log).find("hello from") == std::string::npos);
+	// A stream that is no stream name falls back to the shared file.
+	chatty.log_stream = "../x";
+	TEST_EXPECT(logged.output_of(chatty) == log);
 	::unsetenv("HOSTD_TEST_PLANTED");
+	return 0;
+}
+
+// What the agent reads of the machine once at its start: its image from the instance
+// metadata service (a token PUT, then the GET with it) and its own log stream from its
+// ECS container's metadata (its awslogs options), each against a stand-in on loopback,
+// and every refusal.
+int test_machine_metadata() {
+	TEST_EXPECT(opennova::net::startup() == 0);
+	std::string image;
+	std::string error;
+	{
+		test_http::ReplyServer imds(200, "ami-0123456789abcdef0\n");
+		TEST_EXPECT(hostd::read_image_id(imds.base_url(), image, error));
+		TEST_EXPECT(image == "ami-0123456789abcdef0" && imds.requests() == 2);
+		TEST_EXPECT(imds.last_line() == "GET /latest/meta-data/ami-id HTTP/1.0");
+	}
+	{
+		test_http::ReplyServer refusing(401, "");
+		TEST_EXPECT(!hostd::read_image_id(refusing.base_url(), image, error) &&
+				error.find("token answered HTTP 401") != std::string::npos);
+	}
+	{
+		test_http::ReplyServer odd(200, "ami/0123");
+		TEST_EXPECT(!hostd::read_image_id(odd.base_url(), image, error) &&
+				error.find("no image id") != std::string::npos);
+	}
+	// Nothing listening (off EC2): no image, quickly.
+	TEST_EXPECT(!hostd::read_image_id("http://127.0.0.1:1", image, error, 500));
+
+	namespace ecs = opennova::novaworld_server::ecs;
+	std::string stream;
+	{
+		test_http::ReplyServer metadata(200,
+				R"({"DockerId":"abc","Name":"hostd","LogDriver":"awslogs","LogOptions":)"
+				R"({"awslogs-group":"/opennova/prod/machines","awslogs-region":"us-east-1",)"
+				R"("awslogs-stream":"hostd/hostd/0123456789abcdef"}})");
+		TEST_EXPECT(ecs::read_container_log_stream(metadata.base_url() + "/v4/abc", stream, error));
+		TEST_EXPECT(stream == "hostd/hostd/0123456789abcdef");
+		TEST_EXPECT(metadata.last_line() == "GET /v4/abc HTTP/1.0");
+	}
+	TEST_EXPECT(!ecs::parse_container_log_stream(R"({"LogDriver":"json-file"})", stream, error) &&
+			error.find("names no awslogs stream") != std::string::npos);
+	TEST_EXPECT(!ecs::parse_container_log_stream("[", stream, error));
+	TEST_EXPECT(!ecs::read_container_log_stream("ftp://x", stream, error));
+	{
+		test_http::ReplyServer failing(500, "{}");
+		TEST_EXPECT(!ecs::read_container_log_stream(failing.base_url(), stream, error) &&
+				error.find("answers HTTP 500") != std::string::npos);
+	}
+	opennova::net::shutdown();
 	return 0;
 }
 
@@ -897,9 +981,16 @@ int test_options() {
 	o = {};
 	TEST_EXPECT(hostd::parse_hostd_options(
 						{ "--service", "http://fleet:8070", "--machine", "12", "--log-group",
-								"/opennova/prod/machines", "--log-region", "eu-west-1" },
+								"/opennova/prod/servers", "--log-region", "eu-west-1" },
 						o, error) == ParseOutcome::Run);
-	TEST_EXPECT(o.log_group == "/opennova/prod/machines" && o.log_region == "eu-west-1");
+	TEST_EXPECT(o.log_group == "/opennova/prod/servers" && o.log_region == "eu-west-1" &&
+			o.log_dir.empty());
+	o = {};
+	TEST_EXPECT(hostd::parse_hostd_options(
+						{ "--service", "http://fleet:8070", "--machine", "12", "--runtime",
+								"process", "--log-dir", "/var/log/opennova" },
+						o, error) == ParseOutcome::Run);
+	TEST_EXPECT(o.log_dir == "/var/log/opennova");
 	TEST_EXPECT(hostd::parse_hostd_options({ "--help" }, o, error) == ParseOutcome::Help);
 	TEST_EXPECT(hostd::parse_hostd_options({ "--version" }, o, error) == ParseOutcome::Version);
 	const std::vector<std::vector<std::string>> bad = {
@@ -937,6 +1028,10 @@ int test_options() {
 				"US-East-1" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a", "--log-region",
 				"us-east-1", "--runtime", "process" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-dir", "/var/log/opennova" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--runtime", "process", "--log-dir",
+				"logs" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--runtime", "process", "--log-dir" },
 	};
 	for (const auto &args : bad) {
 		hostd::HostdOptions fresh;
@@ -967,6 +1062,7 @@ int main() {
 		{ "machine_identity", test_machine_identity },
 		{ "image_prune_calls", test_image_prune_calls },
 		{ "process_runtime", test_process_runtime },
+		{ "machine_metadata", test_machine_metadata },
 		{ "options", test_options },
 	};
 	for (const Case &c : cases) {

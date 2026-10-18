@@ -4,8 +4,9 @@ The machine agent of the hosted servers' fleet (pre-1.0, experimental). Each mac
 NovaWorld service launches runs one `opennova-hostd`, the fleet cluster's ECS daemon. It fetches
 the game data trees the service's replies name (ADR 0064), starts the `opennova-serve`
 containers the service places on the machine's slots, stops the ones the service no
-longer wants, and reports every container's state, CPU, memory and its slot's egress
-back. It never decides anything on its own: the service places
+longer wants, and reports every container's state, CPU, memory, its slot's network and its
+server's tick health back, with the machine's own image, use and trees. It never decides
+anything on its own: the service places
 servers, pins their trees, counts restarts and ends machines; the agent does what the
 last reply said and keeps doing it while the service cannot be reached.
 
@@ -56,8 +57,9 @@ opennova-hostd --check-alive [--state-dir <path>]
 | `--serve` | `/usr/local/bin/opennova-serve` | The process runtime's `opennova-serve`. |
 | `--aws` | `/usr/local/bin/aws` | The AWS CLI a tree's `s3 sync` runs, as given. |
 | `--nft` | `/usr/sbin/nft` | The slots' fences and counters (`table inet opennova`, "Fences and counters"), or `none` for neither (a machine with no slot users: the process runtime's). |
-| `--log-group` | none | With `--log-region`, the docker runtime's: the CloudWatch log group the containers' output goes to, a stream per slot ("Logs" below). Unset, the machine's journal. |
+| `--log-group` | none | With `--log-region`, the docker runtime's: the CloudWatch log group the containers' output goes to (the servers' group), the stream the service names for each start ("Logs" below). Unset, the machine's journal. |
 | `--log-region` | none | That log group's region. |
+| `--log-dir` | none | The process runtime's (the local stack's): the log directory each server's output goes to, `servers/<server id>/g<generation>.log`, beside a copy of the agent's own lines, `machines/<machine id>/hostd.log`, each after its time ("Logs" below). |
 | `--once` | | One pass, then exit: 0 when the sync was answered and read. |
 | `--check-alive` | | The ECS health check: exit 0 when a running agent's pass loop touched its alive file (`<state-dir>/alive`) within 120 s, 1 otherwise. The loop touches it at every pass and every 10 s of a wait, whether or not the service answers: a stuck loop is unhealthy, an unreachable service is not. |
 | `--verbose` | | Debug lines too. |
@@ -65,11 +67,13 @@ opennova-hostd --check-alive [--state-dir <path>]
 
 The one variable the agent reads is the ECS agent's, `ECS_CONTAINER_METADATA_URI_V4`: on
 ECS it reads its own container's metadata once at its start, its `Image` (the reference the
-task definition names, a release's pinned by digest), and reports it in every sync's envelope
-(`agent_image`; "" off ECS). The CLIs it runs get the system's variables alone (`PATH`,
-`HOME`, `LANG`, `LC_*`, `TZ`, `TMPDIR`, `DOCKER_*`, and `AWS_*` for a developer's profile
-and region; on a machine the AWS CLI's credentials are the hostd task role's, through the
-ECS agent's credentials endpoint).
+task definition names, a release's pinned by digest), which it reports in every sync's
+envelope (`agent_image`; "" off ECS), and its log stream (its awslogs options), which every
+sync reports (`log_stream`). It also reads, once at its start with the docker runtime, the
+machine's image (the instance metadata service's `ami-id`, IMDSv2). The CLIs it runs get
+the system's variables alone (`PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `TMPDIR`, `DOCKER_*`,
+and `AWS_*` for a developer's profile and region; on a machine the AWS CLI's credentials
+are the hostd task role's, through the ECS agent's credentials endpoint).
 
 The fleet cluster's task definition (`infra/aws/fleet_agent.tf`) runs it as
 
@@ -121,21 +125,40 @@ one to remove, a tree to fetch):
 
 ```
 POST /hosted/machines/<id>/sync           Authorization: Bearer <agent secret>
-{"protocol": 3, "agent_version", "agent_image", "containers": [{"name", "slot", "state",
-  "exit_code", "oom", "started_at", ["reason",] "cpu_percent", "memory_bytes",
-  "egress_bytes"}], ["listing_failed": true]}
+{"protocol": 3, "agent_version", "agent_image", "image_id", "log_stream",
+  ["machine": {"cpu_percent", "memory_used_bytes", "memory_total_bytes", "disk_free_bytes",
+               "disk_total_bytes", "net_in_bytes", "net_out_bytes"},]
+  "trees": {"<tree id>": {"state", "bytes", "tries", ["reason"]}},
+  "containers": [{"name", "slot", "state", "waiting", "exit_code", "oom", "started_at",
+  ["reason",] "cpu_percent", "memory_bytes", "egress_bytes", "net_in_bytes",
+  ["tick": {"p50_ms", "p99_ms", "max_ms", "late"}]}],
+  ["listing_failed": true]}
 -> 200 {"protocol": 3, "drain", "desired": [{"name", "slot", "image", "uid", "base_tree",
-  "expansion_tree", "expansion_code", "args", "files", "env", "cpus", "memory_mb", "pids"}],
+  "expansion_tree", "expansion_code", "args", "files", "env", "cpus", "memory_mb", "pids",
+  "log": {"stream"}}],
   "trees": {"<tree id>": {"url", "version", "files": [{"name", "size"}]}}}
 ```
 
-`state` is `starting`, `running` or `exited`; `started_at` Unix seconds; `reason` rides a
-container that never started (exited with no start) when the agent knows why (its data
-could not be fetched: the owner reads it in the server's events); `egress_bytes` the
-slot's count since the machine booted (a lower count than the last is a counter that started
-over). `files` (each file's bytes in base64) is sent until the agent reports the container
-running or exited (one it reports `starting` waits for its image or its trees, and an agent
-replaced meanwhile needs them again); `uid` is always the slot's. The reply's `trees` names every tree its
+What the agent says of the machine: `image_id` (its AMI, `""` off EC2) and `log_stream`
+(its own ECS task's stream, `""` off ECS); `machine`, once it has read `/proc` twice
+(`apps/novaworld_common/proc_stats.h`: the CPU busy between the readings as a percent of
+the whole machine, the memory in use of the machine's, the trees root's filesystem, every
+interface's bytes but loopback's since the machine booted); `trees`, every tree its store
+holds (`fetching`, a failure with a try left among them, `ready`, or `failed` once its
+tries are spent; its bytes on disk, the fetch's so far while it fetches; the fetches made;
+the last failure's reason). Of each container: `state` is `starting`, `running` or
+`exited`, and a starting one's `waiting` says what for (`image`, `trees`, or `""`);
+`started_at` Unix seconds; `reason` rides an exited container when the agent knows why:
+the line `opennova-serve` wrote at its non-zero exit (its `--exit-file`, `exit.txt` in the
+slot's directory), or why one never started (its data could not be fetched: the owner reads
+it in the server's events); `egress_bytes` and `net_in_bytes` the slot's counts since the
+machine booted, what its user sent to the internet and what reached its ports (a lower
+count than the last is a counter that started over); `tick` a running server's last minute
+of ticks (its `--stats-file`, `tick-stats.json` in the slot's directory, read at most every
+5 s and only while it is less than 3 minutes old). Each desired container names its log
+stream (`log`, "Logs" below). `files` (each file's bytes in base64) is sent until the agent
+reports the container running or exited (one it reports `starting` waits for its image or
+its trees, and an agent replaced meanwhile needs them again); `uid` is always the slot's. The reply's `trees` names every tree its
 desired containers use, with where to fetch it (`url`: `s3://<bucket>/<root>/trees/<id>/`,
 or `file:///` on a developer's machine) and its manifest (each file's name and size);
 `expansion_tree` is null and `expansion_code` `""` for a server without an expansion.
@@ -239,22 +262,25 @@ agent's label are ever listed, stopped or removed.
 
 ## Logs
 
-On a cloud machine the servers' output and the agent's own log go to the deployment's
-machines log group, `/opennova/<deployment>/machines` (`infra/aws`, 30 days), one stream
-per slot and one for the agent, by the machine's id (the service's `fleet_machines` row,
-the id the admin fleet view shows beside each server's slot):
+On a cloud machine each server's output goes to the deployment's servers log group,
+`/opennova/<deployment>/servers` (`infra/aws`, 14 days), a stream per start that the
+service names in the container's desired entry and keeps on the server's start row
+(`hosted_server_starts.log_stream`), and the agent's own log to the machines log group,
+`/opennova/<deployment>/machines` (30 days), a stream per hostd task (its lines name the
+machine's id, the service's `fleet_machines` row the admin fleet view shows beside each
+server's slot):
 
-| Stream | What |
-| --- | --- |
-| `<machine id>/slot-<k>` | slot k's container output, standard output and error: each server on the slot in turn |
-| `hostd/hostd/<task id>` | the agent's own lines, one stream per hostd task (its ECS task definition's awslogs driver) |
+| Group | Stream | What |
+| --- | --- | --- |
+| servers | `<server id>/g<generation>` | one start's container output, standard output and error (the server's status page is off, `--status-page off`) |
+| machines | `hostd/hostd/<task id>` | the agent's own lines, one stream per hostd task (its ECS task definition's awslogs driver) |
 
-A slot's containers log through docker's `awslogs` driver: `--log-group` and `--log-region`
-(the user-data passes both) make the start's log options
+A start's container logs through docker's `awslogs` driver: `--log-group` and `--log-region`
+(the servers' group and its region) make its log options
 
 ```
 --log-driver awslogs --log-opt awslogs-region=<region> --log-opt awslogs-group=<group>
---log-opt awslogs-stream=<machine id>/slot-<k> --log-opt mode=non-blocking
+--log-opt awslogs-stream=<server id>/g<generation> --log-opt mode=non-blocking
 --log-opt max-buffer-size=4m
 ```
 
@@ -269,7 +295,7 @@ development machine) the output goes to the journal: `--log-driver journald --lo
 tag=<name>` (`journalctl CONTAINER_NAME=<name>`).
 
 The agent's own lines go to its standard error, which its task definition's awslogs driver
-ships to the same group (non-blocking, a stream per task: `hostd/hostd/<task id>`), with
+ships to the machines group (non-blocking, a stream per task: `hostd/hostd/<task id>`), with
 the instance role (the task has no execution role). On the machine, `docker logs` of the
 agent's ECS container reads them too.
 
@@ -286,7 +312,10 @@ starts the hostd image as its serve user with `--runtime process --nft none`). A
 is `<--serve> --resource-dir <the data set's mount path> <opennova-serve's arguments>` in the
 slot's directory, its environment the system's variables (`PATH`, `HOME`, `LANG`, `LC_*`,
 `TZ`, `TMPDIR`) and the env file's, its output where the agent's own goes (the machine
-container's log). The rest of the agent is the same: the bootstrap, the syncs, the slots'
+container's log), or with `--log-dir` (the local stack's log volume) to that start's own
+file, `<dir>/servers/<server id>/g<generation>.log`, beside the agent's own lines in
+`<dir>/machines/<machine id>/hostd.log` (each after its time, `2026-10-18T14:05:03.123Z`),
+which the site's admin pages read. The rest of the agent is the same: the bootstrap, the syncs, the slots'
 directories, the starts, stops (SIGTERM), kills (SIGKILL) and removals the reply asks for,
 each server reported by name with its exit code (one a signal ended reads 128 plus the
 signal) until the reply drops it. What a container gave and a process does not: no slot user
@@ -362,13 +391,15 @@ is needed.
 The ctests (`tests/hostd`, Linux only; none runs docker, nft or the AWS CLI; each test
 says what it pins): `opennova_hostd_runtime` (the docker and process runtimes, the nft table's
 ruleset and its counters' JSON on a stub command runner that checks every argv, the fences'
-probe against loopback, the machine id file, the ECS attribute check and the alive file),
-`opennova_hostd_tree_store` (the
+probe against loopback, the machine id file, the ECS attribute check and the alive file, the
+process runtime's log directory, the machine's image and the agent's log stream from
+stand-in metadata endpoints), `opennova_hostd_tree_store` (the
 tree store on a fake fetcher and a hand-stepped clock, then the real fetcher's `file://` copy
 and its `aws s3 sync` run by stand-in programs) and `opennova_hostd_agent` (the bootstrap,
 its saved file read again across a protocol bump, and the sync passes against an in-process
 fake of the service's routes, the envelope, the files sent again to a replaced agent, the
-images pruned, never logging the secret, the token or a file's bytes).
+images pruned, the machine's use from fixture `/proc` files, the servers' tick and exit
+files, never logging the secret, the token or a file's bytes).
 
 The protocol itself is `hosted_agent_protocol` (`tests/novaworld`). The real binary runs
 end to end, with the process runtime, in `hosted_agent_route` (against the service's agent

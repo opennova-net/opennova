@@ -167,6 +167,7 @@ hosted::DesiredContainer desired(const std::string &name, int slot,
 		d.files = std::map<std::string, std::string>{ { "server.host", "GameName \"Caf\xE9\"\r\n" },
 			{ "credentials.txt", "NOVAWORLD_USER=srv-5\nNOVAWORLD_PASS=secretpassword\n" } };
 	d.env = { { "OPENNOVA_SLOT_NOTE", "slot-" + std::to_string(slot) } };
+	d.log_stream = "5/g" + std::to_string(slot + 1);
 	return d;
 }
 

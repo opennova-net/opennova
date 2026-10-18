@@ -137,6 +137,32 @@ bool read_container_image(
 	return get_metadata(uri, body, error, timeout_ms) && parse_container_image(body, out, error);
 }
 
+bool parse_container_log_stream(const std::string &json, std::string &out, std::string &error) {
+	io::JsonValue container;
+	std::string parse_error;
+	if (!io::json_parse(json, container, parse_error)) {
+		error = "the container metadata is no JSON (" + loggable(parse_error, 120) + ")";
+		return false;
+	}
+	const io::JsonValue *options = member(container, "LogOptions", io::JsonValue::Type::Object);
+	const io::JsonValue *stream = options != nullptr
+			? member(*options, "awslogs-stream", io::JsonValue::Type::String)
+			: nullptr;
+	if (stream == nullptr || stream->string.empty()) {
+		error = "the container metadata names no awslogs stream";
+		return false;
+	}
+	out = stream->string;
+	return true;
+}
+
+bool read_container_log_stream(
+		const std::string &uri, std::string &out, std::string &error, int timeout_ms) {
+	std::string body;
+	return get_metadata(uri, body, error, timeout_ms) &&
+			parse_container_log_stream(body, out, error);
+}
+
 std::string internal_bind(const Sources &sources, std::string &error) {
 	if (!sources.configured.empty() || sources.metadata_uri.empty())
 		return {};

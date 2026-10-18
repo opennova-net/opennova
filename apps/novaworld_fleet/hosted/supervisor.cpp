@@ -757,6 +757,7 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	c.cpus = config_.slot_cpus;
 	c.memory_mb = config_.slot_memory_mb;
 	c.pids = config_.slot_pids;
+	c.log_stream = hosted_log_stream(s.id, s.generation);
 	set_serve_image(db, s.id, c.image);
 	const std::string container = c.name;
 	{
@@ -1494,6 +1495,7 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 		c.cpus = config_.slot_cpus;
 		c.memory_mb = config_.slot_memory_mb;
 		c.pids = config_.slot_pids;
+		c.log_stream = hosted_log_stream(h.server_id, h.generation);
 		std::lock_guard<std::mutex> lock(starts_mu_);
 		auto it = starts_.find(h.server_id);
 		if (it == starts_.end()) {

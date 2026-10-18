@@ -16,9 +16,9 @@
 // container's ECS_CONTAINER_METADATA_URI_V4) gives both: in awsvpc mode
 // (Fargate's) the task's containers share one network interface, so any
 // container's first IPv4 address is the task's. It also gives a container its
-// own image as the task definition names it (machine agent opennova-hostd
-// reports its own in every sync, apps/hostd; it compiles this file itself).
-// Service policy, not a port.
+// own image as the task definition names it and the log stream its output goes
+// to (machine agent opennova-hostd reports both in every sync, apps/hostd; it
+// compiles this file itself). Service policy, not a port.
 
 #include <cstdint>
 #include <string>
@@ -60,6 +60,17 @@ bool parse_container_image(const std::string &json, std::string &out, std::strin
 // (parse_container_image): false with `error` when the endpoint does not
 // answer 200 or its reply does not read.
 bool read_container_image(
+		const std::string &uri, std::string &out, std::string &error, int timeout_ms = 3000);
+
+// The container's awslogs stream (its metadata's LogOptions "awslogs-stream")
+// from the text of a GET <uri> reply: false with `error` when it does not read
+// as JSON or names none (a container logging elsewhere).
+bool parse_container_log_stream(const std::string &json, std::string &out, std::string &error);
+
+// GET <uri> (the container's own metadata) read into `out`
+// (parse_container_log_stream): false with `error` when the endpoint does not
+// answer 200 or its reply does not read.
+bool read_container_log_stream(
 		const std::string &uri, std::string &out, std::string &error, int timeout_ms = 3000);
 
 // Where the bind comes from.

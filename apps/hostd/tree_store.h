@@ -103,11 +103,13 @@ enum class TreeFetchState : uint8_t {
 };
 
 // What the store holds of one tree (state_of): its state, its bytes on disk
-// (present: the tree's; fetching: so far), and the last failure's reason.
+// (present: the tree's; fetching: so far), the last failure's reason and the
+// fetches made.
 struct TreeStatus {
 	TreeFetchState state = TreeFetchState::Fetching;
 	uint64_t bytes = 0;
 	std::string error;
+	int tries = 0;
 };
 
 // How the planner takes a tree (reconcile.h): Present; Fetching while the
@@ -157,6 +159,8 @@ public:
 
 	// What the store holds of tree `id`; nullopt for one it holds nothing of.
 	std::optional<TreeStatus> state_of(int64_t id) const;
+	// What it holds of every tree, by id (the agent's report).
+	std::map<int64_t, TreeStatus> statuses() const;
 	// Every tree's standing, for the planner (TreeStanding).
 	std::map<int64_t, TreeStanding> standings() const;
 

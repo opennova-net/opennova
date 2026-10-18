@@ -460,11 +460,19 @@ std::optional<TreeStatus> TreeStore::state_of(int64_t id) const {
 	TreeStatus status;
 	status.state = it->second.state;
 	status.error = it->second.error;
+	status.tries = it->second.tries;
 	if (it->second.state == TreeFetchState::Present)
 		status.bytes = it->second.bytes;
 	else if (fetching_ == id)
 		status.bytes = tree_bytes_on_disk(partial_dir_of(id));
 	return status;
+}
+
+std::map<int64_t, TreeStatus> TreeStore::statuses() const {
+	std::map<int64_t, TreeStatus> out;
+	for (const auto &tree : trees_)
+		out[tree.first] = *state_of(tree.first);
+	return out;
 }
 
 std::string TreeStore::expansion_mount_point(

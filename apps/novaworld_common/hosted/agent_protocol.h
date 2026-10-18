@@ -29,17 +29,29 @@
 //
 //   POST /hosted/machines/<id>/sync           Authorization: Bearer <agent secret>
 //   {"protocol": 3, "agent_version": "...", "agent_image": "<its image>" | "",
+//    "image_id": "<the machine's image (an AMI id)>" | "",
+//    "log_stream": "<the agent's own log stream>" | "",
+//    ["machine": {"cpu_percent": <number>, "memory_used_bytes": <int>,
+//                 "memory_total_bytes": <int>, "disk_free_bytes": <int>,
+//                 "disk_total_bytes": <int>, "net_in_bytes": <int>, "net_out_bytes": <int>},]
+//    "trees": {"<tree id>": {"state": "fetching" | "ready" | "failed", "bytes": <int>,
+//                            "tries": <int>, ["reason": "<the last failure>"]}},
 //    "containers": [{"name", "slot", "state": "starting" | "running" | "exited",
+//                    "waiting": "" | "image" | "trees",
 //                    "exit_code": <int> | null, "oom": <bool>,
 //                    "started_at": <Unix seconds> | null, ["reason": "<why>",]
-//                    "cpu_percent": <number>, "memory_bytes": <int>, "egress_bytes": <int>}],
+//                    "cpu_percent": <number>, "memory_bytes": <int>, "egress_bytes": <int>,
+//                    "net_in_bytes": <int>,
+//                    ["tick": {"p50_ms": <number>, "p99_ms": <number>, "max_ms": <number>,
+//                              "late": <int>}]}],
 //    ["listing_failed": true]}
 //   -> 200 {"protocol": 3, "drain": <bool>,
 //           "desired": [{"name", "slot", "image", "uid",
 //                        "base_tree": <tree id>, "expansion_tree": <tree id> | null,
 //                        "expansion_code": "<code>" | "", "args": [...],
 //                        "files": {"<name>": "<base64>"}, "env": {"<NAME>": "<value>"},
-//                        "cpus": <number>, "memory_mb": <int>, "pids": <int>}],
+//                        "cpus": <number>, "memory_mb": <int>, "pids": <int>,
+//                        "log": {"stream": "<server id>/g<generation>"}}],
 //           "trees": {"<tree id>": {"url": "s3://<bucket>/<root>/trees/<id>/" | "file:///...",
 //                                   "version": "<its version.txt's line>",
 //                                   "files": [{"name", "size"}]}}}
@@ -54,17 +66,33 @@
 // what it lacks before starting a container (reported `starting` meanwhile) and
 // may drop a tree no reply has named for a while.
 //
+// What the agent says of the machine itself: the machine's image (`image_id`,
+// read once from the instance's metadata; "" off EC2), its own log stream
+// (`log_stream`, its ECS task's; "" off ECS), its use (`machine`, present once
+// the agent has read it twice: the CPU busy between two readings, 0..100 of
+// the whole machine, the memory in use of the machine's, the trees'
+// filesystem's room, every interface's bytes but loopback's since the machine
+// booted) and every tree it holds (`trees`: fetching, a failure with a try
+// left among them, ready, or failed for good; its bytes on disk, the fetches
+// made and the last failure's reason).
+//
 // `egress_bytes` is the container's slot's, every byte its user sent since the
 // machine booted (the agent's per-UID counters), so the service takes the
 // difference itself; a count below the last one is a counter that started over
-// (its rule put back), counted from 0. `exit_code` is the container's own once
-// it exited, or the docker CLI's (125) when its start failed (its image did not
-// pull among the causes); such a container is reported as exited until the
-// service drops it, and one that never started may carry `reason`, why (its
+// (its rule put back), counted from 0. `net_in_bytes` is the same for what
+// reached the slot's ports. `exit_code` is the container's own once it exited,
+// or the docker CLI's (125) when its start failed (its image did not pull among
+// the causes); such a container is reported as exited until the service drops
+// it. An exited container may carry `reason`, why: the line opennova-serve
+// wrote at its non-zero exit (its --exit-file), or why one never started (its
 // data could not be fetched: the owner reads it in the server's events), at
 // most kMaxContainerReasonBytes of printable ASCII, present only with an exit
-// code and no `started_at`. One waiting for its image's pull or its trees'
-// fetch is reported starting. `files` carries the slot's working directory
+// code. One waiting for its image's pull or its trees' fetch is reported
+// starting, `waiting` saying which ("" for none). A running container carries
+// its server's last minute of ticks (`tick`, its --stats-file: the frame
+// time's p50, p99 and longest, and the late frames) while that file is fresh.
+// Each desired container names its log stream (`log`), where its output goes
+// (docker's awslogs driver, or the agent's --log-dir). `files` carries the slot's working directory
 // (the bytes in standard base64: the host file is cp1252) and is sent until
 // the agent reports the container running or exited (a container it reports
 // starting waits for its image or its trees, and an agent replaced meanwhile
@@ -132,6 +160,8 @@ inline constexpr size_t kMaxReplyTrees = 32;
 inline constexpr size_t kMaxTreeFiles = 64;
 inline constexpr size_t kMaxTreeUrlBytes = 512;
 inline constexpr size_t kMaxExpansionCodeChars = 8;
+// The trees a report may name (the store keeps an unnamed tree a while).
+inline constexpr size_t kMaxReportedTrees = 2 * kMaxReplyTrees;
 
 // "/hosted/machines/<id>/bootstrap" and "/hosted/machines/<id>/sync".
 std::string machine_bootstrap_path(int64_t machine_id);
@@ -141,6 +171,10 @@ std::string machine_sync_path(int64_t machine_id);
 // start (a restart is a new generation), so a slot's next container never
 // shares the name of the one before.
 std::string hosted_container_name(int64_t server_id, int64_t generation);
+// "<server id>/g<generation>": the log stream a hosted server's start writes
+// (the servers' log group's, or the file under the agent's --log-dir), one per
+// start as its container's name is.
+std::string hosted_log_stream(int64_t server_id, int64_t generation);
 
 // The stored form of an agent secret or a machine token: its SHA-256 in hex.
 std::string agent_secret_digest(std::string_view secret);
@@ -153,10 +187,13 @@ std::string agent_secret_digest(std::string_view secret);
 // expansion code (1..kMaxExpansionCodeChars of a-z, 0-9); a tree's fetch URL
 // (s3://... or file:///..., printable ASCII, at most kMaxTreeUrlBytes); an
 // environment name (a letter or '_' first, then letters, digits and '_', at
-// most 128). And the machines' log group and its region, which the user-data
-// hands the agent's command line (not the protocol): a CloudWatch log group
-// (1..512 of letters, digits and ./_-) and an AWS region (1..32 of a-z, 0-9
-// and '-', a letter first).
+// most 128); a log stream, the agent's own or a container's (1..512 of
+// letters, digits and ._-, in parts separated by '/', none empty, "." or "..":
+// a container's names a file under the agent's --log-dir); a machine's image
+// id (1..64 of letters, digits and '-'). And the servers' log group and its
+// region, which the agent's command line names (not the protocol): a
+// CloudWatch log group (1..512 of letters, digits and ./_-) and an AWS region
+// (1..32 of a-z, 0-9 and '-', a letter first).
 bool is_container_name(std::string_view name);
 bool is_image_reference(std::string_view image);
 bool is_slot_file_name(std::string_view name);
@@ -164,6 +201,8 @@ bool is_tree_file_name(std::string_view name);
 bool is_expansion_code(std::string_view code);
 bool is_tree_url(std::string_view url);
 bool is_env_name(std::string_view name);
+bool is_log_stream_name(std::string_view name);
+bool is_image_id(std::string_view id);
 bool is_log_group_name(std::string_view name);
 bool is_aws_region(std::string_view region);
 
@@ -201,19 +240,66 @@ enum class ContainerState : uint8_t {
 const char *container_state_text(ContainerState state); // "starting", "running", "exited"
 std::optional<ContainerState> parse_container_state(std::string_view text);
 
+// What a starting container waits for.
+enum class ContainerWait : uint8_t {
+	None,
+	Image, // its image's pull
+	Trees, // its trees' fetch
+};
+const char *container_wait_text(ContainerWait wait); // "", "image", "trees"
+std::optional<ContainerWait> parse_container_wait(std::string_view text);
+
+// A server's last minute of ticks (opennova-serve's --stats-file).
+struct TickHealth {
+	double p50_ms = 0.0;
+	double p99_ms = 0.0;
+	double max_ms = 0.0;
+	uint64_t late = 0; // frames that started a whole quantum behind
+};
+
 struct ContainerReport {
 	std::string name;
 	int slot = 0;
 	ContainerState state = ContainerState::Starting;
+	ContainerWait waiting = ContainerWait::None; // starting alone
 	std::optional<int64_t> exit_code; // set once it exited
 	bool oom = false; // the kernel's OOM killer ended it
 	std::optional<int64_t> started_at; // Unix seconds, once it started
-	// Why a container that never started did not ("" for none): sent only with
-	// an exit code and no started_at, 1..kMaxContainerReasonBytes printable.
+	// Why an exited container ended, or never started ("" for none): sent only
+	// with an exit code, 1..kMaxContainerReasonBytes printable.
 	std::string reason;
 	double cpu_percent = 0.0; // of one CPU (above 100 on more than one)
 	uint64_t memory_bytes = 0;
 	uint64_t egress_bytes = 0; // its slot's, since the machine booted
+	uint64_t net_in_bytes = 0; // its slot's ports', since the machine booted
+	std::optional<TickHealth> tick; // running, with a fresh --stats-file
+};
+
+// The machine's own use, as its agent read it (proc_stats.h).
+struct MachineStats {
+	double cpu_percent = 0.0; // of the whole machine, 0..100
+	uint64_t memory_used_bytes = 0;
+	uint64_t memory_total_bytes = 0;
+	uint64_t disk_free_bytes = 0; // the trees' filesystem
+	uint64_t disk_total_bytes = 0;
+	uint64_t net_in_bytes = 0; // since the machine booted, every interface but loopback
+	uint64_t net_out_bytes = 0;
+};
+
+// Where a tree the agent holds stands.
+enum class TreeReportState : uint8_t {
+	Fetching, // in flight, waiting its turn, or failed with a try left
+	Ready,
+	Failed, // its tries spent
+};
+const char *tree_report_state_text(TreeReportState state); // "fetching", "ready", "failed"
+std::optional<TreeReportState> parse_tree_report_state(std::string_view text);
+
+struct TreeReport {
+	TreeReportState state = TreeReportState::Fetching;
+	uint64_t bytes = 0; // on disk: the tree's, or the fetch's so far
+	int tries = 0; // the fetches made
+	std::string reason; // the last failure's ("" for none), 1..kMaxContainerReasonBytes printable
 };
 
 // The sync's request.
@@ -221,6 +307,10 @@ struct SyncRequest {
 	int protocol = kAgentProtocol;
 	std::string agent_version;
 	std::string agent_image; // "" or the image the agent's ECS task runs
+	std::string image_id; // "" off EC2
+	std::string log_stream; // "" off ECS
+	std::optional<MachineStats> machine;
+	std::map<int64_t, TreeReport> trees; // at most kMaxReportedTrees
 	std::vector<ContainerReport> containers;
 	// The agent could not list its containers: `containers` is empty and says
 	// nothing of the machine.
@@ -256,6 +346,7 @@ struct DesiredContainer {
 	double cpus = 1.0; // docker run --cpus
 	int memory_mb = 512; // --memory and --memory-swap
 	int pids = 128; // --pids-limit
+	std::string log_stream; // where its output goes: "<server id>/g<generation>"
 };
 
 // The sync's reply.

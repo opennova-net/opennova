@@ -10,11 +10,14 @@
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 
+#include <base/io/json.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iterator>
 #include <utility>
 
@@ -98,7 +101,40 @@ std::string reason_text(std::string text) {
 	return text;
 }
 
+// The line an exited server wrote in `dir` at its non-zero exit (its
+// --exit-file), as a report's reason; "" for none.
+std::string exit_reason_in(const std::string &dir) {
+	std::string text;
+	std::string error;
+	if (!io::read_file_text(dir + "/" + hosted::kExitFileName, text, error))
+		return {};
+	if (const size_t eol = text.find('\n'); eol != std::string::npos)
+		text.resize(eol);
+	text = strutil::trim(text);
+	return text.empty() ? std::string() : reason_text(text);
+}
+
 } // namespace
+
+std::optional<hosted::TickHealth> parse_tick_stats(std::string_view text) {
+	io::JsonValue v;
+	std::string error;
+	if (!io::json_parse(text, v, error) || !v.is_object())
+		return std::nullopt;
+	hosted::TickHealth out;
+	double *fields[] = { &out.p50_ms, &out.p99_ms, &out.max_ms };
+	const char *names[] = { "p50_ms", "p99_ms", "max_ms" };
+	for (size_t i = 0; i < 3; ++i) {
+		const io::JsonValue *f = v.get(names[i]);
+		if (!f || !f->is_number() || !(f->number >= 0.0 && f->number <= 1e6))
+			return std::nullopt;
+		*fields[i] = f->number;
+	}
+	const io::JsonValue *late = v.get("late");
+	if (!late || !io::json_exact_whole(*late, out.late))
+		return std::nullopt;
+	return out;
+}
 
 // --- the link ------------------------------------------------------------------
 
@@ -302,6 +338,57 @@ void Agent::refresh_stats(
 	stats_ = std::move(read);
 }
 
+void Agent::refresh_machine(const std::vector<ContainerInfo> &observed, uint64_t now) {
+	namespace ps = novaworld_server::proc_stats;
+	if (machine_read_ && now - machine_at_ < kStatsIntervalMs)
+		return;
+	machine_read_ = true;
+	machine_at_ = now;
+	// Each running server's last minute of ticks, while its file is fresh.
+	ticks_.clear();
+	const auto fresh_before =
+			std::filesystem::file_time_type::clock::now() - std::chrono::milliseconds(kTickStaleMs);
+	for (const ContainerInfo &c : observed) {
+		if (c.state != hosted::ContainerState::Running || !hosted::slot_valid(c.slot))
+			continue;
+		const std::string path = slots_.dir(c.slot) + "/" + hosted::kTickStatsFileName;
+		std::error_code ec;
+		const auto written = std::filesystem::last_write_time(std::filesystem::u8path(path), ec);
+		std::string text;
+		std::string error;
+		if (ec || written < fresh_before || !io::read_file_text(path, text, error))
+			continue;
+		if (const auto tick = parse_tick_stats(text))
+			ticks_[c.name] = *tick;
+	}
+	// The machine: the CPU busy since the last reading, the memory, the trees'
+	// filesystem, the network.
+	ps::CpuTimes cpu;
+	ps::Memory memory;
+	ps::NetBytes net;
+	ps::DiskSpace disk;
+	if (!ps::read_host_cpu(cpu, config_.proc_root) ||
+			!ps::read_host_memory(memory, config_.proc_root) ||
+			!ps::read_net_dev(net, config_.proc_root) || !ps::read_disk(trees_.root(), disk)) {
+		warn("machine",
+				"the machine's use does not read (/proc, statvfs of " + trees_.root() + ")");
+		return;
+	}
+	recovered("machine", "the machine's use reads again");
+	if (cpu_mark_) {
+		hosted::MachineStats m;
+		m.cpu_percent = std::clamp(ps::cpu_percent(*cpu_mark_, cpu), 0.0, 100.0);
+		m.memory_used_bytes = memory.used_bytes;
+		m.memory_total_bytes = memory.total_bytes;
+		m.disk_free_bytes = disk.free_bytes;
+		m.disk_total_bytes = disk.total_bytes;
+		m.net_in_bytes = net.in_bytes;
+		m.net_out_bytes = net.out_bytes;
+		machine_stats_ = m;
+	}
+	cpu_mark_ = cpu;
+}
+
 void Agent::refresh_counts(uint64_t now, uint64_t deadline) {
 	if (!counters_ || call_ms(deadline) == 0)
 		return;
@@ -329,13 +416,36 @@ void Agent::refresh_counts(uint64_t now, uint64_t deadline) {
 	recovered("counters", "the slots' counters read again");
 }
 
+void Agent::describe_machine(hosted::SyncRequest &request) const {
+	request.image_id = config_.image_id;
+	request.log_stream = config_.log_stream;
+	request.machine = machine_stats_;
+	// Every tree the store holds: one whose failure has a try left is still
+	// being fetched.
+	for (const auto &[id, status] : trees_.statuses()) {
+		if (request.trees.size() >= hosted::kMaxReportedTrees)
+			break;
+		hosted::TreeReport tree;
+		if (status.state == TreeFetchState::Present)
+			tree.state = hosted::TreeReportState::Ready;
+		else if (status.state == TreeFetchState::Failed && status.tries >= TreeStore::kMaxTries)
+			tree.state = hosted::TreeReportState::Failed;
+		tree.bytes = status.bytes;
+		tree.tries = status.tries;
+		if (!strutil::trim(status.error).empty())
+			tree.reason = reason_text(strutil::trim(status.error));
+		request.trees[id] = std::move(tree);
+	}
+}
+
 hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) const {
 	hosted::SyncRequest request;
 	request.agent_version = config_.agent_version;
 	request.agent_image = config_.agent_image;
-	const auto egress_of = [this](int slot) -> uint64_t {
+	describe_machine(request);
+	const auto count_of = [this](int slot) -> SlotCount {
 		const auto it = counts_.find(slot);
-		return it == counts_.end() ? 0 : it->second.egress_bytes;
+		return it == counts_.end() ? SlotCount{} : it->second;
 	};
 	std::set<std::string> reported;
 	for (const ContainerInfo &c : observed) {
@@ -355,21 +465,31 @@ hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) co
 				r.cpu_percent = it->second.cpu_percent;
 				r.memory_bytes = it->second.memory_bytes;
 			}
+			const auto tick = ticks_.find(c.name);
+			if (tick != ticks_.end())
+				r.tick = tick->second;
 		}
-		r.egress_bytes = egress_of(c.slot);
+		// Why it ended: the line it wrote at a non-zero exit, in its slot's
+		// directory until the container is removed.
+		if (c.state == hosted::ContainerState::Exited && c.exit_code)
+			r.reason = exit_reason_in(slots_.dir(c.slot));
+		r.egress_bytes = count_of(c.slot).egress_bytes;
+		r.net_in_bytes = count_of(c.slot).ingress_bytes;
 		reported.insert(c.name);
 		request.containers.push_back(std::move(r));
 	}
 	// A container waiting for its image's pull or its trees' fetch: starting,
-	// on its slot.
+	// on its slot, saying which.
 	for (const auto &waiting : waiting_) {
 		if (!reported.insert(waiting.first).second)
 			continue;
 		hosted::ContainerReport r;
 		r.name = waiting.first;
-		r.slot = waiting.second.slot;
+		r.slot = waiting.second.desired.slot;
 		r.state = hosted::ContainerState::Starting;
-		r.egress_bytes = egress_of(waiting.second.slot);
+		r.waiting = waiting.second.cause;
+		r.egress_bytes = count_of(r.slot).egress_bytes;
+		r.net_in_bytes = count_of(r.slot).ingress_bytes;
 		request.containers.push_back(std::move(r));
 	}
 	for (const auto &failed : failed_starts_) {
@@ -381,7 +501,8 @@ hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) co
 		r.state = hosted::ContainerState::Exited;
 		r.exit_code = failed.second.exit_code;
 		r.reason = failed.second.reason;
-		r.egress_bytes = egress_of(failed.second.slot);
+		r.egress_bytes = count_of(failed.second.slot).egress_bytes;
+		r.net_in_bytes = count_of(failed.second.slot).ingress_bytes;
 		request.containers.push_back(std::move(r));
 	}
 	return request;
@@ -401,9 +522,11 @@ int Agent::step() {
 		// machine is not lost for a docker that does not answer): a sync that says
 		// so, its answer not acted on.
 		warn("runtime", "the containers cannot be listed: " + error);
+		refresh_machine({}, now);
 		hosted::SyncRequest unlisted;
 		unlisted.agent_version = config_.agent_version;
 		unlisted.agent_image = config_.agent_image;
+		describe_machine(unlisted);
 		unlisted.listing_failed = true;
 		const net::HttpReply reply = link_.post(hosted::machine_sync_path(config_.machine_id),
 				machine_.agent_secret, hosted::encode_sync_request(unlisted));
@@ -414,6 +537,7 @@ int Agent::step() {
 	}
 	recovered("runtime", "the containers list again");
 	refresh_stats(observed, now, deadline);
+	refresh_machine(observed, now);
 	refresh_counts(now, deadline);
 
 	const net::HttpReply reply = link_.post(hosted::machine_sync_path(config_.machine_id),
@@ -465,7 +589,7 @@ void Agent::prune_images(
 	for (const ContainerInfo &c : observed)
 		keep.insert(c.image);
 	for (const auto &w : waiting_)
-		keep.insert(w.second.image);
+		keep.insert(w.second.desired.image);
 	for (const auto &p : pulls_)
 		keep.insert(p.first);
 	for (size_t i = 0; i < kImagesKept && i < named_images_.size(); ++i)
@@ -523,13 +647,14 @@ void Agent::poll_pulls(uint64_t now) {
 		io::logf(LogLevel::kError, "%s did not pull: %s", image.c_str(), error.c_str());
 		// Its containers never ran: reported exited 125, as any start that failed.
 		for (auto w = waiting_.begin(); w != waiting_.end();) {
-			if (w->second.image != image) {
+			const hosted::DesiredContainer &d = w->second.desired;
+			if (d.image != image) {
 				++w;
 				continue;
 			}
 			io::logf(LogLevel::kError, "%s did not start on slot %d: its image did not pull",
-					w->first.c_str(), w->second.slot);
-			failed_starts_[w->first] = { w->second.slot, 125, std::string() };
+					w->first.c_str(), d.slot);
+			failed_starts_[w->first] = { d.slot, 125, std::string() };
 			w = waiting_.erase(w);
 		}
 	}
@@ -544,7 +669,7 @@ void Agent::act(
 	for (hosted::DesiredContainer &d : desired) {
 		const auto waiting = waiting_.find(d.name);
 		if (waiting != waiting_.end() && !d.files)
-			d.files = waiting->second.files;
+			d.files = waiting->second.desired.files;
 	}
 	std::set<std::string> failed;
 	for (const auto &f : failed_starts_)
@@ -627,10 +752,11 @@ void Agent::act(
 		std::string what = "its data (tree " + std::to_string(d.base_tree);
 		if (d.expansion_tree)
 			what += " and tree " + std::to_string(*d.expansion_tree);
-		wait(d, what + ") to fetch");
+		wait(d, hosted::ContainerWait::Trees, what + ") to fetch");
 	}
 	for (const size_t index : plan.wait_for_image)
-		wait(desired[index], "its image " + desired[index].image + " to pull");
+		wait(desired[index], hosted::ContainerWait::Image,
+				"its image " + desired[index].image + " to pull");
 	for (const size_t index : plan.start) {
 		if (deferred || !start(desired[index], deadline)) {
 			deferred = true;
@@ -662,9 +788,12 @@ void Agent::act(
 		delay = hosted::kBusySyncIntervalMs;
 }
 
-void Agent::wait(const hosted::DesiredContainer &desired, const std::string &what) {
-	if (waiting_.emplace(desired.name, desired).second)
+void Agent::wait(const hosted::DesiredContainer &desired, hosted::ContainerWait cause,
+		const std::string &what) {
+	const auto [it, added] = waiting_.emplace(desired.name, Waiting{ desired, cause });
+	if (added || it->second.cause != cause)
 		io::logf(LogLevel::kInfo, "%s waits for %s", desired.name.c_str(), what.c_str());
+	it->second.cause = cause;
 }
 
 void Agent::start_failed(const hosted::DesiredContainer &desired, int exit_code,
@@ -686,7 +815,7 @@ bool Agent::start(const hosted::DesiredContainer &desired, uint64_t deadline) {
 	// Its image first: one the machine lacks is pulled in the background, and
 	// the container waits for it.
 	if (pulls_.count(desired.image)) {
-		wait(desired, "its image " + desired.image + " to pull");
+		wait(desired, hosted::ContainerWait::Image, "its image " + desired.image + " to pull");
 		return true;
 	}
 	if (!images_.count(desired.image)) {
@@ -708,7 +837,7 @@ bool Agent::start(const hosted::DesiredContainer &desired, uint64_t deadline) {
 			}
 			io::logf(LogLevel::kInfo, "pulling %s", desired.image.c_str());
 			pulls_[desired.image] = now_();
-			wait(desired, "its image " + desired.image + " to pull");
+			wait(desired, hosted::ContainerWait::Image, "its image " + desired.image + " to pull");
 			return true;
 		}
 		images_.insert(desired.image);
@@ -727,6 +856,7 @@ bool Agent::start(const hosted::DesiredContainer &desired, uint64_t deadline) {
 	spec.cpus = desired.cpus;
 	spec.memory_mb = desired.memory_mb;
 	spec.pids = desired.pids;
+	spec.log_stream = desired.log_stream;
 
 	const auto fail = [&](int exit_code, const std::string &why) {
 		start_failed(desired, exit_code, why, deadline);
