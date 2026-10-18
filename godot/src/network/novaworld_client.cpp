@@ -537,7 +537,7 @@ static const char *cs_state_name(int s) {
 void NovaWorldClient::trace_sent_datagram(const opennova::PeerAddr &to, const std::vector<uint8_t> &dg) {
 	// Peek the plaintext outbound opcode (envelope byte 0) so the log lines up
 	// 1:1 with retail's _connectlog "SENDING N BYTES ... [0xNN]" — lets the user
-	// diff our wire against the .204 capture (fixtures/novaworld/nw204_lobby).
+	// diff our wire against a retail capture.
 	char op_buf[8] = "0x??";
 	{
 		std::vector<uint8_t> stripped(dg.size());

@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Web's ephemeral state: ElastiCache for Valkey (DEPLOY.md, section 3, "The
+# Web's ephemeral state: ElastiCache for Valkey (DEPLOY.md, section 4, "The
 # cache")
 # ---------------------------------------------------------------------------
 #

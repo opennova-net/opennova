@@ -18,12 +18,11 @@ divergences in its §8 catalog):
 - `docs/adr/0012-player-is-host-side-server-entity.md`
 - `docs/net/novaworld-net-re.md`
 - `.agents/interop.md`, `.agents/ida.md`, and `.agents/debug.md`; the
-  architecture owners are `engine/runtime/inmatch/ROADMAP.md` (module map,
-  frame order), ADR 0013 (the matchmaking/in-match split) and ADR 0019
+  architecture owners are `docs/runtime-architecture.md` (the in-match session and
+  its roles), ADR 0013 (the matchmaking/in-match split) and ADR 0019
   (`engine/net/npwire`)
 - `docs/divergence-ledger.md` — the `PAR-NET` slice is the live open-work list for
-  in-match networking; `engine/runtime/inmatch/ROADMAP.md` is the completed build record
-  behind it, not current status
+  in-match networking
 - `.agents/porting-0a-emit.md` — runbook for the per-frame S2C 0x0A emit: the
   witnessed retail chain (phase counter + sub-blocks + priority/budget entity
   loop) and the verify loop (`scripts/net/diff_0a.py` + the golden). Ported-vs-not

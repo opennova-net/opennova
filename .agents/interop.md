@@ -81,9 +81,9 @@ Supported inputs:
 - `opennova-wire <host.sph>` or `opennova-wire <client.sph>`
 
 No ctest reads a machine-local capture: the wire witnesses that ride CI are the
-committed `fixtures/novaworld/` set (`nw204_lobby_decode`, `nw_self_capture`, the
-`.nwmsg` replays) and the inline-pcap unit tests; a fresh capture is inspected by
-hand with `opennova-wire` and, when it earns a place, promoted as a sanitized fixture.
+committed `fixtures/novaworld/` set (`nw_self_capture`, the `.nwmsg` replays) and the
+inline-pcap unit tests; a fresh capture is inspected by hand with `opennova-wire` and, when it
+earns a place, promoted as a sanitized fixture.
 
 ## Packet-Diff Matrix
 

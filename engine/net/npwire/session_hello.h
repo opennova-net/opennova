@@ -560,7 +560,7 @@ ServerAuth build_server_auth(const ClientAuth &client,
                              std::string_view server_scrk,
                              std::string_view novaworld_name = kNovaworldNameDefault,
                              std::string_view novaworld_web_url = "127.0.0.1:8080",
-                             std::string_view nwuid = "0accd1b2cffac0e3f1efe6c8000000000000000000000000000000000000",
+                             std::string_view nwuid = "0a0000000000000cb0071078000000000000000000000000000000000000",
                              bool include_novaworld_cu = true);
 
 // Serialize a ServerAuth to flat-TLV bytes (ready to opcode-prefix +

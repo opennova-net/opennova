@@ -221,8 +221,8 @@ struct ServerConfig {
 	std::string mail_region;
 
 	// ONNET_HOSTED_AWS_CLI: the AWS CLI v2 every call of it runs (an absolute
-	// path, run as given, no PATH search): the lobby's ECS discovery
-	// (ecs_metadata.h), the mailer's SES calls (mailer.h); the fleet's EC2
+	// path, run as given, no PATH search): the S3 object store
+	// (s3_object_store.h), the mailer's SES calls (mailer.h); the fleet's EC2
 	// driver reads it with its settings (hosted/fleet_config.h).
 	std::string aws_cli = "/usr/local/bin/aws";
 

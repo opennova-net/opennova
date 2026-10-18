@@ -131,8 +131,9 @@ secrets_init() {
   # The deployment's AWS account (an account of its own in the Organization):
   # its id and its root user's address (filled in by hand once the account is
   # made), its name and region; `org apply` adds state_bucket, the deploy
-  # user's access_key_id and secret_access_key and github_deploy_role_arn, and
-  # prod's cutover gate_eip_allocation_id.
+  # user's access_key_id and secret_access_key and github_deploy_role_arn;
+  # prod's gate_eip_allocation_id is filled in by hand (the gate's Elastic IP in
+  # the prod account, DEPLOY.md "The var-file").
   ensure_item "$AWS_ITEM" SECURE_NOTE \
     account_id:value:REPLACE_ME:STRING account_name:value:"opennova-$DEP":STRING \
     region:value:us-east-1:STRING root_email:value:REPLACE_ME:STRING

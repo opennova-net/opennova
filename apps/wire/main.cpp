@@ -1,10 +1,10 @@
 // opennova-wire — NovaWorld in-game packet pretty-printer.
 //
-// Reads a pcap/pcapng OR a hexcap (the format the committed
-// `fixtures/novaworld/*.hexcap` carry) and emits one line per outer datagram
+// Reads a pcap/pcapng OR a hexcap (one `<srcport> <frame> <hex>` datagram per
+// line) and emits one line per outer datagram
 // plus one structured block per inner protocol message. Drives the SAME
 // outer-decode pipeline as the `nw_*` ctests
-// (`nw204_lobby_decode`, `nw_capture_decoder`) — envelope CRC → outer NWU → per-session
+// (`nw_capture_decoder`) — envelope CRC → outer NWU → per-session
 // SCRK → 0x43/0x83 → reassembly — so what it prints is the exact byte stream
 // the shipping libs see, not a parallel re-implementation.
 //

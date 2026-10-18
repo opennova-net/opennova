@@ -331,146 +331,70 @@ Measured the same way (means per family; retail's in brackets):
 | Night frogs | 3 | 2.40 to 3.03 s (1.07 to 4.58) | 1.6 to 3.0 kHz (1.45 to 2.2) | -7.0 to -8.4 dB (-7.0 to -8.4) |
 | Tide washes | 3 | 4.5 to 6.0 s (3.0 to 6.5) | 0.8 to 1.4 kHz (1.2 to 2.9) | -7.9 to -8.4 dB (-6.9 to -7.6) |
 
-The member volumes below match each family's loudness to retail's: retail's
-volume times the ratio of the two families' loudest-50 ms RMS, at most 255;
-for the long winds and flaps (`ON_FREEFALL`, `ON_CHUTE_GLIDE`) the ratio of
-their whole-file RMS. The interface cues the original lacks (the exit chirp,
-the counter tick and stop) are levelled with the objective chirp.
 
-## The sets and the profile (`game.lwf`, `SndProf.def`)
+## The sets and the profile (`game.lwf`, `menu.lwf`, `SndProf.def`)
 
-Authored in the editor (the sound bank and SndProf.def documents, through
-`edit_record`). Every set: set pitch
-0xFFFF, no set pitch jitter, cull range 10000, set flags 0; every layer flags
-0xF, min distance 0; every member clamp 255 unless noted. "pitch" is the
-member's base, "jitter" its random range, both Q16.
+Authored in the editor (the sound bank and SndProf.def documents); the banks hold every value,
+and the editor shows them. The rules they were made by:
 
-| Set | Layer (falloff) | Members | Pitch | Jitter | Volume |
-|---|---|---|---|---|---|
-| `ON_FS_GND_L` | 50 | `onfsgnd01` to `07` | 0xF0A2 | 0x11EB | 115 |
-| `ON_FS_GND_R` | 50 | `onfsgnd08` to `14` | 0xF0A2 | 0x0CCC | 115 |
-| `ON_FS_SNOW_L` | 50 | `onfssnw1` to `4` | 0xFFFF | 0x11EB | 115 |
-| `ON_FS_SNOW_R` | 50 | `onfssnw5` to `8` | 0xFFFF | 0x0CCC | 115 |
-| `ON_FS_OBJ_L` | 50 | `onfsobj1` to `4` | 0xFFFF | 0 | 100 |
-| `ON_FS_OBJ_R` | 50 | `onfsobj5` to `9` | 0xFFFF | 0x0CCC | 100 |
-| `ON_FS_WATER` | 50 | `onfswat1` to `6` | 0xFFFF | 0x11EB | 68 |
-| `ON_FS_SWIM` | 50 | `onfsswm1` to `4` | 0xFFFF | 0x3333 | 99 |
-| `ON_FS_PRONE` | 50 | `onfsprn1` to `8` | 0xFFFF | 0x3FFF | 60 |
-| `ON_FS_PRONE_ROLL` | 50 | `onfsrol1` to `4` | 0xFFFF | 0x0CCC | 63 |
-| `TO_CROUCH` | 50 | `ontocrh1`, `ontocrh2` | 0xFFFF | 0x0CCC | 70 |
-| `TO_PRONE` | 50 | `ontoprn1` | 0xFFFF | 0x0F5C | 70 |
-| `TO_STAND` | 50 | `ontostd1` to `3` | 0xFFFF | 0x0CCC | 70 |
-| `ON_IMP_DIRT` | 60 | `onimpdrt1` to `3` | 0xFFFF | 0x2666 | 230 |
-| | 90 | `onnull` x5 | 0xFFFF | 0x3333 | 255 |
-| | | `onricodt1` to `3` | 0xFFFF | 0x3333 | 125 |
-| `ON_IMP_GRASS` | 80 | `onimpgrs1` to `3` | 0xFFFF | 0x7FFF | 125 |
-| `ON_IMP_CEMENT` | 100 | `onimpcem1` to `8` | 0xFFFF | 0x2147 | 240 |
-| `ON_IMP_WATER` | 60 | `onfswat1` to `6` (clamp 127) | 0x27FFD | 0 | 98 |
-| | 60 | `onimpgrs1` to `3` | 0x37FFC | 0x7FFF | 63 |
-| `ON_IMP_METAL` | 130 | `onimpmtl1` to `8` | 0xFFFF | 0x1EB8 | 255 |
-| | 100 | `onimpmdb1` | 0xFFFF | 0 | 225 |
-| | | `onnull` x5 | 0xFFFF | 0 | 255 |
-| | | `onricodt1`, `onricodt3` | 0xFFFF | 0x6666 | 205 |
-| `ON_IMP_MUD` | 100 | `onimpmud1` to `4` | 0xFFFF | 0x7FFF | 175 |
-| `ON_IMP_SAND` | 100 | `onimpsnd1` to `3` | 0xFFFF | 0x7FFF | 185 |
-| `ON_IMP_WOOD` | 100 | `onnull` x3 | 0x13332 | 0x3333 | 125 |
-| | | `onwdsplt1` to `3` | 0x13332 | 0x3333 | 125 |
-| | 100 | `onimpwod1` to `6` | 0xFFFF | 0x7FFF | 250 |
-| `ON_IMP_GLASS` | 140 | `onimpgls1` to `5` | 0xFFFF | 0x30A3 | 205 |
-| `ON_IMP_CLOTH` | 80 | `onimpclt1` to `3` | 0xFFFF | 0x4CCC | 240 |
-| `ON_IMP_FOLIAGE` | 100 | `onimplvs1` to `3` | 0xFFFF | 0xE665 | 120 |
-| `ON_IMP_ARMOR` | 100 | `onimparm1` to `7` | 0xFFFF | 0x1997 | 215 |
-| | 130 | `onnull` x5 | 0xFFFF | 0x3333 | 255 |
-| | | `onricohm1`, `onricohm2` | 0xFFFF | 0x3333 | 125 |
-| `ON_IMP_FLESH` | 80 | `onimpfls1` to `3` | 0xFFFF | 0x7FFF | 200 |
-| `ON_IMP_PLAYER` | 100 | `onimpfls1` to `3` | 0xFFFF | 0x7FFF | 200 |
-| `ON_BULLET_BY` | 80 | `onbltby1` to `8` | 0xFFFF | 0x4CCC | 100 |
-| `GS_ONAR15` | 150 | `onar15f1` | 0xFFFF | 0 | 245 |
-| | 900 | `onar15f2` (clamp 110) | 0xFFFF | 0 | 130 |
-| `GS_ONAR15AI` | 80 | `onar15f1` | 0x11998 | 0 | 195 |
-| | 800 | `onar15f2` (clamp 110) | 0xFFFF | 0 | 130 |
-| `GF_ONAR15_RL` | 25 | `onar15rl` (clamp 230) | 0xFFFF | 0 | 207 |
-| `DRY_ONAR15` | 25 | `onar15dry` (clamp 180) | 0xFFFF | 0 | 225 |
-| `GF_ONAR15_ST` | 25 | `onar15st` | 0xFFFF | 0 | 89 |
-| `GF_ONAR15_SF` | 25 | `onar15sf` | 0xFFFF | 0 | 107 |
-| `GS_ONPIST` | 150 | `onpistf1` | 0xFFFF | 0 | 243 |
-| | 900 | `onpistf2` (clamp 110) | 0xFFFF | 0 | 130 |
-| `GS_ONPISTAI` | 80 | `onpistf1` | 0x11998 | 0 | 193 |
-| | 800 | `onpistf2` (clamp 110) | 0xFFFF | 0 | 130 |
-| `GF_ONPIST_RL` | 25 | `onpistrl` (clamp 230) | 0xFFFF | 0 | 255 |
-| `DRY_ONPIST` | 25 | `onar15dry` (clamp 180) | 0x11998 | 0 | 225 |
-| `GF_ONPIST_ST` | 25 | `onpistst` | 0xFFFF | 0 | 125 |
-| `GF_ONPIST_SF` | 25 | `onpistsf` | 0xFFFF | 0 | 139 |
-| `BM1_DEATH` | 150 | `ondeath1` to `8` | 0xE3D6 | 0x1EB8 | 201 |
-| `BM1_DEATH_K` | 140 | `ondeathk1` to `3` (clamp 200) | 0xFFFF | 0 | 202 |
-| `ON_FALLDEAD` | 100 | `onfldead1` to `3` | 0xFFFF | 0 | 188 |
-| `ON_JUMPLAND` | 50 | `onjmplnd1`, `onjmplnd2` | 0xFFFF | 0x11EB | 109 |
-| `ON_CHUTE_OPEN` | 50 | `onchtopn` | 0xFFFF | 0 | 241 |
-| `ON_CHUTE_LAND` | 50 | `onchtlnd` | 0xFFFF | 0 | 205 |
-| `ON_CHUTE_GLIDE` | 50 | `onchtflp1` to `7` | 0xB332 | 0x4CCC | 70 |
-| `ON_FREEFALL` | 50 | `onfrfall1` to `8` | 0x14CCB | 0x3333 | 104 |
-| `LPNV_RAIN_L` | 300 | `onrainl` | 0xFFFF | 0 | 180 |
-| `LPNV_RAIN_R` | 300 | `onrainr` | 0xFFFF | 0 | 180 |
-| `NEW_GOAL` | 40 | `onnewgol` | 0xFFFF | 0 | 113 |
-| `START_MISSION` | 1000, flags 0x17 | `onstmis3`, `onstmis1`, `onstmis2` | 0xFFFF | 0 | 142, 189, 187 |
-| `DRY_CLAYSATCH` | 50 | `onar15dry` | 0x13332 | 0 | 156 |
-| `NV_ON` | 20 | `onnvon` | 0xFFFF | 0 | 43 |
-| `NV_OFF` | 20 | `onnvoff` | 0xFFFF | 0 | 37 |
-| `GF_SCOPE` | 40 | `onimpcem1` | 0xCB326 | 0 | 66 |
-| `PU_EXIT_CONFIRM` | 40 | `onpuexit` | 0xFFFF | 0 | 112 |
-| `HEADSHOTTONE` | 40 | `onscrtck` | 0xFFFF | 0 | 150 |
-| `TEXT_END` | 40 | `ontxtend` | 0xFFFF | 0 | 185 |
-| `SURFACE_WTR` | 40 | `onfswat4` | 0x1CCCA | 0 | 62 |
-| | 60 | `onfsswm2` | 0x16664 | 0 | 101 |
-| `BODYWATER1` | 50 | `onbdwtr1` | 0x1E664 | 0x3D70 | 181 |
-| | | `onbdwtr2` | 0x19998 | 0x3D70 | 205 |
-| | 80 | `onsplsh1` | 0xE665 | 0 | 100 |
-| `THUNDER` | 3000 | `onthdst1`, `onthdst2` (clamp 100) | 0xFFFF | 0 | 100 |
-| | | `onthdst3` (clamp 100) | 0xFFFF | 0x1997 | 99 |
-| | | `onthdst4` (clamp 100) | 0xFFFF | 0 | 98 |
-| | 200, flags 0x20E | `onnull` (clamp 0) | 0xFFFF | 0 | 0 |
-| | | `onthcrk1` (clamp 40) | 0xFFFF | 0x1997 | 40 |
-| | | `onthswt1`, `onthswt2` (clamp 30) | 0xFFFF | 0x3333 | 28, 13 |
-| | | `onthswt3` (clamp 40) | 0xFFFF | 0x4CCC | 40 |
-| `BM1_SURFACE_BREATH` | 35 | `onsrfbr1`, `onsrfbr2` | 0xFFFF | 0 | 97, 110 |
-| `BM1_SURFACE_GASP` | 45 | `onsrfgp1`, `onsrfgp2` | 0xFFFF | 0 | 110 |
-| `BM1_WATER_GAG` | 35 | `ondrown1` to `3` | 0xFFFF | 0 | 230, 220, 222 |
+- **Each set copies its retail counterpart**: its layers, falloff, flags, member count (where we
+  have the waves), pitch and jitter. Every set: set pitch 0xFFFF, no set jitter, cull range
+  10000, set flags 0; every layer min distance 0 (flags 0xF unless the counterpart's differ);
+  every member clamp 255 unless a clamp scales with its volume.
+- **Each member's volume matches its family's loudness to retail's**: retail's volume times the
+  ratio of the two families' loudest-50 ms RMS (the loops and the long winds and flaps,
+  `ON_FREEFALL` and `ON_CHUTE_GLIDE`, by whole-file RMS; a menu set against its retail set's
+  layers mixed), at most 255. Where the cap holds a quiet family back it plays under the
+  original's: the knife's hits on cement, metal and wood and a grenade's bounce on wood sit 8 to
+  10 dB under, and the frag and smoke grenades' bursts are held at the cap. The interface cues the
+  original lacks (the exit chirp, the counter tick and stop) are levelled with the objective chirp.
+- **A layer plays one member, chosen at random, and every layer of a set plays at once**, so a
+  silent `onnull` member is the chance that a layer adds nothing (a ricochet on 3 of 8 dirt hits,
+  as retail). A loop's marker plays its layer's member 0 alone, so each loop set holds one wave.
+- **Where the original plays a wave of another set faster, ours does the same with our
+  counterpart** (`SURFACE_WTR` a water step and a swim stroke, `DRY_CLAYSATCH` and `DRY_ONPIST`
+  the carbine's dry fire at 1.2 and 1.1, `GF_SCOPE` a cement hit at 12.7, `PUP_EMPTY` the dry
+  click at 0.8, `GF_ONCNADE_THROW` the frag throw at 1.12), and new waves are authored at the
+  pitch their set restores.
 
-A layer plays one member, chosen at random, and every layer of a set plays at
-once, so a silent `onnull` member is the chance that the second layer adds
-nothing (a ricochet on 3 of 8 dirt hits, as retail). The carbine's sets are
-the ones its `weapon.def` row names (`GS_ONAR15` fire, `GF_ONAR15_RL` reload,
-`DRY_ONAR15` dry fire, `GF_ONAR15_ST` and `GF_ONAR15_SF` switch to and from);
-`GS_ONAR15AI` is for `AMMO_ON_556`'s `ai_launch`, the fire others hear.
-The pistol's sets are laid out as the carbine's (`GS_ONPIST`, `GF_ONPIST_RL`, `DRY_ONPIST`,
-`GF_ONPIST_ST`, `GF_ONPIST_SF`; `GS_ONPISTAI` for `AMMO_ON_9MM`'s `ai_launch`). Its shot sits 1.5 dB
-under the carbine's; its dry fire is the carbine's click played at 1.1; the reload's volume is held at
-255, about 2 dB under the carbine's reload.
-The rain's two sets keep the engine's names, which it plays by name while a
-mission rains; their volume and falloff are the original's, the loops matched
-to its loudness.
+What names them:
 
-The engine's own sets after them keep its names too: the objective chirp as a
-mission shows an objective, the dry click (the carbine's, at 1.2) when a weapon
-key finds nothing to switch to, night vision's whine on and off, the scope's
-tick (a cement crack at 12.7, as the original plays a rock), the exit chirp on
-the Exit Mission key, the counter tick and stop on a won mission's score
-screen, the mission-start sting (in order, one per start) on the start splash,
-which runs only over a mission's own loading image (`<mission>.pcx`; Indigo
-Shore has none), thunder on a script's lightning, and the water entries and
-the drowning. Each copies the original's layers, falloff, member count, pitch
-and jitter; where the original plays a wave of another set faster, ours does
-the same with our counterpart (`SURFACE_WTR` a water step and a swim stroke,
-`DRY_CLAYSATCH` the carbine's dry fire, `GF_SCOPE` a cement hit), and the new
-waves are authored at the pitch the set restores (the plunges slowed 1.75 and
-1.6 times, the splash sped up 1.11). `BODYWATER1` is the entry from the air
-(a plunge and a splash), `SURFACE_WTR` wading in and a swimmer's dive. Every
-engine name the base game cannot reach stays out: the vehicles' and the
-ships', the multiplayer flag, zone, squad and medic cues, glass, powerups that
-heal, a carried goal, a missile lock and the rows the engine never reads.
+- **The weapons** (`assets/weapon.def`): the carbine's `GS_ONAR15` fire, `GF_ONAR15_RL` reload,
+  `DRY_ONAR15` dry fire and `GF_ONAR15_ST` / `_SF` switch to and from; the pistol's laid out the
+  same (`GS_ONPIST`, ...; its shot 1.5 dB under the carbine's, its reload held at 255, about 2 dB
+  under the carbine's); the knife's `GS_ONKNIFE` and `GF_ONKNIFE_ST` / `_SF`; the grenades'
+  `GF_ONGNADE_ST` / `_SF` and the two throws; the medical pouch's `ON_MEDPAK_USE` and
+  `GF_ONMEDP_ST` / `_SF`. `GS_ONAR15AI` and `GS_ONPISTAI` are the ammo's `ai_launch`, the fire
+  others hear.
+- **The ammo** (`assets/ammo.def`): each `effects_table` row names its effect and its impact set.
+  `AMMO_ON_556`: obj, dirt, snow and packeddirt `ON_IMP_DIRT`; grass `ON_IMP_GRASS`; cement and
+  stone `ON_IMP_CEMENT`; water `ON_IMP_WATER`; railroad and metal `ON_IMP_METAL`; mud and ice
+  `ON_IMP_MUD`; sand and quicksand `ON_IMP_SAND`; wood, glass, cloth, foliage `ON_IMP_WOOD`,
+  `_GLASS`, `_CLOTH`, `_FOLIAGE`; hmetal `ON_IMP_ARMOR`; flesh `ON_IMP_FLESH`; player
+  `ON_IMP_PLAYER`; zip `ON_BULLET_BY`; move none. Unlike the original's carbine, obj plays a
+  sound (the dirt set, as the original's default ammo `AT_NULL` does), so a hit on an object of
+  no material, or on terrain of class 0, is heard. The knife's (`AMMO_ON_KNIFE`) and the
+  grenades' rows name their own `ON_IMP_KNIFE_*`, `ON_IMP_GREN_*` and `ON_EXPLO_*` sets, and the
+  bullets' glass, cloth, foliage, flesh and water sets where the original's grenade names its
+  debris and splash sets.
+- **The engine, by name**: the rain's two sets (`LPNV_RAIN_L` / `_R`, the original's volume and
+  falloff), the objective chirp (`NEW_GOAL`), the dry click when a weapon key finds nothing to
+  switch to, night vision on and off, the scope's tick, the exit chirp (`PU_EXIT_CONFIRM`), the
+  counter tick and stop on a won mission's score screen, the mission-start sting (in order, one
+  per start, over a mission's own loading image only), thunder on a script's lightning, the water
+  entries (`BODYWATER1` from the air, `SURFACE_WTR` wading in and a swimmer's dive) and the
+  drowning, `MEDIC_KIT_USE` (a medic's heal, S2C 0x3A) and `PUP_EMPTY` (a health powerup walked
+  into at full health). Every engine name the base game cannot reach stays out: the vehicles' and
+  the ships', the multiplayer flag, zone and squad cues, the other medic cues, glass, a carried goal, a missile
+  lock and the rows the engine never reads.
+- **The menus** (`menu.lwf`): `MOUSE_OVER`, `CLICK_SELECT`, `CLICK_VALUE` and `MOVER_COMBO`, one
+  layer each (our one wave holds what retail's two layers do).
+- **The ambience** (`game.lwf`, played by the `snd: ON ...` sound markers in `assets/items.def`,
+  timed as the retail markers): the jungle's day and night loops, the beach's surf loop with its
+  tide shots, the gnats, the day birds and the night frogs.
 
-The infantry profile `on_soldier` in `SndProf.def`, which the player and enemy
-person items name with `sound_profile on_soldier`:
+The infantry profile `on_soldier` in `SndProf.def`, which the player and enemy person items name
+with `sound_profile on_soldier`:
 
 | Slot | Set |
 |---|---|
@@ -491,113 +415,8 @@ person items name with `sound_profile on_soldier`:
 | `ChuteFlap` | `ON_CHUTE_GLIDE` |
 | `FreeFall` | `ON_FREEFALL` |
 
-A step plays only where the body's clip authors a foot event (bit 0x1 left,
-0x2 right) on the frame the foot lands, a foley slot where it sets that slot's
-bit (0x20 to 0x400). The death sets keep the engine's names: the player's
-death plays `BM1_DEATH` (`BM1_DEATH_K` at night) by name whatever its profile
-says, so the profile names the same two sets, as the original's player profile
-does, and the rebel cries as the player does. `rotor_impact` stays empty (the
+A step plays only where the body's clip authors a foot event (bit 0x1 left, 0x2 right) on the
+frame the foot lands, a foley slot where it sets that slot's bit (0x20 to 0x400). The player's
+death plays `BM1_DEATH` (`BM1_DEATH_K` at night) by name whatever its profile says, so the profile
+names the same two sets, as the original's player profile does. `rotor_impact` stays empty (the
 game has no helicopter yet), and `default` stays empty.
-
-`AMMO_ON_556`'s `effects_table` (`assets/ammo.def`) names the impact sets row by
-row: obj, dirt, snow and packeddirt `ON_IMP_DIRT`; grass `ON_IMP_GRASS`; cement
-and stone `ON_IMP_CEMENT`; water `ON_IMP_WATER`; railroad and metal
-`ON_IMP_METAL`; mud and ice `ON_IMP_MUD`; sand and quicksand `ON_IMP_SAND`;
-wood, glass, cloth, foliage `ON_IMP_WOOD`, `_GLASS`, `_CLOTH`, `_FOLIAGE`;
-hmetal `ON_IMP_ARMOR`; flesh `ON_IMP_FLESH`; player `ON_IMP_PLAYER`; zip
-`ON_BULLET_BY`; move none. Unlike the original's carbine, obj plays a sound
-(the dirt set, as the original's default ammo `AT_NULL` does), so a hit on an
-object of no material, or on terrain of class 0, is heard. Every hit effect is
-`none` until the game has its own particles.
-
-## The menu bank and the ambience sets (to author)
-
-The waves are in `assets/`; the sets are still to be authored in the editor (a
-new `menu.lwf` beside `game.lwf`, and new sets in `game.lwf`), with these
-values. Each copies its retail counterpart's layers, falloff, flags and member
-count, and each member's volume is retail's volume times the ratio of the two
-waves' loudness, as above (the loops by whole-file RMS, the one-shots and the
-menu sounds by the loudest 50 ms; a menu set against its retail set's layers
-mixed). A clamp scales with its volume. Every set: set pitch 0xFFFF, no set
-jitter, cull range 10000, set flags 0; every layer min distance 0; every member
-pitch 0xFFFF and clamp 255 unless noted.
-
-`menu.lwf`, one layer a set (our one wave holds what retail's two layers do):
-
-| Set | Layer (falloff) | Member | Volume | Retail |
-|---|---|---|---|---|
-| `MOUSE_OVER` | 1000, flags 0xF | `onmnovr1` | 78 | `MSOVR_2` 80 and `MSOVRB_2` 65, mixed -21.6 dB; ours -11.3 dB |
-| `CLICK_SELECT` | 1000, flags 0xF | `onmnsel1` | 181 | `SELECTA1` 160 and `SELECTB1` 130 (150), mixed -17.7 dB; ours -14.7 dB |
-| `CLICK_VALUE` | 1000, flags 0xF | `onmnval1` | 134 | `CLIKVAL1` 150, -25.0 dB at its volume; ours -19.4 dB |
-| `MOVER_COMBO` | 300, flags 0xF | `onmncmb1` | 60 | `MSOVRB_2` at 2.0 55 and `MSOVR_2` 80, mixed -23.1 dB; ours -10.5 dB |
-
-`game.lwf`:
-
-| Set | Layer (falloff), flags | Members, volume (clamp), jitter | Retail it is levelled against |
-|---|---|---|---|
-| `LPNV_ONJNGL_D1` | 300, 0xF | `onambjd1` 234 (101) | `LPNV_RAINFOREST1`: `LpJg1` 220 (95) at -13.8 dB RMS; ours -14.3 |
-| `LPNV_ONJNGL_N1` | 300, 0xF | `onambjn1` 255 (105) | `LPNV_RAINFOR_N2` to `N7`: 255 (95) at -11.9 dB RMS (mean); ours -12.8 (against `N1`'s 95 (255) at -12.3 it would be 100 (255)) |
-| `LPNV_ONBEACH1` | 400, 0x40F | `onambsf1` 169 (63) | `LPNV_BEACH_LP1`: `LPBEACH4` 160 (60) at -9.1 dB RMS; ours -9.5 |
-| `LPNV_ONGNATS` | 30, 0xF | `ongnat1` 82 | `LPNV_GNATS`: `LPswarm1` 80 at -14.7 dB RMS; ours -14.9 |
-| `ENV_ONBIRD1` | 250, 0xF | `onbird1` 93, `onbird2` 165, `onbird3` 142, `onbird4` 118 | `ENV_MACCAW`: 164 at -11.0 dB loudest (mean); ours -6.1, -11.1, -9.8, -8.2 |
-| `ENV_ONFROG1` | 180, 0xF | `onfrog1` 133, `onfrog2` 124, `onfrog3` 113, `onnull` 0 (0) | `ENV_PM_TOAD`: 115 at -7.1 dB loudest; ours -8.4, -7.8, -7.0; the silent member as `ENV_PM_TFROG1` and `ENV_FROGGY` |
-| `ENV_ONTIDE1` | 128, 0xF | `onnull` 0 (0); `ontide1` 113 (226), `ontide2` 110 (221), `ontide3` 107 (213), jitter 0x170A | `ENV_TIDE1`: `NULL` 0 (0), then 100 (200), jitter 0x170A, at -7.3 dB loudest; ours -8.4, -8.1, -7.9 |
-
-A loop's marker plays its layer's member 0 alone, so each loop set holds the one
-wave. The markers that would play them (items.def, `type marker`,
-`move_function envs`), timed as the retail markers above:
-
-| Marker | Loops (`soundloop_1` to `_4`) | Shots (base, range in s) |
-|---|---|---|
-| `snd: ON Jungle Lp [300m]` | `LPNV_ONJNGL_D1`, `LPNV_ONJNGL_D1`, `LPNV_ONJNGL_N1`, `LPNV_ONJNGL_N1` | |
-| `snd: ON Beach Lp [400m] + tide shots [128m]` | `LPNV_ONBEACH1` all day | `ENV_ONTIDE1` at dawn, day, dusk and night: 5, 3 |
-| `snd: ON Gnats Lp [30m]` | `LPNV_ONGNATS` all day | |
-| `snd: ON Birds [250m]` | | `ENV_ONBIRD1`: dawn 5, 21; day 6, 24; dusk 8, 34 |
-| `snd: ON Frogs night [180m]` | | `ENV_ONFROG1`: dawn 20, 5; dusk 15, 6; night 11, 7 |
-
-## The gear's sets (proposed for `game.lwf`)
-
-The knife's, the grenades', the medical pouch's and the powerups' sets, for the bank's next edit (the
-waves are in `assets/`, `SOURCES.md` says how each was made). Each copies its original counterpart's
-layers, falloff, member count where we have the waves, pitch and jitter (`GS_KNIFE`, `GF_KNIFE_ST`,
-`GF_KNIFE_SF`, `IMP_KNIFE_*`, `GF_GNADE_ST`, `GF_GNADE_THROW`, `GF_CNADE_THROW`, `EXPLO_FRAG_GREN`,
-`IMP_GREN_*`, `EXPLO_SMOK_GREN`, `MEDPAK_USE`, `GF_SATCHEL_ST`/`_SF`, `HEALTH_UP`, `PU_AMMO`, measured
-as above), and the member volumes match its loudness: the original's volume times the ratio of the
-two families' loudest 50 ms, at most 255 (where the cap holds a quiet family back, the row says so).
-Set pitch 0xFFFF, no set jitter, cull range 10000, layer flags 0xF, member clamp 255 unless noted.
-
-| Set | Layer (falloff) | Members | Pitch | Jitter | Volume | Played by |
-|---|---|---|---|---|---|---|
-| `GS_ONKNIFE` | 50 | `onknfsl1`, `onknfsl2` | 0xFFFF | 0x0F5C | 48 | `WPN_KNIFE`/`WPN_KNIFE2` fire's `soundsetend` (the original's `GS_KNIFE`: two swishes, 50) |
-| `GF_ONKNIFE_ST` | 25 | `onknfst` | 0xFFFF | 0 | 76 | the knife's switchto |
-| `GF_ONKNIFE_SF` | 25 | `onknfsf` | 0x11EB7 | 0 | 47 | the knife's switchfrom |
-| `ON_IMP_KNIFE_FLESH` | 50 | `onknfhf1` to `3` | 0xFFFF | 0x0CCC | 255 | `AMMO_ON_KNIFE`'s `kz_sound` and its flesh and player rows (the original's six stabs, 240) |
-| `ON_IMP_KNIFE_DIRT` | 50 | `onknfhd1`, `onknfhd2` | 0xFFFF | 0 | 110 | its dirt, grass, snow, packeddirt, mud, ice, sand and quicksand rows |
-| `ON_IMP_KNIFE_CEMENT` | 50 | `onknfhm1`, `onknfhm2` | 0x13332 | 0x0CCC | 255 | its cement and stone rows (the metal hits played 1.2 times, held at the cap: ours sit 8 dB under the original's) |
-| `ON_IMP_KNIFE_METAL` | 50 | `onknfhm1`, `onknfhm2` | 0xFFFF | 0x147A | 255 | its railroad, metal and hmetal rows (at the cap, 9 dB under) |
-| `ON_IMP_KNIFE_WOOD` | 50 | `onknfhw1`, `onknfhw2` | 0xFFFF | 0 | 255 | its wood row (at the cap, 10 dB under) |
-| `ON_IMP_KNIFE_CLOTH` | 50 | `onknfhf1` to `3` | 0xE665 | 0 | 200 | its cloth row (the stabs a little lower, as the original's cloth hits are the stabs' kin) |
-| `GF_ONGNADE_ST` | 25 | `onfrgpin` | 0xFFFF | 0 | 99 | the grenades' switchto and reload (the draw's pin pull; the original's `GF_GNADE_ST`, 100) |
-| `GF_ONGNADE_SF` | 25 | `onmedpsf` | 0xFFFF | 0 | 54 | the grenades' switchfrom (a sleeve's rustle; the original plays its `GF_GNADE_ST` here too) |
-| `GF_ONGNADE_THROW` | 25 | `onfrgthr` | 0xFFFF | 0 | 186 | `WPN_GRENADEHE` fire's `soundset` (the swing peaks at 1.28 s, the release at `delaystart` 80) |
-| `GF_ONCNADE_THROW` | 25 | `onfrgthr` | 0x11EB7 | 0 | 115 | `WPN_GRENADESM` fire's `soundset` (the original's own canister throw, 120) |
-| `ON_EXPLO_FRAG` | 200 | `onfrgex1`, `onfrgex2` | 0xFFFF | 0 | 255, 255 | `AMMO_ON_FRAG`'s obj row (the burst) and its underwater rows (the original's `EXPLO_FRAG_GREN`: 245, 225, held at the cap) |
-| | 700 | `onfrgxf1`, `onfrgxf2` (clamp 180) | 0xFFFF | 0x6666 | 255 | the far report |
-| | 20 | `onxpton` (clamp 40) | 0xFFFF | 0 | 255 | the ring in the ears close by |
-| `ON_IMP_GREN_DIRT` | 90 | `onfrgbd1` (clamp 140), `onfrgbd2`, `onfrgbd3` (clamp 120) | 0xFFFF | 0x147A | 242 | the grenades' bounce on dirt, grass, snow, packeddirt, mud, ice, sand and quicksand |
-| `ON_IMP_GREN_STON` | 90 | `onfrgbs1`, `onfrgbs2` (clamp 180) | 0xE665 | 0x35C2 | 164 | on cement and stone |
-| `ON_IMP_GREN_METAL` | 90 | `onfrgbm1`, `onfrgbm2` | 0xB332 | 0x11EB | 255 | on railroad, metal and hmetal |
-| `ON_IMP_GREN_WOOD` | 90 | `onfrgbw1`, `onfrgbw2` | 0xFFFF | 0x0A3D | 255 | on wood (at the cap, 9 dB under the original's) |
-| `ON_EXPLO_SMOKE` | 80 | `onsmkgr1` | 0xFFFF | 0 | 255 | `AMMO_ON_SMOKE`'s obj row: the pop and the 4 s hiss (the original's `EXPLO_SMOK_GREN`, 185, held at the cap) |
-| `ON_MEDPAK_USE` | 35 | `onmedpak` | 0xFFFF | 0 | 120 | `WPN_MEDPACK` fire's `soundsetend` (the original's `MEDPAK_USE`, 90) |
-| `MEDIC_KIT_USE` | 40 | `onmedpak` | 0xFFFF | 0 | 255 | the engine's own name: a medic's heal (S2C 0x3A) plays it at the healed man (the original's, 250) |
-| `GF_ONMEDP_ST` | 25 | `onmedpst` | 0xFFFF | 0 | 213 | the medical pouch's switchto |
-| `GF_ONMEDP_SF` | 25 | `onmedpsf` | 0xFFFF | 0 | 54 | its switchfrom |
-| `ON_HEALTH_UP` | 50 | `onpuhlt1` | 0xFFFF | 0 | 255 | `PU_ONHEALTH`'s pickup `soundset` (the original's `HEALTH_UP`, three layers at 215, 225, 150; ours one) |
-| `ON_PU_AMMO` | 50 | `onpuamm1` | 0xFFFF | 0 | 255 | `PU_ONAMMO`'s pickup `soundset` (the original's `PU_AMMO`, 250 and a chime at 215; ours one) |
-| `PUP_EMPTY` | 60 | `onar15dry` | 0xCCCC | 0x07AE | 150 | the engine's own name: a health powerup walked into at full health (the original's `Sad1`, 125; ours the dry click played at 0.8) |
-
-The grenades' and the knife's rows that hit glass, cloth, foliage, flesh and water name the bullets'
-`ON_IMP_GLASS`, `ON_IMP_CLOTH`, `ON_IMP_FOLIAGE`, `ON_IMP_FLESH` and `ON_IMP_WATER`, as the original's
-grenade names its debris and splash sets there; `DRY_CLAYSATCH` (already in the bank) is the
-grenades' empty click, as the original's.

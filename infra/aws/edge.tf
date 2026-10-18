@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # Cloudflare: the deployment's site records and its origin's TLS (DEPLOY.md,
-# section 3)
+# section 4, "Cloudflare: TLS to the origin")
 # ---------------------------------------------------------------------------
 #
 # Cloudflare proxies the site's hostnames and talks to the origin (the portal's

@@ -40,9 +40,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/help_screen.cpp       # the F1 key-binding help pages
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
-    # target-feed/writeback order) + the mission-start network sample
-    # derivation (ENV resource + BMS header -> world::EnvNetworkState); the
-    # witnessed math cores stay in engine/formats/env
+    # target-feed/writeback order) + the mission-start weather seed
+    # (ENV resource + BMS header -> world::WeatherState); the witnessed math
+    # cores stay in engine/formats/env
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/precipitation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/environment_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/sky_frame.cpp

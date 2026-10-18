@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# The database's dumps: a scheduled ECS task (DEPLOY.md, section 5)
+# The database's dumps: a scheduled ECS task (DEPLOY.md, section 6)
 # ---------------------------------------------------------------------------
 #
 # The backup image (deploy/backup, <image_registry>/opennova-novaworld-backup):

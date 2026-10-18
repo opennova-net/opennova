@@ -349,9 +349,9 @@ Each file in `assets/`, what it was made from and how (PCM mono; the rate and bi
 | `ontide2.wav` | 22050 Hz 16-bit | 4.500 s | -10.5 dB | felix.blume [#510984](https://freesound.org/s/510984/) @68.2s, one wave; made as `ontide1.wav`, limited 2.8 dB |
 | `ontide3.wav` | 22050 Hz 16-bit | 6.000 s | -11.1 dB | felix.blume [#510984](https://freesound.org/s/510984/) @138.6s, one wave; made as `ontide1.wav`, limited 2.9 dB |
 
-### The gear's sounds (2026-10-14)
+### The gear's sounds
 
-The knife's, the grenades', the medical pouch's and the powerups' sounds, made on 2026-10-14 from the CC0 files above (Freesound and Kenney's Impact Sounds, already kept under `sources/`) and synthesis. Their chain is simpler than the hits' above: each mix is normalised to -0.3 dBFS peak (a tanh soft-clip where the row says), faded out (at most 20 ms; longer where the row says), resampled (polyphase) to its format and quantised; the member volumes in `game.lwf` (`README.md`, The gear's sets) match each family's loudness to retail's. The synthesised ones' 44.1 kHz 16-bit masters are under `masters/`. The RMS column is the whole file's.
+The knife's, the grenades', the medical pouch's and the powerups' sounds, made from the CC0 files above (Freesound and Kenney's Impact Sounds, already kept under `sources/`) and synthesis. Their chain is simpler than the hits' above: each mix is normalised to -0.3 dBFS peak (a tanh soft-clip where the row says), faded out (at most 20 ms; longer where the row says), resampled (polyphase) to its format and quantised; the member volumes in `game.lwf` (`README.md`, "The sets and the profile") match each family's loudness to retail's. The synthesised ones' 44.1 kHz 16-bit masters are under `masters/`. The RMS column is the whole file's.
 
 | File | Format | Length | RMS | Made from |
 |---|---|---|---|---|

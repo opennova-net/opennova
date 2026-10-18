@@ -23,7 +23,6 @@
   ],
   "keep": [
     "fixtures/novaworld/*.gsb",
-    "fixtures/novaworld/*.hexcap",
     "fixtures/novaworld/run_*/*"
   ],
   "size_exceptions": []

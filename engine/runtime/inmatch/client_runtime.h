@@ -451,7 +451,7 @@ public:
 	std::vector<ObjectiveNotification> drain_objective_notifications();
 
 	// Deterministic golden replay (Joiner): seed the connection keys + seq/ack + self handle/type so
-	// frame_c2s_uplink reproduces a captured C2S 0x0C datagram byte-for-byte. [ROADMAP "Determinism"]
+	// frame_c2s_uplink reproduces a captured C2S 0x0C datagram byte-for-byte.
 	// `tick_seed` is the capture's live network-role tick (the value its S2C 0x61 seeded);
 	// without it a replayed client's clock stays parked at zero and stamps 0 into every 0x06.
 	// `self_team` is the captured self record's team byte, the team L spawns with.
