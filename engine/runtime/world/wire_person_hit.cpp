@@ -138,6 +138,46 @@ void wire_org_class_event1(World &world, WirePersonBody &body, const HitRecord &
 	if (record.has_round) wire_person_round_legs(world, body, record, owner);
 }
 
+// The plyr class callback, event 1, over a wire-built body
+// [orig: Entity_HandleDamageAndTriggerZones @0x407720, event 1 @0x407742..
+//  0x407A86, the tail @0x407ACD..0x407C71].
+void wire_plyr_class_event1(World &world, WirePersonBody &body, const HitRecord &record,
+		const RoundOwner &owner) {
+	// A body already flagged dead returns at once [orig: @0x40772F].
+	if ((body.flags & kEntityFlagDead) != 0) return;
+	if ((body.flags & kEntityFlagPlayer) == 0) {
+		// A plyr body without the Player bit takes the org alert
+		// [orig: @0x407755..0x40776D].
+		body.ai_alert = 2;
+		world.script.relations.group(body.command_group).alert = TriggerRelations::kAlertRed;
+	}
+	// A Player body's Score_ProcessNetworkKillEvent, with the round's owner
+	// or none (@0x4078ED / @0x407906), scores only on the authority
+	// [orig: @0x4FD494].
+	if (record.has_round) wire_person_round_legs(world, body, record, owner);
+	// The health tail: a body whose Health is gone restages its death clip
+	// (the record-less selection when none is staged) as the current
+	// state, clears the pending one, and a mounted body leaves its seat
+	// through Entity_SendDetachPacket on a client, which sends only for the
+	// local player's own body: a wire-built body sends nothing
+	// [orig: @0x407ACD..0x407B01; Entity_ComputeAnimSlotIndex(entity, 0, 0, 1)
+	//  @0x407ADF; the detach @0x407B0B..0x407B33 -> Entity_SendDetachPacket
+	//  @0x435510, its local-player gate @0x43552A].
+	if (body.health_zero) {
+		if (body.death_anim_state == 0)
+			body.death_anim_state = static_cast<int16_t>(
+					compute_death_anim_state(0, 0, death_cause::kBullet));
+		body.anim_current = body.death_anim_state;
+		body.anim_pending = 0;
+	}
+	// Event 1 keeps the cause bits (1 is in the no-clear set, @0x407B3B..
+	// 0x407B4F). The think re-arm brackets the waypoint tail, which walks the
+	// AI slot's path (+0x94): the client allocates the slot zeroed and no
+	// client message writes the word, so the walk never runs
+	// [orig: @0x407B5E, the path test @0x407B64..0x407B6C, @0x407C71].
+	body.spawn_phase = 64;
+}
+
 } // namespace
 
 // [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0, its in-session
@@ -231,9 +271,11 @@ void RoundSim::process_wire_person_hit(World &world, LiveRound &r,
 			victim.last_attacker = r.shooter_handle;
 			victim.last_attacker_ammo = r.ammo_index;
 		}
-		// The class callback, event 1 (+0x1C8 @0x4E81FF..0x4E820E): the org
-		// rows' here.
-		if (!victim.plyr_class) wire_org_class_event1(world, victim, hit_record, round_owner);
+		// The class callback, event 1 (+0x1C8 @0x4E81FF..0x4E820E).
+		if (victim.plyr_class)
+			wire_plyr_class_event1(world, victim, hit_record, round_owner);
+		else
+			wire_org_class_event1(world, victim, hit_record, round_owner);
 		// Player_OnDamageReceived is the local player's alone (@0x4E8213..
 		// 0x4E822B): a wire-built person never takes it.
 	});

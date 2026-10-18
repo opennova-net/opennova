@@ -365,6 +365,72 @@ void test_org_callback_hit_emitter() {
     CHECK(j.rows[kRemoteH].death_anim_state == 173);
 }
 
+// The plyr class callback's event 1 over a remote player row: no alert for a
+// Player body, the round legs, the think re-arm; a row whose Health is gone
+// restages its death clip as the current state with no pending one, and the
+// detach sends nothing for a body that is not the local player's.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407742..0x407A86, the tail
+//  @0x407ACD..0x407B01, @0x407B5E; Entity_SendDetachPacket @0x43552A]
+void test_plyr_callback_round_legs_and_restage() {
+    {
+        Joiner j(/*self_team=*/1);
+        WirePersonBody &row = j.remote(/*team=*/2);
+        row.plyr_class = true;
+        row.heading_bam = 0x7F000000;
+        row.anim_current = 43;
+        row.anim_pending = 44;
+        j.fire();
+        const WirePersonBody &body = j.rows[kRemoteH];
+        CHECK(body.ai_alert == 0);
+        CHECK(j.world.script.relations.group(0).alert != TriggerRelations::kAlertRed);
+        CHECK(body.death_anim_state == compute_death_anim_state(1, 0, death_cause::kBullet));
+        CHECK(body.body_roll == 0x05B05B00);
+        CHECK(body.was_hit);
+        CHECK(body.spawn_phase == 64);
+        // Health is up: no restage.
+        CHECK(body.anim_current == 43);
+        CHECK(body.anim_pending == 44);
+    }
+    {
+        Joiner j(/*self_team=*/1);
+        WirePersonBody &row = j.remote(/*team=*/2);
+        row.plyr_class = true;
+        row.health_zero = true;
+        row.anim_current = 43;
+        row.anim_pending = 44;
+        j.fire();
+        const WirePersonBody &body = j.rows[kRemoteH];
+        CHECK(body.death_anim_state != 0);
+        CHECK(body.anim_current == body.death_anim_state);
+        CHECK(body.anim_pending == 0);
+    }
+}
+
+// A dead-flagged plyr body returns at the callback's head: the record and the
+// stamp land, the callback writes nothing [orig: @0x40772F].
+void test_plyr_callback_dead_return() {
+    Joiner j(/*self_team=*/1);
+    WirePersonBody &row = j.remote(/*team=*/2, kEntityFlagPlayer | kEntityFlagDead);
+    row.plyr_class = true;
+    j.fire();
+    const WirePersonBody &body = j.rows[kRemoteH];
+    CHECK(j.world.round_sim.hit_record.has_round);
+    CHECK(body.last_attacker == kSelfH);
+    CHECK(body.death_anim_state == 0);
+    CHECK(!body.was_hit);
+    CHECK(body.spawn_phase == 0);
+}
+
+// A plyr row without the Player bit takes the org alert [orig: @0x407755..0x40776D].
+void test_plyr_callback_without_the_player_bit_alerts() {
+    Joiner j(/*self_team=*/1);
+    WirePersonBody &row = j.remote(/*team=*/2, /*flags=*/0);
+    row.plyr_class = true;
+    j.fire();
+    CHECK(j.rows[kRemoteH].ai_alert == 2);
+    CHECK(j.world.script.relations.group(0).alert == TriggerRelations::kAlertRed);
+}
+
 // The row store: every field the leg writes lands on the replica row's own
 // field, the ones the row already kept (the velocity, moveTimer, the death
 // clip, the body states) included.
@@ -426,6 +492,9 @@ const NamedTest kTests[] = {
     {"test_vehicle_shooter_owner_group", test_vehicle_shooter_owner_group},
     {"test_org_callback_hit_emitter", test_org_callback_hit_emitter},
     {"test_row_body_round_trip", test_row_body_round_trip},
+    {"test_plyr_callback_round_legs_and_restage", test_plyr_callback_round_legs_and_restage},
+    {"test_plyr_callback_dead_return", test_plyr_callback_dead_return},
+    {"test_plyr_callback_without_the_player_bit_alerts", test_plyr_callback_without_the_player_bit_alerts},
 };
 
 } // namespace
