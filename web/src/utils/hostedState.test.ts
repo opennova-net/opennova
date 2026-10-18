@@ -20,7 +20,7 @@ describe('the phase in its owner words', () => {
     expect(phaseText({ name: 'running' })).toBe('');
     // Public copy: no em dash anywhere.
     for (const name of ['queued', 'restarting', 'moving', 'launches_held', 'launching_machine', 'waiting_for_slot', 'downloading_server', 'starting_server', 'signing_in']) {
-      expect(phaseText({ name })).not.toContain('—');
+      expect(phaseText({ name })).not.toContain(String.fromCharCode(0x2014));
     }
   });
 
