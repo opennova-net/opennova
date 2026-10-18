@@ -12,7 +12,7 @@
 // and every job due; a step() is what a second of the service does: a tick,
 // then one sync of every machine's agent (a muted machine's agent is silent).
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "billing/billing_repository.h"
 #include "hosted/data_set_repository.h"
 #include "hosted/fleet_jobs.h"

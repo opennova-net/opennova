@@ -31,6 +31,7 @@
 // Each holds its owner-only scratch directory (ScratchDir) and removes it as
 // it goes, after what used it. Service policy, not a port.
 
+#include "accounts/mailer.h"
 #include "billing/billing.h"
 #include "billing/billing_config.h"
 #include "billing/stripe_api.h"
@@ -39,7 +40,6 @@
 #include "hosted/fleet_config.h"
 #include "hosted/machine_driver.h"
 #include "jobs/scheduler.h"
-#include "mailer.h"
 #include "program/server_config.h"
 
 #include <net/novaworld/db/database.h>
@@ -152,7 +152,7 @@ struct BillingStack {
 BillingStack make_billing(
 		const billing::BillingConfig &config, db::ConnectionPool &pool, db::Database &db);
 
-// Outbound mail (mailer.h): the mailer the mail.send jobs send with (SES
+// Outbound mail (accounts/mailer.h): the mailer the mail.send jobs send with (SES
 // through the AWS CLI, with its runner and its owner-only scratch directory,
 // removed at the end; a NullMailer while mail is off) and whether mail is on.
 struct MailStack {

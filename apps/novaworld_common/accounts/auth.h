@@ -156,7 +156,7 @@ void clear_active_user_session(opennova::db::Database &db, int64_t user_id);
 void clear_active_user_session_by_tag(opennova::db::Database &db,
                                       const std::string &session_tag);
 // How long a retail login's session row lasts unused (its last_seen_at): the
-// periodic active_user_sessions.prune job (jobs/account_jobs.h) deletes it
+// periodic active_user_sessions.prune job (account_jobs.h) deletes it
 // past this, and its LOGINSESSIONTAG then names no one.
 inline constexpr int kRetailLoginIdleSeconds = 2 * 60 * 60;
 // The rows unused for `max_age_seconds` deleted; how many.

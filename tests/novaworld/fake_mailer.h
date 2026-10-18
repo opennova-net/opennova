@@ -1,11 +1,11 @@
 #pragma once
 
-// A Mailer (apps/novaworld_common/mailer.h) that records every message it is
+// A Mailer (apps/novaworld_common/accounts/mailer.h) that records every message it is
 // handed: the route harness's and mailer_test's stand-in for SES. Each send
 // answers sent with a message id of its own, or, with `fail` set, as SES's
 // refusal would. Thread-safe: a job worker sends while a test reads.
 
-#include "mailer.h"
+#include "accounts/mailer.h"
 
 #include <atomic>
 #include <mutex>

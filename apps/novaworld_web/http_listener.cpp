@@ -1,7 +1,9 @@
 #include "http_listener.h"
 
+#include "accounts/auth.h"
+#include "accounts/mailer.h"
+#include "accounts/template_engine.h"
 #include "admin_user_routes.h"
-#include "auth.h"
 #include "billing/billing_routes.h"
 #include "cd_key_routes.h"
 #include "connection_routes.h"
@@ -23,12 +25,10 @@
 #include "infra/usage_routes.h"
 #include "jobs/job_routes.h"
 #include "lobby_routes.h"
-#include "mailer.h"
 #include "password_reset_routes.h"
 #include "program/catalog_repository.h"
 #include "program/server_config.h"
 #include "redis_client.h"
-#include "template_engine.h"
 #include "web_access.h"
 
 #include <net/napi/session.h>
@@ -1140,7 +1140,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 	auto handle_login_post = [this, templates_dir](const crow::request &req) {
 		auto db_conn = db_pool_.acquire();
 		// The login rows idle past kRetailLoginIdleSeconds go with the periodic
-		// active_user_sessions.prune job (jobs/account_jobs.h), never on a
+		// active_user_sessions.prune job (accounts/account_jobs.h), never on a
 		// login's thread; the login sessions themselves expire in Redis
 		// (SessionStore::kTtl).
 
@@ -2275,7 +2275,7 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 		}
 
 		// Every file below is reached through file_under_root / template_file
-		// (template_engine.h): '/'-separated bare file names that stay under
+		// (accounts/template_engine.h): '/'-separated bare file names that stay under
 		// their root, so no absolute path ("//etc/..."), backslash, dot segment
 		// or symlink out of the root is served. Crow hands `subpath` over
 		// undecoded, so a %2e%2e or %2f is a literal '%' the rule refuses.

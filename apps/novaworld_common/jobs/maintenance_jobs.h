@@ -16,7 +16,7 @@
 //   unknown_messages.prune  the unknown-message rows no process has seen for
 //                        kUnknownKeepMs (UnknownTracker::prune), hourly
 //
-// and, with the HTTP layer (register_account_jobs, account_jobs.h), the
+// and, with the HTTP layer (register_account_jobs, accounts/account_jobs.h), the
 // website's: sessions past their expiry, login addresses, password reset links
 // and old billing events. Service policy, not a port.
 

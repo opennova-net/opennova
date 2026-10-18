@@ -1,6 +1,6 @@
 #include "billing_routes.h"
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "billing/billing_jobs.h"
 #include "billing/tiers.h"
 #include "core/loggable.h"

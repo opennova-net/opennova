@@ -5,7 +5,7 @@
 //
 //   web_sessions.prune          website sessions past their (sliding) expiry
 //   active_user_sessions.prune  retail logins' session rows unused for
-//                               kRetailLoginIdleSeconds (auth.h), once a
+//                               kRetailLoginIdleSeconds (accounts/auth.h), once a
 //                               sweep every 64th POST /NWLogin.dll ran on
 //                               the login's own thread
 //   login_addresses.prune       login addresses not used for kLoginAddressDays
@@ -15,7 +15,7 @@
 //
 // Service policy, not a port.
 
-#include "maintenance_jobs.h"
+#include "jobs/maintenance_jobs.h"
 
 #include <vector>
 

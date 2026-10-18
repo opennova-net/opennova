@@ -11,7 +11,7 @@
 // HttpListener owns one HostRoutes over its Crow app, beside its WebAccess
 // (README "Pushing statements to a listed server", "Listed servers and owners").
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 

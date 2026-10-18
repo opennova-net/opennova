@@ -15,14 +15,14 @@
 // cache; the machines' zones and EC2 states), read once for the polls within
 // the cache window; and no reply carrying any credential.
 
-#include "auth.h"
+#include "accounts/auth.h"
+#include "accounts/web_session.h"
 #include "hosted/fleet_repository.h"
 #include "http_listener.h"
 #include "infra/infra_status.h"
 #include "net_http.h"
 #include "net_sockets.h"
 #include "program/server_config.h"
-#include "web_session.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/lobby_repository.h>

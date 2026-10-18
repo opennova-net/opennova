@@ -47,7 +47,7 @@ inline constexpr int kPoolAcquireTimeoutMs = 30000;
 // SessionLock, apps/novaworld_fleet/election.h). A job's claim
 // holds the claim lock for its transaction (apps/novaworld_common/jobs/
 // job_queue.h), so claims serialize with one another alone. An account name's
-// writer (auth.cpp) takes, for each username or handle it checks or writes, the
+// writer (accounts/auth.cpp) takes, for each username or handle it checks or writes, the
 // two-key lock (kAccountNameLockSpace, hashtext(lower(name))); the two-key
 // locks are a key space of their own, apart from the one-key ones.
 inline constexpr int64_t kMigrationLock = 0x4f4e4e57'00000002; // "ONNW" 2

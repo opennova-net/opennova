@@ -1,6 +1,6 @@
 #include "stats_routes.h"
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "billing/entitlement.h"
 #include "hosted/fleet_repository.h"
 #include "http_json.h"

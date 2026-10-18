@@ -17,7 +17,7 @@
 //     credential;
 //   - no store: 503 no_log_store.
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "hosted/fleet_repository.h"
 #include "http_listener.h"
 #include "infra/log_store.h"

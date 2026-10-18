@@ -23,7 +23,7 @@
 //     the firing alarms by name with their times, the 20 s cache, AWS's refusal a warn
 //     finding in its own words and no credential.
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_routes.h"
 #include "http_listener.h"

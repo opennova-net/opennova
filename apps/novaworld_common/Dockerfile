@@ -52,8 +52,8 @@ RUN cmake -S . -B build -G Ninja \
 
 # ---- AWS CLI stage ---------------------------------------------------------
 # The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h), the
-# game data's S3 store (s3_object_store.h: s3 cp, sync and rm, s3api's objects
-# and multipart uploads) and the outbound mail (mailer.h, sesv2 send-email) run
+# game data's S3 store (core/s3_object_store.h: s3 cp, sync and rm, s3api's objects
+# and multipart uploads) and the outbound mail (accounts/mailer.h, sesv2 send-email) run
 # the AWS CLI v2, their credentials the ECS task role's. A pinned release,
 # checked against its SHA-256 before it is unpacked. The sum was taken from the
 # release AWS signed: its .sig verifies against the AWS CLI Team key in the
@@ -157,7 +157,7 @@ COPY --from=build /src/backend/migrations /app/backend/migrations
 COPY --from=build /src/backend/seed /app/backend/seed
 COPY --from=rdsca /tmp/rds-global-bundle.pem /app/rds-global-bundle.pem
 
-# The programs read these from the environment (server_config.cpp); the
+# The programs read these from the environment (program/server_config.cpp); the
 # database's DATABASE_URL and DATABASE_PASSWORD come from the deployment.
 # ONNET_HTTP_PORT is web's port and the one the gate and the lobby announce
 # beside ONNET_WEB_HOST; ONNET_HEALTH_PORT the GET /livez port of every program
@@ -186,7 +186,7 @@ RUN install -d -m 1777 /var/log/opennova
 # Run each program under an init as PID 1 (the ECS task definitions'
 # initProcessEnabled, the compose files' `init: true`, or `docker run --init`):
 # a second SIGTERM ends a stuck shutdown only when the program is not PID 1,
-# which the kernel shields from default-action signals (program.cpp).
+# which the kernel shields from default-action signals (program/program.cpp).
 
 # The AWS CLI, at the absolute path the programs run it by: web's, the
 # worker's and data's. The local store's mount point beside it (the compose stack's volume:

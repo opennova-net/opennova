@@ -7,7 +7,7 @@
 // database, and what the lobby or the fleet must act on goes through
 // their tables. No supervisor, no admin link, no lobby.
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "core/loggable.h"
 #include "core/object_store.h"
 #include "http_listener.h"

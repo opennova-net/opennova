@@ -8,7 +8,7 @@
 // an admin-role website session (with the CSRF header on a state change). The
 // HttpListener owns one beside its other route families.
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "hosted/placement.h"
 #include "hosted/sold_capacity.h"
 #include "web_access.h"

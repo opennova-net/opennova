@@ -4,7 +4,7 @@
 // TUs: the retail NW*.dll routes (http_listener.cpp) and the website's session
 // access (web_access.cpp).
 
-#include "auth.h"
+#include "accounts/auth.h"
 
 #include <crow.h>
 

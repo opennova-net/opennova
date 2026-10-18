@@ -21,7 +21,8 @@
 // kind run now once, then 409; a prune with its keep that a worker then runs); and
 // never a job's secret in any reply.
 
-#include "auth.h"
+#include "accounts/auth.h"
+#include "accounts/web_session.h"
 #include "http_listener.h"
 #include "jobs/job_admin.h"
 #include "jobs/job_queue.h"
@@ -31,7 +32,6 @@
 #include "net_http.h"
 #include "net_sockets.h"
 #include "program/server_config.h"
-#include "web_session.h"
 
 #include <net/novaworld/db/database.h>
 

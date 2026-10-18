@@ -20,7 +20,7 @@
 //     unknown) on the local stack and from ECS on a deployment's, what the reporting tasks
 //     use now, the tasks gone in 24 h, each task with its ECS facts.
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "hosted/fleet_repository.h"
 #include "http_listener.h"
 #include "infra/infra_status.h"

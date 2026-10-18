@@ -34,16 +34,16 @@ set(NOVAWORLD_COMMON_SOURCES
 
 if(BUILD_NOVAWORLD_HTTP)
     list(APPEND NOVAWORLD_COMMON_SOURCES
-        auth.cpp
-        web_session.cpp
-        template_engine.cpp
+        accounts/auth.cpp
+        accounts/web_session.cpp
+        accounts/template_engine.cpp
         # Web's shared state lives in Redis: the client and its pool (the
         # stores over it are web's own, apps/novaworld_web).
         redis_client.cpp
         # Account email: the outbound mail (SES through the AWS CLI, the
         # outbox, the templates) and the password reset links.
-        mailer.cpp
-        password_reset.cpp
+        accounts/mailer.cpp
+        accounts/password_reset.cpp
         # What several programs build from the same settings: the hosted
         # servers' setup, billing, mail, the periodic jobs.
         parts.cpp
@@ -53,7 +53,7 @@ if(BUILD_NOVAWORLD_HTTP)
         jobs/maintenance_jobs.cpp
         jobs/scheduler.cpp
         jobs/worker_pool.cpp
-        jobs/account_jobs.cpp
+        accounts/account_jobs.cpp
         # Hosted servers (ADR 0053): their rows and renders, the admin links'
         # states and the console queue as the web routes read them, the
         # per-server stats (samples, hourly rollups); the fleet (its rows,

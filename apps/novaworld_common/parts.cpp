@@ -1,5 +1,6 @@
 #include "parts.h"
 
+#include "accounts/account_jobs.h"
 #include "billing/billing_jobs.h"
 #include "core/local_object_store.h"
 #include "core/loggable.h"
@@ -14,7 +15,6 @@
 #include "hosted/fleet_jobs.h"
 #include "hosted/hosted_settings.h"
 #include "hosted/stats_jobs.h"
-#include "jobs/account_jobs.h"
 #include "jobs/maintenance_jobs.h"
 
 #include <cstdio>

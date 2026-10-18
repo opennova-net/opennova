@@ -1,6 +1,6 @@
 #include "host_routes.h"
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "core/loggable.h"
 #include "hosted/hosted_repository.h"
 #include "http_json.h"

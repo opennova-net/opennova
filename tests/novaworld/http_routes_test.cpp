@@ -26,7 +26,12 @@
 #include "admin_tcp_server.h"
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
-#include "auth.h"
+#include "accounts/account_jobs.h"
+#include "accounts/auth.h"
+#include "accounts/mailer.h"
+#include "accounts/password_reset.h"
+#include "accounts/template_engine.h"
+#include "accounts/web_session.h"
 #include "billing/billing.h"
 #include "billing/billing_jobs.h"
 #include "billing/billing_repository.h"
@@ -48,20 +53,15 @@
 #include "hosted_fake_driver.h"
 #include "http_cookies.h"
 #include "http_listener.h"
-#include "jobs/account_jobs.h"
 #include "jobs/worker_pool.h"
-#include "mailer.h"
 #include "net_http.h"
 #include "net_sockets.h"
 #include "novaworld/billing_fake_stripe.h"
 #include "novaworld/fake_mailer.h"
 #include "nw_udp_listener.h"
-#include "password_reset.h"
 #include "program/server_config.h"
 #include "session_store.h"
-#include "template_engine.h"
 #include "web_access.h"
-#include "web_session.h"
 
 #include <base/io/base64.h>
 #include <base/io/cp1252.h>

@@ -155,7 +155,7 @@ struct ServerConfig {
 	// Bearer token for /api/admin/* endpoints. When unset (default), the
 	// admin endpoints are CLOSED — they always return 401. Set via
 	// ADMIN_API_TOKEN env var to enable. Tokens are compared with a
-	// constant-time string compare in `auth.cpp`.
+	// constant-time string compare in `accounts/auth.cpp`.
 	std::string admin_api_token;
 
 	// The website session cookie's Secure flag (ONNET_COOKIE_SECURE=1). Set
@@ -208,11 +208,11 @@ struct ServerConfig {
 	bool require_host_key = false;
 
 	// The site's origin (ONNET_SITE_URL, its trailing '/' dropped): the links
-	// the welcome mail and the password reset mail carry (mailer.h). Billing
+	// the welcome mail and the password reset mail carry (accounts/mailer.h). Billing
 	// reads the same variable for its return URLs (billing/billing_config.h).
 	std::string site_url;
 
-	// Outbound mail through Amazon SES (mailer.h, README "Account email and
+	// Outbound mail through Amazon SES (accounts/mailer.h, README "Account email and
 	// password resets"): ONNET_MAIL_FROM, the sender's address
 	// (support@<domain>), and ONNET_MAIL_REGION, SES's region. Mail is on only
 	// with both and ONNET_SITE_URL set; web and the worker log why it
@@ -222,7 +222,7 @@ struct ServerConfig {
 
 	// ONNET_HOSTED_AWS_CLI: the AWS CLI v2 every call of it runs (an absolute
 	// path, run as given, no PATH search): the S3 object store
-	// (core/s3_object_store.h), the mailer's SES calls (mailer.h); the fleet's EC2
+	// (core/s3_object_store.h), the mailer's SES calls (accounts/mailer.h); the fleet's EC2
 	// driver reads it with its settings (hosted/fleet_config.h).
 	std::string aws_cli = "/usr/local/bin/aws";
 

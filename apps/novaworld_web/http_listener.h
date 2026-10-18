@@ -1,6 +1,6 @@
 #pragma once
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "hosted/fleet_health.h"
 #include "hosted/placement.h"
 #include "jobs/scheduler.h"
@@ -187,7 +187,7 @@ public:
 
 	// Whether the welcome mail (POST /api/register) and the password reset
 	// links (POST /api/auth/forgot) are sent: queued as mail.send jobs
-	// (mailer.h) that a worker sends. Set before start(); off (the default),
+	// (accounts/mailer.h) that a worker sends. Set before start(); off (the default),
 	// each mail is logged as not sent.
 	void set_mail_enabled(bool on) { mail_on_ = on; }
 

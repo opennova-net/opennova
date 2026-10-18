@@ -1102,7 +1102,7 @@ unreachable` and exits 1 before any listener starts. No other program opens it.
 ## Website sessions and roles
 
 The NovaWorld site logs players in with their NovaWorld account (`web_access.*`,
-`web_session.*`, `rate_limiter.*`, `http_json.h`; the tables `web_sessions` and
+`accounts/web_session.*`, `rate_limiter.*`, `http_json.h`; the tables `web_sessions` and
 `login_addresses`, and `players.role` and `players.credentials_gen`). The retail
 `NW*.dll` login keeps its own flow and shares only the login brake's per-username cap,
 the known addresses and the credentials generation below.
@@ -1139,7 +1139,7 @@ the known addresses and the credentials generation below.
   account still has it, so a reset ends them even where nothing deletes them.
 - **Usernames and handles.** A username: 1..64 bytes, no control byte; a handle
   (`nwhandle`, the player's name in the game and the `NWHANDLE` / `CHAR` cookies): 1..30
-  bytes, no control byte, the longest a stock host reads back whole (`auth.h`,
+  bytes, no control byte, the longest a stock host reads back whole (`accounts/auth.h`,
   `kHandleMaxBytes`), checked on registration, the admin create and every admin update
   (400 `invalid_field`). Every client-supplied string in any listener's log line goes
   through `loggable()` (`core/loggable.h`): control bytes as `\xNN`, cut at 64 bytes.
@@ -1153,7 +1153,7 @@ the known addresses and the credentials generation below.
   missing expansion gets (the `msgbase` page, NWEC11 for a ban, NWEC12 otherwise); one
   with no login standing joins with empty PUB* cookies, which a stock host refuses.
 - **Retail pages.** Every value the routes fill a page with (`{{VAR}}`,
-  `template_engine.*`) goes out with `& < > " '` as entities, so a request's values, a
+  `accounts/template_engine.*`) goes out with `& < > " '` as entities, so a request's values, a
   server's name and a maintenance message add no markup; a stock client's page parser
   turns them back in a page's text (inside a tag it decodes none, and the values there are
   bare page names).
@@ -1215,7 +1215,7 @@ password reset links. Service policy, not a port: retail's NovaWorld accounts ha
 email the service kept.
 
 - **The address.** `POST /api/register` requires `email` (400 `missing_field`).
-  `normalize_email` (`auth.h`) takes at most 254 bytes with exactly one `@`, a local part
+  `normalize_email` (`accounts/auth.h`) takes at most 254 bytes with exactly one `@`, a local part
   and a domain of two or more labels, no space or control byte (400 `invalid_field`), and
   stores it with its ASCII letters lowercased, so one address names one account (400
   `email_exists`; a `CHECK` refuses an upper-case or empty one). The admin's create takes
@@ -1241,7 +1241,7 @@ email the service kept.
   and the account's website sessions, its retail login's session row, its hosting keys and
   its retail pins end. 204. The periodic `password_resets.prune` job prunes links past
   their hour.
-- **The mailer** (`mailer.h`). The routes queue each mail as a `mail.send` job
+- **The mailer** (`accounts/mailer.h`). The routes queue each mail as a `mail.send` job
   ("Background jobs" above) on their own connection, the subject and bodies the job's
   secret, so a mail outlives a restart of the process that asked for it. A worker sends
   it at most once and logs one line (`[mail] sent <template> to '<address>' ...` or

@@ -25,15 +25,15 @@
 // or deleted, its comp grant withdrawn or its support tier canceled (also
 // during a crash restart's backoff), the owners' limits and their hold, the
 // reconciliation at the service's start, and the admin links kept in step with
-// the running servers. Compiles the server's auth.cpp, web_session.cpp and the
+// the running servers. Compiles the server's accounts/auth.cpp, accounts/web_session.cpp and the
 // hosted sources directly, so it runs on every build.
 
 #include "hosted_fleet_rig.h"
 
+#include "accounts/web_session.h"
 #include "hosted/address_jobs.h"
 #include "hosted/address_repository.h"
 #include "hosted/admin_link.h"
-#include "web_session.h"
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/cp1252.h>

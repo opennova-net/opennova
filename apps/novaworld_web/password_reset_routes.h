@@ -7,7 +7,7 @@
 // before anything else. The HttpListener owns one beside its other route
 // families. Service policy, not a port.
 
-#include "mailer.h"
+#include "accounts/mailer.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 
@@ -39,7 +39,7 @@ public:
 	PasswordResetRoutes(const PasswordResetRoutes &) = delete;
 	PasswordResetRoutes &operator=(const PasswordResetRoutes &) = delete;
 
-	// `mail_on`: the links are queued (mailer.h), else logged as not sent;
+	// `mail_on`: the links are queued (accounts/mailer.h), else logged as not sent;
 	// `site_url` is the site's origin the links name (ONNET_SITE_URL).
 	void register_routes(WebApp &app, bool mail_on, std::string site_url, ForgetAccount forget);
 

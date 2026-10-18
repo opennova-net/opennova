@@ -94,12 +94,12 @@ opennova_add_pg_test(db COMMAND db_test)
 
 # One connection per thread under load (issue #981): registrations race host
 # writes and roster readers on one database, each thread on its own pooled
-# connection. Compiles the shared library's auth.cpp (create_user) directly: it joins
+# connection. Compiles the shared library's accounts/auth.cpp (create_user) directly: it joins
 # opennova_novaworld_common only under BUILD_NOVAWORLD_HTTP, and this test runs on
 # every service build.
 add_executable(db_concurrency_test
     novaworld/db_concurrency_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/auth.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/accounts/auth.cpp)
 target_link_libraries(db_concurrency_test
     PRIVATE opennova_novaworld_service opennova_bcrypt Threads::Threads)
 target_include_directories(db_concurrency_test PRIVATE
@@ -112,12 +112,12 @@ opennova_add_pg_test(db_concurrency COMMAND db_concurrency_test)
 # the token kept as its SHA-256, the per-account cap, the sliding expiry and
 # its race (threads on pooled connections), the refusals, the revocations, the
 # prune and the one-shot bootstrap promotion, on a migrated database. Compiles
-# the server's web_session.cpp and auth.cpp directly, as db_concurrency_test
+# the server's accounts/web_session.cpp and accounts/auth.cpp directly, as db_concurrency_test
 # does, so it runs on every service build, not only under BUILD_NOVAWORLD_HTTP.
 add_executable(web_session_test
     novaworld/web_session_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/auth.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/web_session.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/accounts/auth.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/accounts/web_session.cpp)
 target_link_libraries(web_session_test
     PRIVATE opennova_novaworld_service opennova_bcrypt Threads::Threads)
 target_include_directories(web_session_test PRIVATE
@@ -164,13 +164,13 @@ set_tests_properties(jobs PROPERTIES TIMEOUT 300)
 # and their limit, the timeouts, the health checks, the owners' changes and limits, a lost
 # machine placing its servers again with no restart counted, the reconciliation, the
 # admin links following the running servers, and a static address's hold, lapse and
-# brake. Compiles the server's auth.cpp,
-# web_session.cpp and the hosted sources directly (the shared library's and the fleet
+# brake. Compiles the server's accounts/auth.cpp,
+# accounts/web_session.cpp and the hosted sources directly (the shared library's and the fleet
 # program's), as web_session_test does, so it runs on every build, not only under
 # BUILD_NOVAWORLD_HTTP.
 set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/auth.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/web_session.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/accounts/auth.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/accounts/web_session.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/address_jobs.cpp
@@ -848,8 +848,8 @@ if(BUILD_NOVAWORLD_HTTP)
     set_tests_properties(update_listener PROPERTIES TIMEOUT 120)
     set_tests_properties(data_set_routes PROPERTIES TIMEOUT 120)
 
-    # The outbound mail (apps/novaworld_common/mailer.h) and the address rule
-    # (auth.h normalize_email): the shapes taken and refused, SesMailer's settings,
+    # The outbound mail (apps/novaworld_common/accounts/mailer.h) and the address rule
+    # (accounts/auth.h normalize_email): the shapes taken and refused, SesMailer's settings,
     # argv and SendEmail request on a stub CommandRunner (the request file
     # owner-only while the CLI runs and gone after, the CLI's failures), the
     # outbox's order, bound and stop, and the templates. Database-free.

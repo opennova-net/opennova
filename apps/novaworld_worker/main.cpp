@@ -14,6 +14,7 @@
 #include "parts.h"
 #include "program/program.h"
 
+#include "accounts/account_jobs.h"
 #include "billing/billing_jobs.h"
 #include "billing/entitlement.h"
 #include "hosted/address_jobs.h"
@@ -25,7 +26,6 @@
 #include "hosted/fleet_jobs.h"
 #include "hosted/limits_hold.h"
 #include "hosted/stats_jobs.h"
-#include "jobs/account_jobs.h"
 #include "jobs/maintenance_jobs.h"
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"

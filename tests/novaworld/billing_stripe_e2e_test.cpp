@@ -32,7 +32,8 @@
 // customer deleted at the end, which cancels the subscription (set to cancel itself
 // anyway, should the test die first).
 
-#include "auth.h"
+#include "accounts/auth.h"
+#include "accounts/web_session.h"
 #include "billing/billing.h"
 #include "billing/billing_config.h"
 #include "billing/billing_repository.h"
@@ -43,7 +44,6 @@
 #include "core/owner_file.h"
 #include "net_http.h"
 #include "net_sockets.h"
-#include "web_session.h"
 
 #include "novaworld/nw_service_harness.h"
 

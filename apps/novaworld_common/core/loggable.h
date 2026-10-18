@@ -18,7 +18,7 @@
 namespace opennova::novaworld_server {
 
 // Whether `s` holds a control byte (below 0x20, or 0x7F). Usernames and
-// handles may hold none (auth.h); nor may a pushed ServerCommand arg
+// handles may hold none (accounts/auth.h); nor may a pushed ServerCommand arg
 // (compose_server_command, host_routes.h, where the reason is spelled out).
 inline bool has_control_byte(std::string_view s) {
 	return std::any_of(s.begin(), s.end(), [](char c) {

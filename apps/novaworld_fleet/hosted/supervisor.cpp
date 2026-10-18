@@ -1,6 +1,6 @@
 #include "supervisor.h"
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "billing/billing_repository.h"
 #include "core/loggable.h"
 #include "hosted/address_jobs.h"

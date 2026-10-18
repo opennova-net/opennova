@@ -1,6 +1,6 @@
 #include "cd_key_routes.h"
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "core/loggable.h"
 #include "http_json.h"
 #include "program/server_config.h"
