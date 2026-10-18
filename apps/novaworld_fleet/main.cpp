@@ -15,6 +15,7 @@
 #include "election.h"
 #include "parts.h"
 #include "program.h"
+#include "program_log.h"
 
 #include "hosted/admin_link.h"
 #include "hosted/console_drain.h"
@@ -139,6 +140,7 @@ int run(const program::Boot &boot) {
 	}
 	election_config.on_lost = [](const std::string &) {
 		std::fflush(nullptr);
+		program::drain_log_tee(500);
 		std::_Exit(fleet::kLeadershipLostExitCode);
 	};
 	fleet::Election leader(boot.db_options, election_config);
@@ -159,6 +161,7 @@ int run(const program::Boot &boot) {
 							"(ONNET_INTERNAL_HTTP_BIND)\n",
 							bind_address.c_str(), static_cast<unsigned>(bind_port));
 					std::fflush(nullptr);
+					program::drain_log_tee(500);
 					std::_Exit(1);
 				},
 				[internal] { internal->stop(); } });
