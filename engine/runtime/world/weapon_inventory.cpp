@@ -176,9 +176,9 @@ std::vector<std::string> weapon_kit_expand_display_list(
         const WeaponTableEntry *pdef = table.by_index(static_cast<uint8_t>(parent));
         if (pdef == nullptr) continue;
         for (int k = 1; k <= pdef->loadout_subclasses && out.size() < 255; ++k) {
-            const WeaponTableEntry *sub =
-                    (parent + k < 256) ? table.by_index(static_cast<uint8_t>(parent + k))
-                                       : nullptr;
+            // The sub-variant's index is a byte add, wrapping at 256
+            // [orig: `movzx ecx, bl; add cl, [index]` @ 0x54bae6..0x54bae9].
+            const WeaponTableEntry *sub = table.by_index(static_cast<uint8_t>(parent + k));
             if (sub == nullptr) continue; // [orig: null sub skipped @ 0x54baf8]
             out.push_back(sub->name);
         }

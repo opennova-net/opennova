@@ -130,6 +130,41 @@ void test_display_expand_and_fill() {
     CHECK(display[1] == "WPN_M4AUTO");
     CHECK(display[2] == "WPN_M203HE"); // [orig: sub append @ 0x54bb07]
 
+    // A sub-variant index past 254 wraps to the table's start, a byte add; the
+    // 255-slot table holds no index 255, and the wrapped "null" row (entry 0) is
+    // listed but names no weapon, so the fill skips it with the loader's warning.
+    // [orig: AvatarDef_BuildDisplayList @ 0x54bae6..0x54bae9; AdmDef_GetEntryByIndex
+    //  @ 0x53fc84 (0xFF is none); AvatarDef_FindIndexByName @ 0x53fd85..0x53fd97;
+    //  WeaponSlotTable_LoadAllFromDefs @ 0x541532 / @ 0x541553]
+    {
+        WeaponTable wrap;
+        wrap.entries.resize(255);
+        auto def = [&](size_t i, const char *name) -> WeaponTableEntry & {
+            wrap.entries[i].name = name;
+            wrap.entries[i].valid = true;
+            return wrap.entries[i];
+        };
+        WeaponTableEntry &edge = def(254, "WPN_EDGE");
+        edge.loadout_subclasses = 3;
+        edge.category = 2;
+        def(0, "null");
+        WeaponTableEntry &sub = def(1, "WPN_SUB1");
+        sub.category = 3;
+        sub.rank = 1;
+        const auto wrapped =
+                weapon_kit_expand_display_list({{"WPN_EDGE", -1, -1, -1}}, wrap);
+        CHECK(wrapped.size() == 3);
+        CHECK(wrapped.size() == 3 && wrapped[1] == "null" && wrapped[2] == "WPN_SUB1");
+        CHECK(wrap.index_of("null") == -1 && wrap.index_of("NULL") == -1 &&
+                wrap.index_of("WPN_SUB1") == 1);
+        WeaponInventory winv;
+        winv.reset(wrap);
+        const auto wfill = weapon_inventory_load_from_display(wrap, wrapped, winv, 8, false);
+        CHECK(winv.slot(0)->adm_index == -1);
+        CHECK(winv.slot(3 * 65 + 1)->adm_index == 1);
+        CHECK(wfill.warnings.size() == 1);
+    }
+
     WeaponInventory inv;
     inv.reset(f.t);
     auto fill = weapon_inventory_load_from_display(f.t, display, inv, 8, false);
