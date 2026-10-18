@@ -61,17 +61,6 @@ namespace godot {
 namespace {
 
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
-// The witnessed detail trio (limit / cell / cap) is engine-owned:
-// terrain/foliage_detail_collector.h carries the [orig] witness.
-constexpr float DETAIL_DISTANCE_LIMIT = opennova::kFoliageDetailDistanceLimit;
-constexpr float HARNESS_CELL_SIZE =
-		static_cast<float>(opennova::kFoliageDetailCellSize);
-constexpr int HARNESS_CELL_RADIUS = 4;
-constexpr int HARNESS_CELL_LIMIT = opennova::kFoliageDetailPatchCapacity;
-
-bool valid_height(float p_height) {
-  return std::isfinite(p_height) && p_height > INVALID_HEIGHT_THRESHOLD;
-}
 
 bool finite_vector(const Vector3 &p_value) {
   return std::isfinite(static_cast<float>(p_value.x)) &&
@@ -214,9 +203,6 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::get_silhouette_anchors);
   ClassDB::bind_method(D_METHOD("render_frame", "camera_xform", "time_ms"),
                        &FoliageDispatcher::render_frame);
-  ClassDB::bind_method(
-      D_METHOD("render_test_harness_frame", "camera_xform", "time_ms"),
-      &FoliageDispatcher::render_test_harness_frame);
   ClassDB::bind_method(
       D_METHOD("render_inset_frame", "camera", "anchors", "time_ms"),
       &FoliageDispatcher::render_inset_frame);
@@ -1694,17 +1680,6 @@ void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform, int64_t 
   _compile_and_apply(view);
 }
 
-void FoliageDispatcher::render_test_harness_frame(const Transform3D &p_camera_xform,
-                                                  int64_t p_time_ms) {
-  frame_stats_ = FrameStats{};
-  frame_stats_.frame_calls = ++total_frame_calls_;
-  frame_stats_.harness_detail_source = true;
-
-  opennova::renderer::FoliageViewInput view = _view_input(p_camera_xform, p_time_ms);
-  view.detail_cells = _test_harness_cells(p_camera_xform.origin);
-  _compile_and_apply(view);
-}
-
 opennova::renderer::FoliageViewInput
 FoliageDispatcher::_view_input(const Transform3D &p_camera_xform, int64_t p_time_ms) const {
   opennova::renderer::FoliageViewInput input;
@@ -1744,79 +1719,6 @@ FoliageDispatcher::_view_input(const Transform3D &p_camera_xform, int64_t p_time
     });
   }
   return input;
-}
-
-std::vector<opennova::foliage::DetailCell>
-FoliageDispatcher::_test_harness_cells(const Vector3 &p_camera_position) const {
-  std::vector<opennova::foliage::DetailCell> cells;
-  const int camera_cell_x = static_cast<int>(
-      std::floor(static_cast<float>(p_camera_position.x) / HARNESS_CELL_SIZE));
-  const int camera_cell_z = static_cast<int>(
-      std::floor(static_cast<float>(p_camera_position.z) / HARNESS_CELL_SIZE));
-
-  for (int cell_z = camera_cell_z - HARNESS_CELL_RADIUS;
-       cell_z <= camera_cell_z + HARNESS_CELL_RADIUS; ++cell_z) {
-    for (int cell_x = camera_cell_x - HARNESS_CELL_RADIUS;
-         cell_x <= camera_cell_x + HARNESS_CELL_RADIUS; ++cell_x) {
-      const float min_x = static_cast<float>(cell_x) * HARNESS_CELL_SIZE;
-      const float min_z = static_cast<float>(cell_z) * HARNESS_CELL_SIZE;
-      const float max_x = min_x + HARNESS_CELL_SIZE;
-      const float max_z = min_z + HARNESS_CELL_SIZE;
-      const float closest_x =
-          std::clamp(static_cast<float>(p_camera_position.x), min_x, max_x);
-      const float closest_z =
-          std::clamp(static_cast<float>(p_camera_position.z), min_z, max_z);
-      const float dx = static_cast<float>(p_camera_position.x) - closest_x;
-      const float dz = static_cast<float>(p_camera_position.z) - closest_z;
-      const float horizontal_distance_squared = dx * dx + dz * dz;
-      if (horizontal_distance_squared >
-          DETAIL_DISTANCE_LIMIT * DETAIL_DISTANCE_LIMIT) {
-        continue;
-      }
-      // Runtime's Terrain_CollectNearFoliagePatches measures the camera in
-      // three dimensions against each 16-unit patch's representative terrain
-      // height. The editor has no live height mipchain, so use the surface at
-      // the patch center as a live approximation instead of treating every
-      // camera as ground-level. This is especially important for Mission's
-      // default aerial framing: XZ-only distance expanded thousands of cards.
-      const float center_y =
-          _sample_height((min_x + max_x) * 0.5f, (min_z + max_z) * 0.5f);
-      if (!valid_height(center_y)) {
-        continue;
-      }
-      const float dy = static_cast<float>(p_camera_position.y) - center_y;
-      const float distance =
-          std::sqrt(horizontal_distance_squared + dy * dy);
-      if (distance > DETAIL_DISTANCE_LIMIT) {
-        continue;
-      }
-
-      // The harness's one sampled height stands in for the leaf's maximum,
-      // and without a sector routing its world minimum stands in for the
-      // atlas minimum.
-      cells.push_back(opennova::foliage::DetailCell{
-          opennova::foliage::pack_detail_cell_key(static_cast<int32_t>(min_x),
-                                                  static_cast<int32_t>(min_z)),
-          distance,
-          center_y,
-          static_cast<int32_t>(min_x),
-          static_cast<int32_t>(min_z),
-      });
-    }
-  }
-
-  std::sort(cells.begin(), cells.end(),
-            [](const opennova::foliage::DetailCell &p_left,
-               const opennova::foliage::DetailCell &p_right) {
-              if (p_left.camera_distance != p_right.camera_distance) {
-                return p_left.camera_distance < p_right.camera_distance;
-              }
-              return p_left.key < p_right.key;
-            });
-  if (cells.size() > HARNESS_CELL_LIMIT) {
-    cells.resize(HARNESS_CELL_LIMIT);
-  }
-  return cells;
 }
 
 opennova::foliage::WorldSamplers FoliageDispatcher::_world_samplers() {
@@ -2137,9 +2039,8 @@ void FoliageDispatcher::_apply_draw_list(
     }
     // A detail patch borrows its t1 from the terrain page the point lookup
     // finds for it; a patch with no resident page is not drawn at all (the
-    // lookup's null result skips the patch's slot draw), so under a Terrain
-    // there is no cold fallback. Only the terrain-less test harness frame draws through
-    // the analytic colormap. Retail Foliage_RenderDetailPatches @ 0x609de0:
+    // lookup's null result skips the patch's slot draw), so there is no cold
+    // fallback. Retail Foliage_RenderDetailPatches @ 0x609de0:
     // the Terrain_FindSectorPatchRT lookup (the call @ 0x60a1de), the null
     // skip @ 0x60a1e6..0x60a1e8 to the slot loop's next iteration @ 0x60a6a2.
     // The lookup reads the patch key's source-atlas halves and the routed

@@ -182,8 +182,7 @@ public:
 
   // Optional samplers: (x, z) -> height / foliage palette index. Detail uses
   // retail's flat wrapped map lookup at the candidate's source-atlas
-  // position (world in the test harness frame, which has no sector routing);
-  // foliage_sampler retains the
+  // position; foliage_sampler retains the
   // sector-routed MODEL lookup and is the compatibility fallback for detail.
   void set_height_sampler(const Callable &p_sampler);
   Callable get_height_sampler() const;
@@ -203,13 +202,6 @@ public:
   // Runtime frame. Reads exact detail patch keys/distances from the wired
   // Terrain::get_foliage_detail_patches_native().
   void render_frame(const Transform3D &p_camera_xform, int64_t p_time_ms);
-
-  // The test harness's terrain-less frame, no game path: a deterministic
-  // 16-unit cell set whose sampled centers are at most 42 units in 3D from
-  // the camera stands in for the Terrain's collected patches. Its one reach
-  // is the GUT adapter tests (godot/tests/foliage_runtime_adapter_test.gd),
-  // which drive the slots, samplers and draw list without a staged terrain.
-  void render_test_harness_frame(const Transform3D &p_camera_xform, int64_t p_time_ms);
 
   // The weapon Inset pass's own foliage frame, compiled after the main frame
   // and after the Inset's own collect: its detail cells from its own terrain
@@ -485,8 +477,6 @@ private:
 
   opennova::renderer::FoliageViewInput
   _view_input(const Transform3D &p_camera_xform, int64_t p_time_ms) const;
-  std::vector<opennova::foliage::DetailCell>
-  _test_harness_cells(const Vector3 &p_camera_position) const;
   void _compile_and_apply(const opennova::renderer::FoliageViewInput &p_view);
   opennova::renderer::FoliageExpansionSamplers _expansion_samplers();
   // `p_mirror_debug`: the main view's list feeds the frame counters; the
