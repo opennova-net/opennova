@@ -232,7 +232,7 @@ std::vector<DetailInstance> generate_detail_cell(
 		// local offsets, while the blocker takes the world position.
 		// [orig: Foliage_GenerateInstances_0 @ 0x5fff84..0x5fff9d (atlas
 		// sample coordinates), 0x5fffb8..0x60000e (world blocker),
-		// @ 0x600065 (Terrain_GetSurfaceTypeAtFixedPoint)]
+		// @ 0x600065 (Foliage_SampleFoliageMapFlat)]
 		const uint32_t mask =
 		    world.detail_foliage_mask_at
 		        ? world.detail_foliage_mask_at(

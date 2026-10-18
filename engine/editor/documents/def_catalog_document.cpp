@@ -538,7 +538,7 @@ void DefCatalogDocument::refine_symbol(const NodeAddress &address, SymbolFacts &
 		facts.value = static_cast<const DefWeaponDef *>(native)->loadout_menu_textid;
 		// A later block of the name reopens this one's row, reset to its defaults, so the game keeps nothing of
 		// this block; "null" names no row [orig: WeaponDefs_ParseLineCallback @ 0x5436d7 ->
-		// AvatarDef_FindIndexByName @ 0x53fd80 (stricmp, "null" none), AdmDef_InitEntryDefaults @ 0x543722].
+		// AdmDef_FindIndexByName @ 0x53fd80 (stricmp, "null" none), AdmDef_InitEntryDefaults @ 0x543722].
 		const Node *node = row(address.row);
 		if (!node || node->name().empty() || strutil::iequals(node->name(), "null")) return;
 		bool after = false;

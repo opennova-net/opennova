@@ -278,7 +278,7 @@ private:
 	// `weapon <name>`: the row of that name (never "null"), else the lowest
 	// free row, reset to the defaults and named (strncpy 32). A `weapon` line
 	// inside an open block or a full table ends the file walk.
-	// [orig: @0x543694..0x543741; AvatarDef_FindIndexByName @0x53FD80;
+	// [orig: @0x543694..0x543741; AdmDef_FindIndexByName @0x53FD80;
 	//  AdmDef_FindFreeSlot @0x53FC50]
 	bool weapon_line(const io::ConfigTokens &tokens) {
 		if (current_ >= 0)

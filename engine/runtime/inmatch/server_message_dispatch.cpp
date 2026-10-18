@@ -1144,7 +1144,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(std::move(m));
 				break;
 			}
-			case c2s::DOOR_SLOT_REQUEST: // [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+			case c2s::DOOR_SLOT_REQUEST: // [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20]
 				if (world == nullptr || inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) break;
 				for (ProtocolMessage &m : Server_HandleDoorRowRequest(conn, msg.payload, *world))
 					replies.push_back(std::move(m));

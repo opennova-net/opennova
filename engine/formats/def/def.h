@@ -1517,7 +1517,7 @@ int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
    the parsed weapon.def: the LAST block naming it (ASCII case-insensitive). The
    table keeps one entry per name: a later `weapon` line naming an existing entry
    takes that entry back and resets it to defaults before its own keys parse
-   [orig: WeaponDefs_ParseLineCallback @ 0x5436e1..0x543722: AvatarDef_FindIndexByName
+   [orig: WeaponDefs_ParseLineCallback @ 0x5436e1..0x543722: AdmDef_FindIndexByName
    @ 0x53fd80, AdmDef_GetEntryByIndex @ 0x5436f3, AdmDef_InitEntryDefaults
    @ 0x543722], so the last block's fields are the ones the game mounts, draws and
    fires. "null" names no entry (the lookup's own refusal @ 0x53fd8b). Returns -1

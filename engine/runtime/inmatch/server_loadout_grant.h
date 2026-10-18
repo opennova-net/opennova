@@ -33,7 +33,7 @@ namespace opennova::inmatch {
 // weapon on a combo keeps it), then Server_SendWeaponSlotListToPlayer @0x502550 walks that
 // table ascending by weapon-slot combo (category*65 + rank, @0x5026e5..@0x5028a0), filtering
 // each slot by the team/char masks (@0x502716) and emitting one 4-byte group:
-// [admIdx = AvatarDef_FindIndexByName @0x50273b][ammoPrimary = WeaponSlot_GetTotalClips
+// [admIdx = AdmDef_FindIndexByName @0x50273b][ammoPrimary = WeaponSlot_GetTotalClips
 // @0x502794][ammoSecondary = the same count for the first different-ammoclass sub-variant in
 // parent+1..parent+LSC (@0x5027c8), else 0xFF][the slot's player+89688 damage-class byte at
 // the weapon's own AdmDef index (@0x50286A..0x50288A)], then skipping the weapon's LSC slots

@@ -2145,7 +2145,7 @@ bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out) 
 // @0x514b61 / @0x514b72 / @0x514b8c), so a short body decodes zero-filled and
 // returns false — `number` 0 is dropped by every receiver's gate regardless.
 // [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250;
-//  NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+//  NapiNPServerMsg_HandleDoorSlotRequest @0x514B20]
 bool decode_door_slot_action(const uint8_t *body, size_t len,
                              DoorSlotAction &out, size_t &consumed) {
 	out = DoorSlotAction{};

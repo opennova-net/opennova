@@ -149,7 +149,7 @@ void seed_and_recalc(const world::WeaponTable &table, world::WeaponInventory &in
 // Every populated slot whose def draws pool units has its loaded rounds zeroed (the
 // slot word, or its def's bucket, which a controller seat does not write), unless the
 // entity sits a UseGun seat (+0x168 3).
-// [orig: WeaponOverlay_UpdateAllPerFrame @0x5423C0 (a misnomer) - the seat test
+// [orig: WeaponSlots_ClearLoadedRounds @0x5423C0 (ex WeaponOverlay_UpdateAllPerFrame) - the seat test
 //  @0x5423C5, the def[56] gate @0x5423E6, WeaponSlot_SetSharedLoadedRounds(bucket, 0) (its seat test
 //  @0x540684..0x540692) or slot+16 = 0]
 void clear_loaded_rounds(const world::WeaponTable &table, world::WeaponInventory &inv,
@@ -178,7 +178,7 @@ void set_kit_pools(const world::WeaponTable &table, world::WeaponInventory &inv,
 	// The accept takes the entry's def by its index; the deploy looks the buffered
 	// name up again, and a name that names no weapon sets no pool [orig: the accept's
 	//  AdmDef_GetEntryByIndex @0x515E20; PlayerSlot_InitWeaponsFromLoadout's
-	//  AvatarDef_FindIndexByName @0x515608, its def gate @0x5156AF].
+	//  AdmDef_FindIndexByName @0x515608, its def gate @0x5156AF].
 	const world::WeaponTableEntry *def = e.def;
 	uint8_t base = e.adm_index;
 	if (!accept) {
@@ -321,7 +321,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 		//  WeaponSlotTable_LoadAllFromDefs @0x515DBF, WeaponSlots_SeedAmmoPoolsFromDefs
 		//  @0x515DD3, WeaponSlots_RecalculateAmmoFromCapacity @0x515DE3,
 		//  PlayerSlot_BuildNameTable @0x515DE9, PlayerSlot_FullUpdatePipeline @0x515DEF
-		//  (@0x50BA60), WeaponOverlay_UpdateAllPerFrame @0x515DFF, the entry loop
+		//  (@0x50BA60), WeaponSlots_ClearLoadedRounds @0x515DFF, the entry loop
 		//  @0x515E0D..0x515F33, the recalc @0x515F4D]
 		world::WeaponInventory inv = slot_inventory(*table, conn);
 		reload_slots(*table, inv, kit_display_list(entries, *table), cls, allow_zoom);
@@ -438,7 +438,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	// [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 - the fills @0x515571..0x515581
 	//  / @0x5155B8..0x5155C2, the seed and draw @0x515595..0x5155A9,
 	//  PlayerSlot_BuildNameTable @0x5155AF / @0x5155CB, PlayerSlot_ReinitListedSlots @0x5155D1,
-	//  PlayerSlot_SeedAmmoPoolsAndRecalc @0x5155D7, WeaponOverlay_UpdateAllPerFrame
+	//  PlayerSlot_SeedAmmoPoolsAndRecalc @0x5155D7, WeaponSlots_ClearLoadedRounds
 	//  @0x5155E1, the buffer walk @0x5155EB..0x515761 (each name resolved @0x51560D),
 	//  the recalc @0x51577C]
 	world::WeaponInventory inv = slot_inventory(table, conn);

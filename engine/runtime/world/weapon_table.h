@@ -222,7 +222,7 @@ struct WeaponTable {
     }
 
     // Case-insensitive, first match; "null" names no entry, though entry 0 is the
-    // engine's valid "null" def [orig: AvatarDef_FindIndexByName @0x53FD80 - the
+    // engine's valid "null" def [orig: AdmDef_FindIndexByName @0x53FD80 - the
     // "null" stricmp @0x53FD85..0x53FD97 returning 0xFF, then the stricmp walk].
     int index_of(const char *weapon_name) const {
         if (weapon_name == nullptr) return -1;

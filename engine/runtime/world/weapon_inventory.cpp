@@ -365,7 +365,7 @@ WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table
     // HELD one takes the grant as its own def [orig: @0x542779..0x5427C8].
     int32_t slot_combo = -1; // retail's null slot pointer
     if (!cur->sameas.empty()) {
-        const int parent = table.index_of(cur->sameas.c_str()); // AvatarDef_FindIndexByName
+        const int parent = table.index_of(cur->sameas.c_str()); // AdmDef_FindIndexByName
         const WeaponTableEntry *pdef =
                 parent >= 0 && parent != 0xFF ? table.by_index(static_cast<uint8_t>(parent))
                                               : nullptr;
@@ -426,7 +426,7 @@ bool weapon_inventory_weapon_full(const WeaponTable &table, const WeaponInventor
     if (def == nullptr || def->name.empty()) return false;       // @0x5424AB..0x5424BC
     int32_t combo = combo_of(*def);                              // @0x5424BE..0x5424D0
     if (!def->sameas.empty()) {                                  // @0x5424D2
-        // AdmDef_GetEntryByIndex(AvatarDef_FindIndexByName(sameas)): a hit
+        // AdmDef_GetEntryByIndex(AdmDef_FindIndexByName(sameas)): a hit
         // names its slot whether or not it is held [orig: @0x5424D7..0x5424F9]
         const int parent = table.index_of(def->sameas.c_str());
         const WeaponTableEntry *pdef =

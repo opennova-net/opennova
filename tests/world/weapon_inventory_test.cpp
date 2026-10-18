@@ -135,7 +135,7 @@ void test_display_expand_and_fill() {
     // 255-slot table holds no index 255, and the wrapped "null" row (entry 0) is
     // listed but names no weapon, so the fill skips it with the loader's warning.
     // [orig: AvatarDef_BuildDisplayList @ 0x54bae6..0x54bae9; AdmDef_GetEntryByIndex
-    //  @ 0x53fc84 (0xFF is none); AvatarDef_FindIndexByName @ 0x53fd85..0x53fd97;
+    //  @ 0x53fc84 (0xFF is none); AdmDef_FindIndexByName @ 0x53fd85..0x53fd97;
     //  WeaponSlotTable_LoadAllFromDefs @ 0x541532 / @ 0x541553]
     {
         WeaponTable wrap;

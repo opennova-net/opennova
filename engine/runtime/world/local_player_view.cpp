@@ -311,7 +311,7 @@ UseItemArm local_player_use_item_arm(const World &world, const LocalViewSessionI
     const bool preround = session.hud_service.preround_seconds != 0;
     if (local_player_in_armory_zone(world) || preround) {
         // [orig: `test ecx, ecx; jnz` skips the rule in the pre-round @0x4e0b1f..0x4e0b27;
-        //  `cmp g_HostWeaponsRule, ecx; jnz done` @0x4e0b29..0x4e0b2f]
+        //  `cmp g_ClientArmoryDelaySeconds, ecx; jnz done` @0x4e0b29..0x4e0b2f]
         return !preround && session.armory_reuse_seconds != 0 ? UseItemArm::kArmoryRefused
                                                               : UseItemArm::kArmory;
     }

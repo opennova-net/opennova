@@ -804,7 +804,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.respawn_penalty_seconds = fu.weapon.slot_state360;
 		state_.local_revive_seconds = fu.weapon.slot_state368;
 		state_.spawn_hold_seconds = fu.weapon.slot_state364;
-		// [orig: @0x4300e3 -> g_HostWeaponsRule]
+		// [orig: @0x4300e3 -> g_ClientArmoryDelaySeconds]
 		state_.armory_reuse_seconds = fu.weapon.slot_state356;
 		// The underwater breath samples, the breath bar's counter
 		// [orig: NapiNPClientMsg_0x00A @0x430104 -> word_A85B7C].

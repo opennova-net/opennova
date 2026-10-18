@@ -2364,7 +2364,7 @@ void test_use_item_armory_zone_gate() {
 // The arm a USE-ITEM press takes [orig: Input_HandleActionBinding_0 case 0xB1 --
 // parentSlot @0x4e0a91..0x4e0a98; the zone bit @0x4e0aa1 or g_ClientPreRoundTimer
 // @0x4e0aa6..0x4e0ab0 into the armory arm; outside the pre-round
-// `cmp g_HostWeaponsRule, ecx; jnz done` @0x4e0b29..0x4e0b2f; Flags & 0x800
+// `cmp g_ClientArmoryDelaySeconds, ecx; jnz done` @0x4e0b29..0x4e0b2f; Flags & 0x800
 // @0x4e0ab2; else the mount chain @0x4e0b5e].
 void test_use_item_arm_order() {
     LocalWorld lw;

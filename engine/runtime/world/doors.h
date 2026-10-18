@@ -71,7 +71,7 @@ public:
     // The authority's C2S 0x1A leg: record (first + number - 1) of `entity`
     // under the request's gates and switch; false when a gate refuses (no
     // reply), else the record's resulting state in `out_state`.
-    // [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+    // [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20]
     bool apply_request(const Entity &, int number, int32_t value, int32_t &out_state);
 private:
     std::vector<Slot> slots_;

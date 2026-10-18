@@ -102,8 +102,8 @@ bool stat_screen_row_visible(int tab_index, uint8_t team);
 // first stat column, descending, and after it the first row whose column-1
 // value is `local_slot` (the local player entity's slot id, +0x154) selected
 // [orig: the AddRow call's team @0x562550..0x562565, the column-1 value call
-// @0x562576 (the IDB's CEffectCompiler_HasErrors @0x6420f0, a misnomer:
-// SetCellValue), the row walk @0x562700..0x562754] (D-MNU-51). The NAME
+// @0x562576 (CTableWnd_SetCellValue @0x6420f0, ex
+// CEffectCompiler_HasErrors), the row walk @0x562700..0x562754] (D-MNU-51). The NAME
 // and Squad cells are the player slot's name and squad tag as the roster holds
 // them, its bytes in the code page, as the game's table holds, draws and sorts
 // them [orig: the Napi_CopyString calls of the squad @0x56252c and the name

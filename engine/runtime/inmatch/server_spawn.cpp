@@ -366,7 +366,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
 	spawn.owner_connection_id = conn.connection_id;
 	// Equipped-weapon spawn default = the WPN_M4AUTO armory index, resolved BY NAME like retail
-	// [orig: PlayerClass_InitEntity @0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")];
+	// [orig: PlayerClass_InitEntity @0x4B1116 -> AdmDef_FindIndexByName("WPN_M4AUTO")];
 	// 0xFF (none) when no armory table is fed (unit-test hosts). A joiner's own extended uplink
 	// overwrites it on the first drained 0x0C. (D-NET-143)
 	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");

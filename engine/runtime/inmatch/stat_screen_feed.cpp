@@ -144,8 +144,8 @@ void fill_stat_results(menu::MenuRuntime &menu, int table,
 		// with the slot's team as its column-0 value, the flags 0 [orig: the
 		// CTableWnd_AddRow call @0x562565, the team pushed @0x562550..0x56255a];
 		// the slot id as column 1's value [orig: the value call @0x562576, the
-		// byte +0x0C @0x56256a; the IDB's CEffectCompiler_HasErrors @0x6420f0, a
-		// misnomer: SetCellValue] beside the squad [orig: @0x562585], then the
+		// byte +0x0C @0x56256a; CTableWnd_SetCellValue @0x6420f0 (ex
+		// CEffectCompiler_HasErrors)] beside the squad [orig: @0x562585], then the
 		// formatted fields [orig: CTableWnd_SetCellText @0x5626b1].
 		const int index = menu.table_insert_row(table, row.name, row.team, 0, -1);
 		menu.table_set_cell_value(table, index, 1, row.slot);

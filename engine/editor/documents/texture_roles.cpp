@@ -167,7 +167,7 @@ constexpr RoleWords kRows[] = {
 	        .alpha("none: each palette index is a foliage code, its colour unused")
 	        .sampling("looked up by index")
 	        .missing("no detail foliage")
-	        .witness("Foliage_LoadFoliageMapPCX @ 0x605AD0; Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066D0")
+	        .witness("Foliage_LoadFoliageMapPCX @ 0x605AD0; Foliage_SampleFoliageMapFlat @ 0x6066D0")
 	        .row,
 	Role(R::TerrainCharMap, "terrain_char_map", "terrain char map", G::Terrain)
 	        .alpha("none: each palette index is a surface class, its colour unused")

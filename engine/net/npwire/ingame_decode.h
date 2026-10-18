@@ -2077,7 +2077,7 @@ bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch
 //     entity, pool lookup, the same gate, then state 0/3 -> 1 iff value == 1;
 //     state 1/2 -> value iff number == 3 (the SECTION number, @0x514c2a); reply
 //     S2C 0x37 {handle, row.state, number} to the requester
-//     [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20 — switch @0x514c20..
+//     [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20 — switch @0x514c20..
 //      0x514c35, reply @0x514c46..0x514c74].
 struct DoorSlotAction {
 	uint16_t entity_handle = 0;  // (pool<<12)|slot; 0xFFFF when the sender's entity is in no pool

@@ -237,7 +237,7 @@ struct ReadScope {
 // CTableWnd_ParseXMLContentDefinition @ 0x6427d0; CScrollWnd_Initialize @ 0x64d540;
 // CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0; CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0;
 // CWnd_Create @ 0x65d780; CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0;
-// CRadioEditWnd_Create @ 0x65d470; CComboWnd_Init @ 0x65c350; CWnd_InitFromParams @ 0x65bd60;
+// CRadioEditWnd_Create @ 0x65d470; CComboWnd_Init @ 0x65c350; CLanListWnd_Init @ 0x65bd60;
 // CLanListWnd_ParseXMLDefinition @ 0x65b9d0; CGopherWnd_Initialize @ 0x659b50;
 // CGopherWnd_ParseXMLDefinition @ 0x65b130]. A RADIOEDIT's WINDOWs are also created by its two parts
 // (their base parses 52 and 76 bytes deeper); the cost here is its own path's. Every figure is the

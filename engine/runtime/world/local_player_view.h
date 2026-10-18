@@ -107,7 +107,7 @@ struct LocalViewSessionInputs {
     int32_t end_round_winner_team = 0;
     bool local_dead = false;
     // The client's armory countdown, the 0x0A phase-0 block's +356 echo
-    // (g_HostWeaponsRule): the USE-ITEM armory arm refuses while it runs
+    // (g_ClientArmoryDelaySeconds): the USE-ITEM armory arm refuses while it runs
     // outside the pre-round [orig: NapiNPClientMsg_0x00A @0x4300E3; the read
     // Input_HandleActionBinding_0 @0x4E0B29].
     uint8_t armory_reuse_seconds = 0;
@@ -297,7 +297,7 @@ bool local_player_in_armory_zone(const World &world);
 // != 0 @0x4e0a91..0x4e0a98) goes to the mount chain (@0x4e0b5e). An unmounted one
 // in an armory volume (Flags & 0x400000 @0x4e0aa1) or anywhere while the client's
 // pre-round timer runs (g_ClientPreRoundTimer @0x4e0aa6..0x4e0ab0) takes the armory
-// arm: outside the pre-round a running armory countdown (g_HostWeaponsRule,
+// arm: outside the pre-round a running armory countdown (g_ClientArmoryDelaySeconds,
 // @0x4e0b1f..0x4e0b2f) takes the press and opens nothing, else weapon.mnu WEAPON
 // opens (@0x4e0b3e..0x4e0b49). Otherwise a type-11 volume touch takes the
 // vehicle-loadout arm (@0x4e0ab2..0x4e0b05), and else the mount chain. With a

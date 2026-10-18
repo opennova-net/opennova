@@ -48,7 +48,7 @@ void test_sub_block_0_timers_fold_and_retain() {
 	// [orig: NapiNPClientMsg_0x00A @0x430104 -> word_A85B7C].
 	first.weapon.slot_state460 = 40;
 	// And the armory countdown, the USE-ITEM armory arm's refusal
-	// [orig: NapiNPClientMsg_0x00A @0x4300E3 -> g_HostWeaponsRule].
+	// [orig: NapiNPClientMsg_0x00A @0x4300E3 -> g_ClientArmoryDelaySeconds].
 	first.weapon.slot_state356 = 30;
 	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(first));
 	CHECK(view.state().respawn_penalty_seconds == 7);

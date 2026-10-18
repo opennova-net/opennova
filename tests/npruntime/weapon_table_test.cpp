@@ -501,7 +501,7 @@ int main(int argc, char **argv) {
 	}
 
 	// --- by-name reuse: a re-parsed name keeps its index and takes the new fields
-	//     [orig: WeaponDefs_ParseLineCallback @0x5436e1 AvatarDef_FindIndexByName leg].
+	//     [orig: WeaponDefs_ParseLineCallback @0x5436e1 AdmDef_FindIndexByName leg].
 	{
 		static const char kMini[] =
 				"weapon \"WPN_A\"\r\n\tcategory 1\r\nend\r\n"

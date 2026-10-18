@@ -65,7 +65,7 @@ int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
 }
 
 int def_weapon_index_by_name(const DefWeaponDef *weapons, size_t n, const char *name) {
-    /* [orig: AvatarDef_FindIndexByName @ 0x53fd80 over a table whose re-named
+    /* [orig: AdmDef_FindIndexByName @ 0x53fd80 over a table whose re-named
        entries the parse reset and refilled @ 0x5436e1..0x543722]: the last
        block of the name is the entry. */
     if (!weapons || !name || strutil::iequals(name, "null")) return -1;

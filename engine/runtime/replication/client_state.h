@@ -1147,7 +1147,7 @@ struct ClientState {
 	// [orig: reader @0x430064; Game_ProcessMainFrame gate @0x52672C]
 	std::uint8_t preround_delay_seconds = 0;
 	uint8_t vehicle_reload_seconds = 0;
-	// The phase-0 block's armory countdown (+356), the client's g_HostWeaponsRule:
+	// The phase-0 block's armory countdown (+356), the client's g_ClientArmoryDelaySeconds:
 	// the USE-ITEM armory arm refuses while it runs outside the pre-round.
 	// [orig: NapiNPClientMsg_0x00A @0x4300E3; read @0x4E0B29]
 	uint8_t armory_reuse_seconds = 0;

@@ -1788,7 +1788,7 @@ bool check_round_init_rebuilds_the_kept_kit() {
 // entity's) follows the slot table onto a kept slot's next entity.
 // [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515E8B..0x515E92 (the store, no clear
 //  among the accept's memsets @0x515BC1 / @0x515BD3); Server_SendWeaponSlotListToPlayer
-//  @0x50286A..0x50288A (the read at AvatarDef_FindIndexByName @0x502720); Server_PlayerAdd
+//  @0x50286A..0x50288A (the read at AdmDef_FindIndexByName @0x502720); Server_PlayerAdd
 //  @0x51CD06; Weapon_CalcImpactDamage @0x4ECA11..0x4ECA24]
 bool check_loadout_damage_class_bytes() {
 	inmatch::NapiNPServerCtx ctx;
@@ -2082,7 +2082,7 @@ bool check_loadout_sub_variant_rows() {
 
 	// From a UseGun seat every redraw returns at once and no bucket is written: the
 	// pools are the counts, no clip is drawn. [orig: WeaponSlots_RecalculateAmmoFromCapacity
-	//  @0x54228D..0x542294; WeaponOverlay_UpdateAllPerFrame @0x5423C5]
+	//  @0x54228D..0x542294; WeaponSlots_ClearLoadedRounds @0x5423C5]
 	body->flags &= ~w::kEntityFlagDead;
 	body->alive = true;
 	body->health = 100;

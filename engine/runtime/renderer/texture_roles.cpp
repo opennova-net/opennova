@@ -89,7 +89,7 @@ constexpr TextureRole kRoles[] = {
 	Role(R::TerrainTileAtlas, L::Tga, kTextureTga).size(S::MultipleOf, TIL_ATLAS_TILE_PIXELS).row,
 	// [orig: Terrain_LoadScorchTextures @ 0x604CE0]
 	Role(R::TerrainScorch, L::Stage, kStageFormats).no_alpha().row,
-	// [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0; Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066D0]
+	// [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0; Foliage_SampleFoliageMapFlat @ 0x6066D0]
 	Role(R::TerrainFoliageMap, L::Pcx8, kTexturePcx).size(S::SquarePowerOfTwoAtMost, 1024).no_alpha().row,
 	// [orig: sub_605A10 @ 0x605A31 (the 8-bit PCX reader), its side @ 0x605A82..0x605AA0;
 	// Terrain_GetSurfaceTypeAtPosition @ 0x606519, @ 0x6065C6]

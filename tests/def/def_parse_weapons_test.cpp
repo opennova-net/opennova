@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
     // A name two blocks define is its last block in the game's weapon table: the second `weapon`
     // line takes the first's entry back and resets it before its keys parse [orig:
     // WeaponDefs_ParseLineCallback @ 0x5436e1..0x543722]; "null" names no entry [orig:
-    // AvatarDef_FindIndexByName @ 0x53fd8b]. The parse keeps both blocks, as the file has them.
+    // AdmDef_FindIndexByName @ 0x53fd8b]. The parse keeps both blocks, as the file has them.
     {
         static const char kTwice[] =
             "weapon \"WPN_TWICE\"\r\nclipsize 10\r\nend\r\n"
