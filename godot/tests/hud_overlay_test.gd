@@ -90,16 +90,17 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	#  medic, team, zone_number, def_type, entity_bits, zone_index,
 	#  zone_radius, entity_x, entity_y, anchor_x, anchor_y, bound_radius,
 	#  entity_z, bay_groups, timer_flags, timer_team, timer_bar_team,
-	#  timer_value, timer_limit, timer_rate}.
+	#  timer_value, timer_limit, timer_rate, cell, capture_team}.
 	# entity_bits 1: the slot entity carries a model (the persistent bank
 	# draws only those); the blip centres on its anchor.
 	var snapshot := PackedInt32Array([
-		7, 36, 1,
+		8, 38, 1,
 		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 		1, 0, 0, 6, 0,
 		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
 		0, 0,
 		0, 0, 0, 0, 0, 0,
+		0, 0,
 	])
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, snapshot)
 	var stats := hud.get_draw_list_stats()
@@ -147,12 +148,13 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	#  @0x5a4cd6..0x5a4d48 replacing the blip].
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
-				7, 36, 1,
+				8, 38, 1,
 				0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 				1, 0, 0, 6, 1,
 				0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
 				0, 0,
 				0, 0, 0, 0, 0, 0,
+				0, 0,
 			]))
 	stats = hud.get_draw_list_stats()
 	assert_eq(stats.map_sprites, 2,
@@ -172,12 +174,13 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	]))
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
-				7, 36, 1,
+				8, 38, 1,
 				0, 0x2042, 0, 0, 0, 0, 0, -6250336, 0, 0, 1984, 1,
 				2, 0, 0, 6, 0,
 				0, 0, 0, 1, -1, 0, 0, 0, 0, 0, 0,
 				0, 0,
 				0, 0, 0, 0, 0, 0,
+				0, 0,
 			]))
 	stats = hud.get_draw_list_stats()
 	assert_gt(stats.map_footprint_tris, 0,
@@ -223,12 +226,13 @@ func test_map_sprites_submit_their_materials_modulate2x_flag() -> void:
 	hud.configure(fixture.layout, fixture.root)
 	# One live marker in a half-bright blue the device doubles.
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, PackedInt32Array([
-		7, 36, 1,
+		8, 38, 1,
 		0, 0x1001, 64 << 16, 0, 0, 0, 10, 0xFF20407F - 0x100000000, 0, 0, 1984, 1,
 		1, 0, 0, 6, 0,
 		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
 		0, 0,
 		0, 0, 0, 0, 0, 0,
+		0, 0,
 	]))
 	await get_tree().process_frame
 	var blips := 0
@@ -520,12 +524,13 @@ func test_glyph_runs_draw_through_the_font_pages_modulate2x() -> void:
 	hud.set_minimap_terrain(terrain)
 	hud.set_waypoint("Target", 1024, Vector2(100, 0), 20.0)
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, PackedInt32Array([
-		7, 36, 1,
+		8, 38, 1,
 		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 		1, 0, 0, 6, 0,
 		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
 		0, 0,
 		0, 0, 0, 0, 0, 0,
+		0, 0,
 	]))
 	assert_gt(hud.get_draw_list_stats().map_labels, 0, "the distance and grid labels compile")
 	await get_tree().process_frame
@@ -1140,17 +1145,18 @@ func test_lfp_panel_device_seam() -> void:
 	assert_true(is_instance_valid(hud), "Hiding the zone panel is safe.")
 
 
-# One v7 marker row: a spawn-point zone (entity_bits 4) with zone number 0x41
+# One v8 marker row: a spawn-point zone (entity_bits 4) with zone number 0x41
 # (a capture bit in the slot's source byte), team 1, at mission (0, 10, 0),
 # with a zone-timer entry when `timer_flags` is nonzero.
 func _capture_zone_snapshot(timer_flags: int) -> PackedInt32Array:
 	return PackedInt32Array([
-		7, 36, 1,
+		8, 38, 1,
 		0, 0x3001, 0, 10 << 16, 0, 0, 0, -1, 0, 0x41, 0, 1, 0, 0, 0, 6,
 		0, 1, 0x41, 0, 4,
 		0, 0, 0, 10 << 16, 0, 10 << 16, 0,
 		0, 0,
 		timer_flags, 1, 1, 0, 62, 0,
+		0, 0,
 	])
 
 
