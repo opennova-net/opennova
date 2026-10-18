@@ -9,8 +9,10 @@
 # program the down record names no count for, and `app up` the same), a
 # rollback refuses a release from before the program split, a release's
 # revisions hand the serve image and hostd's to every container that reads the
-# fleet's policy, and the org
-# stack's first run moves its state before the vault learns of the bucket. It
+# fleet's policy, fleet logs and fleet console read CloudWatch and EC2 alone
+# (the streams the service names, or by their names while it is down), fleet
+# status prints the service's attention list and a line per machine, and the
+# org stack's first run moves its state before the vault learns of the bucket. It
 # sources on-deploy (which then runs nothing) and stubs every command group,
 # the vault and AWS, so nothing is read or changed anywhere. It needs bash and
 # jq;
