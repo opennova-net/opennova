@@ -38,6 +38,13 @@ uint64_t now_usec() {
 	return Time::get_singleton()->get_ticks_usec();
 }
 
+// A row's 16.16 origin: the .bms record's words, else its transform's.
+opennova::mission::StaticSourceOrigin row_origin_q16(const MissionObjectPlacer::PlacementRow &p_row,
+		const Transform3D &p_xform) {
+	return p_row.origin_q16.value_or(
+			opennova::mission::static_source_origin_of(to_static_source_transform(p_xform)));
+}
+
 } // namespace
 
 // --- MissionPlacementRun -------------------------------------------------------------------------
@@ -225,6 +232,8 @@ void MissionObjectPlacer::_place_bucket(MissionPlacementRun &p_run, size_t p_fir
 			a["team"] = entity.team;
 			a["ai_flags"] = static_cast<int>(entity.ai_flags);
 			a["position"] = entity.position;
+			const opennova::mission::StaticSourceOrigin origin = row_origin_q16(entity, xform);
+			a["origin_q16"] = Vector2i(origin[0], origin[1]);
 			p_run.animated.push_back(a);
 			continue;
 		}
@@ -240,6 +249,7 @@ void MissionObjectPlacer::_place_bucket(MissionPlacementRun &p_run, size_t p_fir
 			p_run.static_order.push_back(group_key);
 		}
 		group->xforms.push_back(xform);
+		group->origins_q16.push_back(row_origin_q16(entity, xform));
 		group->shadow_slots.push_back(item_casts_static_terrain_shadow(static_cast<MissionData::EntityKind>(kind),
 				entity.ai_flags,
 				item_db_->get_attrib(item_id), item_db_->get_attrib2(item_id)));
@@ -325,7 +335,11 @@ void MissionObjectPlacer::_place_static_group(MissionPlacementRun &p_run, int p_
 						? group.entity_attribs[i]
 						: 0,
 				i < group.item_ids.size() ? group.item_ids[i] : 0,
-				graphic, group.xforms[i], shadow_data);
+				graphic, group.xforms[i],
+				i < group.origins_q16.size() ? group.origins_q16[i]
+											 : opennova::mission::static_source_origin_of(
+													   to_static_source_transform(group.xforms[i])),
+				shadow_data);
 	}
 	Vector<int> effect_source_rows;
 	effect_source_rows.resize(instance_count);
@@ -439,6 +453,8 @@ void MissionObjectPlacer::_place_static_group(MissionPlacementRun &p_run, int p_
 			inst.batch_key = opennova::to_std(group_key);
 			inst.index = i;
 			inst.xform = to_static_source_transform(group.xforms[i]);
+			inst.origin_q16 = i < group.origins_q16.size() ? group.origins_q16[i]
+														: opennova::mission::static_source_origin_of(inst.xform);
 			inst.casts_static_shadow =
 					i < group.shadow_slots.size() && group.shadow_slots[i];
 			inst.mirror_reflected = group.mirror_reflected;
@@ -727,6 +743,13 @@ void MissionObjectPlacer::_place_animated(MissionPlacementRun &p_run, int p_firs
 		spec.ai_flags = uint32_t(a.get("ai_flags", 0));
 		spec.position = a.get("position", Vector3());
 		spec.xform = a.get("xform", Transform3D());
+		const Variant origin = a.get("origin_q16", Variant());
+		if (origin.get_type() == Variant::VECTOR2I) {
+			const Vector2i words = origin;
+			spec.origin_q16 = { words.x, words.y };
+		} else {
+			spec.origin_q16 = opennova::mission::static_source_origin_of(to_static_source_transform(spec.xform));
+		}
 		ObjectModel *model = _build_entity_model(spec, data, container,
 				vformat("Anim_%s_%d", spec.graphic, p_run.animated_count),
 				vformat("live%d", p_run.animated_count));
@@ -812,7 +835,7 @@ ObjectModel *MissionObjectPlacer::_build_entity_model(const EntityModelSpec &p_s
 	ref->set_attrib2(int64_t(item_db_->get_attrib2(item_id)));
 	model->set_entity_ref(ref);
 	_record_static_terrain_shadow_source(kind, p_spec.index, p_spec.bms_id, p_spec.team,
-			p_spec.ai_flags, item_id, p_spec.graphic, p_spec.xform, p_data);
+			p_spec.ai_flags, item_id, p_spec.graphic, p_spec.xform, p_spec.origin_q16, p_data);
 	return model;
 }
 
@@ -841,6 +864,7 @@ ObjectModel *MissionObjectPlacer::build_entity_model(const PlacementRow &p_row, 
 	spec.ai_flags = p_row.ai_flags;
 	spec.position = p_row.position;
 	spec.xform = _entity_transform_for_item(p_row.position, p_row.rotation_deg, p_row.item_id);
+	spec.origin_q16 = row_origin_q16(p_row, spec.xform);
 	return _build_entity_model(spec, data, p_parent, p_name, vformat("entity%d", p_row.bms_id));
 }
 

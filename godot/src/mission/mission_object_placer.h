@@ -18,6 +18,7 @@
 #include <runtime/mission/placement_traits.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "mission/mission_data.h" // MissionData::EntityKind
@@ -130,6 +131,9 @@ public:
 		uint32_t ai_flags = 0;
 		Vector3 position;     // mission space
 		Vector3 rotation_deg; // (pitch, yaw, roll) as authored
+		// The .bms record's own x and y words (placement_rows_of); a row without them takes its
+		// transform's (mission::static_source_origin_of).
+		std::optional<opennova::mission::StaticSourceOrigin> origin_q16;
 	};
 	// Place from entity dictionaries in the streamed-record shape (kind, index,
 	// bms_id, item_id, position, rotation_deg, team, group, ai_flags): the
@@ -293,8 +297,11 @@ public:
 	bool static_instance_casts_terrain_shadow(int p_bms_id) const;
 	Variant hide_static_instance(int p_bms_id);
 	bool show_static_instance(int p_bms_id);
+	// `p_origin_q16`: the entity's 16.16 x / y words where the caller holds them (the editor's
+	// document); without them the source re-derives a moved axis from the transform.
 	bool update_static_terrain_shadow_source_transform(MissionData::EntityKind p_kind,
-			int p_index, const Transform3D &p_xform);
+			int p_index, const Transform3D &p_xform,
+			const std::optional<opennova::mission::StaticSourceOrigin> &p_origin_q16 = std::nullopt);
 	bool set_static_terrain_shadow_replacement(int p_bms_id,
 			const String &p_graphic, const Transform3D &p_xform,
 			bool p_active);
@@ -548,6 +555,7 @@ private:
 		uint32_t ai_flags = 0;
 		Vector3 position;
 		Transform3D xform;
+		opennova::mission::StaticSourceOrigin origin_q16{};
 	};
 	ObjectModel *_build_entity_model(const EntityModelSpec &p_spec, const Ref<ObjectData> &p_data,
 			Node3D *p_container, const String &p_name, const String &p_shadow_tag);
@@ -562,6 +570,7 @@ private:
 	void _record_static_terrain_shadow_source(int p_kind, int p_index,
 			int p_bms_id, int p_team, uint32_t p_entity_attrib, int p_item_id,
 			const String &p_graphic, const Transform3D &p_xform,
+			const opennova::mission::StaticSourceOrigin &p_origin_q16,
 			const Ref<ObjectData> &p_data);
 	uint64_t _retain_static_source_asset(const Ref<ObjectData> &p_data);
 

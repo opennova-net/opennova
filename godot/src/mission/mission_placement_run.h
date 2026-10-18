@@ -80,6 +80,7 @@ private:
 		String graphic;
 		bool mirror_reflected = false;
 		Vector<Transform3D> xforms;
+		Vector<opennova::mission::StaticSourceOrigin> origins_q16;
 		Vector<bool> shadow_slots;
 		Vector<int> bms_ids;
 		Vector<int> item_ids;
