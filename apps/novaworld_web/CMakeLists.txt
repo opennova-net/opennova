@@ -53,9 +53,12 @@ add_library(opennova_novaworld_web_core STATIC
     infra/aws_xml.cpp
     infra/infra_routes.cpp
     infra/infra_status.cpp
-    # Every log on the site (the store ONNET_LOG_STORE names) and its route.
+    # Every log on the site (the store ONNET_LOG_STORE names) and its route;
+    # what everything uses (the samples, the AWS resources' metrics) and its.
     infra/log_store.cpp
     infra/log_routes.cpp
+    infra/metrics_store.cpp
+    infra/usage_routes.cpp
 )
 target_include_directories(opennova_novaworld_web_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # The shared library directly: the hiredis containment

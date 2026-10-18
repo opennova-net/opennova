@@ -11,6 +11,7 @@
 #include "http_listener.h"
 #include "infra/infra_status.h"
 #include "infra/log_store.h"
+#include "infra/metrics_store.h"
 #include "loggable.h"
 #include "object_store.h"
 #include "parts.h"
@@ -138,6 +139,12 @@ int run(const program::Boot &boot) {
 	else
 		std::printf("[boot] logs: none read (%s)\n", log_store_none.c_str());
 
+	// The usage view's AWS metrics (infra/metrics_store.h): the database's, the
+	// cache's and the balancer's through the same task role; none on the local
+	// stack, which the view says.
+	infra::MetricsStore metrics_store(*infra_stack.runner,
+			infra::metrics_config_from_env(infra_stack.scratch.path().u8string()));
+
 	// The 404s the routes record, flushed by the main loop into
 	// unknown_messages (GET /api/unknowns reads them there).
 	UnknownTracker unknown_tracker;
@@ -152,6 +159,7 @@ int run(const program::Boot &boot) {
 	http.set_billing(billing_stack->billing.get());
 	http.set_infra(infra_stack.status.get());
 	http.set_log_store(log_store.get(), log_store_none);
+	http.set_metrics_store(&metrics_store);
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
 	// A fleet roll's preview: the image the launch templates pin.

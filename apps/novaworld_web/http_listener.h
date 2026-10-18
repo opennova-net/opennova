@@ -37,7 +37,7 @@ class ObjectStore;
 
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
-namespace infra { class InfraStatus; class LogStore; }
+namespace infra { class InfraStatus; class LogStore; class MetricsStore; }
 
 // Crow-backed HTTP listener. start() registers its route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -72,7 +72,9 @@ namespace infra { class InfraStatus; class LogStore; }
 //                         programs' ECS services and tasks, the balancer, the
 //                         database, the cache, the lobbies, the fleet,
 //                         the machines); LogRoutes (infra/log_routes.h):
-//                         every log on the site
+//                         every log on the site; UsageRoutes
+//                         (infra/usage_routes.h): what everything uses and
+//                         the programs' tasks
 //   game data           — DataSetRoutes and ReleaseRoutes (data_sets/): the
 //                         hosted data sets, their tree uploads into the object
 //                         store and the update releases, each part through
@@ -131,6 +133,10 @@ public:
 		log_store_ = store;
 		log_store_none_ = std::move(none_why);
 	}
+	// The AWS resources' metrics the usage view reads (infra/metrics_store.h).
+	// Set before start(); it must outlive the listener. Null: the view says no
+	// cloud is read here.
+	void set_metrics_store(infra::MetricsStore *store) { metrics_store_ = store; }
 
 	// The object store the hosted data sets' trees and the update packages
 	// live in (object_store.h; parts.h make_object_store), which the admin's
@@ -295,6 +301,8 @@ private:
 	// The log view's store (set_log_store); null: none, for log_store_none_.
 	infra::LogStore *log_store_ = nullptr;
 	std::string log_store_none_ = "no log store";
+	// The usage view's AWS metrics (set_metrics_store); null: none.
+	infra::MetricsStore *metrics_store_ = nullptr;
 	// The object store (set_object_store); null: none.
 	ObjectStore *object_store_ = nullptr;
 	// The slots' limits (set_fleet_slots).

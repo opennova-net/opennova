@@ -363,6 +363,9 @@ the replies say so. Samples are kept 48 h, hours 400 days (`stats.prune`), the s
 and the machines'; the routes read the samples for 1h and 24h and the hours for 7d and
 30d. The admin's **Server usage** page (`/admin/usage`, `GET /api/admin/hosted/usage`)
 reads every live server's newest sample and its last hour.
+`GET /api/admin/usage?subject=server|machine&id=<id>` reads one server's or machine's
+minutes and hours in the shape every subject shares ([`../README.md`](../README.md)
+"Usage").
 
 ## The admin link and the console
 

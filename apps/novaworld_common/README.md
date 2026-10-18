@@ -844,6 +844,34 @@ task role holds these reads alone, scoped to the deployment's resources
 | `ONNET_INFRA_CACHE` | none | Web: the ElastiCache replication group's id. |
 | `ONNET_INFRA_RELEASE_PARAMETER` | none | Web: the SSM parameter holding the release (`/opennova/<deployment>/release`), whose revisions say whether each program runs the release's. |
 | `ONNET_INFRA_FLEET_CLUSTER` | none | Web: the fleet cluster (`opennova-<deployment>-fleet`), whose hostd service and container instances the view reads; unset or empty with hosting off, and nothing of it is read. |
+| `ONNET_INFRA_LOAD_BALANCER` | none | Web: the network load balancer's ARN suffix (`net/<name>/<id>`), the dimension of its CloudWatch metrics (the usage view's `nlb`). |
+
+### Usage
+
+`GET /api/admin/usage?subject=server|machine|program|infra&id=<id>&range=48h|400d` (admin;
+`infra/usage_routes.*`) answers one shape for every subject: `{"subject", "id", "range",
+"step_seconds", "limit": {"cpu", "memory_bytes"}, "series": [{"at", "cpu_percent",
+"memory_bytes", "net_in_bps", "net_out_bps"}], "now"}`, 1-minute points for 48 h or hourly
+ones for 400 days, `cpu_percent` in percent of `limit.cpu`'s CPUs and `now` the newest
+minute while it is at most 3 minutes old. A hosted server's (`hosted_server_samples`,
+`_hourly`; its slot's limits) carry `tick_p99_ms` and `late_ticks` too, a machine's
+(`fleet_machine_samples`, `_hourly`; its memory's limit, `disk_total_bytes`)
+`disk_free_bytes`, and a program's (`program_samples`, `program_hourly`; `&task=` for one
+task) add its tasks up minute by minute, the CPU in percent of their CPUs together. The
+samples keep cumulative byte counters: a rate is the growth between two minutes over the
+time between them, none across a gap past 5 minutes or where a counter went back; an hour's
+is its bytes over the hour. `subject=infra&id=rds|cache|nlb` answers an AWS resource's
+CloudWatch metrics instead (`infra/metrics_store.*`, `cloudwatch:GetMetricData`, kept 60 s):
+`{"available", "unavailable", "error", "period_seconds", "statistics": {"<metric>":
+"Average"|...}, "metrics": {"<metric>": [{"at", "value"}]}}`, the database's CPU, freeable
+memory, connections, network and IOPS, the cache's primary node's CPU, engine CPU, memory,
+network and connections, the balancer's processed bytes, active flows and each target
+group's healthy hosts (`HealthyHostCount:<listener>`); the local stack's says why none.
+`GET /api/admin/programs` lists every program the service runs: its tasks running and
+desired and the revision its ECS service runs (none locally: running is the tasks
+reporting), what its reporting tasks use now, `restarts_24h` (its tasks that reported in
+the last 24 h and no longer do: a crash's, a deploy's replaced ones, a scale-in's) and each
+task, the reporting ones and the ones ECS runs.
 
 ### Logs
 
