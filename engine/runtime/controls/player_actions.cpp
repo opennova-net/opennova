@@ -218,22 +218,26 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	//  (the index byte @0x49C3BA, the entry @0x49C32C) -> case 55 @0x49B20B]
 	frame.respawn_edge = world::latched_key_edge(
 			admitted("respawn") && source.pressed("respawn"), gate.active, respawn_was_down_);
-	// ToSpecial's held state is the binding sampler's, its keys under the
-	// scan's first match (BindingSet::pressed_key); the handler itself reads
-	// the keys raw (g_InputState.keyState), and a release whose press another
-	// row took is D-CTRL-9's. A press dispatches only with captured gameplay
-	// input and under the death screen's binding scan, like the other weapon
-	// rows. The release pass has neither gate: a key whose press latch is set
-	// and that reads up dispatches its release row whenever the input frame
-	// runs, over a screen too, unless an open text line holds the keyboard,
-	// which clears the latch without the dispatch. The latch follows the keys
-	// regardless.
+	// ToSpecial's latch and held state follow its keys by the key state alone
+	// (keys_down), which the handler reads raw (g_InputState.keyState): a key
+	// held through the death (its row scan-gated, @0x49D332..0x49D348)
+	// releases at its key-up, not at the death, and a key held through an open
+	// text line (its events the line's) gives no press when the line closes.
+	// A press dispatches only on the sampler's fire (pressed(), which reads a
+	// keyboard key up under the line, never a mouse button), with captured
+	// gameplay input and under the death screen's binding scan, like the other
+	// weapon rows. The release pass has neither gate: a key whose press latch
+	// is set and that reads up dispatches its release row whenever the input
+	// frame runs, over a screen too, unless an open text line holds the
+	// keyboard, which clears the latch without the dispatch. A release whose
+	// press another row took is D-CTRL-9's.
 	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181;
-	//  Input_ProcessKeyboardEvents, the release pass @0x49D249..0x49D2B9 (the
-	//  capture-mode skip of the queue @0x49D29F)]
-	frame.to_special_held = source.pressed("ToSpecial");
+	//  Input_ProcessKeyboardEvents, the latch set @0x49D2ED, the release pass
+	//  @0x49D249..0x49D2B9 (the capture-mode skip of the queue @0x49D29F)]
+	frame.to_special_held = source.keys_down("ToSpecial");
 	if (frame.to_special_held && !to_special_was_down_)
-		frame.to_special_edge = captured && admitted("ToSpecial") && gate.simulation_available;
+		frame.to_special_edge = source.pressed("ToSpecial") && captured &&
+				admitted("ToSpecial") && gate.simulation_available;
 	else if (!frame.to_special_held && to_special_was_down_)
 		frame.to_special_edge = !gate.keyboard_captured && gate.simulation_available;
 	to_special_was_down_ = frame.to_special_held;

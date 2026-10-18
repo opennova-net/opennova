@@ -21,6 +21,15 @@ public:
 	// [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d470 — Shift or row
 	//  flag 0x200 ORs 0x80000000 into the queued action].
 	virtual bool shift_down() const = 0;
+	// Whether a key bound to the token's row is down by the key state alone:
+	// no scan gate, no keyboard capture, a special-key take included. Retail's
+	// key-press latch is set on every key event (a captured or consumed one
+	// too) and its release pass reads only the latch and the key state; the
+	// ToSpecial handler reads the keys raw.
+	// [orig: Input_ProcessKeyboardEvents -- the latch set @0x49D2ED ahead of
+	//  the capture and special-key branches, the release pass @0x49D240 /
+	//  @0x49D249; Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
+	virtual bool keys_down(const char *token) const { return pressed(token); }
 };
 
 enum class PlayerAction {

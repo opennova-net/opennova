@@ -32,6 +32,9 @@ public:
 		return input != nullptr &&
 				input->is_physical_key_pressed(static_cast<Key>(KEY_0 + p_digit));
 	}
+	bool keys_down(const char *p_token) const override {
+		return pressed(p_token) || (controls_.is_valid() && controls_->is_token_key_down(p_token));
+	}
 	// Shift's sign bit reads the key-state array, which a menu close's reset
 	// clears (engine controls::KeyStateReset carries the witness).
 	bool shift_down() const override {

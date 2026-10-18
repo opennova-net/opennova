@@ -202,6 +202,21 @@ bool ControlsModel::vk_down_(int p_vk) const {
 	return down;
 }
 
+bool ControlsModel::is_token_key_down(const char *p_token) const {
+	const opennova::controls::BindingRecord *r =
+			bindings_.record(bindings_.index_of_token(p_token));
+	if (r == nullptr) return false;
+	Input *input = Input::get_singleton();
+	for (const int vk : {static_cast<int>(r->primary), static_cast<int>(r->secondary)}) {
+		if (vk == 0) continue;
+		const int key = godot_key_from_vk(vk);
+		if (key_reset_.held(vk, input != nullptr && key != 0 &&
+						input->is_physical_key_pressed(static_cast<Key>(key))))
+			return true;
+	}
+	return false;
+}
+
 void ControlsModel::reset_key_state() {
 	Input *input = Input::get_singleton();
 	key_reset_.reset([input](int p_vk) {

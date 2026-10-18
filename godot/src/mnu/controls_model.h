@@ -117,6 +117,11 @@ public:
 	void consume_key_press(int p_vk);
 	// A VK's held state as the samplers read it (a consumed press reads up).
 	bool is_vk_down(int p_vk) const { return vk_down_(p_vk); }
+	// Whether a key bound to the token is down by the key state alone (the
+	// reset-aware device state; no scan gate, no keyboard capture, a
+	// special-key take included; engine controls::PlayerActionSource::keys_down
+	// carries the witness).
+	bool is_token_key_down(const char *p_token) const;
 	// A menu close's key-state reset: every key held now reads up until its
 	// next key-down, which the shell reports through key_down_event for every
 	// key press and OS repeat, or its release (engine controls::KeyStateReset

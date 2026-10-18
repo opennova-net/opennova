@@ -40,6 +40,11 @@ struct Keys : PlayerActionSource {
 	bool digit_down(int digit) const override { return digits[digit]; }
 	bool shift = false;
 	bool shift_down() const override { return shift; }
+	// The key state alone, for a held key the scan or a text line hides.
+	std::set<std::string> raw;
+	bool keys_down(const char *token) const override {
+		return raw.count(token) != 0 || pressed(token);
+	}
 };
 
 bool requests_are(const PlayerActionFrame &frame, const std::vector<PlayerActionRequest> &expected) {
@@ -687,6 +692,41 @@ bool test_to_special_release_over_a_screen() {
 	return true;
 }
 
+// ToSpecial's latch follows its keys by the key state alone: held through the
+// death (the row scan-gated, so the sampler reads it up) it releases at its
+// key-up, not at the death; held through an open text line it gives no press
+// when the line closes, its key events having been the line's.
+// [orig: Input_ProcessKeyboardEvents, the latch set @0x49D2ED, the release
+//  pass @0x49D240 / @0x49D249, the press pass's gate @0x49D332..0x49D348]
+bool test_to_special_latch_reads_the_key_state() {
+	Keys keys;
+	PlayerActionPoll gate;
+	gate.active = true;
+	gate.captured = true;
+	gate.simulation_available = true;
+	PlayerActions actions;
+	keys.hold("ToSpecial", 'F');
+	CHECK(actions.poll(keys, gate).to_special_edge); // the press
+	// The death: the sampler drops the row, the key is still down.
+	keys.release("ToSpecial");
+	keys.raw.insert("ToSpecial");
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	keys.raw.clear(); // the key-up
+	CHECK(actions.poll(keys, gate).to_special_edge);
+	// A text line opens over the held key and closes with it still down.
+	keys.hold("ToSpecial", 'F');
+	CHECK(actions.poll(keys, gate).to_special_edge);
+	PlayerActionPoll typing = gate;
+	typing.keyboard_captured = true;
+	keys.release("ToSpecial");
+	keys.raw.insert("ToSpecial");
+	CHECK(!actions.poll(keys, typing).to_special_edge);
+	keys.raw.clear();
+	keys.hold("ToSpecial", 'F'); // the line closed: the sampler sees it again
+	CHECK(!actions.poll(keys, gate).to_special_edge);
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
@@ -697,7 +737,7 @@ int main() {
 			test_live_binding_modifier_remap_and_use_stream,
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
 			test_wheel_remainder_dispatches_whole_notches,
-			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release, test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen,
+			test_spectator_rows_edge_to_their_codes, test_key_state_reset, test_reset_drops_the_held_release, test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen, test_to_special_latch_reads_the_key_state,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
 			test_held_use_runs_the_arm_every_frame})
