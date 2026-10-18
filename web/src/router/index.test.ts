@@ -5,6 +5,8 @@ import AddressesSection from '../pages/admin/AddressesSection.vue';
 import LobbyServerPage from '../pages/LobbyServerPage.vue';
 import MachineDetailSection from '../pages/admin/MachineDetailSection.vue';
 import NotFoundPage from '../pages/NotFoundPage.vue';
+import ServerLogsTab from '../pages/servers/ServerLogsTab.vue';
+import ServerUsageTab from '../pages/servers/ServerUsageTab.vue';
 
 // The routes whose paths take a numeric id resolve a real one: a pattern's
 // \\d in a string literal must stay escaped, or it matches the letter d.
@@ -15,6 +17,8 @@ describe('router', () => {
     ['/me/addresses', AddressesPage],
     ['/admin/addresses', AddressesSection],
     ['/admin/fleet/machines/3', MachineDetailSection],
+    ['/admin/fleet/12/usage', ServerUsageTab],
+    ['/admin/fleet/12/logs', ServerLogsTab],
   ])('resolves %s', (path, page) => {
     const matched = router.resolve(path).matched;
     expect(matched.at(-1)?.components?.default).toBe(page);

@@ -131,7 +131,8 @@ const backLabel = computed(() => (props.scope === 'admin' ? 'Fleet' : 'All serve
 const owner = computed(() => (server.value as FleetServer | null)?.owner ?? null);
 
 // The owner's tabs; the admin's name the settings tab for the game's (beside
-// the machine's) and add the Machine tab.
+// the machine's) and add the Usage, Logs and Machine tabs (an owner never sees
+// raw logs or a machine's figures).
 const tabs = computed<Tab[]>(() => {
   const common = [
     { path: base.value, label: 'Overview' },
@@ -142,6 +143,8 @@ const tabs = computed<Tab[]>(() => {
     return [
       ...common,
       { path: `${base.value}/game-settings`, label: 'Game settings' },
+      { path: `${base.value}/usage`, label: 'Usage' },
+      { path: `${base.value}/logs`, label: 'Logs' },
       { path: `${base.value}/machine`, label: 'Machine' },
     ];
   }

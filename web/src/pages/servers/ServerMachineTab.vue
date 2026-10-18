@@ -6,7 +6,11 @@
     </p>
     <dl v-else class="grid gap-x-6 gap-y-2 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[auto_1fr]">
       <dt class="text-ink-muted">Machine</dt>
-      <dd class="break-all font-mono text-ink">{{ fleet.machine_ref }}</dd>
+      <dd class="break-all font-mono text-ink">
+        <RouterLink :to="`/admin/fleet/machines/${fleet.machine_ref}`" class="text-accent hover:text-ink-bright">
+          {{ fleet.machine_ref }}<span class="sr-only">: its own page</span>
+        </RouterLink>
+      </dd>
       <dt class="text-ink-muted">Slot</dt>
       <dd class="text-ink">{{ fleet.slot ?? 'None' }}</dd>
       <dt class="text-ink-muted">Game port</dt>
@@ -33,8 +37,8 @@
 
 <script setup lang="ts">
 // An admin's fleet server page's Machine tab: where the server runs (its
-// machine, slot and game port) and that machine's own record, from GET
-// /api/admin/hosted/<id>.
+// machine, to the machine's own page, slot and game port) and that machine's
+// own record, from GET /api/admin/hosted/<id>.
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import type { FleetServer, HostedServer } from '../../types/hostedServer';
