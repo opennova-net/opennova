@@ -580,7 +580,7 @@ run "placeholder_email" {
     error_message = "a placeholder address subscribes nothing"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.server) == 7 && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 6 && length(aws_ce_anomaly_monitor.services) == 1
+    condition     = length(aws_cloudwatch_metric_alarm.server) == 9 && length(aws_cloudwatch_metric_alarm.program_heartbeat) == 6 && length(aws_ce_anomaly_monitor.services) == 1
     error_message = "the alarms and the monitor exist all the same"
   }
 }
