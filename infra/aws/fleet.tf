@@ -221,7 +221,7 @@ data "aws_iam_policy_document" "machine" {
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
       aws_cloudwatch_log_group.machines.arn, "${aws_cloudwatch_log_group.machines.arn}:*",
-      local.servers_log_group_arn, "${local.servers_log_group_arn}:*",
+      aws_cloudwatch_log_group.servers.arn, "${aws_cloudwatch_log_group.servers.arn}:*",
     ]
   }
 }

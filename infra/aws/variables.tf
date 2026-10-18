@@ -193,6 +193,12 @@ variable "log_retention_days" {
   default     = 30
 }
 
+variable "server_log_retention_days" {
+  description = "How long CloudWatch keeps the hosted game servers' own output, in days."
+  type        = number
+  default     = 14
+}
+
 variable "tags" {
   description = "Additional resource tags"
   type        = map(string)

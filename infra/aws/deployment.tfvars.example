@@ -90,3 +90,4 @@ cloudflare_web_proxied = true
 # cost_anomaly_monitor       = true      # false if the account has one already
 # cost_anomaly_threshold_usd = 20
 # log_retention_days         = 30
+# server_log_retention_days  = 14      # the hosted servers' output (the servers log group)

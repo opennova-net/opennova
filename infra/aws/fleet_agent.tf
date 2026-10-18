@@ -46,10 +46,6 @@ locals {
   fleet_cluster_name = "${local.name}-fleet"
   fleet_cluster_arn  = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:cluster/${local.fleet_cluster_name}"
 
-  # The game servers' log group, by name (observability.tf keeps it): the
-  # slots' containers write it with the instance role.
-  servers_log_group_arn = "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:/opennova/${local.deployment}/servers"
-
   # The machine's paths hostd works in, each bound at the same path inside
   # its task (the servers' `docker run --mount` names host paths).
   hostd_volumes = {
@@ -72,7 +68,7 @@ locals {
       "--service", local.internal_url,
       "--machine-file", "/etc/opennova/machine-id",
       "--ecs-config", "/etc/ecs/ecs.config",
-      "--log-group", aws_cloudwatch_log_group.machines.name,
+      "--log-group", aws_cloudwatch_log_group.servers.name,
       "--log-region", local.region,
     ]
     mountPoints = [for k in sort(keys(local.hostd_volumes)) : {
