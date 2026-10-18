@@ -147,7 +147,8 @@ struct Writer {
 			for (int32_t b : f.box) w.write_i32(b);
 			w.write_u32(f.flags);
 			w.write_u8(f.surface);
-			w.write_zeros(3);
+			w.write_zeros(1);
+			w.write_i16(f.aux);
 		}
 		for (const CollisionSection &s : c.sections) {
 			w.write_i32(s.flags);
@@ -235,12 +236,13 @@ struct Writer {
 		w.write_i16(m.frame_rate);
 		w.write_i8(m.frame_count);
 		w.write_u8(m.frame_counter);
-		w.write_zeros(16); // the region colour (runtime) and its triplets
+		w.write_zeros(4); // the region colour (runtime)
+		w.write_bytes(m.colours.data(), m.colours.size());
 		for (int8_t id : m.region_textures) w.write_i8(id);
 		w.write_i8(m.alpha_texture);
-		w.write_zeros(4); // the environment tint
+		w.write_u32(m.env_tint);
 		w.write_u8(m.env_pass);
-		w.write_zeros(1);
+		w.write_u8(m.env_form);
 		w.write_u8(m.shader);
 		w.write_zeros(5);
 		w.write_u8(m.colour_source);
@@ -250,9 +252,8 @@ struct Writer {
 		w.write_u8(m.blend);
 		w.write_u8(m.paired);
 		w.write_zeros(10);
-		// +0x48, +0x4C: the tilings no reader takes, 1 from the tool [orig: @ 0x447AF3..0x447B16 (df4oed)].
-		w.write_f32(1.0f);
-		w.write_f32(1.0f);
+		w.write_f32(m.tiling[0]); // [orig: @ 0x447AF3..0x447B16 (df4oed)]
+		w.write_f32(m.tiling[1]);
 		generator(m.u);
 		generator(m.v);
 		w.write_u8(m.rgb.style);
@@ -350,7 +351,8 @@ struct Writer {
 		w.write_i32(static_cast<int32_t>(m.parts.size()));
 		w.write_zeros(4);
 		w.write_i32(static_cast<int32_t>(m.attach_points.size()));
-		w.write_zeros(0x50 - 0x1C);
+		w.write_zeros(4);
+		for (uint16_t word : m.material_words) w.write_u16(word);
 		w.write_u32(m.flags);
 		w.write_zeros(0x60 - 0x54);
 		w.write_u32(0);

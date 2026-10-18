@@ -165,7 +165,8 @@ struct Parser {
 			for (int32_t &b : f.box) b = r.read_i32();
 			f.flags = r.read_u32();
 			f.surface = r.read_u8();
-			r.skip(3);
+			r.skip(1);
+			f.aux = r.read_i16();
 		}
 		c.sections.resize(static_cast<size_t>(counts[3]));
 		for (CollisionSection &s : c.sections) {
@@ -268,7 +269,8 @@ struct Parser {
 		const int32_t part_count = r.read_i32();
 		r.skip(4);
 		const int32_t point_count = r.read_i32();
-		r.skip(0x50 - 0x1C);
+		r.skip(4);
+		for (uint16_t &word : m.material_words) word = r.read_u16();
 		m.flags = r.read_u32();
 		r.skip(0x60 - 0x54);
 		m.extra_count = r.read_u32();
@@ -346,12 +348,13 @@ struct Parser {
 			mat.frame_rate = block.read_i16();
 			mat.frame_count = block.read_i8();
 			mat.frame_counter = block.read_u8();
-			block.skip(16); // the region colour (runtime) and its triplets
+			block.skip(4); // the region colour (runtime)
+			block.read_bytes(mat.colours.data(), mat.colours.size());
 			for (int8_t &id : mat.region_textures) id = block.read_i8();
 			mat.alpha_texture = block.read_i8();
-			block.skip(4);  // the environment tint
+			mat.env_tint = block.read_u32();
 			mat.env_pass = block.read_u8();
-			block.skip(1);
+			mat.env_form = block.read_u8();
 			mat.shader = block.read_u8();
 			block.skip(5);
 			mat.colour_source = block.read_u8();
@@ -360,7 +363,8 @@ struct Parser {
 			mat.alpha_ref = block.read_u8();
 			mat.blend = block.read_u8();
 			mat.paired = block.read_u8();
-			block.skip(18); // +0x3E..+0x50: unread, then the tilings no reader takes
+			block.skip(10); // +0x3E..+0x48: unread
+			mat.tiling = {block.read_f32(), block.read_f32()};
 			mat.u = b.generator();
 			mat.v = b.generator();
 			mat.rgb.style = block.read_u8();
