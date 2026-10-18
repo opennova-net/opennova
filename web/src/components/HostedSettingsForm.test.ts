@@ -2,7 +2,9 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import HostedSettingsForm from './HostedSettingsForm.vue';
 import { startHostedServer } from '../api/hostedServer';
+import { address } from '../test/addressFixtures';
 import { DFX2, JO, hostedServer, settings } from '../test/hostedFixtures';
+import type { Address } from '../types/addresses';
 import type { HostedDataSet, HostedSettings } from '../types/hostedServer';
 import { MISSIONS_MAX } from '../utils/hostedSettings';
 
@@ -17,7 +19,7 @@ const ESCALATION = JO.expansions[0].id;
 function mountForm(
   dataSets: HostedDataSet[] = [JO, DFX2],
   previous: HostedSettings | null = null,
-  extra: { baseId?: string; ownMachinesFree?: number } = {},
+  extra: { baseId?: string; ownMachinesFree?: number; addresses?: Address[]; preferredAddressId?: number | null } = {},
 ) {
   return mount(HostedSettingsForm, { props: { previous, dataSets, ...extra } });
 }
@@ -148,7 +150,50 @@ describe('HostedSettingsForm', () => {
     await own.get('#new-server-own_machine').setValue(true);
     await own.get('form').trigger('submit');
     await flushPromises();
-    expect(start).toHaveBeenCalledWith(expect.objectContaining({ game_name: 'Night Ops 2' }), true);
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ game_name: 'Night Ops 2' }), true, null);
+  });
+
+  it('offers the free static addresses on an own machine, the preferred one first', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(4, { state: 'requested', own_machine: true }) });
+    const free = [address(1, 'smoke'), address(2, 'arena')];
+    const wrapper = mountForm([JO], null, { ownMachinesFree: 1, addresses: free, preferredAddressId: 2 });
+    // Only once the own machine is picked.
+    expect(wrapper.find('#hosted-settings-address_id').exists()).toBe(false);
+    await wrapper.get('#hosted-settings-own_machine').setValue(true);
+    const select = wrapper.get('#hosted-settings-address_id');
+    expect(select.findAll('option').map((o) => o.text())).toEqual([
+      'No static address',
+      'smoke.play.opennova.net',
+      'arena.play.opennova.net',
+    ]);
+    expect((select.element as HTMLSelectElement).selectedIndex).toBe(2);
+    await wrapper.get('#hosted-settings-game_name').setValue('Night Ops');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ game_name: 'Night Ops' }), true, 2);
+
+    // None picked: no address goes.
+    (select.element as HTMLSelectElement).selectedIndex = 0;
+    await select.trigger('change');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.anything(), true, null);
+
+    // A shared machine never names one.
+    await wrapper.get('#hosted-settings-own_machine').setValue(false);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.anything(), false, null);
+  });
+
+  it('starts the pick on the first free address when the preferred one is taken, and hides it with none free', async () => {
+    const first = mountForm([JO], null, { ownMachinesFree: 1, addresses: [address(1, 'smoke')], preferredAddressId: 9 });
+    await first.get('#hosted-settings-own_machine').setValue(true);
+    expect((first.get('#hosted-settings-address_id').element as HTMLSelectElement).selectedIndex).toBe(1);
+
+    const none = mountForm([JO], null, { ownMachinesFree: 1, addresses: [] });
+    await none.get('#hosted-settings-own_machine').setValue(true);
+    expect(none.find('#hosted-settings-address_id').exists()).toBe(false);
   });
 
   it('marks the game picker when the backend refuses the data set', async () => {

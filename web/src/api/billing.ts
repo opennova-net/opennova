@@ -14,10 +14,12 @@ import { isAxiosError } from 'axios';
 import { apiClient } from './client';
 import { formatRetryAfter, parseRetryAfter } from './session';
 import type {
+  AddressSubscription,
   BillingItem,
   MyBilling,
   OwnMachineOffer,
   OwnMachineSubscription,
+  StaticAddressOffer,
   TierNumber,
   TierOffer,
   TierSubscription,
@@ -35,11 +37,16 @@ export type BillingErrorCode =
   | 'rate_limited'
   | 'invalid_json'
   | 'invalid_item'
+  | 'invalid_field'
   | 'not_eligible'
   | 'already_subscribed'
   | 'own_machine_limit'
+  | 'address_limit'
+  | 'payment_past_due'
+  | 'sold_out'
   | 'checkout_in_progress'
   | 'no_billing_account'
+  | 'not_found'
   | 'stripe_unavailable'
   | 'db_error'
   | 'network'
@@ -65,11 +72,16 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<BillingErrorCode>([
   'rate_limited',
   'invalid_json',
   'invalid_item',
+  'invalid_field',
   'not_eligible',
   'already_subscribed',
   'own_machine_limit',
+  'address_limit',
+  'payment_past_due',
+  'sold_out',
   'checkout_in_progress',
   'no_billing_account',
+  'not_found',
   'stripe_unavailable',
   'db_error',
 ]);
@@ -92,6 +104,7 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
         : 'Too many requests. Try again in a little while.';
     case 'invalid_json':
     case 'invalid_item':
+    case 'invalid_field':
       return 'The server could not read the request. Reload the page and try again.';
     case 'not_eligible':
       return 'Your account cannot buy that right now: an own machine needs a support tier first, and an account that is not active cannot subscribe.';
@@ -99,10 +112,18 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
       return 'You already have a support tier. Change it in the billing portal.';
     case 'own_machine_limit':
       return 'You already have an own machine for every server your support tier covers. A higher tier makes room for more.';
+    case 'address_limit':
+      return 'You already have a static address for every own machine. Add an own machine first to add another address.';
+    case 'payment_past_due':
+      return 'A payment of yours is past due. Fix it in the billing portal first, then add the static address.';
+    case 'sold_out':
+      return 'Hosting is full: new subscriptions are paused. Try again later; no payment was taken.';
     case 'checkout_in_progress':
       return 'A checkout for your account is already starting, perhaps in another tab. Wait a moment, then try again.';
     case 'no_billing_account':
       return 'You have no billing account yet: subscribe to a support tier first.';
+    case 'not_found':
+      return 'That static address subscription is no longer open. Reload the page.';
     case 'stripe_unavailable':
       return 'Stripe could not take the request. Try again in a moment; no payment was taken.';
     case 'db_error':
@@ -153,14 +174,18 @@ function parseTier(value: unknown): TierOffer | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null) return null;
   if (!isTier(v.tier) || !isCount(v.max_servers) || !isAmount(v.amount) || v.interval !== 'month') return null;
-  return { tier: v.tier, max_servers: v.max_servers, amount: v.amount, interval: 'month' };
+  if (typeof v.available !== 'boolean') return null;
+  return { tier: v.tier, max_servers: v.max_servers, amount: v.amount, interval: 'month', available: v.available };
 }
 
-function parseOwnMachineOffer(value: unknown): OwnMachineOffer | null | undefined {
+// An add-on on offer (the own machine, the static address): null when it is
+// not sold, undefined when malformed.
+function parseAddOnOffer(value: unknown): OwnMachineOffer | StaticAddressOffer | null | undefined {
   if (value === null || value === undefined) return null;
   const v = value as Record<string, unknown>;
   if (typeof v !== 'object' || !isAmount(v.amount) || typeof v.interval !== 'string') return undefined;
-  return { amount: v.amount, interval: v.interval };
+  if (typeof v.available !== 'boolean') return undefined;
+  return { amount: v.amount, interval: v.interval, available: v.available };
 }
 
 // The tiers, in order, each once; a reply naming a malformed tier is refused
@@ -171,11 +196,12 @@ export function parseTiers(value: unknown): TiersResponse | null {
   if (typeof v.enabled !== 'boolean' || typeof v.currency !== 'string' || !Array.isArray(v.tiers)) return null;
   const tiers = v.tiers.map(parseTier);
   if (tiers.some((t) => t === null)) return null;
-  const ownMachine = parseOwnMachineOffer(v.own_machine);
-  if (ownMachine === undefined) return null;
+  const ownMachine = parseAddOnOffer(v.own_machine);
+  const staticAddress = parseAddOnOffer(v.static_address);
+  if (ownMachine === undefined || staticAddress === undefined) return null;
   const sorted = (tiers as TierOffer[]).slice().sort((a, b) => a.tier - b.tier);
   if (sorted.some((t, i) => i > 0 && sorted[i - 1].tier === t.tier)) return null;
-  return { enabled: v.enabled, currency: v.currency, tiers: sorted, own_machine: ownMachine };
+  return { enabled: v.enabled, currency: v.currency, tiers: sorted, own_machine: ownMachine, static_address: staticAddress };
 }
 
 const isTime = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v));
@@ -208,6 +234,21 @@ function parseOwnMachineSubscription(value: unknown): OwnMachineSubscription | n
   };
 }
 
+function parseAddressSubscription(value: unknown): AddressSubscription | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null) return null;
+  if (typeof v.stripe_subscription_id !== 'string' || typeof v.status !== 'string') return null;
+  if (!isTime(v.current_period_end) || typeof v.cancel_at_period_end !== 'boolean') return null;
+  if (v.address_id !== null && !isCount(v.address_id)) return null;
+  return {
+    stripe_subscription_id: v.stripe_subscription_id,
+    status: v.status,
+    current_period_end: v.current_period_end,
+    cancel_at_period_end: v.cancel_at_period_end,
+    address_id: v.address_id,
+  };
+}
+
 export function parseMyBilling(value: unknown): MyBilling | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null) return null;
@@ -220,6 +261,9 @@ export function parseMyBilling(value: unknown): MyBilling | null {
   const subscription = parseSubscription(v.subscription);
   const ownMachine = parseOwnMachineSubscription(v.own_machine_subscription);
   if (subscription === undefined || ownMachine === undefined) return null;
+  if (!isCount(v.static_addresses) || !Array.isArray(v.address_subscriptions)) return null;
+  const addresses = v.address_subscriptions.map(parseAddressSubscription);
+  if (addresses.some((a) => a === null)) return null;
   return {
     enabled,
     max_servers: max,
@@ -231,6 +275,8 @@ export function parseMyBilling(value: unknown): MyBilling | null {
     can_start: v.can_start,
     subscription,
     own_machine_subscription: ownMachine,
+    static_addresses: v.static_addresses,
+    address_subscriptions: addresses as AddressSubscription[],
     can_manage: v.can_manage,
     can_subscribe: v.can_subscribe,
   };
@@ -275,15 +321,27 @@ export function syncMyBilling(): Promise<BillingResult<MyBilling>> {
 // POST /api/billing/checkout: a Stripe Checkout session for `item`; its URL.
 // 409 already_subscribed while a tier is live (change it in the portal), 409
 // own_machine_limit for the add-on once every server the account may run has
-// an own machine, 409 checkout_in_progress while another checkout of the
-// account is starting.
+// an own machine, 409 address_limit for a static address once every own
+// machine has one, 403 payment_past_due for a static address while a payment
+// is past due, 409 sold_out when the fleet has sold all it holds of what the
+// item adds, 409 checkout_in_progress while another checkout of the account
+// is starting.
 export function startCheckout(item: BillingItem): Promise<BillingResult<string>> {
   return call(() => apiClient.post<unknown>('/billing/checkout', { item }), pickUrl);
 }
 
-// POST /api/billing/portal: a Stripe billing portal session; its URL.
-export function openPortal(): Promise<BillingResult<string>> {
-  return call(() => apiClient.post<unknown>('/billing/portal'), pickUrl);
+// POST /api/billing/portal: a Stripe billing portal session; its URL. With
+// `cancelSubscription` (one of the account's open static address
+// subscriptions), the portal's cancel flow for that subscription, which
+// returns to /me/addresses; 404 not_found for one that is not.
+export function openPortal(cancelSubscription?: string): Promise<BillingResult<string>> {
+  return call(
+    () =>
+      cancelSubscription === undefined
+        ? apiClient.post<unknown>('/billing/portal')
+        : apiClient.post<unknown>('/billing/portal', { cancel_subscription: cancelSubscription }),
+    pickUrl,
+  );
 }
 
 // The checkout item for a tier.

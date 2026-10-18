@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import SupportTierPage from './SupportTierPage.vue';
 import { fetchMyBilling, fetchTiers, openPortal, startCheckout, syncMyBilling } from '../../api/billing';
-import { myBilling, subscribed, subscription, tiersResponse } from '../../test/billingFixtures';
+import { addressSubscription, myBilling, subscribed, subscription, tiersResponse } from '../../test/billingFixtures';
 import { navigateToStripe } from '../../utils/navigate';
 
 vi.mock('../../api/billing', async (importOriginal) => ({
@@ -131,7 +131,134 @@ describe('SupportTierPage', () => {
     expect(JSON.parse(window.sessionStorage.getItem('opennova_checkout')!)).toEqual({
       item: 'own_machine',
       own_machines_before: 1,
+      addresses_before: 0,
     });
+  });
+
+  it('pauses what the fleet is sold out of, keeping the rest', async () => {
+    const offer = tiersResponse();
+    tiers.mockResolvedValue({
+      ok: true,
+      value: tiersResponse({
+        tiers: offer.tiers.map((t) => ({ ...t, available: t.tier !== 3 })),
+        own_machine: { amount: 4500, interval: 'month', available: false },
+      }),
+    });
+    mine.mockResolvedValue({ ok: true, value: subscribed(3, { own_machines: 1, own_machine_subscription: ownMachine }) });
+    const page = await mountAt('/me/support');
+    // The account's own tier keeps its Manage while the fleet is full.
+    expect(page.get('#support-tier-3 button').attributes('disabled')).toBeUndefined();
+    expect(page.get('#support-tier-3').text()).not.toContain('Hosting is full');
+    const add = page.findAll('button').find((b) => b.text() === 'Add another own machine')!;
+    expect(add.attributes('disabled')).toBeDefined();
+    expect(page.get('#support-own-machine-hint').text()).toBe('Hosting is full: new subscriptions are paused.');
+    expect(page.findAll('button').some((b) => b.text() === 'Cancel one' && b.attributes('disabled') === undefined)).toBe(true);
+  });
+
+  it('reads the tiers again when a checkout finds the fleet sold out', async () => {
+    checkout.mockResolvedValue({
+      ok: false,
+      error: { code: 'sold_out', status: 409, message: 'Hosting is full: new subscriptions are paused. Try again later; no payment was taken.' },
+    });
+    const page = await mountAt('/me/support');
+    const offer = tiersResponse();
+    tiers.mockResolvedValue({ ok: true, value: tiersResponse({ tiers: offer.tiers.map((t) => ({ ...t, available: false })) }) });
+    await page.get('#support-tier-1 button').trigger('click');
+    await flushPromises();
+    expect(page.get('[role="alert"]').text()).toContain('no payment was taken');
+    expect(tiers).toHaveBeenCalledTimes(2);
+    expect(page.get('#support-tier-1').text()).toContain('Hosting is full: new subscriptions are paused.');
+    expect(page.get('#support-tier-1 button').attributes('disabled')).toBeDefined();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  const STATIC_ADDRESS = { amount: 500, interval: 'month', available: true };
+
+  it('sells a static address for each own machine, and links to the addresses', async () => {
+    tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: STATIC_ADDRESS }) });
+    mine.mockResolvedValue({
+      ok: true,
+      value: subscribed(3, {
+        own_machines: 2,
+        own_machine_subscription: { ...ownMachine, quantity: 2 },
+        static_addresses: 1,
+        address_subscriptions: [addressSubscription()],
+      }),
+    });
+    checkout.mockResolvedValue({ ok: true, value: CHECKOUT_URL });
+    const page = await mountAt('/me/support');
+    const section = page.get('#support-static-address').element.closest('section')!;
+    expect(section.textContent).toContain('$5');
+    expect(section.textContent).toContain('You have 1 static address.');
+    expect(page.findAll('a').some((a) => a.attributes('href') === '/me/addresses')).toBe(true);
+    const add = page.findAll('button').find((b) => b.text() === 'Add a static address')!;
+    expect(add.attributes('disabled')).toBeUndefined();
+    await add.trigger('click');
+    await flushPromises();
+    expect(checkout).toHaveBeenCalledWith('static_address');
+    expect(JSON.parse(window.sessionStorage.getItem('opennova_checkout')!)).toMatchObject({
+      item: 'static_address',
+      addresses_before: 1,
+    });
+    expect(navigate).toHaveBeenCalledWith(CHECKOUT_URL);
+  });
+
+  it('says why a static address cannot be bought now', async () => {
+    const offered = tiersResponse({ static_address: STATIC_ADDRESS });
+    tiers.mockResolvedValue({ ok: true, value: offered });
+    // No own machine.
+    mine.mockResolvedValue({ ok: true, value: subscribed(2) });
+    let page = await mountAt('/me/support');
+    const button = () => page.findAll('button').find((b) => b.text() === 'Add a static address')!;
+    expect(button().attributes('disabled')).toBeDefined();
+    expect(page.get('#support-static-address-hint').text()).toContain('Needs an own machine first');
+    page.unmount();
+
+    // One own machine, already with its address.
+    mine.mockResolvedValue({
+      ok: true,
+      value: subscribed(2, { own_machines: 1, own_machine_subscription: ownMachine, static_addresses: 1, address_subscriptions: [addressSubscription()] }),
+    });
+    page = await mountAt('/me/support');
+    expect(button().attributes('disabled')).toBeDefined();
+    expect(page.get('#support-static-address-hint').text()).toContain('a static address for every own machine');
+    page.unmount();
+
+    // Room for one, and the fleet sold out of addresses.
+    tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: { ...STATIC_ADDRESS, available: false } }) });
+    mine.mockResolvedValue({ ok: true, value: subscribed(2, { own_machines: 1, own_machine_subscription: ownMachine }) });
+    page = await mountAt('/me/support');
+    expect(button().attributes('disabled')).toBeDefined();
+    expect(page.get('#support-static-address-hint').text()).toBe('Hosting is full: new subscriptions are paused.');
+  });
+
+  it('shows no static address card where none is sold', async () => {
+    const page = await mountAt('/me/support');
+    expect(page.find('#support-static-address').exists()).toBe(false);
+  });
+
+  it('confirms a static address once one more of them is active', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: STATIC_ADDRESS }) });
+    window.sessionStorage.setItem('opennova_checkout', JSON.stringify({ item: 'static_address', addresses_before: 0 }));
+    const before = subscribed(2, { own_machines: 1, own_machine_subscription: ownMachine });
+    mine.mockResolvedValueOnce({ ok: true, value: before }); // the page's load
+    sync.mockResolvedValue({ ok: true, value: before }); // not yet
+    mine.mockResolvedValue({
+      ok: true,
+      value: subscribed(2, {
+        own_machines: 1,
+        own_machine_subscription: ownMachine,
+        static_addresses: 1,
+        address_subscriptions: [addressSubscription({ address_id: null })],
+      }),
+    });
+    await mountAt('/me/support?checkout=success&session_id=cs_test_1');
+    expect(statusText()).toBe('Confirming your payment with Stripe…');
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(statusText()).toBe('Your static address is paid for. Give it a name on your Static addresses page.');
+    expect(router.currentRoute.value.fullPath).toBe('/me/support');
   });
 
   it('confirms another own machine only once the account has one more', async () => {

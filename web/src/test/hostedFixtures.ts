@@ -84,6 +84,7 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
     state,
     live,
     own_machine: false,
+    address: null,
     settings: settings({ game_name: `Server ${id}` }),
     game_display_name: 'Joint Operations',
     expansion_display_name: '',

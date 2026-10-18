@@ -58,6 +58,26 @@ describe('BillingSection', () => {
     expect(wrapper.get('tfoot').text()).toContain('$130');
   });
 
+  it('counts the static addresses where the deployment sells them', async () => {
+    tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: { amount: 500, interval: 'month', available: true } }) });
+    billing.mockResolvedValue({
+      ok: true,
+      value: adminBilling({
+        subscriptions: [
+          subscriptionRow(1, { tier: 2 }),
+          subscriptionRow(1, { item: 'static_address', tier: null, stripe_subscription_id: 'sub_1_address', cancel_at_period_end: true }),
+        ],
+      }),
+    });
+    const wrapper = await mountSection();
+    const rows = wrapper.findAll('tr.billing-tier-row').map((r) => r.findAll('th, td').map((c) => c.text()));
+    expect(rows.at(-1)).toEqual(['Static addresses', '1', '$5', '$5']);
+    expect(wrapper.get('tfoot').text()).toContain('$15');
+    // Listed as what it is, not as a tier.
+    expect(wrapper.text()).toContain('Static address, ends');
+    expect(wrapper.text()).not.toContain('Tier ?');
+  });
+
   it('lists the past due and canceling accounts', async () => {
     const wrapper = await mountSection();
     const text = wrapper.text();

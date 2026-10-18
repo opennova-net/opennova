@@ -149,7 +149,7 @@
           <ul v-else class="divide-y divide-border rounded-panel border border-border bg-panel text-sm">
             <li v-for="s in pastDue" :key="s.stripe_subscription_id" class="flex flex-wrap justify-between gap-2 px-4 py-2">
               <RouterLink :to="`/admin/users/${s.user_id}`" class="text-accent hover:text-ink-bright">{{ s.username || `Account ${s.user_id}` }}</RouterLink>
-              <span class="text-ink-muted">{{ itemLabel(s) }}, Stripe retrying</span>
+              <span class="text-ink-muted">{{ subscriptionItemLabel(s) }}, Stripe retrying</span>
             </li>
           </ul>
         </div>
@@ -159,7 +159,7 @@
           <ul v-else class="divide-y divide-border rounded-panel border border-border bg-panel text-sm">
             <li v-for="s in canceling" :key="s.stripe_subscription_id" class="flex flex-wrap justify-between gap-2 px-4 py-2">
               <RouterLink :to="`/admin/users/${s.user_id}`" class="text-accent hover:text-ink-bright">{{ s.username || `Account ${s.user_id}` }}</RouterLink>
-              <span class="text-ink-muted">{{ itemLabel(s) }}, ends <RelativeTime :value="s.current_period_end" :now="now" /></span>
+              <span class="text-ink-muted">{{ subscriptionItemLabel(s) }}, ends <RelativeTime :value="s.current_period_end" :now="now" /></span>
             </li>
           </ul>
         </div>
@@ -227,7 +227,7 @@
                 <th scope="row" class="px-4 py-2 text-left font-medium">
                   <RouterLink :to="`/admin/users/${s.user_id}`" class="text-accent hover:text-ink-bright">{{ s.username || `Account ${s.user_id}` }}</RouterLink>
                 </th>
-                <td class="whitespace-nowrap px-4 py-2">{{ itemLabel(s) }}</td>
+                <td class="whitespace-nowrap px-4 py-2">{{ subscriptionItemLabel(s) }}</td>
                 <td class="whitespace-nowrap px-4 py-2" :class="s.status === 'past_due' ? 'text-warn' : ''">
                   {{ subscriptionStatusLabel(s.status) }}<template v-if="s.cancel_at_period_end && s.entitled">, canceling</template>
                 </td>
@@ -300,8 +300,8 @@ import {
 } from '../../api/adminBilling';
 import { fetchTiers } from '../../api/billing';
 import { listUsers } from '../../api/users';
-import type { AdminBillingResponse, AdminSubscription, TiersResponse } from '../../types/billing';
-import { subscriptionStatusLabel } from '../../utils/billingView';
+import type { AdminBillingResponse, TiersResponse } from '../../types/billing';
+import { subscriptionItemLabel, subscriptionStatusLabel } from '../../utils/billingView';
 import { billingRevenue } from '../../utils/billingRevenue';
 import { formatMoney, formatRelative, formatUtc } from '../../utils/format';
 
@@ -330,10 +330,6 @@ const holdSummary = computed(() => (billing.value ? limitsHoldSummary(billing.va
 
 function money(cents: number): string {
   return formatMoney(cents, tiers.value?.currency ?? 'usd');
-}
-
-function itemLabel(s: AdminSubscription): string {
-  return s.item === 'own_machine' ? `Own machines: ${s.quantity}` : `Tier ${s.tier ?? '?'}`;
 }
 
 function nameOf(userId: number): string {

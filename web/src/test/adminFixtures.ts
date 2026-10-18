@@ -46,7 +46,14 @@ export function userDetail(id: number, overrides: Partial<UserDetail> = {}): Use
       own_machines: 0,
       can_start: true,
     },
+    capacity: {
+      shared: { sold: 4, sellable: 24 },
+      own_machines: { sold: 1, sellable: 4 },
+      addresses: { sold: 0, sellable: 4 },
+      oversold: false,
+    },
     servers: [],
+    addresses: [],
     billing: { livemode: false, stripe_customer_id: 'cus_test_1', subscriptions: [] },
     ...overrides,
   };

@@ -39,6 +39,26 @@ describe('TierPicker', () => {
     expect(fits.text()).not.toContain('will be stopped');
   });
 
+  it('pauses a tier the fleet is sold out of, but keeps Manage on the account\'s own', async () => {
+    const full = tiers.map((t) => ({ ...t, available: t.tier === 1 }));
+    const wrapper = mount(TierPicker, { props: { tiers: full, currency, mode: 'subscribe' } });
+    const cards = wrapper.findAll('article');
+    expect(cards[0].get('button').attributes('disabled')).toBeUndefined();
+    expect(cards[0].text()).not.toContain('Hosting is full');
+    expect(cards[1].get('button').attributes('disabled')).toBeDefined();
+    expect(cards[1].text()).toContain('Hosting is full: new subscriptions are paused.');
+    expect(cards[1].get('button').attributes('aria-describedby')).toBe('support-tier-2-full');
+    await cards[1].get('button').trigger('click');
+    expect(wrapper.emitted('choose')).toBeUndefined();
+
+    const manage = mount(TierPicker, { props: { tiers: full, currency, mode: 'manage', currentTier: 3, used: 3 } });
+    const mine = manage.findAll('article');
+    expect(mine[2].get('button').attributes('disabled')).toBeUndefined();
+    expect(mine[2].text()).not.toContain('Hosting is full');
+    // A move down that would stop servers says both.
+    expect(mine[1].get('button').attributes('aria-describedby')).toBe('support-tier-2-note support-tier-2-full');
+  });
+
   it('cannot pick a tier whose price is not set', () => {
     const wrapper = mount(TierPicker, {
       props: { tiers: [{ ...tiers[0], amount: null }], currency, mode: 'subscribe' },

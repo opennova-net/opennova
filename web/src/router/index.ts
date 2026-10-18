@@ -11,6 +11,7 @@ import ServersPage from '../pages/account/ServersPage.vue';
 import NewServerPage from '../pages/account/NewServerPage.vue';
 import AccountPage from '../pages/account/AccountPage.vue';
 import SupportTierPage from '../pages/account/SupportTierPage.vue';
+import AddressesPage from '../pages/account/AddressesPage.vue';
 import SupportPage from '../pages/SupportPage.vue';
 import NotFoundPage from '../pages/NotFoundPage.vue';
 import TermsPage from '../pages/legal/TermsPage.vue';
@@ -36,6 +37,7 @@ import JobDetailSection from '../pages/admin/JobDetailSection.vue';
 import InfraSection from '../pages/admin/InfraSection.vue';
 import CdKeysSection from '../pages/admin/CdKeysSection.vue';
 import DataSetsSection from '../pages/admin/DataSetsSection.vue';
+import AddressesSection from '../pages/admin/AddressesSection.vue';
 import { requireUser } from './guards';
 
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
@@ -80,6 +82,8 @@ const router = createRouter({
         // Stripe's Checkout and billing portal return here
         // (?checkout=success&session_id=..., ?checkout=cancel).
         { path: 'support', component: SupportTierPage, meta: { title: 'Support tier' } },
+        // The billing portal's cancel flow for an address returns here.
+        { path: 'addresses', component: AddressesPage, meta: { title: 'Static addresses' } },
         { path: 'account', component: AccountPage, meta: { title: 'Account' } },
         // The hosted server's page before an account could have several:
         // old links land on the list.
@@ -96,6 +100,7 @@ const router = createRouter({
         { path: 'users', component: UsersSection, meta: { title: 'Admin: Users' } },
         { path: 'users/:id(\\d+)', component: UserDetailSection, meta: { title: 'Admin: User' } },
         { path: 'fleet', component: FleetSection, meta: { title: 'Admin: Fleet' } },
+        { path: 'addresses', component: AddressesSection, meta: { title: 'Admin: Static addresses' } },
         {
           path: 'fleet/:id(\\d+)',
           component: ServerDetailLayout,

@@ -62,6 +62,7 @@ const sections: AdminSection[] = [
   { to: '/admin/overview', label: 'Overview' },
   { to: '/admin/users', label: 'Users' },
   { to: '/admin/fleet', label: 'Fleet' },
+  { to: '/admin/addresses', label: 'Static addresses' },
   { to: '/admin/data-sets', label: 'Game data' },
   { to: '/admin/usage', label: 'Server usage' },
   { to: '/admin/billing', label: 'Billing' },

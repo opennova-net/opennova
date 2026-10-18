@@ -29,6 +29,15 @@
           <dt class="text-ink-muted">Address</dt>
           <dd class="break-all font-mono text-xs text-ink">{{ address }}</dd>
         </template>
+        <template v-if="server.address">
+          <dt class="text-ink-muted">Static address</dt>
+          <dd class="break-all font-mono text-xs text-ink">
+            {{ server.address.hostname || server.address.name }}
+            <span v-if="serverAddressEndpoint(server.address)" class="text-ink-muted">
+              {{ serverAddressEndpoint(server.address) }}
+            </span>
+          </dd>
+        </template>
         <template v-if="server.state === 'running' && server.running_at">
           <dt class="text-ink-muted">Running since</dt>
           <dd class="text-ink"><RelativeTime :value="server.running_at" :now="now" /></dd>
@@ -67,15 +76,17 @@
 
 <script setup lang="ts">
 // One of the account's hosted servers on its Servers page: its state, game,
-// players and address while live, and links to its own page (Manage, its
-// console while it runs) or, once it has ended, to a new start with its
-// settings. Its ids carry its id, so any number of cards share a page.
+// players and address while live, its static address, and links to its own
+// page (Manage, its console while it runs) or, once it has ended, to a new
+// start with its settings. Its ids carry its id, so any number of cards share
+// a page.
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from './RelativeTime.vue';
 import { STOPPING_STILL_COUNTS } from '../api/hostedServer';
 import type { HostedServer } from '../types/hostedServer';
 import type { MyServer } from '../types/myServers';
+import { serverAddressEndpoint } from '../utils/addressView';
 import { ownerStateLabel, stateBadgeClass } from '../utils/hostedState';
 
 const props = defineProps<{

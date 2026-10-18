@@ -1,6 +1,8 @@
 // Hosted servers, as the NovaWorld service's routes answer them (snake_case;
 // apps/novaworld_web/hosted/hosted_routes.cpp, README "Hosted servers").
 
+import type { ServerAddress } from './addresses';
+
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
 // stopped | failed. A crash restart goes back to provisioning, and a stop takes
 // any live state to stopping.
@@ -45,10 +47,11 @@ export interface HostedSettings {
 // of the base and the picked expansion.
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
 
-// POST /api/me/servers's body: the settings, and whether the server runs on
-// one of the account's own machines (the own-machine add-on) rather than a
-// shared one.
-export type StartRequest = StartSettings & { own_machine?: boolean };
+// POST /api/me/servers's body: the settings, whether the server runs on one
+// of the account's own machines (the own-machine add-on) rather than a shared
+// one, and on an own machine the static address it runs at (one of the
+// account's ready ones; absent or null for none).
+export type StartRequest = StartSettings & { own_machine?: boolean; address_id?: number | null };
 
 // The whole-number settings, each with its range per data set.
 export type HostedIntField = 'max_players' | 'time_limit' | 'kill_limit' | 'max_score' | 'respawn' | 'start_delay';
@@ -153,6 +156,8 @@ export interface HostedServer {
   live: boolean;
   // It runs on a machine of its own (the own-machine add-on), not a shared one.
   own_machine: boolean;
+  // The static address it runs at (an own machine's), or null.
+  address: ServerAddress | null;
   settings: HostedSettings;
   // The names the service gives the server's game and expansion ("Joint
   // Operations", "Escalation"); the expansion's '' for the base game alone.

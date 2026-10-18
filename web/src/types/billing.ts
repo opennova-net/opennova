@@ -5,17 +5,20 @@
 
 export type TierNumber = 1 | 2 | 3;
 
-// What a checkout buys: a support tier, or the own-machine add-on.
-export type BillingItem = 'tier1' | 'tier2' | 'tier3' | 'own_machine';
+// What a checkout buys: a support tier, the own-machine add-on, or a static
+// address for an own machine.
+export type BillingItem = 'tier1' | 'tier2' | 'tier3' | 'own_machine' | 'static_address';
 
 // One support tier on offer. `amount` is null while the service could not
-// read its price from Stripe.
+// read its price from Stripe. `available` is false while the fleet has sold
+// all it holds of what the tier adds: new subscriptions to it are paused.
 export interface TierOffer {
   tier: TierNumber;
   // The hosted servers it lets the account run at once.
   max_servers: number;
   amount: number | null;
   interval: 'month';
+  available: boolean;
 }
 
 // The own-machine add-on on offer: one server of the account's tier on a
@@ -23,6 +26,15 @@ export interface TierOffer {
 export interface OwnMachineOffer {
   amount: number | null;
   interval: string;
+  available: boolean;
+}
+
+// The static address add-on on offer: one fixed address and name for a
+// server on an own machine, each its own subscription.
+export interface StaticAddressOffer {
+  amount: number | null;
+  interval: string;
+  available: boolean;
 }
 
 // GET /api/billing/tiers (public).
@@ -33,6 +45,8 @@ export interface TiersResponse {
   currency: string;
   tiers: TierOffer[];
   own_machine: OwnMachineOffer | null;
+  // Null when this deployment sells no static address.
+  static_address: StaticAddressOffer | null;
 }
 
 // Stripe's subscription statuses; another one shows as it is.
@@ -67,6 +81,16 @@ export interface OwnMachineSubscription {
   cancel_at_period_end: boolean;
 }
 
+// One static address's own subscription, while open.
+export interface AddressSubscription {
+  stripe_subscription_id: string;
+  status: SubscriptionStatus;
+  current_period_end: string;
+  cancel_at_period_end: boolean;
+  // Its address's row; null while bought and not named yet.
+  address_id: number | null;
+}
+
 // GET /api/me/billing, and POST /api/me/billing/sync.
 export interface MyBilling {
   enabled: boolean;
@@ -84,6 +108,10 @@ export interface MyBilling {
   can_start: boolean;
   subscription: TierSubscription | null;
   own_machine_subscription: OwnMachineSubscription | null;
+  // The static addresses its subscriptions and an admin's grants pay for (at
+  // most its own machines), and each address subscription still open.
+  static_addresses: number;
+  address_subscriptions: AddressSubscription[];
   // The account has a Stripe customer: the billing portal opens.
   can_manage: boolean;
   // A checkout may start (billing on, the account active, no live tier).
@@ -94,13 +122,13 @@ export interface MyBilling {
 // The admin's view (GET /api/admin/billing, and a user's admin page).
 
 // What a subscription is for.
-export type SubscriptionItem = 'tier' | 'own_machine';
+export type SubscriptionItem = 'tier' | 'own_machine' | 'static_address';
 
 // One subscription as NovaWorld last read it from Stripe.
 export interface AdminSubscription {
   stripe_subscription_id: string;
   item: SubscriptionItem;
-  // The tier, for a tier subscription; null for the add-on.
+  // The tier, for a tier subscription; null for an add-on.
   tier: TierNumber | null;
   quantity: number;
   status: SubscriptionStatus;

@@ -3,7 +3,8 @@
 // of throwing, with the server's `error` code mapped to a message: the
 // server's own `message` text is never shown. The users' calls are in
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
-// adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts; here are the
+// adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts, the static
+// addresses' in adminAddresses.ts; here are the
 // NovaWorld service's status and sessions, and
 // the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*).
 
@@ -18,6 +19,7 @@ import type {
   ServerStatus,
 } from '../types/admin';
 import type { FleetMachine, FleetQuery, FleetResponse, FleetRoom, FleetServer } from '../types/hostedServer';
+import { ADDRESS_NAME_RULE } from '../utils/addressView';
 
 // The `error` codes these routes answer with, plus `network` (no reply at
 // all) and `unknown` (a reply this client does not recognise).
@@ -68,6 +70,13 @@ export type AdminErrorCode =
   | 'not_published'
   | 'published'
   | 'up_to_date'
+  // The static address routes (adminAddresses.ts).
+  | 'invalid_name'
+  | 'name_taken'
+  | 'confirm_mismatch'
+  | 'not_releasable'
+  | 'address_limit'
+  | 'addresses_disabled'
   | 'network'
   | 'unknown';
 
@@ -127,6 +136,12 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'not_published',
   'published',
   'up_to_date',
+  'invalid_name',
+  'name_taken',
+  'confirm_mismatch',
+  'not_releasable',
+  'address_limit',
+  'addresses_disabled',
 ]);
 
 function adminMessageFor(code: AdminErrorCode): string {
@@ -218,6 +233,18 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'A published release cannot be deleted. Retire it first.';
     case 'up_to_date':
       return 'That server already runs the current data.';
+    case 'invalid_name':
+      return `That name cannot name a static address. ${ADDRESS_NAME_RULE}`;
+    case 'name_taken':
+      return 'Another static address already has that name (a released one keeps its name until renamed).';
+    case 'confirm_mismatch':
+      return "The name typed is not the address's. Type it exactly to release it.";
+    case 'not_releasable':
+      return 'That address is on its way out already. Refresh the list.';
+    case 'address_limit':
+      return 'That account has a static address for every own machine it has. Grant it another own machine first.';
+    case 'addresses_disabled':
+      return 'This NovaWorld service sells no static address (ONNET_FLEET_MAX_ADDRESSES is 0, or its address settings are incomplete: the boot log says which).';
     case 'network':
       return 'Could not reach the server. Check your connection and try again.';
     case 'unknown':
