@@ -31,6 +31,8 @@ import type {
   HostedSettings,
   HostingEntitlement,
   PinnedTree,
+  ServerPhase,
+  StoppedBecause,
   PlayerAction,
   PlayerActionReply,
   RotationEntry,
@@ -265,6 +267,34 @@ function parseServerData(value: unknown): HostedServerData {
 // page needs (its id, state, liveness and settings). The data it runs on
 // (its data set, expansion, trees and update flags) and its static address
 // are read with defaults, so a reply that leaves them out still shows.
+function parsePhase(value: unknown): ServerPhase | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.name !== 'string') return null;
+  const phase: ServerPhase = { name: v.name };
+  if (isCount(v.bytes_done) && isCount(v.bytes_total)) {
+    phase.bytes_done = v.bytes_done;
+    phase.bytes_total = v.bytes_total;
+  }
+  if (isCount(v.restart) && isCount(v.restart_limit)) {
+    phase.restart = v.restart;
+    phase.restart_limit = v.restart_limit;
+  }
+  if (typeof v.cause === 'string') phase.cause = v.cause;
+  if (typeof v.line === 'string' && v.line !== '') phase.line = v.line;
+  return phase;
+}
+
+function parseStoppedBecause(value: unknown): StoppedBecause | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.cause !== 'string') return null;
+  return {
+    cause: v.cause,
+    exit_code: Number.isInteger(v.exit_code) ? (v.exit_code as number) : null,
+    oom: v.oom === true,
+    line: typeof v.line === 'string' ? v.line : '',
+  };
+}
+
 export function parseHostedServer(value: unknown): HostedServer | null {
   if (!isHostedServerShape(value)) return null;
   const v = value as unknown as Record<string, unknown>;
@@ -278,6 +308,8 @@ export function parseHostedServer(value: unknown): HostedServer | null {
     data: parseServerData(v.data),
     update_available: v.update_available === true,
     update_requested: v.update_requested === true,
+    phase: parsePhase(v.phase),
+    stopped_because: parseStoppedBecause(v.stopped_because),
   };
 }
 

@@ -27,4 +27,23 @@ describe('HostedServerCard', () => {
     const shared = mount(HostedServerCard, { props: { server: hostedServer(3), now: Date.now() }, global: { plugins: [router] } });
     expect(shared.text()).not.toContain('Static address');
   });
+
+  it("says where a start stands, or why the server's last run ended", async () => {
+    const router = await testRouter('/me/servers');
+    const starting = mount(HostedServerCard, {
+      props: {
+        server: hostedServer(1, { state: 'provisioning', updated_at: '2026-10-14 12:00:00', phase: { name: 'launching_machine' } }),
+        now: Date.parse('2026-10-14T12:30:00Z'),
+      },
+      global: { plugins: [router] },
+    });
+    expect(starting.get('.hosted-phase').text()).toBe('Starting a machine for it. This is taking longer than usual.');
+
+    const ended = mount(HostedServerCard, {
+      props: { server: hostedServer(2, { state: 'stopped', stopped_because: { cause: 'update', exit_code: 0, oom: false, line: '' } }), now: Date.now() },
+      global: { plugins: [router] },
+    });
+    expect(ended.find('.hosted-phase').exists()).toBe(false);
+    expect(ended.get('.hosted-stopped-because').text()).toBe('It was restarted onto newer game data.');
+  });
 });
