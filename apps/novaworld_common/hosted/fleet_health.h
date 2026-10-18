@@ -175,9 +175,12 @@ struct HealthInputs {
 // on), null with hosting off (nothing sold is judged). Throws db::Error.
 HealthInputs read_health(db::Database &db, const PlacementPolicy *policy);
 
-// The findings, danger first, then warn, then info, each level's oldest first
-// (one with no time after the rest).
+// The findings, in sort_findings' order.
 std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &release);
+
+// `findings` danger first, then warn, then info, each level's oldest first (one
+// with no time after the rest), the order kept among equals.
+void sort_findings(std::vector<Finding> &findings);
 
 // What the fleet leader's heartbeat carries of them (health.h).
 struct HealthGauges {

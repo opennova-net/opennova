@@ -477,14 +477,18 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 				0, "/admin/billing", "oversold");
 	}
 
-	std::stable_sort(out.begin(), out.end(), [](const Finding &a, const Finding &b) {
+	sort_findings(out);
+	return out;
+}
+
+void sort_findings(std::vector<Finding> &findings) {
+	std::stable_sort(findings.begin(), findings.end(), [](const Finding &a, const Finding &b) {
 		if (level_rank(a.level) != level_rank(b.level))
 			return level_rank(a.level) < level_rank(b.level);
 		if ((a.since > 0) != (b.since > 0))
 			return a.since > 0;
 		return a.since < b.since;
 	});
-	return out;
 }
 
 HealthGauges health_gauges(const HealthInputs &in, const std::vector<Finding> &findings) {

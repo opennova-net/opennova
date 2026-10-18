@@ -797,12 +797,15 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(usage_routes REDIS COMMAND usage_routes_test)
     set_tests_properties(usage_routes PROPERTIES TIMEOUT 120)
 
-    # The fleet's health on the admin's pages (apps/novaworld_web/hosted/fleet_routes.h)
-    # on the in-process Crow listener over a migrated database and a Redis namespace, the
-    # release pinning its images: the machine JSON's use (the network's rates between its
-    # two newest minutes), images, outdated and static address in the fleet view, one
-    # machine's page (its moves, its trees with their manifests' totals), a server's ticks
-    # in the admin's view alone.
+    # The fleet's health on the admin's pages (apps/novaworld_web/hosted/fleet_routes.h,
+    # infra/attention_routes.h) on in-process Crow listeners over a migrated database and a
+    # Redis namespace, the release pinning its images: the machine JSON's use (the
+    # network's rates between its two newest minutes), images, outdated and static address
+    # in the fleet view, one machine's page (its moves, its trees with their manifests'
+    # totals), a server's ticks in the admin's view alone; the attention list's findings
+    # over the rows in their order with their links, no alarm read locally, a deployment's
+    # firing alarms through CloudWatch behind a stub (DescribeAlarms' form, the 20 s
+    # cache, AWS's refusal a warn finding, no credential).
     add_executable(fleet_health_routes_test novaworld/fleet_health_routes_test.cpp)
     target_link_libraries(fleet_health_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)

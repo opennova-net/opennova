@@ -59,6 +59,10 @@ add_library(opennova_novaworld_web_core STATIC
     infra/log_routes.cpp
     infra/metrics_store.cpp
     infra/usage_routes.cpp
+    # What needs an admin: the fleet's health over the rows and the deployment's
+    # firing CloudWatch alarms, and its route.
+    infra/alarm_store.cpp
+    infra/attention_routes.cpp
 )
 target_include_directories(opennova_novaworld_web_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # The shared library directly: the hiredis containment

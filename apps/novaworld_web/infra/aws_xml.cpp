@@ -15,6 +15,16 @@ bool is_space(char c) {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
+// Days since 1970-01-01 of a civil date (Howard Hinnant's days_from_civil).
+int64_t days_from_civil(int64_t y, unsigned m, unsigned d) {
+	y -= m <= 2;
+	const int64_t era = (y >= 0 ? y : y - 399) / 400;
+	const auto yoe = static_cast<unsigned>(y - era * 400);
+	const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+	const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+	return era * 146097 + static_cast<int64_t>(doe) - 719468;
+}
+
 bool is_name_char(char c) {
 	return !is_space(c) && c != '>' && c != '/' && c != '=' && c != '<' && c != '"' && c != '\'';
 }
@@ -290,6 +300,28 @@ bool parse_xml(std::string_view text, XmlNode &root, std::string &error) {
 		return false;
 	}
 	return true;
+}
+
+int64_t iso_seconds(std::string_view t) {
+	if (t.size() < 20 || t[4] != '-' || t[7] != '-' || t[10] != 'T' || t[13] != ':' ||
+			t[16] != ':' || t.back() != 'Z')
+		return -1;
+	for (const size_t i : { 0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18 })
+		if (t[i] < '0' || t[i] > '9')
+			return -1;
+	const auto num = [&t](size_t at, size_t len) {
+		int64_t v = 0;
+		for (size_t i = at; i < at + len; ++i)
+			v = v * 10 + (t[i] - '0');
+		return v;
+	};
+	const int64_t month = num(5, 2);
+	const int64_t day = num(8, 2);
+	if (month < 1 || month > 12 || day < 1 || day > 31)
+		return -1;
+	const int64_t days =
+			days_from_civil(num(0, 4), static_cast<unsigned>(month), static_cast<unsigned>(day));
+	return ((days * 24 + num(11, 2)) * 60 + num(14, 2)) * 60 + num(17, 2);
 }
 
 } // namespace opennova::novaworld_server::infra
