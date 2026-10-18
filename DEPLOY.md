@@ -133,8 +133,10 @@ reviewers approve).
   and `jq`.
 - **A 1Password account** (any paid plan has service accounts): its vault holds every
   secret and every identifier a rebuild needs.
-- **An AWS management account**, whose Organization holds two member accounts, one per
-  deployment (section 3).
+- **An AWS management account**, whose Organization holds three member accounts, one per
+  deployment (section 3) and one for the CI runners (section "CI runners").
+- **A RunsOn license** for the CI runners (section "CI runners"), or the standard runners
+  alone ("Running it under your own names").
 - **A domain on Cloudflare** (the Free plan does): add the domain to Cloudflare and set
   the registrar's nameservers to the two Cloudflare gives it. Cloudflare holds every
   record, proxies the website (the origin admits Cloudflare's address ranges alone and
@@ -174,8 +176,9 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
 3. **[admin] The Organization and its accounts** (section 3, steps 1 and 2): the
    Organization's and the management account's ids into `aws-org`; IAM Identity Center
    enabled in the console, and your user's `sso_given_name`, `sso_family_name` and
-   `sso_email` into `aws-org`; `aws organizations create-account` for `opennova-prod` and
-   `opennova-staging`, each one's id, name and root address into `aws-<deployment>`.
+   `sso_email` into `aws-org`; `aws organizations create-account` for `opennova-prod`,
+   `opennova-staging` and `opennova-ci`, each one's id, name and root address into
+   `aws-<deployment>` (`aws-ci` for the last).
 4. **[admin] The `opennova-org` user** and its key into `aws-org` (section 3, step 3;
    `infra/aws/iam/README.md`).
 5. **The org stack** (section 3, step 4): `./deploy/run.sh org plan`, then `org apply`.
@@ -187,9 +190,11 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
    account's root user a password and an MFA device. Fill the `github-terraform` and
    `reference-assets` items and `./deploy/run.sh github apply` (section "GitHub"), or on
    a GitHub organization of your own make the two environments by hand ("Running it
-   under your own names").
+   under your own names"). Then the CI runners: the `runs-on` item, `./deploy/run.sh ci
+   apply`, the GitHub App and the fork approval setting (section "CI runners").
 7. **[admin] Per account, in its console** (section 3, step 6): SES production access,
-   the Fargate and EC2 quotas, Cost Explorer once.
+   the Fargate and EC2 quotas, Cost Explorer once; in `opennova-ci`, its EC2 quotas alone
+   (section "CI runners").
 8. **The images** (section 5): a push to your repository's `master` that touches their
    paths publishes them (`.github/workflows/novaworld-images.yml`, `serve-image.yml`; a
    manual run builds them but never pushes); then make each GHCR package public. They
@@ -227,9 +232,10 @@ own, change these on your fork:
 | `cloudflare/domain` (the vault) | your domain | the hosts follow from it: `<domain>` and `www`, `staging.<domain>`, `nw.<domain>` and `nw.staging.<domain>` (the gates), `update.<domain>` and `update.staging.<domain>` (the update service) |
 | `infra/aws/prod.tfvars`, `staging.tfvars` | `image_registry` (default `ghcr.io/opennova-net`), `azs` (`us-east-1a`, `us-east-1b`) | `image_registry = "ghcr.io/<your owner>"` in both. Another region is the `region` fields of `aws-org` and `aws-<deployment>` (`secrets init` writes `us-east-1`) and `azs`; the Route 53 health check's alarm exists in `us-east-1` alone |
 | `infra/org/variables.tf` | `github_repository`, `opennova-net/opennova`: the repository whose deploy workflow may assume each account's deploy role | its default (the toolbox passes none) |
+| `infra/ci/variables.tf` | `github_organization`, `opennova-net`: the organization whose GitHub App the RunsOn setup page registers | its default |
 | `infra/github/` | the GitHub organization `opennova-net`, all of it | adapt it to your organization, or leave it out and make what the deploy workflow needs by hand: the repository environments `staging` and `prod` (prod with required reviewers), each with the variables `AWS_DEPLOY_ROLE_ARN` (the vault's `aws-<deployment>/github_deploy_role_arn`), `AWS_REGION` and `AWS_ACCOUNT_ID`; optionally the secret `STRIPE_TEST_SECRET_KEY` (the billing end-to-end test) |
-| `.github/workflows/ci.yml` | the larger runners `windows-16core` and `ubuntu-16core` (OpenNova's runner group), and the retail legs' private reference repositories (`REFERENCE_ASSETS_TOKEN`) | the standard runners, and no retail legs. The image workflows run on `ubuntu-latest` and need neither |
-| `infra/zone/variables.tf` | `email_routes`: `support`, `aws-prod`, `aws-staging` | its default, if your accounts' root addresses differ (the zone stack takes no var-file) |
+| `.github/workflows/ci.yml` | RunsOn's runner labels on the build and test legs (section "CI runners"), and the retail legs' private reference repositories (`REFERENCE_ASSETS_TOKEN`) | your own RunsOn stack, or `windows-latest` and `ubuntu-latest` in place of the labels; no retail legs. The image workflows run on `ubuntu-latest` and need neither |
+| `infra/zone/variables.tf` | `email_routes`: `support`, `aws-prod`, `aws-staging`, `aws-ci` | its default, if your accounts' root addresses differ (the zone stack takes no var-file) |
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
 | the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
@@ -251,6 +257,8 @@ contract, item by item (`deploy/env/*.tpl` holds every reference the toolbox rea
 | `aws-prod`, `aws-staging` | `account_id`, `account_name`, `root_email`, `region` | hand: the member account (`secrets init` makes the placeholders) |
 | `aws-prod`, `aws-staging` | `state_bucket`, `access_key_id`, `secret_access_key`, `github_deploy_role_arn` | `./deploy/run.sh org apply` |
 | `aws-prod` | `gate_eip_allocation_id` | hand: the gate's Elastic IP in the prod account, allocated once (section 4, "The var-file") |
+| `aws-ci` | `account_id`, `account_name`, `root_email`, `region` | hand: the CI runners' account (`secrets init` makes the placeholders; section "CI runners") |
+| `runs-on` | `key` | hand: RunsOn's license key (section "CI runners") |
 | `cloudflare` | `api_token`, `zone_id`, `domain` | hand (section 1) |
 | `app-prod`, `app-staging` | `admin_api_token`, `database_password`, `redis_password`, `edge_auth_secret` | `secrets init` |
 | `rds-prod`, `rds-staging` | `master_password` | `secrets init` |
@@ -261,7 +269,8 @@ contract, item by item (`deploy/env/*.tpl` holds every reference the toolbox rea
 | `reference-assets` | `token` | hand (section "GitHub") |
 
 The manual steps outside the vault: the Organization and its member accounts, the
-`opennova-org` user's policy, each account's SES production access and service quotas
+`opennova-org` user's policy, the CI runners' GitHub App, EC2 quotas and fork approval
+setting (section "CI runners"), each account's SES production access and service quotas
 (below), the root addresses' Email Routing verification click, the GHCR packages' public
 visibility and the Stripe dashboard's settings.
 
@@ -415,23 +424,25 @@ or an admin role), outside the toolbox; everything else is the toolbox.
    `aws-org/sso_given_name`, `sso_family_name`, `sso_email`).
 2. **[admin] The member accounts**, one per deployment, each with a root address at the
    domain that Email Routing forwards (`aws-prod@<domain>`, `aws-staging@<domain>`;
-   `infra/zone` makes their rules, step 5):
+   `infra/zone` makes their rules, step 5), and the CI runners' (`aws-ci@<domain>`;
+   section "CI runners"):
 
    ```bash
    aws organizations create-account --email aws-prod@<domain> --account-name opennova-prod
    aws organizations create-account --email aws-staging@<domain> --account-name opennova-staging
+   aws organizations create-account --email aws-ci@<domain> --account-name opennova-ci
    aws organizations list-create-account-status --states SUCCEEDED   # each new account's id
    ```
 
-   Each account's id goes in `aws-<deployment>/account_id`, its name in `account_name`,
-   its root address in `root_email` (`./deploy/run.sh --deployment <deployment> secrets
-   init` makes the fields). Each account has the role `OrganizationAccountAccessRole`,
+   Each account's id goes in `aws-<deployment>/account_id` (`aws-ci/account_id` for
+   `opennova-ci`), its name in `account_name`, its root address in `root_email`
+   (`./deploy/run.sh --deployment <deployment> secrets init` makes the fields). Each account has the role `OrganizationAccountAccessRole`,
    which the management account may assume. Its root user gets a password once its
    address receives mail (step 5).
 3. **[admin] The `opennova-org` user**, the management account's one OpenNova principal:
-   `infra/aws/iam/opennova-org.json` filled with the four ids (the Organizations reads,
+   `infra/aws/iam/opennova-org.json` filled with the five ids (the Organizations reads,
    account creation and tagging, Identity Center's user and assignments, and assuming the
-   two member accounts' `OrganizationAccountAccessRole`, nothing else). The commands
+   three member accounts' `OrganizationAccountAccessRole`, nothing else). The commands
    (`infra/aws/iam/README.md`) make the user and put its key straight into
    `aws-org/access_key_id` and `secret_access_key`.
 4. **The org stack:**
@@ -441,8 +452,8 @@ or an admin role), outside the toolbox; everything else is the toolbox.
    ./deploy/run.sh org apply                    # type org
    ```
 
-   `infra/org` adopts the Organization and both accounts, and in each account through
-   its `OrganizationAccountAccessRole` makes: the Terraform state bucket
+   `infra/org` adopts the Organization and the three accounts, and in each deployment's
+   account through its `OrganizationAccountAccessRole` makes: the Terraform state bucket
    (`opennova-tfstate-<account id>`, versioned, encrypted, TLS alone, reached by the
    account's deploy user and admin role alone), the account's S3 public access block, the
    role boundary every role a deployment's stack makes must carry, the deploy user
@@ -450,8 +461,9 @@ or an admin role), outside the toolbox; everything else is the toolbox.
    filled for the account) and its access key, and the GitHub deploy role (trusting the
    repository's environment of the same name alone); in the management account, the
    Identity Center user and its two permission sets (`OpenNovaAdmin`, `OpenNovaReadOnly`)
-   in both accounts. Its first run applies with a local state, then moves the state into
-   prod's state bucket (`org/terraform.tfstate`), where it lives. Every apply writes back
+   in every member account (`opennova-ci` gets nothing else here: section "CI runners").
+   Its first run applies with a local state, then moves the state into prod's state
+   bucket (`org/terraform.tfstate`), where it lives. Every apply writes back
    to the vault, keys never on the screen: each deployment's `state_bucket`,
    `access_key_id`, `secret_access_key` and `github_deploy_role_arn`, and
    `aws-org/sso_portal_url`, the access portal. Rotating a deploy key: `./deploy/run.sh
@@ -1373,9 +1385,9 @@ it, and `github apply` puts it back. Make the change in `infra/github` instead. 
 repositories are never destroyed by Terraform (`prevent_destroy`; one dropped from the map
 on purpose is archived, not deleted).
 
-CI runs on GitHub's standard hosted runners (`windows-latest`, `ubuntu-latest`), free for
-a public repository, so the stack makes no runners: larger runners are billed per minute
-even for a public repository.
+CI's build and test legs run on RunsOn's runners in the ci account (section "CI
+runners"), every other job on GitHub's standard hosted runners (`windows-latest`,
+`ubuntu-latest`), free for a public repository; the stack makes no runners.
 
 The stack is the organization's, not a deployment's: the toolbox runs it without
 `--deployment`, and its state lives in prod's state bucket (`infra/github/terraform.tfstate`,
@@ -1422,6 +1434,82 @@ tokens. Then:
 
 `infra/github/imports.tf` adopted what existed before the stack. A new repository, member
 or secret is a change to the stack: add it, plan, apply.
+
+## CI runners
+
+`ci.yml`'s build and test legs (test-core, test-retail, test-linux, both gdext builds, the
+Godot package) run on [RunsOn](https://runs-on.com)'s runners in the Organization's third
+account, `opennova-ci`, which holds them alone (`infra/ci`). Each job gets an EC2 instance
+of its own with 16 vCPUs, spot unless spot is short (then on demand), launched when GitHub
+queues the job and ended when it finishes: nothing runs between jobs. The Godot tests (one
+test at a time, so more cores buy nothing) and every other job stay on GitHub's standard
+runners, free for a public repository, and so does every job of a pull request from a fork.
+
+What it costs: the instances by the minute (us-east-1 spot, about $0.014 a minute for a
+16-vCPU Windows instance with its license and $0.005 for Linux, against $0.082 and $0.042
+for GitHub's 16-core larger runners), about $15 a month for RunsOn's control plane (a small
+Fargate task, an API Gateway, Lambdas, queues, tables and secrets), the uploads to GitHub
+(about 0.3 GB of artifacts a run and 1.2 GB of compiler caches a `master` push, at $0.09 a
+GB), and RunsOn's license (`runs-on/key`: a yearly fee, no per-minute one). A full run's
+legs come to about $0.60. The account's monthly budget (`budget_monthly_usd`, 300) emails
+`alerts/email` at 80% spent and at a 100% forecast, RunsOn emails a weekly cost report
+there, and a job hung past 90 minutes is ended with its instance.
+
+Once, in order:
+
+1. **[admin] The account**, as the deployments' were (section 3, step 2): `aws
+   organizations create-account --email aws-ci@<domain> --account-name opennova-ci`, its
+   id, name and root address into `aws-ci` (`secrets init` makes the item's placeholders;
+   `infra/zone` forwards `aws-ci@<domain>`). `org apply` adopts it (no state bucket and no
+   deploy user there: the ci stack runs as `opennova-org`) and gives your Identity Center
+   user both permission sets in it; `zone apply` makes its root address's route.
+2. **[admin] `opennova-org`'s policy** names the account's `OrganizationAccountAccessRole`:
+   apply `infra/aws/iam/opennova-org.json` filled again (`infra/aws/iam/README.md`; the org
+   stack's output `org_user_policy` prints it filled).
+3. **The license**: RunsOn's license key (runs-on.com) into the vault item `runs-on`, field
+   `key` (the toolbox finds the item's title in any case).
+4. **[admin] The account's EC2 quotas** (the access portal, `OpenNovaAdmin` in
+   `opennova-ci`, Service Quotas): a run takes 96 vCPUs at once (six 16-vCPU legs). The
+   quotas are the runners' spending ceiling: "All Standard (A, C, D, H, I, M, R, T, Z) Spot
+   Instance Requests" (L-34B43A08) and "Running On-Demand Standard (A, C, D, H, I, M, R,
+   T, Z) instances" (L-1216C47A, for when spot is short), 192 each in OpenNova's account:
+   two runs at once. A leg past them waits for an earlier run's instances to end, or
+   takes on-demand capacity when spot alone is full. A new account's can be lower than
+   one run (OpenNova's spot quota started at 96): check both.
+5. **The stack:**
+
+   ```bash
+   ./deploy/run.sh ci plan
+   ./deploy/run.sh ci apply                     # type ci
+   ./deploy/run.sh ci output setup_url
+   ```
+
+   Confirm the subscription RunsOn's alert topic emails to `alerts/email`.
+6. **The GitHub App**: open `setup_url`, **Register GitHub App** for `opennova-net` (as an
+   organization owner), and install it on the `opennova` repository alone. Its credentials
+   stay in the ci account (Secrets Manager); nothing goes in the vault.
+7. **[admin] Outside contributors' runs wait for approval**: a fork's pull request runs its
+   own copy of `ci.yml`, which could name RunsOn's labels, so the organization and the
+   repository require an admin's approval before any workflow of an outside contributor
+   runs (Settings, Actions, "Approval for running fork pull request workflows from
+   contributors": **Require approval for all external contributors**). The GitHub provider
+   has no resource for it, so `infra/github` leaves it alone:
+
+   ```bash
+   gh api -X PUT orgs/opennova-net/actions/permissions/fork-pr-contributor-approval \
+     -f approval_policy=all_external_contributors
+   gh api -X PUT repos/opennova-net/opennova/actions/permissions/fork-pr-contributor-approval \
+     -f approval_policy=all_external_contributors
+   ```
+
+   Read a fork's workflow changes before approving its run.
+
+A leg that sits queued: RunsOn's alert email, the account's quotas (a launch past them
+fails), or the GitHub App's installation. The labels (`cpu=16`, the instance families, the
+image `windows25-full-x64` or `ubuntu24-full-x64`, the volume) are `ci.yml`'s, on each leg.
+RunsOn's Windows image carries Visual Studio 2022 (GitHub's `windows-latest` and the
+maintainers build with 2026), and its Ubuntu image leaves Ninja out (the Linux legs install
+it). A newer RunsOn: the module's `version` in `infra/ci/runners.tf`, then `ci apply`.
 
 ## Operating
 

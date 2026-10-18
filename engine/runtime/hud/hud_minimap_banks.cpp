@@ -358,7 +358,7 @@ void draw_blip(MapCompile &c, const HudMinimapMarker &marker, uint32_t color,
 // — each special slot draws three times. A persistent slot whose entity has
 // no model never draws.
 // [orig: MapOverlay_RenderAllByLayer @0x5BE590 — pass 1 @0x5BE5C4..0x5BE64B,
-//  flush sub_596780 @0x5BE64D, pass 2 @0x5BE652..0x5BE706 (model +0x30,
+//  flush HUD_FlushWireBatches @0x5BE64D, pass 2 @0x5BE652..0x5BE706 (model +0x30,
 //  (def && type != 5) || !model+0xE0), transient @0x5BE70C..0x5BE779, flush
 //  @0x5BE77B, special lifetime/bit7 @0x5BE780..0x5BE7D7]
 void render_all_layers(MapCompile &c) {

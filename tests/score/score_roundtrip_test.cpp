@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(file.blocks[0].row == 2);
 	TEST_EXPECT(file.blocks[1].row == 1);
 	TEST_EXPECT(file.blocks[2].row == 2);
-	// A GAMETYPE's row is found by its name, the first of the twelve [orig: sub_52D850 @ 0x52D850].
+	// A GAMETYPE's row is found by its name, the first of the twelve [orig: ScoreConfig_FindGameTypeRow @ 0x52D850].
 	TEST_EXPECT(score::game_type_row("coop") == 2 && score::game_type_row("TDM") == 1 && score::game_type_row("XYZ") == -1);
 
 	const score::GameTypeBlock *coop = &file.blocks[2]; // the second COOP block
@@ -155,7 +155,7 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(none.blocks.size() == 1 && none.blocks[0].row == 11 && none.blocks[0].fields.empty() &&
 		            none.blocks[0].vars.empty());
 		// A GAMETYPE of a name no row has selects none: its lines are read for nothing, the block before keeps its own
-		// [orig: sub_52D850 @ 0x52D850; `if (currentGameType)` @ 0x52DB7C, @ 0x52DC05].
+		// [orig: ScoreConfig_FindGameTypeRow @ 0x52D850; `if (currentGameType)` @ 0x52DB7C, @ 0x52DC05].
 		const score::File nameless = parsed("VERSION 40\nGAMETYPE \"DM\"\nVAR \"FIRE\" 1\nGAMETYPE \"A\"\nVAR \"FIRE\" 9\nFIELD \"NUMDEATHS\" 1\n");
 		TEST_EXPECT(nameless.blocks.size() == 1 && nameless.blocks[0].vars.size() == 1 && nameless.blocks[0].vars[0].value == 1 &&
 		            nameless.blocks[0].fields.empty());
@@ -268,7 +268,7 @@ int main(int argc, char **argv) {
 		score::File nowhere = spelled;
 		nowhere.blocks[0].row = 12;
 		TEST_EXPECT(!score::write(nowhere, out, error));
-		// Row 0's name is the empty one, which a quoted pair reads back as [orig: sub_52D850 @ 0x52D850 over row 0's +8].
+		// Row 0's name is the empty one, which a quoted pair reads back as [orig: ScoreConfig_FindGameTypeRow @ 0x52D850 over row 0's +8].
 		score::File first = spelled;
 		first.blocks[0].row = 0;
 		TEST_EXPECT(score::write(first, out, error) && score::equal(parsed(text_of(out)), first));

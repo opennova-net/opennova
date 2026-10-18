@@ -515,7 +515,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 // aircraft's flare latch, 3 skid, 4 collision, 5 the tank pivot, 6/7 the tank
 // tumble cues), plus 0x80 while a type-1 profile's part spin runs.
 // [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503E85..0x503EC0, the rate read
-//  sub_48F090 @0x48F09A (entity+0x468)]
+//  Entity_GetPartSpinRate @0x48F09A (entity+0x468)]
 static uint8_t vehicle_sound_latch_byte(const world::Entity &e, const world::AiEntity &ae) {
 	const auto &m = e.veh;
 	uint8_t b = 0;

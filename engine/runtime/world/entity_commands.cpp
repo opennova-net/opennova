@@ -2242,7 +2242,7 @@ bool apply_entity_ai_command(World &world, Entity &entity, int sub_type, int32_t
             return true;
         case EntityCommands::kAiNodePath:
             // Both writes replace the current callback, including a death callback
-            // and a drop's fall or ride: nullsub_28, or the def's own.
+            // and a drop's fall or ride: Entity_UpdateOrg0Movement, or the def's own.
             // [orig: Entity_ApplyCommand @0x43B22A..0x43B24E]
             entity.motor_suspended = p2 != 0;
             entity.death_motion = DeathMotionMode::None;

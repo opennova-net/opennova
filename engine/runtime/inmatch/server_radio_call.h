@@ -34,7 +34,7 @@ struct RadioCallRule {
 // walk ends at the first row whose type is 0 (RAD_1), so the table's MP_*,
 // class and remaining vehicle rows after it are never compared.
 // [orig: RadioCall_FindRuleByKey @0x5BFE50 (ex Terrain_FindSectorEntryByName)
-//  — the key sub_5BFB00(buf, call, 6, entity) @0x5bfe7e, the row-0 type gate
+//  — the key VMacros_BuildRemappedName(buf, call, 6, entity) @0x5bfe7e, the row-0 type gate
 //  @0x5bfe86, the stricmp walk @0x5bfe98..0x5bfeb9]
 const RadioCallRule *radio_call_find_rule(const std::string &key);
 

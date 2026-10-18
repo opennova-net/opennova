@@ -117,7 +117,7 @@ MenuFlow::ExpansionPick MenuFlow::request_expansion(const std::string &name,
 // clear. OpenNova has no video-mode transition machine, so only the request
 // gates this port. Consuming before the device call prevents a re-entry from
 // repeating it. [orig: @0x552906..0x55291d; UI_ApplyVideoModeChange @0x55a590;
-// sub_555710 seeds the video-mode state to zero @0x555734]
+// UI_InitIngameScreenOnce seeds the video-mode state to zero @0x555734]
 std::string MenuFlow::take_expansion_reload() {
 	expansion_pending_ = false;
 	return std::exchange(expansion_request_, {});

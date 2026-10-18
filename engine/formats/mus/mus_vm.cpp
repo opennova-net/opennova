@@ -1106,7 +1106,7 @@ static void run_dispatch_loop(MusVM *vm, int gate_on_running) {
     }
 }
 
-/* Tick: the per-update step [orig: sub_672EE0 -> sub_672E50 @ 0x672ec1 with
+/* Tick: the per-update step [orig: sub_672EE0 -> AudioVM_RunContext @ 0x672ec1 with
    the restart byte clear -> AudioVM_DispatchLoop @ 0x672720]. */
 int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
     init_handlers();
@@ -1118,7 +1118,7 @@ int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
     return (int)dt_ms;
 }
 
-/* The restart frame [orig: sub_672E50 @ 0x672e95..0x672ec1]:
+/* The restart frame [orig: AudioVM_RunContext @ 0x672e95..0x672ec1]:
      movzx eax,[esi+20h]; test eax,eax; jz normal_step   ; restart byte (ctx+32)
      mov byte [esi+20h],0                                 ; clear it
      mov edx,[esi+18h]; mov [edi],edx; add edi,4          ; push IP on the return stack
@@ -1150,7 +1150,7 @@ std::shared_ptr<MusGlobals> mus_vm_globals(MusVM *vm) {
     return vm != nullptr && vm->script != nullptr ? vm->globals : nullptr;
 }
 
-/* The game reads and writes the area by index unbounded [orig: sub_671FB0 @ 0x672660, sub_671FD0 @ 0x672680:
+/* The game reads and writes the area by index unbounded [orig: AudioVM_GetVariable @ 0x672660, AudioVM_GetVariablePtr @ 0x672680:
    globals + index * 4]: past the globals, the locals after them in the block; past the block nothing (D-MUS-22). */
 int32_t mus_globals_read(const MusGlobals &globals, uint32_t index) {
     int32_t value = 0;

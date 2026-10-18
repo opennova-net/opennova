@@ -325,7 +325,7 @@ void PlayerProfiles::commit_name(const std::string &text) {
 }
 
 void PlayerProfiles::reset_current(const ProfileDefaults &defaults) {
-	// [orig: sub_561400 — g_curProfileSlot < 5 @0x561412, InitDefaults
+	// [orig: PlayerInfo_OnDeleteQueryYes — g_curProfileSlot < 5 @0x561412, InitDefaults
 	//  @0x561435, +52 |= 1 @0x561442]
 	init_defaults(current(), current_weapons(), defaults);
 	current().flags |= playersav::kRecordFlagNoName;

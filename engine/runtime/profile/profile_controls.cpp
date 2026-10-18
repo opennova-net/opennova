@@ -97,7 +97,7 @@ void set_auto_medic(playersav::ProfileRecord &record, bool checked) {
 }
 
 void restore_controls_defaults(playersav::ProfileRecord &record) {
-	// [orig: sub_55BD90 — +1424 = 0x80 @0x55be93, +1428 @0x55bea2, +1432
+	// [orig: Options_OnDefaultsButton — +1424 = 0x80 @0x55be93, +1428 @0x55bea2, +1432
 	//  @0x55beae, +1436 @0x55beba, +1444 @0x55beca = 0]
 	record.mouse_sensitivity = 0x80;
 	record.invert_mouse = 0;

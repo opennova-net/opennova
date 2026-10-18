@@ -8,7 +8,7 @@
 // screen's action filter ahead of the body input, and the spectator actions
 // with the sub-mode wrap's pose placement.
 // [orig: Camera_UpdateFreeFly @0x4b2980; DeathScreen_FilterInputAction @0x52ad50;
-//  sub_52AFF0 @0x52aff0]
+//  Spectator_CycleMode @0x52aff0]
 
 #include <cstdint>
 
@@ -53,7 +53,7 @@ void apply_death_screen_input(mission::MissionKernel &kernel, ClientRuntime &run
 // the role's replica; the cycle's wrap back to the free sub-mode then places
 // the local entity on the composed view pose.
 // [orig: Input_HandleActionBinding cases 500..502 @0x49bd58..0x49bd9e;
-//  sub_52AFF0 @0x52b082..0x52b0ee]
+//  Spectator_CycleMode @0x52b082..0x52b0ee]
 void spectate_action(mission::MissionKernel &kernel, ClientRuntime &runtime, int code);
 
 } // namespace opennova::inmatch

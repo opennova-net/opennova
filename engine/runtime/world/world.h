@@ -400,7 +400,7 @@ struct ScriptState {
     //  Dialog_Register @0x44d980 (history dword_A89600 / dword_A895F8, slots
     //  dword_A8A248 / dword_A8A244); Dialog_UpdatePlayback @0x44e470 ->
     //  Dialog_FreeByName @0x44db40; Dialog_ResetAll @0x44dc90; readers
-    //  Dialog_ExistsByIndex @0x44e170 and sub_44E220 @0x44e220]
+    //  Dialog_ExistsByIndex @0x44e170 and Dialog_IsFinishedByIndex @0x44e220]
     audio::DialogQueue dialog;
     WacNamedValues wac_values; // writable named engine values (the @0x82EEF0 table)
     ScriptWeaponInput weapon_input;
@@ -1175,7 +1175,7 @@ public:
     uint32_t priority_target_clear_countdown = 0;
     // The 1 Hz round-robin S2C 0x2F flag-state refresh cursor: the pool-1 flag
     // index the next periodic second re-broadcasts; a walk that sends nothing
-    // resets it. [orig: dword_24C10D4, read/written only by sub_517B20 @0x517B20]
+    // resets it. [orig: dword_24C10D4, read/written only by Server_RefreshNextFlagState @0x517B20]
     uint32_t flag_refresh_cursor = 0;
     // The team-mode 62-tick countdown behind the per-second S2C 0x46 field-0x0008
     // (downed state) resend to a dead teammate's side. [orig: g_WeaponResendTimer

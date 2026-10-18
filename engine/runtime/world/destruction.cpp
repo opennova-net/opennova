@@ -1330,7 +1330,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         mask |= (1u << (s & 31)); // x86 shl wraps the count mod 32 [orig: @ 0x493698]
     }
     target.spawned_piece_mask = mask; // [orig: entity+0x138 @ 0x493983]
-    target.motor_suspended = false; // installing a callback replaces nullsub_28
+    target.motor_suspended = false; // installing a callback replaces Entity_UpdateOrg0Movement
     // ... and the def's own, a genx item's parent follow included; a death
     // this gate refuses keeps it [orig: the +0x1C4 stores @0x493933 /
     //  @0x49393F / @0x49394B].

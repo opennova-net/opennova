@@ -7,7 +7,7 @@
 namespace opennova::world {
 class World;
 // flags: 1 body prefix, 2 radio, 8 seven fixed emote slots.
-// [orig: VMacros_BuildShaderPassName @0x5BF5D0; sub_5BFB00 @0x5BFB00]
+// [orig: VMacros_BuildShaderPassName @0x5BF5D0; VMacros_BuildRemappedName @0x5BFB00]
 std::string radio_call_key(const World &world, const Entity &speaker, int event,
         uint8_t flags, uint32_t game_type, bool in_active_zone);
 std::string radio_call_text(const World &world, const std::string &key,

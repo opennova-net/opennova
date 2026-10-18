@@ -80,7 +80,7 @@ controls::BindingSet options_bindings(const playersav::ProfileRecord &record);
 // the table's own order, takes the eight binding fields of its row's record;
 // the count and the identity fields stand [orig:
 // KeyBinding_SortAndStoreProfileBindings @0x559d50 — the qsort by the
-// entry's table index (+40, sub_559D40 @0x559d40) restores the table order
+// entry's table index (+40, KeyBinding_CompareByTableIndex @0x559d40) restores the table order
 // before the copy @0x559d90..0x559e2a; callers the front-end ACCEPT
 // @0x55ace5 and the in-game Accept @0x554e74].
 void store_bindings(const controls::BindingSet &records, playersav::ProfileRecord &record);
@@ -100,7 +100,7 @@ void set_auto_medic(playersav::ProfileRecord &record, bool checked);
 // The Options DEFAULTS button's reset of the record's mouse and joystick
 // words: +1424 = 128, +1428 / +1432 / +1436 / +1444 = 0, written into the
 // record at once (the binding records are the screen's own)
-// [orig: sub_55BD90 @0x55be93..0x55beca].
+// [orig: Options_OnDefaultsButton @0x55be93..0x55beca].
 void restore_controls_defaults(playersav::ProfileRecord &record);
 
 }  // namespace opennova::profile

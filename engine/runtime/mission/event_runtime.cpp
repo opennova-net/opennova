@@ -453,7 +453,7 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     return !w.script.dialog.active(t.param1);
                 case bms::PlayerTriggerType::PlayerDialogFinished:
                     // The table's history holds the dialog and no slot does
-                    // [orig: case 35 @0x453d1c: sub_44E220(p1) @0x453d20].
+                    // [orig: case 35 @0x453d1c: Dialog_IsFinishedByIndex(p1) @0x453d20].
                     return w.script.dialog.finished(t.param1);
                 case bms::PlayerTriggerType::PlayerAwol:
                     // AWOL quanta (once per 64 ticks, ~1.02 s each) vs the authored
@@ -591,7 +591,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             cmds.teleport_group_to_marker(a.param1, a.param2);
             break;
         case bms::ActionType::SingleVelocity:
-            // [orig: EventAction_Dispatch case 23 @0x4542E0 -> sub_43DEA0]
+            // [orig: EventAction_Dispatch case 23 @0x4542E0 -> EventAction_SingleVelocityNoOp]
             // Retail scans pool 1 and performs no mutation.
             break;
         case bms::ActionType::ChangeSteamAction:

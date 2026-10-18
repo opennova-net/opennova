@@ -1603,7 +1603,7 @@ static void test_distance_literals_and_lead_queries() {
     // Scaled literals outside int32 store _ftol2_sse's SSE2 integer
     // indefinite; the CRT initializer selects that leg on every SSE2 CPU.
     // [orig: WacScript_ResolveParameter @0x4F2D8C; _ftol2_sse @0x76BC15;
-    //  sub_7887AF @0x7887B4]
+    //  CRT_sse2_available_init @0x7887B4]
     CHECK(w.script.vars.get_mission(16) == INT32_MIN);
     CHECK(w.script.vars.get_mission(17) == INT32_MIN);
     CHECK(w.script.vars.get_mission(18) == INT32_MIN);

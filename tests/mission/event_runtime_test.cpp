@@ -1638,7 +1638,7 @@ static void test_player_berserk_trigger() {
 // and Dialog_ResetAll and a mission load clear the table. DONE = no slot holds
 // the dialog [orig: case 34 @0x453d04 -> Dialog_ExistsByIndex @0x44e170];
 // FINISHED = the history holds it and no slot does [orig: case 35 @0x453d1c ->
-// sub_44E220 @0x44e220].
+// Dialog_IsFinishedByIndex @0x44e220].
 static void test_player_dialog_triggers() {
     World w;
     w.cached.humans = 1;

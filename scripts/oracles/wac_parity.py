@@ -157,7 +157,7 @@ class Compiler:
         for index, group in enumerate(DEFAULT_GROUPS):
             uc.mem_write(GROUPS + 44 * index + 12, group.encode() + b'\0')
         uc.mem_write(ERROR, b'\0')
-        w32(0x334A444, 1)  # __sse2_available, as sub_7887AF @0x7887B4 sets it
+        w32(0x334A444, 1)  # __sse2_available, as CRT_sse2_available_init @0x7887B4 sets it
         imports = {}
         for library in self.pe.DIRECTORY_ENTRY_IMPORT:
             for entry in library.imports:

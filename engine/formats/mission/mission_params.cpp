@@ -215,7 +215,7 @@ constexpr ParamRow kActionRows[] = {
 	{a(A::RedirectSingleTo), kAnySubType, {K::Entity, K::Path, K::PathNode, U}, {}},
 	{a(A::KillSingle), kAnySubType, {K::Entity, U, U, U}, {}},
 	{a(A::VaporizeSingle), kAnySubType, {K::Entity, U, U, U}, {}},
-	// A witnessed no-op [orig: EventAction_Dispatch case 23 -> sub_43DEA0 mutates nothing].
+	// A witnessed no-op [orig: EventAction_Dispatch case 23 -> EventAction_SingleVelocityNoOp mutates nothing].
 	{a(A::SingleVelocity), kAnySubType, {K::Entity, K::SpeedKph, U, U}, {}},
 	{a(A::ChangeSteamAction), kAnySubType, {K::Entity, K::Team, U, U}, {}},
 	{a(A::SingleChangeGroup), kAnySubType, {K::Entity, K::Group, U, U}, {nullptr, "New group"}},

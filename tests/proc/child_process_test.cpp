@@ -16,7 +16,8 @@
 // keeps running past its ChildProcess and past the kill-on-close job of the
 // process that started it, and is watched until it ends on its own), on Windows
 // the polite stop (WM_CLOSE to a window child's unowned top-level window alone,
-// the child started behind; polite only, nothing delivered to a windowless one)
+// the child started behind; polite only, nothing delivered to a windowless one;
+// where a window can be shown at all)
 // and the paths past MAX_PATH (the short form, or the refusal that says why),
 // and on POSIX the released child's own session, no descriptor of this process
 // reaching the child and the destructor killing a running one.
@@ -711,11 +712,26 @@ std::string wait_ready(const fs::path &path, ChildProcess &p) {
 	return std::string();
 }
 
+// Whether this process's window station shows windows: an interactive one (a
+// logged-on session's). A runner started as a service has none (RunsOn's
+// Windows runners, unlike GitHub's hosted ones), and a window there is never
+// shown.
+bool interactive_window_station() {
+	USEROBJECTFLAGS flags{};
+	return GetUserObjectInformationW(
+				   GetProcessWindowStation(), UOI_FLAGS, &flags, sizeof(flags), nullptr) != 0 &&
+			(flags.dwFlags & WSF_VISIBLE) != 0;
+}
+
 // terminate() posts WM_CLOSE to the window child's unowned top-level window
 // alone (its owned window's WM_CLOSE would exit 5), and the child's orderly quit
 // exits 0; polite only, the same. Started behind: its window shown, not the
-// foreground.
+// foreground. Skipped, saying so, where no window can be shown.
 int test_window_stop(const fs::path &dir) {
+	if (!interactive_window_station()) {
+		std::printf("skip: the window stop: no interactive window station shows a window\n");
+		return 0;
+	}
 	for (const bool polite_only : { false, true }) {
 		ChildProcess p;
 		std::string error;

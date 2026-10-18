@@ -36,7 +36,7 @@ static void free_chunk(ThreediChunk *chunk)
 
 // The game keeps a model's chunks as nodes in one list it caps at 2000: the list is made for 2000
 // nodes [orig: CChunkFile_Construct @ 0x56F520, `push 7D0h` @ 0x56F523], each load empties it
-// [orig: CChunkFile_LoadFromFile @ 0x56F780, the reset sub_56F280 @ 0x56F7A5], a ROOT node takes
+// [orig: CChunkFile_LoadFromFile @ 0x56F780, the reset CChunkFile_Reset @ 0x56F7A5], a ROOT node takes
 // index 0 and every chunk read below the file's root appends one, and a node whose index reaches
 // 2000 fails [orig: ChunkFile_CreateChildNode @ 0x56F560, ROOT @ 0x56F576..0x56F5C2, the cap
 // `cmp ecx, 7D0h; jge` @ 0x56F60E..0x56F614], which ChunkFile_ParseRecursive returns as -3

@@ -671,7 +671,7 @@ struct Document {
 
 // A part a window's type creates once its parse is done, an ordinary child of the window behind
 // its authored children, and the fixed NAME the create gives it, which replaces the NAME its block
-// wrote: a combo's LIST_BOX is LISTBOX_WND [orig: sub_65BF60 @ 0x65bf8f], a spin list's arrows
+// wrote: a combo's LIST_BOX is LISTBOX_WND [orig: CComboWnd_CreateChildWindows @ 0x65bf8f], a spin list's arrows
 // SPINLISTWND_UP and SPINLISTWND_DOWN [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8d6,
 // @ 0x64b8fe], the SCROLLBAR of a LIST LISTWND_SCROLL [orig: CListWnd_CreateScrollChild @ 0x644512,
 // from CListWnd_Init @ 0x644d7d], of a TABLE TABLEWND_SCROLL [orig: CTableWnd_Init @ 0x6408a6] and of a

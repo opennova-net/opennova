@@ -25,8 +25,9 @@ the whole bring-up.
     association, the load balancer, the cluster or a program's service, the database,
     the cache or a bucket unless `--allow-destroy`;
   - `org plan|apply|import|output|list`: the Organization (`infra/org`), as the management
-    account's `opennova-org` user (vault item `aws-org`), no deployment: in each member
-    account, through its `OrganizationAccountAccessRole`, the Terraform state bucket, the
+    account's `opennova-org` user (vault item `aws-org`), no deployment: the member
+    accounts (each deployment's and the CI runners'), and in each deployment's account,
+    through its `OrganizationAccountAccessRole`, the Terraform state bucket, the
     role boundary, the deploy user `opennova-deploy` and its key, and the GitHub deploy
     role; its state in prod's state bucket; an apply writes each deployment's bucket, key
     and role into its vault item `aws-<deployment>`;
@@ -37,6 +38,10 @@ the whole bring-up.
     DEPLOY.md, "GitHub"): its settings, members, repositories, the deploy environments,
     branch protection and Actions secrets, no deployment, its state in prod's state
     bucket;
+  - `ci plan|apply|import|output|list`: the CI runners (`infra/ci`; DEPLOY.md, "CI
+    runners"): RunsOn in the ci account (vault item `aws-ci`), as `opennova-org` through
+    that account's `OrganizationAccountAccessRole`, no deployment, its state in prod's
+    state bucket;
   - `app deploy|images|releases|rollback|converge|status|restart|down|up|logs|shell`:
     releases (each program's task definition revision with the images pinned by digest,
     the manifest in SSM and S3; `app deploy --deployment prod --promote staging` takes
@@ -56,7 +61,7 @@ the whole bring-up.
   It keeps the help, the options, the helpers every command shares (the deployment,
   the vault, AWS) and `main`; the commands live in the files it sources from `bin/lib/`,
   one per responsibility: `secrets.sh`, `stripe.sh`, `infra.sh` (`infra`, `org`, `zone`,
-  `github`), `app.sh` (the releases on ECS, ECS Exec, the one-off tasks), `db.sh` (`db`,
+  `github`, `ci`), `app.sh` (the releases on ECS, ECS Exec, the one-off tasks), `db.sh` (`db`,
   `backup`) and `fleet.sh` (`fleet`). The toolbox runs it from the repo, mounted
   at `/workspace`, so the image copies none of it. `bin/tests/deployment_guard_test.sh`
   checks the deployment guard offline, `bin/tests/vault_requests_test.sh` the vault's
@@ -75,9 +80,9 @@ the whole bring-up.
 - `env/`: the `op://` references (`runtime.env.tpl`: the programs' secrets, which `secrets
   sync` copies to SSM and ECS hands the tasks; `terraform.env.tpl`: a deployment stack's;
   `zone.env.tpl`: the zone stack's; `github.env.tpl`: the organization stack's;
-  `org.env.tpl`: the org stack's; `aws.env.tpl`: which access key a command acts with,
-  its deployment's deploy user's (`aws-<deployment>`) or, for `org`, `opennova-org`'s
-  (`aws-org`); `billing.*.env.tpl`: Stripe's test mode for local work and CI,
+  `org.env.tpl`: the org stack's; `ci.env.tpl`: the CI runners' stack's;
+  `aws.env.tpl`: which access key a command acts with, its deployment's deploy user's
+  (`aws-<deployment>`) or, for `org` and `ci`, `opennova-org`'s (`aws-org`); `billing.*.env.tpl`: Stripe's test mode for local work and CI,
   through the restricted key alone). No tracked file holds a value: the vault holds
   every identifier a rebuild needs (DEPLOY.md, "Rebuilding from the vault", the vault's
   contract item by item). The toolbox

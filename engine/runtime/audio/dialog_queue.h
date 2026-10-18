@@ -36,7 +36,7 @@ namespace opennova::audio {
 std::string dialog_name_of(int32_t dialog_index);
 // The name a PLYRDIALOG trigger looks its number up by: "dlg%.3d" of any number,
 // 0 included, which differs from dialog_name_of's for -99..-1 ("dlg-005", not
-// "dlg-05") [orig: Dialog_ExistsByIndex "dlg%.3d" @ 0x44e190; sub_44E220 @ 0x44e23f;
+// "dlg-05") [orig: Dialog_ExistsByIndex "dlg%.3d" @ 0x44e190; Dialog_IsFinishedByIndex @ 0x44e23f;
 // DialogQueue::active / finished].
 std::string trigger_dialog_name(int32_t dialog_index);
 // The number whose "dlg%03i" forms `name` (dlg012: 12, dlg1234: 1234), the
@@ -55,7 +55,7 @@ const dbf::Group *find_dialog(const dbf::File &bank, const std::string &name);
 const lwf::Single *find_dialog_wave(const lwf::File &sounds, const std::string &name);
 // The volume a line plays its wave at, from the wave's byte +33
 // (lwf::Single::volume): a byte of 0 plays at full volume [orig:
-// Dialog_LoadAudioClip @ 0x44dd15 -> sub_75BE10 @ 0x75be10; the play hook
+// Dialog_LoadAudioClip @ 0x44dd15 -> SoundBank_GetEntryVolumeByName @ 0x75be10; the play hook
 // Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527583..0x5275a6 scales a nonzero byte by the voice option
 // and takes 255 for 0]. 0..255.
 int dialog_wave_volume(const lwf::Single &wave);
@@ -131,7 +131,7 @@ DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const lwf::
 
 // The dialog clock: Dialog_UpdatePlayback runs once a logic tick and its rate
 // word is 62 [orig: Game_ProcessMainFrame @ 0x5265af; DialogSystem_Init
-// @ 0x52765e..0x527660 -> sub_44DC60 @ 0x44dc60 into dword_A8A238].
+// @ 0x52765e..0x527660 -> Dialog_SetTickRate @ 0x44dc60 into dword_A8A238].
 inline constexpr uint32_t kDialogTickRate = static_cast<uint32_t>(io::kTicksPerSecondInt);
 // The hold of a line whose wave did not load, or whose rate is 0 [orig:
 // Dialog_LoadAudioClip @ 0x44dd7c, @ 0x44ddbf].
@@ -142,7 +142,7 @@ inline constexpr size_t kDialogSlots = 16;
 // The registered-dialog history: 256 entries whose count saturates at 255, so
 // the 256th registration and every one after it overwrite entry 255, which no
 // scan reaches [orig: dword_A89600 / count dword_A895F8; Dialog_Register
-// @ 0x44d98d, @ 0x44d99c..0x44d9a3; its only reader sub_44E220 @ 0x44e253].
+// @ 0x44d98d, @ 0x44d99c..0x44d9a3; its only reader Dialog_IsFinishedByIndex @ 0x44e253].
 inline constexpr size_t kDialogHistory = 256;
 
 // What the device loaded for a line, Dialog_LoadAudioClip's clip: whether its
@@ -204,7 +204,7 @@ public:
 	// "dlg%.3d" of it. active: a slot holds the dialog (trigger sub 34
 	// PlayerDialogDone is its negation) [orig: Dialog_ExistsByIndex
 	// @ 0x44e170]. finished: the history holds it and no slot does (sub 35
-	// PlayerDialogFinished) [orig: sub_44E220 @ 0x44e220].
+	// PlayerDialogFinished) [orig: Dialog_IsFinishedByIndex @ 0x44e220].
 	bool active(int32_t dialog_index) const;
 	bool finished(int32_t dialog_index) const;
 	const std::vector<Slot> &slots() const { return slots_; }

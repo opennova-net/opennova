@@ -303,7 +303,7 @@ int main(int argc, char **argv) {
 
     // --- translation rows: frame f reads row f, and the final frame reads row
     // frame_count. The original lerps row trunc(frame_count * t) with the next
-    // row [orig: sub_4102D0 @0x4102d0 via BoneAnim_TransformBones @0x410360],
+    // row [orig: AnimChannel_GetTranslationRowAtTime @0x4102d0 via BoneAnim_TransformBones @0x410360],
     // so the block carries frame_count + 1 rows like the keys; holding row
     // frame_count - 1 at the final frame drops the clip's last step.
     {

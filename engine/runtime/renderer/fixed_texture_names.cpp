@@ -85,7 +85,7 @@ std::vector<FixedTextureName> collect() {
 	add_by_role(hud::kHudScopeCrosshairTexture, U::ScopeCrosshair, R::HudAlphaOnly);
 	// [orig: ViewFx_InitShadersAndTextures @ 0x5CFDB8, @ 0x5CFDF3; HUD_LoadAllTextures @ 0x59E109 (the
 	// digits through FILE); ViewFx_InitShadersAndTextures @ 0x5CFE18, @ 0x5CFE4A (the scale through FILE);
-	// sub_5C36B0 @ 0x5C36BC (the vignette through ARCHIVE)]
+	// Render_LoadVignetteTexture @ 0x5C36BC (the vignette through ARCHIVE)]
 	add_by_role(hud::kViewEffectTextureNames[hud::kViewTexBinocularMask], U::BinocularMask, R::ViewEffect);
 	add_by_role(hud::kViewEffectTextureNames[hud::kViewTexBinocularCrosshair], U::BinocularCrosshair, R::ViewEffect);
 	add_by_role(hud::kViewEffectTextureNames[hud::kViewTexBinocularDigits], U::BinocularDigits, R::HudFileArt);
@@ -113,7 +113,7 @@ std::vector<FixedTextureName> collect() {
 	add_by_role(kBootSplashTexture, U::BootSplash, R::BootSplash);
 	// [orig: Render_LoadingScreen @ 0x521D10]
 	add_by_role(hud::kLoadingFallbackImage, U::LoadingFallback, R::LoadingScreen);
-	// [orig: sub_59B120 @ 0x59B120]
+	// [orig: HUD_LoadMfdTexture @ 0x59B120]
 	add_by_role(hud::kHudMfdTexture, U::Mfd, R::HudMfd);
 	return out;
 }

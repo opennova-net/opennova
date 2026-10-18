@@ -803,9 +803,12 @@ int fake_serve_main(int argc, char **argv) {
 	}
 	if (marker.empty())
 		return 2;
+	// Written aside and renamed into place: the test polls for <path>.started
+	// and reads it at once, so it must never see the file half written.
+	const std::string started = marker + ".started";
 	{
 		std::error_code ec;
-		std::ofstream out(marker + ".started", std::ios::binary);
+		std::ofstream out(started + ".partial", std::ios::binary);
 		// What its environment holds of the reply's variable and of the planted
 		// secret (read off the whole environment, as the supervisor test's fake
 		// does: no variable is read by name).
@@ -826,6 +829,10 @@ int fake_serve_main(int argc, char **argv) {
 #endif
 				;
 	}
+	std::error_code renamed;
+	fs::rename(started + ".partial", started, renamed);
+	if (renamed)
+		return 4;
 	if (exit_code >= 0)
 		return exit_code;
 	for (int i = 0; i < 60 * 50 && !g_stop; ++i)

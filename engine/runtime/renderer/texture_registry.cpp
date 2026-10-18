@@ -22,7 +22,7 @@ std::string folded_key(std::string_view name, const char *suffix, bool volume = 
 //  Texture_LoadByNameWithChannel (@ 0x5B1742, @ 0x5B176E: "%s:%c" with channel 0 + '1'
 //  @ 0x58B4AD), type 1 through Texture_LoadAndRegister (@ 0x5B1758: the same @ 0x58B7CD),
 //  4/5 through Texture_LoadAsNormalMap (@ 0x5B1790: "%s:BA:%c" @ 0x58C4CE), 6 through
-//  sub_58A580 (@ 0x5B17AD: "%s:HZ:%c" @ 0x58A5BA, the volume list), 7 through sub_58CE10
+//  Texture_LoadHorizonMap (@ 0x5B17AD: "%s:HZ:%c" @ 0x58A5BA, the volume list), 7 through Texture_LoadOcclusionMap
 //  (@ 0x5B17CA: "%s:AO:%c" @ 0x58CE4A), 16 through sub_58F350 ("%s:NML" @ 0x58F399), 17
 //  through sub_58F470 ("%s:HZ" @ 0x58F4B9, the volume list), 18 through
 //  Texture_LoadAOC8Chunk ("%s:AO" @ 0x58F5D9); the default @ 0x5B17F4 loads nothing]

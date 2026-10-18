@@ -18,7 +18,7 @@ namespace opennova {
 // entries and starts the fresh sweep in the same call, so a list refresh never
 // waits for the previous list's pings [orig: NapiGameList_StartPingSweep
 // @0x63bcf0 -> NapiTimer_Pause @0x63bd0c (Thread_RequestStopAndWait @0x62f846),
-// the entry clear sub_62FE10 @0x63bd17, NapiPingManager_Start @0x63bd7b]. The
+// the entry clear NapiConnection_PauseAndFreeEnumerators @0x63bd17, NapiPingManager_Start @0x63bd7b]. The
 // superseded sweep never reports.
 //
 // The device leg differs in one respect: an OS echo already in flight writes

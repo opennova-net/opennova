@@ -574,7 +574,7 @@ typedef struct DefWeaponDef {
        3 1`). Appended (layout stability).
        [orig: WeaponDefs_ParseLineCallback 'farpinfo' @ 0x544da3 -> +0xE8 @ 0x544dc4,
         +0xEC @ 0x544ddf; consumer Server_UpdateEntityTargetLockAndWeaponOverlays
-        @ 0x511820, @ 0x51190b..0x511934 -> the ammo top-up sub_546230 @ 0x546230] */
+        @ 0x511820, @ 0x51190b..0x511934 -> the ammo top-up Entity_AddMountSlotAmmo @ 0x546230] */
     int farp_rounds;           /* +0xE8 */
     int farp_interval;         /* +0xEC */
     /* 'designation_time <seconds>': atol x 62 -> +0x458, the life of a designation in

@@ -10,9 +10,11 @@
 #   variables.tf     every input (the vault's, through the toolbox)
 #   organization.tf  the organization and its member accounts, adopted by
 #                    import blocks
-#   accounts.tf      each member account's baseline (account/: its state
+#   accounts.tf      each deployment account's baseline (account/: its state
 #                    bucket, the role boundary, the deploy user, its policies
-#                    and key, the GitHub deploy role)
+#                    and key, the GitHub deploy role); the ci account, which
+#                    holds the CI runners alone, has none (infra/ci makes
+#                    what it holds)
 #   identity_center.tf  the maintainer's console access to the member accounts
 #                    (IAM Identity Center: two permission sets, one user)
 #   outputs.tf       what the toolbox writes back to the vault
@@ -20,7 +22,7 @@
 # Run as `./deploy/run.sh org plan|apply` (no --deployment: the stack is the
 # organization's). No tracked file names an account, the organization or an
 # address: every identifier comes from the vault (items aws-org, aws-prod,
-# aws-staging), and what the stack makes that later runs need goes back there.
+# aws-staging, aws-ci), and what the stack makes that later runs need goes back there.
 # Its state is org/terraform.tfstate in prod's state bucket, which this stack
 # makes, reached through prod's OrganizationAccountAccessRole (the backend's
 # assume_role): the first run is local (the toolbox's backend override), then
@@ -48,6 +50,7 @@ locals {
   members = {
     prod    = { account_id = var.aws_account_id_prod, name = var.account_name_prod, email = var.root_email_prod }
     staging = { account_id = var.aws_account_id_staging, name = var.account_name_staging, email = var.root_email_staging }
+    ci      = { account_id = var.aws_account_id_ci, name = var.account_name_ci, email = var.root_email_ci }
   }
 }
 

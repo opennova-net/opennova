@@ -179,7 +179,7 @@ bool connection_claims_player_slot(const NapiNPConnection &connection) {
 // PlayerList never names slot 0 (D-NET-350).
 // [orig: Server_InitNewRoundState @0x51c99a..0x51ca3c (slot 0 active, local);
 //  Server_PlayerAdd @0x51cc31..0x51cc65 (the local add -> g_LocalNetPlayer),
-//  @0x51cc9a -> sub_4FD7B0 @0x4fd7d0 (only rows whose +4 active byte is 0)]
+//  @0x51cc9a -> PlayerSlot_PickFreeSlot @0x4fd7d0 (only rows whose +4 active byte is 0)]
 std::optional<uint8_t> first_free_player_slot(
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection *joining, uint32_t slot_capacity) {
@@ -276,7 +276,7 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// [orig: CBufferList_Free(g_TeamChangeEntityList) @0x51C911..0x51C92A].
 	ctx.team_change_entities.clear();
 	// banlist.txt: freed, and reloaded on a NovaWorld authority session
-	// [orig: sub_436EB0 @0x51c92f -> BanList_InitFromMission @0x5098f0].
+	// [orig: Server_ReloadBanListAndResetNetStats @0x51c92f -> BanList_InitFromMission @0x5098f0].
 	Server_ReloadPcidBanList(ctx);
 	// banned.txt: zeroed and re-read, authority or not
 	// [orig: @0x51cb25..0x51cb3b].

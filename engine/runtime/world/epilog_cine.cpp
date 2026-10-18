@@ -133,7 +133,7 @@ void EpilogCine::clear_events() {
 }
 
 void EpilogCine::step_timeline(World &world) {
-	++frame; // [orig: sub_56FF40 @0x56FF52]
+	++frame; // [orig: Cine_AdvanceTimelineFrame @0x56FF52]
 	// [orig: @0x56FF8A..0x56FFE7 — start <= frame <= start + duration; the
 	//  +0x0C progress the camera and blend nodes read; slot 1 on the start
 	//  frame, slot 2 every live frame, slot 4 on the last]
@@ -167,7 +167,7 @@ void EpilogCine::activate_event(CineEvent &e) {
 			e.alpha = 1.0f;
 		break;
 	case CineEventKind::TextFade:
-		// [orig: sub_572F70 @0x572F70]
+		// [orig: CCineEventTextFade_Start @0x572F70]
 		e.counter = 0;
 		e.alpha = 0.0f;
 		break;
@@ -180,7 +180,7 @@ void EpilogCine::activate_event(CineEvent &e) {
 		break;
 	default:
 		// The cached camera's start is a nullsub (@0x571FB0); the edit fade's
-		// camera-target blend (sub_5726B0 @0x5726B0) has no target in the lose
+		// camera-target blend (CCineEventEditFade_Start @0x5726B0) has no target in the lose
 		// cine.
 		break;
 	}
@@ -189,7 +189,7 @@ void EpilogCine::activate_event(CineEvent &e) {
 void EpilogCine::update_event(CineEvent &e, World &world) {
 	switch (e.kind) {
 	case CineEventKind::ImageFade:
-		// [orig: sub_571020 @0x571020 — the delay @0x571028; mode 1 up to 1
+		// [orig: CCineEventImageFade_Step @0x571020 — the delay @0x571028; mode 1 up to 1
 		//  @0x57107E, mode 2 down to 0 @0x571058, mode 3 at 1 @0x57104B]
 		if (e.counter > 0) {
 			--e.counter;
@@ -220,7 +220,7 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 		bars_held = false;
 		break;
 	case CineEventKind::TextFade: {
-		// [orig: sub_572F90 @0x572F90 — the count @0x572F9A, the fade-in
+		// [orig: CCineEventTextFade_Step @0x572F90 — the count @0x572F9A, the fade-in
 		//  @0x572FB8, the hold @0x572FF7, the fade-out @0x572FDD..0x572FEB]
 		const int32_t count = ++e.counter;
 		if (count < e.fade_in)
@@ -270,16 +270,16 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 	default:
 		// The cached camera's interpolation (Cine_CameraInterpolateTransform
 		// @0x5722C0) drives the cine view (D-AI-16); the edit fade's blend
-		// (sub_5726D0 @0x5726D0) has no target.
+		// (CCineEventEditFade_Step @0x5726D0) has no target.
 		break;
 	}
 }
 
 void EpilogCine::end_event(const CineEvent &e) {
 	// The letterbox's end: a fade-in leaves the bars held opaque, a fade-out
-	// clears them [orig: sub_571330 @0x571330 — mode 1 @0x571348 / @0x571352,
+	// clears them [orig: CCineEventLetterbox_Finish @0x571330 — mode 1 @0x571348 / @0x571352,
 	//  mode 2 @0x57133D / @0x571342]. The other kinds' ends are nullsubs or
-	//  the edit fade's target restore (sub_572750 @0x572750).
+	//  the edit fade's target restore (CCineEventEditFade_Finish @0x572750).
 	if (e.kind != CineEventKind::Letterbox) return;
 	if (e.letterbox_mode == 1) {
 		bars_fading = false;
@@ -291,7 +291,7 @@ void EpilogCine::end_event(const CineEvent &e) {
 }
 
 void EpilogCine::mission_start(bool first_start, bool in_session, World &world) {
-	clear_events(); // [orig: Game_StartMission @0x525DA8 -> sub_577940]
+	clear_events(); // [orig: Game_StartMission @0x525DA8 -> Cine_ReleaseAll]
 	screen_active = false; // [orig: Game_ResetSessionHudState @0x434BDC]
 	// The restart takes the other arm (nullsub_32 @0x525DDD); a session never
 	// loads the intro [orig: @0x525DAF..0x525DBF].
@@ -299,20 +299,20 @@ void EpilogCine::mission_start(bool first_start, bool in_session, World &world) 
 	// The <mission>.cin intro load: no shipped mission carries a .cin, so the
 	// load finds no file and only its head runs; the cine is flagged running
 	// over an empty timeline, which the first render pass stops.
-	// [orig: sub_578270 @0x578270 — dword_26970FC = 1 @0x578296, the fade
+	// [orig: Cine_StartScriptPlayback @0x578270 — dword_26970FC = 1 @0x578296, the fade
 	//  quad down @0x5782A6, mode 0 @0x5782B8; the .pcx probe @0x57833B and the
 	//  re-raise @0x578378]
 	active = true;
 	fade_quad = false;
 	mode = EpilogCineMode::None;
-	frame = -1; // [orig: sub_56FB50 @0x56FB50]
+	frame = -1; // [orig: Cine_ResetTimelineFrame @0x56FB50]
 	update(world); // [orig: @0x525DD6]
 }
 
 void EpilogCine::begin_win(const Entity *local_player) {
 	// [orig: Cine_InitPlayback @0x578390 — the destroy @0x5783A7, the frame
 	//  reset @0x5783B3]. A <mission>.end cine would load here (@0x578411 ->
-	//  sub_578270 when FileSystem_FileExists); no shipped mission carries one,
+	//  Cine_StartScriptPlayback when FileSystem_FileExists); no shipped mission carries one,
 	//  so the timeline stays empty and the no-cine arm builds the camera.
 	clear_events();
 	frame = -1;
@@ -363,7 +363,7 @@ void EpilogCine::begin_lose() {
 void EpilogCine::update(World &world) {
 	// [orig: Cinematic_EpilogUpdate @0x577961 — the cine-running gate]
 	if (!active) return;
-	step_timeline(world); // [orig: Cinematic_EpilogUpdate @0x577963 -> sub_56FF40]
+	step_timeline(world); // [orig: Cinematic_EpilogUpdate @0x577963 -> Cine_AdvanceTimelineFrame]
 	if (mode == EpilogCineMode::Win)
 		update_win(world); // [orig: @0x57797C]
 	else if (mode == EpilogCineMode::Lose)
@@ -505,8 +505,8 @@ void EpilogCine::build_win_screen(const World &world) {
 }
 
 void EpilogCine::render_pass() {
-	// [orig: sub_575A50 @0x575A57 — the running gate; the time-range recalc
-	//  @0x575A59; the draw @0x575A8A -> sub_570BB0, whose tail raises
+	// [orig: Cine_RenderOrEndPlayback @0x575A57 — the running gate; the time-range recalc
+	//  @0x575A59; the draw @0x575A8A -> Cine_RenderOverlays, whose tail raises
 	//  dword_26970F4 @0x570C66; past the end the cine stops @0x575A6B]
 	if (!active) return;
 	if (frame < end_frame())

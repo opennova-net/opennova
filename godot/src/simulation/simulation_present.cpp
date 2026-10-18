@@ -50,7 +50,7 @@ void Simulation::advance_facial_presentation(const Vector3 &p_camera) {
     // JO renders these targets then writes two unused globals. The complete
     // .text/.rdata/.data audit found no texture sink; model materials retain
     // their normal textures. Keep the frame counter/priority state live.
-    // [orig: sub_580360 @0x580360; sub_580030 @0x580030;
+    // [orig: FaceAnim_RenderAllSlots @0x580360; FaceAnim_BindSlotTargets @0x580030;
     //  write-only globals @0x272137C/@0x2721380, world-wac-ai-re §33.30]
 }
 

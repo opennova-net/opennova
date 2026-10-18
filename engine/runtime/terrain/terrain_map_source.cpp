@@ -45,7 +45,7 @@ bool decode_charmap_source(const std::string &name, const std::vector<uint8_t> &
 	IndexedImage8 indices;
 	if (!read_picture(name, bytes, colours, indices, why)) return false;
 	// The game keeps the side alone, the rows' length and the power of two it samples the 1024-unit
-	// heightmap by, so the map is square and a power of two no wider than the heightmap [orig: sub_605A10 @
+	// heightmap by, so the map is square and a power of two no wider than the heightmap [orig: Terrain_LoadCharmapPCX @
 	// 0x605A82..0x605AA0; Terrain_GetSurfaceTypeAtPosition @ 0x6065C6].
 	const int w = colours.width, h = colours.height;
 	if (w != h || w < kCharmapSourceSideMin || surface_sample_extent(w) != w) {

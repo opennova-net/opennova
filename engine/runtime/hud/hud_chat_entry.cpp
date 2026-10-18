@@ -8,7 +8,7 @@ namespace opennova::hud {
 
 int chat_dispatch_channel(int dispatch) {
 	switch (dispatch) {
-		case kChatDispatchLocal: return 13;  // [orig: sub_49A840 @0x49a8d6]
+		case kChatDispatchLocal: return 13;  // [orig: Chat_SendLocalMessage @0x49a8d6]
 		case kChatDispatchGlobal: return 1;  // [orig: @0x49a9af]
 		case kChatDispatchTeam: return 2;    // [orig: @0x49a74f]
 		case kChatDispatchSquad: return 12;  // [orig: @0x49aaff]

@@ -152,7 +152,7 @@ public:
 	void refresh_minimap_live_markers();
 	// S2C 0x3E (empty): every overlay slot and every linked row cleared, the
 	// last message of the host's join tail [orig: NapiNPClientMsg_0x03E
-	// @0x4226D0 -> sub_5BE8D0 @0x5BE8D0; Server_OnPlayerJoin @0x51aaee].
+	// @0x4226D0 -> MapOverlay_ResetAllSlots @0x5BE8D0; Server_OnPlayerJoin @0x51aaee].
 	void reset_minimap_overlays();
     using GuidedRoundResolver = std::function<world::LiveRound *(int16_t)>;
     void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
@@ -506,14 +506,14 @@ public:
 	// walk starts from and excludes (the embedder stamps it each frame), the
 	// target walk (direction 0 clears target and sub-mode), the sub-mode cycle
 	// and the SPECTATORTARGET track.
-	// [orig: Spectator_CycleTarget_0 @0x52ac20; sub_52AFF0 @0x52aff0;
+	// [orig: Spectator_CycleTarget_0 @0x52ac20; Spectator_CycleMode @0x52aff0;
 	//  Entity_TrySetMinimapTrackTarget @0x52abc0]
 	void set_spectate_local_handle(uint16_t handle) { spectate_local_handle_ = handle; }
 	void spectate_cycle_target(int direction);
 	// True when the cycle landed on the free sub-mode by the arm that then
 	// places the local entity on the composed view pose (the forward wrap with
 	// a target, any backward step to free) — that placement is the caller's
-	// (inmatch::spectate_action) [orig: sub_52AFF0 @0x52b043 / @0x52b080 ->
+	// (inmatch::spectate_action) [orig: Spectator_CycleMode @0x52b043 / @0x52b080 ->
 	// @0x52b082].
 	bool spectate_cycle_mode(int direction);
 	void spectate_track(uint16_t handle);

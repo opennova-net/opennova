@@ -35,8 +35,8 @@ namespace opennova::renderer {
 //  Texture_LoadByNameWithChannel @ 0x58B4AD ("%s:%c", channel + '1');
 //  Texture_LoadAndRegister @ 0x58B7CD (the same);
 //  Texture_LoadAsNormalMap @ 0x58C4CE ("%s:BA:%c");
-//  sub_58A580 @ 0x58A5BA ("%s:HZ:%c", looked up in the volume list GStaticVB_FindByName
-//  @ 0x686B60); sub_58CE10 @ 0x58CE4A ("%s:AO:%c");
+//  Texture_LoadHorizonMap @ 0x58A5BA ("%s:HZ:%c", looked up in the volume list GStaticVB_FindByName
+//  @ 0x686B60); Texture_LoadOcclusionMap @ 0x58CE4A ("%s:AO:%c");
 //  sub_58F350 @ 0x58F399 ("%s:NML"); sub_58F470 @ 0x58F4B9 ("%s:HZ", the volume list);
 //  Texture_LoadAOC8Chunk @ 0x58F5D9 ("%s:AO");
 //  the row's name copied byte for byte, Material_ConvertDefinition @ 0x5B0410..0x5B041A;

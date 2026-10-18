@@ -195,7 +195,7 @@ std::string text_id_missing(const AssetGraph &graph, const GraphEdge &edge) {
 }
 
 // A play's stream past its bank's: the game's stream select takes the bank's first [orig: AudioVM_StartSound @
-// 0x671FF0 -> sub_671BC0 @ 0x671BCA, an index past the entries made 0]; a bank the project lacks opens no music
+// 0x671FF0 -> AudioVM_SelectStream @ 0x671BCA, an index past the entries made 0]; a bank the project lacks opens no music
 // [orig: AudioVM_OpenMusicContext @ 0x6722A0].
 std::string stream_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	if (!graph.has_file(edge.scope))
@@ -901,7 +901,7 @@ constexpr ReferenceKindRow kRows[] = {
 	// name, without case [orig: SoundBank_FindEntryByName @ 0x75bba0]. A name none has is an error the
 	// game never meets: the bank cannot be written with it (SoundBankDocument::serialize).
 	// A dialog line's wave is the same name, read by the dialog line player in the dialog bank's sounds alone
-	// [orig: Dialog_LoadAudioClip @ 0x44dcf7..0x44dd15 -> sub_75BDC0 @ 0x75bdc0], which the game tolerates
+	// [orig: Dialog_LoadAudioClip @ 0x44dcf7..0x44dd15 -> SoundBank_GetEntryWaveByName @ 0x75bdc0], which the game tolerates
 	// missing (bank_wave_severity).
 	Row(ReferenceKind::BankWave, "bank_wave", "the wave", "wave")
 	        .symbol(NameCase::NoCase, AssetKind::SoundBank)

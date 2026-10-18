@@ -4,7 +4,7 @@
 // session on the NovaWorld network type reads: every round init frees the list
 // and reloads the file; a missing file, or one whose VERSION is not 1, yields no
 // list, so a fresh empty one is created and saved over the file
-// [orig: Server_InitNewRoundState @0x51C92F -> sub_436EB0 -> BanList_InitFromMission
+// [orig: Server_InitNewRoundState @0x51C92F -> Server_ReloadBanListAndResetNetStats -> BanList_InitFromMission
 // @0x5098F0]. The console's BAN / UNBAN and the admin PLAYER BAN rewrite it at
 // once. A joiner whose decrypted `<local>PCID` cookie is on the list is refused
 // with punt code 29 [orig: Server_ValidatePlayerJoinRequest @0x512737..0x512759].

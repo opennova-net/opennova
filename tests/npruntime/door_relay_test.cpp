@@ -219,7 +219,7 @@ void test_host_answers_door_requests() {
 // A client's door command asks the host for every selected section but
 // section 0, each carrying the record before it, after this command's own
 // transitions. [orig: DoorClass_HandleEvent @0x43f482 ->
-//  NetPacket_SendWeaponSwitch @0x42D0C0]
+//  NetPacket_SendDoorSlotRequest @0x42D0C0]
 void test_client_command_raises_requests() {
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;

@@ -26,7 +26,7 @@ int Server_CountEntitiesByTypeAndTeam(const world::World &world, uint16_t type_i
 std::vector<uint8_t> Server_BuildVehicleSpawnAvailability(
 		const NapiNPServerCtx &ctx, const world::World &world, uint8_t team);
 
-// sub_5104C0: the row exists, the team has slots left, the live count is under
+// EntityLimit_TryConsume: the row exists, the team has slots left, the live count is under
 // the type cap (or the cap is -1); `consume` decrements a finite team slot.
 bool Server_VehicleSpawnAllowed(NapiNPServerCtx &ctx, const world::World &world,
 		uint16_t type_id, uint8_t team, bool consume);

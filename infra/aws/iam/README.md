@@ -2,7 +2,8 @@
 
 OpenNova runs in an AWS Organization: the management account holds the organization,
 billing and one principal, `opennova-org`; each deployment runs in a member account of its own,
-`opennova-prod` and `opennova-staging` (DEPLOY.md, "Deployments"). This directory holds every
+`opennova-prod` and `opennova-staging` (DEPLOY.md, "Deployments"), and the CI runners in a third,
+`opennova-ci` (`infra/ci`; DEPLOY.md, "CI runners"). This directory holds every
 IAM document those principals carry. No document names an account: each is a template, filled
 with the account's id and region from the vault.
 
@@ -19,7 +20,8 @@ and nothing else: it reads the organization, makes and tags member accounts
 (`organizations:CreateAccount`, `TagResource`, `UntagResource` on the organization's accounts),
 and assumes each member account's `OrganizationAccountAccessRole`, the administrator role
 Organizations made with the account. Every resource the org stack makes in a member account, and
-the org stack's own state (in prod's state bucket), it reaches through that role. A new account
+the org stack's own state (in prod's state bucket), it reaches through that role; so too the CI
+runners' stack (`./deploy/run.sh ci plan|apply`) and its state, beside the org stack's. A new account
 adds its role to the document (the org stack's output `org_user_policy` prints the filled
 document after an apply).
 
@@ -31,6 +33,7 @@ policy="$(sed -e "s/\${management_account_id}/$(op read "op://$V/aws-org/account
               -e "s/\${organization_id}/$(op read "op://$V/aws-org/organization_id")/" \
               -e "s/\${prod_account_id}/$(op read "op://$V/aws-prod/account_id")/" \
               -e "s/\${staging_account_id}/$(op read "op://$V/aws-staging/account_id")/" \
+              -e "s/\${ci_account_id}/$(op read "op://$V/aws-ci/account_id")/" \
               infra/aws/iam/opennova-org.json)"
 aws iam create-user --user-name opennova-org
 aws iam put-user-policy --user-name opennova-org --policy-name opennova-org --policy-document "$policy"

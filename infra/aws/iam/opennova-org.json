@@ -65,7 +65,8 @@
       "Action": "sts:AssumeRole",
       "Resource": [
         "arn:aws:iam::${prod_account_id}:role/OrganizationAccountAccessRole",
-        "arn:aws:iam::${staging_account_id}:role/OrganizationAccountAccessRole"
+        "arn:aws:iam::${staging_account_id}:role/OrganizationAccountAccessRole",
+        "arn:aws:iam::${ci_account_id}:role/OrganizationAccountAccessRole"
       ]
     }
   ]

@@ -1,5 +1,5 @@
 // Authored squib sweeps, independent of ballistic round flight.
-// [orig: sub_448CE0 @0x448CE0, Entity_InitArcMovement @0x449810,
+// [orig: Entity_InitSquibFromDef @0x448CE0, Entity_InitArcMovement @0x449810,
 // Entity_ProcessProjectileTravel @0x448D50]
 #include <runtime/world/destruction.h>
 #include <runtime/world/world.h>

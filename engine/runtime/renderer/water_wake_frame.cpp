@@ -5,7 +5,7 @@
 
 namespace opennova::renderer {
 
-// [orig: sub_56BD20 @ 0x56BD20; WaterRing_InitSlot @ 0x5DDD80 (the
+// [orig: WaterRing_SpawnGridAligned @ 0x56BD20; WaterRing_InitSlot @ 0x5DDD80 (the
 //  surface-ring row init)]
 void WaterWakePool::add(int32_t x, int32_t y, float opacity) {
 	for (auto &row : rows_) {

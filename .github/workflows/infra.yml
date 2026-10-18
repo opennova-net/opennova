@@ -2,7 +2,7 @@ name: Infra
 
 # The offline checks of the deploy stack (DEPLOY.md): the Terraform under
 # infra/ (formatted, valid, and the mock-provider tests of infra/aws for both
-# deployments, infra/org, infra/zone and infra/github, which plan
+# deployments, infra/org, infra/zone, infra/github and infra/ci, which plan
 # against mocks with no credentials, so nothing reaches AWS, Cloudflare or
 # GitHub) at the pinned Terraform the toolbox runs, shellcheck on the deploy
 # toolbox (on-deploy, the files it sources, followed with -x, and its tests),
@@ -74,6 +74,12 @@ jobs:
           docker run --rm -v "$PWD:/w" -w /w/infra/github "$TERRAFORM_IMAGE" init -backend=false -input=false
           docker run --rm -v "$PWD:/w" -w /w/infra/github "$TERRAFORM_IMAGE" validate
           docker run --rm --network none -v "$PWD:/w" -w /w/infra/github "$TERRAFORM_IMAGE" test
+      # The CI runners (RunsOn in the ci account; its module from the registry).
+      - name: terraform init, validate and test (infra/ci)
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w/infra/ci "$TERRAFORM_IMAGE" init -backend=false -input=false
+          docker run --rm -v "$PWD:/w" -w /w/infra/ci "$TERRAFORM_IMAGE" validate
+          docker run --rm --network none -v "$PWD:/w" -w /w/infra/ci "$TERRAFORM_IMAGE" test
 
   shellcheck:
     runs-on: ubuntu-latest

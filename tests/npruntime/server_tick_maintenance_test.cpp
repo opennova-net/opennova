@@ -6,7 +6,7 @@
 //     spectator, and cleared by the first validated fire
 //     [orig: Server_UpdateAllActivePlayerSlots @0x518820; Server_DeployPlayer
 //      @0x517740; Server_ClientFiredRound @0x50c736..0x50c75d];
-//   - the 1 Hz round-robin S2C 0x2F flag refresh [orig: sub_517B20 @0x517B20];
+//   - the 1 Hz round-robin S2C 0x2F flag refresh [orig: Server_RefreshNextFlagState @0x517B20];
 //   - the violation sweep's flag carry limit [orig: Server_CheckPlayerViolations
 //     @0x51ABD0 -> Entity_DropCarriedObject @0x439DF0 + Entity_SyncPositionFromDefinition
 //     @0x43A9B0] (the t6 punt arms are pinned in host_punt_test);

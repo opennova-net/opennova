@@ -45,7 +45,7 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	if (bf.font() == nullptr) return;
 	// Every string goes through a half-bright drawer, alpha forced opaque: the
 	// title HUD_DrawLabelBox's HUD_DrawTextLeft_HalfBright @0x51f13a, the header
-	// rungs HUD_DrawTextAtVirtualPos (-> sub_5D2EA0), the rows, rank and footer
+	// rungs HUD_DrawTextAtVirtualPos (-> HUD_DrawTextAligned_HalfBrightNoFlags), the rows, rank and footer
 	// HUD_DrawTextAligned (ex sub_5D3F30, -> sub_5D2F20). `diffuse` lays a run out
 	// at the glyphs' raw diffuse, `text` at the drawer's halved colour.
 	const auto diffuse = [&](const char *t, float design_x, float design_y,

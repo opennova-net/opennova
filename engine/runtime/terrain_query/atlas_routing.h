@@ -47,7 +47,7 @@ inline int32_t surface_clamp_grid(int32_t v, bool wrap) {
 	return v;
 }
 // The width's log2 as the loader counts it (halved while above 1: the floor)
-// [orig: sub_605A10 @ 0x605A82..0x605AA0; Foliage_LoadFoliageMapPCX @
+// [orig: Terrain_LoadCharmapPCX @ 0x605A82..0x605AA0; Foliage_LoadFoliageMapPCX @
 // 0x605B44..0x605B60].
 inline int32_t surface_shift(int32_t width) {
 	int32_t s = 0;

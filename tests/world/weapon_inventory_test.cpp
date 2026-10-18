@@ -1001,7 +1001,7 @@ void test_reload_takes_the_seat() {
 
 // An EWeap mount's reload: the re-split, the draw from the reserve, the clip the draw;
 // an empty reserve leaves the clip empty. [orig: WeaponSlot_ReloadAmmo @0x541720;
-//  the re-split @0x5462A0; sub_5461D0]
+//  the re-split @0x5462A0; Entity_SpendMountSlotReserve]
 void test_mount_slot_reload() {
     WeaponTableEntry gun;
     gun.clipsize = 10;

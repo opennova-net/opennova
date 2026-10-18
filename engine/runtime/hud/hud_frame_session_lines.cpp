@@ -46,7 +46,7 @@ std::string format_team_timer(int32_t remaining, const std::string &label, int32
 } // namespace
 
 void HudFrameCompiler::element_squad_orders(const HudFrameState &state, float w, float h) {
-	// THE SQUAD ORDER LINES (a misnamed sub_59AEE0): off while the server
+	// THE SQUAD ORDER LINES (a misnamed HUD_DrawSquadOrderLines): off while the server
 	// status view is toggled and above detail level 1, and NO declutter slot
 	// of its own (no HUDDECLUT row hides them: the CHAT slot gates only the
 	// console rings); the HUDORDERS anchor and the 18-px pitch each through
@@ -56,7 +56,7 @@ void HudFrameCompiler::element_squad_orders(const HudFrameState &state, float w,
 	// They hold until overwritten, cancelled with an empty line or cleared at
 	// the mission start. The status view's gate is the overlay's: its page
 	// replaces the scene frame's HUD whole.
-	// [orig: sub_59AEE0 @0x59aee0 — `test dword_24C1930, 0x2000000`
+	// [orig: HUD_DrawSquadOrderLines @0x59aee0 — `test dword_24C1930, 0x2000000`
 	//  @0x59aee3 and the level `jge` @0x59aefb, nothing else before the anchor
 	//  @0x59af0a..0x59af2a; the loop @0x59af30..0x59af68 over byte_2721DB8 up
 	//  to g_HUDTrackedTarget, HUD_DrawTextRightAligned_HalfBright
@@ -80,7 +80,7 @@ void HudFrameCompiler::element_squad_orders(const HudFrameState &state, float w,
 
 void HudFrameCompiler::emit_half_bright_text(const GameFont &slot, float slot_scale,
 		const char *text, float screen_x, float screen_y, uint32_t argb, int mode) {
-	// [orig: sub_5D2EA0 @0x5d2ea0 — 0 HUD_DrawTextLeft_HalfBright, 1
+	// [orig: HUD_DrawTextAligned_HalfBrightNoFlags @0x5d2ea0 — 0 HUD_DrawTextLeft_HalfBright, 1
 	//  HUD_DrawTextRightAligned_HalfBright, 2 HUD_DrawTextCentered_HalfBright,
 	//  any other mode falls through]
 	if (mode < 0 || mode > 2) return;
@@ -91,7 +91,7 @@ void HudFrameCompiler::emit_half_bright_text(const GameFont &slot, float slot_sc
 void HudFrameCompiler::emit_text_at_virtual_pos(const GameFont &slot, float slot_scale,
 		const char *text, int design_x, int design_y, float w, float h, uint32_t argb, int mode) {
 	// [orig: HUD_DrawTextAtVirtualPos @0x5d3ec0 — ((x * W + 512) / 1024,
-	//  (y * H + 384) / 768) then sub_5D2EA0]
+	//  (y * H + 384) / 768) then HUD_DrawTextAligned_HalfBrightNoFlags]
 	const int sxp = virtual_scale(design_x, static_cast<int>(w), 1024);
 	const int syp = virtual_scale(design_y, static_cast<int>(h), 768);
 	emit_half_bright_text(slot, slot_scale, text, static_cast<float>(sxp),
@@ -289,7 +289,7 @@ void HudFrameCompiler::element_team_id_line(const HudFrameState &state, float w,
 		int text_w = 0;
 		bold.measure(text.c_str(), bold_scale, bold_scale, &text_w, &text_h);
 	}
-	// The spectated player's name, first [orig: sub_5D2EA0(.., g_DeathScreenTarget + 244,
+	// The spectated player's name, first [orig: HUD_DrawTextAligned_HalfBrightNoFlags(.., g_DeathScreenTarget + 244,
 	// ..) @0x59AC64].
 	if (death)
 		emit_half_bright_text(label_font_bold_, label_scale_, s.spectated_name.c_str(),

@@ -43,7 +43,7 @@ uint32_t read_u32_le(const uint8_t *data, size_t len) {
 // either fails the identity compare against the nonzero protocol GUID.
 // [orig: NapiNPProtocol_HandleClientHello @0x62165E..0x621672;
 //  NapiNPProtocol_HandleClientJoin @0x62BA24..0x62BA38; the zeroed block
-//  sub_62EDB0 @0x62EDB0 / NapiVarBlock_Init @0x62E710]
+//  NapiGUID_Clear @0x62EDB0 / NapiVarBlock_Init @0x62E710]
 void load_value_guid(const uint8_t *value, const uint8_t *end, std::array<uint8_t, 16> &out) {
 	load_value_bytes(value, end, out.data(), out.size());
 }

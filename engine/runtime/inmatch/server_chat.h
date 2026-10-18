@@ -97,7 +97,7 @@ world::EntityHandle carrier_vehicle(const world::World &world, const world::Enti
 // reopens it; a stray '>' while open is kept.
 std::string chat_strip_angle_tags(const std::string &text);
 
-// [orig: sub_4FD650 @0x4FD650 -> the three-int text parse]: true when the text
+// [orig: ChatFilter_IsTextFiltered @0x4FD650 -> the three-int text parse]: true when the text
 // scans as three integers with any of them nonzero.
 bool chat_text_is_int_triplet(const std::string &text);
 

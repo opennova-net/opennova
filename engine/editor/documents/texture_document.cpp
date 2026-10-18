@@ -53,7 +53,7 @@ constexpr FindingCodeRow code(const char *token, FindingFix fixes = FindingFix::
 // buffer of the image's 4 * width * height bytes from the FastMem arena [orig: Texture_LoadPCXFromPFF32 @ 0x56EA30,
 // the buffer @ 0x56EB1E, the row writes @ 0x56EDC0, @ 0x56EDDB], whose blocks are rounded up to 64 bytes [orig:
 // FastMem_Alloc @ 0x7697B0, @ 0x7697D7] and followed by a header whose first dword is the pool pointer the next
-// allocation and free dereference [orig: sub_7695C0 @ 0x7695D1; @ 0x7695C4, @ 0x769664, @ 0x769709]. The bytes the
+// allocation and free dereference [orig: FastMem_SplitBlock @ 0x7695D1; @ 0x7695C4, @ 0x769664, @ 0x769709]. The bytes the
 // rows write past the block's rounding: where the allocator split the free block it took (one more than a header
 // larger than asked, @ 0x769812..0x769819) the next block's header starts there, and a texel (0xFF its top byte) on
 // its pointer faults the game's next FastMem call; a block it gave whole holds up to a header's 36 bytes more of its

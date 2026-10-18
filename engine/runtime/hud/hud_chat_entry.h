@@ -42,11 +42,11 @@ inline constexpr int kChatDispatchRepeat = 112; // row 57 Chat (Enter)
 inline constexpr int kChatDispatchConsole = 20;
 
 // The C2S 0x0D channel byte each dispatch's sender writes, -1 for none
-// [orig: sub_49A840 13 @0x49a8d6; Chat_SendTeamMessage (IDB misnomer — the
+// [orig: Chat_SendLocalMessage 13 @0x49a8d6; Chat_SendTeamMessage (IDB misnomer — the
 //  GLOBAL sender) 1 @0x49a9af; Chat_SendGlobalMessage (IDB misnomer — the
 //  TEAM sender) 2 @0x49a74f; Chat_SendSquadMessage 12 @0x49aaff;
 //  Chat_SendAdminMessage (the CREW sender) 11 @0x49a816; Chat_SendAllMessage
-//  4 @0x49ad1c; sub_49ABA0 5 @0x49ac4c].
+//  4 @0x49ad1c; Chat_SendBlueTeamMessage 5 @0x49ac4c].
 int chat_dispatch_channel(int dispatch);
 // The Misc gametext key of the dispatch's prompt [orig: STRMISC_TALKLOCAL
 // @0x49ba62, _TALKGLOBAL @0x49ba76, _TALKTEAM @0x49ba8a, _TALKSQUAD

@@ -6,7 +6,7 @@ namespace opennova {
 
 // The char map's legend: a colour for each surface class, the twenty of formats/til/til_tsd.h (0 TSD_NULL
 // to 19 TSD_FLESH). A char map (the .trn's polytrn_charmap) is an 8-bit PCX whose index IS the surface
-// class the game reads at a position, its palette unused [orig: sub_605A10 @ 0x605A31..0x605A7D, the
+// class the game reads at a position, its palette unused [orig: Terrain_LoadCharmapPCX @ 0x605A31..0x605A7D, the
 // indices copied alone; Terrain_GetSurfaceTypeAtPosition @ 0x6065C6]; the legend as its palette makes it
 // read as a map in any image viewer, and lets a colour picture be read back as classes.
 //
