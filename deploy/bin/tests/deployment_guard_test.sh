@@ -73,7 +73,7 @@ for cmd in "app deploy --tag sha-abc1234" "app rollback" "app converge" "app res
            "app shell web" "infra plan" "infra apply" "infra destroy" "infra import a b" "infra state-rm a" \
            "secrets init" "secrets sync" "stripe setup" "db bootstrap" "db psql" "db reset-db --yes-drop-database" \
            "db snapshot" "backup now" "backup restore novaworld/x.dump --yes-overwrite-database" "backup import -" \
-           "fleet drain i-0" "fleet end i-0" "fleet roll" "fleet bake-image" \
+           "fleet drain i-0" "fleet end i-0" "fleet roll" "fleet roll --dry-run" "fleet shell 12" \
            "aws s3 ls"; do
   # shellcheck disable=SC2086  # the words are the command's arguments
   expect_refused "'$cmd' without --deployment" "There is no default" $cmd
@@ -180,6 +180,73 @@ SSM_DOWN_REPLY=down
 if grep -q -- '--desired-count 1' "$calls"; then pass "a program the down record names no count for (added since) starts as a first release"; else fail "a program added since app down: $(cat "$calls")"; fi
 unset -f aws
 
+echo "--- hostd is the fleet cluster's daemon: never a count, confirmed on the machines"
+# The real roll, down and release functions on a stub aws that records every
+# call: hostd's service is the fleet cluster's, its zero count no first
+# release, `app down` leaves it running, and a release whose agents never
+# report its image points hostd back at the revision it ran.
+INFRA[OPENNOVA_FLEET_CLUSTER]=opennova-staging-fleet
+current="$scratch/current-td"
+HOSTD_RUNNING=2
+# The service's revision lives in a file: the stub runs in command substitutions.
+aws() {
+  echo "aws $*" >>"$calls"
+  case "$*" in
+    *"services[0].runningCount"*) echo "$HOSTD_RUNNING"; return ;;
+    *"services[0].taskDefinition"*) cat "$current"; return ;;
+  esac
+  case "$1 $2" in
+    "ecs describe-services")
+      echo '{"services":[{"serviceName":"hostd","taskDefinition":"'"$(cat "$current")"'","desiredCount":0,"runningCount":0,"deployments":[{"id":"d1","status":"PRIMARY","rolloutState":"COMPLETED","desiredCount":0,"runningCount":0,"pendingCount":0}]}]}' ;;
+    "ecs update-service")
+      local args=("$@") i
+      for ((i = 0; i < ${#args[@]}; i++)); do
+        [ "${args[$i]}" != --task-definition ] || printf '%s' "${args[$((i + 1))]}" >"$current"
+      done
+      echo '{"service":{"deployments":[{"id":"d1","status":"PRIMARY"}]}}' ;;
+    "ssm get-parameter") echo "An error occurred (ParameterNotFound) when calling the GetParameter operation:" >&2; return 254 ;;
+  esac
+}
+printf 'td:1' >"$current"
+: >"$calls"
+( set_deployment staging; service_roll hostd td:2 ) >/dev/null 2>&1 || fail "hostd's roll failed: $(cat "$calls")"
+if grep -q -- '--desired-count' "$calls"; then fail "hostd's roll passed a count: $(cat "$calls")"
+elif grep -q 'ssm get-parameter\|application-autoscaling' "$calls"; then fail "hostd's roll read the down marker or touched its scaling: $(cat "$calls")"
+elif grep -q 'update-service --cluster opennova-staging-fleet --service hostd --task-definition td:2' "$calls"; then pass "hostd rolls in the fleet cluster, its zero count no first release"
+else fail "hostd's roll: $(cat "$calls")"; fi
+: >"$calls"
+( set_deployment staging; programs_down ) >/dev/null 2>&1
+if grep -Eq -- '--service hostd|/hostd |--services [^-]*hostd' "$calls"; then fail "app down touched hostd: $(grep hostd "$calls")"
+elif grep -q 'update-service --cluster opennova-staging --service worker --desired-count 0' "$calls"; then pass "app down stops the programs and leaves hostd running"
+else fail "app down: $(cat "$calls")"; fi
+# shellcheck disable=SC2317  # the functions under test call both
+sleep() { :; }
+HOSTD_CONFIRM_TIMEOUT=0
+HOSTD_REPORTS=old
+# shellcheck disable=SC2317
+admin_api_json() {
+  echo '{"machines":[{"id":12,"state":"ready","agent_image":"ghcr.io/o/opennova-hostd@sha256:'"$HOSTD_REPORTS"'"},{"id":13,"state":"lost","agent_image":"x"}]}'
+}
+manifest='{"task_definitions":{"hostd":"td:2"},"images":{"hostd":"ghcr.io/o/opennova-hostd@sha256:new"}}'
+printf 'td:1' >"$current"
+: >"$calls"
+out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" && fail "a release its agents never reported went on" \
+  || { if grep -q 'update-service --cluster opennova-staging-fleet --service hostd --task-definition td:1' "$calls"; \
+       then pass "agents that never report the release's image put hostd back on its revision"; else fail "no point-back: $out $(cat "$calls")"; fi; }
+HOSTD_REPORTS=new
+printf 'td:1' >"$current"
+: >"$calls"
+( set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest" ) >/dev/null 2>&1 \
+  && ! grep -q 'task-definition td:1' "$calls" && pass "every ready machine reporting the image confirms hostd" || fail "confirm: $(cat "$calls")"
+HOSTD_REPORTS=old
+HOSTD_RUNNING=0
+printf 'td:1' >"$current"
+: >"$calls"
+out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" \
+  && [[ "$out" == *"no machine to confirm"* ]] && pass "with no hostd task there is no machine to confirm" || fail "no machine: $out"
+unset -f aws sleep admin_api_json
+
+
 echo "--- app up starts a program the down record names no count for at its desired count"
 : >"$calls"
 program_counts() { case "$1" in data) echo '{"min":1,"desired":3,"max":3}' ;; *) echo '{"min":1,"desired":1,"max":1}' ;; esac; }
@@ -249,6 +316,12 @@ aws() {
         *i-0bbbbbbbbbbbbbbb2*) echo None ;;
         *) echo "An error occurred (InvalidInstanceID.NotFound)" >&2; return 254 ;;
       esac ;;
+    "ecs list-container-instances")
+      case "$*" in
+        *"attribute:machine-id == 12"*) echo arn:aws:ecs:us-east-1:1:container-instance/opennova-staging-fleet/ci12 ;;
+        *) echo None ;;
+      esac ;;
+    "ecs list-tasks") echo arn:aws:ecs:us-east-1:1:task/opennova-staging-fleet/t12 ;;
   esac
 }
 # expect_logs NAME WANT ARGS...: fleet_logs ARGS makes WANT its last aws call.
@@ -263,8 +336,8 @@ expect_logs() {
 expect_logs "a slot's stream" \
   "aws logs tail /opennova/staging/machines --log-stream-names 12/slot-3 --since 1h --format short" \
   12 3
-expect_logs "hostd's stream, followed, since 2h" \
-  "aws logs tail /opennova/staging/machines --log-stream-names 12/hostd --since 2h --format short --follow" \
+expect_logs "hostd's stream (its task on the machine), followed, since 2h" \
+  "aws logs tail /opennova/staging/machines --log-stream-names hostd/hostd/t12 --since 2h --format short --follow" \
   12 hostd --since 2h --follow
 expect_logs "every stream of the machine, each line naming its stream" \
   "aws logs tail /opennova/staging/machines --log-stream-name-prefix 12/ --since 1h --format detailed" \
@@ -272,7 +345,7 @@ expect_logs "every stream of the machine, each line naming its stream" \
 expect_logs "an EC2 id read as its machine-id tag" \
   "aws logs tail /opennova/staging/machines --log-stream-names 12/slot-0 --since 1h --format short" \
   i-0aaaaaaaaaaaaaaa1 0
-if grep -vq '^aws \(logs tail\|ec2 describe-instances\) ' "$calls"; then fail "fleet logs called more than CloudWatch and EC2's describe: $(cat "$calls")"; else pass "fleet logs calls CloudWatch's tail and EC2's describe alone"; fi
+if grep -vq '^aws \(logs tail\|ec2 describe-instances\|ecs list-container-instances\|ecs list-tasks\) ' "$calls"; then fail "fleet logs called more than CloudWatch, EC2's describe and ECS's lists: $(cat "$calls")"; else pass "fleet logs calls CloudWatch's tail, EC2's describe and ECS's lists alone"; fi
 for args in "" "x" "0 3" "12 32" "12 03" "12 slot-3" "12 3 4" "12 --tail" "i-0bbbbbbbbbbbbbbb2" "i-0ccccccccccccccc3" "i-XYZ"; do
   : >"$calls"
   # shellcheck disable=SC2086  # the words are the command's arguments

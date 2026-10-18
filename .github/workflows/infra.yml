@@ -6,10 +6,9 @@ name: Infra
 # against mocks with no credentials, so nothing reaches AWS, Cloudflare or
 # GitHub) at the pinned Terraform the toolbox runs, shellcheck on the deploy
 # toolbox (on-deploy, the files it sources, followed with -x, and its tests),
-# the backup task's scripts, the fleet image's builder, the portal's
-# entrypoint and the hosted machines' script, the toolbox's deployment guard
-# and vault requests tests, and `docker compose config` on the local stack's
-# compose files.
+# the backup task's scripts, the portal's entrypoint and the hosted machines'
+# script, the toolbox's deployment guard and vault requests tests, and
+# `docker compose config` on the local stack's compose files.
 # Path-filtered: it runs when one of those changes.
 
 on:
