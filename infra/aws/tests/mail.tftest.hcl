@@ -328,17 +328,14 @@ run "mail" {
       length(data.aws_iam_policy_document.mail[0].statement) == 1 &&
       one([for st in data.aws_iam_policy_document.mail[0].statement :
         toset(st.actions) == toset(["ses:SendEmail"]) &&
-        toset(st.resources) == toset([
-          "arn:aws:ses:us-east-1:123456789012:identity/example.com",
-          "arn:aws:ses:us-east-1:123456789012:identity/maintainer@mail.example.org",
-        ]) &&
+        toset(st.resources) == toset(["arn:aws:ses:us-east-1:123456789012:identity/*"]) &&
         one([for c in st.condition : c.test == "StringEquals" && c.variable == "ses:FromAddress" && toset(c.values) == toset(["support@example.com"])])
       ]) &&
       toset(keys(aws_iam_role_policy.mail)) == toset(["worker"]) &&
       aws_iam_role_policy.mail["worker"].name == "opennova-prod-worker-mail" &&
       aws_iam_role_policy.mail["worker"].role == aws_iam_role.program["worker"].id
     )
-    error_message = "the worker alone sends, through the two identities, from support@<domain> alone (web queues mail.send jobs)"
+    error_message = "the worker alone sends, through any identity of the account (SES also authorizes a verified recipient), from support@<domain> alone (web queues mail.send jobs)"
   }
   assert {
     condition = alltrue([
@@ -361,10 +358,10 @@ run "no_forward_to" {
     condition = (
       length(aws_sesv2_email_identity.domain) == 1 && length(aws_sesv2_email_identity.forward_to) == 0 &&
       one([for st in data.aws_iam_policy_document.mail[0].statement :
-        toset(st.resources) == toset(["arn:aws:ses:us-east-1:123456789012:identity/example.com"])
+        toset(st.resources) == toset(["arn:aws:ses:us-east-1:123456789012:identity/*"])
       ])
     )
-    error_message = "with no destination, the domain's identity alone"
+    error_message = "with no destination, no forward_to identity; the send resource is the account's identities regardless"
   }
 }
 
