@@ -974,6 +974,48 @@ int test_own_machine() {
 	return 0;
 }
 
+// Stopped and started again at the fleet's maximum of own machines (1): the
+// start is taken while the stopped server's machine still waits for its end
+// (its place went with its server), another owner's own-machine start is
+// still at_capacity, and the new server's machine launches once the old one
+// has ended, never past the maximum (no launch refused).
+int test_own_restart_at_cap() {
+	Rig rig("hosted_own_restart");
+	rig.config.cap = 10;
+	rig.config.placement.max_own = 1;
+	rig.make_supervisor();
+	Database *db = &rig.db;
+	const hosted::PlacementPolicy &fleet = rig.config.placement;
+	const int64_t owner = make_player(*db, "restart_owner", 0);
+	subscribe(*db, owner, 1, "active", "sub_restart");
+	subscribe_machines(*db, owner, 1, "sub_restart_machine");
+	const int64_t other = make_player(*db, "restart_other", 0);
+	subscribe(*db, other, 1, "active", "sub_restart_other");
+	subscribe_machines(*db, other, 1, "sub_restart_other_machine");
+	const int64_t first = rig.request_as(owner, rig.settings(), true);
+	TEST_EXPECT(first > 0 && !rig.to_running(first, 5211).empty());
+	const int64_t old_machine = rig.machine_of(first);
+	TEST_EXPECT(!hosted::fleet_has_room(*db, fleet, true));
+	TEST_EXPECT(hosted::request_stop(*db, first, "stopped by its owner"));
+	rig.step(); // the push
+	hostdb::remove_host_by_rid(*db, 5211);
+	rig.step(); // stopped
+	TEST_EXPECT(rig.state(first) == State::Stopped);
+	// Its machine takes servers until the next pass ends it; its place is free.
+	TEST_EXPECT(rig.machine(old_machine)->state == hosted::FleetMachineState::Ready);
+	TEST_EXPECT(hosted::fleet_has_room(*db, fleet, true));
+	const int64_t again = rig.request_as(owner, rig.settings(), true);
+	TEST_EXPECT(again > 0);
+	// The one place is the new server's.
+	TEST_EXPECT(rig.request_as(other, rig.settings(), true) == 0);
+	TEST_EXPECT(!hosted::fleet_has_room(*db, fleet, true));
+	TEST_EXPECT(!rig.to_running(again, 5212).empty());
+	TEST_EXPECT(rig.machine(old_machine)->state == hosted::FleetMachineState::Ended);
+	TEST_EXPECT(rig.machine_of(again) != old_machine && rig.fake.launches == 2);
+	TEST_EXPECT(db->query("SELECT COUNT(*) FROM fleet_machines WHERE state = 'failed';").front().as_int(0) == 0);
+	return 0;
+}
+
 // A static address (hosted/address_repository.h): its own machine launched to carry
 // it, the server's container held back (booting, its agent told to start nothing)
 // while the machine's row does not show the address, an address.associate asked for
@@ -2269,6 +2311,7 @@ int main(int argc, char **argv) {
 		{ "lifecycle_and_stop", test_lifecycle_and_stop },
 		{ "two_servers_one_machine", test_two_servers_one_machine },
 		{ "own_machine", test_own_machine },
+		{ "own_restart_at_cap", test_own_restart_at_cap },
 		{ "static_address", test_static_address },
 		{ "static_address_brake", test_static_address_brake },
 		{ "stop_paths", test_stop_paths },

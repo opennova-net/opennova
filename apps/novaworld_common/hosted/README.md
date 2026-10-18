@@ -72,7 +72,10 @@ this directory's.
   while fewer than `ONNET_FLEET_MAX_SHARED` take servers, else the server waits in
   `provisioning` for a slot. A server on the add-on goes to the machine reserved for it,
   else to a new own machine (at most `ONNET_FLEET_MAX_OWN`). A start the planner could not
-  place, counting the servers already waiting, is `at_capacity`.
+  place, counting the servers already waiting, is `at_capacity`; an own machine whose
+  server stopped or failed holds no place for it (the next pass ends that machine, and only
+  then launches the start's: an owner who stops and starts again at the maximum is taken,
+  and waits a pass for the machine).
 - **The rows.** `hosted_servers` holds one row per start: its owner and service account,
   its state, its data sets and pins, the owner's settings (range-checked columns, never a
   file), its place in the fleet, the serve image its start pinned (a deploy's new image
