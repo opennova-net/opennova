@@ -21,8 +21,13 @@ permissions:
   contents: read
 
 jobs:
+  # On test-linux's RunsOn runner (ci.yml, the same label), which saves the
+  # linux-root cache this job reads: only a job on that runner image reaches it
+  # (it lives in RunsOn's Magic Cache, and actions/cache versions an entry by
+  # its path, which runner.temp makes differ on GitHub's runners). A fork's
+  # pull request runs on ubuntu-latest, cold.
   net-linux:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     env:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
@@ -50,17 +55,22 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
           lfs: false   # net stack consumes no LFS game assets (net fixtures pulled below)
 
       # The service's client libraries: libpq (CMake's FindPostgreSQL) and, for
-      # the service's HTTP layer, hiredis with hiredis_ssl and OpenSSL.
-      - name: Install libpq and hiredis
+      # the service's HTTP layer, hiredis with hiredis_ssl and OpenSSL; and Ninja,
+      # which RunsOn's ubuntu24-full image leaves out (ubuntu-latest has it).
+      - name: Install libpq, hiredis and Ninja
         run: >-
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          libpq-dev libhiredis-dev libssl-dev
+          libpq-dev libhiredis-dev libssl-dev ninja-build
 
       # nwmsg_replay_test and nwmsg_codec_parity_test read the captured .nwmsg
       # parity fixtures and nw_self_capture_test the committed

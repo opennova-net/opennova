@@ -286,6 +286,13 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                                 description="The .3di export writes; empty: the model root's name beside the "
                                             ".blend (//<name>.3di). Its file name has at most 15 characters, as a "
                                             "game archive holds it")
+    # On a model root: the .3di format export writes (export.py Exporter.run_in_object_mode).
+    threedi_version: EnumProperty(name="3DI version", default="3DI3", items=[
+        ("3DI3", "3DI3 (JO and newer)", "The chunked 3DI3 Joint Operations and the games after it load"),
+        ("GP", "GP (Black Hawk Down)", "The GP model Delta Force: Black Hawk Down loads: the model is built as "
+                                       "3DI3 first, then written as GP by `opennova-3di gp`, named after its file. "
+                                       "A rigid model only (a skinned one is refused); BHD reads a bump "
+                                       "material's normal map as <texture>.mdt beside the model")])
     export_bullet_faces: BoolProperty(name="Generate bullet faces", default=True,
                                       description="The collision LOD's render triangles are also its bullet faces; "
                                                   "off for a model that needs none (first-person arms). Its "
@@ -1552,6 +1559,7 @@ def draw_model(layout, model):
     layout.prop(p, "output_path")
     if not p.output_path:
         layout.label(text=f"Writes //{rig.clean_name(model.name)}.3di")
+    layout.prop(p, "threedi_version")
     layout.prop(p, "poly_collision_lod")
     layout.prop(p, "export_bullet_faces")
     row = layout.row(align=True)

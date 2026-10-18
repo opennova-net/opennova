@@ -36,7 +36,12 @@ concurrency:
 # side by side on runners of their own (the two core shards beside the retail
 # leg, a gdext build per flavour) and lean on the compiler caches, and each
 # build takes as many jobs as its runner has cores (scripts/build.sh's --jobs
-# default, nproc, Ninja's own).
+# default, nproc, Ninja's own). Their caches live in RunsOn's Magic Cache (the
+# label's extras=s3-cache and the runs-on/action step): actions/cache reads and
+# writes the ci account's S3 bucket, in the runners' region, instead of
+# GitHub's (no transfer out of AWS, no 10 GB cap). A RunsOn job and a GitHub
+# runner's never share an entry either way: actions/cache versions an entry by
+# its path, and runner.temp differs between the two.
 jobs:
   # A pull request that changes only the private docs pointer and markdown
   # builds and tests nothing: no build or test reads those paths, and the lint
@@ -210,8 +215,9 @@ jobs:
   # after the last cache hit. Only the link step changes, so the cache's
   # objects serve either linker.
   test-core:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     permissions:
       contents: read
       actions: write   # the compiler cache's branch save replaces its older entries
@@ -223,45 +229,43 @@ jobs:
       CMAKE_GENERATOR: Ninja
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
-      CODE: ${{ needs.changes.outputs.code }}
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
-        if: env.CODE == 'true'
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
           submodules: recursive
 
       - name: Pull Git LFS assets (fixtures/ only)
-        if: env.CODE == 'true'
         shell: bash
         run: |
           git lfs install --local
           git lfs pull --include="fixtures/**"
 
+      # RunsOn's Windows image carries Python 3.14 alone; 3.11 would install.
       - uses: actions/setup-python@v5
-        if: env.CODE == 'true'
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search
       # takes the first compiler in PATH order); sccache in front of cl for the
       # compiler-launcher cache.
       - name: Set up MSVC environment
-        if: env.CODE == 'true'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
       - name: Restore the compiler cache
-        if: env.CODE == 'true'
         uses: ./.github/actions/compiler-cache
         with:
           flavour: win-root
           mode: restore
 
       - name: Toolchain sanity (Ninja + cl + lld-link on PATH)
-        if: env.CODE == 'true'
         shell: bash
         run: |
           cmake --version
@@ -270,25 +274,23 @@ jobs:
           command -v lld-link
 
       - name: Build
-        if: env.CODE == 'true'
         shell: bash
         run: scripts/build.sh --no-godot --suite core --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
 
       # Right after the build, so the step's numbers are this build's hit rate.
       - name: sccache stats
-        if: always() && env.CODE == 'true'
+        if: always()
         shell: bash
         run: sccache --show-stats
 
       # The build is up to date, so the second call goes straight to the tests.
       - name: Test (core, ${{ matrix.shard }})
-        if: env.CODE == 'true'
         shell: bash
         run: scripts/build.sh --no-godot --suite core --shard ${{ matrix.shard }}
 
       # build/.ninja_log carries each compile's and link's time.
       - name: Upload native core test reports
-        if: always() && env.CODE == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: native-core-reports-${{ matrix.shard }}
@@ -301,7 +303,7 @@ jobs:
       # The one Windows leg that saves the win-root flavour: the rest shard and
       # test-retail build the same objects and only read it.
       - name: Save the compiler cache
-        if: env.CODE == 'true' && matrix.shard == 'editor'
+        if: matrix.shard == 'editor'
         uses: ./.github/actions/compiler-cache
         with:
           flavour: win-root
@@ -312,7 +314,7 @@ jobs:
   # retail ctests. It runs whenever the reference data is reachable (not on
   # fork PRs) and blocks the merge like the core leg, through `test`.
   test-retail:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [changes, retail-availability]
     if: needs.changes.outputs.code == 'true' && needs.retail-availability.outputs.available == 'true'
     permissions:
@@ -322,6 +324,10 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
@@ -333,9 +339,10 @@ jobs:
           git lfs install --local
           git lfs pull --include="fixtures/**"
 
+      # RunsOn's Windows image carries Python 3.14 alone; 3.11 would install.
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -380,9 +387,10 @@ jobs:
 
   # The required check "test (windows-latest)" (branch protection names it):
   # green when the gates passed, both core shards passed (a matrix job's
-  # result is success only when every leg is), and the retail leg passed, or
-  # was skipped because there was nothing for it to run (a docs-only change, or
-  # a fork PR without the reference data). It runs when a leg fails too, so a
+  # result is success only when every leg is) or were skipped for a docs-only
+  # change (no instance starts for one), and the retail leg passed, or was
+  # skipped because there was nothing for it to run (a docs-only change, or a
+  # fork PR without the reference data). It runs when a leg fails too, so a
   # failure reports red, never skipped.
   test:
     name: test (windows-latest)
@@ -410,8 +418,10 @@ jobs:
             echo "::error::gates: ${GATES}"
             exit 1
           fi
-          if [[ "$CORE" != success ]]; then
-            echo "::error::test-core: ${CORE}"
+          want=skipped
+          if [[ "$CODE" == true ]]; then want=success; fi
+          if [[ "$CORE" != "$want" ]]; then
+            echo "::error::test-core: ${CORE} (expected ${want})"
             exit 1
           fi
           want=skipped
@@ -432,7 +442,7 @@ jobs:
   # their keys on the Valkey one (OPENNOVA_TEST_REDIS); without them they skip,
   # which the core suite fails.
   test-linux:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     permissions:
@@ -466,6 +476,10 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       # The root CMake project builds without godot-cpp or GUT, so the
       # submodules stay uninitialized.
       - uses: actions/checkout@v4
@@ -531,7 +545,7 @@ jobs:
   # RelWithDebInfo made it a 674 MiB artifact and a compiler cache several
   # times this size.
   build-gdextension-linux:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     permissions:
@@ -545,6 +559,10 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -716,7 +734,7 @@ jobs:
   # after one warm-up only changed engine/ sources recompile. Windows must
   # use Ninja: the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
   build-gdextension-windows:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     permissions:
@@ -734,6 +752,10 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -921,7 +943,7 @@ jobs:
   # The game archive and the editor archive (the editor plus the runtime it
   # plays a project with).
   package-godot-windows:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [build-gdextension-windows]
     outputs:
       game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
@@ -930,6 +952,10 @@ jobs:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           lfs: false   # scoped below: the package reads assets/ and expansions/ only

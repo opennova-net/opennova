@@ -1072,6 +1072,45 @@ def a_failed_import_leaves_nothing():
     assert names() == before, (before, names())
 
 
+# --- the 3DI version ----------------------------------------------------------
+
+@case
+def a_rigid_model_exports_as_black_hawk_down_gp():
+    # 3DI version GP: the model is built as 3DI3, then written as BHD's GP by
+    # `opennova-3di gp`; migrated back (the editor's import), its parts and
+    # user point return.
+    root, lod = model("gpcrate")
+    root.o3d.threedi_version = "GP"
+    pn1 = empty("PN01", lod)
+    box("Body", pn1)
+    pn2 = empty("PN02", pn1, (0.0, 0.0, 0.1))
+    box("Lid", pn2, (0.0, 0.0, 0.12), 0.04)
+    empty("UPS spark", pn2, (0.0, 0.0, 0.2))
+    bpy.context.view_layer.update()
+    os.makedirs(folder(root), exist_ok=True)
+    message, _ = export.export_model(bpy.context, root)
+    path = export.output_path(root)
+    assert path in message.replace("\\", "/"), message
+    with open(path, "rb") as f:
+        assert f.read(4) == b"GPM\x02"
+    back = path[:-4] + "_3di3.3di"
+    subprocess.run([CLI, "migrate", path, "-o", back], check=True, capture_output=True)
+    lines = scene_lines(back)
+    assert len(records(lines, "part")) == 2, lines
+    assert [p[0] for p in records(lines, "userpoint")] == ["spark"], lines
+
+
+@case
+def a_skinned_model_is_refused_as_gp():
+    root, lod = model("gpskin")
+    root.o3d.threedi_version = "GP"
+    arm = armature("gpskin Rig", lod, {"BN01": ((0.0, 0.0, 0.0), None)})
+    body = box("Body", arm)
+    skin(body, arm, {v: {"BN01": 1.0} for v in range(8)})
+    refused(root, "skinned")
+    assert not os.path.exists(export.output_path(root))
+
+
 if FAILURES:
     raise SystemExit(f"model_test: {len(FAILURES)} failed: {', '.join(FAILURES)}")
 print("MODEL_TEST_OK")

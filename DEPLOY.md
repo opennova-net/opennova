@@ -1561,10 +1561,11 @@ runners, free for a public repository, and so does every job of a pull request f
 What it costs: the instances by the minute (us-east-1 spot, about $0.014 a minute for a
 16-vCPU Windows instance with its license and $0.005 for Linux, against $0.082 and $0.042
 for GitHub's 16-core larger runners), about $15 a month for RunsOn's control plane (a small
-Fargate task, an API Gateway, Lambdas, queues, tables and secrets), the uploads to GitHub
-(about 0.3 GB of artifacts a run and 1.2 GB of compiler caches a `master` push, at $0.09 a
-GB), and RunsOn's license (`runs-on/key`: a yearly fee, no per-minute one). A full run's
-legs come to about $0.60. The account's monthly budget (`budget_monthly_usd`, 300) emails
+Fargate task, an API Gateway, Lambdas, queues, tables and secrets), the artifacts' upload
+to GitHub (about 0.3 GB a run, at $0.09 a GB), the legs' caches in RunsOn's S3 bucket
+(Magic Cache: about 2.2 GB of compiler caches a `master` push, kept 10 days, about $10 a
+month at twenty pushes a day and no transfer charge), and RunsOn's license (`runs-on/key`:
+a yearly fee, no per-minute one). A full run's legs come to about $0.60. The account's monthly budget (`budget_monthly_usd`, 300) emails
 `alerts/email` at 80% spent and at a 100% forecast, RunsOn emails a weekly cost report
 there, and a job hung past 90 minutes is ended with its instance.
 

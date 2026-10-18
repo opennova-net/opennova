@@ -1,6 +1,7 @@
 // opennova-3di internals: one translation unit per command, dispatched by
 // main.cpp. `build` (build.cpp) mints a .3di from .o3d scene text, `migrate`
-// (migrate.cpp) writes a Black Hawk Down GP model as 3DI3, `scene`
+// (migrate.cpp) writes a Black Hawk Down GP model as 3DI3, `gp` (gp.cpp) a 3DI3
+// as a GP model, `scene`
 // (scene.cpp) writes a .3di back out as .o3d for an importer, `info`
 // (info.cpp) prints a model, `compare` (compare.cpp) tells whether two models
 // are the same model, and `catalog` (main.cpp) prints the engine's tables a
@@ -62,6 +63,9 @@ int cmd_build(const char *scene_path, const char *out_path);
 // `migrate` (migrate.cpp): a Black Hawk Down GP model written as 3DI3, its materials taking
 // mission region `region`'s textures.
 int cmd_migrate(const char *gp_path, const char *out_path, int region);
+// `gp` (gp.cpp): a 3DI3 model, or an .o3d scene built first, written as a Black Hawk Down GP
+// model named after `out_path`.
+int cmd_gp(const char *in_path, const char *out_path);
 int cmd_scene(const char *model_path, const char *out_path);
 // `strict`: drift (a heuristic derived value, or a move within tolerance)
 // counts as a difference too.

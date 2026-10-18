@@ -891,6 +891,25 @@ def colour_textures_written_as_dds():
 
 
 @case
+def a_black_hawk_down_model_writes_dxt5():
+    # A model written as GP writes each .dds as DXT5 with its full chain, opaque
+    # or not, the form of every model texture Black Hawk Down ships; a texture
+    # past BHD's 512 a side is noted.
+    opaque = textured("GpOpaque", image("gp_red", (1, 0, 0, 1), size=1024))
+    root, _ = model("gpdds", opaque)
+    root.o3d.threedi_version = "GP"
+    root.o3d.texture_files = "DDS"  # set: the helper writes TGAs otherwise
+    bpy.context.view_layer.update()
+    os.makedirs(folder(root), exist_ok=True)
+    _, notes = export.export_model(bpy.context, root)  # a GP model: `scene` reads no GP
+    w, h, mips, fourcc, _ = dds_file(os.path.join(folder(root), "gpdds_0.dds"))
+    assert (w, h, mips, fourcc) == (1024, 1024, 11, "DXT5"), (w, h, mips, fourcc)
+    assert any("ships no model texture over 512" in n for n in notes), notes
+    with open(os.path.join(folder(root), "gpdds.3di"), "rb") as f:
+        assert f.read(3) == b"GPM"
+
+
+@case
 def a_copied_tga_is_converted():
     # An image loaded unchanged from a .tga is that file; a model writing DDS
     # textures writes the .dds of it beside the .3di, its row naming the .tga.
