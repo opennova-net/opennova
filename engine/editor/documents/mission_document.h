@@ -195,7 +195,7 @@ public:
 	bool compose(bms::File &out) const;
 	// The AI class each item's records are written with (name1), by item id: its catalog row's sid up to its
 	// first '.', eight characters at most, which the original editor's writer takes from its item table on
-	// every save, never from the record [orig: JOTACmed.exe sub_44C8E0 @ 0x44cabe..0x44caf2, the def's +0x450
+	// every save, never from the record [orig: JOTACmed.exe MissionItem_PackBmsRecord @ 0x44cabe..0x44caf2, the def's +0x450
 	// copied over the record's +0x68]. The session hands it over (DocumentSet: on an edit and before a save);
 	// an item it names none for keeps its record's own. Such a record's name1 reads as its item's and is set
 	// on the item's row, never on the record.
@@ -210,7 +210,7 @@ public:
 	const std::string *item_class(const bms::Entity &entity) const;
 	// The Sets a save makes of the records before it writes, as both of the original editor's writers store
 	// their clamp back into the item: each entity's w_accuracy1 (field "accuracy") above its w_accuracy2 set to
-	// it [orig: JOTACmed.exe sub_44C8E0 @ 0x44c95d, the .bms writer's store; MIS_SaveDocument
+	// it [orig: JOTACmed.exe MissionItem_PackBmsRecord @ 0x44c95d, the .bms writer's store; MIS_SaveDocument
 	// @ 0x455600..0x455602, the .mis writer's]. The session applies them, one step, before each save
 	// (DocumentSet); compose clamps the bytes alike.
 	std::vector<Edit> save_clamps() const;
@@ -290,7 +290,7 @@ protected:
 	// The markers or the events moved: every stop's marker, every Event trigger's and ResetEvent
 	// action's event and every waypoint marker's advance trigger renumbered (RecordShift::now), the
 	// events the step put in included, as the original editor renumbers them [orig: JOTACmed.exe
-	// sub_44D460 @ 0x44d460]; a reference to a record the edit removed refuses the edit with its site.
+	// MissionEvent_InsertAt @ 0x44d460]; a reference to a record the edit removed refuses the edit with its site.
 	bool renumber_references(const StagedRows &rows, const RecordShift &shift,
 	                         std::vector<Edit> &sites, std::string &error) const override;
 	// A path's stops, which records name by their place (mission_stop_namers), never by an index the

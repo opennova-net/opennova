@@ -93,10 +93,10 @@ bool remove_entity(bms::File &file, EntityKind kind, size_t index, std::string &
 // place in the path's order in its wp_number, and the original editor's writer lays out every path from
 // those two fields, its count the waypoint markers that carry its number, its 32 slots the first of them in
 // wp_number order, each a marker's index in the file's markers; a number of 0 (or past the records) is on
-// no path, so record 0 holds none [orig: JOTACmed.exe sub_44C8E0 @ 0x44c8e0, the path number to the
-// record's +0x4f @ 0x44c9f5 and the order to its +0x30 @ 0x44c9ff; sub_44CFD0 @ 0x44cfd0, the 6005 item's
+// no path, so record 0 holds none [orig: JOTACmed.exe MissionItem_PackBmsRecord @ 0x44c8e0, the path number to the
+// record's +0x4f @ 0x44c9f5 and the order to its +0x30 @ 0x44c9ff; MissionDocument_RebuildWaypointPaths @ 0x44cfd0, the 6005 item's
 // markers alone, a number outside 1..128 cleared, a bubble sort on the order @ 0x44d0e9..0x44d0f3;
-// sub_44F920 @ 0x44f920, the count @ 0x4508a6 and the 32 slots @ 0x4508c1]. Every shipped path agrees with
+// MIS_ExportBmsFile @ 0x44f920, the count @ 0x4508a6 and the 32 slots @ 0x4508c1]. Every shipped path agrees with
 // its markers (mission_corpus's retail leg). The edits below set the markers' two fields and lay out each
 // path they touch as the original's writer does; a path of more than 32 stops keeps its count over its 32
 // slots, as CP19.bms's path 6 of 39 does, the game reading the next record's words for the stops past them [orig:

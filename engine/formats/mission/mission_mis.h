@@ -37,7 +37,7 @@ struct MisIssue {
 inline constexpr size_t kMisEventNameChars = 59;
 inline constexpr size_t kMisDescriptionChars = 249;
 // The original editor's area slots, an area's zone id naming its slot; it writes slots 1..99 [orig:
-// JOTACmed.exe MIS_SaveDocument @0x454630, the loop @0x454daf; sub_44D240 @0x44d240, the 100 slots].
+// JOTACmed.exe MIS_SaveDocument @0x454630, the loop @0x454daf; MissionDocument_RebuildAreasFromMarkers @0x44d240, the 100 slots].
 inline constexpr size_t kMisAreaSlots = 100;
 
 // The names the .mis gives a mission's records where the .bms has no room for them (ADR 0046 S24
@@ -58,7 +58,7 @@ inline constexpr size_t kVariableNameCount = size_t(kVariableNameIndexMax) + 1;
 
 // A mission's variable names are the editor's alone (ADR 0046 S24 "Names"): neither the .bms, the
 // game nor the original editor holds one. They ride the .mis as lines both original readers skip,
-// the line's first token starting with '/' [orig: JOTACmed.exe sub_463A90 @ 0x463b3a; MisLdr's
+// the line's first token starting with '/' [orig: JOTACmed.exe File_ParseASCIIFileWithCallback @ 0x463b3a; MisLdr's
 // tokenize_mis_text port, misldr.dll sub_10007E40 @ 0x10007e40], one a name: `//var <index>
 // "<name>"` (kMisVariableLine). The table after the groups, where they rode before S26, is the
 // original editor's wav list (bms.h WavListRecord, D-MIS-13).
@@ -110,7 +110,7 @@ MisWeaponTable mis_weapon_table(const def::DefWeaponsFile &weapons);
 // A mission's default kit: its .mis's default_primary, default_secondary and default_accessory. The original
 // editor reads each line's value as it stands (a line with no value reads as "") and writes each slot as it holds
 // it, an empty one too [orig: JOTACmed.exe MIS_ParseToken @ 0x451caa..0x451d4c, the tokenizer's empty tokens
-// sub_463050 @ 0x46306d, @ 0x463072; MIS_SaveDocument @ 0x454ba7, @ 0x454bb9, @ 0x454bcb]. Its .bms export
+// Config_TokenizeLine @ 0x46306d, @ 0x463072; MIS_SaveDocument @ 0x454ba7, @ 0x454bb9, @ 0x454bcb]. Its .bms export
 // builds the weapon-loadout chunk from the kit (mis_default_loadout).
 using MisDefaultKit = std::array<std::string, 3>;
 
@@ -119,14 +119,14 @@ using MisDefaultKit = std::array<std::string, 3>;
 // @ 0x5b6590), from MIS_LoadDocument @ 0x4543ff].
 inline const MisDefaultKit kMisResetKit = {"WPN_M4AUTO", "WPN_colt45", "WPN_AT4"};
 
-// The four records the original editor's export ends every loadout chunk with [orig: JOTACmed.exe sub_4328A0
+// The four records the original editor's export ends every loadout chunk with [orig: JOTACmed.exe MIS_BuildDefaultLoadoutChunk
 // @ 0x432aef..0x432bda].
 inline constexpr std::array<const char *, 4> kMisLoadoutTail = {"WPN_GRENADEFB", "WPN_GRENADEHE", "WPN_GRENADESM",
                                                                 "WPN_KNIFE"};
 
 // The loadout chunk the original editor's .bms export builds from `kit` over `table` [orig: JOTACmed.exe
-// sub_4328A0 @ 0x4328a0, from sub_44F920 @ 0x45059e]. Each slot in turn whose name a row of the table holds (the
-// first such row, by _stricmp: sub_432860 @ 0x432860) gives that name, then the names of the row's subclass
+// MIS_BuildDefaultLoadoutChunk @ 0x4328a0, from MIS_ExportBmsFile @ 0x45059e]. Each slot in turn whose name a row of the table holds (the
+// first such row, by _stricmp: WeaponDef_FindIndexByName @ 0x432860) gives that name, then the names of the row's subclass
 // rows. A name no row holds is left out. kMisLoadoutTail ends the chunk. Every record writes "-1" for its three
 // other strings (the bytes @ 0x5e5e4c). With no table (nullptr: no weapon.def read), each name a slot holds
 // stands alone.
@@ -218,13 +218,13 @@ inline bool parse_mis_text(const std::string &text, const MisItemTypeResolver &r
 // terrain's height there is the item's z in the editor's frame (write_mis_text's `base_heights`,
 // mis_items_to_bms_frame's `terrain`). `heights`: the .cpt's height atlas, 1024 x 1024 depth words in the
 // file's order, the grid the game loads (CptFile::depth_buffer, the .cpt the .trn's polytrn_polydata names), which
-// the original editor holds as twice each word [orig: JOTACmed.exe sub_44C2B0 @ 0x44c2b0, its DPTH arm @ 0x44c64b
+// the original editor holds as twice each word [orig: JOTACmed.exe MissionDocument_LoadTerrain @ 0x44c2b0, its DPTH arm @ 0x44c64b
 // and CDEP arm @ 0x44c5e7]. The rest is the .trn's own (the original editor reads the .trn alone): `sectors` its
 // 16 x 16 sector grid, row by row, extended past the rows and the width read as trn_extend_sector_grid extends it
 // [orig: JOTACmed.exe sub_464BD0 @ 0x464bd0]; `origin_x`/`origin_y` polytrn_origin; the wraps polytrn_wrapx and polytrn_wrapy;
 // `scale` polytrn_scale, the original editor's height factor (scale / 128, 128 where the .trn names none: no shipped
 // one does; the game reads the key for its file check alone) [orig: JOTACmed.exe sub_463C90 @ 0x463c90, its polytrn_scale arm @
-// 0x464a38; the default, sub_464B60 @ 0x464bb6].
+// 0x464a38; the default, TRN_InitDefaults @ 0x464bb6].
 struct MisTerrain {
 	const uint16_t *heights = nullptr;
 	const int *sectors = nullptr;
@@ -245,8 +245,8 @@ int32_t mis_terrain_height(const MisTerrain &terrain, int32_t x, int32_t y);
 // item's both absolute, the terrain's height added [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from
 // MIS_SaveDocument @ 0x4546b5], and its read takes it off again [orig: JOTACmed.exe sub_44E6A0 @ 0x44e6a0, from
 // MIS_LoadDocument @ 0x45460e]; its .bms export adds it to every item's z and base [orig: JOTACmed.exe
-// sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]; and a change of the terrain takes a locked
-// item's both to absolute over the old terrain and back to relative over the new [orig: JOTACmed.exe sub_402770
+// sub_44E5A0 @ 0x44e5a0, from MIS_ExportBmsFile @ 0x44fa4e]; and a change of the terrain takes a locked
+// item's both to absolute over the old terrain and back to relative over the new [orig: JOTACmed.exe MissionGeneralInfo_DialogProc
 // @ 0x402c9f..0x402ccd], so a locked item keeps its height and its base and an unlocked one follows
 // the ground. A bms::File's mis_frame names the frame its entities are in (bms::MisFrame): the
 // .bms's (a parsed .bms, a new file), each entity's z absolute (the game's), its mis_extra_bheight
@@ -264,12 +264,12 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain);
 
 // The original editor's areas (D-MIS-14): an area is no section of its .mis but the box its
 // type-6013 items of one zone id span, the item's wpnumber of 1..99 its zone id, the least x, y and
-// z and the greatest of every such item [orig: JOTACmed.exe sub_44D240 @ 0x44d240: the 6013 def @
+// z and the greatest of every such item [orig: JOTACmed.exe MissionDocument_RebuildAreasFromMarkers @ 0x44d240: the 6013 def @
 // 0x44d296, the range @ 0x44d2a9, the bounds
 // @ 0x44d2d8..0x44d444], the `areatrig` section of its id giving it its flags (`attrib`) and its
 // description; its .bms export writes the area where the item of the least x (the first of a tie)
-// holds an extra_valmode of 0 [orig: JOTACmed.exe sub_44F920 @ 0x450a16..0x450ab3, the test @ 0x450a3a], in zone
-// id order, and leaves the 6013 items out of the markers [orig: JOTACmed.exe sub_44F920
+// holds an extra_valmode of 0 [orig: JOTACmed.exe MIS_ExportBmsFile @ 0x450a16..0x450ab3, the test @ 0x450a3a], in zone
+// id order, and leaves the 6013 items out of the markers [orig: JOTACmed.exe MIS_ExportBmsFile
 // @ 0x450785]. rebuild_mis_areas
 // makes `file`'s areas so from its mis_area_markers, each area's flags those an area of its id held
 // before (an `areatrig` section's); an area of no marker goes. parse_mis_text reads a 6013 item so

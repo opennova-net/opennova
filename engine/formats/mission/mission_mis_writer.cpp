@@ -34,8 +34,8 @@ std::string listed_name(const std::vector<std::string> *list, size_t index, size
 
 // What the original editor's rebuilds count before it writes the path and group sections, over its items
 // whatever their kind: a path's stops, the waypoint items (type 6005) whose waypoint_id is the path [orig:
-// JOTACmed.exe sub_44CFD0 @0x44cfd0], and a group's members, the items whose group_id is the group [orig: JOTACmed.exe
-// sub_44D160 @0x44d160]. One pass over the four pools.
+// JOTACmed.exe MissionDocument_RebuildWaypointPaths @0x44cfd0], and a group's members, the items whose group_id is the group [orig: JOTACmed.exe
+// MissionDocument_CountGroupMembers @0x44d160]. One pass over the four pools.
 struct HeldCounts {
 	std::array<size_t, 256> stops{};
 	std::array<size_t, 256> members{};
@@ -51,7 +51,7 @@ HeldCounts held_counts(const bms::File &file) {
 }
 
 // The box a zone's area markers span, and the marker of the least x, the first of a tie (null: the
-// zone has none), as the original editor's rebuild makes an area [orig: JOTACmed.exe sub_44D240 @
+// zone has none), as the original editor's rebuild makes an area [orig: JOTACmed.exe MissionDocument_RebuildAreasFromMarkers @
 // 0x44d240, the box set by the first @ 0x44d2d8 and widened after, the least x's item kept @
 // 0x44d3a8].
 const bms::MisAreaMarker *zone_box(
@@ -247,7 +247,7 @@ void write_mis_briefing(const bms::File &file, std::string &out) {
 // write_mis_area_markers), its description, then its color and its attrib, the area's flags
 // (MISSION_AREA 1, constrain-Z 2: the area dialog's 1175 and 1169, the word its .bms writer stores
 // at @28), each when not zero [orig: JOTACmed.exe MIS_SaveDocument @0x454630, the loop
-// @0x454d11..0x454daf; sub_44D240 @0x44d240, the range @0x44d2a9; sub_40F360 @0x40f360; sub_44F920
+// @0x454d11..0x454daf; MissionDocument_RebuildAreasFromMarkers @0x44d240, the range @0x44d2a9; sub_40F360 @0x40f360; MIS_ExportBmsFile
 // @0x44f920, the area @0x450a16..0x450ab3]. So an area is written under its zone id, in id order,
 // and the .bms holds no color. An area whose id is outside 1..99, or a second area of an id, has no
 // slot in the original's .mis: the write is refused, naming it, rather than leaving it out. The
@@ -292,7 +292,7 @@ void write_mis_waypoints(const bms::File &file, const HeldCounts &held, std::str
 		    names != nullptr && i < names->paths.size() ? mis_name(names->paths[i], kMisDescriptionChars) : std::string();
 		// The original editor writes paths 1..127, each one a waypoint item (type 6005, any kind) carries in its
 		// waypoint_id or one with a description, its color and its attrib each when not zero [orig: JOTACmed.exe
-		// MIS_SaveDocument @0x454630, the loop @0x454dbe..0x454e5b; its rebuild sub_44CFD0 @0x44cfd0 counting
+		// MIS_SaveDocument @0x454630, the loop @0x454dbe..0x454e5b; its rebuild MissionDocument_RebuildWaypointPaths @0x44cfd0 counting
 		// them]. Path MEMBERSHIP never travels in this section: the .mis carries it on the marker items and a
 		// reader rebuilds the lists from them [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. So a
 		// path with flags and no stop nor description has no section and its flags do not reach the .mis, as the
@@ -313,8 +313,8 @@ void write_mis_waypoints(const bms::File &file, const HeldCounts &held, std::str
 // The original editor writes groups 1..63 (group 0 is no group), each one an item's group_id names (any kind)
 // or one with a description, then its attrib (the .bms record's flags @0), color and commander (the record's
 // @8) each when not zero; its reader takes no other key in a group, refusing the whole file [orig: JOTACmed.exe
-// MIS_SaveDocument @0x454630, the loop @0x454e6a..0x454f19; its count sub_44D160 @0x44d160; MIS_ParseToken
-// @0x450e50, the group keys @0x453d08..0x453de4; sub_44F920 @0x44f920, the record @0x450940..0x4509b4]. A
+// MIS_SaveDocument @0x454630, the loop @0x454e6a..0x454f19; its count MissionDocument_CountGroupMembers @0x44d160; MIS_ParseToken
+// @0x450e50, the group keys @0x453d08..0x453de4; MIS_ExportBmsFile @0x44f920, the record @0x450940..0x4509b4]. A
 // group's description is its name (the 20 bytes the game's loader drops, bms.h GroupRecord). The .bms holds no
 // color. The original writes the commander line with the color's word (`mov ecx, [edi+104h]` @0x454eea, the
 // commander being +108h), so its own save loses the commander; this writer writes the commander's (D-MIS-16).
@@ -394,7 +394,7 @@ void write_mis_events(const bms::File &file, std::string &out, const MisNames *n
 		// trigger alone and no action; D-10). A trigger byte of 128..255 is written as the byte, over the one row
 		// read, which the original editor and the reader keep as the byte: the zone resolvers read it as no run,
 		// where 1 resolves the first trigger's zone [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000,
-		// @0x453029; JOTACmed.exe MIS_ParseToken, the count @0x453ac5, sub_44F920's byte @0x450b78]. Every action
+		// @0x453029; JOTACmed.exe MIS_ParseToken, the count @0x453ac5, MIS_ExportBmsFile's byte @0x450b78]. Every action
 		// reader reads 128..255 as 0, which no section writes.
 		const int trigger_run = static_cast<int>(triggers_read(event.trigger_count));
 		const int action_run = static_cast<int>(actions_read(event.action_count));
@@ -652,14 +652,14 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain) {
 		// The original's read takes a locked item's z and base less the terrain's height under it,
 		// the point its x and y [orig: JOTACmed.exe sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @
 		// 0x45460e; the lock tested nonzero], and its .bms export adds the height back to every
-		// item's z and base [orig: JOTACmed.exe sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]: a locked
+		// item's z and base [orig: JOTACmed.exe sub_44E5A0 @ 0x44e5a0, from MIS_ExportBmsFile @ 0x44fa4e]: a locked
 		// item's both stand absolute, as read; an unlocked one's z takes the height, its base
 		// (which reaches no .bms byte) staying relative.
 		if (entity.mis_height_lock == 0)
 			entity.z = detail::wrapped_add(entity.z, height);
 	});
 	// The area markers likewise, then the areas the export makes of them over the terrain [orig: JOTACmed.exe
-	// sub_44F920 @ 0x44fa4e, then the rebuild @ 0x44fbeb]: their z absolute. A zone it makes no
+	// MIS_ExportBmsFile @ 0x44fa4e, then the rebuild @ 0x44fbeb]: their z absolute. A zone it makes no
 	// area of keeps its markers as read, in the .mis's frame, which the writer writes back as they
 	// were.
 	const std::vector<bms::MisAreaMarker> as_read = file.mis_area_markers;
@@ -679,9 +679,9 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain) {
 	file.mis_frame = bms::MisFrame::Bms;
 }
 
-// [orig: JOTACmed.exe sub_44D240 @ 0x44d240: every slot's id cleared @ 0x44d250, each 6013 item of
+// [orig: JOTACmed.exe MissionDocument_RebuildAreasFromMarkers @ 0x44d240: every slot's id cleared @ 0x44d250, each 6013 item of
 // a wpnumber of 1..99 @ 0x44d296..0x44d2a9 setting its slot's box on the first @ 0x44d2d8 and
-// widening it after, the least x's item kept @ 0x44d3a8; sub_44F920 @ 0x450a16..0x450ab3, the slots
+// widening it after, the least x's item kept @ 0x44d3a8; MIS_ExportBmsFile @ 0x450a16..0x450ab3, the slots
 // in order, written where the least-x item's extra_valmode is 0 @ 0x450a3a]
 void rebuild_mis_areas(bms::File &file) {
 	std::array<uint32_t, kMisAreaSlots> flags{};
@@ -721,7 +721,7 @@ MisWeaponTable mis_weapon_table(const def::DefWeaponsFile &weapons) {
 
 namespace {
 
-// The first row of `table` named `name`, case aside (sub_432860's _stricmp); table->size() for none.
+// The first row of `table` named `name`, case aside (WeaponDef_FindIndexByName's _stricmp); table->size() for none.
 size_t weapon_row(const MisWeaponTable &table, const std::string &name) {
 	for (size_t i = 0; i < table.size(); ++i)
 		if (strutil::iequals(table[i].name, name)) return i;

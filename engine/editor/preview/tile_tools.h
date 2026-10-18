@@ -54,11 +54,11 @@ uint8_t tile_flipped(uint8_t flags, bool across);
 
 // A record nudged (dx, dy) steps on the plane (each -1, 0 or 1), a step 1 unit or, `big`, 16: MED's arrow keys,
 // each coordinate snapped down to whole units after the move, a positive move rounding the coordinate up first
-// [orig: JOTACmed.exe sub_43F0B0 @ 0x43F0DE..0x43F1A7, its second axis the stored z, the plane's y, positive north].
+// [orig: JOTACmed.exe MissionSelection_Translate @ 0x43F0DE..0x43F1A7, its second axis the stored z, the plane's y, positive north].
 TilOverlayEntry tile_nudged(const TilOverlayEntry &entry, int dx, int dy, bool big);
 // Records turned a quarter (positive counter-clockwise) about their tiles' centroid, each turned in place too:
 // MED's group turn over the tiles' centres, the centroid their integer mean, each centre's offset turned and the
-// positions snapped down to whole units [orig: JOTACmed.exe sub_43E910 @ 0x43E977..0x43EB54].
+// positions snapped down to whole units [orig: JOTACmed.exe MissionSelection_RotateFacing2 @ 0x43E977..0x43EB54].
 std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOverlayEntry> &entries, int direction);
 // The corner a stamp at (x, y) (mission units) places, the square's north-west: Nile's, the point to the nearest whole
 // unit [orig: gobj.dll sub_1000B4A1 @ 0x1000B4C8..0x1000B542]; `grid` takes the north-west corner of the 16-unit grid

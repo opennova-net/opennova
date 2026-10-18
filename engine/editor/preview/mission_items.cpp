@@ -190,7 +190,7 @@ bool MissionItemCache::row(const SessionView &view, int64_t item, MissionItemFac
 			const std::string &sid = seed->second.sid;
 			out.ai_class = sid.substr(0, sid.find('.')).substr(0, 8);
 			// The profile as the original names its file: the name's extension made .aip [orig: JOTACmed.exe
-			// sub_462CB0 @ 0x462cb0 with "aip" @ 0x5b2d40, the file asked for by sub_529FA0 @ 0x529fa0].
+			// Path_ReplaceOrAppendExtension @ 0x462cb0 with "aip" @ 0x5b2d40, the file asked for by sub_529FA0 @ 0x529fa0].
 			const std::string &aip = seed->second.default_aip;
 			if (!aip.empty() && graph->has_file(aip.substr(0, aip.find('.')) + ".aip")) out.ai_script = aip.substr(0, 8);
 			out.min_engagement = seed->second.min_engagement;

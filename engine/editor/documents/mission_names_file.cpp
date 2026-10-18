@@ -344,7 +344,7 @@ bool mission_names_text(const MissionDocument &document, const std::vector<int32
 	// there, take_locks over the mission as it stands), a 0 among them; one locked in the editor since takes the
 	// ground under it, the height handed at this save, which the write keeps (MissionDocument::names_file_written), so
 	// a sculpt after it leaves it (D-MIS-4: the original editor keeps a locked item's base absolute [orig: JOTACmed.exe
-	// sub_402770 @ 0x402c9f..0x402ccd]). With no ground handed it keeps the row's.
+	// MissionGeneralInfo_DialogProc @ 0x402c9f..0x402ccd]). With no ground handed it keeps the row's.
 	MissionNamesFile known = document.names_file();
 	known.kept_bases.clear();
 	if (known.found == Found::Matched) take_locks(file, known);

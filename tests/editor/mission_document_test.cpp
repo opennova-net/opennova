@@ -823,7 +823,7 @@ int test_player_route_past_slots() {
 }
 
 // The original editor's .bms packer writes every record with w_accuracy1 no more than w_accuracy2 and yaw, pitch and
-// roll % 360, the sign kept [orig: sub_44C8E0 @ 0x44c94f..0x44c975, @ 0x44c905..0x44c924 (JOTACmed.exe)] (the field
+// roll % 360, the sign kept [orig: MissionItem_PackBmsRecord @ 0x44c94f..0x44c975, @ 0x44c905..0x44c924 (JOTACmed.exe)] (the field
 // "accuracy" is w_accuracy1): a save writes 80/20 as 20/20 and 400 as 40, -400 as -40; the .mis writer clamps alike
 // and writes the facing as held [orig: MIS_SaveDocument @ 0x455600..0x455602, @ 0x455321..0x455353
 // (JOTACmed.exe)]; the row keeps what it holds.
@@ -1552,7 +1552,7 @@ int test_pool_check() {
 }
 
 // A save stores the writers' clamp back into the record, as the original editor's writers store it into the item on
-// both writes [orig: JOTACmed.exe sub_44C8E0 @ 0x44c95d; MIS_SaveDocument @ 0x455600..0x455602]: an item whose
+// both writes [orig: JOTACmed.exe MissionItem_PackBmsRecord @ 0x44c95d; MIS_SaveDocument @ 0x455600..0x455602]: an item whose
 // w_accuracy1 an edit set above its w_accuracy2 holds the clamped value after the save, the file and the row alike.
 int test_save_clamp() {
 	test_temp::TempDir dir("opennova_mission_save_clamp");

@@ -361,7 +361,7 @@ bool MissionDocument::paste_rows(const Edit &edit, const std::vector<std::shared
 	// A copied event's index names the event of that index here, which the step moves with the events at
 	// or past where the copies land: the original editor's paste renumbers every event index at or past
 	// the paste, the copy's own with the rest, so a copy keeps naming the event it named [orig: JOTACmed.exe
-	// sub_44D460 @ 0x44d460] (D-MIS-9).
+	// MissionEvent_InsertAt @ 0x44d460] (D-MIS-9).
 	// The rows, in band order (the base puts each where its band is, row_position).
 	const auto entities = [&](K kind, const std::vector<bms::Entity> &records) {
 		for (const bms::Entity &record : records) {

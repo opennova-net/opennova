@@ -9,7 +9,7 @@
 // actions are records the event holds, and its two first indexes and two counts are what the writer
 // derives.
 //
-// What the original editor writes for an edited mission is not witnessed (Med_WriteBmsFile @0x44f920,
+// What the original editor writes for an edited mission is not witnessed (MIS_ExportBmsFile @0x44f920,
 // D-MIS-3); the layout join_event_chains writes is the corpus's. An empty run's index is never
 // dereferenced [orig: EventTrigger_EvaluateChain @0x454050: zero triggers is TRUE], so a file whose
 // runs partition its tables in another order (Reordered) loses nothing but its byte layout when it is

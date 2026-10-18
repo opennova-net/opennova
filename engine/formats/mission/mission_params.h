@@ -136,7 +136,7 @@ constexpr bool ssn_is_players(int32_t ssn) {
 }
 // The SSN a new entity takes after the largest the mission's records hold: one past it, as the
 // original editor gives an item it places one past the largest its items hold, skipping none [orig:
-// JOTACmed.exe MissionItem_NextUniqueId @ 0x44db70, written as the record's +8 by sub_44C8E0 @
+// JOTACmed.exe MissionItem_NextUniqueId @ 0x44db70, written as the record's +8 by MissionItem_PackBmsRecord @
 // 0x44c8e0] (an SSN the players' net ids share answers that player's lookups, above: the original
 // allocates it all the same).
 constexpr int32_t ssn_after(int32_t largest) {

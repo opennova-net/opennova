@@ -203,7 +203,7 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 
 	// Every path is its markers' (D-MIS-6), as the original editor's writer lays it out: its count the markers
 	// that carry its number, its 32 slots the first of them in wp_number order [orig: JOTACmed.exe
-	// sub_44CFD0 @ 0x44cfd0, sub_44F920 @ 0x44f920]; CP19's path 6 counts 39 over its 32 slots.
+	// MissionDocument_RebuildWaypointPaths @ 0x44cfd0, MIS_ExportBmsFile @ 0x44f920]; CP19's path 6 counts 39 over its 32 slots.
 	for (size_t path = 0; path < parsed.waypoint_records.size(); ++path) {
 		const bms::WaypointRecord &record = parsed.waypoint_records[path];
 		const std::vector<int> stops = opennova::mission::waypoint_path_markers(parsed, path);

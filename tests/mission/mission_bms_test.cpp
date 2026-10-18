@@ -1324,7 +1324,7 @@ int main() {
 
 	// --- D-MIS-6: a path's stops are its markers' (the original editor's model): an edit sets each marker's
 	// waypoint_id and wp_number and lays the path out from them, its count the markers that carry it, its 32
-	// slots the first of them [orig: JOTACmed.exe sub_44CFD0 @ 0x44cfd0, sub_44F920 @ 0x44f920]. ---
+	// slots the first of them [orig: JOTACmed.exe MissionDocument_RebuildWaypointPaths @ 0x44cfd0, MIS_ExportBmsFile @ 0x44f920]. ---
 	{
 		opennova::bms::File f;
 		make_default(f);

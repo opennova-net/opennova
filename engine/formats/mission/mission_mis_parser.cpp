@@ -434,7 +434,7 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 				                                         "\" is no group name: " + why});
 		} else if (t.size() >= 2 && t[0] == "attrib") {
 			// The record's flags @0 and its value @8, as the original editor's .bms writer stores a group's
-			// attrib and commander [orig: JOTACmed.exe sub_44F920 @0x44f920, the group @0x450940..0x4509b4].
+			// attrib and commander [orig: JOTACmed.exe MIS_ExportBmsFile @0x44f920, the group @0x450940..0x4509b4].
 			if (!token_i32(line, 1, value, error)) return false;
 			record.flags = value;
 		} else if (t.size() >= 2 && t[0] == "commander") {
@@ -453,7 +453,7 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 // JOTACmed.exe MIS_ParseToken
 // @0x450e50, the section @ 0x450faa -> @ 0x4510b3 (N unchecked), the description @ 0x453e61, the
 // file name
-// @ 0x453eb0, any other key failing the load @ 0x453e88; sub_44F920 @ 0x4509bc..0x450a14]. A slot
+// @ 0x453eb0, any other key failing the load @ 0x453e88; MIS_ExportBmsFile @ 0x4509bc..0x450a14]. A slot
 // outside 0..31 is none of the table's (the original's copy runs past its 32), and a file name past
 // the record's 16 bytes (the original's export runs into its stack; 16 characters fill it, no NUL
 // kept): each reported, the one skipped, the other cut.
@@ -514,9 +514,9 @@ bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, std::string
 // `begin areatrig N`: N is the area's zone id, the original editor's slot, and `attrib` its flags
 // (MISSION_AREA 1, constrain-Z 2), which the original's .bms writer stores at @28; `color` is the
 // editor's alone [orig: JOTACmed.exe MIS_ParseToken @0x450e50, the section @0x4510a9, its keys
-// @0x4540ac..0x454144; sub_44F920
+// @0x4540ac..0x454144; MIS_ExportBmsFile
 // @0x44f920, the area @0x450a16..0x450ab3]. The original's .mis has a slot per zone id 1..99 (its
-// writer's loop @0x454d11..0x454daf, its rebuild's range sub_44D240 @0x44d2a9): a number outside
+// writer's loop @0x454d11..0x454daf, its rebuild's range MissionDocument_RebuildAreasFromMarkers @0x44d2a9): a number outside
 // them makes no area, and a second section of a number goes to the first's area, as the original's
 // slot, each reported. The area has its bounds from the 6013 items of its id (rebuild_mis_areas,
 // D-MIS-14); one of none is made none.
@@ -561,7 +561,7 @@ bool parse_mis_area_trigger(const std::vector<MisLine> &lines, size_t &pos, bms:
 // editor's reader stores the declared count and fills a slot per row until the `end`, never comparing the two
 // [orig: JOTACmed.exe MIS_ParseToken, the count @ 0x453ac5, the slot index reset @ 0x453acd, a row's slot
 // @ 0x453b87, the `end` @ 0x453b59], and its .bms export writes the count's low byte and the full count's records
-// from the event's slots [orig: sub_44F920, the byte @ 0x450b78, the records @ 0x450c08]. So the run the event
+// from the event's slots [orig: MIS_ExportBmsFile, the byte @ 0x450b78, the records @ 0x450c08]. So the run the event
 // keeps is the one the game reads of that byte (triggers_read, actions_read): the rows past it left out, the slots
 // past the rows as a fresh document's event holds them, zero. Its event holds 20 slots of each, 32 bytes apiece
 // [orig: MIS_ParseToken, the slot @ 0x453b84, the triggers' @ 0x453b99, the actions' 640 bytes on @ 0x453c6f, an

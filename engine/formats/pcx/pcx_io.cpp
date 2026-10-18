@@ -99,7 +99,7 @@ void append_rle_row(const uint8_t *row, int length, std::vector<uint8_t> &out) {
 }
 
 // JO's mission editor's row coder (PcxCoding::Med): the shipped coding but for the row's last run, which it
-// writes as a count pair whatever it holds [orig: JOTACmed.exe sub_45E8A0 @ 0x45E8A0: a full run of
+// writes as a count pair whatever it holds [orig: JOTACmed.exe PCX_WriteRleRow @ 0x45E8A0: a full run of
 // 63 written as 0xFF and the byte, the current byte opening the next run (@ 0x45E8EB..0x45E913); a
 // run of one below 0xC0 alone, any other a pair (@ 0x45E946..0x45E980); the tail pair
 // @ 0x45E9BF..0x45E9E7].

@@ -95,8 +95,8 @@ size_t index_among(const std::vector<std::shared_ptr<const Node>> &rows, const N
 
 // The number each of a path's stops gives its marker (its wp_number), the stops in their order. A marker's
 // number is the key the original editor sorts a path's markers by, not its place: its writer copies the
-// number the marker holds [orig: JOTACmed.exe sub_44C8E0 @ 0x44c9ff, item +0x90 to the record's +0x30] and
-// its rebuild only sorts each path's markers by it [orig: JOTACmed.exe sub_44CFD0 @ 0x44d0e9..0x44d104],
+// number the marker holds [orig: JOTACmed.exe MissionItem_PackBmsRecord @ 0x44c9ff, item +0x90 to the record's +0x30] and
+// its rebuild only sorts each path's markers by it [orig: JOTACmed.exe MissionDocument_RebuildWaypointPaths @ 0x44d0e9..0x44d104],
 // never writing
 // it, so a shipped path holds keys (00TRa's path 1 holds 0, 1, 2, 2, 3 and 03TR's path 5 1 to 9 and 1648).
 // A stop keeps the number its marker was read with on this path (`held`: each marker's path and number as
@@ -157,8 +157,8 @@ std::vector<int32_t> stop_numbers(const std::vector<uint32_t> &stops, const std:
 // The file's paths laid out from the stops the rows hold (`stops`, one list a path, in the paths' order), as
 // the original editor lays a path out from its markers (D-MIS-6): each waypoint marker carries the path
 // it is a stop of and its number there (stop_numbers), none another, and each path's record is laid out
-// from them (mission::lay_out_waypoint_path) [orig: JOTACmed.exe sub_44C8E0 @ 0x44c8e0, the path @ 0x44c9f5
-// and the number @ 0x44c9ff; sub_44CFD0 @ 0x44cfd0; sub_44F920 @ 0x44f920]. A stop that names no waypoint
+// from them (mission::lay_out_waypoint_path) [orig: JOTACmed.exe MissionItem_PackBmsRecord @ 0x44c8e0, the path @ 0x44c9f5
+// and the number @ 0x44c9ff; MissionDocument_RebuildWaypointPaths @ 0x44cfd0; MIS_ExportBmsFile @ 0x44f920]. A stop that names no waypoint
 // marker, or one of path 0, puts nothing on a path, and a marker of two stops keeps the last
 // (mission.unserializable says each, which refuses the save).
 void lay_out_paths(bms::File &file, const std::vector<const std::vector<uint32_t> *> &stops) {
@@ -379,9 +379,9 @@ std::vector<Edit> MissionDocument::save_clamps() const {
 bool MissionDocument::compose(bms::File &out) const {
 	if (!compose_mission(rows(), out)) return false;
 	// Each record as both of the original's writers write it on every save, every pool's: w_accuracy1 no more than
-	// w_accuracy2 [orig: sub_44C8E0 @ 0x44c94f..0x44c975 (JOTACmed.exe), from the .bms export sub_44F920's four
+	// w_accuracy2 [orig: MissionItem_PackBmsRecord @ 0x44c94f..0x44c975 (JOTACmed.exe), from the .bms export MIS_ExportBmsFile's four
 	// calls @ 0x450672, @ 0x45071b, @ 0x450790, @ 0x450835; MIS_SaveDocument @ 0x455600..0x455602 (JOTACmed.exe)];
-	// its AI class its item's row's, zero-filled past it [orig: sub_44C8E0 @ 0x44c8e0, the memset;
+	// its AI class its item's row's, zero-filled past it [orig: MissionItem_PackBmsRecord @ 0x44c8e0, the memset;
 	// @ 0x44cabe..0x44caf2 (JOTACmed.exe)]. The facing the .bms alone wraps (serialize).
 	for (std::vector<bms::Entity> *pool : {&out.items, &out.buildings, &out.markers, &out.organics})
 		for (bms::Entity &entity : *pool) {
@@ -468,7 +468,7 @@ SerializeResult MissionDocument::serialize() const {
 	std::string error;
 	const bool composed = compose(file);
 	// The .bms packer writes each record's yaw, pitch and roll % 360, the C remainder keeping the sign [orig:
-	// sub_44C8E0 @ 0x44c905..0x44c924 (JOTACmed.exe)]; the .mis writer writes the facing as held [orig:
+	// MissionItem_PackBmsRecord @ 0x44c905..0x44c924 (JOTACmed.exe)]; the .mis writer writes the facing as held [orig:
 	// MIS_SaveDocument @ 0x455321..0x455353 (JOTACmed.exe)], so compose keeps it.
 	if (composed)
 		for (std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
@@ -917,7 +917,7 @@ void MissionDocument::prepare_duplicate(Node &copy, const Node &original,
 		if (const int id = free_zone_id(rows)) static_cast<AreaRow &>(copy).native.id = id;
 	// A duplicated event's parameters keep naming the events they named, its original included: the
 	// original editor's paste of a copied event renumbers every event index at or past where the copy goes,
-	// the copy's own with the rest [orig: JOTACmed.exe sub_44D460 @ 0x44d460, the Event triggers
+	// the copy's own with the rest [orig: JOTACmed.exe MissionEvent_InsertAt @ 0x44d460, the Event triggers
 	// @ 0x44d521 and the ResetEvent actions @ 0x44d550] (renumber_references, D-MIS-9).
 }
 
@@ -1326,7 +1326,7 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 		}
 		// A type-6005 marker's advance trigger, an event by its index (none below 0) [orig:
 		// Entity_SpawnFromBMSRecord @0x40f0b3; EventTrigger_MarkLinkedSpawnPoints @0x452ce0], moves with its
-		// event as the original editor moves it, 0 like any index [orig: JOTACmed.exe sub_44D460 @ 0x44d460,
+		// event as the original editor moves it, 0 like any index [orig: JOTACmed.exe MissionEvent_InsertAt @ 0x44d460,
 		// @ 0x44d59c; sub_411C90 @ 0x411dd8..0x411ded]; a removal sets it to -1 first (removal_edits).
 		if (!markers && is_entity_kind(node->kind)) {
 			const bms::Entity &marker = static_cast<const EntityRow &>(*node).native;
@@ -1451,7 +1451,7 @@ size_t mission_removed_stop_namers(const MissionDocument &document, const std::v
 // A waypoint marker the edit put in (a Duplicate's copy, a Paste's) stays a stop of the path it carries, among
 // the stops its number sorts with, as the original editor's copy stays on its route: its copy is the whole item
 // [orig: JOTACmed.exe MissionItem_CloneTranslated @ 0x455e70, the qmemcpy keeping +0x8c and +0x90], and its
-// rebuild puts every waypoint marker on the path it carries [orig: JOTACmed.exe sub_44CFD0 @
+// rebuild puts every waypoint marker on the path it carries [orig: JOTACmed.exe MissionDocument_RebuildWaypointPaths @
 // 0x44d028..0x44d063], sorted by
 // number. The stop goes after the last of the path's stops whose marker, held on the path, sorts before the
 // copy (by number, a tie by the marker's place: a duplicate right after its original); `sites` takes the Adds.
@@ -1524,7 +1524,7 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 		}
 		if (node->kind == k(K::Event)) {
 			// A waypoint marker advancing on the event advances on none: the original editor's delete of an
-			// event sets such a marker's advance trigger to -1 and says so [orig: JOTACmed.exe sub_455B20
+			// event sets such a marker's advance trigger to -1 and says so [orig: JOTACmed.exe MissionEvent_RemoveAt
 			// @ 0x455b20, WP_EVENT_DELETED].
 			for (const auto &other : rows()) {
 				if (!is_entity_kind(other->kind) || removed.count(other->id)) continue;

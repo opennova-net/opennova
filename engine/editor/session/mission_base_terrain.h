@@ -19,9 +19,9 @@ class FileSource;
 namespace opennova::editor {
 
 // The original editor's read of a terrain's .trn for its base heights: the .trn alone (its own parser over the file,
-// the game's later passes over overcast.def and the mission's .env never run [orig: JOTACmed.exe sub_464DE0 @ 0x464de0
+// the game's later passes over overcast.def and the mission's .env never run [orig: JOTACmed.exe TRN_LoadFile @ 0x464de0
 // -> sub_463C90 @ 0x463c90]) and its last polytrn_scale line by the CRT's atol (128 where it has none [orig:
-// JOTACmed.exe, the arm @ 0x464a38; the default, sub_464B60 @ 0x464bb6]). The .trn is read through the game's parser
+// JOTACmed.exe, the arm @ 0x464a38; the default, TRN_InitDefaults @ 0x464bb6]). The .trn is read through the game's parser
 // and admission gate (load_mission_trn with no later texts): a terrain the game refuses (no polydata, a sector count or
 // row count that is no power of two) samples no height, where the original editor would; and a .trn naming a
 // polytrn_sectorcount but no polytrn_sectors row, whose grid the original editor fills with the .trn's other words
@@ -31,7 +31,7 @@ bool read_base_trn(const FileSource &files, const std::string &trn_file, TrnConf
 
 // The terrain named `terrain` (a mission header's, no extension) as the original editor reads it: its .trn
 // (read_base_trn) and the .cpt its polytrn_polydata names, its DPTH or CDEP depth words into a cleared 1024 x 1024
-// grid, so a CDEP of fewer words leaves the rest 0 [orig: JOTACmed.exe sub_44C2B0 @ 0x44c2b0, the clear @ 0x44c2e0,
+// grid, so a CDEP of fewer words leaves the rest 0 [orig: JOTACmed.exe MissionDocument_LoadTerrain @ 0x44c2b0, the clear @ 0x44c2e0,
 // the DPTH arm @ 0x44c64b, the CDEP arm @ 0x44c5e7]; `cpt_stamp` the .cpt's stamp in `files`. False where either does
 // not read.
 bool read_base_terrain(const FileSource &files, const std::string &terrain, int32_t &scale, TrnConfig &trn,

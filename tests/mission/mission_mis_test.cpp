@@ -321,7 +321,7 @@ int main() {
 								  "height_lock 300\r\n") != std::string::npos);
 
 		// The areas the original editor makes of its type-6013 items (D-MIS-14) [orig: JOTACmed.exe
-		// sub_44D240 @ 0x44d240; sub_44F920 @ 0x450a16..0x450ab3]: zone 3's three unlocked markers
+		// MissionDocument_RebuildAreasFromMarkers @ 0x44d240; MIS_ExportBmsFile @ 0x450a16..0x450ab3]: zone 3's three unlocked markers
 		// span its box, its flags its areatrig's; zone 5's areatrig has no marker, so no area; zone
 		// 7's least-x marker holds an extra_valmode, so the export keeps none. The markers are none
 		// of the pools. Over the 50-unit terrain the box's z is the markers' absolute z.
@@ -961,7 +961,7 @@ int main() {
 	}
 
 	// The default kit (D-MIS-X1): the loadout chunk the original editor's .bms export builds from it over its weapon
-	// table, and the kit a loadout leads with, which the .mis carries [orig: JOTACmed.exe sub_4328A0 @ 0x4328a0;
+	// table, and the kit a loadout leads with, which the .mis carries [orig: JOTACmed.exe MIS_BuildDefaultLoadoutChunk @ 0x4328a0;
 	// MIS_ParseToken @ 0x451caa..0x451d1c; MIS_SaveDocument @ 0x454ba7..0x454bcb].
 	{
 		const MisWeaponTable table = {{"WPN_RIFLE", 2}, {"WPN_RIFLE_A", 0}, {"WPN_RIFLE_B", 0}, {"WPN_PISTOL", 0},

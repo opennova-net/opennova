@@ -98,7 +98,7 @@ struct MissionNamesFile {
 	// measured against, as `kept` is for the names. A lock is the int the file holds, any nonzero one a lock, kept as
 	// read and written back so (the original editor's atol, tested nonzero: mission_mis.h).
 	// A locked item's base comes with its lock: absolute, as the original editor keeps it through a terrain change
-	// [orig: JOTACmed.exe sub_402770 @ 0x402c9f..0x402ccd] and writes it (master #1095, D-MIS-4); kept_bases each
+	// [orig: JOTACmed.exe MissionGeneralInfo_DialogProc @ 0x402c9f..0x402ccd] and writes it (master #1095, D-MIS-4); kept_bases each
 	// entity's in the writer's order, none for one the .mis gives no lock (a base of 0 is one: the .mis holds it).
 	// `locks` of a write (MissionDocument::names_file_written) are what it wrote, each base it chose kept so: a save
 	// after it takes its base from them, never from the ground again.
