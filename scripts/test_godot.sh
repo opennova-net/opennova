@@ -8,10 +8,10 @@
 #                               [--windowed]
 #   --keep-user-dir  leave the run's isolated user:// (.godot-test-user) in
 #                    place to inspect what the suite wrote
-#   --shard NAME     run one of the core suite's two CI shards (shells: the
-#                    scripts under tests/authoring, game, mcp and probes;
-#                    world: every other; test_suites.py GODOT_SHARDS), attested
-#                    on its own
+#   --shard NAME     run one of the core or retail suite's two CI shards
+#                    (shells: the scripts under tests/authoring, game, mcp and
+#                    probes, or under tests/retail/ the same; world: every
+#                    other; test_suites.py GODOT_SHARDS), attested on its own
 #   --windowed      run only the suite's graphics scripts (tests/windowed/ for
 #                    core, tests/retail/windowed/ for retail) under Forward+;
 #                    a pending test there (no RenderingDevice) fails the run
@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
 done
 case "$shard" in
   "") ;;
-  shells|world) [[ "$suite" == core ]] || { echo "--shard splits the core suite only" >&2; exit 2; } ;;
+  shells|world) [[ "$suite" != all ]] || { echo "--shard splits the core or the retail suite" >&2; exit 2; } ;;
   *) echo "$usage" >&2; exit 2 ;;
 esac
 case "$suite" in
