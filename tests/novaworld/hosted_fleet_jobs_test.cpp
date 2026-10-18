@@ -24,6 +24,9 @@
 //   - a launch past the fleet's maximum for its kind (a forged row beside the
 //     machine the cap allows) is refused before any cloud call, and its row fails.
 //
+//   - a refused launch's text: the cloud's error code it names (the AWS CLI's
+//     "An error occurred (<Code>)"), the end reason it makes.
+//
 // Compiles the hosted sources directly, as hosted_supervisor_test does.
 
 #include "health.h"
@@ -62,6 +65,31 @@ jobs::WorkerPoolConfig pool_config(int threads) {
 // workers the launches overlap, so all twenty machines are booting in about one
 // call's time (one after another they would take a minute), and every pass while
 // the calls run stays short. Then each server is placed on its own machine.
+int test_launch_failure_reason() {
+	const std::string vcpu =
+			"aws ec2 run-instances exited with code 254: An error occurred (VcpuLimitExceeded) "
+			"when calling the RunInstances operation: You have requested more vCPU capacity";
+	TEST_EXPECT(hosted::cloud_error_code(vcpu) == "VcpuLimitExceeded");
+	TEST_EXPECT(hosted::launch_failure_reason(vcpu) == "the launch failed (VcpuLimitExceeded)");
+	TEST_EXPECT(hosted::cloud_error_code(
+						"An error occurred (InsufficientInstanceCapacity) when calling") ==
+			"InsufficientInstanceCapacity");
+	TEST_EXPECT(
+			hosted::cloud_error_code(
+					"An error occurred (UnauthorizedOperation) when calling the "
+					"RunInstances operation: You are not authorized") == "UnauthorizedOperation");
+	TEST_EXPECT(hosted::cloud_error_code("An error occurred (Client.InvalidParameterValue) x") ==
+			"Client.InvalidParameterValue");
+	// No code: the plain reason.
+	for (const char *none : { "", "aws ec2 run-instances timed out", "the fake refused the launch",
+				 "An error occurred () when", "An error occurred (Bad Code) when",
+				 "An error occurred (unclosed" })
+		TEST_EXPECT(hosted::cloud_error_code(none).empty());
+	TEST_EXPECT(hosted::launch_failure_reason("aws ec2 run-instances timed out") ==
+			"the launch failed");
+	return 0;
+}
+
 int test_parallel_launches() {
 	Rig rig("fleet_jobs_parallel");
 	rig.config.cap = 50;
@@ -377,6 +405,7 @@ int main(int argc, char **argv) {
 		int (*fn)();
 	};
 	const Case cases[] = {
+		{ "launch_failure_reason", test_launch_failure_reason },
 		{ "parallel_launches", test_parallel_launches },
 		{ "worker_gone_mid_launch", test_worker_gone_mid_launch },
 		{ "describe_grace_from_row", test_describe_grace_from_row },

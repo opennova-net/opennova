@@ -465,6 +465,15 @@ int test_pins_and_updates() {
 	row = rig.server(id);
 	TEST_EXPECT(row->generation == 4 && row->base_tree_id == jo_tree2 && row->expansion_tree_id == rig.data.jox_tree &&
 			!row->update_requested && !hosted::server_outdated(db, id) && row->restarts == 1);
+	// Its runs, each ended with why: a crash, its machine's drain, the owner's update;
+	// the fourth on the new tree, open.
+	{
+		const auto starts = hosted::list_starts(db, id, 10);
+		TEST_EXPECT(starts.size() == 4 && starts[0].generation == 4 && starts[0].ended_at.empty() &&
+				starts[0].base_tree_id == jo_tree2 && starts[1].cause == hosted::StartCause::Update &&
+				starts[2].cause == hosted::StartCause::Fleet && starts[3].cause == hosted::StartCause::Crash &&
+				starts[3].exit_code == 1 && starts[2].machine_id == machine && starts[1].machine_id != machine);
+	}
 	{
 		const FakeAgent::Container *c = rig.running_container(id);
 		TEST_EXPECT(c && c->desired.base_tree == jo_tree2 && c->desired.expansion_tree == rig.data.jox_tree);
@@ -788,6 +797,15 @@ int test_lifecycle_and_stop() {
 			!row->update_requested);
 	TEST_EXPECT(contains(last_detail(rig.db, id), "with tree " + std::to_string(rig.data.jo_tree) +
 							 " and expansion tree " + std::to_string(rig.data.jox_tree)));
+	// Its start: made with its slot, its image, trees and log stream written as it rendered.
+	{
+		const auto starts = hosted::list_starts(rig.db, id, 10);
+		TEST_EXPECT(starts.size() == 1 && starts[0].generation == 1 && starts[0].machine_id == launched.id &&
+				starts[0].slot == 0 && starts[0].serve_image == kServeImage &&
+				starts[0].base_tree_id == rig.data.jo_tree && starts[0].expansion_tree_id == rig.data.jox_tree &&
+				starts[0].log_stream == std::to_string(id) + "/g1" && starts[0].running_at.empty() &&
+				starts[0].ended_at.empty());
+	}
 	const auto login = hosted::admin_login_of(rig.db, id);
 	TEST_EXPECT(login && login->user == "svc" && login->port == 32800 && row->admin_port == login->port);
 	TEST_EXPECT(login->password.size() == hosted::kAdminPasswordChars);
@@ -845,6 +863,10 @@ int test_lifecycle_and_stop() {
 	TEST_EXPECT(agent && agent->last.desired.size() == 1 && !agent->last.desired[0].files);
 	rig.tick();
 	TEST_EXPECT(rig.state(id) == State::Listing);
+	TEST_EXPECT(!hosted::list_starts(rig.db, id, 1)[0].running_at.empty());
+	// The container names the stream its output goes to.
+	TEST_EXPECT(rig.running_container(id) &&
+			rig.running_container(id)->desired.log_stream == std::to_string(id) + "/g1");
 	rig.step(); // no listing yet
 	TEST_EXPECT(rig.state(id) == State::Listing);
 	TEST_EXPECT(list_as(rig.db, service, 5001));
@@ -876,6 +898,12 @@ int test_lifecycle_and_stop() {
 	TEST_EXPECT(transitions(rig.db, id) ==
 			(std::vector<std::string>{ ">requested", "requested>provisioning", "provisioning>booting",
 					"booting>listing", "listing>running", "running>stopping", "stopping>stopped" }));
+	// The stop ended its start.
+	{
+		const auto starts = hosted::list_starts(rig.db, id, 10);
+		TEST_EXPECT(starts.size() == 1 && !starts[0].ended_at.empty() &&
+				starts[0].cause == hosted::StartCause::Stop && !starts[0].exit_code);
+	}
 	rig.step(); // nothing live: nothing happens, and the machine stays (idle) for now
 	TEST_EXPECT(rig.fake.launches == 1 && !rig.fake.was_terminated(launched.cloud_id));
 	return 0;
@@ -1152,6 +1180,12 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(rig.state(unfetched) == State::Provisioning);
 	TEST_EXPECT(contains(last_detail(rig.db, unfetched),
 			"its data could not be fetched: aws s3 sync exited 1: NoSuchKey; restart 1 of 2"));
+	{
+		const auto starts = hosted::list_starts(rig.db, unfetched, 10);
+		TEST_EXPECT(starts.size() == 1 && starts[0].cause == hosted::StartCause::Crash &&
+				starts[0].exit_code == 125 &&
+				starts[0].reason == "its data could not be fetched: aws s3 sync exited 1: NoSuchKey");
+	}
 	TEST_EXPECT(hosted::request_stop(rig.db, unfetched, "stopped by its owner"));
 	rig.tick();
 	TEST_EXPECT(rig.state(unfetched) == State::Stopped);
@@ -1199,6 +1233,14 @@ int test_exits_and_crash_restarts() {
 	row = rig.server(id);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 2);
 	TEST_EXPECT(contains(last_detail(rig.db, id), "ran out of memory; restart 2 of 2"));
+	// Each run a start of its own, each ended by its crash: its code, its OOM flag.
+	{
+		const auto starts = hosted::list_starts(rig.db, id, 10);
+		TEST_EXPECT(starts.size() == 2 && starts[0].generation == 2 && starts[0].cause == hosted::StartCause::Crash &&
+				starts[0].exit_code == 137 && starts[0].oom && starts[1].generation == 1 &&
+				starts[1].cause == hosted::StartCause::Crash && starts[1].exit_code == 3 && !starts[1].oom &&
+				!starts[1].running_at.empty());
+	}
 	// A start that fails (docker's 125): the limit is used up, it fails.
 	rig.advance(rig.config.restart_backoff_ms);
 	rig.step(); // placed, booting, its container started
@@ -1214,6 +1256,11 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(!row->service_user_id && !nws::get_user_by_id(rig.db, service));
 	rig.sync_all();
 	TEST_EXPECT(rig.agents.at(machine).containers.empty());
+	{
+		const auto starts = hosted::list_starts(rig.db, id, 10);
+		TEST_EXPECT(starts.size() == 3 && starts[0].cause == hosted::StartCause::Crash && starts[0].exit_code == 125 &&
+				starts[0].running_at.empty());
+	}
 	return 0;
 }
 
@@ -1223,26 +1270,35 @@ int test_exits_and_crash_restarts() {
 // fails (its launch job's), the next pass counts it for the heartbeat, and no
 // launch of that kind follows within the launch backoff, which doubles with
 // each refusal in a row to its cap (the rig's 5, 10, 20, 20 s); the server is
-// placed on the next machine that launches, whose boot ends the backoff.
+// placed on the next machine that launches, whose boot ends the backoff. The
+// cloud's error code (an AWS CLI's text) names the machine's end and both events.
 int test_launch_failure() {
 	Rig rig("hosted_launch_failure");
 	const int64_t id = rig.request("launch_refused");
 	TEST_EXPECT(id > 0);
 	rig.tick(); // -> provisioning
 	rig.fake.fail_next_launch = true;
+	rig.fake.launch_error = "aws ec2 run-instances exited with code 254: An error occurred "
+							"(VcpuLimitExceeded) when calling the RunInstances operation: You have "
+							"requested more vCPU capacity than your current vCPU limit of 8 allows";
 	rig.tick(); // the launch, which the cloud refuses
 	rig.tick(); // the refusal counted
 	auto row = rig.server(id);
 	TEST_EXPECT(rig.fake.launches == 1);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && !row->machine_ref);
 	const std::string detail = last_detail(rig.db, id);
-	TEST_EXPECT(contains(detail, "the launch of its machine failed; it waits for the next (no restart counted)") &&
-			!contains(detail, "fake"));
+	TEST_EXPECT(contains(detail, "the launch of its machine failed (VcpuLimitExceeded); it waits for the next (no "
+								 "restart counted)") &&
+			!contains(detail, "vCPU limit of 8"));
 	TEST_EXPECT(rig.sup->launch_failures() == 1);
 	const auto machines = hosted::list_machines(rig.db, 10);
 	TEST_EXPECT(machines.size() == 1 && machines[0].state == hosted::FleetMachineState::Failed &&
-			machines[0].end_reason == "the launch failed" &&
+			machines[0].end_reason == "the launch failed (VcpuLimitExceeded)" &&
 			machines[0].kind == hosted::MachineKind::Shared);
+	TEST_EXPECT(!hosted::list_machine_events(rig.db, machines[0].id, 10).empty() &&
+			hosted::list_machine_events(rig.db, machines[0].id, 10).back().detail ==
+					"the launch failed (VcpuLimitExceeded)");
+	rig.fake.launch_error = "the fake refused the launch";
 	// Within the launch backoff (5 s) nothing launches.
 	rig.advance(rig.config.launch_backoff_ms - 1);
 	rig.tick();
@@ -1308,7 +1364,7 @@ int test_launch_refused_mid_pass() {
 	rig.advance(rig.config.restart_backoff_ms);
 	// The pass that places a again: as it does, the worker's refusal of b's
 	// machine lands; b, placed after a, launches nothing.
-	rig.fake.on_slot_plan = [db, own] { hosted::fail_refused_launch(*db, own); };
+	rig.fake.on_slot_plan = [db, own] { hosted::fail_refused_launch(*db, own, "the launch failed"); };
 	rig.sup->tick(rig.now);
 	rig.fake.on_slot_plan = nullptr;
 	TEST_EXPECT(rig.state(a) == State::Booting);

@@ -185,6 +185,7 @@ void Supervisor::reconcile(uint64_t now_ms) {
 		if (s.state == State::Provisioning) {
 			// Placed just before the service went, its files never rendered: the
 			// next pass places it again.
+			end_start(db, s.id, s.generation, StartCause::Fleet);
 			release_slot(db, s.id);
 			continue;
 		}
@@ -416,6 +417,7 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 	std::set<int64_t> stopped;
 	for (const Stop &stop : stops) {
 		if (!request_stop(db, stop.id, stop.detail)) continue;
+		set_start_cause(db, stop.id, StartCause::Limits);
 		stopped.insert(stop.id);
 		std::printf("[hosted] server %lld: -> stopping (%s)\n", static_cast<long long>(stop.id), stop.detail.c_str());
 	}
@@ -468,6 +470,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	if (s.machine_ref) {
 		// Placed by an earlier pass whose start never rendered (the service went
 		// in between): the slot goes, and the next pass places it again.
+		end_start(db, s.id, s.generation, StartCause::Fleet);
 		release_slot(db, s.id);
 		return;
 	}
@@ -508,6 +511,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	if (rank >= entitlement.max_servers && !limits_hold::held(db)) {
 		const std::string limit = limit_detail(entitlement);
 		if (request_stop(db, s.id, limit)) {
+			set_start_cause(db, s.id, StartCause::Limits);
 			std::printf("[hosted] server %lld: provisioning -> stopping (%s)\n", static_cast<long long>(s.id),
 					limit.c_str());
 		}
@@ -518,12 +522,13 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	// trees it is pinned to, when it was started before and they are not pruned,
 	// else the data sets' current trees (its first start, or a pin pruned since).
 	if (!data_of(db, s, why)) {
-		finish(db, s, State::Failed, why);
+		finish(db, s, State::Failed, why, StartCause::NoData);
 		return;
 	}
 	if (!pins_hold(db, s) && !current_trees_of(db, s.settings.data_set_id, s.settings.expansion_id)) {
 		const bool base_has_data = current_trees_of(db, s.settings.data_set_id, std::nullopt).has_value();
-		finish(db, s, State::Failed, base_has_data ? "its expansion has no data" : "its data set has no data");
+		finish(db, s, State::Failed, base_has_data ? "its expansion has no data" : "its data set has no data",
+				StartCause::NoData);
 		return;
 	}
 	place(db, s, rt, now_ms);
@@ -695,6 +700,7 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	std::string why;
 	const auto data = data_of(db, s, why);
 	if (!data) {
+		end_start(db, s.id, s.generation, StartCause::NoData);
 		release_slot(db, s.id); // checked in this pass; the next one fails it
 		return;
 	}
@@ -711,6 +717,7 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 			base_tree = current->base_tree_id;
 			expansion_tree = current->expansion_tree_id;
 		} else if (base_tree == 0 || !pins_hold(db, s)) {
+			end_start(db, s.id, s.generation, StartCause::NoData);
 			release_slot(db, s.id); // no data: the next pass fails it
 			return;
 		}
@@ -720,9 +727,11 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	const std::string nw_password = random_secret(kServicePasswordChars);
 	const MutationResult account = upsert_service_account(db, username, nw_password);
 	if (!account.ok) {
+		end_start(db, s.id, s.generation, StartCause::Fleet);
 		release_slot(db, s.id);
 		if (account.error_code == "db_error") return; // logged by auth; the next pass tries again
-		finish(db, s, State::Failed, "its service account could not be made (" + account.error_code + ")");
+		finish(db, s, State::Failed, "its service account could not be made (" + account.error_code + ")",
+				StartCause::Fleet);
 		return;
 	}
 	set_service_account(db, s.id, account.id);
@@ -771,6 +780,8 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 		db::Transaction tx(db);
 		set_tree_pins(db, s.id, base_tree, expansion_tree);
 		set_machine(db, s.id, profile_.provider, container, machine.private_address);
+		set_start_files(db, s.id, s.generation, config_.serve_image, base_tree, expansion_tree,
+				hosted_log_stream(s.id, s.generation));
 		tx.commit();
 	}
 	std::string placed_text = "placed on " + place_text(machine.id, s.slot) + " with tree " + std::to_string(base_tree);
@@ -800,6 +811,10 @@ void Supervisor::on_exit(db::Database &db, const HostedServer &s, Runtime &rt, u
 	else
 		reason = "opennova-serve exited with code " +
 				(report.exit_code ? std::to_string(*report.exit_code) : std::string("unknown"));
+	// The start's end keeps how the container ended: its code, its OOM flag, and
+	// the server's own last line (its --exit-file) or why it never started.
+	end_start(db, s.id, s.generation, lobby_live_ ? StartCause::Crash : StartCause::Fleet,
+			StartExit{ report.exit_code, report.oom, report.reason });
 	if (!lobby_live_) {
 		// NovaWorld's cause, not the server's: with no lobby live opennova-serve
 		// gives up on the gate (retail's 30 s probe). Placed again, no restart
@@ -807,7 +822,7 @@ void Supervisor::on_exit(db::Database &db, const HostedServer &s, Runtime &rt, u
 		replace(db, s, now_ms, reason + " while no lobby instance was live");
 		return;
 	}
-	attempt_failed(db, s, rt, now_ms, reason);
+	attempt_failed(db, s, rt, now_ms, reason, StartCause::Crash);
 }
 
 void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedServer &s, Runtime &rt,
@@ -818,7 +833,7 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its data set's current data");
+		replace(db, s, now_ms, "updated to its data set's current data", StartCause::Update);
 		return;
 	}
 	if (machine->state != FleetMachineState::Ready) {
@@ -834,6 +849,7 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 	}
 	if (const SlotReport *report = report_of(fleet, s)) {
 		if (report->state == ContainerState::Running) {
+			mark_start_running(db, s.id, s.generation);
 			move(db, s, rt, now_ms, State::Listing, "opennova-serve runs");
 			return;
 		}
@@ -843,7 +859,8 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 		}
 	}
 	if (now_ms - rt.since_ms >= config_.boot_timeout_ms)
-		attempt_failed(db, s, rt, now_ms, "its container did not start in " + seconds_text(config_.boot_timeout_ms));
+		attempt_failed(db, s, rt, now_ms, "its container did not start in " + seconds_text(config_.boot_timeout_ms),
+				StartCause::Timeout);
 }
 
 void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedServer &s, Runtime &rt,
@@ -854,7 +871,7 @@ void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its data set's current data");
+		replace(db, s, now_ms, "updated to its data set's current data", StartCause::Update);
 		return;
 	}
 	const SlotReport *report = report_of(fleet, s);
@@ -875,7 +892,8 @@ void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	if (now_ms - rt.since_ms >= config_.listing_timeout_ms) {
-		attempt_failed(db, s, rt, now_ms, "no listing in " + seconds_text(config_.listing_timeout_ms));
+		attempt_failed(db, s, rt, now_ms, "no listing in " + seconds_text(config_.listing_timeout_ms),
+				StartCause::Timeout);
 	}
 }
 
@@ -889,7 +907,7 @@ void Supervisor::on_running(db::Database &db, const Fleet &fleet, const HostedSe
 	// The owner's update: its slot let go and placed again at once (the next
 	// start takes the current trees), the machine's kind of move, no restart.
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its data set's current data");
+		replace(db, s, now_ms, "updated to its data set's current data", StartCause::Update);
 		return;
 	}
 	const SlotReport *report = report_of(fleet, s);
@@ -943,7 +961,8 @@ void Supervisor::on_running(db::Database &db, const Fleet &fleet, const HostedSe
 	if (rt.misses >= config_.health_misses) {
 		finish(db, s, State::Failed,
 				"no answer on its admin link at " + std::to_string(config_.health_misses) +
-						" health checks in a row");
+						" health checks in a row",
+				StartCause::LinkLost);
 	}
 }
 
@@ -957,17 +976,20 @@ void Supervisor::on_stopping(db::Database &db, const Fleet &fleet, const HostedS
 	}
 	const SlotReport *report = report_of(fleet, s);
 	if (!s.machine_ref || (!acknowledged && !report)) {
-		finish(db, s, State::Stopped, "stopped before it ran");
+		finish(db, s, State::Stopped, "stopped before it ran", StartCause::Stop);
 		return;
 	}
 	if (!machine_of(fleet, s)) {
-		finish(db, s, State::Stopped, "its machine is gone");
+		finish(db, s, State::Stopped, "its machine is gone", StartCause::Stop);
 		return;
 	}
 	if (report && report->state == ContainerState::Exited) {
+		end_start(db, s.id, s.generation, StartCause::Stop,
+				StartExit{ report->exit_code, report->oom, report->reason });
 		finish(db, s, State::Stopped,
 				"opennova-serve exited (code " +
-						(report->exit_code ? std::to_string(*report->exit_code) : std::string("unknown")) + ")");
+						(report->exit_code ? std::to_string(*report->exit_code) : std::string("unknown")) + ")",
+				StartCause::Stop);
 		return;
 	}
 	const auto rid = s.service_user_id ? listing_rid_of(db, *s.service_user_id) : std::nullopt;
@@ -984,20 +1006,21 @@ void Supervisor::on_stopping(db::Database &db, const Fleet &fleet, const HostedS
 		return;
 	}
 	if (!rid) {
-		finish(db, s, State::Stopped, "its listing has ended");
+		finish(db, s, State::Stopped, "its listing has ended", StartCause::Stop);
 	} else if (now_ms - rt.stop_pushed_ms >= config_.stop_timeout_ms) {
 		finish(db, s, State::Stopped,
-				"ended " + seconds_text(config_.stop_timeout_ms) + " after the stop, still listed");
+				"ended " + seconds_text(config_.stop_timeout_ms) + " after the stop, still listed", StartCause::Stop);
 	}
 }
 
 void Supervisor::attempt_failed(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms,
-		const std::string &reason) {
+		const std::string &reason, StartCause cause) {
 	forget_start(s.id);
+	end_start(db, s.id, s.generation, cause);
 	if (s.machine_ref) release_slot(db, s.id);
 	if (s.restarts >= config_.restart_limit) {
 		finish(db, s, State::Failed,
-				reason + "; no restart left (" + std::to_string(config_.restart_limit) + " used)");
+				reason + "; no restart left (" + std::to_string(config_.restart_limit) + " used)", cause);
 		return;
 	}
 	const std::string detail = reason + "; restart " + std::to_string(s.restarts + 1) + " of " +
@@ -1006,12 +1029,14 @@ void Supervisor::attempt_failed(db::Database &db, const HostedServer &s, Runtime
 		rt.not_before_ms = now_ms + config_.restart_backoff_ms;
 }
 
-void Supervisor::replace(db::Database &db, const HostedServer &s, uint64_t now_ms, const std::string &reason) {
+void Supervisor::replace(db::Database &db, const HostedServer &s, uint64_t now_ms, const std::string &reason,
+		StartCause cause) {
 	forget_start(s.id);
+	if (s.state != State::Stopping) end_start(db, s.id, s.generation, cause);
 	if (s.machine_ref) release_slot(db, s.id);
 	switch (s.state) {
 		case State::Stopping:
-			finish(db, s, State::Stopped, reason);
+			finish(db, s, State::Stopped, reason, StartCause::Stop);
 			return;
 		case State::Requested:
 		case State::Provisioning:
@@ -1027,8 +1052,10 @@ void Supervisor::replace(db::Database &db, const HostedServer &s, uint64_t now_m
 	}
 }
 
-void Supervisor::finish(db::Database &db, const HostedServer &s, State to, const std::string &detail) {
+void Supervisor::finish(db::Database &db, const HostedServer &s, State to, const std::string &detail,
+		StartCause cause) {
 	forget_start(s.id);
+	end_start(db, s.id, s.generation, cause);
 	// The end and the service account's delete commit together: no ended row
 	// keeps an account, so nothing still resolves its listing to the owner. The
 	// row keeps the machine and slot it last held (no longer wanted there: its
@@ -1077,10 +1104,15 @@ void Supervisor::note_refused_launches(db::Database &db, uint64_t now_ms) {
 			rt.since_ms = now_ms;
 			rt.last_check_ms = now_ms;
 		}
+		// The machine's end reason names the cloud's error code where it gave one
+		// (launch_failure_reason: "the launch failed (<code>)"); the event carries it.
+		const size_t code = refused.reason.find(" (");
+		const std::string why =
+				"the launch of its machine failed" +
+				(code == std::string::npos ? std::string() : refused.reason.substr(code));
 		if (!rt.launch_failure_noted &&
 				transition(db, s->id, State::Provisioning, State::Provisioning,
-						"the launch of its machine failed; it waits for the next (no restart "
-						"counted)")) {
+						why + "; it waits for the next (no restart counted)")) {
 			std::printf("[hosted] server %lld: the launch of its machine failed; it waits for the "
 						"next\n",
 					static_cast<long long>(s->id));

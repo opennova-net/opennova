@@ -813,7 +813,9 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 		return rows.size() == 1 && rows[0].container == "srv-6-g2" &&
 				rows[0].state == ContainerState::Starting;
 	}));
-	TEST_EXPECT(reported(rig.fake, "srv-6-g2", ContainerState::Starting, 1));
+	// The fake reads the report after the rows are written: waited for too.
+	TEST_EXPECT(
+			wait_for([&] { return reported(rig.fake, "srv-6-g2", ContainerState::Starting, 1); }));
 	TEST_EXPECT(!fs::exists(markers / "srv-6-g2.started") && !fs::exists(game / (std::to_string(kMissingTree) + ".partial")));
 	TEST_EXPECT(wait_for([&] {
 		return read_file(root / "hostd.log").find("is no directory") != std::string::npos;

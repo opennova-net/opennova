@@ -56,9 +56,16 @@ this directory's.
   container's user 10001 + k and the working directory `/srv/slots/slot-k`. A
   `fleet_machines` row moves by compare-and-set: `launching` → `booting` (the cloud runs
   it) → `ready` (its agent reports) → `draining` → `ending` → `ended`, or `failed`, and
-  `lost` once its agent has been silent 60 s. Two live servers never hold one slot (a
-  unique index). An ended or failed machine's row is deleted 14 days after its end by
-  `stats.prune`.
+  `lost` once its agent has been silent 60 s. Every move writes its event in the same
+  statement (`fleet_machine_events`, `backend/migrations/0016_fleet_observability.sql`:
+  from, to, the reason; a launch the cloud refused names its error code, `the launch
+  failed (VcpuLimitExceeded)`, from the AWS CLI's text), and so does each new log stream
+  of the machine's agent (`log stream <name>`, from and to its state). What the agent says
+  of the machine at every sync lands on its row (its image, its own log stream, its CPU,
+  memory, the trees' disk and its network, `stats_at`) and in `fleet_machine_trees` (each
+  tree it holds: fetching, ready or failed, its bytes, its tries, the last failure). Two
+  live servers never hold one slot (a unique index). An ended or failed machine's row is
+  deleted 14 days after its end by `stats.prune`, its events and trees with it.
 - **Placement** (`placement.h`, pure functions): a shared server goes to the fullest
   shared machine that takes servers with a free slot, its lowest free slot, so machines
   fill one at a time and an emptied one can end; with none, a shared machine is launched
@@ -71,7 +78,13 @@ this directory's.
   file), its place in the fleet, the serve image its start pinned (a deploy's new image
   reaches a server at its next start), the remote-admin login rendered for the service,
   the restarts used and why it failed; `hosted_server_events` keeps every transition with
-  its cause. A start request (`hosted::request_server`) checks the entitlement, the
+  its cause. Each run is a row of `hosted_server_starts` (its generation): made when its
+  slot is assigned (the machine and slot), its image, trees and log stream
+  (`<server id>/g<generation>`) written when it renders, `running_at` once its agent
+  reports it running, and ended with its cause (`crash`, `timeout`, `fleet`, `stop`,
+  `update`, `limits`, `no_data`, `link_lost`) and how its container ended (its exit code,
+  OOM flag and the server's exit line, or why it never started). The stats' restarts are
+  its crash and timeout ends. A start request (`hosted::request_server`) checks the entitlement, the
   account's live servers, its own-machine servers against the add-on, `ONNET_HOSTED_CAP`
   (a backstop beside the fleet's room) and the fleet's room in the transaction that writes
   it, under the hosted-start advisory lock. When a server is about to be placed its place
@@ -333,15 +346,23 @@ At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`sold_capacity.*`).
 first supervisor pass of each minute samples every live server into
 `hosted_server_samples`: its state, its listing's players and mission, its admin link's
 scene, its container's CPU (a share of the slot's CPUs) and memory as its agent last
-reported them, and the bytes its slot sent that minute (the difference of the agent's
-per-slot counter; a counter that started over counts from 0). Each sample rewrites its
-server's hour in `hosted_server_hourly` and adds the bytes to its machine's month in
-`fleet_machine_egress`. Unique players are counted from roster names held in memory for
-the hour, never stored, and missions from scene changes: both are approximations, and the
-replies say so. Samples are kept 48 h, hours 90 days (`stats.prune`); the routes read the
-samples for 1h and 24h and the hours for 7d and 30d. The admin's **Server usage** page
-(`/admin/usage`, `GET /api/admin/hosted/usage`) reads every live server's newest sample
-and its last hour. The agents report what each slot sends, not what it receives.
+reported them, the bytes its slot sent that minute (the difference of the agent's
+per-slot counter; a counter that started over counts from 0), its bytes in and out as
+counters since its first sample on the slot (the differences summed, so a move never
+jumps them; a reader takes the differences, a count below the last starting over), and
+its server's last minute of ticks (frame time p50, p99, longest, the late frames). Each
+sample rewrites its server's hour in `hosted_server_hourly` (with the peak memory, the
+bytes in and out, the worst p99 and the late ticks) and adds the bytes to its machine's
+month in `fleet_machine_egress`, which outlives the machine's row to its own 13 months.
+Every live machine gets its minute too (`fleet_machine_samples`: its agent's last report
+of its use, none older than 2 minutes, and how many servers it holds), rolled up by the
+hour by `stats.prune` (`fleet_machine_hourly`); both keep a plain machine id, so the
+history outlives the machine. Unique players are counted from roster names held in memory
+for the hour, never stored, and missions from scene changes: both are approximations, and
+the replies say so. Samples are kept 48 h, hours 400 days (`stats.prune`), the servers'
+and the machines'; the routes read the samples for 1h and 24h and the hours for 7d and
+30d. The admin's **Server usage** page (`/admin/usage`, `GET /api/admin/hosted/usage`)
+reads every live server's newest sample and its last hour.
 
 ## The admin link and the console
 

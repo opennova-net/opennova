@@ -77,7 +77,7 @@ public:
 		++launches;
 		if (fail_next_launch) {
 			fail_next_launch = false;
-			error = "the fake refused the launch";
+			error = launch_error;
 			return std::nullopt;
 		}
 		// Its subnet: a run again goes where its row recorded an earlier run's
@@ -219,6 +219,7 @@ public:
 	// The launch's age the last describe was handed (its row's), under mu.
 	int64_t last_launched_ago_ms = -2;
 	bool fail_next_launch = false;
+	std::string launch_error = "the fake refused the launch"; // the refusal's text
 	// The subnet a first run launches in (a test moves it, as the zones' counts
 	// move between a launch's runs), under mu.
 	std::string subnet = "subnet-a";

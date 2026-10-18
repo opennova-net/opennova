@@ -212,6 +212,9 @@ crow::response AgentRoutes::sync(const crow::request &req, uint64_t raw_id) {
 						  db, id, request.agent_version, request.containers, request.agent_image);
 		if (!after)
 			return refuse(peer, "sync", id, "a machine that no longer syncs");
+		// What it says of the machine itself (its image, its log stream, its use,
+		// its trees), the listing failed or not.
+		record_machine_report(db, id, request);
 		if (request.listing_failed && throttle_->admit(peer))
 			std::fprintf(stderr, "[fleet] WARN machine %lld: its agent cannot list its containers\n",
 					static_cast<long long>(id));

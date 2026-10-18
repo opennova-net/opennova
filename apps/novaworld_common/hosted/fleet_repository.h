@@ -3,7 +3,10 @@
 // The hosted servers' fleet in the database (backend/migrations/0003_fleet.sql):
 // the machines (fleet_machines) and their lifecycle, every move a
 // compare-and-set on the state so the supervisor and the agent routes never
-// both win; each machine's one-time bootstrap token and its agent's long-lived
+// both win, and each move's event (fleet_machine_events, 0016: written in the
+// same statement as the move, so no move goes unrecorded); what each machine's
+// agent says of the machine (its image, its log stream, its use, the trees it
+// holds); each machine's one-time bootstrap token and its agent's long-lived
 // secret, kept as their SHA-256 alone (agent_secret_digest) and compared in
 // constant time; the slots the live servers hold on the machines
 // (hosted_servers' machine_ref, slot, game_port and generation), which
@@ -95,12 +98,34 @@ struct FleetMachineRow {
 	// Since when the supervisor's mass-lost brake holds this lost machine from its
 	// end (supervisor.h, on its clock; 0: not held).
 	int64_t lost_held_since_ms = 0;
+	// What its agent says of the machine (0016_fleet_observability.sql): the
+	// machine's image and the agent's own log stream ("" for none), and its use
+	// as the last report read it (none before one; stats_at its time).
+	std::string image_id;
+	std::string agent_log_stream;
+	std::optional<MachineStats> stats;
+	std::string stats_at;
 };
 
 // The words CloudState is stored as (fleet_machines.cloud_state).
 const char *cloud_state_text(CloudState state);
 // The word's state; nullopt for "" (none known) or another word.
 std::optional<CloudState> parse_cloud_state(std::string_view text);
+
+// One of a machine's events (fleet_machine_events): a move from `from_state`
+// ("" for the row's making) to `to_state`, or, with the two the same, a note
+// ("log stream <name>").
+struct FleetMachineEvent {
+	int64_t id = 0;
+	int64_t machine_id = 0;
+	std::string from_state;
+	std::string to_state;
+	std::string detail;
+	std::string at; // UTC 'YYYY-MM-DD HH:MM:SS'
+};
+// Machine `machine_id`'s newest `limit` events, oldest first.
+std::vector<FleetMachineEvent> list_machine_events(
+		db::Database &db, int64_t machine_id, size_t limit);
 
 // --- the machines ---
 
@@ -123,7 +148,7 @@ struct CreatedMachine {
 };
 
 // A machine about to launch: its row (launching) with a one-time bootstrap
-// token that lapses `token_lifetime_s` from now.
+// token that lapses `token_lifetime_s` from now, and its first event.
 CreatedMachine create_machine(db::Database &db, const NewMachine &machine,
 		int64_t token_lifetime_s = kMachineTokenLifetimeS);
 // The cloud's answer to the launch: launching -> booting, with the machine's
@@ -145,7 +170,7 @@ bool set_machine_addresses(db::Database &db, int64_t id, const std::string &priv
 // clears end_reason; draining, ending, ended, failed and lost take `reason`
 // as end_reason (an empty one keeps the last). Ending, ended and failed spend
 // the bootstrap token and the agent's secret: an ending machine's agent is
-// refused from then on.
+// refused from then on. The move's event carries `reason`.
 bool transition_machine(db::Database &db, int64_t id, const std::vector<FleetMachineState> &from,
 		FleetMachineState to, const std::string &reason);
 bool transition_machine(db::Database &db, int64_t id, FleetMachineState from, FleetMachineState to,
@@ -183,9 +208,10 @@ int count_held_machines(db::Database &db);
 // fleet view lists the newest of them), as long as a finished job's.
 inline constexpr int64_t kEndedMachineKeepS = 14 * 24 * 60 * 60;
 // The ended and failed machines that ended more than `keep_s` ago deleted,
-// with their slot reports and egress months; a stopped or failed server that
-// last ran on one keeps no machine (its machine_ref nulled, as the schema
-// says), and one a live server still names stays. How many went.
+// with their slot reports, trees and events (their egress months, samples and
+// hours stay, pruned by their own ages: stats_repository.h); a stopped or
+// failed server that last ran on one keeps no machine (its machine_ref nulled,
+// as the schema says), and one a live server still names stays. How many went.
 size_t prune_ended_machines(db::Database &db, int64_t keep_s = kEndedMachineKeepS);
 
 // --- what the cloud answered (the fleet's jobs, fleet_jobs.h) ---
@@ -209,14 +235,16 @@ std::optional<int64_t> launched_ago_ms(db::Database &db, int64_t id);
 // none). False when the row is no longer that live machine.
 bool record_cloud_state(
 		db::Database &db, int64_t id, const std::string &cloud_id, const CloudMachine &cloud);
-// A launch the cloud refused: launching -> failed ("the launch failed"), the
+// A launch the cloud refused: launching -> failed with `reason` (fleet_jobs.h
+// launch_failure_reason: the cloud's error code where it named one), the
 // refusal left for the supervisor to count (launch_refused). False when the
 // row was no longer launching.
-bool fail_refused_launch(db::Database &db, int64_t id);
+bool fail_refused_launch(db::Database &db, int64_t id, const std::string &reason);
 struct RefusedLaunch {
 	int64_t machine_id = 0;
 	MachineKind kind = MachineKind::Shared;
 	int64_t launched_for = 0;
+	std::string reason; // the machine's end_reason
 };
 // The refused launches not counted yet, counted now (taken once).
 std::vector<RefusedLaunch> take_refused_launches(db::Database &db);
@@ -287,13 +315,16 @@ struct SlotReport {
 	int slot = 0;
 	std::string container;
 	ContainerState state = ContainerState::Starting;
+	ContainerWait waiting = ContainerWait::None;
 	std::optional<int64_t> exit_code;
 	bool oom = false;
 	std::optional<int64_t> started_at; // Unix seconds
-	std::string reason; // exited and never started: why (agent_protocol.h), else ""
+	std::string reason; // exited: why, when the agent knew (agent_protocol.h), else ""
 	double cpu_percent = 0.0;
 	uint64_t memory_bytes = 0;
 	uint64_t egress_bytes = 0; // the slot's, since the machine booted
+	uint64_t net_in_bytes = 0;
+	std::optional<TickHealth> tick;
 	std::string reported_at; // UTC 'YYYY-MM-DD HH:MM:SS'
 };
 
@@ -322,6 +353,23 @@ std::optional<FleetMachineRow> record_unlisted_sync(db::Database &db, int64_t id
 // another protocol, or nullopt as record_sync's.
 std::optional<FleetMachineRow> record_held_sync(
 		db::Database &db, int64_t id, const AgentEnvelope &envelope, int64_t &mismatch_s);
+// What a sync's report says of the machine itself, in one transaction: its
+// image and the agent's log stream (each kept when the report names none; a
+// new stream an event of its own, in the same statement), its use with
+// stats_at now when the report carries one, and its tree rows replaced by the
+// report's. False when the machine is no longer one that syncs.
+bool record_machine_report(db::Database &db, int64_t id, const SyncRequest &report);
+// What machine `machine_id`'s agent last said of a tree it holds.
+struct MachineTree {
+	int64_t tree_id = 0;
+	TreeReportState state = TreeReportState::Fetching;
+	uint64_t bytes = 0;
+	int tries = 0;
+	std::string error;
+	std::string reported_at;
+};
+// The machine's tree rows, by tree id.
+std::vector<MachineTree> machine_trees(db::Database &db, int64_t machine_id);
 // The machine's slot rows, by slot.
 std::vector<SlotReport> slot_reports(db::Database &db, int64_t machine_id);
 // The slot row of the slot server `server_id` holds, when its machine's agent
