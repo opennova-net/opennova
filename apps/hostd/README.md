@@ -319,34 +319,13 @@ Not as root, it warns and leaves the slots' files its own user's. A development 
 over a local object store (`file:///...`) names tree URLs the agent copies, so no AWS CLI
 is needed.
 
-The ctests (`tests/hostd`, Linux only; none runs docker, iptables or the AWS CLI):
-
-- `opennova_hostd_runtime` drives the docker runtime, the egress counters and the command
-  line on a stub command runner that checks every argv: the exact `docker run` (the base
-  and expansion trees' binds, with the journal, and with a log group: the slot's stream,
-  non-blocking), the
-  listings and their partial answers, each call's timeout, the image check, docker's texts
-  read, the chain's rules put in place only where missing and the counts summed; the
-  background pull runs stand-in programs for the CLI. And the process runtime over a
-  stand-in `opennova-serve` script: its argv, its working directory, the env file's
-  variables and none of the agent's own, running then exited with its code, SIGTERM and
-  SIGKILL, removal, and a start that cannot run (125).
-  background pull runs stand-in programs for the CLI.
-- `opennova_hostd_tree_store` drives the tree store on a fake fetcher and a hand-stepped
-  clock: a tree fetched, checked against its manifest and marked present (extras removed),
-  a size or a file off, a fetch that fails or does not start, the retry wait and
-  the three tries, one fetch at a time, the removal of unnamed trees, a restart's scan of
-  the root, the expansion mount point; then the real fetcher's `file://` copy on a real
-  directory and its `aws s3 sync` run by stand-in programs.
-- `opennova_hostd_agent` drives the bootstrap and the sync passes against an in-process fake
-  of the service's routes, a fake container runtime and a fake tree fetcher on a
-  hand-stepped clock: the saved
-  bootstrap, starts and their files, stops, kills, removals, the slot handover, failed
-  starts, the background pulls (done, failed, past their bound), the trees fetched while
-  their containers wait, a start with both binds, a fetch that fails the start with its
-  reason on the report, the trees let go of, the pass's time shares,
-  refusals, every failing sync, and a log that never holds the secret, the token or a
-  file's bytes.
+The ctests (`tests/hostd`, Linux only; none runs docker, iptables or the AWS CLI; each test
+says what it pins): `opennova_hostd_runtime` (the docker and process runtimes and the egress
+counters on a stub command runner that checks every argv), `opennova_hostd_tree_store` (the
+tree store on a fake fetcher and a hand-stepped clock, then the real fetcher's `file://` copy
+and its `aws s3 sync` run by stand-in programs) and `opennova_hostd_agent` (the bootstrap and
+the sync passes against an in-process fake of the service's routes, never logging the secret,
+the token or a file's bytes).
 
 The protocol itself is `hosted_agent_protocol` (`tests/novaworld`). The real binary runs
 end to end, with the process runtime, in `hosted_agent_route` (against the service's agent
