@@ -208,18 +208,18 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
     dashboard's settings, then `secrets sync`.
 11. **Staging's first release**, from the toolbox, never the workflow (section 5):
     `./deploy/run.sh $D app deploy --tag sha-<programs> --serve-tag sha-<serve>
-    --hostd-tag sha-<serve>`, then `fleet bake-image` (section 7); the first site admin
-    (section 4, "The first site admin"); the game data on the site's Game data page
-    (section 7, "Turning it on"); Stripe's "Send test webhook"; the smoke tests ("Smoke
-    tests").
+    --hostd-tag sha-<serve>` (both images come from one `serve-image.yml` run, so one
+    tag); the first site admin (section 4, "The first site admin"); the game data on the
+    site's Game data page (section 7, "Turning it on"); Stripe's "Send test webhook";
+    the smoke tests ("Smoke tests").
 12. **Prod**, with `P='--deployment prod'`: its gate's Elastic IP, made once in the prod
     account (`./deploy/run.sh $P aws ec2 allocate-address --domain vpc
     --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=opennova:deployment,Value=opennova-prod}]'`),
     its `AllocationId` into `aws-prod/gate_eip_allocation_id` (section 4, "The
     var-file"); `secrets sync`, `infra apply`, `db bootstrap`; Stripe's live mode (the
     site's legal pages written first, then the activation, `stripe setup`, `secrets
-    sync`); `app deploy --promote staging`, `fleet bake-image`, the first site admin, the
-    game data, the smoke tests. Later releases may run from the deploy workflow.
+    sync`); `app deploy --promote staging`, the first site admin, the game data, the
+    smoke tests. Later releases may run from the deploy workflow.
 
 ## Running it under your own names
 
@@ -585,8 +585,9 @@ id>`: the releases, the dumps and the game data's store, `data/`, with its lifec
 rules); the logs, metrics and alarms; the account's budgets; the deployment's
 Cloudflare records (its site's, proxied; the update service's and the gate's, unproxied), its origin
 certificate; its outbound mail's SES identities and records (with a sender); the update
-service's listeners; and (with `hosted_enabled`) the fleet's launch templates and image
-parameter, the machine role and web's and the data program's store policies (section 7). A new
+service's listeners; and (with `hosted_enabled`) the fleet cluster with its hostd daemon,
+the fleet's launch templates, the machine role and web's and the data program's store
+policies (section 7). A new
 database takes 10 to 15 minutes, a new cache about as long. A service runs no task until
 a release names its program (the release manifest's program list): a template's images
 are unpinned (`image_tag`, `latest`), so no task starts from one, and its count's floor
@@ -885,10 +886,12 @@ The images publish to GHCR from CI (`.github/workflows/novaworld-images.yml`), u
 `image_registry` (`ghcr.io/opennova-net`): one per program, `opennova-novaworld-gate`,
 `-lobby`, `-web`, `-fleet`, `-worker` and `-data` (one Dockerfile, a target each); the
 portal's nginx, `novaworld-web`; the backup task's, `opennova-novaworld-backup`
-(`deploy/backup`); and `opennova-serve` (the hosted servers, `serve-image.yml`; it also
-carries hostd, the machines' agent). Make each package public once: the tasks and the
-machines of both accounts pull anonymously (the task execution role holds no registry
-credentials).
+(`deploy/backup`); and, from `serve-image.yml` (one Dockerfile, `apps/serve/Dockerfile`,
+a target each), `opennova-serve` (the hosted servers) and `opennova-hostd` (hostd, the
+machines' agent: the server's runtime with hostd, the docker CLI, the AWS CLI and
+nftables). Make each package public once: the tasks and the machines of both accounts
+pull anonymously (the task execution role holds no registry credentials, and hostd's
+task has no execution role at all).
 
 ```bash
 ./deploy/run.sh --deployment staging app deploy --tag sha-abc1234 --serve-tag sha-def5678
@@ -901,8 +904,8 @@ credentials).
    and the backup task's (all built from one commit), `--image NAME=TAG` one of them
    (`gate`, `lobby`, `web`, `fleet`, `worker`, `data`, `portal`, `backup`, `serve`, `hostd`;
    `NAME=@sha256:<digest>` pins a digest as it is), `--serve-tag` and `--hostd-tag` the
-   machines'. An image given no tag keeps the current release's digest; the first release
-   takes `latest` for any tag not given. `--promote staging` (prod alone) takes, instead,
+   machines'. An image given no tag keeps the current release's digest (while it is of
+   that image's own package); the first release takes `latest` for any tag not given. `--promote staging` (prod alone) takes, instead,
    exactly the images staging's current release runs, by digest, read in staging's
    account with staging's own credentials (`app images` prints them; `--images-from
    FILE|-` takes the same JSON, the deploy workflow's way), and records which release it
@@ -911,21 +914,35 @@ credentials).
    template, `infra.env` names it) with the release's images, the serve image in the
    environment of the programs that read the fleet's policy (web, the fleet, the worker;
    `--no-hosting` turns their provider off) and the hostd image in the one that reads the
-   machine driver's own settings (the worker), every secret the template names (SSM must
-   hold each) and each optional one its label names that SSM holds. A program whose
+   machine driver's own settings (the worker, whose `docker` driver's machines run it),
+   every secret the template names (SSM must hold each) and each optional one its label
+   names that SSM holds; hostd's revision (its own template, the fleet cluster's daemon)
+   takes the hostd image as its container's. A program whose
    revision would run exactly what it runs now keeps it, so a release that changes only
    web's image restarts web alone and never a lobby session;
 3. on prod, prints the images and asks (type `prod`, or `--yes`);
-4. rolls the services in turn: worker, data, fleet, web, lobby, then gate, the players'
-   way in, last. It follows each service's new deployment until ECS calls it COMPLETED (its
-   new tasks healthy, the old stopped) or FAILED: ECS's deployment circuit breaker rolls a
-   deployment whose new tasks never turn healthy back to the old revision, after 10 failed
-   launches, so the wait is bounded at 40 minutes (`OPENNOVA_ROLL_TIMEOUT`, seconds). A
-   failed or unfinished one stops the deploy, leaving the rest on what they ran. A service
-   at no task before a release names its program (and one `app down` recorded no count
-   for: a program added since) starts at its `desired` count, and its floor is raised to
-   its `min` (the fleet, up before any lobby, starts no hosted server until a lobby runs:
-   `apps/novaworld_common/hosted/README.md` "No lobby live");
+4. rolls the services in turn: worker, data, hostd, fleet, web, lobby, then gate, the
+   players' way in, last. It follows each service's new deployment until ECS calls it
+   COMPLETED (its new tasks healthy, the old stopped) or FAILED: ECS's deployment circuit
+   breaker rolls a deployment whose new tasks never turn healthy back to the old
+   revision, after 10 failed launches, so the wait is bounded at 40 minutes
+   (`OPENNOVA_ROLL_TIMEOUT`, seconds). A failed or unfinished one stops the deploy,
+   leaving the rest on what they ran. A service at no task before a release names its
+   program (and one `app down` recorded no count for: a program added since) starts at
+   its `desired` count, and its floor is raised to its `min` (the fleet, up before any
+   lobby, starts no hosted server until a lobby runs:
+   `apps/novaworld_common/hosted/README.md` "No lobby live"). hostd rolls before the
+   fleet program it reports to: its deployment replaces at most half the machines' agents
+   at once (no game server restarts: the containers are docker's, not the agent's), and
+   once it completes the deploy waits up to 3 minutes for every ready machine's agent to
+   report the release's hostd image (the admin fleet view's `agent_image`). If one does
+   not, or hostd's deployment fails, the deploy points hostd back at the revision it ran
+   and stops, the fleet program still on its own, so agents and fleet never run two
+   releases' protocols apart for long
+   (an agent of another protocol is held, heard and acted on for nothing, 10 minutes
+   before its machine drains). With no machine running hostd, or no answer from the
+   service (a first release, the cutover), there is no machine to confirm and the deploy
+   goes on;
 5. once every program runs it, registers the backup task's revision (the nightly run
    takes the newest) and records the release: its manifest (the images by digest, each
    revision, the previous release, the release it was promoted from) goes to
@@ -942,7 +959,12 @@ sign in again through the gate, and the servers listed on it, hosted or retail p
 own, leave the browser for up to about 4.5 min (a host's session drops the silent lobby
 after 240 s and reconnects to the one lobby address), then list again with no restart and
 their matches going on. The jobs (the worker's, the data program's) and the fleet's
-rows wait out a restart in the database.
+rows wait out a restart in the database. hostd is the exception: one task per machine
+(a DAEMON service, never two agents on one machine), so ECS stops at most half the
+machines' agents, then starts their new ones (`minimumHealthyPercent` 50); a machine's
+servers run on meanwhile, and its agent's sync gap stays well under the 60 s after which
+the fleet program takes a silent machine for lost. hostd has no count: `app down` and
+`app up` leave it running, and its machines with it.
 
 ```bash
 D='--deployment staging'                              # or prod
@@ -954,9 +976,10 @@ D='--deployment staging'                              # or prod
 ./deploy/run.sh $D app status                         # every program's counts, rollout and revision
 ./deploy/run.sh $D app restart web                    # new tasks for a program (every program without one)
 ./deploy/run.sh $D app logs lobby --follow            # CloudWatch, a stream per container and task
+./deploy/run.sh $D app logs hostd                     # every machine's agent (the machines' log group)
 ./deploy/run.sh $D app shell fleet                    # a root shell in a running task (ECS Exec)
 ./deploy/run.sh $D app shell web portal               # web's second container, the portal's nginx
-./deploy/run.sh $D app down                           # every program to 0 tasks (the counts recorded)
+./deploy/run.sh $D app down                           # every program to 0 tasks (the counts recorded; hostd runs on)
 ./deploy/run.sh $D app up                             # the recorded counts back (a program added since: its desired)
 ```
 
@@ -1093,11 +1116,15 @@ in the worker's jobs, with the worker's task role), in either public subnet:
 Slot k of a machine is game UDP `32768+k` (to players) and admin TCP `32800+k` (to the
 fleet program alone); hostd, the agent on each machine, runs one container per slot and
 reports to the fleet program's internal listener (`fleet.<deployment>.opennova.internal:8070`,
-its Cloud Map name, admitted from the machines alone). A machine holds no volume of game
-data: its hostd fetches the trees its servers pin from the store (below), once each, onto
-its root volume (`machine_root_volume_gb`, 40 GiB), and keeps each while a server needs
-it. Machines are terminated, never stopped. No machine has an SSH key or database
-credentials; break-glass is Session Manager. At most 2 shared and 2 own machines run at
+its Cloud Map name, admitted from the machines alone). Each machine boots Amazon's
+ECS-optimized Amazon Linux 2023 image, pinned by name (`fleet_ami`), and joins the
+deployment's fleet cluster (`opennova-<deployment>-fleet`) as a container instance;
+hostd is that cluster's DAEMON service, one task per machine, which `app deploy` rolls
+(section 5). A machine holds no volume of game data: its hostd fetches the trees its
+servers pin from the store (below), once each, onto its root volume
+(`machine_root_volume_gb`, 40 GiB), and keeps each while a server needs it. Machines are
+terminated, never stopped. No machine has an SSH key or database credentials;
+break-glass is ECS Exec into its hostd (`fleet shell`). At most 2 shared and 2 own machines run at
 once (`fleet_max_shared`, `fleet_max_own`); `ONNET_HOSTED_CAP`, what that fleet holds at
 its most (`fleet_max_shared` x `shared_slots` + `fleet_max_own`: 14 at the defaults, 7 on
 staging), caps the servers.
@@ -1135,7 +1162,7 @@ so the prefix carries no deployment): `trees/<tree id>/<file>` with its `manifes
 and `updates/upload-<release id>.sfs` (before validation). `ONNET_OBJECT_STORE_URL`
 (`s3://opennova-<deployment>-ops-<account id>/data`) and `ONNET_OBJECT_STORE_REGION` name
 it to web, the fleet, the worker and the data program. The machines' hostd fetches a tree
-with `aws s3 sync` under the machine role, which reads `data/trees/` and nothing else of
+with `aws s3 sync` under its task role, which reads `data/trees/` and nothing else of
 the bucket, and checks the names and sizes against the manifest; web's and the data
 program's task roles read, write and delete under `data/` alone. The bucket aborts an upload abandoned for 7
 days, and keeps a deleted object's old version 7 days (a tree's) or 30 (a package's).
@@ -1146,11 +1173,13 @@ deployment's admins upload it on its own site, into its own bucket.
 ### Turning it on
 
 1. **The role boundary.** The task roles' store access needs `s3:DeleteObject` and
-   `s3:ListBucketMultipartUploads` in `infra/aws/iam/opennova-role-boundary.json`, which
-   the org stack applies in both accounts before the apply below (`./deploy/run.sh org
-   plan`, then `org apply`; `infra/aws/iam/README.md`, "Changing a policy"); applied
-   after, every store call of web and the data program is refused until it is. The deploy user's
-   policies gain nothing.
+   `s3:ListBucketMultipartUploads` in `infra/aws/iam/opennova-role-boundary.json`, and the
+   machine role the ECS agent's calls on the fleet cluster (its registration, its
+   polls, its state changes), which the org stack applies in both accounts before the
+   apply below (`./deploy/run.sh org plan`, then `org apply`; `infra/aws/iam/README.md`,
+   "Changing a policy"); applied after, every store call of web and the data program is
+   refused until it is, and no machine joins the fleet cluster. The deploy user passes
+   hostd's task role to ECS (`opennova-deploy-ecs.json`), applied the same way.
 
 2. **`hosted_enabled = true`** in the deployment's var-file (`infra/aws/<deployment>.tfvars`;
    prod's and staging's say so). Off, fleet.tf creates nothing and the programs run with
@@ -1158,29 +1187,33 @@ deployment's admins upload it on its own site, into its own bucket.
 
 3. **Check the vCPU quota.** The machines alone use the account's On-Demand Standard
    instances quota (L-1216C47A; the programs run on Fargate, whose quota is its own):
-   each `t3a.medium` 2, each `c7a.medium` 1, and 2 for the image builder while it bakes.
-   The defaults need 8 (2 x 2 + 2 x 1 + 2), in each deployment's account. Request 32 in
-   the Service Quotas console to leave room for a roll:
+   each `t3a.medium` 2, each `c7a.medium` 1. The defaults need 6 (2 x 2 + 2 x 1), in
+   each deployment's account. Request 32 in the Service Quotas console to leave room for
+   a roll:
 
    ```bash
    ./deploy/run.sh --deployment staging aws service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A
    ```
 
-4. **Plan, then apply.** The plan adds the two launch templates
-   (`aws_launch_template.fleet["shared"]`, `["own"]`), the fleet's image parameter, the
-   machines' security group and its rules, the machine role (with its read of the trees)
-   and the worker's fleet policy, web's and the data program's store policies and the game
-   data's lifecycle rules; it changes web's, the fleet's, the worker's and the data
-   program's task definitions (the fleet's policy and the store's URL and region; the
-   worker's alone the machine driver's own settings; `app converge` takes them).
-   The update service's listeners and record (below) are there whether or not hosting is on.
+4. **Plan, then apply.** The plan adds the fleet cluster (`aws_ecs_cluster.fleet`), the
+   hostd daemon (`aws_ecs_service.hostd`, its task definition and task role, which reads
+   the trees), the two launch templates (`aws_launch_template.fleet["shared"]`, `["own"]`,
+   from the AMI `fleet_ami` names), the machines' security group and its rules, the
+   machine role (its ECS agent's calls and the machines' logs) and the worker's fleet
+   policy, web's and the data program's store policies and the game data's lifecycle
+   rules; it changes web's, the fleet's, the worker's and the data program's task
+   definitions (the fleet's policy and the store's URL and region; the worker's alone the
+   machine driver's own settings; `app converge` takes them). The update service's
+   listeners and record (below) are there whether or not hosting is on. hostd runs
+   nowhere until a machine registers, and only the worker launches machines.
 
-5. **Deploy**, so the programs read them and pin the serve and hostd images:
-   `./deploy/run.sh --deployment staging app deploy --serve-tag sha-<serve> --hostd-tag sha-<serve>`
-   (on prod, the next `--promote staging`). Web, the fleet and the worker log
-   `[boot] hosted servers: ec2, serve image ...`; the worker also its driver's
-   `[boot] hosted servers: ec2 in <region>, subnets ...` (a worker whose driver settings
-   are incomplete does not boot: `app logs worker` names what is missing).
+5. **Deploy**, so the programs read them, pin the serve image and roll hostd onto the
+   fleet cluster: `./deploy/run.sh --deployment staging app deploy --serve-tag sha-<serve>
+   --hostd-tag sha-<serve>` (on prod, the next `--promote staging`). Web, the fleet and
+   the worker log `[boot] hosted servers: ec2, serve image ...`; the worker also its
+   driver's `[boot] hosted servers: ec2 in <region>, subnets ...` and `... the machines
+   join ECS cluster opennova-<deployment>-fleet` (a worker whose driver settings are
+   incomplete does not boot: `app logs worker` names what is missing).
 
 6. **Upload the data.** On Game data, make the data sets (JO in `jop_2_consumer`,
    Escalation `jox01` under it, DFX2, OpenNova); **Upload data** on each from its install's
@@ -1189,9 +1222,11 @@ deployment's admins upload it on its own site, into its own bucket.
    a crash). Each deployment's admins upload into that deployment alone: staging's data
    never reaches prod's bucket, nor the other way.
 
-7. **Bake the machines' image** (optional, recommended): `./deploy/run.sh --deployment
-   <deployment> fleet bake-image` (below), so a machine boots with docker and the images
-   already there.
+7. **The machines' AMI.** `fleet_ami` in the var-file names the exact image (Amazon's
+   ECS-optimized AL2023, x86_64, its full name), so a new one shows in the plan and in
+   git. `fleet status` says when Amazon has published a newer one; bump it in
+   `staging.tfvars` first (`infra apply`, then `fleet roll`, smoke test F), then in
+   `prod.tfvars` ("A machine image", below).
 
 8. **Subscribe, or grant.** An account hosts once it subscribes to a support tier, or an
    admin gives it a comp grant (`comp_servers`, the admin user page). Run smoke tests F
@@ -1216,20 +1251,28 @@ the first time the updater asks for it, into its task's storage.
 
 ```bash
 D='--deployment staging'                        # or prod
-./deploy/run.sh $D fleet status                # EC2's view, then the service's
+./deploy/run.sh $D fleet status                # EC2's view, the fleet cluster's (ECS), the AMI, then the service's
 ./deploy/run.sh $D fleet logs <machine> <slot> # a slot's server output (CloudWatch; below)
+./deploy/run.sh $D fleet shell <machine>       # a root shell in the machine's hostd (ECS Exec)
 ./deploy/run.sh $D fleet drain <machine>       # no new server there; its servers move
 ./deploy/run.sh $D fleet end <machine>         # end it (its servers move first)
-./deploy/run.sh $D fleet roll                  # move every server to new machines
-./deploy/run.sh $D fleet bake-image            # a new machine image (below)
+./deploy/run.sh $D fleet roll --dry-run        # which machines a roll replaces, and why
+./deploy/run.sh $D fleet roll                  # replace them: their servers move to new machines
 ```
 
-They call the service's admin API inside a web task over ECS Exec, from the task's
-loopback, with the admin token the web container holds. `fleet roll` after a new machine image or a new hostd: servers move
-without counting restarts. On prod `fleet end` and `fleet roll` ask first (type `prod`,
-or `--yes`). A deployment's worker launches and ends its own account's machines alone
+`fleet status`, `fleet drain`, `fleet end` and `fleet roll` call the service's admin API
+inside a web task over ECS Exec, from the task's loopback, with the admin token the web
+container holds. `fleet roll` is for a new AMI, launch template or user data alone: the
+service's plan replaces each machine taking servers whose image is older than the pinned
+AMI and keeps the rest (`--dry-run` prints it and stops), and the replaced machines'
+servers move without counting restarts; a new hostd reaches every machine with `app
+deploy`, no roll. On prod `fleet end` and `fleet roll` ask first (type `prod`, or
+`--yes`). A deployment's worker launches and ends its own account's machines alone
 (the fleet program decides, the worker's `machine.*` jobs call EC2, each launch refused
 past `fleet_max_shared` or `fleet_max_own`): the other account's are out of its reach.
+Never drain a container instance of the fleet cluster in ECS (the console's or `aws ecs
+update-container-instances-state`): that stops its hostd, and the service takes the
+machine for lost; `fleet drain` and `fleet end` are the ways a machine leaves.
 
 ### The kill switch
 
@@ -1243,20 +1286,19 @@ game data stays in the bucket).
 
 ### Operating notes
 
-- **A machine image.** The launch templates launch from the image the SSM parameter
-  `/opennova/<deployment>/fleet/image` names (`resolve:ssm:`), which Terraform seeds with
-  Canonical's Ubuntu 24.04 and then leaves alone. `./deploy/run.sh --deployment <deployment> fleet bake-image`
-  boots a one-off builder (a `t3a.small` with no instance role) from Canonical's newest
-  image with `deploy/host/fleet-image.sh`, which does a machine's install stage (docker,
-  held) and pulls the current release's serve and hostd images, then powers off; the
-  toolbox images it (tagged `opennova:fleet-image`), points the parameter at it, ends the
-  builder, and keeps this deployment's newest two images (the one before stays to point
-  back at: `./deploy/run.sh --deployment <deployment> aws ssm put-parameter --name
-  /opennova/<deployment>/fleet/image --type String --data-type aws:ec2:image --overwrite
-  --value <ami>`). No plan changes; new machines
-  boot from it, and `fleet roll` moves running servers onto new ones. Bake again after an
-  `app deploy --serve-tag` (the pulled images go stale) and now and then for OS updates.
-  A failed bake leaves the parameter alone and says how to read the builder's console.
+- **A machine image.** The launch templates launch from the AMI the var-file's
+  `fleet_ami` names (Amazon's ECS-optimized Amazon Linux 2023, x86_64, by its exact name,
+  owner `amazon`), and the worker may launch that image alone. It carries docker and the
+  ECS agent; a machine's user data writes its token, its id and the ECS agent's settings
+  (its cluster, its `machine-id` and `kind` attributes) and nothing else, and the ECS
+  agent starts the machine's hostd task once it registers. `fleet status` names
+  Amazon's newest image beside the pinned one. To move to it: the new name in
+  `staging.tfvars`, `infra apply` (the launch templates' new version; new machines boot
+  from it), `fleet roll --dry-run`, `fleet roll` (the machines on the older image are
+  replaced, their servers moving without a restart counted), smoke test F; then the same
+  in `prod.tfvars`. Going back is the old name and the same steps. The ECS agent never
+  cleans up images it did not pull (`ECS_ENABLE_UNTRACKED_IMAGE_CLEANUP` stays off, so the
+  servers' serve images are hostd's to prune), and runs no privileged container.
 - **New data, or a new data set.** On Game data: a new data set is a row, new data a
   tree uploaded on it (or a release published), and new servers start on it at once; a
   running server moves to it when its owner presses Update (or the admin's Update servers
@@ -1272,25 +1314,28 @@ game data stays in the bucket).
   pins, an hour after it stopped being any of those; a running server's data is never
   deleted under it. A deleted release's package goes with the release.
 - **A machine's logs.** Every machine writes CloudWatch `/opennova/<deployment>/machines`
-  (30 days), a stream per slot and one for its agent, named by the machine's id (the admin
-  fleet view's "Machine N, slot k"): `<id>/slot-<k>` holds the output of each server that
-  ran on slot k, in turn (`opennova-serve`'s standard output and error: why a server
-  exited), `<id>/hostd` the agent's journal (its starts and failures, docker's refusals).
-  The deploy user reads them, with no shell on the machine and no SSM:
+  (30 days): a stream per slot, named by the machine's id (the admin fleet view's
+  "Machine N, slot k"), `<id>/slot-<k>`, which holds the output of each server that ran
+  on slot k, in turn (`opennova-serve`'s standard output and error: why a server exited);
+  and one per hostd task, `hostd/hostd/<task id>` (ECS's awslogs driver: the agent's
+  lines, its starts and failures, docker's refusals). The deploy user reads them, with no
+  shell on the machine:
 
   ```bash
   ./deploy/run.sh $D fleet logs 12 3                # machine 12, slot 3: the last hour
   ./deploy/run.sh $D fleet logs 12 3 --since 1d     # further back (10m, 2h, 1d)
-  ./deploy/run.sh $D fleet logs 12 hostd --follow   # the agent, live
-  ./deploy/run.sh $D fleet logs 12                  # every stream of the machine, each line naming its stream
+  ./deploy/run.sh $D fleet logs 12 hostd --follow   # the agent of machine 12 (its hostd task), live
+  ./deploy/run.sh $D fleet logs 12                  # every slot stream of the machine, each line naming its stream
   ./deploy/run.sh $D fleet logs i-0123456789abcdef0 3   # by EC2's id, while EC2 lists the machine
+  ./deploy/run.sh $D app logs hostd --since 1d      # every machine's agent, an ended machine's among them
   ```
 
   The streams outlive the machine. A server the service restarts after a crash starts
   again as a new container, often on the same slot, so its slot's stream reads each
-  attempt in turn. A machine whose setup failed before its agent started writes nothing
-  there: its serial console says why (`./deploy/run.sh --deployment <deployment> aws ec2
-  get-console-output --instance-id <machine> --latest`) while EC2 still lists it.
+  attempt in turn. A machine whose hostd never started (its user data failed, or its ECS
+  agent never registered: `fleet status` shows no container instance for it) writes
+  nothing there: its serial console says why (`./deploy/run.sh --deployment <deployment>
+  aws ec2 get-console-output --instance-id <machine> --latest`) while EC2 still lists it.
 - **A refused AWS call.** The service logs each failure (`app logs worker`); for an
   `UnauthorizedOperation`, `./deploy/run.sh --deployment <deployment> aws sts decode-authorization-message
   --encoded-message <message>` names the condition that refused it.
@@ -1597,7 +1642,7 @@ GB-month, `cache.t4g.micro` Valkey $0.0128 an hour, 730 hours a month):
 | the database, `db.t4g.micro` in one zone, 20 GiB gp3, backups | $14 |
 | the cache, one `cache.t4g.micro` Valkey node | $9 |
 | CloudWatch logs, metrics, about 45 alarms; the health check; Cloud Map's zone | $12 |
-| S3 (releases, dumps, baked images), SSM, the nightly backup task, the schedule | about $1 |
+| S3 (releases, dumps), SSM, the nightly backup task, the schedule | about $1 |
 
 Each further web or worker task adds about $22, a further lobby about $13; Multi-AZ
 doubles the database's $14, and each further cache node adds $9. Staging has prod's shape
@@ -1643,8 +1688,9 @@ every command).
   its steps land on both (web's logs show it): it completes.
 - **F. A shared machine.** With a data set uploaded on Game data, start a server from My
   servers: its timeline runs requested, provisioning (a shared machine launching from the
-  baked image, `fleet status`, its hostd reaching the fleet program by its Cloud Map name and
-  fetching the server's trees from the store: a few minutes the first time), booting,
+  pinned AMI and joining the fleet cluster, its hostd task starting there, `fleet status`,
+  hostd reaching the fleet program by its Cloud Map name and fetching the server's trees
+  from the store: a few minutes the first time), booting,
   listing, running. It lands on slot k, lists in its game's lobby in the OpenNova and the
   retail server browsers, and is joinable by a retail and an OpenNova client; the site's
   console works (players, chat, a map change) and the server's stats move; `fleet logs

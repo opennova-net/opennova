@@ -6,8 +6,10 @@
 # vault at run time into a tmpfs (/run/secrets) that never touches disk, each
 # item once per run (the service account's requests are rate-limited). The
 # service's six programs (gate, lobby, web, fleet, worker, data) run as ECS
-# services on Fargate in the deployment's cluster; nothing is reached over SSH:
-# a shell is ECS Exec, the database's commands one-off tasks.
+# services on Fargate in the deployment's cluster, and the machines' agent,
+# hostd, as the DAEMON service of its fleet cluster (one task per machine);
+# nothing is reached over SSH: a shell is ECS Exec, the database's commands
+# one-off tasks.
 #
 # Usage: on-deploy [--deployment prod|staging] <command> [args...]
 #
@@ -126,9 +128,12 @@
 #                                 with the release's images and the secrets SSM
 #                                 holds), roll the services to it, each followed
 #                                 until its deployment completes: worker,
-#                                 data, fleet, web, lobby, then gate; then record
-#                                 the release (a program at no task before the
-#                                 first release naming it starts at its count)
+#                                 data, hostd (then every ready machine's agent
+#                                 confirmed on the release's image, else hostd
+#                                 pointed back and the deploy stopped), fleet,
+#                                 web, lobby, then gate; then record the release
+#                                 (a program at no task before the first release
+#                                 naming it starts at its count)
 #   app images                    the current release's images, as JSON (what
 #                                 --images-from takes)
 #   app releases                  the deployment's releases, newest last
@@ -141,16 +146,20 @@
 #                                 definitions and SSM's secrets as they are now
 #                                 (after infra apply or secrets sync)
 #   app status                    every program's service: its counts, its
-#                                 rollout, its revision
+#                                 rollout, its revision (hostd's from the fleet
+#                                 cluster, a task per machine)
 #   app restart [PROGRAM] [--yes] new tasks for a program (every program without
 #                                 one), the same revision
-#   app down [--yes]              every program's count to 0 (recorded)
+#   app down [--yes]              every program's count to 0 (recorded); hostd
+#                                 is left running on the machines
 #   app up                        the recorded counts back
 #   app logs [PROGRAM|backup] [--follow] [--since 1h]
 #                                 the tasks' logs (CloudWatch; a program's
-#                                 containers on every task)
+#                                 containers on every task; hostd's in the
+#                                 machines' log group)
 #   app shell PROGRAM [CONTAINER] a root shell in a running task (ECS Exec;
-#                                 web's portal nginx is CONTAINER portal)
+#                                 web's portal nginx is CONTAINER portal;
+#                                 hostd's is fleet shell MACHINE)
 #   db bootstrap [--yes]          make the service's role and its database
 #                                 (SQL_ASCII, C collation) with the master user,
 #                                 or set the role's password again; idempotent
@@ -177,27 +186,31 @@
 #   backup restore KEY --yes-overwrite-database [--yes]
 #                                 restore one of the deployment's own dumps over
 #                                 its database (every program is down meanwhile)
-#   fleet status                  the deployment's game machines (EC2) and the
+#   fleet status                  the deployment's game machines (EC2), the
+#                                 fleet cluster's view (each machine's container
+#                                 instance, its ECS agent and its hostd task;
+#                                 the AMI pinned against Amazon's newest) and the
 #                                 service's view of them (its admin API, in a
 #                                 web task)
 #   fleet logs MACHINE [SLOT|hostd] [--since 1h] [--follow]
 #                                 a machine's logs (CloudWatch, the machines'
-#                                 log group): slot SLOT's server output, hostd's
-#                                 journal, or every stream of the machine;
-#                                 MACHINE is the service's id or the EC2 i-...
+#                                 log group): slot SLOT's server output, its
+#                                 hostd task's, or every slot stream of the
+#                                 machine; MACHINE is the service's id or the
+#                                 EC2 i-...
+#   fleet shell MACHINE           a root shell in the machine's hostd container
+#                                 (ECS Exec)
 #   fleet drain MACHINE           start no server there; move its servers off
 #   fleet end MACHINE [--yes]     end a machine (its servers move first)
-#   fleet roll [--yes]            drain every machine onto new ones (a new
-#                                 image, a new hostd), one at a time
-#   fleet bake-image              bake the machines' image: a builder from
-#                                 Canonical's newest Ubuntu 24.04 installs
-#                                 docker and pulls the release's serve and hostd
-#                                 images (deploy/host/fleet-image.sh); the image
-#                                 of it becomes the one new machines launch
-#                                 from (SSM .../fleet/image); the newest two
-#                                 are kept. The game data is the site's Game
-#                                 data page (DEPLOY.md, "Hosted game servers"),
-#                                 not the toolbox's
+#   fleet roll [--dry-run] [--yes]
+#                                 the service's plan (each machine replaced when
+#                                 older than the pinned AMI, else kept), then
+#                                 the replaced ones drained onto new machines,
+#                                 one at a time; for an AMI, launch template or
+#                                 user-data change (a new hostd is app deploy's).
+#                                 The game data is the site's Game data page
+#                                 (DEPLOY.md, "Hosted game servers"), not the
+#                                 toolbox's
 #
 # OP_VAULT (default OpenNova-Deploy) names the vault.
 set -euo pipefail
