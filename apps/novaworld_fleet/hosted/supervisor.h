@@ -305,7 +305,7 @@ struct SupervisorConfig {
 	int health_misses = 3;
 	// At most restart_limit crash restarts within the restart window: a run of
 	// restart_reset_ms in `running` sets the count back to 0.
-	int restart_limit = 3;
+	int restart_limit = kRestartLimit;
 	uint64_t restart_reset_ms = 60 * 60 * 1000;
 	uint64_t restart_backoff_ms = 15 * 1000;
 	uint64_t stop_timeout_ms = 60 * 1000;

@@ -46,6 +46,9 @@ bool is_live(State state);
 // is_live as SQL on hosted_servers' state, for every query of the table
 // (here and fleet_repository.h's).
 inline constexpr const char *kLiveServerSql = "state NOT IN ('stopped', 'failed')";
+// The crash restarts a server has within its restart window (the supervisor's
+// restart_limit, and the owner's "restart n of 3").
+inline constexpr int kRestartLimit = 3;
 
 // A hosted server's row. It carries no admin credential: that is AdminLogin's,
 // read by admin_login_of alone, so nothing that serializes a HostedServer can

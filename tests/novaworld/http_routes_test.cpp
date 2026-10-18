@@ -5264,6 +5264,9 @@ int test_hosted_server_routes(Harness &h) {
 	reply = one(ana, ana_first);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["server"]["id"].i() == ana_first);
+	// Where its start stands (server_phase.h): queued, and no last run to say why it ended.
+	TEST_EXPECT(str(json["server"]["phase"]["name"]) == "queued" &&
+			json["server"]["stopped_because"].t() == crow::json::type::Null);
 	TEST_EXPECT(json["server"]["events"].size() == 1);
 	TEST_EXPECT(str(json["server"]["events"][0]["from"]).empty() &&
 			str(json["server"]["events"][0]["to"]) == "requested");
@@ -5487,6 +5490,46 @@ int test_hosted_server_routes(Harness &h) {
 		auto db = h.pool.acquire();
 		db->exec("DELETE FROM billing_subscriptions WHERE stripe_subscription_id LIKE 'sub_routes_fay_%';");
 	}
+	// An ended server's last run says why it ended: its cause, its code, the
+	// server's own last line; the admin's view carries the same.
+	{
+		auto db = h.pool.acquire();
+		db->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, ended_at, exit_code, "
+				 "reason, cause) VALUES ($1, 1, 99, 0, now(), 3, 'the session ended: the NovaWorld service "
+				 "stopped the hosting', 'crash');",
+				{ opennova::db::BindValue(ana_first) });
+	}
+	reply = one(ana, ana_first);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["server"]["phase"]["name"]) == "stopped");
+	TEST_EXPECT(str(json["server"]["stopped_because"]["cause"]) == "crash" &&
+			json["server"]["stopped_because"]["exit_code"].i() == 3 && !json["server"]["stopped_because"]["oom"].b() &&
+			str(json["server"]["stopped_because"]["line"]) ==
+					"the session ended: the NovaWorld service stopped the hosting");
+	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(ana_first), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["server"]["phase"]["name"]) == "stopped" &&
+			str(json["server"]["stopped_because"]["cause"]) == "crash");
+	// One whose data could not be fetched: its owner reads the cause alone, never
+	// the agent's line (the fetch's error); the admin's view carries the line.
+	{
+		auto db = h.pool.acquire();
+		db->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, ended_at, exit_code, "
+				 "reason, cause) VALUES ($1, 2, 99, 0, now(), 125, 'its data could not be fetched: aws s3 sync "
+				 "exited 1: AccessDenied', 'data_unavailable');",
+				{ opennova::db::BindValue(ana_first) });
+	}
+	reply = one(ana, ana_first);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json &&
+			str(json["server"]["stopped_because"]["cause"]) == "data_unavailable" &&
+			json["server"]["stopped_because"]["exit_code"].i() == 125 &&
+			str(json["server"]["stopped_because"]["line"]).empty());
+	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(ana_first), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json &&
+			str(json["server"]["stopped_because"]["line"]) ==
+					"its data could not be fetched: aws s3 sync exited 1: AccessDenied");
 
 	// Hosting off (the Secure listener runs with ONNET_HOSTED_PROVIDER none): 503.
 	std::string token;

@@ -172,9 +172,11 @@ crow::response FleetRoutes::fleet(const crow::request &req) {
 }
 
 // GET /api/admin/hosted/<id> — one server in any state with its machine:
-// {"server" (as the fleet view's, plus `events`, the newest kEventsShown
-// transitions oldest first), "machine" (machine_json of the machine it is on,
-// or last ran on; null for none)}; 404 not_found; no-store.
+// {"server" (as the fleet view's, plus `phase` and `stopped_because` as its
+// owner reads them with the agent's reason a start never ran besides,
+// hosted_routes.h put_phase, and `events`, the newest
+// kEventsShown transitions oldest first), "machine" (machine_json of the
+// machine it is on, or last ran on; null for none)}; 404 not_found; no-store.
 crow::response FleetRoutes::server(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
@@ -185,6 +187,7 @@ crow::response FleetRoutes::server(const crow::request &req, uint64_t id) {
 		const auto s = find_server(*db_conn, path_id(id));
 		if (!s) return json_error(404, "not_found", "no hosted server has this id");
 		crow::json::wvalue e = server_json(*db_conn, *s, true);
+		put_phase(e, *db_conn, *s, billing::unix_now() * 1000, true);
 		std::vector<crow::json::wvalue> events;
 		for (const HostedEvent &ev : list_events(*db_conn, s->id, kEventsShown)) {
 			crow::json::wvalue j;

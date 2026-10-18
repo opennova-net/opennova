@@ -85,6 +85,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/net_cidr.cpp
         hosted/owner_file.cpp
         hosted/placement.cpp
+        hosted/server_phase.cpp
         hosted/sold_capacity.cpp
         hosted/stats_jobs.cpp
         hosted/stats_repository.cpp
