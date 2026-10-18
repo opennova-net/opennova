@@ -178,6 +178,25 @@
 // it locks what it shares with the pass, and reads the database outside that
 // lock.
 //
+// The static addresses (hosted/address_repository.h, ADR 0066): an own
+// machine launched for a server that names an address carries it
+// (fleet_machines.address_id). Once the machine has a cloud id the pass
+// enqueues its address.associate (and asks a describe, at most every
+// describe_interval_ms, until its row shows the address), and holds the
+// server's container back (booting, its clock waiting; sync answers no
+// unstarted container) until the machine's public address is the address, so
+// the lobby lists it at <address>:32768 from its first packet: an own
+// machine's public address never changes while it runs a server. A
+// subscription's address whose subscription no longer grants lapses only once
+// a clean reconcile with Stripe has completed since the pass first saw it so
+// (limits_hold.h reconciles), and never more at once than max(2, half the
+// subscription addresses), the owners' limits' brake (the pass then logs an
+// ERROR and lapses none; an admin may release one). A lapsed address's server
+// lets go of it: its machine is ended (the association goes with it) and the
+// server placed again without it, no restart counted, its event saying why;
+// once no live machine carries the address it goes releasing with its
+// address.release (re-armed each pass while it releases).
+//
 // The admin link (admin_link.h): with set_admin_links, every pass ends by
 // syncing the links with the servers in running, at their machine's private
 // address and their slot's admin port.
@@ -196,6 +215,7 @@
 #include "stats_sampler.h"
 
 #include "billing/entitlement.h"
+#include "hosted/address_repository.h"
 #include "hosted/data_set_repository.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_repository.h"
@@ -469,6 +489,14 @@ private:
 	// Each live machine's step (the machines' lifecycle in the class comment),
 	// what it remembers of each kept in its row.
 	void step_machines(db::Database &db, uint64_t now_ms);
+	// An addressed machine's association asked for (and a describe) while its
+	// row does not show the address (the class comment).
+	void carry_address(db::Database &db, const FleetMachineRow &machine, uint64_t now_ms);
+	// The static addresses' lapses and releases (the class comment).
+	void step_addresses(db::Database &db, uint64_t now_ms);
+	// Whether `machine` carries a static address its row does not show as its
+	// public address yet: its server's container waits.
+	bool address_held(db::Database &db, const FleetMachineRow &machine) const;
 	void drain_step(db::Database &db, FleetMachineRow &machine,
 			const std::vector<HostedServer> &holders, uint64_t now_ms);
 	// The launches the cloud refused and not counted yet (their jobs' rows), at
@@ -505,6 +533,13 @@ private:
 	// it has one, which the servers placed after it in the pass see as held (so
 	// twenty servers needing twenty machines launch them all in one pass).
 	std::vector<std::pair<int64_t, int>> pass_reserved_;
+	// The pass's memory of the static addresses: when it last asked a machine's
+	// association (by machine), the clean reconciles counted when it first saw
+	// an address's subscription no longer granting (by address), and whether
+	// the lapses' brake holds (logged once).
+	std::map<int64_t, uint64_t> associate_asked_ms_;
+	std::map<int64_t, uint64_t> lapse_seen_;
+	bool address_brake_held_ = false;
 
 	// The starts sync() answers from, by server id (the pass writes, the
 	// internal listener's threads read). No database work is done under

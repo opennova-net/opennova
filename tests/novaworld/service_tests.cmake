@@ -162,8 +162,9 @@ set_tests_properties(jobs PROPERTIES TIMEOUT 300)
 # supervisor's sync, on a hand-stepped clock: placement onto one shared machine for two
 # servers, a launch and the wait for it, the own machine, the stops, the crash restarts
 # and their limit, the timeouts, the health checks, the owners' changes and limits, a lost
-# machine placing its servers again with no restart counted, the reconciliation and the
-# admin links following the running servers. Compiles the server's auth.cpp,
+# machine placing its servers again with no restart counted, the reconciliation, the
+# admin links following the running servers, and a static address's hold, lapse and
+# brake. Compiles the server's auth.cpp,
 # web_session.cpp and the hosted sources directly (the shared library's and the fleet
 # program's), as web_session_test does, so it runs on every build, not only under
 # BUILD_NOVAWORLD_HTTP.
@@ -172,6 +173,9 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/web_session.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/address_jobs.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/address_names.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/address_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/admin_link_status.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp

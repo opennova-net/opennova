@@ -465,7 +465,8 @@ cmd_smoke() {
         local id mission
         id="$(state_value STACK_DATA_SET_ID)"
         [[ -n "$id" ]] || die "the stack hosts, but no data set was seeded (scripts/dev_stack.sh up again)"
-        args+=(--hosting "$id")
+        # The static addresses' zone the worker writes (deploy/compose/docker-compose.hosting.yml).
+        args+=(--hosting "$id" --zone-file /var/lib/opennova/zone/play.localhost.zone)
         mission="$(state_value STACK_MISSION)"
         [[ -z "$mission" ]] || args+=(--mission "$mission")
     fi
