@@ -11,7 +11,9 @@ name: Local stack
 # (scripts/dev_stack.sh smoke: every program's liveness, an account through the
 # site's API, the gate's answer and a lobby session, the jobs admin API, and a
 # hosted server started through the site on a machine the worker launches,
-# running, listed in the lobby, taking console commands, stopped).
+# running, listed in the lobby, taking console commands, on the admin's pages
+# (its machine's agent and trees, its log, the usage samples of it, its machine
+# and every program), stopped; and the attention list holding no danger).
 
 on:
   push:
