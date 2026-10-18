@@ -908,6 +908,10 @@ public:
 	// True once the joiner has name-matched its organic-spawn record and received the
 	// applicable deployment release (self handle H known and gameplay uplink enabled).
 	bool is_joined_in_match() const;
+	// A joiner's mission-start input reset is due (engine
+	// inmatch::ClientRuntime::take_input_reset); reading clears it. False
+	// for any other role, whose mission start resets at its load.
+	bool take_input_reset();
 	// Monotonic initial-admission boundary: the host's S2C 0x0F has landed in the
 	// deploy wait, for any role (D-NET-678). Deploy-pick state is intentionally
 	// exposed separately.

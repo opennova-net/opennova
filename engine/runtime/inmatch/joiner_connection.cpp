@@ -1589,6 +1589,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 							0x0B, build_retail_mission_status()),
 			}));
 			post_auth_stage_ = PostAuthStage::AwaitDeployment;
+			out.game_start_acked = true;
 		} else if (m.tag == s2c::RTT_ECHO) {
 			RttSample sample;
 			std::size_t consumed = 0;

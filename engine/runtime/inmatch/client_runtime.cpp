@@ -1254,6 +1254,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// S2C 0x5A. That is distinct from the causal spawn release below.
 			if (pr.gameplay_release_applied || pr.reached_in_match || respawn_release_in_poll)
 				deployed_ = true;
+			if (pr.game_start_acked) input_reset_pending_ = true;
 			// The owner-ID match may precede loadout by dozens of world-stream packets. Retail only
 			// opens its authoritative spawn latch after H and the applicable deployment release meet.
 			if (pr.reached_in_match || respawn_release_in_poll) {

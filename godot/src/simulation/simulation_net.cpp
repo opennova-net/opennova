@@ -829,6 +829,10 @@ bool Simulation::is_joined_in_match() const {
 	return is_joiner() && runtime_ && runtime_->in_match();
 }
 
+bool Simulation::take_input_reset() {
+	return is_joiner() && runtime_ && runtime_->take_input_reset();
+}
+
 bool Simulation::is_join_initial_admission_complete() const {
 	return is_joiner() && runtime_ && runtime_->initial_admission_complete();
 }

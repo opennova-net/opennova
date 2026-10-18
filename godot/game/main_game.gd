@@ -163,6 +163,11 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		request_quit()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		# The window procedure clears the key state on gaining and on losing the
+		# focus, the key state alone (engine controls::KeyStateReset carries the
+		# witness).
+		ControlsBindings.model().reset_key_state()
 	elif what == NOTIFICATION_EXIT_TREE:
 		begin_runtime_shutdown()
 		finish_runtime_shutdown()
@@ -1239,6 +1244,12 @@ func _on_world_loaded() -> void:
 	if sim != null and bool(sim.is_joiner()) \
 			and not bool(sim.is_joined_in_match()):
 		return
+	# Every mission start, a restart's included, runs the whole input reset; a
+	# joiner's runs later, after its game-start wait (the frame loop's
+	# Simulation.take_input_reset; engine controls::KeyStateReset carries the
+	# witness).
+	if sim == null or not bool(sim.is_joiner()):
+		_reset_key_state()
 	# The SP start-mission splash holds the reveal until its dismissal edge;
 	# the gate + device legs live on the coordinator
 	# [orig: Game_ShowStartMissionSplash @ 0x520820 precedes the release @ 0x525d45].
@@ -1807,6 +1818,11 @@ func _process(delta: float) -> void:
 		return
 	if _state == State.PAUSED and not _world.is_net_session():
 		return
+	# A joiner's mission start owes its input reset once its game-start wait
+	# ends (engine inmatch::ClientRuntime::take_input_reset).
+	var reset_sim: Simulation = _world.get_sim()
+	if reset_sim != null and reset_sim.take_input_reset():
+		_reset_key_state()
 	var frame_input: MissionFrameInput
 	if _player_presenter != null:
 		var player_live := is_gameplay_input_active()
