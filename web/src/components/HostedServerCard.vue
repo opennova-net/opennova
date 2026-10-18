@@ -56,7 +56,7 @@
       </p>
       <p v-if="server.state === 'stopping'" class="text-xs text-ink-muted">{{ STOPPING_STILL_COUNTS }}</p>
       <p v-if="phaseLine" class="hosted-phase text-sm text-ink">
-        {{ phaseLine }}<span v-if="slow" class="font-semibold text-warn"> {{ SLOW_PHASE_TEXT }}</span>
+        {{ phaseLine }}<span v-if="slow" class="font-semibold text-warn">{{ ` ${SLOW_PHASE_TEXT}` }}</span>
       </p>
       <p v-if="!server.live && server.stopped_because" class="hosted-stopped-because text-sm text-ink-muted">
         {{ stoppedBecauseText(server.stopped_because) }}
@@ -64,7 +64,7 @@
     </div>
     <div class="flex shrink-0 flex-wrap gap-2 sm:flex-col sm:items-end">
       <RouterLink :to="detailPath" :class="secondaryButton">
-        Manage<span class="sr-only"> {{ server.settings.game_name }}</span>
+        Manage<span class="sr-only">{{ ` ${server.settings.game_name}` }}</span>
       </RouterLink>
       <RouterLink v-if="server.state === 'running'" :to="`${detailPath}/console`" :class="secondaryButton">
         Console<span class="sr-only"> of {{ server.settings.game_name }}</span>

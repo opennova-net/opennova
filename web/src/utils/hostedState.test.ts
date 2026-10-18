@@ -29,10 +29,11 @@ describe('the phase in its owner words', () => {
     // Starting a machine usually takes 5 minutes.
     expect(phaseSlow({ phase: { name: 'launching_machine' }, updated_at: '2026-10-18 11:51:00' }, now)).toBe(false);
     expect(phaseSlow({ phase: { name: 'launching_machine' }, updated_at: '2026-10-18 11:49:00' }, now)).toBe(true);
-    // The game data's grows with its size: 2 minutes and 20 MB a second.
+    // The game data's grows with its size: 2 minutes and 20 MB a second, so
+    // 6 GB usually takes 7 minutes and is slow past 14.
     const data = { name: 'downloading_data', bytes_done: 0, bytes_total: 6_000_000_000 };
-    expect(phaseSlow({ phase: data, updated_at: '2026-10-18 11:45:00' }, now)).toBe(false);
-    expect(phaseSlow({ phase: data, updated_at: '2026-10-18 11:40:00' }, now)).toBe(true);
+    expect(phaseSlow({ phase: data, updated_at: '2026-10-18 11:47:00' }, now)).toBe(false);
+    expect(phaseSlow({ phase: data, updated_at: '2026-10-18 11:45:00' }, now)).toBe(true);
     // A hold has no usual length; nor has a running server.
     expect(phaseSlow({ phase: { name: 'launches_held' }, updated_at: '2026-10-18 10:00:00' }, now)).toBe(false);
     expect(phaseSlow({ phase: { name: 'running' }, updated_at: '2026-10-18 10:00:00' }, now)).toBe(false);
