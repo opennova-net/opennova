@@ -325,10 +325,14 @@ int test_cloud(Harness &h) {
 	// The machines with EC2's view: the ended one's instance EC2 no longer lists.
 	const auto &machines = json["machines"];
 	TEST_EXPECT(machines.size() == 2);
-	TEST_EXPECT(
-			str(machines[0]["zone"]) == "us-east-1b" && str(machines[0]["ec2_state"]) == "running");
-	TEST_EXPECT(is_null(machines[1]["zone"]) && is_null(machines[1]["ec2_state"]));
+	TEST_EXPECT(str(machines[0]["zone"]) == "us-east-1b" &&
+			str(machines[0]["ec2_state"]) == "running" &&
+			str(machines[0]["image_id"]) == "ami-0123456789abcdef0");
+	TEST_EXPECT(is_null(machines[1]["zone"]) && is_null(machines[1]["ec2_state"]) &&
+			is_null(machines[1]["image_id"]));
 	TEST_EXPECT(is_null(cloud["machines_error"]));
+	// No fleet cluster named (hosting off): no fleet section.
+	TEST_EXPECT(is_null(cloud["fleet"]));
 
 	// One read, every call once; both machines' ids asked about.
 	TEST_EXPECT(h.stub->count("credentials") == 1 && h.stub->count("ecs DescribeServices") == 1);

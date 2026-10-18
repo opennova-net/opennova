@@ -255,6 +255,36 @@ crow::json::wvalue cloud_json(const CloudSnapshot *cloud, const char *no_reader)
 	}
 	text_or_null(out, "cache_error", c.cache_error);
 	text_or_null(out, "machines_error", c.machines_error);
+
+	// The fleet cluster: hostd's daemon and the machines as its container instances.
+	if (!c.fleet_cluster.empty()) {
+		crow::json::wvalue fleet;
+		fleet["cluster"] = c.fleet_cluster;
+		if (c.hostd)
+			fleet["hostd"] = service_json(c, *c.hostd);
+		else
+			fleet["hostd"] = nullptr;
+		std::vector<crow::json::wvalue> instances;
+		for (const ContainerInstance &ci : c.container_instances) {
+			crow::json::wvalue j;
+			j["id"] = ci.id;
+			text_or_null(j, "ec2_instance_id", ci.ec2_instance_id);
+			text_or_null(j, "machine_id", ci.machine_id);
+			text_or_null(j, "kind", ci.kind);
+			text_or_null(j, "image_id", ci.image_id);
+			j["status"] = ci.status;
+			j["agent_connected"] = ci.agent_connected;
+			j["running_tasks"] = ci.running_tasks;
+			j["pending_tasks"] = ci.pending_tasks;
+			text_or_null(j, "agent_version", ci.agent_version);
+			instances.push_back(std::move(j));
+		}
+		fleet["instances"] = std::move(instances);
+		text_or_null(fleet, "error", c.fleet_error);
+		out["fleet"] = std::move(fleet);
+	} else {
+		out["fleet"] = nullptr;
+	}
 	return out;
 }
 
@@ -381,9 +411,11 @@ crow::response InfraRoutes::overview(const crow::request &req) {
 		if (ec2 != nullptr) {
 			text_or_null(j, "zone", ec2->zone);
 			text_or_null(j, "ec2_state", ec2->state);
+			text_or_null(j, "image_id", ec2->image_id);
 		} else {
 			j["zone"] = nullptr;
 			j["ec2_state"] = nullptr;
+			j["image_id"] = nullptr;
 		}
 		rows.push_back(std::move(j));
 	}

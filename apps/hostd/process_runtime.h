@@ -59,6 +59,10 @@ public:
 	bool stop(const std::string &name, int timeout_ms, std::string &error) override;
 	bool kill(const std::string &name, int timeout_ms, std::string &error) override;
 	bool remove(const std::string &name, int timeout_ms, std::string &error) override;
+	// Every image is the machine's own: none is held to prune, none removed.
+	bool list_images(const std::string &repository, std::vector<std::string> &out, int timeout_ms,
+			std::string &error) override;
+	bool remove_image(const std::string &image, int timeout_ms, std::string &error) override;
 
 	// The argv run() starts for `spec`.
 	std::vector<std::string> run_argv(const ContainerSpec &spec) const;

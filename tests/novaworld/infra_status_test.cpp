@@ -445,7 +445,11 @@ int test_snapshot() {
 					"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:42");
 	TEST_EXPECT(snap->machines.size() == 1 && snap->machines_error.empty());
 	const infra::MachineInstance &m = snap->machines.at("i-0aaaaaaaaaaaaaaa1");
-	TEST_EXPECT(m.state == "running" && m.zone == "us-east-1b" && m.type == "t3a.large");
+	TEST_EXPECT(m.state == "running" && m.zone == "us-east-1b" && m.type == "t3a.large" &&
+			m.image_id == "ami-0123456789abcdef0");
+	// No fleet cluster named: none read.
+	TEST_EXPECT(snap->fleet_cluster.empty() && !snap->hostd && snap->container_instances.empty() &&
+			stub.count("ecs DescribeServices fleet") == 0);
 
 	// Within the window the same read answers, calling nothing.
 	stub.clear();
@@ -458,6 +462,48 @@ int test_snapshot() {
 	TEST_EXPECT(again != snap && stub.count("ecs DescribeServices") == 1);
 	// No machine to ask about: no EC2 call.
 	TEST_EXPECT(stub.count("ec2 DescribeInstances") == 0 && again->machines.empty());
+	return 0;
+}
+
+// With hosting on, the fleet cluster too: hostd's daemon service, then the machines
+// registered there with their attributes (machine-id, kind, the image), each once.
+int test_fleet_cluster() {
+	test_temp::TempDir scratch("infra_fleet_cluster");
+	AwsStub stub;
+	stub.replies = infra_stub::deployment_replies();
+	infra::InfraConfig config = deployment_config(scratch.root());
+	config.fleet_cluster = "opennova-prod-fleet";
+	TEST_EXPECT(infra::check_infra_config(config).empty());
+	infra::InfraStatus status(config, stub);
+	const auto snap = status.snapshot({});
+	TEST_EXPECT(snap->fleet_cluster == "opennova-prod-fleet" && snap->fleet_error.empty());
+	for (const char *key : { "ecs DescribeServices fleet", "ecs ListContainerInstances fleet",
+				 "ecs DescribeContainerInstances fleet" })
+		TEST_EXPECT(stub.count(key) == 1);
+	// The programs' call names its cluster's five alone.
+	TEST_EXPECT(stub.count("ecs DescribeServices") == 1);
+	for (const infra_stub::Call &c : stub.calls()) {
+		if (c.key == "ecs DescribeServices fleet")
+			TEST_EXPECT(contains(c.config, R"(\"services\":[\"hostd\"])"));
+		if (c.key == "ecs DescribeContainerInstances fleet")
+			TEST_EXPECT(contains(c.config, "aaaa1111") && contains(c.config, "bbbb2222"));
+	}
+	TEST_EXPECT(snap->hostd && snap->hostd->name == "hostd" && snap->hostd->desired == 2 &&
+			snap->hostd->running == 2 &&
+			snap->hostd->task_definition_arn ==
+					"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-hostd:5");
+	TEST_EXPECT(snap->container_instances.size() == 2);
+	const infra::ContainerInstance &a = snap->container_instances[0];
+	TEST_EXPECT(a.id == "aaaa1111" && a.ec2_instance_id == "i-0aaaaaaaaaaaaaaa1" &&
+			a.machine_id == "12" && a.kind == "shared" && a.image_id == "ami-0123456789abcdef0" &&
+			a.status == "ACTIVE" && a.agent_connected && a.running_tasks == 1 &&
+			a.agent_version == "1.98.0");
+	const infra::ContainerInstance &b = snap->container_instances[1];
+	TEST_EXPECT(b.machine_id == "13" && b.kind.empty() && b.image_id.empty() &&
+			b.status == "DRAINING" && !b.agent_connected && b.pending_tasks == 1);
+	// A name of no cluster is refused before any call.
+	config.fleet_cluster = "opennova prod";
+	TEST_EXPECT(contains(infra::check_infra_config(config), "ONNET_INFRA_FLEET_CLUSTER"));
 	return 0;
 }
 
@@ -600,6 +646,7 @@ int main() {
 		{ "signed_calls", test_signed_calls },
 		{ "unconfigured", test_unconfigured },
 		{ "snapshot", test_snapshot },
+		{ "fleet_cluster", test_fleet_cluster },
 		{ "failures", test_failures },
 		{ "shared_read", test_shared_read },
 	};

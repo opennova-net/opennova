@@ -168,6 +168,17 @@ bool ProcessRuntime::kill(const std::string &name, int, std::string &error) {
 	return true;
 }
 
+bool ProcessRuntime::list_images(
+		const std::string &, std::vector<std::string> &out, int, std::string &) {
+	out.clear();
+	return true;
+}
+
+bool ProcessRuntime::remove_image(const std::string &image, int, std::string &error) {
+	error = image + " is the machine's own image";
+	return false;
+}
+
 bool ProcessRuntime::remove(const std::string &name, int, std::string &error) {
 	const auto it = servers_.find(name);
 	if (it == servers_.end())

@@ -216,6 +216,29 @@ EcsService parse_service(const JsonValue &v) {
 	return s;
 }
 
+ContainerInstance parse_container_instance(const JsonValue &v) {
+	ContainerInstance ci;
+	ci.id = last_segment(text_of(v, "containerInstanceArn"));
+	ci.ec2_instance_id = text_of(v, "ec2InstanceId");
+	ci.status = text_of(v, "status");
+	const JsonValue *connected = v.get("agentConnected");
+	ci.agent_connected = connected != nullptr && connected->is_bool() && connected->boolean;
+	ci.running_tasks = count_of(v, "runningTasksCount");
+	ci.pending_tasks = count_of(v, "pendingTasksCount");
+	if (const JsonValue *version = member(v, "versionInfo", JsonValue::Type::Object))
+		ci.agent_version = text_of(*version, "agentVersion");
+	for (const JsonValue &a : array_of(v, "attributes")) {
+		const std::string name = text_of(a, "name");
+		if (name == "machine-id")
+			ci.machine_id = text_of(a, "value");
+		else if (name == "kind")
+			ci.kind = text_of(a, "value");
+		else if (name == "ecs.ami-id")
+			ci.image_id = text_of(a, "value");
+	}
+	return ci;
+}
+
 Target parse_target(const XmlNode &member) {
 	Target t;
 	if (const XmlNode *target = member.child("Target")) {
@@ -285,6 +308,7 @@ InfraConfig infra_config_from_env(const std::string &scratch_dir) {
 	c.aws.credentials_uri = env("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI");
 	c.aws.scratch_dir = scratch_dir;
 	c.cluster = env("ONNET_INFRA_CLUSTER");
+	c.fleet_cluster = env("ONNET_INFRA_FLEET_CLUSTER");
 	c.database = env("ONNET_INFRA_DATABASE");
 	c.cache = env("ONNET_INFRA_CACHE");
 	c.release_parameter = env("ONNET_INFRA_RELEASE_PARAMETER");
@@ -314,6 +338,8 @@ std::string check_infra_config(const InfraConfig &c) {
 			   "services, load balancer, RDS or ElastiCache)";
 	if (c.cluster.size() > 255 || !all_of(c.cluster, is_name_char))
 		return "ONNET_INFRA_CLUSTER is no cluster name";
+	if (c.fleet_cluster.size() > 255 || !all_of(c.fleet_cluster, is_name_char))
+		return "ONNET_INFRA_FLEET_CLUSTER is no cluster name";
 	if (const std::string why = AwsApi::check_config(c.aws); !why.empty())
 		return "AWS is not read here: " + why;
 	for (const auto &[key, arn] : c.target_groups)
@@ -369,6 +395,7 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 	CloudSnapshot s;
 	s.read_ms = wall_now_ms();
 	s.cluster = config_.cluster;
+	s.fleet_cluster = config_.fleet_cluster;
 	s.region = config_.aws.region;
 	if (!configured()) {
 		s.unavailable = unavailable_;
@@ -602,9 +629,47 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 							if (const XmlNode *placement = i.child("placement"))
 								m.zone = placement->child_text("availabilityZone");
 							m.type = i.child_text("instanceType");
+							m.image_id = i.child_text("imageId");
 							if (!m.id.empty())
 								s.machines[m.id] = std::move(m);
 						}
+		});
+	}
+
+	// The fleet cluster: hostd's daemon service, then the machines registered
+	// there (one page of 100; the fleet holds fewer).
+	if (!config_.fleet_cluster.empty()) {
+		run([&] {
+			const std::string fleet = json_text(config_.fleet_cluster);
+			JsonValue reply;
+			if (!json_reply("ecs",
+						api_.json_call(creds, "ecs", std::string(kEcsTarget) + "DescribeServices",
+								"{\"cluster\":" + fleet + ",\"services\":[\"hostd\"]}"),
+						reply, s.fleet_error))
+				return;
+			for (const JsonValue &v : array_of(reply, "services"))
+				s.hostd = parse_service(v);
+			if (!json_reply("ecs",
+						api_.json_call(creds, "ecs",
+								std::string(kEcsTarget) + "ListContainerInstances",
+								"{\"cluster\":" + fleet + ",\"maxResults\":100}"),
+						reply, s.fleet_error))
+				return;
+			std::vector<std::string> arns;
+			for (const JsonValue &a : array_of(reply, "containerInstanceArns"))
+				if (a.is_string())
+					arns.push_back(a.string);
+			if (arns.empty())
+				return;
+			if (!json_reply("ecs",
+						api_.json_call(creds, "ecs",
+								std::string(kEcsTarget) + "DescribeContainerInstances",
+								"{\"cluster\":" + fleet +
+										",\"containerInstances\":" + json_list(arns) + "}"),
+						reply, s.fleet_error))
+				return;
+			for (const JsonValue &ci : array_of(reply, "containerInstances"))
+				s.container_instances.push_back(parse_container_instance(ci));
 		});
 	}
 

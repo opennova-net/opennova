@@ -106,6 +106,11 @@ public:
 	bool stop(const std::string &name, int timeout_ms, std::string &error) override;
 	bool kill(const std::string &name, int timeout_ms, std::string &error) override;
 	bool remove(const std::string &name, int timeout_ms, std::string &error) override;
+	// `docker image ls --no-trunc --format {{.Repository}}@{{.Digest}}
+	// <repository>`, an image with no digest left out; `docker image rm`.
+	bool list_images(const std::string &repository, std::vector<std::string> &out, int timeout_ms,
+			std::string &error) override;
+	bool remove_image(const std::string &image, int timeout_ms, std::string &error) override;
 
 	// The argv run() runs for `spec`.
 	std::vector<std::string> run_argv(const ContainerSpec &spec) const;
@@ -133,10 +138,10 @@ private:
 };
 
 // `docker inspect`'s JSON array as the agent's containers: the name without its
-// leading '/', the state (created and restarting: starting; running and paused:
-// running; exited, dead and removing: exited), the exit code and OOM flag once
-// exited, the start time, the slot label. An entry without the agent's label is
-// left out. False with `error` when `json` is no such array.
+// leading '/', the image it was run from (Config.Image), the state (created and restarting:
+// starting; running and paused: running; exited, dead and removing: exited), the exit code and OOM
+// flag once exited, the start time, the slot label. An entry without the agent's label is left out.
+// False with `error` when `json` is no such array.
 bool parse_docker_inspect(
 		std::string_view json, std::vector<ContainerInfo> &out, std::string &error);
 // `docker stats --format '{{json .}}'` lines, by container name: CPUPerc

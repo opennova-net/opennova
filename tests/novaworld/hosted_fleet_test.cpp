@@ -2,7 +2,7 @@
 // hosted/supervisor.h) on a migrated database, a FakeDriver whose machines'
 // agents the test plays (hosted_fake_driver.h, hosted_fleet_rig.h) and a
 // hand-stepped clock: the desired state each machine's sync gets (the files
-// until the agent has reported a container, nothing for another machine, a
+// until the agent reports a container running or exited, nothing for another machine, a
 // stopping server's container that never started left unstarted, the drain
 // flag, also while a draining machine is lost, a running container answered
 // for without files by a supervisor that
@@ -11,14 +11,18 @@
 // again with no restart counted), a lost machine terminated once its
 // agent stays silent, an agent that reports again, a shared machine idle past
 // its time, a drain moving its servers one at a time with no restart counted, a
-// fleet roll draining every machine that takes servers,
-// an admin's end, and the reconciliation of the driver's machines with the rows
+// fleet roll draining the machines it names (its plan: each machine kept on the
+// pinned image, the rest replaced),
+// an admin's end, a held agent's end (every server on it placed again at once,
+// never drained), and the reconciliation of the driver's machines with the rows
 // (a launch cut short, a cloud machine no row names, a row whose cloud machine
 // is gone, a start whose files went with the service, a listing that fails),
 // and the periodic sweep (a launch in flight spared). Compiles the hosted sources
 // directly.
 
 #include "hosted_fleet_rig.h"
+
+#include "hosted/fleet_roll.h"
 
 #include "common/test_expect.h"
 
@@ -239,6 +243,61 @@ int test_lost_while_draining() {
 	return 0;
 }
 
+// The mass-lost brake: more than max(2, half) of the live machines lost at once
+// is the fleet's fault, so none ends at lost_end_ms; each stays held (the
+// heartbeat's machines_held) until it reports again or an admin ends it, the
+// brake let go of or not.
+int test_mass_lost_brake() {
+	Rig rig("fleet_mass_lost");
+	rig.config.placement.shared_slots = 1; // a machine per server
+	rig.config.placement.max_shared = 4;
+	rig.make_supervisor();
+	std::vector<int64_t> servers;
+	std::vector<int64_t> machines;
+	for (const char *owner : { "brake_a", "brake_b", "brake_c" }) {
+		const int64_t id = rig.request(owner);
+		TEST_EXPECT(!rig.to_running(id, 3300 + static_cast<int>(servers.size())).empty());
+		servers.push_back(id);
+		machines.push_back(rig.machine_of(id));
+	}
+	TEST_EXPECT(machines[0] != machines[1] && machines[1] != machines[2]);
+	for (const int64_t m : machines)
+		rig.silence(m);
+	rig.step();
+	TEST_EXPECT(hosted::count_machines(rig.db, FleetMachineState::Lost) == 3);
+	rig.advance(rig.config.lost_end_ms);
+	rig.step();
+	// Three of three lost: none ends, each held.
+	for (const int64_t m : machines) {
+		TEST_EXPECT(rig.machine(m)->state == FleetMachineState::Lost &&
+				rig.machine(m)->lost_held_since_ms > 0);
+		TEST_EXPECT(!rig.fake.was_terminated(rig.machine(m)->cloud_id));
+	}
+	TEST_EXPECT(hosted::count_held_machines(rig.db) == 3);
+	for (const int64_t id : servers)
+		TEST_EXPECT(rig.state(id) == State::Running && rig.server(id)->restarts == 0);
+	// One reports again: ready, let go of. The other two stay held, though two of
+	// three lost would no longer engage the brake.
+	rig.muted.erase(machines[0]);
+	rig.sync_all();
+	rig.step();
+	TEST_EXPECT(rig.machine(machines[0])->state == FleetMachineState::Ready &&
+			rig.machine(machines[0])->lost_held_since_ms == 0);
+	rig.advance(rig.config.lost_end_ms);
+	rig.step();
+	TEST_EXPECT(rig.machine(machines[1])->state == FleetMachineState::Lost &&
+			rig.machine(machines[2])->state == FleetMachineState::Lost);
+	TEST_EXPECT(hosted::count_held_machines(rig.db) == 2);
+	// An admin ends one: it ends, its server placed again with no restart counted.
+	TEST_EXPECT(hosted::transition_machine(rig.db, machines[1], FleetMachineState::Lost,
+			FleetMachineState::Ending, "ended by an admin"));
+	rig.step();
+	TEST_EXPECT(rig.machine(machines[1])->state == FleetMachineState::Ended &&
+			rig.machine_of(servers[1]) != machines[1] && rig.server(servers[1])->restarts == 0);
+	TEST_EXPECT(hosted::count_held_machines(rig.db) == 1);
+	return 0;
+}
+
 // A shared machine with no server on it ends idle_ms after its last server
 // left; one with a server stays.
 int test_idle_scale_in() {
@@ -345,8 +404,9 @@ int test_roll() {
 	const int64_t old_b = rig.machine_of(b);
 	TEST_EXPECT(old_a != old_b && rig.fake.launches == 2);
 	Database *db = &rig.db;
-	TEST_EXPECT(hosted::drain_machines(*db, "rolled by an admin") == (std::vector<int64_t>{ old_a, old_b }));
-	TEST_EXPECT(hosted::drain_machines(*db, "rolled by an admin").empty());
+	TEST_EXPECT(hosted::drain_machines(*db, { old_b, old_a, 999999 }, "rolled by an admin") ==
+			(std::vector<int64_t>{ old_a, old_b }));
+	TEST_EXPECT(hosted::drain_machines(*db, { old_a, old_b }, "rolled by an admin").empty());
 	rig.step();
 	TEST_EXPECT(rig.fake.launches == 4);
 	TEST_EXPECT(rig.machine_of(a) != old_a && rig.machine_of(b) != old_b);
@@ -360,6 +420,41 @@ int test_roll() {
 		TEST_EXPECT(m->state == FleetMachineState::Ended && m->end_reason == "rolled by an admin; drained");
 	}
 	TEST_EXPECT(rig.server(a)->restarts == 0 && rig.server(b)->restarts == 0);
+	return 0;
+}
+
+// A roll's plan: the live machines that take servers, each kept on the pinned
+// image and replaced otherwise (another image, or one not known here; every one
+// with no image pinned), with its servers; the others left out.
+int test_roll_plan() {
+	using hosted::FleetMachineRow;
+	const auto row = [](int64_t id, FleetMachineState state) {
+		FleetMachineRow m;
+		m.id = id;
+		m.state = state;
+		return m;
+	};
+	const std::vector<FleetMachineRow> machines = { row(1, FleetMachineState::Ready),
+		row(2, FleetMachineState::Ready), row(3, FleetMachineState::Booting),
+		row(4, FleetMachineState::Draining), row(5, FleetMachineState::Lost),
+		row(6, FleetMachineState::Launching) };
+	const std::map<int64_t, std::string> images = { { 1, "ami-new" }, { 2, "ami-old" },
+		{ 3, "ami-new" }, { 4, "ami-old" } };
+	const std::map<int64_t, int> servers = { { 1, 3 }, { 2, 1 } };
+	const auto plan = hosted::plan_fleet_roll(machines, images, servers, "ami-new");
+	TEST_EXPECT(plan.size() == 4);
+	TEST_EXPECT(plan[0].machine_id == 1 && !plan[0].replace && plan[0].servers == 3 &&
+			plan[0].why == "it runs the pinned image");
+	TEST_EXPECT(plan[1].machine_id == 2 && plan[1].replace && plan[1].servers == 1 &&
+			plan[1].why == "it runs ami-old, not the pinned ami-new");
+	TEST_EXPECT(plan[2].machine_id == 3 && !plan[2].replace);
+	TEST_EXPECT(plan[3].machine_id == 6 && plan[3].replace && plan[3].image_id.empty() &&
+			plan[3].why == "its image is not known here");
+	for (const hosted::RollStep &step : hosted::plan_fleet_roll(machines, images, servers, ""))
+		TEST_EXPECT(step.replace);
+	TEST_EXPECT(hosted::machine_rollable(FleetMachineState::Booting) &&
+			!hosted::machine_rollable(FleetMachineState::Draining) &&
+			!hosted::machine_rollable(FleetMachineState::Lost));
 	return 0;
 }
 
@@ -379,6 +474,35 @@ int test_admin_end() {
 	TEST_EXPECT(rig.fake.was_terminated(cloud));
 	TEST_EXPECT(rig.server(id)->restarts == 0 && rig.machine_of(id) != machine);
 	TEST_EXPECT(has_event(rig.db, id, "ended by an admin; placed again (no restart counted)"));
+	return 0;
+}
+
+// A machine whose agent has spoken another protocol for 10 minutes, moved to
+// ending by its sync (agent_route.h; hosted_agent_route pins the move): the next
+// pass ends it as an admin's end, terminated and every server on it placed again
+// at once, no restart counted. Never a drain's one at a time: its held agent
+// stops none of them, so each would run on it beside its move.
+int test_held_agent_end() {
+	Rig rig("fleet_held_end");
+	const int64_t a = rig.request("held_a");
+	const int64_t b = rig.request("held_b");
+	TEST_EXPECT(!rig.to_running(a, 3511).empty() && !rig.to_running(b, 3512).empty());
+	const int64_t machine = rig.machine_of(a);
+	TEST_EXPECT(rig.machine_of(b) == machine);
+	const std::string cloud = rig.machine(machine)->cloud_id;
+	const std::string why = "its agent speaks protocol " +
+			std::to_string(hosted::kAgentProtocol + 1) + ", not " +
+			std::to_string(hosted::kAgentProtocol) + " for 10 min";
+	TEST_EXPECT(hosted::transition_machine(
+			rig.db, machine, FleetMachineState::Ready, FleetMachineState::Ending, why));
+	rig.step();
+	const auto ended = rig.machine(machine);
+	TEST_EXPECT(ended->state == FleetMachineState::Ended && ended->end_reason == why);
+	TEST_EXPECT(rig.fake.was_terminated(cloud));
+	TEST_EXPECT(rig.machine_of(a) != machine && rig.machine_of(b) != machine);
+	TEST_EXPECT(rig.server(a)->restarts == 0 && rig.server(b)->restarts == 0);
+	TEST_EXPECT(has_event(rig.db, a, why + "; placed again (no restart counted)") &&
+			has_event(rig.db, b, why + "; placed again (no restart counted)"));
 	return 0;
 }
 
@@ -447,6 +571,41 @@ int test_reconcile_machines() {
 	return 0;
 }
 
+// A server whose container its agent reports starting (it waits for its image or
+// its trees, the files in the agent's memory alone) when the service starts again:
+// placed again with fresh files and a new generation, no restart counted, since a
+// replaced agent could not start it. One reported running resumes.
+int test_reconcile_waiting() {
+	Rig rig("fleet_reconcile_waiting");
+	rig.start_running = false;
+	const int64_t waits = rig.request("rec_waits");
+	TEST_EXPECT(rig.walk(waits, State::Booting));
+	rig.step();
+	const int64_t machine = rig.machine_of(waits);
+	const FakeAgent::Container *c = rig.agents.at(machine).find(rig.container(waits));
+	TEST_EXPECT(c && c->report.state == hosted::ContainerState::Starting);
+	// Reported starting, its files are still sent.
+	TEST_EXPECT(rig.agents.at(machine).last.desired.size() == 1 &&
+			rig.agents.at(machine).last.desired[0].files);
+	const int64_t generation = rig.server(waits)->generation;
+	rig.make_supervisor();
+	rig.advance(1000);
+	rig.reconcile();
+	TEST_EXPECT(rig.state(waits) == State::Provisioning && rig.server(waits)->restarts == 0);
+	TEST_EXPECT(has_event(rig.db, waits, "its start was cut short by the service's restart"));
+	rig.start_running = true;
+	rig.agents.clear();
+	TEST_EXPECT(rig.walk(waits, State::Listing));
+	TEST_EXPECT(rig.server(waits)->generation == generation + 1);
+	// Running at the next start of the service: it resumes where it was.
+	rig.make_supervisor();
+	rig.advance(1000);
+	rig.reconcile();
+	TEST_EXPECT(
+			rig.state(waits) == State::Listing && rig.server(waits)->generation == generation + 1);
+	return 0;
+}
+
 // The periodic sweep: a cloud machine no live row names is ended between the
 // boots too, every kFleetSweepIntervalMs; the rows' own machines are kept.
 int test_orphan_sweep() {
@@ -506,8 +665,12 @@ int main(int argc, char **argv) {
 		{ "drain_one_at_a_time", test_drain_one_at_a_time },
 		{ "drain_while_booting", test_drain_while_booting },
 		{ "roll", test_roll },
+		{ "roll_plan", test_roll_plan },
+		{ "mass_lost_brake", test_mass_lost_brake },
 		{ "admin_end", test_admin_end },
+		{ "held_agent_end", test_held_agent_end },
 		{ "reconcile_machines", test_reconcile_machines },
+		{ "reconcile_waiting", test_reconcile_waiting },
 		{ "orphan_sweep", test_orphan_sweep },
 		{ "sweep_spares_launch_in_flight", test_sweep_spares_launch_in_flight },
 	};

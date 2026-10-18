@@ -2,22 +2,29 @@
 // fleet it runs the opennova-serve containers the NovaWorld service places on
 // the machine's slots and reports them, over the agent protocol
 // (apps/novaworld_common/hosted/agent_protocol.h; agent.h). This file owns the
-// command line, the log, the stop signals and the pass loop. Linux only: it
-// runs as root under systemd, shipped inside the opennova-serve image and
-// copied out at the machine's bootstrap (README.md); in the local stack it is
-// the machine container's own process, its servers its children (--runtime
-// process).
+// command line, the machine's identity checks, the lock on the state
+// directory, the fences and their self-test, the log, the stop signals and the
+// pass loop (which keeps the alive file fresh for the ECS health check).
+// Linux only: on a cloud machine it is the fleet cluster's ECS daemon, its own
+// image (opennova-hostd, apps/serve/Dockerfile), root on the machine's network
+// (README.md); in the local stack it is the machine container's own process,
+// its servers its children (--runtime process).
 
 #include "agent.h"
 #include "docker_runtime.h"
-#include "egress_counters.h"
+#include "fence_probe.h"
 #include "hostd_options.h"
+#include "machine_identity.h"
+#include "nft_table.h"
 #include "process_runtime.h"
 #include "slot_files.h"
 #include "tree_store.h"
 
 #include "command_runner.h"
+#include "ecs_metadata.h"
 #include "net_sockets.h"
+
+#include <base/io/file_io.h>
 
 #include <base/io/log.h>
 #include <base/proc/child_process.h>
@@ -33,6 +40,8 @@
 #include <thread>
 #include <vector>
 
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -63,11 +72,57 @@ bool make_private_dir(const std::string &path) {
 	return ::chmod(path.c_str(), 0700) == 0;
 }
 
-// Waits `ms`, or less when a stop signal comes.
+// The alive file the pass loop keeps fresh (--check-alive).
+std::string g_alive;
+// The alive file is fresh this long; the loop touches it at every pass and
+// every kAliveTouchMs of a wait.
+constexpr int64_t kAliveMaxAgeS = 120;
+constexpr int kAliveTouchMs = 10 * 1000;
+
+// Waits `ms`, or less when a stop signal comes, the alive file kept fresh.
 void wait_ms(int ms) {
-	const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
-	while (!g_stop.load() && std::chrono::steady_clock::now() < until)
+	const auto start = std::chrono::steady_clock::now();
+	const auto until = start + std::chrono::milliseconds(ms);
+	auto touched = start;
+	while (!g_stop.load() && std::chrono::steady_clock::now() < until) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		if (!g_alive.empty() &&
+				std::chrono::steady_clock::now() - touched >=
+						std::chrono::milliseconds(kAliveTouchMs)) {
+			touched = std::chrono::steady_clock::now();
+			opennova::hostd::touch_alive(g_alive);
+		}
+	}
+}
+
+// The state directory's lock, held for the agent's life (its fd left open):
+// never two agents on one machine, as a daemon's replacement may start before
+// the task it replaces has ended. Waits for it until a stop signal; false then,
+// or when the lock file cannot be made.
+bool lock_state_dir(const std::string &state_dir) {
+	const std::string path = state_dir + "/lock";
+	const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0) {
+		io::logf(io::LogLevel::kError, "cannot open %s", path.c_str());
+		return false;
+	}
+	bool waited = false;
+	while (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
+		if (errno != EWOULDBLOCK && errno != EINTR) {
+			io::logf(io::LogLevel::kError, "cannot lock %s", path.c_str());
+			return false;
+		}
+		if (!waited)
+			io::logf(io::LogLevel::kWarn, "another opennova-hostd holds %s: waiting for it to end",
+					path.c_str());
+		waited = true;
+		wait_ms(1000);
+		if (g_stop.load())
+			return false;
+	}
+	if (waited)
+		io::logf(io::LogLevel::kInfo, "the state directory is this agent's");
+	return true;
 }
 
 } // namespace
@@ -83,6 +138,11 @@ int main(int argc, char **argv) {
 		case ParseOutcome::Version:
 			std::printf("opennova-hostd %s\n", hostd_version());
 			return 0;
+		case ParseOutcome::CheckAlive:
+			// The ECS health check: the loop turned within kAliveMaxAgeS.
+			return alive_within(alive_path(options.state_dir), kAliveMaxAgeS, std::time(nullptr))
+					? 0
+					: 1;
 		case ParseOutcome::Error:
 			std::fprintf(stderr, "opennova-hostd: %s\n%s", error.c_str(), hostd_usage());
 			return 2;
@@ -95,6 +155,32 @@ int main(int argc, char **argv) {
 	std::signal(SIGTERM, on_signal);
 	std::signal(SIGPIPE, SIG_IGN);
 
+	// Which machine this is: the user-data's file on a cloud machine, which
+	// the ECS agent registered (its instance attribute) must agree with.
+	if (!options.machine_file.empty() &&
+			!read_machine_file(options.machine_file, options.machine_id, error)) {
+		io::logf(io::LogLevel::kError, "%s", error.c_str());
+		return 1;
+	}
+	if (!options.ecs_config.empty()) {
+		std::string text;
+		std::string registered;
+		if (!io::read_file_text(options.ecs_config, text, error) ||
+				!ecs_config_machine_id(text, registered, error)) {
+			io::logf(io::LogLevel::kError, "the ECS agent's config %s: %s",
+					options.ecs_config.c_str(), error.c_str());
+			return 1;
+		}
+		if (registered != std::to_string(options.machine_id)) {
+			io::logf(io::LogLevel::kError,
+					"machine %lld, but the ECS agent registered machine-id %s (%s): refusing to "
+					"run",
+					static_cast<long long>(options.machine_id), registered.c_str(),
+					options.ecs_config.c_str());
+			return 1;
+		}
+	}
+
 	const bool root = ::geteuid() == 0;
 	if (!root)
 		io::logf(io::LogLevel::kWarn, "not running as root: the slots' files stay this user's");
@@ -103,6 +189,10 @@ int main(int argc, char **argv) {
 		io::logf(io::LogLevel::kError, "cannot make %s (0700)", scratch.c_str());
 		return 1;
 	}
+	if (!lock_state_dir(options.state_dir))
+		return g_stop.load() ? 0 : 1;
+	g_alive = alive_path(options.state_dir);
+	touch_alive(g_alive);
 	SlotFiles slots(options.slots_root, root);
 	if (!slots.ensure_root(error)) {
 		io::logf(io::LogLevel::kError, "%s", error.c_str());
@@ -139,16 +229,37 @@ int main(int argc, char **argv) {
 	// store on demand, an s3:// one through the AWS CLI, a file:// one copied.
 	ProcessTreeFetcher fetcher(options.aws, environment, scratch);
 	TreeStore trees(options.trees_root, fetcher);
-	std::vector<EgressTool> tools;
-	if (options.iptables != "none")
-		tools.push_back({ options.iptables, false });
-	if (options.ip6tables != "none" && ::access("/proc/net/if_inet6", F_OK) == 0)
-		tools.push_back({ options.ip6tables, true });
-	Agent::EgressFactory egress;
-	if (!tools.empty())
-		egress = [&runner, tools](int slot_count) {
-			return std::make_unique<EgressCounters>(runner, tools, slot_count);
-		};
+
+	// The slots' fences and counters, in place before any server can start,
+	// and their self-test: as slot 0's user, nothing only the agent may reach
+	// answers (fence_probe.h), or the agent does not run.
+	std::string service_host;
+	uint16_t service_port = 0;
+	service_host_port(options.service_url, service_host, service_port);
+	std::unique_ptr<NftTable> table;
+	if (options.nft != "none") {
+		table = std::make_unique<NftTable>(runner, options.nft, service_port, scratch);
+		if (!table->ensure(error)) {
+			io::logf(io::LogLevel::kError, "the slots' fences do not apply: %s", error.c_str());
+			return 1;
+		}
+		std::string answered;
+		const auto targets = fence_probe_targets(net::resolve_ipv4_all(service_host), service_port);
+		if (!probe_as(hosted::slot_uid(0), targets, 2000, answered, error)) {
+			io::logf(io::LogLevel::kError, "the fences' self-test did not run: %s", error.c_str());
+			return 1;
+		}
+		if (!answered.empty()) {
+			io::logf(io::LogLevel::kError,
+					"UID %u still reaches %s: the fences do not hold, refusing to run",
+					static_cast<unsigned>(hosted::slot_uid(0)), answered.c_str());
+			return 1;
+		}
+		io::logf(io::LogLevel::kInfo,
+				"the slots' users are fenced off the metadata services, the ECS agent and port %u",
+				static_cast<unsigned>(service_port));
+	}
+
 	HttpServiceLink link(options.service_url);
 	AgentConfig config;
 	config.machine_id = options.machine_id;
@@ -156,11 +267,19 @@ int main(int argc, char **argv) {
 	config.state_dir = options.state_dir;
 	config.scratch_dir = scratch;
 	config.token_file = options.token_file;
-	Agent agent(config, link, *runtime, slots, trees, egress);
+	// On ECS, the image this task runs (its task definition's pinned
+	// reference), the envelope's agent_image.
+	if (const std::string uri = novaworld_server::ecs::metadata_uri_from_env(); !uri.empty()) {
+		if (!novaworld_server::ecs::read_container_image(uri, config.agent_image, error))
+			io::logf(io::LogLevel::kWarn, "its own image does not read: %s", error.c_str());
+	}
+	Agent agent(config, link, *runtime, slots, trees, table.get());
 
-	io::logf(io::LogLevel::kInfo, "%s for machine %lld, service %s, %s runtime", hostd_version(),
-			static_cast<long long>(options.machine_id), options.service_url.c_str(),
-			options.runtime == RuntimeKind::Process ? "process" : "docker");
+	io::logf(io::LogLevel::kInfo, "%s for machine %lld, service %s, %s runtime%s%s",
+			hostd_version(), static_cast<long long>(options.machine_id),
+			options.service_url.c_str(),
+			options.runtime == RuntimeKind::Process ? "process" : "docker",
+			config.agent_image.empty() ? "" : ", image ", config.agent_image.c_str());
 	if (!options.log_group.empty())
 		io::logf(io::LogLevel::kInfo,
 				"the containers' output: CloudWatch %s (%s), streams %lld/slot-<k>",
@@ -168,6 +287,7 @@ int main(int argc, char **argv) {
 				static_cast<long long>(options.machine_id));
 	int code = 0;
 	while (!g_stop.load()) {
+		touch_alive(g_alive);
 		const int delay = agent.step();
 		if (options.once) {
 			code = agent.last_sync_ok() ? 0 : 1;

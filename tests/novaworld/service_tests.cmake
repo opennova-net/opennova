@@ -178,6 +178,7 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_jobs.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_roll.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
@@ -285,12 +286,12 @@ set_tests_properties(fleet_election PROPERTIES TIMEOUT 300)
 
 # The fleet's side of the supervisor (apps/novaworld_fleet/hosted/supervisor.h) over the
 # same FakeDriver: the desired state each machine's sync gets (the files until the agent
-# reported a container, the stopping ones, a container rebuilt after a service restart),
-# and the machines' lifecycle (a boot that never reports, lost then gone or terminated, an
-# agent reporting again, a shared machine idle past its time, an own machine ending with
-# its server, a drain moving servers one at a time, a roll, an admin's end, the
-# reconciliation of the driver's machines with the rows). Same sources as
-# hosted_supervisor_test.
+# reports a container running or exited, the stopping ones, a container rebuilt after a
+# service restart), and the machines' lifecycle (a boot that never reports, lost then gone
+# or terminated, the mass-lost brake, an agent reporting again, a shared machine idle past
+# its time, an own machine ending with its server, a drain moving servers one at a time,
+# a roll and its plan, an admin's end, the reconciliation of the driver's machines with the
+# rows). Same sources as hosted_supervisor_test.
 add_executable(hosted_fleet_test
     novaworld/hosted_fleet_test.cpp
     ${OPENNOVA_HOSTED_SUPERVISOR_SOURCES})

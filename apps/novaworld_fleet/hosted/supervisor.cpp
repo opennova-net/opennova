@@ -186,8 +186,14 @@ void Supervisor::reconcile(uint64_t now_ms) {
 			release_slot(db, s.id);
 			continue;
 		}
-		if (s.state == State::Booting && !report_of(fleet, s)) {
-			// Its files went with the service before its agent took them.
+		const SlotReport *report = report_of(fleet, s);
+		if (s.state == State::Booting &&
+				(!report ||
+						(report->state != ContainerState::Running &&
+								report->state != ContainerState::Exited))) {
+			// Its files went with the service before its agent started it (one
+			// waiting for its image or its trees holds them only while its agent
+			// runs): placed again with fresh files, no restart counted.
 			replace(db, s, now_ms, "its start was cut short by the service's restart");
 			continue;
 		}
@@ -1145,7 +1151,15 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 		if (s.machine_ref) holders[*s.machine_ref].push_back(std::move(s));
 	}
 	const uint64_t boot_timeout = profile_.boot_timeout_ms;
-	for (FleetMachineRow m : list_live_machines(db)) {
+	const std::vector<FleetMachineRow> live_machines = list_live_machines(db);
+	// The mass-lost brake: more than max(2, half) of the live machines lost at
+	// once is the fleet's fault (a hostd that cannot sync, the network), not the
+	// machines', so none of them ends for its silence while it holds.
+	size_t lost = 0;
+	for (const FleetMachineRow &m : live_machines)
+		lost += m.state == FleetMachineState::Lost;
+	const bool lost_brake = lost > std::max<size_t>(2, live_machines.size() / 2);
+	for (FleetMachineRow m : live_machines) {
 		// What the passes remember of it, from its row: since when it has been in
 		// its state (another supervisor's passes included).
 		const FleetMachineRow remembered = m;
@@ -1240,12 +1254,29 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 				}
 				// The cloud decides, by a describe since it went lost: still running
 				// lost_end_ms on, it ends; one that did not answer decides nothing.
+				// The brake holds it instead, until it reports again or an admin
+				// ends it (released per machine, however many are lost by then).
 				ask_describe(db, m, now_ms);
 				if ((cloud == CloudState::Pending || cloud == CloudState::Running) &&
-						in_state >= config_.lost_end_ms)
+						in_state >= config_.lost_end_ms) {
+					if (m.lost_held_since_ms > 0)
+						break;
+					if (lost_brake) {
+						if (hold_lost_machine(db, m.id, static_cast<int64_t>(now_ms)))
+							std::fprintf(stderr,
+									"[fleet] ERROR machine %lld: lost for %s, held: %zu of %zu "
+									"live "
+									"machines are lost at once (the fleet's fault, not theirs); it "
+									"ends once an admin ends it, or runs on once it reports "
+									"again\n",
+									static_cast<long long>(m.id), seconds_text(in_state).c_str(),
+									lost, live_machines.size());
+						break;
+					}
 					end(FleetMachineState::Ended,
 							"its agent was silent for " + seconds_text(config_.lost_end_ms) +
 									" more");
+				}
 				break;
 			}
 			case FleetMachineState::Ended:
@@ -1267,8 +1298,15 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 		const std::vector<ContainerReport> &reported) {
 	FleetDecision decision;
+	// The containers reported at all, and those reported started (running or
+	// exited), whose files the agent no longer needs.
 	std::set<std::string> names;
-	for (const ContainerReport &c : reported) names.insert(c.name);
+	std::set<std::string> started;
+	for (const ContainerReport &c : reported) {
+		names.insert(c.name);
+		if (c.state != ContainerState::Starting)
+			started.insert(c.name);
+	}
 	const std::vector<SlotHolder> holders = slot_holders(db, machine.id);
 	// What the starts in memory answer, in the holders' order; the containers no
 	// start answers for are read from their rows after, with no database work
@@ -1290,8 +1328,9 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 			auto it = starts_.find(h.server_id);
 			if (it != starts_.end() && it->second.container.name == name && it->second.machine_id == machine.id) {
 				Start &start = it->second;
-				if (seen) {
-					// Reported once: its files are the agent's now, and no longer kept here.
+				if (started.count(name) != 0) {
+					// Reported running or exited: its files are used, and no longer
+					// kept here.
 					start.acknowledged = true;
 					start.container.files.reset();
 				}

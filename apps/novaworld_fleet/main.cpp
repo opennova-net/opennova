@@ -203,6 +203,7 @@ int run(const program::Boot &boot) {
 		beat.hosted_live = hosted::count_live(db);
 		beat.hosted_failed = hosted::count_failed_since(db, window_s);
 		beat.machines_lost = hosted::count_machines(db, hosted::FleetMachineState::Lost);
+		beat.machines_held = hosted::count_held_machines(db);
 		beat.limits_held = hosted::limits_hold::held(db) ? 1 : 0;
 	};
 	const int exit_code = program::run_main_loop("fleet", boot, watchdog, hooks);

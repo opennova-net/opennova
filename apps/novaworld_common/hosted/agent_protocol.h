@@ -13,13 +13,14 @@
 // whose reply was lost is made again (a fresh secret replacing the last):
 //
 //   POST /hosted/machines/<id>/bootstrap      Authorization: Bearer <token>
-//   {"protocol": 2, "agent_version": "<the agent's build>"}
-//   -> 200 {"protocol": 2, "agent_secret": "<kAgentSecretChars letters and digits>",
+//   {"protocol": 3, "agent_version": "<the agent's build>"}
+//   -> 200 {"protocol": 3, "agent_secret": "<kAgentSecretChars letters and digits>",
 //           "serve_image": "ghcr.io/<owner>/opennova-serve@sha256:<digest>",
 //           "slots": <the machine's slots, 1..kMaxSlots>}
 //
 // The secret is the agent's long-lived credential (the service keeps only its
-// SHA-256, agent_secret_digest).
+// SHA-256, agent_secret_digest). The agent keeps it in a file of its own
+// format (apps/hostd), never this reply's, so a later protocol reads it too.
 //
 // The sync. Every kSyncIntervalMs (kBusySyncIntervalMs while the agent has work:
 // a container to start, stop or remove, a tree to fetch) the agent reports every
@@ -27,13 +28,13 @@
 // they need:
 //
 //   POST /hosted/machines/<id>/sync           Authorization: Bearer <agent secret>
-//   {"protocol": 2, "agent_version": "...",
+//   {"protocol": 3, "agent_version": "...", "agent_image": "<its image>" | "",
 //    "containers": [{"name", "slot", "state": "starting" | "running" | "exited",
 //                    "exit_code": <int> | null, "oom": <bool>,
 //                    "started_at": <Unix seconds> | null, ["reason": "<why>",]
 //                    "cpu_percent": <number>, "memory_bytes": <int>, "egress_bytes": <int>}],
 //    ["listing_failed": true]}
-//   -> 200 {"protocol": 2, "drain": <bool>,
+//   -> 200 {"protocol": 3, "drain": <bool>,
 //           "desired": [{"name", "slot", "image", "uid",
 //                        "base_tree": <tree id>, "expansion_tree": <tree id> | null,
 //                        "expansion_code": "<code>" | "", "args": [...],
@@ -65,9 +66,11 @@
 // code and no `started_at`. One waiting for its image's pull or its trees'
 // fetch is reported starting. `files` carries the slot's working directory
 // (the bytes in standard base64: the host file is cp1252) and is sent until
-// the agent has reported the container once, in any state; the agent keeps
-// them until it starts the container, writes them before, and never needs them
-// again. A desired container the agent does not report is not on the machine:
+// the agent reports the container running or exited (a container it reports
+// starting waits for its image or its trees, and an agent replaced meanwhile
+// needs them again); the agent keeps them until it starts the container,
+// writes them before, and never needs them again. A desired container the
+// agent does not report is not on the machine:
 // the agent cannot start one whose files were left out (a lost agent state),
 // and keeps none whose start failed past the report. The agent stops a
 // container only when a reply leaves it out; a sync that fails changes nothing
@@ -80,10 +83,21 @@
 // reports, moves no booting machine to ready, and the agent acts on no reply
 // until it lists again.
 //
-// Every refusal of either route is a bare 404. A message whose `protocol` is
-// not kAgentProtocol is not read further (protocol_of): the service drains a
-// machine whose agent speaks another protocol, and the agent acts on no reply
-// in one, keeping what it runs.
+// The envelope. Every sync request opens with the same three members,
+// whatever its protocol: `protocol`, `agent_version` and `agent_image` (the
+// image the agent's ECS task runs, as its task definition pins it; "" off
+// ECS). The service reads them first (decode_agent_envelope) and records them
+// at every sync, matched or not. Every refusal of either route is a bare 404.
+// A message whose `protocol` is not kAgentProtocol is not read further: the
+// service holds a machine whose agent speaks another protocol, in either
+// direction (heard, so it is not lost; its slots' last reports kept; nothing
+// answered, so its agent acts on nothing and its servers keep running), and
+// ends it only once that has lasted kProtocolMismatchEndS: terminated, its
+// servers placed again elsewhere (a drain would run each server it moves twice,
+// since the held agent stops none); the agent acts
+// on no reply in another protocol, keeping what it runs. A hostd rolled ahead
+// of the fleet program (or the fleet program ahead of it) so costs nothing
+// while both roll within that window.
 
 #include "slots.h"
 
@@ -97,7 +111,10 @@
 
 namespace opennova::novaworld_server::hosted {
 
-inline constexpr int kAgentProtocol = 2;
+inline constexpr int kAgentProtocol = 3;
+// How long a machine whose agent speaks another protocol is held before it
+// ends (the envelope, above).
+inline constexpr int64_t kProtocolMismatchEndS = 10 * 60;
 inline constexpr int kSyncIntervalMs = 5000;
 inline constexpr int kBusySyncIntervalMs = 1000;
 // The bootstrap token and the agent's secret: letters and digits from the OS
@@ -152,9 +169,17 @@ bool is_env_name(std::string_view name);
 bool is_log_group_name(std::string_view name);
 bool is_aws_region(std::string_view region);
 
-// The `protocol` member of any of these messages, or nullopt when `json` is no
-// object with a whole-number `protocol`.
-std::optional<int> protocol_of(std::string_view json);
+// The envelope a sync request opens with, in any protocol: read before the
+// protocol is checked, and every other member ignored.
+struct AgentEnvelope {
+	int protocol = 0;
+	std::string agent_version; // 1..64 printable ASCII
+	std::string agent_image; // "" or an image reference (is_image_reference)
+};
+// The envelope of `json`: false (with `error`) when it is no object, its
+// `protocol` no whole number, its `agent_version` not 1..64 printable
+// characters, or a present `agent_image` neither "" nor an image reference.
+bool decode_agent_envelope(std::string_view json, AgentEnvelope &out, std::string &error);
 
 // The bootstrap's request.
 struct AgentHello {
@@ -197,6 +222,7 @@ struct ContainerReport {
 struct SyncRequest {
 	int protocol = kAgentProtocol;
 	std::string agent_version;
+	std::string agent_image; // "" or the image the agent's ECS task runs
 	std::vector<ContainerReport> containers;
 	// The agent could not list its containers: `containers` is empty and says
 	// nothing of the machine.

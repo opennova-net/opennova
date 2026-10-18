@@ -4981,13 +4981,15 @@ int test_healthz(Harness &h) {
 	fleet.hosted_live = 2;
 	fleet.hosted_failed = 1;
 	fleet.machines_lost = 0;
+	fleet.machines_held = 0;
 	fleet.launch_failures = 0;
 	fleet.limits_held = 1;
 	fleet.db_lock_timeouts = 2;
 	fleet.db_deadlocks = 1;
 	TEST_EXPECT(nws::heartbeat_line(fleet) ==
 			"{\"heartbeat\":{\"program\":\"fleet\",\"hosted_live\":2,\"hosted_failed\":1,"
-			"\"machines_lost\":0,\"launch_failures\":0,\"limits_held\":1,\"db_lock_timeouts\":2,"
+			"\"machines_lost\":0,\"machines_held\":0,\"launch_failures\":0,\"limits_held\":1,"
+			"\"db_lock_timeouts\":2,"
 			"\"db_deadlocks\":1}}");
 	nws::Heartbeat gate;
 	gate.program = "gate";
@@ -6026,6 +6028,11 @@ int test_admin_fleet_routes(Harness &h) {
 		TEST_EXPECT(m["egress_bytes_month"].t() == crow::json::type::Number && m["egress_bytes_month"].i() == 0);
 		TEST_EXPECT(str(m["template_version"]) == "lt-0fleet:3" && m["reserved_for"].t() == crow::json::type::Null);
 		TEST_EXPECT(m["bootstrapped"].t() == crow::json::type::False);
+		// Its agent's envelope at its last sync, and no brake holding it.
+		TEST_EXPECT(m["agent_protocol"].i() == hosted::kAgentProtocol &&
+				m["agent_image"].t() == crow::json::type::Null &&
+				m["protocol_mismatch_since"].t() == crow::json::type::Null &&
+				m["lost_held"].t() == crow::json::type::False);
 	}
 	TEST_EXPECT(machine_seen);
 	const auto server_in = [](const crow::json::rvalue &list, int64_t id) -> const crow::json::rvalue * {
@@ -6113,7 +6120,8 @@ int test_admin_fleet_routes(Harness &h) {
 	reply = h.send("POST", machine_path + "/end", { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
 
-	// A roll drains every machine that takes servers, none other.
+	// A roll's preview: every machine that takes servers, none other; with no image
+	// pinned here (and no cloud read), each one replaced.
 	const auto booting = hosted::create_machine(
 			*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
 	launched.cloud_id = "local-fleet-2";
@@ -6122,15 +6130,40 @@ int test_admin_fleet_routes(Harness &h) {
 			*db, { "docker", hosted::MachineKind::Own, 1, "opennova-serve:local", 0 });
 	TEST_EXPECT(hosted::transition_machine(*db, failed.id, hosted::FleetMachineState::Launching,
 			hosted::FleetMachineState::Failed, "by the test"));
-	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer });
+	reply = h.send("GET", "/api/admin/fleet/roll", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["image_id"].t() == crow::json::type::Null &&
+			json["machines"].size() == 1 && json["machines"][0]["id"].i() == booting.id);
+	TEST_EXPECT(json && str(json["machines"][0]["action"]) == "replace" &&
+			str(json["machines"][0]["state"]) == "booting" &&
+			json["machines"][0]["servers"].i() == 0 &&
+			json["machines"][0]["image_id"].t() == crow::json::type::Null);
+	TEST_EXPECT(json && json["replace"].size() == 1 && json["replace"][0].i() == booting.id);
+	TEST_EXPECT(h.send("GET", "/api/admin/fleet/roll", { with_session(ana_s) }).code == 403);
+	// The roll drains the machines named, each one taking servers; a body that names
+	// none, or a machine that takes none, is refused, nothing drained.
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson }).code == 400);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson }, "{\"machines\": []}")
+						.code == 400);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson },
+						 "{\"machines\": [\"" + std::to_string(booting.id) + "\"]}")
+						.code == 400);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson },
+						 "{\"machines\": [" + std::to_string(booting.id) + ", " +
+								 std::to_string(failed.id) + "]}")
+						.code == 400);
+	TEST_EXPECT(hosted::find_machine(*db, booting.id)->state == hosted::FleetMachineState::Booting);
+	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson },
+			"{\"machines\": [" + std::to_string(booting.id) + "]}");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && json && json["draining"].i() == 1 && json["machines"].size() == 1 &&
 			json["machines"][0].i() == booting.id);
 	TEST_EXPECT(hosted::find_machine(*db, booting.id)->state == hosted::FleetMachineState::Draining);
 	TEST_EXPECT(hosted::find_machine(*db, booting.id)->end_reason == "rolled by an admin");
 	TEST_EXPECT(hosted::find_machine(*db, failed.id)->state == hosted::FleetMachineState::Failed);
-	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer });
-	TEST_EXPECT(reply.code == 202 && crow::json::load(body_text(reply))["draining"].i() == 0);
+	// Draining now: no machine takes servers, so the preview names none.
+	reply = h.send("GET", "/api/admin/fleet/roll", { kBearer });
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["machines"].size() == 0);
 
 	// Leave no live server or machine for the cases after.
 	TEST_EXPECT(hosted::transition_machine(*db, booting.id, hosted::FleetMachineState::Draining,

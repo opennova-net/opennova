@@ -174,6 +174,15 @@ bool read_agent_version(const JsonValue &object, std::string &out, std::string &
 	return true;
 }
 
+// "" or an image reference: the agent's own image, which it knows only on ECS.
+bool read_agent_image(const JsonValue &object, std::string &out, std::string &error) {
+	if (!read_string(object, "agent_image", out, error))
+		return false;
+	if (!out.empty() && !is_image_reference(out))
+		return fail(error, "agent_image is no image reference");
+	return true;
+}
+
 bool read_report(const JsonValue &v, ContainerReport &out, std::string &error) {
 	if (!v.is_object())
 		return fail(error, "a container is no object");
@@ -445,16 +454,18 @@ bool is_aws_region(std::string_view region) {
 			[](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; });
 }
 
-std::optional<int> protocol_of(std::string_view json) {
+bool decode_agent_envelope(std::string_view json, AgentEnvelope &out, std::string &error) {
 	JsonValue v;
-	std::string error;
-	if (!io::json_parse(json, v, error) || !v.is_object())
-		return std::nullopt;
-	const JsonValue *protocol = v.get("protocol");
-	int64_t whole = 0;
-	if (!protocol || !io::json_exact_whole_in(*protocol, -2147483648.0, 2147483647.0, whole))
-		return std::nullopt;
-	return static_cast<int>(whole);
+	if (!parse_object(json, v, error))
+		return false;
+	int64_t protocol = 0;
+	if (!read_whole(v, "protocol", 0, 2147483647.0, protocol, error))
+		return false;
+	out.protocol = static_cast<int>(protocol);
+	if (!read_agent_version(v, out.agent_version, error))
+		return false;
+	out.agent_image.clear();
+	return !v.get("agent_image") || read_agent_image(v, out.agent_image, error);
 }
 
 const char *container_state_text(ContainerState state) {
@@ -534,6 +545,7 @@ std::string encode_sync_request(const SyncRequest &request) {
 	JsonValue v = JsonValue::make_object();
 	v.set("protocol", json_int(request.protocol));
 	v.set("agent_version", io::json_string(request.agent_version));
+	v.set("agent_image", io::json_string(request.agent_image));
 	JsonValue containers = JsonValue::make_array();
 	for (const ContainerReport &c : request.containers) {
 		JsonValue entry = JsonValue::make_object();
@@ -562,10 +574,12 @@ bool decode_sync_request(std::string_view json, SyncRequest &out, std::string &e
 	JsonValue v;
 	if (!parse_object(json, v, error) || !read_protocol(v, out.protocol, error))
 		return false;
-	if (!io::json_members_known(
-				v, { "protocol", "agent_version", "containers", "listing_failed" }, "sync", error))
+	if (!io::json_members_known(v,
+				{ "protocol", "agent_version", "agent_image", "containers", "listing_failed" },
+				"sync", error))
 		return false;
-	if (!read_agent_version(v, out.agent_version, error))
+	if (!read_agent_version(v, out.agent_version, error) ||
+			!read_agent_image(v, out.agent_image, error))
 		return false;
 	out.listing_failed = false;
 	if (const JsonValue *failed = v.get("listing_failed")) {

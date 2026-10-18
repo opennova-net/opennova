@@ -316,8 +316,8 @@ public:
 		options.argv = { hostd_, "--runtime", "process", "--serve", serve_, "--service",
 			service_url_, "--machine", std::to_string(launch.machine_id), "--token-file",
 			token.u8string(), "--state-dir", (machine / "state").u8string(), "--slots-root",
-			(machine / "slots").u8string(), "--trees-root", trees_root().u8string(), "--iptables",
-			"none", "--ip6tables", "none" };
+			(machine / "slots").u8string(), "--trees-root", trees_root().u8string(), "--nft",
+			"none" };
 		options.output_path = (machine / "hostd.log").u8string();
 		auto child = std::make_unique<opennova::proc::ChildProcess>();
 		if (!child->spawn(options, error))
