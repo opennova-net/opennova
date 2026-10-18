@@ -21,13 +21,15 @@
 
 # The service's programs (programs.tf): each task's size (cpu units, memory
 # MiB: a Fargate pair) and its service's task counts; a field left out keeps
-# its default. Web and worker scale on their CPU between min and max; max (with
-# a deployment's extra tasks) sizes the database's max_connections.
-# gate       = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
-# lobby      = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
-# web        = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
-# controller = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
-# worker     = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
+# its default. Web and worker scale on their CPU between min and max; data runs
+# one fixed count (min = max = desired); max (with a deployment's extra tasks)
+# sizes the database's max_connections.
+# gate   = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
+# lobby  = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
+# web    = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
+# fleet  = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
+# worker = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
+# data   = { cpu = 256, memory = 1024, min = 1, max = 1, desired = 1 }
 # image_registry = "ghcr.io/opennova-net" # where the images are published (public packages)
 # health_port    = 8081                   # every program's /livez (ONNET_HEALTH_PORT)
 

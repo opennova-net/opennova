@@ -5,7 +5,7 @@
 #
 # The NovaWorld service launches and ends the machines itself (its EC2 machine
 # driver, through the AWS CLI, from the worker's jobs, with the worker's task
-# role); each runs opennova-hostd, which reaches the controller's internal
+# role); each runs opennova-hostd, which reaches the fleet program's internal
 # listener by its Cloud Map name (ONNET_INTERNAL_URL), and one opennova-serve
 # container per slot. Two kinds:
 #   shared  var.shared_instance_type (t3a.medium, unlimited CPU credits), up to
@@ -13,7 +13,7 @@
 #   own     var.own_instance_type (c7a.medium), exactly one server, the paid
 #           own-machine add-on.
 # Slot k of a machine: game UDP 32768+k (to players), admin TCP 32800+k (to the
-# controller's security group alone). A server's game data is a tree (one
+# fleet program's security group alone). A server's game data is a tree (one
 # version of a data set's files, ADR 0064) in the store: the deployment's
 # operations bucket, data/trees/<id>/, which admins fill from the site's Game
 # data page. A machine holds no volume of game data: its hostd fetches
@@ -42,8 +42,8 @@
 #     (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES in its environment) and hands each
 #     launch its user data;
 #   - the machines' security group: the slots' game ports to players, their
-#     admin ports to the controller alone; and the controller admitting the
-#     machines on its internal port (var.internal_http_port, its second
+#     admin ports to the fleet program alone; and the fleet program admitting
+#     the machines on its internal port (var.internal_http_port, its second
 #     listener, on its task's private address: hostd's bootstrap and sync);
 #   - the machine role: the five actions Session Manager needs for break-glass,
 #     its logs (/opennova/<deployment>/machines, which docker's awslogs
@@ -59,8 +59,8 @@
 #     deployment's tags, describe, and pass the machine role to EC2.
 #
 # All of it exists only while var.hosted_enabled is on; off (the default),
-# hosting is off and the programs' environment says so. Web's and the worker's
-# own store policies are programs.tf's.
+# hosting is off and the programs' environment says so. Web's and the data
+# program's own store policies are programs.tf's.
 #
 # The ports are the service's and hostd's (apps/novaworld_common/hosted/slots.h):
 # change them in both places or in neither.
@@ -184,15 +184,15 @@ resource "aws_vpc_security_group_ingress_rule" "machines_admin" {
   count = local.hosted_enabled ? 1 : 0
 
   security_group_id            = aws_security_group.machines[0].id
-  description                  = "Slot remote admin from the NovaWorld controller alone (slot k: ${local.slot_admin_port}+k)"
+  description                  = "Slot remote admin from the NovaWorld fleet program alone (slot k: ${local.slot_admin_port}+k)"
   ip_protocol                  = "tcp"
   from_port                    = local.slot_admin_port
   to_port                      = local.slot_admin_port + var.shared_slots - 1
-  referenced_security_group_id = aws_security_group.program["controller"].id
+  referenced_security_group_id = aws_security_group.program["fleet"].id
 }
 
-# Out: the image pulls (ghcr.io), Ubuntu's mirrors, the controller's internal
-# port, and NovaWorld at the gate's public address.
+# Out: the image pulls (ghcr.io), Ubuntu's mirrors, the fleet program's
+# internal port, and NovaWorld at the gate's public address.
 resource "aws_vpc_security_group_egress_rule" "machines_all" {
   count = local.hosted_enabled ? 1 : 0
 
@@ -202,14 +202,14 @@ resource "aws_vpc_security_group_egress_rule" "machines_all" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
-# The controller admits the machines on its internal port alone: its second
+# The fleet program admits the machines on its internal port alone: its second
 # listener, on its task's private address (the leader alone binds it), where
 # hostd fetches its bootstrap and syncs.
-resource "aws_vpc_security_group_ingress_rule" "controller_from_machines" {
+resource "aws_vpc_security_group_ingress_rule" "fleet_from_machines" {
   count = local.hosted_enabled ? 1 : 0
 
-  security_group_id            = aws_security_group.program["controller"].id
-  description                  = "Machine hostd: bootstrap and sync on the controller internal listener (private)"
+  security_group_id            = aws_security_group.program["fleet"].id
+  description                  = "Machine hostd: bootstrap and sync on the fleet internal listener (private)"
   ip_protocol                  = "tcp"
   from_port                    = var.internal_http_port
   to_port                      = var.internal_http_port
@@ -553,13 +553,17 @@ resource "aws_iam_role_policy" "fleet_service" {
   policy = data.aws_iam_policy_document.fleet_service[0].json
 }
 
-# What web, the controller and the worker need to launch and reach the
-# machines, in their environment (programs.tf). The fleet's knobs are there
-# whether or not hosting is on (the controller's address is ONNET_INTERNAL_URL,
-# and its task binds its own private address); with it off, the provider is
-# `none` and there is no store. The serve and hostd images are the release's
-# (`app deploy --serve-tag --hostd-tag`, pinned by digest). The toolbox's own
-# (infra.env): what `fleet bake-image` and the machines' tag need.
+# What the programs need of the fleet, in their environment (programs.tf), in
+# the service's two sets (apps/novaworld_common/hosted/fleet_config.h): the
+# fleet's policy, which web, the fleet program and the worker read alike, and
+# the machine driver's own settings, the worker's alone (it alone launches the
+# machines; the fleet program's address it hands them is ONNET_INTERNAL_URL,
+# and that task binds its own private address). The store is the policy's and
+# the data program's too. The fleet's knobs are there whether or not hosting is
+# on; with it off, the provider is `none` and there is no store or driver. The
+# serve and hostd images are the release's (`app deploy --serve-tag
+# --hostd-tag`, pinned by digest). The toolbox's own (infra.env): what `fleet
+# bake-image` and the machines' tag need.
 locals {
   fleet_env = {
     ONNET_FLEET_SHARED_SLOTS = tostring(var.shared_slots)
@@ -570,30 +574,40 @@ locals {
     ONNET_HOSTED_CAP = tostring(var.fleet_max_shared * var.shared_slots + var.fleet_max_own)
   }
 
-  hosted_env = merge(local.fleet_env, local.hosted_enabled ? {
-    ONNET_HOSTED_PROVIDER             = "ec2"
-    ONNET_HOSTED_EC2_REGION           = local.region
-    ONNET_HOSTED_EC2_LOG_GROUP        = aws_cloudwatch_log_group.machines.name
-    ONNET_HOSTED_EC2_LAUNCH_TEMPLATES = jsonencode({ for kind, t in aws_launch_template.fleet : kind => t.id })
-    # Both public subnets, comma-separated: the service picks one per launch.
-    ONNET_HOSTED_EC2_SUBNETS     = join(",", [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].id])
-    ONNET_HOSTED_DEPLOYMENT      = local.hosted_deployment
-    ONNET_HOSTED_BOOTSTRAP_CIDRS = join(",", [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].cidr_block])
-    # The game data's store: the trees the machines fetch (the controller hands
-    # hostd each tree's URL under it), what web uploads and the worker builds.
+  # The game data's store: the trees the machines fetch (the fleet program
+  # hands hostd each tree's URL under it), what web uploads and the data
+  # program builds.
+  store_env = local.hosted_enabled ? {
     ONNET_OBJECT_STORE_URL    = local.object_store_url
     ONNET_OBJECT_STORE_REGION = var.region
+  } : {}
+
+  # The fleet's policy.
+  hosted_policy_env = merge(local.fleet_env, local.store_env, local.hosted_enabled ? {
+    ONNET_HOSTED_PROVIDER        = "ec2"
+    ONNET_HOSTED_BOOTSTRAP_CIDRS = join(",", [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].cidr_block])
     } : {
     ONNET_HOSTED_PROVIDER = "none"
   })
 
+  # The ec2 machine driver's own settings: the worker's.
+  hosted_driver_env = local.hosted_enabled ? {
+    ONNET_HOSTED_EC2_REGION           = local.region
+    ONNET_HOSTED_EC2_LOG_GROUP        = aws_cloudwatch_log_group.machines.name
+    ONNET_HOSTED_EC2_LAUNCH_TEMPLATES = jsonencode({ for kind, t in aws_launch_template.fleet : kind => t.id })
+    # Both public subnets, comma-separated: the service picks one per launch.
+    ONNET_HOSTED_EC2_SUBNETS = join(",", [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].id])
+    ONNET_HOSTED_DEPLOYMENT  = local.hosted_deployment
+    ONNET_INTERNAL_URL       = local.internal_url
+  } : {}
+
   fleet_toolbox_env = merge(
     {
-      ONNET_HOSTED_PROVIDER   = local.hosted_env.ONNET_HOSTED_PROVIDER
+      ONNET_HOSTED_PROVIDER   = local.hosted_policy_env.ONNET_HOSTED_PROVIDER
       ONNET_HOSTED_DEPLOYMENT = local.hosted_deployment
     },
     local.hosted_enabled ? {
-      ONNET_HOSTED_EC2_SUBNETS = local.hosted_env.ONNET_HOSTED_EC2_SUBNETS
+      ONNET_HOSTED_EC2_SUBNETS = local.hosted_driver_env.ONNET_HOSTED_EC2_SUBNETS
       # What `fleet bake-image` launches its builder with and writes its image to.
       OPENNOVA_FLEET_IMAGE_PARAMETER = aws_ssm_parameter.fleet_image[0].name
       OPENNOVA_FLEET_SECURITY_GROUP  = aws_security_group.machines[0].id

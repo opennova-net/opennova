@@ -9,14 +9,15 @@
 # credit setting), each terminating on shutdown, IMDSv2 with a hop limit of 1,
 # one encrypted root volume (40 GiB: the data trees hostd fetches live there)
 # and no other; the slots' game ports to everyone and admin ports to the
-# controller alone, the controller's internal port to the machines alone. The
+# fleet program alone, the fleet's internal port to the machines alone. The
 # worker's task role's policy pins a launch to the two templates and their two
 # types, IMDSv2, this deployment's tags, gp3 volumes no larger than the root
 # volume, their images; it ends only machines carrying both tags. The machine
 # role holds Session Manager, its logs and a read of the trees in the store
-# alone. Web's, the controller's and the worker's environment carry
-# the fleet's settings (the machines' log group among them) and the store's
-# URL, infra.env what `fleet bake-image` and `fleet logs` need. A t2 or
+# alone. Web's, the fleet's and the worker's environment carry the fleet's
+# policy and the store's URL, the worker's alone the machine driver's own
+# settings (the machines' log group among them), infra.env what `fleet
+# bake-image` and `fleet logs` need. A t2 or
 # Graviton type and a slot count past 32 are refused.
 
 mock_provider "aws" {
@@ -158,14 +159,19 @@ override_resource {
   values          = { id = "sg-0web" }
 }
 override_resource {
-  target          = aws_security_group.program["controller"]
+  target          = aws_security_group.program["fleet"]
   override_during = plan
-  values          = { id = "sg-0controller" }
+  values          = { id = "sg-0fleet" }
 }
 override_resource {
   target          = aws_security_group.program["worker"]
   override_during = plan
   values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.program["data"]
+  override_during = plan
+  values          = { id = "sg-0data" }
 }
 override_resource {
   target          = aws_security_group.lb
@@ -218,14 +224,19 @@ override_resource {
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1" }
 }
 override_resource {
-  target          = aws_ecs_task_definition.program["controller"]
+  target          = aws_ecs_task_definition.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1" }
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.backup
@@ -248,14 +259,19 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-web" }
 }
 override_resource {
-  target          = aws_iam_role.program["controller"]
+  target          = aws_iam_role.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-controller" }
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-fleet" }
 }
 override_resource {
   target          = aws_iam_role.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-worker" }
+}
+override_resource {
+  target          = aws_iam_role.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-data" }
 }
 override_resource {
   target          = aws_iam_role.execution
@@ -328,20 +344,20 @@ run "hosting_off" {
     error_message = "hosting off: no IAM"
   }
   assert {
-    condition     = length(aws_vpc_security_group_ingress_rule.machines_game) == 0 && length(aws_vpc_security_group_ingress_rule.controller_from_machines) == 0
-    error_message = "hosting off: no rule, and nothing admitted to the controller's internal port"
+    condition     = length(aws_vpc_security_group_ingress_rule.machines_game) == 0 && length(aws_vpc_security_group_ingress_rule.fleet_from_machines) == 0
+    error_message = "hosting off: no rule, and nothing admitted to the fleet's internal port"
   }
   assert {
     condition = alltrue([
-      for p in ["web", "controller", "worker"] :
+      for p in ["web", "fleet", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "none" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://controller.prod.opennova.internal:8070" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "6" &&
+      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_URL") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_HTTP_BIND") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_EC2_LOG_GROUP") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_OBJECT_STORE")
     ]) && strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_PROVIDER='none'\n") && !strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET")
-    error_message = "hosting off: the programs' environment turns the provider off, names no store, and still names the controller's URL and the fleet's knobs (the controller binds its own task's address); infra.env says so to the toolbox"
+    error_message = "hosting off: the programs' environment turns the provider off, names no store and no machine driver, and still names the fleet's knobs (the fleet binds its own task's address); infra.env says so to the toolbox"
   }
   assert {
     condition     = strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_MACHINES_LOG_GROUP='/opennova/prod/machines'\n")
@@ -417,33 +433,40 @@ run "hosting_on" {
   assert {
     condition = (
       aws_vpc_security_group_ingress_rule.machines_admin[0].from_port == 32800 && aws_vpc_security_group_ingress_rule.machines_admin[0].to_port == 32805 &&
-      aws_vpc_security_group_ingress_rule.machines_admin[0].ip_protocol == "tcp" && aws_vpc_security_group_ingress_rule.machines_admin[0].referenced_security_group_id == "sg-0controller"
+      aws_vpc_security_group_ingress_rule.machines_admin[0].ip_protocol == "tcp" && aws_vpc_security_group_ingress_rule.machines_admin[0].referenced_security_group_id == "sg-0fleet"
     )
-    error_message = "the 6 slots' admin TCP ports to the controller alone"
+    error_message = "the 6 slots' admin TCP ports to the fleet program alone"
   }
   assert {
     condition = (
-      aws_vpc_security_group_ingress_rule.controller_from_machines[0].from_port == 8070 &&
-      aws_vpc_security_group_ingress_rule.controller_from_machines[0].security_group_id == "sg-0controller" &&
-      aws_vpc_security_group_ingress_rule.controller_from_machines[0].referenced_security_group_id == "sg-0machines"
+      aws_vpc_security_group_ingress_rule.fleet_from_machines[0].from_port == 8070 &&
+      aws_vpc_security_group_ingress_rule.fleet_from_machines[0].security_group_id == "sg-0fleet" &&
+      aws_vpc_security_group_ingress_rule.fleet_from_machines[0].referenced_security_group_id == "sg-0machines"
     )
-    error_message = "the controller's internal port admits the machines alone"
+    error_message = "the fleet's internal port admits the machines alone"
   }
   assert {
     condition = alltrue([
-      for p in ["web", "controller", "worker"] :
+      for p in ["web", "fleet", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "ec2" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_LAUNCH_TEMPLATES"] == "{\"own\":\"lt-0own\",\"shared\":\"lt-0shared\"}" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_SUBNETS"] == "subnet-0public0a,subnet-0public0b" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_BOOTSTRAP_CIDRS"] == "10.44.0.0/24,10.44.1.0/24" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_DEPLOYMENT"] == "opennova-prod" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_LOG_GROUP"] == "/opennova/prod/machines" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_URL"] == "s3://opennova-prod-ops-123456789012/data" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_REGION"] == "us-east-1" &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_DATA_SETS") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "OPENNOVA_FLEET")
+      ]) && (
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_LAUNCH_TEMPLATES"] == "{\"own\":\"lt-0own\",\"shared\":\"lt-0shared\"}" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_SUBNETS"] == "subnet-0public0a,subnet-0public0b" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_DEPLOYMENT"] == "opennova-prod" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_LOG_GROUP"] == "/opennova/prod/machines" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://fleet.prod.opennova.internal:8070"
+      ) && alltrue([
+        for p in ["web", "fleet", "data"] :
+        !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_EC2_") &&
+        !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_DEPLOYMENT") &&
+        !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_URL")
     ])
-    error_message = "web, the controller and the worker get the provider, the templates by kind, both zones' subnets, the deployment tag, the machines' log group and the game data's store (the deployment's bucket under data/)"
+    error_message = "web, the fleet and the worker get the provider, the agents' networks and the game data's store (the deployment's bucket under data/); the worker alone the templates by kind, both zones' subnets, the deployment tag, the machines' log group and the fleet's URL they reach"
   }
   assert {
     condition = (

@@ -48,14 +48,14 @@ output "lb_addresses" {
   description = "The public load balancer's static addresses, one per zone (zone a's is the gate's)"
 }
 
-output "controller_host" {
-  value       = local.controller_host
-  description = "The controller's private DNS name (Cloud Map)"
+output "fleet_host" {
+  value       = local.fleet_host
+  description = "The fleet program's private DNS name (Cloud Map)"
 }
 
 output "internal_url" {
   value       = local.internal_url
-  description = "The controller's internal listener by its private name (ONNET_INTERNAL_URL): where the machines' hostd bootstrap and sync"
+  description = "The fleet program's internal listener by its private name (ONNET_INTERNAL_URL): where the machines' hostd bootstrap and sync"
 }
 
 output "web_domain" {

@@ -317,7 +317,8 @@ run "github_deploy_roles" {
       toset(one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "PassTaskRoles"])) == toset([
         "arn:aws:iam::111111111111:role/opennova-prod-execution",
         "arn:aws:iam::111111111111:role/opennova-prod-backup",
-        "arn:aws:iam::111111111111:role/opennova-prod-controller",
+        "arn:aws:iam::111111111111:role/opennova-prod-data",
+        "arn:aws:iam::111111111111:role/opennova-prod-fleet",
         "arn:aws:iam::111111111111:role/opennova-prod-gate",
         "arn:aws:iam::111111111111:role/opennova-prod-lobby",
         "arn:aws:iam::111111111111:role/opennova-prod-web",

@@ -182,7 +182,7 @@ locals {
   # it be. None (before the first release, the schedule off): the family.
   release_backup_task_definition = try(jsondecode(local.release_value).task_definitions.backup, "")
   backup_schedule_task_definition = (
-    local.released && startswith(local.release_backup_task_definition, "${local.backup_family_arn}:")
+    local.has_release && startswith(local.release_backup_task_definition, "${local.backup_family_arn}:")
     ? local.release_backup_task_definition : local.backup_family_arn
   )
 }
@@ -242,7 +242,7 @@ resource "aws_scheduler_schedule" "backup" {
   schedule_expression_timezone = "UTC"
   # Off until the first release: no program has run, and no backup image is
   # pinned yet.
-  state = local.released ? "ENABLED" : "DISABLED"
+  state = local.has_release ? "ENABLED" : "DISABLED"
 
   flexible_time_window {
     mode = "OFF"
