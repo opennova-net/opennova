@@ -1,6 +1,7 @@
 // Synthetic Black Hawk Down GP models (formats/threedi_gp), built byte by byte in the layout
-// BHD's loader reads [orig: GP_LoadModel @ 0x510E10 (dfbhd)]: nothing of ours writes GP, so no
-// GP fixture can be minted. gpm_model() is a rigid two-part model with every section (lights,
+// BHD's loader reads [orig: GP_LoadModel @ 0x510E10 (dfbhd)], independent of the GP writer they
+// test (threedi_gp_write.h), so no committed fixture rides on it. gpm_model() is a rigid
+// two-part model with every section (lights,
 // the vertex stream, occlusion, a collision section whose volume widens its box, a CTRL register,
 // two MTRX rows, an opaque list and an alpha strip, an unlit additive material); gpp_model() a
 // skinned one with a global batch over a two-part palette. Used by ctest threedi_gp and the
