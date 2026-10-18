@@ -116,7 +116,7 @@ int run(const program::Boot &boot) {
 		billing::register_billing_jobs(registry, billing->sync());
 	}
 	if (machines.driver)
-		hosted::register_fleet_jobs(registry, *machines.driver);
+		hosted::register_fleet_jobs(registry, *machines.driver, hosting.fleet.placement);
 
 	jobs::WorkerPoolConfig worker_config;
 	worker_config.threads = config.worker_threads;

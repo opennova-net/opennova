@@ -22,16 +22,37 @@ int64_t member_int(const io::JsonValue &payload, const char *key) {
 	return v != nullptr && v->is_number() ? static_cast<int64_t>(v->number) : 0;
 }
 
-jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver) {
+jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver, const PlacementPolicy &limits) {
 	const int64_t id = member_int(ctx.job.payload, "machine_id");
 	std::optional<FleetMachineRow> row;
+	int of_kind = 0;
 	{
 		auto lease = ctx.pool.acquire();
 		row = find_machine(*lease, id);
+		// The machines of its kind that take servers, as placement counts them
+		// toward the maximum: this one among them.
+		if (row)
+			for (const FleetMachineRow &m : list_live_machines(*lease))
+				if (m.kind == row->kind && machine_takes_servers(m.state))
+					++of_kind;
 	}
 	// Ended meanwhile (an admin's end, the supervisor's "never finished"): nothing to launch.
 	if (!row || row->state != FleetMachineState::Launching)
 		return jobs::JobResult::done();
+	// Past the fleet's maximum for the kind, whatever made the row: no cloud call.
+	const bool own = row->kind == MachineKind::Own;
+	const int max = own ? limits.max_own : limits.max_shared;
+	if (of_kind > max) {
+		std::fprintf(stderr,
+				"[fleet] machine %lld (%s, for server %lld): refused, %d %s machines would run past "
+				"the fleet's maximum of %d (%s)\n",
+				static_cast<long long>(id), machine_kind_text(row->kind),
+				static_cast<long long>(row->launched_for), of_kind, machine_kind_text(row->kind),
+				max, own ? "ONNET_FLEET_MAX_OWN" : "ONNET_FLEET_MAX_SHARED");
+		auto lease = ctx.pool.acquire();
+		fail_refused_launch(*lease, id);
+		return jobs::JobResult::fail("past the fleet's maximum");
+	}
 	MachineLaunch request;
 	request.machine_id = id;
 	request.kind = row->kind;
@@ -211,9 +232,11 @@ bool machine_launch_pending(db::Database &db, int64_t machine_id) {
 	return jobs::job_pending(db, launch_key(machine_id));
 }
 
-void register_fleet_jobs(jobs::JobRegistry &registry, MachineDriver &driver, FleetJobCaps caps) {
+void register_fleet_jobs(jobs::JobRegistry &registry, MachineDriver &driver,
+		PlacementPolicy limits, FleetJobCaps caps) {
 	jobs::JobKind launch_kind{ kJobMachineLaunch,
-		[&driver](jobs::JobContext &ctx) { return launch(ctx, driver); }, caps.launch };
+		[&driver, limits](jobs::JobContext &ctx) { return launch(ctx, driver, limits); },
+		caps.launch };
 	launch_kind.retry_base_ms = 2000;
 	launch_kind.retry_max_ms = 60 * 1000;
 	registry.add(std::move(launch_kind));

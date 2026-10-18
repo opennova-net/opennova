@@ -289,11 +289,13 @@ struct Rig {
 		// Every pass that wants a describe asks one (the jobs then run at once).
 		config.describe_interval_ms = 0;
 		config.clock_ms = [this] { return now; };
-		hosted::register_fleet_jobs(registry, fake);
 		make_supervisor();
 		lobby_up();
 	}
+	// The supervisor over `config`, and the fleet's jobs registered again with its
+	// maximums (as a worker reads the same settings).
 	void make_supervisor() {
+		hosted::register_fleet_jobs(registry, fake, config.placement);
 		sup = std::make_unique<hosted::Supervisor>(pool, fake.profile(), config);
 		sup->set_stop_listing([this](opennova::db::Database &, uint32_t rid, int64_t account) {
 			pushes.emplace_back(rid, account);
