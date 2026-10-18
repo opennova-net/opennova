@@ -52,8 +52,8 @@
 # too, programs.tf). ECS registers each task with its target groups and holds
 # a deployment until the new tasks pass, and stops an old task only once its
 # targets drained (deregistration_delay below). Deletion protection is on: the
-# balancer holds the gate's address (DEPLOY.md's rollback from the cutover
-# turns it off first).
+# balancer holds the gate's address (lift it first to destroy the balancer on
+# purpose).
 
 locals {
   # The portal nginx's retail server (web/nginx.conf), where the retail port's

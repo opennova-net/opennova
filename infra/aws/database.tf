@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# The service database: PostgreSQL 17 on RDS (DEPLOY.md, section 3)
+# The service database: PostgreSQL 17 on RDS (DEPLOY.md, section 4, "The database")
 # ---------------------------------------------------------------------------
 #
 # One instance in the private subnets on db.t4g.micro (burstable, which RDS runs

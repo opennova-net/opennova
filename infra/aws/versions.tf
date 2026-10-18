@@ -1,5 +1,5 @@
 # The NovaWorld service's AWS + Cloudflare infrastructure for one deployment
-# (DEPLOY.md, section 3).
+# (DEPLOY.md, section 4).
 #
 # Flat files by concern, no child modules:
 #   versions.tf    Terraform and provider pins, the backend, provider configuration
