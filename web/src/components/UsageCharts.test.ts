@@ -12,7 +12,7 @@ describe('UsageCharts', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
 
   async function mountCharts(props: Record<string, unknown>) {
-    wrapper = mount(UsageCharts, { props: { idBase: 'u', ...props } });
+    wrapper = mount(UsageCharts, { props: { idBase: 'u', subject: 'program', id: 'web', name: 'web', ...props } });
     await flushPromises();
     return wrapper;
   }
