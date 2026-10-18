@@ -218,6 +218,13 @@ bool run_in_match_spawn_edge() {
 			"in-match frame: cached.local_player published")) return false;
 	if (!expect(h.role.self_wire_handle() == 0x0005,
 			"in-match frame: H latched from the runtime")) return false;
+	// L is client-built: commandGroup 0, not the authority's 1
+	// [orig: NapiNPClientMsg_0x00C @0x42E7F1].
+	if (const w::Entity *body = h.kernel->world.registry.get(
+				h.kernel->world.cached.local_player)) {
+		if (!expect(body->group_id == 0, "in-match frame: L's commandGroup is 0"))
+			return false;
+	}
 	// The join-wait fire latches died at the spawn edge (the weapon pump ran
 	// gated open the same frame over the cleared latches).
 	if (!expect(!h.weapon().fire_held && !h.weapon().fire_pressed &&

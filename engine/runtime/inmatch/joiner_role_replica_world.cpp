@@ -144,6 +144,14 @@ void JoinerRole::spawn_and_arm_local_player() {
 		const world::PlayerSpawn spawn = spawn_from_self(sp);
 		const world::EntityHandle h = world::spawn_player(world, spawn);
 		local_spawned_ = h.valid();
+		// A client builds its own body from the host's 0x0C like every
+		// pool-0 entity: the slot memset leaves commandGroup (+0x11C) 0 and no
+		// client message stores it. The 1 spawn_player stamps is the
+		// authority's (Entity_SpawnFromAnimSlotProperty @0x43C50F, reached
+		// from Server_PlayerAdd @0x51D056 and
+		// Server_InitAllPlayerEntitiesForRound @0x516B67).
+		// [orig: NapiNPClientMsg_0x00C @0x42E7F1]
+		if (world::Entity *body = world.registry.get(h)) body->group_id = 0;
 		// L is born after the boot's definition sweeps: bind its items.def row
 		// now, as the host's L was at boot (without it L kept the "default"
 		// sound profile, which authors no slots: no footsteps, foley, landings
