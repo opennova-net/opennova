@@ -721,8 +721,27 @@ public:
     // Mission restart discards all transient projectile/presentation state.
     void reset() noexcept;
 
+    // The id the round pool stamps on each allocated round (its +0x78): the
+    // fire's sequence word, or for 0xFFFF a fresh (local slot << 9) | counter,
+    // the 9-bit counter a process-wide word no reset clears.
+    // [orig: CEntityManager_AllocateSlot @0x4EAAD0 - the 0xFFFF test @0x4EAAD7,
+    //  the counter @0x4EAAE8..0x4EAB04, the store @0x4EABD5]
+    uint16_t allocate_round_id(uint16_t sequence_word);
+    // The id of the last round allocated: a fan's last pellet, whose slot the
+    // pellet walks leave as the pool cursor that RoundData_SpawnRound returns.
+    // [orig: Weapon_SpawnProjectileBurst / ...WithSpread return dword_B7E1A0
+    //  @0x4EBB98 / @0x4EBE6D]
+    uint16_t last_allocated_round_id() const { return last_allocated_round_id_; }
+    // The local player's roster slot the fresh id carries: 0 on a host, a joiner's
+    // own S2C 0x04 slot. [orig: g_LocalPlayerSlotId @0xA860D0 -
+    // Server_InitPlayerSlotSystem @0x4243CF, NapiNPClientMsg_SessionSlotConfig
+    // @0x4254A2]
+    uint8_t local_slot_id = 0;
+
 private:
     uint64_t next_presentation_generation_ = 1;
+    uint32_t round_id_counter_ = 0; // [orig: dword_B7E1A4]
+    uint16_t last_allocated_round_id_ = 0;
     // Retail advances tracer cadence on each remote shooter's weapon slot. A
     // visual tag-2 round has wire H but no local Entity owner, so this is that
     // per-remote presentation field projected onto the decoded identity.

@@ -847,7 +847,59 @@ bool check_an_alt_round_takes_its_ammo_byte() {
 			"the weaponless alt round spreads by its ammo's ERROR");
 }
 
+// A 0xFFFF sequence word takes the round pool's fresh id, (the host's slot 0 << 9) | a
+// counter, on the spawned round and its ring record; another word stays.
+// [orig: CEntityManager_AllocateSlot @0x4EAAD7..0x4EAB04, @0x4EABD5; RoundData_AddRound
+//  ring+28 @0x4FDCF1..0x4FDCF5]
+bool check_a_ffff_sequence_word_takes_a_fresh_id() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(2, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	auto &conn = roster[0];
+	world.tables.weapons.entries.resize(6);
+	auto &weapon = world.tables.weapons.entries[5];
+	weapon.name = "SEQ_RIFLE";
+	weapon.valid = true;
+	weapon.clipsize = 20;
+	weapon.category = 3;
+	weapon.rank = 2;
+	weapon.ammo_index = 1;
+	world.tables.ammo.entries.resize(2);
+	world.tables.ammo.entries[1].name = "SEQ_ROUND";
+	world.tables.ammo.entries[1].velocity = 100;
+	world.tables.ammo.entries[1].max_age_ticks = 62;
+	world.tables.ammo.entries[1].valid = true;
+	conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 9};
+	const auto shoot = [&](uint16_t hit_part) {
+		dispatch_fire(conn, roster, world,
+				fire_body(shooter.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, hit_part, 12, 0));
+	};
+	shoot(0xFFFF);
+	shoot(0xFFFF);
+	shoot(0x0123);
+	if (!expect(world.out.rounds.count == 3 && world.round_sim.active_count == 3,
+			"three rounds append and fly"))
+		return false;
+	const auto &ring = world.out.rounds.records;
+	if (!expect(ring[0].shot_seq == 1 && ring[1].shot_seq == 2 && ring[2].shot_seq == 0x0123 &&
+					world.round_sim.rounds[0].shot_seq == 1 &&
+					world.round_sim.rounds[1].shot_seq == 2,
+			"a 0xFFFF word takes the pool's fresh id; another stays"))
+		return false;
+	// A three-pellet fan allocates ids 3, 4 and 5; its ring takes the last pellet's
+	// [orig: Weapon_SpawnProjectileBurstWithSpread @0x4EBC10, the cursor return
+	//  @0x4EBE6D].
+	world.tables.ammo.entries[1].flags |= w::kAmmoFlagShotgun;
+	world.tables.ammo.entries[1].spread_count = 3;
+	shoot(0xFFFF);
+	return expect(world.out.rounds.count == 4 && ring[3].shot_seq == 5,
+			"a fan's ring takes its last pellet's id");
+}
+
 int main() {
+	if (!check_a_ffff_sequence_word_takes_a_fresh_id()) return 1;
 	if (!check_an_alt_round_takes_its_ammo_byte()) return 1;
 	if (!check_the_ring_takes_the_fire_actions_words()) return 1;
 	if (!check_the_fire_action_rejudges_the_round()) return 1;

@@ -763,6 +763,9 @@ void JoinerRole::pump() {
 
 	const bool preround_active = world.preround_delay_seconds != 0;
     world.rules.cease_fire = rt.state().cease_fire;
+    // The joiner's own roster slot rides a fresh round id [orig:
+    //  NapiNPClientMsg_SessionSlotConfig @0x4254A2 -> g_LocalPlayerSlotId].
+    world.round_sim.local_slot_id = rt.local_player_slot();
     // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_RulesFlags
     // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
     // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].

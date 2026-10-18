@@ -265,7 +265,6 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 	ev.subtype = uint8_t((fr.extra_byte2 & 0x3F) | ((fr.extra_byte2 >> 7) << 7));
 	ev.slot_byte = fr.misc_byte; // [orig: ring+32 <- fireRequest+80 @0x4fdcfc]
 	ev.adm_index = fired_adm;
-	if (round_lands) world->out.rounds.add(ev);
 	// The authoritative round spawns SYNCHRONOUSLY with the ring append
 	// [orig: RoundData_AddRound @0x4fdb40 inline-calls RoundData_SpawnRound
 	// @0x4ec0d0 — the ring is only the tag-2 fan-out log; §5.60]. Ammo = the
@@ -305,9 +304,15 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			// PowerThrow charge from fireRequest+80; RoundData_SpawnRound
 			// scales velocity for bytes 1..254 [orig: @0x4ec5bb].
 			rp.charge = fr.misc_byte;
-			world->round_sim.spawn(*world, rp);
+			// The ring takes the spawned round's id, the pool's fresh one for a
+			// 0xFFFF word, a fan's last pellet's [orig: RoundData_AddRound -
+			//  RoundData_SpawnRound @0x4FDC58, ring+28 = round+0x78
+			//  @0x4FDCF1..0x4FDCF5; the fans return the cursor @0x4EBE6D].
+			if (world->round_sim.spawn(*world, rp) >= 0)
+				ev.shot_seq = world->round_sim.last_allocated_round_id();
 		}
 	}
+	if (round_lands) world->out.rounds.add(ev);
 	// A rejected shot leaves this floor untouched. Alt fire stamps only
 	// its tick; primary adds the baked ADM action interval.
 	// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310, stamp @0x513740]

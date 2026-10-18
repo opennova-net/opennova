@@ -841,6 +841,13 @@ int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_
             death_cause::kBullet);
 }
 
+uint16_t RoundSim::allocate_round_id(uint16_t sequence_word) {
+    if (sequence_word != 0xFFFFu) return last_allocated_round_id_ = sequence_word; // @0x4EAB12
+    round_id_counter_ = (round_id_counter_ + 1u) & 0x1FFu;           // @0x4EAAF5..0x4EAB04
+    return last_allocated_round_id_ = static_cast<uint16_t>(
+            (uint32_t(local_slot_id) << 9) | round_id_counter_);
+}
+
 void RoundSim::reset() noexcept {
 	rounds.assign(kCapacity, LiveRound{});
 	active_count = 0;
@@ -1039,6 +1046,10 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         }
     }
     if (slot < 0) return -1; // pool exhausted [orig: allocator scan @0xB7DFA0 flags]
+    // The allocation stamps the round's id, which seeds its spread below
+    // [orig: RoundData_SpawnRound -> CEntityManager_AllocateSlot @0x4EC388; the
+    //  seed round+0x78 @0x4EC394].
+    const uint16_t round_id = allocate_round_id(params.shot_seq);
 
     int32_t final_yaw = params.dir_yaw_bam;
     int32_t final_pitch = params.dir_pitch_bam;
@@ -1072,7 +1083,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                             : weapon->error_hip_theta_fp16;
             const RandomSpreadOffset offset =
                     weapon_calc_random_spread_offset(
-                            spread, params.shot_seq, vertical,
+                            spread, round_id, vertical,
                             (weapon->flags & weapon_flag::kUseSpreadTwo) != 0);
             final_yaw = io::bam_add(final_yaw, offset.yaw_bam);
             final_pitch = io::bam_add(final_pitch, offset.pitch_bam);
@@ -1082,7 +1093,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         // weapon-rule check and always uses the ordinary helper.
         // [orig: RoundData_SpawnRound @0x4EC0D0]
         const RandomSpreadOffset offset = weapon_calc_random_spread_offset(
-                ammo->spread_error_fp16, params.shot_seq, 0, false);
+                ammo->spread_error_fp16, round_id, 0, false);
         final_yaw = io::bam_add(final_yaw, offset.yaw_bam);
         final_pitch = io::bam_add(final_pitch, offset.pitch_bam);
     }
@@ -1121,7 +1132,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.ammo_index = params.ammo_index;
     r.adm_index = params.adm_index;
     r.mass_q16 = signed_from_u32(uint32_t(ammo->weight_in_grains) << 16) / 250;
-    r.shot_seq = params.shot_seq;
+    r.shot_seq = round_id;
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
     r.prev_z_q16 = to_fixed(params.origin.z); // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
@@ -1298,7 +1309,9 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.ammo_index = params.ammo_index;
         r.adm_index = params.adm_index;
         r.mass_q16 = signed_from_u32(uint32_t(ammo.weight_in_grains) << 16) / 250;
-        r.shot_seq = params.shot_seq;
+        // Each pellet is its own allocation [orig: CEntityManager_AllocateSlot from
+        //  Weapon_SpawnProjectileBurst @0x4EB957 / ...WithSpread @0x4EBC10].
+        r.shot_seq = allocate_round_id(params.shot_seq);
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
         r.prev_z_q16 = to_fixed(params.origin.z); // [orig: the spawn's +0x80 copy @0x4ec655]
