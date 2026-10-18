@@ -19,7 +19,7 @@
 # that changes a deployment acts only on the one --deployment names: there is
 # no default and no environment variable for it. A read-only command (secrets
 # check, stripe check, infra output|list, app status|releases|logs|images,
-# fleet status|logs, backup list) without --deployment reads prod and says so.
+# fleet status|logs|console, backup list) without --deployment reads prod and says so.
 # Every command prints the deployment and the account it acts in, and the
 # toolbox refuses to act when its AWS credentials are another account's. On
 # prod, every command that changes something asks first: type prod (or pass
@@ -190,13 +190,15 @@
 #                                 fleet cluster's view (each machine's container
 #                                 instance, its ECS agent and its hostd task;
 #                                 the AMI pinned against Amazon's newest) and the
-#                                 service's view of them (its admin API, in a
-#                                 web task)
-#   fleet logs MACHINE [SLOT|hostd] [--since 1h] [--follow]
-#                                 a machine's logs (CloudWatch, the machines'
-#                                 log group): slot SLOT's server output, its
-#                                 hostd task's, or every slot stream of the
-#                                 machine; MACHINE is the service's id or the
+#                                 service's (its admin API, in a web task): what
+#                                 needs an admin, one line per machine
+#   fleet logs server ID [--start N] [--since 1h] [--follow]
+#   fleet logs machine ID [--since 1h] [--follow]
+#                                 one log (CloudWatch): a server's start (its
+#                                 newest or start N), a machine's hostd; the
+#                                 stream the service's rows name
+#   fleet console MACHINE         the machine's serial console (EC2), while EC2
+#                                 lists it; MACHINE is the service's id or the
 #                                 EC2 i-...
 #   fleet shell MACHINE           a root shell in the machine's hostd container
 #                                 (ECS Exec)
@@ -788,7 +790,7 @@ command_kind() {
     stripe) case "$action" in check) echo read ;; *) echo change ;; esac ;;
     infra) case "${action:-plan}" in output|list) echo read ;; *) echo change ;; esac ;;
     app) case "${action:-status}" in status|releases|logs|images) echo read ;; *) echo change ;; esac ;;
-    fleet) case "${action:-status}" in status|logs) echo read ;; *) echo change ;; esac ;;
+    fleet) case "${action:-status}" in status|logs|console) echo read ;; *) echo change ;; esac ;;
     backup) case "$action" in list) echo read ;; *) echo change ;; esac ;;
     aws|db) echo change ;;
     *) echo unknown ;;
