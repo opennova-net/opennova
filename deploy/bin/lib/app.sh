@@ -12,15 +12,17 @@
 # app: the programs on ECS (infra/aws/programs.tf), their releases
 # ---------------------------------------------------------------------------
 
-# The service's programs, in the order a deploy updates them: the gate (the
-# players' way in) last, the lobby (whose restart the players feel) before it.
-PROGRAMS=(worker controller web lobby gate)
+# The service's programs, in the order a deploy updates them: the job
+# programs first, then the fleet (whose machines' agents roll before it), web,
+# the lobby (whose restart the players feel) and the gate (the players' way in)
+# last.
+PROGRAMS=(worker data fleet web lobby gate)
 
 # A program's name, checked.
 program_name() {
   case "$1" in
-    gate|lobby|web|controller|worker) printf '%s' "$1" ;;
-    *) die "'$1' is no program (gate, lobby, web, controller, worker)" ;;
+    gate|lobby|web|fleet|worker|data) printf '%s' "$1" ;;
+    *) die "'$1' is no program (gate, lobby, web, fleet, worker, data)" ;;
   esac
 }
 
@@ -188,18 +190,18 @@ task_log() {
 # hostd unless the fleet publishes an image of its own.
 HOSTD_REPO="${OPENNOVA_HOSTD_REPO:-opennova-serve}"
 
-# Each image a release pins, by its key: the five programs', the portal's
+# Each image a release pins, by its key: the six programs', the portal's
 # nginx (web's second container) and the backup task's, the containers of
 # the task definitions it registers (named after their keys), and the hosted
 # machines' serve and hostd images.
-SERVICE_IMAGES=(gate lobby web controller worker portal backup)
+SERVICE_IMAGES=(gate lobby web fleet worker data portal backup)
 image_repo() {
   case "$1" in
-    gate|lobby|web|controller|worker|backup) printf 'opennova-novaworld-%s' "$1" ;;
+    gate|lobby|web|fleet|worker|data|backup) printf 'opennova-novaworld-%s' "$1" ;;
     portal) printf 'novaworld-web' ;;
     serve) printf 'opennova-serve' ;;
     hostd) printf '%s' "$HOSTD_REPO" ;;
-    *) die "'$1' is no image (gate, lobby, web, controller, worker, portal, backup, serve, hostd)" ;;
+    *) die "'$1' is no image (gate, lobby, web, fleet, worker, data, portal, backup, serve, hostd)" ;;
   esac
 }
 
@@ -275,8 +277,11 @@ ssm_secret_names() {
 
 # The registration of a revision of task definition $1 (described, with its
 # tags), on stdout: its containers' images from the release ($2, keyed by
-# container), hosting's images and switch for the containers that read
-# hosting ($3: serve, $4: hostd, $5: 1 on, 0 off), and its secrets: every one
+# container), hosting's switch and the serve image for the containers that
+# read the fleet's policy (ONNET_HOSTED_PROVIDER: web, the fleet, the worker),
+# the hostd image for those that read the machine driver's own settings too
+# (ONNET_HOSTED_DEPLOYMENT: the worker's alone) ($3: serve, $4: hostd, $5: 1
+# on, 0 off), and its secrets: every one
 # the template names, which SSM must hold ($6, a JSON array of parameter
 # names), and each optional one its `opennova.optional-secrets` label names
 # (name to parameter ARN: the first admin, the previous edge secret, billing's
@@ -292,10 +297,11 @@ def param: sub("^arn:[^:]*:ssm:[^:]*:[0-9]*:parameter"; "");
     . as $c
     | .image = ($images[$c.name] // error("the release has no image for container \($c.name)"))
     | if ((.environment // []) | any(.name == "ONNET_HOSTED_PROVIDER")) then
-        .environment = ([.environment[] | select(.name != "ONNET_HOSTED_SERVE_IMAGE" and .name != "ONNET_HOSTED_HOSTD_IMAGE")
+        ((.environment // []) | any(.name == "ONNET_HOSTED_DEPLOYMENT")) as $driver
+        | .environment = ([.environment[] | select(.name != "ONNET_HOSTED_SERVE_IMAGE" and .name != "ONNET_HOSTED_HOSTD_IMAGE")
                           | if .name == "ONNET_HOSTED_PROVIDER" and $hosting == "0" then .value = "none" else . end]
                         + (if $serve == "" then [] else [{name: "ONNET_HOSTED_SERVE_IMAGE", value: $serve}] end)
-                        + (if $hostd == "" then [] else [{name: "ONNET_HOSTED_HOSTD_IMAGE", value: $hostd}] end)
+                        + (if $hostd == "" or ($driver | not) then [] else [{name: "ONNET_HOSTED_HOSTD_IMAGE", value: $hostd}] end)
                         | sort_by(.name))
       else . end
     | .secrets = ([(.secrets // [])[] | . as $s | ($s.valueFrom | param) as $p
@@ -362,22 +368,27 @@ program_counts() {
 # a new deployment anyway) and follow the deployment that makes until ECS calls
 # it COMPLETED or FAILED (the circuit breaker's rollback), up to ROLL_TIMEOUT.
 # A service at 0 tasks with no `app down` recorded is one before the first
-# release: it starts at its desired count, and its floor is raised to its min
-# (Terraform's next apply sets the same).
+# release, and so is one whose program the down record names no count for (a
+# program added since `app down`, at the cutover the fleet and data): it starts
+# at its desired count (OPENNOVA_PROGRAM_COUNTS), and its floor is raised to
+# its min (Terraform's next apply sets the same).
 service_roll() {
-  local program="$1" td="$2" force="${3:-0}" cluster described current desired out dep_id waited=0 state counts
+  local program="$1" td="$2" force="${3:-0}" cluster described current desired out dep_id waited=0 state counts record
   cluster="$(ecs_cluster)"
   described="$(aws ecs describe-services --cluster "$cluster" --services "$program" --output json)" \
     || { err "describing the $program service failed"; return 1; }
   current="$(jq -r '.services[0].taskDefinition // ""' <<<"$described")"
   desired="$(jq -r '.services[0].desiredCount // 0' <<<"$described")"
   local args=(--cluster "$cluster" --service "$program" --task-definition "$td")
-  local down_rc=0
+  local down_rc=0 first=0
   if [ "$desired" -eq 0 ]; then
-    down_record >/dev/null || down_rc=$?
+    record="$(down_record)" || down_rc=$?
     [ "$down_rc" -ne 1 ] || return 1
+    if [ "$down_rc" -eq "$DOWN_NONE" ] || ! jq -e --arg p "$program" '.counts | has($p)' <<<"$record" >/dev/null 2>&1; then
+      first=1
+    fi
   fi
-  if [ "$desired" -eq 0 ] && [ "$down_rc" -eq "$DOWN_NONE" ]; then
+  if [ "$first" -eq 1 ]; then
     counts="$(program_counts "$program")"
     [ -n "$counts" ] || { err "infra.env names no task counts for $program (infra apply)"; return 1; }
     args+=(--desired-count "$(jq -r '.desired' <<<"$counts")")
@@ -693,9 +704,13 @@ app_rollback() {
   [[ "$to" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || die "'$to' is no release id"
   manifest="$(release_manifest "$bucket" "$to")" || exit 1
   # A release of the single service instance runs on no ECS service: going
-  # back past the cutover is the cutover's rollback.
+  # back past the cutover is the cutover's rollback. Nor does one from before
+  # the program split (the controller's: no fleet, no data program): its
+  # revisions name a program no service runs, and no fleet would lead.
   jq -e '(.programs | type) == "array" and (.task_definitions | type) == "object"' <<<"$manifest" >/dev/null 2>&1 \
     || die "release $to was made before the programs (its manifest names none): no program runs it"
+  jq -e '(.programs | index("fleet")) != null and (.programs | index("data")) != null' <<<"$manifest" >/dev/null 2>&1 \
+    || die "release $to was made before the program split (its programs name no fleet and no data program, the controller's era): no service runs its controller, so rolling back to it would leave the fleet unled. Roll forward instead (app deploy); going back past the split is the cutover's rollback (DEPLOY.md)"
   manifest="$(jq -c . <<<"$manifest")"
   confirm_prod "roll prod's programs back onto release $to" "$yes"
   # Rolled first, recorded once every program runs it.
@@ -751,7 +766,7 @@ app_logs() {
 # (ECS Exec; web's second container is `portal`).
 app_shell() {
   if [ $# -lt 1 ] || [ $# -gt 2 ]; then
-    die "app shell takes a PROGRAM (gate, lobby, web, controller, worker) and, for web, a CONTAINER (web, portal)"
+    die "app shell takes a PROGRAM (gate, lobby, web, fleet, worker, data) and, for web, a CONTAINER (web, portal)"
   fi
   local program container
   program="$(program_name "$1")" || exit 1
@@ -767,8 +782,10 @@ app_shell() {
 
 # app down / up: every service's count to 0, the counts kept in SSM
 # (.../down) and Application Auto Scaling held off meanwhile; up puts them
-# back. down keeps an earlier record (a second down records no zeros).
-DOWN_ORDER=(gate lobby web controller worker)
+# back, a program the record names no count for (one added since the down) at
+# its desired count (OPENNOVA_PROGRAM_COUNTS). down keeps an earlier record (a
+# second down records no zeros). The reverse of the deploy's order.
+DOWN_ORDER=(gate lobby web fleet data worker)
 scaling_suspended() {
   local program="$1" on="$2"
   aws application-autoscaling register-scalable-target --service-namespace ecs \
@@ -831,7 +848,11 @@ programs_up() {
   [ "$rc" -eq 0 ] \
     || die "no counts recorded ($SSM_PREFIX/down): the programs are not down (app status); infra apply sets a missing service's count"
   for program in "${PROGRAMS[@]}"; do
-    count="$(jq -r --arg p "$program" '.counts[$p] // 1' <<<"$record")"
+    count="$(jq -r --arg p "$program" '.counts[$p] // empty' <<<"$record")"
+    if [ -z "$count" ]; then
+      count="$(jq -r '.desired // empty' <<<"$(program_counts "$program")")"
+      [ -n "$count" ] || die "the down record names no count for $program, nor does infra.env (infra apply); nothing more was started"
+    fi
     aws ecs update-service --cluster "$cluster" --service "$program" --desired-count "$count" --output text --query 'service.serviceName' >/dev/null \
       || die "starting $program failed"
     scaling_suspended "$program" false

@@ -45,7 +45,7 @@ the whole bring-up.
   - `app deploy|images|releases|rollback|converge|status|restart|down|up|logs|shell`:
     releases (each program's task definition revision with the images pinned by digest,
     the manifest in SSM and S3; `app deploy --deployment prod --promote staging` takes
-    staging's release by digest) rolled out to the five ECS services, CloudWatch logs,
+    staging's release by digest) rolled out to the six ECS services, CloudWatch logs,
     an ECS Exec shell;
   - `db bootstrap|psql|reset-db|snapshot`, `backup now|list|restore|import`: the RDS
     database and its pg_dump copies, through one-off tasks of the backup task definition
@@ -73,7 +73,7 @@ the whole bring-up.
 - `host/fleet-image.sh`: the user data of `fleet bake-image`'s one-off builder, which bakes
   the hosted machines' image.
 - `compose/`: the local stack (`scripts/dev_stack.sh`, DEVELOPING.md; dev: no AWS account, no
-  credentials of any deployment): the five programs, the portal, PostgreSQL and Valkey (the
+  credentials of any deployment): the six programs, the portal, PostgreSQL and Valkey (the
   base file and the dev overlay), and the hosted servers' machines as containers (the hosting
   overlay). A deployment runs the same images as ECS services (`infra/aws/programs.tf`), not
   through compose.

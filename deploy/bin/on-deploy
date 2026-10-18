@@ -5,7 +5,7 @@
 # only OP_SERVICE_ACCOUNT_TOKEN; every other secret is read from the 1Password
 # vault at run time into a tmpfs (/run/secrets) that never touches disk, each
 # item once per run (the service account's requests are rate-limited). The
-# service's five programs (gate, lobby, web, controller, worker) run as ECS
+# service's six programs (gate, lobby, web, fleet, worker, data) run as ECS
 # services on Fargate in the deployment's cluster; nothing is reached over SSH:
 # a shell is ECS Exec, the database's commands one-off tasks.
 #
@@ -68,8 +68,8 @@
 #                                 plan that destroys or replaces an Elastic IP or
 #                                 its association, an instance or a network
 #                                 interface, the load balancer, the cluster or a
-#                                 program's service, the controller's Cloud Map
-#                                 namespace, the database, the cache or a bucket
+#                                 program's service, the fleet program's Cloud
+#                                 Map namespace, the database, the cache or a bucket
 #                                 unless --allow-destroy, and any plan that
 #                                 makes prod a gate address
 #   infra destroy [--yes]         (staging alone) destroy the deployment's stack
@@ -115,7 +115,7 @@
 #   app deploy [--tag T] [--image NAME=T|NAME=@sha256:D]... [--serve-tag T]
 #              [--hostd-tag T] [--promote staging | --images-from FILE|-]
 #              [--no-hosting] [--yes]
-#                                 pin the images by digest (--tag sets the five
+#                                 pin the images by digest (--tag sets the six
 #                                 programs', the portal's and the backup task's;
 #                                 --image one of them, or serve or hostd; an image
 #                                 given no tag keeps the current release's;
@@ -126,16 +126,17 @@
 #                                 with the release's images and the secrets SSM
 #                                 holds), roll the services to it, each followed
 #                                 until its deployment completes: worker,
-#                                 controller, web, lobby, then gate; then record
+#                                 data, fleet, web, lobby, then gate; then record
 #                                 the release (a program at no task before the
-#                                 first release starts at its count)
+#                                 first release naming it starts at its count)
 #   app images                    the current release's images, as JSON (what
 #                                 --images-from takes)
 #   app releases                  the deployment's releases, newest last
 #   app rollback [--to ID] [--yes]
 #                                 point every service back at the previous (or
 #                                 the named) release's revisions; refuses one
-#                                 made before the programs
+#                                 made before the programs or before the program
+#                                 split (no fleet, no data)
 #   app converge [--yes]          the current release again on Terraform's task
 #                                 definitions and SSM's secrets as they are now
 #                                 (after infra apply or secrets sync)
