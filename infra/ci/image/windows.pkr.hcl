@@ -3,8 +3,8 @@
 # Studio 2026's C++ build tools added, the toolchain GitHub's windows-latest
 # and the maintainers build with (VS 2022's MSVC 14.44 compiles and runs some
 # of the tree differently). vswhere -latest, and so ilammy/msvc-dev-cmd, finds
-# 2026. The AMI stays in the ci account, private; ci.yml's Windows legs name
-# it (image=ami-...).
+# 2026. The AMI stays in the ci account, private; .github/runs-on.yml names
+# it, and ci.yml's Windows legs name that (image=opennova-win25-vs2026).
 #
 # `./deploy/run.sh ci image` builds it (about an hour), as opennova-org
 # through the ci account's OrganizationAccountAccessRole: the builder runs in

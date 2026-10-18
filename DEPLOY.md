@@ -1508,9 +1508,10 @@ Once, in order:
    `windows-latest` and the maintainers build with. `./deploy/run.sh ci image` (Packer,
    about an hour, type `ci`) builds RunsOn's newest `windows25-full-x64` with Visual
    Studio 2026's C++ build tools added (`infra/ci/image`), a private AMI in the ci
-   account (about $5 a month of snapshot), and prints its id: put it in `ci.yml`'s
-   Windows legs (`image=ami-...`). Build it again for a newer Visual Studio or RunsOn
-   image; deregister the old AMI (and delete its snapshot) once `ci.yml` moves on.
+   account (about $5 a month of snapshot), and prints its id: put it in
+   `.github/runs-on.yml` (the image `opennova-win25-vs2026`, which `ci.yml`'s Windows
+   legs name). Build it again for a newer Visual Studio or RunsOn image; deregister the
+   old AMI (and delete its snapshot) once `runs-on.yml` moves on.
 
 A leg that sits queued: RunsOn's alert email, the account's quotas (a launch past them
 fails), or the GitHub App's installation. The labels (`cpu=16`, the instance families, the

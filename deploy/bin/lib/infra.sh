@@ -384,7 +384,7 @@ cmd_ci() {
 # OrganizationAccountAccessRole (the template's assume_role), with an
 # Administrator password made for the build alone (the image's last step
 # replaces it). About an hour; it prints the AMI, which ci.yml's Windows legs
-# then name (image=ami-...).
+# then name through .github/runs-on.yml.
 ci_image() {
   local json account ci_region
   take_yes "$@"
@@ -401,7 +401,7 @@ ci_image() {
     packer init "$CI_IMAGE_DIR" >/dev/null || die "packer init of $CI_IMAGE_DIR failed"
     packer build -color=false ${OPT_REST[@]+"${OPT_REST[@]}"} "$CI_IMAGE_DIR"
   ) || die "the image build failed; Packer removed what it made"
-  log "put the AMI above into ci.yml's Windows legs (image=ami-...)"
+  log "put the AMI above into .github/runs-on.yml (images: opennova-win25-vs2026: ami)"
 }
 
 # A shared stack (the zone's, the organization's), its state in prod's state
