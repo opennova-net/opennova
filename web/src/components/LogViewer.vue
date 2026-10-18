@@ -55,7 +55,7 @@
       >
         <li v-if="page && lines.length === 0" class="text-ink-muted">{{ q ? 'No line holds that text.' : 'No line yet.' }}</li>
         <li v-for="(line, index) in lines" :key="index" class="log-line whitespace-pre-wrap break-all">
-          <time v-if="line.at" :datetime="line.at" class="mr-2 text-ink-muted">{{ lineTime(line.at) }}</time>{{ line.text }}
+          <time v-if="line.at" :datetime="line.at" class="text-ink-muted">{{ lineTime(line.at) }}</time>{{ line.at ? ` ${line.text}` : line.text }}
         </li>
       </ol>
     </div>

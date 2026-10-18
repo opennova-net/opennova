@@ -33,7 +33,8 @@ describe('LogViewer', () => {
     const page = await mountViewer();
     expect(read).toHaveBeenCalledWith({ subject: 'server', id: 12, generation: 2, limit: 200 }, expect.anything());
     expect(page.get('.log-source').text()).toBe('CloudWatch /opennova/prod/servers, stream 12/g2');
-    expect(lineTexts(page)).toEqual(['2026-10-18 11:59:00[serve] serving on UDP 32768', '2026-10-18 11:59:30[serve] player joined']);
+    // The time and the line apart, for a screen reader too.
+    expect(lineTexts(page)).toEqual(['2026-10-18 11:59:00 [serve] serving on UDP 32768', '2026-10-18 11:59:30 [serve] player joined']);
     expect(page.text()).toContain('2 lines, oldest first');
     expect(page.find('#log-follow').exists()).toBe(true);
   });
