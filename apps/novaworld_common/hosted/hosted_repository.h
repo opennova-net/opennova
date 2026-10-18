@@ -68,6 +68,10 @@ struct HostedServer {
 	std::string failure_reason;
 	// It runs on a machine of its own (the own-machine add-on), not a shared one.
 	bool own_machine = false;
+	// The static address its owner asked it to run at (address_repository.h;
+	// an own-machine server's), kept through its restarts and moves; unset for
+	// none, and once the address lapses.
+	std::optional<int64_t> address_id;
 	// The trees it is pinned to (data_set_repository.h, ADR 0064): the base data
 	// set's and, with an expansion, the expansion's, taken from the data sets'
 	// current trees at its first start and kept through crash restarts and moves
@@ -121,6 +125,7 @@ enum class RequestOutcome : uint8_t {
 	AtLimit,      // `used` of its `max_servers` are live already
 	NoOwnMachine, // an own machine was asked for, and each the add-on pays for runs one
 	AtCapacity,   // `cap` servers are live, or the fleet has no place for it (fleet_has_room)
+	AddressUnavailable, // the address asked for is not the owner's, not ready, or another live server's
 };
 struct RequestResult {
 	RequestOutcome outcome = RequestOutcome::Created;
@@ -139,10 +144,15 @@ struct RequestResult {
 // one counts), and with `own_machine` fewer of them on own machines than the
 // add-on pays for; then the global cap, and with `fleet` the fleet's room under
 // that placement policy (the supervisor's planner, fleet_repository.h
-// fleet_has_room); and the row written (state requested, its event beside it).
+// fleet_has_room); with `address_id` (an own-machine server's), that address
+// the owner's, ready and no other live server's; and the row written (state
+// requested, its event beside it).
 RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
 		const std::vector<OfferedDataSet> &offered, int cap, int64_t now, bool own_machine = false,
-		const PlacementPolicy *fleet = nullptr);
+		const PlacementPolicy *fleet = nullptr, std::optional<int64_t> address_id = std::nullopt);
+// The live server's address let go (it lapsed: the supervisor places the
+// server again without it); false when it held none.
+bool clear_server_address(db::Database &db, int64_t id);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);
 // Server `id` when `owner_user_id` owns it, in any state; nullopt for no such

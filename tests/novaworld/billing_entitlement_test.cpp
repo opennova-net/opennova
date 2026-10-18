@@ -77,6 +77,7 @@ int test_status_truth_table() {
 		TEST_EXPECT(billing::status_grants(r.status) == r.grants);
 		TEST_EXPECT(billing::subscription_grants(tier_sub(1, r.status), kNow) == r.grants);
 		TEST_EXPECT(billing::subscription_grants(sub("om", ItemKind::OwnMachine, 0, r.status), kNow) == r.grants);
+		TEST_EXPECT(billing::subscription_grants(sub("sa", ItemKind::StaticAddress, 0, r.status), kNow) == r.grants);
 	}
 	// An unknown price, or a tier row with no tier, grants nothing.
 	TEST_EXPECT(!billing::subscription_grants(sub("u", ItemKind::Unknown, 0, "active"), kNow));
@@ -159,6 +160,17 @@ int test_entitlement_core() {
 	TEST_EXPECT(e.own_machines == 0 && e.max_servers == 0 && e.comp_own_machines == 1);
 	e = billing::entitlement_from(player(0, 1), { tier_sub(2, "active"), two_machines }, kNow);
 	TEST_EXPECT(e.own_machines == 3 && e.max_servers == 2);
+	// The static addresses: each subscription's and each comp one, used by no more
+	// than the own machines.
+	const SubscriptionRow address = sub("sa1", ItemKind::StaticAddress, 0, "active", kNow + kDay);
+	billing::AccountFacts comped = player(0, 1);
+	comped.comp_addresses = 1;
+	e = billing::entitlement_from(comped, { tier_sub(2, "active"), two_machines, address }, kNow);
+	TEST_EXPECT(e.own_machines == 3 && e.address_grants == 2 && e.static_addresses == 2 && e.comp_addresses == 1);
+	e = billing::entitlement_from(player(), { tier_sub(1, "active"), address }, kNow);
+	TEST_EXPECT(e.own_machines == 0 && e.address_grants == 1 && e.static_addresses == 0);
+	e = billing::entitlement_from(player(), { tier_sub(1, "active"), sub("sac", ItemKind::StaticAddress, 0, "canceled") }, kNow);
+	TEST_EXPECT(e.address_grants == 0);
 	// A past-due add-on keeps its machines and blocks a start.
 	e = billing::entitlement_from(
 			player(), { tier_sub(1, "active"), sub("omp", ItemKind::OwnMachine, 0, "past_due", kNow + kDay, 1) }, kNow);

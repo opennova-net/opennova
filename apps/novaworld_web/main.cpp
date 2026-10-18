@@ -144,6 +144,8 @@ int run(const program::Boot &boot) {
 	http.set_fleet_placement(hosting.fleet.placement);
 	// A fleet roll's preview: the image the launch templates pin.
 	http.set_fleet_image(hosting.fleet.image_id);
+	// The static addresses: on or off, and the zone they are named in.
+	http.set_addresses(hosting.addresses_on, hosting.fleet.address_zone);
 	// The admin usage view's limits: each container's memory and CPUs.
 	http.set_fleet_slots(hosting.fleet.slot_memory_mb, hosting.fleet.slot_cpus);
 	// The admin jobs page's schedules: every program's (the worker's and the

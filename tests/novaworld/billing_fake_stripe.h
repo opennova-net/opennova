@@ -93,6 +93,7 @@ public:
 		std::string customer;
 		std::string return_url;
 		std::string url;
+		std::string cancel_subscription; // flow_data[subscription_cancel][subscription]: "" for none
 	};
 
 	// The fake account's mode and clock (created stamps, Checkout's default expiry).
@@ -549,6 +550,12 @@ private:
 		const auto customer = customers.find(s.customer);
 		if (customer == customers.end() || customer->second.deleted) return missing("customer", s.customer);
 		s.return_url = param(r, "return_url").value_or("");
+		if (param(r, "flow_data[type]").value_or("") == "subscription_cancel") {
+			s.cancel_subscription = param(r, "flow_data[subscription_cancel][subscription]").value_or("");
+			const auto sub = subscriptions.find(s.cancel_subscription);
+			if (sub == subscriptions.end() || sub->second.customer != s.customer)
+				return missing("subscription", s.cancel_subscription);
+		}
 		s.id = next_id("bps_");
 		s.url = "https://billing.stripe.com/p/session/" + s.id;
 		portal_sessions.push_back(s);

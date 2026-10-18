@@ -74,8 +74,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && /tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin \
     && /usr/local/bin/aws --version
 
-# The programs call ec2, s3 (the s3 and s3api commands share its model) and
-# sesv2 alone (sts for a credentials check by hand): the help examples, the
+# The programs call ec2 (the machines, and the static addresses' Elastic IPs),
+# route53 (the static addresses' records, hosted/cloud/address_zone.h), s3 (the
+# s3 and s3api commands share its model) and sesv2 alone (sts for a
+# credentials check by hand); web reads CloudWatch, its logs and ECS through
+# curl's own SigV4 (infra/aws_api.h), never the CLI. The help examples, the
 # completer and its index, and every other service's model go (about 160 MB
 # of the CLI's 270). The models' root files (endpoints.json, partitions.json)
 # stay. Then the check: the commands the programs run still build, and a real
@@ -83,13 +86,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 # closed local port, so they can reach nothing).
 RUN dist=/usr/local/aws-cli/v2/current/dist \
     && data="$dist/awscli/botocore/data" \
-    && test -d "$data/ec2" && test -d "$data/s3" && test -d "$data/sts" && test -d "$data/sesv2" && test -f "$data/endpoints.json" \
+    && test -d "$data/ec2" && test -d "$data/route53" && test -d "$data/s3" && test -d "$data/sts" \
+    && test -d "$data/sesv2" && test -f "$data/endpoints.json" \
     && rm -rf "$dist/awscli/examples" "$dist/awscli/data/ac.index" "$dist/aws_completer" \
         /usr/local/aws-cli/v2/current/bin/aws_completer /usr/local/bin/aws_completer \
-    && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name s3 ! -name sts ! -name sesv2 -exec rm -rf {} + \
+    && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name route53 ! -name s3 ! -name sts ! -name sesv2 \
+        -exec rm -rf {} + \
     && aws ec2 describe-instances --generate-cli-skeleton >/dev/null \
     && aws ec2 run-instances --generate-cli-skeleton >/dev/null \
     && aws ec2 terminate-instances --generate-cli-skeleton >/dev/null \
+    && aws ec2 describe-addresses --generate-cli-skeleton >/dev/null \
+    && aws ec2 allocate-address --generate-cli-skeleton >/dev/null \
+    && aws ec2 associate-address --generate-cli-skeleton >/dev/null \
+    && aws ec2 disassociate-address --generate-cli-skeleton >/dev/null \
+    && aws ec2 release-address --generate-cli-skeleton >/dev/null \
+    && aws route53 change-resource-record-sets --generate-cli-skeleton >/dev/null \
+    && aws route53 get-change --generate-cli-skeleton >/dev/null \
     && aws s3api list-objects-v2 --generate-cli-skeleton >/dev/null \
     && aws s3api head-object --generate-cli-skeleton >/dev/null \
     && aws s3api upload-part --generate-cli-skeleton >/dev/null \

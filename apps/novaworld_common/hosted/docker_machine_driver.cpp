@@ -97,11 +97,14 @@ std::string tar_header(
 
 DockerMachineDriver::DockerMachineDriver(DockerMachineConfig config, EngineCall call) :
 		config_(std::move(config)), call_(std::move(call)) {
-	if (call_)
-		return;
-	const std::string base = config_.engine_url;
-	const int timeout_ms = config_.call_timeout_ms;
-	call_ = [base, timeout_ms](const std::string &method, const std::string &path,
+	if (!call_)
+		call_ = http_call(config_);
+}
+
+DockerMachineDriver::EngineCall DockerMachineDriver::http_call(const DockerMachineConfig &config) {
+	const std::string base = config.engine_url;
+	const int timeout_ms = config.call_timeout_ms;
+	return [base, timeout_ms](const std::string &method, const std::string &path,
 					const std::string &body, const std::string &content_type) {
 		std::vector<std::string> headers;
 		if (!content_type.empty())
@@ -197,7 +200,14 @@ std::string DockerMachineDriver::create_body(
 	host.set("RestartPolicy", std::move(restart));
 	body.set("HostConfig", std::move(host));
 	JsonValue endpoints = JsonValue::make_object();
-	endpoints.set(config.network, JsonValue::make_object());
+	JsonValue endpoint = JsonValue::make_object();
+	// A machine that carries a static address starts at it (docker_address_driver.h).
+	if (!launch.address.empty()) {
+		JsonValue ipam = JsonValue::make_object();
+		ipam.set("IPv4Address", io::json_string(launch.address));
+		endpoint.set("IPAMConfig", std::move(ipam));
+	}
+	endpoints.set(config.network, std::move(endpoint));
 	JsonValue networking = JsonValue::make_object();
 	networking.set("EndpointsConfig", std::move(endpoints));
 	body.set("NetworkingConfig", std::move(networking));

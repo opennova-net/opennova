@@ -23,8 +23,9 @@ constexpr const char *kMachineColumns =
 		"cloud_state, described_at, COALESCE(launched_for, 0), seen_state, seen_since_ms, "
 		"idle_since_ms, "
 		"drain_moving, was_draining, describe_asked_ms, launch_subnet, "
-		"COALESCE(agent_protocol, 0), agent_image, protocol_mismatch_since, lost_held_since_ms";
-constexpr size_t kMachineColumnCount = 33;
+		"COALESCE(agent_protocol, 0), agent_image, protocol_mismatch_since, lost_held_since_ms, "
+		"COALESCE(address_id, 0)";
+constexpr size_t kMachineColumnCount = 34;
 
 // The SQL test for a live machine (a live hosted server's is hosted_repository.h's).
 constexpr const char *kLiveMachineSql = "state NOT IN ('ended', 'failed')";
@@ -100,6 +101,7 @@ FleetMachineRow row_to_machine(const db::Row &r) {
 	m.agent_image = r.as_text(30).value_or("");
 	m.protocol_mismatch_since = r.as_text(31).value_or("");
 	m.lost_held_since_ms = r.as_int(32).value_or(0);
+	m.address_id = r.as_int(33).value_or(0);
 	return m;
 }
 
@@ -162,8 +164,8 @@ CreatedMachine create_machine(
 	out.bootstrap_token = random_secret(kMachineTokenChars);
 	const auto rows = db.query(
 			"INSERT INTO fleet_machines (provider, kind, slots, serve_image, reserved_for, "
-			"bootstrap_token_hash, bootstrap_expires_at, launched_for) "
-			"VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7), $8) RETURNING id;",
+			"bootstrap_token_hash, bootstrap_expires_at, launched_for, address_id) "
+			"VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7), $8, $9) RETURNING id;",
 			{ BindValue(machine.provider), BindValue(std::string(machine_kind_text(machine.kind))),
 					BindValue(static_cast<int64_t>(machine.slots)), BindValue(machine.serve_image),
 					machine.reserved_for > 0 ? BindValue(machine.reserved_for)
@@ -171,9 +173,17 @@ CreatedMachine create_machine(
 					BindValue(agent_secret_digest(out.bootstrap_token)),
 					BindValue(static_cast<double>(token_lifetime_s)),
 					machine.launched_for > 0 ? BindValue(machine.launched_for)
-											 : BindValue(std::monostate{}) });
+											 : BindValue(std::monostate{}),
+					machine.address_id > 0 ? BindValue(machine.address_id) : BindValue(std::monostate{}) });
 	out.id = rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 	return out;
+}
+
+std::string carried_address_ip(db::Database &db, int64_t id) {
+	const auto rows = db.query("SELECT a.public_ip FROM fleet_machines m JOIN hosted_addresses a ON a.id = m.address_id "
+							   "WHERE m.id = $1;",
+			{ BindValue(id) });
+	return rows.empty() ? std::string() : rows.front().as_text(0).value_or("");
 }
 
 bool mark_launched(db::Database &db, int64_t id, const LaunchedMachine &launched) {
@@ -250,6 +260,11 @@ std::optional<FleetMachineRow> find_machine_by_cloud_id(
 	if (rows.empty())
 		return std::nullopt;
 	return std::move(rows.front());
+}
+
+std::vector<FleetMachineRow> live_machines_carrying(db::Database &db, int64_t address_id) {
+	return query_machines(db, std::string("WHERE address_id = $1 AND ") + kLiveMachineSql + " ORDER BY id;",
+			{ BindValue(address_id) });
 }
 
 std::vector<FleetMachineRow> list_live_machines(db::Database &db) {

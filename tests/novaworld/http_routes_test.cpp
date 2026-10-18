@@ -35,6 +35,7 @@
 #include "connection_routes.h"
 #include "novaworld/billing_fake_stripe.h"
 #include "health.h"
+#include "hosted/address_jobs.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
 #include "hosted/console_drain.h"
@@ -7483,6 +7484,145 @@ int test_billing_capacity(Harness &h) {
 	return 0;
 }
 
+// The static addresses' routes (hosted/address_routes.h; the harness sells 4 in the
+// play.test zone): the add-on bought through Checkout once the account has an own
+// machine (address_limit before), its subscription on the account's billing until
+// named, the owner's name (the CSRF header, the name rules, one per subscription),
+// the Portal's cancel flow for it, the admin's view, rename and typed release, a
+// comp address within the own machines, the tiers' offer, and a start naming an
+// address only with an own machine.
+int test_address_routes(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	namespace hosted = opennova::novaworld_server::hosted;
+	const int64_t uma = make_account(h, "addr_uma", "pw-addr-uma");
+	const int64_t vic = make_account(h, "addr_vic", "pw-addr-vic");
+	const std::string uma_s = login_token(h, "10.66.0.1", "addr_uma", "pw-addr-uma");
+	const std::string vic_s = login_token(h, "10.66.0.2", "addr_vic", "pw-addr-vic");
+	TEST_EXPECT(uma > 0 && vic > 0 && !uma_s.empty() && !vic_s.empty());
+	auto post = [&h](const std::string &path, const std::string &session, const std::string &body) {
+		return h.send("POST", path, { kJson, kCsrf, with_session(session) }, body);
+	};
+	auto open_session = [&h](int64_t user) {
+		const auto customer = billing::customer_of(*h.pool.acquire(), user);
+		return customer ? customer->open_checkout_session : std::string();
+	};
+	auto json = crow::json::load(body_text(h.send("GET", "/api/billing/tiers")));
+	TEST_EXPECT(json && json["static_address"]["amount"].i() == 500 && json["static_address"]["available"].b());
+
+	// Uma on tier 1: no own machine yet, no address; with one, the address sells.
+	const std::string uma_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
+			{ billing::kMetaUserId, std::to_string(uma) }, { billing::kMetaUsername, "addr_uma" } });
+	TEST_EXPECT(billing::insert_customer(*h.pool.acquire(), uma, uma_cus, false));
+	h.stripe->add_subscription(uma_cus, "price_htier1", 1, "active", billing::unix_now() + 30 * 86400);
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), uma_cus, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	auto reply = post("/api/billing/checkout", uma_s, "{\"item\":\"static_address\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
+	TEST_EXPECT(post("/api/billing/checkout", uma_s, "{\"item\":\"own_machine\"}").code == 200);
+	TEST_EXPECT(!h.stripe->complete_checkout(open_session(uma)).empty());
+	// The success page's sync (an address needs the machine it is for synced).
+	TEST_EXPECT(post("/api/me/billing/sync", uma_s, "").code == 200);
+	reply = post("/api/billing/checkout", uma_s, "{\"item\":\"static_address\"}");
+	TEST_EXPECT(reply.code == 200);
+	const std::string address_session = open_session(uma);
+	const std::string address_sub = h.stripe->complete_checkout(address_session);
+	TEST_EXPECT(!address_sub.empty());
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), uma_cus, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	reply = h.send("GET", "/api/me/billing", { with_session(uma_s) });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["own_machines"].i() == 1 && json["static_addresses"].i() == 1 &&
+			json["address_subscriptions"].size() == 1 &&
+			str(json["address_subscriptions"][0]["stripe_subscription_id"]) == address_sub &&
+			json["address_subscriptions"][0]["address_id"].t() == crow::json::type::Null);
+	reply = post("/api/billing/checkout", uma_s, "{\"item\":\"static_address\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
+
+	// Her name for it.
+	TEST_EXPECT(h.send("GET", "/api/me/addresses").code == 401);
+	json = crow::json::load(body_text(h.send("GET", "/api/me/addresses", { with_session(uma_s) })));
+	TEST_EXPECT(json && json["enabled"].b() && str(json["zone"]) == "play.test" && json["unnamed"].i() == 1 &&
+			json["addresses"].size() == 0);
+	TEST_EXPECT(h.send("POST", "/api/me/addresses", { kJson, with_session(uma_s) }, "{\"name\":\"umas\"}").code == 403);
+	reply = post("/api/me/addresses", uma_s, "{\"name\":\"Uma's\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_name");
+	reply = post("/api/me/addresses", uma_s, "{\"name\":\"www\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_name");
+	reply = post("/api/me/addresses", uma_s, "{\"name\":7}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	reply = post("/api/me/addresses", uma_s, "{\"name\":\"umas-place\"}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 201 && json && str(json["address"]["name"]) == "umas-place" &&
+			str(json["address"]["hostname"]) == "umas-place.play.test" && str(json["address"]["state"]) == "allocating" &&
+			json["address"]["public_ip"].t() == crow::json::type::Null &&
+			str(json["address"]["stripe_subscription_id"]) == address_sub && !json["address"].has("allocation_id"));
+	const int64_t address = json["address"]["id"].i();
+	TEST_EXPECT(nws::jobs::job_pending(*h.pool.acquire(), std::string(hosted::kJobAddressAllocate) + ":" +
+			std::to_string(address)));
+	reply = post("/api/me/addresses", uma_s, "{\"name\":\"umas-second\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_address");
+	json = crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(uma_s) })));
+	TEST_EXPECT(json["address_subscriptions"][0]["address_id"].i() == address);
+
+	// Its cancel: the Portal's flow for that subscription alone.
+	reply = post("/api/billing/portal", uma_s, "{\"cancel_subscription\":\"" + address_sub + "\"}");
+	TEST_EXPECT(reply.code == 200);
+	TEST_EXPECT(h.stripe->portal_sessions.back().cancel_subscription == address_sub &&
+			h.stripe->portal_sessions.back().return_url.find("/me/addresses") != std::string::npos);
+	// (Uma's sixth draw from the checkout bucket, which the portal shares: 6 at once.)
+	reply = post("/api/billing/portal", uma_s, "{\"cancel_subscription\":\"sub_notyours\"}");
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+
+	// A start naming an address takes an own machine.
+	reply = post("/api/me/servers", uma_s, "{\"game_name\":\"Uma\",\"address_id\":" + std::to_string(address) + "}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+
+	// The admin's view: admin only; the address with its owner; held of sellable.
+	TEST_EXPECT(h.send("GET", "/api/admin/addresses", { with_session(uma_s) }).code == 403);
+	reply = h.send("GET", "/api/admin/addresses", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["held"].i() >= 1 && json["sellable"].i() == 4);
+	bool seen = false;
+	for (const auto &a : json["addresses"])
+		seen = seen || (a["id"].i() == address && a["owner"]["id"].i() == uma && str(a["dns_state"]) == "none");
+	TEST_EXPECT(seen);
+	// A comp address: none past the account's own machines.
+	reply = h.send("POST", "/api/admin/users/" + std::to_string(vic) + "/addresses", { kBearer, kJson },
+			"{\"name\":\"vics\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
+	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), vic, { 1, 1 }));
+	reply = h.send("POST", "/api/admin/users/" + std::to_string(vic) + "/addresses", { kBearer, kJson },
+			"{\"name\":\"umas-place\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "name_taken");
+	reply = h.send("POST", "/api/admin/users/" + std::to_string(vic) + "/addresses", { kBearer, kJson },
+			"{\"name\":\"vics\"}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 201 && json && str(json["address"]["source"]) == "comp" &&
+			json["address"]["stripe_subscription_id"].t() == crow::json::type::Null);
+	const int64_t vics = json["address"]["id"].i();
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/users/" + std::to_string(vic), { kBearer })));
+	TEST_EXPECT(json && json["addresses"].size() == 1 && json["addresses"][0]["id"].i() == vics &&
+			json["capacity"]["addresses"]["sold"].i() >= 2);
+	// Rename, then release with the name typed back.
+	reply = h.send("PUT", "/api/admin/addresses/" + std::to_string(vics), { kBearer, kJson }, "{\"name\":\"umas-place\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "name_taken");
+	reply = h.send("PUT", "/api/admin/addresses/" + std::to_string(vics), { kBearer, kJson }, "{\"name\":\"victors\"}");
+	TEST_EXPECT(reply.code == 200 && str(crow::json::load(body_text(reply))["address"]["name"]) == "victors");
+	TEST_EXPECT(h.send("PUT", "/api/admin/addresses/999999", { kBearer, kJson }, "{\"name\":\"nobody\"}").code == 404);
+	reply = h.send("POST", "/api/admin/addresses/" + std::to_string(vics) + "/release", { kBearer, kJson },
+			"{\"confirm\":\"vics\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "confirm_mismatch");
+	reply = h.send("POST", "/api/admin/addresses/" + std::to_string(vics) + "/release", { kBearer, kJson },
+			"{\"confirm\":\"victors\"}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["address"]["state"]) == "lapsed" && str(json["address"]["lapse_cause"]) == "admin");
+	reply = h.send("POST", "/api/admin/addresses/" + std::to_string(vics) + "/release", { kBearer, kJson },
+			"{\"confirm\":\"victors\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_releasable");
+	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), vic, { 0, 0 }));
+	return 0;
+}
+
 // POST /api/billing/webhook: no session and no CSRF header, the signature its
 // credential. Missing, wrong, stale and several-v1 signatures; a body past
 // 1 MiB (413); a signed body that is no event (400 invalid_json); an event of the
@@ -8048,6 +8188,7 @@ int run(Harness &h) {
 		{ "billing_routes", test_billing_routes },
 		{ "billing_checkout_guard", test_billing_checkout_guard },
 		{ "billing_capacity", test_billing_capacity },
+		{ "address_routes", test_address_routes },
 		{ "billing_webhook", test_billing_webhook },
 		{ "billing_admin", test_billing_admin },
 		{ "admin_user_detail", test_admin_user_detail },
@@ -8208,6 +8349,7 @@ int main(int argc, char **argv) {
 		stripe.add_price(harness_price("price_htier2", 1000));
 		stripe.add_price(harness_price("price_htier3", 1500));
 		stripe.add_price(harness_price("price_hown", 4500));
+		stripe.add_price(harness_price("price_haddr", 500));
 		nws::billing::BillingConfig billing_config;
 		billing_config.secret_key = "sk_test_harnesskey";
 		billing_config.webhook_secret = kWebhookSecret;
@@ -8216,6 +8358,8 @@ int main(int argc, char **argv) {
 		billing_config.tier_prices[2] = { "price_htier2" };
 		billing_config.tier_prices[3] = { "price_htier3" };
 		billing_config.own_machine_prices = { "price_hown" };
+		billing_config.static_address_prices = { "price_haddr" };
+		billing_config.sells_addresses = true;
 		TEST_EXPECT(nws::billing::check_billing_config(billing_config).empty());
 		nws::billing::Billing billing_service(billing_config, stripe, pool, nws::billing::instance_id(*pool.acquire()));
 		TEST_EXPECT(billing_service.sync().reconcile_all(nws::billing::unix_now()).completed);
@@ -8236,7 +8380,10 @@ int main(int argc, char **argv) {
 		// default 2 x 12 shared places, and own machines for every case's.
 		nws::hosted::PlacementPolicy placement;
 		placement.max_own = 16;
+		placement.max_addresses = 4;
 		http.set_fleet_placement(placement);
+		// The static addresses (test_address_routes), named in play.test.
+		http.set_addresses(true, "play.test");
 		// The usage view's slot limits: 256 MiB and 2 CPUs a container.
 		http.set_fleet_slots(256, 2.0);
 		TEST_EXPECT(http.start(config));

@@ -24,7 +24,7 @@ constexpr const char *kServerColumns =
 		"provider, machine_id, machine_address, admin_port, restarts, "
 		"failure_reason, created_at, updated_at, running_at, ended_at, own_machine, "
 		"machine_ref, slot, game_port, generation, serve_image, "
-		"data_set_id, expansion_id, base_tree_id, expansion_tree_id, update_requested";
+		"data_set_id, expansion_id, base_tree_id, expansion_tree_id, update_requested, address_id";
 
 BindValue optional_id(std::optional<int64_t> id) {
 	if (!id) return BindValue(std::monostate{});
@@ -70,6 +70,7 @@ HostedServer row_to_server(const db::Row &r) {
 	s.base_tree_id = r.as_int(32);
 	s.expansion_tree_id = r.as_int(33);
 	s.update_requested = r.as_int(34).value_or(0) != 0;
+	s.address_id = r.as_int(35);
 	return s;
 }
 
@@ -83,6 +84,17 @@ std::vector<HostedServer> query_servers(
 	for (const auto &r : db.query(std::string("SELECT ") + kServerColumns + " FROM hosted_servers " + tail, binds))
 		out.push_back(row_to_server(r));
 	return out;
+}
+
+// Whether static address `address_id` (address_repository.h) may be the new
+// server's: the owner's, ready, and no live server's.
+bool address_free_for(db::Database &db, int64_t address_id, int64_t owner_user_id) {
+	return !db.query(std::string("SELECT 1 FROM hosted_addresses a WHERE a.id = $1 AND a.owner_user_id = $2 "
+								 "AND a.state = 'ready' AND NOT EXISTS (SELECT 1 FROM hosted_servers s "
+								 "WHERE s.address_id = a.id AND s.") +
+							kLiveServerSql + ");",
+						  { BindValue(address_id), BindValue(owner_user_id) })
+					.empty();
 }
 
 void insert_event(db::Database &db, int64_t id, const std::string &from, const std::string &to,
@@ -110,7 +122,7 @@ bool is_live(State state) { return state != State::Stopped && state != State::Fa
 
 RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
 		const std::vector<OfferedDataSet> &offered, int cap, int64_t now, bool own_machine,
-		const PlacementPolicy *fleet) {
+		const PlacementPolicy *fleet, std::optional<int64_t> address_id) {
 	RequestResult out;
 	if (check_settings(settings, offered)) {
 		out.outcome = RequestOutcome::InvalidSettings;
@@ -156,11 +168,16 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 		out.outcome = RequestOutcome::AtCapacity;
 		return out;
 	}
+	// Its address, read under the same lock: no other start takes it between.
+	if (address_id && (!own_machine || !address_free_for(db, *address_id, owner_user_id))) {
+		out.outcome = RequestOutcome::AddressUnavailable;
+		return out;
+	}
 	const auto inserted = db.query(
 			"INSERT INTO hosted_servers (owner_user_id, state, data_set_id, game_name, max_players, "
 			"game_password, time_limit, kill_limit, max_score, respawn, start_delay, team_ff, "
-			"expansion_id, missions, own_machine) "
-			"VALUES ($1, 'requested', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) "
+			"expansion_id, missions, own_machine, address_id) "
+			"VALUES ($1, 'requested', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) "
 			"RETURNING id;",
 			{ BindValue(owner_user_id), BindValue(settings.data_set_id), BindValue(settings.game_name),
 					BindValue(static_cast<int64_t>(settings.max_players)),
@@ -171,7 +188,8 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 					BindValue(static_cast<int64_t>(settings.respawn)),
 					BindValue(static_cast<int64_t>(settings.start_delay)),
 					BindValue(db::Bool{ settings.team_ff }), optional_id(settings.expansion_id),
-					BindValue(join_missions(settings.missions)), BindValue(db::Bool{ own_machine }) });
+					BindValue(join_missions(settings.missions)), BindValue(db::Bool{ own_machine }),
+					optional_id(address_id) });
 	out.id = inserted.front().as_int(0).value_or(0);
 	insert_event(db, out.id, "", state_name(State::Requested), "requested by its owner");
 	tx.commit();
@@ -310,6 +328,12 @@ bool transition(db::Database &db, int64_t id, State from, State to, const std::s
 	}
 	tx.commit();
 	return true;
+}
+
+bool clear_server_address(db::Database &db, int64_t id) {
+	db.exec("UPDATE hosted_servers SET address_id = NULL, updated_at = now() WHERE id = $1 AND address_id IS NOT NULL;",
+			{ BindValue(id) });
+	return db.changes() > 0;
 }
 
 bool reset_restarts(db::Database &db, int64_t id) {

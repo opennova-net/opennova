@@ -1210,9 +1210,13 @@ int test_fleet_config() {
 				c.placement.max_own == 2);
 		TEST_EXPECT(c.idle_minutes == 30 && c.slot_memory_mb == 512 && c.slot_cpus == 1.0);
 		TEST_EXPECT(c.slot_pids == 128 && c.serve_image.empty() && c.image_id.empty());
+		// No static addresses sold, and no zone.
+		TEST_EXPECT(c.placement.max_addresses == 0 && c.address_zone.empty());
 		hosted::DriverConfig d;
 		TEST_EXPECT(hosted::parse_driver_config(env_of({}), c, d, errors) && errors.empty());
 		TEST_EXPECT(d.machine_script_path == "/app/hosted/machine_user_data.sh");
+		TEST_EXPECT(d.addresses.zone_id.empty() && d.addresses.zone_file.empty() &&
+				d.addresses.docker_range.empty());
 		TEST_EXPECT(d.internal_url.empty() && d.ec2.cluster.empty() &&
 				d.docker.service_url.empty() && d.docker.engine_url.empty());
 		TEST_EXPECT(d.ec2.admin_address == "127.0.0.1");
@@ -1238,7 +1242,12 @@ int test_fleet_config() {
 				{ "ONNET_HOSTED_MACHINE_SCRIPT", "/srv/machine.sh" },
 				{ "ONNET_HOSTED_DOCKER_URL", " http://docker-api:2375 " },
 				{ "ONNET_HOSTED_DOCKER_NETWORK", "opennova-dev" },
-				{ "ONNET_HOSTED_DOCKER_DATA_FROM", "opennova-dev-machine-data-1" } });
+				{ "ONNET_HOSTED_DOCKER_DATA_FROM", "opennova-dev-machine-data-1" },
+				{ "ONNET_FLEET_MAX_ADDRESSES", "4" },
+				{ "ONNET_HOSTED_ADDRESS_ZONE", "play.opennova.net" },
+				{ "ONNET_HOSTED_ADDRESS_ZONE_ID", "Z0123456789ABC" },
+				{ "ONNET_HOSTED_ADDRESS_ZONE_FILE", "/var/lib/opennova/zone/play.localhost.zone" },
+				{ "ONNET_HOSTED_DOCKER_ADDRESSES", "172.30.77.64/28" } });
 		hosted::FleetConfig c;
 		std::vector<std::string> errors;
 		const bool ok = hosted::parse_fleet_config(env, c, errors);
@@ -1253,6 +1262,8 @@ int test_fleet_config() {
 				c.placement.max_own == 0);
 		TEST_EXPECT(c.idle_minutes == 45 && c.slot_memory_mb == 768 && c.slot_cpus == 0.5);
 		TEST_EXPECT(c.serve_image == kImage && c.image_id == "ami-0123456789abcdef0");
+		// The static addresses' policy: how many are sold and the zone they are named in.
+		TEST_EXPECT(c.placement.max_addresses == 4 && c.address_zone == "play.opennova.net");
 		// What the agent routes take from it: its networks.
 		const hosted::AgentRouteConfig routes = hosted::agent_route_config(c);
 		TEST_EXPECT(routes.admitted.size() == 2);
@@ -1276,6 +1287,11 @@ int test_fleet_config() {
 				d.docker.data_from == "opennova-dev-machine-data-1");
 		TEST_EXPECT(d.docker.deployment == kDeployment && d.docker.image == kHostdImage &&
 				d.docker.service_url == kServiceUrl && d.docker.admin_address == "10.44.0.10");
+		// The static addresses' drivers' own: the zone's id (ec2), its file and the
+		// addresses (docker).
+		TEST_EXPECT(d.addresses.zone_id == "Z0123456789ABC" &&
+				d.addresses.zone_file == "/var/lib/opennova/zone/play.localhost.zone" &&
+				d.addresses.docker_range == "172.30.77.64/28");
 	}
 	// Every refusal names its variable and keeps the default, the policy's and the
 	// drivers' alike.

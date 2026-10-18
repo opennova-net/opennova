@@ -62,6 +62,9 @@ namespace infra { class InfraStatus; }
 //   support tiers       — BillingRoutes (billing/billing_routes.h): the tiers,
 //                         the account's billing, checkout and portal, the
 //                         Stripe webhook and the admin's billing view
+//   static addresses    — AddressRoutes (hosted/address_routes.h): the
+//                         owner's addresses and their names, the admin's view,
+//                         rename, release and comp addresses
 //   background jobs     — JobRoutes (jobs/job_routes.h): the admin's view of
 //                         the job queue and its actions on it
 //   infrastructure      — InfraRoutes (infra/infra_routes.h): the admin's
@@ -146,6 +149,13 @@ public:
 	// ONNET_FLEET_IMAGE_ID), which a fleet roll's preview holds each machine's
 	// against. Set before start().
 	void set_fleet_image(std::string image_id) { fleet_image_ = std::move(image_id); }
+	// Whether the static addresses are on (parts.h HostedPolicy::addresses_on)
+	// and the play zone they are named in: the address routes and the servers'
+	// and accounts' views. Set before start(); unset, off.
+	void set_addresses(bool on, std::string zone) {
+		addresses_on_ = on;
+		address_zone_ = std::move(zone);
+	}
 
 	// The periodic jobs the deployment's programs schedule (parts.h
 	// periodic_jobs, from the same settings): the admin's jobs page shows each
@@ -283,6 +293,9 @@ private:
 	std::string fleet_image_;
 	// The hosted routes' placement policy (set_fleet_placement).
 	hosted::PlacementPolicy fleet_placement_;
+	// The static addresses (set_addresses).
+	bool addresses_on_ = false;
+	std::string address_zone_;
 	// The outbound mail (set_mail_enabled).
 	bool mail_on_ = false;
 	// config.web_host, set in start() before Crow runs (host_url() /

@@ -28,7 +28,9 @@
 //               ONNET_HOSTED_DOCKER_NETWORK, the mounts of the container
 //               ONNET_HOSTED_DOCKER_DATA_FROM taken read-only (the local object
 //               store's directory, at the path the programs see it: the agent
-//               copies the trees its servers need out of it, ADR 0064), docker's
+//               copies the trees its servers need out of it, ADR 0064), at the
+//               static address it carries when it carries one
+//               (MachineLaunch::address, IPAMConfig.IPv4Address), docker's
 //               init as PID 1,
 //               never restarted; then the token as a file (PUT
 //               /containers/<name>/archive: the machine's user-data, never an
@@ -122,6 +124,9 @@ public:
 
 	// Over `call`, or, unset, HTTP to config.engine_url.
 	explicit DockerMachineDriver(DockerMachineConfig config, EngineCall call = {});
+	// The engine's API over HTTP at config.engine_url, each call bounded by
+	// config.call_timeout_ms.
+	static EngineCall http_call(const DockerMachineConfig &config);
 
 	// "" when `config` can run, else why not (a boot warning; hosting off).
 	// Every program asks it, so each decides alike whether hosting is on.

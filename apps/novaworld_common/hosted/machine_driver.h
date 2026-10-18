@@ -60,6 +60,10 @@ struct MachineLaunch {
 	// when it could not (a database error, or the row left launching): the
 	// launch then calls nothing more and fails. Null: nothing is recorded.
 	std::function<bool(const std::string &subnet)> record_subnet;
+	// The static address it carries (address_repository.h), "" for none: the
+	// docker driver starts the machine at it; on EC2 the worker associates it
+	// once the machine is launched (address_jobs.h address.associate).
+	std::string address;
 };
 
 // The cloud's answer to a launch.

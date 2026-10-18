@@ -91,6 +91,7 @@ struct SyncStatus {
 	// checked: what GET /api/billing/tiers shows.
 	std::array<std::optional<PriceInfo>, kTierCount + 1> tier_prices;
 	std::optional<PriceInfo> own_machine_price;
+	std::optional<PriceInfo> static_address_price; // none while no list is set
 	// The last full reconcile that completed (Unix seconds; 0: none yet), and
 	// why the last one did not ("" when it did).
 	int64_t last_reconcile_at = 0;

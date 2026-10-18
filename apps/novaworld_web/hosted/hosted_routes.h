@@ -45,7 +45,8 @@ namespace hosted {
 // its place in the fleet (machine_ref, slot, game_port, generation,
 // serve_image), its pins and whether it is outdated, and its listing's
 // players besides. Never its admin password. Without its events.
-crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin);
+// With `zone` (the play zone, "" for none), its address's hostname too.
+crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin, const std::string &zone = {});
 
 // An offered data set (data_set_repository.h) as GET /api/me/servers lists it:
 // {id, display_name, title, version, missions [{file, title}], limits, expansions
@@ -76,6 +77,9 @@ public:
 	// ready current tree, data_set_repository.h offered_data_sets). Before
 	// register_routes().
 	void configure(const ServerConfig &config, const PlacementPolicy &fleet);
+	// The play zone the static addresses are named in (the servers' address
+	// hostname); before register_routes().
+	void set_address_zone(std::string zone) { address_zone_ = std::move(zone); }
 	void register_routes(WebApp &app);
 
 	// What configure decided (the fleet routes report them): a driver, its
@@ -99,6 +103,7 @@ private:
 	std::string provider_ = "none";
 	int cap_ = 24;
 	PlacementPolicy fleet_;
+	std::string address_zone_;
 	RateLimiter start_stop_per_user_;
 };
 

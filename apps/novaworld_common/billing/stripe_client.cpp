@@ -396,12 +396,18 @@ StripeResult<CheckoutSession> StripeClient::get_checkout_session(const std::stri
 }
 
 StripeResult<std::string> StripeClient::create_portal_session(const std::string &customer,
-		const std::string &return_url) {
+		const std::string &return_url, const std::string &cancel_subscription) {
 	if (!is_stripe_id(customer)) return refused<std::string>(not_an_id("the customer", customer));
 	if (return_url.empty()) return refused<std::string>("no return URL");
-	return exchange<std::string>(api_,
-			post("/v1/billing_portal/sessions", { { "customer", customer }, { "return_url", return_url } }),
-			"portal session", portal_url_from_json);
+	Params params = { { "customer", customer }, { "return_url", return_url } };
+	if (!cancel_subscription.empty()) {
+		if (!is_stripe_id(cancel_subscription))
+			return refused<std::string>(not_an_id("the subscription", cancel_subscription));
+		params.emplace_back("flow_data[type]", "subscription_cancel");
+		params.emplace_back("flow_data[subscription_cancel][subscription]", cancel_subscription);
+	}
+	return exchange<std::string>(api_, post("/v1/billing_portal/sessions", params), "portal session",
+			portal_url_from_json);
 }
 
 StripeResult<SubscriptionPage> StripeClient::list_subscriptions(const SubscriptionQuery &query) {

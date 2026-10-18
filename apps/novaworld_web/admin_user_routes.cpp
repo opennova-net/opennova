@@ -4,6 +4,8 @@
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
 #include "billing/tiers.h"
+#include "hosted/address_repository.h"
+#include "hosted/address_routes.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/hosted_routes.h"
 #include "http_json.h"
@@ -179,7 +181,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	// tier_servers, own_machines, can_start}), "capacity" (the service's sold
 	// capacity against what the fleet sells, capacity_json),
 	// "servers" (its hosted servers: the live ones by id, then its newest 10
-	// ended), "billing" ({livemode, stripe_customer_id (null for none),
+	// ended), "addresses" (its static addresses, the held ones first:
+	// hosted/address_routes.h address_json, with the admin's fields), "billing" ({livemode, stripe_customer_id (null for none),
 	// subscriptions: [{stripe_subscription_id, item, tier, quantity, status,
 	// entitled, current_period_end, cancel_at_period_end}]})}. 404 not_found
 	// for no player (a hosted server's service account included).
@@ -199,8 +202,12 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			out["capacity"] = capacity_json(*db_conn);
 			std::vector<crow::json::wvalue> servers;
 			for (const hosted::HostedServer &s : hosted::list_servers_of(*db_conn, id))
-				servers.push_back(hosted::server_json(*db_conn, s, false));
+				servers.push_back(hosted::server_json(*db_conn, s, false, address_zone_));
 			out["servers"] = std::move(servers);
+			std::vector<crow::json::wvalue> addresses;
+			for (const hosted::HostedAddress &a : hosted::addresses_of(*db_conn, id))
+				addresses.push_back(hosted::address_json(*db_conn, a, address_zone_, true));
+			out["addresses"] = std::move(addresses);
 			crow::json::wvalue billing_ids;
 			const auto customer = billing::customer_of(*db_conn, id);
 			billing_ids["livemode"] = customer && customer->livemode;

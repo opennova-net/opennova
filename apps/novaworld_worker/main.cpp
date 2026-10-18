@@ -1,14 +1,14 @@
 // opennova-novaworld-worker: a worker (program.h). The job pool
 // (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) and the handlers it runs:
 // the prunes (the service's, the website's, the hosted stats'), the mail it
-// sends, the billing sync and the fleet's machine driver calls; and the
-// scheduler of its own periodic kinds (parts.h worker_schedule), in every
-// worker process with no election (the schedule keys keep each bucket
-// single). What it runs is what its scheduler, the fleet's supervisor and
-// web's routes enqueued; any number of worker processes share the queue. The
-// data sets' jobs are the data program's (apps/novaworld_data). Its watchdog
-// watches the pool's claim loop and the scheduler's ticks: a slow job occupies
-// its worker, never a watched loop.
+// sends, the billing sync, the fleet's machine driver calls and the static
+// addresses' cloud and DNS calls; and the scheduler of its own periodic kinds
+// (parts.h worker_schedule), in every worker process with no election (the
+// schedule keys keep each bucket single). What it runs is what its scheduler,
+// the fleet's supervisor and web's routes enqueued; any number of worker
+// processes share the queue. The data sets' jobs are the data program's
+// (apps/novaworld_data). Its watchdog watches the pool's claim loop and the
+// scheduler's ticks: a slow job occupies its worker, never a watched loop.
 
 #include "ecs_metadata.h"
 #include "parts.h"
@@ -16,7 +16,11 @@
 
 #include "billing/billing_jobs.h"
 #include "billing/entitlement.h"
+#include "hosted/address_jobs.h"
+#include "hosted/address_zone.h"
+#include "hosted/docker_address_driver.h"
 #include "hosted/docker_machine_driver.h"
+#include "hosted/ec2_address_driver.h"
 #include "hosted/ec2_machine_driver.h"
 #include "hosted/fleet_jobs.h"
 #include "hosted/limits_hold.h"
@@ -27,6 +31,7 @@
 #include "jobs/worker_pool.h"
 
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -37,23 +42,27 @@ namespace {
 using namespace opennova;
 using namespace opennova::novaworld_server;
 
-// The machine driver over a driver setup (parts.h driver_setup). Its members
-// go in reverse: the driver first, then its runner, then the scratch
-// directory.
+// The machine driver over a driver setup (parts.h driver_setup), and with the
+// static addresses on their driver and their zone (hosted/address_driver.h,
+// hosted/address_zone.h) over the same runner. Its members go in reverse: the
+// drivers first, then their runner, then the scratch directory.
 struct MachineDriverStack {
 	ScratchDir scratch; // the ec2 driver's
 	std::unique_ptr<proc::CommandRunner> runner;
 	std::unique_ptr<hosted::MachineDriver> driver;
+	std::unique_ptr<hosted::AddressDriver> addresses;
+	std::unique_ptr<hosted::ZoneDriver> zone;
 };
 
-// The driver `provider` names over `setup`: the ec2 driver over its own
+// The driver `hosting` names over `setup`: the ec2 driver over its own
 // scratch directory and AWS CLI runner, or the docker driver over the Docker
-// Engine API (the local stack's); no driver, with `error`, when its scratch
-// directory cannot be made.
+// Engine API (the local stack's), each with the static addresses' driver and
+// zone while they are on (the ec2 driver's: Elastic IPs and Route 53, over its
+// runner); no driver, with `error`, when its scratch directory cannot be made.
 MachineDriverStack make_machine_driver(
-		const std::string &provider, const DriverSetup &setup, std::string &error) {
+		const HostedPolicy &hosting, const DriverSetup &setup, std::string &error) {
 	MachineDriverStack stack;
-	if (provider == "ec2") {
+	if (hosting.provider == "ec2") {
 		hosted::Ec2MachineConfig ec2 = setup.driver.ec2;
 		stack.scratch = ScratchDir::make("opennova-hosted-", error);
 		if (stack.scratch.empty()) {
@@ -63,10 +72,30 @@ MachineDriverStack make_machine_driver(
 		ec2.scratch_dir = stack.scratch.path().u8string();
 		stack.runner = std::make_unique<proc::ProcessCommandRunner>(
 				proc::ProcessCommandRunner::service_environment(), ec2.scratch_dir);
+		if (hosting.addresses_on) {
+			hosted::Ec2AddressConfig addresses;
+			addresses.aws_cli = ec2.aws_cli;
+			addresses.region = ec2.region;
+			addresses.deployment = ec2.deployment;
+			stack.addresses = std::make_unique<hosted::Ec2AddressDriver>(std::move(addresses), *stack.runner);
+			hosted::Route53ZoneConfig zone;
+			zone.aws_cli = ec2.aws_cli;
+			zone.region = ec2.region;
+			zone.zone = hosting.fleet.address_zone;
+			zone.zone_id = setup.driver.addresses.zone_id;
+			stack.zone = std::make_unique<hosted::Route53Zone>(std::move(zone), *stack.runner);
+		}
 		stack.driver = std::make_unique<hosted::Ec2MachineDriver>(std::move(ec2), *stack.runner);
 		return stack;
 	}
 	stack.driver = std::make_unique<hosted::DockerMachineDriver>(setup.driver.docker);
+	if (hosting.addresses_on) {
+		const hosted::DriverConfig::Addresses &a = setup.driver.addresses;
+		std::string why;
+		const auto range = hosted::DockerAddressDriver::parse_range(a.docker_range, why);
+		stack.addresses = std::make_unique<hosted::DockerAddressDriver>(*range, setup.driver.docker);
+		stack.zone = std::make_unique<hosted::FileZone>(hosting.fleet.address_zone, a.zone_file);
+	}
 	return stack;
 }
 
@@ -91,16 +120,17 @@ int run(const program::Boot &boot) {
 	}
 	MailStack mail = make_mail(config);
 	const HostedPolicy hosting = hosted_policy(config);
-	// With hosting on, the driver that launches its machines: its settings
-	// incomplete is this boot's FATAL, never hosting off here while web and the
-	// fleet, which read the policy alone, take starts.
+	// With hosting on, the driver that launches its machines (and, with the
+	// static addresses on, theirs): its settings incomplete is this boot's
+	// FATAL, never hosting off here while web and the fleet, which read the
+	// policy alone, take starts and sell addresses.
 	MachineDriverStack machines;
 	if (hosting.on) {
 		DriverSetup driver;
 		std::string error;
 		if (!driver_setup(hosting, driver, error))
 			return program::fatal("the machine driver: " + error);
-		machines = make_machine_driver(hosting.provider, driver, error);
+		machines = make_machine_driver(hosting, driver, error);
 		if (!machines.driver)
 			return program::fatal("the machine driver: " + error);
 	}
@@ -115,8 +145,17 @@ int run(const program::Boot &boot) {
 				[](db::Database &db) { hosted::limits_hold::reconciled(db); });
 		billing::register_billing_jobs(registry, billing->sync());
 	}
-	if (machines.driver)
-		hosted::register_fleet_jobs(registry, *machines.driver, hosting.fleet.placement);
+	if (machines.driver) {
+		hosted::AddressDriver *addresses = machines.addresses.get();
+		hosted::register_fleet_jobs(registry, *machines.driver, hosting.fleet.placement, {},
+				addresses == nullptr
+						? std::function<void(db::ConnectionPool &)>()
+						: [addresses](db::ConnectionPool &pool) {
+							  hosted::sweep_addresses(pool, *addresses);
+						  });
+		if (addresses != nullptr)
+			hosted::register_address_jobs(registry, *addresses, *machines.zone);
+	}
 
 	jobs::WorkerPoolConfig worker_config;
 	worker_config.threads = config.worker_threads;

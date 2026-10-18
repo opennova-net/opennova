@@ -6,8 +6,9 @@
 //
 // - The hosted servers' policy (hosted_policy): whether hosting is on, its
 //   provider, the fleet's policy settings (placement, the slots' limits, the
-//   cap, the serve image), the object store its data sets' trees live in and
-//   the supervisor's MachineProfile. Web's routes (a start's at_capacity, the
+//   cap, the serve image), the object store its data sets' trees live in, the
+//   supervisor's MachineProfile and whether the static addresses are on (with
+//   their play zone's name). Web's routes (a start's at_capacity, the
 //   list's `full`), the fleet's supervisor and the worker's fleet jobs read
 //   the same environment the same way.
 // - The machine driver's setup (driver_setup): the worker's alone, which
@@ -86,6 +87,12 @@ struct HostedPolicy {
 	hosted::FleetConfig fleet;
 	// The supervisor's view of the driver's machines (the fleet's).
 	hosted::MachineProfile profile;
+	// The static addresses (hosted/address_repository.h) are on: hosting on,
+	// ONNET_FLEET_MAX_ADDRESSES above 0 and ONNET_HOSTED_ADDRESS_ZONE a zone
+	// name (no name: a boot warning). Off, the fleet sells none
+	// (fleet.placement.max_addresses is 0). Their drivers' settings are the
+	// worker's (driver_setup).
+	bool addresses_on = false;
 };
 
 // The hosted servers' policy ONNET_HOSTED_PROVIDER names, over the object store
@@ -101,7 +108,9 @@ HostedPolicy hosted_policy(const ServerConfig &config);
 
 // The machine driver's settings over a policy that is on (the worker's): the
 // drivers' own variables (hosted/fleet_config.h parse_driver_config) and, for
-// the ec2 driver, its machine script's text, each driver's check_config passed.
+// the ec2 driver, its machine script's text, each driver's check_config passed;
+// with the static addresses on, their drivers' settings too (the play zone's
+// Route 53 id for ec2; the zone file and the addresses for docker).
 struct DriverSetup {
 	hosted::DriverConfig driver;
 };
