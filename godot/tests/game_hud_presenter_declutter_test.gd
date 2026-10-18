@@ -201,7 +201,6 @@ func test_world_points_project_through_the_presenter_view_projection() -> void:
 	for i in 2:
 		var frame_input := player.before_world_tick(dt, false, true)
 		world.tick(camera.global_position, camera.global_transform, dt, frame_input)
-		player.after_world_tick()
 	var through: Camera3D = player.projection_camera()
 	var target: SubViewport = player.projection_viewport()
 	assert_not_null(through, "the 4:3 mode over a 1024x600 surface draws through a target")

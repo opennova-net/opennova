@@ -16,11 +16,16 @@ func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
+# One shell frame: the input sample, then the world tick. The tick's local-view
+# leg presents the frame (GameWorld::present_local_view_frame), so the camera is
+# composed once a frame, as retail's render frame composes it once
+# [orig: GameLoop_RenderFrame @0x521310 once per outer frame from Game_MainLoop
+#  @0x52BAC6; Render_ProcessMainSceneFrame @0x5CA34D]. A second
+# after_world_tick would compose again and ease the mounted chase look-ahead twice.
 func _frame(world: GameWorld, camera: Camera3D, ticks: int = 1) -> void:
 	for i in ticks:
 		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
 		world.tick(camera.global_position, camera.global_transform, Simulation.tick_dt(), frame_input)
-		_presenter.after_world_tick()
 
 
 func _load_world() -> GameWorld:
@@ -85,7 +90,6 @@ func test_03tr_little_bird_pilot_fires_the_carrier_weapon() -> void:
 		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
 		frame_input.set_weapon_input(true, tick == 0, false)
 		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
-		_presenter.after_world_tick()
 	assert_gt(sim.get_local_player_weapon_state().fired_serial, fired_before,
 			"pilot input reaches the installed carrier weapon through the real presenter")
 	_frame(world, _camera, 96)
@@ -203,7 +207,6 @@ func test_03tr_minigun_barrel_rotates_while_firing() -> void:
 		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
 		frame_input.set_weapon_input(true, tick == 0, false)
 		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
-		_presenter.after_world_tick()
 		clock.set_time_ms_for_test((tick + 1) * 16)
 		gun.advance_runtime_frame(Simulation.tick_dt())
 		# Remove the live yaw/pitch contribution: only the barrel's authored
@@ -292,7 +295,6 @@ func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
 		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
 		frame_input.set_weapon_input(true, tick == 0, false)
 		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
-		_presenter.after_world_tick()
 		for group in effects.get_debug_group_report():
 			if group.name == "Effect_MiniMuz":
 				flash_id = group.id

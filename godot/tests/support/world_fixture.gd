@@ -267,8 +267,9 @@ static func write_pff(test: GutTest, path: String, entries: Array) -> void:
 
 
 ## Drive `count` fixed world ticks through the local-player presenter the way
-## the shell's frame does (the input override, then before/after world tick
-## around the world's own tick); `jump` holds the jump intent for the run.
+## the shell's frame does (the input override, the before-tick sample, then
+## the world's own tick, whose local-view leg runs the presenter's
+## after_world_tick once); `jump` holds the jump intent for the run.
 static func step_player_frames(presenter: LocalPlayerPresenter, world: GameWorld,
 		camera: Camera3D, count: int = 1, jump: bool = false) -> void:
 	var input := PlayerMoveIntent.new()
@@ -278,7 +279,6 @@ static func step_player_frames(presenter: LocalPlayerPresenter, world: GameWorld
 		var frame_input := presenter.before_world_tick(Simulation.tick_dt(), false, true)
 		world.tick(camera.global_position, camera.global_transform,
 				Simulation.tick_dt(), frame_input)
-		presenter.after_world_tick()
 
 
 ## One archive's rows for `filenames` out of the minimal pack, with the

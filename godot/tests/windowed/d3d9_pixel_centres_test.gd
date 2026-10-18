@@ -144,7 +144,6 @@ func test_the_frame_camera_rasterises_on_d3d9_pixel_centres() -> void:
 	for i in TICK_COUNT:
 		var frame_input := presenter.before_world_tick(dt, false, true)
 		world.tick(camera.global_position, camera.global_transform, dt, frame_input)
-		presenter.after_world_tick()
 	assert_eq(camera.projection, Camera3D.PROJECTION_FRUSTUM,
 			"the frame camera draws through its offset frustum")
 	assert_null(presenter.projection_viewport(), "the native mode draws the surface directly")

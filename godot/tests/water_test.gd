@@ -613,7 +613,6 @@ func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
 	for i in 2:
 		var frame_input := presenter.before_world_tick(TICK, false, true)
 		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
-		presenter.after_world_tick()
 	var through: Camera3D = presenter.projection_camera()
 	assert_not_null(through, "a mode off the surface ratio draws through a target")
 	if through == null:
@@ -641,7 +640,6 @@ func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
 	sim.set_local_player_aspect_mode(-1)
 	var native_input := presenter.before_world_tick(TICK, false, true)
 	world.tick(camera.global_position, camera.global_transform, TICK, native_input)
-	presenter.after_world_tick()
 	assert_null(presenter.projection_viewport(), "a native mode releases the target")
 	water.set_visible_terrain_bounds(false, 0.0, 0.0)
 	water.advance_frame(TICK)
@@ -676,7 +674,6 @@ func test_strip_and_mirror_register_to_the_nvg_raster() -> void:
 	for i in 2:
 		var frame_input := presenter.before_world_tick(TICK, false, true)
 		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
-		presenter.after_world_tick()
 	var target: SubViewport = presenter.projection_viewport()
 	assert_true(presenter.is_nvg_raster_active(), "the NVG composite takes the world pass")
 	if target == null:

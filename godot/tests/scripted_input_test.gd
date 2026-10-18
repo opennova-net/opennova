@@ -275,4 +275,3 @@ func _frame(rig: Dictionary, count: int, active := true) -> void:
 	for i in count:
 		var frame_input := presenter.before_world_tick(TICK, false, active)
 		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
-		presenter.after_world_tick()
