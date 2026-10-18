@@ -53,6 +53,14 @@ inline std::string slot_dir(int slot) {
 	return std::string(kSlotsRoot) + "/" + slot_dir_name(slot);
 }
 
+// What opennova-serve leaves its machine's agent in the slot's working
+// directory (apps/serve/run_reports.h): the tick health it rewrites once a
+// minute (--stats-file) and the error a non-zero exit ended on (--exit-file).
+// The service names both on every hosted start (hosted_settings.h
+// render_serve_args); the agent reads them there.
+inline constexpr const char *kTickStatsFileName = "tick-stats.json";
+inline constexpr const char *kExitFileName = "exit.txt";
+
 // The two port ranges never meet: every game port lies below the first admin port.
 static_assert(slot_game_port(kMaxSlots - 1) < kSlotAdminPortBase,
 		"the slots' game and admin ports overlap");

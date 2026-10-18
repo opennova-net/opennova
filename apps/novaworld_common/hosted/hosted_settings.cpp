@@ -1,4 +1,5 @@
 #include "hosted_settings.h"
+#include "slots.h"
 
 #include "loggable.h"
 
@@ -198,9 +199,13 @@ LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
 
 std::vector<std::string> render_serve_args(const HostedSettings &, std::string_view title,
 		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port) {
+	// A supervised server's: no status page (its lines would ride the server's
+	// log stream every 200 ms), its tick health and its exit's line for the
+	// agent (slots.h).
 	std::vector<std::string> args = { "/HOST", kHostFileName, "--credentials", kCredentialsFileName,
-		"--master-host", master_host, "--master-gate-port", std::to_string(master_gate_port), "/game",
-		std::string(title) };
+		"--master-host", master_host, "--master-gate-port", std::to_string(master_gate_port),
+		"--status-page", "off", "--stats-file", kTickStatsFileName, "--exit-file", kExitFileName,
+		"/game", std::string(title) };
 	if (!expansion_code.empty()) {
 		args.push_back("/exp");
 		args.emplace_back(expansion_code);

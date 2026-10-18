@@ -12,6 +12,7 @@ add_library(opennova_serve_core STATIC
     credentials.cpp      # the --credentials file
     destination_policy.cpp
     lister.cpp           # the NovaWorld listing's driver: the gate, the NWU session, the login and HOSTKEY
+    run_reports.cpp      # a supervisor's files: the tick health (--stats-file), the exit's line (--exit-file)
     serve_listing.cpp
     server.cpp
     server_logs.cpp      # the working-directory file seam and the log switches (ADR 0051 PR7)

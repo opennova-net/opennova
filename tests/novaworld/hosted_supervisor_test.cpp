@@ -295,8 +295,10 @@ int test_renders() {
 		const bool secret = f.name != "game.cfg"; // the host file carries the game password
 		TEST_EXPECT(f.secret == secret);
 	}
-	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials", "credentials.txt",
-		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game", "jo", "/exp", "jox01" };
+	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
+		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
+		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+		"/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
 	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597) == args);
 
@@ -304,11 +306,14 @@ int test_renders() {
 	// Operations', and no expansion is no /exp.
 	s.expansion_id.reset();
 	const hosted::LaunchSpec dfx2 = hosted::render_launch(s, "dfx2", "", in);
-	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials", "credentials.txt",
-		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game", "dfx2" };
+	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials",
+		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
+		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+		"/game", "dfx2" };
 	TEST_EXPECT(dfx2.serve_args == dfx2_args);
 	const hosted::LaunchSpec on = hosted::render_launch(s, "jo", "", in);
-	TEST_EXPECT(on.serve_args.size() == 10 && on.serve_args[8] == "/game" && on.serve_args[9] == "jo");
+	TEST_EXPECT(on.serve_args.size() == 16 && on.serve_args[14] == "/game" &&
+			on.serve_args[15] == "jo");
 	return 0;
 }
 
@@ -810,8 +815,10 @@ int test_lifecycle_and_stop() {
 					jox.files.size() == 3 && jox.files[0].name == "jox01.pff" && jox.files[0].size == 1000);
 		}
 	}
-	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials", "credentials.txt",
-		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game", "jo", "/exp", "jox01" };
+	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
+		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
+		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+		"/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(c->desired.args == args);
 	{
 		Database *db = &rig.db;

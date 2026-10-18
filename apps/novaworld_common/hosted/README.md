@@ -240,7 +240,11 @@ this directory's.
   has reported the container, written owner-only, never logged; the admin login lives in
   the row's own columns, read by `hosted::admin_login_of` alone. `opennova-serve` runs
   with `/HOST server.host --credentials credentials.txt --master-host <host>
-  --master-gate-port <port> /game <title>` and `/exp <code>` with an expansion. The
+  --master-gate-port <port> --status-page off --stats-file tick-stats.json --exit-file
+  exit.txt /game <title>` and `/exp <code>` with an expansion: no status page (it would
+  stream the players' names and chat into the server's log every 200 ms), and the two
+  files the machine's agent reads in the slot's directory, the server's tick health and the
+  error a non-zero exit ended on (`apps/serve/README.md`, "Supervised runs"). The
   settings' rules (`check_settings`): an offered data set, a name of 1..31 cp1252 bytes
   with no control character or double quote, a password of up to 16 printable ASCII
   characters with no space or quote, the numbers within the title's limits, an expansion

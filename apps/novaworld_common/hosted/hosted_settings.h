@@ -148,9 +148,10 @@ std::string render_credentials(const std::string &username, const std::string &p
 
 // opennova-serve's arguments for a server whose data set speaks `title` (its
 // base row's gameprofile code) with the expansion `expansion_code` ("" for
-// none): /HOST, --credentials, --master-host, --master-gate-port, /game with
-// the title, and /exp with the code. They name the working directory's files
-// and carry no secret.
+// none): /HOST, --credentials, --master-host, --master-gate-port, the status
+// page off with the tick-health and exit files (slots.h), /game with the
+// title, and /exp with the code. They name the working directory's files and
+// carry no secret.
 std::vector<std::string> render_serve_args(const HostedSettings &settings, std::string_view title,
 		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port);
 // The whole start of a server speaking `title` with `expansion_code`: the four
