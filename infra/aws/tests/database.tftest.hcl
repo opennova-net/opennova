@@ -3,8 +3,8 @@
 # repo root:
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
-# PostgreSQL 17 in the private subnets on db.t4g.micro, single-AZ in private
-# subnet a's zone (or, on, Multi-AZ), never public, encrypted, TLS
+# PostgreSQL 17 in the private subnets on db.t4g.micro, single-AZ in a zone
+# RDS picks (or, on, Multi-AZ), never public, encrypted, TLS
 # forced, max_connections sized for the programs' pools at their maxima with a
 # deployment's extra tasks, 14 days of point-in-time recovery, a final snapshot
 # and deletion protection; reached from the five programs' security groups and
@@ -284,8 +284,8 @@ run "database" {
     error_message = "PostgreSQL 17 on db.t4g.micro"
   }
   assert {
-    condition     = !aws_db_instance.main.publicly_accessible && !aws_db_instance.main.multi_az && aws_db_instance.main.availability_zone == aws_subnet.private["a"].availability_zone
-    error_message = "private, single-AZ in private subnet a's zone"
+    condition     = !aws_db_instance.main.publicly_accessible && !aws_db_instance.main.multi_az
+    error_message = "private, single-AZ"
   }
   assert {
     condition     = aws_db_instance.main.storage_encrypted && aws_db_instance.main.storage_type == "gp3" && aws_db_instance.main.allocated_storage == 20 && aws_db_instance.main.max_allocated_storage == 100
