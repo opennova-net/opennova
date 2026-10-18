@@ -18,6 +18,7 @@
 #include <cctype>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <set>
 
@@ -144,21 +145,44 @@ const MenuScreen &screen_of(const Node &node) { return static_cast<const MenuScr
 
 // --- names -----------------------------------------------------------------------------
 
-// The windows a window holds that retail's name lookups reach: its children and the
-// windows its parts hold. A part itself is not among them: retail attaches it as a child
-// but names it when it creates it (LISTBOX_WND, SPINLISTWND_UP, LISTWND_SCROLL, ...), so
-// its authored NAME is never looked up (docs/mnu/menu-re.md, "Which type reads what").
+// The window and the windows it holds that retail's name lookups reach, in their order: the window,
+// then each child with everything it reaches before the next, then what each of its parts' windows
+// reaches. A part itself is not among them: retail attaches it as a child but names it when it creates
+// it (LISTBOX_WND, SPINLISTWND_UP, LISTWND_SCROLL, ...), so its authored NAME is never looked up
+// (docs/mnu/menu-re.md, "Which type reads what"). From an explicit stack, never a call a level: a menu
+// nests its windows thousands deep.
 template <class W, class Fn> void each_named_window(W &window, Fn &&fn) {
-	for (auto &child : window.children) fn(child);
-	for (auto *part : {&window.list_box, &window.spinup, &window.spindown, &window.scrollbar})
-		if (auto *held = part->latent()) each_named_window(*held, fn);
+	struct Level {
+		W *window;
+		size_t child, part;
+	};
+	fn(window);
+	std::vector<Level> stack{{&window, 0, 0}};
+	while (!stack.empty()) {
+		Level &top = stack.back();
+		if (top.child < top.window->children.size()) {
+			W &child = top.window->children[top.child++];
+			fn(child);
+			stack.push_back({&child, 0, 0});
+			continue;
+		}
+		decltype(&top.window->list_box) const parts[] = {&top.window->list_box, &top.window->spinup, &top.window->spindown,
+		                                                  &top.window->scrollbar};
+		if (top.part < std::size(parts)) {
+			W *held = parts[top.part++]->latent();
+			if (held) stack.push_back({held, 0, 0});
+			continue;
+		}
+		stack.pop_back();
+	}
 }
 
 // The names of a screen's windows as retail's lookups reach them, case-folded as the
 // lookups compare them.
 void collect_names(const mnu::Window &window, std::set<std::string> &taken) {
-	if (!window.name.empty()) taken.insert(strutil::to_upper(window.name));
-	each_named_window(window, [&](const mnu::Window &held) { collect_names(held, taken); });
+	each_named_window(window, [&](const mnu::Window &held) {
+		if (!held.name.empty()) taken.insert(strutil::to_upper(held.name));
+	});
 }
 
 std::set<std::string> screen_names(const mnu::Screen &screen) {
@@ -187,26 +211,49 @@ std::string unique_name(const std::set<std::string> &taken, const std::string &n
 	}
 }
 
+// unique_name for a run of names given into one `taken` that only grows (each fix's name taken as it is
+// given): a stem's numbers found taken are not tried again (`from`, by the stem as the lookups fold it),
+// so the run is linear in its names, not quadratic, and gives each the name unique_name would.
+std::string unique_name_after(const std::set<std::string> &taken, const std::string &name,
+                              std::map<std::string, int> &from) {
+	if (name.empty() || !taken.count(strutil::to_upper(name))) return name;
+	std::string stem = name;
+	while (!stem.empty() && std::isdigit(static_cast<unsigned char>(stem.back()))) stem.pop_back();
+	if (stem.empty()) stem = name;
+	int &n = from.emplace(strutil::to_upper(stem), 2).first->second;
+	for (;; ++n) {
+		const std::string candidate = stem + std::to_string(n);
+		if (!taken.count(strutil::to_upper(candidate))) return candidate;
+	}
+}
+
 void make_names_unique(mnu::Window &window, std::set<std::string> &taken) {
-	window.name = unique_name(taken, window.name);
-	if (!window.name.empty()) taken.insert(strutil::to_upper(window.name));
-	each_named_window(window, [&](mnu::Window &held) { make_names_unique(held, taken); });
+	each_named_window(window, [&](mnu::Window &held) {
+		held.name = unique_name(taken, held.name);
+		if (!held.name.empty()) taken.insert(strutil::to_upper(held.name));
+	});
 }
 
 // The document windows of a screen in pre-order (the roots and their children; never a
-// part or what a part holds), each with its identity.
+// part or what a part holds), each with its identity, from an explicit stack.
 void walk_document_windows(const MenuScreen &screen, const std::function<bool(const RecordIds &)> &visit) {
 	const size_t children = menu_children_list();
-	std::function<bool(const RecordIds &)> step = [&](const RecordIds &ids) {
-		if (!visit(ids)) return false;
-		if (children < ids.lists.size())
-			for (const RecordIds &child : ids.lists[children])
-				if (!step(child)) return false;
-		return true;
-	};
 	if (screen.ids.lists.empty()) return;
-	for (const RecordIds &root : screen.ids.lists[0])
-		if (!step(root)) return;
+	struct Level {
+		const std::vector<RecordIds> *list;
+		size_t index;
+	};
+	std::vector<Level> stack{{&screen.ids.lists[0], 0}};
+	while (!stack.empty()) {
+		Level &top = stack.back();
+		if (top.index == top.list->size()) {
+			stack.pop_back();
+			continue;
+		}
+		const RecordIds &ids = (*top.list)[top.index++];
+		if (!visit(ids)) return;
+		if (children < ids.lists.size()) stack.push_back({&ids.lists[children], 0});
+	}
 }
 
 } // namespace
@@ -285,26 +332,31 @@ size_t content(const mnu::GopherEntry &entry) {
 	       footprint_of(entry.text);
 }
 
-size_t content(const mnu::GopherCategory &category) {
-	size_t bytes = footprint_of(category.level) + list_content(category.entries);
-	if (const mnu::Window *label = category.label.latent()) bytes += sizeof(mnu::Window) + content(*label);
-	return bytes;
-}
 
 size_t content(const mnu::GlbFieldSlot &slot) { return footprint_of(slot.text); }
 
-// A window: its words, its lists, its STRING, TOGGLE_STRING, FONT, FRAME, CURSOR, ITEMS and table,
-// its children and its parts (each window it holds counted whole).
-size_t content(const mnu::Window &window) {
+// A window's own: its words, its lists, its STRING, TOGGLE_STRING, FONT, FRAME, CURSOR, ITEMS and
+// table, its children's and parts' storage; each window it holds (a child, a part's, a GOPHER
+// category's label) goes on `held`, counted on its own.
+size_t own_content(const mnu::Window &window, std::vector<const mnu::Window *> &held) {
 	size_t bytes = footprint_of(window.name) + footprint_of(window.orientation) + footprint_of(window.text_rsrc) +
 	               footprint_of(window.private_data);
+	size_t categories = footprint_of(window.gopher_categories);
+	for (const mnu::GopherCategory &category : window.gopher_categories) {
+		categories += footprint_of(category.level) + list_content(category.entries);
+		if (const mnu::Window *label = category.label.latent()) {
+			categories += sizeof(mnu::Window);
+			held.push_back(label);
+		}
+	}
 	bytes += list_content(window.appearances) + list_content(window.sounds) +
 	         list_content(window.actions) + list_content(window.datasources) +
 	         list_content(window.hotkeys) + list_content(window.shuttle) +
 	         list_content(window.scrollup) + list_content(window.scrolldown) +
-	         list_content(window.gopher_targets) + list_content(window.gopher_categories) +
+	         list_content(window.gopher_targets) + categories +
 	         list_content(window.glb_server_fields.fields) + footprint_of(window.glb_server_fields.format) +
-	         footprint_of(window.glb_target) + list_content(window.children);
+	         footprint_of(window.glb_target) + footprint_of(window.children);
+	for (const mnu::Window &child : window.children) held.push_back(&child);
 	const mnu::String &label = window.string_data;
 	bytes += footprint_of(label.type) + footprint_of(label.justify) + footprint_of(label.vjustify) +
 	         footprint_of(label.justify_offset) + footprint_of(label.vjustify_offset) + footprint_of(label.value);
@@ -328,8 +380,22 @@ size_t content(const mnu::Window &window) {
 	     {&window.list_box, &window.spinup, &window.spindown, &window.scrollbar, &window.join_button, &window.search_button,
 	      &window.glb_table, &window.glb_info_button, &window.glb_info_player_details, &window.glb_info_server_details,
 	      &window.glb_nw_info, &window.gopher_back})
-		if (const mnu::Window *held = part->latent())
-			bytes += sizeof(mnu::Window) + content(*held);
+		if (const mnu::Window *part_window = part->latent()) {
+			bytes += sizeof(mnu::Window);
+			held.push_back(part_window);
+		}
+	return bytes;
+}
+
+// A window and everything it holds (each window it holds counted whole), from an explicit stack.
+size_t content(const mnu::Window &window) {
+	size_t bytes = 0;
+	std::vector<const mnu::Window *> held{&window};
+	while (!held.empty()) {
+		const mnu::Window *at = held.back();
+		held.pop_back();
+		bytes += own_content(*at, held);
+	}
 	return bytes;
 }
 
@@ -368,10 +434,73 @@ std::string menu_window_scope(const std::string &menu_file, const std::string &s
 }
 // --- the declarations ------------------------------------------------------------------
 
-Applicability MnuDocument::list_applies(const Node &, const Located &owner, size_t list) const {
+Applicability MnuDocument::list_applies(const Node &row, const Located &owner, size_t list) const {
 	// The screen's root windows are read; a window's lists by its type, where it sits.
 	if (owner.is_row()) return Applicability::Reads;
+	if (const Held *at = held(row, owner.ids->id))
+		return menu_applicability(menu_list_reads_in(context_of(row, owner.ids->id, *at), owner.record.kind, list));
 	return menu_applicability(menu_list_reads(owner.record, owner.owners(), list));
+}
+
+const MenuContext &MnuDocument::context_of(const Node &row, NodeId record, const Held &at) const {
+	if (contexts_.load_generation != load_generation() || contexts_.revision != revision()) {
+		contexts_.rows.clear();
+		contexts_.load_generation = load_generation();
+		contexts_.revision = revision();
+	}
+	std::unordered_map<NodeId, Contexts::Entry> &known = contexts_.rows[&row];
+	if (const auto found = known.find(record); found != known.end()) return found->second.context;
+	// The record and its owners up to the nearest one whose context is known (or the root window),
+	// then each worked out from its owner's, top down: menu_context's steps, each taken once.
+	std::vector<std::pair<NodeId, const Held *>> chain{{record, &at}};
+	while (chain.back().second->owner && !known.count(chain.back().second->owner)) {
+		const NodeId owner = chain.back().second->owner;
+		const Held *up = held(row, owner);
+		if (!up) break;
+		chain.push_back({owner, up});
+	}
+	for (auto step = chain.rbegin(); step != chain.rend(); ++step) {
+		const Held &h = *step->second;
+		Contexts::Entry entry;
+		const auto owner = h.owner ? known.find(h.owner) : known.end();
+		if (!h.owner) {
+			// A record the screen holds: a root window, whose context is its own.
+			entry.rooted = is_window_kind(h.record.kind);
+			entry.context = menu_root_context(h.record);
+		} else if (owner != known.end() && owner->second.rooted) {
+			entry.rooted = true;
+			entry.context = menu_context_in(owner->second.context, h.owner_kind, h.list, h.record);
+		}
+		known[step->first] = std::move(entry);
+	}
+	return known[record].context;
+}
+
+bool MnuDocument::sited(const NodeAddress &address, RecordHandle &record, MenuContext &context) const {
+	const Node *node = address.child ? row(address.row) : nullptr;
+	if (!node || node->kind != kScreen) return false;
+	if (address.child == node->id) return false; // the row's own record: no record of it
+	if (const Held *at = held(*node, address.child)) {
+		if (at->record.kind != address.kind) return false;
+		record = at->record;
+		context = context_of(*node, address.child, *at);
+		return true;
+	}
+	Located at;
+	if (!locate(*node, address.child, at) || at.is_row() || at.record.kind != address.kind) return false;
+	record = at.record;
+	context = menu_context(at.record, at.owners());
+	return true;
+}
+
+bool MnuDocument::refine_held(const Node &row, const NodeAddress &address, const Held &at, const TableKind &kind,
+                              size_t place, FieldUse &use) const {
+	// The row's own record (a screen) sits nowhere: its context is none, as menu_context gives it.
+	static const MenuContext kNone;
+	const MenuContext &context = address.child && address.child != row.id ? context_of(row, address.child, at) : kNone;
+	if (kind.applies(place)) use.applies = menu_field_applies_in(context, at.record, kind.fields()[place].id.c_str());
+	if (kind.reference(place)) use.reference = kind.reference(place)(at.record, RecordOwners{});
+	return true;
 }
 
 void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const {
@@ -384,16 +513,14 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 	// A screen's NAME is looked up in its file, a window's on its screen (lookup_names).
 	if (out.defines == ReferenceKind::MenuScreen) out.scope = menu_screen_scope(Document::path());
 	const Node *node = address.child ? row(address.row) : nullptr;
-	Located at;
-	if (!node || node->kind != kScreen || !locate(*node, address.child, at) || at.is_row() ||
-	    at.record.kind != address.kind)
-		return;
-	const MenuContext context = menu_context(at.record, at.owners());
+	RecordHandle record;
+	MenuContext context;
+	if (!sited(address, record, context)) return;
 	// A SOUND's trigger is a set of the bank its FILE names, looked up there alone (the sound lane): the
 	// window's sound plays from that bank's entry of the menu's bank collection [orig:
 	// Sound_CollectionPlayTrigger @ 0x652de0 -> SoundBank_FindTriggerAndPlay @ 0x75d010].
-	if (field.id == "trigger" && std::string(menu_table().kind(at.record.kind)->row().token) == "sound") {
-		const std::string &bank = at.record.as<mnu::Sound>().file;
+	if (field.id == "trigger" && std::string(menu_table().kind(record.kind)->row().token) == "sound") {
+		const std::string &bank = record.as<mnu::Sound>().file;
 		if (!bank.empty()) {
 			out.reference = ReferenceKind::Sound;
 			out.scope = strutil::to_upper(basename_of(bank));
@@ -410,14 +537,14 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 	// write issue, retail's fault); every other target a window of the acting window's own
 	// screen, looked up by that screen's NAME (lookup_names).
 	if (out.reference == ReferenceKind::MenuScreen) {
-		const std::string &file = at.record.as<mnu::Action>().file;
+		const std::string &file = record.as<mnu::Action>().file;
 		if (file.empty()) out.reference = ReferenceKind::None;
 		else out.scope = menu_screen_scope(file);
 	} else if (out.reference == ReferenceKind::MenuWindow) {
 		out.scope = menu_window_scope(Document::path(), screen_of(*node).screen.name);
 	}
 	// A part is named by its owner when retail makes it: no lookup finds it by its NAME.
-	if (menu_shape(at.record.kind) == mnu::SchemaShape::Part) out.defines = ReferenceKind::None;
+	if (menu_shape(record.kind) == mnu::SchemaShape::Part) out.defines = ReferenceKind::None;
 	if (out.defines == ReferenceKind::MenuWindow)
 		out.scope = menu_window_scope(Document::path(), screen_of(*node).screen.name);
 	// Any text that makes no reference of its own (a NAME, a shown text, an ACTION's target,
@@ -427,16 +554,14 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 	if (out.reference == ReferenceKind::None && field.type == FieldType::Text)
 		out.variable_through = ReferenceKind::MenuText;
 	// A row's or an item's TYPE: the tokens its parse knows where it sits (a LIST's ITEM an ID alone).
-	if (field.id == "type" && menu_type_tokens(at.record, at.owners())) out.own_choices = true;
+	if (field.id == "type" && menu_type_tokens_in(context, record)) out.own_choices = true;
 }
 
 bool MnuDocument::record_choices(const NodeAddress &address, const FieldUse &use, std::vector<FieldChoice> &out) const {
-	const Node *node = address.child ? row(address.row) : nullptr;
-	Located at;
-	if (!node || node->kind != kScreen || !locate(*node, address.child, at) || at.is_row() ||
-	    at.record.kind != address.kind || use.schema->id != "type")
-		return false;
-	const char *const *tokens = menu_type_tokens(at.record, at.owners());
+	RecordHandle record;
+	MenuContext context;
+	if (use.schema->id != "type" || !sited(address, record, context)) return false;
+	const char *const *tokens = menu_type_tokens_in(context, record);
 	if (!tokens) return false;
 	out.clear();
 	for (const FieldChoice &choice : use.schema->choices)
@@ -467,35 +592,63 @@ void MnuDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) 
 	}
 }
 
+const MnuDocument::Preorder &MnuDocument::preorder(const Node &screen) const {
+	const auto walk = [&](Preorder &out) {
+		out.windows.clear();
+		out.places.clear();
+		walk_document_windows(screen_of(screen), [&](const RecordIds &ids) {
+			out.places.emplace(ids.id, out.windows.size());
+			out.windows.push_back(ids.id);
+			return true;
+		});
+	};
+	if (!committed(screen)) {
+		walk(preorders_.walked);
+		return preorders_.walked;
+	}
+	if (preorders_.load_generation != load_generation() || preorders_.revision != revision()) {
+		preorders_.rows.clear();
+		preorders_.load_generation = load_generation();
+		preorders_.revision = revision();
+	}
+	const auto found = preorders_.rows.find(&screen);
+	if (found != preorders_.rows.end()) return found->second;
+	Preorder &made = preorders_.rows[&screen];
+	walk(made);
+	return made;
+}
+
 int MnuDocument::window_index(const NodeAddress &address) const {
 	const Node *node = row(address.row);
 	if (!node || node->kind != kScreen || address.kind != kWindow || !address.child) return -1;
-	int index = -1, at = 0;
-	walk_document_windows(screen_of(*node), [&](const RecordIds &ids) {
-		if (ids.id == address.child) { index = at; return false; }
-		++at;
-		return true;
-	});
-	return index;
+	// The first place of the identity in pre-order (an identity names one window).
+	const Preorder &order = preorder(*node);
+	const auto found = order.places.find(address.child);
+	return found == order.places.end() ? -1 : int(found->second);
 }
 
-NodeId MnuDocument::window_at(const Node &screen, size_t preorder) const {
+NodeId MnuDocument::window_at(const Node &screen, size_t preorder_index) const {
 	if (screen.kind != kScreen) return 0;
-	NodeId found = 0;
-	size_t at = 0;
-	walk_document_windows(screen_of(screen), [&](const RecordIds &ids) {
-		if (at++ == preorder) { found = ids.id; return false; }
-		return true;
-	});
-	return found;
+	const Preorder &order = preorder(screen);
+	return preorder_index < order.windows.size() ? order.windows[preorder_index] : 0;
 }
 
 NodeAddress MnuDocument::record_at(const Node &screen, size_t preorder, size_t list, size_t index) const {
 	const NodeId window = window_at(screen, preorder);
-	Located at;
-	if (!window || !locate(screen, window, at)) return {};
-	if (list >= at.ids->lists.size() || index >= at.ids->lists[list].size()) return {};
-	return {screen.id, menu_table().kind(at.record.kind)->lists()[list].spec.kind, at.ids->lists[list][index].id};
+	if (!window) return {};
+	RecordHandle record;
+	const RecordIds *ids = nullptr;
+	if (const Held *at = held(screen, window)) {
+		record = at->record;
+		ids = at->ids;
+	} else {
+		Located located;
+		if (!locate(screen, window, located)) return {};
+		record = located.record;
+		ids = located.ids;
+	}
+	if (list >= ids->lists.size() || index >= ids->lists[list].size()) return {};
+	return {screen.id, menu_table().kind(record.kind)->lists()[list].spec.kind, ids->lists[list][index].id};
 }
 
 bool MnuDocument::identities_match() const {
@@ -537,46 +690,70 @@ std::vector<MenuLookupName> MnuDocument::lookup_names() const {
 		const bool shadowed = newest[strutil::to_upper(screen.screen.name)] != node->id;
 		std::map<std::string, NodeAddress> first; // the window each NAME finds on this screen
 		// [orig: CWnd_FindChildByName @ 0x646850: a window with no NAME returns nothing,
-		// its own NAME is compared, then its children in order]
-		std::function<void(const RecordHandle &, const RecordIds &, bool, bool)> visit =
-		        [&](const RecordHandle &record, const RecordIds &ids, bool reached, bool part) {
-			        const auto &window = record.as<mnu::Window>();
-			        bool open = reached;
-			        if (!part && window.name.empty()) {
-				        open = false;
-			        } else if (!part) {
-				        MenuLookupName entry;
-				        entry.address = {node->id, kWindow, ids.id};
-				        entry.name = window.name;
-				        entry.screen = node->id;
-				        if (shadowed) {
-					        entry.found = Found::ShadowedScreen;
-				        } else if (!reached) {
-					        entry.found = Found::UnderNameless;
-				        } else {
-					        const auto placed = first.emplace(strutil::to_upper(window.name), entry.address);
-					        if (!placed.second) {
-						        entry.found = Found::EarlierWindow;
-						        entry.found_instead = placed.first->second;
-					        }
-				        }
-				        out.push_back(std::move(entry));
-			        }
-			        const TableKind &kind = *menu_table().kind(record.kind);
-			        if (children < ids.lists.size())
-				        for (size_t i = 0; i < ids.lists[children].size(); ++i)
-					        visit(kind.lists()[children].ops.at(record, i), ids.lists[children][i], open, false);
-			        // A part carries the name its owner gives it, so the search goes on inside.
-			        for (const size_t list : parts) {
-				        const ListOps &ops = kind.lists()[list].ops;
-				        if (list < ids.lists.size() && !ids.lists[list].empty() && ops.present(record))
-					        visit(ops.at(record, 0), ids.lists[list][0], open, true);
-			        }
-		        };
+		// its own NAME is compared, then its children in order]. Searched from an explicit stack, a
+		// level a window, in the lookup's order: a window, its children each with everything below it,
+		// then its parts'.
+		struct Level {
+			RecordHandle record;
+			const RecordIds *ids;
+			bool open;
+			const TableKind *kind;
+			size_t child, part;
+		};
+		std::vector<Level> stack;
+		const auto enter = [&](const RecordHandle &record, const RecordIds &ids, bool reached, bool part) {
+			const auto &window = record.as<mnu::Window>();
+			bool open = reached;
+			if (!part && window.name.empty()) {
+				open = false;
+			} else if (!part) {
+				MenuLookupName entry;
+				entry.address = {node->id, kWindow, ids.id};
+				entry.name = window.name;
+				entry.screen = node->id;
+				if (shadowed) {
+					entry.found = Found::ShadowedScreen;
+				} else if (!reached) {
+					entry.found = Found::UnderNameless;
+				} else {
+					const auto placed = first.emplace(strutil::to_upper(window.name), entry.address);
+					if (!placed.second) {
+						entry.found = Found::EarlierWindow;
+						entry.found_instead = placed.first->second;
+					}
+				}
+				out.push_back(std::move(entry));
+			}
+			stack.push_back({record, &ids, open, menu_table().kind(record.kind), 0, 0});
+		};
 		if (screen.ids.lists.empty()) continue;
 		const std::vector<RecordIds> &roots = screen.ids.lists[0];
-		for (size_t i = 0; i < roots.size() && i < screen.screen.roots.size(); ++i)
-			visit(RecordHandle{kWindow, const_cast<mnu::Window *>(&screen.screen.roots[i])}, roots[i], true, false);
+		for (size_t i = 0; i < roots.size() && i < screen.screen.roots.size(); ++i) {
+			enter(RecordHandle{kWindow, const_cast<mnu::Window *>(&screen.screen.roots[i])}, roots[i], true, false);
+			while (!stack.empty()) {
+				Level &top = stack.back();
+				const RecordIds &ids = *top.ids;
+				if (children < ids.lists.size() && top.child < ids.lists[children].size()) {
+					const size_t at = top.child++;
+					const RecordHandle child = top.kind->lists()[children].ops.at(top.record, at);
+					const bool open = top.open;
+					enter(child, ids.lists[children][at], open, false);
+					continue;
+				}
+				// A part carries the name its owner gives it, so the search goes on inside.
+				if (top.part < parts.size()) {
+					const size_t list = parts[top.part++];
+					const ListOps &ops = top.kind->lists()[list].ops;
+					if (list < ids.lists.size() && !ids.lists[list].empty() && ops.present(top.record)) {
+						const RecordHandle part = ops.at(top.record, 0);
+						const bool open = top.open;
+						enter(part, ids.lists[list][0], open, true);
+					}
+					continue;
+				}
+				stack.pop_back();
+			}
+		}
 	}
 	return out;
 }
@@ -597,8 +774,11 @@ SerializeResult MnuDocument::serialize() const {
 	}
 	// A value the file cannot hold, or one retail faults on, blocks the save with the
 	// retail consequence (docs/mnu/menu-re.md, "The writer"), on the record and the field
-	// that cause it (the format names them by the same locator and field path).
-	const mnu::Document document = native();
+	// that cause it (the format names them by the same locator and field path). The rows'
+	// screens are read where they are (native() less its copy, which recurses a window level).
+	mnu::ScreensView document;
+	if (const auto *state = dynamic_cast<const MenuFileState *>(file_state())) document.source_encoding = state->source_encoding;
+	for (const auto &node : rows()) document.screens.push_back(&screen_of(*node).screen);
 	for (const mnu::WriteIssue &issue : mnu::write_issues(document)) {
 		const NodeAddress address = address_at(issue.locator);
 		std::string record = address.row ? record_path(address) : std::string();
@@ -1013,12 +1193,13 @@ void name_findings(const MnuDocument &menu, std::vector<Diagnostic> &findings) {
 	// windows by its row, each grown by the names the fixes before gave.
 	std::set<std::string> screens = menu_screen_names(menu.rows());
 	std::map<NodeId, std::set<std::string>> windows;
+	std::map<const std::set<std::string> *, std::map<std::string, int>> numbers; // unique_name_after's, by set
 	// Its fix (DI-11): a NAME of its own, the number a copy's name takes (unique_name), which an ACTION can
 	// then name it by; none for a NAME a stylesheet variable stands for (%NAME%), which is the variable's.
 	const auto own_name = [&](Diagnostic &d, const MenuLookupName &name, std::set<std::string> &taken, const char *what,
 	                          const std::string &still) {
 		if (name.name.find('%') != std::string::npos) return;
-		const std::string own = unique_name(taken, name.name);
+		const std::string own = unique_name_after(taken, name.name, numbers[&taken]);
 		taken.insert(strutil::to_upper(own));
 		Edit set;
 		set.address = name.address;

@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
+#include <vector>
 
 using namespace opennova::fnt;
 
@@ -212,20 +214,48 @@ void MenuFrameCompiler::note_window_loads_(const mnu::Window &w) {
 	// The base parse's rows, then its child windows (created at the end of the
 	// base parse, @ 0x649789), then what the type's own parse reads after it:
 	// ITEMS rows, the parts and the scroll rows (their element order among
-	// themselves is not kept by the model).
-	note(w.appearances);
-	for (const mnu::Window &child : w.children) {
-		note_window_loads_(child);
-	}
-	note(w.items.appearances);
-	for (const mnu::WindowPart *part : {&w.list_box, &w.spinup, &w.spindown, &w.scrollbar}) {
-		if (part->present()) {
-			note_window_loads_(**part);
+	// themselves is not kept by the model). From an explicit stack, a level a
+	// window, never a call a level: a menu nests its windows thousands deep.
+	struct Level {
+		const mnu::Window *window;
+		int stage;
+		size_t at;
+	};
+	std::vector<Level> stack{{&w, 0, 0}};
+	while (!stack.empty()) {
+		Level &level = stack.back();
+		const mnu::Window &at = *level.window;
+		if (level.stage == 0) {
+			note(at.appearances);
+			level.stage = 1;
+		} else if (level.stage == 1) {
+			if (level.at < at.children.size()) {
+				const mnu::Window &child = at.children[level.at++];
+				stack.push_back({&child, 0, 0});
+			} else {
+				level.stage = 2;
+				level.at = 0;
+			}
+		} else if (level.stage == 2) {
+			note(at.items.appearances);
+			level.stage = 3;
+		} else if (level.stage == 3) {
+			const mnu::WindowPart *const parts[] = {&at.list_box, &at.spinup, &at.spindown, &at.scrollbar};
+			if (level.at < std::size(parts)) {
+				const mnu::WindowPart *part = parts[level.at++];
+				if (part->present()) {
+					stack.push_back({&**part, 0, 0});
+				}
+			} else {
+				level.stage = 4;
+			}
+		} else {
+			note(at.shuttle);
+			note(at.scrollup);
+			note(at.scrolldown);
+			stack.pop_back();
 		}
 	}
-	note(w.shuttle);
-	note(w.scrollup);
-	note(w.scrolldown);
 }
 
 void MenuFrameCompiler::note_texture_loads(const mnu::Document &doc) {
@@ -349,6 +379,34 @@ void MenuFrameCompiler::configure(const mnu::Screen *screen) {
 
 int MenuFrameCompiler::build_node(const mnu::Window &w, int parent, int root,
 		bool part) {
+	// A window, then its children each with everything below it before the
+	// next (the nodes in pre-order), from an explicit stack: never a call a
+	// level, as a menu nests its windows thousands deep.
+	struct Pending {
+		const mnu::Window *window;
+		int parent;
+		int root;
+	};
+	std::vector<Pending> stack{{&w, parent, root}};
+	int first = -1;
+	while (!stack.empty()) {
+		const Pending next = stack.back();
+		stack.pop_back();
+		const int index = build_one_(*next.window, next.parent, next.root, part);
+		if (first < 0) {
+			first = index;
+		}
+		const int below = nodes_[static_cast<size_t>(index)].root;
+		const std::vector<mnu::Window> &children = next.window->children;
+		for (auto child = children.rbegin(); child != children.rend(); ++child) {
+			stack.push_back({&*child, index, below});
+		}
+	}
+	return first;
+}
+
+int MenuFrameCompiler::build_one_(const mnu::Window &w, int parent, int root,
+		bool part) {
 	const int index = static_cast<int>(nodes_.size());
 	nodes_.push_back(WidgetNode{});
 	building_ = index;
@@ -414,9 +472,6 @@ int MenuFrameCompiler::build_node(const mnu::Window &w, int parent, int root,
 			node.frame_brush = p.frame_brush;
 		}
 		nodes_[static_cast<size_t>(index)] = std::move(node);
-	}
-	for (const mnu::Window &child : w.children) {
-		build_node(child, index, nodes_[static_cast<size_t>(index)].root, part);
 	}
 	return index;
 }

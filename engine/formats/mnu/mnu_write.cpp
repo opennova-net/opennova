@@ -582,12 +582,21 @@ WrittenElement Words::screen(const Screen &s) {
 }
 
 // The writer's words for each screen of a document.
-std::vector<WrittenElement> written_screens(const Document &doc) {
+std::vector<WrittenElement> written_screens(const ScreensView &view) {
 	Words words;
 	std::vector<WrittenElement> out;
-	out.reserve(doc.screens.size());
-	for (const Screen &s : doc.screens) out.push_back(words.screen(s));
+	out.reserve(view.screens.size());
+	for (const Screen *s : view.screens) out.push_back(words.screen(*s));
 	return out;
+}
+
+// A document's screens, in place.
+ScreensView view_of(const Document &doc) {
+	ScreensView view;
+	view.source_encoding = doc.source_encoding;
+	view.screens.reserve(doc.screens.size());
+	for (const Screen &s : doc.screens) view.screens.push_back(&s);
+	return view;
 }
 
 // The open tag of an element: `<TAG attributes...>`.
@@ -963,15 +972,19 @@ std::string escape_text(const std::string &text) {
 	return out;
 }
 
-std::vector<WriteIssue> write_issues(const Document &doc) {
+std::vector<WriteIssue> write_issues(const ScreensView &view) {
 	std::vector<WriteIssue> issues;
 	IssueCheck check(issues);
-	for (size_t i = 0; i < doc.screens.size(); ++i) check.screen(doc.screens[i], i);
+	for (size_t i = 0; i < view.screens.size(); ++i) check.screen(*view.screens[i], i);
 	return issues;
 }
 
-std::string serialize(const Document &doc, bool pretty, int indent_size) {
-	const std::vector<WrittenElement> screens = written_screens(doc);
+std::vector<WriteIssue> write_issues(const Document &doc) { return write_issues(view_of(doc)); }
+
+namespace {
+
+std::string serialize_view(const ScreensView &view, bool pretty, int indent_size) {
+	const std::vector<WrittenElement> screens = written_screens(view);
 	const WrittenStyle style = canonical_style(pretty, indent_size);
 	std::string out;
 	for (const WrittenElement &screen : screens) {
@@ -981,18 +994,29 @@ std::string serialize(const Document &doc, bool pretty, int indent_size) {
 	return out;
 }
 
+} // namespace
+
+std::string serialize(const Document &doc, bool pretty, int indent_size) {
+	return serialize_view(view_of(doc), pretty, indent_size);
+}
+
 bool serialize_bytes(const Document &doc, std::vector<uint8_t> &out,
+                     std::string &error, bool pretty, int indent_size) {
+	return serialize_bytes(view_of(doc), out, error, pretty, indent_size);
+}
+
+bool serialize_bytes(const ScreensView &view, std::vector<uint8_t> &out,
                      std::string &error, bool pretty, int indent_size) {
 	out.clear();
 	error.clear();
-	const std::vector<WriteIssue> issues = write_issues(doc);
+	const std::vector<WriteIssue> issues = write_issues(view);
 	if (!issues.empty()) {
 		error = issues.front().message;
 		return false;
 	}
-	const std::string text = serialize(doc, pretty, indent_size);
-	if (doc.source_encoding != SourceEncoding::Utf16LE) {
-		if (doc.source_encoding == SourceEncoding::Utf8Bom) out.insert(out.end(), {0xEF, 0xBB, 0xBF});
+	const std::string text = serialize_view(view, pretty, indent_size);
+	if (view.source_encoding != SourceEncoding::Utf16LE) {
+		if (view.source_encoding == SourceEncoding::Utf8Bom) out.insert(out.end(), {0xEF, 0xBB, 0xBF});
 		out.insert(out.end(), text.begin(), text.end());
 		return true;
 	}

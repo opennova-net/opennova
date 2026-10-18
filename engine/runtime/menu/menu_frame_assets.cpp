@@ -5,7 +5,9 @@
 
 #include <base/io/strutil.h>
 
+#include <iterator>
 #include <utility>
+#include <vector>
 
 namespace opennova::menu {
 
@@ -47,17 +49,42 @@ TextureFile resolve_texture(const std::string &name, const FileSource &files) {
 }
 
 // Every FONT NAME a window tree authors (roots, children and parts), each once
-// (case-insensitive), in document order.
+// (case-insensitive), in document order: a window, its parts' trees, then its
+// children's, from an explicit stack (a menu nests its windows thousands deep).
 void collect_font_names(const mnu::Window &w, std::vector<std::string> &names) {
-	if (!w.font.name.empty()) {
+	const auto note = [&](const mnu::Window &window) {
+		if (window.font.name.empty()) return;
 		bool seen = false;
 		for (const std::string &name : names)
-			if (strutil::iequals(name, w.font.name)) seen = true;
-		if (!seen) names.push_back(w.font.name);
+			if (strutil::iequals(name, window.font.name)) seen = true;
+		if (!seen) names.push_back(window.font.name);
+	};
+	struct Level {
+		const mnu::Window *window;
+		size_t part, child;
+	};
+	note(w);
+	std::vector<Level> stack{{&w, 0, 0}};
+	while (!stack.empty()) {
+		Level &top = stack.back();
+		const mnu::Window &at = *top.window;
+		const mnu::WindowPart *const parts[] = {&at.list_box, &at.spinup, &at.spindown, &at.scrollbar};
+		if (top.part < std::size(parts)) {
+			const mnu::WindowPart *part = parts[top.part++];
+			if (part->present()) {
+				note(**part);
+				stack.push_back({&**part, 0, 0});
+			}
+			continue;
+		}
+		if (top.child < at.children.size()) {
+			const mnu::Window &child = at.children[top.child++];
+			note(child);
+			stack.push_back({&child, 0, 0});
+			continue;
+		}
+		stack.pop_back();
 	}
-	for (const mnu::WindowPart *part : {&w.list_box, &w.spinup, &w.spindown, &w.scrollbar})
-		if (part->present()) collect_font_names(**part, names);
-	for (const mnu::Window &child : w.children) collect_font_names(child, names);
 }
 
 } // namespace

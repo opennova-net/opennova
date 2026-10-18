@@ -285,32 +285,91 @@ private:
 };
 
 // Zero identities in the shape of a native record and of everything it holds (each list's records,
-// all the way down), which a load or an insert gives identities (for_each_identity).
+// all the way down), which a load or an insert gives identities (for_each_identity). Built from an
+// explicit stack, never a call a level: a menu nests its windows thousands deep (formats/mnu/mnu.cpp).
 inline RecordIds shape_ids(const RecordTable &table, const RecordHandle &record) {
 	RecordIds ids;
-	const TableKind *kind = table.kind(record.kind);
-	if (!kind || !record) return ids;
-	ids.lists.resize(kind->lists().size());
-	for (size_t l = 0; l < kind->lists().size(); ++l) {
-		const ListOps &ops = kind->lists()[l].ops;
-		const size_t size = ops.size(record);
-		ids.lists[l].reserve(size);
-		for (size_t i = 0; i < size; ++i) ids.lists[l].push_back(shape_ids(table, ops.at(record, i)));
+	struct Level {
+		RecordHandle record;
+		RecordIds *ids = nullptr;
+		const TableKind *kind = nullptr;
+		size_t list = 0, index = 0, size = 0;
+		bool sized = false;
+	};
+	std::vector<Level> stack;
+	const auto enter = [&](const RecordHandle &held, RecordIds &out) {
+		const TableKind *kind = table.kind(held.kind);
+		if (!kind || !held) return;
+		out.lists.resize(kind->lists().size());
+		stack.push_back({held, &out, kind});
+	};
+	enter(record, ids);
+	while (!stack.empty()) {
+		Level &top = stack.back();
+		if (top.list == top.kind->lists().size()) {
+			stack.pop_back();
+			continue;
+		}
+		const ListOps &ops = top.kind->lists()[top.list].ops;
+		std::vector<RecordIds> &held = top.ids->lists[top.list];
+		if (!top.sized) {
+			// Reserved whole, so an entry stays where it is while the ones after it are made.
+			top.size = ops.size(top.record);
+			held.reserve(top.size);
+			top.sized = true;
+		}
+		if (top.index == top.size) {
+			++top.list;
+			top.index = 0;
+			top.sized = false;
+			continue;
+		}
+		const RecordHandle child = ops.at(top.record, top.index++);
+		held.emplace_back();
+		enter(child, held.back());
 	}
 	return ids;
 }
 
 // The invariant every structural edit keeps: `ids` has the shape of the native record (each list as
-// long, all the way down).
+// long, all the way down). Checked from an explicit stack, as shape_ids builds it.
 inline bool ids_match(const RecordTable &table, const RecordHandle &record, const RecordIds &ids) {
-	const TableKind *kind = table.kind(record.kind);
-	if (!kind || !record || ids.lists.size() != kind->lists().size()) return false;
-	for (size_t l = 0; l < kind->lists().size(); ++l) {
-		const ListOps &ops = kind->lists()[l].ops;
-		const size_t size = ops.size(record);
-		if (ids.lists[l].size() != size) return false;
-		for (size_t i = 0; i < size; ++i)
-			if (!ids_match(table, ops.at(record, i), ids.lists[l][i])) return false;
+	struct Level {
+		RecordHandle record;
+		const RecordIds *ids = nullptr;
+		const TableKind *kind = nullptr;
+		size_t list = 0, index = 0, size = 0;
+		bool sized = false;
+	};
+	std::vector<Level> stack;
+	const auto enter = [&](const RecordHandle &held, const RecordIds &at) {
+		const TableKind *kind = table.kind(held.kind);
+		if (!kind || !held || at.lists.size() != kind->lists().size()) return false;
+		stack.push_back({held, &at, kind});
+		return true;
+	};
+	if (!enter(record, ids)) return false;
+	while (!stack.empty()) {
+		Level &top = stack.back();
+		if (top.list == top.kind->lists().size()) {
+			stack.pop_back();
+			continue;
+		}
+		const ListOps &ops = top.kind->lists()[top.list].ops;
+		if (!top.sized) {
+			top.size = ops.size(top.record);
+			if (top.ids->lists[top.list].size() != top.size) return false;
+			top.sized = true;
+		}
+		if (top.index == top.size) {
+			++top.list;
+			top.index = 0;
+			top.sized = false;
+			continue;
+		}
+		const size_t index = top.index++;
+		const RecordIds &held = top.ids->lists[top.list][index];
+		if (!enter(ops.at(top.record, index), held)) return false;
 	}
 	return true;
 }

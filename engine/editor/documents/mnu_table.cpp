@@ -950,9 +950,8 @@ MenuContext step_into(const MenuContext &owner, NodeKind owner_kind, size_t list
 
 // Whether the game reads a field where its record sits: the type of the window it lies in reads the
 // element path down to it, the lists above it are read, and an ACTION's verb reads it.
-mnu::SchemaApplies menu_field_reads(const RecordHandle &record, const RecordOwners &owners, mnu::SchemaShape shape,
-                                    const char *path) {
-	const MenuContext context = menu_context(record, owners);
+mnu::SchemaApplies field_reads_in(const MenuContext &context, const RecordHandle &record, mnu::SchemaShape shape,
+                                  const char *path) {
 	// A JUSTIFY's or VJUSTIFY's offset is a token of the keyword's attribute: read where the keyword is.
 	std::string own = path;
 	if (own.size() > 7 && own.compare(own.size() - 7, 7, "_offset") == 0) own.resize(own.size() - 7);
@@ -962,6 +961,11 @@ mnu::SchemaApplies menu_field_reads(const RecordHandle &record, const RecordOwne
 	if (shape == mnu::SchemaShape::Action)
 		applies = mnu::schema_applies_both(applies, mnu::schema_action_reads(record.as<mnu::Action>(), path));
 	return applies;
+}
+
+mnu::SchemaApplies menu_field_reads(const RecordHandle &record, const RecordOwners &owners, mnu::SchemaShape shape,
+                                    const char *path) {
+	return field_reads_in(menu_context(record, owners), record, shape, path);
 }
 
 // --- what the editor shows ---------------------------------------------------------------------------
@@ -1753,11 +1757,31 @@ MenuContext menu_context(const RecordHandle &record, const RecordOwners &owners)
 	return c;
 }
 
+MenuContext menu_root_context(const RecordHandle &record) {
+	if (!is_window_kind(record.kind)) return MenuContext{}; // a screen
+	return root_context(record.as<mnu::Window>());
+}
+
+MenuContext menu_context_in(const MenuContext &owner, NodeKind owner_kind, size_t list, const RecordHandle &record) {
+	return step_into(owner, owner_kind, list, record);
+}
+
 mnu::SchemaApplies menu_list_reads(const RecordHandle &owner, const RecordOwners &owners, size_t list) {
 	return list_reads_in(menu_context(owner, owners), list_token(owner.kind, list));
 }
 
-const char *const *menu_type_tokens(const RecordHandle &record, const RecordOwners &owners) {
+mnu::SchemaApplies menu_list_reads_in(const MenuContext &owner, NodeKind owner_kind, size_t list) {
+	return list_reads_in(owner, list_token(owner_kind, list));
+}
+
+Applicability menu_field_applies_in(const MenuContext &context, const RecordHandle &record, const char *path) {
+	return menu_applicability(field_reads_in(context, record, menu_shape(record.kind), path));
+}
+
+namespace {
+
+// menu_type_tokens, the record's context asked only where the tokens depend on it.
+template <class Context> const char *const *type_tokens(const RecordHandle &record, Context &&context_of) {
 	const NodeKind kind = record.kind;
 	const bool cell = kind == kind_index("item");
 	const bool items_row = kind == kind_index("items.appearance");
@@ -1765,10 +1789,20 @@ const char *const *menu_type_tokens(const RecordHandle &record, const RecordOwne
 	    kind != kind_index("shuttle") && kind != kind_index("scrollup") && kind != kind_index("scrolldown"))
 		return nullptr;
 	if (!cell && kind != kind_index("items.item") && !items_row) return mnu::kAppearanceTypes;
-	const MenuContext context = menu_context(record, owners);
+	const MenuContext context = context_of();
 	const mnu::WindowType form = context.window ? context.window->type : mnu::WindowType::Window;
 	if (items_row) return form == mnu::WindowType::Table ? mnu::kTableAppearanceTypes : mnu::kAppearanceTypes;
 	return mnu::item_types_for(form, cell);
+}
+
+} // namespace
+
+const char *const *menu_type_tokens(const RecordHandle &record, const RecordOwners &owners) {
+	return type_tokens(record, [&] { return menu_context(record, owners); });
+}
+
+const char *const *menu_type_tokens_in(const MenuContext &context, const RecordHandle &record) {
+	return type_tokens(record, [&] { return context; });
 }
 
 Applicability menu_applicability(mnu::SchemaApplies applies) {

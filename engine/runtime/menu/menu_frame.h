@@ -901,6 +901,8 @@ private:
 
 	// configure-time build
 	int build_node(const mnu::Window &w, int parent, int root, bool part);
+	// One window's node (build_node's step), its children left to the caller.
+	int build_one_(const mnu::Window &w, int parent, int root, bool part);
 	void resolve_node_(int index);
 	// `list` names the rows for the notes: the window's list ("appearance"), or a part's
 	// ("list_box", with `part_rows`: the rows sit inside that one part record).

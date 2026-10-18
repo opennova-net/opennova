@@ -758,8 +758,18 @@ struct WriteIssue {
   std::string message;
 };
 
+// A menu's screens where a caller keeps them (an editor's rows, a screen each), read in place:
+// write_issues and serialize_bytes check and write them as they do a Document of those screens,
+// with no copy of their windows (a copy recurses a window level, and a menu nests its windows
+// thousands deep).
+struct ScreensView {
+  std::vector<const Screen *> screens;
+  SourceEncoding source_encoding = SourceEncoding::CodePage;
+};
+
 // Every WriteIssue of a document; serialization refuses while there is one.
 std::vector<WriteIssue> write_issues(const Document &doc);
+std::vector<WriteIssue> write_issues(const ScreensView &view);
 
 // Element text as the writer puts it: '<' and '&' as the entities retail's reader decodes
 // back, everything else as it is.
@@ -775,6 +785,9 @@ std::string serialize(const Document &doc, bool pretty = true,
 // Serialize using Document::source_encoding. False, with `error` (the first write
 // issue), when the document has a write issue.
 bool serialize_bytes(const Document &doc, std::vector<uint8_t> &out,
+                     std::string &error, bool pretty = true,
+                     int indent_size = 2);
+bool serialize_bytes(const ScreensView &view, std::vector<uint8_t> &out,
                      std::string &error, bool pretty = true,
                      int indent_size = 2);
 

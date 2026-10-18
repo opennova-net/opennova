@@ -662,6 +662,11 @@ opennova_add_editor_test(file_chores LIBS opennova_project_cli)
 # the query verb reads as the session does.
 opennova_add_editor_test(project_cli_session MIXED NAME project_cli_session LIBS opennova_project_cli)
 
+# opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp's bounds: 2017
+# nested windows, the 4031-deep LAN_LIST chain): it completes on the test's own stack, in time linear in
+# the windows, with the findings it always gave.
+opennova_add_editor_test(menu_depth LIBS opennova_project_cli)
+
 opennova_add_editor_test(catalog SOURCES catalog_document_test.cpp)
 
 # The item ids the engine fixes, as the catalog keeps them (ADR 0046 S19, "Reserved item ids"): the
