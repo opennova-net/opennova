@@ -26,6 +26,7 @@ add_library(opennova_hostd_core STATIC
     reconcile.cpp        # what a sync does, decided as a pure function
     saved_machine.cpp    # the saved bootstrap, a format of the agent's own
     slot_files.cpp       # the slots' working directories
+    stamped_output.cpp   # the process runtime's servers' lines, each after its time, into --log-dir
     tree_store.cpp       # the trees fetched on demand (aws s3 sync) and checked
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/ecs_metadata.cpp  # its own image and log stream on ECS

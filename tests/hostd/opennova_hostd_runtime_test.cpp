@@ -15,7 +15,8 @@
 // slot's directory over its data set with its arguments and the env file's
 // variables alone, listed running then exited with its code, stopped by SIGTERM,
 // killed, removed once ended, a start that cannot run exit 125; with a log
-// directory each server's output in its stream's file), the command line
+// directory each server's output in its stream's file, each line after its
+// time), the command line
 // (apps/hostd/hostd_options.h: its log group and region among them, which send the
 // containers' output to CloudWatch, the stream the service names each, and the
 // process runtime's log directory), the machine's image from a stand-in instance
@@ -860,6 +861,17 @@ int test_process_runtime() {
 	}
 	TEST_EXPECT(written.find("hello from") != std::string::npos);
 	TEST_EXPECT(read(log).find("hello from") == std::string::npos);
+	// Each line after the time it was written, as the programs' copies are.
+	TEST_EXPECT(written.size() > 25 && written[4] == '-' && written[10] == 'T' &&
+			written[19] == '.' && written[23] == 'Z' &&
+			written.compare(24, 11, " hello from") == 0);
+	TEST_EXPECT(hostd::line_stamp().size() == 24 && hostd::line_stamp()[23] == 'Z');
+	std::string partial;
+	std::string stamped;
+	hostd::stamp_lines("one\r\ntwo\nthr", "T", partial, stamped);
+	TEST_EXPECT(stamped == "T one\nT two\n" && partial == "thr");
+	hostd::stamp_lines("ee\n", "U", partial, stamped);
+	TEST_EXPECT(stamped == "T one\nT two\nU three\n" && partial.empty());
 	// A stream that is no stream name falls back to the shared file.
 	chatty.log_stream = "../x";
 	TEST_EXPECT(logged.output_of(chatty) == log);

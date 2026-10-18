@@ -308,7 +308,8 @@ agent's (DEPLOY.md, "Hosted game servers").
 `--runtime process` (`process_runtime.h`) runs each server as a child process of the agent
 rather than a docker container: the runtime of a machine that is itself a container and runs
 no docker, the local stack's (`apps/novaworld_common/hosted/docker_machine_driver.h`, which
-starts the hostd image as its serve user with `--runtime process --nft none`). A start
+starts the hostd image as its serve user with `--runtime process --nft none --log-dir
+/var/log/opennova`, the stack's log volume). A start
 is `<--serve> --resource-dir <the data set's mount path> <opennova-serve's arguments>` in the
 slot's directory, its environment the system's variables (`PATH`, `HOME`, `LANG`, `LC_*`,
 `TZ`, `TMPDIR`) and the env file's, its output where the agent's own goes (the machine

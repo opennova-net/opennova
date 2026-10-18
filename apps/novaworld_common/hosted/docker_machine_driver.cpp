@@ -166,7 +166,7 @@ std::vector<std::string> DockerMachineDriver::machine_command(
 		const DockerMachineConfig &config, int64_t machine_id) {
 	return { "--runtime", "process", "--serve", kServe, "--service", config.service_url,
 		"--machine", std::to_string(machine_id), "--token-file", kTokenFile, "--state-dir",
-		kStateDir, "--slots-root", kSlotsRoot, "--nft", "none" };
+		kStateDir, "--slots-root", kSlotsRoot, "--nft", "none", "--log-dir", kLogDir };
 }
 
 std::string DockerMachineDriver::create_body(
