@@ -45,6 +45,16 @@ bool get_metadata(const std::string &url, std::string &body, std::string &error,
 	return true;
 }
 
+// The task document of a GET <uri>/task reply; false with `error` when it is
+// no JSON.
+bool task_document(const std::string &json, io::JsonValue &task, std::string &error) {
+	std::string parse_error;
+	if (io::json_parse(json, task, parse_error))
+		return true;
+	error = "the task metadata is no JSON (" + loggable(parse_error, 120) + ")";
+	return false;
+}
+
 } // namespace
 
 std::string metadata_uri_from_env() {
@@ -54,11 +64,8 @@ std::string metadata_uri_from_env() {
 
 bool parse_task_address(const std::string &json, std::string &out, std::string &error) {
 	io::JsonValue task;
-	std::string parse_error;
-	if (!io::json_parse(json, task, parse_error)) {
-		error = "the task metadata is no JSON (" + loggable(parse_error, 120) + ")";
+	if (!task_document(json, task, error))
 		return false;
-	}
 	const io::JsonValue *containers = member(task, "Containers", io::JsonValue::Type::Array);
 	if (containers == nullptr) {
 		error = "the task metadata lists no containers";
@@ -92,11 +99,8 @@ bool read_task_address(
 
 bool parse_task_revision(const std::string &json, std::string &out, std::string &error) {
 	io::JsonValue task;
-	std::string parse_error;
-	if (!io::json_parse(json, task, parse_error)) {
-		error = "the task metadata is no JSON (" + loggable(parse_error, 120) + ")";
+	if (!task_document(json, task, error))
 		return false;
-	}
 	const io::JsonValue *family = member(task, "Family", io::JsonValue::Type::String);
 	const io::JsonValue *revision = member(task, "Revision", io::JsonValue::Type::String);
 	if (family == nullptr || family->string.empty() || revision == nullptr ||
@@ -113,6 +117,35 @@ bool read_task_revision(
 	std::string body;
 	return get_metadata(uri + "/task", body, error, timeout_ms) &&
 			parse_task_revision(body, out, error);
+}
+
+bool parse_task_facts(const std::string &json, TaskFacts &out, std::string &error) {
+	io::JsonValue task;
+	if (!task_document(json, task, error))
+		return false;
+	const io::JsonValue *arn = member(task, "TaskARN", io::JsonValue::Type::String);
+	const size_t slash = arn != nullptr ? arn->string.rfind('/') : std::string::npos;
+	if (slash == std::string::npos || slash + 1 >= arn->string.size()) {
+		error = "the task metadata names no task ARN";
+		return false;
+	}
+	out = TaskFacts();
+	out.id = arn->string.substr(slash + 1);
+	if (const io::JsonValue *limits = member(task, "Limits", io::JsonValue::Type::Object)) {
+		if (const io::JsonValue *cpu = member(*limits, "CPU", io::JsonValue::Type::Number);
+				cpu != nullptr && cpu->number > 0 && cpu->number < 1024)
+			out.cpu = cpu->number;
+		if (const io::JsonValue *memory = member(*limits, "Memory", io::JsonValue::Type::Number);
+				memory != nullptr && memory->number >= 1 && memory->number < 1e9)
+			out.memory_mib = static_cast<int64_t>(memory->number);
+	}
+	return true;
+}
+
+bool read_task_facts(const std::string &uri, TaskFacts &out, std::string &error, int timeout_ms) {
+	std::string body;
+	return get_metadata(uri + "/task", body, error, timeout_ms) &&
+			parse_task_facts(body, out, error);
 }
 
 bool parse_container_image(const std::string &json, std::string &out, std::string &error) {

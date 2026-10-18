@@ -10,10 +10,13 @@
 // - the release its tasks run (read_task_revision): its task definition's
 //   family and revision, alike in every task of one revision, and new with
 //   each release that changes the program (`app deploy` registers it): the
-//   worker's at-start jobs' key (jobs/scheduler.h).
+//   worker's at-start jobs' key (jobs/scheduler.h);
+// - the task itself (read_task_facts): its id (its ARN's last segment) and its
+//   size (Limits), which each program's usage samples are keyed and measured
+//   by (program_usage.h).
 //
 // The task metadata endpoint (version 4: the agent names it in every
-// container's ECS_CONTAINER_METADATA_URI_V4) gives both: in awsvpc mode
+// container's ECS_CONTAINER_METADATA_URI_V4) gives them all: in awsvpc mode
 // (Fargate's) the task's containers share one network interface, so any
 // container's first IPv4 address is the task's. It also gives a container its
 // own image as the task definition names it and the log stream its output goes
@@ -50,6 +53,21 @@ bool parse_task_revision(const std::string &json, std::string &out, std::string 
 // GET <uri>/task read into `out` (parse_task_revision), as read_task_address.
 bool read_task_revision(
 		const std::string &uri, std::string &out, std::string &error, int timeout_ms = 3000);
+
+// What a task's metadata says of the task itself.
+struct TaskFacts {
+	std::string id; // its TaskARN's last segment
+	double cpu = 0; // its Limits' CPU, in CPUs; 0: none given
+	int64_t memory_mib = 0; // its Limits' Memory, in MiB; 0: none given
+};
+
+// The task's id and limits from the text of a GET <uri>/task reply: false with
+// `error` when it does not read as JSON or names no task ARN.
+bool parse_task_facts(const std::string &json, TaskFacts &out, std::string &error);
+
+// GET <uri>/task read into `out` (parse_task_facts), as read_task_address.
+bool read_task_facts(
+		const std::string &uri, TaskFacts &out, std::string &error, int timeout_ms = 3000);
 
 // The container's own image (its metadata's "Image": the reference its task
 // definition names, a release's pinned by digest) from the text of a GET <uri>

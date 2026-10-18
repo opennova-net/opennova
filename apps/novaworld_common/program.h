@@ -103,7 +103,8 @@ struct LoopHooks {
 // tick_interval_ms asks the watchdog (a stalled loop logs the FATAL line and
 // exits 70 at once), runs `tick`, and every kHeartbeatMs writes the heartbeat
 // line (the program, its hooks' fields, the database's lock failures since the
-// last line), on one pooled connection it holds for the loop. Returns 0 once
+// last line) and the program's sample of its own task (program_usage.h; one as
+// the loop starts too), on one pooled connection it holds for the loop. Returns 0 once
 // the shutdown flag is up (the health listener stopped, the connection back
 // in the pool), 1 when it could not lease that connection or bind the health
 // port.

@@ -79,6 +79,15 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
   files: the host's CPU, memory and network (`/proc/stat`, `/proc/meminfo`,
   `/proc/net/dev` less loopback), a filesystem's room (statvfs) and a cgroup's CPU time and
   memory (v2, else v1). hostd compiles it in for its machine's stats.
+- **Each program samples its own task** (`program_usage.*`, `program_samples`): once a
+  minute, beside its heartbeat, its main loop writes its task's CPU over the minute (in
+  percent of its CPU limit), its memory and the most it may use, and its network
+  namespace's bytes in and out (cumulative counters), read with `proc_stats.*` from its own
+  cgroup and `/proc/net/dev`. A task is its ECS task id (the task metadata's ARN, with its
+  Limits) or, off ECS, its hostname (a local container's id); its limits are its cgroup's
+  where set, else the task's, else the machine's. The worker's `stats.prune` rolls the
+  minutes up by the hour (`program_hourly`) and prunes both (48 h, 400 days); the admin's
+  usage view reads them (Infrastructure below).
 - **Each process logs `{"boot":{"program":"<program>"}}` once as it starts** (stdout, its
   first line, so a crash loop on a missing setting counts too: the log pipeline counts
   boots per program), keeps printing the `[boot] migrations:` line, logs its own
@@ -276,7 +285,7 @@ policy, not a port.
 | `billing.sync` | the customers with an event to sync | each fresh webhook event; every minute while one waits | worker | 1 |
 | `mail.send` | one mail, at most once | the welcome and reset routes | worker | 4 |
 | `hosts.prune`, `host_keys.prune`, `web_sessions.prune`, `active_user_sessions.prune`, `login_addresses.prune`, `password_resets.prune`, `billing_events.prune` | the prunes (`active_user_sessions.prune`: the retail logins' rows unused for 2 h) | every `HOST_SWEEP_INTERVAL_MS` | worker | 1 |
-| `stats.prune` | the machines' minutes rolled up into their hours; the hosted servers' and the machines' samples past 48 h, their hours past 400 days, the machines' egress months past 13, the fleet's machines ended or failed 14 days ago | hourly | worker | 1 |
+| `stats.prune` | the machines' minutes rolled up into their hours; the hosted servers' and the machines' samples past 48 h, their hours past 400 days, the machines' egress months past 13, the programs' task minutes rolled up by the hour (minutes past 48 h, hours past 400 days), the fleet's machines ended or failed 14 days ago | hourly | worker | 1 |
 | `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | worker | 1 |
 | `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
 | `tree.finalize` | an uploaded data set tree checked, sized and made ready (`hosted/data_set_jobs.h`) | the admin's finalize | data | 2 |

@@ -2,6 +2,7 @@
 
 #include "health_listener.h"
 #include "loggable.h"
+#include "program_usage.h"
 
 #include <base/io/log.h>
 
@@ -245,6 +246,23 @@ int run_main_loop(
 		}
 	});
 
+	// The program's own use of its task (program_usage.h): a sample now, then one
+	// with every heartbeat, on the loop's connection.
+	UsageSampler usage(program, find_usage_task());
+	const auto sample_usage = [&usage](db::Database &db) {
+		using namespace std::chrono;
+		const auto wall_s = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+		const auto steady_us =
+				duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
+		try {
+			insert_usage_sample(
+					db, usage.take(static_cast<int64_t>(wall_s), static_cast<uint64_t>(steady_us)));
+		} catch (const db::Error &e) {
+			std::fprintf(stderr, "[usage] WARN the sample: %s\n", e.what());
+		}
+	};
+	sample_usage(**lease);
+
 	install_signal_handlers();
 	std::printf("[boot] ready. Ctrl+C to stop.\n");
 
@@ -278,6 +296,7 @@ int run_main_loop(
 					static_cast<int64_t>(failures.deadlocks - lock_failures_reported.deadlocks);
 			lock_failures_reported = failures;
 			std::printf("%s\n", heartbeat_line(beat).c_str());
+			sample_usage(db);
 		}
 	}
 	// The shutdown is the program's: no watchdog over it (a second signal ends

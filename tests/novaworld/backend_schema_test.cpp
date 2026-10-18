@@ -93,8 +93,8 @@ int test_migrations_create_expected_tables() {
 		"hosted_server_console", "hosted_server_events", "hosted_server_hourly",
 		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "lobby_commands", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
-		"release_sections", "releases", "server_status", "service_meta", "unknown_messages",
-		"web_sessions" };
+		"program_hourly", "program_samples", "release_sections", "releases", "server_status",
+		"service_meta", "unknown_messages", "web_sessions" };
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);

@@ -8,7 +8,9 @@
 //   - the metadata: the task's private IPv4 at the internal port, and its task
 //     definition's family and revision;
 //   - each refusal: the endpoint answering an error or not at all, a URI that is no
-//     http://, a body that is no JSON or names no address, no family or no revision.
+//     http://, a body that is no JSON or names no address, no family or no revision;
+//   - the task's facts (program_usage.h): its id from its ARN and its Limits, none
+//     without them, the refusals.
 //
 // Database-free.
 
@@ -51,6 +53,7 @@ constexpr const char *kTask = R"({
     }
   ],
   "AvailabilityZone": "us-east-1b",
+  "Limits": {"CPU": 0.25, "Memory": 512},
   "LaunchType": "FARGATE"
 })";
 
@@ -164,6 +167,28 @@ int exercise_revision() {
 	return 0;
 }
 
+int exercise_task_facts() {
+	FakeMetadata metadata(200, kTask);
+	ecs::TaskFacts facts;
+	std::string error;
+	TEST_EXPECT(ecs::read_task_facts(metadata.uri(), facts, error, 1000));
+	TEST_EXPECT(facts.id == "0123456789abcdef" && facts.cpu == 0.25 && facts.memory_mib == 512);
+	TEST_EXPECT(metadata.last_line() == "GET /v4/abc-123/task HTTP/1.0");
+	// No Limits (an EC2 task's): the id alone.
+	TEST_EXPECT(ecs::parse_task_facts(
+			R"({"TaskARN":"arn:aws:ecs:us-east-1:1:task/c/feed"})", facts, error));
+	TEST_EXPECT(facts.id == "feed" && facts.cpu == 0 && facts.memory_mib == 0);
+	TEST_EXPECT(!ecs::parse_task_facts(R"({"Limits":{"CPU":1}})", facts, error) &&
+			contains(error, "names no task ARN"));
+	TEST_EXPECT(!ecs::parse_task_facts(R"({"TaskARN":"arn:aws:ecs:x:task/c/"})", facts, error));
+	TEST_EXPECT(!ecs::parse_task_facts("[", facts, error) && contains(error, "is no JSON"));
+	FakeMetadata failing(404, "{}");
+	TEST_EXPECT(!ecs::read_task_facts(failing.uri(), facts, error, 1000) &&
+			contains(error, "answers HTTP 404"));
+	std::printf("  the task's facts: its id and Limits\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -175,8 +200,10 @@ int main() {
 		rc = exercise_refusals();
 	if (rc == 0)
 		rc = exercise_revision();
+	if (rc == 0)
+		rc = exercise_task_facts();
 	net::shutdown();
 	if (rc == 0)
-		std::printf("OK: an ECS task's own address and revision\n");
+		std::printf("OK: an ECS task's own address, revision and facts\n");
 	return rc;
 }
