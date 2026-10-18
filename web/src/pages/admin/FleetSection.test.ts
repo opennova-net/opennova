@@ -80,24 +80,26 @@ describe('FleetSection', () => {
     expect(page.text()).toContain('0 of 2 own');
   });
 
-  it("puts each live server in its machine's slot, whatever the filter shows", async () => {
+  it("puts each server in its machine's slot from the machine's own slot holders, whatever the list shows", async () => {
     const page = await mountSection();
     const cells = page.findAll('article.machine-card')[0].findAll('.slot-cell');
     expect(cells).toHaveLength(12);
     expect(cells[3].get('a').attributes('href')).toBe('/admin/fleet/1');
     expect(cells[3].text()).toContain('Running');
+    expect(cells[5].text()).toContain('Starting');
     expect(cells[0].text()).toContain('Free');
+    expect(fleet).toHaveBeenCalledTimes(1);
 
-    // A filter that leaves the server out reads the live ones again for the slots.
-    fleet.mockImplementation(async (query = {}) =>
-      ({ ok: true, value: fleetResponse(query.owner ? { servers: [] } : {}) }),
-    );
+    // A filter that leaves the server out changes no slot.
+    fleet.mockResolvedValue({ ok: true, value: fleetResponse({ servers: [] }) });
     await page.get('#fleet-filter-owner').setValue('nobody');
     await page.get('#fleet-filter-owner').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
-    expect(fleet).toHaveBeenCalledWith({ state: 'live' }, expect.anything());
+    expect(fleet).toHaveBeenCalledTimes(2);
     expect(page.findAll('tr.fleet-server-row')).toHaveLength(0);
-    expect(page.findAll('article.machine-card')[0].findAll('.slot-cell')[3].text()).toContain('Running');
+    const cell = page.findAll('article.machine-card')[0].findAll('.slot-cell')[3];
+    expect(cell.text()).toContain('Running');
+    expect(cell.get('.sr-only').text()).toBe(': Server 1');
   });
 
   it('lists the servers with owner, tier, players and slot, each to its own page', async () => {
@@ -164,7 +166,7 @@ describe('FleetSection', () => {
     await page.get('#fleet-filter-state').setValue('ended');
     await page.get('#fleet-filter-owner').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
-    expect(fleet).toHaveBeenCalledWith({ owner: 'owner1', state: 'ended' }, expect.anything());
+    expect(fleet).toHaveBeenLastCalledWith({ owner: 'owner1', state: 'ended' }, expect.anything());
   });
 
   it('drains and ends a machine after a confirmation', async () => {

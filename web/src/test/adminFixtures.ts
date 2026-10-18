@@ -103,6 +103,11 @@ export function machine(id: string, overrides: Partial<FleetMachine> = {}): Flee
     release: { image_id: 'ami-0aaa', agent_image: HOSTD_IMAGE },
     outdated: false,
     address: null,
+    // Server 1 runs in slot 3, server 2 starts in slot 5.
+    slot_holders: [
+      { slot: 3, server_id: 1, state: 'running' },
+      { slot: 5, server_id: 2, state: 'booting' },
+    ],
     ...overrides,
   };
 }
@@ -166,7 +171,10 @@ export function fleetResponse(overrides: Partial<FleetResponse> = {}): FleetResp
     live,
     shared: { live, room: 24 },
     own: { live: 0, room: 2 },
-    machines: [machine('3'), machine('4', { kind: 'own', slots: 1, slots_used: 1, instance_type: 'c7a.medium' })],
+    machines: [
+      machine('3'),
+      machine('4', { kind: 'own', slots: 1, slots_used: 1, instance_type: 'c7a.medium', slot_holders: [{ slot: 0, server_id: 9, state: 'running' }] }),
+    ],
     servers,
     ...overrides,
   };

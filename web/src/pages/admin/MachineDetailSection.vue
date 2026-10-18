@@ -85,12 +85,12 @@
       <section v-if="live" class="space-y-3" aria-labelledby="machine-slots">
         <h2 id="machine-slots" class="text-xl font-semibold text-ink">Slots</h2>
         <p class="text-sm text-ink-muted">{{ machine!.slots_used }} of {{ machine!.slots }} in use. Slot k answers UDP 32768+k.</p>
-        <SlotStrip :machine-id="machine!.id" :slots="machine!.slots" :servers="servers" />
-        <ul v-if="servers.length" class="divide-y divide-border rounded-panel border border-border bg-panel text-sm">
-          <li v-for="s in servers" :key="s.id" class="machine-server flex flex-wrap items-center justify-between gap-2 px-4 py-2">
-            <RouterLink :to="`/admin/fleet/${s.id}`" class="text-accent hover:text-ink-bright">{{ s.settings.game_name || 'Unnamed server' }}</RouterLink>
+        <SlotStrip :machine-id="machine!.id" :slots="machine!.slots" :holders="machine!.slot_holders" :servers="servers" />
+        <ul v-if="slotRows.length" class="divide-y divide-border rounded-panel border border-border bg-panel text-sm">
+          <li v-for="r in slotRows" :key="r.slot" class="machine-server flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+            <RouterLink :to="`/admin/fleet/${r.server_id}`" class="text-accent hover:text-ink-bright">{{ r.name }}</RouterLink>
             <span class="text-xs text-ink-muted">
-              Slot {{ s.slot ?? 'none' }}<template v-if="s.game_port">, port {{ s.game_port }}</template>, {{ stateLabel(s.state).toLowerCase() }}<template v-if="s.tick?.late">, {{ s.tick.late }} late ticks in its last minute</template>
+              Slot {{ r.slot }}, port {{ r.port }}, {{ stateLabel(r.state).toLowerCase() }}<template v-if="r.late">, {{ r.late }} late ticks in its last minute</template>
             </span>
           </li>
         </ul>
@@ -160,7 +160,7 @@
 // /admin/fleet/machines/<id>: one fleet machine (GET
 // /api/admin/fleet/machines/<id>): its state and last report, what is wrong
 // in words, its facts against the release (hostd's image, the machine's
-// image), its slots with the live servers in them (GET
+// image), its slots with the servers in them (its slot_holders, named from GET
 // /api/admin/hosted?state=live), the trees its agent holds with their
 // progress, its timeline (its events), its usage (UsageCharts, with its disk)
 // and hostd's log (LogViewer). Polled every 10 s while it lives.
@@ -180,6 +180,8 @@ import { shortImage, toneBadgeClass } from '../../utils/infraView';
 import { eventText, machineFlags, machineLive, machineTone, reportAge, treeFraction, treeProgress } from '../../utils/machineView';
 
 const POLL_MS = 10_000;
+// Slot k answers UDP 32768+k.
+const GAME_PORT_BASE = 32768;
 
 const TREE_STATES: Record<string, string> = { fetching: 'Fetching', ready: 'Ready', failed: 'Failed' };
 
@@ -198,6 +200,23 @@ const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
 
 const machine = computed(() => detail.value?.machine ?? null);
+// Its slots that hold a server, by slot: the machine's own, the server's name
+// and ticks from the fleet list where it has the server.
+const slotRows = computed(() =>
+  [...(machine.value?.slot_holders ?? [])]
+    .sort((a, b) => a.slot - b.slot)
+    .map((h) => {
+      const server = servers.value.find((s) => s.id === h.server_id) ?? null;
+      return {
+        slot: h.slot,
+        server_id: h.server_id,
+        state: h.state,
+        name: server?.settings.game_name || `Server ${h.server_id}`,
+        port: server?.game_port ?? GAME_PORT_BASE + h.slot,
+        late: server?.tick?.late ?? 0,
+      };
+    }),
+);
 const live = computed(() => (machine.value ? machineLive(machine.value.state) : false));
 const report = computed(() => (machine.value ? reportAge(machine.value, now.value) : null));
 

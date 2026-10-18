@@ -3,19 +3,23 @@ import { describe, expect, it } from 'vitest';
 import SlotStrip from './SlotStrip.vue';
 import { fleetServer } from '../test/adminFixtures';
 import { testRouter } from '../test/router';
+import type { FleetServer, SlotHolder } from '../types/hostedServer';
 
 describe('SlotStrip', () => {
-  async function mountStrip(servers: ReturnType<typeof fleetServer>[], slots = 6) {
+  async function mountStrip(holders: SlotHolder[], servers: FleetServer[] = [], slots = 6) {
     const router = await testRouter('/admin/fleet');
-    return mount(SlotStrip, { props: { machineId: '3', slots, servers }, global: { plugins: [router] } });
+    return mount(SlotStrip, { props: { machineId: '3', slots, holders, servers }, global: { plugins: [router] } });
   }
 
   it('shows every slot, free or the server in it, in a word and a colour', async () => {
-    const strip = await mountStrip([
-      fleetServer(1, { slot: 0 }),
-      fleetServer(2, { slot: 2, tick: { p99_ms: 31, late: 12 } }),
-      fleetServer(3, { slot: 4, state: 'booting' }),
-    ]);
+    const strip = await mountStrip(
+      [
+        { slot: 0, server_id: 1, state: 'running' },
+        { slot: 2, server_id: 2, state: 'running' },
+        { slot: 4, server_id: 3, state: 'booting' },
+      ],
+      [fleetServer(1, { slot: 0 }), fleetServer(2, { slot: 2, tick: { p99_ms: 31, late: 12 } })],
+    );
     const cells = strip.findAll('.slot-cell');
     expect(cells).toHaveLength(6);
     expect(cells[0].text()).toContain('Running');
@@ -29,9 +33,13 @@ describe('SlotStrip', () => {
     expect(cells[0].get('.sr-only').text()).toBe(': Server 1');
   });
 
-  it('reads no tick as on time', async () => {
-    const strip = await mountStrip([fleetServer(1, { slot: 0, tick: null })], 1);
-    expect(strip.get('.slot-cell').text()).toContain('Running');
-    expect(strip.get('.slot-cell').text()).not.toContain('late');
+  it("holds a slot the fleet list does not show, named by its server's id", async () => {
+    const strip = await mountStrip([{ slot: 1, server_id: 150, state: 'running' }]);
+    const cell = strip.findAll('.slot-cell')[1];
+    expect(cell.text()).toContain('Running');
+    expect(cell.get('a').attributes('href')).toBe('/admin/fleet/150');
+    expect(cell.get('.sr-only').text()).toBe(': Server 150');
+    // No tick read for it: on time.
+    expect(cell.text()).not.toContain('late');
   });
 });

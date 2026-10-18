@@ -312,8 +312,6 @@ const route = useRoute();
 const tab = computed(() => (route.query.tab === 'roll' ? 'roll' : 'main'));
 
 const fleet = ref<FleetResponse | null>(null);
-// The live servers, whatever the filter shows: the machines' slots.
-const liveServers = ref<FleetServer[]>([]);
 const busy = ref(false);
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
@@ -353,9 +351,10 @@ const serversShown = computed(() =>
 function pinnedText(tree: PinnedTree | null): string {
   return tree?.version || 'No version';
 }
-// The live servers on a machine.
+// The servers the list shows on a machine (its slots' names and ticks; the
+// slots themselves are the machine's own).
 function serversOn(m: FleetMachine): FleetServer[] {
-  return liveServers.value.filter((s) => s.machine_ref === m.id);
+  return (fleet.value?.servers ?? []).filter((s) => s.live && s.machine_ref === m.id);
 }
 
 const machineBreakdown = computed(() => {
@@ -377,19 +376,11 @@ function fail(text: string) {
 
 const poll = usePolling({
   async read(signal, background) {
-    // A filter that can leave live servers out reads them again for the
-    // machines' slots.
-    const filtered = !!query.value.owner || query.value.state === 'ended';
-    const [result, live] = await Promise.all([
-      fetchHostedFleet(query.value, signal),
-      filtered ? fetchHostedFleet({ state: 'live' }, signal) : Promise.resolve(null),
-    ]);
+    const result = await fetchHostedFleet(query.value, signal);
     if (signal.aborted) return false;
     now.value = Date.now();
     if (result.ok) {
       fleet.value = result.value;
-      const all = live === null ? result.value.servers : live.ok ? live.value.servers : [];
-      liveServers.value = all.filter((s) => s.live);
       loadedAt.value = now.value;
       pollTrouble.value = false;
       if (errorFromLoad) {

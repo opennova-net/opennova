@@ -29,7 +29,7 @@
 
     <div v-if="live" class="space-y-1">
       <p class="text-xs text-ink-muted">{{ machine.slots_used }} of {{ machine.slots }} slots in use</p>
-      <SlotStrip :machine-id="machine.id" :slots="machine.slots" :servers="servers" />
+      <SlotStrip :machine-id="machine.id" :slots="machine.slots" :holders="machine.slot_holders" :servers="servers" />
     </div>
 
     <p class="text-xs text-ink-muted">
@@ -84,7 +84,7 @@ import { machineFigures, machineFlags, machineLive, machineTone, reportAge } fro
 
 const props = defineProps<{
   machine: FleetMachine;
-  // The live servers on it.
+  // The servers the page has read on it (their names and ticks).
   servers: readonly FleetServer[];
   now: number;
   busy?: boolean;

@@ -309,6 +309,15 @@ export interface MachineStats {
   net_out_bps: number | null;
 }
 
+// A slot of a machine that holds a server (machine_json's slot_holders, from
+// the slot assignments): its number (it answers UDP 32768+slot), the server
+// and the server's state.
+export interface SlotHolder {
+  slot: number;
+  server_id: number;
+  state: HostedState | (string & {});
+}
+
 // A machine of the fleet (GET /api/admin/hosted's `machines`, machine_json).
 // Times are UTC; '' or null where none is known.
 export interface FleetMachine {
@@ -355,6 +364,9 @@ export interface FleetMachine {
   outdated: boolean | null;
   // The static address it carries (an own machine's), or null.
   address: { id: number; name: string } | null;
+  // Its slots that hold a server, one each (slots_used of them); whatever the
+  // fleet list shows.
+  slot_holders: SlotHolder[];
 }
 
 // One of a machine's moves (fleet_machine_events): from a state to another,

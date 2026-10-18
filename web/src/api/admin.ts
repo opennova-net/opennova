@@ -31,6 +31,7 @@ import type {
   MachineTree,
   RollPlan,
   RollStep,
+  SlotHolder,
 } from '../types/hostedServer';
 import { ADDRESS_NAME_RULE } from '../utils/addressView';
 
@@ -433,6 +434,11 @@ function pickMachineStats(value: unknown): MachineStats | null {
   };
 }
 
+function pickSlotHolder(value: unknown): SlotHolder | null {
+  if (!isFields(value) || !isCount(value.slot) || !isCount(value.server_id) || typeof value.state !== 'string') return null;
+  return { slot: value.slot, server_id: value.server_id, state: value.state };
+}
+
 function pickMachineAddress(value: unknown): FleetMachine['address'] {
   if (!isFields(value) || !isCount(value.id) || typeof value.name !== 'string') return null;
   return { id: value.id, name: value.name };
@@ -471,6 +477,9 @@ export function pickMachine(value: unknown): FleetMachine | null {
     release: { image_id: textOrNull(release.image_id), agent_image: textOrNull(release.agent_image) },
     outdated: typeof v.outdated === 'boolean' ? v.outdated : null,
     address: pickMachineAddress(v.address),
+    slot_holders: Array.isArray(v.slot_holders)
+      ? v.slot_holders.map(pickSlotHolder).filter((h): h is SlotHolder => h !== null)
+      : [],
   };
 }
 

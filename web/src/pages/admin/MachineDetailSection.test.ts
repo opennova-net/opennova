@@ -66,10 +66,15 @@ describe('MachineDetailSection', () => {
 
   it('lists the servers in its slots, its trees with their progress and its timeline', async () => {
     const page = await mountPage();
+    // Its slots' servers are its own; the fleet list names the ones it shows.
     const servers = page.findAll('li.machine-server');
-    expect(servers).toHaveLength(1);
+    expect(servers).toHaveLength(2);
     expect(servers[0].get('a').attributes('href')).toBe('/admin/fleet/1');
+    expect(servers[0].text()).toContain('Server 1');
     expect(servers[0].text()).toContain('Slot 3, port 32771, running');
+    expect(servers[1].get('a').attributes('href')).toBe('/admin/fleet/2');
+    expect(servers[1].text()).toContain('Server 2');
+    expect(servers[1].text()).toContain('Slot 5, port 32773, booting');
 
     const trees = page.findAll('li.machine-tree');
     expect(trees).toHaveLength(2);
