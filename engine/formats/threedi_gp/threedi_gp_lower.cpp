@@ -656,6 +656,22 @@ bool lower(const Threedi3di3 &model, File &out, std::vector<MigrateNote> &note_l
 		out.occlusion.push_back(std::move(o));
 	}
 	if (!out.occlusion.empty()) h.flags |= kFlagOcclusion;
+	// Past what BHD ships: its largest rigid models hold 26,305 vertices (HN_Bld1, all LODs) and
+	// 11,600 LOD 0 triangles (RE_Bsmt), its largest first-person guns 4,182 (G36_1st) and 3,323
+	// (m60_1st). Nothing in the tool caps a GP model's counts (its vertex tables grow on the
+	// heap [orig: sub_442430, sub_4424F0 (df4oed)]), so a larger one is noted, not refused.
+	size_t triangles = 0;
+	for (const Primitive &p : out.lods[0].primitives)
+		triangles += p.topology == 1 ? (p.indices.size() >= 3 ? p.indices.size() - 2 : 0) : p.indices.size() / 3;
+	const bool first_person = h.name.size() >= 4 && strutil::iequals(h.name.substr(h.name.size() - 4), "_1st");
+	const size_t max_vertices = first_person ? 4182 : 26305, max_triangles = first_person ? 3323 : 11600;
+	const char *largest = first_person ? "first-person gun" : "rigid model";
+	if (out.vertices.size() > max_vertices)
+		notes.add("the model holds " + std::to_string(out.vertices.size()) + " vertices, past the " +
+				std::to_string(max_vertices) + " of the largest " + largest + " BHD ships");
+	if (triangles > max_triangles)
+		notes.add("its LOD 0 holds " + std::to_string(triangles) + " triangles, past the " + std::to_string(max_triangles) +
+				" of the largest " + largest + " BHD ships");
 	h.vertex_count = static_cast<int32_t>(out.vertices.size());
 	h.user_point_count = static_cast<int32_t>(out.user_points.size());
 	h.control_register_count = static_cast<int32_t>(out.control_registers.size());
