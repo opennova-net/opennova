@@ -68,7 +68,7 @@ public:
 	// The descriptors put back, every line read copied, the threads joined.
 	void stop();
 	// Waits (at most `timeout_ms`) for every line written so far to be copied: before an
-	// exit that runs no destructor (the watchdog's).
+	// exit that runs no destructor (the watchdog's, the fleet program's lost leadership).
 	void drain(int timeout_ms);
 
 private:
