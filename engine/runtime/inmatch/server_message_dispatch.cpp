@@ -1981,8 +1981,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						peer->inf.reload_anim_ticks = 80;
 				}
 				// Host-side clip refill for a REMOTE requester [orig: WeaponSlot_ReloadAmmo
-				// @0x541720, called @0x514F03 after the relay iff requester != local player.
-				// Refund + ammo-pool clamp deferred -> refill to capacity @0x541811]. The wire
+				// @0x541720, called @0x514F03 after the relay iff requester != local player:
+				// the refund @0x5417E7, the draw clamped by the pool @0x541811, the store
+				// @0x541842 / @0x541850]. The wire
 				// combo (the second u16) keys the same slot the 0x06 pipeline decrements
 				// [orig: slotIndex = HIWORD @0x514f03; slot = playerSlot+464+100*combo @0x54176d].
 				if (!world->tables.weapons.empty() &&
@@ -1995,24 +1996,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							(addressed_entity->item_attrib &
 									world::kItemAttribEweap) != 0u &&
 							world->vehicles.prepare_weapon_slot(*addressed_entity)) {
-						world::WeaponSlotState *slot =
-								world->vehicles.resolve_mounted_ammo_slot(*addressed_entity);
-						uint8_t slot_adm = addressed_entity->primary_weapon_slot_adm;
-						if (slot != nullptr &&
-								slot != &addressed_entity->primary_weapon_slot) {
-							world::Entity *parent = world->registry.get(
-									addressed_entity->ground_target);
-							if (parent == nullptr ||
-									slot != &parent->primary_weapon_slot)
-								slot = nullptr;
-							else
-								slot_adm = parent->primary_weapon_slot_adm;
-						}
-						const world::WeaponTableEntry *adm =
-								world->tables.weapons.by_index(slot_adm);
-						if (slot != nullptr && adm != nullptr &&
-								adm->clipsize != -1)
-							slot->clip = adm->clipsize;
+						// [orig: WeaponSlot_ReloadAmmo's EWeap legs]
+						world->vehicles.reload_weapon_slot(*addressed_entity);
 						break;
 					}
 					NapiNPConnection *addressed_owner = nullptr;

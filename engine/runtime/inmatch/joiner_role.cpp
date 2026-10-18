@@ -1444,11 +1444,20 @@ void JoinerRole::apply_gameplay_events() {
 		lp.weapon.reload_received_entity = reload.entity_handle;
 		lp.weapon.reload_received_param = reload.reload_param;
 		// ClientRuntime already applied the remote-Person receive-handler stamp
-		// before that frame's body tick. This drain retains diagnostics plus the
+		// before that frame's body tick. This drain retains diagnostics, the
+		// non-person branch's refill on an EWeap entity's own MountSlot, and the
 		// self-only WeaponSlot_ReloadAmmo branch below.
-		if (!lp.inventory_valid || !rt.has_self_handle() ||
-				reload.entity_handle != rt.self_handle())
+		// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the non-person
+		//  WeaponSlot_ReloadAmmo call @0x42C109, whose EWeap slot @0x54172D]
+		if (!rt.has_self_handle() || reload.entity_handle != rt.self_handle()) {
+			world::Entity *mount = world.registry.get(world::EntityHandle{reload.entity_handle});
+			if (mount != nullptr && mount->has_item_def &&
+					(mount->item_attrib & world::kItemAttribEweap) != 0u &&
+					world.vehicles.prepare_weapon_slot(*mount))
+				world.vehicles.reload_weapon_slot(*mount);
 			continue;
+		}
+		if (!lp.inventory_valid) continue;
 
 		const int32_t combo = reload.reload_param;
 		world::WeaponInventorySlot *reloaded = lp.inventory.slot(combo);

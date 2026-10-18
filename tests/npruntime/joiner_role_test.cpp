@@ -1299,6 +1299,55 @@ bool run_flare_descriptor_carries_the_pilot_handheld() {
 	return ok;
 }
 
+// An S2C 0x49 naming a non-Person EWeap entity reloads that entity's own MountSlot:
+// the remaining clip is refunded through the slot's re-split, then a clip is drawn
+// from its reserve [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the
+//  non-Person WeaponSlot_ReloadAmmo call @0x42C109; WeaponSlot_ReloadAmmo's EWeap
+//  slot @0x54172D, the re-split @0x5462A0, sub_546200 / sub_5461D0, the clip store
+//  @0x541850].
+bool run_received_reload_refills_an_eweap_entity() {
+    Harness h;
+    h.role.poll_preload();
+    h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+            1, 0, 5, w::kPlayerInfantryTypeId);
+    w::World &world = h.kernel->world;
+    world.registry.configure_pool(1, 8);
+    world.tables.weapons.entries.resize(2);
+    w::WeaponTableEntry &gun = world.tables.weapons.entries[1];
+    gun.name = "WPN_TANKGUN";
+    gun.valid = true;
+    gun.clipsize = 4;
+    gun.startrounds = 12;
+    gun.ammo_class_count = 1;
+    w::Entity tank;
+    tank.kind = w::EntityKind::Item;
+    tank.has_item_def = true;
+    tank.item_type = 1;
+    tank.item_attrib = w::kItemAttribEweap;
+    tank.primary_weapon = gun.name;
+    const w::EntityHandle tank_h = world.registry.spawn(1, tank);
+    w::Entity *live = world.registry.get(tank_h);
+    if (!expect(live != nullptr && world.vehicles.prepare_weapon_slot(*live),
+            "reload: the tank's slot resolves")) return false;
+    live->primary_weapon_slot.clip = 1;
+    live->primary_weapon_slot.reserve = 8;
+    SessionSequencing tx = inmatch::make_jo_game_session_sequencing();
+    WeaponReload reload;
+    reload.entity_handle = tank_h.packed;
+    reload.reload_param = 0xFFFF;
+    std::vector<uint8_t> body;
+    if (!frame_session_packet(tx, SessionCrypto{kServerScrk, {}, kClientKey},
+            {make_protocol_message(s2c::WEAPON_RELOAD, encode_weapon_reload(reload))}, body))
+        return false;
+    const auto datagram = nw_encode_outbound(
+            SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+    h.role.runtime->receive(datagram.data(), datagram.size());
+    h.role.run_tick(h.input);
+    // 1 + 8 + 1 capped at 12: 4 / 6, then the draw of 4: 4 / 2.
+    return expect(live->primary_weapon_slot.clip == 4 && live->primary_weapon_slot.reserve == 2,
+            "reload: the EWeap entity refills its own slot from its reserve");
+}
+
 bool run_received_loadout_policy_and_sounds() {
     Harness h;
     h.role.poll_preload();
@@ -2569,6 +2618,7 @@ int main() {
 	if (!run_local_replica_turret_channel()) return 1;
 	if (!run_replica_turret_channel()) return 1;
 	if (!run_received_loadout_policy_and_sounds()) return 1;
+	if (!run_received_reload_refills_an_eweap_entity()) return 1;
 	bool ok = true;
 	ok &= run_pre_match_frame();
 	ok &= run_preload_frame();

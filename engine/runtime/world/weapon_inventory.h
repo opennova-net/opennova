@@ -361,6 +361,23 @@ bool weapon_inventory_all_full(const WeaponTable &table, const WeaponInventory &
 int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &inv,
                                      int32_t combo, const WeaponAmmoSeat &seat);
 
+// The reload transfer on an EWeap entity, as retail's accessors route an EWeap
+// owner. The routed slot (the entity's own, or its carrier's when the route bit
+// is set) and its def give the loaded rounds, the draw's size and the clip store;
+// the entity's own slot and def take the refund, the reserve read and the spend.
+// The remaining clip is refunded through the own slot's re-split (clip + reserve +
+// the refund, capped at its def's startrounds, re-split into a clipsize clip and
+// the rest), then clipsize * units is drawn from the own reserve word (floored at
+// 0, -1 kept) and the routed clip becomes what was drawn.
+// [orig: WeaponSlot_ReloadAmmo @0x541720 - Entity_GetWeaponSlots @0x541730 (the
+//  route @0x54610E..0x546113), the loaded word @0x5417C9, WeaponSlot_AddAmmo
+//  @0x5417E7 -> the re-split @0x5462A0..0x5462FF on the entity's own words
+//  (@0x540A85..0x540AB0), the reserve read Entity_GetMountSlotReserve @0x546120
+//  from @0x541805 (@0x540780..0x54078E), WeaponSlot_DecrementAmmo @0x541821 ->
+//  sub_5461D0 @0x5461D0, the clip store @0x541850]
+void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotState &routed,
+                              const WeaponTableEntry &own_def, WeaponSlotState &own);
+
 // Player_SelectWeaponSlot @ 0x4DD680 — the category-level select. Stages the pending
 // slot; the caller commits pending->equipped unless seated (the original applies to
 // EquippedSlot only when !parentEntity || parentSlot not in {2,3}).

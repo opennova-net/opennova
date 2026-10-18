@@ -75,6 +75,10 @@ void def_init_weapon(DefWeaponDef &value) {
     value.scope_min_mag = 2;
     /* [orig: AdmDef_InitEntryDefaults @ 0x53FF61/0x53FF67/0x53FF6D] */
     for (int &stability : value.stability_fp16) stability = 0x10000;
+    /* One pool unit per round until an `ammoclass` line says otherwise
+       [orig: AdmDef_InitEntryDefaults +0xE0 = 1 @ 0x53FF5B; the line's abs(atol)
+       @ 0x544242] */
+    value.ammo_class_count = 1;
 }
 
 /* Whether a named file is one the game can open: never an empty name, and

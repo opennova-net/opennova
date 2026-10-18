@@ -221,6 +221,24 @@ WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(Entity &mount) {
                     static_cast<const Entity &>(mount)));
 }
 
+bool VehicleSystem::reload_weapon_slot(Entity &mount) {
+    World &world = world_;
+    const WeaponTableEntry *own_def = world.tables.weapons.by_index(mount.primary_weapon_slot_adm);
+    WeaponSlotState *routed = resolve_mounted_ammo_slot(mount);
+    if (own_def == nullptr || routed == nullptr) return false;
+    // The routed slot's def is the slot's own: the carrier's when the route bit
+    // sends the child to it [orig: slot+0x20 read @0x541797 / @0x5417EF].
+    const WeaponTableEntry *routed_def = own_def;
+    if (routed != &mount.primary_weapon_slot) {
+        const Entity *carrier = world.registry.get(mount.ground_target);
+        if (carrier == nullptr || routed != &carrier->primary_weapon_slot) return false;
+        routed_def = world.tables.weapons.by_index(carrier->primary_weapon_slot_adm);
+        if (routed_def == nullptr) return false;
+    }
+    weapon_mount_slot_reload(*routed_def, *routed, *own_def, mount.primary_weapon_slot);
+    return true;
+}
+
 void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle) {
     if (vehicle != nullptr && vehicle->primary_weapon_owner == occupant.handle)
         vehicle->primary_weapon_owner = EntityHandle{};

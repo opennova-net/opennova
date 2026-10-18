@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include <formats/def/def.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_inventory.h>
@@ -998,7 +999,47 @@ void test_reload_takes_the_seat() {
     std::printf("PASS the reload takes the seat\n");
 }
 
+// An EWeap mount's reload: the re-split, the draw from the reserve, the clip the draw;
+// an empty reserve leaves the clip empty. [orig: WeaponSlot_ReloadAmmo @0x541720;
+//  the re-split @0x5462A0; sub_5461D0]
+void test_mount_slot_reload() {
+    WeaponTableEntry gun;
+    gun.clipsize = 10;
+    gun.startrounds = 100;
+    gun.ammo_class_count = 1;
+    WeaponSlotState slot;
+    slot.clip = 4;
+    slot.reserve = 50;
+    weapon_mount_slot_reload(gun, slot, gun, slot);
+    CHECK(slot.clip == 10 && slot.reserve == 38); // 4 + 50 + 4 = 58 -> 10 / 48 -> 10 / 38
+    slot.clip = 7;
+    slot.reserve = 0;
+    weapon_mount_slot_reload(gun, slot, gun, slot);
+    CHECK(slot.clip == 4 && slot.reserve == 0);   // 14 -> 10 / 4 -> draw 4 -> 4 / 0
+    gun.startrounds = 9;
+    slot.clip = 7;
+    slot.reserve = 0;
+    weapon_mount_slot_reload(gun, slot, gun, slot);
+    CHECK(slot.clip == 0 && slot.reserve == 0);   // 14 capped at 9 -> 9 / 0 -> draw 0
+    // A def with no `ammoclass` line holds one unit a round: a 1-round tank gun
+    // with 40 start rounds reloads from its reserve [orig: AdmDef_InitEntryDefaults
+    // +0xE0 = 1 @0x53FF5B; WPN_M1TURRET].
+    opennova::def::DefWeaponDef row;
+    opennova::def::def_init_weapon(row);
+    CHECK(row.ammo_class_count == 1);
+    WeaponTableEntry turret;
+    turret.clipsize = 1;
+    turret.startrounds = 40;
+    turret.ammo_class_count = static_cast<int16_t>(row.ammo_class_count);
+    slot.clip = 0;
+    slot.reserve = 39;
+    weapon_mount_slot_reload(turret, slot, turret, slot);
+    CHECK(slot.clip == 1 && slot.reserve == 38);
+    std::printf("PASS the mount slot reload\n");
+}
+
 int main() {
+    test_mount_slot_reload();
     test_recalc_seat_legs();
     test_reload_takes_the_seat();
     test_pump_reads_the_bucket_through_the_seat();

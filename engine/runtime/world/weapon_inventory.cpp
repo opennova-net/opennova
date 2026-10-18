@@ -671,6 +671,41 @@ int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &
     return bucket ? weapon_seat_bucket(seat, after) : after;
 }
 
+void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotState &routed,
+                              const WeaponTableEntry &own_def, WeaponSlotState &own) {
+    if (routed_def.clipsize == -1) return;               // @0x5417aa
+    const int32_t units = routed_def.ammo_class_count;   // the slot def's +0xE0
+    // Only an authored `ammoclass <class> 0` leaves it 0, where retail divides by
+    // it (@0x541832); the defaults give 1 (AdmDef_InitEntryDefaults @0x53FF5B).
+    if (units == 0) return;
+    // A bucket weapon's rounds read through sub_5405F0, which an EWeap owner
+    // answers with its own slot's clip [orig: @0x5417B0..0x5417C5;
+    //  @0x540634..0x540637]; otherwise the routed slot's word (@0x5417C9).
+    const int32_t loaded = routed_def.ammo_bucket != 0 ? static_cast<int16_t>(own.clip)
+                                                       : static_cast<int16_t>(routed.clip);
+    if (loaded != 0 && own_def.startrounds != -1 && own_def.clipsize != -1) { // @0x5462AE..0x5462B8
+        int32_t total = static_cast<int16_t>(own.clip) + static_cast<int16_t>(own.reserve) +
+                loaded * units;                          // @0x5462BA..0x5462CD
+        if (total > own_def.startrounds) total = own_def.startrounds;
+        int32_t clip = own_def.clipsize;                 // @0x5462D6..0x5462DA
+        if (clip > total) clip = total;                  // @0x5462E4..0x5462E8
+        own.clip = static_cast<int16_t>(clip);
+        own.reserve = static_cast<int16_t>(total - clip); // @0x5462F6..0x5462F8
+    }
+    int32_t cost = static_cast<int32_t>(routed_def.clipsize) * units; // @0x5417FF
+    const int32_t avail = static_cast<int16_t>(own.reserve);         // @0x546140
+    if (cost > avail) cost = avail;                      // @0x54180F..0x541811
+    int32_t word = static_cast<int16_t>(own.reserve);    // sub_5461D0
+    if (word != -1) {
+        word -= cost;
+        if (word < 0) word = 0;
+        own.reserve = static_cast<int16_t>(word);
+    }
+    // The bucket's write skips an EWeap owner [orig: sub_540670 @0x540694..0x54069F].
+    if (routed_def.ammo_bucket == 0)
+        routed.clip = static_cast<int16_t>(cost / units); // @0x541832 / @0x541850
+}
+
 bool weapon_select_slot(const WeaponTable &table, WeaponInventory &inv, int32_t combo,
                         bool commit_equip) {
     // [orig: Player_SelectWeaponSlot @ 0x4DD680]

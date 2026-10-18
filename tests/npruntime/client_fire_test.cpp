@@ -141,14 +141,16 @@ bool check_mounted_slot_select_fire_and_reload() {
 	child_weapon.category = 3;
 	child_weapon.rank = 2;
 	child_weapon.clipsize = 4;
-	child_weapon.startrounds = 4;
+	child_weapon.startrounds = 12; // an 8-round reserve
+	child_weapon.ammo_class_count = 1;
 	child_weapon.valid = true;
 	w::WeaponTableEntry &parent_weapon = world.tables.weapons.entries[6];
 	parent_weapon.name = "WPN_PARENT";
 	parent_weapon.category = 4;
 	parent_weapon.rank = 3;
 	parent_weapon.clipsize = 9;
-	parent_weapon.startrounds = 9;
+	parent_weapon.startrounds = 30; // a 21-round reserve
+	parent_weapon.ammo_class_count = 1;
 	parent_weapon.valid = true;
 
 	w::Entity parent;
@@ -220,8 +222,19 @@ bool check_mounted_slot_select_fire_and_reload() {
 	reload.reload_param = 0xBEEF; // ignored for EWeap entities in retail
 	dispatch_gameplay(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload),
 			roster[0], roster, world);
-	if (!expect(live_parent->primary_weapon_slot.clip == 9,
-			"mounted reload refills the selected parent world slot"))
+	// On the parent route the reload splits across the two entities: the parent's
+	// slot gives the loaded 7, the draw's size (9) and takes the clip; the child's
+	// own slot takes the refund (7 + 8 + 4, capped at 12: 4 / 8) and pays the draw
+	// (min(9, 8) = 8: its reserve 0). The parent reads 8 / 21, the child 4 / 0.
+	// [orig: WeaponSlot_ReloadAmmo @0x541730 -> Entity_GetWeaponSlots
+	//  @0x54610E..0x546113; WeaponSlot_AddAmmo @0x540AB0 -> @0x5462A0 on the
+	//  child; Entity_GetMountSlotReserve @0x54078E; sub_5461D0 @0x5409C3; the
+	//  clip store @0x541850]
+	if (!expect(live_parent->primary_weapon_slot.clip == 8 &&
+					live_parent->primary_weapon_slot.reserve == 21 &&
+					live_child->primary_weapon_slot.clip == 4 &&
+					live_child->primary_weapon_slot.reserve == 0,
+			"a parent-route reload draws on the child's own reserve into the parent's clip"))
 		return false;
 
 	MountedWeaponSlotSelection select_child;
@@ -236,13 +249,15 @@ bool check_mounted_slot_select_fire_and_reload() {
 			fire_body(shooter.packed, 0x22, 5, 0, 0, 0, 0, 0,
 					0xFFFF, 2, 0, 0));
 	if (!expect(live_child->primary_weapon_slot.clip == 3 &&
-			live_parent->primary_weapon_slot.clip == 9,
+			live_parent->primary_weapon_slot.clip == 8,
 			"mounted child-route fire spends only the child world slot"))
 		return false;
 	dispatch_gameplay(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload),
 			roster[0], roster, world);
-	if (!expect(live_child->primary_weapon_slot.clip == 4,
-			"mounted reload refills the selected child world slot"))
+	// 3 + 0 + 3 capped at 12: 4 / 2, then the draw of min(4, 2): 2 / 0.
+	if (!expect(live_child->primary_weapon_slot.clip == 2 &&
+					live_child->primary_weapon_slot.reserve == 0,
+			"mounted reload refills the selected child world slot from its reserve"))
 		return false;
 
 	// Malformed bodies and failed parent validation are consume-and-ignore: no
