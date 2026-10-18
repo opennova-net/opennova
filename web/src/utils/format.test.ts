@@ -64,6 +64,8 @@ describe('formatAge', () => {
   it('counts the seconds under a minute, then reads as a relative time', () => {
     expect(formatAge('2026-10-18 11:59:56', now)).toBe('4 s ago');
     expect(formatAge('2026-10-18T11:59:10Z', now)).toBe('50 s ago');
+    // A minute and on, as formatRelative reads it.
+    expect(formatAge('2026-10-18T11:59:00Z', now)).toBe('1 min ago');
     expect(formatAge('2026-10-18T11:57:00Z', now)).toBe('3 min ago');
     expect(formatAge('2026-10-18T12:00:05Z', now)).toBe('just now');
     expect(formatAge('soon', now)).toBe('soon');
