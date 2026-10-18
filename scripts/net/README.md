@@ -6,11 +6,9 @@ retail data stay machine-local and gitignored and must never be
 committed without the sanitization review described in
 [`docs/asset-gated-tests.md`](../../docs/asset-gated-tests.md).
 
-The former generated parity matrix, corpus exporter and PowerShell manifest
-verifier have been removed. The parity verdict is now `opennova-parity` (C++,
-`apps/parity`), run per case by `run_parity_suite.ps1` (see "Parity verdict"
-below). It judges the runs it is given; it does not hash-bind binaries, retail
-trees or the corpus the way the retired manifest did.
+The parity verdict is `opennova-parity` (C++, `apps/parity`), run per case by
+`run_parity_suite.ps1` ("Parity verdict" below). It judges the runs it is given; it
+does not hash-bind binaries, retail trees or a corpus.
 
 ## Tools
 
@@ -97,7 +95,7 @@ over the committed `fixtures/novaworld/` set and the inline-pcap unit tests.
 ## 0x0A shape diff
 
 For the in-match replication core, `diff_0a.py` is a per-FIELD **shape** diff
-of just the S2C `0x0A` stream — the two captures are different sessions, so it compares what
+of just the S2C `0x0A` stream: the two captures are different sessions, so it compares what
 should match between any two hosts on the same map rather than raw bytes:
 
 ```bash
@@ -150,8 +148,8 @@ A subject slot also takes an RR run: `--rr <rr-aa> --rr-aa <rr> --ro <rr>` is th
 A/A sanity and must pass (its only failures can be evidence findings).
 
 The A/A rule: a metric's distance from RR fails when it exceeds
-`max(fixed floor, distance(RR-aa, RR))`. The fixed floors are the retired
-verifier's tolerances. The A/A distances form the verdict's `aa` section,
+`max(fixed floor, distance(RR-aa, RR))`, each metric's fixed floor its own
+(`apps/parity/metric.h`). The A/A distances form the verdict's `aa` section,
 `pass` or `widened` against the fixed floors alone: where retail's own
 run-to-run noise exceeds a floor, the floor widens to it for every subject and
 the report says so.

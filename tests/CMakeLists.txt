@@ -3782,15 +3782,6 @@ target_link_libraries(jointops_hello_test PRIVATE opennova_net)
 target_include_directories(jointops_hello_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME jointops_hello COMMAND jointops_hello_test)
 
-# ADR 0010 real-NW parity — decodes the genuine .204 lobby capture (the oracle):
-# envelope + outer NWU + per-session SCRK, dumps every container so our builders
-# can be matched field for field. fixtures/novaworld/nw204_lobby.hexcap.
-add_executable(nw204_lobby_decode_test novaworld/nw204_lobby_decode_test.cpp)
-target_link_libraries(nw204_lobby_decode_test PRIVATE opennova_net)
-target_include_directories(nw204_lobby_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(nw204_lobby_decode_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
-add_test(NAME nw204_lobby_decode COMMAND nw204_lobby_decode_test)
-
 # Inline-pcap decoder regression — crafts tiny in-memory pcaps and round-trips
 # the 0x0D / 0x20 pool decoders through the full S2C stack (encode -> frame ->
 # NWU -> envelope -> build_pcap_udp -> read_pcap_udp -> decode). No capture

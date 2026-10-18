@@ -3873,7 +3873,7 @@ int test_name_and_value_rules(Harness &h) {
 	for (const char *value : { "3", "2345", "jop:cus2", "us", "127.0.0.1", "::ffff:10.0.0.7",
 				 "65537:3233:ABCDEFGHIJKLMNOP", "NWServer:NWLogin.dll:SESSIONTAG:123:0a1b2c3d",
 				 "A-A02-085D18", "5e550001", "ljim", "Space Handle", "Jim's \"quoted\"",
-				 "JT:0a000013143f1efe6c8000767fd748e1127304c5b6d728", "" }) {
+				 "JT:0a00001314cb0071078000767fd748e1127304c5b6d728", "" }) {
 		TEST_EXPECT(nws::cookie_value_ok(value));
 		TEST_EXPECT(nws::set_cookie_text("NWHANDLE", value, "Path=/") ==
 				std::string("NWHANDLE=") + value + "; Path=/");
@@ -5321,6 +5321,10 @@ int test_hosted_server_routes(Harness &h) {
 	reply = h.send("GET", "/api/admin/hosted", { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 4 && json["live"].i() == 4);
+	// The room per machine kind, from the placement policy (the defaults: 2
+	// shared machines of 12 slots, 2 own machines).
+	TEST_EXPECT(json["shared"]["live"].i() + json["own"]["live"].i() == 4 && json["shared"]["room"].i() == 24 &&
+			json["own"]["room"].i() == 2);
 	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "docker");
 	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
 	TEST_EXPECT(!json.has("jobs")); // the jobs routes' now (job_routes_test)

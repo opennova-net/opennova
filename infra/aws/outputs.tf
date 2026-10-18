@@ -40,7 +40,7 @@ output "lb_dns_name" {
 
 output "lb_arn" {
   value       = aws_lb.public.arn
-  description = "The public load balancer (deletion protection on: DEPLOY.md's rollback from the cutover lifts it first)"
+  description = "The public load balancer (deletion protection on: it holds the gate's address)"
 }
 
 output "lb_addresses" {

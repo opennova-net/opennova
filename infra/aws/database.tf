@@ -1,12 +1,12 @@
 # ---------------------------------------------------------------------------
-# The service database: PostgreSQL 17 on RDS (DEPLOY.md, section 3)
+# The service database: PostgreSQL 17 on RDS (DEPLOY.md, section 4, "The database")
 # ---------------------------------------------------------------------------
 #
-# One instance in the private subnets on db.t4g.small (burstable, which RDS runs
-# in unlimited mode: billed past its baseline, never throttled), Multi-AZ: RDS
-# keeps a synchronous standby in the other private subnet's zone
-# and fails over to it on its own, the endpoint's name following (var.db_multi_az
-# off: single-AZ, in private subnet a's zone). Reached from the five programs'
+# One instance in the private subnets on db.t4g.micro (burstable, which RDS runs
+# in unlimited mode: billed past its baseline, never throttled), single-AZ in
+# a zone RDS picks while traffic is small (var.db_multi_az on: RDS keeps a
+# synchronous standby in the other private subnet's zone and fails over to it on
+# its own, the endpoint's name following). Reached from the five programs'
 # security groups and the backup task's alone (programs.tf, backup.tf).
 # max_connections is sized, not left to RDS's memory formula: db_pool_max
 # connections for each of db_service_processes program processes, plus 10 for
@@ -123,9 +123,9 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.db.id]
   parameter_group_name   = aws_db_parameter_group.main.name
-  # RDS places a Multi-AZ instance's primary and standby itself (it refuses a
-  # zone with Multi-AZ); a single-AZ one sits in private subnet a's zone.
-  availability_zone   = var.db_multi_az ? null : aws_subnet.private["a"].availability_zone
+  # No zone: RDS places the instance in the subnet group itself. Turning
+  # Multi-AZ off keeps whichever zone the primary is in, so a pinned zone
+  # would plan a replacement (prod, 2026-10-17: us-east-1b).
   multi_az            = var.db_multi_az
   publicly_accessible = false
   port                = 5432

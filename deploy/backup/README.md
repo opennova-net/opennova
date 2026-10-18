@@ -19,8 +19,9 @@ recovery beside them, and a dump restores into a fresh instance as well.
   the server's own settings. The image carries the pinned RDS CA bundle at
   `/app/rds-global-bundle.pem`, where the server image has it, so a URI with
   `sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` works in both.
-- `BACKUP_BUCKET` is the operations bucket and `BACKUP_PREFIX` the deployment's prefix
-  (`novaworld`, `novaworld-<deployment>` off prod), both in the task definition.
+- `BACKUP_BUCKET` is the deployment's operations bucket and `BACKUP_PREFIX` the dumps'
+  prefix (`novaworld`; one bucket per deployment, so it names none), both in the task
+  definition.
 
 A dump is custom format (`pg_dump -Fc`: compressed; `pg_restore` reads it)
 with no owners or grants, so it restores under whichever role runs the
@@ -28,15 +29,17 @@ restore.
 
 ## Commands (via the deploy toolbox)
 
+Each names its deployment (`backup list` alone reads prod without one):
+
 ```bash
-./deploy/run.sh backup now      # dump -> s3://<bucket>/novaworld/novaworld-<ts>.dump
-./deploy/run.sh backup list     # list dumps, newest last
+./deploy/run.sh --deployment staging backup now    # dump -> s3://<bucket>/novaworld/novaworld-<ts>.dump
+./deploy/run.sh --deployment staging backup list   # list dumps, newest last
 ```
 
 ## Restore
 
 ```bash
-./deploy/run.sh backup restore novaworld/novaworld-<ts>.dump --yes-overwrite-database
+./deploy/run.sh --deployment staging backup restore novaworld/novaworld-<ts>.dump --yes-overwrite-database
 ```
 
 It stops every program (`app down`), runs `restore.sh` in a one-off task and starts them
@@ -44,5 +47,6 @@ again (`app up`). `restore.sh` first dumps the database as it stands to
 `novaworld/novaworld-pre-restore-<ts>.dump`, then restores in one transaction
 (`pg_restore --clean --if-exists --single-transaction`): every table in the
 dump is dropped and recreated, or nothing changes. The server's next boot
-applies any migration the dump predates. The backups bucket has a 90-day
-lifecycle (terraform).
+applies any migration the dump predates. The operations bucket keeps the dumps 90 days
+(`infra/aws/ops_bucket.tf`). DEPLOY.md, section 6, has the rest: the restore drill, `backup
+import`.

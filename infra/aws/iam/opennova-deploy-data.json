@@ -50,6 +50,8 @@
         "elasticache:CreateReplicationGroup",
         "elasticache:ModifyReplicationGroup",
         "elasticache:DeleteReplicationGroup",
+        "elasticache:IncreaseReplicaCount",
+        "elasticache:DecreaseReplicaCount",
         "elasticache:CreateCacheSubnetGroup",
         "elasticache:ModifyCacheSubnetGroup",
         "elasticache:DeleteCacheSubnetGroup",

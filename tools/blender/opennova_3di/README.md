@@ -2,9 +2,8 @@
 
 Imports and exports NovaLogic `.3di` models for Joint Operations and newer.
 Both directions run the bundled `opennova-3di`, which reads and writes every
-model through OpenNova's own 3DI code
-([ADR 0047](../../../docs/adr/0047-blender-3di-exporter.md)); the add-on lays
-the `.o3d` scene text out in Blender and reads it back. Pre-1.0 and
+model through OpenNova's own 3DI code; the add-on lays the `.o3d` scene text out
+in Blender and reads it back. Pre-1.0 and
 experimental.
 
 ## Install
@@ -67,8 +66,7 @@ inspect a rebuilt model before using it in game.
 
 A model is a model root (an Empty) holding one LOD root per level of detail
 (an Empty with the custom property `_lod_index`), and a LOD's parts are
-either `PN##` empties or the bones of the model's one armature
-([`docs/threedi/scene-naming-contract.md`](../../../docs/threedi/scene-naming-contract.md)).
+either `PN##` empties or the bones of the model's one armature.
 Everything else belongs to the part it sits on: a mesh of any name under a
 `PN##` or parented to a bone is that part's geometry, and so are the user
 points, lights and helpers there. The model faces its root's -Y (Blender's
@@ -567,8 +565,7 @@ reads an existing weapon definition or imported timing.
 6. **Export Animations** writes `<table>_weapon_edits.txt` beside the table:
    per entry only the keys to set (ANIM, DELAYSTART, DELAYEND, POS, TPOS,
    and FUNCTION for a draw timed by its clip), never sounds, effects or flags. A table without a fire row still
-   writes its clips, and no edits. Set those keys in the entries'
-   `weapon.def`; `docs/anim/weapon-timing-format.md` describes both files.
+   writes its clips, and no edits. Set those keys in the entries' `weapon.def`.
 
 | Marker | Times |
 | --- | --- |

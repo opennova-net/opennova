@@ -55,7 +55,7 @@ hand.
 
 | Policy | Covers |
 | --- | --- |
-| `opennova-deploy-network` | VPC, subnets, route tables, internet gateway, security groups and rules, network interfaces, Elastic IPs (associating, tagging, accepting the gate's address transferred in at the cutover, releasing any but prod's tagged ones); creating launch templates; the public network load balancer, its target groups and listeners |
+| `opennova-deploy-network` | VPC, subnets, route tables, internet gateway, security groups and rules, network interfaces, Elastic IPs (allocating one with the deployment's tag, associating, tagging, accepting a transferred address, releasing any but prod's tagged ones); creating launch templates; the public network load balancer, its target groups and listeners |
 | `opennova-deploy-compute` | EC2 reads, instances and their volumes, changing and deleting launch templates, EC2 tags, the baked fleet images, `kms:DescribeKey` |
 | `opennova-deploy-ecs` | the ECS cluster, its services, task definitions and tasks (one-off tasks, ECS Exec), Application Auto Scaling, Cloud Map, EventBridge Scheduler (the nightly backup) |
 | `opennova-deploy-iam` | the stack's roles (under the boundary), instance profiles, the GitHub OIDC provider, `iam:PassRole` to EC2, ECS's tasks and EventBridge Scheduler, the service-linked roles RDS, ElastiCache, Elastic Load Balancing, ECS, Application Auto Scaling and CloudWatch's alarm actions make on first use, the policy simulator; nothing about IAM users |
@@ -68,11 +68,7 @@ stacks; never `org/*`, the org stack's own) with their lock files, and a guard d
 state bucket's settings and old versions. The state bucket's own policy admits the deploy user,
 the account's `OrganizationAccountAccessRole` and its root alone, over TLS alone.
 
-Each document stays under IAM's 6,144-character limit for a managed policy (white space aside),
-and none holds a statement for the old single-account stack: the member accounts never ran it.
-The single account's own `onnet-deploy-*` policies, applied in the management account before
-these, stay as they are until its cleanup (DEPLOY.md, the cutover's last step), which deletes
-them with `onnet`.
+Each document stays under IAM's 6,144-character limit for a managed policy (white space aside).
 
 ## The role boundary
 
@@ -119,8 +115,9 @@ AccessDenied naming the action):
   (`s3:DeleteObject` on it alone), every service-linked role made on first use, the cluster
   and its services under the deployment's tag, Cloud Map's private namespace, the backup
   schedule (`iam:PassRole` to `scheduler.amazonaws.com`);
-- prod's cutover: `ec2:AcceptAddressTransfer` of the gate's address, its tag and its
-  association with the load balancer;
+- prod's gate address: its `ec2:AllocateAddress` with the deployment's tag (or
+  `ec2:AcceptAddressTransfer` of one transferred in), its tag and its association with the load
+  balancer;
 - the first deploy workflow run: its role's `scheduler:UpdateSchedule` under the boundary;
 - the first `infra apply` with `hosted_enabled`: the game data's lifecycle rules; then, at
   the first upload on the Game data page, web's `s3:PutObject` of the parts the browser

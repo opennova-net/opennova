@@ -8,7 +8,7 @@
 # restricted_key (the server's permissions alone, the key CI uses too), never
 # the mode's secret_key, which is staging's, and there is no webhook secret
 # here (staging's endpoint's would let a local stack sign staging's webhooks):
-# `stripe listen --forward-to localhost:8080/api/billing/webhook` prints the
+# `stripe listen --forward-to localhost:8000/api/billing/webhook` (the portal) prints the
 # local one, which goes in STRIPE_WEBHOOK_SECRET by hand. Staging's database
 # ignores the customers the local stack makes (each database stamps its own
 # instance id on them). The live item is prod's alone.

@@ -5,8 +5,9 @@ name: Serve image
 # game servers run (ADR 0053), with the machine agent opennova-hostd beside it
 # (apps/hostd; each machine copies it out). It holds no retail byte: the game
 # data (the server's data set) is mounted at /opt/game (apps/serve/README.md,
-# "Container image"). Nothing deploys it yet. Tags, permissions and the PR behaviour (build, never push) follow the
-# NovaWorld images (novaworld-images.yml).
+# "Container image"). The toolbox deploys it to the fleet (`app deploy --serve-tag`). Tags,
+# permissions and the PR behaviour (build, never push) follow the NovaWorld images
+# (novaworld-images.yml).
 
 on:
   push:

@@ -54,7 +54,7 @@ the reference fixture set the gated tests read (`retail::reference_fixture`,
 
 | Files | Why they stay |
 |---|---|
-| `novaworld/*.gsb`, `novaworld/*.hexcap`, `novaworld/run_*/*` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
+| `novaworld/*.gsb`, `novaworld/run_*/*` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
 
 ## Authored files
 

@@ -5,7 +5,8 @@ game, the NovaWorld servers and the switcher, including how to test the servers
 against both retail Joint Operations and our own Godot client.
 
 For the runtime build and release layout see [README.md](README.md). For
-deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
+deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md) (its "From zero, in
+order" checklist is the whole bring-up).
 
 ## Prerequisites
 
@@ -297,20 +298,13 @@ cloud machines): run them in the Docker stack above (the in-process tests,
 `scripts/dev_postgres.sh reset` deletes the data too. `scripts/dev_redis.sh down` stops
 Redis (it keeps nothing).
 
-Overridable env vars (defaults in parentheses): `ONNET_PUBLIC_HOST` (`127.0.0.1`),
-`ONNET_GATE_UDP_PORT` (`7597`), `ONNET_NW_UDP_PORT` (`64206`), `ONNET_HTTP_PORT` (`8080`),
-`ONNET_HEALTH_PORT` (`8081`),
-`DATABASE_URL` (`postgresql://novaworld@127.0.0.1:5432/novaworld`), `DATABASE_PASSWORD`
-(unset), `DATABASE_POOL_MAX` (`16`), `ONNET_REDIS_URL` (`redis://127.0.0.1:6379`),
-`ONNET_REDIS_PASSWORD` (unset), `MIGRATIONS_DIR`, `SEED_DIR`, `WEB_DIST_DIR`,
-`TEMPLATES_DIR`, `STATIC_DIR`, `ADMIN_API_TOKEN` (unset = admin API closed).
+Every setting and its default: `apps/novaworld_common/README.md`, "Configuration".
 
 ### The headless game server
 
 `opennova-serve` (`apps/serve`, ADR 0051) is the game's Serve Only host with no window,
-configured by retail's host file; it boots the mission through the same engine host boot
-the game's hosts run (`engine/runtime/inmatch/host_boot.h`). Build and run it against an
-install, with the sample host file (`apps/serve/example.host`, shipped in the apps zip):
+configured by retail's host file. Build and run it against an install, with the sample host
+file (`apps/serve/example.host`, shipped in the apps zip):
 
 ```bash
 cmake --build build --config Release --target opennova_serve
@@ -318,17 +312,12 @@ cmake --build build --config Release --target opennova_serve
 ctest --test-dir build -C Release -R "serve|host_boot|host_file|admin|mission_rotation"
 ```
 
-It keeps its files in the directory it runs from, as retail's dedicated server does:
-`game.cfg`, `activesrvr.txt`, and for the remote admin `admin.cfg`, `admin_log.txt`,
-`banned.txt` and `banlist.txt`. To try the remote admin, set `remote_admin_port` in that
-`game.cfg`, give `admin.cfg` a user line and a whitelist that admits you (`boss secret 4F`,
-`ip_restrict = 127.0.0.1`), and connect with retail's `RAT.exe`. The engine halves are
-`engine/net/admin/admin_server.h` (the wire), `engine/runtime/inmatch/admin_console.h` (the verbs) and
-`engine/runtime/inmatch/rotation_admin.h` (the MISSION verbs over the host's rotation); the
-socket pump is `apps/common/admin_tcp_server.h`.
-
-Its usage, the host file's keys, the working directory's files, the remote admin and its
-exit codes are in `apps/serve/README.md`.
+Its usage, the host file's keys, the working directory's files, the remote admin (with
+retail's `RAT.exe`) and its exit codes are in `apps/serve/README.md`. The remote admin's
+engine halves are `engine/net/admin/admin_server.h` (the wire),
+`engine/runtime/inmatch/admin_console.h` (the verbs) and
+`engine/runtime/inmatch/rotation_admin.h` (the MISSION verbs); the socket pump is
+`apps/common/admin_tcp_server.h`.
 
 ## Test with retail Joint Operations
 
@@ -342,11 +331,10 @@ an elevated editor):
 192.168.1.50 gs.novaworld.net
 ```
 
-`gs.novaworld.net` is the one hostname the retail JO matchmaking flow needs redirected
-(NW-L2 in [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md)). The same address
-works for a game on another machine of the LAN; delete the line to go back to NovaLogic's
-service. The game files stay stock; launch `Jointops.exe` as usual and log in with a dev
-account (`test`/`test`).
+`gs.novaworld.net` is the one hostname the retail JO matchmaking flow needs redirected.
+The same address works for a game on another machine of the LAN; delete the line to go
+back to NovaLogic's service. The game files stay stock; launch `Jointops.exe` as usual
+and log in with a dev account (`test`/`test`).
 
 Notes:
 - **Windows + WSL2**: the published container ports reach the Windows host at its LAN

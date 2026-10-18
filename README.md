@@ -85,9 +85,11 @@ retail-compatibility development workflows.
 
 ## Run OpenNova
 
-Build the GDExtension, point `GODOT_BIN` at Godot 4.6.1, and run the project:
+Build the GDExtension, point `GODOT_BIN` at Godot 4.6.1, import the project's resources
+once on a fresh checkout, and run it:
 
 ```bash
+$GODOT_BIN --headless --path godot --import   # once; retry it if a cold cache crashes it
 $GODOT_BIN --path godot
 ```
 
@@ -134,8 +136,8 @@ comment) and `opennova-apps-windows-v<version>.zip` (on tagged releases): the
 `opennova-wire` command-line tools and the headless game server
 (`opennova-serve`, with a sample host file; it plays a map rotation and takes retail's
 remote admin), for Windows x64. Its `README.txt` describes each one. The NovaWorld
-server runs on Linux only; to host one on Windows, run the container stack in
-[deploy/](deploy/README.md) under Docker Desktop.
+service runs on Linux only; on Windows, run the local stack (`scripts/dev_stack.sh up`,
+[DEVELOPING.md](DEVELOPING.md), "Run the NovaWorld servers locally") under Docker Desktop.
 
 The OpenNova Switcher ships as `opennova-switcher-windows.zip` (on a PR's build
 comment) and `opennova-switcher-windows-v<version>.zip` (on tagged releases):
@@ -148,12 +150,19 @@ exe is unsigned, so releases also carry the zip's SHA-256
 (`opennova-switcher-windows-v<version>.zip.sha256`) to check before running it.
 See [switcher/README.md](switcher/README.md).
 
+## Run your own NovaWorld
+
+To run your own NovaWorld, the whole hosted service (the five programs, the website,
+billing and the hosted game servers) on your own AWS, Cloudflare, Stripe and 1Password
+accounts, follow [DEPLOY.md](DEPLOY.md): its "From zero, in order" checklist is the
+bring-up, and "Running it under your own names" lists what to change on a fork. Try the
+same stack on one machine first with `scripts/dev_stack.sh up` (DEVELOPING.md).
+
 ## Documentation
 
 The architecture, format notes, reverse-engineering records, and implementation
 status live in `docs/`, a submodule of a private repository that
-`git submodule update --init --recursive` skips. Deployment is
-documented separately in [DEPLOY.md](DEPLOY.md).
+`git submodule update --init --recursive` skips.
 
 ## License
 

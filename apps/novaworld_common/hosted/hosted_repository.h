@@ -166,7 +166,10 @@ enum class ServerFilter : uint8_t { Live, Ended, All };
 // alone when it is set.
 std::vector<HostedServer> list_fleet_servers(
 		db::Database &db, std::optional<int64_t> owner_user_id, ServerFilter filter, size_t limit);
+// How many servers are live, and how many of those run on own machines (a
+// stopping one counts in both).
 int count_live(db::Database &db);
+int count_own_live(db::Database &db);
 // The servers that ended failed in the last `seconds` (the heartbeat's
 // hosted_failed).
 int count_failed_since(db::Database &db, int64_t seconds);

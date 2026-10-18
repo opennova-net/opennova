@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # The zone's TLS, edge authentication and the webhook's way past the WAF
-# (DEPLOY.md, section 3)
+# (DEPLOY.md, section 4, "The zone's shared settings")
 # ---------------------------------------------------------------------------
 #
 # Cloudflare proxies every deployment's site and talks to its origin (that

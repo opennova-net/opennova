@@ -412,7 +412,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->fleet.configure(impl_->hosted_servers.hosting_on(), impl_->hosted_servers.provider(),
-			impl_->hosted_servers.cap());
+			impl_->hosted_servers.cap(), fleet_placement_);
 	impl_->fleet.register_routes(impl_->app);
 	impl_->stats.configure(fleet_slot_memory_mb_, fleet_slot_cpus_);
 	impl_->stats.register_routes(impl_->app);
@@ -2004,9 +2004,10 @@ void HttpListener::register_legacy_host_join_routes(
 		add_cookie(res, "PUBPCID",       pub_pcid);
 		add_cookie(res, "PUBNAMEINFO",   pub_nameinfo);
 		add_cookie(res, "PUBSQUADINFO",  pub_squadinfo);
-		// JOINTICKET: onnet hardcodes a literal "JT:..." string (witnessed
-		// from a real retail capture); not derived per-session in dev.
-		add_cookie(res, "PUBJOINTICKET", "JT:0a000013143f1efe6c8000767fd748e1127304c5b6d728");
+		// JOINTICKET: onnet hardcodes a literal "JT:..." string (a retail
+		// capture's shape, its public address a documentation one); not
+		// derived per-session in dev.
+		add_cookie(res, "PUBJOINTICKET", "JT:0a00001314cb0071078000767fd748e1127304c5b6d728");
 
 		// NW*/AFF* still stubbed empty — onnet sets them via setdefault to "",
 		// which is what we do here. They feed deeper post-game stat replication

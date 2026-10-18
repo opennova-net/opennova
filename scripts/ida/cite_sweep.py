@@ -91,7 +91,7 @@ CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/probes", "godot/shader
               "apps", "tests", "assets", "fixtures")
 DOC_ROOTS = ("docs",)
 # every tracked text form a marker has been written in: sources, shaders, the engine-side
-# .md records (ROADMAP.md), CMake lists
+# .md records, CMake lists
 CODE_EXT = (".cpp", ".h", ".hpp", ".gd", ".py", ".gdshader", ".gdshaderinc", ".json", ".md", ".txt", ".cmake",
             ".mnu", ".mns", ".ptu")
 DOC_EXT = (".md",)

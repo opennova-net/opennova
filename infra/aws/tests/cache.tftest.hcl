@@ -290,11 +290,11 @@ run "cache" {
   }
   assert {
     condition = (
-      aws_elasticache_replication_group.cache.num_cache_clusters == 2 &&
-      aws_elasticache_replication_group.cache.preferred_cache_cluster_azs == tolist(["us-east-1a", "us-east-1b"]) &&
-      aws_elasticache_replication_group.cache.automatic_failover_enabled && aws_elasticache_replication_group.cache.multi_az_enabled
+      aws_elasticache_replication_group.cache.num_cache_clusters == 1 &&
+      aws_elasticache_replication_group.cache.preferred_cache_cluster_azs == tolist(["us-east-1a"]) &&
+      !aws_elasticache_replication_group.cache.automatic_failover_enabled && !aws_elasticache_replication_group.cache.multi_az_enabled
     )
-    error_message = "a primary and a replica, one in each zone, failing over on its own"
+    error_message = "one node by default, in the first zone, with nothing to fail over to"
   }
   assert {
     condition = (
@@ -347,10 +347,10 @@ run "cache" {
   }
   assert {
     condition = (
-      toset(keys(aws_cloudwatch_metric_alarm.cache_evictions)) == toset(["opennova-prod-cache-001", "opennova-prod-cache-002"]) &&
+      toset(keys(aws_cloudwatch_metric_alarm.cache_evictions)) == toset(["opennova-prod-cache-001"]) &&
       aws_cloudwatch_metric_alarm.cache_evictions["opennova-prod-cache-001"].metric_name == "Evictions" &&
       aws_cloudwatch_metric_alarm.cache_evictions["opennova-prod-cache-001"].threshold == 0 &&
-      length(aws_cloudwatch_metric_alarm.cache_cpu_credits) == 2
+      length(aws_cloudwatch_metric_alarm.cache_cpu_credits) == 1
     )
     error_message = "each node's evictions and its CPU credits (a burstable node) alarm"
   }
@@ -365,7 +365,7 @@ run "fixed_performance_nodes" {
   }
 
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.cache_cpu_credits) == 0 && length(aws_cloudwatch_metric_alarm.cache_evictions) == 2
+    condition     = length(aws_cloudwatch_metric_alarm.cache_cpu_credits) == 0 && length(aws_cloudwatch_metric_alarm.cache_evictions) == 1
     error_message = "a non-burstable node: the evictions alarms alone"
   }
 }
@@ -378,4 +378,34 @@ run "short_token_refused" {
   }
 
   expect_failures = [var.cache_auth_token]
+}
+
+# Two nodes: a primary and a replica, one in each zone, failing over on its
+# own, each with its alarms.
+run "replicated" {
+  command = plan
+
+  variables {
+    cache_node_count = 2
+  }
+
+  assert {
+    condition = (
+      aws_elasticache_replication_group.cache.num_cache_clusters == 2 &&
+      aws_elasticache_replication_group.cache.preferred_cache_cluster_azs == tolist(["us-east-1a", "us-east-1b"]) &&
+      aws_elasticache_replication_group.cache.automatic_failover_enabled && aws_elasticache_replication_group.cache.multi_az_enabled &&
+      toset(keys(aws_cloudwatch_metric_alarm.cache_evictions)) == toset(["opennova-prod-cache-001", "opennova-prod-cache-002"])
+    )
+    error_message = "two nodes: a primary and a replica, one in each zone, failing over on its own, each alarmed"
+  }
+}
+
+run "cache_node_count_refused" {
+  command = plan
+
+  variables {
+    cache_node_count = 0
+  }
+
+  expect_failures = [var.cache_node_count]
 }

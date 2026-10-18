@@ -239,9 +239,9 @@ trap cleanup EXIT
 # The deployments, prod and staging. Each lives in an AWS account of its own,
 # which its vault item names (aws-<deployment>: account_id, account_name,
 # region, root_email by hand; state_bucket, the deploy user's access key and
-# github_deploy_role_arn from `org apply`; prod's gate_eip_allocation_id from
-# the gate address's transfer): no tracked file names an account or holds a
-# key.
+# github_deploy_role_arn from `org apply`; prod's gate_eip_allocation_id by
+# hand, the gate's Elastic IP in the prod account): no tracked file names an
+# account or holds a key.
 DEP=""
 DEP_FLAG=""
 

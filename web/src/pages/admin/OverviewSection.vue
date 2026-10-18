@@ -30,8 +30,8 @@
     <dl class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3">
       <StatTile
         label="Live servers"
-        :value="fleet ? `${fleet.live} of ${fleet.cap}` : 'Unknown'"
-        :detail="fleet ? (fleet.enabled ? 'Hosting is on; the cap is the service\'s limit' : 'Hosting is off') : 'The fleet could not be read'"
+        :value="fleet ? `${fleet.shared.live} of ${fleet.shared.room} shared` : 'Unknown'"
+        :detail="fleet ? (fleet.enabled ? `${fleet.own.live} of ${fleet.own.room} own` : 'Hosting is off') : 'The fleet could not be read'"
       />
       <StatTile
         label="Machines"
