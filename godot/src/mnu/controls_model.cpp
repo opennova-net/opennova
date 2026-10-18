@@ -478,6 +478,7 @@ void ControlsModel::_bind_methods() {
 			D_METHOD("mouse_mask_from_godot_button", "button"),
 			&ControlsModel::mouse_mask_from_godot_button);
 	ClassDB::bind_method(D_METHOD("consume_key_press", "vk"), &ControlsModel::consume_key_press);
+	ClassDB::bind_method(D_METHOD("is_vk_down", "vk"), &ControlsModel::is_vk_down);
 	ClassDB::bind_method(D_METHOD("reset_key_state"), &ControlsModel::reset_key_state);
 	ClassDB::bind_method(D_METHOD("key_down_event", "key"), &ControlsModel::key_down_event);
 	ClassDB::bind_static_method("ControlsModel",
