@@ -90,7 +90,8 @@ expect_refused "the old default workspace's name" "prod or staging" --deployment
 
 echo "--- a read-only command reads prod unless told, and says so"
 for cmd in "app status" "app releases" "app logs web" "app images" "secrets check" "stripe check" \
-           "infra output" "infra list" "fleet status" "fleet logs 12 3" "backup list"; do
+           "infra output" "infra list" "fleet status" "fleet logs server 12" "fleet logs machine 3" \
+           "fleet console 12" "backup list"; do
   # shellcheck disable=SC2086
   expect_run "'$cmd' alone" "ran DEP=prod DEFAULTED=1" $cmd
 done
@@ -314,19 +315,39 @@ else
   fail "no hosting: worker $(env_of worker) fleet $(env_of fleet)"
 fi
 
-echo "--- fleet logs reads the machines' log group alone"
-# The real command (cmd_fleet alone is stubbed above) on a stub aws that records
-# every call: CloudWatch reads of the one stream asked for, an EC2 id read as
-# its machine-id tag, nothing sent to a machine.
-infra_get() { case "$1" in OPENNOVA_MACHINES_LOG_GROUP) echo /opennova/staging/machines ;; *) echo "stub-$1" ;; esac; }
+echo "--- fleet logs reads CloudWatch alone, the stream the service's rows name"
+# The real commands (cmd_fleet alone is stubbed above) on a stub aws that records
+# every call and a stub admin API (the logs route): a server start's stream, a
+# machine's hostd's, read from their groups; with the service down, the streams
+# by their names (a start's, every start's) and the machine's running hostd task;
+# nothing sent to a machine.
+infra_get() {
+  case "$1" in
+    OPENNOVA_MACHINES_LOG_GROUP) echo /opennova/staging/machines ;;
+    OPENNOVA_SERVERS_LOG_GROUP) echo /opennova/staging/servers ;;
+    *) echo "stub-$1" ;;
+  esac
+}
+SERVICE=up
+# shellcheck disable=SC2317  # fleet_logs calls it
+admin_api_json() {
+  echo "admin_api_json $*" >>"$calls"
+  if [ "$SERVICE" = down ]; then echo "HTTP 502" >&2; return 1; fi
+  case "$2" in
+    *subject=server\&id=34*generation=1*) echo '{"source":"cloudwatch","group":"/opennova/staging/servers","stream":"34/g1"}' ;;
+    *subject=server\&id=34*) echo '{"source":"cloudwatch","group":"/opennova/staging/servers","stream":"34/g2"}' ;;
+    *subject=machine\&id=12*) echo '{"source":"cloudwatch","group":"/opennova/staging/machines","stream":"hostd/hostd/abc123"}' ;;
+    *subject=machine\&id=13*) echo '{"source":"cloudwatch","group":"/opennova/staging/machines","stream":null}' ;;
+    *) echo "HTTP 404" >&2; return 1 ;;
+  esac
+}
 aws() {
   echo "aws $*" >>"$calls"
   case "$1 $2" in
     "ec2 describe-instances")
       case "$*" in
-        *i-0aaaaaaaaaaaaaaa1*) echo 12 ;;
-        *i-0bbbbbbbbbbbbbbb2*) echo None ;;
-        *) echo "An error occurred (InvalidInstanceID.NotFound)" >&2; return 254 ;;
+        *"Values=12 "*) echo i-0aaaaaaaaaaaaaaa1 ;;
+        *) echo None ;;
       esac ;;
     "ecs list-container-instances")
       case "$*" in
@@ -336,29 +357,38 @@ aws() {
     "ecs list-tasks") echo arn:aws:ecs:us-east-1:1:task/opennova-staging-fleet/t12 ;;
   esac
 }
-# expect_logs NAME WANT ARGS...: fleet_logs ARGS makes WANT its last aws call.
-expect_logs() {
-  local name="$1" want="$2" got
-  shift 2
+# expect_last NAME WANT FUNCTION ARGS...: FUNCTION ARGS makes WANT its last aws call.
+expect_last() {
+  local name="$1" want="$2" fn="$3" got
+  shift 3
   : >"$calls"
-  ( set_deployment staging; fleet_logs "$@" ) >/dev/null 2>&1 || { fail "$name (refused: $( (set_deployment staging; fleet_logs "$@") 2>&1 | tail -n 1))"; return; }
-  got="$(tail -n 1 "$calls")"
+  ( set_deployment staging; "$fn" "$@" ) >/dev/null 2>&1 || { fail "$name (refused: $( (set_deployment staging; "$fn" "$@") 2>&1 | tail -n 1))"; return; }
+  got="$(grep '^aws ' "$calls" | tail -n 1)"
   if [ "$got" = "$want" ]; then pass "$name"; else fail "$name (got '$got', want '$want')"; fi
 }
-expect_logs "a slot's stream" \
-  "aws logs tail /opennova/staging/machines --log-stream-names 12/slot-3 --since 1h --format short" \
-  12 3
-expect_logs "hostd's stream (its task on the machine), followed, since 2h" \
-  "aws logs tail /opennova/staging/machines --log-stream-names hostd/hostd/t12 --since 2h --format short --follow" \
-  12 hostd --since 2h --follow
-expect_logs "every stream of the machine, each line naming its stream" \
-  "aws logs tail /opennova/staging/machines --log-stream-name-prefix 12/ --since 1h --format detailed" \
-  12
-expect_logs "an EC2 id read as its machine-id tag" \
-  "aws logs tail /opennova/staging/machines --log-stream-names 12/slot-0 --since 1h --format short" \
-  i-0aaaaaaaaaaaaaaa1 0
-if grep -vq '^aws \(logs tail\|ec2 describe-instances\|ecs list-container-instances\|ecs list-tasks\) ' "$calls"; then fail "fleet logs called more than CloudWatch, EC2's describe and ECS's lists: $(cat "$calls")"; else pass "fleet logs calls CloudWatch's tail, EC2's describe and ECS's lists alone"; fi
-for args in "" "x" "0 3" "12 32" "12 03" "12 slot-3" "12 3 4" "12 --tail" "i-0bbbbbbbbbbbbbbb2" "i-0ccccccccccccccc3" "i-XYZ"; do
+expect_last "a server's newest start, its stream the service names" \
+  "aws logs tail /opennova/staging/servers --log-stream-names 34/g2 --since 1h --format short" \
+  fleet_logs server 34
+expect_last "a server's start 1, followed, since 2h" \
+  "aws logs tail /opennova/staging/servers --log-stream-names 34/g1 --since 2h --format short --follow" \
+  fleet_logs server 34 --start 1 --since 2h --follow
+expect_last "a machine's hostd, its stream the service names" \
+  "aws logs tail /opennova/staging/machines --log-stream-names hostd/hostd/abc123 --since 1h --format short" \
+  fleet_logs machine 12
+SERVICE=down
+expect_last "the service down: a start's stream by its name" \
+  "aws logs tail /opennova/staging/servers --log-stream-names 34/g3 --since 1h --format short" \
+  fleet_logs server 34 --start 3
+expect_last "the service down: every start's stream of the server, each line naming its stream" \
+  "aws logs tail /opennova/staging/servers --log-stream-name-prefix 34/g --since 1h --format detailed" \
+  fleet_logs server 34
+expect_last "the service down: the machine's running hostd task" \
+  "aws logs tail /opennova/staging/machines --log-stream-names hostd/hostd/t12 --since 1h --format short" \
+  fleet_logs machine 12
+SERVICE=up
+if grep -vq '^aws \(logs tail\|ec2 describe-instances\|ecs list-container-instances\|ecs list-tasks\) \|^admin_api_json ' "$calls"; then fail "fleet logs called more than CloudWatch, the admin API and ECS's lists: $(cat "$calls")"; else pass "fleet logs calls CloudWatch's tail, the admin API and ECS's lists alone"; fi
+for args in "" "12 3" "12" "server" "server x" "server 0" "machine i-0aaaaaaaaaaaaaaa1" "server 34 --start x" \
+            "machine 12 --start 1" "server 34 --tail" "server 99" "machine 13"; do
   : >"$calls"
   # shellcheck disable=SC2086  # the words are the command's arguments
   if ( set_deployment staging; fleet_logs $args ) >/dev/null 2>&1; then
@@ -369,7 +399,60 @@ for args in "" "x" "0 3" "12 32" "12 03" "12 slot-3" "12 3 4" "12 --tail" "i-0bb
     pass "fleet logs '$args' is refused"
   fi
 done
-unset -f aws
+
+echo "--- fleet console reads EC2's console output of this deployment's machine"
+expect_last "a machine's console, by its id" \
+  "aws ec2 get-console-output --instance-id i-0aaaaaaaaaaaaaaa1 --latest --output text --query Output" \
+  fleet_console 12
+expect_last "a machine's console, by EC2's id" \
+  "aws ec2 get-console-output --instance-id i-0bbbbbbbbbbbbbbb2 --latest --output text --query Output" \
+  fleet_console i-0bbbbbbbbbbbbbbb2
+: >"$calls"
+( set_deployment staging; fleet_console 12 ) >/dev/null 2>&1
+if grep -q '^aws ec2 describe-instances .*Name=tag:opennova:machine-id,Values=12 Name=tag:opennova:deployment,Values=' "$calls"; then
+  pass "a machine's id is found by its tags, this deployment's alone"
+else
+  fail "fleet console's lookup: $(cat "$calls")"
+fi
+for args in "" "x" "13" "i-XYZ" "12 13"; do
+  : >"$calls"
+  # shellcheck disable=SC2086  # the words are the command's arguments
+  if ( set_deployment staging; fleet_console $args ) >/dev/null 2>&1; then
+    fail "fleet console '$args' was taken"
+  elif grep -q 'get-console-output' "$calls"; then
+    fail "fleet console '$args' read a console before refusing"
+  else
+    pass "fleet console '$args' is refused"
+  fi
+done
+unset -f aws admin_api_json
+
+echo "--- fleet status's service view: what needs an admin, one line per machine"
+attention='{"findings":[{"level":"danger","subject":"The lobby","text":"No lobby instance takes clients.","since":null,"link":"/admin/infrastructure/programs/lobby","source":"no_lobby"},
+  {"level":"warn","subject":"Machine 12 (shared)","text":"Booting for 25 min (over 20 min): its agent has not reported.","since":"2026-10-18T12:00:00Z","link":"/admin/fleet/machines/12","source":"stuck_machine"}],
+  "alarms":[{"name":"opennova-staging-machines-stuck","state_since":"2026-10-18T12:05:00Z","description":"A game machine is stuck."}],"alarms_read":true,"checked_at":"2026-10-18T12:30:00Z"}'
+out="$(fleet_attention_lines <<<"$attention")"
+if [[ "$out" == *"DANGER The lobby: No lobby instance takes clients."* &&
+      "$out" == *"WARN Machine 12 (shared): Booting for 25 min (over 20 min): its agent has not reported. (since 2026-10-18T12:00:00Z)"* &&
+      "$out" == *"ALARM opennova-staging-machines-stuck (since 2026-10-18T12:05:00Z): A game machine is stuck."* ]]; then
+  pass "each finding and each firing alarm is a line"
+else
+  fail "attention lines: $out"
+fi
+out="$(fleet_attention_lines <<<'{"findings":[],"alarms":[],"alarms_read":false,"checked_at":"x"}')"
+[[ "$out" == *"nothing needs you"* && "$out" == *"alarms: not read here"* ]] && pass "nothing to do, and no alarm read, each say so" || fail "empty attention: $out"
+machines='{"machines":[{"id":12,"kind":"shared","state":"ready","slots":4,"slots_used":3,"public_address":"54.1.2.3","address":null,
+  "last_report_at":"2026-10-18 12:29:58","stats":{"cpu_percent":41.6,"memory_used_bytes":1073741824,"memory_total_bytes":4080218931,"disk_free_bytes":31,"disk_total_bytes":100},
+  "agent_version":"0.0.19","outdated":true,"protocol_mismatch_since":null,"lost_held":false,"end_reason":null},
+  {"id":13,"kind":"own","state":"lost","slots":1,"slots_used":1,"public_address":null,"address":{"id":5,"name":"smoke"},"last_report_at":null,"stats":null,
+  "agent_version":null,"outdated":null,"protocol_mismatch_since":null,"lost_held":true,"end_reason":"its agent stopped reporting"}]}'
+out="$(fleet_machine_lines <<<"$machines")"
+if [[ "$out" == *"machine 12 (shared) ready, 3 of 4 slots, 54.1.2.3, reported 2026-10-18 12:29:58; CPU 41 %, memory 1 of 3.7 GiB, disk 31 % free; hostd 0.0.19, older than the release"* &&
+      "$out" == *"machine 13 (own) lost, 1 of 1 slots (static address smoke), reported never; use not reported; hostd none, held lost by the brake (its agent stopped reporting)"* ]]; then
+  pass "one readable line per machine"
+else
+  fail "machine lines: $out"
+fi
 
 echo "--- the org stack's first run moves its state before the vault learns of it"
 # The real org command (the groups are stubbed above), around stubs of its

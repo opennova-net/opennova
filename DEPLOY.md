@@ -1301,8 +1301,11 @@ the first time the updater asks for it, into its task's storage.
 
 ```bash
 D='--deployment staging'                        # or prod
-./deploy/run.sh $D fleet status                # EC2's view, the fleet cluster's (ECS), the AMI, then the service's
-./deploy/run.sh $D fleet logs <machine> <slot> # a slot's server output (CloudWatch; below)
+./deploy/run.sh $D fleet status                # EC2's view, the fleet cluster's (ECS), the AMI, then the service's:
+                                               #   what needs you, one line per machine
+./deploy/run.sh $D fleet logs server <id>      # a server's newest start's output (CloudWatch; below)
+./deploy/run.sh $D fleet logs machine <id>     # a machine's hostd
+./deploy/run.sh $D fleet console <machine>     # a machine's serial console (EC2), while EC2 lists it
 ./deploy/run.sh $D fleet shell <machine>       # a root shell in the machine's hostd (ECS Exec)
 ./deploy/run.sh $D fleet drain <machine>       # no new server there; its servers move
 ./deploy/run.sh $D fleet end <machine>         # end it (its servers move first)
@@ -1310,9 +1313,12 @@ D='--deployment staging'                        # or prod
 ./deploy/run.sh $D fleet roll                  # replace them: their servers move to new machines
 ```
 
-`fleet status`, `fleet drain`, `fleet end` and `fleet roll` call the service's admin API
-inside a web task over ECS Exec, from the task's loopback, with the admin token the web
-container holds. `fleet roll` is for a new AMI, launch template or user data alone: the
+`fleet status`, `fleet logs`, `fleet drain`, `fleet end` and `fleet roll` call the
+service's admin API inside a web task over ECS Exec, from the task's loopback, with the
+admin token the web container holds. `fleet status` prints what needs you (the site's
+Attention list: the fleet's findings, danger first, and the firing alarms) and one line per
+machine (its state and slots, its address, its last report, its CPU, memory and disk, its
+hostd, and whether it is older than the release or held). `fleet roll` is for a new AMI, launch template or user data alone: the
 service's plan replaces each machine taking servers whose image is older than the pinned
 AMI and keeps the rest (`--dry-run` prints it and stops), and the replaced machines'
 servers move without counting restarts; a new hostd reaches every machine with `app
@@ -1370,23 +1376,24 @@ game data stays in the bucket).
   `/opennova/<deployment>/machines` (30 days), one stream per hostd task,
   `hostd/hostd/<task id>` (ECS's awslogs driver: the agent's lines, its starts and
   failures, docker's refusals; the admin fleet view's "Machine N" names the machine). The
-  deploy user reads them, with no shell on the machine:
+  deploy user reads them, with no shell on the machine, by the streams the service's rows
+  name (the site's server and machine pages read the same):
 
   ```bash
-  ./deploy/run.sh $D fleet logs 12 3                # machine 12, slot 3: the last hour
-  ./deploy/run.sh $D fleet logs 12 3 --since 1d     # further back (10m, 2h, 1d)
-  ./deploy/run.sh $D fleet logs 12 hostd --follow   # the agent of machine 12 (its hostd task), live
-  ./deploy/run.sh $D fleet logs 12                  # every slot stream of the machine, each line naming its stream
-  ./deploy/run.sh $D fleet logs i-0123456789abcdef0 3   # by EC2's id, while EC2 lists the machine
-  ./deploy/run.sh $D app logs hostd --since 1d      # every machine's agent, an ended machine's among them
+  ./deploy/run.sh $D fleet logs server 34                    # server 34's newest start: the last hour
+  ./deploy/run.sh $D fleet logs server 34 --start 2 --since 1d   # its start 2 (the Logs tab names them), further back
+  ./deploy/run.sh $D fleet logs machine 12 --follow          # machine 12's hostd, live
+  ./deploy/run.sh $D app logs hostd --since 1d               # every machine's agent, an ended machine's among them
   ```
 
-  The streams outlive the machine. A server the service restarts after a crash starts
-  again as a new container, often on the same slot, so its slot's stream reads each
-  attempt in turn. A machine whose hostd never started (its user data failed, or its ECS
-  agent never registered: `fleet status` shows no container instance for it) writes
-  nothing there: its serial console says why (`./deploy/run.sh --deployment <deployment>
-  aws ec2 get-console-output --instance-id <machine> --latest`) while EC2 still lists it.
+  The streams outlive the server and the machine. A server the service restarts after a
+  crash starts again as a new start, a stream of its own. While the service does not
+  answer, `fleet logs server` reads the streams by their names (start N's, or every
+  start's, each line naming its stream) and `fleet logs machine` the machine's running
+  hostd task. A machine whose hostd never started (its user data failed, or its ECS agent
+  never registered: `fleet status` shows no container instance for it) writes nothing
+  there: its serial console says why (`fleet console <machine>`, by the service's id or
+  EC2's) while EC2 still lists it.
 - **A refused AWS call.** The service logs each failure (`app logs worker`); for an
   `UnauthorizedOperation`, `./deploy/run.sh --deployment <deployment> aws sts decode-authorization-message
   --encoded-message <message>` names the condition that refused it.
@@ -1662,7 +1669,13 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   mass-stop guard keeps over-entitled servers running until billing is trusted again;
   the admin billing view says why), a gate probe left unanswered in 5 minutes
   (`probes_unanswered`: the gate had no lobby to hand out, so no client can log in while
-  every health check passes; `LobbiesLive` and `app logs lobby` say why); the database's CPU over 80% for 15 minutes, its CPU
+  every health check passes; `LobbiesLive` and `app logs lobby` say why); a machine stuck
+  in a state (launching or booting past 20 minutes, draining past 60, ending past 15, lost
+  past 10, or moving more than 6 times in an hour: the site's Attention list names it), a
+  machine's disk under 15 % free for 10 minutes, the servers' log group taking in more than
+  `log_ingest_alarm_gib_per_day` (2) GiB a day's rate in an hour (a server logging in a
+  loop), and with hosting on and the fleet released, no fleet leader whose last clean pass
+  is under 2 minutes old for 10 minutes (no data included: no leader logs it); the database's CPU over 80% for 15 minutes, its CPU
   credit balance low (a burstable class), its connections over 80% of `max_connections`
   and its free storage; a cache node evicting keys or short of CPU credits; and the Route
   53 health check on `http://<the gate's address>:8080/healthz`, the way a stock client
@@ -1707,7 +1720,7 @@ GB-month, `cache.t4g.micro` Valkey $0.0128 an hour, 730 hours a month):
 | the load balancer, its LCUs at this traffic and its two Elastic IPs | $25 |
 | the database, `db.t4g.micro` in one zone, 20 GiB gp3, backups | $14 |
 | the cache, one `cache.t4g.micro` Valkey node | $9 |
-| CloudWatch logs, metrics, about 45 alarms; the health check; Cloud Map's zone | $12 |
+| CloudWatch logs, metrics, about 50 alarms; the health check; Cloud Map's zone | $13 |
 | S3 (releases, dumps), SSM, the nightly backup task, the schedule | about $1 |
 
 Each further web or worker task adds about $22, a further lobby about $13; Multi-AZ
@@ -1762,7 +1775,8 @@ every command).
   listing, running. It lands on slot k, lists in its game's lobby in the OpenNova and the
   retail server browsers, and is joinable by a retail and an OpenNova client; the site's
   console works (players, chat, a map change) and the server's stats move; `fleet logs
-  <machine> <k>` shows the server's output and `fleet logs <machine> hostd` the agent's.
+  server <id>` shows the server's output, `fleet logs machine <machine>` the agent's, and
+  `fleet status` lists nothing that needs you.
 - **G. A second account** starts one: it lands on slot k+1 of the same machine.
 - **H. Deploys that keep the lobby.** With a server listed and a retail client in the
   lobby: `app deploy --image portal=<tag>` (nothing restarts but web's task), then `app

@@ -24,6 +24,10 @@ hosted_deployment_tag() {
 FLEET_API=/api/admin/fleet
 # Its view of the machines and of the servers in their slots.
 FLEET_VIEW_API=/api/admin/hosted
+# What needs an admin: the fleet's health and the firing alarms.
+ATTENTION_API=/api/admin/attention
+# A page of one log, and the stream it names (the logs route's).
+LOGS_API=/api/admin/logs
 
 # A machine's id as the service names it (its row) or EC2 does (i-...),
 # checked before it goes into a host script.
@@ -37,10 +41,46 @@ machine_id() {
 # by its creation, to find a newer one than the pinned.
 FLEET_AMI_PATTERN='al2023-ami-ecs-hvm-*-kernel-6.1-x86_64'
 
+# The attention list's JSON ($ATTENTION_API) on stdin as lines: each finding,
+# danger first, with its level, subject and since when, then the alarms that
+# fire (or why none are read).
+fleet_attention_lines() {
+  jq -r '
+    def since($t): if $t then " (since \($t))" else "" end;
+    (if (.findings | length) == 0 then "  nothing needs you: every machine reports and every server is running or starting on time"
+     else (.findings[] | "  \(.level | ascii_upcase) \(.subject): \(.text)" + since(.since)) end),
+    (if (.alarms_read | not) then "  alarms: not read here (a failed read is a finding above)"
+     elif (.alarms | length) == 0 then "  alarms: none fires"
+     else (.alarms[] | "  ALARM \(.name)" + since(.state_since) + ": \(.description)") end)'
+}
+
+# The fleet view's JSON ($FLEET_VIEW_API) on stdin as one line per machine:
+# its id, kind, state and slots, its address, its last report, its use, its
+# agent, and what holds it or is out of date.
+fleet_machine_lines() {
+  jq -r '
+    def gib: ((. / 1073741824 * 10) | floor) / 10 | tostring;
+    if (.machines | length) == 0 then "  no machine" else
+    .machines[] | "  machine \(.id) (\(.kind)) \(.state), \(.slots_used) of \(.slots) slots"
+      + (if .public_address then ", \(.public_address)" else "" end)
+      + (if .address then " (static address \(.address.name))" else "" end)
+      + ", reported \(.last_report_at // "never")"
+      + (if .stats then "; CPU \(.stats.cpu_percent | floor) %, memory \(.stats.memory_used_bytes | gib) of \(.stats.memory_total_bytes | gib) GiB, disk "
+           + (if .stats.disk_total_bytes > 0 then "\(.stats.disk_free_bytes * 100 / .stats.disk_total_bytes | floor) % free" else "unknown" end)
+         else "; use not reported" end)
+      + "; hostd \(.agent_version // "none")"
+      + (if .outdated == true then ", older than the release" else "" end)
+      + (if .protocol_mismatch_since then ", held: another protocol since \(.protocol_mismatch_since)" else "" end)
+      + (if .lost_held then ", held lost by the brake" else "" end)
+      + (if .end_reason then " (\(.end_reason))" else "" end)
+    end'
+}
+
 # fleet status: every machine this deployment tagged (the EC2 view, which
 # answers while the service is down), the fleet cluster's (ECS: each
 # machine's container instance, its agent and its hostd task, and the AMI
-# pinned against Amazon's newest), then the service's own view.
+# pinned against Amazon's newest), then the service's own: what needs an
+# admin (its attention list) and one line per machine.
 fleet_status() {
   [ $# -eq 0 ] || die "unknown: fleet status $1 (the deployment is --deployment's)"
   aws_auth
@@ -60,9 +100,20 @@ fleet_status() {
   else
     log "no fleet cluster (hosting is off)"
   fi
-  log "the service's fleet ($FLEET_VIEW_API):"
-  admin_api GET "$FLEET_VIEW_API" \
-    || err "the service did not answer (app status, app logs web)"
+  local json
+  log "what needs an admin (the service's $ATTENTION_API):"
+  if json="$(admin_api_json GET "$ATTENTION_API")"; then
+    fleet_attention_lines <<<"$json"
+  else
+    err "the service did not answer (app status, app logs web)"
+    return 0
+  fi
+  log "the service's machines ($FLEET_VIEW_API):"
+  if json="$(admin_api_json GET "$FLEET_VIEW_API")"; then
+    fleet_machine_lines <<<"$json"
+  else
+    err "the service did not answer (app status, app logs web)"
+  fi
 }
 
 # The fleet cluster $1 as ECS has it: the hostd service's counts and rollout,
@@ -194,64 +245,100 @@ fleet_roll() {
     || die "the service refused or did not answer (app logs web)"
 }
 
-# fleet logs MACHINE [SLOT|hostd] [--since 1h] [--follow]: a machine's logs,
-# read from CloudWatch alone (the machines' log group, infra.env's
-# OPENNOVA_MACHINES_LOG_GROUP), so no shell on the machine and no SSM: slot k's
-# container output (stream <machine id>/slot-<k>, each server on the slot in
-# turn), hostd's (its running task's stream, hostd/hostd/<task id>, found in
-# the fleet cluster while the machine runs; `app logs hostd` reads every
-# machine's, an ended one's among them), or with neither every slot stream of
-# the machine, each line naming its stream. MACHINE is the service's id (the
-# admin fleet view's "Machine N, slot k", fleet status's id column), or the
-# EC2 machine's (i-...), whose opennova:machine-id tag names it while EC2 still
-# lists it. The streams outlive the machine (the group keeps 30 days).
+# fleet logs server ID [--start N] [--since 1h] [--follow], fleet logs machine
+# ID [--since 1h] [--follow]: one log, read from CloudWatch alone (no shell on
+# the machine, no SSM). A server's: one start's output (the servers' log group,
+# infra.env's OPENNOVA_SERVERS_LOG_GROUP), its newest or start N (the server
+# page's Logs tab names them); a machine's: its hostd's (the machines' group,
+# OPENNOVA_MACHINES_LOG_GROUP). The stream is the one the service's rows name
+# (its logs route, $LOGS_API: a start's row, the machine's agent_log_stream).
+# While the service does not answer, a server's streams are read by their
+# names (<server id>/g<start>: start N's, or every start's, each line naming
+# its stream) and a machine's from its running hostd task (the fleet cluster).
+# ID is the service's (the admin pages', fleet status's). The streams outlive
+# their server and machine (14 and 30 days).
 fleet_logs() {
-  local machine="" slot="" since=1h follow=() streams=() format=short id group
+  local subject="${1:-}" id="${2:-}" start="" since=1h follow=() group path json errors why stream
+  case "$subject" in
+    server|machine) ;;
+    *) die "fleet logs takes server ID or machine ID (try: fleet logs server 34 --since 2h)" ;;
+  esac
+  [[ "$id" =~ ^[1-9][0-9]{0,17}$ ]] || die "'$id' is no $subject id (the admin pages', fleet status's)"
+  shift 2
   while [ $# -gt 0 ]; do
     case "$1" in
       --follow|-f) follow=(--follow); shift ;;
       --since) [ $# -ge 2 ] || die "--since needs a value (10m, 2h, 1d)"; since="$2"; shift 2 ;;
-      -*) die "unknown: fleet logs $1 (try: MACHINE [SLOT|hostd] [--since 1h] [--follow])" ;;
-      *)
-        if [ -z "$machine" ]; then machine="$1"
-        elif [ -z "$slot" ]; then slot="$1"
-        else die "fleet logs takes one MACHINE and one SLOT (or hostd): $1"
+      --start)
+        [ "$subject" = server ] || die "--start is a server's: one of its starts"
+        if [ $# -lt 2 ] || ! [[ "$2" =~ ^[1-9][0-9]{0,17}$ ]]; then
+          die "--start needs a start's number (the server page's Logs tab names them)"
         fi
-        shift ;;
+        start="$2"; shift 2 ;;
+      *) die "unknown: fleet logs $subject $id $1 (try: --start N, --since 1h, --follow)" ;;
     esac
   done
-  [ -n "$machine" ] || die "fleet logs needs a MACHINE: its id (the admin fleet view's, fleet status)"
-  case "$slot" in
-    ""|hostd|[0-9]|[12][0-9]|3[01]) ;;
-    *) die "'$slot' is no slot (0 to 31) and not hostd" ;;
-  esac
   aws_auth
   infra_env_load
-  group="$(infra_get OPENNOVA_MACHINES_LOG_GROUP)"
-  if [[ "$machine" =~ ^[1-9][0-9]{0,17}$ ]]; then
-    id="$machine"
-  elif [[ "$machine" =~ ^i-[0-9a-f]{8,17}$ ]]; then
-    # shellcheck disable=SC2016  # a JMESPath literal, not a shell expansion
-    id="$(aws ec2 describe-instances --instance-ids "$machine" \
-            --query 'Reservations[0].Instances[0].Tags[?Key==`opennova:machine-id`]|[0].Value' \
-            --output text)" \
-      || die "EC2 does not list $machine (an ended machine's logs are read by its id: the admin fleet view's)"
-    [[ "$id" =~ ^[1-9][0-9]{0,17}$ ]] || die "$machine carries no opennova:machine-id tag: no machine of the fleet"
-    log "$machine is machine $id"
+  if [ "$subject" = server ]; then
+    group="$(infra_get OPENNOVA_SERVERS_LOG_GROUP)"
   else
-    die "'$machine' is no machine id (a number, or an EC2 machine's i-...; fleet status lists them)"
+    group="$(infra_get OPENNOVA_MACHINES_LOG_GROUP)"
   fi
-  case "$slot" in
-    "") streams=(--log-stream-name-prefix "$id/"); format=detailed ;;
-    hostd)
-      local cluster task
-      cluster="$(fleet_cluster)"
-      [ -n "$cluster" ] || die "no fleet cluster (hosting is off): there is no machine"
-      task="$(fleet_hostd_task "$cluster" "$id")"
-      streams=(--log-stream-names "hostd/hostd/${task##*/}") ;;
-    *) streams=(--log-stream-names "$id/slot-$slot") ;;
-  esac
-  aws logs tail "$group" "${streams[@]}" --since "$since" --format "$format" ${follow[@]+"${follow[@]}"}
+  path="$LOGS_API?subject=$subject&id=$id&limit=1"
+  [ -z "$start" ] || path="$path&generation=$start"
+  errors="$(mktemp)"
+  if json="$(admin_api_json GET "$path" 2>"$errors")"; then
+    rm -f "$errors"
+    [ "$(jq -r '.source // empty' <<<"$json")" = cloudwatch ] \
+      || die "the service reads its logs from $(jq -r '.source // "nowhere"' <<<"$json"), not CloudWatch"
+    stream="$(jq -r '.stream // empty' <<<"$json")"
+    [ -n "$stream" ] || die "$subject $id has no log yet (a server not yet started, a machine whose hostd never reported)"
+    aws logs tail "$group" --log-stream-names "$stream" --since "$since" --format short ${follow[@]+"${follow[@]}"}
+    return
+  fi
+  why="$(admin_api_failure "$errors")"
+  rm -f "$errors"
+  [[ "$why" != *"HTTP 404"* ]] || die "the service has no $subject $id${start:+ start $start}"
+  if [ "$subject" = server ] && [ -n "$start" ]; then
+    log "the service did not answer ($why): start $start's stream by its name"
+    aws logs tail "$group" --log-stream-names "$id/g$start" --since "$since" --format short ${follow[@]+"${follow[@]}"}
+  elif [ "$subject" = server ]; then
+    log "the service did not answer ($why): every start's stream of server $id, each line naming its stream"
+    aws logs tail "$group" --log-stream-name-prefix "$id/g" --since "$since" --format detailed ${follow[@]+"${follow[@]}"}
+  else
+    local cluster task
+    cluster="$(fleet_cluster)"
+    [ -n "$cluster" ] || die "no fleet cluster (hosting is off): there is no machine"
+    task="$(fleet_hostd_task "$cluster" "$id")"
+    log "the service did not answer ($why): machine $id's running hostd task ${task##*/}"
+    aws logs tail "$group" --log-stream-names "hostd/hostd/${task##*/}" --since "$since" --format short ${follow[@]+"${follow[@]}"}
+  fi
+}
+
+# fleet console MACHINE: the machine's serial console as EC2 has it now
+# (--latest): its boot, its user data's and its ECS agent's lines, a kernel's
+# panic, where a machine whose hostd never started says why; while EC2 still
+# lists it. MACHINE is the service's id (its EC2 machine found by its
+# opennova:machine-id tag, among this deployment's) or EC2's i-....
+fleet_console() {
+  [ $# -eq 1 ] || die "fleet console takes one MACHINE: its id (fleet status lists them) or its EC2 i-..."
+  local instance="$1"
+  if [[ "$1" =~ ^[1-9][0-9]{0,17}$ ]]; then
+    aws_auth
+    infra_env_load
+    instance="$(aws ec2 describe-instances \
+                  --filters "Name=tag:opennova:machine-id,Values=$1" "Name=tag:opennova:deployment,Values=$(hosted_deployment_tag)" \
+                  --query 'Reservations[].Instances[].InstanceId | [0]' --output text)" \
+      || die "describing machine $1 failed"
+    [[ "$instance" =~ ^i-[0-9a-f]{8,17}$ ]] || die "EC2 lists no machine $1 of this deployment (an ended machine's console goes with it)"
+  elif [[ "$1" =~ ^i-[0-9a-f]{8,17}$ ]]; then
+    aws_auth
+  else
+    die "'$1' is no machine id (a number, or an EC2 machine's i-...; fleet status lists them)"
+  fi
+  log "machine $1: $instance's console output (EC2)"
+  aws ec2 get-console-output --instance-id "$instance" --latest --output text --query Output
 }
 
 cmd_fleet() {
@@ -260,6 +347,7 @@ cmd_fleet() {
   case "$action" in
     status) fleet_status "$@" ;;
     logs) fleet_logs "$@" ;;
+    console) fleet_console "$@" ;;
     shell) fleet_shell "$@" ;;
     roll) fleet_roll "$@" ;;
     drain|end)
@@ -270,6 +358,6 @@ cmd_fleet() {
       [ "$action" = drain ] || confirm_prod "end machine $machine (its servers move off first)" "$OPT_YES"
       aws_auth
       admin_api POST "$FLEET_API/machines/$machine/$action" || die "the service refused or did not answer (app logs web)" ;;
-    *) die "unknown: fleet $action (try: status|logs|shell|drain|end|roll)" ;;
+    *) die "unknown: fleet $action (try: status|logs|console|shell|drain|end|roll)" ;;
   esac
 }

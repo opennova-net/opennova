@@ -52,10 +52,12 @@ the whole bring-up.
   - `db bootstrap|psql|reset-db|snapshot`, `backup now|list|restore|import`: the RDS
     database and its pg_dump copies, through one-off tasks of the backup task definition
     (`backup import --from-deployment prod KEY` brings prod's dump into staging alone);
-  - `fleet status|logs|shell|drain|end|roll`: the hosted game servers' machines
+  - `fleet status|logs|console|shell|drain|end|roll`: the hosted game servers' machines
     (`fleet status`: EC2's, the fleet cluster's and the service's views, the AMI pinned
-    against Amazon's newest; `fleet logs MACHINE [SLOT|hostd]`: a machine's logs from
-    CloudWatch; `fleet shell MACHINE`: ECS Exec into its hostd; `fleet roll [--dry-run]`:
+    against Amazon's newest, what needs an admin and one line per machine; `fleet logs
+    server ID [--start N]` and `fleet logs machine ID`: a server start's or a machine's
+    hostd's log from CloudWatch; `fleet console MACHINE`: its EC2 serial console; `fleet
+    shell MACHINE`: ECS Exec into its hostd; `fleet roll [--dry-run]`:
     the machines older than the pinned AMI replaced; their game data is the site's Game
     data page, DEPLOY.md "Hosted game servers", not the toolbox's);
   - `aws <args...>`: the AWS CLI in the deployment's account.
