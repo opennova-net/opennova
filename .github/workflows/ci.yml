@@ -468,12 +468,13 @@ jobs:
           lfs: false   # scoped below: the tests read fixtures/ only
 
       # The service's client libraries: libpq (CMake's FindPostgreSQL) and, for
-      # the server's HTTP layer, hiredis with hiredis_ssl and OpenSSL.
-      - name: Install libpq and hiredis
+      # the server's HTTP layer, hiredis with hiredis_ssl and OpenSSL; and Ninja,
+      # which RunsOn's ubuntu24-full image leaves out (ubuntu-latest has it).
+      - name: Install libpq, hiredis and Ninja
         shell: bash
         run: >-
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          libpq-dev libhiredis-dev libssl-dev
+          libpq-dev libhiredis-dev libssl-dev ninja-build
 
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash
@@ -543,6 +544,11 @@ jobs:
         with:
           submodules: recursive
           lfs: false
+
+      # RunsOn's ubuntu24-full image leaves Ninja out (ubuntu-latest has it).
+      - name: Install Ninja
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
 
       - name: Restore the compiler cache
         uses: ./.github/actions/compiler-cache
