@@ -42,6 +42,7 @@
 #include "cli_verbs.h"
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_parts.h"
 #include "editor/editor_test_support.h"
 #include "common/png_test_support.h"
 
@@ -805,16 +806,16 @@ static int test_retail_expansion_build() {
 	return 0;
 }
 
+// The retail twin's parts (tests/common/test_parts.h): `main` every case but the install import, whose
+// verbs each validate the project against the whole install (about 80 s), `install_import` that leg,
+// side by side.
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	int failures = 0;
-	failures += test_verb_table();
-	failures += test_verbs_answer_as_the_session();
-	failures += test_request_and_query_verbs();
-	failures += test_install();
-	failures += test_validate_follows_the_gate();
-	failures += test_retail_install_import();
-	failures += test_retail_expansion_build();
+	const int failures = test_parts::run(
+	        argc, argv,
+	        {{"main", {test_verb_table, test_verbs_answer_as_the_session, test_request_and_query_verbs, test_install,
+	                   test_validate_follows_the_gate, test_retail_expansion_build}},
+	         {"install_import", {test_retail_install_import}, true}});
 	if (failures == 0) std::printf("project_cli_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

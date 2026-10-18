@@ -1598,7 +1598,8 @@ opennova_add_parts(cpt_trngen_region_bake PARTS state regions locks walk COMMAND
 add_executable(cpt_region_bake_retail_test cpt/trngen_region_bake_retail_test.cpp)
 target_link_libraries(cpt_region_bake_retail_test PRIVATE opennova_formats)
 target_include_directories(cpt_region_bake_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(cpt_region_bake_retail COMMAND cpt_region_bake_retail_test)
+opennova_add_parts(cpt_region_bake_retail PARTS draw_back dvxi5 dvxg3 g14 dvxi4 dvxg9 GATED
+                   COMMAND cpt_region_bake_retail_test)
 # By hand: the region bake's cost per node level (`trngen_region_bake_bench [threads]`).
 add_executable(trngen_region_bake_bench EXCLUDE_FROM_ALL cpt/trngen_region_bake_bench.cpp)
 target_link_libraries(trngen_region_bake_bench PRIVATE opennova_formats)

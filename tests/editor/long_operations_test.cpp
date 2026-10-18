@@ -58,6 +58,7 @@
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_parts.h"
 #include "common/thread_cpu_clock.h"
 #include "editor/editor_test_support.h"
 #include "editor/fixture_projects.h"
@@ -1131,22 +1132,16 @@ static int test_retail_open() {
 	return 0;
 }
 
+// The retail twin's parts (tests/common/test_parts.h): `main` every case but the JO install's project
+// opened a step at a time (about 75 s), `install_open` that leg, side by side.
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	int failures = 0;
-	failures += test_project_scan_steps();
-	failures += test_import_pass_steps();
-	failures += test_scan_update();
-	failures += test_validation_steps();
-	failures += test_validation_keeps_its_readings();
-	failures += test_rename_transaction_steps();
-	failures += test_open_stepped();
-	failures += test_open_cancelled();
-	failures += test_save_scans_one_file();
-	failures += test_stale_import_refused();
-	failures += test_stepped_equals_whole();
-	failures += test_validation_started_again();
-	failures += test_rename_keeps_the_selection();
-	failures += test_retail_open();
+	const int failures = test_parts::run(
+	        argc, argv,
+	        {{"main", {test_project_scan_steps, test_import_pass_steps, test_scan_update, test_validation_steps,
+	                   test_validation_keeps_its_readings, test_rename_transaction_steps, test_open_stepped,
+	                   test_open_cancelled, test_save_scans_one_file, test_stale_import_refused,
+	                   test_stepped_equals_whole, test_validation_started_again, test_rename_keeps_the_selection}},
+	         {"install_open", {test_retail_open}, true}});
 	return failures == 0 ? 0 : 1;
 }

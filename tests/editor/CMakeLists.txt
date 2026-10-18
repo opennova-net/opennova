@@ -29,14 +29,17 @@ function(opennova_add_editor_executable target)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
 endfunction()
 
-# opennova_add_editor_test(<stem> [MIXED] [NAME <ctest name>] [SOURCES <files...>] [LIBS <libs...>]):
-# the ctest row NAME (editor_<stem> unless given) running the executable <NAME>_test, built from
-# SOURCES (<stem>_test.cpp unless given) and linked against LIBS (opennova_editor unless given).
-# MIXED registers it through opennova_add_mixed_test: the row and its _retail twin. TIMEOUT gives a row
+# opennova_add_editor_test(<stem> [MIXED [RETAIL_PARTS <part>...]] [NAME <ctest name>] [SOURCES <files...>]
+# [LIBS <libs...>]): the ctest row NAME (editor_<stem> unless given) running the executable <NAME>_test,
+# built from SOURCES (<stem>_test.cpp unless given) and linked against LIBS (opennova_editor unless given).
+# MIXED registers it through opennova_add_mixed_test: the row and its _retail twin, which RETAIL_PARTS
+# splits by the program's parts (tests/common/test_parts.h): the twin runs the first, and
+# <NAME>_retail_<part> each other, side by side (every case makes its own project in a pid-unique
+# TempDir, tests/common/temp_dir.h, so the parts need no lock between them). TIMEOUT gives a row
 # its own bound in seconds, under ctest's default (600 for the rows whose bakes or build take every core
 # and run beside the others: the longest took 51 s on CI).
 function(opennova_add_editor_test stem)
-    cmake_parse_arguments(T "MIXED" "NAME;TIMEOUT" "SOURCES;LIBS" ${ARGN})
+    cmake_parse_arguments(T "MIXED" "NAME;TIMEOUT" "SOURCES;LIBS;RETAIL_PARTS" ${ARGN})
     if(T_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "opennova_add_editor_test(${stem}): unknown arguments ${T_UNPARSED_ARGUMENTS}")
     endif()
@@ -50,8 +53,11 @@ function(opennova_add_editor_test stem)
         set(T_LIBS opennova_editor)
     endif()
     opennova_add_editor_executable(${T_NAME}_test SOURCES ${T_SOURCES} LIBS ${T_LIBS})
+    if(T_RETAIL_PARTS AND NOT T_MIXED)
+        message(FATAL_ERROR "opennova_add_editor_test(${stem}): RETAIL_PARTS splits a MIXED row's twin")
+    endif()
     if(T_MIXED)
-        opennova_add_mixed_test(${T_NAME} COMMAND ${T_NAME}_test
+        opennova_add_mixed_test(${T_NAME} COMMAND ${T_NAME}_test RETAIL_PARTS ${T_RETAIL_PARTS}
                                 WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
     else()
         add_test(NAME ${T_NAME} COMMAND ${T_NAME}_test WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
@@ -59,6 +65,12 @@ function(opennova_add_editor_test stem)
     set(rows ${T_NAME})
     if(T_MIXED)
         list(APPEND rows ${T_NAME}_retail)
+        if(T_RETAIL_PARTS)
+            list(SUBLIST T_RETAIL_PARTS 1 -1 others)
+            foreach(part IN LISTS others)
+                list(APPEND rows ${T_NAME}_retail_${part})
+            endforeach()
+        endif()
     endif()
     if(T_TIMEOUT)
         set_tests_properties(${rows} PROPERTIES TIMEOUT ${T_TIMEOUT})
@@ -128,8 +140,8 @@ opennova_add_editor_test(project_validation MIXED)
 # end makes), a Save scanning and validating its one file, a stale import refused without writing.
 # Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a step at a time at the
 # editor's budget, its polls and wall time, and the install as the base layer under an expansion
-# project's graph.
-opennova_add_editor_test(long_operations MIXED)
+# project's graph, a row of its own.
+opennova_add_editor_test(long_operations MIXED RETAIL_PARTS main install_open)
 
 # The document types' project checks (S13 V9): a type's own check across the project's files,
 # made by its registry row (the menu type's render check) and kept by whoever validates; a
@@ -266,8 +278,9 @@ endif()
 
 # The asset graph (S7): the extractors, the resolver the badges and Problems share,
 # the per-file slots an update patches (an incremental update equals a fresh build, S13 D3),
-# the base layer, and the rename transaction; its retail legs over the JO install.
-opennova_add_editor_test(asset_graph MIXED)
+# the base layer, and the rename transaction; its retail legs over the JO install, the incremental
+# leg's six fresh-graph comparisons split over three rows of their own (166 s in one row).
+opennova_add_editor_test(asset_graph MIXED RETAIL_PARTS main incremental_1 incremental_2 incremental_3)
 
 # A document's reference queries (S13 D3, graph/reference_queries): the badge, the missing
 # finding, the picker, where Go to leads, and find_definition over the graph's slot or the
@@ -387,8 +400,9 @@ opennova_add_editor_test(disk_changes)
 # A file's rename through the native texts (ADR 0046 S18, graph/native_text_sites): a terrain's, an
 # environment's, a particle file's and the HUD layout's names rewritten as text, only the token the game
 # reads at each site; a flipbook's frame refused; a file in the SCR form written back as plain text. The
-# retail leg (OPENNOVA_JO_DIR): every name the install's native texts write found as its one token.
-opennova_add_editor_test(native_rename MIXED)
+# retail leg (OPENNOVA_JO_DIR): every name the install's native texts write found as its one token, the
+# names dealt over four rows (132 s in one row).
+opennova_add_editor_test(native_rename MIXED RETAIL_PARTS main share_2 share_3 share_4)
 
 opennova_add_editor_test(document_contract SOURCES editor_document_contract_test.cpp)
 
@@ -579,8 +593,10 @@ opennova_add_editor_test(menu_render MIXED SOURCES menu_screen_render_test.cpp)
 # outputs, and the game install as an import source; the plan
 # of an import with the files it needs (S11f, import_plan_test.cpp) and the session's
 # import of it, staged and published (S11g, import_apply_test.cpp: its retail leg imports a
-# packed install's menu with the files it needs, OPENNOVA_JO_DIR).
-opennova_add_editor_test(import MIXED SOURCES import_test.cpp import_plan_test.cpp import_apply_test.cpp)
+# packed install's menu with the files it needs, OPENNOVA_JO_DIR; 04TR's closure imported and built
+# a row of its own).
+opennova_add_editor_test(import MIXED RETAIL_PARTS main closure_04tr
+                         SOURCES import_test.cpp import_plan_test.cpp import_apply_test.cpp)
 
 # The font importer: a font set's glyph sheet made into a .fnt (formats/fnt fnt_sheet, whose advance
 # modes, pages and refusals are the fnt_sheet ctest) and read back by fnt_parse: the set and the options,
@@ -655,7 +671,8 @@ opennova_add_editor_test(file_chores LIBS opennova_project_cli)
 # and query tables, each verb's --json the session's answer to the same requests, the request and
 # query verbs, --install; its retail leg a project imported from the game install whose Problems
 # the query verb reads as the session does.
-opennova_add_editor_test(project_cli_session MIXED NAME project_cli_session LIBS opennova_project_cli)
+opennova_add_editor_test(project_cli_session MIXED RETAIL_PARTS main install_import NAME project_cli_session
+                         LIBS opennova_project_cli)
 
 # opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp's bounds: 2017
 # nested windows, the 4031-deep LAN_LIST chain): it completes on the test's own stack, in time linear in
