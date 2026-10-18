@@ -24,12 +24,10 @@ concurrency:
 # The build and test legs (test-core, test-retail, test-linux, both gdext
 # builds, the Godot package) run on RunsOn's 16-vCPU runners in the
 # Organization's ci account (infra/ci; DEPLOY.md, "CI runners"): an EC2 spot
-# instance of its own per job, launched for it and ended after it. Windows runs
-# our own image (infra/ci/image: RunsOn's Windows Server 2025 plus Visual
-# Studio 2026, the compiler windows-latest and the maintainers use; `ci image`
-# builds a new one, whose AMI .github/runs-on.yml names as the image
-# opennova-win25-vs2026 the Windows legs ask for), Linux RunsOn's
-# Ubuntu 24.04, which leaves Ninja out (the Linux legs install it). The
+# instance of its own per job, launched for it and ended after it, on RunsOn's
+# images: Windows Server 2025 with Visual Studio 2022 (windows-latest and the
+# maintainers build with 2026) and Ubuntu 24.04, which leaves Ninja out (the
+# Linux legs install it). The
 # compiles and the tests are CPU-bound. Every other job, the Godot tests among
 # them (one test at a time: more cores buy nothing), runs on GitHub's standard
 # runners, windows-latest and ubuntu-latest, free for a public repository. So
@@ -212,7 +210,7 @@ jobs:
   # after the last cache hit. Only the link step changes, so the cache's
   # objects serve either linker.
   test-core:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=opennova-win25-vs2026/volume=150gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb', github.run_id) }}
     needs: [changes]
     permissions:
       contents: read
@@ -314,7 +312,7 @@ jobs:
   # retail ctests. It runs whenever the reference data is reachable (not on
   # fork PRs) and blocks the merge like the core leg, through `test`.
   test-retail:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=opennova-win25-vs2026/volume=150gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb', github.run_id) }}
     needs: [changes, retail-availability]
     if: needs.changes.outputs.code == 'true' && needs.retail-availability.outputs.available == 'true'
     permissions:
@@ -718,7 +716,7 @@ jobs:
   # after one warm-up only changed engine/ sources recompile. Windows must
   # use Ninja: the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
   build-gdextension-windows:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=opennova-win25-vs2026/volume=150gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb', github.run_id) }}
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     permissions:
@@ -923,7 +921,7 @@ jobs:
   # The game archive and the editor archive (the editor plus the runtime it
   # plays a project with).
   package-godot-windows:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=opennova-win25-vs2026/volume=150gb', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb', github.run_id) }}
     needs: [build-gdextension-windows]
     outputs:
       game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
