@@ -842,10 +842,10 @@ void test_avatar_grant_names_no_slot() {
     const WeaponTable table = weapons();
     WeaponInventory inv;
     inv.reset(table);
-    CHECK(weapon_inventory_init_from_avatar_def(table, inv, 0xFF, 8, false).combo == -1);
-    CHECK(weapon_inventory_init_from_avatar_def(table, inv, 0, 8, false).combo == -1);
-    CHECK(weapon_inventory_init_from_avatar_def(table, inv, 7, 8, false).combo == -1);
-    const WeaponAvatarGrant landed = weapon_inventory_init_from_avatar_def(table, inv, 5, 8, false);
+    CHECK(weapon_inventory_init_from_avatar_def(table, inv, 0xFF, 8, false, WeaponAmmoSeat{}).combo == -1);
+    CHECK(weapon_inventory_init_from_avatar_def(table, inv, 0, 8, false, WeaponAmmoSeat{}).combo == -1);
+    CHECK(weapon_inventory_init_from_avatar_def(table, inv, 7, 8, false, WeaponAmmoSeat{}).combo == -1);
+    const WeaponAvatarGrant landed = weapon_inventory_init_from_avatar_def(table, inv, 5, 8, false, WeaponAmmoSeat{});
     CHECK(landed.combo == kPistolCombo && landed.reloaded);
     CHECK(!weapon_inventory_weapon_full(table, inv, 9));
     CHECK(weapon_inventory_weapon_full(table, inv, 5)); // 14 + 7 = 21

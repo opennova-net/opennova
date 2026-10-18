@@ -339,7 +339,7 @@ struct WeaponAvatarGrant {
 };
 WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table,
         WeaponInventory &inv, int32_t adm_index, int32_t owner_class,
-        bool allow_sniper_scope_zoom);
+        bool allow_sniper_scope_zoom, const WeaponAmmoSeat &seat);
 
 // The authority's pickup refusals [orig: WeaponSlot_RecalculateScore @ 0x542450;
 // it returns 0 (proceed) on a peer without authority]. The slot leg: the
@@ -356,9 +356,10 @@ bool weapon_inventory_all_full(const WeaponTable &table, const WeaponInventory &
 
 // The reload transfer [orig: WeaponSlot_ReloadAmmo @ 0x541720, net-re §5.58]: refund
 // the remaining clip into the pool, then refill to clipsize clamped by the pool.
-// Returns the rounds now loaded (unchanged when the def has no clip).
+// Returns the rounds now loaded as the seat reads them (unchanged when the def has
+// no clip). The ammo reads, the spend and the bucket write take the owner's seat.
 int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &inv,
-                                     int32_t combo);
+                                     int32_t combo, const WeaponAmmoSeat &seat);
 
 // Player_SelectWeaponSlot @ 0x4DD680 — the category-level select. Stages the pending
 // slot; the caller commits pending->equipped unless seated (the original applies to

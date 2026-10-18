@@ -223,7 +223,7 @@ void test_pools_and_recalc() {
 
     // Reload: refund + redraw [orig: WeaponSlot_ReloadAmmo §5.58].
     inv.slot(3 * 65 + 0)->clip = 5;
-    int32_t loaded = weapon_inventory_reload_slot(f.t, inv, 3 * 65 + 0);
+    int32_t loaded = weapon_inventory_reload_slot(f.t, inv, 3 * 65 + 0, WeaponAmmoSeat{});
     CHECK(loaded == 30);
     CHECK(weapon_pool_get(inv, m4_class) == 155); // 180 + 5 - 30
 
@@ -727,7 +727,7 @@ void test_two_weapons_share_loaded_ammo() {
     CHECK(weapon_inventory_total_clips(f.t, inv, 196) == 3);
     weapon_inventory_set_loaded_rounds(f.t, inv, 195, 23);
     CHECK(weapon_inventory_loaded_rounds(f.t, inv, 196) == 23);
-    CHECK(weapon_inventory_reload_slot(f.t, inv, 196) == 30);
+    CHECK(weapon_inventory_reload_slot(f.t, inv, 196, WeaponAmmoSeat{}) == 30);
     CHECK(weapon_pool_get(inv, a.ammo_class_id) == 63);
 }
 
@@ -949,8 +949,45 @@ void test_pump_reads_the_bucket_through_the_seat() {
     std::printf("PASS the pump reads the bucket through the seat\n");
 }
 
+// The reload refill takes the owner's seat: on a controller seat under a carrier with
+// no EWeap bit a bucket rifle refunds and draws nothing, and a clip weapon empties its
+// clip into the pool and draws none back; off the seat the bucket rifle reloads.
+// [orig: WeaponSlot_ReloadAmmo @0x5417C5, @0x5417E7, @0x541805, @0x541821, @0x541842;
+//  WeaponSlot_DecrementAmmo @0x540994]
+void test_reload_takes_the_seat() {
+    Fixture f;
+    auto &m4 = f.t.entries[f.m4];
+    m4.ammo_bucket = 1;
+    WeaponInventory inv;
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_KNIFE", "WPN_AK47AUTO"}, inv, 8,
+            false);
+    const int32_t m4_combo = 3 * 65;
+    const size_t m4_pool = static_cast<size_t>(m4.ammo_class_id);
+    inv.shared_clips[1] = 5;
+    inv.pools[m4_pool] = 90;
+    WeaponAmmoSeat seat;
+    seat.parent_slot = 2;
+    seat.carrier = true;
+    CHECK(weapon_inventory_reload_slot(f.t, inv, m4_combo, seat) == 0);
+    CHECK(inv.shared_clips[1] == 5 && inv.pools[m4_pool] == 90);
+    const auto &ak = f.t.entries[static_cast<size_t>(f.ak)];
+    const int32_t ak_combo = ak.rank + 65 * ak.category;
+    const size_t ak_pool = static_cast<size_t>(ak.ammo_class_id);
+    inv.slot(ak_combo)->clip = 4;
+    const int32_t ak_before = inv.pools[ak_pool];
+    CHECK(weapon_inventory_reload_slot(f.t, inv, ak_combo, seat) == 0);
+    CHECK(inv.slot(ak_combo)->clip == 0 &&
+            inv.pools[ak_pool] == ak_before + 4 * ak.ammo_class_count);
+    const WeaponAmmoSeat unseated;
+    CHECK(weapon_inventory_reload_slot(f.t, inv, m4_combo, unseated) == m4.clipsize);
+    CHECK(inv.pools[m4_pool] == 90 + 5 * m4.ammo_class_count - m4.clipsize * m4.ammo_class_count);
+    std::printf("PASS the reload takes the seat\n");
+}
+
 int main() {
     test_recalc_seat_legs();
+    test_reload_takes_the_seat();
     test_pump_reads_the_bucket_through_the_seat();
     test_total_clips_seat_legs();
     test_slot_bar_scan();

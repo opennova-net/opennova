@@ -324,24 +324,27 @@ int32_t combo_of(const WeaponTableEntry &def) {
 //  WeaponSlot_SetAmmoCount(def+0x5C, def+0xD8, picker), WeaponSlot_ReloadAmmo
 //  (picker, slotIndex)]
 void refill_slot(const WeaponTable &table, WeaponInventory &inv, const WeaponTableEntry &def,
-                 int32_t slot_combo, int32_t reload_combo) {
+                 int32_t slot_combo, int32_t reload_combo, const WeaponAmmoSeat &seat) {
     WeaponInventorySlot *slot = inv.slot(slot_combo);
     if (slot == nullptr) return;
     if (def.ammo_bucket != 0) {
+        // The bucket write skips a controller or UseGun seat [orig: sub_540670
+        //  @0x542858 / @0x5428DE, its seat test @0x540684..0x540692].
         const uint32_t bucket = static_cast<uint32_t>(def.ammo_bucket);
-        if (bucket < inv.shared_clips.size()) inv.shared_clips[bucket] = 0;
+        if (weapon_seat_writes_buckets(seat) && bucket < inv.shared_clips.size())
+            inv.shared_clips[bucket] = 0;
     } else {
         slot->clip = 0;
     }
     weapon_pool_set(table, inv, def.ammo_class_id, def.startrounds);
-    weapon_inventory_reload_slot(table, inv, reload_combo);
+    weapon_inventory_reload_slot(table, inv, reload_combo, seat);
 }
 
 } // namespace
 
 WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table,
         WeaponInventory &inv, int32_t adm_index, int32_t owner_class,
-        bool allow_sniper_scope_zoom) {
+        bool allow_sniper_scope_zoom, const WeaponAmmoSeat &seat) {
     // [orig: WeaponSlot_InitFromAvatarDef @ 0x542730]
     WeaponAvatarGrant out;
     if ((adm_index & 0xFF) == 0xFF) return out;                  // @0x542753
@@ -386,7 +389,7 @@ WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table
             weapon_slot_init_from_def(*child, static_cast<int16_t>(child_adm), *child_slot,
                                       owner_class, allow_sniper_scope_zoom); // @0x542839
             if (child->clipsize != -1) {                         // @0x542848
-                refill_slot(table, inv, *child, combo_of(*child), own_combo);
+                refill_slot(table, inv, *child, combo_of(*child), own_combo, seat);
                 out.reloaded = true;
             }
         }
@@ -398,7 +401,7 @@ WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table
             ? table.by_index(static_cast<uint8_t>(slot->adm_index))
             : nullptr;
     if (slot_def != nullptr && slot_def->ammo_class_count != 0 && slot_def->clipsize != -1) {
-        refill_slot(table, inv, *slot_def, slot_combo, own_combo);
+        refill_slot(table, inv, *slot_def, slot_combo, own_combo, seat);
         out.reloaded = true;
     }
     out.combo = slot_combo;
@@ -635,26 +638,37 @@ int32_t weapon_slot_ammo_score(const WeaponTable &table, const WeaponInventory &
 }
 
 int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &inv,
-                                     int32_t combo) {
+                                     int32_t combo, const WeaponAmmoSeat &seat) {
     // [orig: WeaponSlot_ReloadAmmo @ 0x541720 (net-re §5.58) — refund the remaining
     //  clip into the def's ammo-class pool, then refill to clipsize clamped by the
-    //  pool]
+    //  pool]. Its ammo accessors take the owner's seat: a shared bucket's loaded
+    //  rounds read through it (@ 0x5417c5) where a slot's own word does not
+    //  (@ 0x5417c9); the refund's add has no seat leg (WeaponSlot_AddAmmo
+    //  @ 0x5417e7); the pool reads through it (@ 0x541805); the spend
+    //  (WeaponSlot_DecrementAmmo @ 0x541821) takes nothing on a controller seat
+    //  (@ 0x540994); the bucket write skips both seats (@ 0x541842). A UseGun seat's
+    //  carrier spend is the borrowed slot's, which never reaches this inventory.
     const WeaponTableEntry *def = entry_at(table, inv, combo);
     WeaponInventorySlot *slot = inv.slot(combo);
     if (def == nullptr || slot == nullptr) return 0;
-    const int32_t loaded = weapon_inventory_loaded_rounds(table, inv, combo);
+    const int32_t own = weapon_inventory_loaded_rounds(table, inv, combo);
+    const bool bucket = def->ammo_bucket != 0;
+    const int32_t loaded = bucket ? weapon_seat_bucket(seat, own) : own;
     if (def->clipsize == -1 || def->ammo_class_count == 0) return loaded;
     int32_t units = def->ammo_class_count;
     if (loaded != 0)
         weapon_pool_add(table, inv, def->ammo_class_id, loaded * units);
     int32_t draw = static_cast<int32_t>(def->clipsize) * units;
-    int32_t pool = weapon_pool_get(inv, def->ammo_class_id);
+    const int32_t pool = weapon_seat_pool(seat, def->ammo_class_id,
+            weapon_pool_get(inv, def->ammo_class_id));
     if (draw > pool) draw = pool;
-    if (def->ammo_class_id >= 0 &&
+    if (seat.parent_slot != 2 && seat.parent_slot != 3 && def->ammo_class_id >= 0 &&
         def->ammo_class_id < static_cast<int>(inv.pools.size()))
         inv.pools[static_cast<size_t>(def->ammo_class_id)] -= draw;
-    weapon_inventory_set_loaded_rounds(table, inv, combo, draw / units);
-    return weapon_inventory_loaded_rounds(table, inv, combo);
+    if (!bucket || weapon_seat_writes_buckets(seat))
+        weapon_inventory_set_loaded_rounds(table, inv, combo, draw / units);
+    const int32_t after = weapon_inventory_loaded_rounds(table, inv, combo);
+    return bucket ? weapon_seat_bucket(seat, after) : after;
 }
 
 bool weapon_select_slot(const WeaponTable &table, WeaponInventory &inv, int32_t combo,

@@ -1463,8 +1463,13 @@ void JoinerRole::apply_gameplay_events() {
 		// the payload-addressed slot's remaining clip to its ammo-class pool and
 		// draw a full clip. A late echo still reloads that exact slot after a switch;
 		// only the currently active personal slot has an FSM mirror to update here.
-		world::weapon_inventory_reload_slot(
-				world.tables.weapons, lp.inventory, combo);
+		// The refill reads, spends and writes through the player's seat
+		// [orig: WeaponSlot_ReloadAmmo @0x5417C5..0x541842].
+		const world::Entity *self_body = world.registry.get(world.cached.local_player);
+		const world::WeaponAmmoSeat seat = self_body != nullptr
+				? world::entity_ammo_seat(world, *self_body) : world::WeaponAmmoSeat{};
+		const int32_t reloaded_rounds = world::weapon_inventory_reload_slot(
+				world.tables.weapons, lp.inventory, combo, seat);
 		if (lp.weapon.active && !lp.weapon.usegun_slot_active &&
 				lp.inventory.equipped_combo >= 0) {
 			world::WeaponSlotState &active_slot =
@@ -1477,12 +1482,11 @@ void JoinerRole::apply_gameplay_events() {
 									static_cast<uint8_t>(equipped->adm_index))
 							: nullptr;
 			if (equipped_def != nullptr) {
-				active_slot.reserve = world::weapon_pool_get(
-						lp.inventory, equipped_def->ammo_class_id);
+				active_slot.reserve = world::weapon_seat_pool(seat, equipped_def->ammo_class_id,
+						world::weapon_pool_get(lp.inventory, equipped_def->ammo_class_id));
 			}
 			if (combo == lp.inventory.equipped_combo) {
-				active_slot.clip = world::weapon_inventory_loaded_rounds(
-                        world.tables.weapons, lp.inventory, combo);
+				active_slot.clip = reloaded_rounds;
 				active_slot.phase = static_cast<uint8_t>(
 						active_slot.phase &
 						~world::weapon_phase::kReloadPendingBit);

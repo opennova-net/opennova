@@ -1600,10 +1600,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// §5.58] — overriding the FSM's single-class transfer (D-WPN-2).
 				// eq->clip still holds the pre-reload remaining rounds (mirrored on
 				// the previous tick); the refund below consumes it.
-				weapon_inventory_reload_slot(world.tables.weapons, inventory,
-						inventory.equipped_combo);
-				active_slot.clip = weapon_inventory_loaded_rounds(
-                        world.tables.weapons, inventory, inventory.equipped_combo);
+				active_slot.clip = weapon_inventory_reload_slot(world.tables.weapons, inventory,
+						inventory.equipped_combo, ammo_seat);
 			} else if (eq_def->ammo_bucket == 0 || weapon_seat_writes_buckets(ammo_seat)) {
 				weapon_inventory_set_loaded_rounds(world.tables.weapons, inventory,
                         inventory.equipped_combo, active_slot.clip);

@@ -120,7 +120,8 @@ void Server_BroadcastWeaponOverlayUpdates(NapiNPServerCtx &ctx, world::World &wo
 			world::WeaponInventory inventory = conn_weapon_inventory(*conn, table);
 			const world::WeaponAvatarGrant landed = world::weapon_inventory_init_from_avatar_def(
 					table, inventory, grant.weapon, body != nullptr ? body->player_class : 0,
-					world.rules.allow_sniper_scope_zoom);
+					world.rules.allow_sniper_scope_zoom,
+					body != nullptr ? world::entity_ammo_seat(world, *body) : world::WeaponAmmoSeat{});
 			store_conn_weapon_inventory(*conn, inventory);
 			// The reload's entry stamp on the host's copy of the body
 			// [orig: WeaponSlot_ReloadAmmo @0x54173c]
