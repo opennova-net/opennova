@@ -29,9 +29,10 @@ describe('MachineCard', () => {
   });
 
   it('turns its last report red past 30 s, in words too', async () => {
-    const card = await mountCard(machine('3', { last_report_at: '2026-10-18T11:59:00Z' }));
+    // Seconds under a minute (formatAge), as the reports come every few.
+    const card = await mountCard(machine('3', { last_report_at: '2026-10-18T11:59:15Z' }));
     const report = card.get('.machine-report');
-    expect(report.text()).toBe('Last report 60 s ago: late');
+    expect(report.text()).toBe('Last report 45 s ago: late');
     expect(report.classes()).toContain('text-danger');
     expect(card.classes()).toContain('border-danger/40');
   });
