@@ -28,6 +28,7 @@
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
+#include "common/test_parts.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -213,8 +214,12 @@ int test_rename_in_native_texts() {
 
 // Every name the install's native texts write (each terrain, environment, particle file and the HUD
 // layout) found as its token: renamed alone in its file, the text reads it back as the new name and
-// nothing else changed.
-int test_retail() {
+// nothing else changed. Each rename parses its whole file again (3016 names over 126 files, 132 s in
+// one row), so the names are dealt round the kShares parts of the program by their place in the walk,
+// a big file's spread over them all: a run renames share `share` alone, over the whole install's walk.
+constexpr size_t kShares = 4;
+
+int test_retail(size_t share) {
 	const std::string install = retail::install();
 	if (install.empty()) {
 		retail::skip_leg("OPENNOVA_JO_DIR (the install's native texts renamed in)");
@@ -226,7 +231,7 @@ int test_retail() {
 	std::string why;
 	TEST_EXPECT(install_view.open(install_spec(install, project), why));
 	const opennova::Vfs &mount = install_view.vfs();
-	size_t files = 0, names = 0, found = 0;
+	size_t files = 0, names = 0, shared = 0, found = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;
 		const AssetKind kind = classify_asset(name, nullptr);
@@ -240,7 +245,8 @@ int test_retail() {
 		const std::string text(bytes.begin(), bytes.end());
 		for (const GraphEdge &edge : extracted.edges) {
 			if (!edge.rewritable) continue;
-			++names;
+			if (names++ % kShares != share) continue;
+			++shared;
 			std::string renamed = text;
 			std::vector<size_t> missed;
 			if (rewrite_native_text(name, kind, "jo", renamed, {{edge.record, edge.field, edge.value, "q" + edge.value}}, missed) == 1)
@@ -250,19 +256,24 @@ int test_retail() {
 				             edge.field.c_str(), edge.value.c_str());
 		}
 	}
-	std::printf("retail: %zu native texts, %zu of their %zu names found as one token\n", files, found, names);
-	TEST_EXPECT(files > 100 && names > 1000 && found == names);
+	std::printf("retail: %zu native texts, %zu names; share %zu of %zu: %zu of its %zu found as one token\n", files,
+	            names, share + 1, kShares, found, shared);
+	TEST_EXPECT(files > 100 && names > 1000 && shared > 0 && found == shared);
 	return 0;
 }
 
 } // namespace
 
+// The retail twin's parts (tests/common/test_parts.h): `main` the synthetic cases and the retail
+// leg's first share of the install's names, `share_2` to `_4` the others, side by side.
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	int failures = test_rewrite_text();
-	failures += test_native_text_place();
-	failures += test_rename_in_native_texts();
-	failures += test_retail();
+	const int failures = test_parts::run(
+	        argc, argv,
+	        {{"main", {test_rewrite_text, test_native_text_place, test_rename_in_native_texts, [] { return test_retail(0); }}},
+	         {"share_2", {[] { return test_retail(1); }}, true},
+	         {"share_3", {[] { return test_retail(2); }}, true},
+	         {"share_4", {[] { return test_retail(3); }}, true}});
 	if (failures == 0) std::printf("editor_native_rename: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
