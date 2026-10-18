@@ -97,7 +97,7 @@ int run(const program::Boot &boot) {
 
 	// The boot's database work on a lease of its own, returned before the
 	// listener starts (its start leases on this thread).
-	const HostedSetup hosting = hosted_setup(config);
+	const HostedPolicy hosting = hosted_policy(config);
 	config.hosted_provider = hosting.provider;
 	std::optional<BillingStack> billing_stack;
 	try {

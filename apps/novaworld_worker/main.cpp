@@ -37,21 +37,24 @@ namespace {
 using namespace opennova;
 using namespace opennova::novaworld_server;
 
-// The machine driver over a hosting setup that is on. Its members go in
-// reverse: the driver first, then its runner, then the scratch directory.
+// The machine driver over a driver setup (parts.h driver_setup). Its members
+// go in reverse: the driver first, then its runner, then the scratch
+// directory.
 struct MachineDriverStack {
 	ScratchDir scratch; // the ec2 driver's
 	std::unique_ptr<proc::CommandRunner> runner;
 	std::unique_ptr<hosted::MachineDriver> driver;
 };
 
-// The driver `setup` names: the ec2 driver over its own scratch directory and
-// AWS CLI runner, or the docker driver over the Docker Engine API (the local
-// stack's); no driver, with `error`, when its scratch directory cannot be made.
-MachineDriverStack make_machine_driver(const HostedSetup &setup, std::string &error) {
+// The driver `provider` names over `setup`: the ec2 driver over its own
+// scratch directory and AWS CLI runner, or the docker driver over the Docker
+// Engine API (the local stack's); no driver, with `error`, when its scratch
+// directory cannot be made.
+MachineDriverStack make_machine_driver(
+		const std::string &provider, const DriverSetup &setup, std::string &error) {
 	MachineDriverStack stack;
-	if (setup.provider == "ec2") {
-		hosted::Ec2MachineConfig ec2 = setup.fleet.ec2;
+	if (provider == "ec2") {
+		hosted::Ec2MachineConfig ec2 = setup.driver.ec2;
 		stack.scratch = ScratchDir::make("opennova-hosted-", error);
 		if (stack.scratch.empty()) {
 			error = "the ec2 driver's scratch directory: " + error;
@@ -63,7 +66,7 @@ MachineDriverStack make_machine_driver(const HostedSetup &setup, std::string &er
 		stack.driver = std::make_unique<hosted::Ec2MachineDriver>(std::move(ec2), *stack.runner);
 		return stack;
 	}
-	stack.driver = std::make_unique<hosted::DockerMachineDriver>(setup.fleet.docker);
+	stack.driver = std::make_unique<hosted::DockerMachineDriver>(setup.driver.docker);
 	return stack;
 }
 
@@ -87,11 +90,17 @@ int run(const program::Boot &boot) {
 		return 1;
 	}
 	MailStack mail = make_mail(config);
-	const HostedSetup hosting = hosted_setup(config);
+	const HostedPolicy hosting = hosted_policy(config);
+	// With hosting on, the driver that launches its machines: its settings
+	// incomplete is this boot's FATAL, never hosting off here while web and the
+	// fleet, which read the policy alone, take starts.
 	MachineDriverStack machines;
 	if (hosting.on) {
+		DriverSetup driver;
 		std::string error;
-		machines = make_machine_driver(hosting, error);
+		if (!driver_setup(hosting, driver, error))
+			return program::fatal("the machine driver: " + error);
+		machines = make_machine_driver(hosting.provider, driver, error);
 		if (!machines.driver)
 			return program::fatal("the machine driver: " + error);
 	}

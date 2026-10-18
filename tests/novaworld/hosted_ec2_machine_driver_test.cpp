@@ -1295,7 +1295,8 @@ hosted::EnvLookup env_of(const std::map<std::string, std::string> &vars) {
 }
 
 int test_fleet_config() {
-	// The defaults: a loopback internal listener admitting loopback, the brief's knobs.
+	// The defaults: a loopback internal listener admitting loopback, the brief's knobs;
+	// the drivers' with no URL unless set (each driver's check asks for one).
 	{
 		hosted::FleetConfig c;
 		std::vector<std::string> errors;
@@ -1306,40 +1307,38 @@ int test_fleet_config() {
 		TEST_EXPECT(c.placement.shared_slots == 12 && c.placement.max_shared == 2 &&
 				c.placement.max_own == 2);
 		TEST_EXPECT(c.idle_minutes == 30 && c.slot_memory_mb == 512 && c.slot_cpus == 1.0);
-		TEST_EXPECT(
-				c.slot_pids == 128 && c.machine_script_path == "/app/hosted/machine_user_data.sh");
-		// No URL unless set: each driver's check asks for one.
-		TEST_EXPECT(c.internal_url.empty() && c.ec2.service_url.empty() &&
-				c.docker.service_url.empty() && c.docker.engine_url.empty());
-		TEST_EXPECT(c.ec2.admin_address == "127.0.0.1");
+		TEST_EXPECT(c.slot_pids == 128 && c.serve_image.empty());
+		hosted::DriverConfig d;
+		TEST_EXPECT(hosted::parse_driver_config(env_of({}), c, d, errors) && errors.empty());
+		TEST_EXPECT(d.machine_script_path == "/app/hosted/machine_user_data.sh");
+		TEST_EXPECT(d.internal_url.empty() && d.ec2.service_url.empty() &&
+				d.docker.service_url.empty() && d.docker.engine_url.empty());
+		TEST_EXPECT(d.ec2.admin_address == "127.0.0.1");
 	}
-	// A deployment's.
+	// A deployment's: every variable set, the policy reading its own and the drivers'
+	// theirs, never the other set's.
 	{
+		const auto env = env_of({ { "ONNET_INTERNAL_HTTP_BIND", "10.44.0.10:8070" },
+				{ "ONNET_INTERNAL_URL", kServiceUrl },
+				{ "ONNET_HOSTED_BOOTSTRAP_CIDRS", "10.44.0.0/16, 10.45.0.0/20" },
+				{ "ONNET_FLEET_SHARED_SLOTS", "16" }, { "ONNET_FLEET_MAX_SHARED", "3" },
+				{ "ONNET_FLEET_MAX_OWN", "0" }, { "ONNET_FLEET_IDLE_MINUTES", "45" },
+				{ "ONNET_FLEET_SLOT_MEMORY_MB", "768" }, { "ONNET_FLEET_SLOT_CPUS", "0.5" },
+				{ "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES",
+						"{\"own\": \" lt-0abcdef0123456789:3 \", \"shared\": \"" +
+								std::string(kShared) + "\"}" },
+				{ "ONNET_HOSTED_EC2_REGION", kRegion }, { "ONNET_HOSTED_EC2_LOG_GROUP", kLogGroup },
+				{ "ONNET_HOSTED_EC2_SUBNETS", std::string(" ") + kSubnet + " , " + kSubnetB + "," },
+				{ "ONNET_HOSTED_DEPLOYMENT", kDeployment }, { "ONNET_HOSTED_SERVE_IMAGE", kImage },
+				{ "ONNET_HOSTED_HOSTD_IMAGE", kHostdImage },
+				{ "ONNET_HOSTED_AWS_CLI", "/opt/aws/bin/aws" },
+				{ "ONNET_HOSTED_MACHINE_SCRIPT", "/srv/machine.sh" },
+				{ "ONNET_HOSTED_DOCKER_URL", " http://docker-api:2375 " },
+				{ "ONNET_HOSTED_DOCKER_NETWORK", "opennova-dev" },
+				{ "ONNET_HOSTED_DOCKER_DATA_FROM", "opennova-dev-machine-data-1" } });
 		hosted::FleetConfig c;
 		std::vector<std::string> errors;
-		const bool ok = hosted::parse_fleet_config(
-				env_of({ { "ONNET_INTERNAL_HTTP_BIND", "10.44.0.10:8070" },
-						{ "ONNET_INTERNAL_URL", kServiceUrl },
-						{ "ONNET_HOSTED_BOOTSTRAP_CIDRS", "10.44.0.0/16, 10.45.0.0/20" },
-						{ "ONNET_FLEET_SHARED_SLOTS", "16" }, { "ONNET_FLEET_MAX_SHARED", "3" },
-						{ "ONNET_FLEET_MAX_OWN", "0" }, { "ONNET_FLEET_IDLE_MINUTES", "45" },
-						{ "ONNET_FLEET_SLOT_MEMORY_MB", "768" }, { "ONNET_FLEET_SLOT_CPUS", "0.5" },
-						{ "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES",
-								"{\"own\": \" lt-0abcdef0123456789:3 \", \"shared\": \"" +
-										std::string(kShared) + "\"}" },
-						{ "ONNET_HOSTED_EC2_REGION", kRegion },
-						{ "ONNET_HOSTED_EC2_LOG_GROUP", kLogGroup },
-						{ "ONNET_HOSTED_EC2_SUBNETS",
-								std::string(" ") + kSubnet + " , " + kSubnetB + "," },
-						{ "ONNET_HOSTED_DEPLOYMENT", kDeployment },
-						{ "ONNET_HOSTED_SERVE_IMAGE", kImage },
-						{ "ONNET_HOSTED_HOSTD_IMAGE", kHostdImage },
-						{ "ONNET_HOSTED_AWS_CLI", "/opt/aws/bin/aws" },
-						{ "ONNET_HOSTED_MACHINE_SCRIPT", "/srv/machine.sh" },
-						{ "ONNET_HOSTED_DOCKER_URL", " http://docker-api:2375 " },
-						{ "ONNET_HOSTED_DOCKER_NETWORK", "opennova-dev" },
-						{ "ONNET_HOSTED_DOCKER_DATA_FROM", "opennova-dev-machine-data-1" } }),
-				c, errors);
+		const bool ok = hosted::parse_fleet_config(env, c, errors);
 		for (const std::string &e : errors)
 			std::fprintf(stderr, "  %s\n", e.c_str());
 		TEST_EXPECT(ok && errors.empty());
@@ -1350,33 +1349,39 @@ int test_fleet_config() {
 		TEST_EXPECT(c.placement.shared_slots == 16 && c.placement.max_shared == 3 &&
 				c.placement.max_own == 0);
 		TEST_EXPECT(c.idle_minutes == 45 && c.slot_memory_mb == 768 && c.slot_cpus == 0.5);
-		TEST_EXPECT(
-				c.ec2.shared_template == kShared && c.ec2.own_template == "lt-0abcdef0123456789:3");
-		TEST_EXPECT(c.ec2.region == kRegion &&
-				c.ec2.subnets == std::vector<std::string>({ kSubnet, kSubnetB }) &&
-				c.ec2.deployment == kDeployment);
-		TEST_EXPECT(c.ec2.serve_image == kImage && c.ec2.aws_cli == "/opt/aws/bin/aws");
-		TEST_EXPECT(c.ec2.hostd_image == kHostdImage && c.ec2.log_group == kLogGroup);
-		// The machines reach the fleet by its URL; its admin links come from its bind.
-		TEST_EXPECT(c.internal_url == kServiceUrl && c.ec2.service_url == kServiceUrl);
-		TEST_EXPECT(c.ec2.admin_address == "10.44.0.10");
-		TEST_EXPECT(c.machine_script_path == "/srv/machine.sh");
-		// The docker driver's: its own three, the deployment, image, URL and bind as ec2's.
-		TEST_EXPECT(c.docker.engine_url == "http://docker-api:2375" &&
-				c.docker.network == "opennova-dev" &&
-				c.docker.data_from == "opennova-dev-machine-data-1");
-		TEST_EXPECT(c.docker.deployment == kDeployment && c.docker.image == kImage &&
-				c.docker.service_url == kServiceUrl && c.docker.admin_address == "10.44.0.10");
+		TEST_EXPECT(c.serve_image == kImage);
 		// What the agent routes take from it: its networks.
 		const hosted::AgentRouteConfig routes = hosted::agent_route_config(c);
 		TEST_EXPECT(routes.admitted.size() == 2);
+		hosted::DriverConfig d;
+		TEST_EXPECT(hosted::parse_driver_config(env, c, d, errors) && errors.empty());
+		TEST_EXPECT(
+				d.ec2.shared_template == kShared && d.ec2.own_template == "lt-0abcdef0123456789:3");
+		TEST_EXPECT(d.ec2.region == kRegion &&
+				d.ec2.subnets == std::vector<std::string>({ kSubnet, kSubnetB }) &&
+				d.ec2.deployment == kDeployment);
+		TEST_EXPECT(d.ec2.serve_image == kImage && d.ec2.aws_cli == "/opt/aws/bin/aws");
+		TEST_EXPECT(d.ec2.hostd_image == kHostdImage && d.ec2.log_group == kLogGroup);
+		// The machines reach the fleet by its URL; its admin links come from its bind.
+		TEST_EXPECT(d.internal_url == kServiceUrl && d.ec2.service_url == kServiceUrl);
+		TEST_EXPECT(d.ec2.admin_address == "10.44.0.10");
+		TEST_EXPECT(d.machine_script_path == "/srv/machine.sh");
+		// The docker driver's: its own three, the deployment, image, URL and bind as ec2's.
+		TEST_EXPECT(d.docker.engine_url == "http://docker-api:2375" &&
+				d.docker.network == "opennova-dev" &&
+				d.docker.data_from == "opennova-dev-machine-data-1");
+		TEST_EXPECT(d.docker.deployment == kDeployment && d.docker.image == kImage &&
+				d.docker.service_url == kServiceUrl && d.docker.admin_address == "10.44.0.10");
 	}
-	// Every refusal names its variable and keeps the default.
+	// Every refusal names its variable and keeps the default, the policy's and the
+	// drivers' alike.
 	const auto refused = [](const char *name, const char *value) {
 		hosted::FleetConfig c;
 		const hosted::FleetConfig defaults;
+		hosted::DriverConfig d;
 		std::vector<std::string> errors;
-		const bool ok = hosted::parse_fleet_config(env_of({ { name, value } }), c, errors);
+		const bool ok = hosted::parse_fleet_config(env_of({ { name, value } }), c, errors) &&
+				hosted::parse_driver_config(env_of({ { name, value } }), c, d, errors);
 		const bool named = errors.size() == 1 && errors[0].find(name) != std::string::npos;
 		if (ok || !named)
 			std::fprintf(stderr, "  %s=%s was not refused by name\n", name, value);

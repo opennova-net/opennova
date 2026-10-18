@@ -58,7 +58,7 @@ std::string configure(ServerConfig &config) {
 int run(const program::Boot &boot) {
 	const ServerConfig &config = boot.config;
 
-	const HostedSetup hosting = hosted_setup(config);
+	const HostedPolicy hosting = hosted_policy(config);
 	const hosted::FleetConfig &fleet = hosting.fleet;
 	// The machines' admin.cfg admits the address the fleet's admin links
 	// connect from, its internal listener's bind: on a cloud machine's
@@ -74,7 +74,7 @@ int run(const program::Boot &boot) {
 	// The admin links to the running hosted servers (hosted/admin_link.h): the
 	// supervisor keeps them in step with its rows and publishes their states
 	// (the routes read those rows), and the console drain runs the routes'
-	// commands on them (hosted/console_queue.h). The supervisor, then the
+	// commands on them (hosted/console_drain.h). The supervisor, then the
 	// internal listener whose agent routes ask it what each machine runs
 	// (declared after it, so destroyed first).
 	std::unique_ptr<hosted::AdminLinks> admin_links;
@@ -102,7 +102,7 @@ int run(const program::Boot &boot) {
 		hosted_config.slot_cpus = fleet.slot_cpus;
 		hosted_config.slot_memory_mb = fleet.slot_memory_mb;
 		hosted_config.slot_pids = fleet.slot_pids;
-		hosted_config.serve_image = fleet.ec2.serve_image;
+		hosted_config.serve_image = fleet.serve_image;
 		// A cloud container lists over the internet: a longer listing clock than
 		// a local stack's machine's (its boot clock, 15 min, covers a fresh
 		// machine's tree fetch and image pull on either driver).

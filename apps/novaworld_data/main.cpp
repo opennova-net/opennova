@@ -29,7 +29,7 @@ using namespace opennova::novaworld_server;
 int run(const program::Boot &boot) {
 	const ServerConfig &config = boot.config;
 
-	const HostedSetup hosting = hosted_setup(config);
+	const HostedPolicy hosting = hosted_policy(config);
 	// The object store the data sets' jobs run over, whether or not hosting is
 	// on (web's data set routes upload into it either way). Outlives the pool.
 	ObjectStoreStack store;

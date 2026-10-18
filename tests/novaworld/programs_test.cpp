@@ -34,7 +34,11 @@
 //   - worker: its job pool over its own kinds (no data set's), its health
 //     listener;
 //   - data: its job pool over the data sets' kinds alone (a store given), its
-//     health listener.
+//     health listener;
+//   - the hosting settings split: with the ec2 policy complete and the driver's
+//     own settings missing, web boots with hosting on (the policy is all it
+//     reads) and the worker, which alone launches the machines, does not
+//     (exit 1, its FATAL naming the driver).
 //
 // Every program then stops on SIGTERM with exit 0 and every database
 // connection closed. POSIX only.
@@ -565,6 +569,52 @@ int exercise_data(const Binaries &bin, const test_temp::TempDir &temp,
 	return 0;
 }
 
+// The fleet's policy for ec2 hosting with none of the driver's own settings:
+// the servers' public address, the store, the serve image.
+std::vector<std::string> ec2_policy_env(
+		const test_temp::TempDir &temp, const std::string &db_url, std::vector<std::string> more) {
+	std::vector<std::string> env;
+	for (const std::string &e : env_of(temp, db_url, std::move(more)))
+		if (e.rfind("ONNET_PUBLIC_HOST=", 0) != 0)
+			env.push_back(e);
+	env.push_back("ONNET_PUBLIC_HOST=203.0.113.7");
+	env.push_back("ONNET_HOSTED_PROVIDER=ec2");
+	env.push_back("ONNET_OBJECT_STORE_URL=file://" + temp.file("store"));
+	env.push_back("ONNET_HOSTED_SERVE_IMAGE=ghcr.io/opennova-net/opennova-serve:test");
+	return env;
+}
+
+int exercise_hosting_split(const Binaries &bin, const test_temp::TempDir &temp,
+		const test_db::TestDatabase &database, const std::string &log_path) {
+	const uint16_t http_port = free_tcp_port();
+	{
+		ProgramProcess process;
+		if (!boot(process, bin.web,
+					ec2_policy_env(temp, database.conninfo(),
+							{ "ONNET_HTTP_PORT=" + std::to_string(http_port),
+									std::string("ONNET_WEB_HOST=") + kWebHost }),
+					temp.root(), log_path))
+			return 1;
+		const std::string log = read_text(log_path);
+		TEST_EXPECT(has(log, "[boot] hosted servers: ec2, serve image ghcr.io/opennova-net/"));
+		TEST_EXPECT(!has(log, "hosting off") && !has(log, "the ec2 driver"));
+		if (stop_cleanly(process, "web", database, log_path) != 0)
+			return 1;
+	}
+	ProgramProcess process;
+	TEST_EXPECT(process.spawn(bin.worker, ec2_policy_env(temp, database.conninfo(), {}),
+			temp.root(), log_path));
+	TEST_EXPECT(process.wait_exit(kBootDeadline));
+	TEST_EXPECT(process.exit_code() == 1);
+	const std::string log = read_text(log_path);
+	TEST_EXPECT(has(log, "[boot] hosted servers: ec2, serve image"));
+	TEST_EXPECT(has(log, "[boot] FATAL: the machine driver: the ec2 driver"));
+	TEST_EXPECT(!has(log, "[boot] ready."));
+	std::printf("  the hosting split: web on the ec2 policy alone; the worker, short of its "
+				"driver, refused\n");
+	return 0;
+}
+
 using Exercise = int (*)(const Binaries &, const test_temp::TempDir &,
 		const test_db::TestDatabase &, const std::string &);
 
@@ -604,6 +654,8 @@ int main(int argc, char **argv) {
 		rc = run_case(bin, exercise_worker, "worker");
 	if (rc == 0)
 		rc = run_case(bin, exercise_data, "data");
+	if (rc == 0)
+		rc = run_case(bin, exercise_hosting_split, "hosting_split");
 	net::shutdown();
 	if (rc == 0)
 		std::printf("OK: each program boots with its own parts alone\n");
