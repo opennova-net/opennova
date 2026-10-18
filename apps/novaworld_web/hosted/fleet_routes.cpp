@@ -156,7 +156,8 @@ void FleetRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/hosted/<uint>")
 			.methods("GET"_method)([this](const crow::request &req, uint64_t id) { return server(req, id); });
 	CROW_ROUTE(app, "/api/admin/fleet/machines/<uint>")
-			.methods("GET"_method)([this](const crow::request &req, uint64_t id) { return machine(req, id); });
+			.methods("GET"_method)(
+					[this](const crow::request &req, uint64_t id) { return machine(req, id); });
 	CROW_ROUTE(app, "/api/admin/fleet/machines/<uint>/drain")
 			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return drain(req, id); });
 	CROW_ROUTE(app, "/api/admin/fleet/machines/<uint>/end")
@@ -302,7 +303,8 @@ crow::response FleetRoutes::machine(const crow::request &req, uint64_t id) {
 		if (!m) return json_error(404, "not_found", "no fleet machine has this id");
 		out["machine"] = machine_json(*db_conn, *m, release_);
 		std::vector<crow::json::wvalue> events;
-		for (const FleetMachineEvent &ev : list_machine_events(*db_conn, m->id, kMachineEventsShown)) {
+		for (const FleetMachineEvent &ev :
+				list_machine_events(*db_conn, m->id, kMachineEventsShown)) {
 			crow::json::wvalue j;
 			text_or_null(j, "from", ev.from_state);
 			j["to"] = ev.to_state;
