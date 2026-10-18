@@ -38,6 +38,8 @@ import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
 import JobsSection from '../pages/admin/JobsSection.vue';
 import JobDetailSection from '../pages/admin/JobDetailSection.vue';
 import InfraSection from '../pages/admin/InfraSection.vue';
+import ProgramDetailSection from '../pages/admin/ProgramDetailSection.vue';
+import InfraResourceSection from '../pages/admin/InfraResourceSection.vue';
 import CdKeysSection from '../pages/admin/CdKeysSection.vue';
 import DataSetsSection from '../pages/admin/DataSetsSection.vue';
 import AddressesSection from '../pages/admin/AddressesSection.vue';
@@ -127,6 +129,12 @@ const router = createRouter({
         { path: 'jobs', component: JobsSection, meta: { title: 'Admin: Background jobs' } },
         { path: 'jobs/:id(\\d+)', component: JobDetailSection, meta: { title: 'Admin: Job' } },
         { path: 'infrastructure', component: InfraSection, meta: { title: 'Admin: Infrastructure' } },
+        { path: 'infrastructure/programs/:name', component: ProgramDetailSection, meta: { title: 'Admin: Program' } },
+        {
+          path: 'infrastructure/resources/:id(rds|cache|nlb)',
+          component: InfraResourceSection,
+          meta: { title: 'Admin: AWS resource' },
+        },
         { path: 'cd-keys', component: CdKeysSection, meta: { title: 'Admin: CD keys' } },
         { path: 'data-sets', component: DataSetsSection, meta: { title: 'Admin: Game data' } },
         // The sections' names before the admin pages were rebuilt: old links

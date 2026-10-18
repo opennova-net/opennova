@@ -2,12 +2,16 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import InfraSection from './InfraSection.vue';
 import { fetchInfrastructure } from '../../api/infra';
+import { fetchPrograms } from '../../api/usage';
 import { NOW, ago, cloud, localOverview, overview, service } from '../../test/infraFixtures';
+import { programsResponse } from '../../test/usageFixtures';
 import { testRouter } from '../../test/router';
 
 vi.mock('../../api/infra', () => ({ fetchInfrastructure: vi.fn() }));
+vi.mock('../../api/usage', () => ({ fetchPrograms: vi.fn() }));
 
 const read = vi.mocked(fetchInfrastructure);
+const programs = vi.mocked(fetchPrograms);
 
 describe('InfraSection', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
@@ -34,6 +38,7 @@ describe('InfraSection', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
     read.mockResolvedValue({ ok: true, value: overview() });
+    programs.mockResolvedValue({ ok: true, value: programsResponse() });
   });
 
   afterEach(() => {
@@ -68,7 +73,7 @@ describe('InfraSection', () => {
   it('shows each program with its rollout, its revision against the release, its tasks and events', async () => {
     const page = await mountSection();
     const names = page.findAll('article.infra-service h3').map((h) => h.text());
-    expect(names).toEqual(['gate', 'lobby', 'web', 'fleet', 'worker', 'data']);
+    expect(names).toEqual(['gate', 'lobby', 'web', 'fleet', 'worker', 'data', 'hostd']);
 
     const gate = card(page, 'gate');
     expect(gate.text()).toContain('Steady');
@@ -114,6 +119,45 @@ describe('InfraSection', () => {
     expect(oneOff.text()).toContain('started 10 min ago');
   });
 
+  it('says what each program uses now and its tasks gone, each card opening its own page', async () => {
+    const page = await mountSection();
+    expect(programs).toHaveBeenCalledTimes(1);
+    const web = card(page, 'web');
+    expect(web.get('h3 a').attributes('href')).toBe('/admin/infrastructure/programs/web');
+    expect(web.get('.infra-program-usage').text()).toBe('web: 41 % CPU of 0.5 vCPU, 612 MiB of 1 GiB, 300 kB/s in, 1.2 MB/s out.');
+    expect(web.get('.infra-program-restarts').text()).toBe('No task gone in the last 24 hours.');
+    const worker = card(page, 'worker');
+    expect(worker.get('.infra-program-restarts').text()).toBe('1 task gone in the last 24 hours (a crash, a deploy or a scale-in).');
+    expect(worker.get('.infra-program-restarts').classes()).toContain('text-warn');
+    // A program none of whose tasks reports, in words and colour.
+    const data = card(page, 'data');
+    expect(data.get('.infra-program-usage').text()).toBe('data: no report in the last 3 minutes.');
+    expect(data.get('.infra-program-usage').classes()).toContain('text-warn');
+  });
+
+  it("shows hostd's daemon with the fleet cluster's machines, opening the Fleet page", async () => {
+    const page = await mountSection();
+    const hostd = card(page, 'hostd');
+    expect(hostd.text()).toContain('opennova-prod-hostd:5');
+    expect(hostd.text()).toContain('1 of 1 running');
+    expect(hostd.get('h3 a').attributes('href')).toBe('/admin/fleet');
+    expect(hostd.find('.infra-program-usage').exists()).toBe(false);
+    const instance = hostd.get('li.infra-instance');
+    expect(instance.text()).toContain('Machine 1 (shared)');
+    expect(instance.text()).toContain('its ECS agent connected');
+    expect(instance.text()).toContain('1 task running');
+    expect(instance.text()).toContain('ami-0aaa');
+    expect(instance.get('a').attributes('href')).toBe('/admin/fleet/machines/1');
+  });
+
+  it("says when what the programs use could not be read, the rest standing", async () => {
+    programs.mockResolvedValue({ ok: false, error: { code: 'db_error', status: 500, message: 'The server hit a database error. Try again shortly.' } });
+    const page = await mountSection();
+    expect(page.get('.infra-programs-error').text()).toContain('The server hit a database error.');
+    expect(card(page, 'gate').text()).toContain('Steady');
+    expect(card(page, 'gate').find('.infra-program-usage').exists()).toBe(false);
+  });
+
   it('lists the target groups, the database and the cache, the lobbies, the fleet leader and the machines', async () => {
     const page = await mountSection();
     const targets = page.findAll('tr.infra-target-row');
@@ -156,26 +200,29 @@ describe('InfraSection', () => {
     expect(fleet.text()).toContain('1 hour ago');
     expect(fleet.text()).toContain('The 3rd');
 
-    const machines = page.findAll('tr.infra-machine-row');
-    expect(machines).toHaveLength(2);
-    expect(machines[0].text()).toContain('Shared machine');
-    expect(machines[0].text()).toContain('Ready');
-    expect(machines[0].text()).toContain('4 of 12');
-    expect(machines[0].text()).toContain('i-0aaaaaaaaaaaaaaa1');
-    expect(machines[0].text()).toContain('EC2: running');
-    expect(machines[0].text()).toContain('us-east-1b');
-    expect(machines[0].get('a').attributes('href')).toBe('/admin/fleet');
-    expect(machines[1].text()).toContain('Ended');
-    expect(machines[1].text()).toContain('drained');
-    expect(page.findAll('a').some((a) => a.attributes('href') === '/admin/fleet' && a.text().startsWith('The fleet'))).toBe(true);
+    // The machines in one line, their page the Fleet's.
+    const machines = page.get('.infra-machines-summary');
+    expect(machines.text()).toContain('1 machine live (1 shared, 0 own), 4 of 12 slots in use.');
+    expect(machines.get('a').attributes('href')).toBe('/admin/fleet');
+
+    // Each AWS resource opens its charts.
+    expect(page.findAll('a.infra-resource-link').map((a) => a.attributes('href'))).toEqual([
+      '/admin/infrastructure/resources/nlb',
+      '/admin/infrastructure/resources/rds',
+      '/admin/infrastructure/resources/cache',
+    ]);
   });
 
   it('on the local stack says AWS is not read and shows the database sections alone', async () => {
     read.mockResolvedValue({ ok: true, value: localOverview() });
     const page = await mountSection();
     expect(page.get('.infra-unavailable').text()).toContain('ONNET_INFRA_CLUSTER is unset');
-    expect(page.findAll('article.infra-service')).toHaveLength(0);
-    expect(page.find('#infra-programs').exists()).toBe(false);
+    // The programs' own samples still show, without ECS's view or hostd's.
+    const cards = page.findAll('article.infra-service');
+    expect(cards.map((c) => c.get('h3').text())).toEqual(['gate', 'lobby', 'web', 'fleet', 'worker', 'data']);
+    expect(cards[0].text()).toContain('1 task reporting');
+    expect(cards[0].text()).not.toContain('ECS runs no service');
+    expect(cards[0].find('li.infra-task').exists()).toBe(false);
     expect(page.find('#infra-targets').exists()).toBe(false);
     expect(page.find('.infra-database').exists()).toBe(false);
     const t = tiles(page);
@@ -183,8 +230,8 @@ describe('InfraSection', () => {
     expect(t['Load balancer targets']).toEqual(['Unknown', 'Not read on this stack']);
     expect(t['Lobby instances']).toEqual(['1 live', '1 taking clients, 3 sessions']);
     expect(page.findAll('tr.infra-lobby-row')).toHaveLength(2);
-    expect(page.findAll('tr.infra-machine-row')[0].text()).toContain('dev-machine-1');
-    expect(page.findAll('tr.infra-machine-row')[0].text()).not.toContain('EC2');
+    expect(page.get('.infra-machines-summary').text()).toContain('1 machine live');
+    expect(page.text()).not.toContain('EC2 no longer runs');
   });
 
   it('says why AWS or one of its sections could not be read, the others standing', async () => {
@@ -196,7 +243,9 @@ describe('InfraSection', () => {
     expect(page.get('.infra-cloud-error').text()).toBe(
       "AWS could not be read: the ECS agent's credentials endpoint did not answer: curl exited with code 7",
     );
-    expect(page.find('#infra-programs').exists()).toBe(false);
+    // The programs' samples stand; ECS's view of them does not.
+    expect(page.findAll('article.infra-service')).toHaveLength(6);
+    expect(page.find('li.infra-task').exists()).toBe(false);
     expect(tiles(page)['Programs']).toEqual(['Unknown', 'AWS could not be read']);
     page.unmount();
 
@@ -256,6 +305,8 @@ describe('InfraSection', () => {
     expect(card(page, 'gate').text()).toContain('Rollout failed');
     expect(card(page, 'worker').text()).toContain('Short of tasks');
     expect(card(page, 'worker').text()).toContain('No task runs.');
+    // A program ECS runs no service of.
+    expect(card(page, 'lobby').text()).toContain('ECS runs no service of it.');
     expect(tiles(page)['Release'][1]).toBe('20261017T120000Z-abc1234. fleet runs another revision');
     expect(page.get('.infra-fleet').text()).toContain('None elected');
   });

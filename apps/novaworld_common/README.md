@@ -827,6 +827,20 @@ on, the fleet cluster: hostd's daemon service and each machine as its container 
 is connected, its tasks). A fleet roll's preview reads each machine's image from the same
 read (`GET /api/admin/fleet/roll`, `hosted/README.md`).
 
+The page is the service's hub. Each program has a card (its ECS service, and from
+`GET /api/admin/programs` what its tasks use now and its tasks gone in 24 hours) opening the
+program's page (`/admin/infrastructure/programs/<name>`: its tasks, the usage charts of all of
+them or of one, and its log); hostd's card holds the fleet cluster's machines; the database,
+the cache and the load balancer each open their CloudWatch charts
+(`/admin/infrastructure/resources/rds|cache|nlb`, which say they are not available on the
+local stack). The machines are one line here: their page is **Fleet** (`/admin/fleet`), with
+what needs an admin (`GET /api/admin/attention`, also counted on the admin menu), a card per
+machine opening its own page (`/admin/fleet/machines/<id>`: its facts against the release,
+slots, trees, timeline, usage and hostd's log) and the roll's preview (`?tab=roll`). A hosted
+server's admin page adds a Usage tab (its slot's CPU, memory, network and tick health) and a
+Logs tab (each start's output); its owner sees neither, only where its start stands and why
+its last run ended.
+
 The AWS calls are curl's, signed by curl itself (`--aws-sigv4`), run the way billing's
 Stripe calls are (`infra/aws_api.*`, XML replies read by `infra/aws_xml.*`), not the AWS
 CLI, whose Python start would cost about a second of web's half vCPU per call. The

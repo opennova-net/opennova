@@ -1635,7 +1635,11 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   against the release), its tasks (health, zone, address, image, the recently stopped ones'
   exit codes) and events, the load balancer's targets, the database's and the cache's status,
   the lobby instances, the fleet leader and the machines. Web reads AWS for it with its task
-  role (read-only, `infra/aws/programs.tf`), at most every 20 s.
+  role (read-only, `infra/aws/programs.tf`), at most every 20 s. Each program's card opens its
+  usage and its logs, and the database, the cache and the load balancer open their CloudWatch
+  charts. **Fleet** (`/admin/fleet`) starts with what needs you (the fleet's findings and the
+  firing alarms, counted in red on the admin menu), then a card per machine opening its page
+  (its facts against the release, trees, timeline, usage and hostd's log).
 - **Logs.** `./deploy/run.sh --deployment <deployment> app logs [PROGRAM|backup] [--follow] [--since 2h]` reads
   CloudWatch (`/opennova/<deployment>/service`, 30 days, a stream per container and task,
   `<program>/<container>/<task id>`: web's task writes `web/web/...` and
