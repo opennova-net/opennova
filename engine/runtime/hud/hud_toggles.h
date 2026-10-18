@@ -210,7 +210,7 @@ inline constexpr uint32_t kHelpToggled = 0x4000;
 inline constexpr uint32_t kMapLegendToggled = 0x8000;
 inline constexpr uint32_t kBriefingToggled = 0x10000;
 // An SP briefing open reset the briefing pages to the first
-// [orig: sub_5B9150(0) @0x49b645].
+// [orig: HUD_CycleBriefingPage(0) @0x49b645].
 inline constexpr uint32_t kBriefingPagesReset = 0x20000;
 // The verbose toggle flipped: post the toast verbose_toast_key names.
 inline constexpr uint32_t kVerboseToggled = 0x40000;
@@ -364,7 +364,7 @@ void hud_toggles_session_init(HudToggleState &state, bool in_session, bool mp_se
 //  Input_InitBindingSystem @0x49a58e..0x49a5a2 (the defaults into
 //  dword_B3B73C / 40 / 44), the first-character `movsx` @0x49a5d1;
 //  action 3 = catalog row 77 `exit`, case 3 @0x49af1f..0x49af42; the save
-//  loader sub_439680 @0x4396a0 refuses in a session; the caller
+//  loader Game_RequestLoadSaveFile @0x4396a0 refuses in a session; the caller
 //  Input_ProcessKeyboardEvents @0x49d2fb skips the binding scan on a take]
 struct HudQuitDialogKeyInput {
 	int vk = 0;

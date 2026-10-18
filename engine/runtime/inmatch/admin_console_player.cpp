@@ -356,7 +356,7 @@ void AdminConsole::handle_fun(const Args &args, std::vector<std::string> &replie
 		// +416, not its number) gets the other side's: a team-1 slot's side-A word (+442) the
 		// good one, any other's side-B word (+444) the evil one, then its entity's team byte
 		// cleared and Server_ChangeEntityTeam back to the slot's team, which re-stamps the
-		// NetId from those words. [orig: sub_57AEC0 @0x57AEC0, sub_57AE90 @0x57AE90 ->
+		// NetId from those words. [orig: CAvatarDefs_ListCombos @0x57AEC0, CAvatarDefs_GetComboSex @0x57AE90 ->
 		//  CAvatarDefs_FindComboByPackedId @0x57A270, CAvatarDefs_GetNationalityAlignment @0x579E70 (the
 		//  nationality's alignment)]
 		uint16_t evil_model = 0xFFFF;

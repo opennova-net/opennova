@@ -10,7 +10,7 @@ EntityHandle guided_heat_target(World &, const Entity &, const AiEntity &, const
 namespace {
 // The RAW Position copies: the Javelin launch seed, the owner's class
 // get-target callback and the flare decoy.
-// [orig: jvln launch @0x445E40..0x445E97; sub_4B0DD0 @0x4B0DF5..0x4B0E12;
+// [orig: jvln launch @0x445E40..0x445E97; PersonClass_GetTarget @0x4B0DF5..0x4B0E12;
 //  flare decoy @0x446232..0x44626B]
 void target_position(const Entity &target, int32_t out[3]) {
     out[0] = to_fixed(target.position.x);
@@ -124,7 +124,7 @@ void RoundSim::tick_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
     if (guided_inputs_provider) guided_inputs_provider(r, in);
     const auto events = GuidedFlight::motor(s, r.guided_family, parameters(ammo), in);
     // The Stinger's lock note, at the pose the motor read [orig:
-    // Entity_UpdateGuidedMissile_0 @0x4465db..0x446622 -> sub_59B200].
+    // Entity_UpdateGuidedMissile_0 @0x4465db..0x446622 -> Radar_TrackMissile].
     if (events.threat_note)
         radar_note_guided_missile(world, r, static_cast<uint32_t>(&r - rounds.data()));
     if (events.detonate) r.det_at_expiry = true;

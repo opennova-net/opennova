@@ -87,7 +87,7 @@ SpawnPointResult marker_pose(const World &world, const Entity &marker) {
 // (@0x50d421); the marker's parachute bit is copied (@0x50d424..0x50d42a);
 // and a team-2 marker arms the queued mount with that player+0x28 value into
 // +0x16C/+0x180 (@0x50d42e..0x50d45a) unless a saved-game load is pending
-// (dword_A892C8, set only outside a session by sub_439680 @0x4396be and
+// (dword_A892C8, set only outside a session by Game_RequestLoadSaveFile @0x4396be and
 // cleared by NapiNPClientMsg_0x05C @0x425207 — zero in every session, and
 // this runtime has no saved-game load, so the arm is unconditional here).
 // player+0x28 itself is cleared before Entity_BuildProximityList (@0x50d6c6),

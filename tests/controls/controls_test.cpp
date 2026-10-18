@@ -381,7 +381,7 @@ bool test_binding_set_assignment() {
   CHECK(set.control_text(fwd, Device::Mouse) == "Right", "mouse control text");
   set.clear(fwd, Device::Mouse);
   CHECK(set.record(fwd)->mouse_mask == 0, "mouse clear");
-  // CLEAR_KEY zeroes the modifier word with the binding [orig: sub_55BFD0
+  // CLEAR_KEY zeroes the modifier word with the binding [orig: Options_OnClearKeyButton
   // @0x55c046/@0x55c04d mouse, @0x55c030/@0x55c036 joystick]: a cleared
   // ScopeZeroDec mouse column no longer Ctrl-gates the next capture.
   const int dec = set.index_of_token("ScopeZeroDec");

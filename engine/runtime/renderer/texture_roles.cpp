@@ -58,9 +58,9 @@ constexpr TextureRole kRoles[] = {
 	Role(R::ModelNormalMap, L::Normal, kTextureMdt).size(S::AtMost, kNormalMapSideCap).row,
 	// [orig: Texture_LoadAsNormalMap @ 0x58C985..0x58CAED (the kernel), the swap @ 0x58C715..0x58C737]
 	Role(R::ModelHeightNormal, L::Normal, kTextureTga | kTextureDds).size(S::PowerOfTwo).row,
-	// [orig: sub_58A430 @ 0x58A430 from sub_58A580 @ 0x58A5DA]
+	// [orig: Texture_LoadTGAPreferDDS @ 0x58A430 from Texture_LoadHorizonMap @ 0x58A5DA]
 	Role(R::ModelHorizon, L::Producer, kTextureTga | kTextureDds).row,
-	// [orig: sub_58A430 @ 0x58A430 from sub_58CE10 @ 0x58CE6A]
+	// [orig: Texture_LoadTGAPreferDDS @ 0x58A430 from Texture_LoadOcclusionMap @ 0x58CE6A]
 	Role(R::ModelOcclusion, L::Producer, kTextureTga | kTextureDds).row,
 	// [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
 	// Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
@@ -91,7 +91,7 @@ constexpr TextureRole kRoles[] = {
 	Role(R::TerrainScorch, L::Stage, kStageFormats).no_alpha().row,
 	// [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0; Foliage_SampleFoliageMapFlat @ 0x6066D0]
 	Role(R::TerrainFoliageMap, L::Pcx8, kTexturePcx).size(S::SquarePowerOfTwoAtMost, 1024).no_alpha().row,
-	// [orig: sub_605A10 @ 0x605A31 (the 8-bit PCX reader), its side @ 0x605A82..0x605AA0;
+	// [orig: Terrain_LoadCharmapPCX @ 0x605A31 (the 8-bit PCX reader), its side @ 0x605A82..0x605AA0;
 	// Terrain_GetSurfaceTypeAtPosition @ 0x606519, @ 0x6065C6]
 	Role(R::TerrainCharMap, L::Pcx8, kTexturePcx).size(S::SquarePowerOfTwoAtMost, 1024).no_alpha().row,
 	// --- Environment --------------------------------------------------------------------------------
@@ -132,7 +132,7 @@ constexpr TextureRole kRoles[] = {
 	Role(R::HudFileArt, L::File, kTextureTga | kTexturePcx).row,
 	// g_HUDAhzBackTextureName, STAGE with flags 0x40001
 	Role(R::HudAttitude, L::Stage, kStageFormats).row,
-	// [orig: sub_59B120 @ 0x59B19F..0x59B1BD]
+	// [orig: HUD_LoadMfdTexture @ 0x59B19F..0x59B1BD]
 	Role(R::HudMfd, L::Pcx, kTexturePcx).size(S::PowerOfTwo).no_alpha().row,
 	// [orig: Minimap_InitOverviewTexture @ 0x573FA0]
 	Role(R::MapOverview, L::Pcx, kTexturePcx).no_alpha().row,

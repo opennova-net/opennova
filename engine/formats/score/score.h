@@ -11,7 +11,7 @@
 // from +4], and the file read over them when it is there, else the defaults written to it [orig: @
 // 0x52F50C..0x52F528, File_IsSingleFile then ScoreConfig_LoadFile @ 0x52D8A0 or ScoreConfig_SaveFile @
 // 0x52CDD0]. A row is its name (+4), its FIELD list (the count at +20, up to 34 pairs of an id and a byte at
-// +24 [orig: sub_52CD70 @ 0x52CD70]) and its 39 VAR words (+296), read as `row + 300 + 4 * entryIndex`
+// +24 [orig: ScoreConfig_AddRowField @ 0x52CD70]) and its 39 VAR words (+296), read as `row + 300 + 4 * entryIndex`
 // [orig: ScoreConfig_GetRowEntry (ex sub_52D430) @ 0x52D430] by the scoring dispatch [orig:
 // GameEvent_ProcessScoring @ 0x52F550] and the change-gated S2C 0x81 score mirror [orig:
 // Server_UpdateCaptureZoneProximity @ 0x5086A0]. A VAR's entryIndex is its id in the VAR name table
@@ -28,7 +28,7 @@
 // dropped); a line whose first or second character is '/' is read for nothing. The first pass takes
 // `VERSION n` (the last one), and a version other than 40 stops the read: the defaults are written over the
 // file instead. The second takes `GAMETYPE "name"` (the row of the name, the
-// first of the twelve; none for a name no row has [orig: sub_52D850 @ 0x52D850]), `FIELD "name" n` (the
+// first of the twelve; none for a name no row has [orig: ScoreConfig_FindGameTypeRow @ 0x52D850]), `FIELD "name" n` (the
 // first of a GAMETYPE's lines clears the row's list; a name the table has, its value a byte), `VAR "name" n`
 // (a name the table has, its value a word) and `EXP_FANFARE a b` (two bytes, kept when both are other than 0
 // and the second is the greater); FIELD, VAR and EXP_FANFARE take three tokens, GAMETYPE two; anything else
@@ -103,7 +103,7 @@ int row_for_game_type(uint32_t game_type);
 
 // The version the reader takes [orig: ScoreConfig_LoadFile @ 0x52DA8A, `version == 40`].
 inline constexpr int32_t kVersion = 40;
-// A row's FIELD list holds 34 [orig: sub_52CD70 @ 0x52CD70, `count >= 34` refuses].
+// A row's FIELD list holds 34 [orig: ScoreConfig_AddRowField @ 0x52CD70, `count >= 34` refuses].
 inline constexpr size_t kMaxFields = 34;
 
 // The FIELD and VAR name tables, each name with its id, in the tables' order [orig: the FIELD names @
@@ -122,7 +122,7 @@ const char *var_name(int32_t id);
 // The game types' rows' names, by row index [orig: GameType_CreateDefaultSettings @ 0x52DD00]: TDM 1, COOP
 // 2, ... DM 11; row 0 has none the writer puts down.
 const std::vector<std::string> &game_type_names();
-// The row a GAMETYPE line's name selects, the first of the name without case [orig: sub_52D850 @ 0x52D850];
+// The row a GAMETYPE line's name selects, the first of the name without case [orig: ScoreConfig_FindGameTypeRow @ 0x52D850];
 // -1 for a name no row has.
 int game_type_row(std::string_view name);
 // Whether the reader keeps the model's fanfare pair from a line: both bytes other than 0, the second the greater
@@ -131,7 +131,7 @@ bool exp_fanfare_kept(const File &file);
 
 // The file as ScoreConfig_LoadFile reads it (the lines and tokens above): VERSION the file's (0 for none); at
 // version 40 every GAMETYPE line of a row's name a block, its FIELD lines whose name the table has its entries
-// up to the row's 34 [orig: sub_52CD70 @ 0x52CD81, `count >= 34` refuses] and its VAR lines', the pair its
+// up to the row's 34 [orig: ScoreConfig_AddRowField @ 0x52CD81, `count >= 34` refuses] and its VAR lines', the pair its
 // EXP_FANFARE lines store; every other line read for nothing, and at any other version every line but VERSION
 // (no block, the defaults' fanfare: the game reads none of the file and writes its defaults over it). Never
 // fails on a text (the game reads any); false only for no data.
@@ -151,7 +151,7 @@ bool write(const File &file, std::vector<uint8_t> &out, std::string &error);
 // A row as the reader leaves it over the row's defaults [orig: ScoreConfig_LoadFile @ 0x52D8A0]: the VAR words of
 // every block of the row in the file's order, a later line of an id over an earlier one [orig: @ 0x52DC50]; the FIELD
 // list of the last block of the row holding a FIELD line the table has, each such block's first clearing the row's
-// list before it appends [orig: @ 0x52DBBE..0x52DBCD, then sub_52CD70 @ 0x52DBE4]. `found` where a block selects
+// list before it appends [orig: @ 0x52DBBE..0x52DBCD, then ScoreConfig_AddRowField @ 0x52DBE4]. `found` where a block selects
 // the row; `has_fields` where one of its blocks holds a FIELD (else the row's default list stands).
 struct Row {
 	bool found = false;

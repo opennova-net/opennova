@@ -36,7 +36,7 @@ using MaterialTextureFileTest = std::function<bool(const std::string &)>;
 std::string material_texture_query(std::string_view name);
 // The DDS sibling a loader probes: the name up to its last '.' plus ".dds".
 // [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B598; Texture_LoadAsNormalMap
-// @ 0x58C644; sub_58A430 @ 0x58A4B4]
+// @ 0x58C644; Texture_LoadTGAPreferDDS @ 0x58A4B4]
 std::string material_dds_sibling(std::string_view name);
 // The one file a material row of runtime `type` (material_texture_runtime_type)
 // loads and the reader that decodes it. The dispatcher picks the loader by the
@@ -60,9 +60,9 @@ std::string material_dds_sibling(std::string_view name);
 //   loose-first @ 0x58C684, the DDS probe @ 0x58C6CB, the PCX test @ 0x58C77D;
 //   the empty path @ 0x5B178A]
 // - 6 and 7, the horizon volume and the occlusion map: the normal maps' .TGA
-//   rule alone, no .MDT. [orig: sub_58A430 @ 0x58A430 (.TGA @ 0x58A496,
-//   loose-first @ 0x58A4F5, the DDS probe @ 0x58A53E), from sub_58A580 @ 0x58A5DA
-//   and sub_58CE10 @ 0x58CE6A]
+//   rule alone, no .MDT. [orig: Texture_LoadTGAPreferDDS @ 0x58A430 (.TGA @ 0x58A496,
+//   loose-first @ 0x58A4F5, the DDS probe @ 0x58A53E), from Texture_LoadHorizonMap @ 0x58A5DA
+//   and Texture_LoadOcclusionMap @ 0x58CE6A]
 // - 16 to 18: the name as written, read as a chunk container whatever it is
 //   called. [orig: dispatch @ 0x5B17D4, @ 0x5B17DD, @ 0x5B17E6;
 //   Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;

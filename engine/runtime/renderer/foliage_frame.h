@@ -292,7 +292,7 @@ struct FoliageDrawList {
 // Render_TerrainScene (the model scene counter) and its own scene core (its
 // own collector's anchors, BySide masks and detail passes)
 // [orig: Render_ProcessMainSceneFrame -> Render_WeaponInsetScene @ 0x5CA949;
-// Render_WeaponInsetScene: sub_60FF50 @ 0x5C9A2F, Render_TerrainScene
+// Render_WeaponInsetScene: Terrain_RenderFromCameraView @ 0x5C9A2F, Render_TerrainScene
 // @ 0x5C99B7, Terrain_RenderWorldScene @ 0x5C9DE9; the counters
 // Foliage_UpdateDetailCellSlots `add g_FoliageFarSlotFrameCounter, 1`
 // @ 0x601B36 and Render_TerrainScene -> Foliage_AdvanceModelSceneCounter

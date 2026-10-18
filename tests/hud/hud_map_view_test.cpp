@@ -416,7 +416,7 @@ void test_death_compile() {
     CHECK(has_label(out.zones, "0/0", 291.0f, 268.0f, 0xFF979FBFu));
 }
 
-// sub_597FD0's colour / cell pick, branch by branch.
+// Minimap_DrawEntityBlip's colour / cell pick, branch by branch.
 void test_zone_blip_pick() {
     DeathMapFacts facts;
     DeathMapZone z;

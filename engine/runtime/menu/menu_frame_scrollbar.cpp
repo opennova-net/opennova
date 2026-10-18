@@ -826,7 +826,7 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_popup_mouse(
 
 // [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — this[183] = row_text(list,
 // selected_row(list)); CStaticWnd_DrawLabel; restore.] The row shown is the list's selected one, else
-// its first [orig: UIList_GetSelectedRow @ 0x644590, the first row of style 3, else 0; sub_6447C0 @ 0x6447c0
+// its first [orig: UIList_GetSelectedRow @ 0x644590, the first row of style 3, else 0; CListWnd_GetRowText @ 0x6447c0
 // reads its text]; every row is text (a list's rows draw no image or colour, build_items).
 std::string MenuFrameCompiler::combo_face_text(const WidgetNode &node,
 		const MenuWidgetState *ws) const {
@@ -848,7 +848,7 @@ std::string MenuFrameCompiler::combo_face_text(const WidgetNode &node,
 
 // A list-like widget's row as it displays: the runtime rows when seeded, else
 // the authored row after the string-table lookup (a combo's LIST_BOX rows
-// when authored) — the text the list row carries [orig: sub_6447C0 @0x6447c0
+// when authored) — the text the list row carries [orig: CListWnd_GetRowText @0x6447c0
 // reads the row's text, resolved at the ITEM parse].
 std::string MenuFrameCompiler::item_display_text(int index, const MenuFrameState &state,
 		int row) const {

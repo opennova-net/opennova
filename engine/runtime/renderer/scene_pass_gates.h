@@ -18,11 +18,11 @@ struct ScenePassGates {
 	// near-foliage patch collection) and the sector pass, both skipped while
 	// the indoors letter is set [orig: Render_ProcessMainSceneFrame
 	// @ 0x5ca197..0x5ca19f -> the traversal skip @ 0x5CA645..0x5CA64E over
-	// sub_60FF50 @ 0x5CA654, the sector-pass skip @ 0x5ca84f over
+	// Terrain_RenderFromCameraView @ 0x5CA654, the sector-pass skip @ 0x5ca84f over
 	// Terrain_RenderMainSectorPass @ 0x5ca867]; the water mirror [orig:
 	// Render_MainScene @ 0x5c1353], the weapon Inset on the main frame's
 	// value [orig: Render_WeaponInsetScene @ 0x5C9A23..0x5C9A2B over
-	// sub_60FF50 @ 0x5C9A2F, @ 0x5C9D57..0x5C9D5F; the push @ 0x5CA948] and
+	// Terrain_RenderFromCameraView @ 0x5C9A2F, @ 0x5C9D57..0x5C9D5F; the push @ 0x5CA948] and
 	// the NVG scene [orig: NVG_RenderSceneToTarget @ 0x5D055C (the letter
 	// test), the skip @ 0x5d0570] skip their own PolyTrn pass on the same
 	// letter.

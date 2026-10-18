@@ -112,7 +112,7 @@ enum class TextureLoader : uint8_t {
 	// Texture_LoadAsNormalMap: a model row's normal map, an .MDT as it is, a .TGA (or its
 	// .dds) converted from its height.
 	Normal,
-	// sub_58A430: a .TGA (or its .dds) height made a horizon volume or an occlusion map.
+	// Texture_LoadTGAPreferDDS: a .TGA (or its .dds) height made a horizon volume or an occlusion map.
 	Producer,
 	// The NQ8B, HRZ8 and AOC8 chunk loaders (Texture_LoadNQ8BChunk @ 0x58F350,
 	// Texture_LoadHRZ8Chunk @ 0x58F470, Texture_LoadAOC8Chunk @ 0x58F590): a chunk

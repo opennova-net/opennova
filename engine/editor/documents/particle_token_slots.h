@@ -21,7 +21,7 @@ namespace opennova::editor {
 // with none loses its last byte, @ 0x53D8E9) and hands every line with a token not starting '/' to the section
 // callback. The parsers' next-token helper [orig: CParticleDefEntry_NextToken @ 0x5DFFB0] steps to the next slot with
 // no bound: it reads the slot (faulting on NULL, @ 0x5E0000), skips a lone ';' ',' or '=', strips those three from the
-// token in place (sub_5DFF00 @ 0x5DFF00; the set @ 0x5E897C) and, where it stripped a ';', ends the statement: the
+// token in place (CParticleDefEntry_StripSeparators @ 0x5DFF00; the set @ 0x5E897C) and, where it stripped a ';', ends the statement: the
 // helper answers NULL from then on. A list therefore stops at a ';' attached to its last token, and otherwise reads on
 // into the slots past the line:
 // - `flags` and `move` take tokens while each is a name of their table [orig: CParticleDef_ParseProperties @

@@ -529,7 +529,7 @@ int main() {
 
 	// D-NET-287: S2C 0x3E (empty, the host's join tail) clears every overlay
 	// slot and every linked row. [orig: NapiNPClientMsg_0x03E @0x4226D0 ->
-	// sub_5BE8D0 @0x5BE8D0 — memset of the 1160 slots and the 251 links, each
+	// MapOverlay_ResetAllSlots @0x5BE8D0 — memset of the 1160 slots and the 251 links, each
 	// slot's handle word -1]
 	{
 		auto reset_owner = std::make_unique<ns::ClientReplicaPipeline>();

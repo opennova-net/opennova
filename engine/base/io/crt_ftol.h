@@ -8,7 +8,7 @@
 // a parser compiles for itself (the items.def scale).
 //
 // _ftol2_sse branches on the CRT's SSE2 flag, which the startup initializer
-// sets from CPUID on every SSE2 processor [orig: sub_7887AF @0x7887B4 (the
+// sets from CPUID on every SSE2 processor [orig: CRT_sse2_available_init @0x7887B4 (the
 // `mov dword_334A444, eax` store)], so the shipped game always takes the
 // cvttsd2si leg: the x87 value is rounded to a double, then truncated toward
 // zero into 32 bits; a NaN, an infinity or a truncation outside the int32

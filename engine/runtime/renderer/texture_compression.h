@@ -23,9 +23,9 @@ namespace opennova::renderer {
 // VIDEODEFAULT preset) writes quality_levels[12] = 1 on a shader-model-2 card,
 // 0 on any other, then clamps it into 0..2; the preset offset is 0 for both.
 // [orig: Renderer_ComputeQualityLevels @ 0x586149..0x586156 (caps +0x20, the
-//  shader-model-2 mark from sub_587790 @ 0x58787A), @ 0x586333..0x586340 (the
+//  shader-model-2 mark from Renderer_ComputeHardwareQualityLevels @ 0x58787A), @ 0x586333..0x586340 (the
 //  clamp); Game_RunVideoTestDialog @ 0x53ED0D and the VIDEODEFAULT preset
-//  sub_55A430 @ 0x55A43A pass offset 0]
+//  Options_OnVideoDefault @ 0x55A43A pass offset 0]
 inline constexpr int kTexCompressionLevelFreshProfile = 1;
 
 // The Options row's rungs: 0..2, every one open, the device-maximum block's

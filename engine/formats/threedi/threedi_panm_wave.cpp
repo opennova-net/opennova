@@ -11,7 +11,7 @@ namespace opennova::threedi {
 // C++ initializer slot 0x7C0664]. Its noise band draws 256 calls from the
 // main thread's CRT rand, unseeded at static init (the default state 1 [orig:
 // _initptd @ 0x779069..0x77906C]), after the one draw an earlier initializer
-// takes: the NAPI cookie ring's [orig: sub_793B00 @ 0x793B00 in slot 0x7C0594
+// takes: the NAPI cookie ring's [orig: _dynamic_initializer_for__g_NapiCookieKeyTable__ @ 0x793B00 in slot 0x7C0594
 // -> CSessionIdRing_Init @ 0x4DBC20, rand @ 0x4DBC45]. The port draws from a
 // CRT recurrence of its own from that state, so the band is retail's while the
 // process-wide stream's later order stays D-3DI-2's.

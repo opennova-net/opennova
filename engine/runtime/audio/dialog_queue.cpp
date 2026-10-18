@@ -75,7 +75,7 @@ std::vector<DialogLineRef> dialog_line_refs(const dbf::Group &group, const lwf::
 	return out;
 }
 
-// [orig: Dialog_ExistsByIndex "dlg%.3d" @ 0x44e190; sub_44E220 @ 0x44e23f]
+// [orig: Dialog_ExistsByIndex "dlg%.3d" @ 0x44e190; Dialog_IsFinishedByIndex @ 0x44e23f]
 std::string trigger_dialog_name(int32_t dialog_index) {
 	char name[32];
 	std::snprintf(name, sizeof(name), "dlg%.3d", int(dialog_index));
@@ -212,7 +212,7 @@ void DialogQueue::tick(bool frame_rendered, const LoadLine &load, const VoicePla
 			// the first slot of its name, and the table closes up behind it, so
 			// this index is walked again [orig: @ 0x44e5c8..0x44e5ef ->
 			// Dialog_FreeByName @ 0x44db40, the slot clear @ 0x44dc07..0x44dc18
-			// -> sub_44DAF0 @ 0x44daf0].
+			// -> Dialog_CompactSlots @ 0x44daf0].
 			if ((slot.timer & kCount) == 0) {
 				const std::string dialog = slot.dialog;
 				for (size_t f = 0; f < slots_.size(); ++f) {
@@ -260,7 +260,7 @@ bool DialogQueue::active(int32_t dialog_index) const {
 }
 
 // The history scan first, a miss -> 0, then the slot scan, a hit -> 0, else 1
-// [orig: sub_44E220 @ 0x44e220: the history walk @ 0x44e253..0x44e28e, miss ->
+// [orig: Dialog_IsFinishedByIndex @ 0x44e220: the history walk @ 0x44e253..0x44e28e, miss ->
 // 0 @ 0x44e291; the slot walk @ 0x44e2b5..0x44e2f1, hit -> 0 @ 0x44e313;
 // 1 @ 0x44e2f5].
 bool DialogQueue::finished(int32_t dialog_index) const {

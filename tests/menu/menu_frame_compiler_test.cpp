@@ -2397,7 +2397,7 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
 // combo with no selected row shows its first row [orig: UIList_GetSelectedRow @ 0x644590]; a spin list's image
 // moves the widget rect by its texture's height on both axes and stretches into it, and its colour fills
 // the rect forced opaque [orig: CSpinListWnd_Render @ 0x64b3b6..0x64b509]; a RADIOEDIT draws as the
-// radio its element makes [orig: sub_65D210 @ 0x65d210].
+// radio its element makes [orig: CRadioEditWnd_CreateChildWindows @ 0x65d210].
 void test_items_as_the_game_draws_them(const fnt_font_t *font) {
 	const char *xml = R"(
 <SCREEN>

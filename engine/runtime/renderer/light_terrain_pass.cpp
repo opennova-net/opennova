@@ -114,7 +114,7 @@ uint32_t cube_normalize_texel_argb(int face, int col, int row, int size) {
 		static_cast<float>(c[1] + u[1] * rt + x[1] * ct),
 		static_cast<float>(c[2] + u[2] * rt + x[2] * ct),
 	};
-	// D3DXVec3Normalize [orig: sub_68B032 @0x685aaf]: a platform primitive,
+	// D3DXVec3Normalize [orig: D3DXVec3Normalize @0x685aaf]: a platform primitive,
 	// a standard normalize here.
 	const float length = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
 	uint32_t bytes[3] = {};

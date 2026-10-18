@@ -143,6 +143,6 @@ struct HudCombatState {
 };
 // Shared weapon/vehicle silhouette flash. The original keeps one stamp and
 // separate previous weapon/root identities. Zero elapsed is promoted to one.
-// [orig: sub_59A710 @0x59A74F..0x59A78F; HUD_DrawTargetEntityOverlay @0x59A5E2]
+// [orig: HUD_DrawWeaponSilhouette @0x59A74F..0x59A78F; HUD_DrawTargetEntityOverlay @0x59A5E2]
 int hud_silhouette_alpha(int elapsed, int ramp, int base, int maximum);
 } // namespace opennova::hud

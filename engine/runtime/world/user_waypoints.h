@@ -78,7 +78,7 @@ struct UserWaypointTable {
 	std::array<Entry, kCapacity> entries{};
 	int count = 0;
 
-	// The whole table and its count zeroed [orig: sub_54B280 @0x54b2f8 on the
+	// The whole table and its count zeroed [orig: CMap_InitScreenOnce @0x54b2f8 on the
 	// screen's first load; sub_5491b0 from the PreMenu state exit @0x5688b6].
 	void clear() {
 		entries = {};

@@ -456,7 +456,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 e->drop_motion = world::DropMotion::Ride;
             // The +0x160/+0x26C/+0x2B0/+0x2C8 init is the ai_function class
             // row's second slot, run through def+0x148 whatever the move
-            // function [orig: sub_448CE0 @0x448CE0, row @0x813120 +12;
+            // function [orig: Entity_InitSquibFromDef @0x448CE0, row @0x813120 +12;
             //  Entity_LookupRenderCallbacks stores it @0x407E36].
             if (strutil::iequals(def->ai_function, "squib")) {
                 e->equipped_adm_index = 0;

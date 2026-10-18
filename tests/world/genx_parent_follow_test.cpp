@@ -185,7 +185,7 @@ int main() {
     CHECK(!rider.ground_target.valid());
     CHECK(rider.veh.slide_z == -0x4000);
 
-    // The AINODEPATH command's two stores: nullsub_28, then the def's own.
+    // The AINODEPATH command's two stores: Entity_UpdateOrg0Movement, then the def's own.
     rider.group_id = 3;
     CHECK(w.commands.apply_group_ai_command(3, EntityCommands::kAiNodePath, 1, 0, 0) == 1);
     CHECK(rider.drop_motion == DropMotion::None && rider.motor_suspended);

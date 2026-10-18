@@ -201,7 +201,7 @@ inline constexpr int kSplashBlinkMaskMs = 0x200;
 // the game's code page: the design point through HUD_DrawTextAtVirtualPos's integer rounding, ((512 * W
 // + 512) / 1024, (730 * H + 384) / 768) [orig: HUD_DrawTextAtVirtualPos @ 0x5d3ec0], its mode 2 the
 // centred half-bright drawer, which halves the phase's colour, its alpha forced opaque, and lays the run
-// out centred at the large slot's scale, W / 800 [orig: sub_5D2EA0 @ 0x5d2ece ->
+// out centred at the large slot's scale, W / 800 [orig: HUD_DrawTextAligned_HalfBrightNoFlags @ 0x5d2ece ->
 // HUD_DrawTextCentered_HalfBright @ 0x580680 -> CGameFont_DrawText @ 0x6752c0, flags 1 @ 0x58069d;
 // the slot @ HUD_InitAllFonts 0x51ef62 (hud_label_font_choice)]. The quads carry the halved colour, the
 // raw diffuse the font page's material doubles on the device (kFontPageMaterialWord, MODULATE2X), so

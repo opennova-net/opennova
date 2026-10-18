@@ -142,14 +142,14 @@ private:
 // the neighbouring HUD globals and is not modeled (the write is dropped).
 // [orig: the timers dword_2723CF8..dword_2723D34; the write
 //  RenderState_SetLayerVisibilityByIndex @ 0x5A3020 (@ 0x5A302A); the tick
-//  sub_59A9E0 @ 0x59A9E0, called per HUD frame with the current tick from
+//  HUD_TickItemFlashTimers @ 0x59A9E0, called per HUD frame with the current tick from
 //  HUD_RenderAllOverlays @ 0x5A80FB]
 class HudItemFlash {
 public:
 	static constexpr int kCount = 16;
 
 	void set(int index, int32_t value);
-	// [orig: sub_59A9E0 @ 0x59A9E0 — the same tick returns @ 0x59A9EC; the
+	// [orig: HUD_TickItemFlashTimers @ 0x59A9E0 — the same tick returns @ 0x59A9EC; the
 	//  delta @ 0x59A9F0; each nonzero timer minus the delta, 0 when the delta
 	//  reaches it @ 0x59AA06..0x59AA10]
 	void tick(int32_t now);

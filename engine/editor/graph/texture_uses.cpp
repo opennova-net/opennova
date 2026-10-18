@@ -86,7 +86,7 @@ FixedUseWords fixed_use_words(renderer::FixedTextureUse use) {
 	case U::BinocularDigits: return {"for the binoculars' range digits", "HUD_LoadAllTextures @ 0x59E109"};
 	case U::NvgMask: return {"for the night vision", "ViewFx_InitShadersAndTextures @ 0x5CFE18"};
 	case U::NvgScale: return {"for the night vision's scale", "ViewFx_InitShadersAndTextures @ 0x5CFE4A"};
-	case U::Vignette: return {"for the damage vignette", "sub_5C36B0 @ 0x5C36BC"};
+	case U::Vignette: return {"for the damage vignette", "Render_LoadVignetteTexture @ 0x5C36BC"};
 	case U::Rain: return {"for rain", "WeatherParticle_LoadTextures @ 0x5DE840"};
 	case U::Snow: return {"for snow", "WeatherParticle_LoadTextures @ 0x5DE88E"};
 	case U::SmokeTrail: return {"for smoke trails", "CEffectEmitterPool_CreateShaders @ 0x5DC8F0"};
@@ -97,7 +97,7 @@ FixedUseWords fixed_use_words(renderer::FixedTextureUse use) {
 	case U::PreviewCube: return {"for the player preview's reflection", "PlayerInfo_InitPreviewModel @ 0x56010C"};
 	case U::BootSplash: return {"for the boot splash", "Game_ShowLoadingScreen @ 0x4A5420"};
 	case U::LoadingFallback: return {"for a mission with no loading screen of its own", "Render_LoadingScreen @ 0x521D10"};
-	case U::Mfd: return {"for the vehicles' MFD", "sub_59B120 @ 0x59B120"};
+	case U::Mfd: return {"for the vehicles' MFD", "HUD_LoadMfdTexture @ 0x59B120"};
 	case U::kCount: break;
 	}
 	return {"", ""};

@@ -106,7 +106,7 @@ int main() {
 	// runtime type, the name, the files there and the loose-first hits.
 	// [orig: Material_LoadStageTexture @0x5B16F0; Texture_LoadByNameWithChannel
 	// @0x58B4E1..0x58B6E6; Texture_LoadAndRegister @0x58B80E..0x58B881;
-	// Texture_LoadAsNormalMap @0x58C480; sub_58A430 @0x58A430]
+	// Texture_LoadAsNormalMap @0x58C480; Texture_LoadTGAPreferDDS @0x58A430]
 	{
 		using Reader = MaterialTextureReader;
 		struct SourceCase {

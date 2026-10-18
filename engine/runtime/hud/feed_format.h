@@ -225,7 +225,7 @@ void feed_event_rows(const FeedEventInput *events, std::size_t count,
                      const FeedActorLookup &actor_of, std::vector<FeedRow> &out);
 
 // Resolve empty actor names without substituting "Unknown" for numeric/empty values.
-// [orig: HUD_FormatKillEventMessage @ 0x422DA0; sub_422D00 @ 0x422D00]
+// [orig: HUD_FormatKillEventMessage @ 0x422DA0; HUD_FormatActorEventMessage @ 0x422D00]
 std::string feed_format_row(const FeedRow &, const std::string &tmpl,
         const std::string &unknown, const std::string &bonus_tmpl, const std::string &wpname);
 

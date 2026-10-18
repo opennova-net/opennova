@@ -48,7 +48,7 @@ void step_facial_animation(FacialSlot &slot, bool dead, uint32_t display_frame,
 
 // Position of every GRM mesh vertex after current/next gesture interpolation.
 // The texture coordinates themselves stay at the base mesh UVs.
-// [orig: sub_588FE0, sub_589090, sub_5890F0]
+// [orig: FaceAnimConfig_SelectGestures, FaceAnimConfig_FindGestureParameter, FaceAnimConfig_BlendVertex]
 std::vector<grm::Point> evaluate_facial_mesh(const grm::File &file,
 		int32_t current, int32_t next, float blend);
 
@@ -80,7 +80,7 @@ public:
 	void automatic_expression(const Entity &entity, int32_t expression);
 
 	// Stable nearest-first sort; only three visible slots have live targets.
-	// [orig: Scar_SortSlotsByDistance @0x57FE60; sub_580360; Render_ScarSlot @0x580170]
+	// [orig: Scar_SortSlotsByDistance @0x57FE60; FaceAnim_RenderAllSlots; Render_ScarSlot @0x580170]
 	void compile_draws(World &world, int32_t camera_x, int32_t camera_y,
 			bool first_person, std::vector<FacialDraw> &out);
 

@@ -75,7 +75,7 @@ inline constexpr const char *kHudScopeCrosshairTexture = "scopexh.tga";
 // box loader BoxTexture_LoadAndSetupUVRegions @0x56acd0]; the HUD never draws it (hud_frame.cpp).
 inline constexpr const char *kHudBoxMonogramTexture = "monogram.tga";
 
-// The vehicles' MFD texture, read by the PCX reader [orig: sub_59B120 @0x59b120]. The game makes no
+// The vehicles' MFD texture, read by the PCX reader [orig: HUD_LoadMfdTexture @0x59b120]. The game makes no
 // material of an MFD texture whose sides are not both powers of two [orig: @0x59b19f..0x59b1bd].
 inline constexpr const char *kHudMfdTexture = "MFD1.PCX";
 constexpr bool hud_mfd_texture_takes(uint32_t width, uint32_t height) {

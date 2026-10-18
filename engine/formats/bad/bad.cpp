@@ -18,7 +18,7 @@ namespace opennova::bad {
 //  addresses at +40/+44), [7] channel table (12-byte rows), [8]/[9] a table of 8-byte rows
 //  (empty in every retail clip), [16] the event table, [19] relocated but 0 in every retail
 //  clip; every stored offset is file-relative and relocated on load. No header word names the
-//  translation block: its rows follow the bone table (sub_4102D0 @0x4102d0)]
+//  translation block: its rows follow the bone table (AnimChannel_GetTranslationRowAtTime @0x4102d0)]
 
 // --------------------------------------------------------------------------
 // Helpers
@@ -245,7 +245,7 @@ int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out) {
         // Rows of bone_count x f32 x,y,z, frame-major, right after the bone table. The runtime
         // reads row trunc(frame_count * t) and lerps it with the NEXT row, so every row from 0
         // to frame_count carries weight: frame_count + 1 rows, the fence-post count the key
-        // lists and the events carry too [orig: sub_4102D0 @0x4102d0, the row base
+        // lists and the events carry too [orig: AnimChannel_GetTranslationRowAtTime @0x4102d0, the row base
         // [6] + [5] * (100 + 12 * row) @0x410327..0x41033b; BoneAnim_TransformBones @0x410360,
         // the next row at +12 * bone_count @0x4104a0..0x4104a5]. Retail files carry one row
         // more (201 of 202 translated clips), which only a zero-weight read reaches; the

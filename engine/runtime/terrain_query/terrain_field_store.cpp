@@ -260,7 +260,7 @@ bool load_store(TerrainFieldStore &store, const Read &read, const std::string &t
 		return false;
 	}
 	// The height data by the name the .trn writes (D-TERRAIN-17), never the terrain's own: terrains share one (15 of
-	// JO:CA's 38 name another's, dvxg8a.trn dvxg8.cpt) [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> sub_603CC0 @
+	// JO:CA's 38 name another's, dvxg8a.trn dvxg8.cpt) [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> Terrain_ConfigureAndLoadLodStorage @
 	// 0x603D0A].
 	if (!read(trn.polydata, cpt_bytes)) {
 		error = trn.polydata + " (" + terrain_name + ".trn's height data) is not under the mount";

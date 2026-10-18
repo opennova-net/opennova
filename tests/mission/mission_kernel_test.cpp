@@ -436,7 +436,7 @@ static void test_initial_wac_binds_the_preopened_music_context() {
         CHECK(kernel.world.script.vars.get_mission(1) == (context_active ? 99 : 0));
         CHECK(kernel.world.script.vars.get_mission(2) == 55);
         // With no context the game's setter writes nothing and its reader reads 0 [orig: AudioVM_SetVariable @
-        // 0x671FA0, the g_AudioVMContextActive test; sub_671FB0 @ 0x672660].
+        // 0x671FA0, the g_AudioVMContextActive test; AudioVM_GetVariable @ 0x672660].
         CHECK(mus::mus_vm_get_var(audio.get(), 7) == (context_active ? 55 : 0));
     }
 }

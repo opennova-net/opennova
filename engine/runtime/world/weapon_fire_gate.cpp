@@ -33,7 +33,7 @@ void weapon_fire_environment_inputs(const World &world, const Entity &owner,
         return;
     // CF contact within a friendly FARP blocks firing. Unnumbered FARPs use
     // team equality in team modes, and protect everyone in non-team modes.
-    // [orig: sub_44A2B0 @0x44a2b0..0x44a334]
+    // [orig: Entity_IsInFriendlyFarp @0x44a2b0..0x44a334]
     if (zone->zone_number != 0) {
         if (carrier->team < ZoneChain::kTeamCount)
             inputs.protected_carrier = (world.zones.chain.owned_mask[carrier->team] &

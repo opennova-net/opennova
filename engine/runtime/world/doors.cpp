@@ -103,7 +103,7 @@ static void queue_door_row(World &world, const Entity &entity, int number) {
 // A client's door section request, C2S 0x1A [u16 handle][i16 record state]
 // [u8 section], queued for the joiner to send at its next boundary: the
 // record is (first + section - 1), gated index > -1, section != 0 and section
-// <= count, so section 0 never asks. [orig: NetPacket_SendWeaponSwitch
+// <= count, so section 0 never asks. [orig: NetPacket_SendDoorSlotRequest
 // @0x42D0C0 — the gates @0x42d0d8..0x42d0f9, the record word @0x42d101, the
 // body NetPacket_WriteShortShortByte @0x42d138, queued (0x1A, 1, 0, ..)
 // @0x42d169]
@@ -165,7 +165,7 @@ void DoorSystem::command(World &world, Entity &entity, int event, uint32_t touch
             // [orig: @0x43f460 is_authority -> Server_SendWeaponSlotActionPacket
             //  (entity, section) @0x43f462]; a client's request does the same
             //  read and skips section 0 [orig: @0x43f482 ->
-            //  NetPacket_SendWeaponSwitch @0x42D0C0].
+            //  NetPacket_SendDoorSlotRequest @0x42D0C0].
             if (world.rules.logic_authority)
                 queue_door_row(world, entity, i);
             else

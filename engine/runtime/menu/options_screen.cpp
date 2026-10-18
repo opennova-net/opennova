@@ -21,7 +21,7 @@ void set_interactive(MenuRuntime &menu, const char *name, bool enabled) {
 }
 
 // A checkbox's state into a record dword when the control exists
-// [orig: UI_FindScreenControl ... sub_64ACB0 (the checked state)].
+// [orig: UI_FindScreenControl ... CCheckWnd_GetCheckedState (the checked state)].
 template <typename Write>
 void read_checked(const MenuRuntime &menu, const char *name, Write write) {
 	const int id = menu.widget_id(name);
@@ -31,7 +31,7 @@ void read_checked(const MenuRuntime &menu, const char *name, Write write) {
 // The mouse and joystick words into their widgets: the shape both screens'
 // inits and the DEFAULTS reseed share [orig: UI_OptionsScreenInit
 // @0x554ba0..0x554ca2; UI_PopulateRenderAndAudioSettings @0x55d2b0..0x55d3c2;
-// sub_55BD90 @0x55bee8..0x55bfb0].
+// Options_OnDefaultsButton @0x55bee8..0x55bfb0].
 void seed_mouse_and_joystick(MenuRuntime &menu, const playersav::ProfileRecord &record) {
 	set_checked(menu, "INVERT_MOUSE", record.invert_mouse != 0);  // [orig: @0x554bb7]
 	const int sensitivity = menu.widget_id("MOUSE_SENSITIVITY");
@@ -188,8 +188,8 @@ void OptionsScreen::switch_device(MenuRuntime &menu, controls::Device device) {
 // [orig: UI_IngameOptionsDialogEventHandler @0x554e40 — the Accept's record
 // writes and its copy of the screen's records @0x554e74;
 // UI_RegisterIngameCallbacks @0x555510, OPT_ACCEPT @0x555597 / OPT_CANCEL @0x5555b5,
-// ENABLE_JOYSTICK -> sub_5554B0 @0x5556bc; Options_HandleAcceptOrBack (the front ACCEPT) @0x55ab5f..0x55ace5;
-// UI_RegisterOptionsCallbacks ENABLE_JOYSTICK -> sub_55B010 @0x55d780;
+// ENABLE_JOYSTICK -> UI_IngameOnEnableJoystick @0x5556bc; Options_HandleAcceptOrBack (the front ACCEPT) @0x55ab5f..0x55ace5;
+// UI_RegisterOptionsCallbacks ENABLE_JOYSTICK -> Options_OnEnableJoystick @0x55d780;
 // OPTIONS DEFAULTS @0x55bd90; CLEAR_KEY @0x55bfd0]
 int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record, int id) {
 	if (!is_surface_) return None;
@@ -220,7 +220,7 @@ int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record,
 		return RestorePreview;
 	}
 	if (upper == "ENABLE_JOYSTICK") {
-		// [orig: sub_55B010 @0x55b010 / sub_5554B0 @0x5554b0: the box's state
+		// [orig: Options_OnEnableJoystick @0x55b010 / UI_IngameOnEnableJoystick @0x5554b0: the box's state
 		//  makes the two joystick rows interactive or not]
 		const int id = menu.widget_id("ENABLE_JOYSTICK");
 		const bool enabled = id >= 0 && menu.is_widget_checked(id);

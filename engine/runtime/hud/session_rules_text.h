@@ -38,7 +38,7 @@ struct SessionStatusView {
 struct RulesBriefingInputs {
 	uint32_t game_type = 0;       // g_GameType
 	int local_team = 0;           // g_LocalPlayerEntity->Team, 0 without one
-	bool spawn_zones = false;     // sub_43B910: g_SpawnZoneCount > 0
+	bool spawn_zones = false;     // SpawnZoneList_HasAny: g_SpawnZoneCount > 0
 	bool authority = false;       // g_NapiNPCtx.is_authority
 	// The authority's mission text: info/briefing3 and info/briefing2 (else
 	// info/briefing), "" on a miss (MissionText_GetString @0x51eb50).

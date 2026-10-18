@@ -23,7 +23,7 @@ inline constexpr int kCharmapSourceSideMin = 256;
 // palette, every entry past it white as the shipped legend leaves its own. An indexed picture (an 8-bit PCX, a
 // palette PNG) is read by its indices, a colour picture by its colours, each looked up in the legend exactly (no
 // nearest colour; the alpha ignored). False, with `why` naming the file, for one that does not read, is not square
-// with a side of 256, 512 or 1024 [orig: sub_605A10 @ 0x605A82..0x605AA0; Terrain_GetSurfaceTypeAtPosition
+// with a side of 256, 512 or 1024 [orig: Terrain_LoadCharmapPCX @ 0x605A82..0x605AA0; Terrain_GetSurfaceTypeAtPosition
 // @ 0x6065C6], or holds a texel of no class (an index past 19, a colour the legend lacks: the first named by its
 // place, column and row from the top left).
 bool decode_charmap_source(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,

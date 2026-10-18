@@ -1143,7 +1143,7 @@ bool MissionMapViewport::command(const ViewportContext &context, const std::stri
 		const NodeAddress primary = !ids.empty() ? of.front() : selection ? selection->primary : NodeAddress();
 		return mission_select_group(*mission, of, primary, out, error);
 	} else if (name == "zoom_in" || name == "zoom_out") {
-		// The CMAP's ZOOMIN and ZOOMOUT steps [orig: loc_548230 @0x548230; hud::MapViewPan::zoom_step], over the map's
+		// The CMAP's ZOOMIN and ZOOMOUT steps [orig: CMap_ZoomStep @0x548230; hud::MapViewPan::zoom_step], over the map's
 		// own range.
 		camera.zoom = std::clamp(camera.zoom * (name == "zoom_in" ? hud::kMapViewZoomInStep : hud::kMapViewZoomOutStep),
 				kMissionMapZoomMin, kMissionMapZoomMax);

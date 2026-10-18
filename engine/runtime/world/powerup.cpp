@@ -444,7 +444,7 @@ void powerup_process_contacts(World &world, const TickContext &ctx) {
 
 bool powerup_weapon_grant_received(World &world, LocalPlayer &lp, const Entity *row,
                                    bool local_dead) {
-    // [orig: sub_4E03D0 @0x4E03D0 -- the local-player and null gates
+    // [orig: Player_MountPickedUpWeapon @0x4E03D0 -- the local-player and null gates
     //  @0x4E03DC..0x4E03E8, the dead bit @0x4E03EE, the row's +0x155 byte
     //  @0x4E03F0 (set only on a dropped carried object and a 0x18 drop
     //  template, neither a powerup row; not carried here)]

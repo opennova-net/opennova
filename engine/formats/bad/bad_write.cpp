@@ -152,7 +152,7 @@ int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out) {
     // rows 0..frame_count + 1), and that last row holds exporter memory that
     // matches no row of the clip; the one read past row frame_count is a
     // one-frame clip at t == 0, which takes row 1 and weights row 2 by zero
-    // [orig: sub_4102D0 @0x4102f7..0x410304, a frame_count * t of 0 read as
+    // [orig: AnimChannel_GetTranslationRowAtTime @0x4102f7..0x410304, a frame_count * t of 0 read as
     // 1.0]. The pad repeats row frame_count, so that read stays finite.
     if (translated) {
         for (size_t row = 0; row < translation_rows + bone_count; ++row) {

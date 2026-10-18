@@ -705,7 +705,7 @@ void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotStat
     int32_t cost = static_cast<int32_t>(routed_def.clipsize) * units; // @0x5417FF
     const int32_t avail = static_cast<int16_t>(own.reserve);         // @0x546140
     if (cost > avail) cost = avail;                      // @0x54180F..0x541811
-    int32_t word = static_cast<int16_t>(own.reserve);    // sub_5461D0
+    int32_t word = static_cast<int16_t>(own.reserve);    // Entity_SpendMountSlotReserve
     if (word != -1) {
         word -= cost;
         if (word < 0) word = 0;

@@ -189,7 +189,7 @@ RecordTable make_table() {
 	face.field(texture_field("eye_texture_1", "First eye texture",
 	                         "The first name of the eyetexture line (the face's +520), made .TGA as the base's is [orig: "
 	                         "Shadow_DecalLoadTextures @ 0x58814A]. The line names both eyes or neither: the game reads a "
-	                         "line naming the first alone as naming neither [orig: sub_587F20 @ 0x587F20].",
+	                         "line naming the first alone as naming neither [orig: FaceAnimConfig_SetEyeTextures @ 0x587F20].",
 	                         [](grm::File &f) -> std::string & { return f.eye_textures[0]; }));
 	face.field(texture_field("eye_texture_2", "Second eye texture",
 	                         "The second name of the eyetexture line (the face's +260), made .TGA [orig: "
@@ -265,10 +265,10 @@ RecordTable make_table() {
 	TableKind vertex(RecordKindRow{kVertex, "vertex", "Vertex", "", false});
 	point<grm::Vertex>(vertex, "uv", "vertex", "Position",
 	                   "Where the vertex sits on the face's texture, 0 to 1 of its side; a gesture's offset of its group "
-	                   "moves it [orig: sub_5890F0 @ 0x5890F0].",
+	                   "moves it [orig: FaceAnimConfig_BlendVertex @ 0x5890F0].",
 	                   [](grm::Vertex &v) -> grm::Point & { return v.uv; });
 	vertex.field(group_field("The group a gesture moves the vertex by: each gesture's first parameter of the group "
-	                         "[orig: sub_589090 @ 0x589090]; xxx moves with none [orig: "
+	                         "[orig: FaceAnimConfig_FindGestureParameter @ 0x589090]; xxx moves with none [orig: "
 	                         "Model_CollectUniqueMaterialNames @ 0x588D90].",
 	                         [](const RecordHandle &r) -> std::string & { return vertex_of(r).group; }));
 
@@ -303,7 +303,7 @@ RecordTable make_table() {
 		FieldSchema name = schema_of("name", FieldType::Text, "Expression",
 				"The expression the gesture is: the game plays NORMAL, HAPPY, SAD, SMIRK, ANGRY, SURPRISE, DISGUST, FEAR "
 				"and AGGRESSIVE by name, without case [orig: AnimState_FindByName @ 0x5800B0, the table @ 0x7D7960], the "
-				"last gesture of the name [orig: sub_588FE0 @ 0x588FE0].");
+				"last gesture of the name [orig: FaceAnimConfig_SelectGestures @ 0x588FE0].");
 		name.width = kGestureBytes;
 		name.code_page = true;
 		for (int i = 0; i < 9; ++i) name.choices.push_back({world::kFacialExpressions[i], i, ""});
@@ -325,11 +325,11 @@ RecordTable make_table() {
 	// --- a parameter -------------------------------------------------------------------------------
 	TableKind parameter(RecordKindRow{kParameter, "parameter", "Parameter", "", false});
 	parameter.field(group_field("The group of vertices the parameter moves: the first parameter of a vertex's group in "
-	                            "the gesture moves it [orig: sub_589090 @ 0x589090].",
+	                            "the gesture moves it [orig: FaceAnimConfig_FindGestureParameter @ 0x589090].",
 	                            [](const RecordHandle &r) -> std::string & { return parameter_of(r).group; }));
 	point<grm::Parameter>(parameter, "offset", "parm", "Offset",
 	                      "How far the gesture moves its group's vertices on the face's texture, blended from one "
-	                      "expression to the next [orig: sub_5890F0 @ 0x5890F0].",
+	                      "expression to the next [orig: FaceAnimConfig_BlendVertex @ 0x5890F0].",
 	                      [](grm::Parameter &p) -> grm::Point & { return p.offset; });
 
 	return RecordTable({std::move(face), std::move(vertex), std::move(triangle), std::move(gesture), std::move(parameter)});
@@ -563,7 +563,7 @@ namespace {
 constexpr FindingCodeEntry<FaceAnimationFinding> kFindingEntries[] = {
 	{ FaceAnimationFinding::InvalidInput, { "face_animation.invalid_input", FindingFix::None, nullptr, true } },
 	{ FaceAnimationFinding::IgnoredInput, { "face_animation.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
-	// The first eye texture named alone: the game reads the line as naming neither eye [orig: sub_587F20 @ 0x587F20];
+	// The first eye texture named alone: the game reads the line as naming neither eye [orig: FaceAnimConfig_SetEyeTextures @ 0x587F20];
 	// it refuses nothing: listed. (The second named alone is face_animation.unserializable.)
 	{ FaceAnimationFinding::EyeTextureAlone, listed_code("face_animation.eye_texture_alone") },
 	// The second eye texture named alone: the writer cannot write the line so (the game reads on): its Save refused.
@@ -618,17 +618,17 @@ std::vector<Diagnostic> validate_face_animation_file(const DocumentBase &documen
 	const NodeAddress at_face{face->id, kFace, 0};
 	// The second eye texture named alone is written as the line's one name: the tokenizer collapses the separators
 	// before it, so the game reads it as the first and the second from a token an earlier line left [orig:
-	// FaceAnimConfig_TokenizeConfigLine @ 0x588AD0; sub_587F20 @ 0x587F20] (D-GRM-1's class), and the format's
+	// FaceAnimConfig_TokenizeConfigLine @ 0x588AD0; FaceAnimConfig_SetEyeTextures @ 0x587F20] (D-GRM-1's class), and the format's
 	// reader refuses the line: the face is not saved so.
 	if (file.eye_textures[0].empty() && !file.eye_textures[1].empty())
 		add(at_face, DiagnosticSeverity::Error, FaceAnimationFinding::Unserializable, "eye_texture_1",
 		    "The face names its second eye texture alone: the line is written with that one name, which the game reads "
 		    "as the first eye's and the second from a token an earlier line left [orig: FaceAnimConfig_TokenizeConfigLine "
-		    "@ 0x588AD0; sub_587F20 @ 0x587F20], so the face is not saved until it names the first too, or neither.");
+		    "@ 0x588AD0; FaceAnimConfig_SetEyeTextures @ 0x587F20], so the face is not saved until it names the first too, or neither.");
 	else if (!file.eye_textures[0].empty() && file.eye_textures[1].empty())
 		add(at_face, DiagnosticSeverity::Warning, FaceAnimationFinding::EyeTextureAlone, "eye_texture_2",
 		    "The face names its first eye texture alone: the game reads the line as naming neither eye [orig: "
-		    "sub_587F20 @ 0x587F20]. Name both, or neither.");
+		    "FaceAnimConfig_SetEyeTextures @ 0x587F20]. Name both, or neither.");
 	for (size_t t = 0; t < file.triangles.size(); ++t)
 		for (int corner = 0; corner < 3; ++corner) {
 			const int32_t index = file.triangles[t][size_t(corner)];
@@ -655,7 +655,7 @@ std::vector<Diagnostic> validate_face_animation_file(const DocumentBase &documen
 		else if (const auto earlier = expressions.find(strutil::to_lower(gesture.name)); earlier != expressions.end())
 			add(child(kGestureList, earlier->second, kGesture), DiagnosticSeverity::Warning,
 			    FaceAnimationFinding::GestureRepeated, "name",
-			    "A later gesture is " + name + " too: the game plays the last gesture of a name [orig: sub_588FE0 @ "
+			    "A later gesture is " + name + " too: the game plays the last gesture of a name [orig: FaceAnimConfig_SelectGestures @ "
 			                                   "0x588FE0], so this one is never played.");
 		expressions[strutil::to_lower(gesture.name)] = g;
 		std::unordered_map<std::string, bool> seen;
@@ -672,7 +672,7 @@ std::vector<Diagnostic> validate_face_animation_file(const DocumentBase &documen
 			if (!seen.emplace(key, true).second)
 				add(at_parameter, DiagnosticSeverity::Warning, FaceAnimationFinding::ParameterRepeated, "group",
 				    name + " moves the group " + group + " in an earlier parameter: a vertex takes the first of its group "
-				                                         "[orig: sub_589090 @ 0x589090], so this one moves nothing.");
+				                                         "[orig: FaceAnimConfig_FindGestureParameter @ 0x589090], so this one moves nothing.");
 			else if (!groups.count(key) || strutil::iequals(parameter.group, "xxx"))
 				add(at_parameter, DiagnosticSeverity::Info, FaceAnimationFinding::ParameterUnmatched, "group",
 				    strutil::iequals(parameter.group, "xxx")

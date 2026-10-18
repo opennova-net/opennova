@@ -153,7 +153,7 @@ bool read_file(const uint8_t *data, size_t size, File &out) {
 		if (tokens.empty()) continue;
 		if (!read) continue;
 		if (tokens.size() > 1 && strutil::iequals(tokens[0], "GAMETYPE")) {
-			// The row of the name, or none: the lines after a name no row has are read for nothing [orig: sub_52D850
+			// The row of the name, or none: the lines after a name no row has are read for nothing [orig: ScoreConfig_FindGameTypeRow
 			// @ 0x52DB50; `if (currentGameType)` @ 0x52DB7C, @ 0x52DC05].
 			const int row = game_type_row(tokens[1]);
 			current = row >= 0;
@@ -170,8 +170,8 @@ bool read_file(const uint8_t *data, size_t size, File &out) {
 			const int32_t id = id_in(kFields, tokens[1]);
 			if (!current || id < 0) continue;
 			std::vector<Entry> &fields = out.blocks.back().fields;
-			if (fields.size() >= kMaxFields) continue; // [orig: sub_52CD70 @ 0x52CD81, `count >= 34` refuses]
-			// The value is a byte [orig: `optionLookup = atol(token2)` @ 0x52DBD9 -> sub_52CD70's char].
+			if (fields.size() >= kMaxFields) continue; // [orig: ScoreConfig_AddRowField @ 0x52CD81, `count >= 34` refuses]
+			// The value is a byte [orig: `optionLookup = atol(token2)` @ 0x52DBD9 -> ScoreConfig_AddRowField's char].
 			fields.push_back({id, int32_t(uint8_t(io::retail_atol(tokens[2].c_str())))});
 		} else if (strutil::iequals(tokens[0], "VAR")) {
 			const int32_t id = id_in(kVars, tokens[1]);
@@ -280,7 +280,7 @@ std::string unread(const File &file) {
 		const std::string name = block.row >= 0 && size_t(block.row) < kGameTypes.size() ? kGameTypes[size_t(block.row)] : "";
 		if (block.fields.size() > kMaxFields)
 			return "GAMETYPE \"" + name + "\" has " + std::to_string(block.fields.size()) +
-			       " FIELD entries: the row holds 34 [orig: sub_52CD70 @ 0x52CD81].";
+			       " FIELD entries: the row holds 34 [orig: ScoreConfig_AddRowField @ 0x52CD81].";
 		for (size_t i = 0; i < block.vars.size(); ++i)
 			for (size_t j = i + 1; j < block.vars.size(); ++j)
 				if (block.vars[i].id == block.vars[j].id) {

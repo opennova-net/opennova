@@ -669,7 +669,7 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// The console messages close the overlay pass [orig: HUD_DrawConsoleMessages
 	//  @0x5a87d1, after HUD_DrawFriendlyTagsPass @0x5a87cc].
 	element_(HudElement::Feed, [&] { element_feed(state, surface_w, surface_h); });
-	// The squad order lines right after the feed [orig: sub_59AEE0 @0x5a87d6;
+	// The squad order lines right after the feed [orig: HUD_DrawSquadOrderLines @0x5a87d6;
 	//  the earlier call @0x5a8508 off the death screen draws the same two
 	//  lines at the same place first].
 	element_(HudElement::SquadOrders, [&] { element_squad_orders(state, surface_w, surface_h); });
@@ -1130,7 +1130,7 @@ void HudFrameCompiler::element_health(const HudFrameState &state, float w,
 									 : layout_.tag_bad;
 	// The fill's width is a whole pixel count, the scaled bar width times the
 	// 16.16 ratio rounded, and its clear runs from x0 + 1 to x0 + width
-	// [orig: HUD_DrawHealthBar @0x5A2EC3..0x5A2EE3 the width, sub_5D48E0
+	// [orig: HUD_DrawHealthBar @0x5A2EC3..0x5A2EE3 the width, Render_FillViewportRect
 	// @0x5A2F7A the clear].
 	const int bar_w = static_cast<int>(x1 - x0);
 	const int fill_px = static_cast<int>(
@@ -1529,7 +1529,7 @@ void HudFrameCompiler::element_power(const HudFrameState &state, float w,
 	emit_wire_rect(x0, y0, x1, y1, color);
 	// The fill clears from x + 1 to x + span, no clamp: at full charge it abuts
 	// the outline's right edge at x + w [orig: Render_DrawWireframeRect
-	// @0x59997D; sub_5D48E0 @0x5999A4, (x + 1, y + 1, x + span, y + h - 1)].
+	// @0x59997D; Render_FillViewportRect @0x5999A4, (x + 1, y + 1, x + span, y + h - 1)].
 	const int span = power_fill_span(progress, static_cast<int>(x1 - x0));
 	if (span > 1) {
 		emit_rect(x0 + 1.0f, y0 + 1.0f, x0 + static_cast<float>(span), y1 - 1.0f, color, true);

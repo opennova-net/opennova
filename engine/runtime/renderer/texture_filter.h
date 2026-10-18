@@ -234,7 +234,7 @@ enum class TextureStage : uint8_t {
 	// strip's width.
 	// [orig: HUD_LoadAllTextures @ 0x59E03D..0x59E04C; Texture_LoadFromFile_0
 	//  @ 0x58FE55, @ 0x58FE80 (the flags into CEffect_BeginPassTraced);
-	//  GImage_CreateTiledTextures_0 @ 0x67A8B9 (the tile sides, sub_679DF0),
+	//  GImage_CreateTiledTextures_0 @ 0x67A8B9 (the tile sides, GImage_FitTextureSizeToCaps),
 	//  @ 0x67AA30..0x67AA43 (| 1); render_tiled_image_strip @ 0x67B6FC]
 	MapIconStrip,
 	// A model stage through its effect: TexDiffuse1/2 and TexNormal1.

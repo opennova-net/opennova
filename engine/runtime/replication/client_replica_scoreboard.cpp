@@ -96,7 +96,7 @@ void resolve_all_registry_clans(ClientState &state) {
 // overwrite its name (64) and tag (8); action 3 additionally queues the C2S
 // 0x4E {netId} walk continuation; every change re-resolves every live slot's
 // tag; any other action does nothing [orig: NapiNPClientMsg_HandlePlayerJoinLeave
-// @0x432510 — the is_authority return @0x43252f, action 2 sub_52B330
+// @0x432510 — the is_authority return @0x43252f, action 2 CLinkedList_RemoveByNetId
 // @0x432578, CLinkedList_FindOrCreateByNetId @0x43262e (Napi_CopyString 65/9
 // @0x52b572/@0x52b58d), PlayerSlotTable_UpdateAllDisplayNames @0x43258b /
 // @0x43263e, the 0x4E queue @0x43266c].

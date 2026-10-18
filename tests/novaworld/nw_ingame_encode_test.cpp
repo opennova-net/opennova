@@ -703,7 +703,7 @@ int test_clan_roster_roundtrip() {
 }
 
 // S2C 0x37 / C2S 0x1A door-slot action: the 5-byte body both directions share.
-// [orig: Server_SendWeaponSlotActionPacket @0x50F9A0 / NetPacket_SendWeaponSwitch @0x42D0C0]
+// [orig: Server_SendWeaponSlotActionPacket @0x50F9A0 / NetPacket_SendDoorSlotRequest @0x42D0C0]
 int test_door_slot_action_roundtrip() {
 	DoorSlotAction in;
 	in.entity_handle = 0x2013;  // pool 2 slot 19

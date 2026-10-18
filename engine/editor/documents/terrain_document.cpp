@@ -215,7 +215,7 @@ void terrain_fields(TableKind &kind) {
 		kind.field(std::move(field));
 	}
 
-	// --- the heights [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> sub_603CC0 @ 0x603D0A; Terrain_LoadLodStorage
+	// --- the heights [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> Terrain_ConfigureAndLoadLodStorage @ 0x603D0A; Terrain_LoadLodStorage
 	// @ 0x603550, the missing file @ 0x60356D]
 	kind.field(name_field("polytrn_polydata", "Height data", "Heights",
 	                      std::string("The .cpt the game loads the heights and the ground mesh from, by the name as "
@@ -264,7 +264,7 @@ void terrain_fields(TableKind &kind) {
 	                      "The second detail far away: optional, and a missing one is no error.", &T::detailmapdist2,
 	                      ReferenceKind::Texture));
 
-	// --- what grows and what the ground is made of [orig: sub_605A10 @ 0x605A31 -> Texture_LoadPCXFromPFF8Bit
+	// --- what grows and what the ground is made of [orig: Terrain_LoadCharmapPCX @ 0x605A31 -> Texture_LoadPCXFromPFF8Bit
 	// @ 0x56E0A0; Terrain_GetSurfaceTypeAtPosition @ 0x606519..0x60651B; Foliage_LoadFoliageMapPCX @ 0x605AD0;
 	// Foliage_SampleFoliageMapMask @ 0x60662B]
 	kind.field(name_field("polytrn_charmap", "Surface map", "Surfaces and foliage",

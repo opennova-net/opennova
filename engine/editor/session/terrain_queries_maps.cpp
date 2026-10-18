@@ -124,7 +124,7 @@ io::JsonValue answer_terrain_legend(const TerrainQueryView &, std::string &) {
 		classes.push(std::move(row));
 	}
 	out.set("classes", std::move(classes));
-	// The game's class where a terrain names no char map [orig: sub_605A10].
+	// The game's class where a terrain names no char map [orig: Terrain_LoadCharmapPCX].
 	out.set("default", io::json_number(1));
 	out.set("past", io::json_string("A class 20 to 255 the game reads as it stands: footsteps and weather treat it as no "
 	                                "class they name, and a round striking there takes an impact row no shipped table "

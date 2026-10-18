@@ -71,7 +71,7 @@ PhysicsClass physics_class_from_move_function(std::string_view move_function);
 // transform, not its own), door (Entity_SetDefaultBoneCallbacks @0x4a91d0),
 // genx (Entity_UpdateParentTransform @0x4a88b0: it moves only with the entity
 // it stands on), upfx (Entity_UpdateWaterPhysicsAndEffects @0x4a92e0), org0
-// (nullsub_28) and chld (nullsub_82). Every other row moves it (the vehicles'
+// (Entity_UpdateOrg0Movement) and chld (nullsub_82). Every other row moves it (the vehicles'
 // and aircraft's movers, the rounds', an elevator's fall and land, a toppling
 // tower, the infantry bodies' gravity).
 // [orig: g_EntityClassPhysicsTable @0x82abc8, each row's update as named]
