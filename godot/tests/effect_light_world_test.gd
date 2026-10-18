@@ -276,9 +276,14 @@ func _round_glow(id: int, pos: Vector3) -> RoundGlowRow:
 	return RoundGlowRow.make(id, pos, 6.0, Color(0.5, 0.47, 0.31))
 
 
-# A local-player fire event carrying only the muzzle-glow leg.
+# A local-player fire event carrying the muzzle-glow leg. The local fire's glow
+# rides ActionSlot_SpawnEffect, which glows only past its FIRE row's effect id
+# test, so the event carries the row's effect as WPN_M4AUTO's FIRE row authors it
+# (particle Effect_CAR15MF at mflash01). [orig: ActionSlot_SpawnEffect @0x401F27 /
+#  @0x40206C / @0x402080]
 func _muzzle_fire(shooter_handle: int, origin: Vector3, mf_light: int) -> FirePresentationEvent:
-	return FirePresentationEvent.make(origin, 0, shooter_handle, true, mf_light)
+	return FirePresentationEvent.make(origin, 0, shooter_handle, true, mf_light,
+			Vector3(0, 0, -1), false, 0, "", "Effect_CAR15MF", "mflash01")
 
 
 func test_destruction_present_dictionary_routes_death_light_into_output() -> void:
