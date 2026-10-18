@@ -1,9 +1,10 @@
 # Hosted game servers in the local stack, over the dev overlay: the fleet's
-# machines are containers of the serve image (apps/serve/Dockerfile) that the
-# worker's docker machine driver launches on the stack's network
-# (apps/novaworld_common/hosted/docker_machine_driver.h), as a deployment's
-# worker launches EC2 machines. Each runs the image's own opennova-hostd with
-# its process runtime: it redeems the one-time token its launch handed it at
+# machines are containers of the hostd image (apps/serve/Dockerfile's hostd
+# target) that the worker's docker machine driver launches on the stack's
+# network (apps/novaworld_common/hosted/docker_machine_driver.h), as a
+# deployment's worker launches EC2 machines. Each runs the image's own
+# opennova-hostd with its process runtime (the image's opennova-serve its
+# servers): it redeems the one-time token its launch handed it at
 # the fleet's internal listener (bound at the fleet's fixed address,
 # admitting the stack's subnet), syncs from the machine's address, and runs
 # each server the fleet places on its slots as an opennova-serve child at
@@ -29,7 +30,7 @@
 #                 machine's hostd copies a tree from
 #                 file:///var/lib/opennova/store/trees/<id>/, the URL the
 #                 fleet hands it, into its own /opt/game.
-#   machine-image the machines' image, the serve image, built and never run.
+#   machine-image the machines' image, the hostd image, built and never run.
 #
 # scripts/dev_stack.sh up --data <dir> (or --synthetic-data) adds this file.
 # The machines are no compose service: `scripts/dev_stack.sh down` removes them
@@ -73,6 +74,9 @@ services:
       ONNET_HOSTED_DOCKER_NETWORK: opennova-dev
       ONNET_HOSTED_DOCKER_DATA_FROM: opennova-dev-machine-data
       ONNET_HOSTED_DEPLOYMENT: dev
+      # The machines' image (a server's start pins the serve image by name
+      # alone: the machines run their own binary).
+      ONNET_HOSTED_HOSTD_IMAGE: ${HOSTD_IMAGE:-opennova-hostd:local}
     networks:
       default: {}
       docker-api: {}
@@ -105,12 +109,14 @@ services:
     volumes:
       - store:/var/lib/opennova/store:ro
 
-  # The machines' image (apps/serve/Dockerfile: opennova-serve and
-  # opennova-hostd), which the worker's driver starts each machine from: built
-  # here, never started as a service (the `machines` profile).
+  # The machines' image (apps/serve/Dockerfile's hostd target: opennova-hostd
+  # with opennova-serve beside it), which the worker's driver starts each
+  # machine from: built here, never started as a service (the `machines`
+  # profile).
   machine-image:
     profiles: ["machines"]
-    image: ${SERVE_IMAGE:-opennova-serve:local}
+    image: ${HOSTD_IMAGE:-opennova-hostd:local}
     build:
       context: ../..
       dockerfile: apps/serve/Dockerfile
+      target: hostd

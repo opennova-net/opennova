@@ -3,7 +3,7 @@ name: Local stack
 # The local stack (deploy/compose, scripts/dev_stack.sh; DEVELOPING.md "Run the
 # NovaWorld servers locally") end to end, so it cannot silently break: the
 # script passes shellcheck; the five programs' images, the portal's, the machines'
-# serve image and the smoke test's are built from this commit (the binaries
+# hostd image and the smoke test's are built from this commit (the binaries
 # compiled here with the compiler cache the Linux jobs share, then laid into
 # the Dockerfiles' build stages: `dev_stack.sh up --prebuilt`, which leaves
 # every runtime stage as it is); the stack comes up with hosted game servers on
