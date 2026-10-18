@@ -9,6 +9,8 @@
 # live in apps/novaworld_<program> (gate, lobby, web, fleet, worker, data).
 set(NOVAWORLD_COMMON_SOURCES
     program.cpp
+    # Each program's own minute of use (its program_samples rows).
+    program_usage.cpp
     server_config.cpp
     catalog_repository.cpp
     # The stall watchdog and the heartbeat line (health.h), GET /livez on

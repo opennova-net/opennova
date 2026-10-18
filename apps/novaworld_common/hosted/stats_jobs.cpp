@@ -1,6 +1,7 @@
 #include "stats_jobs.h"
 
 #include "fleet_repository.h"
+#include "program_usage.h"
 #include "stats_repository.h"
 
 #include <cstdio>
@@ -15,6 +16,8 @@ void register_stats_jobs(jobs::JobRegistry &registry, std::function<int64_t()> n
 				const int64_t now = now_s();
 				rollup_machine_hours(*lease, now);
 				prune_stats(*lease, now);
+				program::rollup_usage_hours(*lease, now);
+				program::prune_usage(*lease, now);
 				if (const size_t pruned = prune_ended_machines(*lease); pruned > 0)
 					std::printf("[sweep] pruned %zu ended fleet machine(s)\n", pruned);
 				return jobs::JobResult::done();

@@ -191,6 +191,10 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/stats_jobs.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/stats_repository.cpp
+    # stats.prune rolls up and prunes the programs' own samples too.
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/program_usage.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/proc_stats.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/ecs_metadata.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/hosted/admin_link.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/hosted/stats_sampler.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_fleet/hosted/supervisor.cpp
@@ -311,6 +315,20 @@ target_include_directories(hosted_fleet_test PRIVATE
 target_compile_definitions(hosted_fleet_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(hosted_fleet COMMAND hosted_fleet_test)
 set_tests_properties(hosted_fleet PROPERTIES TIMEOUT 300)
+
+# What each program's tasks use (apps/novaworld_common/program_usage.h; migration
+# 0018_program_usage.sql) over fixture trees standing in for a container's kernel files and
+# a migrated database: the cgroup's CPU limit (v2, v1, none), the sampler (no CPU for its
+# first minute, then the percent of the task's limit; the memory's limit from the cgroup,
+# the task or the machine; the network's bytes; null where nothing reads), the task found
+# off ECS, a minute written once, the hours rolled up from the minutes (a counter that
+# started over), the prunes at 48 hours and 400 days.
+add_executable(program_usage_test novaworld/program_usage_test.cpp)
+target_link_libraries(program_usage_test PRIVATE
+    opennova_novaworld_common opennova_novaworld_service)
+target_include_directories(program_usage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(program_usage_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(program_usage COMMAND program_usage_test)
 
 # The hosted servers' stats (apps/novaworld_fleet/hosted/stats_sampler.h,
 # stats_repository.h; migration 0004_server_stats.sql) on a migrated database and a
