@@ -541,7 +541,7 @@ int test_events() {
 	// event says nothing more.
 	TEST_EXPECT(!hosted::transition_machine(
 			db, m.id, FleetMachineState::Booting, FleetMachineState::Ready, "never"));
-	TEST_EXPECT(hosted::drain_machines(db, "fleet roll") == std::vector<int64_t>{ m.id });
+	TEST_EXPECT(hosted::drain_machines(db, { m.id }, "fleet roll") == std::vector<int64_t>{ m.id });
 	TEST_EXPECT(hosted::transition_machine(db, m.id,
 			{ FleetMachineState::Ready, FleetMachineState::Draining }, FleetMachineState::Ending,
 			""));
