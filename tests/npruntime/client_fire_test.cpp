@@ -843,9 +843,14 @@ bool check_an_alt_round_takes_its_ammo_byte() {
 	const w::RandomSpreadOffset spread =
 			w::weapon_calc_random_spread_offset(30 << 16, /*seed=*/1, 0, false);
 	const w::LiveRound &round = world.round_sim.rounds[0];
-	return expect((spread.yaw_bam != 0 || spread.pitch_bam != 0) &&
+	if (!expect((spread.yaw_bam != 0 || spread.pitch_bam != 0) &&
 					(round.vel.y != 0.0f || round.vel.z != 0.0f),
-			"the weaponless alt round spreads by its ammo's ERROR");
+			"the weaponless alt round spreads by its ammo's ERROR"))
+		return false;
+	// The host presents no launch for a remote's alt fire [orig: Server_ClientFiredRound
+	//  @0x50BE52..0x50BE64].
+	return expect(world.round_sim.fired.empty(),
+			"the host draws no launch effect, glow or sound for the alt round");
 }
 
 // A 0xFFFF sequence word takes the round pool's fresh id, (the host's slot 0 << 9) | a

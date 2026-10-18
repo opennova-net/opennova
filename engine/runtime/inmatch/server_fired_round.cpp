@@ -339,6 +339,11 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			rp.ammo_index = round_ammo;
 			rp.adm_index = fired_adm;
 			rp.no_weapon = alt_fire && (fr.fire_flags & 0x02) == 0;
+			// The alt leg returns through RoundData_AddRound alone: the host runs no
+			// launch presentation for it, no ammo effect, glow or sound (the round's
+			// own flight presents as any round's). [orig: Server_ClientFiredRound -
+			//  the alt AddRound @0x50BE52 and its return @0x50BE57..0x50BE64]
+			rp.launch_presented = alt_fire;
 			rp.shot_seq = shot_seq;
 			rp.subtype = ev.subtype;
 			// PowerThrow charge from fireRequest+80; RoundData_SpawnRound
