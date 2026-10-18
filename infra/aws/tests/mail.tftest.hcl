@@ -358,10 +358,10 @@ run "no_forward_to" {
     condition = (
       length(aws_sesv2_email_identity.domain) == 1 && length(aws_sesv2_email_identity.forward_to) == 0 &&
       one([for st in data.aws_iam_policy_document.mail[0].statement :
-        toset(st.resources) == toset(["arn:aws:ses:us-east-1:123456789012:identity/example.com"])
+        toset(st.resources) == toset(["arn:aws:ses:us-east-1:123456789012:identity/*"])
       ])
     )
-    error_message = "with no destination, the domain's identity alone"
+    error_message = "with no destination, no forward_to identity; the send resource is the account's identities regardless"
   }
 }
 
