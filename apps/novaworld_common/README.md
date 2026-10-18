@@ -75,6 +75,10 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
   it before the task runs: the fleet program, with `ONNET_INTERNAL_HTTP_BIND` unset and the
   task metadata endpoint there (`ECS_CONTAINER_METADATA_URI_V4`), binds its task's
   private IPv4 at 8070.
+- **What a machine or container uses** (`proc_stats.*`) is read from the kernel's own
+  files: the host's CPU, memory and network (`/proc/stat`, `/proc/meminfo`,
+  `/proc/net/dev` less loopback), a filesystem's room (statvfs) and a cgroup's CPU time and
+  memory (v2, else v1). hostd compiles it in for its machine's stats.
 - **Each process logs `{"boot":{"program":"<program>"}}` once as it starts** (stdout, its
   first line, so a crash loop on a missing setting counts too: the log pipeline counts
   boots per program), keeps printing the `[boot] migrations:` line, logs its own

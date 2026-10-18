@@ -18,6 +18,9 @@ set(NOVAWORLD_COMMON_SOURCES
     health.cpp
     health_listener.cpp
     ecs_metadata.cpp
+    # What a Linux machine or container uses, from the kernel's files (hostd's
+    # machine stats, each program's own samples; hostd compiles it in too).
+    proc_stats.cpp
     # The object store the game data lives in (ADR 0064): the seam, S3 through
     # the AWS CLI, and a directory for a developer's machine and the tests.
     object_store.cpp

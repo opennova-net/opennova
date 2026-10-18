@@ -28,13 +28,14 @@ add_library(opennova_hostd_core STATIC
     tree_store.cpp       # the trees fetched on demand (aws s3 sync) and checked
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/ecs_metadata.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/proc_stats.cpp  # the machine's CPU, memory, disk, network
 )
 
 target_include_directories(opennova_hostd_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         # hosted/agent_protocol.h and hosted/slots.h, the service's half of the protocol,
-        # and ecs_metadata.h
+        # ecs_metadata.h and proc_stats.h
         ${CMAKE_SOURCE_DIR}/apps/novaworld_common
 )
 

@@ -1167,6 +1167,20 @@ target_include_directories(object_store_test PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
 add_test(NAME object_store COMMAND object_store_test)
 
+# What a Linux machine or container uses (apps/novaworld_common/proc_stats.h: hostd's machine
+# stats, each program's own samples), read from fixture trees: /proc/stat's busy and total and
+# a percent between two readings, /proc/meminfo, /proc/net/dev less loopback, a cgroup v2 and a
+# v1 tree (CPU time, memory less the inactive file cache, the limit or none), statvfs.
+# Crow-free and database-free.
+add_executable(proc_stats_test
+    novaworld/proc_stats_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/proc_stats.cpp)
+target_link_libraries(proc_stats_test PRIVATE opennova_base)
+target_include_directories(proc_stats_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
+add_test(NAME proc_stats COMMAND proc_stats_test)
+
 # The `service` label and the aggregate target over everything this file added (the head of
 # this file says why).
 get_directory_property(OPENNOVA_SERVICE_TESTS TESTS)
