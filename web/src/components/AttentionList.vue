@@ -38,7 +38,7 @@
             <p v-if="f.since && sinceText(f.since)" class="text-xs text-ink-muted">For {{ sinceText(f.since) }}</p>
           </div>
           <RouterLink v-if="isPagePath(f.link)" :to="f.link!" class="shrink-0 text-accent hover:text-ink-bright">
-            Open<span class="sr-only"> {{ f.subject || 'it' }}</span>
+            Open<span class="sr-only">{{ ` ${f.subject || 'it'}` }}</span>
           </RouterLink>
           <span v-else-if="f.link" class="shrink-0 break-all font-mono text-xs text-ink-muted">{{ f.link }}</span>
         </li>

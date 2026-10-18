@@ -36,7 +36,7 @@
                   class="admin-attention-count ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger px-1.5 text-xs font-semibold text-on-accent"
                   :title="`${needing} ${needing === 1 ? 'thing needs' : 'things need'} you`"
                 >
-                  {{ needing }}<span class="sr-only"> {{ needing === 1 ? 'thing needs' : 'things need' }} you</span>
+                  {{ needing }}<span class="sr-only">{{ ` ${needing === 1 ? 'thing needs' : 'things need'} you` }}</span>
                 </span>
               </RouterLink>
             </li>
