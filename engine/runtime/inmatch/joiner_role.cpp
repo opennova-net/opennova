@@ -1537,6 +1537,20 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 	// enter RoundData_SpawnRound.
 	if ((ev.flags & (kRoundEventFlagAltFire | kRoundEventFlagAdmIndexed)) == 0)
 		return;
+	// The event names its shooter, which must resolve to a live entity with an
+	// item def on this client, or the whole event is dropped: no 0xFFFF, no pool
+	// past 4, no slot past its pool, no empty slot or def. Here a shooter is a
+	// decoded row with its type or a native twin with its def.
+	// [orig: NetPacket_DeserializeRoundEvent - the 0xFFFF test @0x42F451, the pool
+	//  @0x42F465, the slot @0x42F47C..0x42F482, the entity and its +0x20 def
+	//  @0x42F497..0x42F4A1]
+	{
+		if (wire_handle::is_batch_end_sentinel(ev.shooter_handle)) return;
+		const replication::ClientEntityState *row = rt.state().find(ev.shooter_handle);
+		const world::Entity *twin = world.registry.get(world::EntityHandle{ev.shooter_handle});
+		if ((row == nullptr || row->type_id == 0) && (twin == nullptr || !twin->has_item_def))
+			return;
+	}
 	// Bit 0 is tested first: the ammo-def arm reads the byte as the round's ammo
 	// index and spawns with no weapon. Only with bit 0 clear does the adm-indexed
 	// arm resolve the byte as a weapon and fly that weapon's round.

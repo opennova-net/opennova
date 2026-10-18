@@ -2502,6 +2502,45 @@ bool run_alt_round_event_flies_its_ammo_byte() {
 			"the weaponless alt round spreads by its ammo's ERROR");
 }
 
+// A round event whose shooter resolves to nothing on this client spawns nothing; the
+// same event from a decoded shooter flies. [orig: NetPacket_DeserializeRoundEvent
+//  @0x42F451..0x42F4A1]
+bool run_round_event_needs_a_resolved_shooter() {
+	Harness h;
+	auto &world = h.kernel->world;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	world.tables.ammo.entries.resize(1);
+	world.tables.ammo.entries[0].valid = true;
+	world.tables.ammo.entries[0].velocity = 620;
+	world.tables.ammo.entries[0].max_age_ticks = 100;
+	world.tables.weapons.entries.resize(2);
+	world.tables.weapons.entries[1].valid = true;
+	world.tables.weapons.entries[1].ammo_index = 0;
+	constexpr uint16_t kShooter = 0x0006;
+	const auto fire = [&]() {
+		world.round_sim.reset();
+		FrameUpdate frame;
+		frame.carried_handle = 0xFFFF;
+		frame.health = 100;
+		RoundEventRecord ev;
+		ev.flags = kRoundEventFlagAdmIndexed;
+		ev.adm_index = 1;
+		ev.shooter_handle = kShooter;
+		frame.round_events.push_back(ev);
+		h.role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(frame));
+		return world.round_sim.active_count;
+	};
+	if (!expect(fire() == 0, "an unresolved shooter's round event spawns nothing")) return false;
+	auto &row = h.role.runtime->state().upsert(kShooter);
+	row.type_id = w::kPlayerInfantryTypeId;
+	row.cls = EntityClass::Player;
+	row.carrier_handle = 0xFFFF;
+	return expect(fire() == 1, "a decoded shooter's round event flies");
+}
+
 int main() {
 	if (!run_local_replica_turret_channel()) return 1;
 	if (!run_replica_turret_channel()) return 1;
@@ -2548,6 +2587,7 @@ int main() {
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();
 	ok &= run_round_event_stance_reads_the_flags_legs();
 	ok &= run_alt_round_event_flies_its_ammo_byte();
+	ok &= run_round_event_needs_a_resolved_shooter();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;
