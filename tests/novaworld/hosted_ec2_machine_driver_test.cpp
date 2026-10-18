@@ -1619,7 +1619,7 @@ int test_docker_config_and_profile(const std::string &) {
 			host->get_bool("Init", false));
 	const auto *from = host ? host->get("VolumesFrom") : nullptr;
 	TEST_EXPECT(from && from->array.size() == 1 &&
-			from->array[0].string == std::string(kDataFrom) + ":ro");
+			from->array[0].string == std::string(kDataFrom));
 	const auto *restart = host ? host->get("RestartPolicy") : nullptr;
 	TEST_EXPECT(restart && restart->get_string("Name", "") == "no");
 	const auto *networking = body.get("NetworkingConfig");

@@ -439,7 +439,7 @@ reads the store alone.
 | `ONNET_HOSTED_AWS_CLI` | `/usr/local/bin/aws` | web, worker, data | The AWS CLI v2, an absolute path (no `PATH` search): the `ec2` driver's, the S3 object store's and the mailer's SES calls. |
 | `ONNET_HOSTED_DOCKER_URL` | none | worker | `docker`: the Docker Engine API, `http://<host>:<port>` (the local stack's socket proxy). |
 | `ONNET_HOSTED_DOCKER_NETWORK` | none | worker | `docker`: the network every machine joins. |
-| `ONNET_HOSTED_DOCKER_DATA_FROM` | none | worker | `docker`: the container whose mounts every machine takes, read-only. |
+| `ONNET_HOSTED_DOCKER_DATA_FROM` | none | worker | `docker`: the container whose mounts every machine takes, each in its mode there (the local stack's `machine-data`: the store read-only, the log store read-write). |
 | `ONNET_HOSTED_ADDRESS_ZONE_FILE` | none | worker | `docker`, with static addresses on: the zone file the worker writes, an absolute path (the local stack's `/var/lib/opennova/zone/play.localhost.zone`). |
 | `ONNET_HOSTED_DOCKER_ADDRESSES` | none | worker | `docker`, with static addresses on: the addresses it hands out, a private /24 to /30 the stack's network holds but Docker never assigns (the local stack's `172.30.77.64/28`). |
 | `ONNET_HOSTED_MACHINE_SCRIPT` | `/app/hosted/machine_user_data.sh` | worker | `ec2`: the user-data template, in the worker's image alone; a run outside the image names it. |

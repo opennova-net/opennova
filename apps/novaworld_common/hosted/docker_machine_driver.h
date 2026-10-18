@@ -26,12 +26,13 @@
 //               opennova-serve beside it) running opennova-hostd
 //               (machine_command) as the image's serve user (kMachineUid) on the network
 //               ONNET_HOSTED_DOCKER_NETWORK, the mounts of the container
-//               ONNET_HOSTED_DOCKER_DATA_FROM taken read-only (the local object
-//               store's directory, at the path the programs see it: the agent
-//               copies the trees its servers need out of it, ADR 0064), at the
-//               static address it carries when it carries one
-//               (MachineLaunch::address, IPAMConfig.IPv4Address), docker's
-//               init as PID 1,
+//               ONNET_HOSTED_DOCKER_DATA_FROM taken in that container's modes
+//               (the local object store's directory read-only, at the path the
+//               programs see it: the agent copies the trees its servers need
+//               out of it, ADR 0064; the log store read-write, where the agent
+//               writes its log and its servers'), at the static address it
+//               carries when it carries one (MachineLaunch::address,
+//               IPAMConfig.IPv4Address), docker's init as PID 1,
 //               never restarted; then the token as a file (PUT
 //               /containers/<name>/archive: the machine's user-data, never an
 //               argument or a variable `inspect` shows), then POST .../start, then
@@ -70,8 +71,9 @@ namespace opennova::novaworld_server::hosted {
 struct DockerMachineConfig {
 	std::string engine_url; // ONNET_HOSTED_DOCKER_URL: http://<host>:<port>
 	std::string network; // ONNET_HOSTED_DOCKER_NETWORK: the network the machines join
-	// ONNET_HOSTED_DOCKER_DATA_FROM: the container whose mounts (the local object
-	// store's directory, where the trees are) every machine takes, read-only.
+	// ONNET_HOSTED_DOCKER_DATA_FROM: the container whose mounts every machine
+	// takes in their modes there (the local object store's directory, where the
+	// trees are, read-only; the log store read-write).
 	std::string data_from;
 	std::string deployment; // ONNET_HOSTED_DEPLOYMENT: the label that scopes every call
 	// ONNET_HOSTED_HOSTD_IMAGE: the machines' image, opennova-hostd and

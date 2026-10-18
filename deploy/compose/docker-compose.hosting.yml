@@ -25,9 +25,10 @@
 #                 data sets' trees the site's Game data page uploads, which
 #                 scripts/dev_stack.sh up --data or --synthetic-data seeds
 #                 through the admin API) at /var/lib/opennova/store, the path
-#                 web and the data program see it at, read-only; the machines take every
-#                 mount of this container (ONNET_HOSTED_DOCKER_DATA_FROM), so a
-#                 machine's hostd copies a tree from
+#                 web and the data program see it at, read-only; the machines
+#                 take every mount of this container in its mode
+#                 (ONNET_HOSTED_DOCKER_DATA_FROM), so a machine's hostd copies
+#                 a tree from
 #                 file:///var/lib/opennova/store/trees/<id>/, the URL the
 #                 fleet hands it, into its own /opt/game; and the log store
 #                 (the base file's `logs` volume) at /var/log/opennova,

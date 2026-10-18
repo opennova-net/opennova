@@ -192,7 +192,8 @@ std::string DockerMachineDriver::create_body(
 	JsonValue host = JsonValue::make_object();
 	host.set("NetworkMode", io::json_string(config.network));
 	JsonValue volumes_from = JsonValue::make_array();
-	volumes_from.push(io::json_string(config.data_from + ":ro"));
+	// No mode of its own: each mount keeps the one the container gives it.
+	volumes_from.push(io::json_string(config.data_from));
 	host.set("VolumesFrom", std::move(volumes_from));
 	host.set("Init", JsonValue::make_bool(true));
 	JsonValue restart = JsonValue::make_object();
