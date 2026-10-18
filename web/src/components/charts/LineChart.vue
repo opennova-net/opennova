@@ -144,9 +144,9 @@
     </div>
 
     <!-- The table view: every value, for anyone. -->
-    <details class="text-xs">
+    <details class="text-xs" @toggle="tableOpen = ($event.target as HTMLDetailsElement).open">
       <summary class="cursor-pointer text-accent hover:text-ink-bright">Show the numbers</summary>
-      <div class="mt-2 max-h-72 overflow-auto rounded-panel border border-border">
+      <div v-if="!lazyTable || tableOpen" class="mt-2 max-h-72 overflow-auto rounded-panel border border-border">
         <table class="min-w-full divide-y divide-border">
           <caption class="sr-only">{{ title }}</caption>
           <thead>
@@ -209,6 +209,9 @@ const props = withDefaults(
     emptyText?: string;
     // What a gap reads as in the table.
     gapText?: string;
+    // The table is rendered once opened, not before (a long series': 48
+    // hours of minutes).
+    lazyTable?: boolean;
   }>(),
   {
     description: '',
@@ -218,6 +221,7 @@ const props = withDefaults(
     loading: false,
     emptyText: 'Nothing recorded in this range yet.',
     gapText: 'Not running',
+    lazyTable: false,
   },
 );
 
@@ -227,6 +231,7 @@ const M = { top: 16, right: 16, bottom: 24, left: 44 };
 const box = ref<HTMLElement | null>(null);
 const width = ref(640);
 const active = ref(-1);
+const tableOpen = ref(false);
 let observer: ResizeObserver | null = null;
 
 onMounted(() => {
