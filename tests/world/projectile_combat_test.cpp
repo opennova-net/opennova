@@ -1627,8 +1627,11 @@ void test_visual_dynamic_proxy_excludes_shooter_self_slot() {
 }
 
 // A visual client's decoded remote throwable sweeps the wire dyn proxies like
-// the bullet walk: the motor rides through the shooter's own carrier, stops on
-// (and reflects off) an unrelated decoded mover instead of flying through it.
+// the bullet walk, but its ray context excludes the owner alone: the motors
+// zero ray[18..20], so the shooter's own carrier stops (and reflects) the
+// round like any other decoded mover, where a bullet rides through it.
+// [orig: Entity_UpdateGrenadePhysics -- the ray memset @0x444522, ray[17] the
+// owner (+0x170) @0x44454E..0x444554]
 void test_visual_throwable_motor_sweeps_wire_proxies() {
     World world;
     world.registry.configure_pool(0, 4);
@@ -1702,10 +1705,10 @@ void test_visual_throwable_motor_sweeps_wire_proxies() {
         if (!r.active) break;
     }
     // The sweep found the wire geometry (a fly-through regression records no
-    // bounce at all), and the FIRST contact is the unrelated mover's plane at
-    // X=9 — the shooter's own carrier plane at X=5 was ridden through.
-    CHECK(first_bounce_x > 8.0f);
-    CHECK(first_bounce_x < 9.6f);
+    // bounce at all), and the FIRST contact is the shooter's own carrier plane
+    // at X=5, not the unrelated mover's at X=9.
+    CHECK(first_bounce_x > 4.0f);
+    CHECK(first_bounce_x < 5.6f);
     // The contact reflected the motor: retail's 0.35 impact-speed retention
     // [orig: Physics_ComputeReflectionForce @ 0x4e4310].
     CHECK(speed_after >= 0.0f
