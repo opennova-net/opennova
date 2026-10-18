@@ -510,7 +510,7 @@ int test_service_accounts() {
 	TEST_EXPECT(made.ok && made.id > 0);
 	auto account = nws::get_user_by_id(db, made.id);
 	TEST_EXPECT(account && account->kind == "service" && account->nwhandle == "srv-7");
-	TEST_EXPECT(account->comp_servers == 0 && account->role == "player");
+	TEST_EXPECT(nws::billing::comp_grants_of(db, made.id).servers == 0 && account->role == "player");
 	TEST_EXPECT(nws::get_user_by_id(db, player)->kind == "player");
 	const auto authed = nws::authenticate_user(db, "srv-7", "first-password");
 	TEST_EXPECT(authed && authed->kind == "service");
@@ -522,7 +522,7 @@ int test_service_accounts() {
 	rename.nwhandle = "Renamed";
 	TEST_EXPECT(nws::update_user(db, made.id, rename).error_code == "not_found");
 	TEST_EXPECT(nws::delete_user(db, made.id).error_code == "not_found");
-	TEST_EXPECT(nws::set_comp_servers(db, made.id, 1).error_code == "not_found");
+	TEST_EXPECT(!nws::billing::set_comp_grants(db, made.id, { 1, 0 }));
 	TEST_EXPECT(nws::bootstrap_admin(db, "srv-7").outcome == nws::BootstrapAdminResult::Outcome::NoSuchAccount);
 	// A session row planted by hand resolves to nothing.
 	db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
@@ -568,12 +568,16 @@ int test_service_accounts() {
 	TEST_EXPECT(nws::delete_service_account(db, player).error_code == "not_found");
 	TEST_EXPECT(nws::delete_service_account(db, made.id).ok);
 	TEST_EXPECT(!nws::get_user_by_id(db, made.id));
-	// The comp grant: 0..16.
-	TEST_EXPECT(nws::set_comp_servers(db, player, 2).ok && nws::get_user_by_id(db, player)->comp_servers == 2);
-	TEST_EXPECT(nws::set_comp_servers(db, player, 17).error_code == "invalid_field");
-	TEST_EXPECT(nws::set_comp_servers(db, player, -1).error_code == "invalid_field");
-	TEST_EXPECT(nws::set_comp_servers(db, 999999, 1).error_code == "not_found");
-	TEST_EXPECT(nws::get_user_by_id(db, player)->comp_servers == 2);
+	// The comp grants: a player's alone, a 0 deleting its row.
+	TEST_EXPECT(nws::billing::set_comp_grants(db, player, { 2, 1 }));
+	auto grants = nws::billing::comp_grants_of(db, player);
+	TEST_EXPECT(grants.servers == 2 && grants.own_machines == 1);
+	TEST_EXPECT(!nws::billing::set_comp_grants(db, 999999, { 1, 0 }));
+	TEST_EXPECT(nws::billing::set_comp_grants(db, player, { 3, 0 }));
+	grants = nws::billing::comp_grants_of(db, player);
+	TEST_EXPECT(grants.servers == 3 && grants.own_machines == 0);
+	TEST_EXPECT(db.query("SELECT 1 FROM comp_grants WHERE user_id = $1;", { BindValue(player) }).size() == 1);
+	TEST_EXPECT(nws::billing::comp_grants_by_account(db).at(player).servers == 3);
 	return 0;
 }
 
@@ -1553,7 +1557,7 @@ int test_owner_changes() {
 	// The hosting entitlement is the brake: the comp grant withdrawn (0), the
 	// server stops, as for a ban. Before the pickup nothing is placed.
 	const int64_t withdrawn = rig.request("owner_withdrawn");
-	TEST_EXPECT(nws::set_comp_servers(rig.db, *rig.server(withdrawn)->owner_user_id, 0).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(rig.db, *rig.server(withdrawn)->owner_user_id, { 0, 0 }));
 	rig.step();
 	TEST_EXPECT(stopped_with(rig.db, withdrawn, "hosting entitlement allows 0 hosted servers"));
 	rig.step();
@@ -1591,7 +1595,7 @@ int test_owner_changes() {
 	TEST_EXPECT(rig.state(crashed) == State::Provisioning);
 	const int64_t service = *rig.server(crashed)->service_user_id;
 	const int64_t generation = nws::get_user_by_id(rig.db, service)->credentials_gen;
-	TEST_EXPECT(nws::set_comp_servers(rig.db, *rig.server(crashed)->owner_user_id, 0).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(rig.db, *rig.server(crashed)->owner_user_id, { 0, 0 }));
 	rig.advance(rig.config.restart_backoff_ms);
 	rig.step();
 	TEST_EXPECT(stopped_with(rig.db, crashed, "hosting entitlement allows 0 hosted servers") &&
@@ -1617,7 +1621,7 @@ int test_limit_at_provisioning() {
 	TEST_EXPECT(older > 0 && newer > older);
 	rig.tick(); // both -> provisioning
 	TEST_EXPECT(rig.state(older) == State::Provisioning && rig.state(newer) == State::Provisioning);
-	TEST_EXPECT(nws::set_comp_servers(rig.db, owner, 1).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(rig.db, owner, { 1, 0 }));
 	rig.tick();
 	TEST_EXPECT(stopped_with(rig.db, newer, "hosting entitlement allows 1 hosted server"));
 	TEST_EXPECT(rig.fake.launches == 1); // the older one's machine
@@ -1724,7 +1728,7 @@ int test_mass_stop_hold() {
 	TEST_EXPECT(a > 0 && b > 0 && c > 0);
 	rig.tick();
 	for (const int64_t id : { a, b, c })
-		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 0).ok);
+		TEST_EXPECT(nws::billing::set_comp_grants(*db, *rig.server(id)->owner_user_id, { 0, 0 }));
 	rig.tick();
 	TEST_EXPECT(hold.held() && !hold.view().reason.empty());
 	TEST_EXPECT(hold.view().owners == 3 && hold.view().servers == 3);
@@ -1737,7 +1741,7 @@ int test_mass_stop_hold() {
 	// Two restored: one owner past, below the brake, and still held (no
 	// reconcile has confirmed the cache since).
 	for (const int64_t id : { a, b })
-		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 1).ok);
+		TEST_EXPECT(nws::billing::set_comp_grants(*db, *rig.server(id)->owner_user_id, { 1, 0 }));
 	rig.tick();
 	TEST_EXPECT(hold.held() && rig.state(c) != State::Stopping);
 	TEST_EXPECT(hold.view().owners == 1 && hold.view().servers == 1);
@@ -1767,7 +1771,7 @@ int test_hold_releases() {
 	Database *db = &rig.db;
 	const auto lapse = [&](const std::vector<int64_t> &ids, int comp) {
 		bool ok = true;
-		for (const int64_t id : ids) ok = nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, comp).ok && ok;
+		for (const int64_t id : ids) ok = nws::billing::set_comp_grants(*db, *rig.server(id)->owner_user_id, { comp, 0 }) && ok;
 		return ok;
 	};
 	const auto none_stopping = [&](const std::vector<int64_t> &ids) {

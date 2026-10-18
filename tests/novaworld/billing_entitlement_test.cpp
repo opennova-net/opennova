@@ -2,8 +2,9 @@
 // billing tables it reads (billing/billing_repository.h, backend/migrations/
 // 0002_billing.sql). The pure core first: which Stripe statuses grant, the
 // period's 48 h net, a comp grant against a tier, the own-machine add-on that
-// counts only beside a tier, past_due keeping the servers but starting none,
-// and an inactive or service account getting nothing. Then the same through a
+// counts only beside a tier, an admin's own machines counting while the
+// account has servers, past_due keeping the servers but starting none, and an
+// inactive or service account getting nothing. Then the same through a
 // migrated database of the test's own (common/test_database.h), and the
 // tables' own rules: the instance id minted once, the customers, a
 // subscription's status_since moving only with its status, the webhook
@@ -55,9 +56,10 @@ SubscriptionRow tier_sub(int tier, const std::string &status, std::optional<int6
 	return sub("t" + std::to_string(tier) + status, ItemKind::Tier, tier, status, period_end);
 }
 
-billing::AccountFacts player(int comp = 0) {
+billing::AccountFacts player(int comp = 0, int comp_own = 0) {
 	billing::AccountFacts a;
 	a.comp_servers = comp;
+	a.comp_own_machines = comp_own;
 	return a;
 }
 
@@ -149,6 +151,14 @@ int test_entitlement_core() {
 			player(), { tier_sub(1, "active"), sub("omc", ItemKind::OwnMachine, 0, "canceled", kNow + kDay, 4) },
 			kNow);
 	TEST_EXPECT(e.own_machines == 0);
+	// An admin's own machines: counted while the account has servers (a tier's
+	// or a grant's), on top of the add-on's.
+	e = billing::entitlement_from(player(2, 1), {}, kNow);
+	TEST_EXPECT(e.own_machines == 1 && e.max_servers == 2 && e.comp_own_machines == 1 && e.can_start);
+	e = billing::entitlement_from(player(0, 1), {}, kNow);
+	TEST_EXPECT(e.own_machines == 0 && e.max_servers == 0 && e.comp_own_machines == 1);
+	e = billing::entitlement_from(player(0, 1), { tier_sub(2, "active"), two_machines }, kNow);
+	TEST_EXPECT(e.own_machines == 3 && e.max_servers == 2);
 	// A past-due add-on keeps its machines and blocks a start.
 	e = billing::entitlement_from(
 			player(), { tier_sub(1, "active"), sub("omp", ItemKind::OwnMachine, 0, "past_due", kNow + kDay, 1) }, kNow);
@@ -172,10 +182,15 @@ int64_t make_player(Database &db, const std::string &name, int comp = 0, const c
 	char id[16];
 	std::snprintf(id, sizeof(id), "0b%06x", ++pcid);
 	const auto rows = db.query("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, kind, "
-							   "account_status, comp_servers) VALUES ($1, 'x', $2, '1', $1, $3, $4, $5) RETURNING id;",
-			{ BindValue(name), BindValue(std::string(id)), BindValue(std::string(kind)), BindValue(std::string(status)),
-					BindValue(static_cast<int64_t>(comp)) });
-	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+							   "account_status) VALUES ($1, 'x', $2, '1', $1, $3, $4) RETURNING id;",
+			{ BindValue(name), BindValue(std::string(id)), BindValue(std::string(kind)),
+					BindValue(std::string(status)) });
+	const int64_t user = rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+	// A grant as an admin writes it (a service account takes none: written by hand).
+	if (user > 0 && comp > 0)
+		db.exec("INSERT INTO comp_grants (user_id, item, quantity) VALUES ($1, 'servers', $2);",
+				{ BindValue(user), BindValue(static_cast<int64_t>(comp)) });
+	return user;
 }
 
 // The entitlement through the database: the account's facts and its rows.
@@ -214,14 +229,24 @@ int test_entitlement_of() {
 	billing::upsert_subscription(db, cy_row);
 	TEST_EXPECT(billing::entitlement_of(db, cy, kNow).max_servers == 0);
 	TEST_EXPECT(billing::entitlement_of(db, srv, kNow).max_servers == 0);
-	// The grant's rule is the column's: 0..16.
-	bool refused = false;
-	try {
-		db.exec("UPDATE players SET comp_servers = 17 WHERE id = $1;", { BindValue(ben) });
-	} catch (const opennova::db::Error &) {
-		refused = true;
-	}
-	TEST_EXPECT(refused);
+	// An admin's own machine beside the grant of servers.
+	TEST_EXPECT(billing::set_comp_grants(db, ben, { 2, 1 }));
+	e = billing::entitlement_of(db, ben, kNow);
+	TEST_EXPECT(e.max_servers == 2 && e.own_machines == 1 && e.comp_own_machines == 1);
+	TEST_EXPECT(!billing::set_comp_grants(db, srv, { 1, 0 }));
+	// The grants' rules are the table's: 1..16 a row, of the two items alone.
+	const auto refused = [&db](const std::string &sql) {
+		try {
+			db.exec(sql);
+		} catch (const opennova::db::Error &) {
+			return true;
+		}
+		return false;
+	};
+	const std::string id = std::to_string(ana);
+	TEST_EXPECT(refused("INSERT INTO comp_grants (user_id, item, quantity) VALUES (" + id + ", 'servers', 17);"));
+	TEST_EXPECT(refused("INSERT INTO comp_grants (user_id, item, quantity) VALUES (" + id + ", 'servers', 0);"));
+	TEST_EXPECT(refused("INSERT INTO comp_grants (user_id, item, quantity) VALUES (" + id + ", 'tier', 1);"));
 	return 0;
 }
 

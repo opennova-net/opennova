@@ -100,28 +100,50 @@
           </dd>
         </dl>
         <form class="space-y-2" @submit.prevent="saveComp">
-          <label for="user-comp-servers" :class="labelClass">Admin grant (comp servers)</label>
-          <div class="flex flex-wrap items-center gap-2">
-            <input
-              id="user-comp-servers"
-              v-model.number="comp"
-              type="number"
-              min="0"
-              :max="COMP_SERVERS_MAX"
-              step="1"
-              inputmode="numeric"
-              aria-describedby="user-comp-hint"
-              :aria-invalid="compProblem ? 'true' : undefined"
-              :class="numberClass"
-            />
-            <button type="submit" :disabled="busy || compProblem !== '' || comp === detail.user.comp_servers" :class="primaryButton">
+          <div class="flex flex-wrap items-end gap-4">
+            <div class="space-y-1">
+              <label for="user-comp-servers" :class="labelClass">Admin grant (comp servers)</label>
+              <input
+                id="user-comp-servers"
+                v-model.number="comp"
+                type="number"
+                min="0"
+                :max="COMP_SERVERS_MAX"
+                step="1"
+                inputmode="numeric"
+                aria-describedby="user-comp-hint"
+                :aria-invalid="compProblem ? 'true' : undefined"
+                :class="numberClass"
+              />
+            </div>
+            <div class="space-y-1">
+              <label for="user-comp-own" :class="labelClass">Own machines</label>
+              <input
+                id="user-comp-own"
+                v-model.number="compOwn"
+                type="number"
+                min="0"
+                :max="COMP_OWN_MACHINES_MAX"
+                step="1"
+                inputmode="numeric"
+                aria-describedby="user-comp-hint"
+                :aria-invalid="compOwnProblem ? 'true' : undefined"
+                :class="numberClass"
+              />
+            </div>
+            <button
+              type="submit"
+              :disabled="busy || compProblem !== '' || compOwnProblem !== '' || !compChanged"
+              :class="primaryButton"
+            >
               Save grant
             </button>
           </div>
-          <p id="user-comp-hint" class="text-xs" :class="compProblem ? 'text-danger' : 'text-ink-muted'">
+          <p id="user-comp-hint" class="text-xs" :class="compProblem || compOwnProblem ? 'text-danger' : 'text-ink-muted'">
             {{
               compProblem ||
-              `0 to ${COMP_SERVERS_MAX} free hosted servers. The account gets the larger of this and its tier's; lowering it stops its newest servers first.`
+              compOwnProblem ||
+              `0 to ${COMP_SERVERS_MAX} free hosted servers, and 0 to ${COMP_OWN_MACHINES_MAX} own machines for them. The account gets the larger of the servers and its tier's, and the own machines on top of any it pays for; lowering them stops its newest servers first.`
             }}
           </p>
         </form>
@@ -236,7 +258,7 @@
 // /admin/users/<id>: one account (GET /api/admin/users/<id>): its profile and
 // edit (PUT /api/admin/users/<id>), its role (a demotion of the last admin
 // who can log in says how one comes back), its hosting entitlement with the
-// admin's comp grant (PUT .../comp-servers, 0 to 16), its hosted servers
+// admin's comp grants (PUT .../comp: servers and own machines, 0 to 16 each), its hosted servers
 // (each to its fleet page), its Stripe ids (to Stripe's dashboard, in the
 // key's mode), its CD keys (GET .../cd-keys) and its deletion (409
 // active_subscription while a tier grants).
@@ -247,10 +269,17 @@ import HistoryToggle from '../../components/HistoryToggle.vue';
 import { hasAdminToken } from '../../api/authToken';
 import { stripeDashboardUrl } from '../../api/adminBilling';
 import { fetchAccountCdKeys } from '../../api/cdKeys';
-import { deleteUser, fetchUser, listUsers, setCompServers, updateUser } from '../../api/users';
+import { deleteUser, fetchUser, listUsers, setCompGrants, updateUser } from '../../api/users';
 import { useSession } from '../../composables/useSession';
 import type { CdKeyAccountResponse } from '../../types/cdKeys';
-import { COMP_SERVERS_MAX, type Role, type User, type UserDetail, type UserListEntry } from '../../types/users';
+import {
+  COMP_OWN_MACHINES_MAX,
+  COMP_SERVERS_MAX,
+  type Role,
+  type User,
+  type UserDetail,
+  type UserListEntry,
+} from '../../types/users';
 import { replacedServers } from '../../utils/history';
 import { accountStatusLabel, entitlementLabel, isActiveAccount } from '../../utils/adminView';
 import { subscriptionStatusLabel } from '../../utils/billingView';
@@ -287,19 +316,28 @@ const message = ref('');
 const error = ref('');
 const now = ref(Date.now());
 const comp = ref<number | string>(0);
+const compOwn = ref<number | string>(0);
 const edit = reactive({ username: '', nwhandle: '', pcid: '', nwh: '', password: '' });
 
 const id = computed(() => Number(route.params.id));
 const isSelf = computed(() => sessionUser.value?.id === detail.value?.user.id);
 const liveCount = computed(() => detail.value?.servers.filter((s) => s.live).length ?? 0);
 
-const compProblem = computed(() => {
-  const n = typeof comp.value === 'number' ? comp.value : Number(String(comp.value).trim());
-  if (String(comp.value).trim() === '' || !Number.isInteger(n) || n < 0 || n > COMP_SERVERS_MAX) {
-    return `Enter a whole number from 0 to ${COMP_SERVERS_MAX}.`;
+// "" when `value` is a whole number from 0 to `max`, else what to enter.
+function countProblem(value: number | string, max: number): string {
+  const n = typeof value === 'number' ? value : Number(String(value).trim());
+  if (String(value).trim() === '' || !Number.isInteger(n) || n < 0 || n > max) {
+    return `Enter a whole number from 0 to ${max}.`;
   }
   return '';
-});
+}
+const compProblem = computed(() => countProblem(comp.value, COMP_SERVERS_MAX));
+const compOwnProblem = computed(() => countProblem(compOwn.value, COMP_OWN_MACHINES_MAX));
+const compChanged = computed(
+  () =>
+    !!detail.value &&
+    (Number(comp.value) !== detail.value.user.comp_servers || Number(compOwn.value) !== detail.value.user.comp_own_machines),
+);
 
 function flash(text: string) {
   message.value = text;
@@ -317,6 +355,7 @@ function adopt(user: User) {
   detail.value = { ...detail.value, user };
   Object.assign(edit, { username: user.username, nwhandle: user.nwhandle, pcid: user.pcid, nwh: user.nwh, password: '' });
   comp.value = user.comp_servers;
+  compOwn.value = user.comp_own_machines;
 }
 
 async function load() {
@@ -433,8 +472,9 @@ async function changeRole(role: Role) {
 }
 
 async function saveComp() {
-  if (!detail.value || busy.value || compProblem.value) return;
+  if (!detail.value || busy.value || compProblem.value || compOwnProblem.value) return;
   const n = Number(comp.value);
+  const own = Number(compOwn.value);
   const u = detail.value.user;
   // The entitlement after the change is the larger of the grant and the tier's
   // servers, whichever gives it now; the limit counts the live servers not
@@ -449,13 +489,18 @@ async function saveComp() {
     }
   }
   busy.value = true;
-  const result = await setCompServers(u.id, n);
+  const result = await setCompGrants(u.id, { servers: n, own_machines: own });
   busy.value = false;
   if (!result.ok) {
     fail(result.error.message);
     return;
   }
-  flash(n === 0 ? `${u.username} has no admin grant now.` : `${u.username} may now run ${n} hosted server${n === 1 ? '' : 's'} free of charge.`);
+  const machines = own === 0 ? '' : `, ${own} on an own machine`;
+  flash(
+    n === 0 && own === 0
+      ? `${u.username} has no admin grant now.`
+      : `${u.username} now has ${n} hosted server${n === 1 ? '' : 's'}${machines} free of charge.`,
+  );
   await load();
 }
 

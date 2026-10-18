@@ -120,7 +120,7 @@ inline std::string tree_url_of(int64_t id) {
 	return "file:///store/trees/" + std::to_string(id) + "/";
 }
 
-// A player with an admin's grant of `comp_servers` hosted servers.
+// A player with an admin's grant of `comp_servers` hosted servers (comp_grants).
 inline int64_t make_player(Database &db, const std::string &name, int comp_servers) {
 	static int pcid_counter = 0;
 	nws::CreateUserParams p;
@@ -136,7 +136,7 @@ inline int64_t make_player(Database &db, const std::string &name, int comp_serve
 		std::fprintf(stderr, "  create_user %s: %s\n", name.c_str(), created.error_code.c_str());
 		return 0;
 	}
-	if (comp_servers > 0 && !nws::set_comp_servers(db, created.id, comp_servers).ok) return 0;
+	if (comp_servers > 0 && !nws::billing::set_comp_grants(db, created.id, { comp_servers, 0 })) return 0;
 	return created.id;
 }
 

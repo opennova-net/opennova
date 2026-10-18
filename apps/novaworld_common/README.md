@@ -674,6 +674,19 @@ site. Everything here is service policy (`billing/`).
   listed as duplicates. It also checks the configured prices (monthly, recurring, the key's
   mode, the sold one active, one currency); until they check out, checkout answers 503
   `billing_misconfigured`.
+- **The capacity gate** (`hosted/sold_capacity.*`): a new subscription is never sold past
+  what the fleet holds. Every account holds what its entitlement grants, used or not (its
+  servers less those on own machines are shared places, its own machines are own
+  machines), an admin's comp grant included; the fleet sells `ONNET_FLEET_MAX_SHARED` x
+  `ONNET_FLEET_SHARED_SLOTS` shared places and `ONNET_FLEET_MAX_OWN` own machines. A
+  checkout is judged, and its item reserved (`billing_checkout_reservations`, an hour and
+  a quarter), in one transaction under the hosting-start lock, before Stripe makes its
+  session, so two checkouts at once never both take the last place; the reservation
+  counts as the subscription until the sync writes the one its session made (its
+  `opennova_reservation` metadata), the session's `checkout.session.expired` event, the
+  account's next checkout or its end drops it. One past the fleet is 409 `sold_out`, and
+  `GET /api/billing/tiers` says which items are `available`. A start's `at_capacity`
+  stays the hard gate; the Portal's tier changes are not judged.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -703,9 +716,9 @@ compose stack takes the test-mode set from the vault through
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the own-machine add-on's amount |
-| `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `comp_servers`, `own_machines`, `used`, `stopping`, `can_start`), the support tier and add-on subscriptions shown, `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
-| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine"}`: 200 `{"url"}`; 400; 403 `not_eligible`; 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `own_machine_limit`; 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. The account's previous session is settled first (a completed one synced and judged again), so nothing is sold twice; the session asks for the terms of service and stamps the instance and the account on the subscription |
+| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the own-machine add-on's amount, and each one's `available` (the fleet takes one more for an account that has nothing yet; false: hosting is full) |
+| `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `comp_servers`, `comp_own_machines`, `own_machines`, `used`, `stopping`, `can_start`), the support tier and add-on subscriptions shown, `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
+| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine"}`: 200 `{"url"}`; 400; 403 `not_eligible`; 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `own_machine_limit`, `sold_out` (the fleet has sold all it holds of what the item adds); 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. The account's previous session is settled first (a completed one synced), then the item judged and reserved under the hosting-start lock, so nothing is sold twice or past the fleet; the session asks for the terms of service and stamps the instance, the account and the reservation on the subscription |
 | `POST /api/billing/portal` | a website session, the CSRF header | 200 `{"url"}`; 404 `no_billing_account`; 429; 503 |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook): as `GET /api/me/billing`; 404; 429 (3, then one every 10 s); 503 |
 | `POST /api/billing/webhook` | Stripe's signature | above |
@@ -715,7 +728,10 @@ compose stack takes the test-mode set from the vault through
 
 `DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of
 the account still grants (Stripe would bill an account that is gone). The admin's user
-list and detail carry each account's entitlement, live servers and subscriptions.
+list and detail carry each account's entitlement, live servers and subscriptions; the
+detail and `PUT /api/admin/users/<id>/comp` carry the service's sold `capacity` against
+what the fleet sells (`oversold` when an admin's grant, or a lowered maximum, took it
+past).
 
 ## CD keys (DFX2 activation)
 

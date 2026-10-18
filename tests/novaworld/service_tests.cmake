@@ -455,6 +455,25 @@ target_include_directories(billing_entitlement_test PRIVATE
 target_compile_definitions(billing_entitlement_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(billing_entitlement COMMAND billing_entitlement_test)
 
+# The sold capacity (apps/novaworld_common/hosted/sold_capacity.h) and the checkout
+# reservations it counts (billing/billing_repository.h): what an entitlement holds, what the
+# fleet sells, what one more subscription adds and whether it fits; every account's
+# holdings with its live reservations on a migrated database; and two checkouts for the
+# last place judged under the hosting-start lock, the second seeing the first's
+# reservation. Crow-free: compiles the sources directly.
+add_executable(hosted_sold_capacity_test
+    novaworld/hosted_sold_capacity_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/sold_capacity.cpp)
+target_link_libraries(hosted_sold_capacity_test PRIVATE opennova_novaworld_service Threads::Threads)
+target_include_directories(hosted_sold_capacity_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
+target_compile_definitions(hosted_sold_capacity_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(hosted_sold_capacity COMMAND hosted_sold_capacity_test)
+
 # The billing sync (apps/novaworld_common/billing/billing_sync.h, billing_jobs.h) against
 # the in-memory Stripe (novaworld/billing_fake_stripe.h) on a migrated database, its jobs'
 # work on a stepped clock (and the jobs themselves, their state in the database): a webhook event's customer synced into the entitlement, a redelivery recorded

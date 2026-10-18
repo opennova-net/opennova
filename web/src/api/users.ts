@@ -12,6 +12,7 @@ import { parseHostedServer } from './hostedServer';
 import type { AdminSubscription, TierNumber } from '../types/billing';
 import type { EntitlementSource, HostedServer } from '../types/hostedServer';
 import type {
+  CompGrants,
   CreateUserPayload,
   RegisterPayload,
   Role,
@@ -44,6 +45,7 @@ export function pickUser(value: unknown): User | null {
     email: typeof v.email === 'string' && v.email !== '' ? v.email : null,
     role: v.role as Role,
     comp_servers: count(v.comp_servers),
+    comp_own_machines: count(v.comp_own_machines),
     max_servers: count(v.max_servers ?? (v.entitlement as { max_servers?: unknown } | undefined)?.max_servers),
   };
 }
@@ -100,6 +102,7 @@ function pickDetail(data: unknown): UserDetail | null {
     entitlement: {
       ...pickEntitlement(e, user),
       comp_servers: Number.isInteger(e.comp_servers) ? (e.comp_servers as number) : user.comp_servers,
+      comp_own_machines: Number.isInteger(e.comp_own_machines) ? (e.comp_own_machines as number) : user.comp_own_machines,
       tier_servers: count(e.tier_servers),
       own_machines: count(e.own_machines),
       can_start: e.can_start === true,
@@ -148,11 +151,15 @@ export function updateUser(id: number, payload: UpdateUserPayload): Promise<Admi
   return adminCall(() => adminClient.put<unknown>(`/users/${id}`, payload), pickUserReply);
 }
 
-// PUT /api/admin/users/<id>/comp-servers: the admin's grant of hosted servers
-// (0 to 16). Lowering it below what the account runs makes the service stop
-// its newest servers first; 404 not_found for an unknown account.
-export function setCompServers(id: number, compServers: number): Promise<AdminResult<User>> {
-  return adminCall(() => adminClient.put<unknown>(`/users/${id}/comp-servers`, { comp_servers: compServers }), pickUserReply);
+// PUT /api/admin/users/<id>/comp: the admin's grants of hosted servers and own
+// machines (0 to 16 each, both set at once). Lowering them below what the
+// account runs makes the service stop its newest servers first; 404 not_found
+// for an unknown account.
+export function setCompGrants(id: number, grants: CompGrants): Promise<AdminResult<User>> {
+  return adminCall(
+    () => adminClient.put<unknown>(`/users/${id}/comp`, { servers: grants.servers, own_machines: grants.own_machines }),
+    pickUserReply,
+  );
 }
 
 // DELETE /api/admin/users/<id>; 409 active_subscription while a support tier

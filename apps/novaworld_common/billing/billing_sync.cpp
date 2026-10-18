@@ -23,6 +23,15 @@ std::string meta(const Metadata &metadata, const char *key) {
 
 bool is_terminal(const std::string &status) { return status == "canceled" || status == "incomplete_expired"; }
 
+// The reservation of the checkout that made `row` (its opennova_reservation
+// metadata) dropped once the row counts in its place: it grants, or it ended.
+// One still incomplete (its payment pending) keeps the reservation to its end.
+void settle_reservation(db::Database &db, const Subscription &s, const SubscriptionRow &row, int64_t now) {
+	const auto id = strutil::parse_llong(meta(s.metadata, kMetaReservation));
+	if (!id || *id <= 0 || !row.user_id) return;
+	if (subscription_grants(row, now) || is_terminal(row.status)) drop_reservation(db, *id, *row.user_id);
+}
+
 // Stripe no longer knows it (in this mode, on this account).
 bool is_missing(const StripeError &e) { return e.kind == StripeError::Kind::Rejected && e.status == 404; }
 
@@ -318,7 +327,9 @@ SyncOutcome BillingSync::sync_one(db::Database *held, const std::string &stripe_
 		if (!customer_by_id(db, stripe_customer_id) && !customer_of(db, *user))
 			insert_customer(db, *user, stripe_customer_id, customer.value->livemode);
 		for (const Subscription &s : *subscriptions) {
-			upsert_subscription(db, row_of(s, user));
+			const SubscriptionRow row = row_of(s, user);
+			upsert_subscription(db, row);
+			settle_reservation(db, s, row, clock_());
 			listed.push_back(s.id);
 		}
 		// One Stripe lists no longer (deleted with its test data): canceled.
@@ -494,7 +505,9 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 			if (!customer_by_id(db, o.subscription->customer) && !customer_of(db, o.user) &&
 					insert_customer(db, o.user, o.subscription->customer, o.subscription->livemode))
 				++report.customers_recreated;
-			upsert_subscription(db, row_of(*o.subscription, o.user));
+			const SubscriptionRow row = row_of(*o.subscription, o.user);
+			upsert_subscription(db, row);
+			settle_reservation(db, *o.subscription, row, now);
 			++report.written;
 		}
 		for (const SubscriptionRow &row : refreshed) upsert_subscription(db, row);

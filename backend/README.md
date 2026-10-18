@@ -21,7 +21,7 @@ The database is not here: it is the PostgreSQL server's.
 built, squashed into one file in PostgreSQL's dialect: `bigint` integers,
 identity ids, `timestamptz` times, `boolean` flags and `bytea` samples (with
 the hosted servers' comp grant, `players.comp_servers`, in place of the old
-approval flag). `0002_billing.sql` adds the billing tables: the service's
+approval flag; `0017_capacity_addresses.sql` moves it to the `comp_grants` table). `0002_billing.sql` adds the billing tables: the service's
 instance id, the support tiers' Stripe customers, subscriptions and webhook
 events, the cache of Stripe the hosting entitlement reads
 (apps/novaworld_common/hosted/README.md). `0005_account_email.sql`

@@ -137,8 +137,10 @@ public:
 	}
 
 	// The fleet's placement policy (hosted/fleet_config.h) the hosted routes ask
-	// the supervisor's planner with: a start's at_capacity, the list's `full`.
-	// Set before start(); unset, placement.h's defaults.
+	// the supervisor's planner with (a start's at_capacity, the list's `full`)
+	// and the billing routes judge a checkout's sold capacity against
+	// (hosted/sold_capacity.h). Set before start(); unset, placement.h's
+	// defaults.
 	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
 	// The image the fleet's launch templates pin (hosted/fleet_config.h
 	// ONNET_FLEET_IMAGE_ID), which a fleet roll's preview holds each machine's

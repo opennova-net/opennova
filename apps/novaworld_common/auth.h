@@ -51,10 +51,6 @@ struct UserRecord {
 	// "service" for a hosted server's own account (srv-<id>), which the website's
 	// login refuses and the admin users list hides.
 	std::string kind = "player";
-	// players.comp_servers: the hosted servers an admin granted the account
-	// (0..16); its hosting entitlement is the larger of this and its support
-	// tier's servers (billing/entitlement.h).
-	int comp_servers = 0;
 	// players.credentials_gen, bumped by every update that ends
 	// the account's logins (update_revokes_sessions). What a login grants (a
 	// website session, a retail login's session row and pin, a known address)
@@ -267,7 +263,7 @@ uint64_t password_verifications();
 // (the race credentials_gen closes). Unset in the server.
 void set_password_accepted_hook(std::function<void(int64_t user_id)> hook);
 
-// --- Hosted servers' accounts (players.kind, players.comp_servers) ---
+// --- Hosted servers' accounts (players.kind) ---
 
 // The prefix of every service account's username and handle: "srv-" and the
 // hosted server's id. Reserved, case aside, so no person registers or renames
@@ -275,11 +271,6 @@ void set_password_accepted_hook(std::function<void(int64_t user_id)> hook);
 inline constexpr const char *kServiceUsernamePrefix = "srv-";
 bool is_service_username(std::string_view name);
 std::string service_username(int64_t hosted_server_id);
-
-// Sets an admin's grant of hosted servers to a player (players.comp_servers):
-// invalid_field outside 0..16 (billing/tiers.h kMaxCompServers), not_found for an
-// unknown id and for a service account; a database failure is db_error.
-MutationResult set_comp_servers(opennova::db::Database &db, int64_t id, int comp_servers);
 
 // The supervisor's account for a hosted server: creates the service account
 // `username` (kind 'service', its handle the same, a random free PCID) with

@@ -19,8 +19,10 @@ export interface User {
   // read-only on the admin pages.
   email: string | null;
   role: Role;
-  // An admin's grant of hosted servers (players.comp_servers, 0 to 16).
+  // An admin's grants (comp_grants, 0 to 16 each): hosted servers, and own
+  // machines for them (counted while the account has servers).
   comp_servers: number;
+  comp_own_machines: number;
   // The account's hosting entitlement: the larger of its tier's servers and
   // the grant.
   max_servers: number;
@@ -45,11 +47,19 @@ export interface UserListEntry extends User {
 // The account's hosting entitlement in full, on its admin page.
 export interface UserEntitlement extends UserEntitlementSummary {
   comp_servers: number;
+  comp_own_machines: number;
   // The servers its support tier alone grants (0 with none): the entitlement
   // is the larger of this and comp_servers.
   tier_servers: number;
+  // The add-on's machines (while a tier grants) plus comp_own_machines.
   own_machines: number;
   can_start: boolean;
+}
+
+// PUT /api/admin/users/<id>/comp's body.
+export interface CompGrants {
+  servers: number;
+  own_machines: number;
 }
 
 // GET /api/admin/users/<id>.
@@ -97,5 +107,6 @@ export interface UserResponse {
   user: User;
 }
 
-// The most an admin may grant (PUT /api/admin/users/<id>/comp-servers).
+// The most an admin may grant of each (PUT /api/admin/users/<id>/comp).
 export const COMP_SERVERS_MAX = 16;
+export const COMP_OWN_MACHINES_MAX = 16;

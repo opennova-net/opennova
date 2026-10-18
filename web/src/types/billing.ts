@@ -72,8 +72,10 @@ export interface MyBilling {
   enabled: boolean;
   // The hosting entitlement: max(tier servers, comp_servers).
   max_servers: number;
-  // An admin's grant, 0 for none.
+  // An admin's grants, 0 for none: servers, and own machines for them.
   comp_servers: number;
+  comp_own_machines: number;
+  // The add-on's machines (while a tier grants) plus the admin's.
   own_machines: number;
   // How many of its hosted servers are live now.
   used: number;

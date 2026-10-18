@@ -1,7 +1,5 @@
 #include "auth.h"
 
-#include "billing/tiers.h"
-
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
@@ -42,9 +40,9 @@ std::function<void(int64_t)> g_password_accepted_hook;
 
 // The columns row_to_user reads, in its order.
 constexpr const char *kUserColumns =
-		"id, username, pcid, nwh, nwhandle, account_status, role, credentials_gen, kind, comp_servers, email";
+		"id, username, pcid, nwh, nwhandle, account_status, role, credentials_gen, kind, email";
 // The column after them (authenticate_user's password_hash).
-constexpr std::size_t kUserColumnCount = 11;
+constexpr std::size_t kUserColumnCount = 10;
 
 // Verify a password against a bcrypt hash. The stored hash format is
 //     $2a$<cost>$<22-char-salt><31-char-hash>     (or $2b$ — same algo)
@@ -94,8 +92,7 @@ std::optional<UserRecord> row_to_user(const opennova::db::Row &row) {
 	u.role     = row.as_text(6).value_or("player");
 	u.credentials_gen = row.as_int(7).value_or(0);
 	u.kind     = row.as_text(8).value_or("player");
-	u.comp_servers = static_cast<int>(row.as_int(9).value_or(0));
-	u.email    = row.as_text(10).value_or("");
+	u.email    = row.as_text(9).value_or("");
 	if (u.id == 0) return std::nullopt;
 	return u;
 }
@@ -257,7 +254,7 @@ std::optional<UserRecord> get_user_by_login_session_tag(
 		return std::nullopt;
 	auto rows = db.query(
 			"SELECT p.id, p.username, p.pcid, p.nwh, p.nwhandle, p.account_status, p.role, "
-			"       p.credentials_gen, p.kind, p.comp_servers, p.email "
+			"       p.credentials_gen, p.kind, p.email "
 			"FROM active_user_sessions s JOIN players p ON p.id = s.user_id "
 			"WHERE s.session_tag = $1 AND s.credentials_gen = p.credentials_gen LIMIT 1;",
 			{ opennova::db::BindValue(session_tag) });
@@ -816,23 +813,6 @@ bool is_service_username(std::string_view name) {
 
 std::string service_username(int64_t hosted_server_id) {
 	return kServiceUsernamePrefix + std::to_string(hosted_server_id);
-}
-
-MutationResult set_comp_servers(opennova::db::Database &db, int64_t id, int comp_servers) {
-	if (comp_servers < 0 || comp_servers > billing::kMaxCompServers)
-		return err("invalid_field", "comp_servers must be a whole number from 0 to 16");
-	if (id <= 0) return err("not_found", "invalid id");
-	try {
-		db.exec("UPDATE players SET comp_servers = $1 WHERE id = $2 AND kind = 'player';",
-				{ opennova::db::BindValue(static_cast<int64_t>(comp_servers)), opennova::db::BindValue(id) });
-		if (db.changes() == 0) return err("not_found", "no such user");
-	} catch (const opennova::db::Error &e) {
-		return db_err("set_comp_servers", e);
-	}
-	MutationResult m;
-	m.ok = true;
-	m.id = id;
-	return m;
 }
 
 MutationResult upsert_service_account(

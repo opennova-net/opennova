@@ -120,6 +120,8 @@ std::string check_placement_policy(const PlacementPolicy &policy) {
 		return "the most shared machines cannot be below 0";
 	if (policy.max_own < 0)
 		return "the most own machines cannot be below 0";
+	if (policy.max_addresses < 0)
+		return "the most static addresses cannot be below 0";
 	return std::string();
 }
 
