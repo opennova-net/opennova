@@ -11,8 +11,10 @@
 #include <memory>
 #include <vector>
 
+#include <runtime/replication/client_state.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/infantry.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/wire_person_hit.h>
 #include <runtime/world/world.h>
@@ -57,6 +59,7 @@ struct Joiner {
         self.item_type = 3;
         self.team = self_team;
         self.flags = kEntityFlagPlayer;
+        self.group_id = 1; // as world::spawn_player builds the joiner's body
         self.position = {-50.0f, 0.0f, 0.0f}; // out of the round's path
         self.health = 100;
         local = world.registry.spawn(0, self);
@@ -244,6 +247,169 @@ void test_relayed_round_reads_the_shooter_row() {
     CHECK(j.rows[kRemoteH].last_attacker == kShooterH);
 }
 
+// The org class callback's event 1 over an infantry row (no Player bit, not
+// the plyr row): the alert, then the round legs. The round flies +x into a
+// body facing back along it (heading 0x7F000000), the front quadrant.
+// [orig: OrganicClass_HandleEvent @0x4073BF..0x4076D5]
+void test_org_callback_alerts_and_runs_the_round_legs() {
+    Joiner j(/*self_team=*/1);
+    WirePersonBody &row = j.remote(/*team=*/2, /*flags=*/0);
+    row.heading_bam = 0x7F000000; // facing back along the round, front quadrant
+    row.pos[0] = 5 * kQ;
+    AmmoTableEntry &ammo = j.world.tables.ammo.entries[0];
+    ammo.secondary_anim = 2; // the hit type
+    ammo.kz_physics = 1;     // the walk push
+    j.fire();
+    const WirePersonBody &body = j.rows[kRemoteH];
+    // The alert [orig: @0x4073DB; TriggerGroup_SetAlertRed @0x4073EA].
+    CHECK(body.ai_alert == 2);
+    CHECK(j.world.script.relations.group(0).alert == TriggerRelations::kAlertRed);
+    // The death clip from section 1, the front quadrant, cause 1 [orig: @0x407483].
+    CHECK(body.death_anim_state == compute_death_anim_state(1, 0, death_cause::kBullet));
+    // The hit type and moveTimer: the round's owner is client-built, its
+    // commandGroup 0 like the row's (L's world group_id 1 notwithstanding), so
+    // the same-group duration (2 * 4) >> 2 = 2, the source lying behind the
+    // body's yaw [orig: @0x4AF506, @0x4AF4E7, @0x4AF530].
+    CHECK(body.hit_type == 2);
+    CHECK(body.move_timer == 2);
+    // The walk push: a live body's slideDecay +5120 and a planar kick away
+    // from the source (+x) [orig: @0x4AF5E0..0x4AF602].
+    CHECK(body.vel[2] == 5120);
+    CHECK(body.vel[0] > 0);
+    // The torso-stack roll, front quadrant [orig: @0x407564].
+    CHECK(body.body_roll == 0x05B05B00);
+    // Entity_OnDamageReceived's tail [orig: @0x4AF866..0x4AF878].
+    CHECK(body.was_hit);
+    CHECK(body.damage_timer == 10);
+    CHECK(body.damage_attacker == kSelfH);
+    // No hit emitter on an ammo without one.
+    CHECK(j.world.out.destruction.effects.empty());
+    // The rear quadrant rolls the other way [orig: @0x407575].
+    Joiner k(/*self_team=*/1);
+    k.remote(/*team=*/2, /*flags=*/0).heading_bam = 0;
+    k.fire();
+    CHECK(k.rows[kRemoteH].body_roll == -0x05B05B00);
+    CHECK(k.rows[kRemoteH].death_anim_state ==
+          compute_death_anim_state(1, 2, death_cause::kBullet));
+}
+
+// A relayed round from a non-person shooter row (a vehicle gun): the owner is
+// the row's client-built entity, commandGroup 0, so the same-group duration.
+void test_vehicle_shooter_owner_group() {
+    static constexpr uint16_t kVehicleH = 0x1004;
+    Joiner j(/*self_team=*/1);
+    WirePersonBody &row = j.remote(/*team=*/2, /*flags=*/0);
+    row.heading_bam = 0x7F000000;
+    row.pos[0] = 5 * kQ;
+    j.world.tables.ammo.entries[0].secondary_anim = 2;
+    j.world.round_sim.wire_actor_provider = [](uint16_t handle, RoundSim::WireActor &out) {
+        out = RoundSim::WireActor{};
+        if (handle != kVehicleH) return false;
+        out.team = 1;
+        return true;
+    };
+    RoundSpawnParams params;
+    params.shooter_handle = kVehicleH;
+    params.origin = {0.0f, 0.0f, kOrganicStandInCenterZ};
+    params.ammo_index = 0;
+    CHECK(j.world.round_sim.spawn(j.world, params, RoundConsequenceMode::VisualOnly) >= 0);
+    j.world.round_sim.tick(j.world, nullptr, &j.collision);
+    CHECK(j.rows[kRemoteH].hit_type == 2);
+    CHECK(j.rows[kRemoteH].move_timer == 2);
+    CHECK(j.rows[kRemoteH].last_attacker == kVehicleH);
+}
+
+// A dead-flagged org body still takes the callback (the org row has no dead
+// return): the alert and the clip, the force's smaller dead constants, but no
+// hit-type stamp and no roll [orig: @0x4AF4FF, @0x4AF5A9, @0x40755E].
+void test_org_callback_on_a_dead_body() {
+    Joiner j(/*self_team=*/1);
+    WirePersonBody &row = j.remote(/*team=*/2, /*flags=*/kEntityFlagDead);
+    row.heading_bam = 0x7F000000;
+    AmmoTableEntry &ammo = j.world.tables.ammo.entries[0];
+    ammo.secondary_anim = 2;
+    ammo.kz_physics = 1;
+    j.fire();
+    const WirePersonBody &body = j.rows[kRemoteH];
+    CHECK(body.ai_alert == 2);
+    CHECK(body.hit_type == 0);
+    CHECK(body.move_timer == 0);
+    CHECK(body.vel[2] == 2560);
+    CHECK(body.body_roll == 0);
+    CHECK(body.was_hit);
+}
+
+// The ammo's hit emitter: the body's +0x1CC slot is released, the effect
+// spawns at the body tagged with it, oriented (0, 0, -0.5), and the clip
+// becomes 173 [orig: @0x4074C7..0x40754A, @0x4076D3..0x4076D5].
+void test_org_callback_hit_emitter() {
+    Joiner j(/*self_team=*/1);
+    j.remote(/*team=*/2, /*flags=*/0).pos[0] = 5 * kQ;
+    j.world.tables.ammo.entries[0].secondary_effect = "Effect_Burn";
+    j.fire();
+    const auto &effects = j.world.out.destruction.effects;
+    CHECK(effects.size() == 2);
+    if (effects.size() == 2) {
+        CHECK(effects[0].release);
+        CHECK(effects[0].family == 1);
+        CHECK(effects[0].attach_wire_handle == kRemoteH);
+        CHECK(!effects[1].release);
+        CHECK(effects[1].effect == "Effect_Burn");
+        CHECK(effects[1].family == 1);
+        CHECK(effects[1].attach_wire_handle == kRemoteH);
+        CHECK(effects[1].section_tagged);
+        CHECK(effects[1].positioned);
+        CHECK(effects[1].pos.x == 5.0f);
+        CHECK(effects[1].dir.z == -0.5f);
+    }
+    CHECK(j.rows[kRemoteH].death_anim_state == 173);
+}
+
+// The row store: every field the leg writes lands on the replica row's own
+// field, the ones the row already kept (the velocity, moveTimer, the death
+// clip, the body states) included.
+void test_row_body_round_trip() {
+    opennova::replication::ClientEntityState row;
+    row.handle = kRemoteH;
+    row.team = 2;
+    row.rm_entity_flags = kEntityFlagPlayer;
+    row.x = 3 * kQ;
+    row.heading_bam = 0x40000000;
+    row.net_health_zero = true;
+    row.net_anim_pending_boundary = 7;
+    WirePersonBody body = opennova::replication::wire_person_body_of(
+            row, /*has_item_def=*/true, /*item_attrib=*/0x20u, /*plyr_class=*/true);
+    CHECK(body.wire_handle == kRemoteH && body.team == 2 && body.has_item_def);
+    CHECK(body.item_attrib == 0x20u && body.plyr_class && body.health_zero);
+    CHECK(body.flags == kEntityFlagPlayer && body.pos[0] == 3 * kQ);
+    CHECK(body.heading_bam == 0x40000000);
+    body.last_attacker = 9;
+    body.last_attacker_ammo = 4;
+    body.ai_alert = 2;
+    body.death_anim_state = 120;
+    body.anim_current = 120;
+    body.anim_pending = 0;
+    body.hit_type = 3;
+    body.move_timer = 12;
+    body.vel[0] = 1;
+    body.vel[1] = 2;
+    body.vel[2] = 3;
+    body.body_roll = 0x05B05B00;
+    body.was_hit = true;
+    body.damage_timer = 10;
+    body.damage_attacker = 9;
+    body.spawn_phase = 64;
+    opennova::replication::store_wire_person_body(body, row);
+    CHECK(row.last_attacker == 9 && row.last_attacker_ammo == 4 && row.ai_alert == 2);
+    CHECK(row.net_death_anim == 120 && row.net_anim_current == 120 && row.net_anim_pending == 0);
+    CHECK(row.net_anim_pending_boundary == -1);
+    CHECK(row.hit_type == 3 && row.net_corpse_timer == 12);
+    CHECK(row.rm_vel_xy[0] == 1 && row.rm_vel_xy[1] == 2 && row.rm_vel_z == 3);
+    CHECK(row.rm_body_roll == 0x05B05B00);
+    CHECK(row.was_hit && row.damage_timer == 10 && row.damage_attacker == 9);
+    CHECK(row.spawn_phase == 64);
+}
+
 struct NamedTest {
     const char *name;
     void (*fn)();
@@ -255,6 +421,11 @@ const NamedTest kTests[] = {
     {"test_player_shooter_and_berserk_unprotect", test_player_shooter_and_berserk_unprotect},
     {"test_def_gates", test_def_gates},
     {"test_relayed_round_reads_the_shooter_row", test_relayed_round_reads_the_shooter_row},
+    {"test_org_callback_alerts_and_runs_the_round_legs", test_org_callback_alerts_and_runs_the_round_legs},
+    {"test_org_callback_on_a_dead_body", test_org_callback_on_a_dead_body},
+    {"test_vehicle_shooter_owner_group", test_vehicle_shooter_owner_group},
+    {"test_org_callback_hit_emitter", test_org_callback_hit_emitter},
+    {"test_row_body_round_trip", test_row_body_round_trip},
 };
 
 } // namespace

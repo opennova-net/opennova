@@ -228,12 +228,7 @@ void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
 //  -0x05B05B00 @0x407575; Entity_HandleDamageAndTriggerZones gate @0x4078c6;
 //  @0x4078cc / @0x407918]
 void apply_hit_body_roll(AiEntity *body, int32_t bone, int quadrant) {
-    if (body == nullptr || bone >= 5) return;
-    if (quadrant == 0) {
-        body->roll = 0x05B05B00;
-    } else if (quadrant == 2) {
-        body->roll = -0x05B05B00;
-    }
+    if (body != nullptr) hit_body_roll(body->roll, bone, quadrant);
 }
 
 Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
