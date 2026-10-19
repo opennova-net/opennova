@@ -224,6 +224,64 @@ describe('UserDetailSection', () => {
     expect(comp).not.toHaveBeenCalled();
   });
 
+  it('confirms a cut of own machines below the servers on them: they move while there is room', async () => {
+    // A grant of 3 servers on 2 own machines, both in use.
+    detail.mockResolvedValue({
+      ok: true,
+      value: userDetail(7, {
+        user: user(7, { comp_servers: 3, comp_own_machines: 2, max_servers: 3 }),
+        entitlement: { max_servers: 3, source: 'comp', tier: null, comp_servers: 3, comp_own_machines: 2, tier_servers: 0, own_machines: 2, can_start: true },
+        servers: [hostedServer(31, { own_machine: true }), hostedServer(32, { own_machine: true }), hostedServer(33)],
+      }),
+    });
+    const { wrapper } = await mountSection();
+    confirm.mockReturnValueOnce(false);
+    await wrapper.get('#user-comp-own').setValue(0);
+    await wrapper.get('#user-comp-own').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+    expect(confirm).toHaveBeenCalledWith(
+      "Lower player7's own machines to 0? 2 of their servers on own machines move to a shared machine (their matches restart) while there is room; the rest stop.",
+    );
+    expect(comp).not.toHaveBeenCalled();
+
+    // Down to one: one of the two moves. Down to two: nothing to confirm.
+    confirm.mockClear();
+    confirm.mockReturnValueOnce(false);
+    await wrapper.get('#user-comp-own').setValue(1);
+    await wrapper.get('#user-comp-own').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Lower player7's own machines to 1? One of their servers on own machines moves"));
+    comp.mockResolvedValue({ ok: true, value: { user: user(7, { comp_servers: 2, comp_own_machines: 2, max_servers: 2 }), capacity: null } });
+    confirm.mockClear();
+    await wrapper.get('#user-comp-own').setValue(2);
+    await wrapper.get('#user-comp-servers').setValue(2);
+    await wrapper.get('#user-comp-own').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+    // The server cut stops the newest (a shared one): both own-machine servers keep their machines.
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('stops its newest server'));
+    expect(confirm).not.toHaveBeenCalledWith(expect.stringContaining('own machines to'));
+    expect(comp).toHaveBeenCalledWith(7, { servers: 2, own_machines: 2 });
+  });
+
+  it("counts the add-on's own machines beside the grant's", async () => {
+    // Tier 2 with one own machine paid for, and an admin's one more: two in use.
+    detail.mockResolvedValue({
+      ok: true,
+      value: userDetail(7, {
+        user: user(7, { comp_servers: 0, comp_own_machines: 1, max_servers: 2 }),
+        entitlement: { max_servers: 2, source: 'tier', tier: 2, comp_servers: 0, comp_own_machines: 1, tier_servers: 2, own_machines: 2, can_start: true },
+        servers: [hostedServer(31, { own_machine: true }), hostedServer(32, { own_machine: true })],
+      }),
+    });
+    const { wrapper } = await mountSection();
+    confirm.mockReturnValueOnce(false);
+    await wrapper.get('#user-comp-own').setValue(0);
+    await wrapper.get('#user-comp-own').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Lower player7's own machines to 1? One of their servers"));
+    expect(comp).not.toHaveBeenCalled();
+  });
+
   it("counts the tier's servers under a comp grant, and no stopping server", async () => {
     // Tier 1 (one server) under a grant of 3: cut to 0, the tier's one stays,
     // and of three live servers one is stopping already.

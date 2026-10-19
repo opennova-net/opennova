@@ -148,7 +148,7 @@
             {{
               compProblem ||
               compOwnProblem ||
-              `0 to ${COMP_SERVERS_MAX} free hosted servers. Own machines add no servers: each moves one of the account's servers off the shared machines onto a machine of its own (0 to ${COMP_OWN_MACHINES_MAX}). A granted account buys no support tier or add-on (one it already pays for still counts: it gets the larger). Lowering either stops its newest servers first.`
+              `0 to ${COMP_SERVERS_MAX} free hosted servers. Own machines add no servers: each moves one of the account's servers off the shared machines onto a machine of its own (0 to ${COMP_OWN_MACHINES_MAX}). A granted account buys no support tier or add-on (one it already pays for still counts: it gets the larger). Lowering the servers stops its newest servers first; lowering the own machines moves its servers past them to a shared machine while there is room, and stops the rest.`
             }}
           </p>
         </form>
@@ -310,8 +310,9 @@
 // /admin/users/<id>: one account (GET /api/admin/users/<id>): its profile and
 // edit (PUT /api/admin/users/<id>), its role (a demotion of the last admin
 // who can log in says how one comes back), its hosting entitlement with the
-// admin's comp grants (PUT .../comp: servers and own machines, 0 to 16 each)
-// and a warning while grants and subscriptions oversell the fleet (the
+// admin's comp grants (PUT .../comp: servers and own machines, 0 to 16 each;
+// a cut below what the account runs is confirmed first, saying which servers
+// stop and which move off their own machines) and a warning while grants and subscriptions oversell the fleet (the
 // service's sold capacity, also in the grant's reply), its hosted servers
 // (each to its fleet page), its static addresses with a comp one (POST
 // .../addresses), its Stripe ids (to Stripe's dashboard, in the key's mode),
@@ -558,18 +559,36 @@ async function saveComp() {
   const n = Number(comp.value);
   const own = Number(compOwn.value);
   const u = detail.value.user;
+  const e = detail.value.entitlement;
+  // The live servers the limits count (not already stopping), oldest first,
+  // as the service keeps them.
+  const live = detail.value.servers.filter((s) => s.live && s.state !== 'stopping').sort((a, b) => a.id - b.id);
+  const warnings: string[] = [];
   // The entitlement after the change is the larger of the grant and the tier's
-  // servers, whichever gives it now; the limit counts the live servers not
-  // already stopping.
-  const after = Math.max(n, detail.value.entitlement.tier_servers);
-  const kept = detail.value.servers.filter((s) => s.live && s.state !== 'stopping').length;
-  const over = kept - after;
+  // servers, whichever gives it now: the newest past it stop.
+  const after = Math.max(n, e.tier_servers);
+  const over = live.length - after;
   if (over > 0) {
     const what = over === 1 ? 'its newest server' : `its ${over} newest servers`;
-    if (!window.confirm(`Lower ${u.username}'s grant to ${n}? They run ${kept} servers live, so the service stops ${what}: their matches end for everyone on them.`)) {
-      return;
-    }
+    warnings.push(
+      `Lower ${u.username}'s grant to ${n}? They run ${live.length} servers live, so the service stops ${what}: their matches end for everyone on them.`,
+    );
   }
+  // Its own machines after it: the add-on's (paid while a tier grants) and the
+  // grant's while it has servers. Of the servers the limit keeps, those on own
+  // machines past them move to a shared machine while there is room; the rest
+  // stop.
+  const paidOwn = e.own_machines - (e.max_servers > 0 ? e.comp_own_machines : 0);
+  const ownAfter = paidOwn + (after > 0 ? own : 0);
+  const ownOver = live.slice(0, after).filter((s) => s.own_machine).length - ownAfter;
+  if (ownOver > 0) {
+    warnings.push(
+      ownOver === 1
+        ? `Lower ${u.username}'s own machines to ${ownAfter}? One of their servers on own machines moves to a shared machine (its match restarts) if there is room; else it stops.`
+        : `Lower ${u.username}'s own machines to ${ownAfter}? ${ownOver} of their servers on own machines move to a shared machine (their matches restart) while there is room; the rest stop.`,
+    );
+  }
+  if (warnings.length > 0 && !window.confirm(warnings.join('\n\n'))) return;
   busy.value = true;
   const result = await setCompGrants(u.id, { servers: n, own_machines: own });
   busy.value = false;
