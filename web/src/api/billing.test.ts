@@ -166,7 +166,7 @@ describe('the routes', () => {
       [503, 'billing_misconfigured', 'no payment was taken'],
       [503, 'stripe_unavailable', 'Stripe could not take the request'],
       [403, 'not_eligible', 'an account with an admin grant buys no tier, dedicated machine or static address'],
-      [404, 'no_billing_account', 'subscribe to a support tier first'],
+      [404, 'no_billing_account', 'subscribe to a support tier or a dedicated machine first'],
       [400, 'invalid_item', 'could not read the request'],
       [409, 'sold_out', 'Hosting is full: new subscriptions are paused. Try again later; no payment was taken.'],
       [409, 'address_limit', 'a static address for every dedicated machine'],

@@ -387,7 +387,7 @@ describe('UserDetailSection', () => {
         code: 'active_subscription',
         status: 409,
         message:
-          'This account has a subscription that still grants (a support tier or an add-on). Cancel it in Stripe first; the account can be deleted once its subscriptions end.',
+          'This account has a subscription that still grants (a support tier, a dedicated machine or a static address). Cancel it in Stripe first; the account can be deleted once its subscriptions end.',
       },
     });
     const { wrapper, router } = await mountSection();

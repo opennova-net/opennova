@@ -199,8 +199,8 @@ export function setCompGrants(id: number, grants: CompGrants): Promise<AdminResu
 }
 
 // DELETE /api/admin/users/<id>; 409 active_subscription while a subscription
-// still grants (a support tier or an add-on), 409 checkout_open while a
-// checkout of the account is open.
+// still grants (a support tier, a dedicated machine or a static address), 409
+// checkout_open while a checkout of the account is open.
 export async function deleteUser(id: number): Promise<AdminResult<void>> {
   return adminCall(
     () => adminClient.delete<unknown>(`/users/${id}`),

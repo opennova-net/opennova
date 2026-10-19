@@ -239,7 +239,7 @@ describe('the start, the stop and one server', () => {
     post.mockRejectedValue(refusal(403, { error: 'payment_past_due', message: 'raw server text' }));
     const pastDue = await startHostedServer(settings());
     expect(!pastDue.ok && pastDue.error.message).toContain('Stripe retries the card');
-    // An add-on's payment counts too: no tier assumed.
+    // A dedicated machine's payment counts too: no tier assumed.
     expect(!pastDue.ok && pastDue.error.message).toContain('A payment of yours did not go through');
     expect(!pastDue.ok && pastDue.error.message).not.toContain('raw server text');
 

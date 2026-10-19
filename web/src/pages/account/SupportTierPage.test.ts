@@ -290,7 +290,7 @@ describe('SupportTierPage', () => {
     expect(page.get('#support-static-address-hint').text()).toBe('Hosting is full: new subscriptions are paused.');
   });
 
-  it('says what an admin granted and offers no tier or add-on beside it', async () => {
+  it('says what an admin granted and offers nothing to buy beside it', async () => {
     tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: STATIC_ADDRESS }) });
     mine.mockResolvedValue({
       ok: true,
@@ -381,7 +381,7 @@ describe('SupportTierPage', () => {
     );
   });
 
-  it("warns while an add-on's payment is past due, the tier's paid", async () => {
+  it("warns while a dedicated machine's payment is past due, the tier's paid", async () => {
     mine.mockResolvedValue({
       ok: true,
       value: subscribed(2, {
@@ -422,7 +422,7 @@ describe('SupportTierPage', () => {
   });
 
   it("says an admin's grant keeps the servers of a tier that ends", async () => {
-    // Granted after it subscribed: the tier box stays, canceled, with no add-on.
+    // Granted after it subscribed: the tier box stays, canceled, with nothing else bought.
     mine.mockResolvedValue({
       ok: true,
       value: subscribed(2, {

@@ -141,7 +141,7 @@ describe('ending a session and stopping a listed server', () => {
   it("maps an account delete's refusals to words: a subscription that grants, an open checkout", () => {
     const granting = describeAdminError(refusal(409, { error: 'active_subscription', message: 'raw server text' }));
     expect(granting.code).toBe('active_subscription');
-    expect(granting.message).toContain('a support tier or an add-on');
+    expect(granting.message).toContain('a support tier, a dedicated machine or a static address');
     expect(granting.message).toContain('once its subscriptions end');
     const open = describeAdminError(refusal(409, { error: 'checkout_open', message: 'raw server text' }));
     expect(open.code).toBe('checkout_open');

@@ -126,7 +126,7 @@ describe('ServersPage', () => {
   });
 
   it('says why a past-due account cannot start, whatever payment it is', async () => {
-    // An admin's grant with an add-on's payment past due: no tier to blame.
+    // An admin's grant with a dedicated machine's payment past due: no tier to blame.
     const wrapper = await mountPage(
       serversResponse([hostedServer(1)], { entitlement: { can_start: false, source: 'comp', tier: null, granted: true } }),
     );

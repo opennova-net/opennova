@@ -117,7 +117,7 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
     case 'checkout_in_progress':
       return 'A checkout for your account is already starting, perhaps in another tab. Wait a moment, then try again.';
     case 'no_billing_account':
-      return 'You have no billing account yet: subscribe to a support tier first.';
+      return 'You have no billing account yet: subscribe to a support tier or a dedicated machine first.';
     case 'not_found':
       return 'That static address subscription is no longer open. Reload the page.';
     case 'stripe_unavailable':
@@ -174,8 +174,8 @@ function parseTier(value: unknown): TierOffer | null {
   return { tier: v.tier, max_servers: v.max_servers, amount: v.amount, interval: 'month', available: v.available };
 }
 
-// An add-on on offer (the dedicated machine, the static address): null when
-// it is not sold, undefined when malformed.
+// An item on offer beside the tiers (a dedicated machine, a static address):
+// null when it is not sold, undefined when malformed.
 function parseAddOnOffer(value: unknown): OwnMachineOffer | StaticAddressOffer | null | undefined {
   if (value === null || value === undefined) return null;
   const v = value as Record<string, unknown>;
@@ -306,8 +306,8 @@ function pickUrl(data: unknown): string | null {
   return typeof url === 'string' && url !== '' ? url : null;
 }
 
-// GET /api/billing/tiers: the tiers and the add-ons (the dedicated machine,
-// the static address), with their prices; public.
+// GET /api/billing/tiers: the tiers, the dedicated machine and the static
+// address on offer, with their prices; public.
 export function fetchTiers(signal?: AbortSignal): Promise<BillingResult<TiersResponse>> {
   return call(() => apiClient.get<unknown>('/billing/tiers', { signal }), parseTiers);
 }

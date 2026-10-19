@@ -149,7 +149,8 @@ export type SubscriptionItem = 'tier' | 'own_machine' | 'static_address';
 export interface AdminSubscription {
   stripe_subscription_id: string;
   item: SubscriptionItem;
-  // The tier, for a tier subscription; null for an add-on.
+  // The tier, for a tier subscription; null for a dedicated machine or a
+  // static address.
   tier: TierNumber | null;
   quantity: number;
   status: SubscriptionStatus;

@@ -46,8 +46,8 @@
     </p>
 
     <template v-else-if="tiers && billing">
-      <!-- Past due (the tier's payment or an add-on's): the servers keep
-           running while Stripe retries. -->
+      <!-- Past due (the tier's payment, a dedicated machine's or a static
+           address's): the servers keep running while Stripe retries. -->
       <section
         v-if="pastDue"
         class="space-y-3 rounded-panel border border-warn/40 bg-warn/10 p-4 sm:p-6"

@@ -295,8 +295,8 @@
       <section class="space-y-3 rounded-panel border border-danger/40 p-4" aria-labelledby="user-delete">
         <h2 id="user-delete" class="text-lg font-semibold text-danger">Delete the account</h2>
         <p class="text-sm text-ink-muted">
-          The account goes for good. One with a subscription that still grants (a support tier or an add-on) cannot
-          be deleted until its subscriptions end, nor while a checkout of it is open.
+          The account goes for good. One with a subscription that still grants (a support tier, a dedicated machine or
+          a static address) cannot be deleted until its subscriptions end, nor while a checkout of it is open.
         </p>
         <button type="button" :disabled="busy" class="rounded-control border border-danger px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/10 disabled:opacity-40" @click="remove">
           Delete {{ detail.user.username }}…
@@ -319,8 +319,8 @@
 // (each to its fleet page), its static addresses with a comp one (POST
 // .../addresses), its Stripe ids (to Stripe's dashboard, in the key's mode),
 // its CD keys (GET .../cd-keys) and its deletion (409 active_subscription
-// while a subscription grants, a tier or an add-on; 409 checkout_open while a
-// checkout of it is open).
+// while a subscription grants, a tier, a dedicated machine or a static
+// address; 409 checkout_open while a checkout of it is open).
 import AdminCrumbs from '../../components/AdminCrumbs.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';

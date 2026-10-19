@@ -2,7 +2,7 @@
   <div class="space-y-10">
     <AdminPageHeader
       title="Subscriptions"
-      description="Support tiers and add-ons as last read from Stripe (change them in Stripe), the sold capacity and the admin grants."
+      description="Support tiers, dedicated machines and static addresses as last read from Stripe (change them in Stripe), the sold capacity and the admin grants."
       :loading="loading"
       @refresh="load"
     />
@@ -85,8 +85,8 @@
       <section class="space-y-3" aria-labelledby="billing-grants">
         <h2 id="billing-grants" class="text-xl font-semibold text-ink">Admin grants ({{ billing.comp_grants.length }})</h2>
         <p class="text-sm text-ink-muted">
-          Accounts an admin grants hosting, free of charge: they count as sold and buy no tier or add-on. Change a
-          grant on the account's page.
+          Accounts an admin grants hosting, free of charge: they count as sold and buy no tier, dedicated machine or
+          static address. Change a grant on the account's page.
         </p>
         <p v-if="billing.comp_grants.length === 0" class="text-sm text-ink-muted">None.</p>
         <ul v-else class="divide-y divide-border rounded-panel border border-border bg-panel text-sm">

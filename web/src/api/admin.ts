@@ -193,7 +193,7 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'pcid_exists':
       return 'Another account already has that PCID.';
     case 'active_subscription':
-      return 'This account has a subscription that still grants (a support tier or an add-on). Cancel it in Stripe first; the account can be deleted once its subscriptions end.';
+      return 'This account has a subscription that still grants (a support tier, a dedicated machine or a static address). Cancel it in Stripe first; the account can be deleted once its subscriptions end.';
     case 'checkout_open':
       return 'A checkout of this account is open, or paid and not synced yet, so a subscription could still start. Try again once it ends.';
     case 'revoked':

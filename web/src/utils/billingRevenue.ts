@@ -7,7 +7,7 @@ import type { AdminSubscription, TiersResponse } from '../types/billing';
 
 export interface RevenueRow {
   label: string;
-  // Subscribers (or dedicated machines, for the add-on's row).
+  // Subscribers (or dedicated machines, for their row).
   count: number;
   // The price a month, null when the tiers did not name one.
   price: number | null;

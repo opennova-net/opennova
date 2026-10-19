@@ -34,7 +34,7 @@
       :covers="[
         'Changes and cancellations are made in Stripe\'s billing portal, from the support tier page.',
         'A cancellation takes effect at the end of the period already paid for; the hosted servers keep running until then and stop when it ends.',
-        'Moving to a smaller tier stops the newest hosted servers beyond its number when the change takes effect.',
+        'Moving to a smaller tier stops the newest hosted servers on shared machines beyond its number when the change takes effect; dedicated machines need no tier.',
         'Refunds are covered by the refund policy.',
       ]"
     />
