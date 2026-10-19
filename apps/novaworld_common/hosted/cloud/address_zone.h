@@ -35,10 +35,6 @@ namespace opennova::novaworld_server::hosted {
 // The A records' TTL: the wait a released address's record drains for.
 inline constexpr int64_t kAddressTtlS = 300;
 
-// Whether `zone` is a zone's name (ONNET_HOSTED_ADDRESS_ZONE): dot-separated
-// labels of lower-case letters, digits and '-', no trailing dot.
-bool is_zone_name(const std::string &zone);
-
 struct ZoneChange {
 	bool ok = false;
 	std::string change_id; // ok: the zone's id for the change

@@ -3,6 +3,7 @@
 #include "core/loggable.h"
 #include "core/text_util.h"
 #include "ec2_machine_driver.h"
+#include "hosted/model/address_names.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -17,21 +18,6 @@
 #include <vector>
 
 namespace opennova::novaworld_server::hosted {
-
-bool is_zone_name(const std::string &zone) {
-	if (zone.empty() || zone.size() > 200 || zone.front() == '.' || zone.back() == '.') return false;
-	bool dot_before = true;
-	for (const char c : zone) {
-		if (c == '.') {
-			if (dot_before) return false;
-			dot_before = true;
-			continue;
-		}
-		if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
-		dot_before = false;
-	}
-	return true;
-}
 
 namespace {
 

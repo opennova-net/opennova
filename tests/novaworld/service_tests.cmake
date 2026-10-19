@@ -181,6 +181,7 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_jobs.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/cloud/fleet_job_handlers.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_roll.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
@@ -1250,10 +1251,12 @@ add_executable(hosted_ec2_machine_driver_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/health.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/protocol/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/cloud/docker_machine_driver.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/cloud/driver_config.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/cloud/ec2_machine_driver.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_config.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/machine_profile.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/net_cidr.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/owner_file.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/random_secret.cpp

@@ -144,20 +144,6 @@ std::string DockerMachineDriver::check_config(const DockerMachineConfig &c) {
 	return {};
 }
 
-MachineProfile DockerMachineDriver::profile(const DockerMachineConfig &config) {
-	MachineProfile out;
-	out.provider = "docker";
-	out.boot_timeout_ms = kBootTimeoutMs;
-	out.slot_plan = [pattern = Ec2MachineDriver::admin_pattern(config.admin_address)](int slot) {
-		SlotPlan plan;
-		plan.game_port = slot_game_port(slot);
-		plan.admin_port = slot_admin_port(slot);
-		plan.admin_allowed_ip = pattern;
-		return plan;
-	};
-	return out;
-}
-
 std::string DockerMachineDriver::machine_name(const std::string &deployment, int64_t machine_id) {
 	return deployment + "-machine-" + std::to_string(machine_id);
 }

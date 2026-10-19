@@ -4,7 +4,7 @@
 // 0066): the routes and the fleet's pass never call an AddressDriver
 // (hosted/cloud/address_driver.h) or a ZoneDriver (hosted/cloud/address_zone.h);
 // they enqueue these, in the transaction of the row change that causes them,
-// and the workers run them. Each is idempotent, and a step that must wait (a machine still
+// and the workers run them (hosted/cloud/address_job_handlers.h). Each is idempotent, and a step that must wait (a machine still
 // pending, a record still draining) is a retry at the wait. Service policy,
 // not a port.
 //
@@ -34,13 +34,10 @@
 //                      released (an address the cloud no longer knows is
 //                      released already). Deduped per address.
 //
-// And fleet.sweep's addresses (sweep_addresses): every address the cloud holds
-// for this deployment that no held row names is recorded as an orphan
-// (hosted_address_orphans), never released.
-
-#include "hosted/cloud/address_driver.h"
-#include "hosted/cloud/address_zone.h"
-#include "jobs/worker_pool.h"
+// And fleet.sweep's addresses (hosted/cloud/address_job_handlers.h
+// sweep_addresses): every address the cloud holds for this deployment that no
+// held row names is recorded as an orphan (hosted_address_orphans), never
+// released.
 
 #include <net/novaworld/db/database.h>
 
@@ -52,21 +49,11 @@ inline constexpr const char *kJobAddressAllocate = "address.allocate";
 inline constexpr const char *kJobAddressAssociate = "address.associate";
 inline constexpr const char *kJobAddressRelease = "address.release";
 
-// The wait past a deleted record's TTL before its address goes.
-inline constexpr int64_t kReleaseMarginS = 60;
-
 // Each on `db`, in the caller's transaction; 0 when one is queued or running.
 int64_t enqueue_address_allocate(db::Database &db, int64_t address_id);
 int64_t enqueue_address_associate(db::Database &db, int64_t address_id, int64_t machine_id);
 int64_t enqueue_address_release(db::Database &db, int64_t address_id);
 // Whether machine `machine_id`'s association is queued or running.
 bool address_associate_pending(db::Database &db, int64_t machine_id);
-
-// The handlers over `driver` and `zone`, which must outlive the workers.
-void register_address_jobs(jobs::JobRegistry &registry, AddressDriver &driver, ZoneDriver &zone);
-
-// fleet.sweep's addresses: the listing's orphans written; false when the
-// listing failed (nothing written).
-bool sweep_addresses(db::ConnectionPool &pool, AddressDriver &driver);
 
 } // namespace opennova::novaworld_server::hosted

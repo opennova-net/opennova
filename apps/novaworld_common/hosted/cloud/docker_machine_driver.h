@@ -51,9 +51,9 @@
 //               machine the engine no longer knows is no error.
 //   list_tagged GET /containers/json?all=1 filtered on both labels, in every state.
 //               Throws std::runtime_error when the listing fails.
-//   profile     kBootTimeoutMs, slot k's fixed ports (each machine has an address
-//               of its own) and the fleet's network for admin.cfg
-//               (Ec2MachineDriver::admin_pattern of its internal listener's bind).
+//
+// The supervisor's view of these machines needs no driver: it is the fleet's
+// (hosted/model/machine_profile.h docker_machine_profile).
 //
 // Every failure is logged and handled here, never thrown, but by list_tagged.
 // Platform plumbing for the development stack, not a port.
@@ -82,10 +82,6 @@ struct DockerMachineConfig {
 	// ONNET_INTERNAL_URL: the fleet's internal listener as the machines
 	// reach it (the agent's --service).
 	std::string service_url;
-	// The fleet's internal listener's bind address (ONNET_INTERNAL_HTTP_BIND),
-	// which its admin links connect from: the machines' admin.cfg admits its
-	// network. The supervisor's profile alone reads it.
-	std::string admin_address;
 	int call_timeout_ms = 20 * 1000;
 };
 
@@ -118,9 +114,6 @@ public:
 	// The image's serve user, which the agent runs as and which owns the token
 	// file.
 	static constexpr uint32_t kMachineUid = 10001;
-	// From the launch to the agent's first report: a container's start and a
-	// bootstrap.
-	static constexpr uint64_t kBootTimeoutMs = 2 * 60 * 1000;
 	static constexpr size_t kMaxDeploymentBytes = 32;
 
 	// One call of the engine's API: `method` and `path` (with its query) and a
@@ -137,8 +130,6 @@ public:
 	// "" when `config` can run, else why not (a boot warning; hosting off).
 	// Every program asks it, so each decides alike whether hosting is on.
 	static std::string check_config(const DockerMachineConfig &config);
-	// The supervisor's view of the machines `config` launches: no driver needed.
-	static MachineProfile profile(const DockerMachineConfig &config);
 	// The container machine `machine_id` is: "<deployment>-machine-<id>".
 	static std::string machine_name(const std::string &deployment, int64_t machine_id);
 	// The agent's command line in machine `machine_id`.

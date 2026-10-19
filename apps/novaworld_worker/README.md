@@ -3,9 +3,9 @@
 The NovaWorld service's worker: the job pool (`ONNET_WORKER_THREADS` threads) and its
 handlers: the prunes, the account jobs, the mail it sends (SES), the billing sync, the fleet's
 machine driver (EC2) and, while the static addresses are on, their driver (Elastic IPs) and
-their zone (Route 53; `address.*` jobs, `apps/novaworld_common/hosted/model/address_jobs.h`); and the
-scheduler of its own periodic kinds (every one but the data sets' `tree.prune`, the data
-program's), in every worker process with no election: a schedule key is unique, so a bucket
+their zone (Route 53; `address.*` jobs, `apps/novaworld_common/hosted/cloud/address_job_handlers.h`);
+and the scheduler of its own periodic kinds (every one but the data sets' `tree.prune`, the
+data program's), in every worker process with no election: a schedule key is unique, so a bucket
 gets one job however many workers tick. Its at-start jobs (the billing reconcile) are keyed by
 the release its tasks run (its ECS task definition's revision), so a release's tasks run each
 once. Any number share the queue. `GET /livez` on `ONNET_HEALTH_PORT` (8081). The image

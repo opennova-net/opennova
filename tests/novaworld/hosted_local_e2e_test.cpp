@@ -57,6 +57,7 @@
 #include "core/local_object_store.h"
 #include "data_sets/data_set_repository.h"
 #include "hosted/admin_link.h"
+#include "hosted/cloud/fleet_job_handlers.h"
 #include "hosted/internal_listener.h"
 #include "hosted/model/fleet_config.h"
 #include "hosted/model/fleet_jobs.h"

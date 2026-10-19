@@ -38,8 +38,9 @@
 #include "command_runner.h"
 #include "core/object_store.h"
 #include "core/scratch_dir.h"
+#include "hosted/cloud/driver_config.h"
 #include "hosted/model/fleet_config.h"
-#include "hosted/model/machine_driver.h"
+#include "hosted/model/machine_profile.h"
 #include "jobs/scheduler.h"
 #include "program/server_config.h"
 
@@ -85,7 +86,7 @@ struct HostedPolicy {
 HostedPolicy hosted_policy(const ServerConfig &config);
 
 // The machine driver's settings over a policy that is on (the worker's): the
-// drivers' own variables (hosted/model/fleet_config.h parse_driver_config) and, for
+// drivers' own variables (hosted/cloud/driver_config.h parse_driver_config) and, for
 // the ec2 driver, its machine script's text, each driver's check_config passed;
 // with the static addresses on, their drivers' settings too (the play zone's
 // Route 53 id for ec2; the zone file and the addresses for docker).

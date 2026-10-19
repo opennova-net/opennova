@@ -17,6 +17,7 @@
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
 #include "command_runner.h"
+#include "hosted/cloud/address_job_handlers.h"
 #include "hosted/cloud/address_zone.h"
 #include "hosted/cloud/docker_address_driver.h"
 #include "hosted/cloud/docker_machine_driver.h"

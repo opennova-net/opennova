@@ -46,4 +46,19 @@ std::string address_hostname(std::string_view name, std::string_view zone) {
 	return out;
 }
 
+bool is_zone_name(const std::string &zone) {
+	if (zone.empty() || zone.size() > 200 || zone.front() == '.' || zone.back() == '.') return false;
+	bool dot_before = true;
+	for (const char c : zone) {
+		if (c == '.') {
+			if (dot_before) return false;
+			dot_before = true;
+			continue;
+		}
+		if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
+		dot_before = false;
+	}
+	return true;
+}
+
 } // namespace opennova::novaworld_server::hosted

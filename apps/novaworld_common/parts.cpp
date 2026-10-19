@@ -10,6 +10,7 @@
 #include "hosted/cloud/docker_address_driver.h"
 #include "hosted/cloud/docker_machine_driver.h"
 #include "hosted/cloud/ec2_machine_driver.h"
+#include "hosted/model/address_names.h"
 #include "hosted/model/fleet_jobs.h"
 #include "hosted/model/hosted_settings.h"
 #include "hosted/model/stats_jobs.h"
@@ -194,15 +195,9 @@ HostedPolicy servers_policy(const ServerConfig &config) {
 	}
 	// What the supervisor knows of the driver's machines needs no driver: the
 	// address their admin.cfg admits is the fleet's bind.
-	if (config.hosted_provider == "ec2") {
-		hosted::Ec2MachineConfig ec2;
-		ec2.admin_address = setup.fleet.internal_address;
-		setup.profile = hosted::Ec2MachineDriver::profile(ec2);
-	} else {
-		hosted::DockerMachineConfig docker;
-		docker.admin_address = setup.fleet.internal_address;
-		setup.profile = hosted::DockerMachineDriver::profile(docker);
-	}
+	setup.profile = config.hosted_provider == "ec2"
+			? hosted::ec2_machine_profile(setup.fleet.internal_address)
+			: hosted::docker_machine_profile(setup.fleet.internal_address);
 	setup.provider = config.hosted_provider;
 	setup.on = true;
 	std::printf("[boot] hosted servers: %s, serve image %s, the data sets' trees in %s\n",

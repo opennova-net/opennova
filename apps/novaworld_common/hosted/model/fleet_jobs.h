@@ -3,10 +3,11 @@
 // The fleet's cloud calls as jobs (jobs/job_queue.h): the supervisor's pass
 // never calls the MachineDriver (machine_driver.h); it enqueues these, in the
 // transaction of the row change that causes them, and reads what they found
-// from the machine rows (fleet_repository.h). The workers run them, the
-// driver's calls bounded by its own timeouts, so a slow cloud only occupies a
-// worker and no watched loop (core/health.h) waits on it. Each is idempotent.
-// Service policy, not a port.
+// from the machine rows (fleet_repository.h). The workers run them
+// (hosted/cloud/fleet_job_handlers.h), the driver's calls bounded by its own
+// timeouts, so a slow cloud only occupies a worker and no watched loop
+// (core/health.h) waits on it. Each is idempotent. Service policy, not a
+// port.
 //
 //   machine.launch     the row's launch (its id, kind and slots; its one-time
 //                      bootstrap token the job's secret), skipped once the row
@@ -41,22 +42,19 @@
 //                      ends nothing and fails the job (the next sweep tries
 //                      again). Then the static addresses the cloud holds
 //                      that no held row names are recorded as orphans
-//                      (address_jobs.h sweep_addresses; never released).
+//                      (hosted/cloud/address_job_handlers.h
+//                      sweep_addresses; never released).
 //                      Periodic (fleet_schedule, every
 //                      kFleetSweepIntervalMs), and at the supervisor's
 //                      reconciliation.
 
 #include "jobs/scheduler.h"
-#include "jobs/worker_pool.h"
-#include "machine_driver.h"
 #include "placement.h"
 
 #include <net/novaworld/db/database.h>
 
 #include <cstdint>
-#include <functional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace opennova::novaworld_server::hosted {
@@ -69,14 +67,6 @@ inline constexpr const char *kJobFleetSweep = "fleet.sweep";
 // The fleet.sweep job's period (fleet_schedule).
 inline constexpr int64_t kFleetSweepIntervalMs = 5 * 60 * 1000;
 
-// The most of each running at once, across every worker (the AWS API's rate
-// limits).
-struct FleetJobCaps {
-	int launch = 8;
-	int describe = 4;
-	int terminate = 4;
-};
-
 // The launch of machine `machine_id` (`kind`, `slots`), its token carried as
 // the job's secret; on `db`, in the caller's transaction. Its job id.
 int64_t enqueue_machine_launch(db::Database &db, int64_t machine_id, MachineKind kind, int slots,
@@ -88,23 +78,7 @@ int64_t enqueue_fleet_sweep(db::Database &db);
 // Whether machine `machine_id`'s launch is queued or running.
 bool machine_launch_pending(db::Database &db, int64_t machine_id);
 
-// The handlers over `driver`, which must outlive the workers; `limits` holds
-// the fleet's maximums the launch checks (placement.h PlacementPolicy, the
-// fleet's policy settings). Each fleet.sweep whose machines' listing read also
-// runs `also_sweep` (set: the static addresses' orphan report, address_jobs.h
-// sweep_addresses).
-void register_fleet_jobs(jobs::JobRegistry &registry, MachineDriver &driver,
-		PlacementPolicy limits, FleetJobCaps caps = {},
-		std::function<void(db::ConnectionPool &)> also_sweep = {});
 // The periodic sweep, every `sweep_interval_ms`.
 std::vector<jobs::PeriodicJob> fleet_schedule(int64_t sweep_interval_ms = kFleetSweepIntervalMs);
-
-// The cloud's error code a failure's text names: the AWS CLI's "An error
-// occurred (<Code>) when calling ..." (VcpuLimitExceeded,
-// InsufficientInstanceCapacity, UnauthorizedOperation, ...); "" for none.
-std::string cloud_error_code(std::string_view text);
-// A refused launch's end reason and event: "the launch failed (<code>)" with the
-// cloud's error code (cloud_error_code), else "the launch failed".
-std::string launch_failure_reason(std::string_view error);
 
 } // namespace opennova::novaworld_server::hosted

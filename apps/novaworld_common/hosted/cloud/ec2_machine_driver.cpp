@@ -258,27 +258,6 @@ std::vector<std::string> Ec2MachineDriver::command(
 	return argv;
 }
 
-MachineProfile Ec2MachineDriver::profile(const Ec2MachineConfig &config) {
-	MachineProfile out;
-	out.provider = "ec2";
-	out.boot_timeout_ms = kBootTimeoutMs;
-	out.slot_plan = [pattern = admin_pattern(config.admin_address)](int slot) {
-		SlotPlan plan;
-		plan.game_port = slot_game_port(slot);
-		plan.admin_port = slot_admin_port(slot);
-		plan.admin_allowed_ip = pattern;
-		return plan;
-	};
-	return out;
-}
-
-std::string Ec2MachineDriver::admin_pattern(const std::string &fleet_address) {
-	const auto address = parse_ipv4(fleet_address);
-	if (!address)
-		return fleet_address;
-	return std::to_string(*address >> 24) + "." + std::to_string((*address >> 16) & 0xFFu) + ".*";
-}
-
 std::string Ec2MachineDriver::client_token(
 		const std::string &deployment, int64_t machine_id, const std::string &subnet) {
 	return deployment + "-m" + std::to_string(machine_id) + "-" +

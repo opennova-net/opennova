@@ -69,6 +69,7 @@ if(BUILD_NOVAWORLD_HTTP)
         # admin links and the stats sampler are the fleet program's own
         # (apps/novaworld_fleet).
         hosted/model/address_jobs.cpp
+        hosted/cloud/address_job_handlers.cpp
         hosted/model/address_names.cpp
         hosted/model/address_repository.cpp
         hosted/cloud/address_zone.cpp
@@ -80,8 +81,10 @@ if(BUILD_NOVAWORLD_HTTP)
         data_sets/data_set_repository.cpp
         hosted/cloud/docker_address_driver.cpp
         hosted/cloud/docker_machine_driver.cpp
+        hosted/cloud/driver_config.cpp
         hosted/cloud/ec2_address_driver.cpp
         hosted/cloud/ec2_machine_driver.cpp
+        hosted/cloud/fleet_job_handlers.cpp
         hosted/model/fleet_config.cpp
         hosted/model/fleet_health.cpp
         hosted/model/fleet_jobs.cpp
@@ -91,6 +94,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/model/hosted_repository.cpp
         hosted/model/hosted_settings.cpp
         hosted/model/limits_hold.cpp
+        hosted/model/machine_profile.cpp
         hosted/model/net_cidr.cpp
         hosted/model/placement.cpp
         hosted/model/server_phase.cpp

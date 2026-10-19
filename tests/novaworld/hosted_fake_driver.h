@@ -11,7 +11,7 @@
 // machine (not while `lagging`: EC2 lists a launch late), as the EC2 driver
 // does; it records its subnet (MachineLaunch::record_subnet) before it
 // launches, and one it cannot record launches nothing. The fleet jobs
-// (fleet_jobs.h) call it from any worker thread: its state is under a lock. A
+// (hosted/cloud/fleet_job_handlers.h) call it from any worker thread: its state is under a lock. A
 // FakeAgent per machine syncs the way the agent routes do
 // (fleet_repository.h record_sync, then the supervisor's
 // FleetDesiredState::sync), runs each desired container it got files for, and

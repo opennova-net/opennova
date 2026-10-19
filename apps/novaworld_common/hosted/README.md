@@ -118,7 +118,8 @@ this directory's.
   wins. A pass reads and writes rows alone and never calls the cloud: a launch is the
   machine's row and its `machine.launch` job in one transaction, a check of a booting,
   lost or unaddressed machine a deduped `machine.describe`, an end a `machine.terminate`,
-  run by the workers (`model/fleet_jobs.*`; the service README's "Background jobs"), so a surge
+  run by the workers (`model/fleet_jobs.*`, their handlers `cloud/fleet_job_handlers.*`; the
+  service README's "Background jobs"), so a surge
   of starts launches its machines side by side. What a pass remembers of a machine and
   each kind's launch backoff are rows too, so a supervisor started again resumes its
   timers.
@@ -243,7 +244,9 @@ this directory's.
 - **Machine drivers** (`model/machine_driver.h`): the fleet's one seam to the cloud, called by
   the job workers alone. A driver launches the machine a row stands for (its id and
   one-time token), describes it, terminates it and lists the machines it runs for this
-  deployment; what the supervisor knows of it without a call is its `MachineProfile`.
+  deployment; what the supervisor knows of it without a call is its `MachineProfile`
+  (`model/machine_profile.*`, made from the policy with no driver: the boot timeout, a
+  slot's fixed ports, the fleet's network its admin.cfg admits).
   Every driver's machine runs the real agent and has an address of its own, so each
   slot's ports are its fixed ones and the agent routes can check the peer.
   - `ONNET_HOSTED_PROVIDER=docker` (`cloud/docker_machine_driver.*`, the local stack's,
@@ -320,8 +323,9 @@ At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`).
   names an address (`address_id`, with `own_machine`): it must be the owner's, ready, and
   no other live server's (409 `address_unavailable`; the database's one live server per
   address). An own machine launched for such a server carries it (`fleet_machines.address_id`).
-- **The jobs** (`model/address_jobs.*`, the worker's): `address.allocate` (the address found by
-  its tag first, so a run cut short never allocates a second; then allocated with its tags
+- **The jobs** (`model/address_jobs.*`, the worker's handlers `cloud/address_job_handlers.*`):
+  `address.allocate` (the address found by its tag first, so a run cut short never allocates
+  a second; then allocated with its tags
   in one call; its record written TTL 300; a ready one's run moves its record to a new
   name), `address.associate` (onto the machine launched to carry it, without reassociation
   and only once the machine that held it before has ended; retried while the machine is
@@ -425,7 +429,8 @@ minutes and hours in the shape every subject shares ([`../README.md`](../README.
 
 ## Settings
 
-Two sets (`model/fleet_config.h`; `../parts.h` `hosted_policy`, `driver_setup`). The fleet's
+Two sets (`model/fleet_config.h`, `cloud/driver_config.h`; `../parts.h` `hosted_policy`,
+`driver_setup`). The fleet's
 **policy**, which web, the fleet program and the worker read alike, so each decides alike
 whether hosting is on: the provider, the store, placement, the slots' limits, the cap, the
 serve image and the fleet's internal listener. The **driver's** own settings, which the

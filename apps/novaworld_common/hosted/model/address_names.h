@@ -25,4 +25,8 @@ std::string address_name_refusal(std::string_view name);
 // "smoke.play.opennova.net"), without a trailing dot.
 std::string address_hostname(std::string_view name, std::string_view zone);
 
+// Whether `zone` is a zone's name (ONNET_HOSTED_ADDRESS_ZONE): dot-separated
+// labels of lower-case letters, digits and '-', no trailing dot.
+bool is_zone_name(const std::string &zone);
+
 } // namespace opennova::novaworld_server::hosted

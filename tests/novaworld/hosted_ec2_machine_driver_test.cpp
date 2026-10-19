@@ -35,8 +35,10 @@
 #include "command_runner.h"
 #include "core/random_secret.h"
 #include "hosted/cloud/docker_machine_driver.h"
+#include "hosted/cloud/driver_config.h"
 #include "hosted/cloud/ec2_machine_driver.h"
 #include "hosted/model/fleet_config.h"
+#include "hosted/model/machine_profile.h"
 #include "hosted/model/hosted_settings.h"
 #include "hosted/protocol/agent_protocol.h"
 
@@ -296,7 +298,6 @@ hosted::Ec2MachineConfig config_in(const std::string &scratch) {
 	c.own_template = std::string(kOwn) + ":7";
 	c.serve_image = kImage;
 	c.cluster = kCluster;
-	c.admin_address = kService;
 	c.machine_script = machine_script();
 	c.scratch_dir = scratch;
 	c.describe_ttl_ms = kTtl;
@@ -460,9 +461,8 @@ int test_config_checks(const std::string &scratch) {
 					 "http://fleet:80x" })
 			TEST_EXPECT(!hosted::Ec2MachineDriver::parse_service_url(url, host, port));
 	}
-	// The admin address is the fleet's to check (its profile), and the scratch
-	// directory the worker's to make (the driver): every program asks check_config alike.
-	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.admin_address = "127.0.0.1"; }));
+	// The scratch directory is the worker's to make (the driver): every program asks
+	// check_config alike.
 	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.scratch_dir = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.machine_script = "#!/bin/bash\n"; }));
 	TEST_EXPECT(refused(
@@ -547,10 +547,9 @@ int test_machine_script(const std::string &) {
 int test_slot_plan(const std::string &scratch) {
 	Rig rig(scratch);
 	TEST_EXPECT(std::string(rig.driver.name()) == "ec2");
-	// The supervisor's view, made with no driver (no cloud call).
-	const hosted::MachineProfile profile = hosted::Ec2MachineDriver::profile(config_in(scratch));
-	TEST_EXPECT(profile.provider == "ec2" &&
-			profile.boot_timeout_ms == hosted::Ec2MachineDriver::kBootTimeoutMs);
+	// The supervisor's view, made with no driver (no cloud call), from the fleet's bind.
+	const hosted::MachineProfile profile = hosted::ec2_machine_profile(kService);
+	TEST_EXPECT(profile.provider == "ec2" && profile.boot_timeout_ms == hosted::kEc2BootTimeoutMs);
 	for (int slot : { 0, 5, hosted::kMaxSlots - 1 }) {
 		const hosted::SlotPlan plan = profile.slot_plan(slot);
 		TEST_EXPECT(plan.game_port == 32768 + slot && plan.admin_port == 32800 + slot);
@@ -558,8 +557,8 @@ int test_slot_plan(const std::string &scratch) {
 		// address is in it, and the server keeps the admin.cfg its start rendered.
 		TEST_EXPECT(plan.admin_allowed_ip == "10.44.*");
 	}
-	TEST_EXPECT(hosted::Ec2MachineDriver::admin_pattern("172.31.5.9") == "172.31.*");
-	TEST_EXPECT(hosted::Ec2MachineDriver::admin_pattern("not-an-ip") == "not-an-ip");
+	TEST_EXPECT(hosted::admin_pattern("172.31.5.9") == "172.31.*");
+	TEST_EXPECT(hosted::admin_pattern("not-an-ip") == "not-an-ip");
 	TEST_EXPECT(rig.runner.calls.empty());
 	return 0;
 }
@@ -1222,7 +1221,6 @@ int test_fleet_config() {
 				d.addresses.docker_range.empty());
 		TEST_EXPECT(d.internal_url.empty() && d.ec2.cluster.empty() &&
 				d.docker.service_url.empty() && d.docker.engine_url.empty());
-		TEST_EXPECT(d.ec2.admin_address == "127.0.0.1");
 	}
 	// A deployment's: every variable set, the policy reading its own and the drivers'
 	// theirs, never the other set's.
@@ -1280,17 +1278,16 @@ int test_fleet_config() {
 				d.ec2.deployment == kDeployment);
 		TEST_EXPECT(d.ec2.serve_image == kImage && d.ec2.aws_cli == "/opt/aws/bin/aws");
 		TEST_EXPECT(d.ec2.cluster == kCluster);
-		// The local machines reach the fleet by its URL; its admin links come from its bind.
+		// The machines reach the fleet by its URL.
 		TEST_EXPECT(d.internal_url == kServiceUrl);
-		TEST_EXPECT(d.ec2.admin_address == "10.44.0.10");
 		TEST_EXPECT(d.machine_script_path == "/srv/machine.sh");
 		// The docker driver's: its own three and its image (the hostd image), the
-		// deployment, URL and bind as ec2's.
+		// deployment and URL as ec2's.
 		TEST_EXPECT(d.docker.engine_url == "http://docker-api:2375" &&
 				d.docker.network == "opennova-dev" &&
 				d.docker.data_from == "opennova-dev-machine-data-1");
 		TEST_EXPECT(d.docker.deployment == kDeployment && d.docker.image == kHostdImage &&
-				d.docker.service_url == kServiceUrl && d.docker.admin_address == "10.44.0.10");
+				d.docker.service_url == kServiceUrl);
 		// The static addresses' drivers' own: the zone's id (ec2), its file and the
 		// addresses (docker).
 		TEST_EXPECT(d.addresses.zone_id == "Z0123456789ABC" &&
@@ -1389,7 +1386,6 @@ hosted::DockerMachineConfig docker_config() {
 	c.deployment = kDevDeployment;
 	c.image = kMachineImage;
 	c.service_url = kDevServiceUrl;
-	c.admin_address = "172.30.0.10";
 	return c;
 }
 
@@ -1586,8 +1582,8 @@ int test_docker_config_and_profile(const std::string &) {
 
 	// The slots' fixed ports (every machine has an address of its own), admitting
 	// the fleet's network.
-	const hosted::MachineProfile profile = Driver::profile(docker_config());
-	TEST_EXPECT(profile.provider == "docker" && profile.boot_timeout_ms == Driver::kBootTimeoutMs);
+	const hosted::MachineProfile profile = hosted::docker_machine_profile("172.30.0.10");
+	TEST_EXPECT(profile.provider == "docker" && profile.boot_timeout_ms == hosted::kDockerBootTimeoutMs);
 	const hosted::SlotPlan plan = profile.slot_plan(3);
 	TEST_EXPECT(plan.game_port == 32771 && plan.admin_port == 32803 &&
 			plan.admin_allowed_ip == "172.30.*");

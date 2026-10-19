@@ -77,10 +77,9 @@
 //   list_tagged a fresh describe-instances on both tags; pending, running,
 //               stopping and stopped machines. Throws std::runtime_error when
 //               the listing fails.
-//   profile     the supervisor's view (hosted/model/machine_driver.h MachineProfile, the
-//               fleet's): kBootTimeoutMs, and slot k's ports (hosted/protocol/slots.h:
-//               32768 + k, 32800 + k) with the fleet's network
-//               (admin_pattern of admin_address) for admin.cfg's ip_restrict.
+//
+// The supervisor's view of these machines needs no driver: it is the fleet's
+// (hosted/model/machine_profile.h ec2_machine_profile).
 
 #include "command_runner.h"
 #include "hosted/model/machine_driver.h"
@@ -116,11 +115,6 @@ struct Ec2MachineConfig {
 	// (ONNET_HOSTED_EC2_CLUSTER, opennova-<deployment>-fleet), whose daemon
 	// service runs opennova-hostd on each.
 	std::string cluster;
-	// The fleet's private IPv4, its internal listener's bind
-	// (ONNET_INTERNAL_HTTP_BIND), which its admin links connect from: the
-	// machines' admin.cfg admits its network (admin_pattern). The
-	// supervisor's profile alone reads it; check_config does not.
-	std::string admin_address;
 	std::string machine_script; // machine/machine_user_data.sh's text (ONNET_HOSTED_MACHINE_SCRIPT)
 	// Owner-only: the user-data files the CLI reads. The worker's, made before
 	// it constructs the driver (check_config does not ask for it).
@@ -158,10 +152,6 @@ public:
 	static constexpr size_t kMaxUserDataBytes = 16 * 1024;
 	// ONNET_HOSTED_DEPLOYMENT's longest: its client tokens then fit EC2's 64.
 	static constexpr size_t kMaxDeploymentBytes = 32;
-	// From the launch to the agent's first report: EC2's pending, cloud-init,
-	// the ECS agent's registration, the hostd image's pull, the agent's start
-	// and its bootstrap.
-	static constexpr uint64_t kBootTimeoutMs = 15 * 60 * 1000;
 
 	using Clock = std::function<uint64_t()>;
 
@@ -183,18 +173,6 @@ public:
 			const std::string &script, const MachineUserData &values);
 	// An ECS cluster's name: 1..255 letters, digits, '-' and '_'.
 	static bool is_cluster_name(std::string_view name);
-
-	// The supervisor's view of the machines `config` launches: no driver needed.
-	static MachineProfile profile(const Ec2MachineConfig &config);
-	// The ip_restrict pattern a machine's admin.cfg admits the fleet by: its
-	// private address's /16, "10.44.*" for 10.44.0.17 (the deployment's VPC).
-	// The fleet leader's address moves with each replacement of its task, and
-	// a server keeps the admin.cfg its start rendered, so a pattern naming one
-	// address would refuse a new leader's admin links (and its health checks
-	// would then fail every running server); the machines' security group
-	// admits the admin ports from the fleet's group alone. `fleet_address`
-	// itself when it is no dotted quad.
-	static std::string admin_pattern(const std::string &fleet_address);
 
 	const char *name() const override { return "ec2"; }
 	std::optional<LaunchedMachine> launch(const MachineLaunch &launch, std::string &error) override;

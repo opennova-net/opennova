@@ -12,7 +12,7 @@
 // machine.describe, machine.terminate, fleet.sweep); the supervisor's pass
 // never does. What the pass knows of its machines without the cloud (the
 // driver's name, its boot timeout, a slot's ports) is the driver's
-// MachineProfile, which needs no driver to make.
+// MachineProfile (machine_profile.h), which needs no driver to make.
 //
 // Drivers: Ec2MachineDriver (hosted/cloud/ec2_machine_driver.h, an EC2 machine from the
 // launch template of its kind, whose user-data installs the agent) and
@@ -26,7 +26,7 @@
 // to run (POST /hosted/machines/<id>/sync). No server's file or credential is
 // in a launch.
 
-#include "hosted/protocol/slots.h"
+#include "machine_profile.h"
 #include "placement.h"
 
 #include <cstdint>
@@ -96,27 +96,6 @@ struct CloudMachine {
 struct TaggedCloudMachine {
 	std::string cloud_id;
 	int64_t machine_id = 0;
-};
-
-// A slot's ports on a machine and the address its admin.cfg admits (the
-// service, as the machine sees it): what the server's files are rendered with.
-struct SlotPlan {
-	uint16_t game_port = 0;
-	uint16_t admin_port = 0;
-	std::string admin_allowed_ip;
-};
-
-// What the supervisor knows of its driver's machines without asking the cloud.
-struct MachineProfile {
-	// The driver's name, stored with each machine (fleet_machines.provider).
-	std::string provider;
-	// How long one of its machines may take from the launch to its agent's
-	// first report before the supervisor gives up on it.
-	uint64_t boot_timeout_ms = 0;
-	// The ports slot `slot` of one of its machines serves on, and the address
-	// its admin.cfg admits: no cloud call (each driver's are the slot's fixed
-	// ports, hosted/protocol/slots.h: every machine has an address of its own).
-	std::function<SlotPlan(int slot)> slot_plan;
 };
 
 class MachineDriver {
