@@ -24,7 +24,9 @@ this directory's.
   until 48 h past its period's end; `past_due` keeps the account's servers running but
   starts no new one. The own-machine add-on (one subscription of quantity 1 per machine)
   lets that many of the account's servers run on a machine of their own
-  (`hosted_servers.own_machine`), only while a tier also grants; an admin's comp grant of
+  (`hosted_servers.own_machine`), only while a tier also grants (once none does, the
+  billing sync sets it, and each static-address add-on, to cancel at its period's end:
+  [`../README.md`](../README.md) "The add-ons end with the tier"); an admin's comp grant of
   own machines (`comp_grants`, 0..16) adds to them while the account has servers (a tier's
   or a grant's), so an admin, the local stack and CI give an own machine without Stripe.
   What every account's entitlement holds is what the service has sold, and no checkout

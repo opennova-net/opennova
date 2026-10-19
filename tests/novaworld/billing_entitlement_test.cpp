@@ -3,8 +3,9 @@
 // 0002_billing.sql). The pure core first: which Stripe statuses grant, the
 // period's 48 h net, a comp grant against a tier, the own-machine add-on that
 // counts only beside a tier, an admin's own machines counting while the
-// account has servers, past_due keeping the servers but starting none, and an
-// inactive or service account getting nothing. Then the same through a
+// account has servers, past_due keeping the servers but starting none, an
+// inactive or service account getting nothing, and the add-ons that end with
+// the tier (add_ons_to_end). Then the same through a
 // migrated database of the test's own (common/test_database.h), and the
 // tables' own rules: the instance id minted once, the customers, a
 // subscription's status_since moving only with its status, the webhook
@@ -188,6 +189,37 @@ int test_entitlement_core() {
 	return 0;
 }
 
+// The ids of add_ons_to_end's answer.
+std::vector<std::string> ending(const std::vector<SubscriptionRow> &subscriptions) {
+	std::vector<std::string> out;
+	for (const SubscriptionRow &s : billing::add_ons_to_end(subscriptions, kNow)) out.push_back(s.stripe_subscription_id);
+	return out;
+}
+
+// The add-ons that end with the tier: with no tier granting (none, canceled,
+// unpaid, past its period's net), each renewing add-on of either kind; with a
+// tier that grants (past_due among them), none; an add-on already set to cancel
+// at its period's end, or ended, is none of them; a granting subscription of a
+// price no list names holds them all.
+int test_add_ons_to_end() {
+	const SubscriptionRow own = sub("om", ItemKind::OwnMachine, 0, "active");
+	const SubscriptionRow address = sub("sa", ItemKind::StaticAddress, 0, "past_due");
+	TEST_EXPECT(ending({ own, address }) == (std::vector<std::string>{ "om", "sa" }));
+	for (const char *status : { "canceled", "unpaid", "incomplete_expired", "paused" })
+		TEST_EXPECT(ending({ tier_sub(2, status), own, address }).size() == 2);
+	TEST_EXPECT(ending({ tier_sub(1, "active", kNow - 3 * kDay), own }) == std::vector<std::string>{ "om" });
+	for (const char *status : { "active", "trialing", "past_due" })
+		TEST_EXPECT(ending({ tier_sub(1, "canceled"), tier_sub(1, status), own, address }).empty());
+	SubscriptionRow cancelling = own;
+	cancelling.cancel_at_period_end = true;
+	TEST_EXPECT(ending({ cancelling, sub("sa2", ItemKind::StaticAddress, 0, "canceled"), address }) ==
+			std::vector<std::string>{ "sa" });
+	TEST_EXPECT(ending({ sub("x", ItemKind::Unknown, 0, "active"), own }).empty());
+	TEST_EXPECT(ending({ sub("x", ItemKind::Unknown, 0, "canceled"), own }) == std::vector<std::string>{ "om" });
+	TEST_EXPECT(ending({ tier_sub(3, "canceled") }).empty() && ending({}).empty());
+	return 0;
+}
+
 int64_t make_player(Database &db, const std::string &name, int comp = 0, const char *kind = "player",
 		const char *status = "active") {
 	static int pcid = 0;
@@ -363,6 +395,7 @@ int main(int argc, char **argv) {
 		{ "status_truth_table", test_status_truth_table },
 		{ "period_net", test_period_net },
 		{ "entitlement_core", test_entitlement_core },
+		{ "add_ons_to_end", test_add_ons_to_end },
 	};
 	for (const Case &c : pure) {
 		std::printf("-- %s\n", c.name);

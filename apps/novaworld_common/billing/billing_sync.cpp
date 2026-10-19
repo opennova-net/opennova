@@ -195,6 +195,16 @@ void BillingSync::sync_pending(int64_t now) {
 		SyncOutcome outcome = SyncOutcome::Unreachable;
 		try {
 			outcome = sync_one(nullptr, customer);
+			// Its account's add-ons, read as the sync left them, end with its tier.
+			if (outcome == SyncOutcome::Synced) {
+				std::vector<SubscriptionRow> ending;
+				{
+					auto lease = pool_.acquire();
+					if (const auto user = user_of_customer(*lease, customer))
+						ending = add_ons_ending(subscriptions_of(*lease, *user), now);
+				}
+				end_add_ons(ending);
+			}
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[billing] WARN sync %s: %s\n", loggable(customer).c_str(), e.what());
 		}
@@ -280,6 +290,35 @@ void BillingSync::forget_customer(db::Database &db, const std::string &stripe_cu
 	end_subscriptions_of_customer(db, stripe_customer_id, {}, "canceled");
 	delete_customer(db, stripe_customer_id);
 	tx.commit();
+}
+
+std::vector<SubscriptionRow> BillingSync::add_ons_ending(const std::vector<SubscriptionRow> &rows, int64_t now) const {
+	std::vector<SubscriptionRow> out;
+	for (SubscriptionRow &row : add_ons_to_end(rows, now)) {
+		if (row.livemode == config_.live()) out.push_back(std::move(row));
+	}
+	return out;
+}
+
+void BillingSync::end_add_ons(const std::vector<SubscriptionRow> &add_ons) {
+	for (const SubscriptionRow &row : add_ons) {
+		const long long user = static_cast<long long>(row.user_id.value_or(0));
+		const std::string what = std::string(row.item == ItemKind::OwnMachine ? "own-machine" : "static-address") +
+				" add-on " + loggable(row.stripe_subscription_id);
+		// One answer per subscription and period, however many syncs ask.
+		const std::string key = "opennova-" + instance_id_ + "-end-" + row.stripe_subscription_id + "-" +
+				std::to_string(row.current_period_end.value_or(0));
+		const StripeResult<Subscription> ended = client_.cancel_at_period_end(row.stripe_subscription_id, key);
+		if (!ended.ok()) {
+			std::fprintf(stderr, "[billing] WARN account %lld: its %s not set to cancel with its tier: %s\n", user,
+					what.c_str(), stripe_error_text(ended.error).c_str());
+			continue;
+		}
+		upsert_subscription(*pool_.acquire(), row_of(*ended.value, row.user_id));
+		std::printf("[billing] account %lld: its %s set to cancel at its period's end: no support tier of it "
+					"grants\n",
+				user, what.c_str());
+	}
 }
 
 SyncOutcome BillingSync::sync_customer(db::Database &db, const std::string &stripe_customer_id, int64_t now) {
@@ -589,6 +628,16 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 	// name every price ours sell.
 	if (whole && prices_ok && unknown_prices.empty() && on_reconciled_)
 		on_reconciled_(db);
+	// The add-ons of the accounts no tier of which grants end with it, judged
+	// from a listing read whole alone, and no connection held across the calls.
+	if (whole) {
+		std::vector<SubscriptionRow> ending;
+		for (const auto &account : subscriptions_by_account(db)) {
+			for (SubscriptionRow &row : add_ons_ending(account.second, now)) ending.push_back(std::move(row));
+		}
+		held.reset();
+		end_add_ons(ending);
+	}
 	return report;
 }
 

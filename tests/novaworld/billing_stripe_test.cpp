@@ -799,6 +799,12 @@ int test_client_requests() {
 	api.answer("{\"id\":\"cus_1\",\"object\":\"customer\",\"livemode\":false,\"metadata\":{\"a\":\"b\"}}");
 	TEST_EXPECT(client.update_customer_metadata("cus_1", { { "a", "b" } }).ok());
 	TEST_EXPECT(api.requests[6].path == "/v1/customers/cus_1" && api.param(6, "metadata[a]") == "b");
+	// A cancel at the period's end, under the caller's key.
+	api.answer(kSubscriptionJson);
+	TEST_EXPECT(client.cancel_at_period_end("sub_1Abc", "opennova-inst-1-end-sub_1Abc-1760000000").ok());
+	TEST_EXPECT(api.requests[7].method == StripeRequest::Method::Post && api.requests[7].path == "/v1/subscriptions/sub_1Abc");
+	TEST_EXPECT(api.requests[7].params.size() == 1 && api.param(7, "cancel_at_period_end") == "true" &&
+			api.requests[7].idempotency_key == "opennova-inst-1-end-sub_1Abc-1760000000");
 
 	// Arguments this side refuses never reach Stripe.
 	const size_t sent = api.requests.size();
@@ -817,6 +823,7 @@ int test_client_requests() {
 	query.starting_after = "sub_1&limit=1";
 	TEST_EXPECT(!client.list_subscriptions(query).ok());
 	TEST_EXPECT(!client.create_customer(0, "x", "inst-1", "k").ok());
+	TEST_EXPECT(!client.cancel_at_period_end("sub_1/../x", "k").ok());
 	TEST_EXPECT(api.requests.size() == sent);
 	TEST_EXPECT(billing::is_stripe_id("sub_1Abc") && !billing::is_stripe_id("sub-1") && !billing::is_stripe_id(""));
 	return 0;
@@ -926,6 +933,8 @@ int test_fake_round_trip() {
 
 	TEST_EXPECT(client.update_subscription_metadata(first, { { "x", "1" } }).ok());
 	TEST_EXPECT(fake.subscriptions[first].metadata.at("x") == "1");
+	auto ending = client.cancel_at_period_end(first, "end-first");
+	TEST_EXPECT(ending.ok() && ending.value->cancel_at_period_end && fake.subscriptions[first].cancel_at_period_end);
 	const auto portal = client.create_portal_session(cus, "https://nw.test/me/support");
 	TEST_EXPECT(portal.ok() && portal.value->rfind("https://billing.stripe.com/", 0) == 0);
 	TEST_EXPECT(client.get_price("price_t1").ok() && !client.get_price("price_none").ok());
@@ -950,6 +959,8 @@ int test_fake_round_trip() {
 	query.status = "all";
 	page = client.list_subscriptions(query);
 	TEST_EXPECT(page.ok() && page.value->data.size() == 2 && page.value->data[0].status == "canceled");
+	// An ended subscription refuses a cancel at the period's end.
+	TEST_EXPECT(client.cancel_at_period_end(second, "end-second").error.kind == StripeError::Kind::Rejected);
 	TEST_EXPECT(fake.count(StripeRequest::Method::Post, "/v1/customers") == 2);
 	return 0;
 }

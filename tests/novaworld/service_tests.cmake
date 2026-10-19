@@ -201,7 +201,8 @@ add_test(NAME hosted_net_cidr COMMAND hosted_net_cidr_test)
 # tables under it (billing_repository.h): which subscription statuses grant, the period's
 # 48 h net, comp grants against tiers, the own-machine add-on counting only beside a tier,
 # past_due keeping servers but starting none, an inactive or service account getting
-# nothing; and the tables' rows (the instance id minted once, the customers, the
+# nothing, the add-ons that end with the tier; and the tables' rows (the instance id
+# minted once, the customers, the
 # subscriptions' status_since, the events' dedupe, pending order, cutoff and prune) on a
 # migrated database.
 add_executable(billing_entitlement_test novaworld/billing_entitlement_test.cpp)
@@ -230,7 +231,8 @@ opennova_add_pg_test(hosted_sold_capacity COMMAND hosted_sold_capacity_test)
 # event's customer synced into the entitlement, a redelivery recorded once, another
 # instance's customer ignored and listed as an orphan, the tables wiped and rebuilt by a
 # reconcile, the backoff of a customer Stripe could not be asked about, a deleted customer, a
-# row Stripe no longer knows, duplicates, and the price check.
+# row Stripe no longer knows, duplicates, the price check, and the add-ons set to cancel at
+# their period's end once no tier grants.
 add_executable(billing_sync_test novaworld/billing_sync_test.cpp)
 target_link_libraries(billing_sync_test PRIVATE
     opennova_novaworld_billing opennova_novaworld_service Threads::Threads)

@@ -177,6 +177,10 @@ public:
 	StripeResult<SubscriptionPage> list_subscriptions(const SubscriptionQuery &query);
 	StripeResult<Subscription> get_subscription(const std::string &id, bool expand_customer = false);
 	StripeResult<Subscription> update_subscription_metadata(const std::string &id, const Metadata &metadata);
+	// The subscription set to cancel at its period's end (cancel_at_period_end:
+	// it renews no more, and grants until then), under the caller's
+	// idempotency key.
+	StripeResult<Subscription> cancel_at_period_end(const std::string &id, const std::string &idempotency_key);
 
 	StripeResult<Price> get_price(const std::string &id);
 

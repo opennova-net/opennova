@@ -1662,7 +1662,9 @@ or have the server name the tagged one.
    privacy links (`stripe setup`) do not set these.
 3. **Revenue recovery** (Billing, Revenue recovery): retries (Smart Retries), then cancel
    the subscription when all retries fail. A past-due account keeps its servers running
-   but starts no new one; they stop when Stripe cancels. Its customer emails: receipts
+   but starts no new one; they stop when Stripe cancels, and the worker then sets the
+   account's add-ons (own machines, static addresses) to cancel at their period's end,
+   as it does whenever no tier of an account grants. Its customer emails: receipts
    for successful payments, and the failed-payment emails.
 4. **Tax** is optional: Stripe Tax with `ONNET_BILLING_AUTOMATIC_TAX=1`. EU VAT applies
    from the first EU sale; check with an accountant.

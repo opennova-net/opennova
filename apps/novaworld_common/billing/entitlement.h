@@ -88,6 +88,15 @@ Entitlement entitlement_of(db::Database &db, int64_t user_id, int64_t now);
 // or add-on beside it (the checkout refuses one).
 bool admin_granted(const Entitlement &e);
 
+// The add-ons that end with the tier: of an account's `subscriptions`, the
+// own-machine and static-address ones Stripe still renews (a granting status,
+// no cancel at the period's end) while none of its support tiers grants at
+// `now` (a past_due one still does). An add-on is sold beside a tier, so the
+// billing sync sets each to cancel at its period's end (billing_sync.h). None
+// while a subscription that would grant sells a price no list names (it may
+// be a tier the configuration misses).
+std::vector<SubscriptionRow> add_ons_to_end(const std::vector<SubscriptionRow> &subscriptions, int64_t now);
+
 // The wall clock in Unix seconds (the entitlement's `now` in the service).
 int64_t unix_now();
 

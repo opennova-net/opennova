@@ -552,7 +552,8 @@ game host, instance, dedicated server
 The monthly Stripe subscription that supports the project and sets an account's
 **hosting entitlement**: tier 1, 2 or 3, one, two or three **hosted servers**
 (`apps/novaworld_common/billing/`). Its prices come from the service's configuration,
-never from code. The own-machine add-on is a subscription of its own beside it.
+never from code. Its add-ons (an own machine, a **static address**) are subscriptions of their own
+beside it, and end with it: once no tier of the account grants, each is set to cancel at its period's end.
 _Avoid_: plan, package, premium, donation, membership
 
 **Hosting entitlement**:
@@ -597,7 +598,8 @@ An **own machine**'s fixed public IPv4 with a name in the deployment's play zone
 (`<name>.play.opennova.net`), which its owner keeps for the own-machine servers it starts, so a
 server lists at the same address and port on every start (ADR 0066,
 `apps/novaworld_common/hosted/model/address_repository.h`). Each is a monthly add-on of its own (or an
-admin's comp address), at most one per own machine; on EC2 it is an Elastic IP.
+admin's comp address, which lapses once nothing covers it), at most one per own machine; on EC2 it is
+an Elastic IP.
 _Avoid_: Elastic IP (but naming the AWS resource), dedicated IP, fixed IP, vanity address
 
 **Slot**:

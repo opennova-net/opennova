@@ -100,6 +100,20 @@ bool admin_granted(const Entitlement &e) {
 	return e.comp_servers > 0 || e.comp_own_machines > 0 || e.comp_addresses > 0;
 }
 
+std::vector<SubscriptionRow> add_ons_to_end(const std::vector<SubscriptionRow> &subscriptions, int64_t now) {
+	std::vector<SubscriptionRow> out;
+	for (const SubscriptionRow &s : subscriptions) {
+		if (s.item == ItemKind::Tier && subscription_grants(s, now)) return {};
+		if (s.item == ItemKind::Unknown && status_grants(s.status) && s.current_period_end &&
+				now < *s.current_period_end + kPeriodNetSeconds)
+			return {};
+		if ((s.item == ItemKind::OwnMachine || s.item == ItemKind::StaticAddress) && status_grants(s.status) &&
+				!s.cancel_at_period_end)
+			out.push_back(s);
+	}
+	return out;
+}
+
 int64_t unix_now() {
 	using namespace std::chrono;
 	return static_cast<int64_t>(duration_cast<seconds>(system_clock::now().time_since_epoch()).count());

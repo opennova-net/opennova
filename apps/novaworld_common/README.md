@@ -668,7 +668,8 @@ quantity 1 per own machine (bought through Checkout, canceled in the Portal, whi
 changes no quantity), moves that many of them onto machines of their own while a tier
 also grants, and the static-address add-on, one subscription per address, gives an own
 machine a fixed public address and a name ([`hosted/README.md`](hosted/README.md) "Static
-addresses"). The service makes Stripe Checkout and Customer Portal
+addresses"). The add-ons end with the tier ("The add-ons end with the tier" below).
+The service makes Stripe Checkout and Customer Portal
 sessions and hands the browser their URL; no publishable key and no Stripe.js reach the
 site. Everything here is service policy (`billing/`).
 
@@ -716,6 +717,17 @@ site. Everything here is service policy (`billing/`).
   `billing_misconfigured`. A check is stored with the lists and the mode it was made under,
   so a changed `STRIPE_PRICE_*` list reads unchecked (checkout closed) until a check under
   it: `billing.sync` makes one within a minute of a worker running the new lists.
+- **The add-ons end with the tier** (`billing/billing_sync.*`, `billing/entitlement.*`
+  `add_ons_to_end`): after each customer's `billing.sync` and each reconcile that read
+  every subscription, an account none of whose support tiers grants (none, or ended,
+  canceled, unpaid; a `past_due` one still grants) has each own-machine and
+  static-address subscription Stripe still renews set to cancel at its period's end (one
+  call each, keyed by the subscription and its period, the answer written and logged),
+  so no add-on renews once its tier is gone. An admin-granted account's add-ons with no
+  tier end the same way. A subscription of a price no list names that would grant holds
+  them (it may be a tier the configuration misses). A call Stripe refuses or does not
+  answer is tried again at the next sync or reconcile; a route's own sync (the checkout's
+  success page) leaves the add-ons to the next reconcile.
 - **The capacity gate** (`hosted/model/sold_capacity.*`): a new subscription is never sold past
   what the fleet holds. Every account holds what its entitlement grants, used or not (its
   servers less those on own machines are shared places, its own machines are own

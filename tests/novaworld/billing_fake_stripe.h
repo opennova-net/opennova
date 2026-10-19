@@ -1,5 +1,6 @@
 // An in-memory Stripe behind the billing seam (apps/novaworld_common/billing/stripe_api.h)
-// for the billing tests: customers, subscriptions, prices, Checkout and Customer Portal
+// for the billing tests: customers, subscriptions (their metadata and cancel at the period's
+// end updated), prices, Checkout and Customer Portal
 // sessions, answering the routes the typed client calls (stripe_client.h) with the pinned
 // API version's JSON shapes (basil: current_period_end on each subscription item). It
 // records every request, replays a POST's reply for a repeated idempotency key, honours
@@ -578,6 +579,12 @@ private:
 	billing::StripeReply update_subscription(const billing::StripeRequest &r, const std::string &id) {
 		const auto it = subscriptions.find(id);
 		if (it == subscriptions.end()) return missing("subscription", id);
+		// Stripe's cancel at the period's end, which an ended subscription refuses.
+		if (const auto cancel = param(r, "cancel_at_period_end")) {
+			if (it->second.status == "canceled" || it->second.status == "incomplete_expired")
+				return invalid("A canceled subscription can only update its cancellation_details and metadata.");
+			it->second.cancel_at_period_end = *cancel == "true";
+		}
 		merge_metadata(it->second.metadata, nested(r, "metadata"));
 		return json_reply(subscription_json(it->second, false));
 	}
