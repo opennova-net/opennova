@@ -5,6 +5,7 @@
 #include "billing/entitlement.h"
 #include "hosted_repository.h"
 
+#include <algorithm>
 #include <array>
 #include <utility>
 
@@ -21,7 +22,7 @@ constexpr std::array<const char *, 6> kStateNames = {
 constexpr const char *kAddressColumns =
 		"id, owner_user_id, name, source, COALESCE(stripe_subscription_id, ''), state, allocation_id, public_ip, "
 		"dns_name, dns_change_id, dns_state, COALESCE(extract(epoch FROM release_after)::bigint, 0), lapse_cause, "
-		"reason, created_at, ready_at, lapsed_at, released_at";
+		"reason, created_at, ready_at, lapsed_at, released_at, retries, retry_at";
 
 constexpr const char *kHeldSql = "state IN ('allocating', 'ready', 'lapsed', 'releasing')";
 
@@ -45,6 +46,8 @@ HostedAddress row_to_address(const db::Row &r) {
 	a.ready_at = r.as_text(15).value_or("");
 	a.lapsed_at = r.as_text(16).value_or("");
 	a.released_at = r.as_text(17).value_or("");
+	a.retries = static_cast<int>(r.as_int(18).value_or(0));
+	a.retry_at = r.as_text(19).value_or("");
 	return a;
 }
 
@@ -123,6 +126,14 @@ bool address_is_held(AddressState state) {
 			state == AddressState::Releasing;
 }
 
+bool address_refusal_passes(std::string_view code) { return code == "AddressLimitExceeded"; }
+
+int64_t address_retry_delay_s(int retries) {
+	int64_t delay = kAddressRetryBaseS;
+	for (int i = 0; i < retries && delay < kAddressRetryMaxS; ++i) delay *= 2;
+	return std::min(delay, kAddressRetryMaxS);
+}
+
 std::optional<HostedAddress> find_address(db::Database &db, int64_t id) {
 	auto rows = query_addresses(db, "WHERE id = $1;", { BindValue(id) });
 	if (rows.empty()) return std::nullopt;
@@ -149,13 +160,28 @@ int count_held_addresses(db::Database &db) {
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
+std::map<int64_t, HeldAddresses> held_addresses_by_owner(db::Database &db) {
+	std::map<int64_t, HeldAddresses> out;
+	for (const auto &r : db.query(std::string("SELECT COALESCE(owner_user_id, 0), "
+											  "COUNT(*) FILTER (WHERE state IN ('allocating', 'ready')), "
+											  "COUNT(*) FILTER (WHERE state IN ('lapsed', 'releasing')) "
+											  "FROM hosted_addresses WHERE ") +
+				 kHeldSql + " GROUP BY 1;")) {
+		HeldAddresses &h = out[r.as_int(0).value_or(0)];
+		h.granted = r.as_int(1).value_or(0);
+		h.leaving = r.as_int(2).value_or(0);
+	}
+	return out;
+}
+
 std::vector<std::string> unnamed_address_subscriptions(db::Database &db, int64_t owner_user_id, int64_t now) {
 	std::vector<std::string> out;
 	// subscriptions_of answers newest first: the oldest is named first.
 	const std::vector<billing::SubscriptionRow> rows = billing::subscriptions_of(db, owner_user_id);
 	for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
 		if (it->item != billing::ItemKind::StaticAddress || !billing::subscription_grants(*it, now)) continue;
-		if (db.query("SELECT 1 FROM hosted_addresses WHERE stripe_subscription_id = $1;",
+		// A released row frees it (idx_hosted_addresses_subscription).
+		if (db.query("SELECT 1 FROM hosted_addresses WHERE stripe_subscription_id = $1 AND state <> 'released';",
 					  { BindValue(it->stripe_subscription_id) })
 						.empty())
 			out.push_back(it->stripe_subscription_id);
@@ -223,8 +249,22 @@ bool record_dns_upsert(db::Database &db, int64_t id, const std::string &dns_name
 	return db.changes() > 0;
 }
 
-bool fail_address(db::Database &db, int64_t id, const std::string &reason) {
-	return move(db, id, "'allocating'", "failed", "reason = $3", { BindValue(reason) });
+bool fail_address(db::Database &db, int64_t id, const std::string &reason, int64_t retry_in_s) {
+	return move(db, id, "'allocating'", "failed",
+			"reason = $3, retry_at = CASE WHEN $4 > 0 THEN now() + make_interval(secs => $4) END, "
+			"retries = retries + CASE WHEN $4 > 0 THEN 1 ELSE 0 END",
+			{ BindValue(reason), BindValue(retry_in_s) });
+}
+
+bool retry_address(db::Database &db, int64_t id) {
+	return move(db, id, "'failed'", "allocating", "reason = '', retry_at = NULL, retries = 0");
+}
+
+bool retry_due_address(db::Database &db, int64_t id) {
+	db.exec("UPDATE hosted_addresses SET state = 'allocating', reason = '', retry_at = NULL, updated_at = now() "
+			"WHERE id = $1 AND state = 'failed' AND retry_at <= now();",
+			{ BindValue(id) });
+	return db.changes() > 0;
 }
 
 bool record_dns_delete(db::Database &db, int64_t id, const std::string &change_id) {
@@ -250,7 +290,8 @@ bool restore_address(db::Database &db, int64_t id) {
 }
 
 bool lapse_address(db::Database &db, int64_t id, const std::string &cause, const std::string &reason) {
-	return move(db, id, "'allocating', 'ready', 'failed'", "lapsed", "lapse_cause = $3, reason = $4, lapsed_at = now()",
+	return move(db, id, "'allocating', 'ready', 'failed'", "lapsed",
+			"lapse_cause = $3, reason = $4, lapsed_at = now(), retry_at = NULL",
 			{ BindValue(cause), BindValue(reason) });
 }
 

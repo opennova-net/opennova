@@ -2,7 +2,8 @@
 // GET /api/admin/addresses (every address, what the cloud holds against what
 // the deployment sells, and the addresses the cloud holds that no row names),
 // PUT /api/admin/addresses/<id> (a rename), POST
-// /api/admin/addresses/<id>/release (with the name typed to confirm) and POST
+// /api/admin/addresses/<id>/release (with the name typed to confirm), POST
+// /api/admin/addresses/<id>/retry (one the cloud refused, tried again) and POST
 // /api/admin/users/<id>/addresses (an admin's comp address). Each answers an
 // AdminResult (admin.ts).
 
@@ -27,6 +28,7 @@ export function parseAdminAddress(value: unknown): AdminAddress | null {
     dns_name: textOrNull(v.dns_name),
     dns_state: typeof v.dns_state === 'string' ? v.dns_state : '',
     lapse_cause: textOrNull(v.lapse_cause),
+    retry_at: textOrNull(v.retry_at),
   };
 }
 
@@ -81,6 +83,13 @@ export function renameAddress(id: number, name: string): Promise<AdminResult<Adm
 // confirm_mismatch, 409 not_releasable when it is on its way out already.
 export function releaseAddress(id: number, confirm: string): Promise<AdminResult<AdminAddress>> {
   return adminCall(() => adminClient.post<unknown>(`/addresses/${id}/release`, { confirm }), pickAddressReply);
+}
+
+// POST /api/admin/addresses/<id>/retry: an address the cloud refused tried
+// again (allocating, 202); 409 not_retryable when it is not failed, 503
+// addresses_disabled when the service sells none.
+export function retryAddress(id: number): Promise<AdminResult<AdminAddress>> {
+  return adminCall(() => adminClient.post<unknown>(`/addresses/${id}/retry`, {}), pickAddressReply);
 }
 
 // POST /api/admin/users/<id>/addresses {"name"}: an admin's comp address for

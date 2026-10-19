@@ -44,6 +44,7 @@
 #include "hosted/console_commands.h"
 #include "hosted/console_drain.h"
 #include "hosted/model/address_jobs.h"
+#include "hosted/model/address_repository.h"
 #include "hosted/model/console_queue.h"
 #include "hosted/model/hosted_repository.h"
 #include "hosted/model/limits_hold.h"
@@ -7544,9 +7545,9 @@ int test_billing_capacity(Harness &h) {
 // play.test zone): the add-on bought through Checkout once the account has an own
 // machine (address_limit before), its subscription on the account's billing until
 // named, the owner's name (the CSRF header, the name rules, one per subscription),
-// the Portal's cancel flow for it, the admin's view, rename and typed release, a
-// comp address within the own machines, the tiers' offer, and a start naming an
-// address only with an own machine.
+// the Portal's cancel flow for it, the admin's view, retry of a refused one, rename
+// and typed release, a comp address within the own machines, the tiers' offer, and a
+// start naming an address only with an own machine.
 int test_address_routes(Harness &h) {
 	namespace billing = opennova::novaworld_server::billing;
 	namespace hosted = opennova::novaworld_server::hosted;
@@ -7640,8 +7641,33 @@ int test_address_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200 && json && json["held"].i() >= 1 && json["sellable"].i() == 4);
 	bool seen = false;
 	for (const auto &a : json["addresses"])
-		seen = seen || (a["id"].i() == address && a["owner"]["id"].i() == uma && str(a["dns_state"]) == "none");
+		seen = seen || (a["id"].i() == address && a["owner"]["id"].i() == uma && str(a["dns_state"]) == "none" &&
+							   a["retry_at"].t() == crow::json::type::Null);
 	TEST_EXPECT(seen);
+	// A retry: only of an address the cloud refused, which goes allocating again
+	// with its allocation enqueued; admin only.
+	const std::string retry = "/api/admin/addresses/" + std::to_string(address) + "/retry";
+	const std::string allocate_key = std::string(hosted::kJobAddressAllocate) + ":" + std::to_string(address);
+	reply = h.send("POST", retry, { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_retryable");
+	TEST_EXPECT(hosted::fail_address(*h.pool.acquire(), address, "AddressLimitExceeded", hosted::kAddressRetryBaseS));
+	h.pool.acquire()->exec("UPDATE jobs SET state = 'failed', finished_at = now() WHERE dedupe_key = $1;",
+			{ opennova::db::BindValue(allocate_key) });
+	TEST_EXPECT(!nws::jobs::job_pending(*h.pool.acquire(), allocate_key));
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/addresses", { kBearer })));
+	seen = false;
+	for (const auto &a : json["addresses"])
+		seen = seen || (a["id"].i() == address && str(a["state"]) == "failed" &&
+							   str(a["reason"]) == "AddressLimitExceeded" && a["retry_at"].t() == crow::json::type::String);
+	TEST_EXPECT(seen);
+	TEST_EXPECT(h.send("POST", retry, { with_session(uma_s) }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/addresses/999999/retry", { kBearer }).code == 404);
+	reply = h.send("POST", retry, { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["address"]["state"]) == "allocating" &&
+			json["address"]["reason"].t() == crow::json::type::Null &&
+			json["address"]["retry_at"].t() == crow::json::type::Null);
+	TEST_EXPECT(nws::jobs::job_pending(*h.pool.acquire(), allocate_key));
 	// A comp address: none past the account's own machines.
 	reply = h.send("POST", "/api/admin/users/" + std::to_string(vic) + "/addresses", { kBearer, kJson },
 			"{\"name\":\"vics\"}");

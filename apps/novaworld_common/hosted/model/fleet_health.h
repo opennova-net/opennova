@@ -36,7 +36,8 @@
 //                      StartCause::DataUnavailable, no restart counted, so it
 //                      never fails), or whose run of them began over
 //                      kDataFailingS ago; danger past kDataFailingDangerS
-//   failed_address     warn: a static address the cloud refused
+//   failed_address     warn: a static address the cloud refused (tried again
+//                      automatically when the refusal passes)
 //   stuck_address      warn: a releasing static address whose release has not
 //                      moved for over kStuckReleaseS (no worker runs it)
 //   addresses_off      warn: static addresses held while the add-on is off
@@ -181,6 +182,7 @@ struct FailedAddress {
 	std::string name;
 	std::string reason;
 	int64_t failed_at = 0;
+	bool retried = false; // tried again automatically (its retry_at set)
 };
 
 // A releasing static address, and its release's last step (its row's last

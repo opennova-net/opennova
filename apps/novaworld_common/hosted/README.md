@@ -312,16 +312,22 @@ names it runs on a machine carrying it, so the server lists at the same `address
 each time. Each is its own Stripe subscription (the static-address add-on, quantity 1,
 bought through Checkout once the account has an own machine for it, canceled through the
 Portal's cancel flow), or an admin's comp address (`POST /api/admin/users/<id>/addresses`).
-At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`). With the add-on off
-(`ONNET_FLEET_MAX_ADDRESSES` 0, or no zone name) none is sold or allocated, and a worker
-whose address settings still read releases the held ones.
+At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`), counting what the
+cloud holds too (an account's rows that hold a grant where they pass its grants, and every
+lapsed or releasing row, whose Elastic IP is held until released), so the fleet never
+holds more Elastic IPs than it sells. With the add-on off (`ONNET_FLEET_MAX_ADDRESSES` 0,
+or no zone name) none is sold or allocated, and a worker whose address settings still read
+releases the held ones.
 
 - **The rows** (`model/address_repository.*`): `allocating` once named (the owner names a bought
   one, `POST /api/me/addresses`; a name of 3 to 32 lower-case letters, digits and `-`, a
   letter or digit first and last, no `--`, not all digits, none the service keeps:
   `model/address_names.*`), `ready` once allocated with its A record written, `lapsed` when its
-  grant is gone or an admin released it, `releasing`, then `released`; `failed` when the
-  cloud refused it (its error code: an exhausted Elastic IP quota shows there). A name is
+  grant is gone or an admin released it, `releasing`, then `released` (its subscription,
+  granting still, may name another); `failed` when the cloud refused it (its error code: an
+  exhausted Elastic IP quota shows there), `allocating` again when an admin retries it
+  (`POST /api/admin/addresses/<id>/retry`) or, for an exhausted quota, once the fleet's pass
+  finds its `retry_at` reached (5 min after the refusal, doubling to 6 h). A name is
   unique for good: a released address keeps it until an admin renames the row. A start
   names an address (`address_id`, with `own_machine`): it must be the owner's, ready, and
   no other live server's (409 `address_unavailable`; the database's one live server per
@@ -359,7 +365,10 @@ whose address settings still read releases the held ones.
   subscription addresses) (the owners' limits' brake: it logs an ERROR and lapses none;
   an admin may release one). A lapsed address's machine ends (the association goes with
   it) and its server is placed again without it, no restart counted, its event saying
-  why; once no live machine carries the address it goes releasing.
+  why; once no live machine carries the address it goes releasing. With the add-on on, an
+  allocating address whose `address.allocate` ran out of attempts (a throttle, a cloud
+  that did not answer) is allocated again, and a failed one is tried again at its
+  `retry_at`.
 
 ## Service accounts and the listing's owner
 
@@ -514,9 +523,10 @@ writes need the CSRF header.
 | `GET /api/admin/hosted/usage` | admin | every live server's use of its slot (its newest sample within 3 min and its last hour summed), by machine and slot, with each machine's and the fleet's totals and the slots' limits; 429 |
 | `POST /api/admin/hosted/<id>/stop` | admin | 202; 404; 409 `not_live` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`: 200 with how many |
-| `GET /api/admin/addresses` | admin | `enabled`, the `zone`, how many the cloud `held` of the `sellable`, every address with its owner, allocation, record and lapse cause, and the `orphans` the last sweep found |
+| `GET /api/admin/addresses` | admin | `enabled`, the `zone`, how many the cloud `held` of the `sellable`, every address with its owner, allocation, record, lapse cause and a failed one's `retry_at`, and the `orphans` the last sweep found |
 | `PUT /api/admin/addresses/<id>` | admin | `{"name"}`: a rename (any state: a released one's frees its old name; a ready one's record moves): 200; 400 `invalid_name`; 404; 409 `name_taken` |
 | `POST /api/admin/addresses/<id>/release` | admin | `{"confirm": "<its name>"}`: lapsed by an admin, then released (its server placed again without it): 202; 400 `confirm_mismatch`; 404; 409 `not_releasable` |
+| `POST /api/admin/addresses/<id>/retry` | admin | an address the cloud refused allocated again (its automatic tries counted from 0): 202; 404; 409 `not_retryable` (not failed); 503 `addresses_disabled` |
 | `POST /api/admin/users/<id>/addresses` | admin | `{"name"}`: a comp address for the account, at most its own machines: 201; 400 `invalid_name`; 404; 409 `name_taken`, `address_limit`; 503 `addresses_disabled` |
 
 ## Game data

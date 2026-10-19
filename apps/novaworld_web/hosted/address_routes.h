@@ -6,7 +6,8 @@
 // header on the POST; its cancel is the Portal's, POST /api/billing/portal
 // {"cancel_subscription"}), and the admin's, GET /api/admin/addresses, PUT
 // /api/admin/addresses/<id> (a rename), POST /api/admin/addresses/<id>/release (with
-// the address's name typed back) and POST /api/admin/users/<id>/addresses (a comp
+// the address's name typed back), POST /api/admin/addresses/<id>/retry (one the cloud
+// refused, allocated again) and POST /api/admin/users/<id>/addresses (a comp
 // address; require_admin). They write rows and enqueue the worker's address jobs in
 // the same transaction (hosted/model/address_jobs.h); the fleet's pass and the workers do
 // the rest. Every reply is an error code with our own message, never database text.
@@ -29,8 +30,9 @@ namespace opennova::novaworld_server::hosted {
 // stripe_subscription_id (null for a comp one), server ({id, game_name,
 // state} of the live server using it, or null), reason (null for none),
 // created_at, ready_at, lapsed_at, released_at}, and with `admin` its owner
-// ({id, username} or null), allocation_id, dns_name and dns_state and its
-// lapse_cause.
+// ({id, username} or null), allocation_id, dns_name and dns_state, its
+// lapse_cause and a failed one's retry_at (its next automatic try, null for
+// none).
 crow::json::wvalue address_json(db::Database &db, const HostedAddress &a, const std::string &zone, bool admin);
 
 class AddressRoutes {
@@ -42,7 +44,7 @@ public:
 	// Whether the static addresses are on (hosted/model/hosted_policy.h
 	// HostedPolicy::addresses_on),
 	// the play zone they are named in and the addresses the fleet sells. Before
-	// register_routes(); off, a name or a comp address answers 503
+	// register_routes(); off, a name, a comp address or a retry answers 503
 	// addresses_disabled.
 	void configure(bool on, std::string zone, int sellable);
 	void register_routes(WebApp &app);
@@ -53,6 +55,7 @@ private:
 	crow::response admin_addresses(const crow::request &req);
 	crow::response admin_rename(const crow::request &req, uint64_t id);
 	crow::response admin_release(const crow::request &req, uint64_t id);
+	crow::response admin_retry(const crow::request &req, uint64_t id);
 	crow::response admin_comp(const crow::request &req, uint64_t user_id);
 
 	WebAccess &access_;

@@ -49,13 +49,15 @@ ALTER TABLE billing_subscriptions
 -- A static address: an own machine's fixed public IPv4 with an A record named `name`
 -- in the deployment's play zone, held by its owner for the own-machine servers it
 -- starts. Its source is its own subscription (stripe_subscription_id, one address
--- each) or an admin's grant ('comp'). allocating -> ready -> lapsed (its grant gone, or
--- an admin's release: lapse_cause) -> releasing -> released, or failed (the cloud
--- refused it: reason). allocation_id and public_ip are the cloud's; dns_name the name
--- its record carries now ('' for none), dns_change_id the zone's last change and
--- dns_state whether a delete waits to be in sync; release_after when its record's TTL
--- has drained. A name is unique for good: a released address keeps it until an admin
--- renames the row.
+-- each, until the address is released: a subscription granting still may name another)
+-- or an admin's grant ('comp'). allocating -> ready -> lapsed (its grant gone, or an
+-- admin's release: lapse_cause) -> releasing -> released, or failed (the cloud refused
+-- it: reason) -> allocating again (an admin's retry, or, for a refusal that passes,
+-- the fleet's pass at retry_at; retries counts the automatic tries for their backoff).
+-- allocation_id and public_ip are the cloud's; dns_name the name its record carries
+-- now ('' for none), dns_change_id the zone's last change and dns_state whether a
+-- delete waits to be in sync; release_after when its record's TTL has drained. A name
+-- is unique for good: a released address keeps it until an admin renames the row.
 CREATE TABLE hosted_addresses (
     id                     bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     owner_user_id          bigint REFERENCES players(id) ON DELETE SET NULL,
@@ -72,6 +74,8 @@ CREATE TABLE hosted_addresses (
     release_after          timestamptz,
     lapse_cause            text NOT NULL DEFAULT '' CHECK (lapse_cause IN ('', 'grant', 'admin')),
     reason                 text NOT NULL DEFAULT '',
+    retry_at               timestamptz,
+    retries                bigint NOT NULL DEFAULT 0 CHECK (retries >= 0),
     created_at             timestamptz NOT NULL DEFAULT now(),
     updated_at             timestamptz NOT NULL DEFAULT now(),
     ready_at               timestamptz,
@@ -81,7 +85,7 @@ CREATE TABLE hosted_addresses (
 );
 CREATE UNIQUE INDEX idx_hosted_addresses_name ON hosted_addresses(name);
 CREATE UNIQUE INDEX idx_hosted_addresses_subscription ON hosted_addresses(stripe_subscription_id)
-    WHERE stripe_subscription_id IS NOT NULL;
+    WHERE stripe_subscription_id IS NOT NULL AND state <> 'released';
 CREATE INDEX idx_hosted_addresses_owner ON hosted_addresses(owner_user_id);
 
 -- The address a hosted server asked for (an own-machine server's; one live server per

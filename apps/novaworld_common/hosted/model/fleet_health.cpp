@@ -279,10 +279,10 @@ HealthInputs read_health(db::Database &db, const PlacementPolicy *policy) {
 		in.lobby_last_seen = std::max(in.lobby_last_seen, l.last_seen_ms / 1000);
 
 	for (const db::Row &r :
-			db.query("SELECT id, name, reason, CAST(extract(epoch FROM updated_at) AS bigint) "
-					 "FROM hosted_addresses WHERE state = 'failed' ORDER BY id;"))
+			db.query("SELECT id, name, reason, CAST(extract(epoch FROM updated_at) AS bigint), "
+					 "retry_at IS NOT NULL FROM hosted_addresses WHERE state = 'failed' ORDER BY id;"))
 		in.failed_addresses.push_back({ r.as_int(0).value_or(0), r.as_text(1).value_or(""),
-				r.as_text(2).value_or(""), epoch_at(r, 3) });
+				r.as_text(2).value_or(""), epoch_at(r, 3), r.as_int(4).value_or(0) != 0 });
 	for (const db::Row &r :
 			db.query("SELECT id, name, CAST(extract(epoch FROM updated_at) AS bigint) "
 					 "FROM hosted_addresses WHERE state = 'releasing' ORDER BY id;"))
@@ -525,7 +525,8 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 		add(HealthLevel::Warn, "Address " + a.name,
 				"The cloud refused it: " +
 						(a.reason.empty() ? std::string("no reason recorded") : a.reason) +
-						". Release it, or rename it to try again.",
+						(a.retried ? ". It is tried again automatically; Retry tries it now, or release it."
+								   : ". Retry it once the cause is fixed, or release it."),
 				a.failed_at, "/admin/addresses", "failed_address");
 	for (const ReleasingAddress &a : in.releasing_addresses) {
 		if (a.last_step <= 0 || in.now - a.last_step <= kStuckReleaseS)

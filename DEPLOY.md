@@ -1260,8 +1260,10 @@ deployment's admins upload it on its own site, into its own bucket.
      account, under the quota L-0263D0A3 ("EC2-VPC Elastic IPs", per Region): 5 by default,
      and the load balancer holds 2 of them in each account. Request 10 in each account in
      the Service Quotas console, and wait until it is granted, before raising
-     `fleet_max_addresses` (an allocation past the quota fails, and the address shows
-     failed):
+     `fleet_max_addresses` (an allocation past the quota fails: the address shows failed
+     with `AddressLimitExceeded` and is tried again by itself, 5 minutes on and then twice
+     as long each time up to 6 hours, or at once with Retry on the admin's Static
+     addresses page):
 
      ```bash
      ./deploy/run.sh --deployment staging aws service-quotas get-service-quota --service-code ec2 --quota-code L-0263D0A3

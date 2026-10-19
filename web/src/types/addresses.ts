@@ -7,7 +7,9 @@
 import type { HostedState } from './hostedServer';
 
 // allocating -> ready -> lapsed (its grant ended, or an admin released it) ->
-// releasing -> released; failed when the cloud would not give one.
+// releasing -> released; failed when the cloud would not give one, and
+// allocating again once an admin retries it (or, for an exhausted quota, by
+// itself at its retry_at).
 export type AddressState = 'allocating' | 'ready' | 'lapsed' | 'releasing' | 'released' | 'failed';
 
 // What pays for it: its own subscription, or an admin's grant.
@@ -80,6 +82,8 @@ export interface AdminAddress extends Address {
   dns_state: string;
   // Why it lapsed: 'grant' (its subscription stopped granting) or 'admin'.
   lapse_cause: string | null;
+  // A failed one's next automatic try (an exhausted quota's); null for none.
+  retry_at: string | null;
 }
 
 // An address the cloud holds for this deployment that no address row names

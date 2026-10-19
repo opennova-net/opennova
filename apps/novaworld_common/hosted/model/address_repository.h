@@ -19,8 +19,12 @@
 //               and once no machine holds it the pass makes it releasing
 //   releasing   the worker's address.release: its record deleted and given
 //               its TTL to drain, then the address released
-//   released    gone for good; its name stays taken until an admin renames it
-//   failed      the cloud refused it (reason: its error code)
+//   released    gone for good; its name stays taken until an admin renames
+//               it, and its subscription, granting still, may name another
+//   failed      the cloud refused it (reason: its error code); allocating
+//               again once an admin retries it, or, for a refusal that
+//               passes (address_refusal_passes), once the fleet's pass finds
+//               its retry_at reached
 //
 // Every move is a compare-and-set on the state. Crow-free. Each function throws
 // db::Error on a database failure. Service policy, not a port.
@@ -28,6 +32,7 @@
 #include <net/novaworld/db/database.h>
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -41,6 +46,21 @@ std::optional<AddressState> address_state_from_name(std::string_view name);
 // Whether the cloud may hold it now (allocating, ready, lapsed, releasing):
 // the admin's "held" count, and what fleet.sweep keeps.
 bool address_is_held(AddressState state);
+
+// A failed allocation's automatic tries (the fleet's pass): the first
+// kAddressRetryBaseS after the refusal, the wait doubling with each refusal
+// after it, to kAddressRetryMaxS.
+inline constexpr int64_t kAddressRetryBaseS = 5 * 60;
+inline constexpr int64_t kAddressRetryMaxS = 6 * 60 * 60;
+// Whether the cloud's refusal `code` passes on its own, so the address is
+// tried again automatically: an exhausted Elastic IP quota (or the local
+// stack's range), AddressLimitExceeded, which a raised quota or a released
+// address ends. A throttle or an unanswered call fails no row: the drivers
+// answer it Retry, the job's own backoff, and the fleet's pass runs an
+// allocation whose job is gone again.
+bool address_refusal_passes(std::string_view code);
+// The wait before the automatic try that follows `retries` earlier ones.
+int64_t address_retry_delay_s(int retries);
 
 // A record a state moved by (hosted_addresses.lapse_cause).
 inline constexpr const char *kLapseGrant = "grant"; // its subscription stopped granting
@@ -61,11 +81,13 @@ struct HostedAddress {
 	int64_t release_after = 0; // Unix seconds: its record's TTL drained (0: not yet)
 	std::string lapse_cause;   // "", kLapseGrant or kLapseAdmin
 	std::string reason;        // a failure's, a lapse's
+	int retries = 0;           // the automatic tries since it was named or an admin retried it
 	// UTC 'YYYY-MM-DD HH:MM:SS'; "" until set.
 	std::string created_at;
 	std::string ready_at;
 	std::string lapsed_at;
 	std::string released_at;
+	std::string retry_at; // a failed one's next automatic try; "" for none
 };
 
 std::optional<HostedAddress> find_address(db::Database &db, int64_t id);
@@ -78,9 +100,19 @@ std::vector<HostedAddress> list_addresses(db::Database &db);
 std::vector<HostedAddress> addresses_in(db::Database &db, AddressState state);
 // How many addresses the cloud may hold now (address_is_held).
 int count_held_addresses(db::Database &db);
+// The addresses the cloud may hold now, by owner (an address whose account is
+// gone under 0): those that hold a grant (allocating, ready) and those on
+// their way out (lapsed, releasing), whose cloud address is held until it is
+// released (the sold capacity, sold_capacity.h).
+struct HeldAddresses {
+	int64_t granted = 0;
+	int64_t leaving = 0;
+};
+std::map<int64_t, HeldAddresses> held_addresses_by_owner(db::Database &db);
 
 // The granting static-address subscriptions of the account that no address
-// row names yet (the owner names one of them), oldest first, at `now`.
+// row names yet, a released one's aside (the owner names one of them),
+// oldest first, at `now`.
 std::vector<std::string> unnamed_address_subscriptions(db::Database &db, int64_t owner_user_id, int64_t now);
 
 // What naming an address came to.
@@ -118,8 +150,17 @@ bool record_allocation(db::Database &db, int64_t id, const std::string &allocati
 // known: insync for an upsert); allocating -> ready on the first. False when
 // the row is no longer allocating or ready.
 bool record_dns_upsert(db::Database &db, int64_t id, const std::string &dns_name, const std::string &change_id);
-// The cloud refused it: allocating -> failed with `reason`.
-bool fail_address(db::Database &db, int64_t id, const std::string &reason);
+// The cloud refused it: allocating -> failed with `reason`. With
+// `retry_in_s` above 0 (a refusal that passes) its next automatic try is
+// that far on, and counted (retries); 0 leaves it to an admin's retry.
+bool fail_address(db::Database &db, int64_t id, const std::string &reason, int64_t retry_in_s);
+// An admin's retry: failed -> allocating, its automatic tries counted from 0
+// again. The caller enqueues its address.allocate in the same transaction.
+bool retry_address(db::Database &db, int64_t id);
+// The fleet's pass: a failed address whose retry_at has passed -> allocating,
+// its tries kept for the next backoff. The caller enqueues its
+// address.allocate in the same transaction.
+bool retry_due_address(db::Database &db, int64_t id);
 // A releasing address's record deleted (change `change_id`, pending until in
 // sync).
 bool record_dns_delete(db::Database &db, int64_t id, const std::string &change_id);
@@ -134,7 +175,8 @@ bool restore_address(db::Database &db, int64_t id);
 
 // --- the fleet's pass (the supervisor) ---
 
-// ready (or allocating, or failed) -> lapsed with `cause` and `reason`.
+// ready (or allocating, or failed) -> lapsed with `cause` and `reason` (no
+// automatic try left).
 bool lapse_address(db::Database &db, int64_t id, const std::string &cause, const std::string &reason);
 // lapsed -> releasing.
 bool begin_release(db::Database &db, int64_t id);

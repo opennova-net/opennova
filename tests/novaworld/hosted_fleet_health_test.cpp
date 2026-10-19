@@ -5,7 +5,8 @@
 // warn "unknown", never healthy (nor in the heartbeat's least free disk); a machine's
 // outdated by each image pair; the order (danger, warn, info, each oldest first, a finding
 // with no time after the rest) and the heartbeat's gauges; the static addresses' rules (a
-// release stuck, addresses held with the add-on off). Pure functions: no database.
+// refusal tried again or not, a release stuck, addresses held with the add-on off). Pure
+// functions: no database.
 
 #include "hosted/model/fleet_health.h"
 
@@ -417,16 +418,29 @@ int test_data_unavailable() {
 	return 0;
 }
 
-// The static addresses: a release whose last step is past kStuckReleaseS is
-// stuck, one just at it not; addresses held while the add-on is off, none
-// when it is on or none is held.
+// The static addresses: a refusal's finding says whether it is tried again;
+// a release whose last step is past kStuckReleaseS is stuck, one just at it
+// not; addresses held while the add-on is off, none when it is on or none is
+// held.
 int test_addresses() {
 	hosted::HealthInputs in = healthy();
+	in.failed_addresses.push_back({ 5, "smoke", "AddressLimitExceeded", kNow - 7200, true });
+	in.failed_addresses.push_back({ 6, "broken", "InvalidParameterValue", kNow - 60, false });
 	in.releasing_addresses.push_back({ 7, "slow", kNow - hosted::kStuckReleaseS - 1 });
 	in.releasing_addresses.push_back({ 8, "draining", kNow - hosted::kStuckReleaseS });
 	in.held_addresses = 3;
 	in.addresses_on = true;
 	auto all = hosted::fleet_health(in, {});
+	const auto failed = of(all, "failed_address");
+	const Finding *smoke = about(failed, "Address smoke");
+	const Finding *broken = about(failed, "Address broken");
+	TEST_EXPECT(failed.size() == 2 && smoke != nullptr && broken != nullptr);
+	TEST_EXPECT(smoke->text ==
+			"The cloud refused it: AddressLimitExceeded. It is tried again automatically; Retry tries "
+			"it now, or release it.");
+	TEST_EXPECT(broken->text ==
+			"The cloud refused it: InvalidParameterValue. Retry it once the cause is fixed, or release "
+			"it.");
 	const auto stuck = of(all, "stuck_address");
 	TEST_EXPECT(stuck.size() == 1 && stuck[0].subject == "Address slow" && stuck[0].level == HealthLevel::Warn &&
 			stuck[0].link == "/admin/addresses" && stuck[0].since == kNow - hosted::kStuckReleaseS - 1);

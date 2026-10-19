@@ -64,9 +64,14 @@ jobs::JobResult allocate(jobs::JobContext &ctx, AddressDriver &driver, ZoneDrive
 			});
 			found = driver.allocate(id, a->name, held);
 			if (found.call == AddressCall::Refused) {
-				on_db(ctx, [&](db::Database &db) { return fail_address(db, id, found.code); });
-				std::fprintf(stderr, "[fleet] WARN address %lld (%s): the cloud refused it: %s\n",
-						static_cast<long long>(id), loggable(a->name, 40).c_str(), found.error.c_str());
+				// A refusal that passes (an exhausted quota) is tried again, its
+				// wait doubling with each refusal; any other waits for an admin.
+				const int64_t retry_in = address_refusal_passes(found.code) ? address_retry_delay_s(a->retries) : 0;
+				on_db(ctx, [&](db::Database &db) { return fail_address(db, id, found.code, retry_in); });
+				const std::string again =
+						retry_in > 0 ? "; tried again in " + std::to_string(retry_in / 60) + " min" : std::string();
+				std::fprintf(stderr, "[fleet] WARN address %lld (%s): the cloud refused it: %s%s\n",
+						static_cast<long long>(id), loggable(a->name, 40).c_str(), found.error.c_str(), again.c_str());
 				return jobs::JobResult::fail("the cloud refused the address (" + found.code + ")");
 			}
 			if (found.call != AddressCall::Done || !found.address) return jobs::JobResult::retry(found.error);

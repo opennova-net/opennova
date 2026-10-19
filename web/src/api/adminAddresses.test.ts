@@ -1,7 +1,7 @@
 import { AxiosError, AxiosHeaders, type AxiosResponse } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { adminClient } from './client';
-import { addCompAddress, fetchAdminAddresses, releaseAddress, renameAddress } from './adminAddresses';
+import { addCompAddress, fetchAdminAddresses, releaseAddress, renameAddress, retryAddress } from './adminAddresses';
 import { adminAddress, adminAddressesResponse } from '../test/addressFixtures';
 
 vi.mock('./client', () => ({
@@ -54,6 +54,15 @@ describe('the admin address routes', () => {
     expect(released.ok && released.value.state).toBe('lapsed');
     expect(post).toHaveBeenLastCalledWith('/addresses/1/release', { confirm: 'smoke' });
 
+    post.mockResolvedValueOnce(reply({ address: adminAddress(4, 'quota', { state: 'allocating' }) }, 202));
+    const retried = await retryAddress(4);
+    expect(retried.ok && retried.value.state).toBe('allocating');
+    expect(post).toHaveBeenLastCalledWith('/addresses/4/retry', {});
+    const refused = adminAddress(4, 'quota', { state: 'failed', reason: 'AddressLimitExceeded', retry_at: '2026-10-18 12:05:00' });
+    post.mockResolvedValueOnce(reply({ address: refused }));
+    const failed = await retryAddress(4);
+    expect(failed.ok && failed.value.retry_at).toBe('2026-10-18 12:05:00');
+
     post.mockResolvedValueOnce(reply({ address: adminAddress(3, 'arena', { source: 'comp' }) }, 201));
     const comp = await addCompAddress(7, 'arena');
     expect(comp.ok && comp.value.source).toBe('comp');
@@ -64,6 +73,7 @@ describe('the admin address routes', () => {
       [409, 'name_taken', 'Another static address already has that name'],
       [400, 'confirm_mismatch', "not the address's"],
       [409, 'not_releasable', 'on its way out already'],
+      [409, 'not_retryable', 'Only an address the cloud refused'],
       [409, 'address_limit', 'a static address for every own machine'],
       [503, 'addresses_disabled', 'sells no static address'],
     ];

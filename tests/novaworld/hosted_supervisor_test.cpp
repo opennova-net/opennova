@@ -1092,7 +1092,9 @@ int test_static_address() {
 }
 
 // The lapses' brake: more subscriptions' addresses lapsing in one pass than
-// max(2, half of them) is the cache in doubt, and none lapses.
+// max(2, half of them) is the cache in doubt, and none lapses. Then, with the
+// add-on on, the allocations run again: one whose job is gone, and a refusal
+// that passes once its retry_at is reached.
 int test_static_address_brake() {
 	namespace billing = opennova::novaworld_server::billing;
 	Rig rig("hosted_address_brake");
@@ -1130,6 +1132,40 @@ int test_static_address_brake() {
 	rig.step();
 	for (size_t i = 1; i < addresses.size(); ++i)
 		TEST_EXPECT(hosted::find_address(*db, addresses[i])->state != AddressState::Allocating);
+
+	// With the add-on on (as the worker reads it): an allocation whose job is gone
+	// runs again, and an exhausted quota's refusal is tried again once its retry_at
+	// is reached, never before.
+	rig.config.placement.max_addresses = 4;
+	rig.make_supervisor();
+	const int64_t owner = make_player(*db, "retry_owner", 0);
+	subscribe(*db, owner, 1, "active", "sub_retry_tier");
+	subscribe_machines(*db, owner, 1, "sub_retry_machine");
+	billing::SubscriptionRow sub;
+	sub.stripe_subscription_id = "sub_retry_address";
+	sub.stripe_customer_id = "cus_retry";
+	sub.user_id = owner;
+	sub.status = "active";
+	sub.item = billing::ItemKind::StaticAddress;
+	sub.price_id = "price_address";
+	sub.current_period_end = kWall + 30 * 24 * 60 * 60;
+	billing::upsert_subscription(*db, sub);
+	const auto named = hosted::name_subscription_address(*db, owner, "retry-me", rig.wall);
+	TEST_EXPECT(named.outcome == hosted::NameOutcome::Created);
+	const std::string key = std::string(hosted::kJobAddressAllocate) + ":" + std::to_string(named.id);
+	TEST_EXPECT(!jobs::job_pending(*db, key));
+	rig.step();
+	TEST_EXPECT(jobs::job_pending(*db, key));
+	db->exec("UPDATE jobs SET state = 'failed', finished_at = now() WHERE dedupe_key = $1;", { BindValue(key) });
+	TEST_EXPECT(hosted::fail_address(*db, named.id, "AddressLimitExceeded", hosted::address_retry_delay_s(0)));
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, named.id)->state == AddressState::Failed && !jobs::job_pending(*db, key));
+	db->exec("UPDATE hosted_addresses SET retry_at = now() - interval '1 second' WHERE id = $1;",
+			{ BindValue(named.id) });
+	rig.step();
+	const auto again = hosted::find_address(*db, named.id);
+	TEST_EXPECT(again->state == AddressState::Allocating && again->retries == 1 && again->reason.empty() &&
+			jobs::job_pending(*db, key));
 	return 0;
 }
 

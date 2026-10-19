@@ -1,6 +1,9 @@
 #include "sold_capacity.h"
 
+#include "address_repository.h"
+
 #include <algorithm>
+#include <map>
 #include <utility>
 
 namespace opennova::novaworld_server::hosted {
@@ -83,6 +86,7 @@ Capacity sold_now(db::Database &db, int64_t now, const std::string &except_sessi
 	const auto grants = billing::comp_grants_by_account(db);
 	const auto reservations = billing::live_reservations_by_account(db);
 	const auto addresses = billing::comp_addresses_by_account(db);
+	std::map<int64_t, HeldAddresses> held = held_addresses_by_owner(db);
 	Capacity out;
 	for (const auto &r : db.query("SELECT id, account_status FROM players WHERE kind = 'player';")) {
 		const int64_t user = r.as_int(0).value_or(0);
@@ -101,8 +105,15 @@ Capacity sold_now(db::Database &db, int64_t now, const std::string &except_sessi
 					rows.push_back(billing::reservation_row(c, now));
 			}
 		}
-		out += held_by(billing::entitlement_from(facts, rows, now));
+		Capacity account = held_by(billing::entitlement_from(facts, rows, now));
+		if (const auto h = held.find(user); h != held.end()) {
+			account.addresses = std::max(account.addresses, h->second.granted) + h->second.leaving;
+			held.erase(h);
+		}
+		out += account;
 	}
+	// The addresses of no account counted above (one gone) hold theirs too.
+	for (const auto &gone : held) out.addresses += gone.second.granted + gone.second.leaving;
 	return out;
 }
 

@@ -7,9 +7,14 @@
 // (billing/entitlement.h, the larger of its comp grant and its tier's, never
 // the sum), whether or not it runs a server: its servers less those on own
 // machines are places on shared machines, its own machines (no more than its
-// servers) are own machines, and its static addresses are addresses. An open
-// checkout's reservation (billing_repository.h "A checkout's hold") counts as
-// the subscription it sells. The fleet sells ONNET_FLEET_MAX_SHARED x
+// servers) are own machines, and its static addresses are addresses. Of the
+// addresses, what the cloud holds counts too (address_repository.h
+// held_addresses_by_owner): an account's are the larger of those granted and
+// its rows that hold a grant, plus its rows on their way out (lapsed,
+// releasing: their Elastic IP held until released), and a gone account's rows
+// count as they are, so the fleet never holds more Elastic IPs than it sells.
+// An open checkout's reservation (billing_repository.h "A checkout's hold")
+// counts as the subscription it sells. The fleet sells ONNET_FLEET_MAX_SHARED x
 // ONNET_FLEET_SHARED_SLOTS shared places, ONNET_FLEET_MAX_OWN own machines and
 // ONNET_FLEET_MAX_ADDRESSES addresses (placement.h PlacementPolicy). An admin's
 // comp grant counts as sold too, and may take the sold past what the fleet
@@ -65,8 +70,8 @@ Capacity added_by_new_account(billing::ItemKind item, int tier, int64_t now);
 
 // What every player account holds at `now`, its reservations included but
 // checkout session `except_session`'s (the one a new checkout replaces; ""
-// for none), in the caller's transaction (under the hosting-start lock for a
-// checkout's judgement).
+// for none), with the addresses the cloud holds (the header), in the caller's
+// transaction (under the hosting-start lock for a checkout's judgement).
 Capacity sold_now(db::Database &db, int64_t now, const std::string &except_session = {});
 // The account's facts and its subscriptions with its live reservations as
 // added_by reads them.

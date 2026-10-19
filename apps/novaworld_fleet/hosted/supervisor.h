@@ -195,7 +195,11 @@
 // lets go of it: its machine is ended (the association goes with it) and the
 // server placed again without it, no restart counted, its event saying why;
 // once no live machine carries the address it goes releasing with its
-// address.release (re-armed each pass while it releases).
+// address.release (re-armed each pass while it releases). With the add-on on
+// (placement.max_addresses above 0) an allocating address's address.allocate
+// is re-armed the same way, and a failed one whose refusal passes goes
+// allocating again once its retry_at is reached (its backoff: the worker's
+// fail_address).
 //
 // The admin link (admin_link.h): with set_admin_links, every pass ends by
 // syncing the links with the servers in running, at their machine's private
@@ -514,7 +518,8 @@ private:
 	// An addressed machine's association asked for (and a describe) while its
 	// row does not show the address (the class comment).
 	void carry_address(db::Database &db, const FleetMachineRow &machine, uint64_t now_ms);
-	// The static addresses' lapses and releases (the class comment).
+	// The static addresses' lapses, releases and allocations again (the class
+	// comment).
 	void step_addresses(db::Database &db, uint64_t now_ms);
 	void drain_step(db::Database &db, FleetMachineRow &machine,
 			const std::vector<HostedServer> &holders, uint64_t now_ms);

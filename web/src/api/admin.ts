@@ -89,6 +89,7 @@ export type AdminErrorCode =
   | 'name_taken'
   | 'confirm_mismatch'
   | 'not_releasable'
+  | 'not_retryable'
   | 'address_limit'
   | 'addresses_disabled'
   // The log route (logs.ts).
@@ -157,6 +158,7 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'name_taken',
   'confirm_mismatch',
   'not_releasable',
+  'not_retryable',
   'address_limit',
   'addresses_disabled',
   'no_log_store',
@@ -260,6 +262,8 @@ function adminMessageFor(code: AdminErrorCode): string {
       return "The name typed is not the address's. Type it exactly to release it.";
     case 'not_releasable':
       return 'That address is on its way out already. Refresh the list.';
+    case 'not_retryable':
+      return 'Only an address the cloud refused is tried again. Refresh the list.';
     case 'address_limit':
       return 'That account has a static address for every own machine it has. Grant it another own machine first.';
     case 'addresses_disabled':

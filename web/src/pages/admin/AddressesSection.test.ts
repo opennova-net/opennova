@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AddressesSection from './AddressesSection.vue';
-import { fetchAdminAddresses, releaseAddress, renameAddress } from '../../api/adminAddresses';
+import { fetchAdminAddresses, releaseAddress, renameAddress, retryAddress } from '../../api/adminAddresses';
 import { adminAddress, adminAddressesResponse } from '../../test/addressFixtures';
 import { testRouter } from '../../test/router';
 
@@ -9,11 +9,13 @@ vi.mock('../../api/adminAddresses', () => ({
   fetchAdminAddresses: vi.fn(),
   releaseAddress: vi.fn(),
   renameAddress: vi.fn(),
+  retryAddress: vi.fn(),
 }));
 
 const list = vi.mocked(fetchAdminAddresses);
 const release = vi.mocked(releaseAddress);
 const rename = vi.mocked(renameAddress);
+const retry = vi.mocked(retryAddress);
 
 let wrapper: ReturnType<typeof mount> | null = null;
 
@@ -105,6 +107,33 @@ describe('AddressesSection', () => {
     await flushPromises();
     expect(release).toHaveBeenCalledWith(1, 'smoke');
     expect(page.get('[role="status"]').text()).toContain('smoke.play.opennova.net is being released');
+  });
+
+  it('retries an address the cloud refused, and says when it tries again by itself', async () => {
+    list.mockResolvedValue({
+      ok: true,
+      value: adminAddressesResponse([
+        adminAddress(1, 'smoke'),
+        adminAddress(4, 'quota', {
+          state: 'failed',
+          public_ip: null,
+          port: null,
+          allocation_id: null,
+          reason: 'AddressLimitExceeded',
+          retry_at: '2099-01-01 00:00:00',
+        }),
+      ]),
+    });
+    const page = await mountSection();
+    const [smoke, quota] = rows();
+    expect(smoke.findAll('button').map((b) => b.text())).not.toContain('Retry address smoke');
+    expect(quota.text()).toContain('AddressLimitExceeded');
+    expect(quota.text()).toContain('Tried again by itself');
+    retry.mockResolvedValue({ ok: true, value: adminAddress(4, 'quota', { state: 'allocating' }) });
+    await quota.findAll('button').find((b) => b.text().startsWith('Retry'))!.trigger('click');
+    await flushPromises();
+    expect(retry).toHaveBeenCalledWith(4);
+    expect(page.get('[role="status"]').text()).toBe('quota.play.opennova.net is being set up again.');
   });
 
   it("shows a refusal in the service's place", async () => {

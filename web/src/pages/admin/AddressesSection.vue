@@ -28,8 +28,9 @@
         {{ data.held }} of {{ data.sellable }} address{{ data.sellable === 1 ? '' : 'es' }} the deployment sells held.
       </p>
       <p v-if="!data.enabled" class="text-sm text-warn">
-        Static addresses are off: this deployment sells none (ONNET_FLEET_MAX_ADDRESSES is 0, or its address settings
-        are incomplete: the boot log says which).
+        Static addresses are off: this deployment sells and allocates none (ONNET_FLEET_MAX_ADDRESSES is 0, or its
+        address settings are incomplete: the boot log says which). The held ones are still released while the worker's
+        address settings read.
       </p>
     </div>
 
@@ -77,6 +78,9 @@
                   <span v-if="a.lapse_cause" class="block text-xs text-ink-muted">{{ lapseCauseLabel(a.lapse_cause) }}</span>
                   <span v-if="a.dns_state === 'pending'" class="block text-xs text-ink-muted">Its name's record is being removed</span>
                   <span v-if="a.reason" class="block max-w-xs break-words text-xs text-danger">{{ a.reason }}</span>
+                  <span v-if="a.state === 'failed' && a.retry_at" class="block text-xs text-ink-muted">
+                    Tried again by itself <RelativeTime :value="a.retry_at" :now="now" />
+                  </span>
                 </td>
                 <td class="px-4 py-3">
                   <template v-if="a.source === 'comp'">Admin grant</template>
@@ -92,6 +96,15 @@
                   <span v-else class="text-ink-muted">None</span>
                 </td>
                 <td class="space-x-3 whitespace-nowrap px-4 py-3 text-right">
+                  <button
+                    v-if="a.state === 'failed'"
+                    type="button"
+                    :disabled="busy || !data?.enabled"
+                    class="text-accent hover:text-ink-bright disabled:opacity-40"
+                    @click="retry(a)"
+                  >
+                    Retry<span class="sr-only"> address {{ a.name }}</span>
+                  </button>
                   <button type="button" :disabled="busy" class="text-ink hover:text-ink-bright disabled:opacity-40" @click="beginRename(a)">
                     Rename<span class="sr-only"> address {{ a.name }}</span>
                   </button>
@@ -203,14 +216,15 @@
 // /admin/addresses: every static address (GET /api/admin/addresses), how many
 // the cloud holds of what the deployment sells, each with its owner (to their
 // page), name and host name, IP, state, what pays for it and the server
-// running at it (to its fleet page); a rename (PUT /api/admin/addresses/<id>)
-// and a release behind the address's name typed (POST .../release); and the
-// addresses the cloud holds that no row names, which the sweep never releases.
+// running at it (to its fleet page); a retry of one the cloud refused (POST
+// .../retry), a rename (PUT /api/admin/addresses/<id>) and a release behind the
+// address's name typed (POST .../release); and the addresses the cloud holds
+// that no row names, which the sweep never releases.
 // The page polls, faster while an address is being set up or released.
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
-import { fetchAdminAddresses, releaseAddress, renameAddress } from '../../api/adminAddresses';
+import { fetchAdminAddresses, releaseAddress, renameAddress, retryAddress } from '../../api/adminAddresses';
 import { usePolling } from '../../composables/usePolling';
 import type { AdminAddress, AdminAddressesResponse } from '../../types/addresses';
 import {
@@ -322,6 +336,19 @@ async function saveRename(a: AdminAddress) {
   }
   renaming.value = null;
   flash(`Renamed ${a.name} to ${result.value.name}.`);
+  void poll.readAgain();
+}
+
+async function retry(a: AdminAddress) {
+  if (busy.value) return;
+  busy.value = true;
+  const result = await retryAddress(a.id);
+  busy.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  flash(`${a.hostname} is being set up again.`);
   void poll.readAgain();
 }
 

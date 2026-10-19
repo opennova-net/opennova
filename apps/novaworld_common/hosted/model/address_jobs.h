@@ -13,11 +13,12 @@
 //                      tags; then its A record written (the name it had before
 //                      deleted first: an admin's rename): allocating -> ready.
 //                      The cloud's refusal fails the row with its error code
-//                      (an exhausted quota shows there). With the add-on off
-//                      no address is allocated: the run waits. Deduped per
-//                      address, one running at a time across the workers. A
-//                      ready address's run writes its record again (a rename,
-//                      a release undone).
+//                      (an exhausted quota shows there, and is tried again:
+//                      address_repository.h address_refusal_passes). With the
+//                      add-on off no address is allocated: the run waits.
+//                      Deduped per address, one running at a time across the
+//                      workers. A ready address's run writes its record again
+//                      (a rename, a release undone).
 //   address.associate  a ready address associated with the machine launched
 //                      to carry it, never taken from another (no
 //                      reassociation), and only once the machine that held it

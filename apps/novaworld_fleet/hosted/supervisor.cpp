@@ -1467,6 +1467,28 @@ void Supervisor::step_addresses(db::Database &db, uint64_t now_ms) {
 		enqueue_address_release(db, a.id);
 		tx.commit();
 	}
+	// With the add-on on (the worker allocates nothing while it is off): an
+	// allocation whose job is gone (the cloud throttled it, or did not answer,
+	// past its attempts) runs again, and a refusal that passes is tried again
+	// once its retry_at is reached (address_repository.h).
+	if (config_.placement.max_addresses <= 0) return;
+	for (const HostedAddress &a : addresses_in(db, AddressState::Allocating)) {
+		db::Transaction tx(db);
+		if (pass_guard_ && !pass_guard_(db)) return;
+		enqueue_address_allocate(db, a.id);
+		tx.commit();
+	}
+	for (const HostedAddress &a : addresses_in(db, AddressState::Failed)) {
+		if (a.retry_at.empty()) continue;
+		db::Transaction tx(db);
+		if (pass_guard_ && !pass_guard_(db)) return;
+		if (retry_due_address(db, a.id)) {
+			enqueue_address_allocate(db, a.id);
+			std::printf("[hosted] static address %lld (%s) tried again after the cloud's %s\n",
+					static_cast<long long>(a.id), loggable(a.name, 40).c_str(), loggable(a.reason, 80).c_str());
+		}
+		tx.commit();
+	}
 }
 
 // --- the desired state ---------------------------------------------------------------

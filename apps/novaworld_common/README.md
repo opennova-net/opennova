@@ -718,7 +718,8 @@ site. Everything here is service policy (`billing/`).
   servers less those on own machines are shared places, its own machines are own
   machines), an admin's comp grant included; the fleet sells `ONNET_FLEET_MAX_SHARED` x
   `ONNET_FLEET_SHARED_SLOTS` shared places, `ONNET_FLEET_MAX_OWN` own machines and
-  `ONNET_FLEET_MAX_ADDRESSES` static addresses (each one granted, used or not). A
+  `ONNET_FLEET_MAX_ADDRESSES` static addresses (each one granted, used or not, and each
+  the cloud still holds: one on its way out holds its Elastic IP until released). A
   checkout is judged, and its item reserved (`billing_checkout_reservations`, an hour and
   a quarter), in one transaction under the hosting-start lock, before Stripe makes its
   session, so two checkouts at once never both take the last place; the reservation

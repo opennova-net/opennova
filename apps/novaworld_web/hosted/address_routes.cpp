@@ -84,6 +84,7 @@ crow::json::wvalue address_json(db::Database &db, const HostedAddress &a, const 
 		text_or_null(out, "dns_name", a.dns_name);
 		out["dns_state"] = a.dns_state;
 		text_or_null(out, "lapse_cause", a.lapse_cause);
+		put_time(out, "retry_at", a.retry_at);
 	}
 	return out;
 }
@@ -104,6 +105,8 @@ void AddressRoutes::register_routes(WebApp &app) {
 			.methods("PUT"_method)([this](const crow::request &req, uint64_t id) { return admin_rename(req, id); });
 	CROW_ROUTE(app, "/api/admin/addresses/<uint>/release")
 			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return admin_release(req, id); });
+	CROW_ROUTE(app, "/api/admin/addresses/<uint>/retry")
+			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return admin_retry(req, id); });
 	CROW_ROUTE(app, "/api/admin/users/<uint>/addresses")
 			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return admin_comp(req, id); });
 }
@@ -272,6 +275,38 @@ crow::response AddressRoutes::admin_release(const crow::request &req, uint64_t i
 		return json_reply(202, out);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/addresses/%llu/release failed: %s\n",
+				static_cast<unsigned long long>(id), e.what());
+		return json_error(500, "db_error");
+	}
+}
+
+// POST /api/admin/addresses/<id>/retry — an address the cloud refused
+// allocated again: failed -> allocating, its automatic tries counted from 0,
+// and its address.allocate enqueued. require_admin; 503 addresses_disabled;
+// 404; 409 not_retryable (not failed); 202 {"address"}.
+crow::response AddressRoutes::admin_retry(const crow::request &req, uint64_t id) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal) return std::move(*caller.refusal);
+	if (!on_) return disabled();
+	try {
+		auto db_conn = pool_.acquire();
+		std::optional<HostedAddress> a;
+		{
+			db::Transaction tx(*db_conn);
+			a = find_address(*db_conn, path_id(id));
+			if (!a) return json_error(404, "not_found", "no static address has this id");
+			if (!retry_address(*db_conn, a->id))
+				return json_error(409, "not_retryable", "only an address the cloud refused is tried again");
+			enqueue_address_allocate(*db_conn, a->id);
+			tx.commit();
+		}
+		std::printf("[hosted] an admin retried static address %lld '%s' (the cloud's %s)\n",
+				static_cast<long long>(a->id), loggable(a->name, 40).c_str(), loggable(a->reason, 80).c_str());
+		crow::json::wvalue out;
+		out["address"] = address_json(*db_conn, *find_address(*db_conn, a->id), zone_, true);
+		return json_reply(202, out);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/admin/addresses/%llu/retry failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());
 		return json_error(500, "db_error");
 	}

@@ -12,8 +12,11 @@
 // written, ready), associate (waiting for the previous holder's machine to end, a
 // machine.describe after), release (the machine's end first, the record deleted and in
 // sync, the TTL waited, the grant read again, an association ended, then released), a
-// grant come back before the release, and fleet.sweep's orphans. The jobs with the
-// add-on off: nothing allocated, a ready one's record still moved, a release still run.
+// grant come back before the release, and fleet.sweep's orphans. A refusal: the row
+// failed with its code, an exhausted quota's automatic tries (their backoff, due only
+// at retry_at), an admin's retry, a released row's subscription free for a new name, and
+// what the cloud holds by owner. The jobs with the add-on off: nothing allocated, a ready
+// one's record still moved, a release still run.
 
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
@@ -458,6 +461,7 @@ public:
 	std::optional<CloudAddress> tagged;     // find_tagged's
 	std::optional<CloudAddress> described;  // describe's
 	AddressCall associate_call = AddressCall::Done;
+	std::string refuse; // allocate's refusal code ("" for none)
 	std::vector<CloudAddress> listing;
 
 	const char *name() const override { return "recording"; }
@@ -471,6 +475,12 @@ public:
 	AddressResult allocate(int64_t id, const std::string &name, const std::vector<std::string> &) override {
 		calls.push_back("allocate " + std::to_string(id) + " " + name);
 		AddressResult r;
+		if (!refuse.empty()) {
+			r.call = AddressCall::Refused;
+			r.code = refuse;
+			r.error = "An error occurred (" + refuse + ") when calling the AllocateAddress operation";
+			return r;
+		}
 		r.call = AddressCall::Done;
 		CloudAddress a;
 		a.allocation_id = "eipalloc-" + std::to_string(id);
@@ -715,6 +725,95 @@ int test_jobs_add_on_off() {
 	return 0;
 }
 
+// The seconds from now to address `id`'s retry_at (-1 for none).
+int64_t retry_in(Database &db, int64_t id) {
+	const auto rows = db.query("SELECT COALESCE(CAST(extract(epoch FROM retry_at - now()) AS bigint), -1) "
+							   "FROM hosted_addresses WHERE id = $1;",
+			{ BindValue(id) });
+	return rows.empty() ? -1 : rows.front().as_int(0).value_or(-1);
+}
+
+int test_refusals_and_retries() {
+	test_db::TestDatabase scratch;
+	ConnectionPool pool(scratch.options());
+	auto lease = pool.acquire();
+	Database &db = *lease;
+	test_temp::TempDir dir("opennova_address_retries");
+	hosted::FileZone zone("play.localhost", dir.file("play.zone"));
+	RecordingDriver driver;
+	nws::jobs::JobRegistry registry;
+	hosted::register_address_jobs(registry, driver, zone, true);
+	using Kind = nws::jobs::JobResult::Kind;
+	const int64_t now = billing::unix_now();
+
+	// The pure parts: what passes, and the backoff.
+	TEST_EXPECT(hosted::address_refusal_passes("AddressLimitExceeded"));
+	TEST_EXPECT(!hosted::address_refusal_passes("InvalidParameterValue") && !hosted::address_refusal_passes(""));
+	TEST_EXPECT(hosted::address_retry_delay_s(0) == hosted::kAddressRetryBaseS &&
+			hosted::address_retry_delay_s(1) == 2 * hosted::kAddressRetryBaseS &&
+			hosted::address_retry_delay_s(20) == hosted::kAddressRetryMaxS);
+
+	const int64_t ana = make_player(db, "retry_ana", 0);
+	subscribe_item(db, ana, billing::ItemKind::Tier, 1, "sub_r_t1");
+	subscribe_item(db, ana, billing::ItemKind::OwnMachine, 0, "sub_r_om");
+	subscribe_item(db, ana, billing::ItemKind::StaticAddress, 0, "sub_r_sa");
+	const int64_t id = hosted::name_subscription_address(db, ana, "quota", now).id;
+	TEST_EXPECT(id > 0);
+
+	// An exhausted quota: failed with its code, tried again automatically from
+	// its retry_at on, never before.
+	driver.refuse = "AddressLimitExceeded";
+	auto result = run_job(pool, registry, hosted::kJobAddressAllocate, { { "address_id", id } });
+	TEST_EXPECT(result.kind == Kind::Fail);
+	auto a = hosted::find_address(db, id);
+	TEST_EXPECT(a->state == AddressState::Failed && a->reason == "AddressLimitExceeded" && a->retries == 1 &&
+			!a->retry_at.empty());
+	TEST_EXPECT(retry_in(db, id) > hosted::kAddressRetryBaseS - 30 && retry_in(db, id) <= hosted::kAddressRetryBaseS);
+	TEST_EXPECT(!hosted::retry_due_address(db, id));
+	db.exec("UPDATE hosted_addresses SET retry_at = now() - interval '1 second' WHERE id = $1;", { BindValue(id) });
+	TEST_EXPECT(hosted::retry_due_address(db, id) && !hosted::retry_due_address(db, id));
+	a = hosted::find_address(db, id);
+	TEST_EXPECT(a->state == AddressState::Allocating && a->reason.empty() && a->retry_at.empty() && a->retries == 1);
+	// Refused again: the wait doubles.
+	TEST_EXPECT(run_job(pool, registry, hosted::kJobAddressAllocate, { { "address_id", id } }).kind == Kind::Fail);
+	a = hosted::find_address(db, id);
+	TEST_EXPECT(a->retries == 2 && retry_in(db, id) > 2 * hosted::kAddressRetryBaseS - 30);
+	// An admin's retry counts from 0 again; only a failed one is retried.
+	TEST_EXPECT(hosted::retry_address(db, id) && !hosted::retry_address(db, id));
+	a = hosted::find_address(db, id);
+	TEST_EXPECT(a->state == AddressState::Allocating && a->retries == 0 && a->retry_at.empty());
+	// A refusal that does not pass waits for an admin.
+	driver.refuse = "InvalidParameterValue";
+	TEST_EXPECT(run_job(pool, registry, hosted::kJobAddressAllocate, { { "address_id", id } }).kind == Kind::Fail);
+	a = hosted::find_address(db, id);
+	TEST_EXPECT(a->state == AddressState::Failed && a->reason == "InvalidParameterValue" && a->retry_at.empty() &&
+			a->retries == 0 && retry_in(db, id) == -1);
+	db.exec("UPDATE hosted_addresses SET updated_at = now() - interval '1 day' WHERE id = $1;", { BindValue(id) });
+	TEST_EXPECT(!hosted::retry_due_address(db, id));
+
+	// Released for good (an admin's), its subscription, granting still, names another.
+	TEST_EXPECT(hosted::unnamed_address_subscriptions(db, ana, now).empty());
+	TEST_EXPECT(hosted::lapse_address(db, id, hosted::kLapseAdmin, "released by an admin") &&
+			hosted::begin_release(db, id));
+	TEST_EXPECT(hosted::count_held_addresses(db) == 1);
+	auto held = hosted::held_addresses_by_owner(db);
+	TEST_EXPECT(held.size() == 1 && held[ana].granted == 0 && held[ana].leaving == 1);
+	TEST_EXPECT(hosted::unnamed_address_subscriptions(db, ana, now).empty());
+	driver.calls.clear();
+	TEST_EXPECT(run_job(pool, registry, hosted::kJobAddressRelease, { { "address_id", id } }).kind == Kind::Done);
+	TEST_EXPECT(hosted::find_address(db, id)->state == AddressState::Released &&
+			driver.calls == std::vector<std::string>({ "find_tagged " + std::to_string(id) }));
+	TEST_EXPECT(hosted::unnamed_address_subscriptions(db, ana, now) == std::vector<std::string>{ "sub_r_sa" });
+	driver.refuse.clear();
+	const int64_t second = hosted::name_subscription_address(db, ana, "quota-two", now).id;
+	TEST_EXPECT(second > 0 && hosted::find_address(db, second)->stripe_subscription_id == "sub_r_sa");
+	TEST_EXPECT(hosted::name_subscription_address(db, ana, "quota-three", now).outcome ==
+			hosted::NameOutcome::NoAddress);
+	held = hosted::held_addresses_by_owner(db);
+	TEST_EXPECT(held.size() == 1 && held[ana].granted == 1 && held[ana].leaving == 0);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -741,6 +840,7 @@ int main(int argc, char **argv) {
 		{ "naming_and_starts", test_naming_and_starts },
 		{ "jobs", test_jobs },
 		{ "jobs_add_on_off", test_jobs_add_on_off },
+		{ "refusals_and_retries", test_refusals_and_retries },
 	};
 	for (const Case &c : database) {
 		std::printf("-- %s\n", c.name);

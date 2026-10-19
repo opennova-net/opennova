@@ -6,9 +6,11 @@
 // the oversold test. Then through a migrated database of the test's own
 // (common/test_database.h): every player account's holdings summed with its
 // live reservations (a lapsed one, an inactive account and a service account
-// counting nothing), a reservation dropped by its session or by its id, and two
-// checkouts judged under the hosting-start lock one after the other, the second
-// seeing the first's reservation.
+// counting nothing), a reservation dropped by its session or by its id, the
+// static addresses the cloud holds (an account's past its grants, those on their
+// way out, a gone account's) counted beside the grants, and two checkouts judged
+// under the hosting-start lock one after the other, the second seeing the first's
+// reservation.
 
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
@@ -24,8 +26,10 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <thread>
+#include <variant>
 #include <vector>
 
 namespace billing = opennova::novaworld_server::billing;
@@ -186,6 +190,46 @@ int test_sold_now() {
 	// No such account holds nothing.
 	const hosted::AccountHoldings none = hosted::holdings_of(db, 999999, now);
 	TEST_EXPECT(billing::entitlement_from(none.facts, none.subscriptions, now).max_servers == 0);
+
+	// The static addresses: an account's granted ones, or its rows holding a
+	// grant where they are more, plus every row on its way out (its Elastic IP
+	// held until released), and a gone account's rows as they are. Dee's tier
+	// reservation goes first, so the shared places are the accounts' 3 again.
+	db.exec("DELETE FROM billing_checkout_reservations;");
+	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 0));
+	const auto address = [&db](std::optional<int64_t> owner, const std::string &name, const char *state,
+								 const char *subscription) {
+		db.exec("INSERT INTO hosted_addresses (owner_user_id, name, source, stripe_subscription_id, state) "
+				"VALUES ($1, $2, $3, $4, $5);",
+				{ owner ? BindValue(*owner) : BindValue(std::monostate{}), BindValue(name),
+						BindValue(std::string(subscription != nullptr ? "subscription" : "comp")),
+						subscription != nullptr ? BindValue(std::string(subscription)) : BindValue(std::monostate{}),
+						BindValue(std::string(state)) });
+	};
+	SubscriptionRow ana_address = granting("ana_sa", ItemKind::StaticAddress, 0);
+	ana_address.current_period_end = tier.current_period_end;
+	subscribe(db, ana, ana_address);
+	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 1));
+	address(ana, "ana-now", "ready", "ana_sa");
+	address(ana, "ana-old", "releasing", "ana_sa_old");
+	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 2));
+	// Ben's comp row an admin released, and a ready row whose grant ended
+	// before the fleet's pass lapsed it.
+	address(ben, "ben-gone", "lapsed", nullptr);
+	address(ben, "ben-left", "ready", "ben_sa_ended");
+	address(std::nullopt, "nobodys", "releasing", "gone_sa");
+	address(cy, "cy-failed", "failed", nullptr);
+	address(cy, "cy-done", "released", nullptr);
+	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 5));
+	hosted::PlacementPolicy policy;
+	policy.max_addresses = 5;
+	Capacity one_address;
+	one_address.addresses = 1;
+	TEST_EXPECT(!hosted::fits(hosted::sold_now(db, now), one_address, hosted::sellable_of(policy)));
+	db.exec("DELETE FROM hosted_addresses WHERE name IN ('ana-old', 'ben-left');");
+	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 3));
+	TEST_EXPECT(hosted::fits(hosted::sold_now(db, now), one_address, hosted::sellable_of(policy)));
+	db.exec("DELETE FROM hosted_addresses;");
 	return 0;
 }
 
