@@ -17,6 +17,9 @@ cloudflare_web_proxied = true
 hosted_enabled   = true
 fleet_max_shared = 1
 fleet_max_own    = 1
+# The static address add-on (ADR 0066), rehearsed here first: two, within the
+# account's default Elastic IP quota of 5 beside the load balancer's two.
+fleet_max_addresses = 2
 # The machines' image, pinned by its exact name (fleet_agent.tf): Amazon's
 # ECS-optimized Amazon Linux 2023. A bump lands here, staging's first;
 # the newest: aws ssm get-parameters --names
