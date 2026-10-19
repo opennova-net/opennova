@@ -7296,18 +7296,18 @@ int test_billing_routes(Harness &h) {
 
 	// An admin's grant is the account's whole hosting: it buys no tier and no
 	// add-on, even one that would raise its limit, and no customer is made.
-	const int64_t dee = make_account(h, "bill_dee", "pw-bill-dee");
-	const std::string dee_s = login_token(h, "10.61.0.4", "bill_dee", "pw-bill-dee");
-	TEST_EXPECT(dee > 0 && !dee_s.empty() && billing::set_comp_grants(*h.pool.acquire(), dee, { 2, 1 }));
-	json = crow::json::load(body_text(me(dee_s)));
+	const int64_t gus = make_account(h, "bill_gus", "pw-bill-gus");
+	const std::string gus_s = login_token(h, "10.61.0.9", "bill_gus", "pw-bill-gus");
+	TEST_EXPECT(gus > 0 && !gus_s.empty() && billing::set_comp_grants(*h.pool.acquire(), gus, { 2, 1 }));
+	json = crow::json::load(body_text(me(gus_s)));
 	TEST_EXPECT(json && json["granted"].b() && !json["can_subscribe"].b() && json["comp_servers"].i() == 2 &&
 			json["comp_own_machines"].i() == 1 && json["max_servers"].i() == 2);
 	for (const char *item : { "{\"item\":\"tier1\"}", "{\"item\":\"tier3\"}", "{\"item\":\"own_machine\"}",
 				 "{\"item\":\"static_address\"}" }) {
-		reply = post("/api/billing/checkout", dee_s, item);
+		reply = post("/api/billing/checkout", gus_s, item);
 		TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_eligible");
 	}
-	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), dee));
+	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), gus));
 
 	// Billing off (the Secure listener): every account route 503 billing_disabled.
 	std::string token;
