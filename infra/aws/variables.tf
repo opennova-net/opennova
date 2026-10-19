@@ -23,16 +23,17 @@ variable "region" {
 }
 
 # ---------------------------------------------------------------------------
-# The service's five programs (programs.tf): each its own image and an ECS
-# service on Fargate (x86_64). Each takes its task's size and its service's
-# task counts; a field left out keeps its default (`web = { max = 6 }` in a
-# var-file). cpu is in CPU units (1024 a vCPU), memory in MiB, a Fargate pair
-# (256 with 512, 1024 or 2048; 512 with 1024 to 4096; 1024 with 2048 to
-# 8192). desired is the count a new service starts with; min and max are the
-# bounds Application Auto Scaling holds the count within (web and the worker
-# scale on their CPU between them; the others stay where they start, 1 by
-# default), and max, with a deployment's extra tasks, is what the database's
-# max_connections is sized for.
+# The service's six programs (programs.tf): each its own image and an ECS
+# service on Fargate (x86_64). hostd, the machines' agent, is none of them: it
+# is the fleet cluster's daemon, sized in fleet_agent.tf. Each takes its
+# task's size and its service's task counts; a field left out keeps its
+# default (`web = { max = 6 }` in a var-file). cpu is in CPU units (1024 a
+# vCPU), memory in MiB, a Fargate pair (256 with 512, 1024 or 2048; 512 with
+# 1024 to 4096; 1024 with 2048 to 8192). desired is the count a new service
+# starts with; min and max are the bounds Application Auto Scaling holds the
+# count within (web and the worker scale on their CPU between them; the others
+# stay where they start, 1 by default), and max, with a deployment's extra
+# tasks, is what the database's max_connections is sized for.
 # ---------------------------------------------------------------------------
 
 variable "gate" {
@@ -515,7 +516,7 @@ variable "alert_email" {
 }
 
 variable "budget_monthly_usd" {
-  description = "The deployment's monthly cost budget (its account's, which holds it alone), in USD: an email at 80% spent and at a 100% forecast. Sized for prod's service tier (the five programs on Fargate, the load balancer, a single-zone db.t4g.micro and the cache, about $145: DEPLOY.md, \"Cost\") and a few machines; staging.tfvars sets its own."
+  description = "The deployment's monthly cost budget (its account's, which holds it alone), in USD: an email at 80% spent and at a 100% forecast. Sized for prod's service tier (the six programs on Fargate, the load balancer, a single-zone db.t4g.micro and the cache, about $160: DEPLOY.md, \"Cost\") and a few machines; staging.tfvars sets its own."
   type        = number
   default     = 250
 }

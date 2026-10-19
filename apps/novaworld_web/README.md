@@ -6,7 +6,7 @@ The NovaWorld service's web: the HTTP listener on `ONNET_HTTP_PORT` (8080): the 
 behind one load balancer; in a deployment the portal's nginx (`web/`, the site) runs beside it
 in its task and proxies `/api` to it on 127.0.0.1. Built with `BUILD_NOVAWORLD_HTTP`.
 
-The service as a whole, its five programs, their settings, the database, Redis, the health
+The service as a whole, its six programs, their settings, the database, Redis, the health
 checks and the tests: [`../novaworld_common/README.md`](../novaworld_common/README.md). The
 image is the `web` target of [`../novaworld_common/Dockerfile`](../novaworld_common/Dockerfile).
 

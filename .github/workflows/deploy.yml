@@ -29,7 +29,7 @@ on:
         options: [staging, prod]
         required: true
       tag:
-        description: "staging: the NovaWorld images' tag (sha-abc1234: the five programs, the portal, the backup task); empty keeps the current release's"
+        description: "staging: the NovaWorld images' tag (sha-abc1234: the six programs, the portal, the backup task); empty keeps the current release's"
         required: false
         default: ""
       images:

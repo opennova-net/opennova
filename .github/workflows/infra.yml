@@ -109,7 +109,7 @@ jobs:
       - name: vault requests test
         run: docker run --rm -v "$PWD:/w:ro" -w /w bash:5.2 sh -c 'apk add --no-cache jq >/dev/null && bash deploy/bin/tests/vault_requests_test.sh'
 
-  # The local stack's compose files parse (deploy/compose: the five programs,
+  # The local stack's compose files parse (deploy/compose: the six programs,
   # the portal, PostgreSQL and Valkey, the hosting overlay's machines; the
   # values scripts/dev_stack.sh writes are placeholders here). local-stack.yml
   # brings the stack up and runs its smoke test.

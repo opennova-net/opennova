@@ -55,15 +55,18 @@
 #                                 monthly, the lookup key's), the Customer
 #                                 Portal configuration, the webhook endpoint
 #                                 (its URL, API version and events)
-#   stripe setup [--tier1 USD] [--tier2 USD] [--tier3 USD] [--own-machine USD] [--yes]
+#   stripe setup [--tier1 USD] [--tier2 USD] [--tier3 USD] [--own-machine USD]
+#                [--static-address USD] [--yes]
 #                                 make what the deployment's Stripe mode lacks,
 #                                 idempotently: the products and monthly prices
-#                                 (5, 10, 15 and 45 USD by default; a flag's
-#                                 other amount makes a new price, the old one
-#                                 kept as grandfathered), their ids in the vault
-#                                 item, the Customer Portal configuration, the
-#                                 webhook endpoint on the deployment's site (a
-#                                 new one's signing secret into the vault)
+#                                 (the tiers' 5, 10 and 15 USD, the own
+#                                 machine's 45 and the static address's 5 by
+#                                 default; a flag's other amount makes a new
+#                                 price, the old one kept as grandfathered),
+#                                 their ids in the vault item, the Customer
+#                                 Portal configuration, the webhook endpoint
+#                                 on the deployment's site (a new one's
+#                                 signing secret into the vault)
 #   infra plan [args...]          terraform plan of the deployment's stack
 #   infra apply [--allow-destroy] [--yes] [args...]
 #                                 plan to a file, then apply that plan; refuses a

@@ -10,7 +10,7 @@ and counted in the heartbeat's `probes_unanswered`, beside `lobbies_live`: the d
 alarms on it, since such a gate is otherwise healthy).
 Its only send is the reply to a probe. `GET /livez` on `ONNET_HEALTH_PORT` (8081).
 
-The service as a whole, its five programs, their settings, the database, Redis, the health
+The service as a whole, its six programs, their settings, the database, Redis, the health
 checks and the tests: [`../novaworld_common/README.md`](../novaworld_common/README.md). The
 image is the `gate` target of [`../novaworld_common/Dockerfile`](../novaworld_common/Dockerfile).
 

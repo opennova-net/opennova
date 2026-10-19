@@ -577,8 +577,11 @@ when naming the AWS resource)
 
 **Shared machine**:
 A **machine** that packs up to K **hosted servers** of any account (`ONNET_FLEET_SHARED_SLOTS`,
-12 to start), one per **slot**; servers go to the fullest one with a free slot, and one
-with no server left ends after a while.
+the var-file's `shared_slots`: 6 on the default `t3a.medium`), one per **slot**; servers go to
+the fullest one with a free slot, and one with no server left ends after a while. At most
+`fleet_max_shared` run at once, so with the **own machines** (`fleet_max_own`) they cap the
+hosted servers at `fleet_max_shared` x `shared_slots` + `fleet_max_own` (`ONNET_HOSTED_CAP`:
+14 at the defaults).
 _Avoid_: pool, pod, cluster node
 
 **Own machine**:

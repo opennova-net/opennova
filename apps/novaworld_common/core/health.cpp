@@ -76,7 +76,7 @@ std::string heartbeat_line(const Heartbeat &b) {
 	field("fleet_pass_age_s", b.fleet_pass_age_s);
 	field("db_lock_timeouts", b.db_lock_timeouts);
 	field("db_deadlocks", b.db_deadlocks);
-	// The program is one of the five names (program/program.h): no escaping needed.
+	// The program is one of the six names (program/program.h): no escaping needed.
 	return "{\"heartbeat\":{\"program\":\"" + b.program + "\"" + fields + "}}";
 }
 

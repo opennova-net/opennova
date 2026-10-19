@@ -24,6 +24,6 @@ fleet_max_own    = 1
 fleet_ami = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64"
 
 # Staging's account's budgets (observability.tf): its service tier runs about
-# $145 a month, about $70 while `app down`.
+# $160 a month, about $70 while `app down` (DEPLOY.md, "Cost").
 budget_monthly_usd = 200
 budget_egress_gb   = 200

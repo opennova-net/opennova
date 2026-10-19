@@ -8,7 +8,7 @@ tasks), holds its sessions in its own memory, writes their rows and takes the lo
 commands the other programs address to them. Its stop drains its instance and stops at once
 (the balancer drained its task first). `GET /livez` on `ONNET_HEALTH_PORT` (8081).
 
-The service as a whole, its five programs, their settings, the database, Redis, the health
+The service as a whole, its six programs, their settings, the database, Redis, the health
 checks and the tests: [`../novaworld_common/README.md`](../novaworld_common/README.md). The
 image is the `lobby` target of [`../novaworld_common/Dockerfile`](../novaworld_common/Dockerfile).
 

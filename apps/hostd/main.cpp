@@ -238,7 +238,7 @@ int main(int argc, char **argv) {
 		io::logf(io::LogLevel::kError, "%s", error.c_str());
 		return 1;
 	}
-	// The trees' root, 0755, where it is missing (a baked image has none).
+	// The trees' root, 0755, where it is missing.
 	if (::mkdir(options.trees_root.c_str(), 0755) != 0 && errno != EEXIST) {
 		io::logf(io::LogLevel::kError, "cannot make %s", options.trees_root.c_str());
 		return 1;
