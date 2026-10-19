@@ -2854,7 +2854,7 @@ public:
 
 	// A ClientPlayRequest for the server at `ip`:`port` (its PlaySetup's IpAddress and
 	// PortNumber, as a .joi's NK names them) answered with success; false on a timeout.
-	bool play(const std::string &ip = "127.0.0.1", const std::string &port = "32768") {
+	bool play(const std::string &ip, const std::string &port) {
 		clear_notices();
 		if (!session_.request_playing(opennova::make_play_setup_vars("Host", ip, port, "5699", 0))) {
 			return false;
@@ -3531,7 +3531,7 @@ int test_admin_sessions(Harness &h) {
 	const auto login = nwlogin_to(h, h.fresh_port, "session_player", "pw-session-player");
 	TEST_EXPECT(nwlogin_succeeded(login));
 	client.set_cookie("LOGINSESSIONTAG", set_cookie_value(login, "LOGINSESSIONTAG"));
-	TEST_EXPECT(client.play());
+	TEST_EXPECT(client.play("192.168.77.1", "32768"));
 	reply = connections();
 	json = crow::json::load(body_text(reply));
 	row = row_at(json, client.addr());
@@ -3540,9 +3540,9 @@ int test_admin_sessions(Harness &h) {
 	TEST_EXPECT(str((*row)["account"]["username"]) == "session_player");
 	TEST_EXPECT(str((*row)["account"]["via"]) == "login");
 	TEST_EXPECT((*row)["host"].t() == crow::json::type::Null);
-	// It plays at the address its PlaySetup named, which no listing has.
+	// It plays at the address its PlaySetup named, which no listing has (a LAN server's).
 	TEST_EXPECT((*row)["playing"].t() == crow::json::type::Object);
-	TEST_EXPECT(str((*row)["playing"]["addr"]) == "127.0.0.1:32768");
+	TEST_EXPECT(str((*row)["playing"]["addr"]) == "192.168.77.1:32768");
 	TEST_EXPECT((*row)["playing"]["rid"].t() == crow::json::type::Null);
 	TEST_EXPECT(!(*row)["playing"]["listed"].b());
 	TEST_EXPECT((*row)["playing"]["server_name"].t() == crow::json::type::Null);

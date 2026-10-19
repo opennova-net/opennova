@@ -616,7 +616,9 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 	// host_players. Hosting peer is keyed by RID (drops the host row); a
 	// joiner leaves the server it played on, its account's host_players row
 	// under that RID going (LobbySession::leave_server's rule). The parked
-	// state keeps its play columns: a reconnect still plays there. The
+	// state keeps its play columns, so a reconnect's replay still names the
+	// server it plays on; its roster row does not come back (only
+	// /NWJoin.dll writes one). The
 	// session row goes by its id, and its commands with it (their foreign
 	// key cascades). On the calling thread's own connection (this runs on
 	// the receive thread and on main alike): the caller's, else the one its

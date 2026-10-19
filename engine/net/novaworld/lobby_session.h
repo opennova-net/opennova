@@ -306,8 +306,9 @@ private:
 	bool present_host_key(LobbyState &state, const std::string &host_key);
 	// The account a Cookie list's LOGINSESSIONTAG `tag` names (lobbydb::login_account) pinned
 	// as the one the connection signed in as (user_id); a tag that names no live login, a
-	// database failure (logged) and no database leave the pin as it was.
-	void pin_account(LobbyState &state, const std::string &tag);
+	// database failure (logged) and no database leave the pin as it was. False for the
+	// database failure alone (the caller keeps the tag before it, so the next list asks again).
+	bool pin_account(LobbyState &state, const std::string &tag);
 	// The connection leaves the server it plays on: its account off that listing's roster
 	// (hostdb::remove_player: the row /NWJoin.dll wrote for it), and the play columns cleared.
 	// The NW UDP listener does the same for a connection that drops (erase_lobby_state).

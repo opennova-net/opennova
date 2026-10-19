@@ -393,13 +393,15 @@ void LobbySession::end_hosting(LobbyState &state, const char *reason) {
 	"[lobby] stopped rid=%u reason=%s", rid, reason);
 }
 
-void LobbySession::pin_account(LobbyState &state, const std::string &tag) {
-	if (!db_) return;
+bool LobbySession::pin_account(LobbyState &state, const std::string &tag) {
+	if (!db_) return true;
 	try {
 		if (const auto account = lobbydb::login_account(*db_, tag)) state.user_id = account;
+		return true;
 	} catch (const std::exception &e) {
 		opennova::io::logf(opennova::io::LogLevel::kWarn,
 	"[lobby] WARN sign-in account: %s", e.what());
+		return false;
 	}
 }
 
@@ -444,9 +446,10 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 	//  @0x4d37b4..0x4d37f6 and CNapiGameSession_SendGLSVSSRequest @0x4d3aa0]
 	if (const VarLists lists = extract_var_lists(inner_message); lists.count("Cookie")) {
 		const std::string tag = var_value(lists.at("Cookie"), "LOGINSESSIONTAG");
-		if (!tag.empty() && (tag != state.login_session_tag || !state.user_id))
-			pin_account(state, tag);
-		state.login_session_tag = tag;
+		// A lookup the database failed keeps the tag before it, so the next list asks again.
+		if (tag.empty() || (tag == state.login_session_tag && state.user_id) ||
+				pin_account(state, tag))
+			state.login_session_tag = tag;
 	}
 	if      (name == "ClientConnected")             return handle_client_connected(inner_message, state);
 	else if (name == "ClientRequestVerifyResult")   return handle_client_request_verify_result(inner_message, state);
@@ -830,6 +833,8 @@ LobbyDispatchResult LobbySession::handle_client_play_request(
 			catch (const std::exception &e) {
 				opennova::io::logf(opennova::io::LogLevel::kWarn,
 	"[lobby] WARN play request's listing: %s", e.what());
+				// A lookup that failed is no other server: the same address keeps its listing.
+				if (addr == state.play_addr) rid = state.playing_rid;
 			}
 		}
 	}
