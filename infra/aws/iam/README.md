@@ -88,7 +88,7 @@ refused at run time (an AccessDenied naming the boundary).
 | Boundary | Carried by | Holds |
 | --- | --- | --- |
 | `opennova-machine-boundary` | the machines' two roles: the instance role (`opennova-<deployment>-machine`) and hostd's task role (`opennova-<deployment>-hostd`) | the ECS agent's calls on the fleet clusters (`opennova-*-fleet`) and their container instances (registering the machine, reporting its tasks and containers, polling for its work, its telemetry session; finding the poll endpoint), ECS Exec's session channels (`fleet shell`), the log streams of the `/opennova/*/machines` and `/opennova/*/servers` groups (written by the docker daemon's awslogs driver: hostd's own and the slots'), and the trees of the store (`data/trees/` of an `opennova-*` bucket, listed and read) |
-| `opennova-role-boundary` | every other role `infra/aws` makes (the programs' task roles, the execution role, the backup task's and its schedule's), and the GitHub deploy role | the session channels (ECS Exec), `/opennova/*` parameters and their names, the operations bucket (its objects read, written and deleted, its uploads in flight listed and aborted: the game data's store, `data/`, which web's and the data program's task roles narrow to), `/opennova/*` logs (their streams written, and their events read for the admin's log view), the AWS-managed keys through SSM and EC2, launching and ending machines tagged `opennova:hosted=1` from OpenNova-tagged subnets, groups and templates, the static addresses (Elastic IPs allocated tagged `opennova:hosted=1` and an `opennova-*` deployment, tagged only as they are allocated, associated with such machines, disassociated and released only while they carry both tags, and described) and their names (A records, by UPSERT and DELETE alone, named `*.play.*` in a hosted zone, and a change's state read: the worker's policy narrows them to its own play zone), passing `opennova-*` roles to EC2, ECS's tasks and EventBridge Scheduler, sending mail through the account's SES identities, running `opennova-*` task definitions in an `opennova-*` cluster and tagging their tasks, registering task definitions, pointing `opennova-*` services at them (the fleet cluster's hostd among them) and the backup schedule at a release's revision, ECS Exec into `opennova-*` clusters' tasks (the deploy workflow's, which its own policy narrows to its deployment's web container: `app deploy`'s check of the machines' hostd image), and the admin's infrastructure view's reads (web's: listing and describing `opennova-*` clusters' tasks and container instances, the fleet cluster's among them, describing `opennova-*` databases and cache replication groups, the target groups' health, CloudWatch's metrics) |
+| `opennova-role-boundary` | every other role `infra/aws` makes (the programs' task roles, the execution role, the backup task's and its schedule's), and the GitHub deploy role | the session channels (ECS Exec), `/opennova/*` parameters and their names, the operations bucket (its objects read, written and deleted, its uploads in flight listed and aborted: the game data's store, `data/`, which web's and the data program's task roles narrow to), `/opennova/*` logs (their streams written, and their events read for the admin's log view), the AWS-managed keys through SSM and EC2, launching and ending machines tagged `opennova:hosted=1` from OpenNova-tagged subnets, groups and templates, the static addresses (Elastic IPs allocated tagged `opennova:hosted=1` and an `opennova-*` deployment, tagged only as they are allocated, associated with such machines, disassociated and released only while they carry both tags, and described) and their names (A records, by UPSERT and DELETE alone, named `*.play.*` in a hosted zone, and a change's state read: the worker's policy narrows them to its own play zone), passing `opennova-*` roles to EC2, ECS's tasks and EventBridge Scheduler, sending mail through the account's SES identities, running `opennova-*` task definitions in an `opennova-*` cluster and tagging their tasks, registering task definitions, pointing `opennova-*` services at them (the fleet cluster's hostd among them) and the backup schedule at a release's revision, ECS Exec into `opennova-*` clusters' tasks (the deploy workflow's, which its own policy narrows to its deployment's web container: `app deploy`'s check of the machines' hostd image), and the admin's infrastructure view's reads (web's: listing and describing `opennova-*` clusters' tasks and container instances, the fleet cluster's among them, describing `opennova-*` databases and cache replication groups, the target groups' health, CloudWatch's metrics), and the admin's costs view's (web's: Cost Explorer's month and forecast, `ce:GetCostAndUsage` and `ce:GetCostForecast`, which take no resource, and Budgets' `budgets:ViewBudget`, which web's own policy narrows to the deployment's monthly cost budget) |
 
 What goes where: a permission only the machines' roles use goes in the machine boundary, and
 nothing a program, the backup or the deploy workflow uses goes there; a permission both sides
@@ -99,19 +99,19 @@ agent's calls.
 **6,144 characters.** IAM takes a managed policy of at most 6,144 characters, white space
 aside, counted as the org stack renders it (the account's id and region filled in, minified:
 `infra/org/account/deploy.tf`); `infra/org/tests` refuses a document past it. The role
-boundary is the one near the limit, so it is kept compact: the actions it allows on every
-resource, under no condition, share one statement (`Unscoped`), its statement ids are short,
-and two statements of the same action and resource are one (`PassRoles` names the three
-services). Compacting never widens a scoped resource and never drops or loosens a condition:
-two statements become one only when the one grants exactly what the two did. Statements under
-the same conditions share one where no action of one applies to the other's resources
-(`LaunchTagged`: `ec2:RunInstances` makes instances, never Elastic IPs, and
-`ec2:AllocateAddress` the reverse; `TagAtLaunch`: a tag at creation is under
-`ec2:CreateAction`, the action that made what it tags; `Clusters` and `TasksDbCache`:
-`ecs:ExecuteCommand` acts on a cluster and its task, never a database or a cache, and the
-reads beside it never exec). A permission
-that would push it past the limit and belongs to one kind of role alone is the moment for a
-boundary of its own, as the machines' was.
+boundary is the one near the limit (5,973 characters with the costs view's reads), so it is
+kept compact: the actions it allows on every resource, under no condition, share one
+statement (`Unscoped`), its statement ids are short, and two statements of the same action
+and resource are one (`PassRoles` names the three services). Compacting never widens a
+scoped resource and never drops or loosens a condition: two statements become one only when
+the one grants exactly what the two did. Statements under the same conditions share one
+where no action of one applies to the other's resources (`LaunchTagged`: `ec2:RunInstances`
+makes instances, never Elastic IPs, and `ec2:AllocateAddress` the reverse; `TagAtLaunch`: a
+tag at creation is under `ec2:CreateAction`, the action that made what it tags; `Clusters`
+and `TasksDbCache`: `ecs:ExecuteCommand` acts on a cluster and its task, never a database or
+a cache, and the reads beside it never exec). A permission that would push it past the limit
+and belongs to one kind of role alone is the moment for a boundary of its own, as the
+machines' was.
 
 The org stack applies both, so they go first: before the `infra apply` that turns hosting on
 (`hosted_enabled = true`, DEPLOY.md "Hosted game servers"), `org apply` with this directory's
@@ -175,7 +175,12 @@ AccessDenied naming the action):
 - the admin's log and usage views on web's first read after `org apply`: web's task role's
   `logs:GetLogEvents` and `logs:FilterLogEvents` on the deployment's `service`, `machines`
   and `servers` groups and `cloudwatch:GetMetricData` (no resource scoping exists for it),
-  each under the role boundary.
+  each under the role boundary;
+- the admin's costs view on web's first read after `org apply` and the `infra apply` that
+  names its budget (`ONNET_INFRA_BUDGET`): web's task role's `ce:GetCostAndUsage` and
+  `ce:GetCostForecast` (no resource scoping exists for them) on Cost Explorer's global
+  endpoint, and `budgets:ViewBudget` on the deployment's monthly cost budget's ARN, each
+  under the role boundary.
 
 Verified: the attention list's alarms, web's `cloudwatch:DescribeAlarms` with
 `AlarmNamePrefix`. IAM judges the listing against `alarm:*` whatever its prefix, and refused

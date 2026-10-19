@@ -517,6 +517,7 @@ run "environments" {
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_RELEASE_PARAMETER"] == "/opennova/prod/release" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_LOAD_BALANCER"] == "net/opennova-prod/0123456789abcdef" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_ALARM_PREFIX"] == "opennova-prod-" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_BUDGET"] == "arn:aws:budgets::123456789012:budget/opennova-prod-monthly-cost" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_LOG_STORE"] == "cloudwatch:/opennova/prod" &&
       jsondecode({ for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_TARGET_GROUPS"]) == {
         gate   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef"
@@ -528,7 +529,7 @@ run "environments" {
       alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INFRA_")]) &&
       alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_LOG_STORE")])
     )
-    error_message = "web alone is told what the admin's infrastructure view reads: this deployment's cluster (and no fleet cluster with hosting off), its target groups by listener, its database, cache, balancer and release parameter, in its region, and its log groups' prefix"
+    error_message = "web alone is told what the admin's infrastructure view reads: this deployment's cluster (and no fleet cluster with hosting off), its target groups by listener, its database, cache, balancer and release parameter, in its region, its log groups' prefix and its monthly cost budget"
   }
 }
 
@@ -669,9 +670,9 @@ run "task_roles" {
         "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTasks", "elasticloadbalancing:DescribeTargetHealth",
         "rds:DescribeDBInstances", "elasticache:DescribeReplicationGroups", "ssm:GetParameter", "ec2:DescribeInstances",
         "logs:GetLogEvents", "logs:FilterLogEvents", "logs:DescribeLogStreams", "cloudwatch:GetMetricData",
-        "cloudwatch:DescribeAlarms",
+        "cloudwatch:DescribeAlarms", "ce:GetCostAndUsage", "ce:GetCostForecast", "budgets:ViewBudget",
       ]) &&
-      alltrue([for st in data.aws_iam_policy_document.infra_read.statement : !anytrue([for a in st.actions : !can(regex("^[a-z0-9]+:(Describe|List|Get|Filter)", a))])])
+      alltrue([for st in data.aws_iam_policy_document.infra_read.statement : !anytrue([for a in st.actions : !can(regex("^[a-z0-9]+:(Describe|List|Get|Filter|View)", a))])])
     )
     error_message = "web's role holds the infrastructure view's reads, and nothing but reads"
   }
@@ -684,9 +685,12 @@ run "task_roles" {
         ]
       ])) &&
       one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadMetrics"]) == toset(["*"]) &&
-      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadAlarms"]) == toset(["arn:aws:cloudwatch:us-east-1:123456789012:alarm:*"])
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadAlarms"]) == toset(["arn:aws:cloudwatch:us-east-1:123456789012:alarm:*"]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadCosts"]) == toset(["*"]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.actions if st.sid == "ReadCosts"]) == toset(["ce:GetCostAndUsage", "ce:GetCostForecast"]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadBudget"]) == toset(["arn:aws:budgets::123456789012:budget/opennova-prod-monthly-cost"])
     )
-    error_message = "web reads the events of this deployment's three log groups alone (the programs', the machines', the servers'), CloudWatch's metrics, which take no resource, and the alarms of its account and region (IAM judges a listing against alarm:*)"
+    error_message = "web reads the events of this deployment's three log groups alone (the programs', the machines', the servers'), CloudWatch's metrics, which take no resource, the alarms of its account and region (IAM judges a listing against alarm:*), Cost Explorer's month and forecast (no resource) and its own monthly cost budget"
   }
   assert {
     condition = (
