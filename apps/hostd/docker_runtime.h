@@ -51,7 +51,7 @@
 namespace opennova::hostd {
 
 // Where the containers' output goes. With a group (a cloud machine; its
-// command line passes --log-group and --log-region): that CloudWatch log group,
+// command line passes --log-group and --region): that CloudWatch log group,
 // the servers', a stream per start, the one the service names in the
 // container's desired entry ("<server id>/g<generation>", which the server's
 // start row keeps), through docker's awslogs driver:

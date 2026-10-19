@@ -37,11 +37,13 @@ struct HostdOptions {
 	// --nft: the slots' fences and counters (nft_table.h), or "none" for neither
 	// (the process runtime's machine, which has no slot users).
 	std::string nft = "/usr/sbin/nft";
-	// --log-group and --log-region, both or neither, the docker runtime's: the
-	// CloudWatch log group the containers' output goes to, the servers' group
-	// (docker_runtime.h ContainerLogs); neither, the machine's journal.
+	// --region: the deployment's AWS region, which a tree's `aws s3 sync` names
+	// (tree_store.h ProcessTreeFetcher; unset, the CLI's own) and the log group's.
+	std::string region;
+	// --log-group, with --region, the docker runtime's: the CloudWatch log group
+	// the containers' output goes to, the servers' group (docker_runtime.h
+	// ContainerLogs); unset, the machine's journal.
 	std::string log_group;
-	std::string log_region;
 	// --log-dir, the process runtime's: the local stack's log directory, where
 	// each server's output goes (servers/<server id>/g<generation>.log) and a
 	// copy of the agent's own lines (machines/<machine id>/hostd.log).

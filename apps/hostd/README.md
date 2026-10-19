@@ -58,9 +58,9 @@ opennova-hostd --check-alive [--state-dir <path>]
 | `--docker` | `/usr/bin/docker` | The docker CLI, run as given (no `PATH` search). |
 | `--serve` | `/usr/local/bin/opennova-serve` | The process runtime's `opennova-serve`. |
 | `--aws` | `/usr/local/bin/aws` | The AWS CLI a tree's `s3 sync` runs, as given. |
+| `--region` | none | The deployment's AWS region: a tree's `s3 sync` names it (`--region`; unset, the CLI's own, a developer's profile), and so does `--log-group`'s driver. |
 | `--nft` | `/usr/sbin/nft` | The slots' fences and counters (`table inet opennova`, "Fences and counters"), or `none` for neither (a machine with no slot users: the process runtime's). |
-| `--log-group` | none | With `--log-region`, the docker runtime's: the CloudWatch log group the containers' output goes to (the servers' group), the stream the service names for each start ("Logs" below). Unset, the machine's journal. |
-| `--log-region` | none | That log group's region. |
+| `--log-group` | none | With `--region` (the group's), the docker runtime's: the CloudWatch log group the containers' output goes to (the servers' group), the stream the service names for each start ("Logs" below). Unset, the machine's journal. |
 | `--log-dir` | none | The process runtime's (the local stack's): the log directory each server's output goes to, `servers/<server id>/g<generation>.log`, beside a copy of the agent's own lines, `machines/<machine id>/hostd.log`, each after its time ("Logs" below). |
 | `--once` | | One pass, then exit: 0 when the sync was answered and read. |
 | `--check-alive` | | The ECS health check: exit 0 when a running agent's pass loop touched its alive file (`<state-dir>/alive`) within 120 s, 1 otherwise. The loop touches it at every pass and every 10 s of a wait, whether or not the service answers: a stuck loop is unhealthy, an unreachable service is not. |
@@ -82,7 +82,7 @@ The fleet cluster's task definition (`infra/aws/fleet_agent.tf`) runs it as
 ```
 opennova-hostd --service http://fleet.prod.opennova.internal:8070 \
   --machine-file /etc/opennova/machine-id --ecs-config /etc/ecs/ecs.config \
-  --log-group /opennova/prod/servers --log-region us-east-1
+  --region us-east-1 --log-group /opennova/prod/servers
 ```
 
 as user 0 with docker's default capabilities and `NET_ADMIN` added (never privileged), on
@@ -220,7 +220,8 @@ either pulls nothing). The agent's own image is ECS's to clean up.
 A desired container whose base or expansion tree the machine lacks waits the same way for
 the tree's fetch (`tree_store.h`): the store fetches one tree at a time, in the
 background, into `<trees root>/<id>.partial/` (`aws s3 sync <url> <dir> --no-progress
---only-show-errors` as a child of its own; a `file:///` URL is a directory copy), then
+--only-show-errors --region <the deployment's>` as a child of its own, `--region` left out
+without one; a `file:///` URL is a directory copy), then
 checks every file of the manifest is there with its size (an interrupted sync is caught;
 the sync itself is trusted for the bytes), removes any other file but `manifest.json`,
 renames the directory to `<trees root>/<id>/` and marks it with a `.ready` file. A fetch
@@ -282,7 +283,7 @@ server's slot):
 | servers | `<server id>/g<generation>` | one start's container output, standard output and error (the server's status page is off, `--status-page off`) |
 | machines | `hostd/hostd/<task id>` | the agent's own lines, one stream per hostd task (its ECS task definition's awslogs driver) |
 
-A start's container logs through docker's `awslogs` driver: `--log-group` and `--log-region`
+A start's container logs through docker's `awslogs` driver: `--log-group` and `--region`
 (the servers' group and its region) make its log options
 
 ```

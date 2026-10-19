@@ -68,8 +68,8 @@ locals {
       "--service", local.internal_url,
       "--machine-file", "/etc/opennova/machine-id",
       "--ecs-config", "/etc/ecs/ecs.config",
+      "--region", local.region,
       "--log-group", aws_cloudwatch_log_group.servers.name,
-      "--log-region", local.region,
     ]
     mountPoints = [for k in sort(keys(local.hostd_volumes)) : {
       sourceVolume  = k

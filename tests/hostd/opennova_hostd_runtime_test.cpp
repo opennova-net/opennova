@@ -1021,14 +1021,20 @@ int test_options() {
 					o, error) == ParseOutcome::Run);
 	TEST_EXPECT(o.runtime == hostd::RuntimeKind::Process && o.serve == "/opt/serve");
 	TEST_EXPECT(o.trees_root == "/tmp/trees" && o.aws == "/opt/aws");
-	TEST_EXPECT(o.log_group.empty() && o.log_region.empty());
+	TEST_EXPECT(o.log_group.empty() && o.region.empty());
 	o = {};
 	TEST_EXPECT(hostd::parse_hostd_options(
 						{ "--service", "http://fleet:8070", "--machine", "12", "--log-group",
-								"/opennova/prod/servers", "--log-region", "eu-west-1" },
+								"/opennova/prod/servers", "--region", "eu-west-1" },
 						o, error) == ParseOutcome::Run);
-	TEST_EXPECT(o.log_group == "/opennova/prod/servers" && o.log_region == "eu-west-1" &&
+	TEST_EXPECT(o.log_group == "/opennova/prod/servers" && o.region == "eu-west-1" &&
 			o.log_dir.empty());
+	// The region alone: the trees' sync's, the containers in the journal.
+	o = {};
+	TEST_EXPECT(hostd::parse_hostd_options(
+						{ "--service", "http://fleet:8070", "--machine", "12", "--region", "eu-west-1" },
+						o, error) == ParseOutcome::Run);
+	TEST_EXPECT(o.region == "eu-west-1" && o.log_group.empty());
 	o = {};
 	TEST_EXPECT(hostd::parse_hostd_options(
 						{ "--service", "http://fleet:8070", "--machine", "12", "--runtime",
@@ -1064,13 +1070,15 @@ int test_options() {
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--serve", "opennova-serve" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/opennova/x" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-region", "us-east-1" },
-		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a b", "--log-region",
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--region", "US-East-1" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--region", "us east 1" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a b", "--region",
 				"us-east-1" },
-		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a:b", "--log-region",
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a:b", "--region",
 				"us-east-1" },
-		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a", "--log-region",
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a", "--region",
 				"US-East-1" },
-		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a", "--log-region",
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-group", "/a", "--region",
 				"us-east-1", "--runtime", "process" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--log-dir", "/var/log/opennova" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--runtime", "process", "--log-dir",

@@ -455,11 +455,17 @@ int test_process_fetcher() {
 	Files files = kBase;
 	files["manifest.json"] = "{}";
 	write_tree(source, files);
-	hostd::ProcessTreeFetcher copier(temp.file("no-such-aws"), {}, temp.root());
+	hostd::ProcessTreeFetcher copier(temp.file("no-such-aws"), "", {}, temp.root());
 	TEST_EXPECT(copier.sync_argv("s3://bucket/data/dep/trees/1/", "/opt/game/1.partial") ==
 			(std::vector<std::string>{ temp.file("no-such-aws"), "s3", "sync",
 					"s3://bucket/data/dep/trees/1/", "/opt/game/1.partial", "--no-progress",
 					"--only-show-errors" }));
+	// The deployment's region (hostd's --region), named to the CLI.
+	const hostd::ProcessTreeFetcher regional(temp.file("no-such-aws"), "eu-west-1", {}, temp.root());
+	TEST_EXPECT(regional.sync_argv("s3://bucket/data/dep/trees/1/", "/opt/game/1.partial") ==
+			(std::vector<std::string>{ temp.file("no-such-aws"), "s3", "sync",
+					"s3://bucket/data/dep/trees/1/", "/opt/game/1.partial", "--no-progress",
+					"--only-show-errors", "--region", "eu-west-1" }));
 	std::string error;
 	const std::string dest = temp.file("trees/1.partial");
 	fs::create_directories(dest);
@@ -503,7 +509,7 @@ int test_process_fetcher() {
 		return p;
 	};
 	// A sync that succeeds; a second start while it runs is refused.
-	hostd::ProcessTreeFetcher ok("/bin/true", {}, temp.root());
+	hostd::ProcessTreeFetcher ok("/bin/true", "", {}, temp.root());
 	TEST_EXPECT(ok.start("s3://bucket/data/dep/trees/1/", dest, error));
 	TEST_EXPECT(!ok.start("s3://bucket/data/dep/trees/2/", dest, error) &&
 			error == "a fetch is already under way");
@@ -517,7 +523,7 @@ int test_process_fetcher() {
 				  "ListObjectsV2 operation: Forbidden\" >&2\necho more >&2\nexit 1\n";
 	}
 	::chmod(failing.c_str(), 0755);
-	hostd::ProcessTreeFetcher fails(failing, {}, temp.root());
+	hostd::ProcessTreeFetcher fails(failing, "", {}, temp.root());
 	TEST_EXPECT(fails.start("s3://bucket/data/dep/trees/1/", dest, error));
 	poll = poll_until_done(fails);
 	TEST_EXPECT(!poll.running && !poll.ok);
@@ -531,14 +537,14 @@ int test_process_fetcher() {
 		script << "#!/bin/sh\nexec sleep 30\n";
 	}
 	::chmod(slow.c_str(), 0755);
-	hostd::ProcessTreeFetcher slow_fetch(slow, {}, temp.root());
+	hostd::ProcessTreeFetcher slow_fetch(slow, "", {}, temp.root());
 	TEST_EXPECT(slow_fetch.start("s3://bucket/data/dep/trees/1/", dest, error));
 	TEST_EXPECT(slow_fetch.poll().running);
 	slow_fetch.cancel();
 	poll = slow_fetch.poll();
 	TEST_EXPECT(!poll.running && !poll.ok && poll.error == "no fetch is under way");
 	// One whose CLI is not there does not start.
-	hostd::ProcessTreeFetcher no_cli(temp.file("no-such-aws"), {}, temp.root());
+	hostd::ProcessTreeFetcher no_cli(temp.file("no-such-aws"), "", {}, temp.root());
 	TEST_EXPECT(!no_cli.start("s3://bucket/data/dep/trees/1/", dest, error) &&
 			error.find("aws s3 sync did not start") == 0);
 	// No error file stays behind.

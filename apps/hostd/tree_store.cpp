@@ -61,9 +61,10 @@ std::optional<int64_t> tree_id_of(const std::string &name) {
 
 // --- the real fetcher ------------------------------------------------------------
 
-ProcessTreeFetcher::ProcessTreeFetcher(
-		std::string aws, std::vector<std::string> environment, std::string scratch_dir) :
+ProcessTreeFetcher::ProcessTreeFetcher(std::string aws, std::string region,
+		std::vector<std::string> environment, std::string scratch_dir) :
 		aws_(std::move(aws)),
+		region_(std::move(region)),
 		environment_(std::move(environment)),
 		scratch_dir_(std::move(scratch_dir)) {}
 
@@ -73,7 +74,11 @@ ProcessTreeFetcher::~ProcessTreeFetcher() {
 
 std::vector<std::string> ProcessTreeFetcher::sync_argv(
 		const std::string &url, const std::string &dir) const {
-	return { aws_, "s3", "sync", url, dir, "--no-progress", "--only-show-errors" };
+	std::vector<std::string> argv = { aws_, "s3", "sync", url, dir, "--no-progress",
+		"--only-show-errors" };
+	if (!region_.empty())
+		argv.insert(argv.end(), { "--region", region_ });
+	return argv;
 }
 
 bool ProcessTreeFetcher::start(const std::string &url, const std::string &dir, std::string &error) {

@@ -806,8 +806,8 @@ run "hostd_daemon" {
         "--service", "http://fleet.prod.opennova.internal:8070",
         "--machine-file", "/etc/opennova/machine-id",
         "--ecs-config", "/etc/ecs/ecs.config",
+        "--region", "us-east-1",
         "--log-group", "/opennova/prod/servers",
-        "--log-region", "us-east-1",
       ] &&
       jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].healthCheck.command == ["CMD", "/usr/local/bin/opennova-hostd", "--check-alive"] &&
       jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].logConfiguration.logDriver == "awslogs" &&

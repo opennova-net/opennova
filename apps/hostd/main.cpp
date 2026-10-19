@@ -263,11 +263,12 @@ int main(int argc, char **argv) {
 				"/proc/self/fd/2", ProcessRuntime::Clock{}, options.log_dir);
 	} else {
 		runtime = std::make_unique<DockerRuntime>(runner, options.docker, environment, scratch,
-				ContainerLogs{ options.log_group, options.log_region });
+				ContainerLogs{ options.log_group, options.region });
 	}
 	// The trees the servers' game data comes in (tree_store.h): fetched from the
-	// store on demand, an s3:// one through the AWS CLI, a file:// one copied.
-	ProcessTreeFetcher fetcher(options.aws, environment, scratch);
+	// store on demand, an s3:// one through the AWS CLI (in the deployment's
+	// region), a file:// one copied.
+	ProcessTreeFetcher fetcher(options.aws, options.region, environment, scratch);
 	TreeStore trees(options.trees_root, fetcher);
 
 	// The slots' fences and counters, in place before any server can start,
@@ -338,7 +339,7 @@ int main(int argc, char **argv) {
 	if (!options.log_group.empty())
 		io::logf(io::LogLevel::kInfo,
 				"the containers' output: CloudWatch %s (%s), a stream per start",
-				options.log_group.c_str(), options.log_region.c_str());
+				options.log_group.c_str(), options.region.c_str());
 	if (!options.log_dir.empty())
 		io::logf(io::LogLevel::kInfo, "the servers' output and the agent's lines: %s",
 				options.log_dir.c_str());

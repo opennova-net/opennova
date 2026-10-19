@@ -64,17 +64,18 @@ public:
 };
 
 // The real fetcher. An s3:// URL runs `aws s3 sync <url> <dir> --no-progress
-// --only-show-errors` as a child of its own (proc::ChildProcess, as
-// DockerRuntime runs a pull: its standard error in a scratch file for the
-// failure's text, polled, ended with this process), with `environment` alone
-// (the machine's credentials come from its instance role). A file:/// URL (a
-// developer's machine) copies the directory at the call, so its poll answers
-// at once.
+// --only-show-errors [--region <region>]` as a child of its own
+// (proc::ChildProcess, as DockerRuntime runs a pull: its standard error in a
+// scratch file for the failure's text, polled, ended with this process), with
+// `environment` alone (the machine's credentials come from its instance role).
+// A file:/// URL (a developer's machine) copies the directory at the call, so
+// its poll answers at once.
 class ProcessTreeFetcher : public TreeFetcher {
 public:
-	// `aws`: the CLI's absolute path, run as given (no PATH search).
-	ProcessTreeFetcher(
-			std::string aws, std::vector<std::string> environment, std::string scratch_dir);
+	// `aws`: the CLI's absolute path, run as given (no PATH search); `region`:
+	// the deployment's (hostd's --region), "" for the CLI's own.
+	ProcessTreeFetcher(std::string aws, std::string region, std::vector<std::string> environment,
+			std::string scratch_dir);
 	~ProcessTreeFetcher() override;
 
 	bool start(const std::string &url, const std::string &dir, std::string &error) override;
@@ -86,6 +87,7 @@ public:
 
 private:
 	std::string aws_;
+	std::string region_;
 	std::vector<std::string> environment_;
 	std::string scratch_dir_;
 	proc::ChildProcess child_;

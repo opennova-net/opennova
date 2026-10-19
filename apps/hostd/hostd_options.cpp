@@ -101,9 +101,11 @@ const char *hostd_usage() {
 		   "                         (default /usr/local/bin/opennova-serve)\n"
 		   "  --aws <path>           the AWS CLI a tree's `s3 sync` runs\n"
 		   "                         (default /usr/local/bin/aws)\n"
+		   "  --region <region>      the deployment's AWS region: a tree's `s3 sync` names it\n"
+		   "                         (unset, the CLI's own), and so does --log-group's driver\n"
 		   "  --nft <path>           the slots' fences and counters (table inet opennova), or\n"
 		   "                         none (default /usr/sbin/nft)\n"
-		   "  --log-group <group>    with --log-region <region>: the containers' output to that\n"
+		   "  --log-group <group>    with --region: the containers' output to that\n"
 		   "                         CloudWatch log group (the servers'), the stream the service\n"
 		   "                         names each (docker's awslogs driver; unset, the journal)\n"
 		   "  --log-dir <path>       the process runtime's: each server's output to\n"
@@ -166,8 +168,8 @@ ParseOutcome parse_hostd_options(
 			target = &out.ecs_config;
 		else if (arg == "--log-group")
 			target = &out.log_group;
-		else if (arg == "--log-region")
-			target = &out.log_region;
+		else if (arg == "--region")
+			target = &out.region;
 		else if (arg == "--log-dir")
 			target = &out.log_dir;
 		else if (arg != "--machine") {
@@ -230,8 +232,12 @@ ParseOutcome parse_hostd_options(
 		error = "--nft takes an absolute path or none";
 		return ParseOutcome::Error;
 	}
-	if (out.log_group.empty() != out.log_region.empty()) {
-		error = "--log-group and --log-region go together";
+	if (!out.region.empty() && !hosted::is_aws_region(out.region)) {
+		error = "--region takes an AWS region (a-z, 0-9, -)";
+		return ParseOutcome::Error;
+	}
+	if (!out.log_group.empty() && out.region.empty()) {
+		error = "--log-group needs --region (its log group's)";
 		return ParseOutcome::Error;
 	}
 	if (!out.log_group.empty()) {
@@ -242,10 +248,6 @@ ParseOutcome parse_hostd_options(
 		}
 		if (!hosted::is_log_group_name(out.log_group)) {
 			error = "--log-group takes a log group name of letters, digits and ./_-";
-			return ParseOutcome::Error;
-		}
-		if (!hosted::is_aws_region(out.log_region)) {
-			error = "--log-region takes an AWS region (a-z, 0-9, -)";
 			return ParseOutcome::Error;
 		}
 	}
