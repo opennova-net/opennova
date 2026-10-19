@@ -19,7 +19,13 @@ const ESCALATION = JO.expansions[0].id;
 function mountForm(
   dataSets: HostedDataSet[] = [JO, DFX2],
   previous: HostedSettings | null = null,
-  extra: { baseId?: string; ownMachinesFree?: number; addresses?: Address[]; preferredAddressId?: number | null } = {},
+  extra: {
+    baseId?: string;
+    ownMachinesFree?: number;
+    previousOwnMachine?: boolean;
+    addresses?: Address[];
+    preferredAddressId?: number | null;
+  } = {},
 ) {
   return mount(HostedSettingsForm, { props: { previous, dataSets, ...extra } });
 }
@@ -194,6 +200,20 @@ describe('HostedSettingsForm', () => {
     const none = mountForm([JO], null, { ownMachinesFree: 1, addresses: [] });
     await none.get('#hosted-settings-own_machine').setValue(true);
     expect(none.find('#hosted-settings-address_id').exists()).toBe(false);
+  });
+
+  it('starts on an own machine when the server started again ran on one, while one is free', async () => {
+    const again = mountForm([JO], settings(), {
+      ownMachinesFree: 1,
+      previousOwnMachine: true,
+      addresses: [address(1, 'smoke'), address(2, 'arena')],
+      preferredAddressId: 2,
+    });
+    expect((again.get('#hosted-settings-own_machine').element as HTMLInputElement).checked).toBe(true);
+    expect((again.get('#hosted-settings-address_id').element as HTMLSelectElement).selectedIndex).toBe(2);
+
+    const none = mountForm([JO], settings(), { ownMachinesFree: 0, previousOwnMachine: true });
+    expect(none.find('#hosted-settings-own_machine').exists()).toBe(false);
   });
 
   it('marks the game picker when the backend refuses the data set', async () => {
