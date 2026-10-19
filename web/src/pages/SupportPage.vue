@@ -44,7 +44,7 @@
         </section>
 
         <section v-if="tiers.own_machine" class="space-y-2 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="public-own-machine">
-          <h2 id="public-own-machine" class="text-lg font-semibold text-ink">Own machine add-on</h2>
+          <h2 id="public-own-machine" class="text-lg font-semibold text-ink">Dedicated machine add-on</h2>
           <p class="text-sm text-ink-muted">
             <template v-if="tiers.own_machine.amount !== null">
               {{ formatMoney(tiers.own_machine.amount, tiers.currency) }} a month for each.

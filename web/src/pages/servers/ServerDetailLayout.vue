@@ -43,7 +43,7 @@
           <span :class="stateBadgeClass(server.state)">{{ ownerStateLabel(server.state) }}</span>
           <span>{{ server.data_set?.display_name || server.game_display_name || 'Unknown game' }}</span>
           <span v-if="server.expansion || server.expansion_display_name">{{ server.expansion?.display_name || server.expansion_display_name }}</span>
-          <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Own machine</span>
+          <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Dedicated machine</span>
         </p>
         <p v-if="server.address" class="text-sm text-ink-muted">
           Static address

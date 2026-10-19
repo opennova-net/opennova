@@ -5,7 +5,7 @@
 import type { Address, AddressState, ServerAddress } from '../types/addresses';
 import type { HostedServer } from '../types/hostedServer';
 
-// The game port an own machine's servers list at (its one slot, slot 0;
+// The game port a dedicated machine's servers list at (its one slot, slot 0;
 // hosted/protocol/slots.h slot_game_port): a server JSON's address names no port.
 export const ADDRESS_GAME_PORT = 32768;
 

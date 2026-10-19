@@ -165,7 +165,7 @@ function messageFor(
           : 'All the servers you may run at once are live.'
       } Stop one first. ${STOPPING_STILL_COUNTS}`;
     case 'no_own_machine':
-      return 'Each of your own machines already runs a server. Start this one on a shared machine.';
+      return 'Each of your dedicated machines already runs a server. Start this one on a shared machine.';
     case 'at_capacity':
       return 'Every hosted server place on NovaWorld is taken right now. Try again later.';
     case 'address_unavailable':
@@ -439,7 +439,7 @@ export function fetchMyServer(id: number, signal?: AbortSignal): Promise<HostedR
 }
 
 // POST /api/me/servers: a new server, requested (202), with these settings,
-// on one of the account's own machines when `ownMachine`, there at the static
+// on one of the account's dedicated machines when `ownMachine`, there at the static
 // address `addressId` when one is named (409 address_unavailable when it is
 // not ready, or another live server's). The service's supervisor takes it
 // from there.

@@ -161,7 +161,7 @@ describe('OverviewSection', () => {
     expect(area(page, 'Hosting').get('svg').attributes('aria-label')).toContain('Players on hosted servers, last 24 hours');
     expect(figure(page, 'People and money', 'Subscribers')).toContain('Tier 1: 1, Tier 2: 2, Tier 3: 1');
     expect(figure(page, 'People and money', 'Payments past due')).toContain('Their servers keep running while Stripe retries');
-    // Four tiers and two own machines at today's prices.
+    // Four tiers and two dedicated machines at today's prices.
     expect(figure(page, 'People and money', 'Subscriptions a month')).toContain('about $130');
     expect(figure(page, 'People and money', 'AWS this month')).toContain('$41.25 so far');
     expect(figure(page, 'People and money', 'AWS this month')).toContain("About $117 by the month's end, 47% of the $250 budget.");

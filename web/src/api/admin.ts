@@ -269,7 +269,7 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'not_retryable':
       return 'Only an address the cloud refused is tried again. Refresh the list.';
     case 'address_limit':
-      return 'That account has a static address for every own machine it has. Grant it another own machine first.';
+      return 'That account has a static address for every dedicated machine it has. Grant it another dedicated machine first.';
     case 'addresses_disabled':
       return 'This NovaWorld service sells no static address (ONNET_FLEET_MAX_ADDRESSES is 0, or its address settings are incomplete: the boot log says which).';
     case 'no_log_store':

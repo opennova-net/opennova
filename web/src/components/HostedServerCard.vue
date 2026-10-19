@@ -14,7 +14,7 @@
         <span :class="stateBadgeClass(server.state)">{{ ownerStateLabel(server.state) }}</span>
         <span>{{ gameLabel }}</span>
         <span v-if="expansionLabel">{{ expansionLabel }}</span>
-        <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Own machine</span>
+        <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Dedicated machine</span>
       </p>
       <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
         <template v-if="server.live && players">

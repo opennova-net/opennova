@@ -56,7 +56,7 @@ describe('startBlock and canStartAnother', () => {
     ).toBe(false);
   });
 
-  it('counts the free own machines', () => {
+  it('counts the free dedicated machines', () => {
     expect(ownMachinesFree(serversResponse([]).entitlement)).toBe(0);
     expect(ownMachinesFree(serversResponse([], { entitlement: { own_machines: 2, own_used: 1 } }).entitlement)).toBe(1);
     expect(ownMachinesFree(serversResponse([], { entitlement: { own_machines: 1, own_used: 2 } }).entitlement)).toBe(0);

@@ -28,7 +28,7 @@ export function subscriptionStatusLabel(status: SubscriptionStatus): string {
 // What a subscription is for, as the admin pages list it: "Tier 2", "Own
 // machines: 2", "Static address".
 export function subscriptionItemLabel(s: Pick<AdminSubscription, 'item' | 'tier' | 'quantity'>): string {
-  if (s.item === 'own_machine') return `Own machines: ${s.quantity}`;
+  if (s.item === 'own_machine') return `Dedicated machines: ${s.quantity}`;
   if (s.item === 'static_address') return 'Static address';
   return `Tier ${s.tier ?? '?'}`;
 }

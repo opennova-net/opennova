@@ -36,28 +36,28 @@ export function ownerHostingLabel(owner: { tier: number | null; granted: boolean
 
 // Where an entitlement's servers run, as the sold capacity counts them: an own
 // machine takes one of them off the shared machines and adds none.
-// "9 on shared machines, 2 on own machines", "All on shared machines", "None".
+// "9 on shared machines, 2 on dedicated machines", "All on shared machines", "None".
 export function serverPlacesLabel(e: { max_servers: number; own_machines: number }): string {
   if (e.max_servers <= 0) return 'None';
   const own = Math.min(e.own_machines, e.max_servers);
   const shared = e.max_servers - own;
   if (own === 0) return 'All on shared machines';
-  if (shared === 0) return 'All on own machines';
-  return `${shared} on shared machines, ${own} on own machine${own === 1 ? '' : 's'}`;
+  if (shared === 0) return 'All on dedicated machines';
+  return `${shared} on shared machines, ${own} on dedicated machine${own === 1 ? '' : 's'}`;
 }
 
 // The service's sold capacity against what the fleet sells, item by item:
-// "Sold: 9 of 12 shared places, 2 of 2 own machines, 0 of 1 static addresses."
+// "Sold: 9 of 12 shared places, 2 of 2 dedicated machines, 0 of 1 static addresses."
 export function soldCapacityText(c: SoldCapacity): string {
   return (
     `Sold: ${c.shared.sold} of ${c.shared.sellable} shared places, ` +
-    `${c.own_machines.sold} of ${c.own_machines.sellable} own machines, ` +
+    `${c.own_machines.sold} of ${c.own_machines.sellable} dedicated machines, ` +
     `${c.addresses.sold} of ${c.addresses.sellable} static addresses.`
   );
 }
 
 export function machineKindLabel(kind: MachineKind | string): string {
-  return kind === 'own' ? 'Own machine' : kind === 'shared' ? 'Shared machine' : kind;
+  return kind === 'own' ? 'Dedicated machine' : kind === 'shared' ? 'Shared machine' : kind;
 }
 
 const MACHINE_STATES: Record<string, string> = {

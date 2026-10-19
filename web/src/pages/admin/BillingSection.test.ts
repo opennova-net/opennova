@@ -52,7 +52,7 @@ describe('BillingSection', () => {
       ['Tier 1', '1', '$5', '$5'],
       ['Tier 2', '2', '$10', '$20'],
       ['Tier 3', '1', '$15', '$15'],
-      ['Own machines', '2', '$45', '$90'],
+      ['Dedicated machines', '2', '$45', '$90'],
     ]);
     expect(wrapper.get('tfoot').text()).toContain('4');
     expect(wrapper.get('tfoot').text()).toContain('$130');
@@ -157,12 +157,12 @@ describe('BillingSection', () => {
     });
     const wrapper = await mountSection();
     expect(wrapper.get('section.billing-capacity').text()).toContain(
-      'Sold: 9 of 12 shared places, 2 of 2 own machines, 0 of 1 static addresses.',
+      'Sold: 9 of 12 shared places, 2 of 2 dedicated machines, 0 of 1 static addresses.',
     );
     expect(wrapper.find('.billing-oversold').exists()).toBe(false);
     const grants = wrapper.findAll('li.billing-grant');
     expect(grants.map((g) => g.get('a').text())).toEqual(['player7', 'Account 8']);
-    expect(grants.map((g) => g.get('span').text())).toEqual(['3 servers, 1 own machine and 1 static address', '2 own machines']);
+    expect(grants.map((g) => g.get('span').text())).toEqual(['3 servers, 1 dedicated machine and 1 static address', '2 dedicated machines']);
     expect(grants.map((g) => g.get('a').attributes('href'))).toEqual(['/admin/users/7', '/admin/users/8']);
     expect(wrapper.text()).toContain('Admin grants (2)');
   });
@@ -209,7 +209,7 @@ describe('BillingSection', () => {
     const wrapper = await mountSection();
     const hold = wrapper.get('section.limits-hold');
     expect(hold.text()).toContain('Hosted server limits are on hold');
-    // A pass's stops and its moves off own machines, held alike.
+    // A pass's stops and its moves off dedicated machines, held alike.
     expect(hold.text()).toContain('A pass would stop or move 4 servers of 3 owners');
     expect(hold.text()).toContain('a pass would stop 4 server(s) of 3 of 5 owners');
     expect(hold.text()).toContain('next full read from Stripe');

@@ -30,17 +30,17 @@ describe('soldCapacityText', () => {
         addresses: { sold: 0, sellable: 1 },
         oversold: false,
       }),
-    ).toBe('Sold: 9 of 12 shared places, 2 of 2 own machines, 0 of 1 static addresses.');
+    ).toBe('Sold: 9 of 12 shared places, 2 of 2 dedicated machines, 0 of 1 static addresses.');
   });
 });
 
 describe('serverPlacesLabel', () => {
-  it('counts an own machine as one of the servers, adding none', () => {
+  it('counts a dedicated machine as one of the servers, adding none', () => {
     expect(serverPlacesLabel({ max_servers: 0, own_machines: 2 })).toBe('None');
     expect(serverPlacesLabel({ max_servers: 3, own_machines: 0 })).toBe('All on shared machines');
-    expect(serverPlacesLabel({ max_servers: 11, own_machines: 2 })).toBe('9 on shared machines, 2 on own machines');
-    expect(serverPlacesLabel({ max_servers: 3, own_machines: 1 })).toBe('2 on shared machines, 1 on own machine');
-    // More own machines than servers: every server on one.
-    expect(serverPlacesLabel({ max_servers: 2, own_machines: 5 })).toBe('All on own machines');
+    expect(serverPlacesLabel({ max_servers: 11, own_machines: 2 })).toBe('9 on shared machines, 2 on dedicated machines');
+    expect(serverPlacesLabel({ max_servers: 3, own_machines: 1 })).toBe('2 on shared machines, 1 on dedicated machine');
+    // More dedicated machines than servers: every server on one.
+    expect(serverPlacesLabel({ max_servers: 2, own_machines: 5 })).toBe('All on dedicated machines');
   });
 });

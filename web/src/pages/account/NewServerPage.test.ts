@@ -82,7 +82,7 @@ describe('NewServerPage', () => {
     wrapper = null;
   });
 
-  it('starts an own-machine server again on an own machine at its static address', async () => {
+  it('starts an own-machine server again on a dedicated machine at its static address', async () => {
     // Another free address listed first: the old server's is the one picked.
     const page = await mountPage(stoppedAtAddress(), [address(4, 'arena'), address(3, 'fleettest')]);
     expect(one).not.toHaveBeenCalled();
@@ -94,7 +94,7 @@ describe('NewServerPage', () => {
     expect(start).toHaveBeenCalledWith(expect.objectContaining({ game_name: 'Server 7' }), true, 3);
   });
 
-  it("keeps the own machine but not an address that is no longer the owner's and ready", async () => {
+  it("keeps the dedicated machine but not an address that is no longer the owner's and ready", async () => {
     const lapsed = await mountPage(stoppedAtAddress(), [address(3, 'fleettest', { state: 'lapsed' })]);
     expect((lapsed.get('#new-server-own_machine').element as HTMLInputElement).checked).toBe(true);
     expect(lapsed.find('#new-server-address_id').exists()).toBe(false);
@@ -130,7 +130,7 @@ describe('NewServerPage', () => {
     expect(linkTexts(top)).not.toContain('See the support tiers');
   });
 
-  it('starts a shared server again on a shared machine, and offers no own machine with none free', async () => {
+  it('starts a shared server again on a shared machine, and offers no dedicated machine with none free', async () => {
     const shared = await mountPage(hostedServer(7, { state: 'stopped' }), [address(3, 'fleettest')]);
     expect((shared.get('#new-server-own_machine').element as HTMLInputElement).checked).toBe(false);
     expect(shared.find('#new-server-address_id').exists()).toBe(false);

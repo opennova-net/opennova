@@ -116,7 +116,7 @@ describe('FleetSection', () => {
     expect(cards[0].text()).toContain('2 of 12 slots in use');
     expect(cards[0].text()).toContain('13 GB sent this month');
     expect(cards[0].get('.machine-report').text()).toBe('Last report 4 s ago');
-    expect(cards[1].text()).toContain('Own machine');
+    expect(cards[1].text()).toContain('Dedicated machine');
     expect(cards[1].text()).toContain('c7a.medium');
     expect(page.text()).toContain('1 shared, 1 own');
     expect(page.text()).toContain('1 of 24 shared');

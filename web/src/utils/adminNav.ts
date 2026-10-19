@@ -54,7 +54,7 @@ export const ADMIN_AREAS: readonly AdminArea[] = [
     sections: [
       { to: '/admin/fleet', label: 'Fleet', description: 'Machines and servers, their moves, the roll' },
       { to: '/admin/usage', label: 'Server usage', description: 'What every live server uses of its slot' },
-      { to: '/admin/addresses', label: 'Static addresses', description: "Own machines' fixed addresses and names" },
+      { to: '/admin/addresses', label: 'Static addresses', description: "Dedicated machines' fixed addresses and names" },
       { to: '/admin/data-sets', label: 'Game data', description: 'The data sets servers run on, and their updates' },
     ],
   },

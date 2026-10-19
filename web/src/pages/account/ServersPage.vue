@@ -62,8 +62,8 @@
             id="servers-own-machines"
             :used="data.entitlement.own_used"
             :max="data.entitlement.own_machines"
-            singular="own machine"
-            plural="own machines"
+            singular="dedicated machine"
+            plural="dedicated machines"
           />
         </div>
         <div class="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">

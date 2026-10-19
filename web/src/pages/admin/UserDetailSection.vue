@@ -122,7 +122,7 @@
               />
             </div>
             <div class="space-y-1">
-              <label for="user-comp-own" :class="labelClass">Own machines for its servers</label>
+              <label for="user-comp-own" :class="labelClass">Dedicated machines for its servers</label>
               <input
                 id="user-comp-own"
                 v-model.number="compOwn"
@@ -148,7 +148,7 @@
             {{
               compProblem ||
               compOwnProblem ||
-              `0 to ${COMP_SERVERS_MAX} free hosted servers. Own machines add no servers: each moves one of the account's servers off the shared machines onto a machine of its own (0 to ${COMP_OWN_MACHINES_MAX}). A granted account buys no support tier or add-on (one it already pays for still counts: it gets the larger). Lowering the servers stops its newest servers first; lowering the own machines moves its servers past them to a shared machine while there is room, and stops the rest.`
+              `0 to ${COMP_SERVERS_MAX} free hosted servers. Dedicated machines add no servers: each moves one of the account's servers off the shared machines onto a machine of its own (0 to ${COMP_OWN_MACHINES_MAX}). A granted account buys no support tier or add-on (one it already pays for still counts: it gets the larger). Lowering the servers stops its newest servers first; lowering the dedicated machines moves its servers past them to a shared machine while there is room, and stops the rest.`
             }}
           </p>
         </form>
@@ -168,7 +168,7 @@
             </RouterLink>
             <span class="flex items-center gap-2 text-ink-muted">
               <span :class="stateBadgeClass(s.state)">{{ stateLabel(s.state) }}</span>
-              <span v-if="s.own_machine" class="text-xs">Own machine</span>
+              <span v-if="s.own_machine" class="text-xs">Dedicated machine</span>
               <RelativeTime v-if="s.ended_at" :value="s.ended_at" :now="now" />
             </span>
           </li>
@@ -215,7 +215,7 @@
           <p id="user-comp-address-hint" class="text-xs" :class="compAddressProblem ? 'text-danger' : 'text-ink-muted'">
             {{
               compAddressProblem ||
-              `A static address free of charge, one for each of the account's own machines; it counts as sold. ${ADDRESS_NAME_RULE}`
+              `A static address free of charge, one for each of the account's dedicated machines; it counts as sold. ${ADDRESS_NAME_RULE}`
             }}
           </p>
         </form>
@@ -310,9 +310,9 @@
 // /admin/users/<id>: one account (GET /api/admin/users/<id>): its profile and
 // edit (PUT /api/admin/users/<id>), its role (a demotion of the last admin
 // who can log in says how one comes back), its hosting entitlement with the
-// admin's comp grants (PUT .../comp: servers and own machines, 0 to 16 each;
+// admin's comp grants (PUT .../comp: servers and dedicated machines, 0 to 16 each;
 // a cut below what the account runs is confirmed first, saying which servers
-// stop and which move off their own machines) and a warning while grants and subscriptions oversell the fleet (the
+// stop and which move off their dedicated machines) and a warning while grants and subscriptions oversell the fleet (the
 // service's sold capacity, also in the grant's reply), its hosted servers
 // (each to its fleet page), its static addresses with a comp one (POST
 // .../addresses), its Stripe ids (to Stripe's dashboard, in the key's mode),
@@ -417,7 +417,7 @@ function oversoldText(c: SoldCapacity): string {
   return (
     'Admin grants and subscriptions exceed what the fleet sells: ' +
     `shared places ${c.shared.sold} of ${c.shared.sellable}, ` +
-    `own machines ${c.own_machines.sold} of ${c.own_machines.sellable}, ` +
+    `dedicated machines ${c.own_machines.sold} of ${c.own_machines.sellable}, ` +
     `addresses ${c.addresses.sold} of ${c.addresses.sellable}. New subscriptions of those items are paused.`
   );
 }
@@ -574,7 +574,7 @@ async function saveComp() {
       `Lower ${u.username}'s grant to ${n}? They run ${live.length} servers live, so the service stops ${what}: their matches end for everyone on them.`,
     );
   }
-  // Its own machines after it: the add-on's (paid while a tier grants) and the
+  // Its dedicated machines after it: the add-on's (paid while a tier grants) and the
   // grant's while it has servers. Of the servers the limit keeps, those on own
   // machines past them move to a shared machine while there is room; the rest
   // stop.
@@ -584,8 +584,8 @@ async function saveComp() {
   if (ownOver > 0) {
     warnings.push(
       ownOver === 1
-        ? `Lower ${u.username}'s own machines to ${ownAfter}? One of their servers on own machines moves to a shared machine (its match restarts) if there is room; else it stops.`
-        : `Lower ${u.username}'s own machines to ${ownAfter}? ${ownOver} of their servers on own machines move to a shared machine (their matches restart) while there is room; the rest stop.`,
+        ? `Lower ${u.username}'s dedicated machines to ${ownAfter}? One of their servers on dedicated machines moves to a shared machine (its match restarts) if there is room; else it stops.`
+        : `Lower ${u.username}'s dedicated machines to ${ownAfter}? ${ownOver} of their servers on dedicated machines move to a shared machine (their matches restart) while there is room; the rest stop.`,
     );
   }
   if (warnings.length > 0 && !window.confirm(warnings.join('\n\n'))) return;
@@ -600,7 +600,7 @@ async function saveComp() {
   if (detail.value && result.value.capacity) detail.value = { ...detail.value, capacity: result.value.capacity };
   const granted = [
     ...(n > 0 ? [`${n} hosted server${n === 1 ? '' : 's'}`] : []),
-    ...(own > 0 ? [`${own} own machine${own === 1 ? '' : 's'} for its servers`] : []),
+    ...(own > 0 ? [`${own} dedicated machine${own === 1 ? '' : 's'} for its servers`] : []),
   ];
   flash(
     granted.length === 0

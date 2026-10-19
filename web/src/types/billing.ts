@@ -7,8 +7,8 @@ import type { SoldCapacity } from './users';
 
 export type TierNumber = 1 | 2 | 3;
 
-// What a checkout buys: a support tier, the own-machine add-on, or a static
-// address for an own machine.
+// What a checkout buys: a support tier, the dedicated machine add-on, or a static
+// address for a dedicated machine.
 export type BillingItem = 'tier1' | 'tier2' | 'tier3' | 'own_machine' | 'static_address';
 
 // One support tier on offer. `amount` is null while the service could not
@@ -23,7 +23,7 @@ export interface TierOffer {
   available: boolean;
 }
 
-// The own-machine add-on on offer: one server of the account's tier on a
+// The dedicated machine add-on on offer: one server of the account's tier on a
 // machine of its own, per unit.
 export interface OwnMachineOffer {
   amount: number | null;
@@ -32,7 +32,7 @@ export interface OwnMachineOffer {
 }
 
 // The static address add-on on offer: one fixed address and name for a
-// server on an own machine, each its own subscription.
+// server on a dedicated machine, each its own subscription.
 export interface StaticAddressOffer {
   amount: number | null;
   interval: string;
@@ -75,7 +75,7 @@ export interface TierSubscription {
   cancel_at_period_end: boolean;
 }
 
-// The account's own-machine add-on subscription.
+// The account's dedicated machine add-on subscription.
 export interface OwnMachineSubscription {
   quantity: number;
   status: SubscriptionStatus;
@@ -98,7 +98,7 @@ export interface MyBilling {
   enabled: boolean;
   // The hosting entitlement: max(tier servers, comp_servers).
   max_servers: number;
-  // An admin's grants, 0 for none: servers, own machines for the account's
+  // An admin's grants, 0 for none: servers, dedicated machines for the account's
   // servers, and static addresses.
   comp_servers: number;
   comp_own_machines: number;
@@ -116,7 +116,7 @@ export interface MyBilling {
   subscription: TierSubscription | null;
   own_machine_subscription: OwnMachineSubscription | null;
   // The static addresses its subscriptions and an admin's grants pay for (at
-  // most its own machines), and each address subscription still open.
+  // most its dedicated machines), and each address subscription still open.
   static_addresses: number;
   address_subscriptions: AddressSubscription[];
   // The account has a Stripe customer: the billing portal opens.
@@ -172,7 +172,7 @@ export interface BillingEvent {
 }
 
 // An account an admin grants hosting (comp_grants): its grant of servers,
-// own machines and static addresses (its comp addresses that count).
+// dedicated machines and static addresses (its comp addresses that count).
 export interface AdminCompGrant {
   user_id: number;
   username: string;
@@ -187,7 +187,7 @@ export interface AdminCompGrant {
 export interface AdminBillingResponse {
   enabled: boolean;
   // The hosted servers' limits hold: a pass would have stopped (or moved off
-  // their own machines) the servers of more owners at once than a real lapse
+  // their dedicated machines) the servers of more owners at once than a real lapse
   // would, so no server stops or moves for its owner's limits until a clean
   // read from Stripe confirms them or an admin applies the stops.
   limits_hold: boolean;

@@ -49,8 +49,8 @@ export interface HostedSettings {
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
 
 // POST /api/me/servers's body: the settings, whether the server runs on one
-// of the account's own machines (the own-machine add-on) rather than a shared
-// one, and on an own machine the static address it runs at (one of the
+// of the account's dedicated machines (the dedicated machine add-on) rather than a shared
+// one, and on a dedicated machine the static address it runs at (one of the
 // account's ready ones; absent or null for none).
 export type StartRequest = StartSettings & { own_machine?: boolean; address_id?: number | null };
 
@@ -211,9 +211,9 @@ export interface HostedServer {
   state: HostedState;
   // Any state but stopped and failed.
   live: boolean;
-  // It runs on a machine of its own (the own-machine add-on), not a shared one.
+  // It runs on a machine of its own (the dedicated machine add-on), not a shared one.
   own_machine: boolean;
-  // The static address it runs at (an own machine's), or null.
+  // The static address it runs at (a dedicated machine's), or null.
   address: ServerAddress | null;
   settings: HostedSettings;
   // The names the service gives the server's game and expansion ("Joint
@@ -263,7 +263,7 @@ export interface HostingEntitlement {
   // How many it has live now, stopping ones included (a stopping server holds
   // its place until it has stopped).
   used: number;
-  // The own-machine add-ons it holds, and how many of its live servers run on
+  // The dedicated machines it holds, and how many of its live servers run on
   // one.
   own_machines: number;
   own_used: number;
@@ -309,8 +309,8 @@ export interface FleetOwner {
   granted: boolean;
 }
 
-// A machine's kind: a shared machine packs several servers, an own machine
-// runs exactly one (the own-machine add-on).
+// A machine's kind: a shared machine packs several servers, a dedicated machine
+// runs exactly one (the dedicated machine add-on).
 export type MachineKind = 'shared' | 'own';
 
 // launching -> booting -> ready -> draining -> ending -> ended | failed; lost
@@ -391,7 +391,7 @@ export interface FleetMachine {
   // Its agent's image or its machine's differs from the release's; null when
   // that is not known.
   outdated: boolean | null;
-  // The static address it carries (an own machine's), or null.
+  // The static address it carries (a dedicated machine's), or null.
   address: { id: number; name: string } | null;
   // Its slots that hold a server, one each (slots_used of them); whatever the
   // fleet list shows.

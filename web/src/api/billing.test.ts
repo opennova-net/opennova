@@ -130,7 +130,7 @@ describe('the routes', () => {
   it('maps the refusals to messages, never the server text', async () => {
     const cases: [number, string, string][] = [
       [409, 'already_subscribed', 'You already have a support tier'],
-      [409, 'own_machine_limit', 'an own machine for every server'],
+      [409, 'own_machine_limit', 'a dedicated machine for every server'],
       [409, 'checkout_in_progress', 'already starting'],
       [503, 'billing_disabled', 'not open on NovaWorld yet'],
       [503, 'billing_misconfigured', 'no payment was taken'],
@@ -139,7 +139,7 @@ describe('the routes', () => {
       [404, 'no_billing_account', 'subscribe to a support tier first'],
       [400, 'invalid_item', 'could not read the request'],
       [409, 'sold_out', 'Hosting is full: new subscriptions are paused. Try again later; no payment was taken.'],
-      [409, 'address_limit', 'a static address for every own machine'],
+      [409, 'address_limit', 'a static address for every dedicated machine'],
       [403, 'payment_past_due', 'Fix it in the billing portal first'],
       [404, 'not_found', 'no longer open'],
     ];

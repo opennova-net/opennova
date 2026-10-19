@@ -150,7 +150,7 @@
                     {{ s.settings.game_name || 'Unnamed server' }}
                   </RouterLink>
                   <span class="block text-xs font-normal text-ink-muted">
-                    Server {{ s.id }}, {{ s.data_set?.display_name || s.game_display_name || 'unknown game' }}<template v-if="s.own_machine">, own machine</template>
+                    Server {{ s.id }}, {{ s.data_set?.display_name || s.game_display_name || 'unknown game' }}<template v-if="s.own_machine">, dedicated machine</template>
                   </span>
                 </th>
                 <td class="whitespace-nowrap px-4 py-3">

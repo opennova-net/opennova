@@ -62,7 +62,7 @@ describe('UsageSection', () => {
     expect(rows[0].text()).toContain('0.25 vCPU of 1 vCPU');
     expect(rows[0].text()).toContain('520 MB');
     // Its server has no recent sample: no memory or CPU to show.
-    expect(rows[1].text()).toContain('Own machine, c7a.medium');
+    expect(rows[1].text()).toContain('Dedicated machine, c7a.medium');
     expect(rows[1].text()).toContain('No report');
     expect(rows[1].text()).toContain('0 b/s');
   });
@@ -90,7 +90,7 @@ describe('UsageSection', () => {
     expect(rows[0].text()).toContain('0 b/s');
     // Its account gone, its newest sample too old.
     expect(rows[2].text()).toContain('Deleted account');
-    expect(rows[2].text()).toContain('own machine');
+    expect(rows[2].text()).toContain('dedicated machine');
     expect(rows[2].text()).toContain('Peak 100 MiB in the last hour');
     expect(rows[3].text()).toContain('Not placed');
   });

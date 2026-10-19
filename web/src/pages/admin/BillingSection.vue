@@ -19,7 +19,7 @@
       <h2 id="billing-limits-hold" class="text-lg font-semibold text-danger">Hosted server limits are on hold</h2>
       <p class="text-sm text-ink">
         A pass would stop or move {{ holdSummary }} for their hosting limits: more owners at once than a real lapse
-        would touch. In case the billing cache is wrong, no hosted server stops or moves off its own machine for its
+        would touch. In case the billing cache is wrong, no hosted server stops or moves off its dedicated machine for its
         owner's limits while the hold is on.
       </p>
       <p v-if="billing.limits_hold_reason" class="font-mono text-xs text-ink-muted">{{ billing.limits_hold_reason }}</p>
@@ -40,7 +40,7 @@
       <div v-else class="space-y-2 rounded-panel border border-danger/40 bg-panel p-3">
         <p class="text-sm text-danger">
           Stop or move {{ holdSummary }} now, newest first as their limits say? Those past their servers stop; those
-          past their own machines move to a shared machine while there is room, else stop. Their matches end for
+          past their dedicated machines move to a shared machine while there is room, else stop. Their matches end for
           everyone on them.
         </p>
         <div class="flex flex-wrap items-center gap-3">
@@ -60,7 +60,7 @@
       <p class="text-sm text-ink">
         Subscriptions sell <span class="font-mono">{{ billing.unknown_prices.join(', ') }}</span>, which no
         STRIPE_PRICE setting names: their subscribers get no hosting for them. Add each price to the list of the tier
-        or the own machine it sells (after the one sold now, if it is an older one).
+        or the dedicated machine it sells (after the one sold now, if it is an older one).
       </p>
     </section>
 
@@ -366,13 +366,13 @@ function money(cents: number): string {
   return formatMoney(cents, tiers.value?.currency ?? 'usd');
 }
 
-// "3 servers, 1 own machine and 1 static address": an admin's grant, what it
+// "3 servers, 1 dedicated machine and 1 static address": an admin's grant, what it
 // gives.
 function grantText(g: AdminCompGrant): string {
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const parts = [
     ...(g.servers > 0 ? [count(g.servers, 'server', 'servers')] : []),
-    ...(g.own_machines > 0 ? [count(g.own_machines, 'own machine', 'own machines')] : []),
+    ...(g.own_machines > 0 ? [count(g.own_machines, 'dedicated machine', 'dedicated machines')] : []),
     ...(g.addresses > 0 ? [count(g.addresses, 'static address', 'static addresses')] : []),
   ];
   return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');

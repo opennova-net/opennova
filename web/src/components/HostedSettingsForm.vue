@@ -216,7 +216,7 @@
       :disabled="busy"
     />
 
-    <!-- The own-machine add-on: shown while one of the account's own machines
+    <!-- The dedicated machine add-on: shown while one of the account's dedicated machines
          is free. -->
     <div v-if="ownMachinesFree > 0" class="min-w-0 space-y-1">
       <label class="flex items-center gap-3 text-sm text-ink">
@@ -228,10 +228,10 @@
           :aria-describedby="`${baseId}-own_machine-hint`"
           class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
         />
-        Own machine
+        Dedicated machine
       </label>
       <p :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">
-        {{ ownMachinesFree === 1 ? 'One of your own machines is free.' : `${ownMachinesFree} of your own machines are free.` }}
+        {{ ownMachinesFree === 1 ? 'One of your dedicated machines is free.' : `${ownMachinesFree} of your dedicated machines are free.` }}
       </p>
       <!-- A static address for it: shown while one of the account's is free. -->
       <div v-if="ownMachine && addresses.length > 0" class="space-y-1 pt-2">
@@ -270,7 +270,7 @@
 // account's start page (pages/account/NewServerPage.vue), offered only while
 // its entitlement has room. Started from an ended server, it begins with that
 // server's settings (after a failed one, the owner's try again). The
-// own-machine checkbox shows while one of the account's own machines is free,
+// own-machine checkbox shows while one of the account's dedicated machines is free,
 // checked from the start when the server started again ran on one, and with
 // it checked a pick of the account's free static addresses (the one
 // `preferredAddressId` names first) while any is.
@@ -322,10 +322,10 @@ const props = withDefaults(
     retry?: boolean;
     // The base of every id in the form.
     baseId?: string;
-    // How many of the account's own machines are free; the own-machine
+    // How many of the account's dedicated machines are free; the own-machine
     // checkbox shows while any is.
     ownMachinesFree?: number;
-    // The ended server started again ran on an own machine: the checkbox
+    // The ended server started again ran on a dedicated machine: the checkbox
     // starts checked (while one is free).
     previousOwnMachine?: boolean;
     // The account's static addresses a new server may run at (ready, and no
@@ -351,7 +351,7 @@ const emit = defineEmits<{
   (e: 'refused', error: HostedError): void;
 }>();
 
-// Run on one of the account's own machines: as the server started again did.
+// Run on one of the account's dedicated machines: as the server started again did.
 const ownMachine = ref(props.previousOwnMachine && props.ownMachinesFree > 0);
 // The static address it runs at there, null for none: the preferred one while
 // it is free, else the first free one.

@@ -137,10 +137,10 @@
         </p>
       </section>
 
-      <!-- The own-machine add-on. -->
+      <!-- The dedicated machine add-on. -->
       <section v-if="tiers.own_machine && !billing.granted" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="support-own-machine">
         <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-          <h2 id="support-own-machine" class="text-lg font-semibold text-ink">Own machine add-on</h2>
+          <h2 id="support-own-machine" class="text-lg font-semibold text-ink">Dedicated machine add-on</h2>
           <p class="text-ink">
             <template v-if="tiers.own_machine.amount !== null">
               <span class="text-xl font-semibold">{{ formatMoney(tiers.own_machine.amount, tiers.currency) }}</span>
@@ -151,10 +151,10 @@
         </div>
         <p class="text-sm text-ink-muted">
           Runs one of your tier's servers on a machine of its own. It adds no servers; each is its own monthly
-          subscription. When your tier ends, your own machines are set to end with their paid period.
+          subscription. When your tier ends, your dedicated machines are set to end with their paid period.
         </p>
         <p v-if="billing.own_machine_subscription" class="text-sm text-ink">
-          You have {{ ownMachines }} own machine{{ ownMachines === 1 ? '' : 's' }}
+          You have {{ ownMachines }} dedicated machine{{ ownMachines === 1 ? '' : 's' }}
           ({{ subscriptionStatusLabel(billing.own_machine_subscription.status).toLowerCase() }}).
         </p>
         <div class="flex flex-wrap gap-2">
@@ -168,7 +168,7 @@
             aria-describedby="support-own-machine-hint"
             @click="checkout('own_machine')"
           >
-            {{ billing.own_machine_subscription ? 'Add another own machine' : 'Add an own machine' }}
+            {{ billing.own_machine_subscription ? 'Add another dedicated machine' : 'Add a dedicated machine' }}
           </button>
           <button
             v-if="billing.own_machine_subscription"
@@ -201,8 +201,8 @@
           </p>
         </div>
         <p class="text-sm text-ink-muted">
-          Gives a server on one of your own machines the same IP address and a name of its own every time it starts,
-          so players find it in the same place. One for each own machine; each is its own monthly subscription. When
+          Gives a server on one of your dedicated machines the same IP address and a name of its own every time it starts,
+          so players find it in the same place. One for each dedicated machine; each is its own monthly subscription. When
           your tier ends, your static addresses are set to end with their paid period.
         </p>
         <p v-if="addressCount > 0" class="text-sm text-ink">
@@ -286,7 +286,7 @@ const ADDRESS_HINT = 'Name it on your Static addresses page once it is paid for,
 // The add-ons need the tier: when it stops granting, the service sets each to
 // cancel at its period's end in Stripe.
 const ADD_ONS_END_WITH_TIER =
-  'When your tier ends, your own machines and static addresses are set to end with their paid period.';
+  'When your tier ends, your dedicated machines and static addresses are set to end with their paid period.';
 
 const primaryButton =
   'rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40';
@@ -336,14 +336,14 @@ const hasAddOns = computed(
 // A checkout came back and its confirmation is awaited: no second one starts.
 const waiting = computed(() => confirm.value === 'confirming' || confirm.value === 'pending');
 const currentOffer = computed(() => tiers.value?.tiers.find((t) => t.tier === billing.value?.subscription?.tier));
-// The own machines the account has: what its add-ons grant while its tier
+// The dedicated machines the account has: what its add-ons grant while its tier
 // does, else the shown add-on's own count.
 const ownMachines = computed(() => {
   const b = billing.value;
   if (!b) return 0;
   return b.own_machines > 0 ? b.own_machines : (b.own_machine_subscription?.quantity ?? 0);
 });
-// An own machine for every server the account may run: another buys nothing
+// A dedicated machine for every server the account may run: another buys nothing
 // (the service refuses it, own_machine_limit).
 const ownMachineAtLimit = computed(
   () => !!billing.value?.subscription?.entitled && billing.value.own_machines >= billing.value.max_servers,
@@ -352,7 +352,7 @@ const ownMachineHint = computed(() => {
   if (!billing.value?.subscription?.entitled) return 'Needs a support tier first.';
   if (tiers.value?.own_machine && !tiers.value.own_machine.available && !ownMachineAtLimit.value) return HOSTING_FULL;
   if (ownMachineAtLimit.value) {
-    return 'You have an own machine for every server your tier covers. A higher tier makes room for more; cancel one in the billing portal.';
+    return 'You have a dedicated machine for every server your tier covers. A higher tier makes room for more; cancel one in the billing portal.';
   }
   if (billing.value.own_machine_subscription) {
     return 'Add another here, up to one for each server your tier covers; cancel one in the billing portal.';
@@ -368,7 +368,7 @@ const grantText = computed(() => {
   const parts: string[] = [];
   if (b.comp_servers > 0) parts.push(`${b.comp_servers} hosted server${b.comp_servers === 1 ? '' : 's'}`);
   if (b.comp_own_machines > 0) {
-    parts.push(`${b.comp_own_machines} own machine${b.comp_own_machines === 1 ? '' : 's'} for your servers`);
+    parts.push(`${b.comp_own_machines} dedicated machine${b.comp_own_machines === 1 ? '' : 's'} for your servers`);
   }
   if (b.comp_addresses > 0) parts.push(`${b.comp_addresses} static address${b.comp_addresses === 1 ? '' : 'es'}`);
   const granted = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');
@@ -381,14 +381,14 @@ const addressCount = computed(
   () => (billing.value?.address_subscriptions.length ?? 0) + (billing.value?.comp_addresses ?? 0),
 );
 // Why another static address cannot be bought now, or '' when it can: each
-// is an own machine's, so the account needs an own machine without one.
+// is a dedicated machine's, so the account needs a dedicated machine without one.
 const addressBlock = computed(() => {
   const b = billing.value;
   const offer = tiers.value?.static_address;
   if (!b || !offer) return '';
-  if (b.own_machines === 0) return 'Needs an own machine first: a static address is for a server on one.';
+  if (b.own_machines === 0) return 'Needs a dedicated machine first: a static address is for a server on one.';
   if (b.own_machines <= b.static_addresses) {
-    return 'You have a static address for every own machine. Add an own machine first to add another address.';
+    return 'You have a static address for every dedicated machine. Add a dedicated machine first to add another address.';
   }
   if (offer.amount === null) return 'Its price is not set yet.';
   if (!offer.available) return HOSTING_FULL;
@@ -528,7 +528,7 @@ function confirmed(value: MyBilling): boolean {
   confirm.value = 'done';
   notice.value =
     pending.item === 'own_machine'
-      ? 'Your own machine is active. Start a server on it from your Servers page.'
+      ? 'Your dedicated machine is active. Start a server on it from your Servers page.'
       : pending.item === 'static_address'
         ? 'Your static address is paid for. Give it a name on your Static addresses page.'
         : 'Your support tier is active. Thank you for supporting OpenNova.';

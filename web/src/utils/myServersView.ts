@@ -68,7 +68,7 @@ export function biggerTierOffered(e: HostingEntitlement): boolean {
   return !e.granted && (e.tier ?? 0) < TOP_TIER;
 }
 
-// How many of the account's own machines are free for a new server.
+// How many of the account's dedicated machines are free for a new server.
 export function ownMachinesFree(e: HostingEntitlement): number {
   return Math.max(0, e.own_machines - e.own_used);
 }

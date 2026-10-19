@@ -176,7 +176,7 @@ describe('the start, the stop and one server', () => {
     expect(started.ok && started.value.id).toBe(8);
     expect(post).toHaveBeenLastCalledWith('/me/servers', expect.objectContaining({ game_name: 'Night Ops', own_machine: true }));
 
-    // A static address goes with an own machine alone.
+    // A static address goes with a dedicated machine alone.
     await startHostedServer({ ...settings(), game_name: 'Night Ops' }, true, 5);
     expect(post).toHaveBeenLastCalledWith('/me/servers', expect.objectContaining({ own_machine: true, address_id: 5 }));
     await startHostedServer({ ...settings(), game_name: 'Night Ops' }, false, 5);

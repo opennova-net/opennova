@@ -95,7 +95,7 @@ describe('UserDetailSection', () => {
     expect(wrapper.text()).not.toMatch(/can host|approve/i);
   });
 
-  it("says an own machine moves one of the grant's servers, adding none", async () => {
+  it("says a dedicated machine moves one of the grant's servers, adding none", async () => {
     const base = userDetail(7);
     detail.mockResolvedValue({
       ok: true,
@@ -106,11 +106,11 @@ describe('UserDetailSection', () => {
     const { wrapper } = await mountSection();
     const hosting = wrapper.get('#user-hosting').element.parentElement!.textContent!;
     expect(hosting).toContain('11 hosted servers');
-    expect(hosting).toContain('9 on shared machines, 2 on own machines');
-    expect(wrapper.get('#user-comp-hint').text()).toContain('Own machines add no servers');
+    expect(hosting).toContain('9 on shared machines, 2 on dedicated machines');
+    expect(wrapper.get('#user-comp-hint').text()).toContain('Dedicated machines add no servers');
   });
 
-  it('grants comp servers and own machines from 0 to 16, confirming a cut below what runs', async () => {
+  it('grants comp servers and dedicated machines from 0 to 16, confirming a cut below what runs', async () => {
     const { wrapper } = await mountSection();
     comp.mockResolvedValue({
       ok: true,
@@ -126,7 +126,7 @@ describe('UserDetailSection', () => {
     await flushPromises();
     expect(confirm).not.toHaveBeenCalled();
     expect(comp).toHaveBeenCalledWith(7, { servers: 3, own_machines: 1 });
-    expect(wrapper.get('[role="status"]').text()).toContain("grant is now 3 hosted servers and 1 own machine for its servers, free of charge");
+    expect(wrapper.get('[role="status"]').text()).toContain("grant is now 3 hosted servers and 1 dedicated machine for its servers, free of charge");
 
     // A tier of 2 servers, 2 live: a grant of 0 stops none; the tier still covers them.
     comp.mockClear();
@@ -150,7 +150,7 @@ describe('UserDetailSection', () => {
     await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(wrapper.get('#user-oversold').text()).toBe(
-      'Admin grants and subscriptions exceed what the fleet sells: shared places 26 of 24, own machines 4 of 4, ' +
+      'Admin grants and subscriptions exceed what the fleet sells: shared places 26 of 24, dedicated machines 4 of 4, ' +
         'addresses 1 of 4. New subscriptions of those items are paused.',
     );
 
@@ -224,8 +224,8 @@ describe('UserDetailSection', () => {
     expect(comp).not.toHaveBeenCalled();
   });
 
-  it('confirms a cut of own machines below the servers on them: they move while there is room', async () => {
-    // A grant of 3 servers on 2 own machines, both in use.
+  it('confirms a cut of dedicated machines below the servers on them: they move while there is room', async () => {
+    // A grant of 3 servers on 2 dedicated machines, both in use.
     detail.mockResolvedValue({
       ok: true,
       value: userDetail(7, {
@@ -240,7 +240,7 @@ describe('UserDetailSection', () => {
     await wrapper.get('#user-comp-own').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(confirm).toHaveBeenCalledWith(
-      "Lower player7's own machines to 0? 2 of their servers on own machines move to a shared machine (their matches restart) while there is room; the rest stop.",
+      "Lower player7's dedicated machines to 0? 2 of their servers on dedicated machines move to a shared machine (their matches restart) while there is room; the rest stop.",
     );
     expect(comp).not.toHaveBeenCalled();
 
@@ -250,7 +250,7 @@ describe('UserDetailSection', () => {
     await wrapper.get('#user-comp-own').setValue(1);
     await wrapper.get('#user-comp-own').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Lower player7's own machines to 1? One of their servers on own machines moves"));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Lower player7's dedicated machines to 1? One of their servers on dedicated machines moves"));
     comp.mockResolvedValue({ ok: true, value: { user: user(7, { comp_servers: 2, comp_own_machines: 2, max_servers: 2 }), capacity: null } });
     confirm.mockClear();
     await wrapper.get('#user-comp-own').setValue(2);
@@ -259,12 +259,12 @@ describe('UserDetailSection', () => {
     await flushPromises();
     // The server cut stops the newest (a shared one): both own-machine servers keep their machines.
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('stops its newest server'));
-    expect(confirm).not.toHaveBeenCalledWith(expect.stringContaining('own machines to'));
+    expect(confirm).not.toHaveBeenCalledWith(expect.stringContaining('dedicated machines to'));
     expect(comp).toHaveBeenCalledWith(7, { servers: 2, own_machines: 2 });
   });
 
-  it("counts the add-on's own machines beside the grant's", async () => {
-    // Tier 2 with one own machine paid for, and an admin's one more: two in use.
+  it("counts the add-on's dedicated machines beside the grant's", async () => {
+    // Tier 2 with one dedicated machine paid for, and an admin's one more: two in use.
     detail.mockResolvedValue({
       ok: true,
       value: userDetail(7, {
@@ -278,7 +278,7 @@ describe('UserDetailSection', () => {
     await wrapper.get('#user-comp-own').setValue(0);
     await wrapper.get('#user-comp-own').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Lower player7's own machines to 1? One of their servers"));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Lower player7's dedicated machines to 1? One of their servers"));
     expect(comp).not.toHaveBeenCalled();
   });
 

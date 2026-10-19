@@ -107,13 +107,13 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
     case 'invalid_field':
       return 'The server could not read the request. Reload the page and try again.';
     case 'not_eligible':
-      return 'Your account cannot buy that right now: an own machine needs a support tier first, an account with an admin grant buys no tier or add-on, and an account that is not active cannot subscribe.';
+      return 'Your account cannot buy that right now: a dedicated machine needs a support tier first, an account with an admin grant buys no tier or add-on, and an account that is not active cannot subscribe.';
     case 'already_subscribed':
       return 'You already have a support tier. Change it in the billing portal.';
     case 'own_machine_limit':
-      return 'You already have an own machine for every server your support tier covers. A higher tier makes room for more.';
+      return 'You already have a dedicated machine for every server your support tier covers. A higher tier makes room for more.';
     case 'address_limit':
-      return 'You already have a static address for every own machine. Add an own machine first to add another address.';
+      return 'You already have a static address for every dedicated machine. Add a dedicated machine first to add another address.';
     case 'payment_past_due':
       return 'A payment of yours is past due. Fix it in the billing portal first, then try again.';
     case 'sold_out':
@@ -178,7 +178,7 @@ function parseTier(value: unknown): TierOffer | null {
   return { tier: v.tier, max_servers: v.max_servers, amount: v.amount, interval: 'month', available: v.available };
 }
 
-// An add-on on offer (the own machine, the static address): null when it is
+// An add-on on offer (the dedicated machine, the static address): null when it is
 // not sold, undefined when malformed.
 function parseAddOnOffer(value: unknown): OwnMachineOffer | StaticAddressOffer | null | undefined {
   if (value === null || value === undefined) return null;
@@ -303,7 +303,7 @@ function pickUrl(data: unknown): string | null {
   return typeof url === 'string' && url !== '' ? url : null;
 }
 
-// GET /api/billing/tiers: the tiers and the own-machine add-on, with their
+// GET /api/billing/tiers: the tiers and the dedicated machine add-on, with their
 // prices; public.
 export function fetchTiers(signal?: AbortSignal): Promise<BillingResult<TiersResponse>> {
   return call(() => apiClient.get<unknown>('/billing/tiers', { signal }), parseTiers);
@@ -323,7 +323,7 @@ export function syncMyBilling(): Promise<BillingResult<MyBilling>> {
 // POST /api/billing/checkout: a Stripe Checkout session for `item`; its URL.
 // 409 already_subscribed while a tier is live (change it in the portal), 409
 // own_machine_limit for the add-on once every server the account may run has
-// an own machine, 409 address_limit for a static address once every own
+// a dedicated machine, 409 address_limit for a static address once every own
 // machine has one, 403 payment_past_due for a static address while a payment
 // is past due, 409 sold_out when the fleet has sold all it holds of what the
 // item adds, 409 checkout_in_progress while another checkout of the account

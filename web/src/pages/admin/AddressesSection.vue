@@ -2,7 +2,7 @@
   <div class="space-y-10">
     <AdminPageHeader
       title="Static addresses"
-      :description="`The fixed addresses of own machines, each named under ${data?.zone || 'the play zone'}.`"
+      :description="`The fixed addresses of dedicated machines, each named under ${data?.zone || 'the play zone'}.`"
       :loaded-at="loadedAt"
       :now="now"
       :loading="poll.loading.value"

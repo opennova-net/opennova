@@ -3,7 +3,7 @@
     <header>
       <h1 class="text-3xl font-semibold text-ink">Static addresses</h1>
       <p class="mt-1 max-w-3xl text-sm text-ink-muted">
-        A static address gives a server on one of your own machines the same IP address and a name of its own every
+        A static address gives a server on one of your dedicated machines the same IP address and a name of its own every
         time it starts, so players find it in the same place. Add one on your
         <RouterLink to="/me/support" class="text-accent hover:text-ink-bright">Support tier</RouterLink> page.
       </p>

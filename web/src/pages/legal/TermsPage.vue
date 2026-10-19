@@ -13,7 +13,7 @@
       id="terms-what-a-tier-buys"
       heading="What a support tier is"
       :covers="[
-        'A support tier is a monthly contribution to the OpenNova project. It lets the account run hosted servers on NovaWorld (Tier 1 one at a time, Tier 2 two, Tier 3 three), and the own-machine add-on runs one of them on a machine of its own.',
+        'A support tier is a monthly contribution to the OpenNova project. It lets the account run hosted servers on NovaWorld (Tier 1 one at a time, Tier 2 two, Tier 3 three), and the dedicated machine add-on runs one of them on a machine of its own.',
         'It is support for the project, not the sale of any game: it includes no game, licence or game content, and playing a retail game still needs a purchased copy.',
         'OpenNova is a fan-run preservation project, not endorsed by THQ Nordic; the original games and their rights remain with their owners.',
       ]"
