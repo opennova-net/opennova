@@ -295,7 +295,7 @@ policy, not a port.
   queued or running; the billing reconcile also runs at the worker's start, keyed by its
   release (`<kind>@start:<family>:<revision>`, its ECS task definition's, so a release's
   tasks run it once; by its kind alone off ECS), and the billing sync's bucket is enqueued
-  only while an event waits.
+  only while an event waits or the prices are not checked under the worker's lists.
 - **The prune**: finished jobs are deleted 14 days after they end (`jobs.prune`, hourly;
   an admin's prune names a shorter keep in its payload, `keep_s`, a day at the least).
 
@@ -306,7 +306,7 @@ policy, not a port.
 | `machine.terminate` | a cloud machine ended | the supervisor's ends | worker | 4 |
 | `fleet.sweep` | the driver's machines against the rows | every 5 min (the worker's schedule), and at the supervisor's reconciliation | worker | 1 |
 | `billing.reconcile` | the full reconcile with Stripe | at a release's start, every `ONNET_BILLING_RECONCILE_MINUTES`, an admin | worker | 1 |
-| `billing.sync` | the customers with an event to sync | each fresh webhook event; every minute while one waits | worker | 1 |
+| `billing.sync` | the price check while the prices are not checked under the worker's lists, then the customers with an event to sync | each fresh webhook event; every minute while one waits or the prices are not checked | worker | 1 |
 | `mail.send` | one mail, at most once | the welcome and reset routes | worker | 4 |
 | `hosts.prune`, `host_keys.prune`, `web_sessions.prune`, `active_user_sessions.prune`, `login_addresses.prune`, `password_resets.prune`, `billing_events.prune` | the prunes (`active_user_sessions.prune`: the retail logins' rows unused for 2 h) | every `HOST_SWEEP_INTERVAL_MS` | worker | 1 |
 | `stats.prune` | the machines' minutes rolled up into their hours; the hosted servers' and the machines' samples past 48 h, their hours past 400 days, the machines' egress months past 13, the programs' task minutes rolled up by the hour (minutes past 48 h, hours past 400 days), the fleet's machines ended or failed 14 days ago | hourly | worker | 1 |
@@ -712,7 +712,9 @@ site. Everything here is service policy (`billing/`).
   orphan, a granting row Stripe no longer knows canceled, two granting tiers on one account
   listed as duplicates. It also checks the configured prices (monthly, recurring, the key's
   mode, the sold one active, one currency); until they check out, checkout answers 503
-  `billing_misconfigured`.
+  `billing_misconfigured`. A check is stored with the lists and the mode it was made under,
+  so a changed `STRIPE_PRICE_*` list reads unchecked (checkout closed) until a check under
+  it: `billing.sync` makes one within a minute of a worker running the new lists.
 - **The capacity gate** (`hosted/model/sold_capacity.*`): a new subscription is never sold past
   what the fleet holds. Every account holds what its entitlement grants, used or not (its
   servers less those on own machines are shared places, its own machines are own

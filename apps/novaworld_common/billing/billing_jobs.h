@@ -9,7 +9,9 @@
 //                      kReconcileRetryS later (the job's retries).
 //   billing.sync       BillingSync::sync_pending: enqueued by each fresh webhook
 //                      event, and every minute while a customer's events wait
-//                      (a backoff ran out).
+//                      (a backoff ran out) or the prices are not checked under
+//                      the worker's lists (a STRIPE_PRICE_* list changed: the
+//                      check lands within a minute, not at the next reconcile).
 //
 // Each deduped by its kind (one queued or running at a time), capped at one
 // running across the workers. And the cache's prune, which runs whether or not
@@ -43,9 +45,10 @@ int64_t enqueue_billing_reconcile(db::Database &db);
 
 // The handlers over `sync`, which must outlive the workers.
 void register_billing_jobs(jobs::JobRegistry &registry, BillingSync &sync);
-// The schedule: the reconcile at the start and every `reconcile_minutes`, the
-// sync every minute while an event waits.
-std::vector<jobs::PeriodicJob> billing_schedule(int reconcile_minutes);
+// The schedule under `config`: the reconcile at the start and every
+// reconcile_minutes, the sync every minute while an event waits or the prices
+// are not checked under config's lists (prices_checked_under).
+std::vector<jobs::PeriodicJob> billing_schedule(const BillingConfig &config);
 
 // The prune of the synced webhook events, and its schedule every `period_ms`
 // (the sweep interval).

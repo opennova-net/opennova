@@ -131,20 +131,27 @@ BillingSync::BillingSync(db::ConnectionPool &pool, StripeClient &client,
 		instance_id_(std::move(instance_id)),
 		clock_(std::move(clock)) {}
 
-std::string BillingSync::prices_config() const {
-	std::string out = config_.live() ? "live" : "test";
+std::string prices_config_of(const BillingConfig &config) {
+	std::string out = config.live() ? "live" : "test";
 	for (int tier = 1; tier <= kTierCount; ++tier) {
 		out += "|";
-		for (const std::string &p : config_.tier_prices[tier])
+		for (const std::string &p : config.tier_prices[tier])
 			out += p + ",";
 	}
 	out += "|";
-	for (const std::string &p : config_.own_machine_prices)
+	for (const std::string &p : config.own_machine_prices)
 		out += p + ",";
 	out += "|";
-	for (const std::string &p : config_.static_address_prices)
+	for (const std::string &p : config.static_address_prices)
 		out += p + ",";
 	return out;
+}
+
+bool prices_checked_under(db::Database &db, const std::string &prices_config) {
+	const auto rows =
+			db.query("SELECT prices_config, prices_checked FROM billing_sync_state WHERE id = 1;");
+	return !rows.empty() && rows.front().as_text(0).value_or("") == prices_config &&
+			rows.front().as_int(1).value_or(0) != 0;
 }
 
 void BillingSync::sync_pending(int64_t now) {
@@ -412,7 +419,7 @@ bool BillingSync::validate_prices() {
 	db.exec("UPDATE billing_sync_state SET prices_config = $1, prices_checked = true, prices_ok = "
 			"$2, "
 			"prices_error = $3, prices = $4, price_check_after_s = 0 WHERE id = 1;",
-			{ BindValue(prices_config()), BindValue(db::Bool{ problem.empty() }),
+			{ BindValue(prices_config_of(config_)), BindValue(db::Bool{ problem.empty() }),
 					BindValue(problem), BindValue(prices_text(tier_prices, own_price, address_price)) });
 	if (!problem.empty() && (was.prices_ok || !was.prices_checked))
 		std::fprintf(stderr,
@@ -596,7 +603,7 @@ SyncStatus BillingSync::status(db::Database &db) const {
 		return out;
 	const db::Row &r = rows.front();
 	// Prices checked under other lists (or the other mode) say nothing of these.
-	if (r.as_text(0).value_or("") == prices_config()) {
+	if (r.as_text(0).value_or("") == prices_config_of(config_)) {
 		out.prices_checked = r.as_int(1).value_or(0) != 0;
 		out.prices_ok = r.as_int(2).value_or(0) != 0;
 		out.prices_error = r.as_text(3).value_or("");

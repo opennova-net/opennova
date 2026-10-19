@@ -48,18 +48,23 @@ void register_billing_jobs(jobs::JobRegistry &registry, BillingSync &sync) {
 			1 });
 }
 
-std::vector<jobs::PeriodicJob> billing_schedule(int reconcile_minutes) {
+std::vector<jobs::PeriodicJob> billing_schedule(const BillingConfig &config) {
 	jobs::PeriodicJob reconcile;
 	reconcile.kind = kJobBillingReconcile;
-	reconcile.period_ms = static_cast<int64_t>(reconcile_minutes) * 60 * 1000;
+	reconcile.period_ms = static_cast<int64_t>(config.reconcile_minutes) * 60 * 1000;
 	reconcile.max_attempts = kReconcileAttempts;
 	reconcile.at_start = true;
 	jobs::PeriodicJob sync;
 	sync.kind = kJobBillingSync;
 	sync.period_ms = 60 * 1000;
 	sync.max_attempts = 3;
-	// A bucket gets one only while an event waits (a customer's backoff).
-	sync.wanted = [](db::Database &db) { return pending_event_count(db) > 0; };
+	// A bucket gets one only while it has work: an event waits (a customer's
+	// backoff), or the prices are not checked under these lists (a list
+	// changed). While a release rolls with its old tasks on the old lists,
+	// each task's lists are checked in turn until the old tasks stop.
+	sync.wanted = [prices = prices_config_of(config)](db::Database &db) {
+		return pending_event_count(db) > 0 || !prices_checked_under(db, prices);
+	};
 	return { std::move(reconcile), std::move(sync) };
 }
 
