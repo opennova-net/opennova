@@ -705,11 +705,12 @@ if(BUILD_NOVAWORLD_HTTP)
     # (novaworld/hosted_fake_driver.h) whose machines' agents the test plays through the
     # supervisor's sync, on a hand-stepped clock: placement onto one shared machine for two
     # servers, a launch and the wait for it, the own machine, the stops, the crash restarts
-    # and their limit, the timeouts, the health checks, the owners' changes and limits, a lost
-    # machine placing its servers again with no restart counted, the reconciliation, the
-    # admin links following the running servers, and a static address's hold, lapse and
-    # brake. Over the fleet program's core and the cloud's fleet job handlers, which the rig
-    # registers over the FakeDriver (novaworld/hosted_fleet_rig.h).
+    # and their limit, the timeouts, the health checks, the owners' changes and limits (own
+    # machines cut moving their servers to shared machines while the fleet has room, stopping
+    # the rest), a lost machine placing its servers again with no restart counted, the
+    # reconciliation, the admin links following the running servers, and a static address's
+    # hold, lapse and brake. Over the fleet program's core and the cloud's fleet job
+    # handlers, which the rig registers over the FakeDriver (novaworld/hosted_fleet_rig.h).
     add_executable(hosted_supervisor_test novaworld/hosted_supervisor_test.cpp)
     target_link_libraries(hosted_supervisor_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_hosting_cloud opennova_novaworld_service
@@ -723,7 +724,8 @@ if(BUILD_NOVAWORLD_HTTP)
         static_address_brake stop_paths exits_and_crash_restarts last_good_pass launch_failure
         launch_refused_mid_pass restart_window timeouts_and_health listing_lost machine_lost_replaces
         listing_waits_while_lost waits_for_lobby owner_changes limit_at_provisioning owner_limits
-        mass_stop_hold hold_releases reconciliation relist_grace console_ring admin_links_follow_running)
+        own_machines_cut own_machines_cut_no_room own_cut_at_provisioning mass_stop_hold hold_releases
+        reconciliation relist_grace console_ring admin_links_follow_running)
     set_tests_properties(${hosted_supervisor_rows} PROPERTIES TIMEOUT 300)
 
     # The narrow locks that replaced the writer lock (net/novaworld/db/database.h): for each

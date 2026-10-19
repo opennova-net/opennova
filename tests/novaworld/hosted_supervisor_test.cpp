@@ -23,7 +23,9 @@
 // holding its listing's clock), no lobby live (nothing placed, an exit costing
 // no restart, the listing's clocks waiting), an owner's account banned
 // or deleted, its comp grant withdrawn or its support tier canceled (also
-// during a crash restart's backoff), the owners' limits and their hold, the
+// during a crash restart's backoff), the owners' limits (own machines cut moving
+// their servers to shared machines while the fleet has room, stopping the rest,
+// and the provisioning re-check) and their hold, the
 // reconciliation at the service's start, and the admin links kept in step with
 // the running servers. Compiles the server's accounts/auth.cpp, accounts/web_session.cpp and the
 // hosted sources directly, so it runs on every build.
@@ -1930,8 +1932,9 @@ int test_limit_at_provisioning() {
 // The owners' limits (the supervisor's enforce_limits, each pass's first act):
 // a tier lowered stops the newest servers past it, the oldest kept, the event
 // naming the tier; a past-due tier keeps every server while a start is refused
-// (PastDue); the add-on lowered stops the newest on own machines; a canceled
-// tier stops them all; a stopping server counts toward neither.
+// (PastDue); the add-on lowered moves the newest on own machines to a shared
+// machine; a canceled tier stops them all; a stopping server counts toward
+// neither.
 int test_owner_limits() {
 	Rig rig("hosted_limits");
 	rig.config.cap = 20;
@@ -1977,8 +1980,9 @@ int test_owner_limits() {
 	TEST_EXPECT(stopped_with(*db, b1, "hosting entitlement allows 0 hosted servers"));
 	TEST_EXPECT(stopped_with(*db, b2, "hosting entitlement allows 0 hosted servers"));
 
-	// The add-on: two machines, then one; the newest on an own machine stops,
-	// the shared one stays.
+	// The add-on: two machines, then one; the newest on an own machine, still
+	// waiting for its place, goes to a shared machine instead (the fleet has
+	// room), and the others stay where they are.
 	const int64_t cy = make_player(*db, "lim_cy", 0);
 	subscribe(*db, cy, 3, "active", "sub_lim_cy");
 	subscribe_machines(*db, cy, 2, "sub_lim_cy_machines");
@@ -1991,9 +1995,179 @@ int test_owner_limits() {
 	rig.step();
 	subscribe_machines(*db, cy, 1, "sub_lim_cy_machines");
 	rig.step();
-	TEST_EXPECT(stopped_with(*db, c3, "own-machine add-on covers 1 machine"));
-	TEST_EXPECT(hosted::is_live(rig.state(c1)) && rig.state(c1) != State::Stopping);
+	TEST_EXPECT(has_event(*db, c3, "moved to a shared machine: its owner has 1 own machine now"));
+	TEST_EXPECT(hosted::is_live(rig.state(c3)) && rig.state(c3) != State::Stopping && !rig.server(c3)->own_machine);
+	TEST_EXPECT(hosted::is_live(rig.state(c1)) && rig.state(c1) != State::Stopping && rig.server(c1)->own_machine);
 	TEST_EXPECT(hosted::is_live(rig.state(c2)) && rig.state(c2) != State::Stopping);
+	TEST_EXPECT(rig.walk(c3, State::Listing));
+	TEST_EXPECT(rig.machine(rig.machine_of(c3))->kind == hosted::MachineKind::Shared);
+	return 0;
+}
+
+// Own machines cut while their servers run (an admin's grant of two, then
+// one): the newest server on an own machine moves to a shared machine, which
+// the fleet has room for (its match ends: its start ends `limits`, it is placed
+// again with its own-machine choice cleared and no restart counted, its event
+// saying why, its static address left to the account, and its own machine ends
+// after it), and starts again there; the older one stays on its own machine,
+// the shared one where it runs.
+int test_own_machines_cut() {
+	Rig rig("hosted_own_cut");
+	rig.config.cap = 10;
+	rig.make_supervisor();
+	Database *db = &rig.db;
+	const int64_t owner = make_player(*db, "own_cut_owner", 0);
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 3, 2 }));
+	// The newer one runs at an admin's comp address.
+	const auto named = hosted::add_comp_address(*db, owner, "cut-place", rig.wall);
+	TEST_EXPECT(named.outcome == hosted::NameOutcome::Created);
+	const int64_t address = named.id;
+	const std::string ip = "203.0.113.60";
+	TEST_EXPECT(hosted::record_allocation(*db, address, "eipalloc-cut", ip) &&
+			hosted::record_dns_upsert(*db, address, "cut-place", "c1"));
+	const int64_t older = rig.request_as(owner, rig.settings(), true);
+	const auto requested = hosted::request_server(*db, owner, rig.settings(), rig.offered(), rig.config.cap,
+			rig.wall, true, &rig.config.placement, address);
+	TEST_EXPECT(requested.outcome == hosted::RequestOutcome::Created);
+	const int64_t newer = requested.id;
+	const int64_t shared = rig.request_as(owner);
+	TEST_EXPECT(older > 0 && newer > older && shared > newer);
+	// Its own machine carries the address once a describe brings it.
+	for (int i = 0; i < 6; ++i) rig.step();
+	const int64_t newer_machine = rig.machine_of(newer);
+	TEST_EXPECT(newer_machine > 0 && rig.machine(newer_machine)->address_id == address);
+	const std::string newer_cloud = rig.machine(newer_machine)->cloud_id;
+	rig.fake.machines.at(newer_cloud).public_address = ip;
+	TEST_EXPECT(!rig.to_running(older, 6101).empty() && !rig.to_running(newer, 6102).empty() &&
+			!rig.to_running(shared, 6103).empty());
+	TEST_EXPECT(rig.fake.launches == 3);
+	const int64_t older_machine = rig.machine_of(older);
+	const int64_t shared_machine = rig.machine_of(shared);
+	TEST_EXPECT(rig.machine(newer_machine)->kind == hosted::MachineKind::Own &&
+			rig.machine(newer_machine)->public_address == ip &&
+			rig.machine(shared_machine)->kind == hosted::MachineKind::Shared);
+	const int64_t generation = rig.server(newer)->generation;
+
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 3, 1 }));
+	rig.step();
+	auto row = rig.server(newer);
+	TEST_EXPECT(row && !row->own_machine && row->restarts == 0 && hosted::is_live(row->state) &&
+			row->state != State::Stopping);
+	// Placed again in the same pass, on the shared machine's next slot.
+	TEST_EXPECT(rig.machine_of(newer) == shared_machine && row->generation == generation + 1);
+	TEST_EXPECT(has_event(*db, newer,
+			"moved to a shared machine: its owner has 1 own machine now; placed again (no restart counted)"));
+	TEST_EXPECT(!stopped_with(*db, newer, "own machine"));
+	// Its address stays the account's, ready, and no live server's (only an own
+	// machine carries one).
+	TEST_EXPECT(!row->address_id && !hosted::server_of_address(*db, address) &&
+			hosted::find_address(*db, address)->state == AddressState::Ready);
+	// Its own machine ended after it.
+	TEST_EXPECT(rig.machine(newer_machine)->state == hosted::FleetMachineState::Ended &&
+			rig.machine(newer_machine)->end_reason == "its server moved to a shared machine");
+	TEST_EXPECT(rig.fake.was_terminated(newer_cloud));
+	// The others run on where they ran.
+	TEST_EXPECT(rig.state(older) == State::Running && rig.machine_of(older) == older_machine &&
+			rig.server(older)->own_machine);
+	TEST_EXPECT(rig.state(shared) == State::Running && rig.machine_of(shared) == shared_machine);
+	TEST_EXPECT(rig.machine(older_machine)->state == hosted::FleetMachineState::Ready);
+	// Its old listing went with its match; it lists again from the shared machine.
+	hostdb::remove_host_by_rid(*db, 6102);
+	TEST_EXPECT(!rig.to_running(newer, 6104).empty());
+	TEST_EXPECT(rig.machine_of(newer) == shared_machine && rig.server(newer)->restarts == 0);
+	TEST_EXPECT(rig.fake.launches == 3); // no machine launched for the move
+	{
+		// A new start on the shared machine, the one before it on its own machine
+		// ended for its owner's limits.
+		const auto starts = hosted::list_starts(*db, newer, 10);
+		TEST_EXPECT(starts.size() == 2 && starts[0].generation == generation + 1 &&
+				starts[0].machine_id == shared_machine && starts[0].ended_at.empty() &&
+				!starts[0].running_at.empty() && starts[1].machine_id == newer_machine &&
+				!starts[1].ended_at.empty() && starts[1].cause == hosted::StartCause::Limits);
+	}
+	// Nothing more moves or stops.
+	rig.step();
+	TEST_EXPECT(rig.state(older) == State::Running && rig.state(newer) == State::Running &&
+			rig.state(shared) == State::Running && !hosted::limits_hold::held(*db));
+	return 0;
+}
+
+// Own machines cut with room for one of their servers alone: the newest moves
+// to the shared machine's last slot, the older one, which the fleet then has no
+// shared room for, stops as before, its event saying so and its start ending
+// `limits`; the shared server runs on.
+int test_own_machines_cut_no_room() {
+	Rig rig("hosted_own_cut_full");
+	rig.config.cap = 10;
+	rig.config.placement.shared_slots = 2;
+	rig.config.placement.max_shared = 1;
+	rig.make_supervisor();
+	Database *db = &rig.db;
+	const int64_t owner = make_player(*db, "own_full_owner", 0);
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 3, 2 }));
+	const int64_t older = rig.request_as(owner, rig.settings(), true);
+	const int64_t newer = rig.request_as(owner, rig.settings(), true);
+	const int64_t shared = rig.request_as(owner);
+	TEST_EXPECT(older > 0 && newer > older && shared > newer);
+	TEST_EXPECT(!rig.to_running(older, 6201).empty() && !rig.to_running(newer, 6202).empty() &&
+			!rig.to_running(shared, 6203).empty());
+	const int64_t older_machine = rig.machine_of(older);
+	const int64_t shared_machine = rig.machine_of(shared);
+	TEST_EXPECT(hosted::fleet_has_room(*db, rig.config.placement, false)); // the shared machine's second slot
+
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 3, 0 }));
+	rig.step();
+	TEST_EXPECT(!rig.server(newer)->own_machine && rig.machine_of(newer) == shared_machine);
+	TEST_EXPECT(has_event(*db, newer, "moved to a shared machine: its owner has 0 own machines now"));
+	TEST_EXPECT(stopped_with(*db, older, "its owner has 0 own machines now and the fleet has no shared room"));
+	TEST_EXPECT(rig.server(older)->own_machine && rig.machine_of(older) == older_machine);
+	TEST_EXPECT(hosted::list_starts(*db, older, 1)[0].cause == hosted::StartCause::Limits);
+	TEST_EXPECT(rig.state(shared) == State::Running);
+	TEST_EXPECT(!hosted::fleet_has_room(*db, rig.config.placement, false));
+	// The stop ends as any (its listing gone), and its own machine with it.
+	hostdb::remove_host_by_rid(*db, 6201);
+	rig.step(); // the push
+	rig.step(); // stopped
+	TEST_EXPECT(rig.state(older) == State::Stopped);
+	rig.step();
+	TEST_EXPECT(rig.machine(older_machine)->state == hosted::FleetMachineState::Ended);
+	TEST_EXPECT(rig.state(shared) == State::Running && hosted::is_live(rig.state(newer)));
+	return 0;
+}
+
+// The provisioning re-check (on_provisioning): own machines cut after the pass's
+// limits read them and before an own-machine server waiting for its place is
+// placed (an admin's cut landing mid-pass, played here at the pass's launch for
+// the owner's older shared server): the server goes to a shared machine instead
+// of its own, the shared machine launched for the older one taking both.
+int test_own_cut_at_provisioning() {
+	Rig rig("hosted_own_cut_provisioning");
+	Database *db = &rig.db;
+	const int64_t owner = make_player(*db, "own_prov_owner", 0);
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 2, 1 }));
+	const int64_t older = rig.request_as(owner);
+	const int64_t own = rig.request_as(owner, rig.settings(), true);
+	TEST_EXPECT(older > 0 && own > older);
+	rig.tick(); // both -> provisioning
+	TEST_EXPECT(rig.state(older) == State::Provisioning && rig.state(own) == State::Provisioning);
+	// The pass's next guard read past its first (the older server's launch, after
+	// the limits ran) cuts the own machine.
+	int guards = 0;
+	bool cut = false;
+	rig.sup->set_pass_guard([&](Database &d) {
+		if (++guards == 2) cut = nws::billing::set_comp_grants(d, owner, { 2, 0 });
+		return true;
+	});
+	rig.tick();
+	TEST_EXPECT(cut);
+	auto row = rig.server(own);
+	TEST_EXPECT(row && row->state == State::Provisioning && !row->own_machine && !row->machine_ref);
+	TEST_EXPECT(has_event(*db, own, "moved to a shared machine: its owner has 0 own machines now"));
+	rig.sup->set_pass_guard(nullptr);
+	TEST_EXPECT(rig.walk(own, State::Listing) && rig.walk(older, State::Listing));
+	TEST_EXPECT(rig.machine_of(own) == rig.machine_of(older) &&
+			rig.machine(rig.machine_of(own))->kind == hosted::MachineKind::Shared);
+	TEST_EXPECT(rig.fake.launches == 1); // no own machine launched
 	return 0;
 }
 
@@ -2386,6 +2560,9 @@ int main(int argc, char **argv) {
 		{ "owner_changes", { test_owner_changes } },
 		{ "limit_at_provisioning", { test_limit_at_provisioning } },
 		{ "owner_limits", { test_owner_limits } },
+		{ "own_machines_cut", { test_own_machines_cut } },
+		{ "own_machines_cut_no_room", { test_own_machines_cut_no_room } },
+		{ "own_cut_at_provisioning", { test_own_cut_at_provisioning } },
 		{ "mass_stop_hold", { test_mass_stop_hold } },
 		{ "hold_releases", { test_hold_releases } },
 		{ "reconciliation", { test_reconciliation } },

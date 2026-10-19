@@ -587,7 +587,9 @@ _Avoid_: pool, pod, cluster node
 **Own machine**:
 A **machine** that runs exactly one **hosted server**, its owner's, with the own-machine
 add-on (a paid monthly subscription beside the **support tier**): launched for that server,
-reserved for it (one slot, slot 0), and ended when it stops.
+reserved for it (one slot, slot 0), and ended when it stops, or when the server moves to a
+**shared machine** because its owner has fewer own machines now (its match restarts there
+while the fleet has room; with none, it stops).
 _Avoid_: dedicated machine, dedicated server (retail's Serve Only term), private host
 
 **Static address**:

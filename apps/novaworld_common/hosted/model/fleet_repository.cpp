@@ -948,13 +948,15 @@ std::vector<PlacementRequest> waiting_servers(db::Database &db) {
 bool fleet_has_room(db::Database &db, const PlacementPolicy &policy, bool own_machine) {
 	db::ReadSnapshot snapshot(db);
 	std::vector<FleetMachine> machines = placement_machines(db);
-	// An own machine's place is its server's while that server is live: one
-	// whose server stopped or failed waits for the supervisor's next pass to end
-	// it, and holds no place a start is refused for. The supervisor's own
-	// placement still counts it, so the start waits to launch its machine until
-	// it has ended (never past ONNET_FLEET_MAX_OWN).
+	// An own machine's place is its server's while that server is live on an
+	// own machine: one whose server stopped, failed or moved to a shared machine
+	// waits for the supervisor's next pass to end it, and holds no place a start
+	// is refused for. The supervisor's own placement still counts it, so the
+	// start waits to launch its machine until it has ended (never past
+	// ONNET_FLEET_MAX_OWN).
 	std::vector<int64_t> live;
-	for (const db::Row &r : db.query(std::string("SELECT id FROM hosted_servers WHERE ") + kLiveServerSql + ";"))
+	for (const db::Row &r : db.query(std::string("SELECT id FROM hosted_servers WHERE own_machine AND ") +
+				 kLiveServerSql + ";"))
 		live.push_back(r.as_int(0).value_or(0));
 	machines.erase(std::remove_if(machines.begin(), machines.end(),
 						   [&live](const FleetMachine &m) {

@@ -34,7 +34,7 @@ namespace opennova::novaworld_server::hosted {
 // fleet_machines.kind.
 enum class MachineKind : uint8_t {
 	Shared, // up to ONNET_FLEET_SHARED_SLOTS servers, any account's
-	Own, // one server, the add-on's: launched for it, ended when it stops
+	Own, // one server, the add-on's: launched for it, ended when it stops or moves to a shared one
 };
 
 // fleet_machines.state: launching -> booting -> ready -> draining -> ending ->

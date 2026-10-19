@@ -50,7 +50,8 @@ this directory's.
 - **Machines and slots** (`model/placement.*`, `model/fleet_repository.*`,
   `backend/migrations/0003_fleet.sql`). A **shared machine** packs up to
   `ONNET_FLEET_SHARED_SLOTS` servers of any account; an **own machine** runs exactly one,
-  the add-on's, launched for it and ended when it stops. A **slot** is one server's
+  the add-on's, launched for it and ended when it stops or moves to a shared machine
+  (the owners' limits, below). A **slot** is one server's
   position on a machine (`protocol/slots.h`): slot k is the game's UDP port 32768 + k (open to
   everyone), the remote admin's TCP port 32800 + k (open to the service alone), the
   container's user 10001 + k and the working directory `/srv/slots/slot-k`. A
@@ -73,9 +74,9 @@ this directory's.
   `provisioning` for a slot. A server on the add-on goes to the machine reserved for it,
   else to a new own machine (at most `ONNET_FLEET_MAX_OWN`). A start the planner could not
   place, counting the servers already waiting, is `at_capacity`; an own machine whose
-  server stopped or failed holds no place for it (the next pass ends that machine, and only
-  then launches the start's: an owner who stops and starts again at the maximum is taken,
-  and waits a pass for the machine).
+  server stopped, failed or moved to a shared machine holds no place for it (the next
+  pass ends that machine, and only then launches the start's: an owner who stops and
+  starts again at the maximum is taken, and waits a pass for the machine).
 - **The rows.** `hosted_servers` holds one row per start: its owner and service account,
   its state, its data sets and pins, the owner's settings (range-checked columns, never a
   file), its place in the fleet, the serve image its start pinned (a deploy's new image
@@ -92,18 +93,30 @@ this directory's.
   account's live servers, its own-machine servers against the add-on, `ONNET_HOSTED_CAP`
   (a backstop beside the fleet's room) and the fleet's room in the transaction that writes
   it, under the hosted-start advisory lock. When a server is about to be placed its place
-  is read again, oldest first, and one past the entitlement is stopped instead.
-- **The owners' limits.** Every supervisor pass first stops what an entitlement no longer
-  covers (`Supervisor::enforce_limits`): an owner's newest live servers past its servers,
-  then its newest own-machine servers past the add-on, each stop's event naming why. The
-  brake on the brake: a pass that would stop the servers of more owners than max(2, half
-  the owners with live servers) reads as the billing cache gone wrong, so it stops none,
+  is read again, oldest first, and one past the entitlement is stopped instead; one on an
+  own machine past the account's own machines goes to a shared machine as the owners'
+  limits move one (below), or is stopped when the fleet has no room for it.
+- **The owners' limits.** Every supervisor pass first acts on what an entitlement no
+  longer covers (`Supervisor::enforce_limits`): it stops an owner's newest live servers
+  past its servers, then moves its newest own-machine servers past its own machines (the
+  add-on's and an admin's grant alike) to shared machines, newest first, each while the
+  fleet has a shared place for it, judged as a start's room is (`fleet_has_room`, under the
+  hosted-start lock, with the server's own-machine choice cleared and its slot let go in
+  the same transaction: `hosted::clear_own_machine`). A moved server's match ends: its
+  start ends `limits`, its own machine ends after it, its static address stays the
+  account's but is no longer the server's (only an own machine carries one), and it starts
+  again on a shared machine, no restart counted (the owner's phase reads `moving`). One the
+  fleet has no shared room for stops. Each event names why: `its owner's support tier
+  allows 1 hosted server`, `moved to a shared machine: its owner has 1 own machine now`,
+  `its owner has 0 own machines now and the fleet has no shared room`. The brake on the
+  brake: a pass that would stop or move the servers of more owners than max(2, half the
+  owners with live servers) reads as the billing cache gone wrong, so it acts on none,
   logs `[hosted] ERROR the owners' limits held: ...` and holds (the heartbeat's
   `limits_held`). It releases itself once a full billing reconcile, with every sold price
   configured, has completed after it took its owners and a pass still finds them past
   their entitlements. An admin's override (`POST /api/admin/billing/reconcile` with
-  `{"force_limits": true}`) applies the stops past the brake once. The hold is one row
-  (`hosted_limits_hold`, `model/limits_hold.*`), shown by `GET /api/admin/billing`.
+  `{"force_limits": true}`) applies the stops and moves past the brake once. The hold is
+  one row (`hosted_limits_hold`, `model/limits_hold.*`), shown by `GET /api/admin/billing`.
 
 ## The supervisor
 
@@ -159,12 +172,12 @@ this directory's.
   or draining machine whose agent has been silent 60 s is `lost`: gone, it ends; still
   running, it is terminated 3 min later, unless its agent reports again first. A shared
   machine with no server ends after `ONNET_FLEET_IDLE_MINUTES`; an own machine once its
-  server has ended. The **mass-lost brake**: while more than max(2, half) of the live
-  machines are lost at once (a bad hostd on every machine, the fleet's network gone: the
-  fleet's fault, not the machines'), a lost machine is not terminated at its 3 min but
-  held (`fleet_machines.lost_held_since_ms`, an ERROR line, the heartbeat's
-  `machines_held`), each until it reports again or an admin ends it, whether or not the
-  brake still holds by then. A draining machine moves its servers off one at a time and ends once
+  server has ended or moved to a shared machine. The **mass-lost brake**: while more than
+  max(2, half) of the live machines are lost at once (a bad hostd on every machine, the
+  fleet's network gone: the fleet's fault, not the machines'), a lost machine is not
+  terminated at its 3 min but held (`fleet_machines.lost_held_since_ms`, an ERROR line,
+  the heartbeat's `machines_held`), each until it reports again or an admin ends it,
+  whether or not the brake still holds by then. A draining machine moves its servers off one at a time and ends once
   it holds none, counting toward neither maximum, so a roll launches the machines it moves
   to. A refused launch or a machine that never booted holds every launch of its kind for
   1, 2, 4, 8, 16, then 30 minutes (`fleet_launch_backoff`), until a machine of that kind

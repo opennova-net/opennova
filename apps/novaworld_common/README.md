@@ -768,7 +768,7 @@ compose stack takes the test-mode set from the vault through
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook): as `GET /api/me/billing`; 404; 429 (3, then one every 10 s); 503 |
 | `POST /api/billing/webhook` | Stripe's signature | above |
 | `GET /api/admin/billing` | admin | the mode, the price check, the last reconcile, the pending events, every subscription with its account, the duplicates, `unknown_prices`, the orphans, the newest 50 events and the owners' limits hold (`limits_hold*`); with billing off `{"enabled": false}` and the hold alone |
-| `POST /api/admin/billing/reconcile` | admin | a full reconcile now: 202; `{"force_limits": true}` also has the next supervisor pass apply the stops the hold keeps back (which applies with billing off too); 400 |
+| `POST /api/admin/billing/reconcile` | admin | a full reconcile now: 202; `{"force_limits": true}` also has the next supervisor pass apply the stops and moves the hold keeps back (which applies with billing off too); 400 |
 | `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: an orphan's customer made the account's, stamped and synced: 200; 400; 404; 503 |
 
 `DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of

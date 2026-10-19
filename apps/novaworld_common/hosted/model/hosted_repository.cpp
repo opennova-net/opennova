@@ -426,6 +426,19 @@ bool clear_server_address(db::Database &db, int64_t id) {
 	return db.changes() > 0;
 }
 
+bool clear_own_machine(db::Database &db, int64_t id, State state, const PlacementPolicy &fleet) {
+	db::Transaction tx(db);
+	// The hosted-start lock (database.h), as a start's judgement takes it.
+	db.exec("SELECT pg_advisory_xact_lock($1);", { BindValue(db::kHostedStartLock) });
+	if (!fleet_has_room(db, fleet, false)) return false;
+	db.exec("UPDATE hosted_servers SET own_machine = false, address_id = NULL, updated_at = now() "
+			"WHERE id = $1 AND own_machine AND state = $2;",
+			{ BindValue(id), BindValue(std::string(state_name(state))) });
+	if (db.changes() == 0) return false;
+	tx.commit();
+	return true;
+}
+
 bool reset_restarts(db::Database &db, int64_t id) {
 	db.exec("UPDATE hosted_servers SET restarts = 0, updated_at = now() "
 			"WHERE id = $1 AND state = 'running' AND restarts > 0;",

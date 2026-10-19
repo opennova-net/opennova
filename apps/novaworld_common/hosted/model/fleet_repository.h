@@ -406,11 +406,12 @@ std::vector<PlacementRequest> waiting_servers(db::Database &db);
 // Whether the fleet has a place for a new server (on an own machine with
 // `own_machine`) under `policy`: place_after over placement_machines and
 // waiting_servers is anything but Full, an own machine whose server is no
-// longer live left out (its place is free: the supervisor ends it at its next
-// pass, and its own placement, which still counts it, launches the next own
-// machine only after). The start request's at_capacity and GET
-// /api/me/servers' `full` read it; inside a Transaction it reads that
-// transaction's view.
+// longer live, or moved to a shared machine, left out (its place is free: the
+// supervisor ends it at its next pass, and its own placement, which still
+// counts it, launches the next own machine only after). The start request's
+// at_capacity, GET /api/me/servers' `full` and a move off an own machine
+// (hosted_repository.h clear_own_machine) read it; inside a Transaction it
+// reads that transaction's view.
 bool fleet_has_room(db::Database &db, const PlacementPolicy &policy, bool own_machine);
 // Live server `server_id`, holding no slot, takes slot `slot` of machine
 // `machine_id` (one taking servers, the slot one of its own) at `game_port`:

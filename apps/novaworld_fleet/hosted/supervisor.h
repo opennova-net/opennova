@@ -39,9 +39,12 @@
 //                 its data sets' current trees at its first start, kept through
 //                 a crash restart or a move). A server past its owner's
 //                 entitlement, counted in id order among the owner's live
-//                 servers not stopping, is stopped instead, and one whose data
-//                 set row is gone or has no data (no ready current tree, and no
-//                 pins to keep) fails, which no restart mends
+//                 servers not stopping, is stopped instead; one on an own
+//                 machine past its owner's own machines, counted so, goes to a
+//                 shared machine when the fleet has room for it (else it is
+//                 stopped); and one whose data set row is gone or has no data
+//                 (no ready current tree, and no pins to keep) fails, which no
+//                 restart mends
 //   booting       its container (srv-<id>-g<generation>) is wanted on its slot;
 //                 the machine's agent starts it once the slot is free (its
 //                 boot_timeout_ms counts from the machine's ready)
@@ -70,20 +73,25 @@
 //   stopped       a stop's end
 //   failed        the restarts used up, or a fault no restart mends
 //
-// The owners' limits: every pass opens by stopping what an owner's hosting
-// entitlement no longer covers (enforce_limits): its newest live servers past
-// the entitlement's servers, then its newest on own machines past the add-on's,
-// a stopping one counting toward neither, each with an event its owner reads
-// ("its owner's support tier allows 1 hosted server"). An entitlement is read
-// from the billing cache whether or not billing is configured, and a past_due
-// tier keeps its servers. A pass that would stop more owners' servers than
-// max(2, half the owners with live servers) stops none: it logs an ERROR and
-// holds (limits_hold.h, a row), so a cache gone wrong never mass-stops
-// payers. While held no limit stops. The hold releases once a full reconcile
-// with Stripe has completed clean after it and the same owners (or some of
-// them) are still past their entitlements, whose stops then apply; an admin's
-// override (POST /api/admin/billing/reconcile {"force_limits": true}) applies
-// them at the next pass.
+// The owners' limits: every pass opens with what an owner's hosting
+// entitlement no longer covers (enforce_limits): it stops the owner's newest
+// live servers past the entitlement's servers, then moves its newest on own
+// machines past its own machines (the add-on's and an admin's grant alike) to
+// shared machines, each while the fleet has room for it as a start's room is
+// judged (move_to_shared: its match ends, its own machine ends after it, and it
+// starts again on a shared machine, no restart counted), stopping one with no
+// room; a stopping one counts toward neither, and each has an event its owner
+// reads ("its owner's support tier allows 1 hosted server", "moved to a shared
+// machine: its owner has 1 own machine now"). An entitlement is read from the
+// billing cache whether or not billing is configured, and a past_due tier keeps
+// its servers. A pass that would stop or move more owners' servers than max(2,
+// half the owners with live servers) acts on none: it logs an ERROR and holds
+// (limits_hold.h, a row), so a cache gone wrong never mass-stops payers. While
+// held no limit stops or moves a server. The hold releases once a full
+// reconcile with Stripe has completed clean after it and the same owners (or
+// some of them) are still past their entitlements, whose stops and moves then
+// apply; an admin's override (POST /api/admin/billing/reconcile
+// {"force_limits": true}) applies them at the next pass.
 //
 // Restarts. A stop is the supervisor's own act, never read from an exit code.
 // What the server itself causes is a crash and counts: while the server should
@@ -149,7 +157,8 @@
 //                          runs again elsewhere), and once it holds none it ends
 //   ready -> ended         a shared machine idle (no server on it) for idle_ms
 //                          (ONNET_FLEET_IDLE_MINUTES), an own machine whose
-//                          server ended; an admin's end (ending) the next pass
+//                          server ended or moved to a shared machine; an
+//                          admin's end (ending) the next pass
 //
 // At start() the supervisor reconciles: a machine row still launching whose
 // launch job is gone fails, a fleet.sweep is enqueued (a cloud machine no live
@@ -504,9 +513,17 @@ private:
 	// Whether the owner may keep the server: its account exists and is active
 	// (the entitlement is enforce_limits').
 	bool owner_active(db::Database &db, const HostedServer &server, std::string &why);
-	// Stops the servers past their owners' entitlements (the class comment);
-	// the ids it stopped.
-	std::set<int64_t> enforce_limits(db::Database &db, const std::vector<HostedServer> &live);
+	// Stops the servers past their owners' entitlements, and moves those past
+	// their own machines to shared machines (the class comment); the ids it
+	// stopped.
+	std::set<int64_t> enforce_limits(db::Database &db, const std::vector<HostedServer> &live, uint64_t now_ms);
+	// A server on an own machine its owner no longer has (`own_machines` of them
+	// now) moved to a shared machine, when the fleet has room for it: its
+	// own-machine choice cleared and its slot let go together, under the lock a
+	// start is judged under (hosted_repository.h clear_own_machine), and placed
+	// again as replace places a server, its start ended for its owner's limits
+	// and its event saying why. False (nothing written) when there is no room.
+	bool move_to_shared(db::Database &db, const HostedServer &server, uint64_t now_ms, int own_machines);
 	// The admin links brought in step with the servers in running (their rows
 	// read again, after this pass's moves).
 	void sync_admin_links(db::Database &db);

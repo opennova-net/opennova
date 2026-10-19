@@ -156,6 +156,16 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 // The live server's address let go (it lapsed: the supervisor places the
 // server again without it); false when it held none.
 bool clear_server_address(db::Database &db, int64_t id);
+// Own-machine server `id`, still in `state`, given a shared machine's place
+// instead (its owner has fewer own machines now than its servers on them): when
+// the fleet has a place for one more shared server, judged as request_server
+// judges a start's (under the hosted-start lock, fleet_has_room under `fleet`;
+// the cap counts it live already), its own_machine cleared, and its address
+// with it (only an own machine carries one). Inside the caller's transaction
+// the lock holds until that one ends, so the caller's letting go of its slot
+// lands under it too. False (nothing written) when the fleet has no such place,
+// or the row is no longer an own-machine server in `state`.
+bool clear_own_machine(db::Database &db, int64_t id, State state, const PlacementPolicy &fleet);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);
 // Server `id` when `owner_user_id` owns it, in any state; nullopt for no such
