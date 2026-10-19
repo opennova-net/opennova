@@ -86,12 +86,28 @@ describe('UserDetailSection', () => {
     const hosting = wrapper.get('#user-hosting').element.parentElement!.textContent!;
     expect(hosting).toContain('2 hosted servers');
     expect(hosting).toContain('Tier 2');
+    expect(hosting).toContain('All on shared machines');
     expect(wrapper.findAll('a').filter((a) => a.attributes('href')?.startsWith('/admin/fleet/'))).toHaveLength(3);
     const customer = wrapper.findAll('a').find((a) => a.text() === 'cus_test_7');
     expect(customer?.attributes('href')).toBe('https://dashboard.stripe.com/test/customers/cus_test_7');
     expect(customer?.attributes('rel')).toContain('noopener');
     expect(wrapper.text()).toContain('No key on this account.');
     expect(wrapper.text()).not.toMatch(/can host|approve/i);
+  });
+
+  it("says an own machine moves one of the grant's servers, adding none", async () => {
+    const base = userDetail(7);
+    detail.mockResolvedValue({
+      ok: true,
+      value: userDetail(7, {
+        entitlement: { ...base.entitlement, max_servers: 11, source: 'comp', comp_servers: 11, comp_own_machines: 2, own_machines: 2 },
+      }),
+    });
+    const { wrapper } = await mountSection();
+    const hosting = wrapper.get('#user-hosting').element.parentElement!.textContent!;
+    expect(hosting).toContain('11 hosted servers');
+    expect(hosting).toContain('9 on shared machines, 2 on own machines');
+    expect(wrapper.get('#user-comp-hint').text()).toContain('Own machines add no servers');
   });
 
   it('grants comp servers and own machines from 0 to 16, confirming a cut below what runs', async () => {
@@ -110,7 +126,7 @@ describe('UserDetailSection', () => {
     await flushPromises();
     expect(confirm).not.toHaveBeenCalled();
     expect(comp).toHaveBeenCalledWith(7, { servers: 3, own_machines: 1 });
-    expect(wrapper.get('[role="status"]').text()).toContain('now has 3 hosted servers, 1 on an own machine free of charge');
+    expect(wrapper.get('[role="status"]').text()).toContain('now has 3 hosted servers free of charge, 1 of them on an own machine');
 
     // A tier of 2 servers, 2 live: a grant of 0 stops none; the tier still covers them.
     comp.mockClear();

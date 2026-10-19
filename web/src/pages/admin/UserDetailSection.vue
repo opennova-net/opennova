@@ -90,8 +90,8 @@
           <dd class="text-ink">{{ entitlementLabel(detail.entitlement) }}</dd>
           <dt class="text-ink-muted">Live now</dt>
           <dd class="text-ink">{{ liveCount }}</dd>
-          <dt class="text-ink-muted">Own machines</dt>
-          <dd class="text-ink">{{ detail.entitlement.own_machines }}</dd>
+          <dt class="text-ink-muted">Where they run</dt>
+          <dd class="text-ink">{{ serverPlacesLabel(detail.entitlement) }}</dd>
           <dt class="text-ink-muted">New servers</dt>
           <dd :class="detail.entitlement.can_start ? 'text-ink' : 'text-warn'">
             {{ detail.entitlement.can_start ? 'May start' : 'Cannot start (no entitlement, or a payment past due)' }}
@@ -122,7 +122,7 @@
               />
             </div>
             <div class="space-y-1">
-              <label for="user-comp-own" :class="labelClass">Own machines</label>
+              <label for="user-comp-own" :class="labelClass">Of these, on own machines</label>
               <input
                 id="user-comp-own"
                 v-model.number="compOwn"
@@ -148,7 +148,7 @@
             {{
               compProblem ||
               compOwnProblem ||
-              `0 to ${COMP_SERVERS_MAX} free hosted servers, and 0 to ${COMP_OWN_MACHINES_MAX} own machines for them. The account gets the larger of the servers and its tier's, and the own machines on top of any it pays for; lowering them stops its newest servers first.`
+              `0 to ${COMP_SERVERS_MAX} free hosted servers. Own machines add no servers: each moves one of them off the shared machines onto a machine of its own (0 to ${COMP_OWN_MACHINES_MAX}). The account gets the larger of the servers and its tier's, and the own machines on top of any it pays for; lowering them stops its newest servers first.`
             }}
           </p>
         </form>
@@ -346,7 +346,7 @@ import {
   addressStateClass,
   addressStateLabel,
 } from '../../utils/addressView';
-import { accountStatusLabel, entitlementLabel, isActiveAccount } from '../../utils/adminView';
+import { accountStatusLabel, entitlementLabel, isActiveAccount, serverPlacesLabel } from '../../utils/adminView';
 import { subscriptionItemLabel, subscriptionStatusLabel } from '../../utils/billingView';
 import { stateBadgeClass, stateLabel } from '../../utils/hostedState';
 
@@ -578,11 +578,11 @@ async function saveComp() {
   }
   // The sold capacity with the grant counted: the warning follows it at once.
   if (detail.value && result.value.capacity) detail.value = { ...detail.value, capacity: result.value.capacity };
-  const machines = own === 0 ? '' : `, ${own} on an own machine`;
+  const machines = own === 0 ? '' : `, ${own} of them on ${own === 1 ? 'an own machine' : 'own machines'}`;
   flash(
     n === 0 && own === 0
       ? `${u.username} has no admin grant now.`
-      : `${u.username} now has ${n} hosted server${n === 1 ? '' : 's'}${machines} free of charge.`,
+      : `${u.username} now has ${n} hosted server${n === 1 ? '' : 's'} free of charge${machines}.`,
   );
   await load();
 }
