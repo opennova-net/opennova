@@ -76,11 +76,17 @@ locals {
       containerPath = local.hostd_volumes[k].path
       readOnly      = local.hostd_volumes[k].read_only
     }]
+    # The empty lists ECS stores back: written out, so a plan sees no change
+    # (left out, every apply replaced the task definition).
+    environment    = []
+    portMappings   = []
+    systemControls = []
+    volumesFrom    = []
     # Docker's init as PID 1 forwards the stop's signal; NET_ADMIN beside
     # docker's default capabilities, for hostd's nft table.
     linuxParameters = {
       initProcessEnabled = true
-      capabilities       = { add = ["NET_ADMIN"] }
+      capabilities       = { add = ["NET_ADMIN"], drop = [] }
     }
     stopTimeout = 30
     healthCheck = {
@@ -217,8 +223,9 @@ resource "aws_ecs_task_definition" "hostd" {
   dynamic "volume" {
     for_each = local.hostd_volumes
     content {
-      name      = volume.key
-      host_path = volume.value.path
+      name                = volume.key
+      host_path           = volume.value.path
+      configure_at_launch = false
     }
   }
 
