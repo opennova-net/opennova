@@ -1,13 +1,14 @@
 # ---------------------------------------------------------------------------
-# The cluster the programs run in, the controller's private name, and the
+# The cluster the programs run in, the fleet program's private name, and the
 # role ECS starts every task with (DEPLOY.md, "Operating")
 # ---------------------------------------------------------------------------
 #
-# One ECS cluster per deployment, Fargate alone (no instances to keep). The
-# controller's tasks register in a Cloud Map private DNS namespace,
+# The programs' ECS cluster, one per deployment, Fargate alone (no instances
+# to keep); the fleet's, where hostd runs on the machines, is fleet_agent.tf's.
+# The fleet program's tasks register in a Cloud Map private DNS namespace,
 # <deployment>.opennova.internal (a Route 53 zone private to the VPC that Cloud
-# Map keeps), as `controller`: an A record of each running task's private
-# address, TTL 10, which the machines' hostd and ONNET_INTERNAL_URL name. The
+# Map keeps), as `fleet`: an A record of each running task's private address,
+# TTL 10, which the machines' hostd and ONNET_INTERNAL_URL name. The
 # task execution role pulls nothing (the images are public on GHCR) and does
 # two things for ECS before a container starts: it reads the task's secrets
 # from SSM (/opennova/<deployment>/secret/* and tls/*) and it ships the
@@ -28,28 +29,30 @@ resource "aws_ecs_cluster" "main" {
   })
 }
 
-# ---- the controller's name -------------------------------------------------------
+# ---- the fleet program's name ------------------------------------------------------
 
 locals {
   internal_zone_name = "${local.deployment}.opennova.internal"
-  controller_host    = "controller.${local.internal_zone_name}"
-  internal_url       = "http://${local.controller_host}:${var.internal_http_port}"
+  fleet_host         = "fleet.${local.internal_zone_name}"
+  internal_url       = "http://${local.fleet_host}:${var.internal_http_port}"
 }
 
 resource "aws_service_discovery_private_dns_namespace" "internal" {
   name        = local.internal_zone_name
-  description = "OpenNova ${local.deployment}: the controller's private name"
+  description = "OpenNova ${local.deployment}: the fleet program's private name"
   vpc         = aws_vpc.main.id
 
   tags = var.tags
 }
 
-# Each running controller task's private address, by name. The leader alone
-# binds the internal listener; a standby beside it (a deployment's new task)
-# is listed too for its short overlap, and hostd tries each address the name
+# Each running fleet task's private address, by name. The leader alone binds
+# the internal listener; a standby beside it (a deployment's new task) is
+# listed too for its short overlap, and hostd tries each address the name
 # lists until one takes its connection (apps/hostd/agent.h, HttpServiceLink).
-resource "aws_service_discovery_service" "controller" {
-  name = "controller"
+# Its instances are the tasks ECS registers: a destroy removes them with it.
+resource "aws_service_discovery_service" "fleet" {
+  name          = "fleet"
+  force_destroy = true
 
   dns_config {
     namespace_id   = aws_service_discovery_private_dns_namespace.internal.id

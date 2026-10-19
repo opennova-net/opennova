@@ -1,9 +1,9 @@
-# The NovaWorld service's five programs (README.md "Programs"), one image each,
+# The NovaWorld service's six programs (README.md "Programs"), one image each,
 # from one shared build stage. Build context is the repo root, one target per
 # program:
 #   docker build -f apps/novaworld_common/Dockerfile --target gate -t opennova-novaworld-gate .
-# and alike for lobby, web, controller and worker (.github/workflows/novaworld-images.yml
-# publishes them as ghcr.io/<owner>/opennova-novaworld-<program>, all five in one bake:
+# and alike for lobby, web, fleet, worker and data (.github/workflows/novaworld-images.yml
+# publishes them as ghcr.io/<owner>/opennova-novaworld-<program>, all six in one bake:
 # docker-bake.hcl beside this file). One more target, smoke, is the local stack's
 # smoke test (scripts/dev_stack.sh), never published.
 #
@@ -14,12 +14,11 @@
 # container health check, and the image's HEALTHCHECK, ask GET /livez) and the
 # shell tools ECS Exec sessions use (sh, base64, tr, sed, head, mktemp). Beyond
 # that base: web hiredis (the one program that links it) and the retail pages
-# (templates, static); web, the controller and the
-# worker the machine script (every program that decides whether hosting is on
-# checks it; the worker renders it); the lobby (its own public address, from
+# (templates, static); the worker the machine script (its machine driver alone
+# renders it); the lobby (its own public address, from
 # EC2), web (the game data's store: the admin page's uploads, the update
-# service's packages) and the worker (the fleet's machines, the store, the
-# outbound mail) the AWS CLI v2. No image keeps state: the database is
+# service's packages), the worker (the fleet's machines, the outbound mail) and
+# data (the store: the trees it builds, the packages it reads) the AWS CLI v2. No image keeps state: the database is
 # PostgreSQL (DATABASE_URL, DATABASE_PASSWORD), web's state Redis
 # (ONNET_REDIS_URL, ONNET_REDIS_PASSWORD), the game data the store (S3 on a
 # deployment; the compose stack's directory volume mounts under
@@ -37,10 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
-# Configure the whole tree (cheap) but compile only the five programs and
+# Configure the whole tree (cheap) but compile only the six programs and
 # their lib deps. OPENNOVA_NOVAWORLD_SERVICE=ON defines the service and its
 # programs; BUILD_NOVAWORLD_HTTP=ON pulls Crow + standalone Asio via
-# FetchContent (web, the controller and the worker build with it).
+# FetchContent (web, the fleet, the worker and data build with it).
 # GDExtension is never touched (godot/src is its own project). Mirrors the
 # flags of ci.yml's `test-linux` job and of .github/workflows/net-linux.yml.
 RUN cmake -S . -B build -G Ninja \
@@ -48,12 +47,13 @@ RUN cmake -S . -B build -G Ninja \
         -DOPENNOVA_NOVAWORLD_SERVICE=ON \
         -DBUILD_NOVAWORLD_HTTP=ON \
     && cmake --build build --target opennova_novaworld_gate opennova_novaworld_lobby \
-        opennova_novaworld_web opennova_novaworld_controller opennova_novaworld_worker
+        opennova_novaworld_web opennova_novaworld_fleet opennova_novaworld_worker \
+        opennova_novaworld_data
 
 # ---- AWS CLI stage ---------------------------------------------------------
-# The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h), the
-# game data's S3 store (s3_object_store.h: s3 cp, sync and rm, s3api's objects
-# and multipart uploads) and the outbound mail (mailer.h, sesv2 send-email) run
+# The hosted servers' ec2 machine driver (hosted/cloud/ec2_machine_driver.h), the
+# game data's S3 store (core/s3_object_store.h: s3 cp, sync and rm, s3api's objects
+# and multipart uploads) and the outbound mail (accounts/mailer.h, sesv2 send-email) run
 # the AWS CLI v2, their credentials the ECS task role's. A pinned release,
 # checked against its SHA-256 before it is unpacked. The sum was taken from the
 # release AWS signed: its .sig verifies against the AWS CLI Team key in the
@@ -74,8 +74,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && /tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin \
     && /usr/local/bin/aws --version
 
-# The programs call ec2, s3 (the s3 and s3api commands share its model) and
-# sesv2 alone (sts for a credentials check by hand): the help examples, the
+# The programs call ec2 (the machines, and the static addresses' Elastic IPs),
+# route53 (the static addresses' records, hosted/cloud/address_zone.h), s3 (the
+# s3 and s3api commands share its model) and sesv2 alone (sts for a
+# credentials check by hand); web reads CloudWatch, its logs and ECS through
+# curl's own SigV4 (infra/aws_api.h), never the CLI. The help examples, the
 # completer and its index, and every other service's model go (about 160 MB
 # of the CLI's 270). The models' root files (endpoints.json, partitions.json)
 # stay. Then the check: the commands the programs run still build, and a real
@@ -83,13 +86,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 # closed local port, so they can reach nothing).
 RUN dist=/usr/local/aws-cli/v2/current/dist \
     && data="$dist/awscli/botocore/data" \
-    && test -d "$data/ec2" && test -d "$data/s3" && test -d "$data/sts" && test -d "$data/sesv2" && test -f "$data/endpoints.json" \
+    && test -d "$data/ec2" && test -d "$data/route53" && test -d "$data/s3" && test -d "$data/sts" \
+    && test -d "$data/sesv2" && test -f "$data/endpoints.json" \
     && rm -rf "$dist/awscli/examples" "$dist/awscli/data/ac.index" "$dist/aws_completer" \
         /usr/local/aws-cli/v2/current/bin/aws_completer /usr/local/bin/aws_completer \
-    && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name s3 ! -name sts ! -name sesv2 -exec rm -rf {} + \
+    && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name route53 ! -name s3 ! -name sts ! -name sesv2 \
+        -exec rm -rf {} + \
     && aws ec2 describe-instances --generate-cli-skeleton >/dev/null \
     && aws ec2 run-instances --generate-cli-skeleton >/dev/null \
     && aws ec2 terminate-instances --generate-cli-skeleton >/dev/null \
+    && aws ec2 describe-addresses --generate-cli-skeleton >/dev/null \
+    && aws ec2 allocate-address --generate-cli-skeleton >/dev/null \
+    && aws ec2 associate-address --generate-cli-skeleton >/dev/null \
+    && aws ec2 disassociate-address --generate-cli-skeleton >/dev/null \
+    && aws ec2 release-address --generate-cli-skeleton >/dev/null \
+    && aws route53 change-resource-record-sets --generate-cli-skeleton >/dev/null \
+    && aws route53 get-change --generate-cli-skeleton >/dev/null \
     && aws s3api list-objects-v2 --generate-cli-skeleton >/dev/null \
     && aws s3api head-object --generate-cli-skeleton >/dev/null \
     && aws s3api upload-part --generate-cli-skeleton >/dev/null \
@@ -145,7 +157,7 @@ COPY --from=build /src/backend/migrations /app/backend/migrations
 COPY --from=build /src/backend/seed /app/backend/seed
 COPY --from=rdsca /tmp/rds-global-bundle.pem /app/rds-global-bundle.pem
 
-# The programs read these from the environment (server_config.cpp); the
+# The programs read these from the environment (program/server_config.cpp); the
 # database's DATABASE_URL and DATABASE_PASSWORD come from the deployment.
 # ONNET_HTTP_PORT is web's port and the one the gate and the lobby announce
 # beside ONNET_WEB_HOST; ONNET_HEALTH_PORT the GET /livez port of every program
@@ -163,21 +175,30 @@ ENV ONNET_GATE_UDP_PORT=7597 \
 RUN useradd --uid 10002 --user-group --no-create-home --home-dir /nonexistent \
         --shell /usr/sbin/nologin novaworld
 
+# The local log store's mount point (the compose stack's `logs` volume,
+# ONNET_LOG_STORE=file:///var/log/opennova): world-writable with the sticky bit,
+# as /tmp, so a named volume first mounted here takes that mode and each
+# program (UID 10002) and the local stack's machines (hostd, UID 10001) make
+# their own directories in it. A deployment's logs are CloudWatch's: nothing
+# mounts it there.
+RUN install -d -m 1777 /var/log/opennova
+
 # Run each program under an init as PID 1 (the ECS task definitions'
 # initProcessEnabled, the compose files' `init: true`, or `docker run --init`):
 # a second SIGTERM ends a stuck shutdown only when the program is not PID 1,
-# which the kernel shields from default-action signals (program.cpp).
+# which the kernel shields from default-action signals (program/program.cpp).
 
-# The AWS CLI, at the absolute path the programs run it by: web's and the
-# worker's. The local store's mount point beside it (the compose stack's volume:
+# The AWS CLI, at the absolute path the programs run it by: web's, the
+# worker's and data's. The local store's mount point beside it (the compose stack's volume:
 # a named volume takes the image directory's owner and mode on its first mount,
 # so the program, UID 10002, can write it, and the local stack's machines, whose
 # hostd runs as the serve image's UID 10001, can read the trees through it; a
-# deployment's store is S3 and nothing mounts it).
+# deployment's store is S3 and nothing mounts it), and the local stack's
+# static-address zone file's (the worker writes it, the same way).
 FROM runtime AS runtime-aws
 COPY --from=awscli /usr/local/aws-cli /usr/local/aws-cli
 RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws && aws --version \
-    && install -d -o 10002 -g 10002 -m 0755 /var/lib/opennova/store
+    && install -d -o 10002 -g 10002 -m 0755 /var/lib/opennova/store /var/lib/opennova/zone
 
 # ---- gate ------------------------------------------------------------------
 FROM runtime AS gate
@@ -200,8 +221,8 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
 ENTRYPOINT ["/app/opennova-novaworld-lobby"]
 
 # ---- web -------------------------------------------------------------------
-# Web alone links hiredis (its Redis pool, the shared library's one hiredis
-# user: scripts/lint/link_graph_check.py), so its image alone carries it. It
+# Web alone links hiredis (its Redis pool, in web's core alone:
+# scripts/lint/link_graph_check.py), so its image alone carries it. It
 # runs the AWS CLI for the game data's store (the admin page's uploads, which
 # it puts there part by part, and the update service's packages) and serves
 # retail UPDATE.EXE on the updater's ports (ONNET_UPDATE_PORTS, with
@@ -212,11 +233,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends libhiredis1.1.0
 COPY --from=build /src/build/apps/novaworld_web/opennova-novaworld-web /app/
 COPY --from=build /src/apps/novaworld_web/templates /app/templates
 COPY --from=build /src/apps/novaworld_web/static /app/static
-COPY --from=build /src/apps/novaworld_common/hosted/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
 RUN ! ldd /app/opennova-novaworld-web | grep -q 'not found'
 ENV TEMPLATES_DIR=/app/templates \
     STATIC_DIR=/app/static \
-    ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh \
     ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
 USER 10002
 EXPOSE 8080/tcp 20044/tcp 20556/tcp 21068/tcp 21580/tcp
@@ -226,22 +245,20 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
     CMD curl -fsS --max-time 2 "http://127.0.0.1:${ONNET_HTTP_PORT}/livez" || exit 1
 ENTRYPOINT ["/app/opennova-novaworld-web"]
 
-# ---- controller ------------------------------------------------------------
-FROM runtime AS controller
-COPY --from=build /src/build/apps/novaworld_controller/opennova-novaworld-controller /app/
-COPY --from=build /src/apps/novaworld_common/hosted/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
-RUN ! ldd /app/opennova-novaworld-controller | grep -q 'not found'
-ENV ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh
+# ---- fleet -----------------------------------------------------------------
+FROM runtime AS fleet
+COPY --from=build /src/build/apps/novaworld_fleet/opennova-novaworld-fleet /app/
+RUN ! ldd /app/opennova-novaworld-fleet | grep -q 'not found'
 USER 10002
 EXPOSE 8070/tcp 8081/tcp
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
     CMD curl -fsS --max-time 2 "http://127.0.0.1:${ONNET_HEALTH_PORT}/livez" || exit 1
-ENTRYPOINT ["/app/opennova-novaworld-controller"]
+ENTRYPOINT ["/app/opennova-novaworld-fleet"]
 
 # ---- worker ----------------------------------------------------------------
 FROM runtime-aws AS worker
 COPY --from=build /src/build/apps/novaworld_worker/opennova-novaworld-worker /app/
-COPY --from=build /src/apps/novaworld_common/hosted/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
+COPY --from=build /src/apps/novaworld_common/hosted/cloud/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
 RUN ! ldd /app/opennova-novaworld-worker | grep -q 'not found'
 ENV ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh \
     ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
@@ -250,6 +267,20 @@ EXPOSE 8081/tcp
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
     CMD curl -fsS --max-time 2 "http://127.0.0.1:${ONNET_HEALTH_PORT}/livez" || exit 1
 ENTRYPOINT ["/app/opennova-novaworld-worker"]
+
+# ---- data ------------------------------------------------------------------
+# The data sets' jobs over the game data's store (S3 through the AWS CLI in a
+# deployment; the compose stack's directory volume at /var/lib/opennova/store):
+# a tree's files and a release's package pass through its disk.
+FROM runtime-aws AS data
+COPY --from=build /src/build/apps/novaworld_data/opennova-novaworld-data /app/
+RUN ! ldd /app/opennova-novaworld-data | grep -q 'not found'
+ENV ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
+USER 10002
+EXPOSE 8081/tcp
+HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
+    CMD curl -fsS --max-time 2 "http://127.0.0.1:${ONNET_HEALTH_PORT}/livez" || exit 1
+ENTRYPOINT ["/app/opennova-novaworld-data"]
 
 # ---- the local stack's smoke test ------------------------------------------
 # No program and never published: the smoke test scripts/dev_stack.sh runs

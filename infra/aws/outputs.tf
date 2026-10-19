@@ -48,14 +48,14 @@ output "lb_addresses" {
   description = "The public load balancer's static addresses, one per zone (zone a's is the gate's)"
 }
 
-output "controller_host" {
-  value       = local.controller_host
-  description = "The controller's private DNS name (Cloud Map)"
+output "fleet_host" {
+  value       = local.fleet_host
+  description = "The fleet program's private DNS name (Cloud Map)"
 }
 
 output "internal_url" {
   value       = local.internal_url
-  description = "The controller's internal listener by its private name (ONNET_INTERNAL_URL): where the machines' hostd bootstrap and sync"
+  description = "The fleet program's internal listener by its private name (ONNET_INTERNAL_URL): where the machines' hostd bootstrap and sync"
 }
 
 output "web_domain" {
@@ -153,9 +153,14 @@ output "hosted_subnet_cidrs" {
   description = "Their ranges, the only peers the internal listener's machine routes answer (ONNET_HOSTED_BOOTSTRAP_CIDRS); null while hosting is off"
 }
 
-output "fleet_image_parameter" {
-  value       = one(aws_ssm_parameter.fleet_image[*].name)
-  description = "The SSM parameter holding the image the machines launch from (fleet bake-image writes it); null while hosting is off"
+output "fleet_cluster" {
+  value       = one(aws_ecs_cluster.fleet[*].name)
+  description = "The fleet cluster, where hostd runs on every machine (ONNET_HOSTED_EC2_CLUSTER); null while hosting is off"
+}
+
+output "fleet_image_id" {
+  value       = one(data.aws_ami.fleet[*].id)
+  description = "The image the machines launch, fleet_ami's id (ONNET_FLEET_IMAGE_ID); null while hosting is off"
 }
 
 output "machines_security_group_id" {
@@ -166,6 +171,26 @@ output "machines_security_group_id" {
 output "hosted_deployment" {
   value       = local.hosted_enabled ? local.hosted_deployment : null
   description = "The opennova:deployment tag of this stack's machines (ONNET_HOSTED_DEPLOYMENT); null while hosting is off"
+}
+
+output "fleet_capacity" {
+  value = {
+    max_shared    = var.fleet_max_shared
+    shared_slots  = var.shared_slots
+    max_own       = var.fleet_max_own
+    max_addresses = var.fleet_max_addresses
+  }
+  description = "What the fleet holds and sells at its most (fleet_max_shared, shared_slots, fleet_max_own, fleet_max_addresses): infra plan and infra apply warn when a plan lowers one"
+}
+
+output "play_zone" {
+  value       = local.play_zone_enabled ? local.play_zone_name : null
+  description = "The static addresses' Route 53 zone, delegated from the Cloudflare zone (ONNET_HOSTED_ADDRESS_ZONE; an address's name is <name>.<zone>); null while the add-on is off"
+}
+
+output "play_zone_id" {
+  value       = one(aws_route53_zone.play[*].zone_id)
+  description = "Its hosted zone id (ONNET_HOSTED_ADDRESS_ZONE_ID); null while the add-on is off"
 }
 
 output "machines_log_group" {

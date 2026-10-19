@@ -1,5 +1,5 @@
-// The service's outbound mail (apps/novaworld_common/mailer.h) and the address
-// rule registration and the password reset share (auth.h normalize_email):
+// The service's outbound mail (apps/novaworld_common/accounts/mailer.h) and the address
+// rule registration and the password reset share (accounts/auth.h normalize_email):
 // normalize_email's accepted and refused shapes; SesMailer's settings check,
 // its argv (no address or link on it) and its SendEmail request on a stub
 // CommandRunner (the request file owner-only while the CLI runs and deleted
@@ -9,10 +9,10 @@
 // their send) are jobs_test's. Database-free; links the server core
 // (BUILD_NOVAWORLD_HTTP).
 
-#include "auth.h"
+#include "accounts/auth.h"
+#include "accounts/mailer.h"
 #include "command_runner.h"
-#include "hosted/owner_file.h"
-#include "mailer.h"
+#include "core/owner_file.h"
 #include "novaworld/fake_mailer.h"
 
 #include <base/io/json.h>
@@ -261,7 +261,7 @@ int main() {
 	test_temp::TempDir temp("mailer");
 	const fs::path scratch_path = temp.path / "scratch";
 	std::string error;
-	if (!nws::hosted::make_owner_directory(scratch_path, error)) {
+	if (!nws::make_owner_directory(scratch_path, error)) {
 		std::fprintf(stderr, "cannot make the scratch directory: %s\n", error.c_str());
 		return 1;
 	}

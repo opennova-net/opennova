@@ -22,6 +22,22 @@ describe('ServerSettingsTab', () => {
     await flushPromises();
     const rows = page.findAll('ol li').map((li) => li.text().replace(/\s+/g, ' '));
     expect(rows).toEqual(['River Patrol JO_ONE.bms', 'jo_two.bms']);
+    expect(page.text()).not.toContain('Static address');
+    page.unmount();
+  });
+
+  it('shows the static address the server runs at', async () => {
+    mine.mockResolvedValue({ ok: true, value: serversResponse([], { data_sets: [JO] }) });
+    const server = hostedServer(1, {
+      own_machine: true,
+      address: { id: 5, name: 'smoke', hostname: 'smoke.play.opennova.net', public_ip: '203.0.113.9', state: 'ready' },
+    });
+    const router = await testRouter('/me/servers/1/settings');
+    const page = mount(ServerSettingsTab, { props: { server, scope: 'owner', now: 0 }, global: { plugins: [router] } });
+    await flushPromises();
+    const text = page.get('dl').text().replace(/\s+/g, ' ');
+    expect(text).toContain('Static address');
+    expect(text).toContain('smoke.play.opennova.net 203.0.113.9:32768');
     page.unmount();
   });
 });

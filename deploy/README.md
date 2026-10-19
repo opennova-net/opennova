@@ -28,9 +28,9 @@ the whole bring-up.
     account's `opennova-org` user (vault item `aws-org`), no deployment: the member
     accounts (each deployment's and the CI runners'), and in each deployment's account,
     through its `OrganizationAccountAccessRole`, the Terraform state bucket, the
-    role boundary, the deploy user `opennova-deploy` and its key, and the GitHub deploy
-    role; its state in prod's state bucket; an apply writes each deployment's bucket, key
-    and role into its vault item `aws-<deployment>`;
+    role boundary and the machine boundary, the deploy user `opennova-deploy` and its
+    key, and the GitHub deploy role; its state in prod's state bucket; an apply writes
+    each deployment's bucket, key and role into its vault item `aws-<deployment>`;
   - `zone plan|apply|import|output|list`: the Cloudflare zone's shared settings
     (`infra/zone`: Full (strict), each deployment's edge authentication rule, the Stripe
     webhook's rule, Email Routing), no deployment, its state in prod's state bucket;
@@ -45,14 +45,21 @@ the whole bring-up.
   - `app deploy|images|releases|rollback|converge|status|restart|down|up|logs|shell`:
     releases (each program's task definition revision with the images pinned by digest,
     the manifest in SSM and S3; `app deploy --deployment prod --promote staging` takes
-    staging's release by digest) rolled out to the five ECS services, CloudWatch logs,
-    an ECS Exec shell;
+    staging's release by digest) rolled out to the six ECS services and to hostd, the
+    fleet cluster's daemon (one task per machine, rolled before the fleet program and
+    confirmed on every ready machine; never a count, so `app down` leaves it running),
+    CloudWatch logs, an ECS Exec shell;
   - `db bootstrap|psql|reset-db|snapshot`, `backup now|list|restore|import`: the RDS
     database and its pg_dump copies, through one-off tasks of the backup task definition
     (`backup import --from-deployment prod KEY` brings prod's dump into staging alone);
-  - `fleet status|logs|drain|end|roll|bake-image`: the hosted game servers' machines
-    (`fleet logs MACHINE [SLOT|hostd]`: a machine's logs from CloudWatch; their game data
-    is the site's Game data page, DEPLOY.md "Hosted game servers", not the toolbox's);
+  - `fleet status|logs|console|shell|drain|end|roll`: the hosted game servers' machines
+    (`fleet status`: EC2's, the fleet cluster's and the service's views, the AMI pinned
+    against Amazon's newest, what needs an admin and one line per machine; `fleet logs
+    server ID [--start N]` and `fleet logs machine ID`: a server start's or a machine's
+    hostd's log from CloudWatch; `fleet console MACHINE`: its EC2 serial console; `fleet
+    shell MACHINE`: ECS Exec into its hostd; `fleet roll [--dry-run]`:
+    the machines older than the pinned AMI replaced; their game data is the site's Game
+    data page, DEPLOY.md "Hosted game servers", not the toolbox's);
   - `aws <args...>`: the AWS CLI in the deployment's account.
 
   Every Terraform state lives in an S3 bucket of a deployment's account, versioned and
@@ -70,10 +77,8 @@ the whole bring-up.
 - `Dockerfile`, `docker-compose.deploy.yml`: the toolbox image (Debian: the docker CLI
   with compose and buildx, op, Terraform, the AWS CLI v2, the Session Manager plugin, which
   ECS Exec uses; each a pinned, checksummed release).
-- `host/fleet-image.sh`: the user data of `fleet bake-image`'s one-off builder, which bakes
-  the hosted machines' image.
 - `compose/`: the local stack (`scripts/dev_stack.sh`, DEVELOPING.md; dev: no AWS account, no
-  credentials of any deployment): the five programs, the portal, PostgreSQL and Valkey (the
+  credentials of any deployment): the six programs, the portal, PostgreSQL and Valkey (the
   base file and the dev overlay), and the hosted servers' machines as containers (the hosting
   overlay). A deployment runs the same images as ECS services (`infra/aws/programs.tf`), not
   through compose.

@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <initializer_list>
 #include <map>
 #include <set>
 #include <string>
@@ -886,11 +887,12 @@ static int test_apply_retail_menu() {
 // the design estimated at 8,700 files and 515 MB from the archives' listing). The smaller one is
 // then imported, checked (every file reference resolves or names what the install itself lacks;
 // the checklist is met; the only errors are the shipped files' own unresolved references, which
-// gate nothing) and built by the session's own build.
-static int test_apply_retail_mission_closure() {
+// gate nothing) and built by the session's own build. A run plans the missions `names` (04TR's import
+// and build its own part of the editor_import program, run_import_apply_retail_closure, about 60 s).
+static int test_apply_retail_mission_closure(std::initializer_list<const char *> names) {
 	const std::string install = retail::install();
 	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped mission's closure planned)");
-	for (const char *name : {"04TR.bms", "ASH_I1gA.bms"}) {
+	for (const char *name : names) {
 		Project project("opennova_editor_apply_retail_closure");
 		editor_test::set_game_install(project.session, install);
 		const SessionView &view = project.view();
@@ -1258,7 +1260,7 @@ int run_import_apply_tests() {
 	int failures = 0;
 	failures += test_apply_never_player_files();
 	failures += test_apply_retail_expansion();
-	failures += test_apply_retail_mission_closure();
+	failures += test_apply_retail_mission_closure({"ASH_I1gA.bms"});
 	failures += test_apply_closure();
 	failures += test_apply_unchecked();
 	failures += test_apply_changed();
@@ -1276,3 +1278,7 @@ int run_import_apply_tests() {
 	failures += test_apply_retail_menu();
 	return failures;
 }
+
+// The smaller shipped mission's closure planned, imported, checked and built: the editor_import
+// program's part of its own (closure_04tr).
+int run_import_apply_retail_closure() { return test_apply_retail_mission_closure({"04TR.bms"}); }

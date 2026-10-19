@@ -2,6 +2,7 @@
 
 #include "billing_repository.h"
 
+#include <cstdio>
 #include <utility>
 
 namespace opennova::novaworld_server::billing {
@@ -60,6 +61,24 @@ std::vector<jobs::PeriodicJob> billing_schedule(int reconcile_minutes) {
 	// A bucket gets one only while an event waits (a customer's backoff).
 	sync.wanted = [](db::Database &db) { return pending_event_count(db) > 0; };
 	return { std::move(reconcile), std::move(sync) };
+}
+
+void register_billing_prune(jobs::JobRegistry &registry) {
+	registry.add({ kJobBillingEventsPrune,
+			[](jobs::JobContext &ctx) {
+				auto lease = ctx.pool.acquire();
+				if (const size_t pruned = prune_events(*lease); pruned > 0)
+					std::printf("[sweep] pruned %zu old billing event(s)\n", pruned);
+				return jobs::JobResult::done();
+			},
+			1 });
+}
+
+std::vector<jobs::PeriodicJob> billing_prune_schedule(int64_t period_ms) {
+	jobs::PeriodicJob p;
+	p.kind = kJobBillingEventsPrune;
+	p.period_ms = period_ms;
+	return { std::move(p) };
 }
 
 } // namespace opennova::novaworld_server::billing

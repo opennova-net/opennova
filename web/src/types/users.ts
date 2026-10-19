@@ -1,6 +1,7 @@
 // Player accounts as the admin routes answer them (snake_case;
 // apps/novaworld_web/admin_user_routes.cpp).
 
+import type { AdminAddress } from './addresses';
 import type { AdminSubscription, TierNumber } from './billing';
 import type { EntitlementSource, HostedServer } from './hostedServer';
 
@@ -19,8 +20,10 @@ export interface User {
   // read-only on the admin pages.
   email: string | null;
   role: Role;
-  // An admin's grant of hosted servers (players.comp_servers, 0 to 16).
+  // An admin's grants (comp_grants, 0 to 16 each): hosted servers, and own
+  // machines for them (counted while the account has servers).
   comp_servers: number;
+  comp_own_machines: number;
   // The account's hosting entitlement: the larger of its tier's servers and
   // the grant.
   max_servers: number;
@@ -45,19 +48,56 @@ export interface UserListEntry extends User {
 // The account's hosting entitlement in full, on its admin page.
 export interface UserEntitlement extends UserEntitlementSummary {
   comp_servers: number;
+  comp_own_machines: number;
   // The servers its support tier alone grants (0 with none): the entitlement
   // is the larger of this and comp_servers.
   tier_servers: number;
+  // The add-on's machines (while a tier grants) plus comp_own_machines.
   own_machines: number;
   can_start: boolean;
+}
+
+// PUT /api/admin/users/<id>/comp's body.
+export interface CompGrants {
+  servers: number;
+  own_machines: number;
+}
+
+// PUT /api/admin/users/<id>/comp's reply: the account, and the sold capacity
+// with the grant counted.
+export interface CompGrantsReply {
+  user: User;
+  capacity: SoldCapacity | null;
+}
+
+// What the service has sold of one item (admin grants, subscriptions and
+// open checkouts together) against what the fleet sells of it.
+export interface SoldItem {
+  sold: number;
+  sellable: number;
+}
+
+// The service's sold capacity (hosted/model/sold_capacity.h): shared places, own
+// machines and static addresses. `oversold` when any is past what the fleet
+// sells (an admin's grant can take it there): new subscriptions of it are
+// paused.
+export interface SoldCapacity {
+  shared: SoldItem;
+  own_machines: SoldItem;
+  addresses: SoldItem;
+  oversold: boolean;
 }
 
 // GET /api/admin/users/<id>.
 export interface UserDetail {
   user: User;
   entitlement: UserEntitlement;
+  // The service's sold capacity; null when the reply named none.
+  capacity: SoldCapacity | null;
   // Its hosted servers: the live ones, then the newest ended ones.
   servers: HostedServer[];
+  // Its static addresses, the held ones first.
+  addresses: AdminAddress[];
   billing: {
     // The Stripe mode the ids belong to (the dashboard links follow it).
     livemode: boolean;
@@ -97,5 +137,6 @@ export interface UserResponse {
   user: User;
 }
 
-// The most an admin may grant (PUT /api/admin/users/<id>/comp-servers).
+// The most an admin may grant of each (PUT /api/admin/users/<id>/comp).
 export const COMP_SERVERS_MAX = 16;
+export const COMP_OWN_MACHINES_MAX = 16;

@@ -1,4 +1,4 @@
-// The hosted data sets' jobs (apps/novaworld_common/hosted/data_set_jobs.h) over a migrated
+// The hosted data sets' jobs (apps/novaworld_common/data_sets/data_set_jobs.h) over a migrated
 // database of the test's own and a local object store in a scratch directory, each job run as
 // the workers run it (jobs::run_due): a baseline tree uploaded as a packed synthetic install
 // (the three archives, two multiplayer missions and a single-player one titled from
@@ -20,12 +20,12 @@
 #include "common/test_expect.h"
 #include "update/synthetic_trees.h"
 
-#include "hosted/data_set_files.h"
-#include "hosted/data_set_jobs.h"
-#include "hosted/data_set_repository.h"
+#include "core/local_object_store.h"
+#include "data_sets/data_set_files.h"
+#include "data_sets/data_set_jobs.h"
+#include "data_sets/data_set_repository.h"
 #include "jobs/job_queue.h"
 #include "jobs/worker_pool.h"
-#include "local_object_store.h"
 #include "package_builder.h"
 
 #include <base/io/file_io.h>

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The whole NovaWorld service on this machine, in Docker (deploy/compose): the
-# five programs (gate, lobby, web, controller, worker), each its own container
+# six programs (gate, lobby, web, fleet, worker, data), each its own container
 # as a deployment runs each as its own ECS service, PostgreSQL, Valkey, the
 # portal (prod's nginx image in web's network, as in web's ECS task) and, with
 # a data set, hosted game servers on machines the worker launches as containers
-# of the serve image (the real opennova-hostd and opennova-serve). The project
+# of the hostd image (the real opennova-hostd and opennova-serve). The project
 # is opennova-dev; its state (the compose env file, the synthetic data set) is
 # build/dev-stack/.
 #
@@ -37,7 +37,12 @@
 #   scripts/dev_stack.sh status         the containers, the machines among them
 #   scripts/dev_stack.sh logs [args]    docker compose logs (e.g. -f novaworld-web)
 #   scripts/dev_stack.sh down           stop and remove it (the database stays)
-#   scripts/dev_stack.sh reset          down, the database, the store and the state too
+#   scripts/dev_stack.sh reset          down, the database, the store, the logs and the
+#                                       state too
+#
+# Every program and machine also writes its log into the stack's log store (the
+# `logs` volume, ONNET_LOG_STORE=file:///var/log/opennova), which the site's
+# admin pages read (GET /api/admin/logs) as a deployment's read CloudWatch.
 #
 # Seeding a data set needs curl and jq on this machine (the upload flow is the
 # admin API's, as the Game data page's: a tree, each file's parts PUT through
@@ -133,44 +138,44 @@ stage_prebuilt() {
     local tree="$1" ctx="$state/prebuilt"
     local program
     rm -rf "$ctx"
-    for program in gate lobby web controller worker; do
+    for program in gate lobby web fleet worker data; do
         mkdir -p "$ctx/src/build/apps/novaworld_$program"
         cp "$tree/apps/novaworld_$program/opennova-novaworld-$program" "$ctx/src/build/apps/novaworld_$program/"
     done
     mkdir -p "$ctx/src/build/apps/serve" "$ctx/src/build/apps/hostd" "$ctx/src/build/tests" \
-        "$ctx/src/backend" "$ctx/src/apps/novaworld_web" "$ctx/src/apps/novaworld_common/hosted/machine"
+        "$ctx/src/backend" "$ctx/src/apps/novaworld_web" "$ctx/src/apps/novaworld_common/hosted/cloud/machine"
     cp "$tree/apps/serve/opennova-serve" "$ctx/src/build/apps/serve/"
     cp "$tree/apps/hostd/opennova-hostd" "$ctx/src/build/apps/hostd/"
     cp "$tree/tests/opennova-novaworld-stack-smoke" "$ctx/src/build/tests/"
     cp -r "$repo/backend/migrations" "$repo/backend/seed" "$ctx/src/backend/"
     cp -r "$repo/apps/novaworld_web/templates" "$repo/apps/novaworld_web/static" "$ctx/src/apps/novaworld_web/"
-    cp "$repo/apps/novaworld_common/hosted/machine/machine_user_data.sh" \
-        "$ctx/src/apps/novaworld_common/hosted/machine/"
+    cp "$repo/apps/novaworld_common/hosted/cloud/machine/machine_user_data.sh" \
+        "$ctx/src/apps/novaworld_common/hosted/cloud/machine/"
     printf '%s\n' "$ctx"
 }
 
 # The programs' images, the portal's and the smoke test's (compiled in Docker,
-# or from --prebuilt binaries, which builds the machines' serve image too).
+# or from --prebuilt binaries, which builds the machines' hostd image too).
 build_images() {
     local prebuilt="$1"
     if [[ -z "$prebuilt" ]]; then
-        say "building the images (the five programs, the portal, the smoke test)"
+        say "building the images (the six programs, the portal, the smoke test)"
         stack_compose --profile smoke build
         return
     fi
     local ctx target
     ctx="$(host_path "$(stage_prebuilt "$prebuilt")")"
     say "building the images from $prebuilt's binaries"
-    for target in gate lobby web controller worker smoke; do
+    for target in gate lobby web fleet worker data smoke; do
         local tag="opennova-novaworld-$target:local"
         MSYS_NO_PATHCONV=1 docker build -q -f "$(host_path "$repo/apps/novaworld_common/Dockerfile")" \
             --target "$target" --build-context "build=$ctx" --build-context "smoke-build=$ctx" \
             -t "$tag" "$(host_path "$repo")" > /dev/null
         say "  $tag"
     done
-    MSYS_NO_PATHCONV=1 docker build -q -f "$(host_path "$repo/apps/serve/Dockerfile")" \
-        --build-context "build=$ctx" -t opennova-serve:local "$(host_path "$repo")" > /dev/null
-    say "  opennova-serve:local"
+    MSYS_NO_PATHCONV=1 docker build -q -f "$(host_path "$repo/apps/serve/Dockerfile")" --target hostd \
+        --build-context "build=$ctx" -t opennova-hostd:local "$(host_path "$repo")" > /dev/null
+    say "  opennova-hostd:local"
     MSYS_NO_PATHCONV=1 docker build -q -t opennova-portal:local "$(host_path "$repo/web")" > /dev/null
     say "  opennova-portal:local"
 }
@@ -263,7 +268,7 @@ upload_file() {
 # The data set of lobby $2 (its games slug) from the folder $1, through the
 # admin API as the Game data page does: the row (made once; an `up` run again
 # finds it), a tree of the folder's base files, each uploaded, the finalize,
-# then the worker's verdict (ready, or failed with why). $3 names a mission
+# then the data program's verdict (ready, or failed with why). $3 names a mission
 # the data must hold. Writes the data set's id and the rotation to the state.
 seed_data_set() {
     local dir="$1" game="$2" mission="$3"
@@ -323,7 +328,7 @@ seed_data_set() {
     done
     reply="$(admin_api POST "/api/admin/data-sets/$id/trees/$tree/finalize")"
     [[ "$(reply_code)" == 202 ]] || die "finalizing the tree failed: HTTP $(reply_code) $reply"
-    say "finalizing (the worker checks the files and lists the missions)..."
+    say "finalizing (the data program checks the files and lists the missions)..."
     waited=0
     while :; do
         reply="$(admin_api GET /api/admin/data-sets)"
@@ -337,7 +342,7 @@ seed_data_set() {
                 die "the tree failed: $error" ;;
             "") die "tree $tree of data set $id is gone" ;;
         esac
-        [[ "$waited" -lt 300 ]] || die "the tree is still $state_now after 300 s (scripts/dev_stack.sh logs novaworld-worker)"
+        [[ "$waited" -lt 300 ]] || die "the tree is still $state_now after 300 s (scripts/dev_stack.sh logs novaworld-data)"
         sleep 2
         waited=$((waited + 2))
     done
@@ -415,9 +420,9 @@ cmd_up() {
             dir="$data"
         fi
         sed -i.bak 's/^STACK_HOSTING=0$/STACK_HOSTING=1/' "$env_file" && rm -f "$env_file.bak"
-        # The serve image the machines run (--prebuilt built it above).
+        # The hostd image the machines run (--prebuilt built it above).
         if [[ "$build" == 1 && -z "$prebuilt" ]]; then
-            say "building the machines' serve image"
+            say "building the machines' hostd image"
             stack_compose --profile machines build machine-image
         fi
     fi
@@ -429,7 +434,7 @@ cmd_up() {
         || { stack_compose ps; die "the stack did not come up healthy (scripts/dev_stack.sh logs)"; }
 
     # The data set reaches the stack as it reaches a deployment: uploaded into
-    # the store through the admin API, finalized by the worker.
+    # the store through the admin API, finalized by the data program.
     [[ "$hosting" == 0 ]] || seed_data_set "$dir" "$data_set" "$mission"
 
     cat << EOF
@@ -459,13 +464,14 @@ cmd_smoke() {
     [[ -f "$env_file" ]] || die "no stack (scripts/dev_stack.sh up first)"
     local args=(run --web novaworld-web:8082 --site novaworld-web:80 --gate novaworld-gate:7597
         --livez novaworld-gate:8081 --livez novaworld-lobby:8081
-        --livez novaworld-controller:8081 --livez novaworld-worker:8081
+        --livez novaworld-fleet:8081 --livez novaworld-worker:8081 --livez novaworld-data:8081
         --admin-token "$(state_value ADMIN_API_TOKEN)" --timeout 300)
     if [[ "$(state_value STACK_HOSTING)" == "1" ]]; then
         local id mission
         id="$(state_value STACK_DATA_SET_ID)"
         [[ -n "$id" ]] || die "the stack hosts, but no data set was seeded (scripts/dev_stack.sh up again)"
-        args+=(--hosting "$id")
+        # The static addresses' zone the worker writes (deploy/compose/docker-compose.hosting.yml).
+        args+=(--hosting "$id" --zone-file /var/lib/opennova/zone/play.localhost.zone)
         mission="$(state_value STACK_MISSION)"
         [[ -z "$mission" ]] || args+=(--mission "$mission")
     fi
@@ -475,7 +481,7 @@ cmd_smoke() {
         echo
         say "the smoke test failed; the last lines of each program (and machine):"
         stack_compose logs --no-color --tail 40 novaworld-gate novaworld-lobby novaworld-web \
-            novaworld-controller novaworld-worker || true
+            novaworld-fleet novaworld-worker novaworld-data || true
         local id
         for id in $(machine_ids); do
             echo "---- machine $(docker inspect --format '{{.Name}}' "$id")"
@@ -522,7 +528,7 @@ case "$action" in
     reset)
         cmd_down -v
         rm -rf "$state"
-        say "the stack's database, store and state are gone"
+        say "the stack's database, store, logs and state are gone"
         ;;
     -h|--help) echo "$usage" ;;
     *) die "$usage" ;;

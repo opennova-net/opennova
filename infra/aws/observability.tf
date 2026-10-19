@@ -7,27 +7,37 @@
 # backup/ for the backup task) and the machines', 30 days each. Metrics: from
 # each program's heartbeat, a JSON line it logs every 60 s, carrying its program
 # and the fields that program knows,
-#   {"heartbeat":{"program":"gate|lobby|web|controller|worker","nw_sessions":N,
+#   {"heartbeat":{"program":"gate|lobby|web|fleet|worker|data","nw_sessions":N,
 #     "listed_hosts":N,"hosted_live":N,"hosted_failed":N,"machines_lost":N,
 #     "launch_failures":N,"billing_sync_age_s":N,"webhook_rejects":N,
-#     "limits_held":0|1,"probes_unanswered":N,"lobbies_live":N}}
+#     "limits_held":0|1,"probes_unanswered":N,"lobbies_live":N,
+#     "machines_stuck":N,"machine_disk_free_pct":N,"fleet_pass_age_s":N}}
 # (gauges, but launch_failures, webhook_rejects and probes_unanswered count
 # the minute since the last line; billing_sync_age_s is -1 with billing off;
 # limits_held is 1 while the supervisor holds back the entitlement stops, its
 # mass-stop guard; probes_unanswered counts the gate's probes it had no lobby
 # to hand out for, which no other light shows: that gate's loops turn and its
-# /livez says ok), and
+# /livez says ok; the fleet leader alone logs the last three, from the
+# fleet's health over its rows (apps/novaworld_common/hosted/model/fleet_health.h):
+# the machines stuck in a state or moving over and over, the least free share
+# of a ready machine's disk, and the seconds since its supervisor's last pass
+# that failed in nothing), and
 # from its boot line, {"boot":{"program":"..."}}. Alarms, to one SNS topic
 # emailing var.alert_email:
 #   per program: no heartbeat for 5 minutes (no data is an alarm: a dead
-#   process logs nothing; before the first release, when no task runs, it is
-#   none), more boots in 15 minutes than its max and 3 (a
+#   process logs nothing; before a release names the program, when no task of
+#   it runs, it is none), more boots in 15 minutes than its max and 3 (a
 #   crash loop), fewer tasks running than its min for 5 minutes, its CPU or its
 #   memory over 80% for 15 minutes; a load balancer target group with an
 #   unhealthy target for 10 minutes; a failed hosted server or a lost machine,
 #   3 failed launches in 15 minutes, a billing sync older than an hour, 5
 #   refused webhooks in 15 minutes, the entitlement stops held for 5 minutes,
-#   a gate probe left unanswered for want of a lobby in 5 minutes;
+#   a gate probe left unanswered for want of a lobby in 5 minutes; a machine
+#   stuck (5 minutes), a machine's disk under 15 % free (10 minutes), the
+#   servers' log group taking in more than log_ingest_alarm_gib_per_day's rate
+#   in an hour, and with hosting on and the fleet released, no fleet leader
+#   whose last good pass is under 2 minutes old for 10 minutes (no data is an
+#   alarm: no leader logs it);
 #   the database's CPU, CPU credits (a burstable class), connections and free
 #   storage, each cache node's evictions and CPU credits, and (in us-east-1,
 #   where Route 53's metrics live) a health check of web's /healthz at the
@@ -53,6 +63,10 @@ locals {
     LimitsHeld       = "limits_held"
     ProbesUnanswered = "probes_unanswered"
     LobbiesLive      = "lobbies_live" # every gate logs the deployment-wide count: read it with Maximum, never Sum
+    # The fleet leader's alone (a standby logs none of them).
+    MachinesStuck      = "machines_stuck"
+    MachineDiskFreePct = "machine_disk_free_pct"
+    FleetPassAgeS      = "fleet_pass_age_s"
   }
 
   alarm_actions = [aws_sns_topic.alerts.arn]
@@ -69,12 +83,24 @@ resource "aws_cloudwatch_log_group" "service" {
   tags = var.tags
 }
 
-# The game machines' (hostd and the slots), through the machine role: a
-# stream per slot, <machine id>/slot-<k>, and one for hostd, <machine id>/hostd
-# (apps/hostd/README.md, "Logs"). `./deploy/run.sh fleet logs` reads it.
+# The game machines' agents (hostd), through the machine role: hostd's task
+# (fleet_agent.tf), a stream per task, hostd/hostd/<task id> (apps/hostd/README.md,
+# "Logs"). `./deploy/run.sh fleet logs` reads it.
 resource "aws_cloudwatch_log_group" "machines" {
   name              = "/opennova/${local.deployment}/machines"
   retention_in_days = var.log_retention_days
+
+  tags = var.tags
+}
+
+# The hosted game servers' output, through the machine role (hostd's
+# --log-group: docker's awslogs driver), a stream per start that the service
+# names, <server id>/g<generation>, kept on the start's row. The servers run with
+# their status page off, so this is their own lines alone; kept a shorter while
+# (server_log_retention_days).
+resource "aws_cloudwatch_log_group" "servers" {
+  name              = "/opennova/${local.deployment}/servers"
+  retention_in_days = var.server_log_retention_days
 
   tags = var.tags
 }
@@ -159,7 +185,7 @@ locals {
     machines-lost = {
       metric      = "MachinesLost", statistic = "Maximum", period = 300, periods = 1,
       comparison  = "GreaterThanThreshold", threshold = 0, missing = "notBreaching",
-      description = "A game machine stopped reporting (fleet status)."
+      description = "A game machine stopped reporting (fleet status). With more than half the machines lost at once, the service holds them, ending none, until each reports again or an admin ends it (fleet end)."
     }
     launch-failures = {
       metric      = "LaunchFailures", statistic = "Sum", period = 900, periods = 1,
@@ -193,6 +219,22 @@ locals {
       comparison  = "GreaterThanThreshold", threshold = 0, missing = "notBreaching",
       description = "A gate left probes unanswered in 5 minutes: it had no lobby to hand out (no lobby instance takes clients; LobbiesLive, app status, app logs lobby)."
     }
+    # The fleet's health (hosted/model/fleet_health.h): a machine launching or booting past
+    # 20 minutes, draining past 60, ending past 15, lost past 10, or moving
+    # more than 6 times in an hour. No data (hosting off, no leader) is none:
+    # fleet-pass-age covers a silent leader.
+    machines-stuck = {
+      metric      = "MachinesStuck", statistic = "Maximum", period = 300, periods = 1,
+      comparison  = "GreaterThanThreshold", threshold = 0, missing = "notBreaching",
+      description = "A game machine has been launching, booting, draining, ending or lost past its time, or moved state over and over (the admin Attention list names it; fleet status, fleet logs machine <id>, fleet console <id>)."
+    }
+    # The least free share of a ready machine's trees' disk, under 15 % for 10
+    # minutes: a fetch fails and the servers' data cannot grow.
+    machine-disk = {
+      metric      = "MachineDiskFreePct", statistic = "Minimum", period = 300, periods = 2,
+      comparison  = "LessThanThreshold", threshold = 15, missing = "notBreaching",
+      description = "A game machine's disk is under 15 % free for 10 minutes (the admin Attention list names it; old trees prune as hostd moves on, else fleet drain <id> replaces it)."
+    }
   }
 }
 
@@ -215,12 +257,58 @@ resource "aws_cloudwatch_metric_alarm" "server" {
   tags = var.tags
 }
 
+# The fleet leader's last good pass (fleet_pass_age_s, leader-only) over 2
+# minutes old for 10 minutes: its passes fail (the database, a bug) while its
+# loop turns, so the watchdog keeps it up, or no fleet leads. No data is an
+# alarm (a dead or absent leader logs nothing), so it exists only while hosting
+# is on and a release names the fleet program (before that no fleet task runs).
+resource "aws_cloudwatch_metric_alarm" "fleet_pass_age" {
+  count = local.hosted_enabled && local.released["fleet"] ? 1 : 0
+
+  alarm_name          = "${local.name}-fleet-pass-age"
+  alarm_description   = "No fleet leader passed cleanly for over 2 minutes in 10: no machine is watched or launched and no server placed or stopped (app logs fleet, app status; the Attention list's findings go stale)."
+  namespace           = local.metric_namespace
+  metric_name         = "FleetPassAgeS"
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 2
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 120
+  treat_missing_data  = "breaching"
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+
+  tags = var.tags
+}
+
+# The servers' log group taking in more than log_ingest_alarm_gib_per_day's
+# rate in an hour (CloudWatch bills each GiB ingested): a server logging in a
+# loop.
+resource "aws_cloudwatch_metric_alarm" "servers_log_ingest" {
+  alarm_name          = "${local.name}-servers-log-ingest"
+  alarm_description   = "The game servers' logs took in more than ${var.log_ingest_alarm_gib_per_day} GiB a day's rate in an hour: a server logging in a loop (the CloudWatch console's /opennova/${local.deployment}/servers streams by size, fleet logs server <id>)."
+  namespace           = "AWS/Logs"
+  metric_name         = "IncomingBytes"
+  dimensions          = { LogGroupName = aws_cloudwatch_log_group.servers.name }
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = floor(var.log_ingest_alarm_gib_per_day * 1073741824 / 24)
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+
+  tags = var.tags
+}
+
 # ---- alarms on each program -------------------------------------------------------
 
 # No heartbeat from any of a program's processes for 5 minutes (no data is an
-# alarm: a dead process logs nothing). Before the first release no task runs
-# and none should log: no data is none (local.released, programs.tf), so a
-# fresh deployment mails nothing.
+# alarm: a dead process logs nothing). Before a release names the program no
+# task of it runs and none should log: no data is none (local.released,
+# programs.tf), so a fresh deployment, or a program a newer service added,
+# mails nothing until a deploy names it.
 resource "aws_cloudwatch_metric_alarm" "program_heartbeat" {
   for_each = local.programs
 
@@ -234,7 +322,7 @@ resource "aws_cloudwatch_metric_alarm" "program_heartbeat" {
   evaluation_periods  = 1
   comparison_operator = "LessThanThreshold"
   threshold           = 1
-  treat_missing_data  = local.released ? "breaching" : "notBreaching"
+  treat_missing_data  = local.released[each.key] ? "breaching" : "notBreaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
 
@@ -266,8 +354,8 @@ resource "aws_cloudwatch_metric_alarm" "program_crash_loop" {
 # Fewer tasks running than the program's min, every minute for 5 minutes:
 # ECS's service CPU metric takes one sample a minute from each running task,
 # so its SampleCount is the running count (no data, none running, is an
-# alarm). Before the first release no task runs: the floor is 0 and no data is
-# none.
+# alarm). Before a release names the program no task of it runs: the floor is
+# 0 and no data is none.
 resource "aws_cloudwatch_metric_alarm" "program_running" {
   for_each = local.programs
 
@@ -280,8 +368,8 @@ resource "aws_cloudwatch_metric_alarm" "program_running" {
   period              = 60
   evaluation_periods  = 5
   comparison_operator = "LessThanThreshold"
-  threshold           = local.released ? each.value.min : 0
-  treat_missing_data  = local.released ? "breaching" : "notBreaching"
+  threshold           = local.released[each.key] ? each.value.min : 0
+  treat_missing_data  = local.released[each.key] ? "breaching" : "notBreaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
 

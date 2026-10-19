@@ -2,8 +2,8 @@
 
 // The admin's view of the background jobs and the admin's actions on them
 // (README "Background jobs"; web's /api/admin/jobs routes,
-// job_routes.h). It reads the jobs table and the controller's row alone, never
-// a worker's or the controller's memory, so every web replica answers alike:
+// job_routes.h). It reads the jobs table and the fleet leader's row alone,
+// never a program's memory, so every web replica answers alike:
 // what it shows of a worker is what the claims leave on the rows (worker_id,
 // started_at, lease_until), so a worker thread shows once it has claimed a
 // job. The failures to look at come grouped: one group per kind and failure
@@ -142,7 +142,7 @@ struct JobsOverview {
 	std::vector<FailureGroup> attention;
 	int64_t attention_total = 0;
 	std::vector<WorkerView> workers; // by process
-	// The controller that leads (controller_leader: "" before an election) and
+	// The fleet process that leads (fleet_leader: "" before an election) and
 	// since when, and the newest job a schedule enqueued.
 	std::string leader;
 	std::string elected_at;

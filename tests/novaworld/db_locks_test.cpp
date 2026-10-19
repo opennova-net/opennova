@@ -25,10 +25,10 @@
 // Compiles the service's auth, web_session, cd_keys and hosted sources directly,
 // as hosted_supervisor_test does, so it runs on every service build.
 
-#include "auth.h"
+#include "accounts/auth.h"
+#include "accounts/web_session.h"
 #include "cd_keys.h"
 #include "hosted_fleet_rig.h"
-#include "web_session.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>

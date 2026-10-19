@@ -5,8 +5,15 @@
 # prod unless told otherwise, the zone's, the organization's and the CI
 # runners' commands take none, prod's changes ask for the typed word, data and
 # images cross between the deployments in their one direction alone, a deploy
-# never takes `app down`'s zero counts for a first release, and the org
-# stack's first run moves its state before the vault learns of the bucket. It
+# never takes `app down`'s zero counts for a first release (but starts a
+# program the down record names no count for, and `app up` the same), a
+# rollback refuses a release from before the program split (and a failed
+# deploy from one says fix forward, never a rollback to it), a release's
+# revisions hand the serve image and hostd's to every container that reads the
+# fleet's policy, fleet logs and fleet console read CloudWatch and EC2 alone
+# (the streams the service names, or by their names while it is down), fleet
+# status prints the service's attention list and a line per machine, and the
+# org stack's first run moves its state before the vault learns of the bucket. It
 # sources on-deploy (which then runs nothing) and stubs every command group,
 # the vault and AWS, so nothing is read or changed anywhere. It needs bash and
 # jq;
@@ -69,7 +76,7 @@ for cmd in "app deploy --tag sha-abc1234" "app rollback" "app converge" "app res
            "app shell web" "infra plan" "infra apply" "infra destroy" "infra import a b" "infra state-rm a" \
            "secrets init" "secrets sync" "stripe setup" "db bootstrap" "db psql" "db reset-db --yes-drop-database" \
            "db snapshot" "backup now" "backup restore novaworld/x.dump --yes-overwrite-database" "backup import -" \
-           "fleet drain i-0" "fleet end i-0" "fleet roll" "fleet bake-image" \
+           "fleet drain i-0" "fleet end i-0" "fleet roll" "fleet roll --dry-run" "fleet shell 12" \
            "aws s3 ls"; do
   # shellcheck disable=SC2086  # the words are the command's arguments
   expect_refused "'$cmd' without --deployment" "There is no default" $cmd
@@ -86,7 +93,8 @@ expect_refused "the old default workspace's name" "prod or staging" --deployment
 
 echo "--- a read-only command reads prod unless told, and says so"
 for cmd in "app status" "app releases" "app logs web" "app images" "secrets check" "stripe check" \
-           "infra output" "infra list" "fleet status" "fleet logs 12 3" "backup list"; do
+           "infra output" "infra list" "fleet status" "fleet logs server 12" "fleet logs machine 3" \
+           "fleet console 12" "backup list"; do
   # shellcheck disable=SC2086
   expect_run "'$cmd' alone" "ran DEP=prod DEFAULTED=1" $cmd
 done
@@ -170,47 +178,257 @@ if grep -q -- '--desired-count' "$calls"; then fail "app down's zero counts read
 SSM_DOWN_REPLY=missing
 ( set_deployment staging; service_roll web td:2 ) >/dev/null 2>&1
 if grep -q -- '--desired-count 1' "$calls"; then pass "zero counts with no marker are the first release's"; else fail "first release: $(cat "$calls")"; fi
+: >"$calls"
+SSM_DOWN_REPLY=down
+( set_deployment staging; service_roll data td:2 ) >/dev/null 2>&1
+if grep -q -- '--desired-count 1' "$calls"; then pass "a program the down record names no count for (added since) starts as a first release"; else fail "a program added since app down: $(cat "$calls")"; fi
 unset -f aws
 
-echo "--- fleet logs reads the machines' log group alone"
-# The real command (cmd_fleet alone is stubbed above) on a stub aws that records
-# every call: CloudWatch reads of the one stream asked for, an EC2 id read as
-# its machine-id tag, nothing sent to a machine.
-infra_get() { case "$1" in OPENNOVA_MACHINES_LOG_GROUP) echo /opennova/staging/machines ;; *) echo "stub-$1" ;; esac; }
+echo "--- hostd is the fleet cluster's daemon: never a count, confirmed on the machines"
+# The real roll, down and release functions on a stub aws that records every
+# call: hostd's service is the fleet cluster's, its zero count no first
+# release, `app down` leaves it running, and a release whose agents never
+# report its image points hostd back at the revision it ran.
+INFRA[OPENNOVA_FLEET_CLUSTER]=opennova-staging-fleet
+current="$scratch/current-td"
+HOSTD_RUNNING=2
+# The service's revision lives in a file: the stub runs in command substitutions.
+aws() {
+  echo "aws $*" >>"$calls"
+  case "$*" in
+    *"services[0].runningCount"*) echo "$HOSTD_RUNNING"; return ;;
+    *"services[0].taskDefinition"*) cat "$current"; return ;;
+  esac
+  case "$1 $2" in
+    "ecs describe-services")
+      echo '{"services":[{"serviceName":"hostd","taskDefinition":"'"$(cat "$current")"'","desiredCount":0,"runningCount":0,"deployments":[{"id":"d1","status":"PRIMARY","rolloutState":"COMPLETED","desiredCount":0,"runningCount":0,"pendingCount":0}]}]}' ;;
+    "ecs update-service")
+      local args=("$@") i
+      for ((i = 0; i < ${#args[@]}; i++)); do
+        [ "${args[$i]}" != --task-definition ] || printf '%s' "${args[$((i + 1))]}" >"$current"
+      done
+      echo '{"service":{"deployments":[{"id":"d1","status":"PRIMARY"}]}}' ;;
+    "ssm get-parameter") echo "An error occurred (ParameterNotFound) when calling the GetParameter operation:" >&2; return 254 ;;
+  esac
+}
+printf 'td:1' >"$current"
+: >"$calls"
+( set_deployment staging; service_roll hostd td:2 ) >/dev/null 2>&1 || fail "hostd's roll failed: $(cat "$calls")"
+if grep -q -- '--desired-count' "$calls"; then fail "hostd's roll passed a count: $(cat "$calls")"
+elif grep -q 'ssm get-parameter\|application-autoscaling' "$calls"; then fail "hostd's roll read the down marker or touched its scaling: $(cat "$calls")"
+elif grep -q 'update-service --cluster opennova-staging-fleet --service hostd --task-definition td:2' "$calls"; then pass "hostd rolls in the fleet cluster, its zero count no first release"
+else fail "hostd's roll: $(cat "$calls")"; fi
+: >"$calls"
+( set_deployment staging; programs_down ) >/dev/null 2>&1
+if grep -Eq -- '--service hostd|/hostd |--services [^-]*hostd' "$calls"; then fail "app down touched hostd: $(grep hostd "$calls")"
+elif grep -q 'update-service --cluster opennova-staging --service worker --desired-count 0' "$calls"; then pass "app down stops the programs and leaves hostd running"
+else fail "app down: $(cat "$calls")"; fi
+# shellcheck disable=SC2317  # the functions under test call both
+sleep() { :; }
+HOSTD_CONFIRM_TIMEOUT=0
+HOSTD_REPORTS=old
+# shellcheck disable=SC2317
+admin_api_json() {
+  echo '{"machines":[{"id":12,"state":"ready","agent_image":"ghcr.io/o/opennova-hostd@sha256:'"$HOSTD_REPORTS"'"},{"id":13,"state":"lost","agent_image":"x"}]}'
+}
+manifest='{"task_definitions":{"hostd":"td:2"},"images":{"hostd":"ghcr.io/o/opennova-hostd@sha256:new"}}'
+printf 'td:1' >"$current"
+: >"$calls"
+out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" && fail "a release its agents never reported went on" \
+  || { if grep -q 'update-service --cluster opennova-staging-fleet --service hostd --task-definition td:1' "$calls"; \
+       then pass "agents that never report the release's image put hostd back on its revision"; else fail "no point-back: $out $(cat "$calls")"; fi; }
+HOSTD_REPORTS=new
+printf 'td:1' >"$current"
+: >"$calls"
+( set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest" ) >/dev/null 2>&1 \
+  && ! grep -q 'task-definition td:1' "$calls" && pass "every ready machine reporting the image confirms hostd" || fail "confirm: $(cat "$calls")"
+HOSTD_REPORTS=old
+HOSTD_RUNNING=0
+printf 'td:1' >"$current"
+: >"$calls"
+out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" \
+  && [[ "$out" == *"no machine to confirm"* ]] && pass "with no hostd task there is no machine to confirm" || fail "no machine: $out"
+# The exec into web refused: the log names the refused call, and the deploy goes on.
+HOSTD_RUNNING=2
+# shellcheck disable=SC2317
+admin_api_json() {
+  echo "An error occurred (AccessDeniedException) when calling the ExecuteCommand operation: User: arn:aws:sts::222222222222:assumed-role/opennova-staging-github-deploy/run is not authorized to perform: ecs:ExecuteCommand" >&2
+  return 1
+}
+printf 'td:1' >"$current"
+: >"$calls"
+out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" \
+  && [[ "$out" == *"AWS refused the ExecuteCommand call of ECS Exec into a web task"* ]] && ! grep -q 'task-definition td:1' "$calls" \
+  && pass "an exec into web refused says so, and the deploy goes on" || fail "exec refused: $out"
+# The first ask finds an old agent, the later ones fail: the timeout names the
+# last ask's failure, never the machines an earlier ask found.
+HOSTD_CONFIRM_TIMEOUT=15
+asks="$scratch/asks"
+: >"$asks"
+# shellcheck disable=SC2317
+admin_api_json() {
+  echo ask >>"$asks"
+  if [ "$(wc -l <"$asks")" -eq 1 ]; then
+    echo '{"machines":[{"id":12,"state":"ready","agent_image":"ghcr.io/o/opennova-hostd@sha256:old"}]}'
+    return 0
+  fi
+  echo "An error occurred (AccessDeniedException) when calling the ExecuteCommand operation: User: arn:aws:sts::222222222222:assumed-role/opennova-staging-github-deploy/run is not authorized to perform: ecs:ExecuteCommand" >&2
+  return 1
+}
+printf 'td:1' >"$current"
+: >"$calls"
+out="$( (set_deployment staging; PROGRAMS=(hostd); release_roll "$manifest") 2>&1)" \
+  && fail "a confirmation whose last ask failed went on" \
+  || { [[ "$out" == *"the last ask failed: AWS refused the ExecuteCommand call"* && "$out" != *"still report another agent image"* ]] \
+       && pass "a later ask that fails is the reason the timeout gives" || fail "late failure: $out"; }
+HOSTD_CONFIRM_TIMEOUT=0
+unset -f aws sleep admin_api_json
+
+
+echo "--- app up starts a program the down record names no count for at its desired count"
+: >"$calls"
+program_counts() { case "$1" in data) echo '{"min":1,"desired":3,"max":3}' ;; *) echo '{"min":1,"desired":1,"max":1}' ;; esac; }
+scaling_suspended() { :; }
+aws() {
+  case "$1 $2" in
+    "ssm get-parameter") echo '{"since":"x","counts":{"worker":2,"fleet":1,"web":1,"lobby":1,"gate":1}}' ;;
+    "ecs update-service") echo "update-service $*" >>"$calls" ;;
+    *) : ;;
+  esac
+}
+( set_deployment staging; programs_up ) >/dev/null 2>&1
+if grep -q -- '--service worker --desired-count 2' "$calls" && grep -q -- '--service data --desired-count 3' "$calls"; then
+  pass "app up puts the recorded counts back and starts the program added since at its desired count"
+else
+  fail "app up: $(cat "$calls")"
+fi
+unset -f aws
+
+echo "--- a rollback refuses a release from before the program split"
+release_manifest() {
+  echo '{"id":"20261016T000000Z-abc1234","programs":["worker","controller","web","lobby","gate"],"task_definitions":{"controller":"td:5"}}'
+}
+release_current_manifest() { echo '{"id":"20261019T000000Z-def5678","previous":"20261016T000000Z-abc1234"}'; }
+aws_auth() { :; }
+infra_env_load() { :; }
+infra_get() { echo "stub-$1"; }
+out="$( (set_deployment staging; app_rollback --to 20261016T000000Z-abc1234 --yes) 2>&1)" \
+  && fail "a rollback to the controller's era went on" \
+  || { [[ "$out" == *"before the program split"* ]] && pass "a rollback to a release from before the split is refused" || fail "pre-split rollback: $out"; }
+unset -f release_manifest release_current_manifest
+# A deploy whose roll fails says how back: a rollback to a release of the
+# programs, fix forward from one app rollback refuses (the cutover's).
+out="$(deploy_failed_advice '{"id":"20261016T000000Z-abc1234","programs":["worker","controller","web","lobby","gate"]}' \
+  20261016T000000Z-abc1234 20261019T000000Z-def5678)"
+[[ "$out" == *"fix forward"* && "$out" == *"The cutover to the fleet program"* && "$out" != *"rollback --to"* ]] \
+  && pass "a deploy failing at the cutover says fix forward, never a rollback to the controller's release" \
+  || fail "cutover advice: $out"
+out="$(deploy_failed_advice '{}' none 20261019T000000Z-def5678)"
+[[ "$out" == *"fix forward"* && "$out" != *"rollback --to"* ]] && pass "a first release that fails says fix forward" \
+  || fail "first release advice: $out"
+out="$( (set_deployment staging; deploy_failed_advice '{"id":"20261019T000000Z-def5678","programs":["gate","lobby","web","fleet","worker","data"]}' \
+  20261019T000000Z-def5678 20261020T000000Z-0123456) )"
+[[ "$out" == *"./deploy/run.sh --deployment staging app rollback --to 20261019T000000Z-def5678"* ]] \
+  && pass "a deploy failing after the split names the rollback to the release before it" \
+  || fail "rollback advice: $out"
+
+echo "--- a release's revisions: the serve image and hostd's where the policy is read"
+described='{"taskDefinition":{"family":"opennova-staging-x","containerDefinitions":[
+  {"name":"worker","environment":[{"name":"ONNET_HOSTED_PROVIDER","value":"ec2"},{"name":"ONNET_HOSTED_DEPLOYMENT","value":"opennova-staging"}],"secrets":[]},
+  {"name":"fleet","environment":[{"name":"ONNET_HOSTED_PROVIDER","value":"ec2"}],"secrets":[]},
+  {"name":"data","environment":[{"name":"ONNET_OBJECT_STORE_URL","value":"s3://b/data"}],"secrets":[]}]}}'
+revision="$(jq -c --argjson images '{"worker":"w@1","fleet":"f@1","data":"d@1"}' --arg serve "serve@1" --arg hostd "hostd@1" \
+  --arg hosting 1 --arg dep staging --argjson present '[]' --argjson tags '[]' "$REVISION_JQ" <<<"$described")"
+env_of() { jq -c --arg c "$1" '[.containerDefinitions[] | select(.name == $c) | .environment[]? | "\(.name)=\(.value)"]' <<<"$revision"; }
+if [[ "$(env_of worker)" == *'"ONNET_HOSTED_HOSTD_IMAGE=hostd@1"'* && "$(env_of worker)" == *'"ONNET_HOSTED_SERVE_IMAGE=serve@1"'* ]] &&
+   [[ "$(env_of fleet)" == *'"ONNET_HOSTED_SERVE_IMAGE=serve@1"'* && "$(env_of fleet)" == *'"ONNET_HOSTED_HOSTD_IMAGE=hostd@1"'* ]] &&
+   [[ "$(env_of data)" != *SERVE* && "$(env_of data)" != *HOSTD* ]]; then
+  pass "the worker and the fleet get both images, the data program neither"
+else
+  fail "revision images: worker $(env_of worker) fleet $(env_of fleet) data $(env_of data)"
+fi
+revision="$(jq -c --argjson images '{"worker":"w@1","fleet":"f@1","data":"d@1"}' --arg serve "" --arg hostd "" \
+  --arg hosting 0 --arg dep staging --argjson present '[]' --argjson tags '[]' "$REVISION_JQ" <<<"$described")"
+if [[ "$(env_of worker)" == *'"ONNET_HOSTED_PROVIDER=none"'* && "$(env_of fleet)" == *'"ONNET_HOSTED_PROVIDER=none"'* ]]; then
+  pass "--no-hosting turns the provider off in every container that reads it"
+else
+  fail "no hosting: worker $(env_of worker) fleet $(env_of fleet)"
+fi
+
+echo "--- fleet logs reads CloudWatch alone, the stream the service's rows name"
+# The real commands (cmd_fleet alone is stubbed above) on a stub aws that records
+# every call and a stub admin API (the logs route): a server start's stream, a
+# machine's hostd's, read from their groups; with the service down, the streams
+# by their names (a start's, every start's) and the machine's running hostd task;
+# nothing sent to a machine.
+infra_get() {
+  case "$1" in
+    OPENNOVA_MACHINES_LOG_GROUP) echo /opennova/staging/machines ;;
+    OPENNOVA_SERVERS_LOG_GROUP) echo /opennova/staging/servers ;;
+    *) echo "stub-$1" ;;
+  esac
+}
+SERVICE=up
+# shellcheck disable=SC2317  # fleet_logs calls it
+admin_api_json() {
+  echo "admin_api_json $*" >>"$calls"
+  if [ "$SERVICE" = down ]; then echo "HTTP 502" >&2; return 1; fi
+  case "$2" in
+    *subject=server\&id=34*generation=1*) echo '{"source":"cloudwatch","group":"/opennova/staging/servers","stream":"34/g1"}' ;;
+    *subject=server\&id=34*) echo '{"source":"cloudwatch","group":"/opennova/staging/servers","stream":"34/g2"}' ;;
+    *subject=machine\&id=12*) echo '{"source":"cloudwatch","group":"/opennova/staging/machines","stream":"hostd/hostd/abc123"}' ;;
+    *subject=machine\&id=13*) echo '{"source":"cloudwatch","group":"/opennova/staging/machines","stream":null}' ;;
+    *) echo "HTTP 404" >&2; return 1 ;;
+  esac
+}
 aws() {
   echo "aws $*" >>"$calls"
   case "$1 $2" in
     "ec2 describe-instances")
       case "$*" in
-        *i-0aaaaaaaaaaaaaaa1*) echo 12 ;;
-        *i-0bbbbbbbbbbbbbbb2*) echo None ;;
-        *) echo "An error occurred (InvalidInstanceID.NotFound)" >&2; return 254 ;;
+        *"Values=12 "*) echo i-0aaaaaaaaaaaaaaa1 ;;
+        *) echo None ;;
       esac ;;
+    "ecs list-container-instances")
+      case "$*" in
+        *"attribute:machine-id == 12"*) echo arn:aws:ecs:us-east-1:1:container-instance/opennova-staging-fleet/ci12 ;;
+        *) echo None ;;
+      esac ;;
+    "ecs list-tasks") echo arn:aws:ecs:us-east-1:1:task/opennova-staging-fleet/t12 ;;
   esac
 }
-# expect_logs NAME WANT ARGS...: fleet_logs ARGS makes WANT its last aws call.
-expect_logs() {
-  local name="$1" want="$2" got
-  shift 2
+# expect_last NAME WANT FUNCTION ARGS...: FUNCTION ARGS makes WANT its last aws call.
+expect_last() {
+  local name="$1" want="$2" fn="$3" got
+  shift 3
   : >"$calls"
-  ( set_deployment staging; fleet_logs "$@" ) >/dev/null 2>&1 || { fail "$name (refused: $( (set_deployment staging; fleet_logs "$@") 2>&1 | tail -n 1))"; return; }
-  got="$(tail -n 1 "$calls")"
+  ( set_deployment staging; "$fn" "$@" ) >/dev/null 2>&1 || { fail "$name (refused: $( (set_deployment staging; "$fn" "$@") 2>&1 | tail -n 1))"; return; }
+  got="$(grep '^aws ' "$calls" | tail -n 1)"
   if [ "$got" = "$want" ]; then pass "$name"; else fail "$name (got '$got', want '$want')"; fi
 }
-expect_logs "a slot's stream" \
-  "aws logs tail /opennova/staging/machines --log-stream-names 12/slot-3 --since 1h --format short" \
-  12 3
-expect_logs "hostd's stream, followed, since 2h" \
-  "aws logs tail /opennova/staging/machines --log-stream-names 12/hostd --since 2h --format short --follow" \
-  12 hostd --since 2h --follow
-expect_logs "every stream of the machine, each line naming its stream" \
-  "aws logs tail /opennova/staging/machines --log-stream-name-prefix 12/ --since 1h --format detailed" \
-  12
-expect_logs "an EC2 id read as its machine-id tag" \
-  "aws logs tail /opennova/staging/machines --log-stream-names 12/slot-0 --since 1h --format short" \
-  i-0aaaaaaaaaaaaaaa1 0
-if grep -vq '^aws \(logs tail\|ec2 describe-instances\) ' "$calls"; then fail "fleet logs called more than CloudWatch and EC2's describe: $(cat "$calls")"; else pass "fleet logs calls CloudWatch's tail and EC2's describe alone"; fi
-for args in "" "x" "0 3" "12 32" "12 03" "12 slot-3" "12 3 4" "12 --tail" "i-0bbbbbbbbbbbbbbb2" "i-0ccccccccccccccc3" "i-XYZ"; do
+expect_last "a server's newest start, its stream the service names" \
+  "aws logs tail /opennova/staging/servers --log-stream-names 34/g2 --since 1h --format short" \
+  fleet_logs server 34
+expect_last "a server's start 1, followed, since 2h" \
+  "aws logs tail /opennova/staging/servers --log-stream-names 34/g1 --since 2h --format short --follow" \
+  fleet_logs server 34 --start 1 --since 2h --follow
+expect_last "a machine's hostd, its stream the service names" \
+  "aws logs tail /opennova/staging/machines --log-stream-names hostd/hostd/abc123 --since 1h --format short" \
+  fleet_logs machine 12
+SERVICE=down
+expect_last "the service down: a start's stream by its name" \
+  "aws logs tail /opennova/staging/servers --log-stream-names 34/g3 --since 1h --format short" \
+  fleet_logs server 34 --start 3
+expect_last "the service down: every start's stream of the server, each line naming its stream" \
+  "aws logs tail /opennova/staging/servers --log-stream-name-prefix 34/g --since 1h --format detailed" \
+  fleet_logs server 34
+expect_last "the service down: the machine's running hostd task" \
+  "aws logs tail /opennova/staging/machines --log-stream-names hostd/hostd/t12 --since 1h --format short" \
+  fleet_logs machine 12
+SERVICE=up
+if grep -vq '^aws \(logs tail\|ec2 describe-instances\|ecs list-container-instances\|ecs list-tasks\) \|^admin_api_json ' "$calls"; then fail "fleet logs called more than CloudWatch, the admin API and ECS's lists: $(cat "$calls")"; else pass "fleet logs calls CloudWatch's tail, the admin API and ECS's lists alone"; fi
+for args in "" "12 3" "12" "server" "server x" "server 0" "machine i-0aaaaaaaaaaaaaaa1" "server 34 --start x" \
+            "machine 12 --start 1" "server 34 --tail" "server 99" "machine 13"; do
   : >"$calls"
   # shellcheck disable=SC2086  # the words are the command's arguments
   if ( set_deployment staging; fleet_logs $args ) >/dev/null 2>&1; then
@@ -221,7 +439,60 @@ for args in "" "x" "0 3" "12 32" "12 03" "12 slot-3" "12 3 4" "12 --tail" "i-0bb
     pass "fleet logs '$args' is refused"
   fi
 done
-unset -f aws
+
+echo "--- fleet console reads EC2's console output of this deployment's machine"
+expect_last "a machine's console, by its id" \
+  "aws ec2 get-console-output --instance-id i-0aaaaaaaaaaaaaaa1 --latest --output text --query Output" \
+  fleet_console 12
+expect_last "a machine's console, by EC2's id" \
+  "aws ec2 get-console-output --instance-id i-0bbbbbbbbbbbbbbb2 --latest --output text --query Output" \
+  fleet_console i-0bbbbbbbbbbbbbbb2
+: >"$calls"
+( set_deployment staging; fleet_console 12 ) >/dev/null 2>&1
+if grep -q '^aws ec2 describe-instances .*Name=tag:opennova:machine-id,Values=12 Name=tag:opennova:deployment,Values=' "$calls"; then
+  pass "a machine's id is found by its tags, this deployment's alone"
+else
+  fail "fleet console's lookup: $(cat "$calls")"
+fi
+for args in "" "x" "13" "i-XYZ" "12 13"; do
+  : >"$calls"
+  # shellcheck disable=SC2086  # the words are the command's arguments
+  if ( set_deployment staging; fleet_console $args ) >/dev/null 2>&1; then
+    fail "fleet console '$args' was taken"
+  elif grep -q 'get-console-output' "$calls"; then
+    fail "fleet console '$args' read a console before refusing"
+  else
+    pass "fleet console '$args' is refused"
+  fi
+done
+unset -f aws admin_api_json
+
+echo "--- fleet status's service view: what needs an admin, one line per machine"
+attention='{"findings":[{"level":"danger","subject":"The lobby","text":"No lobby instance takes clients.","since":null,"link":"/admin/infrastructure/programs/lobby","source":"no_lobby"},
+  {"level":"warn","subject":"Machine 12 (shared)","text":"Booting for 25 min (over 20 min): its agent has not reported.","since":"2026-10-18T12:00:00Z","link":"/admin/fleet/machines/12","source":"stuck_machine"}],
+  "alarms":[{"name":"opennova-staging-machines-stuck","state_since":"2026-10-18T12:05:00Z","description":"A game machine is stuck."}],"alarms_read":true,"checked_at":"2026-10-18T12:30:00Z"}'
+out="$(fleet_attention_lines <<<"$attention")"
+if [[ "$out" == *"DANGER The lobby: No lobby instance takes clients."* &&
+      "$out" == *"WARN Machine 12 (shared): Booting for 25 min (over 20 min): its agent has not reported. (since 2026-10-18T12:00:00Z)"* &&
+      "$out" == *"ALARM opennova-staging-machines-stuck (since 2026-10-18T12:05:00Z): A game machine is stuck."* ]]; then
+  pass "each finding and each firing alarm is a line"
+else
+  fail "attention lines: $out"
+fi
+out="$(fleet_attention_lines <<<'{"findings":[],"alarms":[],"alarms_read":false,"checked_at":"x"}')"
+[[ "$out" == *"nothing needs you"* && "$out" == *"alarms: not read here"* ]] && pass "nothing to do, and no alarm read, each say so" || fail "empty attention: $out"
+machines='{"machines":[{"id":12,"kind":"shared","state":"ready","slots":4,"slots_used":3,"public_address":"54.1.2.3","address":null,
+  "last_report_at":"2026-10-18 12:29:58","stats":{"cpu_percent":41.6,"memory_used_bytes":1073741824,"memory_total_bytes":4080218931,"disk_free_bytes":31,"disk_total_bytes":100},
+  "agent_version":"0.0.19","outdated":true,"protocol_mismatch_since":null,"lost_held":false,"end_reason":null},
+  {"id":13,"kind":"own","state":"lost","slots":1,"slots_used":1,"public_address":null,"address":{"id":5,"name":"smoke"},"last_report_at":null,"stats":null,
+  "agent_version":null,"outdated":null,"protocol_mismatch_since":null,"lost_held":true,"end_reason":"its agent stopped reporting"}]}'
+out="$(fleet_machine_lines <<<"$machines")"
+if [[ "$out" == *"machine 12 (shared) ready, 3 of 4 slots, 54.1.2.3, reported 2026-10-18 12:29:58; CPU 41 %, memory 1 of 3.7 GiB, disk 31 % free; hostd 0.0.19, older than the release"* &&
+      "$out" == *"machine 13 (own) lost, 1 of 1 slots (static address smoke), reported never; use not reported; hostd none, held lost by the brake (its agent stopped reporting)"* ]]; then
+  pass "one readable line per machine"
+else
+  fail "machine lines: $out"
+fi
 
 echo "--- the org stack's first run moves its state before the vault learns of it"
 # The real org command (the groups are stubbed above), around stubs of its

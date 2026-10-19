@@ -1,18 +1,20 @@
-// The hosted data sets' rows (apps/novaworld_common/hosted/data_set_repository.h, migrations
+// The hosted data sets' rows (apps/novaworld_common/data_sets/data_set_repository.h, migrations
 // 0011 and 0013) on a migrated database of the test's own: the seeded four, a data set
 // created, changed and refused (a duplicate login, a duplicate expansion, no base parent, in
 // use); trees from uploading to ready (the data set's current and baseline trees follow, a
 // new baseline retires the published release), what a start may pick, what may be pruned and
 // what holds a tree; releases validated, published (the previous one retired), retired; the
-// servers' pins, the owner's update and the admin's update-all; and the migration's mapping
-// of the old game and expansion columns onto the seeded rows.
+// servers' pins, the owner's update and the admin's update-all; the data sets' holds on the
+// servers' rows reading a server as live exactly when the hosted servers' own rule does; and
+// the migration's mapping of the old game and expansion columns onto the seeded rows.
 
 #include "common/test_database.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
-#include "hosted/data_set_files.h"
-#include "hosted/data_set_repository.h"
+#include "data_sets/data_set_files.h"
+#include "data_sets/data_set_repository.h"
+#include "hosted/model/hosted_repository.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -327,6 +329,33 @@ int test_pins() {
 // The migration's mapping: a server on the old game slug and expansion code lands on the
 // seeded rows. Migrations 0001-0010 and 0012 first, a row written as the old service wrote
 // it, then 0011 and 0013 over it (0013's seeded updater products with it).
+// The data sets' holds read the hosted servers' rows with a copy of their live rule
+// (data_set_repository.cpp, which stands below the hosted servers' model): for every state,
+// a server pinning a tree holds it exactly while is_live calls the server live.
+int test_live_rule() {
+	TestDatabase tdb;
+	Database db = tdb.open();
+	const int64_t jo = seeded(db, "Joint Operations");
+	// A tree that is neither current nor the baseline (a newer one is both), so only its
+	// pins hold it.
+	const int64_t pinned_tree = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
+	TEST_EXPECT(finish_tree(db, pinned_tree, TreeState::Finalizing, ready_with("1", {})));
+	const int64_t newer = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
+	TEST_EXPECT(finish_tree(db, newer, TreeState::Finalizing, ready_with("2", {})));
+	for (int i = 0; i <= static_cast<int>(State::Failed); ++i) {
+		const State state = static_cast<State>(i);
+		const int64_t server = insert_server(db, jo, std::nullopt, state_name(state));
+		set_tree_pins(db, server, pinned_tree, std::nullopt);
+		int pinned = 0;
+		const std::string hold = tree_hold(db, pinned_tree, pinned);
+		TEST_EXPECT((pinned == 1) == is_live(state) && (hold == "pinned") == is_live(state));
+		TEST_EXPECT((count_tree_pins(db, pinned_tree) == 1) == is_live(state));
+		TEST_EXPECT((count_live_servers_of(db, jo) == 1) == is_live(state));
+		db.exec("DELETE FROM hosted_servers WHERE id = $1;", { BindValue(server) });
+	}
+	return 0;
+}
+
 int test_migration_mapping() {
 	test_db::Options options;
 	options.migrate = false;
@@ -409,6 +438,8 @@ int main(int argc, char **argv) {
 	if (int rc = test_releases())
 		return rc;
 	if (int rc = test_pins())
+		return rc;
+	if (int rc = test_live_rule())
 		return rc;
 	if (int rc = test_migration_mapping())
 		return rc;

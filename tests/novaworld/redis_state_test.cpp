@@ -1,4 +1,4 @@
-// The web role's shared state in Redis (apps/novaworld_common/redis_client.h,
+// The web role's shared state in Redis (apps/novaworld_web/redis_client.h,
 // session_store.h, retail_pins.h) as two web replicas see it: two pools over
 // one service's namespace on the Redis server -DOPENNOVA_TEST_REDIS names
 // (common/test_redis.h). The client: a URL that does not read and a server that

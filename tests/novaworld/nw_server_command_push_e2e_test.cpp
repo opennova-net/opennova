@@ -22,7 +22,7 @@
 #include "nw_udp_listener.h"
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <net/napi/session.h>
 #include <net/napi/tlv.h>

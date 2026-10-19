@@ -29,6 +29,15 @@
           <dt class="text-ink-muted">Address</dt>
           <dd class="break-all font-mono text-xs text-ink">{{ address }}</dd>
         </template>
+        <template v-if="server.address">
+          <dt class="text-ink-muted">Static address</dt>
+          <dd class="break-all font-mono text-xs text-ink">
+            {{ server.address.hostname || server.address.name }}
+            <span v-if="serverAddressEndpoint(server.address)" class="text-ink-muted">
+              {{ serverAddressEndpoint(server.address) }}
+            </span>
+          </dd>
+        </template>
         <template v-if="server.state === 'running' && server.running_at">
           <dt class="text-ink-muted">Running since</dt>
           <dd class="text-ink"><RelativeTime :value="server.running_at" :now="now" /></dd>
@@ -46,10 +55,16 @@
         {{ server.failure_reason }}
       </p>
       <p v-if="server.state === 'stopping'" class="text-xs text-ink-muted">{{ STOPPING_STILL_COUNTS }}</p>
+      <p v-if="phaseLine" class="hosted-phase text-sm text-ink">
+        {{ phaseLine }}<span v-if="slow" class="font-semibold text-warn">{{ ` ${SLOW_PHASE_TEXT}` }}</span>
+      </p>
+      <p v-if="!server.live && server.stopped_because" class="hosted-stopped-because text-sm text-ink-muted">
+        {{ stoppedBecauseText(server.stopped_because) }}
+      </p>
     </div>
     <div class="flex shrink-0 flex-wrap gap-2 sm:flex-col sm:items-end">
       <RouterLink :to="detailPath" :class="secondaryButton">
-        Manage<span class="sr-only"> {{ server.settings.game_name }}</span>
+        Manage<span class="sr-only">{{ ` ${server.settings.game_name}` }}</span>
       </RouterLink>
       <RouterLink v-if="server.state === 'running'" :to="`${detailPath}/console`" :class="secondaryButton">
         Console<span class="sr-only"> of {{ server.settings.game_name }}</span>
@@ -67,16 +82,19 @@
 
 <script setup lang="ts">
 // One of the account's hosted servers on its Servers page: its state, game,
-// players and address while live, and links to its own page (Manage, its
-// console while it runs) or, once it has ended, to a new start with its
-// settings. Its ids carry its id, so any number of cards share a page.
+// where its start stands (and when that is slower than usual) or why its last
+// run ended, players and address while live, its static address, and links to
+// its own page (Manage, its console while it runs) or, once it has ended, to a
+// new start with its settings. Its ids carry its id, so any number of cards
+// share a page.
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from './RelativeTime.vue';
 import { STOPPING_STILL_COUNTS } from '../api/hostedServer';
 import type { HostedServer } from '../types/hostedServer';
 import type { MyServer } from '../types/myServers';
-import { ownerStateLabel, stateBadgeClass } from '../utils/hostedState';
+import { serverAddressEndpoint } from '../utils/addressView';
+import { SLOW_PHASE_TEXT, ownerStateLabel, phaseSlow, phaseText, stateBadgeClass, stoppedBecauseText } from '../utils/hostedState';
 
 const props = defineProps<{
   server: HostedServer;
@@ -108,4 +126,7 @@ const address = computed(() => {
   const row = props.listing ?? props.server.listing;
   return row ? `${row.host_ip}:${row.host_port}` : '';
 });
+
+const phaseLine = computed(() => (props.server.live && props.server.phase ? phaseText(props.server.phase) : ''));
+const slow = computed(() => phaseSlow(props.server, props.now));
 </script>

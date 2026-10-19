@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# The deploy user, its policies and the role boundary (infra/aws/iam/README.md)
+# The deploy user, its policies and the two boundaries (infra/aws/iam/README.md)
 # ---------------------------------------------------------------------------
 #
 # opennova-deploy is what the toolbox and every infra/aws run act as in this
@@ -8,8 +8,10 @@
 # six policies under infra/aws/iam/, OpenNova's names and tags alone, and two
 # inline ones: the Terraform states it runs, and a guard that keeps it off the
 # state bucket's settings and old versions. Every role infra/aws makes carries
-# the boundary, which the deploy user can neither change nor take off: no role
-# it writes holds more than the boundary allows.
+# a boundary, which the deploy user can neither change nor take off: the
+# machine boundary on the machines' two roles (the instance role, hostd's task
+# role), the role boundary on every other; no role it writes holds more than
+# its boundary allows.
 #
 # A policy file is a template (account_id, region); IAM counts a managed
 # policy's characters without white space, at most 6,144 (tests/ check each).
@@ -22,13 +24,22 @@ locals {
   deploy_policy_documents = {
     for p in local.deploy_policies : p => jsonencode(jsondecode(templatefile("${local.policy_dir}/opennova-deploy-${p}.json", local.policy_vars)))
   }
-  boundary_document = jsonencode(jsondecode(templatefile("${local.policy_dir}/opennova-role-boundary.json", local.policy_vars)))
+  boundary_document         = jsonencode(jsondecode(templatefile("${local.policy_dir}/opennova-role-boundary.json", local.policy_vars)))
+  machine_boundary_document = jsonencode(jsondecode(templatefile("${local.policy_dir}/opennova-machine-boundary.json", local.policy_vars)))
 }
 
+# Its description is the one it was made with: IAM never changes a policy's
+# description (a new one would replace the policy, which every role carries).
 resource "aws_iam_policy" "boundary" {
   name        = "opennova-role-boundary"
   description = "The most any role infra/aws makes may do (infra/aws/iam/opennova-role-boundary.json)"
   policy      = local.boundary_document
+}
+
+resource "aws_iam_policy" "machine_boundary" {
+  name        = "opennova-machine-boundary"
+  description = "The most the machines' instance role and hostd's task role may do (infra/aws/iam/opennova-machine-boundary.json)"
+  policy      = local.machine_boundary_document
 }
 
 resource "aws_iam_policy" "deploy" {

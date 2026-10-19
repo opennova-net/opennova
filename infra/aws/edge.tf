@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # Cloudflare: the deployment's site records and its origin's TLS (DEPLOY.md,
-# section 4, "Cloudflare: TLS to the origin")
+# section 4, "Cloudflare: TLS to the origin"), and the static addresses' zone
 # ---------------------------------------------------------------------------
 #
 # Cloudflare proxies the site's hostnames and talks to the origin (the portal's
@@ -150,4 +150,50 @@ resource "aws_ssm_parameter" "origin_tls_key" {
   value       = base64encode(tls_private_key.origin[0].private_key_pem)
 
   tags = var.tags
+}
+
+# ---- the static addresses' zone -------------------------------------------------
+
+# The static-address add-on (DEPLOY.md, "Hosted game servers"): an own
+# machine's Elastic IP and its name, <name>.<zone>, an A record the worker
+# writes and deletes. The zone is a Route 53 public zone of the deployment's
+# own, play.<domain> on prod and play.<deployment>.<domain> off it
+# (local.play_zone_name), delegated from the Cloudflare zone by its four name
+# servers: Route 53, because IAM holds the worker to the zone's A records
+# (fleet.tf), where a Cloudflare token would reach the whole zone. Made while
+# the add-on is sold (fleet_max_addresses above 0) with hosting on and a
+# Cloudflare zone, and never destroyed by a plan (prevent_destroy stops one
+# that would, fleet_max_addresses back at 0 among them): a new zone gets other
+# name servers, and every address's name stops resolving until the delegation
+# follows them.
+locals {
+  play_zone_enabled = local.dns_enabled && local.hosted_enabled && var.fleet_max_addresses > 0
+}
+
+resource "aws_route53_zone" "play" {
+  count   = local.play_zone_enabled ? 1 : 0
+  name    = local.play_zone_name
+  comment = "OpenNova ${local.deployment}: the static addresses' names (infra/aws/edge.tf)"
+
+  tags = var.tags
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Route 53 gives a zone four name servers, fixed for its life.
+resource "cloudflare_record" "play_ns" {
+  count   = local.play_zone_enabled ? 4 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = local.is_prod ? "play" : "play.${local.deployment}"
+  content = aws_route53_zone.play[0].name_servers[count.index]
+  type    = "NS"
+  ttl     = 300
+
+  comment = "Managed by Terraform - OpenNova static addresses (delegation to Route 53)"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }

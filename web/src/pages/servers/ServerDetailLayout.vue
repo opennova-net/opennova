@@ -44,6 +44,13 @@
           <span v-if="server.expansion || server.expansion_display_name">{{ server.expansion?.display_name || server.expansion_display_name }}</span>
           <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Own machine</span>
         </p>
+        <p v-if="server.address" class="text-sm text-ink-muted">
+          Static address
+          <span class="break-all font-mono text-xs text-ink">{{ server.address.hostname || server.address.name }}</span>
+          <template v-if="serverAddressEndpoint(server.address)">
+            at <span class="font-mono text-xs text-ink">{{ serverAddressEndpoint(server.address) }}</span>
+          </template>
+        </p>
         <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
       </header>
 
@@ -80,9 +87,9 @@
 <script setup lang="ts">
 // One hosted server's own page, the owner's (/me/servers/<id>, scope owner:
 // GET /api/me/servers/<id>) and the admin's (scope admin: GET
-// /api/admin/hosted/<id>): its name and state over tabs, each a child route
-// handed the server (Overview, Stats, Console, Settings, and the admin's
-// extra ones).
+// /api/admin/hosted/<id>): its name, state and static address over tabs,
+// each a child route handed the server (Overview, Stats, Console, Settings,
+// and the admin's extra ones).
 // The page polls the server on the hosted cadence (usePolling) and provides
 // the console queue its Console tab's calls go through.
 import { computed, ref, watch } from 'vue';
@@ -93,6 +100,7 @@ import { provideConsoleQueue } from '../../composables/useConsoleQueue';
 import { hostedCadence, usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import type { FleetServer, HostedServer } from '../../types/hostedServer';
+import { serverAddressEndpoint } from '../../utils/addressView';
 import { ownerStateLabel, stateBadgeClass } from '../../utils/hostedState';
 
 const props = defineProps<{
@@ -123,7 +131,8 @@ const backLabel = computed(() => (props.scope === 'admin' ? 'Fleet' : 'All serve
 const owner = computed(() => (server.value as FleetServer | null)?.owner ?? null);
 
 // The owner's tabs; the admin's name the settings tab for the game's (beside
-// the machine's) and add the Machine tab.
+// the machine's) and add the Usage, Logs and Machine tabs (an owner never sees
+// raw logs or a machine's figures).
 const tabs = computed<Tab[]>(() => {
   const common = [
     { path: base.value, label: 'Overview' },
@@ -134,6 +143,8 @@ const tabs = computed<Tab[]>(() => {
     return [
       ...common,
       { path: `${base.value}/game-settings`, label: 'Game settings' },
+      { path: `${base.value}/usage`, label: 'Usage' },
+      { path: `${base.value}/logs`, label: 'Logs' },
       { path: `${base.value}/machine`, label: 'Machine' },
     ];
   }

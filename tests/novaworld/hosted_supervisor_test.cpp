@@ -15,7 +15,9 @@
 // push, the listing's end, the 60 s timeout, any exit while stopping, a stop
 // before any slot, a stop landing mid-placement, the kill switch), the crash
 // restart and its limit (any exit, the OOM kill, a start that failed; a stop is
-// never read from an exit code), a launch the cloud refused costing the server
+// never read from an exit code), a start whose data could not be fetched placed
+// again after the backoff with no restart counted (the agent's line kept on its
+// start, never in its event), a launch the cloud refused costing the server
 // no restart, the restart window, the boot and listing timeouts, the health
 // checks, a lost machine placing its server again with no restart counted (and
 // holding its listing's clock), no lobby live (nothing placed, an exit costing
@@ -23,13 +25,16 @@
 // or deleted, its comp grant withdrawn or its support tier canceled (also
 // during a crash restart's backoff), the owners' limits and their hold, the
 // reconciliation at the service's start, and the admin links kept in step with
-// the running servers. Compiles the server's auth.cpp, web_session.cpp and the
+// the running servers. Compiles the server's accounts/auth.cpp, accounts/web_session.cpp and the
 // hosted sources directly, so it runs on every build.
 
 #include "hosted_fleet_rig.h"
 
+#include "accounts/web_session.h"
+#include "core/random_secret.h"
 #include "hosted/admin_link.h"
-#include "web_session.h"
+#include "hosted/model/address_jobs.h"
+#include "hosted/model/address_repository.h"
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/cp1252.h>
@@ -37,6 +42,7 @@
 #include <formats/gamecfg/game_cfg.h>
 
 #include "common/test_expect.h"
+#include "common/test_parts.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -45,6 +51,7 @@
 #include <vector>
 
 using namespace hosted_rig;
+using opennova::novaworld_server::hosted::AddressState;
 
 namespace {
 
@@ -258,7 +265,7 @@ int test_renders() {
 	TEST_EXPECT(cfg.cfg.remote_admin_port == 32803);
 	TEST_EXPECT(cfg.cfg.mp_novaworld_host_lan_only == 0);
 
-	const std::string admin_password = hosted::random_secret(hosted::kAdminPasswordChars);
+	const std::string admin_password = nws::random_secret(hosted::kAdminPasswordChars);
 	const std::string admin_text = hosted::render_admin_cfg(plan, admin_password);
 	const auto admin = opennova::admincfg::parse(admin_text.data(), admin_text.size());
 	TEST_EXPECT(admin.users.size() == 1);
@@ -270,8 +277,8 @@ int test_renders() {
 	TEST_EXPECT(credential(creds, "NOVAWORLD_USER") == "srv-12");
 	TEST_EXPECT(credential(creds, "NOVAWORLD_PASS") == "pw");
 
-	const std::string a = hosted::random_secret(31);
-	const std::string b = hosted::random_secret(31);
+	const std::string a = nws::random_secret(31);
+	const std::string b = nws::random_secret(31);
 	TEST_EXPECT(a.size() == 31 && a != b);
 	TEST_EXPECT(std::all_of(a.begin(), a.end(), [](char c) {
 		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
@@ -292,8 +299,10 @@ int test_renders() {
 		const bool secret = f.name != "game.cfg"; // the host file carries the game password
 		TEST_EXPECT(f.secret == secret);
 	}
-	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials", "credentials.txt",
-		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game", "jo", "/exp", "jox01" };
+	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
+		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
+		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+		"/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
 	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597) == args);
 
@@ -301,11 +310,14 @@ int test_renders() {
 	// Operations', and no expansion is no /exp.
 	s.expansion_id.reset();
 	const hosted::LaunchSpec dfx2 = hosted::render_launch(s, "dfx2", "", in);
-	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials", "credentials.txt",
-		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game", "dfx2" };
+	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials",
+		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
+		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+		"/game", "dfx2" };
 	TEST_EXPECT(dfx2.serve_args == dfx2_args);
 	const hosted::LaunchSpec on = hosted::render_launch(s, "jo", "", in);
-	TEST_EXPECT(on.serve_args.size() == 10 && on.serve_args[8] == "/game" && on.serve_args[9] == "jo");
+	TEST_EXPECT(on.serve_args.size() == 16 && on.serve_args[14] == "/game" &&
+			on.serve_args[15] == "jo");
 	return 0;
 }
 
@@ -457,6 +469,15 @@ int test_pins_and_updates() {
 	row = rig.server(id);
 	TEST_EXPECT(row->generation == 4 && row->base_tree_id == jo_tree2 && row->expansion_tree_id == rig.data.jox_tree &&
 			!row->update_requested && !hosted::server_outdated(db, id) && row->restarts == 1);
+	// Its runs, each ended with why: a crash, its machine's drain, the owner's update;
+	// the fourth on the new tree, open.
+	{
+		const auto starts = hosted::list_starts(db, id, 10);
+		TEST_EXPECT(starts.size() == 4 && starts[0].generation == 4 && starts[0].ended_at.empty() &&
+				starts[0].base_tree_id == jo_tree2 && starts[1].cause == hosted::StartCause::Update &&
+				starts[2].cause == hosted::StartCause::Fleet && starts[3].cause == hosted::StartCause::Crash &&
+				starts[3].exit_code == 1 && starts[2].machine_id == machine && starts[1].machine_id != machine);
+	}
 	{
 		const FakeAgent::Container *c = rig.running_container(id);
 		TEST_EXPECT(c && c->desired.base_tree == jo_tree2 && c->desired.expansion_tree == rig.data.jox_tree);
@@ -510,7 +531,7 @@ int test_service_accounts() {
 	TEST_EXPECT(made.ok && made.id > 0);
 	auto account = nws::get_user_by_id(db, made.id);
 	TEST_EXPECT(account && account->kind == "service" && account->nwhandle == "srv-7");
-	TEST_EXPECT(account->comp_servers == 0 && account->role == "player");
+	TEST_EXPECT(nws::billing::comp_grants_of(db, made.id).servers == 0 && account->role == "player");
 	TEST_EXPECT(nws::get_user_by_id(db, player)->kind == "player");
 	const auto authed = nws::authenticate_user(db, "srv-7", "first-password");
 	TEST_EXPECT(authed && authed->kind == "service");
@@ -522,7 +543,7 @@ int test_service_accounts() {
 	rename.nwhandle = "Renamed";
 	TEST_EXPECT(nws::update_user(db, made.id, rename).error_code == "not_found");
 	TEST_EXPECT(nws::delete_user(db, made.id).error_code == "not_found");
-	TEST_EXPECT(nws::set_comp_servers(db, made.id, 1).error_code == "not_found");
+	TEST_EXPECT(!nws::billing::set_comp_grants(db, made.id, { 1, 0 }));
 	TEST_EXPECT(nws::bootstrap_admin(db, "srv-7").outcome == nws::BootstrapAdminResult::Outcome::NoSuchAccount);
 	// A session row planted by hand resolves to nothing.
 	db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
@@ -568,12 +589,16 @@ int test_service_accounts() {
 	TEST_EXPECT(nws::delete_service_account(db, player).error_code == "not_found");
 	TEST_EXPECT(nws::delete_service_account(db, made.id).ok);
 	TEST_EXPECT(!nws::get_user_by_id(db, made.id));
-	// The comp grant: 0..16.
-	TEST_EXPECT(nws::set_comp_servers(db, player, 2).ok && nws::get_user_by_id(db, player)->comp_servers == 2);
-	TEST_EXPECT(nws::set_comp_servers(db, player, 17).error_code == "invalid_field");
-	TEST_EXPECT(nws::set_comp_servers(db, player, -1).error_code == "invalid_field");
-	TEST_EXPECT(nws::set_comp_servers(db, 999999, 1).error_code == "not_found");
-	TEST_EXPECT(nws::get_user_by_id(db, player)->comp_servers == 2);
+	// The comp grants: a player's alone, a 0 deleting its row.
+	TEST_EXPECT(nws::billing::set_comp_grants(db, player, { 2, 1 }));
+	auto grants = nws::billing::comp_grants_of(db, player);
+	TEST_EXPECT(grants.servers == 2 && grants.own_machines == 1);
+	TEST_EXPECT(!nws::billing::set_comp_grants(db, 999999, { 1, 0 }));
+	TEST_EXPECT(nws::billing::set_comp_grants(db, player, { 3, 0 }));
+	grants = nws::billing::comp_grants_of(db, player);
+	TEST_EXPECT(grants.servers == 3 && grants.own_machines == 0);
+	TEST_EXPECT(db.query("SELECT 1 FROM comp_grants WHERE user_id = $1;", { BindValue(player) }).size() == 1);
+	TEST_EXPECT(nws::billing::comp_grants_by_account(db).at(player).servers == 3);
 	return 0;
 }
 
@@ -776,6 +801,15 @@ int test_lifecycle_and_stop() {
 			!row->update_requested);
 	TEST_EXPECT(contains(last_detail(rig.db, id), "with tree " + std::to_string(rig.data.jo_tree) +
 							 " and expansion tree " + std::to_string(rig.data.jox_tree)));
+	// Its start: made with its slot, its image, trees and log stream written as it rendered.
+	{
+		const auto starts = hosted::list_starts(rig.db, id, 10);
+		TEST_EXPECT(starts.size() == 1 && starts[0].generation == 1 && starts[0].machine_id == launched.id &&
+				starts[0].slot == 0 && starts[0].serve_image == kServeImage &&
+				starts[0].base_tree_id == rig.data.jo_tree && starts[0].expansion_tree_id == rig.data.jox_tree &&
+				starts[0].log_stream == std::to_string(id) + "/g1" && starts[0].running_at.empty() &&
+				starts[0].ended_at.empty());
+	}
 	const auto login = hosted::admin_login_of(rig.db, id);
 	TEST_EXPECT(login && login->user == "svc" && login->port == 32800 && row->admin_port == login->port);
 	TEST_EXPECT(login->password.size() == hosted::kAdminPasswordChars);
@@ -803,8 +837,10 @@ int test_lifecycle_and_stop() {
 					jox.files.size() == 3 && jox.files[0].name == "jox01.pff" && jox.files[0].size == 1000);
 		}
 	}
-	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials", "credentials.txt",
-		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game", "jo", "/exp", "jox01" };
+	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
+		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
+		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+		"/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(c->desired.args == args);
 	{
 		Database *db = &rig.db;
@@ -831,6 +867,10 @@ int test_lifecycle_and_stop() {
 	TEST_EXPECT(agent && agent->last.desired.size() == 1 && !agent->last.desired[0].files);
 	rig.tick();
 	TEST_EXPECT(rig.state(id) == State::Listing);
+	TEST_EXPECT(!hosted::list_starts(rig.db, id, 1)[0].running_at.empty());
+	// The container names the stream its output goes to.
+	TEST_EXPECT(rig.running_container(id) &&
+			rig.running_container(id)->desired.log_stream == std::to_string(id) + "/g1");
 	rig.step(); // no listing yet
 	TEST_EXPECT(rig.state(id) == State::Listing);
 	TEST_EXPECT(list_as(rig.db, service, 5001));
@@ -862,6 +902,12 @@ int test_lifecycle_and_stop() {
 	TEST_EXPECT(transitions(rig.db, id) ==
 			(std::vector<std::string>{ ">requested", "requested>provisioning", "provisioning>booting",
 					"booting>listing", "listing>running", "running>stopping", "stopping>stopped" }));
+	// The stop ended its start.
+	{
+		const auto starts = hosted::list_starts(rig.db, id, 10);
+		TEST_EXPECT(starts.size() == 1 && !starts[0].ended_at.empty() &&
+				starts[0].cause == hosted::StartCause::Stop && !starts[0].exit_code);
+	}
 	rig.step(); // nothing live: nothing happens, and the machine stays (idle) for now
 	TEST_EXPECT(rig.fake.launches == 1 && !rig.fake.was_terminated(launched.cloud_id));
 	return 0;
@@ -927,6 +973,200 @@ int test_own_machine() {
 	TEST_EXPECT(rig.machine(own_machine->id)->state == hosted::FleetMachineState::Ended);
 	TEST_EXPECT(rig.machine(own_machine->id)->end_reason == "its server ended");
 	TEST_EXPECT(rig.state(shared) == State::Running);
+	return 0;
+}
+
+// Stopped and started again at the fleet's maximum of own machines (1): the
+// start is taken while the stopped server's machine still waits for its end
+// (its place went with its server), another owner's own-machine start is
+// still at_capacity, and the new server's machine launches once the old one
+// has ended, never past the maximum (no launch refused).
+int test_own_restart_at_cap() {
+	Rig rig("hosted_own_restart");
+	rig.config.cap = 10;
+	rig.config.placement.max_own = 1;
+	rig.make_supervisor();
+	Database *db = &rig.db;
+	const hosted::PlacementPolicy &fleet = rig.config.placement;
+	const int64_t owner = make_player(*db, "restart_owner", 0);
+	subscribe(*db, owner, 1, "active", "sub_restart");
+	subscribe_machines(*db, owner, 1, "sub_restart_machine");
+	const int64_t other = make_player(*db, "restart_other", 0);
+	subscribe(*db, other, 1, "active", "sub_restart_other");
+	subscribe_machines(*db, other, 1, "sub_restart_other_machine");
+	const int64_t first = rig.request_as(owner, rig.settings(), true);
+	TEST_EXPECT(first > 0 && !rig.to_running(first, 5211).empty());
+	const int64_t old_machine = rig.machine_of(first);
+	TEST_EXPECT(!hosted::fleet_has_room(*db, fleet, true));
+	TEST_EXPECT(hosted::request_stop(*db, first, "stopped by its owner"));
+	rig.step(); // the push
+	hostdb::remove_host_by_rid(*db, 5211);
+	rig.step(); // stopped
+	TEST_EXPECT(rig.state(first) == State::Stopped);
+	// Its machine takes servers until the next pass ends it; its place is free.
+	TEST_EXPECT(rig.machine(old_machine)->state == hosted::FleetMachineState::Ready);
+	TEST_EXPECT(hosted::fleet_has_room(*db, fleet, true));
+	const int64_t again = rig.request_as(owner, rig.settings(), true);
+	TEST_EXPECT(again > 0);
+	// The one place is the new server's.
+	TEST_EXPECT(rig.request_as(other, rig.settings(), true) == 0);
+	TEST_EXPECT(!hosted::fleet_has_room(*db, fleet, true));
+	TEST_EXPECT(!rig.to_running(again, 5212).empty());
+	TEST_EXPECT(rig.machine(old_machine)->state == hosted::FleetMachineState::Ended);
+	TEST_EXPECT(rig.machine_of(again) != old_machine && rig.fake.launches == 2);
+	TEST_EXPECT(db->query("SELECT COUNT(*) FROM fleet_machines WHERE state = 'failed';").front().as_int(0) == 0);
+	return 0;
+}
+
+// A static address (hosted/model/address_repository.h): its own machine launched to carry
+// it, the server's container held back (booting, its agent told to start nothing)
+// while the machine's row does not show the address, an address.associate asked for
+// meanwhile, then the start once a describe brings the address; the subscription
+// ended, the address lapses only after a clean reconcile with Stripe, its machine
+// ends and the server is placed again without it (no restart counted), and the
+// address goes releasing once no machine carries it.
+int test_static_address() {
+	namespace billing = opennova::novaworld_server::billing;
+	Rig rig("hosted_address");
+	Database *db = &rig.db;
+	const int64_t owner = make_player(*db, "addr_owner", 0);
+	subscribe(*db, owner, 1, "active", "sub_addr_tier");
+	subscribe_machines(*db, owner, 1, "sub_addr_machine");
+	billing::SubscriptionRow address_sub;
+	address_sub.stripe_subscription_id = "sub_addr_address";
+	address_sub.stripe_customer_id = "cus_addr";
+	address_sub.user_id = owner;
+	address_sub.status = "active";
+	address_sub.item = billing::ItemKind::StaticAddress;
+	address_sub.price_id = "price_address";
+	address_sub.current_period_end = kWall + 30 * 24 * 60 * 60;
+	billing::upsert_subscription(*db, address_sub);
+	const auto named = hosted::name_subscription_address(*db, owner, "rig-place", rig.wall);
+	TEST_EXPECT(named.outcome == hosted::NameOutcome::Created);
+	const int64_t address = named.id;
+	const std::string ip = "203.0.113.50";
+	TEST_EXPECT(hosted::record_allocation(*db, address, "eipalloc-rig", ip) &&
+			hosted::record_dns_upsert(*db, address, "rig-place", "c1"));
+	const auto r = hosted::request_server(*db, owner, rig.settings(), rig.offered(), rig.config.cap, rig.wall, true,
+			&rig.config.placement, address);
+	TEST_EXPECT(r.outcome == hosted::RequestOutcome::Created);
+	const int64_t id = r.id;
+
+	// Its machine carries the address, and starts nothing while it shows another.
+	for (int i = 0; i < 6; ++i) rig.step();
+	const int64_t machine = rig.machine_of(id);
+	TEST_EXPECT(machine > 0 && rig.machine(machine)->address_id == address &&
+			rig.machine(machine)->state == hosted::FleetMachineState::Ready);
+	TEST_EXPECT(rig.machine(machine)->public_address != ip && rig.state(id) == State::Booting);
+	// The hold's rule, which fleet_health and the owner's phase read too.
+	TEST_EXPECT(hosted::awaits_address(*db, *rig.machine(machine)));
+	TEST_EXPECT(rig.agent_of(id) != nullptr && rig.agent_of(id)->last.desired.empty() &&
+			rig.running_container(id) == nullptr);
+	TEST_EXPECT(hosted::address_associate_pending(*db, machine));
+	// The association's describe brings the address: the server starts at it.
+	rig.fake.machines.at(rig.machine(machine)->cloud_id).public_address = ip;
+	TEST_EXPECT(!rig.to_running(id, 5301).empty());
+	TEST_EXPECT(rig.machine(machine)->public_address == ip);
+	TEST_EXPECT(!hosted::awaits_address(*db, *rig.machine(machine)));
+
+	// Its subscription ends: nothing lapses before a clean reconcile confirms it.
+	address_sub.status = "canceled";
+	billing::upsert_subscription(*db, address_sub);
+	rig.step();
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, address)->state == AddressState::Ready && rig.state(id) == State::Running);
+	hosted::limits_hold::reconciled(*db);
+	rig.step();
+	// Lapsed: its machine ended, the server placed again without it, no restart counted.
+	TEST_EXPECT(hosted::find_address(*db, address)->state != AddressState::Ready);
+	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Ended);
+	const auto replaced = rig.server(id);
+	TEST_EXPECT(replaced && !replaced->address_id && replaced->restarts == 0 && is_live(replaced->state) &&
+			has_event(*db, id, "its static address rig-place lapsed"));
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, address)->state == AddressState::Releasing);
+	TEST_EXPECT(jobs::job_pending(*db, std::string(hosted::kJobAddressRelease) + ":" + std::to_string(address)));
+	// It runs again on a machine of its own with no address.
+	TEST_EXPECT(!rig.to_running(id, 5302).empty());
+	TEST_EXPECT(rig.machine(rig.machine_of(id))->address_id == 0);
+	return 0;
+}
+
+// The lapses' brake: more subscriptions' addresses lapsing in one pass than
+// max(2, half of them) is the cache in doubt, and none lapses. Then, with the
+// add-on on, the allocations run again: one whose job is gone, and a refusal
+// that passes once its retry_at is reached.
+int test_static_address_brake() {
+	namespace billing = opennova::novaworld_server::billing;
+	Rig rig("hosted_address_brake");
+	Database *db = &rig.db;
+	std::vector<int64_t> addresses;
+	for (int i = 0; i < 3; ++i) {
+		const std::string n = std::to_string(i);
+		const int64_t owner = make_player(*db, "brake_owner" + n, 0);
+		subscribe(*db, owner, 1, "active", "sub_brake_tier" + n);
+		subscribe_machines(*db, owner, 1, "sub_brake_machine" + n);
+		billing::SubscriptionRow sub;
+		sub.stripe_subscription_id = "sub_brake_address" + n;
+		sub.stripe_customer_id = "cus_brake" + n;
+		sub.user_id = owner;
+		sub.status = "active";
+		sub.item = billing::ItemKind::StaticAddress;
+		sub.price_id = "price_address";
+		sub.current_period_end = kWall + 30 * 24 * 60 * 60;
+		billing::upsert_subscription(*db, sub);
+		const auto named = hosted::name_subscription_address(*db, owner, "brake-" + n, rig.wall);
+		TEST_EXPECT(named.outcome == hosted::NameOutcome::Created);
+		addresses.push_back(named.id);
+		sub.status = "canceled";
+		billing::upsert_subscription(*db, sub);
+	}
+	rig.step();
+	hosted::limits_hold::reconciled(*db);
+	rig.step();
+	for (const int64_t a : addresses) TEST_EXPECT(hosted::find_address(*db, a)->state == AddressState::Allocating);
+	// An admin's release of one goes through all the same.
+	TEST_EXPECT(hosted::lapse_address(*db, addresses[0], hosted::kLapseAdmin, "released by an admin"));
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, addresses[0])->state == AddressState::Releasing);
+	// Two left of three: within the brake, they lapse.
+	rig.step();
+	for (size_t i = 1; i < addresses.size(); ++i)
+		TEST_EXPECT(hosted::find_address(*db, addresses[i])->state != AddressState::Allocating);
+
+	// With the add-on on (as the worker reads it): an allocation whose job is gone
+	// runs again, and an exhausted quota's refusal is tried again once its retry_at
+	// is reached, never before.
+	rig.config.placement.max_addresses = 4;
+	rig.make_supervisor();
+	const int64_t owner = make_player(*db, "retry_owner", 0);
+	subscribe(*db, owner, 1, "active", "sub_retry_tier");
+	subscribe_machines(*db, owner, 1, "sub_retry_machine");
+	billing::SubscriptionRow sub;
+	sub.stripe_subscription_id = "sub_retry_address";
+	sub.stripe_customer_id = "cus_retry";
+	sub.user_id = owner;
+	sub.status = "active";
+	sub.item = billing::ItemKind::StaticAddress;
+	sub.price_id = "price_address";
+	sub.current_period_end = kWall + 30 * 24 * 60 * 60;
+	billing::upsert_subscription(*db, sub);
+	const auto named = hosted::name_subscription_address(*db, owner, "retry-me", rig.wall);
+	TEST_EXPECT(named.outcome == hosted::NameOutcome::Created);
+	const std::string key = std::string(hosted::kJobAddressAllocate) + ":" + std::to_string(named.id);
+	TEST_EXPECT(!jobs::job_pending(*db, key));
+	rig.step();
+	TEST_EXPECT(jobs::job_pending(*db, key));
+	db->exec("UPDATE jobs SET state = 'failed', finished_at = now() WHERE dedupe_key = $1;", { BindValue(key) });
+	TEST_EXPECT(hosted::fail_address(*db, named.id, "AddressLimitExceeded", hosted::address_retry_delay_s(0)));
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, named.id)->state == AddressState::Failed && !jobs::job_pending(*db, key));
+	db->exec("UPDATE hosted_addresses SET retry_at = now() - interval '1 second' WHERE id = $1;",
+			{ BindValue(named.id) });
+	rig.step();
+	const auto again = hosted::find_address(*db, named.id);
+	TEST_EXPECT(again->state == AddressState::Allocating && again->retries == 1 && again->reason.empty() &&
+			jobs::job_pending(*db, key));
 	return 0;
 }
 
@@ -1014,17 +1254,37 @@ int test_exits_and_crash_restarts() {
 	rig.tick(); // no container to stop
 	TEST_EXPECT(rig.state(zero) == State::Stopped);
 
-	// A container that never started because its data could not be fetched: the
-	// agent's reason is the event's, in place of "its container did not start".
+	// A container that never started because its data could not be fetched (the
+	// agent's reason): the data's cause, not the server's. No restart counted; its
+	// event says what happened without the agent's line, which its start keeps (an
+	// admin's to read); placed again only once the backoff has passed (its
+	// machine's agent then syncs without its trees and fetches them afresh), as
+	// often as it takes.
+	const std::string unfetched_line = "its data could not be fetched: aws s3 sync exited 1: NoSuchKey";
 	const int64_t unfetched = rig.request("fetch_fails");
 	TEST_EXPECT(rig.walk(unfetched, State::Booting));
-	rig.agent_of(unfetched)->fail_start(rig.container(unfetched),
-			"its data could not be fetched: aws s3 sync exited 1: NoSuchKey");
-	rig.sync_all();
-	rig.tick();
-	TEST_EXPECT(rig.state(unfetched) == State::Provisioning);
-	TEST_EXPECT(contains(last_detail(rig.db, unfetched),
-			"its data could not be fetched: aws s3 sync exited 1: NoSuchKey; restart 1 of 2"));
+	for (int64_t generation = 1; generation <= 2; ++generation) {
+		rig.agent_of(unfetched)->fail_start(rig.container(unfetched), unfetched_line);
+		rig.sync_all();
+		rig.tick();
+		const auto row = rig.server(unfetched);
+		TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && !row->machine_ref);
+		TEST_EXPECT(last_detail(rig.db, unfetched) ==
+				"its data could not be fetched; placed again (no restart counted)");
+		const auto starts = hosted::list_starts(rig.db, unfetched, 10);
+		TEST_EXPECT(starts.size() == static_cast<size_t>(generation) &&
+				starts[0].generation == generation &&
+				starts[0].cause == hosted::StartCause::DataUnavailable &&
+				starts[0].exit_code == 125 && starts[0].reason == unfetched_line);
+		if (generation == 2)
+			break;
+		rig.step(); // the backoff holds the placement
+		TEST_EXPECT(rig.state(unfetched) == State::Provisioning);
+		rig.advance(rig.config.restart_backoff_ms);
+		rig.step();
+		TEST_EXPECT(rig.state(unfetched) == State::Booting &&
+				rig.server(unfetched)->generation == 2 && rig.server(unfetched)->restarts == 0);
+	}
 	TEST_EXPECT(hosted::request_stop(rig.db, unfetched, "stopped by its owner"));
 	rig.tick();
 	TEST_EXPECT(rig.state(unfetched) == State::Stopped);
@@ -1072,6 +1332,14 @@ int test_exits_and_crash_restarts() {
 	row = rig.server(id);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 2);
 	TEST_EXPECT(contains(last_detail(rig.db, id), "ran out of memory; restart 2 of 2"));
+	// Each run a start of its own, each ended by its crash: its code, its OOM flag.
+	{
+		const auto starts = hosted::list_starts(rig.db, id, 10);
+		TEST_EXPECT(starts.size() == 2 && starts[0].generation == 2 && starts[0].cause == hosted::StartCause::Crash &&
+				starts[0].exit_code == 137 && starts[0].oom && starts[1].generation == 1 &&
+				starts[1].cause == hosted::StartCause::Crash && starts[1].exit_code == 3 && !starts[1].oom &&
+				!starts[1].running_at.empty());
+	}
 	// A start that fails (docker's 125): the limit is used up, it fails.
 	rig.advance(rig.config.restart_backoff_ms);
 	rig.step(); // placed, booting, its container started
@@ -1087,6 +1355,30 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(!row->service_user_id && !nws::get_user_by_id(rig.db, service));
 	rig.sync_all();
 	TEST_EXPECT(rig.agents.at(machine).containers.empty());
+	{
+		const auto starts = hosted::list_starts(rig.db, id, 10);
+		TEST_EXPECT(starts.size() == 3 && starts[0].cause == hosted::StartCause::Crash && starts[0].exit_code == 125 &&
+				starts[0].running_at.empty());
+	}
+	return 0;
+}
+
+// The age of the supervisor's last good pass (the fleet leader's heartbeat's
+// fleet_pass_age_s): none before it starts, each pass that runs whole moves it
+// on, and a pass its guard skips (a fleet process that no longer leads) does
+// not.
+int test_last_good_pass() {
+	Rig rig("hosted_last_good_pass");
+	TEST_EXPECT(rig.sup->last_good_pass_ms() == 0);
+	rig.tick();
+	TEST_EXPECT(rig.sup->last_good_pass_ms() == rig.now);
+	rig.advance(5000);
+	rig.tick();
+	TEST_EXPECT(rig.sup->last_good_pass_ms() == 6000);
+	rig.sup->set_pass_guard([](opennova::db::Database &) { return false; });
+	rig.advance(5000);
+	rig.tick();
+	TEST_EXPECT(rig.sup->last_good_pass_ms() == 6000);
 	return 0;
 }
 
@@ -1096,26 +1388,35 @@ int test_exits_and_crash_restarts() {
 // fails (its launch job's), the next pass counts it for the heartbeat, and no
 // launch of that kind follows within the launch backoff, which doubles with
 // each refusal in a row to its cap (the rig's 5, 10, 20, 20 s); the server is
-// placed on the next machine that launches, whose boot ends the backoff.
+// placed on the next machine that launches, whose boot ends the backoff. The
+// cloud's error code (an AWS CLI's text) names the machine's end and both events.
 int test_launch_failure() {
 	Rig rig("hosted_launch_failure");
 	const int64_t id = rig.request("launch_refused");
 	TEST_EXPECT(id > 0);
 	rig.tick(); // -> provisioning
 	rig.fake.fail_next_launch = true;
+	rig.fake.launch_error = "aws ec2 run-instances exited with code 254: An error occurred "
+							"(VcpuLimitExceeded) when calling the RunInstances operation: You have "
+							"requested more vCPU capacity than your current vCPU limit of 8 allows";
 	rig.tick(); // the launch, which the cloud refuses
 	rig.tick(); // the refusal counted
 	auto row = rig.server(id);
 	TEST_EXPECT(rig.fake.launches == 1);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && !row->machine_ref);
 	const std::string detail = last_detail(rig.db, id);
-	TEST_EXPECT(contains(detail, "the launch of its machine failed; it waits for the next (no restart counted)") &&
-			!contains(detail, "fake"));
+	TEST_EXPECT(contains(detail, "the launch of its machine failed (VcpuLimitExceeded); it waits for the next (no "
+								 "restart counted)") &&
+			!contains(detail, "vCPU limit of 8"));
 	TEST_EXPECT(rig.sup->launch_failures() == 1);
 	const auto machines = hosted::list_machines(rig.db, 10);
 	TEST_EXPECT(machines.size() == 1 && machines[0].state == hosted::FleetMachineState::Failed &&
-			machines[0].end_reason == "the launch failed" &&
+			machines[0].end_reason == "the launch failed (VcpuLimitExceeded)" &&
 			machines[0].kind == hosted::MachineKind::Shared);
+	TEST_EXPECT(!hosted::list_machine_events(rig.db, machines[0].id, 10).empty() &&
+			hosted::list_machine_events(rig.db, machines[0].id, 10).back().detail ==
+					"the launch failed (VcpuLimitExceeded)");
+	rig.fake.launch_error = "the fake refused the launch";
 	// Within the launch backoff (5 s) nothing launches.
 	rig.advance(rig.config.launch_backoff_ms - 1);
 	rig.tick();
@@ -1181,7 +1482,7 @@ int test_launch_refused_mid_pass() {
 	rig.advance(rig.config.restart_backoff_ms);
 	// The pass that places a again: as it does, the worker's refusal of b's
 	// machine lands; b, placed after a, launches nothing.
-	rig.fake.on_slot_plan = [db, own] { hosted::fail_refused_launch(*db, own); };
+	rig.fake.on_slot_plan = [db, own] { hosted::fail_refused_launch(*db, own, "the launch failed"); };
 	rig.sup->tick(rig.now);
 	rig.fake.on_slot_plan = nullptr;
 	TEST_EXPECT(rig.state(a) == State::Booting);
@@ -1433,7 +1734,7 @@ int test_listing_waits_while_lost() {
 	return 0;
 }
 
-// No lobby live (a lobby outage; a deployment's first release, whose controller
+// No lobby live (a lobby outage; a deployment's first release, whose fleet program
 // rolls before any lobby: prod's cutover of 2026-10-17 failed both restored
 // servers, their restarts used up, when each opennova-serve gave up on a gate
 // that handed it no lobby): nothing is placed and no machine launched, an exit
@@ -1553,7 +1854,7 @@ int test_owner_changes() {
 	// The hosting entitlement is the brake: the comp grant withdrawn (0), the
 	// server stops, as for a ban. Before the pickup nothing is placed.
 	const int64_t withdrawn = rig.request("owner_withdrawn");
-	TEST_EXPECT(nws::set_comp_servers(rig.db, *rig.server(withdrawn)->owner_user_id, 0).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(rig.db, *rig.server(withdrawn)->owner_user_id, { 0, 0 }));
 	rig.step();
 	TEST_EXPECT(stopped_with(rig.db, withdrawn, "hosting entitlement allows 0 hosted servers"));
 	rig.step();
@@ -1591,7 +1892,7 @@ int test_owner_changes() {
 	TEST_EXPECT(rig.state(crashed) == State::Provisioning);
 	const int64_t service = *rig.server(crashed)->service_user_id;
 	const int64_t generation = nws::get_user_by_id(rig.db, service)->credentials_gen;
-	TEST_EXPECT(nws::set_comp_servers(rig.db, *rig.server(crashed)->owner_user_id, 0).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(rig.db, *rig.server(crashed)->owner_user_id, { 0, 0 }));
 	rig.advance(rig.config.restart_backoff_ms);
 	rig.step();
 	TEST_EXPECT(stopped_with(rig.db, crashed, "hosting entitlement allows 0 hosted servers") &&
@@ -1617,7 +1918,7 @@ int test_limit_at_provisioning() {
 	TEST_EXPECT(older > 0 && newer > older);
 	rig.tick(); // both -> provisioning
 	TEST_EXPECT(rig.state(older) == State::Provisioning && rig.state(newer) == State::Provisioning);
-	TEST_EXPECT(nws::set_comp_servers(rig.db, owner, 1).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(rig.db, owner, { 1, 0 }));
 	rig.tick();
 	TEST_EXPECT(stopped_with(rig.db, newer, "hosting entitlement allows 1 hosted server"));
 	TEST_EXPECT(rig.fake.launches == 1); // the older one's machine
@@ -1696,7 +1997,7 @@ int test_owner_limits() {
 	return 0;
 }
 
-// The owners' limits' hold, its row (hosted/limits_hold.h) as the tests read
+// The owners' limits' hold, its row (hosted/model/limits_hold.h) as the tests read
 // and move it.
 struct HoldRow {
 	Database &db;
@@ -1724,7 +2025,7 @@ int test_mass_stop_hold() {
 	TEST_EXPECT(a > 0 && b > 0 && c > 0);
 	rig.tick();
 	for (const int64_t id : { a, b, c })
-		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 0).ok);
+		TEST_EXPECT(nws::billing::set_comp_grants(*db, *rig.server(id)->owner_user_id, { 0, 0 }));
 	rig.tick();
 	TEST_EXPECT(hold.held() && !hold.view().reason.empty());
 	TEST_EXPECT(hold.view().owners == 3 && hold.view().servers == 3);
@@ -1737,7 +2038,7 @@ int test_mass_stop_hold() {
 	// Two restored: one owner past, below the brake, and still held (no
 	// reconcile has confirmed the cache since).
 	for (const int64_t id : { a, b })
-		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 1).ok);
+		TEST_EXPECT(nws::billing::set_comp_grants(*db, *rig.server(id)->owner_user_id, { 1, 0 }));
 	rig.tick();
 	TEST_EXPECT(hold.held() && rig.state(c) != State::Stopping);
 	TEST_EXPECT(hold.view().owners == 1 && hold.view().servers == 1);
@@ -1767,7 +2068,7 @@ int test_hold_releases() {
 	Database *db = &rig.db;
 	const auto lapse = [&](const std::vector<int64_t> &ids, int comp) {
 		bool ok = true;
-		for (const int64_t id : ids) ok = nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, comp).ok && ok;
+		for (const int64_t id : ids) ok = nws::billing::set_comp_grants(*db, *rig.server(id)->owner_user_id, { comp, 0 }) && ok;
 		return ok;
 	};
 	const auto none_stopping = [&](const std::vector<int64_t> &ids) {
@@ -2052,51 +2353,47 @@ int test_admin_links_follow_running() {
 
 } // namespace
 
+// A row per case (tests/common/test_parts.h; service_tests.cmake lists them): each makes its own
+// databases, so the cases run side by side.
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
-	struct Case {
-		const char *name;
-		int (*fn)();
-	};
-	const Case cases[] = {
-		{ "settings_rules", test_settings_rules },
-		{ "renders", test_renders },
-		{ "data_sets", test_data_sets },
-		{ "no_data", test_no_data },
-		{ "pins_and_updates", test_pins_and_updates },
-		{ "service_accounts", test_service_accounts },
-		{ "requests", test_requests },
-		{ "fleet_room", test_fleet_room },
-		{ "lifecycle_and_stop", test_lifecycle_and_stop },
-		{ "two_servers_one_machine", test_two_servers_one_machine },
-		{ "own_machine", test_own_machine },
-		{ "stop_paths", test_stop_paths },
-		{ "exits_and_crash_restarts", test_exits_and_crash_restarts },
-		{ "launch_failure", test_launch_failure },
-		{ "launch_refused_mid_pass", test_launch_refused_mid_pass },
-		{ "restart_window", test_restart_window },
-		{ "timeouts_and_health", test_timeouts_and_health },
-		{ "listing_lost", test_listing_lost },
-		{ "machine_lost_replaces", test_machine_lost_replaces },
-		{ "listing_waits_while_lost", test_listing_waits_while_lost },
-		{ "waits_for_lobby", test_waits_for_lobby },
-		{ "owner_changes", test_owner_changes },
-		{ "limit_at_provisioning", test_limit_at_provisioning },
-		{ "owner_limits", test_owner_limits },
-		{ "mass_stop_hold", test_mass_stop_hold },
-		{ "hold_releases", test_hold_releases },
-		{ "reconciliation", test_reconciliation },
-		{ "relist_grace", test_relist_grace },
-		{ "console_ring", test_console_ring },
-		{ "admin_links_follow_running", test_admin_links_follow_running },
-	};
-	for (const Case &c : cases) {
-		std::printf("-- %s\n", c.name);
-		if (c.fn() != 0) {
-			std::fprintf(stderr, "FAIL: %s\n", c.name);
-			return 1;
-		}
-	}
+	const int failures = test_parts::run(argc, argv, {
+		{ "settings_rules", { test_settings_rules } },
+		{ "renders", { test_renders } },
+		{ "data_sets", { test_data_sets } },
+		{ "no_data", { test_no_data } },
+		{ "pins_and_updates", { test_pins_and_updates } },
+		{ "service_accounts", { test_service_accounts } },
+		{ "requests", { test_requests } },
+		{ "fleet_room", { test_fleet_room } },
+		{ "lifecycle_and_stop", { test_lifecycle_and_stop } },
+		{ "two_servers_one_machine", { test_two_servers_one_machine } },
+		{ "own_machine", { test_own_machine } },
+		{ "own_restart_at_cap", { test_own_restart_at_cap } },
+		{ "static_address", { test_static_address } },
+		{ "static_address_brake", { test_static_address_brake } },
+		{ "stop_paths", { test_stop_paths } },
+		{ "exits_and_crash_restarts", { test_exits_and_crash_restarts } },
+		{ "last_good_pass", { test_last_good_pass } },
+		{ "launch_failure", { test_launch_failure } },
+		{ "launch_refused_mid_pass", { test_launch_refused_mid_pass } },
+		{ "restart_window", { test_restart_window } },
+		{ "timeouts_and_health", { test_timeouts_and_health } },
+		{ "listing_lost", { test_listing_lost } },
+		{ "machine_lost_replaces", { test_machine_lost_replaces } },
+		{ "listing_waits_while_lost", { test_listing_waits_while_lost } },
+		{ "waits_for_lobby", { test_waits_for_lobby } },
+		{ "owner_changes", { test_owner_changes } },
+		{ "limit_at_provisioning", { test_limit_at_provisioning } },
+		{ "owner_limits", { test_owner_limits } },
+		{ "mass_stop_hold", { test_mass_stop_hold } },
+		{ "hold_releases", { test_hold_releases } },
+		{ "reconciliation", { test_reconciliation } },
+		{ "relist_grace", { test_relist_grace } },
+		{ "console_ring", { test_console_ring } },
+		{ "admin_links_follow_running", { test_admin_links_follow_running } },
+	});
+	if (failures != 0) return 1;
 	std::printf("OK: hosted servers' supervisor\n");
 	return 0;
 }

@@ -12,6 +12,7 @@
 // server's own `message` text is never shown.
 
 import { isAxiosError, type AxiosInstance } from 'axios';
+import { parseServerAddress } from './addresses';
 import { adminClient, apiClient } from './client';
 import { formatRetryAfter, parseRetryAfter } from './session';
 import type {
@@ -30,10 +31,13 @@ import type {
   HostedSettings,
   HostingEntitlement,
   PinnedTree,
+  ServerPhase,
+  StoppedBecause,
   PlayerAction,
   PlayerActionReply,
   RotationEntry,
   RotationEntryAction,
+  StartRequest,
   StartSettings,
 } from '../types/hostedServer';
 import { FIELD_RULES, INT_FIELDS, MISSIONS_MAX, isSettingsField, type SettingsField } from '../utils/hostedSettings';
@@ -54,6 +58,7 @@ export type HostedErrorCode =
   | 'server_limit'
   | 'no_own_machine'
   | 'at_capacity'
+  | 'address_unavailable'
   | 'not_found'
   | 'not_live'
   | 'up_to_date'
@@ -93,6 +98,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<HostedErrorCode>([
   'server_limit',
   'no_own_machine',
   'at_capacity',
+  'address_unavailable',
   'not_found',
   'not_live',
   'up_to_date',
@@ -161,6 +167,8 @@ function messageFor(
       return 'Each of your own machines already runs a server. Start this one on a shared machine, or add another own machine.';
     case 'at_capacity':
       return 'Every hosted server place on NovaWorld is taken right now. Try again later.';
+    case 'address_unavailable':
+      return 'That static address is not ready, or another of your servers runs at it. Pick another, or start without one.';
     case 'not_found':
       return 'That hosted server no longer exists. Refresh the list.';
     case 'not_live':
@@ -257,13 +265,42 @@ function parseServerData(value: unknown): HostedServerData {
 
 // A hosted server as the routes answer it, or null when it lacks what every
 // page needs (its id, state, liveness and settings). The data it runs on
-// (its data set, expansion, trees and update flags) is read with defaults,
-// so a reply that leaves them out still shows.
+// (its data set, expansion, trees and update flags) and its static address
+// are read with defaults, so a reply that leaves them out still shows.
+function parsePhase(value: unknown): ServerPhase | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.name !== 'string') return null;
+  const phase: ServerPhase = { name: v.name };
+  if (isCount(v.bytes_done) && isCount(v.bytes_total)) {
+    phase.bytes_done = v.bytes_done;
+    phase.bytes_total = v.bytes_total;
+  }
+  if (isCount(v.restart) && isCount(v.restart_limit)) {
+    phase.restart = v.restart;
+    phase.restart_limit = v.restart_limit;
+  }
+  if (typeof v.cause === 'string') phase.cause = v.cause;
+  if (typeof v.line === 'string' && v.line !== '') phase.line = v.line;
+  return phase;
+}
+
+function parseStoppedBecause(value: unknown): StoppedBecause | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.cause !== 'string') return null;
+  return {
+    cause: v.cause,
+    exit_code: Number.isInteger(v.exit_code) ? (v.exit_code as number) : null,
+    oom: v.oom === true,
+    line: typeof v.line === 'string' ? v.line : '',
+  };
+}
+
 export function parseHostedServer(value: unknown): HostedServer | null {
   if (!isHostedServerShape(value)) return null;
   const v = value as unknown as Record<string, unknown>;
   return {
     ...value,
+    address: parseServerAddress(v.address),
     game_display_name: typeof v.game_display_name === 'string' ? v.game_display_name : '',
     expansion_display_name: typeof v.expansion_display_name === 'string' ? v.expansion_display_name : '',
     data_set: parseNamed(v.data_set, () => ({})),
@@ -271,6 +308,8 @@ export function parseHostedServer(value: unknown): HostedServer | null {
     data: parseServerData(v.data),
     update_available: v.update_available === true,
     update_requested: v.update_requested === true,
+    phase: parsePhase(v.phase),
+    stopped_because: parseStoppedBecause(v.stopped_because),
   };
 }
 
@@ -395,10 +434,18 @@ export function fetchMyServer(id: number, signal?: AbortSignal): Promise<HostedR
 }
 
 // POST /api/me/servers: a new server, requested (202), with these settings,
-// on one of the account's own machines when `ownMachine`. The service's
-// supervisor takes it from there.
-export function startHostedServer(settings: StartSettings, ownMachine = false): Promise<HostedResult<HostedServer>> {
-  return forServer(() => apiClient.post<unknown>('/me/servers', { ...settings, own_machine: ownMachine }));
+// on one of the account's own machines when `ownMachine`, there at the static
+// address `addressId` when one is named (409 address_unavailable when it is
+// not ready, or another live server's). The service's supervisor takes it
+// from there.
+export function startHostedServer(
+  settings: StartSettings,
+  ownMachine = false,
+  addressId: number | null = null,
+): Promise<HostedResult<HostedServer>> {
+  const body: StartRequest = { ...settings, own_machine: ownMachine };
+  if (ownMachine && addressId !== null) body.address_id = addressId;
+  return forServer(() => apiClient.post<unknown>('/me/servers', body));
 }
 
 // POST /api/me/servers/<id>/stop: the server to stopping (202; also when it

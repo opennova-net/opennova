@@ -1,0 +1,69 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcsAgentCluster",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:RegisterContainerInstance",
+        "ecs:DeregisterContainerInstance",
+        "ecs:SubmitContainerStateChange",
+        "ecs:SubmitTaskStateChange",
+        "ecs:SubmitAttachmentStateChanges"
+      ],
+      "Resource": "arn:aws:ecs:${region}:${account_id}:cluster/opennova-*-fleet"
+    },
+    {
+      "Sid": "EcsAgentInstance",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:Poll",
+        "ecs:StartTelemetrySession"
+      ],
+      "Resource": "arn:aws:ecs:${region}:${account_id}:container-instance/opennova-*-fleet/*"
+    },
+    {
+      "Sid": "Unscoped",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DiscoverPollEndpoint",
+        "ssmmessages:CreateControlChannel",
+        "ssmmessages:CreateDataChannel",
+        "ssmmessages:OpenControlChannel",
+        "ssmmessages:OpenDataChannel"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "MachineAndServerLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*/machines",
+        "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*/machines:*",
+        "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*/servers",
+        "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*/servers:*"
+      ]
+    },
+    {
+      "Sid": "ListTrees",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::opennova-*",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "data/trees/*"
+        }
+      }
+    },
+    {
+      "Sid": "ReadTrees",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::opennova-*/data/trees/*"
+    }
+  ]
+}

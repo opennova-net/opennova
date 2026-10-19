@@ -1,12 +1,13 @@
 #include "data_set_routes.h"
 
-#include "catalog_repository.h"
-#include "hosted/data_set_jobs.h"
-#include "hosted/data_set_files.h"
-#include "hosted/data_set_repository.h"
+#include "core/loggable.h"
+#include "core/object_store.h"
+#include "data_sets/data_set_files.h"
+#include "data_sets/data_set_jobs.h"
+#include "data_sets/data_set_repository.h"
+#include "hosted/model/hosted_repository.h"
 #include "http_json.h"
-#include "loggable.h"
-#include "object_store.h"
+#include "program/catalog_repository.h"
 
 #include <base/io/strutil.h>
 
@@ -775,7 +776,7 @@ crow::response DataSetRoutes::tree_finalize(const crow::request &req, uint64_t i
 // objects removed, the row pruned, 204; a ready or failed one: the row marked pruned and a
 // tree.prune job in the same transaction, 202 {"tree"}; a pruned one 204 (nothing to do).
 // 404 not_found; 409 current, baseline, pinned (with "servers", how many live ones) for a
-// tree a data set or a live server still needs, in_progress for one the worker is
+// tree a data set or a live server still needs, in_progress for one the data program is
 // finalizing or building; 502 store_error; 503 store_unavailable.
 crow::response DataSetRoutes::tree_remove(const crow::request &req, uint64_t id, uint64_t tree) {
 	auto caller = access_.require_admin(req);
@@ -795,7 +796,7 @@ crow::response DataSetRoutes::tree_remove(const crow::request &req, uint64_t id,
 			case TreeState::Finalizing:
 			case TreeState::Building:
 				return json_error(409, "in_progress",
-						"the worker is finalizing or building this tree; wait for it");
+						"the data program is finalizing or building this tree; wait for it");
 			case TreeState::Uploading: {
 				if (store_ == nullptr)
 					return store_unavailable();

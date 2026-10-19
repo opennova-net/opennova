@@ -92,7 +92,7 @@ struct Rig {
 		billing::register_billing_jobs(registry, *sync);
 	}
 
-	// A controller's start: the reconcile (it checks the prices), then the sync.
+	// A start: the reconcile (it checks the prices), then the sync.
 	void first_pass() {
 		sync->reconcile_all(now);
 		sync->sync_pending(now);

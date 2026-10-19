@@ -1,14 +1,14 @@
 # ---------------------------------------------------------------------------
-# The service: what its five programs share (programs.tf makes the programs;
+# The service: what its six programs share (programs.tf makes the programs;
 # DEPLOY.md, "Operating")
 # ---------------------------------------------------------------------------
 #
-# Five programs, each its own image and an ECS service on Fargate: gate (UDP,
+# Six programs, each its own image and an ECS service on Fargate: gate (UDP,
 # behind load_balancer.tf's network load balancer), lobby (UDP, behind the same
 # balancer), web (the HTTP routes and the website's API, with the portal's
-# nginx, behind the same balancer), controller (the fleet's reconcile
-# pass, the jobs' scheduling, the machines' internal listener) and worker (the
-# jobs). No task keeps state of its own: secrets live in SSM Parameter Store
+# nginx, behind the same balancer), fleet (the fleet's reconcile pass, the
+# machines' internal listener), worker (the jobs and their schedules) and data
+# (the data sets' jobs over the store). No task keeps state of its own: secrets live in SSM Parameter Store
 # (the tasks read them at their start), the release in SSM and the operations
 # bucket, logs in CloudWatch, everything durable in the database (database.tf),
 # web's ephemeral state in the cache (cache.tf).
@@ -31,11 +31,15 @@ data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  # Every role the stack makes carries this boundary (infra/aws/iam/opennova-role-boundary.json,
-  # which infra/org makes in the deployment's account): the deploy user may create and change
-  # opennova-* roles only under it, so no role it writes can hold more than OpenNova's own resources.
-  role_boundary_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/opennova-role-boundary"
-  partition         = data.aws_partition.current.partition
+  # Every role the stack makes carries one of two boundaries, which infra/org makes in the
+  # deployment's account: the deploy user may create and change opennova-* roles only under
+  # them, so no role it writes can hold more than OpenNova's own resources. The machines' two
+  # roles (the instance role, hostd's task role) carry the machine boundary
+  # (infra/aws/iam/opennova-machine-boundary.json), every other role the role boundary
+  # (opennova-role-boundary.json).
+  role_boundary_arn    = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/opennova-role-boundary"
+  machine_boundary_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/opennova-machine-boundary"
+  partition            = data.aws_partition.current.partition
 
   adopt_eip                 = var.service_eip_allocation_id != ""
   service_eip_allocation_id = local.adopt_eip ? data.aws_eip.gate[0].id : aws_eip.gate[0].allocation_id

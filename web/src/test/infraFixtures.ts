@@ -193,8 +193,9 @@ export function cloud(overrides: Partial<InfraCloudRead> = {}): InfraCloudRead {
       }),
       service('lobby'),
       rollingWeb(),
-      service('controller'),
+      service('fleet'),
       service('worker'),
+      service('data'),
     ],
     missing_services: [],
     services_error: null,
@@ -264,6 +265,30 @@ export function cloud(overrides: Partial<InfraCloudRead> = {}): InfraCloudRead {
     },
     cache_error: null,
     machines_error: null,
+    // The fleet cluster: hostd's daemon on machine 1, its container instance.
+    fleet: {
+      cluster: 'opennova-prod-fleet',
+      hostd: service('hostd', {
+        task_definition: 'opennova-prod-hostd:5',
+        on_release: null,
+        tasks: [task('5555eeee5555eeee5555eeee5555eeee', 'hostd', { task_definition: 'opennova-prod-hostd:5', on_release: null })],
+      }),
+      instances: [
+        {
+          id: 'ci0000aaaa',
+          ec2_instance_id: 'i-0aaaaaaaaaaaaaaa1',
+          machine_id: '1',
+          kind: 'shared',
+          image_id: 'ami-0aaa',
+          status: 'ACTIVE',
+          agent_connected: true,
+          running_tasks: 1,
+          pending_tasks: 0,
+          agent_version: '1.97.0',
+        },
+      ],
+      error: null,
+    },
     ...overrides,
   };
 }
@@ -300,6 +325,7 @@ export function machine(id: number, overrides: Partial<InfraMachine> = {}): Infr
     end_reason: null,
     zone: 'us-east-1b',
     ec2_state: 'running',
+    image_id: 'ami-0aaa',
     ...overrides,
   };
 }
@@ -309,7 +335,7 @@ export function overview(overrides: Partial<InfraOverview> = {}): InfraOverview 
     at: ago(0),
     cloud: cloud(),
     lobbies: [lobby(1), lobby(2, { state: 'draining', live: false, last_seen_at: ago(120), seen_ago_seconds: 120, sessions: 0, listings: 0 })],
-    controller: { leader: 'controller-1234abcd', generation: 3, elected_at: ago(3600) },
+    fleet: { leader: 'fleet-1234abcd', generation: 3, elected_at: ago(3600) },
     hosting: { enabled: true, provider: 'ec2' },
     machines: [
       machine(1),
@@ -322,6 +348,7 @@ export function overview(overrides: Partial<InfraOverview> = {}): InfraOverview 
         end_reason: 'drained',
         zone: null,
         ec2_state: null,
+        image_id: null,
       }),
     ],
     ...overrides,
@@ -337,6 +364,6 @@ export function localOverview(): InfraOverview {
         'AWS is not read here: ONNET_INFRA_CLUSTER is unset (the local stack runs no ECS services, load balancer, RDS or ElastiCache)',
     },
     hosting: { enabled: true, provider: 'docker' },
-    machines: [machine(1, { provider: 'docker', cloud_id: 'dev-machine-1', instance_type: null, zone: null, ec2_state: null })],
+    machines: [machine(1, { provider: 'docker', cloud_id: 'dev-machine-1', instance_type: null, zone: null, ec2_state: null, image_id: null })],
   });
 }

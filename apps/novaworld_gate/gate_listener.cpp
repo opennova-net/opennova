@@ -1,7 +1,7 @@
 #include "gate_listener.h"
 
-#include "loggable.h"
-#include "server_config.h"
+#include "core/loggable.h"
+#include "program/server_config.h"
 
 #include <net_sockets.h>
 #include <net/napi/envelope.h>

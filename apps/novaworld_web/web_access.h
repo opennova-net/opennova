@@ -8,10 +8,10 @@
 // /api/admin/* handler opens with require_admin, and a session-authenticated
 // site route with require_user.
 
-#include "auth.h"
+#include "accounts/auth.h"
+#include "accounts/web_session.h"
 #include "http_json.h"
 #include "rate_limiter.h"
-#include "web_session.h"
 
 #include <net/novaworld/db/database.h>
 

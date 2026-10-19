@@ -11,7 +11,7 @@
 // machine (not while `lagging`: EC2 lists a launch late), as the EC2 driver
 // does; it records its subnet (MachineLaunch::record_subnet) before it
 // launches, and one it cannot record launches nothing. The fleet jobs
-// (fleet_jobs.h) call it from any worker thread: its state is under a lock. A
+// (hosted/cloud/fleet_job_handlers.h) call it from any worker thread: its state is under a lock. A
 // FakeAgent per machine syncs the way the agent routes do
 // (fleet_repository.h record_sync, then the supervisor's
 // FleetDesiredState::sync), runs each desired container it got files for, and
@@ -20,11 +20,11 @@
 // answer leaves out; the test exits its containers. Nothing runs, nothing is
 // fetched: the container keeps the answer that started it, trees and all.
 
-#include "hosted/agent_protocol.h"
 #include "hosted/fleet_desired_state.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/machine_driver.h"
-#include "hosted/slots.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/machine_driver.h"
+#include "hosted/protocol/agent_protocol.h"
+#include "hosted/protocol/slots.h"
 
 #include <net/novaworld/db/database.h>
 
@@ -77,7 +77,7 @@ public:
 		++launches;
 		if (fail_next_launch) {
 			fail_next_launch = false;
-			error = "the fake refused the launch";
+			error = launch_error;
 			return std::nullopt;
 		}
 		// Its subnet: a run again goes where its row recorded an earlier run's
@@ -219,6 +219,7 @@ public:
 	// The launch's age the last describe was handed (its row's), under mu.
 	int64_t last_launched_ago_ms = -2;
 	bool fail_next_launch = false;
+	std::string launch_error = "the fake refused the launch"; // the refusal's text
 	// The subnet a first run launches in (a test moves it, as the zones' counts
 	// move between a launch's runs), under mu.
 	std::string subnet = "subnet-a";

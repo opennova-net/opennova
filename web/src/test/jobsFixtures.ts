@@ -154,7 +154,8 @@ export function overview(overrides: Partial<JobsOverview> = {}): JobsOverview {
       }),
       schedule('jobs.prune', { interval_seconds: 3600, pending: true }),
     ],
-    controller: { leader: 'controller-0f0f0f0f', elected_at: ago(7200), last_scheduled_at: ago(5) },
+    last_scheduled_at: ago(5),
+    fleet: { leader: 'fleet-0f0f0f0f', elected_at: ago(7200) },
     ...overrides,
   };
 }

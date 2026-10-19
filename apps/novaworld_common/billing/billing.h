@@ -4,7 +4,7 @@
 // Checkout and the Customer Portal; README "Billing (monthly support tiers)"):
 // the complete settings, the typed client over a transport, the sync worker and
 // this database's instance id. Web and the worker each make one when
-// check_billing_config answers "" (parts.h; the transport curl,
+// check_billing_config answers "" (billing_stack.h; the transport curl,
 // CurlStripeApi), the tests over the fake
 // (tests/novaworld/billing_fake_stripe.h); the routes (billing_routes.h) and the
 // heartbeat read it, and with none the routes answer billing_disabled. Crow-free.

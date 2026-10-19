@@ -29,6 +29,7 @@ STRIPE_PRICE_TIER1=op://@VAULT@/@STRIPE_ITEM@/price_tier1 # billing
 STRIPE_PRICE_TIER2=op://@VAULT@/@STRIPE_ITEM@/price_tier2 # billing
 STRIPE_PRICE_TIER3=op://@VAULT@/@STRIPE_ITEM@/price_tier3 # billing
 STRIPE_PRICE_OWN_MACHINE=op://@VAULT@/@STRIPE_ITEM@/price_own_machine # billing
+STRIPE_PRICE_STATIC_ADDRESS=op://@VAULT@/@STRIPE_ITEM@/price_static_address # billing
 # Edge authentication: the deployment's own secret, which the zone's Transform
 # Rule stamps on that deployment's web hostnames alone (infra/zone). The
 # previous one only during a rotation (DEPLOY.md).

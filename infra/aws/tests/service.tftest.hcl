@@ -154,14 +154,19 @@ override_resource {
   values          = { id = "sg-0web" }
 }
 override_resource {
-  target          = aws_security_group.program["controller"]
+  target          = aws_security_group.program["fleet"]
   override_during = plan
-  values          = { id = "sg-0controller" }
+  values          = { id = "sg-0fleet" }
 }
 override_resource {
   target          = aws_security_group.program["worker"]
   override_during = plan
   values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.program["data"]
+  override_during = plan
+  values          = { id = "sg-0data" }
 }
 override_resource {
   target          = aws_security_group.lb
@@ -214,14 +219,19 @@ override_resource {
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1" }
 }
 override_resource {
-  target          = aws_ecs_task_definition.program["controller"]
+  target          = aws_ecs_task_definition.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1" }
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.backup
@@ -244,14 +254,19 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-web" }
 }
 override_resource {
-  target          = aws_iam_role.program["controller"]
+  target          = aws_iam_role.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-controller" }
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-fleet" }
 }
 override_resource {
   target          = aws_iam_role.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-worker" }
+}
+override_resource {
+  target          = aws_iam_role.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-data" }
 }
 override_resource {
   target          = aws_iam_role.execution
@@ -304,7 +319,7 @@ run "adopted_eip" {
   }
   assert {
     condition = alltrue([
-      for p in ["gate", "lobby", "web", "controller", "worker"] :
+      for p in ["gate", "lobby", "web", "fleet", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_PUBLIC_HOST"] == "54.162.79.147" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_WEB_HOST"] == "54.162.79.147"
     ])
@@ -314,7 +329,7 @@ run "adopted_eip" {
     condition = (
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_DEPLOYMENT='prod'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_CLUSTER='opennova-prod'\n") &&
-      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_TASK_DEFINITIONS='{\"backup\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-backup:1\",\"controller\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1\",\"gate\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-gate:1\",\"lobby\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-lobby:1\",\"web\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1\",\"worker\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1\"}'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_TASK_DEFINITIONS='{\"backup\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-backup:1\",\"data\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:1\",\"fleet\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:1\",\"gate\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-gate:1\",\"lobby\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-lobby:1\",\"web\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1\",\"worker\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1\"}'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_TASK_SUBNETS='subnet-0public0a,subnet-0public0b'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_BACKUP_SECURITY_GROUP='sg-0backup'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_IMAGE_REGISTRY='ghcr.io/opennova-net'\n") &&

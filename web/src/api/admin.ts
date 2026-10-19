@@ -3,9 +3,11 @@
 // of throwing, with the server's `error` code mapped to a message: the
 // server's own `message` text is never shown. The users' calls are in
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
-// adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts; here are the
+// adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts, the static
+// addresses' in adminAddresses.ts; here are the
 // NovaWorld service's status and sessions, and
-// the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*).
+// the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
+// machine's page, the roll preview and the roll).
 
 import { isAxiosError } from 'axios';
 import { adminClient } from './client';
@@ -17,7 +19,21 @@ import type {
   ConnectionsResponse,
   ServerStatus,
 } from '../types/admin';
-import type { FleetMachine, FleetQuery, FleetResponse, FleetRoom, FleetServer } from '../types/hostedServer';
+import type {
+  FleetMachine,
+  FleetQuery,
+  FleetResponse,
+  FleetRoom,
+  FleetServer,
+  MachineDetail,
+  MachineEvent,
+  MachineStats,
+  MachineTree,
+  RollPlan,
+  RollStep,
+  SlotHolder,
+} from '../types/hostedServer';
+import { ADDRESS_NAME_RULE } from '../utils/addressView';
 
 // The `error` codes these routes answer with, plus `network` (no reply at
 // all) and `unknown` (a reply this client does not recognise).
@@ -68,6 +84,17 @@ export type AdminErrorCode =
   | 'not_published'
   | 'published'
   | 'up_to_date'
+  // The static address routes (adminAddresses.ts).
+  | 'invalid_name'
+  | 'name_taken'
+  | 'confirm_mismatch'
+  | 'not_releasable'
+  | 'not_retryable'
+  | 'address_limit'
+  | 'addresses_disabled'
+  // The log route (logs.ts).
+  | 'no_log_store'
+  | 'logs_unavailable'
   | 'network'
   | 'unknown';
 
@@ -127,6 +154,15 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'not_published',
   'published',
   'up_to_date',
+  'invalid_name',
+  'name_taken',
+  'confirm_mismatch',
+  'not_releasable',
+  'not_retryable',
+  'address_limit',
+  'addresses_disabled',
+  'no_log_store',
+  'logs_unavailable',
 ]);
 
 function adminMessageFor(code: AdminErrorCode): string {
@@ -218,6 +254,24 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'A published release cannot be deleted. Retire it first.';
     case 'up_to_date':
       return 'That server already runs the current data.';
+    case 'invalid_name':
+      return `That name cannot name a static address. ${ADDRESS_NAME_RULE}`;
+    case 'name_taken':
+      return 'Another static address already has that name (a released one keeps its name until renamed).';
+    case 'confirm_mismatch':
+      return "The name typed is not the address's. Type it exactly to release it.";
+    case 'not_releasable':
+      return 'That address is on its way out already. Refresh the list.';
+    case 'not_retryable':
+      return 'Only an address the cloud refused is tried again. Refresh the list.';
+    case 'address_limit':
+      return 'That account has a static address for every own machine it has. Grant it another own machine first.';
+    case 'addresses_disabled':
+      return 'This NovaWorld service sells no static address (ONNET_FLEET_MAX_ADDRESSES is 0, or its address settings are incomplete: the boot log says which).';
+    case 'no_log_store':
+      return 'This NovaWorld service reads no log store (ONNET_LOG_STORE is unset or malformed: the boot log says which).';
+    case 'logs_unavailable':
+      return 'The log store could not be read. Try again shortly.';
     case 'network':
       return 'Could not reach the server. Check your connection and try again.';
     case 'unknown':
@@ -365,12 +419,52 @@ export function stopListedServer(rid: number): Promise<AdminResult<void>> {
 // The hosted fleet.
 
 const isCount = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
+const numberOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const textOrNull = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
+const isFields = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-function pickMachine(value: unknown): FleetMachine | null {
+function pickMachineStats(value: unknown): MachineStats | null {
+  if (!isFields(value)) return null;
+  return {
+    cpu_percent: numberOrNull(value.cpu_percent),
+    memory_used_bytes: numberOrNull(value.memory_used_bytes),
+    memory_total_bytes: numberOrNull(value.memory_total_bytes),
+    disk_free_bytes: numberOrNull(value.disk_free_bytes),
+    disk_total_bytes: numberOrNull(value.disk_total_bytes),
+    net_in_bytes: numberOrNull(value.net_in_bytes),
+    net_out_bytes: numberOrNull(value.net_out_bytes),
+    net_in_bps: numberOrNull(value.net_in_bps),
+    net_out_bps: numberOrNull(value.net_out_bps),
+  };
+}
+
+// A server's last minute of ticks (the admin server JSON's and the machine
+// page's slot holders' "tick"); null for none.
+function pickTick(value: unknown): FleetServer['tick'] {
+  return isFields(value) ? { p99_ms: numberOrNull(value.p99_ms), late: numberOrNull(value.late) } : null;
+}
+
+// The machine page's holders also name their servers: name, game_port, tick.
+function pickSlotHolder(value: unknown): SlotHolder | null {
+  if (!isFields(value) || !isCount(value.slot) || !isCount(value.server_id) || typeof value.state !== 'string') return null;
+  const holder: SlotHolder = { slot: value.slot, server_id: value.server_id, state: value.state };
+  if (typeof value.name === 'string') holder.name = value.name;
+  if ('game_port' in value) holder.game_port = isCount(value.game_port) ? value.game_port : null;
+  if ('tick' in value) holder.tick = pickTick(value.tick);
+  return holder;
+}
+
+function pickMachineAddress(value: unknown): FleetMachine['address'] {
+  if (!isFields(value) || !isCount(value.id) || typeof value.name !== 'string') return null;
+  return { id: value.id, name: value.name };
+}
+
+export function pickMachine(value: unknown): FleetMachine | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null) return null;
   if ((typeof v.id !== 'string' && typeof v.id !== 'number') || (v.kind !== 'shared' && v.kind !== 'own')) return null;
   if (typeof v.state !== 'string' || !isCount(v.slots) || !isCount(v.slots_used)) return null;
+  const release: Record<string, unknown> = isFields(v.release) ? v.release : {};
   return {
     id: String(v.id),
     cloud_id: typeof v.cloud_id === 'string' ? v.cloud_id : '',
@@ -381,6 +475,26 @@ function pickMachine(value: unknown): FleetMachine | null {
     slots_used: v.slots_used,
     public_address: typeof v.public_address === 'string' ? v.public_address : '',
     egress_bytes_month: typeof v.egress_bytes_month === 'number' ? v.egress_bytes_month : 0,
+    agent_version: typeof v.agent_version === 'string' ? v.agent_version : '',
+    agent_protocol: isCount(v.agent_protocol) ? v.agent_protocol : null,
+    agent_image: typeof v.agent_image === 'string' ? v.agent_image : '',
+    agent_log_stream: textOrNull(v.agent_log_stream),
+    protocol_mismatch_since: textOrNull(v.protocol_mismatch_since),
+    lost_held: v.lost_held === true,
+    image_id: textOrNull(v.image_id),
+    last_report_at: textOrNull(v.last_report_at),
+    launched_at: textOrNull(v.launched_at),
+    ready_at: textOrNull(v.ready_at),
+    ended_at: textOrNull(v.ended_at),
+    end_reason: textOrNull(v.end_reason),
+    stats: pickMachineStats(v.stats),
+    stats_at: textOrNull(v.stats_at),
+    release: { image_id: textOrNull(release.image_id), agent_image: textOrNull(release.agent_image) },
+    outdated: typeof v.outdated === 'boolean' ? v.outdated : null,
+    address: pickMachineAddress(v.address),
+    slot_holders: Array.isArray(v.slot_holders)
+      ? v.slot_holders.map(pickSlotHolder).filter((h): h is SlotHolder => h !== null)
+      : [],
   };
 }
 
@@ -403,6 +517,8 @@ function pickFleetServer(value: unknown): FleetServer | null {
     base_tree_id: isCount(v.base_tree_id) ? v.base_tree_id : null,
     expansion_tree_id: isCount(v.expansion_tree_id) ? v.expansion_tree_id : null,
     outdated: v.outdated === true,
+    generation: isCount(v.generation) ? v.generation : 0,
+    tick: pickTick(v.tick),
   };
 }
 
@@ -504,8 +620,77 @@ export async function machineAction(id: string, action: 'drain' | 'end'): Promis
   return result;
 }
 
-// POST /api/admin/fleet/roll: every shared machine drains and its servers move
-// to fresh machines, without counting a restart.
-export function rollFleet(): Promise<AdminResult<void>> {
-  return adminPost('/fleet/roll');
+function pickMachineEvent(value: unknown): MachineEvent | null {
+  if (!isFields(value) || typeof value.to !== 'string' || typeof value.at !== 'string') return null;
+  return { from: textOrNull(value.from), to: value.to, detail: typeof value.detail === 'string' ? value.detail : '', at: value.at };
+}
+
+function pickMachineTree(value: unknown): MachineTree | null {
+  if (!isFields(value) || !isCount(value.tree_id) || typeof value.state !== 'string') return null;
+  return {
+    tree_id: value.tree_id,
+    state: value.state,
+    bytes: isCount(value.bytes) ? value.bytes : 0,
+    total_bytes: isCount(value.total_bytes) ? value.total_bytes : null,
+    tries: isCount(value.tries) ? value.tries : 0,
+    error: textOrNull(value.error),
+    reported_at: textOrNull(value.reported_at),
+  };
+}
+
+export function pickMachineDetail(data: unknown): MachineDetail | null {
+  if (!isFields(data) || !Array.isArray(data.events) || !Array.isArray(data.trees)) return null;
+  const machine = pickMachine(data.machine);
+  const events = data.events.map(pickMachineEvent);
+  const trees = data.trees.map(pickMachineTree);
+  if (!machine || events.some((e) => e === null) || trees.some((t) => t === null)) return null;
+  return { machine, events: events as MachineEvent[], trees: trees as MachineTree[] };
+}
+
+// GET /api/admin/fleet/machines/<id>: one machine with its events and trees.
+export function fetchMachine(id: string, signal?: AbortSignal): Promise<AdminResult<MachineDetail>> {
+  return adminCall(() => adminClient.get<unknown>(`/fleet/machines/${encodeURIComponent(id)}`, { signal }), pickMachineDetail);
+}
+
+function pickRollStep(value: unknown): RollStep | null {
+  if (!isFields(value) || (typeof value.id !== 'number' && typeof value.id !== 'string')) return null;
+  if ((value.kind !== 'shared' && value.kind !== 'own') || (value.action !== 'replace' && value.action !== 'keep')) return null;
+  return {
+    id: String(value.id),
+    kind: value.kind,
+    state: typeof value.state === 'string' ? value.state : '',
+    image_id: textOrNull(value.image_id),
+    servers: isCount(value.servers) ? value.servers : 0,
+    action: value.action,
+    why: typeof value.why === 'string' ? value.why : '',
+  };
+}
+
+export function pickRollPlan(data: unknown): RollPlan | null {
+  if (!isFields(data) || !Array.isArray(data.machines)) return null;
+  const machines = data.machines.map(pickRollStep);
+  if (machines.some((m) => m === null)) return null;
+  const replace = Array.isArray(data.replace)
+    ? data.replace.filter((id) => typeof id === 'number' || typeof id === 'string').map(String)
+    : [];
+  return { image_id: textOrNull(data.image_id), machines: machines as RollStep[], replace };
+}
+
+// GET /api/admin/fleet/roll: a fleet roll's preview, replace or keep per
+// machine.
+export function fetchRollPlan(signal?: AbortSignal): Promise<AdminResult<RollPlan>> {
+  return adminCall(() => adminClient.get<unknown>('/fleet/roll', { signal }), pickRollPlan);
+}
+
+// POST /api/admin/fleet/roll {"machines": [ids]}: each machine named drains,
+// its servers moving to machines launched from the templates as they are now,
+// no restart counted; how many drain.
+export function rollFleet(machines: string[]): Promise<AdminResult<number>> {
+  return adminCall(
+    () => adminClient.post<unknown>('/fleet/roll', { machines: machines.map(Number) }),
+    (data) => {
+      const draining = (data as { draining?: unknown } | null)?.draining;
+      return isCount(draining) ? draining : null;
+    },
+  );
 }

@@ -96,11 +96,14 @@ shard_args=(${shard:+--shard "$shard"})
 mapfile -t selection < <(python "$root/scripts/ci/test_suites.py" --suite "$suite" \
     "${shard_args[@]}" --selection | tr -d '\r')
 name="$suite${shard:+-$shard}"
+# The rows that run whole terrain bakes take the `bakes` resource, a few at a time
+# (tests/CMakeLists.txt opennova_bakes).
+resources=(--resource-spec-file "$root/tests/ctest_resources.json")
 if [[ "$run_tests" == "0" ]]; then
     echo "Skipping tests (--no-test)."
 elif [[ -n "$test_regex" ]]; then
     echo "Running $name tests matching '$test_regex' (no suite attestation)..."
-    ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" \
+    ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" "${resources[@]}" \
       -R "$test_regex" "${selection[@]}"
 else
     echo "Running $name tests..."
@@ -111,7 +114,7 @@ else
       --inventory "$inventory"
     # Preserve full passing output so missing compatibility legs cannot hide
     # beyond CTest's default truncation limit.
-    ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" \
+    ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" "${resources[@]}" \
       --test-output-size-passed 1048576 --test-output-size-failed 1048576 \
       --output-junit "$report" "${selection[@]}"
     python "$root/scripts/ci/test_suites.py" --suite "$suite" --inventory "$inventory" --report "$report"

@@ -1,7 +1,7 @@
 // The admin's infrastructure view as GET /api/admin/infrastructure answers it
 // (apps/novaworld_web/infra/infra_routes.h). Times are ISO 8601 UTC. The cloud's
 // sections come from AWS, read by web at most every 20 seconds; the lobbies,
-// the controller and the machines from the database.
+// the fleet leader and the machines from the database.
 
 export interface InfraContainer {
   name: string;
@@ -137,6 +137,34 @@ export interface InfraRelease {
   revision: string | null;
 }
 
+// A machine as the fleet cluster's container instance (ECS's view of it).
+export interface InfraContainerInstance {
+  id: string;
+  ec2_instance_id: string | null;
+  // Its machine-id and kind attributes (the user-data's).
+  machine_id: string | null;
+  kind: string | null;
+  // Its ecs.ami-id attribute.
+  image_id: string | null;
+  // ACTIVE, DRAINING, REGISTERING, ...
+  status: string;
+  // Whether its ECS agent is connected.
+  agent_connected: boolean;
+  running_tasks: number;
+  pending_tasks: number;
+  // The ECS agent's version.
+  agent_version: string | null;
+}
+
+// The fleet cluster (opennova-<deployment>-fleet): hostd's daemon service and
+// the machines as its container instances.
+export interface InfraFleetCluster {
+  cluster: string;
+  hostd: InfraService | null;
+  instances: InfraContainerInstance[];
+  error: string | null;
+}
+
 // AWS read: each section, or the error that kept it out.
 export interface InfraCloudRead {
   configured: true;
@@ -161,6 +189,8 @@ export interface InfraCloudRead {
   cache: InfraCache | null;
   cache_error: string | null;
   machines_error: string | null;
+  // The fleet cluster; null with hosting off.
+  fleet: InfraFleetCluster | null;
 }
 
 // AWS not read here (the local stack), and why.
@@ -185,7 +215,7 @@ export interface InfraLobby {
   listings: number;
 }
 
-export interface InfraController {
+export interface InfraFleet {
   leader: string | null;
   generation: number;
   elected_at: string | null;
@@ -209,6 +239,7 @@ export interface InfraMachine {
   // EC2's own view, when AWS was read and lists it.
   zone: string | null;
   ec2_state: string | null;
+  image_id: string | null;
 }
 
 export interface InfraOverview {
@@ -216,7 +247,7 @@ export interface InfraOverview {
   at: string;
   cloud: InfraCloud;
   lobbies: InfraLobby[];
-  controller: InfraController;
+  fleet: InfraFleet;
   hosting: { enabled: boolean; provider: string };
   machines: InfraMachine[];
 }

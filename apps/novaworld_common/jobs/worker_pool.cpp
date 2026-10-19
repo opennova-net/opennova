@@ -1,6 +1,6 @@
 #include "worker_pool.h"
 
-#include "loggable.h"
+#include "core/loggable.h"
 
 #include <base/os_random/os_random.h>
 

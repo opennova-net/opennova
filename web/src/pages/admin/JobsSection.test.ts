@@ -96,14 +96,15 @@ describe('JobsSection', () => {
       value: overview({
         workers: [worker('worker-5e6f7a8b')],
         totals: { ...overview().totals, oldest_wait_seconds: 300 },
-        controller: { leader: 'controller-0f0f0f0f', elected_at: ago(7200), last_scheduled_at: ago(600) },
+        last_scheduled_at: ago(600),
+        fleet: { leader: 'fleet-0f0f0f0f', elected_at: ago(7200) },
       }),
     });
     page = await mountSection();
     warnings = page.findAll('.jobs-warnings li').map((w) => w.text());
     expect(warnings).toEqual([
       'The oldest due job has waited 5 minutes for a worker: the workers are busy, or none runs.',
-      'No schedule has enqueued a job for 10 minutes. Is a controller leading?',
+      'No schedule has enqueued a job for 10 minutes. Is a worker running?',
     ]);
   });
 
@@ -177,8 +178,8 @@ describe('JobsSection', () => {
     await flushPromises();
     expect(router.currentRoute.value.query).toEqual({ tab: 'schedules' });
     expect(page.findAll('tr.jobs-attention-row')).toHaveLength(0);
-    expect(page.get('.jobs-controller').text()).toContain('controller-0f0f0f0f');
-    expect(page.get('.jobs-controller').text()).toContain('leading since 2 hours ago');
+    expect(page.get('.jobs-fleet').text()).toContain('fleet-0f0f0f0f');
+    expect(page.get('.jobs-fleet').text()).toContain('leading since 2 hours ago');
     const rows = page.findAll('tr.jobs-schedule-row');
     expect(rows).toHaveLength(3);
     expect(rows[0].text()).toContain('Every 30 seconds');

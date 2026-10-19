@@ -4,9 +4,10 @@
 // Crow HttpListener from opennova_novaworld_web_core on port 0 (the OS
 // picks; the harness reads the port back from bound_port()), and requests sent
 // through apps/common's http_exchange to 127.0.0.1. Built only
-// with BUILD_NOVAWORLD_HTTP. The cases share one listener and run in order
-// (the admin users case reads the account the register case made; the
-// concurrent case runs last, since it adds accounts and a host). The listener
+// with BUILD_NOVAWORLD_HTTP. The cases run in parts, a ctest row each over a
+// fixture of its own (main), and a part's cases share its listener and run in
+// order (the admin users case reads the account the register case made; the
+// concurrent case runs last in its part, since it adds accounts and a host). The listener
 // trusts 127.0.0.1 as its proxy and answers /api/ to it alone
 // (ONNET_API_PROXY_ONLY), so the website-session cases each name their own
 // client address in X-Real-IP and keep their own rate-limit buckets; a second
@@ -26,39 +27,43 @@
 #include "admin_tcp_server.h"
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
-#include "auth.h"
+#include "accounts/account_jobs.h"
+#include "accounts/auth.h"
+#include "accounts/mailer.h"
+#include "accounts/password_reset.h"
+#include "accounts/template_engine.h"
+#include "accounts/web_session.h"
 #include "billing/billing.h"
 #include "billing/billing_jobs.h"
 #include "billing/billing_repository.h"
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
 #include "connection_routes.h"
-#include "novaworld/billing_fake_stripe.h"
-#include "health.h"
+#include "core/health.h"
+#include "data_sets/data_set_repository.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
-#include "hosted/console_queue.h"
-#include "hosted/data_set_repository.h"
-#include "hosted/hosted_repository.h"
-#include "hosted/limits_hold.h"
-#include "hosted/stats_repository.h"
+#include "hosted/console_drain.h"
+#include "hosted/model/address_jobs.h"
+#include "hosted/model/address_repository.h"
+#include "hosted/model/console_queue.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/limits_hold.h"
+#include "hosted/model/sold_capacity.h"
+#include "hosted/model/stats_repository.h"
 #include "hosted/supervisor.h"
 #include "hosted_fake_driver.h"
 #include "http_cookies.h"
 #include "http_listener.h"
-#include "jobs/account_jobs.h"
 #include "jobs/worker_pool.h"
-#include "mailer.h"
-#include "novaworld/fake_mailer.h"
-#include "password_reset.h"
 #include "net_http.h"
 #include "net_sockets.h"
+#include "novaworld/billing_fake_stripe.h"
+#include "novaworld/fake_mailer.h"
 #include "nw_udp_listener.h"
-#include "server_config.h"
+#include "program/server_config.h"
 #include "session_store.h"
-#include "template_engine.h"
 #include "web_access.h"
-#include "web_session.h"
 
 #include <base/io/base64.h>
 #include <base/io/cp1252.h>
@@ -82,6 +87,7 @@
 #include "common/temp_dir.h"
 #include "common/test_database.h"
 #include "common/test_expect.h"
+#include "common/test_parts.h"
 #include "common/test_redis.h"
 
 #include <algorithm>
@@ -4885,7 +4891,7 @@ int test_public_reads_fail_as_500(Harness &h) {
 	return 0;
 }
 
-// GET /livez and GET /healthz (health.h): outside /api, so a listener whose
+// GET /livez and GET /healthz (core/health.h): outside /api, so a listener whose
 // /api/ refuses the harness (a proxy it is not) still answers them; "ok" while
 // the stall watchdog finds its loops moving and main()'s checks coming and
 // Redis answers, 503 "stalled" (no detail) once its watched loop has not moved
@@ -4975,18 +4981,33 @@ int test_healthz(Harness &h) {
 	TEST_EXPECT(nws::heartbeat_line(beat) ==
 			"{\"heartbeat\":{\"program\":\"lobby\",\"nw_sessions\":3,\"listed_hosts\":0,"
 			"\"db_lock_timeouts\":0,\"db_deadlocks\":0}}");
-	nws::Heartbeat controller;
-	controller.program = "controller";
-	controller.hosted_live = 2;
-	controller.hosted_failed = 1;
-	controller.machines_lost = 0;
-	controller.launch_failures = 0;
-	controller.limits_held = 1;
-	controller.db_lock_timeouts = 2;
-	controller.db_deadlocks = 1;
-	TEST_EXPECT(nws::heartbeat_line(controller) ==
-			"{\"heartbeat\":{\"program\":\"controller\",\"hosted_live\":2,\"hosted_failed\":1,"
-			"\"machines_lost\":0,\"launch_failures\":0,\"limits_held\":1,\"db_lock_timeouts\":2,"
+	nws::Heartbeat fleet;
+	fleet.program = "fleet";
+	fleet.hosted_live = 2;
+	fleet.hosted_failed = 1;
+	fleet.machines_lost = 0;
+	fleet.machines_held = 0;
+	fleet.launch_failures = 0;
+	fleet.limits_held = 1;
+	fleet.db_lock_timeouts = 2;
+	fleet.db_deadlocks = 1;
+	TEST_EXPECT(nws::heartbeat_line(fleet) ==
+			"{\"heartbeat\":{\"program\":\"fleet\",\"hosted_live\":2,\"hosted_failed\":1,"
+			"\"machines_lost\":0,\"machines_held\":0,\"launch_failures\":0,\"limits_held\":1,"
+			"\"db_lock_timeouts\":2,"
+			"\"db_deadlocks\":1}}");
+	// The fleet leader's own: its health's counts, the machines stuck, the least
+	// free disk, its last good pass's age.
+	fleet.attention_danger = 1;
+	fleet.attention_warn = 4;
+	fleet.machines_stuck = 2;
+	fleet.machine_disk_free_pct = 12;
+	fleet.fleet_pass_age_s = 3;
+	TEST_EXPECT(nws::heartbeat_line(fleet) ==
+			"{\"heartbeat\":{\"program\":\"fleet\",\"hosted_live\":2,\"hosted_failed\":1,"
+			"\"machines_lost\":0,\"machines_held\":0,\"launch_failures\":0,\"limits_held\":1,"
+			"\"attention_danger\":1,\"attention_warn\":4,\"machines_stuck\":2,"
+			"\"machine_disk_free_pct\":12,\"fleet_pass_age_s\":3,\"db_lock_timeouts\":2,"
 			"\"db_deadlocks\":1}}");
 	nws::Heartbeat gate;
 	gate.program = "gate";
@@ -5027,8 +5048,8 @@ void end_stopping_servers(Harness &h) {
 // ready trees, Joint Operations' (with Escalation) and Delta Force Xtreme 2's,
 // and no supervisor, so rows stay where the routes put them): the session and
 // CSRF refusals, the data sets the owner's view lists (each with its tree's
-// missions, limits and expansions), the comp grant (PUT
-// /api/admin/users/<id>/comp-servers, admin only), the settings' refusals (the
+// missions, limits and expansions), the comp grants (PUT
+// /api/admin/users/<id>/comp, admin only), the settings' refusals (the
 // data set, the expansion and the rotation among them), the starts (on the
 // first data set with every mission of its tree when it names none, and on
 // Delta Force Xtreme 2's with its own) up
@@ -5083,7 +5104,7 @@ int test_hosted_server_routes(Harness &h) {
 	};
 	auto grant = [&h](int64_t id, const std::string &body, std::vector<std::string> headers) {
 		headers.push_back(kJson);
-		return h.send("PUT", "/api/admin/users/" + std::to_string(id) + "/comp-servers", headers, body);
+		return h.send("PUT", "/api/admin/users/" + std::to_string(id) + "/comp", headers, body);
 	};
 	const auto entitlement_is = [](const crow::json::rvalue &json, int64_t max, int64_t used, int64_t own,
 										int64_t own_used, bool can_start, const char *source) {
@@ -5203,24 +5224,30 @@ int test_hosted_server_routes(Harness &h) {
 							",\"game_name\":\"x\",\"missions\":[\"first.bms\",\"escal.bms\"]}");
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
 
-	// The comp grant: admin only (the token, or an admin session with the CSRF
-	// header), a whole number 0..16.
-	TEST_EXPECT(grant(ana.id, "{\"comp_servers\":1}", {}).code == 401);
-	TEST_EXPECT(grant(ana.id, "{\"comp_servers\":1}", { with_session(ana.session), kCsrf }).code == 403);
-	reply = grant(ana.id, "{}", { kBearer });
-	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
-	for (const char *bad : { "{\"comp_servers\":true}", "{\"comp_servers\":1.5}", "{\"comp_servers\":17}",
-				 "{\"comp_servers\":-1}", "{\"comp_servers\":\"2\"}" }) {
+	// The comp grants: admin only (the token, or an admin session with the CSRF
+	// header), both set at once, each a whole number 0..16.
+	TEST_EXPECT(grant(ana.id, "{\"servers\":1,\"own_machines\":0}", {}).code == 401);
+	TEST_EXPECT(grant(ana.id, "{\"servers\":1,\"own_machines\":0}", { with_session(ana.session), kCsrf }).code ==
+			403);
+	for (const char *missing : { "{}", "{\"servers\":1}", "{\"own_machines\":1}" }) {
+		reply = grant(ana.id, missing, { kBearer });
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
+	}
+	for (const char *bad : { "{\"servers\":true,\"own_machines\":0}", "{\"servers\":1.5,\"own_machines\":0}",
+				 "{\"servers\":17,\"own_machines\":0}", "{\"servers\":-1,\"own_machines\":0}",
+				 "{\"servers\":\"2\",\"own_machines\":0}", "{\"servers\":1,\"own_machines\":17}",
+				 "{\"servers\":1,\"own_machines\":-1}" }) {
 		reply = grant(ana.id, bad, { kBearer });
 		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 	}
-	TEST_EXPECT(grant(999999, "{\"comp_servers\":1}", { kBearer }).code == 404);
-	reply = grant(ana.id, "{\"comp_servers\":2}", { kBearer });
+	TEST_EXPECT(grant(999999, "{\"servers\":1,\"own_machines\":0}", { kBearer }).code == 404);
+	reply = grant(ana.id, "{\"servers\":2,\"own_machines\":0}", { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["user"]["comp_servers"].i() == 2 &&
-			json["user"]["max_servers"].i() == 2);
+			json["user"]["comp_own_machines"].i() == 0 && json["user"]["max_servers"].i() == 2 &&
+			json["entitlement"]["comp_servers"].i() == 2 && json["entitlement"]["own_machines"].i() == 0);
 	for (const Owner *o : { &ben, &cy, &fay, &gus })
-		TEST_EXPECT(grant(o->id, "{\"comp_servers\":1}", { kBearer }).code == 200);
+		TEST_EXPECT(grant(o->id, "{\"servers\":1,\"own_machines\":0}", { kBearer }).code == 200);
 	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(ana))), 2, 0, 0, 0, true, "comp"));
 
 	// Two starts: 202 with each server, requested, on a shared machine.
@@ -5253,6 +5280,9 @@ int test_hosted_server_routes(Harness &h) {
 	reply = one(ana, ana_first);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["server"]["id"].i() == ana_first);
+	// Where its start stands (server_phase.h): queued, and no last run to say why it ended.
+	TEST_EXPECT(str(json["server"]["phase"]["name"]) == "queued" &&
+			json["server"]["stopped_because"].t() == crow::json::type::Null);
 	TEST_EXPECT(json["server"]["events"].size() == 1);
 	TEST_EXPECT(str(json["server"]["events"][0]["from"]).empty() &&
 			str(json["server"]["events"][0]["to"]) == "requested");
@@ -5321,10 +5351,10 @@ int test_hosted_server_routes(Harness &h) {
 	reply = h.send("GET", "/api/admin/hosted", { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 4 && json["live"].i() == 4);
-	// The room per machine kind, from the placement policy (the defaults: 2
-	// shared machines of 12 slots, 2 own machines).
+	// The room per machine kind, from the placement policy (the harness's: the
+	// default 2 shared machines of 12 slots, 16 own machines).
 	TEST_EXPECT(json["shared"]["live"].i() + json["own"]["live"].i() == 4 && json["shared"]["room"].i() == 24 &&
-			json["own"]["room"].i() == 2);
+			json["own"]["room"].i() == 16);
 	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "docker");
 	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
 	TEST_EXPECT(!json.has("jobs")); // the jobs routes' now (job_routes_test)
@@ -5395,7 +5425,7 @@ int test_hosted_server_routes(Harness &h) {
 	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"data_set_id\":\"x\"}");
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 
-	// The own-machine add-on: none without it (a comp grant buys no machine),
+	// The own-machine add-on: none without it (a grant of servers buys no machine),
 	// then a tier with one machine paid for, and the start on it.
 	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_own_machine");
@@ -5476,6 +5506,46 @@ int test_hosted_server_routes(Harness &h) {
 		auto db = h.pool.acquire();
 		db->exec("DELETE FROM billing_subscriptions WHERE stripe_subscription_id LIKE 'sub_routes_fay_%';");
 	}
+	// An ended server's last run says why it ended: its cause, its code, the
+	// server's own last line; the admin's view carries the same.
+	{
+		auto db = h.pool.acquire();
+		db->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, ended_at, exit_code, "
+				 "reason, cause) VALUES ($1, 1, 99, 0, now(), 3, 'the session ended: the NovaWorld service "
+				 "stopped the hosting', 'crash');",
+				{ opennova::db::BindValue(ana_first) });
+	}
+	reply = one(ana, ana_first);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["server"]["phase"]["name"]) == "stopped");
+	TEST_EXPECT(str(json["server"]["stopped_because"]["cause"]) == "crash" &&
+			json["server"]["stopped_because"]["exit_code"].i() == 3 && !json["server"]["stopped_because"]["oom"].b() &&
+			str(json["server"]["stopped_because"]["line"]) ==
+					"the session ended: the NovaWorld service stopped the hosting");
+	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(ana_first), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["server"]["phase"]["name"]) == "stopped" &&
+			str(json["server"]["stopped_because"]["cause"]) == "crash");
+	// One whose data could not be fetched: its owner reads the cause alone, never
+	// the agent's line (the fetch's error); the admin's view carries the line.
+	{
+		auto db = h.pool.acquire();
+		db->exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, ended_at, exit_code, "
+				 "reason, cause) VALUES ($1, 2, 99, 0, now(), 125, 'its data could not be fetched: aws s3 sync "
+				 "exited 1: AccessDenied', 'data_unavailable');",
+				{ opennova::db::BindValue(ana_first) });
+	}
+	reply = one(ana, ana_first);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json &&
+			str(json["server"]["stopped_because"]["cause"]) == "data_unavailable" &&
+			json["server"]["stopped_because"]["exit_code"].i() == 125 &&
+			str(json["server"]["stopped_because"]["line"]).empty());
+	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(ana_first), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json &&
+			str(json["server"]["stopped_because"]["line"]) ==
+					"its data could not be fetched: aws s3 sync exited 1: AccessDenied");
 
 	// Hosting off (the Secure listener runs with ONNET_HOSTED_PROVIDER none): 503.
 	std::string token;
@@ -5516,7 +5586,7 @@ int test_hosted_listing_owner(Harness &h) {
 	using Notice = PushHost::Notice;
 	const int64_t owner = make_account(h, "listing_owner", "pw-listing-owner");
 	TEST_EXPECT(owner > 0 && make_account(h, "listing_other", "pw-listing-other") > 0);
-	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 1).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(*h.pool.acquire(), owner, { 1, 0 }));
 	const std::string owner_s = login_token(h, "10.52.0.1", "listing_owner", "pw-listing-owner");
 	const std::string other_s = login_token(h, "10.52.0.2", "listing_other", "pw-listing-other");
 	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
@@ -5591,8 +5661,8 @@ int test_hosted_listing_owner(Harness &h) {
 
 	// An admin withdraws the owner's comp grant (the route), and the supervisor's
 	// next pass (here one hand-driven pass over a fake machine driver) stops the server.
-	reply = h.send("PUT", "/api/admin/users/" + std::to_string(owner) + "/comp-servers", { kBearer, kJson },
-			"{\"comp_servers\":0}");
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(owner) + "/comp", { kBearer, kJson },
+			"{\"servers\":0,\"own_machines\":0}");
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["user"]["max_servers"].i() == 0);
 	{
 		hosted_test::FakeDriver fake;
@@ -5634,7 +5704,8 @@ int test_hosted_listing_owner(Harness &h) {
 	reply = h.send("GET", "/api/admin/users", { kBearer });
 	TEST_EXPECT(reply.code == 200 && body_text(reply).find(service_name) == std::string::npos);
 	const std::string service_path = "/api/admin/users/" + std::to_string(service.id);
-	TEST_EXPECT(h.send("PUT", service_path + "/comp-servers", { kBearer, kJson }, "{\"comp_servers\":1}").code == 404);
+	TEST_EXPECT(h.send("PUT", service_path + "/comp", { kBearer, kJson }, "{\"servers\":1,\"own_machines\":0}").code ==
+			404);
 	TEST_EXPECT(h.send("PUT", service_path, { kBearer, kJson }, "{\"nwhandle\":\"Taken\"}").code == 404);
 	TEST_EXPECT(h.send("DELETE", service_path, { kBearer }).code == 404);
 	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.52.0.11") },
@@ -5932,7 +6003,7 @@ int test_admin_fleet_routes(Harness &h) {
 	namespace billing = opennova::novaworld_server::billing;
 	const int64_t ana = make_account(h, "fleet_ana", "pw-fleet-ana");
 	const int64_t ben = make_account(h, "fleet_ben", "pw-fleet-ben");
-	TEST_EXPECT(ana > 0 && ben > 0 && nws::set_comp_servers(*h.pool.acquire(), ana, 2).ok);
+	TEST_EXPECT(ana > 0 && ben > 0 && nws::billing::set_comp_grants(*h.pool.acquire(), ana, { 2, 0 }));
 	{
 		billing::SubscriptionRow tier;
 		tier.stripe_subscription_id = "sub_fleet_ben";
@@ -6025,6 +6096,11 @@ int test_admin_fleet_routes(Harness &h) {
 		TEST_EXPECT(m["egress_bytes_month"].t() == crow::json::type::Number && m["egress_bytes_month"].i() == 0);
 		TEST_EXPECT(str(m["template_version"]) == "lt-0fleet:3" && m["reserved_for"].t() == crow::json::type::Null);
 		TEST_EXPECT(m["bootstrapped"].t() == crow::json::type::False);
+		// Its agent's envelope at its last sync, and no brake holding it.
+		TEST_EXPECT(m["agent_protocol"].i() == hosted::kAgentProtocol &&
+				m["agent_image"].t() == crow::json::type::Null &&
+				m["protocol_mismatch_since"].t() == crow::json::type::Null &&
+				m["lost_held"].t() == crow::json::type::False);
 	}
 	TEST_EXPECT(machine_seen);
 	const auto server_in = [](const crow::json::rvalue &list, int64_t id) -> const crow::json::rvalue * {
@@ -6112,7 +6188,8 @@ int test_admin_fleet_routes(Harness &h) {
 	reply = h.send("POST", machine_path + "/end", { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
 
-	// A roll drains every machine that takes servers, none other.
+	// A roll's preview: every machine that takes servers, none other; with no image
+	// pinned here (and no cloud read), each one replaced.
 	const auto booting = hosted::create_machine(
 			*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
 	launched.cloud_id = "local-fleet-2";
@@ -6121,15 +6198,40 @@ int test_admin_fleet_routes(Harness &h) {
 			*db, { "docker", hosted::MachineKind::Own, 1, "opennova-serve:local", 0 });
 	TEST_EXPECT(hosted::transition_machine(*db, failed.id, hosted::FleetMachineState::Launching,
 			hosted::FleetMachineState::Failed, "by the test"));
-	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer });
+	reply = h.send("GET", "/api/admin/fleet/roll", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["image_id"].t() == crow::json::type::Null &&
+			json["machines"].size() == 1 && json["machines"][0]["id"].i() == booting.id);
+	TEST_EXPECT(json && str(json["machines"][0]["action"]) == "replace" &&
+			str(json["machines"][0]["state"]) == "booting" &&
+			json["machines"][0]["servers"].i() == 0 &&
+			json["machines"][0]["image_id"].t() == crow::json::type::Null);
+	TEST_EXPECT(json && json["replace"].size() == 1 && json["replace"][0].i() == booting.id);
+	TEST_EXPECT(h.send("GET", "/api/admin/fleet/roll", { with_session(ana_s) }).code == 403);
+	// The roll drains the machines named, each one taking servers; a body that names
+	// none, or a machine that takes none, is refused, nothing drained.
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson }).code == 400);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson }, "{\"machines\": []}")
+						.code == 400);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson },
+						 "{\"machines\": [\"" + std::to_string(booting.id) + "\"]}")
+						.code == 400);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson },
+						 "{\"machines\": [" + std::to_string(booting.id) + ", " +
+								 std::to_string(failed.id) + "]}")
+						.code == 400);
+	TEST_EXPECT(hosted::find_machine(*db, booting.id)->state == hosted::FleetMachineState::Booting);
+	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer, kJson },
+			"{\"machines\": [" + std::to_string(booting.id) + "]}");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && json && json["draining"].i() == 1 && json["machines"].size() == 1 &&
 			json["machines"][0].i() == booting.id);
 	TEST_EXPECT(hosted::find_machine(*db, booting.id)->state == hosted::FleetMachineState::Draining);
 	TEST_EXPECT(hosted::find_machine(*db, booting.id)->end_reason == "rolled by an admin");
 	TEST_EXPECT(hosted::find_machine(*db, failed.id)->state == hosted::FleetMachineState::Failed);
-	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer });
-	TEST_EXPECT(reply.code == 202 && crow::json::load(body_text(reply))["draining"].i() == 0);
+	// Draining now: no machine takes servers, so the preview names none.
+	reply = h.send("GET", "/api/admin/fleet/roll", { kBearer });
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["machines"].size() == 0);
 
 	// Leave no live server or machine for the cases after.
 	TEST_EXPECT(hosted::transition_machine(*db, booting.id, hosted::FleetMachineState::Draining,
@@ -6156,8 +6258,8 @@ int test_hosted_stats_routes(Harness &h) {
 	const int64_t owner = make_account(h, "stats_owner", "pw-stats-owner");
 	const int64_t other = make_account(h, "stats_other", "pw-stats-other");
 	TEST_EXPECT(owner > 0 && other > 0);
-	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 2).ok);
-	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), other, 1).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(*h.pool.acquire(), owner, { 2, 0 }));
+	TEST_EXPECT(nws::billing::set_comp_grants(*h.pool.acquire(), other, { 1, 0 }));
 	const std::string owner_s = login_token(h, "10.54.0.1", "stats_owner", "pw-stats-owner");
 	const std::string other_s = login_token(h, "10.54.0.2", "stats_other", "pw-stats-other");
 	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
@@ -6326,8 +6428,8 @@ int test_hosted_usage_route(Harness &h) {
 	const int64_t ana = make_account(h, "usage_ana", "pw-usage-ana");
 	const int64_t ben = make_account(h, "usage_ben", "pw-usage-ben");
 	TEST_EXPECT(ana > 0 && ben > 0);
-	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), ana, 3).ok);
-	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), ben, 2).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(*h.pool.acquire(), ana, { 3, 0 }));
+	TEST_EXPECT(nws::billing::set_comp_grants(*h.pool.acquire(), ben, { 2, 0 }));
 	const std::string ana_s = login_token(h, "10.55.0.1", "usage_ana", "pw-usage-ana");
 	TEST_EXPECT(!ana_s.empty());
 	auto db = h.pool.acquire();
@@ -6550,7 +6652,7 @@ int test_hosted_console_routes(Harness &h) {
 	const int64_t owner = make_account(h, "console_owner", "pw-console-owner");
 	const int64_t admin = make_account(h, "console_admin", "pw-console-admin");
 	TEST_EXPECT(owner > 0 && admin > 0 && make_account(h, "console_other", "pw-console-other") > 0);
-	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 1).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(*h.pool.acquire(), owner, { 1, 0 }));
 	TEST_EXPECT(set_role(h, admin, "admin"));
 	const std::string owner_s = login_token(h, "10.53.0.1", "console_owner", "pw-console-owner");
 	const std::string other_s = login_token(h, "10.53.0.2", "console_other", "pw-console-other");
@@ -7323,6 +7425,297 @@ int test_billing_checkout_guard(Harness &h) {
 	return 0;
 }
 
+// The capacity gate (hosted/model/sold_capacity.h) at checkout: the harness's fleet
+// sells 2 x 12 shared places and 16 own machines (set_fleet_placement). An
+// admin's grants count as sold: filled to the last place, GET /api/billing/tiers
+// says which items are available, and a checkout past the fleet answers 409
+// sold_out. A checkout that goes through reserves its place under the
+// hosting-start lock (the reservation stamped with its session, held a day), so
+// the next account's finds none; the session's checkout.session.expired drops it,
+// and the sync of a paid session drops it as the subscription takes its place. The
+// user page's capacity says when a grant oversells.
+int test_billing_capacity(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	namespace hosted = opennova::novaworld_server::hosted;
+	const auto account = [&h](const char *name, const char *ip) {
+		const int64_t id = make_account(h, name, std::string("pw-") + name);
+		return std::make_pair(id, login_token(h, ip, name, std::string("pw-") + name));
+	};
+	const auto [ivy, ivy_s] = account("cap_ivy", "10.65.0.1");
+	const auto [lee, lee_s] = account("cap_lee", "10.65.0.2");
+	const auto [mo, mo_s] = account("cap_mo", "10.65.0.3");
+	const int64_t jon = make_account(h, "cap_jon", "pw-cap-jon");
+	const int64_t kim = make_account(h, "cap_kim", "pw-cap-kim");
+	const int64_t pat = make_account(h, "cap_pat", "pw-cap-pat");
+	const int64_t nat = make_account(h, "cap_nat", "pw-cap-nat");
+	TEST_EXPECT(ivy > 0 && lee > 0 && mo > 0 && jon > 0 && kim > 0 && pat > 0 && nat > 0 && !ivy_s.empty() &&
+			!lee_s.empty() && !mo_s.empty());
+	// `n` servers granted between Kim and Pat (16 each at most).
+	const auto grant_shared = [&h, kim, pat](int64_t n) {
+		const int to_kim = static_cast<int>(std::min<int64_t>(n, 16));
+		return billing::set_comp_grants(*h.pool.acquire(), kim, { to_kim, 0 }) &&
+				billing::set_comp_grants(*h.pool.acquire(), pat, { static_cast<int>(n - to_kim), 0 });
+	};
+	auto checkout = [&h](const std::string &session, const char *item) {
+		return h.send("POST", "/api/billing/checkout", { kJson, kCsrf, with_session(session) },
+				std::string("{\"item\":\"") + item + "\"}");
+	};
+	auto tiers = [&h] { return crow::json::load(body_text(h.send("GET", "/api/billing/tiers"))); };
+	auto sold = [&h] { return hosted::sold_now(*h.pool.acquire(), billing::unix_now()); };
+	auto open_session = [&h](int64_t user) {
+		const auto customer = billing::customer_of(*h.pool.acquire(), user);
+		return customer ? customer->open_checkout_session : std::string();
+	};
+	auto json = tiers();
+	TEST_EXPECT(json && json["tiers"][0]["available"].b() && json["own_machine"]["available"].b());
+
+	// Ivy on tier 1. An admin's 16 servers on 16 own machines fill the own
+	// machines: her own machine is sold out.
+	const std::string ivy_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
+			{ billing::kMetaUserId, std::to_string(ivy) }, { billing::kMetaUsername, "cap_ivy" } });
+	h.stripe->add_subscription(ivy_cus, "price_htier1", 1, "active", billing::unix_now() + 30 * 86400);
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), ivy_cus, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	const int64_t own_left = 16 - sold().own;
+	TEST_EXPECT(own_left > 0 && own_left <= 16);
+	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), jon, { static_cast<int>(own_left), static_cast<int>(own_left) }));
+	json = tiers();
+	TEST_EXPECT(json && !json["own_machine"]["available"].b() && json["tiers"][0]["available"].b());
+	auto reply = checkout(ivy_s, "own_machine");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "sold_out");
+	TEST_EXPECT(billing::live_reservations_of(*h.pool.acquire(), ivy).empty());
+	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), jon, { 0, 0 }));
+	TEST_EXPECT(crow::json::load(body_text(h.send("GET", "/api/billing/tiers")))["own_machine"]["available"].b());
+
+	// The shared places, granted up to one left: tier 1 fits, tier 2 does not.
+	const int64_t shared_left = 24 - sold().shared;
+	TEST_EXPECT(shared_left > 1 && shared_left <= 33);
+	TEST_EXPECT(grant_shared(shared_left - 1));
+	json = tiers();
+	TEST_EXPECT(json && json["tiers"][0]["available"].b() && !json["tiers"][1]["available"].b() &&
+			!json["tiers"][2]["available"].b());
+	reply = checkout(lee_s, "tier2");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "sold_out");
+	// The user page: sold within the fleet, then past it with one more server.
+	reply = h.send("GET", "/api/admin/users/" + std::to_string(nat), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["capacity"]["oversold"].b() &&
+			json["capacity"]["shared"]["sold"].i() == 23 && json["capacity"]["shared"]["sellable"].i() == 24 &&
+			json["capacity"]["own_machines"]["sellable"].i() == 16);
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(nat) + "/comp", { kBearer, kJson },
+			"{\"servers\":2,\"own_machines\":0}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["capacity"]["oversold"].b() &&
+			json["capacity"]["shared"]["sold"].i() == 25);
+	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), nat, { 0, 0 }));
+
+	// Lee takes the last place: her reservation, stamped with her session,
+	// leaves none for Mo.
+	reply = checkout(lee_s, "tier1");
+	TEST_EXPECT(reply.code == 200);
+	auto held = billing::live_reservations_of(*h.pool.acquire(), lee);
+	TEST_EXPECT(held.size() == 1 && held.front().item == billing::ItemKind::Tier && held.front().tier == 1 &&
+			!held.front().checkout_session.empty() && held.front().checkout_session == open_session(lee));
+	// Held a day, long past its session's hour: a session paid at its last moment
+	// whose sync comes late (a webhook redelivered, the next reconcile) still counts
+	// until the subscription it made is written.
+	const auto life = h.pool.acquire()->query(
+			"SELECT CAST(extract(epoch FROM expires_at - now()) AS bigint) FROM billing_checkout_reservations "
+			"WHERE user_id = $1;",
+			{ opennova::db::BindValue(lee) });
+	TEST_EXPECT(life.size() == 1 && life.front().as_int(0).value_or(0) > 24 * 60 * 60 - 60 &&
+			life.front().as_int(0).value_or(0) <= 24 * 60 * 60);
+	TEST_EXPECT(sold().shared == 24);
+	TEST_EXPECT(!tiers()["tiers"][0]["available"].b());
+	reply = checkout(mo_s, "tier1");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "sold_out");
+	// Her session expires unpaid: its event drops the reservation, and Mo's goes through.
+	const std::string expired = "{\"id\":\"evt_cap_expired\",\"object\":\"event\",\"type\":\"checkout.session.expired\","
+								"\"livemode\":false,\"created\":" +
+			std::to_string(billing::unix_now()) + ",\"data\":{\"object\":{\"id\":\"" + open_session(lee) +
+			"\",\"object\":\"checkout.session\",\"customer\":\"" +
+			billing::customer_of(*h.pool.acquire(), lee)->stripe_customer_id + "\"}}}";
+	reply = h.send("POST", "/api/billing/webhook", { kJson, stripe_signature(expired, billing::unix_now()) }, expired);
+	TEST_EXPECT(reply.code == 200 && billing::live_reservations_of(*h.pool.acquire(), lee).empty());
+	reply = checkout(mo_s, "tier1");
+	TEST_EXPECT(reply.code == 200);
+	TEST_EXPECT(billing::live_reservations_of(*h.pool.acquire(), mo).size() == 1);
+	// Mo pays: the sync writes his tier and drops the reservation in its place.
+	TEST_EXPECT(!h.stripe->complete_checkout(open_session(mo)).empty());
+	const std::string mo_cus = billing::customer_of(*h.pool.acquire(), mo)->stripe_customer_id;
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), mo_cus, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	TEST_EXPECT(billing::live_reservations_of(*h.pool.acquire(), mo).empty());
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), mo, billing::unix_now()).max_servers == 1);
+	TEST_EXPECT(sold().shared == 24);
+	TEST_EXPECT(grant_shared(0));
+	return 0;
+}
+
+// The static addresses' routes (hosted/address_routes.h; the harness sells 4 in the
+// play.test zone): the add-on bought through Checkout once the account has an own
+// machine (address_limit before), its subscription on the account's billing until
+// named, the owner's name (the CSRF header, the name rules, one per subscription),
+// the Portal's cancel flow for it, the admin's view, retry of a refused one, rename
+// and typed release, a comp address within the own machines, the tiers' offer, and a
+// start naming an address only with an own machine.
+int test_address_routes(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	namespace hosted = opennova::novaworld_server::hosted;
+	const int64_t uma = make_account(h, "addr_uma", "pw-addr-uma");
+	const int64_t vic = make_account(h, "addr_vic", "pw-addr-vic");
+	const std::string uma_s = login_token(h, "10.66.0.1", "addr_uma", "pw-addr-uma");
+	const std::string vic_s = login_token(h, "10.66.0.2", "addr_vic", "pw-addr-vic");
+	TEST_EXPECT(uma > 0 && vic > 0 && !uma_s.empty() && !vic_s.empty());
+	auto post = [&h](const std::string &path, const std::string &session, const std::string &body) {
+		return h.send("POST", path, { kJson, kCsrf, with_session(session) }, body);
+	};
+	auto open_session = [&h](int64_t user) {
+		const auto customer = billing::customer_of(*h.pool.acquire(), user);
+		return customer ? customer->open_checkout_session : std::string();
+	};
+	auto json = crow::json::load(body_text(h.send("GET", "/api/billing/tiers")));
+	TEST_EXPECT(json && json["static_address"]["amount"].i() == 500 && json["static_address"]["available"].b());
+
+	// Uma on tier 1: no own machine yet, no address; with one, the address sells.
+	const std::string uma_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
+			{ billing::kMetaUserId, std::to_string(uma) }, { billing::kMetaUsername, "addr_uma" } });
+	TEST_EXPECT(billing::insert_customer(*h.pool.acquire(), uma, uma_cus, false));
+	h.stripe->add_subscription(uma_cus, "price_htier1", 1, "active", billing::unix_now() + 30 * 86400);
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), uma_cus, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	auto reply = post("/api/billing/checkout", uma_s, "{\"item\":\"static_address\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
+	TEST_EXPECT(post("/api/billing/checkout", uma_s, "{\"item\":\"own_machine\"}").code == 200);
+	TEST_EXPECT(!h.stripe->complete_checkout(open_session(uma)).empty());
+	// The success page's sync (an address needs the machine it is for synced).
+	TEST_EXPECT(post("/api/me/billing/sync", uma_s, "").code == 200);
+	reply = post("/api/billing/checkout", uma_s, "{\"item\":\"static_address\"}");
+	TEST_EXPECT(reply.code == 200);
+	const std::string address_session = open_session(uma);
+	const std::string address_sub = h.stripe->complete_checkout(address_session);
+	TEST_EXPECT(!address_sub.empty());
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), uma_cus, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	reply = h.send("GET", "/api/me/billing", { with_session(uma_s) });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["own_machines"].i() == 1 && json["static_addresses"].i() == 1 &&
+			json["address_subscriptions"].size() == 1 &&
+			str(json["address_subscriptions"][0]["stripe_subscription_id"]) == address_sub &&
+			json["address_subscriptions"][0]["address_id"].t() == crow::json::type::Null);
+	reply = post("/api/billing/checkout", uma_s, "{\"item\":\"static_address\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
+
+	// Her name for it.
+	TEST_EXPECT(h.send("GET", "/api/me/addresses").code == 401);
+	json = crow::json::load(body_text(h.send("GET", "/api/me/addresses", { with_session(uma_s) })));
+	TEST_EXPECT(json && json["enabled"].b() && str(json["zone"]) == "play.test" && json["unnamed"].i() == 1 &&
+			json["addresses"].size() == 0);
+	TEST_EXPECT(h.send("POST", "/api/me/addresses", { kJson, with_session(uma_s) }, "{\"name\":\"umas\"}").code == 403);
+	reply = post("/api/me/addresses", uma_s, "{\"name\":\"Uma's\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_name");
+	reply = post("/api/me/addresses", uma_s, "{\"name\":\"www\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_name");
+	reply = post("/api/me/addresses", uma_s, "{\"name\":7}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	reply = post("/api/me/addresses", uma_s, "{\"name\":\"umas-place\"}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 201 && json && str(json["address"]["name"]) == "umas-place" &&
+			str(json["address"]["hostname"]) == "umas-place.play.test" && str(json["address"]["state"]) == "allocating" &&
+			json["address"]["public_ip"].t() == crow::json::type::Null &&
+			str(json["address"]["stripe_subscription_id"]) == address_sub && !json["address"].has("allocation_id"));
+	const int64_t address = json["address"]["id"].i();
+	TEST_EXPECT(nws::jobs::job_pending(*h.pool.acquire(), std::string(hosted::kJobAddressAllocate) + ":" +
+			std::to_string(address)));
+	reply = post("/api/me/addresses", uma_s, "{\"name\":\"umas-second\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_address");
+	json = crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(uma_s) })));
+	TEST_EXPECT(json["address_subscriptions"][0]["address_id"].i() == address);
+
+	// Its cancel: the Portal's flow for that subscription alone.
+	reply = post("/api/billing/portal", uma_s, "{\"cancel_subscription\":\"" + address_sub + "\"}");
+	TEST_EXPECT(reply.code == 200);
+	TEST_EXPECT(h.stripe->portal_sessions.back().cancel_subscription == address_sub &&
+			h.stripe->portal_sessions.back().return_url.find("/me/addresses") != std::string::npos);
+	// (Uma's sixth draw from the checkout bucket, which the portal shares: 6 at once.)
+	reply = post("/api/billing/portal", uma_s, "{\"cancel_subscription\":\"sub_notyours\"}");
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+
+	// A start naming an address takes an own machine.
+	reply = post("/api/me/servers", uma_s, "{\"game_name\":\"Uma\",\"address_id\":" + std::to_string(address) + "}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+
+	// The admin's view: admin only; the address with its owner; held of sellable.
+	TEST_EXPECT(h.send("GET", "/api/admin/addresses", { with_session(uma_s) }).code == 403);
+	reply = h.send("GET", "/api/admin/addresses", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["held"].i() >= 1 && json["sellable"].i() == 4);
+	bool seen = false;
+	for (const auto &a : json["addresses"])
+		seen = seen || (a["id"].i() == address && a["owner"]["id"].i() == uma && str(a["dns_state"]) == "none" &&
+							   a["retry_at"].t() == crow::json::type::Null);
+	TEST_EXPECT(seen);
+	// A retry: only of an address the cloud refused, which goes allocating again
+	// with its allocation enqueued; admin only.
+	const std::string retry = "/api/admin/addresses/" + std::to_string(address) + "/retry";
+	const std::string allocate_key = std::string(hosted::kJobAddressAllocate) + ":" + std::to_string(address);
+	reply = h.send("POST", retry, { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_retryable");
+	TEST_EXPECT(hosted::fail_address(*h.pool.acquire(), address, "AddressLimitExceeded", hosted::kAddressRetryBaseS));
+	h.pool.acquire()->exec("UPDATE jobs SET state = 'failed', finished_at = now() WHERE dedupe_key = $1;",
+			{ opennova::db::BindValue(allocate_key) });
+	TEST_EXPECT(!nws::jobs::job_pending(*h.pool.acquire(), allocate_key));
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/addresses", { kBearer })));
+	seen = false;
+	for (const auto &a : json["addresses"])
+		seen = seen || (a["id"].i() == address && str(a["state"]) == "failed" &&
+							   str(a["reason"]) == "AddressLimitExceeded" && a["retry_at"].t() == crow::json::type::String);
+	TEST_EXPECT(seen);
+	TEST_EXPECT(h.send("POST", retry, { with_session(uma_s) }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/addresses/999999/retry", { kBearer }).code == 404);
+	reply = h.send("POST", retry, { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["address"]["state"]) == "allocating" &&
+			json["address"]["reason"].t() == crow::json::type::Null &&
+			json["address"]["retry_at"].t() == crow::json::type::Null);
+	TEST_EXPECT(nws::jobs::job_pending(*h.pool.acquire(), allocate_key));
+	// A comp address: none past the account's own machines.
+	reply = h.send("POST", "/api/admin/users/" + std::to_string(vic) + "/addresses", { kBearer, kJson },
+			"{\"name\":\"vics\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
+	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), vic, { 1, 1 }));
+	reply = h.send("POST", "/api/admin/users/" + std::to_string(vic) + "/addresses", { kBearer, kJson },
+			"{\"name\":\"umas-place\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "name_taken");
+	reply = h.send("POST", "/api/admin/users/" + std::to_string(vic) + "/addresses", { kBearer, kJson },
+			"{\"name\":\"vics\"}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 201 && json && str(json["address"]["source"]) == "comp" &&
+			json["address"]["stripe_subscription_id"].t() == crow::json::type::Null);
+	const int64_t vics = json["address"]["id"].i();
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/users/" + std::to_string(vic), { kBearer })));
+	TEST_EXPECT(json && json["addresses"].size() == 1 && json["addresses"][0]["id"].i() == vics &&
+			json["capacity"]["addresses"]["sold"].i() >= 2);
+	// Rename, then release with the name typed back.
+	reply = h.send("PUT", "/api/admin/addresses/" + std::to_string(vics), { kBearer, kJson }, "{\"name\":\"umas-place\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "name_taken");
+	reply = h.send("PUT", "/api/admin/addresses/" + std::to_string(vics), { kBearer, kJson }, "{\"name\":\"victors\"}");
+	TEST_EXPECT(reply.code == 200 && str(crow::json::load(body_text(reply))["address"]["name"]) == "victors");
+	TEST_EXPECT(h.send("PUT", "/api/admin/addresses/999999", { kBearer, kJson }, "{\"name\":\"nobody\"}").code == 404);
+	reply = h.send("POST", "/api/admin/addresses/" + std::to_string(vics) + "/release", { kBearer, kJson },
+			"{\"confirm\":\"vics\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "confirm_mismatch");
+	reply = h.send("POST", "/api/admin/addresses/" + std::to_string(vics) + "/release", { kBearer, kJson },
+			"{\"confirm\":\"victors\"}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["address"]["state"]) == "lapsed" && str(json["address"]["lapse_cause"]) == "admin");
+	reply = h.send("POST", "/api/admin/addresses/" + std::to_string(vics) + "/release", { kBearer, kJson },
+			"{\"confirm\":\"victors\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_releasable");
+	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), vic, { 0, 0 }));
+	return 0;
+}
+
 // POST /api/billing/webhook: no session and no CSRF header, the signature its
 // credential. Missing, wrong, stale and several-v1 signatures; a body past
 // 1 MiB (413); a signed body that is no event (400 invalid_json); an event of the
@@ -7599,7 +7992,7 @@ int test_admin_user_detail(Harness &h) {
 	TEST_EXPECT(nws::delete_service_account(*h.pool.acquire(), service.id).ok);
 	// A comped account with no billing: its ids null.
 	const auto bea = nws::get_user_by_username(*h.pool.acquire(), "bill_bea");
-	TEST_EXPECT(bea && nws::set_comp_servers(*h.pool.acquire(), bea->id, 3).ok);
+	TEST_EXPECT(bea && nws::billing::set_comp_grants(*h.pool.acquire(), bea->id, { 3, 0 }));
 	json = crow::json::load(body_text(h.send("GET", "/api/admin/users/" + std::to_string(bea->id), { kBearer })));
 	TEST_EXPECT(json && json["entitlement"]["max_servers"].i() == 3 && str(json["entitlement"]["source"]) == "comp" &&
 			json["entitlement"]["tier"].t() == crow::json::type::Null && json["entitlement"]["tier_servers"].i() == 0 &&
@@ -7622,7 +8015,7 @@ int test_admin_user_detail(Harness &h) {
 		}
 	}
 	TEST_EXPECT(ana_seen && bea_seen);
-	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), bea->id, 0).ok);
+	TEST_EXPECT(nws::billing::set_comp_grants(*h.pool.acquire(), bea->id, { 0, 0 }));
 	// An id past 32 bits names no account (it is never cut down to another's).
 	const std::string wide = std::to_string((int64_t{ 1 } << 32) + ana->id);
 	reply = h.send("PUT", "/api/admin/users/" + wide, { kBearer, kJson }, "{\"nwh\":\"7\"}");
@@ -7831,84 +8224,88 @@ int test_password_reset_brakes(Harness &h) {
 	return 0;
 }
 
-int run(Harness &h) {
-	struct Case { const char *name; int (*fn)(Harness &); };
+// The cases of one part, in order (main's parts: each a run of its own over a fixture of its own).
+int run(Harness &h, const char *part) {
+	struct Case { const char *part; const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
-		{ "health", test_health },
-		{ "lobbies_lists_seeded_games", test_lobbies_lists_seeded_games },
-		{ "register_ok", test_register_ok },
-		{ "register_duplicate", test_register_duplicate },
-		{ "admin_server_status_requires_token", test_admin_server_status_requires_token },
-		{ "admin_users_list", test_admin_users_list },
-		{ "login_sets_session_cookie", test_login_sets_session_cookie },
-		{ "cookie_secure_flag", test_cookie_secure_flag },
-		{ "login_failures_are_generic", test_login_failures_are_generic },
-		{ "login_refuses_inactive_accounts", test_login_refuses_inactive_accounts },
-		{ "me_requires_live_session", test_me_requires_live_session },
-		{ "session_slides", test_session_slides },
-		{ "logout_invalidates", test_logout_invalidates },
-		{ "admin_routes_by_credential", test_admin_routes_by_credential },
-		{ "admin_routes_table", test_admin_routes_table },
-		{ "bootstrap_admin", test_bootstrap_admin },
-		{ "csrf_before_buckets", test_csrf_before_buckets },
-		{ "login_brake", test_login_brake },
-		{ "register_brake", test_register_brake },
-		{ "password_reset", test_password_reset },
-		{ "password_reset_links", test_password_reset_links },
-		{ "password_reset_brakes", test_password_reset_brakes },
-		{ "nwlogin_brake", test_nwlogin_brake },
-		{ "known_addresses", test_known_addresses },
-		{ "retail_pin_revocation", test_retail_pin_revocation },
-		{ "untrusted_proxy_header_ignored", test_untrusted_proxy_header_ignored },
-		{ "nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey },
-		{ "nwhost_records_owner", test_nwhost_records_owner },
-		{ "listed_server_owners", test_listed_server_owners },
-		{ "joiner_routes_admin_only", test_joiner_routes_admin_only },
-		{ "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
-		{ "lobby_per_title", test_lobby_per_title },
-		{ "gsb_rosters", test_gsb_rosters },
-		{ "dfx2_client_path", test_dfx2_client_path },
-		{ "cd_key_routes", test_cd_key_routes },
-		{ "dfx2_activation", test_dfx2_activation },
-		{ "unknown_path_404", test_unknown_path_404 },
-		{ "server_info", test_server_info },
-		{ "healthz", test_healthz },
-		{ "admin_host_push", test_admin_host_push },
-		{ "owner_host_push", test_owner_host_push },
-		{ "admin_sessions", test_admin_sessions },
-		{ "admin_end_session", test_admin_end_session },
-		{ "admin_lobbies", test_admin_lobbies },
-		{ "hosted_server_routes", test_hosted_server_routes },
-		{ "hosted_listing_owner", test_hosted_listing_owner },
-		{ "hosted_console_routes", test_hosted_console_routes },
-		{ "admin_fleet_routes", test_admin_fleet_routes },
-		{ "hosted_stats_routes", test_hosted_stats_routes },
-		{ "hosted_usage_route", test_hosted_usage_route },
-		{ "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
-		{ "billing_routes", test_billing_routes },
-		{ "billing_checkout_guard", test_billing_checkout_guard },
-		{ "billing_webhook", test_billing_webhook },
-		{ "billing_admin", test_billing_admin },
-		{ "admin_user_detail", test_admin_user_detail },
-		{ "host_text_utf8", test_host_text_utf8 },
-		{ "name_and_value_rules", test_name_and_value_rules },
-		{ "template_names_refused", test_template_names_refused },
-		{ "retail_templates_render", test_retail_templates_render },
-		{ "catch_all_stays_in_root", test_catch_all_stays_in_root },
-		{ "header_values_cannot_split", test_header_values_cannot_split },
-		{ "reset_during_login", test_reset_during_login },
-		{ "join_identity", test_join_identity },
-		{ "api_proxy_only", test_api_proxy_only },
-		{ "retail_proxy_names_client", test_retail_proxy_names_client },
-		{ "template_values_escaped", test_template_values_escaped },
-		{ "register_handle_rule", test_register_handle_rule },
-		{ "login_row_kept_alive", test_login_row_kept_alive },
-		{ "host_tag_serves_once", test_host_tag_serves_once },
-		{ "db_failure_reply_carries_code_alone", test_db_failure_reply_carries_code_alone },
-		{ "public_reads_fail_as_500", test_public_reads_fail_as_500 },
-		{ "concurrent_requests", test_concurrent_requests },
+		{ "accounts", "health", test_health },
+		{ "accounts", "lobbies_lists_seeded_games", test_lobbies_lists_seeded_games },
+		{ "accounts", "register_ok", test_register_ok },
+		{ "accounts", "register_duplicate", test_register_duplicate },
+		{ "accounts", "admin_server_status_requires_token", test_admin_server_status_requires_token },
+		{ "accounts", "admin_users_list", test_admin_users_list },
+		{ "accounts", "login_sets_session_cookie", test_login_sets_session_cookie },
+		{ "accounts", "cookie_secure_flag", test_cookie_secure_flag },
+		{ "accounts", "login_failures_are_generic", test_login_failures_are_generic },
+		{ "accounts", "login_refuses_inactive_accounts", test_login_refuses_inactive_accounts },
+		{ "accounts", "me_requires_live_session", test_me_requires_live_session },
+		{ "accounts", "session_slides", test_session_slides },
+		{ "accounts", "logout_invalidates", test_logout_invalidates },
+		{ "accounts", "admin_routes_by_credential", test_admin_routes_by_credential },
+		{ "accounts", "admin_routes_table", test_admin_routes_table },
+		{ "lobby", "bootstrap_admin", test_bootstrap_admin },
+		{ "accounts", "csrf_before_buckets", test_csrf_before_buckets },
+		{ "login_brake", "login_brake", test_login_brake },
+		{ "accounts", "register_brake", test_register_brake },
+		{ "accounts", "password_reset", test_password_reset },
+		{ "accounts", "password_reset_links", test_password_reset_links },
+		{ "accounts", "password_reset_brakes", test_password_reset_brakes },
+		{ "retail_brakes", "nwlogin_brake", test_nwlogin_brake },
+		{ "retail_brakes", "known_addresses", test_known_addresses },
+		{ "retail_brakes", "retail_pin_revocation", test_retail_pin_revocation },
+		{ "retail_brakes", "untrusted_proxy_header_ignored", test_untrusted_proxy_header_ignored },
+		{ "titles", "nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey },
+		{ "titles", "nwhost_records_owner", test_nwhost_records_owner },
+		{ "titles", "listed_server_owners", test_listed_server_owners },
+		{ "titles", "joiner_routes_admin_only", test_joiner_routes_admin_only },
+		{ "titles", "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
+		{ "titles", "lobby_per_title", test_lobby_per_title },
+		{ "titles", "gsb_rosters", test_gsb_rosters },
+		{ "titles", "dfx2_client_path", test_dfx2_client_path },
+		{ "titles", "cd_key_routes", test_cd_key_routes },
+		{ "titles", "dfx2_activation", test_dfx2_activation },
+		{ "titles", "unknown_path_404", test_unknown_path_404 },
+		{ "titles", "server_info", test_server_info },
+		{ "titles", "healthz", test_healthz },
+		{ "lobby", "admin_host_push", test_admin_host_push },
+		{ "owner_push", "owner_host_push", test_owner_host_push },
+		{ "lobby", "admin_sessions", test_admin_sessions },
+		{ "lobby", "admin_end_session", test_admin_end_session },
+		{ "lobby", "admin_lobbies", test_admin_lobbies },
+		{ "hosted", "hosted_server_routes", test_hosted_server_routes },
+		{ "hosted", "hosted_listing_owner", test_hosted_listing_owner },
+		{ "hosted", "hosted_console_routes", test_hosted_console_routes },
+		{ "hosted", "admin_fleet_routes", test_admin_fleet_routes },
+		{ "hosted", "hosted_stats_routes", test_hosted_stats_routes },
+		{ "hosted", "hosted_usage_route", test_hosted_usage_route },
+		{ "hosted", "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
+		{ "billing", "billing_routes", test_billing_routes },
+		{ "billing", "billing_checkout_guard", test_billing_checkout_guard },
+		{ "billing", "billing_capacity", test_billing_capacity },
+		{ "billing", "address_routes", test_address_routes },
+		{ "billing", "billing_webhook", test_billing_webhook },
+		{ "billing", "billing_admin", test_billing_admin },
+		{ "billing", "admin_user_detail", test_admin_user_detail },
+		{ "lobby", "host_text_utf8", test_host_text_utf8 },
+		{ "retail_pages", "name_and_value_rules", test_name_and_value_rules },
+		{ "retail_pages", "template_names_refused", test_template_names_refused },
+		{ "retail_pages", "retail_templates_render", test_retail_templates_render },
+		{ "retail_pages", "catch_all_stays_in_root", test_catch_all_stays_in_root },
+		{ "retail_pages", "header_values_cannot_split", test_header_values_cannot_split },
+		{ "retail_pages", "reset_during_login", test_reset_during_login },
+		{ "retail_pages", "join_identity", test_join_identity },
+		{ "retail_pages", "api_proxy_only", test_api_proxy_only },
+		{ "retail_pages", "retail_proxy_names_client", test_retail_proxy_names_client },
+		{ "retail_pages", "template_values_escaped", test_template_values_escaped },
+		{ "retail_pages", "register_handle_rule", test_register_handle_rule },
+		{ "retail_pages", "login_row_kept_alive", test_login_row_kept_alive },
+		{ "retail_pages", "host_tag_serves_once", test_host_tag_serves_once },
+		{ "retail_pages", "db_failure_reply_carries_code_alone", test_db_failure_reply_carries_code_alone },
+		{ "retail_pages", "public_reads_fail_as_500", test_public_reads_fail_as_500 },
+		{ "retail_pages", "concurrent_requests", test_concurrent_requests },
 	};
 	for (const Case &c : cases) {
+		if (std::string(c.part) != part) continue;
 		std::printf("-- %s\n", c.name);
 		if (c.fn(h) != 0) {
 			std::fprintf(stderr, "FAIL: %s\n", c.name);
@@ -7920,10 +8317,11 @@ int run(Harness &h) {
 
 } // namespace
 
-int main(int argc, char **argv) {
-	test_db::init(argc, argv);
-	test_redis::init(argc, argv);
-	TEST_EXPECT(net::startup() == 0);
+namespace {
+
+// The fixture (the database, the three listeners, the NW UDP listener, the drains, the fake Stripe,
+// the retail roots) built for one part's cases, which run over it in order, then taken down.
+int with_harness(const char *part) {
 	int rc = 1;
 	{
 		const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
@@ -8016,7 +8414,7 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(nw_udp.start(udp_config));
 		nws::SessionStore sessions(http_redis.pool());
 		// The console routes' admin links (the console case syncs them by hand),
-		// declared before the listener so they outlive it, as the controller
+		// declared before the listener so they outlive it, as the fleet
 		// keeps them: their states published to their rows every 50 ms (the
 		// supervisor's pass does it each second) and the routes' commands
 		// drained from their table.
@@ -8047,6 +8445,7 @@ int main(int argc, char **argv) {
 		stripe.add_price(harness_price("price_htier2", 1000));
 		stripe.add_price(harness_price("price_htier3", 1500));
 		stripe.add_price(harness_price("price_hown", 4500));
+		stripe.add_price(harness_price("price_haddr", 500));
 		nws::billing::BillingConfig billing_config;
 		billing_config.secret_key = "sk_test_harnesskey";
 		billing_config.webhook_secret = kWebhookSecret;
@@ -8055,6 +8454,8 @@ int main(int argc, char **argv) {
 		billing_config.tier_prices[2] = { "price_htier2" };
 		billing_config.tier_prices[3] = { "price_htier3" };
 		billing_config.own_machine_prices = { "price_hown" };
+		billing_config.static_address_prices = { "price_haddr" };
+		billing_config.sells_addresses = true;
 		TEST_EXPECT(nws::billing::check_billing_config(billing_config).empty());
 		nws::billing::Billing billing_service(billing_config, stripe, pool, nws::billing::instance_id(*pool.acquire()));
 		TEST_EXPECT(billing_service.sync().reconcile_all(nws::billing::unix_now()).completed);
@@ -8071,6 +8472,14 @@ int main(int argc, char **argv) {
 		http.set_mail_enabled(true);
 		http.set_watchdog(&watchdog);
 		http.set_billing(&billing_service);
+		// The fleet the checkouts are judged against (test_billing_capacity): the
+		// default 2 x 12 shared places, and own machines for every case's.
+		nws::hosted::PlacementPolicy placement;
+		placement.max_own = 16;
+		placement.max_addresses = 4;
+		http.set_fleet_placement(placement);
+		// The static addresses (test_address_routes), named in play.test.
+		http.set_addresses(true, "play.test");
 		// The usage view's slot limits: 256 MiB and 2 CPUs a container.
 		http.set_fleet_slots(256, 2.0);
 		TEST_EXPECT(http.start(config));
@@ -8149,7 +8558,7 @@ int main(int argc, char **argv) {
 		harness.jo_tree = jo_tree;
 		harness.jox_tree = jox_tree;
 		harness.dfx2_tree = dfx2_tree;
-		rc = run(harness);
+		rc = run(harness, part);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener.
 		fresh_http.stop();
@@ -8161,7 +8570,30 @@ int main(int argc, char **argv) {
 		links.stop_all();
 		nw_udp.stop();
 	}
+	return rc;
+}
+
+} // namespace
+
+// A row per part (tests/common/test_parts.h; service_tests.cmake lists them), each over a fixture
+// of its own: a part's cases share what its earlier cases left (the accounts the register case made,
+// the maintenance the status case turned on, the admin bootstrap_admin made), and no part's cases
+// read another's. With no selection every part runs in turn.
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
+	test_redis::init(argc, argv);
+	TEST_EXPECT(net::startup() == 0);
+	const int rc = test_parts::run(argc, argv,
+	        {{"accounts", {[] { return with_harness("accounts"); }}},
+	         {"login_brake", {[] { return with_harness("login_brake"); }}},
+	         {"retail_brakes", {[] { return with_harness("retail_brakes"); }}},
+	         {"titles", {[] { return with_harness("titles"); }}},
+	         {"lobby", {[] { return with_harness("lobby"); }}},
+	         {"owner_push", {[] { return with_harness("owner_push"); }}},
+	         {"hosted", {[] { return with_harness("hosted"); }}},
+	         {"billing", {[] { return with_harness("billing"); }}},
+	         {"retail_pages", {[] { return with_harness("retail_pages"); }}}});
 	net::shutdown();
 	if (rc == 0) std::printf("OK: http routes\n");
-	return rc;
+	return rc == 0 ? 0 : 1;
 }

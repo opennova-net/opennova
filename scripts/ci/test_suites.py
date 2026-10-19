@@ -22,7 +22,31 @@ REPO = Path(__file__).resolve().parents[2]
 ROOTS = ("OPENNOVA_JO_DIR", "OPENNOVA_JO_ASSETS")
 
 
-def godot_scripts(repo: Path, suite: str, *, windowed: bool = False) -> list[str]:
+# The GUT suites' CI shards, each on its own runner: `shells`, the scripts under
+# the directories of the shells and what drives them (tests/authoring the
+# editor's, tests/game the game shell's, tests/mcp their MCP endpoints',
+# tests/probes the runtime probes' contracts; the same names under
+# tests/retail/ for the retail suite), and `world`, every other script of the
+# suite. A script is in one or the other by its first directory under tests/
+# (tests/retail/), so the two partition each suite by construction. On the
+# Windows runs of 2026-10-18 they split core's 406 s of scripts 207 s / 199 s
+# and retail's 326 s 119 s / 207 s.
+GODOT_SHELL_DIRS = ("authoring", "game", "mcp", "probes")
+GODOT_SHARDS = ("shells", "world")
+
+
+def godot_shard(script: str) -> str:
+    """The GUT shard a script (res://tests/... or res://tests/retail/...) runs in."""
+    dirs = script.removeprefix("res://").split("/")[1:-1]
+    if dirs[:1] == ["retail"]:
+        dirs = dirs[1:]
+    return "shells" if dirs[:1] and dirs[0] in GODOT_SHELL_DIRS else "world"
+
+
+def godot_scripts(repo: Path, suite: str, *, windowed: bool = False,
+                  shard: str | None = None) -> list[str]:
+    if shard is not None and (suite == "all" or shard not in GODOT_SHARDS):
+        raise ValueError("a Godot shard (shells, world) splits the core or the retail suite")
     scripts = []
     for path in sorted((repo / "godot/tests").rglob("*_test.gd")):
         rel = path.relative_to(repo / "godot")
@@ -33,6 +57,8 @@ def godot_scripts(repo: Path, suite: str, *, windowed: bool = False) -> list[str
             continue
         if suite == "all" or retail == (suite == "retail"):
             scripts.append("res://" + rel.as_posix())
+    if shard is not None:
+        scripts = [script for script in scripts if godot_shard(script) == shard]
     return scripts
 
 
@@ -200,8 +226,10 @@ def check_log(path: Path, suite: str, *, windowed: bool = False) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--suite", choices=("core", "retail", "all"), required=True)
-    ap.add_argument("--shard", choices=tuple(SHARDS),
-                    help="one CI shard of the core suite (its ctest selection and inventory)")
+    ap.add_argument("--shard", choices=tuple(SHARDS) + GODOT_SHARDS,
+                    help="one CI shard: of the core suite's ctest selection and inventory "
+                         "(editor, rest), or, with --godot-config, of the core or retail suite's "
+                         "Godot scripts (shells, world)")
     ap.add_argument("--selection", action="store_true",
                     help="print the suite's (or shard's) ctest label arguments, one per line")
     ap.add_argument("--godot-config", type=Path)
@@ -215,8 +243,12 @@ def main() -> int:
                     help="select only the suite's graphics scripts (tests/windowed/ for core, "
                          "tests/retail/windowed/ for retail); a pending test then fails")
     args = ap.parse_args()
-    if args.shard and args.suite != "core":
-        ap.error("--shard splits the core suite only")
+    if args.shard and (args.shard in GODOT_SHARDS) != bool(args.godot_config):
+        ap.error("--shard shells|world splits the Godot scripts (--godot-config), editor|rest the ctest rows")
+    if args.shard in SHARDS and args.suite != "core":
+        ap.error("--shard editor|rest splits the core suite only")
+    if args.shard in GODOT_SHARDS and args.suite == "all":
+        ap.error("--shard shells|world splits the core or the retail suite")
     if args.selection:
         for arg in ctest_selection(args.suite, args.shard):
             print(arg)
@@ -225,7 +257,7 @@ def main() -> int:
     if args.check_layout:
         errors += layout_errors(REPO)
     if args.godot_config:
-        expected = godot_scripts(REPO, args.suite, windowed=args.windowed)
+        expected = godot_scripts(REPO, args.suite, windowed=args.windowed, shard=args.shard)
         if not expected:
             errors.append("suite selection is empty")
         config = {"dirs": [], "tests": expected, "prefix": "", "suffix": "_test.gd",

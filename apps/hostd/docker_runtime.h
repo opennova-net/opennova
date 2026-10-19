@@ -51,12 +51,13 @@
 namespace opennova::hostd {
 
 // Where the containers' output goes. With a group (a cloud machine; its
-// user-data passes --log-group and --log-region): that CloudWatch log group, a
-// stream per slot, "<machine id>/slot-<k>", which each server on the slot
-// writes in turn, through docker's awslogs driver:
+// command line passes --log-group and --region): that CloudWatch log group,
+// the servers', a stream per start, the one the service names in the
+// container's desired entry ("<server id>/g<generation>", which the server's
+// start row keeps), through docker's awslogs driver:
 //
 //     --log-driver awslogs --log-opt awslogs-region=<region>
-//     --log-opt awslogs-group=<group> --log-opt awslogs-stream=<machine id>/slot-<k>
+//     --log-opt awslogs-group=<group> --log-opt awslogs-stream=<its log stream>
 //     --log-opt mode=non-blocking --log-opt max-buffer-size=4m
 //
 // Non-blocking: CloudWatch slow or out of reach never holds up a write of the
@@ -70,7 +71,6 @@ namespace opennova::hostd {
 struct ContainerLogs {
 	std::string group;
 	std::string region;
-	int64_t machine_id = 0;
 };
 
 class DockerRuntime : public ContainerRuntime {
@@ -106,11 +106,14 @@ public:
 	bool stop(const std::string &name, int timeout_ms, std::string &error) override;
 	bool kill(const std::string &name, int timeout_ms, std::string &error) override;
 	bool remove(const std::string &name, int timeout_ms, std::string &error) override;
+	// `docker image ls --no-trunc --format {{.Repository}}@{{.Digest}}
+	// <repository>`, an image with no digest left out; `docker image rm`.
+	bool list_images(const std::string &repository, std::vector<std::string> &out, int timeout_ms,
+			std::string &error) override;
+	bool remove_image(const std::string &image, int timeout_ms, std::string &error) override;
 
 	// The argv run() runs for `spec`.
 	std::vector<std::string> run_argv(const ContainerSpec &spec) const;
-	// Slot `slot`'s CloudWatch stream on machine `machine_id`: "<id>/slot-<k>".
-	static std::string slot_log_stream(int64_t machine_id, int slot);
 
 private:
 	struct Pull {
@@ -133,10 +136,10 @@ private:
 };
 
 // `docker inspect`'s JSON array as the agent's containers: the name without its
-// leading '/', the state (created and restarting: starting; running and paused:
-// running; exited, dead and removing: exited), the exit code and OOM flag once
-// exited, the start time, the slot label. An entry without the agent's label is
-// left out. False with `error` when `json` is no such array.
+// leading '/', the image it was run from (Config.Image), the state (created and restarting:
+// starting; running and paused: running; exited, dead and removing: exited), the exit code and OOM
+// flag once exited, the start time, the slot label. An entry without the agent's label is left out.
+// False with `error` when `json` is no such array.
 bool parse_docker_inspect(
 		std::string_view json, std::vector<ContainerInfo> &out, std::string &error);
 // `docker stats --format '{{json .}}'` lines, by container name: CPUPerc

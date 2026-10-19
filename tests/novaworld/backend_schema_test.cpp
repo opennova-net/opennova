@@ -82,17 +82,19 @@ int test_migrations_create_expected_tables() {
 
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
-		"billing_customers", "billing_events", "billing_subscriptions", "billing_sync_backoff",
-		"billing_sync_state", "cd_key_activations", "cd_keys", "controller_leader",
-		"data_set_trees", "data_sets", "fleet_launch_backoff", "fleet_machine_egress",
+		"billing_checkout_reservations", "billing_customers", "billing_events",
+		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state",
+		"cd_key_activations", "cd_keys", "comp_grants", "data_set_trees", "data_sets",
+		"fleet_launch_backoff", "fleet_leader", "fleet_machine_egress", "fleet_machine_events",
+		"fleet_machine_hourly", "fleet_machine_samples", "fleet_machine_trees",
 		"fleet_machines", "fleet_slot_reports",
-		"games", "host_keys", "host_players", "host_roster", "hosted_admin_links",
-		"hosted_console_commands", "hosted_console_replies", "hosted_limits_hold",
+		"games", "host_keys", "host_players", "host_roster", "hosted_address_orphans", "hosted_addresses",
+		"hosted_admin_links", "hosted_console_commands", "hosted_console_replies", "hosted_limits_hold",
 		"hosted_server_console", "hosted_server_events", "hosted_server_hourly",
-		"hosted_server_samples", "hosted_servers", "jobs", "lobby_commands", "lobby_instances",
+		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "lobby_commands", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
-		"release_sections", "releases", "server_status", "service_meta", "unknown_messages",
-		"web_sessions" };
+		"program_hourly", "program_samples", "release_sections", "releases", "server_status",
+		"service_meta", "unknown_messages", "web_sessions" };
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);
@@ -117,7 +119,7 @@ int test_migrations_create_expected_tables() {
 		"fleet_slot_reports.oom",
 		"hosted_console_commands.record", "hosted_console_commands.sent",
 		"hosted_limits_hold.force_next", "hosted_limits_hold.held", "hosted_server_samples.link_up",
-		"hosted_server_samples.mission_started", "hosted_servers.own_machine",
+		"hosted_server_samples.mission_started", "hosted_server_starts.oom", "hosted_servers.own_machine",
 		"hosted_servers.team_ff", "hosted_servers.update_requested", "lobby_sessions.hosting",
 		"lobby_sessions.listed",
 		"server_status.maintenance_enabled",
@@ -684,20 +686,29 @@ int test_hosted_server_game() {
 	return 0;
 }
 
-// The billing tables (0002_billing.sql) and the comp grant beside them: the
-// grant's range, a subscription's item and tier rules, the indexes, an account's
-// delete taking its customer row and leaving its subscriptions with no account,
-// one customer row per account and per Stripe customer.
+// The billing tables (0002_billing.sql) and the comp grants beside them
+// (0017_capacity_addresses.sql): a grant's range and items, an account's delete
+// taking its grants, a subscription's item and tier rules, the indexes, an
+// account's delete taking its customer row and leaving its subscriptions with no
+// account, one customer row per account and per Stripe customer.
 int test_billing_tables() {
 	TestDatabase scratch;
 	Database db = scratch.open();
-	TEST_EXPECT(has_column(db, "players", "comp_servers") && !has_column(db, "players", "can_host"));
+	TEST_EXPECT(!has_column(db, "players", "comp_servers") && !has_column(db, "players", "can_host"));
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
 	        "VALUES ('bill', 'x', '0b110001', '1', 'Bill'), ('bob', 'x', '0b110002', '1', 'Bob');");
-	TEST_EXPECT(db.query("SELECT comp_servers FROM players WHERE username = 'bill';").front().as_int(0) == 0);
-	db.exec("UPDATE players SET comp_servers = 16 WHERE username = 'bill';");
-	TEST_EXPECT(refused(db, "UPDATE players SET comp_servers = 17 WHERE username = 'bill';"));
-	TEST_EXPECT(refused(db, "UPDATE players SET comp_servers = -1 WHERE username = 'bill';"));
+	const std::string grant = "INSERT INTO comp_grants (user_id, item, quantity) SELECT id, ";
+	db.exec(grant + "'servers', 16 FROM players WHERE username = 'bill';");
+	db.exec(grant + "'own_machine', 1 FROM players WHERE username = 'bill';");
+	TEST_EXPECT(refused(db, grant + "'servers', 1 FROM players WHERE username = 'bill';"));
+	TEST_EXPECT(refused(db, grant + "'servers', 17 FROM players WHERE username = 'bob';"));
+	TEST_EXPECT(refused(db, grant + "'servers', 0 FROM players WHERE username = 'bob';"));
+	TEST_EXPECT(refused(db, grant + "'tier', 1 FROM players WHERE username = 'bob';"));
+	db.exec(grant + "'servers', 1 FROM players WHERE username = 'bob';");
+	db.exec("DELETE FROM players WHERE username = 'bob';");
+	TEST_EXPECT(db.query("SELECT 1 FROM comp_grants;").size() == 2);
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+	        "VALUES ('bob', 'x', '0b110002', '1', 'Bob');");
 	for (const char *index : { "idx_billing_subscriptions_user", "idx_billing_subscriptions_customer" })
 		TEST_EXPECT(has_index(db, "billing_subscriptions", index));
 	TEST_EXPECT(has_index(db, "billing_events", "idx_billing_events_pending"));
@@ -808,16 +819,47 @@ int test_jobs_tables() {
 	return 0;
 }
 
-// The controller's state (0008_controller_state.sql): the leadership's and the
-// limits hold's one rows, the admin links' states (gone with their server), and
-// the console's commands with their replies (gone with their command).
-int test_controller_tables() {
+// 0017_capacity_addresses.sql over a database migrated to the one before it: each
+// account's players.comp_servers becomes its comp_grants row of servers (none for 0),
+// and the column goes.
+int test_comp_grants_migration() {
+	const std::filesystem::path migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
+	TestDatabase scratch({ /*migrate=*/false });
+	const std::filesystem::path before =
+			std::filesystem::temp_directory_path() / ("opennova-migrations-" + scratch.name());
+	std::filesystem::create_directories(before);
+	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
+		const std::string name = e.path().filename().string();
+		if (e.path().extension() == ".sql" && name < "0017_")
+			std::filesystem::copy_file(e.path(), before / name);
+	}
+	Database db = scratch.open();
+	run_migrations(db, before);
+	std::filesystem::remove_all(before);
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, comp_servers) "
+	        "VALUES ('cg_ann', 'x', '0b120001', '1', 'Ann', 3), ('cg_bo', 'x', '0b120002', '1', 'Bo', 0);");
+	run_migrations(db, migrations);
+	TEST_EXPECT(!has_column(db, "players", "comp_servers"));
+	const auto rows = db.query("SELECT p.username, g.item, g.quantity FROM comp_grants g "
+							   "JOIN players p ON p.id = g.user_id ORDER BY p.username;");
+	TEST_EXPECT(rows.size() == 1 && rows.front().as_text(0) == "cg_ann" && rows.front().as_text(1) == "servers" &&
+			rows.front().as_int(2) == 3);
+	return 0;
+}
+
+// The fleet program's state (0008_controller_state.sql, its leadership's row
+// renamed by 0014_fleet_leader.sql): the leadership's and the limits hold's one
+// rows, the admin links' states (gone with their server), and the console's
+// commands with their replies (gone with their command).
+int test_fleet_tables() {
 	TestDatabase scratch({ /*migrate=*/true });
 	Database db = scratch.open();
 	TEST_EXPECT(
-			db.query("SELECT generation FROM controller_leader WHERE id = 1;").front().as_int(0) ==
-			0);
-	TEST_EXPECT(refused(db, "INSERT INTO controller_leader (id) VALUES (2);"));
+			db.query("SELECT generation FROM fleet_leader WHERE id = 1;").front().as_int(0) == 0);
+	TEST_EXPECT(refused(db, "INSERT INTO fleet_leader (id) VALUES (2);"));
+	TEST_EXPECT(has_index(db, "fleet_leader", "fleet_leader_pkey"));
+	TEST_EXPECT(!db.query("SELECT 1 FROM pg_constraint WHERE conname = 'fleet_leader_id_check';")
+						 .empty());
 	TEST_EXPECT(
 			db.query("SELECT held FROM hosted_limits_hold WHERE id = 1;").front().as_int(0) == 0);
 	TEST_EXPECT(refused(db, "INSERT INTO hosted_limits_hold (id) VALUES (2);"));
@@ -898,16 +940,17 @@ int main(int argc, char **argv) {
 	if (test_cd_keys_fresh() != 0)
 		return 1;
 	if (test_billing_tables() != 0) return 1;
+	if (test_comp_grants_migration() != 0) return 1;
 	if (test_account_email() != 0) return 1;
 	if (test_jobs_tables() != 0)
 		return 1;
 	if (test_lobby_instances_tables() != 0)
 		return 1;
-	if (test_controller_tables() != 0)
+	if (test_fleet_tables() != 0)
 		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
 				"web sessions + roles, games titles, host keys, credentials generation, hosted "
 				"server games, "
-				"cd keys, billing, account email, jobs, controller state)\n");
+				"cd keys, billing, account email, jobs, fleet state)\n");
 	return 0;
 }

@@ -57,6 +57,9 @@ scripts/build.sh
 - Both scripts configure their build tree once and skip that step on later runs; the build
   re-runs CMake by itself when a `CMakeLists.txt` changes.
 - `scripts/test_godot.sh --keep-user-dir` leaves the suite's isolated `user://` in place.
+- `scripts/test_godot.sh --suite core|retail --shard shells|world` runs one of a suite's
+  two Windows GUT shards in CI (the scripts under `tests/authoring`, `game`, `mcp` and
+  `probes`, or `tests/retail/` the same, or the others) with its own attestation.
 - On Windows, keeping the build trees out of real-time antivirus scanning (a Defender
   exclusion, or a Dev Drive) speeds up compiling, linking and the first launch of each
   freshly linked test.
@@ -71,10 +74,10 @@ ctest --test-dir build --output-on-failure -C Release
 
 When you are working on the NovaWorld service (Linux only), configure with
 `-DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON`: the first defines the
-service, its five programs (`apps/novaworld_common`, the shared library, and
-`apps/novaworld_gate`, `_lobby`, `_web`, `_controller`, `_worker`) and their tests, the
-second fetches Asio + Crow and adds the HTTP layer, which web, the controller and the
-worker need (without it only the gate and the lobby build).
+service, its six programs (`apps/novaworld_common`, the service's layered libraries, and
+`apps/novaworld_gate`, `_lobby`, `_web`, `_fleet`, `_worker`, `_data`) and their tests, the
+second fetches Asio + Crow and adds the HTTP layer, which web, the fleet, the worker and the
+data program need (without it only the gate and the lobby build).
 Both are OFF by default, so the game and tool builds stay lean. The service's database
 tests make their databases on a PostgreSQL server named by
 `-DOPENNOVA_TEST_PG=<uri>`, and without one they skip (which `--suite core` fails):
@@ -157,7 +160,7 @@ examples and exit codes.
 ## Run the NovaWorld servers locally
 
 The whole NovaWorld service runs on your machine with one command, in Docker, in the
-shape a deployment runs it (`deploy/compose/`, ADR 0063): the five programs each in a
+shape a deployment runs it (`deploy/compose/`, ADR 0063): the six programs each in a
 container of its own, PostgreSQL, Valkey, the site behind prod's nginx portal, and, given a
 data set, hosted game servers on machines the worker launches.
 
@@ -180,7 +183,7 @@ reach the published ports there too. It prints what to point a client at when it
 | `novaworld-lobby` | `64206/udp` | a lobby instance: sessions, the server browser, listings |
 | `novaworld-web` | `8080/tcp` | the retail `NW*.dll` and `.gsb` routes, through the portal's retail server (its 8082, in front of web's own 8080, as deployed) |
 | `portal` | `http://localhost:8000` | the site (prod's nginx in web's network, as in web's ECS task) and its `/api` |
-| `novaworld-controller`, `novaworld-worker` | none | the supervisor and the jobs; the machines' internal listener at `172.30.77.10:8070` |
+| `novaworld-fleet`, `novaworld-worker`, `novaworld-data` | none | the supervisor, the jobs, the data sets' jobs; the machines' internal listener at `172.30.77.10:8070` |
 | `postgres`, `valkey` | none | the database (the `pg_data` volume), web's state |
 | `docker-api`, `machine-data`, `dev-machine-<id>` | none | hosted servers (below) |
 
@@ -208,10 +211,10 @@ worker's docker machine driver launches each fleet machine as a container of the
 container of this machine, which is root-equivalent on it: the proxy sits on an internal
 network that the worker alone joins, and the stack is for a developer's machine, never a
 deployment), whose
-own `opennova-hostd` redeems the one-time token its launch handed it at the controller's
-internal listener, syncs from the machine's address, and runs each server the controller
+own `opennova-hostd` redeems the one-time token its launch handed it at the fleet's
+internal listener, syncs from the machine's address, and runs each server the fleet
 places on its slots as an `opennova-serve` child (`apps/hostd/README.md`, "The process
-runtime"); the controller's admin links reach the slots' admin ports at the machine's
+runtime"); the fleet's admin links reach the slots' admin ports at the machine's
 address, and the servers list through the gate at the announced address.
 
 ```bash
@@ -224,13 +227,13 @@ scripts/dev_stack.sh up --no-hosting                          # neither
 `version.txt`, `score.ini`, `_NSTMOUT.TXT` and `gt.ssc` when present) through the admin API
 as the Joint Operations data set (`--data-set` names another seeded base), the way the Game
 data page uploads them (each file in parts PUT through the site, which web puts in the
-stack's store volume; `curl` and `jq` do it); the worker lists its missions, which are the
+stack's store volume; `curl` and `jq` do it); the data program lists its missions, which are the
 rotation (`--mission` names the one the smoke test's server runs). Retail data never enters
 the repository or an image. With no data set hosting stays off (web logs
 `hosted servers: off (provider none ...)` and `up` prints it).
 
 To start one by hand: log in to the site as `test`, grant an account a server (the admin's
-comp grant, `PUT /api/admin/users/<id>/comp-servers` with `{"comp_servers": 1}`), and start it
+comp grant, `PUT /api/admin/users/<id>/comp` with `{"servers": 1, "own_machines": 0}`), and start it
 from that account's servers page (`POST /api/me/servers`). It lists in the lobby a retail
 client browses; its listing's address is the machine's as the lobby sees it through Docker,
 so joining it is for a client on the stack's network, not a retail client on this machine.
@@ -244,7 +247,7 @@ programs' and machines' last log lines. It checks every program's `GET /livez` a
 /api/me`; the gate's answer to a retail probe naming a live lobby and a NovaWorld session
 verified there (the engine's own codecs); the jobs admin API; and, with a data set, a hosted
 server started through the site that reaches `running` on a machine the worker launched, is
-listed in the lobby, answers console commands through the controller's admin link (`PLAYER
+listed in the lobby, answers console commands through the fleet's admin link (`PLAYER
 LIST`, `CHAT SEND`) and stops. CI's `local-stack.yml` runs `up --synthetic-data --prebuilt`
 and the smoke test on every change to the service, its images, the compose files or `web/`.
 
@@ -261,8 +264,8 @@ Avoid rebuilding images to test changes:
   the changed layers rebuild), or on Linux `scripts/dev_stack.sh up --prebuilt build` after an
   incremental build.
 
-**Without Docker** (Linux), build and run the five programs directly. Each reads its
-config from env vars (`apps/novaworld_common/server_config.cpp`); their database is a
+**Without Docker** (Linux), build and run the six programs directly. Each reads its
+config from env vars (`apps/novaworld_common/program/server_config.cpp`); their database is a
 local PostgreSQL that `scripts/dev_postgres.sh up` starts in Docker (and prints the
 settings for), and the other defaults boot a fresh checkout from the repo root:
 
@@ -273,16 +276,17 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOPENNOVA_NOVAWORLD_SERVICE=ON -
     -DOPENNOVA_TEST_PG=postgresql://novaworld:dev@127.0.0.1:5432/postgres \
     -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
 cmake --build build --config Release --target opennova_novaworld_gate opennova_novaworld_lobby \
-    opennova_novaworld_web opennova_novaworld_controller opennova_novaworld_worker
-# run from the repo root so the default relative paths resolve; the five programs, each in
+    opennova_novaworld_web opennova_novaworld_fleet opennova_novaworld_worker opennova_novaworld_data
+# run from the repo root so the default relative paths resolve; the six programs, each in
 # its own terminal (or with &), each its own health port (8081 is every one's default):
 export DATABASE_PASSWORD=dev ADMIN_API_TOKEN=dev-admin-token ONNET_PUBLIC_HOST=127.0.0.1 \
     ONNET_WEB_HOST=127.0.0.1
 ONNET_HEALTH_PORT=8081 ONNET_LOBBY_ENDPOINT=127.0.0.1:64206 ./build/apps/novaworld_lobby/opennova-novaworld-lobby
 ONNET_HEALTH_PORT=8082 ./build/apps/novaworld_gate/opennova-novaworld-gate
 ./build/apps/novaworld_web/opennova-novaworld-web
-ONNET_HEALTH_PORT=8083 ./build/apps/novaworld_controller/opennova-novaworld-controller
+ONNET_HEALTH_PORT=8083 ./build/apps/novaworld_fleet/opennova-novaworld-fleet
 ONNET_HEALTH_PORT=8084 ./build/apps/novaworld_worker/opennova-novaworld-worker
+ONNET_HEALTH_PORT=8085 ./build/apps/novaworld_data/opennova-novaworld-data
 ```
 
 There is no all-in-one binary: each program is its own process (`apps/novaworld_common/README.md`

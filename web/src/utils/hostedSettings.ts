@@ -1,5 +1,5 @@
 // The hosted server settings form: its defaults, and the backend's rules
-// (apps/novaworld_common/hosted/hosted_settings.h check_settings) checked in
+// (apps/novaworld_common/hosted/model/hosted_settings.h check_settings) checked in
 // the browser first, so the owner hears what is wrong before a start is spent
 // on it. The game (a base data set the service offers, by id) sets the
 // whole-number ranges, the expansions and the rotation's missions, which come
@@ -22,7 +22,7 @@ export const MISSIONS_MAX = 128;
 export const MISSION_STEM_MAX = 32;
 
 // The whole-number settings, in the form's order. Their ranges are the data
-// set's (HostedDataSet.limits, hosted/host_limits.h).
+// set's (HostedDataSet.limits, hosted/model/host_limits.h).
 export type IntField = HostedIntField;
 export const INT_FIELDS: readonly IntField[] = [
   'max_players',

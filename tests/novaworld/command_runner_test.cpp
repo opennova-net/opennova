@@ -7,7 +7,7 @@
 // mode unless the service names one). Database-free.
 
 #include "command_runner.h"
-#include "hosted/owner_file.h"
+#include "core/owner_file.h"
 
 #include <base/proc/child_process.h>
 
@@ -24,7 +24,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
-namespace hosted = opennova::novaworld_server::hosted;
+namespace nws = opennova::novaworld_server;
 using opennova::proc::CommandResult;
 
 namespace {
@@ -40,7 +40,7 @@ void set_env(const char *name, const char *value) { setenv(name, value, 1); }
 int test_process_runner(const std::string &scratch) {
 	const fs::path dir = fs::u8path(scratch) / "runner";
 	std::string error;
-	TEST_EXPECT(hosted::make_owner_directory(dir, error));
+	TEST_EXPECT(nws::make_owner_directory(dir, error));
 	opennova::proc::ProcessCommandRunner runner(opennova::proc::current_environment(), dir.u8string());
 
 	CommandResult r = runner.run({ g_self, "--child", "streams" }, 20000);

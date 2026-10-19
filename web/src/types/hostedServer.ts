@@ -1,6 +1,8 @@
 // Hosted servers, as the NovaWorld service's routes answer them (snake_case;
 // apps/novaworld_web/hosted/hosted_routes.cpp, README "Hosted servers").
 
+import type { ServerAddress } from './addresses';
+
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
 // stopped | failed. A crash restart goes back to provisioning, and a stop takes
 // any live state to stopping.
@@ -45,10 +47,11 @@ export interface HostedSettings {
 // of the base and the picked expansion.
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
 
-// POST /api/me/servers's body: the settings, and whether the server runs on
-// one of the account's own machines (the own-machine add-on) rather than a
-// shared one.
-export type StartRequest = StartSettings & { own_machine?: boolean };
+// POST /api/me/servers's body: the settings, whether the server runs on one
+// of the account's own machines (the own-machine add-on) rather than a shared
+// one, and on an own machine the static address it runs at (one of the
+// account's ready ones; absent or null for none).
+export type StartRequest = StartSettings & { own_machine?: boolean; address_id?: number | null };
 
 // The whole-number settings, each with its range per data set.
 export type HostedIntField = 'max_players' | 'time_limit' | 'kill_limit' | 'max_score' | 'respawn' | 'start_delay';
@@ -145,6 +148,62 @@ export interface HostedEvent {
   at: string;
 }
 
+// Where a start stands, in its owner's words (hosted/model/server_phase.h): the
+// states themselves, and within them what the fleet does for it.
+export type ServerPhaseName =
+  | 'queued'
+  | 'restarting'
+  | 'moving'
+  | 'data_unavailable'
+  | 'launches_held'
+  | 'launching_machine'
+  | 'waiting_for_slot'
+  | 'waiting_for_address'
+  | 'downloading_data'
+  | 'downloading_server'
+  | 'starting_server'
+  | 'signing_in'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'failed';
+
+export interface ServerPhase {
+  name: ServerPhaseName | (string & {});
+  // downloading_data: its trees' bytes fetched so far, of their manifests'.
+  bytes_done?: number;
+  bytes_total?: number;
+  // restarting: restart `restart` of `restart_limit`, after a crash or a start
+  // that timed out (`cause`).
+  restart?: number;
+  restart_limit?: number;
+  cause?: 'crash' | 'timeout' | (string & {});
+  // data_unavailable, on an admin's page alone: the machine's agent's reason
+  // (the fetch's error).
+  line?: string;
+}
+
+// Why a stopped or failed server's last run ended: its cause, how its
+// container ended, and the server's own last line ('' for none).
+export type StopCause =
+  | 'crash'
+  | 'timeout'
+  | 'fleet'
+  | 'stop'
+  | 'update'
+  | 'limits'
+  | 'no_data'
+  | 'link_lost'
+  | 'data_unavailable';
+
+export interface StoppedBecause {
+  cause: StopCause | (string & {});
+  exit_code: number | null;
+  // It ran out of memory.
+  oom: boolean;
+  line: string;
+}
+
 // A hosted server, as its owner sees it. Times are UTC 'YYYY-MM-DD HH:MM:SS'.
 export interface HostedServer {
   id: number;
@@ -153,6 +212,8 @@ export interface HostedServer {
   live: boolean;
   // It runs on a machine of its own (the own-machine add-on), not a shared one.
   own_machine: boolean;
+  // The static address it runs at (an own machine's), or null.
+  address: ServerAddress | null;
   settings: HostedSettings;
   // The names the service gives the server's game and expansion ("Joint
   // Operations", "Escalation"); the expansion's '' for the base game alone.
@@ -179,6 +240,11 @@ export interface HostedServer {
   running_at: string | null;
   ended_at: string | null;
   listing: HostedListing | null;
+  // Where its start stands; null where the reply carries none (the admin's
+  // fleet list).
+  phase: ServerPhase | null;
+  // Why its last run ended, for a stopped or failed server; else null.
+  stopped_because: StoppedBecause | null;
   // The newest 50 transitions, oldest first: GET /api/me/servers/<id> only
   // (the list, the start and the stop replies leave them out).
   events?: HostedEvent[];
@@ -244,7 +310,38 @@ export type MachineKind = 'shared' | 'own';
 // when its reports stop.
 export type MachineState = 'launching' | 'booting' | 'ready' | 'draining' | 'ending' | 'ended' | 'failed' | 'lost';
 
-// A machine of the fleet (GET /api/admin/hosted's `machines`).
+// What a machine's agent last said the machine uses: its CPU (0 to 100 of all
+// its CPUs), memory, the trees' disk, and its network (counters since boot, and
+// the rate between its two newest minutes; null for none yet).
+export interface MachineStats {
+  cpu_percent: number | null;
+  memory_used_bytes: number | null;
+  memory_total_bytes: number | null;
+  disk_free_bytes: number | null;
+  disk_total_bytes: number | null;
+  net_in_bytes: number | null;
+  net_out_bytes: number | null;
+  net_in_bps: number | null;
+  net_out_bps: number | null;
+}
+
+// A slot of a machine that holds a server (machine_json's slot_holders, from
+// the slot assignments): its number (it answers UDP 32768+slot), the server
+// and the server's state. On the machine's own page (GET
+// /api/admin/fleet/machines/<id>) each also names its server ('' for a server
+// with no name), its game port and its last minute of ticks (as FleetServer's
+// tick), so the page reads no fleet list; the fleet view's leave them out.
+export interface SlotHolder {
+  slot: number;
+  server_id: number;
+  state: HostedState | (string & {});
+  name?: string;
+  game_port?: number | null;
+  tick?: FleetServer['tick'];
+}
+
+// A machine of the fleet (GET /api/admin/hosted's `machines`, machine_json).
+// Times are UTC; '' or null where none is known.
 export interface FleetMachine {
   // The service's fleet_machines row (what machine_ref and the routes name).
   id: string;
@@ -260,6 +357,89 @@ export interface FleetMachine {
   public_address: string;
   // Bytes sent to players this calendar month, all its servers together.
   egress_bytes_month: number;
+  // Its agent: hostd's version, the protocol its last sync spoke (null before
+  // one), the image its ECS task runs ('' off ECS), its own log stream, and
+  // since when its syncs speak another protocol than the service's (held, not
+  // drained, for 10 minutes).
+  agent_version: string;
+  agent_protocol: number | null;
+  agent_image: string;
+  agent_log_stream: string | null;
+  protocol_mismatch_since: string | null;
+  // Lost, and kept from its end by the supervisor's mass-lost brake.
+  lost_held: boolean;
+  // The machine's image (an AMI id) as its agent reported it.
+  image_id: string | null;
+  last_report_at: string | null;
+  launched_at: string | null;
+  ready_at: string | null;
+  ended_at: string | null;
+  end_reason: string | null;
+  // Its use at its last report (stats_at); null before one.
+  stats: MachineStats | null;
+  stats_at: string | null;
+  // What the release pins: the machines' image (ONNET_FLEET_IMAGE_ID) and
+  // hostd's; null where none or unknown.
+  release: { image_id: string | null; agent_image: string | null };
+  // Its agent's image or its machine's differs from the release's; null when
+  // that is not known.
+  outdated: boolean | null;
+  // The static address it carries (an own machine's), or null.
+  address: { id: number; name: string } | null;
+  // Its slots that hold a server, one each (slots_used of them); whatever the
+  // fleet list shows.
+  slot_holders: SlotHolder[];
+}
+
+// One of a machine's moves (fleet_machine_events): from a state to another,
+// or a note with the two the same ("log stream <name>"); `from` null at the
+// row's making.
+export interface MachineEvent {
+  from: string | null;
+  to: string;
+  detail: string;
+  at: string;
+}
+
+// A tree a machine's agent holds or fetches, as it last said.
+export interface MachineTree {
+  tree_id: number;
+  state: 'fetching' | 'ready' | 'failed' | (string & {});
+  // Fetched so far, of the tree's manifest's (null when unknown).
+  bytes: number;
+  total_bytes: number | null;
+  tries: number;
+  error: string | null;
+  reported_at: string | null;
+}
+
+// GET /api/admin/fleet/machines/<id>: the machine, its newest 100 events
+// oldest first, and its trees.
+export interface MachineDetail {
+  machine: FleetMachine;
+  events: MachineEvent[];
+  trees: MachineTree[];
+}
+
+// One machine in a fleet roll's preview (GET /api/admin/fleet/roll): whether
+// the roll replaces it (another image than the launch templates', or one not
+// known) or keeps it, and why.
+export interface RollStep {
+  id: string;
+  kind: MachineKind;
+  state: string;
+  image_id: string | null;
+  servers: number;
+  action: 'replace' | 'keep';
+  why: string;
+}
+
+export interface RollPlan {
+  // The image the launch templates pin; null for none.
+  image_id: string | null;
+  machines: RollStep[];
+  // The ids the preview would replace.
+  replace: string[];
 }
 
 // A hosted server in the admin's fleet view: the owner's view plus who owns
@@ -279,6 +459,12 @@ export interface FleetServer extends HostedServer {
   expansion_tree_id: number | null;
   // It runs on an older tree than its data set's current one.
   outdated: boolean;
+  // Its starts so far (each start a new generation; 0 before its first).
+  generation: number;
+  // Its tick health in its slot's latest report: its frames' 99th percentile
+  // time and the late ticks of the last minute; null with no report or no
+  // tick in it.
+  tick: { p99_ms: number | null; late: number | null } | null;
   // GET /api/admin/hosted/<id> only: its machine.
   machine?: FleetMachine | null;
 }

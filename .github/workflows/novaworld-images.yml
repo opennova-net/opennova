@@ -2,13 +2,13 @@ name: NovaWorld images
 
 # Builds and publishes the NovaWorld service's container images to GHCR, all
 # public (the ECS task definitions pull them with no registry credentials):
-# its five programs from apps/novaworld_common/Dockerfile, one target each
-# (ghcr.io/<owner>/opennova-novaworld-gate, -lobby, -web, -controller and
-# -worker), the web portal's nginx image (ghcr.io/<owner>/novaworld-web, the
+# its six programs from apps/novaworld_common/Dockerfile, one target each
+# (ghcr.io/<owner>/opennova-novaworld-gate, -lobby, -web, -fleet, -worker and
+# -data), the web portal's nginx image (ghcr.io/<owner>/novaworld-web, the
 # second container in web's task) and the nightly backup task's
 # (ghcr.io/<owner>/opennova-novaworld-backup, deploy/backup). Each is tagged
 # sha-<short commit>, its branch and, on master, latest: `app deploy --tag`
-# pins every one from one tag (DEPLOY.md). All seven build as one bake
+# pins every one from one tag (DEPLOY.md). All eight build as one bake
 # (apps/novaworld_common/docker-bake.hcl) while http-tests runs, and each
 # pushes once it has passed.
 
@@ -61,9 +61,9 @@ jobs:
   http-tests:
     uses: ./.github/workflows/net-linux.yml
 
-  # The seven images, one bake, run beside http-tests rather than after it:
+  # The eight images, one bake, run beside http-tests rather than after it:
   # the one solve compiles the programs' shared build stage once, finishes the
-  # five program targets together and builds the portal and the backup image
+  # six program targets together and builds the portal and the backup image
   # alongside. It pushes nothing. Only push events export the layer cache,
   # each image to its own scope (mode=min: the final image's layers; the
   # build stage's `COPY . .` and compile layers change with every commit, so
@@ -97,7 +97,7 @@ jobs:
   # target built again with its tags. The checkout is the build's, so every
   # step hits the layer cache the build exported for this commit and nothing
   # compiles; each job only uploads (a missed cache costs time alone: the
-  # image builds again, the same). One target per job, not the seven in one
+  # image builds again, the same). One target per job, not the eight in one
   # bake: a bake whose targets share the build stage but read different cache
   # scopes misses that stage and compiles it again. fail-fast is off so one
   # failed push stops no other image's.
@@ -116,8 +116,9 @@ jobs:
           - { target: gate, image: opennova-novaworld-gate }
           - { target: lobby, image: opennova-novaworld-lobby }
           - { target: web, image: opennova-novaworld-web }
-          - { target: controller, image: opennova-novaworld-controller }
+          - { target: fleet, image: opennova-novaworld-fleet }
           - { target: worker, image: opennova-novaworld-worker }
+          - { target: data, image: opennova-novaworld-data }
           # The web portal (nginx), web's second container.
           - { target: portal, image: novaworld-web }
           # The nightly backup task's image (pg_dump to S3; deploy/backup).

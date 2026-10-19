@@ -1,21 +1,30 @@
-// opennova-novaworld-web: web (program.h). The HTTP listener on
+// opennova-novaworld-web: web (program/program.h). The HTTP listener on
 // ONNET_HTTP_PORT (8080: the retail NW*.dll routes, the website's API, GET
 // /livez and /healthz) over the database and the web state's Redis, billing's
 // routes, the mail it queues, and the first site admin. Any number of web
 // processes serve the same clients behind one load-balanced endpoint
 // (ONNET_WEB_HOST): what a later request reads back lives in Redis or the
-// database, and what the lobby or the controller must act on goes through
+// database, and what the lobby or the fleet must act on goes through
 // their tables. No supervisor, no admin link, no lobby.
 
-#include "auth.h"
+#include "accounts/auth.h"
+#include "accounts/mail_stack.h"
+#include "billing/billing_stack.h"
+#include "core/loggable.h"
+#include "core/object_store.h"
+#include "core/object_store_stack.h"
+#include "core/scratch_dir.h"
+#include "data_sets/data_set_jobs.h"
+#include "hosted/model/hosted_policy.h"
 #include "http_listener.h"
+#include "infra/alarm_store.h"
 #include "infra/infra_status.h"
-#include "loggable.h"
-#include "object_store.h"
-#include "parts.h"
-#include "program.h"
+#include "infra/log_store.h"
+#include "infra/metrics_store.h"
+#include "program/program.h"
 #include "redis_client.h"
 #include "updater/update_listener.h"
+#include "worker_schedule.h"
 
 #include <base/io/os_path.h>
 #include <net/novaworld/unknown_tracker.h>
@@ -24,6 +33,7 @@
 #include <exception>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -97,13 +107,14 @@ int run(const program::Boot &boot) {
 
 	// The boot's database work on a lease of its own, returned before the
 	// listener starts (its start leases on this thread).
-	const HostedSetup hosting = hosted_setup(config);
+	const hosted::HostedPolicy hosting = hosted::hosted_policy(config);
 	config.hosted_provider = hosting.provider;
-	std::optional<BillingStack> billing_stack;
+	std::optional<billing::BillingStack> billing_stack;
 	try {
 		auto lease = boot.pool.acquire();
 		bootstrap_first_admin(config, *lease);
-		billing_stack.emplace(make_billing(billing::billing_config_from_env(), boot.pool, *lease));
+		billing_stack.emplace(
+				billing::make_billing(billing::billing_config_from_env(), boot.pool, *lease));
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] FATAL: web's boot: %s\n", e.what());
 		return 1;
@@ -116,7 +127,7 @@ int run(const program::Boot &boot) {
 	ObjectStoreStack store;
 	if (hosting.store_ok) {
 		std::string error;
-		store = make_object_store(hosting, config, error);
+		store = make_object_store(hosting.store, config.aws_cli, error);
 		if (!store.store)
 			return program::fatal("the object store: " + error);
 		std::printf("[boot] data sets: routes over the %s store\n", store.store->kind());
@@ -126,6 +137,30 @@ int run(const program::Boot &boot) {
 	// deployment's ECS services, balancer, database and cache through web's task
 	// role; none on the local stack, which the view says.
 	const infra::InfraStack infra_stack = infra::make_infra();
+	// The admin's log view's store (infra/log_store.h, ONNET_LOG_STORE): the
+	// deployment's CloudWatch groups, through the same task role and curl, or
+	// the local stack's directory.
+	std::string log_store_none;
+	const std::unique_ptr<infra::LogStore> log_store = infra::make_log_store(
+			*infra_stack.runner, infra_stack.scratch.path().u8string(), log_store_none);
+	if (log_store)
+		std::printf("[boot] logs: read from the %s store\n", log_store->source());
+	else
+		std::printf("[boot] logs: none read (%s)\n", log_store_none.c_str());
+
+	// The usage view's AWS metrics (infra/metrics_store.h): the database's, the
+	// cache's and the balancer's through the same task role; none on the local
+	// stack, which the view says.
+	infra::MetricsStore metrics_store(*infra_stack.runner,
+			infra::metrics_config_from_env(infra_stack.scratch.path().u8string()));
+	// The attention list's firing alarms (infra/alarm_store.h): the deployment's,
+	// by their names' prefix, through the same task role; none on the local stack.
+	infra::AlarmStore alarm_store(*infra_stack.runner,
+			infra::alarm_config_from_env(infra_stack.scratch.path().u8string()));
+	if (alarm_store.unavailable().empty())
+		std::printf("[boot] alarms: read from CloudWatch\n");
+	else
+		std::printf("[boot] alarms: none read (%s)\n", alarm_store.unavailable().c_str());
 
 	// The 404s the routes record, flushed by the main loop into
 	// unknown_messages (GET /api/unknowns reads them there).
@@ -140,13 +175,25 @@ int run(const program::Boot &boot) {
 	http.set_watchdog(&watchdog);
 	http.set_billing(billing_stack->billing.get());
 	http.set_infra(infra_stack.status.get());
+	http.set_log_store(log_store.get(), log_store_none);
+	http.set_metrics_store(&metrics_store);
+	http.set_alarm_store(&alarm_store);
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
+	// The images the release pins: the launch templates' (a fleet roll's
+	// preview) and hostd's, each machine's held against them.
+	http.set_fleet_release({ hosting.fleet.image_id, hosting.fleet.hostd_image });
+	// The static addresses: on or off, and the zone they are named in.
+	http.set_addresses(hosting.addresses_on, hosting.fleet.address_zone);
 	// The admin usage view's limits: each container's memory and CPUs.
 	http.set_fleet_slots(hosting.fleet.slot_memory_mb, hosting.fleet.slot_cpus);
-	// The admin jobs page's schedules: the controller's, read from the same
-	// settings.
-	http.set_job_schedules(periodic_jobs(config, hosting));
+	// The admin jobs page's schedules: every program's (the worker's, then the
+	// data program's while there is a store), read from the same settings.
+	std::vector<jobs::PeriodicJob> schedules = worker_schedule(config, hosting);
+	if (hosting.store_ok)
+		for (jobs::PeriodicJob &p : hosted::data_set_schedule())
+			schedules.push_back(std::move(p));
+	http.set_job_schedules(std::move(schedules));
 	// The game data routes (data_sets/) work on the deployment's object store
 	// (ONNET_OBJECT_STORE_URL, ADR 0064), built above: none without one, and those
 	// routes answer 503 store_unavailable.

@@ -1,12 +1,12 @@
 #include "billing_routes.h"
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "billing/billing_jobs.h"
-#include "hosted/hosted_repository.h"
-#include "http_json.h"
-#include "loggable.h"
-#include "stripe_signature.h"
 #include "billing/tiers.h"
+#include "core/loggable.h"
+#include "hosted/model/hosted_repository.h"
+#include "http_json.h"
+#include "stripe_signature.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -70,13 +70,22 @@ void log_account(const WebSessionUser &user, const char *what, const std::string
 			static_cast<long long>(user.id), what, outcome.c_str());
 }
 
-// The item a checkout names: a tier 1..3, or 0 for the add-on; nullopt for none.
-std::optional<int> checkout_item(const std::string &item) {
-	if (item == "own_machine") return 0;
+// What a checkout's "item" names: a tier 1..3, or an add-on; nullopt for none.
+std::optional<std::pair<ItemKind, int>> checkout_item(const std::string &item) {
+	if (item == "own_machine") return std::make_pair(ItemKind::OwnMachine, 0);
+	if (item == "static_address") return std::make_pair(ItemKind::StaticAddress, 0);
 	for (int tier = 1; tier <= kTierCount; ++tier) {
-		if (item == "tier" + std::to_string(tier)) return tier;
+		if (item == "tier" + std::to_string(tier)) return std::make_pair(ItemKind::Tier, tier);
 	}
 	return std::nullopt;
+}
+
+// The fleet has sold all it holds of what `item` adds.
+crow::response sold_out(ItemKind item) {
+	const char *what = item == ItemKind::Tier ? "support tiers"
+			: item == ItemKind::OwnMachine	  ? "own machines"
+											  : "static addresses";
+	return json_error(409, "sold_out", std::string("Hosting is full: new subscriptions are paused (") + what + ")");
 }
 
 } // namespace
@@ -136,19 +145,34 @@ void BillingRoutes::register_routes(WebApp &app) {
 // GET /api/billing/tiers — public: {"enabled" (billing on and its prices checked
 // out), "currency" (the prices', lower case; "" before they are read), "tiers":
 // [{tier, max_servers, amount (the price sold now, in the currency's smallest
-// unit; null while unread), interval: "month"}], "own_machine": {amount,
-// interval: "month"} with billing on, else null}. The amounts are Stripe's
-// price objects', never the service's own.
+// unit; null while unread), interval: "month", available}], "own_machine":
+// {amount, interval: "month", available} with billing on, else null,
+// "static_address": the same while the fleet sells addresses (a price list
+// set), else null}. The
+// amounts are Stripe's price objects', never the service's own. `available`
+// is whether the fleet takes one more of the item for an account that has
+// nothing yet (hosted/model/sold_capacity.h): false, the site says hosting is full
+// and a checkout of it answers sold_out (an account whose grant already
+// covers it may still buy it; the checkout judges each account's own).
 crow::response BillingRoutes::tiers() {
 	SyncStatus status;
+	std::optional<hosted::Capacity> sold;
+	const int64_t now = unix_now();
 	if (billing_ != nullptr) {
 		try {
-			status = billing_->sync().status(*pool_.acquire());
+			auto db_conn = pool_.acquire();
+			status = billing_->sync().status(*db_conn);
+			sold = hosted::sold_now(*db_conn, now);
 		} catch (const db::Error &e) {
 			// Read as prices not yet checked: billing shows off for the moment.
 			std::fprintf(stderr, "[http] GET /api/billing/tiers: %s\n", e.what());
 		}
 	}
+	// One more of `item` for a new account fits what is sold now; with the
+	// sold unread, no.
+	const auto available = [&](ItemKind item, int tier) {
+		return sold && hosted::fits(*sold, hosted::added_by_new_account(item, tier, now), sellable_);
+	};
 	std::string currency;
 	for (int tier = 1; tier <= kTierCount && currency.empty(); ++tier) {
 		if (status.tier_prices[tier]) currency = status.tier_prices[tier]->currency;
@@ -163,6 +187,7 @@ crow::response BillingRoutes::tiers() {
 		t["max_servers"] = kTierServers[tier];
 		amount_or_null(t, status.tier_prices[tier]);
 		t["interval"] = "month";
+		t["available"] = available(ItemKind::Tier, tier);
 		list.push_back(std::move(t));
 	}
 	out["tiers"] = std::move(list);
@@ -170,9 +195,19 @@ crow::response BillingRoutes::tiers() {
 		crow::json::wvalue own;
 		amount_or_null(own, status.own_machine_price);
 		own["interval"] = "month";
+		own["available"] = available(ItemKind::OwnMachine, 0);
 		out["own_machine"] = std::move(own);
 	} else {
 		out["own_machine"] = nullptr;
+	}
+	if (billing_ != nullptr && !billing_->config().static_address_prices.empty() && sellable_.addresses > 0) {
+		crow::json::wvalue address;
+		amount_or_null(address, status.static_address_price);
+		address["interval"] = "month";
+		address["available"] = available(ItemKind::StaticAddress, 0);
+		out["static_address"] = std::move(address);
+	} else {
+		out["static_address"] = nullptr;
 	}
 	crow::response res = json_reply(200, out);
 	res.set_header("Cache-Control", "public, max-age=60");
@@ -180,11 +215,16 @@ crow::response BillingRoutes::tiers() {
 }
 
 // The account's billing: {"enabled", "max_servers", "comp_servers",
-// "own_machines", "used" (its live hosted servers), "stopping" (how many of
+// "comp_own_machines" (an admin's grants), "own_machines", "used" (its live hosted servers), "stopping" (how many of
 // those are stopping: the owners' limits count the rest), "can_start", "subscription"
 // (its support tier: {tier, status, entitled, current_period_end (ISO UTC),
 // cancel_at_period_end}, or null), "own_machine_subscription" ({quantity,
-// status, current_period_end, cancel_at_period_end}, or null), "can_manage" (it
+// status, current_period_end, cancel_at_period_end}, or null),
+// "static_addresses" (the addresses its grants pay for, at most its own
+// machines), "address_subscriptions" (each static address's own subscription
+// still open: {stripe_subscription_id, status, current_period_end,
+// cancel_at_period_end, address_id (its address's row, null while unnamed)}),
+// "can_manage" (it
 // has a Stripe customer: the portal opens), "can_subscribe" (a checkout of a
 // tier may start: the prices checked out, the account an active player's, no
 // tier granting)}.
@@ -198,6 +238,7 @@ crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id
 	out["enabled"] = true;
 	out["max_servers"] = e.max_servers;
 	out["comp_servers"] = e.comp_servers;
+	out["comp_own_machines"] = e.comp_own_machines;
 	out["own_machines"] = e.own_machines;
 	const std::vector<hosted::HostedServer> live = hosted::live_servers_of(db, user_id);
 	out["used"] = static_cast<int64_t>(live.size());
@@ -225,6 +266,24 @@ crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id
 	} else {
 		out["own_machine_subscription"] = nullptr;
 	}
+	out["static_addresses"] = e.static_addresses;
+	std::vector<crow::json::wvalue> addresses;
+	for (const SubscriptionRow &r : rows) {
+		if (r.item != ItemKind::StaticAddress || is_terminal(r.status) || !r.current_period_end) continue;
+		crow::json::wvalue s;
+		s["stripe_subscription_id"] = r.stripe_subscription_id;
+		s["status"] = r.status;
+		s["current_period_end"] = iso_utc(*r.current_period_end);
+		s["cancel_at_period_end"] = r.cancel_at_period_end;
+		const auto named = db.query("SELECT id FROM hosted_addresses WHERE stripe_subscription_id = $1;",
+				{ db::BindValue(r.stripe_subscription_id) });
+		if (named.empty())
+			s["address_id"] = nullptr;
+		else
+			s["address_id"] = named.front().as_int(0).value_or(0);
+		addresses.push_back(std::move(s));
+	}
+	out["address_subscriptions"] = std::move(addresses);
 	out["can_manage"] = customer_of(db, user_id).has_value();
 	out["can_subscribe"] =
 			billing_->sync().status(db).prices_ok && active && !tier_grants(rows, now);
@@ -247,7 +306,8 @@ crow::response BillingRoutes::me_billing(const crow::request &req) {
 	}
 }
 
-std::optional<crow::response> BillingRoutes::judge_checkout(db::Database &db, const WebSessionUser &user, int item) {
+std::optional<crow::response> BillingRoutes::judge_checkout(
+		db::Database &db, const WebSessionUser &user, const CheckoutItem &item, const std::string &replaced) {
 	const auto account = get_user_by_id(db, user.id);
 	if (!account || account->kind != "player" || account->account_status != "active") {
 		log_account(user, "checkout", "not_eligible (account)");
@@ -256,32 +316,48 @@ std::optional<crow::response> BillingRoutes::judge_checkout(db::Database &db, co
 	const int64_t now = unix_now();
 	const std::vector<SubscriptionRow> rows = subscriptions_of(db, user.id);
 	const bool granting_tier = tier_grants(rows, now);
-	if (item > 0 && granting_tier) {
+	if (item.item == ItemKind::Tier && granting_tier) {
 		log_account(user, "checkout", "already_subscribed");
 		return json_error(409, "already_subscribed", "this account has a support tier; change it in the portal");
 	}
-	if (item == 0 && !granting_tier) {
+	if (item.item == ItemKind::OwnMachine && !granting_tier) {
 		log_account(user, "checkout", "not_eligible (no tier)");
 		return json_error(403, "not_eligible", "an own machine needs a support tier first");
 	}
-	if (item == 0) {
-		AccountFacts facts;
-		facts.kind = account->kind;
-		facts.account_status = account->account_status;
-		facts.comp_servers = account->comp_servers;
-		// Each own machine holds one of the servers the account may run: more
-		// machines than servers buys nothing.
-		const Entitlement e = entitlement_from(facts, rows, now);
-		if (e.own_machines >= e.max_servers) {
-			log_account(user, "checkout", "own_machine_limit");
-			return json_error(409, "own_machine_limit", "this account has an own machine for every server it may run");
+	if (item.item == ItemKind::StaticAddress) {
+		// While a payment is past due, Stripe still retries it: no new add-on.
+		for (const SubscriptionRow &r : rows) {
+			if (r.status == "past_due" && subscription_grants(r, now)) {
+				log_account(user, "checkout", "payment_past_due");
+				return json_error(403, "payment_past_due", "a payment of this account is past due");
+			}
 		}
+	}
+	// The account as the sold capacity counts it: its subscriptions and its
+	// open checkouts' reservations.
+	const hosted::AccountHoldings holdings = hosted::holdings_of(db, user.id, now, replaced);
+	const Entitlement e = entitlement_from(holdings.facts, holdings.subscriptions, now);
+	// Each own machine holds one of the servers the account may run: more
+	// machines than servers buys nothing.
+	if (item.item == ItemKind::OwnMachine && e.own_machines >= e.max_servers) {
+		log_account(user, "checkout", "own_machine_limit");
+		return json_error(409, "own_machine_limit", "this account has an own machine for every server it may run");
+	}
+	// An address is its own machine's: one more than them would carry nothing.
+	if (item.item == ItemKind::StaticAddress && e.address_grants >= e.own_machines) {
+		log_account(user, "checkout", "address_limit");
+		return json_error(409, "address_limit", "this account has a static address for every own machine it has");
+	}
+	const hosted::Capacity more = hosted::added_by(holdings.facts, holdings.subscriptions, item.item, item.tier, now);
+	if (!hosted::fits(hosted::sold_now(db, now, replaced), more, sellable_)) {
+		log_account(user, "checkout", "sold_out");
+		return sold_out(item.item);
 	}
 	return std::nullopt;
 }
 
 std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSessionUser &user,
-		const CustomerRow &customer, int item) {
+		const CustomerRow &customer) {
 	StripeClient &client = billing_->client();
 	const std::string &id = customer.open_checkout_session;
 	StripeResult<CheckoutSession> previous = client.get_checkout_session(id);
@@ -299,7 +375,8 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 	}
 	if (previous.value->status != "complete") return std::nullopt;
 	// Paid for, and maybe not synced yet (the webhook on its way, a second
-	// tab): the customer read back from Stripe now, then judged again.
+	// tab): the customer read back from Stripe now (the checkout's judgement
+	// after reads it).
 	try {
 		auto db_conn = pool_.acquire();
 		if (billing_->sync().sync_customer(*db_conn, customer.stripe_customer_id, unix_now()) ==
@@ -307,7 +384,7 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 			log_account(user, "checkout", "stripe_unavailable (the previous session's sync)");
 			return stripe_unavailable();
 		}
-		return judge_checkout(*db_conn, user, item);
+		return std::nullopt;
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/billing/checkout failed: %s\n", e.what());
 		return json_error(500, "db_error");
@@ -315,7 +392,9 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 }
 
 // POST /api/billing/checkout — {"item": "tier1" | "tier2" | "tier3" |
-// "own_machine"}: a Stripe Checkout session for it, {"url"} to send the browser
+// "own_machine" | "static_address"}: a Stripe Checkout session for it (an
+// address is its own subscription, one each; its owner names it after the
+// sync, POST /api/me/addresses), {"url"} to send the browser
 // to. In order: require_user (401, 403 without the CSRF header), 503
 // billing_disabled, the account's kCheckoutPerUser bucket (429), 400
 // invalid_json / invalid_item, 503 billing_misconfigured while the prices do
@@ -324,18 +403,30 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // not an active player's or (the add-on) has no tier granting, 409 already_subscribed when a
 // tier grants already (the portal changes it), 409 own_machine_limit for the
 // add-on when the account has an own machine for every server it may run
-// (each add-on checkout sells one; several are fine below that), 503
-// stripe_unavailable. Then the account's previous session
-// (settle_previous_session): an open one is expired; a complete one has the
-// customer synced from Stripe now and the rules judged again, so a payment the
-// webhook has not brought yet is never sold twice. Its Stripe customer is made
+// (each add-on checkout sells one; several are fine below that), for a static
+// address 403 payment_past_due while a payment of the account is past due and
+// 409 address_limit when its addresses would pass its own machines, 409
+// sold_out when the fleet has sold all it holds of what the item adds
+// (hosted/model/sold_capacity.h: shared places for a tier, own machines and
+// addresses for the add-ons), 503 stripe_unavailable. Those rules are judged first as a quick
+// refusal, then again after the account's previous session is settled
+// (settle_previous_session: an open one is expired; a complete one has the
+// customer synced from Stripe now, so a payment the webhook has not brought
+// yet is never sold twice), in ONE transaction under the hosting-start lock
+// (database.h kHostedStartLock, the one a start counts under) that also drops
+// the previous session's reservation and writes this checkout's
+// (billing_repository.h "A checkout's hold", kReservationLifeS), so two
+// checkouts at once never both take the fleet's last room. Stripe makes the
+// session after that commit (its id then stamped on the reservation; the
+// reservation dropped when no session comes). Its Stripe customer is made
 // at its first checkout (the idempotency key opennova-<instance>-customer-<id>,
 // so a retry answers the same one), and made again in place of a row of the
 // other Stripe mode (the key changed modes), which no call of this key could
 // use. The session asks for the terms of service, lives kCheckoutLifeS from
 // just before it is made, returns to
 // /me/support?checkout=success&session_id=... or ?checkout=cancel, and stamps
-// the instance and the account on the session and on the subscription it makes.
+// the instance, the account and the reservation on the session and on the
+// subscription it makes.
 crow::response BillingRoutes::checkout(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -348,8 +439,12 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	auto body = JsonBody::parse(req.body);
 	if (!body) return json_error(400, "invalid_json");
 	const auto item_text = body->text("item");
-	const std::optional<int> item = item_text ? checkout_item(*item_text) : std::nullopt;
-	if (body->wrong_type() || !item) return json_error(400, "invalid_item", "item is tier1, tier2, tier3 or own_machine");
+	const auto named = item_text ? checkout_item(*item_text) : std::nullopt;
+	if (body->wrong_type() || !named)
+		return json_error(400, "invalid_item", "item is tier1, tier2, tier3, own_machine or static_address");
+	CheckoutItem item;
+	item.item = named->first;
+	item.tier = named->second;
 	const BillingConfig &config = billing_->config();
 	bool prices_ok = false;
 	try {
@@ -360,7 +455,11 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	}
 	if (!prices_ok)
 		return json_error(503, "billing_misconfigured", "the support tiers' prices are being checked; try again later");
-	const std::string price = *item > 0 ? tier_price_for_sale(config, *item) : own_machine_price_for_sale(config);
+	std::string price = tier_price_for_sale(config, item.tier);
+	if (item.item == ItemKind::OwnMachine) price = own_machine_price_for_sale(config);
+	if (item.item == ItemKind::StaticAddress) price = static_address_price_for_sale(config);
+	// The fleet sells no address (or none has a price): nothing to buy.
+	if (price.empty()) return json_error(400, "invalid_item", "this NovaWorld service sells no static address");
 	// The account's one checkout at a time, released however this one ends.
 	{
 		std::lock_guard<std::mutex> lock(checkouts_mu_);
@@ -380,8 +479,10 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	std::optional<CustomerRow> customer;
 	try {
 		auto db_conn = pool_.acquire();
-		if (auto refusal = judge_checkout(*db_conn, user, *item)) return std::move(*refusal);
 		customer = customer_of(*db_conn, user.id);
+		// The quick refusal: the session this checkout replaces holds nothing.
+		if (auto refusal = judge_checkout(*db_conn, user, item, customer ? customer->open_checkout_session : ""))
+			return std::move(*refusal);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/billing/checkout failed: %s\n", e.what());
 		return json_error(500, "db_error");
@@ -393,8 +494,10 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 			customer && customer->livemode != config.live() ? std::optional<std::string>(customer->stripe_customer_id)
 															: std::nullopt;
 	if (other_mode) customer.reset();
-	if (customer && !customer->open_checkout_session.empty()) {
-		if (auto refusal = settle_previous_session(user, *customer, *item)) return std::move(*refusal);
+	// The session this checkout replaces (its reservation goes with the new one's).
+	const std::string previous_session = customer ? customer->open_checkout_session : std::string();
+	if (customer && !previous_session.empty()) {
+		if (auto refusal = settle_previous_session(user, *customer)) return std::move(*refusal);
 	}
 	if (!customer) {
 		const auto made = client.create_customer(user.id, user.username, billing_->instance_id(),
@@ -420,6 +523,29 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 		if (other_mode)
 			log_account(user, "checkout", "a customer of the key's mode made in place of " + loggable(*other_mode));
 	}
+	// The judgement that counts and the reservation it writes, together, under
+	// the lock a start's judgement takes.
+	int64_t reservation = 0;
+	try {
+		auto db_conn = pool_.acquire();
+		db::Transaction tx(*db_conn);
+		db_conn->exec("SELECT pg_advisory_xact_lock($1);", { db::BindValue(db::kHostedStartLock) });
+		drop_session_reservation(*db_conn, previous_session);
+		if (auto refusal = judge_checkout(*db_conn, user, item)) return std::move(*refusal);
+		reservation = reserve_checkout(*db_conn, user.id, item.item, item.tier, kReservationLifeS);
+		tx.commit();
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/billing/checkout failed: %s\n", e.what());
+		return json_error(500, "db_error");
+	}
+	// No session made: the reservation goes (a failure to drop it lapses at its end).
+	const auto unreserve = [&] {
+		try {
+			drop_reservation(*pool_.acquire(), reservation, user.id);
+		} catch (const db::Error &e) {
+			std::fprintf(stderr, "[http] POST /api/billing/checkout: a reservation not dropped: %s\n", e.what());
+		}
+	};
 	CheckoutCreate create;
 	create.customer = customer->stripe_customer_id;
 	create.client_reference_id = std::to_string(user.id);
@@ -428,7 +554,7 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	create.success_url = config.site_url + "/me/support?checkout=success&session_id={CHECKOUT_SESSION_ID}";
 	create.cancel_url = config.site_url + "/me/support?checkout=cancel";
 	create.metadata = { { kMetaInstance, billing_->instance_id() }, { kMetaUserId, std::to_string(user.id) },
-		{ kMetaUsername, user.username } };
+		{ kMetaUsername, user.username }, { kMetaReservation, std::to_string(reservation) } };
 	create.automatic_tax = config.automatic_tax;
 	// Stripe refuses the session while the account's public details name no
 	// terms of service URL (Dashboard, Settings, Public details; DEPLOY.md).
@@ -441,10 +567,13 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 		const std::string why =
 				session.ok() ? std::string("no url") : stripe_error_text(session.error);
 		log_account(user, "checkout", "no session: " + why);
+		unreserve();
 		return stripe_unavailable();
 	}
 	try {
-		set_open_checkout_session(*pool_.acquire(), user.id, session.value->id);
+		auto db_conn = pool_.acquire();
+		stamp_reservation(*db_conn, reservation, session.value->id);
+		set_open_checkout_session(*db_conn, user.id, session.value->id);
 	} catch (const db::Error &e) {
 		// The session stands; the next checkout cannot settle it (expire it, or
 		// see it paid).
@@ -457,9 +586,14 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 }
 
 // POST /api/billing/portal — a Customer Portal session for the account's Stripe
-// customer, {"url"}, returning to /me/support. require_user (401, 403 without
-// the CSRF header), 503 billing_disabled, the checkout bucket (429), 404
-// no_billing_account with no customer yet, 503 stripe_unavailable.
+// customer, {"url"}, returning to /me/support; with {"cancel_subscription":
+// "sub_..."} (one of the account's static-address subscriptions still open),
+// the Portal's cancel flow for that subscription, returning to /me/addresses.
+// require_user (401, 403 without the CSRF header), 503 billing_disabled, the
+// checkout bucket (429), 400 invalid_json / invalid_field, 404
+// no_billing_account with no customer yet, 404 not_found for a subscription
+// that is no open address subscription of the account's, 503
+// stripe_unavailable.
 crow::response BillingRoutes::portal(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -469,16 +603,26 @@ crow::response BillingRoutes::portal(const crow::request &req) {
 		log_account(user, "portal", "rate_limited");
 		return too_many_requests(wait);
 	}
+	auto body = JsonBody::parse(req.body.empty() ? std::string("{}") : req.body);
+	if (!body) return json_error(400, "invalid_json");
+	const std::string cancel = body->text_or("cancel_subscription", "");
+	if (body->wrong_type()) return json_error(400, "invalid_field", "cancel_subscription is a subscription id");
 	std::optional<CustomerRow> customer;
 	try {
-		customer = customer_of(*pool_.acquire(), user.id);
+		auto db_conn = pool_.acquire();
+		customer = customer_of(*db_conn, user.id);
+		if (customer && !cancel.empty()) {
+			const auto row = find_subscription(*db_conn, cancel);
+			if (!row || row->user_id != user.id || row->item != ItemKind::StaticAddress || is_terminal(row->status))
+				return json_error(404, "not_found", "this account has no such static-address subscription");
+		}
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/billing/portal failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
 	if (!customer) return json_error(404, "no_billing_account", "this account has no billing account yet");
-	const auto url =
-			billing_->client().create_portal_session(customer->stripe_customer_id, billing_->config().site_url + "/me/support");
+	const auto url = billing_->client().create_portal_session(customer->stripe_customer_id,
+			billing_->config().site_url + (cancel.empty() ? "/me/support" : "/me/addresses"), cancel);
 	if (!url.ok()) {
 		log_account(user, "portal", "no session: " + stripe_error_text(url.error));
 		return stripe_unavailable();
@@ -525,7 +669,9 @@ crow::response BillingRoutes::me_sync(const crow::request &req) {
 // header); 400 invalid_json for a body that is no event; an event of the other
 // mode is answered 200 and dropped with a WARN. Then the event is recorded once
 // (a redelivery is a no-op) with the customer it names, the worker woken, and
-// 200 {"received": true}: the worker reads the customer back from Stripe.
+// 200 {"received": true}: the worker reads the customer back from Stripe. A
+// checkout.session.expired event drops its session's reservation (an expired
+// session never makes a subscription), with the record.
 crow::response BillingRoutes::webhook(const crow::request &req) {
 	if (req.body.size() > kWebhookMaxBytes) return json_error(413, "payload_too_large");
 	if (billing_ == nullptr) return disabled();
@@ -559,6 +705,10 @@ crow::response BillingRoutes::webhook(const crow::request &req) {
 						event->created > 0 ? std::optional<int64_t>(event->created) : std::nullopt);
 		std::printf("[billing] webhook %s %s customer %s%s\n", loggable(event->id).c_str(), loggable(event->type).c_str(),
 				event->customer_id.empty() ? "(none)" : loggable(event->customer_id).c_str(), fresh ? "" : " (again)");
+		if (event->type == "checkout.session.expired" && event->object_type == "checkout.session" &&
+				drop_session_reservation(*db_conn, event->object_id) > 0)
+			std::printf("[billing] checkout session %s expired: its reservation dropped\n",
+					loggable(event->object_id).c_str());
 		// A worker syncs its customer (billing.sync); one waiting already takes it.
 		if (fresh && !event->customer_id.empty())
 			enqueue_billing_sync(*db_conn);
@@ -570,7 +720,7 @@ crow::response BillingRoutes::webhook(const crow::request &req) {
 	return json_reply(200, out);
 }
 
-// The hosted servers' limits hold (hosted/limits_hold.h) on an admin's view:
+// The hosted servers' limits hold (hosted/model/limits_hold.h) on an admin's view:
 // "limits_hold", "limits_hold_reason" (null when not held), and the stops it
 // keeps back as the supervisor's last pass counted them, "limits_hold_owners"
 // and "limits_hold_servers" (0 when not held).
@@ -682,7 +832,7 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 // POST /api/admin/billing/reconcile — no body or {}: a full reconcile, a
 // billing.reconcile job a worker runs at once: 202 {"reconcile": "requested", "force_limits":
 // false}. The hosted servers' limits hold releases itself after a clean one
-// when the same owners are still past their entitlements (hosted/limits_hold.h).
+// when the same owners are still past their entitlements (hosted/model/limits_hold.h).
 // {"force_limits": true}: the reconcile, and the supervisor's next pass applies
 // the stops the hold keeps back past the brake, once ("force_limits": true;
 // logged). require_admin; 400 invalid_json, invalid_field (force_limits not

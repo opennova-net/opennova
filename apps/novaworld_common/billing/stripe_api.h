@@ -77,7 +77,7 @@ public:
 	struct Config {
 		std::string curl;        // an absolute path, run as given (ONNET_STRIPE_CURL)
 		std::string secret_key;  // sk_/rk_ (STRIPE_SECRET_KEY)
-		std::string scratch_dir; // owner-only (hosted::make_owner_directory)
+		std::string scratch_dir; // owner-only (core/owner_file.h make_owner_directory)
 		std::string api_version = kStripeApiVersion;
 		std::string base_url = "https://api.stripe.com"; // http(s)://host[:port], no path
 		int timeout_ms = 25000;     // the runner's bound on one curl run

@@ -1,4 +1,4 @@
-// The service's admin link (apps/novaworld_common/hosted/admin_link.h) against a
+// The service's admin link (apps/novaworld_fleet/hosted/admin_link.h) against a
 // real opennova-serve child (ctest passes the binary) with its remote-admin port
 // open, over the synthetic loose game directory the hosted e2e serves
 // (serve_test_support.h's deathmatch map), its admin.cfg and host file rendered
@@ -23,10 +23,11 @@
 // The supervisor's side (a link up from running, down at stopping) is
 // hosted_supervisor's and hosted_local_e2e's.
 
+#include "core/loggable.h"
+#include "core/random_secret.h"
 #include "hosted/admin_link.h"
-#include "hosted/hosted_repository.h"
-#include "hosted/hosted_settings.h"
-#include "loggable.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/hosted_settings.h"
 #include "serve/serve_test_support.h"
 
 #include "net_sockets.h"
@@ -54,6 +55,7 @@
 
 namespace fs = std::filesystem;
 namespace net = opennova::net;
+namespace nws = opennova::novaworld_server;
 namespace hosted = opennova::novaworld_server::hosted;
 
 namespace {
@@ -143,7 +145,7 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "FAIL: net::startup\n");
 		return 1;
 	}
-	const std::string password = hosted::random_secret(hosted::kAdminPasswordChars);
+	const std::string password = nws::random_secret(hosted::kAdminPasswordChars);
 	{
 		// Declared first, so the files go last.
 		test_temp::TempDir temp("hosted_admin_link");

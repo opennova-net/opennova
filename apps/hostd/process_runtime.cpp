@@ -6,6 +6,8 @@
 #include <ctime>
 #include <utility>
 
+#include <unistd.h>
+
 namespace opennova::hostd {
 
 std::vector<std::string> read_env_file_lines(const std::string &text) {
@@ -27,12 +29,12 @@ std::vector<std::string> read_env_file_lines(const std::string &text) {
 }
 
 ProcessRuntime::ProcessRuntime(std::string serve, std::vector<std::string> environment,
-		std::string output_path, Clock now_s) :
+		std::string output_path, Clock now_s, std::string log_dir) :
 		serve_(std::move(serve)),
 		environment_(std::move(environment)),
 		output_path_(std::move(output_path)),
-		now_s_(now_s ? std::move(now_s) : [] { return static_cast<int64_t>(std::time(nullptr)); }) {
-}
+		now_s_(now_s ? std::move(now_s) : [] { return static_cast<int64_t>(std::time(nullptr)); }),
+		log_dir_(std::move(log_dir)) {}
 
 ProcessRuntime::~ProcessRuntime() {
 	for (auto &[name, server] : servers_) {
@@ -96,6 +98,12 @@ std::vector<std::string> ProcessRuntime::run_argv(const ContainerSpec &spec) con
 	return argv;
 }
 
+std::string ProcessRuntime::output_of(const ContainerSpec &spec) const {
+	if (log_dir_.empty() || !hosted::is_log_stream_name(spec.log_stream))
+		return output_path_;
+	return log_dir_ + "/servers/" + spec.log_stream + ".log";
+}
+
 bool ProcessRuntime::run(const ContainerSpec &spec, int, int &exit_code, std::string &error) {
 	exit_code = 125;
 	if (servers_.count(spec.name) != 0) {
@@ -131,12 +139,21 @@ bool ProcessRuntime::run(const ContainerSpec &spec, int, int &exit_code, std::st
 	proc::SpawnOptions options;
 	options.argv = run_argv(spec);
 	options.working_dir = spec.work_dir;
-	options.output_path = output_path_;
+	const std::string output = output_of(spec);
+	options.output_path = output;
+	// Into the log directory: through a pipe whose lines are stamped with their
+	// time, its write end the child's alone once it holds it.
+	int write_fd = -1;
+	if (output != output_path_ && !stamped_.open(output, options.output_path, write_fd, error))
+		return false;
 	options.environment = std::move(environment);
 	options.end_with_parent = true;
 	Server server;
 	server.slot = spec.slot;
-	if (!server.process.spawn(options, error))
+	const bool spawned = server.process.spawn(options, error);
+	if (write_fd >= 0)
+		::close(write_fd);
+	if (!spawned)
 		return false;
 	server.started_at = now_s_();
 	servers_.emplace(spec.name, std::move(server));
@@ -166,6 +183,17 @@ bool ProcessRuntime::kill(const std::string &name, int, std::string &error) {
 	if (!it->second.exit_code)
 		it->second.process.kill();
 	return true;
+}
+
+bool ProcessRuntime::list_images(
+		const std::string &, std::vector<std::string> &out, int, std::string &) {
+	out.clear();
+	return true;
+}
+
+bool ProcessRuntime::remove_image(const std::string &image, int, std::string &error) {
+	error = image + " is the machine's own image";
+	return false;
 }
 
 bool ProcessRuntime::remove(const std::string &name, int, std::string &error) {

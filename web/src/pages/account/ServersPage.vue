@@ -95,6 +95,9 @@
       <!-- The account's hosted servers: the live ones, then the newest ended. -->
       <section v-if="live.length > 0" class="space-y-4" aria-labelledby="servers-live-heading">
         <h2 id="servers-live-heading" class="text-xl font-semibold text-ink">Live servers</h2>
+        <p v-if="launchesHeld" class="launches-held rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
+          {{ LAUNCHES_HELD_NOTICE }}
+        </p>
         <HostedServerCard
           v-for="server in live"
           :key="server.id"
@@ -192,6 +195,7 @@ import { useSession } from '../../composables/useSession';
 import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
 import type { MyServer } from '../../types/myServers';
 import { replacedServers } from '../../utils/history';
+import { LAUNCHES_HELD_NOTICE } from '../../utils/hostedState';
 import {
   endedServers,
   hostingView,
@@ -223,6 +227,8 @@ const heading = ref<HTMLElement | null>(null);
 const view = computed(() => hostingView(data.value, hostedError.value !== ''));
 const block = computed(() => (data.value ? startBlock(data.value) : null));
 const live = computed(() => liveServers(data.value?.servers ?? []));
+// The fleet's launches are held while one of them waits for a machine.
+const launchesHeld = computed(() => live.value.some((s) => s.phase?.name === 'launches_held'));
 const ended = computed(() => endedServers(data.value?.servers ?? []));
 // An ended server you started again since (one of the same name after it) is
 // history, shown on request (utils/history.ts).

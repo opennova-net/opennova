@@ -8,9 +8,9 @@
 #   network.tf     the VPC: public subnets a/b (tasks, load balancer, machines),
 #                  private a/b
 #   service.tf     what the service's programs share; the gate's Elastic IP
-#   cluster.tf     the ECS cluster, the controller's Cloud Map name, the task
-#                  execution role
-#   programs.tf    the five programs: gate, lobby, web, controller, worker (an
+#   cluster.tf     the ECS cluster, the fleet program's Cloud Map name, the
+#                  task execution role
+#   programs.tf    the six programs: gate, lobby, web, fleet, worker, data (an
 #                  ECS service on Fargate each), their security groups, task
 #                  roles, task definitions and task counts
 #   load_balancer.tf  the public network load balancer: the gate, the lobby and web
@@ -19,7 +19,8 @@
 #   database.tf    PostgreSQL 17 on RDS
 #   cache.tf       Valkey on ElastiCache: web's ephemeral state
 #   edge.tf        Cloudflare: the deployment's site records and its origin
-#                  certificate (the zone's own settings and rules are infra/zone's)
+#                  certificate (the zone's own settings and rules are infra/zone's);
+#                  the static addresses' Route 53 zone, delegated from it
 #   mail.tf        outbound mail: the deployment's Amazon SES identity, its DKIM
 #                  and MAIL FROM records, the service's permission to send
 #   ops_bucket.tf  the deployment's operations bucket (releases, dumps)

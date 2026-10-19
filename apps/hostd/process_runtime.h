@@ -9,7 +9,11 @@
 // in the slot's directory, its environment the system's variables alone (the
 // `environment` it is given: PATH, HOME, LANG, LC_*, TZ, TMPDIR) and the env
 // file's, its output appended to `output_path` (main.cpp: the agent's own
-// standard error, so the servers' lines are the machine's log). Nothing isolates
+// standard error, so the servers' lines are the machine's log), or with a
+// `log_dir` (--log-dir, the local stack's log directory) to
+// <log_dir>/servers/<its log stream>.log, the file the stream the service names
+// it ("<server id>/g<generation>") is there, each line after its time
+// (stamped_output.h). Nothing isolates
 // it beyond what the machine itself is: no user of the slot's (the uid, the CPUs,
 // the memory and the pids cap are not applied), the machine's own network. What
 // the agent sees is docker's: each one listed by name until it is removed,
@@ -22,6 +26,7 @@
 // plumbing, not a port.
 
 #include "container_runtime.h"
+#include "stamped_output.h"
 
 #include <base/proc/child_process.h>
 
@@ -40,9 +45,10 @@ public:
 
 	// `serve`: opennova-serve's absolute path. `environment`: the NAME=value
 	// entries every server gets before its env file's. `output_path`: the file
-	// each server's output is appended to (empty discards it).
+	// each server's output is appended to (empty discards it), unless
+	// `log_dir` names the directory each server's own file is under.
 	ProcessRuntime(std::string serve, std::vector<std::string> environment, std::string output_path,
-			Clock now_s = {});
+			Clock now_s = {}, std::string log_dir = {});
 	// Kills and reaps every server still running.
 	~ProcessRuntime() override;
 
@@ -59,9 +65,15 @@ public:
 	bool stop(const std::string &name, int timeout_ms, std::string &error) override;
 	bool kill(const std::string &name, int timeout_ms, std::string &error) override;
 	bool remove(const std::string &name, int timeout_ms, std::string &error) override;
+	// Every image is the machine's own: none is held to prune, none removed.
+	bool list_images(const std::string &repository, std::vector<std::string> &out, int timeout_ms,
+			std::string &error) override;
+	bool remove_image(const std::string &image, int timeout_ms, std::string &error) override;
 
 	// The argv run() starts for `spec`.
 	std::vector<std::string> run_argv(const ContainerSpec &spec) const;
+	// The file `spec`'s output is appended to.
+	std::string output_of(const ContainerSpec &spec) const;
 
 private:
 	struct Server {
@@ -78,6 +90,8 @@ private:
 	std::vector<std::string> environment_;
 	std::string output_path_;
 	Clock now_s_;
+	std::string log_dir_;
+	StampedOutput stamped_; // the servers' output into the log directory
 	std::map<std::string, Server> servers_; // by name
 };
 

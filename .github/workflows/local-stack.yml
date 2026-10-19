@@ -2,8 +2,8 @@ name: Local stack
 
 # The local stack (deploy/compose, scripts/dev_stack.sh; DEVELOPING.md "Run the
 # NovaWorld servers locally") end to end, so it cannot silently break: the
-# script passes shellcheck; the five programs' images, the portal's, the machines'
-# serve image and the smoke test's are built from this commit (the binaries
+# script passes shellcheck; the six programs' images, the portal's, the machines'
+# hostd image and the smoke test's are built from this commit (the binaries
 # compiled here with the compiler cache the Linux jobs share, then laid into
 # the Dockerfiles' build stages: `dev_stack.sh up --prebuilt`, which leaves
 # every runtime stage as it is); the stack comes up with hosted game servers on
@@ -11,7 +11,9 @@ name: Local stack
 # (scripts/dev_stack.sh smoke: every program's liveness, an account through the
 # site's API, the gate's answer and a lobby session, the jobs admin API, and a
 # hosted server started through the site on a machine the worker launches,
-# running, listed in the lobby, taking console commands, stopped).
+# running, listed in the lobby, taking console commands, on the admin's pages
+# (its machine's agent and trees, its log, the usage samples of it, its machine
+# and every program), stopped; and the attention list holding no danger).
 
 on:
   push:
@@ -106,8 +108,9 @@ jobs:
       - name: Build the programs, the machines' binaries and the smoke test
         run: >-
           cmake --build build -j "$(nproc)" --target opennova_novaworld_gate
-          opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_controller
-          opennova_novaworld_worker opennova_serve opennova_hostd opennova_novaworld_stack_smoke
+          opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_fleet
+          opennova_novaworld_worker opennova_novaworld_data opennova_serve opennova_hostd
+          opennova_novaworld_stack_smoke
 
       - name: Bring the stack up (hosted servers on the synthetic data set)
         run: scripts/dev_stack.sh up --synthetic-data --prebuilt build

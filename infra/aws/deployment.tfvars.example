@@ -21,13 +21,15 @@
 
 # The service's programs (programs.tf): each task's size (cpu units, memory
 # MiB: a Fargate pair) and its service's task counts; a field left out keeps
-# its default. Web and worker scale on their CPU between min and max; max (with
-# a deployment's extra tasks) sizes the database's max_connections.
-# gate       = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
-# lobby      = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
-# web        = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
-# controller = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
-# worker     = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
+# its default. Web and worker scale on their CPU between min and max; data runs
+# one fixed count (min = max = desired); max (with a deployment's extra tasks)
+# sizes the database's max_connections.
+# gate   = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
+# lobby  = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
+# web    = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
+# fleet  = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
+# worker = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
+# data   = { cpu = 256, memory = 1024, min = 1, max = 1, desired = 1 }
 # image_registry = "ghcr.io/opennova-net" # where the images are published (public packages)
 # health_port    = 8081                   # every program's /livez (ONNET_HEALTH_PORT)
 
@@ -75,9 +77,10 @@ cloudflare_web_proxied = true
 # shared_slots           = 6             # K servers per shared machine (1..32)
 # fleet_max_shared       = 2
 # fleet_max_own          = 2
+# fleet_max_addresses    = 0             # static addresses sold; above 0 makes the play zone (raise the EIP quota first)
 # fleet_idle_minutes     = 30
 # machine_root_volume_gb = 40            # the OS, docker, the images and the data trees
-# hosted_ami_id          = ""            # empty: Canonical's newest Ubuntu 24.04
+# fleet_ami              = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64" # the exact ECS-optimized AL2023 image name, required with hosting
 # update_ports           = [20044, 20556, 21068, 21580] # retail UPDATE.EXE's, fixed
 
 # Alarms and budgets (observability.tf), the deployment's account's. The alert
@@ -87,3 +90,5 @@ cloudflare_web_proxied = true
 # cost_anomaly_monitor       = true      # false if the account has one already
 # cost_anomaly_threshold_usd = 20
 # log_retention_days         = 30
+# server_log_retention_days  = 14      # the hosted servers' output (the servers log group)
+# log_ingest_alarm_gib_per_day = 2     # the servers group's ingest past this rate in an hour alarms

@@ -165,16 +165,19 @@ game is the sole live mission runtime (ADR 0025).
 _Avoid_: NovaWorld (that name now belongs to the service), world scene
 
 **NovaWorld**:
-NovaLogic's online matchmaking and account service, and our reimplementation of it (its five **programs**, `apps/novaworld_*`, over `engine/net/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
+NovaLogic's online matchmaking and account service, and our reimplementation of it (its **programs**, `apps/novaworld_*`, over `engine/net/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
 _Avoid_: emulator, lobby server
 
 **Program (of the NovaWorld service)**:
-One of the service's five binaries, each its own image and ECS service: the **gate**, the
-**lobby**, **web** (the retail HTTP routes and the website's API), the **controller** (the
-hosted servers' supervisor and the job schedules, one elected leader) and the **worker**
-(the **jobs**). Each scales on its own and shares nothing with the others but PostgreSQL
-(and web's Redis); what more than one uses is the shared library (`apps/novaworld_common`).
-There is no all-in-one binary.
+One of the service's binaries, each its own image and ECS service: the **gate**, the
+**lobby**, **web** (the retail HTTP routes and the website's API), the **fleet program** (the
+hosted servers' supervisor, one elected leader), the **worker** (its **jobs** and their
+schedules) and **data** (the data sets' jobs over the game data's store). Each scales on its
+own and shares nothing with the others but PostgreSQL (and web's Redis); what more than one
+uses is the service's libraries (`apps/novaworld_common`). Each runs only its own job kinds and
+schedules only those. There is no all-in-one binary. Beside them, **opennova-hostd** is a
+program of the fleet cluster (`opennova-<deployment>-fleet`): an ECS daemon service, one task
+per **machine**, rolled by the same releases, before the fleet program.
 _Avoid_: role, service (for one program), tier, microservice, pod
 
 **Gate**:
@@ -206,22 +209,35 @@ owner); the owning **lobby instance** takes and runs it within 250 ms, recheckin
 owner. Nothing outside the lobby touches the lobby's memory.
 _Avoid_: push queue (the old in-memory one), message
 
-**Controller**:
-The program that runs the hosted servers' supervisor pass, the console drain, the machine
-agents' internal listener and the periodic **job** schedules, while it holds the election
-lock (`controller_leader`, a generation fencing a stale leader). It never calls the cloud
-itself: its pass enqueues jobs.
-_Avoid_: scheduler (for the program), master, leader (alone)
+**Fleet program**:
+The program (`apps/novaworld_fleet`, ECS service `fleet`) that runs the hosted servers'
+supervisor pass with its admin links, the console drain and the machine agents' internal
+listener (`fleet.<deployment>.opennova.internal:8070`), while it holds the election lock
+(`fleet_leader`, a generation fencing a stale leader). It never calls the cloud and runs and
+schedules no **job** itself: its pass enqueues them for the worker.
+_Avoid_: controller (that word is the in-match **Controller Kind**'s), scheduler, master,
+leader (alone)
 
 **Worker**:
-The program that runs **jobs**, a pool of threads claiming them from PostgreSQL
-(`ONNET_WORKER_THREADS`).
+The program that runs the **jobs** it registers and their schedules: a pool of threads
+claiming them from PostgreSQL (`ONNET_WORKER_THREADS`), and in every worker process a
+scheduler of its own periodic kinds (no election: a schedule key is unique, so a bucket gets
+one job). It alone holds the fleet's cloud calls (`machine.*`, `fleet.sweep`), the billing
+sync and the mail.
 _Avoid_: consumer, executor
+
+**Data program**:
+The program (`apps/novaworld_data`) that runs the data sets' jobs (a tree's finalize, a
+release's validate and apply, the trees' prune) over the game data's store, and schedules
+their prune; one task, its own disk for the files a job passes through. An admin's upload
+never queues a machine launch behind it.
+_Avoid_: data worker, uploader
 
 **Job**:
 One piece of background work in the `jobs` table (a machine launch, describe or terminate,
-a billing sync, a mail, a prune), enqueued in the same transaction as the change that
-causes it, claimed with `SKIP LOCKED` under a lease, retried with backoff, idempotent.
+a billing sync, a mail, a prune, a data set's tree), enqueued in the same transaction as the
+change that causes it, claimed with `SKIP LOCKED` under a lease by the one program that runs
+its kind, retried with backoff, idempotent.
 _Avoid_: task, message, event
 
 **Realm**:
@@ -541,24 +557,31 @@ _Avoid_: plan, package, premium, donation, membership
 
 **Hosting entitlement**:
 How many **hosted servers** an account may have live at once: the larger of its **support tier**'s
-servers and an admin's comp grant, plus how many may run on an own machine (the add-on's quantity,
-while a tier grants). A past-due tier keeps the servers but starts no new one. Read from the
-service's cache of Stripe, whether or not billing is configured (`billing/entitlement.h`).
+servers and an admin's comp grant of servers, plus how many may run on an own machine (the add-on's
+quantity while a tier grants, and an admin's comp grant of own machines while the account has
+servers), and its **static addresses**. A past-due tier keeps the servers but starts no new one.
+Read from the service's cache of Stripe, whether or not billing is configured
+(`billing/entitlement.h`). What every account's entitlement holds is what the service has sold,
+and no new subscription is sold past what the fleet holds (`hosted/model/sold_capacity.h`).
 _Avoid_: quota, allowance (in code; the site's meter may say "N of M servers used"), approval
 (the retired admin flag)
 
 **Machine**:
-A virtual machine **hosted servers** run on, each in a **slot** of its own (an EC2 instance, ADR
-0053; in the local stack, a container of the serve image): a **shared machine** or an **own
+A virtual machine **hosted servers** run on, each in a **slot** of its own (an EC2 instance on
+the deployment's pinned ECS-optimized image, a container instance of the fleet cluster, ADR
+0053; in the local stack, a container of the hostd image): a **shared machine** or an **own
 machine**. The service launches it, places servers on it and ends it; **opennova-hostd** runs its
-containers. Never "host": that word is the authoritative session side alone.
+containers (docker's, never ECS tasks). Never "host": that word is the authoritative session side alone.
 _Avoid_: host, server (for the VM), box, node, pod; "instance" alone (say "EC2 instance"
 when naming the AWS resource)
 
 **Shared machine**:
 A **machine** that packs up to K **hosted servers** of any account (`ONNET_FLEET_SHARED_SLOTS`,
-12 to start), one per **slot**; servers go to the fullest one with a free slot, and one
-with no server left ends after a while.
+the var-file's `shared_slots`: 6 on the default `t3a.medium`), one per **slot**; servers go to
+the fullest one with a free slot, and one with no server left ends after a while. At most
+`fleet_max_shared` run at once, so with the **own machines** (`fleet_max_own`) they cap the
+hosted servers at `fleet_max_shared` x `shared_slots` + `fleet_max_own` (`ONNET_HOSTED_CAP`:
+14 at the defaults).
 _Avoid_: pool, pod, cluster node
 
 **Own machine**:
@@ -567,15 +590,24 @@ add-on (a paid monthly subscription beside the **support tier**): launched for t
 reserved for it (one slot, slot 0), and ended when it stops.
 _Avoid_: dedicated machine, dedicated server (retail's Serve Only term), private host
 
+**Static address**:
+An **own machine**'s fixed public IPv4 with a name in the deployment's play zone
+(`<name>.play.opennova.net`), which its owner keeps for the own-machine servers it starts, so a
+server lists at the same address and port on every start (ADR 0066,
+`apps/novaworld_common/hosted/model/address_repository.h`). Each is a monthly add-on of its own (or an
+admin's comp address), at most one per own machine; on EC2 it is an Elastic IP.
+_Avoid_: Elastic IP (but naming the AWS resource), dedicated IP, fixed IP, vanity address
+
 **Slot**:
-One **hosted server**'s position on a **machine** (`hosted/slots.h`): its index fixes the
+One **hosted server**'s position on a **machine** (`hosted/protocol/slots.h`): its index fixes the
 server's game and remote-admin ports, its container user and its working directory
 (`apps/novaworld_common/hosted/README.md`). Two live servers never hold one slot.
 _Avoid_: seat, position (for the place on the machine), player slot (that is a match's)
 
 **opennova-hostd**:
-The machine agent (`apps/hostd`, target `opennova_hostd`): one per **machine**, it
-redeems the machine's one-time bootstrap token, then syncs with the **controller**'s internal
+The machine agent (`apps/hostd`, target `opennova_hostd`, image `opennova-hostd`): one per
+**machine**, the fleet cluster's ECS daemon on a cloud machine, it fences the slots' users,
+redeems the machine's one-time bootstrap token, then syncs with the **fleet program**'s internal
 listener (by its name, `ONNET_INTERNAL_URL`) every few seconds, reporting each container (its state, CPU, memory, its slot's
 egress) and running the containers the reply wants (a local stack's machine runs them as
 its own processes, `--runtime process`). It decides nothing itself.
@@ -593,7 +625,7 @@ _Avoid_: game (when you mean the identity, not the running program)
 One product a **hosted server** runs on (ADR 0064): a base game (Joint Operations, Delta
 Force Xtreme 2, OpenNova's own data), which speaks a title and lists in a lobby, or one
 expansion of a base (Escalation, `jox01`), holding only its own files
-(`hosted/data_set_files.h`). An admin creates one as a row on the Game data page and uploads
+(`data_sets/data_set_files.h`). An admin creates one as a row on the Game data page and uploads
 its files; the site offers only data sets with a ready **tree**.
 _Avoid_: game (for the data), install (a retail install is where a data set's files come
 from), snapshot (gone: the data lives in the object store), slug (a data set has an id and a

@@ -12,15 +12,33 @@
 # app: the programs on ECS (infra/aws/programs.tf), their releases
 # ---------------------------------------------------------------------------
 
-# The service's programs, in the order a deploy updates them: the gate (the
-# players' way in) last, the lobby (whose restart the players feel) before it.
-PROGRAMS=(worker controller web lobby gate)
+# The service's programs, in the order a deploy updates them: the job
+# programs first, then hostd (the machines' agent) before the fleet program it
+# reports to, so the fleet never speaks a protocol its agents do not yet, then
+# the fleet, web, the lobby (whose restart the players feel) and the gate (the
+# players' way in) last.
+PROGRAMS=(worker data hostd fleet web lobby gate)
+
+# The programs that are no scaled service of the deployment's cluster: hostd,
+# the fleet cluster's DAEMON service (infra/aws/fleet_agent.tf: one task per
+# machine, as many as the machines registered). Never a --desired-count, an
+# Application Auto Scaling target or a count in `app down`'s record: down and up
+# leave it running, and its machines' servers with it.
+DAEMON_PROGRAMS=(hostd)
 
 # A program's name, checked.
 program_name() {
   case "$1" in
-    gate|lobby|web|controller|worker) printf '%s' "$1" ;;
-    *) die "'$1' is no program (gate, lobby, web, controller, worker)" ;;
+    gate|lobby|web|fleet|worker|data|hostd) printf '%s' "$1" ;;
+    *) die "'$1' is no program (gate, lobby, web, fleet, worker, data, hostd)" ;;
+  esac
+}
+
+# Whether program $1 is a daemon (DAEMON_PROGRAMS).
+is_daemon() {
+  case " ${DAEMON_PROGRAMS[*]} " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -28,6 +46,44 @@ program_name() {
 ecs_cluster() {
   infra_env_load
   infra_get OPENNOVA_CLUSTER
+}
+
+# The fleet cluster hostd runs in (infra.env), "" with hosting off: no fleet,
+# so no hostd.
+fleet_cluster() {
+  infra_env_load
+  printf '%s' "${INFRA[OPENNOVA_FLEET_CLUSTER]:-}"
+}
+
+# The cluster program $1's service is in.
+program_cluster() {
+  if is_daemon "$1"; then fleet_cluster; else ecs_cluster; fi
+}
+
+# The programs the deployment runs, in PROGRAMS' order, into RUN_PROGRAMS:
+# hostd only with a fleet cluster, which is said once when there is none.
+RUN_PROGRAMS=()
+DAEMONS_SKIPPED_LOGGED=0
+run_programs() {
+  local program
+  infra_env_load
+  RUN_PROGRAMS=()
+  for program in "${PROGRAMS[@]}"; do
+    if is_daemon "$program" && [ -z "${INFRA[OPENNOVA_FLEET_CLUSTER]:-}" ]; then
+      [ "$DAEMONS_SKIPPED_LOGGED" -eq 1 ] || log "$program: skipped, infra.env names no fleet cluster (hosting is off)"
+      DAEMONS_SKIPPED_LOGGED=1
+      continue
+    fi
+    RUN_PROGRAMS+=("$program")
+  done
+}
+
+# RUN_PROGRAMS less the daemons: the deployment's cluster's scaled services.
+scaled_programs() {
+  local program
+  for program in "${RUN_PROGRAMS[@]}"; do
+    is_daemon "$program" || printf '%s\n' "$program"
+  done
 }
 
 # Terraform's task definition of $1 (a program, or backup): the template a
@@ -43,7 +99,7 @@ task_template() {
 
 # The task definition service $1 runs now (its primary deployment's).
 service_task_definition() {
-  aws ecs describe-services --cluster "$(ecs_cluster)" --services "$1" \
+  aws ecs describe-services --cluster "$(program_cluster "$1")" --services "$1" \
     --query 'services[0].taskDefinition' --output text \
     || die "describing the $DEP $1 service failed"
 }
@@ -90,12 +146,17 @@ proc1_env() {
 # The service's admin API (apps/novaworld_web: the admin routes) on a web
 # task, over ECS Exec, from the task's loopback (a proxy web trusts,
 # ONNET_TRUSTED_PROXIES), with the admin token from the container's own
-# environment in a header file, never an argument. Prints the reply and its
-# status; fails on a status of 400 or more, or none.
+# environment in a header file, never an argument. A POST may carry a JSON body
+# ($3) of ids and words alone (it travels in the script). Prints the reply and
+# its status; fails on a status of 400 or more, or none.
 admin_api() {
-  local method="$1" path="$2" script out code
+  local method="$1" path="$2" body="${3:-}" script out code data=""
   [[ "$method" =~ ^(GET|POST)$ ]] || die "admin_api: no method $method"
   [[ "$path" =~ ^/api/admin/[A-Za-z0-9/_.?=\&-]*$ ]] || die "admin_api: no admin path $path"
+  if [ -n "$body" ]; then
+    [[ "$body" =~ ^[][{}\":,A-Za-z0-9_\ -]*$ ]] || die "admin_api: a body of more than ids and words"
+    data=" -H 'Content-Type: application/json' --data '$body'"
+  fi
   infra_env_load
   script="set -eu
 $(proc1_env ADMIN_API_TOKEN token)
@@ -105,11 +166,44 @@ auth=\"\$(mktemp)\"
 trap 'rm -f \"\$auth\"' EXIT
 printf 'Authorization: Bearer %s\n' \"\$token\" > \"\$auth\"
 unset token
-curl -sS --max-time 30 -X $method -H \"@\$auth\" -H 'Accept: application/json' -w '\nHTTP %{http_code}\n' 'http://127.0.0.1:${INFRA[ONNET_HTTP_PORT]:-8080}$path'"
+curl -sS --max-time 30 -X $method -H \"@\$auth\" -H 'Accept: application/json'$data -w '\nHTTP %{http_code}\n' 'http://127.0.0.1:${INFRA[ONNET_HTTP_PORT]:-8080}$path'"
   out="$(ecs_exec "$(program_task web)" web "$script")" || { printf '%s\n' "$out"; return 1; }
   printf '%s\n' "$out"
   code="$(printf '%s\n' "$out" | tr -d '\r' | sed -n 's/^HTTP \([0-9][0-9]*\)$/\1/p' | tail -n 1)"
   [ -n "$code" ] && [ "$code" -lt 400 ]
+}
+
+# admin_api's reply body alone, the JSON object (its first line opening one;
+# the session's own lines and the status line left out). Fails as admin_api
+# does, or when the reply holds no object.
+admin_api_json() {
+  local out json
+  out="$(admin_api "$@")" || { printf '%s\n' "$out" >&2; return 1; }
+  json="$(printf '%s\n' "$out" | tr -d '\r' | sed -n '/^{/{p;q;}')"
+  [ -n "$json" ] || { err "the admin API's reply to $1 $2 holds no JSON object"; return 1; }
+  printf '%s\n' "$json"
+}
+
+# Why an admin_api call failed, in one line, from what it wrote to stderr ($1,
+# a file): AWS refusing a call ECS Exec into a web task makes (its ListTasks,
+# DescribeTasks or ExecuteCommand), the admin API's own status, or the first
+# line naming an error.
+admin_api_failure() {
+  local text op code line
+  text="$(tr -d '\r' <"$1" 2>/dev/null || true)"
+  op="$(grep -oE -m 1 'AccessDenied[A-Za-z]*\) when calling the [A-Za-z]+ operation' <<<"$text" \
+          | sed 's/.* when calling the \([A-Za-z]*\) operation/\1/' || true)"
+  if [ -n "$op" ]; then
+    printf 'AWS refused the %s call of ECS Exec into a web task' "$op"
+    return
+  fi
+  code="$(sed -n 's/^HTTP \([0-9][0-9]*\)$/\1/p' <<<"$text" | tail -n 1)"
+  if [ -n "$code" ]; then
+    printf 'the admin API answered HTTP %s' "$code"
+    return
+  fi
+  line="$(grep -m 1 -iE 'error|denied|not authorized|no running|failed|holds no' <<<"$text" || true)"
+  printf '%s' "${line:-ECS Exec into a web task failed and said nothing}"
 }
 
 # ---- one-off tasks -----------------------------------------------------------------
@@ -184,22 +278,24 @@ task_log() {
 
 # ---- releases ---------------------------------------------------------------------
 
-# hostd's image repository (under the registry): the serve image carries
-# hostd unless the fleet publishes an image of its own.
-HOSTD_REPO="${OPENNOVA_HOSTD_REPO:-opennova-serve}"
+# hostd's image repository (under the registry): its own image
+# (apps/serve/Dockerfile's hostd target, serve-image.yml), the fleet
+# cluster's daemon.
+HOSTD_REPO=opennova-hostd
 
-# Each image a release pins, by its key: the five programs', the portal's
+# Each image a release pins, by its key: the six programs', the portal's
 # nginx (web's second container) and the backup task's, the containers of
 # the task definitions it registers (named after their keys), and the hosted
-# machines' serve and hostd images.
-SERVICE_IMAGES=(gate lobby web controller worker portal backup)
+# machines' serve image and hostd's (the hostd daemon's revision; its
+# container is named hostd too).
+SERVICE_IMAGES=(gate lobby web fleet worker data portal backup)
 image_repo() {
   case "$1" in
-    gate|lobby|web|controller|worker|backup) printf 'opennova-novaworld-%s' "$1" ;;
+    gate|lobby|web|fleet|worker|data|backup) printf 'opennova-novaworld-%s' "$1" ;;
     portal) printf 'novaworld-web' ;;
     serve) printf 'opennova-serve' ;;
     hostd) printf '%s' "$HOSTD_REPO" ;;
-    *) die "'$1' is no image (gate, lobby, web, controller, worker, portal, backup, serve, hostd)" ;;
+    *) die "'$1' is no image (gate, lobby, web, fleet, worker, data, portal, backup, serve, hostd)" ;;
   esac
 }
 
@@ -216,7 +312,9 @@ image_digest() {
 
 # The image a release takes for key $1: tag $2 resolved now (or, as
 # @sha256:<digest>, that digest as it is, checked to be in the registry), else
-# the current release's ($3, its manifest), else `latest` resolved now.
+# the current release's ($3, its manifest) while it is of the key's
+# repository (a release before hostd's own image names the serve image's for
+# it), else `latest` resolved now.
 pick_image() {
   local key="$1" tag="$2" manifest="$3" kept ref
   if [[ "$tag" == @* ]]; then
@@ -229,7 +327,7 @@ pick_image() {
   fi
   if [ -z "$tag" ]; then
     kept="$(jq -r --arg k "$key" '.images[$k] // empty' <<<"$manifest")"
-    if [ -n "$kept" ]; then
+    if [ -n "$kept" ] && [ "${kept%@*}" = "$(infra_get OPENNOVA_IMAGE_REGISTRY)/$(image_repo "$key")" ]; then
       printf '%s' "$kept"
       return
     fi
@@ -256,6 +354,29 @@ release_current_manifest() {
   fi
 }
 
+# Whether release manifest $1 is from before the program split (it names no
+# fleet and no data program: the controller's era, or no release at all),
+# which no service runs and app rollback refuses.
+release_pre_split() {
+  ! jq -e '(.programs | type) == "array" and (.programs | index("fleet")) != null and (.programs | index("data")) != null' \
+    <<<"$1" >/dev/null 2>&1
+}
+
+# What app deploy says when its roll to release $3 failed, the deployment's
+# release still $2 (its manifest $1): app rollback --to it, or, for a release
+# app rollback refuses (none, or one from before the program split: the
+# cutover's), fix forward.
+deploy_failed_advice() {
+  local manifest="$1" current_id="$2" id="$3" what
+  what="the deployment did not reach $id, which is not recorded: $current_id stays the deployment's release, and the programs before the one that failed run the new revisions."
+  if release_pre_split "$manifest"; then
+    printf '%s app rollback cannot go back to %s (no release, or one from before the program split): fix forward, the cause first, then app deploy again (DEPLOY.md, "The cutover to the fleet program")' \
+      "$what" "$current_id"
+  else
+    printf '%s ./deploy/run.sh%s app rollback --to %s puts every program back on %s' "$what" "$DEP_FLAG" "$current_id" "$current_id"
+  fi
+}
+
 release_manifest() {
   local bucket="$1" id="$2"
   aws s3 cp "s3://$bucket/releases/$id.json" - 2>/dev/null \
@@ -275,8 +396,12 @@ ssm_secret_names() {
 
 # The registration of a revision of task definition $1 (described, with its
 # tags), on stdout: its containers' images from the release ($2, keyed by
-# container), hosting's images and switch for the containers that read
-# hosting ($3: serve, $4: hostd, $5: 1 on, 0 off), and its secrets: every one
+# container: hostd's among them), hosting's switch, the serve image and the
+# hostd image for the containers that read the fleet's policy
+# (ONNET_HOSTED_PROVIDER: web, the fleet, the worker; the worker's docker
+# driver's machines run the hostd image, and the fleet's health holds each
+# machine's agent against it) ($3: serve, $4: hostd, $5: 1 on, 0 off), and its
+# secrets: every one
 # the template names, which SSM must hold ($6, a JSON array of parameter
 # names), and each optional one its `opennova.optional-secrets` label names
 # (name to parameter ARN: the first admin, the previous edge secret, billing's
@@ -362,22 +487,31 @@ program_counts() {
 # a new deployment anyway) and follow the deployment that makes until ECS calls
 # it COMPLETED or FAILED (the circuit breaker's rollback), up to ROLL_TIMEOUT.
 # A service at 0 tasks with no `app down` recorded is one before the first
-# release: it starts at its desired count, and its floor is raised to its min
-# (Terraform's next apply sets the same).
+# release, and so is one whose program the down record names no count for (a
+# program added since `app down`, at the cutover the fleet and data): it starts
+# at its desired count (OPENNOVA_PROGRAM_COUNTS), and its floor is raised to
+# its min (Terraform's next apply sets the same). A daemon (hostd) has no count
+# of its own (ECS runs one task per machine) and none of this: it is pointed at
+# $2 alone, in the fleet cluster, and a deployment of it that wants no task (no
+# machine has registered yet) is done.
 service_roll() {
-  local program="$1" td="$2" force="${3:-0}" cluster described current desired out dep_id waited=0 state counts
-  cluster="$(ecs_cluster)"
+  local program="$1" td="$2" force="${3:-0}" cluster described current desired out dep_id waited=0 state counts record
+  cluster="$(program_cluster "$program")"
   described="$(aws ecs describe-services --cluster "$cluster" --services "$program" --output json)" \
     || { err "describing the $program service failed"; return 1; }
   current="$(jq -r '.services[0].taskDefinition // ""' <<<"$described")"
   desired="$(jq -r '.services[0].desiredCount // 0' <<<"$described")"
   local args=(--cluster "$cluster" --service "$program" --task-definition "$td")
-  local down_rc=0
-  if [ "$desired" -eq 0 ]; then
-    down_record >/dev/null || down_rc=$?
+  local down_rc=0 first=0 daemon=0
+  if is_daemon "$program"; then daemon=1; fi
+  if [ "$daemon" -eq 0 ] && [ "$desired" -eq 0 ]; then
+    record="$(down_record)" || down_rc=$?
     [ "$down_rc" -ne 1 ] || return 1
+    if [ "$down_rc" -eq "$DOWN_NONE" ] || ! jq -e --arg p "$program" '.counts | has($p)' <<<"$record" >/dev/null 2>&1; then
+      first=1
+    fi
   fi
-  if [ "$desired" -eq 0 ] && [ "$down_rc" -eq "$DOWN_NONE" ]; then
+  if [ "$first" -eq 1 ]; then
     counts="$(program_counts "$program")"
     [ -n "$counts" ] || { err "infra.env names no task counts for $program (infra apply)"; return 1; }
     args+=(--desired-count "$(jq -r '.desired' <<<"$counts")")
@@ -404,6 +538,12 @@ service_roll() {
         err "$program's deployment $dep_id is gone: another replaced it, or the circuit breaker rolled it back (app status)"
         return 1 ;;
     esac
+    if [ "$daemon" -eq 1 ] && [ "$waited" -gt 0 ] && jq -e --arg d "$dep_id" \
+         '[.services[0].deployments[]? | select(.id == $d)][0] | .desiredCount == 0 and .runningCount == 0 and .pendingCount == 0' \
+         <<<"$out" >/dev/null 2>&1; then
+      log "$program: no machine runs a task of it yet (the fleet cluster has no container instance)"
+      break
+    fi
     if [ "$waited" -ge "$ROLL_TIMEOUT" ]; then
       err "$program's deployment of ${td##*/} is still $state after ${waited}s (app status, app logs $program)"
       return 1
@@ -423,15 +563,93 @@ service_roll() {
   log "$program: ${td##*/} serves"
 }
 
+# How long the machines' agents get, once hostd's deployment completed, to report
+# the release's hostd image: every ready machine's syncs at most every 5 s, and
+# a new agent's first one comes once its task starts.
+HOSTD_CONFIRM_TIMEOUT=180
+
+# Whether every ready machine's agent reports hostd image $1 (the release's
+# reference, as its ECS task definition names it: the admin fleet view's
+# agent_image, which hostd reads from its task's metadata), asked every 15 s
+# up to HOSTD_CONFIRM_TIMEOUT. With no hostd task running (no machine) there
+# is no machine to confirm; when the first ask fails (the cutover: no web, or
+# no fleet program yet; or ECS Exec into web refused) nothing is confirmed, and
+# it says which failed. Either way the deploy goes on. A later ask that fails
+# is asked again; at the timeout the last ask's own outcome is the reason: its
+# failure, or the machines it found on another image.
+hostd_confirm() {
+  local image="$1" running json stale waited=0 errors failed=""
+  [ -n "$image" ] || { err "hostd: the release names no hostd image to confirm"; return 1; }
+  running="$(aws ecs describe-services --cluster "$(fleet_cluster)" --services hostd \
+               --query 'services[0].runningCount' --output text 2>/dev/null || echo 0)"
+  if ! [[ "$running" =~ ^[0-9]+$ ]] || [ "$running" -eq 0 ]; then
+    log "hostd: no machine to confirm (no hostd task runs)"
+    return 0
+  fi
+  errors="$(mktemp)"
+  while :; do
+    if json="$(admin_api_json GET /api/admin/hosted 2>"$errors")"; then
+      failed=""
+      stale="$(jq -r --arg i "$image" '[.machines[]? | select(.state == "ready" and .agent_image != $i) | .id | tostring] | join(" ")' <<<"$json" 2>/dev/null)" \
+        || stale="?"
+      if [ -z "$stale" ]; then
+        log "hostd: every ready machine's agent reports ${image##*@}"
+        rm -f "$errors"
+        return 0
+      fi
+    elif [ "$waited" -eq 0 ]; then
+      log "hostd: the machines' agents are not confirmed on ${image##*@}, the service could not be asked: $(admin_api_failure "$errors")"
+      rm -f "$errors"
+      return 0
+    else
+      failed="$(admin_api_failure "$errors")"
+    fi
+    if [ "$waited" -ge "$HOSTD_CONFIRM_TIMEOUT" ]; then
+      if [ -n "$failed" ]; then
+        err "hostd: after ${waited}s the machines' agents are not confirmed on ${image##*@}: the last ask failed: $failed (app logs web, fleet status)"
+      else
+        err "hostd: after ${waited}s, machine(s) ${stale:-?} still report another agent image than ${image##*@} (fleet status, app logs hostd)"
+      fi
+      rm -f "$errors"
+      return 1
+    fi
+    sleep 15
+    waited=$((waited + 15))
+  done
+}
+
 # Roll every program to the release's revisions ($1, the manifest), in the
 # deploy's order. The first that fails stops it, leaving the rest on what they
-# ran.
+# ran. hostd, once its deployment completed, is confirmed on the machines
+# (hostd_confirm, with the manifest's hostd image); a deployment or a
+# confirmation that fails points it back at the revision it ran before, so
+# the programs after it (the fleet program first) never meet agents of a release
+# they do not run. A release that names no hostd revision (none was made: no
+# hostd image, hosting off) leaves hostd on what it runs.
 release_roll() {
-  local manifest="$1" program td
-  for program in "${PROGRAMS[@]}"; do
+  local manifest="$1" program td before
+  run_programs
+  for program in "${RUN_PROGRAMS[@]}"; do
     td="$(jq -r --arg p "$program" '.task_definitions[$p] // empty' <<<"$manifest")"
+    if [ -z "$td" ] && is_daemon "$program"; then
+      log "$program: the release names no revision of it; it keeps what it runs"
+      continue
+    fi
     [ -n "$td" ] || { err "the release names no task definition for $program"; return 1; }
-    service_roll "$program" "$td" || return 1
+    if ! is_daemon "$program"; then
+      service_roll "$program" "$td" || return 1
+      continue
+    fi
+    before="$(service_task_definition "$program")" || return 1
+    if service_roll "$program" "$td" \
+         && { [ "$before" = "$td" ] || hostd_confirm "$(jq -r '.images.hostd // empty' <<<"$manifest")"; }; then
+      continue
+    fi
+    if [ -n "$before" ] && [ "$before" != None ] && [ "$before" != "$td" ]; then
+      err "$program: pointing it back at ${before##*/}, the revision it ran before"
+      service_roll "$program" "$before" || err "$program did not come back on ${before##*/} (app status)"
+    fi
+    return 1
   done
 }
 
@@ -604,12 +822,18 @@ app_deploy() {
   confirm_prod "roll prod's programs onto $what" "$yes"
 
   # Each program's revision, the SSM secrets it names (every one SSM must hold,
-  # the optional ones while it does).
-  local present revisions="{}" td
+  # the optional ones while it does); hostd's container takes the hostd image.
+  local present revisions="{}" td revision_images
   present="$(ssm_secret_names | jq -R . | jq -sc .)"
+  revision_images="$(jq -c --arg h "$hostd" 'if $h == "" then . else . + {hostd: $h} end' <<<"$images")"
+  run_programs
   log "revisions:"
-  for key in "${PROGRAMS[@]}"; do
-    td="$(release_revision "$key" "$(service_task_definition "$key")" "$images" "$serve" "$hostd" "$hosting" "$present")" || exit 1
+  for key in "${RUN_PROGRAMS[@]}"; do
+    if is_daemon "$key" && [ -z "$hostd" ]; then
+      log "  $key: no hostd image (--no-hosting); it keeps what it runs"
+      continue
+    fi
+    td="$(release_revision "$key" "$(service_task_definition "$key")" "$revision_images" "$serve" "$hostd" "$hosting" "$present")" || exit 1
     revisions="$(jq -c --arg k "$key" --arg v "$td" '. + {($k): $v}' <<<"$revisions")"
   done
 
@@ -627,8 +851,8 @@ app_deploy() {
   # Rolled first, recorded once every program runs it: the release parameter
   # (and the backup task's revision, which the nightly run takes) never names
   # what nothing runs.
-  if ! release_roll "$(jq -nc --argjson r "$revisions" '{task_definitions: $r}')"; then
-    die "the deployment did not reach $id, which is not recorded: $current_id stays the deployment's release, and the programs before the one that failed run the new revisions. ./deploy/run.sh$DEP_FLAG app rollback --to $current_id puts every program back on $current_id"
+  if ! release_roll "$(jq -nc --argjson r "$revisions" --arg hostd "$hostd" '{task_definitions: $r, images: {hostd: $hostd}}')"; then
+    die "$(deploy_failed_advice "$manifest" "$current_id" "$id")"
   fi
   td="$(release_revision backup "$(jq -r '.task_definitions.backup // empty' <<<"$manifest")" "$images" "$serve" "$hostd" "$hosting" "$present")" || exit 1
   revisions="$(jq -c --arg v "$td" '. + {backup: $v}' <<<"$revisions")"
@@ -637,7 +861,7 @@ app_deploy() {
            --arg rev "$rev" --argjson dirty "$dirty" --arg previous "$current_id" \
            --argjson images "$images" --arg serve "$serve" --arg hostd "$hostd" \
            --argjson hosting "$([ "$hosting" -eq 1 ] && echo true || echo false)" \
-           --arg programs "${PROGRAMS[*]}" --argjson revisions "$revisions" \
+           --arg programs "${RUN_PROGRAMS[*]}" --argjson revisions "$revisions" \
            --argjson promoted_from "$promoted_from" \
     '{id: $id, deployment: $dep, created: $created, revision: $rev, dirty: $dirty,
       previous: (if $previous == "none" then null else $previous end),
@@ -693,9 +917,14 @@ app_rollback() {
   [[ "$to" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || die "'$to' is no release id"
   manifest="$(release_manifest "$bucket" "$to")" || exit 1
   # A release of the single service instance runs on no ECS service: going
-  # back past the cutover is the cutover's rollback.
+  # back past the cutover is the cutover's rollback. Nor does one from before
+  # the program split (the controller's: no fleet, no data program): its
+  # revisions name a program no service runs, and no fleet would lead.
   jq -e '(.programs | type) == "array" and (.task_definitions | type) == "object"' <<<"$manifest" >/dev/null 2>&1 \
     || die "release $to was made before the programs (its manifest names none): no program runs it"
+  if release_pre_split "$manifest"; then
+    die "release $to was made before the program split (its programs name no fleet and no data program, the controller's era): no service runs its controller, so rolling back to it would leave the fleet unled. Roll forward instead (app deploy); going back past the split is the cutover's rollback (DEPLOY.md, \"The cutover to the fleet program\")"
+  fi
   manifest="$(jq -c . <<<"$manifest")"
   confirm_prod "roll prod's programs back onto release $to" "$yes"
   # Rolled first, recorded once every program runs it.
@@ -708,19 +937,26 @@ app_rollback() {
   log "rollback complete: $to is the deployment's release again (was $(jq -r '.id // "none"' <<<"$current"); the nightly backup runs its backup revision)"
 }
 
+# Every program's service, in PROGRAMS' order: the deployment's cluster's, and
+# hostd from the fleet cluster (its desired count is the machines' number).
 app_status() {
   aws_auth
   infra_env_load
-  local cluster manifest
+  local cluster fleet manifest scaled
   cluster="$(ecs_cluster)"
+  fleet="$(fleet_cluster)"
   manifest="$(release_current_manifest)"
-  log "deployment $DEP, cluster $cluster, release $(jq -r '.id // "none"' <<<"$manifest")"
-  aws ecs describe-services --cluster "$cluster" --services "${PROGRAMS[@]}" --output json \
-    | jq -r --argjson m "$manifest" '
+  run_programs
+  mapfile -t scaled < <(scaled_programs)
+  log "deployment $DEP, cluster $cluster${fleet:+, fleet cluster $fleet}, release $(jq -r '.id // "none"' <<<"$manifest")"
+  {
+    aws ecs describe-services --cluster "$cluster" --services "${scaled[@]}" --output json
+    [ -z "$fleet" ] || aws ecs describe-services --cluster "$fleet" --services "${DAEMON_PROGRAMS[@]}" --output json
+  } | jq -rs --argjson m "$manifest" --arg order "${RUN_PROGRAMS[*]}" '
         def pad($n): tostring | if length < $n then . + (" " * ($n - length)) else . end;
         def row: [.[0] | pad(12)] + [.[1], .[2], .[3] | pad(9)] + [.[4] | pad(13)] + [.[5] | pad(40)] + [.[6] | tostring] | join("");
         (["PROGRAM", "DESIRED", "RUNNING", "PENDING", "ROLLOUT", "TASK DEFINITION", "THE RELEASE'"'"'S"] | row),
-        (.services[] | . as $s
+        ([.[].services[]] | sort_by(.serviceName as $n | $order | split(" ") | index($n)) | .[] | . as $s
           | [.serviceName, .desiredCount, .runningCount, .pendingCount,
              ([.deployments[] | select(.status == "PRIMARY")][0].rolloutState // "?"),
              (.taskDefinition | split("/") | last),
@@ -739,22 +975,26 @@ app_logs() {
   done
   aws_auth
   infra_env_load
-  local streams=()
+  local streams=() group
+  group="$(infra_get OPENNOVA_LOG_GROUP)"
   if [ -n "$program" ]; then
     [ "$program" = backup ] || program="$(program_name "$program")" || exit 1
     streams=(--log-stream-name-prefix "$program/")
+    # hostd logs to the machines' group, a stream per task: hostd/hostd/<task id>.
+    if is_daemon "$program"; then group="$(infra_get OPENNOVA_MACHINES_LOG_GROUP)"; fi
   fi
-  aws logs tail "$(infra_get OPENNOVA_LOG_GROUP)" ${streams[@]+"${streams[@]}"} --since "$since" --format short ${follow[@]+"${follow[@]}"}
+  aws logs tail "$group" ${streams[@]+"${streams[@]}"} --since "$since" --format short ${follow[@]+"${follow[@]}"}
 }
 
 # app shell PROGRAM [CONTAINER]: a root shell in a running task's container
 # (ECS Exec; web's second container is `portal`).
 app_shell() {
   if [ $# -lt 1 ] || [ $# -gt 2 ]; then
-    die "app shell takes a PROGRAM (gate, lobby, web, controller, worker) and, for web, a CONTAINER (web, portal)"
+    die "app shell takes a PROGRAM (gate, lobby, web, fleet, worker, data) and, for web, a CONTAINER (web, portal)"
   fi
   local program container
   program="$(program_name "$1")" || exit 1
+  ! is_daemon "$program" || die "$program runs a task on every machine: ./deploy/run.sh$DEP_FLAG fleet shell MACHINE opens a shell in one machine's"
   container="${2:-$program}"
   case "$program/$container" in
     web/portal|"$program/$program") ;;
@@ -767,8 +1007,12 @@ app_shell() {
 
 # app down / up: every service's count to 0, the counts kept in SSM
 # (.../down) and Application Auto Scaling held off meanwhile; up puts them
-# back. down keeps an earlier record (a second down records no zeros).
-DOWN_ORDER=(gate lobby web controller worker)
+# back, a program the record names no count for (one added since the down) at
+# its desired count (OPENNOVA_PROGRAM_COUNTS). down keeps an earlier record (a
+# second down records no zeros). The reverse of the deploy's order. A daemon
+# (hostd) has no count: down and up leave it running on the machines, their
+# servers with it, and it syncs again once the fleet program is back.
+DOWN_ORDER=(gate lobby web fleet hostd data worker)
 scaling_suspended() {
   local program="$1" on="$2"
   aws application-autoscaling register-scalable-target --service-namespace ecs \
@@ -798,14 +1042,16 @@ down_record() {
 }
 
 programs_down() {
-  local cluster record counts program rc=0
+  local cluster record counts program scaled rc=0
   cluster="$(ecs_cluster)"
+  run_programs
+  mapfile -t scaled < <(scaled_programs)
   record="$(down_record)" || rc=$?
   [ "$rc" -ne 1 ] || die "the programs' down marker does not read; nothing was changed"
   if [ "$rc" -eq 0 ]; then
     log "the programs are down already (since $(jq -r '.since // "?"' <<<"$record")); their counts stay recorded"
   else
-    counts="$(aws ecs describe-services --cluster "$cluster" --services "${PROGRAMS[@]}" --output json \
+    counts="$(aws ecs describe-services --cluster "$cluster" --services "${scaled[@]}" --output json \
                 | jq -c '[.services[] | {(.serviceName): .desiredCount}] | add')" \
       || die "reading the services' counts failed"
     aws ssm put-parameter --name "$SSM_PREFIX/down" --type String --overwrite \
@@ -813,32 +1059,42 @@ programs_down() {
       || die "recording the counts in $SSM_PREFIX/down failed; nothing was changed"
   fi
   for program in "${DOWN_ORDER[@]}"; do
+    if is_daemon "$program"; then
+      log "  $program: a daemon on the machines, left running"
+      continue
+    fi
     scaling_suspended "$program" true
     aws ecs update-service --cluster "$cluster" --service "$program" --desired-count 0 --output text --query 'service.serviceName' >/dev/null \
       || die "stopping $program failed"
     log "  $program: 0 tasks"
   done
-  aws ecs wait services-stable --cluster "$cluster" --services "${PROGRAMS[@]}" \
+  aws ecs wait services-stable --cluster "$cluster" --services "${scaled[@]}" \
     || err "not every service settled at 0 within the waiter's 10 minutes (app status)"
 }
 
 programs_up() {
-  local cluster record count program
+  local cluster record count program scaled
   cluster="$(ecs_cluster)"
+  run_programs
+  mapfile -t scaled < <(scaled_programs)
   local rc=0
   record="$(down_record)" || rc=$?
   [ "$rc" -ne 1 ] || die "the programs' down marker does not read; nothing was changed"
   [ "$rc" -eq 0 ] \
     || die "no counts recorded ($SSM_PREFIX/down): the programs are not down (app status); infra apply sets a missing service's count"
-  for program in "${PROGRAMS[@]}"; do
-    count="$(jq -r --arg p "$program" '.counts[$p] // 1' <<<"$record")"
+  for program in "${scaled[@]}"; do
+    count="$(jq -r --arg p "$program" '.counts[$p] // empty' <<<"$record")"
+    if [ -z "$count" ]; then
+      count="$(jq -r '.desired // empty' <<<"$(program_counts "$program")")"
+      [ -n "$count" ] || die "the down record names no count for $program, nor does infra.env (infra apply); nothing more was started"
+    fi
     aws ecs update-service --cluster "$cluster" --service "$program" --desired-count "$count" --output text --query 'service.serviceName' >/dev/null \
       || die "starting $program failed"
     scaling_suspended "$program" false
     log "  $program: $count task(s)"
   done
   aws ssm delete-parameter --name "$SSM_PREFIX/down" >/dev/null || err "deleting $SSM_PREFIX/down failed: delete it by hand"
-  aws ecs wait services-stable --cluster "$cluster" --services "${PROGRAMS[@]}" \
+  aws ecs wait services-stable --cluster "$cluster" --services "${scaled[@]}" \
     || { err "not every service came back within the waiter's 10 minutes (app status)"; return 1; }
 }
 
@@ -864,12 +1120,17 @@ cmd_app() {
       app_status ;;
     restart)
       take_yes "$@"
-      local program="" p targets=("${PROGRAMS[@]}")
+      local program="" p targets=()
       [ "${#OPT_REST[@]}" -le 1 ] || die "app restart takes one PROGRAM, or none for every program"
       [ "${#OPT_REST[@]}" -eq 0 ] || program="$(program_name "${OPT_REST[0]}")" || exit 1
-      [ -z "$program" ] || targets=("$program")
       confirm_prod "restart ${program:-every program}'s tasks (new tasks, the same revision)" "$OPT_YES"
       aws_auth
+      run_programs
+      targets=("${RUN_PROGRAMS[@]}")
+      if [ -n "$program" ]; then
+        [[ " ${RUN_PROGRAMS[*]} " == *" $program "* ]] || die "$program does not run in $DEP (hosting is off: no fleet cluster)"
+        targets=("$program")
+      fi
       for p in "${targets[@]}"; do
         service_roll "$p" "$(service_task_definition "$p")" 1 || die "$p did not come back (app status)"
       done ;;

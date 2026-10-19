@@ -1,8 +1,14 @@
 // opennova-hostd's agent (apps/hostd/agent.h) against an in-process fake of the service's
 // two routes and a fake container runtime, on a hand-stepped clock: the bootstrap (the
-// one-time token redeemed once, the reply saved owner-only and read back by the next
-// agent with no token, the spent token file gone), the sync (every container reported
-// with its stats and its slot's egress; the desired ones started on their slots with
+// one-time token redeemed once, the reply saved owner-only in the agent's own format,
+// apps/hostd/saved_machine.h, and read back by the next agent with no token, the spent
+// token file gone; a service of the next protocol refusing the restarted agent's syncs
+// never strands it), the sync (its envelope, the agent's own image among it; every
+// container reported with its stats and its slot's counts; the machine's image, the
+// agent's log stream, its use from fixture /proc files once read twice, every tree it
+// holds; a running server's tick health from its fresh --stats-file, an exited one's
+// --exit-file line, what a starting one waits for; the desired ones started on their
+// slots with
 // their files written 0600 and their environment in a file that lives for the start
 // alone; the ones left out stopped, killed past the stop timeout, removed and their
 // directories wiped; a slot's next container started only once its previous one is
@@ -17,14 +23,20 @@
 // shares, the refusals (no files, a slot the machine lacks), the busy cadence, the
 // drain flag, and every way a sync can fail (the service down, a refusal, a reply that
 // does not read or speaks another protocol, the runtime unlistable), none of which stops
-// or removes anything. The planner (apps/hostd/reconcile.h) and the slots' directories
-// (apps/hostd/slot_files.h) are checked on their own first. Neither the secret nor a
+// or removes anything; the files sent again to a restarted agent while its container
+// waits, and the machine's serve images pruned (the ones in use and the two the replies
+// named last kept). The planner (apps/hostd/reconcile.h) and the slots' directories
+// (apps/hostd/slot_files.h, the files a server writes there for the agent read with no
+// link followed and no FIFO waited on, a regular file within the bound alone) are checked
+// on their own first; a FIFO and a link in the servers' files' places read as none in a
+// pass too. Neither the secret nor a
 // file's bytes reach the log. The real link (HttpServiceLink) tries each address the
-// service's name lists until one takes the connection (a controller's standby, listed beside
+// service's name lists until one takes the connection (the fleet's standby, listed beside
 // the leader while it is replaced, takes none), against a test server on loopback.
 
 #include "agent.h"
 #include "reconcile.h"
+#include "saved_machine.h"
 #include "slot_files.h"
 #include "tree_store.h"
 
@@ -34,7 +46,9 @@
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -61,6 +75,8 @@ namespace {
 const std::string kToken = "TokenTokenTokenTokenTokenTokenTokenTokenTokenTok"; // 48
 const std::string kSecret = "SecretSecretSecretSecretSecretSecretSecretSecret"; // 48
 const std::string kImage = "ghcr.io/opennova-net/opennova-serve@sha256:00112233";
+// The agent's own image, as its ECS task definition pins it.
+const std::string kHostdImage = "ghcr.io/opennova-net/opennova-hostd@sha256:feedface";
 const std::string kCredentials = "NOVAWORLD_USER srv-1\nNOVAWORLD_PASS hunter2hunter2\n";
 constexpr int64_t kMachine = 7;
 
@@ -198,6 +214,7 @@ hosted::DesiredContainer desired(int64_t server, int64_t generation, int slot) {
 	d.args = { "/HOST", "server.host", "--credentials", "credentials.txt", "/game", "jo" };
 	d.files = std::map<std::string, std::string>{ { "server.host", "GameName \"Caf\xE9\"\r\n" },
 		{ "credentials.txt", kCredentials } };
+	d.log_stream = hosted::hosted_log_stream(server, generation);
 	return d;
 }
 
@@ -211,6 +228,9 @@ struct FakeService {
 	bool token_spent = false;
 	int redeems = 0;
 	bool lose_bootstrap_reply = false; // the next redeem is made, its reply lost
+	// The service's files rule: sent until the agent reports a container running or
+	// exited (true), or the older once-reported rule the agent's own copy covers (false).
+	bool files_until_running = false;
 	bool drain = false;
 	bool down = false;
 	int refuse = 0; // a sync's status instead of 200
@@ -254,7 +274,8 @@ struct FakeService {
 		}
 		++syncs;
 		for (const hosted::ContainerReport &c : last.containers)
-			reported_once.insert(c.name);
+			if (!files_until_running || c.state != ContainerState::Starting)
+				reported_once.insert(c.name);
 		if (refuse)
 			return answer(refuse, "");
 		if (!raw_reply.empty())
@@ -307,6 +328,7 @@ class FakeRuntime : public hostd::ContainerRuntime {
 public:
 	std::map<std::string, hostd::ContainerInfo> containers;
 	std::vector<std::string> calls; // "run <name>", "stop <name>", "pull <image>", ...
+	std::vector<std::string> image_calls; // the prune's: "images <repository>", "rmi <image>"
 	std::vector<Started> started;
 	std::map<std::string, int> run_fails; // name -> the CLI's exit code
 	std::map<std::string, hostd::ContainerStats> stat_values;
@@ -412,6 +434,7 @@ public:
 			return false;
 		}
 		hostd::ContainerInfo c = info(spec.name, spec.slot, ContainerState::Running);
+		c.image = spec.image;
 		c.started_at = now_s;
 		containers[spec.name] = c;
 		return true;
@@ -444,6 +467,27 @@ public:
 		containers.erase(it);
 		return true;
 	}
+	bool list_images(const std::string &repository, std::vector<std::string> &out, int timeout_ms,
+			std::string &) override {
+		took(timeout_ms);
+		image_calls.push_back("images " + repository);
+		out.clear();
+		for (const std::string &image : images)
+			if (image.rfind(repository + "@", 0) == 0)
+				out.push_back(image);
+		return true;
+	}
+	bool remove_image(const std::string &image, int timeout_ms, std::string &error) override {
+		took(timeout_ms);
+		image_calls.push_back("rmi " + image);
+		for (const auto &c : containers)
+			if (c.second.image == image) {
+				error = "conflict: container " + c.first + " is using " + image;
+				return false;
+			}
+		images.erase(image);
+		return true;
+	}
 	void end(const std::string &name, int code, bool oom = false) {
 		auto it = containers.find(name);
 		if (it == containers.end())
@@ -467,18 +511,18 @@ public:
 	}
 };
 
-class FakeEgress : public hostd::EgressSource {
+class FakeCounters : public hostd::SlotCounters {
 public:
-	std::map<int, uint64_t> values;
+	std::map<int, hostd::SlotCount> values = { { 0, { 1000, 10 } }, { 1, { 2000, 20 } } };
 	bool fail_read = false;
 	int ensures = 0;
 	bool ensure(std::string &) override {
 		++ensures;
 		return true;
 	}
-	bool read(std::map<int, uint64_t> &out, std::string &error) override {
+	bool read(std::map<int, hostd::SlotCount> &out, std::string &error) override {
 		if (fail_read) {
-			error = "OPENNOVA-EGRESS lacks slot 0's rule";
+			error = "the table opennova lacks a slot's counters";
 			return false;
 		}
 		out = values;
@@ -486,18 +530,32 @@ public:
 	}
 };
 
+// The kernel's files a machine's use is read from (core/proc_stats.h): two CPUs that ran
+// `busy` of `total` ticks, 4 GiB of memory with `available` free, and two interfaces.
+void write_proc(const std::string &root, uint64_t busy, uint64_t total, uint64_t available_kb,
+		uint64_t net_in, uint64_t net_out) {
+	fs::create_directories(root + "/proc/net");
+	std::ofstream(root + "/proc/stat")
+			<< "cpu  " << busy << " 0 0 " << total - busy << " 0 0 0 0 0 0\n";
+	std::ofstream(root + "/proc/meminfo")
+			<< "MemTotal: 4194304 kB\nMemFree: 1 kB\nMemAvailable: " << available_kb << " kB\n";
+	std::ofstream(root + "/proc/net/dev")
+			<< "Inter-|\n face |\n    lo: 99 1 0 0 0 0 0 0 99 1 0 0 0 0 0 0\n  ens5: " << net_in
+			<< " 1 0 0 0 0 0 0 " << net_out << " 1 0 0 0 0 0 0\n";
+}
+
 // One machine: the dirs, the fakes and an agent over them. Tree 1 is on the
 // machine from the start (found by the store's scan).
 struct Rig {
 	test_temp::TempDir temp;
-	std::string state_dir, scratch_dir, slots_root, trees_root, token_file;
+	std::string state_dir, scratch_dir, slots_root, trees_root, token_file, proc_root;
 	FakeService service;
 	FakeLink link{ service };
 	FakeRuntime runtime;
 	FakeFetcher fetcher;
 	std::unique_ptr<hostd::SlotFiles> slots;
 	std::unique_ptr<hostd::TreeStore> trees;
-	FakeEgress *egress = nullptr; // the agent's, once it bootstrapped
+	FakeCounters counters;
 	uint64_t clock_ms = 1000;
 	std::unique_ptr<hostd::Agent> agent;
 
@@ -507,6 +565,8 @@ struct Rig {
 		slots_root = temp.file("slots");
 		trees_root = temp.file("trees");
 		token_file = temp.file("hostd.token");
+		proc_root = temp.file("proc-root");
+		write_proc(proc_root, 100, 1000, 3145728, 5000, 7000);
 		fs::create_directories(scratch_dir);
 		if (with_token)
 			std::ofstream(token_file) << kToken << "\n";
@@ -525,18 +585,15 @@ struct Rig {
 		hostd::AgentConfig config;
 		config.machine_id = kMachine;
 		config.agent_version = "test-1";
+		config.agent_image = kHostdImage;
 		config.state_dir = state_dir;
 		config.scratch_dir = scratch_dir;
 		config.token_file = token_file;
+		config.image_id = "ami-0123456789abcdef0";
+		config.log_stream = "hostd/hostd/0123456789abcdef";
+		config.proc_root = proc_root;
 		agent = std::make_unique<hostd::Agent>(
-				config, link, runtime, *slots, *trees,
-				[this](int) {
-					auto made = std::make_unique<FakeEgress>();
-					egress = made.get();
-					egress->values = { { 0, 1000 }, { 1, 2000 } };
-					return made;
-				},
-				[this] { return clock_ms; });
+				config, link, runtime, *slots, *trees, &counters, [this] { return clock_ms; });
 	}
 
 	int step() { return agent->step(); }
@@ -714,6 +771,40 @@ int test_slot_files() {
 	TEST_EXPECT(!slots.prepare(2, hosted::slot_uid(2), { { "../escape", "x" } }, error));
 	TEST_EXPECT(
 			!slots.prepare(32, hosted::slot_uid(0), {}, error) && !slots.prepare(-1, 0, {}, error));
+
+	// What a server writes for the agent, read as root reads what the slot's user
+	// controls: a regular file within the bound, its time its own; none, a link to
+	// another file, a FIFO (which never blocks the read), a directory, a sparse file
+	// far past the bound and one a byte past it each read as nothing written.
+	TEST_EXPECT(slots.prepare(3, hosted::slot_uid(3), {}, error));
+	const std::string at = slots.dir(3);
+	std::string text = "stale";
+	std::chrono::system_clock::time_point written;
+	TEST_EXPECT(!slots.read_written(3, hosted::kExitFileName, text, written) && text.empty());
+	std::ofstream(at + "/exit.txt") << "the session ended\n";
+	const auto now = std::chrono::system_clock::now();
+	TEST_EXPECT(slots.read_written(3, hosted::kExitFileName, text, written) &&
+			text == "the session ended\n" && written > now - std::chrono::minutes(1));
+	fs::last_write_time(at + "/exit.txt", fs::file_time_type::clock::now() - std::chrono::minutes(4));
+	TEST_EXPECT(slots.read_written(3, hosted::kExitFileName, text, written) &&
+			written < now - std::chrono::minutes(3));
+	fs::remove(at + "/exit.txt");
+	fs::create_symlink(outside, at + "/exit.txt");
+	TEST_EXPECT(!slots.read_written(3, hosted::kExitFileName, text, written) && text.empty());
+	TEST_EXPECT(::mkfifo((at + "/" + hosted::kTickStatsFileName).c_str(), 0600) == 0);
+	TEST_EXPECT(!slots.read_written(3, hosted::kTickStatsFileName, text, written));
+	fs::create_directory(at + "/dir");
+	TEST_EXPECT(!slots.read_written(3, "dir", text, written));
+	std::ofstream(at + "/sparse");
+	fs::resize_file(at + "/sparse", uintmax_t(1) << 30);
+	TEST_EXPECT(!slots.read_written(3, "sparse", text, written) && text.empty());
+	std::ofstream(at + "/bound") << std::string(hostd::SlotFiles::kMaxWrittenBytes, 'x');
+	TEST_EXPECT(slots.read_written(3, "bound", text, written) &&
+			text.size() == hostd::SlotFiles::kMaxWrittenBytes);
+	std::ofstream(at + "/bound", std::ios::app) << "x";
+	TEST_EXPECT(!slots.read_written(3, "bound", text, written));
+	TEST_EXPECT(!slots.read_written(32, hosted::kExitFileName, text, written));
+	TEST_EXPECT(read_text(outside) == "keep" && slots.wipe(3, error) && !fs::exists(at));
 	return 0;
 }
 
@@ -746,8 +837,17 @@ int test_bootstrap() {
 	// Saved owner-only; the spent token gone.
 	TEST_EXPECT(mode_of(rig.agent->saved_path()) == 0600 && !fs::exists(rig.token_file));
 	TEST_EXPECT(rig.agent->saved_path() == rig.state_dir + "/machine-7.json");
-	// The egress counters are made for the machine's slots and put in place first.
-	TEST_EXPECT(rig.egress && rig.egress->ensures == 1);
+	// The slots' counters are put in place at the first pass.
+	TEST_EXPECT(rig.counters.ensures == 1);
+	// The saved file is the agent's own: no protocol in it.
+	hostd::SavedMachine saved;
+	std::string error;
+	TEST_EXPECT(hostd::decode_saved_machine(read_text(rig.agent->saved_path()), saved, error));
+	TEST_EXPECT(saved.machine_id == kMachine && saved.agent_secret == kSecret &&
+			saved.serve_image == kImage && saved.slots == 4);
+	TEST_EXPECT(read_text(rig.agent->saved_path()).find("protocol") == std::string::npos);
+	TEST_EXPECT(!hostd::decode_saved_machine(
+			hosted::encode_machine_bootstrap(rig.service.machine), saved, error));
 
 	// A restarted agent reads what was saved: no token, no second bootstrap.
 	const int posts = rig.link.posts;
@@ -756,6 +856,35 @@ int test_bootstrap() {
 			rig.agent->machine().agent_secret == kSecret);
 	rig.step();
 	TEST_EXPECT(rig.service.syncs == 2 && rig.agent->last_sync_ok());
+
+	// Across a protocol bump: the service now speaks the next protocol and holds the
+	// machine (the bare 404), its replies another protocol's. A restarted agent still
+	// reads its saved bootstrap, never asks for the spent token again, and keeps syncing
+	// with its secret, acting on nothing.
+	rig.make_agent();
+	rig.service.refuse = 404;
+	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs && rig.agent->bootstrapped() &&
+			!rig.agent->last_sync_ok());
+	rig.service.refuse = 0;
+	rig.service.raw_reply = "{\"protocol\": " + std::to_string(hosted::kAgentProtocol + 1) +
+			", \"drain\": false, \"desired\": [], \"trees\": {}}";
+	rig.make_agent();
+	rig.step();
+	TEST_EXPECT(rig.agent->bootstrapped() && !rig.agent->last_sync_ok() &&
+			rig.service.redeems == 2 && rig.link.posts == posts + 3);
+	rig.service.raw_reply.clear();
+	rig.step();
+	TEST_EXPECT(rig.agent->last_sync_ok());
+	// The envelope opens every sync: the protocol, the build and the agent's own image.
+	hosted::AgentEnvelope envelope;
+	TEST_EXPECT(hosted::decode_agent_envelope(rig.service.bodies.back(), envelope, error));
+	TEST_EXPECT(envelope.protocol == hosted::kAgentProtocol && envelope.agent_version == "test-1" &&
+			envelope.agent_image == kHostdImage && rig.service.last.agent_image == kHostdImage);
+	// A saved file of another machine is not this one's.
+	saved.machine_id = kMachine + 1;
+	std::ofstream(rig.agent->saved_path(), std::ios::trunc) << hostd::encode_saved_machine(saved);
+	rig.make_agent();
+	TEST_EXPECT(!rig.agent->bootstrap());
 
 	// A token the service refuses (spent): no bootstrap, the file left as it was, and
 	// each try twice as late as the one before, up to five minutes.
@@ -793,6 +922,8 @@ int test_sync() {
 	TEST_EXPECT(rig.fetcher.starts.empty());
 	TEST_EXPECT(a.spec.args == rig.service.desired[0].args && a.spec.env_file.empty());
 	TEST_EXPECT(a.spec.cpus == 1.0 && a.spec.memory_mb == 512 && a.spec.pids == 128);
+	// Its output goes to the stream the service named.
+	TEST_EXPECT(a.spec.log_stream == "1/g1" && rig.runtime.started[1].spec.log_stream == "2/g1");
 	TEST_EXPECT(a.dir_mode == 0700 && a.files.size() == 2 &&
 			a.files.at("credentials.txt") == kCredentials);
 	TEST_EXPECT(a.file_modes.at("server.host") == 0600 &&
@@ -816,24 +947,32 @@ int test_sync() {
 	TEST_EXPECT(
 			ra->cpu_percent == 12.5 && ra->memory_bytes == 47710208u && ra->egress_bytes == 1000u);
 	TEST_EXPECT(rb->egress_bytes == 2000u && rb->cpu_percent == 0.0 && !rb->exit_code);
-	// The machine's one tree stands present in its store; the report says nothing of it.
+	TEST_EXPECT(ra->net_in_bytes == 10u && rb->net_in_bytes == 20u &&
+			ra->waiting == hosted::ContainerWait::None);
+	// The machine's one tree stands present in its store, and the report says so.
 	TEST_EXPECT(rig.trees->state_of(1) && rig.trees->state_of(1)->state == hostd::TreeFetchState::Present &&
 			rig.trees->state_of(1)->bytes == 26u);
-	TEST_EXPECT(rig.service.bodies.back().find("trees") == std::string::npos);
+	TEST_EXPECT(rig.service.last.trees.size() == 1 &&
+			rig.service.last.trees.at(1).state == hosted::TreeReportState::Ready &&
+			rig.service.last.trees.at(1).bytes == 26u &&
+			rig.service.last.trees.at(1).reason.empty());
+	TEST_EXPECT(rig.service.last.image_id == "ami-0123456789abcdef0" &&
+			rig.service.last.log_stream == "hostd/hostd/0123456789abcdef");
 	rig.clock_ms += 5000;
 	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs && rig.runtime.calls.size() == 2);
 
-	// Its egress no longer reads: the last counts stand.
-	rig.egress->fail_read = true;
-	rig.egress->values = { { 0, 5 } };
+	// Its counters no longer read: the last counts stand.
+	rig.counters.fail_read = true;
+	rig.counters.values = { { 0, { 5, 5 } } };
 	rig.clock_ms += 5000;
 	rig.step();
 	TEST_EXPECT(rig.service.reported("srv-1-g1")->egress_bytes == 1000u);
-	rig.egress->fail_read = false;
-	rig.egress->values = { { 0, 1500 }, { 1, 2500 } };
+	rig.counters.fail_read = false;
+	rig.counters.values = { { 0, { 1500, 15 } }, { 1, { 2500, 25 } } };
 	rig.clock_ms += 5000;
 	rig.step();
-	TEST_EXPECT(rig.service.reported("srv-1-g1")->egress_bytes == 1500u);
+	TEST_EXPECT(rig.service.reported("srv-1-g1")->egress_bytes == 1500u &&
+			rig.service.reported("srv-1-g1")->net_in_bytes == 15u);
 
 	// The service drops srv-2: asked to stop once, killed once the stop timeout passed,
 	// then removed with its directory.
@@ -940,7 +1079,8 @@ int test_pull() {
 	const hosted::ContainerReport *a = rig.service.reported("srv-1-g1");
 	const hosted::ContainerReport *b = rig.service.reported("srv-2-g1");
 	TEST_EXPECT(a && b && a->state == ContainerState::Starting && a->slot == 0 && b->slot == 1);
-	TEST_EXPECT(!a->exit_code && !a->started_at);
+	TEST_EXPECT(!a->exit_code && !a->started_at && a->waiting == hosted::ContainerWait::Image &&
+			b->waiting == hosted::ContainerWait::Image);
 	rig.clock_ms += 60 * 1000;
 	rig.step();
 	TEST_EXPECT(rig.runtime.count("pull " + newer) == 1 && rig.runtime.started.empty());
@@ -988,6 +1128,85 @@ int test_pull() {
 	const hosted::ContainerReport *e = rig.service.reported("srv-4-g1");
 	TEST_EXPECT(e && e->state == ContainerState::Exited && e->exit_code == 125);
 	TEST_EXPECT(rig.service.bad_reports == 0);
+	return 0;
+}
+
+// An agent replaced while its container waits for its image (the fleet's daemon rolled
+// mid-pull): the service sends the files until the container is reported running or
+// exited, so the new agent, which kept none, still starts it.
+int test_files_while_waiting() {
+	const std::string newer = "ghcr.io/opennova-net/opennova-serve@sha256:44556677";
+	Rig rig("hostd_agent_files_waiting");
+	rig.service.files_until_running = true;
+	rig.service.desired = { desired(1, 1, 0) };
+	rig.service.desired[0].image = newer;
+	rig.step();
+	rig.step();
+	TEST_EXPECT(rig.service.reported("srv-1-g1")->state == ContainerState::Starting);
+	// Replaced: the new agent holds no files of its own, the pull under way lost.
+	rig.make_agent();
+	rig.runtime.pulls.clear();
+	rig.step();
+	TEST_EXPECT(rig.runtime.count("pull " + newer) == 2);
+	rig.runtime.pulls[newer] = hostd::PullState::Done;
+	rig.step();
+	TEST_EXPECT(rig.runtime.started.size() == 1 &&
+			rig.runtime.started[0].files.at("credentials.txt") == kCredentials);
+	TEST_EXPECT(g_log.find("srv-1-g1 cannot start here") == std::string::npos);
+	return 0;
+}
+
+// The machine's serve images: at a pass with no work, at most every
+// kImagePruneIntervalMs, each image of the repositories the replies named that no
+// container uses goes, but the two the replies named last (current and previous).
+int test_image_prune() {
+	const std::string repo = "ghcr.io/opennova-net/opennova-serve";
+	const std::string old1 = repo + "@sha256:0001";
+	const std::string old2 = repo + "@sha256:0002";
+	const std::string next = repo + "@sha256:0003";
+	const std::string third = repo + "@sha256:0004";
+	const std::string other = "ghcr.io/opennova-net/opennova-hostd@sha256:feedface";
+	Rig rig("hostd_agent_prune");
+	rig.runtime.exit_on_stop = true;
+	const auto pruned = [&rig](const std::string &call) {
+		return std::count(rig.runtime.image_calls.begin(), rig.runtime.image_calls.end(), call);
+	};
+	// The passes until one has no work.
+	const auto settle = [&rig] {
+		for (int i = 0; i < 8 && rig.step() == hosted::kBusySyncIntervalMs; ++i)
+			rig.clock_ms += 1000;
+	};
+	rig.runtime.images = { kImage, old1, old2, other };
+	rig.service.desired = { desired(1, 1, 0), desired(2, 1, 1) };
+	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs); // the starts
+	TEST_EXPECT(pruned("images " + repo) == 0);
+	rig.step(); // no work: the first prune
+	TEST_EXPECT(pruned("images " + repo) == 1);
+	TEST_EXPECT(pruned("rmi " + old1) == 1 && pruned("rmi " + old2) == 1);
+	TEST_EXPECT(pruned("rmi " + kImage) == 0 && pruned("rmi " + other) == 0);
+	TEST_EXPECT(rig.runtime.images == (std::set<std::string>{ kImage, other }));
+	// Not again before its interval.
+	rig.step();
+	TEST_EXPECT(pruned("images " + repo) == 1);
+	// A new release: the server on slot 0 starts again on the next image, the one on
+	// slot 1 ends. kImage, the previous, stays while it is among the two named last.
+	rig.runtime.images.insert(next);
+	rig.service.desired = { desired(1, 2, 0) };
+	rig.service.desired[0].image = next;
+	settle();
+	TEST_EXPECT(rig.runtime.containers.count("srv-1-g2") && rig.runtime.containers.size() == 1);
+	rig.clock_ms += hostd::Agent::kImagePruneIntervalMs;
+	settle();
+	TEST_EXPECT(pruned("images " + repo) == 2 && rig.runtime.images.count(kImage));
+	// A third: kImage is no longer among the two named last, and goes.
+	rig.runtime.images.insert(third);
+	rig.service.desired = { desired(1, 3, 0) };
+	rig.service.desired[0].image = third;
+	settle();
+	rig.clock_ms += hostd::Agent::kImagePruneIntervalMs;
+	settle();
+	TEST_EXPECT(pruned("images " + repo) == 3 && pruned("rmi " + kImage) == 1);
+	TEST_EXPECT(rig.runtime.images == (std::set<std::string>{ next, third, other }));
 	return 0;
 }
 
@@ -1048,9 +1267,17 @@ int test_trees() {
 	// Reported starting on its slot, the tree fetching in the store.
 	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
 	const hosted::ContainerReport *a = rig.service.reported("srv-1-g1");
-	TEST_EXPECT(a && a->state == ContainerState::Starting && a->slot == 0 && !a->exit_code);
+	TEST_EXPECT(a && a->state == ContainerState::Starting && a->slot == 0 && !a->exit_code &&
+			a->waiting == hosted::ContainerWait::Trees);
 	TEST_EXPECT(rig.trees->state_of(1) && rig.trees->state_of(2) &&
 			rig.trees->state_of(2)->state == hostd::TreeFetchState::Fetching);
+	// The report names the fetch, its bytes so far and its try.
+	TEST_EXPECT(rig.service.last.trees.count(2) == 1 &&
+			rig.service.last.trees.at(2).state == hosted::TreeReportState::Fetching &&
+			rig.service.last.trees.at(2).tries == 1 && rig.service.last.trees.at(2).bytes == 0u);
+	std::ofstream(rig.trees_root + "/2.partial/jox01.pff") << "ESCAL";
+	rig.step();
+	TEST_EXPECT(rig.service.last.trees.at(2).bytes == 5u);
 	TEST_EXPECT(g_log.find("srv-1-g1 waits for its data (tree 1 and tree 2) to fetch") !=
 			std::string::npos);
 	// Fetched: checked, and the container starts with both binds.
@@ -1085,6 +1312,11 @@ int test_trees() {
 	const hosted::ContainerReport *b = rig.service.reported("srv-2-g1");
 	TEST_EXPECT(b && b->state == ContainerState::Starting && b->slot == 1 && !b->exit_code &&
 			b->reason.empty());
+	// A failure with a try left is still a fetch, its reason riding along.
+	TEST_EXPECT(rig.service.last.trees.at(3).state == hosted::TreeReportState::Fetching &&
+			rig.service.last.trees.at(3).tries == 1 &&
+			rig.service.last.trees.at(3).reason ==
+					"aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey)");
 	TEST_EXPECT(rig.trees->state_of(3) &&
 			rig.trees->state_of(3)->state == hostd::TreeFetchState::Failed &&
 			rig.trees->state_of(3)->error ==
@@ -1113,6 +1345,8 @@ int test_trees() {
 					"its data could not be fetched: aws s3 sync exited 1: fatal error: An error "
 					"occurred (NoSuchKey) again");
 	TEST_EXPECT(rig.runtime.count("run srv-2-g1") == 0 && rig.fetcher.starts.size() == 4);
+	TEST_EXPECT(rig.service.last.trees.at(3).state == hosted::TreeReportState::Failed &&
+			rig.service.last.trees.at(3).tries == 3);
 	TEST_EXPECT(rig.trees->state_of(3)->error ==
 			"aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey) again");
 	TEST_EXPECT(
@@ -1147,6 +1381,89 @@ int test_trees() {
 	TEST_EXPECT(!fs::exists(rig.trees_root + "/2") && fs::is_directory(rig.trees_root + "/1"));
 	rig.step();
 	TEST_EXPECT(rig.trees->standings().size() == 1 && rig.trees->state_of(1));
+	TEST_EXPECT(rig.service.bad_reports == 0);
+	return 0;
+}
+
+// What the reports say of the machine and of each server beyond the runtime's view: the
+// machine's use once read twice (the CPU busy between the readings), a running server's
+// tick health while its --stats-file is fresh, an exited one's --exit-file line.
+int test_machine_report() {
+	Rig rig("hostd_agent_machine");
+	rig.service.desired = { desired(1, 1, 0), desired(2, 1, 1) };
+	rig.step();
+	// One reading: no percent yet, so no machine in the report.
+	TEST_EXPECT(!rig.service.last.machine);
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	write_proc(rig.proc_root, 1100, 3000, 2097152, 9000, 15000);
+	rig.step();
+	const std::optional<hosted::MachineStats> m = rig.service.last.machine;
+	TEST_EXPECT(m && m->cpu_percent == 50.0 && m->memory_total_bytes == 4294967296ull &&
+			m->memory_used_bytes == 2147483648ull && m->net_in_bytes == 9000u &&
+			m->net_out_bytes == 15000u);
+	TEST_EXPECT(m && m->disk_total_bytes > 0 && m->disk_free_bytes <= m->disk_total_bytes);
+	// Read again only kStatsIntervalMs on: the last stands between.
+	write_proc(rig.proc_root, 3000, 4000, 2097152, 9500, 15500);
+	rig.clock_ms += 1000;
+	rig.step();
+	TEST_EXPECT(rig.service.last.machine && rig.service.last.machine->net_in_bytes == 9000u);
+	// A file that no longer reads keeps the last good read, and warns once.
+	fs::remove(rig.proc_root + "/proc/meminfo");
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	TEST_EXPECT(rig.service.last.machine && rig.service.last.machine->net_in_bytes == 9000u);
+	TEST_EXPECT(g_log.find("the machine's use does not read") != std::string::npos);
+
+	// The servers' tick health, written in their slots' directories.
+	std::ofstream(rig.slots_root + "/slot-0/tick-stats.json")
+			<< "{\"at\":1792000000,\"p50_ms\":1.25,\"p99_ms\":15.50,\"max_ms\":31.75,"
+			   "\"late\":4,\"frames\":3750}\n";
+	std::ofstream(rig.slots_root + "/slot-1/tick-stats.json") << "not json\n";
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	const hosted::ContainerReport *a = rig.service.reported("srv-1-g1");
+	const hosted::ContainerReport *b = rig.service.reported("srv-2-g1");
+	TEST_EXPECT(a && a->tick && a->tick->p50_ms == 1.25 && a->tick->p99_ms == 15.5 &&
+			a->tick->max_ms == 31.75 && a->tick->late == 4u);
+	TEST_EXPECT(b && !b->tick);
+	// A file left minutes behind (a server stuck) says nothing.
+	fs::last_write_time(rig.slots_root + "/slot-0/tick-stats.json",
+			fs::file_time_type::clock::now() - std::chrono::minutes(4));
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	TEST_EXPECT(!rig.service.reported("srv-1-g1")->tick);
+	// A FIFO in its place (the slot's user may make one) neither holds the pass up
+	// nor reads.
+	fs::remove(rig.slots_root + "/slot-0/tick-stats.json");
+	TEST_EXPECT(::mkfifo((rig.slots_root + "/slot-0/tick-stats.json").c_str(), 0600) == 0);
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	TEST_EXPECT(rig.service.reported("srv-1-g1") && !rig.service.reported("srv-1-g1")->tick);
+	fs::remove(rig.slots_root + "/slot-0/tick-stats.json");
+	TEST_EXPECT(
+			hostd::parse_tick_stats("{\"p50_ms\":1,\"p99_ms\":2,\"max_ms\":3}") == std::nullopt);
+	TEST_EXPECT(hostd::parse_tick_stats("{\"p50_ms\":-1,\"p99_ms\":2,\"max_ms\":3,\"late\":0}") ==
+			std::nullopt);
+
+	// An exit: its --exit-file line rides the report; one that exited 0 wrote none,
+	// and a link in the file's place (to a file root may read) gives no line.
+	std::ofstream(rig.slots_root + "/slot-0/exit.txt")
+			<< "the session ended: the NovaWorld service stopped the hosting\n";
+	const std::string root_only = rig.temp.file("root-only.txt");
+	std::ofstream(root_only) << "a line of root's\n";
+	rig.runtime.end("srv-1-g1", 3);
+	rig.runtime.end("srv-2-g1", 0);
+	rig.step();
+	a = rig.service.reported("srv-1-g1");
+	b = rig.service.reported("srv-2-g1");
+	TEST_EXPECT(a && a->state == ContainerState::Exited && a->exit_code == 3 && !a->tick &&
+			a->reason == "the session ended: the NovaWorld service stopped the hosting");
+	TEST_EXPECT(b && b->exit_code == 0 && b->reason.empty());
+	fs::remove(rig.slots_root + "/slot-0/exit.txt");
+	fs::create_symlink(root_only, rig.slots_root + "/slot-0/exit.txt");
+	rig.step();
+	a = rig.service.reported("srv-1-g1");
+	TEST_EXPECT(a && a->exit_code == 3 && a->reason.empty());
 	TEST_EXPECT(rig.service.bad_reports == 0);
 	return 0;
 }
@@ -1212,7 +1529,7 @@ int test_log_hygiene() {
 } // namespace
 
 // The real link against the service on 127.0.0.1 alone, reached by a name whose addresses
-// the test lists: an address nothing listens on (127.0.0.2, as the controller's standby is
+// the test lists: an address nothing listens on (127.0.0.2, as the fleet's standby is
 // while it is replaced) is passed over for the next, which answers, and the request reaches
 // the service once; with no address taking the connection the call fails at the connect,
 // and with none at all it cannot reach the name.
@@ -1223,13 +1540,13 @@ int test_link_addresses() {
 			std::vector<net::Endpoint> out;
 			for (const std::string &quad : quads) {
 				net::Endpoint ep;
-				if (host == "controller.test" && net::resolve_ipv4(quad, ep, false))
+				if (host == "fleet.test" && net::resolve_ipv4(quad, ep, false))
 					out.push_back(ep);
 			}
 			return out;
 		};
 	};
-	const std::string url = "http://controller.test:" + std::to_string(service.port());
+	const std::string url = "http://fleet.test:" + std::to_string(service.port());
 	{
 		hostd::HttpServiceLink link(url, 2000, listing({ "127.0.0.2", "127.0.0.1" }));
 		const net::HttpReply reply = link.post("/internal/agent/sync", kToken, "{}");
@@ -1247,7 +1564,7 @@ int test_link_addresses() {
 	{
 		hostd::HttpServiceLink link(url, 2000, listing({}));
 		const net::HttpReply reply = link.post("/internal/agent/sync", kToken, "{}");
-		TEST_EXPECT(!reply.transport_ok && reply.error == "cannot reach controller.test");
+		TEST_EXPECT(!reply.transport_ok && reply.error == "cannot reach fleet.test");
 	}
 	// The real resolver: a dotted quad is its one address.
 	const std::vector<net::Endpoint> quad = net::resolve_ipv4_all("127.0.0.1");
@@ -1269,9 +1586,12 @@ int main() {
 		{ "slot_handover", test_slot_handover },
 		{ "failed_start", test_failed_start },
 		{ "pull", test_pull },
+		{ "files_while_waiting", test_files_while_waiting },
+		{ "image_prune", test_image_prune },
 		{ "pass_budget", test_pass_budget },
 		{ "refusals", test_refusals },
 		{ "trees", test_trees },
+		{ "machine_report", test_machine_report },
 		{ "sync_failures", test_sync_failures },
 		{ "log_hygiene", test_log_hygiene },
 		{ "link_addresses", test_link_addresses },

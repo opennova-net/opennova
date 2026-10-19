@@ -3,7 +3,7 @@
 
 import { hostedServer } from './hostedFixtures';
 import type { AdminBillingResponse, BillingSubscriptionRow } from '../types/billing';
-import type { FleetMachine, FleetResponse, FleetServer, HostedServer } from '../types/hostedServer';
+import type { FleetMachine, FleetResponse, FleetServer, HostedServer, MachineDetail, RollPlan } from '../types/hostedServer';
 import type { User, UserDetail, UserListEntry } from '../types/users';
 
 export function user(id: number, overrides: Partial<User> = {}): User {
@@ -17,6 +17,7 @@ export function user(id: number, overrides: Partial<User> = {}): User {
     email: `player${id}@example.com`,
     role: 'player',
     comp_servers: 0,
+    comp_own_machines: 0,
     max_servers: 0,
     ...overrides,
   };
@@ -35,15 +36,35 @@ export function userEntry(id: number, overrides: Partial<UserListEntry> = {}): U
 export function userDetail(id: number, overrides: Partial<UserDetail> = {}): UserDetail {
   return {
     user: user(id, { max_servers: 2 }),
-    entitlement: { max_servers: 2, source: 'tier', tier: 2, comp_servers: 0, tier_servers: 2, own_machines: 0, can_start: true },
+    entitlement: {
+      max_servers: 2,
+      source: 'tier',
+      tier: 2,
+      comp_servers: 0,
+      comp_own_machines: 0,
+      tier_servers: 2,
+      own_machines: 0,
+      can_start: true,
+    },
+    capacity: {
+      shared: { sold: 4, sellable: 24 },
+      own_machines: { sold: 1, sellable: 4 },
+      addresses: { sold: 0, sellable: 4 },
+      oversold: false,
+    },
     servers: [],
+    addresses: [],
     billing: { livemode: false, stripe_customer_id: 'cus_test_1', subscriptions: [] },
     ...overrides,
   };
 }
 
+const GIB = 1024 * 1024 * 1024;
+export const HOSTD_IMAGE = 'ghcr.io/opennova-net/opennova-hostd@sha256:1111111111111111111111111111111111111111111111111111111111111111';
+
 // A fleet_machines row (its id the row's, as the routes answer it) and the
-// cloud machine it stands for.
+// cloud machine it stands for: on the release's images, its agent's last
+// report 4 s before 2026-10-18 12:00:00 UTC (usageFixtures' NOW).
 export function machine(id: string, overrides: Partial<FleetMachine> = {}): FleetMachine {
   return {
     id,
@@ -55,6 +76,78 @@ export function machine(id: string, overrides: Partial<FleetMachine> = {}): Flee
     slots_used: 2,
     public_address: '203.0.113.7',
     egress_bytes_month: 12_500_000_000,
+    agent_version: '0.0.20',
+    agent_protocol: 3,
+    agent_image: HOSTD_IMAGE,
+    agent_log_stream: `hostd/hostd/task${id}`,
+    protocol_mismatch_since: null,
+    lost_held: false,
+    image_id: 'ami-0aaa',
+    last_report_at: '2026-10-18T11:59:56Z',
+    launched_at: '2026-10-18 10:00:00',
+    ready_at: '2026-10-18 10:03:00',
+    ended_at: null,
+    end_reason: null,
+    stats: {
+      cpu_percent: 22,
+      memory_used_bytes: 2 * GIB,
+      memory_total_bytes: 4 * GIB,
+      disk_free_bytes: 30_000_000_000,
+      disk_total_bytes: 40_000_000_000,
+      net_in_bytes: 9_000_000_000,
+      net_out_bytes: 40_000_000_000,
+      net_in_bps: 300_000,
+      net_out_bps: 1_200_000,
+    },
+    stats_at: '2026-10-18T11:59:56Z',
+    release: { image_id: 'ami-0aaa', agent_image: HOSTD_IMAGE },
+    outdated: false,
+    address: null,
+    // Server 1 runs in slot 3, server 2 starts in slot 5.
+    slot_holders: [
+      { slot: 3, server_id: 1, state: 'running' },
+      { slot: 5, server_id: 2, state: 'booting' },
+    ],
+    ...overrides,
+  };
+}
+
+// GET /api/admin/fleet/machines/<id>: the machine with its slot holders naming
+// their servers (server 1, Ranked TDM, late in its last minute; server 2 with
+// no name, before its first placement and report), its events from its making,
+// a ready base tree and an expansion half fetched.
+export function machineDetail(id: string, overrides: Partial<MachineDetail> = {}): MachineDetail {
+  return {
+    machine: machine(id, {
+      slot_holders: [
+        { slot: 3, server_id: 1, state: 'running', name: 'Ranked TDM', game_port: 32771, tick: { p99_ms: 31, late: 3 } },
+        { slot: 5, server_id: 2, state: 'booting', name: '', game_port: null, tick: null },
+      ],
+    }),
+    events: [
+      { from: null, to: 'launching', detail: '', at: '2026-10-18 10:00:00' },
+      { from: 'launching', to: 'booting', detail: 'the cloud started it', at: '2026-10-18 10:01:00' },
+      { from: 'booting', to: 'booting', detail: `log stream hostd/hostd/task${id}`, at: '2026-10-18 10:02:00' },
+      { from: 'booting', to: 'ready', detail: 'first report', at: '2026-10-18 10:03:00' },
+    ],
+    trees: [
+      { tree_id: 10, state: 'ready', bytes: 1_200_000_000, total_bytes: 1_200_000_000, tries: 1, error: null, reported_at: '2026-10-18T11:59:56Z' },
+      { tree_id: 12, state: 'fetching', bytes: 300_000_000, total_bytes: 600_000_000, tries: 2, error: null, reported_at: '2026-10-18T11:59:56Z' },
+    ],
+    ...overrides,
+  };
+}
+
+// GET /api/admin/fleet/roll: machine 3 on an older image, machine 4 on the
+// templates' own.
+export function rollPlan(overrides: Partial<RollPlan> = {}): RollPlan {
+  return {
+    image_id: 'ami-0bbb',
+    machines: [
+      { id: '3', kind: 'shared', state: 'ready', image_id: 'ami-0aaa', servers: 2, action: 'replace', why: "its image is not the templates' (ami-0bbb)" },
+      { id: '4', kind: 'own', state: 'ready', image_id: 'ami-0bbb', servers: 1, action: 'keep', why: "its image is the templates'" },
+    ],
+    replace: ['3'],
     ...overrides,
   };
 }
@@ -70,6 +163,8 @@ export function fleetServer(id: number, overrides: Partial<FleetServer> & Partia
     base_tree_id: 10,
     expansion_tree_id: null,
     outdated: false,
+    generation: 1,
+    tick: { p99_ms: 14.2, late: 0 },
     ...overrides,
   };
 }
@@ -83,7 +178,10 @@ export function fleetResponse(overrides: Partial<FleetResponse> = {}): FleetResp
     live,
     shared: { live, room: 24 },
     own: { live: 0, room: 2 },
-    machines: [machine('3'), machine('4', { kind: 'own', slots: 1, slots_used: 1, instance_type: 'c7a.medium' })],
+    machines: [
+      machine('3'),
+      machine('4', { kind: 'own', slots: 1, slots_used: 1, instance_type: 'c7a.medium', slot_holders: [{ slot: 0, server_id: 9, state: 'running' }] }),
+    ],
     servers,
     ...overrides,
   };

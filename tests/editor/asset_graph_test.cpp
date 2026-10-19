@@ -72,6 +72,7 @@
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_parts.h"
 #include "editor/editor_test_support.h"
 #include "editor/graph_test_support.h"
 #include "editor/test_platform.h"
@@ -2397,15 +2398,8 @@ std::string difference(
 				file != fresh_file)
 			return "the resolution of " + edges[i]->source + " " + edges[i]->field;
 	}
-	for (const AssetEntry &entry : scan.entries) {
-		const std::string &path = entry.relative_path;
-		if (!same_edges(graph.referrers_of_file(path), fresh.referrers_of_file(path)))
-			return "the users of " + path;
-		if (!same_edges(graph.usages_of(path), fresh.usages_of(path)))
-			return "the usages of " + path;
-		if (!same_edges(graph.references_of(path), fresh.references_of(path)))
-			return "the references of " + path;
-	}
+	// Each file's users, usages and references: asked below, over `seen.paths`, which holds every
+	// path of this step's scan as well as those of the steps before it.
 	for (size_t i = 0; i < symbols.size(); ++i) {
 		const GraphSymbol &symbol = *symbols[i];
 		if (!same_edges(graph.users_of(symbol), fresh.users_of(*fresh_symbols[i])))
@@ -2458,10 +2452,12 @@ std::string difference(
 	for (const std::string &path : seen.paths) {
 		if (!same_edges(edges_at(index, index.users_of(path)),
 					edges_at(fresh_index, fresh_index.users_of(path))) ||
-				!same_edges(graph.referrers_of_file(path), fresh.referrers_of_file(path)) ||
-				!same_edges(graph.usages_of(path), fresh.usages_of(path)) ||
-				!same_edges(graph.references_of(path), fresh.references_of(path)))
-			return "the users of " + path + ", a file seen before";
+				!same_edges(graph.referrers_of_file(path), fresh.referrers_of_file(path)))
+			return "the users of " + path;
+		if (!same_edges(graph.usages_of(path), fresh.usages_of(path)))
+			return "the usages of " + path;
+		if (!same_edges(graph.references_of(path), fresh.references_of(path)))
+			return "the references of " + path;
 	}
 	for (const std::string &variable : seen.variables)
 		if (!same_edges(edges_at(index, index.edges_through(variable)),
@@ -3430,8 +3426,12 @@ static int test_retail_record_references() {
 // string tables, catalogs, animation tables, environments, avatars, particles and missions
 // (every kind the graph reads but the models and clips) exported into a project, then edited: a
 // stylesheet's font changed, brand.mns added, a string table gone, a model the items name added,
-// a menu moved, an item added; after each, the graph equals one built fresh.
-static int test_retail_incremental() {
+// a menu moved, an item added; after each, the graph equals one built fresh. A fresh graph over the
+// install's files is the leg's cost (about 20 s each), so a run compares the steps `first` to `last`
+// (from 1) alone, each part of the program a pair (main's parts): the steps before them are made and
+// patched as before, their names, paths and searches seen, without the fresh graph their own part
+// compares; the steps after them are not made.
+static int test_retail_incremental(int first, int last) {
 	const std::string install = retail::install();
 	if (install.empty()) {
 		retail::skip_leg("OPENNOVA_JO_DIR (the incremental graph over the JO install's files)");
@@ -3474,9 +3474,17 @@ static int test_retail_incremental() {
 				"missing, read in %.2f s\n",
 			exported, graph.edge_count(), graph.symbol_count(), graph.missing_count(), seconds);
 	Seen seen({"main", "font", "d3"});
+	int made = 0;
 	const auto step = [&](const char *what) {
+		if (++made > last) return true;
 		const GraphUpdate update =
 				graph.update(project.paths, project.document, project.rescan(), open);
+		if (made < first) {
+			// Compared by an earlier part: what its comparison saw (a graph equal to the fresh one
+			// sees what the fresh one does).
+			seen.add(graph, project.scan);
+			return update.changed;
+		}
 		const auto compared = std::chrono::steady_clock::now();
 		const std::string different =
 				fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
@@ -3619,37 +3627,26 @@ static int test_retail_base_layer() {
 	return 0;
 }
 
+// The retail twin's parts (tests/common/test_parts.h): `main` every case but the incremental
+// retail leg, which `incremental_1` to `_3` split two steps each, side by side.
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	int failures = 0;
-	failures += test_generation();
-	failures += test_incremental_equals_fresh();
-	failures += test_patch_counts();
-	failures += test_references_of();
-	failures += test_base_layer();
-	failures += test_base_layer_file_set();
-	failures += test_retail_incremental();
-	failures += test_retail_base_layer();
-	failures += test_record_references();
-	failures += test_retail_record_references();
-	failures += test_reference_kind_rows();
-	failures += test_reference_file_candidates();
-	failures += test_terrain_and_bank_extractors();
-	failures += test_model_texture_references();
-	failures += test_model_shader_references();
-	failures += test_rename_keeps_loader_spelling();
-	failures += test_user_point_references();
-	failures += test_blank_project();
-	failures += test_menu_names_and_targets();
-	failures += test_retail_menu_graph();
-	failures += test_menu_text_scope();
-	failures += test_stylesheet_bindings();
-	failures += test_native_extractors();
-	failures += test_catalog_symbols();
-	failures += test_symbol_locators();
-	failures += test_rename();
-	failures += test_rename_rewrites_planned_sites_only();
-	failures += test_rename_by_locator();
+	const int failures = test_parts::run(argc, argv,
+			{{"main",
+					 {test_generation, test_incremental_equals_fresh, test_patch_counts,
+							 test_references_of, test_base_layer, test_base_layer_file_set,
+							 test_retail_base_layer, test_record_references,
+							 test_retail_record_references, test_reference_kind_rows,
+							 test_reference_file_candidates, test_terrain_and_bank_extractors,
+							 test_model_texture_references, test_model_shader_references,
+							 test_rename_keeps_loader_spelling, test_user_point_references,
+							 test_blank_project, test_menu_names_and_targets, test_retail_menu_graph,
+							 test_menu_text_scope, test_stylesheet_bindings, test_native_extractors,
+							 test_catalog_symbols, test_symbol_locators, test_rename,
+							 test_rename_rewrites_planned_sites_only, test_rename_by_locator}},
+					{"incremental_1", {[] { return test_retail_incremental(1, 2); }}, true},
+					{"incremental_2", {[] { return test_retail_incremental(3, 4); }}, true},
+					{"incremental_3", {[] { return test_retail_incremental(5, 6); }}, true}});
 	if (failures == 0) std::printf("editor_asset_graph: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

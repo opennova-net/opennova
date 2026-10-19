@@ -2,8 +2,8 @@
 
 // The hosted data sets' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md
 // "Game data"): the data sets an admin
-// creates as rows (hosted/data_set_repository.h), the trees the admin page uploads into the
-// deployment's object store (object_store.h: this program begins each file's multipart
+// creates as rows (data_sets/data_set_repository.h), the trees the admin page uploads into the
+// deployment's object store (core/object_store.h: this program begins each file's multipart
 // upload, takes each part's PUT and hands it to the store, and completes the upload), their
 // finalize and delete. Each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY like
 // every /api route), its state change logged with its actor and status (AccessMiddleware):
@@ -22,7 +22,7 @@
 //
 // Every reply is an error code with our own message, never database or store text; a
 // timestamp not yet set is "" (the DB text). The jobs the routes enqueue commit in the
-// transaction of the state move that causes them (hosted/data_set_jobs.h). Without a store
+// transaction of the state move that causes them (data_sets/data_set_jobs.h). Without a store
 // (hosting off) every store route answers 503 store_unavailable. The admin's update-all (POST
 // /api/admin/hosted/update-all) sits with the fleet routes. The HttpListener owns one
 // DataSetRoutes beside its ReleaseRoutes (release_routes.h).
@@ -44,14 +44,14 @@ class ObjectStore;
 
 namespace hosted {
 
-struct DataSetTree; // hosted/data_set_repository.h
+struct DataSetTree; // data_sets/data_set_repository.h
 
 // A tree as the admin's JSON: {id, state, source, release_id, version, bytes, files (how
 // many), missions (how many), pinned_by (the live servers pinning it), error, created_by,
 // created_at, ready_at ("" until ready)}.
 crow::json::wvalue tree_json(db::Database &db, const DataSetTree &tree);
 
-// The key a tree's file is stored under (under tree_prefix, hosted/data_set_jobs.h).
+// The key a tree's file is stored under (under tree_prefix, data_sets/data_set_jobs.h).
 std::string tree_file_key(int64_t tree_id, std::string_view name);
 
 class DataSetRoutes {

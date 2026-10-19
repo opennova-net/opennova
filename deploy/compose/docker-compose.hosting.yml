@@ -1,13 +1,14 @@
 # Hosted game servers in the local stack, over the dev overlay: the fleet's
-# machines are containers of the serve image (apps/serve/Dockerfile) that the
-# worker's docker machine driver launches on the stack's network
-# (apps/novaworld_common/hosted/docker_machine_driver.h), as a deployment's
-# worker launches EC2 machines. Each runs the image's own opennova-hostd with
-# its process runtime: it redeems the one-time token its launch handed it at
-# the controller's internal listener (bound at the controller's fixed address,
+# machines are containers of the hostd image (apps/serve/Dockerfile's hostd
+# target) that the worker's docker machine driver launches on the stack's
+# network (apps/novaworld_common/hosted/cloud/docker_machine_driver.h), as a
+# deployment's worker launches EC2 machines. Each runs the image's own
+# opennova-hostd with its process runtime (the image's opennova-serve its
+# servers): it redeems the one-time token its launch handed it at
+# the fleet's internal listener (bound at the fleet's fixed address,
 # admitting the stack's subnet), syncs from the machine's address, and runs
-# each server the controller places on its slots as an opennova-serve child at
-# the slot's fixed ports; the controller's admin links reach those on the
+# each server the fleet places on its slots as an opennova-serve child at
+# the slot's fixed ports; the fleet's admin links reach those on the
 # machine's address; the servers list through the gate at ONNET_PUBLIC_HOST.
 #
 #   docker-api    the worker's Docker Engine API: a socket proxy that admits
@@ -24,12 +25,21 @@
 #                 data sets' trees the site's Game data page uploads, which
 #                 scripts/dev_stack.sh up --data or --synthetic-data seeds
 #                 through the admin API) at /var/lib/opennova/store, the path
-#                 the programs see it at, read-only; the machines take every
-#                 mount of this container (ONNET_HOSTED_DOCKER_DATA_FROM), so a
-#                 machine's hostd copies a tree from
+#                 web and the data program see it at, read-only; the machines
+#                 take every mount of this container in its mode
+#                 (ONNET_HOSTED_DOCKER_DATA_FROM), so a machine's hostd copies
+#                 a tree from
 #                 file:///var/lib/opennova/store/trees/<id>/, the URL the
-#                 controller hands it, into its own /opt/game.
-#   machine-image the machines' image, the serve image, built and never run.
+#                 fleet hands it, into its own /opt/game; and the log store
+#                 (the base file's `logs` volume) at /var/log/opennova,
+#                 read-write, for the machines' and their servers' logs.
+#   machine-image the machines' image, the hostd image, built and never run.
+#   zone          the static addresses' zone file the worker writes
+#                 (apps/novaworld_common/hosted/cloud/address_zone.h FileZone), which
+#                 the smoke test reads; an addressed machine starts at its
+#                 fixed address in the half of the stack's network Docker never
+#                 hands out (172.30.77.64/28, apps/novaworld_common/hosted/cloud/
+#                 docker_address_driver.h).
 #
 # scripts/dev_stack.sh up --data <dir> (or --synthetic-data) adds this file.
 # The machines are no compose service: `scripts/dev_stack.sh down` removes them
@@ -41,36 +51,55 @@ networks:
     name: opennova-dev-docker-api
     internal: true
 
+# The fleet's policy, which web, the fleet and the worker read alike.
 x-hosting-env: &hosting-env
   ONNET_HOSTED_PROVIDER: docker
-  ONNET_HOSTED_DOCKER_URL: http://docker-api:2375
-  ONNET_HOSTED_DOCKER_NETWORK: opennova-dev
-  ONNET_HOSTED_DOCKER_DATA_FROM: opennova-dev-machine-data
-  ONNET_HOSTED_DEPLOYMENT: dev
   ONNET_HOSTED_SERVE_IMAGE: ${SERVE_IMAGE:-opennova-serve:local}
-  # The controller's internal listener at its fixed address (the dev
+  # The hostd image the release pins: the machines' image (a server's start
+  # pins the serve image by name alone: the machines run their own binary), and
+  # what the fleet's health holds each machine's agent against.
+  ONNET_HOSTED_HOSTD_IMAGE: ${HOSTD_IMAGE:-opennova-hostd:local}
+  # The fleet's internal listener at its fixed address (the dev
   # overlay's), admitting the agents from the stack's subnet; the machines'
-  # admin.cfg admits the controller's network.
+  # admin.cfg admits the fleet's network.
   ONNET_INTERNAL_HTTP_BIND: 172.30.77.10:8070
   ONNET_HOSTED_BOOTSTRAP_CIDRS: 172.30.77.0/24
   # A small fleet: one shared machine of 4 slots, one own machine.
   ONNET_FLEET_SHARED_SLOTS: ${ONNET_FLEET_SHARED_SLOTS:-4}
   ONNET_FLEET_MAX_SHARED: ${ONNET_FLEET_MAX_SHARED:-1}
   ONNET_FLEET_MAX_OWN: ${ONNET_FLEET_MAX_OWN:-1}
+  # The static addresses: up to 4, named in play.localhost.
+  ONNET_FLEET_MAX_ADDRESSES: ${ONNET_FLEET_MAX_ADDRESSES:-4}
+  ONNET_HOSTED_ADDRESS_ZONE: play.localhost
+
+# The zone file's volume: the worker writes it, the smoke test reads it.
+volumes:
+  zone: {}
 
 services:
   novaworld-web:
     environment:
       <<: *hosting-env
 
-  novaworld-controller:
+  novaworld-fleet:
     environment:
       <<: *hosting-env
 
-  # On the stack's network and the Docker API's, which it alone joins.
+  # On the stack's network and the Docker API's, which it alone joins; the
+  # docker driver's own settings, its alone.
   novaworld-worker:
     environment:
       <<: *hosting-env
+      ONNET_HOSTED_DOCKER_URL: http://docker-api:2375
+      ONNET_HOSTED_DOCKER_NETWORK: opennova-dev
+      ONNET_HOSTED_DOCKER_DATA_FROM: opennova-dev-machine-data
+      ONNET_HOSTED_DEPLOYMENT: dev
+      # The static addresses' driver's own: the addresses it hands out and
+      # the zone file it writes.
+      ONNET_HOSTED_DOCKER_ADDRESSES: 172.30.77.64/28
+      ONNET_HOSTED_ADDRESS_ZONE_FILE: /var/lib/opennova/zone/play.localhost.zone
+    volumes:
+      - zone:/var/lib/opennova/zone
     networks:
       default: {}
       docker-api: {}
@@ -79,6 +108,11 @@ services:
         condition: service_started
       machine-data:
         condition: service_started
+
+  # The smoke test reads the zone the worker writes (its --zone-file).
+  smoke:
+    volumes:
+      - zone:/var/lib/opennova/zone:ro
 
   docker-api:
     image: tecnativa/docker-socket-proxy:0.3.0
@@ -92,23 +126,31 @@ services:
       - docker-api
 
   # A container of no image of ours: the machines take every mount it has
-  # (VolumesFrom), so it holds the store alone, read-only, at the path web and
-  # the worker mount it at (ONNET_OBJECT_STORE_URL names it).
+  # (VolumesFrom), so it holds the store, read-only, at the path web and the
+  # data program mount it at (ONNET_OBJECT_STORE_URL names it), and the log
+  # store, read-write, where each machine's hostd writes its own log and its
+  # servers' (ONNET_LOG_STORE; its --log-dir). The log store is world-writable
+  # with the sticky bit, as /tmp, whoever mounts it first: the programs (UID
+  # 10002) and the machines' hostd (the serve user, UID 10001) each make their
+  # own directories there.
   machine-data:
     image: alpine:3.20
     container_name: opennova-dev-machine-data
     restart: unless-stopped
     init: true
-    command: ["sleep", "infinity"]
+    command: ["sh", "-c", "chmod 1777 /var/log/opennova && exec sleep infinity"]
     volumes:
       - store:/var/lib/opennova/store:ro
+      - logs:/var/log/opennova
 
-  # The machines' image (apps/serve/Dockerfile: opennova-serve and
-  # opennova-hostd), which the worker's driver starts each machine from: built
-  # here, never started as a service (the `machines` profile).
+  # The machines' image (apps/serve/Dockerfile's hostd target: opennova-hostd
+  # with opennova-serve beside it), which the worker's driver starts each
+  # machine from: built here, never started as a service (the `machines`
+  # profile).
   machine-image:
     profiles: ["machines"]
-    image: ${SERVE_IMAGE:-opennova-serve:local}
+    image: ${HOSTD_IMAGE:-opennova-hostd:local}
     build:
       context: ../..
       dockerfile: apps/serve/Dockerfile
+      target: hostd

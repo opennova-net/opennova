@@ -22,6 +22,7 @@ const USERS = [
   userEntry(2, {
     username: 'bravo',
     comp_servers: 3,
+    comp_own_machines: 0,
     max_servers: 3,
     entitlement: { max_servers: 3, source: 'comp', tier: null },
     live_servers: 3,

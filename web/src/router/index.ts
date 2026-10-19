@@ -11,6 +11,7 @@ import ServersPage from '../pages/account/ServersPage.vue';
 import NewServerPage from '../pages/account/NewServerPage.vue';
 import AccountPage from '../pages/account/AccountPage.vue';
 import SupportTierPage from '../pages/account/SupportTierPage.vue';
+import AddressesPage from '../pages/account/AddressesPage.vue';
 import SupportPage from '../pages/SupportPage.vue';
 import NotFoundPage from '../pages/NotFoundPage.vue';
 import TermsPage from '../pages/legal/TermsPage.vue';
@@ -22,11 +23,14 @@ import ServerConsoleTab from '../pages/servers/ServerConsoleTab.vue';
 import ServerStatsTab from '../pages/servers/ServerStatsTab.vue';
 import ServerSettingsTab from '../pages/servers/ServerSettingsTab.vue';
 import ServerMachineTab from '../pages/servers/ServerMachineTab.vue';
+import ServerUsageTab from '../pages/servers/ServerUsageTab.vue';
+import ServerLogsTab from '../pages/servers/ServerLogsTab.vue';
 import AdminLayout from '../pages/admin/AdminLayout.vue';
 import OverviewSection from '../pages/admin/OverviewSection.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
 import UserDetailSection from '../pages/admin/UserDetailSection.vue';
 import FleetSection from '../pages/admin/FleetSection.vue';
+import MachineDetailSection from '../pages/admin/MachineDetailSection.vue';
 import UsageSection from '../pages/admin/UsageSection.vue';
 import BillingSection from '../pages/admin/BillingSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
@@ -34,8 +38,11 @@ import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
 import JobsSection from '../pages/admin/JobsSection.vue';
 import JobDetailSection from '../pages/admin/JobDetailSection.vue';
 import InfraSection from '../pages/admin/InfraSection.vue';
+import ProgramDetailSection from '../pages/admin/ProgramDetailSection.vue';
+import InfraResourceSection from '../pages/admin/InfraResourceSection.vue';
 import CdKeysSection from '../pages/admin/CdKeysSection.vue';
 import DataSetsSection from '../pages/admin/DataSetsSection.vue';
+import AddressesSection from '../pages/admin/AddressesSection.vue';
 import { requireUser } from './guards';
 
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
@@ -80,6 +87,8 @@ const router = createRouter({
         // Stripe's Checkout and billing portal return here
         // (?checkout=success&session_id=..., ?checkout=cancel).
         { path: 'support', component: SupportTierPage, meta: { title: 'Support tier' } },
+        // The billing portal's cancel flow for an address returns here.
+        { path: 'addresses', component: AddressesPage, meta: { title: 'Static addresses' } },
         { path: 'account', component: AccountPage, meta: { title: 'Account' } },
         // The hosted server's page before an account could have several:
         // old links land on the list.
@@ -96,6 +105,8 @@ const router = createRouter({
         { path: 'users', component: UsersSection, meta: { title: 'Admin: Users' } },
         { path: 'users/:id(\\d+)', component: UserDetailSection, meta: { title: 'Admin: User' } },
         { path: 'fleet', component: FleetSection, meta: { title: 'Admin: Fleet' } },
+        { path: 'fleet/machines/:id(\\d+)', component: MachineDetailSection, meta: { title: 'Admin: Machine' } },
+        { path: 'addresses', component: AddressesSection, meta: { title: 'Admin: Static addresses' } },
         {
           path: 'fleet/:id(\\d+)',
           component: ServerDetailLayout,
@@ -106,6 +117,8 @@ const router = createRouter({
             { path: 'stats', component: ServerStatsTab },
             { path: 'console', component: ServerConsoleTab },
             { path: 'game-settings', component: ServerSettingsTab },
+            { path: 'usage', component: ServerUsageTab },
+            { path: 'logs', component: ServerLogsTab },
             { path: 'machine', component: ServerMachineTab },
           ],
         },
@@ -116,6 +129,12 @@ const router = createRouter({
         { path: 'jobs', component: JobsSection, meta: { title: 'Admin: Background jobs' } },
         { path: 'jobs/:id(\\d+)', component: JobDetailSection, meta: { title: 'Admin: Job' } },
         { path: 'infrastructure', component: InfraSection, meta: { title: 'Admin: Infrastructure' } },
+        { path: 'infrastructure/programs/:name', component: ProgramDetailSection, meta: { title: 'Admin: Program' } },
+        {
+          path: 'infrastructure/resources/:id(rds|cache|nlb)',
+          component: InfraResourceSection,
+          meta: { title: 'Admin: AWS resource' },
+        },
         { path: 'cd-keys', component: CdKeysSection, meta: { title: 'Admin: CD keys' } },
         { path: 'data-sets', component: DataSetsSection, meta: { title: 'Admin: Game data' } },
         // The sections' names before the admin pages were rebuilt: old links

@@ -182,6 +182,25 @@ class SuiteChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             suites.ctest_selection("retail", "editor")
 
+    def test_godot_shards_partition_each_suite(self):
+        for name in ["plain", "net/wire", "authoring/editor", "game/shell", "mcp/server", "probes/probe",
+                     "audio/mix", "retail/compat", "retail/game/menu", "windowed/raster"]:
+            self.write("godot/tests/" + name + "_test.gd", "extends GutTest\nfunc test_works():\n\tpass\n")
+        core = suites.godot_scripts(self.root, "core")
+        shards = {name: suites.godot_scripts(self.root, "core", shard=name) for name in suites.GODOT_SHARDS}
+        self.assertEqual(sorted(shards["shells"] + shards["world"]), core)
+        self.assertFalse(set(shards["shells"]) & set(shards["world"]))
+        self.assertEqual(shards["shells"], ["res://tests/authoring/editor_test.gd", "res://tests/game/shell_test.gd",
+                                            "res://tests/mcp/server_test.gd", "res://tests/probes/probe_test.gd"])
+        retail = suites.godot_scripts(self.root, "retail")
+        retail_shards = {name: suites.godot_scripts(self.root, "retail", shard=name) for name in suites.GODOT_SHARDS}
+        self.assertEqual(sorted(retail_shards["shells"] + retail_shards["world"]), retail)
+        self.assertEqual(retail_shards["shells"], ["res://tests/retail/game/menu_test.gd"])
+        with self.assertRaises(ValueError):
+            suites.godot_scripts(self.root, "all", shard="shells")
+        with self.assertRaises(ValueError):
+            suites.godot_scripts(self.root, "core", shard="editor")
+
     def test_migration_cannot_lose_an_original_method(self):
         self.write("scripts/ci/retail_migration.json", json.dumps([{
             "original_script": "godot/tests/example_test.gd",

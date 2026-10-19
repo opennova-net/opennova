@@ -10,7 +10,7 @@ import {
   startCheckout,
   syncMyBilling,
 } from './billing';
-import { myBilling, subscribed, tiersResponse } from '../test/billingFixtures';
+import { addressSubscription, myBilling, subscribed, tiersResponse } from '../test/billingFixtures';
 import { isStripeUrl, navigateToStripe } from '../utils/navigate';
 
 vi.mock('./client', () => ({
@@ -51,6 +51,38 @@ describe('parsing', () => {
     expect(parseTiers({ ...body, own_machine: { amount: 'x' } })).toBeNull();
   });
 
+  it("reads each item's availability and the static address offer", () => {
+    const body = tiersResponse();
+    const full = parseTiers({
+      ...body,
+      tiers: [{ ...body.tiers[0], available: false }, body.tiers[1], body.tiers[2]],
+      own_machine: { amount: 4500, interval: 'month', available: false },
+      static_address: { amount: 500, interval: 'month', available: true },
+    });
+    expect(full?.tiers.map((t) => t.available)).toEqual([false, true, true]);
+    expect(full?.own_machine?.available).toBe(false);
+    expect(full?.static_address).toEqual({ amount: 500, interval: 'month', available: true });
+    // Not sold here: null, or left out.
+    expect(parseTiers({ ...body, static_address: null })?.static_address).toBeNull();
+    const { static_address: _drop, ...none } = body;
+    expect(parseTiers(none)?.static_address).toBeNull();
+    // An item that does not say whether it is available is refused.
+    const { available: _a, ...unsaid } = body.tiers[0];
+    expect(parseTiers({ ...body, tiers: [unsaid] })).toBeNull();
+    expect(parseTiers({ ...body, static_address: { amount: 500, interval: 'month' } })).toBeNull();
+  });
+
+  it("reads the account's static address subscriptions", () => {
+    const value = myBilling({
+      static_addresses: 1,
+      address_subscriptions: [addressSubscription(), addressSubscription({ stripe_subscription_id: 'sub_2', address_id: null })],
+    });
+    expect(parseMyBilling(value)).toEqual(value);
+    expect(parseMyBilling({ ...value, address_subscriptions: [{ ...addressSubscription(), address_id: 'one' }] })).toBeNull();
+    const { static_addresses: _s, ...uncounted } = value;
+    expect(parseMyBilling(uncounted)).toBeNull();
+  });
+
   it("reads the account's billing and refuses a malformed one", () => {
     expect(parseMyBilling(myBilling())).toEqual(myBilling());
     expect(parseMyBilling(subscribed(2))).toEqual(subscribed(2));
@@ -87,6 +119,10 @@ describe('the routes', () => {
     expect(post).toHaveBeenLastCalledWith('/billing/portal');
     post.mockResolvedValueOnce(reply({}));
     expect((await openPortal()).ok).toBe(false);
+    // A static address's cancel flow names its subscription.
+    post.mockResolvedValueOnce(reply({ url: 'https://billing.stripe.com/p/session/test_2' }));
+    expect((await openPortal('sub_address_1')).ok).toBe(true);
+    expect(post).toHaveBeenLastCalledWith('/billing/portal', { cancel_subscription: 'sub_address_1' });
   });
 
   it('maps the refusals to messages, never the server text', async () => {
@@ -100,6 +136,10 @@ describe('the routes', () => {
       [403, 'not_eligible', 'cannot buy that right now'],
       [404, 'no_billing_account', 'subscribe to a support tier first'],
       [400, 'invalid_item', 'could not read the request'],
+      [409, 'sold_out', 'Hosting is full: new subscriptions are paused. Try again later; no payment was taken.'],
+      [409, 'address_limit', 'a static address for every own machine'],
+      [403, 'payment_past_due', 'Fix it in the billing portal first'],
+      [404, 'not_found', 'no longer open'],
     ];
     for (const [status, code, text] of cases) {
       post.mockRejectedValueOnce(refusal(status, { error: code, message: 'raw server text' }));

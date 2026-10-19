@@ -15,11 +15,11 @@
 // Every reply is an error code with our own message, never database text.
 // Behind ONNET_API_PROXY_ONLY like every /api route. A start needs the
 // account's hosting entitlement (billing/entitlement.h); an admin's comp
-// grant, PUT /api/admin/users/<id>/comp-servers, sits with the admin user
+// grants, PUT /api/admin/users/<id>/comp, sit with the admin user
 // routes (http_listener.cpp). The HttpListener owns one HostedRoutes beside
 // its HostRoutes.
 
-#include "hosted/hosted_repository.h"
+#include "hosted/model/hosted_repository.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 
@@ -43,9 +43,24 @@ namespace hosted {
 // page) or, with `admin`, for the fleet view (fleet_routes.h): its owner (with
 // its support tier), its service account, its container and machine address,
 // its place in the fleet (machine_ref, slot, game_port, generation,
-// serve_image), its pins and whether it is outdated, and its listing's
-// players besides. Never its admin password. Without its events.
-crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin);
+// serve_image), its pins and whether it is outdated, its last minute of ticks
+// (`tick`: {p99_ms, late} from its slot's report, null with none) and its
+// listing's players besides. Never its admin password. Without its events. The owner's
+// views carry its phase and why its last run ended besides (phase_json).
+// With `zone` (the play zone, "" for none), its address's hostname too.
+crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin, const std::string &zone = {});
+
+// Where server `s`'s start stands and why its last run ended (server_phase.h),
+// read from its rows at `now_ms` (Unix milliseconds: the launch backoff's
+// clock) into `e`: "phase" {name, and with downloading_data bytes_done and
+// bytes_total, with restarting restart, restart_limit and cause (crash or
+// timeout), with
+// data_unavailable for an admin (`admin`) line, the agent's reason},
+// "stopped_because" ({cause, exit_code, oom, line} for a stopped or failed
+// server whose last run ended, else null; the agent's reason a start never ran
+// is an admin's line alone).
+void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, int64_t now_ms,
+		bool admin);
 
 // An offered data set (data_set_repository.h) as GET /api/me/servers lists it:
 // {id, display_name, title, version, missions [{file, title}], limits, expansions
@@ -76,6 +91,9 @@ public:
 	// ready current tree, data_set_repository.h offered_data_sets). Before
 	// register_routes().
 	void configure(const ServerConfig &config, const PlacementPolicy &fleet);
+	// The play zone the static addresses are named in (the servers' address
+	// hostname); before register_routes().
+	void set_address_zone(std::string zone) { address_zone_ = std::move(zone); }
 	void register_routes(WebApp &app);
 
 	// What configure decided (the fleet routes report them): a driver, its
@@ -99,6 +117,7 @@ private:
 	std::string provider_ = "none";
 	int cap_ = 24;
 	PlacementPolicy fleet_;
+	std::string address_zone_;
 	RateLimiter start_stop_per_user_;
 };
 

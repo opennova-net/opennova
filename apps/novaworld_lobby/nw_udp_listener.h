@@ -220,7 +220,7 @@ public:
 	bool embedded_jo_host_running() const { return jo_owner_ != nullptr; }
 
 	// The receive loop's turns so far (one per receive, which waits at most a
-	// pump period): the stall watchdog's progress counter (health.h).
+	// pump period): the stall watchdog's progress counter (core/health.h).
 	// Thread-safe.
 	uint64_t loop_turns() const { return loop_turns_.load(std::memory_order_relaxed); }
 

@@ -152,7 +152,7 @@ See [switcher/README.md](switcher/README.md).
 
 ## Run your own NovaWorld
 
-To run your own NovaWorld, the whole hosted service (the five programs, the website,
+To run your own NovaWorld, the whole hosted service (the six programs, the website,
 billing and the hosted game servers) on your own AWS, Cloudflare, Stripe and 1Password
 accounts, follow [DEPLOY.md](DEPLOY.md): its "From zero, in order" checklist is the
 bring-up, and "Running it under your own names" lists what to change on a fork. Try the

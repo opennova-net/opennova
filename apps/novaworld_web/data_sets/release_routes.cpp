@@ -1,11 +1,11 @@
 #include "release_routes.h"
 
+#include "core/loggable.h"
+#include "core/object_store.h"
+#include "data_sets/data_set_jobs.h"
+#include "data_sets/data_set_repository.h"
 #include "data_sets/data_set_routes.h"
-#include "hosted/data_set_jobs.h"
-#include "hosted/data_set_repository.h"
 #include "http_json.h"
-#include "loggable.h"
-#include "object_store.h"
 
 #include <base/io/strutil.h>
 
@@ -375,7 +375,7 @@ crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 // release: its package objects removed (the upload key, which an invalid one keeps, with
 // the upload in flight aborted, and the validated key once it has a sha; a missing object
 // is no failure), the row gone, 204; 404 not_found; 409 published (retire it first),
-// validating (the worker is on it); 502 store_error; 503 store_unavailable.
+// validating (the data program is on it); 502 store_error; 503 store_unavailable.
 crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -389,7 +389,7 @@ crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 			return json_error(409, "published", "retire this release before deleting it");
 		if (release->status == ReleaseStatus::Validating)
 			return json_error(
-					409, "validating", "the worker is validating this release; wait for it");
+					409, "validating", "the data program is validating this release; wait for it");
 		if (store_ == nullptr)
 			return store_unavailable();
 		std::string error;

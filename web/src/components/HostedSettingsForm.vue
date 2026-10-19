@@ -233,6 +233,23 @@
       <p :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">
         {{ ownMachinesFree === 1 ? 'One of your own machines is free.' : `${ownMachinesFree} of your own machines are free.` }}
       </p>
+      <!-- A static address for it: shown while one of the account's is free. -->
+      <div v-if="ownMachine && addresses.length > 0" class="space-y-1 pt-2">
+        <label :for="`${baseId}-address_id`" :class="labelClass">Static address</label>
+        <select
+          :id="`${baseId}-address_id`"
+          v-model="addressId"
+          :disabled="busy"
+          :aria-describedby="`${baseId}-address_id-hint`"
+          class="max-w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none disabled:opacity-60"
+        >
+          <option :value="null">No static address</option>
+          <option v-for="a in addresses" :key="a.id" :value="a.id">{{ a.hostname }}</option>
+        </select>
+        <p :id="`${baseId}-address_id-hint`" class="text-xs text-ink-muted">
+          With one, players find the server at the same address and name every time it starts.
+        </p>
+      </div>
     </div>
 
     <div class="flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
@@ -253,7 +270,9 @@
 // account's start page (pages/account/NewServerPage.vue), offered only while
 // its entitlement has room. Started from an ended server, it begins with that
 // server's settings (after a failed one, the owner's try again). The
-// own-machine checkbox shows while one of the account's own machines is free.
+// own-machine checkbox shows while one of the account's own machines is free,
+// and with it checked a pick of the account's free static addresses (the one
+// `preferredAddressId` names first) while any is.
 // The game (a base data set the service offers, by id) comes first and drives
 // the rest: the expansions it offers (expansion data sets with data), the
 // whole-number ranges and the rotation's missions, which are the game's data's
@@ -266,6 +285,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue';
 import MissionRotationPicker from './MissionRotationPicker.vue';
 import { RouterLink } from 'vue-router';
 import { linksToSupportTier, startHostedServer, type HostedError } from '../api/hostedServer';
+import type { Address } from '../types/addresses';
 import type {
   HostedDataSet,
   HostedExpansionOption,
@@ -304,8 +324,12 @@ const props = withDefaults(
     // How many of the account's own machines are free; the own-machine
     // checkbox shows while any is.
     ownMachinesFree?: number;
+    // The account's static addresses a new server may run at (ready, and no
+    // live server's), and the one the pick starts on.
+    addresses?: Address[];
+    preferredAddressId?: number | null;
   }>(),
-  { retry: false, baseId: 'hosted-settings', ownMachinesFree: 0 },
+  { retry: false, baseId: 'hosted-settings', ownMachinesFree: 0, addresses: () => [], preferredAddressId: null },
 );
 
 const emit = defineEmits<{
@@ -318,6 +342,21 @@ const emit = defineEmits<{
 
 // Run on one of the account's own machines.
 const ownMachine = ref(false);
+// The static address it runs at there, null for none: the preferred one while
+// it is free, else the first free one.
+function firstAddress(): number | null {
+  const preferred = props.preferredAddressId;
+  if (preferred !== null && props.addresses.some((a) => a.id === preferred)) return preferred;
+  return props.addresses[0]?.id ?? null;
+}
+const addressId = ref<number | null>(firstAddress());
+// The page read the addresses again: a pick taken meanwhile starts over.
+watch(
+  () => props.addresses,
+  (list) => {
+    if (addressId.value !== null && !list.some((a) => a.id === addressId.value)) addressId.value = firstAddress();
+  },
+);
 const labelClass = 'block text-xs font-medium uppercase tracking-wider text-ink-muted';
 const inputBase =
   'rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none disabled:opacity-60 aria-[invalid=true]:border-danger';
@@ -486,7 +525,8 @@ async function submit() {
   }
   alertText.value = '';
   busy.value = true;
-  const reply = await startHostedServer(result.settings, props.ownMachinesFree > 0 && ownMachine.value);
+  const own = props.ownMachinesFree > 0 && ownMachine.value;
+  const reply = await startHostedServer(result.settings, own, own && props.addresses.length > 0 ? addressId.value : null);
   busy.value = false;
   if (reply.ok) {
     emit('started', reply.value);

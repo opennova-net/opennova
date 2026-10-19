@@ -54,8 +54,8 @@ void mark_customer_synced(db::Database &db, const std::string &stripe_customer_i
 void delete_customer(db::Database &db, const std::string &stripe_customer_id);
 
 // What a subscription's price sells.
-enum class ItemKind : uint8_t { Tier, OwnMachine, Unknown };
-const char *item_kind_name(ItemKind kind);          // "tier", "own_machine", "unknown"
+enum class ItemKind : uint8_t { Tier, OwnMachine, StaticAddress, Unknown };
+const char *item_kind_name(ItemKind kind);          // "tier", "own_machine", "static_address", "unknown"
 ItemKind item_kind_from_name(std::string_view name); // Unknown for any other text
 
 struct SubscriptionRow {
@@ -133,5 +133,72 @@ std::vector<EventRow> recent_events(db::Database &db, size_t limit);
 // inside its period's net). The admin's account delete refuses such an
 // account.
 bool has_granting_subscription(db::Database &db, int64_t user_id, int64_t now);
+
+// --- An admin's comp grants (comp_grants, 0017_capacity_addresses.sql) ---
+
+// What an admin grants an account outside any subscription (each 0..16,
+// tiers.h kMaxCompServers and kMaxCompOwnMachines): hosted servers, and own
+// machines for them (entitlement.h).
+struct CompGrants {
+	int servers = 0;
+	int own_machines = 0;
+};
+// The account's grants (none: zeros).
+CompGrants comp_grants_of(db::Database &db, int64_t user_id);
+// Every account's grants that are not zeros, by account (the admin's users
+// list and the sold capacity, in one read).
+std::map<int64_t, CompGrants> comp_grants_by_account(db::Database &db);
+// The account's grants set to `grants` (a 0 deletes its row), in one
+// transaction; false (nothing written) when no player account has `user_id`
+// (a service account included). The caller checks the ranges.
+bool set_comp_grants(db::Database &db, int64_t user_id, const CompGrants &grants);
+// An admin's comp addresses that count toward an account's entitlement
+// (hosted_addresses' comp rows allocating or ready;
+// hosted/model/address_repository.h): the account's, and every account's that has
+// some.
+int comp_addresses_of(db::Database &db, int64_t user_id);
+std::map<int64_t, int> comp_addresses_by_account(db::Database &db);
+
+// --- A checkout's hold on what it sells (billing_checkout_reservations) ---
+//
+// A checkout reserves the item it sells before Stripe makes its session, in
+// the transaction that judged it under the hosting-start lock (database.h
+// kHostedStartLock), so two checkouts at once never both take the last of
+// the fleet's room (hosted/model/sold_capacity.h). The reservation counts as a
+// granting subscription of its item until it is dropped: by the sync that
+// writes the subscription its session made (the subscription's
+// opennova_reservation metadata, in the same transaction), by the session's
+// checkout.session.expired event, by the account's next checkout (its
+// previous session is settled first), or at its expires_at.
+
+// The metadata key a checkout stamps its reservation's id under (on the
+// session and on the subscription it makes).
+inline constexpr const char *kMetaReservation = "opennova_reservation";
+
+struct CheckoutReservation {
+	int64_t id = 0;
+	int64_t user_id = 0;
+	ItemKind item = ItemKind::Unknown; // Tier, OwnMachine, StaticAddress
+	int tier = 0; // 1..3 for a tier
+	std::string checkout_session; // "" until its session is made
+};
+
+// A reservation of `item` (`tier` for a tier) for the account that lapses
+// `life_s` from now, in the caller's transaction; its id. Expired ones are
+// deleted first.
+int64_t reserve_checkout(db::Database &db, int64_t user_id, ItemKind item, int tier, int64_t life_s);
+// The checkout session made for reservation `id`.
+void stamp_reservation(db::Database &db, int64_t id, const std::string &checkout_session);
+// Reservation `id` of account `user_id` dropped (another account's stays).
+void drop_reservation(db::Database &db, int64_t id, int64_t user_id);
+// The reservation of checkout session `checkout_session` dropped (none for
+// ""); how many.
+size_t drop_session_reservation(db::Database &db, const std::string &checkout_session);
+// The reservations that have not lapsed, by account.
+std::map<int64_t, std::vector<CheckoutReservation>> live_reservations_by_account(db::Database &db);
+std::vector<CheckoutReservation> live_reservations_of(db::Database &db, int64_t user_id);
+// The reservation as the granting subscription it counts as at `now`
+// (status active, its period a day on).
+SubscriptionRow reservation_row(const CheckoutReservation &reservation, int64_t now);
 
 } // namespace opennova::novaworld_server::billing

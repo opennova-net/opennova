@@ -6,11 +6,16 @@
 // many schedulers tick, and however often, a bucket gets one job; and keyed
 // by its kind as its dedupe key, so a job still queued or running when the
 // next bucket comes is not joined by another. A kind marked at_start also gets
-// one when the scheduler starts (the billing reconcile at a controller's
-// start, the fleet's sweep). A `wanted` test leaves a bucket with nothing to do
-// unqueued (the billing sync with no customer waiting). The scheduler is the
-// controller's; it enqueues and runs nothing itself, and the workers'
-// pools run what it enqueued. Service policy, not a port.
+// one when the scheduler starts (the billing reconcile at a release's start),
+// keyed by its start key where the scheduler has one (<kind>@start:<key>, a
+// release's: every task of one release enqueues it once between them). A
+// `wanted` test leaves a bucket with nothing to do unqueued (the billing sync
+// with no customer waiting). Each program that runs jobs runs a scheduler over
+// its own kinds alone (the worker's worker_schedule.h, the data program's data
+// set prune), in every
+// one of its processes, with no election: the keys keep the buckets single. It
+// enqueues and runs nothing itself, and its program's pool runs what it
+// enqueued. Service policy, not a port.
 
 #include "job_queue.h"
 
@@ -45,15 +50,13 @@ public:
 
 	static int64_t wall_now_ms();
 
-	// `pool` must outlive the scheduler.
+	// `pool` must outlive the scheduler. `start_key` keys the at_start jobs
+	// (start_schedule_key); "" leaves them keyed by their kind alone.
 	Scheduler(db::ConnectionPool &pool, std::vector<PeriodicJob> jobs, Clock now_ms = wall_now_ms,
-			int64_t tick_ms = 1000);
+			int64_t tick_ms = 1000, std::string start_key = {});
 	~Scheduler();
 	Scheduler(const Scheduler &) = delete;
 	Scheduler &operator=(const Scheduler &) = delete;
-
-	// A guard each tick asks first (a controller still leading); unset, always.
-	void set_guard(std::function<bool(db::Database &)> guard) { guard_ = std::move(guard); }
 
 	// The at_start jobs enqueued, then a tick every tick_ms on the scheduler's
 	// own thread until stop().
@@ -69,9 +72,11 @@ public:
 
 	// The schedule key of `kind` at `now_ms` with `period_ms`.
 	static std::string schedule_key(const std::string &kind, int64_t now_ms, int64_t period_ms);
+	// The schedule key of `kind`'s at_start job under start key `start_key`.
+	static std::string start_schedule_key(const std::string &kind, const std::string &start_key);
 
 	// The scheduler thread's ticks so far, a database error's included (the
-	// stall watchdog's counter, health.h): it stands still only while a tick
+	// stall watchdog's counter, core/health.h): it stands still only while a tick
 	// hangs. Thread-safe.
 	uint64_t turns() const { return turns_.load(std::memory_order_relaxed); }
 
@@ -82,7 +87,7 @@ private:
 	const std::vector<PeriodicJob> jobs_;
 	const Clock now_;
 	const int64_t tick_ms_;
-	std::function<bool(db::Database &)> guard_;
+	const std::string start_key_;
 	// The bucket each kind was last enqueued (or found) for: a cache, so a tick
 	// writes only when a bucket turns; the database's keys decide.
 	std::map<std::string, int64_t> last_bucket_;

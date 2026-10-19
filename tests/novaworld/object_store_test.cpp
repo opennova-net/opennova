@@ -1,4 +1,4 @@
-// The object store seam (apps/novaworld_common/object_store.h): the URL forms, the key rule, the
+// The object store seam (apps/novaworld_common/core/object_store.h): the URL forms, the key rule, the
 // local store's files and multipart uploads over a directory (each part handed over, the
 // completion checking the parts reported), and the S3 store's every call as the argv it hands
 // the AWS CLI through a recording runner (a part's bytes in a scratch file for `upload-part`,
@@ -8,9 +8,9 @@
 #include "common/test_expect.h"
 
 #include "command_runner.h"
-#include "local_object_store.h"
-#include "object_store.h"
-#include "s3_object_store.h"
+#include "core/local_object_store.h"
+#include "core/object_store.h"
+#include "core/s3_object_store.h"
 
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>

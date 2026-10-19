@@ -7,7 +7,7 @@
 # RDS picks (or, on, Multi-AZ), never public, encrypted, TLS
 # forced, max_connections sized for the programs' pools at their maxima with a
 # deployment's extra tasks, 14 days of point-in-time recovery, a final snapshot
-# and deletion protection; reached from the five programs' security groups and
+# and deletion protection; reached from the six programs' security groups and
 # the backup task's alone; its master password write-only; every program's
 # environment and the backup task's hand it a verify-full URL with no password
 # in it, and the pool size max_connections is sized for. A malformed class is
@@ -152,14 +152,19 @@ override_resource {
   values          = { id = "sg-0web" }
 }
 override_resource {
-  target          = aws_security_group.program["controller"]
+  target          = aws_security_group.program["fleet"]
   override_during = plan
-  values          = { id = "sg-0controller" }
+  values          = { id = "sg-0fleet" }
 }
 override_resource {
   target          = aws_security_group.program["worker"]
   override_during = plan
   values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.program["data"]
+  override_during = plan
+  values          = { id = "sg-0data" }
 }
 override_resource {
   target          = aws_security_group.lb
@@ -212,14 +217,19 @@ override_resource {
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1" }
 }
 override_resource {
-  target          = aws_ecs_task_definition.program["controller"]
+  target          = aws_ecs_task_definition.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1" }
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.backup
@@ -242,14 +252,19 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-web" }
 }
 override_resource {
-  target          = aws_iam_role.program["controller"]
+  target          = aws_iam_role.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-controller" }
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-fleet" }
 }
 override_resource {
   target          = aws_iam_role.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-worker" }
+}
+override_resource {
+  target          = aws_iam_role.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-data" }
 }
 override_resource {
   target          = aws_iam_role.execution
@@ -312,8 +327,8 @@ run "database" {
     error_message = "the parameter group forces TLS and logs statements over a second"
   }
   assert {
-    condition     = length([for p in aws_db_parameter_group.main.parameter : p if p.name == "max_connections" && p.value == "80" && p.apply_method == "pending-reboot"]) == 1
-    error_message = "max_connections: 7 connections for each of 10 program processes, plus 10 (static: the next reboot)"
+    condition     = length([for p in aws_db_parameter_group.main.parameter : p if p.name == "max_connections" && p.value == "94" && p.apply_method == "pending-reboot"]) == 1
+    error_message = "max_connections: 7 connections for each of 12 program processes, plus 10 (static: the next reboot)"
   }
   assert {
     condition     = toset(aws_db_subnet_group.main.subnet_ids) == toset([aws_subnet.private["a"].id, aws_subnet.private["b"].id])
@@ -330,10 +345,10 @@ run "database_wiring" {
 
   assert {
     condition = (
-      toset([for r in aws_vpc_security_group_ingress_rule.db_from_client : r.referenced_security_group_id]) == toset(["sg-0gate", "sg-0lobby", "sg-0web", "sg-0controller", "sg-0worker", "sg-0backup"]) &&
+      toset([for r in aws_vpc_security_group_ingress_rule.db_from_client : r.referenced_security_group_id]) == toset(["sg-0gate", "sg-0lobby", "sg-0web", "sg-0fleet", "sg-0worker", "sg-0data", "sg-0backup"]) &&
       alltrue([for r in aws_vpc_security_group_ingress_rule.db_from_client : r.security_group_id == aws_security_group.db.id])
     )
-    error_message = "the database admits the five programs' security groups and the backup task's alone"
+    error_message = "the database admits the six programs' security groups and the backup task's alone"
   }
   assert {
     condition = alltrue(concat(
@@ -394,7 +409,7 @@ run "connections_sized" {
 }
 
 # max_connections must hold every program's tasks at its max (the worker's 8,
-# doubled through a deployment, past 14).
+# doubled through a deployment, past 12).
 run "processes_past_sizing_refused" {
   command = plan
 
@@ -405,8 +420,8 @@ run "processes_past_sizing_refused" {
   expect_failures = [aws_db_parameter_group.main]
 }
 
-# The programs' maxima alone (5 processes) fit 8, but a deployment's extra
-# tasks (every program's doubled) make 10.
+# The programs' maxima alone (6 processes) fit 8, but a deployment's extra
+# tasks (every program's doubled) make 12.
 run "replacement_surge_counted" {
   command = plan
 

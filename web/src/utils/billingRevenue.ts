@@ -1,7 +1,7 @@
 // The admin billing page's monthly total (an estimate): the subscriptions
 // that grant hosting now, by tier, at the tiers' prices today, plus the
-// own-machine add-on by quantity. Not what Stripe pays out (no fees, no tax,
-// no proration).
+// own-machine add-on by quantity and, where the deployment sells them, the
+// static addresses. Not what Stripe pays out (no fees, no tax, no proration).
 
 import type { AdminSubscription, TiersResponse } from '../types/billing';
 
@@ -36,6 +36,16 @@ export function billingRevenue(subscriptions: readonly AdminSubscription[], tier
     price: machinePrice,
     total: machinePrice === null ? 0 : machinePrice * machines,
   });
+  const addresses = granting.filter((s) => s.item === 'static_address').length;
+  if (tiers?.static_address || addresses > 0) {
+    const addressPrice = tiers?.static_address?.amount ?? null;
+    rows.push({
+      label: 'Static addresses',
+      count: addresses,
+      price: addressPrice,
+      total: addressPrice === null ? 0 : addressPrice * addresses,
+    });
+  }
   return {
     rows,
     subscribers: rows.slice(0, 3).reduce((n, r) => n + r.count, 0),

@@ -9,11 +9,11 @@
 // (common/test_redis.h), on loopback ports the OS picks. Built only with
 // BUILD_NOVAWORLD_HTTP; main() calls test_db::init and test_redis::init first.
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "gate_listener.h"
 #include "http_listener.h"
 #include "nw_udp_listener.h"
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/db/database.h>

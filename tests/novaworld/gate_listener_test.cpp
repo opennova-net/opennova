@@ -31,7 +31,7 @@
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
 #include "net_sockets.h"
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>

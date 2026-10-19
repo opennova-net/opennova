@@ -23,6 +23,13 @@
         {{ server.expansion?.display_name || server.expansion_display_name || 'Base game' }}
         <span v-if="server.data.expansion" class="text-ink-muted">{{ server.data.expansion.version }}</span>
       </dd>
+      <template v-if="server.address">
+        <dt class="text-ink-muted">Static address</dt>
+        <dd class="break-all font-mono text-xs text-ink">
+          {{ server.address.hostname || server.address.name }}
+          <span v-if="serverAddressEndpoint(server.address)" class="text-ink-muted">{{ serverAddressEndpoint(server.address) }}</span>
+        </dd>
+      </template>
       <dt class="text-ink-muted">{{ FIELD_LABELS.max_players }}</dt>
       <dd class="text-ink">{{ server.settings.max_players }}</dd>
       <dt class="text-ink-muted">{{ FIELD_LABELS.game_password }}</dt>
@@ -69,12 +76,13 @@
 
 <script setup lang="ts">
 // A hosted server page's settings tab (the owner's Settings, the admin's Game
-// settings): the game settings it was started with, and for the owner a new
-// start from them (/me/servers/new?from=<id>).
+// settings): the game settings it was started with (and the static address it
+// runs at), and for the owner a new start from them (/me/servers/new?from=<id>).
 import { onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { fetchMyServers } from '../../api/hostedServer';
 import type { HostedServer } from '../../types/hostedServer';
+import { serverAddressEndpoint } from '../../utils/addressView';
 import { FIELD_LABELS } from '../../utils/hostedSettings';
 
 const props = defineProps<{

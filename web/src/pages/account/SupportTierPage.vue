@@ -108,8 +108,10 @@
       </section>
 
       <p v-if="billing.comp_servers > 0" class="rounded-panel border border-border bg-panel p-4 text-sm text-ink">
-        An admin granted your account {{ billing.comp_servers }} hosted server{{ billing.comp_servers === 1 ? '' : 's' }}.
-        A support tier covering more raises your limit to the tier's.
+        An admin granted your account {{ billing.comp_servers }} hosted server{{ billing.comp_servers === 1 ? '' : 's' }}<template
+          v-if="billing.comp_own_machines > 0"
+          >, {{ billing.comp_own_machines }} of them on an own machine</template
+        >. A support tier covering more raises your limit to the tier's.
       </p>
 
       <section class="space-y-4" aria-labelledby="support-tiers">
@@ -159,7 +161,9 @@
           <button
             v-if="!ownMachineAtLimit"
             type="button"
-            :disabled="busy || waiting || !billing.subscription?.entitled || tiers.own_machine.amount === null"
+            :disabled="
+              busy || waiting || !billing.subscription?.entitled || tiers.own_machine.amount === null || !tiers.own_machine.available
+            "
             :class="billing.own_machine_subscription ? secondaryButton : primaryButton"
             aria-describedby="support-own-machine-hint"
             @click="checkout('own_machine')"
@@ -179,13 +183,53 @@
         </div>
         <p id="support-own-machine-hint" class="text-xs text-ink-muted">{{ ownMachineHint }}</p>
       </section>
+
+      <!-- The static address add-on, while the deployment sells them. -->
+      <section
+        v-if="tiers.static_address"
+        class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6"
+        aria-labelledby="support-static-address"
+      >
+        <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+          <h2 id="support-static-address" class="text-lg font-semibold text-ink">Static address add-on</h2>
+          <p class="text-ink">
+            <template v-if="tiers.static_address.amount !== null">
+              <span class="text-xl font-semibold">{{ formatMoney(tiers.static_address.amount, tiers.currency) }}</span>
+              <span class="text-sm text-ink-muted"> a month for each</span>
+            </template>
+            <span v-else class="text-sm text-ink-muted">Price not set yet</span>
+          </p>
+        </div>
+        <p class="text-sm text-ink-muted">
+          Gives a server on one of your own machines the same IP address and a name of its own every time it starts,
+          so players find it in the same place. One for each own machine; each is its own monthly subscription.
+        </p>
+        <p v-if="addressCount > 0" class="text-sm text-ink">
+          You have {{ addressCount }} static address{{ addressCount === 1 ? '' : 'es' }}.
+        </p>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button
+            type="button"
+            :disabled="busy || waiting || addressBlock !== ''"
+            :class="addressCount > 0 ? secondaryButton : primaryButton"
+            aria-describedby="support-static-address-hint"
+            @click="checkout('static_address')"
+          >
+            Add a static address
+          </button>
+          <RouterLink to="/me/addresses" class="text-sm text-accent hover:text-ink-bright">Your static addresses</RouterLink>
+        </div>
+        <p id="support-static-address-hint" class="text-xs text-ink-muted">{{ addressBlock || ADDRESS_HINT }}</p>
+      </section>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
 // /me/support: the account's support tier (GET /api/me/billing) and the tiers
-// on offer (GET /api/billing/tiers). With no tier, Subscribe starts a Stripe
+// on offer (GET /api/billing/tiers), with the own-machine and static address
+// add-ons (each a checkout of its own; an item the fleet is sold out of says
+// so and cannot be bought). With no tier, Subscribe starts a Stripe
 // Checkout (POST /api/billing/checkout); with one, every change, the payment
 // method and the cancellation open Stripe's billing portal (POST
 // /api/billing/portal); a checkout for a tier the account already has
@@ -214,8 +258,10 @@ import {
 import { useSession } from '../../composables/useSession';
 import type { BillingItem, MyBilling, TierNumber, TiersResponse } from '../../types/billing';
 import {
+  activeAddressSubscriptions,
   checkoutConfirmed,
   hasLiveTier,
+  HOSTING_FULL,
   recallCheckout,
   rememberCheckout,
   type PendingCheckout,
@@ -233,6 +279,7 @@ const CONFIRM_SLOW_MS = 30_000;
 
 const PENDING_TEXT =
   'Your payment went through, and Stripe has not confirmed it to NovaWorld yet. This page keeps checking every 30 seconds.';
+const ADDRESS_HINT = 'Name it on your Static addresses page once it is paid for, and cancel it there.';
 
 const primaryButton =
   'rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40';
@@ -272,6 +319,7 @@ const ownMachineAtLimit = computed(
 );
 const ownMachineHint = computed(() => {
   if (!billing.value?.subscription?.entitled) return 'Needs a support tier first.';
+  if (tiers.value?.own_machine && !tiers.value.own_machine.available && !ownMachineAtLimit.value) return HOSTING_FULL;
   if (ownMachineAtLimit.value) {
     return 'You have an own machine for every server your tier covers. A higher tier makes room for more; cancel one in the billing portal.';
   }
@@ -279,6 +327,23 @@ const ownMachineHint = computed(() => {
     return 'Add another here, up to one for each server your tier covers; cancel one in the billing portal.';
   }
   return 'You can have one for each server your tier covers, and cancel any in the billing portal.';
+});
+
+// The static addresses the account pays for, one subscription each.
+const addressCount = computed(() => billing.value?.address_subscriptions.length ?? 0);
+// Why another static address cannot be bought now, or '' when it can: each
+// is an own machine's, so the account needs an own machine without one.
+const addressBlock = computed(() => {
+  const b = billing.value;
+  const offer = tiers.value?.static_address;
+  if (!b || !offer) return '';
+  if (b.own_machines === 0) return 'Needs an own machine first: a static address is for a server on one.';
+  if (b.own_machines <= b.static_addresses) {
+    return 'You have a static address for every own machine. Add an own machine first to add another address.';
+  }
+  if (offer.amount === null) return 'Its price is not set yet.';
+  if (!offer.available) return HOSTING_FULL;
+  return '';
 });
 
 // The status line: the confirmation's progress, or the last thing done.
@@ -373,14 +438,20 @@ async function checkout(item: BillingItem) {
       return;
     }
     fail(result.error);
-    // An own machine Stripe sold meanwhile (another tab): the page catches up.
-    if (result.error.code === 'own_machine_limit') {
+    // An add-on Stripe sold meanwhile (another tab): the page catches up.
+    if (result.error.code === 'own_machine_limit' || result.error.code === 'address_limit') {
       const fresh = await fetchMyBilling();
       if (fresh.ok) billing.value = fresh.value;
     }
+    // The fleet sold out since the page read the tiers: their cards say so.
+    if (result.error.code === 'sold_out') {
+      const fresh = await fetchTiers();
+      if (fresh.ok) tiers.value = fresh.value;
+    }
     return;
   }
-  rememberCheckout(item, billing.value?.own_machines ?? 0);
+  const b = billing.value;
+  rememberCheckout(item, b?.own_machines ?? 0, b ? activeAddressSubscriptions(b) : 0);
   go(result.value);
 }
 
@@ -395,7 +466,7 @@ function onChoose(tier: TierNumber) {
 let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 let confirmStarted = 0;
 let confirmDelay = CONFIRM_FIRST_MS;
-let pending: PendingCheckout = { item: 'tier1', ownMachinesBefore: 0 };
+let pending: PendingCheckout = { item: 'tier1', ownMachinesBefore: 0, addressesBefore: 0 };
 let unmounted = false;
 
 async function dropQuery() {
@@ -409,7 +480,9 @@ function confirmed(value: MyBilling): boolean {
   notice.value =
     pending.item === 'own_machine'
       ? 'Your own machine is active. Start a server on it from your Servers page.'
-      : 'Your support tier is active. Thank you for supporting OpenNova.';
+      : pending.item === 'static_address'
+        ? 'Your static address is paid for. Give it a name on your Static addresses page.'
+        : 'Your support tier is active. Thank you for supporting OpenNova.';
   void dropQuery();
   return true;
 }

@@ -8,15 +8,16 @@ if(POLICY CMP0168)
 endif()
 
 # The NovaWorld service (the server-side lobby and persistence leg: the
-# opennova_novaworld_service target, its five programs under apps/novaworld_*
+# opennova_novaworld_service target, its six programs under apps/novaworld_*
 # and their tests) builds only when asked. It runs on Linux (the programs'
 # images, the Linux CI jobs) over PostgreSQL through the system libpq
 # (libpq-dev to build, libpq5 to run); the game, the tools and opennova-serve
 # never need it.
 option(OPENNOVA_NOVAWORLD_SERVICE
     "Build the NovaWorld service (opennova_novaworld_service, apps/novaworld_*, their tests)" OFF)
-# Its HTTP layer: Crow and Asio, fetched at configure time. Web, the controller
-# and the worker build only with it; the gate and the lobby without it too.
+# Its HTTP layer: Crow and Asio, fetched at configure time. Web, the fleet, the
+# worker and the data program build only with it; the gate and the lobby
+# without it too.
 option(BUILD_NOVAWORLD_HTTP "Fetch + build Crow for the novaworld HTTP layer" OFF)
 if(BUILD_NOVAWORLD_HTTP AND NOT OPENNOVA_NOVAWORLD_SERVICE)
     message(FATAL_ERROR "BUILD_NOVAWORLD_HTTP is the NovaWorld service's HTTP layer: "
@@ -47,8 +48,8 @@ endif()
 # Native engine group libraries.
 add_subdirectory(engine)
 
-# The NovaWorld service's HTTP layer (apps/novaworld_common, novaworld_web,
-# novaworld_controller, novaworld_worker).
+# The NovaWorld service's HTTP layer (novaworld_web, novaworld_fleet, and with
+# them novaworld_worker and novaworld_data).
 if(BUILD_NOVAWORLD_HTTP)
     include(FetchContent)
     FetchContent_Declare(asio
@@ -73,18 +74,22 @@ endif()
 add_subdirectory(apps/common)
 add_subdirectory(apps/3di)
 add_subdirectory(apps/extract)
+# The service's libraries (apps/novaworld_common/README.md "Build layout and
+# tests"): with the service, or on Linux its core and the machine agents'
+# protocol alone, which hostd links.
+add_subdirectory(apps/novaworld_common)
 add_subdirectory(apps/hostd)  # Linux only
 add_subdirectory(apps/lan_probe)
 if(OPENNOVA_NOVAWORLD_SERVICE)
-    # The shared library first, then the five programs over it
+    # The six programs over the service's libraries
     # (apps/novaworld_common/README.md "Programs").
-    add_subdirectory(apps/novaworld_common)
     add_subdirectory(apps/novaworld_gate)
     add_subdirectory(apps/novaworld_lobby)
     if(BUILD_NOVAWORLD_HTTP)
         add_subdirectory(apps/novaworld_web)
-        add_subdirectory(apps/novaworld_controller)
+        add_subdirectory(apps/novaworld_fleet)
         add_subdirectory(apps/novaworld_worker)
+        add_subdirectory(apps/novaworld_data)
     endif()
 endif()
 add_subdirectory(apps/parity)

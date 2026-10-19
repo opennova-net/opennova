@@ -3,14 +3,17 @@
 // the working directory's game.cfg, listed on NovaWorld when the cfg's network
 // type says so. The server's legs live in server.cpp; this file owns the
 // console, the stop signals, the socket layer and the wall clock. The status
-// page and its chat input are status_console.cpp's.
+// page and its chat input are status_console.cpp's; what a supervisor reads of
+// the run (the tick health, the exit's line) is run_reports.h's.
 
+#include "run_reports.h"
 #include "server.h"
 #include "status_console.h"
 
 #include "console_log.h"
 #include "credentials.h"
 
+#include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <runtime/world/tick_accumulator.h>
 
@@ -27,6 +30,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <ctime>
 #include <string>
 #include <thread>
 #include <vector>
@@ -50,9 +54,15 @@ BOOL WINAPI on_console_ctrl(DWORD type) {
 }
 #endif
 
+// `ns` of the steady clock.
+int64_t ns_of(std::chrono::steady_clock::time_point at) {
+	return std::chrono::duration_cast<std::chrono::nanoseconds>(at.time_since_epoch()).count();
+}
+
 // Starts the server and runs it until a stop or the session's end. Returns
-// the process exit code.
-int serve_until_stopped(const opennova::serve::ServeOptions &options) {
+// the process exit code, and at a non-zero one the error it logged in
+// `failure` (the --exit-file's line).
+int serve_until_stopped(const opennova::serve::ServeOptions &options, std::string &failure) {
 	using namespace opennova;
 	serve::Server server(options);
 	std::string error;
@@ -61,7 +71,10 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 		// A set mpreset ends the process with code 0, as retail's load and its
 		// session create do [orig: Game_LoadConfig @0x5514A1..0x5514AC;
 		// CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0; crt_exit(0)].
-		return server.reset_exit() ? 0 : 1;
+		if (server.reset_exit())
+			return 0;
+		failure = error;
+		return 1;
 	}
 	io::logf(io::LogLevel::kInfo, "opennova-serve: serving on UDP %u (Ctrl+C stops)", server.bound_port());
 
@@ -75,10 +88,13 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 	auto next = last + period;
 	int code = 0;
 	// The status page stands in for the scene a retail dedicated host draws;
-	// stdin is its chat input line (status_console.h).
+	// stdin is its chat input line (status_console.h). A supervised server
+	// (--status-page off) has neither.
 	serve::StatusConsole status(stdout);
 	serve::ConsoleInput input;
-	input.start();
+	if (options.status_page)
+		input.start();
+	serve::TickStats ticks;
 	while (!g_stop.load()) {
 		const auto now = clock::now();
 		const double delta = std::chrono::duration<double>(now - last).count();
@@ -94,14 +110,28 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 			} else {
 				io::logf(io::LogLevel::kError, "opennova-serve: the session ended: %s",
 						server.end_message().c_str());
+				failure = "the session ended: " + server.end_message();
 				code = 3;
 			}
 			break;
 		}
-		std::string line;
-		while (input.poll(line)) status.submit(server, line);
-		status.update(server, static_cast<uint32_t>(
-				std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count()));
+		if (options.status_page) {
+			std::string line;
+			while (input.poll(line)) status.submit(server, line);
+			status.update(server, static_cast<uint32_t>(
+					std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count()));
+		}
+		if (!options.stats_file.empty()) {
+			// This frame's work, due by `next`; the window's summary once a minute.
+			const int64_t done_ns = ns_of(clock::now());
+			ticks.frame(ns_of(now), done_ns, ns_of(next));
+			if (const auto minute = ticks.take_if_due(done_ns)) {
+				std::string why;
+				if (!io::write_file_atomic(options.stats_file,
+							serve::tick_minute_json(*minute, static_cast<int64_t>(std::time(nullptr))), why))
+					io::logf(io::LogLevel::kWarn, "opennova-serve: --stats-file: %s", why.c_str());
+			}
+		}
 		std::this_thread::sleep_until(next);
 		next += period;
 	}
@@ -134,10 +164,18 @@ int main(int argc, char **argv) {
 	// The log sink masks every registered secret, so an account name, a
 	// password or a session tag never reaches the console (console_log.h).
 	serve::install_console_log(std::string(), options.log_debug);
+	// The error a non-zero exit ends on, for the supervisor (--exit-file).
+	const auto exit_with = [&options](int code, const std::string &failure) {
+		std::string why;
+		if (code != 0 && !options.exit_file.empty() &&
+				!io::write_file_atomic(options.exit_file, serve::exit_file_text(failure), why))
+			io::logf(io::LogLevel::kWarn, "opennova-serve: --exit-file: %s", why.c_str());
+		return code;
+	};
 	if (!options.credentials_path.empty()) {
 		if (!serve::load_credentials(options.credentials_path, options.credentials, error)) {
 			io::logf(io::LogLevel::kError, "opennova-serve: --credentials: %s", error.c_str());
-			return 2;
+			return exit_with(2, "--credentials: " + error);
 		}
 		const serve::Credentials &c = options.credentials;
 		for (const std::string *secret : { &c.user, &c.pass })
@@ -157,12 +195,13 @@ int main(int argc, char **argv) {
 	// never starts or stops it.
 	if (net::startup() != 0) {
 		io::logf(io::LogLevel::kError, "opennova-serve: the socket layer did not start");
-		return 1;
+		return exit_with(1, "the socket layer did not start");
 	}
-	const int code = serve_until_stopped(options);
+	std::string failure;
+	const int code = serve_until_stopped(options, failure);
 	net::shutdown();
 #ifdef _WIN32
 	SetEvent(g_done);
 #endif
-	return code;
+	return exit_with(code, failure);
 }

@@ -1,5 +1,5 @@
 // Each of the NovaWorld service's five programs boots alone with its own parts
-// (apps/novaworld_common/program.h). Each real binary runs as a child process
+// (apps/novaworld_common/program/program.h). Each real binary runs as a child process
 // (program_process.h) on an empty database of its own, which its shared boot
 // migrates:
 //
@@ -28,9 +28,17 @@
 //   - web: one with no ONNET_WEB_HOST does not boot; booted, the HTTP listener
 //     alone (and no health listener of its own: GET /livez and /healthz answer
 //     on its HTTP port), its menus' HOST_URL naming the web endpoint;
-//   - controller: no listener but its health one, elected (it leads), its
-//     parts stopped at the signal;
-//   - worker: its job pool, its health listener.
+//   - fleet: no listener but its health one, elected (it leads), stopped at the
+//     signal; with hosting off no part to run, and never a job pool or a
+//     scheduler;
+//   - worker: its job pool over its own kinds (no data set's), its health
+//     listener;
+//   - data: its job pool over the data sets' kinds alone (a store given), its
+//     health listener;
+//   - the hosting settings split: with the ec2 policy complete and the driver's
+//     own settings missing, web boots with hosting on (the policy is all it
+//     reads) and the worker, which alone launches the machines, does not
+//     (exit 1, its FATAL naming the driver).
 //
 // Every program then stops on SIGTERM with exit 0 and every database
 // connection closed. POSIX only.
@@ -221,7 +229,7 @@ int exercise_gate(const Binaries &bin, const test_temp::TempDir &temp,
 		TEST_EXPECT(gate_port != 0);
 		// Its parts alone.
 		TEST_EXPECT(!has(log, kNwUdpLine) && !has(log, kHttpLine) && !has(log, "[jobs]") &&
-				!has(log, "[controller]"));
+				!has(log, "[fleet]"));
 		if (livez_ok(process, log_path) != 0)
 			return 1;
 		opennova::GateResponse reply;
@@ -299,7 +307,7 @@ int exercise_lobby(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(logged_port(log, kNwUdpLine) == nw_port);
 	// Its parts alone.
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kHttpLine) && !has(log, "[jobs]") &&
-			!has(log, "[controller]"));
+			!has(log, "[fleet]"));
 	TEST_EXPECT(has(log, "[lobby] instance ") && has(log, " at " + lobby + " registered;"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
@@ -465,7 +473,7 @@ int exercise_web(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(has(log, boot_line("web")));
 	TEST_EXPECT(logged_port(log, kHttpLine) == http_port);
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHealthLine) &&
-			!has(log, "[jobs]") && !has(log, "[controller]"));
+			!has(log, "[jobs]") && !has(log, "[fleet]"));
 	// The menus name the one web endpoint (ONNET_WEB_HOST) and the port, as the
 	// gate does.
 	TEST_EXPECT(has(log,
@@ -480,28 +488,29 @@ int exercise_web(const Binaries &bin, const test_temp::TempDir &temp,
 	return 0;
 }
 
-int exercise_controller(const Binaries &bin, const test_temp::TempDir &temp,
+int exercise_fleet(const Binaries &bin, const test_temp::TempDir &temp,
 		const test_db::TestDatabase &database, const std::string &log_path) {
 	ProgramProcess process;
-	if (!boot(process, bin.controller, env_of(temp, database.conninfo(), {}), temp.root(),
-				log_path))
+	if (!boot(process, bin.fleet, env_of(temp, database.conninfo(), {}), temp.root(), log_path))
 		return 1;
-	TEST_EXPECT(wait_for_log(process, log_path, "[controller] controller-", kBootDeadline));
+	TEST_EXPECT(wait_for_log(process, log_path, "[fleet] fleet-", kBootDeadline));
 	const auto leads_by = Clock::now() + std::chrono::seconds(10);
 	while (!has(read_text(log_path), " leads (generation ") && Clock::now() < leads_by)
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	const std::string log = read_text(log_path);
-	TEST_EXPECT(has(log, boot_line("controller")));
+	TEST_EXPECT(has(log, boot_line("fleet")));
 	TEST_EXPECT(has(log, " leads (generation "));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
 			!has(log, "[jobs] ") && !has(log, "internal listener on"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
-	if (stop_cleanly(process, "controller", database, log_path) != 0)
+	// It schedules nothing: no periodic job in a few seconds of leading.
+	std::this_thread::sleep_for(std::chrono::seconds(2));
+	TEST_EXPECT(database.open().query("SELECT 1 FROM jobs LIMIT 1;").empty());
+	if (stop_cleanly(process, "fleet", database, log_path) != 0)
 		return 1;
-	TEST_EXPECT(logged_in_order(
-			read_text(log_path), { "[shutdown] stopping the controller", " stopped its parts" }));
-	std::printf("  controller: elected, no listener but its health one, its parts stopped at "
+	TEST_EXPECT(has(read_text(log_path), "[shutdown] stopping the fleet"));
+	std::printf("  fleet: elected, no listener but its health one, no job scheduled, stopped at "
 				"the signal\n");
 	return 0;
 }
@@ -514,14 +523,95 @@ int exercise_worker(const Binaries &bin, const test_temp::TempDir &temp,
 		return 1;
 	const std::string log = read_text(log_path);
 	TEST_EXPECT(has(log, boot_line("worker")));
-	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s)"));
+	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) worker-"));
+	TEST_EXPECT(has(log, "jobs.prune") && !has(log, "tree.finalize") && !has(log, "tree.prune"));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
-			!has(log, "[controller]"));
+			!has(log, "[fleet]"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
+	// Its scheduler: the prunes' first buckets, enqueued by the worker itself.
+	const auto scheduled_by = Clock::now() + std::chrono::seconds(10);
+	while (database.open()
+					.query("SELECT 1 FROM jobs WHERE kind = 'jobs.prune' AND schedule_key IS NOT "
+						   "NULL;")
+					.empty() &&
+			Clock::now() < scheduled_by)
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	TEST_EXPECT(!database.open()
+						 .query("SELECT 1 FROM jobs WHERE kind = 'jobs.prune' AND schedule_key IS "
+								"NOT NULL;")
+						 .empty());
 	if (stop_cleanly(process, "worker", database, log_path) != 0)
 		return 1;
-	std::printf("  worker: its job pool alone\n");
+	std::printf("  worker: its job pool over its own kinds and their schedule\n");
+	return 0;
+}
+
+int exercise_data(const Binaries &bin, const test_temp::TempDir &temp,
+		const test_db::TestDatabase &database, const std::string &log_path) {
+	ProgramProcess process;
+	const std::string store = "ONNET_OBJECT_STORE_URL=file://" + temp.file("store");
+	if (!boot(process, bin.data, env_of(temp, database.conninfo(), { "ONNET_WORKER_THREADS=2", store }),
+				temp.root(), log_path))
+		return 1;
+	const std::string log = read_text(log_path);
+	TEST_EXPECT(has(log, boot_line("data")));
+	TEST_EXPECT(has(log, "[boot] data sets: jobs over the local store"));
+	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) data-") &&
+			has(log, "for release.apply, release.validate, tree.finalize, tree.prune"));
+	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
+			!has(log, "[fleet]") && !has(log, "jobs.prune"));
+	if (livez_ok(process, log_path) != 0)
+		return 1;
+	if (stop_cleanly(process, "data", database, log_path) != 0)
+		return 1;
+	std::printf("  data: its job pool over the data sets' kinds alone\n");
+	return 0;
+}
+
+// The fleet's policy for ec2 hosting with none of the driver's own settings:
+// the servers' public address, the store, the serve image.
+std::vector<std::string> ec2_policy_env(
+		const test_temp::TempDir &temp, const std::string &db_url, std::vector<std::string> more) {
+	std::vector<std::string> env;
+	for (const std::string &e : env_of(temp, db_url, std::move(more)))
+		if (e.rfind("ONNET_PUBLIC_HOST=", 0) != 0)
+			env.push_back(e);
+	env.push_back("ONNET_PUBLIC_HOST=203.0.113.7");
+	env.push_back("ONNET_HOSTED_PROVIDER=ec2");
+	env.push_back("ONNET_OBJECT_STORE_URL=file://" + temp.file("store"));
+	env.push_back("ONNET_HOSTED_SERVE_IMAGE=ghcr.io/opennova-net/opennova-serve:test");
+	return env;
+}
+
+int exercise_hosting_split(const Binaries &bin, const test_temp::TempDir &temp,
+		const test_db::TestDatabase &database, const std::string &log_path) {
+	const uint16_t http_port = free_tcp_port();
+	{
+		ProgramProcess process;
+		if (!boot(process, bin.web,
+					ec2_policy_env(temp, database.conninfo(),
+							{ "ONNET_HTTP_PORT=" + std::to_string(http_port),
+									std::string("ONNET_WEB_HOST=") + kWebHost }),
+					temp.root(), log_path))
+			return 1;
+		const std::string log = read_text(log_path);
+		TEST_EXPECT(has(log, "[boot] hosted servers: ec2, serve image ghcr.io/opennova-net/"));
+		TEST_EXPECT(!has(log, "hosting off") && !has(log, "the ec2 driver"));
+		if (stop_cleanly(process, "web", database, log_path) != 0)
+			return 1;
+	}
+	ProgramProcess process;
+	TEST_EXPECT(process.spawn(bin.worker, ec2_policy_env(temp, database.conninfo(), {}),
+			temp.root(), log_path));
+	TEST_EXPECT(process.wait_exit(kBootDeadline));
+	TEST_EXPECT(process.exit_code() == 1);
+	const std::string log = read_text(log_path);
+	TEST_EXPECT(has(log, "[boot] hosted servers: ec2, serve image"));
+	TEST_EXPECT(has(log, "[boot] FATAL: the machine driver: the ec2 driver"));
+	TEST_EXPECT(!has(log, "[boot] ready."));
+	std::printf("  the hosting split: web on the ec2 policy alone; the worker, short of its "
+				"driver, refused\n");
 	return 0;
 }
 
@@ -547,7 +637,7 @@ int main(int argc, char **argv) {
 	test_redis::init(argc, argv);
 	Binaries bin;
 	if (!bin.read(argc, argv, 1)) {
-		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <controller> <worker>\n", argv[0]);
+		std::fprintf(stderr, "usage: %s <gate> <lobby> <web> <fleet> <worker> <data>\n", argv[0]);
 		return 2;
 	}
 	TEST_EXPECT(net::startup() == 0);
@@ -559,9 +649,13 @@ int main(int argc, char **argv) {
 	if (rc == 0)
 		rc = run_case(bin, exercise_web, "web");
 	if (rc == 0)
-		rc = run_case(bin, exercise_controller, "controller");
+		rc = run_case(bin, exercise_fleet, "fleet");
 	if (rc == 0)
 		rc = run_case(bin, exercise_worker, "worker");
+	if (rc == 0)
+		rc = run_case(bin, exercise_data, "data");
+	if (rc == 0)
+		rc = run_case(bin, exercise_hosting_split, "hosting_split");
 	net::shutdown();
 	if (rc == 0)
 		std::printf("OK: each program boots with its own parts alone\n");

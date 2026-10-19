@@ -35,6 +35,7 @@
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
+#include "common/test_parts.h"
 
 using namespace opennova;
 using namespace opennova::trngen;
@@ -229,53 +230,105 @@ void check_region(const std::string &name, const CptFile &shipped, const std::ve
 	       name + ": the edited file writes and reads back: " + error);
 }
 
+// The shipped files and their .trn locks, read once (at the first part a run makes).
+struct Corpus {
+	std::map<std::string, Locks> locks;
+	std::vector<std::filesystem::path> cpts;
+};
+std::string corpus_dir;
+
+const Corpus &corpus() {
+	static const Corpus read = [] {
+		Corpus c;
+		c.locks = trn_locks(corpus_dir);
+		for (const auto &entry : std::filesystem::directory_iterator(corpus_dir))
+			if (entry.is_regular_file() && lower(entry.path().extension().string()) == ".cpt") c.cpts.push_back(entry.path());
+		std::sort(c.cpts.begin(), c.cpts.end());
+		return c;
+	}();
+	return read;
+}
+
+// A shipped file (`path`) read with its 341 tiles and its .trn's locks; false, a failure, when it does not read.
+bool read_shipped(const std::filesystem::path &path, std::vector<uint8_t> &bytes, CptFile &cpt, Locks &lock) {
+	const std::string name = path.filename().string();
+	bytes = test_io::read_file(path.string());
+	std::string error;
+	if (!load_cpt(bytes.data(), bytes.size(), cpt, error) || cpt.tiles.size() != 341u) {
+		expect(false, name + ": reads with 341 tiles: " + error);
+		return false;
+	}
+	const auto at = corpus().locks.find(lower(name));
+	lock = at == corpus().locks.end() ? Locks{} : at->second;
+	return true;
+}
+
+// The part `draw_back`: every shipped file there, each read and its leaves drawn back (W3).
+int part_draw_back() {
+	const std::vector<std::filesystem::path> &cpts = corpus().cpts;
+	expect(cpts.size() >= 23u, "the shipped .cpt files are there (" + std::to_string(cpts.size()) + ")");
+	for (const auto &path : cpts) {
+		std::vector<uint8_t> bytes;
+		CptFile cpt;
+		Locks lock;
+		if (read_shipped(path, bytes, cpt, lock)) check_draw_back(path.filename().string(), cpt, lock);
+	}
+	return 0;
+}
+
+const std::vector<std::string> kRegionLegs = {"dvxi5.cpt", "dvxg3.cpt", "g14.cpt"};
+const std::vector<std::string> kFlipped = {"dvxi4.cpt", "dvxg9.cpt"};
+
+bool among(const std::vector<std::string> &names, const std::string &key) {
+	return std::find(names.begin(), names.end(), key) != names.end();
+}
+
+// One file's bake (the region leg on Dvxi5, Dvxg3 and g14, the cold bake on the others), timed.
+void bake_shipped(const std::filesystem::path &path) {
+	const std::string name = path.filename().string();
+	std::vector<uint8_t> bytes;
+	CptFile cpt;
+	Locks lock;
+	if (!read_shipped(path, bytes, cpt, lock)) return;
+	const auto start = std::chrono::steady_clock::now();
+	if (among(kRegionLegs, lower(name))) check_region(name, cpt, bytes, lock);
+	else check_cold_bake(name, cpt, lock);
+	std::printf("  %-10s baked cold in %.1f s\n", name.c_str(),
+	            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+}
+
+// The part of one file's leg (`key`, its lower-case name): the file there and baked.
+int part_bake(const char *key) {
+	const std::vector<std::filesystem::path> &cpts = corpus().cpts;
+	const auto at = std::find_if(cpts.begin(), cpts.end(),
+	                             [&](const std::filesystem::path &path) { return lower(path.filename().string()) == key; });
+	expect(at != cpts.end(), std::string("the shipped ") + key + " is there");
+	if (at != cpts.end()) bake_shipped(*at);
+	return 0;
+}
+
 } // namespace
 
+// A row per part (tests/common/test_parts.h): `draw_back` W3 over every file, and a part per baked file (the
+// region legs on Dvxi5, Dvxg3 and g14, the cold bakes of Dvxi4 and dvxg9), side by side. By hand, a directory runs
+// every part over it and then bakes its other files cold.
 int main(int argc, char **argv) {
-	const bool every = argc > 1;
-	const std::string assets = every ? std::string(argv[1]) : retail::assets();
-	if (assets.empty()) return retail::skip("OPENNOVA_JO_ASSETS (the extracted retail tree with its loose .cpt polydata)");
-	const std::map<std::string, Locks> locks = trn_locks(assets);
-	std::vector<std::filesystem::path> cpts;
-	for (const auto &entry : std::filesystem::directory_iterator(assets))
-		if (entry.is_regular_file() && lower(entry.path().extension().string()) == ".cpt") cpts.push_back(entry.path());
-	std::sort(cpts.begin(), cpts.end());
-	expect(cpts.size() >= 23u, "the shipped .cpt files are there (" + std::to_string(cpts.size()) + ")");
-	const std::vector<std::string> region_legs = {"dvxi5.cpt", "dvxg3.cpt", "g14.cpt"};
-	const std::vector<std::string> flipped = {"dvxi4.cpt", "dvxg9.cpt"};
-	const auto among = [](const std::vector<std::string> &names, const std::string &key) {
-		return std::find(names.begin(), names.end(), key) != names.end();
-	};
-	int regions = 0, cold = 0;
-	for (const auto &path : cpts) {
-		const std::string name = path.filename().string();
-		const std::vector<uint8_t> bytes = test_io::read_file(path.string());
-		CptFile cpt;
-		std::string error;
-		if (!load_cpt(bytes.data(), bytes.size(), cpt, error) || cpt.tiles.size() != 341u) {
-			expect(false, name + ": reads with 341 tiles: " + error);
-			continue;
+	const bool every = argc > 1 && std::string(argv[1]) != "--part";
+	corpus_dir = every ? std::string(argv[1]) : retail::assets();
+	if (corpus_dir.empty()) return retail::skip("OPENNOVA_JO_ASSETS (the extracted retail tree with its loose .cpt polydata)");
+	failures += test_parts::run(argc, argv,
+	                            {{"draw_back", {part_draw_back}},
+	                             {"dvxi5", {[] { return part_bake("dvxi5.cpt"); }}},
+	                             {"dvxg3", {[] { return part_bake("dvxg3.cpt"); }}},
+	                             {"g14", {[] { return part_bake("g14.cpt"); }}},
+	                             {"dvxi4", {[] { return part_bake("dvxi4.cpt"); }}},
+	                             {"dvxg9", {[] { return part_bake("dvxg9.cpt"); }}}});
+	if (every)
+		for (const auto &path : corpus().cpts) {
+			const std::string key = lower(path.filename().string());
+			if (!among(kRegionLegs, key) && !among(kFlipped, key)) bake_shipped(path);
 		}
-		const std::string key = lower(name);
-		const auto at = locks.find(key);
-		const Locks lock = at == locks.end() ? Locks{} : at->second;
-		check_draw_back(name, cpt, lock);
-		const auto start = std::chrono::steady_clock::now();
-		if (among(region_legs, key)) {
-			check_region(name, cpt, bytes, lock);
-			++regions;
-		} else if (every || among(flipped, key)) {
-			check_cold_bake(name, cpt, lock);
-		} else {
-			continue;
-		}
-		++cold;
-		std::printf("  %-10s baked cold in %.1f s\n", name.c_str(),
-		            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
-	}
-	expect(regions == 3, "the region legs ran on Dvxi5, Dvxg3 and g14");
-	expect(cold == (every ? static_cast<int>(cpts.size()) : 5), "the cold bakes ran (" + std::to_string(cold) + ")");
 	if (failures) return 1;
-	std::printf("OK: region bakes over the shipped .cpt files, %d of %zu baked cold\n", cold, cpts.size());
+	std::printf("OK: region bakes over the shipped .cpt files%s\n", every ? ", every file baked cold" : "");
 	return 0;
 }

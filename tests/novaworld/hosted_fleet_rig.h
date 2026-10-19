@@ -12,13 +12,14 @@
 // and every job due; a step() is what a second of the service does: a tick,
 // then one sync of every machine's agent (a muted machine's agent is silent).
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "billing/billing_repository.h"
-#include "hosted/data_set_repository.h"
-#include "hosted/fleet_jobs.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/hosted_repository.h"
-#include "hosted/hosted_settings.h"
+#include "data_sets/data_set_repository.h"
+#include "hosted/cloud/fleet_job_handlers.h"
+#include "hosted/model/fleet_jobs.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/hosted_settings.h"
 #include "hosted/supervisor.h"
 #include "hosted_fake_driver.h"
 #include "jobs/scheduler.h"
@@ -120,7 +121,7 @@ inline std::string tree_url_of(int64_t id) {
 	return "file:///store/trees/" + std::to_string(id) + "/";
 }
 
-// A player with an admin's grant of `comp_servers` hosted servers.
+// A player with an admin's grant of `comp_servers` hosted servers (comp_grants).
 inline int64_t make_player(Database &db, const std::string &name, int comp_servers) {
 	static int pcid_counter = 0;
 	nws::CreateUserParams p;
@@ -136,7 +137,7 @@ inline int64_t make_player(Database &db, const std::string &name, int comp_serve
 		std::fprintf(stderr, "  create_user %s: %s\n", name.c_str(), created.error_code.c_str());
 		return 0;
 	}
-	if (comp_servers > 0 && !nws::set_comp_servers(db, created.id, comp_servers).ok) return 0;
+	if (comp_servers > 0 && !nws::billing::set_comp_grants(db, created.id, { comp_servers, 0 })) return 0;
 	return created.id;
 }
 
@@ -289,18 +290,20 @@ struct Rig {
 		// Every pass that wants a describe asks one (the jobs then run at once).
 		config.describe_interval_ms = 0;
 		config.clock_ms = [this] { return now; };
-		hosted::register_fleet_jobs(registry, fake);
 		make_supervisor();
 		lobby_up();
 	}
+	// The supervisor over `config`, and the fleet's jobs registered again with its
+	// maximums (as a worker reads the same settings).
 	void make_supervisor() {
+		hosted::register_fleet_jobs(registry, fake, config.placement);
 		sup = std::make_unique<hosted::Supervisor>(pool, fake.profile(), config);
 		sup->set_stop_listing([this](opennova::db::Database &, uint32_t rid, int64_t account) {
 			pushes.emplace_back(rid, account);
 			return true;
 		});
 		scheduler = std::make_unique<jobs::Scheduler>(pool,
-				hosted::fleet_schedule(static_cast<int64_t>(config.orphan_sweep_interval_ms)),
+				hosted::fleet_schedule(hosted::kFleetSweepIntervalMs),
 				[this] { return static_cast<int64_t>(now); });
 	}
 	// Every job due, run on this thread (it holds none of the pool's leases).

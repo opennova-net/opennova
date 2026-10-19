@@ -319,7 +319,7 @@ int test_retries() {
 
 // The periodic buckets: a tick enqueues each kind's job once per bucket, none beside
 // one still queued (its bucket's own follows once it ended), none for a bucket `wanted`
-// declines; an at_start job stands for its bucket; two schedulers (two controllers in
+// declines; an at_start job stands for its bucket; two schedulers (two leaders in
 // turn) never give a bucket two jobs.
 int test_scheduler() {
 	TestDatabase scratch;
@@ -362,6 +362,103 @@ int test_scheduler() {
 	return 0;
 }
 
+// Two schedulers on one database, as two processes of one program run them (no
+// election), ticking at once on threads of their own over the same buckets: each
+// bucket gets exactly one job, whichever enqueued it.
+int test_schedulers_at_once() {
+	TestDatabase scratch;
+	ConnectionPool pool(scratch.options(), 8);
+	std::vector<jobs::PeriodicJob> periodic(1);
+	periodic[0].kind = "test.bucket";
+	periodic[0].period_ms = 100;
+	std::atomic<int64_t> now{ 50000 };
+	const auto clock = [&now] { return now.load(); };
+	jobs::Scheduler a(pool, periodic, clock, 1);
+	jobs::Scheduler b(pool, periodic, clock, 1);
+	a.start();
+	b.start();
+	auto lease = pool.acquire();
+	Database &db = *lease;
+	// Ten buckets in turn: each one's job comes (from either), is done, and only
+	// then does the clock move on, so a bucket left without one would show.
+	for (int64_t bucket = 500; bucket < 510; ++bucket) {
+		const std::string key = jobs::Scheduler::schedule_key("test.bucket", bucket * 100, 100);
+		bool came = false;
+		for (int i = 0; i < 400 && !came; ++i) {
+			came = !db.query("SELECT 1 FROM jobs WHERE schedule_key = $1;", { BindValue(key) })
+							.empty();
+			if (!came)
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
+		TEST_EXPECT(came);
+		// Both schedulers have ticked over this bucket since its job came.
+		const uint64_t a_turns = a.turns();
+		const uint64_t b_turns = b.turns();
+		while (a.turns() < a_turns + 2 || b.turns() < b_turns + 2)
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		auto j = jobs::claim(db, "w", { "test.bucket" }, {}, 60000);
+		TEST_EXPECT(j && jobs::complete(db, *j));
+		if (bucket + 1 < 510)
+			now = (bucket + 1) * 100;
+	}
+	a.stop();
+	b.stop();
+	TEST_EXPECT(db.query("SELECT COUNT(*) FROM jobs WHERE kind = 'test.bucket';")
+						.front()
+						.as_int(0)
+						.value_or(0) == 10);
+	return 0;
+}
+
+// An at_start job under a start key (a release's): the schedulers of one release's
+// tasks enqueue it once between them, the first one's done or not, and a task of the
+// next release once more; with no start key (off ECS) it is deduped by its kind alone.
+int test_at_start_per_release() {
+	TestDatabase scratch;
+	ConnectionPool pool(scratch.options(), 4);
+	std::vector<jobs::PeriodicJob> periodic(1);
+	periodic[0].kind = "test.reconcile";
+	periodic[0].period_ms = 60 * 60 * 1000;
+	periodic[0].at_start = true;
+	const auto clock = [] { return int64_t{ 5000 }; };
+	auto lease = pool.acquire();
+	Database &db = *lease;
+	const auto count = [&db] {
+		return db.query("SELECT COUNT(*) FROM jobs WHERE kind = 'test.reconcile';")
+				.front()
+				.as_int(0)
+				.value_or(0);
+	};
+	jobs::Scheduler first(pool, periodic, clock, 1000, "opennova-prod-worker:12");
+	first.enqueue_at_start(db, 5000);
+	TEST_EXPECT(count() == 1);
+	TEST_EXPECT(db.query("SELECT schedule_key FROM jobs WHERE kind = 'test.reconcile';")
+						.front()
+						.as_text(0)
+						.value_or("") == "test.reconcile@start:opennova-prod-worker:12");
+	TEST_EXPECT(jobs::Scheduler::start_schedule_key("k", "r") == "k@start:r");
+	auto j = jobs::claim(db, "w", { "test.reconcile" }, {}, 60000);
+	TEST_EXPECT(j && jobs::complete(db, *j));
+	// A second task of the release, once the first one's is done: none.
+	jobs::Scheduler second(pool, periodic, clock, 1000, "opennova-prod-worker:12");
+	second.enqueue_at_start(db, 5000);
+	TEST_EXPECT(count() == 1);
+	// The next release's task: one more.
+	jobs::Scheduler next(pool, periodic, clock, 1000, "opennova-prod-worker:13");
+	next.enqueue_at_start(db, 5000);
+	TEST_EXPECT(count() == 2);
+	// No start key: deduped by its kind alone, so one more while none is pending.
+	j = jobs::claim(db, "w", { "test.reconcile" }, {}, 60000);
+	TEST_EXPECT(j && jobs::complete(db, *j));
+	jobs::Scheduler unkeyed(pool, periodic, clock);
+	unkeyed.enqueue_at_start(db, 5000);
+	TEST_EXPECT(count() == 3);
+	TEST_EXPECT(db.query("SELECT 1 FROM jobs WHERE kind = 'test.reconcile' AND schedule_key IS "
+						 "NULL;")
+						.size() == 1);
+	return 0;
+}
+
 // The claim's lock is its own (database.h's keys): a hosted start holding the
 // hosted-start lock for its transaction keeps no claim waiting (one that
 // shared the key would wait out its lock timeout and fail), and no other
@@ -383,7 +480,7 @@ int test_claim_lock_apart() {
 	start->rollback();
 	TEST_EXPECT(claimed && claimed->id == id);
 	for (const int64_t other : { opennova::db::kMigrationLock, opennova::db::kHostedStartLock,
-				 opennova::db::kControllerLock })
+				 opennova::db::kFleetLock })
 		TEST_EXPECT(other != opennova::db::kJobsClaimLock);
 	return 0;
 }
@@ -523,6 +620,8 @@ int main(int argc, char **argv) {
 		{ "leases", test_leases },
 		{ "retries", test_retries },
 		{ "scheduler", test_scheduler },
+		{ "schedulers_at_once", test_schedulers_at_once },
+		{ "at_start_per_release", test_at_start_per_release },
 		{ "claim_lock_apart", test_claim_lock_apart },
 		{ "prune", test_prune },
 		{ "pool_and_keeper", test_pool_and_keeper },

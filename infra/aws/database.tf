@@ -6,7 +6,7 @@
 # in unlimited mode: billed past its baseline, never throttled), single-AZ in
 # a zone RDS picks while traffic is small (var.db_multi_az on: RDS keeps a
 # synchronous standby in the other private subnet's zone and fails over to it on
-# its own, the endpoint's name following). Reached from the five programs'
+# its own, the endpoint's name following). Reached from the six programs'
 # security groups and the backup task's alone (programs.tf, backup.tf).
 # max_connections is sized, not left to RDS's memory formula: db_pool_max
 # connections for each of db_service_processes program processes, plus 10 for

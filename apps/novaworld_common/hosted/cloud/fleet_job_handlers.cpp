@@ -1,0 +1,242 @@
+#include "fleet_job_handlers.h"
+
+#include "core/loggable.h"
+#include "hosted/model/fleet_repository.h"
+
+#include <cstdio>
+#include <optional>
+#include <set>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+namespace opennova::novaworld_server::hosted {
+
+namespace {
+
+int64_t member_int(const io::JsonValue &payload, const char *key) {
+	const io::JsonValue *v = payload.get(key);
+	return v != nullptr && v->is_number() ? static_cast<int64_t>(v->number) : 0;
+}
+
+jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver, const PlacementPolicy &limits) {
+	const int64_t id = member_int(ctx.job.payload, "machine_id");
+	std::optional<FleetMachineRow> row;
+	int of_kind = 0;
+	{
+		auto lease = ctx.pool.acquire();
+		row = find_machine(*lease, id);
+		// The machines of its kind that take servers, as placement counts them
+		// toward the maximum: this one among them.
+		if (row)
+			for (const FleetMachineRow &m : list_live_machines(*lease))
+				if (m.kind == row->kind && machine_takes_servers(m.state))
+					++of_kind;
+	}
+	// Ended meanwhile (an admin's end, the supervisor's "never finished"): nothing to launch.
+	if (!row || row->state != FleetMachineState::Launching)
+		return jobs::JobResult::done();
+	// Past the fleet's maximum for the kind, whatever made the row: no cloud call.
+	const bool own = row->kind == MachineKind::Own;
+	const int max = own ? limits.max_own : limits.max_shared;
+	if (of_kind > max) {
+		std::fprintf(stderr,
+				"[fleet] machine %lld (%s, for server %lld): refused, %d %s machines would run past "
+				"the fleet's maximum of %d (%s)\n",
+				static_cast<long long>(id), machine_kind_text(row->kind),
+				static_cast<long long>(row->launched_for), of_kind, machine_kind_text(row->kind),
+				max, own ? "ONNET_FLEET_MAX_OWN" : "ONNET_FLEET_MAX_SHARED");
+		auto lease = ctx.pool.acquire();
+		fail_refused_launch(*lease, id, "past the fleet's maximum");
+		return jobs::JobResult::fail("past the fleet's maximum");
+	}
+	MachineLaunch request;
+	request.machine_id = id;
+	request.kind = row->kind;
+	request.slots = row->slots;
+	request.bootstrap_token = ctx.job.secret;
+	request.attempt = ctx.job.attempts;
+	// Where an earlier run last called the cloud, and each call's subnet written
+	// before the call: a run again after this one (its mark_launched failed, its
+	// claim lapsed) calls there first, under the same client token, though the
+	// cloud may not list this run's machine yet.
+	request.subnet = row->launch_subnet;
+	// The static address it carries, which the docker driver starts it at.
+	if (row->address_id > 0) {
+		auto lease = ctx.pool.acquire();
+		request.address = carried_address_ip(*lease, id);
+	}
+	request.record_subnet = [&ctx, id](const std::string &subnet) {
+		try {
+			auto lease = ctx.pool.acquire();
+			return record_launch_subnet(*lease, id, subnet);
+		} catch (const db::Error &e) {
+			std::fprintf(stderr, "[fleet] machine %lld: its launch's subnet was not recorded: %s\n",
+					static_cast<long long>(id), e.what());
+			return false;
+		}
+	};
+	std::string error;
+	const std::optional<LaunchedMachine> launched = driver.launch(request, error);
+	auto lease = ctx.pool.acquire();
+	db::Database &db = *lease;
+	if (!launched) {
+		// The driver's own text (a CLI's error) goes to the log alone; the server's
+		// event, which the owner reads, says what happened (the supervisor's).
+		std::fprintf(stderr, "[fleet] machine %lld (%s, for server %lld): the launch failed: %s\n",
+				static_cast<long long>(id), machine_kind_text(row->kind),
+				static_cast<long long>(row->launched_for), error.c_str());
+		const std::string reason = launch_failure_reason(error);
+		fail_refused_launch(db, id, reason);
+		return jobs::JobResult::fail(reason);
+	}
+	if (mark_launched(db, id, *launched)) {
+		std::printf("[fleet] machine %lld (%s, %d slot%s) launched as %s for server %lld\n",
+				static_cast<long long>(id), machine_kind_text(row->kind), row->slots,
+				row->slots == 1 ? "" : "s", loggable(launched->cloud_id).c_str(),
+				static_cast<long long>(row->launched_for));
+		return jobs::JobResult::done();
+	}
+	// The row left launching meanwhile. Another run of this job (the same client
+	// token) recorded this very machine: it stays. Otherwise no row runs it.
+	const auto now = find_machine(db, id);
+	if (now && now->cloud_id == launched->cloud_id)
+		return jobs::JobResult::done();
+	std::printf("[fleet] machine %lld left launching during its launch; %s ends\n",
+			static_cast<long long>(id), loggable(launched->cloud_id).c_str());
+	driver.terminate(launched->cloud_id);
+	return jobs::JobResult::done();
+}
+
+jobs::JobResult describe(jobs::JobContext &ctx, MachineDriver &driver) {
+	const int64_t id = member_int(ctx.job.payload, "machine_id");
+	const io::JsonValue *cloud_id = ctx.job.payload.get("cloud_id");
+	if (cloud_id == nullptr || !cloud_id->is_string() || cloud_id->string.empty())
+		return jobs::JobResult::fail("no cloud machine named");
+	// The launch's grace by the row's clock, whichever worker launched it.
+	int64_t launched_ago = -1;
+	{
+		auto lease = ctx.pool.acquire();
+		launched_ago = launched_ago_ms(*lease, id).value_or(-1);
+	}
+	const CloudMachine cloud = driver.describe(cloud_id->string, launched_ago);
+	auto lease = ctx.pool.acquire();
+	record_cloud_state(*lease, id, cloud_id->string, cloud);
+	return jobs::JobResult::done();
+}
+
+jobs::JobResult terminate(jobs::JobContext &ctx, MachineDriver &driver) {
+	const io::JsonValue *cloud_id = ctx.job.payload.get("cloud_id");
+	if (cloud_id == nullptr || !cloud_id->is_string() || cloud_id->string.empty())
+		return jobs::JobResult::fail("no cloud machine named");
+	driver.terminate(cloud_id->string);
+	return jobs::JobResult::done();
+}
+
+jobs::JobResult sweep(jobs::JobContext &ctx, MachineDriver &driver,
+		const std::function<void(db::ConnectionPool &)> &also_sweep) {
+	std::vector<TaggedCloudMachine> tagged;
+	try {
+		tagged = driver.list_tagged();
+	} catch (const std::runtime_error &e) {
+		// No listing, nothing ended; the next sweep tries again.
+		std::fprintf(stderr, "[fleet] WARN sweep: %s; nothing is ended\n", e.what());
+		return jobs::JobResult::fail("the machines could not be listed");
+	}
+	std::set<std::string> listed;
+	std::vector<std::string> orphans;
+	std::vector<FleetMachineRow> unlisted;
+	{
+		auto lease = ctx.pool.acquire();
+		db::Database &db = *lease;
+		for (const TaggedCloudMachine &t : tagged) {
+			const auto row = t.machine_id > 0 ? find_machine(db, t.machine_id) : std::nullopt;
+			const bool live = row && machine_is_live(row->state) && row->provider == driver.name();
+			// A row still launching (no cloud id until its launch's answer is written)
+			// names whatever its launch in flight made: never an orphan.
+			if (live && (row->state == FleetMachineState::Launching || row->cloud_id.empty()))
+				continue;
+			if (!live || row->cloud_id != t.cloud_id) {
+				std::printf(
+						"[fleet] sweep: machine %s (row %lld) is no live machine's; ending it\n",
+						loggable(t.cloud_id).c_str(), static_cast<long long>(t.machine_id));
+				orphans.push_back(t.cloud_id);
+				continue;
+			}
+			listed.insert(t.cloud_id);
+		}
+		for (FleetMachineRow &m : list_live_machines(db)) {
+			if (m.state == FleetMachineState::Launching || m.cloud_id.empty() ||
+					listed.count(m.cloud_id) != 0)
+				continue;
+			unlisted.push_back(std::move(m));
+		}
+	}
+	for (const std::string &cloud_id : orphans)
+		driver.terminate(cloud_id);
+	// Not listed: the driver's own describe decides (a cloud machine launched a
+	// moment ago may not be listed yet); a gone one ends at the next pass.
+	for (const FleetMachineRow &m : unlisted) {
+		int64_t launched_ago = -1;
+		{
+			auto lease = ctx.pool.acquire();
+			launched_ago = launched_ago_ms(*lease, m.id).value_or(-1);
+		}
+		const CloudMachine cloud = driver.describe(m.cloud_id, launched_ago);
+		auto lease = ctx.pool.acquire();
+		record_cloud_state(*lease, m.id, m.cloud_id, cloud);
+	}
+	// The static addresses' orphans (reported, never released).
+	if (also_sweep) also_sweep(ctx.pool);
+	return jobs::JobResult::done();
+}
+
+} // namespace
+
+void register_fleet_jobs(jobs::JobRegistry &registry, MachineDriver &driver,
+		PlacementPolicy limits, FleetJobCaps caps,
+		std::function<void(db::ConnectionPool &)> also_sweep) {
+	jobs::JobKind launch_kind{ kJobMachineLaunch,
+		[&driver, limits](jobs::JobContext &ctx) { return launch(ctx, driver, limits); },
+		caps.launch };
+	launch_kind.retry_base_ms = 2000;
+	launch_kind.retry_max_ms = 60 * 1000;
+	registry.add(std::move(launch_kind));
+	jobs::JobKind describe_kind{ kJobMachineDescribe,
+		[&driver](jobs::JobContext &ctx) { return describe(ctx, driver); }, caps.describe };
+	describe_kind.retry_base_ms = 1000;
+	describe_kind.retry_max_ms = 10 * 1000;
+	registry.add(std::move(describe_kind));
+	registry.add({ kJobMachineTerminate,
+			[&driver](jobs::JobContext &ctx) { return terminate(ctx, driver); }, caps.terminate });
+	registry.add({ kJobFleetSweep,
+			[&driver, also_sweep = std::move(also_sweep)](jobs::JobContext &ctx) {
+				return sweep(ctx, driver, also_sweep);
+			},
+			1 });
+}
+
+std::string cloud_error_code(std::string_view text) {
+	static constexpr std::string_view kOpen = "An error occurred (";
+	const size_t at = text.find(kOpen);
+	if (at == std::string_view::npos)
+		return {};
+	const size_t start = at + kOpen.size();
+	const size_t end = text.find(')', start);
+	if (end == std::string_view::npos || end == start || end - start > 64)
+		return {};
+	const std::string_view code = text.substr(start, end - start);
+	for (const char c : code) {
+		if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+					c == '.'))
+			return {};
+	}
+	return std::string(code);
+}
+
+std::string launch_failure_reason(std::string_view error) {
+	const std::string code = cloud_error_code(error);
+	return code.empty() ? "the launch failed" : "the launch failed (" + code + ")";
+}
+
+} // namespace opennova::novaworld_server::hosted

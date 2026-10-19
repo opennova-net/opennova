@@ -11,16 +11,69 @@ endfunction()
 # Mixed binaries expose synthetic cases without resolving either retail root.
 # The separately labeled compatibility entry also runs their retail assertions.
 # Serialize each pair because some legacy format tests share scratch filenames.
+# RETAIL_PARTS <first> <part>... splits the compatibility entry by the program's
+# parts (tests/common/test_parts.h): <name>_retail runs <first> (the program's
+# synthetic cases among them) and <name>_retail_<part> each other part, a part
+# of retail legs alone, side by side; the ordinary entry runs as before.
 function(opennova_add_mixed_test name)
-    cmake_parse_arguments(TEST "" "WORKING_DIRECTORY" "COMMAND" ${ARGN})
+    cmake_parse_arguments(TEST "" "WORKING_DIRECTORY" "COMMAND;RETAIL_PARTS" ${ARGN})
     add_test(NAME ${name} COMMAND ${TEST_COMMAND})
-    add_test(NAME ${name}_retail COMMAND ${TEST_COMMAND} --retail)
-    set_tests_properties(${name}_retail PROPERTIES LABELS retail)
+    set(retail_rows ${name}_retail)
+    if(TEST_RETAIL_PARTS)
+        list(GET TEST_RETAIL_PARTS 0 first)
+        add_test(NAME ${name}_retail COMMAND ${TEST_COMMAND} --retail
+                 --part ${first} --parts ${TEST_RETAIL_PARTS})
+        foreach(part IN LISTS TEST_RETAIL_PARTS)
+            if(NOT part STREQUAL first)
+                add_test(NAME ${name}_retail_${part} COMMAND ${TEST_COMMAND} --retail
+                         --part ${part} --parts ${TEST_RETAIL_PARTS})
+                list(APPEND retail_rows ${name}_retail_${part})
+            endif()
+        endforeach()
+    else()
+        add_test(NAME ${name}_retail COMMAND ${TEST_COMMAND} --retail)
+    endif()
+    set_tests_properties(${retail_rows} PROPERTIES LABELS retail)
     set_tests_properties(${name} ${name}_retail PROPERTIES RESOURCE_LOCK mixed_${name})
     if(TEST_WORKING_DIRECTORY)
-        set_tests_properties(${name} ${name}_retail PROPERTIES
+        set_tests_properties(${name} ${retail_rows} PROPERTIES
                              WORKING_DIRECTORY "${TEST_WORKING_DIRECTORY}")
     endif()
+endfunction()
+
+# opennova_bakes(<row>...): rows that run whole TrnGen terrain bakes, each on as
+# many threads as the machine has (TerrainBakeInput::for_hardware, the editor's
+# bake_threads). scripts/build.sh runs ctest over tests/ctest_resources.json,
+# whose `bakes` resource lets three such rows run at once; the other rows run
+# beside them as before. Twelve at once (ctest starting its longest rows first)
+# kept a 16-core runner's cores so busy that a row beside them with a timeout
+# of its own ran past it. A ctest run without the file runs them unbounded.
+function(opennova_bakes)
+    set_tests_properties(${ARGN} PROPERTIES RESOURCE_GROUPS "bakes:1")
+endfunction()
+
+# opennova_off_bakes(<row>...): rows whose protocol windows a bake beside them could
+# crowd out (a reply asserted within a second of real time, a synthetic clock stepped per
+# wall-clock round), run while no bake does: each takes every `bakes` slot
+# (tests/ctest_resources.json's 3; the two numbers change together).
+function(opennova_off_bakes)
+    set_tests_properties(${ARGN} PROPERTIES RESOURCE_GROUPS "bakes:3")
+endfunction()
+
+# opennova_add_parts(<name> PARTS <part>... [GATED] COMMAND <command>...): a row
+# per part of a program split with tests/common/test_parts.h, <name>_<part>
+# running `<command> --part <part> --parts <part>...`, so the parts run side by
+# side and each row checks the list is the program's own; GATED registers each
+# row through opennova_add_gated_test (the retail label, exit 77 a skip).
+function(opennova_add_parts name)
+    cmake_parse_arguments(P "GATED" "" "PARTS;COMMAND" ${ARGN})
+    foreach(part IN LISTS P_PARTS)
+        if(P_GATED)
+            opennova_add_gated_test(${name}_${part} COMMAND ${P_COMMAND} --part ${part} --parts ${P_PARTS})
+        else()
+            add_test(NAME ${name}_${part} COMMAND ${P_COMMAND} --part ${part} --parts ${P_PARTS})
+        endif()
+    endforeach()
 endfunction()
 
 # The retail-mission rig the asset-gated world/mission ctests share
@@ -39,6 +92,13 @@ add_executable(retail_paths_test common/retail_paths_test.cpp)
 target_compile_features(retail_paths_test PRIVATE cxx_std_17)
 target_include_directories(retail_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME retail_paths COMMAND retail_paths_test)
+
+# The parts seam the split programs share (common/test_parts.h, opennova_add_parts): a
+# row runs its part only when the registration's list of parts is the program's own.
+add_executable(test_parts_test common/test_parts_test.cpp)
+target_compile_features(test_parts_test PRIVATE cxx_std_17)
+target_include_directories(test_parts_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME test_parts COMMAND test_parts_test)
 
 # Shared io infrastructure unit tests
 add_executable(io_test io/io_test.cpp)
@@ -1521,11 +1581,13 @@ add_test(NAME cpt_roundtrip COMMAND cpt_roundtrip_test)
 
 # The TrnGen.exe terrain bake (formats/cpt/trngen): a procedural map baked and read back
 # as the game reads it, the same bytes on one thread and on four. `cpt_trngen_bake_test
-# <dir>` runs the by-hand byte parity with TrnGen's own .cpt (the test's header).
+# <dir>` runs the by-hand byte parity with TrnGen's own .cpt (the test's header). A row per part,
+# so the parts' whole bakes run side by side.
 add_executable(cpt_trngen_bake_test cpt/trngen_bake_test.cpp)
 target_link_libraries(cpt_trngen_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME cpt_trngen_bake COMMAND cpt_trngen_bake_test)
+opennova_add_parts(cpt_trngen_bake PARTS island hills flat refusals COMMAND cpt_trngen_bake_test)
+opennova_bakes(cpt_trngen_bake_island cpt_trngen_bake_hills cpt_trngen_bake_flat cpt_trngen_bake_refusals)
 
 # A heightmap image (a PNG at any depth, TrnGen's .raw, the game's raw16) made
 # into the depth the bake takes (formats/cpt/trngen heightmap_depth.h).
@@ -1542,7 +1604,8 @@ add_test(NAME heightmap_depth_encode16 COMMAND heightmap_depth_encode16_test)
 
 # The TrnGen bake's region bake (formats/cpt/trngen terrain_region_bake.h): which leaves an edited
 # depth texel reaches (the taps, wraps and locks), and a region baked again landing the bytes and
-# the state a whole bake of the edited map makes.
+# the state a whole bake of the edited map makes; a row per part of the region bake's test, so the parts'
+# whole bakes run side by side.
 add_executable(cpt_trngen_leaf_taps_test cpt/trngen_leaf_taps_test.cpp)
 target_link_libraries(cpt_trngen_leaf_taps_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_leaf_taps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1550,12 +1613,16 @@ add_test(NAME cpt_trngen_leaf_taps COMMAND cpt_trngen_leaf_taps_test)
 add_executable(cpt_trngen_region_bake_test cpt/trngen_region_bake_test.cpp)
 target_link_libraries(cpt_trngen_region_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_region_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME cpt_trngen_region_bake COMMAND cpt_trngen_region_bake_test)
+opennova_add_parts(cpt_trngen_region_bake PARTS state regions locks walk COMMAND cpt_trngen_region_bake_test)
+opennova_bakes(cpt_trngen_region_bake_state cpt_trngen_region_bake_regions cpt_trngen_region_bake_locks)
 # Over the shipped .cpt files (a cold bake's state from the atlas; the W3 draw-back report).
 add_executable(cpt_region_bake_retail_test cpt/trngen_region_bake_retail_test.cpp)
 target_link_libraries(cpt_region_bake_retail_test PRIVATE opennova_formats)
 target_include_directories(cpt_region_bake_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(cpt_region_bake_retail COMMAND cpt_region_bake_retail_test)
+opennova_add_parts(cpt_region_bake_retail PARTS draw_back dvxi5 dvxg3 g14 dvxi4 dvxg9 GATED
+                   COMMAND cpt_region_bake_retail_test)
+opennova_bakes(cpt_region_bake_retail_dvxi5 cpt_region_bake_retail_dvxg3 cpt_region_bake_retail_g14
+               cpt_region_bake_retail_dvxi4 cpt_region_bake_retail_dvxg9)
 # By hand: the region bake's cost per node level (`trngen_region_bake_bench [threads]`).
 add_executable(trngen_region_bake_bench EXCLUDE_FROM_ALL cpt/trngen_region_bake_bench.cpp)
 target_link_libraries(trngen_region_bake_bench PRIVATE opennova_formats)
@@ -4587,6 +4654,15 @@ add_executable(opennova_serve_lister_options_test serve/opennova_serve_lister_op
 target_link_libraries(opennova_serve_lister_options_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_lister_options_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_lister_options COMMAND opennova_serve_lister_options_test)
+
+# What a supervised opennova-serve leaves its supervisor (apps/serve/run_reports.h), on a
+# hand-stepped clock: a minute of frames as their p50, p99 and longest frame time and the late
+# frames, the window starting over; the --stats-file and --exit-file lines; the --status-page,
+# --stats-file and --exit-file flags. No retail data.
+add_executable(opennova_serve_run_reports_test serve/run_reports_test.cpp)
+target_link_libraries(opennova_serve_run_reports_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_run_reports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_run_reports COMMAND opennova_serve_run_reports_test)
 
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)

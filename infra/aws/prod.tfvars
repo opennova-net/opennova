@@ -4,8 +4,8 @@
 # ./deploy/run.sh --deployment prod infra ...).
 
 # The service's programs (programs.tf) keep their defaults: a task each, gate,
-# lobby and controller at 0.25 vCPU and 0.5 GiB, web and worker at 0.5 vCPU and
-# 1 GiB.
+# lobby and fleet at 0.25 vCPU and 0.5 GiB, web and worker at 0.5 vCPU and
+# 1 GiB, data at 0.25 vCPU and 1 GiB with 40 GiB of task storage.
 
 # The gate's Elastic IP retail clients reach (54.162.79.147), adopted, never
 # managed (the load balancer's zone-a address), is no knob here: its
@@ -30,3 +30,8 @@ mail_sender = "support"
 # machines, the game data's store in the operations bucket, the update
 # service. The fleet's sizes keep their defaults.
 hosted_enabled = true
+# The machines' image, pinned by its exact name (fleet_agent.tf): Amazon's
+# ECS-optimized Amazon Linux 2023. A bump lands here, staging's first;
+# the newest: aws ssm get-parameters --names
+# /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_name
+fleet_ami = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64"

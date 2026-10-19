@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# The service's five programs: gate, lobby, web, controller, worker (service.tf
+# The service's six programs: gate, lobby, web, fleet, worker, data (service.tf
 # says what they share; DEPLOY.md, "Operating")
 # ---------------------------------------------------------------------------
 #
@@ -19,20 +19,28 @@
 #               the update service of retail UPDATE.EXE (update_ports) and
 #               the portal's nginx (443) in one task, behind the balancer;
 #               nginx reaches the server on the task's loopback
-#   controller  the internal listener (internal_http_port, the leader alone) on
+#   fleet       the internal listener (internal_http_port, the leader alone) on
 #               its task's private address, from the machines alone (fleet.tf),
-#               named controller.<deployment>.opennova.internal (cluster.tf)
-#   worker      nothing inbound; the fleet's machine launches (fleet.tf)
+#               named fleet.<deployment>.opennova.internal (cluster.tf); no
+#               cloud call (its role holds ECS Exec alone)
+#   worker      nothing inbound; the fleet's machine launches (fleet.tf), the
+#               mail and billing, and every periodic job but the data sets'
+#   data        nothing inbound; the data sets' jobs over the game data's
+#               store (data_store), on 40 GiB of task storage
+#
+# The machines' agent, hostd, is no program here: a DAEMON service of the
+# fleet cluster on the machines themselves (fleet_agent.tf), rolled with each
+# release before the fleet program.
 #
 # Every program reaches the database (database.tf); web alone reaches the
 # cache (cache.tf), and reads what the admin's infrastructure view shows (the
 # services, tasks, target groups, database, cache, release and machines below,
-# "web's infrastructure reads"). Each container answers /livez (its stall watchdog) on
+# "web's infrastructure reads", and the fleet cluster's, fleet_agent.tf). Each container answers /livez (its stall watchdog) on
 # health_port (web on game_http_port too, beside /healthz), which its ECS
 # health check asks; a task failing it is replaced. A deployment rolls with
 # the circuit breaker on (a deployment that never turns healthy rolls back)
 # and starts every program's new tasks before it stops the old (the
-# controller's new task waits as the standby, then leads; the balancer sends
+# fleet's new task waits as the standby, then leads; the balancer sends
 # new lobby flows to the new lobby task once it passes, and drains the old one
 # before ECS stops it).
 #
@@ -46,29 +54,32 @@
 # deployment holds alone; the optional ones (the first admin, edge
 # authentication's previous secret, billing's set) are in its
 # `opennova.optional-secrets` label, which a deploy turns into secrets for
-# those SSM holds. Until the deployment's first release, nothing runs: a
-# service is made with no task and its count's floor is 0, so no task ever
-# starts from a template's unpinned image; the first `app deploy` starts
-# each program at its desired count, and the next `infra apply` raises the
-# floor to its min.
+# those SSM holds. Until a release names a program (the release manifest's
+# program list), it runs nothing: its service is made with no task and its
+# count's floor is 0, so no task ever starts from a template's unpinned image,
+# and its alarms stay off (observability.tf); the first `app deploy` naming it
+# starts it at its desired count, and the next `infra apply` raises the floor
+# to its min.
 
 locals {
   programs = {
-    gate       = var.gate
-    lobby      = var.lobby
-    web        = var.web
-    controller = var.controller
-    worker     = var.worker
+    gate   = var.gate
+    lobby  = var.lobby
+    web    = var.web
+    fleet  = var.fleet
+    worker = var.worker
+    data   = var.data
   }
 
-  # The images, under var.image_registry: the five programs', the portal's
+  # The images, under var.image_registry: the six programs', the portal's
   # nginx (web's second container) and the backup task's (backup.tf).
   program_images = { for p in keys(local.programs) : p => "opennova-novaworld-${p}" }
   portal_image   = "novaworld-web"
   backup_image   = "opennova-novaworld-backup"
 
   # The programs Application Auto Scaling scales on their CPU, and the
-  # average it holds them at.
+  # average it holds them at (the data program's jobs have global caps, so
+  # more tasks would run none more at once: it never scales).
   cpu_scaled_programs = toset(["web", "worker"])
   cpu_target_percent  = 60
 
@@ -77,11 +88,14 @@ locals {
   # old tasks serve until the circuit breaker rolls the deployment back.
   deployment_percent = { for p in keys(local.programs) : p => { min = 100, max = 200 } }
 
-  # Whether the deployment has a release of the programs: `app deploy` writes
-  # its manifest (JSON naming the programs) over the parameter's "none" (or the
-  # single service instance's release id, at the cutover). Before it, every
-  # service runs no task.
-  released = try(length(jsondecode(local.release_value).programs) > 0, false)
+  # The programs the deployment's release names: `app deploy` writes its
+  # manifest (JSON naming the programs) over the parameter's "none" (or the
+  # single service instance's release id, at the cutover). A program none names
+  # yet (before the first release, or one a newer service added) runs no task
+  # and alarms on nothing; `has_release` is whether any release is recorded.
+  release_programs = try(tolist(jsondecode(local.release_value).programs), [])
+  released         = { for p in keys(local.programs) : p => contains(local.release_programs, p) }
+  has_release      = length(local.release_programs) > 0
 
   # Every program's tasks at its max and the extra tasks a deployment runs
   # beside them: the processes the database's max_connections must hold
@@ -91,12 +105,12 @@ locals {
   # Seconds a stopping container gets between SIGTERM and SIGKILL (Fargate
   # allows 120): each program's orderly shutdown (a lobby's drain and its
   # sessions' end among them: ECS signals it once the balancer drained it).
-  stop_timeout = { gate = 30, lobby = 30, web = 30, controller = 30, worker = 30 }
+  stop_timeout = { gate = 30, lobby = 30, web = 30, fleet = 30, worker = 30, data = 30 }
 
   # Seconds a new container's failed health checks do not count: its boot
   # (the migrations under their lock among it) before its health listener
   # binds.
-  health_start_period = { gate = 60, lobby = 60, web = 60, controller = 60, worker = 60 }
+  health_start_period = { gate = 60, lobby = 60, web = 60, fleet = 60, worker = 60, data = 60 }
 
   program_subnet_ids = [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].id]
 
@@ -117,11 +131,12 @@ locals {
 # alone: no apostrophe.
 locals {
   program_descriptions = {
-    gate       = "OpenNova NovaWorld gate: its UDP port and health port from the load balancer alone"
-    lobby      = "OpenNova NovaWorld lobby: its UDP port to everyone"
-    web        = "OpenNova NovaWorld web: 443 and the retail HTTP port from the load balancer alone"
-    controller = "OpenNova NovaWorld controller: the internal listener from the machines alone"
-    worker     = "OpenNova NovaWorld worker: nothing inbound"
+    gate   = "OpenNova NovaWorld gate: its UDP port and health port from the load balancer alone"
+    lobby  = "OpenNova NovaWorld lobby: its UDP port to everyone"
+    web    = "OpenNova NovaWorld web: 443 and the retail HTTP port from the load balancer alone"
+    fleet  = "OpenNova NovaWorld fleet: the internal listener from the machines alone"
+    worker = "OpenNova NovaWorld worker: nothing inbound"
+    data   = "OpenNova NovaWorld data: nothing inbound"
   }
 }
 
@@ -190,8 +205,9 @@ resource "aws_iam_role" "program" {
 
 # ECS Exec (`app shell`, the toolbox's admin calls on web): the session's
 # channels, which take no resource scope. Every program's and the backup
-# task's role (backup.tf). fleet.tf gives the worker the machines' EC2 calls,
-# mail.tf web and the worker the mail.
+# task's role (backup.tf); the fleet program's holds nothing else. fleet.tf
+# gives the worker the machines' EC2 calls, mail.tf web and the worker the
+# mail, data_store below web and the data program the game data's store.
 data "aws_iam_policy_document" "exec" {
   statement {
     sid    = "EcsExecChannels"
@@ -217,9 +233,25 @@ resource "aws_iam_role_policy" "exec" {
 # read-only, each scoped to this deployment's own resource where the API allows
 # one. ListTasks takes the cluster as a condition; Elastic Load Balancing's and
 # EC2's describe calls take no resource (web asks only for this deployment's
-# target groups and its machines' instance ids). The boundary
+# target groups and its machines' instance ids), nor does CloudWatch's
+# GetMetricData (web asks for its database's, cache's and balancer's metrics
+# alone). The logs are this deployment's three groups' (the programs', the
+# machines' and the servers', observability.tf), read for the admin's log
+# view; the alarms are this deployment's (every name starts with its own,
+# observability.tf), whose firing ones the attention list reads. The boundary
 # (infra/aws/iam/opennova-role-boundary.json) holds the same, so the org stack
 # applies it first.
+locals {
+  log_group_prefix = "/opennova/${local.deployment}"
+  # Every group the log view reads, and each one's streams.
+  read_log_groups = flatten([
+    for g in ["service", "machines", "servers"] : [
+      "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${local.log_group_prefix}/${g}",
+      "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${local.log_group_prefix}/${g}:*",
+    ]
+  ])
+}
+
 data "aws_iam_policy_document" "infra_read" {
   statement {
     sid       = "ReadServices"
@@ -282,6 +314,27 @@ data "aws_iam_policy_document" "infra_read" {
     actions   = ["ec2:DescribeInstances"]
     resources = ["*"]
   }
+
+  statement {
+    sid       = "ReadLogs"
+    effect    = "Allow"
+    actions   = ["logs:GetLogEvents", "logs:FilterLogEvents", "logs:DescribeLogStreams"]
+    resources = local.read_log_groups
+  }
+
+  statement {
+    sid       = "ReadMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:GetMetricData"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadAlarms"
+    effect    = "Allow"
+    actions   = ["cloudwatch:DescribeAlarms"]
+    resources = ["arn:${local.partition}:cloudwatch:${local.region}:${local.account_id}:alarm:${local.name}-*"]
+  }
 }
 
 resource "aws_iam_role_policy" "infra_read" {
@@ -294,12 +347,12 @@ resource "aws_iam_role_policy" "infra_read" {
 # operations bucket under local.data_prefix, data/), with hosting on: web
 # starts the admin page's uploads (multipart; the browser sends each part
 # through the site and web puts it), removes an abandoned tree's and reads the
-# packages the update service serves; the worker finalizes a tree, validates
-# and applies a release (server-side copies among it) and prunes. Both read,
-# write and delete under data/
-# alone, list it, and list the uploads in flight (that listing takes no prefix
-# condition; aborting one is scoped by its key). The machines read the trees
-# alone (fleet.tf); the controller needs no call (it builds URLs alone).
+# packages the update service serves; the data program finalizes a tree,
+# validates and applies a release (server-side copies among it) and prunes.
+# Both read, write and delete under data/ alone, list it, and list the uploads
+# in flight (that listing takes no prefix condition; aborting one is scoped by
+# its key). The machines read the trees alone (fleet.tf); the fleet program
+# needs no call (it builds URLs alone), nor does the worker.
 data "aws_iam_policy_document" "data_store" {
   count = local.hosted_enabled ? 1 : 0
 
@@ -332,7 +385,7 @@ data "aws_iam_policy_document" "data_store" {
 }
 
 resource "aws_iam_role_policy" "data_store" {
-  for_each = local.hosted_enabled ? toset(["web", "worker"]) : toset([])
+  for_each = local.hosted_enabled ? toset(["web", "data"]) : toset([])
 
   name   = "${local.name}-${each.key}-data-store"
   role   = aws_iam_role.program[each.key].id
@@ -373,25 +426,33 @@ locals {
   # the toolbox's admin calls from there), /api/ for it alone (the retail port
   # is open to the internet), and the retail port's own proxy, the portal
   # nginx's retail server (web/nginx.conf), which reaches web from 127.0.0.2
-  # and names each client in X-Real-IP, no trusted proxy.
+  # and names each client in X-Real-IP, no trusted proxy. The admin's log view
+  # reads the deployment's log groups (apps/novaworld_web/infra/log_store.h).
   web_env = {
     ONNET_COOKIE_SECURE   = local.edge_proxied ? "1" : "0"
     ONNET_TRUSTED_PROXIES = "127.0.0.1"
     ONNET_API_PROXY_ONLY  = "1"
     ONNET_RETAIL_PROXY    = "127.0.0.2"
+    ONNET_LOG_STORE       = "cloudwatch:${local.log_group_prefix}"
   }
 
   # The admin's infrastructure view (apps/novaworld_web/infra/infra_status.h):
-  # what web reads with its task role (the policy below), each setting naming
-  # this deployment's own: the cluster and its services, the balancer's target
-  # groups by listener, the database, the cache and the release parameter.
+  # what web reads with its task role (the policy below, and fleet_agent.tf's),
+  # each setting naming this deployment's own: the cluster and its services,
+  # the fleet cluster ("" while hosting is off), the balancer's target groups
+  # by listener, the database, the cache and the release parameter; the
+  # balancer by its metrics' dimension (the usage view's, metrics_store.h); and
+  # the start of every alarm's name (the attention list's, alarm_store.h).
   infra_status_env = {
     ONNET_INFRA_REGION            = local.region
     ONNET_INFRA_CLUSTER           = aws_ecs_cluster.main.name
+    ONNET_INFRA_FLEET_CLUSTER     = local.hosted_enabled ? aws_ecs_cluster.fleet[0].name : ""
     ONNET_INFRA_TARGET_GROUPS     = jsonencode({ for k, g in aws_lb_target_group.public : k => g.arn })
     ONNET_INFRA_DATABASE          = aws_db_instance.main.identifier
     ONNET_INFRA_CACHE             = aws_elasticache_replication_group.cache.replication_group_id
     ONNET_INFRA_RELEASE_PARAMETER = aws_ssm_parameter.release.name
+    ONNET_INFRA_LOAD_BALANCER     = aws_lb.public.arn_suffix
+    ONNET_INFRA_ALARM_PREFIX      = "${local.name}-"
   }
 
   # The update service (ADR 0061, 0064): web serves retail UPDATE.EXE on the
@@ -403,17 +464,19 @@ locals {
     ONNET_UPDATE_PORTS = join(",", [for p in var.update_ports : tostring(p)])
   }
 
-  # Hosting (fleet.tf), for the programs that read it: the controller's URL
-  # and the fleet's settings. The release adds the serve and hostd images
-  # (`app deploy --serve-tag --hostd-tag`, pinned by digest).
-  hosting_env = merge(local.hosted_env, { ONNET_INTERNAL_URL = local.internal_url })
-
+  # Hosting (fleet.tf): the fleet's policy for the programs that decide
+  # whether hosting is on (web, the fleet, the worker), the machine driver's
+  # own settings for the worker alone, which launches the machines, and the
+  # game data's store for the programs that read it. The release adds the
+  # serve image to every container that reads the policy and the hostd image
+  # to the worker's (`app deploy --serve-tag --hostd-tag`, pinned by digest).
   program_env = {
-    gate       = merge(local.common_env, local.public_env)
-    lobby      = merge(local.common_env, local.public_env, local.lobby_env)
-    web        = merge(local.common_env, local.public_env, local.site_env, local.web_env, local.update_env, local.cache_env, local.mail_env, local.hosting_env, local.infra_status_env)
-    controller = merge(local.common_env, local.public_env, local.site_env, local.hosting_env)
-    worker     = merge(local.common_env, local.public_env, local.site_env, local.mail_env, local.hosting_env)
+    gate   = merge(local.common_env, local.public_env)
+    lobby  = merge(local.common_env, local.public_env, local.lobby_env)
+    web    = merge(local.common_env, local.public_env, local.site_env, local.web_env, local.update_env, local.cache_env, local.mail_env, local.hosted_policy_env, local.infra_status_env)
+    fleet  = merge(local.common_env, local.public_env, local.hosted_policy_env)
+    worker = merge(local.common_env, local.public_env, local.site_env, local.mail_env, local.hosted_policy_env, local.hosted_driver_env)
+    data   = merge(local.common_env, local.store_env)
   }
 
   # The secrets each reads, SecureStrings `secrets sync` writes under
@@ -421,20 +484,22 @@ locals {
   # init` makes them), which the template names, and the optional ones (the
   # "# optional" and "# billing" lines of deploy/env/runtime.env.tpl), which
   # its label names for a deploy to add while SSM holds them.
-  billing_secrets = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE"]
+  billing_secrets = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE", "STRIPE_PRICE_STATIC_ADDRESS"]
   program_secrets = {
-    gate       = ["DATABASE_PASSWORD"]
-    lobby      = ["DATABASE_PASSWORD"]
-    web        = ["DATABASE_PASSWORD", "ADMIN_API_TOKEN", "ONNET_REDIS_PASSWORD"]
-    controller = ["DATABASE_PASSWORD"]
-    worker     = ["DATABASE_PASSWORD"]
+    gate   = ["DATABASE_PASSWORD"]
+    lobby  = ["DATABASE_PASSWORD"]
+    web    = ["DATABASE_PASSWORD", "ADMIN_API_TOKEN", "ONNET_REDIS_PASSWORD"]
+    fleet  = ["DATABASE_PASSWORD"]
+    worker = ["DATABASE_PASSWORD"]
+    data   = ["DATABASE_PASSWORD"]
   }
   program_optional_secrets = {
-    gate       = []
-    lobby      = []
-    web        = concat(["ONNET_BOOTSTRAP_ADMIN"], local.billing_secrets)
-    controller = local.billing_secrets
-    worker     = local.billing_secrets
+    gate   = []
+    lobby  = []
+    web    = concat(["ONNET_BOOTSTRAP_ADMIN"], local.billing_secrets)
+    fleet  = []
+    worker = local.billing_secrets
+    data   = []
   }
 
   # The label a deploy reads the optional secrets from: name to parameter ARN.
@@ -445,17 +510,18 @@ locals {
   livez_url = { for p in keys(local.programs) : p => "http://127.0.0.1:${p == "web" ? var.game_http_port : var.health_port}/livez" }
 
   program_ports = {
-    gate       = [{ port = var.gate_udp_port, protocol = "udp" }, { port = var.health_port, protocol = "tcp" }]
-    lobby      = [{ port = var.nw_udp_port, protocol = "udp" }, { port = var.health_port, protocol = "tcp" }]
-    web        = concat([{ port = var.game_http_port, protocol = "tcp" }, { port = var.health_port, protocol = "tcp" }], [for p in var.update_ports : { port = p, protocol = "tcp" }])
-    controller = [{ port = var.internal_http_port, protocol = "tcp" }, { port = var.health_port, protocol = "tcp" }]
-    worker     = [{ port = var.health_port, protocol = "tcp" }]
+    gate   = [{ port = var.gate_udp_port, protocol = "udp" }, { port = var.health_port, protocol = "tcp" }]
+    lobby  = [{ port = var.nw_udp_port, protocol = "udp" }, { port = var.health_port, protocol = "tcp" }]
+    web    = concat([{ port = var.game_http_port, protocol = "tcp" }, { port = var.health_port, protocol = "tcp" }], [for p in var.update_ports : { port = p, protocol = "tcp" }])
+    fleet  = [{ port = var.internal_http_port, protocol = "tcp" }, { port = var.health_port, protocol = "tcp" }]
+    worker = [{ port = var.health_port, protocol = "tcp" }]
+    data   = [{ port = var.health_port, protocol = "tcp" }]
   }
 
-  # The worker's task storage, in GiB: a tree's files and a release's package
-  # pass through its disk (the finalize, validate and apply jobs, a GiB or two
-  # each at once; Fargate's default is 20). The others keep the default.
-  task_ephemeral_storage_gib = { worker = 40 }
+  # The data program's task storage, in GiB: a tree's files and a release's
+  # package pass through its disk (the finalize, validate and apply jobs, a GiB
+  # or two each at once; Fargate's default is 20). The others keep the default.
+  task_ephemeral_storage_gib = { data = 40 }
 
   # The service's log group, a stream per container and task under the
   # program's prefix (<program>/<container>/<task id>; `app logs PROGRAM`).
@@ -576,9 +642,9 @@ resource "aws_ecs_service" "program" {
   name            = each.key
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.program[each.key].arn
-  # No task before the first release (the template's image is unpinned); the
-  # first deploy starts the program at its desired count.
-  desired_count          = local.released ? each.value.desired : 0
+  # No task before a release names the program (the template's image is
+  # unpinned); the first deploy naming it starts it at its desired count.
+  desired_count          = local.released[each.key] ? each.value.desired : 0
   launch_type            = "FARGATE"
   platform_version       = "1.4.0"
   enable_execute_command = true
@@ -615,7 +681,7 @@ resource "aws_ecs_service" "program" {
   }
 
   dynamic "service_registries" {
-    for_each = each.key == "controller" ? [aws_service_discovery_service.controller.arn] : []
+    for_each = each.key == "fleet" ? [aws_service_discovery_service.fleet.arn] : []
     content {
       registry_arn = service_registries.value
     }
@@ -645,14 +711,14 @@ resource "aws_ecs_service" "program" {
 # ---- task counts ----------------------------------------------------------------------
 
 # Every service's count held between its program's min and max (its floor 0
-# until the first release, so nothing starts a task from a template).
+# until a release names the program, so nothing starts a task from a template).
 resource "aws_appautoscaling_target" "program" {
   for_each = local.programs
 
   service_namespace  = "ecs"
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.program[each.key].name}"
   scalable_dimension = "ecs:service:DesiredCount"
-  min_capacity       = local.released ? each.value.min : 0
+  min_capacity       = local.released[each.key] ? each.value.min : 0
   max_capacity       = each.value.max
 
   tags = var.tags

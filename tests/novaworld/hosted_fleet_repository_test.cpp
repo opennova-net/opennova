@@ -1,4 +1,4 @@
-// The hosted servers' fleet in the database (apps/novaworld_common/hosted/
+// The hosted servers' fleet in the database (apps/novaworld_common/hosted/model/
 // fleet_repository.h, backend/migrations/0003_fleet.sql) on a migrated
 // database: a machine's row and its one-time token (only its SHA-256 stored),
 // the launch's answer, every lifecycle move as a compare-and-set (ready_at,
@@ -12,13 +12,19 @@
 // describe writes,
 // and the slots: assigned with the generation moving on, never twice to two
 // live servers (the index holds it whatever writes the row), let go, and read
-// back for placement; each kind's launch backoff (growing per failure in a row
-// to its cap, counted once while it holds, cleared by a machine of the kind
-// that boots); and the prune of the machines ended 14 days ago (the
-// references a server keeps nulled, one a live server names kept).
+// back for placement, each assignment a start of its own (hosted_server_starts,
+// one left open ended there); each kind's launch backoff (growing per failure
+// in a row to its cap, counted once while it holds, cleared by a machine of
+// the kind that boots); every move's event, in the move's own statement (the
+// making, the launch, the first report, each transition, a drain, a refused
+// launch with its reason, the lost machine, a new log stream), none for a move
+// refused; what a report says of the machine (its image, log stream, use and
+// trees; the slots' waits, network and ticks); and the prune of the machines
+// ended 14 days ago (the references a server keeps nulled, one a live server
+// names kept, the egress months outliving them).
 
-#include "hosted/agent_protocol.h"
-#include "hosted/fleet_repository.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include <net/novaworld/db/database.h>
 
@@ -401,6 +407,23 @@ int test_record_sync() {
 	TEST_EXPECT(slots[0].egress_bytes == 1000 && slots[0].memory_bytes == (64ull << 20));
 	TEST_EXPECT(slots[0].cpu_percent == 12.5 && slots[0].started_at == int64_t{ 1760000000 });
 	TEST_EXPECT(!slots[0].exit_code && !slots[0].oom && !slots[0].reported_at.empty());
+	TEST_EXPECT(slots[0].net_in_bytes == 0 && !slots[0].tick &&
+			slots[1].waiting == hosted::ContainerWait::None);
+	// What a starting one waits for, a slot's ingress and a server's ticks ride the rows.
+	{
+		hosted::ContainerReport ticking = report("srv-7-g1", 0, ContainerState::Running, 1100);
+		ticking.net_in_bytes = 4096;
+		ticking.tick = hosted::TickHealth{ 1.5, 16.25, 40.0, 7 };
+		hosted::ContainerReport waiting = report("srv-8-g1", 2, ContainerState::Starting);
+		waiting.started_at.reset();
+		waiting.waiting = hosted::ContainerWait::Trees;
+		TEST_EXPECT(hosted::record_sync(db, m.id, "v2", { ticking, waiting }));
+		slots = hosted::slot_reports(db, m.id);
+		TEST_EXPECT(slots.size() == 2 && slots[0].net_in_bytes == 4096 && slots[0].tick &&
+				slots[0].tick->p50_ms == 1.5 && slots[0].tick->p99_ms == 16.25 &&
+				slots[0].tick->max_ms == 40.0 && slots[0].tick->late == 7);
+		TEST_EXPECT(slots[1].waiting == hosted::ContainerWait::Trees && !slots[1].tick);
+	}
 
 	// The next replaces them: slot 2 gone, slot 0 exited with its OOM, slot 1 holding two
 	// (the running one wins), slot 9 past the machine's dropped.
@@ -487,6 +510,173 @@ int test_silent_machines() {
 	return 0;
 }
 
+// The events: every move of a machine, in the statement that makes it.
+std::vector<hosted::FleetMachineEvent> events_of(Database &db, int64_t id) {
+	return hosted::list_machine_events(db, id, 100);
+}
+
+bool event_is(const hosted::FleetMachineEvent &e, const char *from, const char *to,
+		const std::string &detail) {
+	return e.from_state == from && e.to_state == to && e.detail == detail && !e.at.empty();
+}
+
+int test_events() {
+	TestDatabase scratch;
+	Database db = scratch.open();
+	const int64_t server = server_row(db);
+	hosted::NewMachine wanted;
+	wanted.provider = "ec2";
+	wanted.slots = 4;
+	wanted.serve_image = kImage;
+	wanted.launched_for = server;
+	const hosted::CreatedMachine m = hosted::create_machine(db, wanted);
+	TEST_EXPECT(hosted::mark_launched(db, m.id, launched("i-0aaaaaaaaaaaaaaa1", "10.44.1.21")));
+	TEST_EXPECT(hosted::record_sync(db, m.id, "v1", {}));
+	// A second report is no move.
+	TEST_EXPECT(hosted::record_sync(db, m.id, "v1", {}));
+	TEST_EXPECT(hosted::mark_machine_lost(db, m.id, "its agent has not reported for 60 s", 1000));
+	TEST_EXPECT(hosted::transition_machine(db, m.id, FleetMachineState::Lost,
+			FleetMachineState::Ready, "its agent reports again"));
+	// A move refused writes nothing; an empty reason keeps the end reason but the
+	// event says nothing more.
+	TEST_EXPECT(!hosted::transition_machine(
+			db, m.id, FleetMachineState::Booting, FleetMachineState::Ready, "never"));
+	TEST_EXPECT(hosted::drain_machines(db, { m.id }, "fleet roll") == std::vector<int64_t>{ m.id });
+	TEST_EXPECT(hosted::transition_machine(db, m.id,
+			{ FleetMachineState::Ready, FleetMachineState::Draining }, FleetMachineState::Ending,
+			""));
+	TEST_EXPECT(hosted::transition_machine(
+			db, m.id, FleetMachineState::Ending, FleetMachineState::Ended, "drained"));
+	const auto e = events_of(db, m.id);
+	TEST_EXPECT(e.size() == 8);
+	if (e.size() == 8) {
+		TEST_EXPECT(
+				event_is(e[0], "", "launching", "launched for server " + std::to_string(server)));
+		TEST_EXPECT(event_is(
+				e[1], "launching", "booting", "launched as i-0aaaaaaaaaaaaaaa1 (t3a.large)"));
+		TEST_EXPECT(event_is(e[2], "booting", "ready", "its agent reports"));
+		TEST_EXPECT(event_is(e[3], "ready", "lost", "its agent has not reported for 60 s"));
+		TEST_EXPECT(event_is(e[4], "lost", "ready", "its agent reports again"));
+		TEST_EXPECT(event_is(e[5], "ready", "draining", "fleet roll"));
+		TEST_EXPECT(event_is(e[6], "draining", "ending", ""));
+		TEST_EXPECT(event_is(e[7], "ending", "ended", "drained"));
+		TEST_EXPECT(e[0].id < e[7].id && e[0].machine_id == m.id);
+	}
+	// The newest `limit`, oldest first.
+	const auto last_two = hosted::list_machine_events(db, m.id, 2);
+	TEST_EXPECT(last_two.size() == 2 && last_two[0].to_state == "ending" &&
+			last_two[1].to_state == "ended");
+
+	// A draining machine that goes lost names the state it left; a refused launch
+	// its reason.
+	const hosted::CreatedMachine d =
+			booting_machine(db, MachineKind::Shared, 4, "i-0bbbbbbbbbbbbbbb2");
+	TEST_EXPECT(hosted::record_sync(db, d.id, "v1", {}));
+	TEST_EXPECT(hosted::transition_machine(
+			db, d.id, FleetMachineState::Ready, FleetMachineState::Draining, "an admin's drain"));
+	TEST_EXPECT(hosted::mark_machine_lost(db, d.id, "silent", 1000));
+	TEST_EXPECT(event_is(events_of(db, d.id).back(), "draining", "lost", "silent"));
+	hosted::NewMachine refused;
+	refused.provider = "ec2";
+	refused.kind = MachineKind::Own;
+	refused.serve_image = kImage;
+	const int64_t r = hosted::create_machine(db, refused).id;
+	TEST_EXPECT(hosted::fail_refused_launch(db, r, "the launch failed (VcpuLimitExceeded)"));
+	TEST_EXPECT(!hosted::fail_refused_launch(db, r, "again"));
+	const auto re = events_of(db, r);
+	TEST_EXPECT(re.size() == 2 && event_is(re[0], "", "launching", "") &&
+			event_is(re[1], "launching", "failed", "the launch failed (VcpuLimitExceeded)"));
+	TEST_EXPECT(hosted::find_machine(db, r)->end_reason == "the launch failed (VcpuLimitExceeded)");
+	const auto taken = hosted::take_refused_launches(db);
+	TEST_EXPECT(taken.size() == 1 && taken[0].reason == "the launch failed (VcpuLimitExceeded)");
+	// They go with their machine.
+	db.exec("DELETE FROM fleet_machines WHERE id = $1;", { BindValue(r) });
+	TEST_EXPECT(events_of(db, r).empty());
+	return 0;
+}
+
+// What a report says of the machine itself: its image and the agent's log stream
+// (each kept when a report names none; a new stream an event), its use with its
+// time, its trees replaced each report; nothing for a machine that no longer syncs.
+int test_machine_report() {
+	TestDatabase scratch;
+	Database db = scratch.open();
+	const hosted::CreatedMachine m = booting_machine(db, MachineKind::Shared, 4);
+	TEST_EXPECT(hosted::record_sync(db, m.id, "v1", {}));
+	auto row = hosted::find_machine(db, m.id);
+	TEST_EXPECT(row && row->image_id.empty() && row->agent_log_stream.empty() && !row->stats &&
+			row->stats_at.empty());
+	hosted::SyncRequest report;
+	report.agent_version = "v1";
+	report.image_id = "ami-0123456789abcdef0";
+	report.log_stream = "hostd/hostd/0123456789abcdef";
+	hosted::MachineStats stats;
+	stats.cpu_percent = 42.5;
+	stats.memory_used_bytes = 1ull << 30;
+	stats.memory_total_bytes = 4ull << 30;
+	stats.disk_free_bytes = 10ull << 30;
+	stats.disk_total_bytes = 20ull << 30;
+	stats.net_in_bytes = 1000;
+	stats.net_out_bytes = 2000;
+	report.machine = stats;
+	hosted::TreeReport ready;
+	ready.state = hosted::TreeReportState::Ready;
+	ready.bytes = 2147483648ull;
+	ready.tries = 1;
+	hosted::TreeReport fetching;
+	fetching.bytes = 5000;
+	fetching.tries = 2;
+	fetching.reason = "aws s3 sync exited 1";
+	report.trees = { { 7, ready }, { 8, fetching } };
+	TEST_EXPECT(hosted::record_machine_report(db, m.id, report));
+	row = hosted::find_machine(db, m.id);
+	TEST_EXPECT(row->image_id == "ami-0123456789abcdef0" &&
+			row->agent_log_stream == "hostd/hostd/0123456789abcdef");
+	TEST_EXPECT(row->stats && row->stats->cpu_percent == 42.5 &&
+			row->stats->memory_used_bytes == (1ull << 30) &&
+			row->stats->memory_total_bytes == (4ull << 30) &&
+			row->stats->disk_free_bytes == (10ull << 30) &&
+			row->stats->disk_total_bytes == (20ull << 30) && row->stats->net_in_bytes == 1000 &&
+			row->stats->net_out_bytes == 2000 && !row->stats_at.empty());
+	auto trees = hosted::machine_trees(db, m.id);
+	TEST_EXPECT(trees.size() == 2 && trees[0].tree_id == 7 &&
+			trees[0].state == hosted::TreeReportState::Ready && trees[0].bytes == 2147483648ull &&
+			trees[0].tries == 1 && trees[0].error.empty() && !trees[0].reported_at.empty());
+	TEST_EXPECT(trees[1].tree_id == 8 && trees[1].state == hosted::TreeReportState::Fetching &&
+			trees[1].bytes == 5000 && trees[1].tries == 2 &&
+			trees[1].error == "aws s3 sync exited 1");
+	// The new stream is an event; the same one again is none.
+	auto e = events_of(db, m.id);
+	TEST_EXPECT(event_is(e.back(), "ready", "ready", "log stream hostd/hostd/0123456789abcdef"));
+	const size_t events = e.size();
+	TEST_EXPECT(hosted::record_machine_report(db, m.id, report));
+	TEST_EXPECT(events_of(db, m.id).size() == events);
+	// A report with no use, no image and no stream keeps the last of each; its
+	// trees replace the last.
+	hosted::SyncRequest bare;
+	bare.agent_version = "v1";
+	bare.trees = { { 9, ready } };
+	TEST_EXPECT(hosted::record_machine_report(db, m.id, bare));
+	row = hosted::find_machine(db, m.id);
+	TEST_EXPECT(row->image_id == "ami-0123456789abcdef0" &&
+			row->agent_log_stream == "hostd/hostd/0123456789abcdef" && row->stats &&
+			row->stats->cpu_percent == 42.5);
+	trees = hosted::machine_trees(db, m.id);
+	TEST_EXPECT(trees.size() == 1 && trees[0].tree_id == 9);
+	// A restarted agent's new task: a new stream, a new event.
+	report.log_stream = "hostd/hostd/fedcba9876543210";
+	TEST_EXPECT(hosted::record_machine_report(db, m.id, report));
+	TEST_EXPECT(event_is(events_of(db, m.id).back(), "ready", "ready",
+			"log stream hostd/hostd/fedcba9876543210"));
+	// An ending machine's report is refused, its rows as they were.
+	TEST_EXPECT(hosted::transition_machine(
+			db, m.id, FleetMachineState::Ready, FleetMachineState::Ending, ""));
+	report.trees.clear();
+	TEST_EXPECT(!hosted::record_machine_report(db, m.id, report));
+	TEST_EXPECT(hosted::machine_trees(db, m.id).size() == 2);
+	return 0;
+}
+
 // --- the slots ------------------------------------------------------------------------
 
 int test_slots() {
@@ -497,6 +687,11 @@ int test_slots() {
 	const int64_t b = server_row(db, "booting");
 	const int64_t c = server_row(db);
 	TEST_EXPECT(hosted::assign_slot(db, a, shared.id, 0, 32768) == std::optional<int64_t>(1));
+	// The assignment is a start of its own: its machine and slot, open.
+	const auto starts = hosted::list_starts(db, a, 10);
+	TEST_EXPECT(starts.size() == 1 && starts[0].generation == 1 &&
+			starts[0].machine_id == shared.id && starts[0].slot == 0 &&
+			!starts[0].placed_at.empty() && starts[0].ended_at.empty() && !starts[0].cause);
 	// One slot per live server: b cannot take a's, a cannot take a second.
 	TEST_EXPECT(!hosted::assign_slot(db, b, shared.id, 0, 32768));
 	TEST_EXPECT(!hosted::assign_slot(db, a, shared.id, 1, 32769));
@@ -568,8 +763,34 @@ int test_slots() {
 	// Let go (a restart elsewhere): the generation stays and moves on at the next slot.
 	TEST_EXPECT(hosted::release_slot(db, c));
 	TEST_EXPECT(!hosted::release_slot(db, c));
-	// (1 at its first slot, 2 now.)
+	// (1 at its first slot, 2 now.) Its first start, left open, ends there.
 	TEST_EXPECT(hosted::assign_slot(db, c, own.id, 0, 32768) == std::optional<int64_t>(2));
+	auto c_starts = hosted::list_starts(db, c, 10);
+	TEST_EXPECT(c_starts.size() == 2 && c_starts[0].generation == 2 &&
+			c_starts[0].machine_id == own.id && c_starts[0].ended_at.empty() &&
+			c_starts[1].generation == 1 && !c_starts[1].ended_at.empty() &&
+			c_starts[1].cause == hosted::StartCause::Fleet);
+	// What it runs, its first report running, a cause asked ahead (a stop for its
+	// owner's limits) standing at its end, and the end once alone.
+	hosted::set_start_files(db, c, 2, kImage, 7, 8, std::to_string(c) + "/g2");
+	hosted::mark_start_running(db, c, 2);
+	hosted::set_start_cause(db, c, hosted::StartCause::Limits);
+	TEST_EXPECT(hosted::end_start(
+			db, c, 2, hosted::StartCause::Stop, { 3, false, "the session ended: x" }));
+	TEST_EXPECT(!hosted::end_start(db, c, 2, hosted::StartCause::Crash));
+	c_starts = hosted::list_starts(db, c, 1);
+	TEST_EXPECT(c_starts.size() == 1 && c_starts[0].serve_image == kImage &&
+			c_starts[0].base_tree_id == 7 && c_starts[0].expansion_tree_id == 8 &&
+			c_starts[0].log_stream == std::to_string(c) + "/g2" &&
+			!c_starts[0].running_at.empty() && !c_starts[0].ended_at.empty() &&
+			c_starts[0].cause == hosted::StartCause::Limits && c_starts[0].exit_code == 3 &&
+			c_starts[0].reason == "the session ended: x");
+	for (const hosted::StartCause cause : { hosted::StartCause::Crash, hosted::StartCause::Fleet,
+				 hosted::StartCause::Stop, hosted::StartCause::Update, hosted::StartCause::Limits,
+				 hosted::StartCause::NoData, hosted::StartCause::Timeout,
+				 hosted::StartCause::LinkLost, hosted::StartCause::DataUnavailable })
+		TEST_EXPECT(hosted::parse_start_cause(hosted::start_cause_text(cause)) == cause);
+	TEST_EXPECT(!hosted::parse_start_cause("restart"));
 	// A machine that no longer takes servers takes no slot.
 	TEST_EXPECT(hosted::release_slot(db, b));
 	TEST_EXPECT(hosted::transition_machine(
@@ -636,9 +857,10 @@ int test_launch_backoff() {
 }
 
 // The prune of the ended machines: one ended or failed more than 14 days ago
-// goes with its slot reports and egress months, a stopped server that last ran
-// on it left with no machine (machine_ref nulled); a younger one, a live one
-// and one a live server still names stay, the last until that server stops.
+// goes with its slot reports (its egress months stay, to their own 13 months),
+// a stopped server that last ran on it left with no machine (machine_ref
+// nulled); a younger one, a live one and one a live server still names stay,
+// the last until that server stops.
 int test_prune_ended_machines() {
 	TestDatabase scratch;
 	Database db = scratch.open();
@@ -652,7 +874,7 @@ int test_prune_ended_machines() {
 	refused.kind = MachineKind::Own;
 	refused.serve_image = kImage;
 	const int64_t old_failed = hosted::create_machine(db, refused).id;
-	TEST_EXPECT(hosted::fail_refused_launch(db, old_failed));
+	TEST_EXPECT(hosted::fail_refused_launch(db, old_failed, "the launch failed"));
 	ended_at(old_failed, "15 days");
 	// One that ran a server (its slot report, its month's egress) and ended 20 days ago.
 	const int64_t old_ended = booting_machine(db, MachineKind::Shared, 4, "i-0eeeeeeeeeeeeeee1").id;
@@ -691,7 +913,7 @@ int test_prune_ended_machines() {
 	TEST_EXPECT(hosted::slot_reports(db, old_ended).empty());
 	TEST_EXPECT(db.query("SELECT 1 FROM fleet_machine_egress WHERE machine_id = $1;",
 						  { BindValue(old_ended) })
-					.empty());
+						.size() == 1);
 	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE id = $1 AND machine_ref IS NULL;",
 						  { BindValue(stopped) })
 						.size() == 1);
@@ -739,6 +961,8 @@ int main(int argc, char **argv) {
 		{ "redeem", test_redeem },
 		{ "authenticate", test_authenticate },
 		{ "record_sync", test_record_sync },
+		{ "events", test_events },
+		{ "machine_report", test_machine_report },
 		{ "silent_machines", test_silent_machines },
 		{ "slots", test_slots },
 		{ "launch_backoff", test_launch_backoff },

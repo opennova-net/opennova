@@ -17,3 +17,4 @@ STRIPE_PRICE_TIER1=op://OpenNova-Deploy/stripe-test/price_tier1
 STRIPE_PRICE_TIER2=op://OpenNova-Deploy/stripe-test/price_tier2
 STRIPE_PRICE_TIER3=op://OpenNova-Deploy/stripe-test/price_tier3
 STRIPE_PRICE_OWN_MACHINE=op://OpenNova-Deploy/stripe-test/price_own_machine
+STRIPE_PRICE_STATIC_ADDRESS=op://OpenNova-Deploy/stripe-test/price_static_address

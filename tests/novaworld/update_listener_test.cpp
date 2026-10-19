@@ -12,8 +12,8 @@
 // catalog refreshed, the login refused and the package dropped from the cache; a second
 // release published, served after a refresh.
 
-#include "hosted/data_set_repository.h"
-#include "local_object_store.h"
+#include "core/local_object_store.h"
+#include "data_sets/data_set_repository.h"
 #include "net_sockets.h"
 #include "updater/update_listener.h"
 

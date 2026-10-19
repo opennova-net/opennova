@@ -1,6 +1,6 @@
 // Two hosted servers end to end on one machine's slots: an in-process NovaWorld
 // service (nw_service_harness.h, hosted servers on) with its supervisor and its
-// job workers (the fleet's jobs, hosted/fleet_jobs.h) over a machine driver of
+// job workers (the fleet's jobs, hosted/model/fleet_jobs.h) over a machine driver of
 // the test's whose machines are the real agent, opennova-hostd, each a process
 // on this system with its process runtime (as the local stack's machine
 // containers run it), launched with its token file and reaching the service's
@@ -16,7 +16,7 @@
 //
 //   * no lobby live (the service's lobby drained): the first start below waits
 //     in provisioning, no machine launched, until the lobby takes clients again;
-//   * the owner, granted a server (players.comp_servers), starts a Joint
+//   * the owner, granted a server (comp_grants), starts a Joint
 //     Operations server with POST /api/me/servers (its data_set_id and the
 //     mission its tree lists); the supervisor launches a shared machine, whose
 //     agent bootstraps and syncs, places the server on its first slot, pins it
@@ -53,19 +53,20 @@
 #include "lobby_client.h"
 #include "nw_service_harness.h"
 
+#include "accounts/web_session.h"
+#include "core/local_object_store.h"
+#include "data_sets/data_set_repository.h"
 #include "hosted/admin_link.h"
-#include "hosted/data_set_repository.h"
-#include "hosted/fleet_config.h"
-#include "hosted/fleet_jobs.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/hosted_repository.h"
+#include "hosted/cloud/fleet_job_handlers.h"
 #include "hosted/internal_listener.h"
-#include "hosted/machine_driver.h"
+#include "hosted/model/fleet_config.h"
+#include "hosted/model/fleet_jobs.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/machine_driver.h"
 #include "hosted/supervisor.h"
 #include "jobs/worker_pool.h"
-#include "local_object_store.h"
 #include "serve/serve_test_support.h"
-#include "web_session.h"
 
 #include "net_http.h"
 #include "net_sockets.h"
@@ -316,8 +317,8 @@ public:
 		options.argv = { hostd_, "--runtime", "process", "--serve", serve_, "--service",
 			service_url_, "--machine", std::to_string(launch.machine_id), "--token-file",
 			token.u8string(), "--state-dir", (machine / "state").u8string(), "--slots-root",
-			(machine / "slots").u8string(), "--trees-root", trees_root().u8string(), "--iptables",
-			"none", "--ip6tables", "none" };
+			(machine / "slots").u8string(), "--trees-root", trees_root().u8string(), "--nft",
+			"none" };
 		options.output_path = (machine / "hostd.log").u8string();
 		auto child = std::make_unique<opennova::proc::ChildProcess>();
 		if (!child->spawn(options, error))
@@ -539,14 +540,14 @@ int main(int argc, char **argv) {
 					config.object_store_url = store.url_of("");
 				});
 		expect(up, "the service starts");
-		expect(nws::set_comp_servers(*service.pool.acquire(), service.owner_id, 1).ok, "the owner is granted a server");
+		expect(nws::billing::set_comp_grants(*service.pool.acquire(), service.owner_id, { 1, 0 }), "the owner is granted a server");
 
 		// The machines: opennova-hostd processes.
 		const fs::path work = temp.path / "work";
 		HostdMachines driver(hostd_binary, serve_binary, work);
 		hosted::SupervisorConfig config;
 		// Where the machines fetch each tree from: the store's URL of trees/<id>/,
-		// as the controller hands it (a file:// copy for the agent).
+		// as the fleet hands it (a file:// copy for the agent).
 		config.tree_url = [&store](int64_t tree_id) {
 			return store.url_of("trees/" + std::to_string(tree_id) + "/");
 		};
@@ -562,7 +563,7 @@ int main(int argc, char **argv) {
 		hosted::Supervisor supervisor(service.pool, HostdMachines::profile(), config);
 		// The job workers that run the driver's calls (the launch, the describes, the ends).
 		nws::jobs::JobRegistry job_registry;
-		hosted::register_fleet_jobs(job_registry, driver);
+		hosted::register_fleet_jobs(job_registry, driver, hosted::PlacementPolicy{});
 		nws::jobs::WorkerPoolConfig worker_config;
 		worker_config.threads = 4;
 		worker_config.poll_ms = 50;
@@ -655,7 +656,7 @@ int main(int argc, char **argv) {
 			p.nwhandle = "Owner2Handle";
 			const auto created = nws::create_user(*service.pool.acquire(), p);
 			second_owner = created.ok ? created.id : 0;
-			expect(second_owner > 0 && nws::set_comp_servers(*service.pool.acquire(), second_owner, 1).ok,
+			expect(second_owner > 0 && nws::billing::set_comp_grants(*service.pool.acquire(), second_owner, { 1, 0 }),
 					"a second owner is granted a server");
 		}
 		const std::string second = second_owner > 0 ? site_login(service, "owner2", "pw-owner2") : std::string();

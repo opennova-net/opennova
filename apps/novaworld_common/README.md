@@ -1,8 +1,8 @@
 # NovaWorld server
 
-The NovaWorld service: five programs ("Programs" below: gate, lobby, web, controller,
-worker), each its own binary and container image, over this shared library
-(`apps/novaworld_common`), one PostgreSQL database ("Database" below) and, for web, one
+The NovaWorld service: six programs ("Programs" below: gate, lobby, web, fleet,
+worker, data), each its own binary and container image, over the service's libraries
+(`apps/novaworld_common`, "Build layout and tests" below), one PostgreSQL database ("Database" below) and, for web, one
 Redis ("Redis" below). Linux only: it ships as its images and runs on ECS Fargate, one
 service per program (DEPLOY.md). Implements the matchmaking/backend half of NovaWorld (the gate, the
 session handshake, the browser/host/play container services, and the legacy
@@ -18,20 +18,20 @@ The hosted servers (the fleet, its supervisor, the data sets, the console) are
 | `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> PN dispatch: NOVAWORLDUDP containers or JointOperations game runtime |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 | `InternalListener` (`hosted/internal_listener.*`) | TCP 8070 | the machines' agent routes alone (`hosted/agent_route.*`), on a private address |
-| `HealthListener` (`health_listener.*`) | TCP 8081 | `GET /livez` alone, from the program's stall watchdog ("Health" below) |
+| `HealthListener` (`core/health_listener.*`) | TCP 8081 | `GET /livez` alone, from the program's stall watchdog ("Health" below) |
 
 The gate listener is the gate's (`apps/novaworld_gate`), the NW UDP listener the lobby's
 (`apps/novaworld_lobby`), the HTTP listener web's (`apps/novaworld_web`), the internal
-listener the controller's while it leads (`apps/novaworld_controller`), and a health
+listener the fleet's while it leads (`apps/novaworld_fleet`), and a health
 listener each program's but web's, whose `/livez` is on its HTTP port.
 
 ## Programs
 
-Five programs, each its own binary (`opennova-novaworld-<program>`), its own image
+Six programs, each its own binary (`opennova-novaworld-<program>`), its own image
 (`ghcr.io/<owner>/opennova-novaworld-<program>`, a target of [`Dockerfile`](Dockerfile))
-and its own ECS service, over this shared library and the databases. Nothing selects
+and its own ECS service, over the service's libraries and the databases. Nothing selects
 what a process is: each binary is one program, constructs its own parts alone, and
-scales on its own. `program.*` is the boot every program shares
+scales on its own. `program/program.*` is the boot every program shares
 (`program::run_program`): the log sink, the config, the boot line, the program's own
 settings checked before the database is touched (a FATAL exit 1 when one is missing),
 the database pool, the migrations and the seeds under the migration lock (whichever
@@ -44,21 +44,28 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 | gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients, and the hosts' status blobs ("Lobbies: one per title" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
 | lobby (`apps/novaworld_lobby`) | one lobby instance: the NW UDP listener, its `ConnectionManager` tick, its lobby command drain, its session rows; its instance's registration, a row of its own, at the one lobby address ("Lobby instances" below) | more lobbies behind the one lobby address, each its own instance |
 | web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
-| controller (`apps/novaworld_controller`) | the election ("The controller" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links, the console drain and the periodic jobs' scheduler | one leader (a standby waits) |
-| worker (`apps/novaworld_worker`) | the job pool and its handlers ("Background jobs" below): the prunes, the account jobs, the mail it sends, the billing sync, the fleet's machine driver | more workers, more threads each |
+| fleet (`apps/novaworld_fleet`) | the election ("The fleet program" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links and the console drain; it runs and schedules no job | one leader (a standby waits) |
+| worker (`apps/novaworld_worker`) | the job pool and its handlers ("Background jobs" below): the prunes, the account jobs, the mail it sends, the billing sync, the fleet's machine driver; the scheduler of its periodic kinds | more workers, more threads each |
+| data (`apps/novaworld_data`) | the job pool over the data sets' jobs on the object store (the trees' finalize and prune, the releases' validate and apply) and the scheduler of their prune | one task (the data jobs' caps are global) |
 
 Each program's own code lives in its directory, a static library its tests drive in
-process (`opennova_novaworld_<program>_core`; the worker has its `main.cpp` alone) and
-its executable; what more than one program uses lives here.
+process (`opennova_novaworld_<program>_core`; the worker and the data program have their
+`main.cpp` alone; the worker's periodic jobs are `opennova_novaworld_worker_core`, which
+web links too) and its executable; what more than one program uses lives here, in the
+layered libraries below. A program
+runs only its own job kinds and schedules only those: no kind has handlers in two programs.
 
 - **They share state only through PostgreSQL** (durable) **and web's Redis**
   (ephemeral), never through memory: the lobby's sessions and commands, the lobby
   instances, the listings, the jobs, the machines and servers, the admin links' states
   and the console's answers are rows each program reads; `GET /api/unknowns` reads
   `unknown_messages`, where every process flushes its sightings. What several programs
-  decide from the same settings they decide alike (`parts.*`): whether hosting is on
-  (web's routes, the controller's supervisor, the worker's driver), whether billing and
-  mail are, the periodic jobs.
+  decide from the same settings they decide alike, each from the library that owns it:
+  whether hosting is on (`hosted/model/hosted_policy.*`: web's routes, the fleet's
+  supervisor, the worker's driver), the object store (`program/server_config.h`
+  `object_store_of`, `core/object_store_stack.*`), whether billing and mail are
+  (`billing/billing_stack.*`, `accounts/mail_stack.*`), the periodic jobs each schedules
+  (the worker's `apps/novaworld_worker/worker_schedule.*`).
 - **Every address a program announces comes from the config**, never from a port another
   bound: the gate's `POSTIPADDRESS` is `ONNET_PUBLIC_HOST` (where status blobs land), its
   `udpnovaworld` the one lobby address every lobby instance announces (its row), and its
@@ -67,29 +74,54 @@ its executable; what more than one program uses lives here.
   the one web endpoint, `ONNET_WEB_HOST` with `ONNET_HTTP_PORT`, so all three agree. The
   hosted servers' master address and gate port are `ONNET_PUBLIC_HOST` and
   `ONNET_GATE_UDP_PORT` (every machine, a local stack's container included, lists through
-  the gate's public address); the machines reach the controller at `ONNET_INTERNAL_URL`, a
+  the gate's public address); the machines reach the fleet program at `ONNET_INTERNAL_URL`, a
   name that follows it.
-- **What an ECS task finds from itself** (`ecs_metadata.*`), where no setting can name
-  it before the task runs: the controller, with `ONNET_INTERNAL_HTTP_BIND` unset and the
+- **What an ECS task finds from itself** (`core/ecs_metadata.*`), where no setting can name
+  it before the task runs: the fleet program, with `ONNET_INTERNAL_HTTP_BIND` unset and the
   task metadata endpoint there (`ECS_CONTAINER_METADATA_URI_V4`), binds its task's
   private IPv4 at 8070.
+- **What a machine or container uses** (`core/proc_stats.*`) is read from the kernel's own
+  files: the host's CPU, memory and network (`/proc/stat`, `/proc/meminfo`,
+  `/proc/net/dev` less loopback), a filesystem's room (statvfs) and a cgroup's CPU time and
+  memory (v2, else v1). hostd links it (the core) for its machine's stats.
+- **Each program samples its own task** (`program/program_usage.*`, `program_samples`): once a
+  minute, beside its heartbeat, its main loop writes its task's CPU over the minute (in
+  percent of its CPU limit), its memory and the most it may use, and its network
+  namespace's bytes in and out (cumulative counters), read with `core/proc_stats.*` from its own
+  cgroup and `/proc/net/dev`. A task is its ECS task id (the task metadata's ARN, with its
+  Limits) or, off ECS, its hostname (a local container's id); its limits are its cgroup's
+  where set, else the task's, else the machine's. The worker's `stats.prune` rolls the
+  minutes up by the hour (`program_hourly`) and prunes both (48 h, 400 days); the admin's
+  usage view reads them (Infrastructure below).
+- **Where the logs are** (`core/program_log.*`, `ONNET_LOG_STORE`): a deployment's are its
+  CloudWatch groups under `/opennova/<deployment>` (`/service` for the programs, filled by
+  ECS's driver; `/machines`, hostd's; `/servers`, the hosted servers'); the local stack's a
+  directory, the `logs` volume at `/var/log/opennova`. With a directory, every program
+  copies each line it writes to stdout and stderr, after its time
+  (`2026-10-18T14:05:03.123Z <line>`), into `programs/<program>/<container id>.log`: its
+  two descriptors become pipes a thread drains into the container's own log and the
+  file, so `docker logs` keeps every line in order. The file is written by a thread of its
+  own, so the console never waits on the disk: past 1 MiB waiting, lines are dropped and the
+  file notes how many in their place, and a file that refuses a write (a full disk) ends the
+  copy with one `[log]` line on stderr naming why. The machines' hostd writes `machines/` and
+  `servers/` beside them. Web reads either for the admin's log view (Infrastructure below).
 - **Each process logs `{"boot":{"program":"<program>"}}` once as it starts** (stdout, its
   first line, so a crash loop on a missing setting counts too: the log pipeline counts
   boots per program), keeps printing the `[boot] migrations:` line, logs its own
   heartbeat with its program and the fields it knows, and runs its own stall watchdog
   over its own loops ("Health" below): a stall exits that process alone.
-- **A redeploy of the gate, web, the controller or the worker leaves the lobby
+- **A redeploy of the gate, web, the fleet program or the worker leaves the lobby
   serving**: only a lobby's boot clears lobby rows, and only its own instance's; the
   retail login's `active_user_sessions` rows are never wiped at boot (their 2 h idle prune
-  and their account's next login end them); a restarted controller resumes from rows (its
+  and their account's next login end them); a restarted fleet leader resumes from rows (its
   reconciliation), a restarted worker's leases run out and its jobs run again. A lobby's
   restart drops its own sessions and listings alone, and its hosts list again at the one
   lobby address ("Lobby instances" below).
 - **Deployment**: one ECS Fargate service per program (`infra/aws/programs.tf`), the
   gate (UDP 7597), the lobby (UDP 64206) and web (TCP 443 through the portal's nginx in
   web's task, TCP 8080) behind one network load balancer at the gate's address, the
-  controller registered in Cloud Map; DEPLOY.md. The local stack (`deploy/compose/`,
-  `scripts/dev_stack.sh`; DEVELOPING.md) runs the five, each its own container, plus
+  fleet registered in Cloud Map; DEPLOY.md. The local stack (`deploy/compose/`,
+  `scripts/dev_stack.sh`; DEVELOPING.md) runs the six, each its own container, plus
   PostgreSQL, Valkey, the portal in web's network as in web's task, and with a data set
   the hosted servers' machines as containers of their own (the docker machine driver,
   [`hosted/README.md`](hosted/README.md)).
@@ -99,8 +131,9 @@ its executable; what more than one program uses lives here.
 | `ONNET_WEB_HOST` | none | The one load-balanced web endpoint (a name or an address) the gate's `startupurl`, the lobby's SessionInit web domain and the menus' `HOST_URL` / `GSB_SERVER` name, with `ONNET_HTTP_PORT`. Required by the gate, the lobby and web. |
 | `ONNET_PUBLIC_HOST` | `127.0.0.1` | The gate's public address: its `POSTIPADDRESS` (where the hosts' status blobs land), the hosted servers' master address, the switcher's (web's `GET /api/server-info`). The gate requires it set in its environment (an explicit `127.0.0.1` too): a gate left on the default would announce loopback to every client. |
 | `ONNET_LOBBY_ENDPOINT` | none | The lobby: the one lobby address every lobby announces, `<host>:<port>` (its instance row, the gates' `udpnovaworld`; on ECS the load balancer's, the gate's address and 64206); required. The gate: optional, the lobby it hands out while no instance takes clients; with none either, a probe goes unanswered (the client asks again) and the gate logs it, once every 10 s at most. |
-| `ONNET_INTERNAL_URL` | none | The controller's internal listener as the machines' agents reach it, `http://<host>:<port>` (`controller.<deployment>.opennova.internal:8070`, the deployment's Cloud Map name, in a deployment; the controller's compose name in the local stack). Required with hosting on. |
-| `ONNET_HEALTH_PORT` | 8081 | The TCP port `GET /livez` answers on in the gate, the lobby, the controller and the worker (web's is its HTTP port); 0 lets the OS pick (the tests). |
+| `ONNET_INTERNAL_URL` | none | The fleet's internal listener as the machines' agents reach it, `http://<host>:<port>` (`fleet.<deployment>.opennova.internal:8070`, the deployment's Cloud Map name, in a deployment; the fleet's compose name in the local stack): the worker's alone, whose machine driver hands it to each machine it launches. Required by the driver with hosting on. |
+| `ONNET_HEALTH_PORT` | 8081 | The TCP port `GET /livez` answers on in the gate, the lobby, the fleet program, the worker and the data program (web's is its HTTP port); 0 lets the OS pick (the tests). |
+| `ONNET_LOG_STORE` | none | Where the logs are: `cloudwatch:/opennova/<deployment>` (the deployment's groups beneath that prefix; web's task sets it, for the admin's log view) or `file://<directory>` (the local stack's `file:///var/log/opennova`: every program copies its lines into `programs/<program>/<container id>.log` there; web reads it). Unset or malformed (a boot warning): no store, no copy, and the log view answers `no_log_store`. |
 
 ## Thread model
 
@@ -112,7 +145,7 @@ its executable; what more than one program uses lives here.
 - **Nothing outside the lobby touches the lobby's memory.** The NW UDP listener's
   sessions, registry and socket are its receive thread's. The lobby keeps a row per
   session in `lobby_sessions` and takes the commands addressed to it from
-  `lobby_commands` ("The lobby's tables" below); web and the controller read the one and
+  `lobby_commands` ("The lobby's tables" below); web and the fleet program read the one and
   insert into the other, never calling into the listener.
 - **Every thread has its own database connection.** A `db::Database` is used by one
   thread at a time; each process owns one `db::ConnectionPool` on `DATABASE_URL` (at most
@@ -127,14 +160,15 @@ its executable; what more than one program uses lives here.
   `.gsb` feeds) one `db::ReadSnapshot` ("Database" below).
 - **The background jobs run on the job workers' threads** (`ONNET_WORKER_THREADS`), each
   handler leasing its connection around its database work, never across a slow call; the
-  controller's election, supervisor, console drain and scheduler each run on a thread of
-  their own ("The controller" below).
+  fleet's election, supervisor and console drain each run on a thread of their own
+  ("The fleet program" below), and the worker's and the data program's scheduler each on
+  one of its own.
 - **No request reads back what another request left in this process's memory.** What
   a later request reads (the retail `NW*.dll` sessions, the retail login pins, every rate
   limiter's buckets) lives in Redis ("Redis" below), so web's replicas serve the same
   clients whichever one each request reaches.
 - **The hosted servers' supervisor** (with `ONNET_HOSTED_PROVIDER` set) starts once the
-  controller leads and stops before the listeners; each running server's admin link is a
+  fleet program leads and stops before the listeners; each running server's admin link is a
   thread of its own (at most `ONNET_HOSTED_CAP`), ended after the supervisor so its
   session ends with `QUIT` ([`hosted/README.md`](hosted/README.md)).
 - **The `UnknownTracker` records from listener threads** into an in-memory accumulator
@@ -161,20 +195,21 @@ its executable; what more than one program uses lives here.
 
 ## Health: the watchdog, `/livez`, `/healthz` and the heartbeat
 
-Service policy (`health.*`), what the container runtime and the uptime checks read:
+Service policy (`core/health.*`), what the container runtime and the uptime checks read:
 
 - **The stall watchdog, one per process, over its program's loops alone**: the gate's
-  and the lobby's receive loops (each wakes at least every 250 ms), the controller's
-  supervisor and job scheduler (the election's turns standing in while it is a standby),
-  the worker's job pool (only a pool whose every thread stands still stalls: each slow
-  call has its own timeout) and every program's main loop. A thread of its own samples
+  and the lobby's receive loops (each wakes at least every 250 ms), the fleet's
+  supervisor (the election's turns standing in while it is a standby, or with hosting
+  off), the worker's and the data program's job pool (only a pool whose every thread
+  stands still stalls: each slow call has its own timeout) and scheduler, and every
+  program's main loop. A thread of its own samples
   the loops' turn counters every second; a loop that has not moved for 30 s logs
   `[watchdog] FATAL the <loop> made no progress for 30 s; exiting 70` and the process
   exits 70 at once (nothing can unstick a thread; an orderly shutdown could hang on it),
   and the runtime starts it again. The other programs' processes are untouched.
 - **`GET /livez`**, the process's liveness: `ok`, or `503 stalled` while a watched loop
-  (or the watchdog's last sample) is 30 s old. The gate, the lobby, the controller and the
-  worker answer it on their health port (`ONNET_HEALTH_PORT`; `health_listener.*`), web on
+  (or the watchdog's last sample) is 30 s old. The gate, the lobby, the fleet program, the
+  worker and the data program answer it on their health port (`ONNET_HEALTH_PORT`; `core/health_listener.*`), web on
   its HTTP port. Each program's ECS container health check and image `HEALTHCHECK` ask it
   (`curl -fsS --max-time 2`), and so does the gate's target group. A cache outage fails no
   web task's liveness, since no restart mends it.
@@ -187,15 +222,22 @@ Service policy (`health.*`), what the container runtime and the uptime checks re
 - **The heartbeat**, one line on stdout every 60 s, for the log pipeline's metric
   filters: `{"heartbeat":{"program":"<program>",...}}`, the program first, then the
   fields that program knows in this order, then every program's lock failures:
-  `{"heartbeat":{"program":"controller","hosted_live":N,"hosted_failed":N,"machines_lost":N,"launch_failures":N,"limits_held":N,"db_lock_timeouts":N,"db_deadlocks":N}}`.
+  `{"heartbeat":{"program":"fleet","hosted_live":N,"hosted_failed":N,"machines_lost":N,"machines_held":N,"launch_failures":N,"limits_held":N,"attention_danger":N,"attention_warn":N,"machines_stuck":N,"machine_disk_free_pct":N,"fleet_pass_age_s":N,"db_lock_timeouts":N,"db_deadlocks":N}}`.
   "Since the last line" counts reset each line; a deployment-wide count every process of
   a program logs alike is aggregated with the maximum, not the sum.
   - lobby: `nw_sessions` (its own NovaWorld UDP sessions), `listed_hosts` (the
     deployment's listed servers; aggregate with the maximum);
   - web, with billing on: `webhook_rejects` (deliveries refused since the last line);
-  - controller, with hosting on: `hosted_live` and `machines_lost` (now),
-    `hosted_failed` and `launch_failures` (since the last line), `limits_held` (1 while
-    the owners' limits hold is on);
+  - fleet, with hosting on: `hosted_live`, `machines_lost` and `machines_held` (the lost
+    machines the mass-lost brake holds from their end; now), `hosted_failed` and
+    `launch_failures` (since the last line), `limits_held` (1 while the owners' limits
+    hold is on); and the leader alone (a standby's would be a stale pass): the fleet's
+    health (`hosted/model/fleet_health.h`) as `attention_danger` and `attention_warn` (its
+    findings of each level), `machines_stuck` (the machines a stuck or flapping finding
+    names), `machine_disk_free_pct` (the least free share of a ready or draining
+    machine's trees' disk; left out with none reporting), and `fleet_pass_age_s` (the
+    seconds since its supervisor's last pass that failed in nothing; from its start
+    before one);
   - worker: `billing_sync_age_s` (the oldest unsynced webhook event's age; 0 with none,
     -1 with billing off);
   - gate: `probes_unanswered` (since the last line, for want of a lobby: what the
@@ -245,33 +287,38 @@ policy, not a port.
   good. A retry waits its kind's backoff, doubling per attempt to its cap, jittered to
   between half and all of it (or the wait the handler names); past `max_attempts` the job
   is `failed`, its error on the row, and the admin's jobs page lists it.
-- **Periodic jobs** (`jobs/scheduler.*`): each tick (every second) enqueues each periodic
-  kind once per time bucket, keyed `<kind>@<bucket>`, and none beside one still queued or
-  running; some also run at the scheduler's start, and the billing sync's bucket is
-  enqueued only while an event waits.
+- **Periodic jobs** (`jobs/scheduler.*`): each program that runs jobs schedules its own
+  periodic kinds alone (the worker's `worker_schedule`, the data program's `tree.prune`
+  while there is a store), in every one of its processes with no election. Each tick (every
+  second) enqueues each periodic kind once per time bucket, keyed `<kind>@<bucket>` (unique
+  for good, so however many processes tick a bucket gets one job), and none beside one still
+  queued or running; the billing reconcile also runs at the worker's start, keyed by its
+  release (`<kind>@start:<family>:<revision>`, its ECS task definition's, so a release's
+  tasks run it once; by its kind alone off ECS), and the billing sync's bucket is enqueued
+  only while an event waits.
 - **The prune**: finished jobs are deleted 14 days after they end (`jobs.prune`, hourly;
   an admin's prune names a shorter keep in its payload, `keep_s`, a day at the least).
 
-| Kind | What | Enqueued by | Cap |
-| --- | --- | --- | --- |
-| `machine.launch` | the row's launch (`hosted/fleet_jobs.*`) | the supervisor, with the machine's row | 8 |
-| `machine.describe` | the cloud's word on a live machine, onto its row | the supervisor's boot and lost checks, deduped per machine | 4 |
-| `machine.terminate` | a cloud machine ended | the supervisor's ends | 4 |
-| `fleet.sweep` | the driver's machines against the rows | every 5 min, and at the supervisor's reconciliation | 1 |
-| `billing.reconcile` | the full reconcile with Stripe | at the start, every `ONNET_BILLING_RECONCILE_MINUTES`, an admin | 1 |
-| `billing.sync` | the customers with an event to sync | each fresh webhook event; every minute while one waits | 1 |
-| `mail.send` | one mail, at most once | the welcome and reset routes | 4 |
-| `hosts.prune`, `host_keys.prune`, `web_sessions.prune`, `active_user_sessions.prune`, `login_addresses.prune`, `password_resets.prune`, `billing_events.prune` | the prunes (`active_user_sessions.prune`: the retail logins' rows unused for 2 h) | every `HOST_SWEEP_INTERVAL_MS` | 1 |
-| `stats.prune` | the hosted servers' samples past 48 h, their hours past 90 days, the machines' months past 13, the fleet's machines ended or failed 14 days ago | hourly | 1 |
-| `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | 1 |
-| `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | 1 |
-| `tree.finalize` | an uploaded data set tree checked, sized and made ready (`hosted/data_set_jobs.h`) | the admin's finalize | 2 |
-| `release.validate` | an uploaded update package read, mapped to its data sets, made a draft or invalid | the admin's upload completion | 1 |
-| `release.apply` | one section of a published release applied to its data set's baseline, a new tree | the admin's publish, one per section | 1 |
-| `tree.prune` | the objects of the prunable trees removed | hourly, after each job above, the delete routes | 1 |
+| Kind | What | Enqueued by | Run by | Cap |
+| --- | --- | --- | --- | --- |
+| `machine.launch` | the row's launch (`hosted/model/fleet_jobs.*`) | the supervisor, with the machine's row | worker | 8 |
+| `machine.describe` | the cloud's word on a live machine, onto its row | the supervisor's boot and lost checks, deduped per machine | worker | 4 |
+| `machine.terminate` | a cloud machine ended | the supervisor's ends | worker | 4 |
+| `fleet.sweep` | the driver's machines against the rows | every 5 min (the worker's schedule), and at the supervisor's reconciliation | worker | 1 |
+| `billing.reconcile` | the full reconcile with Stripe | at a release's start, every `ONNET_BILLING_RECONCILE_MINUTES`, an admin | worker | 1 |
+| `billing.sync` | the customers with an event to sync | each fresh webhook event; every minute while one waits | worker | 1 |
+| `mail.send` | one mail, at most once | the welcome and reset routes | worker | 4 |
+| `hosts.prune`, `host_keys.prune`, `web_sessions.prune`, `active_user_sessions.prune`, `login_addresses.prune`, `password_resets.prune`, `billing_events.prune` | the prunes (`active_user_sessions.prune`: the retail logins' rows unused for 2 h) | every `HOST_SWEEP_INTERVAL_MS` | worker | 1 |
+| `stats.prune` | the machines' minutes rolled up into their hours; the hosted servers' and the machines' samples past 48 h, their hours past 400 days, the machines' egress months past 13, the programs' task minutes rolled up by the hour (minutes past 48 h, hours past 400 days), the fleet's machines ended or failed 14 days ago | hourly | worker | 1 |
+| `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | worker | 1 |
+| `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
+| `tree.finalize` | an uploaded data set tree checked, sized and made ready (`data_sets/data_set_jobs.h`) | the admin's finalize | data | 2 |
+| `release.validate` | an uploaded update package read, mapped to its data sets, made a draft or invalid | the admin's upload completion | data | 1 |
+| `release.apply` | one section of a published release applied to its data set's baseline, a new tree | the admin's publish, one per section | data | 1 |
+| `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each job above, the delete routes | data | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
-**Background jobs**, `/admin/jobs`) reads the jobs table and the controller's row alone,
+**Background jobs**, `/admin/jobs`) reads the jobs table and the fleet leader's row alone,
 so every replica answers alike. A worker process shows by the claims its threads left on
 the rows; a running job whose lease ran out is one whose process has gone away. The
 failures come grouped by kind and **failure key** (the error with its ids, times and
@@ -281,7 +328,7 @@ a worker holds, and each is logged with its actor and the job.
 
 | Route | Auth | Reply |
 | --- | --- | --- |
-| `GET /api/admin/jobs/overview` | admin | each kind's counts, latency and mean run, the newest 20 failure groups, the worker processes, the schedules, the controller; never a job's secret |
+| `GET /api/admin/jobs/overview` | admin | each kind's counts, latency and mean run, the newest 20 failure groups, the worker processes, the schedules, the newest scheduled job, the fleet leader; never a job's secret |
 | `GET /api/admin/jobs` | admin | the filtered, paged list (`?state=`, `?kind=`, `?from=`, `?to=`, `?q=`, `?failure=`, `?before=`, `?limit=` 1..200); 400 `invalid_field` |
 | `GET /api/admin/jobs/<id>` | admin | `{"job"}` with its `payload`; 404 |
 | `POST /api/admin/jobs/<id>/retry` | admin | a failed job queued again with one more attempt: 200; 404; 409 `not_failed`, `secret_dropped`, `already_pending` |
@@ -294,29 +341,30 @@ The replies' times are ISO 8601 UTC, with `Cache-Control: no-store`.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `ONNET_WORKER_THREADS` | 4 | The job workers' threads (1..64), and at most `DATABASE_POOL_MAX` less two (the pool's keeper's connection and the one the process holds): asked for more, that many start, with a boot warning. |
+| `ONNET_WORKER_THREADS` | 4 | The job pool's threads (1..64) in the worker and in the data program, and at most `DATABASE_POOL_MAX` less two (the pool's keeper's connection and the one the process holds): asked for more, that many start, with a boot warning. |
 
-## The controller
+## The fleet program
 
-`apps/novaworld_controller/controller.*` (migration `0008_controller_state.sql`): of the
-controller processes (`apps/novaworld_controller/main.cpp`), the one that runs the machines' internal
-listener, the hosted servers' supervisor (with its admin links), the console drain and the
-periodic jobs' scheduler, elected among them. Service policy, not a port.
+`apps/novaworld_fleet/election.*` (migrations `0008_controller_state.sql` and
+`0014_fleet_leader.sql`, which renamed its row's table): of the
+fleet processes (`apps/novaworld_fleet/main.cpp`), the one that runs the machines' internal
+listener, the hosted servers' supervisor (with its admin links) and the console drain,
+elected among them. It runs no job pool and no scheduler: the periodic jobs are each
+program's own ("Background jobs" above). Service policy, not a port.
 
 - **The election.** A session advisory lock (`db::SessionLock`, its own key) on a
-  connection of the controller's own, outside the pool, tried again while another
+  connection of the fleet's own, outside the pool, tried again while another
   process holds it (each try waits the lock timeout): a standby waits there. Once it
-  holds the lock, the controller moves `controller_leader.generation` on and names
-  itself (`holder`, a random `controller-<hex>`), then starts its parts: the internal
+  holds the lock, the fleet program moves `fleet_leader.generation` on and names
+  itself (`holder`, a random `fleet-<hex>`), then starts its parts: the internal
   listener (bound only now, so the deployment's internal name reaches the process that
   renders the start files; a bind that fails ends the process), the supervisor (which
-  reconciles), the console drain, the scheduler (whose start enqueues the billing
-  reconcile).
+  reconciles), the console drain.
 - **The fence.** Every check (each second) it reads the row on its lock's connection.
   The connection gone (and the lock with it) or a generation not its own is the
-  leadership lost: the server logs `[controller] FATAL ... lost the leadership` and
-  exits 71, and its container starts it again as a standby. Every supervisor pass and
-  scheduler tick first asks that it still leads (its flag, and the row's generation its
+  leadership lost: the server logs `[fleet] FATAL ... lost the leadership` and
+  exits 71, and its container starts it again as a standby. Every supervisor pass first
+  asks that it still leads (its flag, and the row's generation its
   own), so a stale leader that has not noticed yet starts nothing once another leads; and
   a pass asks again inside each write that enqueues cloud work (a machine's row with its
   launch, an end with its terminate), the row share-locked (`FOR SHARE`) to that write's
@@ -334,7 +382,7 @@ periodic jobs' scheduler, elected among them. Service policy, not a port.
 
 ## Lobbies: one per title
 
-Each `games` row is a lobby ([`catalog_repository.h`](catalog_repository.h)). The rows
+Each `games` row is a lobby ([`program/catalog_repository.h`](program/catalog_repository.h)). The rows
 are `backend/seed/0001_games.sql`'s, which every boot applies after the migrations
 (`ON CONFLICT DO NOTHING`, so a row added there reaches every database at its next
 boot); `title` is the engine's game profile code the row's clients speak
@@ -617,7 +665,9 @@ account's hosting entitlement ([`hosted/README.md`](hosted/README.md)): tier 1, 
 3 hosted servers (`billing/tiers.h`), and the own-machine add-on, one subscription of
 quantity 1 per own machine (bought through Checkout, canceled in the Portal, which
 changes no quantity), moves that many of them onto machines of their own while a tier
-also grants. The service makes Stripe Checkout and Customer Portal
+also grants, and the static-address add-on, one subscription per address, gives an own
+machine a fixed public address and a name ([`hosted/README.md`](hosted/README.md) "Static
+addresses"). The service makes Stripe Checkout and Customer Portal
 sessions and hands the browser their URL; no publishable key and no Stripe.js reach the
 site. Everything here is service policy (`billing/`).
 
@@ -631,8 +681,8 @@ site. Everything here is service policy (`billing/`).
   more on no answer, a 429 or a 5xx. The key and the webhook secret are log secrets.
 - **The cache** (`billing/billing_repository.*`, `backend/migrations/0002_billing.sql`):
   each account's Stripe customer (`billing_customers`), every subscription of it as
-  Stripe last answered (`billing_subscriptions`: its item, `tier`, `own_machine` or
-  `unknown` for a price no setting names, read from its price; its status and since when;
+  Stripe last answered (`billing_subscriptions`: its item, `tier`, `own_machine`,
+  `static_address` or `unknown` for a price no setting names, read from its price; its status and since when;
   its period end and whether it cancels at it), the webhook events
   (`billing_events`) and the database's instance id (`service_meta`, 32 hex digits from
   the OS CSPRNG at the first boot). The entitlement reads only this cache, so it holds
@@ -656,19 +706,35 @@ site. Everything here is service policy (`billing/`).
   `billing_sync_backoff`. `billing.sync` reads each customer with an unrecorded event back
   from Stripe with all its subscriptions, then writes it in one transaction (no Stripe call
   ever runs inside one); a customer Stripe could not be asked about waits 60 s, doubling to
-  15 min. `billing.reconcile`, at the controller's start, every
+  15 min. `billing.reconcile`, at a release's start (the worker's), every
   `ONNET_BILLING_RECONCILE_MINUTES` and on an admin's ask, walks every subscription: this
   instance's written, another instance's (or one naming no account here) listed as an
   orphan, a granting row Stripe no longer knows canceled, two granting tiers on one account
   listed as duplicates. It also checks the configured prices (monthly, recurring, the key's
   mode, the sold one active, one currency); until they check out, checkout answers 503
   `billing_misconfigured`.
+- **The capacity gate** (`hosted/model/sold_capacity.*`): a new subscription is never sold past
+  what the fleet holds. Every account holds what its entitlement grants, used or not (its
+  servers less those on own machines are shared places, its own machines are own
+  machines), an admin's comp grant included; the fleet sells `ONNET_FLEET_MAX_SHARED` x
+  `ONNET_FLEET_SHARED_SLOTS` shared places, `ONNET_FLEET_MAX_OWN` own machines and
+  `ONNET_FLEET_MAX_ADDRESSES` static addresses (each one granted, used or not, and each
+  the cloud still holds: one on its way out holds its Elastic IP until released). A
+  checkout is judged, and its item reserved (`billing_checkout_reservations`, for a day),
+  in one transaction under the hosting-start lock, before Stripe makes its
+  session, so two checkouts at once never both take the last place; the reservation
+  counts as the subscription until the sync writes the one its session made (its
+  `opennova_reservation` metadata), the session's `checkout.session.expired` event, the
+  account's next checkout or its end drops it. One past the fleet is 409 `sold_out`, and
+  `GET /api/billing/tiers` says which items are `available`. A start's `at_capacity`
+  stays the hard gate; the Portal's tier changes are not judged.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `STRIPE_SECRET_KEY` | none | `sk_` or `rk_` (a restricted key is the recommended one), `test` or `live`: the mode everything else must match. |
 | `STRIPE_WEBHOOK_SECRET` | none | The webhook endpoint's signing secret, `whsec_...`. |
 | `STRIPE_PRICE_TIER1`..`3`, `STRIPE_PRICE_OWN_MACHINE` | none | Comma lists of `price_...` ids: the first one sold, the rest still recognized (grandfathered); each price in one list alone. The amounts are Stripe's, never the service's. |
+| `STRIPE_PRICE_STATIC_ADDRESS` | none | The static-address add-on's prices, the same way; required only while `ONNET_FLEET_MAX_ADDRESSES` is above 0 (else it may stay unset or `REPLACE_ME`). |
 | `ONNET_SITE_URL` | none | The site's origin (no path): Checkout returns to `/me/support?checkout=success&session_id=...` or `?checkout=cancel` there, the portal to `/me/support`. `https://` with a live key. The dev compose stack sets `http://localhost:8000`. |
 | `ONNET_STRIPE_CURL` | `/usr/bin/curl` | The curl binary, an absolute path. |
 | `ONNET_BILLING_AUTOMATIC_TAX` | off | `1` turns Stripe Tax on in Checkout (it collects the customer's address). |
@@ -692,10 +758,10 @@ compose stack takes the test-mode set from the vault through
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the own-machine add-on's amount |
-| `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `comp_servers`, `own_machines`, `used`, `stopping`, `can_start`), the support tier and add-on subscriptions shown, `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
-| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine"}`: 200 `{"url"}`; 400; 403 `not_eligible`; 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `own_machine_limit`; 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. The account's previous session is settled first (a completed one synced and judged again), so nothing is sold twice; the session asks for the terms of service and stamps the instance and the account on the subscription |
-| `POST /api/billing/portal` | a website session, the CSRF header | 200 `{"url"}`; 404 `no_billing_account`; 429; 503 |
+| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the own-machine add-on's amount, the static-address add-on's while the fleet sells addresses, and each one's `available` (the fleet takes one more for an account that has nothing yet; false: hosting is full) |
+| `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `comp_servers`, `comp_own_machines`, `own_machines`, `static_addresses`, `used`, `stopping`, `can_start`), the support tier and add-on subscriptions shown, each static address's subscription (`address_subscriptions`, with its address once named), `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
+| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine" \| "static_address"}`: 200 `{"url"}`; 400; 403 `not_eligible`, `payment_past_due` (an address while a payment is past due); 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `own_machine_limit`, `address_limit` (an address for every own machine already), `sold_out` (the fleet has sold all it holds of what the item adds); 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. The account's previous session is settled first (a completed one synced), then the item judged and reserved under the hosting-start lock, so nothing is sold twice or past the fleet; the session asks for the terms of service and stamps the instance, the account and the reservation on the subscription |
+| `POST /api/billing/portal` | a website session, the CSRF header | 200 `{"url"}`; with `{"cancel_subscription": "sub_..."}` (a static address's) the Portal's cancel flow for it, returning to `/me/addresses`; 400; 404 `no_billing_account`, `not_found`; 429; 503 |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook): as `GET /api/me/billing`; 404; 429 (3, then one every 10 s); 503 |
 | `POST /api/billing/webhook` | Stripe's signature | above |
 | `GET /api/admin/billing` | admin | the mode, the price check, the last reconcile, the pending events, every subscription with its account, the duplicates, `unknown_prices`, the orphans, the newest 50 events and the owners' limits hold (`limits_hold*`); with billing off `{"enabled": false}` and the hold alone |
@@ -704,7 +770,10 @@ compose stack takes the test-mode set from the vault through
 
 `DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of
 the account still grants (Stripe would bill an account that is gone). The admin's user
-list and detail carry each account's entitlement, live servers and subscriptions.
+list and detail carry each account's entitlement, live servers and subscriptions; the
+detail and `PUT /api/admin/users/<id>/comp` carry the service's sold `capacity` against
+what the fleet sells (`oversold` when an admin's grant, or a lowered maximum, took it
+past).
 
 ## CD keys (DFX2 activation)
 
@@ -760,11 +829,29 @@ The site's admin page **Infrastructure** (`/admin/infrastructure`) shows the dep
 it runs, read on web (`apps/novaworld_web/infra/`) in one route,
 `GET /api/admin/infrastructure` (admin; `Cache-Control: no-store`). From the database,
 which every replica reads alike: the lobby instances with their sessions and listings, the
-controller that leads and the fleet's machines. From AWS, with web's task role
+fleet process that leads and the fleet's machines. From AWS, with web's task role
 (`infra/infra_status.*`): each program's ECS service (its counts, deployments, task
 definition against the recorded release, newest events), its running and recently stopped
 tasks, the one-off tasks, the load balancer's target groups and their targets' health, the
-database's and the cache's status and each machine's EC2 state.
+database's and the cache's status, each machine's EC2 state and image, and, with hosting
+on, the fleet cluster: hostd's daemon service and each machine as its container instance
+(its EC2 instance, its `machine-id` and `kind` attributes, its image, whether its ECS agent
+is connected, its tasks). A fleet roll's preview reads each machine's image from the same
+read (`GET /api/admin/fleet/roll`, `hosted/README.md`).
+
+The page is the service's hub. Each program has a card (its ECS service, and from
+`GET /api/admin/programs` what its tasks use now and its tasks gone in 24 hours) opening the
+program's page (`/admin/infrastructure/programs/<name>`: its tasks, the usage charts of all of
+them or of one, and its log); hostd's card holds the fleet cluster's machines; the database,
+the cache and the load balancer each open their CloudWatch charts
+(`/admin/infrastructure/resources/rds|cache|nlb`, which say they are not available on the
+local stack). The machines are one line here: their page is **Fleet** (`/admin/fleet`), with
+what needs an admin (`GET /api/admin/attention`, also counted on the admin menu), a card per
+machine opening its own page (`/admin/fleet/machines/<id>`: its facts against the release,
+slots, trees, timeline, usage and hostd's log) and the roll's preview (`?tab=roll`). A hosted
+server's admin page adds a Usage tab (its slot's CPU, memory, network and tick health) and a
+Logs tab (each start's output); its owner sees neither, only where its start stands and why
+its last run ended.
 
 The AWS calls are curl's, signed by curl itself (`--aws-sigv4`), run the way billing's
 Stripe calls are (`infra/aws_api.*`, XML replies read by `infra/aws_xml.*`), not the AWS
@@ -775,7 +862,7 @@ many admins look. A call that fails leaves its section's error (AWS's own code a
 message) and the others stand. Without AWS (the local stack: no `ONNET_INFRA_CLUSTER`, or
 no task role) nothing is called and the page says why; it never shows made-up data. Web's
 task role holds these reads alone, scoped to the deployment's resources
-(`infra/aws/programs.tf`, `infra_read`).
+(`infra/aws/programs.tf`, `infra_read`; the fleet cluster's, `infra/aws/fleet_agent.tf`).
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -785,6 +872,75 @@ task role holds these reads alone, scoped to the deployment's resources
 | `ONNET_INFRA_DATABASE` | none | Web: the RDS instance's identifier. |
 | `ONNET_INFRA_CACHE` | none | Web: the ElastiCache replication group's id. |
 | `ONNET_INFRA_RELEASE_PARAMETER` | none | Web: the SSM parameter holding the release (`/opennova/<deployment>/release`), whose revisions say whether each program runs the release's. |
+| `ONNET_INFRA_FLEET_CLUSTER` | none | Web: the fleet cluster (`opennova-<deployment>-fleet`), whose hostd service and container instances the view reads; unset or empty with hosting off, and nothing of it is read. |
+| `ONNET_INFRA_LOAD_BALANCER` | none | Web: the network load balancer's ARN suffix (`net/<name>/<id>`), the dimension of its CloudWatch metrics (the usage view's `nlb`). |
+| `ONNET_INFRA_ALARM_PREFIX` | none | Web: the start every name of the deployment's CloudWatch alarms shares (`opennova-<deployment>-`), whose firing ones the attention list reads (`cloudwatch:DescribeAlarms`). Unset (the local stack), no alarm is read. |
+
+### Usage
+
+`GET /api/admin/usage?subject=server|machine|program|infra&id=<id>&range=48h|400d` (admin;
+`infra/usage_routes.*`) answers one shape for every subject: `{"subject", "id", "range",
+"step_seconds", "limit": {"cpu", "memory_bytes"}, "series": [{"at", "cpu_percent",
+"memory_bytes", "net_in_bps", "net_out_bps"}], "now"}`, 1-minute points for 48 h or hourly
+ones for 400 days, `cpu_percent` in percent of `limit.cpu`'s CPUs and `now` the newest
+minute while it is at most 3 minutes old. A hosted server's (`hosted_server_samples`,
+`_hourly`; its slot's limits) carry `tick_p99_ms` and `late_ticks` too, a machine's
+(`fleet_machine_samples`, `_hourly`; its memory's limit, `disk_total_bytes`)
+`disk_free_bytes`, and a program's (`program_samples`, `program_hourly`; `&task=` for one
+task) add its tasks up minute by minute, the CPU in percent of their CPUs together. The
+samples keep cumulative byte counters: a rate is the growth between two minutes over the
+time between them, none across a gap past 5 minutes or where a counter went back; an hour's
+is its bytes over the hour. `subject=infra&id=rds|cache|nlb` answers an AWS resource's
+CloudWatch metrics instead (`infra/metrics_store.*`, `cloudwatch:GetMetricData`, kept 60 s):
+`{"available", "unavailable", "error", "period_seconds", "statistics": {"<metric>":
+"Average"|...}, "metrics": {"<metric>": [{"at", "value"}]}}`, the database's CPU, freeable
+memory, connections, network and IOPS, the cache's primary node's CPU, engine CPU, memory,
+network and connections, the balancer's processed bytes, active flows and each target
+group's healthy hosts (`HealthyHostCount:<listener>`); the local stack's says why none.
+`GET /api/admin/programs` lists every program the service runs: its tasks running and
+desired and the revision its ECS service runs (none locally: running is the tasks
+reporting), what its reporting tasks use now, `restarts_24h` (its tasks that reported in
+the last 24 h and no longer do: a crash's, a deploy's replaced ones, a scale-in's) and each
+task, the reporting ones and the ones ECS runs.
+
+### Logs
+
+`GET /api/admin/logs` (admin; `Cache-Control: no-store`; `infra/log_routes.*`) answers a
+page of one log, newest last, from the store `ONNET_LOG_STORE` names (`infra/log_store.*`):
+`?subject=server&id=<id>[&generation=<g>]` (a hosted server's start, its newest without a
+number), `?subject=machine&id=<id>` (a machine's hostd) or
+`?subject=program&id=<program>[&task=<task id>]` (a program's task, or every task of it),
+with `&before=<cursor>` (the page before an earlier one), `&limit=` (1 to 500, 200) and
+`&q=` (the lines holding that text). The reply: `{"subject", "id", "generation", "task",
+"source"` (`cloudwatch` or `file`), `"group", "stream"` (where it read), `"lines"` (each
+`{"at", "text"}`, `at` ISO 8601 with milliseconds or null), `"before"` (the older page's
+cursor, null for none)`}`; 404 for no such server, start, machine, program or task, 502
+`logs_unavailable` with AWS's words, 503 `no_log_store`. What it reads comes from rows:
+the stream a start's row names (`hosted_server_starts.log_stream`, in `/servers`), the
+machine's (`fleet_machines.agent_log_stream`, in `/machines`), a program's task that
+sampled itself (`program_samples`; `<program>/<program>/<task id>` in `/service`); no
+request names a group, a stream or a path. A known stream's newest lines are CloudWatch
+Logs' `GetLogEvents`, a text filter or a program's every task `FilterLogEvents` over
+windows walking back from the newest (15 minutes, then four times as long, to 31 days); a
+read makes at most 8 calls in 10 s, a read like one in the last 3 s is answered from
+memory, and an admin has two reads in flight at most (60 at once, then two a second). The
+local stack's directory store reads the same subjects' files (`servers/<id>/g<g>.log`,
+`machines/<id>/hostd.log`, `programs/<program>/<task>.log`) backwards from their end.
+
+### Attention
+
+`GET /api/admin/attention` (admin; `Cache-Control: no-store`; `infra/attention_routes.*`)
+answers what needs an admin: `{"findings": [{"level", "subject", "text", "since", "link",
+"source"}], "alarms": [{"name", "state_since", "description"}], "alarms_read",
+"checked_at"}`. The findings are the fleet's health read from the rows at each request
+(`hosted/model/fleet_health.*`, the hosted README's "The fleet's health"; the fleet leader's
+heartbeat counts the same ones), danger first, then warn, then info, each level's oldest
+first; `link` is the admin page that shows one (a site path) and `source` the rule. The
+alarms are the deployment's CloudWatch alarms in `ALARM` (`infra/alarm_store.*`,
+`cloudwatch:DescribeAlarms` by the names' prefix, `ONNET_INFRA_ALARM_PREFIX`, kept 20 s);
+`alarms_read` is false where none are read (the local stack), and a read that fails is a
+warn finding of its own, never an empty list that reads as none firing. An admin's reads
+come from a bucket of their own (30 at once, then one a second).
 
 ## The switcher's address
 
@@ -802,7 +958,7 @@ answers.
 
 ## Configuration
 
-All via environment (`server_config.cpp`): `ONNET_WEB_HOST`, `ONNET_LOBBY_ENDPOINT`,
+All via environment (`program/server_config.cpp`): `ONNET_WEB_HOST`, `ONNET_LOBBY_ENDPOINT`,
 `ONNET_INTERNAL_URL`, `ONNET_HEALTH_PORT` ("Programs" above), `ONNET_PUBLIC_HOST`,
 `ONNET_{GATE_UDP,NW_UDP,HTTP}_PORT`, `DATABASE_URL`, `DATABASE_PASSWORD`,
 `DATABASE_POOL_MAX` ("Database" below), `ONNET_REDIS_URL`, `ONNET_REDIS_PASSWORD`
@@ -830,8 +986,8 @@ runs no game host).
 Billing takes the `STRIPE_*` set and `ONNET_SITE_URL`, `ONNET_STRIPE_CURL`,
 `ONNET_BILLING_AUTOMATIC_TAX` and `ONNET_BILLING_RECONCILE_MINUTES` ("Billing (monthly
 support tiers)" above). Outbound mail takes `ONNET_MAIL_FROM`, `ONNET_MAIL_REGION` and
-`ONNET_SITE_URL` ("Account email and password resets" below). The job workers take
-`ONNET_WORKER_THREADS` ("Background jobs" above).
+`ONNET_SITE_URL` ("Account email and password resets" below). The job pools (the
+worker's, the data program's) take `ONNET_WORKER_THREADS` ("Background jobs" above).
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts); leave it unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) (one target per program) and the compose files under
@@ -880,7 +1036,7 @@ locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh 
   - a start request (`hosted::request_server`): the hosted-start advisory lock, from
     its first read to its commit (the account's servers, the global cap and the
     fleet's room are counted by one start at a time); a job's claim and the
-    controller's election hold keys of their own, so neither waits on a start;
+    fleet's election hold keys of their own, so neither waits on a start;
   - a website session, a hosting key or a known address minted at a credentials
     generation: the account's row (`FOR NO KEY UPDATE`), so a password reset or a ban
     runs wholly before the mint (which then mints nothing) or wholly after (and
@@ -912,12 +1068,13 @@ locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh 
 
 ## Redis
 
-The HTTP layer's shared state, through hiredis
-([`redis_client.h`](redis_client.h): `RedisPool`, the `opennova_redis` target only this
-shared library links). In prod it is ElastiCache for Valkey over TLS with an AUTH
-password; locally `scripts/dev_redis.sh up` (Valkey 8). The HTTP listener needs it: a
-web process that cannot reach it at boot (a `PING`) logs `[boot] FATAL: redis
-unreachable` and exits 1 before any listener starts. No other program opens it.
+Web's shared state, through hiredis
+([`apps/novaworld_web/redis_client.h`](../novaworld_web/redis_client.h): `RedisPool`, the
+`opennova_redis` target only web's core, `opennova_novaworld_web_core`, links). In prod
+it is ElastiCache for Valkey over TLS with an AUTH password; locally
+`scripts/dev_redis.sh up` (Valkey 8). The HTTP listener needs it: a web process that
+cannot reach it at boot (a `PING`) logs `[boot] FATAL: redis unreachable` and exits 1
+before any listener starts. No other program opens it.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -952,7 +1109,7 @@ unreachable` and exits 1 before any listener starts. No other program opens it.
 ## Website sessions and roles
 
 The NovaWorld site logs players in with their NovaWorld account (`web_access.*`,
-`web_session.*`, `rate_limiter.*`, `http_json.h`; the tables `web_sessions` and
+`accounts/web_session.*`, `rate_limiter.*`, `http_json.h`; the tables `web_sessions` and
 `login_addresses`, and `players.role` and `players.credentials_gen`). The retail
 `NW*.dll` login keeps its own flow and shares only the login brake's per-username cap,
 the known addresses and the credentials generation below.
@@ -989,10 +1146,10 @@ the known addresses and the credentials generation below.
   account still has it, so a reset ends them even where nothing deletes them.
 - **Usernames and handles.** A username: 1..64 bytes, no control byte; a handle
   (`nwhandle`, the player's name in the game and the `NWHANDLE` / `CHAR` cookies): 1..30
-  bytes, no control byte, the longest a stock host reads back whole (`auth.h`,
+  bytes, no control byte, the longest a stock host reads back whole (`accounts/auth.h`,
   `kHandleMaxBytes`), checked on registration, the admin create and every admin update
   (400 `invalid_field`). Every client-supplied string in any listener's log line goes
-  through `loggable()` (`loggable.h`): control bytes as `\xNN`, cut at 64 bytes.
+  through `loggable()` (`core/loggable.h`): control bytes as `\xNN`, cut at 64 bytes.
 - **Retail identity.** `/NWJoin.dll` (the joiner whose PCID and handle its PUB* cookies
   carry, and the expansion gate) and `/NWAccount.dll` / `/NWCharacter.dll` take the
   account from server-side state only: the request's own retail login, its
@@ -1003,7 +1160,7 @@ the known addresses and the credentials generation below.
   missing expansion gets (the `msgbase` page, NWEC11 for a ban, NWEC12 otherwise); one
   with no login standing joins with empty PUB* cookies, which a stock host refuses.
 - **Retail pages.** Every value the routes fill a page with (`{{VAR}}`,
-  `template_engine.*`) goes out with `& < > " '` as entities, so a request's values, a
+  `accounts/template_engine.*`) goes out with `& < > " '` as entities, so a request's values, a
   server's name and a maintenance message add no markup; a stock client's page parser
   turns them back in a page's text (inside a tag it decodes none, and the values there are
   bare page names).
@@ -1065,7 +1222,7 @@ password reset links. Service policy, not a port: retail's NovaWorld accounts ha
 email the service kept.
 
 - **The address.** `POST /api/register` requires `email` (400 `missing_field`).
-  `normalize_email` (`auth.h`) takes at most 254 bytes with exactly one `@`, a local part
+  `normalize_email` (`accounts/auth.h`) takes at most 254 bytes with exactly one `@`, a local part
   and a domain of two or more labels, no space or control byte (400 `invalid_field`), and
   stores it with its ASCII letters lowercased, so one address names one account (400
   `email_exists`; a `CHECK` refuses an upper-case or empty one). The admin's create takes
@@ -1091,7 +1248,7 @@ email the service kept.
   and the account's website sessions, its retail login's session row, its hosting keys and
   its retail pins end. 204. The periodic `password_resets.prune` job prunes links past
   their hour.
-- **The mailer** (`mailer.h`). The routes queue each mail as a `mail.send` job
+- **The mailer** (`accounts/mailer.h`). The routes queue each mail as a `mail.send` job
   ("Background jobs" above) on their own connection, the subject and bodies the job's
   secret, so a mail outlives a restart of the process that asked for it. A worker sends
   it at most once and logs one line (`[mail] sent <template> to '<address>' ...` or
@@ -1111,16 +1268,40 @@ email the service kept.
 
 ## Build layout and tests
 
-This directory builds the static library `opennova_novaworld_common`, what more than one
-program uses; each program's directory builds its own code as
-`opennova_novaworld_<program>_core` and its `main.cpp` as `opennova-novaworld-<program>`.
-All of it, and its tests, exist only with `OPENNOVA_NOVAWORLD_SERVICE=ON` (the root CMake
-option, off by default; the Linux CI jobs and the images turn it on). The HTTP half (the
-website and retail routes' support, the jobs, `hosted/`, `billing/`) builds only under
-`BUILD_NOVAWORLD_HTTP`, which defines `OPENNOVA_HTTP_ENABLED` PUBLIC: web, the controller
-and the worker need it, the gate and the lobby build with or without it.
+This directory builds what more than one program (or opennova-hostd) uses as nine static
+libraries, one per directory, under its one include root (`"core/x.h"`,
+`"hosted/model/x.h"`; a sibling bare). Each includes from and links only the layers below
+it ([`CMakeLists.txt`](CMakeLists.txt) says what each holds):
 
-The tests live in `tests/novaworld/` (`service_tests.cmake`); each says what it pins.
+| Library | Directory | Links | Programs that link it |
+| --- | --- | --- | --- |
+| `opennova_novaworld_core` | `core/` | apps/common (no database) | every program, hostd |
+| `opennova_novaworld_hosting_protocol` | `hosted/protocol/` | core | web, the fleet, the worker, hostd |
+| `opennova_novaworld_program` | `program/` | core | every program |
+| `opennova_novaworld_jobs` | `jobs/` | core | web, the fleet, the worker, data |
+| `opennova_novaworld_accounts` | `accounts/` | core, program, jobs | web, the fleet, the worker |
+| `opennova_novaworld_billing` | `billing/` | core, jobs | web, the fleet, the worker |
+| `opennova_novaworld_data_sets` | `data_sets/` | core, jobs | web, the fleet, the worker, data |
+| `opennova_novaworld_hosting_model` | `hosted/model/` | core, program, jobs, billing, data_sets, hosting_protocol | web, the fleet, the worker |
+| `opennova_novaworld_hosting_cloud` | `hosted/cloud/` | core, jobs, billing, hosting_protocol, hosting_model | the worker alone |
+
+Every library that reaches the database links the service (`opennova_novaworld_service`)
+directly, and web's core alone links Redis (`opennova_redis`): the link lint's
+containments (`scripts/lint/link_graph_check.py`), which also keeps the cloud the worker's,
+the data program off hosting, billing and the accounts, the gate and the lobby on core and
+program, and hostd off the service. The include lint (`scripts/lint/include_graph_check.py`,
+"SERVICE LAYERS") holds every include of a library or a program to the same table. Each
+program's directory builds its own code as
+`opennova_novaworld_<program>_core` and its `main.cpp` as `opennova-novaworld-<program>`.
+Core and the agents' protocol build with the service or on Linux (hostd builds without the
+service); the rest, and the tests, exist only with `OPENNOVA_NOVAWORLD_SERVICE=ON` (the root
+CMake option, off by default; the Linux CI jobs and the images turn it on). Web, the fleet
+program, the worker and the data program build only under `BUILD_NOVAWORLD_HTTP` (Crow:
+web's and the fleet's cores link it); the gate and the lobby build with or without it.
+
+The tests live in `tests/novaworld/` (`service_tests.cmake`); each says what it pins and
+links the libraries it drives, never compiling one's sources itself (those over web's or the
+fleet's code, which link Crow, build with `BUILD_NOVAWORLD_HTTP` alone).
 Every test that opens a database (ctest label `pg`, `opennova_add_pg_test`) makes its own
 databases, one per case, on the PostgreSQL server `-DOPENNOVA_TEST_PG=<uri>` names
 (`tests/common/test_database.h`); the HTTP layer's (label `redis`) also need the Redis
@@ -1129,8 +1310,8 @@ server `-DOPENNOVA_TEST_REDIS=<url>` names, each in a key namespace of its own
 server` (or `a Redis server`) and exits 77, which `--suite core` counts as a failure.
 `scripts/dev_postgres.sh up` and `scripts/dev_redis.sh up` print the values for local
 servers, and the Linux CI jobs run both beside the build. The route harness,
-`opennova_novaworld_web_http_routes` (`tests/novaworld/http_routes_test.cpp`), drives the
-Crow listener in process on port 0; the five binaries also run whole as child processes
+`opennova_novaworld_web_http_routes_*` (`tests/novaworld/http_routes_test.cpp`, a row per part),
+drives the Crow listener in process on port 0; the six binaries also run whole as child processes
 (`opennova_novaworld_programs`, `opennova_novaworld_signal_shutdown`, `nw_programs_e2e`),
 and the local stack's smoke test runs the deployed shape (`scripts/dev_stack.sh smoke`,
 CI's `local-stack.yml`).

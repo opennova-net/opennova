@@ -1,25 +1,31 @@
-// The hosted servers' stats (apps/novaworld_common/hosted/stats_sampler.h,
+// The hosted servers' stats (apps/novaworld_fleet/hosted/stats_sampler.h,
 // stats_repository.h; migration 0004_server_stats.sql) on a migrated database
 // and a hand-stepped wall clock: the sampler's one sample a minute of each live
 // server (its listing's players, slots and mission, its admin link's scene,
 // its agent's CPU as a share of the slot's CPUs, its memory, and its slot's
 // egress as the counter's differences, a first sample counting none and a
-// counter that started over counted from 0), the unique players counted from
-// the roster and never stored, the missions started in the game scene, the
-// hourly rollup, the machine's monthly egress, and the prune (the stats.prune
-// job, the pass's sample never, which takes the fleet's machines ended 14 days
-// ago too); then the reads the
+// counter that started over counted from 0; its bytes in and out as counters
+// since its first sample, the differences summed; its server's ticks), the
+// unique players counted from the roster and never stored, the missions started
+// in the game scene, the hourly rollup (its peak memory, bytes in and out, worst
+// p99 and late ticks among the rest), the machine's monthly egress, every live
+// machine's minute from its agent's report, and the prune (the stats.prune job,
+// the pass's sample never, which takes the fleet's machines ended 14 days ago
+// too); the machines' minutes rolled up by the hour (the counters' differences,
+// one that started over) and pruned at 48 hours and 400 days, a stale report
+// no minute; then the reads the
 // stats routes answer from, over hand-written samples: the summary (live and
 // running time, availability, the peak and the average players, the
 // player-hours, the egress, the restarts, the month's egress) and the series'
 // buckets for each range (1h a minute, 24h five minutes, 7d an hour from the
 // rollups, 30d four hours), for one server, an account's servers together and
-// the fleet; and the ISO timestamps. Compiles the hosted sources directly.
+// the fleet, the restarts counted from the starts its crashes and timeouts
+// ended; and the ISO timestamps. Compiles the hosted sources directly.
 
 #include "hosted_fleet_rig.h"
 
-#include "hosted/stats_jobs.h"
-#include "hosted/stats_repository.h"
+#include "hosted/model/stats_jobs.h"
+#include "hosted/model/stats_repository.h"
 #include "hosted/stats_sampler.h"
 #include "jobs/job_queue.h"
 #include "jobs/worker_pool.h"
@@ -38,6 +44,11 @@ namespace {
 
 bool near(std::optional<double> value, double want) {
 	return value && std::fabs(*value - want) < 1e-6;
+}
+
+std::optional<double> double_of(const opennova::db::Row &row, size_t i) {
+	if (const auto *d = std::get_if<double>(&row.values[i])) return *d;
+	return std::nullopt;
 }
 
 int64_t count_rows(Database &db, const std::string &sql) {
@@ -84,7 +95,8 @@ void list_server(Database &db, int64_t id, uint32_t rid, int players, const std:
 }
 
 // What machine `machine`'s agent reports of slot 0: server `id`'s container.
-void report(Database &db, int64_t machine, int64_t id, double cpu, uint64_t memory, uint64_t egress) {
+void report(Database &db, int64_t machine, int64_t id, double cpu, uint64_t memory, uint64_t egress,
+		uint64_t net_in = 0, std::optional<hosted::TickHealth> tick = std::nullopt) {
 	hosted::ContainerReport c;
 	c.name = hosted::hosted_container_name(id, 1);
 	c.slot = 0;
@@ -92,7 +104,27 @@ void report(Database &db, int64_t machine, int64_t id, double cpu, uint64_t memo
 	c.cpu_percent = cpu;
 	c.memory_bytes = memory;
 	c.egress_bytes = egress;
+	c.net_in_bytes = net_in;
+	c.tick = tick;
 	hosted::record_sync(db, machine, "stats-agent", { c });
+}
+
+// Server `id`'s minute `at`'s network counters and ticks.
+struct NetTick {
+	std::optional<int64_t> in, out, late;
+	std::optional<double> p99;
+};
+NetTick net_tick_at(Database &db, int64_t id, int64_t at) {
+	NetTick out;
+	const auto rows = db.query("SELECT net_in_bytes, net_out_bytes, tick_p99_ms, late_ticks FROM hosted_server_samples "
+							   "WHERE server_id = $1 AND at = to_timestamp($2::double precision);",
+			{ BindValue(id), BindValue(at) });
+	if (rows.empty()) return out;
+	out.in = rows[0].as_int(0);
+	out.out = rows[0].as_int(1);
+	if (const auto *d = std::get_if<double>(&rows[0].values[2])) out.p99 = *d;
+	out.late = rows[0].as_int(3);
+	return out;
 }
 
 // Server `id`'s sample of the minute `at`.
@@ -137,7 +169,19 @@ int test_sampler() {
 	TEST_EXPECT(hosted::assign_slot(db, id, machine.id, 0, 32768) == 1);
 	hosted::set_machine(db, id, "fake", hosted::hosted_container_name(id, 1), "10.0.1.9");
 	list_server(db, id, 4101, 3, "first.bms", { "alice", "bob", "carol" });
-	report(db, machine.id, id, 50.0, 100 << 20, 1000);
+	report(db, machine.id, id, 50.0, 100 << 20, 1000, 300);
+	// The machine's own use, as its agent reported it.
+	hosted::SyncRequest machine_report;
+	machine_report.agent_version = "stats-agent";
+	hosted::MachineStats use;
+	use.cpu_percent = 37.5;
+	use.memory_used_bytes = 3ull << 30;
+	use.memory_total_bytes = 4ull << 30;
+	use.disk_free_bytes = 9ull << 30;
+	use.net_in_bytes = 1234;
+	use.net_out_bytes = 5678;
+	machine_report.machine = use;
+	TEST_EXPECT(hosted::record_machine_report(db, machine.id, machine_report));
 
 	hosted::StatsSampler sampler(1.0);
 	std::string scene = "Game";
@@ -155,24 +199,46 @@ int test_sampler() {
 	TEST_EXPECT(s->egress_bytes == 0 && s->mission_started); // the first sample counts no egress
 	const auto w = sample_at(db, waiting, t0);
 	TEST_EXPECT(w && w->state == "provisioning" && !w->players && !w->cpu_percent && w->scene.empty() && !w->link_up);
+	// Its network counters start at 0; one with no report has none.
+	TEST_EXPECT(net_tick_at(db, id, t0).in == 0 && net_tick_at(db, id, t0).out == 0 && !net_tick_at(db, id, t0).p99);
+	TEST_EXPECT(!net_tick_at(db, waiting, t0).in && !net_tick_at(db, waiting, t0).out);
+	// The machine's minute: its use, and the one live server holding a slot on it.
+	{
+		const auto m = db.query("SELECT cpu_percent, memory_used_bytes, memory_total_bytes, disk_free_bytes, "
+								"net_in_bytes, net_out_bytes, servers FROM fleet_machine_samples WHERE machine_id = $1 "
+								"AND at = to_timestamp($2::double precision);",
+				{ BindValue(machine.id), BindValue(t0) });
+		TEST_EXPECT(m.size() == 1);
+		if (m.size() == 1) {
+			TEST_EXPECT(std::get<double>(m[0].values[0]) == 37.5 && m[0].as_int(1) == int64_t(3ll << 30) &&
+					m[0].as_int(2) == int64_t(4ll << 30) && m[0].as_int(3) == int64_t(9ll << 30));
+			TEST_EXPECT(m[0].as_int(4) == 1234 && m[0].as_int(5) == 5678 && m[0].as_int(6) == 1);
+		}
+	}
 
 	// The next minutes: the counter's differences, a counter that started over
 	// counted from 0, a new mission in the game scene counted, one in the menus not.
-	report(db, machine.id, id, 50.0, 100 << 20, 1500);
+	report(db, machine.id, id, 50.0, 100 << 20, 1500, 700, hosted::TickHealth{ 1.0, 16.0, 30.0, 2 });
 	TEST_EXPECT(sampler.sample(db, t0 + 60, links));
 	s = sample_at(db, id, t0 + 60);
 	TEST_EXPECT(s && s->egress_bytes == 500 && !s->mission_started);
+	TEST_EXPECT(net_tick_at(db, id, t0 + 60).in == 400 && net_tick_at(db, id, t0 + 60).out == 500 &&
+			net_tick_at(db, id, t0 + 60).p99 == 16.0 && net_tick_at(db, id, t0 + 60).late == 2);
 	list_server(db, id, 4101, 4, "second.bms", { "alice", "bob", "dave" });
-	report(db, machine.id, id, 50.0, 100 << 20, 200);
+	report(db, machine.id, id, 50.0, 100 << 20, 200, 100, hosted::TickHealth{ 1.0, 20.0, 45.0, 3 });
 	TEST_EXPECT(sampler.sample(db, t0 + 120, links));
 	s = sample_at(db, id, t0 + 120);
 	TEST_EXPECT(s && s->egress_bytes == 200 && s->mission_started && s->players == 4);
+	// The agent's counters started over: the server's own carry on, counted from 0.
+	TEST_EXPECT(net_tick_at(db, id, t0 + 120).in == 500 && net_tick_at(db, id, t0 + 120).out == 700);
 	scene = "Menus";
 	list_server(db, id, 4101, 0, "third.bms", {});
-	report(db, machine.id, id, 50.0, 100 << 20, 300);
+	report(db, machine.id, id, 50.0, 100 << 20, 300, 250);
 	TEST_EXPECT(sampler.sample(db, t0 + 180, links));
 	s = sample_at(db, id, t0 + 180);
 	TEST_EXPECT(s && s->egress_bytes == 100 && !s->mission_started && s->scene == "menus");
+	TEST_EXPECT(net_tick_at(db, id, t0 + 180).in == 650 && net_tick_at(db, id, t0 + 180).out == 800 &&
+			!net_tick_at(db, id, t0 + 180).p99);
 	// Another container's report on its slot is not this server's.
 	hosted::set_machine(db, id, "fake", hosted::hosted_container_name(id, 2), "10.0.1.9");
 	TEST_EXPECT(sampler.sample(db, t0 + 240, links));
@@ -181,9 +247,11 @@ int test_sampler() {
 	hosted::set_machine(db, id, "fake", hosted::hosted_container_name(id, 1), "10.0.1.9");
 
 	// The hour so far, rolled up: five minutes, the distinct names (alice, bob,
-	// carol, dave), two missions, the bytes, the mean CPU.
+	// carol, dave), two missions, the bytes, the mean CPU; the peak memory, the
+	// bytes in (the counters' differences) and out, the worst p99, the late ticks.
 	const auto hour = db.query("SELECT live_minutes, running_minutes, player_minutes, peak_players, max_players, "
-							   "unique_players, missions, egress_bytes, avg_cpu FROM hosted_server_hourly "
+							   "unique_players, missions, egress_bytes, avg_cpu, peak_memory_bytes, net_in_bytes, "
+							   "net_out_bytes, tick_p99_max_ms, late_ticks FROM hosted_server_hourly "
 							   "WHERE server_id = $1;",
 			{ BindValue(id) });
 	TEST_EXPECT(hour.size() == 1);
@@ -191,6 +259,8 @@ int test_sampler() {
 		TEST_EXPECT(hour[0].as_int(0) == 5 && hour[0].as_int(1) == 5 && hour[0].as_int(2) == 3 + 3 + 4 + 0 + 0);
 		TEST_EXPECT(hour[0].as_int(3) == 4 && hour[0].as_int(4) == 32 && hour[0].as_int(5) == 4);
 		TEST_EXPECT(hour[0].as_int(6) == 2 && hour[0].as_int(7) == 800);
+		TEST_EXPECT(hour[0].as_int(9) == (100 << 20) && hour[0].as_int(10) == 650 && hour[0].as_int(11) == 800);
+		TEST_EXPECT(std::get<double>(hour[0].values[12]) == 20.0 && hour[0].as_int(13) == 5);
 	}
 	// No name is stored anywhere.
 	TEST_EXPECT(count_rows(db, "SELECT COUNT(*) FROM hosted_server_samples WHERE mission LIKE '%alice%';") == 0);
@@ -210,15 +280,16 @@ int test_sampler() {
 
 	// The prune is the hourly stats.prune job's, never the pass's: the first
 	// sample of an hour prunes nothing; the job, at its clock's hour, takes the
-	// samples past 48 h and the hours past 90 days.
+	// samples past 48 h and the hours past 400 days.
 	hosted::ServerSample old;
 	old.server_id = id;
 	old.at = t0 - 49 * 3600;
 	old.state = "running";
 	hosted::insert_sample(db, old);
-	hosted::rollup_hour(db, id, t0 - 91 * 86400, 0);
+	hosted::rollup_hour(db, id, t0 - 401 * 86400, 0);
+	hosted::rollup_hour(db, id, t0 - 91 * 86400, 0); // kept: hours live 400 days now
 	const std::string old_hours = "SELECT COUNT(*) FROM hosted_server_hourly WHERE hour < to_timestamp(" +
-			std::to_string(t0 - 90 * 86400) + ");";
+			std::to_string(t0 - 400 * 86400) + ");";
 	TEST_EXPECT(sample_at(db, id, old.at).has_value() && count_rows(db, old_hours) == 1);
 	TEST_EXPECT(two_cpus.sample(db, t0 + 4000, links)); // a new hour's first sample
 	TEST_EXPECT(sample_at(db, id, old.at).has_value() && count_rows(db, old_hours) == 1);
@@ -230,7 +301,7 @@ int test_sampler() {
 	// The same job takes the fleet's machines ended more than 14 days ago.
 	const auto gone =
 			hosted::create_machine(db, { "fake", hosted::MachineKind::Own, 1, kServeImage, 0 });
-	TEST_EXPECT(hosted::fail_refused_launch(db, gone.id));
+	TEST_EXPECT(hosted::fail_refused_launch(db, gone.id, "the launch failed"));
 	db.exec("UPDATE fleet_machines SET ended_at = now() - interval '15 days' WHERE id = $1;",
 			{ BindValue(gone.id) });
 	jobs::NewJob prune;
@@ -239,6 +310,8 @@ int test_sampler() {
 	TEST_EXPECT(jobs::run_due(pool, registry) == 1);
 	TEST_EXPECT(!sample_at(db, id, old.at) && count_rows(db, old_hours) == 0);
 	TEST_EXPECT(sample_at(db, id, t0).has_value()); // within 48 h: kept
+	TEST_EXPECT(count_rows(db, "SELECT COUNT(*) FROM hosted_server_hourly WHERE hour = to_timestamp(" +
+							std::to_string((t0 - 91 * 86400) - (t0 - 91 * 86400) % 3600) + ");") == 1);
 	TEST_EXPECT(!hosted::find_machine(db, gone.id) && hosted::find_machine(db, machine.id));
 	return 0;
 }
@@ -285,15 +358,16 @@ int test_reads() {
 		hosted::rollup_hour(db, id, m0, id == a ? 1 : 0);
 		hosted::rollup_hour(db, id, m0 - 60, id == a ? 2 : 1);
 	}
-	// A's restarts: two counted in the range, one before it, one move that counts none.
-	for (const auto &[at, detail] : std::vector<std::pair<int64_t, std::string>>{
-				 { m0 - 120, "opennova-serve exited with code 3; restart 1 of 3" },
-				 { m0 - 60, "its container did not start; restart 2 of 3" },
-				 { m0 - 7200, "no listing in 180 s; restart 1 of 3" },
-				 { m0 - 180, "its machine is gone; placed again (no restart counted)" } })
-		db.exec("INSERT INTO hosted_server_events (server_id, from_state, to_state, detail, at) "
-				"VALUES ($1, 'running', 'provisioning', $2, to_timestamp($3::double precision));",
-				{ BindValue(a), BindValue(detail), BindValue(at) });
+	// A's restarts, its starts that its own cause ended: two in the range (a crash,
+	// a start that timed out), one before it, and a move and a stop that count none.
+	int64_t generation = 0;
+	for (const auto &[at, cause] : std::vector<std::pair<int64_t, std::string>>{
+				 { m0 - 120, "crash" }, { m0 - 60, "timeout" }, { m0 - 7200, "crash" }, { m0 - 180, "fleet" },
+				 { m0 - 30, "stop" } })
+		db.exec("INSERT INTO hosted_server_starts (server_id, generation, machine_id, slot, placed_at, ended_at, "
+				"cause) VALUES ($1, $2, 99, 0, to_timestamp($3::double precision) - interval '10 minutes', "
+				"to_timestamp($3::double precision), $4);",
+				{ BindValue(a), BindValue(++generation), BindValue(at), BindValue(cause) });
 
 	const auto range = [](const char *name) { return *hosted::parse_stats_range(name); };
 	TEST_EXPECT(!hosted::parse_stats_range("2h") && !hosted::parse_stats_range(""));
@@ -369,6 +443,119 @@ int test_reads() {
 	return 0;
 }
 
+// The machines' minutes and hours: a minute from each live machine's fresh
+// report alone, the hours rolled up from the minutes (the CPU's mean and peak,
+// the memory's peak, the least disk room, the counters' differences, one that
+// started over counted from 0; every hour still kept as minutes, so a roll-up
+// that did not run for hours leaves none unwritten), both pruned by their ages;
+// the history outlives the machine's row.
+int test_machine_stats() {
+	test_db::TestDatabase scratch;
+	ConnectionPool pool(scratch.options());
+	auto lease = pool.acquire();
+	Database &db = *lease;
+	const auto fresh = hosted::create_machine(db, { "fake", hosted::MachineKind::Shared, 4, kServeImage, 0 });
+	const auto stale = hosted::create_machine(db, { "fake", hosted::MachineKind::Shared, 4, kServeImage, 0 });
+	for (const int64_t id : { fresh.id, stale.id }) {
+		hosted::LaunchedMachine launched;
+		launched.cloud_id = "fake-" + std::to_string(id);
+		launched.private_address = "10.0.1." + std::to_string(id);
+		TEST_EXPECT(hosted::mark_launched(db, id, launched));
+		TEST_EXPECT(hosted::record_sync(db, id, "v1", {}));
+		hosted::SyncRequest report;
+		report.agent_version = "v1";
+		report.machine = hosted::MachineStats{ 10.0, 1, 2, 3, 4, 5, 6 };
+		TEST_EXPECT(hosted::record_machine_report(db, id, report));
+	}
+	db.exec("UPDATE fleet_machines SET stats_at = now() - interval '3 minutes' WHERE id = $1;",
+			{ BindValue(stale.id) });
+	const int64_t minute = 1760004000;
+	TEST_EXPECT(hosted::sample_machines(db, minute) == 1);
+	TEST_EXPECT(hosted::sample_machines(db, minute) == 0); // once a minute
+	TEST_EXPECT(count_rows(db, "SELECT COUNT(*) FROM fleet_machine_samples WHERE machine_id = " +
+							std::to_string(stale.id) + ";") == 0);
+
+	// Two hours of a machine's minutes, written by hand: the counters grow, then
+	// start over (its agent's interface reset), then grow again.
+	const int64_t machine = 77; // no row: the history outlives it
+	const int64_t h0 = 1760000400; // an hour's start
+	struct Minute {
+		int64_t at;
+		double cpu;
+		int64_t memory, disk, in, out;
+	};
+	const std::vector<Minute> minutes = { { h0 - 60, 5, 10, 900, 1000, 100 }, { h0, 10, 20, 800, 1500, 300 },
+		{ h0 + 60, 30, 50, 700, 1800, 400 }, { h0 + 3600, 20, 40, 600, 200, 50 }, { h0 + 3660, 40, 30, 650, 500, 90 } };
+	for (const Minute &m : minutes)
+		db.exec("INSERT INTO fleet_machine_samples (machine_id, at, cpu_percent, memory_used_bytes, disk_free_bytes, "
+				"net_in_bytes, net_out_bytes) VALUES ($1, to_timestamp($2::double precision), $3, $4, $5, $6, $7);",
+				{ BindValue(machine), BindValue(m.at), BindValue(m.cpu), BindValue(m.memory), BindValue(m.disk),
+						BindValue(m.in), BindValue(m.out) });
+	// The roll-up at the third hour's minute 2 writes every hour its minutes hold.
+	hosted::rollup_machine_hours(db, h0 + 3600 + 120);
+	const auto hours_of = [&db, machine] {
+		return db.query("SELECT CAST(extract(epoch FROM hour) AS bigint), cpu_avg, cpu_max, memory_peak_bytes, "
+						"disk_free_min_bytes, net_in_bytes, net_out_bytes FROM fleet_machine_hourly "
+						"WHERE machine_id = $1 ORDER BY hour;",
+				{ BindValue(machine) });
+	};
+	auto hours = hours_of();
+	TEST_EXPECT(hours.size() == 3);
+	if (hours.size() == 3) {
+		// The hour before h0: its one minute, with none before it to count from.
+		TEST_EXPECT(hours[0].as_int(0) == h0 - 3600 && near(double_of(hours[0], 1), 5.0) &&
+				hours[0].as_int(5) == 0 && hours[0].as_int(6) == 0);
+		// h0's: two minutes, each counted from the one before (the hour before's
+		// last among them).
+		TEST_EXPECT(hours[1].as_int(0) == h0 && near(double_of(hours[1], 1), 20.0) && near(double_of(hours[1], 2), 30.0));
+		TEST_EXPECT(hours[1].as_int(3) == 50 && hours[1].as_int(4) == 700 && hours[1].as_int(5) == 800 &&
+				hours[1].as_int(6) == 300);
+		// The next: the counters started over (counted from 0), then grew.
+		TEST_EXPECT(hours[2].as_int(0) == h0 + 3600 && near(double_of(hours[2], 1), 30.0) &&
+				hours[2].as_int(3) == 40 && hours[2].as_int(4) == 600);
+		TEST_EXPECT(hours[2].as_int(5) == 200 + 300 && hours[2].as_int(6) == 50 + 40);
+	}
+	// Again: the same hours rewritten, never doubled.
+	hosted::rollup_machine_hours(db, h0 + 3600 + 600);
+	TEST_EXPECT(count_rows(db, "SELECT COUNT(*) FROM fleet_machine_hourly WHERE machine_id = 77;") == 3);
+
+	// Hours with no roll-up between (stats.prune skipped: its worker down): the
+	// next writes each of them, h0 + 2 h's and h0 + 4 h's among them, no hole.
+	for (const Minute &m : std::vector<Minute>{ { h0 + 7260, 50, 60, 500, 900, 120 },
+				 { h0 + 14460, 70, 80, 400, 1300, 150 } })
+		db.exec("INSERT INTO fleet_machine_samples (machine_id, at, cpu_percent, memory_used_bytes, disk_free_bytes, "
+				"net_in_bytes, net_out_bytes) VALUES ($1, to_timestamp($2::double precision), $3, $4, $5, $6, $7);",
+				{ BindValue(machine), BindValue(m.at), BindValue(m.cpu), BindValue(m.memory), BindValue(m.disk),
+						BindValue(m.in), BindValue(m.out) });
+	hosted::rollup_machine_hours(db, h0 + 5 * 3600 + 30);
+	hours = hours_of();
+	TEST_EXPECT(hours.size() == 5);
+	if (hours.size() == 5) {
+		TEST_EXPECT(hours[3].as_int(0) == h0 + 7200 && near(double_of(hours[3], 1), 50.0) &&
+				hours[3].as_int(5) == 900 - 500 && hours[3].as_int(6) == 120 - 90);
+		TEST_EXPECT(hours[4].as_int(0) == h0 + 14400 && near(double_of(hours[4], 1), 70.0) &&
+				hours[4].as_int(5) == 1300 - 900 && hours[4].as_int(6) == 150 - 120);
+	}
+	// The hour holding the keep's edge (its minutes starting to go) is written no
+	// more: a minute added to it changes nothing, and the hour after it still
+	// counts its first minute from that hour's last.
+	db.exec("INSERT INTO fleet_machine_samples (machine_id, at, cpu_percent, memory_used_bytes, disk_free_bytes, "
+			"net_in_bytes, net_out_bytes) VALUES ($1, to_timestamp($2::double precision), 95, 10, 900, 900, 90);",
+			{ BindValue(machine), BindValue(h0 - 120) });
+	hosted::rollup_machine_hours(db, h0 - 3600 + hosted::kSampleKeepSeconds + 60);
+	hours = hours_of();
+	TEST_EXPECT(hours.size() == 5 && hours[0].as_int(0) == h0 - 3600 && near(double_of(hours[0], 1), 5.0) &&
+			hours[1].as_int(5) == 800);
+
+	// The prune: minutes past 48 hours, hours past 400 days.
+	hosted::prune_stats(db, h0 + 3 * 86400);
+	TEST_EXPECT(count_rows(db, "SELECT COUNT(*) FROM fleet_machine_samples WHERE machine_id = 77;") == 0);
+	TEST_EXPECT(count_rows(db, "SELECT COUNT(*) FROM fleet_machine_hourly WHERE machine_id = 77;") == 5);
+	hosted::prune_stats(db, h0 + 401 * 86400);
+	TEST_EXPECT(count_rows(db, "SELECT COUNT(*) FROM fleet_machine_hourly WHERE machine_id = 77;") == 0);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -380,6 +567,7 @@ int main(int argc, char **argv) {
 	const Case cases[] = {
 		{ "sampler", test_sampler },
 		{ "reads", test_reads },
+		{ "machine_stats", test_machine_stats },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

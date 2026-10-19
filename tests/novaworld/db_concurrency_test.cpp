@@ -30,7 +30,7 @@
 //     the host's row, the registration's names; within the lock timeout), and
 //     each host ends on one of its writers' last generations.
 
-#include "auth.h"
+#include "accounts/auth.h"
 
 #include <base/io/log.h>
 #include <net/novaworld/db/database.h>

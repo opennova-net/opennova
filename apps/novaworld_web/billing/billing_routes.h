@@ -15,12 +15,14 @@
 // database's text. No Stripe call runs inside a db::Transaction. Behind
 // ONNET_API_PROXY_ONLY like every /api route (the webhook too: Stripe reaches it
 // through the site's proxy). The admin's view shows the hosted servers' limits
-// hold (hosted/limits_hold.h), billing on or off, and an admin's reconcile may
+// hold (hosted/model/limits_hold.h), billing on or off, and an admin's reconcile may
 // carry the override that applies its stops. The HttpListener owns one.
 
 #include "billing/billing.h"
 #include "billing/billing_repository.h"
-#include "hosted/limits_hold.h"
+#include "hosted/model/limits_hold.h"
+#include "hosted/model/placement.h"
+#include "hosted/model/sold_capacity.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 
@@ -59,6 +61,12 @@ public:
 	// A checkout session's life: an hour, well past Stripe's minimum of 30
 	// minutes from its creation (Stripe refuses one under that).
 	static constexpr int64_t kCheckoutLifeS = 60 * 60;
+	// Its reservation's (billing_repository.h "A checkout's hold"): a day, so
+	// a session paid at its last moment whose sync comes late (a webhook
+	// Stripe redelivers, the next reconcile) still counts until the
+	// subscription it made is written; the sync, the session's expiry and the
+	// account's next checkout drop it sooner.
+	static constexpr int64_t kReservationLifeS = 24 * 60 * 60;
 	// The webhook events GET /api/admin/billing lists, newest first.
 	static constexpr size_t kEventsShown = 50;
 
@@ -72,6 +80,10 @@ public:
 
 	// Before register_routes(); null: billing off. It must outlive the routes.
 	void set_billing(Billing *billing) { billing_ = billing; }
+	// What the fleet sells (hosted/model/sold_capacity.h sellable_of of its
+	// placement policy, fleet_config.h); before register_routes(). Unset,
+	// placement.h's defaults.
+	void set_fleet(const hosted::PlacementPolicy &policy) { sellable_ = hosted::sellable_of(policy); }
 	void register_routes(WebApp &app);
 
 private:
@@ -88,18 +100,26 @@ private:
 	crow::response me_billing_reply(db::Database &db, int64_t user_id);
 	// The limits hold's fields of GET /api/admin/billing (its row's).
 	void limits_hold_json(db::Database &db, crow::json::wvalue &out) const;
+	// What a checkout sells.
+	struct CheckoutItem {
+		ItemKind item = ItemKind::Tier;
+		int tier = 0; // 1..3 for a tier
+	};
 	// Checkout's rules for the account as the cache has it (checkout's
-	// comment): its refusal, or nullopt when it may go on.
-	std::optional<crow::response> judge_checkout(db::Database &db, const WebSessionUser &user, int item);
+	// comment), the sold capacity among them, the reservation of checkout
+	// session `replaced` left out (the one this checkout replaces: "" for none):
+	// its refusal, or nullopt when it may go on.
+	std::optional<crow::response> judge_checkout(db::Database &db, const WebSessionUser &user, const CheckoutItem &item,
+			const std::string &replaced = {});
 	// The account's previous session before a new one (checkout's comment):
-	// expired while open; once complete, the customer synced from Stripe and
-	// the checkout judged again. Its refusal, or nullopt. No transaction open.
-	std::optional<crow::response> settle_previous_session(const WebSessionUser &user, const CustomerRow &customer,
-			int item);
+	// expired while open; once complete, the customer synced from Stripe. Its
+	// refusal, or nullopt. No transaction open.
+	std::optional<crow::response> settle_previous_session(const WebSessionUser &user, const CustomerRow &customer);
 
 	WebAccess &access_;
 	db::ConnectionPool &pool_;
 	Billing *billing_ = nullptr;
+	hosted::Capacity sellable_ = hosted::sellable_of(hosted::PlacementPolicy{});
 	RateLimiter checkout_per_user_;
 	RateLimiter sync_per_user_;
 	// The accounts whose checkout is running now: a second one at once (two

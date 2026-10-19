@@ -3,7 +3,7 @@
 // The billing sync's jobs (billing_sync.h) on the service's queue
 // (jobs/job_queue.h):
 //
-//   billing.reconcile  BillingSync::reconcile_all: at a controller's start,
+//   billing.reconcile  BillingSync::reconcile_all: at a release's start,
 //                      every ONNET_BILLING_RECONCILE_MINUTES and when an admin
 //                      asks; one that did not complete runs again
 //                      kReconcileRetryS later (the job's retries).
@@ -12,7 +12,14 @@
 //                      (a backoff ran out).
 //
 // Each deduped by its kind (one queued or running at a time), capped at one
-// running across the workers. Service policy, not a port.
+// running across the workers. And the cache's prune, which runs whether or not
+// billing is configured (the cache outlives its settings):
+//
+//   billing_events.prune  webhook events synced more than 30 days ago (the
+//                         cache keeps no history Stripe does not), every
+//                         sweep interval (jobs/maintenance_jobs.h)
+//
+// Service policy, not a port.
 
 #include "billing_sync.h"
 
@@ -28,6 +35,7 @@ namespace opennova::novaworld_server::billing {
 
 inline constexpr const char *kJobBillingSync = "billing.sync";
 inline constexpr const char *kJobBillingReconcile = "billing.reconcile";
+inline constexpr const char *kJobBillingEventsPrune = "billing_events.prune";
 
 // On `db`, in its open transaction when one is: 0 when one is queued or running.
 int64_t enqueue_billing_sync(db::Database &db);
@@ -38,5 +46,10 @@ void register_billing_jobs(jobs::JobRegistry &registry, BillingSync &sync);
 // The schedule: the reconcile at the start and every `reconcile_minutes`, the
 // sync every minute while an event waits.
 std::vector<jobs::PeriodicJob> billing_schedule(int reconcile_minutes);
+
+// The prune of the synced webhook events, and its schedule every `period_ms`
+// (the sweep interval).
+void register_billing_prune(jobs::JobRegistry &registry);
+std::vector<jobs::PeriodicJob> billing_prune_schedule(int64_t period_ms);
 
 } // namespace opennova::novaworld_server::billing

@@ -1,28 +1,28 @@
-# The service's five programs (programs.tf, cluster.tf): their task
+# The service's six programs (programs.tf, cluster.tf): their task
 # definitions, services, task counts, security groups, task roles, the
-# execution role and the controller's Cloud Map name, planned against mock
+# execution role and the fleet program's Cloud Map name, planned against mock
 # providers: offline, no credentials, nothing reaches AWS or Cloudflare. From
 # the repo root:
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
-# Five Fargate task definitions (x86_64, awsvpc), each its program's image,
-# small (0.25 vCPU and 0.5 GiB; web and the worker 0.5 and 1; the worker's
-# task with 40 GiB of storage, the others Fargate's 20), health-checked
+# Six Fargate task definitions (x86_64, awsvpc), each its program's image,
+# small (0.25 vCPU and 0.5 GiB; web and the worker 0.5 and 1; data 0.25 and 1,
+# its task with 40 GiB of storage, the others Fargate's 20), health-checked
 # on /livez, an init as PID 1, its logs under its program's prefix, and the
 # environment and secrets its program reads and no other's (web's with the
 # portal's nginx beside it, which starts once the server answers, and the
-# update service's host and ports); five
+# update service's host and ports); six
 # services on platform 1.4 in both public subnets with public addresses, ECS
 # Exec on, the deployment circuit breaker rolling back, every deployment
 # new-first, ignoring the deploy's revisions and the scaler's counts; a
 # template naming the secrets every deployment holds alone and the optional
-# ones in a label; no task and a floor of 0 until the first release, then the
-# counts held between min and max, web and the worker on their CPU; every security group's ingress its
+# ones in a label; no task and a floor of 0 until a release names the program,
+# then the counts held between min and max, web and the worker on their CPU; every security group's ingress its
 # program's alone; each task role ECS Exec's channels and its program's own
 # permission alone (the lobby none of its own: it announces the balancer's
-# address, ONNET_LOBBY_ENDPOINT; with hosting on, web's and the worker's the game
-# data's store, the deployment's bucket under data/); the execution role the
-# deployment's secrets and its log group alone; the controller named in Cloud Map.
+# address, ONNET_LOBBY_ENDPOINT; with hosting on, web's and the data program's the
+# game data's store, the deployment's bucket under data/); the execution role the
+# deployment's secrets and its log group alone; the fleet program named in Cloud Map.
 # A size Fargate does not offer and counts out of order are refused.
 
 mock_provider "aws" {
@@ -164,14 +164,19 @@ override_resource {
   values          = { id = "sg-0web" }
 }
 override_resource {
-  target          = aws_security_group.program["controller"]
+  target          = aws_security_group.program["fleet"]
   override_during = plan
-  values          = { id = "sg-0controller" }
+  values          = { id = "sg-0fleet" }
 }
 override_resource {
   target          = aws_security_group.program["worker"]
   override_during = plan
   values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.program["data"]
+  override_during = plan
+  values          = { id = "sg-0data" }
 }
 override_resource {
   target          = aws_security_group.lb
@@ -224,14 +229,19 @@ override_resource {
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1" }
 }
 override_resource {
-  target          = aws_ecs_task_definition.program["controller"]
+  target          = aws_ecs_task_definition.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1" }
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.backup
@@ -254,14 +264,19 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-web" }
 }
 override_resource {
-  target          = aws_iam_role.program["controller"]
+  target          = aws_iam_role.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-controller" }
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-fleet" }
 }
 override_resource {
   target          = aws_iam_role.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-worker" }
+}
+override_resource {
+  target          = aws_iam_role.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-data" }
 }
 override_resource {
   target          = aws_iam_role.execution
@@ -300,18 +315,19 @@ run "task_definitions" {
       d.runtime_platform[0].cpu_architecture == "X86_64" && d.runtime_platform[0].operating_system_family == "LINUX" &&
       d.execution_role_arn == "arn:aws:iam::123456789012:role/opennova-prod-execution" &&
       d.task_role_arn == "arn:aws:iam::123456789012:role/opennova-prod-${p}"
-    ]) && length(aws_ecs_task_definition.program) == 5
-    error_message = "five Fargate task definitions (x86_64, awsvpc), each with the execution role and its program's own task role"
+    ]) && length(aws_ecs_task_definition.program) == 6
+    error_message = "six Fargate task definitions (x86_64, awsvpc), each with the execution role and its program's own task role"
   }
   assert {
     condition = (
       aws_ecs_task_definition.program["gate"].cpu == "256" && aws_ecs_task_definition.program["gate"].memory == "512" &&
       aws_ecs_task_definition.program["lobby"].cpu == "256" && aws_ecs_task_definition.program["lobby"].memory == "512" &&
-      aws_ecs_task_definition.program["controller"].cpu == "256" && aws_ecs_task_definition.program["controller"].memory == "512" &&
+      aws_ecs_task_definition.program["fleet"].cpu == "256" && aws_ecs_task_definition.program["fleet"].memory == "512" &&
       aws_ecs_task_definition.program["web"].cpu == "512" && aws_ecs_task_definition.program["web"].memory == "1024" &&
-      aws_ecs_task_definition.program["worker"].cpu == "512" && aws_ecs_task_definition.program["worker"].memory == "1024"
+      aws_ecs_task_definition.program["worker"].cpu == "512" && aws_ecs_task_definition.program["worker"].memory == "1024" &&
+      aws_ecs_task_definition.program["data"].cpu == "256" && aws_ecs_task_definition.program["data"].memory == "1024"
     )
-    error_message = "small tasks: gate, lobby and controller 0.25 vCPU and 0.5 GiB, web (server and nginx) and the worker 0.5 vCPU and 1 GiB"
+    error_message = "small tasks: gate, lobby and the fleet 0.25 vCPU and 0.5 GiB, web (server and nginx) and the worker 0.5 vCPU and 1 GiB, data 0.25 vCPU and 1 GiB"
   }
   assert {
     condition = alltrue([
@@ -330,13 +346,13 @@ run "task_definitions" {
     condition = (
       jsondecode(aws_ecs_task_definition.program["gate"].container_definitions)[0].healthCheck.command == ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "2", "http://127.0.0.1:8081/livez"] &&
       jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].healthCheck.command[7] == "http://127.0.0.1:8080/livez" &&
-      alltrue([for p in ["lobby", "controller", "worker"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].healthCheck.command[7] == "http://127.0.0.1:8081/livez"])
+      alltrue([for p in ["lobby", "fleet", "worker", "data"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].healthCheck.command[7] == "http://127.0.0.1:8081/livez"])
     )
     error_message = "each container's health check asks its /livez: web's on its HTTP port, the others' on the health port"
   }
   assert {
     condition = (
-      alltrue([for p in ["gate", "lobby", "web", "controller", "worker"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].healthCheck.startPeriod == 60])
+      alltrue([for p in ["gate", "lobby", "web", "fleet", "worker", "data"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].healthCheck.startPeriod == 60])
     )
     error_message = "every program's health checks start counting after 60 s (its boot, the migrations among it)"
   }
@@ -345,21 +361,22 @@ run "task_definitions" {
       toset([for m in jsondecode(aws_ecs_task_definition.program["gate"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["udp/7597", "tcp/8081"]) &&
       toset([for m in jsondecode(aws_ecs_task_definition.program["lobby"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["udp/64206", "tcp/8081"]) &&
       toset([for m in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8080", "tcp/8081", "tcp/20044", "tcp/20556", "tcp/21068", "tcp/21580"]) &&
-      toset([for m in jsondecode(aws_ecs_task_definition.program["controller"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8070", "tcp/8081"]) &&
-      toset([for m in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8081"])
+      toset([for m in jsondecode(aws_ecs_task_definition.program["fleet"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8070", "tcp/8081"]) &&
+      toset([for m in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8081"]) &&
+      toset([for m in jsondecode(aws_ecs_task_definition.program["data"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8081"])
     )
-    error_message = "each container's ports: the gate's UDP, the lobby's UDP, web's HTTP and the updater's four, the controller's internal listener, and every program's health port"
+    error_message = "each container's ports: the gate's UDP, the lobby's UDP, web's HTTP and the updater's four, the fleet's internal listener, and every program's health port"
   }
   assert {
     condition = (
-      length(aws_ecs_task_definition.program["worker"].ephemeral_storage) == 1 && aws_ecs_task_definition.program["worker"].ephemeral_storage[0].size_in_gib == 40 &&
-      alltrue([for p in ["gate", "lobby", "web", "controller"] : length(aws_ecs_task_definition.program[p].ephemeral_storage) == 0])
+      length(aws_ecs_task_definition.program["data"].ephemeral_storage) == 1 && aws_ecs_task_definition.program["data"].ephemeral_storage[0].size_in_gib == 40 &&
+      alltrue([for p in ["gate", "lobby", "web", "fleet", "worker"] : length(aws_ecs_task_definition.program[p].ephemeral_storage) == 0])
     )
-    error_message = "the worker's task has 40 GiB of storage (a tree's files and a release's package pass through it); the others keep Fargate's default"
+    error_message = "the data program's task has 40 GiB of storage (a tree's files and a release's package pass through it); the others, the worker among them, keep Fargate's default"
   }
   assert {
     condition = (
-      alltrue([for p in ["gate", "lobby", "web", "controller", "worker"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].stopTimeout == 30])
+      alltrue([for p in ["gate", "lobby", "web", "fleet", "worker", "data"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].stopTimeout == 30])
     )
     error_message = "every program's orderly shutdown gets 30 s (the lobby's drain among them: the balancer drained its task before the signal)"
   }
@@ -379,7 +396,7 @@ run "task_definitions" {
       jsondecode(jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].dockerLabels["opennova.optional-secrets"]) == {
         EDGE_AUTH_SECRET_PREVIOUS = "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/secret/EDGE_AUTH_SECRET_PREVIOUS"
       } &&
-      alltrue([for p in ["gate", "lobby", "controller", "worker"] : length(jsondecode(aws_ecs_task_definition.program[p].container_definitions)) == 1])
+      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : length(jsondecode(aws_ecs_task_definition.program[p].container_definitions)) == 1])
     )
     error_message = "web's task carries the portal's nginx on 443 and its retail server on 8082, started once the server answers, with edge authentication and the origin certificate (the previous edge secret optional, in its label); no other task carries it"
   }
@@ -390,7 +407,7 @@ run "environments" {
 
   assert {
     condition = alltrue([
-      for p in ["gate", "lobby", "web", "controller", "worker"] :
+      for p in ["gate", "lobby", "web", "fleet", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HEALTH_PORT"] == "8081" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["AWS_REGION"] == "us-east-1" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_GATE_UDP_PORT"] == "7597" &&
@@ -400,18 +417,29 @@ run "environments" {
     error_message = "every program: its region, its health port, the ports the programs listen on and announce"
   }
   assert {
+    condition = (
+      { for e in jsondecode(aws_ecs_task_definition.program["data"].container_definitions)[0].environment : e.name => e.value }["ONNET_HEALTH_PORT"] == "8081" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["data"].container_definitions)[0].environment : e.name => e.value }["AWS_REGION"] == "us-east-1" &&
+      !strcontains(aws_ecs_task_definition.program["data"].container_definitions, "ONNET_PUBLIC_HOST") &&
+      !strcontains(aws_ecs_task_definition.program["data"].container_definitions, "ONNET_HOSTED") &&
+      !strcontains(aws_ecs_task_definition.program["data"].container_definitions, "ONNET_MAIL") &&
+      !strcontains(aws_ecs_task_definition.program["data"].container_definitions, "STRIPE_")
+    )
+    error_message = "the data program reads its region, its health port and the database alone (the store with hosting on): nothing of the fleet, the mail or billing"
+  }
+  assert {
     condition = alltrue([
-      for p in ["gate", "lobby", "web", "controller", "worker"] :
+      for p in ["gate", "lobby", "web", "fleet", "worker", "data"] :
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_ROLE") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_HTTP_BIND")
     ])
-    error_message = "no program is told a role; the controller finds its bind address from the task metadata"
+    error_message = "no program is told a role; the fleet finds its bind address from the task metadata"
   }
   assert {
     condition = (
       { for e in jsondecode(aws_ecs_task_definition.program["lobby"].container_definitions)[0].environment : e.name => e.value }["ONNET_LOBBY_ENDPOINT"] == "54.162.79.147:64206" &&
       { for e in jsondecode(aws_ecs_task_definition.program["lobby"].container_definitions)[0].environment : e.name => e.value }["ONNET_PUBLIC_HOST"] == "54.162.79.147" &&
-      alltrue([for p in ["gate", "web", "controller", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_LOBBY_ENDPOINT")])
+      alltrue([for p in ["gate", "web", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_LOBBY_ENDPOINT")])
     )
     error_message = "every lobby announces the one lobby address, the gate's (the balancer's zone-a Elastic IP) and its port; no other program is told it (the gate's would be its fallback, answering while no lobby is live)"
   }
@@ -428,8 +456,9 @@ run "environments" {
   assert {
     condition = (
       toset([for s in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].secrets : s.name]) == toset(["DATABASE_PASSWORD", "ADMIN_API_TOKEN", "ONNET_REDIS_PASSWORD"]) &&
-      toset([for s in jsondecode(aws_ecs_task_definition.program["controller"].container_definitions)[0].secrets : s.name]) == toset(["DATABASE_PASSWORD"]) &&
+      toset([for s in jsondecode(aws_ecs_task_definition.program["fleet"].container_definitions)[0].secrets : s.name]) == toset(["DATABASE_PASSWORD"]) &&
       toset([for s in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].secrets : s.name]) == toset(["DATABASE_PASSWORD"]) &&
+      toset([for s in jsondecode(aws_ecs_task_definition.program["data"].container_definitions)[0].secrets : s.name]) == toset(["DATABASE_PASSWORD"]) &&
       alltrue([for p, d in aws_ecs_task_definition.program : alltrue([for s in jsondecode(d.container_definitions)[0].secrets : s.valueFrom == "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/secret/${s.name}"])])
     )
     error_message = "a template names the secrets every deployment holds alone: the database's password, and web's admin token and cache token"
@@ -438,14 +467,16 @@ run "environments" {
     condition = (
       toset(keys(jsondecode(jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].dockerLabels["opennova.optional-secrets"]))) == toset([
         "ONNET_BOOTSTRAP_ADMIN", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE",
+        "STRIPE_PRICE_STATIC_ADDRESS",
       ]) &&
-      alltrue([for p in ["controller", "worker"] : toset(keys(jsondecode(jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].dockerLabels["opennova.optional-secrets"]))) == toset([
+      toset(keys(jsondecode(jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].dockerLabels["opennova.optional-secrets"]))) == toset([
         "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE",
-      ])]) &&
-      alltrue([for p in ["gate", "lobby"] : jsondecode(jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].dockerLabels["opennova.optional-secrets"]) == {}]) &&
+        "STRIPE_PRICE_STATIC_ADDRESS",
+      ]) &&
+      alltrue([for p in ["gate", "lobby", "fleet", "data"] : jsondecode(jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].dockerLabels["opennova.optional-secrets"]) == {}]) &&
       jsondecode(jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].dockerLabels["opennova.optional-secrets"])["STRIPE_SECRET_KEY"] == "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/secret/STRIPE_SECRET_KEY"
     )
-    error_message = "the optional secrets (the first admin; billing's, for web, the controller and the worker) are in each template's label, for a deploy to add while SSM holds them"
+    error_message = "the optional secrets (the first admin; billing's, for web and the worker) are in each template's label, for a deploy to add while SSM holds them; the fleet and the data program read none"
   }
   assert {
     condition = (
@@ -462,28 +493,31 @@ run "environments" {
     condition = (
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == "update.example.com" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_PORTS"] == "20044,20556,21068,21580" &&
-      alltrue([for p in ["gate", "lobby", "controller", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_UPDATE_")])
+      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_UPDATE_")])
     )
     error_message = "web alone serves the update service: at the update record's name, on the updater's four ports"
   }
   assert {
-    condition = alltrue([
-      for p in ["web", "controller", "worker"] :
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://controller.prod.opennova.internal:8070" &&
+    condition = (alltrue([
+      for p in ["web", "fleet", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "none" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "6" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_CAP"] == "14" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_SITE_URL"] == "https://example.com"
-    ])
-    error_message = "web, the controller and the worker read hosting's settings (off without a data set) and the controller's Cloud Map URL"
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_CAP"] == "14"
+      ]) && alltrue([for p in ["web", "worker"] : { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_SITE_URL"] == "https://example.com"]) &&
+    alltrue([for p in ["gate", "lobby", "web", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_URL")]))
+    error_message = "web, the fleet and the worker read the fleet's policy (hosting off without a data set); no program is handed the machines' URL without hosting"
   }
   assert {
     condition = (
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_REGION"] == "us-east-1" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_CLUSTER"] == "opennova-prod" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_FLEET_CLUSTER"] == "" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_DATABASE"] == "opennova-prod-db" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_CACHE"] == "opennova-prod-cache" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_RELEASE_PARAMETER"] == "/opennova/prod/release" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_LOAD_BALANCER"] == "net/opennova-prod/0123456789abcdef" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_ALARM_PREFIX"] == "opennova-prod-" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_LOG_STORE"] == "cloudwatch:/opennova/prod" &&
       jsondecode({ for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_TARGET_GROUPS"]) == {
         gate   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef"
         lobby  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
@@ -491,9 +525,10 @@ run "environments" {
         https  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-https/0123456789abcdef"
         update = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
       } &&
-      alltrue([for p in ["gate", "lobby", "controller", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INFRA_")])
+      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INFRA_")]) &&
+      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_LOG_STORE")])
     )
-    error_message = "web alone is told what the admin's infrastructure view reads: this deployment's cluster, its target groups by listener, its database, cache and release parameter, in its region"
+    error_message = "web alone is told what the admin's infrastructure view reads: this deployment's cluster (and no fleet cluster with hosting off), its target groups by listener, its database, cache, balancer and release parameter, in its region, and its log groups' prefix"
   }
 }
 
@@ -508,27 +543,27 @@ run "services" {
       s.deployment_circuit_breaker[0].enable && s.deployment_circuit_breaker[0].rollback &&
       toset(s.network_configuration[0].subnets) == toset(["subnet-0public0a", "subnet-0public0b"]) &&
       s.network_configuration[0].security_groups == toset(["sg-0${p}"]) && s.network_configuration[0].assign_public_ip
-    ]) && length(aws_ecs_service.program) == 5
-    error_message = "five services on Fargate 1.4 in both public subnets, each task on a public address in its program's group, ECS Exec on, the circuit breaker rolling back, and no task before the first release"
+    ]) && length(aws_ecs_service.program) == 6
+    error_message = "six services on Fargate 1.4 in both public subnets, each task on a public address in its program's group, ECS Exec on, the circuit breaker rolling back, and no task before the first release"
   }
   assert {
     condition = (
       alltrue([for p, s in aws_ecs_service.program : s.deployment_minimum_healthy_percent == 100 && s.deployment_maximum_percent == 200])
     )
-    error_message = "every program starts the new task first (the controller's waits as standby; the balancer drains the old lobby task before ECS stops it): a bad image stops nothing that runs"
+    error_message = "every program starts the new task first (the fleet's waits as standby; the balancer drains the old lobby task before ECS stops it): a bad image stops nothing that runs"
   }
   assert {
     condition = (
-      length(aws_ecs_service.program["controller"].service_registries) == 1 &&
-      aws_ecs_service.program["controller"].service_registries[0].registry_arn == "arn:aws:servicediscovery:us-east-1:123456789012:service/srv-0123456789abcdef" &&
-      alltrue([for p in ["gate", "lobby", "web", "worker"] : length(aws_ecs_service.program[p].service_registries) == 0])
+      length(aws_ecs_service.program["fleet"].service_registries) == 1 &&
+      aws_ecs_service.program["fleet"].service_registries[0].registry_arn == "arn:aws:servicediscovery:us-east-1:123456789012:service/srv-0123456789abcdef" &&
+      alltrue([for p in ["gate", "lobby", "web", "worker", "data"] : length(aws_ecs_service.program[p].service_registries) == 0])
     )
-    error_message = "the controller alone registers in Cloud Map"
+    error_message = "the fleet program alone registers in Cloud Map"
   }
   assert {
     condition = (
       aws_ecs_cluster.main.name == "opennova-prod" && output.cluster == "opennova-prod" &&
-      output.services == { gate = "gate", lobby = "lobby", web = "web", controller = "controller", worker = "worker" }
+      output.services == { gate = "gate", lobby = "lobby", web = "web", fleet = "fleet", worker = "worker", data = "data" }
     )
     error_message = "the cluster and its services, named after the programs"
   }
@@ -542,14 +577,14 @@ run "task_counts" {
       for p, t in aws_appautoscaling_target.program :
       t.service_namespace == "ecs" && t.scalable_dimension == "ecs:service:DesiredCount" &&
       t.resource_id == "service/opennova-prod/${p}" && t.min_capacity == 0
-    ]) && length(aws_appautoscaling_target.program) == 5
+    ]) && length(aws_appautoscaling_target.program) == 6
     error_message = "every service's count is held under its program's max, its floor 0 until the first release"
   }
   assert {
     condition = (
       aws_appautoscaling_target.program["web"].max_capacity == 1 && aws_appautoscaling_target.program["worker"].max_capacity == 1 &&
       aws_appautoscaling_target.program["gate"].max_capacity == 1 && aws_appautoscaling_target.program["lobby"].max_capacity == 1 &&
-      aws_appautoscaling_target.program["controller"].max_capacity == 1
+      aws_appautoscaling_target.program["fleet"].max_capacity == 1 && aws_appautoscaling_target.program["data"].max_capacity == 1
     )
     error_message = "every program one task at the defaults"
   }
@@ -562,7 +597,7 @@ run "task_counts" {
         a.target_tracking_scaling_policy_configuration[0].predefined_metric_specification[0].predefined_metric_type == "ECSServiceAverageCPUUtilization"
       ])
     )
-    error_message = "web and the worker scale on their CPU (60% on average), no other program"
+    error_message = "web and the worker scale on their CPU (60% on average), no other program (the data program never)"
   }
 }
 
@@ -571,7 +606,7 @@ run "security_groups" {
 
   assert {
     condition = (
-      toset(keys(aws_security_group.program)) == toset(["gate", "lobby", "web", "controller", "worker"]) &&
+      toset(keys(aws_security_group.program)) == toset(["gate", "lobby", "web", "fleet", "worker", "data"]) &&
       alltrue([for p, g in aws_security_group.program : g.name == "opennova-prod-${p}"]) &&
       alltrue([for p, r in aws_vpc_security_group_egress_rule.program_all : r.security_group_id == "sg-0${p}" && r.cidr_ipv4 == "0.0.0.0/0" && r.ip_protocol == "-1"])
     )
@@ -589,9 +624,9 @@ run "security_groups" {
   assert {
     condition = alltrue(concat(
       [for r in aws_vpc_security_group_ingress_rule.from_lb : contains(["sg-0gate", "sg-0lobby", "sg-0web"], r.security_group_id)],
-      [length(aws_vpc_security_group_ingress_rule.controller_from_machines) == 0],
+      [length(aws_vpc_security_group_ingress_rule.fleet_from_machines) == 0],
     ))
-    error_message = "the worker admits nothing, the controller nothing without hosting (fleet.tf adds the machines), the gate and web the balancer alone, the lobby the balancer and its UDP port"
+    error_message = "the worker and the data program admit nothing, the fleet nothing without hosting (fleet.tf adds the machines), the gate and web the balancer alone, the lobby the balancer and its UDP port"
   }
 }
 
@@ -612,7 +647,7 @@ run "task_roles" {
   }
   assert {
     condition = (
-      toset(keys(aws_iam_role_policy.exec)) == toset(["gate", "lobby", "web", "controller", "worker"]) &&
+      toset(keys(aws_iam_role_policy.exec)) == toset(["gate", "lobby", "web", "fleet", "worker", "data"]) &&
       alltrue([for p, r in aws_iam_role_policy.exec : r.role == aws_iam_role.program[p].id]) &&
       toset(flatten([for st in data.aws_iam_policy_document.exec.statement : st.actions])) == toset([
         "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel", "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel",
@@ -633,10 +668,25 @@ run "task_roles" {
       toset(flatten([for st in data.aws_iam_policy_document.infra_read.statement : st.actions])) == toset([
         "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTasks", "elasticloadbalancing:DescribeTargetHealth",
         "rds:DescribeDBInstances", "elasticache:DescribeReplicationGroups", "ssm:GetParameter", "ec2:DescribeInstances",
+        "logs:GetLogEvents", "logs:FilterLogEvents", "logs:DescribeLogStreams", "cloudwatch:GetMetricData",
+        "cloudwatch:DescribeAlarms",
       ]) &&
-      alltrue([for st in data.aws_iam_policy_document.infra_read.statement : !anytrue([for a in st.actions : !can(regex("^[a-z0-9]+:(Describe|List|Get)", a))])])
+      alltrue([for st in data.aws_iam_policy_document.infra_read.statement : !anytrue([for a in st.actions : !can(regex("^[a-z0-9]+:(Describe|List|Get|Filter)", a))])])
     )
     error_message = "web's role holds the infrastructure view's reads, and nothing but reads"
+  }
+  assert {
+    condition = (
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadLogs"]) == toset(flatten([
+        for g in ["service", "machines", "servers"] : [
+          "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/${g}",
+          "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/${g}:*",
+        ]
+      ])) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadMetrics"]) == toset(["*"]) &&
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadAlarms"]) == toset(["arn:aws:cloudwatch:us-east-1:123456789012:alarm:opennova-prod-*"])
+    )
+    error_message = "web reads the events of this deployment's three log groups alone (the programs', the machines', the servers'), CloudWatch's metrics, which take no resource, and this deployment's alarms alone"
   }
   assert {
     condition = (
@@ -666,8 +716,10 @@ run "task_roles" {
   }
 }
 
-# Hosting on: web and the worker get the game data's store, the deployment's
-# bucket under data/ alone; the controller and the others nothing of it.
+# Hosting on: web and the data program get the game data's store, the
+# deployment's bucket under data/ alone, and the others nothing of it; the
+# fleet's policy goes to web, the fleet and the worker, the machine driver's own
+# settings to the worker alone, and the fleet's role holds ECS Exec alone.
 run "hosting_on" {
   command = plan
 
@@ -686,22 +738,19 @@ run "hosting_on" {
     override_during = plan
     values          = { id = "lt-0own", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0own" }
   }
-  override_resource {
-    target          = terraform_data.fleet_seed_image[0]
-    override_during = plan
-    values          = { output = "ami-0123456789abcdef0" }
-  }
 
   variables {
     hosted_enabled = true
+    fleet_ami      = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64"
   }
 
   assert {
     condition = (
-      toset(keys(aws_iam_role_policy.data_store)) == toset(["web", "worker"]) &&
-      alltrue([for p, r in aws_iam_role_policy.data_store : r.role == aws_iam_role.program[p].id && r.name == "opennova-prod-${p}-data-store"])
+      toset(keys(aws_iam_role_policy.data_store)) == toset(["web", "data"]) &&
+      alltrue([for p, r in aws_iam_role_policy.data_store : r.role == aws_iam_role.program[p].id && r.name == "opennova-prod-${p}-data-store"]) &&
+      aws_iam_role_policy.fleet_service[0].role == aws_iam_role.program["worker"].id
     )
-    error_message = "web's and the worker's task roles hold the store's policy, no other's"
+    error_message = "web's and the data program's task roles hold the store's policy, no other's (the worker holds the fleet's EC2 calls)"
   }
   assert {
     condition = (
@@ -725,11 +774,28 @@ run "hosting_on" {
   }
   assert {
     condition = alltrue([
-      for p in ["web", "controller", "worker"] :
+      for p in ["web", "fleet", "worker", "data"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_URL"] == "s3://opennova-prod-ops-123456789012/data" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_REGION"] == "us-east-1"
     ]) && alltrue([for p in ["gate", "lobby"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_OBJECT_STORE")])
-    error_message = "web, the controller and the worker name the store; the gate and the lobby know nothing of it"
+    error_message = "web, the fleet, the worker and the data program name the store; the gate and the lobby know nothing of it"
+  }
+  assert {
+    condition = (
+      alltrue([for p in ["web", "fleet", "worker"] :
+        { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "ec2" &&
+        { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_MAX_SHARED"] == "2"
+      ]) &&
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://fleet.prod.opennova.internal:8070" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_LAUNCH_TEMPLATES"] == jsonencode({ own = "lt-0own", shared = "lt-0shared" }) &&
+      alltrue([for p in ["gate", "lobby", "web", "fleet", "data"] :
+        !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_EC2_") &&
+        !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_URL") &&
+        !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_DEPLOYMENT")
+      ]) &&
+      !strcontains(aws_ecs_task_definition.program["data"].container_definitions, "ONNET_HOSTED_PROVIDER")
+    )
+    error_message = "the fleet's policy for web, the fleet and the worker; the machine driver's own settings (the templates, the subnets, the machines' URL) for the worker alone"
   }
 }
 
@@ -739,14 +805,14 @@ run "cloud_map" {
   assert {
     condition = (
       aws_service_discovery_private_dns_namespace.internal.name == "prod.opennova.internal" &&
-      aws_service_discovery_service.controller.name == "controller" &&
-      aws_service_discovery_service.controller.dns_config[0].namespace_id == "ns-0123456789abcdef" &&
-      aws_service_discovery_service.controller.dns_config[0].routing_policy == "MULTIVALUE" &&
-      aws_service_discovery_service.controller.dns_config[0].dns_records[0].type == "A" &&
-      aws_service_discovery_service.controller.dns_config[0].dns_records[0].ttl == 10 &&
-      output.controller_host == "controller.prod.opennova.internal" && output.internal_url == "http://controller.prod.opennova.internal:8070"
+      aws_service_discovery_service.fleet.name == "fleet" && aws_service_discovery_service.fleet.force_destroy &&
+      aws_service_discovery_service.fleet.dns_config[0].namespace_id == "ns-0123456789abcdef" &&
+      aws_service_discovery_service.fleet.dns_config[0].routing_policy == "MULTIVALUE" &&
+      aws_service_discovery_service.fleet.dns_config[0].dns_records[0].type == "A" &&
+      aws_service_discovery_service.fleet.dns_config[0].dns_records[0].ttl == 10 &&
+      output.fleet_host == "fleet.prod.opennova.internal" && output.internal_url == "http://fleet.prod.opennova.internal:8070"
     )
-    error_message = "the controller's tasks register as controller.prod.opennova.internal, an A record with a 10 s TTL, the name hostd and ONNET_INTERNAL_URL use"
+    error_message = "the fleet's tasks register as fleet.prod.opennova.internal, an A record with a 10 s TTL, the name hostd and ONNET_INTERNAL_URL use, its instances removed with it"
   }
 }
 
@@ -765,12 +831,13 @@ run "released" {
     override_during = plan
     values = {
       names  = ["/opennova/prod/infra.env", "/opennova/prod/release"]
-      values = ["OPENNOVA_DEPLOYMENT='prod'", "{\"id\":\"20261016T000000Z-abc1234\",\"programs\":[\"worker\",\"controller\",\"web\",\"lobby\",\"gate\"]}"]
+      values = ["OPENNOVA_DEPLOYMENT='prod'", "{\"id\":\"20261016T000000Z-abc1234\",\"programs\":[\"worker\",\"data\",\"fleet\",\"web\",\"lobby\",\"gate\"]}"]
     }
   }
 
   assert {
     condition = (
+      alltrue([for p, s in aws_ecs_service.program : s.desired_count >= 1]) &&
       aws_ecs_service.program["lobby"].desired_count == 2 && aws_ecs_service.program["web"].desired_count == 1 &&
       aws_appautoscaling_target.program["lobby"].min_capacity == 2 && aws_appautoscaling_target.program["web"].min_capacity == 1 &&
       aws_cloudwatch_metric_alarm.program_running["lobby"].threshold == 2 &&
@@ -797,6 +864,40 @@ run "single_instance_release" {
   assert {
     condition     = alltrue([for p, s in aws_ecs_service.program : s.desired_count == 0 && aws_appautoscaling_target.program[p].min_capacity == 0])
     error_message = "a release of the single instance is no release of the programs: no task starts from a template"
+  }
+}
+
+# A release from before a program was added (here the controller's era: no
+# fleet, no data) starts the programs it names alone: a program no release names
+# yet runs no task, its floor 0 and its heartbeat and running alarms off.
+run "released_per_program" {
+  command = plan
+
+  override_data {
+    target          = data.aws_ssm_parameters_by_path.deployment
+    override_during = plan
+    values = {
+      names  = ["/opennova/prod/infra.env", "/opennova/prod/release"]
+      values = ["OPENNOVA_DEPLOYMENT='prod'", "{\"id\":\"20261016T000000Z-abc1234\",\"programs\":[\"worker\",\"controller\",\"web\",\"lobby\",\"gate\"]}"]
+    }
+  }
+
+  assert {
+    condition = (
+      alltrue([for p in ["gate", "lobby", "web", "worker"] :
+        aws_ecs_service.program[p].desired_count == 1 && aws_appautoscaling_target.program[p].min_capacity == 1 &&
+        aws_cloudwatch_metric_alarm.program_heartbeat[p].treat_missing_data == "breaching" &&
+        aws_cloudwatch_metric_alarm.program_running[p].threshold == 1
+      ]) &&
+      alltrue([for p in ["fleet", "data"] :
+        aws_ecs_service.program[p].desired_count == 0 && aws_appautoscaling_target.program[p].min_capacity == 0 &&
+        aws_cloudwatch_metric_alarm.program_heartbeat[p].treat_missing_data == "notBreaching" &&
+        aws_cloudwatch_metric_alarm.program_running[p].threshold == 0 &&
+        aws_cloudwatch_metric_alarm.program_running[p].treat_missing_data == "notBreaching"
+      ]) &&
+      aws_scheduler_schedule.backup.state == "ENABLED"
+    )
+    error_message = "a program the release names runs and alarms; one it does not name (a newer service) has no task, a floor of 0 and its alarms off; the backup runs with any release"
   }
 }
 

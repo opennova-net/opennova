@@ -4,10 +4,15 @@
 # Expects $GODOT_BIN to point at Godot 4.6.1. Falls back to the binary
 # at .godot-bin/ if one isn't set.
 #
-# Usage: scripts/test_godot.sh [--keep-user-dir] [--suite core|retail|all] [--windowed]
+# Usage: scripts/test_godot.sh [--keep-user-dir] [--suite core|retail|all] [--shard shells|world]
+#                               [--windowed]
 #   --keep-user-dir  leave the run's isolated user:// (.godot-test-user) in
 #                    place to inspect what the suite wrote
-#   --windowed       run only the suite's graphics scripts (tests/windowed/ for
+#   --shard NAME     run one of the core or retail suite's two CI shards
+#                    (shells: the scripts under tests/authoring, game, mcp and
+#                    probes, or under tests/retail/ the same; world: every
+#                    other; test_suites.py GODOT_SHARDS), attested on its own
+#   --windowed      run only the suite's graphics scripts (tests/windowed/ for
 #                    core, tests/retail/windowed/ for retail) under Forward+;
 #                    a pending test there (no RenderingDevice) fails the run
 #
@@ -20,15 +25,24 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 keep_user_dir=0
 suite=all
 windowed=0
+shard=""
+usage="usage: scripts/test_godot.sh [--keep-user-dir] [--suite core|retail|all] [--shard shells|world] [--windowed]"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep-user-dir) keep_user_dir=1; shift ;;
     --windowed) windowed=1; shift ;;
     --suite) [[ $# -ge 2 ]] || exit 2; suite="$2"; shift 2 ;;
     --suite=*) suite="${1#--suite=}"; shift ;;
-    *) echo "usage: scripts/test_godot.sh [--keep-user-dir] [--suite core|retail|all] [--windowed]" >&2; exit 2 ;;
+    --shard) [[ $# -ge 2 ]] || exit 2; shard="$2"; shift 2 ;;
+    --shard=*) shard="${1#--shard=}"; shift ;;
+    *) echo "$usage" >&2; exit 2 ;;
   esac
 done
+case "$shard" in
+  "") ;;
+  shells|world) [[ "$suite" != all ]] || { echo "--shard splits the core or the retail suite" >&2; exit 2; } ;;
+  *) echo "$usage" >&2; exit 2 ;;
+esac
 case "$suite" in
   core) unset OPENNOVA_JO_DIR OPENNOVA_JO_ASSETS ;;
   retail) python "$root/scripts/ci/test_suites.py" --suite retail --require-roots ;;
@@ -36,11 +50,11 @@ case "$suite" in
   *) echo "unknown suite: $suite" >&2; exit 2 ;;
 esac
 
-label="$suite"
+label="$suite${shard:+-$shard}"
 display=(--headless)
 selection=()
 if [[ "$windowed" == "1" ]]; then
-  label="$suite-windowed"
+  label="$label-windowed"
   display=(--rendering-method forward_plus)
   selection=(--windowed)
 fi
@@ -101,8 +115,8 @@ mkdir -p "$reports"
 config="$reports/gut-$label.json"
 inventory="$reports/gut-$label-inventory.json"
 report="$reports/gut-$label.xml"
-python "$root/scripts/ci/test_suites.py" --suite "$suite" --godot-config "$config" \
-  --inventory "$inventory" --report "$report" "${selection[@]}"
+python "$root/scripts/ci/test_suites.py" --suite "$suite" ${shard:+--shard "$shard"} \
+  --godot-config "$config" --inventory "$inventory" --report "$report" "${selection[@]}"
 # Do not let a previous successful run stand in for a failed collector.
 rm -f "$report"
 

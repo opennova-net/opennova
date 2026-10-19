@@ -113,7 +113,11 @@ func settle(stall_ms := 120000) -> bool:
 	var progress := ""
 	var moved_at := Time.get_ticks_msec()
 	while true:
-		var answer := query("operation")
+		# Read as the parser gives it: the loop needs the running flags and the progress as it moves, and
+		# whole_numbers' walk over the answer (its last operation's lists, thousands of rows after an
+		# import) cost more than the pump each poll runs.
+		var read: Variant = JSON.parse_string(String(app.call("query_json", "operation", "{}")))
+		var answer: Dictionary = read if read is Dictionary else {}
 		var operation: Variant = answer.get("operation", {})
 		var validation: Variant = answer.get("validation", {})
 		if not (operation is Dictionary and bool(operation.get("running", false))) \

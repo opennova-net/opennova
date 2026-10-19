@@ -1,6 +1,6 @@
 #include "billing_sync.h"
 
-#include "loggable.h"
+#include "core/loggable.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -22,6 +22,15 @@ std::string meta(const Metadata &metadata, const char *key) {
 }
 
 bool is_terminal(const std::string &status) { return status == "canceled" || status == "incomplete_expired"; }
+
+// The reservation of the checkout that made `row` (its opennova_reservation
+// metadata) dropped once the row counts in its place: it grants, or it ended.
+// One still incomplete (its payment pending) keeps the reservation to its end.
+void settle_reservation(db::Database &db, const Subscription &s, const SubscriptionRow &row, int64_t now) {
+	const auto id = strutil::parse_llong(meta(s.metadata, kMetaReservation));
+	if (!id || *id <= 0 || !row.user_id) return;
+	if (subscription_grants(row, now) || is_terminal(row.status)) drop_reservation(db, *id, *row.user_id);
+}
 
 // Stripe no longer knows it (in this mode, on this account).
 bool is_missing(const StripeError &e) { return e.kind == StripeError::Kind::Rejected && e.status == 404; }
@@ -57,13 +66,14 @@ std::optional<PriceInfo> price_of(const io::JsonValue *v) {
 }
 
 std::string prices_text(const std::array<std::optional<PriceInfo>, kTierCount + 1> &tiers,
-		const std::optional<PriceInfo> &own) {
+		const std::optional<PriceInfo> &own, const std::optional<PriceInfo> &address) {
 	io::JsonValue v = io::JsonValue::make_object();
 	io::JsonValue list = io::JsonValue::make_array();
 	for (const auto &t : tiers)
 		list.push(price_json(t));
 	v.set("tiers", std::move(list));
 	v.set("own_machine", price_json(own));
+	v.set("static_address", price_json(address));
 	return io::json_write(v);
 }
 
@@ -130,6 +140,9 @@ std::string BillingSync::prices_config() const {
 	}
 	out += "|";
 	for (const std::string &p : config_.own_machine_prices)
+		out += p + ",";
+	out += "|";
+	for (const std::string &p : config_.static_address_prices)
 		out += p + ",";
 	return out;
 }
@@ -211,8 +224,14 @@ SubscriptionRow BillingSync::row_of(const Subscription &s, std::optional<int64_t
 	row.status = s.status;
 	row.price_id = s.first_price_id();
 	row.tier = tier_of_price(config_, row.price_id);
-	row.item = row.tier > 0 ? ItemKind::Tier
-							: is_own_machine_price(config_, row.price_id) ? ItemKind::OwnMachine : ItemKind::Unknown;
+	if (row.tier > 0)
+		row.item = ItemKind::Tier;
+	else if (is_own_machine_price(config_, row.price_id))
+		row.item = ItemKind::OwnMachine;
+	else if (is_static_address_price(config_, row.price_id))
+		row.item = ItemKind::StaticAddress;
+	else
+		row.item = ItemKind::Unknown;
 	row.quantity = std::max<int64_t>(s.first_quantity(), 0);
 	if (const int64_t end = s.first_period_end(); end > 0) row.current_period_end = end;
 	// A cancel the Portal scheduled reads either way, by version.
@@ -318,7 +337,9 @@ SyncOutcome BillingSync::sync_one(db::Database *held, const std::string &stripe_
 		if (!customer_by_id(db, stripe_customer_id) && !customer_of(db, *user))
 			insert_customer(db, *user, stripe_customer_id, customer.value->livemode);
 		for (const Subscription &s : *subscriptions) {
-			upsert_subscription(db, row_of(s, user));
+			const SubscriptionRow row = row_of(s, user);
+			upsert_subscription(db, row);
+			settle_reservation(db, s, row, clock_());
 			listed.push_back(s.id);
 		}
 		// One Stripe lists no longer (deleted with its test data): canceled.
@@ -335,6 +356,7 @@ bool BillingSync::validate_prices() {
 	std::string problem;
 	std::array<std::optional<PriceInfo>, kTierCount + 1> tier_prices;
 	std::optional<PriceInfo> own_price;
+	std::optional<PriceInfo> address_price;
 	std::string currency;
 	const auto check_list = [&](const std::vector<std::string> &list, const std::string &variable,
 									std::optional<PriceInfo> &sold) -> bool {
@@ -383,6 +405,7 @@ bool BillingSync::validate_prices() {
 			return false;
 	}
 	if (!check_list(config_.own_machine_prices, "STRIPE_PRICE_OWN_MACHINE", own_price)) return false;
+	if (!check_list(config_.static_address_prices, "STRIPE_PRICE_STATIC_ADDRESS", address_price)) return false;
 	auto lease = pool_.acquire();
 	db::Database &db = *lease;
 	const SyncStatus was = status(db);
@@ -390,7 +413,7 @@ bool BillingSync::validate_prices() {
 			"$2, "
 			"prices_error = $3, prices = $4, price_check_after_s = 0 WHERE id = 1;",
 			{ BindValue(prices_config()), BindValue(db::Bool{ problem.empty() }),
-					BindValue(problem), BindValue(prices_text(tier_prices, own_price)) });
+					BindValue(problem), BindValue(prices_text(tier_prices, own_price, address_price)) });
 	if (!problem.empty() && (was.prices_ok || !was.prices_checked))
 		std::fprintf(stderr,
 				"[billing] WARN the prices: %s; checkout is off until they are fixed\n",
@@ -494,7 +517,9 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 			if (!customer_by_id(db, o.subscription->customer) && !customer_of(db, o.user) &&
 					insert_customer(db, o.user, o.subscription->customer, o.subscription->livemode))
 				++report.customers_recreated;
-			upsert_subscription(db, row_of(*o.subscription, o.user));
+			const SubscriptionRow row = row_of(*o.subscription, o.user);
+			upsert_subscription(db, row);
+			settle_reservation(db, *o.subscription, row, now);
 			++report.written;
 		}
 		for (const SubscriptionRow &row : refreshed) upsert_subscription(db, row);
@@ -582,6 +607,7 @@ SyncStatus BillingSync::status(db::Database &db) const {
 				out.tier_prices[i] = price_of(&tiers->array[i]);
 		}
 		out.own_machine_price = price_of(prices.get("own_machine"));
+		out.static_address_price = price_of(prices.get("static_address"));
 	}
 	out.last_reconcile_at = r.as_int(5).value_or(0);
 	out.last_reconcile_error = r.as_text(6).value_or("");

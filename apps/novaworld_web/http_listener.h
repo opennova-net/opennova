@@ -1,7 +1,8 @@
 #pragma once
 
-#include "auth.h"
-#include "hosted/placement.h"
+#include "accounts/auth.h"
+#include "hosted/model/fleet_health.h"
+#include "hosted/model/placement.h"
 #include "jobs/scheduler.h"
 #include "retail_pins.h"
 #include "session_store.h"
@@ -37,7 +38,7 @@ class ObjectStore;
 
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
-namespace infra { class InfraStatus; }
+namespace infra { class AlarmStore; class InfraStatus; class LogStore; class MetricsStore; }
 
 // Crow-backed HTTP listener. start() registers its route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -62,13 +63,21 @@ namespace infra { class InfraStatus; }
 //   support tiers       — BillingRoutes (billing/billing_routes.h): the tiers,
 //                         the account's billing, checkout and portal, the
 //                         Stripe webhook and the admin's billing view
+//   static addresses    — AddressRoutes (hosted/address_routes.h): the
+//                         owner's addresses and their names, the admin's view,
+//                         rename, release and comp addresses
 //   background jobs     — JobRoutes (jobs/job_routes.h): the admin's view of
 //                         the job queue and its actions on it
 //   infrastructure      — InfraRoutes (infra/infra_routes.h): the admin's
 //                         read-only view of the deployment as it runs (the
 //                         programs' ECS services and tasks, the balancer, the
-//                         database, the cache, the lobbies, the controller,
-//                         the machines)
+//                         database, the cache, the lobbies, the fleet,
+//                         the machines); AttentionRoutes
+//                         (infra/attention_routes.h): what needs an admin, the
+//                         fleet's health and the firing alarms; LogRoutes (infra/log_routes.h):
+//                         every log on the site; UsageRoutes
+//                         (infra/usage_routes.h): what everything uses and
+//                         the programs' tasks
 //   game data           — DataSetRoutes and ReleaseRoutes (data_sets/): the
 //                         hosted data sets, their tree uploads into the object
 //                         store and the update releases, each part through
@@ -101,7 +110,7 @@ public:
 	// memory. Null is safe (no sighting is recorded).
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
-	// The stall watchdog GET /livez answers from (health.h), and GET /healthz
+	// The stall watchdog GET /livez answers from (core/health.h), and GET /healthz
 	// with Redis's PING (redis_answers()). Set before start(); it must outlive
 	// the HTTP listener. Null: /livez answers "ok", /healthz from the PING
 	// alone.
@@ -120,36 +129,68 @@ public:
 	// (infra/infra_status.h). Set before start(); it must outlive the HTTP
 	// listener. Null: the view says no cloud is read here.
 	void set_infra(infra::InfraStatus *status) { infra_ = status; }
+	// The store the admin's log view reads (infra/log_store.h), or null with why
+	// there is none (the view's 503). Set before start(); it must outlive the
+	// listener.
+	void set_log_store(infra::LogStore *store, std::string none_why) {
+		log_store_ = store;
+		log_store_none_ = std::move(none_why);
+	}
+	// The AWS resources' metrics the usage view reads (infra/metrics_store.h).
+	// Set before start(); it must outlive the listener. Null: the view says no
+	// cloud is read here.
+	void set_metrics_store(infra::MetricsStore *store) { metrics_store_ = store; }
+	// The firing alarms the attention list reads (infra/alarm_store.h). Set before
+	// start(); it must outlive the listener. Null: no alarm is read.
+	void set_alarm_store(infra::AlarmStore *store) { alarm_store_ = store; }
 
 	// The object store the hosted data sets' trees and the update packages
-	// live in (object_store.h; parts.h make_object_store), which the admin's
-	// data set and release routes upload into and read. Set before start(); it
+	// live in (core/object_store.h; core/object_store_stack.h
+	// make_object_store), which the admin's data set and release routes upload
+	// into and read. Set before start(); it
 	// must outlive the listener. Null: no store (those routes answer
 	// store_unavailable).
 	void set_object_store(ObjectStore *store) { object_store_ = store; }
 	ObjectStore *object_store() const { return object_store_; }
 
-	// Each container's memory and CPUs (hosted/fleet_config.h's slot limits):
+	// Each container's memory and CPUs (hosted/model/fleet_config.h's slot limits):
 	// the admin usage view's limits. Set before start(); unset, the defaults.
 	void set_fleet_slots(int memory_mb, double cpus) {
 		fleet_slot_memory_mb_ = memory_mb;
 		fleet_slot_cpus_ = cpus;
 	}
 
-	// The fleet's placement policy (hosted/fleet_config.h) the hosted routes ask
-	// the supervisor's planner with: a start's at_capacity, the list's `full`.
-	// Set before start(); unset, placement.h's defaults.
+	// The fleet's placement policy (hosted/model/fleet_config.h) the hosted routes ask
+	// the supervisor's planner with (a start's at_capacity, the list's `full`)
+	// and the billing routes judge a checkout's sold capacity against
+	// (hosted/model/sold_capacity.h). Set before start(); unset, placement.h's
+	// defaults.
 	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
+	// The images the release pins (hosted/model/fleet_config.h ONNET_FLEET_IMAGE_ID,
+	// the launch templates', which a fleet roll's preview holds each machine's
+	// against; ONNET_HOSTED_HOSTD_IMAGE), which the machines' JSON and the
+	// fleet's health (hosted/model/fleet_health.h) hold each machine's against. Set
+	// before start().
+	void set_fleet_release(hosted::ReleaseImages release) { fleet_release_ = std::move(release); }
+	// Whether the static addresses are on (hosted/model/hosted_policy.h
+	// HostedPolicy::addresses_on)
+	// and the play zone they are named in: the address routes and the servers'
+	// and accounts' views. Set before start(); unset, off.
+	void set_addresses(bool on, std::string zone) {
+		addresses_on_ = on;
+		address_zone_ = std::move(zone);
+	}
 
-	// The periodic jobs the deployment's controller schedules (parts.h
-	// periodic_jobs, from the same settings): the admin's jobs page shows each
+	// The periodic jobs the deployment's programs schedule (the worker's
+	// worker_schedule.h and the data program's data set prune, from the same
+	// settings): the admin's jobs page shows each
 	// one's schedule, and runs one now on request (jobs/job_routes.h). Set
 	// before start(); unset, none.
 	void set_job_schedules(std::vector<jobs::PeriodicJob> schedules);
 
 	// Whether the welcome mail (POST /api/register) and the password reset
 	// links (POST /api/auth/forgot) are sent: queued as mail.send jobs
-	// (mailer.h) that a worker sends. Set before start(); off (the default),
+	// (accounts/mailer.h) that a worker sends. Set before start(); off (the default),
 	// each mail is logged as not sent.
 	void set_mail_enabled(bool on) { mail_on_ = on; }
 
@@ -268,13 +309,25 @@ private:
 	billing::Billing *billing_ = nullptr;
 	// The infrastructure view's cloud reader (set_infra); null: none.
 	infra::InfraStatus *infra_ = nullptr;
+	// The log view's store (set_log_store); null: none, for log_store_none_.
+	infra::LogStore *log_store_ = nullptr;
+	std::string log_store_none_ = "no log store";
+	// The usage view's AWS metrics (set_metrics_store); null: none.
+	infra::MetricsStore *metrics_store_ = nullptr;
+	// The attention list's alarms (set_alarm_store); null: none.
+	infra::AlarmStore *alarm_store_ = nullptr;
 	// The object store (set_object_store); null: none.
 	ObjectStore *object_store_ = nullptr;
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
 	double fleet_slot_cpus_ = 1.0;
+	// The images the release pins (set_fleet_release).
+	hosted::ReleaseImages fleet_release_;
 	// The hosted routes' placement policy (set_fleet_placement).
 	hosted::PlacementPolicy fleet_placement_;
+	// The static addresses (set_addresses).
+	bool addresses_on_ = false;
+	std::string address_zone_;
 	// The outbound mail (set_mail_enabled).
 	bool mail_on_ = false;
 	// config.web_host, set in start() before Crow runs (host_url() /

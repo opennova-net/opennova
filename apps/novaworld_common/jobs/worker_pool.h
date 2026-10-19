@@ -5,7 +5,7 @@
 // connection while its handler runs: it leases one to claim, the handler
 // leases its own around its database work (never across a slow call: the AWS
 // CLI, Stripe, SES), and it leases one again to finish. So a slow job only
-// occupies its worker, and no watched loop (health.h) waits on one. An idle
+// occupies its worker, and no watched loop (core/health.h) waits on one. An idle
 // worker polls every poll_ms, its wait doubling to idle_max_ms while nothing
 // is due; no LISTEN/NOTIFY. A keeper thread extends the leases of the jobs the
 // pool runs and puts back the jobs whose lease ran out (a worker that went
@@ -123,7 +123,7 @@ public:
 	// The jobs run so far (finished, whatever the outcome).
 	uint64_t jobs_run() const { return jobs_run_.load(std::memory_order_relaxed); }
 	// The claim loop's turns so far: each worker's claim or idle wait, and
-	// each keeper pass (the stall watchdog's counter, health.h). A worker
+	// each keeper pass (the stall watchdog's counter, core/health.h). A worker
 	// running a slow job adds none while the others and the keeper do, so it
 	// stands still only while every thread of the pool does. Thread-safe.
 	uint64_t loop_turns() const { return loop_turns_.load(std::memory_order_relaxed); }

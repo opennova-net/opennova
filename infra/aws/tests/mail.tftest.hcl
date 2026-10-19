@@ -152,14 +152,19 @@ override_resource {
   values          = { id = "sg-0web" }
 }
 override_resource {
-  target          = aws_security_group.program["controller"]
+  target          = aws_security_group.program["fleet"]
   override_during = plan
-  values          = { id = "sg-0controller" }
+  values          = { id = "sg-0fleet" }
 }
 override_resource {
   target          = aws_security_group.program["worker"]
   override_during = plan
   values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.program["data"]
+  override_during = plan
+  values          = { id = "sg-0data" }
 }
 override_resource {
   target          = aws_security_group.lb
@@ -212,14 +217,19 @@ override_resource {
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1" }
 }
 override_resource {
-  target          = aws_ecs_task_definition.program["controller"]
+  target          = aws_ecs_task_definition.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1" }
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:1" }
 }
 override_resource {
   target          = aws_ecs_task_definition.backup
@@ -242,14 +252,19 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-web" }
 }
 override_resource {
-  target          = aws_iam_role.program["controller"]
+  target          = aws_iam_role.program["fleet"]
   override_during = plan
-  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-controller" }
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-fleet" }
 }
 override_resource {
   target          = aws_iam_role.program["worker"]
   override_during = plan
   values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-worker" }
+}
+override_resource {
+  target          = aws_iam_role.program["data"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-data" }
 }
 override_resource {
   target          = aws_iam_role.execution
@@ -342,7 +357,7 @@ run "mail" {
       for p in ["web", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_MAIL_FROM"] == "support@example.com" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_MAIL_REGION"] == "us-east-1"
-    ]) && alltrue([for p in ["gate", "lobby", "controller"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_MAIL_")])
+    ]) && alltrue([for p in ["gate", "lobby", "fleet", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_MAIL_")])
     error_message = "web's and the worker's environment name the sender and SES's region, no other program's"
   }
 }

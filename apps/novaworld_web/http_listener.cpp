@@ -1,30 +1,34 @@
 #include "http_listener.h"
 
+#include "accounts/auth.h"
+#include "accounts/mailer.h"
+#include "accounts/template_engine.h"
 #include "admin_user_routes.h"
-#include "auth.h"
 #include "billing/billing_routes.h"
-#include "catalog_repository.h"
 #include "cd_key_routes.h"
 #include "connection_routes.h"
+#include "core/health.h"
+#include "core/object_store.h"
 #include "data_sets/data_set_routes.h"
 #include "data_sets/release_routes.h"
-#include "health.h"
 #include "host_routes.h"
+#include "hosted/address_routes.h"
 #include "hosted/console_routes.h"
 #include "hosted/fleet_routes.h"
 #include "hosted/hosted_routes.h"
-#include "hosted/net_cidr.h"
+#include "hosted/model/net_cidr.h"
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
+#include "infra/attention_routes.h"
 #include "infra/infra_routes.h"
+#include "infra/log_routes.h"
+#include "infra/usage_routes.h"
 #include "jobs/job_routes.h"
 #include "lobby_routes.h"
-#include "mailer.h"
-#include "object_store.h"
 #include "password_reset_routes.h"
+#include "program/catalog_repository.h"
+#include "program/server_config.h"
 #include "redis_client.h"
-#include "server_config.h"
-#include "template_engine.h"
 #include "web_access.h"
 
 #include <net/napi/session.h>
@@ -287,6 +291,7 @@ struct HttpListener::Impl {
 			hosts(access, pool, redis),
 			connections(access, pool),
 			hosted_servers(access, pool, redis),
+			addresses(access, pool),
 			fleet(access, pool),
 			stats(access, pool, redis),
 			console(access, pool, redis),
@@ -297,6 +302,9 @@ struct HttpListener::Impl {
 			resets(access, pool, redis),
 			jobs(access, pool),
 			infra(access, pool),
+			logs(access, pool, redis),
+			usage(access, pool, redis),
+			attention(access, pool, redis),
 			data_sets(access, pool),
 			releases(access, pool) {}
 
@@ -319,6 +327,8 @@ struct HttpListener::Impl {
 	ConnectionRoutes connections;
 	// The hosted servers' routes (hosted/hosted_routes.h), over `access`.
 	hosted::HostedRoutes hosted_servers;
+	// The static addresses' routes (hosted/address_routes.h).
+	hosted::AddressRoutes addresses;
 	// The admin's fleet view and the machines' routes (hosted/fleet_routes.h).
 	hosted::FleetRoutes fleet;
 	// The hosted servers' stats (hosted/stats_routes.h).
@@ -339,6 +349,12 @@ struct HttpListener::Impl {
 	jobs::JobRoutes jobs;
 	// The admin's infrastructure view (infra/infra_routes.h).
 	infra::InfraRoutes infra;
+	// Every log on the site (infra/log_routes.h).
+	infra::LogRoutes logs;
+	// What everything uses, and the programs (infra/usage_routes.h).
+	infra::UsageRoutes usage;
+	// What needs an admin (infra/attention_routes.h).
+	infra::AttentionRoutes attention;
 	// The hosted data sets' and the update releases' routes over the object store
 	// (data_sets/data_set_routes.h, data_sets/release_routes.h).
 	hosted::DataSetRoutes data_sets;
@@ -410,9 +426,13 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->hosts.register_routes(impl_->app);
 	impl_->connections.register_routes(impl_->app, config.heartbeat_timeout_ms);
 	impl_->hosted_servers.configure(config, fleet_placement_);
+	impl_->hosted_servers.set_address_zone(address_zone_);
 	impl_->hosted_servers.register_routes(impl_->app);
+	impl_->addresses.configure(addresses_on_, address_zone_, fleet_placement_.max_addresses);
+	impl_->addresses.register_routes(impl_->app);
 	impl_->fleet.configure(impl_->hosted_servers.hosting_on(), impl_->hosted_servers.provider(),
 			impl_->hosted_servers.cap(), fleet_placement_);
+	impl_->fleet.configure_roll(fleet_release_, infra_);
 	impl_->fleet.register_routes(impl_->app);
 	impl_->stats.configure(fleet_slot_memory_mb_, fleet_slot_cpus_);
 	impl_->stats.register_routes(impl_->app);
@@ -422,11 +442,19 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->cd_keys.configure(config);
 	impl_->cd_keys.register_routes(impl_->app);
 	impl_->billing.set_billing(billing_);
+	impl_->billing.set_fleet(fleet_placement_);
 	impl_->billing.register_routes(impl_->app);
 	impl_->jobs.register_routes(impl_->app);
 	impl_->infra.configure(
 			infra_, impl_->hosted_servers.hosting_on(), impl_->hosted_servers.provider());
 	impl_->infra.register_routes(impl_->app);
+	impl_->logs.configure(log_store_, log_store_none_);
+	impl_->logs.register_routes(impl_->app);
+	impl_->usage.configure(infra_, metrics_store_, fleet_slot_memory_mb_, fleet_slot_cpus_);
+	impl_->usage.register_routes(impl_->app);
+	impl_->attention.configure(
+			alarm_store_, impl_->hosted_servers.hosting_on(), fleet_placement_, fleet_release_);
+	impl_->attention.register_routes(impl_->app);
 	impl_->data_sets.set_store(object_store_);
 	impl_->data_sets.register_routes(impl_->app);
 	impl_->releases.set_store(object_store_);
@@ -816,6 +844,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	});
 
 	// The admin user routes (admin_user_routes.h).
+	impl_->users.set_fleet(fleet_placement_);
+	impl_->users.set_address_zone(address_zone_);
 	impl_->users.register_routes(
 			app, [this](db::Database &db, int64_t id) { forget_revoked_account(db, id); });
 }
@@ -957,7 +987,7 @@ void HttpListener::register_public_api_routes() {
 		return out;
 	});
 
-	// The process's liveness (health.h), web's container health check (the ECS
+	// The process's liveness (core/health.h), web's container health check (the ECS
 	// task's, the image's HEALTHCHECK): the stall watchdog alone. "ok", or 503
 	// "stalled"; never another detail. A Redis outage fails no web task's
 	// liveness: no restart and no new task mends it, and while it lasts each new
@@ -972,7 +1002,7 @@ void HttpListener::register_public_api_routes() {
 		return res;
 	});
 
-	// Whether the process serves a retail client now (health.h), the load
+	// Whether the process serves a retail client now (core/health.h), the load
 	// balancer's and the uptime checks' probe: outside /api, so
 	// ONNET_API_PROXY_ONLY never refuses it. "ok"; 503 "stalled" while the stall
 	// watchdog finds a loop stuck, else 503 "redis unreachable" while Redis does
@@ -1110,7 +1140,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 	auto handle_login_post = [this, templates_dir](const crow::request &req) {
 		auto db_conn = db_pool_.acquire();
 		// The login rows idle past kRetailLoginIdleSeconds go with the periodic
-		// active_user_sessions.prune job (jobs/account_jobs.h), never on a
+		// active_user_sessions.prune job (accounts/account_jobs.h), never on a
 		// login's thread; the login sessions themselves expire in Redis
 		// (SessionStore::kTtl).
 
@@ -2245,7 +2275,7 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 		}
 
 		// Every file below is reached through file_under_root / template_file
-		// (template_engine.h): '/'-separated bare file names that stay under
+		// (accounts/template_engine.h): '/'-separated bare file names that stay under
 		// their root, so no absolute path ("//etc/..."), backslash, dot segment
 		// or symlink out of the root is served. Crow hands `subpath` over
 		// undecoded, so a %2e%2e or %2f is a literal '%' the rule refuses.

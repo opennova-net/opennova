@@ -14,8 +14,9 @@ inline constexpr int kTierCount = 3;
 // Hosted servers a tier grants, by tier (index 0: none).
 inline constexpr int kTierServers[kTierCount + 1] = { 0, 1, 2, 3 };
 
-// The most hosted servers an admin may grant an account outside any tier
-// (players.comp_servers, 0..16).
+// The most hosted servers, and own machines, an admin may grant an account
+// outside any subscription (comp_grants, 0..16 each; billing_repository.h).
 inline constexpr int kMaxCompServers = 16;
+inline constexpr int kMaxCompOwnMachines = 16;
 
 } // namespace opennova::novaworld_server::billing

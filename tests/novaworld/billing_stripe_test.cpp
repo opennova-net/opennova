@@ -10,7 +10,7 @@
 // current_period_end on its item, a deleted customer, a list page's has_more) and its error
 // kinds; the typed client against the FakeStripeApi the later billing tests drive; and the
 // billing settings' checks. Crow-free and database-free: compiles the billing sources and
-// hosted/owner_file.cpp directly, so it runs on every build.
+// core/owner_file.cpp directly, so it runs on every build.
 
 #include "billing/billing_config.h"
 #include "billing/stripe_api.h"
@@ -18,7 +18,7 @@
 #include "billing/stripe_signature.h"
 #include "billing/tiers.h"
 #include "command_runner.h"
-#include "hosted/owner_file.h"
+#include "core/owner_file.h"
 
 #include <base/io/json.h>
 #include <base/io/sha256.h>
@@ -44,7 +44,7 @@
 
 namespace fs = std::filesystem;
 namespace billing = opennova::novaworld_server::billing;
-namespace hosted = opennova::novaworld_server::hosted;
+namespace nws = opennova::novaworld_server;
 namespace proc = opennova::proc;
 using billing::SignatureCheck;
 using billing::StripeError;
@@ -1020,6 +1020,29 @@ int test_billing_config() {
 	TEST_EXPECT(refused_with("STRIPE_PRICE_OWN_MACHINE", "REPLACE_ME", "STRIPE_PRICE_OWN_MACHINE is not set"));
 	TEST_EXPECT(refused_with("STRIPE_PRICE_OWN_MACHINE", "price_t2", "listed twice"));
 	TEST_EXPECT(refused_with("STRIPE_PRICE_TIER2", "price_t1old", "listed twice"));
+	// The static-address add-on's prices: needed while the fleet sells addresses alone.
+	{
+		Env addresses = complete_env();
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).empty() &&
+				!config_of(addresses).sells_addresses);
+		addresses["STRIPE_PRICE_STATIC_ADDRESS"] = "REPLACE_ME";
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).empty() &&
+				config_of(addresses).static_address_prices.empty());
+		addresses["ONNET_FLEET_MAX_ADDRESSES"] = "4";
+		TEST_EXPECT(config_of(addresses).sells_addresses);
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).find("STRIPE_PRICE_STATIC_ADDRESS is not set") !=
+				std::string::npos);
+		addresses["STRIPE_PRICE_STATIC_ADDRESS"] = "price_own";
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).find("listed twice") != std::string::npos);
+		addresses["STRIPE_PRICE_STATIC_ADDRESS"] = "price_addr, price_addrold";
+		c = config_of(addresses);
+		TEST_EXPECT(billing::check_billing_config(c).empty() && c.static_address_prices.size() == 2);
+		TEST_EXPECT(billing::static_address_price_for_sale(c) == "price_addr" &&
+				billing::is_static_address_price(c, "price_addrold") && !billing::is_static_address_price(c, "price_own"));
+		addresses["ONNET_FLEET_MAX_ADDRESSES"] = "0";
+		addresses["STRIPE_PRICE_STATIC_ADDRESS"] = "prod_x";
+		TEST_EXPECT(billing::check_billing_config(config_of(addresses)).find("prod_x") != std::string::npos);
+	}
 	TEST_EXPECT(refused_with("ONNET_SITE_URL", nullptr, "ONNET_SITE_URL is not set"));
 	TEST_EXPECT(refused_with("ONNET_SITE_URL", "localhost:8080", "ONNET_SITE_URL"));
 	TEST_EXPECT(refused_with("ONNET_SITE_URL", "https://nw.test/app", "ONNET_SITE_URL"));
@@ -1077,7 +1100,7 @@ int main() {
 	test_temp::TempDir temp("billing_stripe");
 	const fs::path scratch_path = temp.path / "scratch";
 	std::string error;
-	if (!hosted::make_owner_directory(scratch_path, error)) {
+	if (!nws::make_owner_directory(scratch_path, error)) {
 		std::fprintf(stderr, "cannot make the scratch directory: %s\n", error.c_str());
 		return 1;
 	}

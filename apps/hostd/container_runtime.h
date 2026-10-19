@@ -8,7 +8,7 @@
 // agent's share of its pass, agent.h) and reads as a failure past it; a pull
 // runs in the background, polled, so no pass ever waits for one.
 
-#include "hosted/agent_protocol.h"
+#include "hosted/protocol/agent_protocol.h"
 
 #include <cstdint>
 #include <map>
@@ -37,12 +37,14 @@ struct ContainerSpec {
 	double cpus = 1.0;
 	int memory_mb = 512;
 	int pids = 128;
+	std::string log_stream; // where its output goes, as the service names it
 };
 
 // One of the agent's containers as the runtime sees it.
 struct ContainerInfo {
 	std::string name;
 	int slot = -1; // -1: its slot label is missing or wrong
+	std::string image; // the reference it was run from ("" when unknown)
 	hosted::ContainerState state = hosted::ContainerState::Starting;
 	std::optional<int64_t> exit_code; // once it exited
 	bool oom = false;
@@ -96,6 +98,14 @@ public:
 	virtual bool kill(const std::string &name, int timeout_ms, std::string &error) = 0;
 	// Removes a container that is not running (ended, or never started).
 	virtual bool remove(const std::string &name, int timeout_ms, std::string &error) = 0;
+	// The images of `repository` the machine holds, each as
+	// `<repository>@<digest>` (one held by a tag alone is none of these).
+	// False with `error` when the runtime cannot tell.
+	virtual bool list_images(const std::string &repository, std::vector<std::string> &out,
+			int timeout_ms, std::string &error) = 0;
+	// Removes image `image` (a list_images reference) from the machine; the
+	// runtime refuses one a container still uses (false, `error`).
+	virtual bool remove_image(const std::string &image, int timeout_ms, std::string &error) = 0;
 };
 
 } // namespace opennova::hostd

@@ -1,27 +1,40 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import UserDetailSection from './UserDetailSection.vue';
+import { addCompAddress } from '../../api/adminAddresses';
 import { fetchAccountCdKeys } from '../../api/cdKeys';
-import { deleteUser, fetchUser, listUsers, setCompServers, updateUser } from '../../api/users';
+import { deleteUser, fetchUser, listUsers, setCompGrants, updateUser } from '../../api/users';
+import { adminAddress } from '../../test/addressFixtures';
 import { user, userDetail, userEntry } from '../../test/adminFixtures';
 import { hostedServer } from '../../test/hostedFixtures';
 import { testRouter } from '../../test/router';
+import type { SoldCapacity } from '../../types/users';
 
 vi.mock('../../api/users', () => ({
   fetchUser: vi.fn(),
   listUsers: vi.fn(),
   updateUser: vi.fn(),
-  setCompServers: vi.fn(),
+  setCompGrants: vi.fn(),
   deleteUser: vi.fn(),
 }));
 vi.mock('../../api/cdKeys', () => ({ fetchAccountCdKeys: vi.fn() }));
+vi.mock('../../api/adminAddresses', () => ({ addCompAddress: vi.fn() }));
 
 const detail = vi.mocked(fetchUser);
 const list = vi.mocked(listUsers);
 const update = vi.mocked(updateUser);
-const comp = vi.mocked(setCompServers);
+const comp = vi.mocked(setCompGrants);
 const remove = vi.mocked(deleteUser);
 const keys = vi.mocked(fetchAccountCdKeys);
+const addAddress = vi.mocked(addCompAddress);
+
+// Shared places sold past the fleet: an admin's grant took them there.
+const OVERSOLD: SoldCapacity = {
+  shared: { sold: 26, sellable: 24 },
+  own_machines: { sold: 4, sellable: 4 },
+  addresses: { sold: 1, sellable: 4 },
+  oversold: true,
+};
 
 async function mountSection() {
   const router = await testRouter('/admin/users/7', ['/admin/users/:id']);
@@ -81,25 +94,100 @@ describe('UserDetailSection', () => {
     expect(wrapper.text()).not.toMatch(/can host|approve/i);
   });
 
-  it('grants comp servers from 0 to 16, confirming a cut below what runs', async () => {
+  it('grants comp servers and own machines from 0 to 16, confirming a cut below what runs', async () => {
     const { wrapper } = await mountSection();
-    comp.mockResolvedValue({ ok: true, value: user(7, { comp_servers: 3, max_servers: 3 }) });
+    comp.mockResolvedValue({
+      ok: true,
+      value: { user: user(7, { comp_servers: 3, comp_own_machines: 1, max_servers: 3 }), capacity: null },
+    });
     await wrapper.get('#user-comp-servers').setValue(17);
     expect(wrapper.get('#user-comp-hint').text()).toBe('Enter a whole number from 0 to 16.');
     await wrapper.get('#user-comp-servers').setValue(3);
+    await wrapper.get('#user-comp-own').setValue(-1);
+    expect(wrapper.get('#user-comp-hint').text()).toBe('Enter a whole number from 0 to 16.');
+    await wrapper.get('#user-comp-own').setValue(1);
     await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(confirm).not.toHaveBeenCalled();
-    expect(comp).toHaveBeenCalledWith(7, 3);
-    expect(wrapper.get('[role="status"]').text()).toContain('may now run 3 hosted servers free of charge');
+    expect(comp).toHaveBeenCalledWith(7, { servers: 3, own_machines: 1 });
+    expect(wrapper.get('[role="status"]').text()).toContain('now has 3 hosted servers, 1 on an own machine free of charge');
 
     // A tier of 2 servers, 2 live: a grant of 0 stops none; the tier still covers them.
     comp.mockClear();
     await wrapper.get('#user-comp-servers').setValue(0);
+    await wrapper.get('#user-comp-own').setValue(0);
     await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(confirm).not.toHaveBeenCalled();
-    expect(comp).toHaveBeenCalledWith(7, 0);
+    expect(comp).toHaveBeenCalledWith(7, { servers: 0, own_machines: 0 });
+  });
+
+  it('warns while grants and subscriptions oversell the fleet, also right after a grant', async () => {
+    const { wrapper } = await mountSection();
+    expect(wrapper.find('#user-oversold').exists()).toBe(false);
+
+    // The grant's reply carries the sold capacity: the warning shows from it,
+    // even before (or without) the page's next read.
+    comp.mockResolvedValue({ ok: true, value: { user: user(7, { comp_servers: 6, max_servers: 6 }), capacity: OVERSOLD } });
+    detail.mockResolvedValueOnce({ ok: false, error: { code: 'network', status: null, message: 'Could not reach the server.' } });
+    await wrapper.get('#user-comp-servers').setValue(6);
+    await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+    expect(wrapper.get('#user-oversold').text()).toBe(
+      'Admin grants and subscriptions exceed what the fleet sells: shared places 26 of 24, own machines 4 of 4, ' +
+        'addresses 1 of 4. New subscriptions of those items are paused.',
+    );
+
+    // And on the page's own read.
+    detail.mockResolvedValue({ ok: true, value: userDetail(7, { capacity: OVERSOLD }) });
+    const again = await mountSection();
+    expect(again.wrapper.get('#user-oversold').text()).toContain('shared places 26 of 24');
+  });
+
+  it("lists the account's addresses and adds a comp one, checking its name first", async () => {
+    detail.mockResolvedValue({
+      ok: true,
+      value: userDetail(7, {
+        addresses: [
+          adminAddress(1, 'smoke', { server: { id: 31, game_name: 'Night Ops', state: 'running' } }),
+          adminAddress(2, 'spare', { source: 'comp', stripe_subscription_id: null, state: 'allocating', public_ip: null, port: null }),
+        ],
+      }),
+    });
+    const { wrapper } = await mountSection();
+    const list = wrapper.get('#user-addresses').element.parentElement!.textContent!;
+    expect(list).toContain('smoke.play.opennova.net');
+    expect(list).toContain('203.0.113.1:32768, its own subscription');
+    expect(list).toContain('No IP yet, an admin grant');
+    expect(list).toContain('Being set up');
+    expect(wrapper.findAll('a').find((a) => a.text() === 'Night Ops')?.attributes('href')).toBe('/admin/fleet/31');
+
+    await wrapper.get('#user-comp-address').setValue('Bad--Name');
+    await wrapper.get('#user-comp-address').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+    expect(addAddress).not.toHaveBeenCalled();
+    expect(wrapper.get('#user-comp-address-hint').text()).toContain('3 to 32 lower-case letters');
+    expect(wrapper.get('#user-comp-address').attributes('aria-invalid')).toBe('true');
+
+    addAddress.mockResolvedValue({ ok: true, value: adminAddress(3, 'arena', { state: 'allocating' }) });
+    await wrapper.get('#user-comp-address').setValue('arena');
+    await wrapper.get('#user-comp-address').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+    expect(addAddress).toHaveBeenCalledWith(7, 'arena');
+    expect(wrapper.get('[role="status"]').text()).toBe('player7 has the comp address arena.play.opennova.net; a worker sets it up now.');
+  });
+
+  it('takes the comp address form away when the service sells no address', async () => {
+    addAddress.mockResolvedValue({
+      ok: false,
+      error: { code: 'addresses_disabled', status: 503, message: 'This NovaWorld service sells no static address.' },
+    });
+    const { wrapper } = await mountSection();
+    await wrapper.get('#user-comp-address').setValue('arena');
+    await wrapper.get('#user-comp-address').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain('sells no static address');
+    expect(wrapper.find('#user-comp-address').exists()).toBe(false);
   });
 
   it('confirms a cut that stops servers', async () => {
@@ -107,7 +195,7 @@ describe('UserDetailSection', () => {
       ok: true,
       value: userDetail(7, {
         user: user(7, { comp_servers: 3, max_servers: 3 }),
-        entitlement: { max_servers: 3, source: 'comp', tier: null, comp_servers: 3, tier_servers: 0, own_machines: 0, can_start: true },
+        entitlement: { max_servers: 3, source: 'comp', tier: null, comp_servers: 3, comp_own_machines: 0, tier_servers: 0, own_machines: 0, can_start: true },
         servers: [hostedServer(31), hostedServer(32), hostedServer(33)],
       }),
     });
@@ -127,7 +215,7 @@ describe('UserDetailSection', () => {
       ok: true,
       value: userDetail(7, {
         user: user(7, { comp_servers: 3, max_servers: 3 }),
-        entitlement: { max_servers: 3, source: 'comp', tier: 1, comp_servers: 3, tier_servers: 1, own_machines: 0, can_start: true },
+        entitlement: { max_servers: 3, source: 'comp', tier: 1, comp_servers: 3, comp_own_machines: 0, tier_servers: 1, own_machines: 0, can_start: true },
         servers: [hostedServer(31), hostedServer(32), hostedServer(33, { state: 'stopping' })],
       }),
     });

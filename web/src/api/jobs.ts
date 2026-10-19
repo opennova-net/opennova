@@ -140,7 +140,7 @@ export function pickOverview(data: unknown): JobsOverview | null {
   const workers = every(data.workers, pickWorker);
   const schedules = every(data.schedules, pickSchedule);
   if (!totals || !kinds || !attention || !workers || !schedules) return null;
-  const controller = isObject(data.controller) ? data.controller : {};
+  const fleet = isObject(data.fleet) ? data.fleet : {};
   return {
     at: data.at,
     totals,
@@ -149,10 +149,10 @@ export function pickOverview(data: unknown): JobsOverview | null {
     attention_total: isCount(data.attention_total) ? data.attention_total : 0,
     workers,
     schedules,
-    controller: {
-      leader: textOrNull(controller.leader),
-      elected_at: textOrNull(controller.elected_at),
-      last_scheduled_at: textOrNull(controller.last_scheduled_at),
+    last_scheduled_at: textOrNull(data.last_scheduled_at),
+    fleet: {
+      leader: textOrNull(fleet.leader),
+      elected_at: textOrNull(fleet.elected_at),
     },
   };
 }

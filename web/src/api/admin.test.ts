@@ -1,7 +1,8 @@
 import { AxiosError, AxiosHeaders, type AxiosResponse } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { adminClient } from './client';
-import { endConnection, fetchConnections, stopListedServer } from './admin';
+import { endConnection, fetchConnections, pickMachine, pickMachineDetail, pickRollPlan, rollFleet, stopListedServer } from './admin';
+import { HOSTD_IMAGE, machine, machineDetail, rollPlan } from '../test/adminFixtures';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn() },
@@ -136,5 +137,47 @@ describe('ending a session and stopping a listed server', () => {
     post.mockRejectedValue(refusal(409, { error: 'not_hosting' }));
     const stopped = await stopListedServer(167772161);
     expect(!stopped.ok && stopped.error.message).toContain('no longer listed');
+  });
+});
+
+describe('the fleet machines', () => {
+  const wire = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
+
+  it('reads a machine with its agent, its use and the release as machine_json sends them', () => {
+    // The route writes the row's id and the static address's as numbers.
+    const sent = { ...(wire(machine('3', { address: { id: 7, name: 'smoke' } })) as object), id: 3 };
+    expect(pickMachine(sent)).toEqual(machine('3', { address: { id: 7, name: 'smoke' } }));
+  });
+
+  it('reads a machine before its first report, and the fields a route leaves out', () => {
+    const m = pickMachine({ id: 9, kind: 'own', state: 'launching', slots: 1, slots_used: 0, stats: null, agent_protocol: null });
+    expect(m?.stats).toBeNull();
+    expect(m?.agent_protocol).toBeNull();
+    expect(m?.release).toEqual({ image_id: null, agent_image: null });
+    expect(m?.outdated).toBeNull();
+    expect(m?.address).toBeNull();
+    expect(m?.lost_held).toBe(false);
+    expect(pickMachine({ id: 9, kind: 'own', state: 'ready', slots: 1, slots_used: 0, stats: { cpu_percent: 'x' } })?.stats?.cpu_percent).toBeNull();
+  });
+
+  it("reads a machine's page and a roll's preview", () => {
+    const detail = wire(machineDetail('3')) as { machine: Record<string, unknown> };
+    detail.machine.id = 3;
+    expect(pickMachineDetail(detail)).toEqual(machineDetail('3'));
+    expect(pickMachineDetail({ machine: wire(machine('3')), events: [{ to: 'ready' }], trees: [] })).toBeNull();
+    expect(pickMachineDetail({ machine: null, events: [], trees: [] })).toBeNull();
+
+    const plan = wire(rollPlan()) as { machines: { id: unknown }[]; replace: unknown[] };
+    plan.machines.forEach((m) => (m.id = Number(m.id)));
+    plan.replace = [3];
+    expect(pickRollPlan(plan)).toEqual(rollPlan());
+    expect(pickRollPlan({ machines: [{ id: 3, kind: 'shared', action: 'drain' }] })).toBeNull();
+    expect(HOSTD_IMAGE).toContain('opennova-hostd@sha256:');
+  });
+
+  it('rolls the machines named, as numbers', async () => {
+    post.mockResolvedValue(reply({ draining: 2, machines: [3, 4] }, 202));
+    expect(await rollFleet(['3', '4'])).toEqual({ ok: true, value: 2 });
+    expect(post).toHaveBeenCalledWith('/fleet/roll', { machines: [3, 4] });
   });
 });

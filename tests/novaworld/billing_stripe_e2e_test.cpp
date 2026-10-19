@@ -32,7 +32,8 @@
 // customer deleted at the end, which cancels the subscription (set to cancel itself
 // anyway, should the test die first).
 
-#include "auth.h"
+#include "accounts/auth.h"
+#include "accounts/web_session.h"
 #include "billing/billing.h"
 #include "billing/billing_config.h"
 #include "billing/billing_repository.h"
@@ -40,10 +41,9 @@
 #include "billing/stripe_api.h"
 #include "billing/stripe_client.h"
 #include "command_runner.h"
-#include "hosted/owner_file.h"
+#include "core/owner_file.h"
 #include "net_http.h"
 #include "net_sockets.h"
-#include "web_session.h"
 
 #include "novaworld/nw_service_harness.h"
 
@@ -190,10 +190,10 @@ int run(const std::string &secret_key) {
 	test_temp::TempDir temp("billing_stripe_e2e");
 	const std::filesystem::path scratch = temp.path / "stripe";
 	std::string error;
-	TEST_EXPECT(opennova::novaworld_server::hosted::make_owner_directory(scratch, error));
+	TEST_EXPECT(nws::make_owner_directory(scratch, error));
 
-	// The transport as main() makes it (make_billing): curl through the runner, the key
-	// in an owner-only config file per call.
+	// The transport as main() makes it (billing_stack.h make_billing): curl through the
+	// runner, the key in an owner-only config file per call.
 	billing::CurlStripeApi::Config transport;
 	transport.curl = billing::BillingConfig{}.curl_path;
 	transport.secret_key = secret_key;
@@ -233,7 +233,7 @@ int run(const std::string &secret_key) {
 	nw_service_test::Service service;
 	billing::Billing billing_service(
 			config, api, service.pool, billing::instance_id(*service.pool.acquire()));
-	// The controller's first reconcile, by hand (no worker): the prices checked.
+	// The first reconcile at a start, by hand (no worker): the prices checked.
 	billing_service.sync().reconcile_all(billing::unix_now());
 	const billing::SyncStatus first = billing_service.sync().status(*service.pool.acquire());
 	if (!first.prices_ok)

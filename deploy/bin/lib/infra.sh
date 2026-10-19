@@ -64,9 +64,27 @@ tf_op() {
 # or takes the service down: an Elastic IP (the gate's retail clients use, the
 # load balancer's other) and an association, an instance and a network
 # interface, the load balancer (it holds the gate's address), the cluster and a
-# program's service, the controller's Cloud Map namespace, the database, the
+# program's service, the fleet program's Cloud Map namespace, the database, the
 # cache (every web session goes with it), the operations bucket.
 PRECIOUS_TYPES='["aws_eip","aws_eip_association","aws_network_interface","aws_instance","aws_lb","aws_ecs_cluster","aws_ecs_service","aws_service_discovery_private_dns_namespace","aws_db_instance","aws_elasticache_replication_group","aws_s3_bucket"]'
+
+# The fleet's sizes a plan lowers ($1: the plan's fleet_capacity output, JSON;
+# outputs.tf), against the state's: what the site sells shrinks, and nothing
+# takes back what accounts hold already. Nothing to compare before the first
+# apply that has the output.
+fleet_capacity_warn() {
+  local planned="$1" current line
+  [ -n "$planned" ] || return 0
+  current="$(tf output -json fleet_capacity 2>/dev/null)" || return 0
+  [ -n "$current" ] || return 0
+  jq -r --argjson now "$current" '
+      {max_shared: "fleet_max_shared", shared_slots: "shared_slots", max_own: "fleet_max_own", max_addresses: "fleet_max_addresses"} as $knob
+      | to_entries[] | select(($now[.key] // .value) > .value)
+      | "\($knob[.key] // .key) drops from \($now[.key]) to \(.value)"' <<<"$planned" 2>/dev/null \
+    | while IFS= read -r line; do
+        log "WARNING: $line: accounts already sold more than that keep it, and the admin's attention list shows the shortfall"
+      done || true
+}
 
 # infra apply: plan to a file, and refuse a plan that destroys (or replaces) a
 # precious resource unless --allow-destroy, and any plan that makes prod a gate
@@ -75,7 +93,7 @@ PRECIOUS_TYPES='["aws_eip","aws_eip_association","aws_network_interface","aws_in
 # apply that saved plan only after --yes or a typed prod; on staging apply it.
 # The plan applied is the one shown, never a new one.
 infra_apply() {
-  local allow_destroy=0 yes=0 args=() plan="$SECRETS_DIR/tfplan" plan_json doomed made summary rc=0 a
+  local allow_destroy=0 yes=0 args=() plan="$SECRETS_DIR/tfplan" plan_json doomed made summary capacity rc=0 a
   for a in "$@"; do
     case "$a" in
       --allow-destroy) allow_destroy=1 ;;
@@ -98,6 +116,7 @@ infra_apply() {
         elif . == ["delete"] then "destroy" elif . == ["forget"] then "forget" else empty end]
     | group_by(.) | map("\(length) to \(.[0])") | join(", ")' <<<"$plan_json")" \
     || { rm -f "$plan"; die "reading the plan failed; nothing was applied"; }
+  capacity="$(jq -c '.planned_values.outputs.fleet_capacity.value // empty' <<<"$plan_json")" || capacity=""
   plan_json=""
   if [ "$DEP" = prod ] && [ -n "$made" ]; then
     rm -f "$plan"
@@ -108,6 +127,7 @@ infra_apply() {
     die "the plan destroys or replaces $doomed. Refusing: check the plan above, then infra apply --allow-destroy if that is meant"
   fi
   log "the plan for $DEP: ${summary:-no resource changes}${doomed:+; it destroys or replaces $doomed (--allow-destroy)}"
+  fleet_capacity_warn "$capacity"
   # A refusal exits; the EXIT trap removes the saved plan.
   [ -z "$summary" ] || confirm_prod "apply this saved plan as it stands (nothing is planned again)" "$yes"
   tf_op apply -input=false "$plan" || rc=$?
@@ -126,7 +146,11 @@ cmd_infra() {
   tf_init
   case "$action" in
     plan)
-      tf_op plan -input=false "${TF_VAR_ARGS[@]}" "$@" ;;
+      # Saved alone for its fleet sizes (fleet_capacity_warn); the EXIT trap
+      # removes it too.
+      tf_op plan -input=false -out="$SECRETS_DIR/tfplan" "${TF_VAR_ARGS[@]}" "$@" || exit $?
+      fleet_capacity_warn "$(tf show -json "$SECRETS_DIR/tfplan" | jq -c '.planned_values.outputs.fleet_capacity.value // empty')"
+      rm -f "$SECRETS_DIR/tfplan" ;;
     apply)
       infra_apply "$@" ;;
     destroy)

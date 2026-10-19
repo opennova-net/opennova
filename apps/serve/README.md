@@ -18,6 +18,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
                [/game <code>] [--loose-root] [--lan-port <n>] [--log-debug]
                [--master-host <gate>] [--master-gate-port <n>]
                [--credentials <file>] [--allow-public]
+               [--status-page on|off] [--stats-file <file>] [--exit-file <file>]
                [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG]
 ```
 
@@ -35,6 +36,9 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 | `--master-gate-port <n>` | The gate's UDP port (default 7597). |
 | `--credentials <file>` | `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines: the account the listing logs in with to fetch its HOSTKEY, as the game's NovaWorld menu does. Without it the server hosts with no HOSTKEY, which the NovaWorld service accepts. |
 | `--allow-public` | Allow NovaLogic's NovaWorld (`novaworld.net` and every host under it), a live shared service. Loopback and any other host, an OpenNova service among them, need no flag. |
+| `--status-page on\|off` | `on` (the default) prints the status page on standard output and takes standard input as its chat input (below); `off` does neither. |
+| `--stats-file <file>` | Rewrite the file once a minute with the last minute's tick health ("Supervised runs" below). |
+| `--exit-file <file>` | At a non-zero exit, write the error that ended the server to the file, one line ("Supervised runs" below). |
 | `/PROFILE <path>` | Record every mission to a `.sph` server log (below). |
 | `/PUNTLOG`, `/PUNT.TXT` | Log the players the server punts to `_PUNT.TXT` (below). |
 | `/CHEATLOG` | Start `_CHEAT.TXT` (below). |
@@ -249,7 +253,7 @@ the clock and the counts ride along). A line typed on its standard input goes in
 page's chat input as a retail operator types it on the server's window: the Global talk opens
 (Ctrl+T), the line is typed, and Enter sends it to every player in the match. Global is the
 one talk a server with no player of its own can send. The page's labels come from the
-install's `gametext.bin`.
+install's `gametext.bin`. `--status-page off` prints no page and reads no standard input.
 
 The console also prints the session's lines retail writes under its `/INOUT` switch: `HOST
 STARTED` and `HOST STOPPED` with the server's address, and `SERVER PLAYER ADDED` and
@@ -262,6 +266,25 @@ These logs go to the working directory, in retail's names and formats:
 | `<path>.sph` | `/PROFILE <path>` | The server log: per map of the rotation, a file of its own holding the map, the players, every eighth tick each player's position and heading, each deploy and disconnect. The extension replaces everything after the path's first dot; an existing file is not overwritten, the name counts up instead (`host.sph`, `host1.sph`, ... `host10.sph`, then `host1.sph` again). `opennova-wire` decodes it. |
 | `_PUNT.TXT` | `/PUNTLOG` or `/PUNT.TXT` | A `START` line, then one line per punted player (the weapon and ammo table checks, more than nine suicides). The switch starts the file anew. |
 | `_CHEAT.TXT` | `/CHEATLOG` | A `START` line (retail writes nothing else to it). |
+
+## Supervised runs
+
+Whatever runs the server for others (a hosted server's machine agent, ADR 0053) reads two
+files of its own, neither retail's, and turns the status page off (`--status-page off`):
+the page reprints whenever a slot or a chat line changes, which a log pipeline would carry
+line by line.
+
+- **`--stats-file <file>`**: the tick health. The loop wakes once per logic quantum
+  (62.5 Hz); a frame's time is its work, from its start to the loop's sleep, and a frame is
+  late when it starts past its own end's deadline (the loop a whole quantum behind: a slow
+  frame before it, or a machine that gave the server no CPU). Once a minute the server
+  rewrites the file (a new file renamed over the old) with that minute's frames as one JSON
+  line: `{"at": <Unix seconds>, "p50_ms", "p99_ms", "max_ms", "late", "frames"}`. It is
+  instrumentation only: the loop runs as it does without it.
+- **`--exit-file <file>`**: at a non-zero exit (the table below), the error the server
+  logged as it ended, one line (`the session ended: ...`, `the NovaWorld listing did not
+  host: ...`), so its supervisor can say why without reading its log. A clean exit (0)
+  writes nothing.
 
 ## Exit codes
 
@@ -279,9 +302,11 @@ and restart the server only on an exit it did not ask for (ADR 0053 d6).
 
 ## Container image
 
-`apps/serve/Dockerfile` builds `opennova-serve` into a Linux image (ubuntu 24.04), which
-`.github/workflows/serve-image.yml` publishes as `ghcr.io/<owner>/opennova-serve`
-(tagged `sha-<short>`, the branch, and `latest` on master). It is the server the hosted
+`apps/serve/Dockerfile` builds `opennova-serve` into a Linux image (ubuntu 24.04; its
+`serve` target, the default), which `.github/workflows/serve-image.yml` publishes as
+`ghcr.io/<owner>/opennova-serve` (tagged `sha-<short>`, the branch, and `latest` on
+master), beside the machine agent's own image from the same file (its `hostd` target,
+`ghcr.io/<owner>/opennova-hostd`: `apps/hostd/README.md`). It is the server the hosted
 game servers run (ADR 0053): opennova-hostd on each machine pulls it at the digest the
 service pinned for that server and runs it in the server's slot as below, with the server's
 base data set's tree bound read-only at `/opt/game` and, when it runs an expansion, the

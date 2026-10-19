@@ -1,5 +1,5 @@
-// Where a hosted server runs (apps/novaworld_common/hosted/placement.h) and what a
-// slot is (hosted/slots.h): best fit on the fullest shared machine that takes servers,
+// Where a hosted server runs (apps/novaworld_common/hosted/model/placement.h) and what a
+// slot is (hosted/protocol/slots.h): best fit on the fullest shared machine that takes servers,
 // its lowest free slot, the ties (the readier machine, then the older), the launch of a
 // new shared machine below ONNET_FLEET_MAX_SHARED and the wait at it, the own-machine
 // add-on's reserved machine and its own maximum, the states that take servers and
@@ -7,8 +7,8 @@
 // the policy's checks, and a request placed after the servers waiting before it (the
 // start request's at_capacity). Pure functions: no database, no cloud.
 
-#include "hosted/placement.h"
-#include "hosted/slots.h"
+#include "hosted/model/placement.h"
+#include "hosted/protocol/slots.h"
 
 #include "common/test_expect.h"
 

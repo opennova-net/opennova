@@ -1,13 +1,16 @@
 #include "hosted_routes.h"
 
-#include "auth.h"
+#include "accounts/auth.h"
 #include "billing/entitlement.h"
-#include "hosted/data_set_repository.h"
-#include "hosted/fleet_repository.h"
-#include "hosted/host_limits.h"
+#include "core/loggable.h"
+#include "data_sets/data_set_repository.h"
+#include "hosted/model/address_names.h"
+#include "hosted/model/address_repository.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/host_limits.h"
+#include "hosted/model/server_phase.h"
 #include "http_json.h"
-#include "loggable.h"
-#include "server_config.h"
+#include "program/server_config.h"
 
 #include <base/io/cp1252.h>
 #include <net/novaworld/host_repository.h>
@@ -211,12 +214,29 @@ crow::json::wvalue offered_data_set_json(const OfferedDataSet &d) {
 // the start, stop and update replies) or, with `admin`, for the fleet view:
 // its owner (with its tier), its service account, its place in the fleet, its
 // pins and its listed players besides. Never its admin password.
-crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin) {
+crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin, const std::string &zone) {
 	crow::json::wvalue e;
 	e["id"] = s.id;
 	e["state"] = state_name(s.state);
 	e["live"] = is_live(s.state);
 	e["own_machine"] = s.own_machine;
+	// The static address it runs at (address_repository.h): {id, name,
+	// hostname (with the zone), public_ip, state}, or null.
+	const auto address = s.address_id ? find_address(db, *s.address_id) : std::nullopt;
+	if (address) {
+		crow::json::wvalue a;
+		a["id"] = address->id;
+		a["name"] = address->name;
+		if (zone.empty())
+			a["hostname"] = nullptr;
+		else
+			a["hostname"] = address_hostname(address->name, zone);
+		text_or_null(a, "public_ip", address->public_ip);
+		a["state"] = address_state_name(address->state);
+		e["address"] = std::move(a);
+	} else {
+		e["address"] = nullptr;
+	}
 	e["settings"] = settings_json(s.settings);
 	// Its data set and expansion rows (null once a row is gone), the names the
 	// site shows, the trees it is pinned to and whether newer data waits.
@@ -255,6 +275,7 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	text_or_null(e, "running_at", s.running_at);
 	text_or_null(e, "ended_at", s.ended_at);
 	put_listing(e, db, s, admin);
+	if (!admin) put_phase(e, db, s, billing::unix_now() * 1000, false);
 	if (admin) {
 		put_owner(e, db, s.owner_user_id);
 		put_account(e, "service_account", db, s.service_user_id);
@@ -279,14 +300,88 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		put_id(e, "base_tree_id", s.base_tree_id);
 		put_id(e, "expansion_tree_id", s.expansion_tree_id);
 		e["outdated"] = outdated;
+		// Its last minute of ticks as its slot's report carries it (its own
+		// container's, as put_phase reads it), null with none.
+		const auto report = is_live(s.state) ? slot_report_of(db, s.id) : std::nullopt;
+		if (report && report->container == s.container && report->tick) {
+			crow::json::wvalue t;
+			t["p99_ms"] = report->tick->p99_ms;
+			t["late"] = report->tick->late;
+			e["tick"] = std::move(t);
+		} else {
+			e["tick"] = nullptr;
+		}
 	}
 	return e;
 }
 
+void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, int64_t now_ms,
+		bool admin) {
+	PhaseInputs in;
+	in.state = s.state;
+	in.restarts = s.restarts;
+	in.admin = admin;
+	const std::vector<ServerStart> starts = list_starts(db, s.id, 1);
+	if (!starts.empty()) in.last_start = starts.front();
+	if (is_live(s.state)) {
+		const auto machine = s.machine_ref ? find_machine(db, *s.machine_ref) : std::nullopt;
+		if (machine) {
+			in.machine_state = machine->state;
+			in.address_wait = awaits_address(db, *machine);
+		}
+		in.machine_launching = machine_launching_for(db, s.id);
+		in.launches_held =
+				launch_not_before_ms(db, s.own_machine ? MachineKind::Own : MachineKind::Shared) > now_ms;
+		// Its own container's report, and its pinned trees as its machine holds them
+		// with their manifests' bytes.
+		const auto report = slot_report_of(db, s.id);
+		if (report && report->container == s.container) in.report = report;
+		for (const std::optional<int64_t> id : { s.base_tree_id, s.expansion_tree_id }) {
+			if (!id) continue;
+			if (const auto tree = find_tree(db, *id)) {
+				for (const TreeFile &f : tree->files) in.data_bytes_total += f.size;
+			}
+			if (!machine) continue;
+			for (const MachineTree &t : machine_trees(db, machine->id)) {
+				if (t.tree_id == *id) in.trees.push_back(t);
+			}
+		}
+	}
+	const ServerPhase phase = server_phase(in);
+	crow::json::wvalue p;
+	p["name"] = phase_text(phase.phase);
+	if (phase.phase == Phase::DownloadingData) {
+		p["bytes_done"] = phase.bytes_done;
+		p["bytes_total"] = phase.bytes_total;
+	}
+	if (phase.phase == Phase::Restarting) {
+		p["restart"] = phase.restart;
+		p["restart_limit"] = phase.restart_limit;
+		p["cause"] = start_cause_text(phase.restart_cause);
+	}
+	if (phase.phase == Phase::DataUnavailable && admin)
+		p["line"] = phase.line;
+	e["phase"] = std::move(p);
+	if (const auto why = stopped_because(s.state, in.last_start, admin)) {
+		crow::json::wvalue b;
+		b["cause"] = start_cause_text(why->cause);
+		if (why->exit_code)
+			b["exit_code"] = *why->exit_code;
+		else
+			b["exit_code"] = nullptr;
+		b["oom"] = why->oom;
+		b["line"] = why->line;
+		e["stopped_because"] = std::move(b);
+	} else {
+		e["stopped_because"] = nullptr;
+	}
+}
+
 void HostedRoutes::configure(const ServerConfig &config, const PlacementPolicy &fleet) {
 	provider_ = config.hosted_provider.empty() ? std::string("none") : config.hosted_provider;
-	// The program's boot has warned of what does not read (parts.h
-	// hosted_setup: hosting off, the provider "none", for every program alike).
+	// The program's boot has warned of what does not read
+	// (hosted/model/hosted_policy.h hosted_policy: hosting off, the provider
+	// "none", for every program alike).
 	hosting_on_ = provider_ != "none";
 	cap_ = config.hosted_cap;
 	fleet_ = fleet;
@@ -336,8 +431,17 @@ void HostedRoutes::register_routes(WebApp &app) {
 // (newer data than its pins, while live), update_requested, restarts,
 // failure_reason, created_at, updated_at, running_at, ended_at (UTC, null until
 // set), listing ({rid, server_name, mission_name, players, max_players,
-// host_ip, host_port} while listed, else null)}, without its events. 401 with
-// no live session.
+// host_ip, host_port} while listed, else null), phase ({name: queued,
+// restarting, moving, data_unavailable, launches_held, launching_machine,
+// waiting_for_slot, waiting_for_address, downloading_data, downloading_server,
+// starting_server, signing_in, running, stopping, stopped or failed; bytes_done
+// and bytes_total with downloading_data, restart, restart_limit and cause
+// (crash or timeout) with restarting}: where its start stands,
+// server_phase.h), stopped_because
+// ({cause: crash, timeout, fleet, stop, update, limits, no_data, link_lost or
+// data_unavailable, exit_code, oom, line: the server's own last line} for a
+// stopped or failed server, else null)}, without
+// its events. 401 with no live session.
 crow::response HostedRoutes::me_servers(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -370,7 +474,7 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 		out["data_sets"] = std::move(sets);
 		std::vector<crow::json::wvalue> servers;
 		for (const HostedServer &s : list_servers_of(*db_conn, owner, kEndedShown))
-			servers.push_back(server_json(*db_conn, s, false));
+			servers.push_back(server_json(*db_conn, s, false, address_zone_));
 		out["servers"] = std::move(servers);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/me/servers failed: %s\n", e.what());
@@ -394,7 +498,7 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 		db::ReadSnapshot snapshot(*db_conn);
 		const auto server = owned_server(*db_conn, path_id(id), access.user->id);
 		if (!server) return json_error(404, "not_found", "this account has no hosted server with this id");
-		crow::json::wvalue e = server_json(*db_conn, *server, false);
+		crow::json::wvalue e = server_json(*db_conn, *server, false, address_zone_);
 		std::vector<crow::json::wvalue> events;
 		for (const HostedEvent &ev : list_events(*db_conn, server->id, kEventsShown)) {
 			crow::json::wvalue j;
@@ -424,11 +528,14 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // "team_ff" (true/false), "missions" (a list of .bms names among the data set's
 // and the expansion's, the first the starting map; absent: every mission of
 // the base, then the expansion's), "own_machine" (true: on one of the machines
-// the account's own-machine add-on pays for; absent: false, a shared machine)},
-// each absent one its default. In order: require_user (401, 403 without the
+// the account's own-machine add-on pays for; absent: false, a shared machine),
+// "address_id" (with own_machine: one of the account's ready static addresses,
+// which its machine carries, so it lists at the same address on every start;
+// absent or null: none)}, each absent one its default. In order: require_user (401, 403 without the
 // CSRF header), 503 hosting_disabled when this service runs none (no driver,
 // or no data set with data), one token from the account's kStartStopPerUser
-// bucket (429), 400 invalid_json / invalid_field (a mistyped field), 400
+// bucket (429), 400 invalid_json / invalid_field (a mistyped field, or an
+// address_id without own_machine), 400
 // invalid_settings with the refused "field" (data_set_id, expansion_id,
 // missions among them) and why (hosted_settings.h check_settings), then the
 // request: 403 not_entitled for an account not active or with no hosting
@@ -438,7 +545,9 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // it pays for already runs one, 409 at_capacity when ONNET_HOSTED_CAP servers
 // are live or the fleet has no place for it (the supervisor's planner over the
 // machines and the servers waiting before it: every slot taken and the fleet at
-// its maximum machines); 202 {"server"} (state requested) once written. The
+// its maximum machines), 409 address_unavailable when the address is not the
+// account's, not ready, or another live server's; 202 {"server"} (state
+// requested) once written. The
 // supervisor takes it from there.
 crow::response HostedRoutes::me_start(const crow::request &req) {
 	auto access = access_.require_user(req);
@@ -489,7 +598,12 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 				settings.expansion_id ? find_offered_expansion(*base, *settings.expansion_id) : nullptr);
 	}
 	const bool own_machine = body->flag("own_machine").value_or(false);
+	// The static address it runs at: an own-machine server's alone.
+	std::optional<int64_t> address_id;
+	if (!body->null("address_id")) address_id = body->integer("address_id");
 	if (body->wrong_type()) return json_error(400, "invalid_field");
+	if (address_id && !own_machine)
+		return json_error(400, "invalid_field", "address_id needs own_machine (a static address is an own machine's)");
 	if (const auto refused = check_settings(settings, offered)) {
 		crow::json::wvalue out;
 		out["error"] = "invalid_settings";
@@ -501,7 +615,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		const RequestResult result = request_server(
-				*db_conn, user.id, settings, offered, cap_, billing::unix_now(), own_machine, &fleet_);
+				*db_conn, user.id, settings, offered, cap_, billing::unix_now(), own_machine, &fleet_, address_id);
 		switch (result.outcome) {
 			case RequestOutcome::Created:
 				log_owner(user, "start",
@@ -538,6 +652,10 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 			case RequestOutcome::AtCapacity:
 				log_owner(user, "start", "at_capacity");
 				return json_error(409, "at_capacity", "every hosted server place is taken; try again later");
+			case RequestOutcome::AddressUnavailable:
+				log_owner(user, "start", "address_unavailable");
+				return json_error(409, "address_unavailable",
+						"that static address is not ready, or another of your servers runs at it");
 		}
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/me/servers failed: %s\n", e.what());

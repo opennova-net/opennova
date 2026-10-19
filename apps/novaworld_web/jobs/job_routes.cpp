@@ -1,7 +1,7 @@
 #include "job_routes.h"
 
+#include "core/loggable.h"
 #include "http_json.h"
-#include "loggable.h"
 #include "jobs/maintenance_jobs.h"
 
 #include <base/io/strutil.h>
@@ -175,9 +175,9 @@ const PeriodicJob *JobRoutes::schedule_of(const std::string &kind) const {
 // `lease_left_seconds` (the least left of its others, null with none),
 // `done`, `failed`, `last_active_at`), "schedules" (each periodic kind:
 // `kind`, `interval_seconds`, `at_start`, `conditional`, `last` and
-// `last_finished` (jobs or null), `next_at`, `pending`), "controller"
-// (`leader`, `elected_at`, `last_scheduled_at`, each null for none)}. One
-// snapshot; no-store.
+// `last_finished` (jobs or null), `next_at`, `pending`), "last_scheduled_at"
+// (the newest job a schedule enqueued, null for none), "fleet" (`leader`,
+// `elected_at`, each null before an election)}. One snapshot; no-store.
 crow::response JobRoutes::overview_route(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -241,11 +241,11 @@ crow::response JobRoutes::overview_route(const crow::request &req) {
 			scheduled.push_back(std::move(e));
 		}
 		out["schedules"] = std::move(scheduled);
-		crow::json::wvalue controller;
-		text_or_null(controller, "leader", o.leader);
-		text_or_null(controller, "elected_at", o.elected_at);
-		text_or_null(controller, "last_scheduled_at", o.last_scheduled_at);
-		out["controller"] = std::move(controller);
+		text_or_null(out, "last_scheduled_at", o.last_scheduled_at);
+		crow::json::wvalue fleet;
+		text_or_null(fleet, "leader", o.leader);
+		text_or_null(fleet, "elected_at", o.elected_at);
+		out["fleet"] = std::move(fleet);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/admin/jobs/overview failed: %s\n", e.what());
 		return json_error(500, "db_error");

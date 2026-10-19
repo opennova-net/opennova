@@ -1,21 +1,22 @@
-# Base compose for the OpenNova NovaWorld service's five programs, each its own
+# Base compose for the OpenNova NovaWorld service's six programs, each its own
 # image (one Dockerfile, a runtime target per program), plus the web portal:
 #   novaworld-gate        the gate (UDP 7597; the hosts' status blobs land there)
 #   novaworld-lobby       a lobby instance (UDP 64206)
 #   novaworld-web         the HTTP routes (8080: the retail NW*.dll and .gsb
 #                         routes, the website's API behind the portal)
-#   novaworld-controller  the fleet's reconcile pass, the jobs' scheduling, the
-#                         machines' internal listener (8070, the leader alone)
-#   novaworld-worker      the background jobs (the fleet's machine driver calls
-#                         among them)
+#   novaworld-fleet       the fleet's reconcile pass, the machines' internal
+#                         listener (8070, the leader alone)
+#   novaworld-worker      the background jobs and their schedules (the fleet's
+#                         machine driver calls among them)
+#   novaworld-data        the data sets' jobs over the store and their prune
 #   portal                the website (web/): nginx in its image
 # Every program answers GET /livez on ONNET_HEALTH_PORT (8081), web on its HTTP
 # port as well. No program keeps state of its own: the database is
 # PostgreSQL, named by DATABASE_URL (a libpq URI) with DATABASE_PASSWORD beside
 # it, web's ephemeral state Valkey (ONNET_REDIS_URL, with ONNET_REDIS_PASSWORD
 # beside it), and the hosted servers' game data the object store (a deployment's
-# S3; here the `store` volume, a directory web and the worker share: the data
-# sets' trees and the update packages the site's Game data page uploads). The
+# S3; here the `store` volume, a directory web and the data program share: the
+# data sets' trees and the update packages the site's Game data page uploads). The
 # dev overlay (docker-compose.dev.yml) makes
 # this the local stack: a local PostgreSQL and Valkey, the published ports and
 # the dev environment; the hosting overlay (docker-compose.hosting.yml) adds the
@@ -63,10 +64,8 @@ x-novaworld-env: &novaworld-env
   ONNET_HTTP_PORT: ${ONNET_HTTP_PORT:-}
   ONNET_HEALTH_PORT: ${ONNET_HEALTH_PORT:-}
   # Web's address as the gate and the lobby announce it (the startup URL, the
-  # web domain, HOST_URL, GSB_SERVER), and the controller's internal listener
-  # as the machines' hostd and the other programs reach it.
+  # web domain, HOST_URL, GSB_SERVER).
   ONNET_WEB_HOST: ${ONNET_WEB_HOST:-}
-  ONNET_INTERNAL_URL: ${ONNET_INTERNAL_URL:-}
   # The database (apps/novaworld_common/README.md "Database"): the libpq
   # URI, the role's password kept apart from it (a secret; the URI is
   # not), and the most connections a program opens.
@@ -92,19 +91,26 @@ x-novaworld-env: &novaworld-env
   ONNET_MAIL_REGION: ${ONNET_MAIL_REGION:-}
   # Hosted game servers: unset, hosting is off. The hosting overlay turns it on
   # with the docker driver (the local stack's machines); a deployment's web,
-  # controller and worker get the ec2 driver's settings from their task
-  # definitions (infra/aws/fleet.tf).
+  # fleet and worker get the fleet's policy from their task definitions, and
+  # the worker alone the ec2 driver's own settings (infra/aws/fleet.tf).
   ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
   ONNET_HOSTED_CAP: ${ONNET_HOSTED_CAP:-}
-  # The game data's store (apps/novaworld_common/object_store.h; ADR 0064):
+  # The game data's store (apps/novaworld_common/core/object_store.h; ADR 0064):
   # the data sets' trees and the update packages, which the site's Game data
   # page fills; hosting is on only with one. A deployment names its bucket in
   # S3 (s3://<bucket>/data, with the region); this stack a directory, the
   # store volume below, shared by web (the page's uploads, which it puts there
-  # part by part) and the worker (the trees it builds); the controller only
+  # part by part) and the data program (the trees it builds); the fleet only
   # builds URLs under it and mounts nothing.
   ONNET_OBJECT_STORE_URL: ${ONNET_OBJECT_STORE_URL:-file:///var/lib/opennova/store}
   ONNET_OBJECT_STORE_REGION: ${ONNET_OBJECT_STORE_REGION:-}
+  # The logs' store (apps/novaworld_common/core/program_log.h): a deployment's
+  # CloudWatch groups (cloudwatch:/opennova/<deployment>); this stack the logs
+  # volume below, where every program copies each line it writes
+  # (programs/<program>/<container id>.log) and the hosting overlay's machines
+  # write theirs and their servers' (machines/, servers/), which web reads for
+  # the admin's log view.
+  ONNET_LOG_STORE: ${ONNET_LOG_STORE:-file:///var/log/opennova}
   # Billing, the monthly support tiers over Stripe: on only when the set is
   # complete and well-formed, else a boot warning and billing off. The key
   # and the webhook secret are secrets (the vault's stripe-test or
@@ -117,6 +123,7 @@ x-novaworld-env: &novaworld-env
   STRIPE_PRICE_TIER2: ${STRIPE_PRICE_TIER2:-}
   STRIPE_PRICE_TIER3: ${STRIPE_PRICE_TIER3:-}
   STRIPE_PRICE_OWN_MACHINE: ${STRIPE_PRICE_OWN_MACHINE:-}
+  STRIPE_PRICE_STATIC_ADDRESS: ${STRIPE_PRICE_STATIC_ADDRESS:-}
   ONNET_SITE_URL: ${ONNET_SITE_URL:-}
   ONNET_STRIPE_CURL: ${ONNET_STRIPE_CURL:-}
   ONNET_BILLING_AUTOMATIC_TAX: ${ONNET_BILLING_AUTOMATIC_TAX:-}
@@ -134,6 +141,8 @@ services:
       # The lobby the gate hands a client while no lobby instance is live
       # (host:port; unset, none).
       ONNET_LOBBY_ENDPOINT: ${ONNET_GATE_FALLBACK_LOBBY:-}
+    volumes:
+      - logs:/var/log/opennova
 
   novaworld-lobby:
     <<: *novaworld
@@ -147,6 +156,8 @@ services:
       # announces alike (on ECS the load balancer's: the gate's address and the
       # lobby port).
       ONNET_LOBBY_ENDPOINT: ${ONNET_LOBBY_ENDPOINT:-}
+    volumes:
+      - logs:/var/log/opennova
 
   novaworld-web:
     <<: *novaworld
@@ -170,18 +181,22 @@ services:
       ONNET_UPDATE_PORTS: ${ONNET_UPDATE_PORTS:-}
     volumes:
       - store:/var/lib/opennova/store
+      # Every program's and machine's log, its own copy among them.
+      - logs:/var/log/opennova
 
-  novaworld-controller:
+  novaworld-fleet:
     <<: *novaworld
-    image: ${CONTROLLER_IMAGE:-opennova-novaworld-controller:local}
+    image: ${FLEET_IMAGE:-opennova-novaworld-fleet:local}
     build:
       <<: *novaworld-build
-      target: controller
+      target: fleet
     environment:
       <<: *novaworld-env
       # Where the internal listener binds (<IPv4>:<port>; unset: the ECS
       # task's private address, else 127.0.0.1:8070).
       ONNET_INTERNAL_HTTP_BIND: ${ONNET_INTERNAL_HTTP_BIND:-}
+    volumes:
+      - logs:/var/log/opennova
 
   novaworld-worker:
     <<: *novaworld
@@ -193,8 +208,23 @@ services:
       <<: *novaworld-env
       # Job threads (unset: 4; at most DATABASE_POOL_MAX less 2).
       ONNET_WORKER_THREADS: ${ONNET_WORKER_THREADS:-}
+      # The fleet's internal listener as the machines' hostd reach it: what the
+      # machine driver hands each machine it launches.
+      ONNET_INTERNAL_URL: ${ONNET_INTERNAL_URL:-}
+    volumes:
+      - logs:/var/log/opennova
+
+  novaworld-data:
+    <<: *novaworld
+    image: ${DATA_IMAGE:-opennova-novaworld-data:local}
+    build:
+      <<: *novaworld-build
+      target: data
+    environment:
+      <<: *novaworld-env
     volumes:
       - store:/var/lib/opennova/store
+      - logs:/var/log/opennova
 
   # The website: the portal's nginx image (web/Dockerfile), which serves the
   # built site and proxies /api/ to web's server on 127.0.0.1:8080, and on 8082
@@ -221,3 +251,6 @@ volumes:
   # The local game data store (ONNET_OBJECT_STORE_URL above): the trees and
   # packages the Game data page uploads; `down -v` wipes it.
   store:
+  # The local log store (ONNET_LOG_STORE above): each program's lines and the
+  # hosting overlay's machines' and servers'; `down -v` wipes it.
+  logs:

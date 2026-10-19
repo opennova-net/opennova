@@ -42,17 +42,17 @@ inline constexpr int kPoolAcquireTimeoutMs = 30000;
 // for its transaction, so two servers booting on one database promote one
 // first admin. hosted::request_server holds the hosted-start lock from its
 // first read to its commit: the global cap and the fleet's room are every
-// account's, so one start at a time counts them. The controller's election
-// holds the controller lock on a connection of its own for as long as it leads
-// (a SessionLock, apps/novaworld_controller/controller.h). A job's claim
+// account's, so one start at a time counts them. The fleet program's election
+// holds the fleet lock on a connection of its own for as long as it leads (a
+// SessionLock, apps/novaworld_fleet/election.h). A job's claim
 // holds the claim lock for its transaction (apps/novaworld_common/jobs/
 // job_queue.h), so claims serialize with one another alone. An account name's
-// writer (auth.cpp) takes, for each username or handle it checks or writes, the
+// writer (accounts/auth.cpp) takes, for each username or handle it checks or writes, the
 // two-key lock (kAccountNameLockSpace, hashtext(lower(name))); the two-key
 // locks are a key space of their own, apart from the one-key ones.
 inline constexpr int64_t kMigrationLock = 0x4f4e4e57'00000002; // "ONNW" 2
 inline constexpr int64_t kHostedStartLock = 0x4f4e4e57'00000003; // "ONNW" 3
-inline constexpr int64_t kControllerLock = 0x4f4e4e57'00000004; // "ONNW" 4
+inline constexpr int64_t kFleetLock = 0x4f4e4e57'00000004; // "ONNW" 4
 inline constexpr int64_t kJobsClaimLock = 0x4f4e4e57'00000005; // "ONNW" 5
 inline constexpr int32_t kAccountNameLockSpace = 0x4f4e4e57; // "ONNW"
 

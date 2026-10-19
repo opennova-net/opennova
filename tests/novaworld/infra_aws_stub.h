@@ -110,6 +110,9 @@ inline std::string key_of(const std::string &config) {
 		std::string key = service + " " + name;
 		if (name == "ListTasks")
 			key += data.find("\"STOPPED\"") != std::string::npos ? " STOPPED" : " RUNNING";
+		// The fleet cluster's calls (hostd's daemon, the container instances).
+		if (data.find("\"cluster\":\"opennova-prod-fleet\"") != std::string::npos)
+			key += " fleet";
 		return key;
 	}
 	const size_t action = data.find("Action=");
@@ -172,7 +175,7 @@ private:
 // ---- a deployment mid-deploy -----------------------------------------------------------
 //
 // Release 20261017T120000Z-abc1234 runs every program at revision 7 (gate,
-// lobby), 42 (web) or 5 (controller, worker). Web is rolling out revision 43:
+// lobby), 42 (web), 5 (fleet, worker) or 2 (data). Web is rolling out revision 43:
 // its new task is still starting beside the old one, and an earlier task of
 // it stopped (its container exited 1). The nightly backup runs as a one-off
 // task. The balancer: the gate, the lobby and the retail port healthy, 443 with
@@ -208,14 +211,19 @@ constexpr const char *kServices = R"json({"services":[
    "desiredCount":1,"pendingCount":0,"runningCount":1,"failedTasks":0,"createdAt":1792233600,"updatedAt":1792233900,"rolloutState":"COMPLETED"}],
  "events":[{"id":"w2","createdAt":1792238460,"message":"(service web) has started 1 tasks: (task 3333cccc)."},
    {"id":"w1","createdAt":1792238430,"message":"(service web) has stopped 1 running tasks: (task 9999ffff)."}]},
-{"serviceName":"controller","status":"ACTIVE","desiredCount":1,"runningCount":1,"pendingCount":0,
- "taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:5",
- "deployments":[{"id":"ecs-svc/5","status":"PRIMARY","taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:5",
+{"serviceName":"fleet","status":"ACTIVE","desiredCount":1,"runningCount":1,"pendingCount":0,
+ "taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:5",
+ "deployments":[{"id":"ecs-svc/5","status":"PRIMARY","taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:5",
    "desiredCount":1,"pendingCount":0,"runningCount":1,"failedTasks":0,"createdAt":1792233600,"updatedAt":1792233900,"rolloutState":"COMPLETED"}],
  "events":[]},
 {"serviceName":"worker","status":"ACTIVE","desiredCount":1,"runningCount":1,"pendingCount":0,
  "taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:5",
  "deployments":[{"id":"ecs-svc/6","status":"PRIMARY","taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:5",
+   "desiredCount":1,"pendingCount":0,"runningCount":1,"failedTasks":0,"createdAt":1792233600,"updatedAt":1792233900,"rolloutState":"COMPLETED"}],
+ "events":[]},
+{"serviceName":"data","status":"ACTIVE","desiredCount":1,"runningCount":1,"pendingCount":0,
+ "taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:2",
+ "deployments":[{"id":"ecs-svc/7","status":"PRIMARY","taskDefinition":"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:2",
    "desiredCount":1,"pendingCount":0,"runningCount":1,"failedTasks":0,"createdAt":1792233600,"updatedAt":1792233900,"rolloutState":"COMPLETED"}],
  "events":[]}
 ],"failures":[]})json";
@@ -274,7 +282,7 @@ inline std::string described_tasks() {
 		   R"("attachments":[{"type":"ElasticNetworkInterface","status":"ATTACHED","details":[{"name":"privateIPv4Address","value":"10.40.1.13"}]}],)"
 		   R"("containers":[{"name":"web","image":"ghcr.io/opennova-net/opennova-novaworld-web@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210","lastStatus":"PENDING","healthStatus":"UNKNOWN"},)"
 		   R"({"name":"portal","image":"ghcr.io/opennova-net/novaworld-web@sha256:aaaa","lastStatus":"PENDING","healthStatus":"UNKNOWN"}]},)";
-	out += task_json("5555eeee5555eeee5555eeee5555eeee", "controller", "5", "1792233630",
+	out += task_json("5555eeee5555eeee5555eeee5555eeee", "fleet", "5", "1792233630",
 				   "us-east-1b", "10.40.1.15", "HEALTHY") +
 			",";
 	out += task_json("6666ffff6666ffff6666ffff6666ffff", "worker", "5", "1792233640", "us-east-1a",
@@ -298,13 +306,14 @@ inline std::string described_tasks() {
 constexpr const char *kRelease =
 		R"({"Parameter":{"Name":"/opennova/prod/release","Type":"String","Version":12,"LastModifiedDate":1792233950.1,)"
 		R"("Value":"{\"id\":\"20261017T120000Z-abc1234\",\"deployment\":\"prod\",\"created\":\"2026-10-17T12:00:00Z\",)"
-		R"(\"revision\":\"abc1234def56\",\"dirty\":false,\"previous\":\"20261016T090000Z-0f0f0f0\",\"programs\":[\"gate\",\"lobby\",\"web\",\"controller\",\"worker\"],)"
+		R"(\"revision\":\"abc1234def56\",\"dirty\":false,\"previous\":\"20261016T090000Z-0f0f0f0\",\"programs\":[\"gate\",\"lobby\",\"web\",\"fleet\",\"worker\",\"data\"],)"
 		R"(\"images\":{\"gate\":\"ghcr.io/opennova-net/opennova-novaworld-gate@sha256:0123\"},)"
 		R"(\"task_definitions\":{\"gate\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-gate:7\",)"
 		R"(\"lobby\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-lobby:7\",)"
 		R"(\"web\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:42\",)"
-		R"(\"controller\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:5\",)"
+		R"(\"fleet\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-fleet:5\",)"
 		R"(\"worker\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:5\",)"
+		R"(\"data\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:2\",)"
 		R"(\"backup\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-backup:3\"}}"}})";
 
 // A DescribeTargetHealth reply of `members` (each a <member>...</member>).
@@ -416,6 +425,33 @@ constexpr const char *kMachines = R"(<?xml version="1.0" encoding="UTF-8"?>
     </reservationSet>
 </DescribeInstancesResponse>)";
 
+// The fleet cluster: hostd's daemon service, and two machines registered there.
+constexpr const char *kFleetServices = R"({"services": [{
+  "serviceName": "hostd", "status": "ACTIVE", "desiredCount": 2, "runningCount": 2,
+  "pendingCount": 0, "schedulingStrategy": "DAEMON",
+  "taskDefinition": "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-hostd:5",
+  "deployments": [{"id": "ecs-svc/2", "status": "PRIMARY", "rolloutState": "COMPLETED",
+    "taskDefinition": "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-hostd:5",
+    "desiredCount": 2, "runningCount": 2, "pendingCount": 0, "failedTasks": 0,
+    "createdAt": 1792231200.0, "updatedAt": 1792231500.0}],
+  "events": []}], "failures": []})";
+constexpr const char *kContainerInstanceArns = R"({"containerInstanceArns": [
+  "arn:aws:ecs:us-east-1:123456789012:container-instance/opennova-prod-fleet/aaaa1111",
+  "arn:aws:ecs:us-east-1:123456789012:container-instance/opennova-prod-fleet/bbbb2222"]})";
+constexpr const char *kContainerInstances = R"({"containerInstances": [
+  {"containerInstanceArn": "arn:aws:ecs:us-east-1:123456789012:container-instance/opennova-prod-fleet/aaaa1111",
+   "ec2InstanceId": "i-0aaaaaaaaaaaaaaa1", "status": "ACTIVE", "agentConnected": true,
+   "runningTasksCount": 1, "pendingTasksCount": 0,
+   "versionInfo": {"agentVersion": "1.98.0", "dockerVersion": "DockerVersion: 25.0.8"},
+   "attributes": [{"name": "ecs.ami-id", "value": "ami-0123456789abcdef0"},
+     {"name": "machine-id", "value": "12"}, {"name": "kind", "value": "shared"},
+     {"name": "ecs.instance-type", "value": "t3a.medium"}]},
+  {"containerInstanceArn": "arn:aws:ecs:us-east-1:123456789012:container-instance/opennova-prod-fleet/bbbb2222",
+   "ec2InstanceId": "i-0bbbbbbbbbbbbbbb2", "status": "DRAINING", "agentConnected": false,
+   "runningTasksCount": 0, "pendingTasksCount": 1,
+   "attributes": [{"name": "machine-id", "value": "13"}]}],
+  "failures": []})";
+
 // The calls of a read of the deployment above and their replies.
 inline std::map<std::string, CommandResult> deployment_replies() {
 	std::map<std::string, CommandResult> r;
@@ -441,6 +477,9 @@ inline std::map<std::string, CommandResult> deployment_replies() {
 	r["rds DescribeDBInstances"] = answer(200, kDatabase);
 	r["elasticache DescribeReplicationGroups"] = answer(200, kCache);
 	r["ec2 DescribeInstances"] = answer(200, kMachines);
+	r["ecs DescribeServices fleet"] = answer(200, kFleetServices);
+	r["ecs ListContainerInstances fleet"] = answer(200, kContainerInstanceArns);
+	r["ecs DescribeContainerInstances fleet"] = answer(200, kContainerInstances);
 	return r;
 }
 

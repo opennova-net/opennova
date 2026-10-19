@@ -34,7 +34,7 @@ bool subscription_grants(const SubscriptionRow &row, int64_t now) {
 	if (!status_grants(row.status)) return false;
 	if (row.item == ItemKind::Tier) {
 		if (row.tier < 1 || row.tier > kTierCount) return false;
-	} else if (row.item != ItemKind::OwnMachine) {
+	} else if (row.item != ItemKind::OwnMachine && row.item != ItemKind::StaticAddress) {
 		return false;
 	}
 	return row.current_period_end && now < *row.current_period_end + kPeriodNetSeconds;
@@ -44,6 +44,8 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 		int64_t now) {
 	Entitlement e;
 	e.comp_servers = std::clamp(account.comp_servers, 0, kMaxCompServers);
+	e.comp_own_machines = std::clamp(account.comp_own_machines, 0, kMaxCompOwnMachines);
+	e.comp_addresses = std::max(account.comp_addresses, 0);
 	if (const SubscriptionRow *shown = shown_tier(subscriptions, now)) {
 		e.status = shown->status;
 		e.current_period_end = shown->current_period_end;
@@ -52,14 +54,17 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 	if (account.kind != "player" || account.account_status != "active") return e;
 
 	int64_t own_quantity = 0;
+	int64_t address_quantity = 0;
 	bool past_due = false;
 	for (const SubscriptionRow &s : subscriptions) {
 		if (!subscription_grants(s, now)) continue;
 		past_due = past_due || s.status == "past_due";
 		if (s.item == ItemKind::Tier)
 			e.tier = std::max(e.tier, s.tier);
-		else
+		else if (s.item == ItemKind::OwnMachine)
 			own_quantity += std::max<int64_t>(s.quantity, 0);
+		else
+			address_quantity += std::max<int64_t>(s.quantity, 0);
 	}
 	const int tier_servers = kTierServers[e.tier];
 	e.max_servers = std::max(e.comp_servers, tier_servers);
@@ -68,20 +73,26 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 	else if (e.comp_servers > 0)
 		e.source = "comp";
 	// The add-on moves one of the tier's servers onto a machine of its own: no
-	// tier, nothing to move.
+	// tier, nothing to move. An admin's own machines move any of its servers.
 	e.own_machines = e.tier > 0 ? static_cast<int>(std::min<int64_t>(own_quantity, int64_t{ 1 } << 16)) : 0;
+	if (e.max_servers > 0) e.own_machines += e.comp_own_machines;
+	// An address is its own machine's: one past them is held, and used by none.
+	e.address_grants = static_cast<int>(std::min<int64_t>(address_quantity + e.comp_addresses, int64_t{ 1 } << 16));
+	e.static_addresses = std::min(e.address_grants, e.own_machines);
 	e.can_start = e.max_servers > 0 && !past_due;
 	return e;
 }
 
 Entitlement entitlement_of(db::Database &db, int64_t user_id, int64_t now) {
-	const auto rows = db.query("SELECT kind, account_status, comp_servers FROM players WHERE id = $1;",
-			{ db::BindValue(user_id) });
+	const auto rows = db.query("SELECT kind, account_status FROM players WHERE id = $1;", { db::BindValue(user_id) });
 	if (rows.empty()) return Entitlement{};
 	AccountFacts account;
 	account.kind = rows.front().as_text(0).value_or("");
 	account.account_status = rows.front().as_text(1).value_or("");
-	account.comp_servers = static_cast<int>(rows.front().as_int(2).value_or(0));
+	const CompGrants grants = comp_grants_of(db, user_id);
+	account.comp_servers = grants.servers;
+	account.comp_own_machines = grants.own_machines;
+	account.comp_addresses = comp_addresses_of(db, user_id);
 	return entitlement_from(account, subscriptions_of(db, user_id), now);
 }
 

@@ -5,6 +5,7 @@
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
+#include <algorithm>
 #include <array>
 #include <utility>
 
@@ -135,6 +136,7 @@ const char *item_kind_name(ItemKind kind) {
 	switch (kind) {
 		case ItemKind::Tier: return "tier";
 		case ItemKind::OwnMachine: return "own_machine";
+		case ItemKind::StaticAddress: return "static_address";
 		case ItemKind::Unknown: break;
 	}
 	return "unknown";
@@ -143,6 +145,7 @@ const char *item_kind_name(ItemKind kind) {
 ItemKind item_kind_from_name(std::string_view name) {
 	if (name == "tier") return ItemKind::Tier;
 	if (name == "own_machine") return ItemKind::OwnMachine;
+	if (name == "static_address") return ItemKind::StaticAddress;
 	return ItemKind::Unknown;
 }
 
@@ -289,6 +292,147 @@ bool has_granting_subscription(db::Database &db, int64_t user_id, int64_t now) {
 		if (subscription_grants(row, now)) return true;
 	}
 	return false;
+}
+
+namespace {
+
+// A comp_grants row into `grants`.
+void take_grant(CompGrants &grants, const std::string &item, int64_t quantity) {
+	const int n = static_cast<int>(std::clamp<int64_t>(quantity, 0, 1 << 16));
+	if (item == "servers")
+		grants.servers = n;
+	else if (item == "own_machine")
+		grants.own_machines = n;
+}
+
+} // namespace
+
+CompGrants comp_grants_of(db::Database &db, int64_t user_id) {
+	CompGrants out;
+	for (const auto &r : db.query("SELECT item, quantity FROM comp_grants WHERE user_id = $1;", { BindValue(user_id) }))
+		take_grant(out, r.as_text(0).value_or(""), r.as_int(1).value_or(0));
+	return out;
+}
+
+std::map<int64_t, CompGrants> comp_grants_by_account(db::Database &db) {
+	std::map<int64_t, CompGrants> out;
+	for (const auto &r : db.query("SELECT user_id, item, quantity FROM comp_grants;"))
+		take_grant(out[r.as_int(0).value_or(0)], r.as_text(1).value_or(""), r.as_int(2).value_or(0));
+	return out;
+}
+
+bool set_comp_grants(db::Database &db, int64_t user_id, const CompGrants &grants) {
+	db::Transaction tx(db);
+	if (db.query("SELECT 1 FROM players WHERE id = $1 AND kind = 'player' FOR UPDATE;", { BindValue(user_id) }).empty())
+		return false;
+	const auto put = [&](const char *item, int quantity) {
+		if (quantity <= 0) {
+			db.exec("DELETE FROM comp_grants WHERE user_id = $1 AND item = $2;",
+					{ BindValue(user_id), BindValue(std::string(item)) });
+			return;
+		}
+		db.exec("INSERT INTO comp_grants (user_id, item, quantity) VALUES ($1, $2, $3) "
+				"ON CONFLICT (user_id, item) DO UPDATE SET quantity = excluded.quantity, updated_at = now();",
+				{ BindValue(user_id), BindValue(std::string(item)), BindValue(static_cast<int64_t>(quantity)) });
+	};
+	put("servers", grants.servers);
+	put("own_machine", grants.own_machines);
+	tx.commit();
+	return true;
+}
+
+namespace {
+
+constexpr const char *kCompAddressesSql =
+		"FROM hosted_addresses WHERE source = 'comp' AND state IN ('allocating', 'ready')";
+
+} // namespace
+
+int comp_addresses_of(db::Database &db, int64_t user_id) {
+	return static_cast<int>(
+			count_of(db.query(std::string("SELECT COUNT(*) ") + kCompAddressesSql + " AND owner_user_id = $1;",
+					{ BindValue(user_id) })));
+}
+
+std::map<int64_t, int> comp_addresses_by_account(db::Database &db) {
+	std::map<int64_t, int> out;
+	for (const auto &r : db.query(std::string("SELECT owner_user_id, COUNT(*) ") + kCompAddressesSql +
+				 " AND owner_user_id IS NOT NULL GROUP BY owner_user_id;"))
+		out[r.as_int(0).value_or(0)] = static_cast<int>(r.as_int(1).value_or(0));
+	return out;
+}
+
+namespace {
+
+constexpr const char *kReservationColumns = "id, user_id, item, tier, checkout_session";
+
+std::vector<CheckoutReservation> query_reservations(
+		db::Database &db, const std::string &tail, const std::vector<BindValue> &binds) {
+	std::vector<CheckoutReservation> out;
+	for (const auto &r : db.query(std::string("SELECT ") + kReservationColumns +
+					 " FROM billing_checkout_reservations WHERE expires_at > now() " + tail,
+				 binds)) {
+		CheckoutReservation c;
+		c.id = r.as_int(0).value_or(0);
+		c.user_id = r.as_int(1).value_or(0);
+		c.item = item_kind_from_name(r.as_text(2).value_or(""));
+		c.tier = static_cast<int>(r.as_int(3).value_or(0));
+		c.checkout_session = r.as_text(4).value_or("");
+		out.push_back(std::move(c));
+	}
+	return out;
+}
+
+} // namespace
+
+int64_t reserve_checkout(db::Database &db, int64_t user_id, ItemKind item, int tier, int64_t life_s) {
+	db.exec("DELETE FROM billing_checkout_reservations WHERE expires_at <= now();");
+	const auto rows = db.query("INSERT INTO billing_checkout_reservations (user_id, item, tier, expires_at) "
+							   "VALUES ($1, $2, $3, now() + make_interval(secs => $4)) RETURNING id;",
+			{ BindValue(user_id), BindValue(std::string(item_kind_name(item))), BindValue(static_cast<int64_t>(tier)),
+					BindValue(life_s) });
+	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+}
+
+void stamp_reservation(db::Database &db, int64_t id, const std::string &checkout_session) {
+	db.exec("UPDATE billing_checkout_reservations SET checkout_session = $1 WHERE id = $2;",
+			{ BindValue(checkout_session), BindValue(id) });
+}
+
+void drop_reservation(db::Database &db, int64_t id, int64_t user_id) {
+	db.exec("DELETE FROM billing_checkout_reservations WHERE id = $1 AND user_id = $2;",
+			{ BindValue(id), BindValue(user_id) });
+}
+
+size_t drop_session_reservation(db::Database &db, const std::string &checkout_session) {
+	if (checkout_session.empty()) return 0;
+	db.exec("DELETE FROM billing_checkout_reservations WHERE checkout_session = $1;", { BindValue(checkout_session) });
+	return static_cast<size_t>(db.changes());
+}
+
+std::map<int64_t, std::vector<CheckoutReservation>> live_reservations_by_account(db::Database &db) {
+	std::map<int64_t, std::vector<CheckoutReservation>> out;
+	for (CheckoutReservation &r : query_reservations(db, "ORDER BY id;", {})) {
+		const int64_t user = r.user_id;
+		out[user].push_back(std::move(r));
+	}
+	return out;
+}
+
+std::vector<CheckoutReservation> live_reservations_of(db::Database &db, int64_t user_id) {
+	return query_reservations(db, "AND user_id = $1 ORDER BY id;", { BindValue(user_id) });
+}
+
+SubscriptionRow reservation_row(const CheckoutReservation &reservation, int64_t now) {
+	SubscriptionRow row;
+	row.stripe_subscription_id = "reservation-" + std::to_string(reservation.id);
+	row.user_id = reservation.user_id;
+	row.status = "active";
+	row.item = reservation.item;
+	row.tier = reservation.item == ItemKind::Tier ? reservation.tier : 0;
+	row.quantity = 1;
+	row.current_period_end = now + 24 * 60 * 60;
+	return row;
 }
 
 } // namespace opennova::novaworld_server::billing

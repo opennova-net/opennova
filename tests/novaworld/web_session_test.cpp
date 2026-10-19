@@ -1,5 +1,5 @@
 // The NovaWorld site's login-session store (apps/novaworld_common/
-// web_session.*) and account roles (auth.*: bootstrap_admin, the role column,
+// accounts/web_session.*) and account roles (accounts/auth.*: bootstrap_admin, the role column,
 // update_user's session revocation) over a migrated database: the
 // token minted and kept only as its SHA-256, the per-account session cap, a
 // live session's user, the refusals (malformed, unknown, expired, an inactive
@@ -10,12 +10,12 @@
 // one-shot bootstrap promotion, the unknown-username bcrypt run, and what a
 // deleted or revoked account leaves of the servers it listed and joined.
 // Crow-free (the
-// sources compile straight in, as db_concurrency_test does with auth.cpp), so
+// sources compile straight in, as db_concurrency_test does with accounts/auth.cpp), so
 // it runs on every build; the HTTP route harness drives the same store through
 // the cookie.
 
-#include "auth.h"
-#include "web_session.h"
+#include "accounts/auth.h"
+#include "accounts/web_session.h"
 
 #include <base/io/sha256.h>
 #include <net/novaworld/db/database.h>

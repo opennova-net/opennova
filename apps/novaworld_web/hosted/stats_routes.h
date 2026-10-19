@@ -15,10 +15,10 @@
 // Every reply is an error code with our own message, never database text.
 // Service policy, not a port.
 
-#include "hosted/admin_link.h"
-#include "hosted/hosted_repository.h"
+#include "hosted/model/admin_link_status.h"
+#include "hosted/model/hosted_repository.h"
+#include "hosted/model/stats_repository.h"
 #include "rate_limiter.h"
-#include "hosted/stats_repository.h"
 #include "web_access.h"
 
 #include <net/novaworld/db/database.h>

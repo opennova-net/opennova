@@ -11,9 +11,9 @@
 // hosted_local_e2e_test and nw_programs_e2e_test start real opennova-serve
 // children over.
 
-#include "hosted/data_set_files.h"
-#include "hosted/data_set_repository.h"
-#include "local_object_store.h"
+#include "core/local_object_store.h"
+#include "data_sets/data_set_files.h"
+#include "data_sets/data_set_repository.h"
 #include "serve/serve_test_support.h"
 
 #include <base/io/file_io.h>

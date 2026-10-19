@@ -2,19 +2,28 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "SessionChannels",
+      "Sid": "Unscoped",
       "Effect": "Allow",
       "Action": [
-        "ssm:UpdateInstanceInformation",
         "ssmmessages:CreateControlChannel",
         "ssmmessages:CreateDataChannel",
         "ssmmessages:OpenControlChannel",
-        "ssmmessages:OpenDataChannel"
+        "ssmmessages:OpenDataChannel",
+        "ssm:DescribeParameters",
+        "ec2:DescribeInstances",
+        "ec2:DescribeLaunchTemplates",
+        "ec2:DescribeLaunchTemplateVersions",
+        "ec2:DescribeAddresses",
+        "ecs:DescribeTaskDefinition",
+        "ecs:RegisterTaskDefinition",
+        "elasticloadbalancing:DescribeTargetHealth",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:DescribeAlarms"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "DeploymentParameters",
+      "Sid": "Parameters",
       "Effect": "Allow",
       "Action": [
         "ssm:GetParameter",
@@ -25,7 +34,7 @@
       "Resource": "arn:aws:ssm:${region}:${account_id}:parameter/opennova/*"
     },
     {
-      "Sid": "OpsBucket",
+      "Sid": "Bucket",
       "Effect": "Allow",
       "Action": [
         "s3:ListBucket",
@@ -34,7 +43,7 @@
       "Resource": "arn:aws:s3:::opennova-*"
     },
     {
-      "Sid": "OpsBucketObjects",
+      "Sid": "Objects",
       "Effect": "Allow",
       "Action": [
         "s3:GetObject",
@@ -50,7 +59,9 @@
       "Action": [
         "logs:CreateLogStream",
         "logs:PutLogEvents",
-        "logs:DescribeLogStreams"
+        "logs:DescribeLogStreams",
+        "logs:GetLogEvents",
+        "logs:FilterLogEvents"
       ],
       "Resource": [
         "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*",
@@ -58,7 +69,7 @@
       ]
     },
     {
-      "Sid": "AwsManagedKeysThroughSsmAndEbs",
+      "Sid": "AwsKeysViaSsmEc2",
       "Effect": "Allow",
       "Action": [
         "kms:Decrypt",
@@ -79,10 +90,16 @@
       }
     },
     {
-      "Sid": "LaunchMachinesTagged",
+      "Sid": "LaunchTagged",
       "Effect": "Allow",
-      "Action": "ec2:RunInstances",
-      "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:AllocateAddress"
+      ],
+      "Resource": [
+        "arn:aws:ec2:${region}:${account_id}:instance/*",
+        "arn:aws:ec2:${region}:${account_id}:elastic-ip/*"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestTag/opennova:hosted": "1"
@@ -93,7 +110,7 @@
       }
     },
     {
-      "Sid": "LaunchMachineParts",
+      "Sid": "LaunchParts",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": [
@@ -103,7 +120,7 @@
       ]
     },
     {
-      "Sid": "LaunchFromOpenNovaNetworkTemplatesSnapshots",
+      "Sid": "LaunchFromOurs",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": [
@@ -118,23 +135,30 @@
       }
     },
     {
-      "Sid": "TagMachinesAtLaunch",
+      "Sid": "TagAtLaunch",
       "Effect": "Allow",
       "Action": "ec2:CreateTags",
       "Resource": [
         "arn:aws:ec2:${region}:${account_id}:instance/*",
-        "arn:aws:ec2:${region}:${account_id}:volume/*"
+        "arn:aws:ec2:${region}:${account_id}:volume/*",
+        "arn:aws:ec2:${region}:${account_id}:elastic-ip/*"
       ],
       "Condition": {
         "StringEquals": {
-          "ec2:CreateAction": "RunInstances"
+          "ec2:CreateAction": [
+            "RunInstances",
+            "AllocateAddress"
+          ]
         }
       }
     },
     {
       "Sid": "EndMachines",
       "Effect": "Allow",
-      "Action": "ec2:TerminateInstances",
+      "Action": [
+        "ec2:TerminateInstances",
+        "ec2:AssociateAddress"
+      ],
       "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
       "Condition": {
         "StringEquals": {
@@ -146,23 +170,59 @@
       }
     },
     {
-      "Sid": "DescribeMachines",
+      "Sid": "MoveAddresses",
       "Effect": "Allow",
       "Action": [
-        "ec2:DescribeInstances",
-        "ec2:DescribeLaunchTemplates",
-        "ec2:DescribeLaunchTemplateVersions"
+        "ec2:AssociateAddress",
+        "ec2:DisassociateAddress",
+        "ec2:ReleaseAddress"
       ],
-      "Resource": "*"
+      "Resource": "arn:aws:ec2:${region}:${account_id}:elastic-ip/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/opennova:hosted": "1"
+        },
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
     },
     {
-      "Sid": "PassMachineRoleToEc2",
+      "Sid": "PlayRecords",
+      "Effect": "Allow",
+      "Action": "route53:ChangeResourceRecordSets",
+      "Resource": "arn:aws:route53:::hostedzone/*",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "route53:ChangeResourceRecordSetsRecordTypes": "A",
+          "route53:ChangeResourceRecordSetsActions": [
+            "UPSERT",
+            "DELETE"
+          ]
+        },
+        "ForAllValues:StringLike": {
+          "route53:ChangeResourceRecordSetsNormalizedRecordNames": "*.play.*"
+        }
+      }
+    },
+    {
+      "Sid": "ZoneChanges",
+      "Effect": "Allow",
+      "Action": "route53:GetChange",
+      "Resource": "arn:aws:route53:::change/*"
+    },
+    {
+      "Sid": "PassRoles",
       "Effect": "Allow",
       "Action": "iam:PassRole",
       "Resource": "arn:aws:iam::${account_id}:role/opennova-*",
       "Condition": {
         "StringEquals": {
-          "iam:PassedToService": "ec2.amazonaws.com"
+          "iam:PassedToService": [
+            "ec2.amazonaws.com",
+            "ecs-tasks.amazonaws.com",
+            "scheduler.amazonaws.com"
+          ]
         }
       }
     },
@@ -173,13 +233,7 @@
       "Resource": "arn:aws:ses:${region}:${account_id}:identity/*"
     },
     {
-      "Sid": "ListParameterNames",
-      "Effect": "Allow",
-      "Action": "ssm:DescribeParameters",
-      "Resource": "*"
-    },
-    {
-      "Sid": "RunOpenNovaTasks",
+      "Sid": "RunTasks",
       "Effect": "Allow",
       "Action": "ecs:RunTask",
       "Resource": [
@@ -193,16 +247,7 @@
       }
     },
     {
-      "Sid": "DeployRevisions",
-      "Effect": "Allow",
-      "Action": [
-        "ecs:DescribeTaskDefinition",
-        "ecs:RegisterTaskDefinition"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "PointOpenNovaServicesAndTagTasks",
+      "Sid": "PointServices",
       "Effect": "Allow",
       "Action": [
         "ecs:DescribeServices",
@@ -216,7 +261,7 @@
       ]
     },
     {
-      "Sid": "ListOpenNovaTasks",
+      "Sid": "ListTasks",
       "Effect": "Allow",
       "Action": "ecs:ListTasks",
       "Resource": "*",
@@ -227,10 +272,11 @@
       }
     },
     {
-      "Sid": "ReadOpenNovaTasksDatabaseCache",
+      "Sid": "TasksDbCache",
       "Effect": "Allow",
       "Action": [
         "ecs:DescribeTasks",
+        "ecs:ExecuteCommand",
         "rds:DescribeDBInstances",
         "elasticache:DescribeReplicationGroups"
       ],
@@ -241,27 +287,22 @@
       ]
     },
     {
-      "Sid": "ReadTargetHealth",
+      "Sid": "Clusters",
       "Effect": "Allow",
-      "Action": "elasticloadbalancing:DescribeTargetHealth",
-      "Resource": "*"
+      "Action": [
+        "ecs:ListContainerInstances",
+        "ecs:ExecuteCommand"
+      ],
+      "Resource": "arn:aws:ecs:${region}:${account_id}:cluster/opennova-*"
     },
     {
-      "Sid": "PassOpenNovaRolesToEcsTasksAndScheduler",
+      "Sid": "ReadFleet",
       "Effect": "Allow",
-      "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::${account_id}:role/opennova-*",
-      "Condition": {
-        "StringEquals": {
-          "iam:PassedToService": [
-            "ecs-tasks.amazonaws.com",
-            "scheduler.amazonaws.com"
-          ]
-        }
-      }
+      "Action": "ecs:DescribeContainerInstances",
+      "Resource": "arn:aws:ecs:${region}:${account_id}:container-instance/opennova-*/*"
     },
     {
-      "Sid": "PointBackupSchedule",
+      "Sid": "PointSchedule",
       "Effect": "Allow",
       "Action": [
         "scheduler:GetSchedule",

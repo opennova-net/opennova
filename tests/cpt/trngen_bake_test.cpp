@@ -8,9 +8,10 @@
 // historical TrnGen project under <dir> (Sample, Gradient, Checker64 and Perlin: `<case>/<Name>.tpj`
 // with its 8-bit `.raw` depth map and TrnGen's own `<case>.cpt`, the corpus retired from fixtures/
 // with the old builder; `git show d57608b3d^:fixtures/terrain/...` through `git lfs smudge`
-// restores it) and compares every byte. ctest runs the first part alone; the retail-corpus byte diff of
-// the CPT writer the bake writes with is the re-encode leg of the gated cpt_jo_assets_sweep
-// (tests/terrain/cpt_jo_assets_sweep_test.cpp).
+// restores it) and compares every byte. ctest runs the first part alone, as four rows side by side
+// (cpt_trngen_bake_island, _hills, _flat and _refusals, tests/common/test_parts.h); the retail-corpus
+// byte diff of the CPT writer the bake writes with is the re-encode leg of the gated
+// cpt_jo_assets_sweep (tests/terrain/cpt_jo_assets_sweep_test.cpp).
 #include <formats/cpt/trngen/lod_mesh_data.h>
 #include <formats/cpt/trngen/terrain_bake.h>
 #include <formats/cpt/trngen/tristrip.h>
@@ -29,6 +30,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include "common/test_parts.h"
 
 using namespace opennova;
 using namespace opennova::trngen;
@@ -144,12 +147,16 @@ std::vector<uint8_t> test_bake_reads_back() {
 }
 
 // The bake's bytes pinned: the island (8-bit, TrnGen's own path; test_bake_reads_back's bake, not baked again) and
-// rolling hills (16-bit) hashed, as master made them before the region bake (#1062), so a change that shifts any
-// bake's bytes fails here (the byte parity with TrnGen.exe's own .cpt files is the by-hand corpus leg below).
-void test_bake_pinned(const std::vector<uint8_t> &island) {
+// rolling hills (16-bit, test_hills_pinned) hashed, as master made them before the region bake (#1062), so a change
+// that shifts any bake's bytes fails here (the byte parity with TrnGen.exe's own .cpt files is the by-hand corpus
+// leg below).
+void test_island_pinned(const std::vector<uint8_t> &island) {
 	expect(io::sha256_hex(island.data(), island.size()) ==
 	               "16f080a9f58e86a309e59c6c5992e346e9e132b48a64de8cf64b7e49f8b71b35",
 	       "the island's .cpt keeps its bytes (sha256)");
+}
+
+void test_hills_pinned() {
 	std::vector<uint8_t> bytes;
 	std::string error;
 	TerrainBakeInput hills;
@@ -289,11 +296,14 @@ void test_rough_ground_refused() {
 
 } // namespace
 
+// A row per part (tests/common/test_parts.h), so the parts' bakes run side by side; with no argument
+// every part, and with a directory every part and then the by-hand TrnGen parity over it.
 int main(int argc, char **argv) {
-	test_bake_pinned(test_bake_reads_back());
-	test_bake_16bit();
-	test_refusals();
-	test_rough_ground_refused();
+	failures += test_parts::run(argc, argv,
+	                            {{"island", {[] { test_island_pinned(test_bake_reads_back()); return 0; }}},
+	                             {"hills", {[] { test_hills_pinned(); return 0; }}},
+	                             {"flat", {[] { test_bake_16bit(); return 0; }}},
+	                             {"refusals", {[] { test_refusals(); test_rough_ground_refused(); return 0; }}}});
 	if (argc > 1) test_trngen_parity(argv[1]);
 	if (failures == 0) std::printf("cpt_trngen_bake: all passed\n");
 	return failures == 0 ? 0 : 1;

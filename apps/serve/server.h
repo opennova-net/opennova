@@ -98,6 +98,13 @@ struct ServeOptions {
 	std::string credentials_path;                  // --credentials FILE
 	Credentials credentials; // main() loads it and masks every value
 	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG (server_logs.h)
+	// What a supervisor reads of the run (run_reports.h), none of it retail's: whether the
+	// status page prints and stdin is its chat input (--status-page on|off; on, as a retail
+	// dedicated host draws its page), the tick health rewritten once a minute (--stats-file)
+	// and the error a non-zero exit ends on (--exit-file); "" writes neither file.
+	bool status_page = true;
+	std::string stats_file;
+	std::string exit_file;
 	// The primary desktop's width, the display width game.cfg's defaults take ahead of its
 	// video_res line [orig: Config_SetDefaults @0x54D0F3..0x54D0F6 (GetSystemMetrics
 	// (SM_CXSCREEN) into outWidth)]. main() samples it on Windows; a platform that reports

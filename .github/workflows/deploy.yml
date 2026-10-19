@@ -15,7 +15,10 @@ name: Deploy
 #
 # infra/github makes both environments and their variables (AWS_DEPLOY_ROLE_ARN,
 # AWS_REGION, AWS_ACCOUNT_ID, from the vault's aws-<deployment> items). Rolling
-# back is the toolbox's `app rollback`.
+# back is the toolbox's `app rollback`. After hostd's roll the run asks the
+# service, over ECS Exec into a web task, which hostd image each machine's agent
+# reports (its role may exec into web alone; the runner image carries the
+# Session Manager plugin the AWS CLI's execute-command runs).
 
 on:
   workflow_dispatch:
@@ -26,7 +29,7 @@ on:
         options: [staging, prod]
         required: true
       tag:
-        description: "staging: the NovaWorld images' tag (sha-abc1234: the five programs, the portal, the backup task); empty keeps the current release's"
+        description: "staging: the NovaWorld images' tag (sha-abc1234: the six programs, the portal, the backup task); empty keeps the current release's"
         required: false
         default: ""
       images:

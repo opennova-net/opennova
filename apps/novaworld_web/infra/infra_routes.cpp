@@ -1,7 +1,7 @@
 #include "infra_routes.h"
 
-#include "hosted/fleet_repository.h"
-#include "hosted/stats_repository.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/model/stats_repository.h"
 #include "http_json.h"
 
 #include <net/novaworld/lobby_repository.h>
@@ -255,6 +255,36 @@ crow::json::wvalue cloud_json(const CloudSnapshot *cloud, const char *no_reader)
 	}
 	text_or_null(out, "cache_error", c.cache_error);
 	text_or_null(out, "machines_error", c.machines_error);
+
+	// The fleet cluster: hostd's daemon and the machines as its container instances.
+	if (!c.fleet_cluster.empty()) {
+		crow::json::wvalue fleet;
+		fleet["cluster"] = c.fleet_cluster;
+		if (c.hostd)
+			fleet["hostd"] = service_json(c, *c.hostd);
+		else
+			fleet["hostd"] = nullptr;
+		std::vector<crow::json::wvalue> instances;
+		for (const ContainerInstance &ci : c.container_instances) {
+			crow::json::wvalue j;
+			j["id"] = ci.id;
+			text_or_null(j, "ec2_instance_id", ci.ec2_instance_id);
+			text_or_null(j, "machine_id", ci.machine_id);
+			text_or_null(j, "kind", ci.kind);
+			text_or_null(j, "image_id", ci.image_id);
+			j["status"] = ci.status;
+			j["agent_connected"] = ci.agent_connected;
+			j["running_tasks"] = ci.running_tasks;
+			j["pending_tasks"] = ci.pending_tasks;
+			text_or_null(j, "agent_version", ci.agent_version);
+			instances.push_back(std::move(j));
+		}
+		fleet["instances"] = std::move(instances);
+		text_or_null(fleet, "error", c.fleet_error);
+		out["fleet"] = std::move(fleet);
+	} else {
+		out["fleet"] = nullptr;
+	}
 	return out;
 }
 
@@ -272,7 +302,7 @@ void InfraRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/admin/infrastructure — {"at" (the database's now), "cloud", "lobbies",
-// "controller", "hosting", "machines"}; README "Infrastructure" spells out each.
+// "fleet", "hosting", "machines"}; README "Infrastructure" spells out each.
 // The database's sections from one snapshot, then the cloud (no lease held
 // while AWS answers). No-store.
 crow::response InfraRoutes::overview(const crow::request &req) {
@@ -316,19 +346,19 @@ crow::response InfraRoutes::overview(const crow::request &req) {
 		}
 		out["lobbies"] = std::move(lobbies);
 
-		crow::json::wvalue controller;
-		controller["leader"] = nullptr;
-		controller["generation"] = 0;
-		controller["elected_at"] = nullptr;
+		crow::json::wvalue fleet;
+		fleet["leader"] = nullptr;
+		fleet["generation"] = 0;
+		fleet["elected_at"] = nullptr;
 		const auto leader =
 				db_conn->query("SELECT holder, generation, elected_at::timestamp(0)::text FROM "
-							   "controller_leader WHERE id = 1;");
+							   "fleet_leader WHERE id = 1;");
 		if (!leader.empty()) {
-			text_or_null(controller, "leader", leader.front().as_text(0).value_or(""));
-			controller["generation"] = leader.front().as_int(1).value_or(0);
-			iso_or_null(controller, "elected_at", leader.front().as_text(2).value_or(""));
+			text_or_null(fleet, "leader", leader.front().as_text(0).value_or(""));
+			fleet["generation"] = leader.front().as_int(1).value_or(0);
+			iso_or_null(fleet, "elected_at", leader.front().as_text(2).value_or(""));
 		}
-		out["controller"] = std::move(controller);
+		out["fleet"] = std::move(fleet);
 
 		machines = hosted::list_machines(*db_conn, kEndedMachinesShown);
 		for (const hosted::FleetMachineRow &m : machines)
@@ -381,9 +411,11 @@ crow::response InfraRoutes::overview(const crow::request &req) {
 		if (ec2 != nullptr) {
 			text_or_null(j, "zone", ec2->zone);
 			text_or_null(j, "ec2_state", ec2->state);
+			text_or_null(j, "image_id", ec2->image_id);
 		} else {
 			j["zone"] = nullptr;
 			j["ec2_state"] = nullptr;
+			j["image_id"] = nullptr;
 		}
 		rows.push_back(std::move(j));
 	}

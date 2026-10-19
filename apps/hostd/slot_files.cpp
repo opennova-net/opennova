@@ -1,7 +1,7 @@
 #include "slot_files.h"
 
-#include "hosted/agent_protocol.h"
-#include "hosted/slots.h"
+#include "hosted/protocol/agent_protocol.h"
+#include "hosted/protocol/slots.h"
 
 #include <cerrno>
 #include <cstring>
@@ -110,6 +110,45 @@ bool SlotFiles::prepare(int slot, uint32_t uid, const std::map<std::string, std:
 			return false;
 		}
 	}
+	return true;
+}
+
+bool SlotFiles::read_written(int slot, const char *name, std::string &out,
+		std::chrono::system_clock::time_point &written) const {
+	out.clear();
+	if (!hosted::slot_valid(slot))
+		return false;
+	const int dir_fd = ::open(dir(slot).c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (dir_fd < 0)
+		return false;
+	const int fd = ::openat(dir_fd, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+	::close(dir_fd);
+	if (fd < 0)
+		return false;
+	struct stat st{};
+	bool ok = ::fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 &&
+			static_cast<uint64_t>(st.st_size) <= kMaxWrittenBytes;
+	// One byte past the bound tells a file that grew past it since.
+	char bytes[kMaxWrittenBytes + 1];
+	size_t got = 0;
+	while (ok && got < sizeof bytes) {
+		const ssize_t n = ::read(fd, bytes + got, sizeof bytes - got);
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n <= 0) {
+			ok = n == 0;
+			break;
+		}
+		got += static_cast<size_t>(n);
+	}
+	::close(fd);
+	if (!ok || got > kMaxWrittenBytes)
+		return false;
+	out.assign(bytes, got);
+	written = std::chrono::system_clock::time_point(
+			std::chrono::duration_cast<std::chrono::system_clock::duration>(
+					std::chrono::seconds(st.st_mtim.tv_sec) +
+					std::chrono::nanoseconds(st.st_mtim.tv_nsec)));
 	return true;
 }
 

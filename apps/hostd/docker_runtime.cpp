@@ -277,8 +277,8 @@ std::vector<std::string> DockerRuntime::run_argv(const ContainerSpec &spec) cons
 		argv.insert(argv.end(),
 				{ "--log-driver", "awslogs", "--log-opt", "awslogs-region=" + logs_.region,
 						"--log-opt", "awslogs-group=" + logs_.group, "--log-opt",
-						"awslogs-stream=" + slot_log_stream(logs_.machine_id, spec.slot),
-						"--log-opt", "mode=non-blocking", "--log-opt", "max-buffer-size=4m" });
+						"awslogs-stream=" + spec.log_stream, "--log-opt", "mode=non-blocking",
+						"--log-opt", "max-buffer-size=4m" });
 	}
 	argv.insert(argv.end(),
 			{ "--mount", "type=bind,source=" + spec.base_dir + ",target=/opt/game,readonly" });
@@ -296,10 +296,6 @@ std::vector<std::string> DockerRuntime::run_argv(const ContainerSpec &spec) cons
 	argv.push_back(spec.image);
 	argv.insert(argv.end(), spec.args.begin(), spec.args.end());
 	return argv;
-}
-
-std::string DockerRuntime::slot_log_stream(int64_t machine_id, int slot) {
-	return std::to_string(machine_id) + "/slot-" + std::to_string(slot);
 }
 
 bool DockerRuntime::run(
@@ -337,6 +333,36 @@ bool DockerRuntime::remove(const std::string &name, int timeout_ms, std::string 
 	return simple("rm", { docker_, "rm", name }, timeout_ms, error);
 }
 
+bool DockerRuntime::list_images(const std::string &repository, std::vector<std::string> &out,
+		int timeout_ms, std::string &error) {
+	const proc::CommandResult result =
+			runner_.run({ docker_, "image", "ls", "--no-trunc", "--format",
+								"{{.Repository}}@{{.Digest}}", repository },
+					timeout_ms);
+	if (!result.ok()) {
+		error = failure("image ls", result);
+		return false;
+	}
+	out.clear();
+	size_t start = 0;
+	while (start < result.out.size()) {
+		size_t end = result.out.find('\n', start);
+		if (end == std::string::npos)
+			end = result.out.size();
+		const std::string line =
+				strutil::trim(std::string_view(result.out).substr(start, end - start));
+		start = end + 1;
+		// An image with no digest (built here, held by a tag) reads "<none>".
+		if (line.rfind(repository + "@sha256:", 0) == 0 && hosted::is_image_reference(line))
+			out.push_back(line);
+	}
+	return true;
+}
+
+bool DockerRuntime::remove_image(const std::string &image, int timeout_ms, std::string &error) {
+	return simple("image rm", { docker_, "image", "rm", image }, timeout_ms, error);
+}
+
 bool parse_docker_inspect(
 		std::string_view json, std::vector<ContainerInfo> &out, std::string &error) {
 	JsonValue v;
@@ -357,6 +383,7 @@ bool parse_docker_inspect(
 		info.name = entry.get_string("Name", "");
 		if (!info.name.empty() && info.name[0] == '/')
 			info.name.erase(0, 1);
+		info.image = config->get_string("Image", "");
 		if (!hosted::is_container_name(info.name))
 			continue;
 		const std::string slot = labels->get_string(DockerRuntime::kSlotLabel, "");

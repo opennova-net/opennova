@@ -1,4 +1,4 @@
--- The games: one row per lobby (apps/novaworld_common/catalog_repository.h).
+-- The games: one row per lobby (apps/novaworld_common/program/catalog_repository.h).
 -- A client's gate tag selects its row; the row decides the gate's answer (the
 -- LobbyName, the startupurl, the GLSVSS leg), the .gsb list the browser
 -- fetches and the game its listings land under. Applied at every boot after

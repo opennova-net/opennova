@@ -1,4 +1,4 @@
-// The machine agents' routes (apps/novaworld_controller/hosted/agent_route.h) on the
+// The machine agents' routes (apps/novaworld_fleet/hosted/agent_route.h) on the
 // internal listener (hosted/internal_listener.h) on a loopback port over a
 // migrated database, driven with apps/common's http_exchange: the bootstrap (the
 // one-time token redeemed for a secret kept as its digest, again for a fresh one
@@ -8,10 +8,16 @@
 // address, a reply that would not read: each the one bare 404, the token left
 // unspent), the sync (the agent's secret, the report stored and the machine
 // ready, a listing that failed heard from with
-// nothing stored, the desired containers from a fake FleetDesiredState with the
-// trees they use, the files of a reported container left out, each uid its
-// slot's, a slot past the machine's dropped, drain while draining, another
-// protocol draining the machine, a desired state that throws or does not read),
+// nothing stored, the envelope (the agent's version, protocol and image) recorded
+// at every sync, the desired containers from a fake FleetDesiredState with the
+// trees they use, the files of a container reported running or exited left out
+// and of one reported starting sent again, each uid its slot's, a slot past the
+// machine's dropped, drain while draining, an agent of another protocol, older
+// or newer, held (heard, its envelope recorded, its reports kept, the bare 404)
+// and its machine ended (moved to ending, ready or draining, never drained: the
+// held agent stops nothing) only once that has lasted ten minutes, a lost one
+// left lost, a desired state that
+// throws or does not read),
 // every other path and method the same 404, and a listener whose networks leave
 // loopback out. Then the real agent end to end against the routes:
 // opennova-hostd (ctest passes it) with its process runtime, as the local
@@ -26,12 +32,12 @@
 // whose files it lacks, keeps a container waiting (reported starting, nothing
 // started) on a tree whose URL is not there, and its own end ends its servers.
 
-#include "hosted/agent_protocol.h"
-#include "hosted/data_set_repository.h"
+#include "core/local_object_store.h"
+#include "data_sets/data_set_repository.h"
 #include "hosted/fleet_desired_state.h"
-#include "hosted/fleet_repository.h"
 #include "hosted/internal_listener.h"
-#include "local_object_store.h"
+#include "hosted/model/fleet_repository.h"
+#include "hosted/protocol/agent_protocol.h"
 #include "net_http.h"
 #include "net_sockets.h"
 
@@ -41,6 +47,7 @@
 #include "common/temp_dir.h"
 #include "common/test_database.h"
 #include "common/test_expect.h"
+#include "common/test_parts.h"
 
 #include <atomic>
 #include <chrono>
@@ -80,6 +87,8 @@ namespace {
 std::string g_self;
 std::string g_hostd; // opennova-hostd
 constexpr const char *kImage = "opennova-serve:local";
+// The agent's own image, as its ECS task definition pins it.
+constexpr const char *kAgentImage = "ghcr.io/opennova-net/opennova-hostd@sha256:feedface";
 // The base tree every desired container here uses (a tree id the fake
 // desired state names; the routes read no tree row), and one whose URL leads
 // nowhere.
@@ -161,6 +170,7 @@ hosted::DesiredContainer desired(const std::string &name, int slot,
 		d.files = std::map<std::string, std::string>{ { "server.host", "GameName \"Caf\xE9\"\r\n" },
 			{ "credentials.txt", "NOVAWORLD_USER=srv-5\nNOVAWORLD_PASS=secretpassword\n" } };
 	d.env = { { "OPENNOVA_SLOT_NOTE", "slot-" + std::to_string(slot) } };
+	d.log_stream = "5/g" + std::to_string(slot + 1);
 	return d;
 }
 
@@ -218,8 +228,17 @@ std::string sync_body(const std::vector<hosted::ContainerReport> &containers,
 	hosted::SyncRequest r;
 	r.protocol = protocol;
 	r.agent_version = "test-agent 1";
+	r.agent_image = kAgentImage;
 	r.containers = containers;
 	return hosted::encode_sync_request(r);
+}
+
+hosted::ContainerReport starting(const std::string &name, int slot) {
+	hosted::ContainerReport r;
+	r.name = name;
+	r.slot = slot;
+	r.state = ContainerState::Starting;
+	return r;
 }
 
 hosted::ContainerReport running(const std::string &name, int slot) {
@@ -413,7 +432,8 @@ int test_sync() {
 	std::string wrong = secret;
 	wrong[5] = wrong[5] == 'z' ? 'y' : 'z';
 	TEST_EXPECT(bare_404(rig.post(path, wrong, sync_body({}))));
-	TEST_EXPECT(bare_404(rig.post(path, secret, "{\"protocol\":2,\"agent_version\":\"x\"}")));
+	TEST_EXPECT(bare_404(rig.post(path, secret, "{\"protocol\":2}")));
+	TEST_EXPECT(bare_404(rig.post(path, secret, "[]")));
 	TEST_EXPECT(bare_404(rig.post(hosted::machine_sync_path(m.id + 1), secret, sync_body({}))));
 	TEST_EXPECT(rig.fake.calls == 0);
 	TEST_EXPECT(hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Booting);
@@ -449,9 +469,12 @@ int test_sync() {
 	TEST_EXPECT(reply.trees.size() == 1 && reply.trees.count(kTree) == 1 &&
 			reply.trees.at(kTree).url == "file:///store/trees/41/" &&
 			reply.trees.at(kTree).version == "JO V1.7.5.3" && reply.trees.at(kTree).files.size() == 2);
-	// Stored: the machine ready, its report, and what the desired state was handed.
+	// Stored: the machine ready, its report, its envelope, and what the desired state
+	// was handed.
 	auto row = hosted::find_machine(rig.db, m.id);
 	TEST_EXPECT(row->state == FleetMachineState::Ready && !row->last_report_at.empty());
+	TEST_EXPECT(row->agent_protocol == hosted::kAgentProtocol && row->agent_image == kAgentImage &&
+			row->agent_version == "test-agent 1" && row->protocol_mismatch_since.empty());
 	const auto slots = hosted::slot_reports(rig.db, m.id);
 	TEST_EXPECT(
 			slots.size() == 1 && slots[0].container == "srv-7-g1" && slots[0].egress_bytes == 4096);
@@ -468,6 +491,14 @@ int test_sync() {
 		const auto rows = hosted::slot_reports(rig.db, m.id);
 		TEST_EXPECT(rows.size() == 2 && rows[1].container == "srv-8-g1" &&
 				rows[1].state == ContainerState::Exited && rows[1].reason == unfetched.reason);
+	}
+	// A container its agent reports starting (it waits for its image or its trees):
+	// its files are sent again, so an agent replaced meanwhile can still start it.
+	{
+		const Reply waiting = rig.post(
+				path, secret, sync_body({ running("srv-7-g1", 0), starting("srv-8-g1", 1) }));
+		TEST_EXPECT(waiting.code == 200 && hosted::decode_sync_reply(waiting.body, reply, error));
+		TEST_EXPECT(reply.desired.size() == 2 && !reply.desired[0].files && reply.desired[1].files);
 	}
 	TEST_EXPECT(rig.post(path, secret, sync_body({ running("srv-7-g1", 0) })).code == 200);
 	// A listing that fails now leaves the slots' reports as they were.
@@ -502,23 +533,85 @@ int test_sync() {
 	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}))));
 	rig.fake.throws = false;
 
-	// Another protocol: not read, and the machine drains.
-	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, 1))));
+	// Another protocol, either way (an older agent, a newer one): held. Heard (its
+	// envelope recorded, the time of its report), its slots' reports kept, nothing
+	// asked of the desired state, the bare 404; the machine still ready.
+	rig.fake.set(m.id, decision_of({ desired("srv-7-g1", 0) }));
+	TEST_EXPECT(rig.post(path, secret, sync_body({ running("srv-7-g1", 0) })).code == 200);
+	const int calls = rig.fake.calls;
+	for (const int other : { hosted::kAgentProtocol - 1, hosted::kAgentProtocol + 1 }) {
+		rig.db.exec("UPDATE fleet_machines SET last_report_at = now() - interval '30 seconds' "
+					"WHERE id = $1;",
+				{ opennova::db::BindValue(m.id) });
+		hosted::SyncRequest held;
+		held.protocol = other;
+		held.agent_version = "test-agent " + std::to_string(other);
+		held.agent_image = kAgentImage;
+		TEST_EXPECT(bare_404(rig.post(path, secret, hosted::encode_sync_request(held))));
+		row = hosted::find_machine(rig.db, m.id);
+		TEST_EXPECT(row->state == FleetMachineState::Ready && row->agent_protocol == other &&
+				row->agent_version == held.agent_version && !row->protocol_mismatch_since.empty());
+		TEST_EXPECT(hosted::machine_reported_within(rig.db, m.id, 5));
+		TEST_EXPECT(hosted::slot_reports(rig.db, m.id).size() == 1 && rig.fake.calls == calls);
+	}
+	// Nine minutes of it: still held, the machine still ready.
+	const auto mismatch_for = [&rig](int64_t id, int minutes) {
+		rig.db.exec("UPDATE fleet_machines SET protocol_mismatch_since = now() - interval '" +
+						std::to_string(minutes) + " minutes' WHERE id = $1;",
+				{ opennova::db::BindValue(id) });
+	};
+	mismatch_for(m.id, 9);
+	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, hosted::kAgentProtocol + 1))));
+	TEST_EXPECT(hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Ready);
+	// Its own protocol again: read, no mismatch left.
+	TEST_EXPECT(rig.post(path, secret, sync_body({})).code == 200);
 	row = hosted::find_machine(rig.db, m.id);
-	TEST_EXPECT(row->state == FleetMachineState::Draining &&
-			row->end_reason.find("protocol 1") != std::string::npos);
-	// Lost (its agent silent, since it is never read): it stays lost, so the
-	// supervisor ends it and its servers move, never back to draining.
+	TEST_EXPECT(
+			row->protocol_mismatch_since.empty() && row->agent_protocol == hosted::kAgentProtocol);
+	// Lost: its agent heard in another protocol is heard (its report's time moves on,
+	// so the supervisor finds it back), the row left lost here however long the
+	// mismatch has lasted (it ends at a sync once found back).
 	TEST_EXPECT(hosted::transition_machine(
-			rig.db, m.id, FleetMachineState::Draining, FleetMachineState::Lost, "silent"));
-	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, 1))));
-	TEST_EXPECT(hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Lost);
+			rig.db, m.id, FleetMachineState::Ready, FleetMachineState::Lost, "silent"));
+	rig.db.exec("UPDATE fleet_machines SET last_report_at = now() - interval '5 minutes' WHERE id "
+				"= $1;",
+			{ opennova::db::BindValue(m.id) });
+	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, hosted::kAgentProtocol + 1))));
+	mismatch_for(m.id, 11);
+	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, hosted::kAgentProtocol + 1))));
+	TEST_EXPECT(hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Lost &&
+			hosted::machine_reported_within(rig.db, m.id, 5));
+
+	// Ten minutes of it: the machine ends, a ready one as a draining one (a drain
+	// would leave every server it moved running on the held machine too). It is
+	// moved to ending, which the supervisor's next pass ends (terminated, its
+	// servers placed again: hosted_fleet's end case), the reason naming the
+	// protocol, and its agent is refused from then on, whatever it speaks.
+	const hosted::CreatedMachine ready = machine_row(rig.db, "127.0.0.1");
+	const std::string ready_secret = rig.bootstrap(ready);
+	const std::string ready_path = hosted::machine_sync_path(ready.id);
+	TEST_EXPECT(!ready_secret.empty() &&
+			rig.post(ready_path, ready_secret, sync_body({})).code == 200);
+	TEST_EXPECT(bare_404(
+			rig.post(ready_path, ready_secret, sync_body({}, hosted::kAgentProtocol - 1))));
+	mismatch_for(ready.id, 11);
+	TEST_EXPECT(bare_404(
+			rig.post(ready_path, ready_secret, sync_body({}, hosted::kAgentProtocol - 1))));
+	row = hosted::find_machine(rig.db, ready.id);
+	TEST_EXPECT(row->state == FleetMachineState::Ending &&
+			row->end_reason.find("protocol " + std::to_string(hosted::kAgentProtocol - 1)) !=
+					std::string::npos);
+	TEST_EXPECT(bare_404(rig.post(ready_path, ready_secret, sync_body({}))));
 	TEST_EXPECT(hosted::transition_machine(
-			rig.db, m.id, FleetMachineState::Lost, FleetMachineState::Draining, ""));
-	// An ending machine's agent is refused from then on.
-	TEST_EXPECT(hosted::transition_machine(
-			rig.db, m.id, FleetMachineState::Draining, FleetMachineState::Ending, ""));
+			rig.db, m.id, FleetMachineState::Lost, FleetMachineState::Draining, "roll"));
+	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, hosted::kAgentProtocol + 1))));
+	row = hosted::find_machine(rig.db, m.id);
+	TEST_EXPECT(row->state == FleetMachineState::Ending &&
+			row->end_reason.find("protocol " + std::to_string(hosted::kAgentProtocol + 1)) !=
+					std::string::npos);
 	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}))));
+	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, hosted::kAgentProtocol + 1))));
+	TEST_EXPECT(hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Ending);
 	return 0;
 }
 
@@ -642,7 +735,7 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 		"http://127.0.0.1:" + std::to_string(rig.listener.bound_port()), "--machine",
 		std::to_string(m.id), "--token-file", token.u8string(), "--state-dir",
 		(root / "state").u8string(), "--slots-root", slots.u8string(), "--trees-root",
-		game.u8string(), "--iptables", "none", "--ip6tables", "none", "--verbose" };
+		game.u8string(), "--nft", "none", "--verbose" };
 	options.output_path = (root / "hostd.log").u8string();
 	opennova::proc::ChildProcess hostd;
 	std::string error;
@@ -733,9 +826,11 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 	rig.fake.set(m.id, hosted::FleetDecision{});
 	TEST_EXPECT(wait_for([&] { return hosted::slot_reports(rig.db, m.id).empty(); }));
 
-	// A tree whose URL leads nowhere: the fetch fails at once and the container
-	// waits (reported starting, nothing started, no partial directory left) for
-	// the tries the store has left; dropped, it is forgotten. (The three tries a
+	// A tree whose URL leads nowhere: the copy fails at once and the container
+	// waits (reported starting, nothing started) for the tries the store has
+	// left; the failure read at the agent's next pass (a fetch's outcome is
+	// polled there, after that pass's report), no partial directory is left;
+	// dropped, it is forgotten. (The three tries a
 	// minute apart that end in the container's exit 125 with the fetch's reason
 	// are the agent's and the tree store's own tests', on a hand-stepped clock:
 	// too slow here; the supervisor test reads that reason into the server's
@@ -751,11 +846,18 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 		return rows.size() == 1 && rows[0].container == "srv-6-g2" &&
 				rows[0].state == ContainerState::Starting;
 	}));
-	TEST_EXPECT(reported(rig.fake, "srv-6-g2", ContainerState::Starting, 1));
-	TEST_EXPECT(!fs::exists(markers / "srv-6-g2.started") && !fs::exists(game / (std::to_string(kMissingTree) + ".partial")));
+	// The fake reads the report after the rows are written: waited for too.
+	TEST_EXPECT(
+			wait_for([&] { return reported(rig.fake, "srv-6-g2", ContainerState::Starting, 1); }));
+	// The report that says it waits precedes the act that reads the copy's
+	// failure (the same pass, once the reply is in): the failure logged, then its
+	// partial directory goes.
 	TEST_EXPECT(wait_for([&] {
 		return read_file(root / "hostd.log").find("is no directory") != std::string::npos;
 	}));
+	TEST_EXPECT(wait_for(
+			[&] { return !fs::exists(game / (std::to_string(kMissingTree) + ".partial")); }));
+	TEST_EXPECT(!fs::exists(markers / "srv-6-g2.started"));
 	rig.fake.set(m.id, hosted::FleetDecision{});
 	TEST_EXPECT(wait_for([&] { return hosted::slot_reports(rig.db, m.id).empty(); }));
 	TEST_EXPECT(!fs::exists(markers / "srv-6-g2.started"));
@@ -843,6 +945,9 @@ int fake_serve_main(int argc, char **argv) {
 
 } // namespace
 
+// The run's scratch directory (main's TempDir), for the agent's part.
+std::string g_scratch;
+
 int main(int argc, char **argv) {
 	if (argc > 1 && std::strcmp(argv[1], "--resource-dir") == 0)
 		return fake_serve_main(argc, argv);
@@ -861,24 +966,14 @@ int main(int argc, char **argv) {
 	setenv(kPlantedSecret, "hunter2", 1);
 #endif
 	test_temp::TempDir temp("hosted_agent_route");
-	const std::string scratch = temp.root();
-	struct Case {
-		const char *name;
-		int (*fn)(const std::string &);
-	};
-	const Case cases[] = {
-		{ "bootstrap", [](const std::string &) { return test_bootstrap(); } },
-		{ "sync", [](const std::string &) { return test_sync(); } },
-		{ "networks", [](const std::string &) { return test_networks(); } },
-		{ "agent_end_to_end", test_agent_end_to_end },
-	};
-	for (const Case &c : cases) {
-		std::printf("-- %s\n", c.name);
-		if (c.fn(scratch) != 0) {
-			std::fprintf(stderr, "FAIL: %s\n", c.name);
-			return 1;
-		}
-	}
+	g_scratch = temp.root();
+	// A row per part (tests/common/test_parts.h; service_tests.cmake lists them): the routes'
+	// cases, each on databases of its own, and the agent's run end to end, one opennova-hostd
+	// taken through its steps (each a sync away, 5 s while idle, its own cadence).
+	const int failures = test_parts::run(argc, argv,
+			{ { "routes", { test_bootstrap, test_sync, test_networks } },
+					{ "agent_end_to_end", { [] { return test_agent_end_to_end(g_scratch); } } } });
+	if (failures != 0) return 1;
 	std::printf("OK: hosted agent routes\n");
 	return 0;
 }

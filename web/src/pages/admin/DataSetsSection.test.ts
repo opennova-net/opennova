@@ -324,7 +324,7 @@ describe('DataSetsSection', () => {
     expect(completeFile).toHaveBeenCalledWith(1, 13, 'localres.pff', { upload_id: 'u-localres.pff', parts: [{ part_number: 1, etag: '"e1"' }] });
     expect(finalize).toHaveBeenCalledWith(1, 13);
     expect(page.findAll('li.ds-upload-progress')).toHaveLength(3);
-    expect(page.get('#ds-upload-total').text()).toContain('The worker checks the files');
+    expect(page.get('#ds-upload-total').text()).toContain('The data program checks the files');
 
     // The next poll finds it ready.
     await page.findAll('button').find((b) => b.text() === 'Refresh')!.trigger('click');
@@ -437,7 +437,7 @@ describe('DataSetsSection', () => {
     expect(putReleasePartMock).toHaveBeenCalledWith(7, 'r7', 1, expect.any(Blob), expect.any(AbortSignal));
     expect(putReleasePartMock.mock.calls[0][3].size).toBe(100);
     expect(completeUpload).toHaveBeenCalledWith(7, { upload_id: 'r7', parts: [{ part_number: 1, etag: '"e1"' }] });
-    expect(page.get('[role="status"]').text()).toBe('JO 1.7.5.9 is uploaded; the worker checks the package.');
+    expect(page.get('[role="status"]').text()).toBe('JO 1.7.5.9 is uploaded; the data program checks the package.');
     expect(page.find('#ds-release-progress').exists()).toBe(false);
   });
 

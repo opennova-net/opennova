@@ -23,16 +23,17 @@ variable "region" {
 }
 
 # ---------------------------------------------------------------------------
-# The service's five programs (programs.tf): each its own image and an ECS
-# service on Fargate (x86_64). Each takes its task's size and its service's
-# task counts; a field left out keeps its default (`web = { max = 6 }` in a
-# var-file). cpu is in CPU units (1024 a vCPU), memory in MiB, a Fargate pair
-# (256 with 512, 1024 or 2048; 512 with 1024 to 4096; 1024 with 2048 to
-# 8192). desired is the count a new service starts with; min and max are the
-# bounds Application Auto Scaling holds the count within (web and the worker
-# scale on their CPU between them; the others stay where they start, 1 by
-# default), and max, with a deployment's extra tasks, is what the database's
-# max_connections is sized for.
+# The service's six programs (programs.tf): each its own image and an ECS
+# service on Fargate (x86_64). hostd, the machines' agent, is none of them: it
+# is the fleet cluster's daemon, sized in fleet_agent.tf. Each takes its
+# task's size and its service's task counts; a field left out keeps its
+# default (`web = { max = 6 }` in a var-file). cpu is in CPU units (1024 a
+# vCPU), memory in MiB, a Fargate pair (256 with 512, 1024 or 2048; 512 with
+# 1024 to 4096; 1024 with 2048 to 8192). desired is the count a new service
+# starts with; min and max are the bounds Application Auto Scaling holds the
+# count within (web and the worker scale on their CPU between them; the others
+# stay where they start, 1 by default), and max, with a deployment's extra
+# tasks, is what the database's max_connections is sized for.
 # ---------------------------------------------------------------------------
 
 variable "gate" {
@@ -71,8 +72,8 @@ variable "web" {
   default = {}
 }
 
-variable "controller" {
-  description = "The controller: the fleet's reconcile pass, the jobs' scheduling and the internal listener the machines' hostd reach at its Cloud Map name. Elected: one leads, another waits as its standby (a deployment's new task does, then leads)."
+variable "fleet" {
+  description = "The fleet program: the hosted servers' supervisor, its admin links, the console drain and the internal listener the machines' hostd reach at its Cloud Map name. Elected: one leads, another waits as its standby (a deployment's new task does, then leads). It runs no job and calls no cloud."
   type = object({
     cpu     = optional(number, 256)
     memory  = optional(number, 512)
@@ -84,7 +85,7 @@ variable "controller" {
 }
 
 variable "worker" {
-  description = "The worker: the background jobs (the fleet's AWS calls, billing sync, mail, prunes). Scales on its CPU between min and max (one task at the defaults): more tasks, more jobs at once."
+  description = "The worker: the background jobs and their schedules (the fleet's AWS calls, billing sync, mail, prunes). Scales on its CPU between min and max (one task at the defaults): more tasks, more jobs at once."
   type = object({
     cpu     = optional(number, 512)
     memory  = optional(number, 1024)
@@ -95,8 +96,25 @@ variable "worker" {
   default = {}
 }
 
+variable "data" {
+  description = "The data program: the data sets' jobs over the game data's store (a tree's finalize, a release's validate and apply, the trees' prune), on 40 GiB of task storage. One task: its jobs' caps are global, so it never scales (min = max = desired)."
+  type = object({
+    cpu     = optional(number, 256)
+    memory  = optional(number, 1024)
+    min     = optional(number, 1)
+    max     = optional(number, 1)
+    desired = optional(number, 1)
+  })
+  default = {}
+
+  validation {
+    condition     = var.data.min == var.data.max && var.data.min == var.data.desired
+    error_message = "data runs one fixed count (min = max = desired): its jobs' caps are global, so more tasks run none more at once."
+  }
+}
+
 variable "image_registry" {
-  description = "Where the service's images are published: <registry>/opennova-novaworld-<program>, <registry>/novaworld-web (the portal's nginx), <registry>/opennova-novaworld-backup, and the machines' <registry>/opennova-serve (.github/workflows/novaworld-images.yml, serve-image.yml). Public packages: the tasks and the machines pull anonymously."
+  description = "Where the service's images are published: <registry>/opennova-novaworld-<program>, <registry>/novaworld-web (the portal's nginx), <registry>/opennova-novaworld-backup, and the machines' <registry>/opennova-serve and <registry>/opennova-hostd (.github/workflows/novaworld-images.yml, serve-image.yml). Public packages: the tasks and the machines pull anonymously."
   type        = string
   default     = "ghcr.io/opennova-net"
 
@@ -174,6 +192,23 @@ variable "log_retention_days" {
   description = "How long CloudWatch keeps the service's and the machines' logs, in days."
   type        = number
   default     = 30
+}
+
+variable "server_log_retention_days" {
+  description = "How long CloudWatch keeps the hosted game servers' own output, in days."
+  type        = number
+  default     = 14
+}
+
+variable "log_ingest_alarm_gib_per_day" {
+  description = "The hosted game servers' log ingest the servers-log-ingest alarm allows, GiB a day (judged an hour at a time)."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.log_ingest_alarm_gib_per_day > 0
+    error_message = "log_ingest_alarm_gib_per_day must be above 0."
+  }
 }
 
 variable "tags" {
@@ -263,9 +298,9 @@ variable "db_pool_max" {
 }
 
 variable "db_service_processes" {
-  description = "The most program processes connected to the database at once: every program's tasks at its max, and the extra tasks a deployment runs beside them (a deployment's maximum percent, 200: every program starts its new tasks first), so 2 + 2 + 2 + 2 + 2 = 10 at the defaults; the plan refuses less than that. The database's max_connections is db_pool_max for each of them, plus 10 for the backup task, the operator's psql and the reserved superuser and RDS connections. Changing it is a parameter group change RDS applies at the next reboot."
+  description = "The most program processes connected to the database at once: every program's tasks at its max, and the extra tasks a deployment runs beside them (a deployment's maximum percent, 200: every program starts its new tasks first), so 2 + 2 + 2 + 2 + 2 + 2 = 12 at the defaults; the plan refuses less than that. The database's max_connections is db_pool_max for each of them, plus 10 for the backup task, the operator's psql and the reserved superuser and RDS connections. Changing it is a parameter group change RDS applies at the next reboot."
   type        = number
-  default     = 10
+  default     = 12
 
   validation {
     condition     = var.db_service_processes >= 1 && var.db_service_processes <= 64 && floor(var.db_service_processes) == var.db_service_processes
@@ -435,14 +470,25 @@ variable "fleet_max_own" {
   default     = 2
 }
 
+variable "fleet_max_addresses" {
+  description = "The most static addresses the service sells (ONNET_FLEET_MAX_ADDRESSES): the own machines' add-on, an Elastic IP each with its name in the play zone (edge.tf). 0 (the default) turns the add-on off; above 0, with hosting on and a Cloudflare zone, the stack makes the play zone and its delegation. The account's Elastic IP quota (L-0263D0A3, 5 per Region by default, the load balancer's two among them) is raised first (DEPLOY.md, \"Turning it on\")."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.fleet_max_addresses >= 0 && var.fleet_max_addresses <= 64 && floor(var.fleet_max_addresses) == var.fleet_max_addresses
+    error_message = "fleet_max_addresses must be a whole number 0..64."
+  }
+}
+
 variable "fleet_idle_minutes" {
   description = "How long a shared machine with no server runs before the service ends it (ONNET_FLEET_IDLE_MINUTES)."
   type        = number
   default     = 30
 }
 
-variable "hosted_ami_id" {
-  description = "Override the fleet's seed image (an Ubuntu 24.04 x86_64 AMI), what the machines launch from until `fleet bake-image` bakes one. Empty: Canonical's newest when the image parameter is made; a later seed waits for a -replace of terraform_data.fleet_seed_image[0] and aws_ssm_parameter.fleet_image[0]."
+variable "fleet_ami" {
+  description = "The exact name of the image the machines launch: an ECS-optimized Amazon Linux 2023 x86_64 AMI, Amazon's (fleet_agent.tf). Pinned per deployment, so a bump shows in the plan and in git: staging's first, then prod's, then `fleet roll` moves the servers of the machines on the old image (DEPLOY.md). The newest: aws ssm get-parameters --names /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_name. Required with hosted_enabled."
   type        = string
   default     = ""
 }
@@ -454,7 +500,7 @@ variable "machine_root_volume_gb" {
 }
 
 variable "internal_http_port" {
-  description = "The controller's internal listener's port, on its task's private address (the leader alone binds it; ONNET_INTERNAL_URL names it by its Cloud Map name): the machines' hostd bootstrap and sync, admitted from the machines' security group alone."
+  description = "The fleet program's internal listener's port, on its task's private address (the leader alone binds it; ONNET_INTERNAL_URL names it by its Cloud Map name): the machines' hostd bootstrap and sync, admitted from the machines' security group alone."
   type        = number
   default     = 8070
 }
@@ -470,7 +516,7 @@ variable "alert_email" {
 }
 
 variable "budget_monthly_usd" {
-  description = "The deployment's monthly cost budget (its account's, which holds it alone), in USD: an email at 80% spent and at a 100% forecast. Sized for prod's service tier (the five programs on Fargate, the load balancer, a single-zone db.t4g.micro and the cache, about $145: DEPLOY.md, \"Cost\") and a few machines; staging.tfvars sets its own."
+  description = "The deployment's monthly cost budget (its account's, which holds it alone), in USD: an email at 80% spent and at a 100% forecast. Sized for prod's service tier (the six programs on Fargate, the load balancer, a single-zone db.t4g.micro and the cache, about $160: DEPLOY.md, \"Cost\") and a few machines; staging.tfvars sets its own."
   type        = number
   default     = 250
 }

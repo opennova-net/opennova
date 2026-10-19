@@ -1,29 +1,42 @@
-// opennova-novaworld-worker: a worker (program.h). The job pool
+// opennova-novaworld-worker: a worker (program/program.h). The job pool
 // (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) and the handlers it runs:
 // the prunes (the service's, the website's, the hosted stats'), the mail it
-// sends, the billing sync, the fleet's machine driver calls and the hosted
-// data sets' jobs over the object store. What it runs
-// is what the other programs enqueued (the controller's scheduler and
-// supervisor, web's routes); any number of worker processes share the queue.
-// Its watchdog watches the pool alone: a slow job occupies its worker, never a
-// watched loop.
+// sends, the billing sync, the fleet's machine driver calls and the static
+// addresses' cloud and DNS calls; and the scheduler of its own periodic kinds
+// (worker_schedule.h), in every worker process with no election (the
+// schedule keys keep each bucket single). What it runs is what its scheduler,
+// the fleet's supervisor and web's routes enqueued; any number of worker
+// processes share the queue. The data sets' jobs are the data program's
+// (apps/novaworld_data). Its watchdog watches the pool's claim loop and the
+// scheduler's ticks: a slow job occupies its worker, never a watched loop.
 
-#include "parts.h"
-#include "program.h"
+#include "core/ecs_metadata.h"
+#include "program/program.h"
+#include "worker_schedule.h"
 
+#include "accounts/account_jobs.h"
+#include "accounts/mail_stack.h"
 #include "billing/billing_jobs.h"
+#include "billing/billing_stack.h"
 #include "billing/entitlement.h"
-#include "hosted/data_set_jobs.h"
-#include "hosted/docker_machine_driver.h"
-#include "hosted/ec2_machine_driver.h"
-#include "hosted/fleet_jobs.h"
-#include "hosted/limits_hold.h"
-#include "hosted/stats_jobs.h"
-#include "jobs/account_jobs.h"
+#include "core/scratch_dir.h"
+#include "hosted/cloud/address_job_handlers.h"
+#include "hosted/cloud/address_zone.h"
+#include "hosted/cloud/docker_address_driver.h"
+#include "hosted/cloud/docker_machine_driver.h"
+#include "hosted/cloud/driver_config.h"
+#include "hosted/cloud/ec2_address_driver.h"
+#include "hosted/cloud/ec2_machine_driver.h"
+#include "hosted/cloud/fleet_job_handlers.h"
+#include "hosted/model/hosted_policy.h"
+#include "hosted/model/limits_hold.h"
+#include "hosted/model/stats_jobs.h"
 #include "jobs/maintenance_jobs.h"
+#include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
 
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -34,21 +47,30 @@ namespace {
 using namespace opennova;
 using namespace opennova::novaworld_server;
 
-// The machine driver over a hosting setup that is on. Its members go in
-// reverse: the driver first, then its runner, then the scratch directory.
+// The machine driver over a driver setup (hosted/cloud/driver_config.h
+// driver_setup), and with the
+// static addresses on their driver and their zone (hosted/cloud/address_driver.h,
+// hosted/cloud/address_zone.h) over the same runner. Its members go in reverse: the
+// drivers first, then their runner, then the scratch directory.
 struct MachineDriverStack {
 	ScratchDir scratch; // the ec2 driver's
 	std::unique_ptr<proc::CommandRunner> runner;
 	std::unique_ptr<hosted::MachineDriver> driver;
+	std::unique_ptr<hosted::AddressDriver> addresses;
+	std::unique_ptr<hosted::ZoneDriver> zone;
 };
 
-// The driver `setup` names: the ec2 driver over its own scratch directory and
-// AWS CLI runner, or the docker driver over the Docker Engine API (the local
-// stack's); no driver, with `error`, when its scratch directory cannot be made.
-MachineDriverStack make_machine_driver(const HostedSetup &setup, std::string &error) {
+// The driver `hosting` names over `setup`: the ec2 driver over its own
+// scratch directory and AWS CLI runner, or the docker driver over the Docker
+// Engine API (the local stack's), each with the static addresses' driver and
+// zone whenever their settings read (setup.addresses; the ec2 driver's:
+// Elastic IPs and Route 53, over its runner), the add-on on or off; no
+// driver, with `error`, when its scratch directory cannot be made.
+MachineDriverStack make_machine_driver(
+		const hosted::HostedPolicy &hosting, const hosted::DriverSetup &setup, std::string &error) {
 	MachineDriverStack stack;
-	if (setup.provider == "ec2") {
-		hosted::Ec2MachineConfig ec2 = setup.fleet.ec2;
+	if (hosting.provider == "ec2") {
+		hosted::Ec2MachineConfig ec2 = setup.driver.ec2;
 		stack.scratch = ScratchDir::make("opennova-hosted-", error);
 		if (stack.scratch.empty()) {
 			error = "the ec2 driver's scratch directory: " + error;
@@ -57,10 +79,30 @@ MachineDriverStack make_machine_driver(const HostedSetup &setup, std::string &er
 		ec2.scratch_dir = stack.scratch.path().u8string();
 		stack.runner = std::make_unique<proc::ProcessCommandRunner>(
 				proc::ProcessCommandRunner::service_environment(), ec2.scratch_dir);
+		if (setup.addresses) {
+			hosted::Ec2AddressConfig addresses;
+			addresses.aws_cli = ec2.aws_cli;
+			addresses.region = ec2.region;
+			addresses.deployment = ec2.deployment;
+			stack.addresses = std::make_unique<hosted::Ec2AddressDriver>(std::move(addresses), *stack.runner);
+			hosted::Route53ZoneConfig zone;
+			zone.aws_cli = ec2.aws_cli;
+			zone.region = ec2.region;
+			zone.zone = hosting.fleet.address_zone;
+			zone.zone_id = setup.driver.addresses.zone_id;
+			stack.zone = std::make_unique<hosted::Route53Zone>(std::move(zone), *stack.runner);
+		}
 		stack.driver = std::make_unique<hosted::Ec2MachineDriver>(std::move(ec2), *stack.runner);
 		return stack;
 	}
-	stack.driver = std::make_unique<hosted::DockerMachineDriver>(setup.fleet.docker);
+	stack.driver = std::make_unique<hosted::DockerMachineDriver>(setup.driver.docker);
+	if (setup.addresses) {
+		const hosted::DriverConfig::Addresses &a = setup.driver.addresses;
+		std::string why;
+		const auto range = hosted::DockerAddressDriver::parse_range(a.docker_range, why);
+		stack.addresses = std::make_unique<hosted::DockerAddressDriver>(*range, setup.driver.docker);
+		stack.zone = std::make_unique<hosted::FileZone>(hosting.fleet.address_zone, a.zone_file);
+	}
 	return stack;
 }
 
@@ -75,34 +117,34 @@ int run(const program::Boot &boot) {
 
 	// Every part below outlives the pool (declared before it): the handlers
 	// call into them.
-	std::optional<BillingStack> billing_stack;
+	std::optional<billing::BillingStack> billing_stack;
 	try {
 		auto lease = boot.pool.acquire();
-		billing_stack.emplace(make_billing(billing::billing_config_from_env(), boot.pool, *lease));
+		billing_stack.emplace(
+				billing::make_billing(billing::billing_config_from_env(), boot.pool, *lease));
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] FATAL: the worker's boot: %s\n", e.what());
 		return 1;
 	}
 	MailStack mail = make_mail(config);
-	const HostedSetup hosting = hosted_setup(config);
-	// The object store the data sets' jobs run over (whether or not hosting is on).
-	ObjectStoreStack store;
-	if (hosting.store_ok) {
-		std::string error;
-		store = make_object_store(hosting, config, error);
-		if (!store.store)
-			return program::fatal("the object store: " + error);
-		std::printf("[boot] data sets: jobs over the %s store\n", store.store->kind());
-	}
+	const hosted::HostedPolicy hosting = hosted::hosted_policy(config);
+	// With hosting on, the driver that launches its machines (and the static
+	// addresses', whenever their settings read): its settings incomplete is
+	// this boot's FATAL, never hosting off here while web and the fleet, which
+	// read the policy alone, take starts and sell addresses.
 	MachineDriverStack machines;
 	if (hosting.on) {
+		hosted::DriverSetup driver;
 		std::string error;
-		machines = make_machine_driver(hosting, error);
+		if (!hosted::driver_setup(hosting, driver, error))
+			return program::fatal("the machine driver: " + error);
+		machines = make_machine_driver(hosting, driver, error);
 		if (!machines.driver)
 			return program::fatal("the machine driver: " + error);
 	}
 
 	jobs::register_account_jobs(registry);
+	billing::register_billing_prune(registry);
 	hosted::register_stats_jobs(registry);
 	register_mail_jobs(registry, *mail.mailer);
 	billing::Billing *billing = billing_stack->billing.get();
@@ -112,19 +154,49 @@ int run(const program::Boot &boot) {
 				[](db::Database &db) { hosted::limits_hold::reconciled(db); });
 		billing::register_billing_jobs(registry, billing->sync());
 	}
-	if (machines.driver)
-		hosted::register_fleet_jobs(registry, *machines.driver);
-	if (store.store)
-		hosted::register_data_set_jobs(registry, *store.store, store.scratch.path().u8string());
+	if (machines.driver) {
+		hosted::AddressDriver *addresses = machines.addresses.get();
+		hosted::register_fleet_jobs(registry, *machines.driver, hosting.fleet.placement, {},
+				addresses == nullptr
+						? std::function<void(db::ConnectionPool &)>()
+						: [addresses](db::ConnectionPool &pool) {
+							  hosted::sweep_addresses(pool, *addresses);
+						  });
+		// With the add-on off they release what is held and allocate nothing.
+		if (addresses != nullptr)
+			hosted::register_address_jobs(registry, *addresses, *machines.zone, hosting.addresses_on);
+	}
 
 	jobs::WorkerPoolConfig worker_config;
 	worker_config.threads = config.worker_threads;
 	jobs::WorkerPool workers(boot.pool, registry, worker_config);
 	workers.start();
 
-	// The worker's watchdog: its pool's claim loop.
+	// Its periodic kinds, in every worker process. The at-start ones (the
+	// billing reconcile) are keyed by the release its tasks run, its ECS task
+	// definition's revision (core/ecs_metadata.h): every task of one release
+	// enqueues each once between them. Off ECS (the local stack, the tests)
+	// they are keyed by their kind alone.
+	std::string release;
+	if (const std::string uri = ecs::metadata_uri_from_env(); !uri.empty()) {
+		std::string error;
+		if (ecs::read_task_revision(uri, release, error))
+			std::printf("[boot] worker: release %s (its at-start jobs once per release)\n",
+					release.c_str());
+		else
+			std::fprintf(stderr,
+					"[boot] WARN worker: its release: %s; its at-start jobs are keyed by their "
+					"kind alone\n",
+					error.c_str());
+	}
+	jobs::Scheduler scheduler(boot.pool, worker_schedule(config, hosting),
+			jobs::Scheduler::wall_now_ms, 1000, release);
+	scheduler.start();
+
+	// The worker's watchdog: its pool's claim loop and its scheduler's ticks.
 	Watchdog watchdog;
 	watchdog.watch("job pool", [&workers] { return workers.loop_turns(); });
+	watchdog.watch("job scheduler", [&scheduler] { return scheduler.turns(); });
 
 	program::LoopHooks hooks;
 	hooks.heartbeat = [billing](db::Database &db, Heartbeat &beat, int64_t) {
@@ -133,10 +205,11 @@ int run(const program::Boot &boot) {
 	};
 	const int exit_code = program::run_main_loop("worker", boot, watchdog, hooks);
 
-	// Each worker ends once its job has (a job cut short runs again on the
-	// next lease's worker); then the parts, the driver last. The machines run
-	// on for the controller to resume.
+	// The scheduler first, so nothing more is enqueued; each worker ends once
+	// its job has (a job cut short runs again on the next lease's worker); then
+	// the parts, the driver last. The machines run on for the fleet to resume.
 	std::printf("[shutdown] stopping the job workers\n");
+	scheduler.stop();
 	workers.stop();
 	return exit_code;
 }

@@ -121,4 +121,14 @@ describe('ServersPage', () => {
     expect(wrapper.text()).toContain('Hosting is off');
     expect(wrapper.find('#servers-allowance').exists()).toBe(false);
   });
+
+  it('shows the fleet notice while launches are held for one of the live servers', async () => {
+    const held = await mountPage(serversResponse([hostedServer(1, { state: 'provisioning', phase: { name: 'launches_held' } })]));
+    expect(held.get('.launches-held').text()).toContain('New machines are held for a moment');
+    held.unmount();
+
+    const wrapper = await mountPage(serversResponse([hostedServer(1)]));
+    unmount = () => wrapper.unmount();
+    expect(wrapper.find('.launches-held').exists()).toBe(false);
+  });
 });

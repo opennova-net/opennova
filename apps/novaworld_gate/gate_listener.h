@@ -1,7 +1,7 @@
 #pragma once
 
-#include "catalog_repository.h"
-#include "health.h"
+#include "core/health.h"
+#include "program/catalog_repository.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/lobby_repository.h>
@@ -104,10 +104,10 @@ public:
 	const catalog::GameCatalog &games() const { return games_; }
 
 	// The receive loop's turns so far (one per datagram or 250 ms wait): the
-	// stall watchdog's progress counter (health.h). Thread-safe.
+	// stall watchdog's progress counter (core/health.h). Thread-safe.
 	uint64_t loop_turns() const { return loop_turns_.load(std::memory_order_relaxed); }
 
-	// The gate's heartbeat fields (health.h), from the main loop's connection:
+	// The gate's heartbeat fields (core/health.h), from the main loop's connection:
 	// probes_unanswered, the probes left unanswered for want of a lobby (none
 	// takes clients and no fallback) since the last call, and lobbies_live, the
 	// lobby instances that take clients now, behind the one lobby address (read

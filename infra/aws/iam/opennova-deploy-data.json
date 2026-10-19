@@ -147,26 +147,6 @@
       "Resource": "arn:aws:ssm:${region}:${account_id}:parameter/opennova/*"
     },
     {
-      "Sid": "SsmSessionDocument",
-      "Effect": "Allow",
-      "Action": "ssm:StartSession",
-      "Resource": "arn:aws:ssm:${region}:${account_id}:document/SSM-SessionManagerRunShell"
-    },
-    {
-      "Sid": "SsmSessionOnOpenNovaMachines",
-      "Effect": "Allow",
-      "Action": [
-        "ssm:StartSession",
-        "ssm:GetConnectionStatus"
-      ],
-      "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
-      "Condition": {
-        "StringLike": {
-          "aws:ResourceTag/opennova:deployment": "opennova-*"
-        }
-      }
-    },
-    {
       "Sid": "SsmOwnSessions",
       "Effect": "Allow",
       "Action": [

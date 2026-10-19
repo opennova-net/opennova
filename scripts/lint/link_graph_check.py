@@ -19,15 +19,21 @@ TARGET level are the two structural seams:
      NovaWorld service's programs under apps/novaworld_* and the service
      tests). Everything else — the engine groups, the godot adapter, the
      other apps/tests — is a violation. hiredis is contained the same way one
-     level up: the service's shared library (opennova_novaworld_common, whose
-     HTTP half holds the Redis client) is the ONLY library that links
-     opennova_redis (the interface target over the system hiredis,
-     hiredis_ssl and OpenSSL), and every target reaching it links that
-     library directly (the five programs, their cores and their tests).
+     level up: web's core (opennova_novaworld_web_core, which holds the Redis
+     client) is the ONLY library that links opennova_redis (the interface
+     target over the system hiredis, hiredis_ssl and OpenSSL), and every
+     target reaching it links that library directly (web and its tests).
 
   2. Forbidden edges: the game net stack never links the service leg (the
      service sits ABOVE opennova_net), and the godot adapter links
-     session+gate via opennova_net, never the service.
+     session+gate via opennova_net, never the service. Within the NovaWorld
+     service's layered libraries (apps/novaworld_common/README.md "Build
+     layout and tests"; the include lint's SERVICE LAYERS): only the
+     worker's targets reach the cloud's library, the data program and the
+     data sets never reach hosting, billing or the accounts, the gate and the
+     lobby reach only the core, the program runtime and the service, and
+     hostd never reaches the service or the program runtime (it builds
+     without them).
 
 PUBLIC vs PRIVATE keywords are deliberately not consulted: a STATIC library's
 PRIVATE deps still propagate onto every downstream link line (as $<LINK_ONLY>
@@ -88,22 +94,38 @@ PQ_RULE_REASON = (
     "links opennova_pq; consumers must link the service target directly"
 )
 REDIS_TARGET = "opennova_redis"
-COMMON_TARGET = "opennova_novaworld_common"
+WEB_CORE_TARGET = "opennova_novaworld_web_core"
 REDIS_RULE_REASON = (
-    "hiredis containment: only opennova_novaworld_common links opennova_redis; "
-    "consumers must link the shared library directly"
+    "hiredis containment: only opennova_novaworld_web_core links opennova_redis; "
+    "consumers must link web's core directly"
 )
 # (leaf, its one owner, reason): every target reaching the leaf is the owner or
 # links the owner directly.
 CONTAINED = [
     (PQ_TARGET, SERVICE_TARGET, PQ_RULE_REASON),
-    (REDIS_TARGET, COMMON_TARGET, REDIS_RULE_REASON),
+    (REDIS_TARGET, WEB_CORE_TARGET, REDIS_RULE_REASON),
 ]
+# The NovaWorld service's layered libraries and programs (apps/novaworld_common,
+# apps/novaworld_<program>).
+NW = "opennova_novaworld_"
+NW_CORE, NW_PROTOCOL, NW_PROGRAM = NW + "core", NW + "hosting_protocol", NW + "program"
+NW_JOBS, NW_ACCOUNTS, NW_BILLING = NW + "jobs", NW + "accounts", NW + "billing"
+NW_DATA_SETS, NW_MODEL, NW_CLOUD = NW + "data_sets", NW + "hosting_model", NW + "hosting_cloud"
+NW_GATE = [NW + "gate", NW + "gate_core"]
+NW_LOBBY = [NW + "lobby", NW + "lobby_core"]
+NW_WEB = [NW + "web", WEB_CORE_TARGET]
+NW_FLEET = [NW + "fleet", NW + "fleet_core"]
+NW_WORKER = [NW + "worker", NW + "worker_core"]
+NW_DATA = [NW + "data"]
+HOSTD_TARGETS = ["opennova_hostd", "opennova_hostd_core"]
 # Defined only when the build turns OPENNOVA_NOVAWORLD_SERVICE on (the repo
-# root's option, off by default; opennova_redis with BUILD_NOVAWORLD_HTTP as
-# well): a graphviz dump of a tree configured without it lacks them, which
-# vacates no rule. The files walk always sees them.
-SERVICE_GATED = {PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, COMMON_TARGET}
+# root's option, off by default; opennova_redis, web, the fleet, the worker and
+# the data program with BUILD_NOVAWORLD_HTTP as well; the core and the agents'
+# protocol on Linux too): a graphviz dump of a tree configured without it lacks
+# them, which vacates no rule. The files walk always sees them.
+SERVICE_GATED = {PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, NW_CORE, NW_PROTOCOL, NW_PROGRAM,
+                 NW_JOBS, NW_ACCOUNTS, NW_BILLING, NW_DATA_SETS, NW_MODEL, NW_CLOUD,
+                 *NW_GATE, *NW_LOBBY, *NW_WEB, *NW_FLEET, *NW_WORKER, *NW_DATA}
 
 # (reason, from-targets, to-targets, targets allowed to be absent from the
 # graph without a warning — e.g. the adapter target lives in the godot/src
@@ -144,6 +166,36 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         ["opennova_editor"],
         {"opennova", "opennova_bindings"},  # defined only in the godot/src CMake root
     ),
+    (
+        "the cloud is the worker's (apps/novaworld_common/README.md): only "
+        "opennova_novaworld_worker reaches opennova_novaworld_hosting_cloud, never web, "
+        "the fleet, the gate, the lobby, the data program or the worker's core web links",
+        NW_GATE + NW_LOBBY + NW_WEB + NW_FLEET + NW_DATA + [NW + "worker_core"],
+        [NW_CLOUD],
+        set(),
+    ),
+    (
+        "the data program reads the store and the data sets alone (decision 2 of the "
+        "service's split): it and the data sets never reach hosting, billing or the accounts",
+        NW_DATA + [NW_DATA_SETS],
+        [NW_MODEL, NW_BILLING, NW_ACCOUNTS],
+        set(),
+    ),
+    (
+        "the gate and the lobby stand on the core, the program runtime and the service "
+        "alone: no domain library, no other program's code, no Redis",
+        NW_GATE + NW_LOBBY,
+        [NW_PROTOCOL, NW_JOBS, NW_ACCOUNTS, NW_BILLING, NW_DATA_SETS, NW_MODEL, NW_CLOUD,
+         WEB_CORE_TARGET, NW + "fleet_core", NW + "worker_core", REDIS_TARGET],
+        set(),
+    ),
+    (
+        "hostd builds without the service (apps/serve/Dockerfile): it reaches the core and "
+        "the agents' protocol alone, never the service or the program runtime",
+        HOSTD_TARGETS,
+        [SERVICE_TARGET, NW_PROGRAM],
+        set(HOSTD_TARGETS),  # Linux only
+    ),
 ]
 
 LINK_KEYWORDS = {
@@ -157,11 +209,11 @@ DOT_EDGE = re.compile(r'^\s*"(node\d+)"\s*->\s*"(node\d+)"')
 TLL_CALL = re.compile(r"target_link_libraries\s*\(([^)]*)\)", re.DOTALL)
 TARGET_DEF = re.compile(r"add_(?:library|executable)\s*\(\s*([A-Za-z0-9_.\-]+)")
 SET_CALL = re.compile(r"set\s*\(\s*([A-Za-z0-9_]+)\s+([^)]+)\)", re.DOTALL)
-# tests/editor/CMakeLists.txt's rows: opennova_add_editor_test(<stem> [MIXED] [NAME <name>]
-# [SOURCES ...] [LIBS ...]) builds <name, else editor_<stem>>_test linked against LIBS (else
+# tests/editor/CMakeLists.txt's rows: opennova_add_editor_test(<stem> [MIXED [RETAIL_PARTS ...]]
+# [NAME <name>] [SOURCES ...] [LIBS ...]) builds <name, else editor_<stem>>_test linked against LIBS (else
 # opennova_editor); opennova_add_editor_executable(<target> SOURCES ... LIBS ...) builds <target>.
 EDITOR_TEST_CALL = re.compile(r"\bopennova_add_editor_(test|executable)\s*\(([^)]*)\)", re.DOTALL)
-EDITOR_TEST_KEYWORDS = {"MIXED", "SERIAL", "NAME", "TIMEOUT", "SOURCES", "LIBS"}
+EDITOR_TEST_KEYWORDS = {"MIXED", "RETAIL_PARTS", "BAKES", "NAME", "TIMEOUT", "SOURCES", "LIBS"}
 
 
 def graph_from_graphviz(build_dir: Path) -> tuple[dict[str, set[str]], set[str]] | None:
@@ -358,7 +410,7 @@ def main() -> int:
             if path:
                 violations.append(f"{' -> '.join(path)}  [{reason}]")
 
-    for name in (PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, COMMON_TARGET):
+    for name in (PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, WEB_CORE_TARGET):
         if name not in known and name not in warned and source == "files":
             warned.add(name)
             print(f"[linkgraph] WARNING: rule target '{name}' not in the "

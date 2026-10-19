@@ -27,6 +27,8 @@
       <p v-if="billing.limits_hold_reason" class="font-mono text-xs text-ink-muted">{{ billing.limits_hold_reason }}</p>
     </div>
 
+    <AttentionList />
+
     <dl class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3">
       <StatTile
         label="Live servers"
@@ -75,8 +77,10 @@
 </template>
 
 <script setup lang="ts">
-// /admin/overview: the headline numbers, each from its own read so one
-// failing leaves the rest: live servers against the cap and the machines by
+// /admin/overview: what needs an admin first (AttentionList, the admin
+// layout's read of GET /api/admin/attention), then the headline numbers, each
+// from its own read so one failing leaves the rest: live servers against the
+// cap and the machines by
 // kind (GET /api/admin/hosted), players on hosted servers now with the fleet's
 // last 24 hours (GET /api/admin/hosted/stats), subscribers by tier and
 // payments past due with a banner while the hosted servers' limits are on
@@ -84,6 +88,7 @@
 // (GET /api/admin/server-status). Polled every 30 s.
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
+import AttentionList from '../../components/AttentionList.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
 import Sparkline from '../../components/charts/Sparkline.vue';
 import StatTile from '../../components/charts/StatTile.vue';

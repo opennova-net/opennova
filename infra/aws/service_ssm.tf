@@ -6,8 +6,8 @@
 # Under /opennova/<deployment>/:
 #   infra.env   (String, here) what Terraform knows that the toolbox needs (it
 #               runs no Terraform for a deploy, and neither does the deploy
-#               workflow): the cluster, each program's task definition (the
-#               template a deploy clones) and the backup task's, the subnets
+#               workflow): the clusters, each program's task definition (the
+#               template a deploy clones), the backup task's and hostd's, the subnets
 #               and security group of the toolbox's one-off tasks, the image
 #               registry, the database's names, the hosted machines' settings,
 #               the account, the operations bucket and the log groups; one
@@ -37,13 +37,20 @@ locals {
       OPENNOVA_OPS_BUCKET         = local.ops_bucket_name
       OPENNOVA_LOG_GROUP          = aws_cloudwatch_log_group.service.name
       OPENNOVA_MACHINES_LOG_GROUP = aws_cloudwatch_log_group.machines.name
+      OPENNOVA_SERVERS_LOG_GROUP  = aws_cloudwatch_log_group.servers.name
       AWS_REGION                  = local.region
       BACKUP_BUCKET               = local.ops_bucket_name
       BACKUP_PREFIX               = local.backup_prefix
       # The cluster and its services (the programs' names), each program's
-      # task definition as Terraform made it and the backup task's, as JSON.
-      OPENNOVA_CLUSTER          = aws_ecs_cluster.main.name
-      OPENNOVA_TASK_DEFINITIONS = jsonencode(merge({ for p, d in aws_ecs_task_definition.program : p => d.arn }, { backup = aws_ecs_task_definition.backup.arn }))
+      # task definition as Terraform made it, the backup task's and, with
+      # hosting on, hostd's (the fleet cluster's, OPENNOVA_FLEET_CLUSTER), as
+      # JSON.
+      OPENNOVA_CLUSTER = aws_ecs_cluster.main.name
+      OPENNOVA_TASK_DEFINITIONS = jsonencode(merge(
+        { for p, d in aws_ecs_task_definition.program : p => d.arn },
+        { backup = aws_ecs_task_definition.backup.arn },
+        { for d in aws_ecs_task_definition.hostd : "hostd" => d.arn },
+      ))
       # Each program's task counts: the first deploy starts each service at
       # its desired count and raises its floor to its min (Terraform's next
       # apply sets the same).
@@ -85,7 +92,7 @@ resource "aws_ssm_parameter" "infra_env" {
 }
 
 # The release as it stands (the toolbox's writes, which the resource ignores):
-# whether the programs have one decides whether their services run tasks
+# the programs it names are the ones whose services run tasks and alarm
 # (programs.tf, local.released). Read by path, so a stack's first plan, before
 # the parameter exists, reads none.
 data "aws_ssm_parameters_by_path" "deployment" {

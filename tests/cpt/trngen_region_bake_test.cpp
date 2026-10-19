@@ -25,6 +25,8 @@
 #include <string>
 #include <vector>
 
+#include "common/test_parts.h"
+
 using namespace opennova;
 using namespace opennova::trngen;
 
@@ -144,10 +146,12 @@ std::vector<uint16_t> check_region(Baked &from, std::vector<uint16_t> map, const
 void test_threads_cancel_refusals(const Baked &baked);
 void test_rough_ground(const Baked &baked);
 
-void test_regions() {
+// The whole bake's state, and what a region bake over it refuses (test_regions bakes the same map again, its own
+// part's, for the chain of edits).
+void test_state() {
 	const std::array<CornerLockFlags, 4> none{};
-	std::vector<uint16_t> map = ground();
-	Baked baked = bake_whole(map, none);
+	const std::vector<uint16_t> map = ground();
+	const Baked baked = bake_whole(map, none);
 
 	// bake_terrain_state is bake_terrain, keeping its state, and a cancel never set (TerrainBakeInput::cancel)
 	// changes no byte: the plain bake runs under one, so one comparison holds both.
@@ -177,7 +181,12 @@ void test_regions() {
 
 	test_threads_cancel_refusals(baked);
 	test_rough_ground(baked);
+}
 
+void test_regions() {
+	const std::array<CornerLockFlags, 4> none{};
+	std::vector<uint16_t> map = ground();
+	Baked baked = bake_whole(map, none);
 	map = check_region(baked, map, {{270, 140, 30, 30}}, 3.0, none, "inside a leaf", 1, false);
 	map = check_region(baked, map, {{300, 300, 40, 12}}, -2.0, none, "across a 64 edge", 2, false);
 	map = check_region(baked, map, {{630, 630, 20, 20}}, 4.0, none,
@@ -323,10 +332,13 @@ void test_walk_cancelled_partway() {
 
 } // namespace
 
-int main() {
-	test_regions();
-	test_locks();
-	test_walk_cancelled_partway();
+// A row per part (tests/common/test_parts.h), so the parts' whole bakes run side by side; with no argument every part.
+int main(int argc, char **argv) {
+	failures += test_parts::run(argc, argv,
+	                            {{"state", {[] { test_state(); return 0; }}},
+	                             {"regions", {[] { test_regions(); return 0; }}},
+	                             {"locks", {[] { test_locks(); return 0; }}},
+	                             {"walk", {[] { test_walk_cancelled_partway(); return 0; }}}});
 	if (failures) return 1;
 	std::printf("OK: region bakes land the whole bake's bytes and state\n");
 	return 0;

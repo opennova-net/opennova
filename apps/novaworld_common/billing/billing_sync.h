@@ -12,7 +12,7 @@
 // and the heartbeat wherever they run. Service policy over Stripe's REST API,
 // not a port.
 //
-//   - billing.reconcile (reconcile_all): at a controller's start, every
+//   - billing.reconcile (reconcile_all): at a release's start, every
 //     reconcile_minutes (ONNET_BILLING_RECONCILE_MINUTES, 360) and when an
 //     admin asks (POST /api/admin/billing/reconcile): every subscription of the account, a page of
 //     100 at a time with its customer expanded (at most kMaxReconcilePages); a subscription whose
@@ -91,6 +91,7 @@ struct SyncStatus {
 	// checked: what GET /api/billing/tiers shows.
 	std::array<std::optional<PriceInfo>, kTierCount + 1> tier_prices;
 	std::optional<PriceInfo> own_machine_price;
+	std::optional<PriceInfo> static_address_price; // none while no list is set
 	// The last full reconcile that completed (Unix seconds; 0: none yet), and
 	// why the last one did not ("" when it did).
 	int64_t last_reconcile_at = 0;
@@ -146,7 +147,7 @@ public:
 	// Called on the job's thread, with a connection of its own, after each full
 	// reconcile that completed with the prices checking out and no subscription
 	// of ours selling a price the configuration does not name (the hosted
-	// servers' limits hold, hosted/limits_hold.h, trusts the cache after one).
+	// servers' limits hold, hosted/model/limits_hold.h, trusts the cache after one).
 	void set_on_reconciled(std::function<void(db::Database &)> on_reconciled) {
 		on_reconciled_ = std::move(on_reconciled);
 	}

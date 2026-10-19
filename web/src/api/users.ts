@@ -8,13 +8,19 @@
 
 import { adminClient, apiClient } from './client';
 import { adminCall, type AdminResult } from './admin';
+import { parseAdminAddress } from './adminAddresses';
 import { parseHostedServer } from './hostedServer';
-import type { AdminSubscription, TierNumber } from '../types/billing';
+import type { AdminAddress } from '../types/addresses';
+import type { AdminSubscription, SubscriptionItem, TierNumber } from '../types/billing';
 import type { EntitlementSource, HostedServer } from '../types/hostedServer';
 import type {
+  CompGrants,
+  CompGrantsReply,
   CreateUserPayload,
   RegisterPayload,
   Role,
+  SoldCapacity,
+  SoldItem,
   UpdateUserPayload,
   User,
   UserDetail,
@@ -28,6 +34,7 @@ const count = (v: unknown): number => (Number.isInteger(v) && (v as number) >= 0
 const tierOf = (v: unknown): TierNumber | null => (v === 1 || v === 2 || v === 3 ? v : null);
 const SOURCES: ReadonlySet<unknown> = new Set<EntitlementSource>(['none', 'tier', 'comp']);
 const sourceOf = (v: unknown): EntitlementSource => (SOURCES.has(v) ? (v as EntitlementSource) : 'none');
+const ITEMS: ReadonlySet<unknown> = new Set<SubscriptionItem>(['tier', 'own_machine', 'static_address']);
 
 // An account, or null when it has no id, name or role.
 export function pickUser(value: unknown): User | null {
@@ -44,6 +51,7 @@ export function pickUser(value: unknown): User | null {
     email: typeof v.email === 'string' && v.email !== '' ? v.email : null,
     role: v.role as Role,
     comp_servers: count(v.comp_servers),
+    comp_own_machines: count(v.comp_own_machines),
     max_servers: count(v.max_servers ?? (v.entitlement as { max_servers?: unknown } | undefined)?.max_servers),
   };
 }
@@ -74,7 +82,7 @@ export function pickSubscription(value: unknown): AdminSubscription | null {
   if (typeof v !== 'object' || v === null || typeof v.stripe_subscription_id !== 'string') return null;
   return {
     stripe_subscription_id: v.stripe_subscription_id,
-    item: v.item === 'own_machine' ? 'own_machine' : 'tier',
+    item: ITEMS.has(v.item) ? (v.item as SubscriptionItem) : 'tier',
     tier: tierOf(v.tier),
     quantity: count(v.quantity),
     status: str(v.status),
@@ -82,6 +90,24 @@ export function pickSubscription(value: unknown): AdminSubscription | null {
     current_period_end: str(v.current_period_end),
     cancel_at_period_end: v.cancel_at_period_end === true,
   };
+}
+
+function pickSoldItem(value: unknown): SoldItem | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || !Number.isInteger(v.sold) || !Number.isInteger(v.sellable)) return null;
+  return { sold: v.sold as number, sellable: v.sellable as number };
+}
+
+// The sold capacity a user's page and a grant's reply carry, or null when
+// the reply named none it could read.
+function pickCapacity(value: unknown): SoldCapacity | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.oversold !== 'boolean') return null;
+  const shared = pickSoldItem(v.shared);
+  const own = pickSoldItem(v.own_machines);
+  const addresses = pickSoldItem(v.addresses);
+  if (!shared || !own || !addresses) return null;
+  return { shared, own_machines: own, addresses, oversold: v.oversold };
 }
 
 function pickDetail(data: unknown): UserDetail | null {
@@ -100,11 +126,16 @@ function pickDetail(data: unknown): UserDetail | null {
     entitlement: {
       ...pickEntitlement(e, user),
       comp_servers: Number.isInteger(e.comp_servers) ? (e.comp_servers as number) : user.comp_servers,
+      comp_own_machines: Number.isInteger(e.comp_own_machines) ? (e.comp_own_machines as number) : user.comp_own_machines,
       tier_servers: count(e.tier_servers),
       own_machines: count(e.own_machines),
       can_start: e.can_start === true,
     },
+    capacity: pickCapacity(v.capacity),
     servers,
+    addresses: Array.isArray(v.addresses)
+      ? v.addresses.map(parseAdminAddress).filter((a): a is AdminAddress => a !== null)
+      : [],
     billing: {
       livemode: billing.livemode === true,
       stripe_customer_id: typeof billing.stripe_customer_id === 'string' && billing.stripe_customer_id !== '' ? billing.stripe_customer_id : null,
@@ -148,11 +179,19 @@ export function updateUser(id: number, payload: UpdateUserPayload): Promise<Admi
   return adminCall(() => adminClient.put<unknown>(`/users/${id}`, payload), pickUserReply);
 }
 
-// PUT /api/admin/users/<id>/comp-servers: the admin's grant of hosted servers
-// (0 to 16). Lowering it below what the account runs makes the service stop
-// its newest servers first; 404 not_found for an unknown account.
-export function setCompServers(id: number, compServers: number): Promise<AdminResult<User>> {
-  return adminCall(() => adminClient.put<unknown>(`/users/${id}/comp-servers`, { comp_servers: compServers }), pickUserReply);
+// PUT /api/admin/users/<id>/comp: the admin's grants of hosted servers and own
+// machines (0 to 16 each, both set at once), answered with the account and
+// the sold capacity (a grant counts as sold, and may take it past what the
+// fleet sells). Lowering them below what the account runs makes the service
+// stop its newest servers first; 404 not_found for an unknown account.
+export function setCompGrants(id: number, grants: CompGrants): Promise<AdminResult<CompGrantsReply>> {
+  return adminCall(
+    () => adminClient.put<unknown>(`/users/${id}/comp`, { servers: grants.servers, own_machines: grants.own_machines }),
+    (data) => {
+      const user = pickUserReply(data);
+      return user ? { user, capacity: pickCapacity((data as { capacity?: unknown }).capacity) } : null;
+    },
+  );
 }
 
 // DELETE /api/admin/users/<id>; 409 active_subscription while a support tier
