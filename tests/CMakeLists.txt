@@ -3063,19 +3063,17 @@ target_include_directories(occlusion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(occlusion_test PRIVATE cxx_std_17)
 add_test(NAME occlusion COMMAND occlusion_test)
 
-# Real-asset occlusion probe: retail Armry01.3di (the 00TRa armory) through the
-# engine's 3DI3 read and occlusion-model build (the parsed struct IS the model,
-# ADR 0027), camera walked room to room, per-room section masks asserted
+# Model-file occlusion probe: the synthetic armory (the 00TRa armory's floor plan)
+# through the engine's 3DI3 read and occlusion-model build (the parsed struct IS the
+# model, ADR 0027), camera walked room to room, per-room section masks asserted
 # (window/portal/open-slot legs over authored OFAC topology).
-# Uses the committed Armry01 fixture in CI; OPENNOVA_JO_ASSETS can override it
-# for a retail-install parity run.
 add_executable(occlusion_armry_test world/occlusion_armry_test.cpp)
 target_link_libraries(occlusion_armry_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(occlusion_armry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(occlusion_armry_test PRIVATE cxx_std_17)
 target_compile_definitions(occlusion_armry_test PRIVATE
     OPENNOVA_ARMRY_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/threedi/synth/armory.3di")
-opennova_add_mixed_test(occlusion_armry COMMAND occlusion_armry_test)
+add_test(NAME occlusion_armry COMMAND occlusion_armry_test)
 
 # The FP weapon action FSM (WeaponAction_ProcessFrame @0x540e60 + Anim_InitActions
 # @0x541fa0, net-re §5.62): the ACTION-row bake (auto delays from clip ticks), the
@@ -4436,7 +4434,7 @@ opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bm
 # without OPENNOVA_JO_ASSETS / OPENNOVA_JO_DIR.
 foreach(gated
         anim/reload_clips_us01 anim/weapon_action_clips
-        npruntime/remote_body_state npruntime/held_weapon_attach npruntime/authored_payload_00trg
+        npruntime/held_weapon_attach npruntime/authored_payload_00trg
         particle/gore_set_catalog)
     get_filename_component(gated_name ${gated} NAME)
     get_filename_component(gated_dir ${gated} DIRECTORY)
@@ -4445,6 +4443,19 @@ foreach(gated
     target_include_directories(${gated_dir}_${gated_name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(${gated_dir}_${gated_name}_test PRIVATE cxx_std_17)
     opennova_add_gated_test(${gated_dir}_${gated_name} COMMAND ${gated_dir}_${gated_name}_test)
+endforeach()
+
+# The npruntime probes that became ctests over minted data (ADR 0041): the
+# remote body-state arbitration over a clip set the test mints.
+foreach(minted
+        npruntime/remote_body_state)
+    get_filename_component(minted_name ${minted} NAME)
+    get_filename_component(minted_dir ${minted} DIRECTORY)
+    add_executable(${minted_dir}_${minted_name}_test ${minted}_test.cpp)
+    target_link_libraries(${minted_dir}_${minted_name}_test PRIVATE opennova_net opennova_runtime)
+    target_include_directories(${minted_dir}_${minted_name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(${minted_dir}_${minted_name}_test PRIVATE cxx_std_17)
+    add_test(NAME ${minted_dir}_${minted_name} COMMAND ${minted_dir}_${minted_name}_test)
 endforeach()
 
 add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)
