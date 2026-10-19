@@ -5106,12 +5106,14 @@ int test_hosted_server_routes(Harness &h) {
 		headers.push_back(kJson);
 		return h.send("PUT", "/api/admin/users/" + std::to_string(id) + "/comp", headers, body);
 	};
+	// Its pools: the servers on shared machines are the rest of max and used.
 	const auto entitlement_is = [](const crow::json::rvalue &json, int64_t max, int64_t used, int64_t own,
 										int64_t own_used, bool can_start, const char *source) {
 		if (!json || !json.has("entitlement")) return false;
 		const auto &e = json["entitlement"];
 		return e["max_servers"].i() == max && e["used"].i() == used && e["own_machines"].i() == own &&
-				e["own_used"].i() == own_used && e["can_start"].b() == can_start && str(e["source"]) == source;
+				e["own_used"].i() == own_used && e["shared_servers"].i() == max - own &&
+				e["shared_used"].i() == used - own_used && e["can_start"].b() == can_start && str(e["source"]) == source;
 	};
 	const std::string settings =
 			"{\"game_name\":\"Ana's Server\",\"expansion_id\":null,\"max_players\":16,"
@@ -5302,11 +5304,12 @@ int test_hosted_server_routes(Harness &h) {
 			json["server"]["expansion"]["id"].i() == h.jox_id && str(json["server"]["expansion"]["code"]) == "jox01" &&
 			str(json["server"]["expansion_display_name"]) == "Escalation");
 	const int64_t ana_second = json["server"]["id"].i();
-	// The third: every server the grant allows is live.
+	// The third: every shared server the grant allows is live.
 	reply = start(ana, settings);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_limit");
-	TEST_EXPECT(json && json["max_servers"].i() == 2 && json["used"].i() == 2 && json.has("message"));
+	TEST_EXPECT(json && json["shared_servers"].i() == 2 && json["shared_used"].i() == 2 && json.has("message") &&
+			!json.has("max_servers"));
 	reply = list(ana);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(entitlement_is(json, 2, 2, 0, 0, true, "comp") && json["servers"].size() == 2);
@@ -5344,8 +5347,8 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["server"]["state"]) == "stopping");
 	reply = start(ben, "{\"game_name\":\"Ben's again\"}");
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_limit" && json["used"].i() == 1 &&
-			json["max_servers"].i() == 1);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_limit" && json["shared_used"].i() == 1 &&
+			json["shared_servers"].i() == 1);
 
 	// The fleet view: admin only; it names the owner and never the admin password.
 	h.pool.acquire()->exec("UPDATE hosted_servers SET admin_password = 'planted-admin-secret' WHERE id = $1;",
@@ -5429,10 +5432,13 @@ int test_hosted_server_routes(Harness &h) {
 	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"data_set_id\":\"x\"}");
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 
-	// The own-machine add-on: none without it (a grant of servers buys no machine),
-	// then a tier with one machine paid for, and the start on it.
+	// A dedicated machine: none without one (a grant of shared servers is no
+	// machine), then a tier with one machine paid for beside it, and the start on
+	// it.
 	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
-	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_own_machine");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_own_machine" && json &&
+			json["own_machines"].i() == 0 && json["own_used"].i() == 0);
 	{
 		auto db = h.pool.acquire();
 		const int64_t period_end = billing::unix_now() + 30 * 24 * 60 * 60;
@@ -5453,8 +5459,9 @@ int test_hosted_server_routes(Harness &h) {
 		machine.tier = 0;
 		billing::upsert_subscription(*db, machine);
 	}
+	// Her tier's server and the machine's: two.
 	json = crow::json::load(body_text(list(fay)));
-	TEST_EXPECT(entitlement_is(json, 1, 0, 1, 0, true, "tier"));
+	TEST_EXPECT(entitlement_is(json, 2, 0, 1, 0, true, "tier"));
 	// Her tier and the admin's grant of a server, both.
 	TEST_EXPECT(json["entitlement"]["tier"].i() == 1 && json["entitlement"]["granted"].b());
 	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
@@ -5463,7 +5470,7 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 202 && json["server"]["own_machine"].b());
 	const int64_t fay_server = json["server"]["id"].i();
 	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), fay_server)->own_machine);
-	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(fay))), 1, 1, 1, 1, true, "tier"));
+	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(fay))), 2, 1, 1, 1, true, "tier"));
 
 	// The list's ended servers: the newest 10, after the live ones.
 	{
@@ -7109,9 +7116,9 @@ std::string event_body(const std::string &id, const std::string &customer, bool 
 }
 
 // The tiers (public), the account's billing, checkout and the portal: the
-// session and CSRF refusals, the item's rules (an own machine needs a tier, a
-// tier while one grants is already_subscribed, an account with an admin grant
-// buys nothing), the Checkout session's settings
+// session and CSRF refusals, the item's rules (a dedicated machine needs no
+// tier, a tier while one grants is already_subscribed, an account with an
+// admin grant buys nothing), the Checkout session's settings
 // (the customer made once with its idempotency key and the account's metadata,
 // the previous open session expired, the return URLs, the terms, the life), the
 // sync after a checkout, the portal, the buckets, prices that do not check out
@@ -7160,12 +7167,14 @@ int test_billing_routes(Harness &h) {
 	reply = me(ana_s);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && json["max_servers"].i() == 0 &&
-			json["comp_servers"].i() == 0 && json["own_machines"].i() == 0 && json["used"].i() == 0 &&
-			json["stopping"].i() == 0);
+			json["shared_servers"].i() == 0 && json["comp_servers"].i() == 0 && json["own_machines"].i() == 0 &&
+			json["used"].i() == 0 && json["stopping"].i() == 0 && json["shared_used"].i() == 0 &&
+			json["shared_stopping"].i() == 0);
 	TEST_EXPECT(!json["can_start"].b() && !json["can_manage"].b() && json["can_subscribe"].b());
 	TEST_EXPECT(json["comp_addresses"].i() == 0 && !json["granted"].b());
 	TEST_EXPECT(json["subscription"].t() == crow::json::type::Null &&
-			json["own_machine_subscription"].t() == crow::json::type::Null);
+			json["own_machine_subscriptions"].t() == crow::json::type::List &&
+			json["own_machine_subscriptions"].size() == 0 && !json.has("own_machine_subscription"));
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
 
 	// Checkout's refusals: logged out, no CSRF header, the body (Bea's bucket).
@@ -7180,9 +7189,16 @@ int test_billing_routes(Harness &h) {
 	}
 	TEST_EXPECT(h.stripe->count(StripeRequest::Method::Post, "/v1/customers") == 0);
 
-	// Ana's checkouts (her bucket: 6). The add-on first needs a tier.
+	// Ana's checkouts (her bucket: 6). A dedicated machine needs no tier: its
+	// session first, which the next checkout's expires.
 	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"own_machine\"}");
-	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_eligible");
+	TEST_EXPECT(reply.code == 200);
+	const auto machine_customer = billing::customer_of(*h.pool.acquire(), ana);
+	const std::string machine_session = machine_customer ? machine_customer->open_checkout_session : std::string();
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		TEST_EXPECT(!machine_session.empty() && h.stripe->checkout_sessions[machine_session].price_id == "price_hown");
+	}
 	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier1\"}");
 	json = crow::json::load(body_text(reply));
 	if (reply.code != 200) std::fprintf(stderr, "  checkout: %s\n", describe(reply).c_str());
@@ -7205,6 +7221,7 @@ int test_billing_routes(Harness &h) {
 		TEST_EXPECT(keyed);
 		const auto &session = h.stripe->checkout_sessions[first_session];
 		TEST_EXPECT(session.customer == customer->stripe_customer_id && session.price_id == "price_htier1");
+		TEST_EXPECT(first_session != machine_session && h.stripe->checkout_sessions[machine_session].status == "expired");
 		TEST_EXPECT(session.success_url ==
 				std::string(kSiteUrl) + "/me/support?checkout=success&session_id={CHECKOUT_SESSION_ID}");
 		TEST_EXPECT(session.cancel_url == std::string(kSiteUrl) + "/me/support?checkout=cancel");
@@ -7238,7 +7255,7 @@ int test_billing_routes(Harness &h) {
 	const std::string period_end = str(json["subscription"]["current_period_end"]);
 	TEST_EXPECT(period_end.size() == 20 && period_end[10] == 'T' && period_end.back() == 'Z');
 	TEST_EXPECT(json["can_manage"].b() && !json["can_subscribe"].b());
-	// A tier while one grants: the portal changes it. The add-on now may start.
+	// A tier while one grants: the portal changes it. A dedicated machine beside it may.
 	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier2\"}");
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_subscribed");
 	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"own_machine\"}");
@@ -7310,7 +7327,8 @@ int test_billing_routes(Harness &h) {
 	TEST_EXPECT(gus > 0 && !gus_s.empty() && billing::set_comp_grants(*h.pool.acquire(), gus, { 2, 1 }));
 	json = crow::json::load(body_text(me(gus_s)));
 	TEST_EXPECT(json && json["granted"].b() && !json["can_subscribe"].b() && json["comp_servers"].i() == 2 &&
-			json["comp_own_machines"].i() == 1 && json["max_servers"].i() == 2);
+			json["comp_own_machines"].i() == 1 && json["max_servers"].i() == 3 && json["shared_servers"].i() == 2 &&
+			json["own_machines"].i() == 1);
 	for (const char *item : { "{\"item\":\"tier1\"}", "{\"item\":\"tier3\"}", "{\"item\":\"own_machine\"}",
 				 "{\"item\":\"static_address\"}" }) {
 		reply = post("/api/billing/checkout", gus_s, item);
@@ -7340,8 +7358,9 @@ int test_billing_routes(Harness &h) {
 // Checkout never sells twice what a paid session the webhook has not brought
 // yet already sold: the previous session read from Stripe first, and once
 // complete, the customer synced and the checkout judged again (a tier:
-// already_subscribed; the add-on: own_machine_limit once the account has an own
-// machine for every server it may run, several fine below that). A previous
+// already_subscribed; a static address: address_limit once the account has one
+// for every dedicated machine). Dedicated machines sell one at a time with no
+// tier, as many as the fleet holds. A previous
 // session Stripe no longer knows is no obstacle; one Stripe cannot be asked
 // about refuses (503) with nothing made. While a payment is past due, no
 // add-on sells (payment_past_due).
@@ -7377,34 +7396,40 @@ int test_billing_checkout_guard(Harness &h) {
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_subscribed");
 	TEST_EXPECT(session_reads(paid_tier) == 1);
 	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).max_servers == 1);
-	// Her own machine: one, which tier 1's one server fills; paid, a second is
-	// refused through the same sync.
+	// Her dedicated machine, then a static address for it (the success page's
+	// sync between: an address needs the machine it is for synced); that address
+	// paid, a second is refused through the same sync, then from the cache with
+	// no Stripe call.
 	reply = checkout(dot_s, "own_machine");
 	TEST_EXPECT(reply.code == 200);
 	const std::string paid_machine = open_session(dot);
 	TEST_EXPECT(paid_machine != paid_tier && !h.stripe->complete_checkout(paid_machine).empty());
-	reply = checkout(dot_s, "own_machine");
-	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "own_machine_limit");
+	const auto dot_customer = billing::customer_of(*h.pool.acquire(), dot);
+	TEST_EXPECT(dot_customer && h.billing->sync().sync_customer(*h.pool.acquire(), dot_customer->stripe_customer_id,
+										billing::unix_now()) == billing::SyncOutcome::Synced);
 	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).own_machines == 1);
-	// From the cache now, with no Stripe call.
-	const size_t reads = session_reads(paid_machine);
-	reply = checkout(dot_s, "own_machine");
-	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "own_machine_limit");
-	TEST_EXPECT(session_reads(paid_machine) == reads);
+	reply = checkout(dot_s, "static_address");
+	TEST_EXPECT(reply.code == 200);
+	const std::string paid_address = open_session(dot);
+	TEST_EXPECT(paid_address != paid_machine && !h.stripe->complete_checkout(paid_address).empty());
+	reply = checkout(dot_s, "static_address");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
+	TEST_EXPECT(session_reads(paid_address) == 1);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).address_grants == 1);
+	const size_t reads = session_reads(paid_address);
+	reply = checkout(dot_s, "static_address");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
+	TEST_EXPECT(session_reads(paid_address) == reads);
 
-	// Fay on tier 3: own machines one at a time below its three servers. A
-	// previous session Stripe could not be asked about refuses; one it no
-	// longer knows does not.
-	const std::string fay_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
-			{ billing::kMetaUserId, std::to_string(fay) }, { billing::kMetaUsername, "chk_fay" } });
-	h.stripe->add_subscription(fay_cus, "price_htier3", 1, "active", billing::unix_now() + 30 * 86400);
-	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), fay_cus, billing::unix_now()) ==
-			billing::SyncOutcome::Synced);
+	// Fay, with no tier: dedicated machines one at a time, each its own
+	// checkout, the paid one synced before the next. A previous session Stripe
+	// could not be asked about refuses; one it no longer knows does not.
 	TEST_EXPECT(checkout(fay_s, "own_machine").code == 200);
 	TEST_EXPECT(!h.stripe->complete_checkout(open_session(fay)).empty());
 	reply = checkout(fay_s, "own_machine");
 	TEST_EXPECT(reply.code == 200);
-	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), fay, billing::unix_now()).own_machines == 1);
+	const billing::Entitlement fay_now = billing::entitlement_of(*h.pool.acquire(), fay, billing::unix_now());
+	TEST_EXPECT(fay_now.own_machines == 1 && fay_now.max_servers == 1 && fay_now.tier == 0 && fay_now.can_start);
 	const std::string pending = open_session(fay);
 	const size_t sessions_before = h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions");
 	h.stripe->fail_next(billing::StripeReply::Outcome::Unreachable);
@@ -7470,7 +7495,7 @@ int test_billing_checkout_guard(Harness &h) {
 }
 
 // The capacity gate (hosted/model/sold_capacity.h) at checkout: the harness's fleet
-// sells 2 x 12 shared places and 16 own machines (set_fleet_placement). An
+// sells 2 x 12 shared places and 16 dedicated machines (set_fleet_placement). An
 // admin's grants count as sold: filled to the last place, GET /api/billing/tiers
 // says which items are available, and a checkout past the fleet answers 409
 // sold_out. A checkout that goes through reserves its place under the
@@ -7513,8 +7538,8 @@ int test_billing_capacity(Harness &h) {
 	auto json = tiers();
 	TEST_EXPECT(json && json["tiers"][0]["available"].b() && json["own_machine"]["available"].b());
 
-	// Ivy on tier 1. An admin's 16 servers on 16 own machines fill the own
-	// machines: her own machine is sold out.
+	// Ivy on tier 1. An admin's grant of dedicated machines alone fills the
+	// fleet's 16: her dedicated machine is sold out, a tier still sells.
 	const std::string ivy_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
 			{ billing::kMetaUserId, std::to_string(ivy) }, { billing::kMetaUsername, "cap_ivy" } });
 	h.stripe->add_subscription(ivy_cus, "price_htier1", 1, "active", billing::unix_now() + 30 * 86400);
@@ -7522,7 +7547,7 @@ int test_billing_capacity(Harness &h) {
 			billing::SyncOutcome::Synced);
 	const int64_t own_left = 16 - sold().own;
 	TEST_EXPECT(own_left > 0 && own_left <= 16);
-	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), jon, { static_cast<int>(own_left), static_cast<int>(own_left) }));
+	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), jon, { 0, static_cast<int>(own_left) }));
 	json = tiers();
 	TEST_EXPECT(json && !json["own_machine"]["available"].b() && json["tiers"][0]["available"].b());
 	auto reply = checkout(ivy_s, "own_machine");
@@ -8063,9 +8088,9 @@ int test_admin_user_detail(Harness &h) {
 	TEST_EXPECT(json["user"]["comp_servers"].i() == 0 && json["user"]["max_servers"].i() == 1);
 	TEST_EXPECT(body_text(reply).find("password_hash") == std::string::npos);
 	const auto &e = json["entitlement"];
-	TEST_EXPECT(e["max_servers"].i() == 1 && str(e["source"]) == "tier" && e["tier"].i() == 1 &&
-			e["comp_servers"].i() == 0 && e["tier_servers"].i() == 1 && e["own_machines"].i() == 0 &&
-			e["can_start"].b());
+	TEST_EXPECT(e["max_servers"].i() == 1 && e["shared_servers"].i() == 1 && str(e["source"]) == "tier" &&
+			e["tier"].i() == 1 && e["comp_servers"].i() == 0 && e["tier_servers"].i() == 1 &&
+			e["own_machines"].i() == 0 && e["comp_own_machines"].i() == 0 && e["can_start"].b());
 	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
 	const auto customer = billing::customer_of(*h.pool.acquire(), ana->id);
 	TEST_EXPECT(customer && !json["billing"]["livemode"].b() &&
@@ -8084,11 +8109,14 @@ int test_admin_user_detail(Harness &h) {
 	reply = h.send("GET", "/api/admin/users/" + std::to_string(service.id), { kBearer });
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
 	TEST_EXPECT(nws::delete_service_account(*h.pool.acquire(), service.id).ok);
-	// A comped account with no billing: its ids null.
+	// A comped account with no billing (3 shared servers and a dedicated
+	// machine: 4 servers): its ids null.
 	const auto bea = nws::get_user_by_username(*h.pool.acquire(), "bill_bea");
-	TEST_EXPECT(bea && nws::billing::set_comp_grants(*h.pool.acquire(), bea->id, { 3, 0 }));
+	TEST_EXPECT(bea && nws::billing::set_comp_grants(*h.pool.acquire(), bea->id, { 3, 1 }));
 	json = crow::json::load(body_text(h.send("GET", "/api/admin/users/" + std::to_string(bea->id), { kBearer })));
-	TEST_EXPECT(json && json["entitlement"]["max_servers"].i() == 3 && str(json["entitlement"]["source"]) == "comp" &&
+	TEST_EXPECT(json && json["entitlement"]["max_servers"].i() == 4 && json["entitlement"]["shared_servers"].i() == 3 &&
+			json["entitlement"]["own_machines"].i() == 1 && json["entitlement"]["comp_own_machines"].i() == 1 &&
+			str(json["entitlement"]["source"]) == "comp" &&
 			json["entitlement"]["tier"].t() == crow::json::type::Null && json["entitlement"]["tier_servers"].i() == 0 &&
 			json["billing"]["stripe_customer_id"].t() == crow::json::type::Null &&
 			json["billing"]["subscriptions"].size() == 0);
@@ -8099,14 +8127,16 @@ int test_admin_user_detail(Harness &h) {
 	bool bea_seen = false;
 	for (const auto &u : json["users"]) {
 		if (str(u["username"]) == "bill_ana") {
-			ana_seen = u["entitlement"]["max_servers"].i() == 1 && str(u["entitlement"]["source"]) == "tier" &&
+			ana_seen = u["entitlement"]["max_servers"].i() == 1 && u["entitlement"]["shared_servers"].i() == 1 &&
+					u["entitlement"]["own_machines"].i() == 0 && str(u["entitlement"]["source"]) == "tier" &&
 					u["entitlement"]["tier"].i() == 1 && u["entitlement"]["comp_servers"].i() == 0 &&
 					u["live_servers"].i() == 0 &&
 					str(u["subscription_status"]) == "active" && u["max_servers"].i() == 1;
 		}
 		if (str(u["username"]) == "bill_bea") {
-			bea_seen = u["entitlement"]["max_servers"].i() == 3 && str(u["entitlement"]["source"]) == "comp" &&
-					u["entitlement"]["comp_servers"].i() == 3 &&
+			bea_seen = u["entitlement"]["max_servers"].i() == 4 && u["entitlement"]["shared_servers"].i() == 3 &&
+					u["entitlement"]["own_machines"].i() == 1 && u["entitlement"]["comp_own_machines"].i() == 1 &&
+					str(u["entitlement"]["source"]) == "comp" && u["entitlement"]["comp_servers"].i() == 3 &&
 					u["subscription_status"].t() == crow::json::type::Null && u["comp_servers"].i() == 3;
 		}
 	}

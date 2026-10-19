@@ -663,12 +663,14 @@ statements to a listed server" above).
 
 A support tier is a monthly Stripe subscription that supports the project and sets the
 account's hosting entitlement ([`hosted/README.md`](hosted/README.md)): tier 1, 2 or 3 lets it run 1, 2 or
-3 hosted servers (`billing/tiers.h`), and the own-machine add-on, one subscription of
-quantity 1 per own machine (bought through Checkout, canceled in the Portal, which
-changes no quantity), moves that many of them onto machines of their own while a tier
-also grants, and the static-address add-on, one subscription per address, gives an own
-machine a fixed public address and a name ([`hosted/README.md`](hosted/README.md) "Static
-addresses"). The add-ons end with the tier ("The add-ons end with the tier" below).
+3 hosted servers on shared machines (`billing/tiers.h`). A dedicated machine is a product
+of its own, one subscription of quantity 1 per machine (bought through Checkout, as many
+as the fleet sells, canceled in the Portal, which changes no quantity): each one adds a
+hosted server on a machine of its own, with no tier or beside one (tier 2 and two
+dedicated machines: four servers). The static-address add-on, one subscription per
+address, gives a dedicated machine a fixed public address and a name
+([`hosted/README.md`](hosted/README.md) "Static addresses"). The add-ons end with the tier
+("The add-ons end with the tier" below).
 The service makes Stripe Checkout and Customer Portal
 sessions and hands the browser their URL; no publishable key and no Stripe.js reach the
 site. Everything here is service policy (`billing/`).
@@ -730,9 +732,10 @@ site. Everything here is service policy (`billing/`).
   success page) leaves the add-ons to the next reconcile.
 - **The capacity gate** (`hosted/model/sold_capacity.*`): a new subscription is never sold past
   what the fleet holds. Every account holds what its entitlement grants, used or not (its
-  servers less those on own machines are shared places, its own machines are own
-  machines), an admin's comp grant included; the fleet sells `ONNET_FLEET_MAX_SHARED` x
-  `ONNET_FLEET_SHARED_SLOTS` shared places, `ONNET_FLEET_MAX_OWN` own machines and
+  shared servers are shared places, its dedicated machines are dedicated machines), an
+  admin's comp grant included; the fleet sells `ONNET_FLEET_MAX_SHARED` x
+  `ONNET_FLEET_SHARED_SLOTS` shared places, `ONNET_FLEET_MAX_OWN` dedicated machines (the
+  only cap on an account's) and
   `ONNET_FLEET_MAX_ADDRESSES` static addresses (each one granted, used or not, and each
   the cloud still holds: one on its way out holds its Elastic IP until released). A
   checkout is judged, and its item reserved (`billing_checkout_reservations`, for a day),
@@ -773,9 +776,9 @@ compose stack takes the test-mode set from the vault through
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the own-machine add-on's amount, the static-address add-on's while the fleet sells addresses, and each one's `available` (the fleet takes one more for an account that has nothing yet; false: hosting is full) |
-| `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `comp_servers`, `comp_own_machines`, `own_machines`, `static_addresses`, `used`, `stopping`, `can_start`), the support tier and add-on subscriptions shown, each static address's subscription (`address_subscriptions`, with its address once named), `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
-| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine" \| "static_address"}`: 200 `{"url"}`; 400; 403 `not_eligible`, `payment_past_due` (an add-on while a payment is past due); 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `own_machine_limit`, `address_limit` (an address for every own machine already), `sold_out` (the fleet has sold all it holds of what the item adds); 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. The account's previous session is settled first (a completed one synced), then the item judged and reserved under the hosting-start lock, so nothing is sold twice or past the fleet; the session asks for the terms of service and stamps the instance, the account and the reservation on the subscription |
+| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the dedicated machine's amount (`own_machine`), the static-address add-on's while the fleet sells addresses, and each one's `available` (the fleet takes one more for an account that has nothing yet, no tier assumed; false: hosting is full) |
+| `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `shared_servers`, `comp_servers`, `comp_own_machines`, `own_machines`, `static_addresses`, `used`, `stopping`, `shared_used`, `shared_stopping`, `can_start`), the support tier shown, each dedicated machine's subscription still open (`own_machine_subscriptions`, newest first), each static address's subscription (`address_subscriptions`, with its address once named), `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
+| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine" \| "static_address"}`: 200 `{"url"}`; 400; 403 `not_eligible` (an account not active, or with an admin grant), `payment_past_due` (an add-on while a payment is past due); 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `address_limit` (an address for every dedicated machine already), `sold_out` (the fleet has sold all it holds of what the item adds); 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. A dedicated machine needs no tier. The account's previous session is settled first (a completed one synced), then the item judged and reserved under the hosting-start lock, so nothing is sold twice or past the fleet; the session asks for the terms of service and stamps the instance, the account and the reservation on the subscription |
 | `POST /api/billing/portal` | a website session, the CSRF header | 200 `{"url"}`; with `{"cancel_subscription": "sub_..."}` (a static address's) the Portal's cancel flow for it, returning to `/me/addresses`; 400; 404 `no_billing_account`, `not_found`; 429; 503 |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook): as `GET /api/me/billing`; 404; 429 (3, then one every 10 s); 503 |
 | `POST /api/billing/webhook` | Stripe's signature | above |

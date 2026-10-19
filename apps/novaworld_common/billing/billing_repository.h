@@ -137,11 +137,12 @@ bool has_granting_subscription(db::Database &db, int64_t user_id, int64_t now);
 // --- An admin's comp grants (comp_grants, 0017_capacity_addresses.sql) ---
 
 // What an admin grants an account outside any subscription (each 0..16,
-// tiers.h kMaxCompServers and kMaxCompOwnMachines): hosted servers, and own
-// machines for them (entitlement.h).
+// tiers.h kMaxCompServers and kMaxCompOwnMachines): hosted servers on shared
+// machines, and dedicated machines, each one more server on a machine of its
+// own (entitlement.h).
 struct CompGrants {
-	int servers = 0;
-	int own_machines = 0;
+	int servers = 0;      // shared servers
+	int own_machines = 0; // dedicated machines
 };
 // The account's grants (none: zeros).
 CompGrants comp_grants_of(db::Database &db, int64_t user_id);

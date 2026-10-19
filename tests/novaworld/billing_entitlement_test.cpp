@@ -1,9 +1,9 @@
 // The hosting entitlement (apps/novaworld_common/billing/entitlement.h) and the
 // billing tables it reads (billing/billing_repository.h, backend/migrations/
 // 0002_billing.sql). The pure core first: which Stripe statuses grant, the
-// period's 48 h net, a comp grant against a tier, the own-machine add-on that
-// counts only beside a tier, an admin's own machines counting while the
-// account has servers, past_due keeping the servers but starting none, an
+// period's 48 h net, a comp grant against a tier for the shared servers, the
+// dedicated machines (paid ones with no tier or beside one, and an admin's),
+// each one more server, past_due keeping the servers but starting none, an
 // inactive or service account getting nothing, and the add-ons that end with
 // the tier (add_ons_to_end). Then the same through a
 // migrated database of the test's own (common/test_database.h), and the
@@ -106,10 +106,11 @@ int test_entitlement_core() {
 	// Nothing: no servers, no start.
 	Entitlement e = billing::entitlement_from(player(), {}, kNow);
 	TEST_EXPECT(e.max_servers == 0 && !e.can_start && e.source == "none" && e.tier == 0 && e.status.empty());
-	// Each tier its servers.
+	// Each tier its servers, on shared machines.
 	for (int tier = 1; tier <= billing::kTierCount; ++tier) {
 		e = billing::entitlement_from(player(), { tier_sub(tier, "active") }, kNow);
-		TEST_EXPECT(e.max_servers == billing::kTierServers[tier] && e.tier == tier && e.can_start);
+		TEST_EXPECT(e.max_servers == billing::kTierServers[tier] && e.shared_servers == e.max_servers &&
+				e.own_machines == 0 && e.tier == tier && e.can_start);
 		TEST_EXPECT(e.source == "tier" && e.status == "active" && e.current_period_end == kNow + 20 * kDay);
 	}
 	// Trialing grants and starts.
@@ -117,10 +118,11 @@ int test_entitlement_core() {
 	TEST_EXPECT(e.max_servers == 2 && e.can_start);
 	// A comp grant alone: its servers, and it starts.
 	e = billing::entitlement_from(player(3), {}, kNow);
-	TEST_EXPECT(e.max_servers == 3 && e.can_start && e.source == "comp" && e.comp_servers == 3 && e.tier == 0);
+	TEST_EXPECT(e.max_servers == 3 && e.shared_servers == 3 && e.can_start && e.source == "comp" &&
+			e.comp_servers == 3 && e.tier == 0);
 	// Comp against tier: the larger, the tier named when it gives at least the grant.
 	e = billing::entitlement_from(player(2), { tier_sub(1, "active") }, kNow);
-	TEST_EXPECT(e.max_servers == 2 && e.source == "comp" && e.tier == 1);
+	TEST_EXPECT(e.max_servers == 2 && e.shared_servers == 2 && e.source == "comp" && e.tier == 1);
 	e = billing::entitlement_from(player(2), { tier_sub(2, "active") }, kNow);
 	TEST_EXPECT(e.max_servers == 2 && e.source == "tier");
 	e = billing::entitlement_from(player(1), { tier_sub(3, "active") }, kNow);
@@ -141,28 +143,33 @@ int test_entitlement_core() {
 	// unpaid or canceled: nothing.
 	e = billing::entitlement_from(player(), { tier_sub(2, "unpaid") }, kNow);
 	TEST_EXPECT(e.max_servers == 0 && !e.can_start);
-	// The add-on: its quantity, only while a tier grants.
+	// The dedicated machines: each one more server, on a machine of its own,
+	// with no tier (its servers are its machines') or beside one (Tier 2 and two
+	// of them: four servers, two on shared machines).
 	const SubscriptionRow two_machines = sub("om2", ItemKind::OwnMachine, 0, "active", kNow + kDay, 2);
 	e = billing::entitlement_from(player(), { tier_sub(2, "active"), two_machines }, kNow);
-	TEST_EXPECT(e.own_machines == 2 && e.max_servers == 2);
+	TEST_EXPECT(e.own_machines == 2 && e.shared_servers == 2 && e.max_servers == 4 && e.source == "tier");
 	e = billing::entitlement_from(player(), { two_machines }, kNow);
-	TEST_EXPECT(e.own_machines == 0 && e.max_servers == 0);
+	TEST_EXPECT(e.own_machines == 2 && e.shared_servers == 0 && e.max_servers == 2 && e.can_start &&
+			e.source == "none" && e.tier == 0);
 	e = billing::entitlement_from(player(3), { two_machines }, kNow);
-	TEST_EXPECT(e.own_machines == 0 && e.max_servers == 3);
+	TEST_EXPECT(e.own_machines == 2 && e.shared_servers == 3 && e.max_servers == 5);
 	e = billing::entitlement_from(
 			player(), { tier_sub(1, "active"), sub("omc", ItemKind::OwnMachine, 0, "canceled", kNow + kDay, 4) },
 			kNow);
-	TEST_EXPECT(e.own_machines == 0);
-	// An admin's own machines: counted while the account has servers (a tier's
-	// or a grant's), on top of the add-on's.
-	e = billing::entitlement_from(player(2, 1), {}, kNow);
-	TEST_EXPECT(e.own_machines == 1 && e.max_servers == 2 && e.comp_own_machines == 1 && e.can_start);
+	TEST_EXPECT(e.own_machines == 0 && e.max_servers == 1);
+	// An admin's dedicated machines: added to the paid ones, servers granted or
+	// none (a grant of 9 shared servers and 2 dedicated machines: 11 servers).
+	e = billing::entitlement_from(player(9, 2), {}, kNow);
+	TEST_EXPECT(e.shared_servers == 9 && e.own_machines == 2 && e.max_servers == 11 && e.comp_own_machines == 2 &&
+			e.source == "comp" && e.can_start);
 	e = billing::entitlement_from(player(0, 1), {}, kNow);
-	TEST_EXPECT(e.own_machines == 0 && e.max_servers == 0 && e.comp_own_machines == 1);
+	TEST_EXPECT(e.own_machines == 1 && e.shared_servers == 0 && e.max_servers == 1 && e.comp_own_machines == 1 &&
+			e.can_start && e.source == "none");
 	e = billing::entitlement_from(player(0, 1), { tier_sub(2, "active"), two_machines }, kNow);
-	TEST_EXPECT(e.own_machines == 3 && e.max_servers == 2);
+	TEST_EXPECT(e.own_machines == 3 && e.shared_servers == 2 && e.max_servers == 5);
 	// The static addresses: each subscription's and each comp one, used by no more
-	// than the own machines.
+	// than the dedicated machines.
 	const SubscriptionRow address = sub("sa1", ItemKind::StaticAddress, 0, "active", kNow + kDay);
 	billing::AccountFacts comped = player(0, 1);
 	comped.comp_addresses = 1;
@@ -172,9 +179,12 @@ int test_entitlement_core() {
 	TEST_EXPECT(e.own_machines == 0 && e.address_grants == 1 && e.static_addresses == 0);
 	e = billing::entitlement_from(player(), { tier_sub(1, "active"), sub("sac", ItemKind::StaticAddress, 0, "canceled") }, kNow);
 	TEST_EXPECT(e.address_grants == 0);
-	// A past-due add-on keeps its machines and blocks a start.
-	e = billing::entitlement_from(
-			player(), { tier_sub(1, "active"), sub("omp", ItemKind::OwnMachine, 0, "past_due", kNow + kDay, 1) }, kNow);
+	// A past-due dedicated machine keeps its server and blocks a start, beside a
+	// tier or alone.
+	const SubscriptionRow past_due_machine = sub("omp", ItemKind::OwnMachine, 0, "past_due", kNow + kDay, 1);
+	e = billing::entitlement_from(player(), { tier_sub(1, "active"), past_due_machine }, kNow);
+	TEST_EXPECT(e.own_machines == 1 && e.shared_servers == 1 && e.max_servers == 2 && !e.can_start);
+	e = billing::entitlement_from(player(), { past_due_machine }, kNow);
 	TEST_EXPECT(e.own_machines == 1 && e.max_servers == 1 && !e.can_start);
 	// Inactive and service accounts: nothing, whatever they pay or were granted.
 	billing::AccountFacts banned = player(5);
@@ -273,10 +283,10 @@ int test_entitlement_of() {
 	billing::upsert_subscription(db, cy_row);
 	TEST_EXPECT(billing::entitlement_of(db, cy, kNow).max_servers == 0);
 	TEST_EXPECT(billing::entitlement_of(db, srv, kNow).max_servers == 0);
-	// An admin's own machine beside the grant of servers.
+	// An admin's dedicated machine beside the grant of shared servers: one more server.
 	TEST_EXPECT(billing::set_comp_grants(db, ben, { 2, 1 }));
 	e = billing::entitlement_of(db, ben, kNow);
-	TEST_EXPECT(e.max_servers == 2 && e.own_machines == 1 && e.comp_own_machines == 1);
+	TEST_EXPECT(e.max_servers == 3 && e.shared_servers == 2 && e.own_machines == 1 && e.comp_own_machines == 1);
 	TEST_EXPECT(!billing::set_comp_grants(db, srv, { 1, 0 }));
 	// The grants' rules are the table's: 1..16 a row, of the two items alone.
 	const auto refused = [&db](const std::string &sql) {

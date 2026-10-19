@@ -15,20 +15,20 @@ this directory's.
 ## The entitlement and the data sets
 
 - **The hosting entitlement** (`billing/entitlement.*`): how many hosted servers an
-  account may have live, the larger of its support tier's servers (a monthly Stripe
-  subscription: tier 1, 2 or 3 grants 1, 2 or 3; `billing/tiers.h`) and an admin's comp
-  grant of servers (`comp_grants`, 0..16). Only an active player's account has one. It is
+  account may have live, in two pools. Its **shared servers**, on shared machines, are the
+  larger of its support tier's servers (a monthly Stripe subscription: tier 1, 2 or 3
+  grants 1, 2 or 3; `billing/tiers.h`) and an admin's comp grant of servers (`comp_grants`,
+  0..16). Its **dedicated machines** are each one more server, on a machine of its own
+  (`hosted_servers.own_machine`): one per dedicated-machine subscription (quantity 1
+  each; no tier needed), plus an admin's comp grant of them (`comp_grants`, 0..16), so an
+  admin, the local stack and CI give one without Stripe. Its servers are the two together
+  (tier 2 and two dedicated machines: four; an admin's grant of 9 shared servers and 2
+  dedicated machines: eleven). Only an active player's account has one. It is
   read from the billing tables (the cache of Stripe the billing sync keeps), whether or
   not billing is configured, so a deploy that breaks billing never stops a payer's
   servers. A subscription grants while Stripe calls it `active`, `trialing` or `past_due`,
   until 48 h past its period's end; `past_due` keeps the account's servers running but
-  starts no new one. The own-machine add-on (one subscription of quantity 1 per machine)
-  lets that many of the account's servers run on a machine of their own
-  (`hosted_servers.own_machine`), only while a tier also grants (once none does, the
-  billing sync sets it, and each static-address add-on, to cancel at its period's end:
-  [`../README.md`](../README.md) "The add-ons end with the tier"); an admin's comp grant of
-  own machines (`comp_grants`, 0..16) adds to them while the account has servers (a tier's
-  or a grant's), so an admin, the local stack and CI give an own machine without Stripe.
+  starts no new one.
   What every account's entitlement holds is what the service has sold, and no checkout
   sells past the fleet (`model/sold_capacity.*`; [`../README.md`](../README.md) "Billing").
   A start is still refused `at_capacity` when the fleet has no room for it now.
@@ -92,7 +92,9 @@ this directory's.
   ended (its exit code, OOM flag and the server's exit line, or the agent's reason it never
   started). The stats' restarts are
   its crash and timeout ends. A start request (`hosted::request_server`) checks the entitlement, the
-  account's live servers, its own-machine servers against the add-on, `ONNET_HOSTED_CAP`
+  account's live servers in the pool it asks for (on shared machines against its shared
+  servers, `server_limit`; on a dedicated machine against its dedicated machines,
+  `no_own_machine`), `ONNET_HOSTED_CAP`
   (a backstop beside the fleet's room) and the fleet's room in the transaction that writes
   it, under the hosted-start advisory lock. When a server is about to be placed its place
   is read again, oldest first, and one past the entitlement is stopped instead; one on an
@@ -526,16 +528,16 @@ writes need the CSRF header.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `enabled`, `full`, the account's `entitlement`, the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its own machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) and `stopped_because` (an ended server's last run: its cause, exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
+| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its own machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) and `stopped_because` (an ended server's last run: its cause, exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
-| `POST /api/me/servers` | a website session | the settings (`game_name` required; `data_set_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit`, `no_own_machine`, `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
+| `POST /api/me/servers` | a website session | the settings (`game_name` required; `data_set_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
 | `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason, why it lapsed and times) |
 | `POST /api/me/addresses` | a website session | `{"name"}`: the account's next bought address named, then allocated by a worker: 201 `{"address"}`; 400 `invalid_json`, `invalid_field`, `invalid_name`; 404; 409 `name_taken`, `no_address`; 503 `addresses_disabled` |
 | `POST /api/me/servers/<id>/stop` | a website session | 202 `stopping` (or `stopped`); 404; 409 `not_live`; 429 |
 | `POST /api/me/servers/<id>/update` | a website session | `update_requested` (placed again on the current trees; players drop): 202; 404; 409 `not_live`, `up_to_date` |
 | `GET /api/me/servers/<id>/stats` | a website session | `?range=1h`, `24h` (the default), `7d`, `30d`: the server now (`live`), the range's `summary` (availability, players, egress, the `approximate` fields) and `series`; 400; 404; 429 (60, then two a second) |
 | `GET /api/me/servers/stats` | a website session | the account's servers together, as above |
-| `PUT /api/admin/users/<id>/comp` | admin | `{"servers": 0..16, "own_machines": 0..16}`, both: 200 `{"user", "entitlement", "capacity"}` (the service's sold hosting against what the fleet sells: `shared`, `own_machines` and `addresses`, each `{sold, sellable}`, and `oversold` when a grant takes any past it; logged); 400 `invalid_json`, `missing_field`, `invalid_field`; 404 (or a service account). An entitlement down to no server stops the account's hosted servers, as a ban does |
+| `PUT /api/admin/users/<id>/comp` | admin | `{"servers": 0..16, "own_machines": 0..16}`, both (shared servers, and dedicated machines added to them): 200 `{"user", "entitlement", "capacity"}` (the service's sold hosting against what the fleet sells: `shared`, `own_machines` and `addresses`, each `{sold, sellable}`, and `oversold` when a grant takes any past it; logged); 400 `invalid_json`, `missing_field`, `invalid_field`; 404 (or a service account). An entitlement down to no server stops the account's hosted servers, as a ban does |
 | `GET /api/admin/hosted` | admin | the fleet: `enabled`, the provider, the cap, each kind's live servers and room, the live machines then the newest 10 ended (each with its state, cloud id, slots, the live servers on them (`slot_holders`: each slot's server and its state), addresses, agent and template versions, this month's egress, its `image_id` and `agent_log_stream`, its `stats` as its agent last reported them at `stats_at` with `net_in_bps` and `net_out_bps` between its two newest minutes, the `release`'s images, `outdated` (true, false, or null when nothing compares; `model/fleet_health.h` `machine_outdated`) and its static `address`) and the newest 100 servers (`?owner=`, `?state=live`, `ended`, `all`), each as the owner's plus its owner (its tier, and `granted` while an admin grants it hosting), service account, container, place, generation, image, pins, players and `tick` (its last minute's `p99_ms` and `late` ticks from its slot's report, null with none); never the admin password or an agent's credential |
 | `GET /api/admin/hosted/<id>` | admin | one server with its `phase`, `stopped_because`, events and its machine; 404 |
 | `GET /api/admin/fleet/machines/<id>` | admin | one machine for its page: `machine` (as the fleet view's, each of its `slot_holders` also with its server's `name`, `game_port` and `tick`, so the page reads no fleet list), its newest 100 `events` oldest first (`from` null at its making; a note's `to` is its `from`), its `trees` (state, bytes so far, `total_bytes` from the tree's manifest or null, tries, error); 404 |

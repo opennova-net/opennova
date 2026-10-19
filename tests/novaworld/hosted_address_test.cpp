@@ -922,9 +922,10 @@ int test_comp_uncovered() {
 	const int64_t now = billing::unix_now();
 	const std::string machines_why = "its account's own machines no longer cover it";
 
-	// Cal: one server, one own machine, one comp address. Its own machines cut to
-	// 0, the address is uncovered, judged without the cache (Cal has no
-	// subscription); its servers cut to 0, its own machines count for nothing.
+	// Cal: one shared server, one dedicated machine, one comp address. Its
+	// dedicated machines cut to 0, the address is uncovered, judged without the
+	// cache (Cal has no subscription); its shared servers cut to 0, its
+	// dedicated machine still covers it (it needs no shared server).
 	const int64_t cal = make_player(db, "unc_cal", 0);
 	TEST_EXPECT(billing::set_comp_grants(db, cal, { 1, 1 }));
 	const int64_t cal_addr = hosted::add_comp_address(db, cal, "cal-place", now).id;
@@ -932,8 +933,7 @@ int test_comp_uncovered() {
 	TEST_EXPECT(billing::set_comp_grants(db, cal, { 1, 0 }));
 	auto u = uncovered_at(db, now);
 	TEST_EXPECT(u.size() == 1 && u.count(cal_addr) == 1 && !u[cal_addr].cached && u[cal_addr].why == machines_why);
-	TEST_EXPECT(billing::set_comp_grants(db, cal, { 0, 1 }));
-	TEST_EXPECT(uncovered_at(db, now).count(cal_addr) == 1);
+	TEST_EXPECT(billing::set_comp_grants(db, cal, { 0, 1 }) && uncovered_at(db, now).empty());
 	TEST_EXPECT(billing::set_comp_grants(db, cal, { 1, 1 }) && uncovered_at(db, now).empty());
 
 	// Dot: two comp addresses, one of her two own machines cut: the newer goes.

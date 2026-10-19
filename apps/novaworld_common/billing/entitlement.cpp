@@ -67,16 +67,16 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 			address_quantity += std::max<int64_t>(s.quantity, 0);
 	}
 	const int tier_servers = kTierServers[e.tier];
-	e.max_servers = std::max(e.comp_servers, tier_servers);
+	e.shared_servers = std::max(e.comp_servers, tier_servers);
 	if (e.tier > 0 && tier_servers >= e.comp_servers)
 		e.source = "tier";
 	else if (e.comp_servers > 0)
 		e.source = "comp";
-	// The add-on moves one of the tier's servers onto a machine of its own: no
-	// tier, nothing to move. An admin's own machines move any of its servers.
-	e.own_machines = e.tier > 0 ? static_cast<int>(std::min<int64_t>(own_quantity, int64_t{ 1 } << 16)) : 0;
-	if (e.max_servers > 0) e.own_machines += e.comp_own_machines;
-	// An address is its own machine's: one past them is held, and used by none.
+	// A dedicated machine is one more server, on a machine of its own, a tier or
+	// not; an admin's are added to the paid ones.
+	e.own_machines = static_cast<int>(std::min<int64_t>(own_quantity + e.comp_own_machines, int64_t{ 1 } << 16));
+	e.max_servers = e.shared_servers + e.own_machines;
+	// An address is its dedicated machine's: one past them is held, and used by none.
 	e.address_grants = static_cast<int>(std::min<int64_t>(address_quantity + e.comp_addresses, int64_t{ 1 } << 16));
 	e.static_addresses = std::min(e.address_grants, e.own_machines);
 	e.can_start = e.max_servers > 0 && !past_due;

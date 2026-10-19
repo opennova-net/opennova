@@ -162,14 +162,12 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 		out.outcome = RequestOutcome::PastDue;
 		return out;
 	}
-	out.max_servers = entitlement.max_servers;
-	out.used = count_live_of(db, owner_user_id);
-	if (out.used >= entitlement.max_servers) {
-		out.outcome = RequestOutcome::AtLimit;
-		return out;
-	}
-	if (own_machine && count_own_live_of(db, owner_user_id) >= entitlement.own_machines) {
-		out.outcome = RequestOutcome::NoOwnMachine;
+	// Each pool its own places: a shared server within the shared servers, one
+	// on a dedicated machine within the dedicated machines.
+	out.limit = own_machine ? entitlement.own_machines : entitlement.shared_servers;
+	out.used = own_machine ? count_own_live_of(db, owner_user_id) : count_shared_live_of(db, owner_user_id);
+	if (out.used >= out.limit) {
+		out.outcome = own_machine ? RequestOutcome::NoOwnMachine : RequestOutcome::AtLimit;
 		return out;
 	}
 	if (count_live(db) >= cap || (fleet && !fleet_has_room(db, *fleet, own_machine))) {
@@ -253,6 +251,13 @@ int count_live_of(db::Database &db, int64_t owner_user_id) {
 int count_own_live_of(db::Database &db, int64_t owner_user_id) {
 	return count_of(db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 "
 										 "AND own_machine AND ") +
+					kLiveServerSql + ";",
+			{ BindValue(owner_user_id) }));
+}
+
+int count_shared_live_of(db::Database &db, int64_t owner_user_id) {
+	return count_of(db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 "
+										 "AND NOT own_machine AND ") +
 					kLiveServerSql + ";",
 			{ BindValue(owner_user_id) }));
 }

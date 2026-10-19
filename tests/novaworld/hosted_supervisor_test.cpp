@@ -644,7 +644,7 @@ int test_requests() {
 	const auto first = request(a, settings, offered, 3);
 	TEST_EXPECT(first.outcome == hosted::RequestOutcome::Created && first.id > 0);
 	const auto second = request(a, settings, offered, 3);
-	TEST_EXPECT(second.outcome == hosted::RequestOutcome::AtLimit && second.max_servers == 1 && second.used == 1);
+	TEST_EXPECT(second.outcome == hosted::RequestOutcome::AtLimit && second.limit == 1 && second.used == 1);
 	TEST_EXPECT(transitions(db, first.id) == std::vector<std::string>{ ">requested" });
 	TEST_EXPECT(hosted::count_live_of(db, a) == 1 && hosted::count_own_live_of(db, a) == 0);
 	const auto row = hosted::find_server(db, first.id);
@@ -681,33 +681,53 @@ int test_requests() {
 	// An owner's server by id, and another's not.
 	TEST_EXPECT(hosted::owned_server(db, first.id, a) && !hosted::owned_server(db, first.id, c));
 
-	// A grant of two: two live, the third at the limit; the own-machine add-on
-	// counted apart, a tier needed for it (a comp grant buys no machine).
+	// A grant of two shared servers: two live, the third at the limit; a
+	// dedicated machine counted apart, none in a grant of shared servers.
 	const int64_t g = make_player(db, "req_g", 2);
 	const int big_cap = 100;
+	const auto on_dedicated = [&](int64_t user) {
+		return hosted::request_server(db, user, settings, offered, big_cap, kWall, /*own_machine=*/true);
+	};
 	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
-	TEST_EXPECT(hosted::request_server(db, g, settings, offered, big_cap, kWall, /*own_machine=*/true).outcome ==
-			hosted::RequestOutcome::NoOwnMachine);
+	const auto no_machine = on_dedicated(g);
+	TEST_EXPECT(no_machine.outcome == hosted::RequestOutcome::NoOwnMachine && no_machine.limit == 0 &&
+			no_machine.used == 0);
 	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
 	const auto at_limit = request(g, settings, offered, big_cap);
-	TEST_EXPECT(at_limit.outcome == hosted::RequestOutcome::AtLimit && at_limit.max_servers == 2 &&
+	TEST_EXPECT(at_limit.outcome == hosted::RequestOutcome::AtLimit && at_limit.limit == 2 &&
 			at_limit.used == 2);
 	// A stopping server still counts.
 	const auto g_live = hosted::live_servers_of(db, g);
 	TEST_EXPECT(g_live.size() == 2 && g_live[0].id < g_live[1].id);
 	TEST_EXPECT(hosted::request_stop(db, g_live[0].id, "test"));
 	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::AtLimit);
-	// A tier with one own machine: one server on it, the second refused.
+	// Tier 2 and one dedicated machine: two shared servers and one on it (a
+	// dedicated machine adds to the tier's), the second on one refused, and a
+	// third shared one at the shared limit.
 	const int64_t m = make_player(db, "req_m", 0);
 	subscribe(db, m, 2, "active", "sub_req_m");
 	subscribe_machines(db, m, 1, "sub_req_m_machine");
-	const auto own = hosted::request_server(db, m, settings, offered, big_cap, kWall, true);
+	const auto own = on_dedicated(m);
 	TEST_EXPECT(own.outcome == hosted::RequestOutcome::Created && hosted::find_server(db, own.id)->own_machine);
-	TEST_EXPECT(hosted::request_server(db, m, settings, offered, big_cap, kWall, true).outcome ==
-			hosted::RequestOutcome::NoOwnMachine);
+	const auto second_own = on_dedicated(m);
+	TEST_EXPECT(second_own.outcome == hosted::RequestOutcome::NoOwnMachine && second_own.limit == 1 &&
+			second_own.used == 1);
 	TEST_EXPECT(request(m, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
-	TEST_EXPECT(hosted::count_live_of(db, m) == 2 && hosted::count_own_live_of(db, m) == 1);
-	for (const int64_t owner : { g, m }) {
+	TEST_EXPECT(request(m, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
+	const auto m_limit = request(m, settings, offered, big_cap);
+	TEST_EXPECT(m_limit.outcome == hosted::RequestOutcome::AtLimit && m_limit.limit == 2 && m_limit.used == 2);
+	TEST_EXPECT(hosted::count_live_of(db, m) == 3 && hosted::count_own_live_of(db, m) == 1 &&
+			hosted::count_shared_live_of(db, m) == 2);
+	// An admin's dedicated machine alone: one server on it, none on a shared
+	// machine (no tier, no shared server).
+	const int64_t k = make_player(db, "req_k", 0);
+	TEST_EXPECT(nws::billing::set_comp_grants(db, k, { 0, 1 }));
+	const auto k_shared = request(k, settings, offered, big_cap);
+	TEST_EXPECT(k_shared.outcome == hosted::RequestOutcome::AtLimit && k_shared.limit == 0 && k_shared.used == 0);
+	TEST_EXPECT(on_dedicated(k).outcome == hosted::RequestOutcome::Created);
+	TEST_EXPECT(on_dedicated(k).outcome == hosted::RequestOutcome::NoOwnMachine);
+	TEST_EXPECT(hosted::count_live_of(db, k) == 1 && hosted::count_own_live_of(db, k) == 1);
+	for (const int64_t owner : { g, m, k }) {
 		for (const auto &s : hosted::live_servers_of(db, owner)) hosted::request_stop(db, s.id, "test");
 		db.exec("UPDATE hosted_servers SET state = 'stopped' WHERE owner_user_id = $1 AND state = 'stopping';",
 				{ BindValue(owner) });
@@ -735,10 +755,9 @@ int test_fleet_room() {
 	Database *db = &rig.db;
 	const hosted::PlacementPolicy &fleet = rig.config.placement;
 	TEST_EXPECT(hosted::fleet_has_room(*db, fleet, false) && hosted::fleet_has_room(*db, fleet, true));
-	// A comp grant of ten servers (the fleet, not the entitlement, is the limit
-	// here) and a tier, which the own-machine add-on needs.
+	// A comp grant of ten shared servers and two dedicated machines paid for
+	// (the fleet, not the entitlement, is the limit here).
 	const int64_t owner = make_player(*db, "room_owner", 10);
-	subscribe(*db, owner, 1, "active", "sub_room");
 	subscribe_machines(*db, owner, 2, "sub_room_machines");
 	const auto start = [&](bool own) {
 		return hosted::request_server(*db, owner, rig.settings(), rig.offered(), rig.config.cap, rig.wall,
@@ -2082,7 +2101,7 @@ int test_owner_limits() {
 	const int64_t c2 = own(false);
 	const int64_t c3 = own(true);
 	TEST_EXPECT(c1 > 0 && c2 > c1 && c3 > c2);
-	TEST_EXPECT(own(true) == 0); // a fourth: every server the tier allows is live
+	TEST_EXPECT(own(true) == 0); // a third on a dedicated machine: both run one
 	rig.step();
 	subscribe_machines(*db, cy, 1, "sub_lim_cy_machines");
 	rig.step();

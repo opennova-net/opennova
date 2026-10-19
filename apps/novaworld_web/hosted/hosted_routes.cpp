@@ -413,13 +413,18 @@ void HostedRoutes::register_routes(WebApp &app) {
 // GET /api/me/servers — the logged-in account's hosted servers: {"enabled" (this
 // service runs hosted servers: a machine driver and at least one offered data
 // set), "full" (a start now would be refused at_capacity: every place under
-// ONNET_HOSTED_CAP is taken, or the fleet has no place for a shared server and
-// none for one on an own machine the account still has free), "entitlement"
-// (its hosting entitlement, billing/entitlement.h: {max_servers, used (its
-// live servers, a stopping one included), own_machines, own_used (those of
-// them on own machines), can_start, source ("none", "tier" or "comp"), tier
-// (its granting support tier, null for none), granted (an admin grants it
-// hosting, billing::admin_granted: it buys no tier or add-on)}),
+// ONNET_HOSTED_CAP is taken, or the account has a free place in a pool and
+// the fleet has no room in any pool it has one in: a shared server while
+// shared_used < shared_servers, one on a dedicated machine while own_used <
+// own_machines), "entitlement"
+// (its hosting entitlement, billing/entitlement.h: {max_servers (its shared
+// servers and its dedicated machines together), used (its live servers, a
+// stopping one included), shared_servers, shared_used (those of them on shared
+// machines), own_machines (its dedicated machines), own_used (those of them on
+// dedicated machines), can_start, source (its shared servers': "none", "tier"
+// or "comp"), tier (its granting support tier, null for none), granted (an
+// admin grants it hosting, billing::admin_granted: it buys no tier or
+// add-on)}),
 // "data_sets" (the data sets a start may pick, data_set_repository.h
 // offered_data_sets: the bases with a ready current tree, each {id,
 // display_name, title, version, missions [{file, title}] (its tree's
@@ -458,16 +463,21 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 		const bool enabled = hosting_on_ && !offered.empty();
 		out["enabled"] = enabled;
 		const billing::Entitlement entitlement = billing::entitlement_of(*db_conn, owner, billing::unix_now());
+		const int shared_used = count_shared_live_of(*db_conn, owner);
 		const int own_used = count_own_live_of(*db_conn, owner);
+		const bool shared_free = shared_used < entitlement.shared_servers;
+		const bool own_free = own_used < entitlement.own_machines;
 		bool full = enabled && count_live(*db_conn) >= cap_;
-		if (enabled && !full) {
-			full = !fleet_has_room(*db_conn, fleet_, false) &&
-					(own_used >= entitlement.own_machines || !fleet_has_room(*db_conn, fleet_, true));
+		if (enabled && !full && (shared_free || own_free)) {
+			full = !(shared_free && fleet_has_room(*db_conn, fleet_, false)) &&
+					!(own_free && fleet_has_room(*db_conn, fleet_, true));
 		}
 		out["full"] = full;
 		crow::json::wvalue entitled;
 		entitled["max_servers"] = entitlement.max_servers;
-		entitled["used"] = count_live_of(*db_conn, owner);
+		entitled["used"] = shared_used + own_used;
+		entitled["shared_servers"] = entitlement.shared_servers;
+		entitled["shared_used"] = shared_used;
 		entitled["own_machines"] = entitlement.own_machines;
 		entitled["own_used"] = own_used;
 		entitled["can_start"] = entitlement.can_start;
@@ -537,7 +547,7 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // "team_ff" (true/false), "missions" (a list of .bms names among the data set's
 // and the expansion's, the first the starting map; absent: every mission of
 // the base, then the expansion's), "own_machine" (true: on one of the
-// account's own machines, the add-on's or an admin's; absent: false, a shared
+// account's dedicated machines, a paid one or an admin's; absent: false, a shared
 // machine), "address_id" (with own_machine: one of the account's ready static addresses,
 // which its machine carries, so it lists at the same address on every start;
 // absent or null: none)}, each absent one its default. In order: require_user (401, 403 without the
@@ -549,9 +559,11 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // missions among them) and why (hosted_settings.h check_settings), then the
 // request: 403 not_entitled for an account not active or with no hosting
 // entitlement, 403 payment_past_due while a payment of its (a tier's or an
-// add-on's) is past due, 409 server_limit with "max_servers" and "used" when
-// every server it may run is live (a stopping one counts), 409 no_own_machine
-// when each of its own machines already runs one, 409 at_capacity when
+// add-on's) is past due, 409 server_limit with "shared_servers" and
+// "shared_used" when a shared machine was asked for and every server it may
+// run on shared machines is live (a stopping one counts), 409 no_own_machine
+// with "own_machines" and "own_used" when a dedicated machine was asked for and
+// each of its dedicated machines already runs one, 409 at_capacity when
 // ONNET_HOSTED_CAP servers are live or the fleet has no place for it (the supervisor's planner over the
 // machines and the servers waiting before it: every slot taken and the fleet at
 // its maximum machines), 409 address_unavailable when the address is not the
@@ -640,24 +652,32 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 			case RequestOutcome::NoSuchUser:
 			case RequestOutcome::NotEntitled:
 				log_owner(user, "start", "not_entitled");
-				return json_error(403, "not_entitled", "hosting a server needs a support tier or an admin grant");
+				return json_error(
+						403, "not_entitled", "hosting a server needs a support tier, a dedicated machine or an admin grant");
 			case RequestOutcome::PastDue:
 				log_owner(user, "start", "payment_past_due");
 				return json_error(403, "payment_past_due",
 						"a payment of this account is past due: running servers keep running, none starts");
 			case RequestOutcome::AtLimit: {
 				log_owner(user, "start", "server_limit (" + std::to_string(result.used) + " of " +
-								std::to_string(result.max_servers) + ")");
+								std::to_string(result.limit) + " shared)");
 				crow::json::wvalue out;
 				out["error"] = "server_limit";
-				out["message"] = "every hosted server this account may run is live; stop one first";
-				out["max_servers"] = result.max_servers;
-				out["used"] = result.used;
+				out["message"] = "every hosted server this account may run on shared machines is live; stop one first";
+				out["shared_servers"] = result.limit;
+				out["shared_used"] = result.used;
 				return json_reply(409, out);
 			}
-			case RequestOutcome::NoOwnMachine:
-				log_owner(user, "start", "no_own_machine");
-				return json_error(409, "no_own_machine", "each of this account's own machines runs a server");
+			case RequestOutcome::NoOwnMachine: {
+				log_owner(user, "start", "no_own_machine (" + std::to_string(result.used) + " of " +
+								std::to_string(result.limit) + ")");
+				crow::json::wvalue out;
+				out["error"] = "no_own_machine";
+				out["message"] = "each of this account's dedicated machines runs a server";
+				out["own_machines"] = result.limit;
+				out["own_used"] = result.used;
+				return json_reply(409, out);
+			}
 			case RequestOutcome::AtCapacity:
 				log_owner(user, "start", "at_capacity");
 				return json_error(409, "at_capacity", "every hosted server place is taken; try again later");

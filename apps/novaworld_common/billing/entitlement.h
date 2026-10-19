@@ -1,14 +1,15 @@
 #pragma once
 
 // An account's hosting entitlement: how many hosted servers it may have live
-// at once (max_servers = the larger of its support tier's servers and an
-// admin's comp grant of servers, comp_grants), how many of them may run on an
-// own machine (the own-machine add-on's quantity, counted only while a tier
-// also grants, plus an admin's comp grant of own machines, counted while the
-// account has servers), and whether a new one may start now. Computed from the
-// billing tables (billing_repository.h), the cache of Stripe the sync worker
-// keeps, whether or not billing is configured, so a deploy that breaks billing
-// never stops a payer's servers. Crow-free. Service policy, not a port.
+// at once, in two pools: on shared machines (shared_servers = the larger of
+// its support tier's servers and an admin's comp grant of servers,
+// comp_grants) and each on a dedicated machine of its own (own_machines = the
+// dedicated-machine subscriptions' quantities, which need no tier, plus an
+// admin's comp grant of dedicated machines), max_servers the two together; and
+// whether a new one may start now. Computed from the billing tables
+// (billing_repository.h), the cache of Stripe the sync worker keeps, whether
+// or not billing is configured, so a deploy that breaks billing never stops a
+// payer's servers. Crow-free. Service policy, not a port.
 //
 // A subscription grants while Stripe calls it active, trialing or past_due
 // (Stripe still retries the card: the servers stay up, but no new one starts),
@@ -35,9 +36,11 @@ namespace opennova::novaworld_server::billing {
 inline constexpr int64_t kPeriodNetSeconds = 48 * 60 * 60;
 
 struct Entitlement {
-	int max_servers = 0;   // max(comp_servers, the granting tier's servers); 0 locks hosting
-	// The granting add-on quantities while a tier grants, plus
-	// comp_own_machines while max_servers > 0.
+	int max_servers = 0;    // shared_servers + own_machines; 0 locks hosting
+	int shared_servers = 0; // max(comp_servers, the granting tier's servers)
+	// Its dedicated machines, each one more server on a machine of its own:
+	// the granting dedicated-machine subscriptions' quantities, a tier or not,
+	// plus comp_own_machines.
 	int own_machines = 0;
 	bool can_start = false; // max_servers > 0 and no granting subscription past_due
 	// The admin's grants (comp_grants; also on an account that gets nothing).
@@ -45,7 +48,7 @@ struct Entitlement {
 	int comp_own_machines = 0;
 	// Its static addresses: the granting static-address subscriptions'
 	// quantities plus the admin's comp addresses (address_grants, each one
-	// the cloud holds), and of them the ones its own machines can use
+	// the cloud holds), and of them the ones its dedicated machines can use
 	// (static_addresses, at most own_machines).
 	int address_grants = 0;
 	int static_addresses = 0;
@@ -54,7 +57,9 @@ struct Entitlement {
 	// The tier subscription the account's page shows: the granting one of the
 	// highest tier, else the newest one; "" with none.
 	std::string status;
-	std::string source = "none"; // "none", "tier" (the tier gives at least the grant) or "comp"
+	// Where its shared servers come from: "none", "tier" (the tier gives at
+	// least the grant) or "comp".
+	std::string source = "none";
 	std::optional<int64_t> current_period_end; // that subscription's, Unix seconds
 	bool cancel_at_period_end = false;
 };

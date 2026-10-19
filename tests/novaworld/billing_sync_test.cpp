@@ -180,7 +180,7 @@ int test_event_to_entitlement() {
 	rig.pass(++rig.now);
 	e = rig.entitlement(ana);
 	TEST_EXPECT(e.max_servers == 2 && !e.can_start);
-	// An add-on beside it.
+	// Two dedicated machines beside it: two servers more.
 	rig.fake.add_subscription(cus, "price_own", 2, "active", rig.now + kMonth);
 	{
 		std::lock_guard<std::mutex> lock(rig.fake.mu);
@@ -189,7 +189,7 @@ int test_event_to_entitlement() {
 	rig.event("evt_a4", cus);
 	rig.pass(++rig.now);
 	e = rig.entitlement(ana);
-	TEST_EXPECT(e.max_servers == 2 && e.own_machines == 2 && e.can_start);
+	TEST_EXPECT(e.max_servers == 4 && e.shared_servers == 2 && e.own_machines == 2 && e.can_start);
 	// The synchronous sync a route runs answers the same and marks its events.
 	rig.event("evt_a5", cus);
 	TEST_EXPECT(rig.sync->sync_customer(*rig.pool.acquire(), cus, rig.now) == billing::SyncOutcome::Synced);
@@ -618,7 +618,7 @@ int test_add_ons_end_with_tier() {
 	set_status(tier, "past_due");
 	rig.event("evt_end2", ana_cus);
 	rig.pass(++rig.now);
-	TEST_EXPECT(rig.entitlement(ana).max_servers == 1 && calls(own) == 0 && calls(addr) == 0);
+	TEST_EXPECT(rig.entitlement(ana).shared_servers == 1 && calls(own) == 0 && calls(addr) == 0);
 
 	set_status(tier, "canceled");
 	rig.event("evt_end3", ana_cus);

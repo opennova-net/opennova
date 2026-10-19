@@ -20,14 +20,19 @@ namespace opennova::novaworld_server {
 
 namespace {
 
-// The entitlement a users list row and a user page carry: {max_servers,
-// source, tier (null for none), comp_servers (the admin's grant of servers:
-// with a tier too, the pages show both)}, and on the user page its grant of
-// own machines (comp_own_machines), the servers its tier alone grants
-// (tier_servers, 0 for none), its own machines and whether a server may start.
+// The entitlement a users list row and a user page carry: {max_servers (its
+// shared servers and its dedicated machines together), shared_servers,
+// own_machines (its dedicated machines), comp_own_machines (the admin's grant
+// of them), source (its shared servers'), tier (null for none), comp_servers
+// (the admin's grant of shared servers: with a tier too, the pages show
+// both)}, and on the user page the servers its tier alone grants
+// (tier_servers, 0 for none) and whether a server may start.
 crow::json::wvalue entitlement_json(const billing::Entitlement &e, bool full) {
 	crow::json::wvalue out;
 	out["max_servers"] = e.max_servers;
+	out["shared_servers"] = e.shared_servers;
+	out["own_machines"] = e.own_machines;
+	out["comp_own_machines"] = e.comp_own_machines;
 	out["source"] = e.source;
 	if (e.tier > 0)
 		out["tier"] = e.tier;
@@ -35,9 +40,7 @@ crow::json::wvalue entitlement_json(const billing::Entitlement &e, bool full) {
 		out["tier"] = nullptr;
 	out["comp_servers"] = e.comp_servers;
 	if (full) {
-		out["comp_own_machines"] = e.comp_own_machines;
 		out["tier_servers"] = billing::kTierServers[e.tier];
-		out["own_machines"] = e.own_machines;
 		out["can_start"] = e.can_start;
 	}
 	return out;
@@ -75,7 +78,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	forget_ = std::move(forget);
 
 	// GET /api/admin/users — list every player (no password_hash), each with
-	// its hosting entitlement ({max_servers, source, tier, comp_servers}), its
+	// its hosting entitlement ({max_servers, shared_servers, own_machines,
+	// comp_own_machines, source, tier, comp_servers}), its
 	// live hosted servers (live_servers) and its support tier's Stripe status
 	// (subscription_status, null for none). Five reads whatever the count:
 	// the accounts, every subscription, every comp grant, every comp address
@@ -164,8 +168,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	});
 
 	// GET /api/admin/users/<id> — one player: {"user", "entitlement"
-	// ({max_servers, source, tier, comp_servers, comp_own_machines,
-	// tier_servers, own_machines, can_start}), "capacity" (the service's sold
+	// ({max_servers, shared_servers, source, tier, comp_servers,
+	// comp_own_machines, tier_servers, own_machines, can_start}), "capacity" (the service's sold
 	// capacity against what the fleet sells, billing/billing_routes.h
 	// sold_capacity_json),
 	// "servers" (its hosted servers: the live ones by id, then its newest 10
@@ -308,9 +312,10 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 
 	// PUT /api/admin/users/<id>/comp — {"servers": 0..16, "own_machines":
 	// 0..16}: an admin's grants to the account outside any subscription
-	// (comp_grants; billing/entitlement.h: its servers are the larger of the
-	// grant and its support tier's, its own machines the add-on's plus the
-	// grant's while it has servers), both set at once, answered with the
+	// (comp_grants; billing/entitlement.h: its shared servers are the larger of
+	// the grant of servers and its support tier's, and each dedicated machine
+	// granted is one more server on a machine of its own, added to the paid
+	// ones), both set at once, answered with the
 	// account, its entitlement and the sold capacity (sold_capacity_json: a grant
 	// counts as sold, and may take it past what the fleet sells, which the
 	// page warns of; logged). 400 invalid_json, invalid_field (no whole
@@ -330,7 +335,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 		const auto own_machines = body->integer("own_machines");
 		if (body->wrong_type()) return json_error(400, "invalid_field");
 		if (!servers || !own_machines)
-			return json_error(400, "missing_field", "servers and own_machines (0 to 16 each) are required");
+			return json_error(400, "missing_field",
+					"servers (shared servers) and own_machines (dedicated machines), 0 to 16 each, are required");
 		if (*servers < 0 || *servers > billing::kMaxCompServers || *own_machines < 0 ||
 				*own_machines > billing::kMaxCompOwnMachines)
 			return json_error(400, "invalid_field", "servers and own_machines are whole numbers from 0 to 16");
@@ -341,7 +347,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			grants.own_machines = static_cast<int>(*own_machines);
 			if (!billing::set_comp_grants(*db_conn, id, grants))
 				return json_error(404, "not_found", "no player account has this id");
-			std::printf("[http] an admin set account %lld's comp grants: %d server(s), %d own machine(s)\n",
+			std::printf("[http] an admin set account %lld's comp grants: %d shared server(s), %d dedicated machine(s)\n",
 					static_cast<long long>(id), grants.servers, grants.own_machines);
 			const auto updated = get_user_by_id(*db_conn, id);
 			crow::json::wvalue out;
