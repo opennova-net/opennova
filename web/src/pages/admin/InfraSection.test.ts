@@ -73,7 +73,7 @@ describe('InfraSection', () => {
   it('shows each program with its rollout, its revision against the release, its tasks and events', async () => {
     const page = await mountSection();
     const names = page.findAll('article.infra-service h3').map((h) => h.text());
-    expect(names).toEqual(['gate', 'lobby', 'web', 'fleet', 'worker', 'data', 'hostd']);
+    expect(names).toEqual(['gate', 'lobby', 'web', 'fleet', 'worker', 'data']);
 
     const gate = card(page, 'gate');
     expect(gate.text()).toContain('Steady');
@@ -135,19 +135,10 @@ describe('InfraSection', () => {
     expect(data.get('.infra-program-usage').classes()).toContain('text-warn');
   });
 
-  it("shows hostd's daemon with the fleet cluster's machines, opening the Fleet page", async () => {
+  it("leaves hostd's daemon and the fleet cluster to the Fleet page", async () => {
     const page = await mountSection();
-    const hostd = card(page, 'hostd');
-    expect(hostd.text()).toContain('opennova-prod-hostd:5');
-    expect(hostd.text()).toContain('1 of 1 running');
-    expect(hostd.get('h3 a').attributes('href')).toBe('/admin/fleet');
-    expect(hostd.find('.infra-program-usage').exists()).toBe(false);
-    const instance = hostd.get('li.infra-instance');
-    expect(instance.text()).toContain('Machine 1 (shared)');
-    expect(instance.text()).toContain('its ECS agent connected');
-    expect(instance.text()).toContain('1 task running');
-    expect(instance.text()).toContain('ami-0aaa');
-    expect(instance.get('a').attributes('href')).toBe('/admin/fleet/machines/1');
+    expect(page.findAll('article.infra-service h3').map((h) => h.text())).not.toContain('hostd');
+    expect(page.find('li.infra-instance').exists()).toBe(false);
   });
 
   it("says when what the programs use could not be read, the rest standing", async () => {

@@ -55,6 +55,7 @@
           new machine image, starts from its preview.
           <HistoryToggle v-model="showMachineHistory" :count="replacedMachineIds.size" class="ml-1" />
         </p>
+        <FleetClusterPanel v-if="cluster || clusterUnread" :cluster="cluster" :unread="clusterUnread" />
         <p v-if="fleet === null" class="rounded-panel border border-border bg-panel px-4 py-6 text-center text-sm text-ink-muted">
           {{ poll.loading.value ? 'Loading…' : 'Not loaded.' }}
         </p>
@@ -278,6 +279,7 @@ import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import AttentionList from '../../components/AttentionList.vue';
 import FleetRollPreview from '../../components/FleetRollPreview.vue';
 import HistoryToggle from '../../components/HistoryToggle.vue';
+import FleetClusterPanel from '../../components/FleetClusterPanel.vue';
 import MachineCard from '../../components/MachineCard.vue';
 import { replacedMachines, replacedServers } from '../../utils/history';
 import { computed, nextTick, ref } from 'vue';
@@ -286,8 +288,10 @@ import RelativeTime from '../../components/RelativeTime.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import { fetchHostedFleet, machineAction, stopAllFleetServers, stopFleetServer } from '../../api/admin';
 import { updateAllServers } from '../../api/dataSets';
+import { fetchInfrastructure } from '../../api/infra';
 import { usePolling } from '../../composables/usePolling';
 import type { FleetMachine, FleetQuery, FleetResponse, FleetServer, PinnedTree } from '../../types/hostedServer';
+import type { InfraFleetCluster } from '../../types/infra';
 import { isTransitioning, stateBadgeClass, stateLabel } from '../../utils/hostedState';
 
 const STOP_ALL_PHRASE = 'STOP ALL';
@@ -367,9 +371,32 @@ function fail(text: string) {
   errorFromLoad = false;
 }
 
+// The fleet cluster as ECS sees it: web's AWS read (cached there), beside the
+// fleet's rows; its failure leaves the rest of the page as it is.
+const cluster = ref<InfraFleetCluster | null>(null);
+const clusterUnread = ref('');
+async function readCluster(signal: AbortSignal) {
+  const result = await fetchInfrastructure(signal);
+  if (signal.aborted) return;
+  if (!result.ok) {
+    if (!cluster.value) clusterUnread.value = `the fleet cluster could not be read: ${result.error.message}`;
+    return;
+  }
+  const cloud = result.value.cloud;
+  if (!cloud.configured) {
+    cluster.value = null;
+    clusterUnread.value = `not read on this stack (${cloud.unavailable})`;
+  } else if (cloud.error) {
+    clusterUnread.value = `AWS could not be read: ${cloud.error}`;
+  } else {
+    cluster.value = cloud.fleet;
+    clusterUnread.value = '';
+  }
+}
+
 const poll = usePolling({
   async read(signal, background) {
-    const result = await fetchHostedFleet(query.value, signal);
+    const [result] = await Promise.all([fetchHostedFleet(query.value, signal), readCluster(signal)]);
     if (signal.aborted) return false;
     now.value = Date.now();
     if (result.ok) {
