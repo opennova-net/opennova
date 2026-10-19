@@ -450,10 +450,9 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // own_machine_limit for the own machine when the account has one for every
 // server it may run (each add-on checkout sells one; several are fine below
 // that), for a static address 409 address_limit when its addresses would pass
-// its own machines, 409
-// sold_out when the fleet has sold all it holds of what the item adds
-// (hosted/model/sold_capacity.h: shared places for a tier, own machines and
-// addresses for the add-ons), 503 stripe_unavailable. Those rules are judged first as a quick
+// its own machines, 409 sold_out when the fleet has sold all it holds of what
+// the item adds (hosted/model/sold_capacity.h: shared places for a tier, own
+// machines and addresses for the add-ons), 503 stripe_unavailable. Those rules are judged first as a quick
 // refusal, then again after the account's previous session is settled
 // (settle_previous_session: an open one is expired; a complete one has the
 // customer synced from Stripe now, so a payment the webhook has not brought
@@ -791,9 +790,9 @@ void BillingRoutes::limits_hold_json(db::Database &db, crow::json::wvalue &out) 
 // received_at (ISO), outcome)} with the limits hold (limits_hold_json), the
 // sold "capacity" (sold_capacity_json: the fleet-health oversold finding links
 // here) and "comp_grants" (every account an admin grants hosting,
-// comp_grants_json). With billing off, {"enabled": false} with the limits hold, the capacity and
-// the comp grants alone (each reads the database billing on or off).
-// Cache-Control: no-store.
+// comp_grants_json). With billing off, {"enabled": false} with the limits
+// hold, the capacity and the comp grants alone (each reads the database
+// billing on or off). Cache-Control: no-store.
 crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
