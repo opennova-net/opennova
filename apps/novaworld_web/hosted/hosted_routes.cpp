@@ -136,7 +136,8 @@ void put_account(crow::json::wvalue &out, const char *key, db::Database &db, std
 }
 
 // The fleet view's owner: {id, username, tier (its granting support tier, null
-// for none)}, or null once the account is gone.
+// for none), granted (an admin grants it hosting, billing::admin_granted; with
+// a tier too, both are shown)}, or null once the account is gone.
 void put_owner(crow::json::wvalue &out, db::Database &db, std::optional<int64_t> id) {
 	const auto user = id ? get_user_by_id(db, *id) : std::nullopt;
 	if (!user) {
@@ -151,6 +152,7 @@ void put_owner(crow::json::wvalue &out, db::Database &db, std::optional<int64_t>
 		owner["tier"] = entitlement.tier;
 	else
 		owner["tier"] = nullptr;
+	owner["granted"] = billing::admin_granted(entitlement);
 	out["owner"] = std::move(owner);
 }
 

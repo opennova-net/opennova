@@ -21,8 +21,9 @@ namespace opennova::novaworld_server {
 namespace {
 
 // The entitlement a users list row and a user page carry: {max_servers,
-// source, tier (null for none)}, and on the user page its comp grants
-// (comp_servers, comp_own_machines), the servers its tier alone grants
+// source, tier (null for none), comp_servers (the admin's grant of servers:
+// with a tier too, the pages show both)}, and on the user page its grant of
+// own machines (comp_own_machines), the servers its tier alone grants
 // (tier_servers, 0 for none), its own machines and whether a server may start.
 crow::json::wvalue entitlement_json(const billing::Entitlement &e, bool full) {
 	crow::json::wvalue out;
@@ -32,8 +33,8 @@ crow::json::wvalue entitlement_json(const billing::Entitlement &e, bool full) {
 		out["tier"] = e.tier;
 	else
 		out["tier"] = nullptr;
+	out["comp_servers"] = e.comp_servers;
 	if (full) {
-		out["comp_servers"] = e.comp_servers;
 		out["comp_own_machines"] = e.comp_own_machines;
 		out["tier_servers"] = billing::kTierServers[e.tier];
 		out["own_machines"] = e.own_machines;
@@ -92,10 +93,11 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	forget_ = std::move(forget);
 
 	// GET /api/admin/users — list every player (no password_hash), each with
-	// its hosting entitlement ({max_servers, source, tier}), its live hosted
-	// servers (live_servers) and its support tier's Stripe status
-	// (subscription_status, null for none). Four reads whatever the count:
-	// the accounts, every subscription, every comp grant and every live server.
+	// its hosting entitlement ({max_servers, source, tier, comp_servers}), its
+	// live hosted servers (live_servers) and its support tier's Stripe status
+	// (subscription_status, null for none). Five reads whatever the count:
+	// the accounts, every subscription, every comp grant, every comp address
+	// and every live server.
 	CROW_ROUTE(app, "/api/admin/users").methods("GET"_method)(
 	    [this](const crow::request &req) {
 		auto caller = access_.require_admin(req);
@@ -105,6 +107,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 		const int64_t now = billing::unix_now();
 		const auto subscriptions = billing::subscriptions_by_account(*db_conn);
 		const auto grants = billing::comp_grants_by_account(*db_conn);
+		const auto comp_addresses = billing::comp_addresses_by_account(*db_conn);
 		static const std::vector<billing::SubscriptionRow> kNoSubscriptions;
 		std::map<int64_t, int> live;
 		for (const hosted::HostedServer &s : hosted::list_live(*db_conn)) {
@@ -119,6 +122,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 				facts.comp_servers = granted->second.servers;
 				facts.comp_own_machines = granted->second.own_machines;
 			}
+			if (const auto addresses = comp_addresses.find(u.id); addresses != comp_addresses.end())
+				facts.comp_addresses = addresses->second;
 			const auto rows = subscriptions.find(u.id);
 			const billing::Entitlement entitlement =
 					billing::entitlement_from(facts, rows == subscriptions.end() ? kNoSubscriptions : rows->second, now);
@@ -362,10 +367,11 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			if (hosted::sold_exceeds_capacity(sold, sellable_))
 				std::fprintf(stderr,
 						"[http] WARN account %lld's comp grants take the sold capacity past what the fleet sells "
-						"(shared %lld of %lld, own machines %lld of %lld)\n",
+						"(shared %lld of %lld, own machines %lld of %lld, addresses %lld of %lld)\n",
 						static_cast<long long>(id), static_cast<long long>(sold.shared),
 						static_cast<long long>(sellable_.shared), static_cast<long long>(sold.own),
-						static_cast<long long>(sellable_.own));
+						static_cast<long long>(sellable_.own), static_cast<long long>(sold.addresses),
+						static_cast<long long>(sellable_.addresses));
 			return json_reply(200, out);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] PUT /api/admin/users/%lld/comp failed: %s\n", static_cast<long long>(id),

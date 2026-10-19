@@ -6120,7 +6120,8 @@ int test_admin_fleet_routes(Harness &h) {
 	TEST_EXPECT(r != nullptr);
 	if (r) {
 		TEST_EXPECT((*r)["owner"]["id"].i() == ana && str((*r)["owner"]["username"]) == "fleet_ana");
-		TEST_EXPECT((*r)["owner"]["tier"].t() == crow::json::type::Null); // a comp grant, no tier
+		// A comp grant, no tier: the fleet view says "Admin grant".
+		TEST_EXPECT((*r)["owner"]["tier"].t() == crow::json::type::Null && (*r)["owner"]["granted"].b());
 		TEST_EXPECT((*r)["machine_ref"].i() == machine.id && (*r)["slot"].i() == 0 && (*r)["game_port"].i() == 32768);
 		TEST_EXPECT((*r)["players"].i() == 5 && (*r)["listing"]["rid"].i() == static_cast<int64_t>(rid));
 		TEST_EXPECT(str((*r)["state"]) == "running" && (*r)["generation"].i() == 1);
@@ -6134,7 +6135,8 @@ int test_admin_fleet_routes(Harness &h) {
 	const crow::json::rvalue *e = server_in(json["servers"], ended);
 	TEST_EXPECT(e != nullptr);
 	if (e) {
-		TEST_EXPECT((*e)["owner"]["tier"].i() == 2 && (*e)["machine_ref"].i() == machine.id && (*e)["slot"].i() == 1);
+		TEST_EXPECT((*e)["owner"]["tier"].i() == 2 && !(*e)["owner"]["granted"].b() &&
+				(*e)["machine_ref"].i() == machine.id && (*e)["slot"].i() == 1);
 		TEST_EXPECT(!(*e)["live"].b());
 	}
 
@@ -8078,11 +8080,13 @@ int test_admin_user_detail(Harness &h) {
 	for (const auto &u : json["users"]) {
 		if (str(u["username"]) == "bill_ana") {
 			ana_seen = u["entitlement"]["max_servers"].i() == 1 && str(u["entitlement"]["source"]) == "tier" &&
-					u["entitlement"]["tier"].i() == 1 && u["live_servers"].i() == 0 &&
+					u["entitlement"]["tier"].i() == 1 && u["entitlement"]["comp_servers"].i() == 0 &&
+					u["live_servers"].i() == 0 &&
 					str(u["subscription_status"]) == "active" && u["max_servers"].i() == 1;
 		}
 		if (str(u["username"]) == "bill_bea") {
 			bea_seen = u["entitlement"]["max_servers"].i() == 3 && str(u["entitlement"]["source"]) == "comp" &&
+					u["entitlement"]["comp_servers"].i() == 3 &&
 					u["subscription_status"].t() == crow::json::type::Null && u["comp_servers"].i() == 3;
 		}
 	}
