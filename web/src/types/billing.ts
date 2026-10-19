@@ -96,9 +96,14 @@ export interface MyBilling {
   enabled: boolean;
   // The hosting entitlement: max(tier servers, comp_servers).
   max_servers: number;
-  // An admin's grants, 0 for none: servers, and own machines for them.
+  // An admin's grants, 0 for none: servers, own machines for the account's
+  // servers, and static addresses.
   comp_servers: number;
   comp_own_machines: number;
+  comp_addresses: number;
+  // Any of them: the account's hosting is the grant, and it buys no tier or
+  // add-on (the checkout refuses one).
+  granted: boolean;
   // The add-on's machines (while a tier grants) plus the admin's.
   own_machines: number;
   // How many of its hosted servers are live now.
@@ -114,7 +119,8 @@ export interface MyBilling {
   address_subscriptions: AddressSubscription[];
   // The account has a Stripe customer: the billing portal opens.
   can_manage: boolean;
-  // A checkout may start (billing on, the account active, no live tier).
+  // A checkout may start (billing on, the account active, no live tier, no
+  // admin grant).
   can_subscribe: boolean;
 }
 

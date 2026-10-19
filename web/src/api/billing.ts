@@ -254,7 +254,7 @@ export function parseMyBilling(value: unknown): MyBilling | null {
   if (typeof v !== 'object' || v === null) return null;
   const { enabled, max_servers: max, comp_servers: comp, comp_own_machines: compOwn, own_machines: own, used, stopping } = v;
   if (typeof enabled !== 'boolean' || !isCount(max) || !isCount(comp) || !isCount(own) || !isCount(used)) return null;
-  if (!isCount(stopping) || !isCount(compOwn)) return null;
+  if (!isCount(stopping) || !isCount(compOwn) || !isCount(v.comp_addresses) || typeof v.granted !== 'boolean') return null;
   if (typeof v.can_start !== 'boolean' || typeof v.can_manage !== 'boolean' || typeof v.can_subscribe !== 'boolean') {
     return null;
   }
@@ -269,6 +269,8 @@ export function parseMyBilling(value: unknown): MyBilling | null {
     max_servers: max,
     comp_servers: comp,
     comp_own_machines: compOwn,
+    comp_addresses: v.comp_addresses,
+    granted: v.granted,
     own_machines: own,
     used,
     stopping,

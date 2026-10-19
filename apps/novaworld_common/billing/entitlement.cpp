@@ -96,6 +96,10 @@ Entitlement entitlement_of(db::Database &db, int64_t user_id, int64_t now) {
 	return entitlement_from(account, subscriptions_of(db, user_id), now);
 }
 
+bool admin_granted(const Entitlement &e) {
+	return e.comp_servers > 0 || e.comp_own_machines > 0 || e.comp_addresses > 0;
+}
+
 int64_t unix_now() {
 	using namespace std::chrono;
 	return static_cast<int64_t>(duration_cast<seconds>(system_clock::now().time_since_epoch()).count());

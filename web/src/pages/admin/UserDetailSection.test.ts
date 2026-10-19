@@ -126,7 +126,7 @@ describe('UserDetailSection', () => {
     await flushPromises();
     expect(confirm).not.toHaveBeenCalled();
     expect(comp).toHaveBeenCalledWith(7, { servers: 3, own_machines: 1 });
-    expect(wrapper.get('[role="status"]').text()).toContain('now has 3 hosted servers free of charge, 1 of them on an own machine');
+    expect(wrapper.get('[role="status"]').text()).toContain("grant is now 3 hosted servers and 1 own machine for its servers, free of charge");
 
     // A tier of 2 servers, 2 live: a grant of 0 stops none; the tier still covers them.
     comp.mockClear();

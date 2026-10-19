@@ -122,7 +122,7 @@
               />
             </div>
             <div class="space-y-1">
-              <label for="user-comp-own" :class="labelClass">Of these, on own machines</label>
+              <label for="user-comp-own" :class="labelClass">Own machines for its servers</label>
               <input
                 id="user-comp-own"
                 v-model.number="compOwn"
@@ -148,7 +148,7 @@
             {{
               compProblem ||
               compOwnProblem ||
-              `0 to ${COMP_SERVERS_MAX} free hosted servers. Own machines add no servers: each moves one of them off the shared machines onto a machine of its own (0 to ${COMP_OWN_MACHINES_MAX}). The account gets the larger of the servers and its tier's, and the own machines on top of any it pays for; lowering them stops its newest servers first.`
+              `0 to ${COMP_SERVERS_MAX} free hosted servers. Own machines add no servers: each moves one of the account's servers off the shared machines onto a machine of its own (0 to ${COMP_OWN_MACHINES_MAX}). A granted account buys no support tier or add-on (one it already pays for still counts: it gets the larger). Lowering either stops its newest servers first.`
             }}
           </p>
         </form>
@@ -578,11 +578,14 @@ async function saveComp() {
   }
   // The sold capacity with the grant counted: the warning follows it at once.
   if (detail.value && result.value.capacity) detail.value = { ...detail.value, capacity: result.value.capacity };
-  const machines = own === 0 ? '' : `, ${own} of them on ${own === 1 ? 'an own machine' : 'own machines'}`;
+  const granted = [
+    ...(n > 0 ? [`${n} hosted server${n === 1 ? '' : 's'}`] : []),
+    ...(own > 0 ? [`${own} own machine${own === 1 ? '' : 's'} for its servers`] : []),
+  ];
   flash(
-    n === 0 && own === 0
+    granted.length === 0
       ? `${u.username} has no admin grant now.`
-      : `${u.username} now has ${n} hosted server${n === 1 ? '' : 's'} free of charge${machines}.`,
+      : `${u.username}'s grant is now ${granted.join(' and ')}, free of charge.`,
   );
   await load();
 }

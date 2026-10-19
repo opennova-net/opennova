@@ -152,8 +152,8 @@ void BillingRoutes::register_routes(WebApp &app) {
 // amounts are Stripe's price objects', never the service's own. `available`
 // is whether the fleet takes one more of the item for an account that has
 // nothing yet (hosted/model/sold_capacity.h): false, the site says hosting is full
-// and a checkout of it answers sold_out (an account whose grant already
-// covers it may still buy it; the checkout judges each account's own).
+// and a checkout of it answers sold_out (an account with an admin grant buys
+// none; the checkout judges each account's own).
 crow::response BillingRoutes::tiers() {
 	SyncStatus status;
 	std::optional<hosted::Capacity> sold;
@@ -215,7 +215,8 @@ crow::response BillingRoutes::tiers() {
 }
 
 // The account's billing: {"enabled", "max_servers", "comp_servers",
-// "comp_own_machines" (an admin's grants), "own_machines", "used" (its live hosted servers), "stopping" (how many of
+// "comp_own_machines", "comp_addresses" (an admin's grants), "granted" (any of
+// them: billing::admin_granted), "own_machines", "used" (its live hosted servers), "stopping" (how many of
 // those are stopping: the owners' limits count the rest), "can_start", "subscription"
 // (its support tier: {tier, status, entitled, current_period_end (ISO UTC),
 // cancel_at_period_end}, or null), "own_machine_subscription" ({quantity,
@@ -227,7 +228,7 @@ crow::response BillingRoutes::tiers() {
 // "can_manage" (it
 // has a Stripe customer: the portal opens), "can_subscribe" (a checkout of a
 // tier may start: the prices checked out, the account an active player's, no
-// tier granting)}.
+// tier granting, no admin grant)}.
 crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id) {
 	const int64_t now = unix_now();
 	const Entitlement e = entitlement_of(db, user_id, now);
@@ -239,6 +240,8 @@ crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id
 	out["max_servers"] = e.max_servers;
 	out["comp_servers"] = e.comp_servers;
 	out["comp_own_machines"] = e.comp_own_machines;
+	out["comp_addresses"] = e.comp_addresses;
+	out["granted"] = admin_granted(e);
 	out["own_machines"] = e.own_machines;
 	const std::vector<hosted::HostedServer> live = hosted::live_servers_of(db, user_id);
 	out["used"] = static_cast<int64_t>(live.size());
@@ -286,7 +289,7 @@ crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id
 	out["address_subscriptions"] = std::move(addresses);
 	out["can_manage"] = customer_of(db, user_id).has_value();
 	out["can_subscribe"] =
-			billing_->sync().status(db).prices_ok && active && !tier_grants(rows, now);
+			billing_->sync().status(db).prices_ok && active && !tier_grants(rows, now) && !admin_granted(e);
 	return no_store(json_reply(200, out));
 }
 
@@ -314,6 +317,14 @@ std::optional<crow::response> BillingRoutes::judge_checkout(
 		return json_error(403, "not_eligible", "this account cannot subscribe");
 	}
 	const int64_t now = unix_now();
+	// The account as the sold capacity counts it: its subscriptions and its
+	// open checkouts' reservations.
+	const hosted::AccountHoldings holdings = hosted::holdings_of(db, user.id, now, replaced);
+	const Entitlement e = entitlement_from(holdings.facts, holdings.subscriptions, now);
+	if (admin_granted(e)) {
+		log_account(user, "checkout", "not_eligible (admin grant)");
+		return json_error(403, "not_eligible", "this account's hosting is an admin grant: it buys no support tier or add-on");
+	}
 	const std::vector<SubscriptionRow> rows = subscriptions_of(db, user.id);
 	const bool granting_tier = tier_grants(rows, now);
 	if (item.item == ItemKind::Tier && granting_tier) {
@@ -333,10 +344,6 @@ std::optional<crow::response> BillingRoutes::judge_checkout(
 			}
 		}
 	}
-	// The account as the sold capacity counts it: its subscriptions and its
-	// open checkouts' reservations.
-	const hosted::AccountHoldings holdings = hosted::holdings_of(db, user.id, now, replaced);
-	const Entitlement e = entitlement_from(holdings.facts, holdings.subscriptions, now);
 	// Each own machine holds one of the servers the account may run: more
 	// machines than servers buys nothing.
 	if (item.item == ItemKind::OwnMachine && e.own_machines >= e.max_servers) {
@@ -400,7 +407,8 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // invalid_json / invalid_item, 503 billing_misconfigured while the prices do
 // not check out, 409 checkout_in_progress while another checkout of the
 // account is running (one at a time), 403 not_eligible for an account that is
-// not an active player's or (the add-on) has no tier granting, 409 already_subscribed when a
+// not an active player's, has an admin grant (billing::admin_granted: it buys
+// nothing beside it) or (the add-on) has no tier granting, 409 already_subscribed when a
 // tier grants already (the portal changes it), 409 own_machine_limit for the
 // add-on when the account has an own machine for every server it may run
 // (each add-on checkout sells one; several are fine below that), for a static

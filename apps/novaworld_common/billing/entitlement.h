@@ -83,6 +83,11 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 // The account's, read from the database (no such account: 0 servers).
 Entitlement entitlement_of(db::Database &db, int64_t user_id, int64_t now);
 
+// Whether an admin grants the account anything (servers, own machines or a
+// static address): its hosting is then that grant, and it buys no support tier
+// or add-on beside it (the checkout refuses one).
+bool admin_granted(const Entitlement &e);
+
 // The wall clock in Unix seconds (the entitlement's `now` in the service).
 int64_t unix_now();
 
