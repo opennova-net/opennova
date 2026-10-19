@@ -7838,7 +7838,8 @@ int test_billing_webhook(Harness &h) {
 // with their accounts, the webhook log, the orphans a reconcile found (another
 // instance's subscription) and their relink to an account (its metadata
 // stamped, the account's entitlement from it), and the account delete refused
-// while a subscription grants.
+// while a subscription grants (a tier or an add-on) or a checkout of it holds
+// its reservation.
 int test_billing_admin(Harness &h) {
 	namespace billing = opennova::novaworld_server::billing;
 	const int64_t eli = make_account(h, "bill_eli", "pw-bill-eli");
@@ -7980,6 +7981,33 @@ int test_billing_admin(Harness &h) {
 	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), foreign, billing::unix_now()) ==
 			billing::SyncOutcome::Synced);
 	TEST_EXPECT(h.send("DELETE", "/api/admin/users/" + std::to_string(eli), { kBearer }).code == 204);
+	// An add-on alone grants too: the delete waits for it as for a tier.
+	const int64_t jan = make_account(h, "bill_jan", "pw-bill-jan");
+	TEST_EXPECT(jan > 0);
+	const std::string jan_path = "/api/admin/users/" + std::to_string(jan);
+	billing::SubscriptionRow addon;
+	addon.stripe_subscription_id = "sub_bill_jan_own";
+	addon.stripe_customer_id = "cus_bill_jan";
+	addon.user_id = jan;
+	addon.status = "active";
+	addon.item = billing::ItemKind::OwnMachine;
+	addon.price_id = "price_hown";
+	addon.current_period_end = billing::unix_now() + 30 * 24 * 60 * 60;
+	billing::upsert_subscription(*h.pool.acquire(), addon);
+	reply = h.send("DELETE", jan_path, { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "active_subscription");
+	addon.status = "canceled";
+	billing::upsert_subscription(*h.pool.acquire(), addon);
+	// An open checkout's reservation: its session may still be paid, so the
+	// delete waits for it too, and goes once it is dropped.
+	const int64_t held = billing::reserve_checkout(*h.pool.acquire(), jan, billing::ItemKind::Tier, 1, 3600);
+	TEST_EXPECT(held > 0);
+	reply = h.send("DELETE", jan_path, { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "checkout_open");
+	TEST_EXPECT(nws::get_user_by_id(*h.pool.acquire(), jan).has_value());
+	billing::drop_reservation(*h.pool.acquire(), held, jan);
+	TEST_EXPECT(h.send("DELETE", jan_path, { kBearer }).code == 204);
+	TEST_EXPECT(!nws::get_user_by_id(*h.pool.acquire(), jan).has_value());
 	// Billing off: the view says so, with the limits hold; a reconcile is 503,
 	// an override still goes through.
 	reply = h.send_to(h.secure_port, "GET", "/api/admin/billing", { kBearer });

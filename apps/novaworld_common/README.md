@@ -784,8 +784,10 @@ compose stack takes the test-mode set from the vault through
 | `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: an orphan's customer made the account's, stamped and synced: 200; 400; 404; 503 |
 
 `DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of
-the account still grants (Stripe would bill an account that is gone). The admin's user
-list and detail carry each account's entitlement, live servers and subscriptions; the
+the account still grants, a tier or an add-on (Stripe would bill an account that is gone),
+and 409 `checkout_open` while a checkout of it holds its reservation (its session may still
+be paid); it judges and deletes under the hosting-start lock a checkout reserves under. The
+admin's user list and detail carry each account's entitlement, live servers and subscriptions; the
 detail and `PUT /api/admin/users/<id>/comp` carry the service's sold `capacity` against
 what the fleet sells (`oversold` when an admin's grant, or a lowered maximum, took it
 past).

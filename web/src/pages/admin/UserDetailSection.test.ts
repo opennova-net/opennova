@@ -256,13 +256,14 @@ describe('UserDetailSection', () => {
     expect(wrapper.get('[role="status"]').text()).toBe('player7 is now an admin.');
   });
 
-  it('refuses to delete while a tier grants, in words', async () => {
+  it('refuses to delete while a subscription grants, in words', async () => {
     remove.mockResolvedValue({
       ok: false,
       error: {
         code: 'active_subscription',
         status: 409,
-        message: 'This account has a support tier that still grants hosting. Cancel it in Stripe first; the account can be deleted once it ends.',
+        message:
+          'This account has a subscription that still grants (a support tier or an add-on). Cancel it in Stripe first; the account can be deleted once its subscriptions end.',
       },
     });
     const { wrapper, router } = await mountSection();
@@ -270,7 +271,8 @@ describe('UserDetailSection', () => {
     await button.trigger('click');
     await flushPromises();
     expect(remove).toHaveBeenCalledWith(7);
-    expect(wrapper.get('[role="alert"]').text()).toContain('support tier that still grants hosting');
+    expect(wrapper.text()).toContain('cannot be deleted until its subscriptions end, nor while a checkout of it is open');
+    expect(wrapper.get('[role="alert"]').text()).toContain('a subscription that still grants');
     expect(router.currentRoute.value.path).toBe('/admin/users/7');
 
     remove.mockResolvedValue({ ok: true, value: undefined });

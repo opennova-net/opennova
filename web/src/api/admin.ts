@@ -51,6 +51,7 @@ export type AdminErrorCode =
   | 'username_exists'
   | 'pcid_exists'
   | 'active_subscription'
+  | 'checkout_open'
   | 'revoked'
   | 'already_revoked'
   | 'already_assigned'
@@ -122,6 +123,7 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'username_exists',
   'pcid_exists',
   'active_subscription',
+  'checkout_open',
   'revoked',
   'already_revoked',
   'already_assigned',
@@ -191,7 +193,9 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'pcid_exists':
       return 'Another account already has that PCID.';
     case 'active_subscription':
-      return 'This account has a support tier that still grants hosting. Cancel it in Stripe first; the account can be deleted once it ends.';
+      return 'This account has a subscription that still grants (a support tier or an add-on). Cancel it in Stripe first; the account can be deleted once its subscriptions end.';
+    case 'checkout_open':
+      return 'A checkout of this account is open, or paid and not synced yet, so a subscription could still start. Try again once it ends.';
     case 'revoked':
     case 'already_revoked':
       return 'That key is revoked. Refresh the list.';

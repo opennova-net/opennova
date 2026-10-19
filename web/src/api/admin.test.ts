@@ -1,7 +1,16 @@
 import { AxiosError, AxiosHeaders, type AxiosResponse } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { adminClient } from './client';
-import { endConnection, fetchConnections, pickMachine, pickMachineDetail, pickRollPlan, rollFleet, stopListedServer } from './admin';
+import {
+  describeAdminError,
+  endConnection,
+  fetchConnections,
+  pickMachine,
+  pickMachineDetail,
+  pickRollPlan,
+  rollFleet,
+  stopListedServer,
+} from './admin';
 import { HOSTD_IMAGE, machine, machineDetail, rollPlan } from '../test/adminFixtures';
 
 vi.mock('./client', () => ({
@@ -127,6 +136,17 @@ describe('ending a session and stopping a listed server', () => {
     post.mockRejectedValue(refusal(404, { error: 'not_found' }));
     const gone = await endConnection({ session_id: 41 });
     expect(!gone.ok && gone.error.code).toBe('not_found');
+  });
+
+  it("maps an account delete's refusals to words: a subscription that grants, an open checkout", () => {
+    const granting = describeAdminError(refusal(409, { error: 'active_subscription', message: 'raw server text' }));
+    expect(granting.code).toBe('active_subscription');
+    expect(granting.message).toContain('a support tier or an add-on');
+    expect(granting.message).toContain('once its subscriptions end');
+    const open = describeAdminError(refusal(409, { error: 'checkout_open', message: 'raw server text' }));
+    expect(open.code).toBe('checkout_open');
+    expect(open.message).toContain('A checkout of this account is open');
+    expect(open.message).not.toContain('raw server text');
   });
 
   it('stops a listed server by its RID', async () => {

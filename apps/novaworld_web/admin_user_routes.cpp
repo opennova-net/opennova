@@ -230,19 +230,40 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	});
 
 	// DELETE /api/admin/users/<id> — 204; 404 not_found; 409
-	// active_subscription while a subscription of the account still grants
-	// (billing/entitlement.h): Stripe would bill an account that is gone, so it
-	// is canceled first.
+	// active_subscription while a subscription of the account still grants (a
+	// support tier or an add-on; billing/entitlement.h), and 409 checkout_open
+	// while a checkout of the account holds its reservation
+	// (billing/billing_repository.h "A checkout's hold": its session may still
+	// be paid, or be paid and not synced yet): Stripe would bill an account that
+	// is gone, so its subscriptions end first. The checks and the delete hold
+	// the hosting-start lock a checkout's judgement and reservation take
+	// (database.h kHostedStartLock), so no checkout reserves for an account
+	// being deleted.
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
 	    [this](const crow::request &req, int64_t id) {
 		auto caller = access_.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
-		auto db_conn = pool_.acquire();
-		if (billing::has_granting_subscription(*db_conn, id, billing::unix_now()))
-			return json_error(409, "active_subscription",
-					"a support tier of this account still grants; cancel it in Stripe first");
-		auto result = delete_user(*db_conn, id);
-		if (result.ok) forget_(*db_conn, id);
+		MutationResult result;
+		try {
+			auto db_conn = pool_.acquire();
+			{
+				db::Transaction tx(*db_conn);
+				db_conn->exec("SELECT pg_advisory_xact_lock($1);", { db::BindValue(db::kHostedStartLock) });
+				if (billing::has_granting_subscription(*db_conn, id, billing::unix_now()))
+					return json_error(409, "active_subscription",
+							"a subscription of this account still grants (a support tier or an add-on); cancel it in "
+							"Stripe first");
+				if (!billing::live_reservations_of(*db_conn, id).empty())
+					return json_error(409, "checkout_open",
+							"a checkout of this account may still be paid; try again once it ends");
+				result = delete_user(*db_conn, id);
+				if (result.ok) tx.commit();
+			}
+			if (result.ok) forget_(*db_conn, id);
+		} catch (const db::Error &e) {
+			std::fprintf(stderr, "[http] DELETE /api/admin/users/%lld failed: %s\n", static_cast<long long>(id), e.what());
+			return json_error(500, "db_error");
+		}
 		crow::response res(result.ok ? 204 :
 		                   result.error_code == "not_found" ? 404 : 500);
 		if (!result.ok) {
