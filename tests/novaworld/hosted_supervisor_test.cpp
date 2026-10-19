@@ -2047,6 +2047,10 @@ int test_own_machines_cut() {
 			rig.machine(newer_machine)->public_address == ip &&
 			rig.machine(shared_machine)->kind == hosted::MachineKind::Shared);
 	const int64_t generation = rig.server(newer)->generation;
+	// The move's compare-and-set: a row no longer in the state its pass read
+	// keeps its own machine, room or not.
+	TEST_EXPECT(!hosted::clear_own_machine(*db, older, State::Booting, rig.config.placement) &&
+			rig.server(older)->own_machine);
 
 	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 3, 1 }));
 	rig.step();
