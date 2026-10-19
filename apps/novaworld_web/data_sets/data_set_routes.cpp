@@ -5,6 +5,7 @@
 #include "data_sets/data_set_files.h"
 #include "data_sets/data_set_jobs.h"
 #include "data_sets/data_set_repository.h"
+#include "hosted/model/hosted_repository.h"
 #include "http_json.h"
 #include "program/catalog_repository.h"
 

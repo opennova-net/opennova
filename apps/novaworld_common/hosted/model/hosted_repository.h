@@ -341,4 +341,26 @@ std::vector<int64_t> listing_accounts_of(db::Database &db, int64_t user_id);
 // listing's claim; nullopt when the listing is not `user_id`'s (or not listed).
 std::optional<int64_t> owned_listing_account(db::Database &db, uint32_t rid, int64_t user_id);
 
+// --- the data sets' pins (ADR 0064) ---
+//
+// A live server is pinned to its data sets' trees (data_sets/data_set_repository.h
+// current_trees_of) at its start; these are the servers' own rows.
+
+// How many live servers running `id` as their data set or expansion are behind
+// its current tree (server_outdated's rule, over `id` alone).
+int count_outdated_servers_of(db::Database &db, int64_t id);
+
+// The server's pins, and update_requested cleared.
+void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
+		std::optional<int64_t> expansion_tree_id);
+enum class UpdateOutcome : uint8_t { Requested, NotFound, NotLive, UpToDate };
+// The owner's update: a live server whose pins differ from its data sets' current trees
+// gets update_requested (idempotent: one already asked answers Requested).
+UpdateOutcome request_update(db::Database &db, int64_t server_id);
+// Every live server whose pins are behind its data sets' current trees (of data set
+// `data_set_id`, as base or expansion, when set); how many were marked.
+size_t request_update_all(db::Database &db, std::optional<int64_t> data_set_id);
+// Whether a live server's pins are behind its data sets' current trees.
+bool server_outdated(db::Database &db, int64_t server_id);
+
 } // namespace opennova::novaworld_server::hosted

@@ -1179,12 +1179,23 @@ add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
 # generation moving on, let go, read back for placement). Compiles the hosted sources it needs
 # directly, so it runs on every service build.
 # The hosted data sets' rows (data_sets/data_set_repository.h, migration 0011, ADR 0064): the
-# seeded data sets, trees, the servers' pins, and the migration's mapping of the old columns.
+# seeded data sets, trees, the servers' pins (hosted/model/hosted_repository.h), the holds'
+# live rule against the hosted servers' own, and the migration's mapping of the old columns.
 add_executable(data_set_repository_test
     novaworld/data_set_repository_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/core/random_secret.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_files.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp)
-target_link_libraries(data_set_repository_test PRIVATE opennova_novaworld_service Threads::Threads)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/data_sets/data_set_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/fleet_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/host_limits.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/model/placement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/protocol/agent_protocol.cpp)
+target_link_libraries(data_set_repository_test
+    PRIVATE opennova_novaworld_service opennova_app_common Threads::Threads)
 target_include_directories(data_set_repository_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common)

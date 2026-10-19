@@ -26,6 +26,14 @@ constexpr const char *kServerColumns =
 		"machine_ref, slot, game_port, generation, serve_image, "
 		"data_set_id, expansion_id, base_tree_id, expansion_tree_id, update_requested, address_id";
 
+// The servers whose pins are behind their data sets' current trees, as a WHERE over
+// hosted_servers s (live ones).
+constexpr const char *kOutdatedSql =
+		"EXISTS (SELECT 1 FROM data_sets b WHERE b.id = s.data_set_id "
+		"        AND b.current_tree_id IS NOT NULL AND b.current_tree_id IS DISTINCT FROM s.base_tree_id) "
+		"OR EXISTS (SELECT 1 FROM data_sets e WHERE e.id = s.expansion_id "
+		"        AND e.current_tree_id IS NOT NULL AND e.current_tree_id IS DISTINCT FROM s.expansion_tree_id)";
+
 BindValue optional_id(std::optional<int64_t> id) {
 	if (!id) return BindValue(std::monostate{});
 	return BindValue(*id);
@@ -556,6 +564,67 @@ std::optional<int64_t> owned_listing_account(db::Database &db, uint32_t rid, int
 		if (hostdb::listing_owned_by(db, rid, account)) return account;
 	}
 	return std::nullopt;
+}
+
+// --- the data sets' pins ---
+
+int count_outdated_servers_of(db::Database &db, int64_t id) {
+	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers s WHERE ") +
+					kLiveServerSql + " AND (s.data_set_id = $1 OR s.expansion_id = $1) AND (" +
+					kOutdatedSql + ");",
+			{ BindValue(id) });
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
+}
+
+void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
+		std::optional<int64_t> expansion_tree_id) {
+	db.exec("UPDATE hosted_servers SET base_tree_id = $2, expansion_tree_id = $3, "
+			"update_requested = false, updated_at = now() WHERE id = $1;",
+			{ BindValue(server_id), BindValue(base_tree_id), optional_id(expansion_tree_id) });
+}
+
+UpdateOutcome request_update(db::Database &db, int64_t server_id) {
+	db::Transaction tx(db);
+	const auto rows = db.query(
+			std::string("SELECT update_requested, (") + kLiveServerSql + ") AS live, (" + kOutdatedSql +
+					") AS outdated FROM hosted_servers s WHERE id = $1 FOR NO KEY UPDATE;",
+			{ BindValue(server_id) });
+	if (rows.empty())
+		return UpdateOutcome::NotFound;
+	const bool requested = rows.front().as_int(0).value_or(0) != 0;
+	const bool live = rows.front().as_int(1).value_or(0) != 0;
+	const bool outdated = rows.front().as_int(2).value_or(0) != 0;
+	if (!live)
+		return UpdateOutcome::NotLive;
+	if (requested) {
+		tx.commit();
+		return UpdateOutcome::Requested;
+	}
+	if (!outdated)
+		return UpdateOutcome::UpToDate;
+	db.exec("UPDATE hosted_servers SET update_requested = true, updated_at = now() WHERE id = $1;",
+			{ BindValue(server_id) });
+	tx.commit();
+	return UpdateOutcome::Requested;
+}
+
+size_t request_update_all(db::Database &db, std::optional<int64_t> data_set_id) {
+	std::string sql = std::string("UPDATE hosted_servers s SET update_requested = true, updated_at = now() WHERE ") +
+			kLiveServerSql + " AND NOT update_requested AND (" + kOutdatedSql + ")";
+	if (data_set_id) {
+		db.exec(sql + " AND (s.data_set_id = $1 OR s.expansion_id = $1);", { BindValue(*data_set_id) });
+	} else {
+		db.exec(sql + ";");
+	}
+	return static_cast<size_t>(db.changes());
+}
+
+bool server_outdated(db::Database &db, int64_t server_id) {
+	const auto rows = db.query(
+			std::string("SELECT 1 FROM hosted_servers s WHERE id = $1 AND ") + kLiveServerSql + " AND (" +
+					kOutdatedSql + ");",
+			{ BindValue(server_id) });
+	return !rows.empty();
 }
 
 } // namespace opennova::novaworld_server::hosted

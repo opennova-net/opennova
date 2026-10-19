@@ -158,8 +158,6 @@ std::vector<DataSetRow> list_data_sets(db::Database &db);
 std::vector<DataSetRow> list_expansions_of(db::Database &db, int64_t parent_id);
 // How many live servers run `id` as their data set or expansion.
 int count_live_servers_of(db::Database &db, int64_t id);
-// How many of them are behind its current tree (server_outdated's rule, over `id` alone).
-int count_outdated_servers_of(db::Database &db, int64_t id);
 
 // A data set a start may pick: a base with a ready current tree, each of its expansions
 // with one beside it. The start form's list and check_settings' `offered`.
@@ -298,18 +296,6 @@ struct CurrentTrees {
 };
 std::optional<CurrentTrees> current_trees_of(db::Database &db, int64_t data_set_id,
 		std::optional<int64_t> expansion_id);
-// The server's pins, and update_requested cleared.
-void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
-		std::optional<int64_t> expansion_tree_id);
-enum class UpdateOutcome : uint8_t { Requested, NotFound, NotLive, UpToDate };
-// The owner's update: a live server whose pins differ from its data sets' current trees
-// gets update_requested (idempotent: one already asked answers Requested).
-UpdateOutcome request_update(db::Database &db, int64_t server_id);
-// Every live server whose pins are behind its data sets' current trees (of data set
-// `data_set_id`, as base or expansion, when set); how many were marked.
-size_t request_update_all(db::Database &db, std::optional<int64_t> data_set_id);
-// Whether a live server's pins are behind its data sets' current trees.
-bool server_outdated(db::Database &db, int64_t server_id);
 
 // The manifest JSON a tree's files are stored as, and read back (`{"files": [{"name",
 // "size"}]}`).

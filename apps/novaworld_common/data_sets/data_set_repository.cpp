@@ -1,7 +1,5 @@
 #include "data_set_repository.h"
 
-#include "hosted/model/hosted_repository.h"
-
 #include <base/io/json.h>
 
 #include <array>
@@ -117,13 +115,11 @@ void retire_if_unreferenced(db::Database &db, int64_t release_id) {
 			{ BindValue(release_id) });
 }
 
-// The servers whose pins are behind their data sets' current trees, as a WHERE over
-// hosted_servers s (live ones).
-constexpr const char *kOutdatedSql =
-		"EXISTS (SELECT 1 FROM data_sets b WHERE b.id = s.data_set_id "
-		"        AND b.current_tree_id IS NOT NULL AND b.current_tree_id IS DISTINCT FROM s.base_tree_id) "
-		"OR EXISTS (SELECT 1 FROM data_sets e WHERE e.id = s.expansion_id "
-		"        AND e.current_tree_id IS NOT NULL AND e.current_tree_id IS DISTINCT FROM s.expansion_tree_id)";
+// A live hosted server as SQL on hosted_servers' state: the hosted servers'
+// own rule (hosted/model/hosted_repository.h is_live, kLiveServerSql), which
+// the data sets' holds on the servers' rows read without the model above them;
+// data_set_repository_test pins the two alike.
+constexpr const char *kServerLiveSql = "state NOT IN ('stopped', 'failed')";
 
 } // namespace
 
@@ -265,15 +261,7 @@ std::vector<DataSetRow> list_expansions_of(db::Database &db, int64_t parent_id) 
 
 int count_live_servers_of(db::Database &db, int64_t id) {
 	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers WHERE ") +
-					kLiveServerSql + " AND (data_set_id = $1 OR expansion_id = $1);",
-			{ BindValue(id) });
-	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
-}
-
-int count_outdated_servers_of(db::Database &db, int64_t id) {
-	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers s WHERE ") +
-					kLiveServerSql + " AND (s.data_set_id = $1 OR s.expansion_id = $1) AND (" +
-					kOutdatedSql + ");",
+					kServerLiveSql + " AND (data_set_id = $1 OR expansion_id = $1);",
 			{ BindValue(id) });
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
@@ -389,7 +377,7 @@ std::vector<int64_t> prunable_trees(db::Database &db, int64_t min_age_s, int64_t
 						"OR (t.state IN ('ready', 'failed') AND t.created_at < now() - make_interval(secs => $1) "
 						"    AND NOT EXISTS (SELECT 1 FROM data_sets d WHERE d.current_tree_id = t.id OR d.baseline_tree_id = t.id) "
 						"    AND NOT EXISTS (SELECT 1 FROM hosted_servers s WHERE ") +
-					kLiveServerSql +
+					kServerLiveSql +
 					"        AND (s.base_tree_id = t.id OR s.expansion_tree_id = t.id))) "
 					"ORDER BY t.id;",
 			{ BindValue(static_cast<double>(min_age_s)), BindValue(static_cast<double>(abandoned_upload_s)) });
@@ -410,7 +398,7 @@ void request_tree_prune(db::Database &db, int64_t id) {
 
 int count_tree_pins(db::Database &db, int64_t id) {
 	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers WHERE ") +
-					kLiveServerSql + " AND (base_tree_id = $1 OR expansion_tree_id = $1);",
+					kServerLiveSql + " AND (base_tree_id = $1 OR expansion_tree_id = $1);",
 			{ BindValue(id) });
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
@@ -422,7 +410,7 @@ std::string tree_hold(db::Database &db, int64_t id, int &pinned_by) {
 	if (!db.query("SELECT 1 FROM data_sets WHERE baseline_tree_id = $1;", { BindValue(id) }).empty())
 		return "baseline";
 	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers WHERE ") +
-					kLiveServerSql + " AND (base_tree_id = $1 OR expansion_tree_id = $1);",
+					kServerLiveSql + " AND (base_tree_id = $1 OR expansion_tree_id = $1);",
 			{ BindValue(id) });
 	pinned_by = rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 	return pinned_by > 0 ? "pinned" : "";
@@ -596,57 +584,6 @@ std::optional<CurrentTrees> current_trees_of(db::Database &db, int64_t data_set_
 		trees.expansion_tree_id = exp.front().as_int(0);
 	}
 	return trees;
-}
-
-void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
-		std::optional<int64_t> expansion_tree_id) {
-	db.exec("UPDATE hosted_servers SET base_tree_id = $2, expansion_tree_id = $3, "
-			"update_requested = false, updated_at = now() WHERE id = $1;",
-			{ BindValue(server_id), BindValue(base_tree_id), optional_id(expansion_tree_id) });
-}
-
-UpdateOutcome request_update(db::Database &db, int64_t server_id) {
-	db::Transaction tx(db);
-	const auto rows = db.query(
-			std::string("SELECT update_requested, (") + kLiveServerSql + ") AS live, (" + kOutdatedSql +
-					") AS outdated FROM hosted_servers s WHERE id = $1 FOR NO KEY UPDATE;",
-			{ BindValue(server_id) });
-	if (rows.empty())
-		return UpdateOutcome::NotFound;
-	const bool requested = rows.front().as_int(0).value_or(0) != 0;
-	const bool live = rows.front().as_int(1).value_or(0) != 0;
-	const bool outdated = rows.front().as_int(2).value_or(0) != 0;
-	if (!live)
-		return UpdateOutcome::NotLive;
-	if (requested) {
-		tx.commit();
-		return UpdateOutcome::Requested;
-	}
-	if (!outdated)
-		return UpdateOutcome::UpToDate;
-	db.exec("UPDATE hosted_servers SET update_requested = true, updated_at = now() WHERE id = $1;",
-			{ BindValue(server_id) });
-	tx.commit();
-	return UpdateOutcome::Requested;
-}
-
-size_t request_update_all(db::Database &db, std::optional<int64_t> data_set_id) {
-	std::string sql = std::string("UPDATE hosted_servers s SET update_requested = true, updated_at = now() WHERE ") +
-			kLiveServerSql + " AND NOT update_requested AND (" + kOutdatedSql + ")";
-	if (data_set_id) {
-		db.exec(sql + " AND (s.data_set_id = $1 OR s.expansion_id = $1);", { BindValue(*data_set_id) });
-	} else {
-		db.exec(sql + ";");
-	}
-	return static_cast<size_t>(db.changes());
-}
-
-bool server_outdated(db::Database &db, int64_t server_id) {
-	const auto rows = db.query(
-			std::string("SELECT 1 FROM hosted_servers s WHERE id = $1 AND ") + kLiveServerSql + " AND (" +
-					kOutdatedSql + ");",
-			{ BindValue(server_id) });
-	return !rows.empty();
 }
 
 // --- the JSON columns ---
