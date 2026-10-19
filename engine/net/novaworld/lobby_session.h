@@ -159,7 +159,7 @@ struct LobbyState {
 	// PlaySetup: play_addr its IpAddress:PortNumber (the join address the .joi handed it),
 	// playing_rid the listing at that address then (hostdb::rid_at; 0 for none, or with no
 	// database), playing_since_ms when it began playing there (Unix epoch ms; 0 while it plays
-	// on nothing). Its ClientStopPlaying clears them (LobbySession::stop_playing).
+	// on nothing). Its ClientStopPlaying clears them (LobbySession::leave_server).
 	uint32_t playing_rid = 0;
 	std::string play_addr;
 	int64_t playing_since_ms = 0;
