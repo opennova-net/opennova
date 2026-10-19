@@ -115,6 +115,30 @@ static func directory() -> String:
 	return _directory
 
 
+## A flat def root of a test's own authored tables: `weapon_text` as weapon.def,
+## `ammo` as ammo.def (this fixture's ammo_text() when empty), `hudpos` as
+## hudpos.def, beside the committed items table, staged fresh under
+## `.godot-test-fixtures/defs_<name>` (ResourceRoot indexes flat names and
+## rejects user://). A test that pins a shipped value authors only the rows
+## and fields its assertions read, each value cited where it is defined.
+static func stage_catalog(name: String, weapon_text: String, ammo := "",
+		hudpos := HUD) -> String:
+	var dir := ProjectSettings.globalize_path(
+			"res://../.godot-test-fixtures/defs_%s" % name)
+	var made := DirAccess.make_dir_recursive_absolute(dir)
+	assert(made == OK, "the def catalog directory is creatable")
+	WorldFixture.write_file(dir.path_join("weapon.def"), weapon_text)
+	WorldFixture.write_file(dir.path_join("ammo.def"), ammo_text() if ammo.is_empty() else ammo)
+	WorldFixture.write_file(dir.path_join("hudpos.def"), hudpos)
+	var items := dir.path_join("items.def")
+	if FileAccess.file_exists(items):
+		DirAccess.remove_absolute(items)
+	var copied := DirAccess.copy_absolute(
+			ProjectSettings.globalize_path(ItemDbFixture.FIXTURE_ITEMS), items)
+	assert(copied == OK, "the committed items table copies beside the authored defs")
+	return dir
+
+
 static func ammo_text() -> String:
 	# The impact drain only publishes authored effect/sound rows. Distinct
 	# sentinels let the real projectile produce an observable presentation event.

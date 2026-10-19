@@ -12,8 +12,15 @@ extends GutTest
 # engine's local_player_use_item_arm (ctest local_player_view) + the collision
 # resolver (ctest collision_test) — here the screen itself is the unit.
 
-# ArmoryFixture authors the catalog and strings. Shipped menu/layout/string
-# checks remain in tests/retail/armory_menu_seam_test.gd.
+# ArmoryFixture authors the catalog and strings. The shipped-value pins at the end
+# read ArmoryFixture's loadout catalog (the shipped weapon.def's loadout fields) and
+# our base game's assets/weapon.mnu (the authored WEAPON screen).
+
+const ASSETS_WEAPON_MNU := "res://../assets/weapon.mnu"
+# The shipped gametext.bin WepDes round labels the ammo rows resolve
+# [orig: WeaponDef_ParseProperty @0x54d730 resolves through GameText_GetString("WepDes", ...)]:
+# WepDes/AMMO_CAR15_556MM and WepDes/GRENADEFB.
+const SHIPPED_WEPDES_ROUNDS := {"AMMO_CAR15_556MM": "5.56x45", "GRENADEFB": "Flashbang"}
 
 
 func before_each() -> void:
@@ -488,6 +495,86 @@ func test_degrades_without_weapon_def() -> void:
 			"no weapon.def -> empty slots, no crash")
 
 
-# End-to-end against the REAL weapon.mnu (authored widget tree), so population runs
-# through the same document the runtime opens [orig: the WEAPON screen of
+# --- Shipped-value pins (the loadout catalog) ----------------------------------
+
+func _load_loadout_catalog() -> WeaponDatabase:
+	var wdb := WeaponDatabase.new()
+	var path := ArmoryFixture.stage_loadout_catalog("armory_seam").path_join("weapon.def")
+	assert_eq(wdb.load(path), OK, "the loadout catalog weapon.def loads")
+	return wdb
+
+
+# Our base game's WEAPON screen: the authored widget tree the runtime opens.
+func _assets_weapon_driver() -> MenuDriver:
+	var doc := MnuDocument.new()
+	assert_eq(doc.load_from_bytes(FileAccess.get_file_as_bytes(ASSETS_WEAPON_MNU)), OK,
+			"assets/weapon.mnu loads")
+	return MenuDriverFixture.driver_over(self, doc, "weapon.mnu", "WEAPON")
+
+
+func test_ammo_rows_resolve_the_shipped_wepdes_labels() -> void:
+	var gametext := RtxtStringFile.new()
+	gametext.add_section("WepDes")
+	for key: String in SHIPPED_WEPDES_ROUNDS:
+		gametext.add_entry(key, SHIPPED_WEPDES_ROUNDS[key], 0, Vector2i())
+	Strings.register_table("gametext", gametext)
+
+	var companion := ArmoryMenuCompanion.new()
+	companion.set_weapon_database(_load_loadout_catalog())
+	companion.set_player_class(8)
+	companion.set_current_loadout("WPN_M4AUTO")
+	var driver := _make_weapon_driver()
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
+
+	assert_eq(driver.item_text(driver.widget_id("PRIMARY_AMMO1"), 0), "30 - 5.56x45",
+			"parent ammo rows use the shipped WepDes round label")
+	assert_eq(driver.item_text(driver.widget_id("GRENADE_AMMO1"), 0), "0 - Flashbang",
+			"grenade zero rows use the shipped WepDes round label")
+	assert_eq(driver.item_text(driver.widget_id("GRENADE_AMMO1"), 1), "1 - Flashbang",
+			"grenade count rows keep the localized label")
+
+
+# End-to-end against the authored WEAPON screen (assets/weapon.mnu), so population
+# runs through the same document the runtime opens [orig: the WEAPON screen of
 # weapon.mnu, a boot resource @0x49b3b1 family].
+func test_real_weapon_mnu_populates() -> void:
+	var driver := _assets_weapon_driver()
+
+	var companion := ArmoryMenuCompanion.new()
+	assert_true(companion.owns_menu(driver), "the real weapon.mnu is claimed by the armory companion")
+	companion.set_weapon_database(_load_loadout_catalog())
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
+
+	var primary := driver.widget_id("PRIMARY")
+	assert_gte(primary, 0, "the real weapon.mnu authors a PRIMARY combobox")
+	assert_gt(driver.item_count(primary), 1, "PRIMARY populates (NONE + weapons)")
+	var spin := driver.widget_id("PLAYER_CLASS")
+	assert_gte(spin, 0, "the real weapon.mnu authors the PLAYER_CLASS spinlist")
+	assert_eq(driver.item_count(spin), 5, "the companion fills the authored-empty class spinlist")
+
+
+# First-show regression against the authored WEAPON screen and the shipped loadout
+# fields: M4 (weaponweight 5.5 + maxclips 10 * clipweight 1.5) plus two satchels
+# (maxclips 2 * clipweight 17.6) is 55.7 lbs / Normal. Selecting row zero means one
+# satchel and must re-render 38.1 lbs / Normal.
+func test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open() -> void:
+	var driver := _assets_weapon_driver()
+
+	var companion := ArmoryMenuCompanion.new()
+	companion.set_weapon_database(_load_loadout_catalog())
+	companion.set_player_class(8)
+	companion.set_current_loadout("WPN_M4AUTO", "", "WPN_SATCHEL_CHARGE")
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
+
+	assert_gte(driver.widget_id("STATIC_TOTAL_WEIGHT"), 0,
+			"the real weapon.mnu authors the weight readout")
+	assert_eq(companion.weight_line(), "Total Weight 55.7 lbs (Normal)",
+			"first open weighs the selected M4 plus two satchels")
+
+	var satchel_ammo := driver.widget_id("ACCESSORY_AMMO1")
+	assert_gte(satchel_ammo, 0, "the real weapon.mnu authors the satchel ammo combo")
+	assert_eq(driver.selected_row(satchel_ammo), 1,
+			"two satchels preselect the last zero-based row")
+	driver.select_row(satchel_ammo, 0)
+	assert_eq(companion.weight_line(), "Total Weight 38.1 lbs (Normal)",
+			"row zero means one satchel and updates both weight and encumbrance")

@@ -3598,3 +3598,74 @@ func test_emit_callback_uses_live_particle_groups_on_fixed_ticks() -> void:
 	assert_true(stopped, "the next callback stops its existing group")
 	assert_true(restarted, "the callback rearms after the 15-tick gap")
 	world.unload()
+
+
+# The first armory open over the production world: our base game's WEAPON screen
+# (assets/weapon.mnu) and string tables (assets/menutxt.bin, assets/gametext.bin)
+# beside ArmoryFixture's loadout catalog (the shipped weapon.def's loadout rows, the
+# satchel's loadout_subclasses 1 and its detonator row among them), staged over the
+# minimal root.
+func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
+	Strings.clear()
+	var root_dir := _staged(WorldFixture.stage_minimal_root("first_armory_open"))
+	var staged := {
+		"res://../assets/weapon.mnu": "weapon.mnu",
+		"res://../assets/menutxt.bin": "menutxt.BIN",
+		"res://../assets/gametext.bin": "gametext.bin",
+	}
+	for source in staged:
+		var target := root_dir.path_join(staged[source])
+		if FileAccess.file_exists(target):
+			assert_eq(DirAccess.remove_absolute(target), OK)
+		assert_eq(DirAccess.copy_absolute(ProjectSettings.globalize_path(source), target), OK)
+	WorldFixture.write_file(root_dir.path_join("weapon.def"), ArmoryFixture.loadout_catalog_text())
+
+	var world := WorldFixture.make_world(self)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	world.set_resource_root(root)
+	var loadout := PlayerSpawnLoadout.new()
+	loadout.primary = "WPN_M4AUTO"
+	loadout.accessory = "WPN_SATCHEL_CHARGE"
+	loadout.player_class = 8
+	world.set_local_player_spawn_loadout(loadout)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+
+	var weapons: WeaponDatabase = world.get_weapon_database()
+	assert_not_null(weapons, "first armory open lazily resolves weapon.def")
+	if weapons == null:
+		return
+	assert_true(weapons.is_loaded())
+	assert_gte(weapons.find_weapon("WPN_M4AUTO"), 0)
+	assert_gte(weapons.find_weapon("WPN_SATCHEL_CHARGE"), 0)
+	var sim := world.get_sim()
+	var expected_names := ["WPN_M4AUTO", "WPN_SATCHEL_CHARGE"]
+	var before_names: Array[String] = []
+	for value in sim.get_local_player_loadout():
+		before_names.append((value as WeaponKitEntry).name)
+	assert_eq(before_names, expected_names,
+		"the production world promoted the PLAYER_INFO-style canonical profile")
+
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	overlay.size = Vector2(800, 600)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world.armory_view(), null, overlay)
+	assert_true(presenter.open(), "the production world catalog reaches first armory open")
+	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	assert_gt(driver.selected_row(driver.widget_id("PRIMARY")), 0,
+		"the current primary is not NONE on first visit")
+	assert_gt(driver.selected_row(driver.widget_id("ACCESSORY")), 0,
+		"the current satchel is not NONE on first visit")
+
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	var after_names: Array[String] = []
+	for value in sim.get_local_player_loadout():
+		after_names.append((value as WeaponKitEntry).name)
+	assert_eq(after_names, expected_names,
+		"accepting the untouched first-open rows preserves the exact canonical kit")
+	world.unload()
+	Strings.clear()

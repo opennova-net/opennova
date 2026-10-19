@@ -2,7 +2,8 @@ class_name DeployMenuFixture
 extends RefCounted
 
 ## The named controls consumed by DeployScreenPresenter, with authored text.
-## Shipped death.mnu remains covered by the retail menu-corpus compilation test.
+## Our base game's assets/death.mnu compiles in the menu-corpus test
+## (mnu/mnu_corpus_test.gd).
 ## `targets` names the files to author into `res_dir` (death.mnu, gametext.bin,
 ## menutxt.bin).
 static func stage(test: GutTest, res_dir: String, targets: PackedStringArray) -> void:
