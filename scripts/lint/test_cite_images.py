@@ -84,6 +84,14 @@ class ImageAt(unittest.TestCase):
         self.assertFalse(cite_images.misspelled("JOTACmed.exe", "JOTACmed.exe"))
         self.assertFalse(cite_images.misspelled("dfbhd.exe", "dfbhd"))   # an established form
         self.assertFalse(cite_images.misspelled("UPDATE.EXE", ""))        # a record's default
+        self.assertTrue(cite_images.misspelled("df4oed.exe", "df4oed"))
+
+    def test_a_short_form_is_never_read_as_the_default_image(self):
+        # an unknown short form binds nothing, so its address would read as Jointops.exe's
+        self.assertEqual(bound("// [orig: GP_WriteModel @ 0x448B77 (df4oed)]"),
+                         [("448b77", "df4oed.exe")])
+        self.assertEqual(bound("// [orig: GP_WriteModel @ 0x448B77 (df4oed.exe)]"),
+                         [("448b77", "df4oed.exe")])
 
 
 if __name__ == "__main__":

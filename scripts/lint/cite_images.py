@@ -31,6 +31,7 @@ IMAGES = (
     "ModSuperOed.exe",
     "dfvas.exe",
     "dfbhd.exe",
+    "df4oed.exe",
     "jodemo.exe",
     "TrnGen.exe",
     "ParticleEdit_v1_1.exe",
@@ -68,11 +69,13 @@ ALIASES = {
     "JOTACmed": "JOTACmed.exe",
     "ModSuperOed": "ModSuperOed.exe",
     "REVUPDAT": "REVUPDAT.EXE",
+    "df4oed": "df4oed.exe",
 }
 
 # One spelling each, decided 2026-10-15: these file names are written exactly so.
+# df4oed.exe joined 2026-10-19 with its first cites (BHD's GP writer).
 RATIFIED = ("gobj.dll", "JOTACmed.exe", "ModSuperOed.exe", "UPDATE.EXE", "REVUPDAT.EXE",
-            "pack.exe")
+            "pack.exe", "df4oed.exe")
 
 # Executables and modules of our own (and the engine's host) are never witness images.
 OURS = re.compile(r"^(?:opennova|OpennovaGodotClient|godot|libgodot)", re.I)

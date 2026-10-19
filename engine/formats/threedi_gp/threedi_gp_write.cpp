@@ -14,7 +14,7 @@ namespace {
 using io::ByteWriter;
 
 // The tag the tool writes over each primitive's +4, which the loader overwrites with the
-// primitive's index offset [orig: GP_WriteRenderModel @ 0x4474D6, @ 0x447786 (df4oed)].
+// primitive's index offset [orig: GP_WriteRenderModel @ 0x4474D6, @ 0x447786 (df4oed.exe)].
 constexpr uint32_t kPrimitiveTag = 0x72646441u; // "Addr"
 
 struct Writer {
@@ -46,7 +46,7 @@ struct Writer {
 		w.write_i16(g.end);
 	}
 
-	// [orig: GP_WriteModel @ 0x448B77..0x448F88 (df4oed): the 0xEC header]
+	// [orig: GP_WriteModel @ 0x448B77..0x448F88 (df4oed.exe): the 0xEC header]
 	bool header(const File &f) {
 		const Header &h = f.header;
 		const char kind = h.kind == Kind::Gpm ? 'M' : h.kind == Kind::Gps ? 'S' : h.kind == Kind::Gpp ? 'P' : '\0';
@@ -82,7 +82,7 @@ struct Writer {
 		return true;
 	}
 
-	// [orig: GP_WriteUserPoints @ 0x443310 (df4oed)]
+	// [orig: GP_WriteUserPoints @ 0x443310 (df4oed.exe)]
 	bool user_points(const std::vector<UserPoint> &points) {
 		for (const UserPoint &p : points) {
 			i32x3(p.position);
@@ -95,7 +95,7 @@ struct Writer {
 		return true;
 	}
 
-	// [orig: GP_WriteTextureTable @ 0x4485B0 (df4oed)]
+	// [orig: GP_WriteTextureTable @ 0x4485B0 (df4oed.exe)]
 	bool textures(const std::vector<TextureRow> &rows) {
 		w.write_u32(static_cast<uint32_t>(rows.size()));
 		for (const TextureRow &t : rows) {
@@ -110,12 +110,12 @@ struct Writer {
 		return true;
 	}
 
-	// [orig: GP_WriteCollision @ 0x443980 (df4oed)]: the 0x88 header, then the vertices,
+	// [orig: GP_WriteCollision @ 0x443980 (df4oed.exe)]: the 0x88 header, then the vertices,
 	// normals, faces, sections, translations, planes and volumes in one blob.
 	void collision(Kind kind, const Collision &c) {
 		const size_t blob = c.vertices.size() * 8 + c.normals.size() * 8 + c.faces.size() * 44 + c.sections.size() * 128 +
 				c.translations.size() * 12 + c.planes.size() * 16 + c.volumes.size() * 96;
-		// +0: 1 on a skinned model's block [orig: @ 0x443B77 (df4oed)]; no dfbhd reader found.
+		// +0: 1 on a skinned model's block [orig: @ 0x443B77 (df4oed.exe)]; no dfbhd reader found.
 		w.write_i32(kind == Kind::Gpm ? 0 : 1);
 		w.write_u32(static_cast<uint32_t>(blob));
 		w.write_zeros(4);
@@ -181,7 +181,7 @@ struct Writer {
 			i32x3(v.centre);
 			w.write_i32(v.radius);
 			w.write_i32(v.radius_xy);
-			w.write_i32(v.radius_xy); // the tool stores the xy radius twice [orig: @ 0x444D7D..0x444DA3 (df4oed)]
+			w.write_i32(v.radius_xy); // the tool stores the xy radius twice [orig: @ 0x444D7D..0x444DA3 (df4oed.exe)]
 			i32x3(v.half);
 			w.write_zeros(4);
 			for (int32_t b : v.box) w.write_i32(b);
@@ -190,7 +190,7 @@ struct Writer {
 		}
 	}
 
-	// [orig: GP_WriteModel @ 0x4490EF..0x449238 (df4oed)]: GPP's 60-byte vertices and GPM's
+	// [orig: GP_WriteModel @ 0x4490EF..0x449238 (df4oed.exe)]: GPP's 60-byte vertices and GPM's
 	// 44-byte ones, each with the packed colour the loader drops (0xFF000000 from the tool).
 	bool vertices(Kind kind, const std::vector<Vertex> &verts) {
 		for (const Vertex &v : verts) {
@@ -229,7 +229,7 @@ struct Writer {
 		for (uint16_t i : p.indices) w.write_u16(i);
 	}
 
-	// [orig: GP_WriteMaterials, in GP_WriteRenderModel @ 0x4478B9..0x447D7D (df4oed)]
+	// [orig: GP_WriteMaterials, in GP_WriteRenderModel @ 0x4478B9..0x447D7D (df4oed.exe)]
 	bool material(const Material &m) {
 		if (!name(m.name, 16, "a material's name")) return false;
 		w.write_u32(m.attributes);
@@ -252,7 +252,7 @@ struct Writer {
 		w.write_u8(m.blend);
 		w.write_u8(m.paired);
 		w.write_zeros(10);
-		w.write_f32(m.tiling[0]); // [orig: @ 0x447AF3..0x447B16 (df4oed)]
+		w.write_f32(m.tiling[0]); // [orig: @ 0x447AF3..0x447B16 (df4oed.exe)]
 		w.write_f32(m.tiling[1]);
 		generator(m.u);
 		generator(m.v);
@@ -266,7 +266,7 @@ struct Writer {
 		return true;
 	}
 
-	// A part's animation row [orig: GP_WriteRenderModel @ 0x447DC1..0x4481F5 (df4oed)]; a
+	// A part's animation row [orig: GP_WriteRenderModel @ 0x447DC1..0x4481F5 (df4oed.exe)]; a
 	// spinner's first 12 track bytes are its three float rates.
 	void part_animation(const PartAnimation &a) {
 		w.write_u32(a.flags);
@@ -286,7 +286,7 @@ struct Writer {
 		w.write_zeros(92 - 60);
 	}
 
-	// [orig: GP_WriteRenderModel @ 0x446D90 (df4oed)]: the 0x88 header, then the blob: attach
+	// [orig: GP_WriteRenderModel @ 0x446D90 (df4oed.exe)]: the 0x88 header, then the blob: attach
 	// points, parts, batches (a global table's header first), primitives, materials, part
 	// animations.
 	bool render_model(const RenderModel &m) {
@@ -317,7 +317,7 @@ struct Writer {
 		for (size_t i = 0; i < m.parts.size(); ++i) {
 			const Part &p = m.parts[i];
 			blob.write_zeros(4);
-			// A skinned model's parts each count one batch as well [orig: @ 0x44717B (df4oed)].
+			// A skinned model's parts each count one batch as well [orig: @ 0x44717B (df4oed.exe)].
 			blob.write_i32(global ? 1 : part_batches[i]);
 			blob.write_zeros(4);
 			blob.write_i32(p.parent);
@@ -363,7 +363,7 @@ struct Writer {
 		return true;
 	}
 
-	// [orig: GP_WriteLights @ 0x4464E0 (df4oed)]: {256, size}, the 60-byte table (the model's
+	// [orig: GP_WriteLights @ 0x4464E0 (df4oed.exe)]: {256, size}, the 60-byte table (the model's
 	// two ambient generators, which nothing of ours carries, -1.0 at +28 and the count), then
 	// 48 bytes a light.
 	void lights(const std::vector<Light> &lights) {
@@ -388,7 +388,7 @@ struct Writer {
 		}
 	}
 
-	// [orig: GP_WriteOcclusion @ 0x442110 (df4oed)]: the 60-byte records, then each one's
+	// [orig: GP_WriteOcclusion @ 0x442110 (df4oed.exe)]: the 60-byte records, then each one's
 	// vertices, planes and faces.
 	void occlusion(const std::vector<OcclusionObject> &objects) {
 		for (const OcclusionObject &o : objects) {
@@ -422,7 +422,7 @@ bool write(const File &f, std::vector<uint8_t> &out, std::string &error) {
 	error.clear();
 	ByteWriter bytes;
 	Writer w{bytes, error};
-	// [orig: GP_WriteModel @ 0x448F88..0x4493FC (df4oed)]: the section order parse() reads.
+	// [orig: GP_WriteModel @ 0x448F88..0x4493FC (df4oed.exe)]: the section order parse() reads.
 	if (!w.header(f) || !w.user_points(f.user_points) || !w.textures(f.textures)) return false;
 	w.collision(f.header.kind, f.collision);
 	if (!w.vertices(f.header.kind, f.vertices)) return false;
@@ -436,7 +436,8 @@ bool write(const File &f, std::vector<uint8_t> &out, std::string &error) {
 		for (float v : m) bytes.write_f32(v);
 	if (f.header.flags & kFlagLights) w.lights(f.lights);
 	if (f.header.flags & kFlagVertexStream) {
-		// {0, size, 0, 0}; the tool writes the size, 24 bytes a vertex [orig: @ 0x44933B (df4oed)].
+		// {0, size, 0, 0}; the tool writes the size, 24 bytes a vertex [orig: @ 0x44933B
+		// (df4oed.exe)].
 		bytes.write_zeros(4);
 		bytes.write_u32(static_cast<uint32_t>(f.vertex_stream.size()));
 		bytes.write_zeros(8);

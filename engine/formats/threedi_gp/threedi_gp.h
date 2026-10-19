@@ -84,8 +84,8 @@ struct TextureRow {
 	int16_t id = 0;     // +0x24
 	uint16_t flags = 0; // +0x26: 0x8 alpha only, 0x100 colour with +0x10's alpha
 	// +0x28: the image's size, the checkerboard a failed load makes [orig: @ 0x5161C3..0x5161C7
-	// (dfbhd)], which the tool takes from the file it loads [orig: sub_4485B0 @ 0x4486F7..0x44871F
-	// (df4oed)].
+	// (dfbhd)], which the tool takes from the file it loads [orig: GP_WriteTextureTable
+	// @ 0x4486F7..0x44871F (df4oed.exe)].
 	uint16_t width = 0, height = 0;
 };
 
@@ -125,8 +125,8 @@ struct CollisionSection {
 	std::array<int32_t, 3> centre{};  // +88
 	int32_t radius = 0;               // +100
 	// +104, +108: the radius in xy about the centre and the box's height, as the tool derives
-	// them from the section's vertices [orig: sub_443980 @ 0x4449AA..0x4449ED (df4oed)]; no
-	// dfbhd reader found.
+	// them from the section's vertices [orig: GP_WriteCollision @ 0x4449AA..0x4449ED
+	// (df4oed.exe)]; no dfbhd reader found.
 	int32_t radius_xy = 0;
 	int32_t height = 0;
 };
@@ -142,7 +142,7 @@ struct CollisionVolume {
 	int32_t type = 0;                 // +0, the collidable type
 	int32_t flags = 0;                // +4
 	// +8: the centre, the sphere and xy radii (the xy one twice) and the half extents the tool
-	// stores [orig: sub_443980 @ 0x444D44..0x444DDE (df4oed)]; no dfbhd reader found.
+	// stores [orig: GP_WriteCollision @ 0x444D44..0x444DDE (df4oed.exe)]; no dfbhd reader found.
 	std::array<int32_t, 3> centre{};
 	int32_t radius = 0;
 	int32_t radius_xy = 0;
@@ -235,7 +235,7 @@ struct RgbGenerator {
 // A render material, 152 bytes. GP names no shader: the render state comes from the
 // bytes below [orig: GPMaterial_BuildModeWord @ 0x5163F0; GPMaterial_CompileGPM @ 0x516E70
 // (dfbhd)]; the record's own name (+0x00) is never read (the tool writes the material's name,
-// in BHD's corpus most often its texture's [orig: GP_WriteRenderModel @ 0x4478DD (df4oed)]).
+// in BHD's corpus most often its texture's [orig: GP_WriteRenderModel @ 0x4478DD (df4oed.exe)]).
 inline constexpr uint32_t kMaterialTwoSided = 0x1;    // cull none
 inline constexpr uint32_t kMaterialAlphaTest = 0x2;   // GREATER than +0x3B
 inline constexpr uint32_t kMaterialAlphaTestInv = 0x4;
@@ -251,13 +251,13 @@ struct Material {
 	uint8_t frame_counter = 0;    // +0x17: the counter that picks the frame
 	// +0x1C: four RGB triplets, the material's flat colour four times over; the loader takes
 	// triplet 1 + q as region q's (colour source 1) [orig: GP_LoadRenderModel @ 0x515D38..0x515D57
-	// (dfbhd); GP_WriteRenderModel @ 0x4479CD..0x447A11 (df4oed)].
+	// (dfbhd); GP_WriteRenderModel @ 0x4479CD..0x447A11 (df4oed.exe)].
 	std::array<uint8_t, 12> colours{};
 	std::array<int8_t, 3> region_textures{}; // +0x28: the texture row id per mission region (-1 none)
 	int8_t alpha_texture = 0;     // +0x2B: the row id when only the alpha source is the texture
-	uint32_t env_tint = 0;        // +0x2C: the environment pass's colour [orig: @ 0x447A92 (df4oed)]
+	uint32_t env_tint = 0;        // +0x2C: the environment pass's colour [orig: @ 0x447A92 (df4oed.exe)]
 	uint8_t env_pass = 0;         // +0x30: the environment pass
-	uint8_t env_form = 0;         // +0x31: [orig: @ 0x447A96 (df4oed)]
+	uint8_t env_form = 0;         // +0x31: [orig: @ 0x447A96 (df4oed.exe)]
 	uint8_t shader = 0;           // +0x32: 0 fixed function, else a bump technique
 	uint8_t colour_source = 0;    // +0x38: 1 the region colour, 2 the texture
 	uint8_t alpha_source = 0;     // +0x39: 0/1 the material's, 2 the texture's
@@ -294,12 +294,12 @@ struct PartAnimation {
 
 // One LOD's render model: the 0x88 header and the blob it sizes. The blob opens with the
 // attach points (12 bytes each, mission axes: the collision block's translations as floats
-// [orig: sub_446D90 @ 0x4470D5..0x44712C (df4oed)]), which nothing reads.
+// [orig: GP_WriteRenderModel @ 0x4470D5..0x44712C (df4oed.exe)]), which nothing reads.
 inline constexpr uint32_t kRenderGlobalBatch = 0x1;
 inline constexpr uint32_t kRenderPartAnimations = 0x2;
 struct RenderModel {
 	// +0x20, +0x38: twelve words each the tool writes from the materials by an index they hold
-	// [orig: GP_WriteRenderModel @ 0x447031..0x447065 (df4oed)]; no dfbhd reader found.
+	// [orig: GP_WriteRenderModel @ 0x447031..0x447065 (df4oed.exe)]; no dfbhd reader found.
 	std::array<uint16_t, 24> material_words{};
 	uint32_t flags = 0;                  // +0x50: kRender*
 	uint32_t extra_count = 0;            // +0x60: 88-byte primitives (none in BHD's corpus)
@@ -325,7 +325,7 @@ struct Light {
 struct OcclusionObject {
 	uint8_t type = 0, parent = 0, connecting = 0;
 	// +4: the sphere the tool stores, which the loader recomputes [orig: GP_LoadOcclusionData
-	// @ 0x5150C9..0x515258 (dfbhd); sub_442110 @ 0x4421A1..0x4421CB (df4oed)].
+	// @ 0x5150C9..0x515258 (dfbhd); GP_WriteOcclusion @ 0x4421A1..0x4421CB (df4oed.exe)].
 	std::array<float, 3> centre{};
 	float radius = 0.0f;
 	std::vector<std::array<float, 3>> vertices;
