@@ -10,8 +10,9 @@
 //      "source" (the rule)}] (danger first, then warn, then info, each level's oldest
 //      first),
 //    "alarms": [{"name", "state_since" (ISO 8601; null when not known), "description"}],
-//    "alarms_read" (false where none are read: the local stack, or a read that failed,
-//      which is a warn finding of its own, never a quiet list),
+//    "alarms_read" (false where none are read: the local stack, or a read that failed),
+//    "alarms_read_failed" (true for a read that failed, which is a warn finding of its
+//      own, never a quiet list; false for the local stack, which reads none),
 //    "checked_at" (ISO 8601, the database's clock)}
 //
 // Each admin's reads are drawn from a bucket of their own. Read only; no-store. Service

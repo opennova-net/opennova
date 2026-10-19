@@ -218,6 +218,7 @@ export function attention(overrides: Partial<Attention> = {}): Attention {
     ],
     alarms: [{ name: 'opennova-prod-machines-lost', state_since: ago(300), description: 'A machine was lost. See the Fleet page.' }],
     alarms_read: true,
+    alarms_read_failed: false,
     checked_at: ago(0),
     ...overrides,
   };

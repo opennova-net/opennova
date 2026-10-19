@@ -36,7 +36,9 @@ function pickAlarm(v: unknown): FiringAlarm | null {
 }
 
 export function pickAttention(v: unknown): Attention | null {
-  if (!isObject(v) || !Array.isArray(v.findings) || typeof v.alarms_read !== 'boolean') return null;
+  if (!isObject(v) || !Array.isArray(v.findings) || typeof v.alarms_read !== 'boolean' || typeof v.alarms_read_failed !== 'boolean') {
+    return null;
+  }
   const findings: Finding[] = [];
   for (const f of v.findings) {
     const finding = pickFinding(f);
@@ -49,7 +51,13 @@ export function pickAttention(v: unknown): Attention | null {
     if (alarm === null) return null;
     alarms.push(alarm);
   }
-  return { findings, alarms, alarms_read: v.alarms_read, checked_at: typeof v.checked_at === 'string' ? v.checked_at : '' };
+  return {
+    findings,
+    alarms,
+    alarms_read: v.alarms_read,
+    alarms_read_failed: v.alarms_read_failed,
+    checked_at: typeof v.checked_at === 'string' ? v.checked_at : '',
+  };
 }
 
 // GET /api/admin/attention.

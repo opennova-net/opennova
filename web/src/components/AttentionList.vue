@@ -67,7 +67,10 @@
         </ul>
       </div>
 
-      <p v-if="!attention.alarms_read" class="attention-no-alarms text-xs text-ink-muted">Alarms are not read here (local stack).</p>
+      <!-- A failed read is a finding of its own, which says why. -->
+      <p v-if="!attention.alarms_read && !attention.alarms_read_failed" class="attention-no-alarms text-xs text-ink-muted">
+        Alarms are not read here (local stack).
+      </p>
     </template>
   </section>
 </template>
@@ -78,7 +81,8 @@
 // words and colour, what it is about, since when, and the page to look at;
 // then the deployment's firing alarms. With none of either it says that
 // nothing needs anyone; where alarms are not read (the local stack) it says so
-// rather than implying none fire. A failed read shows why, and the last answer
+// rather than implying none fire, and a failed alarm read is left to the
+// finding that says why. A failed read shows why, and the last answer
 // marked as of its time, never that nothing needs anyone. The read is the
 // admin layout's, shared with the nav's count (composables/useAttention.ts).
 import { computed, ref, watch } from 'vue';

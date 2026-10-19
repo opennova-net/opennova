@@ -684,9 +684,9 @@ run "task_roles" {
         ]
       ])) &&
       one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadMetrics"]) == toset(["*"]) &&
-      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadAlarms"]) == toset(["arn:aws:cloudwatch:us-east-1:123456789012:alarm:opennova-prod-*"])
+      one([for st in data.aws_iam_policy_document.infra_read.statement : st.resources if st.sid == "ReadAlarms"]) == toset(["arn:aws:cloudwatch:us-east-1:123456789012:alarm:*"])
     )
-    error_message = "web reads the events of this deployment's three log groups alone (the programs', the machines', the servers'), CloudWatch's metrics, which take no resource, and this deployment's alarms alone"
+    error_message = "web reads the events of this deployment's three log groups alone (the programs', the machines', the servers'), CloudWatch's metrics, which take no resource, and the alarms of its account and region (IAM judges a listing against alarm:*)"
   }
   assert {
     condition = (

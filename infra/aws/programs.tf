@@ -237,8 +237,11 @@ resource "aws_iam_role_policy" "exec" {
 # GetMetricData (web asks for its database's, cache's and balancer's metrics
 # alone). The logs are this deployment's three groups' (the programs', the
 # machines' and the servers', observability.tf), read for the admin's log
-# view; the alarms are this deployment's (every name starts with its own,
-# observability.tf), whose firing ones the attention list reads. The boundary
+# view; the alarms are the account's in its region, whose firing ones by this
+# deployment's name prefix (observability.tf) the attention list reads: IAM
+# judges a DescribeAlarms listing against alarm:*, whatever its prefix (a
+# grant of this deployment's alarm names alone was refused, on staging's
+# first read). The boundary
 # (infra/aws/iam/opennova-role-boundary.json) holds the same, so the org stack
 # applies it first.
 locals {
@@ -333,7 +336,7 @@ data "aws_iam_policy_document" "infra_read" {
     sid       = "ReadAlarms"
     effect    = "Allow"
     actions   = ["cloudwatch:DescribeAlarms"]
-    resources = ["arn:${local.partition}:cloudwatch:${local.region}:${local.account_id}:alarm:${local.name}-*"]
+    resources = ["arn:${local.partition}:cloudwatch:${local.region}:${local.account_id}:alarm:*"]
   }
 }
 

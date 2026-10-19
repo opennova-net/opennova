@@ -175,11 +175,10 @@ AccessDenied naming the action):
 - the admin's log and usage views on web's first read after `org apply`: web's task role's
   `logs:GetLogEvents` and `logs:FilterLogEvents` on the deployment's `service`, `machines`
   and `servers` groups and `cloudwatch:GetMetricData` (no resource scoping exists for it),
-  each under the role boundary;
-- the attention list's alarms on web's first read: `cloudwatch:DescribeAlarms` with
-  `AlarmNamePrefix` under a role policy scoped to the deployment's alarm ARNs
-  (`alarm:opennova-<deployment>-*`; the boundary holds it unscoped, in `Unscoped`): that
-  CloudWatch filters a prefix listing by the alarm ARNs the policy grants rather than
-  refusing it (AWS documents a narrower scope as allowed, without composite alarms, which
-  the service makes none of). If it refuses, the page says so (a warn finding in AWS's
-  words), and the statement's resource becomes `*`.
+  each under the role boundary.
+
+Verified: the attention list's alarms, web's `cloudwatch:DescribeAlarms` with
+`AlarmNamePrefix`. IAM judges the listing against `alarm:*` whatever its prefix, and refused
+it (staging's first read) under a role policy scoped to the deployment's alarm ARNs
+(`alarm:opennova-<deployment>-*`), so web's policy grants `alarm:*` of its account and region
+(`ReadAlarms`, `infra/aws/programs.tf`; the boundary holds the action unscoped, in `Unscoped`).

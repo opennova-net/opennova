@@ -76,6 +76,26 @@ describe('AttentionList', () => {
     expect(note.text()).toContain('https://example.com');
   });
 
+  it("leaves a failed alarm read to its finding, never calling it the local stack's", async () => {
+    read.mockResolvedValue({
+      ok: true,
+      value: attention({
+        findings: [
+          finding('warn', 'Not read: monitoring answered 403: AccessDenied.', { subject: 'CloudWatch alarms', since: null, link: null, source: 'unknown' }),
+        ],
+        alarms: [],
+        alarms_read: false,
+        alarms_read_failed: true,
+      }),
+    });
+    const page = await mountList();
+    const told = page.get('li.attention-finding');
+    expect(told.text()).toContain('CloudWatch alarms');
+    expect(told.text()).toContain('Not read: monitoring answered 403: AccessDenied.');
+    expect(page.find('.attention-no-alarms').exists()).toBe(false);
+    expect(page.find('.attention-empty').exists()).toBe(false);
+  });
+
   it('keeps the last findings while a read fails, marked as of their time', async () => {
     const page = await mountList();
     read.mockResolvedValue({ ok: false, error: { code: 'network', status: null, message: 'The service could not be reached.' } });

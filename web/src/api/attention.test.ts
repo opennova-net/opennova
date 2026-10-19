@@ -22,12 +22,14 @@ describe('the attention client', () => {
   });
 
   it('reads a level it does not know as a warning, never dropping a finding', () => {
-    const read = pickAttention({ findings: [{ level: 'critical', text: 'x' }], alarms_read: false });
+    const read = pickAttention({ findings: [{ level: 'critical', text: 'x' }], alarms_read: false, alarms_read_failed: true });
     expect(read?.findings).toEqual([{ level: 'warn', subject: '', text: 'x', since: null, link: null, source: '' }]);
     expect(read?.alarms).toEqual([]);
     expect(read?.alarms_read).toBe(false);
-    expect(pickAttention({ findings: [{ level: 'warn' }], alarms_read: true })).toBeNull();
+    expect(read?.alarms_read_failed).toBe(true);
+    expect(pickAttention({ findings: [{ level: 'warn' }], alarms_read: true, alarms_read_failed: false })).toBeNull();
     expect(pickAttention({ findings: [] })).toBeNull();
+    expect(pickAttention({ findings: [], alarms_read: false })).toBeNull();
   });
 
   it('counts what needs someone: danger and warn findings and firing alarms', () => {

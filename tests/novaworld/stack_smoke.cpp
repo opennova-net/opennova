@@ -309,8 +309,10 @@ void check_attention(const Site &site) {
 	const auto json = json_of(reply);
 	const io::JsonValue *findings = reply.code == 200 && json ? at(*json, { "findings" }) : nullptr;
 	const io::JsonValue *alarms_read = json ? at(*json, { "alarms_read" }) : nullptr;
+	const io::JsonValue *alarms_failed = json ? at(*json, { "alarms_read_failed" }) : nullptr;
 	if (!check(findings && findings->is_array() && alarms_read && alarms_read->is_bool() &&
-					   !alarms_read->boolean,
+						!alarms_read->boolean && alarms_failed && alarms_failed->is_bool() &&
+						!alarms_failed->boolean,
 				"the attention list answers, reading no alarm here (GET /api/admin/attention)",
 				status_text(reply)))
 		return;

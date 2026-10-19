@@ -374,7 +374,9 @@ int test_attention(Harness &h, ConnectionPool &pool) {
 	TEST_EXPECT(str(findings[3]["level"]) == "info" &&
 			str(findings[3]["source"]) == "outdated_image" &&
 			str(findings[3]["link"]) == "/admin/fleet?tab=roll");
-	TEST_EXPECT(json["alarms_read"].t() == crow::json::type::False && json["alarms"].size() == 0);
+	TEST_EXPECT(json["alarms_read"].t() == crow::json::type::False &&
+			json["alarms_read_failed"].t() == crow::json::type::False &&
+			json["alarms"].size() == 0);
 	TEST_EXPECT(str(json["checked_at"]).size() == 20 && str(json["checked_at"]).back() == 'Z');
 
 	// A lobby registers: no danger left.
@@ -449,7 +451,8 @@ int test_alarms(Harness &h) {
 	h.stub->clear();
 	auto reply = h.get_at(h.cloud_port, "/api/admin/attention");
 	auto json = json_of(reply, 200);
-	TEST_EXPECT(json && json["alarms_read"].t() == crow::json::type::True);
+	TEST_EXPECT(json && json["alarms_read"].t() == crow::json::type::True &&
+			json["alarms_read_failed"].t() == crow::json::type::False);
 	const auto &alarms = json["alarms"];
 	TEST_EXPECT(alarms.size() == 2);
 	TEST_EXPECT(str(alarms[0]["name"]) == "opennova-prod-db-cpu" &&
@@ -480,7 +483,7 @@ int test_alarms(Harness &h) {
 	reply = h.get_at(h.cloud_port, "/api/admin/attention");
 	json = json_of(reply, 200);
 	TEST_EXPECT(json && json["alarms_read"].t() == crow::json::type::False &&
-			json["alarms"].size() == 0);
+			json["alarms_read_failed"].t() == crow::json::type::True && json["alarms"].size() == 0);
 	TEST_EXPECT(h.stub->count("monitoring DescribeAlarms") == 2);
 	bool told = false;
 	for (const auto &f : json["findings"])
