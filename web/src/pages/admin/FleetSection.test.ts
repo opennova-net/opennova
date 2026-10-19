@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import FleetSection from './FleetSection.vue';
 import { fetchHostedFleet, fetchRollPlan, machineAction, stopAllFleetServers, stopFleetServer } from '../../api/admin';
 import { updateAllServers } from '../../api/dataSets';
+import { fetchInfrastructure } from '../../api/infra';
 import { fleetResponse, fleetServer, machine as fleetMachine } from '../../test/adminFixtures';
 import { NOW } from '../../test/usageFixtures';
+import { cloud, localOverview, overview } from '../../test/infraFixtures';
 import { testRouter } from '../../test/router';
 
 vi.mock('../../api/admin', () => ({
@@ -16,6 +18,7 @@ vi.mock('../../api/admin', () => ({
   stopFleetServer: vi.fn(),
 }));
 vi.mock('../../api/dataSets', () => ({ updateAllServers: vi.fn() }));
+vi.mock('../../api/infra', () => ({ fetchInfrastructure: vi.fn() }));
 vi.mock('../../api/attention', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/attention')>()),
   fetchAttention: vi.fn(async () => ({ ok: true, value: { findings: [], alarms: [], alarms_read: true, alarms_read_failed: false, checked_at: '' } })),
@@ -27,6 +30,7 @@ const rollPlan = vi.mocked(fetchRollPlan);
 const stopAll = vi.mocked(stopAllFleetServers);
 const stopOne = vi.mocked(stopFleetServer);
 const updateAll = vi.mocked(updateAllServers);
+const infra = vi.mocked(fetchInfrastructure);
 
 describe('FleetSection', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
@@ -45,6 +49,7 @@ describe('FleetSection', () => {
     vi.setSystemTime(NOW);
     confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     fleet.mockResolvedValue({ ok: true, value: fleetResponse() });
+    infra.mockResolvedValue({ ok: true, value: overview() });
   });
 
   afterEach(() => {
@@ -52,6 +57,44 @@ describe('FleetSection', () => {
     wrapper = null;
     confirm.mockRestore();
     vi.useRealTimers();
+  });
+
+  it("shows hostd's daemon on the fleet cluster, each machine as ECS sees it", async () => {
+    const page = await mountSection();
+    const panel = page.get('.fleet-cluster');
+    expect(panel.text()).toContain('Steady');
+    expect(panel.text()).toContain('hostd runs on 1 of 1 machine in opennova-prod-fleet (opennova-prod-hostd:5).');
+    const instance = panel.get('li.fleet-cluster-instance');
+    expect(instance.text()).toContain('Machine 1 (shared)');
+    expect(instance.text()).toContain('its ECS agent connected');
+    expect(instance.text()).toContain('1 task running');
+    expect(instance.text()).toContain('ami-0aaa');
+    expect(instance.get('a').attributes('href')).toBe('/admin/fleet/machines/1');
+  });
+
+  it('says hostd runs nowhere while no machine has joined, not that it stopped', async () => {
+    const read = cloud();
+    infra.mockResolvedValue({
+      ok: true,
+      value: overview({ cloud: { ...read, fleet: { ...read.fleet!, hostd: { ...read.fleet!.hostd!, desired: 0, running: 0 }, instances: [] } } }),
+    });
+    const page = await mountSection();
+    const panel = page.get('.fleet-cluster');
+    expect(panel.text()).toContain('No machines');
+    expect(panel.text()).not.toContain('Stopped');
+    expect(panel.text()).toContain('No machine has joined opennova-prod-fleet, so hostd runs nowhere yet');
+    expect(panel.find('li').exists()).toBe(false);
+  });
+
+  it('on the local stack says ECS is not read, and a failed read leaves the machines standing', async () => {
+    infra.mockResolvedValue({ ok: true, value: localOverview() });
+    let page = await mountSection();
+    expect(page.get('.fleet-cluster').text()).toContain('ECS: not read on this stack');
+    page.unmount();
+    infra.mockResolvedValue({ ok: false, error: { code: 'db_error', status: 500, message: 'The server hit a database error. Try again shortly.' } });
+    page = await mountSection();
+    expect(page.get('.fleet-cluster').text()).toContain('the fleet cluster could not be read: The server hit a database error.');
+    expect(page.text()).toContain('Machine');
   });
 
   it('sends the background jobs to their own page', async () => {

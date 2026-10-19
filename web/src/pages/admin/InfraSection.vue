@@ -38,8 +38,8 @@
         <StatTile label="Fleet machines" :value="machinesTile.value" :detail="machinesTile.detail" />
       </dl>
 
-      <!-- The programs: a card each (ECS's service, what its tasks use), and
-           hostd's daemon on the fleet cluster with its machines. -->
+      <!-- The programs: a card each (ECS's service, what its tasks use).
+           hostd's daemon and the fleet cluster are the Fleet page's. -->
       <section v-if="programNames.length" class="space-y-4" aria-labelledby="infra-programs">
         <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
           <h2 id="infra-programs" class="text-xl font-semibold text-ink">Programs</h2>
@@ -65,40 +65,6 @@
             :now="now"
             :to="`/admin/infrastructure/programs/${name}`"
           />
-          <ProgramCard
-            v-if="cloudRead?.fleet"
-            name="hostd"
-            :service="cloudRead.fleet.hostd"
-            :usage="null"
-            :cloud-read="true"
-            :now="now"
-            to="/admin/fleet"
-            link-label="Its machines, on the Fleet page"
-          >
-            <div class="infra-fleet-cluster space-y-1">
-              <h4 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                Machines in <span class="font-mono normal-case">{{ cloudRead.fleet.cluster }}</span>
-              </h4>
-              <p v-if="cloudRead.fleet.error" class="text-xs text-danger">The fleet cluster could not be read: {{ cloudRead.fleet.error }}</p>
-              <p v-else-if="cloudRead.fleet.instances.length === 0" class="text-xs text-ink-muted">
-                No machine has registered, so hostd runs nowhere yet.
-              </p>
-              <ul v-else class="space-y-1">
-                <li v-for="i in cloudRead.fleet.instances" :key="i.id" class="infra-instance text-xs text-ink-muted">
-                  <RouterLink v-if="i.machine_id" :to="`/admin/fleet/machines/${i.machine_id}`" class="text-accent hover:text-ink-bright">
-                    Machine {{ i.machine_id }}</RouterLink
-                  ><span v-else class="text-warn">A machine with no machine-id</span>
-                  <template v-if="i.kind"> ({{ i.kind }})</template>:
-                  <span :class="i.agent_connected ? '' : 'font-semibold text-danger'">{{
-                    i.agent_connected ? 'its ECS agent connected' : 'its ECS agent NOT connected'
-                  }}</span>, {{ i.status.toLowerCase() }}, {{ countLabel(i.running_tasks, 'task') }} running<template v-if="i.pending_tasks"
-                    >, {{ i.pending_tasks }} starting</template
-                  ><template v-if="i.ec2_instance_id">, <span class="font-mono">{{ i.ec2_instance_id }}</span></template
-                  ><template v-if="i.image_id">, <span class="font-mono">{{ i.image_id }}</span></template>
-                </li>
-              </ul>
-            </div>
-          </ProgramCard>
         </div>
 
         <div v-if="cloudRead && (cloudRead.one_off_tasks.length || cloudRead.one_off_stopped_tasks.length)" class="infra-one-off rounded-panel border border-border bg-panel p-4">
@@ -329,8 +295,8 @@
 // instances and the fleet's machines, and the warnings to look at first.
 // Below: a card per program (ProgramCard: its ECS service with its tasks,
 // stopped tasks and events, what its tasks use now and its tasks gone in 24
-// hours), each opening its own page (usage per task, its logs), and hostd's
-// with the fleet cluster's machines; the target groups, the database and the
+// hours), each opening its own page (usage per task, its logs; hostd's daemon
+// and the fleet cluster are the Fleet page's); the target groups, the database and the
 // cache (from AWS, which web reads at most every 20 seconds), each opening its
 // charts; then the lobby instances, the fleet leader and one line on the
 // machines (from the database), whose page is the Fleet's. On the local stack
