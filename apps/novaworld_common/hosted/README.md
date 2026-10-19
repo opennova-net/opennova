@@ -97,22 +97,27 @@ this directory's.
   `no_own_machine`), `ONNET_HOSTED_CAP`
   (a backstop beside the fleet's room) and the fleet's room in the transaction that writes
   it, under the hosted-start advisory lock. When a server is about to be placed its place
-  is read again, oldest first, and one past the entitlement is stopped instead; one on an
-  own machine past the account's own machines goes to a shared machine as the owners'
-  limits move one (below), or is stopped when the fleet has no room for it.
+  in its pool is read again, oldest first, and one on a shared machine past the shared
+  servers is stopped instead; one on a dedicated machine past the account's dedicated
+  machines goes to a shared machine as the owners' limits move one (below), or is
+  stopped when it cannot.
 - **The owners' limits.** Every supervisor pass first acts on what an entitlement no
-  longer covers (`Supervisor::enforce_limits`): it stops an owner's newest live servers
-  past its servers, then moves its newest own-machine servers past its own machines (the
-  add-on's and an admin's grant alike) to shared machines, newest first, each while the
-  fleet has a shared place for it, judged as a start's room is (`fleet_has_room`, under the
-  hosted-start lock, with the server's own-machine choice cleared and its slot let go in
-  the same transaction: `hosted::clear_own_machine`). A moved server's match ends: its
-  start ends `limits`, its own machine ends after it, its static address stays the
-  account's but is no longer the server's (only an own machine carries one), and it starts
-  again on a shared machine, no restart counted (the owner's phase reads `moving`). One the
-  fleet has no shared room for stops. Each event names why: `its owner's support tier
-  allows 1 hosted server`, `moved to a shared machine: its owner has 1 own machine now`,
-  `its owner has 0 own machines now and the fleet has no shared room`. The brake on the
+  longer covers (`Supervisor::enforce_limits`), each pool apart: it stops an owner's
+  newest live servers on shared machines past its shared servers, then moves its newest
+  servers on dedicated machines past its dedicated machines (paid ones and an admin's
+  grant alike) to shared machines, newest first, each judged as a shared server's start
+  is, under the hosted-start lock: the owner must have a shared server free (the stops
+  just asked still count) and the fleet a shared place for it (`fleet_has_room`), with the
+  server's dedicated-machine choice cleared and its slot let go in the same transaction
+  (`hosted::clear_own_machine`). A moved server's match ends: its start ends `limits`, its
+  dedicated machine ends after it, its static address stays the account's but is no
+  longer the server's (only a dedicated machine carries one), and it starts again on a
+  shared machine, no restart counted (the owner's phase reads `moving`). One its owner has
+  no shared server free for, or the fleet no shared room for, stops; a shared server never
+  moves onto a free dedicated machine. Each event names why: `its owner's support tier
+  allows 1 hosted server on shared machines`, `moved to a shared machine: its owner has 1
+  dedicated machine now`, `its owner has 1 dedicated machine now and no shared server
+  free`, `its owner has 0 dedicated machines now and the fleet has no shared room`. The brake on the
   brake: a pass that would stop or move the servers of more owners than max(2, half the
   owners with live servers) reads as the billing cache gone wrong, so it acts on none,
   logs `[hosted] ERROR the owners' limits held: ...` and holds (the heartbeat's

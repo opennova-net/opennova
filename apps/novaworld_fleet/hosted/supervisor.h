@@ -37,12 +37,13 @@
 //                 scratch for the slot's ports (hosted_settings.h), and the
 //                 trees it runs on are pinned (data_set_repository.h, ADR 0064:
 //                 its data sets' current trees at its first start, kept through
-//                 a crash restart or a move). A server past its owner's
-//                 entitlement, counted in id order among the owner's live
-//                 servers not stopping, is stopped instead; one on an own
-//                 machine past its owner's own machines, counted so, goes to a
-//                 shared machine when the fleet has room for it (else it is
-//                 stopped); and one whose data set row is gone or has no data
+//                 a crash restart or a move). A server on a shared machine
+//                 past its owner's shared servers, counted in id order among
+//                 the owner's live servers on shared machines not stopping, is
+//                 stopped instead; one on a dedicated machine past its owner's
+//                 dedicated machines, counted so, goes to a shared machine when
+//                 its owner has a shared server free and the fleet room for it
+//                 (else it is stopped); and one whose data set row is gone or has no data
 //                 (no ready current tree, and no pins to keep) fails, which no
 //                 restart mends
 //   booting       its container (srv-<id>-g<generation>) is wanted on its slot;
@@ -74,15 +75,20 @@
 //   failed        the restarts used up, or a fault no restart mends
 //
 // The owners' limits: every pass opens with what an owner's hosting
-// entitlement no longer covers (enforce_limits): it stops the owner's newest
-// live servers past the entitlement's servers, then moves its newest on own
-// machines past its own machines (the add-on's and an admin's grant alike) to
-// shared machines, each while the fleet has room for it as a start's room is
-// judged (move_to_shared: its match ends, its own machine ends after it, and it
-// starts again on a shared machine, no restart counted), stopping one with no
-// room; a stopping one counts toward neither, and each has an event its owner
-// reads ("its owner's support tier allows 1 hosted server", "moved to a shared
-// machine: its owner has 1 own machine now"). An entitlement is read from the
+// entitlement no longer covers (enforce_limits), each of its two pools apart:
+// it stops the owner's newest live servers on shared machines past its shared
+// servers, then moves its newest on dedicated machines past its dedicated
+// machines (paid ones and an admin's grant alike) to shared machines, each
+// judged as a shared server's start is (move_to_shared: its owner must have a
+// shared server free, the stops just asked still counted, and the fleet room
+// for it; its match ends, its dedicated machine ends after it, and it starts
+// again on a shared machine, no restart counted), stopping one its owner has no
+// shared server for or the fleet no room for. A shared server never moves onto
+// a free dedicated machine. A stopping one counts toward neither, and each has
+// an event its owner reads ("its owner's support tier allows 1 hosted server on
+// shared machines", "moved to a shared machine: its owner has 1 dedicated
+// machine now", "its owner has 1 dedicated machine now and no shared server
+// free"). An entitlement is read from the
 // billing cache whether or not billing is configured, and a past_due tier keeps
 // its servers. A pass that would stop or move more owners' servers than max(2,
 // half the owners with live servers) acts on none: it logs an ERROR and holds
@@ -519,17 +525,18 @@ private:
 	// Whether the owner may keep the server: its account exists and is active
 	// (the entitlement is enforce_limits').
 	bool owner_active(db::Database &db, const HostedServer &server, std::string &why);
-	// Stops the servers past their owners' entitlements, and moves those past
-	// their own machines to shared machines (the class comment); the ids it
-	// stopped.
+	// Stops the servers on shared machines past their owners' shared servers,
+	// and moves those past their dedicated machines to shared machines (the
+	// class comment); the ids it stopped.
 	std::set<int64_t> enforce_limits(db::Database &db, const std::vector<HostedServer> &live, uint64_t now_ms);
-	// A server on an own machine its owner no longer has (`own_machines` of them
-	// now) moved to a shared machine, when the fleet has room for it: its
-	// own-machine choice cleared and its slot let go together, under the lock a
-	// start is judged under (hosted_repository.h clear_own_machine), and placed
-	// again as replace places a server, its start ended for its owner's limits
-	// and its event saying why. False (nothing written) when there is no room.
-	bool move_to_shared(db::Database &db, const HostedServer &server, uint64_t now_ms, int own_machines);
+	// A server on a dedicated machine its owner no longer has (`own_machines` of
+	// them now) moved to a shared machine, when its owner has a shared server
+	// free and the fleet room for it: its dedicated-machine choice cleared and
+	// its slot let go together, under the lock a start is judged under
+	// (hosted_repository.h clear_own_machine), and placed again as replace
+	// places a server, its start ended for its owner's limits and its event
+	// saying why. Nothing is written but on Moved.
+	MoveOutcome move_to_shared(db::Database &db, const HostedServer &server, uint64_t now_ms, int own_machines);
 	// The admin links brought in step with the servers in running (their rows
 	// read again, after this pass's moves).
 	void sync_admin_links(db::Database &db);

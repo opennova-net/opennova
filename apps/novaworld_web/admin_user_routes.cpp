@@ -320,10 +320,11 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	// counts as sold, and may take it past what the fleet sells, which the
 	// page warns of; logged). 400 invalid_json, invalid_field (no whole
 	// number, or outside 0..16) or missing_field, 404 for an unknown id and for
-	// a hosted server's service account. Lowering the servers below what the
-	// account runs stops its newest; lowering its own machines below its
-	// servers on them moves the newest of those to a shared machine while there
-	// is room and stops the rest (the supervisor's next pass;
+	// a hosted server's service account. Lowering the shared servers below what
+	// the account runs on shared machines stops its newest there; lowering its
+	// dedicated machines below its servers on them moves the newest of those to
+	// a shared machine while the account has a shared server free and the
+	// fleet room, and stops the rest (the supervisor's next pass;
 	// hosted/supervisor.h).
 	CROW_ROUTE(app, "/api/admin/users/<int>/comp").methods("PUT"_method)(
 	    [this](const crow::request &req, int64_t id) {

@@ -29,22 +29,39 @@ std::string seconds_text(uint64_t ms) { return std::to_string(ms / 1000) + " s";
 // "1 hosted server", "3 hosted servers".
 std::string servers_text(int n) { return std::to_string(n) + " hosted server" + (n == 1 ? "" : "s"); }
 
-// Why a server past its owner's entitlement stops: the event its owner reads.
+// Why a server on a shared machine past its owner's shared servers stops: the
+// event its owner reads.
 std::string limit_detail(const billing::Entitlement &e) {
 	return std::string(e.source == "tier" ? "its owner's support tier allows " : "its owner's hosting entitlement allows ") +
-			servers_text(e.max_servers);
+			servers_text(e.shared_servers) + " on shared machines";
 }
 
-// "its owner has 1 own machine now": why a server leaves its own machine,
-// whatever cut them (an add-on's end, an admin's grant).
+// "its owner has 1 dedicated machine now": why a server leaves its dedicated
+// machine, whatever cut them (a subscription's end, an admin's grant).
 std::string own_machines_text(int n) {
-	return "its owner has " + std::to_string(n) + " own machine" + (n == 1 ? "" : "s") + " now";
+	return "its owner has " + std::to_string(n) + " dedicated machine" + (n == 1 ? "" : "s") + " now";
 }
 
-// A server past its owner's own machines that the fleet has no shared room
-// for stops: the event its owner reads.
+// A server past its owner's dedicated machines that cannot go to a shared
+// machine stops: the event its owner reads, when its owner has no shared
+// server free, and when the fleet has no shared room for it.
+std::string no_shared_server_detail(int own_machines) {
+	return own_machines_text(own_machines) + " and no shared server free";
+}
 std::string no_shared_room_detail(int own_machines) {
 	return own_machines_text(own_machines) + " and the fleet has no shared room";
+}
+
+// Why a move that did not happen (move_to_shared's `outcome`) stops its
+// server; "" for one moved, or no longer the pass's to move.
+std::string move_refusal(MoveOutcome outcome, int own_machines) {
+	switch (outcome) {
+		case MoveOutcome::NoSharedServer: return no_shared_server_detail(own_machines);
+		case MoveOutcome::NoRoom: return no_shared_room_detail(own_machines);
+		case MoveOutcome::Moved:
+		case MoveOutcome::Gone: break;
+	}
+	return {};
 }
 
 // "machine 3, slot 1": where a server runs, as its events say it.
@@ -370,8 +387,8 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 		std::string detail;
 	};
 	std::vector<Stop> stops;
-	// The servers on own machines past their owners' own machines, each owner's
-	// newest first, with the own machines its owner has now.
+	// The servers on dedicated machines past their owners' dedicated machines,
+	// each owner's newest first, with the dedicated machines its owner has now.
 	struct Move {
 		const HostedServer *server;
 		int own_machines;
@@ -386,24 +403,17 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 		if (!owner || owner->account_status != "active") continue;
 		++owners;
 		const billing::Entitlement e = billing::entitlement_of(db, owner_id, wall);
-		std::set<int64_t> chosen;
-		// The newest past the entitlement's servers.
-		const size_t max = static_cast<size_t>(std::max(e.max_servers, 0));
-		for (size_t i = servers.size(); i > max; --i) {
-			chosen.insert(servers[i - 1]->id);
-			stops.push_back({ servers[i - 1]->id, limit_detail(e) });
-		}
-		// Of the rest, the newest on own machines past its own machines.
+		// Each pool apart, its oldest kept: the newest on shared machines past
+		// the shared servers stop, the newest on dedicated machines past the
+		// dedicated machines move to a shared machine.
+		std::vector<const HostedServer *> shared;
 		std::vector<const HostedServer *> own;
-		for (const HostedServer *s : servers) {
-			if (s->own_machine && chosen.count(s->id) == 0) own.push_back(s);
-		}
+		for (const HostedServer *s : servers) (s->own_machine ? own : shared).push_back(s);
+		const size_t shared_max = static_cast<size_t>(std::max(e.shared_servers, 0));
+		for (size_t i = shared.size(); i > shared_max; --i) stops.push_back({ shared[i - 1]->id, limit_detail(e) });
 		const size_t own_max = static_cast<size_t>(std::max(e.own_machines, 0));
-		for (size_t i = own.size(); i > own_max; --i) {
-			chosen.insert(own[i - 1]->id);
-			moves.push_back({ own[i - 1], e.own_machines });
-		}
-		if (!chosen.empty()) owners_past.insert(owner_id);
+		for (size_t i = own.size(); i > own_max; --i) moves.push_back({ own[i - 1], e.own_machines });
+		if (shared.size() > shared_max || own.size() > own_max) owners_past.insert(owner_id);
 	}
 	// An admin's override (limits_hold.h) is this pass's, whatever it finds.
 	const bool forced = limits_hold::take_force(db);
@@ -457,31 +467,33 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 		std::printf("[hosted] server %lld: -> stopping (%s)\n", static_cast<long long>(id), detail.c_str());
 	};
 	for (const Stop &s : stops) stop_for(s.id, s.detail);
-	// Then each server past its owner's own machines: moved to a shared machine
-	// while the fleet has room for it, else stopped.
+	// Then each server past its owner's dedicated machines: moved to a shared
+	// machine while its owner has a shared server free (the stops above still
+	// count) and the fleet has room for it, else stopped.
 	for (const Move &m : moves) {
-		if (!move_to_shared(db, *m.server, now_ms, m.own_machines))
-			stop_for(m.server->id, no_shared_room_detail(m.own_machines));
+		const std::string why = move_refusal(move_to_shared(db, *m.server, now_ms, m.own_machines), m.own_machines);
+		if (!why.empty()) stop_for(m.server->id, why);
 	}
 	return stopped;
 }
 
-bool Supervisor::move_to_shared(db::Database &db, const HostedServer &s, uint64_t now_ms, int own_machines) {
+MoveOutcome Supervisor::move_to_shared(db::Database &db, const HostedServer &s, uint64_t now_ms, int own_machines) {
 	const std::string why = "moved to a shared machine: " + own_machines_text(own_machines);
-	// The room judged, the own machine given up and the slot let go together,
-	// under the lock a start is judged under (clear_own_machine): no start takes
-	// the shared place it now waits for. Placed again as a machine's move places
-	// a server (its match ends, no restart counted), its start ended for its
-	// owner's limits; one not started yet (requested, provisioning) has the
-	// move in an event of its own.
+	// The shared server and the room judged, the dedicated machine given up and
+	// the slot let go together, under the lock a start is judged under
+	// (clear_own_machine): no start takes the shared place it now waits for.
+	// Placed again as a machine's move places a server (its match ends, no
+	// restart counted), its start ended for its owner's limits; one not started
+	// yet (requested, provisioning) has the move in an event of its own.
 	const bool unstarted = s.state == State::Requested || s.state == State::Provisioning;
 	db::Transaction tx(db);
-	if (!clear_own_machine(db, s.id, s.state, config_.placement)) return false;
+	const MoveOutcome outcome = clear_own_machine(db, s.id, s.state, config_.placement, config_.wall_clock_s());
+	if (outcome != MoveOutcome::Moved) return outcome;
 	replace(db, s, now_ms, why, StartCause::Limits);
 	if (unstarted) transition(db, s.id, s.state, s.state, why);
 	tx.commit();
 	if (unstarted) std::printf("[hosted] server %lld: %s\n", static_cast<long long>(s.id), why.c_str());
-	return true;
+	return MoveOutcome::Moved;
 }
 
 // --- the servers -------------------------------------------------------------------
@@ -558,20 +570,20 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	}
 	// Its place under the owner's entitlement, read again (a tier lowered, a
 	// grant cut since the request): the owner's live servers not stopping keep
-	// their places oldest first, and one past the entitlement's servers is
-	// stopped rather than started; one on an own machine past its owner's own
-	// machines goes to a shared machine when the fleet has room for it (the next
+	// their places in each pool oldest first, and one on a shared machine past
+	// the shared servers is stopped rather than started; one on a dedicated
+	// machine past its owner's dedicated machines goes to a shared machine when
+	// its owner has a shared server free and the fleet room for it (the next
 	// pass places it there), else it is stopped (neither while the limits are
 	// held: the cache is then in doubt).
 	const billing::Entitlement entitlement =
 			billing::entitlement_of(db, *s.owner_user_id, config_.wall_clock_s());
-	int rank = 0;
+	int shared_rank = 0;
 	int own_rank = 0;
 	for (const HostedServer &other : live_servers_of(db, *s.owner_user_id)) {
 		if (other.id == s.id) break;
 		if (other.state == State::Stopping) continue;
-		++rank;
-		if (other.own_machine) ++own_rank;
+		++(other.own_machine ? own_rank : shared_rank);
 	}
 	const auto stop_for = [&](const std::string &limit) {
 		if (request_stop(db, s.id, limit)) {
@@ -580,13 +592,14 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 					limit.c_str());
 		}
 	};
-	if (rank >= entitlement.max_servers && !limits_hold::held(db)) {
+	if (!s.own_machine && shared_rank >= entitlement.shared_servers && !limits_hold::held(db)) {
 		stop_for(limit_detail(entitlement));
 		return;
 	}
 	if (s.own_machine && own_rank >= entitlement.own_machines && !limits_hold::held(db)) {
-		if (!move_to_shared(db, s, now_ms, entitlement.own_machines))
-			stop_for(no_shared_room_detail(entitlement.own_machines));
+		const std::string why =
+				move_refusal(move_to_shared(db, s, now_ms, entitlement.own_machines), entitlement.own_machines);
+		if (!why.empty()) stop_for(why);
 		return;
 	}
 

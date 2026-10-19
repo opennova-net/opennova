@@ -159,16 +159,25 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 // The live server's address let go (it lapsed: the supervisor places the
 // server again without it); false when it held none.
 bool clear_server_address(db::Database &db, int64_t id);
-// Own-machine server `id`, still in `state`, given a shared machine's place
-// instead (its owner has fewer own machines now than its servers on them): when
-// the fleet has a place for one more shared server, judged as request_server
-// judges a start's (under the hosted-start lock, fleet_has_room under `fleet`;
-// the cap counts it live already), its own_machine cleared, and its address
-// with it (only an own machine carries one). Inside the caller's transaction
-// the lock holds until that one ends, so the caller's letting go of its slot
-// lands under it too. False (nothing written) when the fleet has no such place,
-// or the row is no longer an own-machine server in `state`.
-bool clear_own_machine(db::Database &db, int64_t id, State state, const PlacementPolicy &fleet);
+// What moving a server off its dedicated machine came to (clear_own_machine).
+enum class MoveOutcome : uint8_t {
+	Moved,          // a shared server now: its own_machine cleared, and its address with it
+	NoSharedServer, // its owner's live servers on shared machines fill its shared servers
+	NoRoom,         // the fleet has no place for one more shared server (fleet_has_room)
+	Gone,           // the row is no longer a dedicated-machine server of an account in `state`
+};
+// Dedicated-machine server `id`, still in `state`, given a shared machine's
+// place instead (its owner has fewer dedicated machines now than its servers
+// on them), judged as request_server judges a shared server's start, under the
+// hosted-start lock: its owner's entitlement at `now` (Unix seconds) must have
+// a shared server free (fewer of its servers live on shared machines than its
+// shared_servers, a stopping one counted), then the fleet a place for one more
+// under `fleet` (fleet_has_room; the cap counts it live already); then its
+// own_machine cleared, and its address with it (only a dedicated machine
+// carries one). Inside the caller's transaction the lock holds until that one
+// ends, so the caller's letting go of its slot lands under it too. Nothing is
+// written but on Moved.
+MoveOutcome clear_own_machine(db::Database &db, int64_t id, State state, const PlacementPolicy &fleet, int64_t now);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);
 // Server `id` when `owner_user_id` owns it, in any state; nullopt for no such

@@ -707,10 +707,11 @@ if(BUILD_NOVAWORLD_HTTP)
     # fleet's room among them), and each server's lifecycle on the fleet over a FakeDriver
     # (novaworld/hosted_fake_driver.h) whose machines' agents the test plays through the
     # supervisor's sync, on a hand-stepped clock: placement onto one shared machine for two
-    # servers, a launch and the wait for it, the own machine, the stops, the crash restarts
-    # and their limit, the timeouts, the health checks, the owners' changes and limits (own
-    # machines cut moving their servers to shared machines while the fleet has room, stopping
-    # the rest), a lost machine placing its servers again with no restart counted, the
+    # servers, a launch and the wait for it, the dedicated machine, the stops, the crash
+    # restarts and their limit, the timeouts, the health checks, the owners' changes and
+    # limits (each pool apart: dedicated machines cut moving their servers to shared machines
+    # while their owners have a shared server free and the fleet room, stopping the rest), a
+    # lost machine placing its servers again with no restart counted, the
     # reconciliation, the admin links following the running servers, a static address's
     # hold, lapse and brake, and a comp address's lapse once nothing covers it. Over the fleet
     # program's core and the cloud's fleet job handlers, which the rig registers over the
@@ -729,7 +730,7 @@ if(BUILD_NOVAWORLD_HTTP)
         launch_failure launch_refused_mid_pass restart_window timeouts_and_health listing_lost
         machine_lost_replaces
         listing_waits_while_lost waits_for_lobby owner_changes limit_at_provisioning owner_limits
-        own_machines_cut own_machines_cut_no_room own_cut_at_provisioning mass_stop_hold hold_releases
+        own_machines_cut own_machines_cut_no_room own_cut_at_provisioning pools_cut mass_stop_hold hold_releases
         reconciliation relist_grace console_ring admin_links_follow_running)
     set_tests_properties(${hosted_supervisor_rows} PROPERTIES TIMEOUT 300)
 
