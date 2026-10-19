@@ -258,8 +258,15 @@ int main(int argc, char **argv) {
 	{
 		opennova::hostdb::PlayerRow joined;
 		joined.host_rid = a.rid;
+		joined.user_id = db.query("INSERT INTO players (username, password_hash, pcid, nwh, "
+								  "nwhandle) VALUES ('resend_joiner', 'x', '0000d200', '1', "
+								  "'joiner') RETURNING id;")
+								 .front()
+								 .as_int(0)
+								 .value_or(0);
 		joined.nwhandle = "joiner";
 		joined.peer_ip = "10.0.0.9";
+		TEST_EXPECT(joined.user_id > 0);
 		opennova::hostdb::add_player(db, joined);
 		TEST_EXPECT(opennova::hostdb::list_players(db, a.rid).size() == 1);
 
@@ -334,6 +341,122 @@ int main(int argc, char **argv) {
 		opennova::hostdb::remove_host_by_rid(db, d.rid);
 	}
 
-	std::printf("OK: host register -> list round-trip (rid minting, roster, GSB projection, status blob, re-send, DFX2 lists)\n");
+	// A joiner's lobby session (service policy): its Cookie list's retail login pins the account
+	// it signed in as, which stays when that login ends; its play request names the listing at
+	// its PlaySetup's address (the .joi's NK, the listing's host_ip:host_port); leaving it (a
+	// play request for another server, its ClientStopPlaying) takes the account's /NWJoin.dll
+	// row off that listing's roster, and no one else's. An address no listing has (a LAN
+	// server's) plays on no RID.
+	{
+		using opennova::db::BindValue;
+		const auto player = [&db](const char *name, const char *pcid) {
+			return db.query("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+							"VALUES ($1, 'x', $2, '1', $1) RETURNING id;",
+							{ BindValue(std::string(name)), BindValue(std::string(pcid)) })
+					.front()
+					.as_int(0)
+					.value_or(0);
+		};
+		const int64_t joiner = player("roster_joiner", "0000d201");
+		const int64_t stayer = player("roster_stayer", "0000d202");
+		TEST_EXPECT(joiner > 0 && stayer > 0);
+		db.exec("INSERT INTO active_user_sessions (user_id, username, session_tag) "
+				"VALUES ($1, 'roster_joiner', 'tag-roster-joiner');",
+				{ BindValue(joiner) });
+		LobbyState east;
+		TEST_EXPECT(sess.dispatch(make_host_request("2001", "Roster East", "HK-EAST", {}), east,
+				"10.0.0.31", 40000).label == "ClientHostRequest");
+		LobbyState west;
+		TEST_EXPECT(sess.dispatch(make_host_request("2002", "Roster West", "HK-WEST", {}), west,
+				"10.0.0.32", 40000).label == "ClientHostRequest");
+		TEST_EXPECT(east.rid != 0 && west.rid != 0 && east.rid != west.rid);
+		TEST_EXPECT(opennova::hostdb::rid_at(db, "10.0.0.31", 40000) == east.rid);
+		TEST_EXPECT(opennova::hostdb::rid_at(db, "10.0.0.31", 40001) == 0);
+		// The joins /NWJoin.dll recorded: the joiner on both, another account on the east.
+		const auto joined = [&db](uint32_t rid, int64_t user, const char *handle) {
+			opennova::hostdb::PlayerRow p;
+			p.host_rid = rid;
+			p.user_id = user;
+			p.nwhandle = handle;
+			p.peer_ip = "10.0.0.40";
+			opennova::hostdb::add_player(db, p);
+		};
+		joined(east.rid, joiner, "roster_joiner");
+		joined(west.rid, joiner, "roster_joiner");
+		{
+			opennova::hostdb::PlayerRow p;
+			p.host_rid = east.rid;
+			p.user_id = stayer;
+			p.nwhandle = "roster_stayer";
+			p.peer_ip = "10.0.0.41";
+			opennova::hostdb::add_player(db, p);
+		}
+		const auto roster = [&db](uint32_t rid) {
+			std::vector<std::string> names;
+			for (const auto &p : opennova::hostdb::list_players(db, rid)) names.push_back(p.nwhandle);
+			return names;
+		};
+		const auto play = [](const std::string &ip, const std::string &port) {
+			NapiMessage in;
+			in.name = "ClientPlayRequest";
+			in.children.push_back(make_client_var_list("Cookie", {{"LOGINSESSIONTAG", "tag-roster-joiner"}}));
+			in.children.push_back(make_client_var_list("PlaySetup", {
+				{"ServerName", "Roster"}, {"IpAddress", ip}, {"PortNumber", port}, {"AppId", "20"}, {"Lan", "0"},
+			}));
+			return in;
+		};
+
+		LobbyState c;
+		NapiMessage verify;
+		verify.name = "ClientRequestVerifyResult";
+		verify.children.push_back(make_client_var_list("Cookie", {{"LOGINSESSIONTAG", "tag-roster-joiner"}}));
+		sess.dispatch(verify, c, "10.0.0.40", 32768);
+		TEST_EXPECT(c.user_id == joiner);
+		TEST_EXPECT(c.playing_since_ms == 0 && c.playing_rid == 0 && c.play_addr.empty());
+		// The login ends (a logout, the idle sweep): the account stays the one it signed in as.
+		db.exec("DELETE FROM active_user_sessions WHERE user_id = $1;", { BindValue(joiner) });
+		TEST_EXPECT(sess.dispatch(play("10.0.0.31", "40000"), c, "10.0.0.40", 32768).label ==
+				"ClientPlayRequest");
+		TEST_EXPECT(c.user_id == joiner);
+		TEST_EXPECT(c.playing_rid == east.rid && c.play_addr == "10.0.0.31:40000" &&
+				c.playing_since_ms > 0);
+		const int64_t since = c.playing_since_ms;
+		// A reconnect's replay of the same request keeps when it began, and both rosters.
+		sess.dispatch(play("10.0.0.31", "40000"), c, "10.0.0.40", 32768);
+		TEST_EXPECT(c.playing_rid == east.rid && c.playing_since_ms == since);
+		TEST_EXPECT(roster(east.rid).size() == 2 && roster(west.rid).size() == 1);
+		// It plays on the west server: off the east one's roster, the other account still on it.
+		sess.dispatch(play("10.0.0.32", "40000"), c, "10.0.0.40", 32768);
+		TEST_EXPECT(c.playing_rid == west.rid && c.play_addr == "10.0.0.32:40000");
+		TEST_EXPECT(roster(east.rid) == std::vector<std::string>{ "roster_stayer" });
+		TEST_EXPECT(roster(west.rid) == std::vector<std::string>{ "roster_joiner" });
+		// Its ClientStopPlaying: off the west one's too, and it plays on nothing.
+		NapiMessage stop;
+		stop.name = "ClientStopPlaying";
+		TEST_EXPECT(sess.dispatch(stop, c, "10.0.0.40", 32768).label == "ClientStopPlaying");
+		TEST_EXPECT(roster(west.rid).empty() && roster(east.rid).size() == 1);
+		TEST_EXPECT(c.playing_rid == 0 && c.play_addr.empty() && c.playing_since_ms == 0);
+		// A server no listing names: it plays at the address, on no RID.
+		sess.dispatch(play("192.168.1.20", "32768"), c, "10.0.0.40", 32768);
+		TEST_EXPECT(c.playing_rid == 0 && c.play_addr == "192.168.1.20:32768" &&
+				c.playing_since_ms > 0);
+		// Another account's live login named by a later tag moves the pin; one that names no
+		// live login leaves it.
+		db.exec("INSERT INTO active_user_sessions (user_id, username, session_tag) "
+				"VALUES ($1, 'roster_stayer', 'tag-roster-stayer');",
+				{ BindValue(stayer) });
+		verify.children.clear();
+		verify.children.push_back(make_client_var_list("Cookie", {{"LOGINSESSIONTAG", "tag-roster-stale"}}));
+		sess.dispatch(verify, c, "10.0.0.40", 32768);
+		TEST_EXPECT(c.user_id == joiner);
+		verify.children.clear();
+		verify.children.push_back(make_client_var_list("Cookie", {{"LOGINSESSIONTAG", "tag-roster-stayer"}}));
+		sess.dispatch(verify, c, "10.0.0.40", 32768);
+		TEST_EXPECT(c.user_id == stayer);
+		opennova::hostdb::remove_host_by_rid(db, east.rid);
+		opennova::hostdb::remove_host_by_rid(db, west.rid);
+	}
+
+	std::printf("OK: host register -> list round-trip (rid minting, roster, GSB projection, status blob, re-send, DFX2 lists, a joiner's account and play)\n");
 	return 0;
 }

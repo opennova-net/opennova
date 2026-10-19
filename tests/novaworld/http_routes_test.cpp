@@ -385,9 +385,17 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	{
 		opennova::hostdb::PlayerRow joiner;
 		joiner.host_rid = 1000;
+		// Its account (a joiner's row names one).
+		joiner.user_id = h.pool.acquire()
+								 ->query("INSERT INTO players (username, password_hash, pcid, nwh, "
+										 "nwhandle) VALUES ('lobby_card_joiner', 'x', '0c4d0001', "
+										 "'1', 'Joiner') RETURNING id;")
+								 .front()
+								 .as_int(0)
+								 .value_or(0);
 		joiner.nwhandle = "Joiner";
 		joiner.peer_ip = "10.9.9.9";
-		joiner.peer_port = 4000;
+		TEST_EXPECT(joiner.user_id > 0);
 		opennova::hostdb::add_player(*h.pool.acquire(), joiner);
 	}
 	reply = h.send("GET", "/api/lobbies/1000");
@@ -401,6 +409,9 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	TEST_EXPECT(body_text(reply).find("10.9.9.9") == std::string::npos);
 	reply = h.send("GET", "/api/lobbies/4242");
 	TEST_EXPECT(reply.code == 404 && str(crow::json::load(body_text(reply))["error"]) == "not_found");
+	// The joiner's account goes (its row with it): the users list case counts the harness's alone.
+	h.pool.acquire()->exec("DELETE FROM players WHERE username = 'lobby_card_joiner';");
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM host_players WHERE host_rid = 1000;").empty());
 	return 0;
 }
 
@@ -1954,7 +1965,6 @@ int test_joiner_routes_admin_only(Harness &h) {
 		p.user_id = joiner;
 		p.nwhandle = "joiner_seen";
 		p.peer_ip = joiner_ip;
-		p.peer_port = 4242;
 		opennova::hostdb::add_player(*conn, p);
 	}
 
@@ -2806,8 +2816,10 @@ public:
 		service_.port = service_port;
 	}
 
-	// The session's address as the service sees it.
+	// The session's address as the service sees it, and its port: a listing's join address
+	// once it hosts (the observed source, its Host list naming no Port).
 	std::string addr() const { return "127.0.0.1:" + std::to_string(port_); }
+	uint16_t port() const { return port_; }
 
 	// The ClientHello alone: the service holds a session still signing in.
 	void hello() {
@@ -2838,14 +2850,20 @@ public:
 		cookies_.emplace_back(name, value);
 	}
 
-	// A ClientPlayRequest answered with success; false on a timeout.
-	bool play() {
-		if (!session_.request_playing(
-					opennova::make_play_setup_vars("Host", "127.0.0.1", "32768", "5699", 0))) {
+	// A ClientPlayRequest for the server at `ip`:`port` (its PlaySetup's IpAddress and
+	// PortNumber, as a .joi's NK names them) answered with success; false on a timeout.
+	bool play(const std::string &ip = "127.0.0.1", const std::string &port = "32768") {
+		clear_notices();
+		if (!session_.request_playing(opennova::make_play_setup_vars("Host", ip, port, "5699", 0))) {
 			return false;
 		}
 		return wait_notice(Notice::Kind::PlayResult, 3000) != nullptr &&
 				session_.play_state() == opennova::ClientSession::PlayState::Playing;
+	}
+	// Its ClientStopPlaying, pumped while it goes out and is ACKed.
+	void stop_playing() {
+		session_.stop_playing();
+		pump_until(300, [] { return false; });
 	}
 
 	// Verified, then a ClientHostRequest answered with success; false on a timeout.
@@ -3441,8 +3459,9 @@ int test_owner_host_push(Harness &h) {
 // session's read within a minute of now. Each session names who it is: none until a Cookie list
 // carries a live retail login, then that login's account; a hosting session its listing (name,
 // map, players, listed) and the owner its HostKey names, whatever login it sent; a login that
-// ended names no one. The route reads the lobby's rows, which the lobby writes as the session
-// changes, before it answers the statement that changed it.
+// ended still names the account the session signed in as. The route reads the lobby's rows,
+// which the lobby writes as the session changes, before it answers the statement that changed
+// it.
 int test_admin_sessions(Harness &h) {
 	// The production shape: a session made 125 s before the read, on a machine up 7 h 40 min.
 	const int64_t unix_now = 1792120342793; // 2026-10-16 09:39 UTC
@@ -3542,12 +3561,15 @@ int test_admin_sessions(Harness &h) {
 	TEST_EXPECT((*row)["account"]["id"].i() == owner);
 	TEST_EXPECT(str((*row)["account"]["via"]) == "host_key");
 
-	// The login ends (its row goes, as a logout or the idle sweep takes it): no one.
+	// The login ends (its row goes, as a logout or the idle sweep takes it): the session is
+	// still the account it signed in as (the lobby pinned it).
 	nws::clear_active_user_session(*h.pool.acquire(), player);
 	reply = connections();
 	json = crow::json::load(body_text(reply));
 	row = row_at(json, client.addr());
-	TEST_EXPECT(row != nullptr && (*row)["account"].t() == crow::json::type::Null);
+	TEST_EXPECT(row != nullptr && (*row)["account"].t() == crow::json::type::Object);
+	TEST_EXPECT(row != nullptr && (*row)["account"]["id"].i() == player &&
+			str((*row)["account"]["via"]) == "login");
 
 	client.goodbye();
 	host.goodbye();
@@ -3661,6 +3683,70 @@ int test_admin_lobbies(Harness &h) {
 	TEST_EXPECT(json && str(json["lobbies"][0]["state"]) == "draining");
 	TEST_EXPECT(opennova::lobbydb::live_lobbies(*h.pool.acquire()).instances == 0);
 	TEST_EXPECT(opennova::lobbydb::set_instance_state(*h.pool.acquire(), id, "active"));
+	return 0;
+}
+
+// GET /api/lobbies/<rid>'s roster is who plays on the server now: the joiners /NWJoin.dll
+// recorded, one per account (two joining from one address are two), each gone once its lobby
+// session, signed in as that account, stops playing there (its ClientStopPlaying) or ends (its
+// goodbye); the other stays until it leaves too.
+int test_join_roster(Harness &h) {
+	PushHost host(h.nw_udp.bound_port(), 0x524f5331u);
+	TEST_EXPECT(host.host("Roster Route Host"));
+	std::optional<opennova::hostdb::HostRow> listing;
+	TEST_EXPECT(wait_until([&] { return (listing = row_named(h, "Roster Route Host")).has_value(); }));
+	// Its join address, which a .joi hands its joiners: where it sends from.
+	TEST_EXPECT(listing->host_ip == "127.0.0.1" && listing->host_port == host.port());
+	const std::string rid = std::to_string(listing->rid);
+	const std::string port = std::to_string(listing->host_port);
+	const auto roster = [&h, &rid] {
+		std::vector<std::string> names;
+		const auto json = crow::json::load(body_text(h.send("GET", "/api/lobbies/" + rid)));
+		if (json && json.has("roster")) {
+			for (const auto &name : json["roster"])
+				names.push_back(str(name));
+		}
+		return names;
+	};
+	// Two players' retail logins, each joining through /NWJoin.dll from the harness's address.
+	const auto login_tag = [&h](const std::string &name) {
+		return set_cookie_value(nwlogin_to(h, h.fresh_port, name, "pw-" + name), "LOGINSESSIONTAG");
+	};
+	const auto nwjoin = [&h, &rid](const std::string &tag) {
+		const auto first = h.send_to(h.fresh_port, "GET", "/NWJoin.dll?rid=" + rid);
+		return h.send_to(h.fresh_port, "GET", "/NWJoin.dll",
+				{ "Cookie: NWJOINSESSIONTAG=" + set_cookie_value(first, "NWJOINSESSIONTAG") +
+						"; LOGINSESSIONTAG=" + tag });
+	};
+	TEST_EXPECT(make_account(h, "roster_ada", "pw-roster_ada") > 0);
+	TEST_EXPECT(make_account(h, "roster_bo", "pw-roster_bo") > 0);
+	const std::string ada = login_tag("roster_ada");
+	const std::string bo = login_tag("roster_bo");
+	TEST_EXPECT(!ada.empty() && !bo.empty());
+	TEST_EXPECT(nwjoin(ada).code == 200);
+	TEST_EXPECT(nwjoin(bo).code == 200);
+	TEST_EXPECT(roster() == (std::vector<std::string>{ "roster_ada", "roster_bo" }));
+
+	// Each plays on it, its lobby session signed in as its account.
+	PushHost ada_client(h.nw_udp.bound_port(), 0x524f5332u);
+	ada_client.set_cookie("LOGINSESSIONTAG", ada);
+	TEST_EXPECT(ada_client.connect());
+	TEST_EXPECT(ada_client.play("127.0.0.1", port));
+	PushHost bo_client(h.nw_udp.bound_port(), 0x524f5333u);
+	bo_client.set_cookie("LOGINSESSIONTAG", bo);
+	TEST_EXPECT(bo_client.connect());
+	TEST_EXPECT(bo_client.play("127.0.0.1", port));
+	TEST_EXPECT(roster().size() == 2);
+	// Ada stops playing: off the roster, Bo still on it.
+	ada_client.stop_playing();
+	TEST_EXPECT(wait_until([&] { return roster() == std::vector<std::string>{ "roster_bo" }; }));
+	// Bo's session ends: no one.
+	bo_client.goodbye();
+	TEST_EXPECT(wait_until([&] { return roster().empty(); }));
+
+	ada_client.goodbye();
+	host.goodbye();
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "Roster Route Host"); }));
 	return 0;
 }
 
@@ -8291,6 +8377,7 @@ int run(Harness &h, const char *part) {
 		{ "lobby", "admin_sessions", test_admin_sessions },
 		{ "lobby", "admin_end_session", test_admin_end_session },
 		{ "lobby", "admin_lobbies", test_admin_lobbies },
+		{ "lobby", "join_roster", test_join_roster },
 		{ "hosted", "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted", "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted", "hosted_console_routes", test_hosted_console_routes },

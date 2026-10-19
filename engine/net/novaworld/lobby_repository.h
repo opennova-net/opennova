@@ -11,7 +11,8 @@
 namespace opennova {
 
 // Thin SQL wrapper around the lobby's tables (backend/migrations/0006_lobby_commands.sql,
-// 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql): `lobby_instances`, the
+// 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql,
+// 0020_lobby_live_view.sql): `lobby_instances`, the
 // lobbies that run (one per lobby process, each its own id, all announcing the deployment's one
 // lobby address), `lobby_sessions`, the NovaWorld sessions each lobby holds, which
 // that lobby alone writes and everything else reads, and `lobby_commands`, what the HTTP routes
@@ -34,6 +35,8 @@ struct LobbyInstance {
 	int64_t id = 0;
 	std::string endpoint; // host:port, the address the gates hand clients (every instance's)
 	std::string state; // "active" or "draining"
+	// The task its lobby runs as (its program_samples rows' task_id); "" for none.
+	std::string task_id;
 	int64_t started_ms = 0;
 	int64_t last_seen_ms = 0;
 	int64_t seen_ago_ms = 0; // now less last_seen_at, by the database's clock
@@ -54,8 +57,10 @@ inline constexpr int64_t kGateRefreshSeconds = 5;
 
 // A lobby starts, or registers again: a row of its own (a new id: instances share their
 // endpoint, the deployment's one lobby address), active (draining when `draining`: a running
-// lobby registering again keeps the drain its row had), started and seen now. Its id.
-int64_t register_instance(db::Database &db, const std::string &endpoint, bool draining = false);
+// lobby registering again keeps the drain its row had), started and seen now, naming the task
+// it runs as (`task_id`, program_usage.h find_usage_task). Its id.
+int64_t register_instance(db::Database &db, const std::string &endpoint, bool draining = false,
+		const std::string &task_id = "");
 // Its row's last_seen_at now, and the row's state ("active" or "draining": an admin's drain
 // goes through the row); nullopt when the row is gone (reaped as stale while this lobby could
 // not reach the database, its rows with it: the lobby registers again).
@@ -99,7 +104,8 @@ struct SessionRow {
 	std::string state; // "handshaking", "active" or "closing"
 	std::string pn;
 	std::string identity;
-	std::string login_session_tag;
+	// The account it signed in as (LobbyState::user_id); unset for none.
+	std::optional<int64_t> user_id;
 	uint32_t rid = 0; // 0: none
 	bool hosting = false;
 	bool listed = false;
@@ -108,6 +114,11 @@ struct SessionRow {
 	std::string mission_name;
 	int players = 0;
 	int max_players = 0;
+	// What it plays on (LobbyState's play columns): the listing at its PlaySetup's address
+	// (0: none), that address ("" and 0 while it plays on nothing), and since when.
+	uint32_t playing_rid = 0;
+	std::string play_addr;
+	int64_t playing_since_ms = 0;
 	int64_t connected_ms = 0;
 	int64_t last_seen_ms = 0;
 };
@@ -150,6 +161,12 @@ void touch_sessions(db::Database &db, const std::vector<SessionSeen> &seen);
 
 // Every session row, oldest first, of every instance.
 std::vector<SessionRow> list_sessions(db::Database &db);
+
+// The account whose live retail login set `session_tag` (a Cookie list's LOGINSESSIONTAG): its
+// active_user_sessions row, while the account is still at the credentials_gen the row was made
+// under, as the HTTP routes read a login (accounts/auth.h get_user_by_login_session_tag). nullopt
+// for an empty or unknown tag. The lobby pins the session's account with it (LobbyState::user_id).
+std::optional<int64_t> login_account(db::Database &db, const std::string &session_tag);
 
 // --- lobby_commands ---------------------------------------------------------
 

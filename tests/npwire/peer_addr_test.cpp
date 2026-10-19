@@ -1,9 +1,9 @@
 // PeerAddr: the octet packing and the two renderings.
 //
-// These are not cosmetic helpers. The dotted-quad string is a DB key: the
-// novaworld host_players rows are written at add_player time and deleted by
-// remove_player_by_peer, and a second differently-derived spelling of the same
-// address silently leaks rows. The packing direction is equally load-bearing —
+// These are not cosmetic helpers. The dotted-quad string is a DB key: a
+// novaworld listing's host_ip is written in it and a joiner's PlaySetup names
+// it again (hostdb::rid_at), and a second differently-derived spelling of the
+// same address silently stops matching. The packing direction is equally load-bearing —
 // retail's _connectlog.txt reads the four payload bytes positionally, so the
 // other endianness prints "1.0.0.127" for 127.0.0.1 (verified 2026-04-27).
 #include <net/npwire/peer_addr.h>

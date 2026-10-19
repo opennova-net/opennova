@@ -271,7 +271,7 @@ int run_main_loop(
 
 	// The program's own use of its task (program_usage.h): a sample now, then one
 	// with every heartbeat, on the loop's connection.
-	UsageSampler usage(program, find_usage_task());
+	UsageSampler usage(program, hooks.task ? *hooks.task : find_usage_task());
 	const auto sample_usage = [&usage](db::Database &db) {
 		using namespace std::chrono;
 		const auto wall_s = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();

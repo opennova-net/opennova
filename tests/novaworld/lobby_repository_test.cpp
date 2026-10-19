@@ -1,12 +1,14 @@
 // The lobby's tables below the listener (engine/net/novaworld/lobby_repository.h, migrations
-// 0006_lobby_commands.sql, 0009_lobby_instances.sql and 0012_lobby_instances_share_endpoint.sql),
-// on a migrated database per case: the lobby instances (each registration a row of its own, two
+// 0006_lobby_commands.sql, 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql and
+// 0020_lobby_live_view.sql), on a migrated database per case: the lobby instances (each
+// registration a row of its own naming its task, two
 // at one endpoint, listed with how long ago each was seen, touched, drained, the live ones those
 // active and seen within the live window and named by the newest one's endpoint, one unseen for
 // longer than a database failover left alone, the stale reaped with their rows, a clean stop's
 // delete), the RIDs from one sequence (a held suffix passed over past the
-// wrap), the session rows the lobby writes and the routes read (its sweep of the rows it holds
-// no session for, its own instance's alone), and the commands the
+// wrap), the session rows the lobby writes and the routes read (the account each signed in as
+// and the server it plays on; its sweep of the rows it holds no session for, its own
+// instance's alone), the account a retail login's tag names, and the commands the
 // routes and the supervisor queue for it. A push answers from the session rows what the lobby
 // would (a RID no session holds, one not hosting, one another account owns) and inserts only when
 // the lobby would take it, bearing the session's lobby_id; an end names its session by its row's
@@ -89,8 +91,12 @@ bool refused(Database &db, const std::string &sql) {
 int test_session_rows() {
 	test_db::TestDatabase scratch;
 	Database db = scratch.open();
+	// A client signed in as account 41, playing on a listing since half a minute ago.
 	lobbydb::SessionRow a = session(1, 40001);
-	a.login_session_tag = "TAG-A";
+	a.user_id = 41;
+	a.playing_rid = 0x0A000031u;
+	a.play_addr = "203.0.113.31:32768";
+	a.playing_since_ms = kNow - 30000;
 	a.id = lobbydb::insert_session(db, a);
 	TEST_EXPECT(a.id > 0);
 	lobbydb::SessionRow b = hosting(session(0x80000000u, 40002), 0x0A000001u, 77);
@@ -101,10 +107,19 @@ int test_session_rows() {
 	TEST_EXPECT(rows.size() == 2);
 	TEST_EXPECT(rows[0].id == a.id && lobbydb::same_columns(rows[0], a));
 	TEST_EXPECT(rows[0].connected_ms == a.connected_ms && rows[0].last_seen_ms == a.last_seen_ms);
-	TEST_EXPECT(rows[0].rid == 0 && !rows[0].host_user_id && rows[0].login_session_tag == "TAG-A");
+	TEST_EXPECT(rows[0].rid == 0 && !rows[0].host_user_id && rows[0].user_id == 41);
+	TEST_EXPECT(rows[0].playing_rid == 0x0A000031u && rows[0].play_addr == "203.0.113.31:32768" &&
+			rows[0].playing_since_ms == kNow - 30000);
 	TEST_EXPECT(lobbydb::session_addr(rows[0]) == "10.1.2.3:40001");
 	TEST_EXPECT(rows[1].id == b.id && lobbydb::same_columns(rows[1], b));
 	TEST_EXPECT(rows[1].connection_id == 0x80000000u && rows[1].host_user_id == 77);
+	// Playing on nothing, signed in as no one: NULLs, read back as none.
+	TEST_EXPECT(!rows[1].user_id && rows[1].playing_rid == 0 && rows[1].play_addr.empty() &&
+			rows[1].playing_since_ms == 0);
+	TEST_EXPECT(db.query("SELECT 1 FROM lobby_sessions WHERE id = $1 AND user_id IS NULL AND "
+						 "playing_rid IS NULL AND playing_since IS NULL;",
+						{ BindValue(b.id) })
+						.size() == 1);
 
 	// An update writes the columns, never the times; touch moves last_seen_at alone.
 	lobbydb::SessionRow changed = a;
@@ -116,6 +131,16 @@ int test_session_rows() {
 	rows = lobbydb::list_sessions(db);
 	TEST_EXPECT(rows[0].state == "closing" && rows[0].connected_ms == a.connected_ms &&
 	            rows[0].last_seen_ms == a.last_seen_ms);
+	// It stops playing: the play columns clear; another account's tag moves the account.
+	changed.playing_rid = 0;
+	changed.play_addr.clear();
+	changed.playing_since_ms = 0;
+	changed.user_id = 43;
+	TEST_EXPECT(!lobbydb::same_columns(changed, rows[0]));
+	lobbydb::update_session(db, changed);
+	rows = lobbydb::list_sessions(db);
+	TEST_EXPECT(lobbydb::same_columns(rows[0], changed) && rows[0].user_id == 43 &&
+			rows[0].playing_since_ms == 0);
 	lobbydb::touch_sessions(db, {{a.id, kNow + 5000}, {b.id, kNow + 7000}, {999999, kNow}});
 	rows = lobbydb::list_sessions(db);
 	TEST_EXPECT(rows[0].last_seen_ms == kNow + 5000 && rows[1].last_seen_ms == kNow + 7000);
@@ -125,6 +150,7 @@ int test_session_rows() {
 	TEST_EXPECT(refused(db, "UPDATE lobby_sessions SET state = 'gone';"));
 	TEST_EXPECT(refused(db, "UPDATE lobby_sessions SET listed = true, hosting = false;"));
 	TEST_EXPECT(refused(db, "UPDATE lobby_sessions SET rid = 0;"));
+	TEST_EXPECT(refused(db, "UPDATE lobby_sessions SET playing_rid = 0;"));
 
 	lobbydb::delete_session(db, a.id);
 	rows = lobbydb::list_sessions(db);
@@ -346,7 +372,11 @@ int test_instances_and_rids() {
 	TEST_EXPECT(live.endpoint == shared && live.instances == 2);
 	const std::optional<lobbydb::LobbyInstance> found = instance_of(db, a);
 	TEST_EXPECT(found && found->endpoint == shared && found->state == "active" &&
-			found->seen_ago_ms >= 0 && found->seen_ago_ms < 5000);
+			found->seen_ago_ms >= 0 && found->seen_ago_ms < 5000 && found->task_id.empty());
+	// One registered with the task it runs as names it (the admin's link to its usage).
+	const int64_t tasked = lobbydb::register_instance(db, shared, false, "4f1c2a9e0b7d4c3e");
+	TEST_EXPECT(instance_of(db, tasked) && instance_of(db, tasked)->task_id == "4f1c2a9e0b7d4c3e");
+	lobbydb::remove_instance(db, tasked);
 	TEST_EXPECT(!instance_of(db, 999999));
 	TEST_EXPECT(lobbydb::set_instance_state(db, b, "draining"));
 	TEST_EXPECT(!lobbydb::set_instance_state(db, b, "gone") &&
@@ -453,11 +483,37 @@ int test_instances_and_rids() {
 	return 0;
 }
 
+// The account a session signs in as (lobbydb::login_account): the one whose live retail login
+// set the tag, only while the account is at the credentials_gen the login was made under (a
+// password reset or a ban moves it); none for an empty or unknown tag.
+int test_login_account() {
+	test_db::TestDatabase scratch;
+	Database db = scratch.open();
+	const int64_t pilot = db.query("INSERT INTO players (username, password_hash, pcid, nwh, "
+								   "nwhandle) VALUES ('lobby_pilot', 'x', '0000c101', '1', "
+								   "'Pilot') RETURNING id;")
+								  .front()
+								  .as_int(0)
+								  .value_or(0);
+	TEST_EXPECT(pilot > 0);
+	db.exec("INSERT INTO active_user_sessions (user_id, username, session_tag, credentials_gen) "
+			"VALUES ($1, 'lobby_pilot', 'tag-lobby-pilot', 0);",
+			{ BindValue(pilot) });
+	TEST_EXPECT(lobbydb::login_account(db, "tag-lobby-pilot") == pilot);
+	TEST_EXPECT(!lobbydb::login_account(db, ""));
+	TEST_EXPECT(!lobbydb::login_account(db, "tag-lobby-nobody"));
+	db.exec("UPDATE players SET credentials_gen = credentials_gen + 1 WHERE id = $1;",
+			{ BindValue(pilot) });
+	TEST_EXPECT(!lobbydb::login_account(db, "tag-lobby-pilot"));
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	if (test_session_rows() != 0) return 1;
+	if (test_login_account() != 0) return 1;
 	if (test_pushes() != 0) return 1;
 	if (test_end_session_and_forget() != 0) return 1;
 	if (test_take_and_cascade() != 0) return 1;

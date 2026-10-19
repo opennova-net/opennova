@@ -786,7 +786,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 					for (const auto &p : players) {
 						crow::json::wvalue pe;
 						pe["nwhandle"] = text(p.nwhandle);
-						if (p.user_id) pe["user_id"] = static_cast<int64_t>(*p.user_id);
+						pe["user_id"]  = p.user_id;
 						pe["peer_ip"]  = text(p.peer_ip);
 						player_entries.push_back(std::move(pe));
 					}
@@ -2015,11 +2015,11 @@ void HttpListener::register_legacy_host_join_routes(
 					            payloads.name_info.size(), payloads.squad_info.size());
 				}
 			}
-			// Phase I.3: persist the join in host_players. Cascade-deletes
-			// when the host row goes away (host disconnect). We don't have
-			// the joiner's UDP peer port at this point — they're still on
-			// HTTP — so peer_port=0 placeholder; a future refinement would
-			// correlate the joiner's lobby UDP src with this row.
+			// Phase I.3: persist the join in host_players, the listing's roster,
+			// keyed by the joiner's account. Its lobby session, signed in as the
+			// same account, takes it off when it stops playing there, plays
+			// elsewhere or ends (hostdb::remove_player); it cascades when the
+			// host row goes away (host disconnect).
 			if (joiner_user_id != 0) {
 				try {
 					hostdb::PlayerRow p;
@@ -2029,7 +2029,6 @@ void HttpListener::register_legacy_host_join_routes(
 					                ? joiner_label
 					                : joiner_nwhandle;
 					p.peer_ip   = req.remote_ip_address;
-					p.peer_port = 0;
 					hostdb::add_player(*db_conn, p);
 				} catch (const std::exception &e) {
 					std::fprintf(stderr, "[http] /NWJoin.dll WARN host_players add: %s\n", e.what());

@@ -23,16 +23,20 @@ BindValue lobby_bind(int64_t lobby_id) {
 	return lobby_id == 0 ? null() : i64(lobby_id);
 }
 
+// A time column as epoch ms: NULL for 0.
+BindValue ms_bind(int64_t ms) { return ms == 0 ? null() : i64(ms); }
+
 constexpr const char *kSessionColumns =
-		"id, connection_id, peer_ip, peer_port, state, pn, identity, login_session_tag, rid, "
+		"id, connection_id, peer_ip, peer_port, state, pn, identity, user_id, rid, "
 		"hosting, listed, host_user_id, server_name, mission_name, players, max_players, "
 		"(extract(epoch FROM connected_at) * 1000)::bigint, "
-		"(extract(epoch FROM last_seen_at) * 1000)::bigint, COALESCE(lobby_id, 0)";
+		"(extract(epoch FROM last_seen_at) * 1000)::bigint, COALESCE(lobby_id, 0), "
+		"playing_rid, play_addr, COALESCE((extract(epoch FROM playing_since) * 1000)::bigint, 0)";
 
 constexpr const char *kInstanceColumns =
 		"id, endpoint, state, (extract(epoch FROM started_at) * 1000)::bigint, "
 		"(extract(epoch FROM last_seen_at) * 1000)::bigint, "
-		"(extract(epoch FROM now() - last_seen_at) * 1000)::bigint";
+		"(extract(epoch FROM now() - last_seen_at) * 1000)::bigint, task_id";
 
 LobbyInstance row_to_instance(const db::Row &r) {
 	LobbyInstance i;
@@ -42,6 +46,7 @@ LobbyInstance row_to_instance(const db::Row &r) {
 	i.started_ms = r.as_int(3).value_or(0);
 	i.last_seen_ms = r.as_int(4).value_or(0);
 	i.seen_ago_ms = r.as_int(5).value_or(0);
+	i.task_id = r.as_text(6).value_or("");
 	return i;
 }
 
@@ -54,7 +59,7 @@ SessionRow row_to_session(const db::Row &r) {
 	s.state = r.as_text(4).value_or("");
 	s.pn = r.as_text(5).value_or("");
 	s.identity = r.as_text(6).value_or("");
-	s.login_session_tag = r.as_text(7).value_or("");
+	s.user_id = r.as_int(7);
 	s.rid = static_cast<uint32_t>(r.as_int(8).value_or(0));
 	s.hosting = r.as_int(9).value_or(0) != 0;
 	s.listed = r.as_int(10).value_or(0) != 0;
@@ -66,6 +71,9 @@ SessionRow row_to_session(const db::Row &r) {
 	s.connected_ms = r.as_int(16).value_or(0);
 	s.last_seen_ms = r.as_int(17).value_or(0);
 	s.lobby_id = r.as_int(18).value_or(0);
+	s.playing_rid = static_cast<uint32_t>(r.as_int(19).value_or(0));
+	s.play_addr = r.as_text(20).value_or("");
+	s.playing_since_ms = r.as_int(21).value_or(0);
 	return s;
 }
 
@@ -140,10 +148,11 @@ PushResult queue_push(db::Database &db, CommandKind kind, uint32_t rid, std::opt
 
 const char *command_kind_name(CommandKind kind) { return kind_name_of(kind); }
 
-int64_t register_instance(db::Database &db, const std::string &endpoint, bool draining) {
-	const auto rows =
-			db.query("INSERT INTO lobby_instances (endpoint, state) VALUES ($1, $2) RETURNING id;",
-					{ str(endpoint), str(draining ? "draining" : "active") });
+int64_t register_instance(
+		db::Database &db, const std::string &endpoint, bool draining, const std::string &task_id) {
+	const auto rows = db.query("INSERT INTO lobby_instances (endpoint, state, task_id) "
+							   "VALUES ($1, $2, $3) RETURNING id;",
+			{ str(endpoint), str(draining ? "draining" : "active"), str(task_id) });
 	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 }
 
@@ -218,39 +227,44 @@ std::string session_addr(const SessionRow &row) {
 bool same_columns(const SessionRow &a, const SessionRow &b) {
 	return a.connection_id == b.connection_id && a.peer_ip == b.peer_ip &&
 			a.peer_port == b.peer_port && a.state == b.state && a.pn == b.pn &&
-			a.identity == b.identity && a.login_session_tag == b.login_session_tag &&
-			a.rid == b.rid && a.hosting == b.hosting && a.listed == b.listed &&
-			a.host_user_id == b.host_user_id && a.server_name == b.server_name &&
-			a.mission_name == b.mission_name && a.players == b.players &&
-			a.max_players == b.max_players;
+			a.identity == b.identity && a.user_id == b.user_id && a.rid == b.rid &&
+			a.hosting == b.hosting && a.listed == b.listed && a.host_user_id == b.host_user_id &&
+			a.server_name == b.server_name && a.mission_name == b.mission_name &&
+			a.players == b.players && a.max_players == b.max_players &&
+			a.playing_rid == b.playing_rid && a.play_addr == b.play_addr &&
+			a.playing_since_ms == b.playing_since_ms;
 }
 
 int64_t insert_session(db::Database &db, const SessionRow &row) {
 	const auto rows = db.query(
 			"INSERT INTO lobby_sessions (connection_id, peer_ip, peer_port, state, pn, identity, "
-			"login_session_tag, rid, hosting, listed, host_user_id, server_name, mission_name, "
-			"players, max_players, connected_at, last_seen_at, lobby_id) VALUES ($1, $2, $3, $4, "
-			"$5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, to_timestamp($16::float8 / 1000), "
-			"to_timestamp($17::float8 / 1000), $18) RETURNING id;",
+			"user_id, rid, hosting, listed, host_user_id, server_name, mission_name, players, "
+			"max_players, connected_at, last_seen_at, lobby_id, playing_rid, play_addr, "
+			"playing_since) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, "
+			"$15, to_timestamp($16::float8 / 1000), to_timestamp($17::float8 / 1000), $18, $19, "
+			"$20, to_timestamp($21::float8 / 1000)) RETURNING id;",
 			{ i64(row.connection_id), str(row.peer_ip), i64(row.peer_port), str(row.state),
-					str(row.pn), str(row.identity), str(row.login_session_tag), rid_bind(row.rid),
+					str(row.pn), str(row.identity), opt_int(row.user_id), rid_bind(row.rid),
 					flag(row.hosting), flag(row.listed), opt_int(row.host_user_id),
 					str(row.server_name), str(row.mission_name), i64(row.players),
 					i64(row.max_players), i64(row.connected_ms), i64(row.last_seen_ms),
-					lobby_bind(row.lobby_id) });
+					lobby_bind(row.lobby_id), rid_bind(row.playing_rid), str(row.play_addr),
+					ms_bind(row.playing_since_ms) });
 	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 }
 
 void update_session(db::Database &db, const SessionRow &row) {
 	db.exec("UPDATE lobby_sessions SET connection_id = $2, peer_ip = $3, peer_port = $4, "
-			"state = $5, pn = $6, identity = $7, login_session_tag = $8, rid = $9, hosting = $10, "
+			"state = $5, pn = $6, identity = $7, user_id = $8, rid = $9, hosting = $10, "
 			"listed = $11, host_user_id = $12, server_name = $13, mission_name = $14, "
-			"players = $15, max_players = $16 WHERE id = $1;",
+			"players = $15, max_players = $16, playing_rid = $17, play_addr = $18, "
+			"playing_since = to_timestamp($19::float8 / 1000) WHERE id = $1;",
 			{ i64(row.id), i64(row.connection_id), str(row.peer_ip), i64(row.peer_port),
-					str(row.state), str(row.pn), str(row.identity), str(row.login_session_tag),
+					str(row.state), str(row.pn), str(row.identity), opt_int(row.user_id),
 					rid_bind(row.rid), flag(row.hosting), flag(row.listed), opt_int(row.host_user_id),
 					str(row.server_name), str(row.mission_name), i64(row.players),
-					i64(row.max_players) });
+					i64(row.max_players), rid_bind(row.playing_rid), str(row.play_addr),
+					ms_bind(row.playing_since_ms) });
 }
 
 void update_session_listing(db::Database &db, int64_t id, uint32_t rid, bool hosting, bool listed,
@@ -310,6 +324,19 @@ std::vector<SessionRow> list_sessions(db::Database &db) {
 				 " FROM lobby_sessions ORDER BY id;"))
 		out.push_back(row_to_session(r));
 	return out;
+}
+
+std::optional<int64_t> login_account(db::Database &db, const std::string &session_tag) {
+	if (session_tag.empty())
+		return std::nullopt;
+	const auto rows = db.query("SELECT s.user_id FROM active_user_sessions s "
+							   "JOIN players p ON p.id = s.user_id "
+							   "WHERE s.session_tag = $1 AND s.credentials_gen = p.credentials_gen "
+							   "LIMIT 1;",
+			{ str(session_tag) });
+	if (rows.empty())
+		return std::nullopt;
+	return rows.front().as_int(0);
 }
 
 const char *push_result_name(PushResult result) {

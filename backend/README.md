@@ -31,7 +31,10 @@ and password resets"). `0006_lobby_commands.sql` adds the lobby's tables: the
 NovaWorld sessions the lobby holds (`lobby_sessions`) and the commands the
 routes and the hosted servers' supervisor address to it (`lobby_commands`),
 the only way in and out of the lobby's memory (apps/novaworld_common/README.md
-"Connection lifecycle").
+"Connection lifecycle"). `0020_lobby_live_view.sql` adds the account each lobby
+session signed in as and the server it plays on, the task each lobby instance
+runs as, and keys a listing's joiners (`host_players`) by their account, so its
+roster is who plays on it now ("Listed servers and owners").
 
 ## Migrations are append-only
 

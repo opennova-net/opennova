@@ -188,9 +188,8 @@ struct CreateUserParams {
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p);
 // Deletes the account with its sessions and hosting keys (ON DELETE CASCADE).
 // A server it has listed stays listed with no owner, and its rows in listed
-// servers' player lists stay with no account (ON DELETE SET NULL); the
-// listing's later refreshes store no owner, the claim having gone with the
-// keys. POST /api/admin/hosts/<rid>/stop ends such a listing. A hosted
+// servers' player lists go with it (ON DELETE CASCADE); the listing's later
+// refreshes store no owner, the claim having gone with the keys. POST /api/admin/hosts/<rid>/stop ends such a listing. A hosted
 // server's service account is not_found here (delete_service_account is the
 // supervisor's).
 MutationResult delete_user(opennova::db::Database &db, int64_t id);

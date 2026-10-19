@@ -78,9 +78,15 @@ struct LobbyState {
 	// The LOGINSESSIONTAG the connection's latest Cookie list carried (its
 	// verify, play or host request: a stock client's whole HTTP cookie jar, so
 	// the tag of its retail login once it logged in), kept for the connection's
-	// life; empty until one did. The admin's sessions view names the account
-	// whose live login it is (service policy). A secret: never logged or sent.
+	// life; empty until one did. The lobby pins the account whose live login it
+	// is (user_id, below; service policy). A secret: never logged, sent or
+	// written.
 	std::string login_session_tag;
+	// The account the connection signed in as (service policy): the one whose live retail
+	// login a Cookie list's tag named when the lobby resolved it (lobbydb::login_account),
+	// kept for the connection's life however that login ends; a later tag that names another
+	// account moves it. Unset until a tag resolves (and with no database).
+	std::optional<int64_t> user_id;
 
 	// Populated when the client transitions into hosting mode
 	// (ClientHostRequest sets these; ClientHostUpdate refreshes them).
@@ -149,6 +155,14 @@ struct LobbyState {
 	// current lists, for /api/lobbies introspection.
 	VarLists last_host_update;
 	VarLists play_state;
+	// What the connection plays on (service policy), from its latest ClientPlayRequest's
+	// PlaySetup: play_addr its IpAddress:PortNumber (the join address the .joi handed it),
+	// playing_rid the listing at that address then (hostdb::rid_at; 0 for none, or with no
+	// database), playing_since_ms when it began playing there (Unix epoch ms; 0 while it plays
+	// on nothing). Its ClientStopPlaying clears them (LobbySession::stop_playing).
+	uint32_t playing_rid = 0;
+	std::string play_addr;
+	int64_t playing_since_ms = 0;
 };
 
 struct LobbyDispatchResult {
@@ -194,8 +208,11 @@ public:
 
 	// Optional DB handle for host-state persistence (Phase I.2). When
 	// non-null, ClientHostRequest / ClientHostUpdate / ClientHostPlayerAdded /
-	// ClientHostPlayerRemoved upsert/delete `active_hosts` + `host_players`
-	// rows; null leaves the dispatcher purely in-memory (used by tests
+	// ClientHostPlayerRemoved upsert/delete `active_hosts` + `host_roster`
+	// rows, a Cookie list's LOGINSESSIONTAG pins the account (user_id), and
+	// ClientPlayRequest / ClientStopPlaying name the listing played on and take
+	// the joiner's `host_players` row off the one it left; null leaves the
+	// dispatcher purely in-memory (used by tests
 	// that bring up no database). The connection belongs to the thread that
 	// calls dispatch() (Database is single-threaded; the NW UDP listener hands
 	// over the one its receive thread leases).
@@ -287,6 +304,14 @@ private:
 	// A HostKey the connection presents decides its owner (owner_key,
 	// host_user_id). False when ONNET_REQUIRE_HOST_KEY refuses it.
 	bool present_host_key(LobbyState &state, const std::string &host_key);
+	// The account a Cookie list's LOGINSESSIONTAG `tag` names (lobbydb::login_account) pinned
+	// as the one the connection signed in as (user_id); a tag that names no live login, a
+	// database failure (logged) and no database leave the pin as it was.
+	void pin_account(LobbyState &state, const std::string &tag);
+	// The connection leaves the server it plays on: its account off that listing's roster
+	// (hostdb::remove_player: the row /NWJoin.dll wrote for it), and the play columns cleared.
+	// The NW UDP listener does the same for a connection that drops (erase_lobby_state).
+	void leave_server(LobbyState &state, const char *reason);
 
 	IdGenerator sess_id_gen_;
 	std::function<std::string(const std::string&)> gsid_gen_;

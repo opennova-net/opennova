@@ -53,9 +53,9 @@ void ConnectionRoutes::register_routes(WebApp &app, uint64_t heartbeat_timeout_m
 // heard from (created_ms, last_seen_ms; the lobby writes the last within ten
 // seconds) as Unix epoch ms; "account", who the session is, and "host", the
 // server it lists. The account is the listing's owner while it hosts
-// (listing_owner, "via": "host_key"), else the account whose live retail login
-// its latest Cookie list named (the row's login_session_tag, "via": "login"),
-// else null. The host is null unless it hosts: {rid, server_name, mission_name
+// (listing_owner, "via": "host_key"), else the account it signed in as (the
+// row's user_id, pinned by the lobby from its Cookie list's retail login, "via":
+// "login"), else null. The host is null unless it hosts: {rid, server_name, mission_name
 // (UTF-8, as every list of listed servers sends a host's text), players,
 // max_players, listed (false while it waits out of the browser for a HostKey
 // naming an account), hosted_server_id (null for a listing that is no live
@@ -98,8 +98,8 @@ crow::response ConnectionRoutes::list(const crow::request &req) {
 				if (listing.owner)
 					e["account"] = account_json(*listing.owner, "host_key");
 			}
-			if (e["account"].t() == crow::json::type::Null && !s.login_session_tag.empty()) {
-				if (const auto user = get_user_by_login_session_tag(*db_conn, s.login_session_tag))
+			if (e["account"].t() == crow::json::type::Null && s.user_id) {
+				if (const auto user = get_user_by_id(*db_conn, *s.user_id))
 					e["account"] = account_json(*user, "login");
 			}
 			entries.push_back(std::move(e));
