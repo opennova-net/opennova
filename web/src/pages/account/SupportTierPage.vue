@@ -107,14 +107,12 @@
         </p>
       </section>
 
-      <p v-if="billing.comp_servers > 0" class="rounded-panel border border-border bg-panel p-4 text-sm text-ink">
-        An admin granted your account {{ billing.comp_servers }} hosted server{{ billing.comp_servers === 1 ? '' : 's' }}<template
-          v-if="billing.comp_own_machines > 0"
-          >, {{ billing.comp_own_machines }} of them on an own machine</template
-        >. A support tier covering more raises your limit to the tier's.
+      <!-- An admin's grant: the account's whole hosting, with nothing to buy beside it. -->
+      <p v-if="billing.granted" id="support-granted" class="rounded-panel border border-border bg-panel p-4 text-sm text-ink">
+        {{ grantText }}
       </p>
 
-      <section class="space-y-4" aria-labelledby="support-tiers">
+      <section v-if="!billing.granted" class="space-y-4" aria-labelledby="support-tiers">
         <h2 id="support-tiers" class="text-xl font-semibold text-ink">{{ liveTier ? 'Change your tier' : 'Pick a tier' }}</h2>
         <p v-if="!liveTier && !billing.can_subscribe" class="text-sm text-warn">Your account cannot subscribe right now.</p>
         <TierPicker
@@ -138,7 +136,7 @@
       </section>
 
       <!-- The own-machine add-on. -->
-      <section v-if="tiers.own_machine" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="support-own-machine">
+      <section v-if="tiers.own_machine && !billing.granted" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="support-own-machine">
         <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
           <h2 id="support-own-machine" class="text-lg font-semibold text-ink">Own machine add-on</h2>
           <p class="text-ink">
@@ -186,7 +184,7 @@
 
       <!-- The static address add-on, while the deployment sells them. -->
       <section
-        v-if="tiers.static_address"
+        v-if="tiers.static_address && !billing.granted"
         class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6"
         aria-labelledby="support-static-address"
       >
@@ -327,6 +325,21 @@ const ownMachineHint = computed(() => {
     return 'Add another here, up to one for each server your tier covers; cancel one in the billing portal.';
   }
   return 'You can have one for each server your tier covers, and cancel any in the billing portal.';
+});
+
+// What an admin's grant gives, said whole: an account with one buys no tier
+// or add-on (the checkout refuses one, not_eligible).
+const grantText = computed(() => {
+  const b = billing.value;
+  if (!b) return '';
+  const parts: string[] = [];
+  if (b.comp_servers > 0) parts.push(`${b.comp_servers} hosted server${b.comp_servers === 1 ? '' : 's'}`);
+  if (b.comp_own_machines > 0) {
+    parts.push(`${b.comp_own_machines} own machine${b.comp_own_machines === 1 ? '' : 's'} for your servers`);
+  }
+  if (b.comp_addresses > 0) parts.push(`${b.comp_addresses} static address${b.comp_addresses === 1 ? '' : 'es'}`);
+  const granted = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');
+  return `An admin granted your account ${granted}, free of charge. With an admin grant there is no support tier or add-on to buy.`;
 });
 
 // The static addresses the account pays for, one subscription each.

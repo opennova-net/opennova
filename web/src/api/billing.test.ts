@@ -88,6 +88,8 @@ describe('parsing', () => {
     expect(parseMyBilling(subscribed(2))).toEqual(subscribed(2));
     expect(parseMyBilling({ ...myBilling(), used: -1 })).toBeNull();
     expect(parseMyBilling({ ...myBilling(), can_manage: 'yes' })).toBeNull();
+    expect(parseMyBilling({ ...myBilling(), granted: 'yes' })).toBeNull();
+    expect(parseMyBilling({ ...myBilling(), comp_addresses: -1 })).toBeNull();
     const bad = subscribed(2);
     expect(parseMyBilling({ ...bad, subscription: { ...bad.subscription, current_period_end: 'soon' } })).toBeNull();
     expect(parseMyBilling({ ...bad, subscription: { ...bad.subscription, tier: 5 } })).toBeNull();

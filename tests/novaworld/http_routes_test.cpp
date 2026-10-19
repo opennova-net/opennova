@@ -7101,7 +7101,8 @@ std::string event_body(const std::string &id, const std::string &customer, bool 
 
 // The tiers (public), the account's billing, checkout and the portal: the
 // session and CSRF refusals, the item's rules (an own machine needs a tier, a
-// tier while one grants is already_subscribed), the Checkout session's settings
+// tier while one grants is already_subscribed, an account with an admin grant
+// buys nothing), the Checkout session's settings
 // (the customer made once with its idempotency key and the account's metadata,
 // the previous open session expired, the return URLs, the terms, the life), the
 // sync after a checkout, the portal, the buckets, prices that do not check out
@@ -7153,6 +7154,7 @@ int test_billing_routes(Harness &h) {
 			json["comp_servers"].i() == 0 && json["own_machines"].i() == 0 && json["used"].i() == 0 &&
 			json["stopping"].i() == 0);
 	TEST_EXPECT(!json["can_start"].b() && !json["can_manage"].b() && json["can_subscribe"].b());
+	TEST_EXPECT(json["comp_addresses"].i() == 0 && !json["granted"].b());
 	TEST_EXPECT(json["subscription"].t() == crow::json::type::Null &&
 			json["own_machine_subscription"].t() == crow::json::type::Null);
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
@@ -7291,6 +7293,21 @@ int test_billing_routes(Harness &h) {
 	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
 	TEST_EXPECT(reply.code == 200 &&
 			!billing::customer_of(*h.pool.acquire(), cy)->open_checkout_session.empty());
+
+	// An admin's grant is the account's whole hosting: it buys no tier and no
+	// add-on, even one that would raise its limit, and no customer is made.
+	const int64_t gus = make_account(h, "bill_gus", "pw-bill-gus");
+	const std::string gus_s = login_token(h, "10.61.0.9", "bill_gus", "pw-bill-gus");
+	TEST_EXPECT(gus > 0 && !gus_s.empty() && billing::set_comp_grants(*h.pool.acquire(), gus, { 2, 1 }));
+	json = crow::json::load(body_text(me(gus_s)));
+	TEST_EXPECT(json && json["granted"].b() && !json["can_subscribe"].b() && json["comp_servers"].i() == 2 &&
+			json["comp_own_machines"].i() == 1 && json["max_servers"].i() == 2);
+	for (const char *item : { "{\"item\":\"tier1\"}", "{\"item\":\"tier3\"}", "{\"item\":\"own_machine\"}",
+				 "{\"item\":\"static_address\"}" }) {
+		reply = post("/api/billing/checkout", gus_s, item);
+		TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_eligible");
+	}
+	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), gus));
 
 	// Billing off (the Secure listener): every account route 503 billing_disabled.
 	std::string token;

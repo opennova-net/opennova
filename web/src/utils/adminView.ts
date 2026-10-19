@@ -22,6 +22,18 @@ export function entitlementLabel(e: { source: EntitlementSource; tier: number | 
   return 'None';
 }
 
+// Where an entitlement's servers run, as the sold capacity counts them: an own
+// machine takes one of them off the shared machines and adds none.
+// "9 on shared machines, 2 on own machines", "All on shared machines", "None".
+export function serverPlacesLabel(e: { max_servers: number; own_machines: number }): string {
+  if (e.max_servers <= 0) return 'None';
+  const own = Math.min(e.own_machines, e.max_servers);
+  const shared = e.max_servers - own;
+  if (own === 0) return 'All on shared machines';
+  if (shared === 0) return 'All on own machines';
+  return `${shared} on shared machines, ${own} on own machine${own === 1 ? '' : 's'}`;
+}
+
 export function machineKindLabel(kind: MachineKind | string): string {
   return kind === 'own' ? 'Own machine' : kind === 'shared' ? 'Shared machine' : kind;
 }

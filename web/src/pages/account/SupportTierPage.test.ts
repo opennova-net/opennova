@@ -232,6 +232,30 @@ describe('SupportTierPage', () => {
     expect(page.get('#support-static-address-hint').text()).toBe('Hosting is full: new subscriptions are paused.');
   });
 
+  it('says what an admin granted and offers no tier or add-on beside it', async () => {
+    tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: STATIC_ADDRESS }) });
+    mine.mockResolvedValue({
+      ok: true,
+      value: myBilling({
+        max_servers: 11,
+        comp_servers: 11,
+        comp_own_machines: 2,
+        comp_addresses: 1,
+        granted: true,
+        own_machines: 2,
+        can_start: true,
+        can_subscribe: false,
+      }),
+    });
+    const page = await mountAt('/me/support');
+    expect(page.get('#support-granted').text()).toBe(
+      'An admin granted your account 11 hosted servers, 2 own machines for your servers and 1 static address, free of charge. ' +
+        'With an admin grant there is no support tier or add-on to buy.',
+    );
+    for (const id of ['#support-tiers', '#support-own-machine', '#support-static-address']) expect(page.find(id).exists()).toBe(false);
+    expect(page.findAll('button').some((b) => /subscribe|own machine|static address/i.test(b.text()))).toBe(false);
+  });
+
   it('shows no static address card where none is sold', async () => {
     const page = await mountAt('/me/support');
     expect(page.find('#support-static-address').exists()).toBe(false);
