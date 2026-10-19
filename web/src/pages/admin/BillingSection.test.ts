@@ -209,13 +209,18 @@ describe('BillingSection', () => {
     const wrapper = await mountSection();
     const hold = wrapper.get('section.limits-hold');
     expect(hold.text()).toContain('Hosted server limits are on hold');
-    expect(hold.text()).toContain('4 servers of 3 owners');
+    // A pass's stops and its moves off own machines, held alike.
+    expect(hold.text()).toContain('A pass would stop or move 4 servers of 3 owners');
     expect(hold.text()).toContain('a pass would stop 4 server(s) of 3 of 5 owners');
     expect(hold.text()).toContain('next full read from Stripe');
     await hold.findAll('button').find((b) => b.text() === 'Apply the stops')!.trigger('click');
-    // The first step asks, naming what stops; nothing is sent yet.
+    // The first step asks, naming what stops or moves; nothing is sent yet.
     expect(applyStops).not.toHaveBeenCalled();
-    const confirm = wrapper.get('section.limits-hold').findAll('button').find((b) => b.text() === 'Stop 4 servers of 3 owners');
+    expect(wrapper.get('section.limits-hold').text()).toContain('move to a shared machine while there is room, else stop');
+    const confirm = wrapper
+      .get('section.limits-hold')
+      .findAll('button')
+      .find((b) => b.text() === 'Stop or move 4 servers of 3 owners');
     expect(confirm).toBeDefined();
     await confirm!.trigger('click');
     await flushPromises();

@@ -224,7 +224,7 @@ describe('OverviewSection', () => {
     const page = await mountOverview();
     const hold = page.get('.limits-hold');
     expect(hold.text()).toContain('Hosted server limits are on hold');
-    expect(hold.text()).toContain('11 servers of 9 owners');
+    expect(hold.text()).toContain('A pass would stop or move 11 servers of 9 owners');
     expect(hold.get('a').attributes('href')).toBe('/admin/billing');
     expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('Server limits on hold');
   });

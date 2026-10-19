@@ -17,8 +17,8 @@
     <div v-if="billing?.limits_hold" role="alert" class="limits-hold space-y-1 rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm">
       <p class="font-semibold text-danger">Hosted server limits are on hold</p>
       <p class="text-ink">
-        A pass would stop {{ holdSummary }} for their hosting limits, so none is stopped until a clean read from Stripe
-        confirms them or an admin applies the stops.
+        A pass would stop or move {{ holdSummary }} for their hosting limits, so none is stopped or moved until a
+        clean read from Stripe confirms them or an admin applies the stops.
         <RouterLink to="/admin/billing" class="text-accent hover:text-ink-bright">Review it on the Subscriptions page</RouterLink>.
       </p>
       <p v-if="billing.limits_hold_reason" class="font-mono text-xs text-ink-muted">{{ billing.limits_hold_reason }}</p>

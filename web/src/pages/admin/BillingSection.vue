@@ -18,8 +18,9 @@
     >
       <h2 id="billing-limits-hold" class="text-lg font-semibold text-danger">Hosted server limits are on hold</h2>
       <p class="text-sm text-ink">
-        A pass would stop {{ holdSummary }} for their hosting limits: more owners at once than a real lapse would
-        touch. In case the billing cache is wrong, no hosted server stops for its owner's limits while the hold is on.
+        A pass would stop or move {{ holdSummary }} for their hosting limits: more owners at once than a real lapse
+        would touch. In case the billing cache is wrong, no hosted server stops or moves off its own machine for its
+        owner's limits while the hold is on.
       </p>
       <p v-if="billing.limits_hold_reason" class="font-mono text-xs text-ink-muted">{{ billing.limits_hold_reason }}</p>
       <p class="text-sm text-ink-muted">
@@ -30,7 +31,7 @@
         </template>
         <template v-else>
           It releases by itself after the next full read from Stripe (Reconcile now starts one): if the same owners are
-          still past their limits then, their servers stop.
+          still past their limits then, their servers stop or move.
         </template>
       </p>
       <div v-if="!confirmingStops" class="flex flex-wrap items-center gap-3">
@@ -38,10 +39,12 @@
       </div>
       <div v-else class="space-y-2 rounded-panel border border-danger/40 bg-panel p-3">
         <p class="text-sm text-danger">
-          Stop {{ holdSummary }} now, newest first as their limits say? Their matches end for everyone on them.
+          Stop or move {{ holdSummary }} now, newest first as their limits say? Those past their servers stop; those
+          past their own machines move to a shared machine while there is room, else stop. Their matches end for
+          everyone on them.
         </p>
         <div class="flex flex-wrap items-center gap-3">
-          <button type="button" :disabled="busy" :class="dangerButton" @click="applyStops">Stop {{ holdSummary }}</button>
+          <button type="button" :disabled="busy" :class="dangerButton" @click="applyStops">Stop or move {{ holdSummary }}</button>
           <button type="button" :disabled="busy" :class="secondaryButton" @click="confirmingStops = false">Keep the hold</button>
         </div>
       </div>
