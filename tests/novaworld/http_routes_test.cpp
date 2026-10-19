@@ -7334,7 +7334,8 @@ int test_billing_routes(Harness &h) {
 // already_subscribed; the add-on: own_machine_limit once the account has an own
 // machine for every server it may run, several fine below that). A previous
 // session Stripe no longer knows is no obstacle; one Stripe cannot be asked
-// about refuses (503) with nothing made.
+// about refuses (503) with nothing made. While a payment is past due, no
+// add-on sells (payment_past_due).
 int test_billing_checkout_guard(Harness &h) {
 	namespace billing = opennova::novaworld_server::billing;
 	using billing::StripeRequest;
@@ -7439,6 +7440,23 @@ int test_billing_checkout_guard(Harness &h) {
 	TEST_EXPECT(inside && second.code == 409 && error_of_reply(second) == "checkout_in_progress");
 	TEST_EXPECT(first.code == 200);
 	TEST_EXPECT(checkout(hal_s, "tier1").code == 200);
+
+	// A payment past due, Stripe still retrying it: the tier still grants, and
+	// no add-on sells, an own machine as a static address, nothing reserved.
+	const int64_t ida = make_account(h, "chk_ida", "pw-chk-ida");
+	const std::string ida_s = login_token(h, "10.62.0.5", "chk_ida", "pw-chk-ida");
+	TEST_EXPECT(ida > 0 && !ida_s.empty());
+	const std::string ida_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
+			{ billing::kMetaUserId, std::to_string(ida) }, { billing::kMetaUsername, "chk_ida" } });
+	h.stripe->add_subscription(ida_cus, "price_htier2", 1, "past_due", billing::unix_now() + 30 * 86400);
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), ida_cus, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), ida, billing::unix_now()).max_servers == 2);
+	for (const char *item : { "own_machine", "static_address" }) {
+		reply = checkout(ida_s, item);
+		TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "payment_past_due");
+	}
+	TEST_EXPECT(billing::live_reservations_of(*h.pool.acquire(), ida).empty());
 	return 0;
 }
 

@@ -115,7 +115,7 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
     case 'address_limit':
       return 'You already have a static address for every own machine. Add an own machine first to add another address.';
     case 'payment_past_due':
-      return 'A payment of yours is past due. Fix it in the billing portal first, then add the static address.';
+      return 'A payment of yours is past due. Fix it in the billing portal first, then try again.';
     case 'sold_out':
       return 'Hosting is full: new subscriptions are paused. Try again later; no payment was taken.';
     case 'checkout_in_progress':

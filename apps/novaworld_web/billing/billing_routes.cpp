@@ -335,7 +335,7 @@ std::optional<crow::response> BillingRoutes::judge_checkout(
 		log_account(user, "checkout", "not_eligible (no tier)");
 		return json_error(403, "not_eligible", "an own machine needs a support tier first");
 	}
-	if (item.item == ItemKind::StaticAddress) {
+	if (item.item != ItemKind::Tier) {
 		// While a payment is past due, Stripe still retries it: no new add-on.
 		for (const SubscriptionRow &r : rows) {
 			if (r.status == "past_due" && subscription_grants(r, now)) {
@@ -409,11 +409,12 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // account is running (one at a time), 403 not_eligible for an account that is
 // not an active player's, has an admin grant (billing::admin_granted: it buys
 // nothing beside it) or (the add-on) has no tier granting, 409 already_subscribed when a
-// tier grants already (the portal changes it), 409 own_machine_limit for the
-// add-on when the account has an own machine for every server it may run
-// (each add-on checkout sells one; several are fine below that), for a static
-// address 403 payment_past_due while a payment of the account is past due and
-// 409 address_limit when its addresses would pass its own machines, 409
+// tier grants already (the portal changes it), for an add-on 403
+// payment_past_due while a payment of the account is past due, 409
+// own_machine_limit for the own machine when the account has one for every
+// server it may run (each add-on checkout sells one; several are fine below
+// that), for a static address 409 address_limit when its addresses would pass
+// its own machines, 409
 // sold_out when the fleet has sold all it holds of what the item adds
 // (hosted/model/sold_capacity.h: shared places for a tier, own machines and
 // addresses for the add-ons), 503 stripe_unavailable. Those rules are judged first as a quick
