@@ -7,7 +7,7 @@ import type { SoldCapacity } from './users';
 
 export type TierNumber = 1 | 2 | 3;
 
-// What a checkout buys: a support tier, the dedicated machine add-on, or a static
+// What a checkout buys: a support tier, a dedicated machine, or a static
 // address for a dedicated machine.
 export type BillingItem = 'tier1' | 'tier2' | 'tier3' | 'own_machine' | 'static_address';
 
@@ -23,8 +23,9 @@ export interface TierOffer {
   available: boolean;
 }
 
-// The dedicated machine add-on on offer: one server of the account's tier on a
-// machine of its own, per unit.
+// A dedicated machine on offer: one more hosted server, on a machine of its
+// own, with or without a support tier; each its own subscription.
+// `available` is false while the fleet sells no more of them.
 export interface OwnMachineOffer {
   amount: number | null;
   interval: string;
@@ -75,8 +76,11 @@ export interface TierSubscription {
   cancel_at_period_end: boolean;
 }
 
-// The account's dedicated machine add-on subscription.
+// One of the account's dedicated machine subscriptions (each checkout makes
+// another), while not over.
 export interface OwnMachineSubscription {
+  stripe_subscription_id: string;
+  // The dedicated machines it pays for.
   quantity: number;
   status: SubscriptionStatus;
   current_period_end: string;
@@ -96,33 +100,42 @@ export interface AddressSubscription {
 // GET /api/me/billing, and POST /api/me/billing/sync.
 export interface MyBilling {
   enabled: boolean;
-  // The hosting entitlement: max(tier servers, comp_servers).
+  // The hosting entitlement: its servers on shared machines plus its
+  // dedicated machines (one server each).
   max_servers: number;
-  // An admin's grants, 0 for none: servers, dedicated machines for the account's
-  // servers, and static addresses.
+  // The servers it may run on shared machines: max(tier servers,
+  // comp_servers).
+  shared_servers: number;
+  // An admin's grants, 0 for none: servers on shared machines, dedicated
+  // machines, and static addresses.
   comp_servers: number;
   comp_own_machines: number;
   comp_addresses: number;
-  // Any of them: the account's hosting is the grant, and it buys no tier or
-  // add-on (the checkout refuses one).
+  // Any of them: the account's hosting is the grant, and it buys no tier,
+  // dedicated machine or static address (the checkout refuses one).
   granted: boolean;
-  // The add-on's machines (while a tier grants) plus the admin's.
+  // Its dedicated machines: every granting subscription's quantity (no tier
+  // needed) plus the admin's.
   own_machines: number;
-  // How many of its hosted servers are live now.
+  // How many of its hosted servers are live now, and how many of those are
+  // stopping.
   used: number;
-  // How many of those are stopping: a lower tier stops among the rest.
   stopping: number;
+  // The same on shared machines alone: a lower tier stops among the rest.
+  shared_used: number;
+  shared_stopping: number;
   can_start: boolean;
   subscription: TierSubscription | null;
-  own_machine_subscription: OwnMachineSubscription | null;
+  // Its dedicated machine subscriptions, newest first.
+  own_machine_subscriptions: OwnMachineSubscription[];
   // The static addresses its subscriptions and an admin's grants pay for (at
   // most its dedicated machines), and each address subscription still open.
   static_addresses: number;
   address_subscriptions: AddressSubscription[];
   // The account has a Stripe customer: the billing portal opens.
   can_manage: boolean;
-  // A checkout may start (billing on, the account active, no live tier, no
-  // admin grant).
+  // A tier checkout may start (billing on, the account active, no live tier,
+  // no admin grant).
   can_subscribe: boolean;
 }
 
@@ -171,8 +184,9 @@ export interface BillingEvent {
   outcome: string;
 }
 
-// An account an admin grants hosting (comp_grants): its grant of servers,
-// dedicated machines and static addresses (its comp addresses that count).
+// An account an admin grants hosting (comp_grants): its grant of servers on
+// shared machines, dedicated machines and static addresses (its comp
+// addresses that count).
 export interface AdminCompGrant {
   user_id: number;
   username: string;
@@ -187,9 +201,9 @@ export interface AdminCompGrant {
 export interface AdminBillingResponse {
   enabled: boolean;
   // The hosted servers' limits hold: a pass would have stopped (or moved off
-  // their dedicated machines) the servers of more owners at once than a real lapse
-  // would, so no server stops or moves for its owner's limits until a clean
-  // read from Stripe confirms them or an admin applies the stops.
+  // their dedicated machines) the servers of more owners at once than a real
+  // lapse would, so no server stops or moves for its owner's limits until a
+  // clean read from Stripe confirms them or an admin applies the stops.
   limits_hold: boolean;
   limits_hold_reason: string | null;
   // The stops and moves it keeps back, as the supervisor's last pass counted

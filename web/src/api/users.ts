@@ -60,9 +60,12 @@ function pickEntitlement(value: unknown, user: User): UserEntitlementSummary {
   const v = (value ?? {}) as Record<string, unknown>;
   return {
     max_servers: Number.isInteger(v.max_servers) ? (v.max_servers as number) : user.max_servers,
+    shared_servers: count(v.shared_servers),
     source: sourceOf(v.source),
     tier: tierOf(v.tier),
     comp_servers: Number.isInteger(v.comp_servers) ? (v.comp_servers as number) : user.comp_servers,
+    own_machines: count(v.own_machines),
+    comp_own_machines: Number.isInteger(v.comp_own_machines) ? (v.comp_own_machines as number) : user.comp_own_machines,
   };
 }
 
@@ -126,9 +129,7 @@ function pickDetail(data: unknown): UserDetail | null {
     user,
     entitlement: {
       ...pickEntitlement(e, user),
-      comp_own_machines: Number.isInteger(e.comp_own_machines) ? (e.comp_own_machines as number) : user.comp_own_machines,
       tier_servers: count(e.tier_servers),
-      own_machines: count(e.own_machines),
       can_start: e.can_start === true,
     },
     capacity: pickCapacity(v.capacity),
@@ -179,12 +180,14 @@ export function updateUser(id: number, payload: UpdateUserPayload): Promise<Admi
   return adminCall(() => adminClient.put<unknown>(`/users/${id}`, payload), pickUserReply);
 }
 
-// PUT /api/admin/users/<id>/comp: the admin's grants of hosted servers and
-// dedicated machines (0 to 16 each, both set at once), answered with the
-// account and the sold capacity (a grant counts as sold, and may take it past
-// what the fleet sells). Lowering them below what the account runs makes the
-// service stop its newest servers first; 404 not_found for an unknown
-// account.
+// PUT /api/admin/users/<id>/comp: the admin's grants of servers on shared
+// machines and of dedicated machines (0 to 16 each, both set at once, adding
+// up), answered with the account and the sold capacity (a grant counts as
+// sold, and may take it past what the fleet sells). Lowering the servers
+// below what the account runs on shared machines stops its newest there;
+// lowering the dedicated machines moves its newest servers on them to a
+// shared machine while it has a shared server free and the fleet has room,
+// and stops the rest. 404 not_found for an unknown account.
 export function setCompGrants(id: number, grants: CompGrants): Promise<AdminResult<CompGrantsReply>> {
   return adminCall(
     () => adminClient.put<unknown>(`/users/${id}/comp`, { servers: grants.servers, own_machines: grants.own_machines }),

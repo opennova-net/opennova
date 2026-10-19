@@ -26,7 +26,15 @@ export function user(id: number, overrides: Partial<User> = {}): User {
 export function userEntry(id: number, overrides: Partial<UserListEntry> = {}): UserListEntry {
   return {
     ...user(id),
-    entitlement: { max_servers: 0, source: 'none', tier: null, comp_servers: 0 },
+    entitlement: {
+      max_servers: 0,
+      shared_servers: 0,
+      source: 'none',
+      tier: null,
+      comp_servers: 0,
+      own_machines: 0,
+      comp_own_machines: 0,
+    },
     live_servers: 0,
     subscription_status: null,
     ...overrides,
@@ -38,6 +46,7 @@ export function userDetail(id: number, overrides: Partial<UserDetail> = {}): Use
     user: user(id, { max_servers: 2 }),
     entitlement: {
       max_servers: 2,
+      shared_servers: 2,
       source: 'tier',
       tier: 2,
       comp_servers: 0,

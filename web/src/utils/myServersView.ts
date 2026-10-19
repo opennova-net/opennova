@@ -12,7 +12,8 @@ import type { MyServer } from '../types/myServers';
 //   off     - the service runs no hosted servers (or offers no game to start
 //             one of);
 //   locked  - the account's entitlement is 0 servers: hosting needs a support
-//             tier or an admin's grant (the callout to the tiers);
+//             tier, a dedicated machine or an admin's grant (the callout to
+//             the tiers);
 //   ready   - the allowance meter, with a start when one is allowed.
 // The account's servers show in every view but loading and error: a live one
 // shows whatever the entitlement or the service say (the service stops it on
@@ -33,11 +34,11 @@ export function hostingView(data: HostedServersResponse | null, failed: boolean)
 // Why no new server may start now, or null when one may:
 //   off      - the service runs no hosted servers;
 //   locked   - no entitlement;
-//   past_due - a payment of the account's (a tier's or an add-on's) is past
-//              due (the live ones keep running);
+//   past_due - a payment of the account's (a tier's or a dedicated
+//              machine's) is past due (the live ones keep running);
 //   limit    - every server the entitlement covers is live (stopping ones
-//              included);
-//   full     - every hosted server place on the service is taken.
+//              included), on shared machines and on dedicated machines alike;
+//   full     - no hosted server place the account could take is free.
 export type StartBlock = 'off' | 'locked' | 'past_due' | 'limit' | 'full';
 
 export function startBlock(data: HostedServersResponse): StartBlock | null {
@@ -45,7 +46,7 @@ export function startBlock(data: HostedServersResponse): StartBlock | null {
   const e = data.entitlement;
   if (e.max_servers === 0) return 'locked';
   if (!e.can_start) return 'past_due';
-  if (e.used >= e.max_servers) return 'limit';
+  if (sharedFree(e) === 0 && ownMachinesFree(e) === 0) return 'limit';
   if (data.full) return 'full';
   return null;
 }
@@ -55,7 +56,7 @@ export function canStartAnother(data: HostedServersResponse | null): boolean {
 }
 
 // Why a past-due account starts no server, in its owner's words: the
-// payment may be a tier's or an add-on's.
+// payment may be a tier's or a dedicated machine's.
 export const PAST_DUE_TEXT =
   "A payment of yours did not go through. Your servers keep running while Stripe retries the card; new servers can't start.";
 
@@ -66,6 +67,11 @@ const TOP_TIER = 3;
 // with an admin's grant (it buys none), nor on the biggest tier.
 export function biggerTierOffered(e: HostingEntitlement): boolean {
   return !e.granted && (e.tier ?? 0) < TOP_TIER;
+}
+
+// How many more servers the account may start on shared machines.
+export function sharedFree(e: HostingEntitlement): number {
+  return Math.max(0, e.shared_servers - e.shared_used);
 }
 
 // How many of the account's dedicated machines are free for a new server.

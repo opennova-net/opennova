@@ -16,15 +16,29 @@ export function isActiveAccount(status: string): boolean {
   return (status || 'active') === 'active';
 }
 
-// Where an account's hosted servers come from, each source it has, the one
-// that gives its servers first: "Tier 2", "Admin grant of 3", "Admin grant of
-// 11, Tier 2" (a tier still billing under a bigger grant), "Tier 2, Admin
-// grant of 2", "None".
-export function entitlementLabel(e: { source: EntitlementSource; tier: number | null; comp_servers: number }): string {
-  const grant = e.comp_servers > 0 ? `Admin grant of ${e.comp_servers}` : '';
+// Where an account's hosted servers come from, each source it has: the one
+// that gives its servers on shared machines first, then the dedicated
+// machines it pays for. "Tier 2", "Admin grant of 9 shared + 2 dedicated",
+// "Admin grant of 9 shared, Tier 2" (a tier still billing under a bigger
+// grant), "Tier 2, Admin grant of 2 shared", "Tier 2, 1 dedicated",
+// "1 dedicated", "None".
+export function entitlementLabel(e: {
+  source: EntitlementSource;
+  tier: number | null;
+  comp_servers: number;
+  comp_own_machines: number;
+  own_machines: number;
+}): string {
+  const granted = [
+    ...(e.comp_servers > 0 ? [`${e.comp_servers} shared`] : []),
+    ...(e.comp_own_machines > 0 ? [`${e.comp_own_machines} dedicated`] : []),
+  ];
+  const grant = granted.length > 0 ? `Admin grant of ${granted.join(' + ')}` : '';
   const tier = e.tier !== null ? `Tier ${e.tier}` : '';
-  const parts = (e.source === 'tier' ? [tier, grant] : [grant, tier]).filter((p) => p !== '');
-  return parts.length > 0 ? parts.join(', ') : 'None';
+  const paid = e.own_machines - e.comp_own_machines;
+  const parts = [...(e.source === 'tier' ? [tier, grant] : [grant, tier]), paid > 0 ? `${paid} dedicated` : ''];
+  const named = parts.filter((p) => p !== '');
+  return named.length > 0 ? named.join(', ') : 'None';
 }
 
 // A fleet view's owner's hosting: "Admin grant, Tier 2", "Admin grant",
@@ -34,17 +48,17 @@ export function ownerHostingLabel(owner: { tier: number | null; granted: boolean
   return parts.length > 0 ? parts.join(', ') : 'No tier';
 }
 
-// Where an entitlement's servers run, as the sold capacity counts them: a
-// dedicated machine takes one of them off the shared machines and adds none.
-// "9 on shared machines, 2 on dedicated machines", "All on shared machines",
-// "None".
-export function serverPlacesLabel(e: { max_servers: number; own_machines: number }): string {
-  if (e.max_servers <= 0) return 'None';
-  const own = Math.min(e.own_machines, e.max_servers);
-  const shared = e.max_servers - own;
-  if (own === 0) return 'All on shared machines';
-  if (shared === 0) return 'All on dedicated machines';
-  return `${shared} on shared machines, ${own} on dedicated machine${own === 1 ? '' : 's'}`;
+// Where an entitlement's servers run, as the sold capacity counts them: its
+// servers on shared machines, and one on each dedicated machine. "9 on
+// shared machines, 2 on dedicated machines", "3 on shared machines",
+// "1 on a dedicated machine", "None".
+export function serverPlacesLabel(e: { shared_servers: number; own_machines: number }): string {
+  const own = e.own_machines === 1 ? '1 on a dedicated machine' : `${e.own_machines} on dedicated machines`;
+  const places = [
+    ...(e.shared_servers > 0 ? [`${e.shared_servers} on shared machines`] : []),
+    ...(e.own_machines > 0 ? [own] : []),
+  ];
+  return places.length > 0 ? places.join(', ') : 'None';
 }
 
 // The service's sold capacity against what the fleet sells, item by item:

@@ -8,6 +8,7 @@ import {
   listingsOutrunHosted,
   liveServers,
   ownMachinesFree,
+  sharedFree,
   splitListings,
   startBlock,
 } from './myServersView';
@@ -46,6 +47,20 @@ describe('startBlock and canStartAnother', () => {
     expect(startBlock(serversResponse(three, { entitlement: { can_start: false } }))).toBe('past_due');
   });
 
+  it('reaches the limit only once both pools are full', () => {
+    // Tier 2 and a dedicated machine: both shared servers live, the machine free.
+    const shared = [hostedServer(1), hostedServer(2)];
+    const room = { max_servers: 3, shared_servers: 2, own_machines: 1 };
+    expect(startBlock(serversResponse(shared, { entitlement: room }))).toBeNull();
+    // The dedicated machine busy too.
+    const all = [...shared, hostedServer(3, { own_machine: true })];
+    expect(startBlock(serversResponse(all, { entitlement: room }))).toBe('limit');
+    // A dedicated machine alone, no tier: its one server, then the limit.
+    const alone = { max_servers: 1, shared_servers: 0, own_machines: 1, source: 'none' as const, tier: null };
+    expect(startBlock(serversResponse([], { entitlement: alone }))).toBeNull();
+    expect(startBlock(serversResponse([hostedServer(4, { own_machine: true })], { entitlement: alone }))).toBe('limit');
+  });
+
   it('offers a bigger tier only below the biggest, and never with an admin grant', () => {
     expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 2, max_servers: 2 } }).entitlement)).toBe(true);
     expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 3 } }).entitlement)).toBe(false);
@@ -54,6 +69,15 @@ describe('startBlock and canStartAnother', () => {
     expect(
       biggerTierOffered(serversResponse([], { entitlement: { tier: null, source: 'comp', granted: true } }).entitlement),
     ).toBe(false);
+  });
+
+  it('counts the free places on shared machines', () => {
+    expect(sharedFree(serversResponse([hostedServer(1)]).entitlement)).toBe(2);
+    // A stopping server still holds its place.
+    const stopping = serversResponse([hostedServer(1), hostedServer(2, { state: 'stopping' })], { entitlement: { shared_servers: 2 } });
+    expect(sharedFree(stopping.entitlement)).toBe(0);
+    // Past the allowance (a lowered tier, its stops pending): none, never fewer.
+    expect(sharedFree(serversResponse([], { entitlement: { shared_servers: 1, shared_used: 3 } }).entitlement)).toBe(0);
   });
 
   it('counts the free dedicated machines', () => {

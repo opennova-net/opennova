@@ -40,7 +40,6 @@ export type BillingErrorCode =
   | 'invalid_field'
   | 'not_eligible'
   | 'already_subscribed'
-  | 'own_machine_limit'
   | 'address_limit'
   | 'payment_past_due'
   | 'sold_out'
@@ -75,7 +74,6 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<BillingErrorCode>([
   'invalid_field',
   'not_eligible',
   'already_subscribed',
-  'own_machine_limit',
   'address_limit',
   'payment_past_due',
   'sold_out',
@@ -107,11 +105,9 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
     case 'invalid_field':
       return 'The server could not read the request. Reload the page and try again.';
     case 'not_eligible':
-      return 'Your account cannot buy that right now: a dedicated machine needs a support tier first, an account with an admin grant buys no tier or add-on, and an account that is not active cannot subscribe.';
+      return 'Your account cannot buy that right now: an account with an admin grant buys no tier, dedicated machine or static address, and an account that is not active cannot subscribe.';
     case 'already_subscribed':
       return 'You already have a support tier. Change it in the billing portal.';
-    case 'own_machine_limit':
-      return 'You already have a dedicated machine for every server your support tier covers. A higher tier makes room for more.';
     case 'address_limit':
       return 'You already have a static address for every dedicated machine. Add a dedicated machine first to add another address.';
     case 'payment_past_due':
@@ -221,12 +217,13 @@ function parseSubscription(value: unknown): TierSubscription | null | undefined 
   };
 }
 
-function parseOwnMachineSubscription(value: unknown): OwnMachineSubscription | null | undefined {
-  if (value === null || value === undefined) return null;
-  const v = value as Record<string, unknown>;
-  if (typeof v !== 'object' || !isCount(v.quantity) || typeof v.status !== 'string') return undefined;
-  if (!isTime(v.current_period_end) || typeof v.cancel_at_period_end !== 'boolean') return undefined;
+function parseOwnMachineSubscription(value: unknown): OwnMachineSubscription | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null) return null;
+  if (typeof v.stripe_subscription_id !== 'string' || !isCount(v.quantity) || typeof v.status !== 'string') return null;
+  if (!isTime(v.current_period_end) || typeof v.cancel_at_period_end !== 'boolean') return null;
   return {
+    stripe_subscription_id: v.stripe_subscription_id,
     quantity: v.quantity,
     status: v.status,
     current_period_end: v.current_period_end,
@@ -255,18 +252,22 @@ export function parseMyBilling(value: unknown): MyBilling | null {
   const { enabled, max_servers: max, comp_servers: comp, comp_own_machines: compOwn, own_machines: own, used, stopping } = v;
   if (typeof enabled !== 'boolean' || !isCount(max) || !isCount(comp) || !isCount(own) || !isCount(used)) return null;
   if (!isCount(stopping) || !isCount(compOwn) || !isCount(v.comp_addresses) || typeof v.granted !== 'boolean') return null;
+  const { shared_servers: shared, shared_used: sharedUsed, shared_stopping: sharedStopping } = v;
+  if (!isCount(shared) || !isCount(sharedUsed) || !isCount(sharedStopping)) return null;
   if (typeof v.can_start !== 'boolean' || typeof v.can_manage !== 'boolean' || typeof v.can_subscribe !== 'boolean') {
     return null;
   }
   const subscription = parseSubscription(v.subscription);
-  const ownMachine = parseOwnMachineSubscription(v.own_machine_subscription);
-  if (subscription === undefined || ownMachine === undefined) return null;
+  if (subscription === undefined || !Array.isArray(v.own_machine_subscriptions)) return null;
+  const ownMachines = v.own_machine_subscriptions.map(parseOwnMachineSubscription);
+  if (ownMachines.some((s) => s === null)) return null;
   if (!isCount(v.static_addresses) || !Array.isArray(v.address_subscriptions)) return null;
   const addresses = v.address_subscriptions.map(parseAddressSubscription);
   if (addresses.some((a) => a === null)) return null;
   return {
     enabled,
     max_servers: max,
+    shared_servers: shared,
     comp_servers: comp,
     comp_own_machines: compOwn,
     comp_addresses: v.comp_addresses,
@@ -274,9 +275,11 @@ export function parseMyBilling(value: unknown): MyBilling | null {
     own_machines: own,
     used,
     stopping,
+    shared_used: sharedUsed,
+    shared_stopping: sharedStopping,
     can_start: v.can_start,
     subscription,
-    own_machine_subscription: ownMachine,
+    own_machine_subscriptions: ownMachines as OwnMachineSubscription[],
     static_addresses: v.static_addresses,
     address_subscriptions: addresses as AddressSubscription[],
     can_manage: v.can_manage,
@@ -321,12 +324,13 @@ export function syncMyBilling(): Promise<BillingResult<MyBilling>> {
 }
 
 // POST /api/billing/checkout: a Stripe Checkout session for `item`; its URL.
-// 409 already_subscribed while a tier is live (change it in the portal), 409
-// own_machine_limit for the add-on once every server the account may run has
-// a dedicated machine, 409 address_limit for a static address once every
-// dedicated machine has one, 403 payment_past_due for a static address while
-// a payment is past due, 409 sold_out when the fleet has sold all it holds of
-// what the item adds, 409 checkout_in_progress while another checkout of the
+// A dedicated machine needs no tier. 403 not_eligible for an account that is
+// not active or has an admin grant, 409 already_subscribed while a tier is
+// live (change it in the portal), 409 address_limit for a static address once
+// every dedicated machine has one, 403 payment_past_due for a dedicated
+// machine or a static address while a payment is past due, 409 sold_out when
+// the fleet has sold all it holds of what the item adds (the only cap on
+// dedicated machines), 409 checkout_in_progress while another checkout of the
 // account is starting.
 export function startCheckout(item: BillingItem): Promise<BillingResult<string>> {
   return call(() => apiClient.post<unknown>('/billing/checkout', { item }), pickUrl);

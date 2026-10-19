@@ -217,7 +217,7 @@ export function stoppedBecauseText(b: StoppedBecause): string {
     case 'update':
       return 'It was restarted onto newer game data.';
     case 'limits':
-      return 'Your hosting limit no longer covers it (your support tier or admin grant ended or changed), so it was stopped.';
+      return 'Your hosting limit no longer covers it (your support tier, dedicated machine or admin grant ended or changed), so it was stopped.';
     case 'no_data':
       return 'Its game data is no longer offered, so it could not run.';
     case 'data_unavailable':

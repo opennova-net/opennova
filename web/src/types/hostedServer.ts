@@ -251,30 +251,37 @@ export interface HostedServer {
   events?: HostedEvent[];
 }
 
-// Where an account's hosting entitlement comes from: nothing, its support
-// tier, or an admin's comp grant.
+// Where an account's servers on shared machines come from: nothing, its
+// support tier, or an admin's comp grant.
 export type EntitlementSource = 'none' | 'tier' | 'comp';
 
-// The account's hosting entitlement, as GET /api/me/servers counts it.
+// The account's hosting entitlement, as GET /api/me/servers counts it: its
+// servers on shared machines (its tier's or an admin's grant, the larger) and
+// its dedicated machines, one more server each.
 export interface HostingEntitlement {
-  // How many hosted servers the account may have live at once; 0 locks
-  // hosting.
+  // How many hosted servers the account may have live at once, the two
+  // together; 0 locks hosting.
   max_servers: number;
   // How many it has live now, stopping ones included (a stopping server holds
   // its place until it has stopped).
   used: number;
-  // The dedicated machines it holds, and how many of its live servers run on
-  // one.
+  // The servers it may run on shared machines, and how many of its live
+  // servers run on one.
+  shared_servers: number;
+  shared_used: number;
+  // The dedicated machines it holds (no tier needed), and how many of its
+  // live servers run on one.
   own_machines: number;
   own_used: number;
   // Whether a new server may start: false while a payment of the account's (a
-  // tier's or an add-on's) is past due (the live ones keep running).
+  // tier's or a dedicated machine's) is past due (the live ones keep running).
   can_start: boolean;
+  // Where the servers on shared machines come from.
   source: EntitlementSource;
   // Its granting support tier, null for none.
   tier: TierNumber | null;
-  // An admin grants the account hosting: it buys no support tier or add-on,
-  // so the pages offer none.
+  // An admin grants the account hosting: it buys no support tier, dedicated
+  // machine or static address, so the pages offer none.
   granted: boolean;
 }
 
@@ -283,8 +290,10 @@ export interface HostedServersResponse {
   // The service runs hosted servers (it has a fleet and offers at least one
   // data set).
   enabled: boolean;
-  // Every hosted server place on the service is taken: a start now would be
-  // refused (at_capacity).
+  // No hosted server place the account could take is free: the service's cap
+  // is reached, or no pool the account has a free place in (shared machines,
+  // dedicated machines) has room in the fleet. A start now would be refused
+  // (at_capacity).
   full: boolean;
   entitlement: HostingEntitlement;
   // The data sets a start may pick, in the service's order (the first is a
