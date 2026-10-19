@@ -386,8 +386,10 @@ if(BUILD_NOVAWORLD_HTTP)
         opennova_novaworld_service)
     target_include_directories(opennova_novaworld_web_http_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(opennova_novaworld_web_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    # A row per part (80-88 s as one row), each over a fixture of its own (the test's main).
     opennova_add_pg_test(opennova_novaworld_web_http_routes REDIS
-        COMMAND opennova_novaworld_web_http_routes_test)
+        COMMAND opennova_novaworld_web_http_routes_test
+        PARTS accounts login_brake retail_brakes titles lobby owner_push hosted billing retail_pages)
 
     # The static addresses (apps/novaworld_common/hosted/address_*.h): the name rules, the
     # file and Route 53 zones, the EC2 and docker address drivers' calls on stub runners;
@@ -406,7 +408,7 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(hosted_address COMMAND hosted_address_test)
     # The concurrent case gives each request up to 30 s; this bounds a hang
     # below ctest's 1500 s default.
-    set_tests_properties(opennova_novaworld_web_http_routes PROPERTIES TIMEOUT 120)
+    set_tests_properties(${opennova_novaworld_web_http_routes_rows} PROPERTIES TIMEOUT 120)
 
     # The admin's background jobs routes (apps/novaworld_web/jobs/job_routes.h over
     # job_admin.h) on the in-process Crow listener over a migrated database and a Redis
@@ -647,10 +649,13 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(hosted_agent_route_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(hosted_agent_route_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_dependencies(hosted_agent_route_test opennova_hostd)
+    # Two rows: the routes' cases, and the agent's run end to end (about 50 s of the agent's own
+    # sync cadence, its steps in one sequence on one agent).
     opennova_add_pg_test(hosted_agent_route
         COMMAND hosted_agent_route_test $<TARGET_FILE:hosted_agent_route_test>
-            $<TARGET_FILE:opennova_hostd>)
-    set_tests_properties(hosted_agent_route PROPERTIES TIMEOUT 180)
+            $<TARGET_FILE:opennova_hostd>
+        PARTS routes agent_end_to_end)
+    set_tests_properties(${hosted_agent_route_rows} PROPERTIES TIMEOUT 180)
 
     # The support tiers end to end against Stripe's TEST mode: an in-process service (the
     # same nw_service_harness.h) with billing over the real curl transport; a Checkout

@@ -47,6 +47,7 @@
 #include "common/temp_dir.h"
 #include "common/test_database.h"
 #include "common/test_expect.h"
+#include "common/test_parts.h"
 
 #include <atomic>
 #include <chrono>
@@ -944,6 +945,9 @@ int fake_serve_main(int argc, char **argv) {
 
 } // namespace
 
+// The run's scratch directory (main's TempDir), for the agent's part.
+std::string g_scratch;
+
 int main(int argc, char **argv) {
 	if (argc > 1 && std::strcmp(argv[1], "--resource-dir") == 0)
 		return fake_serve_main(argc, argv);
@@ -962,24 +966,14 @@ int main(int argc, char **argv) {
 	setenv(kPlantedSecret, "hunter2", 1);
 #endif
 	test_temp::TempDir temp("hosted_agent_route");
-	const std::string scratch = temp.root();
-	struct Case {
-		const char *name;
-		int (*fn)(const std::string &);
-	};
-	const Case cases[] = {
-		{ "bootstrap", [](const std::string &) { return test_bootstrap(); } },
-		{ "sync", [](const std::string &) { return test_sync(); } },
-		{ "networks", [](const std::string &) { return test_networks(); } },
-		{ "agent_end_to_end", test_agent_end_to_end },
-	};
-	for (const Case &c : cases) {
-		std::printf("-- %s\n", c.name);
-		if (c.fn(scratch) != 0) {
-			std::fprintf(stderr, "FAIL: %s\n", c.name);
-			return 1;
-		}
-	}
+	g_scratch = temp.root();
+	// A row per part (tests/common/test_parts.h; service_tests.cmake lists them): the routes'
+	// cases, each on databases of its own, and the agent's run end to end, one opennova-hostd
+	// taken through its steps (each a sync away, 5 s while idle, its own cadence).
+	const int failures = test_parts::run(argc, argv,
+			{ { "routes", { test_bootstrap, test_sync, test_networks } },
+					{ "agent_end_to_end", { [] { return test_agent_end_to_end(g_scratch); } } } });
+	if (failures != 0) return 1;
 	std::printf("OK: hosted agent routes\n");
 	return 0;
 }

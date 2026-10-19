@@ -413,7 +413,7 @@ files (a FIFO, a link, a directory and a sparse oversize file among them, none o
 blocks or reads), never logging the secret, the token or a file's bytes).
 
 The protocol itself is `hosted_agent_protocol` (`tests/novaworld`). The real binary runs
-end to end, with the process runtime, in `hosted_agent_route` (against the service's agent
+end to end, with the process runtime, in `hosted_agent_route_agent_end_to_end` (against the service's agent
 routes, a stand-in `opennova-serve`) and `hosted_local_e2e` (under the service's supervisor,
 real servers), and in the local stack's smoke test (`scripts/dev_stack.sh smoke`), its
 machines containers of the hostd image.

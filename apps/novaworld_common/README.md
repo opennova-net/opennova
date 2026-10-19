@@ -1310,8 +1310,8 @@ server `-DOPENNOVA_TEST_REDIS=<url>` names, each in a key namespace of its own
 server` (or `a Redis server`) and exits 77, which `--suite core` counts as a failure.
 `scripts/dev_postgres.sh up` and `scripts/dev_redis.sh up` print the values for local
 servers, and the Linux CI jobs run both beside the build. The route harness,
-`opennova_novaworld_web_http_routes` (`tests/novaworld/http_routes_test.cpp`), drives the
-Crow listener in process on port 0; the six binaries also run whole as child processes
+`opennova_novaworld_web_http_routes_*` (`tests/novaworld/http_routes_test.cpp`, a row per part),
+drives the Crow listener in process on port 0; the six binaries also run whole as child processes
 (`opennova_novaworld_programs`, `opennova_novaworld_signal_shutdown`, `nw_programs_e2e`),
 and the local stack's smoke test runs the deployed shape (`scripts/dev_stack.sh smoke`,
 CI's `local-stack.yml`).

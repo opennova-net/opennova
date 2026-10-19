@@ -4,9 +4,10 @@
 // Crow HttpListener from opennova_novaworld_web_core on port 0 (the OS
 // picks; the harness reads the port back from bound_port()), and requests sent
 // through apps/common's http_exchange to 127.0.0.1. Built only
-// with BUILD_NOVAWORLD_HTTP. The cases share one listener and run in order
-// (the admin users case reads the account the register case made; the
-// concurrent case runs last, since it adds accounts and a host). The listener
+// with BUILD_NOVAWORLD_HTTP. The cases run in parts, a ctest row each over a
+// fixture of its own (main), and a part's cases share its listener and run in
+// order (the admin users case reads the account the register case made; the
+// concurrent case runs last in its part, since it adds accounts and a host). The listener
 // trusts 127.0.0.1 as its proxy and answers /api/ to it alone
 // (ONNET_API_PROXY_ONLY), so the website-session cases each name their own
 // client address in X-Real-IP and keep their own rate-limit buckets; a second
@@ -86,6 +87,7 @@
 #include "common/temp_dir.h"
 #include "common/test_database.h"
 #include "common/test_expect.h"
+#include "common/test_parts.h"
 #include "common/test_redis.h"
 
 #include <algorithm>
@@ -8222,86 +8224,88 @@ int test_password_reset_brakes(Harness &h) {
 	return 0;
 }
 
-int run(Harness &h) {
-	struct Case { const char *name; int (*fn)(Harness &); };
+// The cases of one part, in order (main's parts: each a run of its own over a fixture of its own).
+int run(Harness &h, const char *part) {
+	struct Case { const char *part; const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
-		{ "health", test_health },
-		{ "lobbies_lists_seeded_games", test_lobbies_lists_seeded_games },
-		{ "register_ok", test_register_ok },
-		{ "register_duplicate", test_register_duplicate },
-		{ "admin_server_status_requires_token", test_admin_server_status_requires_token },
-		{ "admin_users_list", test_admin_users_list },
-		{ "login_sets_session_cookie", test_login_sets_session_cookie },
-		{ "cookie_secure_flag", test_cookie_secure_flag },
-		{ "login_failures_are_generic", test_login_failures_are_generic },
-		{ "login_refuses_inactive_accounts", test_login_refuses_inactive_accounts },
-		{ "me_requires_live_session", test_me_requires_live_session },
-		{ "session_slides", test_session_slides },
-		{ "logout_invalidates", test_logout_invalidates },
-		{ "admin_routes_by_credential", test_admin_routes_by_credential },
-		{ "admin_routes_table", test_admin_routes_table },
-		{ "bootstrap_admin", test_bootstrap_admin },
-		{ "csrf_before_buckets", test_csrf_before_buckets },
-		{ "login_brake", test_login_brake },
-		{ "register_brake", test_register_brake },
-		{ "password_reset", test_password_reset },
-		{ "password_reset_links", test_password_reset_links },
-		{ "password_reset_brakes", test_password_reset_brakes },
-		{ "nwlogin_brake", test_nwlogin_brake },
-		{ "known_addresses", test_known_addresses },
-		{ "retail_pin_revocation", test_retail_pin_revocation },
-		{ "untrusted_proxy_header_ignored", test_untrusted_proxy_header_ignored },
-		{ "nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey },
-		{ "nwhost_records_owner", test_nwhost_records_owner },
-		{ "listed_server_owners", test_listed_server_owners },
-		{ "joiner_routes_admin_only", test_joiner_routes_admin_only },
-		{ "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
-		{ "lobby_per_title", test_lobby_per_title },
-		{ "gsb_rosters", test_gsb_rosters },
-		{ "dfx2_client_path", test_dfx2_client_path },
-		{ "cd_key_routes", test_cd_key_routes },
-		{ "dfx2_activation", test_dfx2_activation },
-		{ "unknown_path_404", test_unknown_path_404 },
-		{ "server_info", test_server_info },
-		{ "healthz", test_healthz },
-		{ "admin_host_push", test_admin_host_push },
-		{ "owner_host_push", test_owner_host_push },
-		{ "admin_sessions", test_admin_sessions },
-		{ "admin_end_session", test_admin_end_session },
-		{ "admin_lobbies", test_admin_lobbies },
-		{ "hosted_server_routes", test_hosted_server_routes },
-		{ "hosted_listing_owner", test_hosted_listing_owner },
-		{ "hosted_console_routes", test_hosted_console_routes },
-		{ "admin_fleet_routes", test_admin_fleet_routes },
-		{ "hosted_stats_routes", test_hosted_stats_routes },
-		{ "hosted_usage_route", test_hosted_usage_route },
-		{ "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
-		{ "billing_routes", test_billing_routes },
-		{ "billing_checkout_guard", test_billing_checkout_guard },
-		{ "billing_capacity", test_billing_capacity },
-		{ "address_routes", test_address_routes },
-		{ "billing_webhook", test_billing_webhook },
-		{ "billing_admin", test_billing_admin },
-		{ "admin_user_detail", test_admin_user_detail },
-		{ "host_text_utf8", test_host_text_utf8 },
-		{ "name_and_value_rules", test_name_and_value_rules },
-		{ "template_names_refused", test_template_names_refused },
-		{ "retail_templates_render", test_retail_templates_render },
-		{ "catch_all_stays_in_root", test_catch_all_stays_in_root },
-		{ "header_values_cannot_split", test_header_values_cannot_split },
-		{ "reset_during_login", test_reset_during_login },
-		{ "join_identity", test_join_identity },
-		{ "api_proxy_only", test_api_proxy_only },
-		{ "retail_proxy_names_client", test_retail_proxy_names_client },
-		{ "template_values_escaped", test_template_values_escaped },
-		{ "register_handle_rule", test_register_handle_rule },
-		{ "login_row_kept_alive", test_login_row_kept_alive },
-		{ "host_tag_serves_once", test_host_tag_serves_once },
-		{ "db_failure_reply_carries_code_alone", test_db_failure_reply_carries_code_alone },
-		{ "public_reads_fail_as_500", test_public_reads_fail_as_500 },
-		{ "concurrent_requests", test_concurrent_requests },
+		{ "accounts", "health", test_health },
+		{ "accounts", "lobbies_lists_seeded_games", test_lobbies_lists_seeded_games },
+		{ "accounts", "register_ok", test_register_ok },
+		{ "accounts", "register_duplicate", test_register_duplicate },
+		{ "accounts", "admin_server_status_requires_token", test_admin_server_status_requires_token },
+		{ "accounts", "admin_users_list", test_admin_users_list },
+		{ "accounts", "login_sets_session_cookie", test_login_sets_session_cookie },
+		{ "accounts", "cookie_secure_flag", test_cookie_secure_flag },
+		{ "accounts", "login_failures_are_generic", test_login_failures_are_generic },
+		{ "accounts", "login_refuses_inactive_accounts", test_login_refuses_inactive_accounts },
+		{ "accounts", "me_requires_live_session", test_me_requires_live_session },
+		{ "accounts", "session_slides", test_session_slides },
+		{ "accounts", "logout_invalidates", test_logout_invalidates },
+		{ "accounts", "admin_routes_by_credential", test_admin_routes_by_credential },
+		{ "accounts", "admin_routes_table", test_admin_routes_table },
+		{ "lobby", "bootstrap_admin", test_bootstrap_admin },
+		{ "accounts", "csrf_before_buckets", test_csrf_before_buckets },
+		{ "login_brake", "login_brake", test_login_brake },
+		{ "accounts", "register_brake", test_register_brake },
+		{ "accounts", "password_reset", test_password_reset },
+		{ "accounts", "password_reset_links", test_password_reset_links },
+		{ "accounts", "password_reset_brakes", test_password_reset_brakes },
+		{ "retail_brakes", "nwlogin_brake", test_nwlogin_brake },
+		{ "retail_brakes", "known_addresses", test_known_addresses },
+		{ "retail_brakes", "retail_pin_revocation", test_retail_pin_revocation },
+		{ "retail_brakes", "untrusted_proxy_header_ignored", test_untrusted_proxy_header_ignored },
+		{ "titles", "nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey },
+		{ "titles", "nwhost_records_owner", test_nwhost_records_owner },
+		{ "titles", "listed_server_owners", test_listed_server_owners },
+		{ "titles", "joiner_routes_admin_only", test_joiner_routes_admin_only },
+		{ "titles", "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
+		{ "titles", "lobby_per_title", test_lobby_per_title },
+		{ "titles", "gsb_rosters", test_gsb_rosters },
+		{ "titles", "dfx2_client_path", test_dfx2_client_path },
+		{ "titles", "cd_key_routes", test_cd_key_routes },
+		{ "titles", "dfx2_activation", test_dfx2_activation },
+		{ "titles", "unknown_path_404", test_unknown_path_404 },
+		{ "titles", "server_info", test_server_info },
+		{ "titles", "healthz", test_healthz },
+		{ "lobby", "admin_host_push", test_admin_host_push },
+		{ "owner_push", "owner_host_push", test_owner_host_push },
+		{ "lobby", "admin_sessions", test_admin_sessions },
+		{ "lobby", "admin_end_session", test_admin_end_session },
+		{ "lobby", "admin_lobbies", test_admin_lobbies },
+		{ "hosted", "hosted_server_routes", test_hosted_server_routes },
+		{ "hosted", "hosted_listing_owner", test_hosted_listing_owner },
+		{ "hosted", "hosted_console_routes", test_hosted_console_routes },
+		{ "hosted", "admin_fleet_routes", test_admin_fleet_routes },
+		{ "hosted", "hosted_stats_routes", test_hosted_stats_routes },
+		{ "hosted", "hosted_usage_route", test_hosted_usage_route },
+		{ "hosted", "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
+		{ "billing", "billing_routes", test_billing_routes },
+		{ "billing", "billing_checkout_guard", test_billing_checkout_guard },
+		{ "billing", "billing_capacity", test_billing_capacity },
+		{ "billing", "address_routes", test_address_routes },
+		{ "billing", "billing_webhook", test_billing_webhook },
+		{ "billing", "billing_admin", test_billing_admin },
+		{ "billing", "admin_user_detail", test_admin_user_detail },
+		{ "lobby", "host_text_utf8", test_host_text_utf8 },
+		{ "retail_pages", "name_and_value_rules", test_name_and_value_rules },
+		{ "retail_pages", "template_names_refused", test_template_names_refused },
+		{ "retail_pages", "retail_templates_render", test_retail_templates_render },
+		{ "retail_pages", "catch_all_stays_in_root", test_catch_all_stays_in_root },
+		{ "retail_pages", "header_values_cannot_split", test_header_values_cannot_split },
+		{ "retail_pages", "reset_during_login", test_reset_during_login },
+		{ "retail_pages", "join_identity", test_join_identity },
+		{ "retail_pages", "api_proxy_only", test_api_proxy_only },
+		{ "retail_pages", "retail_proxy_names_client", test_retail_proxy_names_client },
+		{ "retail_pages", "template_values_escaped", test_template_values_escaped },
+		{ "retail_pages", "register_handle_rule", test_register_handle_rule },
+		{ "retail_pages", "login_row_kept_alive", test_login_row_kept_alive },
+		{ "retail_pages", "host_tag_serves_once", test_host_tag_serves_once },
+		{ "retail_pages", "db_failure_reply_carries_code_alone", test_db_failure_reply_carries_code_alone },
+		{ "retail_pages", "public_reads_fail_as_500", test_public_reads_fail_as_500 },
+		{ "retail_pages", "concurrent_requests", test_concurrent_requests },
 	};
 	for (const Case &c : cases) {
+		if (std::string(c.part) != part) continue;
 		std::printf("-- %s\n", c.name);
 		if (c.fn(h) != 0) {
 			std::fprintf(stderr, "FAIL: %s\n", c.name);
@@ -8313,10 +8317,11 @@ int run(Harness &h) {
 
 } // namespace
 
-int main(int argc, char **argv) {
-	test_db::init(argc, argv);
-	test_redis::init(argc, argv);
-	TEST_EXPECT(net::startup() == 0);
+namespace {
+
+// The fixture (the database, the three listeners, the NW UDP listener, the drains, the fake Stripe,
+// the retail roots) built for one part's cases, which run over it in order, then taken down.
+int with_harness(const char *part) {
 	int rc = 1;
 	{
 		const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
@@ -8553,7 +8558,7 @@ int main(int argc, char **argv) {
 		harness.jo_tree = jo_tree;
 		harness.jox_tree = jox_tree;
 		harness.dfx2_tree = dfx2_tree;
-		rc = run(harness);
+		rc = run(harness, part);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener.
 		fresh_http.stop();
@@ -8565,7 +8570,30 @@ int main(int argc, char **argv) {
 		links.stop_all();
 		nw_udp.stop();
 	}
+	return rc;
+}
+
+} // namespace
+
+// A row per part (tests/common/test_parts.h; service_tests.cmake lists them), each over a fixture
+// of its own: a part's cases share what its earlier cases left (the accounts the register case made,
+// the maintenance the status case turned on, the admin bootstrap_admin made), and no part's cases
+// read another's. With no selection every part runs in turn.
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
+	test_redis::init(argc, argv);
+	TEST_EXPECT(net::startup() == 0);
+	const int rc = test_parts::run(argc, argv,
+	        {{"accounts", {[] { return with_harness("accounts"); }}},
+	         {"login_brake", {[] { return with_harness("login_brake"); }}},
+	         {"retail_brakes", {[] { return with_harness("retail_brakes"); }}},
+	         {"titles", {[] { return with_harness("titles"); }}},
+	         {"lobby", {[] { return with_harness("lobby"); }}},
+	         {"owner_push", {[] { return with_harness("owner_push"); }}},
+	         {"hosted", {[] { return with_harness("hosted"); }}},
+	         {"billing", {[] { return with_harness("billing"); }}},
+	         {"retail_pages", {[] { return with_harness("retail_pages"); }}}});
 	net::shutdown();
 	if (rc == 0) std::printf("OK: http routes\n");
-	return rc;
+	return rc == 0 ? 0 : 1;
 }
