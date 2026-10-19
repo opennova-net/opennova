@@ -109,7 +109,7 @@ opennova_add_editor_test(blank_writers)
 # by the runtime's terrain field and frame compiler, the import rerun-stable, the blank environment
 # and a mission made on the terrain; the surface map read, written and sampled by the runtime (its
 # _retail entry reads a shipped char map as the importer does).
-opennova_add_editor_test(terrain_import MIXED BAKES)
+opennova_add_editor_test(terrain_import BAKES)
 
 opennova_add_editor_test(create_missing)
 
@@ -135,7 +135,7 @@ opennova_add_editor_test(session SOURCES editor_session_test.cpp)
 # split pinned over the fixtures; every finding composed carries a finding code's row (S13 A6).
 # Retail leg (OPENNOVA_JO_DIR): the install's files a document type opens validated, every
 # finding composed a row's, then an edit of one validating it alone.
-opennova_add_editor_test(project_validation MIXED)
+opennova_add_editor_test(project_validation)
 
 # Long operations everywhere (S13 A3): the walks stepped by bytes (the scan, the import pass, a
 # scan's targeted update), the validation a file at a time and a rename's commit a file at a time,
@@ -145,7 +145,7 @@ opennova_add_editor_test(project_validation MIXED)
 # Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a step at a time at the
 # editor's budget, its polls and wall time, and the install as the base layer under an expansion
 # project's graph, a row of its own.
-opennova_add_editor_test(long_operations MIXED RETAIL_PARTS main install_open)
+opennova_add_editor_test(long_operations)
 
 # The document types' project checks (S13 V9): a type's own check across the project's files,
 # made by its registry row (the menu type's render check) and kept by whoever validates; a
@@ -192,14 +192,14 @@ opennova_add_editor_test(non_record_document)
 # fallback name, Rename everywhere through a span, a Go to's RevealText; the wire's span edits and
 # pages of lines; the credits, music script and shader codecs byte for byte; and the install's
 # scripts, music scripts, credits and shaders (OPENNOVA_JO_DIR) as the retail leg.
-opennova_add_editor_test(text_document MIXED)
+opennova_add_editor_test(text_document)
 
 # The environment document (the deep-integration plan's DI-19a): a .env through the engine's own
 # reader and writer, its fields in the file's units and the game's rules, its keyframes, its source
 # findings, its references through the graph, the missions that run on it (the environment_uses
 # query); the retail leg (OPENNOVA_JO_DIR) reads every .env of the install through the document and
 # writes it again, field for field.
-opennova_add_editor_test(environment_document MIXED)
+opennova_add_editor_test(environment_document)
 
 # The terrain document (the deep-integration plan's DI-30): a .trn through the engine's own reader and
 # writer, its keys in the file's units and the game's rules, its grid rows and foliage definitions, its
@@ -207,7 +207,7 @@ opennova_add_editor_test(environment_document MIXED)
 # the graph, the missions that run on it and the import that makes it (the terrain_uses query), an import's
 # terrain refused every edit (document.imported); the retail leg (OPENNOVA_JO_DIR) reads every .trn of the
 # install through the document and writes it again, field for field.
-opennova_add_editor_test(terrain_document MIXED BAKES)
+opennova_add_editor_test(terrain_document BAKES)
 
 opennova_add_editor_test(unsaved_guard)
 
@@ -249,7 +249,7 @@ opennova_add_editor_test(add_it_there)
 # removed, the camouflage items as references, the game's words for a missing one, a rename writing the type id
 # back, the unread sections and the type's other findings; --retail: the install's charattr.def (base and each
 # expansion) through the document byte for byte.
-opennova_add_editor_test(charattr MIXED SOURCES charattr_document_test.cpp)
+opennova_add_editor_test(charattr SOURCES charattr_document_test.cpp)
 
 opennova_add_editor_test(def_references)
 
@@ -284,7 +284,7 @@ endif()
 # the per-file slots an update patches (an incremental update equals a fresh build, S13 D3),
 # the base layer, and the rename transaction; its retail legs over the JO install, the incremental
 # leg's six fresh-graph comparisons split over three rows of their own (166 s in one row).
-opennova_add_editor_test(asset_graph MIXED RETAIL_PARTS main incremental_1 incremental_2 incremental_3)
+opennova_add_editor_test(asset_graph)
 
 # A document's reference queries (S13 D3, graph/reference_queries): the badge, the missing
 # finding, the picker, where Go to leads, and find_definition over the graph's slot or the
@@ -313,14 +313,14 @@ opennova_add_editor_test(symbol_rename)
 # using it); the retail leg (OPENNOVA_JO_DIR) a sample of the install's textures of each extension.
 opennova_add_editor_test(effect_viewport)
 
-opennova_add_editor_test(texture_document MIXED)
+opennova_add_editor_test(texture_document)
 
 # ADR 0046 S18, the texture roles: the catalog (documents/texture_roles: every way the game uses a
 # texture, its loader, formats, size rule and witness) and the loaders' name rules and transforms
 # (documents/texture_load_rules), against vectors worked by hand; the texture_roles query; the graph
 # resolving each texture reference by its loader, a terrain's colour map and blend map refusing a
 # build; the retail leg (OPENNOVA_JO_DIR) the install's texture references by role, none refusing one.
-opennova_add_editor_test(texture_roles MIXED)
+opennova_add_editor_test(texture_roles)
 
 # ADR 0046 S18, the texture thumbnails (preview/texture_thumbnails): a texture as a small picture, the
 # PNG writer, the session's cache made by its poll, the texture_thumbnail query and a texture field's
@@ -336,14 +336,14 @@ opennova_add_editor_test(texture_uses)
 # ADR 0046 S18, the texture checks: a texture file's own findings from its header and its uses' (the
 # texture use check, graph/texture_checks) over a minted project, which refuse a build; the retail leg
 # (OPENNOVA_JO_DIR) every shipped texture's own findings and every terrain's colour map, none refusing one.
-opennova_add_editor_test(texture_checks MIXED)
+opennova_add_editor_test(texture_checks)
 
 # ADR 0046 S18, the texture budget (documents/texture_budget over renderer/device_texture): what a model
 # row's texture costs the game at each object texture detail and as its .dds; over a minted project the
 # texture_uses query's budgets, texture.memory and texture.normal_slot_loader with its fix, the
 # texture_budget query (the project's textures and their totals); the retail leg (OPENNOVA_JO_DIR) every
 # shipped model's texture rows costed, none past the warning.
-opennova_add_editor_test(texture_budget MIXED)
+opennova_add_editor_test(texture_budget)
 
 # ADR 0046 S18, a texture as the game draws it: the chain the game builds, the object texture detail's halvings,
 # a normal map lit, a model row's alpha by its technique; through a session the texture viewport's level, detail,
@@ -377,7 +377,7 @@ opennova_add_editor_test(line_ends)
 # the build it refuses;
 # the retail leg every file JO:CA reads through the text reader (charattr.def, the menus' DATASOURCEs), none past
 # its pool.
-opennova_add_editor_test(config_overrun MIXED)
+opennova_add_editor_test(config_overrun)
 
 opennova_add_editor_test(texture_document_edit)
 
@@ -406,7 +406,7 @@ opennova_add_editor_test(disk_changes)
 # reads at each site; a flipbook's frame refused; a file in the SCR form written back as plain text. The
 # retail leg (OPENNOVA_JO_DIR): every name the install's native texts write found as its one token, the
 # names dealt over four rows (132 s in one row).
-opennova_add_editor_test(native_rename MIXED RETAIL_PARTS main share_2 share_3 share_4)
+opennova_add_editor_test(native_rename)
 
 opennova_add_editor_test(document_contract SOURCES editor_document_contract_test.cpp)
 
@@ -426,7 +426,7 @@ opennova_add_editor_test(project_asset_source)
 # point's move an Update over the scene that stands, the menu read again everything), the model's
 # scene held until the gesture's end, the menu's caret on the preview clock; its retail leg a
 # shipped screen's edit box blinking its caret on the clock (OPENNOVA_JO_DIR).
-opennova_add_editor_test(viewport MIXED)
+opennova_add_editor_test(viewport)
 
 # The script device's portable half (S13 V10, editor/preview/script_viewport, shown_text,
 # text_burst): ViewportKind::Script in the kinds' table, the Main role of every text type; the span
@@ -437,7 +437,7 @@ opennova_add_editor_test(viewport MIXED)
 # undo step, the follow's actions, a Go to's span selected, a document held read only and the busy
 # gate, the envelope and a SetViewport; and the install's scripts (OPENNOVA_JO_DIR) as the retail
 # leg: their highlights tokens of their lines, their shown text's lines the documents'.
-opennova_add_editor_test(script_viewport MIXED)
+opennova_add_editor_test(script_viewport)
 
 # Edits in a viewport over the wire (S13 V7: edit_in_viewport through a session's JSON requests): its
 # refusals, a drag one batch over the selection, a command one request; the wire's gestures (a
@@ -471,9 +471,9 @@ opennova_add_editor_test(mission_scene)
 # terrain with a char map (class, footstep slots, effects row, a placed tile, the water). Mixed: the
 # retail row opens every shipped mission (OPENNOVA_JO_DIR) in its viewport, hits its marks and moves
 # its first item and back.
-opennova_add_editor_test(mission_viewport MIXED)
+opennova_add_editor_test(mission_viewport)
 
-opennova_add_editor_test(mission_map MIXED)
+opennova_add_editor_test(mission_map)
 
 # A mission's items' effects as its start attaches them (ADR 0046 DI-31, editor/preview/mission_effects) over
 # a real session: each placed entity's particle slot by the start's pool gates and its model's points, the
@@ -489,14 +489,14 @@ opennova_add_editor_test(mission_listen)
 
 # The surface classes and the foliage over a mission's terrain (ADR 0046 DI-29, editor/preview/
 # mission_ground_overlay): the ground's foliage at a point and the two overlays over a minted Tmap.
-opennova_add_editor_test(mission_ground_overlay MIXED)
+opennova_add_editor_test(mission_ground_overlay)
 
 # Place a model no item draws yet (DI-12, editor/preview/model_placement, editor/documents/model_item) over
 # a real session and the synth models: the item a model is drawn as from its parts; a model no item draws
 # dropped on a mission making its item in items.def (the next free id, its TYPE, its graphic), then placed,
 # an undo step in each file; the refusals; a model's Place in mission arming the mission's Place tool. Mixed:
 # the retail row holds the rule to every model the shipped ITEMS.DEF draws (OPENNOVA_JO_DIR).
-opennova_add_editor_test(place_model MIXED)
+opennova_add_editor_test(place_model)
 
 # A mission's people posed as the game spawns them (DI-38, editor/preview/mission_poses) over a real
 # session: each organic's spawn pose held to the world's own organic init over the same clips (pool
@@ -504,7 +504,7 @@ opennova_add_editor_test(place_model MIXED)
 # definition's AI slot alone, the poses following the records and the catalog live, the wire. Mixed:
 # the retail row poses every shipped base-game mission's people over the game's catalog and clips and
 # holds each pose to the world init's (OPENNOVA_JO_DIR).
-opennova_add_editor_test(mission_poses MIXED)
+opennova_add_editor_test(mission_poses)
 
 # An entity off the ground is a Problem with a fix (DI-28, editor/preview/mission_ground_rules and the
 # mission type's project check, mission_ground_check): each entity class grounded by the game's own
@@ -512,7 +512,7 @@ opennova_add_editor_test(mission_poses MIXED)
 # down by the warmup or standing on a floor; a mover the game's to place), the findings and their fixes
 # over a real session, followed live. Mixed: the retail row runs the rules over every shipped mission
 # of the base game and counts what they flag (OPENNOVA_JO_DIR).
-opennova_add_editor_test(mission_ground MIXED SOURCES mission_ground_check_test.cpp)
+opennova_add_editor_test(mission_ground SOURCES mission_ground_check_test.cpp)
 
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.
@@ -548,7 +548,7 @@ opennova_add_editor_test(first_person)
 
 # DI-10: a model's damage states named in the game's words and played as the game destroys the item (the
 # husk swap, the pieces, the death sound, the destroy fade); the retail leg over JO's damageable items.
-opennova_add_editor_test(model_damage MIXED)
+opennova_add_editor_test(model_damage)
 
 # DI-21: a definition table's record drawn as the game draws the thing it defines (an item in its state with its
 # effects and its death's sound, a person posed as it spawns, a weapon's models, an ammo's round); the engine's
@@ -591,7 +591,7 @@ opennova_add_editor_test(query SOURCES editor_query_test.cpp)
 # on their records (never a build's gate, never the graph's findings twice), rendered
 # again only when something it read moved; a SKIP-LEG over OPENNOVA_JO_ASSETS' shipped
 # menus (every screen renders in the document's order, every interned name a graph edge).
-opennova_add_editor_test(menu_render MIXED SOURCES menu_screen_render_test.cpp)
+opennova_add_editor_test(menu_render SOURCES menu_screen_render_test.cpp)
 
 # The imports (S8): the sidecars, the import pass, the scan and the build over the
 # outputs, and the game install as an import source; the plan
@@ -599,7 +599,7 @@ opennova_add_editor_test(menu_render MIXED SOURCES menu_screen_render_test.cpp)
 # import of it, staged and published (S11g, import_apply_test.cpp: its retail leg imports a
 # packed install's menu with the files it needs, OPENNOVA_JO_DIR; 04TR's closure imported and built
 # a row of its own).
-opennova_add_editor_test(import MIXED RETAIL_PARTS main closure_04tr
+opennova_add_editor_test(import
                          SOURCES import_test.cpp import_plan_test.cpp import_apply_test.cpp)
 
 # The font importer: a font set's glyph sheet made into a .fnt (formats/fnt fnt_sheet, whose advance
@@ -677,7 +677,7 @@ opennova_add_editor_test(file_chores LIBS opennova_project_cli)
 # and query tables, each verb's --json the session's answer to the same requests, the request and
 # query verbs, --install; its retail leg a project imported from the game install whose Problems
 # the query verb reads as the session does.
-opennova_add_editor_test(project_cli_session MIXED RETAIL_PARTS main install_import NAME project_cli_session
+opennova_add_editor_test(project_cli_session NAME project_cli_session
                          LIBS opennova_project_cli)
 
 # opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp's bounds: 2017
@@ -693,20 +693,20 @@ opennova_add_editor_test(reserved_items)
 # The sound lane (ADR 0046; DI-02, DI-16): the bank and SndProf.def documents, the sound names in the
 # graph by the game's bank order, the preview's picks, the session's play_sound; a SKIP-LEG without
 # OPENNOVA_JO_ASSETS (every shipped bank and SndProf.def through the documents).
-opennova_add_editor_test(sound_documents MIXED)
+opennova_add_editor_test(sound_documents)
 # Dialog banks followed (ADR 0046 DI-32): a .dbf as a document over the engine's reader and writer, its dialogs the
 # Dialog symbols a mission's Play dialog names by number (Go to, used by, a rename writing the number, Add it there),
 # a line's wave one of the bank's sounds, the session's play of a dialog line after line; a SKIP-LEG without
 # OPENNOVA_JO_ASSETS (every shipped dialog bank through the document byte for byte, each line's wave in its sounds).
-opennova_add_editor_test(dialog_bank MIXED SOURCES dialog_bank_document_test.cpp)
+opennova_add_editor_test(dialog_bank SOURCES dialog_bank_document_test.cpp)
 # The AI profile document (ADR 0046 S23 B): an .aip's one profile over the game's reader with the file's layout, its
 # keys in the file's units by its type's set, a value read back as the game reads it, the save the file but for its
 # lines; --retail: every shipped profile through the document byte for byte.
-opennova_add_editor_test(ai_profile MIXED SOURCES ai_profile_document_test.cpp)
+opennova_add_editor_test(ai_profile SOURCES ai_profile_document_test.cpp)
 # The particle key panel (ADR 0046 S23 B): a particle file's blocks and keys as the game's reader reads them, a set
 # rewriting one value's span, a key added where the line-ordered reader reads it, a value the reader takes otherwise
 # refused, the particle_keys query; --retail: the install's particle files, each key's text at its span.
-opennova_add_editor_test(particle_keys MIXED)
+opennova_add_editor_test(particle_keys)
 
 # The particle type's project check: an effect's particle and a particle's curve table that no particle file the game
 # loads defines (every file's names, without case; the gore set the project picks), each a warning at the name.
@@ -721,15 +721,15 @@ opennova_add_editor_test(hudfx SOURCES hudfx_document_test.cpp)
 # The score table document (ADR 0046 S23 B): score.ini's blocks, columns and points over the game's reader with the
 # file's layout, a value's own line, a column and a block added, the game's reading as findings; --retail: the
 # install's loose score.ini through the document byte for byte.
-opennova_add_editor_test(score MIXED SOURCES score_document_test.cpp)
+opennova_add_editor_test(score SOURCES score_document_test.cpp)
 # The avatars table document (ADR 0046 S23 B): Avatars.def's parts and nationalities over the game's reader with the
 # file's layout, the graph over its records, the reader's notes, a session's edit and undo; --retail: the install's
 # Avatars.def (base and each expansion) through the document byte for byte.
-opennova_add_editor_test(avatars MIXED SOURCES avatars_document_test.cpp)
+opennova_add_editor_test(avatars SOURCES avatars_document_test.cpp)
 
 # The string-table document (ADR 0046 S6b); --retail: every RTXT table of the install through the document, an unedited
 # save the stored bytes or, for a table the game reads regrouped, the format's regrouped table.
-opennova_add_editor_test(strings MIXED SOURCES strings_document_test.cpp)
+opennova_add_editor_test(strings SOURCES strings_document_test.cpp)
 
 # The menu document (S6c), the edits that must not lose authored data (S9d) and the
 # retail sweep through it: a SKIP-LEG per root (OPENNOVA_JO_DIR's installed menus,
@@ -737,9 +737,9 @@ opennova_add_editor_test(strings MIXED SOURCES strings_document_test.cpp)
 # The menu's table (editor/documents/mnu_table, ADR 0046 S13 D10): every member reached by
 # exactly one field path or list, over a synthetic every-element menu and (a SKIP-LEG without
 # OPENNOVA_JO_ASSETS) the fifteen reference menus rebuilt through the table.
-opennova_add_editor_test(menu_table MIXED)
+opennova_add_editor_test(menu_table)
 
-opennova_add_editor_test(menus MIXED SOURCES mnu_document_test.cpp)
+opennova_add_editor_test(menus SOURCES mnu_document_test.cpp)
 
 # The model document (S10d): untouched saves, edits, structure and refusals, undo,
 # save and reload, the validator (S11h: frames and registers as the runtime reads them);
@@ -749,13 +749,13 @@ opennova_add_editor_test(menus MIXED SOURCES mnu_document_test.cpp)
 # threedi_schema test it was): a Set of every field of every record to itself changes no
 # byte, over the synthetic models and (a SKIP-LEG without OPENNOVA_JO_DIR) every model the
 # game install ships; the derived words, the refusals, the lists, the rows.
-opennova_add_editor_test(model_table MIXED)
+opennova_add_editor_test(model_table)
 
 # The mission's table (editor/documents/mission_table.h, ADR 0046 S13 D10, S14): a mission's records
 # as rows of the one table shape over the format's field rows, read through the mission document;
 # the rules, the editor's ranges, the lists and the chains over the synthetic dense mission, and (a
 # SKIP-LEG without OPENNOVA_JO_DIR) every mission the game install ships read and set to itself.
-opennova_add_editor_test(mission_table MIXED)
+opennova_add_editor_test(mission_table)
 
 # The mission document (editor/documents/mission_document.h, ADR 0046 S14) over the minted
 # synth_logic mission: the rows in bands, every reference as a graph edge of its kind, the
@@ -763,26 +763,26 @@ opennova_add_editor_test(mission_table MIXED)
 # use check, the picture's reads, an item's TYPE on its symbol; and (a SKIP-LEG without
 # OPENNOVA_JO_DIR) every shipped mission opened, its references counted and its findings by
 # code.
-opennova_add_editor_test(mission_document MIXED)
+opennova_add_editor_test(mission_document)
 
 # A mission's logic in words (editor/documents/mission_sentence.h, ADR 0046 S15): each trigger and
 # action worded from its type and its typed parameters, the chain's fold, an event's flags, delay and
 # repeat, a type or a value naming nothing said so; the minted mission's titles; the types "Add
 # trigger" and "Add action" offer; and (a SKIP-LEG without OPENNOVA_JO_DIR) every shipped event worded.
-opennova_add_editor_test(mission_sentence MIXED)
+opennova_add_editor_test(mission_sentence)
 
 # Adding and editing a mission's logic without its format (editor/documents/mission_logic.h,
 # mission_uses.h, ADR 0046 S15): the forms, an add by type, the 20 an event holds refused before the
 # edit, a retype keeping what applies, a move, a negation and a join, what names a record, the
 # mission_logic and mission_uses queries; and (a SKIP-LEG without OPENNOVA_JO_DIR) every shipped record
 # given a form and the defaults' measured values.
-opennova_add_editor_test(mission_logic MIXED)
+opennova_add_editor_test(mission_logic)
 
 # The mission logic, deeply integrated (ADR 0046 S24): the Event board's portable half (the mission_logic query's
 # op table; editor/documents/mission_board.h), and (a SKIP-LEG without OPENNOVA_JO_DIR) every shipped event's form;
 # the logic in the views (the pick a chip asks of them; editor/documents/mission_links.h); the names and the live
 # logic (a variable's words, editor/documents/mission_live.h).
-opennova_add_editor_test(mission_board MIXED)
+opennova_add_editor_test(mission_board)
 
 opennova_add_editor_test(mission_links)
 
@@ -795,7 +795,7 @@ opennova_add_editor_test(mission_names)
 # choices worded, the cache, the wire's words through a session; and (a SKIP-LEG without
 # OPENNOVA_JO_DIR) every record and reference of the shipped missions worded with the install's
 # catalogs and tables, timed.
-opennova_add_editor_test(mission_labels MIXED)
+opennova_add_editor_test(mission_labels)
 
 # Help in a script's text (editor/session/script_assist.h, ADR 0046 S15): the completions from the WAC
 # compiler's tables and the mission of the script's name, what a word is, where it is defined, the
@@ -807,29 +807,29 @@ opennova_add_editor_test(script_assist)
 # choice, the labelled field, the record handle and the list ops over a file of each; the cost of a
 # keystroke in a def catalog (one field's row resolved); and (a SKIP-LEG without OPENNOVA_JO_DIR)
 # the game's powerup.def opened as the catalog's rows, generated back as the file was (its modeled layout).
-opennova_add_editor_test(table_shape MIXED)
+opennova_add_editor_test(table_shape)
 
-opennova_add_editor_test(model_document MIXED)
+opennova_add_editor_test(model_document)
 
 # A model's bullet-face surfaces set on its materials and its records in words (S17): each face's
 # material found, a material's surface set on every face made from it in one step, mixed and unified,
 # the refusals, the game's words; a SKIP-LEG counting the install's faces and mixed materials.
-opennova_add_editor_test(model_surfaces MIXED)
+opennova_add_editor_test(model_surfaces)
 
 # A model's collision shown in its viewport (S17): a box's planes make the box, every synthetic
 # model's collision as shapes on the collision LOD's triangles, each record's shape and back, a
 # person's hit spheres at the game's radius, a live part carrying its section, picking; a SKIP-LEG
 # making every installed model's volumes into solids inside their boxes.
-opennova_add_editor_test(model_collision MIXED)
+opennova_add_editor_test(model_collision)
 
 # The clip and animation map documents (S10e): untouched saves, engine data edits,
 # the motion refused, rows and clips, the reset row, the validator and the clip edges;
 # a SKIP-LEG saving every retail clip and table untouched.
-opennova_add_editor_test(animation_documents MIXED)
+opennova_add_editor_test(animation_documents)
 
 # The stylesheet document (S9i): rows per line, edits the game reads as shown, the
 # refusals, the validator; a SKIP-LEG for OPENNOVA_JO_ASSETS' shipped menu_style.mns.
-opennova_add_editor_test(styles MIXED SOURCES mns_document_test.cpp)
+opennova_add_editor_test(styles SOURCES mns_document_test.cpp)
 
 # The terrain viewport (the deep-integration plan's DI-30b): a terrain drawn on its own under a mission's
 # environment or the engine's own, its tiles the mission's or the terrain's own, framed within the fog, DI-29's
@@ -841,16 +841,16 @@ opennova_add_editor_test(environment_viewport)
 # Face animations (ADR 0046, round S23 lane A): a .grm as a document over the engine's reader and writer, its
 # triangles' corners following their vertices, its findings, its references and its blank, over the authored
 # fixture; the retail twin opens and saves the 13 faces Black Hawk Down ships (JO ships none).
-opennova_add_editor_test(face_animation MIXED SOURCES face_animation_document_test.cpp)
+opennova_add_editor_test(face_animation SOURCES face_animation_document_test.cpp)
 
 # Fonts (ADR 0046, round S23 lane A): a .fnt as a document over the engine's reader and writer, its header and
 # glyphs edited, its findings, its blank; a SKIP-LEG without OPENNOVA_JO_ASSETS (every shipped .fnt byte for byte).
-opennova_add_editor_test(font_document MIXED)
+opennova_add_editor_test(font_document)
 
 # Music banks (ADR 0046, round S23 lane A): a .sbf as a document over the engine's reader and writer, its streams
 # edited, its findings, a stream played through a session; a SKIP-LEG without OPENNOVA_JO_DIR (every bank the
 # install streams, byte for byte).
-opennova_add_editor_test(music_bank MIXED SOURCES music_bank_document_test.cpp)
+opennova_add_editor_test(music_bank SOURCES music_bank_document_test.cpp)
 
 # A music bank stream's audio from a wave: a stream's audio replaced and a stream added over a session (a mono 44100 Hz
 # wave of the project, a stereo 22050 Hz one on disk), saved and decoded back within the codec's precision, undone.
@@ -859,7 +859,7 @@ opennova_add_editor_test(music_stream_audio)
 # Waves (ADR 0046, round S23 lane A): a .wav as a document read as the game's loader reads it, its one finding, a
 # trim and a normalise through a session; a SKIP-LEG without OPENNOVA_JO_ASSETS (every shipped wave byte for byte,
 # DSkid.wav alone refused).
-opennova_add_editor_test(wave_document MIXED)
+opennova_add_editor_test(wave_document)
 
 # --- ADR 0046 S25, terrain editing: the round's rows (added with its shared seams; each lane fills its own). ---
 
@@ -880,7 +880,7 @@ opennova_add_editor_test(raster_history)
 opennova_add_editor_test(raster_document)
 
 # The heights document (S25); the retail twin opens and saves every JO:CA .cpt byte for byte.
-opennova_add_editor_test(terrain_heights_document MIXED)
+opennova_add_editor_test(terrain_heights_document)
 
 # The heights brushes (S25).
 opennova_add_editor_test(heights_brushes BAKES TIMEOUT 600)
@@ -893,7 +893,7 @@ opennova_add_editor_test(height_lock_follow BAKES)
 
 # The .til document (S25): a .til's tiles over formats/til, their layers kept ascending, the source notes and
 # the files read only; the retail twin opens and saves all 116 shipped .til byte for byte.
-opennova_add_editor_test(til_document MIXED)
+opennova_add_editor_test(til_document)
 
 # The tile tools (S25).
 opennova_add_editor_test(tile_tools)
@@ -908,7 +908,7 @@ opennova_add_editor_test(terrain_maps_view BAKES)
 
 # Painting a texture used as a terrain map (S25); the retail twin paints every shipped map, undoes it and saves it
 # identical.
-opennova_add_editor_test(texture_paint MIXED)
+opennova_add_editor_test(texture_paint)
 
 # The paint planner (S25).
 opennova_add_editor_test(terrain_map_paint BAKES)
