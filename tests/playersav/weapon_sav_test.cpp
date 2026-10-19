@@ -1,8 +1,8 @@
 // engine/formats/playersav — weapon.sav player-profile parse/serialize tests.
 //
-// Every fixture is built in code: no retail file is committed. The optional
-// last leg reads the install's real weapon.sav (OPENNOVA_JO_DIR, beside the
-// expansion) and notes SKIP-LEG otherwise (docs/asset-gated-tests.md).
+// Every fixture is built in code: no retail file is committed. The last leg
+// writes the file the original ships beside its expansion from its seed values
+// and pins the shipped bytes' digest (common/default_weapon_sav.h).
 
 #include <cstdint>
 #include <cstdio>
@@ -11,10 +11,9 @@
 #include <string>
 #include <vector>
 
-#include "common/file_io.h"
+#include "common/default_weapon_sav.h"
 #include "common/test_expect.h"
 #include <formats/playersav/weapon_sav.h>
-#include "common/retail_paths.h"
 
 using namespace opennova::playersav;
 
@@ -480,22 +479,15 @@ int test_page_codec_roundtrip()
     return 0;
 }
 
-// --- 8. optional: the install's real weapon.sav (SKIP-LEG without it) --------
+// --- 8. the shipped default weapon.sav, written from its seeds --------------
 
-int test_retail_file()
+int test_default_file()
 {
-    // <install>/expansion/<exp>/weapon.sav, else <install>/weapon.sav
-    // (net-re section 5.66) — the retail leg of an otherwise synthetic test.
-    const std::string sav = retail::weapon_sav();
-    if (sav.empty())
-        return retail::skip_leg("OPENNOVA_JO_DIR carrying a retail weapon.sav (corpus leg)");
-    const char *path = sav.c_str();
-
-    std::vector<uint8_t> bytes;
-    if (!test_io::read_file(path, bytes)) {
-        std::fprintf(stderr, "retail weapon.sav found but unreadable: %s\n", path);
-        return 1;
-    }
+    // The file the original ships beside its expansion (net-re section 5.66),
+    // rebuilt from the values PlayerProfile_InitDefaults seeds.
+    const std::vector<uint8_t> bytes = write(test_weapon_sav::default_file());
+    TEST_EXPECT(bytes.size() == kHeaderBytes + kProfileSlots * kRecordBytes);
+    TEST_EXPECT(test_weapon_sav::fnv1a64(bytes) == test_weapon_sav::kDefaultWeaponSavFnv1a64);
 
     File f;
     TEST_EXPECT(read(bytes.data(), bytes.size(), f));
@@ -512,34 +504,33 @@ int test_retail_file()
     }
 
     // A record the original's defaults made carries the default pages: where a
-    // retail slot's single-player page has the default's first name, every page
-    // of it is the default's.
+    // slot's single-player page has the default's first name, every page of it
+    // is the default's.
     const File defaults = make_defaults();
+    size_t default_records = 0;
     for (size_t s = 0; s < kProfileSlots; ++s) {
         const Record &rec = f.slots[s];
         if (rec.single_player.entries.size() != 8 ||
             rec.single_player.entries[1].name != "WPN_M4")
             continue;
+        ++default_records;
         TEST_EXPECT(pages_equal(rec.single_player, defaults.slots[s].single_player));
         for (size_t i = 0; i < kKitPagesPerSide; ++i) {
             TEST_EXPECT(pages_equal(rec.blue.pages[i], defaults.slots[s].blue.pages[i]));
             TEST_EXPECT(pages_equal(rec.red.pages[i], defaults.slots[s].red.pages[i]));
         }
     }
+    TEST_EXPECT(default_records == kProfileSlots);
 
-    // Writer parity: a retail-SAVED profile re-serializes byte for byte.
+    // Writer parity: the read file re-serializes byte for byte.
     const std::vector<uint8_t> rewritten = write(f);
-    TEST_EXPECT(rewritten.size() == bytes.size());
     TEST_EXPECT(rewritten == bytes);
-    std::printf("retail weapon.sav: %zu bytes re-serialized byte-identically\n",
-                bytes.size());
     return 0;
 }
 
 }  // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     struct Case {
         const char *name;
         int (*fn)();
@@ -554,7 +545,7 @@ int main(int argc, char **argv) {
         {"clamp_classes", test_clamp_classes},
         {"update_avatar_selection", test_update_avatar_selection},
         {"page_codec_roundtrip", test_page_codec_roundtrip},
-        {"retail_file", test_retail_file},
+        {"default_file", test_default_file},
     };
 
     int failures = 0;

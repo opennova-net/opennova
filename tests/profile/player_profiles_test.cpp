@@ -1,10 +1,12 @@
 // engine/runtime/profile — the player profile's in-memory image: the fresh
 // record's seeds, the binding merge, the load and the save, the screens' name
 // rules, the session steps and the controls words the game reads
-// (profile_controls.h). Fixtures are built in code; the retail legs
-// check the fresh record's tables against the installed program's own static
-// data (Jointops.exe, read only) and load and save the install's weapon.sav in
-// memory (docs/asset-gated-tests.md).
+// (profile_controls.h). Fixtures are built in code; the fresh record's tables
+// are pinned against the program's own static data (digests read once from the
+// pinned JO:CA Jointops.exe, SHA-256 9a1035440a53af2057ce0995ac42dced840d3b9f
+// d53c04dc86041a962b84fe57), the controls words' offsets against the
+// instructions that read and write them, and the shipped default weapon.sav
+// (common/default_weapon_sav.h) loads and saves in memory.
 
 #include <algorithm>
 #include <cstdint>
@@ -14,9 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "common/file_io.h"
-#include "common/pe_image.h"
-#include "common/retail_paths.h"
+#include "common/default_weapon_sav.h"
 #include "common/test_expect.h"
 #include <formats/playersav/player_sav.h>
 #include <formats/playersav/weapon_sav.h>
@@ -491,201 +491,163 @@ int test_controls_words() {
     return 0;
 }
 
-// --- 7. retail: the fresh record against the installed program's static data -------
+// --- 7. the fresh record against the program's own static data ------------------
 
-uint32_t le(const std::vector<uint8_t> &b, size_t at, size_t n) {
-    uint32_t v = 0;
-    for (size_t i = 0; i < n; ++i) v |= static_cast<uint32_t>(b[at + i]) << (8 * i);
-    return v;
+// FNV-1a 64 over each binding entry's fields, little-endian in declaration order
+// (id u16, index i32, flags, modes, action_class, help u32, primary, secondary,
+// primary_mod, secondary_mod, mouse_mask, mouse_mod u16, joy_button, joy_mod u8),
+// then its token and a NUL.
+uint64_t binding_table_digest(const std::vector<playersav::BindingEntry> &table) {
+    uint64_t h = io::kFnv1a64Offset;
+    const auto put = [&h](uint64_t v, int bytes) {
+        for (int i = 0; i < bytes; ++i) h = io::fnv1a64_byte(h, static_cast<uint8_t>(v >> (8 * i)));
+    };
+    for (const playersav::BindingEntry &e : table) {
+        put(e.id, 2);
+        put(static_cast<uint32_t>(e.index), 4);
+        put(e.flags, 4);
+        put(e.modes, 4);
+        put(e.action_class, 4);
+        put(e.help, 4);
+        put(e.primary, 2);
+        put(e.secondary, 2);
+        put(e.primary_mod, 2);
+        put(e.secondary_mod, 2);
+        put(e.mouse_mask, 2);
+        put(e.mouse_mod, 2);
+        put(e.joy_button, 1);
+        put(e.joy_mod, 1);
+        h = io::fnv1a64_bytes(h, e.token.data(), e.token.size());
+        h = io::fnv1a64_byte(h, 0);
+    }
+    return h;
+}
+
+// FNV-1a 64 over a kit page: each entry's name and a NUL, then its three
+// numbers as little-endian i32s.
+uint64_t kit_page_digest(const playersav::KitPage &page) {
+    uint64_t h = io::kFnv1a64Offset;
+    const auto put32 = [&h](int32_t v) {
+        for (int i = 0; i < 4; ++i) h = io::fnv1a64_byte(h, static_cast<uint8_t>(static_cast<uint32_t>(v) >> (8 * i)));
+    };
+    for (const playersav::KitEntry &e : page.entries) {
+        h = io::fnv1a64_bytes(h, e.name.data(), e.name.size());
+        h = io::fnv1a64_byte(h, 0);
+        put32(e.ammo_primary);
+        put32(e.ammo_secondary);
+        put32(e.flags);
+    }
+    return h;
 }
 
 // The default binding table as the program builds it from its static catalog:
 // the boot's sort puts the row whose id is i at place i [orig:
 // KeyBinding_SortBySequentialId @0x498260, rows from 0x8159A8 to the bound
 // @0x4982a4], then the walk over 768 places keeps each row flagged 0x4000000,
-// at most 190 [orig: KeyBinding_BuildFilteredTable @0x54c2b0..0x54c3a5].
-bool program_binding_table(const pe::Image &image, std::vector<playersav::BindingEntry> &out) {
-    constexpr uint32_t kCatalog = 0x8159A8;
-    constexpr size_t kStride = 108;
-    uint32_t bound = 0;
-    std::vector<uint8_t> t;
-    if (!image.u32(0x4982a5, bound) || bound <= kCatalog || (bound - kCatalog) % kStride != 0 ||
-        !image.read(kCatalog, bound - kCatalog, t))
-        return false;
-    const size_t rows = t.size() / kStride;
-    const auto id_of = [&](size_t r) { return static_cast<int>(static_cast<int16_t>(le(t, r * kStride, 2))); };
-    for (size_t i = 0; i < rows; ++i) {
-        const int id = id_of(i);
-        if (id >= 768 || id == static_cast<int>(i)) continue;
-        for (size_t j = 0; j < rows; ++j) {
-            if (id_of(j) != static_cast<int>(i)) continue;
-            std::swap_ranges(t.begin() + static_cast<std::ptrdiff_t>(i * kStride),
-                             t.begin() + static_cast<std::ptrdiff_t>((i + 1) * kStride),
-                             t.begin() + static_cast<std::ptrdiff_t>(j * kStride));
-            break;
-        }
-    }
-    out.clear();
-    for (size_t place = 0; place < 768 && place < rows && out.size() < playersav::kBindingCapacity; ++place) {
-        const size_t r = place * kStride;
-        const uint32_t flags = le(t, r + 4, 4);
-        if ((flags & 0x4000000u) == 0) continue;
-        playersav::BindingEntry e;
-        e.id = static_cast<uint16_t>(le(t, r, 2));
-        e.index = static_cast<int32_t>(place);
-        e.flags = flags;
-        e.modes = le(t, r + 8, 4);
-        e.action_class = t[r + 12];
-        e.help = le(t, r + 16, 4);
-        e.primary = static_cast<uint16_t>(le(t, r + 20, 2));
-        e.secondary = static_cast<uint16_t>(le(t, r + 22, 2));
-        e.mouse_mask = static_cast<uint16_t>(le(t, r + 24, 2));
-        e.joy_button = t[r + 26];
-        e.primary_mod = static_cast<uint16_t>(le(t, r + 28, 2));
-        e.secondary_mod = static_cast<uint16_t>(le(t, r + 30, 2));
-        e.mouse_mod = static_cast<uint16_t>(le(t, r + 32, 2));
-        e.joy_mod = t[r + 34];
-        // The row's token, NUL-terminated inside the row [orig: @0x54c37a..0x54c38d].
-        for (size_t c = r + 75; c < r + kStride && t[c] != 0; ++c) e.token.push_back(static_cast<char>(t[c]));
-        out.push_back(std::move(e));
-    }
-    return true;
-}
+// at most 190 [orig: KeyBinding_BuildFilteredTable @0x54c2b0..0x54c3a5]: 109
+// entries, read once from the pinned program into this digest.
+constexpr size_t kProgramBindingEntries = 109;
+constexpr uint64_t kProgramBindingTableDigest = UINT64_C(0xF822C6DB461D2A12);
 
-// A static default kit page: NUL-separated (name, ammo, ammo, flags) quads that
-// end at an empty string [orig: Buffer_CopyUntilDoubleNull's source blobs].
-bool program_kit_page(const pe::Image &image, uint32_t va, playersav::KitPage &out) {
-    out.entries.clear();
-    std::vector<std::string> fields;
-    for (uint32_t at = va;;) {
-        std::string field = image.c_string(at);
-        if (field.empty()) break;
-        at += static_cast<uint32_t>(field.size()) + 1;
-        fields.push_back(std::move(field));
-        if (fields.size() > 64) return false;
-    }
-    if (fields.size() % 4 != 0) return false;
-    for (size_t i = 0; i < fields.size(); i += 4) {
-        playersav::KitEntry e;
-        e.name = fields[i];
-        e.ammo_primary = std::atoi(fields[i + 1].c_str());
-        e.ammo_secondary = std::atoi(fields[i + 2].c_str());
-        e.flags = std::atoi(fields[i + 3].c_str());
-        out.entries.push_back(std::move(e));
-    }
-    return true;
-}
-
-bool same_page(const playersav::KitPage &a, const playersav::KitPage &b) {
-    if (a.entries.size() != b.entries.size()) return false;
-    for (size_t i = 0; i < a.entries.size(); ++i) {
-        const playersav::KitEntry &x = a.entries[i];
-        const playersav::KitEntry &y = b.entries[i];
-        if (x.name != y.name || x.ammo_primary != y.ammo_primary || x.ammo_secondary != y.ammo_secondary ||
-            x.flags != y.flags)
-            return false;
-    }
-    return true;
-}
-
-int test_retail_program() {
-    const std::string exe = retail::jointops_exe();
-    if (exe.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying Jointops.exe");
-    pe::Image image;
-    if (!image.open(exe)) {
-        std::fprintf(stderr, "Jointops.exe found but not a readable PE32 image: %s\n", exe.c_str());
-        return 1;
-    }
-    // The default binding table, entry for entry.
-    std::vector<playersav::BindingEntry> program;
-    TEST_EXPECT(program_binding_table(image, program));
+int test_program_binding_table() {
     const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
-    TEST_EXPECT(program.size() == table.size());
-    for (size_t i = 0; i < std::min(program.size(), table.size()); ++i) {
-        const playersav::BindingEntry &a = program[i];
-        const playersav::BindingEntry &b = table[i];
-        TEST_EXPECT(a.id == b.id && a.index == b.index && a.token == b.token);
-        TEST_EXPECT(a.flags == b.flags && a.modes == b.modes && a.action_class == b.action_class);
-        TEST_EXPECT(a.help == b.help);
-        TEST_EXPECT(a.primary == b.primary && a.secondary == b.secondary);
-        TEST_EXPECT(a.primary_mod == b.primary_mod && a.secondary_mod == b.secondary_mod);
-        TEST_EXPECT(a.mouse_mask == b.mouse_mask && a.mouse_mod == b.mouse_mod);
-        TEST_EXPECT(a.joy_button == b.joy_button && a.joy_mod == b.joy_mod);
-    }
-    // The eleven default kit pages the fresh weapon record copies [orig:
-    // PlayerProfile_InitDefaults @0x54bb40]; the profile-less spawn kit copies
-    // the single-player one whole [orig: push 0x833BF8 @0x5246be and @0x5519da].
-    playersav::KitPage page;
-    TEST_EXPECT(program_kit_page(image, 0x833BF8, page) &&
-                same_page(page, playersav::default_single_player_page()));
-    const uint8_t push_sp[] = {0x68, 0xF8, 0x3B, 0x83, 0x00};
-    std::vector<uint8_t> b;
-    TEST_EXPECT(image.read(0x5246be, 5, b) && std::memcmp(b.data(), push_sp, 5) == 0);
-    TEST_EXPECT(image.read(0x5519da, 5, b) && std::memcmp(b.data(), push_sp, 5) == 0);
-    const uint32_t blue[5] = {0x8353F8, 0x8363F8, 0x8373F8, 0x8393F8, 0x83A3F8};
-    const uint32_t red[5] = {0x835BF8, 0x836BF8, 0x837BF8, 0x839BF8, 0x83ABF8};
-    for (uint8_t i = 0; i < 5; ++i) {
-        const uint8_t klass = static_cast<uint8_t>(playersav::kMinPlayerClass + i);
-        TEST_EXPECT(program_kit_page(image, blue[i], page) &&
-                    same_page(page, playersav::default_kit_page(playersav::SideId::Blue, klass)));
-        TEST_EXPECT(program_kit_page(image, red[i], page) &&
-                    same_page(page, playersav::default_kit_page(playersav::SideId::Red, klass)));
-    }
-    std::printf("Jointops.exe: the %zu-entry default binding table and the 11 default kit pages match\n",
-                program.size());
+    TEST_EXPECT(table.size() == kProgramBindingEntries);
+    TEST_EXPECT(binding_table_digest(table) == kProgramBindingTableDigest);
     return 0;
 }
 
-// --- 7b. retail: the controls words' readers and writers in the installed program ---
+// The eleven default kit pages the fresh weapon record copies [orig:
+// PlayerProfile_InitDefaults @0x54bb40], each a static double-NUL blob of
+// (name, ammo, ammo, flags) quads [orig: Buffer_CopyUntilDoubleNull's source
+// blobs], read once from the pinned program into these digests.
+struct ProgramKitPage {
+    uint32_t va;
+    size_t entries;
+    uint64_t digest;
+};
+constexpr ProgramKitPage kProgramSinglePlayerPage = {0x833BF8, 8, UINT64_C(0xEAFAC9532B3B6FA2)};
+constexpr ProgramKitPage kProgramBluePages[5] = {
+    {0x8353F8, 8, UINT64_C(0x482808AD8DE0E40F)}, {0x8363F8, 7, UINT64_C(0x5EC94FD329F6A478)},
+    {0x8373F8, 7, UINT64_C(0x57938392AF3A0D04)}, {0x8393F8, 7, UINT64_C(0x81BC3067E26EE3E1)},
+    {0x83A3F8, 7, UINT64_C(0x37786A67C3B02B01)},
+};
+constexpr ProgramKitPage kProgramRedPages[5] = {
+    {0x835BF8, 8, UINT64_C(0xE4672FE97B594585)}, {0x836BF8, 7, UINT64_C(0x4BCD9741B57B04B2)},
+    {0x837BF8, 7, UINT64_C(0xE87F81250371CFB3)}, {0x839BF8, 7, UINT64_C(0xD5386517F140B5A1)},
+    {0x83ABF8, 7, UINT64_C(0x54D39615DD2597F1)},
+};
+// The profile-less spawn kit copies the single-player page whole: both sites
+// push its address [orig: push 0x833BF8 @0x5246be and @0x5519da].
+constexpr uint8_t kPushSinglePlayerPage[5] = {0x68, 0xF8, 0x3B, 0x83, 0x00};
 
-// The instructions profile_controls.h ports, read from the installed
-// Jointops.exe: each reads or writes the record offset the port names.
-int test_retail_controls_code() {
-    const std::string exe = retail::jointops_exe();
-    if (exe.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying Jointops.exe");
-    pe::Image image;
-    if (!image.open(exe)) {
-        std::fprintf(stderr, "Jointops.exe found but not a readable PE32 image: %s\n", exe.c_str());
-        return 1;
+bool page_matches(const playersav::KitPage &page, const ProgramKitPage &pin) {
+    return page.entries.size() == pin.entries && kit_page_digest(page) == pin.digest;
+}
+
+int test_program_kit_pages() {
+    TEST_EXPECT(page_matches(playersav::default_single_player_page(), kProgramSinglePlayerPage));
+    const uint32_t pushed = static_cast<uint32_t>(kPushSinglePlayerPage[1]) |
+                            (static_cast<uint32_t>(kPushSinglePlayerPage[2]) << 8) |
+                            (static_cast<uint32_t>(kPushSinglePlayerPage[3]) << 16) |
+                            (static_cast<uint32_t>(kPushSinglePlayerPage[4]) << 24);
+    TEST_EXPECT(kPushSinglePlayerPage[0] == 0x68 && pushed == kProgramSinglePlayerPage.va);
+    for (uint8_t i = 0; i < 5; ++i) {
+        const uint8_t klass = static_cast<uint8_t>(playersav::kMinPlayerClass + i);
+        TEST_EXPECT(page_matches(playersav::default_kit_page(playersav::SideId::Blue, klass), kProgramBluePages[i]));
+        TEST_EXPECT(page_matches(playersav::default_kit_page(playersav::SideId::Red, klass), kProgramRedPages[i]));
     }
+    return 0;
+}
+
+// --- 7b. the controls words' readers and writers in the program -----------------
+
+// The instructions profile_controls.h ports, as the pinned program holds them:
+// each reads or writes a record word at the displacement it encodes, which must
+// be the offset the record layout gives that word (and the DEFAULTS store's
+// immediate the fresh record's seed). The joystick dispatch's gate
+// (`cmp dword_24D2088, 0` @0x499481) addresses the global the session copy
+// fills, not a record word, so it has no offset to check.
+int test_program_controls_code() {
     struct Site {
         uint32_t va;
         std::vector<uint8_t> bytes;
+        size_t disp_at;    // where the instruction's disp32 sits
+        const char *word;  // the record word it addresses
     };
     const Site sites[] = {
         // The session copy: +1432, +1428, +1424, +1524.
-        {0x5515c0, {0x8B, 0x88, 0x98, 0x05, 0x00, 0x00}},  // mov ecx, [eax+598h]
-        {0x55160c, {0x8B, 0x88, 0x94, 0x05, 0x00, 0x00}},  // mov ecx, [eax+594h]
-        {0x551618, {0x8B, 0x90, 0x90, 0x05, 0x00, 0x00}},  // mov edx, [eax+590h]
-        {0x551a3a, {0x8B, 0x91, 0xF4, 0x05, 0x00, 0x00}},  // mov edx, [ecx+5F4h]
-        // The joystick dispatch's gate: cmp dword_24D2088, 0.
-        {0x499481, {0x83, 0x3D, 0x88, 0x20, 0x4D, 0x02, 0x00}},
+        {0x5515c0, {0x8B, 0x88, 0x98, 0x05, 0x00, 0x00}, 2, "joystick_enabled"},  // mov ecx, [eax+598h]
+        {0x55160c, {0x8B, 0x88, 0x94, 0x05, 0x00, 0x00}, 2, "invert_mouse"},      // mov ecx, [eax+594h]
+        {0x551618, {0x8B, 0x90, 0x90, 0x05, 0x00, 0x00}, 2, "mouse_sensitivity"}, // mov edx, [eax+590h]
+        {0x551a3a, {0x8B, 0x91, 0xF4, 0x05, 0x00, 0x00}, 2, "auto_reload"},       // mov edx, [ecx+5F4h]
         // The in-game Accept's inverted OPTIONS_AUTOMEDIC store to +1660.
-        {0x5552b5, {0xF7, 0xD8, 0x1B, 0xC0, 0x83, 0xC0, 0x01, 0x89, 0x82, 0x7C, 0x06, 0x00, 0x00}},
+        {0x5552b5, {0xF7, 0xD8, 0x1B, 0xC0, 0x83, 0xC0, 0x01, 0x89, 0x82, 0x7C, 0x06, 0x00, 0x00}, 9,
+         "auto_medic_off"},
         // C2S 0x03's body: the current record's +1660, raw.
-        {0x42a40b, {0xA1, 0xFC, 0x10, 0x55, 0x02, 0x56, 0x8B, 0xB0, 0x7C, 0x06, 0x00, 0x00}},
+        {0x42a40b, {0xA1, 0xFC, 0x10, 0x55, 0x02, 0x56, 0x8B, 0xB0, 0x7C, 0x06, 0x00, 0x00}, 8, "auto_medic_off"},
         // DEFAULTS: +1424 = 0x80.
-        {0x55be93, {0xC7, 0x82, 0x90, 0x05, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00}},
+        {0x55be93, {0xC7, 0x82, 0x90, 0x05, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00}, 2, "mouse_sensitivity"},
+    };
+    const auto le32 = [](const std::vector<uint8_t> &b, size_t at) {
+        return static_cast<uint32_t>(b[at]) | (static_cast<uint32_t>(b[at + 1]) << 8) |
+               (static_cast<uint32_t>(b[at + 2]) << 16) | (static_cast<uint32_t>(b[at + 3]) << 24);
     };
     for (const Site &site : sites) {
-        std::vector<uint8_t> b;
-        TEST_EXPECT(image.read(site.va, site.bytes.size(), b) && b == site.bytes);
+        const playersav::RecordWord *word = playersav::find_record_word(site.word);
+        TEST_EXPECT(word != nullptr && site.disp_at + 4 <= site.bytes.size());
+        if (word == nullptr || site.disp_at + 4 > site.bytes.size()) continue;
+        TEST_EXPECT(le32(site.bytes, site.disp_at) == word->offset);
     }
-    std::printf("Jointops.exe: the controls words' %zu reader and writer sites match\n",
-                sizeof(sites) / sizeof(sites[0]));
+    // The DEFAULTS store's immediate is the fresh record's sensitivity.
+    TEST_EXPECT(static_cast<int32_t>(le32(sites[6].bytes, 6)) == playersav::ProfileRecord{}.mouse_sensitivity);
     return 0;
 }
 
-// --- 8. retail: the install's weapon.sav, loaded and saved in memory ---------------
+// --- 8. the shipped default weapon.sav, loaded and saved in memory ---------------
 
-int test_retail_weapon_sav() {
-    const std::string sav = retail::weapon_sav();
-    if (sav.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying a retail weapon.sav");
-    std::vector<uint8_t> bytes;
-    if (!test_io::read_file(sav.c_str(), bytes)) {
-        std::fprintf(stderr, "retail weapon.sav found but unreadable: %s\n", sav.c_str());
-        return 1;
-    }
+int test_default_weapon_sav() {
+    const std::vector<uint8_t> bytes = playersav::write(test_weapon_sav::default_file());
+    TEST_EXPECT(test_weapon_sav::fnv1a64(bytes) == test_weapon_sav::kDefaultWeaponSavFnv1a64);
     PlayerProfiles p;
     PlayerProfiles::LoadInput in;
     in.weapon_sav = &bytes;
@@ -696,14 +658,12 @@ int test_retail_weapon_sav() {
     TEST_EXPECT(saved.size() == bytes.size());
     TEST_EXPECT(saved.size() > 16 && std::equal(saved.begin(), saved.begin() + 8, bytes.begin()));
     TEST_EXPECT(saved.size() == bytes.size() && std::equal(saved.begin() + 16, saved.end(), bytes.begin() + 16));
-    std::printf("retail weapon.sav: %zu bytes; the profile's load and save keep every record\n", bytes.size());
     return 0;
 }
 
 }  // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     struct Case {
         const char *name;
         int (*fn)();
@@ -719,9 +679,10 @@ int main(int argc, char **argv) {
         {"voice_override", test_voice_override},
         {"session_steps", test_session_steps},
         {"controls_words", test_controls_words},
-        {"retail_program", test_retail_program},
-        {"retail_controls_code", test_retail_controls_code},
-        {"retail_weapon_sav", test_retail_weapon_sav},
+        {"program_binding_table", test_program_binding_table},
+        {"program_kit_pages", test_program_kit_pages},
+        {"program_controls_code", test_program_controls_code},
+        {"default_weapon_sav", test_default_weapon_sav},
     };
     int failures = 0;
     for (const Case &c : cases) {
