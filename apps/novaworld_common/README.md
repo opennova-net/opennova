@@ -1286,7 +1286,11 @@ it ([`CMakeLists.txt`](CMakeLists.txt) says what each holds):
 
 Every library that reaches the database links the service (`opennova_novaworld_service`)
 directly, and web's core alone links Redis (`opennova_redis`): the link lint's
-containments (`scripts/lint/link_graph_check.py`). Each program's directory builds its own code as
+containments (`scripts/lint/link_graph_check.py`), which also keeps the cloud the worker's,
+the data program off hosting, billing and the accounts, the gate and the lobby on core and
+program, and hostd off the service. The include lint (`scripts/lint/include_graph_check.py`,
+"SERVICE LAYERS") holds every include of a library or a program to the same table. Each
+program's directory builds its own code as
 `opennova_novaworld_<program>_core` and its `main.cpp` as `opennova-novaworld-<program>`.
 Core and the agents' protocol build with the service or on Linux (hostd builds without the
 service); the rest, and the tests, exist only with `OPENNOVA_NOVAWORLD_SERVICE=ON` (the root

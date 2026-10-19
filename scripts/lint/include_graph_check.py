@@ -64,6 +64,22 @@ in the path is what makes the layering visible, so this check reads it:
      unseen, so the headers the command line includes stay light (it takes
      outcome_json.h, not session_json.h, which includes the graph), and a
      second orchestration beside the session's is a review concern too.
+  9. SERVICE LAYERS (apps/novaworld_common/README.md "Build layout and
+     tests") — the NovaWorld service's libraries are nine directories under
+     apps/novaworld_common, ranked core < hosting_protocol < program < jobs <
+     accounts < billing < data_sets < hosting_model < hosting_cloud, and its
+     programs (apps/novaworld_<program>, apps/hostd) stand on them: each
+     unit's own #include lines reach only its own unit, the units
+     SERVICE_ALLOWED gives it, apps/common and the engine, the include
+     resolved as the compiler finds it (a quoted one in the includer's
+     directory, then for either form the service's root, its own program's
+     root, the other programs', then apps/common: an angled
+     `<hosted/cloud/x.h>` is held to the table as a quoted one is, while an
+     engine `<base/...>` lands in no service unit). Every source under
+     apps/novaworld_common lies in one of the nine directories, and
+     SERVICE_ALLOWED names known units alone and is acyclic. Direct includes
+     only, like rule 8; the tests are exempt (they link what they drive). The
+     CMake links follow the same table (scripts/lint/link_graph_check.py).
 
 Modes:
   (default)   report violations; exit 0
@@ -148,6 +164,53 @@ CLI_TREE = "apps/project"
 CLI_EDITOR_PREFIXES = ("editor/session/",)
 CLI_EDITOR_HEADERS = {"editor/run/null_process_platform.h"}
 
+# Rule 9: the NovaWorld service's layers. Each library is a directory under
+# the service's one include root; each program a root of its own.
+SERVICE_ROOT = "apps/novaworld_common"
+SERVICE_LIBS = {
+    "core": "core",
+    "hosted/protocol": "hosting_protocol",
+    "program": "program",
+    "jobs": "jobs",
+    "accounts": "accounts",
+    "billing": "billing",
+    "data_sets": "data_sets",
+    "hosted/model": "hosting_model",
+    "hosted/cloud": "hosting_cloud",
+}
+SERVICE_PROGRAMS = {
+    "apps/novaworld_gate": "gate",
+    "apps/novaworld_lobby": "lobby",
+    "apps/novaworld_web": "web",
+    "apps/novaworld_fleet": "fleet",
+    "apps/novaworld_worker": "worker",
+    "apps/novaworld_data": "data",
+    "apps/hostd": "hostd",
+}
+# What each unit may include beside itself (the CMake links: each library links
+# exactly these). The worker's unit is its worker_schedule.h, which web shows.
+_SERVICE_DOMAIN = ("core", "program", "jobs", "accounts", "billing", "data_sets",
+                   "hosting_protocol", "hosting_model")
+SERVICE_ALLOWED: dict[str, set[str]] = {
+    "core": set(),
+    "hosting_protocol": {"core"},
+    "program": {"core"},
+    "jobs": {"core"},
+    "accounts": {"core", "program", "jobs"},
+    "billing": {"core", "jobs"},
+    "data_sets": {"core", "jobs"},
+    "hosting_model": {"core", "program", "jobs", "billing", "data_sets", "hosting_protocol"},
+    "hosting_cloud": {"core", "jobs", "billing", "hosting_protocol", "hosting_model"},
+    "gate": {"core", "program"},
+    "lobby": {"core", "program"},
+    "data": {"core", "program", "jobs", "data_sets"},
+    "fleet": set(_SERVICE_DOMAIN),
+    "worker": set(_SERVICE_DOMAIN) | {"hosting_cloud"},
+    "web": set(_SERVICE_DOMAIN) | {"worker"},
+    "hostd": {"core", "hosting_protocol"},
+}
+APPS_COMMON = "apps/common"
+
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
 
 # Rule 6: Dear ImGui stays behind the engine's dev-tools pass (ADR 0042 d6).
@@ -223,6 +286,81 @@ def editor_lib(rel: Path) -> str | None:
     return None
 
 
+def service_unit(posix: str) -> str | None:
+    """The service unit (SERVICE_LIBS, SERVICE_PROGRAMS) a repo path lies in."""
+    if posix.startswith(SERVICE_ROOT + "/"):
+        rel = posix[len(SERVICE_ROOT) + 1:]
+        for directory in sorted(SERVICE_LIBS, key=len, reverse=True):
+            if rel.startswith(directory + "/"):
+                return SERVICE_LIBS[directory]
+        return None
+    for root, unit in SERVICE_PROGRAMS.items():
+        if posix.startswith(root + "/"):
+            return unit
+    return None
+
+
+def service_program_root(posix: str) -> str | None:
+    for root in SERVICE_PROGRAMS:
+        if posix.startswith(root + "/"):
+            return root
+    return None
+
+
+def resolve_service_include(rel: Path, inc: str, angled: bool = False) -> str | None:
+    """An include of a service source as the compiler finds it, as a repo path;
+    None when no root holds it (a system or engine header). A quoted include
+    looks in the includer's directory first; an angled one through the roots
+    alone."""
+    posix = rel.as_posix()
+    own = service_program_root(posix)
+    roots = [] if angled else [rel.parent.as_posix()]
+    roots.append(SERVICE_ROOT)
+    if own:
+        roots.append(own)
+    roots += [r for r in SERVICE_PROGRAMS if r != own]
+    roots.append(APPS_COMMON)
+    for root in roots:
+        candidate = (REPO / root / inc).resolve()
+        if candidate.is_file():
+            try:
+                return candidate.relative_to(REPO).as_posix()
+            except ValueError:
+                return None
+    return None
+
+
+def service_layer_table_violations() -> list[str]:
+    """SERVICE_ALLOWED names known units alone and is acyclic (Kahn)."""
+    out: list[str] = []
+    units = set(SERVICE_LIBS.values()) | set(SERVICE_PROGRAMS.values())
+    for unit, allowed_units in SERVICE_ALLOWED.items():
+        for name in sorted({unit} | allowed_units):
+            if name not in units:
+                out.append(f"[service-layer] SERVICE_ALLOWED names '{name}', no service unit")
+    for unit in sorted(units - set(SERVICE_ALLOWED)):
+        out.append(f"[service-layer] service unit '{unit}' has no SERVICE_ALLOWED row")
+    indegree = {u: 0 for u in SERVICE_ALLOWED}
+    for unit, allowed_units in SERVICE_ALLOWED.items():
+        for dep in allowed_units:
+            if dep in indegree:
+                indegree[unit] += 1
+    ready = [u for u, n in indegree.items() if n == 0]
+    done = 0
+    while ready:
+        dep = ready.pop()
+        done += 1
+        for unit, allowed_units in SERVICE_ALLOWED.items():
+            if dep in allowed_units:
+                indegree[unit] -= 1
+                if indegree[unit] == 0:
+                    ready.append(unit)
+    if done != len(indegree):
+        cyclic = sorted(u for u, n in indegree.items() if n > 0)
+        out.append(f"[service-layer] SERVICE_ALLOWED has a cycle among {', '.join(cyclic)}")
+    return out
+
+
 def scan() -> tuple[list[str], int]:
     libs = engine_libs()
     all_libs = set().union(*libs.values())
@@ -243,12 +381,23 @@ def scan() -> tuple[list[str], int]:
                 rel.parts[2] not in NET_AWARE_RUNTIME_LIBS
         editor_from = editor_lib(rel)
         cli = posix.startswith(CLI_TREE + "/")
+        unit = service_unit(posix)
+        if posix.startswith(SERVICE_ROOT + "/") and unit is None:
+            violations.append(f"[service-layer] {posix} lies in no service library's directory "
+                              f"(SERVICE_LIBS)")
         for lineno, line in enumerate(text.splitlines(), 1):
             m = INCLUDE_LINE.match(line)
             if not m:
                 continue
             quote, inc = m.group(1), m.group(2).replace("\\", "/").strip()
             where = f"{posix}:{lineno}: {line.strip()}"
+            if unit is not None:
+                target = resolve_service_include(rel, inc, angled=quote == "<")
+                to = service_unit(target) if target else None
+                if to is not None and to != unit and to not in SERVICE_ALLOWED.get(unit, set()):
+                    violations.append(
+                            f"[service-layer] {where} ({unit} may not include {to}: "
+                            f"SERVICE_ALLOWED; apps/novaworld_common/README.md)")
             if rel.parts[0] in GODOT_FREE_ROOTS and "godot" in inc.lower():
                 violations.append(f"[godot-free] {where}")
                 continue
@@ -309,6 +458,7 @@ def scan() -> tuple[list[str], int]:
     for name in sorted(GROUPS):
         if (REPO / "godot" / "src" / name).exists():
             violations.append(f"[binding-root] godot/src/{name}/ is named like an engine group")
+    violations.extend(service_layer_table_violations())
     return violations, len(files)
 
 
@@ -336,7 +486,9 @@ def main() -> int:
               "engine/runtime/devtools/ and tests/devtools/ (ADR 0042 d6); inside "
               "engine/editor, model < documents < graph < session < ui (ADR 0046 S13 D3); "
               "apps/project includes editor/ only through editor/session/ and "
-              "editor/run/null_process_platform.h (ADR 0046 S13 A7).")
+              "editor/run/null_process_platform.h (ADR 0046 S13 A7); the NovaWorld "
+              "service's libraries and programs include only the layers SERVICE_ALLOWED "
+              "gives them (apps/novaworld_common/README.md).")
         return 1
     return 0
 

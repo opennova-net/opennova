@@ -26,7 +26,14 @@ TARGET level are the two structural seams:
 
   2. Forbidden edges: the game net stack never links the service leg (the
      service sits ABOVE opennova_net), and the godot adapter links
-     session+gate via opennova_net, never the service.
+     session+gate via opennova_net, never the service. Within the NovaWorld
+     service's layered libraries (apps/novaworld_common/README.md "Build
+     layout and tests"; the include lint's SERVICE LAYERS): only the
+     worker's targets reach the cloud's library, the data program and the
+     data sets never reach hosting, billing or the accounts, the gate and the
+     lobby reach only the core, the program runtime and the service, and
+     hostd never reaches the service or the program runtime (it builds
+     without them).
 
 PUBLIC vs PRIVATE keywords are deliberately not consulted: a STATIC library's
 PRIVATE deps still propagate onto every downstream link line (as $<LINK_ONLY>
@@ -98,11 +105,27 @@ CONTAINED = [
     (PQ_TARGET, SERVICE_TARGET, PQ_RULE_REASON),
     (REDIS_TARGET, WEB_CORE_TARGET, REDIS_RULE_REASON),
 ]
+# The NovaWorld service's layered libraries and programs (apps/novaworld_common,
+# apps/novaworld_<program>).
+NW = "opennova_novaworld_"
+NW_CORE, NW_PROTOCOL, NW_PROGRAM = NW + "core", NW + "hosting_protocol", NW + "program"
+NW_JOBS, NW_ACCOUNTS, NW_BILLING = NW + "jobs", NW + "accounts", NW + "billing"
+NW_DATA_SETS, NW_MODEL, NW_CLOUD = NW + "data_sets", NW + "hosting_model", NW + "hosting_cloud"
+NW_GATE = [NW + "gate", NW + "gate_core"]
+NW_LOBBY = [NW + "lobby", NW + "lobby_core"]
+NW_WEB = [NW + "web", WEB_CORE_TARGET]
+NW_FLEET = [NW + "fleet", NW + "fleet_core"]
+NW_WORKER = [NW + "worker", NW + "worker_core"]
+NW_DATA = [NW + "data"]
+HOSTD_TARGETS = ["opennova_hostd", "opennova_hostd_core"]
 # Defined only when the build turns OPENNOVA_NOVAWORLD_SERVICE on (the repo
-# root's option, off by default; opennova_redis with BUILD_NOVAWORLD_HTTP as
-# well): a graphviz dump of a tree configured without it lacks them, which
-# vacates no rule. The files walk always sees them.
-SERVICE_GATED = {PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, WEB_CORE_TARGET}
+# root's option, off by default; opennova_redis, web, the fleet, the worker and
+# the data program with BUILD_NOVAWORLD_HTTP as well; the core and the agents'
+# protocol on Linux too): a graphviz dump of a tree configured without it lacks
+# them, which vacates no rule. The files walk always sees them.
+SERVICE_GATED = {PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, NW_CORE, NW_PROTOCOL, NW_PROGRAM,
+                 NW_JOBS, NW_ACCOUNTS, NW_BILLING, NW_DATA_SETS, NW_MODEL, NW_CLOUD,
+                 *NW_GATE, *NW_LOBBY, *NW_WEB, *NW_FLEET, *NW_WORKER, *NW_DATA}
 
 # (reason, from-targets, to-targets, targets allowed to be absent from the
 # graph without a warning — e.g. the adapter target lives in the godot/src
@@ -142,6 +165,36 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         ["opennova", "opennova_bindings"],
         ["opennova_editor"],
         {"opennova", "opennova_bindings"},  # defined only in the godot/src CMake root
+    ),
+    (
+        "the cloud is the worker's (apps/novaworld_common/README.md): only "
+        "opennova_novaworld_worker reaches opennova_novaworld_hosting_cloud, never web, "
+        "the fleet, the gate, the lobby, the data program or the worker's core web links",
+        NW_GATE + NW_LOBBY + NW_WEB + NW_FLEET + NW_DATA + [NW + "worker_core"],
+        [NW_CLOUD],
+        set(),
+    ),
+    (
+        "the data program reads the store and the data sets alone (decision 2 of the "
+        "service's split): it and the data sets never reach hosting, billing or the accounts",
+        NW_DATA + [NW_DATA_SETS],
+        [NW_MODEL, NW_BILLING, NW_ACCOUNTS],
+        set(),
+    ),
+    (
+        "the gate and the lobby stand on the core, the program runtime and the service "
+        "alone: no domain library, no other program's code, no Redis",
+        NW_GATE + NW_LOBBY,
+        [NW_PROTOCOL, NW_JOBS, NW_ACCOUNTS, NW_BILLING, NW_DATA_SETS, NW_MODEL, NW_CLOUD,
+         WEB_CORE_TARGET, NW + "fleet_core", NW + "worker_core", REDIS_TARGET],
+        set(),
+    ),
+    (
+        "hostd builds without the service (apps/serve/Dockerfile): it reaches the core and "
+        "the agents' protocol alone, never the service or the program runtime",
+        HOSTD_TARGETS,
+        [SERVICE_TARGET, NW_PROGRAM],
+        set(HOSTD_TARGETS),  # Linux only
     ),
 ]
 
