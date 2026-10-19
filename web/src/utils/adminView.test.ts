@@ -21,6 +21,8 @@ describe('entitlementLabel', () => {
     // Paid for, beside a tier or alone (no tier needed).
     expect(entitlementLabel({ ...none, source: 'tier', tier: 2, own_machines: 1 })).toBe('Tier 2, 1 dedicated');
     expect(entitlementLabel({ ...none, own_machines: 2 })).toBe('2 dedicated');
+    // Paid for beside the grant's own: told apart.
+    expect(entitlementLabel({ ...none, comp_own_machines: 1, own_machines: 2 })).toBe('Admin grant of 1 dedicated, 1 paid dedicated');
   });
 });
 

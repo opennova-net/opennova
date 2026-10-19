@@ -35,8 +35,10 @@ export function entitlementLabel(e: {
   ];
   const grant = granted.length > 0 ? `Admin grant of ${granted.join(' + ')}` : '';
   const tier = e.tier !== null ? `Tier ${e.tier}` : '';
+  // The paid dedicated machines; "paid" only beside the grant's own, so the two never read alike.
   const paid = e.own_machines - e.comp_own_machines;
-  const parts = [...(e.source === 'tier' ? [tier, grant] : [grant, tier]), paid > 0 ? `${paid} dedicated` : ''];
+  const paidLabel = e.comp_own_machines > 0 ? `${paid} paid dedicated` : `${paid} dedicated`;
+  const parts = [...(e.source === 'tier' ? [tier, grant] : [grant, tier]), paid > 0 ? paidLabel : ''];
   const named = parts.filter((p) => p !== '');
   return named.length > 0 ? named.join(', ') : 'None';
 }
