@@ -22,14 +22,14 @@
 //   ONNET_HOSTED_EC2_CLUSTER      the fleet cluster the ec2 driver's machines
 //                                 join (infra/aws/fleet_agent.tf's
 //                                 opennova-<deployment>-fleet)
-//   ONNET_HOSTED_ADDRESS_ZONE_ID  ec2, with static addresses on: the play
+//   ONNET_HOSTED_ADDRESS_ZONE_ID  ec2, for the static addresses: the play
 //                                 zone's Route 53 id (Z...; address_zone.h
 //                                 Route53Zone)
 //   ONNET_HOSTED_ADDRESS_ZONE_FILE
-//                                 docker, with static addresses on: the zone
+//                                 docker, for the static addresses: the zone
 //                                 file the worker writes (address_zone.h
 //                                 FileZone), absolute
-//   ONNET_HOSTED_DOCKER_ADDRESSES docker, with static addresses on: the
+//   ONNET_HOSTED_DOCKER_ADDRESSES docker, for the static addresses: the
 //                                 addresses it hands out (172.30.77.64/28;
 //                                 docker_address_driver.h)
 //
@@ -94,16 +94,20 @@ bool load_machine_script(const std::string &path, std::string &out, std::string 
 
 // The machine driver's settings over a policy that is on (the worker's): the
 // drivers' own variables (parse_driver_config) and, for the ec2 driver, its
-// machine script's text, each driver's check_config passed; with the static
-// addresses on, their drivers' settings too (the play zone's Route 53 id for
-// ec2; the zone file and the addresses for docker).
+// machine script's text, each driver's check_config passed; and whether the
+// static addresses' drivers' settings read (the play zone's name, its Route
+// 53 id for ec2; the zone file and the addresses for docker): then the
+// worker runs the address jobs, with the add-on off too, so the addresses it
+// holds are still released (it allocates none while it is off).
 struct DriverSetup {
 	DriverConfig driver;
+	bool addresses = false;
 };
 
 // The driver `policy` names, set up, into `out`; false with `error` when its
 // settings do not read or are incomplete (the worker's FATAL: hosting on with
-// no driver to launch its machines).
+// no driver to launch its machines), or the static addresses are on and
+// their drivers' settings do not read.
 bool driver_setup(const HostedPolicy &policy, DriverSetup &out, std::string &error);
 
 } // namespace opennova::novaworld_server::hosted

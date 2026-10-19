@@ -361,8 +361,8 @@ if(BUILD_NOVAWORLD_HTTP)
     # then on a migrated database the names, the comp addresses, the entitlement's
     # addresses, a start naming one, and the address jobs run by hand over a recording
     # driver (allocate, associate after the previous holder's end, release after the
-    # machine's end, the record's sync and TTL, the grant read again) and fleet.sweep's
-    # orphans.
+    # machine's end, the record's sync and TTL, the grant read again), fleet.sweep's
+    # orphans and the jobs with the add-on off.
     add_executable(hosted_address_test novaworld/hosted_address_test.cpp)
     target_link_libraries(hosted_address_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_hosting_cloud opennova_novaworld_service)
@@ -896,9 +896,9 @@ add_test(NAME hosted_server_phase COMMAND hosted_server_phase_test)
 # each rule just under and just over its bound (stalled starts, stuck and flapping
 # machines, the brake's held machines, a protocol mismatch, outdated agents and images,
 # machine pressure, late ticks, held launches, no lobby, failed servers and addresses,
-# orphans, oversold), the level, the admin page each links and its rule's name, stale rows
-# a warn "unknown", a machine's outdated by each image pair, the order and the heartbeat's
-# gauges. Database-free.
+# stuck releases, addresses held with the add-on off, orphans, oversold), the level, the
+# admin page each links and its rule's name, stale rows a warn "unknown", a machine's
+# outdated by each image pair, the order and the heartbeat's gauges. Database-free.
 add_executable(hosted_fleet_health_test novaworld/hosted_fleet_health_test.cpp)
 target_link_libraries(hosted_fleet_health_test PRIVATE
     opennova_novaworld_hosting_model opennova_novaworld_service Threads::Threads)

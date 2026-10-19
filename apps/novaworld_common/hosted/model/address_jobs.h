@@ -13,10 +13,11 @@
 //                      tags; then its A record written (the name it had before
 //                      deleted first: an admin's rename): allocating -> ready.
 //                      The cloud's refusal fails the row with its error code
-//                      (an exhausted quota shows there). Deduped per address,
-//                      one running at a time across the workers. A ready
-//                      address's run writes its record again (a rename, a
-//                      release undone).
+//                      (an exhausted quota shows there). With the add-on off
+//                      no address is allocated: the run waits. Deduped per
+//                      address, one running at a time across the workers. A
+//                      ready address's run writes its record again (a rename,
+//                      a release undone).
 //   address.associate  a ready address associated with the machine launched
 //                      to carry it, never taken from another (no
 //                      reassociation), and only once the machine that held it
@@ -48,6 +49,11 @@ namespace opennova::novaworld_server::hosted {
 inline constexpr const char *kJobAddressAllocate = "address.allocate";
 inline constexpr const char *kJobAddressAssociate = "address.associate";
 inline constexpr const char *kJobAddressRelease = "address.release";
+
+// The A records' TTL: the wait a released address's record drains for.
+inline constexpr int64_t kAddressTtlS = 300;
+// The wait past a deleted record's TTL before its address goes.
+inline constexpr int64_t kReleaseMarginS = 60;
 
 // Each on `db`, in the caller's transaction; 0 when one is queued or running.
 int64_t enqueue_address_allocate(db::Database &db, int64_t address_id);

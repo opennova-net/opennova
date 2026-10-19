@@ -214,7 +214,8 @@ this directory's.
   could not be fetched at its last 3 starts in a row, or for over 15 min (danger past an
   hour: such a start costs no restart, so the server never fails of it), with its data set,
   its trees and hostd's last reason; a failed or orphan
-  static address; the hosting sold past what the fleet sells. Rows too old to judge (a
+  static address, a release that has not moved for 16 min, and addresses held while the
+  add-on is off; the hosting sold past what the fleet sells. Rows too old to judge (a
   machine's report or use, a server's ticks) are a warn `unknown`, never healthy. The
   admin's attention list (`GET /api/admin/attention`) and the fleet leader's heartbeat
   read the same findings.
@@ -311,7 +312,9 @@ names it runs on a machine carrying it, so the server lists at the same `address
 each time. Each is its own Stripe subscription (the static-address add-on, quantity 1,
 bought through Checkout once the account has an own machine for it, canceled through the
 Portal's cancel flow), or an admin's comp address (`POST /api/admin/users/<id>/addresses`).
-At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`).
+At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`). With the add-on off
+(`ONNET_FLEET_MAX_ADDRESSES` 0, or no zone name) none is sold or allocated, and a worker
+whose address settings still read releases the held ones.
 
 - **The rows** (`model/address_repository.*`): `allocating` once named (the owner names a bought
   one, `POST /api/me/addresses`; a name of 3 to 32 lower-case letters, digits and `-`, a
@@ -327,7 +330,8 @@ At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`).
   `address.allocate` (the address found by its tag first, so a run cut short never allocates
   a second; then allocated with its tags
   in one call; its record written TTL 300; a ready one's run moves its record to a new
-  name), `address.associate` (onto the machine launched to carry it, without reassociation
+  name; with the add-on off it allocates nothing and waits), `address.associate` (onto the
+  machine launched to carry it, without reassociation
   and only once the machine that held it before has ended; retried while the machine is
   pending; then a `machine.describe`, so the machine's public address follows),
   `address.release` (once no live machine carries it: its record deleted and in sync, the
@@ -451,7 +455,7 @@ reads the store alone.
 | `ONNET_FLEET_SHARED_SLOTS` | 12 | web, fleet, worker | A new shared machine's slots (1..32). |
 | `ONNET_FLEET_MAX_SHARED` | 2 | web, fleet, worker | The most shared machines taking servers at once (the worker's launch refuses a machine past it). |
 | `ONNET_FLEET_MAX_OWN` | 2 | web, fleet, worker | The most own machines taking servers at once (the same). |
-| `ONNET_FLEET_MAX_ADDRESSES` | 0 | web, fleet, worker | The static addresses the fleet sells (0: the add-on is off). Above 0 with hosting on, `ONNET_HOSTED_ADDRESS_ZONE` must name the zone (else a boot warning and none sold), and the worker needs its driver's address settings below (else its boot FATAL). |
+| `ONNET_FLEET_MAX_ADDRESSES` | 0 | web, fleet, worker | The static addresses the fleet sells (0: the add-on is off). Above 0 with hosting on, `ONNET_HOSTED_ADDRESS_ZONE` must name the zone (else a boot warning and none sold), and the worker needs its driver's address settings below (else its boot FATAL). At 0 none is sold or allocated, while a worker whose address settings still read (the zone's name among them) releases the addresses held. |
 | `ONNET_HOSTED_ADDRESS_ZONE` | none | web, fleet, worker | The play zone the addresses are named in, no trailing dot (`play.opennova.net`; infra/aws/edge.tf's): the site shows each one as `<name>.<zone>`. |
 | `ONNET_FLEET_IDLE_MINUTES` | 30 | web, fleet, worker | How long a shared machine with no server lives on before it ends. |
 | `ONNET_FLEET_SLOT_MEMORY_MB` | 512 | web, fleet, worker | Each container's memory (no swap). |
@@ -464,14 +468,14 @@ reads the store alone.
 | `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | worker | `ec2`: the launch templates by kind, `{"shared": "lt-...", "own": "lt-..."}` (`lt-<id>` or `lt-<id>:<version>`). |
 | `ONNET_HOSTED_EC2_REGION` | none | worker | `ec2`: the region every AWS CLI call names. |
 | `ONNET_HOSTED_EC2_CLUSTER` | none | worker | `ec2`: the fleet cluster every machine's ECS agent joins (`opennova-<deployment>-fleet`), whose daemon service runs `opennova-hostd`; required. |
-| `ONNET_HOSTED_ADDRESS_ZONE_ID` | none | worker | `ec2`, with static addresses on: the play zone's Route 53 id (`Z...`). |
+| `ONNET_HOSTED_ADDRESS_ZONE_ID` | none | worker | `ec2`, for the static addresses (on, or off with addresses still held): the play zone's Route 53 id (`Z...`). |
 | `ONNET_HOSTED_EC2_SUBNETS` | none | worker | `ec2`: the subnets machines launch into, one per zone, each giving a public IPv4; a launch takes the one with fewer live machines and, when that zone cannot take it, the next. |
 | `ONNET_HOSTED_AWS_CLI` | `/usr/local/bin/aws` | web, worker, data | The AWS CLI v2, an absolute path (no `PATH` search): the `ec2` driver's, the S3 object store's and the mailer's SES calls. |
 | `ONNET_HOSTED_DOCKER_URL` | none | worker | `docker`: the Docker Engine API, `http://<host>:<port>` (the local stack's socket proxy). |
 | `ONNET_HOSTED_DOCKER_NETWORK` | none | worker | `docker`: the network every machine joins. |
 | `ONNET_HOSTED_DOCKER_DATA_FROM` | none | worker | `docker`: the container whose mounts every machine takes, each in its mode there (the local stack's `machine-data`: the store read-only, the log store read-write). |
-| `ONNET_HOSTED_ADDRESS_ZONE_FILE` | none | worker | `docker`, with static addresses on: the zone file the worker writes, an absolute path (the local stack's `/var/lib/opennova/zone/play.localhost.zone`). |
-| `ONNET_HOSTED_DOCKER_ADDRESSES` | none | worker | `docker`, with static addresses on: the addresses it hands out, a private /24 to /30 the stack's network holds but Docker never assigns (the local stack's `172.30.77.64/28`). |
+| `ONNET_HOSTED_ADDRESS_ZONE_FILE` | none | worker | `docker`, for the static addresses (on, or off with addresses still held): the zone file the worker writes, an absolute path (the local stack's `/var/lib/opennova/zone/play.localhost.zone`). |
+| `ONNET_HOSTED_DOCKER_ADDRESSES` | none | worker | `docker`, for the static addresses (on, or off with addresses still held): the addresses it hands out, a private /24 to /30 the stack's network holds but Docker never assigns (the local stack's `172.30.77.64/28`). |
 | `ONNET_HOSTED_MACHINE_SCRIPT` | `/app/hosted/machine_user_data.sh` | worker | `ec2`: the user-data template, in the worker's image alone; a run outside the image names it. |
 | `ONNET_LOG_STORE` | none | web | Where the admin's pages read a machine's hostd log and a server start's log from (`GET /api/admin/logs`, [`../README.md`](../README.md) "Logs"): the deployment's `/machines` and `/servers` groups (`cloudwatch:/opennova/<deployment>`), or the local stack's directory (`file:///var/log/opennova`, its `machines/` and `servers/`). |
 

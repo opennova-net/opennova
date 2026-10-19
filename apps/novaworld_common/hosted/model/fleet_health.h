@@ -37,6 +37,11 @@
 //                      never fails), or whose run of them began over
 //                      kDataFailingS ago; danger past kDataFailingDangerS
 //   failed_address     warn: a static address the cloud refused
+//   stuck_address      warn: a releasing static address whose release has not
+//                      moved for over kStuckReleaseS (no worker runs it)
+//   addresses_off      warn: static addresses held while the add-on is off
+//                      (ONNET_FLEET_MAX_ADDRESSES 0, or no zone name): only a
+//                      worker whose address settings still read releases them
 //   orphan_address     warn: an address the cloud holds that no row names
 //   oversold           warn: the hosting sold is past what the fleet sells
 //   unknown            warn: rows too old to judge: a ready or draining machine's
@@ -46,6 +51,7 @@
 //
 // Service policy, not a port.
 
+#include "address_jobs.h"
 #include "fleet_repository.h"
 #include "hosted_repository.h"
 #include "sold_capacity.h"
@@ -84,6 +90,9 @@ inline constexpr int64_t kDataFailingDangerS = 60 * 60;
 inline constexpr int64_t kStaleReportS = 3 * 60;
 // A machine's use rides its syncs, a server's ticks a once-a-minute file.
 inline constexpr int64_t kStaleStatsS = 5 * 60;
+// A release's steps: its record's TTL and margin waited out after the delete,
+// and ten minutes for the delete's sync and the job's waits between them.
+inline constexpr int64_t kStuckReleaseS = kAddressTtlS + kReleaseMarginS + 10 * 60;
 
 enum class HealthLevel : uint8_t { Info, Warn, Danger };
 const char *health_level_text(HealthLevel level); // "info", "warn", "danger"
@@ -174,6 +183,14 @@ struct FailedAddress {
 	int64_t failed_at = 0;
 };
 
+// A releasing static address, and its release's last step (its row's last
+// write, Unix seconds).
+struct ReleasingAddress {
+	int64_t id = 0;
+	std::string name;
+	int64_t last_step = 0;
+};
+
 // An address the cloud holds for this deployment that no row names, as the last
 // fleet.sweep found it (hosted_address_orphans).
 struct OrphanAddress {
@@ -191,7 +208,13 @@ struct HealthInputs {
 	size_t lobbies_live = 0; // lobbydb::live_lobbies
 	int64_t lobby_last_seen = 0; // the newest instance's last_seen_at (0: none)
 	std::vector<FailedAddress> failed_addresses;
+	std::vector<ReleasingAddress> releasing_addresses;
 	std::vector<OrphanAddress> orphans;
+	// The static addresses the cloud may hold now (address_repository.h
+	// count_held_addresses), and whether the add-on is on (hosting on and its
+	// policy's max_addresses above 0).
+	int held_addresses = 0;
+	bool addresses_on = false;
 	// With hosting on: what is sold, and what the fleet sells.
 	std::optional<Capacity> sold;
 	Capacity sellable;

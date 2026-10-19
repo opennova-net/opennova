@@ -351,10 +351,11 @@ int test_attention(Harness &h, ConnectionPool &pool) {
 	auto reply = h.get("/api/admin/attention");
 	auto json = json_of(reply, 200);
 	TEST_EXPECT(json && no_store(reply));
-	// No lobby takes clients (danger), a server on the reporting machine late (warn), a
-	// machine on an older image (info, the fleet's).
+	// No lobby takes clients (danger), a server on the reporting machine late (warn), its
+	// static address held with the add-on off (warn), a machine on an older image (info,
+	// the fleet's).
 	const auto &findings = json["findings"];
-	TEST_EXPECT(findings.size() == 3);
+	TEST_EXPECT(findings.size() == 4);
 	TEST_EXPECT(str(findings[0]["level"]) == "danger" && str(findings[0]["source"]) == "no_lobby" &&
 			str(findings[0]["subject"]) == "The lobby" &&
 			str(findings[0]["link"]) == "/admin/infrastructure/programs/lobby" &&
@@ -365,9 +366,14 @@ int test_attention(Harness &h, ConnectionPool &pool) {
 			str(findings[1]["text"])
 							.find("Server " + std::to_string(h.rows.server) + " (42 late)") !=
 					std::string::npos);
-	TEST_EXPECT(str(findings[2]["level"]) == "info" &&
-			str(findings[2]["source"]) == "outdated_image" &&
-			str(findings[2]["link"]) == "/admin/fleet?tab=roll");
+	// The machine's static address, held while the add-on is off (hosting is, here).
+	TEST_EXPECT(str(findings[2]["level"]) == "warn" &&
+			str(findings[2]["source"]) == "addresses_off" &&
+			str(findings[2]["link"]) == "/admin/addresses" &&
+			str(findings[2]["text"]).rfind("1 is held while the add-on is off", 0) == 0);
+	TEST_EXPECT(str(findings[3]["level"]) == "info" &&
+			str(findings[3]["source"]) == "outdated_image" &&
+			str(findings[3]["link"]) == "/admin/fleet?tab=roll");
 	TEST_EXPECT(json["alarms_read"].t() == crow::json::type::False && json["alarms"].size() == 0);
 	TEST_EXPECT(str(json["checked_at"]).size() == 20 && str(json["checked_at"]).back() == 'Z');
 
@@ -377,7 +383,7 @@ int test_attention(Harness &h, ConnectionPool &pool) {
 		opennova::lobbydb::register_instance(*db, "127.0.0.1:7598");
 	}
 	json = json_of(h.get("/api/admin/attention"), 200);
-	TEST_EXPECT(json && json["findings"].size() == 2);
+	TEST_EXPECT(json && json["findings"].size() == 3);
 	for (const auto &f : json["findings"])
 		TEST_EXPECT(str(f["level"]) != "danger");
 
@@ -431,7 +437,7 @@ int test_attention(Harness &h, ConnectionPool &pool) {
 				{ BindValue(unfetched) });
 	}
 	json = json_of(h.get("/api/admin/attention"), 200);
-	TEST_EXPECT(json && json["findings"].size() == 2);
+	TEST_EXPECT(json && json["findings"].size() == 3);
 	{
 		auto db = pool.acquire();
 		db->exec("DELETE FROM hosted_servers WHERE id = $1;", { BindValue(unfetched) });

@@ -12,7 +12,8 @@
 // written, ready), associate (waiting for the previous holder's machine to end, a
 // machine.describe after), release (the machine's end first, the record deleted and in
 // sync, the TTL waited, the grant read again, an association ended, then released), a
-// grant come back before the release, and fleet.sweep's orphans.
+// grant come back before the release, and fleet.sweep's orphans. The jobs with the
+// add-on off: nothing allocated, a ready one's record still moved, a release still run.
 
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
@@ -542,7 +543,7 @@ int test_jobs() {
 	hosted::FileZone zone("play.localhost", dir.file("play.zone"));
 	RecordingDriver driver;
 	nws::jobs::JobRegistry registry;
-	hosted::register_address_jobs(registry, driver, zone);
+	hosted::register_address_jobs(registry, driver, zone, true);
 	using Kind = nws::jobs::JobResult::Kind;
 	const int64_t now = billing::unix_now();
 	const int64_t ana = make_player(db, "jobs_ana", 0);
@@ -673,6 +674,47 @@ int test_jobs() {
 	return 0;
 }
 
+// The jobs with the add-on off: nothing allocated (no cloud call), the
+// allocation waiting for it; a ready address's record still moved by a rename,
+// and a release still run.
+int test_jobs_add_on_off() {
+	test_db::TestDatabase scratch;
+	ConnectionPool pool(scratch.options());
+	auto lease = pool.acquire();
+	Database &db = *lease;
+	test_temp::TempDir dir("opennova_address_off");
+	hosted::FileZone zone("play.localhost", dir.file("play.zone"));
+	RecordingDriver driver;
+	nws::jobs::JobRegistry on;
+	hosted::register_address_jobs(on, driver, zone, true);
+	nws::jobs::JobRegistry off;
+	hosted::register_address_jobs(off, driver, zone, false);
+	using Kind = nws::jobs::JobResult::Kind;
+	const int64_t ben = make_player(db, "off_ben", 0);
+	TEST_EXPECT(billing::set_comp_grants(db, ben, { 1, 1 }));
+	const int64_t id = hosted::add_comp_address(db, ben, "kept", billing::unix_now()).id;
+	TEST_EXPECT(id > 0);
+
+	const auto result = run_job(pool, off, hosted::kJobAddressAllocate, { { "address_id", id } });
+	TEST_EXPECT(result.kind == Kind::Retry && result.delay_ms >= 60 * 1000 && driver.calls.empty() &&
+			hosted::find_address(db, id)->state == AddressState::Allocating);
+	TEST_EXPECT(run_job(pool, on, hosted::kJobAddressAllocate, { { "address_id", id } }).kind == Kind::Done);
+	const std::string ip = hosted::find_address(db, id)->public_ip;
+	TEST_EXPECT(hosted::find_address(db, id)->state == AddressState::Ready && !ip.empty());
+	TEST_EXPECT(hosted::rename_address(db, id, "moved").outcome == hosted::NameOutcome::Created);
+	driver.calls.clear();
+	TEST_EXPECT(run_job(pool, off, hosted::kJobAddressAllocate, { { "address_id", id } }).kind == Kind::Done);
+	auto records = hosted::FileZone::parse(read_text(dir.file("play.zone")));
+	TEST_EXPECT(driver.calls.empty() && records.count("kept") == 0 && records["moved"] == ip &&
+			hosted::find_address(db, id)->dns_name == "moved");
+	TEST_EXPECT(hosted::lapse_address(db, id, hosted::kLapseAdmin, "released by an admin") &&
+			hosted::begin_release(db, id));
+	TEST_EXPECT(run_job(pool, off, hosted::kJobAddressRelease, { { "address_id", id } }).kind == Kind::Retry);
+	TEST_EXPECT(hosted::FileZone::parse(read_text(dir.file("play.zone"))).count("moved") == 0 &&
+			hosted::find_address(db, id)->dns_state == "pending");
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -698,6 +740,7 @@ int main(int argc, char **argv) {
 	const Case database[] = {
 		{ "naming_and_starts", test_naming_and_starts },
 		{ "jobs", test_jobs },
+		{ "jobs_add_on_off", test_jobs_add_on_off },
 	};
 	for (const Case &c : database) {
 		std::printf("-- %s\n", c.name);

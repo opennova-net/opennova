@@ -2,8 +2,9 @@
 
 The NovaWorld service's worker: the job pool (`ONNET_WORKER_THREADS` threads) and its
 handlers: the prunes, the account jobs, the mail it sends (SES), the billing sync, the fleet's
-machine driver (EC2) and, while the static addresses are on, their driver (Elastic IPs) and
-their zone (Route 53; `address.*` jobs, `apps/novaworld_common/hosted/cloud/address_job_handlers.h`);
+machine driver (EC2) and, whenever their settings read, the static addresses' driver (Elastic
+IPs) and their zone (Route 53; `address.*` jobs, `apps/novaworld_common/hosted/cloud/address_job_handlers.h`:
+with the add-on off they allocate nothing and release what is held);
 and the scheduler of its own periodic kinds (every one but the data sets' `tree.prune`, the
 data program's), in every worker process with no election: a schedule key is unique, so a bucket
 gets one job however many workers tick. Its at-start jobs (the billing reconcile) are keyed by

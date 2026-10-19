@@ -2,8 +2,8 @@
 
 // The play zone a static address's name lives in (ADR 0066): an A record
 // <name>.<zone> at the address, TTL kAddressTtlS, written by the worker's
-// address jobs (hosted/model/address_jobs.h) when an address is ready and deleted before it
-// is released. The seam has two zones:
+// address jobs (hosted/model/address_jobs.h, which holds the TTL) when an
+// address is ready and deleted before it is released. The seam has two zones:
 //
 //   Route53Zone  the deployment's Route 53 public zone (infra/aws/edge.tf
 //                play.<domain>, staging play.staging.<domain>; its id
@@ -22,6 +22,7 @@
 // Service policy, not a port.
 
 #include "command_runner.h"
+#include "hosted/model/address_jobs.h"
 
 #include <cstdint>
 #include <functional>
@@ -31,9 +32,6 @@
 #include <string>
 
 namespace opennova::novaworld_server::hosted {
-
-// The A records' TTL: the wait a released address's record drains for.
-inline constexpr int64_t kAddressTtlS = 300;
 
 struct ZoneChange {
 	bool ok = false;

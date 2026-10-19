@@ -63,8 +63,9 @@ struct MachineDriverStack {
 // The driver `hosting` names over `setup`: the ec2 driver over its own
 // scratch directory and AWS CLI runner, or the docker driver over the Docker
 // Engine API (the local stack's), each with the static addresses' driver and
-// zone while they are on (the ec2 driver's: Elastic IPs and Route 53, over its
-// runner); no driver, with `error`, when its scratch directory cannot be made.
+// zone whenever their settings read (setup.addresses; the ec2 driver's:
+// Elastic IPs and Route 53, over its runner), the add-on on or off; no
+// driver, with `error`, when its scratch directory cannot be made.
 MachineDriverStack make_machine_driver(
 		const hosted::HostedPolicy &hosting, const hosted::DriverSetup &setup, std::string &error) {
 	MachineDriverStack stack;
@@ -78,7 +79,7 @@ MachineDriverStack make_machine_driver(
 		ec2.scratch_dir = stack.scratch.path().u8string();
 		stack.runner = std::make_unique<proc::ProcessCommandRunner>(
 				proc::ProcessCommandRunner::service_environment(), ec2.scratch_dir);
-		if (hosting.addresses_on) {
+		if (setup.addresses) {
 			hosted::Ec2AddressConfig addresses;
 			addresses.aws_cli = ec2.aws_cli;
 			addresses.region = ec2.region;
@@ -95,7 +96,7 @@ MachineDriverStack make_machine_driver(
 		return stack;
 	}
 	stack.driver = std::make_unique<hosted::DockerMachineDriver>(setup.driver.docker);
-	if (hosting.addresses_on) {
+	if (setup.addresses) {
 		const hosted::DriverConfig::Addresses &a = setup.driver.addresses;
 		std::string why;
 		const auto range = hosted::DockerAddressDriver::parse_range(a.docker_range, why);
@@ -127,10 +128,10 @@ int run(const program::Boot &boot) {
 	}
 	MailStack mail = make_mail(config);
 	const hosted::HostedPolicy hosting = hosted::hosted_policy(config);
-	// With hosting on, the driver that launches its machines (and, with the
-	// static addresses on, theirs): its settings incomplete is this boot's
-	// FATAL, never hosting off here while web and the fleet, which read the
-	// policy alone, take starts and sell addresses.
+	// With hosting on, the driver that launches its machines (and the static
+	// addresses', whenever their settings read): its settings incomplete is
+	// this boot's FATAL, never hosting off here while web and the fleet, which
+	// read the policy alone, take starts and sell addresses.
 	MachineDriverStack machines;
 	if (hosting.on) {
 		hosted::DriverSetup driver;
@@ -161,8 +162,9 @@ int run(const program::Boot &boot) {
 						: [addresses](db::ConnectionPool &pool) {
 							  hosted::sweep_addresses(pool, *addresses);
 						  });
+		// With the add-on off they release what is held and allocate nothing.
 		if (addresses != nullptr)
-			hosted::register_address_jobs(registry, *addresses, *machines.zone);
+			hosted::register_address_jobs(registry, *addresses, *machines.zone, hosting.addresses_on);
 	}
 
 	jobs::WorkerPoolConfig worker_config;

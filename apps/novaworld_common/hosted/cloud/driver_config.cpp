@@ -4,6 +4,7 @@
 #include "core/loggable.h"
 #include "core/text_util.h"
 #include "docker_address_driver.h"
+#include "hosted/model/address_names.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -55,12 +56,13 @@ bool setup_docker(const DriverConfig &driver, std::string &error) {
 	return true;
 }
 
-// The static addresses' drivers' settings checked over a policy with them on
-// (the play zone's Route 53 id for ec2; the zone file and the addresses for
-// docker): false with `error`.
-bool setup_addresses(const HostedPolicy &policy, const DriverConfig &driver,
-		std::string &error) {
+// The static addresses' drivers' settings checked (the play zone's name, and
+// its Route 53 id for ec2; the zone file and the addresses for docker): ""
+// when they read, else why not.
+std::string addresses_refusal(const HostedPolicy &policy, const DriverConfig &driver) {
 	const DriverConfig::Addresses &a = driver.addresses;
+	if (!is_zone_name(policy.fleet.address_zone))
+		return "ONNET_HOSTED_ADDRESS_ZONE is no zone name (play.<domain>)";
 	std::string why;
 	if (policy.provider == "ec2") {
 		Route53ZoneConfig zone;
@@ -74,17 +76,7 @@ bool setup_addresses(const HostedPolicy &policy, const DriverConfig &driver,
 	} else {
 		DockerAddressDriver::parse_range(a.docker_range, why);
 	}
-	if (!why.empty()) {
-		error = "the static addresses' driver is not configured: " + why +
-				" (ONNET_FLEET_MAX_ADDRESSES " + std::to_string(policy.fleet.placement.max_addresses) +
-				")";
-		return false;
-	}
-	const std::string from = policy.provider == "ec2"
-			? "Elastic IPs, their records in Route 53 zone " + a.zone_id
-			: "from " + a.docker_range + ", their records in " + loggable(a.zone_file, 260);
-	std::printf("[boot] static addresses: %s\n", from.c_str());
-	return true;
+	return why;
 }
 
 } // namespace
@@ -189,7 +181,28 @@ bool driver_setup(const HostedPolicy &policy, DriverSetup &out, std::string &err
 												   : setup_docker(out.driver, error);
 	if (!machines)
 		return false;
-	return !policy.addresses_on || setup_addresses(policy, out.driver, error);
+	// The static addresses' drivers whenever their settings read, so the held
+	// addresses' releases run with the add-on off too; with it on, settings
+	// that do not read are the boot's FATAL.
+	const std::string why = addresses_refusal(policy, out.driver);
+	if (!why.empty()) {
+		if (!policy.addresses_on)
+			return true;
+		error = "the static addresses' driver is not configured: " + why +
+				" (ONNET_FLEET_MAX_ADDRESSES " + std::to_string(policy.fleet.placement.max_addresses) +
+				")";
+		return false;
+	}
+	out.addresses = true;
+	const DriverConfig::Addresses &a = out.driver.addresses;
+	const std::string from = policy.provider == "ec2"
+			? "Elastic IPs, their records in Route 53 zone " + a.zone_id
+			: "from " + a.docker_range + ", their records in " + loggable(a.zone_file, 260);
+	std::printf("[boot] static addresses: %s%s\n", from.c_str(),
+			policy.addresses_on ? ""
+								: "; the add-on is off (none sold or allocated): the held ones' "
+								  "releases run");
+	return true;
 }
 
 } // namespace opennova::novaworld_server::hosted

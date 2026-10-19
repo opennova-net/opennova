@@ -38,11 +38,18 @@ void log_address(const HostedAddress &a, const std::string &what) {
 			what.c_str());
 }
 
-jobs::JobResult allocate(jobs::JobContext &ctx, AddressDriver &driver, ZoneDriver &zone) {
+// The wait of an allocation while the add-on is off.
+constexpr int64_t kAllocationsOffRetryMs = 10 * 60 * 1000;
+
+jobs::JobResult allocate(jobs::JobContext &ctx, AddressDriver &driver, ZoneDriver &zone, bool allocations_on) {
 	const int64_t id = member_int(ctx.job.payload, "address_id");
 	std::optional<HostedAddress> a = address_of(ctx, id);
 	if (!a || (a->state != AddressState::Allocating && a->state != AddressState::Ready)) return jobs::JobResult::done();
 	if (a->allocation_id.empty()) {
+		// The add-on off allocates nothing: the address waits for it.
+		if (!allocations_on)
+			return jobs::JobResult::retry("the static-address add-on is off: no address is allocated",
+					kAllocationsOffRetryMs);
 		// One a run cut short made already carries the row's tag: it is taken,
 		// never a second one.
 		AddressResult found = driver.find_tagged(id);
@@ -195,9 +202,11 @@ jobs::JobResult release(jobs::JobContext &ctx, AddressDriver &driver, ZoneDriver
 
 } // namespace
 
-void register_address_jobs(jobs::JobRegistry &registry, AddressDriver &driver, ZoneDriver &zone) {
+void register_address_jobs(
+		jobs::JobRegistry &registry, AddressDriver &driver, ZoneDriver &zone, bool allocations_on) {
 	jobs::JobKind allocate_kind{ kJobAddressAllocate,
-		[&driver, &zone](jobs::JobContext &ctx) { return allocate(ctx, driver, zone); }, 1 };
+		[&driver, &zone, allocations_on](jobs::JobContext &ctx) { return allocate(ctx, driver, zone, allocations_on); },
+		1 };
 	allocate_kind.retry_base_ms = 5 * 1000;
 	allocate_kind.retry_max_ms = 5 * 60 * 1000;
 	registry.add(std::move(allocate_kind));

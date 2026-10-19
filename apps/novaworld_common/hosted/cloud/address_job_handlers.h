@@ -16,11 +16,12 @@
 
 namespace opennova::novaworld_server::hosted {
 
-// The wait past a deleted record's TTL before its address goes.
-inline constexpr int64_t kReleaseMarginS = 60;
-
-// The handlers over `driver` and `zone`, which must outlive the workers.
-void register_address_jobs(jobs::JobRegistry &registry, AddressDriver &driver, ZoneDriver &zone);
+// The handlers over `driver` and `zone`, which must outlive the workers. With
+// `allocations_on` false (the add-on off: hosted/model/hosted_policy.h
+// addresses_on) no address is allocated, while the held ones' releases,
+// associations and records run.
+void register_address_jobs(
+		jobs::JobRegistry &registry, AddressDriver &driver, ZoneDriver &zone, bool allocations_on);
 
 // fleet.sweep's addresses: the listing's orphans written; false when the
 // listing failed (nothing written).

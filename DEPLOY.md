@@ -1278,10 +1278,27 @@ deployment's admins upload it on its own site, into its own bucket.
      that delegate it to Route 53 (`cloudflare_record.play_ns`), both `prevent_destroy`,
      and names the zone to web, the fleet and the worker (`ONNET_HOSTED_ADDRESS_ZONE`) and
      its id to the worker alone (`ONNET_HOSTED_ADDRESS_ZONE_ID`; `app converge` takes them).
+   - **The zone's name, checked.** `./deploy/run.sh --deployment staging app logs worker`
+     (and `web`, `fleet`): each boot says `static addresses: up to N, named in
+     play.<domain>`. A `WARN static addresses: ONNET_HOSTED_ADDRESS_ZONE is no zone name`
+     instead means the add-on is off there: nothing is sold or allocated, and a worker
+     with no zone it can name releases nothing either. Fix the name before anything else.
 
    The zone costs $0.50 a month. An address costs $3.65 a month while it is idle, and
    nothing more while its server runs (it takes the place of the machine's own public
    IPv4).
+
+   **Turning it off**: release every address first. On the admin's Static addresses page,
+   release each held one and cancel in Stripe the subscriptions that pay for them, then
+   wait until the page holds none (lapsed and releasing ones are held too: each is
+   released once its record's TTL has drained). Only then set `fleet_max_addresses` to 0:
+   the plan then takes the zone's names from the worker (`ONNET_HOSTED_ADDRESS_ZONE`,
+   `ONNET_HOSTED_ADDRESS_ZONE_ID`), and a worker with no zone releases no address, so one
+   still held stays held, and billed by AWS, until the add-on is back. The Attention list
+   warns of any address held while the add-on is off, and of a release that has stopped
+   moving. The zone and its NS records are `prevent_destroy`, so that plan is refused
+   until both leave the state (`infra state-rm 'aws_route53_zone.play[0]'` and each
+   `cloudflare_record.play_ns[N]`; delete them by hand to have them gone).
 
 ### The update service
 

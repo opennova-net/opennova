@@ -4,7 +4,8 @@
 // data cannot be fetched start after start among them); stale rows a
 // warn "unknown", never healthy (nor in the heartbeat's least free disk); a machine's
 // outdated by each image pair; the order (danger, warn, info, each oldest first, a finding
-// with no time after the rest) and the heartbeat's gauges. Pure functions: no database.
+// with no time after the rest) and the heartbeat's gauges; the static addresses' rules (a
+// release stuck, addresses held with the add-on off). Pure functions: no database.
 
 #include "hosted/model/fleet_health.h"
 
@@ -416,6 +417,34 @@ int test_data_unavailable() {
 	return 0;
 }
 
+// The static addresses: a release whose last step is past kStuckReleaseS is
+// stuck, one just at it not; addresses held while the add-on is off, none
+// when it is on or none is held.
+int test_addresses() {
+	hosted::HealthInputs in = healthy();
+	in.releasing_addresses.push_back({ 7, "slow", kNow - hosted::kStuckReleaseS - 1 });
+	in.releasing_addresses.push_back({ 8, "draining", kNow - hosted::kStuckReleaseS });
+	in.held_addresses = 3;
+	in.addresses_on = true;
+	auto all = hosted::fleet_health(in, {});
+	const auto stuck = of(all, "stuck_address");
+	TEST_EXPECT(stuck.size() == 1 && stuck[0].subject == "Address slow" && stuck[0].level == HealthLevel::Warn &&
+			stuck[0].link == "/admin/addresses" && stuck[0].since == kNow - hosted::kStuckReleaseS - 1);
+	TEST_EXPECT(of(all, "addresses_off").empty());
+	// The add-on off with addresses held.
+	in.addresses_on = false;
+	all = hosted::fleet_health(in, {});
+	auto off = of(all, "addresses_off");
+	TEST_EXPECT(off.size() == 1 && off[0].subject == "Static addresses" && off[0].level == HealthLevel::Warn &&
+			off[0].link == "/admin/addresses" && off[0].text.rfind("3 are held while the add-on is off", 0) == 0);
+	in.held_addresses = 1;
+	off = of(hosted::fleet_health(in, {}), "addresses_off");
+	TEST_EXPECT(off.size() == 1 && off[0].text.rfind("1 is held while the add-on is off", 0) == 0);
+	in.held_addresses = 0;
+	TEST_EXPECT(of(hosted::fleet_health(in, {}), "addresses_off").empty());
+	return 0;
+}
+
 int test_order_and_gauges() {
 	hosted::HealthInputs in = healthy();
 	in.lobbies_live = 0; // danger, since kNow - 50
@@ -461,6 +490,7 @@ int main() {
 		{ "stale_reports", test_stale_reports },
 		{ "launches_lobby_failures", test_launches_lobby_failures },
 		{ "data_unavailable", test_data_unavailable },
+		{ "addresses", test_addresses },
 		{ "order_and_gauges", test_order_and_gauges },
 	};
 	for (const Case &c : cases) {

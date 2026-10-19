@@ -1,5 +1,7 @@
 #include "fleet_health.h"
 
+#include "address_repository.h"
+
 #include <net/novaworld/lobby_repository.h>
 
 #include <algorithm>
@@ -282,6 +284,13 @@ HealthInputs read_health(db::Database &db, const PlacementPolicy *policy) {
 		in.failed_addresses.push_back({ r.as_int(0).value_or(0), r.as_text(1).value_or(""),
 				r.as_text(2).value_or(""), epoch_at(r, 3) });
 	for (const db::Row &r :
+			db.query("SELECT id, name, CAST(extract(epoch FROM updated_at) AS bigint) "
+					 "FROM hosted_addresses WHERE state = 'releasing' ORDER BY id;"))
+		in.releasing_addresses.push_back(
+				{ r.as_int(0).value_or(0), r.as_text(1).value_or(""), epoch_at(r, 2) });
+	in.held_addresses = count_held_addresses(db);
+	in.addresses_on = policy != nullptr && policy->max_addresses > 0;
+	for (const db::Row &r :
 			db.query("SELECT allocation_id, public_ip, CAST(extract(epoch FROM seen_at) AS "
 					 "bigint) FROM hosted_address_orphans ORDER BY seen_at, allocation_id;"))
 		in.orphans.push_back(
@@ -518,6 +527,23 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 						(a.reason.empty() ? std::string("no reason recorded") : a.reason) +
 						". Release it, or rename it to try again.",
 				a.failed_at, "/admin/addresses", "failed_address");
+	for (const ReleasingAddress &a : in.releasing_addresses) {
+		if (a.last_step <= 0 || in.now - a.last_step <= kStuckReleaseS)
+			continue;
+		add(HealthLevel::Warn, "Address " + a.name,
+				"Releasing, its release's last step " + age_text(in.now - a.last_step) +
+						" ago (over " + age_text(kStuckReleaseS) +
+						"): no worker runs its address.release (app logs worker).",
+				a.last_step, "/admin/addresses", "stuck_address");
+	}
+	if (!in.addresses_on && in.held_addresses > 0)
+		add(HealthLevel::Warn, "Static addresses",
+				std::to_string(in.held_addresses) +
+						(in.held_addresses == 1 ? " is" : " are") +
+						" held while the add-on is off (ONNET_FLEET_MAX_ADDRESSES 0, or "
+						"ONNET_HOSTED_ADDRESS_ZONE no zone name): only a worker whose address "
+						"settings still read releases them. Release each before the add-on goes.",
+				0, "/admin/addresses", "addresses_off");
 	for (const OrphanAddress &o : in.orphans)
 		add(HealthLevel::Warn, "Address " + o.public_ip,
 				"The cloud holds " + o.allocation_id +
