@@ -32,8 +32,11 @@ set(OPENNOVA_TEST_PG "" CACHE STRING
 # valkey/valkey:8 as a job service. A pg test that needs Redis too names REDIS.
 set(OPENNOVA_TEST_REDIS "" CACHE STRING
     "Redis (Valkey) server URL the NovaWorld server's HTTP-layer tests keep their keys on")
+# PARTS <part>... registers a row per part of a program split with tests/common/test_parts.h,
+# <name>_<part> running `<command> <servers> --part <part> --parts <part>...` (the selection last,
+# as the seam reads it), side by side; <name>_rows names the rows registered, for their properties.
 function(opennova_add_pg_test name)
-    cmake_parse_arguments(TEST "REDIS" "" "COMMAND" ${ARGN})
+    cmake_parse_arguments(TEST "REDIS" "" "COMMAND;PARTS" ${ARGN})
     set(servers)
     if(OPENNOVA_TEST_PG)
         list(APPEND servers --pg ${OPENNOVA_TEST_PG})
@@ -45,8 +48,18 @@ function(opennova_add_pg_test name)
             list(APPEND servers --redis ${OPENNOVA_TEST_REDIS})
         endif()
     endif()
-    add_test(NAME ${name} COMMAND ${TEST_COMMAND} ${servers})
-    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 LABELS "${labels}")
+    set(rows)
+    if(TEST_PARTS)
+        foreach(part IN LISTS TEST_PARTS)
+            add_test(NAME ${name}_${part} COMMAND ${TEST_COMMAND} ${servers} --part ${part} --parts ${TEST_PARTS})
+            list(APPEND rows ${name}_${part})
+        endforeach()
+    else()
+        add_test(NAME ${name} COMMAND ${TEST_COMMAND} ${servers})
+        set(rows ${name})
+    endif()
+    set_tests_properties(${rows} PROPERTIES SKIP_RETURN_CODE 77 LABELS "${labels}")
+    set(${name}_rows ${rows} PARENT_SCOPE)
 endfunction()
 # A test that needs Redis and no database.
 function(opennova_add_redis_test name)
@@ -651,8 +664,15 @@ if(BUILD_NOVAWORLD_HTTP)
         Threads::Threads)
     target_include_directories(hosted_supervisor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(hosted_supervisor_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    opennova_add_pg_test(hosted_supervisor COMMAND hosted_supervisor_test)
-    set_tests_properties(hosted_supervisor PROPERTIES TIMEOUT 300)
+    # A row per case (99-112 s as one row), each on databases of its own.
+    opennova_add_pg_test(hosted_supervisor COMMAND hosted_supervisor_test PARTS
+        settings_rules renders data_sets no_data pins_and_updates service_accounts requests fleet_room
+        lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
+        static_address_brake stop_paths exits_and_crash_restarts last_good_pass launch_failure
+        launch_refused_mid_pass restart_window timeouts_and_health listing_lost machine_lost_replaces
+        listing_waits_while_lost waits_for_lobby owner_changes limit_at_provisioning owner_limits
+        mass_stop_hold hold_releases reconciliation relist_grace console_ring admin_links_follow_running)
+    set_tests_properties(${hosted_supervisor_rows} PROPERTIES TIMEOUT 300)
 
     # The narrow locks that replaced the writer lock (net/novaworld/db/database.h): for each
     # invariant a check and its write hold, two writers on two connections, the first's

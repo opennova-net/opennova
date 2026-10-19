@@ -3,7 +3,8 @@
 // (tests/CMakeLists.txt opennova_add_parts and opennova_add_mixed_test's RETAIL_PARTS register
 // the rows):
 //
-//   <program>                               every part, in order: a by-hand run, as before
+//   <program>                               every part, in order, each headed `-- <name>`: a
+//                                           by-hand run, as before
 //   <program> --part <name> --parts <all>   that part alone, once <all> is checked to name the
 //                                           program's parts exactly, in order
 //
@@ -60,6 +61,11 @@ inline int run(int &argc, char **argv, const std::vector<Part> &parts) {
 		if (by_part && wanted != part.name) continue;
 		if (by_part && part.retail && !retail::selected()) continue;
 		ran = true;
+		// A run of every part heads each part's output with its name; a row is its part's alone.
+		if (!by_part) {
+			std::printf("-- %s\n", part.name);
+			std::fflush(stdout);
+		}
 		for (int (*each)() : part.cases) failures += each();
 	}
 	if (by_part && !ran) {

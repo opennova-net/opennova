@@ -42,6 +42,7 @@
 #include <formats/gamecfg/game_cfg.h>
 
 #include "common/test_expect.h"
+#include "common/test_parts.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -2352,55 +2353,47 @@ int test_admin_links_follow_running() {
 
 } // namespace
 
+// A row per case (tests/common/test_parts.h; service_tests.cmake lists them): each makes its own
+// databases, so the cases run side by side.
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
-	struct Case {
-		const char *name;
-		int (*fn)();
-	};
-	const Case cases[] = {
-		{ "settings_rules", test_settings_rules },
-		{ "renders", test_renders },
-		{ "data_sets", test_data_sets },
-		{ "no_data", test_no_data },
-		{ "pins_and_updates", test_pins_and_updates },
-		{ "service_accounts", test_service_accounts },
-		{ "requests", test_requests },
-		{ "fleet_room", test_fleet_room },
-		{ "lifecycle_and_stop", test_lifecycle_and_stop },
-		{ "two_servers_one_machine", test_two_servers_one_machine },
-		{ "own_machine", test_own_machine },
-		{ "own_restart_at_cap", test_own_restart_at_cap },
-		{ "static_address", test_static_address },
-		{ "static_address_brake", test_static_address_brake },
-		{ "stop_paths", test_stop_paths },
-		{ "exits_and_crash_restarts", test_exits_and_crash_restarts },
-		{ "last_good_pass", test_last_good_pass },
-		{ "launch_failure", test_launch_failure },
-		{ "launch_refused_mid_pass", test_launch_refused_mid_pass },
-		{ "restart_window", test_restart_window },
-		{ "timeouts_and_health", test_timeouts_and_health },
-		{ "listing_lost", test_listing_lost },
-		{ "machine_lost_replaces", test_machine_lost_replaces },
-		{ "listing_waits_while_lost", test_listing_waits_while_lost },
-		{ "waits_for_lobby", test_waits_for_lobby },
-		{ "owner_changes", test_owner_changes },
-		{ "limit_at_provisioning", test_limit_at_provisioning },
-		{ "owner_limits", test_owner_limits },
-		{ "mass_stop_hold", test_mass_stop_hold },
-		{ "hold_releases", test_hold_releases },
-		{ "reconciliation", test_reconciliation },
-		{ "relist_grace", test_relist_grace },
-		{ "console_ring", test_console_ring },
-		{ "admin_links_follow_running", test_admin_links_follow_running },
-	};
-	for (const Case &c : cases) {
-		std::printf("-- %s\n", c.name);
-		if (c.fn() != 0) {
-			std::fprintf(stderr, "FAIL: %s\n", c.name);
-			return 1;
-		}
-	}
+	const int failures = test_parts::run(argc, argv, {
+		{ "settings_rules", { test_settings_rules } },
+		{ "renders", { test_renders } },
+		{ "data_sets", { test_data_sets } },
+		{ "no_data", { test_no_data } },
+		{ "pins_and_updates", { test_pins_and_updates } },
+		{ "service_accounts", { test_service_accounts } },
+		{ "requests", { test_requests } },
+		{ "fleet_room", { test_fleet_room } },
+		{ "lifecycle_and_stop", { test_lifecycle_and_stop } },
+		{ "two_servers_one_machine", { test_two_servers_one_machine } },
+		{ "own_machine", { test_own_machine } },
+		{ "own_restart_at_cap", { test_own_restart_at_cap } },
+		{ "static_address", { test_static_address } },
+		{ "static_address_brake", { test_static_address_brake } },
+		{ "stop_paths", { test_stop_paths } },
+		{ "exits_and_crash_restarts", { test_exits_and_crash_restarts } },
+		{ "last_good_pass", { test_last_good_pass } },
+		{ "launch_failure", { test_launch_failure } },
+		{ "launch_refused_mid_pass", { test_launch_refused_mid_pass } },
+		{ "restart_window", { test_restart_window } },
+		{ "timeouts_and_health", { test_timeouts_and_health } },
+		{ "listing_lost", { test_listing_lost } },
+		{ "machine_lost_replaces", { test_machine_lost_replaces } },
+		{ "listing_waits_while_lost", { test_listing_waits_while_lost } },
+		{ "waits_for_lobby", { test_waits_for_lobby } },
+		{ "owner_changes", { test_owner_changes } },
+		{ "limit_at_provisioning", { test_limit_at_provisioning } },
+		{ "owner_limits", { test_owner_limits } },
+		{ "mass_stop_hold", { test_mass_stop_hold } },
+		{ "hold_releases", { test_hold_releases } },
+		{ "reconciliation", { test_reconciliation } },
+		{ "relist_grace", { test_relist_grace } },
+		{ "console_ring", { test_console_ring } },
+		{ "admin_links_follow_running", { test_admin_links_follow_running } },
+	});
+	if (failures != 0) return 1;
 	std::printf("OK: hosted servers' supervisor\n");
 	return 0;
 }
