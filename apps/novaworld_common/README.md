@@ -932,15 +932,17 @@ local stack's directory store reads the same subjects' files (`servers/<id>/g<g>
 `GET /api/admin/attention` (admin; `Cache-Control: no-store`; `infra/attention_routes.*`)
 answers what needs an admin: `{"findings": [{"level", "subject", "text", "since", "link",
 "source"}], "alarms": [{"name", "state_since", "description"}], "alarms_read",
-"checked_at"}`. The findings are the fleet's health read from the rows at each request
-(`hosted/model/fleet_health.*`, the hosted README's "The fleet's health"; the fleet leader's
-heartbeat counts the same ones), danger first, then warn, then info, each level's oldest
-first; `link` is the admin page that shows one (a site path) and `source` the rule. The
-alarms are the deployment's CloudWatch alarms in `ALARM` (`infra/alarm_store.*`,
-`cloudwatch:DescribeAlarms` by the names' prefix, `ONNET_INFRA_ALARM_PREFIX`, kept 20 s);
-`alarms_read` is false where none are read (the local stack), and a read that fails is a
-warn finding of its own, never an empty list that reads as none firing. An admin's reads
-come from a bucket of their own (30 at once, then one a second).
+"alarms_read_failed", "checked_at"}`. The findings are the fleet's health read from the
+rows at each request (`hosted/model/fleet_health.*`, the hosted README's "The fleet's
+health"; the fleet leader's heartbeat counts the same ones), danger first, then warn, then
+info, each level's oldest first; `link` is the admin page that shows one (a site path)
+and `source` the rule. The alarms are the deployment's CloudWatch alarms in `ALARM`
+(`infra/alarm_store.*`, `cloudwatch:DescribeAlarms` by the names' prefix,
+`ONNET_INFRA_ALARM_PREFIX`, kept 20 s); `alarms_read` is false where none are read: the
+local stack, which reads none (`alarms_read_failed` false), or a read that failed
+(`alarms_read_failed` true), which is a warn finding of its own, never an empty list that
+reads as none firing. An admin's reads come from a bucket of their own (30 at once, then one
+a second).
 
 ## The switcher's address
 

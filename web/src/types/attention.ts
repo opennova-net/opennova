@@ -27,7 +27,10 @@ export interface Attention {
   // Danger first, then warn, then info, oldest first within each.
   findings: Finding[];
   alarms: FiringAlarm[];
-  // False where the alarms are not read (the local stack).
+  // False where the alarms are not read: the local stack, or a read that failed.
   alarms_read: boolean;
+  // True for a read that failed (a finding says why); false for the local
+  // stack, which reads none.
+  alarms_read_failed: boolean;
   checked_at: string;
 }

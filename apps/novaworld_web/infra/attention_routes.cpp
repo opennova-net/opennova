@@ -93,6 +93,7 @@ crow::response AttentionRoutes::attention(const crow::request &req) {
 	}
 	out["alarms"] = std::move(firing);
 	out["alarms_read"] = alarms.read;
+	out["alarms_read_failed"] = !alarms.error.empty();
 	out["checked_at"] = hosted::iso_utc(now);
 	return no_store(json_reply(200, out));
 }
