@@ -1057,6 +1057,8 @@ int test_static_address() {
 	TEST_EXPECT(machine > 0 && rig.machine(machine)->address_id == address &&
 			rig.machine(machine)->state == hosted::FleetMachineState::Ready);
 	TEST_EXPECT(rig.machine(machine)->public_address != ip && rig.state(id) == State::Booting);
+	// The hold's rule, which fleet_health and the owner's phase read too.
+	TEST_EXPECT(hosted::awaits_address(*db, *rig.machine(machine)));
 	TEST_EXPECT(rig.agent_of(id) != nullptr && rig.agent_of(id)->last.desired.empty() &&
 			rig.running_container(id) == nullptr);
 	TEST_EXPECT(hosted::address_associate_pending(*db, machine));
@@ -1064,6 +1066,7 @@ int test_static_address() {
 	rig.fake.machines.at(rig.machine(machine)->cloud_id).public_address = ip;
 	TEST_EXPECT(!rig.to_running(id, 5301).empty());
 	TEST_EXPECT(rig.machine(machine)->public_address == ip);
+	TEST_EXPECT(!hosted::awaits_address(*db, *rig.machine(machine)));
 
 	// Its subscription ends: nothing lapses before a clean reconcile confirms it.
 	address_sub.status = "canceled";

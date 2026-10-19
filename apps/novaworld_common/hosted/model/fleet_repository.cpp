@@ -219,6 +219,14 @@ std::string carried_address_ip(db::Database &db, int64_t id) {
 	return rows.empty() ? std::string() : rows.front().as_text(0).value_or("");
 }
 
+bool awaits_address(const FleetMachineRow &m, const std::string &address_ip) {
+	return m.address_id > 0 && (address_ip.empty() || m.public_address != address_ip);
+}
+
+bool awaits_address(db::Database &db, const FleetMachineRow &m) {
+	return m.address_id > 0 && awaits_address(m, carried_address_ip(db, m.id));
+}
+
 bool mark_launched(db::Database &db, int64_t id, const LaunchedMachine &launched) {
 	db.exec("WITH moved AS (UPDATE fleet_machines SET state = 'booting', cloud_id = $2, "
 			"private_address = $3, public_address = $4, instance_type = $5, template_version = $6, "

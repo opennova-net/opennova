@@ -158,6 +158,7 @@ export type ServerPhaseName =
   | 'launches_held'
   | 'launching_machine'
   | 'waiting_for_slot'
+  | 'waiting_for_address'
   | 'downloading_data'
   | 'downloading_server'
   | 'starting_server'

@@ -152,7 +152,7 @@ HealthInputs read_health(db::Database &db, const PlacementPolicy *policy) {
 	// The live machines, with their times: the move into their state and the
 	// moves of the last hour (fleet_machine_events; a note's to_state is its
 	// from_state, the row's making's from_state null), and whether one carries
-	// a static address its public address does not show (Supervisor::address_held).
+	// a static address its public address does not show (awaits_address).
 	std::map<int64_t, HealthMachine> machines;
 	for (FleetMachineRow &m : list_live_machines(db)) {
 		const int64_t id = m.id;
@@ -168,8 +168,7 @@ HealthInputs read_health(db::Database &db, const PlacementPolicy *policy) {
 				 "(SELECT count(*) FROM fleet_machine_events e WHERE e.machine_id = m.id AND "
 				 "e.from_state IS NOT NULL AND e.from_state <> e.to_state AND "
 				 "e.at > now() - interval '1 hour'), "
-				 "m.address_id IS NOT NULL AND (a.public_ip IS NULL OR a.public_ip = '' OR "
-				 "a.public_ip <> m.public_address) "
+				 "a.public_ip "
 				 "FROM fleet_machines m LEFT JOIN hosted_addresses a ON a.id = m.address_id "
 				 "WHERE m.state NOT IN ('ended', 'failed');")) {
 		const auto it = machines.find(r.as_int(0).value_or(0));
@@ -181,7 +180,7 @@ HealthInputs read_health(db::Database &db, const PlacementPolicy *policy) {
 		h.mismatch_since = epoch_at(r, 3);
 		h.state_since = epoch_at(r, 4);
 		h.moves_last_hour = static_cast<int>(r.as_int(5).value_or(0));
-		h.address_wait = r.as_int(6).value_or(0) != 0;
+		h.address_wait = awaits_address(h.row, r.as_text(6).value_or(""));
 	}
 
 	// The live servers, each with its move into its state and its container's

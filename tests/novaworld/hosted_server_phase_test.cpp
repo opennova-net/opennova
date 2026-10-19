@@ -4,9 +4,11 @@
 // restarting n of the limit; its machine's cause or the owner's update: moving; its data
 // not fetched: data_unavailable, the agent's reason an admin's alone), else by
 // the fleet (launches held, a machine launching for it, a slot to wait for); a booting
-// server's by its machine (still booting) and its container's report (its trees with the
-// bytes so far of their total, its image, its start); and the last run's end for a
-// stopped or failed server alone. Pure functions: no database.
+// server's by its machine (still booting, or not showing its static address yet:
+// fleet_repository.h awaits_address) and its container's report (its trees with the bytes
+// so far of their total, its image, its start); and the last run's end for a stopped or
+// failed server alone (the agent's reason a start never ran an admin's line alone). Pure
+// functions: no database.
 
 #include "hosted/model/server_phase.h"
 
@@ -41,13 +43,16 @@ int test_states() {
 	TEST_EXPECT(phase_of(State::Stopping) == Phase::Stopping);
 	TEST_EXPECT(phase_of(State::Stopped) == Phase::Stopped);
 	TEST_EXPECT(phase_of(State::Failed) == Phase::Failed);
-	for (const Phase p : { Phase::Queued, Phase::Restarting, Phase::Moving, Phase::LaunchesHeld,
-				 Phase::LaunchingMachine, Phase::WaitingForSlot, Phase::DownloadingData,
-				 Phase::DownloadingServer, Phase::StartingServer, Phase::SigningIn, Phase::Running,
-				 Phase::Stopping, Phase::Stopped, Phase::Failed })
+	for (const Phase p : { Phase::Queued, Phase::Restarting, Phase::Moving,
+				 Phase::DataUnavailable, Phase::LaunchesHeld,
+				 Phase::LaunchingMachine, Phase::WaitingForSlot, Phase::WaitingForAddress,
+				 Phase::DownloadingData, Phase::DownloadingServer, Phase::StartingServer,
+				 Phase::SigningIn, Phase::Running, Phase::Stopping, Phase::Stopped, Phase::Failed })
 		TEST_EXPECT(hosted::phase_text(p)[0] != '\0');
 	TEST_EXPECT(std::string(hosted::phase_text(Phase::DownloadingData)) == "downloading_data" &&
-			std::string(hosted::phase_text(Phase::LaunchesHeld)) == "launches_held");
+			std::string(hosted::phase_text(Phase::LaunchesHeld)) == "launches_held" &&
+			std::string(hosted::phase_text(Phase::WaitingForAddress)) == "waiting_for_address" &&
+			std::string(hosted::phase_text(Phase::DataUnavailable)) == "data_unavailable");
 	return 0;
 }
 
@@ -107,6 +112,19 @@ int test_booting() {
 	TEST_EXPECT(hosted::server_phase(in).phase == Phase::LaunchingMachine);
 	in.machine_state = hosted::FleetMachineState::Ready;
 	TEST_EXPECT(hosted::server_phase(in).phase == Phase::StartingServer);
+	// Its machine does not show its static address yet: the supervisor holds its
+	// container back, so it waits for the address; still booting, the machine's wait.
+	in.address_wait = true;
+	TEST_EXPECT(hosted::server_phase(in).phase == Phase::WaitingForAddress);
+	in.machine_state = hosted::FleetMachineState::Booting;
+	TEST_EXPECT(hosted::server_phase(in).phase == Phase::LaunchingMachine);
+	in.machine_state = hosted::FleetMachineState::Ready;
+	// A container already reported is no longer held: its report says where it stands.
+	hosted::SlotReport started;
+	started.state = hosted::ContainerState::Starting;
+	in.report = started;
+	TEST_EXPECT(hosted::server_phase(in).phase == Phase::StartingServer);
+	in.address_wait = false;
 	// Its container waits for its trees: the bytes so far of their manifests' total.
 	hosted::SlotReport report;
 	report.state = hosted::ContainerState::Starting;
@@ -133,6 +151,23 @@ int test_booting() {
 	report.waiting = hosted::ContainerWait::None;
 	in.report = report;
 	TEST_EXPECT(hosted::server_phase(in).phase == Phase::StartingServer);
+	return 0;
+}
+
+int test_awaits_address() {
+	// The supervisor's hold, fleet_health's wait and the phase read one rule: a machine
+	// that carries an address waits until its public address is the address's.
+	hosted::FleetMachineRow m;
+	m.public_address = "198.51.100.7";
+	TEST_EXPECT(!hosted::awaits_address(m, ""));
+	TEST_EXPECT(!hosted::awaits_address(m, "203.0.113.20"));
+	m.address_id = 4;
+	TEST_EXPECT(hosted::awaits_address(m, "")); // not allocated yet
+	TEST_EXPECT(hosted::awaits_address(m, "203.0.113.20"));
+	m.public_address.clear();
+	TEST_EXPECT(hosted::awaits_address(m, "203.0.113.20"));
+	m.public_address = "203.0.113.20";
+	TEST_EXPECT(!hosted::awaits_address(m, "203.0.113.20"));
 	return 0;
 }
 
@@ -171,7 +206,7 @@ int test_stopped_because() {
 
 int main() {
 	if (test_states() != 0 || test_provisioning() != 0 || test_booting() != 0 ||
-			test_stopped_because() != 0)
+			test_awaits_address() != 0 || test_stopped_because() != 0)
 		return 1;
 	std::printf("OK: a hosted server's phase\n");
 	return 0;

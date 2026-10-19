@@ -325,7 +325,10 @@ void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, i
 	if (!starts.empty()) in.last_start = starts.front();
 	if (is_live(s.state)) {
 		const auto machine = s.machine_ref ? find_machine(db, *s.machine_ref) : std::nullopt;
-		if (machine) in.machine_state = machine->state;
+		if (machine) {
+			in.machine_state = machine->state;
+			in.address_wait = awaits_address(db, *machine);
+		}
 		in.machine_launching = machine_launching_for(db, s.id);
 		in.launches_held =
 				launch_not_before_ms(db, s.own_machine ? MachineKind::Own : MachineKind::Shared) > now_ms;
@@ -429,13 +432,15 @@ void HostedRoutes::register_routes(WebApp &app) {
 // failure_reason, created_at, updated_at, running_at, ended_at (UTC, null until
 // set), listing ({rid, server_name, mission_name, players, max_players,
 // host_ip, host_port} while listed, else null), phase ({name: queued,
-// restarting, moving, launches_held, launching_machine, waiting_for_slot,
-// downloading_data, downloading_server, starting_server, signing_in, running,
-// stopping, stopped or failed; bytes_done and bytes_total with
-// downloading_data, restart and restart_limit with restarting}: where its
-// start stands, server_phase.h), stopped_because ({cause: crash, timeout,
-// fleet, stop, update, limits, no_data or link_lost, exit_code, oom, line: the
-// server's own last line} for a stopped or failed server, else null)}, without
+// restarting, moving, data_unavailable, launches_held, launching_machine,
+// waiting_for_slot, waiting_for_address, downloading_data, downloading_server,
+// starting_server, signing_in, running, stopping, stopped or failed; bytes_done
+// and bytes_total with downloading_data, restart, restart_limit and cause
+// (crash or timeout) with restarting}: where its start stands,
+// server_phase.h), stopped_because
+// ({cause: crash, timeout, fleet, stop, update, limits, no_data, link_lost or
+// data_unavailable, exit_code, oom, line: the server's own last line} for a
+// stopped or failed server, else null)}, without
 // its events. 401 with no live session.
 crow::response HostedRoutes::me_servers(const crow::request &req) {
 	auto access = access_.require_user(req);

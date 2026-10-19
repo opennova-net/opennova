@@ -142,6 +142,8 @@ export function phaseText(phase: ServerPhase): string {
       return 'Starting a machine for it.';
     case 'waiting_for_slot':
       return 'Waiting for a place on a machine.';
+    case 'waiting_for_address':
+      return 'Waiting for your static address to reach its machine.';
     case 'downloading_data':
       return phase.bytes_done !== undefined && phase.bytes_total !== undefined && phase.bytes_total > 0
         ? `Downloading game data: ${bytesOf(phase.bytes_done, phase.bytes_total)}.`
@@ -174,6 +176,8 @@ export function expectedPhaseSeconds(phase: ServerPhase): number | null {
     case 'downloading_server':
       return 180;
     case 'launching_machine':
+    case 'waiting_for_address':
+      // A machine's launch; its static address's wait comes after it in the same state.
       return 300;
     case 'downloading_data':
       // A minute or two, and 20 MB a second.

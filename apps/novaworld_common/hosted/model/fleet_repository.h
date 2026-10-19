@@ -159,6 +159,13 @@ bool mark_launched(db::Database &db, int64_t id, const LaunchedMachine &launched
 // The public IPv4 of the static address machine `id` carries (its row's
 // address_id), "" for none or one not allocated.
 std::string carried_address_ip(db::Database &db, int64_t id);
+// Whether machine `m` carries a static address its row does not show as its
+// public address yet, `address_ip` being that address's (carried_address_ip):
+// the supervisor starts none of its servers' containers until it does,
+// fleet_health's stalled start names the wait, and the owner's phase is
+// waiting_for_address (server_phase.h). The second reads the address's IPv4.
+bool awaits_address(const FleetMachineRow &m, const std::string &address_ip);
+bool awaits_address(db::Database &db, const FleetMachineRow &m);
 // What a describe read of a live machine's addresses: the private one only
 // fills an empty one (it is what the agent routes admit the machine from, so
 // nothing moves it once set), the public one follows the cloud. False when

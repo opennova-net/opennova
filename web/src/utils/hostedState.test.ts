@@ -26,9 +26,10 @@ describe('the phase in its owner words', () => {
     expect(phaseText({ name: 'moving' })).toBe('Moving to another machine. This is not a restart and does not count toward the restart limit.');
     expect(phaseText({ name: 'data_unavailable' })).toBe('The game data could not be fetched; the service is retrying.');
     expect(phaseText({ name: 'launching_machine' })).toBe('Starting a machine for it.');
+    expect(phaseText({ name: 'waiting_for_address' })).toBe('Waiting for your static address to reach its machine.');
     expect(phaseText({ name: 'running' })).toBe('');
     // Public copy: no em dash anywhere.
-    for (const name of ['queued', 'restarting', 'moving', 'launches_held', 'launching_machine', 'waiting_for_slot', 'downloading_server', 'starting_server', 'signing_in']) {
+    for (const name of ['queued', 'restarting', 'moving', 'launches_held', 'launching_machine', 'waiting_for_slot', 'waiting_for_address', 'downloading_server', 'starting_server', 'signing_in']) {
       expect(phaseText({ name })).not.toContain(String.fromCharCode(0x2014));
     }
   });
@@ -38,6 +39,9 @@ describe('the phase in its owner words', () => {
     // Starting a machine usually takes 5 minutes.
     expect(phaseSlow({ phase: { name: 'launching_machine' }, updated_at: '2026-10-18 11:51:00' }, now)).toBe(false);
     expect(phaseSlow({ phase: { name: 'launching_machine' }, updated_at: '2026-10-18 11:49:00' }, now)).toBe(true);
+    // So does a static address reaching its machine, timed from the same move into booting.
+    expect(phaseSlow({ phase: { name: 'waiting_for_address' }, updated_at: '2026-10-18 11:51:00' }, now)).toBe(false);
+    expect(phaseSlow({ phase: { name: 'waiting_for_address' }, updated_at: '2026-10-18 11:49:00' }, now)).toBe(true);
     // The game data's grows with its size: 2 minutes and 20 MB a second, so
     // 6 GB usually takes 7 minutes and is slow past 14.
     const data = { name: 'downloading_data', bytes_done: 0, bytes_total: 6_000_000_000 };

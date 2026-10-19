@@ -20,6 +20,8 @@ const char *phase_text(Phase phase) {
 			return "launching_machine";
 		case Phase::WaitingForSlot:
 			return "waiting_for_slot";
+		case Phase::WaitingForAddress:
+			return "waiting_for_address";
 		case Phase::DownloadingData:
 			return "downloading_data";
 		case Phase::DownloadingServer:
@@ -92,6 +94,12 @@ ServerPhase server_phase(const PhaseInputs &in) {
 			if (!in.machine_state || *in.machine_state == FleetMachineState::Launching ||
 					*in.machine_state == FleetMachineState::Booting) {
 				out.phase = Phase::LaunchingMachine;
+				return out;
+			}
+			// Its machine does not show its static address yet: the supervisor
+			// holds back a container not yet reported until it does.
+			if (in.address_wait && !in.report) {
+				out.phase = Phase::WaitingForAddress;
 				return out;
 			}
 			const ContainerWait wait = in.report ? in.report->waiting : ContainerWait::None;

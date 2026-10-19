@@ -883,8 +883,9 @@ add_test(NAME health_listener COMMAND health_listener_test)
 # Where a hosted server's start stands in its owner's words, and why its last run ended
 # (apps/novaworld_common/hosted/model/server_phase.h), over hand-made rows: each state's phase, a
 # provisioning server's wait by its last run's end or the fleet, a booting one's by its
-# machine and its container's report (the data's bytes so far of their total), the last
-# run's end for an ended server alone. Database-free.
+# machine (its static address not shown yet: the shared awaits_address rule) and its
+# container's report (the data's bytes so far of their total), the last run's end for an
+# ended server alone. Database-free.
 add_executable(hosted_server_phase_test novaworld/hosted_server_phase_test.cpp)
 target_link_libraries(hosted_server_phase_test PRIVATE
     opennova_novaworld_hosting_model opennova_novaworld_service Threads::Threads)

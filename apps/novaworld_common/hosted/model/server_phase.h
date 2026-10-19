@@ -21,6 +21,9 @@
 //   launching_machine   a machine is launching or booting for it, or it waits
 //                       for the one it was placed on to boot
 //   waiting_for_slot    provisioning with no place in the fleet yet
+//   waiting_for_address booting on a machine that does not show its static
+//                       address yet: the supervisor holds its container
+//                       until it does (fleet_repository.h awaits_address)
 //   downloading_data    booting while its machine fetches its trees: the bytes
 //                       so far of their manifests' total
 //   downloading_server  booting while its machine pulls its image
@@ -46,6 +49,7 @@ enum class Phase : uint8_t {
 	LaunchesHeld,
 	LaunchingMachine,
 	WaitingForSlot,
+	WaitingForAddress,
 	DownloadingData,
 	DownloadingServer,
 	StartingServer,
@@ -63,9 +67,11 @@ struct PhaseInputs {
 	int restarts = 0;
 	int restart_limit = kRestartLimit;
 	std::optional<ServerStart> last_start; // its newest
-	// The machine its slot is on (unset: it holds none), whether a machine is
-	// launching or booting for it, and whether its kind's launches are held.
+	// The machine its slot is on (unset: it holds none), whether that machine
+	// does not show its static address yet (awaits_address), whether a machine
+	// is launching or booting for it, and whether its kind's launches are held.
 	std::optional<FleetMachineState> machine_state;
+	bool address_wait = false;
 	bool machine_launching = false;
 	bool launches_held = false;
 	// Its own container's report on its slot, its trees as its machine's agent

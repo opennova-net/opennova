@@ -516,9 +516,6 @@ private:
 	void carry_address(db::Database &db, const FleetMachineRow &machine, uint64_t now_ms);
 	// The static addresses' lapses and releases (the class comment).
 	void step_addresses(db::Database &db, uint64_t now_ms);
-	// Whether `machine` carries a static address its row does not show as its
-	// public address yet: its server's container waits.
-	bool address_held(db::Database &db, const FleetMachineRow &machine) const;
 	void drain_step(db::Database &db, FleetMachineRow &machine,
 			const std::vector<HostedServer> &holders, uint64_t now_ms);
 	// The launches the cloud refused and not counted yet (their jobs' rows), at

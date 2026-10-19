@@ -866,7 +866,7 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 		rt.since_ms = now_ms;
 		return;
 	}
-	if (address_held(db, *machine) && !report_of(fleet, s)) {
+	if (awaits_address(db, *machine) && !report_of(fleet, s)) {
 		// Its machine does not show its static address yet: the container waits
 		// (sync answers none), so it lists at the address from its first packet.
 		rt.since_ms = now_ms;
@@ -1370,12 +1370,6 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 
 // --- the static addresses -------------------------------------------------------------
 
-bool Supervisor::address_held(db::Database &db, const FleetMachineRow &machine) const {
-	if (machine.address_id <= 0) return false;
-	const std::string ip = carried_address_ip(db, machine.id);
-	return ip.empty() || machine.public_address != ip;
-}
-
 void Supervisor::carry_address(db::Database &db, const FleetMachineRow &m, uint64_t now_ms) {
 	const auto address = find_address(db, m.address_id);
 	if (m.cloud_id.empty() || !address || address->state != AddressState::Ready) return;
@@ -1492,7 +1486,7 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 	const std::vector<SlotHolder> holders = slot_holders(db, machine.id);
 	// A machine that does not show its static address yet starts nothing (the
 	// class comment); what it runs already stays.
-	const bool address_wait = address_held(db, machine);
+	const bool address_wait = awaits_address(db, machine);
 	// What the starts in memory answer, in the holders' order; the containers no
 	// start answers for are read from their rows after, with no database work
 	// under starts_mu_ (the pass takes it too).
