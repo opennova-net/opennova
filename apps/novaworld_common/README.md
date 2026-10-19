@@ -1,8 +1,8 @@
 # NovaWorld server
 
 The NovaWorld service: six programs ("Programs" below: gate, lobby, web, fleet,
-worker, data), each its own binary and container image, over this shared library
-(`apps/novaworld_common`), one PostgreSQL database ("Database" below) and, for web, one
+worker, data), each its own binary and container image, over the service's libraries
+(`apps/novaworld_common`, "Build layout and tests" below), one PostgreSQL database ("Database" below) and, for web, one
 Redis ("Redis" below). Linux only: it ships as its images and runs on ECS Fargate, one
 service per program (DEPLOY.md). Implements the matchmaking/backend half of NovaWorld (the gate, the
 session handshake, the browser/host/play container services, and the legacy
@@ -29,7 +29,7 @@ listener each program's but web's, whose `/livez` is on its HTTP port.
 
 Six programs, each its own binary (`opennova-novaworld-<program>`), its own image
 (`ghcr.io/<owner>/opennova-novaworld-<program>`, a target of [`Dockerfile`](Dockerfile))
-and its own ECS service, over this shared library and the databases. Nothing selects
+and its own ECS service, over the service's libraries and the databases. Nothing selects
 what a process is: each binary is one program, constructs its own parts alone, and
 scales on its own. `program/program.*` is the boot every program shares
 (`program::run_program`): the log sink, the config, the boot line, the program's own
@@ -50,7 +50,9 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 
 Each program's own code lives in its directory, a static library its tests drive in
 process (`opennova_novaworld_<program>_core`; the worker and the data program have their
-`main.cpp` alone) and its executable; what more than one program uses lives here. A program
+`main.cpp` alone; the worker's periodic jobs are `opennova_novaworld_worker_core`, which
+web links too) and its executable; what more than one program uses lives here, in the
+layered libraries below. A program
 runs only its own job kinds and schedules only those: no kind has handlers in two programs.
 
 - **They share state only through PostgreSQL** (durable) **and web's Redis**
@@ -1265,14 +1267,32 @@ email the service kept.
 
 ## Build layout and tests
 
-This directory builds the static library `opennova_novaworld_common`, what more than one
-program uses; each program's directory builds its own code as
+This directory builds what more than one program (or opennova-hostd) uses as nine static
+libraries, one per directory, under its one include root (`"core/x.h"`,
+`"hosted/model/x.h"`; a sibling bare). Each includes from and links only the layers below
+it ([`CMakeLists.txt`](CMakeLists.txt) says what each holds):
+
+| Library | Directory | Links | Programs that link it |
+| --- | --- | --- | --- |
+| `opennova_novaworld_core` | `core/` | apps/common (no database) | every program, hostd |
+| `opennova_novaworld_hosting_protocol` | `hosted/protocol/` | core | web, the fleet, the worker, hostd |
+| `opennova_novaworld_program` | `program/` | core | every program |
+| `opennova_novaworld_jobs` | `jobs/` | core | web, the fleet, the worker, data |
+| `opennova_novaworld_accounts` | `accounts/` | core, program, jobs | web, the fleet, the worker |
+| `opennova_novaworld_billing` | `billing/` | core, jobs | web, the fleet, the worker |
+| `opennova_novaworld_data_sets` | `data_sets/` | core, jobs | web, the fleet, the worker, data |
+| `opennova_novaworld_hosting_model` | `hosted/model/` | core, program, jobs, billing, data_sets, hosting_protocol | web, the fleet, the worker |
+| `opennova_novaworld_hosting_cloud` | `hosted/cloud/` | core, jobs, billing, hosting_protocol, hosting_model | the worker alone |
+
+Every library that reaches the database links the service (`opennova_novaworld_service`)
+directly, and web's core alone links Redis (`opennova_redis`): the link lint's
+containments (`scripts/lint/link_graph_check.py`). Each program's directory builds its own code as
 `opennova_novaworld_<program>_core` and its `main.cpp` as `opennova-novaworld-<program>`.
-All of it, and its tests, exist only with `OPENNOVA_NOVAWORLD_SERVICE=ON` (the root CMake
-option, off by default; the Linux CI jobs and the images turn it on). The HTTP half (the
-website and retail routes' support, the jobs, `hosted/`, `billing/`) builds only under
-`BUILD_NOVAWORLD_HTTP`, which defines `OPENNOVA_HTTP_ENABLED` PUBLIC: web, the fleet program,
-the worker and the data program need it, the gate and the lobby build with or without it.
+Core and the agents' protocol build with the service or on Linux (hostd builds without the
+service); the rest, and the tests, exist only with `OPENNOVA_NOVAWORLD_SERVICE=ON` (the root
+CMake option, off by default; the Linux CI jobs and the images turn it on). Web, the fleet
+program, the worker and the data program build only under `BUILD_NOVAWORLD_HTTP` (Crow:
+web's and the fleet's cores link it); the gate and the lobby build with or without it.
 
 The tests live in `tests/novaworld/` (`service_tests.cmake`); each says what it pins.
 Every test that opens a database (ctest label `pg`, `opennova_add_pg_test`) makes its own

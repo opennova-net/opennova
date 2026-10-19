@@ -17,6 +17,6 @@ image is the `worker` target of [`../novaworld_common/Dockerfile`](../novaworld_
 
 - `main.cpp`: the program (`opennova_novaworld_worker`, binary `opennova-novaworld-worker`):
   the handlers it registers, the machine and address drivers it builds and its scheduler,
-  over the shared library's jobs, hosted servers, billing and mail.
+  over the service's libraries (the cloud's its alone).
 - `worker_schedule.*`: its periodic jobs (`opennova_novaworld_worker_core`, a library web
   links too: the admin's jobs page shows and runs them from the same settings).

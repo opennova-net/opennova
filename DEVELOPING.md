@@ -74,7 +74,7 @@ ctest --test-dir build --output-on-failure -C Release
 
 When you are working on the NovaWorld service (Linux only), configure with
 `-DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON`: the first defines the
-service, its six programs (`apps/novaworld_common`, the shared library, and
+service, its six programs (`apps/novaworld_common`, the service's layered libraries, and
 `apps/novaworld_gate`, `_lobby`, `_web`, `_fleet`, `_worker`, `_data`) and their tests, the
 second fetches Asio + Crow and adds the HTTP layer, which web, the fleet, the worker and the
 data program need (without it only the gate and the lobby build).

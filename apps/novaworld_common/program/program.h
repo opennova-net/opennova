@@ -1,8 +1,8 @@
 #pragma once
 
 // The NovaWorld service is six programs (README.md "Programs"), each its own
-// binary and image (apps/novaworld_<program>), over this shared library and the
-// databases, constructing only its own parts:
+// binary and image (apps/novaworld_<program>), over the service's libraries
+// (apps/novaworld_common) and the databases, constructing only its own parts:
 //
 //   gate        the gate (UDP 7597): each client's lobby, picked from the lobby
 //               instances that take clients, and the hosts' status blobs

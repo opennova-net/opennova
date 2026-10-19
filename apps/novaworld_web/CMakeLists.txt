@@ -3,8 +3,8 @@
 # (BUILD_NOVAWORLD_HTTP). Its own code builds as opennova_novaworld_web_core
 # (the HTTP listener, its routes, the Redis client and the stores it keeps
 # over it), which the tests drive in-process; the executable is its main.cpp
-# over it and the shared library. The retail pages (templates/, static/)
-# ship in its image.
+# over it and the service's libraries it reads (apps/novaworld_common), never
+# the cloud's. The retail pages (templates/, static/) ship in its image.
 add_library(opennova_novaworld_web_core STATIC
     http_listener.cpp
     # The admin's user routes (moved out of http_listener.cpp whole).
@@ -25,7 +25,7 @@ add_library(opennova_novaworld_web_core STATIC
     retail_pins.cpp
     rate_limiter.cpp
     web_access.cpp
-    # The password reset routes (the links are the shared library's).
+    # The password reset routes (the links are the accounts').
     password_reset_routes.cpp
     # The admin's view of the background jobs and its routes.
     jobs/job_admin.cpp
@@ -69,11 +69,19 @@ add_library(opennova_novaworld_web_core STATIC
 target_include_directories(opennova_novaworld_web_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # The service directly: the libpq containment
 # (scripts/lint/link_graph_check.py) wants every target that reaches
-# opennova_pq to link it itself.
+# opennova_pq to link it itself. Crow PUBLIC, for the routes' headers.
 target_link_libraries(opennova_novaworld_web_core
     PUBLIC
-        opennova_novaworld_common
+        opennova_novaworld_core
+        opennova_novaworld_program
+        opennova_novaworld_jobs
+        opennova_novaworld_accounts
+        opennova_novaworld_billing
+        opennova_novaworld_data_sets
+        opennova_novaworld_hosting_protocol
+        opennova_novaworld_hosting_model
         opennova_novaworld_service
+        Crow::Crow
 )
 
 # The Redis client (redis_client.h): the system hiredis and hiredis_ssl
@@ -104,7 +112,12 @@ target_link_libraries(opennova_novaworld_web
     PRIVATE
         opennova_novaworld_web_core
         opennova_novaworld_worker_core
-        opennova_novaworld_common
+        opennova_novaworld_hosting_model
+        opennova_novaworld_billing
+        opennova_novaworld_accounts
+        opennova_novaworld_data_sets
+        opennova_novaworld_program
+        opennova_novaworld_core
         opennova_novaworld_service
 )
 set_target_properties(opennova_novaworld_web PROPERTIES OUTPUT_NAME "opennova-novaworld-web")

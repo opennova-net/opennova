@@ -4,7 +4,8 @@
 # (the election, the hosted servers' supervisor with its stats sampler, the
 # admin links and the console drain over them, the internal listener and the
 # machine agents' routes on it), which the tests drive in-process; the
-# executable is its main.cpp over it and the shared library.
+# executable is its main.cpp over it and the service's libraries it reads
+# (apps/novaworld_common), never the cloud's: it calls no cloud.
 add_library(opennova_novaworld_fleet_core STATIC
     election.cpp
     hosted/admin_link.cpp
@@ -15,12 +16,20 @@ add_library(opennova_novaworld_fleet_core STATIC
     hosted/supervisor.cpp
 )
 target_include_directories(opennova_novaworld_fleet_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-# The shared library and the service directly (scripts/lint/link_graph_check.py:
-# the libpq containment), as on every target here.
+# The service directly (scripts/lint/link_graph_check.py: the libpq
+# containment), as on every target here; Crow for the internal listener.
 target_link_libraries(opennova_novaworld_fleet_core
     PUBLIC
-        opennova_novaworld_common
+        opennova_novaworld_core
+        opennova_novaworld_program
+        opennova_novaworld_jobs
+        opennova_novaworld_accounts
+        opennova_novaworld_billing
+        opennova_novaworld_data_sets
+        opennova_novaworld_hosting_protocol
+        opennova_novaworld_hosting_model
         opennova_novaworld_service
+        Crow::Crow
 )
 target_compile_features(opennova_novaworld_fleet_core PUBLIC cxx_std_17)
 
@@ -28,7 +37,9 @@ add_executable(opennova_novaworld_fleet main.cpp)
 target_link_libraries(opennova_novaworld_fleet
     PRIVATE
         opennova_novaworld_fleet_core
-        opennova_novaworld_common
+        opennova_novaworld_hosting_model
+        opennova_novaworld_program
+        opennova_novaworld_core
         opennova_novaworld_service
 )
 set_target_properties(opennova_novaworld_fleet PROPERTIES

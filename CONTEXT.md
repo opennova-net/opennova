@@ -174,7 +174,7 @@ One of the service's binaries, each its own image and ECS service: the **gate**,
 hosted servers' supervisor, one elected leader), the **worker** (its **jobs** and their
 schedules) and **data** (the data sets' jobs over the game data's store). Each scales on its
 own and shares nothing with the others but PostgreSQL (and web's Redis); what more than one
-uses is the shared library (`apps/novaworld_common`). Each runs only its own job kinds and
+uses is the service's libraries (`apps/novaworld_common`). Each runs only its own job kinds and
 schedules only those. There is no all-in-one binary. Beside them, **opennova-hostd** is a
 program of the fleet cluster (`opennova-<deployment>-fleet`): an ECS daemon service, one task
 per **machine**, rolled by the same releases, before the fleet program.

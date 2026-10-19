@@ -48,8 +48,8 @@ endif()
 # Native engine group libraries.
 add_subdirectory(engine)
 
-# The NovaWorld service's HTTP layer (apps/novaworld_common, novaworld_web,
-# novaworld_fleet, novaworld_worker, novaworld_data).
+# The NovaWorld service's HTTP layer (novaworld_web, novaworld_fleet, and with
+# them novaworld_worker and novaworld_data).
 if(BUILD_NOVAWORLD_HTTP)
     include(FetchContent)
     FetchContent_Declare(asio
@@ -74,12 +74,15 @@ endif()
 add_subdirectory(apps/common)
 add_subdirectory(apps/3di)
 add_subdirectory(apps/extract)
+# The service's libraries (apps/novaworld_common/README.md "Build layout and
+# tests"): with the service, or on Linux its core and the machine agents'
+# protocol alone, which hostd links.
+add_subdirectory(apps/novaworld_common)
 add_subdirectory(apps/hostd)  # Linux only
 add_subdirectory(apps/lan_probe)
 if(OPENNOVA_NOVAWORLD_SERVICE)
-    # The shared library first, then the six programs over it
+    # The six programs over the service's libraries
     # (apps/novaworld_common/README.md "Programs").
-    add_subdirectory(apps/novaworld_common)
     add_subdirectory(apps/novaworld_gate)
     add_subdirectory(apps/novaworld_lobby)
     if(BUILD_NOVAWORLD_HTTP)

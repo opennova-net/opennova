@@ -66,7 +66,7 @@ endfunction()
 # NW UDP e2e tests below).
 add_executable(gate_listener_test novaworld/gate_listener_test.cpp)
 target_link_libraries(gate_listener_test PRIVATE
-    opennova_novaworld_gate_core opennova_novaworld_common opennova_novaworld_service)
+    opennova_novaworld_gate_core opennova_novaworld_service)
 target_include_directories(gate_listener_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(gate_listener_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(gate_listener COMMAND gate_listener_test)
@@ -327,7 +327,7 @@ set_tests_properties(hosted_fleet PROPERTIES TIMEOUT 300)
 # started over), the prunes at 48 hours and 400 days.
 add_executable(program_usage_test novaworld/program_usage_test.cpp)
 target_link_libraries(program_usage_test PRIVATE
-    opennova_novaworld_common opennova_novaworld_service)
+    opennova_novaworld_program opennova_novaworld_service)
 target_include_directories(program_usage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(program_usage_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(program_usage COMMAND program_usage_test)
@@ -337,8 +337,7 @@ opennova_add_pg_test(program_usage COMMAND program_usage_test)
 # stderr's lines after their times in programs/<program>/<task>.log, an unended line at the
 # stop, the descriptors back after it, a directory it cannot make refused). Database-free.
 add_executable(program_log_test novaworld/program_log_test.cpp)
-target_link_libraries(program_log_test PRIVATE
-    opennova_novaworld_common opennova_novaworld_service Threads::Threads)
+target_link_libraries(program_log_test PRIVATE opennova_novaworld_core Threads::Threads)
 target_include_directories(program_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME program_log COMMAND program_log_test)
 
@@ -560,14 +559,14 @@ add_test(NAME client_session_loopback COMMAND client_session_loopback_test)
 # refresh and the stop.
 add_executable(nwu_host_session_e2e_test novaworld/nwu_host_session_e2e_test.cpp)
 target_link_libraries(nwu_host_session_e2e_test PRIVATE
-    opennova_novaworld_lobby_core opennova_novaworld_common opennova_novaworld_service)
+    opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(nwu_host_session_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nwu_host_session_e2e COMMAND nwu_host_session_e2e_test)
 set_tests_properties(nwu_host_session_e2e PROPERTIES RUN_SERIAL TRUE)
 
 add_executable(nw_host_register_e2e_test novaworld/nw_host_register_e2e_test.cpp)
 target_link_libraries(nw_host_register_e2e_test PRIVATE
-    opennova_novaworld_lobby_core opennova_novaworld_common opennova_novaworld_service)
+    opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(nw_host_register_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_host_register_e2e COMMAND nw_host_register_e2e_test)
 # This is the only test that drives the complete listener lifecycle through
@@ -580,7 +579,7 @@ set_tests_properties(nw_host_register_e2e PROPERTIES RUN_SERIAL TRUE)
 # listener over loopback UDP (same listener-source recipe as above).
 add_executable(nw_lobby_resend_e2e_test novaworld/nw_lobby_resend_e2e_test.cpp)
 target_link_libraries(nw_lobby_resend_e2e_test PRIVATE
-    opennova_novaworld_lobby_core opennova_novaworld_common opennova_novaworld_service)
+    opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(nw_lobby_resend_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_lobby_resend_e2e COMMAND nw_lobby_resend_e2e_test)
 set_tests_properties(nw_lobby_resend_e2e PROPERTIES RUN_SERIAL TRUE)
@@ -596,7 +595,7 @@ set_tests_properties(nw_lobby_resend_e2e PROPERTIES RUN_SERIAL TRUE)
 # one-second recovery window is a protocol assertion, so it runs serially.
 add_executable(nw_server_command_push_e2e_test novaworld/nw_server_command_push_e2e_test.cpp)
 target_link_libraries(nw_server_command_push_e2e_test PRIVATE
-    opennova_novaworld_lobby_core opennova_novaworld_common opennova_novaworld_service)
+    opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(nw_server_command_push_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_server_command_push_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(nw_server_command_push_e2e COMMAND nw_server_command_push_e2e_test)
@@ -615,8 +614,7 @@ set_tests_properties(nw_server_command_push_e2e PROPERTIES RUN_SERIAL TRUE)
 if(UNIX)
     add_executable(lobby_instances_e2e_test novaworld/lobby_instances_e2e_test.cpp)
     target_link_libraries(lobby_instances_e2e_test PRIVATE
-        opennova_novaworld_gate_core opennova_novaworld_lobby_core opennova_novaworld_common
-        opennova_novaworld_service)
+        opennova_novaworld_gate_core opennova_novaworld_lobby_core opennova_novaworld_service)
     target_include_directories(lobby_instances_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(lobby_instances_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(lobby_instances_e2e COMMAND lobby_instances_e2e_test)
@@ -691,7 +689,7 @@ if(BUILD_NOVAWORLD_HTTP)
     add_executable(opennova_novaworld_web_http_routes_test novaworld/http_routes_test.cpp)
     target_link_libraries(opennova_novaworld_web_http_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_lobby_core opennova_novaworld_fleet_core
-        opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_service)
     target_include_directories(opennova_novaworld_web_http_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(opennova_novaworld_web_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(opennova_novaworld_web_http_routes REDIS
@@ -706,7 +704,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # orphans.
     add_executable(hosted_address_test novaworld/hosted_address_test.cpp)
     target_link_libraries(hosted_address_test PRIVATE
-        opennova_novaworld_fleet_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_fleet_core opennova_novaworld_hosting_cloud opennova_novaworld_service)
     target_include_directories(hosted_address_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(hosted_address_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(hosted_address COMMAND hosted_address_test)
@@ -722,7 +720,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # and never a job's secret in a reply.
     add_executable(job_routes_test novaworld/job_routes_test.cpp)
     target_link_libraries(job_routes_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(job_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(job_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(job_routes REDIS COMMAND job_routes_test)
@@ -736,7 +734,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # and the cache window with one read shared by callers at once.
     add_executable(infra_status_test novaworld/infra_status_test.cpp)
     target_link_libraries(infra_status_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(infra_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME infra_status COMMAND infra_status_test)
 
@@ -747,7 +745,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # window; and no credential in any reply.
     add_executable(infra_routes_test novaworld/infra_routes_test.cpp)
     target_link_libraries(infra_routes_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(infra_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(infra_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(infra_routes REDIS COMMAND infra_routes_test)
@@ -761,7 +759,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # backwards and merged by time, the programs' stamps.
     add_executable(log_store_test novaworld/log_store_test.cpp)
     target_link_libraries(log_store_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(log_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME log_store COMMAND log_store_test)
 
@@ -771,7 +769,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # stub), AWS's refusal a 502, no store a 503.
     add_executable(log_routes_test novaworld/log_routes_test.cpp)
     target_link_libraries(log_routes_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(log_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(log_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(log_routes REDIS COMMAND log_routes_test)
@@ -783,7 +781,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # local stack calling nothing.
     add_executable(metrics_store_test novaworld/metrics_store_test.cpp)
     target_link_libraries(metrics_store_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(metrics_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME metrics_store COMMAND metrics_store_test)
 
@@ -794,7 +792,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # ECS (a stub).
     add_executable(usage_routes_test novaworld/usage_routes_test.cpp)
     target_link_libraries(usage_routes_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(usage_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(usage_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(usage_routes REDIS COMMAND usage_routes_test)
@@ -811,7 +809,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # cache, AWS's refusal a warn finding, no credential).
     add_executable(fleet_health_routes_test novaworld/fleet_health_routes_test.cpp)
     target_link_libraries(fleet_health_routes_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(fleet_health_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(fleet_health_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(fleet_health_routes REDIS COMMAND fleet_health_routes_test)
@@ -829,7 +827,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # tree.prune job, a pinned one refused.
     add_executable(data_set_routes_test novaworld/data_set_routes_test.cpp)
     target_link_libraries(data_set_routes_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(data_set_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(data_set_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(data_set_routes REDIS COMMAND data_set_routes_test)
@@ -843,8 +841,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # second release served.
     add_executable(update_listener_test novaworld/update_listener_test.cpp)
     target_link_libraries(update_listener_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service
-        opennova_update_tool_core)
+        opennova_novaworld_web_core opennova_novaworld_service opennova_update_tool_core)
     target_include_directories(update_listener_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(update_listener_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(update_listener COMMAND update_listener_test)
@@ -857,7 +854,8 @@ if(BUILD_NOVAWORLD_HTTP)
     # owner-only while the CLI runs and gone after, the CLI's failures), the
     # outbox's order, bound and stop, and the templates. Database-free.
     add_executable(mailer_test novaworld/mailer_test.cpp)
-    target_link_libraries(mailer_test PRIVATE opennova_novaworld_common opennova_novaworld_service)
+    target_link_libraries(mailer_test PRIVATE
+        opennova_novaworld_accounts opennova_novaworld_service)
     target_include_directories(mailer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME mailer COMMAND mailer_test)
 
@@ -867,8 +865,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # on one bucket exactly) and the trusted-proxy client address.
     add_executable(rate_limiter_test novaworld/rate_limiter_test.cpp)
     target_link_libraries(rate_limiter_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service
-        Threads::Threads)
+        opennova_novaworld_web_core opennova_novaworld_service Threads::Threads)
     target_include_directories(rate_limiter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     opennova_add_redis_test(rate_limiter COMMAND rate_limiter_test)
 
@@ -881,8 +878,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # revocation on one replica holding on the other).
     add_executable(redis_state_test novaworld/redis_state_test.cpp)
     target_link_libraries(redis_state_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service
-        Threads::Threads)
+        opennova_novaworld_web_core opennova_novaworld_service Threads::Threads)
     target_include_directories(redis_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     opennova_add_redis_test(redis_state COMMAND redis_state_test)
 
@@ -895,7 +891,7 @@ if(BUILD_NOVAWORLD_HTTP)
     add_executable(nw_host_ownership_e2e_test novaworld/nw_host_ownership_e2e_test.cpp)
     target_link_libraries(nw_host_ownership_e2e_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_lobby_core opennova_novaworld_gate_core
-        opennova_serve_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_serve_core opennova_novaworld_service)
     target_include_directories(nw_host_ownership_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(nw_host_ownership_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(nw_host_ownership_e2e REDIS COMMAND nw_host_ownership_e2e_test)
@@ -909,7 +905,7 @@ if(BUILD_NOVAWORLD_HTTP)
     add_executable(nw_owner_admin_e2e_test novaworld/nw_owner_admin_e2e_test.cpp)
     target_link_libraries(nw_owner_admin_e2e_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_lobby_core opennova_novaworld_gate_core
-        opennova_serve_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_serve_core opennova_novaworld_service)
     target_include_directories(nw_owner_admin_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(nw_owner_admin_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(nw_owner_admin_e2e REDIS COMMAND nw_owner_admin_e2e_test)
@@ -928,7 +924,7 @@ if(BUILD_NOVAWORLD_HTTP)
     add_executable(hosted_local_e2e_test novaworld/hosted_local_e2e_test.cpp)
     target_link_libraries(hosted_local_e2e_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_lobby_core opennova_novaworld_gate_core
-        opennova_novaworld_fleet_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_fleet_core opennova_novaworld_hosting_cloud opennova_novaworld_service)
     target_include_directories(hosted_local_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(hosted_local_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_dependencies(hosted_local_e2e_test opennova_serve opennova_hostd)
@@ -946,7 +942,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # opennova-serve (`--resource-dir ...`). Linux: the agent is.
     add_executable(hosted_agent_route_test novaworld/hosted_agent_route_test.cpp)
     target_link_libraries(hosted_agent_route_test PRIVATE
-        opennova_novaworld_fleet_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_fleet_core opennova_novaworld_service)
     target_include_directories(hosted_agent_route_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(hosted_agent_route_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_dependencies(hosted_agent_route_test opennova_hostd)
@@ -966,7 +962,7 @@ if(BUILD_NOVAWORLD_HTTP)
     add_executable(billing_stripe_e2e_test novaworld/billing_stripe_e2e_test.cpp)
     target_link_libraries(billing_stripe_e2e_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_lobby_core opennova_novaworld_gate_core
-        opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_service)
     target_include_directories(billing_stripe_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(billing_stripe_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(billing_stripe_e2e REDIS COMMAND billing_stripe_e2e_test)
@@ -1019,7 +1015,7 @@ if(UNIX AND BUILD_NOVAWORLD_HTTP)
         # core for the Redis test helper's client (common/test_redis.h: web's
         # ONNET_REDIS_URL).
         target_link_libraries(${test_target} PRIVATE
-            opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+            opennova_novaworld_web_core opennova_novaworld_service)
         target_include_directories(${test_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         target_compile_definitions(${test_target} PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
         add_dependencies(${test_target} ${OPENNOVA_NOVAWORLD_PROGRAMS})
@@ -1043,7 +1039,7 @@ if(UNIX AND BUILD_NOVAWORLD_HTTP)
 
     add_executable(nw_programs_e2e_test novaworld/nw_programs_e2e_test.cpp)
     target_link_libraries(nw_programs_e2e_test PRIVATE
-        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(nw_programs_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(nw_programs_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_dependencies(nw_programs_e2e_test ${OPENNOVA_NOVAWORLD_PROGRAMS})
@@ -1059,8 +1055,7 @@ endif()
 # then 503 "stalled" once a watched loop stood still, a slow probe bounded, the port
 # let go at stop(). Database-free.
 add_executable(health_listener_test novaworld/health_listener_test.cpp)
-target_link_libraries(health_listener_test PRIVATE
-    opennova_novaworld_common opennova_novaworld_service Threads::Threads)
+target_link_libraries(health_listener_test PRIVATE opennova_novaworld_core Threads::Threads)
 target_include_directories(health_listener_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME health_listener COMMAND health_listener_test)
 
@@ -1071,7 +1066,7 @@ add_test(NAME health_listener COMMAND health_listener_test)
 # run's end for an ended server alone. Database-free.
 add_executable(hosted_server_phase_test novaworld/hosted_server_phase_test.cpp)
 target_link_libraries(hosted_server_phase_test PRIVATE
-    opennova_novaworld_common opennova_novaworld_service)
+    opennova_novaworld_hosting_model opennova_novaworld_service Threads::Threads)
 target_include_directories(hosted_server_phase_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hosted_server_phase COMMAND hosted_server_phase_test)
 
@@ -1084,7 +1079,7 @@ add_test(NAME hosted_server_phase COMMAND hosted_server_phase_test)
 # gauges. Database-free.
 add_executable(hosted_fleet_health_test novaworld/hosted_fleet_health_test.cpp)
 target_link_libraries(hosted_fleet_health_test PRIVATE
-    opennova_novaworld_common opennova_novaworld_service)
+    opennova_novaworld_hosting_model opennova_novaworld_service Threads::Threads)
 target_include_directories(hosted_fleet_health_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hosted_fleet_health COMMAND hosted_fleet_health_test)
 
@@ -1094,8 +1089,7 @@ add_test(NAME hosted_fleet_health COMMAND hosted_fleet_health_test)
 # set or there is no metadata; and every refusal: an endpoint that does not answer or
 # answers an error, no JSON or no address. Database-free.
 add_executable(ecs_metadata_test novaworld/ecs_metadata_test.cpp)
-target_link_libraries(ecs_metadata_test PRIVATE
-    opennova_novaworld_common opennova_novaworld_service Threads::Threads)
+target_link_libraries(ecs_metadata_test PRIVATE opennova_novaworld_core Threads::Threads)
 target_include_directories(ecs_metadata_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME ecs_metadata COMMAND ecs_metadata_test)
 
@@ -1115,8 +1109,7 @@ opennova_add_pg_test(unknown_tracker COMMAND unknown_tracker_test)
 # deregisters.
 add_executable(opennova_serve_novaworld_test serve/opennova_serve_novaworld_test.cpp)
 target_link_libraries(opennova_serve_novaworld_test PRIVATE
-    opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_common
-    opennova_novaworld_service)
+    opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(opennova_serve_novaworld_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
 set_tests_properties(opennova_serve_novaworld PROPERTIES RUN_SERIAL TRUE)
@@ -1126,8 +1119,7 @@ set_tests_properties(opennova_serve_novaworld PROPERTIES RUN_SERIAL TRUE)
 # ServerStopHosting ends the listing, an unknown RID is refused.
 add_executable(opennova_serve_server_command_push_test serve/opennova_serve_server_command_push_test.cpp)
 target_link_libraries(opennova_serve_server_command_push_test PRIVATE
-    opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_common
-    opennova_novaworld_service)
+    opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(opennova_serve_server_command_push_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(opennova_serve_server_command_push_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(opennova_serve_server_command_push COMMAND opennova_serve_server_command_push_test)
@@ -1138,8 +1130,7 @@ set_tests_properties(opennova_serve_server_command_push PROPERTIES RUN_SERIAL TR
 # roster edit keeping the other slot, the refresh, the stop).
 add_executable(opennova_serve_lister_e2e_test serve/opennova_serve_lister_e2e_test.cpp)
 target_link_libraries(opennova_serve_lister_e2e_test PRIVATE
-    opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_common
-    opennova_novaworld_service)
+    opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_service)
 add_test(NAME opennova_serve_lister_e2e COMMAND opennova_serve_lister_e2e_test)
 set_tests_properties(opennova_serve_lister_e2e PROPERTIES RUN_SERIAL TRUE)
 
