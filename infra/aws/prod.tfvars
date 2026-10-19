@@ -30,6 +30,9 @@ mail_sender = "support"
 # machines, the game data's store in the operations bucket, the update
 # service. The fleet's sizes keep their defaults.
 hosted_enabled = true
+# The static address add-on (ADR 0066): one for sale, within the account's
+# default Elastic IP quota of 5 beside the load balancer's two.
+fleet_max_addresses = 1
 # The machines' image, pinned by its exact name (fleet_agent.tf): Amazon's
 # ECS-optimized Amazon Linux 2023. A bump lands here, staging's first;
 # the newest: aws ssm get-parameters --names
