@@ -20,23 +20,27 @@ namespace opennova::novaworld_server {
 
 namespace {
 
-// The entitlement a users list row and a user page carry: {max_servers,
-// source, tier (null for none)}, and on the user page its comp grants
-// (comp_servers, comp_own_machines), the servers its tier alone grants
-// (tier_servers, 0 for none), its own machines and whether a server may start.
+// The entitlement a users list row and a user page carry: {max_servers (its
+// shared servers and its dedicated machines together), shared_servers,
+// own_machines (its dedicated machines), comp_own_machines (the admin's grant
+// of them), source (its shared servers'), tier (null for none), comp_servers
+// (the admin's grant of shared servers: with a tier too, the pages show
+// both)}, and on the user page the servers its tier alone grants
+// (tier_servers, 0 for none) and whether a server may start.
 crow::json::wvalue entitlement_json(const billing::Entitlement &e, bool full) {
 	crow::json::wvalue out;
 	out["max_servers"] = e.max_servers;
+	out["shared_servers"] = e.shared_servers;
+	out["own_machines"] = e.own_machines;
+	out["comp_own_machines"] = e.comp_own_machines;
 	out["source"] = e.source;
 	if (e.tier > 0)
 		out["tier"] = e.tier;
 	else
 		out["tier"] = nullptr;
+	out["comp_servers"] = e.comp_servers;
 	if (full) {
-		out["comp_servers"] = e.comp_servers;
-		out["comp_own_machines"] = e.comp_own_machines;
 		out["tier_servers"] = billing::kTierServers[e.tier];
-		out["own_machines"] = e.own_machines;
 		out["can_start"] = e.can_start;
 	}
 	return out;
@@ -66,24 +70,6 @@ crow::json::wvalue user_json(const UserRecord &u, const billing::Entitlement &en
 
 } // namespace
 
-// The hosting the service has sold against what its fleet sells
-// (hosted/model/sold_capacity.h), each of shared places, own machines and static
-// addresses as {sold, sellable}, and `oversold` when any is past it (an
-// admin's grant can take it there; the page warns).
-crow::json::wvalue AdminUserRoutes::capacity_json(db::Database &db) const {
-	const hosted::Capacity sold = hosted::sold_now(db, billing::unix_now());
-	crow::json::wvalue out;
-	const auto part = [&out](const char *key, int64_t has, int64_t cap) {
-		out[key]["sold"] = has;
-		out[key]["sellable"] = cap;
-	};
-	part("shared", sold.shared, sellable_.shared);
-	part("own_machines", sold.own, sellable_.own);
-	part("addresses", sold.addresses, sellable_.addresses);
-	out["oversold"] = hosted::sold_exceeds_capacity(sold, sellable_);
-	return out;
-}
-
 crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u) {
 	return user_json(u, billing::entitlement_of(db, u.id, billing::unix_now()));
 }
@@ -92,10 +78,12 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	forget_ = std::move(forget);
 
 	// GET /api/admin/users — list every player (no password_hash), each with
-	// its hosting entitlement ({max_servers, source, tier}), its live hosted
-	// servers (live_servers) and its support tier's Stripe status
-	// (subscription_status, null for none). Four reads whatever the count:
-	// the accounts, every subscription, every comp grant and every live server.
+	// its hosting entitlement ({max_servers, shared_servers, own_machines,
+	// comp_own_machines, source, tier, comp_servers}), its
+	// live hosted servers (live_servers) and its support tier's Stripe status
+	// (subscription_status, null for none). Five reads whatever the count:
+	// the accounts, every subscription, every comp grant, every comp address
+	// and every live server.
 	CROW_ROUTE(app, "/api/admin/users").methods("GET"_method)(
 	    [this](const crow::request &req) {
 		auto caller = access_.require_admin(req);
@@ -105,6 +93,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 		const int64_t now = billing::unix_now();
 		const auto subscriptions = billing::subscriptions_by_account(*db_conn);
 		const auto grants = billing::comp_grants_by_account(*db_conn);
+		const auto comp_addresses = billing::comp_addresses_by_account(*db_conn);
 		static const std::vector<billing::SubscriptionRow> kNoSubscriptions;
 		std::map<int64_t, int> live;
 		for (const hosted::HostedServer &s : hosted::list_live(*db_conn)) {
@@ -119,6 +108,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 				facts.comp_servers = granted->second.servers;
 				facts.comp_own_machines = granted->second.own_machines;
 			}
+			if (const auto addresses = comp_addresses.find(u.id); addresses != comp_addresses.end())
+				facts.comp_addresses = addresses->second;
 			const auto rows = subscriptions.find(u.id);
 			const billing::Entitlement entitlement =
 					billing::entitlement_from(facts, rows == subscriptions.end() ? kNoSubscriptions : rows->second, now);
@@ -177,9 +168,10 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	});
 
 	// GET /api/admin/users/<id> — one player: {"user", "entitlement"
-	// ({max_servers, source, tier, comp_servers, comp_own_machines,
-	// tier_servers, own_machines, can_start}), "capacity" (the service's sold
-	// capacity against what the fleet sells, capacity_json),
+	// ({max_servers, shared_servers, source, tier, comp_servers,
+	// comp_own_machines, tier_servers, own_machines, can_start}), "capacity" (the service's sold
+	// capacity against what the fleet sells, billing/billing_routes.h
+	// sold_capacity_json),
 	// "servers" (its hosted servers: the live ones by id, then its newest 10
 	// ended), "addresses" (its static addresses, the held ones first:
 	// hosted/address_routes.h address_json, with the admin's fields), "billing" ({livemode, stripe_customer_id (null for none),
@@ -199,7 +191,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			crow::json::wvalue out;
 			out["user"] = user_to_json(*db_conn, *user);
 			out["entitlement"] = entitlement_json(billing::entitlement_of(*db_conn, id, now), true);
-			out["capacity"] = capacity_json(*db_conn);
+			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, now);
 			std::vector<crow::json::wvalue> servers;
 			for (const hosted::HostedServer &s : hosted::list_servers_of(*db_conn, id))
 				servers.push_back(hosted::server_json(*db_conn, s, false, address_zone_));
@@ -230,19 +222,41 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	});
 
 	// DELETE /api/admin/users/<id> — 204; 404 not_found; 409
-	// active_subscription while a subscription of the account still grants
-	// (billing/entitlement.h): Stripe would bill an account that is gone, so it
-	// is canceled first.
+	// active_subscription while a subscription of the account still grants (a
+	// support tier, a dedicated machine or a static address;
+	// billing/entitlement.h), and 409 checkout_open
+	// while a checkout of the account holds its reservation
+	// (billing/billing_repository.h "A checkout's hold": its session may still
+	// be paid, or be paid and not synced yet): Stripe would bill an account that
+	// is gone, so its subscriptions end first. The checks and the delete hold
+	// the hosting-start lock a checkout's judgement and reservation take
+	// (database.h kHostedStartLock), so no checkout reserves for an account
+	// being deleted.
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
 	    [this](const crow::request &req, int64_t id) {
 		auto caller = access_.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
-		auto db_conn = pool_.acquire();
-		if (billing::has_granting_subscription(*db_conn, id, billing::unix_now()))
-			return json_error(409, "active_subscription",
-					"a support tier of this account still grants; cancel it in Stripe first");
-		auto result = delete_user(*db_conn, id);
-		if (result.ok) forget_(*db_conn, id);
+		MutationResult result;
+		try {
+			auto db_conn = pool_.acquire();
+			{
+				db::Transaction tx(*db_conn);
+				db_conn->exec("SELECT pg_advisory_xact_lock($1);", { db::BindValue(db::kHostedStartLock) });
+				if (billing::has_granting_subscription(*db_conn, id, billing::unix_now()))
+					return json_error(409, "active_subscription",
+							"a subscription of this account still grants (a support tier, a dedicated machine or a static "
+							"address); cancel it in Stripe first");
+				if (!billing::live_reservations_of(*db_conn, id).empty())
+					return json_error(409, "checkout_open",
+							"a checkout of this account may still be paid; try again once it ends");
+				result = delete_user(*db_conn, id);
+				if (result.ok) tx.commit();
+			}
+			if (result.ok) forget_(*db_conn, id);
+		} catch (const db::Error &e) {
+			std::fprintf(stderr, "[http] DELETE /api/admin/users/%lld failed: %s\n", static_cast<long long>(id), e.what());
+			return json_error(500, "db_error");
+		}
 		crow::response res(result.ok ? 204 :
 		                   result.error_code == "not_found" ? 404 : 500);
 		if (!result.ok) {
@@ -299,15 +313,19 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 
 	// PUT /api/admin/users/<id>/comp — {"servers": 0..16, "own_machines":
 	// 0..16}: an admin's grants to the account outside any subscription
-	// (comp_grants; billing/entitlement.h: its servers are the larger of the
-	// grant and its support tier's, its own machines the add-on's plus the
-	// grant's while it has servers), both set at once, answered with the
-	// account, its entitlement and the sold capacity (capacity_json: a grant
+	// (comp_grants; billing/entitlement.h: its shared servers are the larger of
+	// the grant of servers and its support tier's, and each dedicated machine
+	// granted is one more server on a machine of its own, added to the paid
+	// ones), both set at once, answered with the
+	// account, its entitlement and the sold capacity (sold_capacity_json: a grant
 	// counts as sold, and may take it past what the fleet sells, which the
 	// page warns of; logged). 400 invalid_json, invalid_field (no whole
 	// number, or outside 0..16) or missing_field, 404 for an unknown id and for
-	// a hosted server's service account. Lowering the entitlement below what
-	// the account runs stops servers (the supervisor's next pass;
+	// a hosted server's service account. Lowering the shared servers below what
+	// the account runs on shared machines stops its newest there; lowering its
+	// dedicated machines below its servers on them moves the newest of those to
+	// a shared machine while the account has a shared server free and the
+	// fleet room, and stops the rest (the supervisor's next pass;
 	// hosted/supervisor.h).
 	CROW_ROUTE(app, "/api/admin/users/<int>/comp").methods("PUT"_method)(
 	    [this](const crow::request &req, int64_t id) {
@@ -319,7 +337,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 		const auto own_machines = body->integer("own_machines");
 		if (body->wrong_type()) return json_error(400, "invalid_field");
 		if (!servers || !own_machines)
-			return json_error(400, "missing_field", "servers and own_machines (0 to 16 each) are required");
+			return json_error(400, "missing_field",
+					"servers (shared servers) and own_machines (dedicated machines), 0 to 16 each, are required");
 		if (*servers < 0 || *servers > billing::kMaxCompServers || *own_machines < 0 ||
 				*own_machines > billing::kMaxCompOwnMachines)
 			return json_error(400, "invalid_field", "servers and own_machines are whole numbers from 0 to 16");
@@ -330,21 +349,22 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			grants.own_machines = static_cast<int>(*own_machines);
 			if (!billing::set_comp_grants(*db_conn, id, grants))
 				return json_error(404, "not_found", "no player account has this id");
-			std::printf("[http] an admin set account %lld's comp grants: %d server(s), %d own machine(s)\n",
+			std::printf("[http] an admin set account %lld's comp grants: %d shared server(s), %d dedicated machine(s)\n",
 					static_cast<long long>(id), grants.servers, grants.own_machines);
 			const auto updated = get_user_by_id(*db_conn, id);
 			crow::json::wvalue out;
 			out["user"] = updated ? user_to_json(*db_conn, *updated) : crow::json::wvalue{};
 			out["entitlement"] = entitlement_json(billing::entitlement_of(*db_conn, id, billing::unix_now()), true);
-			out["capacity"] = capacity_json(*db_conn);
+			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, billing::unix_now());
 			const hosted::Capacity sold = hosted::sold_now(*db_conn, billing::unix_now());
 			if (hosted::sold_exceeds_capacity(sold, sellable_))
 				std::fprintf(stderr,
 						"[http] WARN account %lld's comp grants take the sold capacity past what the fleet sells "
-						"(shared %lld of %lld, own machines %lld of %lld)\n",
+						"(shared %lld of %lld, dedicated machines %lld of %lld, addresses %lld of %lld)\n",
 						static_cast<long long>(id), static_cast<long long>(sold.shared),
 						static_cast<long long>(sellable_.shared), static_cast<long long>(sold.own),
-						static_cast<long long>(sellable_.own));
+						static_cast<long long>(sellable_.own), static_cast<long long>(sold.addresses),
+						static_cast<long long>(sellable_.addresses));
 			return json_reply(200, out);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] PUT /api/admin/users/%lld/comp failed: %s\n", static_cast<long long>(id),

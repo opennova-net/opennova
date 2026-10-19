@@ -13,7 +13,7 @@
       id="terms-what-a-tier-buys"
       heading="What a support tier is"
       :covers="[
-        'A support tier is a monthly contribution to the OpenNova project. It lets the account run hosted servers on NovaWorld (Tier 1 one at a time, Tier 2 two, Tier 3 three), and the own-machine add-on runs one of them on a machine of its own.',
+        'A support tier is a monthly contribution to the OpenNova project. It lets the account run hosted servers on NovaWorld on shared machines (Tier 1 one at a time, Tier 2 two, Tier 3 three). A dedicated machine, a monthly subscription of its own that needs no tier, runs one more hosted server on a machine of its own.',
         'It is support for the project, not the sale of any game: it includes no game, licence or game content, and playing a retail game still needs a purchased copy.',
         'OpenNova is a fan-run preservation project, not endorsed by THQ Nordic; the original games and their rights remain with their owners.',
       ]"
@@ -22,7 +22,7 @@
       id="terms-price"
       heading="Price, currency, taxes and renewal"
       :covers="[
-        'The price of each tier and of the add-on, and the currency (shown on the support tier page from Stripe\'s prices).',
+        'The price of each tier, of a dedicated machine and of a static address, and the currency (shown on the support tier page from Stripe\'s prices).',
         'Whether prices include taxes such as VAT, and how taxes are charged.',
         'That a tier renews automatically every month until it is canceled, and when each payment is taken.',
         'What happens when a payment fails: running servers keep running while Stripe retries the card, new servers cannot start, and the tier ends when Stripe gives up.',
@@ -34,7 +34,7 @@
       :covers="[
         'Changes and cancellations are made in Stripe\'s billing portal, from the support tier page.',
         'A cancellation takes effect at the end of the period already paid for; the hosted servers keep running until then and stop when it ends.',
-        'Moving to a smaller tier stops the newest hosted servers beyond its number when the change takes effect.',
+        'Moving to a smaller tier stops the newest hosted servers on shared machines beyond its number when the change takes effect; dedicated machines need no tier.',
         'Refunds are covered by the refund policy.',
       ]"
     />

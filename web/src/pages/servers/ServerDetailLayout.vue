@@ -27,7 +27,7 @@
           <template v-if="owner">
             owned by
             <RouterLink :to="`/admin/users/${owner.id}`" class="text-accent hover:text-ink-bright">{{ owner.username }}</RouterLink>
-            ({{ owner.tier ? `Tier ${owner.tier}` : 'no tier' }})
+            ({{ ownerHostingLabel(owner) }})
           </template>
           <template v-else>whose owner was deleted</template>
         </p>
@@ -43,7 +43,7 @@
           <span :class="stateBadgeClass(server.state)">{{ ownerStateLabel(server.state) }}</span>
           <span>{{ server.data_set?.display_name || server.game_display_name || 'Unknown game' }}</span>
           <span v-if="server.expansion || server.expansion_display_name">{{ server.expansion?.display_name || server.expansion_display_name }}</span>
-          <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Own machine</span>
+          <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Dedicated machine</span>
         </p>
         <p v-if="server.address" class="text-sm text-ink-muted">
           Static address
@@ -103,6 +103,7 @@ import { hostedCadence, usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import type { FleetServer, HostedServer } from '../../types/hostedServer';
 import { serverAddressEndpoint } from '../../utils/addressView';
+import { ownerHostingLabel } from '../../utils/adminView';
 import { ownerStateLabel, stateBadgeClass } from '../../utils/hostedState';
 
 const props = defineProps<{

@@ -162,14 +162,12 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 		out.outcome = RequestOutcome::PastDue;
 		return out;
 	}
-	out.max_servers = entitlement.max_servers;
-	out.used = count_live_of(db, owner_user_id);
-	if (out.used >= entitlement.max_servers) {
-		out.outcome = RequestOutcome::AtLimit;
-		return out;
-	}
-	if (own_machine && count_own_live_of(db, owner_user_id) >= entitlement.own_machines) {
-		out.outcome = RequestOutcome::NoOwnMachine;
+	// Each pool its own places: a shared server within the shared servers, one
+	// on a dedicated machine within the dedicated machines.
+	out.limit = own_machine ? entitlement.own_machines : entitlement.shared_servers;
+	out.used = own_machine ? count_own_live_of(db, owner_user_id) : count_shared_live_of(db, owner_user_id);
+	if (out.used >= out.limit) {
+		out.outcome = own_machine ? RequestOutcome::NoOwnMachine : RequestOutcome::AtLimit;
 		return out;
 	}
 	if (count_live(db) >= cap || (fleet && !fleet_has_room(db, *fleet, own_machine))) {
@@ -253,6 +251,13 @@ int count_live_of(db::Database &db, int64_t owner_user_id) {
 int count_own_live_of(db::Database &db, int64_t owner_user_id) {
 	return count_of(db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 "
 										 "AND own_machine AND ") +
+					kLiveServerSql + ";",
+			{ BindValue(owner_user_id) }));
+}
+
+int count_shared_live_of(db::Database &db, int64_t owner_user_id) {
+	return count_of(db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 "
+										 "AND NOT own_machine AND ") +
 					kLiveServerSql + ";",
 			{ BindValue(owner_user_id) }));
 }
@@ -424,6 +429,28 @@ bool clear_server_address(db::Database &db, int64_t id) {
 	db.exec("UPDATE hosted_servers SET address_id = NULL, updated_at = now() WHERE id = $1 AND address_id IS NOT NULL;",
 			{ BindValue(id) });
 	return db.changes() > 0;
+}
+
+MoveOutcome clear_own_machine(db::Database &db, int64_t id, State state, const PlacementPolicy &fleet, int64_t now) {
+	db::Transaction tx(db);
+	// The hosted-start lock (database.h), as a start's judgement takes it.
+	db.exec("SELECT pg_advisory_xact_lock($1);", { BindValue(db::kHostedStartLock) });
+	const auto row = db.query("SELECT owner_user_id FROM hosted_servers "
+							  "WHERE id = $1 AND own_machine AND state = $2 AND owner_user_id IS NOT NULL;",
+			{ BindValue(id), BindValue(std::string(state_name(state))) });
+	if (row.empty()) return MoveOutcome::Gone;
+	// A shared server's start: a shared server of its owner's free, then the
+	// fleet's room for it.
+	const int64_t owner = row.front().as_int(0).value_or(0);
+	if (count_shared_live_of(db, owner) >= billing::entitlement_of(db, owner, now).shared_servers)
+		return MoveOutcome::NoSharedServer;
+	if (!fleet_has_room(db, fleet, false)) return MoveOutcome::NoRoom;
+	db.exec("UPDATE hosted_servers SET own_machine = false, address_id = NULL, updated_at = now() "
+			"WHERE id = $1 AND own_machine AND state = $2;",
+			{ BindValue(id), BindValue(std::string(state_name(state))) });
+	if (db.changes() == 0) return MoveOutcome::Gone;
+	tx.commit();
+	return MoveOutcome::Moved;
 }
 
 bool reset_restarts(db::Database &db, int64_t id) {

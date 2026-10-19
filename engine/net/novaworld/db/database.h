@@ -42,8 +42,10 @@ inline constexpr int kPoolAcquireTimeoutMs = 30000;
 // for its transaction, so two servers booting on one database promote one
 // first admin. hosted::request_server holds the hosted-start lock from its
 // first read to its commit: the global cap and the fleet's room are every
-// account's, so one start at a time counts them. The fleet program's election
-// holds the fleet lock on a connection of its own for as long as it leads (a
+// account's, so one start at a time counts them; a checkout's judgement and
+// reservation hold it too, and an admin's account delete for its checks and
+// the delete, so no checkout reserves for an account being deleted. The fleet
+// program's election holds the fleet lock on a connection of its own for as long as it leads (a
 // SessionLock, apps/novaworld_fleet/election.h). A job's claim
 // holds the claim lock for its transaction (apps/novaworld_common/jobs/
 // job_queue.h), so claims serialize with one another alone. An account name's

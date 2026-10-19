@@ -3,8 +3,9 @@
     <header>
       <h1 class="text-3xl font-semibold text-ink">Support tier</h1>
       <p class="mt-1 max-w-3xl text-sm text-ink-muted">
-        A monthly tier funds OpenNova and lets you run hosted servers. It supports the project; it is not the sale
-        of a game. Hosted servers are pre-1.0 and experimental.
+        A monthly tier funds OpenNova and lets you run hosted servers on shared machines; a dedicated machine adds one
+        more on a machine of its own, with or without a tier. It supports the project; it is not the sale of a game.
+        Hosted servers are pre-1.0 and experimental.
       </p>
     </header>
 
@@ -45,16 +46,17 @@
     </p>
 
     <template v-else-if="tiers && billing">
-      <!-- Past due: the servers keep running while Stripe retries. -->
+      <!-- Past due (the tier's payment, a dedicated machine's or a static
+           address's): the servers keep running while Stripe retries. -->
       <section
-        v-if="billing.subscription?.status === 'past_due'"
+        v-if="pastDue"
         class="space-y-3 rounded-panel border border-warn/40 bg-warn/10 p-4 sm:p-6"
         aria-labelledby="support-past-due"
       >
         <h2 id="support-past-due" class="text-lg font-semibold text-warn">Your last payment did not go through</h2>
         <p class="text-sm text-ink">
           Your servers keep running while Stripe retries the card; new servers can't start. Update your payment
-          method to keep your tier.
+          method to keep your subscriptions.
         </p>
         <button type="button" :disabled="busy" :class="primaryButton" @click="portal">Update your payment method</button>
       </section>
@@ -69,8 +71,8 @@
         <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">Tier</dt>
           <dd class="text-ink">
-            Tier {{ billing.subscription.tier }}, up to {{ currentOffer?.max_servers ?? billing.max_servers }} hosted
-            server{{ (currentOffer?.max_servers ?? billing.max_servers) === 1 ? '' : 's' }} at once
+            Tier {{ billing.subscription.tier }}, up to {{ tierServers }} hosted server{{ tierServers === 1 ? '' : 's' }}
+            at once on shared machines
           </dd>
           <dt class="text-ink-muted">Status</dt>
           <dd class="text-ink">{{ subscriptionStatusLabel(billing.subscription.status) }}</dd>
@@ -80,12 +82,12 @@
               {{ formatDate(billing.subscription.current_period_end) }}
             </time>
           </dd>
-          <dt class="text-ink-muted">Servers live</dt>
-          <dd class="text-ink">{{ billing.used }} of {{ billing.max_servers }}</dd>
+          <dt class="text-ink-muted">Live on shared machines</dt>
+          <dd class="text-ink">{{ billing.shared_used }} of {{ billing.shared_servers }}</dd>
         </dl>
-        <p v-if="billing.subscription.cancel_at_period_end" class="text-sm text-warn">
-          Your tier is canceled: it lasts until the end of the period you paid for, then your hosted servers stop.
-          You can renew it in the billing portal before then.
+        <p v-if="billing.subscription.cancel_at_period_end" id="support-canceled" class="text-sm text-warn">
+          Your tier is canceled: it lasts until the end of the period you paid for, then {{ afterTier }}. You can
+          renew it in the billing portal before then.{{ dedicatedStay }}
         </p>
         <div class="flex flex-wrap gap-2">
           <button type="button" :disabled="busy || !billing.can_manage" :class="secondaryButton" @click="portal">
@@ -103,7 +105,8 @@
           </button>
         </div>
         <p v-if="!billing.subscription.cancel_at_period_end" id="support-cancel-hint" class="text-xs text-ink-muted">
-          Change or cancel in Stripe's billing portal. Your servers run until the paid period ends.
+          Change or cancel in Stripe's billing portal. A canceled tier lasts until the paid period ends, then
+          {{ afterTier }}.{{ dedicatedStay }}
         </p>
       </section>
 
@@ -120,7 +123,7 @@
           :currency="tiers.currency"
           :mode="liveTier ? 'manage' : 'subscribe'"
           :current-tier="billing.subscription?.tier ?? null"
-          :used="billing.used - billing.stopping"
+          :used="billing.shared_used - billing.shared_stopping"
           :busy="busy || waiting"
           :disabled="liveTier ? !billing.can_manage : !billing.can_subscribe"
           base-id="support"
@@ -135,10 +138,10 @@
         </p>
       </section>
 
-      <!-- The own-machine add-on. -->
+      <!-- Dedicated machines: subscriptions of their own, no tier needed. -->
       <section v-if="tiers.own_machine && !billing.granted" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="support-own-machine">
         <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-          <h2 id="support-own-machine" class="text-lg font-semibold text-ink">Own machine add-on</h2>
+          <h2 id="support-own-machine" class="text-lg font-semibold text-ink">Dedicated machines</h2>
           <p class="text-ink">
             <template v-if="tiers.own_machine.amount !== null">
               <span class="text-xl font-semibold">{{ formatMoney(tiers.own_machine.amount, tiers.currency) }}</span>
@@ -148,35 +151,40 @@
           </p>
         </div>
         <p class="text-sm text-ink-muted">
-          Runs one of your tier's servers on a machine of its own. It adds no servers; each is its own monthly
-          subscription.
+          One more hosted server, on a machine of its own. No support tier needed; add as many as you like, each its
+          own monthly subscription.
         </p>
-        <p v-if="billing.own_machine_subscription" class="text-sm text-ink">
-          You have {{ ownMachines }} own machine{{ ownMachines === 1 ? '' : 's' }}
-          ({{ subscriptionStatusLabel(billing.own_machine_subscription.status).toLowerCase() }}).
-        </p>
+        <template v-if="billing.own_machine_subscriptions.length > 0">
+          <p class="text-sm text-ink">You have {{ ownMachines }} dedicated machine{{ ownMachines === 1 ? '' : 's' }}.</p>
+          <ul id="support-own-machine-subscriptions" class="space-y-1 text-sm text-ink">
+            <li v-for="s in billing.own_machine_subscriptions" :key="s.stripe_subscription_id">
+              {{ s.quantity }} dedicated machine{{ s.quantity === 1 ? '' : 's' }}:
+              {{ subscriptionStatusLabel(s.status) }}, {{ s.cancel_at_period_end ? 'ends' : 'renews' }}
+              <time :datetime="isoTime(s.current_period_end)" :title="formatUtc(s.current_period_end)">
+                {{ formatDate(s.current_period_end) }}
+              </time>
+            </li>
+          </ul>
+        </template>
         <div class="flex flex-wrap gap-2">
           <button
-            v-if="!ownMachineAtLimit"
             type="button"
-            :disabled="
-              busy || waiting || !billing.subscription?.entitled || tiers.own_machine.amount === null || !tiers.own_machine.available
-            "
-            :class="billing.own_machine_subscription ? secondaryButton : primaryButton"
+            :disabled="busy || waiting || pastDue || tiers.own_machine.amount === null || !tiers.own_machine.available"
+            :class="billing.own_machine_subscriptions.length > 0 ? secondaryButton : primaryButton"
             aria-describedby="support-own-machine-hint"
             @click="checkout('own_machine')"
           >
-            {{ billing.own_machine_subscription ? 'Add another own machine' : 'Add an own machine' }}
+            {{ billing.own_machine_subscriptions.length > 0 ? 'Add another' : 'Add a dedicated machine' }}
           </button>
           <button
-            v-if="billing.own_machine_subscription"
+            v-if="billing.own_machine_subscriptions.length > 0"
             type="button"
             :disabled="busy || !billing.can_manage"
             :class="secondaryButton"
             aria-describedby="support-own-machine-hint"
             @click="portal"
           >
-            Cancel one
+            Cancel one in the billing portal
           </button>
         </div>
         <p id="support-own-machine-hint" class="text-xs text-ink-muted">{{ ownMachineHint }}</p>
@@ -199,8 +207,10 @@
           </p>
         </div>
         <p class="text-sm text-ink-muted">
-          Gives a server on one of your own machines the same IP address and a name of its own every time it starts,
-          so players find it in the same place. One for each own machine; each is its own monthly subscription.
+          Gives a server on one of your dedicated machines the same IP address and a name of its own every time it
+          starts, so players find it in the same place. One for each dedicated machine; each is its own monthly
+          subscription. With fewer dedicated machines than addresses, the ones past them are set to end with their paid
+          period.
         </p>
         <p v-if="addressCount > 0" class="text-sm text-ink">
           You have {{ addressCount }} static address{{ addressCount === 1 ? '' : 'es' }}.
@@ -225,11 +235,14 @@
 
 <script setup lang="ts">
 // /me/support: the account's support tier (GET /api/me/billing) and the tiers
-// on offer (GET /api/billing/tiers), with the own-machine and static address
-// add-ons (each a checkout of its own; an item the fleet is sold out of says
-// so and cannot be bought). With no tier, Subscribe starts a Stripe
-// Checkout (POST /api/billing/checkout); with one, every change, the payment
-// method and the cancellation open Stripe's billing portal (POST
+// on offer (GET /api/billing/tiers), its dedicated machines (one more server
+// each, no tier needed; each checkout another subscription, listed with its
+// status and renewal) and the static addresses (each a checkout of its own;
+// an item the fleet is sold out of says so and cannot be bought, nor a
+// dedicated machine or an address while a payment is past due). With no
+// tier, Subscribe starts a Stripe Checkout (POST /api/billing/checkout); with
+// one, every change, the payment method and the cancellation open Stripe's
+// billing portal (POST
 // /api/billing/portal); a checkout for a tier the account already has
 // (already_subscribed) opens the portal too. Both leave through
 // navigateToStripe. Back from a checkout (?checkout=success), the page asks
@@ -240,7 +253,10 @@
 // tiers closed) drops the query with nothing claimed, and a page whose read
 // failed holds the confirmation back until "Try again". ?checkout=cancel says
 // no payment was taken. With billing off the page says support tiers are not
-// open.
+// open. A payment past due (the tier's or a dedicated machine's or a static
+// address's) shows a banner to the portal; the tier box counts the servers on
+// shared machines and says what the tier's end leaves (an admin's grant of
+// servers keeps them running; the dedicated machines need no tier).
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import TierPicker from '../../components/TierPicker.vue';
@@ -300,59 +316,95 @@ const notice = ref('');
 const confirm = ref<'idle' | 'confirming' | 'pending' | 'done'>('idle');
 
 const liveTier = computed(() => hasLiveTier(billing.value));
+// A payment past due: the tier's, a dedicated machine's or a static
+// address's (any keeps new servers from starting, and no dedicated machine
+// or address sells meanwhile).
+const pastDue = computed(() => {
+  const b = billing.value;
+  if (!b) return false;
+  return (
+    b.subscription?.status === 'past_due' ||
+    b.own_machine_subscriptions.some((s) => s.status === 'past_due') ||
+    b.address_subscriptions.some((s) => s.status === 'past_due')
+  );
+});
+// What the tier's end leaves: an admin's grant of servers keeps that many
+// running on shared machines (an account granted after it subscribed keeps
+// its tier box), else its servers there stop.
+const afterTier = computed(() => {
+  const n = billing.value?.comp_servers ?? 0;
+  return n > 0
+    ? `your admin grant keeps up to ${n} hosted server${n === 1 ? '' : 's'} running on shared machines`
+    : 'your hosted servers on shared machines stop';
+});
+// What the tier's end does not touch: the dedicated machines, subscriptions
+// of their own that need no tier.
+const dedicatedStay = computed(() =>
+  (billing.value?.own_machines ?? 0) > 0 ? ' Your dedicated machines keep running: they need no tier.' : '',
+);
 // A checkout came back and its confirmation is awaited: no second one starts.
 const waiting = computed(() => confirm.value === 'confirming' || confirm.value === 'pending');
 const currentOffer = computed(() => tiers.value?.tiers.find((t) => t.tier === billing.value?.subscription?.tier));
-// The own machines the account has: what its add-ons grant while its tier
-// does, else the shown add-on's own count.
+// The servers the account's tier covers on shared machines.
+const tierServers = computed(() => currentOffer.value?.max_servers ?? billing.value?.shared_servers ?? 0);
+// The dedicated machines the account has: what its subscriptions grant now,
+// else what the listed ones pay for (none granting yet, say a first payment
+// still awaited).
 const ownMachines = computed(() => {
   const b = billing.value;
   if (!b) return 0;
-  return b.own_machines > 0 ? b.own_machines : (b.own_machine_subscription?.quantity ?? 0);
+  return b.own_machines > 0 ? b.own_machines : b.own_machine_subscriptions.reduce((n, s) => n + s.quantity, 0);
 });
-// An own machine for every server the account may run: another buys nothing
-// (the service refuses it, own_machine_limit).
-const ownMachineAtLimit = computed(
-  () => !!billing.value?.subscription?.entitled && billing.value.own_machines >= billing.value.max_servers,
-);
+// Why another dedicated machine cannot be bought now, or what buying one
+// does. The fleet's room is the only cap.
 const ownMachineHint = computed(() => {
-  if (!billing.value?.subscription?.entitled) return 'Needs a support tier first.';
-  if (tiers.value?.own_machine && !tiers.value.own_machine.available && !ownMachineAtLimit.value) return HOSTING_FULL;
-  if (ownMachineAtLimit.value) {
-    return 'You have an own machine for every server your tier covers. A higher tier makes room for more; cancel one in the billing portal.';
+  const offer = tiers.value?.own_machine;
+  if (pastDue.value) return 'Fix the payment that is past due first, then add one.';
+  if (offer && offer.amount === null) return 'Its price is not set yet.';
+  if (offer && !offer.available) return HOSTING_FULL;
+  if ((billing.value?.own_machine_subscriptions.length ?? 0) > 0) {
+    return 'Each one you add is another subscription. Cancel one in the billing portal; it lasts until its paid period ends.';
   }
-  if (billing.value.own_machine_subscription) {
-    return 'Add another here, up to one for each server your tier covers; cancel one in the billing portal.';
-  }
-  return 'You can have one for each server your tier covers, and cancel any in the billing portal.';
+  return 'Start a server on it from your Servers page once it is paid for. Cancel it in the billing portal.';
 });
 
-// What an admin's grant gives, said whole: an account with one buys no tier
-// or add-on (the checkout refuses one, not_eligible).
+// What an admin's grant gives, said whole (its servers on shared machines and
+// its dedicated machines add up): an account with one buys no tier,
+// dedicated machine or static address (the checkout refuses one,
+// not_eligible).
 const grantText = computed(() => {
   const b = billing.value;
   if (!b) return '';
   const parts: string[] = [];
-  if (b.comp_servers > 0) parts.push(`${b.comp_servers} hosted server${b.comp_servers === 1 ? '' : 's'}`);
+  if (b.comp_servers > 0) {
+    parts.push(`${b.comp_servers} hosted server${b.comp_servers === 1 ? '' : 's'} on shared machines`);
+  }
   if (b.comp_own_machines > 0) {
-    parts.push(`${b.comp_own_machines} own machine${b.comp_own_machines === 1 ? '' : 's'} for your servers`);
+    const one = b.comp_own_machines === 1;
+    parts.push(`${b.comp_own_machines} dedicated machine${one ? '' : 's'} (${one ? 'one more server' : 'one more server each'})`);
   }
   if (b.comp_addresses > 0) parts.push(`${b.comp_addresses} static address${b.comp_addresses === 1 ? '' : 'es'}`);
   const granted = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');
-  return `An admin granted your account ${granted}, free of charge. With an admin grant there is no support tier or add-on to buy.`;
+  return (
+    `An admin granted your account ${granted}, free of charge. ` +
+    'With an admin grant there is no support tier, dedicated machine or static address to buy.'
+  );
 });
 
-// The static addresses the account pays for, one subscription each.
-const addressCount = computed(() => billing.value?.address_subscriptions.length ?? 0);
+// The static addresses the account has: one subscription each, and an
+// admin's comp addresses.
+const addressCount = computed(
+  () => (billing.value?.address_subscriptions.length ?? 0) + (billing.value?.comp_addresses ?? 0),
+);
 // Why another static address cannot be bought now, or '' when it can: each
-// is an own machine's, so the account needs an own machine without one.
+// is a dedicated machine's, so the account needs a dedicated machine without one.
 const addressBlock = computed(() => {
   const b = billing.value;
   const offer = tiers.value?.static_address;
   if (!b || !offer) return '';
-  if (b.own_machines === 0) return 'Needs an own machine first: a static address is for a server on one.';
+  if (b.own_machines === 0) return 'Needs a dedicated machine first: a static address is for a server on one.';
   if (b.own_machines <= b.static_addresses) {
-    return 'You have a static address for every own machine. Add an own machine first to add another address.';
+    return 'You have a static address for every dedicated machine. Add a dedicated machine first to add another address.';
   }
   if (offer.amount === null) return 'Its price is not set yet.';
   if (!offer.available) return HOSTING_FULL;
@@ -451,8 +503,8 @@ async function checkout(item: BillingItem) {
       return;
     }
     fail(result.error);
-    // An add-on Stripe sold meanwhile (another tab): the page catches up.
-    if (result.error.code === 'own_machine_limit' || result.error.code === 'address_limit') {
+    // An address Stripe sold meanwhile (another tab): the page catches up.
+    if (result.error.code === 'address_limit') {
       const fresh = await fetchMyBilling();
       if (fresh.ok) billing.value = fresh.value;
     }
@@ -492,7 +544,7 @@ function confirmed(value: MyBilling): boolean {
   confirm.value = 'done';
   notice.value =
     pending.item === 'own_machine'
-      ? 'Your own machine is active. Start a server on it from your Servers page.'
+      ? 'Your dedicated machine is active. Start a server on it from your Servers page.'
       : pending.item === 'static_address'
         ? 'Your static address is paid for. Give it a name on your Static addresses page.'
         : 'Your support tier is active. Thank you for supporting OpenNova.';

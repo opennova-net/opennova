@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { hostedServer, listedServer, serversResponse } from '../test/hostedFixtures';
 import {
+  biggerTierOffered,
   canStartAnother,
+  moreServersEnding,
   endedServers,
   hostingView,
   listingsOutrunHosted,
   liveServers,
   ownMachinesFree,
+  sharedFree,
   splitListings,
   startBlock,
 } from './myServersView';
@@ -45,7 +48,53 @@ describe('startBlock and canStartAnother', () => {
     expect(startBlock(serversResponse(three, { entitlement: { can_start: false } }))).toBe('past_due');
   });
 
-  it('counts the free own machines', () => {
+  it('reaches the limit only once both pools are full', () => {
+    // Tier 2 and a dedicated machine: both shared servers live, the machine free.
+    const shared = [hostedServer(1), hostedServer(2)];
+    const room = { max_servers: 3, shared_servers: 2, own_machines: 1 };
+    expect(startBlock(serversResponse(shared, { entitlement: room }))).toBeNull();
+    // The dedicated machine busy too.
+    const all = [...shared, hostedServer(3, { own_machine: true })];
+    expect(startBlock(serversResponse(all, { entitlement: room }))).toBe('limit');
+    // A dedicated machine alone, no tier: its one server, then the limit.
+    const alone = { max_servers: 1, shared_servers: 0, own_machines: 1, source: 'none' as const, tier: null };
+    expect(startBlock(serversResponse([], { entitlement: alone }))).toBeNull();
+    expect(startBlock(serversResponse([hostedServer(4, { own_machine: true })], { entitlement: alone }))).toBe('limit');
+  });
+
+  it('offers a bigger tier only below the biggest, and never with an admin grant', () => {
+    expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 2, max_servers: 2 } }).entitlement)).toBe(true);
+    expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 3 } }).entitlement)).toBe(false);
+    // A grant over a tier, or a grant alone: it buys no tier.
+    expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 1, granted: true } }).entitlement)).toBe(false);
+    expect(
+      biggerTierOffered(serversResponse([], { entitlement: { tier: null, source: 'comp', granted: true } }).entitlement),
+    ).toBe(false);
+  });
+
+  it('says what buys another server at the limit: a dedicated machine for any account but a granted one', () => {
+    expect(moreServersEnding(serversResponse([], { entitlement: { tier: 2, max_servers: 2 } }).entitlement)).toBe(
+      ', or move to a bigger support tier or add a dedicated machine.',
+    );
+    expect(moreServersEnding(serversResponse([]).entitlement)).toBe(', or add a dedicated machine.');
+    // Dedicated machines alone, no tier: a tier or another machine.
+    const tierless = { tier: null, source: 'none' as const, max_servers: 1, own_machines: 1 };
+    expect(moreServersEnding(serversResponse([], { entitlement: tierless }).entitlement)).toBe(
+      ', or move to a bigger support tier or add a dedicated machine.',
+    );
+    expect(moreServersEnding(serversResponse([], { entitlement: { granted: true, source: 'comp', tier: null } }).entitlement)).toBe('.');
+  });
+
+  it('counts the free places on shared machines', () => {
+    expect(sharedFree(serversResponse([hostedServer(1)]).entitlement)).toBe(2);
+    // A stopping server still holds its place.
+    const stopping = serversResponse([hostedServer(1), hostedServer(2, { state: 'stopping' })], { entitlement: { shared_servers: 2 } });
+    expect(sharedFree(stopping.entitlement)).toBe(0);
+    // Past the allowance (a lowered tier, its stops pending): none, never fewer.
+    expect(sharedFree(serversResponse([], { entitlement: { shared_servers: 1, shared_used: 3 } }).entitlement)).toBe(0);
+  });
+
+  it('counts the free dedicated machines', () => {
     expect(ownMachinesFree(serversResponse([]).entitlement)).toBe(0);
     expect(ownMachinesFree(serversResponse([], { entitlement: { own_machines: 2, own_used: 1 } }).entitlement)).toBe(1);
     expect(ownMachinesFree(serversResponse([], { entitlement: { own_machines: 1, own_used: 2 } }).entitlement)).toBe(0);

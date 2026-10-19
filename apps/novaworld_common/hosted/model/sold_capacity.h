@@ -4,10 +4,10 @@
 // hold (ADR 0066): a new subscription is never sold past the fleet, so a
 // paying owner's start is not refused at_capacity for room someone else
 // bought after it. Every account holds what its hosting entitlement grants
-// (billing/entitlement.h, the larger of its comp grant and its tier's, never
-// the sum), whether or not it runs a server: its servers less those on own
-// machines are places on shared machines, its own machines (no more than its
-// servers) are own machines, and its static addresses are addresses. Of the
+// (billing/entitlement.h), whether or not it runs a server: its shared servers
+// (the larger of its comp grant and its tier's, never the sum) are places on
+// shared machines, its dedicated machines are dedicated machines, and its
+// static addresses are addresses. Of the
 // addresses, what the cloud holds counts too (address_repository.h
 // held_addresses_by_owner): an account's are the larger of those granted and
 // its rows that hold a grant, plus its rows on their way out (lapsed,
@@ -15,7 +15,7 @@
 // count as they are, so the fleet never holds more Elastic IPs than it sells.
 // An open checkout's reservation (billing_repository.h "A checkout's hold")
 // counts as the subscription it sells. The fleet sells ONNET_FLEET_MAX_SHARED x
-// ONNET_FLEET_SHARED_SLOTS shared places, ONNET_FLEET_MAX_OWN own machines and
+// ONNET_FLEET_SHARED_SLOTS shared places, ONNET_FLEET_MAX_OWN dedicated machines and
 // ONNET_FLEET_MAX_ADDRESSES addresses (placement.h PlacementPolicy). An admin's
 // comp grant counts as sold too, and may take the sold past what the fleet
 // sells (the user page warns), as may a lowered maximum; then no new
@@ -39,7 +39,7 @@ namespace opennova::novaworld_server::hosted {
 // The three things the fleet holds.
 struct Capacity {
 	int64_t shared = 0;    // places on shared machines
-	int64_t own = 0;       // own machines
+	int64_t own = 0;       // dedicated machines
 	int64_t addresses = 0; // static addresses
 
 	Capacity &operator+=(const Capacity &other);
@@ -65,7 +65,7 @@ bool fits(const Capacity &sold, const Capacity &more, const Capacity &sellable);
 Capacity added_by(const billing::AccountFacts &account, const std::vector<billing::SubscriptionRow> &subscriptions,
 		billing::ItemKind item, int tier, int64_t now);
 // The same for an account that has nothing yet (GET /api/billing/tiers'
-// availability).
+// availability; a dedicated machine needs no tier beside it).
 Capacity added_by_new_account(billing::ItemKind item, int tier, int64_t now);
 
 // What every player account holds at `now`, its reservations included but

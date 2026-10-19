@@ -64,7 +64,7 @@ x-hosting-env: &hosting-env
   # admin.cfg admits the fleet's network.
   ONNET_INTERNAL_HTTP_BIND: 172.30.77.10:8070
   ONNET_HOSTED_BOOTSTRAP_CIDRS: 172.30.77.0/24
-  # A small fleet: one shared machine of 4 slots, one own machine.
+  # A small fleet: one shared machine of 4 slots, one dedicated machine.
   ONNET_FLEET_SHARED_SLOTS: ${ONNET_FLEET_SHARED_SLOTS:-4}
   ONNET_FLEET_MAX_SHARED: ${ONNET_FLEET_MAX_SHARED:-1}
   ONNET_FLEET_MAX_OWN: ${ONNET_FLEET_MAX_OWN:-1}

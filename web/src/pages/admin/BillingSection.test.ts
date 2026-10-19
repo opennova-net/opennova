@@ -52,7 +52,7 @@ describe('BillingSection', () => {
       ['Tier 1', '1', '$5', '$5'],
       ['Tier 2', '2', '$10', '$20'],
       ['Tier 3', '1', '$15', '$15'],
-      ['Own machines', '2', '$45', '$90'],
+      ['Dedicated machines', '2', '$45', '$90'],
     ]);
     expect(wrapper.get('tfoot').text()).toContain('4');
     expect(wrapper.get('tfoot').text()).toContain('$130');
@@ -145,6 +145,52 @@ describe('BillingSection', () => {
     expect(wrapper.get('[role="status"]').text()).toBe('Linked cus_lost to Echo.');
   });
 
+  it('shows the sold capacity and the admin-granted accounts, each to its page', async () => {
+    billing.mockResolvedValue({
+      ok: true,
+      value: adminBilling({
+        comp_grants: [
+          { user_id: 7, username: 'player7', servers: 3, own_machines: 1, addresses: 1 },
+          { user_id: 8, username: '', servers: 0, own_machines: 2, addresses: 0 },
+        ],
+      }),
+    });
+    const wrapper = await mountSection();
+    expect(wrapper.get('section.billing-capacity').text()).toContain(
+      'Sold: 9 of 12 shared places, 2 of 2 dedicated machines, 0 of 1 static addresses.',
+    );
+    expect(wrapper.find('.billing-oversold').exists()).toBe(false);
+    const grants = wrapper.findAll('li.billing-grant');
+    expect(grants.map((g) => g.get('a').text())).toEqual(['player7', 'Account 8']);
+    expect(grants.map((g) => g.get('span').text())).toEqual([
+      '3 servers on shared machines, 1 dedicated machine and 1 static address',
+      '2 dedicated machines',
+    ]);
+    expect(grants.map((g) => g.get('a').attributes('href'))).toEqual(['/admin/users/7', '/admin/users/8']);
+    expect(wrapper.text()).toContain('Admin grants (2)');
+  });
+
+  it('warns while grants and subscriptions oversell the fleet, billing off too', async () => {
+    billing.mockResolvedValue({
+      ok: true,
+      value: adminBilling({
+        enabled: false,
+        capacity: {
+          shared: { sold: 26, sellable: 24 },
+          own_machines: { sold: 2, sellable: 2 },
+          addresses: { sold: 0, sellable: 1 },
+          oversold: true,
+        },
+        comp_grants: [{ user_id: 7, username: 'player7', servers: 16, own_machines: 0, addresses: 0 }],
+      }),
+    });
+    const wrapper = await mountSection();
+    expect(wrapper.text()).toContain('Billing is off');
+    expect(wrapper.get('section.billing-capacity').text()).toContain('Sold: 26 of 24 shared places');
+    expect(wrapper.get('.billing-oversold').text()).toContain('Admin grants and subscriptions exceed what the fleet sells.');
+    expect(wrapper.get('li.billing-grant').text()).toContain('16 servers on shared machines');
+  });
+
   it('says when billing is off', async () => {
     billing.mockResolvedValue({ ok: true, value: adminBilling({ enabled: false }) });
     const wrapper = await mountSection();
@@ -166,13 +212,18 @@ describe('BillingSection', () => {
     const wrapper = await mountSection();
     const hold = wrapper.get('section.limits-hold');
     expect(hold.text()).toContain('Hosted server limits are on hold');
-    expect(hold.text()).toContain('4 servers of 3 owners');
+    // A pass's stops and its moves off dedicated machines, held alike.
+    expect(hold.text()).toContain('A pass would stop or move 4 servers of 3 owners');
     expect(hold.text()).toContain('a pass would stop 4 server(s) of 3 of 5 owners');
     expect(hold.text()).toContain('next full read from Stripe');
     await hold.findAll('button').find((b) => b.text() === 'Apply the stops')!.trigger('click');
-    // The first step asks, naming what stops; nothing is sent yet.
+    // The first step asks, naming what stops or moves; nothing is sent yet.
     expect(applyStops).not.toHaveBeenCalled();
-    const confirm = wrapper.get('section.limits-hold').findAll('button').find((b) => b.text() === 'Stop 4 servers of 3 owners');
+    expect(wrapper.get('section.limits-hold').text()).toContain('move to a shared machine while their owner has a shared server free and there is room, else stop');
+    const confirm = wrapper
+      .get('section.limits-hold')
+      .findAll('button')
+      .find((b) => b.text() === 'Stop or move 4 servers of 3 owners');
     expect(confirm).toBeDefined();
     await confirm!.trigger('click');
     await flushPromises();

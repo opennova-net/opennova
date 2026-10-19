@@ -6,7 +6,7 @@
 //   STRIPE_SECRET_KEY               sk_/rk_ (test or live; a restricted rk_ key is the recommended one)
 //   STRIPE_WEBHOOK_SECRET           whsec_...: the webhook endpoint's signing secret
 //   STRIPE_PRICE_TIER1..3           price_... comma lists: the first is sold, the rest grandfathered
-//   STRIPE_PRICE_OWN_MACHINE        the own-machine add-on's prices, the same way
+//   STRIPE_PRICE_OWN_MACHINE        the dedicated machine's prices, the same way
 //   STRIPE_PRICE_STATIC_ADDRESS     the static-address add-on's, the same way; needed only
 //                                   while the fleet sells addresses
 //                                   (ONNET_FLEET_MAX_ADDRESSES above 0)
@@ -63,7 +63,7 @@ BillingConfig billing_config_from_env();
 // "" when `config` is complete and well-formed, else the first reason it is
 // not, naming the variable ("STRIPE_SECRET_KEY is not set"): a key of
 // ^(sk|rk)_(test|live)_, a webhook secret of ^whsec_, every price ^price_ and
-// in one list alone, a non-empty list per tier and for the add-on, an
+// in one list alone, a non-empty list per tier and for the dedicated machine, an
 // http(s) site URL with no path, query or fragment (https in live mode), the
 // static-address add-on's list while sells_addresses (else it may be unset), an
 // absolute curl path, and a reconcile period of 5 to 10080 minutes.
@@ -71,10 +71,10 @@ std::string check_billing_config(const BillingConfig &config);
 
 // The tier (1..kTierCount) `price` sells or once sold; 0 when it is none of them.
 int tier_of_price(const BillingConfig &config, std::string_view price);
-// Whether `price` is (or was) the own-machine add-on's, or the static-address add-on's.
+// Whether `price` is (or was) the dedicated machine's, or the static-address add-on's.
 bool is_own_machine_price(const BillingConfig &config, std::string_view price);
 bool is_static_address_price(const BillingConfig &config, std::string_view price);
-// The price that sells tier `tier` now (its list's first), or the add-on; "" when none.
+// The price that sells tier `tier` now (its list's first), or each other item; "" when none.
 std::string tier_price_for_sale(const BillingConfig &config, int tier);
 std::string own_machine_price_for_sale(const BillingConfig &config);
 std::string static_address_price_for_sale(const BillingConfig &config);

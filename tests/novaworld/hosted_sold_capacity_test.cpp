@@ -1,8 +1,8 @@
 // The sold capacity (apps/novaworld_common/hosted/model/sold_capacity.h) and the
 // checkout reservations it counts (billing/billing_repository.h "A checkout's
-// hold"). The pure core first: what an entitlement holds (the larger of a comp
-// grant and a tier's, never the sum; an own machine no further than the
-// servers), what the fleet sells, what one more subscription adds, the fit and
+// hold"). The pure core first: what an entitlement holds (its shared servers,
+// the larger of a comp grant and a tier's, never the sum; its dedicated
+// machines, each apart), what the fleet sells, what one more subscription adds, the fit and
 // the oversold test. Then through a migrated database of the test's own
 // (common/test_database.h): every player account's holdings summed with its
 // live reservations (a lapsed one, an inactive account and a service account
@@ -64,12 +64,15 @@ bool same(const Capacity &c, int64_t shared, int64_t own, int64_t addresses) {
 
 int test_core() {
 	billing::Entitlement e;
-	e.max_servers = 3;
+	e.shared_servers = 2;
 	e.own_machines = 1;
+	e.max_servers = 3;
 	TEST_EXPECT(same(hosted::held_by(e), 2, 1, 0));
-	// An own machine past the servers holds nothing more.
+	// Dedicated machines with no shared server: each holds a dedicated machine.
+	e.shared_servers = 0;
 	e.own_machines = 5;
-	TEST_EXPECT(same(hosted::held_by(e), 0, 3, 0));
+	e.max_servers = 5;
+	TEST_EXPECT(same(hosted::held_by(e), 0, 5, 0));
 	TEST_EXPECT(same(hosted::held_by(billing::Entitlement{}), 0, 0, 0));
 
 	hosted::PlacementPolicy policy;
@@ -101,16 +104,18 @@ int test_core() {
 	TEST_EXPECT(hosted::fits(sold, machine, sellable));
 
 	// What one more subscription adds: a tier its servers past the comp grant
-	// (the larger, never the sum); an own machine one of its servers moved.
+	// (the larger, never the sum); a dedicated machine one, beside a tier or
+	// with none, and no shared place.
 	billing::AccountFacts comp2;
 	comp2.comp_servers = 2;
 	TEST_EXPECT(same(hosted::added_by(comp2, {}, ItemKind::Tier, 3, kNow), 1, 0, 0));
 	TEST_EXPECT(same(hosted::added_by(comp2, {}, ItemKind::Tier, 1, kNow), 0, 0, 0));
 	const std::vector<SubscriptionRow> tier2 = { granting("t2", ItemKind::Tier, 2) };
-	TEST_EXPECT(same(hosted::added_by(billing::AccountFacts{}, tier2, ItemKind::OwnMachine, 0, kNow), -1, 1, 0));
+	TEST_EXPECT(same(hosted::added_by(billing::AccountFacts{}, tier2, ItemKind::OwnMachine, 0, kNow), 0, 1, 0));
 	for (int tier = 1; tier <= 3; ++tier)
 		TEST_EXPECT(same(hosted::added_by_new_account(ItemKind::Tier, tier, kNow), tier, 0, 0));
-	TEST_EXPECT(same(hosted::added_by_new_account(ItemKind::OwnMachine, 0, kNow), -1, 1, 0));
+	TEST_EXPECT(same(hosted::added_by_new_account(ItemKind::OwnMachine, 0, kNow), 0, 1, 0));
+	TEST_EXPECT(same(hosted::added_by_new_account(ItemKind::StaticAddress, 0, kNow), 0, 0, 1));
 	return 0;
 }
 
@@ -135,9 +140,9 @@ int test_sold_now() {
 	Database db = scratch.open();
 	const int64_t now = billing::unix_now();
 	TEST_EXPECT(same(hosted::sold_now(db, now), 0, 0, 0));
-	// Ana: tier 2 and an own machine. Ben: a grant of 3 servers, 1 on an own
-	// machine, under a tier 1 (the larger counts). Cy, banned, and a service
-	// account: nothing, whatever they hold.
+	// Ana: tier 2 and a dedicated machine. Ben: a grant of 3 shared servers and
+	// 1 dedicated machine, under a tier 1 (the larger shared count counts). Cy,
+	// banned, and a service account: nothing, whatever they hold.
 	const int64_t ana = make_player(db, "sold_ana");
 	const int64_t ben = make_player(db, "sold_ben");
 	const int64_t cy = make_player(db, "sold_cy", "player", "banned");
@@ -157,26 +162,26 @@ int test_sold_now() {
 	SubscriptionRow srv_tier = granting("srv_t3", ItemKind::Tier, 3);
 	srv_tier.current_period_end = tier.current_period_end;
 	subscribe(db, srv, srv_tier);
-	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 0));
+	TEST_EXPECT(same(hosted::sold_now(db, now), 5, 2, 0));
 
 	// A reservation counts as the subscription it sells, until it lapses or
 	// goes; another account's id drops nothing.
 	const int64_t dee = make_player(db, "sold_dee");
 	const int64_t r1 = billing::reserve_checkout(db, dee, ItemKind::Tier, 3, 3600);
-	TEST_EXPECT(r1 > 0 && same(hosted::sold_now(db, now), 6, 2, 0));
+	TEST_EXPECT(r1 > 0 && same(hosted::sold_now(db, now), 8, 2, 0));
 	const auto held = billing::live_reservations_of(db, dee);
 	TEST_EXPECT(held.size() == 1 && held.front().item == ItemKind::Tier && held.front().tier == 3 &&
 			held.front().checkout_session.empty());
 	billing::stamp_reservation(db, r1, "cs_sold_1");
 	TEST_EXPECT(billing::live_reservations_by_account(db).at(dee).front().checkout_session == "cs_sold_1");
 	billing::drop_reservation(db, r1, ana);
-	TEST_EXPECT(same(hosted::sold_now(db, now), 6, 2, 0));
+	TEST_EXPECT(same(hosted::sold_now(db, now), 8, 2, 0));
 	TEST_EXPECT(billing::drop_session_reservation(db, "") == 0);
 	TEST_EXPECT(billing::drop_session_reservation(db, "cs_sold_1") == 1);
-	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 0));
-	// An own machine reserved beside Ana's tier moves one of her places.
+	TEST_EXPECT(same(hosted::sold_now(db, now), 5, 2, 0));
+	// A dedicated machine reserved beside Ana's tier adds one, and no shared place.
 	const int64_t r2 = billing::reserve_checkout(db, ana, ItemKind::OwnMachine, 0, 3600);
-	TEST_EXPECT(r2 > 0 && same(hosted::sold_now(db, now), 2, 3, 0));
+	TEST_EXPECT(r2 > 0 && same(hosted::sold_now(db, now), 5, 3, 0));
 	const hosted::AccountHoldings ana_now = hosted::holdings_of(db, ana, now);
 	TEST_EXPECT(billing::entitlement_from(ana_now.facts, ana_now.subscriptions, now).own_machines == 2);
 	billing::drop_reservation(db, r2, ana);
@@ -184,7 +189,7 @@ int test_sold_now() {
 	const int64_t lapsed = billing::reserve_checkout(db, dee, ItemKind::Tier, 1, 3600);
 	db.exec("UPDATE billing_checkout_reservations SET expires_at = now() - interval '1 second' WHERE id = $1;",
 			{ BindValue(lapsed) });
-	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 0) && billing::live_reservations_of(db, dee).empty());
+	TEST_EXPECT(same(hosted::sold_now(db, now), 5, 2, 0) && billing::live_reservations_of(db, dee).empty());
 	billing::reserve_checkout(db, dee, ItemKind::Tier, 1, 3600);
 	TEST_EXPECT(db.query("SELECT 1 FROM billing_checkout_reservations WHERE id = $1;", { BindValue(lapsed) }).empty());
 	// No such account holds nothing.
@@ -194,9 +199,9 @@ int test_sold_now() {
 	// The static addresses: an account's granted ones, or its rows holding a
 	// grant where they are more, plus every row on its way out (its Elastic IP
 	// held until released), and a gone account's rows as they are. Dee's tier
-	// reservation goes first, so the shared places are the accounts' 3 again.
+	// reservation goes first, so the shared places are the accounts' 5 again.
 	db.exec("DELETE FROM billing_checkout_reservations;");
-	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 0));
+	TEST_EXPECT(same(hosted::sold_now(db, now), 5, 2, 0));
 	const auto address = [&db](std::optional<int64_t> owner, const std::string &name, const char *state,
 								 const char *subscription) {
 		db.exec("INSERT INTO hosted_addresses (owner_user_id, name, source, stripe_subscription_id, state) "
@@ -209,10 +214,10 @@ int test_sold_now() {
 	SubscriptionRow ana_address = granting("ana_sa", ItemKind::StaticAddress, 0);
 	ana_address.current_period_end = tier.current_period_end;
 	subscribe(db, ana, ana_address);
-	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 1));
+	TEST_EXPECT(same(hosted::sold_now(db, now), 5, 2, 1));
 	address(ana, "ana-now", "ready", "ana_sa");
 	address(ana, "ana-old", "releasing", "ana_sa_old");
-	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 2));
+	TEST_EXPECT(same(hosted::sold_now(db, now), 5, 2, 2));
 	// Ben's comp row an admin released, and a ready row whose grant ended
 	// before the fleet's pass lapsed it.
 	address(ben, "ben-gone", "lapsed", nullptr);
@@ -220,14 +225,14 @@ int test_sold_now() {
 	address(std::nullopt, "nobodys", "releasing", "gone_sa");
 	address(cy, "cy-failed", "failed", nullptr);
 	address(cy, "cy-done", "released", nullptr);
-	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 5));
+	TEST_EXPECT(same(hosted::sold_now(db, now), 5, 2, 5));
 	hosted::PlacementPolicy policy;
 	policy.max_addresses = 5;
 	Capacity one_address;
 	one_address.addresses = 1;
 	TEST_EXPECT(!hosted::fits(hosted::sold_now(db, now), one_address, hosted::sellable_of(policy)));
 	db.exec("DELETE FROM hosted_addresses WHERE name IN ('ana-old', 'ben-left');");
-	TEST_EXPECT(same(hosted::sold_now(db, now), 3, 2, 3));
+	TEST_EXPECT(same(hosted::sold_now(db, now), 5, 2, 3));
 	TEST_EXPECT(hosted::fits(hosted::sold_now(db, now), one_address, hosted::sellable_of(policy)));
 	db.exec("DELETE FROM hosted_addresses;");
 	return 0;

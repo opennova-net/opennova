@@ -24,7 +24,7 @@
 //                                 bind, admits 127.0.0.0/8
 //   ONNET_FLEET_SHARED_SLOTS      a new shared machine's slots (12; 1..32)
 //   ONNET_FLEET_MAX_SHARED        the most shared machines taking servers (2)
-//   ONNET_FLEET_MAX_OWN           the most own machines taking servers (2)
+//   ONNET_FLEET_MAX_OWN           the most dedicated machines taking servers (2)
 //   ONNET_FLEET_MAX_ADDRESSES     the static addresses the fleet sells (0: the
 //                                 add-on is off; sold_capacity.h)
 //   ONNET_HOSTED_ADDRESS_ZONE     the play zone the addresses' names live in

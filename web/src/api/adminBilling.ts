@@ -1,12 +1,18 @@
 // The admin's billing overview (apps/novaworld_web/billing/billing_routes.cpp):
-// GET /api/admin/billing (with the hosted servers' limits hold, billing on or
-// off), POST /api/admin/billing/reconcile (and its override of the hold) and
+// GET /api/admin/billing (with the hosted servers' limits hold, the sold
+// capacity and the admin grants, billing on or off), POST /api/admin/billing/reconcile (and its override of the hold) and
 // POST /api/admin/billing/link. Each answers an AdminResult (admin.ts).
 
 import { adminClient } from './client';
 import { adminCall, adminPost, type AdminResult } from './admin';
-import { pickSubscription } from './users';
-import type { AdminBillingResponse, BillingEvent, BillingOrphan, BillingSubscriptionRow } from '../types/billing';
+import { pickCapacity, pickSubscription } from './users';
+import type {
+  AdminBillingResponse,
+  AdminCompGrant,
+  BillingEvent,
+  BillingOrphan,
+  BillingSubscriptionRow,
+} from '../types/billing';
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
@@ -36,6 +42,18 @@ function pickEvent(value: unknown): BillingEvent | null {
   return { event_id: v.event_id, type: str(v.type), received_at: str(v.received_at), outcome: str(v.outcome) };
 }
 
+function pickCompGrant(value: unknown): AdminCompGrant | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.user_id !== 'number') return null;
+  return {
+    user_id: v.user_id,
+    username: str(v.username),
+    servers: count(v.servers),
+    own_machines: count(v.own_machines),
+    addresses: count(v.addresses),
+  };
+}
+
 function list<T>(value: unknown, pick: (v: unknown) => T | null): T[] | null {
   if (!Array.isArray(value)) return null;
   const out = value.map(pick);
@@ -48,7 +66,8 @@ export function parseAdminBilling(data: unknown): AdminBillingResponse | null {
   const subscriptions = list(v.subscriptions ?? [], pickRow);
   const orphans = list(v.orphans ?? [], pickOrphan);
   const events = list(v.recent_events ?? [], pickEvent);
-  if (!subscriptions || !orphans || !events) return null;
+  const grants = list(v.comp_grants ?? [], pickCompGrant);
+  if (!subscriptions || !orphans || !events || !grants) return null;
   return {
     enabled: v.enabled,
     limits_hold: v.limits_hold === true,
@@ -67,6 +86,8 @@ export function parseAdminBilling(data: unknown): AdminBillingResponse | null {
       : [],
     orphans,
     recent_events: events,
+    capacity: pickCapacity(v.capacity),
+    comp_grants: grants,
   };
 }
 

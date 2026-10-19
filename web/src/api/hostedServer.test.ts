@@ -42,13 +42,26 @@ describe('fetchMyServers', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('reads the entitlement, the data sets and the servers', async () => {
+    // One server on a shared machine and a dedicated machine free.
     const body = serversResponse([hostedServer(1), hostedServer(2, { state: 'stopped' })], {
-      entitlement: { max_servers: 2, own_machines: 1, own_used: 0 },
+      entitlement: { max_servers: 2, shared_servers: 1, own_machines: 1 },
     });
+    expect(body.entitlement).toMatchObject({ used: 1, shared_used: 1, own_used: 0 });
     get.mockResolvedValue(reply(body));
     const result = await fetchMyServers();
     expect(get).toHaveBeenCalledWith('/me/servers', expect.anything());
     expect(result).toEqual({ ok: true, value: body });
+  });
+
+  it("reads the entitlement's tier and grant, none when left out", async () => {
+    const body = serversResponse([], { entitlement: { source: 'comp', tier: 2, granted: true } });
+    get.mockResolvedValue(reply(body));
+    const granted = await fetchMyServers();
+    expect(granted.ok && granted.value.entitlement).toMatchObject({ tier: 2, granted: true });
+    const { tier: _tier, granted: _granted, ...older } = body.entitlement;
+    get.mockResolvedValue(reply({ ...body, entitlement: { ...older } }));
+    const plain = await fetchMyServers();
+    expect(plain.ok && plain.value.entitlement).toMatchObject({ tier: null, granted: false });
   });
 
   it('refuses a reply whose entitlement or any server is malformed', async () => {
@@ -58,6 +71,12 @@ describe('fetchMyServers', () => {
     get.mockResolvedValue(reply({ ...good, entitlement: { ...good.entitlement, used: -1 } }));
     expect((await fetchMyServers()).ok).toBe(false);
     get.mockResolvedValue(reply({ ...good, entitlement: { ...good.entitlement, source: 'gift' } }));
+    expect((await fetchMyServers()).ok).toBe(false);
+    // The shared machines' counts are what a start is judged by.
+    const { shared_servers: _shared, ...uncounted } = good.entitlement;
+    get.mockResolvedValue(reply({ ...good, entitlement: uncounted }));
+    expect((await fetchMyServers()).ok).toBe(false);
+    get.mockResolvedValue(reply({ ...good, entitlement: { ...good.entitlement, shared_used: 'one' } }));
     expect((await fetchMyServers()).ok).toBe(false);
     get.mockResolvedValue(reply({ ...good, entitlement: undefined }));
     expect((await fetchMyServers()).ok).toBe(false);
@@ -165,7 +184,7 @@ describe('the start, the stop and one server', () => {
     expect(started.ok && started.value.id).toBe(8);
     expect(post).toHaveBeenLastCalledWith('/me/servers', expect.objectContaining({ game_name: 'Night Ops', own_machine: true }));
 
-    // A static address goes with an own machine alone.
+    // A static address goes with a dedicated machine alone.
     await startHostedServer({ ...settings(), game_name: 'Night Ops' }, true, 5);
     expect(post).toHaveBeenLastCalledWith('/me/servers', expect.objectContaining({ own_machine: true, address_id: 5 }));
     await startHostedServer({ ...settings(), game_name: 'Night Ops' }, false, 5);
@@ -187,26 +206,49 @@ describe('the start, the stop and one server', () => {
     expect(!current.ok && current.error.message).toContain('already runs the current data');
   });
 
-  it('reads server_limit with its counts, and links it to the support tiers', async () => {
-    post.mockRejectedValue(refusal(409, { error: 'server_limit', max_servers: 2, used: 2 }));
+  it("reads server_limit with the shared machines' counts, and links it to the support tiers", async () => {
+    post.mockRejectedValue(refusal(409, { error: 'server_limit', shared_servers: 2, shared_used: 2 }));
     const result = await startHostedServer(settings());
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toMatchObject({ code: 'server_limit', status: 409, maxServers: 2, used: 2 });
-    expect(result.error.message).toContain('You may run 2 servers at once');
+    expect(result.error).toMatchObject({ code: 'server_limit', status: 409, sharedServers: 2, sharedUsed: 2 });
+    expect(result.error.message).toContain('You may run 2 servers at once on shared machines');
     expect(result.error.message).toContain('counts toward your limit until it has stopped, in about a minute');
     expect(linksToSupportTier(result.error.code)).toBe(true);
+
+    // An account with dedicated machines alone runs no server on a shared one.
+    post.mockRejectedValue(refusal(409, { error: 'server_limit', shared_servers: 0, shared_used: 0 }));
+    const dedicatedOnly = await startHostedServer(settings());
+    expect(!dedicatedOnly.ok && dedicatedOnly.error.message).toBe(
+      'Your account may run no servers on shared machines. Start this one on a dedicated machine.',
+    );
+  });
+
+  it('reads no_own_machine with its counts', async () => {
+    post.mockRejectedValue(refusal(409, { error: 'no_own_machine', own_machines: 2, own_used: 2 }));
+    const busy = await startHostedServer(settings(), true);
+    expect(!busy.ok && busy.error).toMatchObject({ code: 'no_own_machine', ownMachines: 2, ownUsed: 2 });
+    expect(!busy.ok && busy.error.message).toContain('Each of your dedicated machines already runs a server.');
+    expect(linksToSupportTier('no_own_machine')).toBe(true);
+    post.mockRejectedValue(refusal(409, { error: 'no_own_machine', own_machines: 0, own_used: 0 }));
+    const none = await startHostedServer(settings(), true);
+    expect(!none.ok && none.error.message).toBe('You have no dedicated machine. Start this one on a shared machine.');
   });
 
   it('maps the entitlement refusals, never showing the server text', async () => {
     post.mockRejectedValue(refusal(403, { error: 'payment_past_due', message: 'raw server text' }));
     const pastDue = await startHostedServer(settings());
     expect(!pastDue.ok && pastDue.error.message).toContain('Stripe retries the card');
+    // A dedicated machine's payment counts too: no tier assumed.
+    expect(!pastDue.ok && pastDue.error.message).toContain('A payment of yours did not go through');
     expect(!pastDue.ok && pastDue.error.message).not.toContain('raw server text');
 
     post.mockRejectedValue(refusal(403, { error: 'not_entitled' }));
     const locked = await startHostedServer(settings());
     expect(!locked.ok && locked.error.code).toBe('not_entitled');
+    expect(!locked.ok && locked.error.message).toBe(
+      'Hosting a server needs a support tier, a dedicated machine or an admin grant.',
+    );
     expect(linksToSupportTier('not_entitled')).toBe(true);
 
     post.mockRejectedValue(refusal(409, { error: 'at_capacity' }));

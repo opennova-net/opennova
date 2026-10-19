@@ -110,7 +110,7 @@ int test_two_leaders() {
 			[&rig, machine] { return rig.machine(machine)->seen_state == "booting"; }, 5000));
 	const int64_t booting_since = rig.machine(machine)->seen_since_ms;
 	TEST_EXPECT(booting_since == 1000);
-	// An own machine's launch the cloud refuses: A holds that kind's launches for 5 s.
+	// A dedicated machine's launch the cloud refuses: A holds that kind's launches for 5 s.
 	const int64_t owner = make_player(rig.db, "ctl_own_owner", 0);
 	subscribe(rig.db, owner, 1, "active", "sub_ctl_own");
 	subscribe_machines(rig.db, owner, 1, "sub_ctl_own_machine");
@@ -144,7 +144,7 @@ int test_two_leaders() {
 	a.leader->stop();
 	TEST_EXPECT(wait_until([&b] { return b.sup->pass_turns() > 0; }, 5000));
 
-	// B resumes A's launch backoff from its row: no own machine before 6000.
+	// B resumes A's launch backoff from its row: no dedicated machine before 6000.
 	std::this_thread::sleep_for(std::chrono::milliseconds(300));
 	TEST_EXPECT(rig.fake.launches.load() == launches);
 	clock.store(6000);

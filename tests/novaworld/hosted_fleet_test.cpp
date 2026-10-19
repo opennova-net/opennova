@@ -66,7 +66,7 @@ int test_desired_state() {
 	rig.sync_all();
 	TEST_EXPECT(agent.last.desired.size() == 1 && !agent.last.desired[0].files);
 
-	// Another machine's sync names none of this machine's containers (an own one,
+	// Another machine's sync names none of this machine's containers (a dedicated one,
 	// so placement never picks it).
 	Database *db = &rig.db;
 	const auto other = hosted::create_machine(*db, { "fake", hosted::MachineKind::Own, 1, kServeImage, 0 });

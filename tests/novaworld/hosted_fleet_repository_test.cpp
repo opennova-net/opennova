@@ -163,7 +163,7 @@ int test_create_and_launch() {
 	TEST_EXPECT(!hosted::find_machine_by_cloud_id(db, "ec2", ""));
 	TEST_EXPECT(!hosted::find_machine(db, created.id + 100));
 
-	// An own machine is reserved for its server.
+	// A dedicated machine is reserved for its server.
 	const int64_t server = server_row(db);
 	hosted::NewMachine own;
 	own.provider = "ec2";
@@ -837,7 +837,7 @@ int test_launch_backoff() {
 		TEST_EXPECT(b && b->failures == i + 1 &&
 				b->not_before_ms == now + static_cast<int64_t>(waits[i] * kMin));
 	}
-	// The own machines' is their own.
+	// The dedicated machines' is their own.
 	TEST_EXPECT(hosted::launch_not_before_ms(db, MachineKind::Own) == 0);
 	b = hosted::note_launch_failure(db, MachineKind::Own, now, kMin, kCap);
 	TEST_EXPECT(b && b->failures == 1);

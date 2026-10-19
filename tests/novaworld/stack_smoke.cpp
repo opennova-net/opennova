@@ -447,9 +447,9 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 }
 
 // The static addresses (with --zone-file, the zone the worker writes): the admin
-// grants the account an own machine and a comp address, which the worker allocates
-// from the stack's fixed range and names in the zone file; an own-machine server
-// started at it runs on a machine at that address and lists there; stopped and
+// grants the account a dedicated machine alone and a comp address, which the worker
+// allocates from the stack's fixed range and names in the zone file; a server on the
+// dedicated machine started at it runs on a machine at that address and lists there; stopped and
 // started again, it keeps it. With billing on, a checkout past the fleet's shared
 // places (an admin's grant fills them) is refused sold_out.
 void check_static_address(const Site &site, int64_t user_id, const Options &o) {
@@ -461,8 +461,8 @@ void check_static_address(const Site &site, int64_t user_id, const Options &o) {
 		return;
 	}
 	reply = site.admin("PUT", "/api/admin/users/" + std::to_string(user_id) + "/comp",
-			"{\"servers\":1,\"own_machines\":1}");
-	if (!check(reply.code == 200, "the admin grants the account an own machine (comp grant)", status_text(reply)))
+			"{\"servers\":0,\"own_machines\":1}");
+	if (!check(reply.code == 200, "the admin grants the account a dedicated machine (comp grant)", status_text(reply)))
 		return;
 	const std::string name = "smoke-" + random_hex(3);
 	reply = site.admin("POST", "/api/admin/users/" + std::to_string(user_id) + "/addresses",
@@ -500,7 +500,7 @@ void check_static_address(const Site &site, int64_t user_id, const Options &o) {
 	}
 	// Twice: a start at the address runs and lists there, then stops.
 	for (int round = 1; round <= 2; ++round) {
-		const std::string label = round == 1 ? "an own-machine server" : "started again, it";
+		const std::string label = round == 1 ? "a server on the dedicated machine" : "started again, it";
 		reply = site.user("POST", "/api/me/servers",
 				"{\"data_set_id\":" + o.hosting + ",\"game_name\":\"Smoke at " + name +
 						"\",\"own_machine\":true,\"address_id\":" + std::to_string(address) + "}");
@@ -563,7 +563,7 @@ void check_static_address(const Site &site, int64_t user_id, const Options &o) {
 	const auto refused = json_of(reply);
 	check(reply.code == 409 && refused && text_at(*refused, { "error" }) == "sold_out",
 			"a checkout past the fleet is refused (409 sold_out)", status_text(reply));
-	site.admin("PUT", "/api/admin/users/" + std::to_string(user_id) + "/comp", "{\"servers\":1,\"own_machines\":1}");
+	site.admin("PUT", "/api/admin/users/" + std::to_string(user_id) + "/comp", "{\"servers\":0,\"own_machines\":1}");
 }
 
 int run(const Options &o) {

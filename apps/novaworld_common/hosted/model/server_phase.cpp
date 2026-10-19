@@ -74,7 +74,10 @@ ServerPhase server_phase(const PhaseInputs &in) {
 				out.restart = in.restarts;
 				out.restart_limit = in.restart_limit;
 				out.restart_cause = *ended;
-			} else if (ended == StartCause::Fleet || ended == StartCause::Update) {
+			} else if (ended == StartCause::Fleet || ended == StartCause::Update ||
+					ended == StartCause::Limits) {
+				// A live server's limits end is a move off a dedicated machine its owner
+				// no longer has (a limits stop leaves it stopping).
 				out.phase = Phase::Moving;
 			} else if (ended == StartCause::DataUnavailable) {
 				out.phase = Phase::DataUnavailable;

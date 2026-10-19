@@ -37,10 +37,9 @@ Capacity operator-(const Capacity &a, const Capacity &b) {
 
 Capacity held_by(const billing::Entitlement &e) {
 	Capacity out;
-	// An own machine past the account's servers would run nothing: it holds no
-	// more own machines than servers, and each it holds is a shared place less.
-	out.own = std::min(e.own_machines, e.max_servers);
-	out.shared = e.max_servers - out.own;
+	// Each pool its own: a dedicated machine takes no shared place.
+	out.shared = e.shared_servers;
+	out.own = e.own_machines;
 	// Every address granted is one the cloud holds, used or not.
 	out.addresses = e.address_grants;
 	return out;
@@ -73,12 +72,7 @@ Capacity added_by(const billing::AccountFacts &account, const std::vector<billin
 }
 
 Capacity added_by_new_account(billing::ItemKind item, int tier, int64_t now) {
-	billing::AccountFacts account;
-	std::vector<billing::SubscriptionRow> subscriptions;
-	// An add-on is bought beside a tier: the account a new one comes to has the
-	// lowest.
-	if (item != billing::ItemKind::Tier) subscriptions.push_back(one_more(billing::ItemKind::Tier, 1, now));
-	return added_by(account, subscriptions, item, tier, now);
+	return added_by(billing::AccountFacts{}, {}, item, tier, now);
 }
 
 Capacity sold_now(db::Database &db, int64_t now, const std::string &except_session) {

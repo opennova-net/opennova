@@ -157,7 +157,7 @@ inline void subscribe(Database &db, int64_t user, int tier, const std::string &s
 	billing::upsert_subscription(db, row);
 }
 
-// The owner's own-machine add-on in the billing cache, `quantity` machines.
+// The owner's dedicated-machine subscription in the billing cache, `quantity` machines.
 inline void subscribe_machines(Database &db, int64_t user, int64_t quantity, const std::string &id) {
 	namespace billing = opennova::novaworld_server::billing;
 	billing::SubscriptionRow row;

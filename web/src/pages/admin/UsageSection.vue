@@ -128,7 +128,7 @@
                 <RouterLink :to="`/admin/fleet/${s.id}`" class="break-words text-accent hover:text-ink-bright">
                   {{ s.name || 'Unnamed server' }}
                 </RouterLink>
-                <span class="block text-xs font-normal text-ink-muted">Server {{ s.id }}<template v-if="s.own_machine">, own machine</template></span>
+                <span class="block text-xs font-normal text-ink-muted">Server {{ s.id }}<template v-if="s.own_machine">, dedicated machine</template></span>
               </th>
               <td class="whitespace-nowrap px-4 py-3">
                 <template v-if="s.owner">{{ s.owner.username }}</template>

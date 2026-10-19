@@ -1,7 +1,9 @@
-// Labels the admin pages share: account statuses, support tiers, machines,
-// NovaWorld sessions and the titles they speak, each in words.
+// Labels the admin pages share: account statuses, support tiers and admin
+// grants, the sold capacity, machines, NovaWorld sessions and the titles they
+// speak, each in words.
 
 import type { EntitlementSource, MachineKind } from '../types/hostedServer';
+import type { SoldCapacity } from '../types/users';
 
 // "Active", "Banned", "Restricted": a players.account_status; one stored
 // empty reads as active.
@@ -14,28 +16,66 @@ export function isActiveAccount(status: string): boolean {
   return (status || 'active') === 'active';
 }
 
-// "Tier 2", "Admin grant of 3", "None".
-export function entitlementLabel(e: { source: EntitlementSource; tier: number | null; max_servers: number }): string {
-  if (e.source === 'tier' && e.tier !== null) return `Tier ${e.tier}`;
-  if (e.source === 'comp') return `Admin grant of ${e.max_servers}`;
-  if (e.tier !== null) return `Tier ${e.tier}`;
-  return 'None';
+// Where an account's hosted servers come from, each source it has: the one
+// that gives its servers on shared machines first, then the dedicated
+// machines it pays for. "Tier 2", "Admin grant of 9 shared + 2 dedicated",
+// "Admin grant of 9 shared, Tier 2" (a tier still billing under a bigger
+// grant), "Tier 2, Admin grant of 2 shared", "Tier 2, 1 dedicated",
+// "1 dedicated", "None".
+export function entitlementLabel(e: {
+  source: EntitlementSource;
+  tier: number | null;
+  comp_servers: number;
+  comp_own_machines: number;
+  own_machines: number;
+}): string {
+  const granted = [
+    ...(e.comp_servers > 0 ? [`${e.comp_servers} shared`] : []),
+    ...(e.comp_own_machines > 0 ? [`${e.comp_own_machines} dedicated`] : []),
+  ];
+  const grant = granted.length > 0 ? `Admin grant of ${granted.join(' + ')}` : '';
+  const tier = e.tier !== null ? `Tier ${e.tier}` : '';
+  // The paid dedicated machines; "paid" only beside the grant's own, so the two never read alike.
+  const paid = e.own_machines - e.comp_own_machines;
+  const paidLabel = e.comp_own_machines > 0 ? `${paid} paid dedicated` : `${paid} dedicated`;
+  const parts = [...(e.source === 'tier' ? [tier, grant] : [grant, tier]), paid > 0 ? paidLabel : ''];
+  const named = parts.filter((p) => p !== '');
+  return named.length > 0 ? named.join(', ') : 'None';
 }
 
-// Where an entitlement's servers run, as the sold capacity counts them: an own
-// machine takes one of them off the shared machines and adds none.
-// "9 on shared machines, 2 on own machines", "All on shared machines", "None".
-export function serverPlacesLabel(e: { max_servers: number; own_machines: number }): string {
-  if (e.max_servers <= 0) return 'None';
-  const own = Math.min(e.own_machines, e.max_servers);
-  const shared = e.max_servers - own;
-  if (own === 0) return 'All on shared machines';
-  if (shared === 0) return 'All on own machines';
-  return `${shared} on shared machines, ${own} on own machine${own === 1 ? '' : 's'}`;
+// A fleet view's owner's hosting: "Admin grant, Tier 2", "Admin grant",
+// "Tier 2", "No tier".
+export function ownerHostingLabel(owner: { tier: number | null; granted: boolean }): string {
+  const parts = [...(owner.granted ? ['Admin grant'] : []), ...(owner.tier !== null ? [`Tier ${owner.tier}`] : [])];
+  return parts.length > 0 ? parts.join(', ') : 'No tier';
+}
+
+// Where an entitlement's servers run, as the sold capacity counts them: its
+// servers on shared machines, and one on each dedicated machine. "9 on
+// shared machines, 2 on dedicated machines", "3 on shared machines",
+// "1 on a dedicated machine", "None".
+export function serverPlacesLabel(e: { shared_servers: number; own_machines: number }): string {
+  const own = e.own_machines === 1 ? '1 on a dedicated machine' : `${e.own_machines} on dedicated machines`;
+  const places = [
+    ...(e.shared_servers > 0 ? [`${e.shared_servers} on shared machines`] : []),
+    ...(e.own_machines > 0 ? [own] : []),
+  ];
+  return places.length > 0 ? places.join(', ') : 'None';
+}
+
+// The service's sold capacity against what the fleet sells, item by item:
+// "Sold: 9 of 12 shared places, 2 of 2 dedicated machines, 0 of 1 static
+// addresses."
+export function soldCapacityText(c: SoldCapacity): string {
+  return (
+    `Sold: ${c.shared.sold} of ${c.shared.sellable} shared places, ` +
+    `${c.own_machines.sold} of ${c.own_machines.sellable} dedicated machines, ` +
+    `${c.addresses.sold} of ${c.addresses.sellable} static addresses.`
+  );
 }
 
 export function machineKindLabel(kind: MachineKind | string): string {
-  return kind === 'own' ? 'Own machine' : kind === 'shared' ? 'Shared machine' : kind;
+  return kind === 'own' ? 'Dedicated machine' : kind === 'shared' ? 'Shared machine' : kind;
 }
 
 const MACHINE_STATES: Record<string, string> = {

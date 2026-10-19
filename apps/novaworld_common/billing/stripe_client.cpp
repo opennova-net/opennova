@@ -446,6 +446,14 @@ StripeResult<Subscription> StripeClient::update_subscription_metadata(const std:
 			subscription_from_json);
 }
 
+StripeResult<Subscription> StripeClient::cancel_at_period_end(const std::string &id,
+		const std::string &idempotency_key) {
+	if (!is_stripe_id(id)) return refused<Subscription>(not_an_id("the subscription", id));
+	return exchange<Subscription>(api_,
+			post("/v1/subscriptions/" + id, { { "cancel_at_period_end", "true" } }, idempotency_key), "subscription",
+			subscription_from_json);
+}
+
 StripeResult<Price> StripeClient::get_price(const std::string &id) {
 	if (!is_stripe_id(id)) return refused<Price>(not_an_id("the price", id));
 	return exchange<Price>(api_, get("/v1/prices/" + id), "price", price_from_json);

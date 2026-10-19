@@ -4,7 +4,7 @@
 // of a machine is the game's UDP port 32768 + k (open to everyone), the remote
 // admin's TCP port 32800 + k (open to the service alone), the container's user
 // 10001 + k and the working directory /srv/slots/slot-k (0700, that user's). A
-// shared machine has up to kMaxSlots of them (ONNET_FLEET_SHARED_SLOTS), an own
+// shared machine has up to kMaxSlots of them (ONNET_FLEET_SHARED_SLOTS), a dedicated
 // machine one, slot 0: the ports and the user a machine of its own always had
 // (the serve image's user is 10001). Service policy, shared by the NovaWorld
 // service (hosted/model/placement.h, the rendered game.cfg) and opennova-hostd (apps/hostd:

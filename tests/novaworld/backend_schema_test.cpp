@@ -819,31 +819,78 @@ int test_jobs_tables() {
 	return 0;
 }
 
-// 0017_capacity_addresses.sql over a database migrated to the one before it: each
-// account's players.comp_servers becomes its comp_grants row of servers (none for 0),
-// and the column goes.
-int test_comp_grants_migration() {
-	const std::filesystem::path migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
-	TestDatabase scratch({ /*migrate=*/false });
+// The backend's migrations.
+std::filesystem::path migrations_dir() {
+	return std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
+}
+
+// `scratch`'s database migrated through the migrations named before `first`.
+Database migrated_before(TestDatabase &scratch, const std::string &first) {
 	const std::filesystem::path before =
 			std::filesystem::temp_directory_path() / ("opennova-migrations-" + scratch.name());
 	std::filesystem::create_directories(before);
-	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
+	for (const auto &e : std::filesystem::directory_iterator(migrations_dir())) {
 		const std::string name = e.path().filename().string();
-		if (e.path().extension() == ".sql" && name < "0017_")
+		if (e.path().extension() == ".sql" && name < first)
 			std::filesystem::copy_file(e.path(), before / name);
 	}
 	Database db = scratch.open();
 	run_migrations(db, before);
 	std::filesystem::remove_all(before);
+	return db;
+}
+
+// 0017_capacity_addresses.sql over a database migrated to the one before it: each
+// account's players.comp_servers becomes its comp_grants row of servers (none for 0),
+// and the column goes.
+int test_comp_grants_migration() {
+	TestDatabase scratch({ /*migrate=*/false });
+	Database db = migrated_before(scratch, "0017_");
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, comp_servers) "
 	        "VALUES ('cg_ann', 'x', '0b120001', '1', 'Ann', 3), ('cg_bo', 'x', '0b120002', '1', 'Bo', 0);");
-	run_migrations(db, migrations);
+	run_migrations(db, migrations_dir());
 	TEST_EXPECT(!has_column(db, "players", "comp_servers"));
 	const auto rows = db.query("SELECT p.username, g.item, g.quantity FROM comp_grants g "
 							   "JOIN players p ON p.id = g.user_id ORDER BY p.username;");
 	TEST_EXPECT(rows.size() == 1 && rows.front().as_text(0) == "cg_ann" && rows.front().as_text(1) == "servers" &&
 			rows.front().as_int(2) == 3);
+	return 0;
+}
+
+// 0019_dedicated_machines.sql over a database migrated to the one before it: an
+// admin's grant of servers gives up the machines granted beside it (each a server of
+// its own now, a dedicated machine), and goes when they cover it: 11 servers with 2
+// machines become 9 shared servers and 2 dedicated machines, 2 with 2 the 2 dedicated
+// machines alone; a grant of servers alone, and one of machines alone, stay.
+int test_dedicated_grants_migration() {
+	TestDatabase scratch({ /*migrate=*/false });
+	Database db = migrated_before(scratch, "0019_");
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES "
+			"('dg_ann', 'x', '0b130001', '1', 'Ann'), ('dg_bo', 'x', '0b130002', '1', 'Bo'), "
+			"('dg_cy', 'x', '0b130003', '1', 'Cy'), ('dg_dee', 'x', '0b130004', '1', 'Dee');");
+	const auto grant = [&db](const char *user, const char *item, int quantity) {
+		db.exec(std::string("INSERT INTO comp_grants (user_id, item, quantity) SELECT id, '") + item + "', " +
+				std::to_string(quantity) + " FROM players WHERE username = '" + user + "';");
+	};
+	grant("dg_ann", "servers", 11);
+	grant("dg_ann", "own_machine", 2);
+	grant("dg_bo", "servers", 2);
+	grant("dg_bo", "own_machine", 2);
+	grant("dg_cy", "servers", 3);
+	grant("dg_dee", "own_machine", 1);
+	run_migrations(db, migrations_dir());
+	const auto rows = db.query("SELECT p.username, g.item, g.quantity FROM comp_grants g "
+							   "JOIN players p ON p.id = g.user_id ORDER BY p.username, g.item;");
+	std::vector<std::string> got;
+	for (const auto &r : rows)
+		got.push_back(r.as_text(0).value_or("") + " " + r.as_text(1).value_or("") + " " +
+				std::to_string(r.as_int(2).value_or(0)));
+	const std::vector<std::string> want = { "dg_ann own_machine 2", "dg_ann servers 9", "dg_bo own_machine 2",
+		"dg_cy servers 3", "dg_dee own_machine 1" };
+	if (got != want) {
+		for (const std::string &g : got) std::fprintf(stderr, "  comp grant after 0019: %s\n", g.c_str());
+	}
+	TEST_EXPECT(got == want);
 	return 0;
 }
 
@@ -941,6 +988,7 @@ int main(int argc, char **argv) {
 		return 1;
 	if (test_billing_tables() != 0) return 1;
 	if (test_comp_grants_migration() != 0) return 1;
+	if (test_dedicated_grants_migration() != 0) return 1;
 	if (test_account_email() != 0) return 1;
 	if (test_jobs_tables() != 0)
 		return 1;

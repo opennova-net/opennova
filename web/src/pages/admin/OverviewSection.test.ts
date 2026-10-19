@@ -155,13 +155,13 @@ describe('OverviewSection', () => {
     expect(figure(page, 'NovaWorld', 'Sign-in')).toContain('Open');
     expect(figure(page, 'NovaWorld', 'Signed in now')).toBe('Signed in now21 hosts a server');
     expect(figure(page, 'Hosting', 'Live servers')).toContain('1 of 24 shared');
-    expect(figure(page, 'Hosting', 'Live servers')).toContain('0 of 2 own');
-    expect(figure(page, 'Hosting', 'Machines')).toContain('1 shared, 1 own');
+    expect(figure(page, 'Hosting', 'Live servers')).toContain('0 of 2 dedicated');
+    expect(figure(page, 'Hosting', 'Machines')).toContain('1 shared, 1 dedicated');
     expect(figure(page, 'Hosting', 'Players on hosted servers')).toContain('5');
     expect(area(page, 'Hosting').get('svg').attributes('aria-label')).toContain('Players on hosted servers, last 24 hours');
     expect(figure(page, 'People and money', 'Subscribers')).toContain('Tier 1: 1, Tier 2: 2, Tier 3: 1');
     expect(figure(page, 'People and money', 'Payments past due')).toContain('Their servers keep running while Stripe retries');
-    // Four tiers and two own machines at today's prices.
+    // Four tiers and two dedicated machines at today's prices.
     expect(figure(page, 'People and money', 'Subscriptions a month')).toContain('about $130');
     expect(figure(page, 'People and money', 'AWS this month')).toContain('$41.25 so far');
     expect(figure(page, 'People and money', 'AWS this month')).toContain("About $117 by the month's end, 47% of the $250 budget.");
@@ -224,7 +224,7 @@ describe('OverviewSection', () => {
     const page = await mountOverview();
     const hold = page.get('.limits-hold');
     expect(hold.text()).toContain('Hosted server limits are on hold');
-    expect(hold.text()).toContain('11 servers of 9 owners');
+    expect(hold.text()).toContain('A pass would stop or move 11 servers of 9 owners');
     expect(hold.get('a').attributes('href')).toBe('/admin/billing');
     expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('Server limits on hold');
   });

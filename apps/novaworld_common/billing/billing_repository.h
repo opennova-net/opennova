@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -129,7 +130,7 @@ struct EventRow {
 std::vector<EventRow> recent_events(db::Database &db, size_t limit);
 
 // Whether a subscription of the account grants at `now` (entitlement.h
-// subscription_grants: a tier or an add-on, active, trialing or past_due,
+// subscription_grants: a tier, a dedicated machine or a static address, active, trialing or past_due,
 // inside its period's net). The admin's account delete refuses such an
 // account.
 bool has_granting_subscription(db::Database &db, int64_t user_id, int64_t now);
@@ -137,11 +138,12 @@ bool has_granting_subscription(db::Database &db, int64_t user_id, int64_t now);
 // --- An admin's comp grants (comp_grants, 0017_capacity_addresses.sql) ---
 
 // What an admin grants an account outside any subscription (each 0..16,
-// tiers.h kMaxCompServers and kMaxCompOwnMachines): hosted servers, and own
-// machines for them (entitlement.h).
+// tiers.h kMaxCompServers and kMaxCompOwnMachines): hosted servers on shared
+// machines, and dedicated machines, each one more server on a machine of its
+// own (entitlement.h).
 struct CompGrants {
-	int servers = 0;
-	int own_machines = 0;
+	int servers = 0;      // shared servers
+	int own_machines = 0; // dedicated machines
 };
 // The account's grants (none: zeros).
 CompGrants comp_grants_of(db::Database &db, int64_t user_id);
@@ -158,6 +160,12 @@ bool set_comp_grants(db::Database &db, int64_t user_id, const CompGrants &grants
 // some.
 int comp_addresses_of(db::Database &db, int64_t user_id);
 std::map<int64_t, int> comp_addresses_by_account(db::Database &db);
+// The static-address subscriptions an address was named for that holds one
+// (hosted_addresses' subscription rows allocating or ready): the account's,
+// and every account's that has some (entitlement.h addresses_to_end ends
+// these last).
+std::set<std::string> named_address_subscriptions(db::Database &db, int64_t user_id);
+std::map<int64_t, std::set<std::string>> named_address_subscriptions_by_account(db::Database &db);
 
 // --- A checkout's hold on what it sells (billing_checkout_reservations) ---
 //

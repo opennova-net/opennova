@@ -20,20 +20,28 @@ export interface User {
   // read-only on the admin pages.
   email: string | null;
   role: Role;
-  // An admin's grants (comp_grants, 0 to 16 each): hosted servers, and own
-  // machines for them (counted while the account has servers).
+  // An admin's grants (comp_grants, 0 to 16 each): servers on shared
+  // machines, and dedicated machines (one more server each).
   comp_servers: number;
   comp_own_machines: number;
-  // The account's hosting entitlement: the larger of its tier's servers and
-  // the grant.
+  // The account's hosting entitlement: its servers on shared machines (the
+  // larger of its tier's and the grant's) plus its dedicated machines.
   max_servers: number;
 }
 
-// The entitlement a users list row carries: how many, from where, the tier.
+// The entitlement a users list row carries: how many servers, how many of
+// them on shared machines and from where (the tier, the admin's grant: with
+// both, both show), and its dedicated machines with the grant's among them.
 export interface UserEntitlementSummary {
   max_servers: number;
+  shared_servers: number;
   source: EntitlementSource;
   tier: TierNumber | null;
+  comp_servers: number;
+  // Every granting subscription's quantity (no tier needed) plus
+  // comp_own_machines.
+  own_machines: number;
+  comp_own_machines: number;
 }
 
 // GET /api/admin/users's rows.
@@ -47,17 +55,14 @@ export interface UserListEntry extends User {
 
 // The account's hosting entitlement in full, on its admin page.
 export interface UserEntitlement extends UserEntitlementSummary {
-  comp_servers: number;
-  comp_own_machines: number;
-  // The servers its support tier alone grants (0 with none): the entitlement
-  // is the larger of this and comp_servers.
+  // The servers its support tier alone grants (0 with none): its servers on
+  // shared machines are the larger of this and comp_servers.
   tier_servers: number;
-  // The add-on's machines (while a tier grants) plus comp_own_machines.
-  own_machines: number;
   can_start: boolean;
 }
 
-// PUT /api/admin/users/<id>/comp's body.
+// PUT /api/admin/users/<id>/comp's body: the servers on shared machines and
+// the dedicated machines granted, which add up.
 export interface CompGrants {
   servers: number;
   own_machines: number;
@@ -77,10 +82,10 @@ export interface SoldItem {
   sellable: number;
 }
 
-// The service's sold capacity (hosted/model/sold_capacity.h): shared places, own
-// machines and static addresses. `oversold` when any is past what the fleet
-// sells (an admin's grant can take it there): new subscriptions of it are
-// paused.
+// The service's sold capacity (hosted/model/sold_capacity.h): shared places,
+// dedicated machines and static addresses. `oversold` when any is past what
+// the fleet sells (an admin's grant can take it there): new subscriptions of
+// it are paused.
 export interface SoldCapacity {
   shared: SoldItem;
   own_machines: SoldItem;

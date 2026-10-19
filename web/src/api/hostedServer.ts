@@ -76,10 +76,14 @@ export interface HostedError {
   retryAfterSeconds?: number;
   // invalid_settings: the setting the server refused.
   field?: SettingsField;
-  // server_limit: the account's entitlement and how many of its servers are
-  // live, when the reply said.
-  maxServers?: number;
-  used?: number;
+  // server_limit: the servers the account may run on shared machines and how
+  // many of its live servers run there, when the reply said.
+  sharedServers?: number;
+  sharedUsed?: number;
+  // no_own_machine: its dedicated machines and how many of them run a server,
+  // when the reply said.
+  ownMachines?: number;
+  ownUsed?: number;
 }
 
 export type HostedResult<T> = { ok: true; value: T } | { ok: false; error: HostedError };
@@ -105,8 +109,9 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<HostedErrorCode>([
   'db_error',
 ]);
 
-// The refusals a support tier (or its add-on) answers: the page shows a link
-// to the account's support tier page beside their message.
+// The refusals a support tier or a dedicated machine answers: the page shows
+// a link to the account's support tier page beside their message (which
+// shows an admin's grant in its place).
 const SUPPORT_TIER_CODES: ReadonlySet<HostedErrorCode> = new Set<HostedErrorCode>([
   'not_entitled',
   'payment_past_due',
@@ -130,7 +135,7 @@ function servers(n: number): string {
 
 function messageFor(
   code: HostedErrorCode,
-  extra: { field?: SettingsField; retryAfterSeconds?: number; maxServers?: number } = {},
+  extra: { field?: SettingsField; retryAfterSeconds?: number; sharedServers?: number; ownMachines?: number } = {},
 ): string {
   switch (code) {
     case 'unauthorized':
@@ -154,17 +159,19 @@ function messageFor(
         ? `The server refused the settings. ${FIELD_RULES[extra.field]}`
         : 'The server refused the settings. Check them and try again.';
     case 'not_entitled':
-      return 'Hosting a server needs a support tier.';
+      return 'Hosting a server needs a support tier, a dedicated machine or an admin grant.';
     case 'payment_past_due':
-      return "Your support tier's last payment did not go through, so new servers can't start. Your running servers keep running while Stripe retries the card.";
+      return "A payment of yours did not go through, so new servers can't start. Your running servers keep running while Stripe retries the card.";
     case 'server_limit':
+      if (extra.sharedServers === 0) return 'Your account may run no servers on shared machines. Start this one on a dedicated machine.';
       return `${
-        extra.maxServers !== undefined
-          ? `You may run ${servers(extra.maxServers)} at once, and all of them are live.`
-          : 'All the servers you may run at once are live.'
-      } Stop one, or move to a bigger support tier. ${STOPPING_STILL_COUNTS}`;
+        extra.sharedServers !== undefined
+          ? `You may run ${servers(extra.sharedServers)} at once on shared machines, and all of them are live.`
+          : 'All the servers you may run at once on shared machines are live.'
+      } Stop one first. ${STOPPING_STILL_COUNTS}`;
     case 'no_own_machine':
-      return 'Each of your own machines already runs a server. Start this one on a shared machine, or add another own machine.';
+      if (extra.ownMachines === 0) return 'You have no dedicated machine. Start this one on a shared machine.';
+      return 'Each of your dedicated machines already runs a server. Stop one first, or start this one on a shared machine.';
     case 'at_capacity':
       return 'Every hosted server place on NovaWorld is taken right now. Try again later.';
     case 'address_unavailable':
@@ -193,7 +200,7 @@ export function describeHostedError(err: unknown): HostedError {
     if (!response) {
       return { code: 'network', status: null, message: messageFor('network') };
     }
-    const data = response.data as { error?: unknown; field?: unknown; max_servers?: unknown; used?: unknown } | undefined;
+    const data = response.data as Record<string, unknown> | undefined;
     const serverCode = typeof data?.error === 'string' ? data.error : '';
     const code: HostedErrorCode = KNOWN_CODES.has(serverCode)
       ? (serverCode as HostedErrorCode)
@@ -206,19 +213,25 @@ export function describeHostedError(err: unknown): HostedError {
     const field = code === 'invalid_settings' && isSettingsField(named) ? named : undefined;
     const retryAfterSeconds =
       code === 'rate_limited' ? parseRetryAfter(response.headers?.['retry-after']) : undefined;
-    const maxServers = code === 'server_limit' && isCount(data?.max_servers) ? data.max_servers : undefined;
-    const used = code === 'server_limit' && isCount(data?.used) ? data.used : undefined;
+    // A refusal's counts, when it is that refusal and the reply said.
+    const counted = (refusal: HostedErrorCode, v: unknown) => (code === refusal && isCount(v) ? v : undefined);
+    const sharedServers = counted('server_limit', data?.shared_servers);
+    const sharedUsed = counted('server_limit', data?.shared_used);
+    const ownMachines = counted('no_own_machine', data?.own_machines);
+    const ownUsed = counted('no_own_machine', data?.own_used);
     return {
       code,
       status: response.status,
       message:
         code === 'unknown'
           ? `${messageFor('unknown')} (HTTP ${response.status})`
-          : messageFor(code, { field, retryAfterSeconds, maxServers }),
+          : messageFor(code, { field, retryAfterSeconds, sharedServers, ownMachines }),
       ...(field !== undefined ? { field } : {}),
       ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
-      ...(maxServers !== undefined ? { maxServers } : {}),
-      ...(used !== undefined ? { used } : {}),
+      ...(sharedServers !== undefined ? { sharedServers } : {}),
+      ...(sharedUsed !== undefined ? { sharedUsed } : {}),
+      ...(ownMachines !== undefined ? { ownMachines } : {}),
+      ...(ownUsed !== undefined ? { ownUsed } : {}),
     };
   }
   return { code: 'unknown', status: null, message: messageFor('unknown') };
@@ -316,20 +329,28 @@ export function parseHostedServer(value: unknown): HostedServer | null {
 const SOURCES: ReadonlySet<unknown> = new Set<EntitlementSource>(['none', 'tier', 'comp']);
 
 // The entitlement, or null when any count is missing or not a whole number
-// (the page never offers a start it could not count).
+// (the page never offers a start it could not count); its tier and `granted`
+// read as none when left out.
 function parseEntitlement(value: unknown): HostingEntitlement | null {
   const v = value as Partial<Record<keyof HostingEntitlement, unknown>> | null;
   if (typeof v !== 'object' || v === null) return null;
   const { max_servers: max, used, own_machines: own, own_used: ownUsed, can_start: canStart, source } = v;
   if (!isCount(max) || !isCount(used) || !isCount(own) || !isCount(ownUsed)) return null;
+  const { shared_servers: shared, shared_used: sharedUsed } = v;
+  if (!isCount(shared) || !isCount(sharedUsed)) return null;
   if (typeof canStart !== 'boolean' || !SOURCES.has(source)) return null;
+  const tier = v.tier;
   return {
     max_servers: max,
     used,
+    shared_servers: shared,
+    shared_used: sharedUsed,
     own_machines: own,
     own_used: ownUsed,
     can_start: canStart,
     source: source as EntitlementSource,
+    tier: tier === 1 || tier === 2 || tier === 3 ? tier : null,
+    granted: v.granted === true,
   };
 }
 
@@ -434,10 +455,10 @@ export function fetchMyServer(id: number, signal?: AbortSignal): Promise<HostedR
 }
 
 // POST /api/me/servers: a new server, requested (202), with these settings,
-// on one of the account's own machines when `ownMachine`, there at the static
-// address `addressId` when one is named (409 address_unavailable when it is
-// not ready, or another live server's). The service's supervisor takes it
-// from there.
+// on one of the account's dedicated machines when `ownMachine`, there at the
+// static address `addressId` when one is named (409 address_unavailable when
+// it is not ready, or another live server's). The service's supervisor takes
+// it from there.
 export function startHostedServer(
   settings: StartSettings,
   ownMachine = false,

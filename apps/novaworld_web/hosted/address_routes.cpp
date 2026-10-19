@@ -32,7 +32,7 @@ std::optional<crow::response> refusal_of(const NameResult &r) {
 		case NameOutcome::NoAddress:
 			return json_error(409, "no_address", "this account has no static address left to name; buy one first");
 		case NameOutcome::AddressLimit:
-			return json_error(409, "address_limit", "this account has a static address for every own machine it has");
+			return json_error(409, "address_limit", "this account has a static address for every dedicated machine it has");
 		case NameOutcome::NoSuchAccount: return json_error(404, "not_found", "no active player account has this id");
 	}
 	return json_error(500, "internal_error");
@@ -49,7 +49,7 @@ crow::json::wvalue address_json(db::Database &db, const HostedAddress &a, const 
 	out["hostname"] = address_hostname(a.name, zone);
 	out["state"] = address_state_name(a.state);
 	text_or_null(out, "public_ip", a.public_ip);
-	// An own machine has one slot: its servers list at slot 0's game port.
+	// A dedicated machine has one slot: its servers list at slot 0's game port.
 	if (a.public_ip.empty())
 		out["port"] = nullptr;
 	else
@@ -315,7 +315,7 @@ crow::response AddressRoutes::admin_retry(const crow::request &req, uint64_t id)
 
 // POST /api/admin/users/<id>/addresses — {"name"}: an admin's comp address for
 // the account (counted toward its entitlement and the sold capacity, at most
-// its own machines), allocated by a worker: 201 {"address"}. require_admin;
+// its dedicated machines), allocated by a worker: 201 {"address"}. require_admin;
 // 503 addresses_disabled; 400 invalid_json, invalid_field, invalid_name; 404
 // not_found (no active player); 409 name_taken, address_limit.
 crow::response AddressRoutes::admin_comp(const crow::request &req, uint64_t user_id) {

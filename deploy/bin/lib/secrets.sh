@@ -60,7 +60,7 @@ stripe_check_item() {
     STRIPE_DETAIL="placeholders: $(IFS=,; printf '%s' "${placeholders[*]}" | sed 's/,/, /g') (billing off)"
   else
     STRIPE_STATE=ok
-    STRIPE_DETAIL="OK ($mode mode, 3 tiers + own machine + static address)"
+    STRIPE_DETAIL="OK ($mode mode, 3 tiers + dedicated machine + static address)"
   fi
 }
 

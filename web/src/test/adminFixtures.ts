@@ -26,7 +26,15 @@ export function user(id: number, overrides: Partial<User> = {}): User {
 export function userEntry(id: number, overrides: Partial<UserListEntry> = {}): UserListEntry {
   return {
     ...user(id),
-    entitlement: { max_servers: 0, source: 'none', tier: null },
+    entitlement: {
+      max_servers: 0,
+      shared_servers: 0,
+      source: 'none',
+      tier: null,
+      comp_servers: 0,
+      own_machines: 0,
+      comp_own_machines: 0,
+    },
     live_servers: 0,
     subscription_status: null,
     ...overrides,
@@ -38,6 +46,7 @@ export function userDetail(id: number, overrides: Partial<UserDetail> = {}): Use
     user: user(id, { max_servers: 2 }),
     entitlement: {
       max_servers: 2,
+      shared_servers: 2,
       source: 'tier',
       tier: 2,
       comp_servers: 0,
@@ -155,7 +164,7 @@ export function rollPlan(overrides: Partial<RollPlan> = {}): RollPlan {
 export function fleetServer(id: number, overrides: Partial<FleetServer> & Partial<HostedServer> = {}): FleetServer {
   return {
     ...hostedServer(id, overrides),
-    owner: { id: 100 + id, username: `owner${id}`, tier: 2 },
+    owner: { id: 100 + id, username: `owner${id}`, tier: 2, granted: false },
     machine_ref: '3',
     slot: 3,
     game_port: 32771,
@@ -228,6 +237,13 @@ export function adminBilling(overrides: Partial<AdminBillingResponse> = {}): Adm
     unknown_prices: [],
     orphans: [],
     recent_events: [{ event_id: 'evt_1', type: 'invoice.paid', received_at: '2026-10-14T12:00:00Z', outcome: 'processed' }],
+    capacity: {
+      shared: { sold: 9, sellable: 12 },
+      own_machines: { sold: 2, sellable: 2 },
+      addresses: { sold: 0, sellable: 1 },
+      oversold: false,
+    },
+    comp_grants: [],
     ...overrides,
   };
 }
