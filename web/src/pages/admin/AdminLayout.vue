@@ -17,10 +17,11 @@
       <div class="flex flex-col gap-8 md:flex-row">
         <nav aria-label="Admin" class="shrink-0 md:w-56">
           <!-- One scrolling row on a phone (the areas side by side), a column
-               with each area's name above its pages from md up. -->
+               from md up: each area set off by a rule, its name above its pages,
+               and its pages on a rail under the name. -->
           <div
             ref="menu"
-            class="flex items-stretch gap-1 overflow-x-auto rounded-panel border border-border bg-panel p-2 [scrollbar-width:none] md:flex-col md:gap-4 md:overflow-visible [&::-webkit-scrollbar]:hidden"
+            class="flex items-stretch gap-1 overflow-x-auto rounded-panel border border-border bg-panel p-2 [scrollbar-width:none] md:flex-col md:gap-3 md:overflow-visible [&::-webkit-scrollbar]:hidden"
           >
             <ul class="flex gap-1 md:flex-col">
               <li>
@@ -53,17 +54,17 @@
             <div
               v-for="area in ADMIN_AREAS"
               :key="area.id"
-              class="admin-nav-area flex shrink-0 items-center gap-1 border-l border-border pl-1 md:block md:border-l-0 md:pl-0"
+              class="admin-nav-area flex shrink-0 items-center gap-1 border-l border-border pl-1 md:block md:border-l-0 md:border-t md:pl-0 md:pt-3"
               role="group"
               :aria-labelledby="`admin-nav-${area.id}`"
             >
               <p
                 :id="`admin-nav-${area.id}`"
-                class="sr-only md:not-sr-only md:px-3 md:pb-1 md:text-xs md:font-semibold md:uppercase md:tracking-wider md:text-ink-muted"
+                class="sr-only md:not-sr-only md:px-3 md:pb-1.5 md:text-xs md:font-semibold md:uppercase md:tracking-wider md:text-ink-bright"
               >
                 {{ area.label }}
               </p>
-              <ul class="flex gap-1 md:flex-col">
+              <ul class="flex gap-1 md:ml-3 md:flex-col md:gap-0.5 md:border-l md:border-border md:pl-2">
                 <li v-for="item in area.sections" :key="item.to">
                   <RouterLink
                     :to="item.to"
