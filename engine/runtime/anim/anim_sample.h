@@ -31,10 +31,13 @@
 // Every rig loader — FP viewmodel and body alike — passes `model_bind=false` and runs the
 // rest-carrying factorization (absolute channel rotations over the bind-rotation rests),
 // which the loaders assert is the proven-equivalent form of the composed builders and
-// which is byte-identical for healthy exports where channel-at-reset == bind. That
-// equivalence is asserted, not yet grilled against the WORLD builder @0x40c770 — the
-// open D-INF-13 question (docs/divergence-ledger.md): its bone-table source, whether it
-// carries the FP builder's bone-0 padding loop @0x40c5a1, and its frame map.
+// which is byte-identical for healthy exports where channel-at-reset == bind. For bodies
+// that equivalence is asserted, not yet grilled against the body builder,
+// Entity_BuildBoneTransformMatrices @0x4b1290 -> AnimChannel_ComputeBoneMatrices @0x410da0
+// (@0x40c770 is reached only from the 'bfst' bone callback @0x4e33d0, which no JO model
+// selects; the FP builder's bone-0 padding loop is @0x40c5a1) — the open D-INF-13
+// question (docs/divergence-ledger.md): a clip whose frame-0 channel is not the bind, and
+// the body frame map.
 
 #pragma once
 

@@ -51,9 +51,14 @@ std::size_t utf8_sequence_length(const std::string &text, std::size_t at) {
 // parameters offset the first (`use_kerning_start`) and the wrapped
 // (`use_kerning_wrap`) lines by the font's tab-width field font+0x168; every
 // loading-screen call site passes `use_kerning_start = 0` [orig: @0x521fee,
-// @0x52201a, @0x52203c, @0x5220bd] and the field is 0 unless
-// GText_SetLineSpacing @ 0x674720 sets one, so the offset folds out here --
-// D-LOADSCR-2 carries the residual with the rest of the CGameFont metrics.
+// @0x52201a, @0x52203c, @0x5220bd]. Render_LoadingScreen sets that field (the
+// one GText_SetLineSpacing @ 0x674720 also writes) to 120 on Arials18.fnt and
+// 0 on Arial22.fnt [orig: sub_6741C0 @0x6741c0, called @0x521f42 /
+// @0x521fae], but only the large font's sites pass
+// `use_kerning_wrap = 1` (the small font's pass 0 [orig: @0x5220bb,
+// @0x5220f8]), so the offset folds out here. The 120 is the small font's tab
+// stop (CGameFont_DrawText's tab arm); D-LOADSCR-2 carries it with the rest of
+// the CGameFont metrics.
 std::vector<std::string> wrap_text_lines(const TextExtent &extent, const std::string &text,
 		int max_width) {
 	std::vector<std::string> out;

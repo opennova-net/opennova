@@ -781,13 +781,14 @@ static void op_playw(MusVM *vm) {
 /* method/callvl: implemented in E7/E8/E9. */
 static void op_method (MusVM *vm); /* impl below */
 static void op_callvl (MusVM *vm) {
-    /* Jointops.exe!AudioVM_Op_CallVL @ 0x672B70 is LIVE here: it dispatches through
-       the resolved-name table dword_3245958[byte] (populated by AudioVM_LoadScriptFile's
-       name-resolution pass) and pushes the handler result. In the Jointops.exe build that
-       table was uninitialised BSS, so the opcode was dead. DIVERGENCE: we mirror the
-       Jointops.exe dead-stub (push 0). MDEdit music scripts use opcode 0x40 `method` for the
-       built-in intrinsics (GEcho/GSV/...), not callvl, so this is inert for known
-       fixtures. See docs/audio/mus-sbf-re.md (D-MUS-7). */
+    /* Op 0x33 [orig: Jointops.exe!AudioVM_Op_CallVL @ 0x672B70]: reads its byte, loads
+       dword_3245958[byte], calls it when nonzero and pushes eax, so a null entry pushes 0
+       (@ 0x672b74..0x672b81). That table's only writer is an unreferenced function at
+       0x6726a0 (no code xref, no pointer to it); AudioVM_LoadScriptFile does not fill it.
+       So every entry is 0 and push 0 is the game's own result for idx 0..31. Past 31 the
+       game reads past the 32-dword table (dword_32459D8 and on) and calls what is there; we
+       push 0 (D-MUS-7, docs/audio/mus-sbf-re.md). MDEdit music scripts use opcode 0x40
+       `method` for the built-in intrinsics (GEcho/GSV/...), not callvl. */
     (void)read_u8(vm);
     vm_push(vm, 0);
 }

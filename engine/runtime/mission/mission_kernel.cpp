@@ -1070,9 +1070,11 @@ bool MissionKernel::restore_baseline() {
 	local.weapon.switch_deferred_action = -1;
 	world.restore(baseline); // rewinds registry/vars/env/clock + re-inits systems (incl.
 	                         // AI; WacSystem::on_load also resets its 62-tick accumulator)
-	// The SP restart is a mission start: the HUD's frame counters restart with it
-	// [orig: Game_RestartRoundSP @0x5263DB -> Game_StartMission ->
-	// Game_ResetSessionHudState @0x525BAA].
+	// A baseline restore is a mission start, as retail's SP restart is: the HUD's
+	// frame counters restart with it [orig: Game_RestartRoundSP @0x5263DB ->
+	// Game_StartMission -> Game_ResetSessionHudState @0x525BAA]. (The shipped SP
+	// restart boots a fresh kernel instead, D-PWR-8; this restore serves
+	// MissionRoot.stop, the GUT rewind and the editor preview.)
 	world.hud_frames = w::HudFrameCounters{};
 	if (have_wac_baseline) wac.restore_runtime_state(world, wac_baseline);
 	// Re-ground every soldier from scratch: the restored registry may reuse
@@ -1117,9 +1119,11 @@ bool MissionKernel::restore_baseline() {
 	// Environment_SnapStateToTargets call @0x525CAE re-seeds it from
 	// the .env default (@0x57D2BB) and the WacScript_InitAndLoad call @0x525CB3 re-applies
 	// the script's fov (WacCmd_Fov @0x4EDEA7), so the post-restart target is the
-	// authored value. The sealed baseline already holds that post-init target:
-	// restoring it after the reset stands in for the re-run (the port restores
-	// the sealed world instead of re-executing the script's initial pass).
+	// authored value. The sealed baseline already holds that post-init target, so
+	// restoring it after the reset gives the value a re-run would (the restore
+	// takes the sealed world back instead of re-executing the script's initial
+	// pass). It does not stand in for retail's SP restart: the shipped SP restart
+	// boots a fresh kernel (D-PWR-8).
 	const int32_t baseline_fov = world.weather.core.scalar_channels.camera_fov_target_fp;
 	// The FP channel position is a gated advance count, not a clock delta, so
 	// the restored world keeps the held clip pose with no epoch re-stamp.

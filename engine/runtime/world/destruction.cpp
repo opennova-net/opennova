@@ -53,8 +53,9 @@ float world_water_z(const World &world) {
 // The witnessed rol-xor PRNG stream the death paths roll [orig: the inline
 // dword_31BFBB8 form — v = rol4(state + rol11(state)); state = v ^ 1; the
 // low 16 bits are the draw. PRNG_Next16/_B/_C @ 0x6130a0/0x6130f0/0x6131b0 are
-// per-module instances of the same generator; one stream stands in for the
-// three (piece cosmetics + the wreck-fire crackle, S12b — tracked in §24).]
+// per-module instances of the same generator; this one stream stands in for
+// them for the death pieces (D-ITEM-4). The wreck-fire crackle draws World's
+// stream C instead (World::next_prng16_c).]
 uint16_t death_rand16(World &world) { return world.destruction_rng.next16(); }
 
 // Piece spin rate: max * (rand % 100)/100, floored at min — NOT uniform in
@@ -1568,8 +1569,8 @@ void tick_item_death_motion(World &world, Entity &entity,
     if (tick_item_class_motion(world, entity, terrain)) return;
     if ((e->engine_flags & kEntityFlagHusk) == 0) return;
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(e->item_id);
-    // The wreck-fire random crackle (S12b), one roll per burning wreck
-    // per tick on the engine PRNG stream — the draw is consumed BEFORE
+    // The wreck-fire random crackle (S12b), one roll per masked fire-bone
+    // slot per tick on World's stream C — the draw is consumed BEFORE
     // the water gate, retail's evaluation order. The sound rides the
     // fire-sound distance-delay queue at the entity position.
     // UnitType 3 calls it at the callback-specific sites below so its
@@ -1786,11 +1787,10 @@ void tick_item_death_motion(World &world, Entity &entity,
 				ground = terrain::height_field_height_mission_bilinear(
 						*terrain, e->position.x, e->position.y);
 			// The wreck rests with section 0's lowest extent on the ground
-    // [orig: ground -= |sec0 z min| @ 0x461e23-0x461e4b; the inverted
-    // += |z max| leg is unreachable here — sim wrecks stay upright].
-    // Ground is terrain-only; retail raycasts objects too (mask
-    // 0x200000 @ 0x461e1a) — a wreck dying on a roof diverges
-    // (world-wac-ai-re.md D-ITEM-9).
+    // [orig: ground -= |sec0 z min| @ 0x461e23-0x461e4b]. The ground above
+    // is the object-aware probe (terrain plus posed models, retail's mask
+    // 0x200000 @ 0x461e1a); the inverted += |z max| leg
+    // (@ 0x494034-0x49405e) is not taken here (world-wac-ai-re.md D-ITEM-9).
     if (traits != nullptr) ground -= std::abs(traits->husk_rest_min_z);
     const float old_top = e->position.z + e->bound_radius;
     const float new_z = e->position.z + e->veh.slide_z / io::kFp16One;
