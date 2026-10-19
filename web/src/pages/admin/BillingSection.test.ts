@@ -145,6 +145,49 @@ describe('BillingSection', () => {
     expect(wrapper.get('[role="status"]').text()).toBe('Linked cus_lost to Echo.');
   });
 
+  it('shows the sold capacity and the admin-granted accounts, each to its page', async () => {
+    billing.mockResolvedValue({
+      ok: true,
+      value: adminBilling({
+        comp_grants: [
+          { user_id: 7, username: 'player7', servers: 3, own_machines: 1, addresses: 1 },
+          { user_id: 8, username: '', servers: 0, own_machines: 2, addresses: 0 },
+        ],
+      }),
+    });
+    const wrapper = await mountSection();
+    expect(wrapper.get('section.billing-capacity').text()).toContain(
+      'Sold: 9 of 12 shared places, 2 of 2 own machines, 0 of 1 static addresses.',
+    );
+    expect(wrapper.find('.billing-oversold').exists()).toBe(false);
+    const grants = wrapper.findAll('li.billing-grant');
+    expect(grants.map((g) => g.get('a').text())).toEqual(['player7', 'Account 8']);
+    expect(grants.map((g) => g.get('span').text())).toEqual(['3 servers, 1 own machine and 1 static address', '2 own machines']);
+    expect(grants.map((g) => g.get('a').attributes('href'))).toEqual(['/admin/users/7', '/admin/users/8']);
+    expect(wrapper.text()).toContain('Admin grants (2)');
+  });
+
+  it('warns while grants and subscriptions oversell the fleet, billing off too', async () => {
+    billing.mockResolvedValue({
+      ok: true,
+      value: adminBilling({
+        enabled: false,
+        capacity: {
+          shared: { sold: 26, sellable: 24 },
+          own_machines: { sold: 2, sellable: 2 },
+          addresses: { sold: 0, sellable: 1 },
+          oversold: true,
+        },
+        comp_grants: [{ user_id: 7, username: 'player7', servers: 16, own_machines: 0, addresses: 0 }],
+      }),
+    });
+    const wrapper = await mountSection();
+    expect(wrapper.text()).toContain('Billing is off');
+    expect(wrapper.get('section.billing-capacity').text()).toContain('Sold: 26 of 24 shared places');
+    expect(wrapper.get('.billing-oversold').text()).toContain('Admin grants and subscriptions exceed what the fleet sells.');
+    expect(wrapper.get('li.billing-grant').text()).toContain('16 servers');
+  });
+
   it('says when billing is off', async () => {
     billing.mockResolvedValue({ ok: true, value: adminBilling({ enabled: false }) });
     const wrapper = await mountSection();

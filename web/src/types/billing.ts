@@ -3,6 +3,8 @@
 // billing_routes.cpp). Amounts are in the currency's smallest unit (cents);
 // times are ISO 8601 UTC.
 
+import type { SoldCapacity } from './users';
+
 export type TierNumber = 1 | 2 | 3;
 
 // What a checkout buys: a support tier, the own-machine add-on, or a static
@@ -169,8 +171,19 @@ export interface BillingEvent {
   outcome: string;
 }
 
+// An account an admin grants hosting (comp_grants): its grant of servers,
+// own machines and static addresses (its comp addresses that count).
+export interface AdminCompGrant {
+  user_id: number;
+  username: string;
+  servers: number;
+  own_machines: number;
+  addresses: number;
+}
+
 // GET /api/admin/billing. With billing off, `enabled` is false and only the
-// limits hold is read (the rest stays empty).
+// limits hold, the sold capacity and the admin grants are read (the rest
+// stays empty).
 export interface AdminBillingResponse {
   enabled: boolean;
   // The hosted servers' limits hold: a pass would have stopped the servers of
@@ -199,4 +212,10 @@ export interface AdminBillingResponse {
   unknown_prices: string[];
   orphans: BillingOrphan[];
   recent_events: BillingEvent[];
+  // The service's sold capacity against what the fleet sells (the
+  // fleet-health oversold finding links to this page); null when the reply
+  // named none.
+  capacity: SoldCapacity | null;
+  // Every account an admin grants hosting, by id.
+  comp_grants: AdminCompGrant[];
 }

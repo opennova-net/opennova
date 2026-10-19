@@ -99,9 +99,9 @@ function pickSoldItem(value: unknown): SoldItem | null {
   return { sold: v.sold as number, sellable: v.sellable as number };
 }
 
-// The sold capacity a user's page and a grant's reply carry, or null when
-// the reply named none it could read.
-function pickCapacity(value: unknown): SoldCapacity | null {
+// The sold capacity a user's page, a grant's reply and the billing overview
+// carry, or null when the reply named none it could read.
+export function pickCapacity(value: unknown): SoldCapacity | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || typeof v.oversold !== 'boolean') return null;
   const shared = pickSoldItem(v.shared);

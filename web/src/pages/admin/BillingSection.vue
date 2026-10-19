@@ -2,7 +2,7 @@
   <div class="space-y-10">
     <AdminPageHeader
       title="Subscriptions"
-      description="Support tiers and add-ons as last read from Stripe. Change them in Stripe."
+      description="Support tiers and add-ons as last read from Stripe (change them in Stripe), the sold capacity and the admin grants."
       :loading="loading"
       @refresh="load"
     />
@@ -60,6 +60,40 @@
         or the own machine it sells (after the one sold now, if it is an older one).
       </p>
     </section>
+
+    <!-- What the service has sold, and the admin grants among it (billing on or
+         off: the fleet-health oversold finding links here). -->
+    <template v-if="billing">
+      <section v-if="billing.capacity" class="billing-capacity space-y-2" aria-labelledby="billing-capacity">
+        <h2 id="billing-capacity" class="text-xl font-semibold text-ink">Sold capacity</h2>
+        <p class="text-sm text-ink">{{ soldCapacityText(billing.capacity) }}</p>
+        <p
+          v-if="billing.capacity.oversold"
+          class="billing-oversold rounded-panel border border-warn/40 bg-warn/10 p-4 text-sm text-warn"
+        >
+          Admin grants and subscriptions exceed what the fleet sells. New subscriptions of the items past it are
+          paused until it sells more or a grant is lowered.
+        </p>
+        <p class="text-xs text-ink-muted">
+          Every account's subscriptions, open checkouts and admin grants, used or not, against what the fleet sells.
+        </p>
+      </section>
+
+      <section class="space-y-3" aria-labelledby="billing-grants">
+        <h2 id="billing-grants" class="text-xl font-semibold text-ink">Admin grants ({{ billing.comp_grants.length }})</h2>
+        <p class="text-sm text-ink-muted">
+          Accounts an admin grants hosting, free of charge: they count as sold and buy no tier or add-on. Change a
+          grant on the account's page.
+        </p>
+        <p v-if="billing.comp_grants.length === 0" class="text-sm text-ink-muted">None.</p>
+        <ul v-else class="divide-y divide-border rounded-panel border border-border bg-panel text-sm">
+          <li v-for="g in billing.comp_grants" :key="g.user_id" class="billing-grant flex flex-wrap justify-between gap-2 px-4 py-2">
+            <RouterLink :to="`/admin/users/${g.user_id}`" class="text-accent hover:text-ink-bright">{{ g.username || `Account ${g.user_id}` }}</RouterLink>
+            <span class="text-ink-muted">{{ grantText(g) }}</span>
+          </li>
+        </ul>
+      </section>
+    </template>
 
     <div v-if="billing === null && loading" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
       Loading billing…
@@ -272,7 +306,9 @@
 <script setup lang="ts">
 // /admin/billing: the billing overview (GET /api/admin/billing): the hosted
 // servers' limits hold with its reason and a two-step "Apply the stops" (POST
-// /api/admin/billing/reconcile {"force_limits": true}), the Stripe mode, the
+// /api/admin/billing/reconcile {"force_limits": true}), the sold capacity
+// (warned of while oversold) and the admin-granted accounts, each to its page
+// (both billing on or off), the Stripe mode, the
 // prices' check, the last full read from Stripe with "Reconcile now" (POST
 // /api/admin/billing/reconcile), subscribers by tier and the
 // monthly total at the tiers' prices (GET /api/billing/tiers), the past-due,
@@ -294,7 +330,8 @@ import {
 } from '../../api/adminBilling';
 import { fetchTiers } from '../../api/billing';
 import { listUsers } from '../../api/users';
-import type { AdminBillingResponse, TiersResponse } from '../../types/billing';
+import type { AdminBillingResponse, AdminCompGrant, TiersResponse } from '../../types/billing';
+import { soldCapacityText } from '../../utils/adminView';
 import { subscriptionItemLabel, subscriptionStatusLabel } from '../../utils/billingView';
 import { billingRevenue } from '../../utils/billingRevenue';
 import { formatMoney, formatRelative, formatUtc } from '../../utils/format';
@@ -324,6 +361,18 @@ const holdSummary = computed(() => (billing.value ? limitsHoldSummary(billing.va
 
 function money(cents: number): string {
   return formatMoney(cents, tiers.value?.currency ?? 'usd');
+}
+
+// "3 servers, 1 own machine and 1 static address": an admin's grant, what it
+// gives.
+function grantText(g: AdminCompGrant): string {
+  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const parts = [
+    ...(g.servers > 0 ? [count(g.servers, 'server', 'servers')] : []),
+    ...(g.own_machines > 0 ? [count(g.own_machines, 'own machine', 'own machines')] : []),
+    ...(g.addresses > 0 ? [count(g.addresses, 'static address', 'static addresses')] : []),
+  ];
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');
 }
 
 function nameOf(userId: number): string {

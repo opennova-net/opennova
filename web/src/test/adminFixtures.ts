@@ -228,6 +228,13 @@ export function adminBilling(overrides: Partial<AdminBillingResponse> = {}): Adm
     unknown_prices: [],
     orphans: [],
     recent_events: [{ event_id: 'evt_1', type: 'invoice.paid', received_at: '2026-10-14T12:00:00Z', outcome: 'processed' }],
+    capacity: {
+      shared: { sold: 9, sellable: 12 },
+      own_machines: { sold: 2, sellable: 2 },
+      addresses: { sold: 0, sellable: 1 },
+      oversold: false,
+    },
+    comp_grants: [],
     ...overrides,
   };
 }

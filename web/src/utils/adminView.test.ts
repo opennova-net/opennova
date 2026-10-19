@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { entitlementLabel, ownerHostingLabel, serverPlacesLabel } from './adminView';
+import { entitlementLabel, ownerHostingLabel, serverPlacesLabel, soldCapacityText } from './adminView';
 
 describe('entitlementLabel', () => {
   it('names each source an account has, the one that gives its servers first', () => {
@@ -18,6 +18,19 @@ describe('ownerHostingLabel', () => {
     expect(ownerHostingLabel({ tier: null, granted: true })).toBe('Admin grant');
     expect(ownerHostingLabel({ tier: 1, granted: true })).toBe('Admin grant, Tier 1');
     expect(ownerHostingLabel({ tier: null, granted: false })).toBe('No tier');
+  });
+});
+
+describe('soldCapacityText', () => {
+  it('says each item sold against what the fleet sells', () => {
+    expect(
+      soldCapacityText({
+        shared: { sold: 9, sellable: 12 },
+        own_machines: { sold: 2, sellable: 2 },
+        addresses: { sold: 0, sellable: 1 },
+        oversold: false,
+      }),
+    ).toBe('Sold: 9 of 12 shared places, 2 of 2 own machines, 0 of 1 static addresses.');
   });
 });
 

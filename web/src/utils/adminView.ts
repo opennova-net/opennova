@@ -1,7 +1,9 @@
-// Labels the admin pages share: account statuses, support tiers, machines,
-// NovaWorld sessions and the titles they speak, each in words.
+// Labels the admin pages share: account statuses, support tiers and admin
+// grants, the sold capacity, machines, NovaWorld sessions and the titles they
+// speak, each in words.
 
 import type { EntitlementSource, MachineKind } from '../types/hostedServer';
+import type { SoldCapacity } from '../types/users';
 
 // "Active", "Banned", "Restricted": a players.account_status; one stored
 // empty reads as active.
@@ -42,6 +44,16 @@ export function serverPlacesLabel(e: { max_servers: number; own_machines: number
   if (own === 0) return 'All on shared machines';
   if (shared === 0) return 'All on own machines';
   return `${shared} on shared machines, ${own} on own machine${own === 1 ? '' : 's'}`;
+}
+
+// The service's sold capacity against what the fleet sells, item by item:
+// "Sold: 9 of 12 shared places, 2 of 2 own machines, 0 of 1 static addresses."
+export function soldCapacityText(c: SoldCapacity): string {
+  return (
+    `Sold: ${c.shared.sold} of ${c.shared.sellable} shared places, ` +
+    `${c.own_machines.sold} of ${c.own_machines.sellable} own machines, ` +
+    `${c.addresses.sold} of ${c.addresses.sellable} static addresses.`
+  );
 }
 
 export function machineKindLabel(kind: MachineKind | string): string {
