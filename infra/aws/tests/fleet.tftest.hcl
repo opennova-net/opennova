@@ -461,8 +461,8 @@ run "hosting_on" {
   }
   assert {
     condition = (
-      aws_vpc_security_group_ingress_rule.machines_admin[0].from_port == 32800 && aws_vpc_security_group_ingress_rule.machines_admin[0].to_port == 32805 &&
-      aws_vpc_security_group_ingress_rule.machines_admin[0].ip_protocol == "tcp" && aws_vpc_security_group_ingress_rule.machines_admin[0].referenced_security_group_id == "sg-0fleet"
+      aws_vpc_security_group_ingress_rule.machines_admin_from_fleet[0].from_port == 32800 && aws_vpc_security_group_ingress_rule.machines_admin_from_fleet[0].to_port == 32805 &&
+      aws_vpc_security_group_ingress_rule.machines_admin_from_fleet[0].ip_protocol == "tcp" && aws_vpc_security_group_ingress_rule.machines_admin_from_fleet[0].referenced_security_group_id == "sg-0fleet"
     )
     error_message = "the 6 slots' admin TCP ports to the fleet program alone"
   }
@@ -981,7 +981,7 @@ run "four_slots" {
   }
 
   assert {
-    condition     = aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].to_port == 32771 && aws_vpc_security_group_ingress_rule.machines_admin[0].to_port == 32803
+    condition     = aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].to_port == 32771 && aws_vpc_security_group_ingress_rule.machines_admin_from_fleet[0].to_port == 32803
     error_message = "the port ranges follow shared_slots"
   }
   assert {

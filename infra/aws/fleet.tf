@@ -124,7 +124,13 @@ resource "aws_vpc_security_group_ingress_rule" "machines_game" {
   cidr_ipv4         = each.value
 }
 
-resource "aws_vpc_security_group_ingress_rule" "machines_admin" {
+# Named for the group it admits, and renamed (with no moved block) when that
+# changes: a deployment from before the program split holds the controller's
+# rule as machines_admin, which Terraform then destroys before the
+# controller's group, since the rule depends on it. Updated in place instead,
+# the rule would depend on that group no more, so the group's delete would run
+# first, and AWS refuses it (DependencyViolation) while the rule names it.
+resource "aws_vpc_security_group_ingress_rule" "machines_admin_from_fleet" {
   count = local.hosted_enabled ? 1 : 0
 
   security_group_id            = aws_security_group.machines[0].id
