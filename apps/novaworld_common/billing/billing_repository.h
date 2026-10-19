@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -159,6 +160,12 @@ bool set_comp_grants(db::Database &db, int64_t user_id, const CompGrants &grants
 // some.
 int comp_addresses_of(db::Database &db, int64_t user_id);
 std::map<int64_t, int> comp_addresses_by_account(db::Database &db);
+// The static-address subscriptions an address was named for that holds one
+// (hosted_addresses' subscription rows allocating or ready): the account's,
+// and every account's that has some (entitlement.h addresses_to_end ends
+// these last).
+std::set<std::string> named_address_subscriptions(db::Database &db, int64_t user_id);
+std::map<int64_t, std::set<std::string>> named_address_subscriptions_by_account(db::Database &db);
 
 // --- A checkout's hold on what it sells (billing_checkout_reservations) ---
 //

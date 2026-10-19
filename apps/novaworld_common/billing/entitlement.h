@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -93,14 +94,24 @@ Entitlement entitlement_of(db::Database &db, int64_t user_id, int64_t now);
 // or add-on beside it (the checkout refuses one).
 bool admin_granted(const Entitlement &e);
 
-// The add-ons that end with the tier: of an account's `subscriptions`, the
-// own-machine and static-address ones Stripe still renews (a granting status,
-// no cancel at the period's end) while none of its support tiers grants at
-// `now` (a past_due one still does). An add-on is sold beside a tier, so the
-// billing sync sets each to cancel at its period's end (billing_sync.h). None
-// while a subscription that would grant sells a price no list names (it may
-// be a tier the configuration misses).
-std::vector<SubscriptionRow> add_ons_to_end(const std::vector<SubscriptionRow> &subscriptions, int64_t now);
+// The dedicated machines of `subscriptions` granting at `now` (their
+// quantities, a tier or not) plus an admin's `comp_own_machines` (0..16): the
+// entitlement's own_machines before its account's checks.
+int64_t dedicated_machines(const std::vector<SubscriptionRow> &subscriptions, int comp_own_machines, int64_t now);
+
+// The static addresses to end: of an account's `subscriptions`, the
+// static-address ones Stripe still renews (granting at `now`, no cancel at the
+// period's end) past its dedicated machines (dedicated_machines with
+// `comp_own_machines`): an address is its dedicated machine's, and one past
+// them carries nothing, so the billing sync sets each to cancel at its
+// period's end (billing_sync.h). The unnamed ones go first (none of `named`,
+// the subscriptions an address allocating or ready was named for), then the
+// named, each newest first (`subscriptions` come so). None while a
+// subscription that would grant sells a price no list names (it may be a
+// dedicated machine the configuration misses). A dedicated machine never ends
+// for a support tier's end: it needs none.
+std::vector<SubscriptionRow> addresses_to_end(const std::vector<SubscriptionRow> &subscriptions, int comp_own_machines,
+		const std::set<std::string> &named, int64_t now);
 
 // The wall clock in Unix seconds (the entitlement's `now` in the service).
 int64_t unix_now();

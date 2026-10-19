@@ -669,8 +669,8 @@ as the fleet sells, canceled in the Portal, which changes no quantity): each one
 hosted server on a machine of its own, with no tier or beside one (tier 2 and two
 dedicated machines: four servers). The static-address add-on, one subscription per
 address, gives a dedicated machine a fixed public address and a name
-([`hosted/README.md`](hosted/README.md) "Static addresses"). The add-ons end with the tier
-("The add-ons end with the tier" below).
+([`hosted/README.md`](hosted/README.md) "Static addresses"); one past the account's
+dedicated machines ends ("A static address past the dedicated machines ends" below).
 The service makes Stripe Checkout and Customer Portal
 sessions and hands the browser their URL; no publishable key and no Stripe.js reach the
 site. Everything here is service policy (`billing/`).
@@ -719,17 +719,18 @@ site. Everything here is service policy (`billing/`).
   `billing_misconfigured`. A check is stored with the lists and the mode it was made under,
   so a changed `STRIPE_PRICE_*` list reads unchecked (checkout closed) until a check under
   it: `billing.sync` makes one within a minute of a worker running the new lists.
-- **The add-ons end with the tier** (`billing/billing_sync.*`, `billing/entitlement.*`
-  `add_ons_to_end`): after each customer's `billing.sync` and each reconcile that read
-  every subscription, an account none of whose support tiers grants (none, or ended,
-  canceled, unpaid; a `past_due` one still grants) has each own-machine and
-  static-address subscription Stripe still renews set to cancel at its period's end (one
-  call each, keyed by the subscription and its period, the answer written and logged),
-  so no add-on renews once its tier is gone. An admin-granted account's add-ons with no
-  tier end the same way. A subscription of a price no list names that would grant holds
-  them (it may be a tier the configuration misses). A call Stripe refuses or does not
-  answer is tried again at the next sync or reconcile; a route's own sync (the checkout's
-  success page) leaves the add-ons to the next reconcile.
+- **A static address past the dedicated machines ends** (`billing/billing_sync.*`,
+  `billing/entitlement.*` `addresses_to_end`): after each customer's `billing.sync` and
+  each reconcile that read every subscription, an account whose static-address
+  subscriptions Stripe still renews pass its dedicated machines granting now (its paid
+  ones and an admin's comp ones; an address is its dedicated machine's) has the surplus
+  set to cancel at its period's end, the ones no address was named for first, then the
+  newest (one call each, keyed by the subscription and its period, the answer written
+  and logged: `past the account's N dedicated machines`). A dedicated machine needs no
+  tier and never ends with one. A subscription of a price no list names that would grant
+  holds them (it may be a dedicated machine the configuration misses). A call Stripe
+  refuses or does not answer is tried again at the next sync or reconcile; a route's own
+  sync (the checkout's success page) leaves them to the next reconcile.
 - **The capacity gate** (`hosted/model/sold_capacity.*`): a new subscription is never sold past
   what the fleet holds. Every account holds what its entitlement grants, used or not (its
   shared servers are shared places, its dedicated machines are dedicated machines), an

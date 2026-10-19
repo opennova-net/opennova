@@ -40,16 +40,18 @@
 //     be asked about waits kBackoffFirstS, doubling to kBackoffMaxS. Enqueued
 //     by each fresh webhook event, and every minute while a customer waits or
 //     the prices are not checked under the worker's lists (a list changed).
-//   - The add-ons end with the tier: after each customer's sync there and
-//     after a reconcile that read every subscription, an account none of
-//     whose support tiers grants (entitlement.h add_ons_to_end: none, or
-//     ended, canceled, unpaid; a past_due one still grants) has each
-//     own-machine and static-address subscription of this key's mode that
-//     Stripe still renews set to cancel at its period's end, one call each
-//     under an idempotency key of the subscription's and its period's, the
-//     answer written and logged. One Stripe refuses or does not answer is
-//     tried again at the next sync or reconcile. A route's sync_customer ends
-//     none: the events it marks wait for the next reconcile.
+//   - A static address past the dedicated machines ends: after each
+//     customer's sync there and after a reconcile that read every
+//     subscription, an account whose static-address subscriptions Stripe still
+//     renews pass the dedicated machines granting now (entitlement.h
+//     addresses_to_end: its paid ones and its admin's comp ones, which need no
+//     tier) has the surplus of this key's mode set to cancel at its period's
+//     end, the unnamed ones first, then the newest, one call each under an
+//     idempotency key of the subscription's and its period's, the answer
+//     written and logged. A dedicated machine never ends for a tier's end.
+//     One Stripe refuses or does not answer is tried again at the next sync or
+//     reconcile. A route's sync_customer ends none: the events it marks wait
+//     for the next reconcile.
 //
 // No Stripe call ever runs inside a db::Transaction, nor while a pooled
 // connection is held for a job: a sync reads Stripe first, then leases a
@@ -69,6 +71,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -213,13 +216,24 @@ private:
 	std::optional<std::vector<Subscription>> stripe_subscriptions_of(const std::string &stripe_customer_id);
 	// The customer gone: its row deleted, its live subscriptions canceled.
 	void forget_customer(db::Database &db, const std::string &stripe_customer_id);
-	// The add-ons add_ons_to_end finds among an account's `rows`, of this key's
-	// mode alone (another mode's are no subscriptions this key reaches).
-	std::vector<SubscriptionRow> add_ons_ending(const std::vector<SubscriptionRow> &rows, int64_t now) const;
-	// Each of `add_ons` set to cancel at its period's end in Stripe and the
+	// A static-address subscription to end, with the dedicated machines its
+	// account has now (its log line's).
+	struct AddressEnding {
+		SubscriptionRow row;
+		int64_t dedicated = 0;
+	};
+	// The static addresses addresses_to_end finds among an account's `rows`,
+	// with its admin's `comp_own_machines` and the subscriptions its addresses
+	// were `named` for, of this key's mode alone (another mode's are no
+	// subscriptions this key reaches).
+	std::vector<AddressEnding> addresses_ending(const std::vector<SubscriptionRow> &rows, int comp_own_machines,
+			const std::set<std::string> &named, int64_t now) const;
+	// The same for account `user_id`, its rows read from `db`.
+	std::vector<AddressEnding> addresses_ending_of(db::Database &db, int64_t user_id, int64_t now) const;
+	// Each of `addresses` set to cancel at its period's end in Stripe and the
 	// answer written, each logged. Leases a connection for each write, none
 	// across a Stripe call; the calling thread holds none.
-	void end_add_ons(const std::vector<SubscriptionRow> &add_ons);
+	void end_addresses(const std::vector<AddressEnding> &addresses);
 
 	db::ConnectionPool &pool_;
 	StripeClient &client_;

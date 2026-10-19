@@ -53,7 +53,6 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 	}
 	if (account.kind != "player" || account.account_status != "active") return e;
 
-	int64_t own_quantity = 0;
 	int64_t address_quantity = 0;
 	bool past_due = false;
 	for (const SubscriptionRow &s : subscriptions) {
@@ -61,9 +60,7 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 		past_due = past_due || s.status == "past_due";
 		if (s.item == ItemKind::Tier)
 			e.tier = std::max(e.tier, s.tier);
-		else if (s.item == ItemKind::OwnMachine)
-			own_quantity += std::max<int64_t>(s.quantity, 0);
-		else
+		else if (s.item == ItemKind::StaticAddress)
 			address_quantity += std::max<int64_t>(s.quantity, 0);
 	}
 	const int tier_servers = kTierServers[e.tier];
@@ -74,7 +71,8 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 		e.source = "comp";
 	// A dedicated machine is one more server, on a machine of its own, a tier or
 	// not; an admin's are added to the paid ones.
-	e.own_machines = static_cast<int>(std::min<int64_t>(own_quantity + e.comp_own_machines, int64_t{ 1 } << 16));
+	e.own_machines = static_cast<int>(
+			std::min<int64_t>(dedicated_machines(subscriptions, e.comp_own_machines, now), int64_t{ 1 } << 16));
 	e.max_servers = e.shared_servers + e.own_machines;
 	// An address is its dedicated machine's: one past them is held, and used by none.
 	e.address_grants = static_cast<int>(std::min<int64_t>(address_quantity + e.comp_addresses, int64_t{ 1 } << 16));
@@ -100,16 +98,35 @@ bool admin_granted(const Entitlement &e) {
 	return e.comp_servers > 0 || e.comp_own_machines > 0 || e.comp_addresses > 0;
 }
 
-std::vector<SubscriptionRow> add_ons_to_end(const std::vector<SubscriptionRow> &subscriptions, int64_t now) {
-	std::vector<SubscriptionRow> out;
+int64_t dedicated_machines(const std::vector<SubscriptionRow> &subscriptions, int comp_own_machines, int64_t now) {
+	int64_t out = std::clamp(comp_own_machines, 0, kMaxCompOwnMachines);
 	for (const SubscriptionRow &s : subscriptions) {
-		if (s.item == ItemKind::Tier && subscription_grants(s, now)) return {};
+		if (s.item == ItemKind::OwnMachine && subscription_grants(s, now)) out += std::max<int64_t>(s.quantity, 0);
+	}
+	return out;
+}
+
+std::vector<SubscriptionRow> addresses_to_end(const std::vector<SubscriptionRow> &subscriptions, int comp_own_machines,
+		const std::set<std::string> &named, int64_t now) {
+	const auto renews = [now](const SubscriptionRow &s) {
+		return s.item == ItemKind::StaticAddress && !s.cancel_at_period_end && subscription_grants(s, now);
+	};
+	int64_t renewing = 0;
+	for (const SubscriptionRow &s : subscriptions) {
 		if (s.item == ItemKind::Unknown && status_grants(s.status) && s.current_period_end &&
 				now < *s.current_period_end + kPeriodNetSeconds)
 			return {};
-		if ((s.item == ItemKind::OwnMachine || s.item == ItemKind::StaticAddress) && status_grants(s.status) &&
-				!s.cancel_at_period_end)
+		if (renews(s)) renewing += std::max<int64_t>(s.quantity, 0);
+	}
+	const int64_t dedicated = dedicated_machines(subscriptions, comp_own_machines, now);
+	std::vector<SubscriptionRow> out;
+	for (const bool named_ones : { false, true }) {
+		for (const SubscriptionRow &s : subscriptions) {
+			if (renewing <= dedicated) return out;
+			if (!renews(s) || (named.count(s.stripe_subscription_id) > 0) != named_ones) continue;
 			out.push_back(s);
+			renewing -= std::max<int64_t>(s.quantity, 0);
+		}
 	}
 	return out;
 }

@@ -4,8 +4,8 @@
 // period's 48 h net, a comp grant against a tier for the shared servers, the
 // dedicated machines (paid ones with no tier or beside one, and an admin's),
 // each one more server, past_due keeping the servers but starting none, an
-// inactive or service account getting nothing, and the add-ons that end with
-// the tier (add_ons_to_end). Then the same through a
+// inactive or service account getting nothing, and the static addresses that
+// end past the dedicated machines (addresses_to_end). Then the same through a
 // migrated database of the test's own (common/test_database.h), and the
 // tables' own rules: the instance id minted once, the customers, a
 // subscription's status_since moving only with its status, the webhook
@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -199,34 +200,53 @@ int test_entitlement_core() {
 	return 0;
 }
 
-// The ids of add_ons_to_end's answer.
-std::vector<std::string> ending(const std::vector<SubscriptionRow> &subscriptions) {
+// The ids of addresses_to_end's answer.
+std::vector<std::string> ending(const std::vector<SubscriptionRow> &subscriptions, int comp_own = 0,
+		const std::set<std::string> &named = {}) {
 	std::vector<std::string> out;
-	for (const SubscriptionRow &s : billing::add_ons_to_end(subscriptions, kNow)) out.push_back(s.stripe_subscription_id);
+	for (const SubscriptionRow &s : billing::addresses_to_end(subscriptions, comp_own, named, kNow))
+		out.push_back(s.stripe_subscription_id);
 	return out;
 }
 
-// The add-ons that end with the tier: with no tier granting (none, canceled,
-// unpaid, past its period's net), each renewing add-on of either kind; with a
-// tier that grants (past_due among them), none; an add-on already set to cancel
-// at its period's end, or ended, is none of them; a granting subscription of a
-// price no list names holds them all.
-int test_add_ons_to_end() {
+// The static addresses past the dedicated machines: each renewing one (past_due
+// among them) past the granting dedicated machines, paid or an admin's, whatever
+// the tier does (a tier's end ends nothing a dedicated machine covers, and never
+// the machine); the unnamed first, then the named, each newest first; one
+// already set to cancel at its period's end, or ended, is none of them, and a
+// dedicated machine ended or past its period's net counts for none; a granting
+// subscription of a price no list names holds them all.
+int test_addresses_to_end() {
 	const SubscriptionRow own = sub("om", ItemKind::OwnMachine, 0, "active");
 	const SubscriptionRow address = sub("sa", ItemKind::StaticAddress, 0, "past_due");
-	TEST_EXPECT(ending({ own, address }) == (std::vector<std::string>{ "om", "sa" }));
-	for (const char *status : { "canceled", "unpaid", "incomplete_expired", "paused" })
-		TEST_EXPECT(ending({ tier_sub(2, status), own, address }).size() == 2);
-	TEST_EXPECT(ending({ tier_sub(1, "active", kNow - 3 * kDay), own }) == std::vector<std::string>{ "om" });
-	for (const char *status : { "active", "trialing", "past_due" })
-		TEST_EXPECT(ending({ tier_sub(1, "canceled"), tier_sub(1, status), own, address }).empty());
-	SubscriptionRow cancelling = own;
+	const SubscriptionRow older = sub("sa_old", ItemKind::StaticAddress, 0, "active");
+	TEST_EXPECT(ending({ address }) == std::vector<std::string>{ "sa" });
+	TEST_EXPECT(ending({ own, address }).empty() && ending({ address }, 1).empty());
+	for (const char *status : { "canceled", "unpaid", "active" })
+		TEST_EXPECT(ending({ tier_sub(2, status), own, address }).empty());
+	TEST_EXPECT(ending({ tier_sub(2, "active"), address }) == std::vector<std::string>{ "sa" });
+	// Two addresses on one dedicated machine: the newest goes, or the unnamed
+	// one, wherever it stands; with none, both, the unnamed first.
+	TEST_EXPECT(ending({ address, older, own }) == std::vector<std::string>{ "sa" });
+	TEST_EXPECT(ending({ address, older, own }, 0, { "sa" }) == std::vector<std::string>{ "sa_old" });
+	TEST_EXPECT(ending({ address, older }, 0, { "sa" }) == (std::vector<std::string>{ "sa_old", "sa" }));
+	TEST_EXPECT(ending({ address, older }, 2).empty());
+	// What counts: a renewing address, a granting dedicated machine.
+	SubscriptionRow cancelling = address;
 	cancelling.cancel_at_period_end = true;
-	TEST_EXPECT(ending({ cancelling, sub("sa2", ItemKind::StaticAddress, 0, "canceled"), address }) ==
+	TEST_EXPECT(ending({ cancelling, sub("sa2", ItemKind::StaticAddress, 0, "canceled") }).empty());
+	TEST_EXPECT(ending({ sub("omc", ItemKind::OwnMachine, 0, "canceled"), address }) == std::vector<std::string>{ "sa" });
+	TEST_EXPECT(ending({ sub("omx", ItemKind::OwnMachine, 0, "active", kNow - 3 * kDay), address }) ==
 			std::vector<std::string>{ "sa" });
-	TEST_EXPECT(ending({ sub("x", ItemKind::Unknown, 0, "active"), own }).empty());
-	TEST_EXPECT(ending({ sub("x", ItemKind::Unknown, 0, "canceled"), own }) == std::vector<std::string>{ "om" });
-	TEST_EXPECT(ending({ tier_sub(3, "canceled") }).empty() && ending({}).empty());
+	TEST_EXPECT(ending({ cancelling, own, older }).empty());
+	TEST_EXPECT(ending({ sub("x", ItemKind::Unknown, 0, "active"), address }).empty());
+	TEST_EXPECT(ending({ sub("x", ItemKind::Unknown, 0, "canceled"), address }) == std::vector<std::string>{ "sa" });
+	TEST_EXPECT(ending({ tier_sub(3, "canceled"), own }).empty() && ending({}).empty());
+	// The dedicated machines it judges by: the paid ones granting, a tier or not,
+	// and the admin's (0..16).
+	TEST_EXPECT(billing::dedicated_machines({ own, sub("om3", ItemKind::OwnMachine, 0, "active", kNow + kDay, 3) }, 1,
+						kNow) == 5);
+	TEST_EXPECT(billing::dedicated_machines({ sub("omc", ItemKind::OwnMachine, 0, "canceled") }, 40, kNow) == 16);
 	return 0;
 }
 
@@ -405,7 +425,7 @@ int main(int argc, char **argv) {
 		{ "status_truth_table", test_status_truth_table },
 		{ "period_net", test_period_net },
 		{ "entitlement_core", test_entitlement_core },
-		{ "add_ons_to_end", test_add_ons_to_end },
+		{ "addresses_to_end", test_addresses_to_end },
 	};
 	for (const Case &c : pure) {
 		std::printf("-- %s\n", c.name);

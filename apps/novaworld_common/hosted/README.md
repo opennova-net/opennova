@@ -388,8 +388,10 @@ releases the held ones.
   (`uncovered_comp_addresses`): every comp address of an account deleted or no longer an
   active player's (banned), and, while an account's addresses that count (its granting
   static-address subscriptions and its comp addresses) pass its own machines, its newest
-  comp ones until they no longer do (an admin's cut of its own machines or servers; a
-  paid address never lapses for that, but with its subscription). One the billing cache
+  comp ones until they no longer do (an admin's cut of its dedicated machines; a
+  paid address never lapses for that, but with its subscription, which the billing sync
+  sets to cancel at its period's end once it is past the dedicated machines:
+  [`../README.md`](../README.md) "A static address past the dedicated machines ends"). One the billing cache
   judged (a subscription's, or a comp one of an account with subscriptions, whose own
   machines may be the cache's) lapses only once a clean reconcile with Stripe has
   completed since the pass first saw it so, and never more at once than max(2, half the
