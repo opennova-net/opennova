@@ -57,7 +57,9 @@ describe('the phase in its owner words', () => {
     expect(stoppedBecauseText({ cause: 'crash', exit_code: 3, oom: false, line: '' })).toBe('It crashed (exit code 3).');
     expect(stoppedBecauseText({ cause: 'crash', exit_code: 137, oom: true, line: '' })).toBe('It crashed: it ran out of memory.');
     expect(stoppedBecauseText({ cause: 'stop', exit_code: 0, oom: false, line: '' })).toBe('It was stopped.');
-    expect(stoppedBecauseText({ cause: 'limits', exit_code: null, oom: false, line: '' })).toContain('Your hosting limit no longer covers it');
+    expect(stoppedBecauseText({ cause: 'limits', exit_code: null, oom: false, line: '' })).toBe(
+      'Your hosting limit no longer covers it (your support tier or admin grant ended or changed), so it was stopped.',
+    );
     // A start whose data could not be fetched never crashed, whatever docker's code.
     expect(stoppedBecauseText({ cause: 'data_unavailable', exit_code: 125, oom: false, line: '' })).toBe(
       'Its game data could not be fetched.',

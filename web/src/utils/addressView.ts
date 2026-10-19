@@ -33,9 +33,9 @@ const STATE_LABELS: Record<AddressState, string> = {
   failed: 'Could not be set up',
 };
 
-// Why an address lapsed, from its own cause: an admin released it, or its
-// subscription stopped paying for it ('grant'; a comp address, an admin's
-// grant, has no subscription to end). '' before it lapsed.
+// Why an address lapsed, from its own cause: an admin released it, or what
+// paid for it stopped ('grant': its subscription, or for a comp address the
+// admin's grant that covered it). '' before it lapsed.
 function lapseClause(a: Pick<Address, 'source' | 'lapse_cause'>): string {
   if (a.lapse_cause === 'admin') return 'an admin released it';
   if (a.lapse_cause === 'grant') return a.source === 'comp' ? 'its grant ended' : 'its subscription ended';

@@ -107,7 +107,7 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
     case 'invalid_field':
       return 'The server could not read the request. Reload the page and try again.';
     case 'not_eligible':
-      return 'Your account cannot buy that right now: an own machine needs a support tier first, and an account that is not active cannot subscribe.';
+      return 'Your account cannot buy that right now: an own machine needs a support tier first, an account with an admin grant buys no tier or add-on, and an account that is not active cannot subscribe.';
     case 'already_subscribed':
       return 'You already have a support tier. Change it in the billing portal.';
     case 'own_machine_limit':
