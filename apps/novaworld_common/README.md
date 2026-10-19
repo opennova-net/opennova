@@ -438,9 +438,10 @@ reasons (`ConnectionManager::DropReason`):
 
 Every drop, regardless of reason, fires `on_lost` → `NwUdpListener::erase_lobby_state`,
 which removes the in-memory per-peer session state, the matching `active_hosts` /
-`host_players` rows (the host row by RID, the player row by peer address) and the
-session's `lobby_sessions` row (with the commands addressed to it). So a host that quits,
-times out, or is replaced disappears from the browser the same way.
+`host_players` rows (the host row by RID; a joiner's row in the listing it played on, by
+the account it signed in as) and the session's `lobby_sessions` row (with the commands
+addressed to it). So a host that quits, times out, or is replaced disappears from the
+browser the same way, and a joiner from its server's roster.
 
 A **backstop sweep** runs as the periodic `hosts.prune` job (every
 `host_sweep_interval_ms`, default 30 s): it prunes `active_hosts` rows whose `updated_at` (refreshed by every
@@ -453,7 +454,7 @@ registers an instance of its own: a previous run's rows went at its clean stop, 
 with its stale row), and no other program's boot touches them.
 
 **Lobby instances** (`backend/migrations/0009_lobby_instances.sql`,
-`0012_lobby_instances_share_endpoint.sql`, `lobbydb::register_instance` and its neighbours;
+`0012_lobby_instances_share_endpoint.sql`, `0020_lobby_live_view.sql`, `lobbydb::register_instance` and its neighbours;
 service policy). Each lobby process is one instance, a row of its own, and as many lobbies
 run as the deployment wants, all behind one lobby address (`ONNET_LOBBY_ENDPOINT`), which
 every lobby announces alike: on ECS the network load balancer's, the gate's Elastic IP and
@@ -464,8 +465,9 @@ port) and keeps each flow on one task.
   only to the lobby address the gate first gave it, after 240 s of silence, so with one
   address a host whose lobby went away is listed again on a live one within about 271 s,
   with no restart; retail self-hosts recover the same way.
-- **Its row** (`lobby_instances`: id, endpoint, `active` or `draining`, `started_at`,
-  `last_seen_at`). The NW UDP listener's start registers a new row, reaps every instance
+- **Its row** (`lobby_instances`: id, endpoint, `active` or `draining`, the task its lobby
+  runs as, `started_at`, `last_seen_at`; the task, its ECS task id else its hostname, is the
+  key its `program_samples` rows carry). The NW UDP listener's start registers a new row, reaps every instance
   unseen for 5 min with its rows (`kInstanceStaleSeconds`, well past a database failover)
   and clears the rows no instance holds, all before it serves. Its receive thread moves
   `last_seen_at` every 5 s; a row found reaped all the same is registered again under a new
@@ -494,18 +496,24 @@ port) and keeps each flow on one task.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/admin/lobbies` | admin | the instances by id, each with its state, times and session count |
+| `GET /api/admin/lobbies` | admin | the instances by id, each with its state, the task its lobby runs as (`task_id`, the program usage page's key), times and session count |
 | `POST /api/admin/lobbies/<id>/drain` | admin | 200; 404 |
 
-**The lobby's tables** (`backend/migrations/0006_lobby_commands.sql`,
+**The lobby's tables** (`backend/migrations/0006_lobby_commands.sql`, `0020_lobby_live_view.sql`,
 `engine/net/novaworld/lobby_repository.h`; service policy):
 
 - **`lobby_sessions`**, one row per lobby session, which the listener alone writes:
   inserted with the `ClientHello` that admits the address, replaced by a `ClientAuth` that
-  starts a new logical connection, updated as the session's statements change it (its
-  retail login's tag, RID, hosting, listing), deleted with the drop; `last_seen_at` lags
-  by up to 10 s. The receive thread writes the row before it answers the statement that
-  changed it.
+  starts a new logical connection, updated as the session's statements change it (the
+  account it signed in as, RID, hosting, listing, what it plays on), deleted with the drop;
+  `last_seen_at` lags by up to 10 s. The receive thread writes the row before it answers the
+  statement that changed it. The account (`user_id`) is the one whose live retail login a
+  `Cookie` list's `LOGINSESSIONTAG` named when the lobby resolved it, pinned for the
+  session's life however that login ends (a later tag naming another account moves it; the
+  tag itself, a secret, stays in the lobby's memory). What it plays on is its latest
+  `ClientPlayRequest`'s `PlaySetup`: `play_addr` its `IpAddress:PortNumber` (the join address
+  the `.joi` handed it), `playing_rid` the listing at that address then (none for a LAN
+  server, or one no lobby lists) and `playing_since`; its `ClientStopPlaying` clears them.
 - **`lobby_commands`**, what the routes and the supervisor address to the lobby holding a
   session: `server_command` and `stop_hosting` (the pushes below), `end_session` (the
   admin's end) and `forget_owner` (an account lost its keys). An insert is made only when
@@ -517,14 +525,23 @@ port) and keeps each flow on one task.
 
 **The admin's view** (`connection_routes.*`, the site's admin page **Status and sessions**,
 `/admin/novaworld#sessions`, under NovaWorld):
-every session the instances hold, from their `lobby_sessions` rows, with the server it
-lists and an end queued for its instance. A session's account is its listing's owner
-while it hosts, else the account whose live retail login its latest `Cookie` list named
-(its `LOGINSESSIONTAG`, which the row keeps and no route sends).
+every session the instances hold, from their `lobby_sessions` rows and the listings, split
+into clients and servers, with the server each lists or plays on and an end queued for its
+instance. A session's account is its listing's owner while it hosts, else the account it
+signed in as (the row's `user_id`). A **server** is a session that hosts (a listen host
+plays on its own server too); any other is a **client**. A session's game is its games row:
+a server's by its listing's `LobbyName`, else by its game tag (aliases included). A
+server's listing says what it is: `hosted` (a live hosted server of the fleet's, linked to
+`/admin/fleet/<id>`), `owned` (its HostKey names an account) or `anonymous`, and retail's
+Serve Only flag (`Dedicated`). A client's server is the listing its `PlaySetup` named, by
+RID, while it is listed (its address alone otherwise: a LAN server, one no lobby lists).
+The page shows the clients and the servers as two tables, each session's lobby linked to
+the lobby program's usage of that instance's task, and the lobby instances below them
+(`/admin/novaworld#lobbies`: each one's state, sessions and task, with its Drain).
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance, state, game tag, address, times, `account` (`via` `host_key` or `login`) and `host` while it hosts |
+| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance (`lobby_id`) and that instance's task (`lobby_task_id`), state, game tag, address, times, `kind` (`client` or `server`), `title` (`{slug, display_name}`, null for a tag no games row answers to), `account` (`via` `host_key` or `login`), `host` while it hosts (with `server_kind` and `dedicated`, null while not listed) and `playing` while it plays (`rid`, null for no listing at its address; `addr`, `since_ms`, `listed`, `server_name`, `hosted_server_id`) |
 | `POST /api/admin/connections/<session id>/end` | admin | 202, an `end_session` command for the instance holding it: the client gets its `ServerGoodBye` burst and the connection drops (`Logout`), as the NAPI server role ends a connection it asked to disconnect; 404 for a session that ended; 409 `hosting` (with its `rid`: stop the listing instead, since ending its session only parks it for the re-host) |
 
 ## Pushing statements to a listed server
@@ -647,6 +664,13 @@ HostKey is unwitnessed.
   a key, and one whose key then claims no account ends with `ServerStopHosting`
   `MsgCode=200`. Off (the default), such a host is listed with no owner, so
   `opennova-serve` without `--credentials` keeps listing.
+- **The joiners.** `/NWJoin.dll` records each joiner its retail login names in
+  `host_players`, one row per account and listing (its handle and the HTTP address it
+  joined from; a second join replaces them), and `GET /api/lobbies/<rid>` lists their
+  handles as the listing's `roster`. The joiner's lobby session, signed in as the same
+  account, takes its row off when it stops playing there (`ClientStopPlaying`), asks to
+  play on another server, or ends (`hostdb::remove_player`), so the roster is who plays on
+  the server now; the listing's end takes every row, and an account's delete its own.
 
 | Route | Access | Replies |
 | --- | --- | --- |

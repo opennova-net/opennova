@@ -63,6 +63,10 @@ int run(const program::Boot &boot) {
 	// ReflectedPortNumber). See program/server_config.h.
 	nwudp.set_reflect_endpoint(config.client_reflect_ip, config.client_reflect_novaworld_port);
 	nwudp.set_unknown_tracker(&unknown_tracker);
+	// The task it runs as, which its instance row names (the admin's link from a lobby to its
+	// usage) and its usage samples carry: found once, for both.
+	const program::UsageTask task = program::find_usage_task();
+	nwudp.set_task_id(task.id);
 
 	// Wired before the listener starts, so the lost-handler cleans up the
 	// per-connection lobby_state entry too (and its session row). It runs on
@@ -88,6 +92,7 @@ int run(const program::Boot &boot) {
 	watchdog.watch("NovaWorld UDP receive loop", [&nwudp] { return nwudp.loop_turns(); });
 
 	program::LoopHooks hooks;
+	hooks.task = task;
 	hooks.tick = [&manager, &unknown_tracker](db::Database &db, uint64_t now) {
 		if (auto dropped = manager.tick(now); dropped > 0)
 			std::printf("[tick] expired %zu connection(s)\n", dropped);

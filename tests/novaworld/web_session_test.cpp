@@ -515,8 +515,8 @@ int test_inactive_and_deleted_accounts(Database &db, int64_t) {
 // A listed server's owner and a listed server's player rows. A password reset
 // deletes the account's hosting keys, so its live listing's next refresh stores
 // no owner. delete_user succeeds for an account that hosts a listed server and
-// sits in another's player list (ON DELETE SET NULL): the listing stays with no
-// owner, the player row with no account; a newcomer never gets the deleted id
+// sits in another's player list: the listing stays with no owner (ON DELETE SET
+// NULL), the player row goes (ON DELETE CASCADE); a newcomer never gets the deleted id
 // (AUTOINCREMENT), and the listing's next refresh, the lobby still holding the
 // deleted id, names no one.
 int test_listing_owner_revoked_and_deleted(Database &db, int64_t) {
@@ -563,14 +563,13 @@ int test_listing_owner_revoked_and_deleted(Database &db, int64_t) {
 	joined.user_id = gus;
 	joined.nwhandle = "gus";
 	joined.peer_ip = "10.0.0.9";
-	joined.peer_port = 0; // /NWJoin.dll's, which no ClientHostPlayerRemoved matches
 	hostdb::add_player(db, joined);
 
 	TEST_EXPECT(nws::delete_user(db, gus).ok);
 	TEST_EXPECT(!nws::get_user_by_id(db, gus).has_value());
 	TEST_EXPECT(owner_of(gus_row.rid) == std::nullopt);
-	const auto players = hostdb::list_players(db, reset_row.rid);
-	TEST_EXPECT(players.size() == 1 && !players[0].user_id.has_value());
+	// Its joins go with it: a listing's roster is its players' accounts.
+	TEST_EXPECT(hostdb::list_players(db, reset_row.rid).empty());
 
 	// A newcomer never takes the deleted id; the deleted owner's listing
 	// refreshes (the lobby still holds gus's id) and names no one.

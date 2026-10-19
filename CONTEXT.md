@@ -202,6 +202,14 @@ instance its flow reached through the load balancer for the session's life; list
 session rows and **lobby commands** carry the instance's id.
 _Avoid_: lobby server, shard (for one instance)
 
+**Lobby session**:
+One game process's NovaWorld UDP session on a **lobby instance** (`lobby_sessions`), from its
+ClientHello to its drop: a **client**'s, or a **server**'s (a session that hosts, so lists a
+server; a listen host also plays on it). It keeps the account it signed in as for its life and,
+while it plays, the server its play request named. The admin's Status and sessions page lists the
+clients and the servers apart, and a listing's roster is the clients that play on it now.
+_Avoid_: connection (that is the registry's entry), player session, host (for the session)
+
 **Lobby command**:
 A statement for a lobby session that another program sends through the `lobby_commands`
 table (a server command or a stop to a listed server, the end of a session, forgetting an

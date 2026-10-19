@@ -4,8 +4,10 @@
 #include "core/loggable.h"
 #include "host_routes.h"
 #include "http_json.h"
+#include "program/catalog_repository.h"
 
 #include <base/io/cp1252.h>
+#include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_repository.h>
 
 #include <cstdint>
@@ -28,6 +30,24 @@ crow::json::wvalue account_json(const UserRecord &user, const char *via) {
 	return a;
 }
 
+// `out` the game's {slug, display_name}, or null for none.
+void set_title(crow::json::wvalue &out, const catalog::GameRow *game) {
+	if (game == nullptr) {
+		out = nullptr;
+		return;
+	}
+	out["slug"] = game->slug;
+	out["display_name"] = game->display_name;
+}
+
+// `out` the id, or null for none.
+void set_id(crow::json::wvalue &out, std::optional<int64_t> id) {
+	if (id)
+		out = *id;
+	else
+		out = nullptr;
+}
+
 } // namespace
 
 void ConnectionRoutes::register_routes(WebApp &app, uint64_t heartbeat_timeout_ms) {
@@ -47,19 +67,34 @@ void ConnectionRoutes::register_routes(WebApp &app, uint64_t heartbeat_timeout_m
 
 // GET /api/admin/connections — {"count", "heartbeat_timeout_ms", "connections"}:
 // each session's row id (session_id: what the end route takes, unique across
-// the instances), the lobby instance holding it (lobby_id), its registry id
-// (id: unique within its instance alone), state, the protocol name (pn) and NA its hello
-// and auth carried (identity), its address, and when it connected and was last
-// heard from (created_ms, last_seen_ms; the lobby writes the last within ten
-// seconds) as Unix epoch ms; "account", who the session is, and "host", the
-// server it lists. The account is the listing's owner while it hosts
-// (listing_owner, "via": "host_key"), else the account whose live retail login
-// its latest Cookie list named (the row's login_session_tag, "via": "login"),
-// else null. The host is null unless it hosts: {rid, server_name, mission_name
-// (UTF-8, as every list of listed servers sends a host's text), players,
-// max_players, listed (false while it waits out of the browser for a HostKey
-// naming an account), hosted_server_id (null for a listing that is no live
-// hosted server)}. All of it from the lobby's session rows, in one snapshot.
+// the instances), the lobby instance holding it (lobby_id) and the task that
+// instance runs as (lobby_task_id, "" for none: the program usage page's key),
+// its registry id (id: unique within its instance alone), state, the protocol
+// name (pn) and NA its hello and auth carried (identity), its address, and when
+// it connected and was last heard from (created_ms, last_seen_ms; the lobby
+// writes the last within ten seconds) as Unix epoch ms; "kind", "server" for a
+// session that hosts (a listen host plays on its own server too) and "client"
+// for any other; "title", the game it speaks ({slug, display_name} of its games
+// row: a server's by its listing's LobbyName, else any session's by its game
+// tag, aliases included; null for a tag no row answers to); "account", who the
+// session is; "host", the server it lists; and "playing", the server it plays
+// on. The account is the listing's owner while it hosts (listing_owner, "via":
+// "host_key"), else the account it signed in as (the row's user_id, pinned by
+// the lobby from its Cookie list's retail login, "via": "login"), else null.
+// The host is null unless it hosts: {rid, server_name, mission_name (UTF-8, as
+// every list of listed servers sends a host's text), players, max_players,
+// listed (false while it waits out of the browser for a HostKey naming an
+// account), hosted_server_id (null for a listing that is no live hosted
+// server), server_kind ("hosted" for a live hosted server of the fleet's,
+// "owned" for a listing its HostKey names an account for, "anonymous" for
+// one it names none), dedicated (its listing's Dedicated column: true for a
+// Serve Only host, false for a listen host; null while it is not listed)}.
+// Playing is null unless it plays (its latest ClientPlayRequest, not stopped):
+// {rid (the listing at its PlaySetup's address when it asked; null for none),
+// addr (that address), since_ms, listed (whether that listing is still in the
+// browser), server_name (the listing's, UTF-8; null when it is not),
+// hosted_server_id (as the host's)}. All of it from the lobby's session rows
+// and the listings, in one snapshot.
 crow::response ConnectionRoutes::list(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -68,10 +103,30 @@ crow::response ConnectionRoutes::list(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot read(*db_conn);
+		const catalog::GameCatalog games = catalog::GameCatalog::load(*db_conn);
+		std::map<uint32_t, hostdb::HostRow> listings;
+		for (hostdb::HostRow &h : hostdb::list_hosts(*db_conn))
+			listings.emplace(h.rid, std::move(h));
+		std::map<int64_t, std::string> tasks;
+		for (const lobbydb::LobbyInstance &i : lobbydb::list_instances(*db_conn))
+			tasks[i.id] = i.task_id;
+		// The live hosted server a listing is, by its owner (listing_owner): once per RID.
+		std::map<uint32_t, std::optional<int64_t>> hosted_of;
+		const auto hosted_server_of = [&](uint32_t rid, std::optional<int64_t> host_user_id) {
+			const auto known = hosted_of.find(rid);
+			if (known != hosted_of.end())
+				return known->second;
+			const std::optional<int64_t> id = listing_owner(*db_conn, host_user_id).hosted_server_id;
+			hosted_of.emplace(rid, id);
+			return id;
+		};
 		for (const lobbydb::SessionRow &s : lobbydb::list_sessions(*db_conn)) {
+			const auto listing = s.hosting ? listings.find(s.rid) : listings.end();
 			crow::json::wvalue e;
 			e["session_id"] = s.id;
 			e["lobby_id"] = s.lobby_id;
+			const auto task = tasks.find(s.lobby_id);
+			e["lobby_task_id"] = task == tasks.end() ? std::string() : task->second;
 			e["id"] = s.connection_id;
 			e["state"] = s.state;
 			e["pn"] = s.pn;
@@ -79,10 +134,17 @@ crow::response ConnectionRoutes::list(const crow::request &req) {
 			e["created_ms"] = s.connected_ms;
 			e["last_seen_ms"] = s.last_seen_ms;
 			e["addr"] = lobbydb::session_addr(s);
+			e["kind"] = s.hosting ? "server" : "client";
+			const catalog::GameRow *game = listing != listings.end() && !listing->second.game.empty()
+					? games.by_lobby_name(listing->second.game)
+					: nullptr;
+			set_title(e["title"], game != nullptr ? game : games.by_gate_tag(s.identity));
 			e["account"] = nullptr;
 			e["host"] = nullptr;
+			e["playing"] = nullptr;
 			if (s.hosting) {
-				const ListingOwner listing = listing_owner(*db_conn, s.host_user_id);
+				const ListingOwner owner = listing_owner(*db_conn, s.host_user_id);
+				hosted_of.emplace(s.rid, owner.hosted_server_id);
 				crow::json::wvalue host;
 				host["rid"] = s.rid;
 				host["server_name"] = retail_text_to_utf8(s.server_name);
@@ -90,17 +152,41 @@ crow::response ConnectionRoutes::list(const crow::request &req) {
 				host["players"] = s.players;
 				host["max_players"] = s.max_players;
 				host["listed"] = s.listed;
-				if (listing.hosted_server_id)
-					host["hosted_server_id"] = *listing.hosted_server_id;
+				set_id(host["hosted_server_id"], owner.hosted_server_id);
+				host["server_kind"] = owner.hosted_server_id ? "hosted"
+						: s.host_user_id                     ? "owned"
+															 : "anonymous";
+				if (listing != listings.end())
+					host["dedicated"] = listing->second.dedicated != "N";
 				else
-					host["hosted_server_id"] = nullptr;
+					host["dedicated"] = nullptr;
 				e["host"] = std::move(host);
-				if (listing.owner)
-					e["account"] = account_json(*listing.owner, "host_key");
+				if (owner.owner)
+					e["account"] = account_json(*owner.owner, "host_key");
 			}
-			if (e["account"].t() == crow::json::type::Null && !s.login_session_tag.empty()) {
-				if (const auto user = get_user_by_login_session_tag(*db_conn, s.login_session_tag))
+			if (e["account"].t() == crow::json::type::Null && s.user_id) {
+				if (const auto user = get_user_by_id(*db_conn, *s.user_id))
 					e["account"] = account_json(*user, "login");
+			}
+			if (s.playing_since_ms != 0) {
+				const auto on = s.playing_rid != 0 ? listings.find(s.playing_rid) : listings.end();
+				crow::json::wvalue playing;
+				if (s.playing_rid != 0)
+					playing["rid"] = s.playing_rid;
+				else
+					playing["rid"] = nullptr;
+				playing["addr"] = s.play_addr;
+				playing["since_ms"] = s.playing_since_ms;
+				playing["listed"] = on != listings.end();
+				if (on != listings.end()) {
+					playing["server_name"] = retail_text_to_utf8(on->second.server_name);
+					set_id(playing["hosted_server_id"],
+							hosted_server_of(on->first, on->second.host_user_id));
+				} else {
+					playing["server_name"] = nullptr;
+					playing["hosted_server_id"] = nullptr;
+				}
+				e["playing"] = std::move(playing);
 			}
 			entries.push_back(std::move(e));
 		}
@@ -164,7 +250,8 @@ crow::response ConnectionRoutes::end(const crow::request &req, uint64_t session_
 // GET /api/admin/lobbies — {"lobbies"}: every lobby instance (one per lobby
 // process), by id: its endpoint (the gate's udpnovaworld, the lobby address
 // every instance announces), its state ("active" counts as taking clients,
-// "draining" does not), when it
+// "draining" does not), the task its lobby runs as (task_id, "" for none: the
+// program usage page's key), when it
 // started and was last seen (Unix epoch ms; a running lobby moves it every few
 // seconds, and one unseen for five minutes is reaped with its rows), and its sessions.
 crow::response ConnectionRoutes::lobbies(const crow::request &req) {
@@ -184,6 +271,7 @@ crow::response ConnectionRoutes::lobbies(const crow::request &req) {
 			e["id"] = i.id;
 			e["endpoint"] = i.endpoint;
 			e["state"] = i.state;
+			e["task_id"] = i.task_id;
 			e["started_ms"] = i.started_ms;
 			e["last_seen_ms"] = i.last_seen_ms;
 			const auto it = sessions.find(i.id);

@@ -505,7 +505,7 @@ void NwUdpListener::stop() {
 void NwUdpListener::register_instance(db::Database &db) {
 	// A row of its own: every instance announces the same endpoint (the deployment's one lobby
 	// address), so neither the endpoint nor a previous run's row names this one.
-	const int64_t id = lobbydb::register_instance(db, instance_endpoint_);
+	const int64_t id = lobbydb::register_instance(db, instance_endpoint_, false, task_id_);
 	const size_t reaped = lobbydb::reap_stale_instances(db, lobbydb::kInstanceStaleSeconds, id);
 	hostdb::clear_unheld(db);
 	lobby_id_.store(id);
@@ -520,7 +520,7 @@ void NwUdpListener::reregister_instance(db::Database &db) {
 	// Drained (its own stop, or an admin's through the row), it stays drained: coming back does
 	// not make it count as taking clients again.
 	const bool draining = draining_.load();
-	const int64_t id = lobbydb::register_instance(db, instance_endpoint_, draining);
+	const int64_t id = lobbydb::register_instance(db, instance_endpoint_, draining, task_id_);
 	lobby_id_.store(id);
 	lobby_session_.set_lobby_id(id);
 	std::size_t sessions = 0;
@@ -575,6 +575,9 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 	bool had_state = false;
 	bool was_hosting = false;
 	uint32_t rid = 0;
+	// The server it played on and the account it signed in as: its row in that listing's roster.
+	uint32_t playing_rid = 0;
+	std::optional<int64_t> user_id;
 	int64_t session_id = 0;
 	{
 		std::lock_guard<std::mutex> lk(lobby_states_mu_);
@@ -590,6 +593,8 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 			had_state = true;
 			was_hosting = it->second.lobby.hosting;
 			rid = it->second.lobby.rid;
+			playing_rid = it->second.lobby.playing_rid;
+			user_id = it->second.lobby.user_id;
 			// Park the identity for the connection's reconnect (see parked_lobby_states_).
 			const uint64_t now = now_ms();
 			for (auto park = parked_lobby_states_.begin(); park != parked_lobby_states_.end();) {
@@ -608,8 +613,12 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 	if (!had_state && session_id == 0) return;
 
 	// Phase I.2: drop the matching row(s) from active_hosts +
-	// host_players. Hosting peer is keyed by RID (drops the host row);
-	// joining peer's own host_players entry is keyed by peer addr. The
+	// host_players. Hosting peer is keyed by RID (drops the host row); a
+	// joiner leaves the server it played on, its account's host_players row
+	// under that RID going (LobbySession::leave_server's rule). The parked
+	// state keeps its play columns, so a reconnect's replay still names the
+	// server it plays on; its roster row does not come back (only
+	// /NWJoin.dll writes one). The
 	// session row goes by its id, and its commands with it (their foreign
 	// key cascades). On the calling thread's own connection (this runs on
 	// the receive thread and on main alike): the caller's, else the one its
@@ -625,15 +634,12 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 			}
 			if (session_id != 0) lobbydb::delete_session(*db, session_id);
 			if (had_state) {
-				// The DB key MUST be the same spelling add_player stored, or
-				// remove_player_by_peer stops matching and host_players rows leak
-				// until the host row cascades. Both sides now render through
-				// peer_addr_ip_to_string, so they cannot drift apart.
-				const std::string ip_key = peer_addr_ip_to_string(peer);
 				if (was_hosting && rid != 0) {
 					hostdb::remove_host_by_rid(*db, rid);
 				}
-				hostdb::remove_player_by_peer(*db, ip_key, peer.port);
+				if (playing_rid != 0 && user_id) {
+					hostdb::remove_player(*db, playing_rid, *user_id);
+				}
 			}
 		} catch (const std::exception &e) {
 			std::fprintf(stderr, "[lobby] WARN db cleanup on erase_lobby_state: %s\n", e.what());
@@ -674,7 +680,10 @@ lobbydb::SessionRow NwUdpListener::session_row_locked(const PeerAddr &peer,
 	const auto it = lobby_states_.find(peer);
 	if (it != lobby_states_.end()) {
 		const LobbyState &lobby = it->second.lobby;
-		row.login_session_tag = lobby.login_session_tag;
+		row.user_id = lobby.user_id;
+		row.playing_rid = lobby.playing_rid;
+		row.play_addr = lobby.play_addr;
+		row.playing_since_ms = lobby.playing_since_ms;
 		row.rid = lobby.rid;
 		row.hosting = lobby.hosting;
 		row.listed = lobby.hosting && !lobby.awaiting_host_key;
@@ -1116,8 +1125,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 		const uint32_t client_ip_net = peer.ip;
 		const uint16_t client_port = from.port;
 		const auto client_label = opennova::net::endpoint_to_string(from);
-		// Same rendering the erase path keys the DB with (peer_addr_ip_to_string):
-		// add_player and remove_player_by_peer must agree byte for byte.
+		// The rendering the session rows and a listing's host_ip carry
+		// (peer_addr_ip_to_string): a joiner's PlaySetup names the listing by it
+		// (hostdb::rid_at), so the two must agree byte for byte.
 		const std::string client_ip_str = peer_addr_ip_to_string(peer);
 
 		// Demultiplex the in-match game protocol onto the shared authoritative host

@@ -159,8 +159,9 @@ const loadError = ref('');
 const pollTrouble = ref(false);
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
-// The task picked ('' for all of them together).
-const task = ref('');
+// The task picked ('' for all of them together): first the one a link names
+// (?task=, a lobby's from the NovaWorld page), else none.
+const task = ref(typeof route.query.task === 'string' ? route.query.task : '');
 
 const program = computed(() => programs.value?.programs.find((p) => p.name === name.value) ?? null);
 const reporting = computed(() => (program.value?.tasks ?? []).some((t) => t.reporting));

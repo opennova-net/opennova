@@ -279,8 +279,8 @@ int test_foreign_keys_enforced() {
 	bool caught = false;
 	try {
 		db.exec(
-			"INSERT INTO host_players (host_rid, nwhandle, peer_ip, peer_port) "
-			"VALUES (9999, 'orphan', '10.0.0.1', 1);"
+			"INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip) "
+			"VALUES (9999, 9999, 'orphan', '10.0.0.1');"
 		);
 	} catch (const opennova::db::Error &e) {
 		caught = e.sqlstate() == "23503";
@@ -458,8 +458,8 @@ int test_credentials_generation() {
 
 // The account deletes and host_keys. players.id is an identity, so a deleted
 // account's id is never handed out again; a deleted account leaves its listed
-// server listed and its player-list rows in place with no account (ON DELETE
-// SET NULL) and takes its hosting keys (ON DELETE CASCADE). host_keys is keyed
+// server listed with no owner (ON DELETE SET NULL) and takes its player-list
+// rows and its hosting keys (ON DELETE CASCADE). host_keys is keyed
 // by the key hash, with its indexes; a key needs a player, and a fresh key row
 // carries both times and no claim.
 int test_host_keys_and_account_deletes() {
@@ -517,17 +517,15 @@ int test_host_keys_and_account_deletes() {
 	        "host_user_id, peer_ip, peer_port) VALUES (7, 'G7', 'jop_2_consumer', '1234', 'Owned', "
 	        "'10.0.0.7', 32768, $1, '10.0.0.7', 32768);",
 	        {opennova::db::BindValue(host)});
-	db.exec("INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip, peer_port) "
-	        "VALUES (7, $1, 'first', '10.0.0.8', 0);",
+	db.exec("INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip) "
+	        "VALUES (7, $1, 'first', '10.0.0.8');",
 	        {opennova::db::BindValue(first)});
 	db.exec("DELETE FROM players WHERE id IN ($1, $2);",
 	        {opennova::db::BindValue(host), opennova::db::BindValue(first)});
 	const auto listed = db.query("SELECT server_name, host_user_id FROM active_hosts WHERE rid = 7;");
 	TEST_EXPECT(listed.size() == 1 && listed[0].as_text(0).value() == "Owned");
 	TEST_EXPECT(!listed[0].as_int(1).has_value());
-	const auto joined = db.query("SELECT nwhandle, user_id FROM host_players WHERE host_rid = 7;");
-	TEST_EXPECT(joined.size() == 1 && joined[0].as_text(0).value() == "first");
-	TEST_EXPECT(!joined[0].as_int(1).has_value());
+	TEST_EXPECT(db.query("SELECT 1 FROM host_players WHERE host_rid = 7;").empty());
 	TEST_EXPECT(db.query("SELECT 1 FROM host_keys;").empty());
 	return 0;
 }
@@ -970,6 +968,76 @@ int test_lobby_instances_tables() {
 	return 0;
 }
 
+// 0020_lobby_live_view.sql over a database migrated to the ones before it: a listing's joiners
+// keyed by their account (a row with none goes, one per account and listing stays, its latest
+// join, and the port of 0 goes), an account's delete taking its rows; the session rows' account
+// and play columns (the login tag gone) and the instances' task.
+int test_lobby_live_view_migration() {
+	const std::filesystem::path migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
+	TestDatabase scratch({ /*migrate=*/false });
+	const std::filesystem::path before =
+			std::filesystem::temp_directory_path() / ("opennova-migrations-" + scratch.name());
+	std::filesystem::create_directories(before);
+	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
+		const std::string name = e.path().filename().string();
+		if (e.path().extension() == ".sql" && name < "0020_")
+			std::filesystem::copy_file(e.path(), before / name);
+	}
+	Database db = scratch.open();
+	run_migrations(db, before);
+	std::filesystem::remove_all(before);
+	const auto player = [&db](const char *name, const char *pcid) {
+		return db.query("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+						"VALUES ($1, 'x', $2, '1', $1) RETURNING id;",
+					   { BindValue(std::string(name)), BindValue(std::string(pcid)) })
+				.front()
+				.as_int(0)
+				.value_or(0);
+	};
+	const int64_t ann = player("lv_ann", "0b200001");
+	const int64_t bo = player("lv_bo", "0b200002");
+	db.exec("INSERT INTO active_hosts (rid, gsid, game, app_id, server_name, host_ip, host_port, "
+			"peer_ip, peer_port) VALUES (7, 'G7', 'jop_2_consumer', '1', 'Live', '10.0.0.7', "
+			"32768, '10.0.0.7', 32768);");
+	// Ann joined twice from two addresses, Bo once behind Ann's first, and one joiner's account
+	// is gone.
+	db.exec("INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip, peer_port, joined_at) "
+			"VALUES (7, $1, 'ann-old', '10.0.0.1', 0, now() - interval '5 minutes'), "
+			"(7, $1, 'ann-new', '10.0.0.2', 0, now()), (7, NULL, 'gone', '10.0.0.3', 0, now()), "
+			"(7, $2, 'bo', '10.0.0.1', 1, now());",
+			{ BindValue(ann), BindValue(bo) });
+	run_migrations(db, migrations);
+
+	const auto joined = db.query("SELECT user_id, nwhandle FROM host_players WHERE host_rid = 7 "
+								 "ORDER BY nwhandle;");
+	TEST_EXPECT(joined.size() == 2 && joined[0].as_int(0) == ann &&
+			joined[0].as_text(1) == "ann-new" && joined[1].as_int(0) == bo);
+	TEST_EXPECT(!has_column(db, "host_players", "peer_port"));
+	TEST_EXPECT(has_index(db, "host_players", "host_players_pkey"));
+	TEST_EXPECT(has_index(db, "host_players", "idx_host_players_user"));
+	TEST_EXPECT(!has_index(db, "host_players", "idx_host_players_peer"));
+	// One row per account and listing, and none without an account.
+	TEST_EXPECT(refused(db, "INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip) "
+							"SELECT 7, id, 'again', '10.0.0.9' FROM players WHERE username = 'lv_ann';"));
+	TEST_EXPECT(refused(db, "INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip) "
+							"VALUES (7, NULL, 'nobody', '10.0.0.9');"));
+	db.exec("DELETE FROM players WHERE id = $1;", { BindValue(ann) });
+	TEST_EXPECT(db.query("SELECT 1 FROM host_players WHERE host_rid = 7;").size() == 1);
+
+	for (const char *column : { "user_id", "playing_rid", "play_addr", "playing_since" })
+		TEST_EXPECT(has_column(db, "lobby_sessions", column));
+	TEST_EXPECT(!has_column(db, "lobby_sessions", "login_session_tag"));
+	TEST_EXPECT(refused(db, "INSERT INTO lobby_sessions (connection_id, peer_ip, peer_port, state, "
+							"playing_rid, connected_at, last_seen_at) VALUES (1, '10.0.0.2', 1, "
+							"'active', 0, now(), now());"));
+	TEST_EXPECT(has_column(db, "lobby_instances", "task_id"));
+	TEST_EXPECT(db.query("INSERT INTO lobby_instances (endpoint) VALUES ('10.0.0.1:64206') "
+						 "RETURNING task_id;")
+						.front()
+						.as_text(0) == "");
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -994,11 +1062,13 @@ int main(int argc, char **argv) {
 		return 1;
 	if (test_lobby_instances_tables() != 0)
 		return 1;
+	if (test_lobby_live_view_migration() != 0)
+		return 1;
 	if (test_fleet_tables() != 0)
 		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
 				"web sessions + roles, games titles, host keys, credentials generation, hosted "
 				"server games, "
-				"cd keys, billing, account email, jobs, fleet state)\n");
+				"cd keys, billing, account email, jobs, fleet state, the lobby live view)\n");
 	return 0;
 }

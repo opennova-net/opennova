@@ -540,12 +540,17 @@ int test_stop_hosting_and_stop_playing_are_silent_lifecycle_messages() {
 	TEST_EXPECT(state.player_count == 0);
 
 	state.play_state["PlaySetup"].push_back({0, "GSID", "fixed"});
+	state.playing_rid = 0x0A000098u;
+	state.play_addr = "10.0.0.98:32768";
+	state.playing_since_ms = 1792120342793;
 	NapiMessage stop_playing;
 	stop_playing.name = "ClientStopPlaying";
 	auto r2 = sess.dispatch(stop_playing, state, "127.0.0.1", 32768);
 	TEST_EXPECT(r2.label == "ClientStopPlaying");
 	TEST_EXPECT(r2.reply_containers.empty());
 	TEST_EXPECT(state.play_state.empty());
+	// It plays on nothing (service policy: the admin's view).
+	TEST_EXPECT(state.playing_rid == 0 && state.play_addr.empty() && state.playing_since_ms == 0);
 	return 0;
 }
 
@@ -569,6 +574,24 @@ int test_client_play_request_returns_server_play_result() {
 	TEST_EXPECT(cmds != nullptr);
 	TEST_EXPECT(field_str(find_field(*cmds, "VarList")) == "PlayCommands");
 	TEST_EXPECT(var_value(state.play_state["PlaySetup"], "GSID") == "fixed-gsid");
+	// No IpAddress: it plays, at no address; no database names a listing.
+	TEST_EXPECT(state.play_addr.empty() && state.playing_rid == 0 && state.playing_since_ms > 0);
+
+	// Its PlaySetup's IpAddress / PortNumber are the server it plays on, at once (service
+	// policy: the admin's view); with no database no listing is looked up, and a pinned account
+	// needs one too.
+	LobbyState joiner;
+	NapiMessage play;
+	play.name = "ClientPlayRequest";
+	play.children.push_back(make_client_var_list("Cookie", {{"LOGINSESSIONTAG", "tag-no-db"}}));
+	play.children.push_back(make_client_var_list("PlaySetup", {
+		{"ServerName", "Far Server"}, {"IpAddress", "203.0.113.44"}, {"PortNumber", "32771"},
+		{"AppId", "20"}, {"Lan", "0"},
+	}));
+	TEST_EXPECT(sess.dispatch(play, joiner, "127.0.0.1", 32768).label == "ClientPlayRequest");
+	TEST_EXPECT(joiner.play_addr == "203.0.113.44:32771" && joiner.playing_rid == 0 &&
+			joiner.playing_since_ms > 0);
+	TEST_EXPECT(joiner.login_session_tag == "tag-no-db" && !joiner.user_id);
 	return 0;
 }
 

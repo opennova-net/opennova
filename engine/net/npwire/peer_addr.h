@@ -42,9 +42,11 @@ inline PeerAddr peer_addr_from_octets(const std::array<uint8_t, 4> &octets, uint
 	return addr;
 }
 
-// "a.b.c.d". This is a WIRE-VISIBLE and DB-VISIBLE rendering: the host_players
-// rows are keyed by it, so a second, differently-derived spelling of the same
-// address silently leaks rows (remove_player_by_peer stops matching).
+// "a.b.c.d". This is a WIRE-VISIBLE and DB-VISIBLE rendering: a listing's
+// host_ip is written in it, the .joi hands joiners that text and their
+// PlaySetup names it again, which the lobby looks the listing up by
+// (hostdb::rid_at), so a second, differently-derived spelling of the same
+// address silently stops matching.
 inline std::string peer_addr_ip_to_string(const PeerAddr &addr) {
 	std::string out;
 	out.reserve(15);

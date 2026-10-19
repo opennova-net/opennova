@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { adminClient } from './client';
 import {
   describeAdminError,
+  drainLobby,
   endConnection,
   fetchConnections,
+  fetchLobbies,
   pickMachine,
   pickMachineDetail,
   pickRollPlan,
@@ -38,7 +40,9 @@ function refusal(status: number, data: unknown): AxiosError {
 }
 
 // GET /api/admin/connections as production answered it (2026-10-16), with the
-// times the service now sends (epoch ms) and its handles and addresses replaced.
+// times the service now sends (epoch ms), the fields the live view adds (each
+// session's kind, game, lobby task and the server it plays on) and its handles
+// and addresses replaced.
 const productionShape = {
   heartbeat_timeout_ms: 240000,
   count: 2,
@@ -46,6 +50,7 @@ const productionShape = {
     {
       session_id: 41,
       lobby_id: 1,
+      lobby_task_id: '0f3c9a1b2d4e4f6a8b0c1d2e3f405162',
       addr: '198.51.100.20:32768',
       last_seen_ms: 1792120317793,
       created_ms: 1792096041000,
@@ -53,6 +58,8 @@ const productionShape = {
       pn: 'NOVAWORLDUDP',
       state: 'active',
       id: 3879272710,
+      kind: 'server',
+      title: { slug: 'jop_2_consumer', display_name: 'Joint Operations' },
       account: { id: 1, username: 'owner1', via: 'host_key' },
       host: {
         rid: 167772161,
@@ -62,11 +69,15 @@ const productionShape = {
         max_players: 32,
         listed: true,
         hosted_server_id: 1,
+        server_kind: 'hosted',
+        dedicated: true,
       },
+      playing: null,
     },
     {
       session_id: 57,
       lobby_id: 2,
+      lobby_task_id: '',
       addr: '198.51.100.21:32769',
       last_seen_ms: 1792120335000,
       created_ms: 1792120218000,
@@ -74,8 +85,18 @@ const productionShape = {
       pn: 'NOVAWORLDUDP',
       state: 'active',
       id: 2147483649,
+      kind: 'client',
+      title: { slug: 'jop_2_consumer', display_name: 'Joint Operations' },
       account: null,
       host: null,
+      playing: {
+        rid: 167772161,
+        addr: '198.51.100.20:32768',
+        since_ms: 1792120300000,
+        listed: true,
+        server_name: 'Retail Joint Ops',
+        hosted_server_id: 1,
+      },
     },
   ],
 };
@@ -93,23 +114,44 @@ describe('fetchConnections', () => {
     expect(result.value.heartbeat_timeout_ms).toBe(240_000);
     const [host, player] = result.value.connections;
     expect(host).toEqual(productionShape.connections[0]);
+    expect(player).toEqual(productionShape.connections[1]);
     expect(player.account).toBeNull();
     expect(player.host).toBeNull();
     expect(player.created_ms).toBe(1792120218000);
   });
 
-  it('reads a session without account or listing (an older service) as none', async () => {
-    const { account: _a, host: _h, ...bare } = productionShape.connections[1];
+  it('reads a session without account, game, listing or play (an older service) as none', async () => {
+    const { account: _a, host: _h, kind: _k, title: _t, playing: _p, lobby_task_id: _l, ...bare } = productionShape.connections[1];
     get.mockResolvedValue(reply({ ...productionShape, connections: [bare] }));
     const result = await fetchConnections();
-    expect(result.ok && result.value.connections[0]).toMatchObject({ session_id: 57, id: 2147483649, account: null, host: null });
+    expect(result.ok && result.value.connections[0]).toMatchObject({
+      session_id: 57,
+      id: 2147483649,
+      lobby_task_id: '',
+      kind: 'client',
+      title: null,
+      account: null,
+      host: null,
+      playing: null,
+    });
+    // A listing with no kind said: a server, hosted when it is one of the fleet's.
+    const { kind: _k2, ...unkinded } = productionShape.connections[0];
+    const oldHost = { rid: 167772161, server_name: 'Retail Joint Ops', mission_name: 'River Patrol', players: 2, max_players: 32, listed: true, hosted_server_id: 1 };
+    get.mockResolvedValue(reply({ ...productionShape, connections: [{ ...unkinded, host: oldHost }] }));
+    const old = await fetchConnections();
+    expect(old.ok && old.value.connections[0]).toMatchObject({ kind: 'server', host: { server_kind: 'hosted', dedicated: null } });
   });
 
-  it('drops a malformed account or listing and refuses a malformed session', async () => {
+  it('drops a malformed account, game, listing or play and refuses a malformed session', async () => {
     const session = productionShape.connections[0];
-    get.mockResolvedValue(reply({ ...productionShape, connections: [{ ...session, account: { id: '1' }, host: { server_name: 'x' } }] }));
+    get.mockResolvedValue(
+      reply({
+        ...productionShape,
+        connections: [{ ...session, account: { id: '1' }, host: { server_name: 'x' }, title: { slug: 1 }, playing: { rid: 1 } }],
+      }),
+    );
     const result = await fetchConnections();
-    expect(result.ok && result.value.connections[0]).toMatchObject({ account: null, host: null });
+    expect(result.ok && result.value.connections[0]).toMatchObject({ account: null, host: null, title: null, playing: null, kind: 'server' });
 
     get.mockResolvedValue(reply({ ...productionShape, connections: [{ ...session, id: '3879272710' }] }));
     expect((await fetchConnections()).ok).toBe(false);
@@ -135,6 +177,32 @@ describe('ending a session and stopping a listed server', () => {
 
     post.mockRejectedValue(refusal(404, { error: 'not_found' }));
     const gone = await endConnection({ session_id: 41 });
+    expect(!gone.ok && gone.error.code).toBe('not_found');
+  });
+
+  it('reads the lobby instances, and drains one by its id', async () => {
+    get.mockResolvedValue(
+      reply({
+        lobbies: [
+          { id: 3, endpoint: '203.0.113.20:64206', state: 'active', task_id: '7a1e3c0ffee0', started_ms: 1792100000000, last_seen_ms: 1792120000000, sessions: 4 },
+          { id: 4, endpoint: '203.0.113.20:64206', state: 'draining', started_ms: 1792100000000, last_seen_ms: 1792120000000, sessions: 0 },
+        ],
+      }),
+    );
+    const result = await fetchLobbies();
+    expect(get).toHaveBeenCalledWith('/lobbies', expect.anything());
+    expect(result.ok && result.value.lobbies).toEqual([
+      { id: 3, endpoint: '203.0.113.20:64206', state: 'active', task_id: '7a1e3c0ffee0', started_ms: 1792100000000, last_seen_ms: 1792120000000, sessions: 4 },
+      { id: 4, endpoint: '203.0.113.20:64206', state: 'draining', task_id: '', started_ms: 1792100000000, last_seen_ms: 1792120000000, sessions: 0 },
+    ]);
+    get.mockResolvedValue(reply({ lobbies: [{ endpoint: 'x' }] }));
+    expect((await fetchLobbies()).ok).toBe(false);
+
+    post.mockResolvedValue(reply({ status: 'draining', id: 3 }));
+    expect((await drainLobby(3)).ok).toBe(true);
+    expect(post).toHaveBeenCalledWith('/lobbies/3/drain', undefined);
+    post.mockRejectedValue(refusal(404, { error: 'not_found' }));
+    const gone = await drainLobby(9);
     expect(!gone.ok && gone.error.code).toBe('not_found');
   });
 

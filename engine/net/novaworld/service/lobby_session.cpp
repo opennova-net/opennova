@@ -393,6 +393,35 @@ void LobbySession::end_hosting(LobbyState &state, const char *reason) {
 	"[lobby] stopped rid=%u reason=%s", rid, reason);
 }
 
+bool LobbySession::pin_account(LobbyState &state, const std::string &tag) {
+	if (!db_) return true;
+	try {
+		if (const auto account = lobbydb::login_account(*db_, tag)) state.user_id = account;
+		return true;
+	} catch (const std::exception &e) {
+		opennova::io::logf(opennova::io::LogLevel::kWarn,
+	"[lobby] WARN sign-in account: %s", e.what());
+		return false;
+	}
+}
+
+void LobbySession::leave_server(LobbyState &state, const char *reason) {
+	if (db_ && state.playing_rid != 0 && state.user_id) {
+		try { hostdb::remove_player(*db_, state.playing_rid, *state.user_id); }
+		catch (const std::exception &e) {
+			opennova::io::logf(opennova::io::LogLevel::kWarn,
+	"[lobby] WARN leaving rid=%u: %s", state.playing_rid, e.what());
+		}
+	}
+	if (state.playing_since_ms != 0) {
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] left rid=%u reason=%s", state.playing_rid, reason);
+	}
+	state.playing_rid = 0;
+	state.play_addr.clear();
+	state.playing_since_ms = 0;
+}
+
 void LobbySession::relist(const LobbyState &state, const std::string &peer_ip, uint16_t peer_port) {
 	if (!db_ || !state.hosting || state.rid == 0 || state.awaiting_host_key)
 		return;
@@ -408,13 +437,19 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 	// A statement carrying the session's Cookie list (the verify, play, host and GLSVSS
 	// requests) names the connection's retail login by its LOGINSESSIONTAG: the list is every
 	// name/value pair the game's pages hold, cookies included, so a client that logged in
-	// sends its tag (service policy: the admin's sessions view reads it, nothing gates on it).
+	// sends its tag. A new tag, or one while none resolved yet, pins the account it names
+	// (pin_account; service policy: the admin's sessions view and a listing's roster read the
+	// account, nothing gates on it).
 	// [orig: CNapiSession_ReadLocaleInfo @0x4ce390 fills the list from the game menu's store
 	//  ("*"); serialized by CNapiGameSession_SendVerifyRequest @0x4d3694,
 	//  CNapiGameSession_SendPlayRequest @0x4d39b0, CNapiGameSession_SendHostRequest
 	//  @0x4d37b4..0x4d37f6 and CNapiGameSession_SendGLSVSSRequest @0x4d3aa0]
 	if (const VarLists lists = extract_var_lists(inner_message); lists.count("Cookie")) {
-		state.login_session_tag = var_value(lists.at("Cookie"), "LOGINSESSIONTAG");
+		const std::string tag = var_value(lists.at("Cookie"), "LOGINSESSIONTAG");
+		// A lookup the database failed keeps the tag before it, so the next list asks again.
+		if (tag.empty() || (tag == state.login_session_tag && state.user_id) ||
+				pin_account(state, tag))
+			state.login_session_tag = tag;
 	}
 	if      (name == "ClientConnected")             return handle_client_connected(inner_message, state);
 	else if (name == "ClientRequestVerifyResult")   return handle_client_request_verify_result(inner_message, state);
@@ -507,6 +542,7 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 	}
 	else if (name == "ClientStopPlaying") {
 		state.play_state.clear();
+		leave_server(state, "ClientStopPlaying");
 		return {{}, "ClientStopPlaying"};
 	}
 	// An empty statement with no params and no reply path in the client:
@@ -774,10 +810,44 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 	return {{}, "ClientHostUpdate"};
 }
 
-// ClientPlayRequest -> ServerPlayResult with an empty PlayCommands list.
+// ClientPlayRequest -> ServerPlayResult with an empty PlayCommands list. Its PlaySetup's
+// IpAddress / PortNumber are the join address the .joi handed the client (NK, the listing's
+// host_ip:host_port) [orig: CNapiGameSession_ConnectOrHost @0x4d53d1..0x4d542b], which names
+// the server it plays on (service policy: the admin's view, and the listing's roster): a
+// request for another server leaves the one it played on first. A repeat for the same one
+// (a reconnect's replay) keeps when it began.
 LobbyDispatchResult LobbySession::handle_client_play_request(
 		const NapiMessage &msg, LobbyState &state) {
 	state.play_state = extract_var_lists(msg);
+	std::string ip;
+	std::string port;
+	if (const auto setup = state.play_state.find("PlaySetup"); setup != state.play_state.end()) {
+		ip = var_value(setup->second, "IpAddress");
+		port = var_value(setup->second, "PortNumber");
+	}
+	const std::string addr = ip.empty() ? std::string() : ip + ":" + port;
+	uint32_t rid = 0;
+	if (db_ && !ip.empty()) {
+		if (const auto host_port = strutil::parse_int(port)) {
+			try { rid = hostdb::rid_at(*db_, ip, *host_port); }
+			catch (const std::exception &e) {
+				opennova::io::logf(opennova::io::LogLevel::kWarn,
+	"[lobby] WARN play request's listing: %s", e.what());
+				// A lookup that failed is no other server: the same address keeps its listing.
+				if (addr == state.play_addr) rid = state.playing_rid;
+			}
+		}
+	}
+	if (state.playing_since_ms != 0 && (addr != state.play_addr || rid != state.playing_rid))
+		leave_server(state, "ClientPlayRequest");
+	if (state.playing_since_ms == 0) {
+		state.playing_since_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::system_clock::now().time_since_epoch()).count();
+	}
+	state.play_addr = addr;
+	state.playing_rid = rid;
+	opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] playing rid=%u (0: no listing at its PlaySetup's address)", rid);
 
 	NapiMessage reply;
 	reply.name = "ServerPlayResult";

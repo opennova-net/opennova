@@ -31,9 +31,10 @@ namespace opennova {
 //   ClientHostUpdate   -> update_host() (refresh the Host columns) + replace_roster()
 //   POST status blob   -> apply_status_blob() (the Host columns, keyed by HostKey)
 //   GOODBYE / timeout  -> remove_host_by_rid() (lobby_session's teardown)
-//   ClientHostPlayerAdded   -> add_player()
-//   ClientHostPlayerRemoved -> remove_player_by_peer() (a peer can leave
-//     at most one host at a time so the unique-by-peer index is enough)
+//   /NWJoin.dll        -> add_player() (the joiner's account, which its retail login names)
+//   the joiner leaves  -> remove_player() (its lobby session's ClientStopPlaying, a play
+//     request for another server, or the session's end: the account the session signed in
+//     as, LobbyState::user_id, off the server its PlaySetup named)
 //   a lobby's start    -> clear_unheld() (the rows no lobby instance holds)
 //
 // The listing's owner (host_keys; service policy, the retail
@@ -99,12 +100,13 @@ struct HostRow {
 	std::string updated_at;
 };
 
+// One joiner of a listing /NWJoin.dll recorded, keyed by its account (one row per account
+// and listing): its handle, and the HTTP address it joined from.
 struct PlayerRow {
 	uint32_t    host_rid = 0;
-	std::optional<int64_t> user_id;
+	int64_t     user_id = 0;
 	std::string nwhandle;
 	std::string peer_ip;
-	int         peer_port = 0;
 };
 
 // A lobby instance's start, before it serves: the rows no instance holds
@@ -127,8 +129,14 @@ void remove_host_by_rid(db::Database &db, uint32_t rid);
 // number of rows removed. host_players cascade. policy, not wire-witnessed.
 int prune_stale_hosts(db::Database &db, int64_t window_seconds);
 
+// A joiner /NWJoin.dll recorded (a second join of the account's replaces its handle and
+// address), and the joiner gone from the server: the account's row under `host_rid`.
 void add_player(db::Database &db, const PlayerRow &row);
-void remove_player_by_peer(db::Database &db, const std::string &peer_ip, int peer_port);
+void remove_player(db::Database &db, uint32_t host_rid, int64_t user_id);
+// The RID of the listing whose join address is `host_ip`:`host_port` (the address a .joi
+// hands its joiners, NK: the row's host_ip and host_port), the newest when two share one; 0
+// for none. How the lobby names the server a ClientPlayRequest's PlaySetup plays on.
+uint32_t rid_at(db::Database &db, const std::string &host_ip, int host_port);
 
 // The host-reported PlayerList (one row per slot). Replaced wholesale on
 // every ClientHostRequest / ClientHostUpdate; cascades with the host row.

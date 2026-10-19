@@ -179,6 +179,11 @@ public:
 	// unknown_messages table. Null is safe (every hook is guarded).
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
+	// The task this lobby runs as (program_usage.h find_usage_task), which its instance row
+	// names (lobby_instances.task_id: the admin's link to its usage). Set before start(); ""
+	// (the default, the tests') names none.
+	void set_task_id(std::string task_id) { task_id_ = std::move(task_id); }
+
 	NwUdpListener(const NwUdpListener &) = delete;
 	NwUdpListener &operator=(const NwUdpListener &) = delete;
 
@@ -407,6 +412,7 @@ private:
 	// draining (an admin's drain). A registration again keeps it.
 	std::atomic<bool> draining_{ false };
 	std::string instance_endpoint_;
+	std::string task_id_; // set_task_id
 	uint64_t last_instance_touch_ms_ = 0;
 	opennova::db::ConnectionPool *db_pool_ = nullptr;
 	opennova::UnknownTracker *tracker_ = nullptr;

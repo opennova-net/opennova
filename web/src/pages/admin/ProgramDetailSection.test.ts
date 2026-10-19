@@ -71,6 +71,13 @@ describe('ProgramDetailSection', () => {
     expect(logsPage.get('nav[aria-label="The program\'s views"] [aria-current="page"]').text()).toBe('Logs');
   });
 
+  it('reads the task a link names (?task=, a lobby from the NovaWorld page)', async () => {
+    const page = await mountPage('/admin/infrastructure/programs/web?task=cccc3333dddd4444');
+    expect((page.get('#program-task').element as HTMLSelectElement).value).toBe('cccc3333dddd4444');
+    expect(usage).toHaveBeenCalledWith('program', 'web', '48h', { task: 'cccc3333dddd4444', signal: expect.anything() });
+    expect(page.text()).toContain("Task cccc3333dddd's usage");
+  });
+
   it('says the service runs no such program', async () => {
     const page = await mountPage('/admin/infrastructure/programs/hostd');
     expect(page.get('h1').text()).toBe('No such program');

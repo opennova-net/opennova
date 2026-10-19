@@ -69,10 +69,9 @@ HostRow row_to_host(const opennova::db::Row &r) {
 PlayerRow row_to_player(const opennova::db::Row &r) {
 	PlayerRow p;
 	p.host_rid = static_cast<uint32_t>(r.as_int(0).value_or(0));
-	if (auto v = r.as_int(1)) p.user_id = *v;
+	p.user_id = r.as_int(1).value_or(0);
 	p.nwhandle = r.as_text(2).value_or("");
 	p.peer_ip  = r.as_text(3).value_or("");
-	p.peer_port = static_cast<int>(r.as_int(4).value_or(0));
 	return p;
 }
 
@@ -213,18 +212,25 @@ int prune_stale_hosts(opennova::db::Database &db, int64_t window_seconds) {
 void add_player(opennova::db::Database &db, const PlayerRow &p) {
 	db.exec(
 		"INSERT INTO host_players ("
-		" host_rid, user_id, nwhandle, peer_ip, peer_port) "
-		"VALUES ($1,$2,$3,$4,$5) "
-		"ON CONFLICT (host_rid, peer_ip, peer_port) DO UPDATE SET"
-		" user_id=excluded.user_id, nwhandle=excluded.nwhandle, joined_at=now();",
-		{i64(p.host_rid), opt_int(p.user_id), str(p.nwhandle),
-		 str(p.peer_ip), i64(p.peer_port)});
+		" host_rid, user_id, nwhandle, peer_ip) "
+		"VALUES ($1,$2,$3,$4) "
+		"ON CONFLICT (host_rid, user_id) DO UPDATE SET"
+		" nwhandle=excluded.nwhandle, peer_ip=excluded.peer_ip, joined_at=now();",
+		{i64(p.host_rid), i64(p.user_id), str(p.nwhandle), str(p.peer_ip)});
 }
 
-void remove_player_by_peer(opennova::db::Database &db,
-                           const std::string &peer_ip, int peer_port) {
-	db.exec("DELETE FROM host_players WHERE peer_ip=$1 AND peer_port=$2;",
-	        {str(peer_ip), i64(peer_port)});
+void remove_player(opennova::db::Database &db, uint32_t host_rid, int64_t user_id) {
+	db.exec("DELETE FROM host_players WHERE host_rid=$1 AND user_id=$2;",
+	        {i64(host_rid), i64(user_id)});
+}
+
+uint32_t rid_at(opennova::db::Database &db, const std::string &host_ip, int host_port) {
+	auto rows = db.query(
+		"SELECT rid FROM active_hosts WHERE host_ip=$1 AND host_port=$2 "
+		"ORDER BY created_at DESC, rid DESC LIMIT 1;",
+		{str(host_ip), i64(host_port)});
+	if (rows.empty()) return 0;
+	return static_cast<uint32_t>(rows.front().as_int(0).value_or(0));
 }
 
 void replace_roster(opennova::db::Database &db, uint32_t host_rid,
@@ -388,8 +394,8 @@ std::optional<HostRow> find_host_by_key(opennova::db::Database &db,
 
 std::vector<PlayerRow> list_players(opennova::db::Database &db, uint32_t host_rid) {
 	auto rows = db.query(
-		"SELECT host_rid, user_id, nwhandle, peer_ip, peer_port "
-		"FROM host_players WHERE host_rid=$1 ORDER BY joined_at;",
+		"SELECT host_rid, user_id, nwhandle, peer_ip "
+		"FROM host_players WHERE host_rid=$1 ORDER BY joined_at, user_id;",
 		{i64(host_rid)});
 	std::vector<PlayerRow> out;
 	out.reserve(rows.size());

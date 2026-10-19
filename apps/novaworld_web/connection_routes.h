@@ -1,10 +1,10 @@
 #pragma once
 
 // The admin's NovaWorld sessions view: GET /api/admin/connections, every
-// session the lobby instances hold (a game client's or a host's NovaWorld UDP
-// session, from its ClientHello), with who it is, the server it lists and the
-// instance holding it, read from the lobbies' session rows
-// (lobbydb::list_sessions, lobby_repository.h), and POST
+// session the lobby instances hold (a game client's or a server's NovaWorld UDP
+// session, from its ClientHello), with who it is, its game, the server it lists
+// or plays on and the instance holding it, read from the lobbies' session rows
+// (lobbydb::list_sessions, lobby_repository.h) and the listings, and POST
 // /api/admin/connections/<session id>/end, which ends one through a command for
 // the lobby holding it (lobbydb::queue_end_session); and the lobby instances:
 // GET /api/admin/lobbies, and POST /api/admin/lobbies/<id>/drain, after which no

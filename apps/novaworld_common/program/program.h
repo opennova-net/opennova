@@ -46,12 +46,14 @@
 // its own HTTP port. Service policy, not a port.
 
 #include "core/health.h"
+#include "program_usage.h"
 #include "server_config.h"
 
 #include <net/novaworld/db/database.h>
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 
 namespace opennova::novaworld_server::program {
@@ -91,11 +93,14 @@ int run_program(const Program &program);
 // tick; the unknown-message flushes); `heartbeat` fills the program's fields of
 // the line every kHeartbeatMs, `window_s` the seconds since the last one.
 // `health_listener`: whether the loop serves GET /livez on ONNET_HEALTH_PORT
-// (core/health_listener.h); web serves its own on its HTTP port.
+// (core/health_listener.h); web serves its own on its HTTP port. `task`: the
+// task the program runs as, when its run found it already (the lobby's, which
+// its instance row names); unset, the loop finds it (find_usage_task).
 struct LoopHooks {
 	std::function<void(db::Database &db, uint64_t now_ms)> tick;
 	std::function<void(db::Database &db, Heartbeat &beat, int64_t window_s)> heartbeat;
 	bool health_listener = true;
+	std::optional<UsageTask> task;
 };
 
 // The program's main loop on the calling (main) thread, once its parts run:
