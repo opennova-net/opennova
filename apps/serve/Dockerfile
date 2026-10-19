@@ -41,7 +41,8 @@ ARG OPENNOVA_VERSION=dev
 # targets and their lib deps: the engine groups and apps/common, with no HTTP
 # layer and no Godot. The configure is .github/workflows/net-linux.yml's, which
 # builds and tests both on Linux, minus its NovaWorld service flags (neither links
-# the service; the agent compiles the service's agent protocol itself).
+# the service; the agent links the service's core and agents' protocol, which build
+# without it on Linux and need no libpq).
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
         "-DOPENNOVA_HOSTD_VERSION=${OPENNOVA_VERSION}" \
     && cmake --build build --target opennova_serve opennova_hostd

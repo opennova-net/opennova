@@ -10,10 +10,12 @@ anything on its own: the service places
 servers, pins their trees, counts restarts and ends machines; the agent does what the
 last reply said and keeps doing it while the service cannot be reached.
 
-Linux only. Target `opennova_hostd`, binary `opennova-hostd`, built from `apps/hostd` with
-the service's half of the protocol (`apps/novaworld_common/hosted/protocol/agent_protocol.*`,
-`slots.h`) and the ECS metadata reader (`apps/novaworld_common/core/ecs_metadata.*`) compiled
-in. It ships in an image of its own, `opennova-hostd` (`apps/serve/Dockerfile`'s `hostd`
+Linux only. Target `opennova_hostd`, binary `opennova-hostd`, built from `apps/hostd` over
+the service's two lowest libraries, which build without the service and reach no database:
+its core (`opennova_novaworld_core`: the ECS metadata reader,
+`apps/novaworld_common/core/ecs_metadata.*`, and the kernel's files, `core/proc_stats.*`) and
+the agents' protocol (`opennova_novaworld_hosting_protocol`, the service's half of it:
+`apps/novaworld_common/hosted/protocol/agent_protocol.*`, `slots.h`). It ships in an image of its own, `opennova-hostd` (`apps/serve/Dockerfile`'s `hostd`
 target: the agent at `/usr/local/bin/opennova-hostd`, `opennova-serve` beside it, the static
 docker CLI, the AWS CLI v2 and nft, every one pinned). On a cloud machine it is the ECS
 daemon of the deployment's fleet cluster (`infra/aws/fleet_agent.tf`): one task per machine,

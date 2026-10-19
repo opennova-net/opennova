@@ -7,7 +7,7 @@
 // fleet_machines stats it reports); each program reads its own task's (its
 // program_samples rows). Every read but read_disk takes the root the kernel's
 // files are under: "" on a machine, a fixture tree in the tests. No service
-// dependency (hostd compiles it in). Platform plumbing, not a port.
+// dependency (hostd links the core). Platform plumbing, not a port.
 
 #include <cstdint>
 #include <string>

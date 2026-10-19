@@ -21,7 +21,7 @@
 // container's first IPv4 address is the task's. It also gives a container its
 // own image as the task definition names it and the log stream its output goes
 // to (machine agent opennova-hostd reports both in every sync, apps/hostd; it
-// compiles this file itself). Service policy, not a port.
+// links the core). Service policy, not a port.
 
 #include <cstdint>
 #include <string>

@@ -83,7 +83,7 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
 - **What a machine or container uses** (`core/proc_stats.*`) is read from the kernel's own
   files: the host's CPU, memory and network (`/proc/stat`, `/proc/meminfo`,
   `/proc/net/dev` less loopback), a filesystem's room (statvfs) and a cgroup's CPU time and
-  memory (v2, else v1). hostd compiles it in for its machine's stats.
+  memory (v2, else v1). hostd links it (the core) for its machine's stats.
 - **Each program samples its own task** (`program/program_usage.*`, `program_samples`): once a
   minute, beside its heartbeat, its main loop writes its task's CPU over the minute (in
   percent of its CPU limit), its memory and the most it may use, and its network
