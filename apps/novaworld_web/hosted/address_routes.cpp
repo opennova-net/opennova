@@ -68,6 +68,8 @@ crow::json::wvalue address_json(db::Database &db, const HostedAddress &a, const 
 		out["server"] = nullptr;
 	}
 	text_or_null(out, "reason", a.reason);
+	// Why it lapsed ('grant' or 'admin'): the owner's page says why it is ending.
+	text_or_null(out, "lapse_cause", a.lapse_cause);
 	put_time(out, "created_at", a.created_at);
 	put_time(out, "ready_at", a.ready_at);
 	put_time(out, "lapsed_at", a.lapsed_at);
@@ -83,7 +85,6 @@ crow::json::wvalue address_json(db::Database &db, const HostedAddress &a, const 
 		text_or_null(out, "allocation_id", a.allocation_id);
 		text_or_null(out, "dns_name", a.dns_name);
 		out["dns_state"] = a.dns_state;
-		text_or_null(out, "lapse_cause", a.lapse_cause);
 		put_time(out, "retry_at", a.retry_at);
 	}
 	return out;

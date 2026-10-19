@@ -86,7 +86,7 @@
           >
             <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
               <h2 :id="`address-${a.id}-heading`" class="break-all font-mono text-lg font-semibold text-ink">{{ a.hostname }}</h2>
-              <span class="text-sm font-medium" :class="addressStateClass(a.state)">{{ addressStateLabel(a.state) }}</span>
+              <span class="text-sm font-medium" :class="addressStateClass(a.state)">{{ addressStateLabel(a) }}</span>
             </div>
             <p v-if="a.state === 'failed' && a.reason" class="break-words text-sm text-danger">{{ a.reason }}</p>
             <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">

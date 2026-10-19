@@ -27,15 +27,34 @@ export function addressNameProblem(name: string): string {
 const STATE_LABELS: Record<AddressState, string> = {
   allocating: 'Being set up',
   ready: 'Ready',
-  lapsed: 'Ending: its subscription ended',
+  lapsed: 'Ending',
   releasing: 'Being released',
   released: 'Released',
   failed: 'Could not be set up',
 };
 
-// An address state in words; one this site does not know shows as it is.
-export function addressStateLabel(state: string): string {
-  return (STATE_LABELS as Record<string, string>)[state] ?? state;
+// Why an address lapsed, from its own cause: an admin released it, or its
+// subscription stopped paying for it ('grant'; a comp address, an admin's
+// grant, has no subscription to end). '' before it lapsed.
+function lapseClause(a: Pick<Address, 'source' | 'lapse_cause'>): string {
+  if (a.lapse_cause === 'admin') return 'an admin released it';
+  if (a.lapse_cause === 'grant') return a.source === 'comp' ? 'its grant ended' : 'its subscription ended';
+  return '';
+}
+
+// An address's state in words, a lapsed one's with why it is ending; a state
+// this site does not know shows as it is.
+export function addressStateLabel(a: Pick<Address, 'state' | 'source' | 'lapse_cause'>): string {
+  const label = (STATE_LABELS as Record<string, string>)[a.state] ?? a.state;
+  const why = a.state === 'lapsed' ? lapseClause(a) : '';
+  return why ? `${label}: ${why}` : label;
+}
+
+// The same cause as a line of its own, for an address past its lapse (being
+// released, released), whose state no longer says it; '' for none.
+export function lapseCauseLabel(a: Pick<Address, 'state' | 'source' | 'lapse_cause'>): string {
+  const why = a.state === 'lapsed' ? '' : lapseClause(a);
+  return why && why.charAt(0).toUpperCase() + why.slice(1);
 }
 
 // The badge colour of a state: ready is good, failed is bad, the rest move.

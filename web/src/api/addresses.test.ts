@@ -41,11 +41,13 @@ describe('parseAddress', () => {
       stripe_subscription_id: null,
       server: null,
       reason: null,
+      lapse_cause: null,
       created_at: null,
       ready_at: null,
       lapsed_at: null,
       released_at: null,
     });
+    expect(parseAddress({ ...address(1), state: 'lapsed', lapse_cause: 'admin' })?.lapse_cause).toBe('admin');
     expect(parseAddress({ ...address(1), id: '1' })).toBeNull();
     expect(parseAddress({ ...address(1), state: undefined })).toBeNull();
   });

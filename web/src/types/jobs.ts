@@ -89,7 +89,8 @@ export interface JobSchedule {
   kind: string;
   interval_seconds: number;
   at_start: boolean;
-  // Its run only while there is work for it (the billing sync's events).
+  // Its run only while there is work for it (the billing sync's events, or
+  // prices not checked under the worker's lists).
   conditional: boolean;
   last: Job | null;
   last_finished: Job | null;

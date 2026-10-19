@@ -61,7 +61,6 @@ describe('AddressesSection', () => {
     expect(spare).toContain('Deleted account');
     expect(spare).toContain('Admin grant');
     expect(old).toContain('Ending: its subscription ended');
-    expect(old).toContain('Its subscription stopped paying for it');
     expect(old).toContain("Its name's record is being removed");
     const links = page.findAll('a').map((a) => a.attributes('href'));
     expect(links).toContain('/admin/users/101');
@@ -69,6 +68,30 @@ describe('AddressesSection', () => {
     // An address on its way out has no release.
     expect(rows()[2].findAll('button').map((b) => b.text())).toEqual(['Rename address old']);
     expect(page.find('#addresses-orphans').exists()).toBe(false);
+  });
+
+  it("says why an address is ending from its own cause, never a comp address's subscription", async () => {
+    list.mockResolvedValue({
+      ok: true,
+      value: adminAddressesResponse([
+        adminAddress(1, 'smoke', { state: 'lapsed', lapse_cause: 'grant', reason: 'its subscription ended' }),
+        adminAddress(2, 'fleettest', {
+          source: 'comp',
+          stripe_subscription_id: null,
+          state: 'lapsed',
+          lapse_cause: 'admin',
+          reason: 'released by an admin',
+        }),
+        adminAddress(3, 'gone', { state: 'released', lapse_cause: 'admin', reason: 'released by an admin' }),
+      ]),
+    });
+    await mountSection();
+    // The state cell's lines: the reason (the lapse's words) shows for a failed one alone.
+    const [sold, comp, gone] = rows().map((r) => r.findAll('td')[2].findAll('span').map((line) => line.text()));
+    expect(sold).toEqual(['Ending: its subscription ended']);
+    expect(comp).toEqual(['Ending: an admin released it']);
+    expect(rows()[1].text()).not.toMatch(/subscription/i);
+    expect(gone).toEqual(['Released', 'An admin released it']);
   });
 
   it('renames an address in its row, checking the name first', async () => {
@@ -106,7 +129,19 @@ describe('AddressesSection', () => {
     input.element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(release).toHaveBeenCalledWith(1, 'smoke');
-    expect(page.get('[role="status"]').text()).toContain('smoke.play.opennova.net is being released');
+    const status = page.get('[role="status"]');
+    expect(status.text()).toBe('smoke.play.opennova.net is being released: a server running at it moves to another address first.');
+    // Said once: the live region is the box itself, not a hidden copy beside a shown one.
+    expect(page.text().split('is being released').length - 1).toBe(1);
+    expect(status.classes()).not.toContain('sr-only');
+  });
+
+  it('keeps its live regions in the page, hidden while they hold nothing', async () => {
+    const page = await mountSection();
+    for (const region of [page.get('[role="status"]'), page.get('[role="alert"]')]) {
+      expect(region.text()).toBe('');
+      expect(region.classes()).toContain('sr-only');
+    }
   });
 
   it('retries an address the cloud refused, and says when it tries again by itself', async () => {

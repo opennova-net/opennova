@@ -271,7 +271,8 @@
 // its entitlement has room. Started from an ended server, it begins with that
 // server's settings (after a failed one, the owner's try again). The
 // own-machine checkbox shows while one of the account's own machines is free,
-// and with it checked a pick of the account's free static addresses (the one
+// checked from the start when the server started again ran on one, and with
+// it checked a pick of the account's free static addresses (the one
 // `preferredAddressId` names first) while any is.
 // The game (a base data set the service offers, by id) comes first and drives
 // the rest: the expansions it offers (expansion data sets with data), the
@@ -324,12 +325,22 @@ const props = withDefaults(
     // How many of the account's own machines are free; the own-machine
     // checkbox shows while any is.
     ownMachinesFree?: number;
+    // The ended server started again ran on an own machine: the checkbox
+    // starts checked (while one is free).
+    previousOwnMachine?: boolean;
     // The account's static addresses a new server may run at (ready, and no
     // live server's), and the one the pick starts on.
     addresses?: Address[];
     preferredAddressId?: number | null;
   }>(),
-  { retry: false, baseId: 'hosted-settings', ownMachinesFree: 0, addresses: () => [], preferredAddressId: null },
+  {
+    retry: false,
+    baseId: 'hosted-settings',
+    ownMachinesFree: 0,
+    previousOwnMachine: false,
+    addresses: () => [],
+    preferredAddressId: null,
+  },
 );
 
 const emit = defineEmits<{
@@ -340,8 +351,8 @@ const emit = defineEmits<{
   (e: 'refused', error: HostedError): void;
 }>();
 
-// Run on one of the account's own machines.
-const ownMachine = ref(false);
+// Run on one of the account's own machines: as the server started again did.
+const ownMachine = ref(props.previousOwnMachine && props.ownMachinesFree > 0);
 // The static address it runs at there, null for none: the preferred one while
 // it is free, else the first free one.
 function firstAddress(): number | null {

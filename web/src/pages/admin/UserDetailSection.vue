@@ -190,7 +190,7 @@
               </span>
             </span>
             <span class="flex items-center gap-2 text-ink-muted">
-              <span :class="addressStateClass(a.state)">{{ addressStateLabel(a.state) }}</span>
+              <span :class="addressStateClass(a.state)">{{ addressStateLabel(a) }}</span>
               <RouterLink v-if="a.server" :to="`/admin/fleet/${a.server.id}`" class="text-accent hover:text-ink-bright">
                 {{ a.server.game_name || `Server ${a.server.id}` }}
               </RouterLink>

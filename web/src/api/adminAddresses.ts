@@ -27,7 +27,6 @@ export function parseAdminAddress(value: unknown): AdminAddress | null {
     allocation_id: textOrNull(v.allocation_id),
     dns_name: textOrNull(v.dns_name),
     dns_state: typeof v.dns_state === 'string' ? v.dns_state : '',
-    lapse_cause: textOrNull(v.lapse_cause),
     retry_at: textOrNull(v.retry_at),
   };
 }

@@ -11,8 +11,9 @@
 // granting row Stripe no longer knows canceled, two granting tiers listed as a
 // duplicate, the price check refusing a yearly price and a price of the
 // other mode, on_reconciled called after a clean reconcile alone, its state
-// kept in the database (another sync over it reads the same), and the
-// billing.sync and billing.reconcile jobs enqueued, deduped, scheduled and run.
+// kept in the database (another sync over it reads the same), the
+// billing.sync and billing.reconcile jobs enqueued, deduped, scheduled and run,
+// and a changed price list checked on the schedule's next pass.
 // Crow-free: compiles the billing sources directly.
 
 #include "billing/billing_config.h"
@@ -37,6 +38,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace billing = opennova::novaworld_server::billing;
@@ -444,23 +446,25 @@ int test_on_reconciled() {
 
 // The jobs: a fresh webhook event's billing.sync (one queued however many
 // events come) syncs its customer on a worker; the schedule enqueues the
-// reconcile at the start and a billing.sync bucket only while an event waits;
-// and the state is the database's: another sync over the same database (a
-// worker in another process) reads the prices, the reconcile and the backoff
-// this one wrote, and prices checked under other price lists read unchecked.
+// reconcile at the start and a billing.sync bucket only while an event waits
+// or the prices are unchecked; and the state is the database's: another sync
+// over the same database (a worker in another process) reads the prices, the
+// reconcile and the backoff this one wrote, and prices checked under other
+// price lists read unchecked.
 int test_jobs_and_state() {
 	Rig rig;
 	TEST_EXPECT(!rig.status().prices_checked);
 	{
-		auto db = rig.pool.acquire();
-		const auto schedule = billing::billing_schedule(rig.config.reconcile_minutes);
-		jobs::Scheduler scheduler(rig.pool, schedule, [&rig] { return rig.now * 1000; });
-		scheduler.enqueue_at_start(*db, rig.now * 1000);
-		// No event waits: the sync's bucket stays empty.
-		TEST_EXPECT(scheduler.tick(*db, rig.now * 1000) == 0);
+		jobs::Scheduler scheduler(
+				rig.pool, billing::billing_schedule(rig.config), [&rig] { return rig.now * 1000; });
+		scheduler.enqueue_at_start(*rig.pool.acquire(), rig.now * 1000);
+		// The prices not checked yet: the sync's bucket too.
+		TEST_EXPECT(scheduler.tick(*rig.pool.acquire(), rig.now * 1000) == 1);
+		TEST_EXPECT(rig.run_jobs() == 2 && rig.status().prices_ok &&
+				rig.status().last_reconcile_at == rig.now);
+		// Checked, and no event waits: the next minute's bucket stays empty.
+		TEST_EXPECT(scheduler.tick(*rig.pool.acquire(), (rig.now + 60) * 1000) == 0);
 	}
-	TEST_EXPECT(rig.run_jobs() == 1 && rig.status().prices_ok &&
-			rig.status().last_reconcile_at == rig.now);
 	const int64_t ana = rig.player("job_ana");
 	const std::string cus = rig.customer(ana, "job_ana");
 	rig.fake.add_subscription(cus, "price_tier1", 1, "active", rig.now + kMonth);
@@ -486,8 +490,7 @@ int test_jobs_and_state() {
 						.front()
 						.as_int(0) == rig.now + billing::BillingSync::kBackoffFirstS);
 		// While it waits, the schedule enqueues the sync's bucket.
-		jobs::Scheduler scheduler(
-				rig.pool, billing::billing_schedule(rig.config.reconcile_minutes));
+		jobs::Scheduler scheduler(rig.pool, billing::billing_schedule(rig.config));
 		scheduler.tick(*db, (rig.now + 120) * 1000);
 		TEST_EXPECT(
 				db->query("SELECT 1 FROM jobs WHERE kind = 'billing.sync' AND state = 'queued';")
@@ -514,6 +517,60 @@ int test_jobs_and_state() {
 	billing::BillingSync reconfigured(
 			rig.pool, rig.client, changed, rig.instance, [&rig] { return rig.now; });
 	TEST_EXPECT(!reconfigured.status(*rig.pool.acquire()).prices_checked);
+	return 0;
+}
+
+// A price list changed (STRIPE_PRICE_STATIC_ADDRESS set, as on a release that
+// starts selling addresses): the check stored under the old lists reads
+// unchecked under the new ones, so checkout stays closed, until a worker on
+// the new lists checks them on its schedule's next pass, with no event
+// waiting and no reconcile due. A worker still on the old lists has nothing
+// to do; once the new lists are checked, the next bucket stays empty.
+int test_price_list_change() {
+	Rig rig;
+	rig.first_pass();
+	TEST_EXPECT(rig.status().prices_ok);
+	FakeStripeApi::Price address;
+	address.id = "price_address";
+	address.unit_amount = 300;
+	rig.fake.add_price(address);
+	billing::BillingConfig changed = rig.config;
+	changed.static_address_prices = { "price_address" };
+	changed.sells_addresses = true;
+	billing::BillingSync worker(
+			rig.pool, rig.client, changed, rig.instance, [&rig] { return rig.now; });
+	jobs::JobRegistry registry;
+	billing::register_billing_jobs(registry, worker);
+	TEST_EXPECT(!worker.status(*rig.pool.acquire()).prices_checked);
+
+	// The sync's schedule alone: the reconcile is not due.
+	const auto sync_schedule = [](const billing::BillingConfig &config) {
+		std::vector<jobs::PeriodicJob> out;
+		for (jobs::PeriodicJob &p : billing::billing_schedule(config)) {
+			if (p.kind == billing::kJobBillingSync)
+				out.push_back(std::move(p));
+		}
+		return out;
+	};
+	const int64_t at_ms = (rig.now + 30) * 1000;
+	{
+		jobs::Scheduler old_lists(rig.pool, sync_schedule(rig.config));
+		TEST_EXPECT(old_lists.tick(*rig.pool.acquire(), at_ms) == 0);
+	}
+	jobs::Scheduler scheduler(rig.pool, sync_schedule(changed));
+	TEST_EXPECT(scheduler.tick(*rig.pool.acquire(), at_ms) == 1);
+	const size_t reads = rig.fake.count(StripeRequest::Method::Get, "/v1/prices/price_address");
+	++rig.now;
+	TEST_EXPECT(jobs::run_due(rig.pool, registry) == 1);
+	TEST_EXPECT(
+			rig.fake.count(StripeRequest::Method::Get, "/v1/prices/price_address") == reads + 1);
+	{
+		const billing::SyncStatus status = worker.status(*rig.pool.acquire());
+		TEST_EXPECT(status.prices_checked && status.prices_ok && status.static_address_price &&
+				status.static_address_price->id == "price_address" &&
+				status.static_address_price->unit_amount == 300);
+	}
+	TEST_EXPECT(scheduler.tick(*rig.pool.acquire(), at_ms + 60 * 1000) == 0);
 	return 0;
 }
 
@@ -565,6 +622,7 @@ int main(int argc, char **argv) {
 		{ "price_validation", test_price_validation },
 		{ "on_reconciled", test_on_reconciled },
 		{ "jobs_and_state", test_jobs_and_state },
+		{ "price_list_change", test_price_list_change },
 		{ "no_connection_across_stripe", test_no_connection_across_stripe },
 	};
 	for (const Case &c : cases) {

@@ -38,7 +38,8 @@
 //     the customers with an unprocessed event, the longest-waiting first
 //     (kPendingPerPass at most), one sync each: a customer Stripe could not
 //     be asked about waits kBackoffFirstS, doubling to kBackoffMaxS. Enqueued
-//     by each fresh webhook event, and every minute while a customer waits.
+//     by each fresh webhook event, and every minute while a customer waits or
+//     the prices are not checked under the worker's lists (a list changed).
 //
 // No Stripe call ever runs inside a db::Transaction, nor while a pooled
 // connection is held for a job: a sync reads Stripe first, then leases a
@@ -104,6 +105,13 @@ struct SyncStatus {
 	std::vector<std::string> unknown_prices;
 	int64_t started_at = 0; // when the billing sync first ran on this database
 };
+
+// The price lists and the mode `config` checks its prices under: the key a
+// price check is stored with (billing_sync_state.prices_config).
+std::string prices_config_of(const BillingConfig &config);
+// Whether a price check completed under `prices_config` on `db`; one stored
+// under other lists or the other mode is none.
+bool prices_checked_under(db::Database &db, const std::string &prices_config);
 
 // What one customer's sync came to.
 enum class SyncOutcome : uint8_t {
@@ -195,9 +203,6 @@ private:
 	std::optional<std::vector<Subscription>> stripe_subscriptions_of(const std::string &stripe_customer_id);
 	// The customer gone: its row deleted, its live subscriptions canceled.
 	void forget_customer(db::Database &db, const std::string &stripe_customer_id);
-	// The price lists and the mode the prices are checked under
-	// (billing_sync_state.prices_config).
-	std::string prices_config() const;
 
 	db::ConnectionPool &pool_;
 	StripeClient &client_;

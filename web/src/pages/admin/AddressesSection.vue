@@ -16,11 +16,14 @@
     </header>
 
     <!-- Live regions, always in the page so a screen reader hears what lands in
-         them; the boxes below are their visible copies. -->
-    <div role="status" class="sr-only">{{ message }}</div>
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+         them, each its own box while it holds something: one copy of the text,
+         so the page (and its text) says it once. -->
+    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">
+      {{ message }}
+    </div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">
+      {{ error }}
+    </div>
     <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
 
     <div v-if="data" class="space-y-1">
@@ -74,10 +77,10 @@
                   <span v-if="a.allocation_id" class="block text-ink-muted">{{ a.allocation_id }}</span>
                 </td>
                 <td class="px-4 py-3">
-                  <span :class="addressStateClass(a.state)">{{ addressStateLabel(a.state) }}</span>
-                  <span v-if="a.lapse_cause" class="block text-xs text-ink-muted">{{ lapseCauseLabel(a.lapse_cause) }}</span>
+                  <span :class="addressStateClass(a.state)">{{ addressStateLabel(a) }}</span>
+                  <span v-if="lapseCauseLabel(a)" class="block text-xs text-ink-muted">{{ lapseCauseLabel(a) }}</span>
                   <span v-if="a.dns_state === 'pending'" class="block text-xs text-ink-muted">Its name's record is being removed</span>
-                  <span v-if="a.reason" class="block max-w-xs break-words text-xs text-danger">{{ a.reason }}</span>
+                  <span v-if="a.state === 'failed' && a.reason" class="block max-w-xs break-words text-xs text-danger">{{ a.reason }}</span>
                   <span v-if="a.state === 'failed' && a.retry_at" class="block text-xs text-ink-muted">
                     Tried again by itself <RelativeTime :value="a.retry_at" :now="now" />
                   </span>
@@ -234,6 +237,7 @@ import {
   addressStateClass,
   addressStateLabel,
   isAddressMoving,
+  lapseCauseLabel,
 } from '../../utils/addressView';
 
 const MOVING_POLL_MS = 5_000;
@@ -265,12 +269,6 @@ const typedName = ref('');
 let errorFromLoad = false;
 
 const renameProblem = computed(() => (renameTried.value ? addressNameProblem(newName.value.trim()) : ''));
-
-function lapseCauseLabel(cause: string): string {
-  if (cause === 'grant') return 'Its subscription stopped paying for it';
-  if (cause === 'admin') return 'Released by an admin';
-  return cause;
-}
 
 function flash(text: string) {
   message.value = text;

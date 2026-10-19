@@ -31,7 +31,7 @@ std::vector<jobs::PeriodicJob> worker_schedule(
 	// period: the workers' billing runs them.
 	if (const billing::BillingConfig billing_config = billing::billing_config_from_env();
 			billing::check_billing_config(billing_config).empty())
-		add(billing::billing_schedule(billing_config.reconcile_minutes));
+		add(billing::billing_schedule(billing_config));
 	// The sweep of the driver's machines (hosted/model/fleet_jobs.h kFleetSweepIntervalMs).
 	if (hosting.on)
 		add(hosted::fleet_schedule());

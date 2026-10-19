@@ -55,6 +55,7 @@
         :data-sets="data.data_sets"
         :retry="from?.state === 'failed'"
         :own-machines-free="ownMachinesFree(data.entitlement)"
+        :previous-own-machine="from?.own_machine ?? false"
         :addresses="free"
         :preferred-address-id="preferredAddress(free, data.servers, from)"
         @started="onStarted"
@@ -69,10 +70,12 @@
 // (HostedSettingsForm, POST /api/me/servers), offered only while the
 // account's entitlement has room (GET /api/me/servers). `from` names one of
 // the account's ended servers to start again: the form begins with its
-// settings (its try again, after a failure). On an own machine the form
-// offers the account's free static addresses (GET /api/me/addresses), the one
-// `from` (else the newest server) ran at first, so a server started again
-// keeps its address. A start that went in goes to the new server's page.
+// settings (its try again, after a failure), on an own machine when it ran on
+// one. On an own machine the form offers the account's free static addresses
+// (GET /api/me/addresses: its own, ready, no live server's), the one `from`
+// (else the newest server) ran at first, so a server started again keeps its
+// own machine and its address. A start that went in goes to the new server's
+// page.
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import HostedSettingsForm from '../../components/HostedSettingsForm.vue';
