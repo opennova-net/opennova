@@ -18,7 +18,9 @@
 // what the cloud holds by owner. The jobs with the add-on off: nothing allocated, a ready
 // one's record still moved, a release still run. An admin's release racing the
 // allocation: the record it writes is recorded on the lapsed row, and the release waits
-// for the allocation's job, then deletes it.
+// for the allocation's job, then deletes it. The comp addresses nothing covers (an
+// admin's cuts of own machines and servers, a paid address beside a comp one, a failed
+// one, a banned and a deleted account's), and their release's grant read again.
 
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
@@ -899,6 +901,119 @@ int test_release_races_allocate() {
 	return 0;
 }
 
+// The comp addresses nothing covers (uncovered_comp_addresses), by id.
+std::map<int64_t, hosted::UncoveredAddress> uncovered_at(Database &db, int64_t now) {
+	std::map<int64_t, hosted::UncoveredAddress> out;
+	for (hosted::UncoveredAddress &u : hosted::uncovered_comp_addresses(db, now)) out.emplace(u.id, std::move(u));
+	return out;
+}
+
+// The comp addresses nothing covers, at an admin's cuts: its own machines cut to 0, an
+// account's one comp address; one of two cut, the newer of two; a paid address and a
+// comp one past the own machines, the comp one alone (judged with the cache); a failed
+// one past the machines left; a banned account's and a deleted one's, every one. Then
+// the release's grant read again: one covered once more kept, a deleted account's
+// released.
+int test_comp_uncovered() {
+	test_db::TestDatabase scratch;
+	ConnectionPool pool(scratch.options());
+	auto lease = pool.acquire();
+	Database &db = *lease;
+	const int64_t now = billing::unix_now();
+	const std::string machines_why = "its account's own machines no longer cover it";
+
+	// Cal: one server, one own machine, one comp address. Its own machines cut to
+	// 0, the address is uncovered, judged without the cache (Cal has no
+	// subscription); its servers cut to 0, its own machines count for nothing.
+	const int64_t cal = make_player(db, "unc_cal", 0);
+	TEST_EXPECT(billing::set_comp_grants(db, cal, { 1, 1 }));
+	const int64_t cal_addr = hosted::add_comp_address(db, cal, "cal-place", now).id;
+	TEST_EXPECT(cal_addr > 0 && uncovered_at(db, now).empty());
+	TEST_EXPECT(billing::set_comp_grants(db, cal, { 1, 0 }));
+	auto u = uncovered_at(db, now);
+	TEST_EXPECT(u.size() == 1 && u.count(cal_addr) == 1 && !u[cal_addr].cached && u[cal_addr].why == machines_why);
+	TEST_EXPECT(billing::set_comp_grants(db, cal, { 0, 1 }));
+	TEST_EXPECT(uncovered_at(db, now).count(cal_addr) == 1);
+	TEST_EXPECT(billing::set_comp_grants(db, cal, { 1, 1 }) && uncovered_at(db, now).empty());
+
+	// Dot: two comp addresses, one of her two own machines cut: the newer goes.
+	const int64_t dot = make_player(db, "unc_dot", 0);
+	TEST_EXPECT(billing::set_comp_grants(db, dot, { 2, 2 }));
+	const int64_t dot_old = hosted::add_comp_address(db, dot, "dot-old", now).id;
+	const int64_t dot_new = hosted::add_comp_address(db, dot, "dot-new", now).id;
+	TEST_EXPECT(dot_old > 0 && dot_new > dot_old && uncovered_at(db, now).empty());
+	TEST_EXPECT(billing::set_comp_grants(db, dot, { 2, 1 }));
+	u = uncovered_at(db, now);
+	TEST_EXPECT(u.size() == 1 && u.count(dot_new) == 1 && u[dot_new].why == machines_why);
+	// A failed one counts for none, but past the own machines left it goes too
+	// (an allocation would only make it count): the older keeps the one.
+	TEST_EXPECT(billing::set_comp_grants(db, dot, { 2, 2 }));
+	TEST_EXPECT(hosted::fail_address(db, dot_new, "AddressLimitExceeded", hosted::kAddressRetryBaseS));
+	TEST_EXPECT(uncovered_at(db, now).empty());
+	TEST_EXPECT(billing::set_comp_grants(db, dot, { 2, 1 }));
+	u = uncovered_at(db, now);
+	TEST_EXPECT(u.size() == 1 && u.count(dot_new) == 1);
+	TEST_EXPECT(hosted::retry_address(db, dot_new));
+	u = uncovered_at(db, now);
+	TEST_EXPECT(u.size() == 1 && u.count(dot_new) == 1);
+	TEST_EXPECT(billing::set_comp_grants(db, dot, { 2, 2 }) && uncovered_at(db, now).empty());
+
+	// Eve on tier 1 with an own machine and a paid address, and an admin's own
+	// machine and comp address beside them. Cut to her paid one, the comp address
+	// goes, judged with the cache (she has subscriptions); the paid one never does,
+	// even with her tier gone.
+	const int64_t eve = make_player(db, "unc_eve", 0);
+	subscribe_item(db, eve, billing::ItemKind::Tier, 1, "sub_unc_eve_t1");
+	subscribe_item(db, eve, billing::ItemKind::OwnMachine, 0, "sub_unc_eve_om");
+	TEST_EXPECT(billing::set_comp_grants(db, eve, { 0, 1 }));
+	const int64_t eve_comp = hosted::add_comp_address(db, eve, "eve-comp", now).id;
+	subscribe_item(db, eve, billing::ItemKind::StaticAddress, 0, "sub_unc_eve_sa");
+	const int64_t eve_paid = hosted::name_subscription_address(db, eve, "eve-paid", now).id;
+	TEST_EXPECT(eve_comp > 0 && eve_paid > 0 && uncovered_at(db, now).empty());
+	TEST_EXPECT(billing::set_comp_grants(db, eve, { 0, 0 }));
+	u = uncovered_at(db, now);
+	TEST_EXPECT(u.size() == 1 && u.count(eve_comp) == 1 && u[eve_comp].cached);
+	subscribe_item(db, eve, billing::ItemKind::Tier, 1, "sub_unc_eve_t1", "canceled");
+	u = uncovered_at(db, now);
+	TEST_EXPECT(u.size() == 1 && u.count(eve_comp) == 1);
+
+	// A banned account's comp addresses go, every one; a deleted one's too.
+	nws::UpdateUserParams ban;
+	ban.account_status = "banned";
+	TEST_EXPECT(nws::update_user(db, dot, ban).ok);
+	TEST_EXPECT(nws::delete_user(db, cal).ok);
+	TEST_EXPECT(!hosted::find_address(db, cal_addr)->owner_user_id);
+	u = uncovered_at(db, now);
+	TEST_EXPECT(u.size() == 4 && u.count(dot_old) == 1 && u.count(dot_new) == 1 && u.count(cal_addr) == 1);
+	TEST_EXPECT(u[dot_old].why == "its account is banned" && !u[dot_old].cached);
+	TEST_EXPECT(u[cal_addr].why == "its account was deleted" && !u[cal_addr].cached);
+
+	// The release reads the grant again (comp_address_covered): a comp address
+	// its account covers once more is kept (ready, allocated again); a deleted
+	// account's is released.
+	test_temp::TempDir dir("opennova_address_uncovered");
+	hosted::FileZone zone("play.localhost", dir.file("play.zone"));
+	RecordingDriver driver;
+	nws::jobs::JobRegistry registry;
+	hosted::register_address_jobs(registry, driver, zone, true);
+	using Kind = nws::jobs::JobResult::Kind;
+	TEST_EXPECT(hosted::lapse_address(db, eve_comp, hosted::kLapseGrant, machines_why) &&
+			hosted::begin_release(db, eve_comp));
+	TEST_EXPECT(!hosted::comp_address_covered(db, *hosted::find_address(db, eve_comp), now));
+	TEST_EXPECT(!hosted::comp_address_covered(db, *hosted::find_address(db, eve_paid), now));
+	TEST_EXPECT(billing::set_comp_grants(db, eve, { 1, 2 }));
+	TEST_EXPECT(hosted::comp_address_covered(db, *hosted::find_address(db, eve_comp), now));
+	TEST_EXPECT(run_job(pool, registry, hosted::kJobAddressRelease, { { "address_id", eve_comp } }).kind == Kind::Done);
+	TEST_EXPECT(hosted::find_address(db, eve_comp)->state == AddressState::Ready &&
+			nws::jobs::job_pending(db, std::string(hosted::kJobAddressAllocate) + ":" + std::to_string(eve_comp)));
+	TEST_EXPECT(hosted::lapse_address(db, cal_addr, hosted::kLapseGrant, "its account was deleted") &&
+			hosted::begin_release(db, cal_addr));
+	TEST_EXPECT(!hosted::comp_address_covered(db, *hosted::find_address(db, cal_addr), now));
+	TEST_EXPECT(run_job(pool, registry, hosted::kJobAddressRelease, { { "address_id", cal_addr } }).kind == Kind::Done);
+	TEST_EXPECT(hosted::find_address(db, cal_addr)->state == AddressState::Released);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -927,6 +1042,7 @@ int main(int argc, char **argv) {
 		{ "jobs_add_on_off", test_jobs_add_on_off },
 		{ "refusals_and_retries", test_refusals_and_retries },
 		{ "release_races_allocate", test_release_races_allocate },
+		{ "comp_uncovered", test_comp_uncovered },
 	};
 	for (const Case &c : database) {
 		std::printf("-- %s\n", c.name);

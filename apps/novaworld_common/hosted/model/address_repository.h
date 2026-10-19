@@ -14,9 +14,11 @@
 //   ready       held, its name in DNS: a start of the owner's on an own
 //               machine may name it (hosted_servers.address_id; one live
 //               server per address)
-//   lapsed      its grant is gone (the fleet's pass, with the brake) or an
-//               admin released it: its server is placed again without it,
-//               and once no machine holds it the pass makes it releasing
+//   lapsed      its grant is gone (the fleet's pass: a subscription that
+//               no longer grants, or a comp address nothing covers,
+//               uncovered_comp_addresses) or an admin released it: its
+//               server is placed again without it, and once no machine
+//               holds it the pass makes it releasing
 //   releasing   the worker's address.release: its record deleted and given
 //               its TTL to drain, then the address released
 //   released    gone for good; its name stays taken until an admin renames
@@ -63,7 +65,7 @@ bool address_refusal_passes(std::string_view code);
 int64_t address_retry_delay_s(int retries);
 
 // A record a state moved by (hosted_addresses.lapse_cause).
-inline constexpr const char *kLapseGrant = "grant"; // its subscription stopped granting
+inline constexpr const char *kLapseGrant = "grant"; // its subscription stopped granting, or nothing covers a comp one
 inline constexpr const char *kLapseAdmin = "admin"; // an admin released it
 
 struct HostedAddress {
@@ -175,6 +177,30 @@ bool mark_released(db::Database &db, int64_t id);
 bool restore_address(db::Database &db, int64_t id);
 
 // --- the fleet's pass (the supervisor) ---
+
+// The comp addresses nothing covers any more at `now`, of those that may lapse
+// (allocating, ready, failed): every one of an account gone or not an active
+// player's; and while an account's addresses that count (its granting
+// static-address subscriptions and its comp addresses allocating or ready,
+// the entitlement's address_grants) pass its own machines, its newest comp
+// ones that count until they no longer do, then its failed comp ones past the
+// own machines left (an allocation would only make them count), the oldest
+// kept. A subscription's address never lapses for this: it lapses with its
+// subscription.
+struct UncoveredAddress {
+	int64_t id = 0;
+	std::string why; // the lapse's reason
+	// Judged with the account's subscriptions (the billing cache's own
+	// machines and addresses): the fleet's pass confirms it as a
+	// subscription's lapse. False for one the account's row and its admin's
+	// grant alone judged.
+	bool cached = false;
+};
+std::vector<UncoveredAddress> uncovered_comp_addresses(db::Database &db, int64_t now);
+// Whether comp address `a` (one on its way out, counted by none) would be
+// covered again at `now`: its account an active player's, with an own machine
+// past the addresses that count. The release's grant read again.
+bool comp_address_covered(db::Database &db, const HostedAddress &a, int64_t now);
 
 // ready (or allocating, or failed) -> lapsed with `cause` and `reason` (no
 // automatic try left).

@@ -398,8 +398,9 @@ if(BUILD_NOVAWORLD_HTTP)
     # driver (allocate, associate after the previous holder's end, release after the
     # machine's end, the record's sync and TTL, the grant read again) and fleet.sweep's
     # orphans; a refusal tried again (an exhausted quota's backoff, an admin's retry), a
-    # released row's subscription named again, the jobs with the add-on off, and an
-    # admin's release racing an allocation.
+    # released row's subscription named again, the jobs with the add-on off, an admin's
+    # release racing an allocation, and the comp addresses nothing covers (an admin's cuts,
+    # a paid address beside a comp one, a failed one, a banned and a deleted account's).
     add_executable(hosted_address_test novaworld/hosted_address_test.cpp)
     target_link_libraries(hosted_address_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_hosting_cloud opennova_novaworld_service)
@@ -708,9 +709,10 @@ if(BUILD_NOVAWORLD_HTTP)
     # and their limit, the timeouts, the health checks, the owners' changes and limits (own
     # machines cut moving their servers to shared machines while the fleet has room, stopping
     # the rest), a lost machine placing its servers again with no restart counted, the
-    # reconciliation, the admin links following the running servers, and a static address's
-    # hold, lapse and brake. Over the fleet program's core and the cloud's fleet job
-    # handlers, which the rig registers over the FakeDriver (novaworld/hosted_fleet_rig.h).
+    # reconciliation, the admin links following the running servers, a static address's
+    # hold, lapse and brake, and a comp address's lapse once nothing covers it. Over the fleet
+    # program's core and the cloud's fleet job handlers, which the rig registers over the
+    # FakeDriver (novaworld/hosted_fleet_rig.h).
     add_executable(hosted_supervisor_test novaworld/hosted_supervisor_test.cpp)
     target_link_libraries(hosted_supervisor_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_hosting_cloud opennova_novaworld_service
@@ -721,8 +723,9 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(hosted_supervisor COMMAND hosted_supervisor_test PARTS
         settings_rules renders data_sets no_data pins_and_updates service_accounts requests fleet_room
         lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
-        static_address_brake stop_paths exits_and_crash_restarts last_good_pass launch_failure
-        launch_refused_mid_pass restart_window timeouts_and_health listing_lost machine_lost_replaces
+        static_address_brake comp_address_lapse stop_paths exits_and_crash_restarts last_good_pass
+        launch_failure launch_refused_mid_pass restart_window timeouts_and_health listing_lost
+        machine_lost_replaces
         listing_waits_while_lost waits_for_lobby owner_changes limit_at_provisioning owner_limits
         own_machines_cut own_machines_cut_no_room own_cut_at_provisioning mass_stop_hold hold_releases
         reconciliation relist_grace console_ring admin_links_follow_running)

@@ -86,6 +86,16 @@ bool active_player(db::Database &db, int64_t user_id) {
 					.empty();
 }
 
+// Why the account `owner` names is no active player's ("" when it is one).
+std::string inactive_why(db::Database &db, const std::optional<int64_t> &owner) {
+	if (!owner) return "its account was deleted";
+	const auto rows = db.query("SELECT kind, account_status FROM players WHERE id = $1;", { BindValue(*owner) });
+	if (rows.empty()) return "its account was deleted";
+	if (rows.front().as_text(0).value_or("") != "player") return "its account is no player's";
+	const std::string status = rows.front().as_text(1).value_or("");
+	return status == "active" ? std::string() : "its account is " + status;
+}
+
 int64_t insert_address(db::Database &db, int64_t owner, const std::string &name, const char *source,
 		const std::optional<std::string> &subscription) {
 	const auto rows = db.query("INSERT INTO hosted_addresses (owner_user_id, name, source, stripe_subscription_id) "
@@ -289,6 +299,47 @@ bool mark_released(db::Database &db, int64_t id) {
 
 bool restore_address(db::Database &db, int64_t id) {
 	return move(db, id, "'releasing'", "ready", "lapse_cause = '', reason = '', release_after = NULL");
+}
+
+std::vector<UncoveredAddress> uncovered_comp_addresses(db::Database &db, int64_t now) {
+	// The comp rows that may lapse, by account (a gone one's under none),
+	// oldest first.
+	std::map<std::optional<int64_t>, std::vector<HostedAddress>> by_owner;
+	for (HostedAddress &a : query_addresses(db,
+				 "WHERE source = 'comp' AND state IN ('allocating', 'ready', 'failed') ORDER BY id;", {}))
+		by_owner[a.owner_user_id].push_back(std::move(a));
+	std::vector<UncoveredAddress> out;
+	for (const auto &[owner, rows] : by_owner) {
+		if (const std::string why = inactive_why(db, owner); !why.empty()) {
+			for (const HostedAddress &a : rows) out.push_back({ a.id, why, false });
+			continue;
+		}
+		const billing::Entitlement e = billing::entitlement_of(db, *owner, now);
+		const bool cached = !billing::subscriptions_of(db, *owner).empty();
+		const char *why = "its account's own machines no longer cover it";
+		// The newest that count past the own machines; then the failed ones
+		// (counted by none: billing comp_addresses_of) past the room left, which
+		// an allocation would only make count, the oldest kept.
+		int over = e.address_grants - e.own_machines;
+		std::vector<int64_t> failed; // newest first
+		for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
+			if (it->state == AddressState::Failed) {
+				failed.push_back(it->id);
+			} else if (over > 0) {
+				out.push_back({ it->id, why, cached });
+				--over;
+			}
+		}
+		const size_t room = over < 0 ? static_cast<size_t>(-over) : 0;
+		for (size_t i = 0; i + room < failed.size(); ++i) out.push_back({ failed[i], why, cached });
+	}
+	return out;
+}
+
+bool comp_address_covered(db::Database &db, const HostedAddress &a, int64_t now) {
+	if (a.source != "comp" || !inactive_why(db, a.owner_user_id).empty()) return false;
+	const billing::Entitlement e = billing::entitlement_of(db, *a.owner_user_id, now);
+	return e.address_grants < e.own_machines;
 }
 
 bool lapse_address(db::Database &db, int64_t id, const std::string &cause, const std::string &reason) {

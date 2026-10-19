@@ -1172,6 +1172,97 @@ int test_static_address_brake() {
 	return 0;
 }
 
+// A comp address nothing covers lapses through the same path (address_repository.h
+// uncovered_comp_addresses): one of an account's two own machines cut, the newer of its
+// two comp addresses lapses at the next pass with no reconcile waited for (the account
+// has no subscription for the cache to judge), the server on it placed again without it
+// (no restart counted), and the address goes releasing; an account with subscriptions
+// waits for a clean reconcile, its paid address kept; a deleted account's lapses at once.
+int test_comp_address_lapse() {
+	namespace billing = opennova::novaworld_server::billing;
+	Rig rig("hosted_comp_address");
+	Database *db = &rig.db;
+	const int64_t cy = make_player(*db, "comp_cy", 0);
+	TEST_EXPECT(billing::set_comp_grants(*db, cy, { 2, 2 }));
+	const int64_t older = hosted::add_comp_address(*db, cy, "cy-older", rig.wall).id;
+	const int64_t newer = hosted::add_comp_address(*db, cy, "cy-newer", rig.wall).id;
+	TEST_EXPECT(older > 0 && newer > older);
+	const std::string ip = "203.0.113.62";
+	TEST_EXPECT(hosted::record_allocation(*db, older, "eipalloc-cy1", "203.0.113.61") &&
+			hosted::record_dns_upsert(*db, older, "cy-older", "c1"));
+	TEST_EXPECT(hosted::record_allocation(*db, newer, "eipalloc-cy2", ip) &&
+			hosted::record_dns_upsert(*db, newer, "cy-newer", "c2"));
+	const auto r = hosted::request_server(*db, cy, rig.settings(), rig.offered(), rig.config.cap, rig.wall, true,
+			&rig.config.placement, newer);
+	TEST_EXPECT(r.outcome == hosted::RequestOutcome::Created);
+	const int64_t id = r.id;
+	for (int i = 0; i < 6; ++i) rig.step();
+	const int64_t machine = rig.machine_of(id);
+	TEST_EXPECT(machine > 0 && rig.machine(machine)->address_id == newer);
+	rig.fake.machines.at(rig.machine(machine)->cloud_id).public_address = ip;
+	TEST_EXPECT(!rig.to_running(id, 5401).empty());
+	TEST_EXPECT(hosted::find_address(*db, newer)->state == AddressState::Ready);
+
+	// One of her own machines cut: the newer address lapses at the next pass.
+	TEST_EXPECT(billing::set_comp_grants(*db, cy, { 2, 1 }));
+	rig.step();
+	const auto lapsed = hosted::find_address(*db, newer);
+	TEST_EXPECT(lapsed->state != AddressState::Ready && lapsed->lapse_cause == hosted::kLapseGrant &&
+			lapsed->reason == "its account's own machines no longer cover it");
+	TEST_EXPECT(hosted::find_address(*db, older)->state == AddressState::Ready);
+	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Ended);
+	const auto replaced = rig.server(id);
+	TEST_EXPECT(replaced && !replaced->address_id && replaced->restarts == 0 && is_live(replaced->state) &&
+			has_event(*db, id, "its static address cy-newer lapsed"));
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, newer)->state == AddressState::Releasing);
+	TEST_EXPECT(jobs::job_pending(*db, std::string(hosted::kJobAddressRelease) + ":" + std::to_string(newer)));
+	TEST_EXPECT(!rig.to_running(id, 5402).empty());
+	TEST_EXPECT(rig.machine(rig.machine_of(id))->address_id == 0);
+
+	// Dee on tier 1 with an own machine and a paid address, and an admin's own machine
+	// and comp address beside them. The admin's own machine taken back, the comp
+	// address lapses once a clean reconcile confirms the cache (she has
+	// subscriptions); the paid one stays.
+	const int64_t dee = make_player(*db, "comp_dee", 0);
+	subscribe(*db, dee, 1, "active", "sub_compdee_tier");
+	subscribe_machines(*db, dee, 1, "sub_compdee_machine");
+	TEST_EXPECT(billing::set_comp_grants(*db, dee, { 0, 1 }));
+	const int64_t dee_comp = hosted::add_comp_address(*db, dee, "dee-comp", rig.wall).id;
+	billing::SubscriptionRow address_sub;
+	address_sub.stripe_subscription_id = "sub_compdee_address";
+	address_sub.stripe_customer_id = "cus_compdee";
+	address_sub.user_id = dee;
+	address_sub.status = "active";
+	address_sub.item = billing::ItemKind::StaticAddress;
+	address_sub.price_id = "price_address";
+	address_sub.current_period_end = kWall + 30 * 24 * 60 * 60;
+	billing::upsert_subscription(*db, address_sub);
+	const int64_t dee_paid = hosted::name_subscription_address(*db, dee, "dee-paid", rig.wall).id;
+	TEST_EXPECT(dee_comp > 0 && dee_paid > 0);
+	TEST_EXPECT(billing::set_comp_grants(*db, dee, { 0, 0 }));
+	rig.step();
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, dee_comp)->state == AddressState::Allocating);
+	hosted::limits_hold::reconciled(*db);
+	rig.step();
+	const auto dee_lapsed = hosted::find_address(*db, dee_comp);
+	TEST_EXPECT(dee_lapsed->state != AddressState::Allocating && dee_lapsed->lapse_cause == hosted::kLapseGrant);
+	TEST_EXPECT(hosted::find_address(*db, dee_paid)->state == AddressState::Allocating);
+
+	// A deleted account's comp address lapses at the next pass.
+	const int64_t eve = make_player(*db, "comp_eve", 0);
+	TEST_EXPECT(billing::set_comp_grants(*db, eve, { 1, 1 }));
+	const int64_t eve_addr = hosted::add_comp_address(*db, eve, "eve-place", rig.wall).id;
+	rig.step();
+	TEST_EXPECT(eve_addr > 0 && hosted::find_address(*db, eve_addr)->state == AddressState::Allocating);
+	TEST_EXPECT(nws::delete_user(*db, eve).ok);
+	rig.step();
+	const auto gone = hosted::find_address(*db, eve_addr);
+	TEST_EXPECT(gone->state != AddressState::Allocating && gone->reason == "its account was deleted");
+	return 0;
+}
+
 int test_stop_paths() {
 	Rig rig("hosted_stops");
 	// A stop before any slot: stopped with no launch.
@@ -2550,6 +2641,7 @@ int main(int argc, char **argv) {
 		{ "own_restart_at_cap", { test_own_restart_at_cap } },
 		{ "static_address", { test_static_address } },
 		{ "static_address_brake", { test_static_address_brake } },
+		{ "comp_address_lapse", { test_comp_address_lapse } },
 		{ "stop_paths", { test_stop_paths } },
 		{ "exits_and_crash_restarts", { test_exits_and_crash_restarts } },
 		{ "last_good_pass", { test_last_good_pass } },

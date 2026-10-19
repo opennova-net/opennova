@@ -195,12 +195,18 @@
 // server's container back (booting, its clock waiting; sync answers no
 // unstarted container) until the machine's public address is the address, so
 // the lobby lists it at <address>:32768 from its first packet: an own
-// machine's public address never changes while it runs a server. A
-// subscription's address whose subscription no longer grants lapses only once
-// a clean reconcile with Stripe has completed since the pass first saw it so
-// (limits_hold.h reconciles), and never more at once than max(2, half the
-// subscription addresses), the owners' limits' brake (the pass then logs an
-// ERROR and lapses none; an admin may release one). A lapsed address's server
+// machine's public address never changes while it runs a server. An address
+// whose grant is gone lapses: a subscription's whose subscription no longer
+// grants, and a comp one nothing covers (address_repository.h
+// uncovered_comp_addresses: its account gone or no longer an active
+// player's, or its newest comp ones while the account's addresses pass its
+// own machines; a paid one never lapses for that). One the billing cache
+// judged (a subscription's, a comp one of an account with subscriptions)
+// lapses only once a clean reconcile with Stripe has completed since the pass
+// first saw it so (limits_hold.h reconciles), and never more at once than
+// max(2, half the addresses), the owners' limits' brake (the pass then logs
+// an ERROR and lapses none of them; an admin may release one); one its
+// account and its admin's grant alone judged lapses at once. A lapsed address's server
 // lets go of it: its machine is ended (the association goes with it) and the
 // server placed again without it, no restart counted, its event saying why;
 // once no live machine carries the address it goes releasing with its
@@ -576,7 +582,7 @@ private:
 	std::vector<std::pair<int64_t, int>> pass_reserved_;
 	// The pass's memory of the static addresses: when it last asked a machine's
 	// association (by machine), the clean reconciles counted when it first saw
-	// an address's subscription no longer granting (by address), and whether
+	// an address's grant gone, as the billing cache judged it (by address), and whether
 	// the lapses' brake holds (logged once).
 	std::map<int64_t, uint64_t> associate_asked_ms_;
 	std::map<int64_t, uint64_t> lapse_seen_;

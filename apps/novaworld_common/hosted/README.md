@@ -324,8 +324,8 @@ which its owner keeps for the own-machine servers it starts: every start of a se
 names it runs on a machine carrying it, so the server lists at the same `address:32768`
 each time. Each is its own Stripe subscription (the static-address add-on, quantity 1,
 bought through Checkout once the account has an own machine for it, canceled through the
-Portal's cancel flow), or an admin's comp address (`POST /api/admin/users/<id>/addresses`).
-At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`), counting what the
+Portal's cancel flow), or an admin's comp address (`POST /api/admin/users/<id>/addresses`),
+which lapses once nothing covers it ("The fleet's pass" below). At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`), counting what the
 cloud holds too (an account's rows that hold a grant where they pass its grants, and every
 lapsed or releasing row, whose Elastic IP is held until released), so the fleet never
 holds more Elastic IPs than it sells. With the add-on off (`ONNET_FLEET_MAX_ADDRESSES` 0,
@@ -355,8 +355,9 @@ releases the held ones.
   pending; then a `machine.describe`, so the machine's public address follows),
   `address.release` (once no live machine carries it and no `address.allocate` of it is
   queued or running, so it sees every record written: its record deleted and in sync, the
-  TTL and a minute waited out, its grant read again (a subscription granting once more
-  keeps it), any association the cloud still shows ended, then released). `fleet.sweep`
+  TTL and a minute waited out, its grant read again (a subscription granting once more,
+  or a comp address its account covers again, keeps it), any association the cloud still
+  shows ended, then released). `fleet.sweep`
   records the addresses the cloud holds for this deployment that no held row names
   (`hosted_address_orphans`, the admin's view), never releasing one.
 - **The drivers**: `cloud/ec2_address_driver.*` (Elastic IPs through the AWS CLI, tagged
@@ -373,11 +374,19 @@ releases the held ones.
   the pass asks its `address.associate` and a describe, and holds the server's container
   back (booting, its clock waiting) until the machine's public address is the address, so
   the lobby lists it at `<address>:32768` from its first packet (an own machine's public
-  address never changes while it runs a server). A subscription's address whose
-  subscription no longer grants lapses only once a clean reconcile with Stripe has
+  address never changes while it runs a server). An address whose grant is gone lapses:
+  a subscription's whose subscription no longer grants, and a comp address nothing covers
+  (`uncovered_comp_addresses`): every comp address of an account deleted or no longer an
+  active player's (banned), and, while an account's addresses that count (its granting
+  static-address subscriptions and its comp addresses) pass its own machines, its newest
+  comp ones until they no longer do (an admin's cut of its own machines or servers; a
+  paid address never lapses for that, but with its subscription). One the billing cache
+  judged (a subscription's, or a comp one of an account with subscriptions, whose own
+  machines may be the cache's) lapses only once a clean reconcile with Stripe has
   completed since the pass first saw it so, and never more at once than max(2, half the
-  subscription addresses) (the owners' limits' brake: it logs an ERROR and lapses none;
-  an admin may release one). A lapsed address's machine ends (the association goes with
+  addresses) (the owners' limits' brake: it logs an ERROR and lapses none of them; an
+  admin may release one); one its account and its admin's grant alone judged lapses at
+  once, billing configured or not. A lapsed address's machine ends (the association goes with
   it) and its server is placed again without it, no restart counted, its event saying
   why; once no live machine carries the address it goes releasing. With the add-on on, an
   allocating address whose `address.allocate` ran out of attempts (a throttle, a cloud

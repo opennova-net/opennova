@@ -1459,46 +1459,66 @@ void Supervisor::carry_address(db::Database &db, const FleetMachineRow &m, uint6
 }
 
 void Supervisor::step_addresses(db::Database &db, uint64_t now_ms) {
-	// The subscriptions' addresses whose grant is gone, each confirmed once a
-	// clean reconcile with Stripe completed after the pass first saw it so.
+	// The addresses whose grant is gone: a subscription's that no longer
+	// grants, and a comp one nothing covers (uncovered_comp_addresses). One
+	// the billing cache judged (a subscription's, a comp one of an account
+	// with subscriptions) is confirmed once a clean reconcile with Stripe
+	// completed after the pass first saw it so; one its account and its
+	// admin's grant alone judged lapses at once.
 	const uint64_t reconciles = limits_hold::reconciles(db);
 	const int64_t wall = config_.wall_clock_s();
-	std::vector<HostedAddress> confirmed;
+	std::map<int64_t, UncoveredAddress> uncovered;
+	for (UncoveredAddress &u : uncovered_comp_addresses(db, wall)) uncovered.emplace(u.id, std::move(u));
+	struct Lapse {
+		HostedAddress address;
+		std::string why;
+	};
+	std::vector<Lapse> confirmed;
+	std::vector<Lapse> at_once;
 	std::set<int64_t> seen;
-	size_t subscribed = 0;
 	for (const AddressState state : { AddressState::Allocating, AddressState::Ready, AddressState::Failed }) {
 		for (HostedAddress &a : addresses_in(db, state)) {
-			if (a.source != "subscription") continue;
-			++subscribed;
 			seen.insert(a.id);
-			const auto row = billing::find_subscription(db, a.stripe_subscription_id);
-			if (row && billing::subscription_grants(*row, wall)) {
+			std::string why;
+			bool cached = true;
+			if (a.source == "subscription") {
+				const auto row = billing::find_subscription(db, a.stripe_subscription_id);
+				if (!row || !billing::subscription_grants(*row, wall)) why = "its subscription ended";
+			} else if (const auto u = uncovered.find(a.id); u != uncovered.end()) {
+				why = u->second.why;
+				cached = u->second.cached;
+			}
+			if (why.empty() || !cached) {
 				lapse_seen_.erase(a.id);
+				if (!why.empty()) at_once.push_back({ std::move(a), why });
 				continue;
 			}
 			const auto first = lapse_seen_.emplace(a.id, reconciles).first;
-			if (reconciles > first->second) confirmed.push_back(std::move(a));
+			if (reconciles > first->second) confirmed.push_back({ std::move(a), why });
 		}
 	}
 	for (auto it = lapse_seen_.begin(); it != lapse_seen_.end();)
 		it = seen.count(it->first) == 0 ? lapse_seen_.erase(it) : std::next(it);
-	// The owners' limits' brake: more at once reads as the cache gone wrong.
-	const size_t threshold = std::max<size_t>(2, subscribed / 2);
+	const auto lapse = [&](const Lapse &l) {
+		if (!lapse_address(db, l.address.id, kLapseGrant, l.why)) return;
+		lapse_seen_.erase(l.address.id);
+		std::printf("[hosted] static address %lld (%s) lapsed: %s\n", static_cast<long long>(l.address.id),
+				loggable(l.address.name, 40).c_str(), loggable(l.why, 80).c_str());
+	};
+	for (const Lapse &l : at_once) lapse(l);
+	// The owners' limits' brake on the cache's: more at once reads as the
+	// cache gone wrong.
+	const size_t threshold = std::max<size_t>(2, seen.size() / 2);
 	if (confirmed.size() > threshold) {
 		if (!address_brake_held_)
 			std::fprintf(stderr,
-					"[hosted] ERROR the static addresses' lapses held: %zu of %zu would lapse at once; none lapses "
-					"(an admin may release one)\n",
-					confirmed.size(), subscribed);
+					"[hosted] ERROR the static addresses' lapses held: %zu of %zu would lapse at once on the "
+					"billing cache; none of them lapses (an admin may release one)\n",
+					confirmed.size(), seen.size());
 		address_brake_held_ = true;
 	} else {
 		address_brake_held_ = false;
-		for (const HostedAddress &a : confirmed) {
-			if (!lapse_address(db, a.id, kLapseGrant, "its subscription ended")) continue;
-			lapse_seen_.erase(a.id);
-			std::printf("[hosted] static address %lld (%s) lapsed: its subscription ended\n",
-					static_cast<long long>(a.id), loggable(a.name, 40).c_str());
-		}
+		for (const Lapse &l : confirmed) lapse(l);
 	}
 
 	// A lapsed address leaves its server and its machine, then goes.

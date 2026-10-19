@@ -167,10 +167,11 @@ jobs::JobResult release(jobs::JobContext &ctx, AddressDriver &driver, ZoneDriver
 	} else if (now < a->release_after) {
 		return jobs::JobResult::retry("its record's TTL drains", (a->release_after - now) * 1000);
 	}
-	// Its grant, read again: a subscription that grants once more keeps it
-	// (but an admin's release stands).
-	if (a->source == "subscription" && a->lapse_cause == kLapseGrant) {
+	// Its grant, read again: a subscription that grants once more, or a comp
+	// address covered again, keeps it (but an admin's release stands).
+	if (a->lapse_cause == kLapseGrant) {
 		const bool grants = on_db(ctx, [&](db::Database &db) {
+			if (a->source != "subscription") return comp_address_covered(db, *a, now);
 			const auto row = billing::find_subscription(db, a->stripe_subscription_id);
 			return row && billing::subscription_grants(*row, now);
 		});
@@ -182,7 +183,8 @@ jobs::JobResult release(jobs::JobContext &ctx, AddressDriver &driver, ZoneDriver
 				tx.commit();
 				return restored;
 			});
-			log_address(*a, "its subscription grants again: kept, ready");
+			log_address(*a, a->source == "subscription" ? "its subscription grants again: kept, ready"
+														: "its account covers it again: kept, ready");
 			return jobs::JobResult::done();
 		}
 	}

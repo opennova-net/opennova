@@ -35,7 +35,9 @@
 //                      the change in sync, then the
 //                      record's TTL (kAddressTtlS) and kReleaseMarginS waited
 //                      out; its grant read again (a subscription granting once
-//                      more makes it ready again, unless an admin released it);
+//                      more, or a comp address its account covers again,
+//                      address_repository.h comp_address_covered, makes it
+//                      ready again, unless an admin released it);
 //                      any association the cloud still shows ended; then
 //                      released (an address the cloud no longer knows is
 //                      released already). Deduped per address.
