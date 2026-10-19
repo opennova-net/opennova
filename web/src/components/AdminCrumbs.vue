@@ -26,7 +26,9 @@ import { placeOf, type Crumb } from '../utils/adminNav';
 
 withDefaults(defineProps<{ trail?: Crumb[] }>(), { trail: () => [] });
 
-const route = useRoute();
-const place = computed(() => placeOf(route.path));
-const onSection = computed(() => place.value !== null && route.path === place.value.section.to);
+// No router (a page mounted alone in a test): no breadcrumb.
+const route = useRoute() as ReturnType<typeof useRoute> | undefined;
+const path = computed(() => route?.path ?? '');
+const place = computed(() => placeOf(path.value));
+const onSection = computed(() => place.value !== null && path.value === place.value.section.to);
 </script>

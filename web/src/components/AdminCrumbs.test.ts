@@ -35,6 +35,10 @@ describe('AdminCrumbs', () => {
     expect(page.text()).toBe('Operations/Background jobs/Mail jobs/Job 77');
   });
 
+  it('shows none without a router (a page mounted alone)', () => {
+    expect(mount(AdminCrumbs).find('nav').exists()).toBe(false);
+  });
+
   it('shows none on the Overview', async () => {
     const page = await crumbs('/admin/overview');
     expect(page.find('nav').exists()).toBe(false);
