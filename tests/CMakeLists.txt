@@ -52,6 +52,14 @@ function(opennova_bakes)
     set_tests_properties(${ARGN} PROPERTIES RESOURCE_GROUPS "bakes:1")
 endfunction()
 
+# opennova_off_bakes(<row>...): rows whose protocol windows a bake beside them could
+# crowd out (a reply asserted within a second of real time, a synthetic clock stepped per
+# wall-clock round), run while no bake does: each takes every `bakes` slot
+# (tests/ctest_resources.json's 3; the two numbers change together).
+function(opennova_off_bakes)
+    set_tests_properties(${ARGN} PROPERTIES RESOURCE_GROUPS "bakes:3")
+endfunction()
+
 # opennova_add_parts(<name> PARTS <part>... [GATED] COMMAND <command>...): a row
 # per part of a program split with tests/common/test_parts.h, <name>_<part>
 # running `<command> --part <part> --parts <part>...`, so the parts run side by

@@ -27,7 +27,8 @@
 //      (the host's session row and its listing gone), and its new run, an
 //      instance of its own at the same address, takes clients again.
 //
-// Built only with BUILD_NOVAWORLD_HTTP; POSIX only. Serial.
+// Built only with BUILD_NOVAWORLD_HTTP; POSIX only. One loopback e2e row at a time
+// (service_tests.cmake opennova_loopback_e2e).
 
 #include "lobby_client.h"
 #include "program_process.h"

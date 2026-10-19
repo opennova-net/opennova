@@ -72,6 +72,18 @@ function(opennova_add_redis_test name)
     set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 LABELS redis)
 endfunction()
 
+# The end-to-end rows over loopback UDP and the service's programs (the listener's whole
+# lifecycle, the lobby's instances, the hosted stack's children): one at a time among themselves
+# (RESOURCE_LOCK novaworld_loopback_e2e: an 8-thread flood, rows of several processes), each holding
+# two of ctest's slots for its own thread and the listener's or service's it waits on, and beside the
+# other rows as any row is. RUN_SERIAL held them until everything else had finished and then ran them
+# alone, one after another: 125 s of test-linux's 339 s on #1223's run 39175230674. What each asserts
+# about time (a reply within its window, a quiet window, a service period) is as it was; the rows
+# whose windows a bake beside them could crowd out run while no bake does as well (opennova_off_bakes).
+function(opennova_loopback_e2e)
+    set_tests_properties(${ARGN} PROPERTIES RESOURCE_LOCK novaworld_loopback_e2e PROCESSORS 2)
+endfunction()
+
 # The real GateListener on port 0 over loopback UDP: the port start() reports is
 # the one that answers a probe and the one the reply advertises as POSTIPPORT,
 # a second listener on that port fails start(), and each gate tag's reply
@@ -252,7 +264,8 @@ target_link_libraries(nwu_host_session_e2e_test PRIVATE
     opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(nwu_host_session_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nwu_host_session_e2e COMMAND nwu_host_session_e2e_test)
-set_tests_properties(nwu_host_session_e2e PROPERTIES RUN_SERIAL TRUE)
+opennova_loopback_e2e(nwu_host_session_e2e)
+opennova_off_bakes(nwu_host_session_e2e)
 
 add_executable(nw_host_register_e2e_test novaworld/nw_host_register_e2e_test.cpp)
 target_link_libraries(nw_host_register_e2e_test PRIVATE
@@ -262,8 +275,10 @@ add_test(NAME nw_host_register_e2e COMMAND nw_host_register_e2e_test)
 # This is the only test that drives the complete listener lifecycle through
 # real UDP sockets. Its one-second negative/retry receive windows are protocol
 # assertions, not load-test budgets, so CPU-saturated parallel ctest runs can
-# manufacture packet timeouts that never reproduce in isolation.
-set_tests_properties(nw_host_register_e2e PROPERTIES RUN_SERIAL TRUE)
+# manufacture packet timeouts that never reproduce in isolation: it runs under the
+# loopback lock while no bake does.
+opennova_loopback_e2e(nw_host_register_e2e)
+opennova_off_bakes(nw_host_register_e2e)
 
 # The lobby's answer to a stock client's 0x44 resend request, through the real
 # listener over loopback UDP (same listener-source recipe as above).
@@ -272,7 +287,8 @@ target_link_libraries(nw_lobby_resend_e2e_test PRIVATE
     opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(nw_lobby_resend_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_lobby_resend_e2e COMMAND nw_lobby_resend_e2e_test)
-set_tests_properties(nw_lobby_resend_e2e PROPERTIES RUN_SERIAL TRUE)
+opennova_loopback_e2e(nw_lobby_resend_e2e)
+opennova_off_bakes(nw_lobby_resend_e2e)
 
 # The service's ServerCommand / ServerStopHosting pushes to a listed host, through
 # the real listener over loopback UDP (same listener-source recipe as above) and a
@@ -282,14 +298,16 @@ set_tests_properties(nw_lobby_resend_e2e PROPERTIES RUN_SERIAL TRUE)
 # hosting, the pushes landing as the host session's notices, an expired command
 # dropped unsent, a lost push coming back after the send-interval leg's gap and
 # the client's 0x44, and the stop taking the row out of the browser. Its
-# one-second recovery window is a protocol assertion, so it runs serially.
+# one-second recovery window is a protocol assertion, so it runs under the
+# loopback lock while no bake does (opennova_loopback_e2e, opennova_off_bakes).
 add_executable(nw_server_command_push_e2e_test novaworld/nw_server_command_push_e2e_test.cpp)
 target_link_libraries(nw_server_command_push_e2e_test PRIVATE
     opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(nw_server_command_push_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_server_command_push_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(nw_server_command_push_e2e COMMAND nw_server_command_push_e2e_test)
-set_tests_properties(nw_server_command_push_e2e PROPERTIES RUN_SERIAL TRUE)
+opennova_loopback_e2e(nw_server_command_push_e2e)
+opennova_off_bakes(nw_server_command_push_e2e)
 
 # Several lobby instances on one database sharing one lobby address (nw_udp_listener.h,
 # gate_listener.h, lobby_repository.h): real NW UDP listeners, each an instance of its own at the
@@ -299,7 +317,7 @@ set_tests_properties(nw_server_command_push_e2e PROPERTIES RUN_SERIAL TRUE)
 # listings stay and both drained leave it silent, a lobby's start reaps a stale instance with its
 # rows and leaves the others', a clean stop deletes its instance, and a host whose lobby was
 # replaced behind the address (its receive window run out by its clock) reconnects there and is
-# listed on the new instance. Serial: its packet windows are protocol assertions. POSIX (it binds
+# listed on the new instance. Under the loopback lock: its packet windows are protocol assertions. POSIX (it binds
 # 127.0.0.x).
 if(UNIX)
     add_executable(lobby_instances_e2e_test novaworld/lobby_instances_e2e_test.cpp)
@@ -308,7 +326,9 @@ if(UNIX)
     target_include_directories(lobby_instances_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(lobby_instances_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(lobby_instances_e2e COMMAND lobby_instances_e2e_test)
-    set_tests_properties(lobby_instances_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+    opennova_loopback_e2e(lobby_instances_e2e)
+    # Its flood's eight sender threads (Flood(..., 8)) hold eight slots.
+    set_tests_properties(lobby_instances_e2e PROPERTIES TIMEOUT 120 PROCESSORS 8)
 endif()
 
 # Host-row staleness backstop sweep (prune_stale_hosts).
@@ -563,7 +583,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # ONNET_REQUIRE_HOST_KEY) and opennova-serve's Lister with
     # and without an account, plus hand-driven host sessions for the NWU
     # reconnect and a second connection presenting a listed key. Its packet
-    # windows are protocol assertions, so it runs serially.
+    # windows are protocol assertions, so it runs under the loopback lock while no bake does.
     add_executable(nw_host_ownership_e2e_test novaworld/nw_host_ownership_e2e_test.cpp)
     target_link_libraries(nw_host_ownership_e2e_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_lobby_core opennova_novaworld_gate_core
@@ -571,13 +591,16 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(nw_host_ownership_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(nw_host_ownership_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(nw_host_ownership_e2e REDIS COMMAND nw_host_ownership_e2e_test)
-    set_tests_properties(nw_host_ownership_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+    opennova_loopback_e2e(nw_host_ownership_e2e)
+    opennova_off_bakes(nw_host_ownership_e2e)
+    set_tests_properties(nw_host_ownership_e2e PROPERTIES TIMEOUT 120)
 
     # The owner's pushes end to end: an in-process opennova-serve hosting with an account on an
     # in-process service (the same nw_service_harness.h), administered from the website's routes
     # (POST /api/login, GET /api/me/hosts, POST /api/me/hosts/<rid>/command and /stop): the
     # owner's SetServerName renames the match and saves game.cfg, its TextChatServer runs, another
-    # account's push is a 404, and the stop ends the listing. Serial, like the other serve e2e.
+    # account's push is a 404, and the stop ends the listing. Under the loopback lock, like the
+    # other serve e2e.
     add_executable(nw_owner_admin_e2e_test novaworld/nw_owner_admin_e2e_test.cpp)
     target_link_libraries(nw_owner_admin_e2e_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_lobby_core opennova_novaworld_gate_core
@@ -585,7 +608,8 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(nw_owner_admin_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(nw_owner_admin_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(nw_owner_admin_e2e REDIS COMMAND nw_owner_admin_e2e_test)
-    set_tests_properties(nw_owner_admin_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+    opennova_loopback_e2e(nw_owner_admin_e2e)
+    set_tests_properties(nw_owner_admin_e2e PROPERTIES TIMEOUT 120)
 
     # Two hosted servers end to end on one machine's slots (apps/novaworld_common/hosted): an
     # in-process service with hosted servers on (the same nw_service_harness.h), its
@@ -606,7 +630,8 @@ if(BUILD_NOVAWORLD_HTTP)
     add_dependencies(hosted_local_e2e_test opennova_serve opennova_hostd)
     opennova_add_pg_test(hosted_local_e2e REDIS COMMAND hosted_local_e2e_test $<TARGET_FILE:opennova_serve>
         $<TARGET_FILE:opennova_hostd>)
-    set_tests_properties(hosted_local_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
+    opennova_loopback_e2e(hosted_local_e2e)
+    set_tests_properties(hosted_local_e2e PROPERTIES TIMEOUT 300)
 
     # The machine agents' routes (apps/novaworld_fleet/hosted/agent_route.h) on the internal
     # listener (hosted/internal_listener.h) on a loopback port over a migrated database, driven
@@ -764,8 +789,8 @@ if(BUILD_NOVAWORLD_HTTP)
     # CHAT SEND read back by CHAT GET, the per-verb reply framing (two packets, one, the quiet
     # gap), the status poll, the reconnect after the child is killed and started again on the
     # same port, QUIT at the end, and the admin password in no log or console line. Over the
-    # fleet program's core; ctest passes the opennova-serve binary. Serial: the child holds one
-    # TCP port across its restart.
+    # fleet program's core; ctest passes the opennova-serve binary. Under the loopback lock: the
+    # child holds one TCP port across its restart, which no other loopback row can take meanwhile.
     add_executable(hosted_admin_link_test novaworld/hosted_admin_link_test.cpp)
     target_link_libraries(hosted_admin_link_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_service Threads::Threads)
@@ -773,7 +798,8 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(hosted_admin_link_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_dependencies(hosted_admin_link_test opennova_serve)
     opennova_add_pg_test(hosted_admin_link COMMAND hosted_admin_link_test $<TARGET_FILE:opennova_serve>)
-    set_tests_properties(hosted_admin_link PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
+    opennova_loopback_e2e(hosted_admin_link)
+    set_tests_properties(hosted_admin_link PROPERTIES TIMEOUT 300)
 
     # The console's curated commands (apps/novaworld_web/hosted/console_commands.h, service
     # policy): the owners' list and the admins' one wider read, every line composed from checked
@@ -841,8 +867,8 @@ endif()
 #                    then the fleet's database frozen (a proxy that stops
 #                    forwarding): its watchdog exits it alone (70), the others serve
 #                    on; then the lobby restarted, which alone drops its own
-#                    sessions and listings. Serial: its packet windows and its
-#                    stall's 30 s.
+#                    sessions and listings. Under the loopback lock: its packet
+#                    windows and its stall's 30 s.
 if(UNIX AND BUILD_NOVAWORLD_HTTP)
     set(OPENNOVA_NOVAWORLD_PROGRAMS
         opennova_novaworld_gate opennova_novaworld_lobby opennova_novaworld_web
@@ -888,7 +914,8 @@ if(UNIX AND BUILD_NOVAWORLD_HTTP)
     add_dependencies(nw_programs_e2e_test ${OPENNOVA_NOVAWORLD_PROGRAMS})
     opennova_add_pg_test(nw_programs_e2e REDIS COMMAND nw_programs_e2e_test
         ${OPENNOVA_NOVAWORLD_PROGRAM_FILES})
-    set_tests_properties(nw_programs_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
+    opennova_loopback_e2e(nw_programs_e2e)
+    set_tests_properties(nw_programs_e2e PROPERTIES TIMEOUT 300)
 endif()
 
 # GET /livez on ONNET_HEALTH_PORT (apps/novaworld_common/core/health_listener.h): the
@@ -956,7 +983,8 @@ target_link_libraries(opennova_serve_novaworld_test PRIVATE
     opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_service)
 target_include_directories(opennova_serve_novaworld_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
-set_tests_properties(opennova_serve_novaworld PROPERTIES RUN_SERIAL TRUE)
+opennova_loopback_e2e(opennova_serve_novaworld)
+opennova_off_bakes(opennova_serve_novaworld)
 # The service's pushes to a listed opennova-serve over its NovaWorld session (the same setup,
 # over a migrated database: each push a command for the listener, lobby_repository.h): a pushed
 # SetServerName renames the match and saves game.cfg, a pushed Cycle changes the map, a pushed
@@ -967,7 +995,7 @@ target_link_libraries(opennova_serve_server_command_push_test PRIVATE
 target_include_directories(opennova_serve_server_command_push_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(opennova_serve_server_command_push_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(opennova_serve_server_command_push COMMAND opennova_serve_server_command_push_test)
-set_tests_properties(opennova_serve_server_command_push PROPERTIES RUN_SERIAL TRUE)
+opennova_loopback_e2e(opennova_serve_server_command_push)
 
 # opennova-serve's Lister end to end over real loopback UDP against the real NwUdpListener
 # and an in-test gate (the host result publishing nothing, the mission start's update, a
@@ -976,7 +1004,8 @@ add_executable(opennova_serve_lister_e2e_test serve/opennova_serve_lister_e2e_te
 target_link_libraries(opennova_serve_lister_e2e_test PRIVATE
     opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_service)
 add_test(NAME opennova_serve_lister_e2e COMMAND opennova_serve_lister_e2e_test)
-set_tests_properties(opennova_serve_lister_e2e PROPERTIES RUN_SERIAL TRUE)
+opennova_loopback_e2e(opennova_serve_lister_e2e)
+opennova_off_bakes(opennova_serve_lister_e2e)
 
 # Where a hosted server runs (apps/novaworld_common/hosted/model/placement.h) and what a slot
 # of a machine is (hosted/protocol/slots.h): best fit on the fullest shared machine that takes

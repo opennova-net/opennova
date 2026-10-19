@@ -501,9 +501,15 @@ int main() {
 				/*Host*/{{0, "Players", "7"}}, true,
 				/*PlayerList*/{}, true));
 		send(after_loss);
-		service_session(500);
-		expect(wait_players(7) == 7,
-		       "a lost lobby packet is recovered through the service's 0x84");
+		// The client answers the service's 0x84 as it comes, for as long as the recovery takes.
+		int recovered = 0;
+		for (const auto until = std::chrono::steady_clock::now() + 5s;
+		     recovered != 7 && std::chrono::steady_clock::now() < until;) {
+			service_session(20);
+			const auto snap = listener.snapshot_hosted();
+			if (!snap.empty()) recovered = snap[0].lobby.player_count;
+		}
+		expect(recovered == 7, "a lost lobby packet is recovered through the service's 0x84");
 	}
 
 	// The NWU reconnect against the real listener: a registered host's connection drops (its own
