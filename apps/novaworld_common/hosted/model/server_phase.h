@@ -13,7 +13,8 @@
 //   restarting          provisioning after a crash or a start that timed out
 //                       (which, its cause), restart n of the limit
 //   moving              provisioning after its machine's cause (a drain, a lost
-//                       machine, a new lobby) or the owner's update: no restart
+//                       machine, a new lobby), the owner's update or a move off
+//                       an own machine its owner no longer has: no restart
 //   data_unavailable    provisioning after a start whose data its machine could
 //                       not fetch: no restart, placed again shortly
 //   launches_held       provisioning while its kind's launches are held (a
