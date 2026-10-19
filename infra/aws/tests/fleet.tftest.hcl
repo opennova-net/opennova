@@ -779,7 +779,7 @@ run "hostd_daemon" {
       jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].image == "ghcr.io/opennova-net/opennova-hostd:latest" &&
       jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].user == "0" &&
       jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].linuxParameters.capabilities.add == ["NET_ADMIN"] &&
-      !contains(keys(jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].linuxParameters.capabilities), "drop") &&
+      length(lookup(jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0].linuxParameters.capabilities, "drop", [])) == 0 &&
       !contains(keys(jsondecode(aws_ecs_task_definition.hostd[0].container_definitions)[0]), "privileged")
     )
     error_message = "hostd runs as root with docker's default capabilities and NET_ADMIN (its nft table), never privileged"
