@@ -162,7 +162,10 @@ describe('BillingSection', () => {
     expect(wrapper.find('.billing-oversold').exists()).toBe(false);
     const grants = wrapper.findAll('li.billing-grant');
     expect(grants.map((g) => g.get('a').text())).toEqual(['player7', 'Account 8']);
-    expect(grants.map((g) => g.get('span').text())).toEqual(['3 servers, 1 dedicated machine and 1 static address', '2 dedicated machines']);
+    expect(grants.map((g) => g.get('span').text())).toEqual([
+      '3 servers on shared machines, 1 dedicated machine and 1 static address',
+      '2 dedicated machines',
+    ]);
     expect(grants.map((g) => g.get('a').attributes('href'))).toEqual(['/admin/users/7', '/admin/users/8']);
     expect(wrapper.text()).toContain('Admin grants (2)');
   });
@@ -185,7 +188,7 @@ describe('BillingSection', () => {
     expect(wrapper.text()).toContain('Billing is off');
     expect(wrapper.get('section.billing-capacity').text()).toContain('Sold: 26 of 24 shared places');
     expect(wrapper.get('.billing-oversold').text()).toContain('Admin grants and subscriptions exceed what the fleet sells.');
-    expect(wrapper.get('li.billing-grant').text()).toContain('16 servers');
+    expect(wrapper.get('li.billing-grant').text()).toContain('16 servers on shared machines');
   });
 
   it('says when billing is off', async () => {

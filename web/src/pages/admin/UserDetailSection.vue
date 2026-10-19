@@ -107,7 +107,7 @@
         <form class="space-y-2" @submit.prevent="saveComp">
           <div class="flex flex-wrap items-end gap-4">
             <div class="space-y-1">
-              <label for="user-comp-servers" :class="labelClass">Admin grant (comp servers)</label>
+              <label for="user-comp-servers" :class="labelClass">Shared servers</label>
               <input
                 id="user-comp-servers"
                 v-model.number="comp"
@@ -122,7 +122,7 @@
               />
             </div>
             <div class="space-y-1">
-              <label for="user-comp-own" :class="labelClass">Dedicated machines for its servers</label>
+              <label for="user-comp-own" :class="labelClass">Dedicated machines</label>
               <input
                 id="user-comp-own"
                 v-model.number="compOwn"
@@ -148,7 +148,7 @@
             {{
               compProblem ||
               compOwnProblem ||
-              `0 to ${COMP_SERVERS_MAX} free hosted servers. Dedicated machines add no servers: each moves one of the account's servers off the shared machines onto a machine of its own (0 to ${COMP_OWN_MACHINES_MAX}). A granted account buys no support tier or add-on (one it already pays for still counts: it gets the larger). Lowering the servers stops its newest servers first; lowering the dedicated machines moves its servers past them to a shared machine while there is room, and stops the rest.`
+              `An admin grant, free of charge: 0 to ${COMP_SERVERS_MAX} hosted servers on shared machines, and 0 to ${COMP_OWN_MACHINES_MAX} dedicated machines, each one more server on a machine of its own; the two add up. A granted account buys no support tier, dedicated machine or static address; what it already pays for still counts (the larger of its tier's servers and the shared servers granted, and every dedicated machine). Lowering the shared servers stops its newest servers on shared machines; lowering the dedicated machines moves its newest servers on them to a shared machine while it has a shared server free and the fleet has room, and stops the rest.`
             }}
           </p>
         </form>
@@ -310,10 +310,12 @@
 // /admin/users/<id>: one account (GET /api/admin/users/<id>): its profile and
 // edit (PUT /api/admin/users/<id>), its role (a demotion of the last admin
 // who can log in says how one comes back), its hosting entitlement with the
-// admin's comp grants (PUT .../comp: servers and dedicated machines, 0 to 16 each;
-// a cut below what the account runs is confirmed first, saying which servers
-// stop and which move off their dedicated machines) and a warning while grants and subscriptions oversell the fleet (the
-// service's sold capacity, also in the grant's reply), its hosted servers
+// admin's comp grants (PUT .../comp: servers on shared machines and dedicated
+// machines, 0 to 16 each, which add up; a cut below what the account runs is
+// confirmed first, pool by pool, saying which servers stop and which move off
+// their dedicated machines) and a warning while grants and subscriptions
+// oversell the fleet (the service's sold capacity, also in the grant's
+// reply), its hosted servers
 // (each to its fleet page), its static addresses with a comp one (POST
 // .../addresses), its Stripe ids (to Stripe's dashboard, in the key's mode),
 // its CD keys (GET .../cd-keys) and its deletion (409 active_subscription
@@ -554,39 +556,59 @@ async function changeRole(role: Role) {
   }
 }
 
+// What a cut of dedicated machines does to the `over` newest servers on them:
+// `moving` of them move to a shared machine (one each into the owner's free
+// shared servers, while the fleet has room), the rest stop.
+function dedicatedCutText(over: number, moving: number): string {
+  if (moving === 0) {
+    return over === 1
+      ? 'Their newest server on a dedicated machine stops: they have no shared server free for it to move to.'
+      : `Their ${over} newest servers on dedicated machines stop: they have no shared server free for them to move to.`;
+  }
+  if (moving === over) {
+    return over === 1
+      ? 'Their newest server on a dedicated machine moves to a shared machine (its match restarts) if the fleet has room; else it stops.'
+      : `Their ${over} newest servers on dedicated machines move to a shared machine (their matches restart) while the fleet has room; the rest stop.`;
+  }
+  return (
+    `Of their ${over} newest servers on dedicated machines, ${moving} move${moving === 1 ? 's' : ''} to a shared machine ` +
+    `(${moving === 1 ? 'its match restarts' : 'their matches restart'}) while the fleet has room, as many as their free ` +
+    'shared servers; the rest stop.'
+  );
+}
+
 async function saveComp() {
   if (!detail.value || busy.value || compProblem.value || compOwnProblem.value) return;
   const n = Number(comp.value);
   const own = Number(compOwn.value);
   const u = detail.value.user;
   const e = detail.value.entitlement;
-  // The live servers the limits count (not already stopping), oldest first,
-  // as the service keeps them.
-  const live = detail.value.servers.filter((s) => s.live && s.state !== 'stopping').sort((a, b) => a.id - b.id);
+  // Its live servers in each pool, oldest first, as the service keeps them.
+  // A stopping one still holds its place on shared machines, and no cut
+  // counts it.
+  const live = detail.value.servers.filter((s) => s.live).sort((a, b) => a.id - b.id);
+  const shared = live.filter((s) => !s.own_machine);
+  const sharedRunning = shared.filter((s) => s.state !== 'stopping');
+  const ownRunning = live.filter((s) => s.own_machine && s.state !== 'stopping');
   const warnings: string[] = [];
-  // The entitlement after the change is the larger of the grant and the tier's
-  // servers, whichever gives it now: the newest past it stop.
-  const after = Math.max(n, e.tier_servers);
-  const over = live.length - after;
-  if (over > 0) {
-    const what = over === 1 ? 'its newest server' : `its ${over} newest servers`;
+  // Its servers on shared machines after the change: the larger of the grant
+  // and the tier's, whichever gives them now. The newest there past it stop.
+  const sharedAfter = Math.max(n, e.tier_servers);
+  const sharedOver = sharedRunning.length - sharedAfter;
+  if (sharedOver > 0) {
+    const what = sharedOver === 1 ? 'its newest server there' : `its ${sharedOver} newest servers there`;
     warnings.push(
-      `Lower ${u.username}'s grant to ${n}? They run ${live.length} servers live, so the service stops ${what}: their matches end for everyone on them.`,
+      `Lower ${u.username}'s shared servers to ${n}? They run ${sharedRunning.length} on shared machines, so the service stops ${what}: their matches end for everyone on them.`,
     );
   }
-  // Its dedicated machines after it: the add-on's (paid while a tier grants) and the
-  // grant's while it has servers. Of the servers the limit keeps, those on own
-  // machines past them move to a shared machine while there is room; the rest
-  // stop.
-  const paidOwn = e.own_machines - (e.max_servers > 0 ? e.comp_own_machines : 0);
-  const ownAfter = paidOwn + (after > 0 ? own : 0);
-  const ownOver = live.slice(0, after).filter((s) => s.own_machine).length - ownAfter;
+  // Its dedicated machines after it: the ones it pays for (no tier needed)
+  // and the grant's. The newest servers past them move to a shared machine
+  // while it has a shared server free, else stop.
+  const ownAfter = e.own_machines - e.comp_own_machines + own;
+  const ownOver = ownRunning.length - ownAfter;
   if (ownOver > 0) {
-    warnings.push(
-      ownOver === 1
-        ? `Lower ${u.username}'s dedicated machines to ${ownAfter}? One of their servers on dedicated machines moves to a shared machine (its match restarts) if there is room; else it stops.`
-        : `Lower ${u.username}'s dedicated machines to ${ownAfter}? ${ownOver} of their servers on dedicated machines move to a shared machine (their matches restart) while there is room; the rest stop.`,
-    );
+    const moving = Math.min(ownOver, Math.max(0, sharedAfter - shared.length));
+    warnings.push(`Lower ${u.username}'s dedicated machines to ${ownAfter}? ${dedicatedCutText(ownOver, moving)}`);
   }
   if (warnings.length > 0 && !window.confirm(warnings.join('\n\n'))) return;
   busy.value = true;
@@ -599,8 +621,8 @@ async function saveComp() {
   // The sold capacity with the grant counted: the warning follows it at once.
   if (detail.value && result.value.capacity) detail.value = { ...detail.value, capacity: result.value.capacity };
   const granted = [
-    ...(n > 0 ? [`${n} hosted server${n === 1 ? '' : 's'}`] : []),
-    ...(own > 0 ? [`${own} dedicated machine${own === 1 ? '' : 's'} for its servers`] : []),
+    ...(n > 0 ? [`${n} hosted server${n === 1 ? '' : 's'} on shared machines`] : []),
+    ...(own > 0 ? [`${own} dedicated machine${own === 1 ? '' : 's'}`] : []),
   ];
   flash(
     granted.length === 0

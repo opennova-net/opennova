@@ -39,9 +39,9 @@
       </div>
       <div v-else class="space-y-2 rounded-panel border border-danger/40 bg-panel p-3">
         <p class="text-sm text-danger">
-          Stop or move {{ holdSummary }} now, newest first as their limits say? Those past their servers stop; those
-          past their dedicated machines move to a shared machine while there is room, else stop. Their matches end for
-          everyone on them.
+          Stop or move {{ holdSummary }} now, newest first as their limits say? Those past their servers on shared
+          machines stop; those past their dedicated machines move to a shared machine while their owner has a shared
+          server free and there is room, else stop. Their matches end for everyone on them.
         </p>
         <div class="flex flex-wrap items-center gap-3">
           <button type="button" :disabled="busy" :class="dangerButton" @click="applyStops">Stop or move {{ holdSummary }}</button>
@@ -366,12 +366,12 @@ function money(cents: number): string {
   return formatMoney(cents, tiers.value?.currency ?? 'usd');
 }
 
-// "3 servers, 1 dedicated machine and 1 static address": an admin's grant,
-// what it gives.
+// "3 servers on shared machines, 1 dedicated machine and 1 static address":
+// an admin's grant, what it gives (the servers and the machines add up).
 function grantText(g: AdminCompGrant): string {
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const parts = [
-    ...(g.servers > 0 ? [count(g.servers, 'server', 'servers')] : []),
+    ...(g.servers > 0 ? [count(g.servers, 'server on shared machines', 'servers on shared machines')] : []),
     ...(g.own_machines > 0 ? [count(g.own_machines, 'dedicated machine', 'dedicated machines')] : []),
     ...(g.addresses > 0 ? [count(g.addresses, 'static address', 'static addresses')] : []),
   ];
