@@ -106,6 +106,7 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
   };
 }
 
+// Tier 3's three servers unless the overrides say otherwise.
 export function entitlement(overrides: Partial<HostingEntitlement> = {}): HostingEntitlement {
   return {
     max_servers: 3,
@@ -114,6 +115,8 @@ export function entitlement(overrides: Partial<HostingEntitlement> = {}): Hostin
     own_used: 0,
     can_start: true,
     source: 'tier',
+    tier: 3,
+    granted: false,
     ...overrides,
   };
 }

@@ -97,19 +97,46 @@ describe('ServersPage', () => {
     expect(wrapper.text()).toContain('counts toward your limit until it has stopped, in about a minute');
   });
 
-  it('says why a past-due account cannot start', async () => {
-    const wrapper = await mountPage(serversResponse([hostedServer(1)], { entitlement: { can_start: false } }));
+  it('says why a past-due account cannot start, whatever payment it is', async () => {
+    // An admin's grant with an add-on's payment past due: no tier to blame.
+    const wrapper = await mountPage(
+      serversResponse([hostedServer(1)], { entitlement: { can_start: false, source: 'comp', tier: null, granted: true } }),
+    );
     unmount = () => wrapper.unmount();
     expect(wrapper.findAll('a').some((a) => a.text() === 'Start a server')).toBe(false);
-    expect(wrapper.text()).toContain("new servers can't start");
+    expect(wrapper.text()).toContain("A payment of yours did not go through. Your servers keep running while Stripe retries the card; new servers can't start.");
+    expect(wrapper.text()).not.toContain('support tier');
+  });
+
+  it('offers a bigger tier at the limit only to an account that can buy one', async () => {
+    const two = [hostedServer(1), hostedServer(2)];
+    const tier2 = await mountPage(serversResponse(two, { entitlement: { max_servers: 2, tier: 2 } }));
+    expect(tier2.text()).toContain('Stop one to start another, or move to a bigger support tier.');
+    expect(tier2.findAll('a').some((a) => a.text() === 'See the support tiers')).toBe(true);
+    tier2.unmount();
+
+    // Tier 3 has none bigger; a granted account buys none.
+    for (const e of [{ max_servers: 3, tier: 3 as const }, { max_servers: 3, tier: 1 as const, granted: true }]) {
+      const page = await mountPage(serversResponse([...two, hostedServer(3)], { entitlement: e }));
+      expect(page.text()).toContain('All 3 servers you may run are live. Stop one to start another.');
+      expect(page.text()).not.toContain('bigger support tier');
+      expect(page.findAll('a').some((a) => a.text() === 'See the support tiers')).toBe(false);
+      page.unmount();
+    }
   });
 
   it('shows the support tier callout to an account with no entitlement', async () => {
     const wrapper = await mountPage(
-      serversResponse([hostedServer(5, { state: 'stopped' })], { entitlement: { max_servers: 0, source: 'none' } }),
+      serversResponse([hostedServer(5, { state: 'stopped' })], {
+        entitlement: { max_servers: 0, source: 'none', tier: null },
+      }),
     );
     unmount = () => wrapper.unmount();
     expect(wrapper.find('#servers-locked-heading').exists()).toBe(true);
+    // An admin's grant is the other way to host.
+    expect(wrapper.get('#servers-locked-heading').element.closest('section')!.textContent).toContain(
+      'an admin can also grant your account hosted servers',
+    );
     expect(wrapper.find('#servers-allowance').exists()).toBe(false);
     // Its ended server still shows, with no start again.
     expect(wrapper.get('#hosted-server-5').text()).not.toContain('Start again');

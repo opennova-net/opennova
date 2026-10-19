@@ -35,7 +35,7 @@
       <p class="text-sm text-ink-muted">{{ blockText }}</p>
       <p class="flex flex-wrap gap-4 text-sm">
         <RouterLink
-          v-if="block === 'locked' || block === 'past_due' || (block === 'limit' && data.entitlement.source !== 'comp')"
+          v-if="block === 'locked' || block === 'past_due' || (block === 'limit' && biggerTierOffered(data.entitlement))"
           to="/me/support"
           class="text-accent hover:text-ink-bright"
         >
@@ -85,7 +85,7 @@ import { useSession } from '../../composables/useSession';
 import type { Address } from '../../types/addresses';
 import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
 import { freeAddresses, preferredAddress } from '../../utils/addressView';
-import { ownMachinesFree, startBlock } from '../../utils/myServersView';
+import { PAST_DUE_TEXT, biggerTierOffered, ownMachinesFree, startBlock } from '../../utils/myServersView';
 
 const route = useRoute();
 const router = useRouter();
@@ -108,9 +108,9 @@ const blockText = computed(() => {
     case 'off':
       return 'NovaWorld is not starting hosted servers right now.';
     case 'locked':
-      return 'Hosting a server needs a support tier.';
+      return 'Hosting a server needs a support tier or an admin grant.';
     case 'past_due':
-      return "Your support tier's last payment did not go through. Your servers keep running while Stripe retries the card; new servers can't start.";
+      return PAST_DUE_TEXT;
     case 'limit':
       return 'All the servers you may run at once are live. Stop one first.';
     case 'full':

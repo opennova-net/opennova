@@ -106,7 +106,8 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<HostedErrorCode>([
 ]);
 
 // The refusals a support tier (or its add-on) answers: the page shows a link
-// to the account's support tier page beside their message.
+// to the account's support tier page beside their message (which shows an
+// admin's grant in its place).
 const SUPPORT_TIER_CODES: ReadonlySet<HostedErrorCode> = new Set<HostedErrorCode>([
   'not_entitled',
   'payment_past_due',
@@ -154,17 +155,17 @@ function messageFor(
         ? `The server refused the settings. ${FIELD_RULES[extra.field]}`
         : 'The server refused the settings. Check them and try again.';
     case 'not_entitled':
-      return 'Hosting a server needs a support tier.';
+      return 'Hosting a server needs a support tier or an admin grant.';
     case 'payment_past_due':
-      return "Your support tier's last payment did not go through, so new servers can't start. Your running servers keep running while Stripe retries the card.";
+      return "A payment of yours did not go through, so new servers can't start. Your running servers keep running while Stripe retries the card.";
     case 'server_limit':
       return `${
         extra.maxServers !== undefined
           ? `You may run ${servers(extra.maxServers)} at once, and all of them are live.`
           : 'All the servers you may run at once are live.'
-      } Stop one, or move to a bigger support tier. ${STOPPING_STILL_COUNTS}`;
+      } Stop one first. ${STOPPING_STILL_COUNTS}`;
     case 'no_own_machine':
-      return 'Each of your own machines already runs a server. Start this one on a shared machine, or add another own machine.';
+      return 'Each of your own machines already runs a server. Start this one on a shared machine.';
     case 'at_capacity':
       return 'Every hosted server place on NovaWorld is taken right now. Try again later.';
     case 'address_unavailable':
@@ -316,13 +317,15 @@ export function parseHostedServer(value: unknown): HostedServer | null {
 const SOURCES: ReadonlySet<unknown> = new Set<EntitlementSource>(['none', 'tier', 'comp']);
 
 // The entitlement, or null when any count is missing or not a whole number
-// (the page never offers a start it could not count).
+// (the page never offers a start it could not count); its tier and `granted`
+// read as none when left out.
 function parseEntitlement(value: unknown): HostingEntitlement | null {
   const v = value as Partial<Record<keyof HostingEntitlement, unknown>> | null;
   if (typeof v !== 'object' || v === null) return null;
   const { max_servers: max, used, own_machines: own, own_used: ownUsed, can_start: canStart, source } = v;
   if (!isCount(max) || !isCount(used) || !isCount(own) || !isCount(ownUsed)) return null;
   if (typeof canStart !== 'boolean' || !SOURCES.has(source)) return null;
+  const tier = v.tier;
   return {
     max_servers: max,
     used,
@@ -330,6 +333,8 @@ function parseEntitlement(value: unknown): HostingEntitlement | null {
     own_used: ownUsed,
     can_start: canStart,
     source: source as EntitlementSource,
+    tier: tier === 1 || tier === 2 || tier === 3 ? tier : null,
+    granted: v.granted === true,
   };
 }
 

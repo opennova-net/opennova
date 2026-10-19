@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { hostedServer, listedServer, serversResponse } from '../test/hostedFixtures';
 import {
+  biggerTierOffered,
   canStartAnother,
   endedServers,
   hostingView,
@@ -43,6 +44,16 @@ describe('startBlock and canStartAnother', () => {
     expect(startBlock(serversResponse([], { full: true }))).toBe('full');
     // Past due outranks the limit: the payment is what to fix first.
     expect(startBlock(serversResponse(three, { entitlement: { can_start: false } }))).toBe('past_due');
+  });
+
+  it('offers a bigger tier only below the biggest, and never with an admin grant', () => {
+    expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 2, max_servers: 2 } }).entitlement)).toBe(true);
+    expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 3 } }).entitlement)).toBe(false);
+    // A grant over a tier, or a grant alone: it buys no tier.
+    expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 1, granted: true } }).entitlement)).toBe(false);
+    expect(
+      biggerTierOffered(serversResponse([], { entitlement: { tier: null, source: 'comp', granted: true } }).entitlement),
+    ).toBe(false);
   });
 
   it('counts the free own machines', () => {

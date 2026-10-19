@@ -73,7 +73,7 @@
               Update your payment method
             </RouterLink>
             <RouterLink
-              v-else-if="block === 'limit' && data.entitlement.source !== 'comp'"
+              v-else-if="block === 'limit' && biggerTierOffered(data.entitlement)"
               to="/me/support"
               class="text-accent hover:text-ink-bright"
             >
@@ -166,7 +166,8 @@
 <script setup lang="ts">
 // /me/servers: everything the logged-in account runs. From GET /api/me/servers
 // its hosting allowance (the AllowanceMeter, "2 of 3 servers used") with the
-// start (to /me/servers/new) while it has room, the support tier callout
+// start (to /me/servers/new) while it has room (at its limit, a bigger tier
+// while one can be bought: biggerTierOffered), the support tier callout
 // while it has none, and its hosted servers (HostedServerCard, each linking
 // to its own page) and their stats together (StatsDashboard, GET
 // /api/me/servers/stats); from GET /api/me/hosts the games it hosts itself
@@ -197,6 +198,8 @@ import type { MyServer } from '../../types/myServers';
 import { replacedServers } from '../../utils/history';
 import { LAUNCHES_HELD_NOTICE } from '../../utils/hostedState';
 import {
+  PAST_DUE_TEXT,
+  biggerTierOffered,
   endedServers,
   hostingView,
   listingsOutrunHosted,
@@ -252,14 +255,14 @@ const blockText = computed(() => {
   const e = data.value?.entitlement;
   switch (block.value) {
     case 'past_due':
-      return "Your support tier's last payment did not go through. Your servers keep running while Stripe retries the card; new servers can't start.";
+      return PAST_DUE_TEXT;
     case 'limit': {
       const stopping = live.value.some((s) => s.state === 'stopping');
       const all =
         e?.max_servers === 1 ? 'The one server you may run is live.' : `All ${e?.max_servers} servers you may run are live.`;
       return stopping
         ? `${all} ${STOPPING_STILL_COUNTS}`
-        : `${all} Stop one to start another${e?.source === 'comp' ? '.' : ', or move to a bigger support tier.'}`;
+        : `${all} Stop one to start another${e && biggerTierOffered(e) ? ', or move to a bigger support tier.' : '.'}`;
     }
     case 'full':
       return 'Every hosted server place on NovaWorld is taken right now. Try again later.';

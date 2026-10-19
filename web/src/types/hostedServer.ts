@@ -2,6 +2,7 @@
 // apps/novaworld_web/hosted/hosted_routes.cpp, README "Hosted servers").
 
 import type { ServerAddress } from './addresses';
+import type { TierNumber } from './billing';
 
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
 // stopped | failed. A crash restart goes back to provisioning, and a stop takes
@@ -266,10 +267,15 @@ export interface HostingEntitlement {
   // one.
   own_machines: number;
   own_used: number;
-  // Whether a new server may start: false while the support tier's payment is
-  // past due (the live ones keep running).
+  // Whether a new server may start: false while a payment of the account's (a
+  // tier's or an add-on's) is past due (the live ones keep running).
   can_start: boolean;
   source: EntitlementSource;
+  // Its granting support tier, null for none.
+  tier: TierNumber | null;
+  // An admin grants the account hosting: it buys no support tier or add-on,
+  // so the pages offer none.
+  granted: boolean;
 }
 
 // GET /api/me/servers.

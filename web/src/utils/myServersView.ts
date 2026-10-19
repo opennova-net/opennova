@@ -12,7 +12,7 @@ import type { MyServer } from '../types/myServers';
 //   off     - the service runs no hosted servers (or offers no game to start
 //             one of);
 //   locked  - the account's entitlement is 0 servers: hosting needs a support
-//             tier (the callout to the tiers);
+//             tier or an admin's grant (the callout to the tiers);
 //   ready   - the allowance meter, with a start when one is allowed.
 // The account's servers show in every view but loading and error: a live one
 // shows whatever the entitlement or the service say (the service stops it on
@@ -33,8 +33,8 @@ export function hostingView(data: HostedServersResponse | null, failed: boolean)
 // Why no new server may start now, or null when one may:
 //   off      - the service runs no hosted servers;
 //   locked   - no entitlement;
-//   past_due - the support tier's payment is past due (the live ones keep
-//              running);
+//   past_due - a payment of the account's (a tier's or an add-on's) is past
+//              due (the live ones keep running);
 //   limit    - every server the entitlement covers is live (stopping ones
 //              included);
 //   full     - every hosted server place on the service is taken.
@@ -52,6 +52,20 @@ export function startBlock(data: HostedServersResponse): StartBlock | null {
 
 export function canStartAnother(data: HostedServersResponse | null): boolean {
   return data !== null && startBlock(data) === null;
+}
+
+// Why a past-due account starts no server, in its owner's words: the
+// payment may be a tier's or an add-on's.
+export const PAST_DUE_TEXT =
+  "A payment of yours did not go through. Your servers keep running while Stripe retries the card; new servers can't start.";
+
+// The biggest support tier: none past it to move to.
+const TOP_TIER = 3;
+
+// Whether the account can move to a bigger support tier for more servers: not
+// with an admin's grant (it buys none), nor on the biggest tier.
+export function biggerTierOffered(e: HostingEntitlement): boolean {
+  return !e.granted && (e.tier ?? 0) < TOP_TIER;
 }
 
 // How many of the account's own machines are free for a new server.

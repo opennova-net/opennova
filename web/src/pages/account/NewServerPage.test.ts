@@ -7,7 +7,7 @@ import { address, addressesResponse } from '../../test/addressFixtures';
 import { hostedServer, serversResponse } from '../../test/hostedFixtures';
 import { testRouter } from '../../test/router';
 import type { Address } from '../../types/addresses';
-import type { HostedServer } from '../../types/hostedServer';
+import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
 
 vi.mock('../../api/hostedServer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/hostedServer')>()),
@@ -52,6 +52,20 @@ async function mountPage(from: HostedServer, owned: Address[], ownMachines = 1) 
   return wrapper;
 }
 
+// The page with no server to start again, the account's servers `live`.
+async function mountBlocked(live: HostedServer[], e: Partial<HostedServersResponse['entitlement']>) {
+  servers.mockResolvedValue({ ok: true, value: serversResponse(live, { entitlement: e }) });
+  addresses.mockResolvedValue({ ok: true, value: addressesResponse([]) });
+  const router = await testRouter('/me/servers/new');
+  wrapper = mount(NewServerPage, { global: { plugins: [router] } });
+  await flushPromises();
+  return wrapper;
+}
+
+function linkTexts(page: VueWrapper): string[] {
+  return page.findAll('a').map((a) => a.text());
+}
+
 function selectedAddress(page: VueWrapper): string {
   const select = page.get('#new-server-address_id').element as HTMLSelectElement;
   return select.options[select.selectedIndex].text;
@@ -89,6 +103,31 @@ describe('NewServerPage', () => {
     // Gone from the account's list: another free one, never the old one.
     const gone = await mountPage(stoppedAtAddress(), [address(4, 'arena')]);
     expect(selectedAddress(gone)).toBe('arena.play.opennova.net');
+  });
+
+  it('says why no server starts, offering a bigger tier only to an account that can buy one', async () => {
+    const past = await mountBlocked([], { can_start: false, source: 'comp', tier: null, granted: true });
+    expect(past.get('#new-server-blocked').element.closest('section')!.textContent).toContain(
+      "A payment of yours did not go through. Your servers keep running while Stripe retries the card; new servers can't start.",
+    );
+    expect(linkTexts(past)).toContain('Update your payment method');
+    past.unmount();
+
+    const locked = await mountBlocked([], { max_servers: 0, source: 'none', tier: null });
+    expect(locked.text()).toContain('Hosting a server needs a support tier or an admin grant.');
+    expect(linkTexts(locked)).toContain('See the support tiers');
+    locked.unmount();
+
+    const one = [hostedServer(1)];
+    const tier1 = await mountBlocked(one, { max_servers: 1, tier: 1 });
+    expect(linkTexts(tier1)).toContain('See the support tiers');
+    tier1.unmount();
+    const granted = await mountBlocked(one, { max_servers: 1, tier: 1, granted: true });
+    expect(granted.text()).toContain('All the servers you may run at once are live.');
+    expect(linkTexts(granted)).not.toContain('See the support tiers');
+    granted.unmount();
+    const top = await mountBlocked([hostedServer(1), hostedServer(2), hostedServer(3)], { tier: 3 });
+    expect(linkTexts(top)).not.toContain('See the support tiers');
   });
 
   it('starts a shared server again on a shared machine, and offers no own machine with none free', async () => {

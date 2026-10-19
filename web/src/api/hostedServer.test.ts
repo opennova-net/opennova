@@ -51,6 +51,17 @@ describe('fetchMyServers', () => {
     expect(result).toEqual({ ok: true, value: body });
   });
 
+  it("reads the entitlement's tier and grant, none when left out", async () => {
+    const body = serversResponse([], { entitlement: { source: 'comp', tier: 2, granted: true } });
+    get.mockResolvedValue(reply(body));
+    const granted = await fetchMyServers();
+    expect(granted.ok && granted.value.entitlement).toMatchObject({ tier: 2, granted: true });
+    const { tier: _tier, granted: _granted, ...older } = body.entitlement;
+    get.mockResolvedValue(reply({ ...body, entitlement: { ...older } }));
+    const plain = await fetchMyServers();
+    expect(plain.ok && plain.value.entitlement).toMatchObject({ tier: null, granted: false });
+  });
+
   it('refuses a reply whose entitlement or any server is malformed', async () => {
     const good = serversResponse([hostedServer(1)]);
     get.mockResolvedValue(reply({ ...good, entitlement: { ...good.entitlement, max_servers: '3' } }));
@@ -202,11 +213,14 @@ describe('the start, the stop and one server', () => {
     post.mockRejectedValue(refusal(403, { error: 'payment_past_due', message: 'raw server text' }));
     const pastDue = await startHostedServer(settings());
     expect(!pastDue.ok && pastDue.error.message).toContain('Stripe retries the card');
+    // An add-on's payment counts too: no tier assumed.
+    expect(!pastDue.ok && pastDue.error.message).toContain('A payment of yours did not go through');
     expect(!pastDue.ok && pastDue.error.message).not.toContain('raw server text');
 
     post.mockRejectedValue(refusal(403, { error: 'not_entitled' }));
     const locked = await startHostedServer(settings());
     expect(!locked.ok && locked.error.code).toBe('not_entitled');
+    expect(!locked.ok && locked.error.message).toBe('Hosting a server needs a support tier or an admin grant.');
     expect(linksToSupportTier('not_entitled')).toBe(true);
 
     post.mockRejectedValue(refusal(409, { error: 'at_capacity' }));
