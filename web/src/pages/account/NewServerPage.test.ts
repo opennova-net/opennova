@@ -135,8 +135,19 @@ describe('NewServerPage', () => {
   });
 
   it('starts on the dedicated machine once every server on shared machines is live', async () => {
-    // Tier 2 and a dedicated machine, both shared servers live.
-    const page = await mountBlocked([hostedServer(1), hostedServer(2)], { max_servers: 3, tier: 2, own_machines: 1 });
+    // Tier 2 and a dedicated machine, both shared servers live: a stopped shared
+    // server starts again on the dedicated machine.
+    const stopped = hostedServer(7, { state: 'stopped' });
+    servers.mockResolvedValue({
+      ok: true,
+      value: serversResponse([hostedServer(1), hostedServer(2), stopped], {
+        entitlement: { max_servers: 3, tier: 2, own_machines: 1 },
+      }),
+    });
+    addresses.mockResolvedValue({ ok: true, value: addressesResponse([]) });
+    wrapper = mount(NewServerPage, { global: { plugins: [await testRouter('/me/servers/new?from=7')] } });
+    await flushPromises();
+    const page = wrapper;
     expect(page.find('#new-server-blocked').exists()).toBe(false);
     expect(page.find('#new-server-shared_machine').exists()).toBe(false);
     expect(page.get('#new-server-pool').text()).toBe('On your dedicated machine');

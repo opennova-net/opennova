@@ -87,7 +87,7 @@ describe('UserDetailSection', () => {
     const hosting = wrapper.get('#user-hosting').element.parentElement!.textContent!;
     expect(hosting).toContain('2 hosted servers');
     expect(hosting).toContain('Tier 2');
-    expect(hosting).toContain('All on shared machines');
+    expect(hosting).toContain('2 on shared machines');
     expect(wrapper.findAll('a').filter((a) => a.attributes('href')?.startsWith('/admin/fleet/'))).toHaveLength(3);
     const customer = wrapper.findAll('a').find((a) => a.text() === 'cus_test_7');
     expect(customer?.attributes('href')).toBe('https://dashboard.stripe.com/test/customers/cus_test_7');

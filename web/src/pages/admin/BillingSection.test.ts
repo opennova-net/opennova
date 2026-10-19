@@ -219,7 +219,7 @@ describe('BillingSection', () => {
     await hold.findAll('button').find((b) => b.text() === 'Apply the stops')!.trigger('click');
     // The first step asks, naming what stops or moves; nothing is sent yet.
     expect(applyStops).not.toHaveBeenCalled();
-    expect(wrapper.get('section.limits-hold').text()).toContain('move to a shared machine while there is room, else stop');
+    expect(wrapper.get('section.limits-hold').text()).toContain('move to a shared machine while their owner has a shared server free and there is room, else stop');
     const confirm = wrapper
       .get('section.limits-hold')
       .findAll('button')
