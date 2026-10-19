@@ -7,7 +7,8 @@
 # images cross between the deployments in their one direction alone, a deploy
 # never takes `app down`'s zero counts for a first release (but starts a
 # program the down record names no count for, and `app up` the same), a
-# rollback refuses a release from before the program split, a release's
+# rollback refuses a release from before the program split (and a failed
+# deploy from one says fix forward, never a rollback to it), a release's
 # revisions hand the serve image and hostd's to every container that reads the
 # fleet's policy, fleet logs and fleet console read CloudWatch and EC2 alone
 # (the streams the service names, or by their names while it is down), fleet
@@ -315,6 +316,21 @@ out="$( (set_deployment staging; app_rollback --to 20261016T000000Z-abc1234 --ye
   && fail "a rollback to the controller's era went on" \
   || { [[ "$out" == *"before the program split"* ]] && pass "a rollback to a release from before the split is refused" || fail "pre-split rollback: $out"; }
 unset -f release_manifest release_current_manifest
+# A deploy whose roll fails says how back: a rollback to a release of the
+# programs, fix forward from one app rollback refuses (the cutover's).
+out="$(deploy_failed_advice '{"id":"20261016T000000Z-abc1234","programs":["worker","controller","web","lobby","gate"]}' \
+  20261016T000000Z-abc1234 20261019T000000Z-def5678)"
+[[ "$out" == *"fix forward"* && "$out" == *"The cutover to the fleet program"* && "$out" != *"rollback --to"* ]] \
+  && pass "a deploy failing at the cutover says fix forward, never a rollback to the controller's release" \
+  || fail "cutover advice: $out"
+out="$(deploy_failed_advice '{}' none 20261019T000000Z-def5678)"
+[[ "$out" == *"fix forward"* && "$out" != *"rollback --to"* ]] && pass "a first release that fails says fix forward" \
+  || fail "first release advice: $out"
+out="$( (set_deployment staging; deploy_failed_advice '{"id":"20261019T000000Z-def5678","programs":["gate","lobby","web","fleet","worker","data"]}' \
+  20261019T000000Z-def5678 20261020T000000Z-0123456) )"
+[[ "$out" == *"./deploy/run.sh --deployment staging app rollback --to 20261019T000000Z-def5678"* ]] \
+  && pass "a deploy failing after the split names the rollback to the release before it" \
+  || fail "rollback advice: $out"
 
 echo "--- a release's revisions: the serve image and hostd's where the policy is read"
 described='{"taskDefinition":{"family":"opennova-staging-x","containerDefinitions":[

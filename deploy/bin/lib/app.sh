@@ -354,6 +354,29 @@ release_current_manifest() {
   fi
 }
 
+# Whether release manifest $1 is from before the program split (it names no
+# fleet and no data program: the controller's era, or no release at all),
+# which no service runs and app rollback refuses.
+release_pre_split() {
+  ! jq -e '(.programs | type) == "array" and (.programs | index("fleet")) != null and (.programs | index("data")) != null' \
+    <<<"$1" >/dev/null 2>&1
+}
+
+# What app deploy says when its roll to release $3 failed, the deployment's
+# release still $2 (its manifest $1): app rollback --to it, or, for a release
+# app rollback refuses (none, or one from before the program split: the
+# cutover's), fix forward.
+deploy_failed_advice() {
+  local manifest="$1" current_id="$2" id="$3" what
+  what="the deployment did not reach $id, which is not recorded: $current_id stays the deployment's release, and the programs before the one that failed run the new revisions."
+  if release_pre_split "$manifest"; then
+    printf '%s app rollback cannot go back to %s (no release, or one from before the program split): fix forward, the cause first, then app deploy again (DEPLOY.md, "The cutover to the fleet program")' \
+      "$what" "$current_id"
+  else
+    printf '%s ./deploy/run.sh%s app rollback --to %s puts every program back on %s' "$what" "$DEP_FLAG" "$current_id" "$current_id"
+  fi
+}
+
 release_manifest() {
   local bucket="$1" id="$2"
   aws s3 cp "s3://$bucket/releases/$id.json" - 2>/dev/null \
@@ -829,7 +852,7 @@ app_deploy() {
   # (and the backup task's revision, which the nightly run takes) never names
   # what nothing runs.
   if ! release_roll "$(jq -nc --argjson r "$revisions" --arg hostd "$hostd" '{task_definitions: $r, images: {hostd: $hostd}}')"; then
-    die "the deployment did not reach $id, which is not recorded: $current_id stays the deployment's release, and the programs before the one that failed run the new revisions. ./deploy/run.sh$DEP_FLAG app rollback --to $current_id puts every program back on $current_id"
+    die "$(deploy_failed_advice "$manifest" "$current_id" "$id")"
   fi
   td="$(release_revision backup "$(jq -r '.task_definitions.backup // empty' <<<"$manifest")" "$images" "$serve" "$hostd" "$hosting" "$present")" || exit 1
   revisions="$(jq -c --arg v "$td" '. + {backup: $v}' <<<"$revisions")"
@@ -899,8 +922,9 @@ app_rollback() {
   # revisions name a program no service runs, and no fleet would lead.
   jq -e '(.programs | type) == "array" and (.task_definitions | type) == "object"' <<<"$manifest" >/dev/null 2>&1 \
     || die "release $to was made before the programs (its manifest names none): no program runs it"
-  jq -e '(.programs | index("fleet")) != null and (.programs | index("data")) != null' <<<"$manifest" >/dev/null 2>&1 \
-    || die "release $to was made before the program split (its programs name no fleet and no data program, the controller's era): no service runs its controller, so rolling back to it would leave the fleet unled. Roll forward instead (app deploy); going back past the split is the cutover's rollback (DEPLOY.md)"
+  if release_pre_split "$manifest"; then
+    die "release $to was made before the program split (its programs name no fleet and no data program, the controller's era): no service runs its controller, so rolling back to it would leave the fleet unled. Roll forward instead (app deploy); going back past the split is the cutover's rollback (DEPLOY.md, \"The cutover to the fleet program\")"
+  fi
   manifest="$(jq -c . <<<"$manifest")"
   confirm_prod "roll prod's programs back onto release $to" "$yes"
   # Rolled first, recorded once every program runs it.

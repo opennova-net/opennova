@@ -1010,11 +1010,12 @@ it the current release; the revisions stay registered, so any release made since
 deployment's account was built can be rolled back to, with two limits: a rollback across a
 migration is the database's business (section 6), and a release from before the program
 split (its programs name no fleet and no data program: the controller's) is refused, since
-no service runs its controller any more; past the split, fix forward. The nightly backup runs the current
-release's backup revision (its image pinned by digest): `app deploy` and `app rollback`
-point its schedule at it as they record the release, and an `infra apply` reads the same
-from the release (never the family's newest revision, which an apply's template,
-`latest`, may be). Before the first release the schedule is off.
+no service runs its controller any more; past the split, fix forward (section 7, "The
+cutover to the fleet program"). The nightly backup runs the current release's backup
+revision (its image pinned by digest): `app deploy` and `app rollback` point its schedule
+at it as they record the release, and an `infra apply` reads the same from the release
+(never the family's newest revision, which an apply's template, `latest`, may be). Before
+the first release the schedule is off.
 
 ### The deploy workflow
 
@@ -1397,6 +1398,166 @@ game data stays in the bucket).
 - **A refused AWS call.** The service logs each failure (`app logs worker`); for an
   `UnauthorizedOperation`, `./deploy/run.sh --deployment <deployment> aws sts decode-authorization-message
   --encoded-message <message>` names the condition that refused it.
+
+### The cutover to the fleet program
+
+A deployment whose release still runs the controller (any release from before the program
+split: `app releases` lists no `fleet` and no `data` image in it) moves to the fleet program
+once, in one window with the whole service down: the retail lobby, the site and every hosted
+server, for about 30 to 45 minutes, each hosted server back once its new machine has fetched
+its data. Staging goes first, the whole way; prod's deploy then promotes staging's release,
+which a staging release from before the split cannot be (`app deploy --promote staging`
+refuses one that names no fleet or data image, and changes nothing).
+
+It takes two checkouts: the **old** one, a worktree of the `master` commit before the fleet
+program (`git worktree add ../opennova-before-fleet <that commit>`), whose toolbox still knows
+the controller, and the **new** one, `master` with it. Every command runs from the new
+checkout unless it says old.
+
+**Before the window**, for both deployments:
+
+- **The boundaries and the policies.** `./deploy/run.sh org plan`, then `org apply`. It
+  writes into each account `opennova-role-boundary` with what the programs gain (the
+  worker's static addresses and their Route 53 records; web's reads of the logs, the metrics
+  and the fleet cluster), the new `opennova-machine-boundary` (the instance role's ECS agent
+  calls on the fleet cluster and the machines' and servers' logs; hostd's task role's tree
+  reads and ECS Exec), the deploy user's leave to make a role under either
+  (`opennova-deploy-iam`), and the GitHub deploy role's to roll the fleet and data programs
+  and hostd. Without it, step 4 cannot make the machines' roles ("The boundaries",
+  `infra/aws/iam/README.md`). It also takes what only the old machines used: their
+  instance role's SSM agent calls (`ssm:UpdateInstanceInformation` and its channels) and
+  the deploy user's `ssm:StartSession` and `ec2:CreateImage` (the old `fleet shell` and
+  `fleet bake-image`). From this apply until step 6 ends them the old machines have no
+  shell: do anything that needs one on them before it.
+- **The Elastic IP quota.** Request 10 of L-0263D0A3 in each account in the Service Quotas
+  console now: a grant can take days, and the static-address add-on stays off until
+  `fleet_max_addresses` is raised ("Turning it on", step 9). `./deploy/run.sh --deployment
+  staging aws service-quotas get-service-quota --service-code ec2 --quota-code L-0263D0A3`
+  shows it.
+- **The static address's price.** `./deploy/run.sh --deployment staging stripe setup` (test
+  mode), then `--deployment prod stripe setup` (live mode), makes the add-on's product and
+  monthly price (5 USD, or `--static-address USD`) and writes `price_static_address` into
+  the deployment's Stripe item; then `stripe check` and `secrets sync` on each, so SSM holds
+  `STRIPE_PRICE_STATIC_ADDRESS` for the new release's web and worker.
+- **The images.** The merge's image workflows publish three new GHCR packages,
+  `opennova-novaworld-fleet`, `opennova-novaworld-data` and `opennova-hostd`: make each one
+  public (section 5) before step 5, since `app deploy` resolves their tags anonymously and
+  the tasks and the machines pull them that way.
+- **The machines' AMI.** **[admin]** `aws ssm get-parameters --names
+  /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_name --query
+  'Parameters[0].Value' --output text --region <region>` names Amazon's recommended
+  ECS-optimized AL2023 image (a public parameter, the same from any account; the deploy
+  user's SSM reads stop at `/opennova/*`). When it is newer than `fleet_ami` in
+  `staging.tfvars` and `prod.tfvars`, bump both before step 4: no machine boots from either
+  yet. A name that matches no image fails the plan.
+
+**The window.** Steps 3 to 7 run on staging first (step 1), then on prod; `D` names the
+deployment (`D='--deployment staging'`, then `D='--deployment prod'`).
+
+1. **Staging's rehearsal.** While staging is down (`app down`), `./deploy/run.sh --deployment
+   staging app up` from the **old** checkout brings back its current release; give an
+   account a comp grant and start a server (smoke test F), so the cutover has an old machine
+   and a live server to carry. Then steps 3 to 7 on staging, and smoke tests F to J after.
+2. **Prod's window, announced**: the retail lobby, the site and the hosted servers down for
+   about 30 to 45 minutes, each hosted server back once its new machine has its data.
+3. **Down, then a snapshot.** From the **old** checkout, `./deploy/run.sh $D app down` (on
+   prod, type `prod`): the new toolbox would try to stop the fleet and data programs'
+   services, which do not exist yet, and never the controller's. Then `./deploy/run.sh $D
+   db snapshot`, and its `aws rds wait db-snapshot-available` (the command prints it).
+4. **The stack.** `./deploy/run.sh $D infra plan`, then `./deploy/run.sh $D infra apply
+   --allow-destroy`: the plan destroys the controller's service, a program's service,
+   which `infra apply` refuses to destroy without the flag (read the plan for nothing else
+   precious going), and its Cloud Map service (the fleet program's `fleet` takes its
+   place, with no alias: every machine is replaced). It adds the fleet and data programs'
+   services (no task until a release names them), the fleet cluster and hostd's daemon
+   (running nowhere until a machine registers), the AL2023 launch templates, the machines'
+   roles under their boundary and the servers' log group (the play zone too, with
+   `fleet_max_addresses` above 0), and deletes the baked image's parameter
+   (`/opennova/<deployment>/fleet/image`). The controller's security group's delete may
+   retry for a few minutes while ECS lets go of its last network interface. The apply also
+   raises `max_connections` to 94 (`db_service_processes` 12, for six programs), a static
+   parameter that waits for a reboot: reboot the database now, while nothing connects
+   (`infra output -raw db_identifier` names it):
+
+   ```bash
+   ./deploy/run.sh $D aws rds reboot-db-instance --db-instance-identifier opennova-staging-db   # opennova-prod-db on prod
+   ./deploy/run.sh $D aws rds wait db-instance-available --db-instance-identifier opennova-staging-db
+   ```
+
+5. **The release, then up**, from the toolbox and never the deploy workflow: the fleet's and
+   the data program's first release raises their task-count floors, which the workflow's
+   role may not (section 5).
+
+   ```bash
+   ./deploy/run.sh --deployment staging app deploy --tag sha-<programs> --serve-tag sha-<serve> --hostd-tag sha-<serve>
+   ./deploy/run.sh --deployment prod app deploy --promote staging      # type prod
+   ./deploy/run.sh $D app up
+   ```
+
+   The deploy finds the programs down: the worker, web, the lobby and the gate take their
+   new revisions at 0 tasks, while the fleet and data programs, which the old `app down`
+   recorded no count for, start as a first release, at their `desired` count with their
+   floors raised. The first of them to boot applies the new migrations, and from then the
+   database is the fleet program's ("Rolling back", below). hostd has no machine yet, so
+   there is no agent to confirm. `app up` starts the recorded counts, and the fleet's and
+   the data program's from their `desired`. Then the stack once more:
+
+   ```bash
+   ./deploy/run.sh $D infra plan
+   ./deploy/run.sh $D infra apply
+   ```
+
+   The stack reads the release parameter when it plans (`local.released`,
+   `infra/aws/programs.tf`), and step 4's plan read the controller's release, which names
+   no fleet and no data program: it made no fleet pass-age alarm and left the fleet's and
+   the data program's heartbeat and running alarms quiet on missing data. This plan reads
+   the new release: it makes the one and arms the others, and keeps the floors the first
+   release raised. Until it applies, a fleet or data program that stops alarms nothing.
+6. **The old machines.** Their agents report to the controller's name, which step 4
+   removed, so the fleet program takes each for lost within a minute of leading and ends it
+   3 minutes later; its servers are placed again on new machines (container instances of the
+   fleet cluster, on the pinned AMI), no restart counted, each listing again once its machine
+   has fetched its data. With one or two (prod's usual) that is all. With more than two lost
+   at once, and more than half the live machines, the mass-lost brake holds them instead
+   (`fleet status` says "held lost by the brake", the Attention list names each, the fleet
+   leader logs an ERROR): end one, `./deploy/run.sh $D fleet end <machine>`, as the canary,
+   wait until its servers run and list again, then end the rest the same way.
+7. **Verify, then clean up.** Smoke tests A to E, then F's checks on the servers that ran
+   before (each running and listed again). `./deploy/run.sh $D fleet status`: every machine
+   a container instance of the fleet cluster on the pinned AMI, its agent connected and its
+   hostd task running and healthy; nothing that needs you; no machine older than the
+   release or held. Then, in the same round:
+   - once each deployment's check holds, the images `fleet bake-image` baked in its account
+     and their snapshots, tagged `opennova:fleet-image` with the deployment's tag
+     (`opennova-staging`, `opennova-prod`): deregister each image, then delete its
+     snapshots (a snapshot an image still uses refuses):
+
+     ```bash
+     ./deploy/run.sh $D aws ec2 describe-images --owners self --filters Name=tag:opennova:fleet-image,Values=opennova-staging --query 'Images[].[ImageId,Name]' --output text
+     ./deploy/run.sh $D aws ec2 deregister-image --image-id <ami>
+     ./deploy/run.sh $D aws ec2 describe-snapshots --owner-ids self --filters Name=tag:opennova:fleet-image,Values=opennova-staging --query 'Snapshots[].SnapshotId' --output text
+     ./deploy/run.sh $D aws ec2 delete-snapshot --snapshot-id <snapshot>
+     ```
+
+   - once prod's holds, the old GHCR package `opennova-novaworld-controller` (its Package
+     settings on GitHub, Delete this package; until then a rollback of prod's window still
+     runs its images), and the old checkout's worktree (`git worktree remove
+     ../opennova-before-fleet`);
+   - once the Elastic IP quota is granted, `fleet_max_addresses`, if the add-on is to sell
+     ("Turning it on", step 9).
+
+**Rolling back.** Until step 5's first boot (the first fleet or data task, which applies the
+migrations), the database is still the controller's: from the **old** checkout, `infra apply
+--allow-destroy` (the old stack: the controller's service and Cloud Map name back, the fleet
+cluster, hostd and the fleet and data services gone), then `app up`, which starts the counts
+its `app down` recorded, and `app converge`, which puts the controller's service, made anew on
+its Terraform template, back on the release's images. The baked image's parameter comes back
+at the stock Ubuntu image the old stack seeds it with, and every new machine boots from it,
+slower: no image is baked again, since `org apply` took the bake's `ec2:CreateImage` (and the
+machines' SSM shell) until an `org apply` from the old checkout puts the old boundary back.
+After the first boot there is no going back: fix forward with `app deploy`, the snapshot
+being for data loss alone. `app rollback` refuses a release from before the split, and says
+why.
 
 ## Monthly support tiers (Stripe)
 
