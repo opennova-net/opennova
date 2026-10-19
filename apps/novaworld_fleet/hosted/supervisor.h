@@ -26,7 +26,7 @@
 //                 entitlement (its live servers under it), the cap and the
 //                 fleet's room were checked then
 //   provisioning  placed (placement.h): on the fullest shared machine with a
-//                 free slot, or the own machine reserved for it; with none, a
+//                 free slot, or the dedicated machine reserved for it; with none, a
 //                 machine of that kind is launched and the server placed on it
 //                 at once (a booting machine takes servers: it waits for the
 //                 boot in booting, no restart counted), and at the fleet's
@@ -162,7 +162,7 @@
 //                          off one at a time (the next once the last moved one
 //                          runs again elsewhere), and once it holds none it ends
 //   ready -> ended         a shared machine idle (no server on it) for idle_ms
-//                          (ONNET_FLEET_IDLE_MINUTES), an own machine whose
+//                          (ONNET_FLEET_IDLE_MINUTES), a dedicated machine whose
 //                          server ended or moved to a shared machine; an
 //                          admin's end (ending) the next pass
 //
@@ -193,20 +193,20 @@
 // it locks what it shares with the pass, and reads the database outside that
 // lock.
 //
-// The static addresses (hosted/model/address_repository.h, ADR 0066): an own
+// The static addresses (hosted/model/address_repository.h, ADR 0066): a dedicated
 // machine launched for a server that names an address carries it
 // (fleet_machines.address_id). Once the machine has a cloud id the pass
 // enqueues its address.associate (and asks a describe, at most every
 // describe_interval_ms, until its row shows the address), and holds the
 // server's container back (booting, its clock waiting; sync answers no
 // unstarted container) until the machine's public address is the address, so
-// the lobby lists it at <address>:32768 from its first packet: an own
+// the lobby lists it at <address>:32768 from its first packet: a dedicated
 // machine's public address never changes while it runs a server. An address
 // whose grant is gone lapses: a subscription's whose subscription no longer
 // grants, and a comp one nothing covers (address_repository.h
 // uncovered_comp_addresses: its account gone or no longer an active
 // player's, or its newest comp ones while the account's addresses pass its
-// own machines; a paid one never lapses for that). One the billing cache
+// dedicated machines; a paid one never lapses for that). One the billing cache
 // judged (a subscription's, a comp one of an account with subscriptions)
 // lapses only once a clean reconcile with Stripe has completed since the pass
 // first saw it so (limits_hold.h reconciles), and never more at once than
@@ -476,7 +476,7 @@ private:
 	// The server's place: a slot it is started on at once (on a machine launched
 	// for it, if need be), or a wait.
 	void place(db::Database &db, const HostedServer &server, Runtime &rt, uint64_t now_ms);
-	// A machine of `kind` launched for `server` (an own one reserved for it);
+	// A machine of `kind` launched for `server` (a dedicated one reserved for it);
 	// false when none was (the launch backoff, a refused launch: the server
 	// waits, no restart counted).
 	bool launch_machine(db::Database &db, const HostedServer &server, MachineKind kind, Runtime &rt,

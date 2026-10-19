@@ -38,7 +38,8 @@ anywhere: a shell is ECS Exec. The gate's Elastic IP is one no Terraform plan ca
 the load balancer's address in its first zone, where retail clients reach the gate, the
 lobby and the retail HTTP routes; the website reaches web through Cloudflare alone, over
 TLS Cloudflare verifies. Hosted game servers run on machines the service launches itself:
-shared machines holding up to 6 servers, and own machines (a paid add-on) holding one.
+shared machines holding up to 6 servers, and dedicated machines (a monthly product of their
+own) holding one.
 
 ## Deployments: dev, staging and prod
 
@@ -372,7 +373,7 @@ export OP_SERVICE_ACCOUNT_TOKEN=ops_...                         # the only secre
 
 `./deploy/run.sh --deployment staging secrets check`, once `org apply` (section 3) has
 written the deploy keys it resolves too, resolves every reference without printing a
-value, and reports each Stripe item as `OK (test mode, 3 tiers + own machine + static address)`, `placeholders: <fields> (billing
+value, and reports each Stripe item as `OK (test mode, 3 tiers + dedicated machine + static address)`, `placeholders: <fields> (billing
 off)`, `absent (billing off)` or `FAILED: <field> (malformed)` / `(a test key in a live
 item)`; a failed one makes it exit non-zero. The forms it checks: `secret_key`
 `sk_<mode>_...` or `rk_<mode>_...` (the item's mode: `test` for `stripe-test`, `live` for
@@ -1111,8 +1112,9 @@ again (section 4). On prod it asks for `prod` besides `--yes-drop-database`.
 
 ## 7. Hosted game servers
 
-An account with a hosting entitlement (a monthly support tier, or an admin's comp grant
-of servers and own machines, the admin user page) starts servers from the site's My servers page, picking a data set
+An account with a hosting entitlement (a monthly support tier, a dedicated machine, or an
+admin's comp grant of shared servers and dedicated machines, the admin user page) starts
+servers from the site's My servers page, picking a data set
 (JO, DFX2 or OpenNova: a product's game files, which admins upload on the site's Game
 data page, below) and, for JO, its Escalation expansion. The server is always the public
 `opennova-serve` image, started with `/game <title>` (and `/exp <code>`) over the data
@@ -1124,7 +1126,9 @@ in the worker's jobs, with the worker's task role), in either public subnet:
 - **shared machines**, `t3a.medium` with unlimited CPU credits, holding up to 6 servers
   (`shared_slots`; each slot's 512 MiB memory limit, so 3 of its 4 GiB) of any accounts, packed best-fit; an idle one ends after 30 minutes
   (`fleet_idle_minutes`);
-- **own machines**, `c7a.medium`, exactly one server: the own-machine add-on.
+- **dedicated machines**, `c7a.medium`, exactly one server: each its own monthly
+  subscription (no support tier needed) or an admin's grant, one more server beside the
+  tier's.
 
 Slot k of a machine is game UDP `32768+k` (to players) and admin TCP `32800+k` (to the
 fleet program alone); hostd, the agent on each machine, runs one container per slot and
@@ -1137,11 +1141,11 @@ hostd is that cluster's DAEMON service, one task per machine, which `app deploy`
 servers pin from the store (below), once each, onto its root volume
 (`machine_root_volume_gb`, 40 GiB), and keeps each while a server needs it. Machines are
 terminated, never stopped. No machine has an SSH key or database credentials;
-break-glass is ECS Exec into its hostd (`fleet shell`). At most 2 shared and 2 own machines run at
+break-glass is ECS Exec into its hostd (`fleet shell`). At most 2 shared and 2 dedicated machines run at
 once (`fleet_max_shared`, `fleet_max_own`); `ONNET_HOSTED_CAP`, what that fleet holds at
 its most (`fleet_max_shared` x `shared_slots` + `fleet_max_own`: 14 at the defaults, 7 on
 staging), caps the servers. The same sizes are what the site sells: a checkout past
-`fleet_max_shared` x `shared_slots` shared places, `fleet_max_own` own machines or
+`fleet_max_shared` x `shared_slots` shared places, `fleet_max_own` dedicated machines or
 `fleet_max_addresses` static addresses (0 by default: the static-address add-on off;
 "Turning it on", step 9) is refused as sold out. `infra plan` and `infra apply` warn when a
 plan lowers one of the four: an account already sold more keeps it, and the admin's
@@ -1249,11 +1253,11 @@ deployment's admins upload it on its own site, into its own bucket.
    `staging.tfvars` first (`infra apply`, then `fleet roll`, smoke test F), then in
    `prod.tfvars` ("A machine image", below).
 
-8. **Subscribe, or grant.** An account hosts once it subscribes to a support tier, or an
-   admin gives it a comp grant (servers, and own machines, on the admin user page). Run smoke tests F
-   to J ("Smoke tests", at the end).
+8. **Subscribe, or grant.** An account hosts once it subscribes to a support tier or a
+   dedicated machine, or an admin gives it a comp grant (shared servers and dedicated
+   machines, on the admin user page). Run smoke tests F to J ("Smoke tests", at the end).
 
-9. **Static addresses** (optional): the add-on that gives an own machine a static IPv4
+9. **Static addresses** (optional): the add-on that gives a dedicated machine a static IPv4
    address and a name, `<name>.play.<domain>` (staging's `<name>.play.staging.<domain>`).
    Off while `fleet_max_addresses` is 0, the default. In this order:
    - **The Elastic IP quota, first.** Each address is an Elastic IP of the deployment's
@@ -1587,9 +1591,10 @@ mode serves staging (`stripe-test`), live mode prod (`stripe-live`).
 **What a mode holds** once `stripe setup` (below) ran in it: the products and their
 monthly USD prices, found by lookup key (`opennova_tier1_monthly` $5,
 `opennova_tier2_monthly` $10, `opennova_tier3_monthly` $15: 1, 2 and 3 hosted servers;
-`opennova_own_machine_monthly` $45, the add-on that puts one of the account's servers on
-a machine of its own, about what a `c7a.medium` costs; `opennova_static_address_monthly`
-$5, the add-on that gives one own machine a static IPv4 address and a name under the
+`opennova_own_machine_monthly` $45, a dedicated machine: one more hosted server on a
+machine of its own, no support tier needed, about what a `c7a.medium` costs;
+`opennova_static_address_monthly` $5, the add-on that gives one dedicated machine a static
+IPv4 address and a name under the
 deployment's play zone, which covers the address's $3.65 and Stripe's fee on the charge),
 their ids in the item's `price_tier1`..`price_tier3`, `price_own_machine` and
 `price_static_address` fields (`secrets sync` syncs billing's parameters only while every
@@ -1617,10 +1622,12 @@ the rest: a product and a monthly price per lookup key (`--tier1`, `--tier2`, `-
 `--own-machine`, `--static-address` take other amounts in US dollars: an amount that
 differs from the current price makes a new price, which takes the lookup key and goes
 first in the field, the old one kept after it, since the first is sold and the rest still
-grant); the price ids into the item; the portal configuration (customers switch among the
+grant); each product's name and description brought to the toolbox's catalog (an item
+renamed in `deploy/bin/lib/stripe.sh` renames its product, as the own machine's became
+"OpenNova dedicated machine"); the price ids into the item; the portal configuration (customers switch among the
 three tier products, an upgrade prorating at once and a downgrade waiting for the
 period's end, quantity changes off; cancel any subscription at the period's end, a tier,
-one own machine or one static address, since each add-on is a subscription of its own
+one dedicated machine or one static address, since each of those is a subscription of its own
 (quantity 1) bought through Checkout, and a static address's Cancel on the site opens the
 portal at that subscription's cancellation; and update the card, the email and the
 address and see invoices; the privacy and terms links are `https://<domain>/privacy` and
@@ -1662,9 +1669,10 @@ or have the server name the tagged one.
    privacy links (`stripe setup`) do not set these.
 3. **Revenue recovery** (Billing, Revenue recovery): retries (Smart Retries), then cancel
    the subscription when all retries fail. A past-due account keeps its servers running
-   but starts no new one; they stop when Stripe cancels, and the worker then sets the
-   account's add-ons (own machines, static addresses) to cancel at their period's end,
-   as it does whenever no tier of an account grants. Its customer emails: receipts
+   but starts no new one; they stop when Stripe cancels (the tier's shared servers with
+   the tier, a dedicated machine's server with its own subscription), and the worker sets
+   a static address past the account's dedicated machines to cancel at its period's end.
+   Its customer emails: receipts
    for successful payments, and the failed-payment emails.
 4. **Tax** is optional: Stripe Tax with `ONNET_BILLING_AUTOMATIC_TAX=1`. EU VAT applies
    from the first EU sale; check with an accountant.
@@ -1923,7 +1931,7 @@ machines and their egress; staging's account has its own (200).
 
 The machines: a full shared machine (`t3a.medium`, its address and volume, about $34) is
 about $5.70 a server at 6 servers, before egress (its CPU credits add a little under a
-sustained load); an own machine (`c7a.medium`) about $43. With static addresses sold, the
+sustained load); a dedicated machine (`c7a.medium`) about $43. With static addresses sold, the
 play zone adds $0.50, and each address $3.65 while no server runs at it (net $0 while one
 does: it replaces the machine's own public IPv4).
 Egress is about $0.09 a GB, and a full 64-player server sends about 1.8 GB an hour, so

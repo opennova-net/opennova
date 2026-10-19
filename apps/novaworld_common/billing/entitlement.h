@@ -79,7 +79,7 @@ struct AccountFacts {
 // Whether Stripe's `status` is one that grants (active, trialing, past_due).
 bool status_grants(std::string_view status);
 // Whether the subscription grants at `now` (Unix seconds): a granting status,
-// a tier (1..3) or an add-on (an own machine, a static address), and now <
+// a tier (1..3), a dedicated machine or a static address, and now <
 // current_period_end + kPeriodNetSeconds (no period end: no grant).
 bool subscription_grants(const SubscriptionRow &row, int64_t now);
 
@@ -89,9 +89,10 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 // The account's, read from the database (no such account: 0 servers).
 Entitlement entitlement_of(db::Database &db, int64_t user_id, int64_t now);
 
-// Whether an admin grants the account anything (servers, own machines or a
-// static address): its hosting is then that grant, and it buys no support tier
-// or add-on beside it (the checkout refuses one).
+// Whether an admin grants the account anything (shared servers, dedicated
+// machines or a static address): its hosting is then that grant, and it buys no
+// support tier, dedicated machine or static address beside it (the checkout
+// refuses one).
 bool admin_granted(const Entitlement &e);
 
 // The dedicated machines of `subscriptions` granting at `now` (their

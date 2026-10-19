@@ -3,7 +3,7 @@
 // The admin's user routes (README "Website sessions and roles";
 // apps/novaworld_common/hosted/README.md): GET and POST /api/admin/users, PUT and DELETE
 // /api/admin/users/<id>, PUT /api/admin/users/<id>/comp (an admin's
-// grants of hosted servers and own machines) and PUT /api/admin/users/<id>/game-access. Every
+// grants of hosted servers and dedicated machines) and PUT /api/admin/users/<id>/game-access. Every
 // handler opens with WebAccess::require_admin: the Bearer ADMIN_API_TOKEN, or
 // an admin-role website session (with the CSRF header on a state change). The
 // HttpListener owns one beside its other route families.

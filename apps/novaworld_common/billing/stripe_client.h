@@ -90,7 +90,7 @@ struct Subscription {
 	bool customer_deleted = false;
 
 	// The first item's price and period end ("" / 0 when it has no item): a
-	// tier or own-machine subscription carries one item.
+	// tier or dedicated-machine subscription carries one item.
 	std::string first_price_id() const;
 	int64_t first_period_end() const;
 	int64_t first_quantity() const;

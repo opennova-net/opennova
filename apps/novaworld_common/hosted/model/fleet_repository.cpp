@@ -948,8 +948,8 @@ std::vector<PlacementRequest> waiting_servers(db::Database &db) {
 bool fleet_has_room(db::Database &db, const PlacementPolicy &policy, bool own_machine) {
 	db::ReadSnapshot snapshot(db);
 	std::vector<FleetMachine> machines = placement_machines(db);
-	// An own machine's place is its server's while that server is live on an
-	// own machine: one whose server stopped, failed or moved to a shared machine
+	// A dedicated machine's place is its server's while that server is live on a
+	// dedicated machine: one whose server stopped, failed or moved to a shared machine
 	// waits for the supervisor's next pass to end it, and holds no place a start
 	// is refused for. The supervisor's own placement still counts it, so the
 	// start waits to launch its machine until it has ended (never past

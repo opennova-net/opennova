@@ -791,7 +791,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # reports a container running or exited, the stopping ones, a container rebuilt after a
     # service restart), and the machines' lifecycle (a boot that never reports, lost then gone
     # or terminated, the mass-lost brake, an agent reporting again, a shared machine idle past
-    # its time, an own machine ending with its server, a drain moving servers one at a time,
+    # its time, a dedicated machine ending with its server, a drain moving servers one at a time,
     # a roll and its plan, an admin's end, the reconciliation of the driver's machines with the
     # rows). Over the libraries hosted_supervisor_test links.
     add_executable(hosted_fleet_test novaworld/hosted_fleet_test.cpp)
@@ -1047,7 +1047,7 @@ opennova_off_bakes(opennova_serve_lister_e2e)
 # Where a hosted server runs (apps/novaworld_common/hosted/model/placement.h) and what a slot
 # of a machine is (hosted/protocol/slots.h): best fit on the fullest shared machine that takes
 # servers, the ties, the launches below the fleet's maximums and the waits at them, the
-# own-machine add-on's machine, the states that count, the columns' words. Pure
+# dedicated machine's reserved machine, the states that count, the columns' words. Pure
 # functions.
 add_executable(hosted_placement_test novaworld/hosted_placement_test.cpp)
 target_link_libraries(hosted_placement_test PRIVATE

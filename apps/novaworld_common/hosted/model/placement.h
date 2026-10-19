@@ -11,10 +11,10 @@
 // an emptied one can end). With none, a new shared machine is launched while the
 // fleet has fewer than ONNET_FLEET_MAX_SHARED of them taking servers, and the
 // server waits in provisioning for it ("waiting for a machine"; no restart is
-// counted); at that maximum the server waits for a slot to free. A server on the
-// own-machine add-on goes to the machine launched for it (reserved for its id)
+// counted); at that maximum the server waits for a slot to free. A server on a
+// dedicated machine goes to the machine launched for it (reserved for its id)
 // while that one takes servers (waiting while its slot is held, never getting a
-// second), else to a new own machine, at most ONNET_FLEET_MAX_OWN of them taking
+// second), else to a new dedicated machine, at most ONNET_FLEET_MAX_OWN of them taking
 // servers. A launching machine takes servers:
 // the servers that wait for it fill it as it boots, so one launch serves every
 // server a pass places. Draining and ending machines count toward neither
@@ -34,7 +34,7 @@ namespace opennova::novaworld_server::hosted {
 // fleet_machines.kind.
 enum class MachineKind : uint8_t {
 	Shared, // up to ONNET_FLEET_SHARED_SLOTS servers, any account's
-	Own, // one server, the add-on's: launched for it, ended when it stops or moves to a shared one
+	Own, // one server on a dedicated machine: launched for it, ended when it stops or moves to a shared one
 };
 
 // fleet_machines.state: launching -> booting -> ready -> draining -> ending ->
@@ -70,7 +70,7 @@ struct FleetMachine {
 	FleetMachineState state = FleetMachineState::Launching;
 	int slots = 0; // fleet_machines.slots
 	std::vector<int> used_slots; // any order; one outside 0..slots-1 is ignored
-	int64_t reserved_for = 0; // an own machine's server id (0: none)
+	int64_t reserved_for = 0; // a dedicated machine's server id (0: none)
 };
 
 // The fleet's knobs (ONNET_FLEET_*).
@@ -89,13 +89,13 @@ std::string check_placement_policy(const PlacementPolicy &policy);
 
 struct PlacementRequest {
 	int64_t server_id = 0;
-	bool own_machine = false; // the account's own-machine add-on puts it on a machine of its own
+	bool own_machine = false; // on a dedicated machine of the account's: a machine of its own
 };
 
 struct Placement {
 	enum class Outcome : uint8_t {
 		Placed, // on `machine_id`, at `slot`
-		Launch, // launch a machine of `launch_kind` (an own one reserved for the
+		Launch, // launch a machine of `launch_kind` (a dedicated one reserved for the
 				// server; a shared one of policy.shared_slots), then place again
 		Full, // at the maximum, no slot free: the server waits
 	};

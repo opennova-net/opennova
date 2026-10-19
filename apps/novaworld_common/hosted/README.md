@@ -2,7 +2,7 @@
 
 An account with a hosting entitlement can have the service run as many `opennova-serve`
 servers for it as the entitlement allows, each in a slot of one of the fleet's machines
-(a shared machine, or an own machine of its own), until it stops them (ADR 0053; this
+(a shared machine, or a dedicated machine, the server's alone), until it stops them (ADR 0053; this
 directory; the `hosted_servers`, `hosted_server_events` and `fleet_machines` tables). Each
 server runs the data set its owner picks (and an expansion of it), pinned to the data it
 started on (ADR 0064). Everything here is service policy. The service around it (the
@@ -51,8 +51,8 @@ this directory's.
 
 - **Machines and slots** (`model/placement.*`, `model/fleet_repository.*`,
   `backend/migrations/0003_fleet.sql`). A **shared machine** packs up to
-  `ONNET_FLEET_SHARED_SLOTS` servers of any account; an **own machine** runs exactly one,
-  the add-on's, launched for it and ended when it stops or moves to a shared machine
+  `ONNET_FLEET_SHARED_SLOTS` servers of any account; a **dedicated machine** runs exactly one,
+  its owner's, launched for it and ended when it stops or moves to a shared machine
   (the owners' limits, below). A **slot** is one server's
   position on a machine (`protocol/slots.h`): slot k is the game's UDP port 32768 + k (open to
   everyone), the remote admin's TCP port 32800 + k (open to the service alone), the
@@ -73,9 +73,9 @@ this directory's.
   shared machine that takes servers with a free slot, its lowest free slot, so machines
   fill one at a time and an emptied one can end; with none, a shared machine is launched
   while fewer than `ONNET_FLEET_MAX_SHARED` take servers, else the server waits in
-  `provisioning` for a slot. A server on the add-on goes to the machine reserved for it,
-  else to a new own machine (at most `ONNET_FLEET_MAX_OWN`). A start the planner could not
-  place, counting the servers already waiting, is `at_capacity`; an own machine whose
+  `provisioning` for a slot. A server on a dedicated machine goes to the machine reserved for it,
+  else to a new dedicated machine (at most `ONNET_FLEET_MAX_OWN`). A start the planner could not
+  place, counting the servers already waiting, is `at_capacity`; a dedicated machine whose
   server stopped, failed or moved to a shared machine holds no place for it (the next
   pass ends that machine, and only then launches the start's: an owner who stops and
   starts again at the maximum is taken, and waits a pass for the machine).
@@ -180,7 +180,7 @@ this directory's.
   stack's containers) fails; one whose describe finds it gone first fails at once. A ready
   or draining machine whose agent has been silent 60 s is `lost`: gone, it ends; still
   running, it is terminated 3 min later, unless its agent reports again first. A shared
-  machine with no server ends after `ONNET_FLEET_IDLE_MINUTES`; an own machine once its
+  machine with no server ends after `ONNET_FLEET_IDLE_MINUTES`; a dedicated machine once its
   server has ended or moved to a shared machine. The **mass-lost brake**: while more than
   max(2, half) of the live machines are lost at once (a bad hostd on every machine, the
   fleet's network gone: the fleet's fault, not the machines'), a lost machine is not
@@ -327,12 +327,12 @@ this directory's.
 
 ## Static addresses
 
-A **static address** (ADR 0066; `model/address_*.h`, `cloud/address_*.h`, `hosted_addresses`) is an own machine's
+A **static address** (ADR 0066; `model/address_*.h`, `cloud/address_*.h`, `hosted_addresses`) is a dedicated machine's
 fixed public IPv4 with a name, `<name>.play.<domain>` (staging `play.staging.<domain>`),
-which its owner keeps for the own-machine servers it starts: every start of a server that
+which its owner keeps for the servers it starts on dedicated machines: every start of a server that
 names it runs on a machine carrying it, so the server lists at the same `address:32768`
 each time. Each is its own Stripe subscription (the static-address add-on, quantity 1,
-bought through Checkout once the account has an own machine for it, canceled through the
+bought through Checkout once the account has a dedicated machine for it, canceled through the
 Portal's cancel flow), or an admin's comp address (`POST /api/admin/users/<id>/addresses`),
 which lapses once nothing covers it ("The fleet's pass" below). At most `ONNET_FLEET_MAX_ADDRESSES` are sold (`model/sold_capacity.*`), counting what the
 cloud holds too (an account's rows that hold a grant where they pass its grants, and every
@@ -353,7 +353,7 @@ releases the held ones.
   unique for good: a released address keeps it until an admin renames the row. A start
   names an address (`address_id`, with `own_machine`): it must be the owner's, ready, and
   no other live server's (409 `address_unavailable`; the database's one live server per
-  address). An own machine launched for such a server carries it (`fleet_machines.address_id`).
+  address). A dedicated machine launched for such a server carries it (`fleet_machines.address_id`).
 - **The jobs** (`model/address_jobs.*`, the worker's handlers `cloud/address_job_handlers.*`):
   `address.allocate` (the address found by its tag first, so a run cut short never allocates
   a second; then allocated with its tags
@@ -378,21 +378,21 @@ releases the held ones.
   `ONNET_HOSTED_DOCKER_ADDRESSES`, which the docker machine driver starts the machine at;
   its association confirmed by inspect) with `FileZone` (a zone file the worker rewrites
   whole, which the smoke test reads).
-- **The fleet's pass** (`apps/novaworld_fleet/hosted/supervisor.*`): an own machine
+- **The fleet's pass** (`apps/novaworld_fleet/hosted/supervisor.*`): a dedicated machine
   launched for a server that names an address carries it; once the machine has a cloud id
   the pass asks its `address.associate` and a describe, and holds the server's container
   back (booting, its clock waiting) until the machine's public address is the address, so
-  the lobby lists it at `<address>:32768` from its first packet (an own machine's public
+  the lobby lists it at `<address>:32768` from its first packet (a dedicated machine's public
   address never changes while it runs a server). An address whose grant is gone lapses:
   a subscription's whose subscription no longer grants, and a comp address nothing covers
   (`uncovered_comp_addresses`): every comp address of an account deleted or no longer an
   active player's (banned), and, while an account's addresses that count (its granting
-  static-address subscriptions and its comp addresses) pass its own machines, its newest
+  static-address subscriptions and its comp addresses) pass its dedicated machines, its newest
   comp ones until they no longer do (an admin's cut of its dedicated machines; a
   paid address never lapses for that, but with its subscription, which the billing sync
   sets to cancel at its period's end once it is past the dedicated machines:
   [`../README.md`](../README.md) "A static address past the dedicated machines ends"). One the billing cache
-  judged (a subscription's, or a comp one of an account with subscriptions, whose own
+  judged (a subscription's, or a comp one of an account with subscriptions, whose dedicated
   machines may be the cache's) lapses only once a clean reconcile with Stripe has
   completed since the pass first saw it so, and never more at once than max(2, half the
   addresses) (the owners' limits' brake: it logs an ERROR and lapses none of them; an
@@ -497,7 +497,7 @@ reads the store alone.
 | `ONNET_HOSTED_BOOTSTRAP_CIDRS` | none | fleet | Comma-separated private IPv4 CIDRs the agent routes answer (the machines' subnet); 127.0.0.0/8 is admitted besides on a loopback bind. |
 | `ONNET_FLEET_SHARED_SLOTS` | 12 | web, fleet, worker | A new shared machine's slots (1..32). |
 | `ONNET_FLEET_MAX_SHARED` | 2 | web, fleet, worker | The most shared machines taking servers at once (the worker's launch refuses a machine past it). |
-| `ONNET_FLEET_MAX_OWN` | 2 | web, fleet, worker | The most own machines taking servers at once (the same). |
+| `ONNET_FLEET_MAX_OWN` | 2 | web, fleet, worker | The most dedicated machines taking servers at once (the same). |
 | `ONNET_FLEET_MAX_ADDRESSES` | 0 | web, fleet, worker | The static addresses the fleet sells (0: the add-on is off). Above 0 with hosting on, `ONNET_HOSTED_ADDRESS_ZONE` must name the zone (else a boot warning and none sold), and the worker needs its driver's address settings below (else its boot FATAL). At 0 none is sold or allocated, while a worker whose address settings still read (the zone's name among them) releases the addresses held. |
 | `ONNET_HOSTED_ADDRESS_ZONE` | none | web, fleet, worker | The play zone the addresses are named in, no trailing dot (`play.opennova.net`; infra/aws/edge.tf's): the site shows each one as `<name>.<zone>`. |
 | `ONNET_FLEET_IDLE_MINUTES` | 30 | web, fleet, worker | How long a shared machine with no server lives on before it ends. |
@@ -535,7 +535,7 @@ writes need the CSRF header.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its own machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) and `stopped_because` (an ended server's last run: its cause, exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
+| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) and `stopped_because` (an ended server's last run: its cause, exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
 | `POST /api/me/servers` | a website session | the settings (`game_name` required; `data_set_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
 | `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason, why it lapsed and times) |
@@ -561,7 +561,7 @@ writes need the CSRF header.
 | `PUT /api/admin/addresses/<id>` | admin | `{"name"}`: a rename (any state: a released one's frees its old name; a ready one's record moves): 200; 400 `invalid_name`; 404; 409 `name_taken` |
 | `POST /api/admin/addresses/<id>/release` | admin | `{"confirm": "<its name>"}`: lapsed by an admin, then released (its server placed again without it): 202; 400 `confirm_mismatch`; 404; 409 `not_releasable` |
 | `POST /api/admin/addresses/<id>/retry` | admin | an address the cloud refused allocated again (its automatic tries counted from 0): 202; 404; 409 `not_retryable` (not failed); 503 `addresses_disabled` |
-| `POST /api/admin/users/<id>/addresses` | admin | `{"name"}`: a comp address for the account, at most its own machines: 201; 400 `invalid_name`; 404; 409 `name_taken`, `address_limit`; 503 `addresses_disabled` |
+| `POST /api/admin/users/<id>/addresses` | admin | `{"name"}`: a comp address for the account, at most its dedicated machines: 201; 400 `invalid_name`; 404; 409 `name_taken`, `address_limit`; 503 `addresses_disabled` |
 
 ## Game data
 

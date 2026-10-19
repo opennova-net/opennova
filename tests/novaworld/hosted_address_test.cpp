@@ -5,7 +5,7 @@
 // and what each AWS error code comes to; the docker address driver's lowest free address,
 // its association confirmed by inspect, and the addressed machine's create body. Then over
 // a migrated database of the test's own (common/test_database.h): an address subscription
-// named once, a name taken for good, a comp address within the own machines, the
+// named once, a name taken for good, a comp address within the dedicated machines, the
 // entitlement's addresses, a start naming an address (refused while it is not ready, and
 // for a second live server); and the jobs over a recording driver and the file zone, each
 // handler run by hand: allocate (the tag looked up before any allocation, the record
@@ -19,7 +19,7 @@
 // one's record still moved, a release still run. An admin's release racing the
 // allocation: the record it writes is recorded on the lapsed row, and the release waits
 // for the allocation's job, then deletes it. The comp addresses nothing covers (an
-// admin's cuts of own machines and servers, a paid address beside a comp one, a failed
+// admin's cuts of dedicated machines and servers, a paid address beside a comp one, a failed
 // one, a banned and a deleted account's), and their release's grant read again.
 
 #include "billing/billing_repository.h"
@@ -392,7 +392,7 @@ int test_naming_and_starts() {
 	const int64_t ana = make_player(db, "addr_ana", 0);
 	const int64_t ben = make_player(db, "addr_ben", 0);
 	TEST_EXPECT(ana > 0 && ben > 0);
-	// Ana: tier 2, an own machine, a static address bought.
+	// Ana: tier 2, a dedicated machine, a static address bought.
 	subscribe_item(db, ana, billing::ItemKind::Tier, 2, "sub_ana_t2");
 	subscribe_item(db, ana, billing::ItemKind::OwnMachine, 0, "sub_ana_om");
 	subscribe_item(db, ana, billing::ItemKind::StaticAddress, 0, "sub_ana_sa");
@@ -411,7 +411,7 @@ int test_naming_and_starts() {
 	TEST_EXPECT(row && row->state == AddressState::Allocating && row->source == "subscription" &&
 			row->stripe_subscription_id == "sub_ana_sa" && row->owner_user_id == ana);
 
-	// Ben: a comp address needs an own machine for it; the name is taken for good.
+	// Ben: a comp address needs a dedicated machine for it; the name is taken for good.
 	TEST_EXPECT(hosted::add_comp_address(db, ben, "benaddr", now).outcome == hosted::NameOutcome::AddressLimit);
 	TEST_EXPECT(billing::set_comp_grants(db, ben, { 1, 1 }));
 	TEST_EXPECT(hosted::add_comp_address(db, ben, "smoke", now).outcome == hosted::NameOutcome::NameTaken);
@@ -441,7 +441,7 @@ int test_naming_and_starts() {
 	const auto made = start(ana, true, smoke);
 	TEST_EXPECT(made.outcome == hosted::RequestOutcome::Created);
 	TEST_EXPECT(hosted::find_server(db, made.id)->address_id == smoke && hosted::server_of_address(db, smoke) == made.id);
-	// One live server per address: her second own-machine start may not take it.
+	// One live server per address: her second start on a dedicated machine may not take it.
 	subscribe_item(db, ana, billing::ItemKind::OwnMachine, 0, "sub_ana_om2");
 	TEST_EXPECT(start(ana, true, smoke).outcome == hosted::RequestOutcome::AddressUnavailable);
 	TEST_EXPECT(start(ana, true, std::nullopt).outcome == hosted::RequestOutcome::Created);
@@ -543,7 +543,7 @@ void finish_allocate(Database &db, int64_t id) {
 			{ BindValue(std::string(hosted::kJobAddressAllocate) + ":" + std::to_string(id)) });
 }
 
-// A live own machine carrying `address`, launched as `cloud_id`.
+// A live dedicated machine carrying `address`, launched as `cloud_id`.
 int64_t carrying_machine(Database &db, int64_t address, const std::string &cloud_id) {
 	hosted::NewMachine m;
 	m.provider = "docker";
@@ -594,7 +594,7 @@ int test_jobs() {
 	auto records = hosted::FileZone::parse(read_text(dir.file("play.zone")));
 	TEST_EXPECT(records.count("smoke") == 0 && records["renamed"] == ip && hosted::find_address(db, id)->dns_name == "renamed");
 	// One a cut-short run allocated is found by its tag, never allocated twice.
-	// Her one own machine has its address: a comp one waits for a second.
+	// Her one dedicated machine has its address: a comp one waits for a second.
 	TEST_EXPECT(hosted::add_comp_address(db, ana, "tagged", now).outcome == hosted::NameOutcome::AddressLimit);
 	TEST_EXPECT(billing::set_comp_grants(db, ana, { 0, 1 }));
 	const int64_t tagged_id = hosted::add_comp_address(db, ana, "tagged", now).id;
@@ -908,9 +908,9 @@ std::map<int64_t, hosted::UncoveredAddress> uncovered_at(Database &db, int64_t n
 	return out;
 }
 
-// The comp addresses nothing covers, at an admin's cuts: its own machines cut to 0, an
+// The comp addresses nothing covers, at an admin's cuts: its dedicated machines cut to 0, an
 // account's one comp address; one of two cut, the newer of two; a paid address and a
-// comp one past the own machines, the comp one alone (judged with the cache); a failed
+// comp one past the dedicated machines, the comp one alone (judged with the cache); a failed
 // one past the machines left; a banned account's and a deleted one's, every one. Then
 // the release's grant read again: one covered once more kept, a deleted account's
 // released.
@@ -920,7 +920,7 @@ int test_comp_uncovered() {
 	auto lease = pool.acquire();
 	Database &db = *lease;
 	const int64_t now = billing::unix_now();
-	const std::string machines_why = "its account's own machines no longer cover it";
+	const std::string machines_why = "its account's dedicated machines no longer cover it";
 
 	// Cal: one shared server, one dedicated machine, one comp address. Its
 	// dedicated machines cut to 0, the address is uncovered, judged without the
@@ -936,7 +936,7 @@ int test_comp_uncovered() {
 	TEST_EXPECT(billing::set_comp_grants(db, cal, { 0, 1 }) && uncovered_at(db, now).empty());
 	TEST_EXPECT(billing::set_comp_grants(db, cal, { 1, 1 }) && uncovered_at(db, now).empty());
 
-	// Dot: two comp addresses, one of her two own machines cut: the newer goes.
+	// Dot: two comp addresses, one of her two dedicated machines cut: the newer goes.
 	const int64_t dot = make_player(db, "unc_dot", 0);
 	TEST_EXPECT(billing::set_comp_grants(db, dot, { 2, 2 }));
 	const int64_t dot_old = hosted::add_comp_address(db, dot, "dot-old", now).id;
@@ -945,7 +945,7 @@ int test_comp_uncovered() {
 	TEST_EXPECT(billing::set_comp_grants(db, dot, { 2, 1 }));
 	u = uncovered_at(db, now);
 	TEST_EXPECT(u.size() == 1 && u.count(dot_new) == 1 && u[dot_new].why == machines_why);
-	// A failed one counts for none, but past the own machines left it goes too
+	// A failed one counts for none, but past the dedicated machines left it goes too
 	// (an allocation would only make it count): the older keeps the one.
 	TEST_EXPECT(billing::set_comp_grants(db, dot, { 2, 2 }));
 	TEST_EXPECT(hosted::fail_address(db, dot_new, "AddressLimitExceeded", hosted::kAddressRetryBaseS));
@@ -958,7 +958,7 @@ int test_comp_uncovered() {
 	TEST_EXPECT(u.size() == 1 && u.count(dot_new) == 1);
 	TEST_EXPECT(billing::set_comp_grants(db, dot, { 2, 2 }) && uncovered_at(db, now).empty());
 
-	// Eve on tier 1 with an own machine and a paid address, and an admin's own
+	// Eve on tier 1 with a dedicated machine and a paid address, and an admin's dedicated
 	// machine and comp address beside them. Cut to her paid one, the comp address
 	// goes, judged with the cache (she has subscriptions); the paid one never does,
 	// even with her tier gone.

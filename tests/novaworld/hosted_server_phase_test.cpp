@@ -1,7 +1,7 @@
 // Where a hosted server's start stands in its owner's words, and why its last run ended
 // (apps/novaworld_common/hosted/model/server_phase.h), over hand-made rows: each state's
 // phase; a provisioning server's wait by why its last run ended (a crash or a timeout:
-// restarting n of the limit; its machine's cause, the owner's update or a move off an own
+// restarting n of the limit; its machine's cause, the owner's update or a move off a dedicated
 // machine: moving; its data
 // not fetched: data_unavailable, the agent's reason an admin's alone), else by
 // the fleet (launches held, a machine launching for it, a slot to wait for); a booting
@@ -80,7 +80,7 @@ int test_provisioning() {
 	// Its restarts forgiven: no restart to name, the fleet's wait again.
 	in.restarts = 0;
 	TEST_EXPECT(hosted::server_phase(in).phase == Phase::LaunchesHeld);
-	// Its machine's cause, the owner's update or a move off an own machine its
+	// Its machine's cause, the owner's update or a move off a dedicated machine its
 	// owner no longer has (its owner's limits): moving, no restart.
 	for (const hosted::StartCause cause :
 			{ hosted::StartCause::Fleet, hosted::StartCause::Update, hosted::StartCause::Limits }) {

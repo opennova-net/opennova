@@ -27,12 +27,12 @@ the agent their own process, with the process runtime (below).
 
 ## Vocabulary
 
-A **machine** is the EC2 virtual machine; a **shared machine** packs up to K servers, an
-**own machine** runs exactly one (the paid add-on). A **slot** is one server's position on a
+A **machine** is the EC2 virtual machine; a **shared machine** packs up to K servers, a
+**dedicated machine** runs exactly one (a monthly product of its own). A **slot** is one server's position on a
 machine (`hosted/protocol/slots.h`): slot k is the game's UDP port 32768 + k (open to everyone), the
 remote admin's TCP port 32800 + k (open to the service alone), the container's user
 10001 + k and the working directory `/srv/slots/slot-k` (0700, that user's). At most 32
-slots; an own machine has slot 0 alone. A **tree** is one immutable version of a data
+slots; a dedicated machine has slot 0 alone. A **tree** is one immutable version of a data
 set's files in the object store (CONTEXT.md "Tree"): a server is pinned to a base tree
 (stock JO, DFX2) and, with an expansion, to an expansion tree (Escalation's), and the
 machine holds each tree it needs at `/opt/game/<tree id>/`.

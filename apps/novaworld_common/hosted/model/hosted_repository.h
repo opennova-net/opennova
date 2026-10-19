@@ -69,10 +69,10 @@ struct HostedServer {
 	int admin_port = 0;
 	int restarts = 0;
 	std::string failure_reason;
-	// It runs on a machine of its own (the own-machine add-on), not a shared one.
+	// It runs on a machine of its own (a dedicated machine), not a shared one.
 	bool own_machine = false;
 	// The static address its owner asked it to run at (address_repository.h;
-	// an own-machine server's), kept through its restarts and moves; unset for
+	// a dedicated-machine server's), kept through its restarts and moves; unset for
 	// none, and once the address lapses.
 	std::optional<int64_t> address_id;
 	// The trees it is pinned to (data_sets/data_set_repository.h, ADR 0064): the base data
@@ -202,7 +202,7 @@ enum class ServerFilter : uint8_t { Live, Ended, All };
 // alone when it is set.
 std::vector<HostedServer> list_fleet_servers(
 		db::Database &db, std::optional<int64_t> owner_user_id, ServerFilter filter, size_t limit);
-// How many servers are live, and how many of those run on own machines (a
+// How many servers are live, and how many of those run on dedicated machines (a
 // stopping one counts in both).
 int count_live(db::Database &db);
 int count_own_live(db::Database &db);

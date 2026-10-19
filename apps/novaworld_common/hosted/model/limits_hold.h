@@ -1,7 +1,7 @@
 #pragma once
 
 // The owners' limits' hold (supervisor.h, "The owners' limits"): set by the
-// supervisor when one pass would stop (or move off their own machines) the
+// supervisor when one pass would stop (or move off their dedicated machines) the
 // servers of more owners than it ever should at once (the billing cache in
 // doubt). It releases itself once a full reconcile with Stripe has completed
 // clean after it took its owners and a pass after that finds only those owners

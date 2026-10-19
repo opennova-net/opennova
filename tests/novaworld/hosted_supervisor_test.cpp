@@ -11,7 +11,7 @@
 // start, deleted at the end), the start request's checks (the hosting
 // entitlement, the global cap, the fleet's room under the planner), each
 // server's lifecycle on the fleet (a shared machine launched and waited for,
-// two servers on one machine's slots, an own machine of its own), the stop (the
+// two servers on one machine's slots, a dedicated machine of its own), the stop (the
 // push, the listing's end, the 60 s timeout, any exit while stopping, a stop
 // before any slot, a stop landing mid-placement, the kill switch), the crash
 // restart and its limit (any exit, the OOM kill, a start that failed; a stop is
@@ -743,9 +743,9 @@ int test_requests() {
 }
 
 // The fleet's room at the request (the supervisor's planner): one shared machine
-// of two slots at most and one own machine, so two shared servers and one own one
-// fit, waiting ones counted before the request; a third shared one, or a second
-// own one, is at_capacity, and a place frees once a server ends.
+// of two slots at most and one dedicated machine, so two shared servers and one
+// dedicated one fit, waiting ones counted before the request; a third shared one,
+// or a second dedicated one, is at_capacity, and a place frees once a server ends.
 int test_fleet_room() {
 	Rig rig("hosted_fleet_room");
 	rig.config.cap = 50;
@@ -962,9 +962,9 @@ int test_two_servers_one_machine() {
 	return 0;
 }
 
-// The own-machine add-on: the server gets a machine of its own (one slot,
+// A dedicated machine: the server gets a machine of its own (one slot,
 // reserved for it, its own kind's template), never a shared one's slot, while a
-// shared server of the same owner goes to a shared machine; the own machine
+// shared server of the same owner goes to a shared machine; the dedicated machine
 // ends when its server stops.
 int test_own_machine() {
 	Rig rig("hosted_own");
@@ -998,9 +998,9 @@ int test_own_machine() {
 	return 0;
 }
 
-// Stopped and started again at the fleet's maximum of own machines (1): the
+// Stopped and started again at the fleet's maximum of dedicated machines (1): the
 // start is taken while the stopped server's machine still waits for its end
-// (its place went with its server), another owner's own-machine start is
+// (its place went with its server), another owner's dedicated-machine start is
 // still at_capacity, and the new server's machine launches once the old one
 // has ended, never past the maximum (no launch refused).
 int test_own_restart_at_cap() {
@@ -1040,7 +1040,7 @@ int test_own_restart_at_cap() {
 	return 0;
 }
 
-// A static address (hosted/model/address_repository.h): its own machine launched to carry
+// A static address (hosted/model/address_repository.h): its dedicated machine launched to carry
 // it, the server's container held back (booting, its agent told to start nothing)
 // while the machine's row does not show the address, an address.associate asked for
 // meanwhile, then the start once a describe brings the address; the subscription
@@ -1193,7 +1193,7 @@ int test_static_address_brake() {
 }
 
 // A comp address nothing covers lapses through the same path (address_repository.h
-// uncovered_comp_addresses): one of an account's two own machines cut, the newer of its
+// uncovered_comp_addresses): one of an account's two dedicated machines cut, the newer of its
 // two comp addresses lapses at the next pass with no reconcile waited for (the account
 // has no subscription for the cache to judge), the server on it placed again without it
 // (no restart counted), and the address goes releasing; an account with subscriptions
@@ -1223,12 +1223,12 @@ int test_comp_address_lapse() {
 	TEST_EXPECT(!rig.to_running(id, 5401).empty());
 	TEST_EXPECT(hosted::find_address(*db, newer)->state == AddressState::Ready);
 
-	// One of her own machines cut: the newer address lapses at the next pass.
+	// One of her dedicated machines cut: the newer address lapses at the next pass.
 	TEST_EXPECT(billing::set_comp_grants(*db, cy, { 2, 1 }));
 	rig.step();
 	const auto lapsed = hosted::find_address(*db, newer);
 	TEST_EXPECT(lapsed->state != AddressState::Ready && lapsed->lapse_cause == hosted::kLapseGrant &&
-			lapsed->reason == "its account's own machines no longer cover it");
+			lapsed->reason == "its account's dedicated machines no longer cover it");
 	TEST_EXPECT(hosted::find_address(*db, older)->state == AddressState::Ready);
 	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Ended);
 	const auto replaced = rig.server(id);
@@ -1240,8 +1240,8 @@ int test_comp_address_lapse() {
 	TEST_EXPECT(!rig.to_running(id, 5402).empty());
 	TEST_EXPECT(rig.machine(rig.machine_of(id))->address_id == 0);
 
-	// Dee on tier 1 with an own machine and a paid address, and an admin's own machine
-	// and comp address beside them. The admin's own machine taken back, the comp
+	// Dee on tier 1 with a dedicated machine and a paid address, and an admin's dedicated machine
+	// and comp address beside them. The admin's dedicated machine taken back, the comp
 	// address lapses once a clean reconcile confirms the cache (she has
 	// subscriptions); the paid one stays.
 	const int64_t dee = make_player(*db, "comp_dee", 0);
@@ -1579,7 +1579,7 @@ int test_launch_refused_mid_pass() {
 	subscribe_machines(*db, owner, 1, "sub_mid_pass_machine");
 	const int64_t b = rig.request_as(owner, rig.settings(), true);
 	TEST_EXPECT(b > a);
-	// Passes alone (no job runs): b's own machine, its row and its launch job.
+	// Passes alone (no job runs): b's dedicated machine, its row and its launch job.
 	rig.sup->tick(rig.now);
 	rig.sup->tick(rig.now);
 	int64_t own = 0;
@@ -2145,7 +2145,7 @@ int test_own_machines_cut() {
 	const int64_t newer = requested.id;
 	const int64_t shared = rig.request_as(owner);
 	TEST_EXPECT(older > 0 && newer > older && shared > newer);
-	// Its own machine carries the address once a describe brings it.
+	// Its dedicated machine carries the address once a describe brings it.
 	for (int i = 0; i < 6; ++i) rig.step();
 	const int64_t newer_machine = rig.machine_of(newer);
 	TEST_EXPECT(newer_machine > 0 && rig.machine(newer_machine)->address_id == address);
@@ -2176,11 +2176,11 @@ int test_own_machines_cut() {
 	TEST_EXPECT(has_event(*db, newer,
 			"moved to a shared machine: its owner has 1 dedicated machine now; placed again (no restart counted)"));
 	TEST_EXPECT(!stopped_with(*db, newer, "dedicated machine"));
-	// Its address stays the account's, ready, and no live server's (only an own
+	// Its address stays the account's, ready, and no live server's (only a dedicated
 	// machine carries one).
 	TEST_EXPECT(!row->address_id && !hosted::server_of_address(*db, address) &&
 			hosted::find_address(*db, address)->state == AddressState::Ready);
-	// Its own machine ended after it.
+	// Its dedicated machine ended after it.
 	TEST_EXPECT(rig.machine(newer_machine)->state == hosted::FleetMachineState::Ended &&
 			rig.machine(newer_machine)->end_reason == "its server moved to a shared machine");
 	TEST_EXPECT(rig.fake.was_terminated(newer_cloud));
@@ -2195,7 +2195,7 @@ int test_own_machines_cut() {
 	TEST_EXPECT(rig.machine_of(newer) == shared_machine && rig.server(newer)->restarts == 0);
 	TEST_EXPECT(rig.fake.launches == 3); // no machine launched for the move
 	{
-		// A new start on the shared machine, the one before it on its own machine
+		// A new start on the shared machine, the one before it on its dedicated machine
 		// ended for its owner's limits.
 		const auto starts = hosted::list_starts(*db, newer, 10);
 		TEST_EXPECT(starts.size() == 2 && starts[0].generation == generation + 1 &&
@@ -2242,7 +2242,7 @@ int test_own_machines_cut_no_room() {
 	TEST_EXPECT(hosted::list_starts(*db, older, 1)[0].cause == hosted::StartCause::Limits);
 	TEST_EXPECT(rig.state(shared) == State::Running);
 	TEST_EXPECT(!hosted::fleet_has_room(*db, rig.config.placement, false));
-	// The stop ends as any (its listing gone), and its own machine with it.
+	// The stop ends as any (its listing gone), and its dedicated machine with it.
 	hostdb::remove_host_by_rid(*db, 6201);
 	rig.step(); // the push
 	rig.step(); // stopped
@@ -2270,7 +2270,7 @@ int test_own_cut_at_provisioning() {
 	rig.tick(); // both -> provisioning
 	TEST_EXPECT(rig.state(older) == State::Provisioning && rig.state(own) == State::Provisioning);
 	// The pass's next guard read past its first (the older server's launch, after
-	// the limits ran) cuts the own machine.
+	// the limits ran) cuts the dedicated machine.
 	int guards = 0;
 	bool cut = false;
 	rig.sup->set_pass_guard([&](Database &d) {
@@ -2286,7 +2286,7 @@ int test_own_cut_at_provisioning() {
 	TEST_EXPECT(rig.walk(own, State::Listing) && rig.walk(older, State::Listing));
 	TEST_EXPECT(rig.machine_of(own) == rig.machine_of(older) &&
 			rig.machine(rig.machine_of(own))->kind == hosted::MachineKind::Shared);
-	TEST_EXPECT(rig.fake.launches == 1); // no own machine launched
+	TEST_EXPECT(rig.fake.launches == 1); // no dedicated machine launched
 	return 0;
 }
 

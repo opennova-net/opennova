@@ -1,8 +1,8 @@
 // Where a hosted server runs (apps/novaworld_common/hosted/model/placement.h) and what a
 // slot is (hosted/protocol/slots.h): best fit on the fullest shared machine that takes servers,
 // its lowest free slot, the ties (the readier machine, then the older), the launch of a
-// new shared machine below ONNET_FLEET_MAX_SHARED and the wait at it, the own-machine
-// add-on's reserved machine and its own maximum, the states that take servers and
+// new shared machine below ONNET_FLEET_MAX_SHARED and the wait at it, a dedicated
+// machine's reserved machine and its maximum, the states that take servers and
 // count toward the maximums (draining and ending do neither), the columns' words and
 // the policy's checks, and a request placed after the servers waiting before it (the
 // start request's at_capacity). Pure functions: no database, no cloud.
@@ -203,7 +203,7 @@ int test_shared_limits() {
 		TEST_EXPECT(launches(
 				hosted::place_server(shared_request(5), fleet, policy), MachineKind::Shared));
 	}
-	// Own machines count toward the own maximum alone, and never take a shared server.
+	// Dedicated machines count toward the dedicated maximum alone, and never take a shared server.
 	fleet = { shared(1, FleetMachineState::Ready, 4, full), own(2, FleetMachineState::Ready, 77),
 		own(3, FleetMachineState::Ready, 78) };
 	TEST_EXPECT(
@@ -220,7 +220,7 @@ int test_own() {
 	policy.max_own = 2;
 	// No machine of its own yet: launch one (reserved for the server by the caller).
 	TEST_EXPECT(launches(hosted::place_server(own_request(7), {}, policy), MachineKind::Own));
-	// A shared machine with room is never an own machine.
+	// A shared machine with room is never a dedicated machine.
 	std::vector<FleetMachine> fleet = { shared(1, FleetMachineState::Ready, 12, {}) };
 	TEST_EXPECT(launches(hosted::place_server(own_request(7), fleet, policy), MachineKind::Own));
 	// The machine launched for it takes it, at slot 0, from its launch on.
@@ -228,19 +228,19 @@ int test_own() {
 	TEST_EXPECT(placed_at(hosted::place_server(own_request(7), fleet, policy), 2, 0));
 	fleet[1].state = FleetMachineState::Ready;
 	TEST_EXPECT(placed_at(hosted::place_server(own_request(7), fleet, policy), 2, 0));
-	// Another server's own machine is not this one's, nor is a shared server's.
+	// Another server's dedicated machine is not this one's, nor is a shared server's.
 	fleet = { own(2, FleetMachineState::Ready, 8) };
 	TEST_EXPECT(launches(hosted::place_server(own_request(7), fleet, policy), MachineKind::Own));
 	TEST_EXPECT(
 			launches(hosted::place_server(shared_request(8), fleet, policy), MachineKind::Shared));
-	// At the own maximum the server waits.
+	// At the dedicated maximum the server waits.
 	fleet = { own(2, FleetMachineState::Ready, 8), own(3, FleetMachineState::Booting, 9) };
 	TEST_EXPECT(hosted::place_server(own_request(7), fleet, policy).outcome ==
 			Placement::Outcome::Full);
-	// Its own machine draining (a roll) or gone: a new one, the old one counting toward nothing.
+	// Its dedicated machine draining (a roll) or gone: a new one, the old one counting toward nothing.
 	fleet = { own(2, FleetMachineState::Draining, 7), own(3, FleetMachineState::Ready, 9) };
 	TEST_EXPECT(launches(hosted::place_server(own_request(7), fleet, policy), MachineKind::Own));
-	// Its own machine's slot still held: it waits for that machine and never gets a
+	// Its dedicated machine's slot still held: it waits for that machine and never gets a
 	// second one, below the maximum too.
 	fleet = { own(2, FleetMachineState::Ready, 7, { 0 }) };
 	TEST_EXPECT(hosted::place_server(own_request(7), fleet, policy).outcome ==
@@ -266,9 +266,9 @@ int test_place_after() {
 	// Two wait: that machine is theirs, and no second may launch.
 	const std::vector<PlacementRequest> two = { shared_request(1), shared_request(2) };
 	TEST_EXPECT(hosted::place_after(shared_request(9), two, {}, policy).outcome == Placement::Outcome::Full);
-	// An own request waits for its own machine apart: the shared ones leave it room.
+	// A dedicated request waits for its dedicated machine apart: the shared ones leave it room.
 	TEST_EXPECT(launches(hosted::place_after(own_request(9), two, {}, policy), MachineKind::Own));
-	// One own server waiting takes the one own machine the fleet may launch.
+	// One dedicated server waiting takes the one dedicated machine the fleet may launch.
 	TEST_EXPECT(hosted::place_after(own_request(9), { own_request(3) }, {}, policy).outcome ==
 			Placement::Outcome::Full);
 	// Over real machines: a free slot taken by a waiting one is gone for the request.
@@ -278,7 +278,7 @@ int test_place_after() {
 			Placement::Outcome::Full);
 	// The request itself among the waiting (an id already written) is not counted twice.
 	TEST_EXPECT(placed_at(hosted::place_after(shared_request(1), { shared_request(1) }, fleet, policy), 5, 1));
-	// A waiting own server whose machine exists goes there and leaves the rest alone.
+	// A waiting dedicated server whose machine exists goes there and leaves the rest alone.
 	fleet = { own(6, FleetMachineState::Ready, 3) };
 	policy.max_own = 2;
 	TEST_EXPECT(launches(hosted::place_after(own_request(9), { own_request(3) }, fleet, policy), MachineKind::Own));

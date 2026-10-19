@@ -500,7 +500,7 @@ void check_static_address(const Site &site, int64_t user_id, const Options &o) {
 	}
 	// Twice: a start at the address runs and lists there, then stops.
 	for (int round = 1; round <= 2; ++round) {
-		const std::string label = round == 1 ? "an own-machine server" : "started again, it";
+		const std::string label = round == 1 ? "a server on the dedicated machine" : "started again, it";
 		reply = site.user("POST", "/api/me/servers",
 				"{\"data_set_id\":" + o.hosting + ",\"game_name\":\"Smoke at " + name +
 						"\",\"own_machine\":true,\"address_id\":" + std::to_string(address) + "}");

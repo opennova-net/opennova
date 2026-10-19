@@ -5053,10 +5053,10 @@ void end_stopping_servers(Harness &h) {
 // data set, the expansion and the rotation among them), the starts (on the
 // first data set with every mission of its tree when it names none, and on
 // Delta Force Xtreme 2's with its own) up
-// to the account's hosting entitlement (server_limit with its counts past it,
-// a stopping server counting), the cap and `full`, another account's id
-// answering 404, the owner's stop by id (409 not_live once ended), the
-// own-machine add-on (no_own_machine without one), the list's order (the live
+// to the account's hosting entitlement in each pool (server_limit with the shared
+// counts past it, a stopping server counting), the cap and `full`, another account's id
+// answering 404, the owner's stop by id (409 not_live once ended), a
+// dedicated machine (no_own_machine without one), the list's order (the live
 // servers, then the newest 10 ended), the owner's update and the admin's
 // update-all (ADR 0064), the fleet view and the admin's stops (admin only,
 // never the admin password), and a listener with hosting off.
@@ -5359,7 +5359,7 @@ int test_hosted_server_routes(Harness &h) {
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 4 && json["live"].i() == 4);
 	// The room per machine kind, from the placement policy (the harness's: the
-	// default 2 shared machines of 12 slots, 16 own machines).
+	// default 2 shared machines of 12 slots, 16 dedicated machines).
 	TEST_EXPECT(json["shared"]["live"].i() + json["own"]["live"].i() == 4 && json["shared"]["room"].i() == 24 &&
 			json["own"]["room"].i() == 16);
 	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "docker");
@@ -5466,7 +5466,7 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(json["entitlement"]["tier"].i() == 1 && json["entitlement"]["granted"].b());
 	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
 	json = crow::json::load(body_text(reply));
-	if (reply.code != 202) std::fprintf(stderr, "  own-machine start: %s\n", describe(reply).c_str());
+	if (reply.code != 202) std::fprintf(stderr, "  dedicated-machine start: %s\n", describe(reply).c_str());
 	TEST_EXPECT(reply.code == 202 && json["server"]["own_machine"].b());
 	const int64_t fay_server = json["server"]["id"].i();
 	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), fay_server)->own_machine);
@@ -6450,7 +6450,7 @@ int test_hosted_usage_route(Harness &h) {
 	TEST_EXPECT(!ana_s.empty());
 	auto db = h.pool.acquire();
 
-	// A ready shared machine of 4 slots and a ready own machine of 1 (0 when
+	// A ready shared machine of 4 slots and a ready dedicated machine of 1 (0 when
 	// one did not get there).
 	const auto ready_machine = [&](hosted::MachineKind kind, int slots,
 									   const char *cloud_id) -> int64_t {
@@ -6469,7 +6469,7 @@ int test_hosted_usage_route(Harness &h) {
 	TEST_EXPECT(shared > 0 && own > shared);
 
 	// The servers: Ana's running on the shared machine's slot 1, Ben's booting
-	// on its slot 0, Ana's running on the own machine, Ana's waiting for a
+	// on its slot 0, Ana's running on the dedicated machine, Ana's waiting for a
 	// place, and Ben's ended.
 	hosted::HostedSettings settings;
 	settings.data_set_id = h.jo_id;
@@ -7476,7 +7476,7 @@ int test_billing_checkout_guard(Harness &h) {
 	TEST_EXPECT(checkout(hal_s, "tier1").code == 200);
 
 	// A payment past due, Stripe still retrying it: the tier still grants, and
-	// no add-on sells, an own machine as a static address, nothing reserved.
+	// neither a dedicated machine nor a static address sells, nothing reserved.
 	const int64_t ida = make_account(h, "chk_ida", "pw-chk-ida");
 	const std::string ida_s = login_token(h, "10.62.0.5", "chk_ida", "pw-chk-ida");
 	TEST_EXPECT(ida > 0 && !ida_s.empty());
@@ -7622,12 +7622,12 @@ int test_billing_capacity(Harness &h) {
 }
 
 // The static addresses' routes (hosted/address_routes.h; the harness sells 4 in the
-// play.test zone): the add-on bought through Checkout once the account has an own
+// play.test zone): the add-on bought through Checkout once the account has a dedicated
 // machine (address_limit before), its subscription on the account's billing until
 // named, the owner's name (the CSRF header, the name rules, one per subscription),
 // the Portal's cancel flow for it, the admin's view, retry of a refused one, rename
-// and typed release, a comp address within the own machines, the tiers' offer, and a
-// start naming an address only with an own machine.
+// and typed release, a comp address within the dedicated machines, the tiers' offer, and a
+// start naming an address only with a dedicated machine.
 int test_address_routes(Harness &h) {
 	namespace billing = opennova::novaworld_server::billing;
 	namespace hosted = opennova::novaworld_server::hosted;
@@ -7646,7 +7646,7 @@ int test_address_routes(Harness &h) {
 	auto json = crow::json::load(body_text(h.send("GET", "/api/billing/tiers")));
 	TEST_EXPECT(json && json["static_address"]["amount"].i() == 500 && json["static_address"]["available"].b());
 
-	// Uma on tier 1: no own machine yet, no address; with one, the address sells.
+	// Uma on tier 1: no dedicated machine yet, no address; with one, the address sells.
 	const std::string uma_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
 			{ billing::kMetaUserId, std::to_string(uma) }, { billing::kMetaUsername, "addr_uma" } });
 	TEST_EXPECT(billing::insert_customer(*h.pool.acquire(), uma, uma_cus, false));
@@ -7712,7 +7712,7 @@ int test_address_routes(Harness &h) {
 	reply = post("/api/billing/portal", uma_s, "{\"cancel_subscription\":\"sub_notyours\"}");
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
 
-	// A start naming an address takes an own machine.
+	// A start naming an address takes a dedicated machine.
 	reply = post("/api/me/servers", uma_s, "{\"game_name\":\"Uma\",\"address_id\":" + std::to_string(address) + "}");
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 
@@ -7750,7 +7750,7 @@ int test_address_routes(Harness &h) {
 			json["address"]["reason"].t() == crow::json::type::Null &&
 			json["address"]["retry_at"].t() == crow::json::type::Null);
 	TEST_EXPECT(nws::jobs::job_pending(*h.pool.acquire(), allocate_key));
-	// A comp address: none past the account's own machines.
+	// A comp address: none past the account's dedicated machines.
 	reply = h.send("POST", "/api/admin/users/" + std::to_string(vic) + "/addresses", { kBearer, kJson },
 			"{\"name\":\"vics\"}");
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
@@ -8599,7 +8599,7 @@ int with_harness(const char *part) {
 		http.set_watchdog(&watchdog);
 		http.set_billing(&billing_service);
 		// The fleet the checkouts are judged against (test_billing_capacity): the
-		// default 2 x 12 shared places, and own machines for every case's.
+		// default 2 x 12 shared places, and dedicated machines for every case's.
 		nws::hosted::PlacementPolicy placement;
 		placement.max_own = 16;
 		placement.max_addresses = 4;

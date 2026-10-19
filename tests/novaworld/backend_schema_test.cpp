@@ -858,10 +858,10 @@ int test_comp_grants_migration() {
 }
 
 // 0019_dedicated_machines.sql over a database migrated to the one before it: an
-// admin's grant of servers gives up the own machines granted beside it (each a
-// server of its own now), and goes when they cover it: 11 servers on 2 own machines
-// become 9 shared servers and 2 dedicated machines, 2 on 2 the 2 dedicated machines
-// alone; a grant of servers alone, and one of own machines alone, stay.
+// admin's grant of servers gives up the machines granted beside it (each a server of
+// its own now, a dedicated machine), and goes when they cover it: 11 servers with 2
+// machines become 9 shared servers and 2 dedicated machines, 2 with 2 the 2 dedicated
+// machines alone; a grant of servers alone, and one of machines alone, stay.
 int test_dedicated_grants_migration() {
 	TestDatabase scratch({ /*migrate=*/false });
 	Database db = migrated_before(scratch, "0019_");

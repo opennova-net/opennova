@@ -783,12 +783,12 @@ compose stack takes the test-mode set from the vault through
 | `POST /api/billing/portal` | a website session, the CSRF header | 200 `{"url"}`; with `{"cancel_subscription": "sub_..."}` (a static address's) the Portal's cancel flow for it, returning to `/me/addresses`; 400; 404 `no_billing_account`, `not_found`; 429; 503 |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook): as `GET /api/me/billing`; 404; 429 (3, then one every 10 s); 503 |
 | `POST /api/billing/webhook` | Stripe's signature | above |
-| `GET /api/admin/billing` | admin | the mode, the price check, the last reconcile, the pending events, every subscription with its account, the duplicates, `unknown_prices`, the orphans, the newest 50 events, the owners' limits hold (`limits_hold*`), the sold `capacity` (as the user page's) and `comp_grants` (each account an admin grants hosting: its servers, own machines and comp addresses); with billing off `{"enabled": false}` with the hold, the capacity and the comp grants alone |
+| `GET /api/admin/billing` | admin | the mode, the price check, the last reconcile, the pending events, every subscription with its account, the duplicates, `unknown_prices`, the orphans, the newest 50 events, the owners' limits hold (`limits_hold*`), the sold `capacity` (as the user page's) and `comp_grants` (each account an admin grants hosting: its servers, dedicated machines and comp addresses); with billing off `{"enabled": false}` with the hold, the capacity and the comp grants alone |
 | `POST /api/admin/billing/reconcile` | admin | a full reconcile now: 202; `{"force_limits": true}` also has the next supervisor pass apply the stops and moves the hold keeps back (which applies with billing off too); 400 |
 | `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: an orphan's customer made the account's, stamped and synced: 200; 400; 404; 503 |
 
 `DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of
-the account still grants, a tier or an add-on (Stripe would bill an account that is gone),
+the account still grants, a tier, a dedicated machine or a static address (Stripe would bill an account that is gone),
 and 409 `checkout_open` while a checkout of it holds its reservation (its session may still
 be paid); it judges and deletes under the hosting-start lock a checkout reserves under. The
 admin's user list and detail carry each account's entitlement, live servers and subscriptions; the

@@ -101,8 +101,8 @@ struct SyncStatus {
 	bool prices_checked = false;
 	bool prices_ok = false;
 	std::string prices_error; // "" when ok
-	// The price each tier (index 1..kTierCount) and the add-on sells now, once
-	// checked: what GET /api/billing/tiers shows.
+	// The price each tier (index 1..kTierCount), the dedicated machine and the
+	// static-address add-on sell now, once checked: what GET /api/billing/tiers shows.
 	std::array<std::optional<PriceInfo>, kTierCount + 1> tier_prices;
 	std::optional<PriceInfo> own_machine_price;
 	std::optional<PriceInfo> static_address_price; // none while no list is set

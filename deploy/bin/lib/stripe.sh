@@ -32,8 +32,8 @@ STRIPE_CATALOG=(
   "price_tier1|opennova_tier1_monthly|OpenNova support tier 1|Monthly support for OpenNova: 1 hosted game server|tier1|500"
   "price_tier2|opennova_tier2_monthly|OpenNova support tier 2|Monthly support for OpenNova: 2 hosted game servers|tier2|1000"
   "price_tier3|opennova_tier3_monthly|OpenNova support tier 3|Monthly support for OpenNova: 3 hosted game servers|tier3|1500"
-  "price_own_machine|opennova_own_machine_monthly|OpenNova own machine|A machine of its own for one of your hosted servers, monthly add-on|own_machine|4500"
-  "price_static_address|opennova_static_address_monthly|OpenNova static address|A static IPv4 address and a DNS name for one own machine, monthly add-on|static_address|500"
+  "price_own_machine|opennova_own_machine_monthly|OpenNova dedicated machine|One more hosted server on a machine of its own, no support tier needed|own_machine|4500"
+  "price_static_address|opennova_static_address_monthly|OpenNova static address|A static IPv4 address and a DNS name for one dedicated machine, monthly add-on|static_address|500"
 )
 # The Customer Portal configuration this toolbox owns carries this metadata.
 STRIPE_PORTAL_TAG=support_tiers
@@ -115,10 +115,10 @@ usd_cents() {
 # The portal's settings, as curl data arguments, for the tier products $@
 # (product:price each): switching among them prorates, a downgrade waits for
 # the period's end, a cancel ends the subscription at the period's end (a
-# tier's or an add-on's; the site opens a static address's cancel straight at
-# its subscription, a subscription_cancel flow, which this setting allows); the
-# card, the invoices, the email and the address are the customer's to see and
-# change.
+# tier's, a dedicated machine's or a static address's; the site opens a static
+# address's cancel straight at its subscription, a subscription_cancel flow,
+# which this setting allows); the card, the invoices, the email and the address
+# are the customer's to see and change.
 stripe_portal_args() {
   local i=0 pair
   printf '%s\n' \
@@ -176,7 +176,9 @@ vault_set_fields() {
 # prices by lookup key (an existing active one is kept; an amount given by a
 # flag that differs makes a new price, which takes the lookup key and goes
 # first in the vault field, the old one kept after it so its subscribers
-# still grant); the price ids into the vault item; the Customer Portal
+# still grant), and each product's name and description brought to the
+# catalog's (an item renamed: the own machine became the dedicated machine);
+# the price ids into the vault item; the Customer Portal
 # configuration tagged opennova=support_tiers (made, or brought to these
 # settings); the webhook endpoint on https://<web host>/api/billing/webhook
 # (made, its events brought up to date; a new one's signing secret goes into
@@ -250,6 +252,16 @@ stripe_setup() {
       price_id="$(jq -r '.id' "$STRIPE_REPLY")"
       log "  $field: made $price_id ($lookup, $cents usd cents a month)${old:+, after $old (kept in the field: its subscribers still grant)}"
     fi
+    # The product's name and description, as Checkout, the portal and the
+    # invoices show them: the catalog's.
+    stripe_call GET "/v1/products/$product_id"
+    stripe_ok "reading the product $product_id"
+    if [ "$(jq -r '.name // ""' "$STRIPE_REPLY")" != "$name" ] ||
+        [ "$(jq -r '.description // ""' "$STRIPE_REPLY")" != "$desc" ]; then
+      stripe_call POST "/v1/products/$product_id" --data-urlencode "name=$name" --data-urlencode "description=$desc"
+      stripe_ok "updating the product $product_id's name and description"
+      log "  $field: the product $product_id is now '$name' ($desc)"
+    fi
     # The field: this price first, then the prices it held before
     # (grandfathered: their subscribers still grant).
     current="$(json_field "$vault_json" "$field")"
@@ -259,8 +271,9 @@ stripe_setup() {
       VAULT_VALUES[$field]="$want"
       wrote+=("$field:STRING")
     fi
-    # The add-ons are no tier the portal switches among: each is a
-    # subscription of its own (quantity 1), bought through Checkout.
+    # A dedicated machine and a static address are no tier the portal
+    # switches among: each is a subscription of its own (quantity 1), bought
+    # through Checkout.
     case "$field" in
       price_own_machine|price_static_address) ;;
       *) tier_pairs+=("$product_id:$price_id") ;;

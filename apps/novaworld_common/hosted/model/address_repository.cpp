@@ -222,7 +222,7 @@ NameResult add_comp_address(db::Database &db, int64_t owner_user_id, const std::
 		return out;
 	}
 	if (auto refused = refuse_name(db, name)) return *refused;
-	// One more address than the account's own machines would hold nothing.
+	// One more address than the account's dedicated machines would hold nothing.
 	const billing::Entitlement e = billing::entitlement_of(db, owner_user_id, now);
 	if (e.address_grants + 1 > e.own_machines) {
 		out.outcome = NameOutcome::AddressLimit;
@@ -316,8 +316,8 @@ std::vector<UncoveredAddress> uncovered_comp_addresses(db::Database &db, int64_t
 		}
 		const billing::Entitlement e = billing::entitlement_of(db, *owner, now);
 		const bool cached = !billing::subscriptions_of(db, *owner).empty();
-		const char *why = "its account's own machines no longer cover it";
-		// The newest that count past the own machines; then the failed ones
+		const char *why = "its account's dedicated machines no longer cover it";
+		// The newest that count past the dedicated machines; then the failed ones
 		// (counted by none: billing comp_addresses_of) past the room left, which
 		// an allocation would only make count, the oldest kept.
 		int over = e.address_grants - e.own_machines;

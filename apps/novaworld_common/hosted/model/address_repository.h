@@ -1,9 +1,9 @@
 #pragma once
 
 // The static addresses (ADR 0066; hosted_addresses, 0017_capacity_addresses.sql):
-// an own machine's fixed public IPv4 (an Elastic IP on EC2, a fixed address on
+// a dedicated machine's fixed public IPv4 (an Elastic IP on EC2, a fixed address on
 // the local stack's network) with an A record in the deployment's play zone,
-// which an owner holds for its own-machine servers, so a server lists at the
+// which an owner holds for its servers on dedicated machines, so a server lists at the
 // same address:port on every start. Each is its own Stripe subscription
 // (billing ItemKind::StaticAddress, quantity 1; its source 'subscription') or
 // an admin's grant (source 'comp'), and lives as a row:
@@ -11,7 +11,7 @@
 //   allocating  named (the owner after the purchase, or the admin); the
 //               worker's address.allocate (address_jobs.h) finds or
 //               allocates it and writes its A record
-//   ready       held, its name in DNS: a start of the owner's on an own
+//   ready       held, its name in DNS: a start of the owner's on a dedicated
 //               machine may name it (hosted_servers.address_id; one live
 //               server per address)
 //   lapsed      its grant is gone (the fleet's pass: a subscription that
@@ -123,7 +123,7 @@ enum class NameOutcome : uint8_t {
 	InvalidName,   // address_names.h refuses it
 	NameTaken,     // another address has it (any state)
 	NoAddress,     // a subscription address: none of the account's is unnamed
-	AddressLimit,  // a comp address: the account's addresses would pass its own machines
+	AddressLimit,  // a comp address: the account's addresses would pass its dedicated machines
 	NoSuchAccount, // no active player's account
 };
 struct NameResult {
@@ -136,7 +136,7 @@ struct NameResult {
 // caller's transaction (which enqueues its address.allocate beside it).
 NameResult name_subscription_address(db::Database &db, int64_t owner_user_id, const std::string &name, int64_t now);
 // An admin's comp address for the account named `name`, while its static
-// addresses stay within its own machines (billing/entitlement.h). In the
+// addresses stay within its dedicated machines (billing/entitlement.h). In the
 // caller's transaction.
 NameResult add_comp_address(db::Database &db, int64_t owner_user_id, const std::string &name, int64_t now);
 // An admin's rename of address `id` (any state: a released one's frees its
@@ -182,15 +182,15 @@ bool restore_address(db::Database &db, int64_t id);
 // (allocating, ready, failed): every one of an account gone or not an active
 // player's; and while an account's addresses that count (its granting
 // static-address subscriptions and its comp addresses allocating or ready,
-// the entitlement's address_grants) pass its own machines, its newest comp
+// the entitlement's address_grants) pass its dedicated machines, its newest comp
 // ones that count until they no longer do, then its failed comp ones past the
-// own machines left (an allocation would only make them count), the oldest
+// dedicated machines left (an allocation would only make them count), the oldest
 // kept. A subscription's address never lapses for this: it lapses with its
 // subscription.
 struct UncoveredAddress {
 	int64_t id = 0;
 	std::string why; // the lapse's reason
-	// Judged with the account's subscriptions (the billing cache's own
+	// Judged with the account's subscriptions (the billing cache's dedicated
 	// machines and addresses): the fleet's pass confirms it as a
 	// subscription's lapse. False for one the account's row and its admin's
 	// grant alone judged.
@@ -198,7 +198,7 @@ struct UncoveredAddress {
 };
 std::vector<UncoveredAddress> uncovered_comp_addresses(db::Database &db, int64_t now);
 // Whether comp address `a` (one on its way out, counted by none) would be
-// covered again at `now`: its account an active player's, with an own machine
+// covered again at `now`: its account an active player's, with a dedicated machine
 // past the addresses that count. The release's grant read again.
 bool comp_address_covered(db::Database &db, const HostedAddress &a, int64_t now);
 

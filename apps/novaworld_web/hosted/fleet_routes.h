@@ -42,7 +42,7 @@ namespace opennova::novaworld_server::hosted {
 // cap), addresses, agent (its
 // version, protocol and image, its own log stream, and since when it speaks
 // another protocol than the service's), its image, template, serve image, the
-// server an own machine is reserved for, whether the mass-lost brake holds it,
+// server a dedicated machine is reserved for, whether the mass-lost brake holds it,
 // its times and why it ended, and its slots' egress this calendar month (UTC;
 // stats_repository.h); its use as its agent last reported it ("stats", null
 // before a report, with "stats_at"; its network's rates between its two newest

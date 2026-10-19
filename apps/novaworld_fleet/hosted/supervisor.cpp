@@ -427,7 +427,7 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 	const size_t acts = stops.size() + moves.size();
 	const std::string reason = "a pass would stop or move " + std::to_string(acts) + " server(s) of " +
 			std::to_string(owners_past.size()) + " of " + std::to_string(owners) + " owners";
-	// The brake on the brake: a pass that would stop (or move off their own
+	// The brake on the brake: a pass that would stop (or move off their dedicated
 	// machines) more owners' servers than max(2, half the owners) reads as the
 	// cache gone wrong (a lost sync, a mass expiry), not as that many owners
 	// lapsing at once. It holds every stop and move until a clean reconcile
@@ -701,7 +701,7 @@ void Supervisor::place(db::Database &db, const HostedServer &s, Runtime &rt, uin
 		case Placement::Outcome::Full:
 			if (!rt.waiting_logged) {
 				std::printf("[hosted] server %lld waits for a slot: the fleet's %s machines are full\n",
-						static_cast<long long>(s.id), s.own_machine ? "own" : "shared");
+						static_cast<long long>(s.id), s.own_machine ? "dedicated" : "shared");
 				rt.waiting_logged = true;
 			}
 			return;
@@ -745,7 +745,7 @@ bool Supervisor::launch_machine(db::Database &db, const HostedServer &s, Machine
 	wanted.serve_image = config_.serve_image;
 	wanted.reserved_for = kind == MachineKind::Own ? s.id : 0;
 	wanted.launched_for = s.id;
-	// The static address the server runs at, which its own machine carries.
+	// The static address the server runs at, which its dedicated machine carries.
 	if (kind == MachineKind::Own && s.address_id) wanted.address_id = *s.address_id;
 	// The row and its launch job, together: no row without its launch, no
 	// launch without its row. A worker runs the launch (fleet_jobs.h); the
@@ -1291,7 +1291,7 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 
 	std::map<int64_t, std::vector<HostedServer>> holders;
 	std::set<int64_t> live_ids;
-	std::set<int64_t> own_ids; // the live servers on own machines
+	std::set<int64_t> own_ids; // the live servers on dedicated machines
 	for (HostedServer &s : list_live(db)) {
 		live_ids.insert(s.id);
 		if (s.own_machine) own_ids.insert(s.id);

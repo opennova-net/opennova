@@ -423,8 +423,8 @@ void HostedRoutes::register_routes(WebApp &app) {
 // machines), own_machines (its dedicated machines), own_used (those of them on
 // dedicated machines), can_start, source (its shared servers': "none", "tier"
 // or "comp"), tier (its granting support tier, null for none), granted (an
-// admin grants it hosting, billing::admin_granted: it buys no tier or
-// add-on)}),
+// admin grants it hosting, billing::admin_granted: it buys no tier, dedicated
+// machine or static address)}),
 // "data_sets" (the data sets a start may pick, data_set_repository.h
 // offered_data_sets: the bases with a ready current tree, each {id,
 // display_name, title, version, missions [{file, title}] (its tree's
@@ -558,8 +558,8 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // invalid_settings with the refused "field" (data_set_id, expansion_id,
 // missions among them) and why (hosted_settings.h check_settings), then the
 // request: 403 not_entitled for an account not active or with no hosting
-// entitlement, 403 payment_past_due while a payment of its (a tier's or an
-// add-on's) is past due, 409 server_limit with "shared_servers" and
+// entitlement, 403 payment_past_due while a payment of its (a tier's, a
+// dedicated machine's or a static address's) is past due, 409 server_limit with "shared_servers" and
 // "shared_used" when a shared machine was asked for and every server it may
 // run on shared machines is live (a stopping one counts), 409 no_own_machine
 // with "own_machines" and "own_used" when a dedicated machine was asked for and
@@ -619,12 +619,12 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 				settings.expansion_id ? find_offered_expansion(*base, *settings.expansion_id) : nullptr);
 	}
 	const bool own_machine = body->flag("own_machine").value_or(false);
-	// The static address it runs at: an own-machine server's alone.
+	// The static address it runs at: a dedicated-machine server's alone.
 	std::optional<int64_t> address_id;
 	if (!body->null("address_id")) address_id = body->integer("address_id");
 	if (body->wrong_type()) return json_error(400, "invalid_field");
 	if (address_id && !own_machine)
-		return json_error(400, "invalid_field", "address_id needs own_machine (a static address is an own machine's)");
+		return json_error(400, "invalid_field", "address_id needs own_machine (a static address is a dedicated machine's)");
 	if (const auto refused = check_settings(settings, offered)) {
 		crow::json::wvalue out;
 		out["error"] = "invalid_settings";
@@ -640,7 +640,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 		switch (result.outcome) {
 			case RequestOutcome::Created:
 				log_owner(user, "start",
-						"server " + std::to_string(result.id) + " requested" + (own_machine ? " (own machine)" : ""));
+						"server " + std::to_string(result.id) + " requested" + (own_machine ? " (dedicated machine)" : ""));
 				return server_reply(202, *db_conn, result.id, false);
 			case RequestOutcome::InvalidSettings:
 				// check_settings passed above, and request_server runs the same

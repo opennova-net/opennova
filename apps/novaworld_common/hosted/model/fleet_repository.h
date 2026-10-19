@@ -60,7 +60,7 @@ struct FleetMachineRow {
 	std::string agent_version;
 	std::string template_version;
 	std::string serve_image;
-	int64_t reserved_for = 0; // an own machine's server id (0: none)
+	int64_t reserved_for = 0; // a dedicated machine's server id (0: none)
 	// UTC 'YYYY-MM-DD HH:MM:SS'; empty until set.
 	std::string last_report_at;
 	std::string launched_at;
@@ -76,7 +76,7 @@ struct FleetMachineRow {
 	// (record_launch_subnet); "" until one did.
 	std::string launch_subnet;
 	// The static address it was launched to carry (address_repository.h; an
-	// own machine's): 0 for none.
+	// dedicated machine's): 0 for none.
 	int64_t address_id = 0;
 	// What the supervisor remembers of it between passes (supervisor.h, on its
 	// clock): the state its pass last saw and since when, since when it has
@@ -132,7 +132,7 @@ std::vector<FleetMachineEvent> list_machine_events(
 struct NewMachine {
 	std::string provider; // the driver's name (MachineDriver::name)
 	MachineKind kind = MachineKind::Shared;
-	int slots = 1; // 1..kMaxSlots; an own machine's 1
+	int slots = 1; // 1..kMaxSlots; a dedicated machine's 1
 	// The serve image its agent is copied out of; the bootstrap reply names it.
 	std::string serve_image;
 	int64_t reserved_for = 0; // own: the server it is launched for
@@ -403,13 +403,13 @@ std::vector<FleetMachine> placement_machines(db::Database &db);
 // The live servers that hold no slot (requested, or provisioning before their
 // placement), by id: the ones placement serves first.
 std::vector<PlacementRequest> waiting_servers(db::Database &db);
-// Whether the fleet has a place for a new server (on an own machine with
+// Whether the fleet has a place for a new server (on a dedicated machine with
 // `own_machine`) under `policy`: place_after over placement_machines and
-// waiting_servers is anything but Full, an own machine whose server is no
+// waiting_servers is anything but Full, a dedicated machine whose server is no
 // longer live, or moved to a shared machine, left out (its place is free: the
 // supervisor ends it at its next pass, and its own placement, which still
-// counts it, launches the next own machine only after). The start request's
-// at_capacity, GET /api/me/servers' `full` and a move off an own machine
+// counts it, launches the next dedicated machine only after). The start request's
+// at_capacity, GET /api/me/servers' `full` and a move off a dedicated machine
 // (hosted_repository.h clear_own_machine) read it; inside a Transaction it
 // reads that transaction's view.
 bool fleet_has_room(db::Database &db, const PlacementPolicy &policy, bool own_machine);

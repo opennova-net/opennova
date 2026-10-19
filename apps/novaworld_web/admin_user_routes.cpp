@@ -223,7 +223,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 
 	// DELETE /api/admin/users/<id> — 204; 404 not_found; 409
 	// active_subscription while a subscription of the account still grants (a
-	// support tier or an add-on; billing/entitlement.h), and 409 checkout_open
+	// support tier, a dedicated machine or a static address;
+	// billing/entitlement.h), and 409 checkout_open
 	// while a checkout of the account holds its reservation
 	// (billing/billing_repository.h "A checkout's hold": its session may still
 	// be paid, or be paid and not synced yet): Stripe would bill an account that
@@ -243,8 +244,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 				db_conn->exec("SELECT pg_advisory_xact_lock($1);", { db::BindValue(db::kHostedStartLock) });
 				if (billing::has_granting_subscription(*db_conn, id, billing::unix_now()))
 					return json_error(409, "active_subscription",
-							"a subscription of this account still grants (a support tier or an add-on); cancel it in "
-							"Stripe first");
+							"a subscription of this account still grants (a support tier, a dedicated machine or a static "
+							"address); cancel it in Stripe first");
 				if (!billing::live_reservations_of(*db_conn, id).empty())
 					return json_error(409, "checkout_open",
 							"a checkout of this account may still be paid; try again once it ends");
@@ -359,7 +360,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			if (hosted::sold_exceeds_capacity(sold, sellable_))
 				std::fprintf(stderr,
 						"[http] WARN account %lld's comp grants take the sold capacity past what the fleet sells "
-						"(shared %lld of %lld, own machines %lld of %lld, addresses %lld of %lld)\n",
+						"(shared %lld of %lld, dedicated machines %lld of %lld, addresses %lld of %lld)\n",
 						static_cast<long long>(id), static_cast<long long>(sold.shared),
 						static_cast<long long>(sellable_.shared), static_cast<long long>(sold.own),
 						static_cast<long long>(sellable_.own), static_cast<long long>(sold.addresses),

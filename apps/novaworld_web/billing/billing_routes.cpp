@@ -71,7 +71,8 @@ void log_account(const WebSessionUser &user, const char *what, const std::string
 			static_cast<long long>(user.id), what, outcome.c_str());
 }
 
-// What a checkout's "item" names: a tier 1..3, or an add-on; nullopt for none.
+// What a checkout's "item" names: a tier 1..3, a dedicated machine or a static
+// address; nullopt for none.
 std::optional<std::pair<ItemKind, int>> checkout_item(const std::string &item) {
 	if (item == "own_machine") return std::make_pair(ItemKind::OwnMachine, 0);
 	if (item == "static_address") return std::make_pair(ItemKind::StaticAddress, 0);
@@ -84,7 +85,7 @@ std::optional<std::pair<ItemKind, int>> checkout_item(const std::string &item) {
 // The fleet has sold all it holds of what `item` adds.
 crow::response sold_out(ItemKind item) {
 	const char *what = item == ItemKind::Tier ? "support tiers"
-			: item == ItemKind::OwnMachine	  ? "own machines"
+			: item == ItemKind::OwnMachine	  ? "dedicated machines"
 											  : "static addresses";
 	return json_error(409, "sold_out", std::string("Hosting is full: new subscriptions are paused (") + what + ")");
 }
@@ -380,7 +381,8 @@ std::optional<crow::response> BillingRoutes::judge_checkout(
 	const Entitlement e = entitlement_from(holdings.facts, holdings.subscriptions, now);
 	if (admin_granted(e)) {
 		log_account(user, "checkout", "not_eligible (admin grant)");
-		return json_error(403, "not_eligible", "this account's hosting is an admin grant: it buys no support tier or add-on");
+		return json_error(403, "not_eligible",
+				"this account's hosting is an admin grant: it buys no support tier, dedicated machine or static address");
 	}
 	const std::vector<SubscriptionRow> rows = subscriptions_of(db, user.id);
 	if (item.item == ItemKind::Tier && tier_grants(rows, now)) {
@@ -388,7 +390,8 @@ std::optional<crow::response> BillingRoutes::judge_checkout(
 		return json_error(409, "already_subscribed", "this account has a support tier; change it in the portal");
 	}
 	if (item.item != ItemKind::Tier) {
-		// While a payment is past due, Stripe still retries it: no new add-on.
+		// While a payment is past due, Stripe still retries it: no new dedicated
+		// machine or static address.
 		for (const SubscriptionRow &r : rows) {
 			if (r.status == "past_due" && subscription_grants(r, now)) {
 				log_account(user, "checkout", "payment_past_due");
@@ -396,10 +399,10 @@ std::optional<crow::response> BillingRoutes::judge_checkout(
 			}
 		}
 	}
-	// An address is its own machine's: one more than them would carry nothing.
+	// An address is its dedicated machine's: one more than them would carry nothing.
 	if (item.item == ItemKind::StaticAddress && e.address_grants >= e.own_machines) {
 		log_account(user, "checkout", "address_limit");
-		return json_error(409, "address_limit", "this account has a static address for every own machine it has");
+		return json_error(409, "address_limit", "this account has a static address for every dedicated machine it has");
 	}
 	const hosted::Capacity more = hosted::added_by(holdings.facts, holdings.subscriptions, item.item, item.tier, now);
 	if (!hosted::fits(hosted::sold_now(db, now, replaced), more, sellable_)) {
@@ -455,12 +458,12 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // account is running (one at a time), 403 not_eligible for an account that is
 // not an active player's or has an admin grant (billing::admin_granted: it buys
 // nothing beside it), 409 already_subscribed when a
-// tier grants already (the portal changes it), for an add-on 403
-// payment_past_due while a payment of the account is past due, for a static
+// tier grants already (the portal changes it), for a dedicated machine or a
+// static address 403 payment_past_due while a payment of the account is past due, for a static
 // address 409 address_limit when its addresses would pass its dedicated
 // machines, 409 sold_out when the fleet has sold all it holds of what the item
 // adds (hosted/model/sold_capacity.h: shared places for a tier, dedicated
-// machines and addresses for the add-ons; a dedicated machine needs no tier,
+// machines and addresses for the others; a dedicated machine needs no tier,
 // each checkout sells one, and the fleet's ONNET_FLEET_MAX_OWN is the only cap
 // on an account's), 503 stripe_unavailable. Those rules are judged first as a quick
 // refusal, then again after the account's previous session is settled

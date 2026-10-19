@@ -559,7 +559,7 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 						std::to_string(sold) + " of " + std::to_string(sellable);
 		};
 		part("shared places", in.sold->shared, in.sellable.shared);
-		part("own machines", in.sold->own, in.sellable.own);
+		part("dedicated machines", in.sold->own, in.sellable.own);
 		part("static addresses", in.sold->addresses, in.sellable.addresses);
 		add(HealthLevel::Warn, "Hosting capacity",
 				"Sold past what the fleet holds: " + parts +

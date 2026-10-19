@@ -130,7 +130,7 @@ struct EventRow {
 std::vector<EventRow> recent_events(db::Database &db, size_t limit);
 
 // Whether a subscription of the account grants at `now` (entitlement.h
-// subscription_grants: a tier or an add-on, active, trialing or past_due,
+// subscription_grants: a tier, a dedicated machine or a static address, active, trialing or past_due,
 // inside its period's net). The admin's account delete refuses such an
 // account.
 bool has_granting_subscription(db::Database &db, int64_t user_id, int64_t now);
