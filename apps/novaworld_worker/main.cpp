@@ -136,6 +136,7 @@ int run(const program::Boot &boot) {
 	}
 
 	jobs::register_account_jobs(registry);
+	billing::register_billing_prune(registry);
 	hosted::register_stats_jobs(registry);
 	register_mail_jobs(registry, *mail.mailer);
 	billing::Billing *billing = billing_stack->billing.get();

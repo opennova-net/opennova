@@ -1,7 +1,6 @@
 #include "account_jobs.h"
 
 #include "auth.h"
-#include "billing/billing_repository.h"
 #include "password_reset.h"
 #include "web_session.h"
 
@@ -39,15 +38,12 @@ void register_account_jobs(JobRegistry &registry) {
 			prune_job(kJobLoginAddressesPrune, prune_login_addresses, "stale login address(es)"));
 	registry.add(prune_job(
 			kJobPasswordResetsPrune, prune_password_resets, "expired password reset link(s)"));
-	registry.add(prune_job(
-			kJobBillingEventsPrune, [](db::Database &db) { return billing::prune_events(db); },
-			"old billing event(s)"));
 }
 
 std::vector<PeriodicJob> account_schedule(const MaintenanceConfig &config) {
 	std::vector<PeriodicJob> out;
 	for (const char *kind : { kJobWebSessionsPrune, kJobActiveSessionsPrune,
-				 kJobLoginAddressesPrune, kJobPasswordResetsPrune, kJobBillingEventsPrune }) {
+				 kJobLoginAddressesPrune, kJobPasswordResetsPrune }) {
 		PeriodicJob p;
 		p.kind = kind;
 		p.period_ms = config.sweep_interval_ms;

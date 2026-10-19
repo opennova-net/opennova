@@ -355,6 +355,8 @@ std::vector<jobs::PeriodicJob> worker_schedule(
 			out.push_back(std::move(p));
 	};
 	add(jobs::account_schedule(maintenance));
+	// The billing cache's prune whether or not billing is configured.
+	add(billing::billing_prune_schedule(maintenance.sweep_interval_ms));
 	// The hosted stats' prune whether or not hosting is on: a fleet turned off
 	// leaves rows that still age out.
 	add(hosted::stats_schedule());

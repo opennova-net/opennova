@@ -10,8 +10,6 @@
 //                               the login's own thread
 //   login_addresses.prune       login addresses not used for kLoginAddressDays
 //   password_resets.prune       password reset links past their hour
-//   billing_events.prune        webhook events synced more than 30 days ago
-//                               (the cache keeps no history Stripe does not)
 //
 // Service policy, not a port.
 
@@ -25,7 +23,6 @@ inline constexpr const char *kJobWebSessionsPrune = "web_sessions.prune";
 inline constexpr const char *kJobActiveSessionsPrune = "active_user_sessions.prune";
 inline constexpr const char *kJobLoginAddressesPrune = "login_addresses.prune";
 inline constexpr const char *kJobPasswordResetsPrune = "password_resets.prune";
-inline constexpr const char *kJobBillingEventsPrune = "billing_events.prune";
 
 void register_account_jobs(JobRegistry &registry);
 std::vector<PeriodicJob> account_schedule(const MaintenanceConfig &config);
