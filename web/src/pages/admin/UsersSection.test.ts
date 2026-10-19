@@ -15,7 +15,7 @@ const USERS = [
   userEntry(1, {
     username: 'alpha',
     max_servers: 2,
-    entitlement: { max_servers: 2, source: 'tier', tier: 2 },
+    entitlement: { max_servers: 2, source: 'tier', tier: 2, comp_servers: 0 },
     live_servers: 1,
     subscription_status: 'active',
   }),
@@ -24,15 +24,23 @@ const USERS = [
     comp_servers: 3,
     comp_own_machines: 0,
     max_servers: 3,
-    entitlement: { max_servers: 3, source: 'comp', tier: null },
+    entitlement: { max_servers: 3, source: 'comp', tier: null, comp_servers: 3 },
     live_servers: 3,
   }),
   userEntry(3, {
     username: 'charlie',
-    entitlement: { max_servers: 1, source: 'tier', tier: 1 },
+    entitlement: { max_servers: 1, source: 'tier', tier: 1, comp_servers: 0 },
     live_servers: 2,
     subscription_status: 'past_due',
     account_status: 'banned',
+  }),
+  // A grant bigger than the tier still billing beside it: both show.
+  userEntry(4, {
+    username: 'delta',
+    comp_servers: 11,
+    max_servers: 11,
+    entitlement: { max_servers: 11, source: 'comp', tier: 2, comp_servers: 11 },
+    subscription_status: 'active',
   }),
 ];
 
@@ -52,7 +60,7 @@ describe('UsersSection', () => {
   it('lists each account with its tier, subscription and servers, each linking to its page', async () => {
     const wrapper = await mountSection();
     const rows = wrapper.findAll('tr.user-row');
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     expect(rows[0].text()).toContain('Tier 2');
     expect(rows[0].text()).toContain('Active');
     expect(rows[0].text()).toContain('1 live of 2');
@@ -64,6 +72,7 @@ describe('UsersSection', () => {
     expect(rows[2].text()).toContain('Banned');
     // Over its entitlement: marked.
     expect(rows[2].find('.text-danger').text()).toBe('2 live of 1');
+    expect(rows[3].text()).toContain('Admin grant of 11, Tier 2');
     // The approval toggle is gone.
     expect(wrapper.text()).not.toMatch(/approve|can host/i);
     expect(wrapper.text()).not.toContain('—');

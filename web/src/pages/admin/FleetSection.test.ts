@@ -158,6 +158,22 @@ describe('FleetSection', () => {
     expect(rows[1].text()).toContain('Not listed');
   });
 
+  it("names an owner's admin grant where it said no tier, and the tier beside it", async () => {
+    fleet.mockResolvedValue({
+      ok: true,
+      value: fleetResponse({
+        servers: [
+          fleetServer(1, { owner: { id: 101, username: 'owner1', tier: null, granted: true } }),
+          fleetServer(2, { owner: { id: 102, username: 'owner2', tier: 2, granted: true } }),
+          fleetServer(3, { owner: { id: 103, username: 'owner3', tier: null, granted: false } }),
+        ],
+      }),
+    });
+    const page = await mountSection();
+    const owners = page.findAll('tr.fleet-server-row').map((r) => r.get('td span').text());
+    expect(owners).toEqual(['Admin grant', 'Admin grant, Tier 2', 'No tier']);
+  });
+
   it("shows each server's data, and whether newer waits", async () => {
     fleet.mockResolvedValue({
       ok: true,

@@ -26,7 +26,7 @@ export function user(id: number, overrides: Partial<User> = {}): User {
 export function userEntry(id: number, overrides: Partial<UserListEntry> = {}): UserListEntry {
   return {
     ...user(id),
-    entitlement: { max_servers: 0, source: 'none', tier: null },
+    entitlement: { max_servers: 0, source: 'none', tier: null, comp_servers: 0 },
     live_servers: 0,
     subscription_status: null,
     ...overrides,
@@ -155,7 +155,7 @@ export function rollPlan(overrides: Partial<RollPlan> = {}): RollPlan {
 export function fleetServer(id: number, overrides: Partial<FleetServer> & Partial<HostedServer> = {}): FleetServer {
   return {
     ...hostedServer(id, overrides),
-    owner: { id: 100 + id, username: `owner${id}`, tier: 2 },
+    owner: { id: 100 + id, username: `owner${id}`, tier: 2, granted: false },
     machine_ref: '3',
     slot: 3,
     game_port: 32771,

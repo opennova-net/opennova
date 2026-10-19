@@ -156,7 +156,7 @@
                 <td class="whitespace-nowrap px-4 py-3">
                   <template v-if="s.owner">
                     {{ s.owner.username }}
-                    <span class="block text-xs text-ink-muted">{{ s.owner.tier ? `Tier ${s.owner.tier}` : 'No tier' }}</span>
+                    <span class="block text-xs text-ink-muted">{{ ownerHostingLabel(s.owner) }}</span>
                   </template>
                   <span v-else class="text-ink-muted">Deleted account</span>
                 </td>
@@ -292,6 +292,7 @@ import { fetchInfrastructure } from '../../api/infra';
 import { usePolling } from '../../composables/usePolling';
 import type { FleetMachine, FleetQuery, FleetResponse, FleetServer, PinnedTree } from '../../types/hostedServer';
 import type { InfraFleetCluster } from '../../types/infra';
+import { ownerHostingLabel } from '../../utils/adminView';
 import { isTransitioning, stateBadgeClass, stateLabel } from '../../utils/hostedState';
 
 const STOP_ALL_PHRASE = 'STOP ALL';

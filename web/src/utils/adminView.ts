@@ -14,12 +14,22 @@ export function isActiveAccount(status: string): boolean {
   return (status || 'active') === 'active';
 }
 
-// "Tier 2", "Admin grant of 3", "None".
-export function entitlementLabel(e: { source: EntitlementSource; tier: number | null; max_servers: number }): string {
-  if (e.source === 'tier' && e.tier !== null) return `Tier ${e.tier}`;
-  if (e.source === 'comp') return `Admin grant of ${e.max_servers}`;
-  if (e.tier !== null) return `Tier ${e.tier}`;
-  return 'None';
+// Where an account's hosted servers come from, each source it has, the one
+// that gives its servers first: "Tier 2", "Admin grant of 3", "Admin grant of
+// 11, Tier 2" (a tier still billing under a bigger grant), "Tier 2, Admin
+// grant of 2", "None".
+export function entitlementLabel(e: { source: EntitlementSource; tier: number | null; comp_servers: number }): string {
+  const grant = e.comp_servers > 0 ? `Admin grant of ${e.comp_servers}` : '';
+  const tier = e.tier !== null ? `Tier ${e.tier}` : '';
+  const parts = (e.source === 'tier' ? [tier, grant] : [grant, tier]).filter((p) => p !== '');
+  return parts.length > 0 ? parts.join(', ') : 'None';
+}
+
+// A fleet view's owner's hosting: "Admin grant, Tier 2", "Admin grant",
+// "Tier 2", "No tier".
+export function ownerHostingLabel(owner: { tier: number | null; granted: boolean }): string {
+  const parts = [...(owner.granted ? ['Admin grant'] : []), ...(owner.tier !== null ? [`Tier ${owner.tier}`] : [])];
+  return parts.length > 0 ? parts.join(', ') : 'No tier';
 }
 
 // Where an entitlement's servers run, as the sold capacity counts them: an own

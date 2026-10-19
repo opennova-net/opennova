@@ -62,6 +62,7 @@ function pickEntitlement(value: unknown, user: User): UserEntitlementSummary {
     max_servers: Number.isInteger(v.max_servers) ? (v.max_servers as number) : user.max_servers,
     source: sourceOf(v.source),
     tier: tierOf(v.tier),
+    comp_servers: Number.isInteger(v.comp_servers) ? (v.comp_servers as number) : user.comp_servers,
   };
 }
 
@@ -125,7 +126,6 @@ function pickDetail(data: unknown): UserDetail | null {
     user,
     entitlement: {
       ...pickEntitlement(e, user),
-      comp_servers: Number.isInteger(e.comp_servers) ? (e.comp_servers as number) : user.comp_servers,
       comp_own_machines: Number.isInteger(e.comp_own_machines) ? (e.comp_own_machines as number) : user.comp_own_machines,
       tier_servers: count(e.tier_servers),
       own_machines: count(e.own_machines),

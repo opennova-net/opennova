@@ -301,11 +301,12 @@ export interface HostedServerReply {
 }
 
 // The owner named in the fleet view, with their support tier (null for
-// none: a comp grant, or no entitlement left).
+// none) and whether an admin grants them hosting (both may hold).
 export interface FleetOwner {
   id: number;
   username: string;
   tier: 1 | 2 | 3 | null;
+  granted: boolean;
 }
 
 // A machine's kind: a shared machine packs several servers, an own machine

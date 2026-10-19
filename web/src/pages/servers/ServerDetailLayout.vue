@@ -27,7 +27,7 @@
           <template v-if="owner">
             owned by
             <RouterLink :to="`/admin/users/${owner.id}`" class="text-accent hover:text-ink-bright">{{ owner.username }}</RouterLink>
-            ({{ owner.tier ? `Tier ${owner.tier}` : 'no tier' }})
+            ({{ ownerHostingLabel(owner) }})
           </template>
           <template v-else>whose owner was deleted</template>
         </p>
@@ -103,6 +103,7 @@ import { hostedCadence, usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import type { FleetServer, HostedServer } from '../../types/hostedServer';
 import { serverAddressEndpoint } from '../../utils/addressView';
+import { ownerHostingLabel } from '../../utils/adminView';
 import { ownerStateLabel, stateBadgeClass } from '../../utils/hostedState';
 
 const props = defineProps<{

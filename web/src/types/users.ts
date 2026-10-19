@@ -29,11 +29,13 @@ export interface User {
   max_servers: number;
 }
 
-// The entitlement a users list row carries: how many, from where, the tier.
+// The entitlement a users list row carries: how many, from where, the tier,
+// and the admin's grant of servers (0 for none; with a tier too, both show).
 export interface UserEntitlementSummary {
   max_servers: number;
   source: EntitlementSource;
   tier: TierNumber | null;
+  comp_servers: number;
 }
 
 // GET /api/admin/users's rows.
@@ -47,7 +49,6 @@ export interface UserListEntry extends User {
 
 // The account's hosting entitlement in full, on its admin page.
 export interface UserEntitlement extends UserEntitlementSummary {
-  comp_servers: number;
   comp_own_machines: number;
   // The servers its support tier alone grants (0 with none): the entitlement
   // is the larger of this and comp_servers.

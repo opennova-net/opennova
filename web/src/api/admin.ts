@@ -512,7 +512,12 @@ function pickFleetServer(value: unknown): FleetServer | null {
     ...server,
     owner:
       owner && typeof owner.id === 'number' && typeof owner.username === 'string'
-        ? { id: owner.id, username: owner.username, tier: tier === 1 || tier === 2 || tier === 3 ? tier : null }
+        ? {
+            id: owner.id,
+            username: owner.username,
+            tier: tier === 1 || tier === 2 || tier === 3 ? tier : null,
+            granted: owner.granted === true,
+          }
         : null,
     machine_ref: typeof v.machine_ref === 'string' || typeof v.machine_ref === 'number' ? String(v.machine_ref) : null,
     slot: isCount(v.slot) ? v.slot : null,
