@@ -5,7 +5,8 @@
 # the games catalogue; with the HTTP layer, the accounts and sessions, the
 # mail, the background jobs' queue, pool and scheduler, the
 # hosted servers' and billing's logic, and what several programs build alike
-# from the same settings (parts.*). Each program's own code and its main()
+# from the same settings (the hosted policy, the store's, billing's and the
+# mail's stacks). Each program's own code and its main()
 # live in apps/novaworld_<program> (gate, lobby, web, fleet, worker, data).
 set(NOVAWORLD_COMMON_SOURCES
     program/program.cpp
@@ -36,6 +37,8 @@ set(NOVAWORLD_COMMON_SOURCES
     core/owner_file.cpp
     core/random_secret.cpp
     core/scratch_dir.cpp
+    # The object store as a program runs it (its scratch directory, its runner).
+    core/object_store_stack.cpp
 )
 
 if(BUILD_NOVAWORLD_HTTP)
@@ -46,10 +49,8 @@ if(BUILD_NOVAWORLD_HTTP)
         # Account email: the outbound mail (SES through the AWS CLI, the
         # outbox, the templates) and the password reset links.
         accounts/mailer.cpp
+        accounts/mail_stack.cpp
         accounts/password_reset.cpp
-        # What several programs build from the same settings: the hosted
-        # servers' setup, billing, mail, the periodic jobs.
-        parts.cpp
         # The background jobs: the queue in the database, the worker pool, the
         # periodic jobs' scheduler and the prunes.
         jobs/job_queue.cpp
@@ -91,6 +92,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/model/fleet_repository.cpp
         hosted/model/fleet_roll.cpp
         hosted/model/host_limits.cpp
+        hosted/model/hosted_policy.cpp
         hosted/model/hosted_repository.cpp
         hosted/model/hosted_settings.cpp
         hosted/model/limits_hold.cpp
@@ -109,6 +111,7 @@ if(BUILD_NOVAWORLD_HTTP)
         billing/billing_config.cpp
         billing/billing_jobs.cpp
         billing/billing_repository.cpp
+        billing/billing_stack.cpp
         billing/billing_sync.cpp
         billing/entitlement.cpp
         billing/stripe_api.cpp

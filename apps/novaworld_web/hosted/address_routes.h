@@ -39,7 +39,8 @@ public:
 	AddressRoutes(const AddressRoutes &) = delete;
 	AddressRoutes &operator=(const AddressRoutes &) = delete;
 
-	// Whether the static addresses are on (parts.h HostedPolicy::addresses_on),
+	// Whether the static addresses are on (hosted/model/hosted_policy.h
+	// HostedPolicy::addresses_on),
 	// the play zone they are named in and the addresses the fleet sells. Before
 	// register_routes(); off, a name or a comp address answers 503
 	// addresses_disabled.

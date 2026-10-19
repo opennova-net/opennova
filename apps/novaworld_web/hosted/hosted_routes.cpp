@@ -376,8 +376,9 @@ void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, i
 
 void HostedRoutes::configure(const ServerConfig &config, const PlacementPolicy &fleet) {
 	provider_ = config.hosted_provider.empty() ? std::string("none") : config.hosted_provider;
-	// The program's boot has warned of what does not read (parts.h
-	// hosted_policy: hosting off, the provider "none", for every program alike).
+	// The program's boot has warned of what does not read
+	// (hosted/model/hosted_policy.h hosted_policy: hosting off, the provider
+	// "none", for every program alike).
 	hosting_on_ = provider_ != "none";
 	cap_ = config.hosted_cap;
 	fleet_ = fleet;

@@ -91,7 +91,7 @@ int64_t enqueue_tree_prune(db::Database &db);
 // downloads what it works on (one directory of its own per job, removed when it ends).
 void register_data_set_jobs(
 		jobs::JobRegistry &registry, ObjectStore &store, std::string scratch_dir);
-// The periodic prune, hourly (the data program's scheduler, parts.h data_schedule).
+// The periodic prune, hourly (the data program's scheduler, while there is a store).
 std::vector<jobs::PeriodicJob> data_set_schedule();
 
 } // namespace opennova::novaworld_server::hosted

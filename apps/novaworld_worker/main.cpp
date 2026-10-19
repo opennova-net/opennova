@@ -3,7 +3,7 @@
 // the prunes (the service's, the website's, the hosted stats'), the mail it
 // sends, the billing sync, the fleet's machine driver calls and the static
 // addresses' cloud and DNS calls; and the scheduler of its own periodic kinds
-// (parts.h worker_schedule), in every worker process with no election (the
+// (worker_schedule.h), in every worker process with no election (the
 // schedule keys keep each bucket single). What it runs is what its scheduler,
 // the fleet's supervisor and web's routes enqueued; any number of worker
 // processes share the queue. The data sets' jobs are the data program's
@@ -11,19 +11,24 @@
 // scheduler's ticks: a slow job occupies its worker, never a watched loop.
 
 #include "core/ecs_metadata.h"
-#include "parts.h"
 #include "program/program.h"
+#include "worker_schedule.h"
 
 #include "accounts/account_jobs.h"
+#include "accounts/mail_stack.h"
 #include "billing/billing_jobs.h"
+#include "billing/billing_stack.h"
 #include "billing/entitlement.h"
+#include "core/scratch_dir.h"
 #include "hosted/cloud/address_job_handlers.h"
 #include "hosted/cloud/address_zone.h"
 #include "hosted/cloud/docker_address_driver.h"
 #include "hosted/cloud/docker_machine_driver.h"
+#include "hosted/cloud/driver_config.h"
 #include "hosted/cloud/ec2_address_driver.h"
 #include "hosted/cloud/ec2_machine_driver.h"
 #include "hosted/cloud/fleet_job_handlers.h"
+#include "hosted/model/hosted_policy.h"
 #include "hosted/model/limits_hold.h"
 #include "hosted/model/stats_jobs.h"
 #include "jobs/maintenance_jobs.h"
@@ -42,7 +47,8 @@ namespace {
 using namespace opennova;
 using namespace opennova::novaworld_server;
 
-// The machine driver over a driver setup (parts.h driver_setup), and with the
+// The machine driver over a driver setup (hosted/cloud/driver_config.h
+// driver_setup), and with the
 // static addresses on their driver and their zone (hosted/cloud/address_driver.h,
 // hosted/cloud/address_zone.h) over the same runner. Its members go in reverse: the
 // drivers first, then their runner, then the scratch directory.
@@ -60,7 +66,7 @@ struct MachineDriverStack {
 // zone while they are on (the ec2 driver's: Elastic IPs and Route 53, over its
 // runner); no driver, with `error`, when its scratch directory cannot be made.
 MachineDriverStack make_machine_driver(
-		const HostedPolicy &hosting, const DriverSetup &setup, std::string &error) {
+		const hosted::HostedPolicy &hosting, const hosted::DriverSetup &setup, std::string &error) {
 	MachineDriverStack stack;
 	if (hosting.provider == "ec2") {
 		hosted::Ec2MachineConfig ec2 = setup.driver.ec2;
@@ -110,25 +116,26 @@ int run(const program::Boot &boot) {
 
 	// Every part below outlives the pool (declared before it): the handlers
 	// call into them.
-	std::optional<BillingStack> billing_stack;
+	std::optional<billing::BillingStack> billing_stack;
 	try {
 		auto lease = boot.pool.acquire();
-		billing_stack.emplace(make_billing(billing::billing_config_from_env(), boot.pool, *lease));
+		billing_stack.emplace(
+				billing::make_billing(billing::billing_config_from_env(), boot.pool, *lease));
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] FATAL: the worker's boot: %s\n", e.what());
 		return 1;
 	}
 	MailStack mail = make_mail(config);
-	const HostedPolicy hosting = hosted_policy(config);
+	const hosted::HostedPolicy hosting = hosted::hosted_policy(config);
 	// With hosting on, the driver that launches its machines (and, with the
 	// static addresses on, theirs): its settings incomplete is this boot's
 	// FATAL, never hosting off here while web and the fleet, which read the
 	// policy alone, take starts and sell addresses.
 	MachineDriverStack machines;
 	if (hosting.on) {
-		DriverSetup driver;
+		hosted::DriverSetup driver;
 		std::string error;
-		if (!driver_setup(hosting, driver, error))
+		if (!hosted::driver_setup(hosting, driver, error))
 			return program::fatal("the machine driver: " + error);
 		machines = make_machine_driver(hosting, driver, error);
 		if (!machines.driver)

@@ -1,9 +1,12 @@
 #pragma once
 
+#include "core/object_store.h"
+
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/gate_probe.h>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -295,5 +298,11 @@ struct ServerConfig {
 	// above for anything not set.
 	static ServerConfig from_env();
 };
+
+// The object store `config` names (ONNET_OBJECT_STORE_URL with
+// ONNET_OBJECT_STORE_REGION): nullopt when it names none, or when the URL does
+// not parse (a boot warning). Web's data set routes, the hosted servers'
+// policy and the data program's jobs read it alike.
+std::optional<ObjectStoreConfig> object_store_of(const ServerConfig &config);
 
 } // namespace opennova::novaworld_server

@@ -8,17 +8,23 @@
 // their tables. No supervisor, no admin link, no lobby.
 
 #include "accounts/auth.h"
+#include "accounts/mail_stack.h"
+#include "billing/billing_stack.h"
 #include "core/loggable.h"
 #include "core/object_store.h"
+#include "core/object_store_stack.h"
+#include "core/scratch_dir.h"
+#include "data_sets/data_set_jobs.h"
+#include "hosted/model/hosted_policy.h"
 #include "http_listener.h"
 #include "infra/alarm_store.h"
 #include "infra/infra_status.h"
 #include "infra/log_store.h"
 #include "infra/metrics_store.h"
-#include "parts.h"
 #include "program/program.h"
 #include "redis_client.h"
 #include "updater/update_listener.h"
+#include "worker_schedule.h"
 
 #include <base/io/os_path.h>
 #include <net/novaworld/unknown_tracker.h>
@@ -27,6 +33,7 @@
 #include <exception>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -100,13 +107,14 @@ int run(const program::Boot &boot) {
 
 	// The boot's database work on a lease of its own, returned before the
 	// listener starts (its start leases on this thread).
-	const HostedPolicy hosting = hosted_policy(config);
+	const hosted::HostedPolicy hosting = hosted::hosted_policy(config);
 	config.hosted_provider = hosting.provider;
-	std::optional<BillingStack> billing_stack;
+	std::optional<billing::BillingStack> billing_stack;
 	try {
 		auto lease = boot.pool.acquire();
 		bootstrap_first_admin(config, *lease);
-		billing_stack.emplace(make_billing(billing::billing_config_from_env(), boot.pool, *lease));
+		billing_stack.emplace(
+				billing::make_billing(billing::billing_config_from_env(), boot.pool, *lease));
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] FATAL: web's boot: %s\n", e.what());
 		return 1;
@@ -119,7 +127,7 @@ int run(const program::Boot &boot) {
 	ObjectStoreStack store;
 	if (hosting.store_ok) {
 		std::string error;
-		store = make_object_store(hosting, config, error);
+		store = make_object_store(hosting.store, config.aws_cli, error);
 		if (!store.store)
 			return program::fatal("the object store: " + error);
 		std::printf("[boot] data sets: routes over the %s store\n", store.store->kind());
@@ -179,9 +187,13 @@ int run(const program::Boot &boot) {
 	http.set_addresses(hosting.addresses_on, hosting.fleet.address_zone);
 	// The admin usage view's limits: each container's memory and CPUs.
 	http.set_fleet_slots(hosting.fleet.slot_memory_mb, hosting.fleet.slot_cpus);
-	// The admin jobs page's schedules: every program's (the worker's and the
-	// data program's), read from the same settings.
-	http.set_job_schedules(periodic_jobs(config, hosting));
+	// The admin jobs page's schedules: every program's (the worker's, then the
+	// data program's while there is a store), read from the same settings.
+	std::vector<jobs::PeriodicJob> schedules = worker_schedule(config, hosting);
+	if (hosting.store_ok)
+		for (jobs::PeriodicJob &p : hosted::data_set_schedule())
+			schedules.push_back(std::move(p));
+	http.set_job_schedules(std::move(schedules));
 	// The game data routes (data_sets/) work on the deployment's object store
 	// (ONNET_OBJECT_STORE_URL, ADR 0064), built above: none without one, and those
 	// routes answer 503 store_unavailable.

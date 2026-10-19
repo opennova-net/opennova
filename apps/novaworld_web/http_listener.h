@@ -145,8 +145,9 @@ public:
 	void set_alarm_store(infra::AlarmStore *store) { alarm_store_ = store; }
 
 	// The object store the hosted data sets' trees and the update packages
-	// live in (core/object_store.h; parts.h make_object_store), which the admin's
-	// data set and release routes upload into and read. Set before start(); it
+	// live in (core/object_store.h; core/object_store_stack.h
+	// make_object_store), which the admin's data set and release routes upload
+	// into and read. Set before start(); it
 	// must outlive the listener. Null: no store (those routes answer
 	// store_unavailable).
 	void set_object_store(ObjectStore *store) { object_store_ = store; }
@@ -171,7 +172,8 @@ public:
 	// fleet's health (hosted/model/fleet_health.h) hold each machine's against. Set
 	// before start().
 	void set_fleet_release(hosted::ReleaseImages release) { fleet_release_ = std::move(release); }
-	// Whether the static addresses are on (parts.h HostedPolicy::addresses_on)
+	// Whether the static addresses are on (hosted/model/hosted_policy.h
+	// HostedPolicy::addresses_on)
 	// and the play zone they are named in: the address routes and the servers'
 	// and accounts' views. Set before start(); unset, off.
 	void set_addresses(bool on, std::string zone) {
@@ -179,8 +181,9 @@ public:
 		address_zone_ = std::move(zone);
 	}
 
-	// The periodic jobs the deployment's programs schedule (parts.h
-	// periodic_jobs, from the same settings): the admin's jobs page shows each
+	// The periodic jobs the deployment's programs schedule (the worker's
+	// worker_schedule.h and the data program's data set prune, from the same
+	// settings): the admin's jobs page shows each
 	// one's schedule, and runs one now on request (jobs/job_routes.h). Set
 	// before start(); unset, none.
 	void set_job_schedules(std::vector<jobs::PeriodicJob> schedules);

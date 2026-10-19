@@ -58,9 +58,12 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
   instances, the listings, the jobs, the machines and servers, the admin links' states
   and the console's answers are rows each program reads; `GET /api/unknowns` reads
   `unknown_messages`, where every process flushes its sightings. What several programs
-  decide from the same settings they decide alike (`parts.*`): whether hosting is on
-  (web's routes, the fleet's supervisor, the worker's driver), whether billing and
-  mail are, the periodic jobs each schedules.
+  decide from the same settings they decide alike, each from the library that owns it:
+  whether hosting is on (`hosted/model/hosted_policy.*`: web's routes, the fleet's
+  supervisor, the worker's driver), the object store (`program/server_config.h`
+  `object_store_of`, `core/object_store_stack.*`), whether billing and mail are
+  (`billing/billing_stack.*`, `accounts/mail_stack.*`), the periodic jobs each schedules
+  (the worker's `apps/novaworld_worker/worker_schedule.*`).
 - **Every address a program announces comes from the config**, never from a port another
   bound: the gate's `POSTIPADDRESS` is `ONNET_PUBLIC_HOST` (where status blobs land), its
   `udpnovaworld` the one lobby address every lobby instance announces (its row), and its
@@ -283,8 +286,8 @@ policy, not a port.
   between half and all of it (or the wait the handler names); past `max_attempts` the job
   is `failed`, its error on the row, and the admin's jobs page lists it.
 - **Periodic jobs** (`jobs/scheduler.*`): each program that runs jobs schedules its own
-  periodic kinds alone (`parts.h`: the worker's `worker_schedule`, the data program's
-  `data_schedule`), in every one of its processes with no election. Each tick (every
+  periodic kinds alone (the worker's `worker_schedule`, the data program's `tree.prune`
+  while there is a store), in every one of its processes with no election. Each tick (every
   second) enqueues each periodic kind once per time bucket, keyed `<kind>@<bucket>` (unique
   for good, so however many processes tick a bucket gets one job), and none beside one still
   queued or running; the billing reconcile also runs at the worker's start, keyed by its

@@ -192,8 +192,8 @@ int run(const std::string &secret_key) {
 	std::string error;
 	TEST_EXPECT(nws::make_owner_directory(scratch, error));
 
-	// The transport as main() makes it (make_billing): curl through the runner, the key
-	// in an owner-only config file per call.
+	// The transport as main() makes it (billing_stack.h make_billing): curl through the
+	// runner, the key in an owner-only config file per call.
 	billing::CurlStripeApi::Config transport;
 	transport.curl = billing::BillingConfig{}.curl_path;
 	transport.secret_key = secret_key;

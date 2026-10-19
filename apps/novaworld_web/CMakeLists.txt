@@ -98,9 +98,12 @@ target_link_libraries(opennova_novaworld_web_core PRIVATE opennova_redis)
 target_compile_features(opennova_novaworld_web_core PUBLIC cxx_std_17)
 
 add_executable(opennova_novaworld_web main.cpp)
+# The worker's periodic jobs (apps/novaworld_worker's worker_schedule.h): the
+# admin's jobs page shows them from the same settings.
 target_link_libraries(opennova_novaworld_web
     PRIVATE
         opennova_novaworld_web_core
+        opennova_novaworld_worker_core
         opennova_novaworld_common
         opennova_novaworld_service
 )

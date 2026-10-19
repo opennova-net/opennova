@@ -85,7 +85,7 @@ struct FleetConfig {
 	// ONNET_HOSTED_HOSTD_IMAGE ("" when unset).
 	std::string hostd_image;
 	// ONNET_HOSTED_ADDRESS_ZONE: the play zone the static addresses' names
-	// live in ("" when unset; the setup checks it, parts.h).
+	// live in ("" when unset; the policy checks it, hosted_policy.h).
 	std::string address_zone;
 };
 

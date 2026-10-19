@@ -16,4 +16,6 @@ the `data` target of [`../novaworld_common/Dockerfile`](../novaworld_common/Dock
 
 - `main.cpp`: the program (`opennova_novaworld_data`, binary `opennova-novaworld-data`): the
   store it builds, the data sets' handlers it registers, its pool (worker ids `data-<tag>-<n>`)
-  and its scheduler (`../novaworld_common/parts.h` `data_schedule`).
+  and its scheduler (the data sets' `tree.prune` while there is a store). It reads the store
+  alone (`../novaworld_common/program/server_config.h` `object_store_of`), never the hosting
+  policy, so its boot names no hosted server.

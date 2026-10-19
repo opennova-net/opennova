@@ -14,7 +14,6 @@
 #include "core/ecs_metadata.h"
 #include "core/program_log.h"
 #include "election.h"
-#include "parts.h"
 #include "program/program.h"
 
 #include "core/object_store.h"
@@ -23,6 +22,7 @@
 #include "hosted/internal_listener.h"
 #include "hosted/model/fleet_health.h"
 #include "hosted/model/fleet_repository.h"
+#include "hosted/model/hosted_policy.h"
 #include "hosted/model/hosted_repository.h"
 #include "hosted/model/limits_hold.h"
 #include "hosted/model/net_cidr.h"
@@ -60,7 +60,7 @@ std::string configure(ServerConfig &config) {
 int run(const program::Boot &boot) {
 	const ServerConfig &config = boot.config;
 
-	const HostedPolicy hosting = hosted_policy(config);
+	const hosted::HostedPolicy hosting = hosted::hosted_policy(config);
 	const hosted::FleetConfig &fleet = hosting.fleet;
 	// The machines' admin.cfg admits the address the fleet's admin links
 	// connect from, its internal listener's bind: on a cloud machine's

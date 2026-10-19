@@ -429,8 +429,8 @@ minutes and hours in the shape every subject shares ([`../README.md`](../README.
 
 ## Settings
 
-Two sets (`model/fleet_config.h`, `cloud/driver_config.h`; `../parts.h` `hosted_policy`,
-`driver_setup`). The fleet's
+Two sets (`model/fleet_config.h` with `model/hosted_policy.h` `hosted_policy`;
+`cloud/driver_config.h` `driver_setup`). The fleet's
 **policy**, which web, the fleet program and the worker read alike, so each decides alike
 whether hosting is on: the provider, the store, placement, the slots' limits, the cap, the
 serve image and the fleet's internal listener. The **driver's** own settings, which the

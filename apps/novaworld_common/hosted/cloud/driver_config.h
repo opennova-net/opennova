@@ -47,6 +47,7 @@
 #include "docker_machine_driver.h"
 #include "ec2_machine_driver.h"
 #include "hosted/model/fleet_config.h"
+#include "hosted/model/hosted_policy.h"
 
 #include <string>
 #include <string_view>
@@ -65,7 +66,7 @@ struct DriverConfig {
 	// The docker driver's.
 	DockerMachineConfig docker;
 	// The static addresses' drivers' own (the variables above; the zone's name
-	// is the policy's): read as they are, checked by the setup (parts.h).
+	// is the policy's): read as they are, checked by the setup (driver_setup).
 	struct Addresses {
 		std::string zone_id;
 		std::string zone_file;
@@ -90,5 +91,19 @@ bool parse_launch_templates(
 
 // The text of the machine script at `path` into `out`; false with `error`.
 bool load_machine_script(const std::string &path, std::string &out, std::string &error);
+
+// The machine driver's settings over a policy that is on (the worker's): the
+// drivers' own variables (parse_driver_config) and, for the ec2 driver, its
+// machine script's text, each driver's check_config passed; with the static
+// addresses on, their drivers' settings too (the play zone's Route 53 id for
+// ec2; the zone file and the addresses for docker).
+struct DriverSetup {
+	DriverConfig driver;
+};
+
+// The driver `policy` names, set up, into `out`; false with `error` when its
+// settings do not read or are incomplete (the worker's FATAL: hosting on with
+// no driver to launch its machines).
+bool driver_setup(const HostedPolicy &policy, DriverSetup &out, std::string &error);
 
 } // namespace opennova::novaworld_server::hosted

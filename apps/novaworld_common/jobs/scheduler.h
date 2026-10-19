@@ -11,7 +11,8 @@
 // release's: every task of one release enqueues it once between them). A
 // `wanted` test leaves a bucket with nothing to do unqueued (the billing sync
 // with no customer waiting). Each program that runs jobs runs a scheduler over
-// its own kinds alone (parts.h: the worker's and the data program's), in every
+// its own kinds alone (the worker's worker_schedule.h, the data program's data
+// set prune), in every
 // one of its processes, with no election: the keys keep the buckets single. It
 // enqueues and runs nothing itself, and its program's pool runs what it
 // enqueued. Service policy, not a port.

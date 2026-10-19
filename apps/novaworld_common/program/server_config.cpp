@@ -1,9 +1,11 @@
 #include "server_config.h"
+#include "core/loggable.h"
 #include "core/text_util.h"
 
 #include <base/io/strutil.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -124,6 +126,19 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_UPDATE_CACHE_DIR")) c.update_cache_dir = strutil::trim(v);
 
 	return c;
+}
+
+std::optional<ObjectStoreConfig> object_store_of(const ServerConfig &config) {
+	if (config.object_store_url.empty())
+		return std::nullopt;
+	ObjectStoreConfig store;
+	std::string error;
+	if (!parse_object_store_url(config.object_store_url, config.object_store_region, store, error)) {
+		std::fprintf(stderr, "[boot] WARN the object store: ONNET_OBJECT_STORE_URL %s\n",
+				loggable(error, 300).c_str());
+		return std::nullopt;
+	}
+	return store;
 }
 
 } // namespace opennova::novaworld_server
