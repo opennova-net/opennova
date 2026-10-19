@@ -167,9 +167,13 @@ function tierLabel(u: UserListEntry): string {
   return entitlementLabel(u.entitlement);
 }
 
+// The badge's colour: a tier's (or dedicated machines paid for with no tier),
+// an admin's grant's, or none.
 function tierBadgeClass(u: UserListEntry): string {
-  if (u.entitlement.source === 'tier') return `${badge} bg-accent/15 text-accent`;
-  if (u.entitlement.source === 'comp') return `${badge} bg-online/15 text-online`;
+  const e = u.entitlement;
+  if (e.source === 'tier') return `${badge} bg-accent/15 text-accent`;
+  if (e.source === 'comp' || e.comp_own_machines > 0) return `${badge} bg-online/15 text-online`;
+  if (e.own_machines > 0) return `${badge} bg-accent/15 text-accent`;
   return `${badge} bg-hover text-ink-muted`;
 }
 

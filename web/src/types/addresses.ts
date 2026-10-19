@@ -1,6 +1,6 @@
 // Static addresses, as the NovaWorld service's address routes answer them
 // (snake_case; apps/novaworld_web/hosted/address_routes.cpp). A static address
-// is an own machine's: a fixed public IP its servers list at on every start,
+// is a dedicated machine's: a fixed public IP its servers list at on every start,
 // named <name>.<zone> in the deployment's play zone. Times are UTC
 // 'YYYY-MM-DD HH:MM:SS'.
 
@@ -31,7 +31,7 @@ export interface Address {
   state: AddressState | (string & {});
   // Null until the cloud gave it one.
   public_ip: string | null;
-  // The game port its servers list at (an own machine's one slot), with the IP.
+  // The game port its servers list at (a dedicated machine's one slot), with the IP.
   port: number | null;
   source: AddressSource;
   // The subscription that pays for it; null for an admin's grant.

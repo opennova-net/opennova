@@ -55,6 +55,7 @@ export type AdminErrorCode =
   | 'username_exists'
   | 'pcid_exists'
   | 'active_subscription'
+  | 'checkout_open'
   | 'revoked'
   | 'already_revoked'
   | 'already_assigned'
@@ -126,6 +127,7 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'username_exists',
   'pcid_exists',
   'active_subscription',
+  'checkout_open',
   'revoked',
   'already_revoked',
   'already_assigned',
@@ -195,7 +197,9 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'pcid_exists':
       return 'Another account already has that PCID.';
     case 'active_subscription':
-      return 'This account has a support tier that still grants hosting. Cancel it in Stripe first; the account can be deleted once it ends.';
+      return 'This account has a subscription that still grants (a support tier, a dedicated machine or a static address). Cancel it in Stripe first; the account can be deleted once its subscriptions end.';
+    case 'checkout_open':
+      return 'A checkout of this account is open, or paid and not synced yet, so a subscription could still start. Try again once it ends.';
     case 'revoked':
     case 'already_revoked':
       return 'That key is revoked. Refresh the list.';
@@ -269,7 +273,7 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'not_retryable':
       return 'Only an address the cloud refused is tried again. Refresh the list.';
     case 'address_limit':
-      return 'That account has a static address for every own machine it has. Grant it another own machine first.';
+      return 'That account has a static address for every dedicated machine it has. Grant it another dedicated machine first.';
     case 'addresses_disabled':
       return 'This NovaWorld service sells no static address (ONNET_FLEET_MAX_ADDRESSES is 0, or its address settings are incomplete: the boot log says which).';
     case 'no_log_store':
@@ -580,7 +584,12 @@ function pickFleetServer(value: unknown): FleetServer | null {
     ...server,
     owner:
       owner && typeof owner.id === 'number' && typeof owner.username === 'string'
-        ? { id: owner.id, username: owner.username, tier: tier === 1 || tier === 2 || tier === 3 ? tier : null }
+        ? {
+            id: owner.id,
+            username: owner.username,
+            tier: tier === 1 || tier === 2 || tier === 3 ? tier : null,
+            granted: owner.granted === true,
+          }
         : null,
     machine_ref: typeof v.machine_ref === 'string' || typeof v.machine_ref === 'number' ? String(v.machine_ref) : null,
     slot: isCount(v.slot) ? v.slot : null,

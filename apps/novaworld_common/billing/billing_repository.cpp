@@ -345,6 +345,9 @@ namespace {
 
 constexpr const char *kCompAddressesSql =
 		"FROM hosted_addresses WHERE source = 'comp' AND state IN ('allocating', 'ready')";
+constexpr const char *kNamedSubscriptionsSql =
+		"FROM hosted_addresses WHERE source = 'subscription' AND state IN ('allocating', 'ready') "
+		"AND stripe_subscription_id IS NOT NULL AND owner_user_id IS NOT NULL";
 
 } // namespace
 
@@ -359,6 +362,22 @@ std::map<int64_t, int> comp_addresses_by_account(db::Database &db) {
 	for (const auto &r : db.query(std::string("SELECT owner_user_id, COUNT(*) ") + kCompAddressesSql +
 				 " AND owner_user_id IS NOT NULL GROUP BY owner_user_id;"))
 		out[r.as_int(0).value_or(0)] = static_cast<int>(r.as_int(1).value_or(0));
+	return out;
+}
+
+std::set<std::string> named_address_subscriptions(db::Database &db, int64_t user_id) {
+	std::set<std::string> out;
+	for (const auto &r : db.query(std::string("SELECT stripe_subscription_id ") + kNamedSubscriptionsSql +
+				 " AND owner_user_id = $1;",
+				 { BindValue(user_id) }))
+		out.insert(r.as_text(0).value_or(""));
+	return out;
+}
+
+std::map<int64_t, std::set<std::string>> named_address_subscriptions_by_account(db::Database &db) {
+	std::map<int64_t, std::set<std::string>> out;
+	for (const auto &r : db.query(std::string("SELECT owner_user_id, stripe_subscription_id ") + kNamedSubscriptionsSql + ";"))
+		out[r.as_int(0).value_or(0)].insert(r.as_text(1).value_or(""));
 	return out;
 }
 

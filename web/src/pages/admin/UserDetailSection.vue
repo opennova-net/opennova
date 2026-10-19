@@ -107,7 +107,7 @@
         <form class="space-y-2" @submit.prevent="saveComp">
           <div class="flex flex-wrap items-end gap-4">
             <div class="space-y-1">
-              <label for="user-comp-servers" :class="labelClass">Admin grant (comp servers)</label>
+              <label for="user-comp-servers" :class="labelClass">Shared servers</label>
               <input
                 id="user-comp-servers"
                 v-model.number="comp"
@@ -122,7 +122,7 @@
               />
             </div>
             <div class="space-y-1">
-              <label for="user-comp-own" :class="labelClass">Own machines for its servers</label>
+              <label for="user-comp-own" :class="labelClass">Dedicated machines</label>
               <input
                 id="user-comp-own"
                 v-model.number="compOwn"
@@ -148,7 +148,7 @@
             {{
               compProblem ||
               compOwnProblem ||
-              `0 to ${COMP_SERVERS_MAX} free hosted servers. Own machines add no servers: each moves one of the account's servers off the shared machines onto a machine of its own (0 to ${COMP_OWN_MACHINES_MAX}). A granted account buys no support tier or add-on (one it already pays for still counts: it gets the larger). Lowering either stops its newest servers first.`
+              `An admin grant, free of charge: 0 to ${COMP_SERVERS_MAX} hosted servers on shared machines, and 0 to ${COMP_OWN_MACHINES_MAX} dedicated machines, each one more server on a machine of its own; the two add up. A granted account buys no support tier, dedicated machine or static address; what it already pays for still counts (the larger of its tier's servers and the shared servers granted, and every dedicated machine). Lowering the shared servers stops its newest servers on shared machines; lowering the dedicated machines moves its newest servers on them to a shared machine while it has a shared server free and the fleet has room, and stops the rest.`
             }}
           </p>
         </form>
@@ -168,7 +168,7 @@
             </RouterLink>
             <span class="flex items-center gap-2 text-ink-muted">
               <span :class="stateBadgeClass(s.state)">{{ stateLabel(s.state) }}</span>
-              <span v-if="s.own_machine" class="text-xs">Own machine</span>
+              <span v-if="s.own_machine" class="text-xs">Dedicated machine</span>
               <RelativeTime v-if="s.ended_at" :value="s.ended_at" :now="now" />
             </span>
           </li>
@@ -215,7 +215,7 @@
           <p id="user-comp-address-hint" class="text-xs" :class="compAddressProblem ? 'text-danger' : 'text-ink-muted'">
             {{
               compAddressProblem ||
-              `A static address free of charge, one for each of the account's own machines; it counts as sold. ${ADDRESS_NAME_RULE}`
+              `A static address free of charge, one for each of the account's dedicated machines; it counts as sold. ${ADDRESS_NAME_RULE}`
             }}
           </p>
         </form>
@@ -295,8 +295,8 @@
       <section class="space-y-3 rounded-panel border border-danger/40 p-4" aria-labelledby="user-delete">
         <h2 id="user-delete" class="text-lg font-semibold text-danger">Delete the account</h2>
         <p class="text-sm text-ink-muted">
-          The account goes for good. One whose support tier still grants hosting cannot be deleted until the tier
-          ends.
+          The account goes for good. One with a subscription that still grants (a support tier, a dedicated machine or
+          a static address) cannot be deleted until its subscriptions end, nor while a checkout of it is open.
         </p>
         <button type="button" :disabled="busy" class="rounded-control border border-danger px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/10 disabled:opacity-40" @click="remove">
           Delete {{ detail.user.username }}…
@@ -310,13 +310,17 @@
 // /admin/users/<id>: one account (GET /api/admin/users/<id>): its profile and
 // edit (PUT /api/admin/users/<id>), its role (a demotion of the last admin
 // who can log in says how one comes back), its hosting entitlement with the
-// admin's comp grants (PUT .../comp: servers and own machines, 0 to 16 each)
-// and a warning while grants and subscriptions oversell the fleet (the
-// service's sold capacity, also in the grant's reply), its hosted servers
+// admin's comp grants (PUT .../comp: servers on shared machines and dedicated
+// machines, 0 to 16 each, which add up; a cut below what the account runs is
+// confirmed first, pool by pool, saying which servers stop and which move off
+// their dedicated machines) and a warning while grants and subscriptions
+// oversell the fleet (the service's sold capacity, also in the grant's
+// reply), its hosted servers
 // (each to its fleet page), its static addresses with a comp one (POST
 // .../addresses), its Stripe ids (to Stripe's dashboard, in the key's mode),
 // its CD keys (GET .../cd-keys) and its deletion (409 active_subscription
-// while a tier grants).
+// while a subscription grants, a tier, a dedicated machine or a static
+// address; 409 checkout_open while a checkout of it is open).
 import AdminCrumbs from '../../components/AdminCrumbs.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
@@ -415,7 +419,7 @@ function oversoldText(c: SoldCapacity): string {
   return (
     'Admin grants and subscriptions exceed what the fleet sells: ' +
     `shared places ${c.shared.sold} of ${c.shared.sellable}, ` +
-    `own machines ${c.own_machines.sold} of ${c.own_machines.sellable}, ` +
+    `dedicated machines ${c.own_machines.sold} of ${c.own_machines.sellable}, ` +
     `addresses ${c.addresses.sold} of ${c.addresses.sellable}. New subscriptions of those items are paused.`
   );
 }
@@ -552,23 +556,61 @@ async function changeRole(role: Role) {
   }
 }
 
+// What a cut of dedicated machines does to the `over` newest servers on them:
+// `moving` of them move to a shared machine (one each into the owner's free
+// shared servers, while the fleet has room), the rest stop.
+function dedicatedCutText(over: number, moving: number): string {
+  if (moving === 0) {
+    return over === 1
+      ? 'Their newest server on a dedicated machine stops: they have no shared server free for it to move to.'
+      : `Their ${over} newest servers on dedicated machines stop: they have no shared server free for them to move to.`;
+  }
+  if (moving === over) {
+    return over === 1
+      ? 'Their newest server on a dedicated machine moves to a shared machine (its match restarts) if the fleet has room; else it stops.'
+      : `Their ${over} newest servers on dedicated machines move to a shared machine (their matches restart) while the fleet has room; the rest stop.`;
+  }
+  return (
+    `Of their ${over} newest servers on dedicated machines, ${moving} move${moving === 1 ? 's' : ''} to a shared machine ` +
+    `(${moving === 1 ? 'its match restarts' : 'their matches restart'}) while the fleet has room, as many as their free ` +
+    'shared servers; the rest stop.'
+  );
+}
+
 async function saveComp() {
   if (!detail.value || busy.value || compProblem.value || compOwnProblem.value) return;
   const n = Number(comp.value);
   const own = Number(compOwn.value);
   const u = detail.value.user;
-  // The entitlement after the change is the larger of the grant and the tier's
-  // servers, whichever gives it now; the limit counts the live servers not
-  // already stopping.
-  const after = Math.max(n, detail.value.entitlement.tier_servers);
-  const kept = detail.value.servers.filter((s) => s.live && s.state !== 'stopping').length;
-  const over = kept - after;
-  if (over > 0) {
-    const what = over === 1 ? 'its newest server' : `its ${over} newest servers`;
-    if (!window.confirm(`Lower ${u.username}'s grant to ${n}? They run ${kept} servers live, so the service stops ${what}: their matches end for everyone on them.`)) {
-      return;
-    }
+  const e = detail.value.entitlement;
+  // Its live servers in each pool, oldest first, as the service keeps them.
+  // A stopping one still holds its place on shared machines, and no cut
+  // counts it.
+  const live = detail.value.servers.filter((s) => s.live).sort((a, b) => a.id - b.id);
+  const shared = live.filter((s) => !s.own_machine);
+  const sharedRunning = shared.filter((s) => s.state !== 'stopping');
+  const ownRunning = live.filter((s) => s.own_machine && s.state !== 'stopping');
+  const warnings: string[] = [];
+  // Its servers on shared machines after the change: the larger of the grant
+  // and the tier's, whichever gives them now. The newest there past it stop.
+  const sharedAfter = Math.max(n, e.tier_servers);
+  const sharedOver = sharedRunning.length - sharedAfter;
+  if (sharedOver > 0) {
+    const what = sharedOver === 1 ? 'its newest server there' : `its ${sharedOver} newest servers there`;
+    warnings.push(
+      `Lower ${u.username}'s shared servers to ${n}? They run ${sharedRunning.length} on shared machines, so the service stops ${what}: their matches end for everyone on them.`,
+    );
   }
+  // Its dedicated machines after it: the ones it pays for (no tier needed)
+  // and the grant's. The newest servers past them move to a shared machine
+  // while it has a shared server free, else stop.
+  const ownAfter = e.own_machines - e.comp_own_machines + own;
+  const ownOver = ownRunning.length - ownAfter;
+  if (ownOver > 0) {
+    const moving = Math.min(ownOver, Math.max(0, sharedAfter - shared.length));
+    warnings.push(`Lower ${u.username}'s dedicated machines to ${ownAfter}? ${dedicatedCutText(ownOver, moving)}`);
+  }
+  if (warnings.length > 0 && !window.confirm(warnings.join('\n\n'))) return;
   busy.value = true;
   const result = await setCompGrants(u.id, { servers: n, own_machines: own });
   busy.value = false;
@@ -579,8 +621,8 @@ async function saveComp() {
   // The sold capacity with the grant counted: the warning follows it at once.
   if (detail.value && result.value.capacity) detail.value = { ...detail.value, capacity: result.value.capacity };
   const granted = [
-    ...(n > 0 ? [`${n} hosted server${n === 1 ? '' : 's'}`] : []),
-    ...(own > 0 ? [`${own} own machine${own === 1 ? '' : 's'} for its servers`] : []),
+    ...(n > 0 ? [`${n} hosted server${n === 1 ? '' : 's'} on shared machines`] : []),
+    ...(own > 0 ? [`${own} dedicated machine${own === 1 ? '' : 's'}`] : []),
   ];
   flash(
     granted.length === 0

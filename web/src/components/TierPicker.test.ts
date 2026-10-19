@@ -31,8 +31,8 @@ describe('TierPicker', () => {
     expect(cards[2].text()).toContain('Your tier');
     expect(cards[2].get('button').text()).toBe('Manage: Tier 3');
     expect(cards[0].get('button').text()).toBe('Change: Tier 1');
-    expect(cards[0].text()).toContain('Your 2 newest servers will be stopped when the change takes effect.');
-    expect(cards[1].text()).toContain('Your newest server will be stopped when the change takes effect.');
+    expect(cards[0].text()).toContain('Your 2 newest servers on shared machines will be stopped when the change takes effect.');
+    expect(cards[1].text()).toContain('Your newest server on a shared machine will be stopped when the change takes effect.');
     expect(cards[1].get('button').attributes('aria-describedby')).toBe('support-tier-2-note');
     // Nothing to stop when the live servers fit.
     const fits = mount(TierPicker, { props: { tiers, currency, mode: 'manage', currentTier: 3, used: 1 } });

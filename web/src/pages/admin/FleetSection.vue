@@ -37,7 +37,7 @@
 
       <dl v-if="fleet" class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
         <StatTile label="Hosting" :value="fleet.enabled ? 'On' : 'Off'" :detail="fleet.enabled ? 'Owners can start servers' : 'No server can start'" />
-        <StatTile label="Live servers" :value="`${fleet.shared.live} of ${fleet.shared.room} shared`" :detail="`${fleet.own.live} of ${fleet.own.room} own`" />
+        <StatTile label="Live servers" :value="`${fleet.shared.live} of ${fleet.shared.room} shared`" :detail="`${fleet.own.live} of ${fleet.own.room} dedicated`" />
         <StatTile label="Machines" :value="String(activeMachines.length)" :detail="machineBreakdown" />
       </dl>
 
@@ -150,13 +150,13 @@
                     {{ s.settings.game_name || 'Unnamed server' }}
                   </RouterLink>
                   <span class="block text-xs font-normal text-ink-muted">
-                    Server {{ s.id }}, {{ s.data_set?.display_name || s.game_display_name || 'unknown game' }}<template v-if="s.own_machine">, own machine</template>
+                    Server {{ s.id }}, {{ s.data_set?.display_name || s.game_display_name || 'unknown game' }}<template v-if="s.own_machine">, dedicated machine</template>
                   </span>
                 </th>
                 <td class="whitespace-nowrap px-4 py-3">
                   <template v-if="s.owner">
                     {{ s.owner.username }}
-                    <span class="block text-xs text-ink-muted">{{ s.owner.tier ? `Tier ${s.owner.tier}` : 'No tier' }}</span>
+                    <span class="block text-xs text-ink-muted">{{ ownerHostingLabel(s.owner) }}</span>
                   </template>
                   <span v-else class="text-ink-muted">Deleted account</span>
                 </td>
@@ -292,6 +292,7 @@ import { fetchInfrastructure } from '../../api/infra';
 import { usePolling } from '../../composables/usePolling';
 import type { FleetMachine, FleetQuery, FleetResponse, FleetServer, PinnedTree } from '../../types/hostedServer';
 import type { InfraFleetCluster } from '../../types/infra';
+import { ownerHostingLabel } from '../../utils/adminView';
 import { isTransitioning, stateBadgeClass, stateLabel } from '../../utils/hostedState';
 
 const STOP_ALL_PHRASE = 'STOP ALL';
@@ -357,7 +358,7 @@ function serversOn(m: FleetMachine): FleetServer[] {
 const machineBreakdown = computed(() => {
   const shared = activeMachines.value.filter((m) => m.kind === 'shared').length;
   const own = activeMachines.value.length - shared;
-  return `${shared} shared, ${own} own`;
+  return `${shared} shared, ${own} dedicated`;
 });
 
 function flash(text: string) {

@@ -10,7 +10,7 @@ import {
   startCheckout,
   syncMyBilling,
 } from './billing';
-import { addressSubscription, myBilling, subscribed, tiersResponse } from '../test/billingFixtures';
+import { addressSubscription, myBilling, ownMachineSubscription, subscribed, tiersResponse } from '../test/billingFixtures';
 import { isStripeUrl, navigateToStripe } from '../utils/navigate';
 
 vi.mock('./client', () => ({
@@ -83,6 +83,31 @@ describe('parsing', () => {
     expect(parseMyBilling(uncounted)).toBeNull();
   });
 
+  it("reads the account's dedicated machine subscriptions and its shared machines' counts", () => {
+    // Tier 2 and two dedicated machines, no tier needed for them: 4 servers.
+    const value = subscribed(2, {
+      max_servers: 4,
+      own_machines: 2,
+      used: 3,
+      shared_used: 2,
+      shared_stopping: 1,
+      stopping: 1,
+      own_machine_subscriptions: [
+        ownMachineSubscription({ stripe_subscription_id: 'sub_own_2', cancel_at_period_end: true }),
+        ownMachineSubscription(),
+      ],
+    });
+    expect(parseMyBilling(value)).toEqual(value);
+    const { own_machine_subscriptions: _list, ...unlisted } = value;
+    expect(parseMyBilling(unlisted)).toBeNull();
+    const { stripe_subscription_id: _id, ...unnamed } = ownMachineSubscription();
+    expect(parseMyBilling({ ...value, own_machine_subscriptions: [unnamed] })).toBeNull();
+    expect(parseMyBilling({ ...value, own_machine_subscriptions: [ownMachineSubscription({ quantity: -1 })] })).toBeNull();
+    const { shared_servers: _shared, ...uncounted } = value;
+    expect(parseMyBilling(uncounted)).toBeNull();
+    expect(parseMyBilling({ ...value, shared_stopping: 'one' })).toBeNull();
+  });
+
   it("reads the account's billing and refuses a malformed one", () => {
     expect(parseMyBilling(myBilling())).toEqual(myBilling());
     expect(parseMyBilling(subscribed(2))).toEqual(subscribed(2));
@@ -127,19 +152,24 @@ describe('the routes', () => {
     expect(post).toHaveBeenLastCalledWith('/billing/portal', { cancel_subscription: 'sub_address_1' });
   });
 
+  it('reads a retired own_machine_limit as unknown: a dedicated machine has no cap but the fleet', async () => {
+    post.mockRejectedValueOnce(refusal(409, { error: 'own_machine_limit' }));
+    const result = await startCheckout('own_machine');
+    expect(!result.ok && result.error.code).toBe('unknown');
+  });
+
   it('maps the refusals to messages, never the server text', async () => {
     const cases: [number, string, string][] = [
       [409, 'already_subscribed', 'You already have a support tier'],
-      [409, 'own_machine_limit', 'an own machine for every server'],
       [409, 'checkout_in_progress', 'already starting'],
       [503, 'billing_disabled', 'not open on NovaWorld yet'],
       [503, 'billing_misconfigured', 'no payment was taken'],
       [503, 'stripe_unavailable', 'Stripe could not take the request'],
-      [403, 'not_eligible', 'cannot buy that right now'],
-      [404, 'no_billing_account', 'subscribe to a support tier first'],
+      [403, 'not_eligible', 'an account with an admin grant buys no tier, dedicated machine or static address'],
+      [404, 'no_billing_account', 'subscribe to a support tier or a dedicated machine first'],
       [400, 'invalid_item', 'could not read the request'],
       [409, 'sold_out', 'Hosting is full: new subscriptions are paused. Try again later; no payment was taken.'],
-      [409, 'address_limit', 'a static address for every own machine'],
+      [409, 'address_limit', 'a static address for every dedicated machine'],
       [403, 'payment_past_due', 'Fix it in the billing portal first'],
       [404, 'not_found', 'no longer open'],
     ];

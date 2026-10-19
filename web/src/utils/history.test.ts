@@ -39,7 +39,7 @@ describe('replacedMachines', () => {
     expect([...replacedMachines(machines)].sort()).toEqual(['79', '86', '88']);
   });
 
-  it('keeps failures no launch has worked after, and an own machine for its own kind', () => {
+  it('keeps failures no launch has worked after, and a dedicated machine for its own kind', () => {
     const machines = [machine('91', 'failed'), machine('90', 'failed'), machine('89', 'ready'), machine('88', 'ended', 'own')];
     expect(replacedMachines(machines).size).toBe(0);
   });

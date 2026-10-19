@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <ctime>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -70,7 +71,8 @@ void log_account(const WebSessionUser &user, const char *what, const std::string
 			static_cast<long long>(user.id), what, outcome.c_str());
 }
 
-// What a checkout's "item" names: a tier 1..3, or an add-on; nullopt for none.
+// What a checkout's "item" names: a tier 1..3, a dedicated machine or a static
+// address; nullopt for none.
 std::optional<std::pair<ItemKind, int>> checkout_item(const std::string &item) {
 	if (item == "own_machine") return std::make_pair(ItemKind::OwnMachine, 0);
 	if (item == "static_address") return std::make_pair(ItemKind::StaticAddress, 0);
@@ -83,9 +85,30 @@ std::optional<std::pair<ItemKind, int>> checkout_item(const std::string &item) {
 // The fleet has sold all it holds of what `item` adds.
 crow::response sold_out(ItemKind item) {
 	const char *what = item == ItemKind::Tier ? "support tiers"
-			: item == ItemKind::OwnMachine	  ? "own machines"
+			: item == ItemKind::OwnMachine	  ? "dedicated machines"
 											  : "static addresses";
 	return json_error(409, "sold_out", std::string("Hosting is full: new subscriptions are paused (") + what + ")");
+}
+
+// Every account an admin grants hosting (billing::admin_granted), by id:
+// [{user_id, username, servers, own_machines, addresses (its comp addresses
+// that count)}].
+std::vector<crow::json::wvalue> comp_grants_json(db::Database &db) {
+	std::map<int64_t, std::pair<CompGrants, int>> granted;
+	for (const auto &[user_id, grants] : comp_grants_by_account(db)) granted[user_id].first = grants;
+	for (const auto &[user_id, addresses] : comp_addresses_by_account(db)) granted[user_id].second = addresses;
+	std::vector<crow::json::wvalue> out;
+	for (const auto &[user_id, grant] : granted) {
+		crow::json::wvalue e;
+		e["user_id"] = user_id;
+		const auto user = get_user_by_id(db, user_id);
+		e["username"] = user ? user->username : std::string();
+		e["servers"] = grant.first.servers;
+		e["own_machines"] = grant.first.own_machines;
+		e["addresses"] = grant.second;
+		out.push_back(std::move(e));
+	}
+	return out;
 }
 
 } // namespace
@@ -124,6 +147,20 @@ crow::json::wvalue admin_subscription_json(const SubscriptionRow &row, int64_t n
 	return out;
 }
 
+crow::json::wvalue sold_capacity_json(db::Database &db, const hosted::Capacity &sellable, int64_t now) {
+	const hosted::Capacity sold = hosted::sold_now(db, now);
+	crow::json::wvalue out;
+	const auto part = [&out](const char *key, int64_t has, int64_t cap) {
+		out[key]["sold"] = has;
+		out[key]["sellable"] = cap;
+	};
+	part("shared", sold.shared, sellable.shared);
+	part("own_machines", sold.own, sellable.own);
+	part("addresses", sold.addresses, sellable.addresses);
+	out["oversold"] = hosted::sold_exceeds_capacity(sold, sellable);
+	return out;
+}
+
 void BillingRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/billing/tiers").methods("GET"_method)([this]() { return tiers(); });
 	CROW_ROUTE(app, "/api/me/billing").methods("GET"_method)([this](const crow::request &req) { return me_billing(req); });
@@ -151,7 +188,8 @@ void BillingRoutes::register_routes(WebApp &app) {
 // set), else null}. The
 // amounts are Stripe's price objects', never the service's own. `available`
 // is whether the fleet takes one more of the item for an account that has
-// nothing yet (hosted/model/sold_capacity.h): false, the site says hosting is full
+// nothing yet (hosted/model/sold_capacity.h; a dedicated machine needs no tier
+// beside it): false, the site says hosting is full
 // and a checkout of it answers sold_out (an account with an admin grant buys
 // none; the checkout judges each account's own).
 crow::response BillingRoutes::tiers() {
@@ -214,14 +252,19 @@ crow::response BillingRoutes::tiers() {
 	return res;
 }
 
-// The account's billing: {"enabled", "max_servers", "comp_servers",
+// The account's billing: {"enabled", "max_servers" (shared_servers and
+// own_machines together), "shared_servers" (on shared machines), "comp_servers",
 // "comp_own_machines", "comp_addresses" (an admin's grants), "granted" (any of
-// them: billing::admin_granted), "own_machines", "used" (its live hosted servers), "stopping" (how many of
-// those are stopping: the owners' limits count the rest), "can_start", "subscription"
+// them: billing::admin_granted), "own_machines" (its dedicated machines), "used"
+// (its live hosted servers), "stopping" (how many of those are stopping: the
+// owners' limits count the rest), "shared_used" and "shared_stopping" (the same
+// of those on shared machines), "can_start", "subscription"
 // (its support tier: {tier, status, entitled, current_period_end (ISO UTC),
-// cancel_at_period_end}, or null), "own_machine_subscription" ({quantity,
-// status, current_period_end, cancel_at_period_end}, or null),
-// "static_addresses" (the addresses its grants pay for, at most its own
+// cancel_at_period_end}, or null), "own_machine_subscriptions" (each
+// dedicated-machine subscription still open, newest first:
+// {stripe_subscription_id, quantity, status, current_period_end,
+// cancel_at_period_end}),
+// "static_addresses" (the addresses its grants pay for, at most its dedicated
 // machines), "address_subscriptions" (each static address's own subscription
 // still open: {stripe_subscription_id, status, current_period_end,
 // cancel_at_period_end, address_id (its address's row, null while unnamed)}),
@@ -238,15 +281,27 @@ crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id
 	crow::json::wvalue out;
 	out["enabled"] = true;
 	out["max_servers"] = e.max_servers;
+	out["shared_servers"] = e.shared_servers;
 	out["comp_servers"] = e.comp_servers;
 	out["comp_own_machines"] = e.comp_own_machines;
 	out["comp_addresses"] = e.comp_addresses;
 	out["granted"] = admin_granted(e);
 	out["own_machines"] = e.own_machines;
 	const std::vector<hosted::HostedServer> live = hosted::live_servers_of(db, user_id);
+	int64_t stopping = 0;
+	int64_t shared_used = 0;
+	int64_t shared_stopping = 0;
+	for (const hosted::HostedServer &s : live) {
+		const bool is_stopping = s.state == hosted::State::Stopping;
+		stopping += is_stopping ? 1 : 0;
+		if (s.own_machine) continue;
+		++shared_used;
+		shared_stopping += is_stopping ? 1 : 0;
+	}
 	out["used"] = static_cast<int64_t>(live.size());
-	out["stopping"] = static_cast<int64_t>(std::count_if(live.begin(), live.end(),
-			[](const hosted::HostedServer &s) { return s.state == hosted::State::Stopping; }));
+	out["stopping"] = stopping;
+	out["shared_used"] = shared_used;
+	out["shared_stopping"] = shared_stopping;
 	out["can_start"] = e.can_start;
 	if (const SubscriptionRow *tier = shown(rows, ItemKind::Tier, now)) {
 		crow::json::wvalue s;
@@ -259,16 +314,19 @@ crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id
 	} else {
 		out["subscription"] = nullptr;
 	}
-	if (const SubscriptionRow *own = shown(rows, ItemKind::OwnMachine, now)) {
+	// Each dedicated machine its own subscription (a checkout sells one).
+	std::vector<crow::json::wvalue> machines;
+	for (const SubscriptionRow &r : rows) {
+		if (r.item != ItemKind::OwnMachine || is_terminal(r.status) || !r.current_period_end) continue;
 		crow::json::wvalue s;
-		s["quantity"] = own->quantity;
-		s["status"] = own->status;
-		s["current_period_end"] = iso_utc(*own->current_period_end);
-		s["cancel_at_period_end"] = own->cancel_at_period_end;
-		out["own_machine_subscription"] = std::move(s);
-	} else {
-		out["own_machine_subscription"] = nullptr;
+		s["stripe_subscription_id"] = r.stripe_subscription_id;
+		s["quantity"] = r.quantity;
+		s["status"] = r.status;
+		s["current_period_end"] = iso_utc(*r.current_period_end);
+		s["cancel_at_period_end"] = r.cancel_at_period_end;
+		machines.push_back(std::move(s));
 	}
+	out["own_machine_subscriptions"] = std::move(machines);
 	out["static_addresses"] = e.static_addresses;
 	std::vector<crow::json::wvalue> addresses;
 	for (const SubscriptionRow &r : rows) {
@@ -323,20 +381,17 @@ std::optional<crow::response> BillingRoutes::judge_checkout(
 	const Entitlement e = entitlement_from(holdings.facts, holdings.subscriptions, now);
 	if (admin_granted(e)) {
 		log_account(user, "checkout", "not_eligible (admin grant)");
-		return json_error(403, "not_eligible", "this account's hosting is an admin grant: it buys no support tier or add-on");
+		return json_error(403, "not_eligible",
+				"this account's hosting is an admin grant: it buys no support tier, dedicated machine or static address");
 	}
 	const std::vector<SubscriptionRow> rows = subscriptions_of(db, user.id);
-	const bool granting_tier = tier_grants(rows, now);
-	if (item.item == ItemKind::Tier && granting_tier) {
+	if (item.item == ItemKind::Tier && tier_grants(rows, now)) {
 		log_account(user, "checkout", "already_subscribed");
 		return json_error(409, "already_subscribed", "this account has a support tier; change it in the portal");
 	}
-	if (item.item == ItemKind::OwnMachine && !granting_tier) {
-		log_account(user, "checkout", "not_eligible (no tier)");
-		return json_error(403, "not_eligible", "an own machine needs a support tier first");
-	}
-	if (item.item == ItemKind::StaticAddress) {
-		// While a payment is past due, Stripe still retries it: no new add-on.
+	if (item.item != ItemKind::Tier) {
+		// While a payment is past due, Stripe still retries it: no new dedicated
+		// machine or static address.
 		for (const SubscriptionRow &r : rows) {
 			if (r.status == "past_due" && subscription_grants(r, now)) {
 				log_account(user, "checkout", "payment_past_due");
@@ -344,16 +399,10 @@ std::optional<crow::response> BillingRoutes::judge_checkout(
 			}
 		}
 	}
-	// Each own machine holds one of the servers the account may run: more
-	// machines than servers buys nothing.
-	if (item.item == ItemKind::OwnMachine && e.own_machines >= e.max_servers) {
-		log_account(user, "checkout", "own_machine_limit");
-		return json_error(409, "own_machine_limit", "this account has an own machine for every server it may run");
-	}
-	// An address is its own machine's: one more than them would carry nothing.
+	// An address is its dedicated machine's: one more than them would carry nothing.
 	if (item.item == ItemKind::StaticAddress && e.address_grants >= e.own_machines) {
 		log_account(user, "checkout", "address_limit");
-		return json_error(409, "address_limit", "this account has a static address for every own machine it has");
+		return json_error(409, "address_limit", "this account has a static address for every dedicated machine it has");
 	}
 	const hosted::Capacity more = hosted::added_by(holdings.facts, holdings.subscriptions, item.item, item.tier, now);
 	if (!hosted::fits(hosted::sold_now(db, now, replaced), more, sellable_)) {
@@ -407,16 +456,16 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // invalid_json / invalid_item, 503 billing_misconfigured while the prices do
 // not check out, 409 checkout_in_progress while another checkout of the
 // account is running (one at a time), 403 not_eligible for an account that is
-// not an active player's, has an admin grant (billing::admin_granted: it buys
-// nothing beside it) or (the add-on) has no tier granting, 409 already_subscribed when a
-// tier grants already (the portal changes it), 409 own_machine_limit for the
-// add-on when the account has an own machine for every server it may run
-// (each add-on checkout sells one; several are fine below that), for a static
-// address 403 payment_past_due while a payment of the account is past due and
-// 409 address_limit when its addresses would pass its own machines, 409
-// sold_out when the fleet has sold all it holds of what the item adds
-// (hosted/model/sold_capacity.h: shared places for a tier, own machines and
-// addresses for the add-ons), 503 stripe_unavailable. Those rules are judged first as a quick
+// not an active player's or has an admin grant (billing::admin_granted: it buys
+// nothing beside it), 409 already_subscribed when a
+// tier grants already (the portal changes it), for a dedicated machine or a
+// static address 403 payment_past_due while a payment of the account is past due, for a static
+// address 409 address_limit when its addresses would pass its dedicated
+// machines, 409 sold_out when the fleet has sold all it holds of what the item
+// adds (hosted/model/sold_capacity.h: shared places for a tier, dedicated
+// machines and addresses for the others; a dedicated machine needs no tier,
+// each checkout sells one, and the fleet's ONNET_FLEET_MAX_OWN is the only cap
+// on an account's), 503 stripe_unavailable. Those rules are judged first as a quick
 // refusal, then again after the account's previous session is settled
 // (settle_previous_session: an open one is expired; a complete one has the
 // customer synced from Stripe now, so a payment the webhook has not brought
@@ -751,9 +800,12 @@ void BillingRoutes::limits_hold_json(db::Database &db, crow::json::wvalue &out) 
 // left no reconcile releases the limits hold),
 // "orphans" ({stripe_customer_id, stripe_subscription_id, username_hint,
 // status}), "recent_events" (the newest kEventsShown: event_id, type,
-// received_at (ISO), outcome)} with the limits hold (limits_hold_json). With
-// billing off, {"enabled": false} and the limits hold alone (the hold reads the
-// cache billing on or off). Cache-Control: no-store.
+// received_at (ISO), outcome)} with the limits hold (limits_hold_json), the
+// sold "capacity" (sold_capacity_json: the fleet-health oversold finding links
+// here) and "comp_grants" (every account an admin grants hosting,
+// comp_grants_json). With billing off, {"enabled": false} with the limits
+// hold, the capacity and the comp grants alone (each reads the database
+// billing on or off). Cache-Control: no-store.
 crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
@@ -762,6 +814,8 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		limits_hold_json(*db_conn, out);
+		out["capacity"] = sold_capacity_json(*db_conn, sellable_, unix_now());
+		out["comp_grants"] = comp_grants_json(*db_conn);
 		if (billing_ == nullptr) {
 			out["enabled"] = false;
 			return no_store(json_reply(200, out));

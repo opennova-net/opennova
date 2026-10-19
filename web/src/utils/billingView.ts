@@ -25,10 +25,10 @@ export function subscriptionStatusLabel(status: SubscriptionStatus): string {
   return STATUS_LABELS[status] ?? status;
 }
 
-// What a subscription is for, as the admin pages list it: "Tier 2", "Own
-// machines: 2", "Static address".
+// What a subscription is for, as the admin pages list it: "Tier 2",
+// "Dedicated machines: 2", "Static address".
 export function subscriptionItemLabel(s: Pick<AdminSubscription, 'item' | 'tier' | 'quantity'>): string {
-  if (s.item === 'own_machine') return `Own machines: ${s.quantity}`;
+  if (s.item === 'own_machine') return `Dedicated machines: ${s.quantity}`;
   if (s.item === 'static_address') return 'Static address';
   return `Tier ${s.tier ?? '?'}`;
 }
@@ -43,8 +43,8 @@ export function hasLiveTier(billing: MyBilling | null): boolean {
   return !!sub && !ENDED.has(sub.status);
 }
 
-// What a checkout went to Stripe for: the item, and for an add-on the own
-// machines or static addresses the account had before it left (each is a
+// What a checkout went to Stripe for: the item, and for a dedicated machine
+// or a static address how many the account had before it left (each is a
 // subscription of its own, so the return waits for one more).
 export interface PendingCheckout {
   item: BillingItem;
@@ -60,12 +60,15 @@ export function activeAddressSubscriptions(billing: MyBilling): number {
 }
 
 // A checkout that came back successful is confirmed once Stripe's word has
-// reached NovaWorld: the tier grants hosting, or the account has more own
-// machines (or active static addresses) than before, its add-on active.
+// reached NovaWorld: the tier grants hosting, or the account has more
+// dedicated machines (or active static addresses) than before, a
+// subscription of them active.
 export function checkoutConfirmed(billing: MyBilling, pending: PendingCheckout): boolean {
   if (pending.item === 'own_machine') {
-    const own = billing.own_machine_subscription;
-    return !!own && granting(own.status) && billing.own_machines > pending.ownMachinesBefore;
+    return (
+      billing.own_machine_subscriptions.some((s) => granting(s.status)) &&
+      billing.own_machines > pending.ownMachinesBefore
+    );
   }
   if (pending.item === 'static_address') return activeAddressSubscriptions(billing) > pending.addressesBefore;
   return billing.subscription?.entitled === true;

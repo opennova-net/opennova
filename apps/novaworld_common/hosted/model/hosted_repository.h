@@ -69,10 +69,10 @@ struct HostedServer {
 	int admin_port = 0;
 	int restarts = 0;
 	std::string failure_reason;
-	// It runs on a machine of its own (the own-machine add-on), not a shared one.
+	// It runs on a machine of its own (a dedicated machine), not a shared one.
 	bool own_machine = false;
 	// The static address its owner asked it to run at (address_repository.h;
-	// an own-machine server's), kept through its restarts and moves; unset for
+	// a dedicated-machine server's), kept through its restarts and moves; unset for
 	// none, and once the address lapses.
 	std::optional<int64_t> address_id;
 	// The trees it is pinned to (data_sets/data_set_repository.h, ADR 0064): the base data
@@ -124,17 +124,19 @@ enum class RequestOutcome : uint8_t {
 	InvalidSettings, // check_settings refused them (the routes check first)
 	NoSuchUser,   // no player account by that id
 	NotEntitled,  // the account is not active, or its hosting entitlement is 0 servers
-	PastDue,      // its support tier's payment is past due: its servers run on, none starts
-	AtLimit,      // `used` of its `max_servers` are live already
-	NoOwnMachine, // an own machine was asked for, and each the add-on pays for runs one
+	PastDue,      // a payment of its is past due: its servers run on, none starts
+	AtLimit,      // a shared machine was asked for, and `used` of its `limit` shared servers are live
+	NoOwnMachine, // a dedicated machine was asked for, and each of its `limit` runs one
 	AtCapacity,   // `cap` servers are live, or the fleet has no place for it (fleet_has_room)
 	AddressUnavailable, // the address asked for is not the owner's, not ready, or another live server's
 };
 struct RequestResult {
 	RequestOutcome outcome = RequestOutcome::Created;
 	int64_t id = 0;
-	// AtLimit: the entitlement's servers, and how many of the account's are live.
-	int max_servers = 0;
+	// AtLimit and NoOwnMachine: the places of the pool the start asked for (the
+	// entitlement's shared_servers or own_machines), and how many of the
+	// account's servers in it are live.
+	int limit = 0;
 	int used = 0;
 };
 
@@ -143,11 +145,12 @@ struct RequestResult {
 // (which holds the hosted-start lock, database.h kHostedStartLock, so no other
 // start lands between a count and the row) the account (a player's, active),
 // its hosting entitlement at `now` (Unix seconds; billing/entitlement.h): some
-// servers, none past due, fewer of its servers live than it grants (a stopping
-// one counts), and with `own_machine` fewer of them on own machines than the
-// add-on pays for; then the global cap, and with `fleet` the fleet's room under
+// servers, none past due, and fewer of its servers live in the pool the start
+// asks for than it grants there (a stopping one counts): without `own_machine`
+// on shared machines, its shared_servers; with it on dedicated machines, its
+// own_machines. Then the global cap, and with `fleet` the fleet's room under
 // that placement policy (the supervisor's planner, fleet_repository.h
-// fleet_has_room); with `address_id` (an own-machine server's), that address
+// fleet_has_room); with `address_id` (a dedicated-machine server's), that address
 // the owner's, ready and no other live server's; and the row written (state
 // requested, its event beside it).
 RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
@@ -156,6 +159,25 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 // The live server's address let go (it lapsed: the supervisor places the
 // server again without it); false when it held none.
 bool clear_server_address(db::Database &db, int64_t id);
+// What moving a server off its dedicated machine came to (clear_own_machine).
+enum class MoveOutcome : uint8_t {
+	Moved,          // a shared server now: its own_machine cleared, and its address with it
+	NoSharedServer, // its owner's live servers on shared machines fill its shared servers
+	NoRoom,         // the fleet has no place for one more shared server (fleet_has_room)
+	Gone,           // the row is no longer a dedicated-machine server of an account in `state`
+};
+// Dedicated-machine server `id`, still in `state`, given a shared machine's
+// place instead (its owner has fewer dedicated machines now than its servers
+// on them), judged as request_server judges a shared server's start, under the
+// hosted-start lock: its owner's entitlement at `now` (Unix seconds) must have
+// a shared server free (fewer of its servers live on shared machines than its
+// shared_servers, a stopping one counted), then the fleet a place for one more
+// under `fleet` (fleet_has_room; the cap counts it live already); then its
+// own_machine cleared, and its address with it (only a dedicated machine
+// carries one). Inside the caller's transaction the lock holds until that one
+// ends, so the caller's letting go of its slot lands under it too. Nothing is
+// written but on Moved.
+MoveOutcome clear_own_machine(db::Database &db, int64_t id, State state, const PlacementPolicy &fleet, int64_t now);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);
 // Server `id` when `owner_user_id` owns it, in any state; nullopt for no such
@@ -166,10 +188,11 @@ std::vector<HostedServer> live_servers_of(db::Database &db, int64_t owner_user_i
 // The owner's live servers by id, oldest first, then its newest
 // `ended_limit` ended ones, newest first.
 std::vector<HostedServer> list_servers_of(db::Database &db, int64_t owner_user_id, size_t ended_limit = 10);
-// How many of the owner's servers are live, and how many of those run on own
-// machines (a stopping one counts in both).
+// How many of the owner's servers are live, and how many of those run on
+// dedicated machines and on shared ones (a stopping one counts in each).
 int count_live_of(db::Database &db, int64_t owner_user_id);
 int count_own_live_of(db::Database &db, int64_t owner_user_id);
+int count_shared_live_of(db::Database &db, int64_t owner_user_id);
 std::vector<HostedServer> list_live(db::Database &db);
 // The newest `limit` servers, live ones first (the admin's fleet view).
 std::vector<HostedServer> list_servers(db::Database &db, size_t limit);
@@ -179,7 +202,7 @@ enum class ServerFilter : uint8_t { Live, Ended, All };
 // alone when it is set.
 std::vector<HostedServer> list_fleet_servers(
 		db::Database &db, std::optional<int64_t> owner_user_id, ServerFilter filter, size_t limit);
-// How many servers are live, and how many of those run on own machines (a
+// How many servers are live, and how many of those run on dedicated machines (a
 // stopping one counts in both).
 int count_live(db::Database &db);
 int count_own_live(db::Database &db);

@@ -116,11 +116,11 @@ describe('FleetSection', () => {
     expect(cards[0].text()).toContain('2 of 12 slots in use');
     expect(cards[0].text()).toContain('13 GB sent this month');
     expect(cards[0].get('.machine-report').text()).toBe('Last report 4 s ago');
-    expect(cards[1].text()).toContain('Own machine');
+    expect(cards[1].text()).toContain('Dedicated machine');
     expect(cards[1].text()).toContain('c7a.medium');
-    expect(page.text()).toContain('1 shared, 1 own');
+    expect(page.text()).toContain('1 shared, 1 dedicated');
     expect(page.text()).toContain('1 of 24 shared');
-    expect(page.text()).toContain('0 of 2 own');
+    expect(page.text()).toContain('0 of 2 dedicated');
   });
 
   it("puts each server in its machine's slot from the machine's own slot holders, whatever the list shows", async () => {
@@ -156,6 +156,22 @@ describe('FleetSection', () => {
     expect(rows[0].get('th a').attributes('href')).toBe('/admin/fleet/1');
     expect(rows[1].text()).toContain('Not placed');
     expect(rows[1].text()).toContain('Not listed');
+  });
+
+  it("names an owner's admin grant where it said no tier, and the tier beside it", async () => {
+    fleet.mockResolvedValue({
+      ok: true,
+      value: fleetResponse({
+        servers: [
+          fleetServer(1, { owner: { id: 101, username: 'owner1', tier: null, granted: true } }),
+          fleetServer(2, { owner: { id: 102, username: 'owner2', tier: 2, granted: true } }),
+          fleetServer(3, { owner: { id: 103, username: 'owner3', tier: null, granted: false } }),
+        ],
+      }),
+    });
+    const page = await mountSection();
+    const owners = page.findAll('tr.fleet-server-row').map((r) => r.get('td span').text());
+    expect(owners).toEqual(['Admin grant', 'Admin grant, Tier 2', 'No tier']);
   });
 
   it("shows each server's data, and whether newer waits", async () => {
@@ -254,7 +270,7 @@ describe('FleetSection', () => {
     });
     const page = await mountSection();
     // Only the lost one counts as a machine: a failed one never ran.
-    expect(page.text()).toContain('1 shared, 0 own');
+    expect(page.text()).toContain('1 shared, 0 dedicated');
     // The failed and the ended one are history once a later machine launched.
     expect(page.findAll('article.machine-card')).toHaveLength(1);
     await page.findAll('button').find((b) => b.text() === 'Show history (2)')!.trigger('click');

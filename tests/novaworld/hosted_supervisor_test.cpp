@@ -11,7 +11,7 @@
 // start, deleted at the end), the start request's checks (the hosting
 // entitlement, the global cap, the fleet's room under the planner), each
 // server's lifecycle on the fleet (a shared machine launched and waited for,
-// two servers on one machine's slots, an own machine of its own), the stop (the
+// two servers on one machine's slots, a dedicated machine of its own), the stop (the
 // push, the listing's end, the 60 s timeout, any exit while stopping, a stop
 // before any slot, a stop landing mid-placement, the kill switch), the crash
 // restart and its limit (any exit, the OOM kill, a start that failed; a stop is
@@ -23,7 +23,10 @@
 // holding its listing's clock), no lobby live (nothing placed, an exit costing
 // no restart, the listing's clocks waiting), an owner's account banned
 // or deleted, its comp grant withdrawn or its support tier canceled (also
-// during a crash restart's backoff), the owners' limits and their hold, the
+// during a crash restart's backoff), the owners' limits (each pool apart: shared
+// servers cut stopping the newest shared ones, dedicated machines cut moving
+// their servers to shared machines while their owners have a shared server free
+// and the fleet room, stopping the rest; and the provisioning re-check) and their hold, the
 // reconciliation at the service's start, and the admin links kept in step with
 // the running servers. Compiles the server's accounts/auth.cpp, accounts/web_session.cpp and the
 // hosted sources directly, so it runs on every build.
@@ -642,7 +645,7 @@ int test_requests() {
 	const auto first = request(a, settings, offered, 3);
 	TEST_EXPECT(first.outcome == hosted::RequestOutcome::Created && first.id > 0);
 	const auto second = request(a, settings, offered, 3);
-	TEST_EXPECT(second.outcome == hosted::RequestOutcome::AtLimit && second.max_servers == 1 && second.used == 1);
+	TEST_EXPECT(second.outcome == hosted::RequestOutcome::AtLimit && second.limit == 1 && second.used == 1);
 	TEST_EXPECT(transitions(db, first.id) == std::vector<std::string>{ ">requested" });
 	TEST_EXPECT(hosted::count_live_of(db, a) == 1 && hosted::count_own_live_of(db, a) == 0);
 	const auto row = hosted::find_server(db, first.id);
@@ -679,33 +682,53 @@ int test_requests() {
 	// An owner's server by id, and another's not.
 	TEST_EXPECT(hosted::owned_server(db, first.id, a) && !hosted::owned_server(db, first.id, c));
 
-	// A grant of two: two live, the third at the limit; the own-machine add-on
-	// counted apart, a tier needed for it (a comp grant buys no machine).
+	// A grant of two shared servers: two live, the third at the limit; a
+	// dedicated machine counted apart, none in a grant of shared servers.
 	const int64_t g = make_player(db, "req_g", 2);
 	const int big_cap = 100;
+	const auto on_dedicated = [&](int64_t user) {
+		return hosted::request_server(db, user, settings, offered, big_cap, kWall, /*own_machine=*/true);
+	};
 	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
-	TEST_EXPECT(hosted::request_server(db, g, settings, offered, big_cap, kWall, /*own_machine=*/true).outcome ==
-			hosted::RequestOutcome::NoOwnMachine);
+	const auto no_machine = on_dedicated(g);
+	TEST_EXPECT(no_machine.outcome == hosted::RequestOutcome::NoOwnMachine && no_machine.limit == 0 &&
+			no_machine.used == 0);
 	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
 	const auto at_limit = request(g, settings, offered, big_cap);
-	TEST_EXPECT(at_limit.outcome == hosted::RequestOutcome::AtLimit && at_limit.max_servers == 2 &&
+	TEST_EXPECT(at_limit.outcome == hosted::RequestOutcome::AtLimit && at_limit.limit == 2 &&
 			at_limit.used == 2);
 	// A stopping server still counts.
 	const auto g_live = hosted::live_servers_of(db, g);
 	TEST_EXPECT(g_live.size() == 2 && g_live[0].id < g_live[1].id);
 	TEST_EXPECT(hosted::request_stop(db, g_live[0].id, "test"));
 	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::AtLimit);
-	// A tier with one own machine: one server on it, the second refused.
+	// Tier 2 and one dedicated machine: two shared servers and one on it (a
+	// dedicated machine adds to the tier's), the second on one refused, and a
+	// third shared one at the shared limit.
 	const int64_t m = make_player(db, "req_m", 0);
 	subscribe(db, m, 2, "active", "sub_req_m");
 	subscribe_machines(db, m, 1, "sub_req_m_machine");
-	const auto own = hosted::request_server(db, m, settings, offered, big_cap, kWall, true);
+	const auto own = on_dedicated(m);
 	TEST_EXPECT(own.outcome == hosted::RequestOutcome::Created && hosted::find_server(db, own.id)->own_machine);
-	TEST_EXPECT(hosted::request_server(db, m, settings, offered, big_cap, kWall, true).outcome ==
-			hosted::RequestOutcome::NoOwnMachine);
+	const auto second_own = on_dedicated(m);
+	TEST_EXPECT(second_own.outcome == hosted::RequestOutcome::NoOwnMachine && second_own.limit == 1 &&
+			second_own.used == 1);
 	TEST_EXPECT(request(m, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
-	TEST_EXPECT(hosted::count_live_of(db, m) == 2 && hosted::count_own_live_of(db, m) == 1);
-	for (const int64_t owner : { g, m }) {
+	TEST_EXPECT(request(m, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
+	const auto m_limit = request(m, settings, offered, big_cap);
+	TEST_EXPECT(m_limit.outcome == hosted::RequestOutcome::AtLimit && m_limit.limit == 2 && m_limit.used == 2);
+	TEST_EXPECT(hosted::count_live_of(db, m) == 3 && hosted::count_own_live_of(db, m) == 1 &&
+			hosted::count_shared_live_of(db, m) == 2);
+	// An admin's dedicated machine alone: one server on it, none on a shared
+	// machine (no tier, no shared server).
+	const int64_t k = make_player(db, "req_k", 0);
+	TEST_EXPECT(nws::billing::set_comp_grants(db, k, { 0, 1 }));
+	const auto k_shared = request(k, settings, offered, big_cap);
+	TEST_EXPECT(k_shared.outcome == hosted::RequestOutcome::AtLimit && k_shared.limit == 0 && k_shared.used == 0);
+	TEST_EXPECT(on_dedicated(k).outcome == hosted::RequestOutcome::Created);
+	TEST_EXPECT(on_dedicated(k).outcome == hosted::RequestOutcome::NoOwnMachine);
+	TEST_EXPECT(hosted::count_live_of(db, k) == 1 && hosted::count_own_live_of(db, k) == 1);
+	for (const int64_t owner : { g, m, k }) {
 		for (const auto &s : hosted::live_servers_of(db, owner)) hosted::request_stop(db, s.id, "test");
 		db.exec("UPDATE hosted_servers SET state = 'stopped' WHERE owner_user_id = $1 AND state = 'stopping';",
 				{ BindValue(owner) });
@@ -720,9 +743,9 @@ int test_requests() {
 }
 
 // The fleet's room at the request (the supervisor's planner): one shared machine
-// of two slots at most and one own machine, so two shared servers and one own one
-// fit, waiting ones counted before the request; a third shared one, or a second
-// own one, is at_capacity, and a place frees once a server ends.
+// of two slots at most and one dedicated machine, so two shared servers and one
+// dedicated one fit, waiting ones counted before the request; a third shared one,
+// or a second dedicated one, is at_capacity, and a place frees once a server ends.
 int test_fleet_room() {
 	Rig rig("hosted_fleet_room");
 	rig.config.cap = 50;
@@ -733,10 +756,9 @@ int test_fleet_room() {
 	Database *db = &rig.db;
 	const hosted::PlacementPolicy &fleet = rig.config.placement;
 	TEST_EXPECT(hosted::fleet_has_room(*db, fleet, false) && hosted::fleet_has_room(*db, fleet, true));
-	// A comp grant of ten servers (the fleet, not the entitlement, is the limit
-	// here) and a tier, which the own-machine add-on needs.
+	// A comp grant of ten shared servers and two dedicated machines paid for
+	// (the fleet, not the entitlement, is the limit here).
 	const int64_t owner = make_player(*db, "room_owner", 10);
-	subscribe(*db, owner, 1, "active", "sub_room");
 	subscribe_machines(*db, owner, 2, "sub_room_machines");
 	const auto start = [&](bool own) {
 		return hosted::request_server(*db, owner, rig.settings(), rig.offered(), rig.config.cap, rig.wall,
@@ -940,9 +962,9 @@ int test_two_servers_one_machine() {
 	return 0;
 }
 
-// The own-machine add-on: the server gets a machine of its own (one slot,
+// A dedicated machine: the server gets a machine of its own (one slot,
 // reserved for it, its own kind's template), never a shared one's slot, while a
-// shared server of the same owner goes to a shared machine; the own machine
+// shared server of the same owner goes to a shared machine; the dedicated machine
 // ends when its server stops.
 int test_own_machine() {
 	Rig rig("hosted_own");
@@ -976,9 +998,9 @@ int test_own_machine() {
 	return 0;
 }
 
-// Stopped and started again at the fleet's maximum of own machines (1): the
+// Stopped and started again at the fleet's maximum of dedicated machines (1): the
 // start is taken while the stopped server's machine still waits for its end
-// (its place went with its server), another owner's own-machine start is
+// (its place went with its server), another owner's dedicated-machine start is
 // still at_capacity, and the new server's machine launches once the old one
 // has ended, never past the maximum (no launch refused).
 int test_own_restart_at_cap() {
@@ -1018,7 +1040,7 @@ int test_own_restart_at_cap() {
 	return 0;
 }
 
-// A static address (hosted/model/address_repository.h): its own machine launched to carry
+// A static address (hosted/model/address_repository.h): its dedicated machine launched to carry
 // it, the server's container held back (booting, its agent told to start nothing)
 // while the machine's row does not show the address, an address.associate asked for
 // meanwhile, then the start once a describe brings the address; the subscription
@@ -1167,6 +1189,97 @@ int test_static_address_brake() {
 	const auto again = hosted::find_address(*db, named.id);
 	TEST_EXPECT(again->state == AddressState::Allocating && again->retries == 1 && again->reason.empty() &&
 			jobs::job_pending(*db, key));
+	return 0;
+}
+
+// A comp address nothing covers lapses through the same path (address_repository.h
+// uncovered_comp_addresses): one of an account's two dedicated machines cut, the newer of its
+// two comp addresses lapses at the next pass with no reconcile waited for (the account
+// has no subscription for the cache to judge), the server on it placed again without it
+// (no restart counted), and the address goes releasing; an account with subscriptions
+// waits for a clean reconcile, its paid address kept; a deleted account's lapses at once.
+int test_comp_address_lapse() {
+	namespace billing = opennova::novaworld_server::billing;
+	Rig rig("hosted_comp_address");
+	Database *db = &rig.db;
+	const int64_t cy = make_player(*db, "comp_cy", 0);
+	TEST_EXPECT(billing::set_comp_grants(*db, cy, { 2, 2 }));
+	const int64_t older = hosted::add_comp_address(*db, cy, "cy-older", rig.wall).id;
+	const int64_t newer = hosted::add_comp_address(*db, cy, "cy-newer", rig.wall).id;
+	TEST_EXPECT(older > 0 && newer > older);
+	const std::string ip = "203.0.113.62";
+	TEST_EXPECT(hosted::record_allocation(*db, older, "eipalloc-cy1", "203.0.113.61") &&
+			hosted::record_dns_upsert(*db, older, "cy-older", "c1"));
+	TEST_EXPECT(hosted::record_allocation(*db, newer, "eipalloc-cy2", ip) &&
+			hosted::record_dns_upsert(*db, newer, "cy-newer", "c2"));
+	const auto r = hosted::request_server(*db, cy, rig.settings(), rig.offered(), rig.config.cap, rig.wall, true,
+			&rig.config.placement, newer);
+	TEST_EXPECT(r.outcome == hosted::RequestOutcome::Created);
+	const int64_t id = r.id;
+	for (int i = 0; i < 6; ++i) rig.step();
+	const int64_t machine = rig.machine_of(id);
+	TEST_EXPECT(machine > 0 && rig.machine(machine)->address_id == newer);
+	rig.fake.machines.at(rig.machine(machine)->cloud_id).public_address = ip;
+	TEST_EXPECT(!rig.to_running(id, 5401).empty());
+	TEST_EXPECT(hosted::find_address(*db, newer)->state == AddressState::Ready);
+
+	// One of her dedicated machines cut: the newer address lapses at the next pass.
+	TEST_EXPECT(billing::set_comp_grants(*db, cy, { 2, 1 }));
+	rig.step();
+	const auto lapsed = hosted::find_address(*db, newer);
+	TEST_EXPECT(lapsed->state != AddressState::Ready && lapsed->lapse_cause == hosted::kLapseGrant &&
+			lapsed->reason == "its account's dedicated machines no longer cover it");
+	TEST_EXPECT(hosted::find_address(*db, older)->state == AddressState::Ready);
+	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Ended);
+	const auto replaced = rig.server(id);
+	TEST_EXPECT(replaced && !replaced->address_id && replaced->restarts == 0 && is_live(replaced->state) &&
+			has_event(*db, id, "its static address cy-newer lapsed"));
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, newer)->state == AddressState::Releasing);
+	TEST_EXPECT(jobs::job_pending(*db, std::string(hosted::kJobAddressRelease) + ":" + std::to_string(newer)));
+	TEST_EXPECT(!rig.to_running(id, 5402).empty());
+	TEST_EXPECT(rig.machine(rig.machine_of(id))->address_id == 0);
+
+	// Dee on tier 1 with a dedicated machine and a paid address, and an admin's dedicated machine
+	// and comp address beside them. The admin's dedicated machine taken back, the comp
+	// address lapses once a clean reconcile confirms the cache (she has
+	// subscriptions); the paid one stays.
+	const int64_t dee = make_player(*db, "comp_dee", 0);
+	subscribe(*db, dee, 1, "active", "sub_compdee_tier");
+	subscribe_machines(*db, dee, 1, "sub_compdee_machine");
+	TEST_EXPECT(billing::set_comp_grants(*db, dee, { 0, 1 }));
+	const int64_t dee_comp = hosted::add_comp_address(*db, dee, "dee-comp", rig.wall).id;
+	billing::SubscriptionRow address_sub;
+	address_sub.stripe_subscription_id = "sub_compdee_address";
+	address_sub.stripe_customer_id = "cus_compdee";
+	address_sub.user_id = dee;
+	address_sub.status = "active";
+	address_sub.item = billing::ItemKind::StaticAddress;
+	address_sub.price_id = "price_address";
+	address_sub.current_period_end = kWall + 30 * 24 * 60 * 60;
+	billing::upsert_subscription(*db, address_sub);
+	const int64_t dee_paid = hosted::name_subscription_address(*db, dee, "dee-paid", rig.wall).id;
+	TEST_EXPECT(dee_comp > 0 && dee_paid > 0);
+	TEST_EXPECT(billing::set_comp_grants(*db, dee, { 0, 0 }));
+	rig.step();
+	rig.step();
+	TEST_EXPECT(hosted::find_address(*db, dee_comp)->state == AddressState::Allocating);
+	hosted::limits_hold::reconciled(*db);
+	rig.step();
+	const auto dee_lapsed = hosted::find_address(*db, dee_comp);
+	TEST_EXPECT(dee_lapsed->state != AddressState::Allocating && dee_lapsed->lapse_cause == hosted::kLapseGrant);
+	TEST_EXPECT(hosted::find_address(*db, dee_paid)->state == AddressState::Allocating);
+
+	// A deleted account's comp address lapses at the next pass.
+	const int64_t eve = make_player(*db, "comp_eve", 0);
+	TEST_EXPECT(billing::set_comp_grants(*db, eve, { 1, 1 }));
+	const int64_t eve_addr = hosted::add_comp_address(*db, eve, "eve-place", rig.wall).id;
+	rig.step();
+	TEST_EXPECT(eve_addr > 0 && hosted::find_address(*db, eve_addr)->state == AddressState::Allocating);
+	TEST_EXPECT(nws::delete_user(*db, eve).ok);
+	rig.step();
+	const auto gone = hosted::find_address(*db, eve_addr);
+	TEST_EXPECT(gone->state != AddressState::Allocating && gone->reason == "its account was deleted");
 	return 0;
 }
 
@@ -1466,7 +1579,7 @@ int test_launch_refused_mid_pass() {
 	subscribe_machines(*db, owner, 1, "sub_mid_pass_machine");
 	const int64_t b = rig.request_as(owner, rig.settings(), true);
 	TEST_EXPECT(b > a);
-	// Passes alone (no job runs): b's own machine, its row and its launch job.
+	// Passes alone (no job runs): b's dedicated machine, its row and its launch job.
 	rig.sup->tick(rig.now);
 	rig.sup->tick(rig.now);
 	int64_t own = 0;
@@ -1930,8 +2043,9 @@ int test_limit_at_provisioning() {
 // The owners' limits (the supervisor's enforce_limits, each pass's first act):
 // a tier lowered stops the newest servers past it, the oldest kept, the event
 // naming the tier; a past-due tier keeps every server while a start is refused
-// (PastDue); the add-on lowered stops the newest on own machines; a canceled
-// tier stops them all; a stopping server counts toward neither.
+// (PastDue); dedicated machines lowered move the newest on them to a shared
+// machine (a shared server of the tier's free); a canceled tier stops them all;
+// a stopping server counts toward neither.
 int test_owner_limits() {
 	Rig rig("hosted_limits");
 	rig.config.cap = 20;
@@ -1977,8 +2091,10 @@ int test_owner_limits() {
 	TEST_EXPECT(stopped_with(*db, b1, "hosting entitlement allows 0 hosted servers"));
 	TEST_EXPECT(stopped_with(*db, b2, "hosting entitlement allows 0 hosted servers"));
 
-	// The add-on: two machines, then one; the newest on an own machine stops,
-	// the shared one stays.
+	// Dedicated machines beside tier 3: two, then one; the newest on a dedicated
+	// machine, still waiting for its place, goes to a shared machine instead (one
+	// of the tier's three shared servers is free, and the fleet has room), and
+	// the others stay where they are.
 	const int64_t cy = make_player(*db, "lim_cy", 0);
 	subscribe(*db, cy, 3, "active", "sub_lim_cy");
 	subscribe_machines(*db, cy, 2, "sub_lim_cy_machines");
@@ -1987,13 +2103,232 @@ int test_owner_limits() {
 	const int64_t c2 = own(false);
 	const int64_t c3 = own(true);
 	TEST_EXPECT(c1 > 0 && c2 > c1 && c3 > c2);
-	TEST_EXPECT(own(true) == 0); // a fourth: every server the tier allows is live
+	TEST_EXPECT(own(true) == 0); // a third on a dedicated machine: both run one
 	rig.step();
 	subscribe_machines(*db, cy, 1, "sub_lim_cy_machines");
 	rig.step();
-	TEST_EXPECT(stopped_with(*db, c3, "own-machine add-on covers 1 machine"));
-	TEST_EXPECT(hosted::is_live(rig.state(c1)) && rig.state(c1) != State::Stopping);
+	TEST_EXPECT(has_event(*db, c3, "moved to a shared machine: its owner has 1 dedicated machine now"));
+	TEST_EXPECT(hosted::is_live(rig.state(c3)) && rig.state(c3) != State::Stopping && !rig.server(c3)->own_machine);
+	TEST_EXPECT(hosted::is_live(rig.state(c1)) && rig.state(c1) != State::Stopping && rig.server(c1)->own_machine);
 	TEST_EXPECT(hosted::is_live(rig.state(c2)) && rig.state(c2) != State::Stopping);
+	TEST_EXPECT(rig.walk(c3, State::Listing));
+	TEST_EXPECT(rig.machine(rig.machine_of(c3))->kind == hosted::MachineKind::Shared);
+	return 0;
+}
+
+// Dedicated machines cut while their servers run (an admin's grant of three
+// shared servers and two dedicated machines, then one): the newest server on a
+// dedicated machine moves to a shared machine, a shared server of the grant's
+// free and the fleet room for it (its match ends: its start ends `limits`, it is placed
+// again with its dedicated-machine choice cleared and no restart counted, its event
+// saying why, its static address left to the account, and its dedicated machine ends
+// after it), and starts again there; the older one stays on its dedicated machine,
+// the shared one where it runs.
+int test_own_machines_cut() {
+	Rig rig("hosted_own_cut");
+	rig.config.cap = 10;
+	rig.make_supervisor();
+	Database *db = &rig.db;
+	const int64_t owner = make_player(*db, "own_cut_owner", 0);
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 3, 2 }));
+	// The newer one runs at an admin's comp address.
+	const auto named = hosted::add_comp_address(*db, owner, "cut-place", rig.wall);
+	TEST_EXPECT(named.outcome == hosted::NameOutcome::Created);
+	const int64_t address = named.id;
+	const std::string ip = "203.0.113.60";
+	TEST_EXPECT(hosted::record_allocation(*db, address, "eipalloc-cut", ip) &&
+			hosted::record_dns_upsert(*db, address, "cut-place", "c1"));
+	const int64_t older = rig.request_as(owner, rig.settings(), true);
+	const auto requested = hosted::request_server(*db, owner, rig.settings(), rig.offered(), rig.config.cap,
+			rig.wall, true, &rig.config.placement, address);
+	TEST_EXPECT(requested.outcome == hosted::RequestOutcome::Created);
+	const int64_t newer = requested.id;
+	const int64_t shared = rig.request_as(owner);
+	TEST_EXPECT(older > 0 && newer > older && shared > newer);
+	// Its dedicated machine carries the address once a describe brings it.
+	for (int i = 0; i < 6; ++i) rig.step();
+	const int64_t newer_machine = rig.machine_of(newer);
+	TEST_EXPECT(newer_machine > 0 && rig.machine(newer_machine)->address_id == address);
+	const std::string newer_cloud = rig.machine(newer_machine)->cloud_id;
+	rig.fake.machines.at(newer_cloud).public_address = ip;
+	TEST_EXPECT(!rig.to_running(older, 6101).empty() && !rig.to_running(newer, 6102).empty() &&
+			!rig.to_running(shared, 6103).empty());
+	TEST_EXPECT(rig.fake.launches == 3);
+	const int64_t older_machine = rig.machine_of(older);
+	const int64_t shared_machine = rig.machine_of(shared);
+	TEST_EXPECT(rig.machine(newer_machine)->kind == hosted::MachineKind::Own &&
+			rig.machine(newer_machine)->public_address == ip &&
+			rig.machine(shared_machine)->kind == hosted::MachineKind::Shared);
+	const int64_t generation = rig.server(newer)->generation;
+	// The move's compare-and-set: a row no longer in the state its pass read
+	// keeps its dedicated machine, room or not.
+	TEST_EXPECT(hosted::clear_own_machine(*db, older, State::Booting, rig.config.placement, rig.wall) ==
+					hosted::MoveOutcome::Gone &&
+			rig.server(older)->own_machine);
+
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 3, 1 }));
+	rig.step();
+	auto row = rig.server(newer);
+	TEST_EXPECT(row && !row->own_machine && row->restarts == 0 && hosted::is_live(row->state) &&
+			row->state != State::Stopping);
+	// Placed again in the same pass, on the shared machine's next slot.
+	TEST_EXPECT(rig.machine_of(newer) == shared_machine && row->generation == generation + 1);
+	TEST_EXPECT(has_event(*db, newer,
+			"moved to a shared machine: its owner has 1 dedicated machine now; placed again (no restart counted)"));
+	TEST_EXPECT(!stopped_with(*db, newer, "dedicated machine"));
+	// Its address stays the account's, ready, and no live server's (only a dedicated
+	// machine carries one).
+	TEST_EXPECT(!row->address_id && !hosted::server_of_address(*db, address) &&
+			hosted::find_address(*db, address)->state == AddressState::Ready);
+	// Its dedicated machine ended after it.
+	TEST_EXPECT(rig.machine(newer_machine)->state == hosted::FleetMachineState::Ended &&
+			rig.machine(newer_machine)->end_reason == "its server moved to a shared machine");
+	TEST_EXPECT(rig.fake.was_terminated(newer_cloud));
+	// The others run on where they ran.
+	TEST_EXPECT(rig.state(older) == State::Running && rig.machine_of(older) == older_machine &&
+			rig.server(older)->own_machine);
+	TEST_EXPECT(rig.state(shared) == State::Running && rig.machine_of(shared) == shared_machine);
+	TEST_EXPECT(rig.machine(older_machine)->state == hosted::FleetMachineState::Ready);
+	// Its old listing went with its match; it lists again from the shared machine.
+	hostdb::remove_host_by_rid(*db, 6102);
+	TEST_EXPECT(!rig.to_running(newer, 6104).empty());
+	TEST_EXPECT(rig.machine_of(newer) == shared_machine && rig.server(newer)->restarts == 0);
+	TEST_EXPECT(rig.fake.launches == 3); // no machine launched for the move
+	{
+		// A new start on the shared machine, the one before it on its dedicated machine
+		// ended for its owner's limits.
+		const auto starts = hosted::list_starts(*db, newer, 10);
+		TEST_EXPECT(starts.size() == 2 && starts[0].generation == generation + 1 &&
+				starts[0].machine_id == shared_machine && starts[0].ended_at.empty() &&
+				!starts[0].running_at.empty() && starts[1].machine_id == newer_machine &&
+				!starts[1].ended_at.empty() && starts[1].cause == hosted::StartCause::Limits);
+	}
+	// Nothing more moves or stops.
+	rig.step();
+	TEST_EXPECT(rig.state(older) == State::Running && rig.state(newer) == State::Running &&
+			rig.state(shared) == State::Running && !hosted::limits_hold::held(*db));
+	return 0;
+}
+
+// Dedicated machines cut with room for one of their servers alone: the newest
+// moves to the shared machine's last slot, the older one, which the fleet then
+// has no shared room for (its owner still has a shared server free), stops, its
+// event saying so and its start ending `limits`; the shared server runs on.
+int test_own_machines_cut_no_room() {
+	Rig rig("hosted_own_cut_full");
+	rig.config.cap = 10;
+	rig.config.placement.shared_slots = 2;
+	rig.config.placement.max_shared = 1;
+	rig.make_supervisor();
+	Database *db = &rig.db;
+	const int64_t owner = make_player(*db, "own_full_owner", 0);
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 3, 2 }));
+	const int64_t older = rig.request_as(owner, rig.settings(), true);
+	const int64_t newer = rig.request_as(owner, rig.settings(), true);
+	const int64_t shared = rig.request_as(owner);
+	TEST_EXPECT(older > 0 && newer > older && shared > newer);
+	TEST_EXPECT(!rig.to_running(older, 6201).empty() && !rig.to_running(newer, 6202).empty() &&
+			!rig.to_running(shared, 6203).empty());
+	const int64_t older_machine = rig.machine_of(older);
+	const int64_t shared_machine = rig.machine_of(shared);
+	TEST_EXPECT(hosted::fleet_has_room(*db, rig.config.placement, false)); // the shared machine's second slot
+
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 3, 0 }));
+	rig.step();
+	TEST_EXPECT(!rig.server(newer)->own_machine && rig.machine_of(newer) == shared_machine);
+	TEST_EXPECT(has_event(*db, newer, "moved to a shared machine: its owner has 0 dedicated machines now"));
+	TEST_EXPECT(stopped_with(*db, older, "its owner has 0 dedicated machines now and the fleet has no shared room"));
+	TEST_EXPECT(rig.server(older)->own_machine && rig.machine_of(older) == older_machine);
+	TEST_EXPECT(hosted::list_starts(*db, older, 1)[0].cause == hosted::StartCause::Limits);
+	TEST_EXPECT(rig.state(shared) == State::Running);
+	TEST_EXPECT(!hosted::fleet_has_room(*db, rig.config.placement, false));
+	// The stop ends as any (its listing gone), and its dedicated machine with it.
+	hostdb::remove_host_by_rid(*db, 6201);
+	rig.step(); // the push
+	rig.step(); // stopped
+	TEST_EXPECT(rig.state(older) == State::Stopped);
+	rig.step();
+	TEST_EXPECT(rig.machine(older_machine)->state == hosted::FleetMachineState::Ended);
+	TEST_EXPECT(rig.state(shared) == State::Running && hosted::is_live(rig.state(newer)));
+	return 0;
+}
+
+// The provisioning re-check (on_provisioning): dedicated machines cut after the
+// pass's limits read them and before a server waiting for its place on one is
+// placed (an admin's cut landing mid-pass, played here at the pass's launch for
+// the owner's older shared server): the server goes to a shared machine instead
+// (its owner's second shared server free), the shared machine launched for the
+// older one taking both.
+int test_own_cut_at_provisioning() {
+	Rig rig("hosted_own_cut_provisioning");
+	Database *db = &rig.db;
+	const int64_t owner = make_player(*db, "own_prov_owner", 0);
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 2, 1 }));
+	const int64_t older = rig.request_as(owner);
+	const int64_t own = rig.request_as(owner, rig.settings(), true);
+	TEST_EXPECT(older > 0 && own > older);
+	rig.tick(); // both -> provisioning
+	TEST_EXPECT(rig.state(older) == State::Provisioning && rig.state(own) == State::Provisioning);
+	// The pass's next guard read past its first (the older server's launch, after
+	// the limits ran) cuts the dedicated machine.
+	int guards = 0;
+	bool cut = false;
+	rig.sup->set_pass_guard([&](Database &d) {
+		if (++guards == 2) cut = nws::billing::set_comp_grants(d, owner, { 2, 0 });
+		return true;
+	});
+	rig.tick();
+	TEST_EXPECT(cut);
+	auto row = rig.server(own);
+	TEST_EXPECT(row && row->state == State::Provisioning && !row->own_machine && !row->machine_ref);
+	TEST_EXPECT(has_event(*db, own, "moved to a shared machine: its owner has 0 dedicated machines now"));
+	rig.sup->set_pass_guard(nullptr);
+	TEST_EXPECT(rig.walk(own, State::Listing) && rig.walk(older, State::Listing));
+	TEST_EXPECT(rig.machine_of(own) == rig.machine_of(older) &&
+			rig.machine(rig.machine_of(own))->kind == hosted::MachineKind::Shared);
+	TEST_EXPECT(rig.fake.launches == 1); // no dedicated machine launched
+	return 0;
+}
+
+// Each pool its own at the owners' limits (an admin's grant of two shared
+// servers and two dedicated machines, all four running): its shared servers cut
+// to one, the newer shared server stops while both on dedicated machines run
+// on; then its dedicated machines cut to one, the newer server on one has no
+// shared server to go to (the older shared server fills the one left), so it
+// stops though the fleet has room.
+int test_pools_cut() {
+	Rig rig("hosted_pools_cut");
+	rig.config.cap = 10;
+	rig.make_supervisor();
+	Database *db = &rig.db;
+	const int64_t owner = make_player(*db, "pools_owner", 0);
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 2, 2 }));
+	const int64_t shared_old = rig.request_as(owner);
+	const int64_t own_old = rig.request_as(owner, rig.settings(), true);
+	const int64_t shared_new = rig.request_as(owner);
+	const int64_t own_new = rig.request_as(owner, rig.settings(), true);
+	TEST_EXPECT(shared_old > 0 && own_old > shared_old && shared_new > own_old && own_new > shared_new);
+	TEST_EXPECT(!rig.to_running(shared_old, 6301).empty() && !rig.to_running(own_old, 6302).empty() &&
+			!rig.to_running(shared_new, 6303).empty() && !rig.to_running(own_new, 6304).empty());
+
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 1, 2 }));
+	rig.step();
+	TEST_EXPECT(stopped_with(*db, shared_new, "its owner's hosting entitlement allows 1 hosted server on shared machines"));
+	TEST_EXPECT(rig.state(shared_old) == State::Running && rig.state(own_old) == State::Running &&
+			rig.state(own_new) == State::Running);
+	hostdb::remove_host_by_rid(*db, 6303);
+	rig.step(); // the push
+	rig.step(); // stopped
+	TEST_EXPECT(rig.state(shared_new) == State::Stopped);
+
+	TEST_EXPECT(hosted::fleet_has_room(*db, rig.config.placement, false));
+	TEST_EXPECT(nws::billing::set_comp_grants(*db, owner, { 1, 1 }));
+	rig.step();
+	TEST_EXPECT(stopped_with(*db, own_new, "its owner has 1 dedicated machine now and no shared server free"));
+	TEST_EXPECT(rig.server(own_new)->own_machine && !has_event(*db, own_new, "moved to a shared machine"));
+	TEST_EXPECT(hosted::list_starts(*db, own_new, 1)[0].cause == hosted::StartCause::Limits);
+	TEST_EXPECT(rig.state(shared_old) == State::Running && rig.state(own_old) == State::Running &&
+			rig.server(own_old)->own_machine);
 	return 0;
 }
 
@@ -2372,6 +2707,7 @@ int main(int argc, char **argv) {
 		{ "own_restart_at_cap", { test_own_restart_at_cap } },
 		{ "static_address", { test_static_address } },
 		{ "static_address_brake", { test_static_address_brake } },
+		{ "comp_address_lapse", { test_comp_address_lapse } },
 		{ "stop_paths", { test_stop_paths } },
 		{ "exits_and_crash_restarts", { test_exits_and_crash_restarts } },
 		{ "last_good_pass", { test_last_good_pass } },
@@ -2386,6 +2722,10 @@ int main(int argc, char **argv) {
 		{ "owner_changes", { test_owner_changes } },
 		{ "limit_at_provisioning", { test_limit_at_provisioning } },
 		{ "owner_limits", { test_owner_limits } },
+		{ "own_machines_cut", { test_own_machines_cut } },
+		{ "own_machines_cut_no_room", { test_own_machines_cut_no_room } },
+		{ "own_cut_at_provisioning", { test_own_cut_at_provisioning } },
+		{ "pools_cut", { test_pools_cut } },
 		{ "mass_stop_hold", { test_mass_stop_hold } },
 		{ "hold_releases", { test_hold_releases } },
 		{ "reconciliation", { test_reconciliation } },

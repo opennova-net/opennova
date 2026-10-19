@@ -74,7 +74,7 @@ describe('the admin address routes', () => {
       [400, 'confirm_mismatch', "not the address's"],
       [409, 'not_releasable', 'on its way out already'],
       [409, 'not_retryable', 'Only an address the cloud refused'],
-      [409, 'address_limit', 'a static address for every own machine'],
+      [409, 'address_limit', 'a static address for every dedicated machine'],
       [503, 'addresses_disabled', 'sells no static address'],
     ];
     for (const [status, code, text] of cases) {

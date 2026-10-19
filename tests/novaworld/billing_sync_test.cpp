@@ -13,7 +13,9 @@
 // other mode, on_reconciled called after a clean reconcile alone, its state
 // kept in the database (another sync over it reads the same), the
 // billing.sync and billing.reconcile jobs enqueued, deduped, scheduled and run,
-// and a changed price list checked on the schedule's next pass.
+// a changed price list checked on the schedule's next pass, and the static
+// addresses past their accounts' dedicated machines set to cancel at their
+// period's end (none for a tier's end).
 // Crow-free: compiles the billing sources directly.
 
 #include "billing/billing_config.h"
@@ -179,7 +181,7 @@ int test_event_to_entitlement() {
 	rig.pass(++rig.now);
 	e = rig.entitlement(ana);
 	TEST_EXPECT(e.max_servers == 2 && !e.can_start);
-	// An add-on beside it.
+	// Two dedicated machines beside it: two servers more.
 	rig.fake.add_subscription(cus, "price_own", 2, "active", rig.now + kMonth);
 	{
 		std::lock_guard<std::mutex> lock(rig.fake.mu);
@@ -188,7 +190,7 @@ int test_event_to_entitlement() {
 	rig.event("evt_a4", cus);
 	rig.pass(++rig.now);
 	e = rig.entitlement(ana);
-	TEST_EXPECT(e.max_servers == 2 && e.own_machines == 2 && e.can_start);
+	TEST_EXPECT(e.max_servers == 4 && e.shared_servers == 2 && e.own_machines == 2 && e.can_start);
 	// The synchronous sync a route runs answers the same and marks its events.
 	rig.event("evt_a5", cus);
 	TEST_EXPECT(rig.sync->sync_customer(*rig.pool.acquire(), cus, rig.now) == billing::SyncOutcome::Synced);
@@ -574,6 +576,107 @@ int test_price_list_change() {
 	return 0;
 }
 
+// A static address past the dedicated machines ends, and a tier's end ends
+// nothing. Ana on tier 1 with a dedicated machine and a static address: her tier
+// canceled, nothing is called (the machine needs no tier, and the address is its
+// machine's); her dedicated machine canceled, her customer's next sync sets the
+// address to cancel at its period's end, one call under the subscription's and
+// its period's key, and writes Stripe's answer; the next sync and a reconcile
+// call no more. Ben, with an admin's dedicated machine and two addresses
+// renewing, one of them named: the reconcile ends the unnamed one alone. Cy's
+// call Stripe refuses is tried again at the next reconcile. A route's sync ends
+// none of Dee's; the reconcile does.
+int test_surplus_addresses_end() {
+	Rig rig;
+	rig.config.static_address_prices = { "price_address" };
+	FakeStripeApi::Price address;
+	address.id = "price_address";
+	address.unit_amount = 300;
+	rig.fake.add_price(address);
+	rig.first_pass();
+	const auto calls = [&rig](const std::string &sub) {
+		return rig.fake.count(StripeRequest::Method::Post, "/v1/subscriptions/" + sub);
+	};
+	const auto cancelling = [&rig](const std::string &sub) {
+		std::lock_guard<std::mutex> lock(rig.fake.mu);
+		return rig.fake.subscriptions[sub].cancel_at_period_end;
+	};
+	const auto row_cancelling = [&rig](const std::string &sub) {
+		const auto row = billing::find_subscription(*rig.pool.acquire(), sub);
+		return row && row->cancel_at_period_end;
+	};
+	const auto set_status = [&rig](const std::string &sub, const char *status) {
+		std::lock_guard<std::mutex> lock(rig.fake.mu);
+		rig.fake.subscriptions[sub].status = status;
+	};
+
+	const int64_t ana = rig.player("end_ana");
+	const std::string ana_cus = rig.customer(ana, "end_ana");
+	const int64_t addr_end = rig.now + 9 * 86400;
+	const std::string tier = rig.fake.add_subscription(ana_cus, "price_tier1", 1, "active", rig.now + kMonth);
+	const std::string own = rig.fake.add_subscription(ana_cus, "price_own", 1, "active", rig.now + kMonth);
+	const std::string addr = rig.fake.add_subscription(ana_cus, "price_address", 1, "active", addr_end);
+	rig.event("evt_end1", ana_cus);
+	rig.pass(++rig.now);
+	TEST_EXPECT(rig.entitlement(ana).own_machines == 1 && rig.entitlement(ana).address_grants == 1);
+	set_status(tier, "canceled");
+	rig.event("evt_end2", ana_cus);
+	rig.pass(++rig.now);
+	const billing::Entitlement tierless = rig.entitlement(ana);
+	TEST_EXPECT(tierless.shared_servers == 0 && tierless.own_machines == 1 && tierless.static_addresses == 1);
+	TEST_EXPECT(calls(tier) == 0 && calls(own) == 0 && calls(addr) == 0);
+
+	set_status(own, "canceled");
+	rig.event("evt_end3", ana_cus);
+	rig.pass(++rig.now);
+	TEST_EXPECT(calls(own) == 0 && calls(addr) == 1 && cancelling(addr) && row_cancelling(addr));
+	{
+		std::lock_guard<std::mutex> lock(rig.fake.mu);
+		for (const StripeRequest &r : rig.fake.requests) {
+			if (r.path != "/v1/subscriptions/" + addr) continue;
+			TEST_EXPECT(r.idempotency_key ==
+					"opennova-" + rig.instance + "-end-" + addr + "-" + std::to_string(addr_end));
+			TEST_EXPECT(r.params.size() == 1 && r.params[0].first == "cancel_at_period_end" &&
+					r.params[0].second == "true");
+		}
+	}
+	rig.event("evt_end4", ana_cus);
+	rig.pass(++rig.now);
+	TEST_EXPECT(rig.outcome_of("evt_end4") == "synced");
+	TEST_EXPECT(rig.sync->reconcile_all(++rig.now).completed);
+	TEST_EXPECT(calls(own) == 0 && calls(addr) == 1);
+
+	// Ben: an admin's dedicated machine, an address named for one subscription
+	// (ready) and another unnamed; Cy: an address and no dedicated machine, Stripe
+	// refusing its call once.
+	const int64_t ben = rig.player("end_ben");
+	TEST_EXPECT(billing::set_comp_grants(*rig.pool.acquire(), ben, { 0, 1 }));
+	const std::string ben_cus = rig.customer(ben, "end_ben");
+	const std::string ben_named = rig.fake.add_subscription(ben_cus, "price_address", 1, "active", rig.now + kMonth);
+	const std::string ben_unnamed = rig.fake.add_subscription(ben_cus, "price_address", 1, "trialing", rig.now + kMonth);
+	rig.pool.acquire()->exec("INSERT INTO hosted_addresses (owner_user_id, name, source, stripe_subscription_id, state) "
+							 "VALUES ($1, 'ben-place', 'subscription', $2, 'ready');",
+			{ BindValue(ben), BindValue(ben_named) });
+	const int64_t cy = rig.player("end_cy");
+	const std::string cy_cus = rig.customer(cy, "end_cy");
+	const std::string cy_addr = rig.fake.add_subscription(cy_cus, "price_address", 1, "active", rig.now + kMonth);
+	rig.fake.refuse_next("/v1/subscriptions/" + cy_addr, 400, "parameter_invalid", "fake: refused once");
+	TEST_EXPECT(rig.sync->reconcile_all(++rig.now).completed);
+	TEST_EXPECT(calls(ben_named) == 0 && !cancelling(ben_named) && calls(ben_unnamed) == 1 && cancelling(ben_unnamed));
+	TEST_EXPECT(calls(cy_addr) == 1 && !cancelling(cy_addr) && !row_cancelling(cy_addr));
+	TEST_EXPECT(rig.sync->reconcile_all(++rig.now).completed);
+	TEST_EXPECT(calls(ben_unnamed) == 1 && calls(cy_addr) == 2 && cancelling(cy_addr) && row_cancelling(cy_addr));
+
+	// A route's sync (sync_customer) leaves Dee's address to the worker.
+	const int64_t dee = rig.player("end_dee");
+	const std::string dee_cus = rig.customer(dee, "end_dee");
+	const std::string dee_addr = rig.fake.add_subscription(dee_cus, "price_address", 1, "active", rig.now + kMonth);
+	TEST_EXPECT(rig.sync->sync_customer(*rig.pool.acquire(), dee_cus, rig.now) == billing::SyncOutcome::Synced);
+	TEST_EXPECT(calls(dee_addr) == 0 && billing::find_subscription(*rig.pool.acquire(), dee_addr));
+	TEST_EXPECT(rig.sync->reconcile_all(++rig.now).completed && calls(dee_addr) == 1 && cancelling(dee_addr));
+	return 0;
+}
+
 // A billing.sync job holds no pooled connection while Stripe answers: on a pool of
 // one, the connection stays free for the rest of the process (the job pool's keeper,
 // a route) while a customer's read waits at Stripe, and the sync then writes what it
@@ -624,6 +727,7 @@ int main(int argc, char **argv) {
 		{ "jobs_and_state", test_jobs_and_state },
 		{ "price_list_change", test_price_list_change },
 		{ "no_connection_across_stripe", test_no_connection_across_stripe },
+		{ "surplus_addresses_end", test_surplus_addresses_end },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

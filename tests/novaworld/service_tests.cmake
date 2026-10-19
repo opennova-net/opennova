@@ -199,9 +199,11 @@ add_test(NAME hosted_net_cidr COMMAND hosted_net_cidr_test)
 
 # The hosting entitlement (apps/novaworld_common/billing/entitlement.h) and the billing
 # tables under it (billing_repository.h): which subscription statuses grant, the period's
-# 48 h net, comp grants against tiers, the own-machine add-on counting only beside a tier,
-# past_due keeping servers but starting none, an inactive or service account getting
-# nothing; and the tables' rows (the instance id minted once, the customers, the
+# 48 h net, comp grants against tiers for the shared servers, the dedicated machines (paid,
+# with no tier or beside one, and an admin's) each one more server, past_due keeping
+# servers but starting none, an inactive or service account getting nothing, the static
+# addresses that end past the dedicated machines; and the tables' rows (the instance id
+# minted once, the customers, the
 # subscriptions' status_since, the events' dedupe, pending order, cutoff and prune) on a
 # migrated database.
 add_executable(billing_entitlement_test novaworld/billing_entitlement_test.cpp)
@@ -230,7 +232,9 @@ opennova_add_pg_test(hosted_sold_capacity COMMAND hosted_sold_capacity_test)
 # event's customer synced into the entitlement, a redelivery recorded once, another
 # instance's customer ignored and listed as an orphan, the tables wiped and rebuilt by a
 # reconcile, the backoff of a customer Stripe could not be asked about, a deleted customer, a
-# row Stripe no longer knows, duplicates, and the price check.
+# row Stripe no longer knows, duplicates, the price check, and the static addresses past
+# their accounts' dedicated machines set to cancel at their period's end (none for a tier's
+# end).
 add_executable(billing_sync_test novaworld/billing_sync_test.cpp)
 target_link_libraries(billing_sync_test PRIVATE
     opennova_novaworld_billing opennova_novaworld_service Threads::Threads)
@@ -398,8 +402,9 @@ if(BUILD_NOVAWORLD_HTTP)
     # driver (allocate, associate after the previous holder's end, release after the
     # machine's end, the record's sync and TTL, the grant read again) and fleet.sweep's
     # orphans; a refusal tried again (an exhausted quota's backoff, an admin's retry), a
-    # released row's subscription named again, the jobs with the add-on off, and an
-    # admin's release racing an allocation.
+    # released row's subscription named again, the jobs with the add-on off, an admin's
+    # release racing an allocation, and the comp addresses nothing covers (an admin's cuts,
+    # a paid address beside a comp one, a failed one, a banned and a deleted account's).
     add_executable(hosted_address_test novaworld/hosted_address_test.cpp)
     target_link_libraries(hosted_address_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_hosting_cloud opennova_novaworld_service)
@@ -704,12 +709,15 @@ if(BUILD_NOVAWORLD_HTTP)
     # fleet's room among them), and each server's lifecycle on the fleet over a FakeDriver
     # (novaworld/hosted_fake_driver.h) whose machines' agents the test plays through the
     # supervisor's sync, on a hand-stepped clock: placement onto one shared machine for two
-    # servers, a launch and the wait for it, the own machine, the stops, the crash restarts
-    # and their limit, the timeouts, the health checks, the owners' changes and limits, a lost
-    # machine placing its servers again with no restart counted, the reconciliation, the
-    # admin links following the running servers, and a static address's hold, lapse and
-    # brake. Over the fleet program's core and the cloud's fleet job handlers, which the rig
-    # registers over the FakeDriver (novaworld/hosted_fleet_rig.h).
+    # servers, a launch and the wait for it, the dedicated machine, the stops, the crash
+    # restarts and their limit, the timeouts, the health checks, the owners' changes and
+    # limits (each pool apart: dedicated machines cut moving their servers to shared machines
+    # while their owners have a shared server free and the fleet room, stopping the rest), a
+    # lost machine placing its servers again with no restart counted, the
+    # reconciliation, the admin links following the running servers, a static address's
+    # hold, lapse and brake, and a comp address's lapse once nothing covers it. Over the fleet
+    # program's core and the cloud's fleet job handlers, which the rig registers over the
+    # FakeDriver (novaworld/hosted_fleet_rig.h).
     add_executable(hosted_supervisor_test novaworld/hosted_supervisor_test.cpp)
     target_link_libraries(hosted_supervisor_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_hosting_cloud opennova_novaworld_service
@@ -720,10 +728,12 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(hosted_supervisor COMMAND hosted_supervisor_test PARTS
         settings_rules renders data_sets no_data pins_and_updates service_accounts requests fleet_room
         lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
-        static_address_brake stop_paths exits_and_crash_restarts last_good_pass launch_failure
-        launch_refused_mid_pass restart_window timeouts_and_health listing_lost machine_lost_replaces
+        static_address_brake comp_address_lapse stop_paths exits_and_crash_restarts last_good_pass
+        launch_failure launch_refused_mid_pass restart_window timeouts_and_health listing_lost
+        machine_lost_replaces
         listing_waits_while_lost waits_for_lobby owner_changes limit_at_provisioning owner_limits
-        mass_stop_hold hold_releases reconciliation relist_grace console_ring admin_links_follow_running)
+        own_machines_cut own_machines_cut_no_room own_cut_at_provisioning pools_cut mass_stop_hold hold_releases
+        reconciliation relist_grace console_ring admin_links_follow_running)
     set_tests_properties(${hosted_supervisor_rows} PROPERTIES TIMEOUT 300)
 
     # The narrow locks that replaced the writer lock (net/novaworld/db/database.h): for each
@@ -781,7 +791,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # reports a container running or exited, the stopping ones, a container rebuilt after a
     # service restart), and the machines' lifecycle (a boot that never reports, lost then gone
     # or terminated, the mass-lost brake, an agent reporting again, a shared machine idle past
-    # its time, an own machine ending with its server, a drain moving servers one at a time,
+    # its time, a dedicated machine ending with its server, a drain moving servers one at a time,
     # a roll and its plan, an admin's end, the reconciliation of the driver's machines with the
     # rows). Over the libraries hosted_supervisor_test links.
     add_executable(hosted_fleet_test novaworld/hosted_fleet_test.cpp)
@@ -1037,7 +1047,7 @@ opennova_off_bakes(opennova_serve_lister_e2e)
 # Where a hosted server runs (apps/novaworld_common/hosted/model/placement.h) and what a slot
 # of a machine is (hosted/protocol/slots.h): best fit on the fullest shared machine that takes
 # servers, the ties, the launches below the fleet's maximums and the waits at them, the
-# own-machine add-on's machine, the states that count, the columns' words. Pure
+# dedicated machine's reserved machine, the states that count, the columns' words. Pure
 # functions.
 add_executable(hosted_placement_test novaworld/hosted_placement_test.cpp)
 target_link_libraries(hosted_placement_test PRIVATE

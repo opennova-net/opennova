@@ -195,6 +195,17 @@ void BillingSync::sync_pending(int64_t now) {
 		SyncOutcome outcome = SyncOutcome::Unreachable;
 		try {
 			outcome = sync_one(nullptr, customer);
+			// Its account's static addresses past its dedicated machines, read as
+			// the sync left them, end.
+			if (outcome == SyncOutcome::Synced) {
+				std::vector<AddressEnding> ending;
+				{
+					auto lease = pool_.acquire();
+					if (const auto user = user_of_customer(*lease, customer))
+						ending = addresses_ending_of(*lease, *user, now);
+				}
+				end_addresses(ending);
+			}
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[billing] WARN sync %s: %s\n", loggable(customer).c_str(), e.what());
 		}
@@ -280,6 +291,43 @@ void BillingSync::forget_customer(db::Database &db, const std::string &stripe_cu
 	end_subscriptions_of_customer(db, stripe_customer_id, {}, "canceled");
 	delete_customer(db, stripe_customer_id);
 	tx.commit();
+}
+
+std::vector<BillingSync::AddressEnding> BillingSync::addresses_ending(const std::vector<SubscriptionRow> &rows,
+		int comp_own_machines, const std::set<std::string> &named, int64_t now) const {
+	std::vector<AddressEnding> out;
+	const int64_t dedicated = dedicated_machines(rows, comp_own_machines, now);
+	for (SubscriptionRow &row : addresses_to_end(rows, comp_own_machines, named, now)) {
+		if (row.livemode == config_.live()) out.push_back({ std::move(row), dedicated });
+	}
+	return out;
+}
+
+std::vector<BillingSync::AddressEnding> BillingSync::addresses_ending_of(db::Database &db, int64_t user_id,
+		int64_t now) const {
+	return addresses_ending(subscriptions_of(db, user_id), comp_grants_of(db, user_id).own_machines,
+			named_address_subscriptions(db, user_id), now);
+}
+
+void BillingSync::end_addresses(const std::vector<AddressEnding> &addresses) {
+	for (const AddressEnding &ending : addresses) {
+		const SubscriptionRow &row = ending.row;
+		const long long user = static_cast<long long>(row.user_id.value_or(0));
+		const std::string what = "static-address add-on " + loggable(row.stripe_subscription_id);
+		// One answer per subscription and period, however many syncs ask.
+		const std::string key = "opennova-" + instance_id_ + "-end-" + row.stripe_subscription_id + "-" +
+				std::to_string(row.current_period_end.value_or(0));
+		const StripeResult<Subscription> ended = client_.cancel_at_period_end(row.stripe_subscription_id, key);
+		if (!ended.ok()) {
+			std::fprintf(stderr, "[billing] WARN account %lld: its %s not set to cancel past its dedicated machines: %s\n",
+					user, what.c_str(), stripe_error_text(ended.error).c_str());
+			continue;
+		}
+		upsert_subscription(*pool_.acquire(), row_of(*ended.value, row.user_id));
+		std::printf("[billing] account %lld: its %s set to cancel at its period's end: past the account's %lld "
+					"dedicated machine%s\n",
+				user, what.c_str(), static_cast<long long>(ending.dedicated), ending.dedicated == 1 ? "" : "s");
+	}
 }
 
 SyncOutcome BillingSync::sync_customer(db::Database &db, const std::string &stripe_customer_id, int64_t now) {
@@ -589,6 +637,23 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 	// name every price ours sell.
 	if (whole && prices_ok && unknown_prices.empty() && on_reconciled_)
 		on_reconciled_(db);
+	// The static addresses past their accounts' dedicated machines end, judged
+	// from a listing read whole alone, and no connection held across the calls.
+	if (whole) {
+		const auto grants = comp_grants_by_account(db);
+		const auto named = named_address_subscriptions_by_account(db);
+		static const std::set<std::string> kNoneNamed;
+		std::vector<AddressEnding> ending;
+		for (const auto &[user_id, rows] : subscriptions_by_account(db)) {
+			const auto granted = grants.find(user_id);
+			const auto names = named.find(user_id);
+			for (AddressEnding &e : addresses_ending(rows, granted == grants.end() ? 0 : granted->second.own_machines,
+						 names == named.end() ? kNoneNamed : names->second, now))
+				ending.push_back(std::move(e));
+		}
+		held.reset();
+		end_addresses(ending);
+	}
 	return report;
 }
 

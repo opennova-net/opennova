@@ -1,12 +1,14 @@
 // What the pages show of static addresses (types/addresses.ts): a name's rule
 // and its check before the request, each state in plain words, the address
-// players join, and which addresses a new own-machine server may take.
+// players join, and which addresses a new server on a dedicated machine may
+// take.
 
 import type { Address, AddressState, ServerAddress } from '../types/addresses';
 import type { HostedServer } from '../types/hostedServer';
 
-// The game port an own machine's servers list at (its one slot, slot 0;
-// hosted/protocol/slots.h slot_game_port): a server JSON's address names no port.
+// The game port a dedicated machine's servers list at (its one slot, slot 0;
+// hosted/protocol/slots.h slot_game_port): a server JSON's address names no
+// port.
 export const ADDRESS_GAME_PORT = 32768;
 
 // hosted/model/address_names.h: 3 to 32 of lower-case letters, digits and '-', a
@@ -33,9 +35,9 @@ const STATE_LABELS: Record<AddressState, string> = {
   failed: 'Could not be set up',
 };
 
-// Why an address lapsed, from its own cause: an admin released it, or its
-// subscription stopped paying for it ('grant'; a comp address, an admin's
-// grant, has no subscription to end). '' before it lapsed.
+// Why an address lapsed, from its own cause: an admin released it, or what
+// paid for it stopped ('grant': its subscription, or for a comp address the
+// admin's grant that covered it). '' before it lapsed.
 function lapseClause(a: Pick<Address, 'source' | 'lapse_cause'>): string {
   if (a.lapse_cause === 'admin') return 'an admin released it';
   if (a.lapse_cause === 'grant') return a.source === 'comp' ? 'its grant ended' : 'its subscription ended';
@@ -81,8 +83,8 @@ export function serverAddressEndpoint(address: Pick<ServerAddress, 'public_ip'>)
   return address.public_ip ? `${address.public_ip}:${ADDRESS_GAME_PORT}` : '';
 }
 
-// The addresses a new own-machine server may run at: the ready ones no live
-// server uses.
+// The addresses a new server on a dedicated machine may run at: the ready
+// ones no live server uses.
 export function freeAddresses(addresses: readonly Address[]): Address[] {
   return addresses.filter((a) => a.state === 'ready' && a.server === null);
 }

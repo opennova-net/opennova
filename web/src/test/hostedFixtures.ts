@@ -106,32 +106,43 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
   };
 }
 
+// Tier 3's three servers on shared machines unless the overrides say
+// otherwise; the servers on shared machines are the ones max_servers holds
+// past the dedicated machines, unless named.
 export function entitlement(overrides: Partial<HostingEntitlement> = {}): HostingEntitlement {
+  const max = overrides.max_servers ?? 3;
+  const own = overrides.own_machines ?? 0;
   return {
-    max_servers: 3,
+    max_servers: max,
     used: 0,
-    own_machines: 0,
+    shared_servers: Math.max(0, max - own),
+    shared_used: 0,
+    own_machines: own,
     own_used: 0,
     can_start: true,
     source: 'tier',
+    tier: 3,
+    granted: false,
     ...overrides,
   };
 }
 
-// GET /api/me/servers, its entitlement's `used` counted from the live servers
-// unless the overrides name it.
+// GET /api/me/servers, its entitlement's `used`, `shared_used` and `own_used`
+// counted from the live servers unless the overrides name them.
 export function serversResponse(
   servers: HostedServer[],
   overrides: Partial<Omit<HostedServersResponse, 'entitlement'>> & { entitlement?: Partial<HostingEntitlement> } = {},
 ): HostedServersResponse {
   const { entitlement: e, ...rest } = overrides;
+  const live = servers.filter((s) => s.live);
+  const ownUsed = live.filter((s) => s.own_machine).length;
   return {
     enabled: true,
     full: false,
     data_sets: [JO, DFX2],
     servers,
     ...rest,
-    entitlement: entitlement({ used: servers.filter((s) => s.live).length, ...e }),
+    entitlement: entitlement({ used: live.length, shared_used: live.length - ownUsed, own_used: ownUsed, ...e }),
   };
 }
 

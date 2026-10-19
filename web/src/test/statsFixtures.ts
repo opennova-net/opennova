@@ -58,8 +58,8 @@ const MiB = 1024 * 1024;
 
 // A usage reply (GET /api/admin/hosted/usage) as the service answers it: a
 // shared machine with two servers (one running and reporting, one booting),
-// an own machine whose server's newest sample is too old, and a server placed
-// nowhere yet.
+// a dedicated machine whose server's newest sample is too old, and a server
+// placed nowhere yet.
 export function fleetUsageReply(): Record<string, unknown> {
   const usage = (over: Record<string, unknown> = {}) => ({
     reporting: 0,

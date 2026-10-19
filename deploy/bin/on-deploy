@@ -59,7 +59,7 @@
 #                [--static-address USD] [--yes]
 #                                 make what the deployment's Stripe mode lacks,
 #                                 idempotently: the products and monthly prices
-#                                 (the tiers' 5, 10 and 15 USD, the own
+#                                 (the tiers' 5, 10 and 15 USD, the dedicated
 #                                 machine's 45 and the static address's 5 by
 #                                 default; a flag's other amount makes a new
 #                                 price, the old one kept as grandfathered),

@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import UserDetailSection from './UserDetailSection.vue';
 import { addCompAddress } from '../../api/adminAddresses';
@@ -8,6 +8,7 @@ import { adminAddress } from '../../test/addressFixtures';
 import { user, userDetail, userEntry } from '../../test/adminFixtures';
 import { hostedServer } from '../../test/hostedFixtures';
 import { testRouter } from '../../test/router';
+import type { HostedServer } from '../../types/hostedServer';
 import type { SoldCapacity } from '../../types/users';
 
 vi.mock('../../api/users', () => ({
@@ -86,7 +87,7 @@ describe('UserDetailSection', () => {
     const hosting = wrapper.get('#user-hosting').element.parentElement!.textContent!;
     expect(hosting).toContain('2 hosted servers');
     expect(hosting).toContain('Tier 2');
-    expect(hosting).toContain('All on shared machines');
+    expect(hosting).toContain('2 on shared machines');
     expect(wrapper.findAll('a').filter((a) => a.attributes('href')?.startsWith('/admin/fleet/'))).toHaveLength(3);
     const customer = wrapper.findAll('a').find((a) => a.text() === 'cus_test_7');
     expect(customer?.attributes('href')).toBe('https://dashboard.stripe.com/test/customers/cus_test_7');
@@ -95,22 +96,37 @@ describe('UserDetailSection', () => {
     expect(wrapper.text()).not.toMatch(/can host|approve/i);
   });
 
-  it("says an own machine moves one of the grant's servers, adding none", async () => {
+  it("adds the grant's dedicated machines to its shared servers", async () => {
     const base = userDetail(7);
     detail.mockResolvedValue({
       ok: true,
       value: userDetail(7, {
-        entitlement: { ...base.entitlement, max_servers: 11, source: 'comp', comp_servers: 11, comp_own_machines: 2, own_machines: 2 },
+        user: user(7, { comp_servers: 9, comp_own_machines: 2, max_servers: 11 }),
+        entitlement: {
+          ...base.entitlement,
+          max_servers: 11,
+          shared_servers: 9,
+          source: 'comp',
+          tier: null,
+          tier_servers: 0,
+          comp_servers: 9,
+          comp_own_machines: 2,
+          own_machines: 2,
+        },
       }),
     });
     const { wrapper } = await mountSection();
     const hosting = wrapper.get('#user-hosting').element.parentElement!.textContent!;
     expect(hosting).toContain('11 hosted servers');
-    expect(hosting).toContain('9 on shared machines, 2 on own machines');
-    expect(wrapper.get('#user-comp-hint').text()).toContain('Own machines add no servers');
+    expect(hosting).toContain('Admin grant of 9 shared + 2 dedicated');
+    expect(hosting).toContain('9 on shared machines, 2 on dedicated machines');
+    expect(wrapper.get('label[for="user-comp-servers"]').text()).toBe('Shared servers');
+    expect(wrapper.get('label[for="user-comp-own"]').text()).toBe('Dedicated machines');
+    expect((wrapper.get('#user-comp-servers').element as HTMLInputElement).value).toBe('9');
+    expect(wrapper.get('#user-comp-hint').text()).toContain('each one more server on a machine of its own; the two add up');
   });
 
-  it('grants comp servers and own machines from 0 to 16, confirming a cut below what runs', async () => {
+  it('grants comp servers and dedicated machines from 0 to 16, confirming a cut below what runs', async () => {
     const { wrapper } = await mountSection();
     comp.mockResolvedValue({
       ok: true,
@@ -126,7 +142,9 @@ describe('UserDetailSection', () => {
     await flushPromises();
     expect(confirm).not.toHaveBeenCalled();
     expect(comp).toHaveBeenCalledWith(7, { servers: 3, own_machines: 1 });
-    expect(wrapper.get('[role="status"]').text()).toContain("grant is now 3 hosted servers and 1 own machine for its servers, free of charge");
+    expect(wrapper.get('[role="status"]').text()).toContain(
+      "grant is now 3 hosted servers on shared machines and 1 dedicated machine, free of charge",
+    );
 
     // A tier of 2 servers, 2 live: a grant of 0 stops none; the tier still covers them.
     comp.mockClear();
@@ -150,7 +168,7 @@ describe('UserDetailSection', () => {
     await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(wrapper.get('#user-oversold').text()).toBe(
-      'Admin grants and subscriptions exceed what the fleet sells: shared places 26 of 24, own machines 4 of 4, ' +
+      'Admin grants and subscriptions exceed what the fleet sells: shared places 26 of 24, dedicated machines 4 of 4, ' +
         'addresses 1 of 4. New subscriptions of those items are paused.',
     );
 
@@ -206,21 +224,119 @@ describe('UserDetailSection', () => {
     expect(wrapper.find('#user-comp-address').exists()).toBe(false);
   });
 
-  it('confirms a cut that stops servers', async () => {
+  // An account's page with an admin grant of `shared` servers on shared
+  // machines and `own` dedicated machines, and these servers.
+  function granted(shared: number, own: number, servers: HostedServer[]) {
+    return userDetail(7, {
+      user: user(7, { comp_servers: shared, comp_own_machines: own, max_servers: shared + own }),
+      entitlement: {
+        max_servers: shared + own,
+        shared_servers: shared,
+        source: shared > 0 ? 'comp' : 'none',
+        tier: null,
+        comp_servers: shared,
+        comp_own_machines: own,
+        tier_servers: 0,
+        own_machines: own,
+        can_start: true,
+      },
+      servers,
+    });
+  }
+
+  async function submitGrant(wrapper: VueWrapper, shared: number, own: number) {
+    await wrapper.get('#user-comp-servers').setValue(shared);
+    await wrapper.get('#user-comp-own').setValue(own);
+    await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+  }
+
+  it('confirms a cut of shared servers below the ones running there', async () => {
+    // A grant of 3 shared + 1 dedicated, all four live: the dedicated one is no part of the cut.
+    detail.mockResolvedValue({
+      ok: true,
+      value: granted(3, 1, [hostedServer(30, { own_machine: true }), hostedServer(31), hostedServer(32), hostedServer(33)]),
+    });
+    const { wrapper } = await mountSection();
+    confirm.mockReturnValueOnce(false);
+    await submitGrant(wrapper, 1, 1);
+    expect(confirm).toHaveBeenCalledWith(
+      "Lower player7's shared servers to 1? They run 3 on shared machines, so the service stops its 2 newest servers there: their matches end for everyone on them.",
+    );
+    expect(comp).not.toHaveBeenCalled();
+  });
+
+  it('confirms a cut of dedicated machines: their servers move into free shared servers, else stop', async () => {
+    // 3 shared + 2 dedicated, one shared server live: two shared servers free.
+    const servers = [hostedServer(31, { own_machine: true }), hostedServer(32, { own_machine: true }), hostedServer(33)];
+    detail.mockResolvedValue({ ok: true, value: granted(3, 2, servers) });
+    const { wrapper } = await mountSection();
+    confirm.mockReturnValue(false);
+    await submitGrant(wrapper, 3, 0);
+    expect(confirm).toHaveBeenLastCalledWith(
+      "Lower player7's dedicated machines to 0? Their 2 newest servers on dedicated machines move to a shared machine (their matches restart) while the fleet has room; the rest stop.",
+    );
+    await submitGrant(wrapper, 3, 1);
+    expect(confirm).toHaveBeenLastCalledWith(
+      "Lower player7's dedicated machines to 1? Their newest server on a dedicated machine moves to a shared machine (its match restarts) if the fleet has room; else it stops.",
+    );
+    // Down to one shared server too: the live one holds it, so none is free.
+    await submitGrant(wrapper, 1, 0);
+    expect(confirm).toHaveBeenLastCalledWith(
+      "Lower player7's dedicated machines to 0? Their 2 newest servers on dedicated machines stop: they have no shared server free for them to move to.",
+    );
+    // Two shared servers, one free: one moves, one stops.
+    await submitGrant(wrapper, 2, 0);
+    expect(confirm).toHaveBeenLastCalledWith(
+      "Lower player7's dedicated machines to 0? Of their 2 newest servers on dedicated machines, 1 moves to a shared machine " +
+        '(its match restarts) while the fleet has room, as many as their free shared servers; the rest stop.',
+    );
+    expect(comp).not.toHaveBeenCalled();
+
+    // Both pools cut at once: one confirm says both.
+    await submitGrant(wrapper, 0, 0);
+    const both = confirm.mock.lastCall![0] as string;
+    expect(both).toContain("Lower player7's shared servers to 0? They run 1 on shared machines, so the service stops its newest server there");
+    expect(both).toContain("Lower player7's dedicated machines to 0? Their 2 newest servers on dedicated machines stop");
+  });
+
+  it('confirms nothing for a cut the servers fit in, and takes it', async () => {
+    const servers = [hostedServer(31, { own_machine: true }), hostedServer(32, { own_machine: true }), hostedServer(33)];
+    detail.mockResolvedValue({ ok: true, value: granted(3, 2, servers) });
+    comp.mockResolvedValue({ ok: true, value: { user: user(7, { comp_servers: 1, comp_own_machines: 2, max_servers: 3 }), capacity: null } });
+    const { wrapper } = await mountSection();
+    await submitGrant(wrapper, 1, 2);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(comp).toHaveBeenCalledWith(7, { servers: 1, own_machines: 2 });
+  });
+
+  it('counts the dedicated machines it pays for beside the grant, no tier needed', async () => {
+    // One dedicated machine paid for and an admin's one more, no tier: both in use.
     detail.mockResolvedValue({
       ok: true,
       value: userDetail(7, {
-        user: user(7, { comp_servers: 3, max_servers: 3 }),
-        entitlement: { max_servers: 3, source: 'comp', tier: null, comp_servers: 3, comp_own_machines: 0, tier_servers: 0, own_machines: 0, can_start: true },
-        servers: [hostedServer(31), hostedServer(32), hostedServer(33)],
+        user: user(7, { comp_servers: 0, comp_own_machines: 1, max_servers: 2 }),
+        entitlement: {
+          max_servers: 2,
+          shared_servers: 0,
+          source: 'none',
+          tier: null,
+          comp_servers: 0,
+          comp_own_machines: 1,
+          tier_servers: 0,
+          own_machines: 2,
+          can_start: true,
+        },
+        servers: [hostedServer(31, { own_machine: true }), hostedServer(32, { own_machine: true })],
       }),
     });
     const { wrapper } = await mountSection();
     confirm.mockReturnValueOnce(false);
-    await wrapper.get('#user-comp-servers').setValue(1);
-    await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
-    await flushPromises();
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('stops its 2 newest servers'));
+    await submitGrant(wrapper, 0, 0);
+    // The paid one stays; with no shared server, the newer server stops.
+    expect(confirm).toHaveBeenCalledWith(
+      "Lower player7's dedicated machines to 1? Their newest server on a dedicated machine stops: they have no shared server free for it to move to.",
+    );
     expect(comp).not.toHaveBeenCalled();
   });
 
@@ -231,16 +347,24 @@ describe('UserDetailSection', () => {
       ok: true,
       value: userDetail(7, {
         user: user(7, { comp_servers: 3, max_servers: 3 }),
-        entitlement: { max_servers: 3, source: 'comp', tier: 1, comp_servers: 3, comp_own_machines: 0, tier_servers: 1, own_machines: 0, can_start: true },
+        entitlement: {
+          max_servers: 3,
+          shared_servers: 3,
+          source: 'comp',
+          tier: 1,
+          comp_servers: 3,
+          comp_own_machines: 0,
+          tier_servers: 1,
+          own_machines: 0,
+          can_start: true,
+        },
         servers: [hostedServer(31), hostedServer(32), hostedServer(33, { state: 'stopping' })],
       }),
     });
     const { wrapper } = await mountSection();
     confirm.mockReturnValueOnce(false);
-    await wrapper.get('#user-comp-servers').setValue(0);
-    await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
-    await flushPromises();
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('They run 2 servers live, so the service stops its newest server'));
+    await submitGrant(wrapper, 0, 0);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('They run 2 on shared machines, so the service stops its newest server there'));
     expect(comp).not.toHaveBeenCalled();
   });
 
@@ -256,13 +380,14 @@ describe('UserDetailSection', () => {
     expect(wrapper.get('[role="status"]').text()).toBe('player7 is now an admin.');
   });
 
-  it('refuses to delete while a tier grants, in words', async () => {
+  it('refuses to delete while a subscription grants, in words', async () => {
     remove.mockResolvedValue({
       ok: false,
       error: {
         code: 'active_subscription',
         status: 409,
-        message: 'This account has a support tier that still grants hosting. Cancel it in Stripe first; the account can be deleted once it ends.',
+        message:
+          'This account has a subscription that still grants (a support tier, a dedicated machine or a static address). Cancel it in Stripe first; the account can be deleted once its subscriptions end.',
       },
     });
     const { wrapper, router } = await mountSection();
@@ -270,7 +395,8 @@ describe('UserDetailSection', () => {
     await button.trigger('click');
     await flushPromises();
     expect(remove).toHaveBeenCalledWith(7);
-    expect(wrapper.get('[role="alert"]').text()).toContain('support tier that still grants hosting');
+    expect(wrapper.text()).toContain('cannot be deleted until its subscriptions end, nor while a checkout of it is open');
+    expect(wrapper.get('[role="alert"]').text()).toContain('a subscription that still grants');
     expect(router.currentRoute.value.path).toBe('/admin/users/7');
 
     remove.mockResolvedValue({ ok: true, value: undefined });

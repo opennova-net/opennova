@@ -1,13 +1,14 @@
 #pragma once
 
 // The owners' limits' hold (supervisor.h, "The owners' limits"): set by the
-// supervisor when one pass would stop the servers of more owners than it ever
-// should at once (the billing cache in doubt). It releases itself once a full
-// reconcile with Stripe has completed clean after it took its owners and a pass
-// after that finds only those owners (or some of them) still past their
-// entitlements: the cache is confirmed, and their stops apply. An admin's
-// override (POST /api/admin/billing/reconcile {"force_limits": true}) makes the
-// next pass apply the stops past the brake, once.
+// supervisor when one pass would stop (or move off their dedicated machines) the
+// servers of more owners than it ever should at once (the billing cache in
+// doubt). It releases itself once a full reconcile with Stripe has completed
+// clean after it took its owners and a pass after that finds only those owners
+// (or some of them) still past their entitlements: the cache is confirmed, and
+// their stops and moves apply. An admin's override (POST
+// /api/admin/billing/reconcile {"force_limits": true}) makes the next pass
+// apply them past the brake, once.
 //
 // One row (hosted_limits_hold, migration 0008), so the supervisor (the
 // fleet's), the billing sync's reconcile (a worker's) and the admin's

@@ -1,14 +1,15 @@
 #pragma once
 
 // An account's hosting entitlement: how many hosted servers it may have live
-// at once (max_servers = the larger of its support tier's servers and an
-// admin's comp grant of servers, comp_grants), how many of them may run on an
-// own machine (the own-machine add-on's quantity, counted only while a tier
-// also grants, plus an admin's comp grant of own machines, counted while the
-// account has servers), and whether a new one may start now. Computed from the
-// billing tables (billing_repository.h), the cache of Stripe the sync worker
-// keeps, whether or not billing is configured, so a deploy that breaks billing
-// never stops a payer's servers. Crow-free. Service policy, not a port.
+// at once, in two pools: on shared machines (shared_servers = the larger of
+// its support tier's servers and an admin's comp grant of servers,
+// comp_grants) and each on a dedicated machine of its own (own_machines = the
+// dedicated-machine subscriptions' quantities, which need no tier, plus an
+// admin's comp grant of dedicated machines), max_servers the two together; and
+// whether a new one may start now. Computed from the billing tables
+// (billing_repository.h), the cache of Stripe the sync worker keeps, whether
+// or not billing is configured, so a deploy that breaks billing never stops a
+// payer's servers. Crow-free. Service policy, not a port.
 //
 // A subscription grants while Stripe calls it active, trialing or past_due
 // (Stripe still retries the card: the servers stay up, but no new one starts),
@@ -25,6 +26,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,9 +37,11 @@ namespace opennova::novaworld_server::billing {
 inline constexpr int64_t kPeriodNetSeconds = 48 * 60 * 60;
 
 struct Entitlement {
-	int max_servers = 0;   // max(comp_servers, the granting tier's servers); 0 locks hosting
-	// The granting add-on quantities while a tier grants, plus
-	// comp_own_machines while max_servers > 0.
+	int max_servers = 0;    // shared_servers + own_machines; 0 locks hosting
+	int shared_servers = 0; // max(comp_servers, the granting tier's servers)
+	// Its dedicated machines, each one more server on a machine of its own:
+	// the granting dedicated-machine subscriptions' quantities, a tier or not,
+	// plus comp_own_machines.
 	int own_machines = 0;
 	bool can_start = false; // max_servers > 0 and no granting subscription past_due
 	// The admin's grants (comp_grants; also on an account that gets nothing).
@@ -45,7 +49,7 @@ struct Entitlement {
 	int comp_own_machines = 0;
 	// Its static addresses: the granting static-address subscriptions'
 	// quantities plus the admin's comp addresses (address_grants, each one
-	// the cloud holds), and of them the ones its own machines can use
+	// the cloud holds), and of them the ones its dedicated machines can use
 	// (static_addresses, at most own_machines).
 	int address_grants = 0;
 	int static_addresses = 0;
@@ -54,7 +58,9 @@ struct Entitlement {
 	// The tier subscription the account's page shows: the granting one of the
 	// highest tier, else the newest one; "" with none.
 	std::string status;
-	std::string source = "none"; // "none", "tier" (the tier gives at least the grant) or "comp"
+	// Where its shared servers come from: "none", "tier" (the tier gives at
+	// least the grant) or "comp".
+	std::string source = "none";
 	std::optional<int64_t> current_period_end; // that subscription's, Unix seconds
 	bool cancel_at_period_end = false;
 };
@@ -66,14 +72,14 @@ struct AccountFacts {
 	int comp_servers = 0;                  // comp_grants' servers
 	int comp_own_machines = 0;             // comp_grants' own_machine
 	// Its comp addresses that count (allocating or ready;
-	// hosted/model/address_repository.h count_comp_addresses_of).
+	// billing_repository.h comp_addresses_of).
 	int comp_addresses = 0;
 };
 
 // Whether Stripe's `status` is one that grants (active, trialing, past_due).
 bool status_grants(std::string_view status);
 // Whether the subscription grants at `now` (Unix seconds): a granting status,
-// a tier (1..3) or an add-on (an own machine, a static address), and now <
+// a tier (1..3), a dedicated machine or a static address, and now <
 // current_period_end + kPeriodNetSeconds (no period end: no grant).
 bool subscription_grants(const SubscriptionRow &row, int64_t now);
 
@@ -83,10 +89,30 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 // The account's, read from the database (no such account: 0 servers).
 Entitlement entitlement_of(db::Database &db, int64_t user_id, int64_t now);
 
-// Whether an admin grants the account anything (servers, own machines or a
-// static address): its hosting is then that grant, and it buys no support tier
-// or add-on beside it (the checkout refuses one).
+// Whether an admin grants the account anything (shared servers, dedicated
+// machines or a static address): its hosting is then that grant, and it buys no
+// support tier, dedicated machine or static address beside it (the checkout
+// refuses one).
 bool admin_granted(const Entitlement &e);
+
+// The dedicated machines of `subscriptions` granting at `now` (their
+// quantities, a tier or not) plus an admin's `comp_own_machines` (0..16): the
+// entitlement's own_machines before its account's checks.
+int64_t dedicated_machines(const std::vector<SubscriptionRow> &subscriptions, int comp_own_machines, int64_t now);
+
+// The static addresses to end: of an account's `subscriptions`, the
+// static-address ones Stripe still renews (granting at `now`, no cancel at the
+// period's end) past its dedicated machines (dedicated_machines with
+// `comp_own_machines`): an address is its dedicated machine's, and one past
+// them carries nothing, so the billing sync sets each to cancel at its
+// period's end (billing_sync.h). The unnamed ones go first (none of `named`,
+// the subscriptions an address allocating or ready was named for), then the
+// named, each newest first (`subscriptions` come so). None while a
+// subscription that would grant sells a price no list names (it may be a
+// dedicated machine the configuration misses). A dedicated machine never ends
+// for a support tier's end: it needs none.
+std::vector<SubscriptionRow> addresses_to_end(const std::vector<SubscriptionRow> &subscriptions, int comp_own_machines,
+		const std::set<std::string> &named, int64_t now);
 
 // The wall clock in Unix seconds (the entitlement's `now` in the service).
 int64_t unix_now();

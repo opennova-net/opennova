@@ -2,6 +2,7 @@
 // apps/novaworld_web/hosted/hosted_routes.cpp, README "Hosted servers").
 
 import type { ServerAddress } from './addresses';
+import type { TierNumber } from './billing';
 
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
 // stopped | failed. A crash restart goes back to provisioning, and a stop takes
@@ -48,9 +49,9 @@ export interface HostedSettings {
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
 
 // POST /api/me/servers's body: the settings, whether the server runs on one
-// of the account's own machines (the own-machine add-on) rather than a shared
-// one, and on an own machine the static address it runs at (one of the
-// account's ready ones; absent or null for none).
+// of the account's dedicated machines rather than a shared one, and on a
+// dedicated machine the static address it runs at (one of the account's
+// ready ones; absent or null for none).
 export type StartRequest = StartSettings & { own_machine?: boolean; address_id?: number | null };
 
 // The whole-number settings, each with its range per data set.
@@ -210,9 +211,9 @@ export interface HostedServer {
   state: HostedState;
   // Any state but stopped and failed.
   live: boolean;
-  // It runs on a machine of its own (the own-machine add-on), not a shared one.
+  // It runs on a machine of its own (a dedicated machine), not a shared one.
   own_machine: boolean;
-  // The static address it runs at (an own machine's), or null.
+  // The static address it runs at (a dedicated machine's), or null.
   address: ServerAddress | null;
   settings: HostedSettings;
   // The names the service gives the server's game and expansion ("Joint
@@ -250,26 +251,38 @@ export interface HostedServer {
   events?: HostedEvent[];
 }
 
-// Where an account's hosting entitlement comes from: nothing, its support
-// tier, or an admin's comp grant.
+// Where an account's servers on shared machines come from: nothing, its
+// support tier, or an admin's comp grant.
 export type EntitlementSource = 'none' | 'tier' | 'comp';
 
-// The account's hosting entitlement, as GET /api/me/servers counts it.
+// The account's hosting entitlement, as GET /api/me/servers counts it: its
+// servers on shared machines (its tier's or an admin's grant, the larger) and
+// its dedicated machines, one more server each.
 export interface HostingEntitlement {
-  // How many hosted servers the account may have live at once; 0 locks
-  // hosting.
+  // How many hosted servers the account may have live at once, the two
+  // together; 0 locks hosting.
   max_servers: number;
   // How many it has live now, stopping ones included (a stopping server holds
   // its place until it has stopped).
   used: number;
-  // The own-machine add-ons it holds, and how many of its live servers run on
-  // one.
+  // The servers it may run on shared machines, and how many of its live
+  // servers run on one.
+  shared_servers: number;
+  shared_used: number;
+  // The dedicated machines it holds (no tier needed), and how many of its
+  // live servers run on one.
   own_machines: number;
   own_used: number;
-  // Whether a new server may start: false while the support tier's payment is
-  // past due (the live ones keep running).
+  // Whether a new server may start: false while a payment of the account's (a
+  // tier's or a dedicated machine's) is past due (the live ones keep running).
   can_start: boolean;
+  // Where the servers on shared machines come from.
   source: EntitlementSource;
+  // Its granting support tier, null for none.
+  tier: TierNumber | null;
+  // An admin grants the account hosting: it buys no support tier, dedicated
+  // machine or static address, so the pages offer none.
+  granted: boolean;
 }
 
 // GET /api/me/servers.
@@ -277,8 +290,10 @@ export interface HostedServersResponse {
   // The service runs hosted servers (it has a fleet and offers at least one
   // data set).
   enabled: boolean;
-  // Every hosted server place on the service is taken: a start now would be
-  // refused (at_capacity).
+  // No hosted server place the account could take is free: the service's cap
+  // is reached, or no pool the account has a free place in (shared machines,
+  // dedicated machines) has room in the fleet. A start now would be refused
+  // (at_capacity).
   full: boolean;
   entitlement: HostingEntitlement;
   // The data sets a start may pick, in the service's order (the first is a
@@ -295,15 +310,16 @@ export interface HostedServerReply {
 }
 
 // The owner named in the fleet view, with their support tier (null for
-// none: a comp grant, or no entitlement left).
+// none) and whether an admin grants them hosting (both may hold).
 export interface FleetOwner {
   id: number;
   username: string;
   tier: 1 | 2 | 3 | null;
+  granted: boolean;
 }
 
-// A machine's kind: a shared machine packs several servers, an own machine
-// runs exactly one (the own-machine add-on).
+// A machine's kind: a shared machine packs several servers, a dedicated
+// machine runs exactly one, its owner's.
 export type MachineKind = 'shared' | 'own';
 
 // launching -> booting -> ready -> draining -> ending -> ended | failed; lost
@@ -384,7 +400,7 @@ export interface FleetMachine {
   // Its agent's image or its machine's differs from the release's; null when
   // that is not known.
   outdated: boolean | null;
-  // The static address it carries (an own machine's), or null.
+  // The static address it carries (a dedicated machine's), or null.
   address: { id: number; name: string } | null;
   // Its slots that hold a server, one each (slots_used of them); whatever the
   // fleet list shows.

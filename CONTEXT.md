@@ -557,17 +557,19 @@ _Avoid_ (for this product only; the words keep their meanings elsewhere): hosted
 game host, instance, dedicated server
 
 **Support tier**:
-The monthly Stripe subscription that supports the project and sets an account's
-**hosting entitlement**: tier 1, 2 or 3, one, two or three **hosted servers**
-(`apps/novaworld_common/billing/`). Its prices come from the service's configuration,
-never from code. The own-machine add-on is a subscription of its own beside it.
+The monthly Stripe subscription that supports the project and sets an account's shared servers
+in its **hosting entitlement**: tier 1, 2 or 3, one, two or three **hosted servers** on **shared
+machines** (`apps/novaworld_common/billing/`). Its prices come from the service's configuration,
+never from code. A **dedicated machine** is no part of it: a product of its own, which needs no
+tier and adds to one.
 _Avoid_: plan, package, premium, donation, membership
 
 **Hosting entitlement**:
-How many **hosted servers** an account may have live at once: the larger of its **support tier**'s
-servers and an admin's comp grant of servers, plus how many may run on an own machine (the add-on's
-quantity while a tier grants, and an admin's comp grant of own machines while the account has
-servers), and its **static addresses**. A past-due tier keeps the servers but starts no new one.
+How many **hosted servers** an account may have live at once, in two pools: its shared servers, on
+**shared machines** (the larger of its **support tier**'s servers and an admin's comp grant of
+servers), and its **dedicated machines** (each paid one, no tier needed, and an admin's comp grant
+of them), the two added together (tier 2 and two dedicated machines: four servers); and its
+**static addresses**. A past-due subscription keeps the servers but starts no new one.
 Read from the service's cache of Stripe, whether or not billing is configured
 (`billing/entitlement.h`). What every account's entitlement holds is what the service has sold,
 and no new subscription is sold past what the fleet holds (`hosted/model/sold_capacity.h`).
@@ -577,7 +579,7 @@ _Avoid_: quota, allowance (in code; the site's meter may say "N of M servers use
 **Machine**:
 A virtual machine **hosted servers** run on, each in a **slot** of its own (an EC2 instance on
 the deployment's pinned ECS-optimized image, a container instance of the fleet cluster, ADR
-0053; in the local stack, a container of the hostd image): a **shared machine** or an **own
+0053; in the local stack, a container of the hostd image): a **shared machine** or a **dedicated
 machine**. The service launches it, places servers on it and ends it; **opennova-hostd** runs its
 containers (docker's, never ECS tasks). Never "host": that word is the authoritative session side alone.
 _Avoid_: host, server (for the VM), box, node, pod; "instance" alone (say "EC2 instance"
@@ -587,23 +589,29 @@ when naming the AWS resource)
 A **machine** that packs up to K **hosted servers** of any account (`ONNET_FLEET_SHARED_SLOTS`,
 the var-file's `shared_slots`: 6 on the default `t3a.medium`), one per **slot**; servers go to
 the fullest one with a free slot, and one with no server left ends after a while. At most
-`fleet_max_shared` run at once, so with the **own machines** (`fleet_max_own`) they cap the
+`fleet_max_shared` run at once, so with the **dedicated machines** (`fleet_max_own`) they cap the
 hosted servers at `fleet_max_shared` x `shared_slots` + `fleet_max_own` (`ONNET_HOSTED_CAP`:
 14 at the defaults).
 _Avoid_: pool, pod, cluster node
 
-**Own machine**:
-A **machine** that runs exactly one **hosted server**, its owner's, with the own-machine
-add-on (a paid monthly subscription beside the **support tier**): launched for that server,
-reserved for it (one slot, slot 0), and ended when it stops.
-_Avoid_: dedicated machine, dedicated server (retail's Serve Only term), private host
+**Dedicated machine**:
+A **machine** that runs exactly one **hosted server**, its owner's, and the product that pays for
+it: a monthly subscription of its own (no **support tier** needed; each one more server, beside a
+tier's or alone), or an admin's comp grant. It is launched for that server, reserved for it (one
+slot, slot 0), and ended when it stops, or when the server moves to a **shared machine** because
+its owner has fewer dedicated machines now (its match restarts there while its owner has a shared
+server free and the fleet has room; else it stops). Code, the API and the database keep the name
+`own_machine`.
+_Avoid_: own machine, dedicated server (retail's Serve Only term; a hosted server is never one),
+private host
 
 **Static address**:
-An **own machine**'s fixed public IPv4 with a name in the deployment's play zone
-(`<name>.play.opennova.net`), which its owner keeps for the own-machine servers it starts, so a
-server lists at the same address and port on every start (ADR 0066,
+A **dedicated machine**'s fixed public IPv4 with a name in the deployment's play zone
+(`<name>.play.opennova.net`), which its owner keeps for the servers it starts on dedicated
+machines, so a server lists at the same address and port on every start (ADR 0066,
 `apps/novaworld_common/hosted/model/address_repository.h`). Each is a monthly add-on of its own (or an
-admin's comp address), at most one per own machine; on EC2 it is an Elastic IP.
+admin's comp address, which lapses once nothing covers it), at most one per dedicated machine: a
+paid one past them is set to cancel at its period's end. On EC2 it is an Elastic IP.
 _Avoid_: Elastic IP (but naming the AWS resource), dedicated IP, fixed IP, vanity address
 
 **Slot**:

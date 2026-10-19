@@ -92,7 +92,7 @@ export function retryAddress(id: number): Promise<AdminResult<AdminAddress>> {
 }
 
 // POST /api/admin/users/<id>/addresses {"name"}: an admin's comp address for
-// the account (201), at most one for each of its own machines; 409
+// the account (201), at most one for each of its dedicated machines; 409
 // address_limit past them, 503 addresses_disabled when the service sells
 // none.
 export function addCompAddress(userId: number, name: string): Promise<AdminResult<AdminAddress>> {

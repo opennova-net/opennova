@@ -90,7 +90,7 @@ struct Subscription {
 	bool customer_deleted = false;
 
 	// The first item's price and period end ("" / 0 when it has no item): a
-	// tier or own-machine subscription carries one item.
+	// tier or dedicated-machine subscription carries one item.
 	std::string first_price_id() const;
 	int64_t first_period_end() const;
 	int64_t first_quantity() const;
@@ -177,6 +177,10 @@ public:
 	StripeResult<SubscriptionPage> list_subscriptions(const SubscriptionQuery &query);
 	StripeResult<Subscription> get_subscription(const std::string &id, bool expand_customer = false);
 	StripeResult<Subscription> update_subscription_metadata(const std::string &id, const Metadata &metadata);
+	// The subscription set to cancel at its period's end (cancel_at_period_end:
+	// it renews no more, and grants until then), under the caller's
+	// idempotency key.
+	StripeResult<Subscription> cancel_at_period_end(const std::string &id, const std::string &idempotency_key);
 
 	StripeResult<Price> get_price(const std::string &id);
 
