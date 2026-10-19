@@ -1,7 +1,7 @@
 // The GP writer: a threedi_gp::File serialized in the order BHD's loader reads it, the inverse
 // of parse() (threedi_gp_read.cpp) section by section. Every count and size is the struct's;
-// a word the loader skips is written as BHD's own model tool writes it [orig: sub_4488F0, the
-// GP save, and its section writers (df4oed)]. threedi_gp_lower.h makes the File from a 3DI3.
+// a word the loader skips is written as BHD's own model tool writes it [orig: GP_WriteModel, the
+// GP save, and its section writers (df4oed.exe)]. threedi_gp_lower.h makes the File from a 3DI3.
 #pragma once
 
 #include <cstdint>

@@ -74,7 +74,7 @@ int cmd_gp(const char *in_path, const char *out_path) {
 	}
 	opennova::threedi_gp::LowerOptions options;
 	// The model is named after the file it is written to, up to its extension and at most 15
-	// characters [orig: GP_WriteModel @ 0x448A94..0x448AD1 (df4oed)].
+	// characters [orig: GP_WriteModel @ 0x448A94..0x448AD1 (df4oed.exe)].
 	options.name = opennova::io::utf8_path(opennova::io::os_path(out_path).stem()).substr(0, 15);
 	const fs::path folders[2] = {in.parent_path(), opennova::io::os_path(out_path).parent_path()};
 	options.texture_size = [&](const std::string &name, uint16_t &w, uint16_t &h) {

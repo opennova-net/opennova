@@ -1,7 +1,7 @@
 // The 3DI3 to GP lowering (threedi_gp_lower.h): threedi_gp_migrate.cpp's map run backwards,
 // section by section, each 3DI3 word turned into the GP word the migration reads it from. The
-// words the migration drops take what BHD's model tool writes [orig: sub_4488F0, the GP save
-// (df4oed)]; docs/threedi/3di-gp-format-re.md, "3DI3 to GP", is the map.
+// words the migration drops take what BHD's model tool writes [orig: GP_WriteModel, the GP save
+// (df4oed.exe)]; docs/threedi/3di-gp-format-re.md, "3DI3 to GP", is the map.
 
 #include <formats/threedi_gp/threedi_gp_lower.h>
 
@@ -49,9 +49,9 @@ std::string field(const char *s, size_t cap) {
 }
 
 // A LOD's render tag. The tool packs the tag's four characters into one dword, first character
-// highest [orig: GP_WriteModel @ 0x448C38 (df4oed)], so "gnrc" is stored as the bytes "crng" both
-// engines search their packed table for; a migrated 3DI3 already holds the stored bytes and keeps
-// them. The readable tags are the ones BHD's corpus ships.
+// highest [orig: GP_WriteModel @ 0x448C38 (df4oed.exe)], so "gnrc" is stored as the bytes
+// "crng" both engines search their packed table for; a migrated 3DI3 already holds the stored
+// bytes and keeps them. The readable tags are the ones BHD's corpus ships.
 uint32_t render_tag(const char model_type[5]) {
 	static const char *const kTags[] = {"gnrc", "bldg", "door", "veh0", "org0", "tree", "cpln", "ewpn"};
 	const uint8_t *b = reinterpret_cast<const uint8_t *>(model_type);
@@ -140,10 +140,10 @@ struct MaterialLower {
 	bool &team_used;
 
 	// A texture row by name, one a spelling: the tool folds case [orig: sub_443080
-	// @ 0x44311F..0x4431E4 (df4oed)], but BHD ships rows a case apart (Jglow.tga, jglow.tga) and
-	// the 3DI3 keeps each, so each keeps its row. A colour row's flags are the material's 0x200
-	// and 7 [orig: sub_4484E0 @ 0x448506, @ 0x448570 (df4oed)]; the loader tests only 0x8 and
-	// 0x100 [orig: @ 0x516070..0x516091 (dfbhd)].
+	// @ 0x44311F..0x4431E4 (df4oed.exe)], but BHD ships rows a case apart (Jglow.tga, jglow.tga)
+	// and the 3DI3 keeps each, so each keeps its row. A colour row's flags are the material's
+	// 0x200 and 7 [orig: sub_4484E0 @ 0x448506, @ 0x448570 (df4oed.exe)]; the loader tests only
+	// 0x8 and 0x100 [orig: @ 0x516070..0x516091 (dfbhd)].
 	int texture(const std::string &name) {
 		if (name.empty()) return -1;
 		for (const TextureRow &r : rows)
@@ -225,7 +225,7 @@ struct MaterialLower {
 		Material base;
 		// The record is named after its texture, as BHD's corpus names most of them; no reader.
 		base.name = diffuse[0].substr(0, 15);
-		// [orig: GP_WriteRenderModel @ 0x4478F8..0x447A41 (df4oed): the attribute bits]
+		// [orig: GP_WriteRenderModel @ 0x4478F8..0x447A41 (df4oed.exe): the attribute bits]
 		base.attributes = ((m.material_flags & THREEDI_MATERIAL_FLAG_TWO_SIDED) ? kMaterialTwoSided : 0u) |
 				(test ? ((m.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) ? kMaterialAlphaTestInv : kMaterialAlphaTest) : 0u) |
 				(t.lum ? kMaterialUnlit : 0u) | (t.bump ? kMaterialBump : 0u) | (frames > 1 ? kMaterialFlipbook : 0u) |
@@ -339,7 +339,8 @@ void collision(const ThreediCollisionModel *c, Collision &out) {
 		o.box = interleave(s.min, s.max);
 		o.radius = s.radius;
 		// The xy radius about the box's centre over the section's vertices, and the box's
-		// height, as the tool derives them [orig: GP_WriteCollision @ 0x4446FE..0x4449ED (df4oed)].
+		// height, as the tool derives them [orig: GP_WriteCollision @ 0x4446FE..0x4449ED
+		// (df4oed.exe)].
 		const double cx = (static_cast<double>(s.min[0]) + s.max[0]) * 0.5;
 		const double cy = (static_cast<double>(s.min[1]) + s.max[1]) * 0.5;
 		double rxy = 0.0;
@@ -371,7 +372,7 @@ void collision(const ThreediCollisionModel *c, Collision &out) {
 		o.box = interleave(vmn, vmx);
 		o.plane_count = v.plane_count;
 		// The group the tool stores and no dfbhd reader takes: the box's centre, half extents
-		// and the radii over them [orig: GP_WriteCollision @ 0x444D44..0x444DDE (df4oed)].
+		// and the radii over them [orig: GP_WriteCollision @ 0x444D44..0x444DDE (df4oed.exe)].
 		double h[3];
 		for (int k = 0; k < 3; ++k) {
 			o.centre[static_cast<size_t>(k)] = static_cast<int32_t>((static_cast<int64_t>(vmn[k]) + vmx[k]) / 2);
@@ -449,7 +450,7 @@ bool lower(const Threedi3di3 &model, File &out, std::vector<MigrateNote> &note_l
 	}
 	Header &h = out.header;
 	h.kind = Kind::Gpm;
-	h.revision = kMaxRevision; // [orig: GP_WriteModel @ 0x448B9A (df4oed)]
+	h.revision = kMaxRevision; // [orig: GP_WriteModel @ 0x448B9A (df4oed.exe)]
 	h.name = options.name.empty() ? field(model.header.name, sizeof(model.header.name)) : options.name;
 	if (h.name.size() > 15) {
 		error = "the model's name is longer than 15 characters: " + h.name;
@@ -500,7 +501,7 @@ bool lower(const Threedi3di3 &model, File &out, std::vector<MigrateNote> &note_l
 			// The stream holds S and T, BHD's shaders taking (S, -T, N) [the migration's rule].
 			frames.push_back({v.tangent[0], v.tangent[1], v.tangent[2], -v.bitangent[0], -v.bitangent[1], -v.bitangent[2]});
 		}
-		// The collision block's translations, as floats [orig: GP_WriteRenderModel @ 0x4470D5..0x44712C (df4oed)].
+		// The collision block's translations, as floats [orig: GP_WriteRenderModel @ 0x4470D5..0x44712C (df4oed.exe)].
 		for (const auto &t : out.collision.translations)
 			rm.attach_points.push_back({t[0] / 65536.0f, t[1] / 65536.0f, t[2] / 65536.0f});
 		std::vector<int> slot_of(model.material_count, -1); // MTRL index -> this LOD's first record
@@ -517,7 +518,7 @@ bool lower(const Threedi3di3 &model, File &out, std::vector<MigrateNote> &note_l
 			}
 			// rel, which no BHD reader takes, as the tool computes it: its pivot record holds the
 			// model's (z, -x, y), and it subtracts the parent's record one word along [orig:
-			// GP_WriteRenderModel @ 0x447190..0x4471E7 (df4oed)].
+			// GP_WriteRenderModel @ 0x447190..0x4471E7 (df4oed.exe)].
 			p.rel = {-(ro.abs[2] + q[0]), -ro.abs[0] - q[1], ro.abs[1] - q[2]};
 			p.radius = fp16(ro.bounding_radius);
 			rm.parts.push_back(p);
@@ -659,7 +660,7 @@ bool lower(const Threedi3di3 &model, File &out, std::vector<MigrateNote> &note_l
 	// Past what BHD ships: its largest rigid models hold 26,305 vertices (HN_Bld1, all LODs) and
 	// 11,600 LOD 0 triangles (RE_Bsmt), its largest first-person guns 4,182 (G36_1st) and 3,323
 	// (m60_1st). Nothing in the tool caps a GP model's counts (its vertex tables grow on the
-	// heap [orig: sub_442430, sub_4424F0 (df4oed)]), so a larger one is noted, not refused.
+	// heap [orig: sub_442430, sub_4424F0 (df4oed.exe)]), so a larger one is noted, not refused.
 	size_t triangles = 0;
 	for (const Primitive &p : out.lods[0].primitives)
 		triangles += p.topology == 1 ? (p.indices.size() >= 3 ? p.indices.size() - 2 : 0) : p.indices.size() / 3;

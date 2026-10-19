@@ -265,7 +265,7 @@ int synthetic_write() {
 		TEST_EXPECT(gp::parse(written.data(), written.size(), file, error));
 		TEST_EXPECT(written.size() == bytes.size());
 		// The vertex colour the loader drops, 0xFF000000 from the tool [orig: GP_WriteModel
-		// @ 0x4490EF..0x449238 (df4oed)].
+		// @ 0x4490EF..0x449238 (df4oed.exe)].
 		const size_t first_vertex = gp::kHeaderSize + file.user_points.size() * 48 + 4 + file.textures.size() * 60 + 0x88 +
 				file.collision.vertices.size() * 8 + file.collision.normals.size() * 8 + file.collision.faces.size() * 44 +
 				file.collision.sections.size() * 128 + file.collision.translations.size() * 12 +
