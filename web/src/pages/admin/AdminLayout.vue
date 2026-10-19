@@ -84,6 +84,7 @@ const sections: AdminSection[] = [
   { to: '/admin/data-sets', label: 'Game data' },
   { to: '/admin/usage', label: 'Server usage' },
   { to: '/admin/billing', label: 'Billing' },
+  { to: '/admin/costs', label: 'AWS costs' },
   { to: '/admin/service', label: 'NovaWorld service' },
   { to: '/admin/sessions', label: 'NovaWorld sessions' },
   { to: '/admin/jobs', label: 'Background jobs' },

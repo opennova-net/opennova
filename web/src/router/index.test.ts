@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import router from './index';
 import AddressesPage from '../pages/account/AddressesPage.vue';
 import AddressesSection from '../pages/admin/AddressesSection.vue';
+import CostsSection from '../pages/admin/CostsSection.vue';
 import LobbyServerPage from '../pages/LobbyServerPage.vue';
 import MachineDetailSection from '../pages/admin/MachineDetailSection.vue';
 import InfraResourceSection from '../pages/admin/InfraResourceSection.vue';
@@ -18,6 +19,7 @@ describe('router', () => {
     // The billing portal's cancel flow for an address returns here.
     ['/me/addresses', AddressesPage],
     ['/admin/addresses', AddressesSection],
+    ['/admin/costs', CostsSection],
     ['/admin/fleet/machines/3', MachineDetailSection],
     ['/admin/fleet/12/usage', ServerUsageTab],
     ['/admin/fleet/12/logs', ServerLogsTab],

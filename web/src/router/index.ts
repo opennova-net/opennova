@@ -33,6 +33,7 @@ import FleetSection from '../pages/admin/FleetSection.vue';
 import MachineDetailSection from '../pages/admin/MachineDetailSection.vue';
 import UsageSection from '../pages/admin/UsageSection.vue';
 import BillingSection from '../pages/admin/BillingSection.vue';
+import CostsSection from '../pages/admin/CostsSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
 import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
 import JobsSection from '../pages/admin/JobsSection.vue';
@@ -124,6 +125,7 @@ const router = createRouter({
         },
         { path: 'usage', component: UsageSection, meta: { title: 'Admin: Server usage' } },
         { path: 'billing', component: BillingSection, meta: { title: 'Admin: Billing' } },
+        { path: 'costs', component: CostsSection, meta: { title: 'Admin: AWS costs' } },
         { path: 'service', component: ServerStatusSection, meta: { title: 'Admin: NovaWorld service' } },
         { path: 'sessions', component: ConnectionsSection, meta: { title: 'Admin: NovaWorld sessions' } },
         { path: 'jobs', component: JobsSection, meta: { title: 'Admin: Background jobs' } },
