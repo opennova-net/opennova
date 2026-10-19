@@ -319,6 +319,49 @@ describe('SupportTierPage', () => {
     );
   });
 
+  it("warns while an add-on's payment is past due, the tier's paid", async () => {
+    mine.mockResolvedValue({
+      ok: true,
+      value: subscribed(2, { can_start: false, own_machines: 1, own_machine_subscription: { ...ownMachine, status: 'past_due' } }),
+    });
+    const page = await mountAt('/me/support');
+    expect(page.get('#support-past-due').element.parentElement!.textContent).toContain(
+      'Update your payment method to keep your subscriptions.',
+    );
+  });
+
+  it("says what a tier's end leaves: the servers stop, the add-ons end with it", async () => {
+    mine.mockResolvedValue({ ok: true, value: subscribed(2, { own_machines: 1, own_machine_subscription: ownMachine }) });
+    const page = await mountAt('/me/support');
+    expect(page.get('#support-cancel-hint').text()).toBe(
+      "Change or cancel in Stripe's billing portal. A canceled tier lasts until the paid period ends, then your hosted " +
+        'servers stop. When your tier ends, your own machines and static addresses are set to end with their paid period.',
+    );
+    expect(page.get('#support-own-machine').element.closest('section')!.textContent).toContain(
+      'When your tier ends, your own machines are set to end with their paid period.',
+    );
+  });
+
+  it("says an admin's grant keeps the servers of a tier that ends", async () => {
+    // Granted after it subscribed: the tier box stays, canceled, with no add-on.
+    mine.mockResolvedValue({
+      ok: true,
+      value: subscribed(2, {
+        max_servers: 3,
+        comp_servers: 3,
+        granted: true,
+        subscription: subscription({ tier: 2, cancel_at_period_end: true }),
+      }),
+    });
+    const page = await mountAt('/me/support');
+    const canceled = page.get('#support-canceled').text();
+    expect(canceled).toBe(
+      'Your tier is canceled: it lasts until the end of the period you paid for, then your admin grant keeps up to 3 ' +
+        'hosted servers running. You can renew it in the billing portal before then.',
+    );
+    expect(canceled).not.toContain('servers stop');
+  });
+
   it('says no payment was taken after a canceled checkout, and drops the query', async () => {
     const page = await mountAt('/me/support?checkout=cancel');
     expect(page.text()).toContain('No payment was taken.');

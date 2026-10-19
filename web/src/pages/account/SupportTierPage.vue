@@ -45,16 +45,17 @@
     </p>
 
     <template v-else-if="tiers && billing">
-      <!-- Past due: the servers keep running while Stripe retries. -->
+      <!-- Past due (the tier's payment or an add-on's): the servers keep
+           running while Stripe retries. -->
       <section
-        v-if="billing.subscription?.status === 'past_due'"
+        v-if="pastDue"
         class="space-y-3 rounded-panel border border-warn/40 bg-warn/10 p-4 sm:p-6"
         aria-labelledby="support-past-due"
       >
         <h2 id="support-past-due" class="text-lg font-semibold text-warn">Your last payment did not go through</h2>
         <p class="text-sm text-ink">
           Your servers keep running while Stripe retries the card; new servers can't start. Update your payment
-          method to keep your tier.
+          method to keep your subscriptions.
         </p>
         <button type="button" :disabled="busy" :class="primaryButton" @click="portal">Update your payment method</button>
       </section>
@@ -83,9 +84,9 @@
           <dt class="text-ink-muted">Servers live</dt>
           <dd class="text-ink">{{ billing.used }} of {{ billing.max_servers }}</dd>
         </dl>
-        <p v-if="billing.subscription.cancel_at_period_end" class="text-sm text-warn">
-          Your tier is canceled: it lasts until the end of the period you paid for, then your hosted servers stop.
-          You can renew it in the billing portal before then.
+        <p v-if="billing.subscription.cancel_at_period_end" id="support-canceled" class="text-sm text-warn">
+          Your tier is canceled: it lasts until the end of the period you paid for, then {{ afterTier }}. You can
+          renew it in the billing portal before then.{{ hasAddOns ? ` ${ADD_ONS_END_WITH_TIER}` : '' }}
         </p>
         <div class="flex flex-wrap gap-2">
           <button type="button" :disabled="busy || !billing.can_manage" :class="secondaryButton" @click="portal">
@@ -103,7 +104,8 @@
           </button>
         </div>
         <p v-if="!billing.subscription.cancel_at_period_end" id="support-cancel-hint" class="text-xs text-ink-muted">
-          Change or cancel in Stripe's billing portal. Your servers run until the paid period ends.
+          Change or cancel in Stripe's billing portal. A canceled tier lasts until the paid period ends, then
+          {{ afterTier }}.{{ hasAddOns ? ` ${ADD_ONS_END_WITH_TIER}` : '' }}
         </p>
       </section>
 
@@ -149,7 +151,7 @@
         </div>
         <p class="text-sm text-ink-muted">
           Runs one of your tier's servers on a machine of its own. It adds no servers; each is its own monthly
-          subscription.
+          subscription. When your tier ends, your own machines are set to end with their paid period.
         </p>
         <p v-if="billing.own_machine_subscription" class="text-sm text-ink">
           You have {{ ownMachines }} own machine{{ ownMachines === 1 ? '' : 's' }}
@@ -200,7 +202,8 @@
         </div>
         <p class="text-sm text-ink-muted">
           Gives a server on one of your own machines the same IP address and a name of its own every time it starts,
-          so players find it in the same place. One for each own machine; each is its own monthly subscription.
+          so players find it in the same place. One for each own machine; each is its own monthly subscription. When
+          your tier ends, your static addresses are set to end with their paid period.
         </p>
         <p v-if="addressCount > 0" class="text-sm text-ink">
           You have {{ addressCount }} static address{{ addressCount === 1 ? '' : 'es' }}.
@@ -240,7 +243,9 @@
 // tiers closed) drops the query with nothing claimed, and a page whose read
 // failed holds the confirmation back until "Try again". ?checkout=cancel says
 // no payment was taken. With billing off the page says support tiers are not
-// open.
+// open. A payment past due (the tier's or an add-on's) shows a banner to the
+// portal; the tier box says what the tier's end leaves (an admin's grant of
+// servers keeps them running) and that the add-ons end with it.
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import TierPicker from '../../components/TierPicker.vue';
@@ -278,6 +283,10 @@ const CONFIRM_SLOW_MS = 30_000;
 const PENDING_TEXT =
   'Your payment went through, and Stripe has not confirmed it to NovaWorld yet. This page keeps checking every 30 seconds.';
 const ADDRESS_HINT = 'Name it on your Static addresses page once it is paid for, and cancel it there.';
+// The add-ons need the tier: when it stops granting, the service sets each to
+// cancel at its period's end in Stripe.
+const ADD_ONS_END_WITH_TIER =
+  'When your tier ends, your own machines and static addresses are set to end with their paid period.';
 
 const primaryButton =
   'rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40';
@@ -300,6 +309,30 @@ const notice = ref('');
 const confirm = ref<'idle' | 'confirming' | 'pending' | 'done'>('idle');
 
 const liveTier = computed(() => hasLiveTier(billing.value));
+// A payment past due: the tier's or an add-on's (any keeps new servers from
+// starting).
+const pastDue = computed(() => {
+  const b = billing.value;
+  if (!b) return false;
+  return (
+    b.subscription?.status === 'past_due' ||
+    b.own_machine_subscription?.status === 'past_due' ||
+    b.address_subscriptions.some((s) => s.status === 'past_due')
+  );
+});
+// What the tier's end leaves: an admin's grant of servers keeps that many
+// running (an account granted after it subscribed keeps its tier box), else
+// the hosted servers stop.
+const afterTier = computed(() => {
+  const n = billing.value?.comp_servers ?? 0;
+  return n > 0
+    ? `your admin grant keeps up to ${n} hosted server${n === 1 ? '' : 's'} running`
+    : 'your hosted servers stop';
+});
+// The account pays for an add-on beside its tier.
+const hasAddOns = computed(
+  () => !!billing.value?.own_machine_subscription || (billing.value?.address_subscriptions.length ?? 0) > 0,
+);
 // A checkout came back and its confirmation is awaited: no second one starts.
 const waiting = computed(() => confirm.value === 'confirming' || confirm.value === 'pending');
 const currentOffer = computed(() => tiers.value?.tiers.find((t) => t.tier === billing.value?.subscription?.tier));
@@ -342,8 +375,11 @@ const grantText = computed(() => {
   return `An admin granted your account ${granted}, free of charge. With an admin grant there is no support tier or add-on to buy.`;
 });
 
-// The static addresses the account pays for, one subscription each.
-const addressCount = computed(() => billing.value?.address_subscriptions.length ?? 0);
+// The static addresses the account has: one subscription each, and an
+// admin's comp addresses.
+const addressCount = computed(
+  () => (billing.value?.address_subscriptions.length ?? 0) + (billing.value?.comp_addresses ?? 0),
+);
 // Why another static address cannot be bought now, or '' when it can: each
 // is an own machine's, so the account needs an own machine without one.
 const addressBlock = computed(() => {
