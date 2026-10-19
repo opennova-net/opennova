@@ -7428,10 +7428,10 @@ int test_billing_checkout_guard(Harness &h) {
 // admin's grants count as sold: filled to the last place, GET /api/billing/tiers
 // says which items are available, and a checkout past the fleet answers 409
 // sold_out. A checkout that goes through reserves its place under the
-// hosting-start lock (the reservation stamped with its session), so the next
-// account's finds none; the session's checkout.session.expired drops it, and the
-// sync of a paid session drops it as the subscription takes its place. The user
-// page's capacity says when a grant oversells.
+// hosting-start lock (the reservation stamped with its session, held a day), so
+// the next account's finds none; the session's checkout.session.expired drops it,
+// and the sync of a paid session drops it as the subscription takes its place. The
+// user page's capacity says when a grant oversells.
 int test_billing_capacity(Harness &h) {
 	namespace billing = opennova::novaworld_server::billing;
 	namespace hosted = opennova::novaworld_server::hosted;
@@ -7514,6 +7514,15 @@ int test_billing_capacity(Harness &h) {
 	auto held = billing::live_reservations_of(*h.pool.acquire(), lee);
 	TEST_EXPECT(held.size() == 1 && held.front().item == billing::ItemKind::Tier && held.front().tier == 1 &&
 			!held.front().checkout_session.empty() && held.front().checkout_session == open_session(lee));
+	// Held a day, long past its session's hour: a session paid at its last moment
+	// whose sync comes late (a webhook redelivered, the next reconcile) still counts
+	// until the subscription it made is written.
+	const auto life = h.pool.acquire()->query(
+			"SELECT CAST(extract(epoch FROM expires_at - now()) AS bigint) FROM billing_checkout_reservations "
+			"WHERE user_id = $1;",
+			{ opennova::db::BindValue(lee) });
+	TEST_EXPECT(life.size() == 1 && life.front().as_int(0).value_or(0) > 24 * 60 * 60 - 60 &&
+			life.front().as_int(0).value_or(0) <= 24 * 60 * 60);
 	TEST_EXPECT(sold().shared == 24);
 	TEST_EXPECT(!tiers()["tiers"][0]["available"].b());
 	reply = checkout(mo_s, "tier1");

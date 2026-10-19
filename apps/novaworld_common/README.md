@@ -720,8 +720,8 @@ site. Everything here is service policy (`billing/`).
   `ONNET_FLEET_SHARED_SLOTS` shared places, `ONNET_FLEET_MAX_OWN` own machines and
   `ONNET_FLEET_MAX_ADDRESSES` static addresses (each one granted, used or not, and each
   the cloud still holds: one on its way out holds its Elastic IP until released). A
-  checkout is judged, and its item reserved (`billing_checkout_reservations`, an hour and
-  a quarter), in one transaction under the hosting-start lock, before Stripe makes its
+  checkout is judged, and its item reserved (`billing_checkout_reservations`, for a day),
+  in one transaction under the hosting-start lock, before Stripe makes its
   session, so two checkouts at once never both take the last place; the reservation
   counts as the subscription until the sync writes the one its session made (its
   `opennova_reservation` metadata), the session's `checkout.session.expired` event, the

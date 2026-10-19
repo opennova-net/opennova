@@ -61,10 +61,12 @@ public:
 	// A checkout session's life: an hour, well past Stripe's minimum of 30
 	// minutes from its creation (Stripe refuses one under that).
 	static constexpr int64_t kCheckoutLifeS = 60 * 60;
-	// Its reservation's (billing_repository.h "A checkout's hold"): the
-	// session's, from before the slow calls that precede it, and the time a
-	// session paid at its last moment takes to reach the sync.
-	static constexpr int64_t kReservationLifeS = kCheckoutLifeS + 15 * 60;
+	// Its reservation's (billing_repository.h "A checkout's hold"): a day, so
+	// a session paid at its last moment whose sync comes late (a webhook
+	// Stripe redelivers, the next reconcile) still counts until the
+	// subscription it made is written; the sync, the session's expiry and the
+	// account's next checkout drop it sooner.
+	static constexpr int64_t kReservationLifeS = 24 * 60 * 60;
 	// The webhook events GET /api/admin/billing lists, newest first.
 	static constexpr size_t kEventsShown = 50;
 
