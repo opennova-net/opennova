@@ -67,24 +67,6 @@ crow::json::wvalue user_json(const UserRecord &u, const billing::Entitlement &en
 
 } // namespace
 
-// The hosting the service has sold against what its fleet sells
-// (hosted/model/sold_capacity.h), each of shared places, own machines and static
-// addresses as {sold, sellable}, and `oversold` when any is past it (an
-// admin's grant can take it there; the page warns).
-crow::json::wvalue AdminUserRoutes::capacity_json(db::Database &db) const {
-	const hosted::Capacity sold = hosted::sold_now(db, billing::unix_now());
-	crow::json::wvalue out;
-	const auto part = [&out](const char *key, int64_t has, int64_t cap) {
-		out[key]["sold"] = has;
-		out[key]["sellable"] = cap;
-	};
-	part("shared", sold.shared, sellable_.shared);
-	part("own_machines", sold.own, sellable_.own);
-	part("addresses", sold.addresses, sellable_.addresses);
-	out["oversold"] = hosted::sold_exceeds_capacity(sold, sellable_);
-	return out;
-}
-
 crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u) {
 	return user_json(u, billing::entitlement_of(db, u.id, billing::unix_now()));
 }
@@ -184,7 +166,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	// GET /api/admin/users/<id> — one player: {"user", "entitlement"
 	// ({max_servers, source, tier, comp_servers, comp_own_machines,
 	// tier_servers, own_machines, can_start}), "capacity" (the service's sold
-	// capacity against what the fleet sells, capacity_json),
+	// capacity against what the fleet sells, billing/billing_routes.h
+	// sold_capacity_json),
 	// "servers" (its hosted servers: the live ones by id, then its newest 10
 	// ended), "addresses" (its static addresses, the held ones first:
 	// hosted/address_routes.h address_json, with the admin's fields), "billing" ({livemode, stripe_customer_id (null for none),
@@ -204,7 +187,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			crow::json::wvalue out;
 			out["user"] = user_to_json(*db_conn, *user);
 			out["entitlement"] = entitlement_json(billing::entitlement_of(*db_conn, id, now), true);
-			out["capacity"] = capacity_json(*db_conn);
+			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, now);
 			std::vector<crow::json::wvalue> servers;
 			for (const hosted::HostedServer &s : hosted::list_servers_of(*db_conn, id))
 				servers.push_back(hosted::server_json(*db_conn, s, false, address_zone_));
@@ -328,12 +311,14 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	// (comp_grants; billing/entitlement.h: its servers are the larger of the
 	// grant and its support tier's, its own machines the add-on's plus the
 	// grant's while it has servers), both set at once, answered with the
-	// account, its entitlement and the sold capacity (capacity_json: a grant
+	// account, its entitlement and the sold capacity (sold_capacity_json: a grant
 	// counts as sold, and may take it past what the fleet sells, which the
 	// page warns of; logged). 400 invalid_json, invalid_field (no whole
 	// number, or outside 0..16) or missing_field, 404 for an unknown id and for
-	// a hosted server's service account. Lowering the entitlement below what
-	// the account runs stops servers (the supervisor's next pass;
+	// a hosted server's service account. Lowering the servers below what the
+	// account runs stops its newest; lowering its own machines below its
+	// servers on them moves the newest of those to a shared machine while there
+	// is room and stops the rest (the supervisor's next pass;
 	// hosted/supervisor.h).
 	CROW_ROUTE(app, "/api/admin/users/<int>/comp").methods("PUT"_method)(
 	    [this](const crow::request &req, int64_t id) {
@@ -362,7 +347,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			crow::json::wvalue out;
 			out["user"] = updated ? user_to_json(*db_conn, *updated) : crow::json::wvalue{};
 			out["entitlement"] = entitlement_json(billing::entitlement_of(*db_conn, id, billing::unix_now()), true);
-			out["capacity"] = capacity_json(*db_conn);
+			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, billing::unix_now());
 			const hosted::Capacity sold = hosted::sold_now(*db_conn, billing::unix_now());
 			if (hosted::sold_exceeds_capacity(sold, sellable_))
 				std::fprintf(stderr,

@@ -7839,9 +7839,9 @@ int test_billing_webhook(Harness &h) {
 // the price check, the last reconcile, the pending count, the subscriptions
 // with their accounts, the webhook log, the orphans a reconcile found (another
 // instance's subscription) and their relink to an account (its metadata
-// stamped, the account's entitlement from it), and the account delete refused
-// while a subscription grants (a tier or an add-on) or a checkout of it holds
-// its reservation.
+// stamped, the account's entitlement from it), the sold capacity and the
+// admin-granted accounts, and the account delete refused while a subscription
+// grants (a tier or an add-on) or a checkout of it holds its reservation.
 int test_billing_admin(Harness &h) {
 	namespace billing = opennova::novaworld_server::billing;
 	const int64_t eli = make_account(h, "bill_eli", "pw-bill-eli");
@@ -7890,6 +7890,26 @@ int test_billing_admin(Harness &h) {
 	TEST_EXPECT(listed);
 	TEST_EXPECT(json["duplicates"].t() == crow::json::type::List && json["duplicates"].size() == 0);
 	TEST_EXPECT(json["unknown_prices"].t() == crow::json::type::List && json["unknown_prices"].size() == 0);
+	// The sold capacity against what the fleet sells (the fleet-health oversold
+	// finding links to this page), and every account an admin grants hosting.
+	TEST_EXPECT(json["capacity"]["shared"]["sellable"].i() == 24 &&
+			json["capacity"]["own_machines"]["sellable"].i() == 16 &&
+			json["capacity"]["addresses"]["sellable"].i() == 4 && json["capacity"].has("oversold"));
+	TEST_EXPECT(json["comp_grants"].t() == crow::json::type::List);
+	const int64_t kai = make_account(h, "bill_kai", "pw-bill-kai");
+	TEST_EXPECT(kai > 0 && billing::set_comp_grants(*h.pool.acquire(), kai, { 2, 1 }));
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
+	bool kai_listed = false;
+	for (const auto &g : json["comp_grants"]) {
+		kai_listed = kai_listed || (g["user_id"].i() == kai && str(g["username"]) == "bill_kai" &&
+										   g["servers"].i() == 2 && g["own_machines"].i() == 1 && g["addresses"].i() == 0);
+	}
+	TEST_EXPECT(kai_listed);
+	TEST_EXPECT(billing::set_comp_grants(*h.pool.acquire(), kai, { 0, 0 }));
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
+	bool kai_gone = json && json["comp_grants"].t() == crow::json::type::List;
+	for (const auto &g : json["comp_grants"]) kai_gone = kai_gone && g["user_id"].i() != kai;
+	TEST_EXPECT(kai_gone);
 
 	// A subscription of ours selling a price no list names: listed once a
 	// reconcile reads it, gone once it is canceled.
@@ -8015,7 +8035,7 @@ int test_billing_admin(Harness &h) {
 	reply = h.send_to(h.secure_port, "GET", "/api/admin/billing", { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && !json["limits_hold"].b() &&
-			!json.has("subscriptions"));
+			!json.has("subscriptions") && json.has("capacity") && json["comp_grants"].t() == crow::json::type::List);
 	reply = h.send_to(h.secure_port, "POST", "/api/admin/billing/reconcile", { kBearer });
 	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_disabled");
 	reply = h.send_to(h.secure_port, "POST", "/api/admin/billing/reconcile", { kBearer, kJson }, "{\"force_limits\":true}");

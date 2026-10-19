@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <ctime>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -88,6 +89,27 @@ crow::response sold_out(ItemKind item) {
 	return json_error(409, "sold_out", std::string("Hosting is full: new subscriptions are paused (") + what + ")");
 }
 
+// Every account an admin grants hosting (billing::admin_granted), by id:
+// [{user_id, username, servers, own_machines, addresses (its comp addresses
+// that count)}].
+std::vector<crow::json::wvalue> comp_grants_json(db::Database &db) {
+	std::map<int64_t, std::pair<CompGrants, int>> granted;
+	for (const auto &[user_id, grants] : comp_grants_by_account(db)) granted[user_id].first = grants;
+	for (const auto &[user_id, addresses] : comp_addresses_by_account(db)) granted[user_id].second = addresses;
+	std::vector<crow::json::wvalue> out;
+	for (const auto &[user_id, grant] : granted) {
+		crow::json::wvalue e;
+		e["user_id"] = user_id;
+		const auto user = get_user_by_id(db, user_id);
+		e["username"] = user ? user->username : std::string();
+		e["servers"] = grant.first.servers;
+		e["own_machines"] = grant.first.own_machines;
+		e["addresses"] = grant.second;
+		out.push_back(std::move(e));
+	}
+	return out;
+}
+
 } // namespace
 
 std::string iso_utc(int64_t unix_seconds) {
@@ -121,6 +143,20 @@ crow::json::wvalue admin_subscription_json(const SubscriptionRow &row, int64_t n
 	out["entitled"] = subscription_grants(row, now);
 	out["current_period_end"] = row.current_period_end ? iso_utc(*row.current_period_end) : std::string();
 	out["cancel_at_period_end"] = row.cancel_at_period_end;
+	return out;
+}
+
+crow::json::wvalue sold_capacity_json(db::Database &db, const hosted::Capacity &sellable, int64_t now) {
+	const hosted::Capacity sold = hosted::sold_now(db, now);
+	crow::json::wvalue out;
+	const auto part = [&out](const char *key, int64_t has, int64_t cap) {
+		out[key]["sold"] = has;
+		out[key]["sellable"] = cap;
+	};
+	part("shared", sold.shared, sellable.shared);
+	part("own_machines", sold.own, sellable.own);
+	part("addresses", sold.addresses, sellable.addresses);
+	out["oversold"] = hosted::sold_exceeds_capacity(sold, sellable);
 	return out;
 }
 
@@ -752,9 +788,12 @@ void BillingRoutes::limits_hold_json(db::Database &db, crow::json::wvalue &out) 
 // left no reconcile releases the limits hold),
 // "orphans" ({stripe_customer_id, stripe_subscription_id, username_hint,
 // status}), "recent_events" (the newest kEventsShown: event_id, type,
-// received_at (ISO), outcome)} with the limits hold (limits_hold_json). With
-// billing off, {"enabled": false} and the limits hold alone (the hold reads the
-// cache billing on or off). Cache-Control: no-store.
+// received_at (ISO), outcome)} with the limits hold (limits_hold_json), the
+// sold "capacity" (sold_capacity_json: the fleet-health oversold finding links
+// here) and "comp_grants" (every account an admin grants hosting,
+// comp_grants_json). With billing off, {"enabled": false} with the limits hold, the capacity and
+// the comp grants alone (each reads the database billing on or off).
+// Cache-Control: no-store.
 crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
@@ -763,6 +802,8 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		limits_hold_json(*db_conn, out);
+		out["capacity"] = sold_capacity_json(*db_conn, sellable_, unix_now());
+		out["comp_grants"] = comp_grants_json(*db_conn);
 		if (billing_ == nullptr) {
 			out["enabled"] = false;
 			return no_store(json_reply(200, out));

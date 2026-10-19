@@ -50,6 +50,13 @@ std::string iso_from_db(const std::string &db_text);
 // current_period_end (ISO, "" for none), cancel_at_period_end}.
 crow::json::wvalue admin_subscription_json(const SubscriptionRow &row, int64_t now);
 
+// The hosting the service has sold at `now` against what its fleet sells
+// (hosted/model/sold_capacity.h): {shared, own_machines, addresses}, each
+// {sold, sellable}, and `oversold` when any is past it (an admin's grant can
+// take it there; the pages warn). A user page's, a comp grant's reply's and
+// the admin's billing view's.
+crow::json::wvalue sold_capacity_json(db::Database &db, const hosted::Capacity &sellable, int64_t now);
+
 class BillingRoutes {
 public:
 	// A checkout or a portal session per account: 6 at once, then one every 20 s.

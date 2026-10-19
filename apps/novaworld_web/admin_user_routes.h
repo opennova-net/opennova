@@ -49,9 +49,6 @@ public:
 	void register_routes(WebApp &app, ForgetAccount forget);
 
 private:
-	// The sold capacity against what the fleet sells (capacity_json).
-	crow::json::wvalue capacity_json(db::Database &db) const;
-
 	WebAccess &access_;
 	db::ConnectionPool &pool_;
 	ForgetAccount forget_;
