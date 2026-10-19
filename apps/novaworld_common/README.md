@@ -496,7 +496,7 @@ port) and keeps each flow on one task.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/admin/lobbies` | admin | the instances by id, each with its state, times and session count |
+| `GET /api/admin/lobbies` | admin | the instances by id, each with its state, the task its lobby runs as (`task_id`, the program usage page's key), times and session count |
 | `POST /api/admin/lobbies/<id>/drain` | admin | 200; 404 |
 
 **The lobby's tables** (`backend/migrations/0006_lobby_commands.sql`, `0020_lobby_live_view.sql`,
@@ -525,13 +525,20 @@ port) and keeps each flow on one task.
 
 **The admin's view** (`connection_routes.*`, the site's admin page **Status and sessions**,
 `/admin/novaworld#sessions`, under NovaWorld):
-every session the instances hold, from their `lobby_sessions` rows, with the server it
-lists and an end queued for its instance. A session's account is its listing's owner
-while it hosts, else the account it signed in as (the row's `user_id`).
+every session the instances hold, from their `lobby_sessions` rows and the listings, split
+into clients and servers, with the server each lists or plays on and an end queued for its
+instance. A session's account is its listing's owner while it hosts, else the account it
+signed in as (the row's `user_id`). A **server** is a session that hosts (a listen host
+plays on its own server too); any other is a **client**. A session's game is its games row:
+a server's by its listing's `LobbyName`, else by its game tag (aliases included). A
+server's listing says what it is: `hosted` (a live hosted server of the fleet's, linked to
+`/admin/fleet/<id>`), `owned` (its HostKey names an account) or `anonymous`, and retail's
+Serve Only flag (`Dedicated`). A client's server is the listing its `PlaySetup` named, by
+RID, while it is listed (its address alone otherwise: a LAN server, one no lobby lists).
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance, state, game tag, address, times, `account` (`via` `host_key` or `login`) and `host` while it hosts |
+| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance (`lobby_id`) and that instance's task (`lobby_task_id`), state, game tag, address, times, `kind` (`client` or `server`), `title` (`{slug, display_name}`, null for a tag no games row answers to), `account` (`via` `host_key` or `login`), `host` while it hosts (with `server_kind` and `dedicated`, null while not listed) and `playing` while it plays (`rid`, null for no listing at its address; `addr`, `since_ms`, `listed`, `server_name`, `hosted_server_id`) |
 | `POST /api/admin/connections/<session id>/end` | admin | 202, an `end_session` command for the instance holding it: the client gets its `ServerGoodBye` burst and the connection drops (`Logout`), as the NAPI server role ends a connection it asked to disconnect; 404 for a session that ended; 409 `hosting` (with its `rid`: stop the listing instead, since ending its session only parks it for the re-host) |
 
 ## Pushing statements to a listed server

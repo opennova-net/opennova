@@ -137,6 +137,8 @@ constexpr const char *kJson = "Content-Type: application/json";
 constexpr const char *kCsrf = "X-OpenNova-Request: 1";
 // The first listener's ONNET_SITE_URL: the links its mail carries.
 constexpr const char *kMailSiteUrl = "https://site.example";
+// The task the harness's lobby runs as (its instance row's task_id).
+constexpr const char *kHarnessLobbyTask = "http-routes-lobby";
 
 struct Harness {
 	ConnectionPool &pool;
@@ -3459,9 +3461,12 @@ int test_owner_host_push(Harness &h) {
 // session's read within a minute of now. Each session names who it is: none until a Cookie list
 // carries a live retail login, then that login's account; a hosting session its listing (name,
 // map, players, listed) and the owner its HostKey names, whatever login it sent; a login that
-// ended still names the account the session signed in as. The route reads the lobby's rows,
-// which the lobby writes as the session changes, before it answers the statement that changed
-// it.
+// ended still names the account the session signed in as. Each is a client or a server (one
+// that hosts), of the game its listing or its game tag names, on the lobby instance's task; a
+// server's listing says what it is (owned, Serve Only); a client names the server it plays on,
+// the listing at its PlaySetup's address (none at an address no listing has), until it stops.
+// The route reads the lobby's rows, which the lobby writes as the session changes, before it
+// answers the statement that changed it.
 int test_admin_sessions(Harness &h) {
 	// The production shape: a session made 125 s before the read, on a machine up 7 h 40 min.
 	const int64_t unix_now = 1792120342793; // 2026-10-16 09:39 UTC
@@ -3510,9 +3515,14 @@ int test_admin_sessions(Harness &h) {
 		}
 		TEST_EXPECT(std::llabs(created - read_at) <= 60000);
 		TEST_EXPECT(last_seen >= created && std::llabs(last_seen - read_at) <= 60000);
-		// Signed in to the lobby with no retail login yet, hosting nothing.
+		// Signed in to the lobby with no retail login yet, hosting nothing: a client, playing on
+		// nothing, its game tag ("http:push") no games row's; its instance's task.
 		TEST_EXPECT((*row)["account"].t() == crow::json::type::Null);
 		TEST_EXPECT((*row)["host"].t() == crow::json::type::Null);
+		TEST_EXPECT(str((*row)["kind"]) == "client");
+		TEST_EXPECT((*row)["title"].t() == crow::json::type::Null);
+		TEST_EXPECT((*row)["playing"].t() == crow::json::type::Null);
+		TEST_EXPECT(str((*row)["lobby_task_id"]) == kHarnessLobbyTask);
 	}
 
 	// The player's retail login, then a ClientPlayRequest whose Cookie list carries its tag.
@@ -3530,6 +3540,13 @@ int test_admin_sessions(Harness &h) {
 	TEST_EXPECT(str((*row)["account"]["username"]) == "session_player");
 	TEST_EXPECT(str((*row)["account"]["via"]) == "login");
 	TEST_EXPECT((*row)["host"].t() == crow::json::type::Null);
+	// It plays at the address its PlaySetup named, which no listing has.
+	TEST_EXPECT((*row)["playing"].t() == crow::json::type::Object);
+	TEST_EXPECT(str((*row)["playing"]["addr"]) == "127.0.0.1:32768");
+	TEST_EXPECT((*row)["playing"]["rid"].t() == crow::json::type::Null);
+	TEST_EXPECT(!(*row)["playing"]["listed"].b());
+	TEST_EXPECT((*row)["playing"]["server_name"].t() == crow::json::type::Null);
+	TEST_EXPECT(std::llabs((*row)["playing"]["since_ms"].i() - unix_ms()) <= 60000);
 
 	// A host whose HostKey names its owner: the listing, and the owner rather than its login.
 	const int64_t owner = make_account(h, "session_owner", "pw-session-owner");
@@ -3560,6 +3577,31 @@ int test_admin_sessions(Harness &h) {
 	TEST_EXPECT(listing["hosted_server_id"].t() == crow::json::type::Null);
 	TEST_EXPECT((*row)["account"]["id"].i() == owner);
 	TEST_EXPECT(str((*row)["account"]["via"]) == "host_key");
+	// A server, of the game its listing's LobbyName names; owned (its HostKey names an
+	// account, no hosted server), Serve Only (its HostSetup names no Dedicated, which reads Y).
+	TEST_EXPECT(str((*row)["kind"]) == "server");
+	TEST_EXPECT((*row)["title"].t() == crow::json::type::Object);
+	TEST_EXPECT(str((*row)["title"]["slug"]) == "jop_2_consumer" &&
+			str((*row)["title"]["display_name"]) == "Joint Operations");
+	TEST_EXPECT(str(listing["server_kind"]) == "owned");
+	TEST_EXPECT(listing["dedicated"].t() == crow::json::type::True);
+	const int64_t host_rid = listing["rid"].i();
+
+	// The client plays on that server instead (its join address: where the host sends from):
+	// the listing, by its RID and name.
+	client.stop_playing();
+	TEST_EXPECT(client.play("127.0.0.1", std::to_string(host.port())));
+	TEST_EXPECT(wait_until([&] {
+		json = crow::json::load(body_text(connections()));
+		row = row_at(json, client.addr());
+		return row != nullptr && (*row)["playing"].t() == crow::json::type::Object &&
+				(*row)["playing"]["rid"].t() == crow::json::type::Number;
+	}));
+	TEST_EXPECT((*row)["playing"]["rid"].i() == host_rid && (*row)["playing"]["listed"].b());
+	TEST_EXPECT(str((*row)["playing"]["addr"]) == "127.0.0.1:" + std::to_string(host.port()));
+	TEST_EXPECT(str((*row)["playing"]["server_name"]) == "Sessions Host");
+	TEST_EXPECT((*row)["playing"]["hosted_server_id"].t() == crow::json::type::Null);
+	TEST_EXPECT(str((*row)["kind"]) == "client");
 
 	// The login ends (its row goes, as a logout or the idle sweep takes it): the session is
 	// still the account it signed in as (the lobby pinned it).
@@ -3570,6 +3612,14 @@ int test_admin_sessions(Harness &h) {
 	TEST_EXPECT(row != nullptr && (*row)["account"].t() == crow::json::type::Object);
 	TEST_EXPECT(row != nullptr && (*row)["account"]["id"].i() == player &&
 			str((*row)["account"]["via"]) == "login");
+
+	// It stops playing: on nothing.
+	client.stop_playing();
+	TEST_EXPECT(wait_until([&] {
+		json = crow::json::load(body_text(connections()));
+		row = row_at(json, client.addr());
+		return row != nullptr && (*row)["playing"].t() == crow::json::type::Null;
+	}));
 
 	client.goodbye();
 	host.goodbye();
@@ -3655,7 +3705,7 @@ int test_admin_end_session(Harness &h) {
 }
 
 // GET /api/admin/lobbies lists the lobby instances (the harness's one lobby: its endpoint, active,
-// seen within the minute, its sessions), and POST /api/admin/lobbies/<id>/drain marks one
+// the task it runs as, seen within the minute, its sessions), and POST /api/admin/lobbies/<id>/drain marks one
 // draining (no gate counts it as taking clients from its next read on); an id no instance has
 // is a 404. The instance is active again for the cases after.
 int test_admin_lobbies(Harness &h) {
@@ -3669,6 +3719,7 @@ int test_admin_lobbies(Harness &h) {
 	const auto &mine = json["lobbies"][0];
 	TEST_EXPECT(mine["id"].i() == id && str(mine["endpoint"]) == h.nw_udp.instance_endpoint() &&
 			str(mine["state"]) == "active" && mine["sessions"].i() >= 0);
+	TEST_EXPECT(str(mine["task_id"]) == kHarnessLobbyTask);
 	const int64_t now_ms =
 			static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
 					std::chrono::system_clock::now().time_since_epoch())
@@ -8512,6 +8563,7 @@ int with_harness(const char *part) {
 			nw_udp.erase_lobby_state(c.addr, opennova::drop_reason_name(r));
 		});
 		nw_udp.set_db_pool(&pool);
+		nw_udp.set_task_id(kHarnessLobbyTask);
 		nws::ServerConfig udp_config;
 		udp_config.nw_udp_port = 0;
 		// The endpoint its instance announces (no gate hands it out here: the
