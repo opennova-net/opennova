@@ -48,6 +48,10 @@ int64_t enqueue_address_release(db::Database &db, int64_t address_id) {
 	return jobs::enqueue(db, job);
 }
 
+bool address_allocate_pending(db::Database &db, int64_t address_id) {
+	return jobs::job_pending(db, allocate_key(address_id));
+}
+
 bool address_associate_pending(db::Database &db, int64_t machine_id) {
 	return jobs::job_pending(db, associate_key(machine_id));
 }

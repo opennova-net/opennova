@@ -335,12 +335,13 @@ releases the held ones.
 - **The jobs** (`model/address_jobs.*`, the worker's handlers `cloud/address_job_handlers.*`):
   `address.allocate` (the address found by its tag first, so a run cut short never allocates
   a second; then allocated with its tags
-  in one call; its record written TTL 300; a ready one's run moves its record to a new
-  name; with the add-on off it allocates nothing and waits), `address.associate` (onto the
-  machine launched to carry it, without reassociation
+  in one call; its record written TTL 300 and recorded on the row whatever its state by
+  then; a ready one's run moves its record to a new name; with the add-on off it allocates
+  nothing and waits), `address.associate` (onto the machine launched to carry it, without reassociation
   and only once the machine that held it before has ended; retried while the machine is
   pending; then a `machine.describe`, so the machine's public address follows),
-  `address.release` (once no live machine carries it: its record deleted and in sync, the
+  `address.release` (once no live machine carries it and no `address.allocate` of it is
+  queued or running, so it sees every record written: its record deleted and in sync, the
   TTL and a minute waited out, its grant read again (a subscription granting once more
   keeps it), any association the cloud still shows ended, then released). `fleet.sweep`
   records the addresses the cloud holds for this deployment that no held row names

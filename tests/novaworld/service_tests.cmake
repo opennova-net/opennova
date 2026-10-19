@@ -363,7 +363,8 @@ if(BUILD_NOVAWORLD_HTTP)
     # driver (allocate, associate after the previous holder's end, release after the
     # machine's end, the record's sync and TTL, the grant read again) and fleet.sweep's
     # orphans; a refusal tried again (an exhausted quota's backoff, an admin's retry), a
-    # released row's subscription named again, and the jobs with the add-on off.
+    # released row's subscription named again, the jobs with the add-on off, and an
+    # admin's release racing an allocation.
     add_executable(hosted_address_test novaworld/hosted_address_test.cpp)
     target_link_libraries(hosted_address_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_hosting_cloud opennova_novaworld_service)

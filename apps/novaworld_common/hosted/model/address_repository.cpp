@@ -242,11 +242,13 @@ bool record_allocation(db::Database &db, int64_t id, const std::string &allocati
 }
 
 bool record_dns_upsert(db::Database &db, int64_t id, const std::string &dns_name, const std::string &change_id) {
-	db.exec("UPDATE hosted_addresses SET state = 'ready', dns_name = $1, dns_change_id = $2, dns_state = 'insync', "
-			"ready_at = COALESCE(ready_at, now()), updated_at = now() "
-			"WHERE id = $3 AND state IN ('allocating', 'ready') AND public_ip <> '';",
+	const auto rows = db.query(
+			"UPDATE hosted_addresses SET dns_name = $1, dns_change_id = $2, dns_state = 'insync', "
+			"ready_at = CASE WHEN state IN ('allocating', 'ready') THEN COALESCE(ready_at, now()) ELSE ready_at END, "
+			"state = CASE WHEN state = 'allocating' THEN 'ready' ELSE state END, updated_at = now() "
+			"WHERE id = $3 AND state <> 'released' AND public_ip <> '' RETURNING state;",
 			{ BindValue(dns_name), BindValue(change_id), BindValue(id) });
-	return db.changes() > 0;
+	return !rows.empty() && rows.front().as_text(0).value_or("") == "ready";
 }
 
 bool fail_address(db::Database &db, int64_t id, const std::string &reason, int64_t retry_in_s) {

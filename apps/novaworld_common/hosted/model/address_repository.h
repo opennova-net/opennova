@@ -147,8 +147,9 @@ NameResult rename_address(db::Database &db, int64_t id, const std::string &name)
 // longer allocating.
 bool record_allocation(db::Database &db, int64_t id, const std::string &allocation_id, const std::string &public_ip);
 // Its A record names `dns_name` now (change `change_id`, in sync or not yet
-// known: insync for an upsert); allocating -> ready on the first. False when
-// the row is no longer allocating or ready.
+// known: insync for an upsert), recorded whatever the row's state but
+// released, so a release that took the row meanwhile deletes it;
+// allocating -> ready on the first. True when the row is ready.
 bool record_dns_upsert(db::Database &db, int64_t id, const std::string &dns_name, const std::string &change_id);
 // The cloud refused it: allocating -> failed with `reason`. With
 // `retry_in_s` above 0 (a refusal that passes) its next automatic try is

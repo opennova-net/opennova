@@ -87,7 +87,9 @@ jobs::JobResult allocate(jobs::JobContext &ctx, AddressDriver &driver, ZoneDrive
 		a = address_of(ctx, id);
 		if (!a) return jobs::JobResult::done();
 	}
-	// Its record: the name it carried before (a rename) deleted first.
+	// Its record: the name it carried before (a rename) deleted first. What is
+	// written is recorded on the row whatever its state by then: a release
+	// that took it meanwhile (an admin's) waits for this run, then deletes it.
 	if (a->dns_name == a->name && a->state == AddressState::Ready) return jobs::JobResult::done();
 	if (!a->dns_name.empty() && a->dns_name != a->name) {
 		const ZoneChange gone = zone.remove(a->dns_name, a->public_ip);
@@ -139,6 +141,10 @@ jobs::JobResult release(jobs::JobContext &ctx, AddressDriver &driver, ZoneDriver
 	const auto machines = on_db(ctx, [id](db::Database &db) { return live_machines_carrying(db, id); });
 	if (!machines.empty())
 		return jobs::JobResult::retry("machine " + std::to_string(machines.front().id) + " still carries it", 15 * 1000);
+	// An allocation begun before the release took the row may write a record
+	// yet (recorded on the row): this run reads it once that is done.
+	if (on_db(ctx, [id](db::Database &db) { return address_allocate_pending(db, id); }))
+		return jobs::JobResult::retry("its address.allocate runs first", 10 * 1000);
 	const int64_t now = billing::unix_now();
 	// Its record: deleted, in sync, then its TTL drained.
 	if (a->dns_state == "pending") {

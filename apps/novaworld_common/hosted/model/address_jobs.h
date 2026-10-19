@@ -11,9 +11,11 @@
 //   address.allocate   an allocating address found by its tag (a run cut
 //                      short after its allocation), else allocated, with its
 //                      tags; then its A record written (the name it had before
-//                      deleted first: an admin's rename): allocating -> ready.
-//                      The cloud's refusal fails the row with its error code
-//                      (an exhausted quota shows there, and is tried again:
+//                      deleted first: an admin's rename) and recorded on the
+//                      row whatever its state by then (a release that took it
+//                      meanwhile deletes it): allocating -> ready. The cloud's
+//                      refusal fails the row with its error code (an
+//                      exhausted quota shows there, and is tried again:
 //                      address_repository.h address_refusal_passes). With the
 //                      add-on off no address is allocated: the run waits.
 //                      Deduped per address, one running at a time across the
@@ -27,8 +29,10 @@
 //                      follows (fleet_repository.h: only a describe moves it).
 //                      Deduped per machine.
 //   address.release    a releasing address: once no live machine carries it
-//                      (an ended machine's association goes with it), its A
-//                      record deleted and the change in sync, then the
+//                      (an ended machine's association goes with it) and no
+//                      address.allocate of it is queued or running (whose
+//                      record it must see first), its A record deleted and
+//                      the change in sync, then the
 //                      record's TTL (kAddressTtlS) and kReleaseMarginS waited
 //                      out; its grant read again (a subscription granting once
 //                      more makes it ready again, unless an admin released it);
@@ -60,6 +64,8 @@ inline constexpr int64_t kReleaseMarginS = 60;
 int64_t enqueue_address_allocate(db::Database &db, int64_t address_id);
 int64_t enqueue_address_associate(db::Database &db, int64_t address_id, int64_t machine_id);
 int64_t enqueue_address_release(db::Database &db, int64_t address_id);
+// Whether address `address_id`'s allocation is queued or running.
+bool address_allocate_pending(db::Database &db, int64_t address_id);
 // Whether machine `machine_id`'s association is queued or running.
 bool address_associate_pending(db::Database &db, int64_t machine_id);
 

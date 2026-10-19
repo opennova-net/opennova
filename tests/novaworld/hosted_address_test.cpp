@@ -16,7 +16,9 @@
 // failed with its code, an exhausted quota's automatic tries (their backoff, due only
 // at retry_at), an admin's retry, a released row's subscription free for a new name, and
 // what the cloud holds by owner. The jobs with the add-on off: nothing allocated, a ready
-// one's record still moved, a release still run.
+// one's record still moved, a release still run. An admin's release racing the
+// allocation: the record it writes is recorded on the lapsed row, and the release waits
+// for the allocation's job, then deletes it.
 
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
@@ -47,6 +49,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -529,6 +532,15 @@ nws::jobs::JobResult run_job(ConnectionPool &pool, const nws::jobs::JobRegistry 
 	return registry.find(kind)->handler(ctx);
 }
 
+// The queued address.allocate of address `id`, whose handler the test ran by
+// hand, done as the worker that ran it leaves it (a release waits while it is
+// pending).
+void finish_allocate(Database &db, int64_t id) {
+	db.exec("UPDATE jobs SET state = 'done', finished_at = now() WHERE dedupe_key = $1 AND "
+			"state IN ('queued', 'running');",
+			{ BindValue(std::string(hosted::kJobAddressAllocate) + ":" + std::to_string(id)) });
+}
+
 // A live own machine carrying `address`, launched as `cloud_id`.
 int64_t carrying_machine(Database &db, int64_t address, const std::string &cloud_id) {
 	hosted::NewMachine m;
@@ -639,6 +651,8 @@ int test_jobs() {
 	TEST_EXPECT(result.kind == Kind::Done && hosted::find_address(db, id)->state == AddressState::Ready);
 	TEST_EXPECT(nws::jobs::job_pending(db, std::string(hosted::kJobAddressAllocate) + ":" + std::to_string(id)));
 	TEST_EXPECT(run_job(pool, registry, hosted::kJobAddressAllocate, { { "address_id", id } }).kind == Kind::Done);
+	finish_allocate(db, id);
+	TEST_EXPECT(!hosted::address_allocate_pending(db, id));
 	TEST_EXPECT(hosted::FileZone::parse(read_text(dir.file("play.zone")))["renamed"] == ip);
 	// Canceled now: the release goes through, an association the cloud still shows ended first.
 	subscribe_item(db, ana, billing::ItemKind::StaticAddress, 0, "sub_j_sa", "canceled");
@@ -814,6 +828,77 @@ int test_refusals_and_retries() {
 	return 0;
 }
 
+// A record writer that runs `before` ahead of each upsert (an admin's release
+// landing mid-allocation).
+class RacingZone : public hosted::ZoneDriver {
+public:
+	explicit RacingZone(hosted::FileZone &inner) : inner_(inner) {}
+	std::function<void()> before;
+	const std::string &zone() const override { return inner_.zone(); }
+	hosted::ZoneChange upsert(const std::string &name, const std::string &ip) override {
+		if (before) before();
+		return inner_.upsert(name, ip);
+	}
+	hosted::ZoneChange remove(const std::string &name, const std::string &ip) override {
+		return inner_.remove(name, ip);
+	}
+	std::optional<bool> in_sync(const std::string &change_id) override { return inner_.in_sync(change_id); }
+
+private:
+	hosted::FileZone &inner_;
+};
+
+int test_release_races_allocate() {
+	test_db::TestDatabase scratch;
+	ConnectionPool pool(scratch.options());
+	auto lease = pool.acquire();
+	Database &db = *lease;
+	test_temp::TempDir dir("opennova_address_race");
+	hosted::FileZone file("play.localhost", dir.file("play.zone"));
+	RacingZone zone(file);
+	RecordingDriver driver;
+	nws::jobs::JobRegistry registry;
+	hosted::register_address_jobs(registry, driver, zone, true);
+	using Kind = nws::jobs::JobResult::Kind;
+	const int64_t now = billing::unix_now();
+	const int64_t ben = make_player(db, "race_ben", 0);
+	TEST_EXPECT(billing::set_comp_grants(db, ben, { 1, 1 }));
+	const int64_t id = hosted::add_comp_address(db, ben, "racer", now).id;
+	TEST_EXPECT(id > 0);
+
+	// The admin's release lands between the allocation and its record: the
+	// record written is recorded on the lapsed row all the same.
+	zone.before = [&db, id] { hosted::lapse_address(db, id, hosted::kLapseAdmin, "released by an admin"); };
+	TEST_EXPECT(run_job(pool, registry, hosted::kJobAddressAllocate, { { "address_id", id } }).kind == Kind::Done);
+	zone.before = nullptr;
+	auto a = hosted::find_address(db, id);
+	const std::string ip = "203.0.113." + std::to_string(id);
+	TEST_EXPECT(a->state == AddressState::Lapsed && a->public_ip == ip && a->dns_name == "racer" &&
+			a->dns_state == "insync");
+	TEST_EXPECT(hosted::FileZone::parse(read_text(dir.file("play.zone")))["racer"] == ip);
+
+	// Its release waits while an allocation of it is queued, then deletes the record.
+	TEST_EXPECT(hosted::begin_release(db, id));
+	TEST_EXPECT(hosted::enqueue_address_allocate(db, id) > 0 && hosted::address_allocate_pending(db, id));
+	auto result = run_job(pool, registry, hosted::kJobAddressRelease, { { "address_id", id } });
+	TEST_EXPECT(result.kind == Kind::Retry && hosted::find_address(db, id)->dns_state == "insync");
+	TEST_EXPECT(hosted::FileZone::parse(read_text(dir.file("play.zone"))).count("racer") == 1);
+	// That allocation finds the row releasing and writes nothing.
+	TEST_EXPECT(run_job(pool, registry, hosted::kJobAddressAllocate, { { "address_id", id } }).kind == Kind::Done);
+	finish_allocate(db, id);
+	TEST_EXPECT(!hosted::address_allocate_pending(db, id));
+	result = run_job(pool, registry, hosted::kJobAddressRelease, { { "address_id", id } });
+	TEST_EXPECT(result.kind == Kind::Retry && hosted::find_address(db, id)->dns_state == "pending");
+	TEST_EXPECT(hosted::FileZone::parse(read_text(dir.file("play.zone"))).count("racer") == 0);
+	result = run_job(pool, registry, hosted::kJobAddressRelease, { { "address_id", id } });
+	a = hosted::find_address(db, id);
+	TEST_EXPECT(result.kind == Kind::Retry && a->dns_name.empty() && a->release_after > 0);
+	db.exec("UPDATE hosted_addresses SET release_after = now() - interval '1 second' WHERE id = $1;", { BindValue(id) });
+	TEST_EXPECT(run_job(pool, registry, hosted::kJobAddressRelease, { { "address_id", id } }).kind == Kind::Done);
+	TEST_EXPECT(hosted::find_address(db, id)->state == AddressState::Released);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -841,6 +926,7 @@ int main(int argc, char **argv) {
 		{ "jobs", test_jobs },
 		{ "jobs_add_on_off", test_jobs_add_on_off },
 		{ "refusals_and_retries", test_refusals_and_retries },
+		{ "release_races_allocate", test_release_races_allocate },
 	};
 	for (const Case &c : database) {
 		std::printf("-- %s\n", c.name);
