@@ -30,8 +30,7 @@
       </fieldset>
     </header>
 
-    <p role="alert" class="sr-only">{{ error }}</p>
-    <p v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{{ error }}</p>
+    <p role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger' : 'sr-only'">{{ error }}</p>
     <div v-if="usage === null && !error" class="animate-pulse rounded-panel border border-border bg-panel p-6 text-center text-sm text-ink-muted">
       Loading the metrics…
     </div>

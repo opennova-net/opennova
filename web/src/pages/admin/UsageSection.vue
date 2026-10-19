@@ -1,22 +1,15 @@
 <template>
   <div class="space-y-10">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">Server usage</h1>
-        <p class="text-sm text-ink-muted">
-          Memory, CPU and network of each live hosted server, sampled every minute.
-        </p>
-      </div>
-      <div class="flex items-center gap-3">
-        <p v-if="loadedAt" class="text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /></p>
-        <button type="button" :class="secondaryButton" :disabled="poll.loading.value" @click="poll.refresh">
-          {{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}
-        </button>
-      </div>
-    </header>
+    <AdminPageHeader
+      title="Server usage"
+      description="Memory, CPU and network of each live hosted server, sampled every minute."
+      :loaded-at="loadedAt"
+      :now="now"
+      :loading="poll.loading.value"
+      @refresh="poll.refresh"
+    />
 
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
     <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
 
     <dl v-if="usage" class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3">
@@ -189,21 +182,19 @@
 // bytes sent in the last hour), each live machine's share, and each live
 // server by machine and slot with its owner, state, players, memory, CPU and
 // sending rate now and over the last hour. Read again every 30 s.
+import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
-import RelativeTime from '../../components/RelativeTime.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import { fetchFleetUsage } from '../../api/hostedStats';
 import { usePolling } from '../../composables/usePolling';
 import type { FleetUsage, FleetUsageTotals } from '../../types/hostedStats';
 import { machineKindLabel, machineStateLabel } from '../../utils/adminView';
-import { formatBitRate, formatBytes, formatDuration, formatMemory } from '../../utils/format';
+import { formatBitRate, formatBytes, formatDuration, formatMemory, formatPercent } from '../../utils/format';
 import { stateBadgeClass, stateLabel } from '../../utils/hostedState';
 
 const POLL_MS = 30_000;
 
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 
 const usage = ref<FleetUsage | null>(null);
 const loadedAt = ref<number | null>(null);
@@ -238,15 +229,12 @@ function plural(n: number, unit: string): string {
   return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
-// "0.45 CPUs", "1 CPU", "12.5 CPUs".
+// "0.45 vCPU", "1 vCPU", "12.5 vCPU": CPUs in use or their limits, in the unit
+// the charts and ECS size them in (utils/format.ts formatCpus, which reads
+// none in use as unknown: here it is a reading).
 function formatCpus(cpus: number): string {
   const shown = cpus < 10 ? Math.round(cpus * 100) / 100 : Math.round(cpus * 10) / 10;
-  return `${shown} CPU${shown === 1 ? '' : 's'}`;
-}
-
-// "23%", "7.5%": a share of the slot's CPUs.
-function formatPercent(percent: number): string {
-  return `${percent < 10 ? Math.round(percent * 10) / 10 : Math.round(percent)}%`;
+  return `${shown} vCPU`;
 }
 
 const poll = usePolling({

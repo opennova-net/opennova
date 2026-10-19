@@ -1,19 +1,13 @@
 <template>
   <div class="space-y-10">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">Static addresses</h1>
-        <p class="text-sm text-ink-muted">
-          The fixed addresses of own machines, each named under {{ data?.zone || 'the play zone' }}.
-        </p>
-      </div>
-      <div class="flex items-center gap-3">
-        <p v-if="loadedAt" class="text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /></p>
-        <button type="button" :class="secondaryButton" :disabled="poll.loading.value" @click="poll.refresh">
-          {{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}
-        </button>
-      </div>
-    </header>
+    <AdminPageHeader
+      title="Static addresses"
+      :description="`The fixed addresses of own machines, each named under ${data?.zone || 'the play zone'}.`"
+      :loaded-at="loadedAt"
+      :now="now"
+      :loading="poll.loading.value"
+      @refresh="poll.refresh"
+    />
 
     <!-- Live regions, always in the page so a screen reader hears what lands in
          them, each its own box while it holds something: one copy of the text,
@@ -224,6 +218,7 @@
 // address's name typed (POST .../release); and the addresses the cloud holds
 // that no row names, which the sweep never releases.
 // The page polls, faster while an address is being set up or released.
+import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';

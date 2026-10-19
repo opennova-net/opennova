@@ -1,6 +1,6 @@
 // The AWS costs as GET /api/admin/costs answers them (types/costs.ts): a
 // deployment's October to the 19th, $41.25 so far, a $117.20 forecast against a
-// $250 budget.
+// $250 budget, read at a fixed time (two calls give equal fixtures).
 
 import type { Costs } from '../types/costs';
 
@@ -9,7 +9,7 @@ export function costs(overrides: Partial<Costs> = {}): Costs {
     available: true,
     unavailable: null,
     error: null,
-    read_at: new Date(Date.now() - 2 * 3600_000).toISOString(),
+    read_at: '2026-10-19T10:00:30Z',
     currency: 'USD',
     month: { start: '2026-10-01', end: '2026-11-01' },
     through: '2026-10-19',

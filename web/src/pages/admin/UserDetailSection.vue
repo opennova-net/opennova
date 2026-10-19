@@ -2,10 +2,8 @@
   <div class="space-y-10">
     <AdminCrumbs />
 
-    <div role="status" class="sr-only">{{ message }}</div>
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
 
     <div v-if="detail === null && loading" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
       Loading the account…

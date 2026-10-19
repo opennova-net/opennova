@@ -14,11 +14,13 @@ const wire = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
 
 describe('the costs client', () => {
   it('reads the month as the server sends it', async () => {
-    expect(pickCosts(wire(costs()))).toEqual(costs());
-    expect(pickCosts(wire(localCosts()))).toEqual(localCosts());
-    get.mockResolvedValue({ status: 200, data: wire(costs()) });
+    const month = costs();
+    expect(pickCosts(wire(month))).toEqual(month);
+    const local = localCosts();
+    expect(pickCosts(wire(local))).toEqual(local);
+    get.mockResolvedValue({ status: 200, data: wire(month) });
     const result = await fetchCosts();
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ ok: true, value: month });
     expect(get).toHaveBeenCalledWith('/costs', { signal: undefined });
   });
 

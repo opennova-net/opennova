@@ -1817,7 +1817,11 @@ it). A newer RunsOn: the module's `version` in `infra/ci/runners.tf`, then `ci a
 Every command here takes the deployment it reads or changes: `--deployment staging` or
 `--deployment prod`.
 
-- **At a glance.** The site's admin page **Infrastructure** (`/admin/infrastructure`) shows
+- **At a glance.** The site's admin **Overview** (`/admin/overview`) puts what needs you
+  first, then each area of the admin with its state in words and its key numbers:
+  NovaWorld (sign-in, sessions), Hosting (servers, machines, players), People and money
+  (subscribers, payments past due, the AWS bill against the budget) and Operations (alarms,
+  background jobs). Its page **Infrastructure** (`/admin/infrastructure`) shows
   what `app status` does and more: each program's service (its counts, rollout and revision
   against the release), its tasks (health, zone, address, image, the recently stopped ones'
   exit codes) and events, the load balancer's targets, the database's and the cache's status,
