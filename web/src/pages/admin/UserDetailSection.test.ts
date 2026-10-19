@@ -257,7 +257,7 @@ describe('UserDetailSection', () => {
     await wrapper.get('#user-comp-servers').setValue(2);
     await wrapper.get('#user-comp-own').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
-    // The server cut stops the newest (a shared one): both own-machine servers keep their machines.
+    // The server cut stops the newest (a shared one): both servers on dedicated machines keep their machines.
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('stops its newest server'));
     expect(confirm).not.toHaveBeenCalledWith(expect.stringContaining('dedicated machines to'));
     expect(comp).toHaveBeenCalledWith(7, { servers: 2, own_machines: 2 });

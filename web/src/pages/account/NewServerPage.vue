@@ -70,12 +70,12 @@
 // (HostedSettingsForm, POST /api/me/servers), offered only while the
 // account's entitlement has room (GET /api/me/servers). `from` names one of
 // the account's ended servers to start again: the form begins with its
-// settings (its try again, after a failure), on a dedicated machine when it ran on
-// one. On a dedicated machine the form offers the account's free static addresses
-// (GET /api/me/addresses: its own, ready, no live server's), the one `from`
-// (else the newest server) ran at first, so a server started again keeps its
-// dedicated machine and its address. A start that went in goes to the new server's
-// page.
+// settings (its try again, after a failure), on a dedicated machine when it
+// ran on one. On a dedicated machine the form offers the account's free
+// static addresses (GET /api/me/addresses: its own, ready, no live server's),
+// the one `from` (else the newest server) ran at first, so a server started
+// again keeps its dedicated machine and its address. A start that went in
+// goes to the new server's page.
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import HostedSettingsForm from '../../components/HostedSettingsForm.vue';
@@ -163,9 +163,9 @@ function onStarted(server: HostedServer) {
 
 // A refusal that means the page's picture is out of date (the entitlement,
 // the payment or hosting changed): read it again, which takes the form away
-// when no start is allowed, so the refusal's sentence stays above it. An own
-// machine or a static address taken meanwhile only takes it from the form
-// (the form says why).
+// when no start is allowed, so the refusal's sentence stays above it. A
+// dedicated machine or a static address taken meanwhile only takes it from
+// the form (the form says why).
 function onRefused(error: HostedError) {
   if (error.code === 'unauthorized') {
     void onSessionEnded();

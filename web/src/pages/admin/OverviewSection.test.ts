@@ -155,8 +155,8 @@ describe('OverviewSection', () => {
     expect(figure(page, 'NovaWorld', 'Sign-in')).toContain('Open');
     expect(figure(page, 'NovaWorld', 'Signed in now')).toBe('Signed in now21 hosts a server');
     expect(figure(page, 'Hosting', 'Live servers')).toContain('1 of 24 shared');
-    expect(figure(page, 'Hosting', 'Live servers')).toContain('0 of 2 own');
-    expect(figure(page, 'Hosting', 'Machines')).toContain('1 shared, 1 own');
+    expect(figure(page, 'Hosting', 'Live servers')).toContain('0 of 2 dedicated');
+    expect(figure(page, 'Hosting', 'Machines')).toContain('1 shared, 1 dedicated');
     expect(figure(page, 'Hosting', 'Players on hosted servers')).toContain('5');
     expect(area(page, 'Hosting').get('svg').attributes('aria-label')).toContain('Players on hosted servers, last 24 hours');
     expect(figure(page, 'People and money', 'Subscribers')).toContain('Tier 1: 1, Tier 2: 2, Tier 3: 1');

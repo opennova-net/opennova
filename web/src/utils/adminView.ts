@@ -34,9 +34,10 @@ export function ownerHostingLabel(owner: { tier: number | null; granted: boolean
   return parts.length > 0 ? parts.join(', ') : 'No tier';
 }
 
-// Where an entitlement's servers run, as the sold capacity counts them: an own
-// machine takes one of them off the shared machines and adds none.
-// "9 on shared machines, 2 on dedicated machines", "All on shared machines", "None".
+// Where an entitlement's servers run, as the sold capacity counts them: a
+// dedicated machine takes one of them off the shared machines and adds none.
+// "9 on shared machines, 2 on dedicated machines", "All on shared machines",
+// "None".
 export function serverPlacesLabel(e: { max_servers: number; own_machines: number }): string {
   if (e.max_servers <= 0) return 'None';
   const own = Math.min(e.own_machines, e.max_servers);
@@ -47,7 +48,8 @@ export function serverPlacesLabel(e: { max_servers: number; own_machines: number
 }
 
 // The service's sold capacity against what the fleet sells, item by item:
-// "Sold: 9 of 12 shared places, 2 of 2 dedicated machines, 0 of 1 static addresses."
+// "Sold: 9 of 12 shared places, 2 of 2 dedicated machines, 0 of 1 static
+// addresses."
 export function soldCapacityText(c: SoldCapacity): string {
   return (
     `Sold: ${c.shared.sold} of ${c.shared.sellable} shared places, ` +

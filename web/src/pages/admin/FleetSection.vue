@@ -37,7 +37,7 @@
 
       <dl v-if="fleet" class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
         <StatTile label="Hosting" :value="fleet.enabled ? 'On' : 'Off'" :detail="fleet.enabled ? 'Owners can start servers' : 'No server can start'" />
-        <StatTile label="Live servers" :value="`${fleet.shared.live} of ${fleet.shared.room} shared`" :detail="`${fleet.own.live} of ${fleet.own.room} own`" />
+        <StatTile label="Live servers" :value="`${fleet.shared.live} of ${fleet.shared.room} shared`" :detail="`${fleet.own.live} of ${fleet.own.room} dedicated`" />
         <StatTile label="Machines" :value="String(activeMachines.length)" :detail="machineBreakdown" />
       </dl>
 
@@ -358,7 +358,7 @@ function serversOn(m: FleetMachine): FleetServer[] {
 const machineBreakdown = computed(() => {
   const shared = activeMachines.value.filter((m) => m.kind === 'shared').length;
   const own = activeMachines.value.length - shared;
-  return `${shared} shared, ${own} own`;
+  return `${shared} shared, ${own} dedicated`;
 });
 
 function flash(text: string) {

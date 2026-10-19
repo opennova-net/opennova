@@ -1,6 +1,6 @@
 // The admin billing page's monthly total (an estimate): the subscriptions
 // that grant hosting now, by tier, at the tiers' prices today, plus the
-// dedicated machine add-on by quantity and, where the deployment sells them, the
+// dedicated machines by quantity and, where the deployment sells them, the
 // static addresses. Not what Stripe pays out (no fees, no tax, no proration).
 
 import type { AdminSubscription, TiersResponse } from '../types/billing';

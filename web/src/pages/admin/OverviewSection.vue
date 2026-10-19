@@ -47,12 +47,12 @@
           <OverviewFigure
             label="Live servers"
             :value="fleet ? `${fleet.shared.live} of ${fleet.shared.room} shared` : 'Unknown'"
-            :detail="fleet ? (fleet.enabled ? `${fleet.own.live} of ${fleet.own.room} own` : 'Hosting is off') : 'Not read'"
+            :detail="fleet ? (fleet.enabled ? `${fleet.own.live} of ${fleet.own.room} dedicated` : 'Hosting is off') : 'Not read'"
           />
           <OverviewFigure
             label="Machines"
             :value="fleet ? String(machines.shared + machines.own) : 'Unknown'"
-            :detail="fleet ? `${machines.shared} shared, ${machines.own} own` : 'Not read'"
+            :detail="fleet ? `${machines.shared} shared, ${machines.own} dedicated` : 'Not read'"
           />
           <OverviewFigure
             label="Players on hosted servers"

@@ -1,12 +1,14 @@
 // What the pages show of static addresses (types/addresses.ts): a name's rule
 // and its check before the request, each state in plain words, the address
-// players join, and which addresses a new own-machine server may take.
+// players join, and which addresses a new server on a dedicated machine may
+// take.
 
 import type { Address, AddressState, ServerAddress } from '../types/addresses';
 import type { HostedServer } from '../types/hostedServer';
 
 // The game port a dedicated machine's servers list at (its one slot, slot 0;
-// hosted/protocol/slots.h slot_game_port): a server JSON's address names no port.
+// hosted/protocol/slots.h slot_game_port): a server JSON's address names no
+// port.
 export const ADDRESS_GAME_PORT = 32768;
 
 // hosted/model/address_names.h: 3 to 32 of lower-case letters, digits and '-', a
@@ -81,8 +83,8 @@ export function serverAddressEndpoint(address: Pick<ServerAddress, 'public_ip'>)
   return address.public_ip ? `${address.public_ip}:${ADDRESS_GAME_PORT}` : '';
 }
 
-// The addresses a new own-machine server may run at: the ready ones no live
-// server uses.
+// The addresses a new server on a dedicated machine may run at: the ready
+// ones no live server uses.
 export function freeAddresses(addresses: readonly Address[]): Address[] {
   return addresses.filter((a) => a.state === 'ready' && a.server === null);
 }

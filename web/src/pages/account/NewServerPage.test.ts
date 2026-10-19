@@ -25,7 +25,8 @@ const one = vi.mocked(fetchMyServer);
 const addresses = vi.mocked(fetchMyAddresses);
 const start = vi.mocked(startHostedServer);
 
-// An own-machine server that ran at the static address fleettest (id 3), stopped.
+// A server on a dedicated machine that ran at the static address fleettest
+// (id 3), stopped.
 function stoppedAtAddress(overrides: Partial<HostedServer> = {}): HostedServer {
   return hostedServer(7, {
     state: 'stopped',
@@ -82,7 +83,7 @@ describe('NewServerPage', () => {
     wrapper = null;
   });
 
-  it('starts an own-machine server again on a dedicated machine at its static address', async () => {
+  it('starts a server that ran on a dedicated machine again on one, at its static address', async () => {
     // Another free address listed first: the old server's is the one picked.
     const page = await mountPage(stoppedAtAddress(), [address(4, 'arena'), address(3, 'fleettest')]);
     expect(one).not.toHaveBeenCalled();

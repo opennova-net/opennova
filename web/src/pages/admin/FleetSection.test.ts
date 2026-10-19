@@ -118,9 +118,9 @@ describe('FleetSection', () => {
     expect(cards[0].get('.machine-report').text()).toBe('Last report 4 s ago');
     expect(cards[1].text()).toContain('Dedicated machine');
     expect(cards[1].text()).toContain('c7a.medium');
-    expect(page.text()).toContain('1 shared, 1 own');
+    expect(page.text()).toContain('1 shared, 1 dedicated');
     expect(page.text()).toContain('1 of 24 shared');
-    expect(page.text()).toContain('0 of 2 own');
+    expect(page.text()).toContain('0 of 2 dedicated');
   });
 
   it("puts each server in its machine's slot from the machine's own slot holders, whatever the list shows", async () => {
@@ -270,7 +270,7 @@ describe('FleetSection', () => {
     });
     const page = await mountSection();
     // Only the lost one counts as a machine: a failed one never ran.
-    expect(page.text()).toContain('1 shared, 0 own');
+    expect(page.text()).toContain('1 shared, 0 dedicated');
     // The failed and the ended one are history once a later machine launched.
     expect(page.findAll('article.machine-card')).toHaveLength(1);
     await page.findAll('button').find((b) => b.text() === 'Show history (2)')!.trigger('click');

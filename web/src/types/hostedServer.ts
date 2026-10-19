@@ -49,9 +49,9 @@ export interface HostedSettings {
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
 
 // POST /api/me/servers's body: the settings, whether the server runs on one
-// of the account's dedicated machines (the dedicated machine add-on) rather than a shared
-// one, and on a dedicated machine the static address it runs at (one of the
-// account's ready ones; absent or null for none).
+// of the account's dedicated machines rather than a shared one, and on a
+// dedicated machine the static address it runs at (one of the account's
+// ready ones; absent or null for none).
 export type StartRequest = StartSettings & { own_machine?: boolean; address_id?: number | null };
 
 // The whole-number settings, each with its range per data set.
@@ -211,7 +211,7 @@ export interface HostedServer {
   state: HostedState;
   // Any state but stopped and failed.
   live: boolean;
-  // It runs on a machine of its own (the dedicated machine add-on), not a shared one.
+  // It runs on a machine of its own (a dedicated machine), not a shared one.
   own_machine: boolean;
   // The static address it runs at (a dedicated machine's), or null.
   address: ServerAddress | null;
@@ -309,8 +309,8 @@ export interface FleetOwner {
   granted: boolean;
 }
 
-// A machine's kind: a shared machine packs several servers, a dedicated machine
-// runs exactly one (the dedicated machine add-on).
+// A machine's kind: a shared machine packs several servers, a dedicated
+// machine runs exactly one, its owner's.
 export type MachineKind = 'shared' | 'own';
 
 // launching -> booting -> ready -> draining -> ending -> ended | failed; lost

@@ -216,8 +216,8 @@
       :disabled="busy"
     />
 
-    <!-- The dedicated machine add-on: shown while one of the account's dedicated machines
-         is free. -->
+    <!-- A dedicated machine: shown while one of the account's dedicated
+         machines is free. -->
     <div v-if="ownMachinesFree > 0" class="min-w-0 space-y-1">
       <label class="flex items-center gap-3 text-sm text-ink">
         <input
@@ -270,10 +270,10 @@
 // account's start page (pages/account/NewServerPage.vue), offered only while
 // its entitlement has room. Started from an ended server, it begins with that
 // server's settings (after a failed one, the owner's try again). The
-// own-machine checkbox shows while one of the account's dedicated machines is free,
-// checked from the start when the server started again ran on one, and with
-// it checked a pick of the account's free static addresses (the one
-// `preferredAddressId` names first) while any is.
+// dedicated machine checkbox shows while one of the account's dedicated
+// machines is free, checked from the start when the server started again ran
+// on one, and with it checked a pick of the account's free static addresses
+// (the one `preferredAddressId` names first) while any is.
 // The game (a base data set the service offers, by id) comes first and drives
 // the rest: the expansions it offers (expansion data sets with data), the
 // whole-number ranges and the rotation's missions, which are the game's data's
@@ -322,8 +322,8 @@ const props = withDefaults(
     retry?: boolean;
     // The base of every id in the form.
     baseId?: string;
-    // How many of the account's dedicated machines are free; the own-machine
-    // checkbox shows while any is.
+    // How many of the account's dedicated machines are free; the dedicated
+    // machine checkbox shows while any is.
     ownMachinesFree?: number;
     // The ended server started again ran on a dedicated machine: the checkbox
     // starts checked (while one is free).
@@ -351,7 +351,8 @@ const emit = defineEmits<{
   (e: 'refused', error: HostedError): void;
 }>();
 
-// Run on one of the account's dedicated machines: as the server started again did.
+// Run on one of the account's dedicated machines: as the server started again
+// did.
 const ownMachine = ref(props.previousOwnMachine && props.ownMachinesFree > 0);
 // The static address it runs at there, null for none: the preferred one while
 // it is free, else the first free one.

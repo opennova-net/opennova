@@ -439,10 +439,10 @@ export function fetchMyServer(id: number, signal?: AbortSignal): Promise<HostedR
 }
 
 // POST /api/me/servers: a new server, requested (202), with these settings,
-// on one of the account's dedicated machines when `ownMachine`, there at the static
-// address `addressId` when one is named (409 address_unavailable when it is
-// not ready, or another live server's). The service's supervisor takes it
-// from there.
+// on one of the account's dedicated machines when `ownMachine`, there at the
+// static address `addressId` when one is named (409 address_unavailable when
+// it is not ready, or another live server's). The service's supervisor takes
+// it from there.
 export function startHostedServer(
   settings: StartSettings,
   ownMachine = false,

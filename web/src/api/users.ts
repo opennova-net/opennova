@@ -179,11 +179,12 @@ export function updateUser(id: number, payload: UpdateUserPayload): Promise<Admi
   return adminCall(() => adminClient.put<unknown>(`/users/${id}`, payload), pickUserReply);
 }
 
-// PUT /api/admin/users/<id>/comp: the admin's grants of hosted servers and own
-// machines (0 to 16 each, both set at once), answered with the account and
-// the sold capacity (a grant counts as sold, and may take it past what the
-// fleet sells). Lowering them below what the account runs makes the service
-// stop its newest servers first; 404 not_found for an unknown account.
+// PUT /api/admin/users/<id>/comp: the admin's grants of hosted servers and
+// dedicated machines (0 to 16 each, both set at once), answered with the
+// account and the sold capacity (a grant counts as sold, and may take it past
+// what the fleet sells). Lowering them below what the account runs makes the
+// service stop its newest servers first; 404 not_found for an unknown
+// account.
 export function setCompGrants(id: number, grants: CompGrants): Promise<AdminResult<CompGrantsReply>> {
   return adminCall(
     () => adminClient.put<unknown>(`/users/${id}/comp`, { servers: grants.servers, own_machines: grants.own_machines }),

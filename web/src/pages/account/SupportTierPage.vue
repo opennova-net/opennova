@@ -228,7 +228,7 @@
 
 <script setup lang="ts">
 // /me/support: the account's support tier (GET /api/me/billing) and the tiers
-// on offer (GET /api/billing/tiers), with the own-machine and static address
+// on offer (GET /api/billing/tiers), with the dedicated machine and static address
 // add-ons (each a checkout of its own; an item the fleet is sold out of says
 // so and cannot be bought). With no tier, Subscribe starts a Stripe
 // Checkout (POST /api/billing/checkout); with one, every change, the payment

@@ -366,8 +366,8 @@ function money(cents: number): string {
   return formatMoney(cents, tiers.value?.currency ?? 'usd');
 }
 
-// "3 servers, 1 dedicated machine and 1 static address": an admin's grant, what it
-// gives.
+// "3 servers, 1 dedicated machine and 1 static address": an admin's grant,
+// what it gives.
 function grantText(g: AdminCompGrant): string {
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const parts = [

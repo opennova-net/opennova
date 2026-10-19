@@ -20,8 +20,8 @@ export interface User {
   // read-only on the admin pages.
   email: string | null;
   role: Role;
-  // An admin's grants (comp_grants, 0 to 16 each): hosted servers, and own
-  // machines for them (counted while the account has servers).
+  // An admin's grants (comp_grants, 0 to 16 each): hosted servers, and
+  // dedicated machines for them (counted while the account has servers).
   comp_servers: number;
   comp_own_machines: number;
   // The account's hosting entitlement: the larger of its tier's servers and
@@ -78,10 +78,10 @@ export interface SoldItem {
   sellable: number;
 }
 
-// The service's sold capacity (hosted/model/sold_capacity.h): shared places, own
-// machines and static addresses. `oversold` when any is past what the fleet
-// sells (an admin's grant can take it there): new subscriptions of it are
-// paused.
+// The service's sold capacity (hosted/model/sold_capacity.h): shared places,
+// dedicated machines and static addresses. `oversold` when any is past what
+// the fleet sells (an admin's grant can take it there): new subscriptions of
+// it are paused.
 export interface SoldCapacity {
   shared: SoldItem;
   own_machines: SoldItem;

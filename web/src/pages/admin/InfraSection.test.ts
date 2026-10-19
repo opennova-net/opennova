@@ -193,7 +193,7 @@ describe('InfraSection', () => {
 
     // The machines in one line, their page the Fleet's.
     const machines = page.get('.infra-machines-summary');
-    expect(machines.text()).toContain('1 machine live (1 shared, 0 own), 4 of 12 slots in use.');
+    expect(machines.text()).toContain('1 machine live (1 shared, 0 dedicated), 4 of 12 slots in use.');
     expect(machines.get('a').attributes('href')).toBe('/admin/fleet');
 
     // Each AWS resource opens its charts.

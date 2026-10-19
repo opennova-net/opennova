@@ -440,7 +440,7 @@ const machinesSummary = computed(() => {
   const shared = live.filter((m) => m.kind === 'shared').length;
   const used = live.reduce((n, m) => n + m.slots_used, 0);
   const slots = live.reduce((n, m) => n + m.slots, 0);
-  return `${countLabel(live.length, 'machine')} live (${shared} shared, ${live.length - shared} own), ${used} of ${slots} slots in use.`;
+  return `${countLabel(live.length, 'machine')} live (${shared} shared, ${live.length - shared} dedicated), ${used} of ${slots} slots in use.`;
 });
 // Live machines EC2 lists as no longer running.
 const ec2Gone = computed(() => liveMachines.value.filter((m) => m.ec2_state !== null && m.ec2_state !== 'running' && m.ec2_state !== 'pending').length);
