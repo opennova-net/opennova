@@ -16,11 +16,14 @@
     </header>
 
     <!-- Live regions, always in the page so a screen reader hears what lands in
-         them; the boxes below are their visible copies. -->
-    <div role="status" class="sr-only">{{ message }}</div>
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+         them, each its own box while it holds something: one copy of the text,
+         so the page (and its text) says it once. -->
+    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">
+      {{ message }}
+    </div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">
+      {{ error }}
+    </div>
     <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
 
     <div v-if="data" class="space-y-1">

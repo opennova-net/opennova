@@ -129,7 +129,19 @@ describe('AddressesSection', () => {
     input.element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(release).toHaveBeenCalledWith(1, 'smoke');
-    expect(page.get('[role="status"]').text()).toContain('smoke.play.opennova.net is being released');
+    const status = page.get('[role="status"]');
+    expect(status.text()).toBe('smoke.play.opennova.net is being released: a server running at it moves to another address first.');
+    // Said once: the live region is the box itself, not a hidden copy beside a shown one.
+    expect(page.text().split('is being released').length - 1).toBe(1);
+    expect(status.classes()).not.toContain('sr-only');
+  });
+
+  it('keeps its live regions in the page, hidden while they hold nothing', async () => {
+    const page = await mountSection();
+    for (const region of [page.get('[role="status"]'), page.get('[role="alert"]')]) {
+      expect(region.text()).toBe('');
+      expect(region.classes()).toContain('sr-only');
+    }
   });
 
   it('retries an address the cloud refused, and says when it tries again by itself', async () => {
