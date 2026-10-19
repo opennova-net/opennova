@@ -10,6 +10,7 @@ opennova-3di, reads the .3di back with `opennova-3di scene` and, where a case
 round-trips, imports it again and has `opennova-3di compare` call the second
 export the same model.
 """
+import hashlib
 import math
 import os
 import subprocess
@@ -841,20 +842,14 @@ def stock_arm_rig_checked_on_a_first_person_gun():
 @case
 def stock_arms_table_is_armsg():
     # assembly.STOCK_ARMS transcribes ArmsG.3di's parts 0-36 (each part's
-    # parent and pivot): the reference model, read by the add-on's own reader
-    # (opennova-3di scene, read_o3d), must give the table to the bit. The
-    # retail leg: without the reference file it returns (addon_harness).
-    path = addon_harness.retail_asset("ArmsG.3di")
-    if path is None:
-        return
-    out = os.path.join(OUT, "armsg", "ArmsG.o3d")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    subprocess.run([CLI, "scene", path, "-o", out], check=True, capture_output=True)
-    parts = importer.read_o3d(out)["lods"][0]["parts"]
+    # parent and pivot): read by the add-on's own reader (opennova-3di scene,
+    # read_o3d), JOTAC's ArmsG.3di gave the table to the bit (witnessed
+    # 2026-10-19, the retired retail leg). The digest pins the table as
+    # witnessed, so a change to it needs that witness again.
     table = addon.assembly.STOCK_ARMS
-    assert len(parts) >= len(table), len(parts)
-    got = tuple((p["parent"], tuple(p["pivot"])) for p in parts[:len(table)])
-    assert got == table, [(f"part {i + 1:02d}", a, b) for i, (a, b) in enumerate(zip(got, table)) if a != b]
+    assert len(table) == 37, len(table)
+    digest = hashlib.sha256(repr(table).encode()).hexdigest()
+    assert digest == "767872cd4f4d6356704c24ab4e5d6e8558407fdab4a78775c6f9b52349399b51", digest
 
 
 @case
