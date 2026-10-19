@@ -36,10 +36,11 @@ inline bool friendly_tag_entry_bails(bool is_local, uint32_t flags,
 // every team [orig: HUD_DrawEntityLabel death arm @0x5a3c33..0x5a3c3a; team
 // compare @0x5a3c6b..0x5a3c7d]: an unequal team, neutral 0 included, draws
 // magenta only under `g_EnemyTagsVisible` and otherwise bails
-// [orig: @0x5a3c7f..0x5a3c95]. The grant's S2C 0x0A edge only rises with the
-// death screen here, whose arm already admits every team; its spectator-mode
-// and action-130 writers are unported, so the drawer's ordinary-play leg is
-// the bail. Magenta outside the death screen can only reach team 0: the pass
+// [orig: @0x5a3c7f..0x5a3c95]. The grant's writers here, the S2C 0x0A edge and
+// the S2C 0x75 spectator mode [orig: NapiNPClientMsg_SetSpectatorMode
+// @0x4259e0], both rise with the death screen, whose arm already admits every
+// team; the action-130 toggle is unported (no catalog row), so the drawer's
+// ordinary-play leg is the bail. Magenta outside the death screen can only reach team 0: the pass
 // gate has already dropped a real enemy.
 inline bool friendly_tag_pass_gates(uint8_t team, uint8_t local_team,
                                     bool death_screen, uint32_t game_type) {

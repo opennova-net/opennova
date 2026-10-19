@@ -33,8 +33,11 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
 
     // Built unconditionally at the top of the original, before the branch split.
     // v142 (head/full aim): Roll = torsoRoll + lean/2 while Yaw/Pitch stay the aim pair.
-    // [orig: @ 0x4b17e5 + 0x4b180a. The local-player fine pitch kick
-    //  (dword_3346FA8 << 17, @ 0x4b17fb) is unported -- its writer is unwitnessed.]
+    // [orig: @ 0x4b17e5 + 0x4b180a. The speaking entity's pitch kick (the body
+    //  that is g_VoicePlaybackEntity, `cmp` @ 0x4b17e8, takes g_AudioOutLevel << 17,
+    //  @ 0x4b17f0..0x4b17fb) is unported: its writers are witnessed (the mixer's
+    //  output meter; world-wac-ai-re §14.3 / §14.5), and the port needs a mixer
+    //  output-level tap.]
     out[kOverlayHead] = {A, P, bam_add(TR, bam_sar(LN, 1))};
     // v132 (body): bodyHeading / bodyPitch / original Roll. [orig: @ 0x4b182e]
     out[kOverlayBody] = {B, Q, R};

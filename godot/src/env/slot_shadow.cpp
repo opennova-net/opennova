@@ -967,8 +967,8 @@ void SlotShadow::advance_frame() {
 		// 0.2..5000.2 band (renderer::kSilhouetteCaptureNear/Far), a band that
 		// as read starts in front of the entity's own origin; the RD ortho
 		// clips outside [near, far] the same way, so this eye backs off along
-		// -forward by two sphere diameters plus the retail near margin and the
-		// band spans the sphere. An orthographic silhouette is invariant under
+		// -forward by one sphere diameter (2 * radius) plus 2 u and the band
+		// spans the sphere. An orthographic silhouette is invariant under
 		// that translation, so the capture is the same image.
 		const float radius = casters[*caster_index.getptr(slot.id)].caster.capture_radius;
 		const float half_extent = capture.half_extent;

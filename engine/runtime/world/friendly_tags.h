@@ -59,8 +59,8 @@ struct FriendlyTagSource {
     // The player slot's squad colour index (slot+0x33), the good/middle tier
     // override (hud_frame.h friendly_tag_squad_color), read off the slot
     // (ClientRosterSlot::squad_color). Its only writer is the client-local
-    // CMAP entity click [orig: CMap_EntityWidgetHandler @0x5485E4], unported
-    // with the CMAP tabs, so it reads 0 (no override).
+    // CMAP TEAMLIST Map-column click [orig: CMap_EntityWidgetHandler @0x5485E4],
+    // ported as menu::command_map_team_list_click; 0 is no override.
     uint8_t squad_color_index = 0;
 };
 
