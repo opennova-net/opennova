@@ -1,26 +1,18 @@
 <template>
   <div class="space-y-8">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">Background jobs</h1>
-        <p class="text-sm text-ink-muted">
-          Work NovaWorld does in the background: cloud calls, the Stripe sync, mail and prunes.
-        </p>
-      </div>
-      <div class="flex items-center gap-3">
-        <p v-if="loadedAt" class="text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /></p>
-        <button type="button" :class="secondaryButton" :disabled="poll.loading.value" @click="refresh">
-          {{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}
-        </button>
-      </div>
-    </header>
+    <AdminPageHeader
+      title="Background jobs"
+      description="Work NovaWorld does in the background: cloud calls, the Stripe sync, mail and prunes."
+      :loaded-at="loadedAt"
+      :now="now"
+      :loading="poll.loading.value"
+      @refresh="refresh"
+    />
 
     <!-- Live regions, always in the page so a screen reader hears what lands in
-         them; the boxes below are their visible copies. -->
-    <div role="status" class="sr-only">{{ message }}</div>
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+         them, each its own box while it holds something: the text once. -->
+    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
     <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
 
     <ul v-if="warnings.length" class="jobs-warnings space-y-2">
@@ -76,9 +68,9 @@
 // prune) and Schedules (each periodic kind, run now). The overview is polled
 // every 15 s, every 5 s while a job waits or runs; the Jobs tab reads its own
 // page.
+import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
-import RelativeTime from '../../components/RelativeTime.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import JobsListTab from './JobsListTab.vue';
 import JobsOverviewTab from './JobsOverviewTab.vue';
@@ -102,8 +94,6 @@ const IDLE_POLL_MS = 15_000;
 // The oldest due job's wait past which the page warns.
 const LATENCY_WARN_S = 60;
 
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 
 const route = useRoute();
 

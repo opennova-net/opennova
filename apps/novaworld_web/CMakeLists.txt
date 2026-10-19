@@ -65,6 +65,9 @@ add_library(opennova_novaworld_web_core STATIC
     # firing CloudWatch alarms, and its route.
     infra/alarm_store.cpp
     infra/attention_routes.cpp
+    # The month's AWS bill (Cost Explorer and the deployment's budget) and its route.
+    infra/cost_store.cpp
+    infra/cost_routes.cpp
 )
 target_include_directories(opennova_novaworld_web_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # The service directly: the libpq containment

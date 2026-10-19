@@ -1,6 +1,7 @@
 <template>
   <div class="space-y-6">
-    <RouterLink :to="backPath" class="text-sm text-accent hover:text-ink-bright">{{ backLabel }}</RouterLink>
+    <AdminCrumbs v-if="scope === 'admin'" />
+    <RouterLink v-else to="/me/servers" class="text-sm text-accent hover:text-ink-bright">All servers</RouterLink>
 
     <div v-if="server === null && !loadError" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
       Loading the server…
@@ -92,6 +93,7 @@
 // and the admin's extra ones).
 // The page polls the server on the hosted cadence (usePolling) and provides
 // the console queue its Console tab's calls go through.
+import AdminCrumbs from '../../components/AdminCrumbs.vue';
 import { computed, ref, watch } from 'vue';
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
 import { fetchFleetServer } from '../../api/admin';
@@ -126,8 +128,6 @@ const heading = ref<HTMLElement | null>(null);
 
 const id = computed(() => Number(route.params.id));
 const base = computed(() => (props.scope === 'admin' ? `/admin/fleet/${id.value}` : `/me/servers/${id.value}`));
-const backPath = computed(() => (props.scope === 'admin' ? '/admin/fleet' : '/me/servers'));
-const backLabel = computed(() => (props.scope === 'admin' ? 'Fleet' : 'All servers'));
 const owner = computed(() => (server.value as FleetServer | null)?.owner ?? null);
 
 // The owner's tabs; the admin's name the settings tab for the game's (beside

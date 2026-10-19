@@ -1,38 +1,21 @@
 <template>
   <div class="space-y-10">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">CD keys</h1>
-        <p class="text-sm text-ink-muted">
-          Delta Force Xtreme 2 keys, activated on a copy's first NovaWorld login. Joint Operations needs none.
-        </p>
-        <p v-if="list" class="mt-1 text-xs text-ink-muted">
-          <template v-if="list.auto_mint">
-            An account with no key gets one at its first activation.
-          </template>
-          <template v-else>Only keys assigned here activate.</template>
-        </p>
-      </div>
-      <button
-        type="button"
-        class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40"
-        :disabled="loading"
-        @click="load"
-      >
-        {{ loading ? 'Refreshing…' : 'Refresh' }}
-      </button>
-    </header>
+    <AdminPageHeader
+      title="CD keys"
+      description="Delta Force Xtreme 2 keys, activated on a copy's first NovaWorld login. Joint Operations needs none."
+      :loading="loading"
+      @refresh="load"
+    >
+      <p v-if="list" class="text-xs text-ink-muted">
+        <template v-if="list.auto_mint">An account with no key gets one at its first activation.</template>
+        <template v-else>Only keys assigned here activate.</template>
+      </p>
+    </AdminPageHeader>
 
     <!-- Live regions, always in the page so a screen reader hears what lands in
-         them; the boxes below are their visible copies. -->
-    <div role="status" class="sr-only">{{ message }}</div>
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">
-      {{ message }}
-    </div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-      {{ error }}
-    </div>
+         them, each its own box while it holds something: the text once. -->
+    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
 
     <section class="space-y-4" aria-labelledby="cd-generate-heading">
       <h2 id="cd-generate-heading" class="text-xl font-semibold text-ink">Generate</h2>
@@ -296,6 +279,7 @@
 // per key, a key's machines and a manual activation (/api/admin/cd-keys/<id>/
 // activations), and an account's keys and machines (/api/admin/users/<id>/cd-keys,
 // the account found by name in the users list).
+import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { defineComponent, h, onMounted, ref, computed, type PropType } from 'vue';
 import {
   activateCdKey,

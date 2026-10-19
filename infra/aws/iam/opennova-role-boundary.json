@@ -18,7 +18,10 @@
         "ecs:RegisterTaskDefinition",
         "elasticloadbalancing:DescribeTargetHealth",
         "cloudwatch:GetMetricData",
-        "cloudwatch:DescribeAlarms"
+        "cloudwatch:DescribeAlarms",
+        "ce:GetCostAndUsage",
+        "ce:GetCostForecast",
+        "budgets:ViewBudget"
       ],
       "Resource": "*"
     },

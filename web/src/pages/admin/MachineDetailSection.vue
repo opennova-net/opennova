@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-8">
-    <RouterLink to="/admin/fleet" class="text-sm text-accent hover:text-ink-bright">Fleet</RouterLink>
+    <AdminCrumbs />
 
     <div v-if="detail === null && !loadError" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
       Loading the machine…
@@ -165,6 +165,7 @@
 // holds with their progress, its timeline (its events), its usage
 // (UsageCharts, with its disk) and hostd's log (LogViewer). Polled every 10 s
 // while it lives.
+import AdminCrumbs from '../../components/AdminCrumbs.vue';
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import LogViewer from '../../components/LogViewer.vue';

@@ -247,7 +247,9 @@ run "deploy_users" {
           st.Action == "ecs:DescribeContainerInstances" && st.Resource == "arn:aws:ecs:us-east-1:111111111111:container-instance/opennova-*/*"
           ) : st.Sid == "Unscoped" ? (
           contains(st.Action, "elasticloadbalancing:DescribeTargetHealth") && contains(st.Action, "cloudwatch:GetMetricData") &&
-          contains(st.Action, "cloudwatch:DescribeAlarms") && st.Resource == "*" && !contains(keys(st), "Condition")
+          contains(st.Action, "cloudwatch:DescribeAlarms") && contains(st.Action, "ce:GetCostAndUsage") &&
+          contains(st.Action, "ce:GetCostForecast") && contains(st.Action, "budgets:ViewBudget") &&
+          st.Resource == "*" && !contains(keys(st), "Condition")
           ) : st.Sid == "Logs" ? (
           toset(st.Action) == toset(["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams", "logs:GetLogEvents", "logs:FilterLogEvents"]) &&
           toset(st.Resource) == toset([
@@ -258,7 +260,7 @@ run "deploy_users" {
       )
       ]) && length([for st in jsondecode(module.prod.documents.boundary).Statement : st
     if contains(["ListTasks", "TasksDbCache", "Clusters", "ReadFleet", "Unscoped", "Logs"], st.Sid)]) == 6
-    error_message = "the boundary holds web's infrastructure reads (infra/aws/programs.tf, fleet_agent.tf): OpenNova's clusters' tasks and container instances, its database and cache, the target groups' health, CloudWatch's metrics and alarms, and the /opennova/* logs' events; and the deploy workflow's ECS Exec on OpenNova's clusters and tasks"
+    error_message = "the boundary holds web's infrastructure reads (infra/aws/programs.tf, fleet_agent.tf): OpenNova's clusters' tasks and container instances, its database and cache, the target groups' health, CloudWatch's metrics and alarms, Cost Explorer's month and forecast and the monthly budget (web's costs view), and the /opennova/* logs' events; and the deploy workflow's ECS Exec on OpenNova's clusters and tasks"
   }
   assert {
     condition = alltrue([for m in [module.prod.documents, module.staging.documents] :

@@ -1,30 +1,22 @@
 <template>
   <div class="space-y-10">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">Game data</h1>
-        <p class="text-sm text-ink-muted">
-          A data set is a base game or an expansion. New servers start on its current data; running ones keep theirs
-          until updated.
-        </p>
-        <p v-if="data" class="mt-1 text-xs text-ink-muted">
-          Uploads go to {{ data.store.kind === 's3' ? 'S3' : "the service's local store" }} in {{ formatMemory(PART_SIZE) }} parts.
-        </p>
-      </div>
-      <div class="flex items-center gap-3">
-        <p v-if="loadedAt" class="text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /></p>
-        <button type="button" :class="secondaryButton" :disabled="poll.loading.value" @click="poll.refresh">
-          {{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}
-        </button>
-      </div>
-    </header>
+    <AdminPageHeader
+      title="Game data"
+      description="A data set is a base game or an expansion. New servers start on its current data; running ones keep theirs until updated."
+      :loaded-at="loadedAt"
+      :now="now"
+      :loading="poll.loading.value"
+      @refresh="poll.refresh"
+    >
+      <p v-if="data" class="text-xs text-ink-muted">
+        Uploads go to {{ data.store.kind === 's3' ? 'S3' : "the service's local store" }} in {{ formatMemory(PART_SIZE) }} parts.
+      </p>
+    </AdminPageHeader>
 
     <!-- Live regions, always in the page so a screen reader hears what lands in
-         them; the boxes below are their visible copies. -->
-    <div role="status" class="sr-only">{{ message }}</div>
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+         them, each its own box while it holds something: the text once. -->
+    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
     <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
 
     <!-- The data sets. -->
@@ -503,6 +495,7 @@
 // same way (POST releases, PUT each part, POST complete), then publish, retire
 // and delete. The page polls, faster while a tree or a release is being
 // worked on.
+import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { computed, onBeforeUnmount, nextTick, reactive, ref } from 'vue';
 import RelativeTime from '../../components/RelativeTime.vue';
 import {

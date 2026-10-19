@@ -241,11 +241,15 @@ resource "aws_iam_role_policy" "exec" {
 # deployment's name prefix (observability.tf) the attention list reads: IAM
 # judges a DescribeAlarms listing against alarm:*, whatever its prefix (a
 # grant of this deployment's alarm names alone was refused, on staging's
-# first read). The boundary
-# (infra/aws/iam/opennova-role-boundary.json) holds the same, so the org stack
-# applies it first.
+# first read). The costs view's: Cost Explorer's month and forecast, which
+# take no resource (they read the whole account, which holds this deployment
+# alone), and this deployment's monthly cost budget (observability.tf). The
+# boundary (infra/aws/iam/opennova-role-boundary.json) holds the same, so the
+# org stack applies it first.
 locals {
   log_group_prefix = "/opennova/${local.deployment}"
+  # The monthly cost budget's ARN (Budgets names a budget by account and name).
+  cost_budget_arn = "arn:${local.partition}:budgets::${local.account_id}:budget/${aws_budgets_budget.monthly_cost.name}"
   # Every group the log view reads, and each one's streams.
   read_log_groups = flatten([
     for g in ["service", "machines", "servers"] : [
@@ -337,6 +341,20 @@ data "aws_iam_policy_document" "infra_read" {
     effect    = "Allow"
     actions   = ["cloudwatch:DescribeAlarms"]
     resources = ["arn:${local.partition}:cloudwatch:${local.region}:${local.account_id}:alarm:*"]
+  }
+
+  statement {
+    sid       = "ReadCosts"
+    effect    = "Allow"
+    actions   = ["ce:GetCostAndUsage", "ce:GetCostForecast"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadBudget"
+    effect    = "Allow"
+    actions   = ["budgets:ViewBudget"]
+    resources = [local.cost_budget_arn]
   }
 }
 
@@ -444,8 +462,9 @@ locals {
   # each setting naming this deployment's own: the cluster and its services,
   # the fleet cluster ("" while hosting is off), the balancer's target groups
   # by listener, the database, the cache and the release parameter; the
-  # balancer by its metrics' dimension (the usage view's, metrics_store.h); and
-  # the start of every alarm's name (the attention list's, alarm_store.h).
+  # balancer by its metrics' dimension (the usage view's, metrics_store.h); the
+  # start of every alarm's name (the attention list's, alarm_store.h); and the
+  # monthly cost budget (the costs view's, cost_store.h).
   infra_status_env = {
     ONNET_INFRA_REGION            = local.region
     ONNET_INFRA_CLUSTER           = aws_ecs_cluster.main.name
@@ -456,6 +475,7 @@ locals {
     ONNET_INFRA_RELEASE_PARAMETER = aws_ssm_parameter.release.name
     ONNET_INFRA_LOAD_BALANCER     = aws_lb.public.arn_suffix
     ONNET_INFRA_ALARM_PREFIX      = "${local.name}-"
+    ONNET_INFRA_BUDGET            = local.cost_budget_arn
   }
 
   # The update service (ADR 0061, 0064): web serves retail UPDATE.EXE on the

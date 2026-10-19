@@ -1,27 +1,11 @@
 <template>
   <div class="space-y-10">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">Users</h1>
-        <p class="text-sm text-ink-muted">
-          Accounts with their support tier and hosted servers.
-        </p>
-      </div>
-      <button type="button" :class="secondaryButton" :disabled="loading" @click="refresh">
-        {{ loading ? 'Refreshing…' : 'Refresh' }}
-      </button>
-    </header>
+    <AdminPageHeader title="Users" description="Accounts with their support tier and hosted servers." :loading="loading" @refresh="refresh" />
 
     <!-- Live regions, always in the page so a screen reader hears what lands in
-         them; the boxes below are their visible copies. -->
-    <div role="status" class="sr-only">{{ message }}</div>
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">
-      {{ message }}
-    </div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-      {{ error }}
-    </div>
+         them, each its own box while it holds something: the text once. -->
+    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
 
     <section class="space-y-4" aria-labelledby="users-heading">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -137,6 +121,7 @@
 // entitlement; each opens its own page (/admin/users/<id>, UserDetailSection)
 // for the edits. And the admin's account creation (POST /api/admin/users, or
 // the public registration when no PCID is given, which makes one up).
+import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { createUserAdmin, listUsers, registerUser } from '../../api/users';
@@ -150,8 +135,6 @@ const inputClass =
   'w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none';
 const primaryButton =
   'rounded-control bg-accent px-4 py-2 text-sm font-medium text-on-accent transition hover:bg-accent/90 disabled:opacity-50';
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 
 const { user: sessionUser } = useSession();
 

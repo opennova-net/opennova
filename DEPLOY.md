@@ -1817,7 +1817,11 @@ it). A newer RunsOn: the module's `version` in `infra/ci/runners.tf`, then `ci a
 Every command here takes the deployment it reads or changes: `--deployment staging` or
 `--deployment prod`.
 
-- **At a glance.** The site's admin page **Infrastructure** (`/admin/infrastructure`) shows
+- **At a glance.** The site's admin **Overview** (`/admin/overview`) puts what needs you
+  first, then each area of the admin with its state in words and its key numbers:
+  NovaWorld (sign-in, sessions), Hosting (servers, machines, players), People and money
+  (subscribers, payments past due, the AWS bill against the budget) and Operations (alarms,
+  background jobs). Its page **Infrastructure** (`/admin/infrastructure`) shows
   what `app status` does and more: each program's service (its counts, rollout and revision
   against the release), its tasks (health, zone, address, image, the recently stopped ones'
   exit codes) and events, the load balancer's targets, the database's and the cache's status,
@@ -1868,7 +1872,10 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   200) and the EC2 data transfer out (`budget_egress_gb`): an email at 80% and at a 100%
   forecast; Cost Anomaly Detection by AWS service emails daily anomalies over
   `cost_anomaly_threshold_usd`. The hosted servers' egress is metered and shown, never
-  capped.
+  capped. The site's admin page **AWS costs** (`/admin/costs`, and its summary on the
+  admin Overview) shows the account's month so far by AWS service and by day, AWS's forecast
+  for the month and the monthly budget: web's task role reads Cost Explorer and the budget
+  (`infra/aws/programs.tf`), kept 6 hours, since each Cost Explorer request costs $0.01.
 - **A shell.** `./deploy/run.sh --deployment <deployment> app shell PROGRAM [CONTAINER]` (ECS Exec; the toolbox
   carries the Session Manager plugin it uses). `db psql` opens psql as the
   service's role in a one-off task over ECS Exec; `db psql -c 'SELECT ...'` runs one

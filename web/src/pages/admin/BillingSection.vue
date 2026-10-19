@@ -1,21 +1,14 @@
 <template>
   <div class="space-y-10">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">Billing</h1>
-        <p class="text-sm text-ink-muted">
-          Subscriptions as last read from Stripe. Change them in Stripe.
-        </p>
-      </div>
-      <button type="button" :class="secondaryButton" :disabled="loading" @click="load">
-        {{ loading ? 'Refreshing…' : 'Refresh' }}
-      </button>
-    </header>
+    <AdminPageHeader
+      title="Subscriptions"
+      description="Support tiers and add-ons as last read from Stripe. Change them in Stripe."
+      :loading="loading"
+      @refresh="load"
+    />
 
-    <div role="status" class="sr-only">{{ message }}</div>
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
 
     <!-- The hosted servers' limits hold, billing on or off. -->
     <section
@@ -286,6 +279,7 @@
 // canceling and doubled accounts, the subscriptions no account owns with
 // their relink (POST /api/admin/billing/link), every subscription, and the
 // webhook event log.
+import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';

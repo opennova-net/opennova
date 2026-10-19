@@ -513,6 +513,28 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(fleet_health_routes REDIS COMMAND fleet_health_routes_test)
     set_tests_properties(fleet_health_routes PROPERTIES TIMEOUT 120)
 
+    # The month's AWS costs (apps/novaworld_web/infra/cost_store.h), no database: Cost
+    # Explorer and Budgets behind a scripted CommandRunner, their global endpoints signed
+    # for us-east-1, GetCostAndUsage's body and pages added up by service and by day, the
+    # forecast from today, the budget by its ARN, AWS's refusals in words, a month's last
+    # day, the 6 h cache and a failure's 10 min, the local stack calling nothing.
+    add_executable(cost_store_test novaworld/cost_store_test.cpp)
+    target_link_libraries(cost_store_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_service)
+    target_include_directories(cost_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME cost_store COMMAND cost_store_test)
+
+    # Its route (infra/cost_routes.h) on in-process Crow listeners over a migrated
+    # database and a Redis namespace: refused without an admin, the local stack's
+    # available false, a deployment's month from the stub (no-store, kept, no credential).
+    add_executable(cost_routes_test novaworld/cost_routes_test.cpp)
+    target_link_libraries(cost_routes_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_service)
+    target_include_directories(cost_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(cost_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(cost_routes REDIS COMMAND cost_routes_test)
+    set_tests_properties(cost_routes PROPERTIES TIMEOUT 120)
+
     # The hosted data sets' admin routes (apps/novaworld_web/data_sets/, ADR 0064) on the
     # in-process Crow listener over a migrated database, a Redis namespace and a local
     # object store in a temp directory: every route refused without the admin, the list's

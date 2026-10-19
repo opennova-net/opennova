@@ -43,8 +43,8 @@ describe('UsageSection', () => {
     expect(tiles[1]).toContain('3 of 13 slots hold a server');
     expect(tiles[2]).toContain('200 MiB');
     expect(tiles[2]).toContain('Of 512 MiB');
-    expect(tiles[3]).toContain('0.25 CPUs');
-    expect(tiles[3]).toContain('Of 1 CPU,');
+    expect(tiles[3]).toContain('0.25 vCPU');
+    expect(tiles[3]).toContain('Of 1 vCPU,');
     // 150,000 bytes a second is 1.2 megabits a second.
     expect(tiles[4]).toContain('1.2 Mb/s');
     expect(tiles[5]).toContain('Sent to players in the last hour');
@@ -59,7 +59,7 @@ describe('UsageSection', () => {
     expect(rows[0].text()).toContain('Shared machine, t3a.large');
     expect(rows[0].text()).toContain('2 of 12');
     expect(rows[0].text()).toContain('200 MiB of 512 MiB');
-    expect(rows[0].text()).toContain('0.25 CPUs of 1 CPU');
+    expect(rows[0].text()).toContain('0.25 vCPU of 1 vCPU');
     expect(rows[0].text()).toContain('520 MB');
     // Its server has no recent sample: no memory or CPU to show.
     expect(rows[1].text()).toContain('Own machine, c7a.medium');
@@ -79,8 +79,8 @@ describe('UsageSection', () => {
     expect(running).toContain('6 of 32');
     expect(running).toContain('200 MiB of 512 MiB');
     expect(running).toContain('Peak 310 MiB in the last hour');
-    expect(running).toContain('25%');
-    expect(running).toContain('Mean 18%, peak 61%');
+    expect(running).toContain('25 %');
+    expect(running).toContain('Mean 18 %, peak 61 %');
     expect(running).toContain('1.2 Mb/s');
     expect(running).toContain('520 MB in the last hour');
     // Booting: a sample without its container's numbers.

@@ -20,6 +20,7 @@
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
 #include "infra/attention_routes.h"
+#include "infra/cost_routes.h"
 #include "infra/infra_routes.h"
 #include "infra/log_routes.h"
 #include "infra/usage_routes.h"
@@ -305,6 +306,7 @@ struct HttpListener::Impl {
 			logs(access, pool, redis),
 			usage(access, pool, redis),
 			attention(access, pool, redis),
+			costs(access, redis),
 			data_sets(access, pool),
 			releases(access, pool) {}
 
@@ -355,6 +357,8 @@ struct HttpListener::Impl {
 	infra::UsageRoutes usage;
 	// What needs an admin (infra/attention_routes.h).
 	infra::AttentionRoutes attention;
+	// The month's AWS costs (infra/cost_routes.h).
+	infra::CostRoutes costs;
 	// The hosted data sets' and the update releases' routes over the object store
 	// (data_sets/data_set_routes.h, data_sets/release_routes.h).
 	hosted::DataSetRoutes data_sets;
@@ -455,6 +459,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->attention.configure(
 			alarm_store_, impl_->hosted_servers.hosting_on(), fleet_placement_, fleet_release_);
 	impl_->attention.register_routes(impl_->app);
+	impl_->costs.configure(cost_store_);
+	impl_->costs.register_routes(impl_->app);
 	impl_->data_sets.set_store(object_store_);
 	impl_->data_sets.register_routes(impl_->app);
 	impl_->releases.set_store(object_store_);

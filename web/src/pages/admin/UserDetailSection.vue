@@ -1,11 +1,9 @@
 <template>
   <div class="space-y-10">
-    <RouterLink to="/admin/users" class="text-sm text-accent hover:text-ink-bright">Users</RouterLink>
+    <AdminCrumbs />
 
-    <div role="status" class="sr-only">{{ message }}</div>
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
 
     <div v-if="detail === null && loading" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
       Loading the account…
@@ -319,6 +317,7 @@
 // .../addresses), its Stripe ids (to Stripe's dashboard, in the key's mode),
 // its CD keys (GET .../cd-keys) and its deletion (409 active_subscription
 // while a tier grants).
+import AdminCrumbs from '../../components/AdminCrumbs.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';

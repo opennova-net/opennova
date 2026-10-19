@@ -1,19 +1,13 @@
 <template>
   <div class="space-y-10">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">Fleet</h1>
-        <p class="text-sm text-ink-muted">
-          The machines that run hosted servers, and their servers.
-        </p>
-      </div>
-      <div class="flex items-center gap-3">
-        <p v-if="loadedAt" class="text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /></p>
-        <button type="button" :class="secondaryButton" :disabled="poll.loading.value" @click="poll.refresh">
-          {{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}
-        </button>
-      </div>
-    </header>
+    <AdminPageHeader
+      title="Fleet"
+      description="The machines that run hosted servers, and their servers."
+      :loaded-at="loadedAt"
+      :now="now"
+      :loading="poll.loading.value"
+      @refresh="poll.refresh"
+    />
 
     <nav aria-label="Fleet pages" class="border-b border-border">
       <ul class="-mb-px flex gap-1 overflow-x-auto">
@@ -34,11 +28,9 @@
 
     <template v-else>
       <!-- Live regions, always in the page so a screen reader hears what lands in
-           them; the boxes below are their visible copies. -->
-      <div role="status" class="sr-only">{{ message }}</div>
-      <div role="alert" class="sr-only">{{ error }}</div>
-      <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
-      <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+           them, each its own box while it holds something: the text once. -->
+      <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
+      <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
       <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
 
       <AttentionList />
@@ -282,6 +274,7 @@
 // /api/admin/hosted/update-all); and the kill switch (POST
 // /api/admin/hosted/stop-all) behind a typed confirmation. The page polls,
 // faster while a server changes state.
+import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import AttentionList from '../../components/AttentionList.vue';
 import FleetRollPreview from '../../components/FleetRollPreview.vue';
 import HistoryToggle from '../../components/HistoryToggle.vue';

@@ -1,23 +1,16 @@
 <template>
   <div ref="root" class="space-y-10">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">Infrastructure</h1>
-        <p class="text-sm text-ink-muted">
-          The deployment as it runs, read from AWS and the database.
-        </p>
-      </div>
-      <div class="flex items-center gap-3">
-        <p v-if="loadedAt" class="text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /></p>
-        <button type="button" :class="secondaryButton" :disabled="poll.loading.value" @click="poll.refresh">
-          {{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}
-        </button>
-      </div>
-    </header>
+    <AdminPageHeader
+      title="Infrastructure"
+      description="The deployment as it runs, read from AWS and the database."
+      :loaded-at="loadedAt"
+      :now="now"
+      :loading="poll.loading.value"
+      @refresh="poll.refresh"
+    />
 
-    <!-- A live region, always in the page; the box below is its visible copy. -->
-    <div role="alert" class="sr-only">{{ error }}</div>
-    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+    <!-- A live region, always in the page, the box itself while it holds something. -->
+    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
     <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
     <div v-if="overview === null && poll.loading.value" class="flex h-32 items-center justify-center text-ink-muted">
       Loading the deployment…
@@ -255,7 +248,7 @@
         <h2 id="infra-lobbies" class="text-xl font-semibold text-ink">Lobby instances</h2>
         <p class="text-sm text-ink-muted">
           One per lobby task; a draining one takes no new client. Their sessions are on
-          <RouterLink to="/admin/sessions" class="text-accent hover:text-ink-bright">NovaWorld sessions</RouterLink>.
+          <RouterLink :to="{ path: '/admin/novaworld', hash: '#sessions' }" class="text-accent hover:text-ink-bright">NovaWorld's status and sessions</RouterLink>.
         </p>
         <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
           <table class="min-w-full divide-y divide-border">
@@ -343,6 +336,7 @@
 // machines (from the database), whose page is the Fleet's. On the local stack
 // AWS is not read, and the page says so rather than showing anything made up;
 // the programs' own samples still show. Polled every 30 seconds.
+import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import ProgramCard from '../../components/ProgramCard.vue';
@@ -370,8 +364,6 @@ import {
 
 const POLL_MS = 30_000;
 
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 const headRow = 'bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted';
 
 const root = ref<HTMLElement | null>(null);
