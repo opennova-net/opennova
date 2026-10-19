@@ -877,6 +877,7 @@ task role holds these reads alone, scoped to the deployment's resources
 | `ONNET_INFRA_FLEET_CLUSTER` | none | Web: the fleet cluster (`opennova-<deployment>-fleet`), whose hostd service and container instances the view reads; unset or empty with hosting off, and nothing of it is read. |
 | `ONNET_INFRA_LOAD_BALANCER` | none | Web: the network load balancer's ARN suffix (`net/<name>/<id>`), the dimension of its CloudWatch metrics (the usage view's `nlb`). |
 | `ONNET_INFRA_ALARM_PREFIX` | none | Web: the start every name of the deployment's CloudWatch alarms shares (`opennova-<deployment>-`), whose firing ones the attention list reads (`cloudwatch:DescribeAlarms`). Unset (the local stack), no alarm is read. |
+| `ONNET_INFRA_BUDGET` | none | Web: the ARN of the deployment's monthly cost budget (`arn:aws:budgets::<account>:budget/opennova-<deployment>-monthly-cost`, `infra/aws/observability.tf`), which the costs view reads its limit from (`budgets:ViewBudget`). Unset, the view shows no budget. |
 
 ### Usage
 
@@ -945,6 +946,31 @@ local stack, which reads none (`alarms_read_failed` false), or a read that faile
 (`alarms_read_failed` true), which is a warn finding of its own, never an empty list that
 reads as none firing. An admin's reads come from a bucket of their own (30 at once, then one
 a second).
+
+### AWS costs
+
+`GET /api/admin/costs` (admin; `Cache-Control: no-store`; `infra/cost_routes.*`) answers
+what the deployment's AWS account is charged this month (the account holds the deployment
+alone, so its bill is the deployment's): `{"available", "unavailable", "error", "read_at",
+"currency", "month": {"start", "end"}, "through", "estimated", "month_to_date_cents",
+"forecast_cents", "forecast_error", "by_service": [{"service", "cents"}], "days": [{"date",
+"cents"}], "budget": {"name", "currency", "limit_cents", "actual_cents", "forecast_cents"},
+"budget_error"}`, amounts in cents. The store (`infra/cost_store.*`) reads Cost Explorer's
+global endpoint (`ce.us-east-1.amazonaws.com`, signed for us-east-1 whatever
+`ONNET_INFRA_REGION` says): `GetCostAndUsage` of the month so far (its first day, UTC,
+through today) by day and by AWS service, the unblended cost, every page of it; and
+`GetCostForecast` from today to the next month's first, which makes `forecast_cents` the
+month's spend before today plus AWS's forecast (never below the month so far; none, with
+AWS's words in `forecast_error`, while the account has too little history). With
+`ONNET_INFRA_BUDGET` it reads the budget too (Budgets' `DescribeBudget` on
+`budgets.amazonaws.com`): its limit and AWS Budgets' own spend and forecast. Cost Explorer
+charges $0.01 a request and refreshes its figures a few times a day, up to a day behind, so
+a read is kept 6 hours (two Cost Explorer requests: about $0.08 a day at most) and a failed
+one 10 minutes, one read at a time. Without a task role (the local stack) nothing is read:
+`available` is false and `unavailable` says why. Web's task role holds the reads
+(`infra/aws/programs.tf`, `infra_read`: `ce:GetCostAndUsage` and `ce:GetCostForecast`,
+which take no resource, and `budgets:ViewBudget` on the budget's ARN). An admin's reads come
+from a bucket of their own (30 at once, then one a second).
 
 ## The switcher's address
 

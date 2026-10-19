@@ -186,20 +186,31 @@ bool AwsApi::credentials(AwsCredentials &out, std::string &error) {
 
 AwsReply AwsApi::json_call(const AwsCredentials &credentials, std::string_view service,
 		std::string_view target, const std::string &body) {
-	return signed_call(credentials, service, "application/x-amz-json-1.1", target, body);
+	return signed_call(credentials, service,
+			std::string(service) + "." + config_.region + ".amazonaws.com", config_.region,
+			"application/x-amz-json-1.1", target, body);
+}
+
+AwsReply AwsApi::global_json_call(const AwsCredentials &credentials, std::string_view service,
+		std::string_view host, std::string_view signing_region, std::string_view target,
+		const std::string &body) {
+	return signed_call(credentials, service, host, signing_region,
+			"application/x-amz-json-1.1", target, body);
 }
 
 AwsReply AwsApi::query_call(const AwsCredentials &credentials, std::string_view service,
 		const std::vector<std::pair<std::string, std::string>> &params) {
-	return signed_call(credentials, service, "application/x-www-form-urlencoded; charset=utf-8", {},
-			query_encode(params));
+	return signed_call(credentials, service,
+			std::string(service) + "." + config_.region + ".amazonaws.com", config_.region,
+			"application/x-www-form-urlencoded; charset=utf-8", {}, query_encode(params));
 }
 
 AwsReply AwsApi::signed_call(const AwsCredentials &credentials, std::string_view service,
-		std::string_view content_type, std::string_view target, const std::string &body) {
+		std::string_view host, std::string_view region, std::string_view content_type,
+		std::string_view target, const std::string &body) {
 	const std::string name(service);
-	const auto url = config_value("https://" + name + "." + config_.region + ".amazonaws.com/");
-	const auto sigv4 = config_value("aws:amz:" + config_.region + ":" + name);
+	const auto url = config_value("https://" + std::string(host) + "/");
+	const auto sigv4 = config_value("aws:amz:" + std::string(region) + ":" + name);
 	const auto user = config_value(credentials.key_id + ":" + credentials.secret);
 	const auto type = config_value("Content-Type: " + std::string(content_type));
 	const auto amz_target = config_value("X-Amz-Target: " + std::string(target));

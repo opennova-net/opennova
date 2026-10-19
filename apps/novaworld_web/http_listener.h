@@ -38,7 +38,7 @@ class ObjectStore;
 
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
-namespace infra { class AlarmStore; class InfraStatus; class LogStore; class MetricsStore; }
+namespace infra { class AlarmStore; class CostStore; class InfraStatus; class LogStore; class MetricsStore; }
 
 // Crow-backed HTTP listener. start() registers its route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -77,7 +77,8 @@ namespace infra { class AlarmStore; class InfraStatus; class LogStore; class Met
 //                         fleet's health and the firing alarms; LogRoutes (infra/log_routes.h):
 //                         every log on the site; UsageRoutes
 //                         (infra/usage_routes.h): what everything uses and
-//                         the programs' tasks
+//                         the programs' tasks; CostRoutes
+//                         (infra/cost_routes.h): the month's AWS bill
 //   game data           — DataSetRoutes and ReleaseRoutes (data_sets/): the
 //                         hosted data sets, their tree uploads into the object
 //                         store and the update releases, each part through
@@ -143,6 +144,9 @@ public:
 	// The firing alarms the attention list reads (infra/alarm_store.h). Set before
 	// start(); it must outlive the listener. Null: no alarm is read.
 	void set_alarm_store(infra::AlarmStore *store) { alarm_store_ = store; }
+	// The month's AWS costs the costs view reads (infra/cost_store.h). Set before
+	// start(); it must outlive the listener. Null: the view says none is read.
+	void set_cost_store(infra::CostStore *store) { cost_store_ = store; }
 
 	// The object store the hosted data sets' trees and the update packages
 	// live in (core/object_store.h; core/object_store_stack.h
@@ -316,6 +320,8 @@ private:
 	infra::MetricsStore *metrics_store_ = nullptr;
 	// The attention list's alarms (set_alarm_store); null: none.
 	infra::AlarmStore *alarm_store_ = nullptr;
+	// The costs view's AWS costs (set_cost_store); null: none.
+	infra::CostStore *cost_store_ = nullptr;
 	// The object store (set_object_store); null: none.
 	ObjectStore *object_store_ = nullptr;
 	// The slots' limits (set_fleet_slots).

@@ -5,9 +5,11 @@
 // proc::CommandRunner, as billing's CurlStripeApi does
 // (billing/stripe_api.h), and has curl sign each request itself (--aws-sigv4,
 // Signature Version 4): a POST to the service's regional endpoint
-// (https://<service>.<region>.amazonaws.com/), a JSON body with its
-// X-Amz-Target for the JSON APIs (ECS, SSM), a form for the Query APIs (Elastic
-// Load Balancing, RDS, ElastiCache, EC2), whose replies are XML (aws_xml.h).
+// (https://<service>.<region>.amazonaws.com/), or to a global service's one
+// endpoint signed for its one region (Cost Explorer, Budgets:
+// global_json_call), a JSON body with its X-Amz-Target for the JSON APIs (ECS,
+// SSM, Cost Explorer, Budgets), a form for the Query APIs (Elastic Load
+// Balancing, RDS, ElastiCache, EC2), whose replies are XML (aws_xml.h).
 // Not the AWS CLI the worker runs for the fleet: a CLI run spends about a
 // second of CPU starting its Python, and a refresh of the view makes a dozen
 // calls on web's half vCPU, which serves the retail routes too; a curl run
@@ -85,6 +87,13 @@ public:
 	// application/x-amz-json-1.1 with X-Amz-Target `target`.
 	AwsReply json_call(const AwsCredentials &credentials, std::string_view service,
 			std::string_view target, const std::string &body);
+	// A JSON-protocol call to a global service at its one endpoint, whatever the
+	// config's region: `host` (Cost Explorer's "ce.us-east-1.amazonaws.com",
+	// Budgets' "budgets.amazonaws.com") signed for `signing_region` (the aws
+	// partition's us-east-1, for both).
+	AwsReply global_json_call(const AwsCredentials &credentials, std::string_view service,
+			std::string_view host, std::string_view signing_region, std::string_view target,
+			const std::string &body);
 	// A Query-protocol call (Elastic Load Balancing, RDS, ElastiCache, EC2):
 	// `params` (Action and Version among them) POSTed as a form.
 	AwsReply query_call(const AwsCredentials &credentials, std::string_view service,
@@ -100,10 +109,11 @@ public:
 	static std::string query_encode(const std::vector<std::pair<std::string, std::string>> &params);
 
 private:
-	// A signed POST to `service` of `body` as `content_type` (with `target`
-	// unless it is empty).
+	// A signed POST to `service` at https://<host>/ (signed for `region`) of
+	// `body` as `content_type` (with `target` unless it is empty).
 	AwsReply signed_call(const AwsCredentials &credentials, std::string_view service,
-			std::string_view content_type, std::string_view target, const std::string &body);
+			std::string_view host, std::string_view region, std::string_view content_type,
+			std::string_view target, const std::string &body);
 	// One curl run over the config text `text`: the file written, run, and
 	// deleted; `secrets` scrubbed from any error.
 	AwsReply run(const std::string &text, const std::vector<std::string> &secrets);

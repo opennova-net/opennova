@@ -18,6 +18,7 @@
 #include "hosted/model/hosted_policy.h"
 #include "http_listener.h"
 #include "infra/alarm_store.h"
+#include "infra/cost_store.h"
 #include "infra/infra_status.h"
 #include "infra/log_store.h"
 #include "infra/metrics_store.h"
@@ -161,6 +162,14 @@ int run(const program::Boot &boot) {
 		std::printf("[boot] alarms: read from CloudWatch\n");
 	else
 		std::printf("[boot] alarms: none read (%s)\n", alarm_store.unavailable().c_str());
+	// The costs view's month of AWS costs (infra/cost_store.h): Cost Explorer's and the
+	// deployment's budget, through the same task role; none on the local stack.
+	infra::CostStore cost_store(*infra_stack.runner,
+			infra::cost_config_from_env(infra_stack.scratch.path().u8string()));
+	if (cost_store.unavailable().empty())
+		std::printf("[boot] costs: read from Cost Explorer\n");
+	else
+		std::printf("[boot] costs: none read (%s)\n", cost_store.unavailable().c_str());
 
 	// The 404s the routes record, flushed by the main loop into
 	// unknown_messages (GET /api/unknowns reads them there).
@@ -178,6 +187,7 @@ int run(const program::Boot &boot) {
 	http.set_log_store(log_store.get(), log_store_none);
 	http.set_metrics_store(&metrics_store);
 	http.set_alarm_store(&alarm_store);
+	http.set_cost_store(&cost_store);
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
 	// The images the release pins: the launch templates' (a fleet roll's
