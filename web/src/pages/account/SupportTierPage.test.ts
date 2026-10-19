@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import SupportTierPage from './SupportTierPage.vue';
 import { fetchMyBilling, fetchTiers, openPortal, startCheckout, syncMyBilling } from '../../api/billing';
-import { addressSubscription, myBilling, subscribed, subscription, tiersResponse } from '../../test/billingFixtures';
+import {
+  addressSubscription,
+  myBilling,
+  ownMachineSubscription,
+  subscribed,
+  subscription,
+  tiersResponse,
+} from '../../test/billingFixtures';
 import { navigateToStripe } from '../../utils/navigate';
 
 vi.mock('../../api/billing', async (importOriginal) => ({
@@ -69,14 +76,18 @@ describe('SupportTierPage', () => {
   });
 
   it("marks the account's tier and sends every change to the billing portal", async () => {
-    mine.mockResolvedValue({ ok: true, value: subscribed(2, { used: 2 }) });
+    mine.mockResolvedValue({ ok: true, value: subscribed(2, { used: 2, shared_used: 2 }) });
     portal.mockResolvedValue({ ok: true, value: PORTAL_URL });
     const page = await mountAt('/me/support');
     expect(page.get('#support-tier-2').attributes('aria-current')).toBe('true');
     expect(page.get('#support-tier-1').attributes('aria-current')).toBeUndefined();
-    expect(page.get('#support-current').element.closest('section')!.textContent).toContain('Tier 2');
+    const facts = page.findAll('#support-current ~ dl > *').map((f) => f.text());
+    expect(facts[1]).toBe('Tier 2, up to 2 hosted servers at once on shared machines');
+    expect(facts.slice(-2)).toEqual(['Live on shared machines', '2 of 2']);
     // Moving down from 2 live servers to Tier 1 stops the newest.
-    expect(page.get('#support-tier-1').text()).toContain('Your newest server will be stopped when the change takes effect.');
+    expect(page.get('#support-tier-1').text()).toContain(
+      'Your newest server on a shared machine will be stopped when the change takes effect.',
+    );
     await page.get('#support-tier-3 button').trigger('click');
     await flushPromises();
     expect(checkout).not.toHaveBeenCalled();
@@ -86,7 +97,17 @@ describe('SupportTierPage', () => {
 
   it('counts no stopping server in what a move down would stop', async () => {
     // Two live on Tier 2, one of them stopping already: Tier 1 keeps the other.
-    mine.mockResolvedValue({ ok: true, value: subscribed(2, { used: 2, stopping: 1 }) });
+    mine.mockResolvedValue({ ok: true, value: subscribed(2, { used: 2, stopping: 1, shared_used: 2, shared_stopping: 1 }) });
+    const page = await mountAt('/me/support');
+    expect(page.get('#support-tier-1').text()).not.toContain('will be stopped');
+  });
+
+  it('counts no server on a dedicated machine in what a move down would stop', async () => {
+    // Tier 2 with one server on a shared machine and one on a dedicated machine.
+    mine.mockResolvedValue({
+      ok: true,
+      value: subscribed(2, { max_servers: 3, own_machines: 1, used: 2, shared_used: 1, own_machine_subscriptions: [ownMachineSubscription()] }),
+    });
     const page = await mountAt('/me/support');
     expect(page.get('#support-tier-1').text()).not.toContain('will be stopped');
   });
@@ -113,16 +134,51 @@ describe('SupportTierPage', () => {
     expect(page.get('[role="alert"]').text()).toContain('looked wrong');
   });
 
-  const ownMachine = { quantity: 1, status: 'active', current_period_end: '2026-11-14T12:00:00Z', cancel_at_period_end: false };
+  const ownMachine = ownMachineSubscription();
 
-  it('offers another dedicated machine below the limit', async () => {
-    mine.mockResolvedValue({ ok: true, value: subscribed(3, { own_machines: 1, own_machine_subscription: ownMachine }) });
+  it('sells a dedicated machine with no support tier', async () => {
     checkout.mockResolvedValue({ ok: true, value: CHECKOUT_URL });
     const page = await mountAt('/me/support');
     const section = page.get('#support-own-machine').element.closest('section')!;
-    expect(section.textContent).toContain('You have 1 dedicated machine (active).');
-    expect(page.get('#support-own-machine-hint').text()).toContain('cancel one in the billing portal');
-    const add = page.findAll('button').find((b) => b.text() === 'Add another dedicated machine');
+    expect(page.get('#support-own-machine').text()).toBe('Dedicated machines');
+    expect(section.textContent).toContain(
+      'One more hosted server, on a machine of its own. No support tier needed; add as many as you like, each its own monthly subscription.',
+    );
+    expect(section.textContent).toContain('$45');
+    const add = page.findAll('button').find((b) => b.text() === 'Add a dedicated machine')!;
+    expect(add.attributes('disabled')).toBeUndefined();
+    await add.trigger('click');
+    await flushPromises();
+    expect(checkout).toHaveBeenCalledWith('own_machine');
+    expect(navigate).toHaveBeenCalledWith(CHECKOUT_URL);
+  });
+
+  it('lists the dedicated machine subscriptions and adds another', async () => {
+    // No tier: two dedicated machines, the newer one canceled.
+    mine.mockResolvedValue({
+      ok: true,
+      value: myBilling({
+        max_servers: 2,
+        own_machines: 2,
+        can_start: true,
+        can_manage: true,
+        own_machine_subscriptions: [
+          ownMachineSubscription({ stripe_subscription_id: 'sub_own_2', cancel_at_period_end: true, current_period_end: '2026-11-20T12:00:00Z' }),
+          ownMachine,
+        ],
+      }),
+    });
+    checkout.mockResolvedValue({ ok: true, value: CHECKOUT_URL });
+    const page = await mountAt('/me/support');
+    const section = page.get('#support-own-machine').element.closest('section')!;
+    expect(section.textContent).toContain('You have 2 dedicated machines.');
+    const rows = page.findAll('#support-own-machine-subscriptions li').map((li) => li.text().replace(/\s+/g, ' '));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatch(/^1 dedicated machine: Active, ends .*2026$/);
+    expect(rows[1]).toMatch(/^1 dedicated machine: Active, renews .*2026$/);
+    expect(page.get('#support-own-machine-hint').text()).toContain('Cancel one in the billing portal');
+    expect(page.findAll('button').some((b) => b.text() === 'Cancel one in the billing portal')).toBe(true);
+    const add = page.findAll('button').find((b) => b.text() === 'Add another');
     expect(add).toBeDefined();
     await add!.trigger('click');
     await flushPromises();
@@ -130,7 +186,7 @@ describe('SupportTierPage', () => {
     // The count it had goes along, for the return to wait for one more.
     expect(JSON.parse(window.sessionStorage.getItem('opennova_checkout')!)).toEqual({
       item: 'own_machine',
-      own_machines_before: 1,
+      own_machines_before: 2,
       addresses_before: 0,
     });
   });
@@ -144,15 +200,17 @@ describe('SupportTierPage', () => {
         own_machine: { amount: 4500, interval: 'month', available: false },
       }),
     });
-    mine.mockResolvedValue({ ok: true, value: subscribed(3, { own_machines: 1, own_machine_subscription: ownMachine }) });
+    mine.mockResolvedValue({ ok: true, value: subscribed(3, { own_machines: 1, own_machine_subscriptions: [ownMachine] }) });
     const page = await mountAt('/me/support');
     // The account's own tier keeps its Manage while the fleet is full.
     expect(page.get('#support-tier-3 button').attributes('disabled')).toBeUndefined();
     expect(page.get('#support-tier-3').text()).not.toContain('Hosting is full');
-    const add = page.findAll('button').find((b) => b.text() === 'Add another dedicated machine')!;
+    const add = page.findAll('button').find((b) => b.text() === 'Add another')!;
     expect(add.attributes('disabled')).toBeDefined();
     expect(page.get('#support-own-machine-hint').text()).toBe('Hosting is full: new subscriptions are paused.');
-    expect(page.findAll('button').some((b) => b.text() === 'Cancel one' && b.attributes('disabled') === undefined)).toBe(true);
+    expect(
+      page.findAll('button').some((b) => b.text() === 'Cancel one in the billing portal' && b.attributes('disabled') === undefined),
+    ).toBe(true);
   });
 
   it('reads the tiers again when a checkout finds the fleet sold out', async () => {
@@ -180,7 +238,7 @@ describe('SupportTierPage', () => {
       ok: true,
       value: subscribed(3, {
         own_machines: 2,
-        own_machine_subscription: { ...ownMachine, quantity: 2 },
+        own_machine_subscriptions: [ownMachineSubscription({ quantity: 2 })],
         static_addresses: 1,
         address_subscriptions: [addressSubscription()],
       }),
@@ -217,7 +275,7 @@ describe('SupportTierPage', () => {
     // One dedicated machine, already with its address.
     mine.mockResolvedValue({
       ok: true,
-      value: subscribed(2, { own_machines: 1, own_machine_subscription: ownMachine, static_addresses: 1, address_subscriptions: [addressSubscription()] }),
+      value: subscribed(2, { own_machines: 1, own_machine_subscriptions: [ownMachine], static_addresses: 1, address_subscriptions: [addressSubscription()] }),
     });
     page = await mountAt('/me/support');
     expect(button().attributes('disabled')).toBeDefined();
@@ -226,7 +284,7 @@ describe('SupportTierPage', () => {
 
     // Room for one, and the fleet sold out of addresses.
     tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: { ...STATIC_ADDRESS, available: false } }) });
-    mine.mockResolvedValue({ ok: true, value: subscribed(2, { own_machines: 1, own_machine_subscription: ownMachine }) });
+    mine.mockResolvedValue({ ok: true, value: subscribed(2, { own_machines: 1, own_machine_subscriptions: [ownMachine] }) });
     page = await mountAt('/me/support');
     expect(button().attributes('disabled')).toBeDefined();
     expect(page.get('#support-static-address-hint').text()).toBe('Hosting is full: new subscriptions are paused.');
@@ -238,7 +296,8 @@ describe('SupportTierPage', () => {
       ok: true,
       value: myBilling({
         max_servers: 11,
-        comp_servers: 11,
+        shared_servers: 9,
+        comp_servers: 9,
         comp_own_machines: 2,
         comp_addresses: 1,
         granted: true,
@@ -249,8 +308,9 @@ describe('SupportTierPage', () => {
     });
     const page = await mountAt('/me/support');
     expect(page.get('#support-granted').text()).toBe(
-      'An admin granted your account 11 hosted servers, 2 dedicated machines for your servers and 1 static address, free of charge. ' +
-        'With an admin grant there is no support tier or add-on to buy.',
+      'An admin granted your account 9 hosted servers on shared machines, 2 dedicated machines (one more server each) ' +
+        'and 1 static address, free of charge. With an admin grant there is no support tier, dedicated machine or ' +
+        'static address to buy.',
     );
     for (const id of ['#support-tiers', '#support-own-machine', '#support-static-address']) expect(page.find(id).exists()).toBe(false);
     expect(page.findAll('button').some((b) => /subscribe|dedicated machine|static address/i.test(b.text()))).toBe(false);
@@ -265,14 +325,14 @@ describe('SupportTierPage', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: STATIC_ADDRESS }) });
     window.sessionStorage.setItem('opennova_checkout', JSON.stringify({ item: 'static_address', addresses_before: 0 }));
-    const before = subscribed(2, { own_machines: 1, own_machine_subscription: ownMachine });
+    const before = subscribed(2, { own_machines: 1, own_machine_subscriptions: [ownMachine] });
     mine.mockResolvedValueOnce({ ok: true, value: before }); // the page's load
     sync.mockResolvedValue({ ok: true, value: before }); // not yet
     mine.mockResolvedValue({
       ok: true,
       value: subscribed(2, {
         own_machines: 1,
-        own_machine_subscription: ownMachine,
+        own_machine_subscriptions: [ownMachine],
         static_addresses: 1,
         address_subscriptions: [addressSubscription({ address_id: null })],
       }),
@@ -288,10 +348,11 @@ describe('SupportTierPage', () => {
   it('confirms another dedicated machine only once the account has one more', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     window.sessionStorage.setItem('opennova_checkout', JSON.stringify({ item: 'own_machine', own_machines_before: 1 }));
-    const before = subscribed(3, { own_machines: 1, own_machine_subscription: ownMachine });
+    const before = subscribed(3, { own_machines: 1, own_machine_subscriptions: [ownMachine] });
     mine.mockResolvedValueOnce({ ok: true, value: before }); // the page's load
     sync.mockResolvedValue({ ok: true, value: before }); // its first machine: not yet
-    mine.mockResolvedValue({ ok: true, value: subscribed(3, { own_machines: 2, own_machine_subscription: ownMachine }) });
+    const newer = ownMachineSubscription({ stripe_subscription_id: 'sub_own_2' });
+    mine.mockResolvedValue({ ok: true, value: subscribed(3, { own_machines: 2, own_machine_subscriptions: [newer, ownMachine] }) });
     await mountAt('/me/support?checkout=success&session_id=cs_test_1');
     expect(statusText()).toBe('Confirming your payment with Stripe…');
     await vi.advanceTimersByTimeAsync(2_000);
@@ -300,12 +361,13 @@ describe('SupportTierPage', () => {
     expect(router.currentRoute.value.fullPath).toBe('/me/support');
   });
 
-  it('hides the add-on once every server has a dedicated machine', async () => {
-    mine.mockResolvedValue({ ok: true, value: subscribed(1, { own_machines: 1, own_machine_subscription: ownMachine }) });
+  it("adds dedicated machines past the tier's servers: only the fleet caps them", async () => {
+    // Tier 1 and a dedicated machine already: 2 servers, and another is on offer.
+    mine.mockResolvedValue({ ok: true, value: subscribed(1, { max_servers: 2, own_machines: 1, own_machine_subscriptions: [ownMachine] }) });
     const page = await mountAt('/me/support');
-    expect(page.findAll('button').some((b) => b.text().includes('dedicated machine'))).toBe(false);
-    expect(page.get('#support-own-machine-hint').text()).toContain('a dedicated machine for every server your tier covers');
-    expect(page.findAll('button').some((b) => b.text() === 'Cancel one')).toBe(true);
+    const add = page.findAll('button').find((b) => b.text() === 'Add another')!;
+    expect(add.attributes('disabled')).toBeUndefined();
+    expect(page.findAll('button').some((b) => b.text() === 'Cancel one in the billing portal')).toBe(true);
   });
 
   it('warns while a payment is past due', async () => {
@@ -322,23 +384,40 @@ describe('SupportTierPage', () => {
   it("warns while an add-on's payment is past due, the tier's paid", async () => {
     mine.mockResolvedValue({
       ok: true,
-      value: subscribed(2, { can_start: false, own_machines: 1, own_machine_subscription: { ...ownMachine, status: 'past_due' } }),
+      value: subscribed(2, {
+        can_start: false,
+        own_machines: 1,
+        own_machine_subscriptions: [ownMachineSubscription({ status: 'past_due' })],
+      }),
     });
     const page = await mountAt('/me/support');
     expect(page.get('#support-past-due').element.parentElement!.textContent).toContain(
       'Update your payment method to keep your subscriptions.',
     );
+    // No dedicated machine sells meanwhile.
+    expect(page.findAll('button').find((b) => b.text() === 'Add another')!.attributes('disabled')).toBeDefined();
+    expect(page.get('#support-own-machine-hint').text()).toBe('Fix the payment that is past due first, then add one.');
   });
 
-  it("says what a tier's end leaves: the servers stop, the add-ons end with it", async () => {
-    mine.mockResolvedValue({ ok: true, value: subscribed(2, { own_machines: 1, own_machine_subscription: ownMachine }) });
-    const page = await mountAt('/me/support');
+  it("says a tier's end stops the servers on shared machines and leaves the dedicated machines", async () => {
+    mine.mockResolvedValue({
+      ok: true,
+      value: subscribed(2, { max_servers: 3, own_machines: 1, own_machine_subscriptions: [ownMachine] }),
+    });
+    let page = await mountAt('/me/support');
     expect(page.get('#support-cancel-hint').text()).toBe(
       "Change or cancel in Stripe's billing portal. A canceled tier lasts until the paid period ends, then your hosted " +
-        'servers stop. When your tier ends, your dedicated machines and static addresses are set to end with their paid period.',
+        'servers on shared machines stop. Your dedicated machines keep running: they need no tier.',
     );
-    expect(page.get('#support-own-machine').element.closest('section')!.textContent).toContain(
-      'When your tier ends, your dedicated machines are set to end with their paid period.',
+    expect(page.get('#support-own-machine').element.closest('section')!.textContent).not.toContain('end with');
+    page.unmount();
+
+    // With no dedicated machine there is nothing more to say.
+    mine.mockResolvedValue({ ok: true, value: subscribed(2) });
+    page = await mountAt('/me/support');
+    expect(page.get('#support-cancel-hint').text()).toBe(
+      "Change or cancel in Stripe's billing portal. A canceled tier lasts until the paid period ends, then your hosted " +
+        'servers on shared machines stop.',
     );
   });
 
@@ -357,7 +436,7 @@ describe('SupportTierPage', () => {
     const canceled = page.get('#support-canceled').text();
     expect(canceled).toBe(
       'Your tier is canceled: it lasts until the end of the period you paid for, then your admin grant keeps up to 3 ' +
-        'hosted servers running. You can renew it in the billing portal before then.',
+        'hosted servers running on shared machines. You can renew it in the billing portal before then.',
     );
     expect(canceled).not.toContain('servers stop');
   });

@@ -94,7 +94,7 @@ describe('LandingPage', () => {
     expect((await mountPage()).get('[role="status"]').text()).toBe('NovaWorld status unavailable.');
   });
 
-  it('lists the tiers with their prices and the dedicated machine add-on', async () => {
+  it('lists the tiers with their prices and the dedicated machine', async () => {
     const wrapper = await mountPage();
     const text = wrapper.text();
     expect(text).toContain('$5');
@@ -102,7 +102,7 @@ describe('LandingPage', () => {
     expect(text).toContain('$15');
     expect(text).toContain('1 hosted server');
     expect(text).toContain('3 hosted servers');
-    expect(text).toContain('Dedicated machine add-on: $45 a month for each');
+    expect(text).toContain('Dedicated machine: $45 a month for each, one more hosted server on a machine of its own, no tier needed.');
     expect(hrefs(wrapper)).toContain('/support');
   });
 
@@ -115,7 +115,7 @@ describe('LandingPage', () => {
     tiers.mockResolvedValueOnce({ ok: false, error: { code: 'network', status: null, message: 'offline' } });
     wrapper = await mountPage();
     expect(wrapper.text()).toContain('The prices did not load.');
-    expect(wrapper.text()).not.toContain('Dedicated machine add-on');
+    expect(wrapper.text()).not.toContain('Dedicated machine:');
   });
 
   it('offers every release download and the account and lobby steps', async () => {

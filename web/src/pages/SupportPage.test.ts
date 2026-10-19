@@ -32,8 +32,9 @@ describe('SupportPage', () => {
     expect(wrapper.text()).toContain('$5 a month');
     expect(wrapper.text()).toContain('$10 a month');
     expect(wrapper.text()).toContain('$15 a month');
-    expect(wrapper.text()).toContain('Dedicated machine add-on');
+    expect(wrapper.get('#public-own-machine').text()).toBe('Dedicated machines');
     expect(wrapper.text()).toContain('$45 a month for each');
+    expect(wrapper.text()).toContain('No support tier needed');
     expect(wrapper.text()).toContain('not the sale of any game');
     expect(wrapper.text()).not.toContain('—');
     // The terms and the refund policy beside Subscribe.

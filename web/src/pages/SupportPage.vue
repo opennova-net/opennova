@@ -7,8 +7,9 @@
         <p class="max-w-3xl text-base text-ink-muted">
           OpenNova is a free, open-source project. A monthly support tier funds it, and lets you run your own
           hosted servers on NovaWorld: we start them on our machines, list them in the game's server browser and
-          keep them running until you stop them. A tier is support for the project, not the sale of any game.
-          Hosted servers are pre-1.0 and experimental.
+          keep them running until you stop them. A dedicated machine adds one more server on a machine of its own,
+          with or without a tier. A tier is support for the project, not the sale of any game. Hosted servers are
+          pre-1.0 and experimental.
         </p>
         <p class="max-w-3xl text-base text-ink-muted">
           Hosted servers run OpenNova's own server, opennova-serve, not the original game. Retail and OpenNova players
@@ -44,12 +45,13 @@
         </section>
 
         <section v-if="tiers.own_machine" class="space-y-2 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="public-own-machine">
-          <h2 id="public-own-machine" class="text-lg font-semibold text-ink">Dedicated machine add-on</h2>
+          <h2 id="public-own-machine" class="text-lg font-semibold text-ink">Dedicated machines</h2>
           <p class="text-sm text-ink-muted">
             <template v-if="tiers.own_machine.amount !== null">
               {{ formatMoney(tiers.own_machine.amount, tiers.currency) }} a month for each.
             </template>
-            Runs one of your tier's servers on a machine of its own. Add it from your support tier page.
+            One more hosted server, on a machine of its own. No support tier needed; add as many as you like, each its
+            own monthly subscription, from your support tier page.
           </p>
         </section>
       </template>

@@ -199,7 +199,8 @@
             <li v-for="n in loadingCards" v-else :key="n" class="card h-36 animate-pulse" aria-hidden="true"></li>
           </ul>
           <p v-if="ownMachine" class="mt-3 text-sm text-ink-muted">
-            Dedicated machine add-on: {{ ownMachine }} a month for each, to run one of your servers on a machine of its own.
+            Dedicated machine: {{ ownMachine }} a month for each, one more hosted server on a machine of its own, no tier
+            needed.
           </p>
           <p v-if="tiersState === 'closed'" class="card p-6 text-sm text-ink-muted">Support tiers are not open on NovaWorld yet.</p>
           <p v-if="tiersState === 'failed'" class="card p-6 text-sm text-ink-muted">

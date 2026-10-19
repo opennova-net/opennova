@@ -20,8 +20,9 @@
 // (no tier yet, or a visitor not logged in), or manage (the account's tier
 // is marked, and every action opens the billing portal, where a tier is
 // changed or canceled). A tier below the account's warns which of its live
-// servers a move there would stop: the service stops the newest first. A tier
-// the fleet is sold out of cannot be picked (TierCard), but the account's own.
+// servers on shared machines a move there would stop: the service stops the
+// newest first (its dedicated machines need no tier). A tier the fleet is
+// sold out of cannot be picked (TierCard), but the account's own.
 import TierCard from './TierCard.vue';
 import type { TierNumber, TierOffer } from '../types/billing';
 
@@ -32,8 +33,9 @@ const props = withDefaults(
     mode: 'subscribe' | 'manage';
     // The account's tier, in manage mode.
     currentTier?: TierNumber | null;
-    // How many of the account's live hosted servers are not already
-    // stopping: the ones a lower tier's limit counts (newest stop first).
+    // How many of the account's live hosted servers on shared machines are
+    // not already stopping: the ones a lower tier's limit counts (newest stop
+    // first).
     used?: number;
     busy?: boolean;
     disabled?: boolean;
@@ -57,7 +59,7 @@ function noteFor(offer: TierOffer): string | undefined {
   const over = props.used - offer.max_servers;
   if (over <= 0) return undefined;
   return over === 1
-    ? 'Your newest server will be stopped when the change takes effect.'
-    : `Your ${over} newest servers will be stopped when the change takes effect.`;
+    ? 'Your newest server on a shared machine will be stopped when the change takes effect.'
+    : `Your ${over} newest servers on shared machines will be stopped when the change takes effect.`;
 }
 </script>
