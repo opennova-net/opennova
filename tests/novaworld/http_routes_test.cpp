@@ -5132,6 +5132,7 @@ int test_hosted_server_routes(Harness &h) {
 	auto json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["full"].b());
 	TEST_EXPECT(entitlement_is(json, 0, 0, 0, 0, false, "none"));
+	TEST_EXPECT(json["entitlement"]["tier"].t() == crow::json::type::Null && !json["entitlement"]["granted"].b());
 	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
 	// The data sets with data, bases by id (Joint Operations first; OpenNova's
 	// has no tree, so it is not offered): each one's id, name, title, version,
@@ -5248,7 +5249,10 @@ int test_hosted_server_routes(Harness &h) {
 			json["entitlement"]["comp_servers"].i() == 2 && json["entitlement"]["own_machines"].i() == 0);
 	for (const Owner *o : { &ben, &cy, &fay, &gus })
 		TEST_EXPECT(grant(o->id, "{\"servers\":1,\"own_machines\":0}", { kBearer }).code == 200);
-	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(ana))), 2, 0, 0, 0, true, "comp"));
+	json = crow::json::load(body_text(list(ana)));
+	TEST_EXPECT(entitlement_is(json, 2, 0, 0, 0, true, "comp"));
+	// An admin's grant: the page offers no tier to buy.
+	TEST_EXPECT(json["entitlement"]["tier"].t() == crow::json::type::Null && json["entitlement"]["granted"].b());
 
 	// Two starts: 202 with each server, requested, on a shared machine.
 	reply = start(ana, settings);
@@ -5449,7 +5453,10 @@ int test_hosted_server_routes(Harness &h) {
 		machine.tier = 0;
 		billing::upsert_subscription(*db, machine);
 	}
-	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(fay))), 1, 0, 1, 0, true, "tier"));
+	json = crow::json::load(body_text(list(fay)));
+	TEST_EXPECT(entitlement_is(json, 1, 0, 1, 0, true, "tier"));
+	// Her tier and the admin's grant of a server, both.
+	TEST_EXPECT(json["entitlement"]["tier"].i() == 1 && json["entitlement"]["granted"].b());
 	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
 	json = crow::json::load(body_text(reply));
 	if (reply.code != 202) std::fprintf(stderr, "  own-machine start: %s\n", describe(reply).c_str());

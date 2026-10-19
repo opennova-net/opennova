@@ -124,9 +124,9 @@ enum class RequestOutcome : uint8_t {
 	InvalidSettings, // check_settings refused them (the routes check first)
 	NoSuchUser,   // no player account by that id
 	NotEntitled,  // the account is not active, or its hosting entitlement is 0 servers
-	PastDue,      // its support tier's payment is past due: its servers run on, none starts
+	PastDue,      // a payment of its (a tier's or an add-on's) is past due: its servers run on, none starts
 	AtLimit,      // `used` of its `max_servers` are live already
-	NoOwnMachine, // an own machine was asked for, and each the add-on pays for runs one
+	NoOwnMachine, // an own machine was asked for, and each of its own machines runs one
 	AtCapacity,   // `cap` servers are live, or the fleet has no place for it (fleet_has_room)
 	AddressUnavailable, // the address asked for is not the owner's, not ready, or another live server's
 };
