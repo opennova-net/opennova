@@ -1,11 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
-import ConnectionsSection from './ConnectionsSection.vue';
-import { endConnection, fetchConnections, stopListedServer } from '../../api/admin';
-import type { AdminConnection, ConnectionsResponse } from '../../types/admin';
-import { testRouter } from '../../test/router';
+import NovaWorldSessions from './NovaWorldSessions.vue';
+import { endConnection, fetchConnections, stopListedServer } from '../api/admin';
+import type { AdminConnection, ConnectionsResponse } from '../types/admin';
+import { testRouter } from '../test/router';
 
-vi.mock('../../api/admin', () => ({ fetchConnections: vi.fn(), endConnection: vi.fn(), stopListedServer: vi.fn() }));
+vi.mock('../api/admin', () => ({ fetchConnections: vi.fn(), endConnection: vi.fn(), stopListedServer: vi.fn() }));
 
 const connections = vi.mocked(fetchConnections);
 const end = vi.mocked(endConnection);
@@ -35,14 +35,14 @@ function response(list: AdminConnection[]): ConnectionsResponse {
   return { count: list.length, heartbeat_timeout_ms: 240_000, connections: list };
 }
 
-describe('ConnectionsSection', () => {
+describe('NovaWorldSessions', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
   let confirm: MockInstance<typeof window.confirm>;
 
   async function mountSection(list: AdminConnection[]) {
     connections.mockResolvedValue({ ok: true, value: response(list) });
-    const router = await testRouter('/admin/sessions');
-    wrapper = mount(ConnectionsSection, { global: { plugins: [router] } });
+    const router = await testRouter('/admin/novaworld');
+    wrapper = mount(NovaWorldSessions, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
   }
@@ -70,8 +70,8 @@ describe('ConnectionsSection', () => {
       session(13, { state: 'closing', pn: 'SOMETHINGELSE', identity: '', created_ms: 0, last_seen_ms: 0 }),
     ]);
     const text = page.text();
-    expect(page.get('h1').text()).toBe('NovaWorld sessions');
-    expect(text).toContain('Game clients and hosts signed in to NovaWorld. 3 signed in; a session closes after 4 minutes without a keepalive.');
+    expect(page.get('h2').text()).toBe('Signed in now');
+    expect(page.get('.sessions-summary').text()).toBe('Game clients and hosts signed in to NovaWorld. 3 signed in; a session closes after 4 minutes without a keepalive.');
     expect(text).not.toMatch(/\bms\b/);
     expect(text).not.toContain('240000');
     expect(text).not.toMatch(/\bPN\b/);
@@ -195,5 +195,20 @@ describe('ConnectionsSection', () => {
     expect(stop).toHaveBeenCalledWith(167772161);
     expect(end).not.toHaveBeenCalled();
     expect(page.text()).toContain('That server is no longer listed. Refresh the list.');
+  });
+
+  it('says what happened once: the live region is the box itself', async () => {
+    const page = await mountSection([session(11)]);
+    await page.get('tr.session-row button').trigger('click');
+    await flushPromises();
+    expect(page.text().split('Session 11 is ending.')).toHaveLength(2);
+    expect(page.get('[role="status"]').text()).toBe('Session 11 is ending.');
+  });
+
+  it("reads again when asked (the page's Refresh)", async () => {
+    const page = await mountSection([session(11)]);
+    expect(connections).toHaveBeenCalledTimes(1);
+    await (page.vm as unknown as { refresh: () => Promise<void> }).refresh();
+    expect(connections).toHaveBeenCalledTimes(2);
   });
 });

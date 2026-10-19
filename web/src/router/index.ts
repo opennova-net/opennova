@@ -34,8 +34,7 @@ import MachineDetailSection from '../pages/admin/MachineDetailSection.vue';
 import UsageSection from '../pages/admin/UsageSection.vue';
 import BillingSection from '../pages/admin/BillingSection.vue';
 import CostsSection from '../pages/admin/CostsSection.vue';
-import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
-import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
+import NovaWorldSection from '../pages/admin/NovaWorldSection.vue';
 import JobsSection from '../pages/admin/JobsSection.vue';
 import JobDetailSection from '../pages/admin/JobDetailSection.vue';
 import InfraSection from '../pages/admin/InfraSection.vue';
@@ -96,6 +95,9 @@ const router = createRouter({
         { path: 'server', redirect: '/me/servers' },
       ],
     },
+    // The admin, in four areas (utils/adminNav.ts): NovaWorld, Hosting, People
+    // and money, Operations. Its paths stay flat: the attention list's links
+    // and the toolbox name them.
     {
       path: '/admin',
       component: AdminLayout,
@@ -124,10 +126,9 @@ const router = createRouter({
           ],
         },
         { path: 'usage', component: UsageSection, meta: { title: 'Admin: Server usage' } },
-        { path: 'billing', component: BillingSection, meta: { title: 'Admin: Billing' } },
+        { path: 'billing', component: BillingSection, meta: { title: 'Admin: Subscriptions' } },
         { path: 'costs', component: CostsSection, meta: { title: 'Admin: AWS costs' } },
-        { path: 'service', component: ServerStatusSection, meta: { title: 'Admin: NovaWorld service' } },
-        { path: 'sessions', component: ConnectionsSection, meta: { title: 'Admin: NovaWorld sessions' } },
+        { path: 'novaworld', component: NovaWorldSection, meta: { title: 'Admin: NovaWorld' } },
         { path: 'jobs', component: JobsSection, meta: { title: 'Admin: Background jobs' } },
         { path: 'jobs/:id(\\d+)', component: JobDetailSection, meta: { title: 'Admin: Job' } },
         { path: 'infrastructure', component: InfraSection, meta: { title: 'Admin: Infrastructure' } },
@@ -139,11 +140,14 @@ const router = createRouter({
         },
         { path: 'cd-keys', component: CdKeysSection, meta: { title: 'Admin: CD keys' } },
         { path: 'data-sets', component: DataSetsSection, meta: { title: 'Admin: Game data' } },
-        // The sections' names before the admin pages were rebuilt: old links
-        // land on their new pages.
+        // The sections' names before the admin pages were rebuilt, and the
+        // NovaWorld service's and sessions' pages before they were one: old
+        // links land on their new pages.
         { path: 'hosted', redirect: '/admin/fleet' },
-        { path: 'server', redirect: '/admin/service' },
-        { path: 'connections', redirect: '/admin/sessions' },
+        { path: 'service', redirect: '/admin/novaworld' },
+        { path: 'server', redirect: '/admin/novaworld' },
+        { path: 'sessions', redirect: { path: '/admin/novaworld', hash: '#sessions' } },
+        { path: 'connections', redirect: { path: '/admin/novaworld', hash: '#sessions' } },
       ],
     },
     // Anything else.

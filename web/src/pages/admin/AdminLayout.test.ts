@@ -55,6 +55,30 @@ describe('AdminLayout', () => {
     expect(page.findAll('.admin-attention-count')).toHaveLength(1);
   });
 
+  it('groups the pages by area, each named, and marks the one open', async () => {
+    const page = await mountLayout();
+    const areas = page.findAll('.admin-nav-area').map((area) => [area.get('p').text(), area.findAll('a').map((a) => a.text())]);
+    expect(areas).toEqual([
+      ['NovaWorld', ['Status and sessions', 'CD keys']],
+      ['Hosting', ['Fleet', 'Server usage', 'Static addresses', 'Game data']],
+      ['People and money', ['Users', 'Subscriptions', 'AWS costs']],
+      ['Operations', ['Infrastructure', 'Background jobs']],
+    ]);
+    // Each area is a group its name labels, for a screen reader.
+    const hosting = page.findAll('.admin-nav-area')[1];
+    expect(hosting.attributes('role')).toBe('group');
+    expect(hosting.attributes('aria-labelledby')).toBe(hosting.get('p').attributes('id'));
+    const current = page.findAll('nav a[aria-current="page"]');
+    expect(current.map((a) => a.text())).toEqual(['Fleet']);
+  });
+
+  it('marks a section for the pages under it', async () => {
+    const router = await testRouter('/admin/fleet/machines/3');
+    wrapper = mount(AdminLayout, { global: { plugins: [router] } });
+    await flushPromises();
+    expect(wrapper.findAll('nav a[aria-current="page"]').map((a) => a.text())).toEqual(['Fleet']);
+  });
+
   it('shows no count when nothing needs anyone', async () => {
     read.mockResolvedValue({ ok: true, value: attention({ findings: [], alarms: [] }) });
     const page = await mountLayout();

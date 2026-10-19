@@ -69,8 +69,7 @@
     <nav aria-label="Admin sections" class="flex flex-wrap gap-4 text-sm">
       <RouterLink to="/admin/fleet" class="text-accent hover:text-ink-bright">The fleet</RouterLink>
       <RouterLink to="/admin/billing" class="text-accent hover:text-ink-bright">Billing</RouterLink>
-      <RouterLink to="/admin/service" class="text-accent hover:text-ink-bright">The NovaWorld service</RouterLink>
-      <RouterLink to="/admin/sessions" class="text-accent hover:text-ink-bright">NovaWorld sessions</RouterLink>
+      <RouterLink to="/admin/novaworld" class="text-accent hover:text-ink-bright">NovaWorld's status and sessions</RouterLink>
       <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">Background jobs</RouterLink>
     </nav>
   </div>

@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-8">
-    <RouterLink to="/admin/infrastructure" class="text-sm text-accent hover:text-ink-bright">Infrastructure</RouterLink>
+    <AdminCrumbs />
 
     <div v-if="programs === null && !loadError" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
       Loading the program…
@@ -128,6 +128,7 @@
 // usage (UsageCharts, all its tasks together or one) and, on the Logs tab
 // (?tab=logs), its log over its tasks' streams or one's (LogViewer). Polled
 // every 30 s.
+import AdminCrumbs from '../../components/AdminCrumbs.vue';
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import LogViewer from '../../components/LogViewer.vue';

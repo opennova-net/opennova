@@ -515,7 +515,8 @@ port) and keeps each flow on one task.
   and runs it; one whose session is gone or changed, or past its 30 s expiry, is dropped.
   A command is best effort, as the pushes always were.
 
-**The admin's view** (`connection_routes.*`, the site's admin page `/admin/sessions`):
+**The admin's view** (`connection_routes.*`, the site's admin page **Status and sessions**,
+`/admin/novaworld#sessions`, under NovaWorld):
 every session the instances hold, from their `lobby_sessions` rows, with the server it
 lists and an end queued for its instance. A session's account is its listing's owner
 while it hosts, else the account whose live retail login its latest `Cookie` list named
@@ -826,6 +827,14 @@ browser variable, and its LAN host checks the wire `CDKIID` that value decodes t
   is `/admin/cd-keys`.
 
 ## Infrastructure (the admin's view)
+
+The site's admin pages fall in four areas, the admin menu's (`web/src/utils/adminNav.ts`),
+under the **Overview** (what needs an admin, then each area at a glance): **NovaWorld**
+(Status and sessions, `/admin/novaworld`: the sign-in and maintenance mode, and the
+sessions; CD keys), **Hosting** (Fleet, Server usage, Static addresses, Game data),
+**People and money** (Users; Subscriptions, `/admin/billing`; AWS costs, `/admin/costs`)
+and **Operations** (Infrastructure, Background jobs). The paths stay flat, and the old
+`/admin/service` and `/admin/sessions` lead to `/admin/novaworld`.
 
 The site's admin page **Infrastructure** (`/admin/infrastructure`) shows the deployment as
 it runs, read on web (`apps/novaworld_web/infra/`) in one route,

@@ -255,7 +255,7 @@
         <h2 id="infra-lobbies" class="text-xl font-semibold text-ink">Lobby instances</h2>
         <p class="text-sm text-ink-muted">
           One per lobby task; a draining one takes no new client. Their sessions are on
-          <RouterLink to="/admin/sessions" class="text-accent hover:text-ink-bright">NovaWorld sessions</RouterLink>.
+          <RouterLink :to="{ path: '/admin/novaworld', hash: '#sessions' }" class="text-accent hover:text-ink-bright">NovaWorld's status and sessions</RouterLink>.
         </p>
         <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
           <table class="min-w-full divide-y divide-border">

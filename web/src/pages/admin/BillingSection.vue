@@ -2,9 +2,9 @@
   <div class="space-y-10">
     <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <h1 class="text-3xl font-semibold text-ink">Billing</h1>
+        <h1 class="text-3xl font-semibold text-ink">Subscriptions</h1>
         <p class="text-sm text-ink-muted">
-          Subscriptions as last read from Stripe. Change them in Stripe.
+          Support tiers and add-ons as last read from Stripe. Change them in Stripe.
         </p>
       </div>
       <button type="button" :class="secondaryButton" :disabled="loading" @click="load">

@@ -1,10 +1,6 @@
 <template>
   <div class="space-y-10">
-    <nav aria-label="Breadcrumb" class="job-breadcrumb flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-      <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">Background jobs</RouterLink>
-      <span aria-hidden="true">/</span>
-      <RouterLink :to="jobsLink" class="text-accent hover:text-ink-bright">{{ job ? `${jobKindLabel(job.kind)} jobs` : 'Jobs' }}</RouterLink>
-    </nav>
+    <AdminCrumbs class="job-breadcrumb" :trail="[{ label: job ? `${jobKindLabel(job.kind)} jobs` : 'Jobs', to: jobsLink }]" />
 
     <div role="status" class="sr-only">{{ message }}</div>
     <div role="alert" class="sr-only">{{ error }}</div>
@@ -103,8 +99,9 @@
 // .../cancel), each asked first. Read again every 5 s while it waits or runs.
 // Its breadcrumb leads back to the jobs page and to the Jobs tab's list of
 // its kind.
+import AdminCrumbs from '../../components/AdminCrumbs.vue';
 import { computed, ref } from 'vue';
-import { RouterLink, useRoute } from 'vue-router';
+import { useRoute } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
 import { cancelJob, fetchJob, retryJob } from '../../api/jobs';
 import { usePolling } from '../../composables/usePolling';
