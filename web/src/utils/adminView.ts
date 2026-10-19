@@ -1,7 +1,10 @@
 // Labels the admin pages share: account statuses, support tiers, machines,
-// NovaWorld sessions and the titles they speak, each in words.
+// NovaWorld sessions, the titles they speak, their servers and their lobby
+// instances, each in words.
 
+import type { ServerKind } from '../types/admin';
 import type { EntitlementSource, MachineKind } from '../types/hostedServer';
+import type { Tone } from './infraView';
 
 // "Active", "Banned", "Restricted": a players.account_status; one stored
 // empty reads as active.
@@ -64,19 +67,67 @@ export function sessionStateLabel(state: string): string {
   return SESSION_STATES[state] ?? state;
 }
 
-// The protocol names a client hello carries (engine/net/title: each title's
-// PN; NOVAWORLDUDP is the NovaWorld session every game client opens, whatever
-// its game).
+// The titles' own protocol names a client hello carries (engine/net/title:
+// each title's PN). NOVAWORLDUDP, the NovaWorld session every game client
+// opens whatever its game, names none.
 const PROTOCOL_NAMES: Record<string, string> = {
-  NOVAWORLDUDP: 'NovaWorld lobby (any game)',
   JOINTOPERATIONS: 'Joint Operations',
   DELTAFORCEXTREME2: 'Delta Force Xtreme 2',
 };
 
-// The game a session's protocol name says, or null when it names none this
-// site knows (the page then shows the raw name with a hint).
+// The game a session's protocol name says, or null when it names none.
 export function protocolTitle(pn: string): string | null {
   return PROTOCOL_NAMES[pn.toUpperCase()] ?? null;
+}
+
+// The game a session speaks, in words: its games row's name (the service's
+// read of its listing or its game tag), else the title its protocol name
+// says; null when neither names one.
+export function sessionGame(s: { title: { display_name: string } | null; pn: string }): string | null {
+  return s.title?.display_name ?? protocolTitle(s.pn);
+}
+
+// What a listing is, in words.
+const SERVER_KINDS: Record<ServerKind, string> = {
+  hosted: 'Hosted server',
+  owned: "A player's own",
+  anonymous: 'Anonymous',
+};
+
+export function serverKindLabel(kind: ServerKind): string {
+  return SERVER_KINDS[kind];
+}
+
+// Retail's Serve Only flag in words: a Serve Only host runs the server alone,
+// a listen host plays on it too; null while it is not listed.
+export function serverRoleLabel(dedicated: boolean | null): string | null {
+  if (dedicated === null) return null;
+  return dedicated ? 'Serve Only' : 'Listen (plays too)';
+}
+
+// A task id's first 12 characters (an ECS task id's, a local container's id
+// whole), as the program page names its tasks.
+export function shortTaskId(id: string): string {
+  return id.slice(0, 12);
+}
+
+// The page of the lobby program's usage, the task `taskId` picked when it
+// names one.
+export function lobbyUsageLink(taskId: string): { path: string; query?: { task: string } } {
+  const path = '/admin/infrastructure/programs/lobby';
+  return taskId ? { path, query: { task: taskId } } : { path };
+}
+
+// A lobby instance's heartbeat moves every 5 s; one seen within this long
+// runs (lobby_repository.h kInstanceLiveSeconds).
+export const LOBBY_LIVE_MS = 15_000;
+
+// A lobby instance's state in words and a tone: not seen within LOBBY_LIVE_MS
+// (its process may be gone), taking clients, or draining.
+export function lobbyStateLabel(lobby: { state: string; last_seen_ms: number }, now: number): { label: string; tone: Tone } {
+  const seen = sessionTime(lobby.last_seen_ms, now);
+  if (seen === null || now - seen > LOBBY_LIVE_MS) return { label: 'Not seen', tone: 'bad' };
+  return lobby.state === 'active' ? { label: 'Taking clients', tone: 'ok' } : { label: 'Draining', tone: 'warn' };
 }
 
 // The oldest a session time can be: a year (a session ends after four minutes

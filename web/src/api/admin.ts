@@ -5,7 +5,7 @@
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
 // adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts, the static
 // addresses' in adminAddresses.ts; here are the
-// NovaWorld service's status and sessions, and
+// NovaWorld service's status, sessions and lobby instances, and
 // the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
 // machine's page, the roll preview and the roll).
 
@@ -16,7 +16,11 @@ import type {
   AdminConnection,
   AdminConnectionAccount,
   AdminConnectionHost,
+  AdminConnectionPlaying,
+  AdminConnectionTitle,
+  AdminLobby,
   ConnectionsResponse,
+  LobbiesResponse,
   ServerStatus,
 } from '../types/admin';
 import type {
@@ -350,9 +354,16 @@ function pickConnectionAccount(value: unknown): AdminConnectionAccount | null {
   return { id: v.id, username: v.username, via: v.via === 'host_key' ? 'host_key' : 'login' };
 }
 
+function pickConnectionTitle(value: unknown): AdminConnectionTitle | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.slug !== 'string' || typeof v.display_name !== 'string') return null;
+  return { slug: v.slug, display_name: v.display_name };
+}
+
 function pickConnectionHost(value: unknown): AdminConnectionHost | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || typeof v.rid !== 'number') return null;
+  const hostedServerId = typeof v.hosted_server_id === 'number' ? v.hosted_server_id : null;
   return {
     rid: v.rid,
     server_name: typeof v.server_name === 'string' ? v.server_name : '',
@@ -360,6 +371,26 @@ function pickConnectionHost(value: unknown): AdminConnectionHost | null {
     players: typeof v.players === 'number' ? v.players : 0,
     max_players: typeof v.max_players === 'number' ? v.max_players : 0,
     listed: v.listed !== false,
+    hosted_server_id: hostedServerId,
+    server_kind:
+      v.server_kind === 'hosted' || v.server_kind === 'owned' || v.server_kind === 'anonymous'
+        ? v.server_kind
+        : hostedServerId !== null
+          ? 'hosted'
+          : 'anonymous',
+    dedicated: typeof v.dedicated === 'boolean' ? v.dedicated : null,
+  };
+}
+
+function pickConnectionPlaying(value: unknown): AdminConnectionPlaying | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.addr !== 'string') return null;
+  return {
+    rid: typeof v.rid === 'number' ? v.rid : null,
+    addr: v.addr,
+    since_ms: typeof v.since_ms === 'number' ? v.since_ms : 0,
+    listed: v.listed === true,
+    server_name: typeof v.server_name === 'string' ? v.server_name : null,
     hosted_server_id: typeof v.hosted_server_id === 'number' ? v.hosted_server_id : null,
   };
 }
@@ -367,9 +398,11 @@ function pickConnectionHost(value: unknown): AdminConnectionHost | null {
 function pickConnection(value: unknown): AdminConnection | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || typeof v.id !== 'number' || typeof v.session_id !== 'number') return null;
+  const host = pickConnectionHost(v.host);
   return {
     session_id: v.session_id,
     lobby_id: typeof v.lobby_id === 'number' ? v.lobby_id : 0,
+    lobby_task_id: typeof v.lobby_task_id === 'string' ? v.lobby_task_id : '',
     id: v.id,
     state: typeof v.state === 'string' ? v.state : '',
     pn: typeof v.pn === 'string' ? v.pn : typeof v.pn === 'number' ? String(v.pn) : '',
@@ -377,8 +410,11 @@ function pickConnection(value: unknown): AdminConnection | null {
     created_ms: typeof v.created_ms === 'number' ? v.created_ms : 0,
     last_seen_ms: typeof v.last_seen_ms === 'number' ? v.last_seen_ms : 0,
     addr: typeof v.addr === 'string' ? v.addr : '',
+    kind: v.kind === 'server' || v.kind === 'client' ? v.kind : host ? 'server' : 'client',
+    title: pickConnectionTitle(v.title),
     account: pickConnectionAccount(v.account),
-    host: pickConnectionHost(v.host),
+    host,
+    playing: pickConnectionPlaying(v.playing),
   };
 }
 
@@ -413,6 +449,42 @@ export function endConnection(c: Pick<AdminConnection, 'session_id'>): Promise<A
 // its match and takes it out of NovaWorld.
 export function stopListedServer(rid: number): Promise<AdminResult<void>> {
   return adminPost(`/hosts/${rid}/stop`);
+}
+
+function pickLobby(value: unknown): AdminLobby | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.id !== 'number') return null;
+  return {
+    id: v.id,
+    endpoint: typeof v.endpoint === 'string' ? v.endpoint : '',
+    state: typeof v.state === 'string' ? v.state : '',
+    task_id: typeof v.task_id === 'string' ? v.task_id : '',
+    started_ms: typeof v.started_ms === 'number' ? v.started_ms : 0,
+    last_seen_ms: typeof v.last_seen_ms === 'number' ? v.last_seen_ms : 0,
+    sessions: typeof v.sessions === 'number' ? v.sessions : 0,
+  };
+}
+
+// GET /api/admin/lobbies: the lobby instances, by id.
+export function fetchLobbies(signal?: AbortSignal): Promise<AdminResult<LobbiesResponse>> {
+  return adminCall(
+    () => adminClient.get<unknown>('/lobbies', { signal }),
+    (data) => {
+      const v = data as { lobbies?: unknown } | null;
+      if (typeof v !== 'object' || v === null || !Array.isArray(v.lobbies)) return null;
+      const lobbies = v.lobbies.map(pickLobby);
+      if (lobbies.some((l) => l === null)) return null;
+      return { lobbies: lobbies as AdminLobby[] };
+    },
+  );
+}
+
+// POST /api/admin/lobbies/<id>/drain: no gate counts the instance as taking
+// clients from the gates' next read on (200); the sessions it holds stay until
+// they leave, and its task stays in the load balancer. 404 not_found for no
+// such instance.
+export function drainLobby(id: number): Promise<AdminResult<void>> {
+  return adminPost(`/lobbies/${id}/drain`);
 }
 
 // ---------------------------------------------------------------------------

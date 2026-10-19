@@ -535,6 +535,9 @@ server's listing says what it is: `hosted` (a live hosted server of the fleet's,
 `/admin/fleet/<id>`), `owned` (its HostKey names an account) or `anonymous`, and retail's
 Serve Only flag (`Dedicated`). A client's server is the listing its `PlaySetup` named, by
 RID, while it is listed (its address alone otherwise: a LAN server, one no lobby lists).
+The page shows the clients and the servers as two tables, each session's lobby linked to
+the lobby program's usage of that instance's task, and the lobby instances below them
+(`/admin/novaworld#lobbies`: each one's state, sessions and task, with its Drain).
 
 | Route | Access | Replies |
 | --- | --- | --- |
