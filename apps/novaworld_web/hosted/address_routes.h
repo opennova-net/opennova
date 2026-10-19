@@ -29,10 +29,11 @@ namespace opennova::novaworld_server::hosted {
 // and port (where its servers list: null until allocated), source,
 // stripe_subscription_id (null for a comp one), server ({id, game_name,
 // state} of the live server using it, or null), reason (null for none),
-// created_at, ready_at, lapsed_at, released_at}, and with `admin` its owner
-// ({id, username} or null), allocation_id, dns_name and dns_state, its
-// lapse_cause and a failed one's retry_at (its next automatic try, null for
-// none).
+// lapse_cause ('grant': its subscription stopped granting, 'admin': an admin
+// released it; null before a lapse), created_at, ready_at, lapsed_at,
+// released_at}, and with `admin` its owner ({id, username} or null),
+// allocation_id, dns_name and dns_state, and a failed one's retry_at (its next
+// automatic try, null for none).
 crow::json::wvalue address_json(db::Database &db, const HostedAddress &a, const std::string &zone, bool admin);
 
 class AddressRoutes {

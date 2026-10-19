@@ -136,6 +136,7 @@ export function parseAddress(value: unknown): Address | null {
     stripe_subscription_id: textOrNull(v.stripe_subscription_id),
     server: parseAddressServer(v.server),
     reason: textOrNull(v.reason),
+    lapse_cause: textOrNull(v.lapse_cause),
     created_at: textOrNull(v.created_at),
     ready_at: textOrNull(v.ready_at),
     lapsed_at: textOrNull(v.lapsed_at),

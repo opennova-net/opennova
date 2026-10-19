@@ -5,6 +5,7 @@ import {
   addressNameProblem,
   addressStateLabel,
   freeAddresses,
+  lapseCauseLabel,
   preferredAddress,
   serverAddressEndpoint,
 } from './addressView';
@@ -25,13 +26,30 @@ describe('addressNameProblem', () => {
 
 describe('the words and the endpoint', () => {
   it('names each state plainly, an unknown one as it is', () => {
-    expect(addressStateLabel('allocating')).toBe('Being set up');
-    expect(addressStateLabel('ready')).toBe('Ready');
-    expect(addressStateLabel('lapsed')).toBe('Ending: its subscription ended');
-    expect(addressStateLabel('releasing')).toBe('Being released');
-    expect(addressStateLabel('released')).toBe('Released');
-    expect(addressStateLabel('failed')).toBe('Could not be set up');
-    expect(addressStateLabel('parked')).toBe('parked');
+    const named = (state: string) => addressStateLabel(address(1, 'smoke', { state }));
+    expect(named('allocating')).toBe('Being set up');
+    expect(named('ready')).toBe('Ready');
+    expect(named('lapsed')).toBe('Ending');
+    expect(named('releasing')).toBe('Being released');
+    expect(named('released')).toBe('Released');
+    expect(named('failed')).toBe('Could not be set up');
+    expect(named('parked')).toBe('parked');
+  });
+
+  it("says why a lapsed address is ending from its own cause, never a comp one's subscription", () => {
+    const sold = (overrides: Parameters<typeof address>[2]) => address(1, 'smoke', { state: 'lapsed', ...overrides });
+    const comp = (overrides: Parameters<typeof address>[2]) =>
+      sold({ source: 'comp', stripe_subscription_id: null, ...overrides });
+    expect(addressStateLabel(sold({ lapse_cause: 'grant' }))).toBe('Ending: its subscription ended');
+    expect(addressStateLabel(sold({ lapse_cause: 'admin' }))).toBe('Ending: an admin released it');
+    expect(addressStateLabel(comp({ lapse_cause: 'admin' }))).toBe('Ending: an admin released it');
+    expect(addressStateLabel(comp({ lapse_cause: 'grant' }))).toBe('Ending: its grant ended');
+    // The state says it while lapsed; past it, a line of its own does.
+    expect(lapseCauseLabel(comp({ lapse_cause: 'admin' }))).toBe('');
+    expect(lapseCauseLabel(comp({ state: 'releasing', lapse_cause: 'admin' }))).toBe('An admin released it');
+    expect(lapseCauseLabel(sold({ state: 'released', lapse_cause: 'grant' }))).toBe('Its subscription ended');
+    expect(addressStateLabel(sold({ state: 'released', lapse_cause: 'grant' }))).toBe('Released');
+    expect(lapseCauseLabel(address(1))).toBe('');
   });
 
   it('joins the IP and the port, and says nothing before an IP', () => {

@@ -40,6 +40,9 @@ export interface Address {
   server: AddressServer | null;
   // Why it failed, in the service's words; null unless it did.
   reason: string | null;
+  // Why it lapsed: 'grant' (its subscription stopped granting) or 'admin' (an
+  // admin released it); null before it lapsed.
+  lapse_cause: string | null;
   created_at: string | null;
   ready_at: string | null;
   lapsed_at: string | null;
@@ -80,8 +83,6 @@ export interface AdminAddress extends Address {
   dns_name: string | null;
   // 'none', 'pending' (a delete waits to be in sync) or 'insync'.
   dns_state: string;
-  // Why it lapsed: 'grant' (its subscription stopped granting) or 'admin'.
-  lapse_cause: string | null;
   // A failed one's next automatic try (an exhausted quota's); null for none.
   retry_at: string | null;
 }

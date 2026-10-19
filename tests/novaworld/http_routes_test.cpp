@@ -7623,7 +7623,9 @@ int test_address_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 201 && json && str(json["address"]["name"]) == "umas-place" &&
 			str(json["address"]["hostname"]) == "umas-place.play.test" && str(json["address"]["state"]) == "allocating" &&
 			json["address"]["public_ip"].t() == crow::json::type::Null &&
-			str(json["address"]["stripe_subscription_id"]) == address_sub && !json["address"].has("allocation_id"));
+			str(json["address"]["stripe_subscription_id"]) == address_sub &&
+			!json["address"].has("allocation_id") &&
+			json["address"]["lapse_cause"].t() == crow::json::type::Null);
 	const int64_t address = json["address"]["id"].i();
 	TEST_EXPECT(nws::jobs::job_pending(*h.pool.acquire(), std::string(hosted::kJobAddressAllocate) + ":" +
 			std::to_string(address)));

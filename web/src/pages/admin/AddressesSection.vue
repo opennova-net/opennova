@@ -74,10 +74,10 @@
                   <span v-if="a.allocation_id" class="block text-ink-muted">{{ a.allocation_id }}</span>
                 </td>
                 <td class="px-4 py-3">
-                  <span :class="addressStateClass(a.state)">{{ addressStateLabel(a.state) }}</span>
-                  <span v-if="a.lapse_cause" class="block text-xs text-ink-muted">{{ lapseCauseLabel(a.lapse_cause) }}</span>
+                  <span :class="addressStateClass(a.state)">{{ addressStateLabel(a) }}</span>
+                  <span v-if="lapseCauseLabel(a)" class="block text-xs text-ink-muted">{{ lapseCauseLabel(a) }}</span>
                   <span v-if="a.dns_state === 'pending'" class="block text-xs text-ink-muted">Its name's record is being removed</span>
-                  <span v-if="a.reason" class="block max-w-xs break-words text-xs text-danger">{{ a.reason }}</span>
+                  <span v-if="a.state === 'failed' && a.reason" class="block max-w-xs break-words text-xs text-danger">{{ a.reason }}</span>
                   <span v-if="a.state === 'failed' && a.retry_at" class="block text-xs text-ink-muted">
                     Tried again by itself <RelativeTime :value="a.retry_at" :now="now" />
                   </span>
@@ -234,6 +234,7 @@ import {
   addressStateClass,
   addressStateLabel,
   isAddressMoving,
+  lapseCauseLabel,
 } from '../../utils/addressView';
 
 const MOVING_POLL_MS = 5_000;
@@ -265,12 +266,6 @@ const typedName = ref('');
 let errorFromLoad = false;
 
 const renameProblem = computed(() => (renameTried.value ? addressNameProblem(newName.value.trim()) : ''));
-
-function lapseCauseLabel(cause: string): string {
-  if (cause === 'grant') return 'Its subscription stopped paying for it';
-  if (cause === 'admin') return 'Released by an admin';
-  return cause;
-}
 
 function flash(text: string) {
   message.value = text;

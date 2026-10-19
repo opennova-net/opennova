@@ -19,6 +19,7 @@ export function address(id: number, name = `addr${id}`, overrides: Partial<Addre
     stripe_subscription_id: `sub_address_${id}`,
     server: null,
     reason: null,
+    lapse_cause: null,
     created_at: '2026-10-14 12:00:00',
     ready_at: '2026-10-14 12:01:00',
     lapsed_at: null,
@@ -38,7 +39,6 @@ export function adminAddress(id: number, name = `addr${id}`, overrides: Partial<
     allocation_id: `eipalloc-0abc${id}`,
     dns_name: `${name}.${ZONE}`,
     dns_state: 'insync',
-    lapse_cause: null,
     retry_at: null,
     ...overrides,
   };
