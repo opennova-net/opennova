@@ -1294,7 +1294,9 @@ CMake option, off by default; the Linux CI jobs and the images turn it on). Web,
 program, the worker and the data program build only under `BUILD_NOVAWORLD_HTTP` (Crow:
 web's and the fleet's cores link it); the gate and the lobby build with or without it.
 
-The tests live in `tests/novaworld/` (`service_tests.cmake`); each says what it pins.
+The tests live in `tests/novaworld/` (`service_tests.cmake`); each says what it pins and
+links the libraries it drives, never compiling one's sources itself (those over web's or the
+fleet's code, which link Crow, build with `BUILD_NOVAWORLD_HTTP` alone).
 Every test that opens a database (ctest label `pg`, `opennova_add_pg_test`) makes its own
 databases, one per case, on the PostgreSQL server `-DOPENNOVA_TEST_PG=<uri>` names
 (`tests/common/test_database.h`); the HTTP layer's (label `redis`) also need the Redis
