@@ -216,25 +216,47 @@
       :disabled="busy"
     />
 
-    <!-- A dedicated machine: shown while one of the account's dedicated
-         machines is free. -->
+    <!-- Where it runs, while one of the account's dedicated machines is free:
+         a choice while a server on shared machines is free too, else on the
+         dedicated machine. -->
     <div v-if="ownMachinesFree > 0" class="min-w-0 space-y-1">
-      <label class="flex items-center gap-3 text-sm text-ink">
-        <input
-          :id="`${baseId}-own_machine`"
-          v-model="ownMachine"
-          type="checkbox"
-          :disabled="busy"
-          :aria-describedby="`${baseId}-own_machine-hint`"
-          class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
-        />
-        Dedicated machine
-      </label>
+      <fieldset v-if="sharedFree > 0" :id="`${baseId}-pool`" class="space-y-2">
+        <legend :class="labelClass">Where it runs</legend>
+        <div class="flex flex-wrap gap-x-6 gap-y-2">
+          <label class="flex items-center gap-2 text-sm text-ink">
+            <input
+              :id="`${baseId}-shared_machine`"
+              v-model="ownMachine"
+              type="radio"
+              :name="`${baseId}-pool`"
+              :value="false"
+              :disabled="busy"
+              :aria-describedby="`${baseId}-own_machine-hint`"
+              class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
+            />
+            Shared machine
+          </label>
+          <label class="flex items-center gap-2 text-sm text-ink">
+            <input
+              :id="`${baseId}-own_machine`"
+              v-model="ownMachine"
+              type="radio"
+              :name="`${baseId}-pool`"
+              :value="true"
+              :disabled="busy"
+              :aria-describedby="`${baseId}-own_machine-hint`"
+              class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
+            />
+            Dedicated machine
+          </label>
+        </div>
+      </fieldset>
+      <p v-else :id="`${baseId}-pool`" class="text-sm text-ink">On your dedicated machine</p>
       <p :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">
         {{ ownMachinesFree === 1 ? 'One of your dedicated machines is free.' : `${ownMachinesFree} of your dedicated machines are free.` }}
       </p>
       <!-- A static address for it: shown while one of the account's is free. -->
-      <div v-if="ownMachine && addresses.length > 0" class="space-y-1 pt-2">
+      <div v-if="onDedicated && addresses.length > 0" class="space-y-1 pt-2">
         <label :for="`${baseId}-address_id`" :class="labelClass">Static address</label>
         <select
           :id="`${baseId}-address_id`"
@@ -269,11 +291,13 @@
 // A hosted server's settings and its start (POST /api/me/servers), on the
 // account's start page (pages/account/NewServerPage.vue), offered only while
 // its entitlement has room. Started from an ended server, it begins with that
-// server's settings (after a failed one, the owner's try again). The
-// dedicated machine checkbox shows while one of the account's dedicated
-// machines is free, checked from the start when the server started again ran
-// on one, and with it checked a pick of the account's free static addresses
-// (the one `preferredAddressId` names first) while any is.
+// server's settings (after a failed one, the owner's try again). While one of
+// the account's dedicated machines is free it offers a choice of where the
+// server runs (a shared machine or a dedicated one, the dedicated one from
+// the start when the server started again ran on one), or with no server on
+// shared machines free runs it on the dedicated machine; there, a pick of the
+// account's free static addresses (the one `preferredAddressId` names first)
+// while any is.
 // The game (a base data set the service offers, by id) comes first and drives
 // the rest: the expansions it offers (expansion data sets with data), the
 // whole-number ranges and the rotation's missions, which are the game's data's
@@ -322,11 +346,14 @@ const props = withDefaults(
     retry?: boolean;
     // The base of every id in the form.
     baseId?: string;
-    // How many of the account's dedicated machines are free; the dedicated
-    // machine checkbox shows while any is.
+    // How many more servers the account may start on shared machines (1
+    // unless said: the form was offered, so there is room), and how many of
+    // its dedicated machines are free; the choice of where it runs shows
+    // while both have room.
+    sharedFree?: number;
     ownMachinesFree?: number;
-    // The ended server started again ran on a dedicated machine: the checkbox
-    // starts checked (while one is free).
+    // The ended server started again ran on a dedicated machine: the choice
+    // starts there (while one is free).
     previousOwnMachine?: boolean;
     // The account's static addresses a new server may run at (ready, and no
     // live server's), and the one the pick starts on.
@@ -336,6 +363,7 @@ const props = withDefaults(
   {
     retry: false,
     baseId: 'hosted-settings',
+    sharedFree: 1,
     ownMachinesFree: 0,
     previousOwnMachine: false,
     addresses: () => [],
@@ -351,9 +379,11 @@ const emit = defineEmits<{
   (e: 'refused', error: HostedError): void;
 }>();
 
-// Run on one of the account's dedicated machines: as the server started again
-// did.
-const ownMachine = ref(props.previousOwnMachine && props.ownMachinesFree > 0);
+// Run on one of the account's dedicated machines: the choice, which starts
+// where the server started again ran; with no server on shared machines
+// free, always (while one is free).
+const ownMachine = ref(props.previousOwnMachine);
+const onDedicated = computed(() => props.ownMachinesFree > 0 && (ownMachine.value || props.sharedFree === 0));
 // The static address it runs at there, null for none: the preferred one while
 // it is free, else the first free one.
 function firstAddress(): number | null {
@@ -537,7 +567,7 @@ async function submit() {
   }
   alertText.value = '';
   busy.value = true;
-  const own = props.ownMachinesFree > 0 && ownMachine.value;
+  const own = onDedicated.value;
   const reply = await startHostedServer(result.settings, own, own && props.addresses.length > 0 ? addressId.value : null);
   busy.value = false;
   if (reply.ok) {

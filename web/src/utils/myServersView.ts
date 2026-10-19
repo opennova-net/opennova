@@ -69,6 +69,19 @@ export function biggerTierOffered(e: HostingEntitlement): boolean {
   return !e.granted && (e.tier ?? 0) < TOP_TIER;
 }
 
+// Whether the account can buy more servers at all: a dedicated machine adds
+// one with or without a tier, so every account but a granted one can.
+export function moreServersOffered(e: HostingEntitlement): boolean {
+  return !e.granted;
+}
+
+// How a sentence at the limit ends: what the account can buy for another
+// server, or a full stop with an admin's grant.
+export function moreServersEnding(e: HostingEntitlement): string {
+  if (biggerTierOffered(e)) return ', or move to a bigger support tier or add a dedicated machine.';
+  return moreServersOffered(e) ? ', or add a dedicated machine.' : '.';
+}
+
 // How many more servers the account may start on shared machines.
 export function sharedFree(e: HostingEntitlement): number {
   return Math.max(0, e.shared_servers - e.shared_used);

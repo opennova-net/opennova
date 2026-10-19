@@ -35,7 +35,7 @@
       <p class="text-sm text-ink-muted">{{ blockText }}</p>
       <p class="flex flex-wrap gap-4 text-sm">
         <RouterLink
-          v-if="block === 'locked' || block === 'past_due' || (block === 'limit' && biggerTierOffered(data.entitlement))"
+          v-if="block === 'locked' || block === 'past_due' || (block === 'limit' && moreServersOffered(data.entitlement))"
           to="/me/support"
           class="text-accent hover:text-ink-bright"
         >
@@ -54,6 +54,7 @@
         :previous="from?.settings ?? null"
         :data-sets="data.data_sets"
         :retry="from?.state === 'failed'"
+        :shared-free="sharedFree(data.entitlement)"
         :own-machines-free="ownMachinesFree(data.entitlement)"
         :previous-own-machine="from?.own_machine ?? false"
         :addresses="free"
@@ -68,10 +69,11 @@
 <script setup lang="ts">
 // /me/servers/new?from=<id>: a new hosted server's settings and its start
 // (HostedSettingsForm, POST /api/me/servers), offered only while the
-// account's entitlement has room (GET /api/me/servers). `from` names one of
-// the account's ended servers to start again: the form begins with its
-// settings (its try again, after a failure), on a dedicated machine when it
-// ran on one. On a dedicated machine the form offers the account's free
+// account's entitlement has room on shared machines or on a dedicated
+// machine (GET /api/me/servers), the form picking between them. `from` names
+// one of the account's ended servers to start again: the form begins with
+// its settings (its try again, after a failure), on a dedicated machine when
+// it ran on one. On a dedicated machine the form offers the account's free
 // static addresses (GET /api/me/addresses: its own, ready, no live server's),
 // the one `from` (else the newest server) ran at first, so a server started
 // again keeps its dedicated machine and its address. A start that went in
@@ -85,7 +87,14 @@ import { useSession } from '../../composables/useSession';
 import type { Address } from '../../types/addresses';
 import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
 import { freeAddresses, preferredAddress } from '../../utils/addressView';
-import { PAST_DUE_TEXT, biggerTierOffered, ownMachinesFree, startBlock } from '../../utils/myServersView';
+import {
+  PAST_DUE_TEXT,
+  moreServersEnding,
+  moreServersOffered,
+  ownMachinesFree,
+  sharedFree,
+  startBlock,
+} from '../../utils/myServersView';
 
 const route = useRoute();
 const router = useRouter();
@@ -108,11 +117,11 @@ const blockText = computed(() => {
     case 'off':
       return 'NovaWorld is not starting hosted servers right now.';
     case 'locked':
-      return 'Hosting a server needs a support tier or an admin grant.';
+      return 'Hosting a server needs a support tier, a dedicated machine or an admin grant.';
     case 'past_due':
       return PAST_DUE_TEXT;
     case 'limit':
-      return 'All the servers you may run at once are live. Stop one first.';
+      return `All the servers you may run at once are live. Stop one first${data.value ? moreServersEnding(data.value.entitlement) : '.'}`;
     case 'full':
       return 'Every hosted server place on NovaWorld is taken right now. Try again later.';
     default:

@@ -21,6 +21,7 @@ function mountForm(
   previous: HostedSettings | null = null,
   extra: {
     baseId?: string;
+    sharedFree?: number;
     ownMachinesFree?: number;
     previousOwnMachine?: boolean;
     addresses?: Address[];
@@ -152,6 +153,9 @@ describe('HostedSettingsForm', () => {
     start.mockResolvedValue({ ok: true, value: hostedServer(4, { state: 'requested', own_machine: true }) });
     const own = mountForm([JO], null, { baseId: 'new-server', ownMachinesFree: 1 });
     expect(own.get('#new-server-own_machine-hint').text()).toContain('One of your dedicated machines is free.');
+    // A choice of where it runs, a shared machine first.
+    expect(own.get('#new-server-pool legend').text()).toBe('Where it runs');
+    expect((own.get('#new-server-shared_machine').element as HTMLInputElement).checked).toBe(true);
     await own.get('#new-server-game_name').setValue('Night Ops 2');
     await own.get('#new-server-own_machine').setValue(true);
     await own.get('form').trigger('submit');
@@ -186,7 +190,7 @@ describe('HostedSettingsForm', () => {
     expect(start).toHaveBeenLastCalledWith(expect.anything(), true, null);
 
     // A shared machine never names one.
-    await wrapper.get('#hosted-settings-own_machine').setValue(false);
+    await wrapper.get('#hosted-settings-shared_machine').setValue();
     await wrapper.get('form').trigger('submit');
     await flushPromises();
     expect(start).toHaveBeenLastCalledWith(expect.anything(), false, null);
@@ -214,6 +218,19 @@ describe('HostedSettingsForm', () => {
 
     const none = mountForm([JO], settings(), { ownMachinesFree: 0, previousOwnMachine: true });
     expect(none.find('#hosted-settings-own_machine').exists()).toBe(false);
+  });
+
+  it('runs on a dedicated machine with no server on shared machines free', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(4, { state: 'requested', own_machine: true }) });
+    const wrapper = mountForm([JO], null, { sharedFree: 0, ownMachinesFree: 1, addresses: [address(1, 'smoke')] });
+    expect(wrapper.find('#hosted-settings-own_machine').exists()).toBe(false);
+    expect(wrapper.get('#hosted-settings-pool').text()).toBe('On your dedicated machine');
+    // Its static addresses at once.
+    expect((wrapper.get('#hosted-settings-address_id').element as HTMLSelectElement).selectedIndex).toBe(1);
+    await wrapper.get('#hosted-settings-game_name').setValue('Night Ops');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ game_name: 'Night Ops' }), true, 1);
   });
 
   it('marks the game picker when the backend refuses the data set', async () => {

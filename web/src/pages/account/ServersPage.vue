@@ -53,18 +53,20 @@
       <section v-else class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="servers-allowance-heading">
         <h2 id="servers-allowance-heading" class="sr-only">Your hosting allowance</h2>
         <div class="grid gap-6 sm:grid-cols-2">
-          <div class="space-y-1">
-            <AllowanceMeter id="servers-allowance" :used="data.entitlement.used" :max="data.entitlement.max_servers" />
+          <div v-if="data.entitlement.shared_servers > 0" class="space-y-1">
+            <AllowanceMeter id="servers-allowance" :used="data.entitlement.shared_used" :max="data.entitlement.shared_servers" />
             <p class="text-xs text-ink-muted">{{ sourceLine }}</p>
           </div>
-          <AllowanceMeter
-            v-if="data.entitlement.own_machines > 0"
-            id="servers-own-machines"
-            :used="data.entitlement.own_used"
-            :max="data.entitlement.own_machines"
-            singular="dedicated machine"
-            plural="dedicated machines"
-          />
+          <div v-if="data.entitlement.own_machines > 0" class="space-y-1">
+            <AllowanceMeter
+              id="servers-own-machines"
+              :used="data.entitlement.own_used"
+              :max="data.entitlement.own_machines"
+              singular="dedicated machine"
+              plural="dedicated machines"
+            />
+            <p class="text-xs text-ink-muted">One more server each, on a machine of its own.</p>
+          </div>
         </div>
         <div class="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p v-if="blockText" class="text-sm" :class="block === 'past_due' ? 'text-warn' : 'text-ink-muted'">
@@ -73,7 +75,7 @@
               Update your payment method
             </RouterLink>
             <RouterLink
-              v-else-if="block === 'limit' && biggerTierOffered(data.entitlement)"
+              v-else-if="block === 'limit' && moreServersOffered(data.entitlement)"
               to="/me/support"
               class="text-accent hover:text-ink-bright"
             >
@@ -84,7 +86,7 @@
           <RouterLink
             v-if="block === null"
             to="/me/servers/new"
-            aria-describedby="servers-allowance"
+            :aria-describedby="meterIds"
             class="shrink-0 rounded-control bg-accent px-5 py-2.5 text-center text-sm font-semibold text-on-accent transition hover:bg-accent/90"
           >
             Start a server
@@ -165,12 +167,14 @@
 
 <script setup lang="ts">
 // /me/servers: everything the logged-in account runs. From GET /api/me/servers
-// its hosting allowance (the AllowanceMeter, "2 of 3 servers used") with the
-// start (to /me/servers/new) while it has room (at its limit, a bigger tier
-// while one can be bought: biggerTierOffered), the support tier callout
-// while it has none, and its hosted servers (HostedServerCard, each linking
-// to its own page) and their stats together (StatsDashboard, GET
-// /api/me/servers/stats); from GET /api/me/hosts the games it hosts itself
+// its hosting allowance (an AllowanceMeter for its servers on shared
+// machines, "2 of 3 servers used", and one for its dedicated machines) with
+// the start (to /me/servers/new) while either has room (at its limit, a
+// bigger tier or a dedicated machine while one can be bought:
+// moreServersEnding), the support tier callout while it has none, and its
+// hosted servers (HostedServerCard, each linking to its own page) and their
+// stats together (StatsDashboard, GET /api/me/servers/stats); from GET
+// /api/me/hosts the games it hosts itself
 // (MyServerCard; a hosted server's own listing shows on its card instead,
 // utils/myServersView.ts).
 //
@@ -199,11 +203,12 @@ import { replacedServers } from '../../utils/history';
 import { LAUNCHES_HELD_NOTICE } from '../../utils/hostedState';
 import {
   PAST_DUE_TEXT,
-  biggerTierOffered,
   endedServers,
   hostingView,
   listingsOutrunHosted,
   liveServers,
+  moreServersEnding,
+  moreServersOffered,
   splitListings,
   startBlock,
 } from '../../utils/myServersView';
@@ -240,15 +245,23 @@ const replacedEndedIds = computed(() => replacedServers(data.value?.servers ?? [
 const endedShown = computed(() => ended.value.filter((s) => showEndedHistory.value || !replacedEndedIds.value.has(s.id)));
 const listings = computed(() => splitListings(hosts.value, data.value?.servers ?? []));
 
+// Where the servers on shared machines come from.
 const sourceLine = computed(() => {
   switch (data.value?.entitlement.source) {
     case 'tier':
-      return 'From your support tier.';
+      return 'On shared machines, from your support tier.';
     case 'comp':
-      return 'Granted to your account by an admin.';
+      return 'On shared machines, granted to your account by an admin.';
     default:
-      return '';
+      return 'On shared machines.';
   }
+});
+// The meters the start link is described by: the ones shown.
+const meterIds = computed(() => {
+  const e = data.value?.entitlement;
+  if (!e) return undefined;
+  const ids = [...(e.shared_servers > 0 ? ['servers-allowance'] : []), ...(e.own_machines > 0 ? ['servers-own-machines'] : [])];
+  return ids.length > 0 ? ids.join(' ') : undefined;
 });
 
 const blockText = computed(() => {
@@ -260,9 +273,7 @@ const blockText = computed(() => {
       const stopping = live.value.some((s) => s.state === 'stopping');
       const all =
         e?.max_servers === 1 ? 'The one server you may run is live.' : `All ${e?.max_servers} servers you may run are live.`;
-      return stopping
-        ? `${all} ${STOPPING_STILL_COUNTS}`
-        : `${all} Stop one to start another${e && biggerTierOffered(e) ? ', or move to a bigger support tier.' : '.'}`;
+      return stopping ? `${all} ${STOPPING_STILL_COUNTS}` : `${all} Stop one to start another${e ? moreServersEnding(e) : '.'}`;
     }
     case 'full':
       return 'Every hosted server place on NovaWorld is taken right now. Try again later.';

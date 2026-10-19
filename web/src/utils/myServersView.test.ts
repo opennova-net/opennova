@@ -3,6 +3,7 @@ import { hostedServer, listedServer, serversResponse } from '../test/hostedFixtu
 import {
   biggerTierOffered,
   canStartAnother,
+  moreServersEnding,
   endedServers,
   hostingView,
   listingsOutrunHosted,
@@ -69,6 +70,19 @@ describe('startBlock and canStartAnother', () => {
     expect(
       biggerTierOffered(serversResponse([], { entitlement: { tier: null, source: 'comp', granted: true } }).entitlement),
     ).toBe(false);
+  });
+
+  it('says what buys another server at the limit: a dedicated machine for any account but a granted one', () => {
+    expect(moreServersEnding(serversResponse([], { entitlement: { tier: 2, max_servers: 2 } }).entitlement)).toBe(
+      ', or move to a bigger support tier or add a dedicated machine.',
+    );
+    expect(moreServersEnding(serversResponse([]).entitlement)).toBe(', or add a dedicated machine.');
+    // Dedicated machines alone, no tier: a tier or another machine.
+    const tierless = { tier: null, source: 'none' as const, max_servers: 1, own_machines: 1 };
+    expect(moreServersEnding(serversResponse([], { entitlement: tierless }).entitlement)).toBe(
+      ', or move to a bigger support tier or add a dedicated machine.',
+    );
+    expect(moreServersEnding(serversResponse([], { entitlement: { granted: true, source: 'comp', tier: null } }).entitlement)).toBe('.');
   });
 
   it('counts the free places on shared machines', () => {

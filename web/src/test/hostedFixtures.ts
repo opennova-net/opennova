@@ -107,14 +107,17 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
 }
 
 // Tier 3's three servers on shared machines unless the overrides say
-// otherwise.
+// otherwise; the servers on shared machines are the ones max_servers holds
+// past the dedicated machines, unless named.
 export function entitlement(overrides: Partial<HostingEntitlement> = {}): HostingEntitlement {
+  const max = overrides.max_servers ?? 3;
+  const own = overrides.own_machines ?? 0;
   return {
-    max_servers: 3,
+    max_servers: max,
     used: 0,
-    shared_servers: 3,
+    shared_servers: Math.max(0, max - own),
     shared_used: 0,
-    own_machines: 0,
+    own_machines: own,
     own_used: 0,
     can_start: true,
     source: 'tier',
