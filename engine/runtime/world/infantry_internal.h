@@ -15,6 +15,11 @@ namespace opennova::world {
 // infantry.cpp, shared with infantry_combat.cpp and infantry_board.cpp.
 // The motor-head channel update in infantry_animation.cpp owns gait inserts.
 int32_t bearing_to(int32_t dx, int32_t dy);
+// Whether the player-body (org2) update runs this body: the local player, a remote
+// player (its read-apply marked it, or its Flags carry the player classifier before
+// its first uplink); every other organic runs the org1 update.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 vs Entity_UpdateInfantryAI @0x4B9910]
+bool infantry_org2_body(const AiEntity &e, const Entity *ent);
 void commit_body_state(InfantryState &inf, int resolved);
 void commit_player_body_state(InfantryState &inf, int resolved,
                               const IRootMotionSource *root_motion, bool wash);
@@ -57,23 +62,21 @@ InfantryAttachmentPose infantry_attachment_pose(AiEntity &, World &);
 void infantry_attachment_select(AiEntity &, World &, const InfantryAttachmentPose &);
 bool infantry_attachment_move(AiEntity &, World &, const InfantryAttachmentPose &);
 
-bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent);
 // The once-per-life death edge (infantry_death.cpp). `org1` selects the NPC
 // legs: the drowning clip, the unstaged-hit alert, the death tick, the 0xC0 clear
 // and, on the authority, the edge's own death transaction.
 // [orig: Entity_UpdateInfantryAI @0x4B9C40..0x4B9D55]
 void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
                          uint32_t logic_tick);
-// The player-body (org2) edge's gate at Health <= 0, for both legs (the motor
-// and the authority's remote peers): the head's hidden-bit return, then the
-// dead bit. [orig: Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127,
+// The player-body (org2) edge's gate at Health <= 0, for every player body (the
+// local one and, on the authority, the remote ones): the head's hidden-bit
+// return, then the dead bit. [orig: Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127,
 // @0x4B4BFE]
 bool player_body_death_edge_open(const AiSystem &ai, const AiEntity &e, const Entity *ent);
 // The player-body edge's tail after its latch: on the authority, the death
 // transaction the host session armed. [orig: @0x4B4CE1..0x4B4CEA]
 void raise_player_body_death(const AiSystem &ai, World &world, Entity &ent);
-// The death edge's scream leg, shared by the motor's edge and the authority's
-// remote-peer edge: a player body (org2) composes "<prefix>_DEATH" /
+// The death edge's scream leg: a player body (org2) composes "<prefix>_DEATH" /
 // "_DEATH_K" from its anim slot, any other body plays its profile slot 7 / 8;
 // the section-bit-0 silent cleanup and a dismemberment piece play nothing.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b4c19, @0x4b4c4a..0x4b4c6a;

@@ -454,6 +454,11 @@ void test_remote_player_body_publishes_exact_change_team_contact() {
 
     AiSystem ai;
     ai.bind_registry(&world.registry);
+    // The authority runs the remote player's whole org2 update: gravity, the
+    // resolver and the jump block sit behind the terrain, which retail always has
+    // (a flat floor at 0 here). [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
+    Field floor0([](int) { return static_cast<uint16_t>(0); });
+    ai.terrain = &floor0.field;
     ai.collision = &collision;
     TestSource source;
     source.clips = {anim_state::kIdle};
@@ -941,6 +946,11 @@ void test_remote_player_body_anim() {
 
     AiSystem ai;
     ai.bind_registry(&w.registry);
+    // The authority runs the remote player's whole org2 update: gravity, the
+    // resolver and the jump block sit behind the terrain, which retail always has
+    // (a flat floor at 0 here). [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
+    Field floor0([](int) { return static_cast<uint16_t>(0); });
+    ai.terrain = &floor0.field;
     TestSource src;
     for (int s = 1; s <= 8; ++s) src.clips.insert(s);          // stand walk block
     for (int s = 11; s <= 18; ++s) src.clips.insert(s);        // crouch walk block
@@ -1013,17 +1023,19 @@ void test_remote_player_body_anim() {
     CHECK(e->inf.anim_state == anim_state::kJumpStart);
     CHECK(e->inf.anim_pending == anim_state::kJumpLoop);
     CHECK(e->inf.jump_cooldown > 0);
-    // Held key: the countdown parks at 1 — no auto-repeat while held, and the
-    // selection resumes locomotion once the episode window closes.
-    run_ticks(ai, w, t + 2, t + 40);
+    // Held key: the countdown parks at 1 — no auto-repeat while held. The body
+    // flies its own arc (0x1600 up, 208 a tick down: about 55 ticks) and lands,
+    // after which the selection resumes locomotion.
+    run_ticks(ai, w, t + 2, t + 80);
     CHECK(e->inf.jump_cooldown == 1);
+    CHECK(!e->inf.airborne);
     CHECK(ent->net_anim_state != anim_state::kJumpStart);
     // Release, then press again: a fresh edge launches a second jump.
     ent->net_move_input = 0;
-    run_ticks(ai, w, t + 40, t + 44);
+    run_ticks(ai, w, t + 80, t + 84);
     CHECK(e->inf.jump_cooldown == 0);
     ent->net_move_input = 0x20;
-    run_ticks(ai, w, t + 44, t + 46);
+    run_ticks(ai, w, t + 84, t + 86);
     CHECK(e->inf.anim_state == anim_state::kJumpStart ||
           e->inf.anim_state == anim_state::kJumpLoop);
 }
@@ -1045,6 +1057,11 @@ void test_remote_player_same_tick_prone_jump_is_rejected() {
 
     AiSystem ai;
     ai.bind_registry(&w.registry);
+    // The authority runs the remote player's whole org2 update: gravity, the
+    // resolver and the jump block sit behind the terrain, which retail always has
+    // (a flat floor at 0 here). [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
+    Field floor0([](int) { return static_cast<uint16_t>(0); });
+    ai.terrain = &floor0.field;
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
     ai.root_motion = &src;
@@ -1082,6 +1099,11 @@ void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
 
     AiSystem ai;
     ai.bind_registry(&w.registry);
+    // The authority runs the remote player's whole org2 update: gravity, the
+    // resolver and the jump block sit behind the terrain, which retail always has
+    // (a flat floor at 0 here). [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
+    Field floor0([](int) { return static_cast<uint16_t>(0); });
+    ai.terrain = &floor0.field;
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
     ai.root_motion = &src;
@@ -1129,6 +1151,11 @@ void test_remote_player_jump_respects_world_state_flag_gates() {
 
     AiSystem ai;
     ai.bind_registry(&w.registry);
+    // The authority runs the remote player's whole org2 update: gravity, the
+    // resolver and the jump block sit behind the terrain, which retail always has
+    // (a flat floor at 0 here). [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
+    Field floor0([](int) { return static_cast<uint16_t>(0); });
+    ai.terrain = &floor0.field;
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
     ai.root_motion = &src;
@@ -1136,11 +1163,11 @@ void test_remote_player_jump_respects_world_state_flag_gates() {
     e->net_is_remote_peer = true;
     e->health = 100;
 
-    // 0x10000 is the terrain-gradient slide bit. This remote input gate consumes
-    // the replicated flag; the local motor's producer is covered by infantry_terrain.
-    const std::array<uint32_t, 5> blocked_flags = {
-        kEntityFlagDead, kEntityFlagInAir, kEntityFlagDrowning,
-        0x10000u, kEntityFlagMounted,
+    // The remote body runs the same org2 update as the local one, so its
+    // terrain-slide bit 0x10000 is produced and cleared before the gate by the
+    // body's own gradient pass, as the local body's is (infantry_terrain covers it).
+    const std::array<uint32_t, 4> blocked_flags = {
+        kEntityFlagDead, kEntityFlagInAir, kEntityFlagDrowning, kEntityFlagMounted,
     };
     uint32_t tick = 1;
     for (const uint32_t blocked : blocked_flags) {
@@ -1185,6 +1212,11 @@ void test_remote_player_jump_hold_release_cooldown_matches_retail() {
 
     AiSystem ai;
     ai.bind_registry(&w.registry);
+    // The authority runs the remote player's whole org2 update: gravity, the
+    // resolver and the jump block sit behind the terrain, which retail always has
+    // (a flat floor at 0 here). [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
+    Field floor0([](int) { return static_cast<uint16_t>(0); });
+    ai.terrain = &floor0.field;
     TestSource src;
     src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
     ai.root_motion = &src;
@@ -1205,8 +1237,11 @@ void test_remote_player_jump_hold_release_cooldown_matches_retail() {
     run_ticks(ai, w, 41, 42);
     CHECK(e->inf.jump_cooldown == 0);
 
+    // The body lands from its own arc before a fresh press can launch it.
+    run_ticks(ai, w, 42, 80);
+    CHECK(!e->inf.airborne);
     ent->net_move_input = Entity::kMoveOrderJump;
-    run_ticks(ai, w, 42, 43);
+    run_ticks(ai, w, 80, 81);
     CHECK(e->inf.jump_cooldown == 32);
     CHECK(e->inf.anim_state == anim_state::kJumpStart ||
           e->inf.anim_state == anim_state::kJumpLoop);
@@ -3890,8 +3925,8 @@ void test_eye_offset_restamp() {
     AiEntity *e = soldier(ai);
     w.registry.configure_pool(0, 4);
     Entity ent;
-    ent.kind = EntityKind::Organic;
-    ent.flags |= kEntityFlagPlayer; // the retail player classifier
+    ent.kind = EntityKind::Organic; // no player classifier: the org1 legs below;
+                                    // is_local_player selects the org2 ones
     w.registry.spawn(0, ent);
 
     run_ticks(ai, w, 0, 2);

@@ -528,7 +528,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			}
 			conn.discard_pre_deploy_uplinks = false;
 		}
-		replication::drain_connection_c2s(world, conn.link);
+		replication::drain_connection_c2s(world, conn.link,
+				conn.slot_state == PlayerSlotState::Joined); // [orig: @0x4C2017]
 	}
 
 	// (1b) The WAC 'humans' count, rebuilt each server tick right after the

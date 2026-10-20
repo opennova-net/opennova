@@ -310,8 +310,9 @@ bool run_fanout_and_per_connection_anchor() {
 	return true;
 }
 
-// (b) A joiner's C2S 0x0C uplink drains through its connection and SNAPs its remote-peer entity;
-//     the host's own player is untouched.
+// (b) A joiner's C2S 0x0C uplink drains through its connection and stages its remote-peer body's
+//     chase target (a visible body's position is its own update's, D-NET-NEW-LP-2); the host's own
+//     player is untouched.
 bool run_joiner_uplink_snaps_peer() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
@@ -341,17 +342,17 @@ bool run_joiner_uplink_snaps_peer() {
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	if (!expect(udp_host.inbound_pending() == 0, "host drained the joiner connection")) return false;
 
-	// The joiner's registry entity SNAPPED to the wire pose.
+	// The joiner's body staged the wire pose as its chase target; its live position is unchanged.
 	const w::Entity *je = world.registry.get(joiner_h);
 	if (!expect(je != nullptr, "joiner entity present")) return false;
-	if (!expect(je->position.x == static_cast<float>(w::from_fixed(wx)) &&
-	                    je->position.y == static_cast<float>(w::from_fixed(wy)) &&
-	                    je->position.z == static_cast<float>(w::from_fixed(wz)),
-	            "joiner registry position snapped to the wire pose")) return false;
+	if (!expect(je->position.x == 1.0f && je->position.y == 1.0f && je->position.z == 1.0f,
+	            "a visible joiner body is not snapped to the wire pose")) return false;
 	if (!expect(je->yaw == 45, "joiner yaw = 90 - BAM/deg (== 45)")) return false;
 	const w::AiEntity *jae = ai.for_handle(joiner_h);
-	if (!expect(jae != nullptr && jae->net_is_remote_peer,
-	            "joiner AiEntity marked net-snapped")) return false;
+	if (!expect(jae != nullptr && jae->net_is_remote_peer &&
+	                    jae->net_smooth_target[0] == wx && jae->net_smooth_target[1] == wy &&
+	                    jae->net_smooth_target[2] == wz,
+	            "joiner AiEntity staged the wire pose as its chase target")) return false;
 
 	// The host's own player was NOT touched by the drain.
 	const w::Entity *he = world.registry.get(host_h);
@@ -370,11 +371,10 @@ bool run_joiner_uplink_snaps_peer() {
 			w::to_fixed(50.0), 0x4000, 0));
 	carry(udp_join, udp_host);
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
-	je = world.registry.get(joiner_h);
+	jae = ai.for_handle(joiner_h);
 	if (!expect(udp_host.inbound_pending() == 0 &&
-	                    je->position.x == static_cast<float>(w::from_fixed(wx)) &&
-	                    je->position.y == static_cast<float>(w::from_fixed(wy)) &&
-	                    je->position.z == static_cast<float>(w::from_fixed(wz)),
+	                    jae->net_smooth_target[0] == wx && jae->net_smooth_target[1] == wy &&
+	                    jae->net_smooth_target[2] == wz,
 	            "pre-round drains but ignores the remote pose uplink")) return false;
 	return true;
 }
@@ -447,14 +447,14 @@ bool run_cross_peer_uplink_rejected() {
 	if (!expect(bae != nullptr && !bae->net_is_remote_peer, "peer B not net-snapped by the spoof"))
 		return false;
 
-	// Positive control: the SAME connection naming its OWN entity (A) DOES snap A — proving the gate
-	// admits the owner, it does not reject every uplink.
+	// Positive control: the SAME connection naming its OWN entity (A) DOES apply to A (its chase
+	// target staged) — proving the gate admits the owner, it does not reject every uplink.
 	udp_a_client.client_send(0x0C, make_0c_uplink(peer_a.packed, w::to_fixed(100.0), 0, 0, 0x0000, 0));
 	carry(udp_a_client, udp_a);
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
-	const w::Entity *ae2 = world.registry.get(peer_a);
-	if (!expect(ae2 != nullptr && ae2->position.x == 100.0f,
-	            "peer A snapped by ITS OWN connection's uplink (owner gate admits the owner)"))
+	const w::AiEntity *aae = ai.for_handle(peer_a);
+	if (!expect(aae != nullptr && aae->net_smooth_target[0] == w::to_fixed(100.0),
+	            "peer A applied by ITS OWN connection's uplink (owner gate admits the owner)"))
 		return false;
 	return true;
 }
@@ -1923,8 +1923,10 @@ bool run_mounted_g_slot_route_echo() {
 //     heading [orig: op3 reads groundEntity(+0x28); the extended body's pose is
 //     Entity_TransformWorldToLocal output]. The host apply must lift local -> world through
 //     the carrier pose [orig: op4 @0x4c1de1 Entity_TransformLocalToWorld; heading add
-//     @0x43be7e], REPLACE flags bits 2-4 from the raw wire byte [orig: @0x4c1e4d], and the
-//     0x0A echo must re-emit the carrier + local pos + local yaw byte [orig: op1 @0x4c0a08 /
+//     @0x43be7e] into the body's chase target (D-NET-NEW-LP-2), REPLACE flags bits 2-4 from
+//     the raw wire byte [orig: @0x4c1e4d], store no ground link (the host body's own resolver
+//     probe keeps +0x28), and the 0x0A echo of a body standing on the carrier must re-emit the
+//     carrier + local pos + local yaw byte [orig: op1 @0x4c0a08 /
 //     @0x4c0b07 / sar-24 yaw @0x4c0b85] — echoing 0xFFFF at a grounded retail client
 //     detaches + hard-snaps it to local-as-world coords (the v26 origin teleport).
 bool run_grounded_uplink_apply_and_echo() {
@@ -1969,21 +1971,33 @@ bool run_grounded_uplink_apply_and_echo() {
 	                                         bld_h.packed, /*state_flags=*/0x10));
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
 
-	// (1) HOST APPLY: world pos = carrier ⊕ local (identity rotation -> exact adds).
+	// (1) HOST APPLY: the chase target = carrier ⊕ local (identity rotation -> exact adds).
 	const w::Entity *je = world.registry.get(joiner_h);
-	if (!expect(je != nullptr, "joiner entity present")) return false;
-	if (!expect(je->position.x == 102.0f && je->position.y == 200.5f && je->position.z == 11.0f,
+	const w::AiEntity *jae = ai.for_handle(joiner_h);
+	if (!expect(je != nullptr && jae != nullptr, "joiner entity present")) return false;
+	if (!expect(jae->net_smooth_target[0] == w::to_fixed(102.0) &&
+	                    jae->net_smooth_target[1] == w::to_fixed(200.5) &&
+	                    jae->net_smooth_target[2] == w::to_fixed(11.0),
 	            "grounded uplink lifted local -> world through the carrier pose"))
 		return false;
 	if (!expect(je->yaw == 45, "grounded heading composed with the carrier heading")) return false;
-	if (!expect(je->ground_target == bld_h, "uplinked carrier mirrored into ground_target"))
+	if (!expect(!je->ground_target.valid(), "the read-apply stores no ground link"))
 		return false;
 	if (!expect((je->flags & 0x1Cu) == 0x10u,
 	            "flags bits 2-4 REPLACED from the wire byte (bit 3 cleared, not xor-kept)"))
 		return false;
 
-	// (2) ECHO: the joiner's 0x0A record re-emits the carrier + compressed LOCAL pos +
-	// local yaw byte (single-bit locals survive the 12-bit-mantissa compressor exactly).
+	// (2) ECHO: a body standing on the carrier (the host body's own resolver probe links it;
+	// this collision-less rig places it there) — the joiner's 0x0A record re-emits the carrier
+	// + compressed LOCAL pos + local yaw byte (single-bit locals survive the 12-bit-mantissa
+	// compressor exactly).
+	{
+		w::Entity *standing = world.registry.get(joiner_h);
+		standing->position.x.q16 = w::to_fixed(102.0);
+		standing->position.y.q16 = w::to_fixed(200.5);
+		standing->position.z.q16 = w::to_fixed(11.0);
+		standing->ground_target = bld_h;
+	}
 	ns::test::emit_all(world, conns);
 	ns::Datagram dg;
 	if (!expect(join_ch.client_recv(dg), "joiner 0x0A frame dequeued")) return false;
@@ -2012,11 +2026,10 @@ bool run_grounded_uplink_apply_and_echo() {
 	join_ch.client_send(0x0C, make_0c_uplink(joiner_h.packed, w::to_fixed(50.0),
 	                                         w::to_fixed(60.0), w::to_fixed(12.0), 0x2000, 0));
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
-	je = world.registry.get(joiner_h);
-	if (!expect(je->position.x == 50.0f && je->position.y == 60.0f && je->position.z == 12.0f,
-	            "free-standing uplink applies world coords raw")) return false;
-	if (!expect(!je->ground_target.valid(), "ground_target cleared by a free-standing uplink"))
-		return false;
+	if (!expect(jae->net_smooth_target[0] == w::to_fixed(50.0) &&
+	                    jae->net_smooth_target[1] == w::to_fixed(60.0) &&
+	                    jae->net_smooth_target[2] == w::to_fixed(12.0),
+	            "free-standing uplink stages world coords raw")) return false;
 	std::printf("PASS grounded_uplink_apply_and_echo\n");
 	return true;
 }
@@ -2358,7 +2371,7 @@ bool run_vehicle_drive_authority() {
 	intent.heading = static_cast<int16_t>(
 			static_cast<uint16_t>(local_heading_bits >> 16));
 	intent.move_input = 0x08;
-	if (!expect(ns::apply_player_intent(world, intent), "driver intent read-applied"))
+	if (!expect(ns::apply_player_intent(world, intent, true), "driver intent read-applied"))
 		return false;
 	w::AiEntity *driver_ai = ai.for_handle(ph);
 	if (!expect(driver_ai != nullptr && driver_ai->net_is_remote_peer &&

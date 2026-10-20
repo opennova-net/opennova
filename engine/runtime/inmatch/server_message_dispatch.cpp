@@ -886,7 +886,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				//  @0x4D6A80 (mode-4 read-apply, owner gate @0x4D6B08)]
 				cache_client_pose(msg.payload, st);
 				if (world != nullptr && conn.burst.spawned)
-					replication::apply_connection_uplink(*world, conn.link, msg.payload);
+					replication::apply_connection_uplink(*world, conn.link, msg.payload,
+							conn.slot_state == PlayerSlotState::Joined); // [orig: @0x4C2017]
 				break;
 			case c2s::MOUNTED_WEAPON_SLOT_SELECT: {
 				// Action 6 on a designated-G attached EWeap selects which live

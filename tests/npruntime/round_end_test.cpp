@@ -30,12 +30,15 @@
 #include <runtime/world/world.h>
 #include <runtime/world/zone_chain.h>
 
+#include "../common/flat_floor.h"
+
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/wac_system.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -142,6 +145,14 @@ w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
 	if (entity == nullptr) return nullptr;
 	w::AiEntity *body = ai.at(ai.attach(handle));
 	if (body == nullptr) return nullptr;
+	// The authority runs the remote player's whole org2 update (D-NET-NEW-LP-2):
+	// a floor at the body's own height keeps it standing where the fixture put it.
+	static std::map<int, std::unique_ptr<test_common::FlatFloor>> floors;
+	std::unique_ptr<test_common::FlatFloor> &floor =
+			floors[static_cast<int>(entity->position.z * 256.0f)];
+	if (!floor) floor = std::make_unique<test_common::FlatFloor>(entity->position.z);
+	world.tables.terrain = &floor->field;
+	ai.terrain = &floor->field;
 	body->inf.active = true;
 	body->net_is_remote_peer = true;
 	body->health = entity->health;

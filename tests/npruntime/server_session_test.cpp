@@ -35,6 +35,8 @@
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
+#include "../common/flat_floor.h"
+
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
@@ -4429,6 +4431,11 @@ bool check_timed_capture_host_wire_transaction() {
 	const int capture_model = collision.add_model(capture_box());
 	collision.assign_entity(zone_handle, capture_model);
 
+	// The authority runs the remote players' whole org2 update (D-NET-NEW-LP-2):
+	// a floor at their height keeps them standing in the box.
+	static test_common::FlatFloor floor4(4.0);
+	world.tables.terrain = &floor4.field;
+	ai.terrain = &floor4.field;
 	auto soldier = [&](uint8_t team) {
 		opennova::world::Entity entity;
 		entity.kind = opennova::world::EntityKind::Organic;
@@ -4661,6 +4668,11 @@ bool check_numbered_flip_pair_and_banner_wire() {
 	model.sections.push_back(section);
 	collision.assign_entity(target, collision.add_model(model));
 
+	// The authority runs the remote players' whole org2 update (D-NET-NEW-LP-2):
+	// a floor at their height keeps them standing in the box.
+	static test_common::FlatFloor floor4(4.0);
+	world.tables.terrain = &floor4.field;
+	ai.terrain = &floor4.field;
 	auto soldier = [&](uint8_t team, int32_t x, int32_t y) {
 		opennova::world::Entity entity;
 		entity.kind = opennova::world::EntityKind::Organic;

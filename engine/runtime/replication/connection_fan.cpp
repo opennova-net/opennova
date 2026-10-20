@@ -1108,7 +1108,7 @@ std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type,
 // whole Connection (not a bare transport) so it can enforce the per-connection owner gate and
 // null-checks the transport internally — symmetric with emit_connection_s2c.
 bool apply_connection_uplink(world::World &world, Connection &conn,
-                             const std::vector<uint8_t> &body) {
+                             const std::vector<uint8_t> &body, bool slot_in_game) {
 	// 5-byte sub-header [u16 handle][u16 itemTypeId][u8 sub_op], then the 43-B body.
 	std::size_t consumed = 0;
 	EntityPacketSubHeader hdr;
@@ -1131,15 +1131,16 @@ bool apply_connection_uplink(world::World &world, Connection &conn,
 	if (!decode_player_extended_uplink(body.data() + consumed, body.size() - consumed,
 	                                   up, body_consumed))
 		return false;
-	// The frame statistics land on the slot as the callback parses them,
-	// ahead of the pre-round gate [orig: @0x4c1edd / @0x4c1efa].
+	// The frame statistics and the sender's 4 requested-interest pairs (the 0x0A priority
+	// build's tracked-handle floor) land on the slot as the callback parses them, ahead of
+	// its pose gates [orig: the stats @0x4c1edd / @0x4c1efa; the pairs at playerState
+	// +94346..+94368 @0x4C1F18..0x4C1FFA, owner-gated like the intent].
 	conn.uplink_frame_rate = up.stat_byte_0;
 	conn.uplink_cpu_percent = up.stat_byte_1;
-	// The receive queue remains live during the countdown, but the player
-	// state callback does not apply its remote pose/state until the shared
-	// pre-round timer clears.
-	// [orig: NetPacket_SerializePlayerState @0x4C2010..0x4C2028]
-	if (world.preround_delay_seconds != 0) return false;
+	conn.tracked_handle = {up.priority_handle_0, up.priority_handle_1,
+	                       up.priority_handle_2, up.priority_handle_3};
+	conn.tracked_score = {int32_t(up.priority_score_0), int32_t(up.priority_score_1),
+	                      int32_t(up.priority_score_2), int32_t(up.priority_score_3)};
 
 	PlayerIntent intent;
 	intent.entity_handle = hdr.handle;
@@ -1160,25 +1161,18 @@ bool apply_connection_uplink(world::World &world, Connection &conn,
 	intent.analog_y = static_cast<int8_t>(up.analog_y); // the vehicle motor reads the
 	intent.analog_z = static_cast<int8_t>(up.analog_z); // controller's axes [orig: @0x48b783]
 	intent.buttons = 0; // extended uplink carries state/anim bytes, not a buttons word
-	apply_player_intent(world, intent);
-
-	// Store the sender's 4 requested-interest pairs for the 0x0A priority
-	// build's tracked-handle floor [orig: the 0x0C read-apply stores at
-	// playerState+94346/+94356 @0x4c09c0 — owner-gated like the intent].
-	conn.tracked_handle = {up.priority_handle_0, up.priority_handle_1,
-	                       up.priority_handle_2, up.priority_handle_3};
-	conn.tracked_score = {int32_t(up.priority_score_0), int32_t(up.priority_score_1),
-	                      int32_t(up.priority_score_2), int32_t(up.priority_score_3)};
-	return true;
+	// The pose gates (the dead bit, the round-over latch, the slot state, the pre-round
+	// countdown) sit inside the read-apply, after its unconditional stores.
+	return apply_player_intent(world, intent, slot_in_game);
 }
 
-void drain_connection_c2s(world::World &world, Connection &conn) {
+void drain_connection_c2s(world::World &world, Connection &conn, bool slot_in_game) {
 	if (conn.transport == nullptr) return;
 	Datagram dg;
 	while (conn.transport->host_recv(dg)) {
 		// §5.10 player-input uplink only this increment (other in-match C2S tags TBD).
 		if (dg.tag != c2s::ENTITY_UPLINK) continue;
-		(void)apply_connection_uplink(world, conn, dg.body);
+		(void)apply_connection_uplink(world, conn, dg.body, slot_in_game);
 	}
 }
 

@@ -1226,10 +1226,11 @@ std::vector<uint8_t> make_built_0c_uplink(
 }
 
 // The host read-applies a remote peer's C2S 0x0C uplink: the authority drain (drain_connection_c2s)
-// reads it and EntityWireBridge::apply_player_intent SNAPS the registry Entity (the store the S2C 0x0A
-// frame re-broadcasts), mirrors the engine-frame AiEntity, and stages the smooth-target.
+// reads it and EntityWireBridge::apply_player_intent stages the smooth target the body's update
+// chases and stores the live yaw/pitch; a visible body's live position is its own update's, not the
+// uplink's (D-NET-NEW-LP-2).
 // [orig: NetPacket_DispatchEntityPacketCallback @0x4D6A80 -> NetPacket_SerializePlayerState case 4
-// @0x4c2042-0x4c20a9; §5.10/§5.38]
+// @0x4c2042-0x4c20a9, the hidden-only position stores @0x4C207E..0x4C208E; §5.10/§5.38]
 bool run_apply_player_intent_stages_remote_peer() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
@@ -1266,13 +1267,11 @@ bool run_apply_player_intent_stages_remote_peer() {
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	if (!expect(channel.c2s_pending() == 0, "C2S drained by the tick")) return false;
 
-	// Registry Entity SNAPPED (absolute world pos; no map-origin add on the extended wire).
+	// A visible body is NOT snapped: its position waits for its own update's chase.
 	const w::Entity *pe = world.registry.get(ph);
 	if (!expect(pe != nullptr, "peer still present")) return false;
-	if (!expect(pe->position.x == static_cast<float>(w::from_fixed(wx)) &&
-	            pe->position.y == static_cast<float>(w::from_fixed(wy)) &&
-	            pe->position.z == static_cast<float>(w::from_fixed(wz)),
-	            "registry Entity position snapped to the wire pose")) return false;
+	if (!expect(pe->position.x.q16 == 0 && pe->position.y.q16 == 0 && pe->position.z.q16 == 0,
+	            "a visible body's live position is not the wire pose")) return false;
 	if (!expect(pe->yaw == 45, "registry yaw = 90 - BAM/deg (== 45)")) return false;
 
 	// Engine-frame AiEntity mirrored + smooth-target staged + net-snapped.
@@ -1283,8 +1282,6 @@ bool run_apply_player_intent_stages_remote_peer() {
 			static_cast<uint32_t>(static_cast<uint16_t>(wheading)) << 16);
 	const int32_t pitch_bam = static_cast<int32_t>(
 			static_cast<uint32_t>(static_cast<uint16_t>(wpitch)) << 16);
-	if (!expect(ae->self->position.x.q16 == wx && ae->self->position.y.q16 == wy && ae->self->position.z.q16 == wz,
-	            "AiEntity live pos = wire pose")) return false;
 	if (!expect(ae->heading == heading_bam && ae->pitch == pitch_bam,
 	            "AiEntity heading/pitch = i16<<16 (pure widen, no 90-offset)")) return false;
 	if (!expect(ae->net_smooth_target[0] == wx && ae->net_smooth_target[1] == wy &&
@@ -1296,10 +1293,15 @@ bool run_apply_player_intent_stages_remote_peer() {
 	return true;
 }
 
-// A player's in-air bit is above the one-byte 0x0C state field, so the host must
-// reconstruct it from the uplinked pose instead of trusting an impossible wire
-// flag. Exercise the complete local builder -> codec -> authority apply -> body
-// tick path, including landing and a new grounded press.
+// A player's in-air bit is above the one-byte 0x0C state field: the host's copy of
+// the remote body takes it from its own update (gravity, the resolver's clearance,
+// the fall and landing edges), and the uplinked MoveOrder's jump key meets that
+// state at the org2 jump gate. Exercise the complete local builder -> codec ->
+// authority apply -> body tick path: a held key in the air does not launch, the
+// body lands by its own fall, and a fresh grounded press launches once.
+// [orig: Entity_UpdateInfantryPlayerBody - the fall edge @0x4b7e17..0x4b7e73, the
+//  landing @0x4b7d0a, the jump gate @0x4b7e8c..0x4b7f06; the read-apply stores no
+//  in-air bit, @0x4C1E50 replaces bits 2-4 only]
 bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	FlatTerrain terrain;
 	w::World world;
@@ -1347,36 +1349,40 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 		return channel.c2s_pending() == 0;
 	};
 
+	// The host's copy stands 2 units above the floor where the joiner's pose is.
+	w::Entity *host_peer = world.registry.get(ph);
+	host_peer->position.x.q16 = local_entity.position.x.q16;
+	host_peer->position.y.q16 = local_entity.position.y.q16;
+	host_peer->position.z.q16 = local_entity.position.z.q16;
 	nw::PlayerExtendedUplink first_uplink;
 	if (!expect(send_local_pose(&first_uplink), "airborne local uplink drained")) return false;
 	if (!expect(first_uplink.state_flags_byte == 0,
 	            "the in-air high bit is not represented by the 0x0C state byte")) return false;
-	w::Entity *host_peer = world.registry.get(ph);
-	if (!expect(host_peer != nullptr && host_ai->inf.airborne &&
-	                    (host_peer->flags & w::kEntityFlagInAir) != 0 &&
-	                    (host_peer->engine_flags & w::kEntityFlagInAir) != 0,
-	            "authority derives both airborne mirrors from the uplink pose")) return false;
+	if (!expect(!host_ai->inf.airborne && (host_peer->flags & w::kEntityFlagInAir) == 0,
+	            "the read-apply derives no in-air state")) return false;
 	world.run_logic_tick(/*is_authority=*/true);
+	if (!expect(host_ai->inf.airborne && (host_peer->flags & w::kEntityFlagInAir) != 0,
+	            "the host body's own update raises the fall edge")) return false;
 	if (!expect(host_ai->inf.jump_cooldown == 0,
-	            "held jump while pose-derived airborne does not relaunch")) return false;
+	            "a held jump in the air does not launch")) return false;
 
-	// A grounded release clears the same derived state. The small-positive band
-	// remains hysteretic in production; exact floor contact is the landing edge.
-	local_entity.flags = 0;
+	// Released, the body falls to the floor under its own gravity and lands.
 	local_entity.net_move_input = 0;
-	local_ai.inf.airborne = false;
-	local_entity.position.z.q16 = 0;
-	if (!expect(send_local_pose(), "landing local uplink drained")) return false;
+	if (!expect(send_local_pose(), "released local uplink drained")) return false;
+	for (int t = 0; t < 120 && host_ai->inf.airborne; ++t)
+		world.run_logic_tick(/*is_authority=*/true);
 	if (!expect(!host_ai->inf.airborne &&
 	                    (host_peer->flags & w::kEntityFlagInAir) == 0 &&
 	                    (host_peer->engine_flags & w::kEntityFlagInAir) == 0,
-	            "grounded pose clears both authority airborne mirrors")) return false;
-	world.run_logic_tick(/*is_authority=*/true);
+	            "the host body lands by its own fall")) return false;
 
-	// A new press at the same grounded pose reaches the authority body gate and
-	// stamps the normal 32-tick jump latch plus the derived launch state.
+	// A new press reaches the authority body gate and stamps the normal 32-tick jump
+	// latch plus the launch state.
+	local_entity.flags = 0;
+	local_ai.inf.airborne = false;
+	local_entity.position.z.q16 = host_peer->position.z.q16;
 	local_entity.net_move_input = w::Entity::kMoveOrderJump;
-	if (!expect(send_local_pose(), "grounded repress local uplink drained")) return false;
+	if (!expect(send_local_pose(), "grounded press local uplink drained")) return false;
 	world.run_logic_tick(/*is_authority=*/true);
 	return expect(host_ai->inf.jump_cooldown == 32 && host_ai->inf.airborne &&
 	                      (host_peer->flags & w::kEntityFlagInAir) != 0 &&
@@ -1501,9 +1507,9 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	              "same-tick dead player compact carries detached FFFF/zero relationship");
 }
 
-// The infantry motor SKIPS a net-snapped remote peer entirely — its pose is host-snapped,
-// never re-simulated. [orig: Entity_UpdateInfantryAI @0x4b9a03 entity+0x24 bit0 -> full exit.]
-bool run_motor_skips_net_peer() {
+// On a client the infantry motor skips a wire-owned remote body entirely: the joiner's replica
+// motion owns it (the authority runs its whole org2 update, D-NET-NEW-LP-2).
+bool run_motor_skips_client_wire_peer() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
@@ -1524,6 +1530,7 @@ bool run_motor_skips_net_peer() {
 	ae->self->position.z.q16 = 333;
 	ae->heading = 4444;
 	ae->net_is_remote_peer = true;
+	ai.is_authority = false;
 	ai.tick_infantry(*ae, world, 0);
 
 	if (!expect(ae->inf.body_heading == 12345 && ae->inf.target_heading == 9999999,
@@ -1556,7 +1563,7 @@ int main() {
 	                run_wire_pose_drives_remote_airborne_jump_gate() &&
 	                run_apply_rejects_own_player() &&
 	                run_remote_mounted_player_death_detaches_compact() &&
-	                run_motor_skips_net_peer();
+	                run_motor_skips_client_wire_peer();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

@@ -2408,11 +2408,17 @@ bool run_roundtrip() {
 	if (!expect(client.is_deployed(), "client is deployed after owner-ID match plus the applicable 0x5A release")) return false;
 
 	// --- 4) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
+	// The joiner reports itself half a unit along x from where the host's copy of its body
+	// stands: inside the authority chase's band (D-NET-NEW-LP-2).
+	const w::Entity *host_copy = world.registry.get(Hh);
+	if (!expect(host_copy != nullptr, "the host holds the joiner's body")) return false;
+	const int32_t hx = host_copy->position.x.q16, hy = host_copy->position.y.q16,
+	              hz = host_copy->position.z.q16;
 	PlayerExtendedUplink up;
 	up.carrier_handle = 0xFFFF;
-	up.pos_x = w::to_fixed(100.0);
-	up.pos_y = w::to_fixed(200.0);
-	up.pos_z = w::to_fixed(-50.0);
+	up.pos_x = hx + 0x8000;
+	up.pos_y = hy;
+	up.pos_z = hz;
 	up.heading = 0x2000; // -> mission yaw 45
 	up.pitch = 0x0100;
 
@@ -2445,13 +2451,17 @@ bool run_roundtrip() {
 	}
 	// With a World bound the host read-applies the 0x0C inside the dispatch walk, in
 	// wire order (retail's NapiNPServerMsg_0x00C @0x501C30); nothing is surfaced for
-	// the tick-time FIFO, so the joiner entity already sits at the uplink pose here.
+	// the tick-time FIFO, so the joiner body's chase target is already staged here, its
+	// live position still the host's own.
 	if (!expect(staged == 0, "no C2S 0x0C is staged for the tick drain once a World applies it inline")) return false;
 	{
-		const w::Entity *snapped = world.registry.get(Hh);
-		if (!expect(snapped != nullptr &&
-		                    snapped->position.x == static_cast<float>(w::from_fixed(up.pos_x)),
-		            "the dispatch walk SNAPped the joiner before the authoritative tick")) return false;
+		const w::Entity *body = world.registry.get(Hh);
+		const w::AiEntity *motor = world.ai.for_handle(Hh);
+		if (!expect(body != nullptr && motor != nullptr &&
+		                    motor->net_smooth_target[0] == up.pos_x &&
+		                    body->position.x.q16 == hx,
+		            "the dispatch walk staged the joiner's chase target before the authoritative tick"))
+			return false;
 	}
 
 	// This focused test invokes Server_TickUpdate without HostOwner's pump; open
@@ -2459,14 +2469,16 @@ bool run_roundtrip() {
 	// before the authoritative tick.
 	for (inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
 		if (connection.peer == peer) connection.s2c_send_boundary_open = true;
-	inmatch::Server_TickUpdate(ctx); // drain (SNAP) -> run_logic_tick -> emit per-connection 0x0A
+	inmatch::Server_TickUpdate(ctx); // drain -> run_logic_tick (the chase) -> emit per-connection 0x0A
 
+	// The body's update took the first of ten bucket steps toward the target:
+	// ((10 >> 1) + 0x8000) / 10 = 3277 along x, no vertical step.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B458A..0x4B45CA, z = 0 @0x4B4600]
 	const w::Entity *je = world.registry.get(Hh);
 	if (!expect(je != nullptr, "joiner entity present after the tick")) return false;
-	if (!expect(je->position.x == static_cast<float>(w::from_fixed(up.pos_x)) &&
-	                    je->position.y == static_cast<float>(w::from_fixed(up.pos_y)) &&
-	                    je->position.z == static_cast<float>(w::from_fixed(up.pos_z)),
-	            "joiner entity SNAPped to the C2S 0x0C uplink pose")) return false;
+	if (!expect(je->position.x.q16 == hx + 3277 && je->position.y.q16 == hy &&
+	                    je->position.z.q16 == hz,
+	            "the joiner's body chased its C2S 0x0C uplink one bucket step")) return false;
 	// The host's own player was NOT touched by the joiner's uplink (entity-scoped owner gate).
 	const w::Entity *ho = world.registry.get(host_h);
 	if (!expect(ho && ho->position.x == 0.0f && ho->position.y == 0.0f && ho->position.z == 0.0f,
@@ -2489,12 +2501,15 @@ bool run_roundtrip() {
 	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
 		pump_host(std::move(d)); // fold the 0x0A and ship any same-frame housekeeping
 
-	// The client's decoded view reflects the server's 0x0A: its anchor IS the joiner's post-SNAP
-	// position (emit_connection_s2c anchors to owned_entity), tying 0x0C-in -> 0x0A-out -> ClientState.
-	if (!expect(client.state().anchor_x == w::to_fixed(je->position.x) &&
-	                    client.state().anchor_y == w::to_fixed(je->position.y) &&
-	                    client.state().anchor_z == w::to_fixed(je->position.z),
-	            "client ClientState anchor == joiner's post-SNAP position (0x0A folded)")) return false;
+	// The client's decoded view reflects the server's 0x0A: its anchor IS the joiner's eye,
+	// Position plus CameraOffset, as the tick's send block found it, ahead of that tick's entity
+	// update (emit_connection_s2c anchors to owned_entity), tying 0x0C-in -> 0x0A-out ->
+	// ClientState. [orig: Server_SendEntityStateToPlayer @0x517BEF..0x517C13; the periodic send
+	// block precedes Game_ProcessMainFrame's entity update in Server_TickUpdate]
+	if (!expect(client.state().anchor_x == hx + je->eye_offset_x &&
+	                    client.state().anchor_y == hy + je->eye_offset_y &&
+	                    client.state().anchor_z == hz + je->eye_offset_z,
+	            "client ClientState anchor == the joiner's pre-update eye (0x0A folded)")) return false;
 	if (!expect(client.state().frames_applied >= 1, "client folded at least one 0x0A frame")) return false;
 	if (!expect(client.state().objective_updates_applied == 1 &&
 	                    client.state().objective_won == world.script.subgoals.won &&

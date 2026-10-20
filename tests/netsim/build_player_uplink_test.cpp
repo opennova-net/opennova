@@ -383,7 +383,7 @@ bool run_scope_flag_reaches_host() {
 	intent.item_type_id = 0x14B9;
 	intent.state_flags =
 			ns::build_player_uplink(world, src_e, src_ae).state_flags_byte;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect((world.registry.get(ph)->flags & 0x10u) != 0,
 	            "the host's copy of the joiner's entity is SCOPED after the uplink"))
 		return false;
@@ -396,15 +396,19 @@ bool run_scope_flag_reaches_host() {
 	src_e.flags = 0u;
 	intent.state_flags =
 			ns::build_player_uplink(world, src_e, src_ae).state_flags_byte;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect((world.registry.get(ph)->flags & 0x10u) == 0,
 	            "lowering the scope clears the host's bit (a REPLACE, not an OR)"))
 		return false;
 	return true;
 }
 
-// build -> encode -> decode -> host read-apply (drain_connection_c2s): the host peer SNAPs to the source pose.
-bool run_roundtrip_to_host_snap() {
+// build -> encode -> decode -> host read-apply (drain_connection_c2s): the host stages the source pose
+// exactly as the body's chase target and stores the live heading/pitch; a visible body keeps its own
+// position, a hidden one (Flags bit 0) takes the source pose (D-NET-NEW-LP-2).
+// [orig: NetPacket_SerializePlayerState case 4 - the target @0x4C2042..0x4C205E, live Pitch/Yaw
+//  @0x4C206A / @0x4C206D, the hidden-only position stores @0x4C207E..0x4C208E]
+bool run_roundtrip_to_host_staging(bool hidden) {
 	// Source: the joiner's live local-player pose (zero low-16 heading/pitch for exact round-trip).
 	w::World source_world;
 	w::Entity src_e{};
@@ -427,6 +431,7 @@ bool run_roundtrip_to_host_snap() {
 	peer.kind = w::EntityKind::Organic;
 	peer.item_id = 0x14B9; // player infantry template
 	peer.position = {0.0f, 0.0f, 0.0f};
+	if (hidden) peer.flags |= w::kEntityFlagCarried;
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
 	if (!expect(ph.valid(), "host peer spawned")) return false;
 	w::AiSystem &ai = world.ai;
@@ -453,15 +458,17 @@ bool run_roundtrip_to_host_snap() {
 
 	const w::Entity *pe = world.registry.get(ph);
 	if (!expect(pe != nullptr, "host peer present")) return false;
-	if (!expect(pe->position.x == static_cast<float>(w::from_fixed(sx)) &&
-	            pe->position.y == static_cast<float>(w::from_fixed(sy)) &&
-	            pe->position.z == static_cast<float>(w::from_fixed(sz)),
-	            "host peer snapped to the joiner's source position")) return false;
+	if (!expect(hidden ? (pe->position.x.q16 == sx && pe->position.y.q16 == sy &&
+	                      pe->position.z.q16 == sz)
+	                   : (pe->position.x.q16 == 0 && pe->position.y.q16 == 0 &&
+	                      pe->position.z.q16 == 0),
+	            "a hidden peer takes the source position, a visible one keeps its own")) return false;
 	if (!expect(pe->yaw == 45, "host peer yaw = 45 (from the joiner's heading)")) return false;
 	const w::AiEntity *ae = ai.for_handle(ph);
 	if (!expect(ae != nullptr, "host peer has an AiEntity")) return false;
-	if (!expect(ae->self->position.x.q16 == sx && ae->self->position.y.q16 == sy && ae->self->position.z.q16 == sz,
-	            "host peer AiEntity live pos = source (16.16 exact)")) return false;
+	if (!expect(ae->net_smooth_target[0] == sx && ae->net_smooth_target[1] == sy &&
+	                    ae->net_smooth_target[2] == sz,
+	            "host peer chase target = source (16.16 exact)")) return false;
 	if (!expect(ae->heading == src_ae.heading && ae->pitch == src_ae.pitch,
 	            "host peer heading/pitch round-trip exactly (zero low-16 source)")) return false;
 	if (!expect(ae->net_is_remote_peer, "host peer marked net-snapped")) return false;
@@ -585,12 +592,14 @@ bool run_mounted_moving_carrier_roundtrip() {
 	                    host_player->net_analog_y == 37 && host_player->net_analog_z == -128,
 	            "mounted throttle and steering reach authority through the real uplink"))
 		return false;
-	if (!expect(host_body != nullptr && host_body->self->position.x.q16 == lifted.x &&
-	                    host_body->self->position.y.q16 == lifted.y && host_body->self->position.z.q16 == lifted.z,
+	// The lifted pose is the body's staged chase target (D-NET-NEW-LP-2).
+	if (!expect(host_body != nullptr && host_body->net_smooth_target[0] == lifted.x &&
+	                    host_body->net_smooth_target[1] == lifted.y &&
+	                    host_body->net_smooth_target[2] == lifted.z,
 	            "host lifts mounted local pose through the full carrier frame")) return false;
-	if (!expect(near_fixed(host_body->self->position.x.q16, source_body->self->position.x.q16) &&
-	                    near_fixed(host_body->self->position.y.q16, source_body->self->position.y.q16) &&
-	                    near_fixed(host_body->self->position.z.q16, source_body->self->position.z.q16),
+	if (!expect(near_fixed(host_body->net_smooth_target[0], source_body->self->position.x.q16) &&
+	                    near_fixed(host_body->net_smooth_target[1], source_body->self->position.y.q16) &&
+	                    near_fixed(host_body->net_smooth_target[2], source_body->self->position.z.q16),
 	            "mounted builder/apply round-trip preserves the source world pose")) return false;
 	const int32_t expected_host_heading = static_cast<int32_t>(
 			(static_cast<uint32_t>(static_cast<uint16_t>(up.heading)) << 16) +
@@ -674,16 +683,19 @@ bool run_ground_target_carrier_roundtrip() {
 			w::to_fixed(deck_seed.position.z), static_cast<uint32_t>(deck_yaw),
 			static_cast<uint32_t>(carrier_axis_bam(deck_seed.pitch)),
 			static_cast<uint32_t>(carrier_axis_bam(deck_seed.roll)));
-	if (!expect(host_body != nullptr && host_body->self->position.x.q16 == lifted.x &&
-	                    host_body->self->position.y.q16 == lifted.y && host_body->self->position.z.q16 == lifted.z,
+	if (!expect(host_body != nullptr && host_body->net_smooth_target[0] == lifted.x &&
+	                    host_body->net_smooth_target[1] == lifted.y &&
+	                    host_body->net_smooth_target[2] == lifted.z,
 	            "authority lifts ground-local pose through the carrier")) return false;
-	if (!expect(near_fixed(host_body->self->position.x.q16, source_body->self->position.x.q16) &&
-	                    near_fixed(host_body->self->position.y.q16, source_body->self->position.y.q16) &&
-	                    near_fixed(host_body->self->position.z.q16, source_body->self->position.z.q16),
+	if (!expect(near_fixed(host_body->net_smooth_target[0], source_body->self->position.x.q16) &&
+	                    near_fixed(host_body->net_smooth_target[1], source_body->self->position.y.q16) &&
+	                    near_fixed(host_body->net_smooth_target[2], source_body->self->position.z.q16),
 	            "ground-target round-trip preserves source world pose")) return false;
+	// The read-apply stores no ground link: the host body's own resolver probe keeps it
+	// [orig: Entity_RaycastGroundHeightAndObject @0x414370].
 	return expect(host_player != nullptr && !host_player->mounted &&
-	                      host_player->ground_target == host_deck_h,
-	              "authority retains ground_target without inventing a mount");
+	                      !host_player->ground_target.valid(),
+	              "the read-apply invents neither a mount nor a ground link");
 }
 
 // The equipped-adm ingest gate (D-NET-143): a table-less world accepts the uplinked byte
@@ -707,7 +719,7 @@ bool run_equipped_adm_ingest_gate() {
 
 	// Table-less world: accepted verbatim (unit path — a live host always feeds weapon.def).
 	intent.equipped_adm_index = 0x30;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect(world.registry.get(ph)->equipped_adm_index == 0x30,
 	            "table-less world stores the uplinked byte verbatim")) return false;
 
@@ -721,15 +733,15 @@ bool run_equipped_adm_ingest_gate() {
 	world.tables.weapons.entries[11].category = 11;
 
 	intent.equipped_adm_index = 8;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect(world.registry.get(ph)->equipped_adm_index == 8,
 	            "category 3 entry passes the < 11 gate")) return false;
 	intent.equipped_adm_index = 11;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect(world.registry.get(ph)->equipped_adm_index == 8,
 	            "category 11 (emplaced band) is NOT stored")) return false;
 	intent.equipped_adm_index = 0xFF;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect(world.registry.get(ph)->equipped_adm_index == 8,
 	            "the 0xFF none sentinel / missing entry is NOT stored")) return false;
 	return true;
@@ -960,7 +972,8 @@ int main() {
 	ok = run_interest_pairs_top4() && ok;
 	ok = run_stat_bytes() && ok;
 	ok = run_interest_person_bound_radius() && ok;
-	ok = run_roundtrip_to_host_snap() && ok;
+	ok = run_roundtrip_to_host_staging(false) &&
+	                run_roundtrip_to_host_staging(true) && ok;
 	ok = run_mounted_moving_carrier_roundtrip() && ok;
 	ok = run_seeded_carrier_seat_local_is_attitude_invariant() && ok;
 	ok = run_ground_target_carrier_roundtrip() && ok;

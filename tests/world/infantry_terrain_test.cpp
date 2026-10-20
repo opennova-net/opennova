@@ -362,25 +362,28 @@ void test_standing_carrier_motion() {
         CHECK(moving.ai().self->position.z.q16 - stationary.ai().self->position.z.q16 == q16(1));
         CHECK(moving.entity().position.x == world::from_fixed(moving.ai().self->position.x.q16));
     }
-    // Authority-side remote players retain wire-owned locomotion but consume
-    // carrier motion, including without a model collision provider.
+    // An authority-side remote player runs the same org2 update and consumes
+    // carrier motion the same way, including without a model collision provider.
     {
-        Motor m(0, 0, true);
-        m.ai().inf.is_local_player = false;
-        m.ai().net_is_remote_peer = true;
-        m.entity().position = {100, -100, 60};
-        world::Entity platform;
-        platform.position = {98, -100, 60};
-        platform.bound_radius = 20;
-        const auto h = m.w->registry.spawn(0, platform);
-        auto &parent = *m.w->registry.get(h);
-        world::stamp_saved_live_pose(parent);
-        parent.position = {101, -98, 61};
-        m.entity().ground_target = h;
-        m.tick();
-        CHECK(m.entity().position.x == 103);
-        CHECK(m.entity().position.y == -98);
-        CHECK(m.entity().position.z == 61);
+        Motor stationary(0, 0, true), moving(0, 0, true);
+        for (auto *m : {&stationary, &moving}) {
+            m->ai().inf.is_local_player = false;
+            m->ai().net_is_remote_peer = true;
+            m->entity().position = {100, -100, 60};
+            world::Entity platform;
+            platform.position = {98, -100, 60};
+            platform.bound_radius = 20;
+            const auto h = m->w->registry.spawn(0, platform);
+            auto &parent = *m->w->registry.get(h);
+            world::stamp_saved_live_pose(parent);
+            if (m == &moving) parent.position = {101, -98, 61};
+            m->entity().ground_target = h;
+        }
+        stationary.tick();
+        moving.tick();
+        CHECK(moving.ai().self->position.x.q16 - stationary.ai().self->position.x.q16 == q16(3));
+        CHECK(moving.ai().self->position.y.q16 - stationary.ai().self->position.y.q16 == q16(2));
+        CHECK(moving.ai().self->position.z.q16 - stationary.ai().self->position.z.q16 == q16(1));
     }
     // Player-only radius release; NPC support is released by contact instead.
     for (bool player : {false, true}) {

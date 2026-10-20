@@ -31,13 +31,13 @@ void ladder_unlatch(Entity *ent) {
     ent->engine_flags &= ~kEntityFlagLadderContact;
 }
 
-void infantry_ladder_view_clamp(InfantryState &inf, uint32_t entity_flags) {
+void infantry_ladder_view_clamp(int32_t &yaw, int32_t body_heading, uint32_t entity_flags) {
     if ((entity_flags & (kEntityFlagLadderContact | kEntityFlagParachute)) == 0) return;
-    const int32_t d = io::bam_sub(inf.target_heading, inf.body_heading);
+    const int32_t d = io::bam_sub(yaw, body_heading);
     if (d > 1431655680)
-        inf.target_heading = io::bam_add(inf.body_heading, 1431655680);
+        yaw = io::bam_add(body_heading, 1431655680);
     else if (d < -1431655680)
-        inf.target_heading = io::bam_sub(inf.body_heading, 1431655680);
+        yaw = io::bam_sub(body_heading, 1431655680);
 }
 
 LadderResolveIO make_ladder_resolve_io(AiEntity &e, int32_t tick_start_z) {
@@ -81,8 +81,7 @@ LadderResolveIO make_ladder_resolve_io(AiEntity &e, int32_t tick_start_z) {
 // horizontal pair. [orig: Entity_UpdateInfantryPlayerBody @ 0x4b7484-0x4b76d8]
 void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
     InfantryState &inf = e.inf;
-    if (!inf.is_local_player || tick_entity == nullptr || collision == nullptr ||
-        e.health <= 0)
+    if (tick_entity == nullptr || collision == nullptr || e.health <= 0)
         return;
     const uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
     if ((flags & kEntityFlagLadderContact) == 0 || (flags & kEntityFlagDead) != 0)
@@ -111,10 +110,13 @@ void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
             // The forward fan climbs; the look-pitch sign picks the direction,
             // with the witnessed edge quirks: +0x7FFFFFFF, -1, and INT32_MIN
             // all resolve UP. [orig: cases 0/1/7 @ 0x4b74bc-0x4b750a]
+            // The look pitch is the body's Pitch word: the local player's look
+            // accumulator, any other player body's own.
+            const int32_t look_pitch = inf.is_local_player ? inf.look_pitch : e.pitch;
             int sign = 0;
-            if (inf.look_pitch > 0) sign = inf.look_pitch != 0x7FFFFFFF ? 1 : 0;
-            if (static_cast<uint32_t>(inf.look_pitch) > 0x80000000u &&
-                inf.look_pitch != -1)
+            if (look_pitch > 0) sign = look_pitch != 0x7FFFFFFF ? 1 : 0;
+            if (static_cast<uint32_t>(look_pitch) > 0x80000000u &&
+                look_pitch != -1)
                 sign = -1;
             stamp(sign < 0 ? anim_state::kClimbDown : anim_state::kClimbUp);
             break;

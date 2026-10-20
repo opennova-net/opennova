@@ -93,7 +93,6 @@
     X(SIM_UPDATE_ENTITIES, "World::update_all_entities total, every lap below in retail order") \
     X(SIM_UPDATE_WALKS, "the pool-1 slot walk (brains, vehicle motors, ewep, items) + the pool-0 organic walk") \
     X(SIM_AI_INFANTRY, "infantry/player body rows") \
-    X(SIM_AI_INFANTRY_REMOTE, "authority animation/collision for remote players") \
     X(SIM_AI_INFANTRY_COMBAT, "NPC perception, reactions, and aim") \
     X(SIM_AI_INFANTRY_ANIMATION, "weapon/body channels + root-motion sampling") \
     X(SIM_AI_INFANTRY_COLLISION, "mounted and ordinary movement resolver calls") \

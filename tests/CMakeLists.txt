@@ -5070,6 +5070,12 @@ add_test(NAME npruntime_restore_team COMMAND npruntime_restore_team_test)
 add_executable(terrain_bilinear_fixed_test world/terrain_bilinear_fixed_test.cpp)
 target_link_libraries(terrain_bilinear_fixed_test PRIVATE opennova_runtime)
 add_test(NAME terrain_bilinear_fixed COMMAND terrain_bilinear_fixed_test)
+# The host's remote player body: the 0x0C read-apply's gates and hidden-body
+# snap, the authority chase (bucket 10, the 0x2AAA deadband, the 2-unit drop)
+# (D-NET-NEW-LP-2, the host side).
+add_executable(player_body_chase_test world/player_body_chase_test.cpp)
+target_link_libraries(player_body_chase_test PRIVATE opennova_runtime)
+add_test(NAME player_body_chase COMMAND player_body_chase_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

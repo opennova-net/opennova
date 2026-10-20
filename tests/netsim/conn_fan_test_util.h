@@ -23,7 +23,7 @@ namespace opennova::replication::test {
 // never drains — the original gates on g_NapiNPCtx.is_authority).
 inline void drain_all(world::World &world, std::vector<Connection> &conns, bool is_authority) {
 	if (!is_authority) return;
-	for (Connection &c : conns) drain_connection_c2s(world, c);
+	for (Connection &c : conns) drain_connection_c2s(world, c, true); // the slots in game (state 6)
 }
 
 // Build the world snapshot ONCE, then fan a per-connection-anchored 0x0A to every connection

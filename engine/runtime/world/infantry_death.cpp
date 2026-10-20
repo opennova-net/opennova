@@ -124,7 +124,8 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     // cleared, so a death nothing stamped (script/WAC) reports as
     // unattributed while one that follows a non-lethal hit keeps that
     // hit's clip and shooter [orig: @0x4b9cc9 fallback, @0x4b9ceb
-    // lastAttacker = 0; the player-body edge's twin @0x4b4c72..0x4b4c8d;
+    // lastAttacker = 0; the player-body edge's twin @0x4b4c72..0x4b4c8d (its
+    // Entity_ComputeAnimSlotIndex(0, 0, 4) call @0x4B4C7F);
     // consumed +0x2C0 clears @0x4b9d38].
     if (ent != nullptr && ent->death_anim_state == 0) {
         ent->last_attacker = EntityHandle{};
@@ -173,7 +174,8 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     // [orig: Entity_UpdateInfantryAI `or eax,2` @0x4B9D18 / store @0x4B9D1B,
     //  death tick @0x4B9D24..0x4B9D2F, `and eax,0FFFFFF3Fh` @0x4B9D2A,
     //  +0x184 = 0 @0x4B9D3E; the player-body twin
-    //  Entity_UpdateInfantryPlayerBody @0x4B4CB5..0x4B4CDB]
+    //  Entity_UpdateInfantryPlayerBody @0x4B4CB5..0x4B4CDB: the death tick
+    //  g_CurrentTick @0x4B4CC1 into +0x1AC @0x4B4CCC, `and eax,0FFFFFF3Fh` @0x4B4CC7]
     ent->flags |= kEntityFlagDead;
     ent->engine_flags |= kEntityFlagDead;
     ent->attach_parent = {};

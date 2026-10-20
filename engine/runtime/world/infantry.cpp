@@ -115,15 +115,11 @@ int32_t bearing_to(int32_t dx, int32_t dy) {
                                 io::kBamPerRadian);
 }
 
-// Shared with infantry_remote_anim.cpp (the size-gate split): these were
-// file-local helpers; they keep their bodies verbatim and only gain external
-// linkage so the extracted leg can call them. Declared in infantry_internal.h.
-
 // The two halves of the org2 jump gate's Flags reads. The 0x1A002 word test
 // (`test eax,1A002h` @0x4b7ea4: in-air, dead, the water pair, the terrain
 // slide) fails INTO the landing else-leg @0x4b7f71; the carried test past it
 // (`test al,40h; jnz 0x4b8020` @0x4b7ebb) skips the whole tail instead. The
-// local block keys on the halves; the remote projection reads the union.
+// org2 jump block keys on the halves.
 namespace {
 bool player_jump_flags_blocked(const InfantryState &inf, const Entity *ent) {
     if (inf.airborne) return true;
@@ -136,10 +132,6 @@ bool player_jump_carried(const Entity *ent) {
            (ent->mounted || ((ent->flags | ent->engine_flags) & kEntityFlagMounted) != 0);
 }
 } // namespace
-
-bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent) {
-    return player_jump_flags_blocked(inf, ent) || player_jump_carried(ent);
-}
 
 // ----------------------------------------------------------------------------
 // Navigation think (every 16 ticks, authority). [orig: 0x4b9910 dump 1293-1540]
@@ -631,13 +623,18 @@ void infantry_org1_heading_chase(AiEntity &e, const Entity *ent, uint32_t key) {
     infantry_look_tick(inf, e.heading, e.pitch);
 }
 
-// The org2 local view/leg phase precedes the scoped additions, before later
-// animation selection or ladder movement consumes aim.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4B4945..0x4B4BC6;
-// scoped additions @0x4B5C78..0x4B5C91]
+// The org2 view/leg phase precedes the scoped additions, before later
+// animation selection or ladder movement consumes aim. It runs for every player
+// body: the legs chase the body's Yaw word and the look pitch clamps about the
+// body pitch whoever owns the body; the local player's Yaw and Pitch are its look
+// accumulators (the mouse), any other body's its own words (a remote player's the
+// read-apply and the chase write). [orig: Entity_UpdateInfantryPlayerBody
+// @0x4B4945..0x4B4BC6, no locality test but the g_LocalPlayerLookYaw mirrors
+// @0x4B4B1C / @0x4B4B4B; scoped additions @0x4B5C78..0x4B5C91]
 // `tick` is the raw current_tick the org2 prologue banks [orig: @0x4B4147].
-static void infantry_local_view_tick(AiEntity &e, const Entity *tick_entity, uint32_t tick) {
+static void infantry_org2_view_tick(AiEntity &e, const Entity *tick_entity, uint32_t tick) {
     InfantryState &inf = e.inf;
+    const bool local = inf.is_local_player;
     // org2 on-foot [orig: Entity_UpdateInfantryPlayerBody @0x4b4945-0x4b4ac1].
     // There is NO body chase: the LEGS chase the mouse yaw (+0x10) directly and
     // the body heading is written as their midpoint — the legs lead, the body
@@ -651,13 +648,15 @@ static void infantry_local_view_tick(AiEntity &e, const Entity *tick_entity, uin
     const uint32_t leg_flags = tick_entity != nullptr
             ? (tick_entity->flags | tick_entity->engine_flags)
             : 0u;
+    int32_t &yaw_word = local ? inf.target_heading : e.heading;
     if ((leg_flags & kEntityFlagParachute) != 0) {
-        const int32_t delta = io::bam_add(io::bam_sub(inf.target_heading, inf.body_heading), 8) >> 4;
+        const int32_t delta = io::bam_add(io::bam_sub(yaw_word, inf.body_heading), 8) >> 4;
         inf.body_heading = io::bam_add(inf.body_heading, delta);
     }
-    infantry_ladder_view_clamp(inf, leg_flags);
-    e.heading = inf.target_heading; // mouse-instant render/aim yaw [orig:
-                                    // Input_HandleActionBinding @0x49ad40 writes +0x10]
+    infantry_ladder_view_clamp(yaw_word, inf.body_heading, leg_flags);
+    if (local)
+        e.heading = inf.target_heading; // mouse-instant render/aim yaw [orig:
+                                        // Input_HandleActionBinding @0x49ad40 writes +0x10]
     const int32_t yaw = e.heading;
     if ((leg_flags & (kEntityFlagLadderContact | kEntityFlagMounted |
                       kEntityFlagParachute)) != 0) {
@@ -730,12 +729,116 @@ static void infantry_local_view_tick(AiEntity &e, const Entity *tick_entity, uin
         // 0x1C71C700 (+40 deg) / 0x38E38E00 (+80 deg) — the same two BAM
         // constants player_look.h names for the input-side clamp.
         const int32_t limit = prone_effective ? 0x1C71C700 : 0x38E38E00;
-        if (inf.look_pitch - e.body_pitch > limit) inf.look_pitch = e.body_pitch + limit;
-        if (inf.look_pitch - e.body_pitch < -limit) inf.look_pitch = e.body_pitch - limit;
+        int32_t &pitch_word = local ? inf.look_pitch : e.pitch;
+        if (pitch_word - e.body_pitch > limit) pitch_word = e.body_pitch + limit;
+        if (pitch_word - e.body_pitch < -limit) pitch_word = e.body_pitch - limit;
     }
     // The original clamp writes entity Pitch directly; publish our input
     // mirror before the following drift and later body consumers read it.
-    e.pitch = inf.look_pitch;
+    if (local) e.pitch = inf.look_pitch;
+}
+
+// See infantry_internal.h.
+bool infantry_org2_body(const AiEntity &e, const Entity *ent) {
+    return e.inf.is_local_player || e.net_is_remote_peer ||
+           (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
+}
+
+// See the ai.h declaration. The authority's leg of the player-body update's network
+// chase: a body that is not the local player's (the local body on the authority goes
+// straight to the mover, @0x4B428B..0x4B428F). The staged words are reused as the
+// steps, as retail reuses them.
+void player_body_authority_chase(AiEntity &e, Entity &body) {
+    // The angle divisor: 2 for a non-local body on the authority (12 off it, the
+    // client's leg). [orig: `cmp edi(is_authority), ebp` @0x4B4299, `mov ebx, 2`
+    //  @0x4B429B, `jnz` @0x4B42A0, the 12 @0x4B42A2, v369 @0x4B42A7, the half @0x4B42B2]
+    constexpr int32_t kDivisor = 2;
+    constexpr int32_t kHalf = kDivisor >> 1;
+    // The authority's position bucket. [orig: @0x4B4466]
+    constexpr int16_t kAuthorityBucket = 10;
+    const int16_t progress = e.net_interp_progress; // [orig: +0x27C @0x4B42B7]
+    if (progress == 0) {
+        // The gap: the staged target less the savedLivePose the head stamped, a float
+        // 3D length clamped by flt_7C19E0 (2147418112.0) and truncated.
+        // [orig: the deltas @0x4B42C1..0x4B42ED, the x87 length @0x4B42F1..0x4B430B,
+        //  `fcom st(3)` @0x4B430D..0x4B4318 against flt_7C19E0 loaded @0x4B427F,
+        //  _ftol2_sse @0x4B431A]
+        const int32_t dx = io::bam_sub(e.net_smooth_target[0], body.saved_live_pos[0]);
+        const int32_t dy = io::bam_sub(e.net_smooth_target[1], body.saved_live_pos[1]);
+        const int32_t dz = io::bam_sub(e.net_smooth_target[2], body.saved_live_pos[2]);
+        double length = std::sqrt(static_cast<double>(dx) * dx +
+                                  static_cast<double>(dy) * dy +
+                                  static_cast<double>(dz) * dz);
+        if (length > 2147418112.0) length = 2147418112.0;
+        const int32_t gap = static_cast<int32_t>(length);
+        if (gap > 0x20000) {
+            // Over 2 units: off the authority the body snaps to the target; on it
+            // nothing moves. Either way the target, the bucket and the angle steps
+            // clear. [orig: `cmp eax, 20000h; jle` @0x4B431F..0x4B4324, the client's
+            //  snap skipped `cmp is_authority` @0x4B4330, the clears @0x4B4367..0x4B4386]
+            e.net_smooth_target[0] = 0;
+            e.net_smooth_target[1] = 0;
+            e.net_smooth_target[2] = 0;
+            e.net_interp_steps = 0;
+            e.net_smooth_heading = 0;
+            e.net_smooth_pitch = 0;
+        } else if (gap < 0x2AAA) {
+            // Inside the deadband the position takes no step; the angles still do.
+            // [orig: `cmp eax, 2AAAh; jge` @0x4B438E..0x4B4393, the clears
+            //  @0x4B43A3..0x4B43B5, the angle steps @0x4B43CA / @0x4B43DE]
+            e.net_smooth_target[0] = 0;
+            e.net_smooth_target[1] = 0;
+            e.net_smooth_target[2] = 0;
+            e.net_interp_steps = 0;
+            e.net_smooth_heading =
+                    io::bam_sub(io::bam_add(e.net_smooth_heading, kHalf), e.heading) / kDivisor;
+            e.net_smooth_pitch =
+                    io::bam_sub(io::bam_add(kHalf, e.net_smooth_pitch), e.pitch) / kDivisor;
+        } else {
+            // The bucket steps: ((bucket >> 1) + delta) / bucket per axis and
+            // (half + delta) / divisor per angle, each an idiv (truncation toward
+            // zero); on the authority no vertical step, and no horizontal one while
+            // the body's vertical speed (+0xA0) exceeds 1670.
+            // [orig: the angle deltas @0x4B444A..0x4B445E, the bucket @0x4B4466, the
+            //  steps @0x4B458A..0x4B45CA, the angles @0x4B45C4..0x4B45DF, `cmp
+            //  is_authority` @0x4B45EC, the vertical-speed abs @0x4B45EE..0x4B45F9,
+            //  z = 0 @0x4B4600, `cmp 686h; jle` @0x4B4606, x/y = 0 @0x4B460C / @0x4B4612]
+            const int32_t dh = io::bam_sub(e.net_smooth_heading, e.heading);
+            const int32_t dp = io::bam_sub(e.net_smooth_pitch, e.pitch);
+            e.net_interp_steps = kAuthorityBucket;
+            const int32_t bucket = kAuthorityBucket;
+            e.net_smooth_target[0] = io::bam_add(bucket >> 1, dx) / bucket;
+            e.net_smooth_target[1] = io::bam_add(bucket >> 1, dy) / bucket;
+            e.net_smooth_target[2] = io::bam_add(bucket >> 1, dz) / bucket;
+            e.net_smooth_heading = io::bam_add(kHalf, dh) / kDivisor;
+            e.net_smooth_pitch = io::bam_add(kHalf, dp) / kDivisor;
+            e.net_smooth_target[2] = 0;
+            if (io::bam_abs(e.inf.vel[2]) > 1670) {
+                e.net_smooth_target[0] = 0;
+                e.net_smooth_target[1] = 0;
+            }
+        }
+    }
+    // The apply, every tick: the angle steps while progress is below the divisor,
+    // the position steps while it is below the bucket (16-bit signed compares), then
+    // progress counts up to 512; held there, a movement clip (flag-table bit 0) falls
+    // back to idle 43 by a direct store. [orig: @0x4B43E6..0x4B440A, @0x4B440D..0x4B442E,
+    //  `cmp ax, 200h; jge` @0x4B4431..0x4B4435, the count @0x4B443B..0x4B443E; the
+    //  fallback @0x4B464F..0x4B465F]
+    if (progress < kDivisor) {
+        e.heading = io::bam_add(e.heading, e.net_smooth_heading);
+        e.pitch = io::bam_add(e.pitch, e.net_smooth_pitch);
+    }
+    if (progress < e.net_interp_steps) {
+        body.position.x.q16 = io::bam_add(body.position.x.q16, e.net_smooth_target[0]);
+        body.position.y.q16 = io::bam_add(body.position.y.q16, e.net_smooth_target[1]);
+        body.position.z.q16 = io::bam_add(body.position.z.q16, e.net_smooth_target[2]);
+    }
+    if (progress < 512) {
+        e.net_interp_progress = static_cast<int16_t>(progress + 1);
+    } else if ((infantry_anim_flags(e.inf.anim_state) & 0x1u) != 0) {
+        e.inf.store_body_animation(anim_state::kIdle);
+    }
 }
 
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
@@ -758,16 +861,22 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
     // A newly spawned remote player is already org2 before its first pose
     // uplink sets net_is_remote_peer. NPC corpse ownership must follow the
-    // entity's player bit, not whether a movement packet has arrived.
+    // entity's player bit, not whether a movement packet has arrived. The org2
+    // update runs every player body, the local one and every remote one alike;
+    // its few local-player legs test the body against g_LocalPlayerEntity.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 vs org1 @0x4B9910]
-    const bool npc_body = !e.inf.is_local_player && !e.net_is_remote_peer &&
-            (tick_entity == nullptr ||
-             ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagPlayer) == 0);
+    const bool npc_body = !infantry_org2_body(e, tick_entity);
+    const bool local = e.inf.is_local_player;
+    // A wire-owned body on a client stays outside this mover: the joiner's
+    // replica motion owns it (the client leg of the chase, divisor 12, lives
+    // there). On the authority a remote player runs the whole org2 update.
+    const bool client_wire_peer = e.net_is_remote_peer && !is_authority;
     // A hidden player body runs nothing at all: the org2 head returns at Flags
     // bit 0 ahead of its channels, its motion and its edge, so an added body
     // waits unmoved for its join's placement and a held one for its deploy (a
-    // remote peer's leg returns there too, remote_player_body_anim).
-    // [orig: Entity_UpdateInfantryPlayerBody `test dl,1; jnz` @0x4B411E..0x4B4127;
+    // hidden remote body moves only by the read-apply's position store).
+    // [orig: Entity_UpdateInfantryPlayerBody `mov edx,[esi+24h]` @0x4B411B,
+    //  `test dl,1; jnz` @0x4B411E..0x4B4127;
     //  the add's Flags |= 0x101 Entity_SpawnFromAnimSlotProperty @0x43C433 /
     //  @0x43C508; the join's clear Server_OnPlayerJoin @0x51A7DA]
     if (!npc_body && tick_entity != nullptr &&
@@ -795,6 +904,25 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         npc_respawn_unhide(world, *this, *tick_entity);
         if (((tick_entity->flags | tick_entity->engine_flags) & 1u) != 0) return;
     }
+    // A remote player body's inputs are its uplinked MoveOrder, decoded at the
+    // head every tick as the local body's are from input: bits 0-2 the 8-way
+    // direction, bit 3 moving, bit 5 the jump key, bits 6-7 the lean keys, and
+    // the stance bits 8-9 (ours: the 0x1D-fed net_stance_bits).
+    // [orig: Entity_UpdateInfantryPlayerBody - MoveOrder +0x12C @0x4B414B, the
+    //  direction `and ecx,7` @0x4B4153, moving `sar ecx,3` @0x4B415C, crouch bit 9
+    //  @0x4B4167, the prone local @0x4B416C..0x4B4181]
+    if (!npc_body && !local && !client_wire_peer && tick_entity != nullptr) {
+        const uint8_t move_order = tick_entity->net_move_input;
+        e.inf.player_moving = (move_order & 0x08u) != 0;
+        e.inf.player_move_dir_index = move_order & 0x07u;
+        e.inf.jump_requested = (move_order & Entity::kMoveOrderJump) != 0;
+        e.inf.lean_left = (move_order & 0x40u) != 0;
+        e.inf.lean_right = (move_order & 0x80u) != 0;
+        e.inf.stance = (tick_entity->net_stance_bits & 0x1u) != 0
+                ? InfantryState::Stance::kProne
+                : ((tick_entity->net_stance_bits & 0x2u) != 0 ? InfantryState::Stance::kCrouch
+                                                              : InfantryState::Stance::kStand);
+    }
     RootMotionFrame frame;
     // Org2 rotates root output before this tick's view/leg chase changes +0x8C.
     // [orig: @0x4B41E4..0x4B4255 precedes @0x4B4945..0x4B4ABB]
@@ -803,11 +931,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Each body samples secondary then primary before any state producers:
     // org1 through its motor head (the primary's state and pending target
     // copied into the secondary's request first, before think or authority
-    // interpolation: infantry_org1_motor_head), org2 straight. A wire-owned
-    // org2 does the same in remote_player_body_anim below.
+    // interpolation: infantry_org1_motor_head), org2 straight, a remote
+    // player's body included.
     // [orig: org1 @0x4B9A14..0x4B9A48; org2 @0x4B41DF; dual order
     //  @0x40B908/@0x40B94E]
-    if (!e.net_is_remote_peer) {
+    if (!client_wire_peer) {
         devtools::ProfileLap animation_lap(world.profile);
         if (npc_body) {
             have_clip = infantry_org1_motor_head(e.inf, root_motion, anim_rings, frame);
@@ -837,6 +965,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         tick_entity->flags &= ~kEntityFlagQueuedMount;
         tick_entity->engine_flags &= ~kEntityFlagQueuedMount;
     }
+    // The network chase, after the queued use: on the authority every player body
+    // but the local one walks toward the target its last 0x0C staged; the local
+    // body goes straight to the mover. [orig: Entity_UpdateInfantryPlayerBody
+    // `cmp esi, g_LocalPlayerEntity` and the authority skip @0x4B428B..0x4B428F,
+    // the chase @0x4B4299..0x4B4445]
+    if (!npc_body && !local && is_authority && tick_entity != nullptr)
+        player_body_authority_chase(e, *tick_entity);
     // The player bodies decay recoil and spread at their head; org1 runs the
     // same pair after its think (below). [orig: org1 Entity_UpdateInfantryAI
     //  @0x4BE7FD..0x4BE86F]
@@ -884,13 +1019,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // branch still consumes the same already-drifted look when posing its seat.
     // This phase has no PRNG draws, so recoil/yaw/pitch sampling stays ordered.
     // [orig: view/legs @0x4B4945..0x4B4BC6 before drift @0x4B5966]
-    const bool local_view_prepared = e.inf.is_local_player && !mounted_for_spread;
+    const bool view_prepared = !npc_body && !client_wire_peer && !mounted_for_spread;
     // The org2 body reads the RAW current_tick for its leg re-plant windows:
     // the prologue stores it into the frame slot and the leg phase masks that
     // slot, with no per-entity stagger term (that term is org1's alone).
     // [orig: Entity_UpdateInfantryPlayerBody store @0x4B4147; read
     //  @0x4B467A..0x4B4683 (ebp = tick & 0x3F)]
-    if (local_view_prepared) infantry_local_view_tick(e, tick_entity, logic_tick);
+    if (view_prepared) infantry_org2_view_tick(e, tick_entity, logic_tick);
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, local-only gate @0x4B5966]
     if (world.local_player_state != nullptr)
         world.local_player_state->apply_scoped_aim_drift(e, logic_tick);
@@ -903,8 +1038,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 stance_bits, tick_flags, parent != nullptr && parent->has_item_def);
     }
 
-    // The player body's think cadence, ahead of BOTH org2 death edges (the
-    // local edge below and remote_player_body_anim's): the plyr class callback
+    // The player body's think cadence, ahead of the org2 death edge: the plyr class callback
     // fires as event 0 whenever entity+0x2AC is <= 0, and the counter decrements
     // every tick, corpse included (the callback then returns on Flags&2, so a
     // dead body neither clears its kill-cause bits nor re-arms), then its
@@ -923,21 +1057,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         else tick_entity->radio_request = 0;
     }
 
-    // A remote player's locomotion source is its C2S pose snapshot, so do not
-    // run the NPC/local-input movement core over it. The authority still runs
-    // the org2 body animation and shared collision tail in
-    // remote_player_body_anim; retail's entity+0x24 bit 0 is the conditional
-    // hard-snap/freeze gate, not an all-remote-player classifier. [orig: org2
-    // head @0x4B411B..0x4B4127; hard-snap test @0x4C207E..0x4C2091;
-    // resolver call @0x4B7CE0..0x4B7CF4]
-    if (e.net_is_remote_peer) {
-        if (is_authority) {
-            const devtools::ProfileScope remote_scope(
-                    world.profile, devtools::Slot::SIM_AI_INFANTRY_REMOTE);
-            remote_player_body_anim(e, world, logic_tick);
-        }
-        return;
-    }
+    // A client's wire-owned body leaves here; the authority's remote player runs
+    // on through the whole org2 update: its death edge, its selection, root
+    // motion, gravity, the resolver, the edges and the jump, as the local body
+    // does. [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0, LABEL_82
+    //  @0x4B467A onward]
+    if (client_wire_peer) return;
 
     // The registry Entity is the script/HUD/wire health store. Hydrate the
     // motor copy before death selection and damage so item-trait resolution,
@@ -1000,7 +1125,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: Entity_UpdateInfantryAI slope @0x4BA066, attach sample @0x4BA348,
     //  carrier @0x4BA45D..0x4BA891, gradient @0x4BA896, think @0x4BA970]
     if (npc_body) infantry_slope_pass(e, world, logic_tick, key);
-    const InfantryAttachmentPose attachment = !inf.is_local_player && body_live
+    const InfantryAttachmentPose attachment = npc_body && body_live
             ? infantry_attachment_pose(e, world) : InfantryAttachmentPose{};
     if (npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, false);
     // Org1 samples before the think so path_state=1 is visible to this tick's
@@ -1031,7 +1156,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: Entity_UpdateInfantryAI @0x4BAA57..0x4BAA66 -> loc_4BE7FD; the
     //  attachment select @0x4BD273, the ride link and attention @0x4BD87E..]
     bool thought = false;
-    if (!(e.health > 0 && inf.is_local_player) && body_live && is_authority &&
+    if (npc_body && body_live && is_authority &&
             (key & 15u) == 0) {
 		// 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
 		// A cached board-any target can upgrade an already seated NPC once
@@ -1085,11 +1210,6 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
 	}
 
-    // 2c. The on-ladder override + player dismounts (org2; EVERY tick — the
-    // 4th-tick gate above covers only the stance selection). Body in
-    // infantry_ladder.cpp. [orig: @ 0x4b7484-0x4b76d8]
-    if (!inf.is_local_player) infantry_ladder_override(e, tick_entity);
-
     if (thought) {
         infantry_attachment_select(e, world, attachment);
         if (npc_body && (tick_flags & kEntityFlagDead) == 0)
@@ -1135,7 +1255,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // the weapon-channel block in the original) and ramps while a lean key is held;
     // the torso roll chases the slope roll in the same pass [orig: @0x4b5cff].
     // [orig: @0x4b5c97 / @0x4b7dbf; see infantry_lean_tick]
-    if (inf.is_local_player) {
+    if (!npc_body) {
         infantry_lean_tick(e, tick_entity != nullptr
                                   ? (tick_entity->flags | tick_entity->engine_flags)
                                   : 0u);
@@ -1144,7 +1264,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 
     // Selection writes only next tick's secondary request. Both channels have
     // already advanced at the motor head. [orig: @0x4B41DF before @0x4B5CAB]
-    if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
+    // The channel runs for every player body. The one locality test in the
+    // region refreshes Flags bits 2-4 from the local scope / binocular / NVG
+    // globals; any other body reads its own Flags, which for a remote player the
+    // 0x0C read-apply replaced from the sender's state byte (mask 0x1C): bit 0x10
+    // scoped, and the equipped adm index at +0x2B0. [orig: @0x4b5d77 `cmp
+    // g_LocalPlayerEntity, esi; jnz short loc_4B5DAD`; the scoped test @0x4b5deb,
+    // +0x2B0 @0x4b5dba]
+    if (!npc_body) {
+        if (!local && tick_entity != nullptr) {
+            inf.scope_raised = (tick_entity->flags & kEntityFlagScopeRaised) != 0;
+            inf.binoculars_raised = (tick_entity->flags & kEntityFlagBinoculars) != 0;
+        }
+        infantry_weapon_channel(e, world, logic_tick);
+    }
 
     if (!npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, true);
 
@@ -1159,9 +1292,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 
     // Org2 selects its next gait only after the current head pose was built.
     // [orig: head @0x4B6BB3; fourth-tick selector @0x4B70CE; ladder @0x4B7484]
-    if (e.health > 0 && inf.is_local_player) {
-        // 2'. Local player: the player-body input is set from host input each frame
-        // (world::apply_player_body_input), never by the org1 AI think path. The body
+    if (e.health > 0 && !npc_body) {
+        // 2'. Player bodies: the local body's input is set from host input each frame
+        // (world::apply_player_body_input), a remote body's from its uplinked MoveOrder
+        // at the head, never by the org1 AI think path. The body
         // selection is the witnessed org2 selector, every 4th tick like the original
         // (idle 43->44 counts SELECTION passes, so the cadence is load-bearing). The
         // player takes the motor's simulate branch on host (is_authority) and on a
@@ -1181,7 +1315,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     ent != nullptr ? (ent->flags | ent->engine_flags) : 0u, logic_tick);
         }
     }
-    if (inf.is_local_player) infantry_ladder_override(e, tick_entity);
+    if (!npc_body) infantry_ladder_override(e, tick_entity);
 
     // 3a. The anim-event consumers, in the witnessed order: the sound block
     // (foley + footsteps) precedes the fire bits inside the same consume
@@ -1197,7 +1331,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // whatever its seat, then makes the request.
     // [orig: Entity_UpdateInfantryAI odd-tick gate @0x4BF156, the request's
     //  mounted-live test @0x4BF4B3]
-    if (!inf.is_local_player && is_authority && e.health > 0) {
+    if (npc_body && is_authority && e.health > 0) {
         infantry_fire_pass(e, world, logic_tick);
         if (mounted) infantry_mounted_fire_pass(e, world, logic_tick, key);
     }
@@ -1241,12 +1375,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // tail at every resolve, below.)
 
     // 5. The org2 heading/leg chase (org1 chased above, before its fire pass).
-    if (inf.is_local_player) {
+    if (!npc_body) {
         // A stale mount can fall back to the ordinary mover during this tick.
-        // Valid mounted bodies returned above; ordinary local bodies already
+        // Valid mounted bodies returned above; ordinary player bodies already
         // ran the view phase ahead of their scoped drift.
         // Raw tick, not the org1 stagger key [orig: @0x4B4147 / @0x4B467A].
-        if (!local_view_prepared) infantry_local_view_tick(e, tick_entity, logic_tick);
+        if (!view_prepared) infantry_org2_view_tick(e, tick_entity, logic_tick);
     }
 
     // 6. The org2 slope pass: conform-or-decay body_pitch/roll + the steep-ground
@@ -1266,7 +1400,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // airborne one died fast; corrected 2026-08-26 from the kong differential
     // (@0x4b78ab selector; kong 193989-194043). [inf.airborne here is last
     // tick's value — the vertical resolve below updates it.]
-    if (!inf.is_local_player) {
+    if (npc_body) {
         inf.vel[0] = damp_npc_slide(inf.vel[0]);
         inf.vel[1] = damp_npc_slide(inf.vel[1]);
     } else if (inf.airborne) {
@@ -1316,7 +1450,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         e.pitch = inf.look_pitch;
     }
 
-    if (!inf.is_local_player && infantry_attachment_move(e, world, attachment)) {
+    if (npc_body && infantry_attachment_move(e, world, attachment)) {
         finish_infantry_tick(e, world);
         return;
     }
@@ -1344,7 +1478,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // the skeletal FK slid the feet — the "idle skating" this overturns. capsule bottom/top and
         // vel are MOVEMENT data only; the visual is the skeleton, which never reads them.
         // [orig: Entity_UpdateInfantryAI @0x4b9910 integrates root delta for all states; overturns D-INF-8]
-        if (inf.is_local_player && inf.airborne) {
+        if (!npc_body && inf.airborne) {
             // org2 zeroes the rotated ROOT while airborne — an in-air player
             // body moves on the slide triplet alone [orig: the airborne arm
             // zeroes channelData before the integrate, between @0x4b78ab and
@@ -1361,8 +1495,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // [orig: Entity_UpdateInfantryPlayerBody entity+0x8C @0x4B41E4, the
         //  rotation @0x4B4210..0x4B4255; Entity_UpdateInfantryAI entity+0x8C
         //  @0x4BF001]
-        const int32_t move_heading = inf.is_local_player ? player_root_heading : inf.body_heading;
-        const RootRotationQ22 rot = root_rotation_q22(move_heading, inf.is_local_player);
+        const int32_t move_heading = !npc_body ? player_root_heading : inf.body_heading;
+        const RootRotationQ22 rot = root_rotation_q22(move_heading, !npc_body);
         const int32_t c = rot.c;
         const int32_t s = rot.s;
         int32_t wx = static_cast<int32_t>((static_cast<int64_t>(fwd) * c) >> 22) -
@@ -1371,7 +1505,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                      static_cast<int32_t>((static_cast<int64_t>(lat) * c) >> 22);
         // Org2 replaces the already-rotated world pair after slide decay.
         // It does not write the NPC path-state byte. [orig: @0x4B7A64..0x4B7A93]
-        if (inf.is_local_player)
+        if (!npc_body)
             infantry_terrain_motion(e, tick_entity, gradient_field, false, wx, wy);
         int32_t dz = frame.dz;
         // Root suppression: drowning zeroes the vertical lane, a ladder latch
@@ -1402,7 +1536,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // resolves. [orig: Entity_UpdateInfantryAI outYaw = key & 1 @0x4BF146 /
     // @0x4BF14F, the skip `cmp [outYaw],0; jnz loc_4BFC80` @0x4BF6A5..0x4BF6B2,
     // the re-apply @0x4BFC80..0x4BFC86]
-    if (!inf.is_local_player && (key & 1u) != 0) {
+    if (npc_body && (key & 1u) != 0) {
         e.self->position.z.q16 = io::bam_add(e.self->position.z.q16, inf.z_quarter_step);
         finish_infantry_tick(e, world);
         return;
@@ -1441,9 +1575,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // NPC moves about vel_z per two ticks, not 2 * vel_z.
         // [orig: Entity_UpdateInfantryAI skip @0x4BF6B2; integrate @0x4BF7EC;
         //  tail @0x4BFC65..0x4BFC86]
-        // The org2 (local player) leg keeps its own cadence: it integrates
+        // The org2 (player body) leg keeps its own cadence: it integrates
         // `pos += vel` once per tick and has no quarter-step tail.
-        if (inf.is_local_player) {
+        if (!npc_body) {
             if (!gravity_skip) inf.vel[2] -= kGravityStepPlayer;
             if (tick_entity != nullptr) {
                 uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
@@ -1563,7 +1697,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // [orig: org2 test 0x10A002 @0x4b7e22-0x4b7e3c; org1 test 0x10A000
             // + write @0x4bf8b5-0x4bf8cf]
             const bool fall_edge_allowed =
-                (!inf.is_local_player || e.health > 0) && !on_ladder_now &&
+                (npc_body || e.health > 0) && !on_ladder_now &&
                 (tick_entity == nullptr ||
                  ((tick_entity->flags | tick_entity->engine_flags) &
                   kEntityFlagDrowning) == 0);
@@ -1582,7 +1716,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 //   @0x4bf8d8), so a live NPC keeps its walk/run clip off a ledge;
                 //   live non-carried bodies just clear any pending anim (dead skips
                 //   the clear too, airborne still sets). [orig: @0x4bf8ae-0x4bf901]
-                if (inf.is_local_player) {
+                if (!npc_body) {
                     inf.vel[0] += (3 * root_wx) >> 2;
                     inf.vel[1] += (3 * root_wy) >> 2;
                     inf.anim_pending = 0; // [orig: @0x4b7e46, before the stamp]
@@ -1623,7 +1757,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 // attachBoneId @0x43591b and parentSlot @0x435921 follow)], so
                 // `mounted` stays put exactly as the link does there.
                 // [orig: org2 @0x4b7e34..0x4b7e3c; org1 @0x4bf8c8..0x4bf8cf]
-                if (inf.is_local_player && !inf.airborne && tick_entity != nullptr) {
+                if (!npc_body && !inf.airborne && tick_entity != nullptr) {
                     tick_entity->flags =
                             (tick_entity->flags & ~kEntityFlagMounted) | kEntityFlagInAir;
                     tick_entity->engine_flags =
@@ -1664,9 +1798,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // org1 re-bases its quarter-step tail on the snapped Z, so a landing
             // lands in full on this tick. [orig: `mov [esp+117Ch+entity], edx`
             // @0x4BF808]
-            if (!inf.is_local_player) org1_saved_z = e.self->position.z.q16;
+            if (npc_body) org1_saved_z = e.self->position.z.q16;
             const int32_t fall_threshold = -1057 * world.script.wac_values.fallmps;
-            const bool fall_charges = inf.is_local_player
+            const bool fall_charges = !npc_body
                     ? inf.vel[2] <= fall_threshold
                     : inf.airborne && (org1_body ? !org1_dead_now() : e.health > 0) &&
                       inf.vel[2] <= fall_threshold;
@@ -1698,7 +1832,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                             compute_death_anim_state(0, 0, death_cause::kGeneric);
                 }
             }
-            if (inf.is_local_player) {
+            if (!npc_body) {
                 // org2's arm ends at vel_z = 0 [orig: @0x4b7d91] with NO 0x2000
                 // test and NO clear: the word is re-read whole @0x4b7d9f, the
                 // jump gates @0x4b7ea4 still see the bit on the landing tick,
@@ -1743,7 +1877,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // the slide velocity, vel_z = 0x1600, in-air set, anim 30 jump_start now
         // with 31 jump_loop queued, cooldown reloaded to 32; an on-ladder jump
         // adds the 0.5u back-push + unlatch [orig: @0x4b7f0c-0x4b7f68].
-        if (inf.is_local_player) {
+        // A remote body's key is its uplinked MoveOrder bit 5, decoded at the head.
+        if (!npc_body) {
             if (inf.jump_cooldown < 0) inf.jump_cooldown = 0;   // [orig: @0x4b7de0]
             if (inf.jump_cooldown > 32) inf.jump_cooldown = 32; // [orig: @0x4b7dee]
             if (inf.jump_cooldown > 1) {
@@ -1841,12 +1976,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // org1 on-ladder (NPC, post-resolve): the congestion hold, the facing
         // press, the climb_up/climb_top select. Body in infantry_ladder.cpp.
         // [orig: Entity_UpdateInfantryAI @ 0x4bf907-0x4bfad8]
-        infantry_ladder_org1_block(e, world, tick_entity);
+        if (npc_body) infantry_ladder_org1_block(e, world, tick_entity);
 
         // org1 water (NPC, immediately after the ladder block, same as retail):
         // float on the plane instead of walking along the riverbed, and fan the
         // splash once on entry.
-        if (!inf.is_local_player) {
+        if (npc_body) {
             infantry_water_block(e, world, tick_entity, frame.capsule_bottom, logic_tick);
             // The org1 quarter-step tail: of everything gravity, the resolver,
             // the ladder and the water blocks did to Z since the save, keep a
@@ -1858,8 +1993,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     io::bam_add(io::bam_sub(e.self->position.z.q16, org1_saved_z), 2), 2);
             e.self->position.z.q16 = io::bam_add(org1_saved_z, inf.z_quarter_step);
         }
-        // org2 water (the LOCAL player body, immediately after its jump block --
-        // the same mover-tail placement retail gives it @0x4b8020).
+        // org2 water (every player body, immediately after its jump block -- the
+        // same mover-tail placement retail gives it @0x4b8020).
         else
             player_water_block(e, world, tick_entity, frame.capsule_bottom, is_authority,
                                logic_tick);
@@ -1875,6 +2010,9 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
     // @0x4B66CD; org2 @0x4B6908..0x4B696C / @0x4B6BB3..0x4B6CC8;
     // org1 @0x4BF078..0x4BF14C]
     InfantryState &inf = e.inf;
+    // The capsule legs are the player body's (org2: every player body, the local
+    // one when its head sample is lost) or the NPC's (org1).
+    const bool org2 = infantry_org2_body(e, world.registry.get(e.handle));
     int32_t head_world[3] = {};
     if (inf.is_local_player && world.pose_provider != nullptr &&
             world.pose_provider->resolve_skeletal_anchor(
@@ -1911,7 +2049,7 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
         // Player extent cap: on foot @0x4B698C, mounted @0x4B66D9.
         // [orig: @0x4B698C / @0x4B66D9; floors @0x4B6B98 / @0x4B68E7]
         const int32_t extent = frame.capsule_top - frame.capsule_bottom;
-        const int32_t delta = inf.is_local_player ? std::min(extent, 0xD000)
+        const int32_t delta = org2 ? std::min(extent, 0xD000)
                                                   : std::max(extent, 0x9000);
         // The NPC (org1) restamp reads the Q22 sine table at the rounded top
         // ten bits of the lean and of the heading; the player-body fallback
@@ -1921,15 +2059,15 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
         //  heading +0x10 @0x4BF0EE..0x4BF114); org2 `fild; fld dbl_7C3608`
         //  @0x4B69AB..0x4B69AF, the cosine @0x4B69CC..0x4B69D4]
         const int lean_index = io::bam_table_index(static_cast<uint32_t>(inf.lean_angle) + 0x200000u);
-        const int32_t lean_cos = inf.is_local_player
+        const int32_t lean_cos = org2
             ? static_cast<int32_t>(std::cos(static_cast<double>(inf.lean_angle) *
                                             io::kRadiansPerBamX87) * io::kQ22One)
             : static_cast<int32_t>(io::bam_table_cos(lean_index) * io::kQ22One);
         int32_t eye_z =
             static_cast<int32_t>((static_cast<int64_t>(delta) * lean_cos) >> 22);
-        if (inf.is_local_player && eye_z < 0x2000) eye_z = 0x2000;
+        if (org2 && eye_z < 0x2000) eye_z = 0x2000;
         inf.eye_offset_z = eye_z;
-        if (inf.is_local_player) {
+        if (org2) {
             // A lost sample must not leave a stale head-frame lateral pair
             // behind: the capsule fallback carries no lateral model (the
             // 3-angle tilt is the tracked residue), so the lanes reset.

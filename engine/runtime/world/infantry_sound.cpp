@@ -15,6 +15,7 @@
 #include <runtime/terrain_query/height_field.h>
 
 #include <runtime/world/ai.h>
+#include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/world/world.h>
 #include <cstdint>
@@ -84,9 +85,9 @@ void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const 
 void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logic_tick,
                                         int32_t capsule_bottom) {
     InfantryState &inf = e.inf;
-    // Opposite tick halves: the NPC updater consumes on ODD ticks, the player
+    // Opposite tick halves: the NPC updater consumes on ODD ticks, every player
     // body on EVEN (anim_sound_tick, witnessed at its declaration).
-    if (!anim_sound_tick(logic_tick, inf.is_local_player)) return;
+    if (!anim_sound_tick(logic_tick, infantry_org2_body(e, world.registry.get(e.handle)))) return;
     const uint32_t ev = inf.last_events;
     if (ev == 0) return; // [orig: org1 whole-block skip @0x4bf161-0x4bf163]
 

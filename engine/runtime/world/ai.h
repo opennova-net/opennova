@@ -471,22 +471,22 @@ struct AiEntity {
 
     // --- network receive-apply: a remote peer's pose, read-applied on the host ---
     // The host stages a joiner's reported 0x0C pose into these engine-frame slots
-    // [orig: NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9]. Retail's
-    // entity+0x24 bit 0 only selects the conditional hard snap at @0x4C207E; it
-    // is not an all-remote classifier. `net_is_remote_peer` is OpenNova's explicit
-    // snapshot-ownership fact: it skips locomotion but retains the authority org2
-    // animation/collision tail. net_smooth_target/heading/pitch are staged
-    // for the CLIENT-side interpolation smoothing (motor fall-through @0x4b9a8c, is_authority==0)
-    // — a deferred, client-only concern; the authority host never interpolates. NEVER set for
-    // the host's own player (ADR-0012 amendment / §5.38).
+    // [orig: NetPacket_SerializePlayerState case 4 @0x4C2042..0x4C20A9] and the body's
+    // own update chases it (player_body_authority_chase, from AiSystem::tick_infantry):
+    // the chase overwrites the staged target with its per-tick steps, as retail reuses
+    // the same words. `net_is_remote_peer` is OpenNova's snapshot-ownership fact (a
+    // client keeps such a body outside the mover); the org2 mover itself is chosen by
+    // the player classifier. NEVER set for the host's own player (ADR-0012 amendment /
+    // §5.38).
     bool    net_is_remote_peer = false;
-    int32_t net_smooth_target[3] = {};   // entity+0x234/+0x238/+0x23C (16.16 world)
-    int32_t net_smooth_heading = 0;      // entity+0x240 (BAM32; also mirrored to heading/+0x10)
-    int32_t net_smooth_pitch = 0;        // entity+0x244 (BAM32; also mirrored to pitch/+0x14)
+    int32_t net_smooth_target[3] = {};   // entity+0x234/+0x238/+0x23C (16.16 world; then the steps)
+    int32_t net_smooth_heading = 0;      // entity+0x240 (BAM32; then the heading step)
+    int32_t net_smooth_pitch = 0;        // entity+0x244 (BAM32; then the pitch step)
     int16_t net_interp_progress = 0;     // entity+0x27C (reset to 0 on each read-apply)
-    // Deferred client-interp bookkeeping (consumed by the @0x4b9a8c fall-through only):
-    int32_t net_saved_live_pose[3] = {}; // entity+0x80/+0x84/+0x88 (interp delta basis)
-    int16_t net_interp_steps = 0;        // entity+0x27E (2..16; buckets {3,4,5,8,16})
+    // entity+0x80/+0x84/+0x88: a second store of savedLivePose (the infantry head
+    // stamps Entity::saved_live_pos, which the chase reads).
+    int32_t net_saved_live_pose[3] = {};
+    int16_t net_interp_steps = 0;        // entity+0x27E: the chase's step bucket (10 on the authority)
 
     int32_t vel_x = 0;         // entity+152 (0x98, velocity X)
     int32_t vel_y = 0;         // entity+156 (0x9C, velocity Y), a hull's mirror; an
@@ -548,6 +548,19 @@ struct AiCandidate {
     // called only at 0x467363/0x46738b].
     bool los_blocked = false;
 };
+
+// The player-body update's network chase on the authority, for every player body
+// but the local one (a remote player whose 0x0C the read-apply staged), run at the
+// update head after the savedLivePose stamp. At progress 0 it measures the staged
+// target against `body`'s savedLivePose (3D, float, truncated): a gap over 2 units is
+// dropped (no snap on the authority), one under 0x2AAA moves nothing but the angles,
+// anything between steps in a bucket of 10 with no vertical step (and none at all
+// while the vertical speed exceeds 1670); then it applies the steps while progress
+// is below the divisor 2 (angles) or the bucket (position), and counts progress up
+// to 512, past which a movement clip falls back to idle 43.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B428B..0x4B4445,
+//  @0x4B4459..0x4B4612, @0x4B464F..0x4B465F]
+void player_body_authority_chase(AiEntity &e, Entity &body);
 
 class AiSystem; // fwd
 
@@ -1240,15 +1253,6 @@ public:
     // [orig: carrier selector @0x4B6386; mounted local selector @0x4B66CD;
     //  org2 @0x4B6908..0x4B696C / @0x4B6BB3..0x4B6CC8; org1 @0x4BF078..0x4BF14C]
     void infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame);
-    // AUTHORITY body-anim selection for a net-snapped REMOTE player. The movement motor must
-    // not re-simulate a wire-snapped peer (tick_infantry skips it), but the retail authority
-    // still runs the player-body ANIM selection for every player, consuming the REPLICATED
-    // MoveOrder byte (bits 0-2 dir, bit 3 moving) + stance bits (C2S 0x1D -> MoveOrder bits
-    // 8-9) every 4th tick, and the selected state/ratio feed that player's 0x0A record bytes
-    // 14/15. Also mirrors the wire-anim fields onto the world Entity. [orig:
-    // Entity_UpdateInfantryPlayerBody @0x4b40e0 — local-or-authority gate @0x4b70a3-0x4b70b2,
-    // 4th-tick gate @0x4b70ce, selection @0x4b7183-0x4b729d, commit @0x4b7356-96]
-    void remote_player_body_anim(AiEntity &e, World &world, uint32_t logic_tick);
     // Mirror the selected body-anim state + channel phase (and, for the local player, the
     // packed MoveOrder low byte) onto the world Entity the 0x0A snapshot reads.
     void mirror_wire_anim(AiEntity &e, World &world);

@@ -39,17 +39,19 @@ namespace opennova::replication {
 // with emit_connection_s2c). Only sub_op 0x0A (extended) this increment; 0x0B compact is deferred.
 // Only the host (authority) receives C2S — a joiner never drains one
 // [orig: NetPacket_DispatchEntityPacketCallback @0x4D6A80 gates on g_NapiNPCtx.is_authority].
-void drain_connection_c2s(world::World &world, Connection &conn);
+// `slot_in_game` is the sender's player slot in game (state 6), one of the read-apply's
+// pose gates (apply_player_intent).
+void drain_connection_c2s(world::World &world, Connection &conn, bool slot_in_game);
 
 // Read-apply ONE decoded C2S 0x0C body onto `conn`'s owned entity: the same
-// owner gate, pre-round hold and SNAP as the drain above, callable from the
+// owner gate and read-apply as the drain above, callable from the
 // host's session dispatch so an uplink lands in wire order with the other
 // gameplay messages of its datagram (retail applies it inside the dispatch
 // walk, not on a later tick). Returns false when nothing was applied.
 // [orig: NapiNPServerMsg_0x00C @0x501C30 -> NetPacket_DispatchEntityPacketCallback
 //  @0x4D6A80 mode-4 read-apply]
 bool apply_connection_uplink(world::World &world, Connection &conn,
-                             const std::vector<uint8_t> &body);
+                             const std::vector<uint8_t> &body, bool slot_in_game);
 
 // The per-frame 0x0A byte cap, header included [orig: g_EntitySendBudget
 // @0xC8FC50, default 600, runtime-set by the BANDWIDTH server command clamped

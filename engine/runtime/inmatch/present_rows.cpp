@@ -574,7 +574,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				write_present_body(r, infantry_body_pose(ae->inf));
 				// The upper-body weapon channel this body derived for itself —
 				// for the host's OWN player and for every wire peer alike, since
-				// remote_player_body_anim now runs the same selection. The gate is
+				// every player body runs the same org2 update. The gate is
 				// the §14.8.6 consumer test; engine_flags bit 0x100 is this file's
 				// established "is a player" mirror of entity+0x24, which is what
 				// keeps NPCs (who carry no hold ladder in the original either) out.

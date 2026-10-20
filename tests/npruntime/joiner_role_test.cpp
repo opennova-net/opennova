@@ -889,7 +889,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 			channel.client_send(message.tag, message.payload);
 			toward_host.pop_front();
 		}
-		replication::drain_connection_c2s(*authority, connection);
+		replication::drain_connection_c2s(*authority, connection, true);
 		authority->run_logic_tick(true);
 		if ((tick + 1) % period == 0) {
 			if (!expect(replication::emit_connection_s2c(*authority, connection,

@@ -19,7 +19,7 @@ struct ClientEntityState;
 // (ADR 0012 Decision 2): under SP it feeds the owned pool-0 entity through the
 // in-process loopback; under MP the identical fields ARE the C2S uplink a remote
 // client sends. apply_player_intent (below) applies it, gated by the witnessed
-// entity+286 (healthMax) / entity+36 bit-1 checks.
+// read-apply gates (the dead bit, the round-over latch, the slot state, the pre-round).
 struct PlayerIntent {
 	uint16_t entity_handle = 0;        // owned entity (pool<<12)|slot
 	uint16_t item_type_id = 0;
@@ -144,17 +144,17 @@ Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e);
 
 // Host-side receive-apply of a decoded C2S 0x0C extended (type-10) player uplink to a
-// REMOTE PEER entity — the host-side mover [orig: NetPacket_SerializePlayerState case 4
-// @0x4c2042-0x4c20a9; docs/net/novaworld-net-re.md §5.38a/§5.10]. The inverse of
-// snapshot_of's two-store read at the wire
-// boundary: it SNAPS the registry Entity pose (the store snapshot_of re-broadcasts) and
-// mirrors the engine-frame AiEntity (live pose + heading/pitch) + stages the smooth-target
-// the CLIENT interpolation consumes, marking the entity net-snapped so the motor skips it
-// [orig: Entity_UpdateInfantryAI @0x4b9a03]. Per §5.38 / ADR-0012 this is ONLY ever called
-// for a remote peer — the host NEVER read-applies its own player (motor-from-input). Returns
-// false if the handle is unresolved, it is the local player, or the movement/spawn gate
-// (Entity.flags bit1) is set.
-bool apply_player_intent(world::World &world, const PlayerIntent &intent);
+// REMOTE PEER entity [orig: NetPacket_SerializePlayerState case 4 @0x4C09C0 -
+// @0x4C1D07..0x4C20A9; docs/net/novaworld-net-re.md §5.38a/§5.10], in retail's order:
+// the movement-input byte, the state-flag bits 2-4 and the analog axes land whatever
+// the body's state; then, unless the body is dead, the round is over, the sender's slot
+// is not in game (`slot_in_game`, playerSlot+0x20 == 6) or the pre-round countdown runs,
+// it stages the smooth target the body update chases (AiSystem::tick_infantry), stores
+// the live yaw/pitch, writes the live position only for a hidden body (Flags bit 0),
+// stores the equipped adm index and restarts the chase (progress 0). Per §5.38 /
+// ADR-0012 the host never read-applies its own player. Returns false if the handle is
+// unresolved, it is the local player, or a pose gate held.
+bool apply_player_intent(world::World &world, const PlayerIntent &intent, bool slot_in_game);
 
 // What the client-side interest list reads beyond the uplinking player itself: the
 // decoded pool-0/1 entities (a joiner's remote persons live only there; its pool-1
