@@ -960,9 +960,10 @@ void Server::open_admin() {
 }
 
 // The console over the session's context, for the whole run: the cfg block SET writes and
-// Game_SaveConfig saves, the host's rotation, the mounted gametext and avatars, and GOTO
-// MENUSTATE's quit. The chat seams are a listen host's: this host's CHAT SEND and CHAT GET run
-// over the context's CHAT ring and flood table (server_console.h).
+// Game_SaveConfig saves, the host's rotation, the mounted gametext and avatars; GOTO
+// MENUSTATE's quit is the binding's (RemoteAdminConsoles: exit reason 1 on the context). The
+// chat seams are a listen host's: this host's CHAT SEND and CHAT GET run over the context's
+// CHAT ring and flood table (server_console.h).
 void Server::bind_admin_console() {
 	rotation_admin_ = std::make_unique<inmatch::HostRotationAdmin>(rotation_, catalog_);
 	inmatch::AdminConsole::Seams seams;
@@ -978,17 +979,16 @@ void Server::bind_admin_console() {
 	seams.items_table = [this]() -> const def::DefItemsFile * {
 		return kernel_ ? kernel_->items_table() : nullptr;
 	};
-	// GOTO MENUSTATE's input action 3 on this host: exit reason 1; the active connection's
-	// disconnect drops nothing, as a Serve Only host has no client connection. The next frame's
-	// mission exit takes the router's reason-1 arm, which destroys the session; with no menu
-	// to land on, the session's end is the process's (frame, quit()).
+	// GOTO MENUSTATE's input action 3 on this host: exit reason 1 on the context (the binding's
+	// quit); the active connection's disconnect drops nothing, as a Serve Only host has no client
+	// connection. The next frame's mission exit takes the router's reason-1 arm, which destroys
+	// the session; with no menu to land on, the session's end is the process's (frame, quit()).
 	// [orig: Input_HandleActionBinding case 3 @0x49AF26 (g_MissionExitReason = 1),
 	//  CNapiNetwork_DisconnectActiveConnection @0x4C918F (no connection, no record);
 	//  PostMenu_RouteMissionExit @0x5684AB -> CNapiGameSession_FullDestroy @0x568683]
-	seams.quit_to_menu = [this] {
-		role_->state.host_owner.ctx.mission_exit_reason = inmatch::kMissionExitQuit;
-	};
-	admin_consoles_.bind(&role_->state.host_owner.ctx, std::move(seams));
+	inmatch::RemoteAdminBinding binding;
+	binding.host = &role_->state.host_owner.ctx;
+	admin_consoles_.bind(binding, std::move(seams));
 }
 
 // The scene is the Game Loop whenever this runs: a map change runs inside one frame, so the

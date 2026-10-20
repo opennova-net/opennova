@@ -3,6 +3,7 @@
 #include "util/string_convert.h"
 
 #include <net/novaworld/lobby_vars.h> // platform_inet_addr
+#include <runtime/inmatch/remote_admin.h> // kAdminListenAddress
 
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -26,7 +27,9 @@ bool send_all(const Ref<StreamPeerTCP> &p_peer, const std::vector<uint8_t> &p_by
 bool AdminTcpPump::listen(uint16_t port) {
 	close();
 	server_socket_.instantiate();
-	if (server_socket_->listen(port, "*") != OK) {
+	// IPv4 alone, every interface (engine inmatch/remote_admin.h kAdminListenAddress carries the
+	// witness): "*" would open Godot's dual-stack listener, which also accepts IPv6 admins.
+	if (server_socket_->listen(port, opennova::inmatch::kAdminListenAddress) != OK) {
 		server_socket_.unref();
 		return false;
 	}

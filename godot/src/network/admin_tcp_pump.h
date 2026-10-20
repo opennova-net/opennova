@@ -23,8 +23,8 @@ public:
 	AdminTcpPump(const AdminTcpPump &) = delete;
 	AdminTcpPump &operator=(const AdminTcpPump &) = delete;
 
-	// Listen on `port` on every interface (retail's INADDR_ANY). False when the listen fails,
-	// which the caller ignores as retail ignores Listen's result.
+	// Listen on `port` on every IPv4 interface (retail's AF_INET INADDR_ANY). False when the
+	// listen fails, which the caller ignores as retail ignores Listen's result.
 	bool listen(uint16_t port);
 	bool listening() const { return server_socket_.is_valid() && server_socket_->is_listening(); }
 	// One frame of the device: one accept, one read per connection.

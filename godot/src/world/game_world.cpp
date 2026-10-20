@@ -1,6 +1,7 @@
 #include "world/game_world.h"
 
 #include <formats/admincfg/admin_cfg.h>
+#include <optional>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
@@ -19,6 +20,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include "audio/music_director.h"
 #include "hud/hud_inset_scope.h"
+#include "hud/hud_overlay.h" // the remote admin: the CHAT window and the echo
 #include "render/texture_filter_device.h"
 
 using namespace godot;
@@ -146,13 +148,22 @@ void GameWorld::_process(double p_delta) {
 
 void GameWorld::_notification(int p_what) {
 	if (p_what == NOTIFICATION_INTERNAL_PROCESS) {
-		// A frame with no mission frame: the menus (the main menu with nothing loaded, the
-		// pre and post menus around a loaded mission) pump the admin server too
-		// (Menu_UpdateFrame's call; engine inmatch/remote_admin.h).
+		// A frame outside the running mission's ticked frame (whose remote_admin leg pumps): the
+		// menus pump as MainMenu, a paused single player as the Game Loop, a joiner's connect,
+		// a load, a held start and a teardown not at all (engine inmatch/remote_admin.h
+		// remote_admin_idle_scene).
 		MissionRoot *runtime = get_runtime();
-		if (runtime == nullptr || !runtime->is_playing())
-			pump_remote_admin(world_ready_ ? opennova::inmatch::AdminScene::Other
-			                               : opennova::inmatch::AdminScene::MainMenu);
+		if (runtime != nullptr && runtime->is_playing()) return;
+		const Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
+		opennova::inmatch::RemoteAdminIdleFrame frame;
+		frame.mission = sim.is_valid();
+		frame.session_state = sim.is_valid()
+				? static_cast<opennova::inmatch::State>(sim->session_state())
+				: opennova::inmatch::State::Unloaded;
+		frame.join_pending = drive_.is_preload_pending();
+		if (const std::optional<opennova::inmatch::AdminScene> scene =
+						opennova::inmatch::remote_admin_idle_scene(frame))
+			pump_remote_admin(*scene);
 		return;
 	}
 	if (p_what == NOTIFICATION_EXIT_TREE) {
@@ -475,25 +486,31 @@ bool GameWorld::open_remote_admin() {
 void GameWorld::pump_remote_admin(opennova::inmatch::AdminScene p_scene) {
 	if (!open_remote_admin() || !admin_pump_->listening()) return;
 	const Ref<Simulation> sim = get_sim();
-	opennova::inmatch::NapiNPServerCtx *ctx = sim.is_valid() ? sim->host_ctx() : nullptr;
-	opennova::inmatch::ClientRuntime *client = sim.is_valid() ? sim->host_client_runtime() : nullptr;
-	const uint64_t sim_id = sim.is_valid() ? static_cast<uint64_t>(sim->get_instance_id()) : 0u;
-	if (!admin_consoles_.bound_to(ctx) || sim_id != admin_bound_sim_ || ctx != admin_bound_ctx_ ||
-			client != admin_bound_client_) {
-		admin_bound_sim_ = sim_id;
-		admin_bound_ctx_ = ctx;
-		admin_bound_client_ = client;
+	const opennova::inmatch::RemoteAdminBinding binding =
+			sim.is_valid() ? sim->remote_admin_binding() : opennova::inmatch::RemoteAdminBinding{};
+	if (!admin_consoles_.bound_to(binding)) {
 		Ref<GameConfigBlock> block = game_config_;
 		std::function<void()> save = [block]() { (void)block->save(); };
 		opennova::gamecfg::GameCfg *cfg = &game_config_->native().cfg();
+		opennova::inmatch::AdminConsole::Seams seams;
 		if (sim.is_valid()) {
-			admin_consoles_.bind(ctx, sim->remote_admin_seams(cfg, std::move(save)));
+			seams = sim->remote_admin_seams(cfg, std::move(save));
 		} else {
-			opennova::inmatch::AdminConsole::Seams seams;
 			seams.config_block = cfg;
 			seams.save_config = std::move(save);
-			admin_consoles_.bind(nullptr, std::move(seams));
 		}
+		// The process's own client's HUD (a listen host, a joiner): CHAT GET reads its CHAT
+		// window and a refused CHAT SEND echoes into it (the HUD device, by its group).
+		if (binding.client != nullptr) {
+			seams.chat_window = [this]() {
+				const HudOverlay *hud = admin_hud_overlay();
+				return hud != nullptr ? hud->chat_window_lines() : std::vector<std::string>();
+			};
+			seams.chat_echo = [this](const std::string &p_text) {
+				if (HudOverlay *hud = admin_hud_overlay()) hud->echo_admin_chat(p_text);
+			};
+		}
+		admin_consoles_.bind(binding, std::move(seams));
 	}
 	opennova::inmatch::AdminConsole *console = admin_consoles_.console();
 	console->set_scene(p_scene);
@@ -506,6 +523,11 @@ void GameWorld::pump_remote_admin(opennova::inmatch::AdminScene p_scene) {
 	}
 	admin_pump_->pump();
 	if (crt != nullptr) *crt = admin_rand_;
+}
+
+HudOverlay *GameWorld::admin_hud_overlay() const {
+	if (!is_inside_tree()) return nullptr;
+	return Object::cast_to<HudOverlay>(get_tree()->get_first_node_in_group(HudOverlay::kAdminGroup));
 }
 
 Ref<Simulation> GameWorld::get_sim() const {

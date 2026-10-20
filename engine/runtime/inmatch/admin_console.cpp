@@ -668,29 +668,28 @@ bool AdminConsole::local_command(const std::string &line) {
 	return client_process_local_command(line, seams);
 }
 
-// The host's own console line: Client_ProcessLocalCommand's arms first; then a session peer
-// queues the line to its own server as reliable C2S 0x04, whose authority half echoes back as
-// S2C 0x06 whatever NETLOG does not take (Server_HandleConsoleCommandMessage); an authority that
-// is not a peer runs the NETLOG handler (a `STAT` prefix taken whole; NETLOG toggling the net
-// log and going on), Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute: its
-// debug commands and the server command table's walk (client_console.h); its key-binding
-// queue is the input layer's (D-NET-710). Its one-second guard compares the tick
-// with the last stamp minus 1000, so it never drops a line.
-// [orig: Client_ProcessConsoleCommand @0x520E80 — the guard, Client_ProcessLocalCommand
-//  @0x520EEC, the peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430,
-//  the authority's Server_HandleAdminNetlogCommand(line, 0) @0x5175D0,
-//  Server_HandleBanPuntCommand(line, 0) @0x50B380, NapiClientCmd_ParseAndExecute @0x4329C0
-//  (the call @0x520f70)]
+// The process's console line (Client_ProcessConsoleCommand, the typed console's sender too). A
+// session peer (a listen host, a joiner) is its own client's: the client runs the one-second
+// guard and Client_ProcessLocalCommand's arms over its own seams and rings, then queues the line
+// to its server as reliable C2S 0x04, whose authority half echoes back as S2C 0x06 whatever
+// NETLOG does not take (Server_HandleConsoleCommandMessage); ClientRuntime::console_command
+// carries that half. An authority that is not a peer runs the local arms, then the NETLOG
+// handler (a `STAT` prefix taken whole; NETLOG toggling the net log and going on),
+// Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute: its debug commands and the
+// server command table's walk (client_console.h); its key-binding queue is the input layer's
+// (D-NET-710). Its one-second guard compares the tick with the last stamp minus 1000, so it
+// never drops a line.
+// [orig: CAdminServer_HandleCmdCommand @0x404997 (j_Client_ProcessConsoleCommand);
+//  Client_ProcessConsoleCommand @0x520E80 — the guard, Client_ProcessLocalCommand @0x520EEC, the
+//  peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430, the authority's
+//  Server_HandleAdminNetlogCommand(line, 0) @0x5175D0, Server_HandleBanPuntCommand(line, 0)
+//  @0x50B380, NapiClientCmd_ParseAndExecute @0x4329C0 (the call @0x520f70)]
 void AdminConsole::console_command(const std::string &line) {
-	if (local_command(line)) return;
 	if (ctx_.is_mp_session_peer != 0) {
-		if (seams_.host_client != nullptr) {
-			std::vector<uint8_t> body(line.begin(), line.end());
-			body.push_back(0);
-			seams_.host_client->queue_host_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
-		}
+		if (seams_.host_client != nullptr) (void)seams_.host_client->console_command(line);
 		return;
 	}
+	if (local_command(line)) return;
 	if (ctx_.is_authority == 0) return;
 	std::vector<ProtocolMessage> no_slot_replies;
 	if (Server_HandleAdminNetlogCommand(ctx_, line, nullptr, no_slot_replies)) return;

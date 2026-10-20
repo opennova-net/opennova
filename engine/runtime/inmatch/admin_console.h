@@ -33,12 +33,15 @@ struct NapiNPServerCtx;
 class ClientRuntime;
 class CharacterRegistry;
 
-// The main loop's current scene, as the console's state tests read it.
-// [orig: sub_52BC90() against g_GameModeMainMenu @0x83B400 and g_GameModeGameLoop @0x82F340]
+// The main loop's current mode, as the console's state tests read it.
+// [orig: UI_GetCurrentGameMode against g_GameModeMainMenu @0x83B400 and g_GameModeGameLoop
+//  @0x82F340, CAdminServer_HandleGet @0x4033D0..0x40340B]
 enum class AdminScene : uint8_t {
 	MainMenu,
 	GameLoop,
-	Other, // the pre and post menus, a load
+	// The PreMenu and Post Menu modes, whose frames never pump the admin server
+	// (remote_admin_idle_scene, remote_admin.h): GET GAMESTATE's "Unknown" arm is never reached.
+	Other,
 };
 
 // The usage reply for a rights word: `USAGE - [QUIT`, then each listed verb by its usage bit
@@ -60,7 +63,7 @@ public:
 		// quit to the main menu (exit reason 1 and the active connection's disconnect, which a
 		// Serve Only host does not have). No binding gate stops the action on any host
 		// (handle_goto); the router then destroys the session (PostMenu_RouteMissionExit's
-		// reason-1 arm).
+		// reason-1 arm). RemoteAdminConsoles::bind sets it from its binding.
 		// [orig: CAdminServer_HandleGotoCommand @0x404A4E (Game_CloseInGameScreens),
 		//  @0x404A5D (Input_HandleActionBinding(3)); PostMenu_RouteMissionExit @0x5684AB ->
 		//  CNapiGameSession_FullDestroy @0x568683]
@@ -68,17 +71,23 @@ public:
 		// The map rotation and its catalog (ADR 0051 PR3; HostRotationAdmin over the host's
 		// own); null reads as no rotation and an empty catalog.
 		RotationAdmin *rotation = nullptr;
-		// A listen host's chat window display lines, oldest first (CHAT GET's walk of slots
-		// 40..1): its HUD's word-wrapped ring. A host with no client reads the context's own
-		// display buffer instead (`console_chat_display`, server_console.h).
+		// A session peer's (a listen host's, a joiner's) chat window display lines, oldest first
+		// (CHAT GET's walk of slots 40..1): its HUD's word-wrapped ring. A host with no client
+		// reads the context's own display buffer instead (`console_chat_display`,
+		// server_console.h). [orig: CAdminServer_HandleChatCommand @0x404B0F..0x404BB3]
 		std::function<std::vector<std::string>()> chat_window;
-		// A listen host's flood refusal echoed into its HUD window (Chat_AddMessageChannel1). A
-		// host with no client sends through Server_SendConsoleChat, which posts the sent line,
-		// and echoes a refusal, into the context's CHAT ring.
+		// A session peer's flood refusal echoed into its HUD window in the global sender's flood
+		// colour. A host with no client sends through Server_SendConsoleChat, which posts the
+		// sent line, and echoes a refusal, into the context's CHAT ring.
+		// [orig: Chat_SendTeamMessage @0x49A953 (Chat_AddMessageChannel1(message, palette[3], 930))]
 		std::function<void(const std::string &text)> chat_echo;
-		// The listen host's own client: a session peer's CHAT SEND and CMD leave on its connection.
+		// The process's own client (a listen host's, a joiner's): a session peer's CHAT SEND and
+		// CMD leave on its connection, CMD through its console sender. RemoteAdminConsoles::bind
+		// sets it from its binding.
 		ClientRuntime *host_client = nullptr;
-		// A gametext string (GameText_GetString(section, key)); "" when absent.
+		// A gametext string (GameText_GetString(section, key): the mount's override table first,
+		// D-NET-675); "" when absent. [orig: GameType_GetAbbreviation @0x520FD0;
+		//  GameText_GetString @0x51EBD0]
 		std::function<std::string(std::string_view section, std::string_view key)> game_text;
 		// The avatar registry PETERRABBIT SEXCHANGE picks its two combos from.
 		const CharacterRegistry *characters = nullptr;
@@ -87,9 +96,11 @@ public:
 		//  off_8154D8), @0x4A7D75..0x4A7D90 ("V%i.%i.%i.%i" into g_VersionText)].
 		std::string version_text;
 		std::string title_text;
-		// A listen host's SYSTEM ring (Chat_AddMessageChannel2), which CMD VERSION posts to.
-		// A host with no client shows no SYSTEM ring (its status page reads the CHAT ring, CHAT
-		// GET the CHAT display), so no embedder of that host sets it.
+		// The SYSTEM ring (Chat_AddMessageChannel2) of a host that is not a session peer, which
+		// its CMD VERSION and its command walk post to; a session peer's lines are its own
+		// client's rings (ClientRuntime::console_command). A host with no client shows no SYSTEM
+		// ring (its status page reads the CHAT ring, CHAT GET the CHAT display), so no embedder
+		// of that host sets it.
 		std::function<void(const std::string &text, uint32_t argb)> system_message;
 		// The mission's items.def rows, which CMD SAVENFO's dump names (null: none loaded).
 		std::function<const def::DefItemsFile *()> items_table;

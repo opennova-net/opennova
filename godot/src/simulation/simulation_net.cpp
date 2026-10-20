@@ -9,6 +9,8 @@
 #include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
 #include <runtime/inmatch/loaded_model_list.h> // the C2S 0x3D page (D-NET-527)
 #include <runtime/mission/runtime_boot.h>      // boot_files_from_index
+#include <formats/rtxt/rtxt.h>                 // the gametext table (the admin status report)
+#include <runtime/hud/game_text_lookup.h>     // kGameTextTable
 #include "network/udp_pump_datagram_socket.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
@@ -426,7 +428,24 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 	seams.items_table = [this]() -> const opennova::def::DefItemsFile * {
 		return kernel_ ? kernel_->items_table() : nullptr;
 	};
-	seams.host_client = host_client_runtime();
+	// The status report's game type abbreviation reads the mounted gametext, the mount's
+	// override table first (D-NET-675; engine inmatch/admin_console.h Seams::game_text).
+	if (assets_.root.is_valid()) {
+		auto gametext = std::make_shared<opennova::rtxt::File>();
+		std::vector<uint8_t> bytes;
+		std::string parse_error;
+		const opennova::mission::BootFileSource files =
+				opennova::mission::boot_files_from_index(assets_.root->native_index());
+		if (files.valid() && files.read_file(opennova::hud::kGameTextTable, bytes) &&
+				opennova::rtxt::parse(bytes.data(), bytes.size(), *gametext, parse_error)) {
+			std::shared_ptr<const opennova::rtxt::File> override_table = net_.mission_text.override_table;
+			seams.game_text = [gametext, override_table](std::string_view p_section, std::string_view p_key) {
+				const opennova::rtxt::Entry *entry = opennova::rtxt::find_with_override(
+						override_table.get(), *gametext, std::string(p_section), std::string(p_key));
+				return entry != nullptr ? entry->text : std::string();
+			};
+		}
+	}
 	const opennova::TitleIdentity *title = session_title(net_.title);
 	if (title != nullptr) {
 		const opennova::inmatch::ConnectLogHeader header = opennova::inmatch::connect_log_header(title);
@@ -434,6 +453,15 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 		seams.title_text = header.title;
 	}
 	return seams;
+}
+
+opennova::inmatch::RemoteAdminBinding Simulation::remote_admin_binding() {
+	opennova::inmatch::RemoteAdminBinding binding;
+	binding.host = host_ctx();
+	binding.client = is_joiner() ? runtime_ : host_client_runtime();
+	binding.world = kernel_ ? &kernel_->world : nullptr;
+	binding.session = static_cast<uint64_t>(get_instance_id());
+	return binding;
 }
 
 opennova::io::CrtRand *Simulation::process_crt_rand() {

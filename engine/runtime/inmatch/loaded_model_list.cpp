@@ -302,8 +302,8 @@ LoadedModelList build_mission_start_model_list(const MissionStartModelSources &s
 	}
 	// (9) The terrain's foliage models, marked, on all but a dedicated host [orig:
 	// Game_StartMission @0x5259fd -> Render_InitTerrainSubsystems @0x587000 ->
-	// sub_604DA0 (@0x604dbc) -> Foliage_LoadDefAssets @0x601260; the dedicated host's jump
-	// @0x5259B4..0x5259BF].
+	// Render_InitLodCacheAndFoliage (@0x604dbc) -> Foliage_LoadDefAssets @0x601260; the
+	// dedicated host's jump @0x5259B4..0x5259BF].
 	if (!src.foliage) return list;
 	const mission::BootFileSource *files = src.files;
 	const std::function<bool(const std::string &, std::vector<uint8_t> &)> read_file =

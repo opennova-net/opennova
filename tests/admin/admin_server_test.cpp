@@ -760,10 +760,13 @@ void test_cmd_arms() {
 	               host.console->local_command("\\pb_") && !host.console->local_command("pbx") &&
 	               !host.console->local_command("//pb_x") && !host.console->local_command("NETLOG"),
 	       "the pb_ lines are taken, nothing else");
-	// A session peer runs the local arms first too.
+	// A session peer's line is its own client's (ClientRuntime::console_command, the typed
+	// console's sender, its local arms on the client's own rings): with no client bound here
+	// nothing runs, and this host's SYSTEM seam stays as it was (remote_admin's joiner and
+	// listen-host cases pin the client's sends).
 	host.ctx.is_mp_session_peer = 1;
 	a.one("CMD VERSION");
-	expect(host.system_lines.size() == 2, "a listen host's VERSION is its own");
+	expect(host.system_lines.size() == 1, "a listen host's VERSION is its own client's");
 	host.ctx.is_mp_session_peer = 0;
 }
 

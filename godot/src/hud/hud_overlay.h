@@ -35,6 +35,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 #include <unordered_map>
 
 namespace godot {
@@ -204,6 +205,13 @@ public:
 	// One line for the CHAT ring (the script chat lines); the engine ring
 	// word-wraps it.
 	void push_chat_line(const String &p_text, int64_t p_argb);
+	// The process's remote admin reaches the HUD through this group (GameWorld's console
+	// seams, engine inmatch/admin_console.h Seams::chat_window / chat_echo): CHAT GET reads the
+	// CHAT window's display lines, oldest first, and a refused CHAT SEND echoes into it in the
+	// global sender's flood colour.
+	static constexpr const char *kAdminGroup = "opennova_hud_overlay";
+	std::vector<std::string> chat_window_lines() const;
+	void echo_admin_chat(const std::string &p_text);
 	// Drain the sim's S2C 0x1E feed lines, 0x14 chat lines and 0x32 join/leave
 	// lines (Simulation::drain_feed_posts, resolved against the gametext
 	// table) into their rings in wire order. Returns the frame's last involved

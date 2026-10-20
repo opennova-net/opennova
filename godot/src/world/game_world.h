@@ -93,6 +93,7 @@
 namespace godot {
 
 class HudInsetScope;
+class HudOverlay;
 
 // Loads a playable world (terrain + environment + vegetation + foliage) from
 // ONE resource root and wires it onto the engine nodes it contains (Terrain,
@@ -927,24 +928,22 @@ private:
 	// the exit from the tree.
 	std::unique_ptr<opennova::inmatch::ServerLogDevices> log_devices_;
 	// The process's remote admin (engine inmatch/remote_admin.h): admin.cfg and the listener
-	// once the process block is known, the console bound over the running session's host (else
-	// session-less), the CRT stream its challenge draws from outside a mission, and the TCP
-	// device. Pumped by the remote_admin leg in a mission frame and by the internal process
-	// step on every other frame (the menus).
+	// once the process block is known, the console bound over the running session (its host
+	// context, else a joiner's own client, else session-less; any change of the binding
+	// rebinds), the CRT stream its challenge draws from outside a mission, and the TCP device.
+	// Pumped by the remote_admin leg in a ticked mission frame and by the internal process step
+	// on the frames remote_admin_idle_scene names (the menus, a paused single player).
 	opennova::inmatch::RemoteAdminConsoles admin_consoles_;
 	opennova::io::CrtRand admin_rand_;
 	std::unique_ptr<opennova::AdminServer> admin_server_;
 	std::unique_ptr<AdminTcpPump> admin_pump_;
 	bool admin_opened_ = false;
-	// What the bound console's seams point into: the session's simulation (its instance id), its
-	// host context and the listen host's own client; any change rebinds.
-	uint64_t admin_bound_sim_ = 0;
-	opennova::inmatch::NapiNPServerCtx *admin_bound_ctx_ = nullptr;
-	opennova::inmatch::ClientRuntime *admin_bound_client_ = nullptr;
 	// Open on the first pump with a process block; false until then.
 	bool open_remote_admin();
-	// One frame's pump in `p_scene` over the running session's host (none: session-less).
+	// One frame's pump in `p_scene` over the running session (none: session-less).
 	void pump_remote_admin(opennova::inmatch::AdminScene p_scene);
+	// The HUD the console's CHAT window and echo reach (its group); null with none.
+	HudOverlay *admin_hud_overlay() const;
 	// The last frame's world-tick leg counters (RuntimePerfCounters).
 	int64_t perf_tick_us_ = 0;
 	int64_t perf_foliage_us_ = 0;

@@ -48,6 +48,7 @@
 #include <runtime/world/fire_sound.h> // ReadyFireSound (the fire-sound drain)
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <runtime/inmatch/admin_console.h> // AdminConsole::Seams (remote_admin_seams)
+#include <runtime/inmatch/remote_admin.h> // RemoteAdminBinding (remote_admin_binding)
 #include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
@@ -1416,10 +1417,15 @@ public:
 	void use_log_devices(opennova::inmatch::ServerLogDevices *p_devices) { net_.log_devices = p_devices; }
 	// The remote-admin console's seams over this session (C++ only; the game world's admin
 	// pump binds them, engine inmatch/remote_admin.h): the process block and its save, the
-	// host's rotation and catalog, the avatars, the mission's items.def rows, the listen host's
-	// own client and the title's version and name texts.
+	// host's rotation and catalog, the avatars, the mission's items.def rows, the mounted
+	// gametext (GameText_GetString, the override table first) and the title's version and name
+	// texts.
 	opennova::inmatch::AdminConsole::Seams remote_admin_seams(opennova::gamecfg::GameCfg *p_block,
 			std::function<void()> p_save_config);
+	// What the console binds over (engine inmatch/remote_admin.h RemoteAdminBinding): the host
+	// context, the process's own client (the listen host's or the joiner's), the world, and this
+	// session's identity.
+	opennova::inmatch::RemoteAdminBinding remote_admin_binding();
 	// The process's CRT stream the challenge draws from while a mission runs (World::crt_rand);
 	// null with no kernel.
 	opennova::io::CrtRand *process_crt_rand();

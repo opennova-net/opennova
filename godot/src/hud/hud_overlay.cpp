@@ -1212,6 +1212,18 @@ void HudOverlay::push_chat_line(const String &p_text, int64_t p_argb) {
 	queue_redraw();
 }
 
+std::vector<std::string> HudOverlay::chat_window_lines() const {
+	std::vector<std::string> lines;
+	for (const opennova::hud::HudMessageLine &line : compiler_.chat_lines()) lines.push_back(line.text);
+	return lines;
+}
+
+void HudOverlay::echo_admin_chat(const std::string &p_text) {
+	compiler_.push_chat_line(p_text, opennova::hud::chat_dispatch_flood_color(opennova::hud::kChatDispatchGlobal),
+			static_cast<int>(state_.main_frame));
+	queue_redraw();
+}
+
 void HudOverlay::set_message_log_shown(bool p_shown) {
 	state_.message_log_shown = p_shown;
 	queue_redraw();
@@ -1954,6 +1966,9 @@ const opennova::hud::HudFrameCompiler::MapWindowDraw *HudOverlay::compile_comman
 }
 
 void HudOverlay::_notification(int p_what) {
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		add_to_group(kAdminGroup);
+	}
 	if (p_what == NOTIFICATION_RESIZED) {
 		queue_redraw();
 	}
