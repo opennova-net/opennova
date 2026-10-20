@@ -52,11 +52,15 @@ param(
     [string[]] $Rotation = @(),
 
     # E2: the round time limit in minutes for this cell. Both hosts read it
-    # from the SERVER copy's game.cfg koth_limit (retail:
-    # Game_ApplySessionSettingsToGlobals @0x551CBF..0x551CDF ->
-    # g_TimeLimitMinutes), so the runner writes it there for the cell and
-    # restores the file's exact bytes once every process has stopped. 0 keeps
-    # the copy's own value and leaves the file alone.
+    # from the SERVER copy's game.cfg time_limit (retail:
+    # Game_ApplySessionSettingsToGlobals @0x551CCC..0x551CD2 copies it to the
+    # misnamed g_RespawnTime, and Game_StartMission @0x525242..0x525251 starts
+    # a round that is not co-op with g_RoundTimeRemaining = it * 0xE88 ticks,
+    # which Server_CheckWinConditions @0x51AF6E ends at zero; koth_limit is
+    # the king-of-the-hill hold, @0x51AF0F..0x51AF18), so the runner writes it
+    # there for the cell and restores the file's exact bytes once every
+    # process has stopped. 0 keeps the copy's own value and leaves the file
+    # alone.
     [ValidateRange(0, 600)]
     [int] $TimeLimitMinutes = 0,
 
@@ -889,7 +893,7 @@ function Publish-MotionGate {
     }
 }
 
-# E2's time limit: the SERVER copy's game.cfg koth_limit for this cell (the
+# E2's time limit: the SERVER copy's game.cfg time_limit for this cell (the
 # retail host reads the file at its start, the OpenNova host mounts the same
 # copy). The cell's exact original bytes are kept and written back by the
 # cleanup once every process has stopped: retail saves game.cfg at its exit
@@ -902,9 +906,9 @@ function Set-ServerTimeLimit {
     $latin1 = [Text.Encoding]::GetEncoding(28591)
     $original = [IO.File]::ReadAllBytes($path)
     $text = $latin1.GetString($original)
-    $found = [regex]::Matches($text, '(?m)^[ \t]*koth_limit[ \t]*=[ \t]*"?(\d+)"?')
+    $found = [regex]::Matches($text, '(?m)^[ \t]*time_limit[ \t]*=[ \t]*"?(\d+)"?')
     if ($found.Count -ne 1) {
-        throw "SERVER game.cfg holds $($found.Count) koth_limit lines; the time limit needs exactly one."
+        throw "SERVER game.cfg holds $($found.Count) time_limit lines; the time limit needs exactly one."
     }
     $digits = $found[0].Groups[1]
     $updated = $text.Substring(0, $digits.Index) + [string] $TimeLimitMinutes +
@@ -913,7 +917,7 @@ function Set-ServerTimeLimit {
     $sha = [Security.Cryptography.SHA256]::Create()
     $script:ServerGameCfgOverride = [pscustomobject][ordered]@{
         path = $path
-        key = "koth_limit"
+        key = "time_limit"
         value = $TimeLimitMinutes
         original_value = [int] $digits.Value
         original_sha256 = ([BitConverter]::ToString($sha.ComputeHash($original)) -replace '-', '').ToLowerInvariant()
@@ -922,7 +926,7 @@ function Set-ServerTimeLimit {
     }
     $script:ServerGameCfgOriginal = $original
     [IO.File]::WriteAllBytes($path, $bytes)
-    Write-Host "PARITY_RUN_NOTE SERVER game.cfg koth_limit $($digits.Value) -> $TimeLimitMinutes for this cell"
+    Write-Host "PARITY_RUN_NOTE SERVER game.cfg time_limit $($digits.Value) -> $TimeLimitMinutes for this cell"
 }
 
 function Restore-ServerGameCfg {

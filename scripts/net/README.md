@@ -292,8 +292,10 @@ so the default suite is unchanged. An extension case may add:
   The OpenNova listen host has no rotation launch flag yet, so a rotation case
   runs RR, RR-aa and RO only.
 - `time_limit_minutes`: E2's round limit (`-TimeLimitMinutes`). Both hosts read
-  it from the SERVER copy's `game.cfg` `koth_limit` (retail's
-  `g_TimeLimitMinutes`), so the runner writes it there for the cell and
+  it from the SERVER copy's `game.cfg` `time_limit` (retail starts a round
+  that is not co-op with `time_limit` x 3720 ticks on its round timer;
+  `koth_limit` is the king-of-the-hill hold), so the runner writes it there
+  for the cell and
   restores the file's exact bytes after every process has stopped. The summary
   records the write and the restore as `server_game_cfg_override`.
 - `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's
