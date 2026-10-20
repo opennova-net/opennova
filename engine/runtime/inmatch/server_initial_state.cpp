@@ -371,7 +371,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		// is for World-only unit fixtures with no mission).
 		// [orig: Server_SendInitialGameStateToPlayer @0x51BBA0 - the tail
 		//  @0x51C03A..0x51C10E (the 0x0B NetPacket_WriteBMSHeader over g_BmsHeaderBlock
-		//  @0x51C054..0x51C077), game state 9 @0x51C11C, slot state 3 @0x51C134,
+		//  @0x51C054..0x51C077), game state 9 @0x51C113..0x51C11C, slot state 3 @0x51C134,
 		//  subphase 0 @0x51C13C]
 		step.messages.push_back(InitialStateMessage{s2c::NOOP, {}});
 		if (ctx.mission != nullptr) {
@@ -658,6 +658,8 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// The head (D-NET-502): the join, not the add, writes these slot words, so a stock
 	// client's join-time C2S 0x2F pair (ahead of its 0x0B in one packet) has seeded the
 	// armory cooldown before the join zeroes it.
+	// The slot gates are the 0x0B receiver's (Server_HandlePlayerJoinRequest)
+	// [orig: Server_OnPlayerJoin @0x51a6a3..0x51a6c7].
 	// [orig: Server_OnPlayerJoin @0x51A680 - +100360 = 0 @0x51A6CD; the state byte +89912 = 1
 	//  @0x51A6D3, 3 while g_PreRoundDelayTimer runs @0x51A6DA..0x51A6E2, |= 0x10 with spawn zones
 	//  @0x51A6E9..0x51A6F2; CNetPlayer_SetGameState(.., 10) @0x51A6FD; the state-6 entry
@@ -683,7 +685,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	st.capture_nag_held = false;
 	conn.burst.game_state = 10;
 	if (conn.slot_state != PlayerSlotState::Joined) {
-		conn.slot_state = PlayerSlotState::Joined; // [orig: @0x51A712]
+		conn.slot_state = PlayerSlotState::Joined; // [orig: the test @0x51A707..0x51A70A, @0x51A712]
 		// The quality level and its resend flag: a level kept across a map change (or stored
 		// ahead of the join) is gone, and the client's next C2S 0x4C above 0 dirties it again.
 		// [orig: +418 = 0 @0x51A71F, +89860 = 0 @0x51A725]
@@ -870,7 +872,11 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	}
 	// The host's own client sends its C2S 0x0B in-process once its world loaded: the type-2
 	// loopback runs the join here (a remote joiner's runs from its 0x0B's dispatch,
-	// Server_HandlePlayerJoinRequest).
+	// Server_HandlePlayerJoinRequest). The 0x0B is every session peer's, the host's own client
+	// included, and the receiver is the one player-path caller of the join (the other two are
+	// the bot arms behind the slot's +0x178E3 bot byte).
+	// [orig: Game_StartMission @0x526189 (the is_mp_session_peer gate) -> the C2S 0x0B
+	//  @0x52624B; the bot arms' calls @0x51B93A / @0x51D2E1, behind @0x51B928 / @0x51D2CF]
 	if (!is_remote && conn.slot_state == PlayerSlotState::AwaitJoin) {
 		for (InitialStateMessage &m : Server_OnPlayerJoin(ctx, conn, now_tick))
 			step.messages.push_back(std::move(m));
