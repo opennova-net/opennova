@@ -276,6 +276,14 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 		//  NapiNPServerMsg_HandleWeaponToggle @0x511b08 / @0x511b38]
 		if (!w.usegun_slot_active)
 			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;
+		// The attach's mount stores g_PendingWeaponSlot over whatever a mount
+		// before it staged there: a personal mount still in flight (the previous
+		// control seat's detach mount, run by the same process ahead of this
+		// attach) no longer commits; the switch-out's completion takes the
+		// carrier's slot. [orig: Player_MountWeaponSlot @0x4DFB16, called from
+		// Entity_AttachToVehicleSlot @0x494838 and Entity_AttachToUseGunSlot
+		// @0x546C38; the earlier detach Entity_ProcessVehicleAttach @0x435BCE]
+		w.switch_in_flight = false;
 		w.usegun_pending_mount = p_mount.handle;
 		w.usegun_pending_weapon_adm = target_adm;
 		w.usegun_switch = w.usegun_slot_active ? LocalUseGunSwitch::kSwap

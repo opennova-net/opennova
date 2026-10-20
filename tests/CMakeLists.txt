@@ -5074,6 +5074,11 @@ add_test(NAME selected_slot COMMAND selected_slot_test)
 add_executable(round_type_index_test world/round_type_index_test.cpp)
 target_link_libraries(round_type_index_test PRIVATE opennova_runtime)
 add_test(NAME round_type_index COMMAND round_type_index_test)
+# The local player's mounted fire path across a seat switch: the attach's mount replaces the
+# detach's pending personal slot, and the gun fires.
+add_executable(mounted_fire_path_test world/mounted_fire_path_test.cpp)
+target_link_libraries(mounted_fire_path_test PRIVATE opennova_runtime)
+add_test(NAME mounted_fire_path COMMAND mounted_fire_path_test)
 
 # --- parity lane L8 (round/info/serve) ---
 
