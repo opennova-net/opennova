@@ -693,11 +693,12 @@ struct Entity {
     uint8_t player_slot_id = 0;
     uint8_t radio_request = 0; // entity+885 [orig: @0x430C50]
     uint8_t radio_request_seconds = 0; // entity+886
-    // Players only: the wire NetId (entity+0x15C) = the minimap/character-slot id, picked per
-    // assigned team from the joiner's CI0/CI1 join vars (low u16 of the atol). 0 = unassigned
-    // (the encoder falls back to its D-NET-137 shim). Non-players serialize Entity::net_id
-    // (the WAC SSN space) there instead. [orig: Server_PlayerAdd @0x51cbc0 slot+440 ->
-    // entity+0x15C; NapiNetConfig_LoadFromConnTags @0x4c7260 jsp[56]/jsp[58]]
+    // The wire NetId (entity+0x15C). A player's is the minimap/character-slot id, picked per
+    // assigned team from the joiner's CI0/CI1 join vars (low u16 of the atol); 0 = unassigned
+    // (the encoder falls back to its D-NET-137 shim). Every other row keeps the 0 the BMS
+    // spawn's memset left (D-NET-512); the SSN is Entity::net_id (+0x7C).
+    // [orig: Server_PlayerAdd @0x51cbc0 slot+440 -> entity+0x15C; NapiNetConfig_LoadFromConnTags
+    //  @0x4c7260 jsp[56]/jsp[58]; Entity_SpawnFromBMSRecord @0x40E9F0 - memset @0x40EA27]
     uint16_t minimap_net_id = 0;
     // MoveOrder bit layout (the reconstructed word = net_move_input | net_stance_bits << 8;
     // [orig: Player_PackInputStateToEntity @0x4df68f-0x4df741; stance reads

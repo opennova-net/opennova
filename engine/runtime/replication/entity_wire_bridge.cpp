@@ -428,11 +428,14 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		// spawn stamped it from the joiner's per-side VCA/VCB join var (golden joiner=4); NEVER the
 		// body-anim clip — echoing Entity::body_anim_slot here was the DBuggy1-shadow bug (D-NET-146).
 		rec.anim_slot = e.anim_slot;
-		// Players: the per-team minimap/char-slot id picked at add (CI0/CI1 join vars) when present,
-		// else the D-NET-137 encoding shim (host's own player / var-less peers).
+		// entity+0x15C for every row (D-NET-512): a player's per-team minimap/char-slot id picked
+		// at add (CI0/CI1 join vars) when present, else the D-NET-137 encoding shim (host's own
+		// player / var-less peers); any other row's word, which the BMS spawn's memset leaves 0.
+		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - `movzx edi, word ptr
+		//  [ecx+15Ch]` @0x5032CB; Entity_SpawnFromBMSRecord @0x40E9F0 - memset @0x40EA27]
 		rec.net_id = (e.item_id == kPlayerPersonTypeId)
 				? player_wire_net_id(e)
-				: e.net_id;
+				: e.minimap_net_id;
 		rec.player_class = player_class_for_wire(e);
 		rec.player_slot_id = e.player_slot_id; // entity+0x154 [orig: @0x503316..0x503327]
 		batch.records.push_back(std::move(rec));
@@ -499,9 +502,11 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 	// Same field sources as the 0x0C organic record: entity+0x374 raw + the per-team minimap id
 	// (see build_pool0_organic_batch; D-NET-146/137).
 	rec.anim_slot = e.anim_slot;
+	// entity+0x15C for every row, as the 0x0C (D-NET-512).
+	// [orig: NetPacket_SerializeObjectToBuffer @0x504D10 - `mov dx, [ebx+15Ch]` @0x5051BF]
 	rec.net_id = (e.item_id == kPlayerPersonTypeId)
 			? player_wire_net_id(e)
-			: e.net_id;
+			: e.minimap_net_id;
 	rec.player_class = player_class_for_wire(e);
 	// The wire struct retains its early alert_level name, but the grilled source is refNum.
 	rec.player_slot_id = e.player_slot_id; // entity+340 [orig: @0x5051f0..0x5051fd]

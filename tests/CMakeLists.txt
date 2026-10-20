@@ -5020,6 +5020,10 @@ add_test(NAME npruntime_player_death_edge COMMAND npruntime_player_death_edge_te
 add_executable(npruntime_entity_position_words_test npruntime/entity_position_words_test.cpp)
 target_link_libraries(npruntime_entity_position_words_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_entity_position_words COMMAND npruntime_entity_position_words_test)
+# The load-stream rows' fields as retail's serializers write them (D-NET-512, ...).
+add_executable(npruntime_load_stream_rows_test npruntime/load_stream_rows_test.cpp)
+target_link_libraries(npruntime_load_stream_rows_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_load_stream_rows COMMAND npruntime_load_stream_rows_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
 

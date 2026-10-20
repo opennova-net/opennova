@@ -127,7 +127,9 @@ bool run_pool0_organic() {
 	if (!expect(r.pos_x == w::to_fixed(10.0) && r.pos_z == w::to_fixed(1.5), "pos 16.16")) return false;
 	if (!expect(r.orientation == heading_bam(30), "orientation = engine heading BAM")) return false;
 	if (!expect(r.team == 2, "team carried")) return false;
-	if (!expect(r.net_id == 0x4242, "net_id carried")) return false;
+	// entity+0x15C, 0 on a non-player row: the SSN (0x4242) never rides the 0x0C (D-NET-512).
+	// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - @0x5032CB]
+	if (!expect(r.net_id == 0, "a non-player's netId is its +0x15C word, 0")) return false;
 	if (!expect(r.anim_slot == 5, "anim slot carried")) return false;
 	std::printf("PASS pool0_organic\n");
 	return true;
@@ -876,7 +878,8 @@ bool run_full_entity_spawn_rich_fields() {
 	entity.pitch = -15;
 	entity.ai_state = 0x1234;
 	entity.anim_slot = 6;
-	entity.net_id = 0x4242;
+	entity.net_id = 0x4242;          // the SSN (+0x7C): never streamed
+	entity.minimap_net_id = 0x1357;  // entity+0x15C, the netId word (D-NET-512)
 	entity.player_class = 7;
 	entity.ref_num = 0xAB;
 	entity.sub_type = 0xCD;
@@ -915,7 +918,7 @@ bool run_full_entity_spawn_rich_fields() {
 	if (!expect(rec.heading_hi == want_heading && rec.pitch_hi == want_pitch,
 	            "yaw/pitch engine BAM high words")) return false;
 	if (!expect(rec.ai_state == 0x34, "ai_state low byte")) return false;
-	if (!expect(rec.anim_slot == 6 && rec.net_id == 0x4242 && rec.player_class == 7,
+	if (!expect(rec.anim_slot == 6 && rec.net_id == 0x1357 && rec.player_class == 7,
 	            "anim/net/class raw fields")) return false;
 	if (!expect(rec.player_slot_id == 0 && rec.alert_level == 0xAB && rec.sub_type == 0xCD,
 	            "tail leaves only entity+340 zero")) return false;
