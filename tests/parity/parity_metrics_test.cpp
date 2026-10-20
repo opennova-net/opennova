@@ -1593,6 +1593,8 @@ void test_pool_live_pose() {
 	expect_row(moved, 'S', "initial_records", "0x0d:0", "pass");
 	check(find_row(moved.verdict.rows, 'S', "initial_body", "0x0d:0") == nullptr,
 			"S2C 0x0D compares as records, not bytes");
+	check(find_row(moved.verdict.rows, 'S', "length_set", "0x0d:0") == nullptr,
+			"S2C 0x0D's page lengths follow its live records' value-gated fields: left out");
 	for (const auto &change : std::vector<std::pair<const char *, Pose>>{
 				 { "a parked vehicle's z", [&] { Pose p = rest; p.parked = 1; return p; }() },
 				 { "a record carried on a parked vehicle",

@@ -230,6 +230,13 @@ inline constexpr Normalization kNormalizations[] = {
 			"each 0x10 record's trailing zone block is retail stack residue "
 			"(world.S.0x10.zone_prefix), so the page lengths follow it; the records compare "
 			"by slot" },
+	{ "length.S.0x0d", MaskKind::LengthExempt, 'S', 0x00D, "POOL_SPAWN", 0,
+			"a live record's value-gated fields follow its physics tick: the serializer writes "
+			"each euler angle only when nonzero (NetPacket_SerializeEntityPoolToPacket_0 "
+			"@0x503B3A..0x503B74) and an awake vehicle's ground link (the target) only while "
+			"its mover's probe hits (Entity_RaycastGroundHeightAndObject @0x414370), so the "
+			"page lengths follow the join's tick (initial.S.0x0d.live_pose); the records "
+			"compare by slot" },
 	{ "length.C.0x3d", MaskKind::LengthExempt, 'C', 0x03D, "LOADED_MODEL_PAGE_REPLY", 0,
 			"a reply's length is 4 + 4 * min(50, count - start) "
 			"(NetPacket_WriteEntityIndexList @0x42d9c3) for the start the host's "
@@ -284,7 +291,7 @@ inline constexpr Normalization kNormalizations[] = {
 			"retail's 650-byte page cut falls follows them" },
 	{ "group.S.0x0d.length", MaskKind::GroupLength, 'S', 0x00D, "POOL_SPAWN", 0,
 			"a world-stream page's length is its records' value-gated fields (judged by "
-			"length_set and initial_records): where the page cut falls follows them" },
+			"initial_records): where the page cut falls follows them" },
 	{ "group.S.0x10.length", MaskKind::GroupLength, 'S', 0x010, "STATIC_ENTITY_BATCH", 0,
 			"a world-stream page's length carries retail's uninitialized zone blocks "
 			"(world.S.0x10.zone_prefix)" },
@@ -491,6 +498,7 @@ static_assert(initial_body_exempt('S', 0x019) && !initial_body_exempt('C', 0x019
 static_assert(initial_body_exempt('S', 0x01A) && !initial_body_exempt('S', 0x064));
 static_assert(initial_body_set('S', 0x016) && !initial_body_exempt('S', 0x016));
 static_assert(initial_records('S', 0x010) && length_set_exempt('S', 0x010));
+static_assert(initial_records('S', 0x00D) && length_set_exempt('S', 0x00D));
 static_assert(stable_body_prefix('S', 0x00F) == 4 && stable_body_prefix('C', 0x00F) == 0);
 static_assert(first_order_excluded('S', 0x030) && !first_order_excluded('S', 0x02C));
 static_assert(group_length_masked('S', 0x00A) && !group_length_masked('C', 0x00A));
