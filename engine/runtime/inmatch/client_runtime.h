@@ -384,6 +384,11 @@ public:
 	bool queue_mounted_weapon_slot_selection(bool use_parent_slot);
 	bool queue_vehicle_attach(uint16_t vehicle_handle, uint8_t model_bone_index);
 	bool queue_vehicle_detach(uint16_t vehicle_handle);
+	// Entity_SendDetachPacket itself: the reliable C2S 0x27 [self][target][2 B],
+	// gated only on the target (the plyr class callback's seat leave; the mount
+	// toggle's caller adds its own gates in queue_vehicle_detach).
+	// [orig: Entity_SendDetachPacket @0x435510]
+	bool queue_detach_packet(uint16_t target_handle);
 	std::vector<replication::ClientRoundEvent> drain_round_events();
 	// S2C 0x1E game events the recv fold surfaced this frame — the kill /
 	// objective / medic feed lane. The embedder formats each into a canned

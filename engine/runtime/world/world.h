@@ -839,6 +839,11 @@ struct WorldOutbox {
     // witness); the joiner role drains them into its send queue. The authority
     // never fills it.
     std::vector<DoorRowEvent> door_requests;
+    // A client's local body's seat-leave requests (C2S 0x27, the target's wire
+    // handle) the plyr class callback raised (infantry_death.cpp carries the
+    // witness); the joiner role drains them into its send queue. The authority
+    // never fills it.
+    std::vector<uint16_t> detach_requests;
     // HUD relays pending the host's S2C 0x3F fan.
     std::vector<HudRelay> hud_relays;
     // Powerup ammo grants for REMOTE players' connection pools (world/powerup.h);

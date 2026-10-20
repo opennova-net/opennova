@@ -868,7 +868,18 @@ bool ClientRuntime::queue_vehicle_detach(uint16_t vehicle_handle) {
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
 	    !is_deployed() || !joiner_->has_self_handle() || vehicle_handle == 0xFFFFu)
 		return false;
+	return queue_detach_packet(vehicle_handle);
+}
+
+// [orig: Entity_SendDetachPacket @0x435510 -- the target test @0x435518, the
+//  local player's slot id @0x43555A, the target's @0x43559D, the reliable 0x27
+//  @0x435596..0x4355A2]
+bool ClientRuntime::queue_detach_packet(uint16_t target_handle) {
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->has_self_handle() ||
+	    target_handle == 0xFFFFu)
+		return false;
 	const uint16_t self = joiner_->self_handle();
+	const uint16_t vehicle_handle = target_handle;
 	send_queue_.push_back(make_protocol_message(
 			0x27,
 			{

@@ -85,10 +85,81 @@ void test_the_drowning_runs_the_class_callback() {
 	CHECK(body->spawn_phase == 64);
 }
 
+// The callback's seat leave splits on the session-peer bit (L4-s3 FOUND 2): a
+// dedicated host (not a session peer) detaches any mounted body itself, at the
+// event-4 arm and the health tail alike; a listen host's leave is
+// Entity_SendDetachPacket, which acts for its own local body alone (applied on
+// its own server leg) and leaves a remote player's dead body on its seat; a
+// client's local body queues the C2S 0x27 to its seat's carrier, and the
+// event-4 arm is the authority's alone.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407A8D..0x407ABD,
+//  @0x407B0B..0x407B33; Entity_SendDetachPacket @0x435518 / @0x43552A]
+void test_the_seat_leave_splits_on_the_session_peer_bit() {
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(1, 4);
+	w::PlayerSpawn spawn;
+	spawn.team = 1;
+	const w::EntityHandle local_h = w::spawn_remote_player(world, spawn);
+	const w::EntityHandle remote_h = w::spawn_remote_player(world, spawn);
+	const w::EntityHandle carrier = w::EntityHandle::make(1, 2);
+	world.cached.local_player = local_h;
+	auto seat = [&](w::EntityHandle h, int16_t health) {
+		w::Entity *e = world.registry.get(h);
+		e->mounted = true;
+		e->flags |= w::kEntityFlagMounted;
+		e->mount_target = carrier;
+		e->mount_type = w::SeatType::Passenger;
+		e->health = health;
+	};
+	auto mounted = [&](w::EntityHandle h) { return world.registry.get(h)->mounted; };
+
+	// A dedicated host: both bodies leave, by the health tail and by event 4.
+	world.ai.is_authority = true;
+	world.rules.mp_session_peer = false;
+	seat(local_h, 0);
+	seat(remote_h, 0);
+	w::player_body_class_event(world, *world.registry.get(remote_h), 0);
+	CHECK(!mounted(remote_h));
+	seat(remote_h, 50);
+	w::player_body_class_event(world, *world.registry.get(remote_h), 4);
+	CHECK(!mounted(remote_h));
+
+	// A listen host: the remote player's dead body keeps its seat; its own
+	// body leaves.
+	world.rules.mp_session_peer = true;
+	seat(remote_h, 0);
+	w::player_body_class_event(world, *world.registry.get(remote_h), 0);
+	CHECK(mounted(remote_h));
+	w::player_body_class_event(world, *world.registry.get(remote_h), 4);
+	CHECK(mounted(remote_h));
+	seat(local_h, 0);
+	w::player_body_class_event(world, *world.registry.get(local_h), 0);
+	CHECK(!mounted(local_h));
+	CHECK(world.out.detach_requests.empty());
+
+	// A client: the local dead body queues its 0x27 to the carrier and stays
+	// seated until the host's echo; event 4 does nothing; another body nothing.
+	world.ai.is_authority = false;
+	seat(local_h, 0);
+	w::player_body_class_event(world, *world.registry.get(local_h), 0);
+	CHECK(mounted(local_h));
+	CHECK(world.out.detach_requests == std::vector<uint16_t>{carrier.packed});
+	world.out.detach_requests.clear();
+	seat(local_h, 50);
+	w::player_body_class_event(world, *world.registry.get(local_h), 4);
+	CHECK(world.out.detach_requests.empty());
+	seat(remote_h, 0);
+	w::player_body_class_event(world, *world.registry.get(remote_h), 0);
+	CHECK(world.out.detach_requests.empty() && mounted(remote_h));
+}
+
 } // namespace
 
 int main() {
 	test_the_drowning_runs_the_class_callback();
+	test_the_seat_leave_splits_on_the_session_peer_bit();
 	if (failures == 0) std::printf("drowning_class_event: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

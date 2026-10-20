@@ -764,6 +764,10 @@ void JoinerRole::pump() {
 	for (const world::DoorRowEvent &request : world.out.door_requests)
 		rt.queue_door_request(request.handle, request.state, request.number);
 	world.out.door_requests.clear();
+	// The plyr class callback's seat leave for the local body, its C2S 0x27
+	// (world/infantry_death.cpp carries the witness).
+	for (const uint16_t target : world.out.detach_requests) (void)rt.queue_detach_packet(target);
+	world.out.detach_requests.clear();
 	if (!preround_active)
 		mirror_predicted_vehicles(); // predicted boat poses -> presented rows
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);

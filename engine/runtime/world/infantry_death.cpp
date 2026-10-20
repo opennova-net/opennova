@@ -201,6 +201,29 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     }
 }
 
+// The callback's seat leave: a host that is not a session peer (dedicated)
+// detaches the body itself; anywhere else (a listen host, a client) the leave
+// is Entity_SendDetachPacket, which queues the C2S 0x27 only for the local
+// player's own body with a parent and does nothing for any other body. A
+// listen host's own 0x27 lands on its own server leg, applied here directly as
+// the mount toggle's is (vehicle_attach.cpp); a client's goes to its send queue.
+// [orig: Entity_HandleDamageAndTriggerZones -- `cmp is_mp_session_peer`
+//  @0x407AA0 / @0x407B16, Entity_DetachFromVehicleIfServer @0x407AAA /
+//  @0x407B20, Entity_SendDetachPacket @0x407ABD / @0x407B33;
+//  Entity_SendDetachPacket @0x435510 (the target and local-player gates
+//  @0x435518 / @0x43552A, the reliable 0x27 @0x435596..0x4355A2)]
+static void class_event_seat_leave(World &world, Entity &body) {
+    if (world.ai.is_authority && !world.rules.mp_session_peer) {
+        world.commands.dismount(body.handle);
+        return;
+    }
+    if (body.handle != world.cached.local_player || !body.mount_target.valid()) return;
+    if (world.ai.is_authority)
+        world.commands.dismount(body.handle);
+    else
+        world.out.detach_requests.push_back(body.mount_target.packed);
+}
+
 // See the infantry.h contract.
 void player_body_class_event(World &world, Entity &body, int event) {
     // [orig: the dead return @0x40772A..0x40772F]
@@ -215,9 +238,9 @@ void player_body_class_event(World &world, Entity &body, int event) {
         const HitRecord &record = world.round_sim.hit_record;
         if (record.has_round) person_class_round_legs(world, body, record);
     } else if (event == 4) {
-        // [orig: `cmp is_authority` @0x407A94, the parent @0x407A96,
-        //  Entity_DetachFromVehicleIfServer @0x407AAA]
-        if (world.ai.is_authority && body.mounted) world.commands.dismount(body.handle);
+        // The authority's arm alone [orig: `cmp is_authority` @0x407A8D..0x407A94,
+        //  the parent @0x407A96, the leave @0x407AA0..0x407ABD]
+        if (world.ai.is_authority && body.mounted) class_event_seat_leave(world, body);
     }
     if (retail_signed_i16(body.health) <= 0) {
         if (body.death_anim_state == 0)
@@ -228,9 +251,9 @@ void player_body_class_event(World &world, Entity &body, int event) {
             motor->inf.anim_state = body.death_anim_state;
             motor->inf.anim_pending = 0;
         }
-        // [orig: the parent @0x407AED, Entity_DetachFromVehicleIfServer
-        //  @0x407B0B..0x407B20]
-        if (world.ai.is_authority && body.mounted) world.commands.dismount(body.handle);
+        // Every peer's arm [orig: the parent @0x407AED / @0x407B0B, the leave
+        //  @0x407B0D..0x407B33]
+        if (body.mounted) class_event_seat_leave(world, body);
     }
     if (event != 4 && event != 1 && event != 3 && event != 5) body.cause_flags &= ~0xF00u;
     body.spawn_phase = 64;
