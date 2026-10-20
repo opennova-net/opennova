@@ -37,21 +37,46 @@ bool load_listed(DocumentBase &document, const ProjectPaths &paths, const AssetE
 	return document.load_bytes(bytes, asset.relative_path, asset.kind, game, error);
 }
 
-void ValidationCache::begin() {
+void ValidationCache::begin(uint64_t serial, const std::string &game) {
 	const size_t passes = stats_.passes;
 	stats_ = ValidationStats();
 	stats_.passes = passes + 1;
 	loaded_.clear();
-	for (auto &[path, entry] : entries_)
-		entry.asked = false;
+	floor_ = ++pass_;
+	keeping_ = false;
+	serial_ = serial;
+	game_ = game;
+}
+
+bool ValidationCache::keeps(uint64_t serial, const std::string &game) const {
+	return ended_ && serial != 0 && serial == ended_serial_ && game == ended_game_;
+}
+
+void ValidationCache::begin_kept(uint64_t serial, const std::string &game, const std::vector<std::string> &asked) {
+	const size_t passes = stats_.passes;
+	stats_ = ValidationStats();
+	stats_.passes = passes + 1;
+	loaded_.clear();
+	++pass_;
+	// The entries the last validation that ended made or kept (and those asked since) are this one's.
+	floor_ = ended_floor_;
+	keeping_ = true;
+	serial_ = serial;
+	game_ = game;
+	// Every entry is the last ended validation's or asked since (that one let go of those it did not ask), so
+	// each one not asked now is kept.
+	size_t asked_held = 0;
+	for (const std::string &path : std::set<std::string>(asked.begin(), asked.end()))
+		asked_held += entries_.count(path);
+	stats_.files_reused = entries_.size() - asked_held;
 }
 
 const std::vector<Diagnostic> &ValidationCache::file_findings(
 		const ValidationInput &input, const AssetEntry &asset) {
 	Entry &entry = entries_[asset.relative_path];
-	if (entry.asked)
+	if (entry.pass == pass_)
 		return entry.findings; // asked again within the same validation: counted once
-	entry.asked = true;
+	entry.pass = pass_;
 	const std::shared_ptr<const DocumentBase> open = input.open_document(asset);
 	// Kept while what they were made from holds: the same open document in the same state, or the
 	// same closed file.
@@ -69,7 +94,10 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 		return entry.findings;
 	}
 	entry = Entry();
-	entry.filled = entry.asked = true;
+	entry.filled = true;
+	entry.pass = pass_;
+	if (open) open_.insert(asset.relative_path);
+	else open_.erase(asset.relative_path);
 	++stats_.files_validated;
 	const DocumentType *type = document_type_for(asset.kind);
 	// A type whose documents hold neither records nor a text (S13 D6, D9): no validator reads
@@ -145,23 +173,30 @@ size_t ValidationCache::documents_alive() const {
 
 bool ValidationCache::records_checked(const std::string &path) const {
 	const auto found = entries_.find(path);
-	return found != entries_.end() && found->second.asked && found->second.checked;
+	return found != entries_.end() && current(found->second) && found->second.checked;
 }
 
 const std::vector<Diagnostic> *ValidationCache::kept_findings(const std::string &path) const {
 	const auto found = entries_.find(path);
-	return found != entries_.end() && found->second.asked ? &found->second.findings : nullptr;
+	return found != entries_.end() && current(found->second) ? &found->second.findings : nullptr;
 }
 
 void ValidationCache::end() {
-	for (auto it = entries_.begin(); it != entries_.end();) {
-		if (it->second.asked) {
-			++it;
-			continue;
+	// A validation of every file lets go of those it did not ask; one that kept them lets go of none.
+	if (!keeping_)
+		for (auto it = entries_.begin(); it != entries_.end();) {
+			if (it->second.pass == pass_) {
+				++it;
+				continue;
+			}
+			++stats_.files_dropped;
+			open_.erase(it->first);
+			it = entries_.erase(it);
 		}
-		++stats_.files_dropped;
-		it = entries_.erase(it);
-	}
+	ended_ = true;
+	ended_serial_ = serial_;
+	ended_game_ = game_;
+	ended_floor_ = floor_;
 }
 
 std::shared_ptr<const DocumentBase> ValidationInput::open_document(const AssetEntry &asset) const {

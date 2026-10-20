@@ -22,9 +22,12 @@
 #include <utility>
 #include <vector>
 
+#include <editor/assets/project_asset_source.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/documents/project_checks.h>
+#include <editor/documents/validation_cache.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
@@ -1808,6 +1811,75 @@ static int test_use_checks_kept() {
 	return 0;
 }
 
+// A single edit costs what it touched (the editor speed pass): over the scan the last validation read, the graph
+// visits only the open document's file (GraphStats::files_walked) and the validation asks only it
+// (files_validated), an edit that renames a window and so moves the graph included; the rows and their marks are
+// those a validation of every file with nothing kept makes (compose_project_findings over a graph, a cache and
+// project checks made afresh; the plan's refusals over its gate, mark_findings).
+static int test_edit_costs_what_it_touched() {
+	test_temp::TempDir dir("opennova_editor_problems_edit_cost");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Edit cost"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const std::string logo = "<SCREEN>\r\n\t<NAME>C</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+	                         "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+	                         "\t\t<APPEARANCE type=\"image\" state=\"default\">gone.tga</APPEARANCE>\r\n\t</WINDOW>\r\n"
+	                         "</SCREEN>\r\n";
+	TEST_EXPECT(test_io::write_text(root + "/menus/a.mnu", kMenuA) && test_io::write_text(root + "/menus/b.mnu", kMenuB) &&
+	            test_io::write_text(root + "/menus/c.mnu", logo) &&
+	            test_io::write_file(root + "/textures/here.tga", editor_test::tga_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("menus/a.mnu"));
+	const Document *menu = records_of(*session.document_for("menus/a.mnu"));
+	NodeAddress go;
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "GO", go));
+	if (!menu) return 1;
+	const auto perf = [&session](const char *section, const char *count) {
+		std::string error;
+		const opennova::io::JsonValue answer = session.query("perf", opennova::io::JsonValue(), error);
+		const opennova::io::JsonValue *part = answer.get(section);
+		return part ? size_t(part->get_number(count, -1)) : SIZE_MAX;
+	};
+	for (const char *name : {"GONE", "GO"}) {
+		Edit renamed;
+		renamed.address = go;
+		renamed.field = "name";
+		renamed.value = std::string(name);
+		editor_test::handle_to_end(session, request::edit_record("menus/a.mnu", renamed));
+		TEST_EXPECT(perf("graph", "files_walked") == 1 && perf("graph", "files_extracted") == 1 &&
+		            perf("validation", "files_validated") == 1);
+		// Every file validated afresh, nothing kept.
+		const ProjectPaths paths = ProjectPaths::for_root(root);
+		AssetGraph graph;
+		ValidationCache cache;
+		ProjectChecks checks;
+		ProjectAssetSource source;
+		source.set_scan(root, *v.project.scan, v.project.document->target_game);
+		source.set_open(v.documents.open);
+		const std::vector<Diagnostic> none;
+		const ProjectFindings cold = compose_project_findings(
+		        {paths, *v.project.document, *v.project.scan, *v.project.requirements, v.documents.open,
+		         v.activity.boot_missing, none, none, none},
+		        graph, cache, checks, source);
+		TEST_EXPECT(cold.rows == v.findings.diagnostics);
+		const std::vector<Diagnostic> gate(cold.rows.begin() + std::ptrdiff_t(cold.gate_begin),
+		                                   cold.rows.begin() + std::ptrdiff_t(cold.gate_end));
+		ShippedFiles shipped;
+		shipped.unsaved = {"menus/a.mnu"};
+		BuildTarget target;
+		target.game = v.project.document->target_game;
+		const BaseNames base{&v.project.base_files};
+		const std::vector<Diagnostic> blockers =
+		        plan_blockers(paths, *v.project.scan, *v.project.requirements, gate, target, &base, &shipped);
+		TEST_EXPECT(v.findings.marks && *v.findings.marks == mark_findings(cold.rows, v.findings.originals.get(), &blockers));
+	}
+	std::printf("edit cost: one file walked and validated, the rows and marks a fresh validation's\n");
+	return 0;
+}
+
 // The demo round's bug 10: the required files landing take their "required file missing" rows out of
 // Problems at once, while the validation the change left due has yet to run (an import's 27 such rows
 // stood until the validation after it ended); the other rows wait for it, which then composes them.
@@ -1839,6 +1911,7 @@ int main() {
 	failures += test_requirements_at_once();
 	failures += test_marks_planned_once();
 	failures += test_use_checks_kept();
+	failures += test_edit_costs_what_it_touched();
 	failures += test_original_marks();
 	failures += test_blocking();
 	failures += test_fix_all_served_whole();

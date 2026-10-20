@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -59,8 +60,20 @@ bool load_listed(DocumentBase &document, const ProjectPaths &paths, const AssetE
 // nor a text (document_content, S13 D6 and D9) makes document.no_records for its file, unread.
 class ValidationCache {
 public:
-	// A validation starts: its counters restart and no file has been asked.
-	void begin();
+	// A validation starts over every file of the scan of `serial` (AssetScan::serial) read for the game `game`:
+	// its counters restart and no file has been asked.
+	void begin(uint64_t serial = 0, const std::string &game = std::string());
+	// Whether a validation over the scan of `serial` for `game` may keep every file's findings as the last one
+	// that ended left them (begin_kept): that one read the same scan (the same files at the same stamps) for
+	// the same game. Never for a scan not indexed (serial 0).
+	bool keeps(uint64_t serial, const std::string &game) const;
+	// A validation starts over that scan (keeps() true), every file's findings kept as the last one that ended
+	// left them, counted reused, but those of the files `asked` names (project-relative), which file_findings
+	// makes or keeps again: the files an open document stands in for, now or at the last validation
+	// (open_files). An edit of one document validates that document and asks no other.
+	void begin_kept(uint64_t serial, const std::string &game, const std::vector<std::string> &asked);
+	// The files whose findings were made from an open document, project-relative, sorted.
+	std::vector<std::string> open_files() const { return {open_.begin(), open_.end()}; }
 	// A file's own findings, made or kept (above); none for a kind no document type opens.
 	const std::vector<Diagnostic> &file_findings(
 			const ValidationInput &input, const AssetEntry &asset);
@@ -71,7 +84,8 @@ public:
 	// A file's own findings as this validation made or kept them (file_findings); null for a
 	// file it did not ask.
 	const std::vector<Diagnostic> *kept_findings(const std::string &path) const;
-	// The validation ends: the files it did not ask (gone from the scan) leave the cache.
+	// The validation ends: the files it did not ask (gone from the scan) leave the cache (none of a validation
+	// that kept them, begin_kept).
 	void end();
 	const ValidationStats &stats() const { return stats_; }
 	// The closed files' documents the current validation loaded that are alive, anywhere: none
@@ -81,7 +95,7 @@ public:
 private:
 	struct Entry {
 		bool filled = false; // made at least once
-		bool asked = false; // asked by the current validation
+		uint64_t pass = 0;   // the validation that last asked it (asked by the current one: pass_)
 		bool checked = false; // its records were read (records_checked)
 		// What the findings were made from: an open document, or a closed file as the scan lists
 		// it.
@@ -95,7 +109,21 @@ private:
 		std::string game;
 		std::vector<Diagnostic> findings;
 	};
+	// Whether an entry is the current validation's: asked by it, or by one it kept the findings of (floor_).
+	bool current(const Entry &entry) const { return entry.pass >= floor_ && entry.pass != 0; }
+
 	std::map<std::string, Entry> entries_; // by project-relative path
+	std::set<std::string> open_;           // the entries made from an open document (open_files)
+	uint64_t pass_ = 0;                    // the current validation, counted (Entry::pass)
+	uint64_t floor_ = 0;                   // the first validation whose asked entries are the current one's
+	bool keeping_ = false;                 // the current validation keeps the files it does not ask (begin_kept)
+	// The scan and the game the current validation reads, and those of the last that ended (keeps), with the
+	// first validation whose entries that one's are.
+	uint64_t serial_ = 0;
+	std::string game_;
+	bool ended_ = false;
+	uint64_t ended_serial_ = 0, ended_floor_ = 0;
+	std::string ended_game_;
 	ValidationStats stats_;
 	std::vector<std::weak_ptr<const DocumentBase>> loaded_; // the closed files this validation read
 };

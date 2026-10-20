@@ -826,6 +826,7 @@ JsonValue answer_perf(const QueryContext &context, const QueryArgs &, std::strin
 	out.set("validation", std::move(files));
 	const GraphStats &graph = problems.graph().stats();
 	JsonValue edges = JsonValue::make_object();
+	edges.set("files_walked", number(graph.files_walked));
 	edges.set("files_extracted", number(graph.files_extracted));
 	edges.set("files_reused", number(graph.files_reused));
 	edges.set("files_patched", number(graph.files_patched));
@@ -1400,7 +1401,8 @@ constexpr EditorQueryRow kRows[] = {
 			"total_frames, slow and stall: those over 50 and 100 ms, held and all told; phases: wall, layout, requests, "
 			"poll, validation, compose, operation, originals and devices, each its mean, p50, p95 and max in "
 			"microseconds; worst: the slowest frame's phases); problems (compositions, compose_us, blocker_plans); "
-			"validation (the last pass's files); graph (the last update's files and edges); originals (validations, "
+			"validation (the last pass's files); graph (the last update's files, files_walked those it visited, and "
+			"edges); originals (validations, "
 			"files, last_ms, us); textures (headers_read, header_bytes, use_walks); and status (the validation's "
 			"running, done, total). Every count is all told since the editor started.")
 			.row,

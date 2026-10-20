@@ -85,11 +85,14 @@ struct GraphSearchHit {
 // What the last update (or set_base) did.
 struct GraphStats {
 	size_t files_extracted = 0; // read again
-	size_t files_reused = 0;    // unchanged since the previous update
+	size_t files_reused = 0;    // visited and unchanged since the previous update
 	size_t files_failed = 0;    // unreadable
 	size_t files_patched = 0;   // slots added, gone or read differently (GraphUpdate::files)
 	size_t edges_resolved = 0;  // edges resolved again
 	size_t findings_made = 0;   // missing edges' findings made (missing_finding)
+	// The scan's files it visited: every one, or, with the scan the last update read (its serial), only those an
+	// open document stands in for and those one stood in for at the last update.
+	size_t files_walked = 0;
 };
 
 // A closed file of the project read ahead of an update (S13 A3): a validation stepped a file at a
@@ -135,13 +138,16 @@ public:
 	// variable's name; which files the project has, for a kind whose row says its words read
 	// them). The generation moves exactly when what the graph holds changed. `read_ahead`: the
 	// closed files read before (S13 A3), each taken (moved out) where the scan lists it as it was
-	// read, the others read here.
+	// read, the others read here. Over the scan the last update read (its serial: the same files at
+	// the same stamps) only the files a document stands in for, now or at the last update, are
+	// visited (GraphStats::files_walked): an edit of one document costs that document.
 	GraphUpdate update(const ProjectPaths &paths, const ProjectDocument &project,
 			const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open,
 			GraphReadings *read_ahead = nullptr);
 	// The closed files an update over `scan` would read (S13 A3): those of a kind the graph reads,
 	// not open as a record document, whose slot holds no reading of them as the scan lists them (new,
-	// of another name or kind, or of another size or last write); in the scan's order.
+	// of another name or kind, or of another size or last write); in the scan's order. Over the scan
+	// the last update read, only the files the update would visit are looked at.
 	std::vector<const AssetEntry *> files_to_read(const AssetScan &scan,
 			const std::vector<std::shared_ptr<const DocumentBase>> &open) const;
 	// A file read as an update reads it (extract_from_asset), for a later update to take.
@@ -358,6 +364,11 @@ private:
 		}
 	};
 
+	// Whether `scan` is the one the last update read (its serial; never one not indexed).
+	bool scan_kept(const AssetScan &scan) const;
+	// The files of `scan` a document stands in for, now (`open`) or at the last update, in the scan's order.
+	std::vector<const AssetEntry *> stand_ins(const AssetScan &scan,
+			const std::vector<std::shared_ptr<const DocumentBase>> &open) const;
 	// A slot's reading replaced (the slot patched), or left as it was when it reads the same.
 	void take(uint32_t id, Extracted content, bool ok, const Diagnostic &failure, Patch &patch);
 	// A slot gone (its file no longer listed, or another file at its path).
@@ -452,6 +463,8 @@ private:
 	// item and the edge's caller takes the lookup's 0 for none (a tracer: fallback_kind ItemName).
 	const GraphSymbol *value_symbol(const GraphEdge &edge, const std::string &scope) const;
 	std::vector<std::string> base_names_; // set_base_names
+	uint64_t scan_serial_ = 0;             // the scan the last update read (AssetScan::serial)
+	std::vector<std::string> open_paths_;  // the files a document stood in for at the last update
 	std::map<std::string, Binding> bindings_; // upper-case name -> the definition the game reads
 	std::vector<Diagnostic> diagnostics_;
 	GraphStats stats_;

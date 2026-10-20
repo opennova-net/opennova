@@ -621,7 +621,7 @@ static int test_item_ids_within_a_table() {
 // own tests', editor_texture_roles) exported into a project and validated: every file's own findings
 // made once, and no closed file's document alive after (the models' geometry included); nothing
 // made again while nothing changed; an edit of the open item table validates that table alone and
-// the graph extracts it alone.
+// the graph extracts it alone, visiting no other file, the rows those of a validation with nothing kept.
 static int test_install_validation() {
 	test_temp::TempDir minted("opennova_editor_project_validation_install");
 	const std::string install = minted.file("install");
@@ -742,6 +742,16 @@ static int test_install_validation() {
 			graph.stats().files_extracted, edited);
 	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 0 &&
 			stats.files_reused == files - 1 && graph.stats().files_extracted == 1);
+	// Over the scan the last validation read, the graph visits the open table's file alone, and the rows are
+	// those a validation of every file with nothing kept makes.
+	TEST_EXPECT(graph.stats().files_walked == open.size());
+	{
+		AssetGraph cold_graph;
+		ValidationCache cold_cache;
+		const ValidationInput input{ project.paths, project.document, project.scan, open };
+		TEST_EXPECT(validate_project(input, cold_graph, cold_cache) == project_rows(input, graph, cache) &&
+				cold_cache.stats().files_validated == files);
+	}
 	return 0;
 }
 

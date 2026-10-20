@@ -2196,8 +2196,8 @@ static int test_rename_keeps_loader_spelling() {
 
 // S13 D1: an update that finds the files as they were (their rows in the scan, what each read
 // references and defines) changes nothing: the generation stands and every edge and symbol stays
-// where it was, a file read again whose content is the same included. One whose files moved
-// assembles again. A generation is a process-wide counter's value: no two graphs, a copy or a
+// where it was, a file read again whose content is the same included (over the scan it read last, no file is
+// even visited). One whose files moved assembles again. A generation is a process-wide counter's value: no two graphs, a copy or a
 // cleared graph share one. The symbols of a kind come in the order the files define them.
 static int test_generation() {
 	test_temp::TempDir dir("opennova_asset_graph_generation");
@@ -2222,8 +2222,15 @@ static int test_generation() {
 		return graph.generation() == assembled && &all_edges(graph).front().get() == edge &&
 				&all_symbols(graph).front().get() == symbol;
 	};
+	// Over the scan the last update read (its serial) no file is visited; over another scan of the same files,
+	// every one, each reused.
 	graph.update(paths, doc, scan, {});
-	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_reused == 1);
+	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_walked == 0);
+	TEST_EXPECT(kept());
+	const AssetScan same = scan_project_assets(paths, doc);
+	graph.update(paths, doc, same, {});
+	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_reused == 1 &&
+	            graph.stats().files_walked == same.entries.size());
 	TEST_EXPECT(kept());
 	// The same bytes written again: read again, and still the graph as it was.
 	TEST_EXPECT(test_io::write_text(items, text));

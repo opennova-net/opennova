@@ -51,7 +51,8 @@ std::vector<Diagnostic> project_rows(
 		const ValidationInput &input, const AssetGraph &graph, const ValidationCache &cache);
 
 // The files validate_project gives their own checks, in its order: every file of the scan a
-// document type opens, type by type in the registry's order, each type's in the scan's order.
+// document type opens, type by type in the registry's order, each type's in the scan's order. Made once per
+// scan (its serial): a validation and the rows composed after it ask the same.
 std::vector<const AssetEntry *> validation_files(const AssetScan &scan);
 
 // What a step of a stepped validation spends on a file besides the bytes of a closed file it
@@ -96,6 +97,11 @@ public:
 
 private:
 	enum class Phase : uint8_t { Start, Read, Graph, Uses, Files, Done };
+
+	// The files whose own findings the validation asks, and the cache begun: every file of validation_files, or,
+	// over the scan the last validation that ended read (ValidationCache::keeps), only those an open document
+	// stands in for, now or then, the cache keeping the rest (ValidationCache::begin_kept).
+	void begin_files(const ValidationInput &input);
 
 	AssetGraph &graph_;
 	ValidationCache &cache_;
