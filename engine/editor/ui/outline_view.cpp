@@ -206,6 +206,11 @@ void OutlineView::filter_box(const char *hint, float width, const char *tip) {
 	model_.set_filter(filter_);
 }
 
+void OutlineView::nothing_matches(const char *what, const char *otherwise) {
+	if (!filter_[0]) return ui_kit::empty_state(otherwise);
+	if (ui_kit::nothing_matches(filter_, what)) model_.set_filter(filter_);
+}
+
 OutlineView::Shown OutlineView::shown() const {
 	return Shown{ model_.filter(), model_.kinds(), model_.all_rows(), model_.sort(), model_.every() };
 }
@@ -343,7 +348,7 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 	}
 	const std::vector<OutlineLine> &lines = model_.lines(document, 0, names.get());
 	if (rows.empty()) ui_kit::empty_state("The file has no records yet.", "Add one with the buttons above.");
-	else if (lines.empty()) ui_kit::empty_state("No record matches the filter.");
+	else if (lines.empty()) nothing_matches("record", "No record of the kinds shown.");
 	ImGuiListClipper clipper;
 	clipper.Begin(static_cast<int>(lines.size()));
 	if (revealed != SIZE_MAX) clipper.IncludeItemByIndex(static_cast<int>(revealed));
@@ -414,7 +419,7 @@ void OutlineView::draw_tree(Workspace &workspace, const Document &document) {
 	if (ImGui::BeginChild("outline", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar)) {
 		const std::vector<OutlineLine> &lines = model_.lines(document, 0, names.get());
 		if (document.rows().empty()) ui_kit::empty_state("The file holds no records.");
-		else if (lines.empty()) ui_kit::empty_state("No record matches the filter.");
+		else if (lines.empty()) nothing_matches("record", "No record of the kinds shown.");
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(lines.size()));
 		if (revealed != SIZE_MAX) clipper.IncludeItemByIndex(static_cast<int>(revealed));
@@ -620,7 +625,7 @@ void OutlineView::draw_master_detail(Workspace &workspace, const Document &docum
 		draw_masters(workspace, document);
 		ImGui::TableNextColumn();
 		if (!master && !model_.every_row())
-			ui_kit::empty_state(("Select one of the " + strutil::to_lower(spec_.rows) + " to list what it holds.").c_str());
+			ui_kit::empty_state("Select one to list what it holds.");
 		else
 			draw_details(workspace, document, master, revealed);
 		ImGui::EndTable();
@@ -752,8 +757,7 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 		if (!every && ids.empty()) return ui_kit::empty_state("Nothing in it yet.");
 	}
 	const std::vector<OutlineLine> &lines = model_.lines(document, master ? master->id : 0);
-	if (lines.empty())
-		return ui_kit::empty_state(every ? "Nothing in any of them matches the filter." : "Nothing matches the filter.");
+	if (lines.empty()) return nothing_matches(every ? "record in any of them" : "record", "Nothing of the kinds shown.");
 	const std::vector<const FieldSchema *> &columns = model_.columns();
 	// The column of the name a record is found by (a string's key) as wide as its widest value, up to a
 	// third of the table, and a Uses column after the others where the project's graph counts what names

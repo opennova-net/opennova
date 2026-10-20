@@ -65,7 +65,7 @@ void TextView::draw_toolbar(Workspace &workspace, const TextDocument &document) 
 	draw_document_toolbar(workspace, document,
 			"Read only: the editor shows this file's text and cannot write the file back as it is.");
 	for (const SourceIssue &issue : document.issues())
-		if (issue.blocks) ImGui::TextWrapped("%s", issue.message.c_str());
+		if (issue.blocks) ui_kit::refusal_text(issue.message);
 }
 
 void TextView::draw_lines(Workspace &workspace, const TextDocument &text) {
@@ -80,9 +80,8 @@ void TextView::draw_lines(Workspace &workspace, const TextDocument &text) {
 	const TextDocument *document = &text;
 	const SessionView &view = workspace.view();
 	follow_markers(view, *document);
-	const std::string lines = std::to_string(document->line_count()) +
-			" lines, read only here: an edit is a span the editor MCP sends.";
-	ui_kit::empty_state(lines.c_str());
+	const std::string lines = std::to_string(document->line_count()) + " lines, read only.";
+	ui_kit::quiet_text(lines, "An edit here is a span the editor MCP sends.");
 	if (!ImGui::BeginChild("text", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar)) {
 		ImGui::EndChild();
 		return;

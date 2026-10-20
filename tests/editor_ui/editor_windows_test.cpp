@@ -1682,8 +1682,9 @@ void test_problems_window_ui() {
 	ui.away();
 	text = logged_frame(ui);
 	CHECK(in_order(text, {kGametext, "Import gametext.bin from the game data...", "Create a placeholder gametext.bin",
-	                      "Use spare.bin as gametext.bin", "Renames spare.bin to gametext.bin.", "requirement.missing"}),
-	      "the selected row: every fix with what it does, and its code");
+	                      "Use spare.bin as gametext.bin", "requirement.missing"}) &&
+	              text.find("Renames spare.bin to gametext.bin.") == std::string::npos,
+	      "the selected row: every fix (what it does in its tooltip), and its code");
 	CHECK(text.find("As the original was seen to do:") != std::string::npos, "the manifest's own record of it, the cited detail");
 	CHECK(text.find("Blocks the build") != std::string::npos, "a row a build is refused for says so");
 	ui.click(problems_lines().at(0, 2));

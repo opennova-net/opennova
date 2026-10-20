@@ -387,7 +387,7 @@ void test_script_uses() {
 	run.ui.frames(2);
 	run.ui.away();
 	text = logged_frame(run.ui);
-	CHECK(in_order(text, {"Move Event 2", "Named by 1 trigger", "names it by its number on 1 line", "logic.wac, line 1",
+	CHECK(in_order(text, {"Move Event 2", "Named by 1 trigger", "names it by number on 1 line", "logic.wac, line 1",
 	                      "To place 1 (first), 1 other renumbered"}),
 	      "Move event...: what names it, the script's line, the places and what each renumbers");
 	ImGui::ClosePopupsExceptModals();

@@ -65,23 +65,30 @@ void draw_document_toolbar(Workspace &workspace, const DocumentBase &document, c
 	const bool reading = !view.activity.validation.read || view.activity.validation.files_unread;
 	const size_t uses = use_count(view, document.path());
 	const std::string label = "Used by (" + (reading && !uses ? std::string("...") : std::to_string(uses)) + ")###used_by";
-	const std::string tip = reading && !uses ? "The project's references are still being read."
-	                        : uses ? "Who names this file or what it defines: " + std::to_string(uses) +
-	                                         (uses == 1 ? " use" : " uses") +
-	                                         ". Shown in the Inspector, the selection cleared, each a click away."
-	                               : "No file of the project names it or what it defines.";
+	const std::string tip = reading && !uses ? std::string(ui_kit::reading_references())
+	                        : uses ? std::string("Who names this file or what it defines, listed in the Inspector.")
+	                               : std::string("No file of the project names it or what it defines.");
 	if (ui_kit::tool(row, label.c_str(), (uses || reading) && view.allows(EditorRequestKind::SelectRecord), tip)) {
 		workspace.request(request::select_record(document.path(), NodeAddress()));
 		window_requests::focus(workspace, "inspector");
 	}
-	if (document.blocked())
-		ImGui::TextWrapped("%s", blocked_notice ? blocked_notice
-		                                        : "This file has unsupported or malformed input. See Problems, correct "
-		                                          "the source, then Reload.");
-	// What a save changes beyond the edits, said before it (while there are edits to save, or what the
-	// game skips to leave out).
-	else if (const std::string words = document.save_words(); !words.empty() && (document.dirty() || document.ignored_lines()))
-		ImGui::TextWrapped("%s", words.c_str());
+	if (document.blocked()) {
+		ui_kit::refusal_text(blocked_notice ? blocked_notice
+		                                    : "This file has unsupported or malformed input. See Problems, correct "
+		                                      "the source, then Reload.");
+		return;
+	}
+	// What a save changes beyond the edits, on the tools' row, its words in the tooltip (while there are
+	// edits to save, or lines the game skips to leave out): amber while the save leaves lines out.
+	const std::string words = document.save_words();
+	const size_t ignored = document.ignored_lines();
+	if (words.empty() || (!document.dirty() && !ignored)) return;
+	const std::string line = ignored ? "Save leaves out " + std::to_string(ignored) + (ignored == 1 ? " line" : " lines")
+	                                 : std::string("Save rewrites the file");
+	row.next(ui_kit::text_width(line.c_str()));
+	ImGui::AlignTextToFramePadding();
+	if (ignored) ui_kit::warning_line(line, words);
+	else ui_kit::quiet_text(line, words);
 }
 
 } // namespace opennova::editor

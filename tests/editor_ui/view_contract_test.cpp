@@ -402,7 +402,7 @@ void test_a_view_per_document() {
 	a_outline->set_filter("zzz");
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("No record matches the filter.") != std::string::npos, "a's filter hides its records");
+	CHECK(logged_frame(ui).find("No record matches") != std::string::npos, "a's filter hides its records");
 	// b made active: its own view, its own (empty) filter.
 	v.documents.active = b->path();
 	v.revisions.touch(ViewConcern::ActiveDocument);
@@ -413,7 +413,7 @@ void test_a_view_per_document() {
 	DocumentView *b_view = documents->view_of(b->path());
 	CHECK(b_view && b_view != documents->view_of(a->path()) && b_view->outline() && b_view->outline()->filter().empty(),
 	      "b gets a view of its own, its filter empty");
-	CHECK(shown.find("Bravo") != std::string::npos && shown.find("No record matches the filter.") == std::string::npos,
+	CHECK(shown.find("Bravo") != std::string::npos && shown.find("No record matches") == std::string::npos,
 	      "b's filter is its own: its record listed");
 	// Back to a: its filter kept.
 	v.documents.active = a->path();
@@ -421,7 +421,7 @@ void test_a_view_per_document() {
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(4);
 	ui.away();
-	CHECK(a_outline->filter() == "zzz" && logged_frame(ui).find("No record matches the filter.") != std::string::npos,
+	CHECK(a_outline->filter() == "zzz" && logged_frame(ui).find("No record matches") != std::string::npos,
 	      "a keeps its filter");
 	// b closed: its view goes with it.
 	v.documents.open = {a};

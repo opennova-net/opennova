@@ -114,19 +114,17 @@ void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 // bring in the game's (the UX round's project lane): the main menu with what it needs, the game data to
 // choose from, or every file of the install; with no install, where to name one.
 void DocumentWindow::draw_first_steps(const SessionView &view) {
-	ui_kit::empty_state("Double-click a file in Files to open it, or make one with New.");
+	ui_kit::empty_state("No file open.", "Double-click a file in Files to open it, or make one with New.");
 	if (view.project.scan->entries.size() >= kFewFiles) return;
 	ImGui::Spacing();
 	ImGui::SeparatorText("Bring in the game's files");
-	ImGui::PushTextWrapPos(0.0f);
+	ui_kit::tooltip("A project holds its own copies of the game's files: what you change, and what those need.");
 	if (view.project.retail_directory.empty()) {
-		ImGui::TextWrapped("Choose the game install in File > Project settings... to import the game's files; files from "
-		                   "the disk come in with Files > Import > Files....");
-		ImGui::PopTextWrapPos();
+		ui_kit::empty_state("No game install chosen.",
+		                    "Choose it in File > Project settings... to import the game's files; files from the disk "
+		                    "come in with Files > Import > Files....");
 		return;
 	}
-	ImGui::TextDisabled("A project holds its own copies of the game's files: what you change, and what those need.");
-	ImGui::PopTextWrapPos();
 	const bool imports = view.allows(EditorRequestKind::PreviewInstallImport);
 	ImGui::BeginDisabled(!imports);
 	const gameprofile::RequiredResource *menu = gameprofile::gameprofile_required_resource_by_role("main_menu");

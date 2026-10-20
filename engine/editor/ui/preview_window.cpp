@@ -156,7 +156,7 @@ void PreviewWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	prune_(view);
 	const ViewportKind kind = view.documents.preview_shown;
 	if (kind == ViewportKind::kCount) {
-		ui_kit::empty_state("Open a menu, a model or an animation to preview it, or select a texture in Files.");
+		ui_kit::empty_state("Nothing to preview.", "Open a menu, a model or an animation to preview it, or select a texture in Files.");
 		return;
 	}
 	const std::string &path = view.documents.previews[kind].path;

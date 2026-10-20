@@ -267,8 +267,7 @@ void test_workspace_layout() {
 	CHECK(GImGui->NavWindow == document, "Document has the focus");
 	CHECK(problems->DockNode && problems->DockNode->TabBar && problems->DockNode->TabBar->SelectedTabId == problems->TabId,
 	      "Problems is the bottom's tab");
-	CHECK(logged_frame(windows, 8).find("Open a menu, a model or an animation to preview it, or select a texture in Files.") != std::string::npos,
-	      "nothing to preview yet");
+	CHECK(logged_frame(windows, 8).find("Nothing to preview.") != std::string::npos, "nothing to preview yet");
 	// No project open (the UX round's project lane): the welcome page, the workspace's whole; the other windows
 	// stand aside, open in the Windows menu.
 	SessionView none;
@@ -304,7 +303,7 @@ void test_workspace_layout() {
 	for (uint64_t i = 9; i < 15; ++i) frame(windows, i);
 	CHECK(ImGui::GetDrawData()->TotalVtxCount > 0, "the project layout draws");
 	const std::string text = logged_frame(windows, 15);
-	CHECK(in_order(text, {"items.def", "Reload", "the game skips", "Marker"}), "the catalog's tab: its toolbar, notice and records");
+	CHECK(in_order(text, {"items.def", "Reload", "Save leaves out", "Marker"}), "the catalog's tab: its toolbar, notice and records");
 	CHECK(windows.pending_requests() == 0, "drawing raises no request by itself");
 	v.dialogs.import_preview = planned_import("C:/assets");
 	v.revisions.touch(ViewConcern::Dialogs);
@@ -857,7 +856,7 @@ void test_project_settings() {
 	ui.activate(item_id(dialog, {"Multiplayer"}));
 	CHECK(only_workspace(serve(ui, session)) && v.workspace.settings.multiplayer, "Multiplayer ticked, the workspace's");
 	text = logged_frame(ui);
-	CHECK(text.find("A source run") != std::string::npos && text.find("C:/checkout/godot.exe") != std::string::npos,
+	CHECK(text.find("OpenNova runtime: C:/checkout/godot.exe") != std::string::npos,
 	      "a source run: the runtime Play drives, no field");
 	ui.activate(item_id(dialog, {"Cancel"}));
 	CHECK(only_workspace(serve(ui, session)) && !modal_open("Project settings") && !v.workspace.settings.open &&
@@ -1988,7 +1987,7 @@ void test_preview_follows() {
 	ui.windows.set_view(&v);
 	ui.windows.set_devices(&devices.cache);
 	PreviewRun run{ session, devices, ui, {} };
-	const char *const kNothing = "open a menu, a model or an animation to preview it, or select a texture in files.";
+	const char *const kNothing = "nothing to preview.";
 	run.settle();
 	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "nothing to preview: what to open");
 

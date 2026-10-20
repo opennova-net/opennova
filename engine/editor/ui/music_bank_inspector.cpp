@@ -37,8 +37,9 @@ bool draw_music_bank_inspector(Workspace &workspace, const Document &document, c
 		for (const MusicBankStream &stream : row->streams) seconds += music_stream_seconds(stream);
 		char total[32];
 		std::snprintf(total, sizeof(total), "%.0f", seconds);
-		ui_kit::note(std::to_string(row->streams.size()) + " streams, " + total + " s in all. The game streams the bank loose "
-		             "beside its archives, and its music script plays each stream by its place.");
+		ui_kit::quiet_text(std::to_string(row->streams.size()) + " streams, " + total + " s in all",
+		                   "The game streams the bank loose beside its archives, and its music script plays each stream by "
+		                   "its place.");
 		ui_kit::WrapRow tools;
 		if (ui_kit::tool(tools, "Add a stream from a wave...", workspace.view().allows(EditorRequestKind::MusicStreamAudio),
 		                 "Adds a stream at the end of the bank, sound " + std::to_string(row->streams.size()) +
@@ -54,8 +55,9 @@ bool draw_music_bank_inspector(Workspace &workspace, const Document &document, c
 			if (row->ids.lists[0][i].id == record.child) place = int(i);
 	if (place < 0 || size_t(place) >= row->streams.size()) return false;
 	const MusicBankStream &stream = row->streams[size_t(place)];
-	ui_kit::note("The music script plays this stream as sound " + std::to_string(place) + ": moving or removing a stream before it "
-	             "changes what the script plays.");
+	ui_kit::quiet_text("Sound " + std::to_string(place) + " of the music script",
+	                   "The music script plays this stream by its place: moving or removing a stream before it changes "
+	                   "what the script plays.");
 	ui_kit::WrapRow tools;
 	const bool saved = !bank->dirty();
 	if (ui_kit::tool(tools, "Play", saved,
@@ -73,7 +75,7 @@ bool draw_music_bank_inspector(Workspace &workspace, const Document &document, c
 	const WorkspaceView::Sound &sound = workspace.view().workspace.sound;
 	if (!sound.voices.empty() && sound.voices.front().stream == place && sound.voices.front().path == document.path() &&
 	    !sound.words.empty())
-		ui_kit::note("Last played: " + sound.words);
+		ui_kit::quiet_text("Last played: " + sound.words);
 	return true;
 }
 

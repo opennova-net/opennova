@@ -41,25 +41,18 @@ public:
 			peak_ = 1.0f;
 		}
 		if (!facts.read) {
-			ImGui::TextWrapped("The editor reads no wave in this file: %s.", facts.error.c_str());
+			ui_kit::refusal_text("The editor reads no wave in this file: " + facts.error + ".");
 			return;
 		}
 		// What it is, and whether the game plays it.
-		ImGui::TextWrapped("%s", (lwf::wave_format_words(facts.format) + ", " + number_words("%.3f s", facts.seconds) + ", " +
-		                          std::to_string(facts.frames) + " frames; peak " +
-		                          number_words("%.0f%%", double(facts.peak) * 100.0) + ", RMS " +
-		                          number_words("%.0f%%", double(facts.rms) * 100.0) + ".")
-		                                 .c_str());
-		if (facts.retail.plays) {
-			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-			ImGui::TextWrapped("The game plays it as it is.");
-			ImGui::PopStyleColor();
-		} else {
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.6f, 0.3f, 1.0f));
-			ImGui::TextWrapped("The game cannot play it: %s A trim or a normalise writes it as the game plays it.",
-			                   facts.retail.why.c_str());
-			ImGui::PopStyleColor();
-		}
+		ui_kit::clipped_text(lwf::wave_format_words(facts.format) + ", " + number_words("%.3f s", facts.seconds) + ", " +
+		                     std::to_string(facts.frames) + " frames; peak " +
+		                     number_words("%.0f%%", double(facts.peak) * 100.0) + ", RMS " +
+		                     number_words("%.0f%%", double(facts.rms) * 100.0) + ".");
+		if (facts.retail.plays) ui_kit::quiet_text("The game plays it as it is.");
+		else
+			ui_kit::warning_line("The game cannot play it.",
+			                     facts.retail.why + " A trim or a normalise writes it as the game plays it.");
 		ui_kit::WrapRow tools;
 		if (ui_kit::tool(tools, "Play", !wave->dirty(),
 		                 wave->dirty() ? std::string("Save the wave first: the editor plays the file, as the game loads it.")

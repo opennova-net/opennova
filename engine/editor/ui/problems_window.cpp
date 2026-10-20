@@ -279,7 +279,7 @@ void ProblemsWindow::draw_summary(const SessionView &view) {
 		ui_kit::severity_marker(severity);
 		ImGui::SameLine();
 		ImGui::AlignTextToFramePadding();
-		ImGui::TextWrapped("%s", sentence.c_str());
+		ui_kit::clipped_text(sentence);
 	}
 	ImGui::PushID(view.project.root.c_str());
 	ImGui::PushID("required");
@@ -433,14 +433,12 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 		ImGui::SameLine();
 	}
 	if (expanded) {
+		// The whole message; the blocker's reason, the shipped file's mark and each fix's detail are in their tooltips.
 		ImGui::TextWrapped("%s", d.message.c_str());
-		if (blocks) ui_kit::note(blocker_reason(d));
 		// A file the game reads by name: the manifest's own record of it, the plain words' cited detail.
 		if (const RequirementSubject *requirement = requirement_subject(d))
 			if (const std::string witness = requirement_witness(requirement->role); !witness.empty())
-				ui_kit::note("As the original was seen to do: " + witness);
-		// A fix of the game's own data is marked as editing a file the game ships (S15).
-		if (!note.empty()) ui_kit::note(note);
+				ui_kit::quiet_text("As the original was seen to do: " + witness);
 		for (const ProblemFix &fix : fixes) {
 			ImGui::PushID(fix.label.c_str());
 			const float room = ImGui::GetContentRegionAvail().x;
@@ -450,10 +448,6 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 				apply(view, line.finding, fix);
 			ImGui::EndDisabled();
 			ui_kit::tooltip_lazy([&] { return fix_tip(fix, note, allowed); });
-			// What it does beside it when there is room for a few words, else under it.
-			if (room - ImGui::GetItemRectSize().x - ImGui::GetStyle().ItemSpacing.x >= ImGui::GetFontSize() * 12.0f)
-				ImGui::SameLine();
-			ui_kit::note(fix.detail);
 			ImGui::PopID();
 		}
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -495,9 +489,8 @@ void ProblemsWindow::finding_menu(const SessionView &view, size_t finding) {
 	if (ImGui::MenuItem("Go to", nullptr, false, goes) && goes) workspace_.request(location.request());
 	ui_kit::tooltip(location.empty()   ? std::string("It names no place.")
 	                : location.in_files ? "Show " + location.path + " in Files."
-	                : location.page     ? "Open the page of " + location.path +
-	                                          ", what it is about marked (the editor has no editor for its kind; a click on its row goes too)."
-	                                    : "Open " + location.path + " at what it is about (a click on its row goes too).");
+	                : location.page     ? "Open the page of " + location.path + ", what it is about marked."
+	                                    : "Open " + location.path + " at what it is about.");
 	const AssetEntry *asset = view.project.scan && !d.asset.empty() ? view.project.scan->at_path(d.asset) : nullptr;
 	const bool reveals = asset && view.allows(EditorRequestKind::ShowInFiles);
 	if (ImGui::MenuItem("Show in Files", nullptr, false, reveals) && reveals)

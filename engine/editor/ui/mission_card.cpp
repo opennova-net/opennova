@@ -44,8 +44,6 @@ static std::vector<ScriptUse> script_event_uses(const SessionView &view, const M
 namespace {
 
 
-const ImVec4 kMuted(0.62f, 0.62f, 0.62f, 1.0f);
-const ImVec4 kWarn(0.95f, 0.75f, 0.35f, 1.0f);
 const ImVec4 kTypeWords(0.70f, 0.82f, 1.00f, 1.0f);
 const ImVec4 kNote(0.85f, 0.65f, 0.45f, 1.0f);
 
@@ -117,8 +115,10 @@ bool makes_text(const FieldUse &use) {
 // The New text popup of a chip that forms a text key: what is typed made the next free key of the mission's own
 // table (set_string_text's create), the chip set to its number.
 void new_text_popup(CardContext &context, const BoardLine &line, const BoardChip &chip, const FieldUse &use) {
-	if (!ImGui::BeginPopup("new_text")) return;
 	const float em = ImGui::GetFontSize();
+	// As wide as its field, so its one-line warnings cut to it.
+	ImGui::SetNextWindowSize(ImVec2(em * 24.0f + ImGui::GetStyle().WindowPadding.x * 2.0f, 0.0f));
+	if (!ImGui::BeginPopup("new_text")) return;
 	const size_t slash = use.scope.find('/');
 	const std::string table = use.scope.substr(0, slash);
 	const SessionView &view = context.workspace.view();
@@ -127,19 +127,15 @@ void new_text_popup(CardContext &context, const BoardLine &line, const BoardChip
 	const std::string installed = held ? std::string() : install_file_name(view, table);
 	ImGui::TextUnformatted("New text");
 	if (!installed.empty()) {
-		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + em * 24.0f);
-		ImGui::TextColored(kWarn, "The project has no %s, but the game install has one: the mission's title and its other "
-		                          "texts. Import it into the project first; a new %s would hide it.",
-		                   table.c_str(), table.c_str());
-		ImGui::PopTextWrapPos();
-		ImGui::BeginDisabled(!view.allows(EditorRequestKind::PreviewInstallImport));
-		if (ImGui::Button(("Import " + installed + "...").c_str())) {
+		ui_kit::warning_line("Import the game's " + table + " first.",
+		                     "The project has no " + table + ", but the game install has one: the mission's title and its "
+		                     "other texts. A new " + table + " would hide it.");
+		if (ui_kit::named_action("Import", installed, "...", view.allows(EditorRequestKind::PreviewInstallImport),
+		                         "Opens the import dialog on the game's own " + installed +
+		                                 (view.project.import_dependencies ? ", with the files it needs." : "."))) {
 			context.workspace.request(request::preview_install_import({installed}, view.project.import_dependencies));
 			ImGui::CloseCurrentPopup();
 		}
-		ImGui::EndDisabled();
-		ui_kit::tooltip("Opens the import dialog on the game's own " + installed +
-		                (view.project.import_dependencies ? ", with the files it needs." : "."));
 		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
@@ -151,17 +147,15 @@ void new_text_popup(CardContext &context, const BoardLine &line, const BoardChip
 	ImGui::SetNextItemWidth(em * 24.0f);
 	const bool entered = ImGui::InputText("##new_text", context.state.new_text, sizeof(context.state.new_text),
 	                                      ImGuiInputTextFlags_EnterReturnsTrue);
-	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + em * 24.0f);
 	if (held)
-		ImGui::TextDisabled("Added to %s's %s under the next free key, and the %s set to its number: two files changed, "
-		                    "which Save All writes.",
-		                    table.c_str(), use.scope.substr(slash + 1).c_str(), chip.label.c_str());
-	else
-		ImGui::TextColored(kWarn, "The mission has no text table of its own: the game reads %s in its place, which the editor "
-		                          "never writes. Enter makes %s, which the game then reads for this mission instead (its "
-		                          "title and its other texts too).",
-		                   use.scope_alternate.c_str(), table.c_str());
-	ImGui::PopTextWrapPos();
+		ui_kit::tooltip("Added to " + table + "'s " + use.scope.substr(slash + 1) + " under the next free key, and the " +
+		                chip.label + " set to its number: two files changed, which Save All writes.");
+	else {
+		ui_kit::warning_line("Enter makes " + table + " for this mission.",
+		                     "The mission has no text table of its own: the game reads " + use.scope_alternate +
+		                     " in its place, which the editor never writes. Enter makes " + table +
+		                     ", which the game then reads for this mission instead (its title and its other texts too).");
+	}
 	if (entered && context.state.new_text[0] && context.editable) {
 		EditorRequest create = request::set_string_text(context.mission.path(), line.record, chip.field, context.state.new_text);
 		create.create = true;
@@ -385,7 +379,7 @@ void drop_line(CardContext &context, const BoardCard &card, bool actions, size_t
 						const Node *row = context.mission.row(drag.record.row);
 						const bool waits = row && row->kind == node_kind(MissionKind::Event) &&
 						                   static_cast<const EventRow *>(row)->native.event.delay > 0;
-						ImGui::TextColored(kWarn, "%s is left with no trigger: it %s, as the mission runs.", title.c_str(),
+						ImGui::TextColored(ui_kit::warning_color(), "%s is left with no trigger: it %s, as the mission runs.", title.c_str(),
 						                   waits ? "acts after its wait" : "fires right away");
 					}
 				}
@@ -544,7 +538,7 @@ void wait_chip(CardContext &context, ui_kit::WrapRow &row, const BoardCard &card
 	ImGui::TextDisabled("%s", counted);
 	if (bms::event_steps_wrap(steps)) {
 		row.next(ui_kit::text_width("(!)"));
-		ImGui::TextColored(kWarn, "(!)");
+		ImGui::TextColored(ui_kit::warning_color(), "(!)");
 		ui_kit::tooltip(board_wrap_words(repeat, steps));
 	}
 }
@@ -559,7 +553,6 @@ void move_event_popup(CardContext &context, const BoardCard &card) {
 	const std::unique_ptr<MissionNames> names = mission_label_names(mission, context.names);
 	const MissionUses uses = mission_uses(mission, card.event, *names);
 	ImGui::TextUnformatted(("Move " + card.title).c_str());
-	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + em * 26.0f);
 	if (uses.uses.empty()) ImGui::TextDisabled("No trigger or action names it.");
 	else
 		ImGui::TextDisabled("Named by %zu trigger%s or action%s, renumbered with it:", uses.uses.size(), uses.uses.size() == 1 ? "" : "s",
@@ -568,8 +561,9 @@ void move_event_popup(CardContext &context, const BoardCard &card) {
 	// The mission's script's event(n) of it: a number, which the move does not follow into the script.
 	const std::vector<ScriptUse> scripted = script_event_uses(context.workspace.view(), mission, card.index);
 	if (!scripted.empty()) {
-		ImGui::TextColored(kWarn, "The mission's script names it by its number on %zu line%s, which the move does not change:",
-		                   scripted.size(), scripted.size() == 1 ? "" : "s");
+		ui_kit::warning_line("The script names it by number on " + std::to_string(scripted.size()) +
+		                             (scripted.size() == 1 ? " line:" : " lines:"),
+		                     "The move does not change the script's numbers.");
 		for (size_t i = 0; i < scripted.size(); ++i) {
 			ImGui::PushID(int(i));
 			const std::string label = scripted[i].file + ", line " + std::to_string(scripted[i].line);
@@ -578,9 +572,9 @@ void move_event_popup(CardContext &context, const BoardCard &card) {
 			ImGui::PopID();
 		}
 	}
-	ImGui::TextColored(kWarn, "The events between the place it leaves and the place it takes are renumbered too (each place "
-	                          "says which): the triggers and actions follow, a script's numbers do not.");
-	ImGui::PopTextWrapPos();
+	ui_kit::warning_line("The events in between are renumbered too.",
+	                     "The events between the place it leaves and the place it takes are renumbered too (each place "
+	                     "says which): the triggers and actions follow, a script's numbers do not.");
 	ImGui::Separator();
 	const size_t count = mission.count_of(MissionKind::Event);
 	if (ImGui::BeginChild("places", ImVec2(em * 26.0f, std::min(em * 16.0f, ImGui::GetFrameHeightWithSpacing() * float(count + 1))))) {
@@ -749,7 +743,7 @@ static bool draw_type_picker(CardContext &context, bool actions) {
 			++shown;
 			if (open && row(type, "all")) chosen = &type;
 		}
-		if (!shown) ui_kit::empty_state("No type matches the filter.");
+		if (!shown) ui_kit::nothing_matches(state.filter, "type");
 	}
 	ImGui::EndChild();
 	if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
@@ -928,19 +922,16 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		          ImGui::GetID(actions ? "drop_actions" : "drop_triggers"));
 	};
 	add_button(false);
-	if (card.actions.empty()) {
-		ImGui::PushTextWrapPos(0.0f);
-		ImGui::TextDisabled("Then no action: as it fires it is only marked fired, which a trigger's \"has fired\", a waypoint "
-		                    "marker advancing on it and the script's event() read.");
-		ImGui::PopTextWrapPos();
-	}
+	if (card.actions.empty())
+		ui_kit::quiet_text("Then no action.", "As it fires it is only marked fired, which a trigger's \"has fired\", a "
+		                                      "waypoint marker advancing on it and the script's event() read.");
 	for (const BoardLine &line : card.actions) draw_line(context, card, line, line.index == 0 ? "Then" : "", lead, right, asked);
 	add_button(true);
 	// The notes: the editor's reading, never gating.
-	if (!card.notes.empty()) {
-		ImGui::PushTextWrapPos(0.0f);
-		for (const BoardNote &note : card.notes) ImGui::TextColored(kNote, "- %s", note.words.c_str());
-		ImGui::PopTextWrapPos();
+	for (const BoardNote &note : card.notes) {
+		ImGui::PushStyleColor(ImGuiCol_Text, kNote);
+		ui_kit::clipped_text("- " + note.words);
+		ImGui::PopStyleColor();
 	}
 	(void)em;
 	finish();

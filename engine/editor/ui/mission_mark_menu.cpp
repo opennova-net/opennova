@@ -49,7 +49,7 @@ void events_using(Workspace &workspace, const MissionDocument &mission, const No
 	const SessionView &view = workspace.view();
 	const AssetGraph *graph = view.findings.graph.get();
 	if (!graph) {
-		ImGui::TextDisabled("Not known yet (the project is still being read).");
+		ImGui::TextDisabled("%s", ui_kit::reading_references());
 		return;
 	}
 	const Node *row = mission.row(record.row);

@@ -38,7 +38,9 @@ void draw_tools(Workspace &workspace, const TerrainBrush &brush, const TerrainTo
 		const bool active = brush.tool == tool;
 		if (lit_tool(row, terrain_tool_label(tool), active, true,
 		             active ? std::string("Put the brush down (no tool): the view's own tools again.")
-		                    : std::string("Brush with ") + terrain_tool_label(tool) + "."))
+		             : tool == TerrainTool::Flatten
+		                     ? std::string("Brush with Flatten: it levels towards the height under the stroke's first dab.")
+		                     : std::string("Brush with ") + terrain_tool_label(tool) + "."))
 			set_tool(workspace, active ? TerrainTool::None : tool);
 	}
 }
@@ -51,7 +53,7 @@ void draw_lock_line(TerrainPaneContext &context) {
 	const SessionView &view = context.workspace.view();
 	const std::vector<const MissionDocument *> missions = missions_under_view(view, context.document, context.family);
 	if (missions.empty()) {
-		ImGui::TextDisabled("No open mission stands on this terrain: a sculpt moves no entity open here.");
+		ui_kit::quiet_text("No open mission stands on this terrain.", "A sculpt moves no entity open here.");
 		return;
 	}
 	double x = 0.0, y = 0.0;
@@ -62,7 +64,7 @@ void draw_lock_line(TerrainPaneContext &context) {
 		at = true;
 	}
 	if (!at) {
-		ImGui::TextDisabled("Point the brush at the ground: what a sculpt there moves shows here.");
+		ui_kit::quiet_text("Point the brush at the ground.", "What a sculpt there moves shows here.");
 		return;
 	}
 	size_t follow = 0, locked = 0;
@@ -75,15 +77,16 @@ void draw_lock_line(TerrainPaneContext &context) {
 	// mission on the heights, closed ones and those of another terrain naming the .cpt among them).
 	const bool mission = dynamic_cast<const MissionDocument *>(&context.document) != nullptr;
 	const char *where = mission ? "in this mission" : "in the open missions on it";
+	const std::string tip = "A sculpt moves an entity that follows the ground with the ground under it, in every mission on "
+	                        "these heights; a height-locked one keeps its height (its Height lock, beside its z).";
 	if (follow + locked == 0) {
-		ImGui::TextDisabled("Under the brush %s: no entity.", where);
+		ui_kit::quiet_text(std::string("Under the brush ") + where + ": no entity.", tip);
 	} else {
 		const std::string follows = std::to_string(follow) + (follow == 1 ? " entity follows" : " entities follow");
 		const std::string held = std::to_string(locked) + (locked == 1 ? " is" : " are");
-		ImGui::TextWrapped("Under the brush %s: %s the ground, %s height locked.", where, follows.c_str(), held.c_str());
+		ui_kit::clipped_text(std::string("Under the brush ") + where + ": " + follows + " the ground, " + held + " height locked.",
+		                     tip);
 	}
-	ui_kit::tooltip("A sculpt moves an entity that follows the ground with the ground under it, in every mission on these "
-	                "heights; a height-locked one keeps its height (its Height lock, beside its z).");
 }
 
 // One of the brush's numbers as a slider on `row` (as many to a line as the pane holds), set once as the drag lets go.
@@ -108,7 +111,7 @@ public:
 		resolve_terrain_family(view, document, family);
 		TerrainPaneContext context{workspace, document, family, brush};
 		ImGui::TextUnformatted("Terrain");
-		if (!family.error.empty()) ImGui::TextWrapped("%s", family.error.c_str());
+		if (!family.error.empty()) ui_kit::refusal_text(family.error);
 		// The files a Save of this view writes beside it that keep unsaved edits, each with its dirty dot: the terrain
 		// files its brush edited and the missions that followed their strokes (its Save saves them with the view's
 		// document; its Close asks about them).
@@ -124,21 +127,21 @@ public:
 			}
 			std::string unsaved;
 			for (const std::string &path : scope) unsaved += (unsaved.empty() ? "" : ", ") + basename_of(path) + " *";
-			if (!unsaved.empty()) {
-				ImGui::TextWrapped("Unsaved: %s", unsaved.c_str());
-				ui_kit::tooltip("Saving this view (Ctrl+S) saves them with it; closing it asks about them.");
-			}
+			if (!unsaved.empty())
+				ui_kit::clipped_text("Unsaved: " + unsaved,
+				                     "Unsaved: " + unsaved + "\nSaving this view (Ctrl+S) saves them with it; closing it asks "
+				                     "about them.");
 		}
 		// Where the edits go and why.
 		TerrainPlane plane = TerrainPlane::Heights;
 		if (terrain_tool_plane(brush.tool, plane)) {
 			const TerrainFamilyFile &file = family.plane(plane);
-			const std::string words = !file.refusal.empty() ? file.refusal : !file.words.empty() ? file.words : file.path;
-			ImGui::TextWrapped("%s", words.c_str());
+			if (!file.refusal.empty()) ui_kit::refusal_text(file.refusal);
+			else ui_kit::clipped_text(!file.words.empty() ? file.words : file.path);
 		} else if (brush.tool == TerrainTool::None) {
-			ImGui::TextDisabled("No tool: pick one to brush in the view.");
+			ui_kit::quiet_text("No tool.", "Pick one to brush in the view.");
 		} else if (!family.tiles.words.empty()) {
-			ImGui::TextWrapped("Tiles go to %s.", family.tiles.words.c_str());
+			ui_kit::clipped_text("Tiles go to " + family.tiles.words + ".");
 		}
 		// The tab of the brush's tool comes forward as the tool moves to another family (a tab looked at stays). A tab
 		// pressed picks its family's first tool where the brush has another family's, or none (Paint: Surface, its

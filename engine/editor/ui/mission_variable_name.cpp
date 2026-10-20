@@ -21,8 +21,6 @@ namespace opennova::editor {
 
 namespace {
 
-const ImVec4 kWarn(0.95f, 0.75f, 0.35f, 1.0f);
-
 // What a field holds while it is typed in, and the refusal its last commit met, by document and variable.
 struct FieldState {
 	char text[mission::kMisDescriptionChars + 1] = {};
@@ -71,11 +69,7 @@ void draw_variable_name_field(Workspace &workspace, const MissionDocument &missi
 			window_requests::edits(workspace, mission, std::move(edits));
 		}
 	}
-	if (!state.refusal.empty()) {
-		ImGui::PushTextWrapPos(0.0f);
-		ImGui::TextColored(kWarn, "%s", state.refusal.c_str());
-		ImGui::PopTextWrapPos();
-	}
+	if (!state.refusal.empty()) ui_kit::warning_line(state.refusal);
 	ImGui::PopID();
 }
 
