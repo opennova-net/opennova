@@ -571,10 +571,16 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
     add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
     add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
+    // The 0x14 feed carries the flag's own words, read before the carry moves it: the
+    // attach hands the sender the carrier and the flag, and the sender takes the x/y of
+    // the second. [orig: Entity_AttachCarriedObject — push esi (the flag, its +0x1C4
+    //  stored @0x43C191) @0x43C18F, push edi (the carrier) @0x43C190, the call @0x43C197;
+    //  Server_HandleEntityDeath @0x517460 — the flag's +4 / +8 @0x517481..0x517488, the
+    //  carrier's pool index @0x517490]
     gameplay_events_.push_back({MatchGameplayEventKind::FlagPickup,
                                 player_handle,
                                 flag_handle,
-                                carrier->position,
+                                flag->position,
                                 flag->position,
                                 static_cast<uint8_t>(flag->flags),
                                 player_handle,
