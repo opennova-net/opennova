@@ -310,12 +310,14 @@ func _deck(at: Vector2) -> Vector3:
 	return Vector3(at.x, at.y, WATER_Z + DECK_Z)
 
 
-# Waypoint markers (type 6005) as path `path`'s stops, in order.
+# Waypoint markers (type 6005) as path `path`'s stops, in order. Every 07TR path is
+# one-shot (DoesNotLoop): a mover halts at its route's last stop.
 func _path(mission: MissionData, terrain: TerrainData, path: int, stops: Array) -> void:
 	for i in stops.size():
 		var marker := mission.add_entity(MissionData.KIND_MARKER, 106005, _ground(terrain, stops[i]), Vector3.ZERO)
 		assert_true(mission.set_entity_property_int(MissionData.KIND_MARKER, marker.index, "waypoint_id", path))
 		assert_true(mission.set_entity_property_int(MissionData.KIND_MARKER, marker.index, "wp_number", i + 1))
+	assert_true(mission.set_waypoint_path_flags(path, MissionData.WAYPOINT_DOES_NOT_LOOP), "path %d is one-shot" % path)
 
 
 func _set_fields(mission: MissionData, entity: EntityRef, kind: int, fields: Dictionary) -> void:
@@ -378,7 +380,6 @@ func _build_course(terrain: TerrainData, root: ResourceRoot) -> void:
 		_enemies.append(enemy.bms_id)
 	# The near APCs wait uncrewed; the final APCs and the reserve have their
 	# drivers aboard.
-	var movers: Array[EntityRef] = []
 	for i in APC_GROUPS.size():
 		var near := _vehicle(mission, VehicleFixture.TARGET_APC, _ground(terrain, NEAR_APCS[i]),
 				{"group": APC_GROUPS[i], "team": 2, "spawn_count": NEAR_APC_SPAWNS}, "tdrive", ENEMY_YAW)
@@ -388,12 +389,10 @@ func _build_course(terrain: TerrainData, root: ResourceRoot) -> void:
 		_crew(mission, _ground(terrain, FINAL_APCS[i] + Vector2(0.0, 4.0)), 2, final_apc)
 		_enemies.append(final_apc.bms_id)
 		_finals.append(final_apc.bms_id)
-		movers.append(final_apc)
 	var reserve := _vehicle(mission, VehicleFixture.TARGET_APC, _ground(terrain, RESERVE_AT),
 			{"group": RESERVE_GROUP, "team": 2, "spawn_count": NEAR_APC_SPAWNS}, "tdrive", PLATEAU_YAW)
 	_crew(mission, _ground(terrain, RESERVE_AT + Vector2(0.0, 4.0)), 2, reserve)
 	_enemies.append(reserve.bms_id)
-	movers.append(reserve)
 	_path(mission, terrain, LANDING_PATH, LANDING)
 	_path(mission, terrain, COURSE_PATH, COURSE)
 	_path(mission, terrain, ALLY_PATH, ALLY_ROUTE)
@@ -407,19 +406,13 @@ func _build_course(terrain: TerrainData, root: ResourceRoot) -> void:
 
 	# The second craft's run in, from the start (07TR's event 11), slowing at
 	# its second stop (event 12; GroupAtWaypoint's node is the stop's place on
-	# the path, from 0) and halting at its landing. 07TR's paths are one-shot
-	# (the DoesNotLoop flag, which MissionData does not edit); a group halts
-	# at a path's end on a zero patrol speed instead, 07TR's own halt for its
-	# convoy (event 27: ChangeGroupAI PATROLSPEED 0).
+	# the path, from 0) and halting at its landing, its one-shot path's end.
 	var launch := mission.add_event(0, 0, 0)
 	assert_true(mission.add_event_action(launch, 1, 0, SECOND_CRAFT_GROUP, LANDING_PATH, 0), "the second craft runs in")
 	assert_true(mission.add_event_action(launch, 3, 30, SECOND_CRAFT_GROUP, LANDING_SPEEDS[0]), "at its patrol speed")
 	var slow := mission.add_event(0, 0, 0)
 	assert_true(mission.add_event_trigger(slow, 1, 7, SECOND_CRAFT_GROUP, LANDING_PATH, 1))
 	assert_true(mission.add_event_action(slow, 3, 30, SECOND_CRAFT_GROUP, LANDING_SPEEDS[1]))
-	var landed := mission.add_event(0, 0, 0)
-	assert_true(mission.add_event_trigger(landed, 1, 7, SECOND_CRAFT_GROUP, LANDING_PATH, LANDING.size() - 1))
-	assert_true(mission.add_event_action(landed, 3, 30, SECOND_CRAFT_GROUP, 0), "the second craft lands")
 	# The lesson: the player standing on the tank orders the instructor aboard.
 	var lesson := mission.add_event(0, 0, 2)
 	assert_true(mission.add_event_trigger(lesson, 7, 39, tank.bms_id), "PLYRONSSN of the tank")
@@ -438,29 +431,18 @@ func _build_course(terrain: TerrainData, root: ResourceRoot) -> void:
 	assert_true(mission.add_event_trigger(ally_drive, 1, 7, TANK_GROUP, COURSE_PATH, 0))
 	assert_true(mission.add_event_action(ally_drive, 1, 0, ALLY_GROUP, ALLY_PATH, 0), "the other tank drives in")
 	assert_true(mission.add_event_action(ally_drive, 3, 30, ALLY_GROUP, ALLY_SPEED))
-	# The tank's final firing position, then the other tank's, which releases
-	# the APC wave.
+	# The tank's final firing position (event 49), where its one-shot course
+	# halts it, then the other tank's at its route's end, which releases the APC
+	# wave (event 48).
 	var final_position := mission.add_event(0, 0, 0)
 	assert_true(mission.add_event_trigger(final_position, 1, 7, TANK_GROUP, COURSE_PATH, COURSE.size() - 1))
-	assert_true(mission.add_event_action(final_position, 3, 30, TANK_GROUP, 0), "the tank halts")
 	_events["final_position"] = final_position
 	var release := mission.add_event(0, 0, 0)
 	assert_true(mission.add_event_trigger(release, 1, 7, ALLY_GROUP, ALLY_PATH, ALLY_ROUTE.size() - 1))
-	assert_true(mission.add_event_action(release, 3, 30, ALLY_GROUP, 0), "the other tank halts")
 	for i in APC_GROUPS.size():
 		assert_true(mission.add_event_action(release, 1, 0, APC_GROUPS[i], APC_PATHS[i], 0), "the APC wave drives in")
 		assert_true(mission.add_event_action(release, 3, 30, APC_GROUPS[i], APC_SPEED))
 	_events["release"] = release
-	# Each APC halts at its route's end (SingleAtWaypoint -> ChangeSingleAI
-	# PATROLSPEED 0), as a one-shot path leaves it.
-	var routes := APC_ROUTES.duplicate()
-	routes.append(RESERVE_ROUTE)
-	var paths := APC_PATHS.duplicate()
-	paths.append(RESERVE_PATH)
-	for i in movers.size():
-		var halt := mission.add_event(0, 0, 0)
-		assert_true(mission.add_event_trigger(halt, 2, 7, movers[i].bms_id, paths[i], routes[i].size() - 1))
-		assert_true(mission.add_event_action(halt, 21, 30, movers[i].bms_id, 0))
 	# The reserve drives in once the wave is down.
 	var reserve_drive := mission.add_event(0, 0, RESERVE_DELAY)
 	for group: int in APC_GROUPS:
