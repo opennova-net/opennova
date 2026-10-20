@@ -5016,6 +5016,10 @@ add_test(NAME npruntime_joiner_mission_start COMMAND npruntime_joiner_mission_st
 add_executable(npruntime_player_state_writer_test npruntime/player_state_writer_test.cpp)
 target_link_libraries(npruntime_player_state_writer_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_player_state_writer COMMAND npruntime_player_state_writer_test)
+# The 0x0A priority list's boundRadius term and tracked-slot despawn (D-NET-530, D-NET-349).
+add_executable(netsim_priority_list_test netsim/priority_list_test.cpp)
+target_link_libraries(netsim_priority_list_test PRIVATE opennova_runtime)
+add_test(NAME netsim_priority_list COMMAND netsim_priority_list_test)
 
 # --- parity lane L4 (spawn/death) ---
 # The player body's death edge raising the player-death transaction in the

@@ -129,6 +129,10 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 // g_ServerCpuPct; NetPacket_WritePlayerState @0x4FFA76..0x4FFA7C].
 // `title` is the title the host speaks (null: JO's), whose 0x0A objective body
 // carries the co-op checkpoint after its four values (DFX2-1).
+// `despawned` (when given) receives the handles the priority list's tracked-slot
+// walk cleared, in order: the caller sends each to this recipient, once, as an
+// S2C 0x12 ahead of the frame (D-NET-349) [orig: Server_BuildEntityPriorityList
+// @0x50E7F3..0x50E835, pool 1 @0x50ECE0].
 bool build_connection_s2c(const world::World &w, Connection &conn,
                           const std::vector<GameEntitySnapshot> &ents,
                           std::vector<uint8_t> &frame_out,
@@ -136,7 +140,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           std::size_t max_frame_body_bytes = 0,
                           int32_t server_fps = 0,
                           int32_t server_cpu_percent = 0,
-                          const TitleIdentity *title = nullptr);
+                          const TitleIdentity *title = nullptr,
+                          std::vector<uint16_t> *despawned = nullptr);
 
 // The co-op checkpoint a DFX2 host's 0x0A objective body carries (DFX2-1): the
 // pool-3 slot of the newest player-route marker the authority marked done in a

@@ -237,6 +237,12 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	up.pos_z = w::to_fixed(-50.0);
 	up.heading = 0x2000;
 	up.pitch = 0x0100;
+	// No tracked entities: the four interest pairs are unused, (0xFFFF, 0), as the
+	// client's builder pre-fills them; a 0x0000 handle names a pool-0 row the host's
+	// list would despawn [orig: NetPacket_SerializePlayerState @0x4C09C0, case 3
+	//  @0x4C1BC7..0x4C1BD8; Server_BuildEntityPriorityList @0x50E7F3].
+	up.priority_handle_0 = up.priority_handle_1 = up.priority_handle_2 =
+			up.priority_handle_3 = 0xFFFF;
 	for (int f = 0; f < 12; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(up, tick)) ship_joiner(d);
 		++tick;

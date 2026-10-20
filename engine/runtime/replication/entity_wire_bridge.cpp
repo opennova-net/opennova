@@ -160,6 +160,8 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.euler_z = carrier_heading_bam(e);
 	s.entity_class = entity_class_of(e);
 	s.health = e.health; // §5.10 field-17 tier numerator — non-zero keeps the player alive
+	// entity+0 boundRadius, the priority list's distance term (D-NET-530).
+	s.bound_radius_q16 = world::to_fixed(e.bound_radius);
 	// The tier denominator is the def's signed hp word, 0 included (the classifier's guard
 	// turns it into 1): an hp-0 Player row's Health-1 body packs tier 2 (D-PWR-10)
 	// [orig: Entity_GetHealthClassification @0x4AD4E0 - entity+0x20 @0x4AD4EF, the

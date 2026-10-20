@@ -202,6 +202,10 @@ struct GameEntitySnapshot {
 	// integration step; pool-0 per-tick displacement is not stored by our movers and stays 0
 	// (tracked D-NET-139 residual — infantry priority rides distance/angle/age).
 	uint8_t tick_speed_q6 = 0;
+	// entity+0 boundRadius (16.16), which the priority list subtracts from the row's
+	// distance before the tile shift [orig: Server_BuildEntityPriorityList @0x50E8DC
+	// (pool 0), @0x50EDC9 (pool 1)].
+	int32_t bound_radius_q16 = 0;
 	// pool-1: a live controller occupies the vehicle (entity+0x170) [orig: @0x50efc9 — +200].
 	bool occupied = false;
 	// pool-0: mounted AND the carrier def lacks attrib 0x20 (EWEAP) — such riders LOSE the

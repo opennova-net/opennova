@@ -574,6 +574,24 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 	}
 }
 
+// Whether the recipient's tracked slot naming `handle` despawns: a handle in
+// pools 0..4 within its pool's capacity whose row is freed (no item def), is
+// the recipient's own entity or belongs to a hidden slot (the owner-hidden
+// stamp); Entity_ValidatePtr's owner of a visible other slot is cleared, and
+// an unowned live row stays.
+// [orig: Server_BuildEntityPriorityList @0x50E757..0x50E7F3; Entity_ValidatePtr
+//  @0x500910]
+bool tracked_slot_despawns(const world::World &w, const Connection &conn,
+                           const std::vector<GameEntitySnapshot> &entities, uint16_t handle) {
+	if ((handle & 0xF000u) >= 0x5000u) return false;
+	if ((handle & 0xFFFu) >= w.registry.pool_capacity(handle >> 12)) return false;
+	if (w.registry.get(world::EntityHandle{handle}) == nullptr) return true;
+	if (conn.owned_entity.valid() && conn.owned_entity.packed == handle) return true;
+	for (const GameEntitySnapshot &row : entities)
+		if (row.wire_handle == handle) return row.owner_hidden;
+	return false;
+}
+
 // Select and order this frame's tag-1 records for one connection. A faithful structural
 // port of the original per-recipient chain, with the inputs our headless world does not
 // model documented at their use sites (docs/net/novaworld-net-re.md D-NET-139):
@@ -595,7 +613,8 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
                                                       const int32_t (&body)[3],
                                                       std::size_t header_bytes,
                                                       std::size_t hard_frame_limit,
-                                                      std::size_t frame_budget) {
+                                                      std::size_t frame_budget,
+                                                      std::vector<uint16_t> *despawned) {
 	devtools::ProfileLap lap(w.profile);
 	// 1. Age sweep: a saturating +1 in 32-byte strides over the age block's 0x5B0 bytes
 	// rounded down to the stride, so 0x5A0: pool 1's last sixteen slots (1184..1199) never
@@ -662,46 +681,68 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		// spectator latch — replication_model.h owner_hidden) never enters
 		// another recipient's list; the recipient's OWN entity is always
 		// admitted [orig: @0x50e6fd — `validated == recipient ||
-		// (!slot[97537] && !slot[97536])`]. The original's tracked-slot walk
-		// also despawns a tracked hidden row with a reliable 0x12; that sweep
-		// stays a D-NET-139 residual.
+		// (!slot[97537] && !slot[97536])`].
 		if (e.owner_hidden && e.wire_handle != conn.owned_entity.packed) continue;
 		std::size_t cache = 0;
 		const bool cached = priority_cache_index(e, cache);
 		const uint8_t age = cached ? conn.s2c_entity_age[cache] : uint8_t{0};
 
-		// distanceTiles = (sqrt(dx^2 + dy^2 + (dz/2)^2) - boundRadius) >> 16 against the
-		// recipient anchor [orig: @0x50e925; z half-weighted]. boundRadius (entity+0) is
-		// unmodeled (0). The anchor is the recipient EYE pos (entity pos + camera
-		// offset entity+0x6C..), as the header carries it (anchor_for_owned_entity).
-		// Squared in double like retail's fild/fmul — the int64 product can
-		// overflow at map-corner separations.
-		const int64_t dx = int64_t(e.x) - ax;
-		const int64_t dy = int64_t(e.y) - ay;
-		const int64_t dzh = (int64_t(e.z) - az) >> 1;
-		const int64_t dist = static_cast<int64_t>(
-				std::sqrt(double(dx) * double(dx) + double(dy) * double(dy) +
-				          double(dzh) * double(dzh)));
-		const int32_t distance_tiles = int32_t(dist >> 16);
-
-		// The recipient's requested-interest floor: a row named by one of its 4
-		// tracked slots keeps that score as a priority floor and passes the
-		// distance gate regardless of range. The invalid-slot 0x12 despawn leg
-		// of the original's walk stays a D-NET-139 residual.
-		// [orig: the tracked-slot walk @0x50e5f4.. -> priorPriority]
+		// The recipient's tracked slots, walked in this admitted row's turn up to
+		// the slot naming the row, whose score is the row's priority floor (it
+		// passes the distance gate regardless of range). On the way, a slot naming
+		// a freed row, the recipient's own entity or a hidden slot's entity is
+		// cleared and despawned to this recipient alone with a one-send S2C 0x12
+		// [u16 handle], ahead of its 0x0A: the first admitted rows' walks clear
+		// them all, in slot order. A handle past pool 4 or a pool's capacity
+		// resolves to nothing and stays.
+		// [orig: the walk @0x50E736..0x50E867 (pool 1 @0x50EC45..0x50ECE0): the
+		//  resolve @0x50E757..0x50E794, Entity_ValidatePtr @0x50E7C2 and its
+		//  visible-owner clear @0x50E7DC..0x50E7E5, the despawn test @0x50E7F3, the
+		//  clear @0x50E7F9, mask 32 to this slot @0x50E808 / @0x50E812, the 0x12
+		//  at userParam 1 @0x50E835 (NetPacket_WriteEntityHandle16 @0x504720), the
+		//  stop @0x50E841, the floor @0x50E867]
 		int32_t prior_priority = 0;
 		for (int t = 0; t < 4; ++t) {
-			if (conn.tracked_handle[t] != 0xFFFF &&
-			    conn.tracked_handle[t] == e.wire_handle) {
+			uint16_t &tracked = conn.tracked_handle[t];
+			if (tracked == 0xFFFF) continue;
+			if (tracked_slot_despawns(w, conn, entities, tracked)) {
+				if (despawned != nullptr) despawned->push_back(tracked);
+				tracked = 0xFFFF;
+			}
+			if (tracked == e.wire_handle) {
 				prior_priority = conn.tracked_score[t];
 				break;
 			}
 		}
 
-		// Distance gate [orig: @0x50e925]: skip unless within 1124 tiles, the
-		// tracked-handle priority floor holds it, or age force-admits
-		// [orig: `dist <= 1124 || priorPriority || age >= 50` @0x50e93a].
+		// distanceTiles = (min(sqrt(dx^2 + dy^2 + (dz/2)^2), cap) - boundRadius) >> 16
+		// against the recipient anchor, z half-weighted, the distance truncated to
+		// an int32 and the shift arithmetic; the gate reads it raw, then it floors
+		// at 0. The anchor is the recipient EYE pos (entity pos + camera offset
+		// entity+0x6C..), as the header carries it (anchor_for_owned_entity).
+		// Squared in double like retail's fild/fmul (the int64 product can
+		// overflow at map-corner separations).
+		// [orig: Server_BuildEntityPriorityList - the cap flt_7C19E0 @0x50E8B0..0x50E8CD,
+		//  _ftol2_sse @0x50E8CF, `sub ecx, [ebx]` @0x50E8DC (pool 1 @0x50EDC9),
+		//  `sar ecx, 10h` @0x50E902, the gate @0x50E90D..0x50E925, the floor
+		//  @0x50E92E..0x50E934]
+		const int64_t dx = int64_t(e.x) - ax;
+		const int64_t dy = int64_t(e.y) - ay;
+		const int64_t dzh = (int64_t(e.z) - az) >> 1;
+		constexpr double kMaxDistance = 2147418112.0; // flt_7C19E0
+		const double dist = std::min(
+				std::sqrt(double(dx) * double(dx) + double(dy) * double(dy) +
+				          double(dzh) * double(dzh)),
+				kMaxDistance);
+		int32_t distance_tiles = static_cast<int32_t>(
+				static_cast<uint32_t>(static_cast<int32_t>(dist)) -
+				static_cast<uint32_t>(e.bound_radius_q16)) >> 16;
+
+		// Distance gate: skip unless within 1124 tiles, the tracked-handle
+		// priority floor holds it, or age force-admits
+		// [orig: `dist <= 1124 || priorPriority || age >= 50` @0x50e925].
 		if (distance_tiles > 1124 && prior_priority == 0 && age < 50) continue;
+		if (distance_tiles < 0) distance_tiles = 0;
 
 		// ---- Score, full terms (D-NET-139 port 2026-08-06)
 		// [orig: pool-0 @0x50eb5f, pool-1 @0x50f008 — both expand to
@@ -710,6 +751,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		//            + 1000*(entity == recipient carrier) (+200*occupied, pool 1)
 		//            (+200 inside the view distance)
 		//            + 3*speedDelta + 2*headingDelta].
+		// distScore = 1124 - tiles, floored at 0 [orig: @0x50E937..0x50E943].
 		int64_t v = distance_tiles < 1124 ? (1124 - distance_tiles) : 0;
 
 		if (self_dead_or_spectator) {
@@ -1146,9 +1188,18 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          int32_t server_cpu_percent,
                          const TitleIdentity *title) {
 	std::vector<uint8_t> frame;
-	if (!build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes,
-	                          server_fps, server_cpu_percent, title))
-		return false;
+	std::vector<uint16_t> despawned;
+	const bool built = build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes,
+	                                        server_fps, server_cpu_percent, title, &despawned);
+	// The list's tracked-slot despawns go out ahead of the frame, each sent
+	// once (D-NET-349).
+	for (const uint16_t handle : despawned) {
+		EntityRemove removal;
+		removal.entity_handle = handle;
+		conn.transport->host_send(s2c::ENTITY_REMOVE, encode_entity_remove(removal),
+				/*reliable=*/false);
+	}
+	if (!built) return false;
 	devtools::ProfileLap lap(w.profile);
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
 	                          /*reliable=*/false);
@@ -1163,7 +1214,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           std::size_t max_frame_body_bytes,
                           int32_t server_fps,
                           int32_t server_cpu_percent,
-                          const TitleIdentity *title) {
+                          const TitleIdentity *title,
+                          std::vector<uint16_t> *despawned) {
 	devtools::ProfileLap lap(w.profile);
 	if (conn.transport == nullptr) return false;
 	const world::Entity *owned = owned_entity_for_emit(w, conn);
@@ -1352,7 +1404,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	std::vector<GameEntitySnapshot> selected =
 			select_frame_entities(
 					w, conn, ents, anchor, body, header_bytes + rounds_bytes,
-					max_frame_body_bytes, frame_budget);
+					max_frame_body_bytes, frame_budget, despawned);
 	// The list read the recipient's body as the caller's snapshot holds it,
 	// ahead of the writer's stores (the hide bit, the spectator restamp, the
 	// pre-round dead-bit clear, which the host applies before this call); its

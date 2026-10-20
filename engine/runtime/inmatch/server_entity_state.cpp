@@ -1,6 +1,8 @@
 #include <runtime/inmatch/server_entity_state.h>
 
 #include <runtime/devtools/tick_profile.h>
+#include <net/npwire/ingame_encode.h>                   // encode_entity_remove
+#include <net/npwire/ingame_message_id.h>               // s2c::ENTITY_REMOVE
 #include <runtime/inmatch/game_config.h>               // kMaxFrameUpdateBodyBytes
 #include <runtime/replication/connection_fan.h>         // build_connection_s2c
 #include <runtime/replication/entity_wire_bridge.h>     // snapshot_world
@@ -96,10 +98,22 @@ bool write_entity_state(NapiNPServerCtx &ctx, world::World &world, NapiNPConnect
 	// The frame's CONTENT is the world as the caller found it. The server-fps and CPU
 	// bytes are this tick's copies of the main loop's FR counter and CPU share
 	// [orig: Server_TickUpdate @0x51D7E0..0x51D7E5, @0x51D7EA..0x51D7FB].
+	std::vector<uint16_t> despawned;
 	const bool built = replication::build_connection_s2c(
 			world, conn.link, ents, frame_out, ctx.config.game_type,
 			conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0,
-			ctx.stats_avg_fps, ctx.stats_cpu_percent, ctx.np_protocol.identity);
+			ctx.stats_avg_fps, ctx.stats_cpu_percent, ctx.np_protocol.identity, &despawned);
+	// The list's tracked-slot despawns, each an S2C 0x12 to this slot alone,
+	// sent once (userParam 1: the queue's one-send lifetime), queued ahead of
+	// its 0x0A [orig: Server_BuildEntityPriorityList @0x50E7F3..0x50E835 (pool 1
+	//  @0x50ECE0), inside the list @0x517C1E; NapiNPServer_SendToConn passes the
+	//  userParam as the message's user_param1 @0x4C4F52].
+	for (const uint16_t handle : despawned) {
+		EntityRemove removal;
+		removal.entity_handle = handle;
+		conn.link.transport->host_send(s2c::ENTITY_REMOVE, encode_entity_remove(removal),
+				/*reliable=*/false);
+	}
 	// The slots written after this one read this body as the stores left it.
 	for (GameEntitySnapshot &row : ents) {
 		if (row.wire_handle != body.handle.packed) continue;
