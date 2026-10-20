@@ -705,13 +705,15 @@ void Simulation::finalize_loaded_model_challenge_snapshot() {
 	// The page the C2S 0x3D answers from is the model-def list the mission start's loads
 	// built, computed from the mount and the tables as retail's loads run, not from what
 	// this shell happened to render (D-NET-527; engine: inmatch/loaded_model_list.h). A
-	// joiner loads no mission body, so it has no special event.
+	// joiner loads no mission body, so it has no special event; a Serve Only host loads no
+	// foliage.
 	namespace inmatch = opennova::inmatch;
 	std::vector<uint32_t> page;
 	if (kernel_ && assets_.root.is_valid()) {
 		const opennova::mission::BootFileSource files =
 				opennova::mission::boot_files_from_index(assets_.root->native_index());
-		page = inmatch::mission_start_model_page(*kernel_, files, &net_.charattr_table, !is_joiner());
+		page = inmatch::mission_start_model_page(*kernel_, files, &net_.charattr_table, !is_joiner(),
+				/*dedicated=*/!is_joiner() && !net_.host_serve_and_play);
 	}
 	// The same frozen count is a host's S2C 0x68 cursor wrap (the role reads
 	// it every tick) [orig: Server_SendLoadedModelPageRequest @0x511375 / @0x511391].

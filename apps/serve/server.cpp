@@ -594,13 +594,14 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// No device stages run between the phases on a headless host.
 	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
 	// The mission start freezes its model-def list, whose count every S2C 0x68
-	// cursor wraps at: a dedicated host builds it as the game's host does,
-	// from the mission's loads, with no renderer [orig: Game_StartMission
-	// @0x524360 (the call @0x525A6E) -> Render_InitMissionTextures @0x587120
-	// (the call @0x58728C) -> CEffectWorld_RebuildAllModelBuffers @0x5B3A80].
+	// cursor wraps at: a dedicated host builds it from the mission's loads,
+	// with no renderer and no foliage leg [orig: Game_StartMission @0x524360
+	// (the dedicated jump @0x5259B4..0x5259BF, the call @0x525A6E) ->
+	// Render_InitMissionTextures @0x587120 (the reduced arm's call @0x58728C)
+	// -> CEffectWorld_RebuildAllModelBuffers @0x5B3A80].
 	loaded_model_list_count_ = static_cast<uint32_t>(inmatch::mission_start_model_page(
 			*kernel_, mission::boot_files_from_index(index_), &boot_.charattr,
-			/*authority=*/true).size());
+			/*authority=*/true, /*dedicated=*/true).size());
 	select_chat_font();
 	++missions_played_;
 	io::logf(io::LogLevel::kInfo,

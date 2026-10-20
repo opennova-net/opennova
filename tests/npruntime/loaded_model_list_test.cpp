@@ -228,6 +228,17 @@ void test_the_mission_start_list() {
 	CHECK(std::count(asked.begin(), asked.end(), std::string("M4.3DI")) == 0);
 	CHECK(std::count(asked.begin(), asked.end(), std::string("player.3DI")) == 0);
 
+	// A dedicated host's start loads no foliage: weapon.def's pine counts, bush never loads
+	// [orig: Game_StartMission - the jump @0x5259B4..0x5259BF past @0x5259FD].
+	inmatch::MissionStartModelSources dedicated_sources = sources;
+	dedicated_sources.foliage = false;
+	const inmatch::LoadedModelList dedicated = inmatch::build_mission_start_model_list(dedicated_sources);
+	const std::vector<inmatch::LoadedModelList::Node> dedicated_nodes = dedicated.nodes();
+	CHECK(dedicated_nodes.size() == created_count - 1);
+	CHECK(!dedicated_nodes.empty() && dedicated_nodes.front().name == "hud.3DI");
+	for (const inmatch::LoadedModelList::Node &n : dedicated_nodes) CHECK(!n.foliage);
+	CHECK(dedicated.freeze().size() == created_count - 1);
+
 	// The page the joiner's 0x3D answers from: [u32 start] and up to 50 dwords.
 	inmatch::JoinerConnection joiner("ModelPage");
 	joiner.set_loaded_model_challenge_snapshot(page);

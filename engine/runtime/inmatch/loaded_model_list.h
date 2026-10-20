@@ -97,6 +97,11 @@ struct MissionStartModelSources {
 	// A mission event with an action 39 of subtype 1 or 2 [orig: EventTrigger_HasActive-
 	// SpecialEvent @0x452d90]. A joiner loads no mission body, so it has none.
 	bool special_event = false;
+	// The terrain's foliage defs load: on every host but a dedicated one (in session, the
+	// authority, not a session peer), whose mission start jumps past the render setup that
+	// is their only caller [orig: Game_StartMission @0x524360 - the flag @0x524942..0x524964,
+	// the branch @0x5259AE..0x5259BF past CRenderManager_ShutdownAllSubsystems @0x5259FD].
+	bool foliage = true;
 };
 
 // Whether a mission event carries an action 39 of subtype 1 or 2: the special event whose
@@ -107,18 +112,21 @@ bool mission_has_special_event(const bms::File &mission);
 // The list Game_StartMission builds, its loads in its order: the Avatars.def combos at the
 // climate's variant, the ammo rows' tracer items, weapon.def's gfx1 / gfx3 models, the
 // items the mission reloads (Game_ReloadEntityModelsAndCallbacks), the celestial models and
-// upl.3di, hudfx.def's models, and the terrain's foliage models, marked.
+// upl.3di, hudfx.def's models, and (MissionStartModelSources::foliage) the terrain's foliage
+// models, marked.
 LoadedModelList build_mission_start_model_list(const MissionStartModelSources &sources);
 
 // The page a mission start freezes for `kernel` over the mount `files`: the kernel's loaded
 // tables and world, a load the kernel's asset store parsing the model (no renderer), the
 // process's character-attribute table, and the mission's special event, an authority's alone
 // (a joiner loads no mission body). Its size is the host's S2C 0x68 cursor wrap, its dwords a
-// joiner's C2S 0x3D page; the game's host and joiner and opennova-serve's dedicated host build
-// it alike [orig: Game_StartMission @0x524360 (the call @0x525A6E) ->
-// Render_InitMissionTextures @0x587120 (the call @0x58728C) -> CEffectWorld_RebuildAllModelBuffers
-// @0x5B3A80].
+// joiner's C2S 0x3D page. A listen host and a joiner freeze it on the full arm, a `dedicated`
+// host (opennova-serve, the game's Serve Only host) on the reduced arm with no foliage leg
+// before it [orig: Game_StartMission @0x524360 (the call @0x525A6E, the flag its third
+// argument) -> Render_InitMissionTextures @0x587120 (the full arm's call @0x5871CF, the
+// reduced arm's @0x58728C) -> CEffectWorld_RebuildAllModelBuffers @0x5B3A80].
 std::vector<uint32_t> mission_start_model_page(const mission::MissionKernel &kernel,
-		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority);
+		const mission::BootFileSource &files, const CharAttrTable *charattr, bool authority,
+		bool dedicated);
 
 } // namespace opennova::inmatch
