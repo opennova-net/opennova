@@ -10,10 +10,11 @@
 //       connection ID (== ServerAuth.MI) and receives the applicable deployment release ->
 //       InMatch (learns wire handle H).
 //   (2) Per frame: ClientRuntime emits a framed C2S 0x0C (+ the §5.44 0x2C RTT housekeeping) over UDP ->
-//       handle_server_datagram surfaces PeerC2SInMatch -> apply_in_match_c2s stages it -> Server_TickUpdate
-//       drains+SNAPs the entity + fans an S2C 0x0A -> the owner reframes it 0x83 over UDP -> the client
-//       folds it into ClientState. The peer SNAPs to the uplink, no synthetic host player exists, and
-//       the client's ClientState anchor == the joiner's post-SNAP position.
+//       the receive pump's dispatch walk read-applies it (the chase target staged) -> Server_TickUpdate
+//       runs the body's chase + fans an S2C 0x0A -> the owner reframes it 0x83 over UDP -> the client
+//       folds it into ClientState. The host's body chases the uplink into its deadband (never a snap,
+//       D-NET-NEW-LP-2), no synthetic host player exists, and the client's ClientState anchor == the
+//       joiner body's eye.
 //   (3) The host's emitted S2C stream (recorded at the joiner socket) appears in the §5.2a order.
 //       Order-only (body byte-parity is deferred: our world stream is built from our own minimal
 //       World).
@@ -211,14 +212,21 @@ int main() {
 	}
 
 	// ---- Phase B: in-match per-frame play — the 0x0C -> 0x0A round-trip over UDP ----
+	// The joiner reports itself half a unit along x from where the host's copy of its body
+	// stands: inside the authority chase's 2-unit band, so the host's body chases it rather
+	// than dropping it (D-NET-NEW-LP-2).
+	const w::Entity *host_copy = world.registry.get(Hh);
+	if (!expect(host_copy != nullptr, "the host holds the joiner's body")) { net::shutdown(); return 1; }
+	const int32_t hx = host_copy->position.x.q16, hy = host_copy->position.y.q16,
+	              hz = host_copy->position.z.q16;
 	PlayerExtendedUplink up;
 	up.carrier_handle = 0xFFFF;
-	up.pos_x = w::to_fixed(100.0);
-	up.pos_y = w::to_fixed(200.0);
-	up.pos_z = w::to_fixed(-50.0);
+	up.pos_x = hx + 0x8000;
+	up.pos_y = hy;
+	up.pos_z = hz;
 	up.heading = 0x2000;
 	up.pitch = 0x0100;
-	for (int f = 0; f < 12; ++f) {
+	for (int f = 0; f < 16; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(up, tick)) ship_joiner(d);
 		++tick;
 		inmatch::host_session_pump(owner, host_dgram);
@@ -231,17 +239,29 @@ int main() {
 	const w::Entity *je = world.registry.get(Hh);
 	bool ok = true;
 	ok = expect(je != nullptr, "joiner entity present") && ok;
+	// The host never snaps a visible remote body to its uplink: each read-apply stages the
+	// target and resets the progress, and the body's own update steps along x by
+	// ((10 >> 1) + gap) / 10 per tick, never vertically, until the gap falls under 0x2AAA,
+	// where it holds short of the uplink. [orig: NetPacket_SerializePlayerState @0x4C09C0 -
+	// the staging @0x4C2042..0x4C205E, the hidden-only live store @0x4C207E..0x4C208E, the
+	// progress reset @0x4C20A9; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the deadband
+	// `cmp eax, 2AAAh; jge` @0x4B438E..0x4B4393, the bucket 10 @0x4B4466, the steps
+	// @0x4B458A..0x4B45CA, z = 0 @0x4B4600]
 	if (je) {
-		ok = expect(je->position.x == static_cast<float>(w::from_fixed(up.pos_x)) &&
-		                    je->position.y == static_cast<float>(w::from_fixed(up.pos_y)) &&
-		                    je->position.z == static_cast<float>(w::from_fixed(up.pos_z)),
-		            "joiner entity SNAPped to the C2S 0x0C uplink pose (delivered over UDP)") && ok;
+		const int32_t gap = up.pos_x - je->position.x.q16;
+		ok = expect(gap > 0 && gap < 0x2AAA && je->position.y.q16 == hy && je->position.z.q16 == hz,
+		            "joiner body chased its C2S 0x0C uplink (delivered over UDP) into the deadband, "
+		            "short of it and with no vertical step") && ok;
 	}
+	// The client's anchor is the joiner's eye, Position plus CameraOffset, as the last 0x0A's
+	// send block found it ahead of that tick's entity update; the body holds in the deadband,
+	// so that is its eye now. [orig: Server_SendEntityStateToPlayer @0x517BEF..0x517C13; the
+	// periodic send block precedes Game_ProcessMainFrame's entity update]
 	if (je) {
-		ok = expect(client.state().anchor_x == w::to_fixed(je->position.x) &&
-		                    client.state().anchor_y == w::to_fixed(je->position.y) &&
-		                    client.state().anchor_z == w::to_fixed(je->position.z),
-		            "client ClientState anchor == joiner post-SNAP position (S2C 0x0A folded over UDP)") && ok;
+		ok = expect(client.state().anchor_x == je->position.x.q16 + je->eye_offset_x &&
+		                    client.state().anchor_y == je->position.y.q16 + je->eye_offset_y &&
+		                    client.state().anchor_z == je->position.z.q16 + je->eye_offset_z,
+		            "client ClientState anchor == the joiner body's eye (S2C 0x0A folded over UDP)") && ok;
 	}
 	ok = expect(client.state().frames_applied >= 1, "client folded >= 1 S2C 0x0A over the wire") && ok;
 	if (!ok) { net::shutdown(); return 1; }
