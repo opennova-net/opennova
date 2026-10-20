@@ -703,6 +703,14 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		st.rtt_request_countdown = 0;                      // +89816 [orig: @0x51A758]
 		st.state6_entry_host_ms = ctx.np_protocol.host_run_duration_ms; // +100580 [orig: @0x51A770]
 		st.state6_entry_host_ms_valid = true;
+		// The entry also zeroes +452 and +448 (as CServerTick_SetPhase's does), which nothing
+		// in the image sets otherwise; their readers reach no wire: +448 feeds the host's own
+		// status screen and the 0x16 row's status word, which goes only to a recipient whose
+		// +96481 byte is set, which JO never sets (build_player_list_message sends 0), and
+		// +452 has no slot reader at all (Network_DrawDebugScreen's +0x1C4 is the protocol
+		// connection's). [orig: Server_OnPlayerJoin @0x51A75E / @0x51A764;
+		//  CServerTick_SetPhase @0x5100C4 / @0x5100CA; Server_DrawStatusScreen @0x50A59E;
+		//  Server_BuildAndBroadcastScoreboard @0x50DADF; Network_DrawDebugScreen @0x500FB5]
 	}
 
 	// The join places the body again, in session (D-NET-503): the add hid it and placed it
@@ -810,8 +818,9 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// joiner's own mission start does for the two it sends) against the 0x0B's. For a slot
 	// that is not the host's own (nor a bot's, which JO has none of), each mismatch logs its
 	// HMCRC / CMCRC line and punts type 9 / 10 (the "t9" / "t10" description, DPC 33), here
-	// among the sends, after the 0x0F; the second finds the slot already punted
-	// (D-NET-NEW-L1-5). `/NOPUNT` is not modelled (no port host sets it).
+	// among the sends, after the 0x0F (D-NET-NEW-L1-5). Both legs run through the shared
+	// punt seam (server_logs_punt, Server_StageHostPunt), which stages one description per
+	// connection. `/NOPUNT` is not modelled (no port host sets it).
 	// [orig: Server_OnPlayerJoin - Mission_GetMapChecksums @0x51A89C (@0x6108A8 / @0x6108AE),
 	//  the local and bot bytes @0x51A8A0..0x51A8AD, the first compare @0x51A8B7..0x51A8CE,
 	//  Server_WritePuntLog "HMCRC" @0x51A8E1, Server_LogCRCMismatchPunt(slot, 9, ..) @0x51A8F2,
