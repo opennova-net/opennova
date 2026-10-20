@@ -65,8 +65,9 @@ void mirror_pose(World &world, Entity &e) {
 }
 } // namespace
 
-// The settle writes the spawn pose (+0x24C..+0x260) and its support (+0x264)
-// alone: the AI slot's +0x10/+0x14 keep the words the model init stamped
+// The settle writes no AI-slot word; its pose capture writes the spawn pose
+// (+0x24C..+0x260) and its support (+0x264): the AI slot's +0x10/+0x14 keep the
+// words the model init stamped
 // before it (the BMS record's, Entity::spawn_position), which the 0x0D AI
 // trailer streams, so a hull the settle tick moved still streams its record.
 // [orig: Game_StartMission @0x526012..0x52606B (the model init

@@ -550,7 +550,8 @@ bool collision_matrix_attach_userpoint(const CollisionMatrix &carrier, const int
     final[12] = static_cast<float>(static_cast<double>(tx));
     final[13] = static_cast<float>(static_cast<double>(ty));
     final[14] = static_cast<float>(static_cast<double>(tz));
-    // [orig: Math_FloatMatrixToFixedPoint22 @0x56C7A9]
+    // [orig: Bone_BuildAttachmentMatrix @0x56C630 (the Math_FloatMatrixToFixedPoint22
+    //  call @0x56C7A9)]
     return render_float_to_fixed(final, out);
 }
 

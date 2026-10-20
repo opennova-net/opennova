@@ -1263,6 +1263,116 @@ void test_use_scan_reads_the_dead_bit_alone() {
     }
 }
 
+// The label pass's carrier block has no type test, where the scan's asks only of
+// a type-6 candidate on a PlayerControl carrier: a vehicle parked on a destroyed
+// PlayerControl carrier keeps its seat in the scan and loses its labels, and an
+// EWeap gun on a vehicle carrier without PlayerControl is hidden by an enemy aboard
+// that carrier, which the scan does not ask. A candidate's own enemy occupant is
+// asked of a vehicle (def type 1) alone.
+// [orig: Entity_FindNearestSeatOrArmory @0x435E58..0x435E6C, @0x435E72..0x435E97;
+//  HUD_DrawVehicleSeatAndArmoryLabels @0x5A3379..0x5A3395, @0x5A339B..0x5A33D9]
+void test_label_pass_carrier_block_has_no_type_test() {
+	const auto labels_of = [](Rig &r) {
+		std::vector<AttachLabel> labels;
+		r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
+		return labels;
+	};
+	{
+		Rig r;
+		r.veh().seats.clear(); // the parked vehicle's seat is the only one
+		Entity ride;
+		ride.kind = EntityKind::Item;
+		ride.has_item_def = true;
+		ride.has_graphic_model = true;
+		ride.item_type = 1;
+		ride.health = 500;
+		ride.alive = true;
+		ride.position = r.veh().position;
+		ride.ground_target = r.veh_h;
+		Seat sit;
+		sit.type = SeatType::Passenger;
+		sit.bone_index = 2;
+		sit.seat_local = {0.5f, 1.5f, 1.0f}; // where the rig's ctrlx seat sat
+		ride.seats.push_back(sit);
+		const EntityHandle ride_h = r.w.registry.spawn(1, ride);
+		VehicleSeatSelection hit;
+		CHECK(labels_of(r).size() == 1);
+		r.veh().engine_flags |= kEntityFlagDead;
+		CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+		CHECK(hit.vehicle == ride_h);
+		CHECK(labels_of(r).empty());
+		// Without PlayerControl the dead carrier hides nothing.
+		r.veh().item_attrib = 0;
+		CHECK(labels_of(r).size() == 1);
+	}
+	{
+		Rig r;
+		r.player().team = 1;
+		r.veh().item_type = 1;
+		r.veh().item_attrib = 0; // a vehicle carrier without PlayerControl
+		Entity gun;
+		gun.kind = EntityKind::Item;
+		gun.has_item_def = true;
+		gun.has_graphic_model = true;
+		gun.item_type = 6;
+		gun.item_attrib = kItemAttribEweap;
+		gun.health = 100;
+		gun.alive = true;
+		gun.position = r.veh().position;
+		gun.ground_target = r.veh_h;
+		Seat gunner;
+		gunner.type = SeatType::Gunner;
+		gunner.bone_index = 5;
+		gunner.seat_local = {0.5f, 1.5f, 1.0f};
+		gun.seats.push_back(gunner);
+		const EntityHandle gun_h = r.w.registry.spawn(1, gun);
+		Entity enemy;
+		enemy.kind = EntityKind::Organic;
+		enemy.health = 100;
+		enemy.alive = true;
+		enemy.team = 2;
+		enemy.mounted = true;
+		enemy.mount_target = r.veh_h;
+		enemy.mount_type = SeatType::Passenger;
+		const EntityHandle eh = r.w.registry.spawn(0, enemy);
+		r.veh().seats[1].occupant = eh;
+		VehicleSeatSelection hit;
+		CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+		CHECK(hit.vehicle == gun_h);
+		CHECK(labels_of(r).empty());
+		r.w.registry.get(eh)->team = 1;
+		bool gun_labelled = false;
+		for (const AttachLabel &label : labels_of(r))
+			gun_labelled = gun_labelled || label.entity == gun_h;
+		CHECK(gun_labelled);
+	}
+	{
+		// A two-seat object (def type 6, no EWeap) with an enemy on one seat
+		// still offers the other: only a vehicle asks for its enemy occupant.
+		Rig r;
+		r.player().team = 1;
+		r.veh().item_type = 6;
+		r.veh().item_attrib = 0;
+		r.veh().seats[0].type = SeatType::Passenger;
+		Entity enemy;
+		enemy.kind = EntityKind::Organic;
+		enemy.health = 100;
+		enemy.alive = true;
+		enemy.team = 2;
+		enemy.mounted = true;
+		enemy.mount_target = r.veh_h;
+		enemy.mount_type = SeatType::Passenger;
+		const EntityHandle eh = r.w.registry.spawn(0, enemy);
+		r.veh().seats[1].occupant = eh;
+		VehicleSeatSelection hit;
+		CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+		CHECK(hit.vehicle == r.veh_h && hit.seat_index == 0);
+		CHECK(labels_of(r).size() == 1);
+		r.veh().item_type = 1;
+		CHECK(!r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+	}
+}
+
 // The portable whole-registry walk is only for a world that never built the
 // collision tables. Once a live table build has happened, the retail BSS-zero
 // cadence leaves the first 16 ticks deliberately sliceless.
@@ -2129,6 +2239,7 @@ void test_enemy_occupant_blocks_scan() {
     enemy.alive = true;
     EntityHandle eh = r.w.registry.spawn(0, enemy);
     r.player().team = 1;
+    r.veh().item_type = 1; // only a vehicle asks for its enemy occupant [orig: @0x435E58]
     Entity *ee = r.w.registry.get(eh);
     ee->mounted = true;
     ee->mount_target = r.veh_h;
@@ -3852,6 +3963,7 @@ void test_attach_labels_build_enemy_occupancy_once() {
         vehicle.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         vehicle.has_item_def = true; // seats need the def (D-NET-422)
         vehicle.has_graphic_model = true;
+        vehicle.item_type = 1; // a vehicle: only def type 1 asks for an enemy occupant
         vehicle.position = {
             100.1f + 0.05f * static_cast<float>(i), 200.0f, 10.0f};
         vehicle.health = 100;
@@ -4774,6 +4886,7 @@ int main() {
     test_best_seat_walks_vehicle_children();
     test_seat_gates_read_the_dead_bit_alone();
     test_use_scan_reads_the_dead_bit_alone();
+    test_label_pass_carrier_block_has_no_type_test();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();
     test_post_epoch_player_spawn_discovers_nearby_seat_immediately();
     test_restore_refreshes_completed_candidate_epoch();

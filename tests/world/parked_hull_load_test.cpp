@@ -173,8 +173,8 @@ void test_a_light_hull_leaves_a_neighbours_gun_asleep() {
 void test_a_heavy_hull_wakes_a_neighbours_gun() {
 	ContactRig rig;
 	// Two Mark Vs (mass 114) side by side, each with its gun.
-	const w::EntityHandle a = rig.hull(10.0f, 1320, 114, 2.0f);
-	const w::EntityHandle b = rig.hull(17.0f, 1320, 114, 2.0f);
+	const w::EntityHandle a = rig.hull(10.0f, 1299, 114, 2.0f);
+	const w::EntityHandle b = rig.hull(17.0f, 1299, 114, 2.0f);
 	const w::EntityHandle gun_b = rig.gun(17.0f, b, 1.5f);
 	CHECK(a.valid() && b.valid() && gun_b.valid());
 	rig.contact(a);

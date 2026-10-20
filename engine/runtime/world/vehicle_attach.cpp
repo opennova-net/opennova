@@ -758,11 +758,13 @@ bool point_los_clear(World &world, const Entity &player, const Entity &cand, con
 	return world.ai.line_of_sight_clear(world, a, b, player.handle, endpoint);
 }
 
-// The shared per-entity reject set of the scan and the label pass
-// [orig: @0x435e28..0x435eae / @0x5a335a..0x5a3395 — dead/destroyed skip, itemDef/model
-// presence, enemy-occupant and carried-object rejects].
+// The per-entity reject set of the scan and the label pass: the dead skip, the
+// itemDef and model presence and a vehicle's enemy occupant are shared; the
+// carrier (+0x28) block differs (below).
+// [orig: Entity_FindNearestSeatOrArmory @0x435E28..0x435EA1;
+//  HUD_DrawVehicleSeatAndArmoryLabels @0x5A335A..0x5A33D9]
 bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &player,
-		const HostileMountIndex &hostile_mounts) {
+		const HostileMountIndex &hostile_mounts, bool label_pass) {
 	if (cand.handle == player.handle) return true;
 	// The dead bit alone, in either view: no Health, no latch.
 	// [orig: Entity_FindNearestSeatOrArmory `test byte [esi+24h],2` @0x435E2B;
@@ -778,16 +780,30 @@ bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &
 	// ours' seats and armory points are that model's userpoint rows
 	// (mission/seat_spec_extract.cpp), so such a model offers no point here.
 	if (!cand.has_graphic_model) return true;
-	if (hostile_mounts.blocks(cand.handle))
+	// A vehicle (def type 1) with an enemy occupant; no other type asks
+	// [orig: the scan @0x435E58..0x435E6C, the labels @0x5A3379..0x5A3395].
+	if (cand.item_type == 1 && hostile_mounts.blocks(cand.handle))
 		return true;
 	const Entity *ground = world.registry.get(cand.ground_target);
-	if (cand.item_type == 6 && ground != nullptr && ground->has_item_def &&
-			(ground->item_attrib & kItemAttribPlayerControl) != 0)
-		// Its PlayerControl carrier on the same dead bit [orig: @0x435E8B; the labels
-		// @0x5A33AF].
-		return ((ground->flags | ground->engine_flags) & kEntityFlagDead) != 0 ||
-				hostile_mounts.blocks(ground->handle);
-	return false;
+	if (ground == nullptr || !ground->has_item_def) return false;
+	const bool carrier_control = (ground->item_attrib & kItemAttribPlayerControl) != 0;
+	const bool carrier_dead = ((ground->flags | ground->engine_flags) & kEntityFlagDead) != 0;
+	if (!label_pass) {
+		// The scan asks only of a type-6 candidate on a PlayerControl carrier:
+		// the carrier's dead bit, then its enemy occupant [orig: @0x435E72..0x435E89,
+		// the dead bit @0x435E8B, Vehicle_HasEnemyOccupant @0x435E97].
+		if (cand.item_type == 6 && carrier_control)
+			return carrier_dead || hostile_mounts.blocks(ground->handle);
+		return false;
+	}
+	// The label pass has no type test: any candidate on a dead PlayerControl
+	// carrier is hidden, and an EWeap candidate's vehicle (def type 1) carrier
+	// is asked for an enemy occupant, PlayerControl or not
+	// [orig: @0x5A339B..0x5A33AD, the dead bit @0x5A33AF; EWeap @0x5A33B9..0x5A33C0,
+	//  type 1 @0x5A33C2, Vehicle_HasEnemyOccupant @0x5A33CF].
+	if (carrier_control && carrier_dead) return true;
+	return (cand.item_attrib & kItemAttribEweap) != 0 && ground->item_type == 1 &&
+			hostile_mounts.blocks(ground->handle);
 }
 
 // The scan container: the player's proximity slice when the per-tick tables are
@@ -901,7 +917,7 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // per query above so its witnessed pool-0 scan is not multiplied here.
     for_each_scan_candidate(world, player, [&](const Entity &cand) {
         if (!candidate_relevant_for_mode(cand, armory_mode)) return;
-		if (scan_entity_rejected(world, cand, player, hostile_mounts))
+		if (scan_entity_rejected(world, cand, player, hostile_mounts, false))
 			return;
 		if (!armory_mode) {
             // [orig: the searchMode-0 seat loop @0x435f1e]
@@ -977,7 +993,7 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
         // || entity == nearest_entity @0x5a3354].
         if (can_fire && cand.handle != nearest.vehicle) return;
         if (!candidate_relevant_for_mode(cand, armory_mode)) return;
-		if (scan_entity_rejected(world, cand, player, hostile_mounts))
+		if (scan_entity_rejected(world, cand, player, hostile_mounts, true))
 			return;
 		if (!armory_mode) {
             // [orig: the seat-label loop @0x5a3464; occupied seats never label @0x5a348f]
