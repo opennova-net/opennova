@@ -203,11 +203,15 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
 
 // See the infantry.h contract.
 void player_body_class_event(World &world, Entity &body, int event) {
-    if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return; // [orig: @0x40772F]
+    // [orig: the dead return @0x40772A..0x40772F]
+    if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
     if (event == 1) {
-        // A recorded round's legs; with none the network kill scorer returns
-        // at once [orig: the round test @0x4078D8..0x4078DA, the legs
-        //  @0x407777..0x407A7C; Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D].
+        // A recorded round's legs (its network kill scorer only reaches
+        // GameEvent_ProcessScoring case 2, which the port does not model, live
+        // hits included); with none the scorer returns at once [orig: the
+        //  round test @0x4078D8..0x4078DA, the legs @0x407777..0x407A7C;
+        //  Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D;
+        //  GameEvent_ProcessScoring case 2 @0x52FC22].
         const HitRecord &record = world.round_sim.hit_record;
         if (record.has_round) person_class_round_legs(world, body, record);
     } else if (event == 4) {
@@ -224,6 +228,8 @@ void player_body_class_event(World &world, Entity &body, int event) {
             motor->inf.anim_state = body.death_anim_state;
             motor->inf.anim_pending = 0;
         }
+        // [orig: the parent @0x407AED, Entity_DetachFromVehicleIfServer
+        //  @0x407B0B..0x407B20]
         if (world.ai.is_authority && body.mounted) world.commands.dismount(body.handle);
     }
     if (event != 4 && event != 1 && event != 3 && event != 5) body.cause_flags &= ~0xF00u;
