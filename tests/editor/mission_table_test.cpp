@@ -15,15 +15,14 @@
 // units, an entity's item is set by its items.def id; the lists: the fixed tables take nothing in or
 // out, a path holds 32 stops and a stop put in or taken out writes the path's count as its slots where
 // a flags edit leaves a stored count past them as it was read, an event's chain holds 20 of each, a
-// new bounding box is a type-0 box no reader reads, and the file reparses after every edit. With the game install (a
-// SKIP-LEG without OPENNOVA_JO_DIR), every mission it ships reads through the table and a Set of every
-// field to the value it reads writes the same file but the bytes it names, each a fixed text slot's
-// past its text in a slot the game is witnessed to read to its first NUL alone (the shipped missions'
-// two: the terrain slot of TDH_I3A.bms and TKH_I3A.bms, three bytes each).
+// new bounding box is a type-0 box no reader reads, and the file reparses after every edit. Every mission of
+// the sweep (mission_sweep.h) reads through the table and a Set of every field to the value it reads writes
+// the same file but the bytes it names, each a fixed text slot's past its text in a slot the game is
+// witnessed to read to its first NUL alone (records.bms's terrain slot, the form of TDH_I3A.bms's and
+// TKH_I3A.bms's, three bytes each); a slot no witness names holding such bytes fails.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
 #include <functional>
 #include <limits>
 #include <map>
@@ -31,8 +30,6 @@
 #include <string>
 #include <vector>
 
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
 #include <editor/graph/reference_kinds.h>
@@ -42,14 +39,13 @@
 #include <formats/mission/mission_chains.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/mission_sweep.h"
 
 using namespace opennova::editor;
 namespace bms = opennova::bms;
 namespace mission = opennova::mission;
-namespace fs = std::filesystem;
 
 namespace {
 
@@ -618,7 +614,7 @@ int test_lists() {
 	return 0;
 }
 
-// --- the retail sweep ----------------------------------------------------------------------------------
+// --- the sweep -----------------------------------------------------------------------------------------
 
 void each_record(const RecordHandle &record, const std::function<void(const RecordHandle &)> &fn) {
 	fn(record);
@@ -695,7 +691,7 @@ std::map<MissionKind, std::vector<Slot>> text_slots() {
 	return out;
 }
 
-struct RetailCounts {
+struct SweepCounts {
 	long fields = 0, set = 0, padded = 0;
 	// Each run of bytes a Set of a text to itself zero-padded past its text, named: the mission, the
 	// record, the field and the bytes of the slot.
@@ -712,7 +708,7 @@ const char *const kCitedSlots[] = {"terrain"};
 // zero-padded past its text (copy_fixed_field pads a slot with zeros past the text it copies), each
 // named, each in a slot kCitedSlots names.
 int set_to_itself(const std::vector<uint8_t> &bytes, const std::string &name,
-                  const std::map<MissionKind, std::vector<Slot>> &slots, RetailCounts &counts) {
+                  const std::map<MissionKind, std::vector<Slot>> &slots, SweepCounts &counts) {
 	Loaded m;
 	if (!load(m, bytes, name) || m.document.blocked()) {
 		std::fprintf(stderr, "%s: does not open as a mission document\n", name.c_str());
@@ -801,46 +797,52 @@ int set_to_itself(const std::vector<uint8_t> &bytes, const std::string &name,
 	return failures;
 }
 
-int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every mission of the game install through the table)");
+// Every mission of the sweep (mission_sweep.h), in place of every mission the install ships, read through the
+// table and set to itself: the same file but the bytes a text slot's Set zero-padded past its text, each in a
+// slot kCitedSlots names. The one such run is records.bms's terrain, bytes 6..8 of the slot past its NUL, the form
+// two shipped missions hold there (TDH_I3A.bms and TKH_I3A.bms, three bytes each, file @74..76). A slot no citation
+// names holding bytes past its NUL fails the pass (logic.bms's first item's name1 so made, in memory).
+int test_sweep() {
 	const std::map<MissionKind, std::vector<Slot>> slots = text_slots();
 	TEST_EXPECT(slots.size() == 3 && slots.at(MissionKind::Mission).size() == 9 && slots.at(MissionKind::Item).size() == 3);
-	// The base game's missions and each expansion's (each file once, by its archive and name).
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string());
-	std::set<std::string> seen;
+	std::vector<std::string> missing;
+	const std::vector<mission_sweep::Mission> sweep = mission_sweep::load(missing);
 	int missions = 0, failures = 0;
-	RetailCounts counts;
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(fs::path(file.logical_name).extension().string()) != ".bms") continue;
-			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			TEST_EXPECT(game.read_file(file.logical_name, bytes));
-			failures += set_to_itself(bytes, file.logical_name, slots, counts);
-			++missions;
-		}
+	SweepCounts counts;
+	for (const mission_sweep::Mission &file : sweep) {
+		failures += set_to_itself(file.bytes, file.name, slots, counts);
+		++missions;
 	}
-	if (missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
 	for (const std::string &line : counts.named) std::printf("  zero-padded past its text: %s\n", line.c_str());
-	std::printf("retail: %d missions, %ld fields read, %ld set to themselves, each file written again the same but "
+	std::printf("sweep: %d missions, %ld fields read, %ld set to themselves, each file written again the same but "
 	            "%ld byte(s) in %zu slot(s) a text's Set padded with zeros past its text\n",
 	            missions, counts.fields, counts.set, counts.padded, counts.named.size());
 	TEST_EXPECT(failures == 0);
+	TEST_EXPECT(counts.named == std::vector<std::string>{"records.bms: mission 0, terrain, its bytes 6..8 (file @74..76)"});
+	// Bytes past the NUL of a slot no citation names (an item's name1): its Set's padding fails the pass.
+	{
+		std::vector<uint8_t> bytes;
+		for (const mission_sweep::Mission &file : sweep)
+			if (mission_sweep::minted(file, "logic.bms")) bytes = file.bytes;
+		bms::File file;
+		std::string error;
+		TEST_EXPECT(!bytes.empty() && bms::parse(bytes.data(), bytes.size(), file, error) && !file.items.empty());
+		std::memcpy(file.items[0].name1, "AB\0Z", 4);
+		TEST_EXPECT(bms::write(file, bytes, error));
+		SweepCounts uncited;
+		std::printf("  (an item's name1 holding a byte past its NUL, which no citation names: the pass fails it)\n");
+		TEST_EXPECT(set_to_itself(bytes, "uncited.bms", slots, uncited) == 1 && uncited.named.empty());
+	}
+	TEST_EXPECT(mission_sweep::none_missing(missing));
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (test_rows() != 0) return 1;
 	if (test_complete() != 0) return 1;
 	if (test_fields() != 0) return 1;
 	if (test_lists() != 0) return 1;
-	return test_retail();
+	return test_sweep();
 }
