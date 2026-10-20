@@ -150,6 +150,10 @@ void OriginalFiles::begin_round() {
 		}
 	run.scope.taken();
 	run.scope_missions = false;
+	// The project checks start over: what each kept of the round before was made over that round's files whose
+	// records were checked (a menu outside it kept unread, its stamps standing), which this round's widen, and a
+	// check keeps a file until its stamps move.
+	run.checks.clear();
 	run.validation = std::make_unique<ProjectValidation>(run.graph, run.cache, run.readings);
 	run.slot = 0;
 	run.begun = false;
