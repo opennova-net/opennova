@@ -623,9 +623,14 @@ int round_flies_on_the_words() {
 }
 
 // The 0x0C carries a mounted body's attachBoneId (+0x157), parentSlot (+0x168) and its
-// parent's packed handle (+0x16C); an unmounted one 0 / 0 / 0xFFFF.
+// parent's packed handle (+0x16C); an unmounted one 0 / 0 / 0xFFFF. Every body's record
+// also carries the low byte of aiState (+0x2B4), the AI slot's +0x20 byte (the low byte of
+// its tick accumulator), refNum (+0x215) and subType (+0x214), each of which a stock
+// joiner stores.
 // [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - @0x503353, @0x50336D,
-//  @0x50337B..0x5033DD, the null 0xFFFF @0x5033EC]
+//  @0x50337B..0x5033DD, the null 0xFFFF @0x5033EC; aiState @0x5032A3, the slot byte
+//  @0x5032F3..0x5032F6, refNum @0x503329, subType @0x50333E; NapiNPClientMsg_0x00C
+//  @0x42E730 - @0x42E991, @0x42E9EB, @0x42EA20, @0x42EA35]
 int organic_record_streams_the_mount() {
 	auto world = std::make_unique<w::World>();
 	world->registry.configure_pool(0, 4);
@@ -650,6 +655,10 @@ int organic_record_streams_the_mount() {
 	g.mount_target = carrier;
 	g.mount_type = w::SeatType::Gunner;
 	g.mount_bone = 4;
+	g.ai_state = 0x0115;
+	g.ref_num = 7;
+	g.sub_type = 9;
+	world->ai.for_handle(gunner)->brain.f[w::AiBrain::kTickAccum] = 0x1234;
 	const opennova::OrganicSpawnBatch c = ns::build_pool0_organic_batch(*world);
 	opennova::OrganicSpawnBatch out;
 	const std::vector<uint8_t> wire = opennova::encode_organic_spawn_batch(c);
@@ -667,6 +676,10 @@ int organic_record_streams_the_mount() {
 		return 1;
 	if (!expect(free.weapon_type == 0 && free.parent_slot == 0 && free.parent_handle == 0xFFFF,
 	            "an unmounted body streams 0 / 0 / 0xFFFF"))
+		return 1;
+	if (!expect(mounted.ai_state == 0x15 && mounted.ai_action == 0x34 && mounted.alert_level == 7 &&
+	                    mounted.sub_type == 9,
+	            "the record streams aiState's low byte, the slot's +0x20 byte, refNum and subType"))
 		return 1;
 	std::printf("PASS organic_record_streams_the_mount\n");
 	return 0;

@@ -409,8 +409,8 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		// A row with no ItemTypeIndex (+0x1C), no def (+0x20) or no AI slot (+0x68) is
 		// passed over, uncounted (D-NET-487). [orig: NetPacket_SerializeEntityStatesToBuffer
 		//  @0x5030A0 - the tests @0x503134 / @0x50313E / @0x503148]
-		if (e.item_type_index == 0 || !e.has_item_def || w.ai.for_handle(e.handle) == nullptr)
-			return;
+		const world::AiEntity *ae = w.ai.for_handle(e.handle);
+		if (e.item_type_index == 0 || !e.has_item_def || ae == nullptr) return;
 		// The dismemberment clone is included: the original's join download
 		// serializes every pool-0 slot (single caller
 		// Server_SendInitialGameStateToPlayer @0x51bd24), and the 0x0C record
@@ -441,6 +441,10 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		rec.pos_z = e.position.z.q16;
 		rec.orientation = engine_heading_bam(e.yaw);
 		rec.team = e.team;
+		// aiState (+0x2B4), the low byte. [orig: NetPacket_SerializeEntityStatesToBuffer
+		//  @0x5030A0 - read @0x5032A3, stored @0x5032B6; NapiNPClientMsg_0x00C @0x42E730 -
+		//  entity->aiState @0x42E991]
+		rec.ai_state = static_cast<uint8_t>(e.ai_state);
 		// Field 13 = entity+0x374 animSlot, the character-model/anim-set selector — serialized RAW
 		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0 reads +0x374 @0x5032b8]. For players the
 		// spawn stamped it from the joiner's per-side VCA/VCB join var (golden joiner=4); NEVER the
@@ -454,7 +458,19 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 				? player_wire_net_id(e)
 				: e.minimap_net_id;
 		rec.player_class = player_class_for_wire(e);
+		// The AI slot's +0x20 byte (*(entity+0x68) + 0x20): the low byte of the slot's tick
+		// accumulator, which a stock joiner stores back into its slot's +0x20 dword.
+		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - `mov edx, [ecx+68h];
+		//  mov dl, [edx+20h]` @0x5032F3..0x5032F6, stored @0x503306; NapiNPClientMsg_0x00C
+		//  @0x42E730 - @0x42E9EB; AIEntity_ProcessWeaponFire @0x472E00 - `add [esi+20h], eax`
+		//  @0x472E3A]
+		rec.ai_action = static_cast<uint8_t>(ae->brain.f[world::AiBrain::kTickAccum]);
 		rec.player_slot_id = e.player_slot_id; // entity+0x154 [orig: @0x503316..0x503327]
+		// refNum (+0x215) and subType (+0x214). [orig: NetPacket_SerializeEntityStatesToBuffer
+		//  @0x5030A0 - +0x215 @0x503329 stored @0x50333C, +0x214 @0x50333E stored @0x503351;
+		//  NapiNPClientMsg_0x00C @0x42E730 - @0x42EA20, @0x42EA35]
+		rec.alert_level = e.ref_num;
+		rec.sub_type = e.sub_type;
 		// The mount: attachBoneId (+0x157), parentSlot (+0x168) and the parent's packed
 		// handle (+0x16C, 0xFFFF for none), so a joiner seats a mounted body on arrival.
 		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - +0x157 @0x503353,
