@@ -275,10 +275,9 @@ void run_two_squads_added_in_one_pass() {
 	f.queue_joiner(1, "Baker", 8, "Bravo Squad", "BRV");
 	expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 2,
 	       "one pump pass adds both joiners");
-	expect(drain(f.transports[0]).empty(), "Able hears nothing ahead of its pump block");
+	// The pump queues each added player's block at its add (D-NET-504), so Able's queue
+	// holds its block and then, from Baker's add, Baker's 0x6A.
 	(void)drain(f.lan_transport);
-	(void)inmatch::tick_connections(*f.ctx, 16, f.tick++, /*respect_s2c_send_boundary=*/false,
-			/*run_spawn_pump=*/false);
 	const std::vector<ns::Datagram> able = drain(f.transports[0]);
 	const std::size_t own = index_of(able, opennova::s2c::CLAN_ROSTER);
 	const std::size_t start = index_of(able, opennova::s2c::GAME_START_SIGNAL);
