@@ -89,7 +89,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		//  @0x50C297 / @0x50C30D]
 		const bool mounted_route =
 				shooter->use_gun_slot_swapped && shooter->mount_target.valid();
-		WeaponSlotState *personal = nullptr;
+		world::PersonalWeaponSlot *personal = nullptr;
 		world::WeaponSlotState *mounted_slot = nullptr;
 		const world::WeaponTableEntry *slot_def = nullptr;
 		if (mounted_route) {
@@ -119,9 +119,9 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			if (slot_def == nullptr) return;
 			fired_adm = mounted_adm;
 		} else {
-			const auto found = conn.weapon_slots.find(
+			const auto found = shooter->weapon_slots.find(
 					static_cast<uint16_t>(uint16_t(adm->category) * 65u + adm->rank));
-			if (found == conn.weapon_slots.end()) return;
+			if (found == shooter->weapon_slots.end()) return;
 			personal = &found->second;
 			slot_def = world->tables.weapons.by_index(personal->adm_index);
 			if (slot_def == nullptr) return;
@@ -184,8 +184,8 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 				if (static_cast<int16_t>(mounted_slot->clip) == 0) return;
 				--mounted_slot->clip;
 			} else {
-				WeaponSlotState &slot = *personal;
-				if (slot.clip == 0) return;
+				world::PersonalWeaponSlot &slot = *personal;
+				if (static_cast<int16_t>(slot.clip) == 0) return;
 				--slot.clip;
 			}
 		}

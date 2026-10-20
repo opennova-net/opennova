@@ -103,13 +103,13 @@ void write_ammo_damage_classes(NapiNPConnection &conn, const GrantedWeaponLoadou
 // The rebuilt kit onto the slot: the retained 0x5A body the re-sends answer with (each
 // row's fourth byte the slot's damage-class byte at the row's AdmDef index), the
 // authority ammo pools and loaded-round buckets, and (with a weapon table) the
-// host-side slot rows — every granted combo with its drawn clip replaces the previous
-// rows. A table-less host keeps its rows (the lazy first-fire seed).
+// player entity's own slot rows (world::Entity::weapon_slots) — every granted combo
+// with its drawn clip replaces the previous rows. A table-less host keeps its rows.
 // [orig: WeaponSlotPool_ResetAllEntries + WeaponSlotTable_LoadAllFromDefs +
 //  WeaponSlots_RecalculateAmmoFromCapacity, NapiNPServerMsg_HandlePlayerLoadout
 //  @0x515DB5..0x515F4D and PlayerSlot_InitWeaponsFromLoadout @0x515571..0x51577C]
-void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &grant,
-                           bool rebuild_rows);
+void apply_granted_loadout(NapiNPConnection &conn, world::Entity &player,
+                           const GrantedWeaponLoadout &grant, bool rebuild_rows);
 
 // The deploy's kit rebuild: the slot's weapon table, ammo pools and clips rebuilt
 // from its loadout buffer (the last accepted 0x2F's entries and counts under the

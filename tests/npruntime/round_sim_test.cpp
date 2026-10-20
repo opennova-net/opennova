@@ -59,6 +59,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -73,6 +74,13 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
+
+// The player entity's own weapon table (world::Entity::weapon_slots), the host's
+// per-player slot rows since D-NET-336's move.
+std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
+		const inmatch::NapiNPConnection &conn) {
+	return world.registry.get(conn.link.owned_entity)->weapon_slots;
+}
 using conn_fixture::make_seeded_conn;
 
 bool expect(bool cond, const char *msg) {
@@ -1809,7 +1817,7 @@ int main() {
 	roster.push_back(make_seeded_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
 	roster.push_back(make_seeded_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
 	// The rifle slot B's loadout grant left: the 0x06 fires only through a held slot.
-	roster[1].weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 30};
+	slots_of(world, roster[1])[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 30};
 	// Distinct roster slot indexes (playerSlot+20): the chat sender byte and the
 	// C2S 0x22 slot pull below address players by this index.
 	for (size_t i = 0; i < roster.size(); ++i)

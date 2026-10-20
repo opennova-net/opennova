@@ -216,20 +216,6 @@ struct CharacterJoinVars {
 	uint8_t avatar[2] = {0, 0};     // VCA / VCB -> jsp[63] / ci0 low byte
 };
 
-// Host-side fire state for ONE of this player's weapon slots — the clip the C2S 0x06 fire
-// pipeline checks + decrements and the C2S 0x25 reload relay refills. Keyed (in the map
-// below) by the weapon-slot combo = category*65 + rank [orig: the per-player 100-B
-// weapon-slot array playerSlot+464, index roundSlotIndex = adm[4] + 65*adm[0]
-// (Server_ClientFiredRound @0x50c0d7); the u16 clip = slot+16 (WeaponSlot_CanFire
-// @0x541ba0 reads it, Weapon_ConsumeAmmo @0x540850 decrements it, WeaponSlot_ReloadAmmo
-// @0x541720 refills it)]. The shared ammo pools (adm+220 belt / adm+216 ammo-point
-// classes) and the +96472 fire-rate stamp are the connection's, not this struct's
-// (`ammo_pools`; `fire_tick_floor`, stamped in server_fired_round.cpp).
-struct WeaponSlotState {
-	uint8_t adm_index = 0; // the weapon bound to this combo [orig: slot+32 adm ptr]
-	int16_t clip = 0;      // rounds left in the magazine [orig: slot+16]
-};
-
 // Per-connection state for the reactive gameplay-message reply handlers (the §5.1 handshake /
 // server-info / mission-metadata / loadout replies a retail joiner expects). Folded
 // onto the connection node like InitialStateBurst — the slice of the retired GameSessionState the
@@ -810,13 +796,6 @@ struct NapiNPConnection {
 	//  @0x51E3BB..0x51E3C8 / @0x51E40D]
 	static constexpr size_t kAmmoDamageClassBytes = 0x15ED8 - 0x15E58;
 	std::array<uint8_t, kAmmoDamageClassBytes> ammo_damage_classes{};
-
-	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
-	// by the loadout grant's rebuild (the kit and its sub-variants) and the powerup grants; a
-	// combo with no row holds no weapon, and the 0x06 refuses it. Refilled by the 0x25 relay.
-	// (D-NET-152). The player entity's EquippedSlot names a row by its combo
-	// (world::Entity::equipped_slot).
-	std::map<uint16_t, WeaponSlotState> weapon_slots;
 };
 
 // Store `event` as the connection's disconnect record only while none is latched — retail's

@@ -97,10 +97,10 @@ bool remote_held_weapon_out_of_ammo(const World &w, const NapiNPServerCtx &serve
 			case WeaponSlotRef::kNone:
 				return false;
 			case WeaponSlotRef::kPersonal: {
-				const auto slot = conn.weapon_slots.find(e.equipped_slot.combo);
-				if (slot == conn.weapon_slots.end()) return false;
+				const auto slot = e.weapon_slots.find(e.equipped_slot.combo);
+				if (slot == e.weapon_slots.end()) return false;
 				def = w.tables.weapons.by_index(slot->second.adm_index);
-				slot_clip = slot->second.clip;
+				slot_clip = static_cast<int16_t>(slot->second.clip);
 				break;
 			}
 			case WeaponSlotRef::kMount: {

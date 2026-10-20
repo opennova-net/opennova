@@ -31,10 +31,10 @@ NapiNPConnection *owning_connection(std::vector<NapiNPConnection> &roster,
 } // namespace
 
 world::WeaponInventory conn_weapon_inventory(const NapiNPConnection &conn,
-		const world::WeaponTable &table) {
+		const world::Entity *player, const world::WeaponTable &table) {
 	world::WeaponInventory inventory;
 	inventory.reset(table);
-	for (const auto &[combo, row] : conn.weapon_slots) {
+	if (player != nullptr) for (const auto &[combo, row] : player->weapon_slots) {
 		world::WeaponInventorySlot *slot = inventory.slot(combo);
 		if (slot == nullptr) continue;
 		slot->adm_index = row.adm_index;
@@ -48,16 +48,18 @@ world::WeaponInventory conn_weapon_inventory(const NapiNPConnection &conn,
 	return inventory;
 }
 
-void store_conn_weapon_inventory(NapiNPConnection &conn, const world::WeaponInventory &inventory) {
+void store_conn_weapon_inventory(NapiNPConnection &conn, world::Entity *player,
+		const world::WeaponInventory &inventory) {
 	const size_t pool_count = std::min(inventory.pools.size(), conn.reply.ammo_pools.size());
 	for (size_t i = 0; i < pool_count; ++i) {
 		conn.reply.ammo_pools[i] = inventory.pools[i];
 		conn.reply.shared_clips[i] = inventory.shared_clips[i];
 	}
+	if (player == nullptr) return;
 	for (int32_t combo = 0; combo < world::weapon_combo::kSlotCount; ++combo) {
 		const world::WeaponInventorySlot *slot = inventory.slot(combo);
 		if (slot == nullptr || slot->adm_index < 0) continue;
-		WeaponSlotState &row = conn.weapon_slots[static_cast<uint16_t>(combo)];
+		world::PersonalWeaponSlot &row = player->weapon_slots[static_cast<uint16_t>(combo)];
 		row.adm_index = static_cast<uint8_t>(slot->adm_index);
 		row.clip = static_cast<int16_t>(slot->clip);
 	}
@@ -68,12 +70,12 @@ bool ServerRemoteWeaponTables::remote_weapon_tables(const world::World &world,
 	if (world.tables.weapons.empty()) return false;
 	NapiNPConnection *conn = owning_connection(roster_, player);
 	if (conn == nullptr) return false; // Entity_ValidatePtr finds no slot
-	out = conn_weapon_inventory(*conn, world.tables.weapons);
+	out = conn_weapon_inventory(*conn, world.registry.get(player), world.tables.weapons);
 	return true;
 }
 
 // A remote player's powerup pickup: the per-class adds and the `allammo`
-// re-seed land on the owning connection's pools and slot rows, the way retail's
+// re-seed land on the owning connection's pools and the player's slot rows, the way retail's
 // authority arms write the validated entity's per-connection tables (the listen
 // host's own player writes its live inventory inside world/powerup.cpp). The
 // joiner ran the same pickup on its own pools, so no message follows. Only the
@@ -89,8 +91,8 @@ void Server_ApplyPowerupGrants(std::vector<NapiNPConnection> &roster, world::Wor
 		if (table.empty()) break;
 		NapiNPConnection *conn = owning_connection(roster, grant.picker);
 		if (conn == nullptr) continue;
-		const world::Entity *body = world.registry.get(grant.picker);
-		world::WeaponInventory inventory = conn_weapon_inventory(*conn, table);
+		world::Entity *body = world.registry.get(grant.picker);
+		world::WeaponInventory inventory = conn_weapon_inventory(*conn, body, table);
 		if (grant.allammo) {
 			world::weapon_inventory_seed_pools(
 					table, inventory, body != nullptr ? body->player_class : 0);
@@ -99,7 +101,7 @@ void Server_ApplyPowerupGrants(std::vector<NapiNPConnection> &roster, world::Wor
 		}
 		for (const auto &[class_id, amount] : grant.ammo_adds)
 			world::weapon_pool_add(table, inventory, class_id, amount);
-		store_conn_weapon_inventory(*conn, inventory);
+		store_conn_weapon_inventory(*conn, body, inventory);
 	}
 	world.out.powerup_grants.clear();
 }
@@ -116,13 +118,13 @@ void Server_BroadcastWeaponOverlayUpdates(NapiNPServerCtx &ctx, world::World &wo
 				? nullptr
 				: owning_connection(ctx.np_protocol.connection_list, grant.picker);
 		if (conn != nullptr && !table.empty()) {
-			const world::Entity *body = world.registry.get(grant.picker);
-			world::WeaponInventory inventory = conn_weapon_inventory(*conn, table);
+			world::Entity *body = world.registry.get(grant.picker);
+			world::WeaponInventory inventory = conn_weapon_inventory(*conn, body, table);
 			const world::WeaponAvatarGrant landed = world::weapon_inventory_init_from_avatar_def(
 					table, inventory, grant.weapon, body != nullptr ? body->player_class : 0,
 					world.rules.sniper_zoom_fill,
 					body != nullptr ? world::entity_ammo_seat(world, *body) : world::WeaponAmmoSeat{});
-			store_conn_weapon_inventory(*conn, inventory);
+			store_conn_weapon_inventory(*conn, body, inventory);
 			// The reload's entry stamp on the host's copy of the body
 			// [orig: WeaponSlot_ReloadAmmo @0x54173c]
 			if (landed.reloaded)

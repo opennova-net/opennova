@@ -889,9 +889,10 @@ void Server_RecalculateAllPlayerKitWeights(
 		}
 		world::AiEntity *body = world.ai.for_handle(conn.link.owned_entity);
 		if (body == nullptr) continue;
+		const world::Entity *entity = world.registry.get(conn.link.owned_entity);
 		world::WeaponInventory inventory;
 		inventory.reset(table);
-		for (const auto &[combo, row] : conn.weapon_slots) {
+		if (entity != nullptr) for (const auto &[combo, row] : entity->weapon_slots) {
 			world::WeaponInventorySlot *slot = inventory.slot(combo);
 			if (slot == nullptr) continue;
 			slot->adm_index = row.adm_index;
@@ -903,7 +904,6 @@ void Server_RecalculateAllPlayerKitWeights(
 			inventory.pools[i] = conn.reply.ammo_pools[i];
         for (size_t i = 0; i < pool_count; ++i)
             inventory.shared_clips[i] = conn.reply.shared_clips[i];
-		const world::Entity *entity = world.registry.get(conn.link.owned_entity);
 		body->inf.loadout_weight_fp16 = world::weapon_inventory_loadout_weight_fp16(table,
 				inventory,
 				entity != nullptr ? world::entity_ammo_seat(world, *entity) : world::WeaponAmmoSeat{});

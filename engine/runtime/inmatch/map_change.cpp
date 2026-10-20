@@ -79,9 +79,13 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 // client's medic preference; the reply state's name, roster slot, ping
 // history, team-change stamp and integrity salts, the latches that make
 // the admission's 0x04 / 0x7B boundary and the join announcement one-shot,
-// and the slot's kit: its loadout buffer, ammo pools, loaded-round buckets
-// and slot table, which the reset does not store to (the round init rebuilds
-// the slot table from them), and the retained list body.
+// and the slot's kit: its loadout buffer, ammo pools and loaded-round buckets,
+// which the reset does not store to, and the retained list body. The slot
+// table's rows are the player entity's (world::Entity::weapon_slots) and go
+// with it; the round init rebuilds every row on the slot's new entity from the
+// kept buffer, as retail's resets every entry of the kept table first
+// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 (the
+//  WeaponSlotPool_ResetAllEntries call @0x516C03)].
 // The burst's cursors start over; the slot's state word is the caller's (the
 // reset returns a slot in states 2..7 to state 1, so the kept joiner's reload
 // starts the player-sync track again with its C2S 0x09).

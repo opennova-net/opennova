@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 #include <runtime/world/weapon_fsm.h>
@@ -354,6 +355,19 @@ struct WeaponSlotRef {
 	bool operator==(const WeaponSlotRef &o) const {
 		return kind == o.kind && combo == o.combo && adm == o.adm && mount == o.mount;
 	}
+};
+
+// One slot of a player's own weapon table on the host: the def the slot holds and
+// the MountSlot's state (its action FSM and the clip, +0x10). A remote player's
+// table is the player record's 780 rows of 100 bytes at +0x1D0, indexed by the combo
+// category * 65 + rank; its EquippedSlot names a row by that combo. The local
+// player's table is its WeaponInventory. [orig: Server_ClientFiredRound - the row
+// @0x50C27F..0x50C282; NapiNPServerMsg_HandlePlayerLoadout @0x515F5B;
+// Server_InitAllPlayerEntitiesForRound @0x516AA0 (the reload @0x516BFC..0x516C0E)]
+struct PersonalWeaponSlot : WeaponSlotState {
+	uint8_t adm_index = 0; // the def the row holds [orig: slot+0x20]
+	PersonalWeaponSlot() = default;
+	PersonalWeaponSlot(uint8_t adm, int32_t rounds) : adm_index(adm) { clip = rounds; }
 };
 
 // The lndm entity overlay. Zero-filled, unauthored slots still participate.
@@ -800,6 +814,11 @@ struct Entity {
     // at the second; the weapon walk pumps the first, a borrowed one on foot too.
     WeaponSlotRef equipped_slot;
     WeaponSlotRef selected_slot;
+    // A remote player's own weapon table on the host, by combo (PersonalWeaponSlot
+    // above): seeded by the loadout rebuilds and the powerup grants; a combo with no
+    // row holds no weapon, and the C2S 0x06 refuses it; the C2S 0x25 relay refills
+    // it. Empty for every other entity (D-NET-152, D-NET-336).
+    std::map<uint16_t, PersonalWeaponSlot> weapon_slots;
     bool hidden = false;
 
     // --- destruction state (world/destruction.h; world-wac-ai-re §24) ---

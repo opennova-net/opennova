@@ -42,6 +42,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,13 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
+
+// The player entity's own weapon table (world::Entity::weapon_slots), the host's
+// per-player slot rows since D-NET-336's move.
+std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
+		const inmatch::NapiNPConnection &conn) {
+	return world.registry.get(conn.link.owned_entity)->weapon_slots;
+}
 using conn_fixture::make_seeded_conn;
 
 bool expect(bool cond, const char *msg) {
@@ -202,7 +210,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 					0xFFFF, 1, 0, 0));
 	if (!expect(live_parent->primary_weapon_slot.clip == 8 &&
 			live_child->primary_weapon_slot.clip == 4 &&
-			roster[0].weapon_slots.empty(),
+			slots_of(world, roster[0]).empty(),
 			"mounted parent-route fire spends only the parent world slot"))
 		return false;
 	// A request naming the child's weapon on the parent route fires the parent's: the
@@ -317,8 +325,8 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	conn.server_sk = 0x55667788u;
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 	// The slot the loadout grant left.
-	ctx.np_protocol.connection_list[0].weapon_slots[uint16_t(3 * 65 + 2)] =
-			inmatch::WeaponSlotState{5, 30};
+	slots_of(world, ctx.np_protocol.connection_list[0])[uint16_t(3 * 65 + 2)] =
+			w::PersonalWeaponSlot{5, 30};
 
 	const std::vector<uint8_t> shot =
 			fire_body(shooter.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0);
@@ -335,14 +343,14 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	if (!expect(world.out.rounds.count == 1, "first C2S 0x06 appends one authoritative round"))
 		return false;
 	const uint16_t combo = uint16_t(3 * 65 + 2);
-	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
+	if (!expect(slots_of(world, ctx.np_protocol.connection_list[0])[combo].clip == 29,
 	            "first C2S 0x06 spends one cartridge"))
 		return false;
 
 	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 101);
 	if (!expect(world.out.rounds.count == 1, "exact duplicate C2S 0x06 does not append a second round"))
 		return false;
-	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
+	if (!expect(slots_of(world, ctx.np_protocol.connection_list[0])[combo].clip == 29,
 	            "exact duplicate C2S 0x06 does not spend a second cartridge"))
 		return false;
 
@@ -394,7 +402,7 @@ bool check_retail_fire_admission() {
     weapon.action_fsm.actions[w::weapon_action::kFire].delay_end = 2;
     weapon.action_fsm.actions[w::weapon_action::kRecoil].delay_start = 3;
     weapon.action_fsm.actions[w::weapon_action::kRecoil].delay_end = 4;
-    conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 20}; // the grant's
+    slots_of(world, conn)[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 20}; // the grant's
     const auto send = [&](uint32_t tick, uint8_t flags = 0, uint8_t adm = 5) {
         ClientFiredRound fire;
         fire.current_tick = tick;
@@ -430,7 +438,7 @@ bool check_retail_fire_admission() {
     send(seed + 21, 1);    // alt fire advances by zero, not the primary cooldown
     send(seed + 22, 1);
     if (!expect(world.out.rounds.count == 4, "rejects preserve the clock and alt shots stamp only their tick")) return false;
-    if (!expect(conn.weapon_slots[uint16_t(3 * 65 + 2)].clip == 18,
+    if (!expect(slots_of(world, conn)[uint16_t(3 * 65 + 2)].clip == 18,
             "only the two accepted primary shots consume cartridges")) return false;
     // The grace reads the server frame clock (g_ServerFrameClock), not the logic
     // tick: the frame clock trails the logic tick by one here, so a logic-tick
@@ -474,7 +482,7 @@ bool check_fire_owner_environment_and_origin() {
     ns::UdpSessionTransport udp(ns::UdpSessionTransport::Role::Host);
     std::vector<inmatch::NapiNPConnection> roster;
     roster.push_back(make_seeded_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
-    roster[0].weapon_slots[uint16_t(65)] = inmatch::WeaponSlotState{1, 4}; // the grant's
+    slots_of(world, roster[0])[uint16_t(65)] = w::PersonalWeaponSlot{1, 4}; // the grant's
     auto shoot_at = [&](int32_t px) {
         dispatch_fire(roster[0], roster, world,
                 fire_body(shooter.packed, 2, 1, px, 0, 0, 0, 0, 0xFFFF, 1, 0, 0));
@@ -576,7 +584,7 @@ bool check_refused_fire_mirrors_the_weapon() {
     std::vector<inmatch::NapiNPConnection> roster;
     roster.push_back(make_seeded_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
     // adm 1 holds its slot with an empty clip.
-    roster[0].weapon_slots[uint16_t(65 + 1)] = inmatch::WeaponSlotState{1, 0};
+    slots_of(world, roster[0])[uint16_t(65 + 1)] = w::PersonalWeaponSlot{1, 0};
     auto shoot = [&](uint8_t adm) {
         dispatch_fire(roster[0], roster, world,
                 fire_body(shooter.packed, 2, adm, 0, 0, 0, 0, 0, 0xFFFF, 1, 0, 0));
@@ -632,13 +640,13 @@ bool check_ungranted_combo_is_refused() {
 	shoot(6);
 	if (!expect(world.out.rounds.count == 0, "an ungranted combo fires no round, clipless too"))
 		return false;
-	if (!expect(conn.weapon_slots.empty(), "an ungranted combo's refusal makes no slot"))
+	if (!expect(slots_of(world, conn).empty(), "an ungranted combo's refusal makes no slot"))
 		return false;
 	// The grant left three rounds in the clip: the fire spends one of them.
-	conn.weapon_slots[combo] = inmatch::WeaponSlotState{5, 3};
+	slots_of(world, conn)[combo] = w::PersonalWeaponSlot{5, 3};
 	shoot(5);
 	if (!expect(world.out.rounds.count == 1, "a granted combo fires")) return false;
-	return expect(conn.weapon_slots[combo].clip == 2,
+	return expect(slots_of(world, conn)[combo].clip == 2,
 	              "the fire spends the granted clip and never reseeds it");
 }
 
@@ -665,14 +673,14 @@ bool check_the_slot_weapon_fires() {
 		weapon.ammo_index = adm == 5 ? 1 : 2;
 	}
 	const uint16_t combo = uint16_t(3 * 65 + 2);
-	conn.weapon_slots[combo] = inmatch::WeaponSlotState{5, 1};
+	slots_of(world, conn)[combo] = w::PersonalWeaponSlot{5, 1};
 	const auto shoot = [&](uint8_t adm) {
 		dispatch_fire(conn, roster, world,
 				fire_body(shooter.packed, 0x22, adm, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0));
 	};
 	shoot(6);
 	if (!expect(world.out.rounds.count == 1 && world.out.rounds.records[0].adm_index == 5 &&
-					conn.weapon_slots[combo].clip == 0,
+					slots_of(world, conn)[combo].clip == 0,
 			"the other weapon's request fires the held rifle from its clip"))
 		return false;
 	shoot(6);
@@ -711,9 +719,9 @@ bool check_controller_seat_reads_no_bucket() {
 	weapon(5, 2, 20, 1);  // a bucket rifle
 	weapon(6, 3, 20, 0);  // a clip rifle
 	weapon(7, 4, -1, 0);  // a clipless weapon, one unit a shot
-	conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 0};
-	conn.weapon_slots[uint16_t(3 * 65 + 3)] = inmatch::WeaponSlotState{6, 3};
-	conn.weapon_slots[uint16_t(3 * 65 + 4)] = inmatch::WeaponSlotState{7, 0};
+	slots_of(world, conn)[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 0};
+	slots_of(world, conn)[uint16_t(3 * 65 + 3)] = w::PersonalWeaponSlot{6, 3};
+	slots_of(world, conn)[uint16_t(3 * 65 + 4)] = w::PersonalWeaponSlot{7, 0};
 	conn.reply.shared_clips[1] = 5;
 	conn.reply.ammo_pools[2] = 50;
 	w::Entity carrier;
@@ -732,7 +740,7 @@ bool check_controller_seat_reads_no_bucket() {
 			"a controller seat reads the bucket and the pool as 0: both refuse"))
 		return false;
 	shoot(6);
-	if (!expect(world.out.rounds.count == 1 && conn.weapon_slots[uint16_t(3 * 65 + 3)].clip == 2,
+	if (!expect(world.out.rounds.count == 1 && slots_of(world, conn)[uint16_t(3 * 65 + 3)].clip == 2,
 			"a clip weapon fires from its own slot word"))
 		return false;
 	player->mounted = false;
@@ -765,7 +773,7 @@ bool check_the_fire_action_rejudges_the_round() {
 		weapon.ammo_index = adm == 5 ? 0 : 1; // the zero-index round: Medic only
 	}
 	const uint16_t combo = uint16_t(3 * 65 + 2);
-	conn.weapon_slots[combo] = inmatch::WeaponSlotState{5, 3};
+	slots_of(world, conn)[combo] = w::PersonalWeaponSlot{5, 3};
 	w::Entity *player = world.registry.get(shooter);
 	const auto shoot = [&](uint8_t adm, int32_t px) {
 		dispatch_fire(conn, roster, world,
@@ -773,18 +781,18 @@ bool check_the_fire_action_rejudges_the_round() {
 	};
 	// The request's weapon passes the first pass; the slot's fails the second.
 	shoot(6, 0);
-	if (!expect(world.out.rounds.count == 0 && conn.weapon_slots[combo].clip == 2,
+	if (!expect(world.out.rounds.count == 0 && slots_of(world, conn)[combo].clip == 2,
 			"the slot weapon's -14 drops the round and still spends the clip"))
 		return false;
 	world.tables.weapons.entries[5].ammo_index = 1;
 	player->flags |= w::kEntityFlagPlayer;
 	shoot(6, 3 * 65536); // three metres off the shooter's position
-	if (!expect(world.out.rounds.count == 0 && conn.weapon_slots[combo].clip == 1,
+	if (!expect(world.out.rounds.count == 0 && slots_of(world, conn)[combo].clip == 1,
 			"a claimed origin beyond the reach drops the round and spends the clip"))
 		return false;
 	shoot(6, 0);
 	return expect(world.out.rounds.count == 1 && world.out.rounds.records[0].adm_index == 5 &&
-			conn.weapon_slots[combo].clip == 0,
+			slots_of(world, conn)[combo].clip == 0,
 			"a round within reach lands");
 }
 
@@ -809,7 +817,7 @@ bool check_the_ring_takes_the_fire_actions_words() {
 	weapon.category = 3;
 	weapon.rank = 2;
 	weapon.ammo_index = 1;
-	conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 7};
+	slots_of(world, conn)[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 7};
 	const auto shoot = [&](uint8_t flags, uint16_t hit_part) {
 		dispatch_fire(conn, roster, world,
 				fire_body(shooter.packed, flags, 5, 0, 0, 0, 0, 0, 0xFFFF, hit_part, 12, 0));
@@ -900,7 +908,7 @@ bool check_a_ffff_sequence_word_takes_a_fresh_id() {
 	world.tables.ammo.entries[1].velocity = 100;
 	world.tables.ammo.entries[1].max_age_ticks = 62;
 	world.tables.ammo.entries[1].valid = true;
-	conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 9};
+	slots_of(world, conn)[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 9};
 	const auto shoot = [&](uint16_t hit_part) {
 		dispatch_fire(conn, roster, world,
 				fire_body(shooter.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, hit_part, 12, 0));
@@ -1068,8 +1076,8 @@ int main() {
 	roster.push_back(make_seeded_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
 	roster.push_back(make_seeded_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
 	// The slots B's loadout grant left: the rifle with a full clip, the knife.
-	roster[1].weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 30};
-	roster[1].weapon_slots[uint16_t(65)] = inmatch::WeaponSlotState{7, 0};
+	slots_of(world, roster[1])[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 30};
+	slots_of(world, roster[1])[uint16_t(65)] = w::PersonalWeaponSlot{7, 0};
 
 	// --- 1. Valid primary fire: ring append + clip decrement + mirrors, no replies. ---
 	const std::vector<uint8_t> body =
@@ -1101,8 +1109,8 @@ int main() {
 	}
 	{
 		const uint16_t combo = 3 * 65 + 2;
-		auto it = roster[1].weapon_slots.find(combo);
-		if (!expect(it != roster[1].weapon_slots.end(), "the granted slot keeps its combo")) return 1;
+		auto it = slots_of(world, roster[1]).find(combo);
+		if (!expect(it != slots_of(world, roster[1]).end(), "the granted slot keeps its combo")) return 1;
 		if (!expect(it->second.clip == 29, "clip 30 -> 29 after one primary fire")) return 1;
 	}
 	{
@@ -1144,7 +1152,7 @@ int main() {
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x23, 5, 0, 0, 0, 0, 0, 0xFFFF, 3, 12, 0));
 	if (!expect(world.out.rounds.count == 2, "alt fire appended")) return 1;
-	if (!expect(roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip == 29,
+	if (!expect(slots_of(world, roster[1])[uint16_t(3 * 65 + 2)].clip == 29,
 	            "alt fire leaves the clip untouched"))
 		return 1;
 
@@ -1154,7 +1162,7 @@ int main() {
 	if (!expect(world.out.rounds.count == 2, "loopback fire ignored on the net path")) return 1;
 
 	// --- 6. Clip exhaustion rejects; the 0x25 relay refills [orig: @0x541720]. ---
-	roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip = 1;
+	slots_of(world, roster[1])[uint16_t(3 * 65 + 2)].clip = 1;
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 5, 12, 0));
 	if (!expect(world.out.rounds.count == 3, "last round fires")) return 1;
@@ -1176,7 +1184,7 @@ int main() {
 		while (udp_c.pop_outbound(raw)) {}
 		while (loop.client_recv(dg)) {}
 	}
-	if (!expect(roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip == 30,
+	if (!expect(slots_of(world, roster[1])[uint16_t(3 * 65 + 2)].clip == 30,
 	            "0x25 relay refilled the clip to capacity"))
 		return 1;
 	dispatch_fire(roster[1], roster, world,

@@ -15,13 +15,15 @@ namespace opennova::inmatch {
 
 // A connection's weapon tables as one inventory: retail's player-slot block
 // (the 780-slot table at +0x1D0, the class pools at +0x15A58, the shared clips
-// at +0x15C58) as this host keeps it -- the seeded slot rows plus the 0x0F
-// reply's pools. `store` writes an inventory back: every held slot's row (new
-// rows included) and the pools. [orig: Entity_ValidatePtr @0x500910 and the
-// block offsets every authority arm reads]
+// at +0x15C58) as this host keeps it -- the player entity's seeded slot rows
+// (world::Entity::weapon_slots; none for a null entity) plus the 0x0F reply's
+// pools. `store` writes an inventory back: every held slot's row (new rows
+// included) and the pools. [orig: Entity_ValidatePtr @0x500910 and the block
+// offsets every authority arm reads]
 world::WeaponInventory conn_weapon_inventory(const NapiNPConnection &conn,
-		const world::WeaponTable &table);
-void store_conn_weapon_inventory(NapiNPConnection &conn, const world::WeaponInventory &inventory);
+		const world::Entity *player, const world::WeaponTable &table);
+void store_conn_weapon_inventory(NapiNPConnection &conn, world::Entity *player,
+		const world::WeaponInventory &inventory);
 
 // The roster's tables behind the World's remote-player seam: the session
 // installs one around its entity pass, where the pickup's refusal walks read

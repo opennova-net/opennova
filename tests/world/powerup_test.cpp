@@ -611,8 +611,8 @@ void test_server_applies_remote_grants() {
     im::NapiNPConnection &conn = server.np_protocol.connection_list[0];
     conn.phase = im::ConnectionPhase::PlayerAdded;
     conn.link.owned_entity = remote;
-    conn.weapon_slots[static_cast<uint16_t>(kRifleCombo)].adm_index = 4;
-    conn.weapon_slots[static_cast<uint16_t>(kRifleCombo)].clip = 3;
+    rig.get(remote)->weapon_slots[static_cast<uint16_t>(kRifleCombo)].adm_index = 4;
+    rig.get(remote)->weapon_slots[static_cast<uint16_t>(kRifleCombo)].clip = 3;
     conn.reply.ammo_pools[11] = 0;
     im::NapiNPConnection &bystander = server.np_protocol.connection_list[1];
     bystander.phase = im::ConnectionPhase::PlayerAdded;
@@ -633,7 +633,7 @@ void test_server_applies_remote_grants() {
     // allammo: seed 90 + the 3 returned rounds - the 30-round redraw = 63,
     // then the class grant adds 30 (cap 120)
     CHECK(conn.reply.ammo_pools[11] == 93);
-    CHECK(conn.weapon_slots[static_cast<uint16_t>(kRifleCombo)].clip == 30);
+    CHECK(rig.get(remote)->weapon_slots[static_cast<uint16_t>(kRifleCombo)].clip == 30);
     CHECK(conn.reply.ammo_pools[13] == 4);
     CHECK(bystander.reply.ammo_pools[11] == 7);
     // The listen host's own player never routes through a grant.
@@ -887,14 +887,14 @@ void test_server_weapon_grant_fan() {
     im::ServerRemoteWeaponTables tables(server.np_protocol.connection_list);
     rig.world.remote_weapon_tables = &tables;
     // Full on its connection: refused.
-    conn.weapon_slots[static_cast<uint16_t>(kPistolCombo)].adm_index = 5;
-    conn.weapon_slots[static_cast<uint16_t>(kPistolCombo)].clip = 7;
+    rig.get(remote)->weapon_slots[static_cast<uint16_t>(kPistolCombo)].adm_index = 5;
+    rig.get(remote)->weapon_slots[static_cast<uint16_t>(kPistolCombo)].clip = 7;
     conn.reply.ammo_pools[12] = 14;
     powerup_pickup(rig.world, row, remote, rig.ctx(true));
     CHECK(rig.world.out.powerup_weapon_grants.empty());
     CHECK(rig.get(row) != nullptr && !rig.get(row)->hidden);
     // Short: granted, routed onto the connection.
-    conn.weapon_slots.clear();
+    rig.get(remote)->weapon_slots.clear();
     conn.reply.ammo_pools[12] = 0;
     powerup_pickup(rig.world, row, remote, rig.ctx(true));
     powerup_pickup(rig.world, row2, rig.picker, rig.ctx(true));
@@ -902,13 +902,13 @@ void test_server_weapon_grant_fan() {
     CHECK(rig.world.out.powerup_weapon_grants.size() == 2);
     im::Server_BroadcastWeaponOverlayUpdates(server, rig.world);
     CHECK(rig.world.out.powerup_weapon_grants.empty());
-    const auto landed = conn.weapon_slots.find(static_cast<uint16_t>(kPistolCombo));
-    CHECK(landed != conn.weapon_slots.end());
-    if (landed != conn.weapon_slots.end())
+    const auto landed = rig.get(remote)->weapon_slots.find(static_cast<uint16_t>(kPistolCombo));
+    CHECK(landed != rig.get(remote)->weapon_slots.end());
+    if (landed != rig.get(remote)->weapon_slots.end())
         CHECK(landed->second.adm_index == 5 && landed->second.clip == 7);
     CHECK(conn.reply.ammo_pools[12] == 14);
     // The listen host's own pickup wrote its live inventory, never a connection.
-    CHECK(host.weapon_slots.empty());
+    CHECK(rig.get(rig.picker)->weapon_slots.empty());
     CHECK(rig.local->inventory.slots[kPistolCombo].adm_index == 5);
     std::vector<opennova::WeaponPickupNotice> sent;
     opennova::replication::Datagram datagram;

@@ -760,7 +760,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				conn.slot_class = grant.reply.avatar_class;
 				conn.player_list_type = grant.reply.avatar_class;
 				write_ammo_damage_classes(conn, grant);
-				apply_granted_loadout(conn, grant, armory != nullptr);
+				apply_granted_loadout(conn, *loadout_player, grant, armory != nullptr);
 				if (armory != nullptr) {
 					// The accept points the entity's EquippedSlot at the submitted slot and
 					// clears it when that slot holds no def or a NoSelect one (flags2 bit 0).
@@ -770,9 +770,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					world::WeaponSlotRef &equipped = loadout_player->equipped_slot;
 					equipped = {};
 					const auto submitted = req.weapon_slot_index <= 0xFFFFu
-							? conn.weapon_slots.find(static_cast<uint16_t>(req.weapon_slot_index))
-							: conn.weapon_slots.end();
-					const world::WeaponTableEntry *submitted_def = submitted != conn.weapon_slots.end()
+							? loadout_player->weapon_slots.find(
+									  static_cast<uint16_t>(req.weapon_slot_index))
+							: loadout_player->weapon_slots.end();
+					const world::WeaponTableEntry *submitted_def =
+							submitted != loadout_player->weapon_slots.end()
 							? armory->by_index(submitted->second.adm_index)
 							: nullptr;
 					if (submitted_def != nullptr &&
@@ -1195,8 +1197,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						}
 					}
 					if (addressed_owner == nullptr) break;
-					auto slot_it = addressed_owner->weapon_slots.find(req.reload_param);
-					if (slot_it != addressed_owner->weapon_slots.end()) {
+					// The addressed player's own table [orig: playerSlot+0x1D0 +
+					//  100 * combo @0x54176D].
+					auto slot_it = addressed_entity->weapon_slots.find(req.reload_param);
+					if (slot_it != addressed_entity->weapon_slots.end()) {
 						const world::WeaponTableEntry *adm =
 								world->tables.weapons.by_index(slot_it->second.adm_index);
 						// The pool half of the refill: the remaining clip is refunded into
@@ -1207,7 +1211,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						// [orig: WeaponSlot_ReloadAmmo @0x541720 — refund @0x5417a2,
 						//  the clamped draw and slot+16 store @0x541811..0x541850]
 						if (adm != nullptr && adm->clipsize != -1) {
-							WeaponSlotState &slot = slot_it->second;
+							world::PersonalWeaponSlot &slot = slot_it->second;
 							const bool shared = adm->ammo_bucket != 0;
                             const uint32_t bucket = static_cast<uint32_t>(adm->ammo_bucket);
                             auto &shared_clips = addressed_owner->reply.shared_clips;

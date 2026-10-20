@@ -67,6 +67,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <initializer_list>
 #include <utility>
 #include <vector>
@@ -80,6 +81,13 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
+
+// The player entity's own weapon table (world::Entity::weapon_slots), the host's
+// per-player slot rows since D-NET-336's move.
+std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
+		const inmatch::NapiNPConnection &conn) {
+	return world.registry.get(conn.link.owned_entity)->weapon_slots;
+}
 using conn_fixture::make_seeded_conn;
 
 bool expect(bool cond, const char *msg) {
@@ -319,7 +327,7 @@ bool check_spawn_protection_cleared_by_validated_fire() {
 	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
 	roster.push_back(make_seeded_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
 	inmatch::NapiNPConnection &conn = roster[0];
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30}; // the grant's rifle
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30}; // the grant's rifle
 	w::Entity *entity = world.registry.get(shooter);
 	entity->damage_state = 500;
 	uint32_t client_tick = conn.tick_seed;
@@ -2156,7 +2164,7 @@ bool check_kit_weight_recompute() {
 		return body != nullptr ? body->inf.loadout_weight_fp16 : -1;
 	};
 	if (!expect(remote_conn.reply.ammo_pools[0] == 60 &&
-			remote_conn.weapon_slots[combo].clip == 30 && remote_weight() == 0x60000,
+			slots_of(world, remote_conn)[combo].clip == 30 && remote_weight() == 0x60000,
 			"the loadout accept seeds the host-side rows and stamps the remote kit weight"))
 		return false;
 	remote_entity->flags &= ~w::kEntityFlagDead;
@@ -2174,7 +2182,7 @@ bool check_kit_weight_recompute() {
 	};
 	tick_to_periodic_second(ctx); // the periodic second that precedes the shots
 	fire(30);
-	if (!expect(remote_conn.weapon_slots[combo].clip == 0 &&
+	if (!expect(slots_of(world, remote_conn)[combo].clip == 0 &&
 			remote_weight() == 0x60000,
 			"a spent clip does not change the weight before the periodic second"))
 		return false;
@@ -2191,7 +2199,7 @@ bool check_kit_weight_recompute() {
 				{make_protocol_message(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload))},
 				100, roster, &world);
 	}
-	if (!expect(remote_conn.weapon_slots[combo].clip == 30 && remote_conn.reply.ammo_pools[0] == 30,
+	if (!expect(slots_of(world, remote_conn)[combo].clip == 30 && remote_conn.reply.ammo_pools[0] == 30,
 			"the host-side reload draws the clip out of the ammo pool"))
 		return false;
 	tick_to_periodic_second(ctx);
@@ -2241,7 +2249,7 @@ bool check_kit_weight_reads_the_seat() {
 	std::vector<inmatch::NapiNPConnection> roster;
 	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, remote, true));
 	inmatch::NapiNPConnection &conn = roster.front();
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30};
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30};
 	conn.reply.ammo_pools[0] = 60;
 	auto weight = [&]() -> int32_t {
 		inmatch::Server_RecalculateAllPlayerKitWeights(roster, world);
@@ -2305,7 +2313,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 			100, roster, &world);
 	const std::vector<uint8_t> granted = conn.reply.last_loadout_reply;
 	if (!expect(conn.reply.loadout_buffer_set && conn.reply.ammo_pools[0] == 60 &&
-			conn.weapon_slots[combo].clip == 30 && !granted.empty(),
+			slots_of(world, conn)[combo].clip == 30 && !granted.empty(),
 			"the accept keeps the buffer and seeds 60 + one 30-round clip"))
 		return false;
 	body->flags &= ~w::kEntityFlagDead;
@@ -2320,7 +2328,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 	};
 	spend_clip();
 	conn.reply.ammo_pools[0] = 7; // a reload or two in the last life
-	if (!expect(conn.weapon_slots[combo].clip == 0, "the last life spent the clip")) return false;
+	if (!expect(slots_of(world, conn)[combo].clip == 0, "the last life spent the clip")) return false;
 
 	auto deploy = [&]() {
 		body->flags |= w::kEntityFlagDead;
@@ -2334,7 +2342,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 		return std::vector<uint8_t>{};
 	};
 	std::vector<ProtocolMessage> replies = deploy();
-	if (!expect(conn.reply.ammo_pools[0] == 60 && conn.weapon_slots[combo].clip == 30,
+	if (!expect(conn.reply.ammo_pools[0] == 60 && slots_of(world, conn)[combo].clip == 30,
 			"the deploy rebuilds the pool and the clip from the loadout buffer"))
 		return false;
 	if (!expect(loadout_body(replies) == granted,
@@ -2349,7 +2357,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 	conn.reply.ammo_pools[0] = 7;
 	conn.reply.revive_pose_valid = true;
 	replies = deploy();
-	if (!expect(conn.reply.ammo_pools[0] == 7 && conn.weapon_slots[combo].clip == 0,
+	if (!expect(conn.reply.ammo_pools[0] == 7 && slots_of(world, conn)[combo].clip == 0,
 			"a revive deploy leaves the kit the player died with"))
 		return false;
 	bool seed = false;
@@ -2380,14 +2388,14 @@ bool check_deploy_rebuilds_an_unsubmitted_slot_empty() {
 	auto &roster = ctx.np_protocol.connection_list;
 	roster.push_back(make_seeded_conn(3, 1, &remote_wire, ns::TransportMode::Client, remote, true));
 	inmatch::NapiNPConnection &conn = roster[0];
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30}; // a picked-up rifle
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30}; // a picked-up rifle
 	conn.reply.ammo_pools[0] = 40;
 	w::Entity *body = world.registry.get(remote);
 	body->flags |= w::kEntityFlagDead;
 	body->alive = false;
 	body->health = 0;
 	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
-	return expect(conn.weapon_slots.empty() && conn.reply.ammo_pools[0] == 0,
+	return expect(slots_of(world, conn).empty() && conn.reply.ammo_pools[0] == 0,
 			"an unsubmitted slot's deploy leaves no row and no pool");
 }
 
@@ -2418,7 +2426,7 @@ bool check_deploy_leaves_the_listen_hosts_kit() {
 	auto &roster = ctx.np_protocol.connection_list;
 	roster.push_back(make_seeded_conn(0, 1, nullptr, ns::TransportMode::Client, host, true));
 	inmatch::NapiNPConnection &conn = roster[0];
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30};
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30};
 	w::Entity *body = world.registry.get(host);
 	body->carry_flags |= 0x18u; // the local kit's armor and parachute
 	body->flags |= w::kEntityFlagDead;
@@ -2427,7 +2435,7 @@ bool check_deploy_leaves_the_listen_hosts_kit() {
 	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
 	body = world.registry.get(host);
 	return expect(body != nullptr && (body->carry_flags & 0x18u) == 0x18u &&
-					conn.weapon_slots.size() == 1,
+					slots_of(world, conn).size() == 1,
 			"the listen host's deploy keeps its kit's carry bits and rows");
 }
 
@@ -2483,18 +2491,21 @@ bool check_round_init_rebuilds_the_kept_kit() {
 	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
 			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
 			100, roster, &world);
-	if (!expect(conn.reply.ammo_pools[0] == 0 && conn.weapon_slots[3 * 65 + 2].clip == 30,
+	if (!expect(conn.reply.ammo_pools[0] == 0 && slots_of(world, conn)[3 * 65 + 2].clip == 30,
 			"the one-magazine accept draws its clip and leaves no reserve"))
 		return false;
 	inmatch::reset_slot_for_next_mission(conn);
-	if (!expect(conn.reply.loadout_buffer_set && conn.weapon_slots.size() == 1 &&
-					conn.weapon_slots[3 * 65 + 2].clip == 30 &&
+	if (!expect(conn.reply.loadout_buffer_set &&
 					conn.reply.loadout_buffer.entries.size() == 1,
-			"the map change keeps the slot's buffer and its rows"))
+			"the map change keeps the slot's buffer"))
 		return false;
-	conn.weapon_slots[3 * 65 + 2].clip = 4; // a spent clip the round init redraws
+	// The rows are the player entity's; the round init rebuilds them on the slot's
+	// entity from the kept buffer whatever they held.
+	auto &rows = world.registry.get(remote)->weapon_slots;
+	rows[3 * 65 + 2].clip = 4; // a spent clip the round init redraws
+	rows[3 * 65 + 7] = w::PersonalWeaponSlot{5, 9}; // a row the buffer does not name
 	inmatch::PlayerSlot_RebuildKitForRound(conn, world, *world.registry.get(remote));
-	return expect(conn.weapon_slots.size() == 1 && conn.weapon_slots[3 * 65 + 2].clip == 30 &&
+	return expect(rows.size() == 1 && rows[3 * 65 + 2].clip == 30 &&
 					conn.reply.ammo_pools[0] == 60,
 			"the round init rebuilds the rifle with its seeded 90 less one clip");
 }
@@ -2751,15 +2762,15 @@ bool check_loadout_sub_variant_rows() {
 			"the rifle's row skips its semi mode; the launcher outside the skip is a row"))
 		return false;
 	auto row_adm = [&](uint16_t combo) -> int {
-		const auto it = conn.weapon_slots.find(combo);
-		return it != conn.weapon_slots.end() ? it->second.adm_index : -1;
+		const auto it = slots_of(world, conn).find(combo);
+		return it != slots_of(world, conn).end() ? it->second.adm_index : -1;
 	};
-	if (!expect(conn.weapon_slots.size() == 3 && row_adm(195) == 1 && row_adm(196) == 2 &&
+	if (!expect(slots_of(world, conn).size() == 3 && row_adm(195) == 1 && row_adm(196) == 2 &&
 					row_adm(200) == 3,
 			"the host rows hold the rifle, its semi mode and its launcher; the rifle keeps its combo"))
 		return false;
 	if (!expect(conn.reply.ammo_pools[0] == 270 && conn.reply.ammo_pools[2] == 10 &&
-					conn.reply.shared_clips[1] == 30 && conn.weapon_slots[200].clip == 2,
+					conn.reply.shared_clips[1] == 30 && slots_of(world, conn)[200].clip == 2,
 			"the pools and the shared bucket after the accept's draw"))
 		return false;
 
@@ -2797,7 +2808,7 @@ bool check_loadout_sub_variant_rows() {
 	accept({{4, 0xFF, 0xFF, 0}});
 	if (!expect(conn.reply.ammo_pools[0] == 0 && conn.reply.ammo_pools[2] == 0 &&
 					conn.reply.ammo_pools[3] == 40 && conn.reply.shared_clips[1] == 0 &&
-					conn.weapon_slots.size() == 1 && conn.weapon_slots[195].adm_index == 4,
+					slots_of(world, conn).size() == 1 && slots_of(world, conn)[195].adm_index == 4,
 			"a kit change leaves the dropped classes at zero"))
 		return false;
 
@@ -2812,7 +2823,7 @@ bool check_loadout_sub_variant_rows() {
 	accept({{1, 0xFF, 0xFF, 0}});
 	if (!expect(conn.reply.ammo_pools[0] == 300 && conn.reply.ammo_pools[2] == 12 &&
 					conn.reply.ammo_pools[3] == 0 && conn.reply.shared_clips[1] == 0 &&
-					conn.weapon_slots[200].clip == 0,
+					slots_of(world, conn)[200].clip == 0,
 			"a UseGun seat's accept draws no clip"))
 		return false;
 
@@ -2834,7 +2845,7 @@ bool check_loadout_sub_variant_rows() {
 					seated.slots.size() == 2 && seated.slots[0].ammo_primary == 10 &&
 					seated.slots[0].ammo_secondary == 6 && conn.reply.ammo_pools[0] == 300 &&
 					conn.reply.ammo_pools[2] == 12 && conn.reply.shared_clips[1] == 0 &&
-					conn.weapon_slots[200].clip == 1,
+					slots_of(world, conn)[200].clip == 1,
 			"a controller seat's draws read the carrier's reserve and spend nothing");
 }
 
@@ -2874,7 +2885,7 @@ bool check_sub_variant_fire_after_the_grant() {
 	fire(3); // the launcher
 	if (!expect(world.out.rounds.count == 2 && world.out.rounds.records[0].adm_index == 2 &&
 					world.out.rounds.records[1].adm_index == 3 &&
-					conn.reply.shared_clips[1] == 29 && conn.weapon_slots[200].clip == 1,
+					conn.reply.shared_clips[1] == 29 && slots_of(world, conn)[200].clip == 1,
 			"the semi mode spends the shared bucket and the launcher its own clip"))
 		return false;
 	fire(4); // another weapon on the rifle's combo
@@ -2884,7 +2895,7 @@ bool check_sub_variant_fire_after_the_grant() {
 		return false;
 	world.tables.weapons.entries[4].rank = 7;
 	fire(4);
-	return expect(world.out.rounds.count == 3 && conn.weapon_slots.count(3 * 65 + 7) == 0,
+	return expect(world.out.rounds.count == 3 && slots_of(world, conn).count(3 * 65 + 7) == 0,
 			"a combo the kit left empty refuses the fire and makes no slot");
 }
 
@@ -3483,7 +3494,7 @@ bool check_shared_loaded_ammo_fire_and_reload() {
     conn.reply.shared_clips[1] = 2;
     conn.reply.ammo_pools[0] = 5;
     for (uint8_t adm : {5,6}) {
-        auto &slot = conn.weapon_slots[3*65+table.entries[adm].rank];
+        auto &slot = slots_of(world, conn)[3*65+table.entries[adm].rank];
         slot.adm_index = adm; slot.clip = 123;
     }
     uint32_t client_tick = conn.tick_seed;
@@ -3502,7 +3513,7 @@ bool check_shared_loaded_ammo_fire_and_reload() {
             "reload fills the shared clip from its reserve pool")) return false;
     fire(5);
     return expect(conn.reply.shared_clips[1]==4 && world.out.rounds.count==3 &&
-            conn.weapon_slots[197].clip==123 && conn.weapon_slots[198].clip==123,
+            slots_of(world, conn)[197].clip==123 && slots_of(world, conn)[198].clip==123,
             "the other weapon sees the reload without rewriting either private clip");
 }
 
@@ -3527,7 +3538,7 @@ bool check_validated_fire_scores_one_shot() {
 	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
 	roster.push_back(make_seeded_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
 	inmatch::NapiNPConnection &conn = roster[0];
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30}; // the grant's rifle
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30}; // the grant's rifle
 	uint32_t client_tick = conn.tick_seed;
 	auto dispatch_fire = [&](std::vector<uint8_t> body) {
 		std::vector<ProtocolMessage> msgs;
@@ -3596,7 +3607,7 @@ bool check_host_tracks_the_remote_equipped_slot() {
 				100, roster, &world);
 	};
 	submit(rifle_combo);
-	if (!expect(conn.weapon_slots.count(rifle_combo) == 1 && equipped().kind == Ref::kPersonal &&
+	if (!expect(slots_of(world, conn).count(rifle_combo) == 1 && equipped().kind == Ref::kPersonal &&
 					equipped().combo == rifle_combo,
 			"a selectable submitted slot is the EquippedSlot"))
 		return false;

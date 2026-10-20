@@ -386,8 +386,8 @@ void write_ammo_damage_classes(NapiNPConnection &conn, const GrantedWeaponLoadou
 	}
 }
 
-void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &grant,
-                           bool rebuild_rows) {
+void apply_granted_loadout(NapiNPConnection &conn, world::Entity &player,
+                           const GrantedWeaponLoadout &grant, bool rebuild_rows) {
 	SessionReplyState &st = conn.reply;
 	// Each row's fourth byte is the slot's damage-class byte at the weapon's OWN AdmDef
 	// index, read when the list is built: so a weapon whose index equals an accepted
@@ -408,12 +408,9 @@ void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &g
 	// The 0x06 pipeline used to seed a full clip on first fire; the rebuild now owns
 	// the rows retail's leaves behind.
 	if (!rebuild_rows) return;
-	conn.weapon_slots.clear();
-	for (const GrantedWeaponLoadout::Row &row : grant.rows) {
-		WeaponSlotState &slot = conn.weapon_slots[row.combo];
-		slot.adm_index = row.adm_index;
-		slot.clip = row.clip;
-	}
+	player.weapon_slots.clear();
+	for (const GrantedWeaponLoadout::Row &row : grant.rows)
+		player.weapon_slots[row.combo] = world::PersonalWeaponSlot(row.adm_index, row.clip);
 }
 
 void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &world,
@@ -458,7 +455,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	grant.ammo_pools = conn.reply.ammo_pools;
 	grant.shared_clips = conn.reply.shared_clips;
 	finish_grant(table, inv, conn.assigned_team, grant);
-	apply_granted_loadout(conn, grant, /*rebuild_rows=*/true);
+	apply_granted_loadout(conn, player, grant, /*rebuild_rows=*/true);
 	// The fill's carry bits stay on the entity: every listed weapon's
 	// [orig: WeaponSlotTable_LoadAllFromDefs - the clear @0x541503, the bits
 	//  @0x5415AA / @0x5415BC].
@@ -491,7 +488,7 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 	grant.ammo_pools = conn.reply.ammo_pools;
 	grant.shared_clips = conn.reply.shared_clips;
 	finish_grant(table, inv, conn.assigned_team, grant);
-	apply_granted_loadout(conn, grant, /*rebuild_rows=*/true);
+	apply_granted_loadout(conn, player, grant, /*rebuild_rows=*/true);
 	// The fill's carry bits [orig: WeaponSlotTable_LoadAllFromDefs @0x541503 /
 	//  @0x5415AA / @0x5415BC].
 	player.carry_flags = (player.carry_flags & ~0x18u) | inv.carry_flags;

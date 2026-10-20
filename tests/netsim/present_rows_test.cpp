@@ -1412,8 +1412,8 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	im::NapiNPConnection &conn = server.np_protocol.connection_list.back();
 	conn.link.owned_entity = body_handle;
 	const uint16_t grenade_combo = 5 * 65 + 1;
-	conn.weapon_slots[grenade_combo].adm_index = 4;
-	conn.weapon_slots[grenade_combo].clip = 0;
+	kernel.world.registry.get(body_handle)->weapon_slots[grenade_combo].adm_index = 4;
+	kernel.world.registry.get(body_handle)->weapon_slots[grenade_combo].clip = 0;
 	body->equipped_slot.kind = w::WeaponSlotRef::kPersonal;
 	body->equipped_slot.combo = grenade_combo;
 
@@ -1430,9 +1430,9 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	conn.reply.ammo_pools[3] = 2;
 	ok = expect(held(&server) == 5, "a stocked pool draws it") && ok;
 	conn.reply.ammo_pools[3] = 0;
-	conn.weapon_slots[grenade_combo].clip = 1;
+	kernel.world.registry.get(body_handle)->weapon_slots[grenade_combo].clip = 1;
 	ok = expect(held(&server) == 5, "the one-round clip counts toward the ammo") && ok;
-	conn.weapon_slots[grenade_combo].clip = 0;
+	kernel.world.registry.get(body_handle)->weapon_slots[grenade_combo].clip = 0;
 	kernel.world.registry.get(body_handle)->equipped_slot = {};
 	ok = expect(held(&server) == 5, "no EquippedSlot: nothing to test") && ok;
 	kernel.world.registry.get(body_handle)->equipped_slot.kind = w::WeaponSlotRef::kPersonal;
