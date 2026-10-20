@@ -119,7 +119,7 @@ begin "Corpus Flyable Helo"
   player_speed 80
   damage_reduc_pp 0.33 0.67
   husk Chelo1H
-  husk_sub_part_types 01_HULL 02_ROCK_M _ROCK_M
+  husk_sub_part_types 01_HULL 02_ROCK_M 03__ROCK_M
   rotor_parts 2 3 4 5
   aux_parts 6 7 8 9
   shadow shadowh.tga 2.5 8.0 1.5 2.0

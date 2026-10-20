@@ -210,6 +210,7 @@ weapon "WPN_CORPUSMORTAR"
 
 	teamfilter	red
 	charfilter	engineer
+	weapon_class	accessory
 
 	error 3 3 3 3 3 3
 	error_hipTheta 4
@@ -327,3 +328,30 @@ weapon "WPN_CORPUSCANNON"
 	end
 end
 
+weapon "WPN_CORPUSGRENADE"
+	category 5
+	rank     0
+	statid 540
+
+	charfilter	medic
+	charfilter	rifleman
+
+	loadout_selectable	1	
+	loadout_subclasses	0	
+	maxclips		3			
+	clipweight		.5			
+	weaponweight	.5		
+	weapon_class	grenade
+
+	round_type		"AMMO_CORPUS_FRAG"
+	clipsize		1
+	startrounds		3
+	ammoclass		CLASS_CORPUS_B	1
+	launchuserpoint grenade
+
+	action "fire"
+		delayend			auto
+		soundsetend			GS_CTHROW
+		function			wpn_std_fire
+	end
+end

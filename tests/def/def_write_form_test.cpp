@@ -944,7 +944,7 @@ struct Vector {
 };
 const Vector kWritten[] = {
 	{ "items.def", 6928u, 0xb06176f6a3f42f2aull },
-	{ "weapon.def", 5434u, 0x1233406f42ecb780ull },
+	{ "weapon.def", 5859u, 0xe4b17d27937a67b6ull },
 	{ "ammo.def", 3934u, 0x479c48e82941110cull },
 	{ "powerup.def", 786u, 0xba9671b5137c8761ull },
 };
