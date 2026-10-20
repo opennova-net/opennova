@@ -1403,9 +1403,9 @@ constexpr EditorQueryRow kRows[] = {
 			"poll, validation, compose, operation, originals and devices, each its mean, p50, p95 and max in "
 			"microseconds; worst: the slowest frame's phases); problems (compositions, compose_us, blocker_plans); "
 			"validation (the last pass's files); graph (the last update's files, files_walked those it visited, and "
-			"edges); originals (validations: its rounds, "
-			"files: those whose own findings it made, listed, last_ms, us); textures (headers_read, header_bytes, use_walks); and status (the validation's "
-			"running, done, total). Every count is all told since the editor started.")
+			"edges); originals (validations: its rounds, files: those whose own findings it made, listed, last_ms, "
+			"us); textures (headers_read, header_bytes, use_walks); and status (the validation's running, done, "
+			"total). Every count is all told since the editor started.")
 			.row,
 };
 

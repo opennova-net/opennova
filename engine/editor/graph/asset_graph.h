@@ -157,6 +157,11 @@ public:
 	// states of one graph share it. While it stands, every edge and symbol the graph handed out
 	// is where it was (a cache may keep them).
 	uint64_t generation() const { return generation_.value; }
+	// A value of the same counter, taken anew whenever what a texture use's check reads of the graph may have
+	// moved (graph/texture_checks.cpp keeps its walk by it): a file's texture uses (a texture, a menu's texture, a
+	// loading image) read otherwise, added or gone, one resolved to another file or status, the file set, or the
+	// base layer. An edit that moves the graph and none of its texture uses (a window renamed) leaves it.
+	uint64_t texture_uses_generation() const { return texture_uses_.value; }
 	// Every file, edge and symbol gone (a project closed), its base layer too, under a new
 	// generation.
 	void clear();
@@ -469,6 +474,8 @@ private:
 	std::vector<Diagnostic> diagnostics_;
 	GraphStats stats_;
 	Generation generation_;
+	Generation texture_uses_;    // texture_uses_generation
+	bool texture_moved_ = false; // a texture use resolved otherwise in the update under way
 };
 
 // True when a string id a table defines in section `symbol_scope` ("TABLE.BIN/Section")

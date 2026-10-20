@@ -84,10 +84,10 @@ std::mutex g_mutex;
 std::map<std::pair<std::string, TextureReader>, Kept> g_headers;
 TextureCheckStats g_stats; // g_mutex held
 
-// A walk of the uses' findings, kept while what it read stands (g_mutex held): the graph's state (every edge and
-// what it resolves to), the scan (each file's stamp, so each header read), the project's folder and the source
-// its files are read through (held weakly: one let go is never taken for another at its address). A composition
-// after an edit that left the graph as it was walks nothing.
+// A walk of the uses' findings, kept while what it read stands (g_mutex held): the graph's texture uses and what
+// they resolve to (AssetGraph::texture_uses_generation), the scan (each file's stamp, so each header read), the
+// project's folder and the source its files are read through (held weakly: one let go is never taken for another
+// at its address). A composition after an edit that left the graph's texture uses as they were walks nothing.
 struct WalkKey {
 	uint64_t generation = 0, serial = 0;
 	std::string root;
@@ -100,7 +100,7 @@ struct WalkKey {
 };
 
 WalkKey walk_key(const AssetGraph &graph, const ValidationInput &input) {
-	return {graph.generation(), input.scan.serial(), input.paths.root, input.paths.files.get(),
+	return {graph.texture_uses_generation(), input.scan.serial(), input.paths.root, input.paths.files.get(),
 	        input.scope ? input.scope->version : 0};
 }
 struct Walk {
@@ -732,7 +732,8 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
                         std::vector<Diagnostic> &out) {
 	(void)files;
 	const std::lock_guard<std::mutex> lock(g_mutex);
-	// The walk kept while the graph, the scan and the files it read stand (a scan never indexed keeps none).
+	// The walk kept while the graph's texture uses, the scan and the files it read stand (a scan never indexed
+	// keeps none).
 	const WalkKey key = walk_key(graph, input);
 	if (key.serial != 0)
 		if (const Walk *kept = g_walks.find(key); kept && kept->files.lock() == input.paths.files) {

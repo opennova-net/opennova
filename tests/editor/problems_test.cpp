@@ -1986,9 +1986,10 @@ static int test_marks_planned_once() {
 }
 
 // The cross-file checks' answers are kept between compositions by what they were made of (graph/use_checks.h:
-// the texture uses' walk by the graph's generation, the scan's serial and the files' source): an edit of a menu that
-// leaves its references as they were (its window moved) walks the uses no more, the rows as they were; the image
-// it names retargeted walks them once; every kept answer let go (forget_kept_answers), the next composition makes
+// the texture uses' walk by the graph's texture uses, the scan's serial and the files' source): an edit of a menu
+// that leaves its references as they were (its window moved) walks the uses no more, the rows as they were, nor does
+// one that moves the graph but none of its texture uses (a window of another menu renamed; a texture use's own
+// menu's window renamed renames the record its findings name); the image it names retargeted walks them once; every kept answer let go (forget_kept_answers), the next composition makes
 // each again, the rows as the kept answers made them.
 static int test_use_checks_kept() {
 	test_temp::TempDir dir("opennova_editor_problems_use_checks_kept");
@@ -2002,7 +2003,7 @@ static int test_use_checks_kept() {
 	                         "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
 	                         "\t\t<APPEARANCE type=\"image\" state=\"default\">logo.tga</APPEARANCE>\r\n\t</WINDOW>\r\n"
 	                         "</SCREEN>\r\n";
-	TEST_EXPECT(test_io::write_text(root + "/menus/kept.mnu", menu) &&
+	TEST_EXPECT(test_io::write_text(root + "/menus/kept.mnu", menu) && test_io::write_text(root + "/menus/b.mnu", kMenuB) &&
 	            test_io::write_file(root + "/textures/logo.tga", editor_test::tga_bytes()) &&
 	            test_io::write_file(root + "/textures/other.tga", editor_test::tga_bytes()));
 	editor_test::handle_to_end(session, request::rescan());
@@ -2034,6 +2035,18 @@ static int test_use_checks_kept() {
 	const std::vector<Diagnostic> rows = v.findings.diagnostics;
 	move_window(10);
 	TEST_EXPECT(texture_check_stats().use_walks == walks && v.findings.diagnostics == rows);
+	// A window of a menu that names no texture renamed: the graph moves (its symbol), its texture uses do not.
+	editor_test::handle_to_end(session, request::open_document("menus/b.mnu"));
+	const Document *other = records_of(*session.document_for("menus/b.mnu"));
+	NodeAddress main;
+	TEST_EXPECT(other && find_definition(AssetGraph(), *other, "MAIN", main));
+	const uint64_t generation = v.findings.graph->generation();
+	Edit renamed;
+	renamed.address = main;
+	renamed.field = "name";
+	renamed.value = std::string("BACKDROP");
+	editor_test::handle_to_end(session, request::edit_record("menus/b.mnu", renamed));
+	TEST_EXPECT(v.findings.graph->generation() != generation && texture_check_stats().use_walks == walks);
 	Edit retarget;
 	retarget.address = appearance;
 	retarget.field = image_field;
@@ -2044,7 +2057,7 @@ static int test_use_checks_kept() {
 	forget_kept_answers();
 	move_window(20);
 	TEST_EXPECT(texture_check_stats().use_walks == walks + 2 && v.findings.diagnostics == retargeted);
-	std::printf("use checks kept: walked again only when the graph moved, the rows as before\n");
+	std::printf("use checks kept: walked again only when the texture uses moved, the rows as before\n");
 	return 0;
 }
 

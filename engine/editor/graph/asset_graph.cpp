@@ -119,6 +119,23 @@ void changed_names(const GraphSlot &slot, const std::vector<GraphSymbol> &now,
 	}
 }
 
+// An edge a texture use's check reads (graph/texture_checks.cpp): a texture, a menu's texture, a loading image.
+bool texture_use(const GraphEdge &edge) {
+	return edge.kind == ReferenceKind::Texture || edge.kind == ReferenceKind::MenuTexture ||
+	       edge.kind == ReferenceKind::LoadingImage;
+}
+
+// Whether two readings of a file hold the same texture uses, in the same order.
+bool same_texture_uses(const std::vector<GraphEdge> &a, const std::vector<GraphEdge> &b) {
+	size_t i = 0, j = 0;
+	for (;; ++i, ++j) {
+		while (i < a.size() && !texture_use(a[i])) ++i;
+		while (j < b.size() && !texture_use(b[j])) ++j;
+		if (i == a.size() || j == b.size()) return i == a.size() && j == b.size();
+		if (!same_reading(a[i], b[j])) return false;
+	}
+}
+
 // An edge whose resolution reads the file set: a file reference, a screen's (its lookup asks
 // whether its menu file is one), and one whose scope a file decides (its table there or not, its
 // owner there or not), or whose reading at all does (GraphEdge::needs).
@@ -144,6 +161,7 @@ struct AssetGraph::Patch {
 	// when its findings come out otherwise.
 	std::vector<std::pair<uint32_t, std::vector<Diagnostic>>> held;
 	bool diagnostics_moved = false;    // a failure changed, or a file holding findings gone
+	bool texture_uses = false;         // a file's texture uses read otherwise, or gone
 	bool file_set = false;             // a file added, gone or of another kind
 	bool base = false;                 // another base layer: everything resolves again
 };
@@ -384,8 +402,10 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 	// Everything the graph holds is made from the files' rows and what each one read: when
 	// neither moved it stays as it is, every edge and symbol where it was.
 	if (patch.files.empty()) return out;
+	texture_moved_ = false;
 	resolve_patch(patch, out);
 	generation_.value = next_generation();
+	if (patch.texture_uses || patch.file_set || patch.base || texture_moved_) texture_uses_.value = next_generation();
 	out.changed = true;
 	return out;
 }
@@ -395,6 +415,7 @@ void AssetGraph::take(
 	GraphSlot &slot = index_.slot(id);
 	if (reads_the_same(slot, content, ok, failure)) return;
 	changed_names(slot, content.symbols, patch.symbol_keys, patch.style_keys);
+	patch.texture_uses = patch.texture_uses || !same_texture_uses(slot.edges, content.edges);
 	// The findings its edges held, which those it holds once resolved are compared against.
 	std::vector<Diagnostic> held;
 	for (EdgeResolution &resolution : slot.resolutions)
@@ -422,6 +443,7 @@ void AssetGraph::take(
 void AssetGraph::drop(uint32_t id, Patch &patch) {
 	const GraphSlot &slot = index_.slot(id);
 	changed_names(slot, {}, patch.symbol_keys, patch.style_keys);
+	patch.texture_uses = patch.texture_uses || std::any_of(slot.edges.begin(), slot.edges.end(), texture_use);
 	patch.names.emplace(slot.key, true);
 	patch.files.push_back(slot.path);
 	patch.file_set = true;
@@ -655,6 +677,9 @@ bool AssetGraph::resolve_edge(Ref ref) {
 	const bool missing = counts_missing(slot, edge, target, status);
 	// Each entry of the index moves only when it changed.
 	const bool was = resolution.resolved;
+	// A texture use resolved otherwise (texture_uses_generation).
+	if (was && texture_use(edge) && (status != resolution.status || file != resolution.file || target != edge.target))
+		texture_moved_ = true;
 	if (!was || target != edge.target || target_kind != edge.target_kind) {
 		if (was) index_.remove_target(GraphIndex::key_of(edge.target_as(), edge.target, edge.scope), ref);
 		edge.target = target;
@@ -761,6 +786,7 @@ GraphUpdate AssetGraph::set_base(std::shared_ptr<const GraphLayer> base) {
 	patch.base = true;
 	resolve_patch(patch, out);
 	generation_.value = next_generation();
+	texture_uses_.value = next_generation();
 	out.changed = true;
 	return out;
 }
