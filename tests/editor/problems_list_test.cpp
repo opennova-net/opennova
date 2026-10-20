@@ -302,7 +302,11 @@ int test_proposals() {
 	SessionView v = problems_view();
 	ProblemsList list;
 	list.refresh(v);
+	// A Fix all is proposed when its header asks, once until the list is made again (a game's thousands of
+	// findings are never all proposed by a refresh).
+	TEST_EXPECT(list.proposed() == 0);
 	const ProblemsList::Proposal &required = list.group_fixes(0);
+	TEST_EXPECT(list.proposed() == 1 && &list.group_fixes(0) == &required && list.proposed() == 1);
 	// The placeholder made first, the import's preview last (an operation a request after it would find busy).
 	TEST_EXPECT(required.findings == 2 && required.requests.size() == 2 &&
 	            required.requests[0].kind == EditorRequestKind::CreateMissing &&

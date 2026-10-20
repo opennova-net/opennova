@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <base/io/json.h>
@@ -97,19 +98,31 @@ renderer::TextureRoleId texture_role_of_edge(const GraphEdge &edge, const Docume
 // null when it does not read).
 using TextureModelSource = std::function<std::shared_ptr<const Document>(const std::string &path)>;
 
+// The graph's texture edges by the name each writes (its file name's key, pff::normalized_logical_name) and
+// by that name's stem's, each list in the graph's edge order: made in one walk of the graph while it stands,
+// so a file's or a stem's uses are found by name instead of by a walk of every edge for each (a full game's
+// Problems ask for hundreds).
+struct TextureEdgeNames {
+	std::unordered_map<std::string, std::vector<const GraphEdge *>> by_name;
+	std::unordered_map<std::string, std::vector<const GraphEdge *>> by_stem;
+};
+TextureEdgeNames texture_edge_names(const AssetGraph &graph);
+
 // Every use of the project file `file`: the graph's texture edges naming it by its loader (those the
-// loader resolves to it, and those whose name is the file's though the loader opens another), each
-// with its role and context, then the fixed names its logical name is, each with what the game opens
-// it for. `exists` answers whether the project holds a name (the loaders' probes).
-std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &scan, const std::string &file,
-                                     const TextureModelSource &models, const TextureNameTest &exists);
+// loader resolves to it, and those whose name is the file's though the loader opens another, found in
+// `names`, the graph's), each with its role and context, then the fixed names its logical name is, each
+// with what the game opens it for. `exists` answers whether the project holds a name (the loaders' probes).
+std::vector<TextureUse> texture_uses(const AssetGraph &graph, const TextureEdgeNames &names, const AssetScan &scan,
+                                     const std::string &file, const TextureModelSource &models,
+                                     const TextureNameTest &exists);
 
 // Every use of a name whose stem is `stem` (case aside), whatever file its loader finds: the graph's
-// texture references writing one (a missing one too), then the names the game opens itself; `served` the
-// project file the loader opens ("" none), `reads_file` whether it opens one. What an import of that stem
-// is asked for (graph/texture_import_needs).
-std::vector<TextureUse> texture_uses_named(const AssetGraph &graph, const AssetScan &scan, const std::string &stem,
-                                           const TextureModelSource &models, const TextureNameTest &exists);
+// texture references writing one (a missing one too, found in `names`, the graph's), then the names the
+// game opens itself; `served` the project file the loader opens ("" none), `reads_file` whether it opens
+// one. What an import of that stem is asked for (graph/texture_import_needs).
+std::vector<TextureUse> texture_uses_named(const AssetGraph &graph, const TextureEdgeNames &names, const AssetScan &scan,
+                                           const std::string &stem, const TextureModelSource &models,
+                                           const TextureNameTest &exists);
 
 io::JsonValue texture_use_json(const TextureUse &use);
 

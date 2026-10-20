@@ -232,8 +232,19 @@ std::string stem_key(const std::string &name) {
 
 } // namespace
 
-std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &scan, const std::string &file,
-                                     const TextureModelSource &models, const TextureNameTest &exists) {
+TextureEdgeNames texture_edge_names(const AssetGraph &graph) {
+	TextureEdgeNames out;
+	graph.for_each_edge([&](const GraphEdge &edge) {
+		if (!texture_edge(edge)) return;
+		out.by_name[pff::normalized_logical_name(basename_of(edge.value))].push_back(&edge);
+		out.by_stem[stem_key(edge.value)].push_back(&edge);
+	});
+	return out;
+}
+
+std::vector<TextureUse> texture_uses(const AssetGraph &graph, const TextureEdgeNames &names, const AssetScan &scan,
+                                     const std::string &file, const TextureModelSource &models,
+                                     const TextureNameTest &exists) {
 	std::vector<TextureUse> out;
 	const AssetEntry *entry = scan.at_path(file);
 	if (!entry) return out;
@@ -243,10 +254,9 @@ std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &s
 	std::vector<const GraphEdge *> edges;
 	for (const GraphEdge *edge : graph.referrers_of_file(file))
 		if (texture_edge(*edge)) edges.push_back(edge);
-	graph.for_each_edge([&](const GraphEdge &edge) {
-		if (!texture_edge(edge) || pff::normalized_logical_name(basename_of(edge.value)) != key) return;
-		if (std::find(edges.begin(), edges.end(), &edge) == edges.end()) edges.push_back(&edge);
-	});
+	if (const auto named = names.by_name.find(key); named != names.by_name.end())
+		for (const GraphEdge *edge : named->second)
+			if (std::find(edges.begin(), edges.end(), edge) == edges.end()) edges.push_back(edge);
 	std::map<std::string, std::shared_ptr<const Document>> read;
 	for (const GraphEdge *edge : edges) {
 		TextureUse use = edge_use(graph, scan, *edge, models, exists, read);
@@ -288,19 +298,20 @@ bool texture_use_opens(const TextureUse &use, const std::string &file) {
 	return !load.file.empty() && pff::normalized_logical_name(basename_of(load.file)) == wanted;
 }
 
-std::vector<TextureUse> texture_uses_named(const AssetGraph &graph, const AssetScan &scan, const std::string &stem,
-                                           const TextureModelSource &models, const TextureNameTest &exists) {
+std::vector<TextureUse> texture_uses_named(const AssetGraph &graph, const TextureEdgeNames &names, const AssetScan &scan,
+                                           const std::string &stem, const TextureModelSource &models,
+                                           const TextureNameTest &exists) {
 	std::vector<TextureUse> out;
 	const std::string key = pff::normalized_logical_name(stem);
 	if (key.empty()) return out;
 	std::map<std::string, std::shared_ptr<const Document>> read;
-	graph.for_each_edge([&](const GraphEdge &edge) {
-		if (!texture_edge(edge) || stem_key(edge.value) != key) return;
-		TextureUse use = edge_use(graph, scan, edge, models, exists, read);
-		use.reads_file = !use.served.empty();
-		use.words = use_words(use);
-		out.push_back(std::move(use));
-	});
+	if (const auto named = names.by_stem.find(key); named != names.by_stem.end())
+		for (const GraphEdge *edge : named->second) {
+			TextureUse use = edge_use(graph, scan, *edge, models, exists, read);
+			use.reads_file = !use.served.empty();
+			use.words = use_words(use);
+			out.push_back(std::move(use));
+		}
 	for (const FixedTextureName &fixed : fixed_texture_names()) {
 		if (stem_key(fixed.name) != key) continue;
 		TextureUse use = fixed_use(scan, fixed, exists);

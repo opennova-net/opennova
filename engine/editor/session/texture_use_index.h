@@ -51,7 +51,16 @@ private:
 	const std::vector<TextureUse> &kept(const SessionView &view, const std::string &key,
 	                                    const std::function<std::vector<TextureUse>()> &make) const;
 
+	// The graph's texture edges by name (texture_edge_names), made again when the graph or what the uses read
+	// moves: what every file's and stem's uses are found through.
+	const TextureEdgeNames &edge_names(const SessionView &view) const;
+
 	ModelReader reader_;
+	mutable TextureEdgeNames names_;
+	mutable RevisionKey names_key_;
+	mutable const AssetGraph *names_graph_ = nullptr;
+	mutable uint64_t names_generation_ = 0;
+	mutable bool names_made_ = false;
 	mutable std::map<std::string, Made> made_by_file_; // by a file's path, or "\x01" and a stem
 	mutable std::map<std::string, Model> models_;
 	mutable uint64_t made_ = 0;

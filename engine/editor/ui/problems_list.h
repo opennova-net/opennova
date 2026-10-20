@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -126,8 +127,11 @@ public:
 	// A click on a group's header: folded away, or opened again; the user's from now on.
 	void toggle_fold(const std::string &group);
 	// A group's Fix all (in the answer's groups' order): shown while several of its findings
-	// give a fix.
-	const Proposal &group_fixes(size_t group) const { return group_fixes_[group]; }
+	// give a fix. Proposed the first time it is asked after the list was made (the header drawn:
+	// a game's thousands of findings are never all proposed at once), kept until it is made again.
+	const Proposal &group_fixes(size_t group);
+	// How many Fix alls were proposed (a group's or the summary's), for the tests.
+	size_t proposed() const { return proposed_; }
 	// The summary while required files are missing or are other kinds of file than the game reads, from
 	// the build's gate (ADR 0046 S14; the UX round's problems lane): first what stops the game, the rows
 	// the boot exits or dead-ends without, whose findings block the build ("The game will not start: 2
@@ -139,7 +143,8 @@ public:
 		bool empty() const { return stops.empty() && more.empty(); }
 	};
 	static Summary summary(const RequirementReport &report);
-	const Proposal &required_fixes() const { return required_fixes_; }
+	// Proposed the first time it is asked after the list was made, as a group's is.
+	const Proposal &required_fixes();
 
 	// --- the selected finding ---------------------------------------------------------------
 	size_t selected() const { return selected_index_; }
@@ -198,12 +203,19 @@ private:
 	uint64_t fixed_ = 0;
 	bool stale_ = true;
 	uint64_t made_ = 0;
+	// Each finding's key, made again only when the findings moved (keys_findings_: the Findings
+	// concern's revision they were made at).
 	std::vector<std::string> keys_;
 	std::unordered_map<std::string, size_t> index_;
+	uint64_t keys_findings_ = 0;
 	std::vector<Line> lines_;
-	std::vector<Proposal> group_fixes_;
+	// Each group's findings, and its Fix all once proposed (group_fixes); none for the game's own data's.
+	std::vector<std::vector<size_t>> group_rows_;
+	std::vector<bool> group_original_;
+	std::vector<std::optional<Proposal>> group_fixes_;
 	std::vector<size_t> required_;
-	Proposal required_fixes_;
+	std::optional<Proposal> required_fixes_;
+	size_t proposed_ = 0;
 	std::set<std::string> folded_;      // the keys of the groups folded away
 	std::set<std::string> auto_folded_; // those folded for holding notes alone, untouched since
 	std::set<std::string> seen_groups_; // the keys of the groups shown so far
