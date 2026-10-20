@@ -494,6 +494,15 @@ bool set_waypoint_path(bms::File &file, size_t index, const std::vector<int> &ma
 	return true;
 }
 
+bool set_waypoint_path_flags(bms::File &file, size_t index, int flags, std::string &error) {
+	if (index >= file.waypoint_records.size()) {
+		error = "Waypoint path index out of range";
+		return false;
+	}
+	const MissionField *row = settable(MissionRecord::WaypointPath, "flags", MissionFieldType::Integer);
+	return row && row->set(&file.waypoint_records[index], int64_t(uint32_t(flags)), error);
+}
+
 bool clear_waypoint_path(bms::File &file, size_t index, std::string &error) {
 	return set_waypoint_path(file, index, {}, 0, error);
 }

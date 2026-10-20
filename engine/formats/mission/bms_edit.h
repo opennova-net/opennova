@@ -119,6 +119,9 @@ void lay_out_waypoint_path(bms::File &file, size_t index);
 // out a path from those alone).
 bool set_waypoint_path(bms::File &file, size_t index, const std::vector<int> &marker_indices,
 		int flags, std::string &error);
+// Path `index`'s flags (bms::WaypointFlags) made `flags`, through the path's field row: its stops, its markers'
+// fields and the count it stores stay as they stand. Refused for a path out of range.
+bool set_waypoint_path_flags(bms::File &file, size_t index, int flags, std::string &error);
 bool clear_waypoint_path(bms::File &file, size_t index, std::string &error);
 // A new marker record put on `path_index` at `insert_index` (-1 = at its end); returns the marker's
 // index through `out_marker_index`.

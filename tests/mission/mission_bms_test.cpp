@@ -1370,6 +1370,34 @@ int main() {
 		            waypoint_path_markers(back, 7) == std::vector<int>({37}));
 	}
 
+	// --- A path's flags alone: DoesNotLoop, the one-shot patrol that stops at its last stop [orig:
+	// AI_UpdateWaypointMovement @0x457caa], set through the path's field row. Its markers keep their own
+	// fields (a 1-based order is not renumbered from 0, as set_waypoint_path would) and the path its
+	// stops; written and read again, the record carries the flag. ---
+	{
+		opennova::bms::File f;
+		make_default(f);
+		opennova::bms::Entity waypoint{};
+		waypoint.type = opennova::bms::ItemType::Marker;
+		waypoint.type_id = opennova::def::DEF_TYPE_WAYPOINT;
+		waypoint.waypoint_id = 4;
+		f.markers.assign(3, waypoint);
+		for (int i = 0; i < 3; ++i) f.markers[size_t(i)].wp_number = i + 1;
+		lay_out_waypoint_path(f, 4);
+		const int one_shot = int(opennova::bms::WaypointFlags::DoesNotLoop);
+		TEST_EXPECT(set_waypoint_path_flags(f, 4, one_shot, error));
+		TEST_EXPECT(uint32_t(f.waypoint_records[4].flags) == 1u && f.waypoint_records[4].marker_count == 3);
+		TEST_EXPECT(f.waypoint_records[4].waypoint_numbers == std::vector<uint32_t>({0u, 1u, 2u}));
+		TEST_EXPECT(f.markers[0].wp_number == 1 && f.markers[2].wp_number == 3);
+		TEST_EXPECT(!set_waypoint_path_flags(f, f.waypoint_records.size(), one_shot, error));
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(write_document(f, bytes));
+		opennova::bms::File back;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), back, err));
+		TEST_EXPECT(uint32_t(back.waypoint_records[4].flags) == 1u && waypoint_path_markers(back, 4).size() == 3);
+	}
+
 	// --- Regression (review): set_event / add_event clamp reset_after & delay to 0..1023 (their packed
 	// 10-bit range) at the library boundary, so an out-of-range value can't wrap on serialize. ---
 	{

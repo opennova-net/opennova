@@ -141,6 +141,8 @@ void MissionData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_area_trigger_count"), &MissionData::get_area_trigger_count);
 	ClassDB::bind_method(D_METHOD("add_area_trigger", "min_bounds", "max_bounds", "active", "constrain_z", "zone_id"), &MissionData::add_area_trigger);
+	ClassDB::bind_method(D_METHOD("get_waypoint_path_flags", "path"), &MissionData::get_waypoint_path_flags);
+	ClassDB::bind_method(D_METHOD("set_waypoint_path_flags", "path", "flags"), &MissionData::set_waypoint_path_flags);
 
 	ClassDB::bind_method(D_METHOD("set_weapon_loadout", "entries"), &MissionData::set_weapon_loadout);
 
@@ -189,9 +191,15 @@ void MissionData::_bind_methods() {
 	BIND_CONSTANT(ATTRIB_SEARCH_AND_DESTROY);
 	BIND_CONSTANT(ATTRIB_GAME_MODE_MASK);
 	BIND_CONSTANT(ITEM_ID_OFFSET);
+	BIND_CONSTANT(WAYPOINT_DOES_NOT_LOOP);
+	BIND_CONSTANT(WAYPOINT_PLAYER_ROUTE);
 }
 
 static_assert(MissionData::ITEM_ID_OFFSET == mission::kItemIdOffset);
+static_assert(MissionData::WAYPOINT_DOES_NOT_LOOP ==
+              static_cast<uint32_t>(bms::WaypointFlags::DoesNotLoop));
+static_assert(MissionData::WAYPOINT_PLAYER_ROUTE ==
+              static_cast<uint32_t>(bms::WaypointFlags::PlayerRoute));
 // Every ATTRIB_* mirror is pinned to its engine home (engine/formats/mission
 // bms.h AttribFlags) — a drifted copy here would silently mis-edit headers.
 static_assert(MissionData::ATTRIB_FORCE_INDOORS ==
@@ -576,6 +584,22 @@ int MissionData::add_area_trigger(const Vector3 &min_bounds, const Vector3 &max_
 			make_area_record(min_bounds, max_bounds, active, constrain_z, zone_id));
 	modified = true;
 	return static_cast<int>(index);
+}
+
+int MissionData::get_waypoint_path_flags(int path) const {
+	mission::WaypointPath record;
+	if (!loaded_ || path < 0 || !mission::waypoint_path(file_, static_cast<size_t>(path), record))
+		return -1;
+	return record.flags;
+}
+
+bool MissionData::set_waypoint_path_flags(int path, int flags) {
+	if (!loaded_ || path < 0) return false;
+	std::string error;
+	if (!mission::set_waypoint_path_flags(file_, static_cast<size_t>(path), flags, error))
+		return edit_failed(error);
+	modified = true;
+	return true;
 }
 
 bool MissionData::set_weapon_loadout(const TypedArray<PackedStringArray> &entries) {

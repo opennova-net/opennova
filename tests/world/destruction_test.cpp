@@ -2193,10 +2193,11 @@ void test_death_dispatch_flag_routing() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
     w.registry.configure_pool(1, 4);
-    auto dispatch = [&](int32_t item_id, int32_t unit_type, bool has_husk) {
+    auto dispatch = [&](int32_t item_id, int32_t unit_type, bool husk) {
         ItemDeathTraits traits;
         traits.unit_type = unit_type;
-        traits.has_husk = has_husk;
+        traits.has_husk = husk;
+        traits.husk_model_loaded = husk;
         w.tables.item_death_traits.set(item_id, traits);
         Entity seed;
         seed.kind = EntityKind::Item;
@@ -2379,6 +2380,52 @@ void test_building_death_requires_loaded_husk_model() {
     for (const DestructionSoundEvent &sound : w.out.destruction.sounds)
         if (sound.sound == "EXPLO_SHIP_TINY") collapse_sound = true;
     CHECK(!collapse_sound);
+}
+
+// The death-piece spawn gates on the LOADED husk model too, not the authored
+// name: a vehicle whose items.def row names a husk the install does not carry
+// (JO's item 101281 names Fblkhawx, which only BHD's files hold) spawns no
+// pieces, takes no kick and keeps the def's +0x1C4 mover, so its parked-mover
+// leg goes on stamping the brain, as a husk-less row's does (such a
+// PlayerControl hull never respawns). With the model the land row installs the
+// falling mover. [orig: Entity_SpawnDeathPieces @0x4934AF..0x4934E5
+// (huskFinalModel ?: huskModel), the +0x1C4 store @0x493925..0x49394B past it;
+// the land row's arg Entity_UpdateFallingDeathPhysics @0x493F70, table @0x815410]
+void test_vehicle_death_pieces_require_loaded_husk_model() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+    auto kill = [&](int32_t item_id, bool loaded) {
+        ItemDeathTraits traits = barrel_traits();
+        traits.unit_type = 1;       // the land row
+        traits.has_husk = true;     // the def authors a husk name
+        traits.husk_model_loaded = loaded;
+        w.tables.item_death_traits.set(item_id, traits);
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = item_id;
+        seed.health = 0;
+        seed.position = Vec3{0.0f, 0.0f, 5.0f};
+        seed.bound_radius = 2.0f;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        Entity *e = w.registry.get(h);
+        entity_update_death_transforms(w, *e, /*silent=*/true);
+        return e;
+    };
+    const Entity *missing = kill(720, false);
+    CHECK((missing->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+          (kEntityFlagDead | kEntityFlagHusk));
+    CHECK(missing->death_motion == DeathMotionMode::None);
+    CHECK(missing->spawned_piece_mask == 0);
+    CHECK(missing->veh.slide_z == 0);
+    size_t active_pieces = 0;
+    for (const DeathPiece &piece : w.death_pieces.pieces)
+        if (piece.active) ++active_pieces;
+    CHECK(active_pieces == 0);
+    const Entity *loaded = kill(721, true);
+    CHECK(loaded->death_motion == DeathMotionMode::Falling);
+    CHECK(loaded->veh.slide_z >= 4096); // the pop [orig: @0x493977]
 }
 
 // The MP VISUAL CLIENT runs the destruction chain locally. Retail's client
@@ -4489,6 +4536,7 @@ int main() {
     test_death_kick_field();
     test_round_destroys_item();
     test_building_death_requires_loaded_husk_model();
+    test_vehicle_death_pieces_require_loaded_husk_model();
     test_net_kill_runs_client_side_death_chain();
     test_medic_kill_zone_queues_both_arms();
     if (failures == 0) std::printf("destruction_test: all checks passed\n");
