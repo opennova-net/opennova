@@ -1,0 +1,19 @@
+description     "Helo - medevac Black Hawk"
+type				HELO
+default_state		HELO_FOLLOWWP
+
+primary_weap		50CAL
+primary_ammo		0
+
+patrol_speed		70
+patrol_altitude		25
+patrol_climb		6
+combat_speed		150
+combat_altitude		40
+combat_climb		10
+
+min_agl				10
+flight_skill		4
+turn_rate			30
+accel_time			1
+use_waypoint_z		1

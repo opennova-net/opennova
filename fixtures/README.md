@@ -226,6 +226,7 @@ stands in for.
 | `mbuggy.3di` | the shipped dune buggy's (Dbuggy1): the hull on part 0, four wheels on parts 1..4 (the front pair steering); the driver's ctrlx02, the passenger sitex06 and the gun anchor ewep01; a collision object per part; `buggy_01tr`'s |
 | `mladder.3di` | the shipped 8 m ladder's (WLad03): two rails and sixteen rungs as collision faces (poly type 13), one type-1 volume around them and the type-4 climb volume (CL), the flat face 0.37 in front of the rungs; `ladder_00tra`'s |
 | `mlndmine.3di` | the shipped unmarked minefield section's (Lndmine1): one flat 16 x 16 part, its `ground` point, then nine `small` and five `large` mine points in the shipped order and places; one collision object, the slab; `minefield_missions`' |
+| `mheli.3di` | the shipped medevac Black Hawk's (Fblkhawm, the teammate flyover's helicopter): the fuselage and open cabin on part 0, the floor 2.5 under the origin, the main rotor on part 1 on HELO_ROTOR; one collision object, the floor and nose type-1 volumes; `teammate_spawn`'s |
 | `door.3di` | the shipped door building's (IBlock01): a "door" LOD, part 0 a 6 x 6 block house with a doorway in its +x wall, part 1 the door hinged at (2.9, -0.5), its PANM row a rotation on control register 0 (`DOOR_00`) from 0 to -5688; a collision object per part, the door's offset to its hinge; `doors`' |
 
 Its missions, each the scenario of the shipped training mission the test it serves is named
@@ -238,6 +239,8 @@ falling a sixteenth of a unit per unit of mission y):
 | `infantry.bms` | CP01's opening ground: the single-player start with six of the shipped AK47 soldier (team 2, group 33, CP01's squad record values) spread some 60 units apart in front of it; `ai_threat`, `ai_corpse`, `ai_muzzle_pose` and `ground_conform`'s |
 | `ladder.bms` | 00TRa's ladder ground: the single-player start with the 8 m ladder (bms 1134) twenty units in front of it |
 | `land_vehicles.bms` | 01TR's opening ground: the single-player start, the dune buggy SSN 300 with its `addeweap` gun child, the player's team's riflemen SSNs 2, 70 and 71 (the shipped records' distances) and five team-2 concrete lane dividers (hp 0) in their arc |
+| `minimap.bms` | 00TRg's pool-2 records in its promote order: two pier building pieces (no minimap marker), the twenty-four records its minimap draws (buildings over the synthetic armory and the armories), then sandbag walls; `minimap_overlay`'s |
+| `payload.bms`, `payload.bin` | 00TRg's two mission payload halves: an AI patrol path and exactly one blue player route (DoesNotLoop, PlayerRoute) over marker 12; its table an 810-character second briefing in our own words (no third) and 00TRg's two deploy-map location labels; `npruntime_authored_payload_00trg`'s |
 | `minefield.bms`, `minefield_coop.bms` | 00TRd's and CP09's minefields: three and two unmarked sections in front of the start, the second an objective Co-op mission |
 | `rock_collision.bms` | 00TRg's single-player start (bms 1197) with the rock formation (bms 650) seven units in front of it |
 | `truck_rest.bms` | 00TRa's three parked trucks by their SSNs (11 and 1714 crewed by a command-mounted friendly soldier, 6 empty) around the single-player start |
@@ -248,11 +251,13 @@ soldier's one-bone clips `ms_*.bad` (the reset, the idle, the walk with its foot
 and forward root motion, the run, the crouch and prone poses, the attack with its fire
 words, the guard, the reload, the death, the ladder's hold, climb up and down, the jump and
 the roll), the tables `msoldier.adm` and `E_STAND.adm` (the shipped soldier's slots) and
-`mplayer.adm` (the shipped player's), and the first-person M4's clips `mfp_*.bad` and table
+`mplayer.adm` (the shipped player's), `mmedic1.adm` and `mmedic2.adm` (the soldier's and the
+shipped medics' drag poses: the draggee; the dragger's idle and walk), and the first-person M4's clips `mfp_*.bad` and table
 `mfp_m4.adm` (the shipped M4_1st table's slots).
 
 Its authored text: `items.def` (the rows its missions place, by the shipped rows' ids and
 field values over the minted models), `weapon.def` (the knife, the Colt, the M4 with its
 actions and the buggy's emplaced gun, over the minted first-person table) and the AI
-profiles its vehicles name (`d_5ton.aip`, `d_buggy.aip`: the shipped profiles' values). Tests read it through `tests/common/mission_set.h`, which stages it beside
+profiles its vehicles name (`d_5ton.aip`, `d_buggy.aip`, and `h_bhawkn.aip`, the teammate
+helicopter's: the shipped profiles' values). Tests read it through `tests/common/mission_set.h`, which stages it beside
 the Tmap terrain, the synthetic models and the authored clips as one loose game root.

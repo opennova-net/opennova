@@ -549,6 +549,36 @@ synth3di::Model make_atv() {
 	return m;
 }
 
+// mheli.3di: a utility helicopter in the shape of the shipped medevac Black Hawk (Fblkhawm, the
+// helicopter the teammate flyover spawns, items.def 101281; an LOD of type "gnrc"): the fuselage and
+// its open cabin on part 0, the cabin floor 2.5 under the origin (the flyover sets its two medics
+// down 1.5 under it) and its roof clear of their heads; the main rotor on part 1, turning on
+// HELO_ROTOR as the shipped rotor does;
+// one collision object, the fuselage's faces, its floor and nose type-1 volumes.
+synth3di::Model make_heli() {
+	synth3di::Model m;
+	m.name = "mheli";
+	const int lod = m.add_lod(240, "gnrc");
+	const int paint = m.add_material("FF_ST_OP", "mheli.tga");
+	const Box floor = box(-3.0, -1.6, -2.7, 2.5, 1.6, -2.5);
+	const Box roof = box(-3.0, -1.6, 0.4, 2.5, 1.6, 0.6);
+	const Box nose = box(2.5, -1.0, -2.7, 4.5, 1.0, 0.4);
+	const Box boom = box(-11.0, -0.3, -0.2, -3.0, 0.3, 0.4);
+	const int hull = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {floor, roof, nose, boom}) m.add_box(lod, hull, paint, b);
+	m.add_control_register("HELO_ROTOR");
+	m.add_panm(lod, hull, 0);
+	const int rotor = m.add_part(lod, 0, Vec3{});
+	m.add_box(lod, rotor, paint, box(-0.3, -7.0, 0.7, 0.3, 7.0, 0.8));
+	opennova::threedi::ThreediPartAnimation &spin = m.add_panm(lod, rotor, 0, 0x00000200u);
+	spin.rotation_x = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 256, 0, -16338);
+	const int c = m.add_cobj(0);
+	for (const Box &b : {floor, roof, nose, boom}) m.add_face_box(c, b);
+	m.add_volume(c, 1, 0, floor);
+	m.add_volume(c, 1, 0, nose);
+	return m;
+}
+
 // mladder.3di: an 8 m wooden ladder in the shape of the shipped WLad03: one part, two rails and
 // sixteen rungs as collision faces (poly type 13, as the shipped faces), one type-1 volume around
 // them (x -0.04..0.24, y -0.5..0.52, up to 8.01) and the climb volume, type 4 (CL), the flat
@@ -994,6 +1024,75 @@ bool build_minefield_coop(std::vector<uint8_t> &bytes, std::string &err) {
 	return build_minefield_mission(bytes, err, true, 2);
 }
 
+// minimap.bms: 00TRg's pool-2 records in miniature, in the order its promote lays them out: two
+// pier building pieces (buildings whose model carries no occlusion, so no minimap marker), then the
+// twenty-four records its minimap draws (the power generator housing, the mobile armory and two
+// armories, eight, four and four jungle huts of three kinds, the concrete bunker on team 2 and
+// three warehouses: buildings over the synthetic armory, whose interior is an occlusion object,
+// and the armories by their attribute), then a few of its sandbag walls (decorations), all around
+// the single-player start.
+bool build_minimap(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Minimap", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -100.0, -100.0, 0, 1197);
+	struct Run {
+		int item;
+		int count;
+	};
+	const Run runs[] = {{101101, 2}, {101132, 1}, {101165, 1}, {101186, 2}, {101202, 8}, {101203, 4},
+		{101204, 4}, {101205, 1}, {101207, 2}, {101208, 1}, {101309, 3}, {101310, 2}};
+	int32_t id = 71;
+	int at = 0;
+	for (const Run &run : runs) {
+		for (int i = 0; i < run.count; ++i, ++at) {
+			const double x = -300.0 + 40.0 * (at % 12);
+			const double y = -40.0 + 40.0 * (at / 12);
+			const size_t index = place_on_ground(doc, EntityKind::Building, run.item, x, y, 0, id++);
+			if (run.item == 101205) doc.buildings[index].team = 2;
+		}
+	}
+	return finish_mission(doc, bytes, err);
+}
+
+// payload.bms: the authored halves of 00TRg's two mission payloads in miniature: the single-player
+// start (marker 0), an AI patrol path over markers 1..11 and the blue player route, exactly one
+// path flagged DoesNotLoop|PlayerRoute over the one marker 12 (00TRg's pool-3 slot 0x300c), beside
+// its string table payload.bin.
+bool build_payload(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Payload", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -100.0, -100.0, 0, 1197);
+	if (!add_path(doc, 1, {{-200.0, -60.0}, {-180.0, -40.0}, {-160.0, -20.0}, {-140.0, 0.0}, {-120.0, 20.0},
+			{-100.0, 40.0}, {-80.0, 60.0}, {-60.0, 80.0}, {-40.0, 100.0}, {-20.0, 120.0}, {0.0, 140.0}}, 0, err, 3000))
+		return false;
+	const int blue = static_cast<int>(bms::WaypointFlags::DoesNotLoop) | static_cast<int>(bms::WaypointFlags::PlayerRoute);
+	if (!add_path(doc, 2, {{-90.0, -80.0}}, blue, err, 3100)) return false;
+	return finish_mission(doc, bytes, err);
+}
+
+// payload.bin: its string table: the briefing (a short first draft the engine passes over) and the
+// 810-character second briefing 00TRg's 0x7E body carries (no third, as 00TRg authors none), and
+// the two deploy-map location labels its 0x0F world-state names, 00TRg's own.
+bool build_payload_table(std::vector<uint8_t> &bytes, std::string &err) {
+	std::string briefing2;
+	const char *const kSentence =
+			"Cross the river at first light, secure the weapons cache and hold the rebel outpost until relieved. ";
+	while (briefing2.size() < 810) briefing2 += kSentence;
+	briefing2.resize(810);
+	briefing2.back() = '.';
+	rtxt::File table;
+	table.sections.push_back({"Info", 3});
+	table.entries.push_back({"TITLE", "Payload", {}, 0});
+	table.entries.push_back({"BRIEFING", "Secure the cache.", {}, 0});
+	table.entries.push_back({"BRIEFING2", briefing2, {}, 0});
+	table.sections.push_back({"Locations", 2});
+	table.entries.push_back({"LOCATION001", "Weapons Cache", {}, 1});
+	table.entries.push_back({"LOCATION002", "Rebel Outpost", {}, 1});
+	if (!rtxt::write(table, bytes, err)) return false;
+	rtxt::File back;
+	return rtxt::parse(bytes.data(), bytes.size(), back, err) && back.entries.size() == table.entries.size();
+}
+
 // fixtures/bms/synth_areas.bms: a mission whose area triggers take the shape of a shipped
 // training mission's (03TR: thirteen zones over ids 1..15 with gaps, most constrain-Z, flag 2),
 // with the mission boundary (flag 1) beside them and a record in each of the four pools, so its
@@ -1123,9 +1222,10 @@ std::vector<opennova::bad::BadBuildClip> soldier_clips() {
 	};
 }
 
-// The clip a body slot plays: a death slot the death; a walk or a wash the walk, a run or a jog
-// the run; the crouch and prone families theirs; reloads, the guard family and the attacks theirs;
-// every other body slot the idle. The reset row is the reset.
+// The clip a body slot plays: a death slot the death; a walk or the wash walk the walk, a run, a jog
+// or the wash run the run; the crouch and prone families theirs; reloads, the guard family and the
+// attacks theirs; every other body slot (the wash idle, the brace a body holds under a rotor's
+// downwash, among them) the idle. The reset row is the reset.
 const char *soldier_slot_clip(const std::string &slot) {
 	const auto starts = [&slot](const char *prefix) { return slot.rfind(prefix, 0) == 0; };
 	if (slot == "reset") return "ms_rst";
@@ -1140,9 +1240,10 @@ const char *soldier_slot_clip(const std::string &slot) {
 	if (starts("walk_prone")) return "ms_prwalk";
 	if (slot == "idle_crouch") return "ms_crouch";
 	if (slot == "idle_prone") return "ms_prone";
-	if (starts("walk") || starts("wash") || starts("wounded_walk")) return "ms_walk";
+	if (starts("walk") || slot == "wash_walk" || starts("wounded_walk")) return "ms_walk";
 	if (starts("run_attack")) return "ms_attack";
-	if (starts("run") || starts("jog") || starts("wounded_run") || starts("cover_run")) return "ms_run";
+	if (starts("run") || starts("jog") || slot == "wash_run" || starts("wounded_run") || starts("cover_run"))
+		return "ms_run";
 	if (starts("reload")) return "ms_reload";
 	if (starts("guard")) return "ms_guard";
 	if (starts("attack") || starts("post_attack") || starts("pre_attack") || starts("cover_attack"))
@@ -1233,6 +1334,22 @@ bool build_player_table(std::vector<uint8_t> &bytes, std::string &err) {
 	return build_body_table(player_authors, bytes, err);
 }
 
+// mmedic2.adm (the first teammate medic's, the shipped Medic02 table DeltaMED reads): the
+// soldier's slots and the two drag poses it authors, dragger_idle and dragger_walk; mmedic1.adm (the
+// second's, Medic01): the soldier's slots and the draggee.
+bool dragger_authors(const std::string &slot) {
+	return soldier_authors(slot) || slot == "dragger_idle" || slot == "dragger_walk";
+}
+bool draggee_authors(const std::string &slot) {
+	return soldier_authors(slot) || slot == "draggee";
+}
+bool build_dragger_table(std::vector<uint8_t> &bytes, std::string &err) {
+	return build_body_table(dragger_authors, bytes, err);
+}
+bool build_draggee_table(std::vector<uint8_t> &bytes, std::string &err) {
+	return build_body_table(draggee_authors, bytes, err);
+}
+
 // mfp_m4.adm: the first-person M4's rows.
 bool build_fp_m4_table(std::vector<uint8_t> &bytes, std::string &err) {
 	return mint_table({{"anim_reset", "mfp_rst"}, {"anim_wpn_idle", "mfp_idle"}, {"anim_wpn_fire", "mfp_fire"},
@@ -1289,6 +1406,7 @@ int main(int argc, char **argv) {
 		{"mladder.3di", make_ladder},
 		{"mbuggy.3di", make_buggy},
 		{"mlndmine.3di", make_minefield},
+		{"mheli.3di", make_heli},
 	};
 	for (const ModelRecipe &recipe : models) {
 		std::vector<uint8_t> bytes;
@@ -1315,6 +1433,9 @@ int main(int argc, char **argv) {
 		{"land_vehicles.bms", build_land_vehicles},
 		{"minefield.bms", build_minefield},
 		{"minefield_coop.bms", build_minefield_coop},
+		{"minimap.bms", build_minimap},
+		{"payload.bms", build_payload},
+		{"payload.bin", build_payload_table},
 	};
 	for (const MissionRecipe &recipe : missions) {
 		std::vector<uint8_t> bytes;
@@ -1333,6 +1454,8 @@ int main(int argc, char **argv) {
 		{"msoldier.adm", build_soldier_table},
 		{"E_STAND.adm", build_soldier_table},
 		{"mplayer.adm", build_player_table},
+		{"mmedic1.adm", build_draggee_table},
+		{"mmedic2.adm", build_dragger_table},
 		{"mfp_m4.adm", build_fp_m4_table},
 	};
 	for (const TableRecipe &recipe : tables) {

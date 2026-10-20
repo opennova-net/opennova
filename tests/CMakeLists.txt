@@ -719,7 +719,6 @@ add_executable(teammate_spawn_test mission/teammate_spawn_test.cpp)
 target_link_libraries(teammate_spawn_test PRIVATE opennova_test_rig)
 target_include_directories(teammate_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME teammate_spawn COMMAND teammate_spawn_test)
-set_tests_properties(teammate_spawn PROPERTIES SKIP_RETURN_CODE 77 LABELS retail)
 
 add_executable(infantry_spawn_test world/infantry_spawn_test.cpp)
 target_link_libraries(infantry_spawn_test PRIVATE opennova_runtime)
@@ -2598,7 +2597,7 @@ add_executable(minimap_overlay_test world/minimap_overlay_test.cpp)
 target_link_libraries(minimap_overlay_test PRIVATE opennova_runtime opennova_test_rig)
 target_include_directories(minimap_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(minimap_overlay_test PRIVATE cxx_std_17)
-opennova_add_mixed_test(minimap_overlay COMMAND minimap_overlay_test)
+add_test(NAME minimap_overlay COMMAND minimap_overlay_test)
 
 # The guided-missile flight integrator (D-NET-64): ignition hold, boost ramp,
 # BAM turn clamp, the three termination tests and their ordering.
@@ -3016,7 +3015,7 @@ add_executable(truck_dismount_test world/truck_dismount_test.cpp)
 target_link_libraries(truck_dismount_test PRIVATE opennova_runtime)
 target_include_directories(truck_dismount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(truck_dismount_test PRIVATE cxx_std_17)
-opennova_add_gated_test(truck_dismount COMMAND truck_dismount_test)
+add_test(NAME truck_dismount COMMAND truck_dismount_test)
 
 # Authoritative projectile consequences through RoundSim's CollisionWorld seam:
 # pre-arm dud substitution, kinetic damage, NoDie, and physical zero-damage blockers.
@@ -4446,7 +4445,6 @@ opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bm
 # without OPENNOVA_JO_ASSETS / OPENNOVA_JO_DIR.
 foreach(gated
         anim/reload_clips_us01 anim/weapon_action_clips
-        npruntime/authored_payload_00trg
         particle/gore_set_catalog)
     get_filename_component(gated_name ${gated} NAME)
     get_filename_component(gated_dir ${gated} DIRECTORY)
@@ -4459,9 +4457,10 @@ endforeach()
 
 # The npruntime probes that became ctests over minted data (ADR 0041): the
 # remote body-state arbitration over a clip set the test mints, the held-weapon
-# attach over the synthetic person rig and gun.
+# attach over the synthetic person rig and gun, the authored payload halves
+# over the mission set's payload mission.
 foreach(minted
-        npruntime/remote_body_state npruntime/held_weapon_attach)
+        npruntime/remote_body_state npruntime/held_weapon_attach npruntime/authored_payload_00trg)
     get_filename_component(minted_name ${minted} NAME)
     get_filename_component(minted_dir ${minted} DIRECTORY)
     add_executable(${minted_dir}_${minted_name}_test ${minted}_test.cpp)

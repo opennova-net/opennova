@@ -331,6 +331,151 @@ begin "All Un-marked Land Mine Section"
     ammo_marker3        LARGELANDMINE
 end
 
+begin "Blackhawk, MEDIVAC, both doors open"
+  id 101281
+  type vehicle
+  unit_type 3
+  graphic mheli
+  attrib: AIData Good easy notool
+  disk_function HELO
+  ai_function chel
+  move_function chel
+  render_function chel
+  hp 1600
+  score 100
+  armor -1
+end
+
+begin "Combat Medic01 Soldier w"
+  id 104520
+  type person
+  unit_type 9
+  graphic person
+  anim_def mmedic1
+  attrib: good aidata easy leavecorpse nodismember notool
+  hp 500
+  score 25
+  armor 0 0
+  ai_function org1
+  disk_function ORGANIC
+  move_function org1
+  radarsig 300
+  clipsize 30
+  ammo_closeattack    AMMO_CAR15_556MM
+  ammo_easyrocket     AMMO_CAR15_556MM
+  ammo_marker3        AMMO_CAR15_556MM
+end
+
+begin "Combat Medic02 Soldier no gun"
+  id 104529
+  type person
+  unit_type 9
+  graphic person
+  anim_def mmedic2
+  attrib: good aidata easy leavecorpse nodismember notool
+  hp 500
+  score 25
+  armor -1
+  ai_function org1
+  disk_function ORGANIC
+  move_function org1
+  radarsig 300
+  clipsize 30
+  ammo_closeattack    AMMO_CAR15_556MM
+  ammo_easyrocket     AMMO_CAR15_556MM
+  ammo_marker3        AMMO_CAR15_556MM
+end
+
+begin "teleport target"
+  id 106088
+  type marker
+  disk_function MARKER
+end
+
+begin "Open Building on Pier Piece"
+  id 101101
+  attrib: Landable reflect
+  type building
+  graphic house
+end
+
+begin "Power Generator Housing"
+  id 101132
+  type building
+  graphic armory
+  attrib: Landable
+end
+
+begin "Mobile Armory Version #2"
+  id 101165
+  type building
+  graphic armory
+  attrib: Landable Armory
+end
+
+begin "Armory Version #3"
+  id 101186
+  type decoration
+  graphic armory
+  attrib: Landable Armory
+end
+
+begin "Jungle Hut 1"
+  id 101202
+  attrib:
+  type building
+  graphic armory
+end
+
+begin "Jungle Hut 2"
+  id 101203
+  attrib:
+  type building
+  graphic armory
+end
+
+begin "Jungle Hut 3"
+  id 101204
+  attrib:
+  type building
+  graphic armory
+end
+
+begin "Concrete Bunker 1"
+  id 101205
+  attrib:  landable
+  type building
+  graphic armory
+end
+
+begin "Indonesian warehouse 2"
+  id 101207
+  attrib:  landable
+  type building
+  graphic armory
+end
+
+begin "Indonesian warehouse 3"
+  id 101208
+  attrib:  landable
+  type building
+  graphic armory
+end
+
+begin "Sand bag wall #1, 4 m. long, no skirt"
+  id 101309
+  attrib:
+  type decoration
+  graphic crate
+end
+
+begin "Sand bag wall #2, 8 m. long"
+  id 101310
+  attrib:
+  type decoration
+  graphic crate
+end
+
 begin "Drivable Transport Truck"
   id 101294
   type vehicle
