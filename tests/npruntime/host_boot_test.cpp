@@ -342,6 +342,35 @@ int main() {
 		CHECK(plain.boot.mission_text.location_name(2) == "Ridge");
 	}
 
+	// --- D-NET-675: the gametext "Server" strings search the mount's override
+	// table first, and the kernel hands the table to the world, whose dialog
+	// subtitles search it first too.
+	// [orig: GameText_GetString @0x51EBD0 -- the call @0x51EBF6 into
+	//  TextResource_FindEntryBySectionAndKey @0x75D250, the override test @0x75D27B;
+	//  Dialog_LoadAudioClip @0x44DDD6]
+	{
+		rtxt::File file;
+		file.sections.push_back({"Server", 0});
+		rtxt::Entry medic;
+		medic.key = "STRSRV_MEDREQ";
+		medic.text = "%s calls for a medic";
+		medic.section_index = 0;
+		file.entries.push_back(medic);
+		++file.sections[0].string_count;
+		file.normalize_grouping();
+		std::vector<uint8_t> bytes;
+		std::string error;
+		if (!rtxt::write(file, bytes, error)) std::printf("rtxt::write: %s\n", error.c_str());
+		Host host;
+		inmatch::HostBootRequest r = host.request(0);
+		r.text_override_table = bytes;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+		CHECK(ctx.server_text.medic_request_format == "%s calls for a medic");
+		CHECK(ctx.server_text.change_to_blue_format == "%s joined blue"); // the gametext's own
+		CHECK(host.kernel != nullptr && host.kernel->world.tables.text_override != nullptr);
+	}
+
 	// --- the water rungs (env #44): the .env's line writes after the .trn's,
 	// so the .env's height (40 half units) beats the terrain's (30); with no
 	// .env line the terrain's stands -----------------------------------------

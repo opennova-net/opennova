@@ -132,18 +132,20 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 				s.service_wait_seconds, game_text_lookup(gametext));
 	}
 	if (gametext.is_valid()) {
-		const String impact = gametext->get_string_in_section(opennova::hud::kGameTextOverlays, "STROVER_DIST");
-		if (!impact.is_empty())
-			s.impact_format = opennova::to_std(impact);
+		// The override table first (game_text_lookup, D-NET-675).
+		const opennova::hud::GameTextLookup lookup = game_text_lookup(gametext);
+		const std::string impact = lookup(opennova::hud::kGameTextOverlays, "STROVER_DIST", "");
+		if (!impact.empty())
+			s.impact_format = impact;
 		const char *keys[] = { "STROVER_MEDGEAR", "STROVER_LOWGEAR", "STROVER_HIGEAR" };
 		for (int i = 0; i < 3; ++i) {
-			const String text = gametext->get_string_in_section(opennova::hud::kGameTextOverlays, keys[i]);
-			if (!text.is_empty())
-				s.gear_text[i] = opennova::to_std(text);
+			const std::string text = lookup(opennova::hud::kGameTextOverlays, keys[i], "");
+			if (!text.empty())
+				s.gear_text[i] = text;
 		}
-		const String text = gametext->get_string_in_section("hud", "altitude");
-		if (!text.is_empty())
-			s.altitude_text = opennova::to_std(text);
+		const std::string text = lookup("hud", "altitude", "");
+		if (!text.empty())
+			s.altitude_text = text;
 	}
 	compiler_.update_layout(layout_);
 	queue_redraw();

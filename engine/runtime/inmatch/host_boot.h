@@ -177,7 +177,10 @@ struct HostBoot {
 // "" miss, which the handler sends nothing for [orig: Game_InitSubsystems
 // @0x4A6CD0 loads gametext.bin]. Phase A reads them; an embedder staging its
 // own bring-up (the game's in-memory loads) reads them here.
-ServerTextTable read_host_server_text(const mission::BootFileSource &files);
+// `text_override` is the mount's override table (null for none), searched
+// first by every lookup as GameText_GetString's is (D-NET-675).
+ServerTextTable read_host_server_text(const mission::BootFileSource &files,
+		const rtxt::File *text_override);
 
 // The mission text a host's boot reads for `mission_basename` (the mission's
 // name cut at its first '.'): resolve_mission_text's <mission>.bin else

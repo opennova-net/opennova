@@ -524,6 +524,10 @@ struct MissionTables {
     const dbf::File *dialog_bank = nullptr;
     const lwf::File *dialog_sounds = nullptr;
     const rtxt::File *mission_text = nullptr;
+    // g_TextOverrideTable: the expansion's text-override table every section
+    // lookup searches first (null for none) [orig: TextResource_FindEntryBySectionAndKey
+    // @0x75D27B].
+    const rtxt::File *text_override = nullptr;
     CharacterTraitsTable character_traits;
     // charattr.def: each CHARACTER row's tokenized ATTRIBUTES dword (AutoScope 1,
     // SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl 0x20), indexed by the

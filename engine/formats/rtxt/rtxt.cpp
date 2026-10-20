@@ -72,6 +72,14 @@ std::string format_miss_marker(const std::string &section, const std::string &ke
   return out;
 }
 
+const Entry *find_with_override(const File *override_table, const File &table,
+                                const std::string &section, const std::string &key) {
+  if (override_table != nullptr && override_table != &table) {
+    if (const Entry *entry = override_table->find_in_section(section, key)) return entry;
+  }
+  return table.find_in_section(section, key);
+}
+
 std::string lookup_with_override(const File *override_table, const File *table,
                                  const std::string &section, const std::string &key) {
   // Override-table-first [orig: TextResource_LoadOverrideTable @ 0x75D5C0]:

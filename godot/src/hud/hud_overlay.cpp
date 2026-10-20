@@ -996,8 +996,10 @@ void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<R
         scope.magnification = v.scope_magnification;
     }
     if (scope.active && p_gametext.is_valid()) {
+        // The override table first (game_text_lookup, D-NET-675).
+        const opennova::hud::GameTextLookup lookup = game_text_lookup(p_gametext);
         const auto text = [&](const char *section, const char *key) -> std::string {
-            return opennova::to_std(p_gametext->get_string_in_section(section, key));
+            return lookup(section, key, "");
         };
         scope.range_format = text(opennova::hud::kGameTextOverlays, "STROVER_DIST");
         scope.range_over_1km = text(opennova::hud::kGameTextOverlays, "STROVER_DIST1KM");
@@ -1286,11 +1288,9 @@ bool project_to_overlay(const Transform3D &p_camera, const Projection &p_project
 
 String overlay_text(const Ref<RtxtStringFile> &p_gametext, const String &p_key,
 		const String &p_fallback) {
-	if (p_gametext.is_valid() &&
-			p_gametext->has_string_in_section(opennova::hud::kGameTextOverlays, StringName(p_key))) {
-		return p_gametext->get_string_in_section(opennova::hud::kGameTextOverlays, StringName(p_key));
-	}
-	return p_fallback;
+	// The override table first (game_text_lookup, D-NET-675).
+	return opennova::to_gd(game_text_lookup(p_gametext)(opennova::hud::kGameTextOverlays,
+			opennova::to_std(p_key).c_str(), opennova::to_std(p_fallback).c_str()));
 }
 
 } // namespace

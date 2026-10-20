@@ -77,6 +77,7 @@ func clear() -> void:
 	_tables.clear()
 	_untrack_override_source()
 	_override_table = null
+	_publish_override()
 	# The installed "Keys" table goes with the registry: every binding label
 	# falls back to its literal until the next keyhelp registration.
 	RtxtStringFile.clear_key_strings()
@@ -125,6 +126,7 @@ func load_rtxt(root: ResourceRoot, file: String) -> RtxtStringFile:
 ## active expansion's text bin here). Pass null to clear.
 func set_override_table(table: RtxtStringFile) -> void:
 	_override_table = table
+	_publish_override()
 
 
 func get_override_table() -> RtxtStringFile:
@@ -152,9 +154,20 @@ func _install_override_from_source() -> void:
 		bytes = _override_source.get_expansion_override_table()
 	if bytes.is_empty():
 		_override_table = null
+		_publish_override()
 		return
 	var table := RtxtStringFile.new()
 	_override_table = table if table.load_from_byte_array(bytes) == OK else null
+	_publish_override()
+
+
+# The engine's game-text lookups (game_text_lookup in the GDExtension: the HUD's
+# and the waypoint names' among them) search the same table first.
+func _publish_override() -> void:
+	if _override_table != null:
+		_override_table.install_text_override()
+	else:
+		RtxtStringFile.clear_text_override()
 
 
 func _untrack_override_source() -> void:
@@ -177,14 +190,26 @@ func lookup(table_name: String, section: String, key: String) -> String:
 			_tables.get(table_name.to_lower()), section, key)
 
 
-## The named table's own entry, or `fallback` when the table is absent or
-## lacks the key: no override table and no miss marker, the form the HUD
-## overlay and label lookups take (a table-only has/get pair).
+## The override table's entry, else the named table's own, or `fallback` when
+## the table is absent or neither has the key: no miss marker, the form the HUD
+## overlay and label lookups take. As every engine section lookup, the override
+## table answers first (D-NET-675; RtxtStringFile.lookup_with_override's order).
 func lookup_or(table_name: String, section: String, key: String, fallback: String) -> String:
 	var t: RtxtStringFile = get_table(table_name)
-	if t != null and t.has_string_in_section(section, key):
-		return t.get_string_in_section(section, key)
+	if t != null:
+		if _override_table != null and _override_table.has_string_in_section(section, key):
+			return _override_table.get_string_in_section(section, key)
+		if t.has_string_in_section(section, key):
+			return t.get_string_in_section(section, key)
 	return fallback
+
+
+## Whether lookup_or finds the key: in the override table or the named table.
+func has_text(table_name: String, section: String, key: String) -> bool:
+	var t: RtxtStringFile = get_table(table_name)
+	return t != null and ((_override_table != null
+			and _override_table.has_string_in_section(section, key))
+			or t.has_string_in_section(section, key))
 
 
 ## A menu UI token: menutxt's "Menu" section, then gameui's, else the fallback

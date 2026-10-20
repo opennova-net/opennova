@@ -129,7 +129,8 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 	bringup.mission_text = net_.mission_text;
 	if (assets_.root.is_valid())
 		bringup.server_text = inmatch::read_host_server_text(
-				opennova::mission::boot_files_from_index(assets_.root->native_index()));
+				opennova::mission::boot_files_from_index(assets_.root->native_index()),
+				net_.mission_text.override_table.get());
 	return bringup;
 }
 

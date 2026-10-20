@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -261,6 +262,30 @@ String RtxtStringFile::lookup_with_override(const Ref<RtxtStringFile> &p_overrid
 			override_file, file, gd_to_std(p_section), gd_to_std(p_key)));
 }
 
+// --- The process's text-override table ---
+
+namespace {
+std::shared_ptr<const opennova::rtxt::File> g_text_override;
+} // namespace
+
+void RtxtStringFile::install_text_override() const {
+	g_text_override = std::make_shared<const opennova::rtxt::File>(file_);
+}
+
+void RtxtStringFile::clear_text_override() {
+	g_text_override.reset();
+}
+
+bool RtxtStringFile::text_override_lookup(const char *p_section, const char *p_key,
+		std::string &r_out) {
+	const std::shared_ptr<const opennova::rtxt::File> table = g_text_override;
+	if (!table) return false;
+	const opennova::rtxt::Entry *entry = table->find_in_section(p_section, p_key);
+	if (entry == nullptr) return false;
+	r_out = opennova::to_std(std_to_gd(entry->text));
+	return true;
+}
+
 // --- The process-wide "Keys" table (engine controls/key_strings.h) ---
 
 void RtxtStringFile::install_key_strings() const {
@@ -319,6 +344,8 @@ void RtxtStringFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("install_key_strings"), &RtxtStringFile::install_key_strings);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("clear_key_strings"), &RtxtStringFile::clear_key_strings);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("has_key_strings"), &RtxtStringFile::has_key_strings);
+	ClassDB::bind_method(D_METHOD("install_text_override"), &RtxtStringFile::install_text_override);
+	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("clear_text_override"), &RtxtStringFile::clear_text_override);
 
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("strip_hotkey", "text"), &RtxtStringFile::strip_hotkey);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("format_miss_marker", "section", "key"), &RtxtStringFile::format_miss_marker);

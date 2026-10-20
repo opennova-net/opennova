@@ -665,7 +665,9 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		std::vector<uint8_t> text;
 		text_source = resolve_mission_text(files_, mission_basename, text);
 		text_size = text.size();
-		// g_TextMission, the table the dialog lines' subtitles read.
+		// g_TextMission, the table the dialog lines' subtitles read, and the
+		// override table their lookup searches first (D-NET-675).
+		world.tables.text_override = text_override_table.get();
 		world.tables.mission_text = nullptr;
 		mission_text_table = rtxt::File{};
 		std::string text_error;

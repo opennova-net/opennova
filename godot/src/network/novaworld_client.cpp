@@ -211,7 +211,10 @@ void NovaWorldClient::set_gametext(const Ref<RtxtStringFile> &gametext) {
 	gametext_ = gametext;
 	host_role_.set_lobby_text(opennova::make_host_lobby_text(
 			[&gametext](const char *section, const char *key, std::string &out) {
-				if (gametext.is_null() || !gametext->has_string_in_section(section, StringName(key))) return false;
+				if (gametext.is_null()) return false;
+				// The override table first (D-NET-675).
+				if (RtxtStringFile::text_override_lookup(section, key, out)) return true;
+				if (!gametext->has_string_in_section(section, StringName(key))) return false;
 				out = opennova::to_std(gametext->get_string_in_section(section, StringName(key)));
 				return true;
 			}));

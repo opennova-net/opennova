@@ -602,7 +602,7 @@ bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
 	const opennova::dbf::File *dialog_bank =
 			(dbf_.is_valid() && dbf_->is_loaded()) ? &dbf_->engine_file() : nullptr;
 	const opennova::audio::DialogLinePlayback line = opennova::audio::resolve_dialog_line(
-			dialog_bank, dialog_sounds_loaded_ ? &dialog_sounds_ : nullptr, nullptr,
+			dialog_bank, dialog_sounds_loaded_ ? &dialog_sounds_ : nullptr, nullptr, nullptr,
 			opennova::to_std(p_dialog_name), p_line, p_player_class);
 	if (line.file.empty()) {
 		return false;

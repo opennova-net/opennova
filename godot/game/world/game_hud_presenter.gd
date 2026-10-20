@@ -448,10 +448,9 @@ func ensure_game_hud() -> void:
 	HudTextTables.register(root, _world)
 	# The objectives-panel header, resolved once against the freshly registered
 	# gametext table. [orig: STROVER_MISSIONOBJECTIVES @0x5ba986]
-	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if t != null and t.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"):
-		_game_hud.set_objectives_header(
-				t.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"))
+	if Strings.has_text(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"):
+		_game_hud.set_objectives_header(Strings.lookup_or(Strings.TABLE_GAMETEXT,
+				Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES", ""))
 	# The presenter-held friendly-tags mode survives the per-mission rebuild
 	# like retail's process-lifetime global [orig: g_FriendlyTagsMode @0x24C18C4].
 	_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
@@ -1007,14 +1006,10 @@ func _update_overlay_windows(sim: Simulation) -> void:
 func _resolve_map_legend_labels() -> PackedStringArray:
 	var labels := PackedStringArray()
 	_map_legend_title = ""
-	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if t != null and t.has_string_in_section("Hud", "hud_map_legend"):
-		_map_legend_title = t.get_string_in_section("Hud", "hud_map_legend")
+	if Strings.has_text(Strings.TABLE_GAMETEXT, "Hud", "hud_map_legend"):
+		_map_legend_title = Strings.lookup_or(Strings.TABLE_GAMETEXT, "Hud", "hud_map_legend", "")
 	for key in HudOverlay.map_legend_keys():
-		var label := ""
-		if t != null and t.has_string_in_section("Hud", key):
-			label = t.get_string_in_section("Hud", key)
-		labels.push_back(label)
+		labels.push_back(Strings.lookup_or(Strings.TABLE_GAMETEXT, "Hud", key, ""))
 	return labels
 
 

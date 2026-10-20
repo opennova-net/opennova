@@ -510,31 +510,49 @@ int test_client_line_resolution() {
 	text.entries = { e0, e1, e2 };
 
 	// Class 3: the "3SynR101" variant wins; the subtitle is the wave name's.
-	DialogLinePlayback line = resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 2, 3);
+	DialogLinePlayback line = resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 2, 3);
 	TEST_EXPECT(line.line_found && line.wave == "SynR101");
 	TEST_EXPECT(line.played == "3SynR101" && line.file == "3SynR101.wav" && line.volume == 200 &&
 			line.text == "Move out!");
 	// Class 1 has no variant: the bare wave.
-	line = resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 2, 1);
+	line = resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 2, 1);
 	TEST_EXPECT(line.played == "SynR101" && line.file == "SynR101.wav");
 	// No [Mission Dialog] entry: the flat entry the sequence suffix names.
-	line = resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 0, 1);
+	line = resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 0, 1);
 	TEST_EXPECT(line.file == "SynR100.wav" && line.text == "Mission title");
 	// A line whose wave the sounds lack resolves its subtitle but no clip; a suffix
 	// past the table names no entry.
-	line = resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 1, 1);
+	line = resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 1, 1);
 	TEST_EXPECT(line.line_found && line.file.empty() && line.text.empty());
 	// The name is matched exactly, and a line past the table resolves nothing.
-	TEST_EXPECT(!resolve_dialog_line(&dialogs, &sounds, &text, "DLG001", 0, 1).line_found);
-	TEST_EXPECT(!resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 3, 1).line_found);
-	TEST_EXPECT(!resolve_dialog_line(nullptr, &sounds, &text, "dlg001", 0, 1).line_found);
+	TEST_EXPECT(!resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "DLG001", 0, 1).line_found);
+	TEST_EXPECT(!resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 3, 1).line_found);
+	TEST_EXPECT(!resolve_dialog_line(nullptr, &sounds, nullptr, &text, "dlg001", 0, 1).line_found);
 	// No mission text: the clip alone.
-	line = resolve_dialog_line(&dialogs, &sounds, nullptr, "dlg001", 2, 3);
+	line = resolve_dialog_line(&dialogs, &sounds, nullptr, nullptr, "dlg001", 2, 3);
 	TEST_EXPECT(line.file == "3SynR101.wav" && line.text.empty());
 	// The subtitle alone, as the line's own words say it.
-	TEST_EXPECT(dialog_line_text(&text, dialogs.groups[0].lines[2]) == "Move out!");
-	TEST_EXPECT(dialog_line_text(&text, dialogs.groups[0].lines[0]) == "Mission title");
-	TEST_EXPECT(dialog_line_text(nullptr, dialogs.groups[0].lines[0]).empty());
+	TEST_EXPECT(dialog_line_text(nullptr, &text, dialogs.groups[0].lines[2]) == "Move out!");
+	TEST_EXPECT(dialog_line_text(nullptr, &text, dialogs.groups[0].lines[0]) == "Mission title");
+	TEST_EXPECT(dialog_line_text(nullptr, nullptr, dialogs.groups[0].lines[0]).empty());
+	// The expansion's override table answers the [Mission Dialog] lookup first;
+	// with no mission table there is no subtitle at all, and the by-index
+	// fallback reads the mission table alone (D-NET-675).
+	// [orig: Dialog_LoadAudioClip -- `test g_TextMission` @0x44DDCB..0x44DDCD,
+	//  TextResource_FindEntryBySectionAndKey @0x44DDD6 -> the override test @0x75D27B]
+	rtxt::File override_table;
+	override_table.sections.push_back(rtxt::Section{"Mission Dialog", 1});
+	rtxt::Entry o0;
+	o0.key = "SynR101";
+	o0.text = "Expansion line";
+	override_table.entries = { o0 };
+	TEST_EXPECT(dialog_line_text(&override_table, &text, dialogs.groups[0].lines[2]) ==
+			"Expansion line");
+	TEST_EXPECT(dialog_line_text(&override_table, nullptr, dialogs.groups[0].lines[2]).empty());
+	TEST_EXPECT(dialog_line_text(&override_table, &text, dialogs.groups[0].lines[0]) ==
+			"Mission title");
+	line = resolve_dialog_line(&dialogs, &sounds, &override_table, &text, "dlg001", 2, 3);
+	TEST_EXPECT(line.text == "Expansion line");
 	return 0;
 }
 

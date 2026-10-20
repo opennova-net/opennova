@@ -99,7 +99,11 @@ std::vector<DialogLineRef> dialog_line_refs(const dbf::Group &group, const lwf::
 // of the line's sequence (none where it holds no '_'); "" for none.
 // [orig: Dialog_LoadAudioClip @ 0x44ddcd..0x44de3c; IniSection_GetEntryByIndex
 //  @ 0x75d130]
-std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &line);
+// The section lookup searches `text_override` (the expansion's override table,
+// null for none) first; the by-index fallback reads the mission table alone.
+// [orig: TextResource_FindEntryBySectionAndKey @0x75D27B, D-NET-675]
+std::string dialog_line_text(const rtxt::File *text_override, const rtxt::File *mission_text,
+		const dbf::Line &line);
 
 // A co-op dialog line a client plays on S2C 0x28 (the effect pass's
 // "dialog_line" record): the dialog by its exact name in the loaded bank's
@@ -126,8 +130,8 @@ struct DialogLinePlayback {
 	std::string text;        // the subtitle; empty when none resolves
 };
 DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const lwf::File *dialog_sounds,
-		const rtxt::File *mission_text, const std::string &dialog_name, int line,
-		int player_class);
+		const rtxt::File *text_override, const rtxt::File *mission_text,
+		const std::string &dialog_name, int line, int player_class);
 
 // The dialog clock: Dialog_UpdatePlayback runs once a logic tick and its rate
 // word is 62 [orig: Game_ProcessMainFrame @ 0x5265af; DialogSystem_Init

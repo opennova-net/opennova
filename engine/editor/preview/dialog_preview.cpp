@@ -179,7 +179,7 @@ DialogPlay plan_dialog_play(const DialogSources &sources, const std::string &dia
 		played.wave = each.line.wave;
 		played.file = each.line.file;
 		played.volume = each.line.volume;
-		played.text = audio::dialog_line_text(text, entry);
+		played.text = audio::dialog_line_text(nullptr, text, entry);
 		played.wait_s = (line < 0 && each.line.line > 0) ? double(each.line.delay) / 10.0 : 0.0;
 		played.start_tick = each.tick;
 		played.start_s = double(each.tick) / io::kTickHz;

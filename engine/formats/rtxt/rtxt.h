@@ -150,6 +150,13 @@ std::string format_miss_marker(const std::string &section, const std::string &ke
 std::string lookup_with_override(const File *override_table, const File *table,
                                  const std::string &section, const std::string &key);
 
+// The (section, key) entry every section lookup finds: the override table's
+// first, unless it is the table asked, else the table's; null for none.
+// [orig: TextResource_FindEntryBySectionAndKey @0x75D250, the override test
+// @0x75D27B]
+const Entry *find_with_override(const File *override_table, const File &table,
+                                const std::string &section, const std::string &key);
+
 // Strip the {hot} accelerator marker, reporting its char index (-1 = none).
 std::string strip_hotkey(const std::string &text, int &hotkey_index);
 

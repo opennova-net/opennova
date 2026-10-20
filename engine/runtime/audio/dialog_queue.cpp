@@ -88,10 +88,14 @@ std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
 	return group != nullptr ? dialog_line_refs(*group, dialog_sounds) : std::vector<DialogLineRef>();
 }
 
-std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &line) {
+std::string dialog_line_text(const rtxt::File *text_override, const rtxt::File *mission_text,
+		const dbf::Line &line) {
+	// No mission table, no subtitle [orig: `test g_TextMission` @0x44DDCB..0x44DDCD].
 	if (mission_text == nullptr) return std::string();
-	// [Mission Dialog] by the wave's name [orig: @0x44ddd6..0x44dde4].
-	if (const rtxt::Entry *text = mission_text->find_in_section("Mission Dialog", line.def_id_name))
+	// [Mission Dialog] by the wave's name, the override table first
+	// [orig: @0x44ddd6..0x44dde4 -> TextResource_FindEntryBySectionAndKey @0x75D27B].
+	if (const rtxt::Entry *text = rtxt::find_with_override(text_override, *mission_text,
+				"Mission Dialog", line.def_id_name))
 		return text->text;
 	// Else the flat entry the sequence's suffix after its last '_' names: the walk tests the
 	// character before the cursor from the string's last character back [orig: @0x44ddec..0x44de3c;
@@ -109,8 +113,8 @@ std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &li
 }
 
 DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const lwf::File *dialog_sounds,
-		const rtxt::File *mission_text, const std::string &dialog_name, int line,
-		int player_class) {
+		const rtxt::File *text_override, const rtxt::File *mission_text,
+		const std::string &dialog_name, int line, int player_class) {
 	DialogLinePlayback out;
 	if (dialog_bank == nullptr) return out;
 	// The loaded list in load order, the first exact (strcmp) name match.
@@ -129,7 +133,7 @@ DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const lwf::
 		out.file = wave->path;
 		out.volume = dialog_wave_volume(*wave);
 	}
-	out.text = dialog_line_text(mission_text, entry);
+	out.text = dialog_line_text(text_override, mission_text, entry);
 	return out;
 }
 

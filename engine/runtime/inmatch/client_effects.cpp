@@ -281,7 +281,8 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             if (world.tables.dialog_bank != nullptr) {
                 const audio::DialogLinePlayback resolved = audio::resolve_dialog_line(
                         world.tables.dialog_bank, world.tables.dialog_sounds,
-                        world.tables.mission_text, dialog->dialog_name, dialog->line,
+                        world.tables.text_override, world.tables.mission_text,
+                        dialog->dialog_name, dialog->line,
                         player_class);
                 if (resolved.line_found && resolved.file.empty())
                     pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,

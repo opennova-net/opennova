@@ -24,18 +24,28 @@
 
 namespace opennova::inmatch {
 
-ServerTextTable read_host_server_text(const mission::BootFileSource &files) {
+ServerTextTable read_host_server_text(const mission::BootFileSource &files,
+		const rtxt::File *text_override) {
 	ServerTextTable text;
 	std::vector<uint8_t> bytes;
 	rtxt::File gametext;
 	std::string parse_error;
+	// No gametext table answers "" before any table is searched
+	// [orig: GameText_GetString @0x51EBD0 -- the g_TextGameText test @0x51EBD7].
 	if (!files.valid() || !files.read_file(hud::kGameTextTable, bytes) ||
 			!rtxt::parse(bytes.data(), bytes.size(), gametext, parse_error))
 		return text;
-	text.medic_request_format = gametext.get_in_section("Server", "STRSRV_MEDREQ");
-	text.change_to_blue_format = gametext.get_in_section("Server", "C2Blue");
-	text.change_to_red_format = gametext.get_in_section("Server", "C2Red");
-	text.host_name = gametext.get_in_section("Server", "STRSRV19");
+	// Each lookup searches the override table first (D-NET-675)
+	// [orig: GameText_GetString -- the call @0x51EBF6 into
+	//  TextResource_FindEntryBySectionAndKey @0x75D250, @0x75D27B].
+	const auto get = [&](const char *key) {
+		const rtxt::Entry *entry = rtxt::find_with_override(text_override, gametext, "Server", key);
+		return entry != nullptr ? entry->text : std::string();
+	};
+	text.medic_request_format = get("STRSRV_MEDREQ");
+	text.change_to_blue_format = get("C2Blue");
+	text.change_to_red_format = get("C2Red");
+	text.host_name = get("STRSRV19");
 	return text;
 }
 
@@ -220,7 +230,8 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// every host carries (D-NET-344) [orig: Game_InitSubsystems @0x4A6CD0
 	// loads gametext.bin; Server_BroadcastMedicRequest @0x5153C9..0x5153D0;
 	// GameText_GetString("server", "C2Blue" / "C2Red") @0x51902E / @0x51909C].
-	if (request.host != nullptr) boot.server_text = read_host_server_text(files);
+	if (request.host != nullptr)
+		boot.server_text = read_host_server_text(files, boot.mission_text.override_table.get());
 
 	if (!request.session->begin_load().applied()) {
 		error = "the session did not enter its load";
@@ -232,6 +243,9 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	mission::MissionKernel &kernel = request.fresh_kernel();
 	boot.kernel = &kernel;
 	request.role->bind(kernel);
+	// The mount's override table every section lookup searches first (the
+	// dialog subtitles' [Mission Dialog] among them, D-NET-675).
+	kernel.text_override_table = boot.mission_text.override_table;
 	kernel.set_assets(request.assets);
 	if (request.items != nullptr) kernel.set_items_table(request.items);
 	kernel.wire_header_world = request.wire_header_world;

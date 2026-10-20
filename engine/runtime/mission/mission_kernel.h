@@ -390,6 +390,12 @@ public:
     dbf::File dialog_bank;
     lwf::File dialog_sounds;
     rtxt::File mission_text_table;
+    // The mount's expansion text-override table (null for none), searched
+    // first by every section lookup: the boot sets it ahead of its boot and
+    // world.tables.text_override points at it (D-NET-675).
+    // [orig: g_TextOverrideTable @0x33429B0; TextResource_FindEntryBySectionAndKey
+    //  @0x75D27B]
+    std::shared_ptr<const rtxt::File> text_override_table;
     particle::EffectCatalogNames script_effect_catalog;
 	bool wac_loaded = false;
 	world::CollisionWorld collision;
