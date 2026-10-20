@@ -172,15 +172,6 @@ inline constexpr Normalization kNormalizations[] = {
 			"(u16)(GetTickCount x GetTickCount) (@0x51e93f), 148..179 a second GetTickCount x "
 			"rand() token (@0x51e9a2); those bytes are zeroed, the header, the rules word and "
 			"the three names compare" },
-	{ "body.S.0x0d.hull_bob", MaskKind::Field, 'S', 0x00D, "pos_z of a bobbing hull", 0,
-			"a hull at rest on water (entity+0x24 bit 0x8000) arms a heave phase at 3pi/2 and "
-			"steps it every tick (Entity_ProcessPlatformPhysics @0x4839C5..0x483A29, the arm "
-			"@0x4839FA..0x483A07; Entity_ApplyBreathingOscillation @0x463BE0, the phase step "
-			"@0x463BEB, called @0x483A1D), so its "
-			"z, and the z of a record carried on it, is the phase at the tick the join's 0x0D "
-			"snapshot is written, which follows the joiner's own message timing: that z is "
-			"zeroed in the 0x0D bodies, every other field compares, and the steady window "
-			"still measures the hull (state.position)" },
 	{ "initial.S.0x16", MaskKind::InitialSet, 'S', 0x016, "PLAYER_LIST", 0,
 			"the scoreboard rides the 311-tick integrity boundary (Server_TickUpdate "
 			"@0x51D90D), whose phase against the join varies per run: how many one-row lists "
@@ -203,6 +194,28 @@ inline constexpr Normalization kNormalizations[] = {
 			"AI organic) carries its live position and heading, which its owner's input or "
 			"AI think moves between the add and the send; a hidden body (bit 0 set) sits "
 			"at its placement and compares exactly" },
+	{ "initial.S.0x0d", MaskKind::InitialRecords, 'S', 0x00D, "POOL_SPAWN", 0,
+			"pages of pool spawn records: compared record by record (keyed by slot) with the "
+			"live poses left out (initial.S.0x0d.live_pose)" },
+	{ "initial.S.0x0d.live_pose", MaskKind::Field, 'S', 0x00D, "live record pose", 0,
+			"a record whose physics runs every tick carries its pose (x, y, z, euler z/x/y) at "
+			"the tick the join's 0x0D snapshot is written, which follows the joiner's own "
+			"message timing: a hull on water (entity+0x24 bit 0x8000) steps a heave phase into "
+			"its four suspension forces every tick (Entity_ProcessPlatformPhysics @0x4839CE, "
+			"the arm @0x4839FA..0x483A07, Entity_ApplyBreathingOscillation @0x463BE0 called "
+			"@0x483A1D, the phase step @0x463BEB); a vehicle with Flags bit 0x2000 or 0x40 or an occupant (+0x170, the "
+			"record's parent) never takes the sleep return "
+			"(Entity_ProcessWheeledVehiclePhysics @0x475EB3..0x475EC7, @0x475F17; "
+			"Entity_ProcessTrackedVehiclePhysics @0x47C2A5..0x47C2B7, @0x47C308); a record "
+			"carried on a live one (+0x28, the record's target) takes its pose from its carrier "
+			"every update (Entity_UpdateTransformAndTurret @0x440CBF, @0x44109D..0x4410DD, "
+			"@0x441153..0x441177). One live by its own physics also leaves out its contact bit "
+			"(0x2000, set by contact: Entity_ProcessTrackedVehiclePhysics @0x47E57B) and its "
+			"ground link (the target), which each mover re-probes "
+			"(Entity_RaycastGroundHeightAndObject's store @0x414370, called from "
+			"Entity_UpdateVehiclePhysics @0x48AFD1, Entity_UpdateWatercraftPhysics @0x48D535 "
+			"and the other movers). Liveness is RR's record's; every other field compares, and "
+			"the steady window still measures the vehicles (state.position)" },
 	{ "initial.S.0x10", MaskKind::InitialRecords, 'S', 0x010, "STATIC_ENTITY_BATCH", 0,
 			"pages of pool-2 static records: compared record by record (keyed by slot) "
 			"with the zone block stripped (world.S.0x10.zone_prefix)" },
@@ -271,7 +284,7 @@ inline constexpr Normalization kNormalizations[] = {
 			"retail's 650-byte page cut falls follows them" },
 	{ "group.S.0x0d.length", MaskKind::GroupLength, 'S', 0x00D, "POOL_SPAWN", 0,
 			"a world-stream page's length is its records' value-gated fields (judged by "
-			"length_set and initial_body): where the page cut falls follows them" },
+			"length_set and initial_records): where the page cut falls follows them" },
 	{ "group.S.0x10.length", MaskKind::GroupLength, 'S', 0x010, "STATIC_ENTITY_BATCH", 0,
 			"a world-stream page's length carries retail's uninitialized zone blocks "
 			"(world.S.0x10.zone_prefix)" },

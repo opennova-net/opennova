@@ -53,6 +53,7 @@ MetricValue metric(char dir, const char *name, std::string key, const char *code
 
 struct TagStats {
 	size_t count = 0;
+	std::vector<uint64_t> times; // each occurrence's capture time
 	std::set<size_t> lengths;
 	std::set<std::string> bodies; // raw bytes; material events only
 	bool material = true;
@@ -75,6 +76,7 @@ TagProfile tag_profile(const RunFacts &run, char dir) {
 			profile.first_order.push_back(identity);
 		TagStats &stats = inserted.first->second;
 		++stats.count;
+		stats.times.push_back(event.ts_ns);
 		stats.lengths.insert(event.length);
 		if (!event.material) {
 			stats.material = false;
@@ -122,8 +124,18 @@ void compare_tags(
 		const TagStats &sa = in_a->second, &sb = in_b->second;
 
 		MetricValue count = metric(dir, "tag_count", key, "COUNT_MISMATCH");
-		count_metric(
-				count, double(sa.count), rr.comparison_ms, double(sb.count), other.comparison_ms);
+		const double cadence =
+				sa.count < 20 ? periodic_cadence_ms(sa.times, rr.info.steady_end_ns) : 0.0;
+		if (cadence > 0.0) {
+			const uint64_t first = *std::min_element(sb.times.begin(), sb.times.end());
+			const double span_ms = other.info.steady_end_ns > first
+					? double(other.info.steady_end_ns - first) / 1e6
+					: 0.0;
+			cadence_count_metric(count, double(sa.count), cadence, double(sb.count), span_ms);
+		} else {
+			count_metric(
+					count, double(sa.count), rr.comparison_ms, double(sb.count), other.comparison_ms);
+		}
 		out.push_back(count);
 
 		const bool gameplay = identity == gameplay_identity(dir);

@@ -587,8 +587,7 @@ void test_registry() {
 }
 
 // The registered body masks: S2C 0x1A's tick is out of byte equality; S2C 0x64's
-// session block zeroes only its random seed, session id and token; S2C 0x0D zeroes the z
-// of a bobbing hull (entity+0x24 bit 0x8000) and of a record carried on it, nothing else.
+// session block zeroes only its random seed, session id and token.
 void test_body_masks() {
 	check(initial_body_exempt('S', 0x01A), "the 0x1A game-start tick is exempt");
 
@@ -612,41 +611,6 @@ void test_body_masks() {
 	check(stable_body_key('S', 0x064, chunk(140, 0x11, 'A')) ==
 					stable_body_key('S', 0x064, chunk(140, 0x77, 'A')),
 			"0x64: a chunk past the names masks the token by its block offset");
-
-	auto record = [](uint16_t slot, uint32_t entity_flags, int32_t z, uint16_t parent) {
-		PoolSpawnRecord r;
-		r.spawn_flags = kPoolSpawnHasEntityFlags;
-		r.slot_id = slot;
-		r.item_type_id = 0x050d;
-		r.pos_x = 0x10000;
-		r.pos_y = 0x20000;
-		r.pos_z = z;
-		r.entity_flags = entity_flags;
-		if (parent != 0xFFFF) {
-			r.spawn_flags |= kPoolSpawnHasParentHandle;
-			r.parent_handle = parent;
-		}
-		return r;
-	};
-	auto pool = [&](int32_t hull_z, int32_t child_z, int32_t land_z, int32_t hull_x) {
-		PoolSpawnBatch batch;
-		batch.records.push_back(record(0x1003, 0x00028400, hull_z, 0xFFFF));
-		batch.records.back().pos_x = hull_x;
-		batch.records.push_back(record(0x1004, 0x00020400, child_z, 0x1003));
-		batch.records.push_back(record(0x1000, 0x00020400, land_z, 0xFFFF));
-		const std::vector<uint8_t> bytes = encode_pool_spawn_batch(batch);
-		return std::string(bytes.begin(), bytes.end());
-	};
-	const std::string base = pool(0x000d7033, 0x000e0000, 0x000f0000, 0x10000);
-	check(stable_body_key('S', 0x00D, base) ==
-					stable_body_key('S', 0x00D, pool(0x000d701b, 0x000e0800, 0x000f0000, 0x10000)),
-			"0x0D: a bobbing hull's z and its carried child's z are masked");
-	check(stable_body_key('S', 0x00D, base) !=
-					stable_body_key('S', 0x00D, pool(0x000d7033, 0x000e0000, 0x000f0001, 0x10000)),
-			"0x0D: a land vehicle's z compares");
-	check(stable_body_key('S', 0x00D, base) !=
-					stable_body_key('S', 0x00D, pool(0x000d7033, 0x000e0000, 0x000f0000, 0x10001)),
-			"0x0D: the hull's x compares");
 }
 
 void test_timestamps() {
@@ -776,6 +740,75 @@ void test_tag_histogram() {
 		std::swap(subject.events[first_08].length, subject.events[first_7b].length);
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'S', "first_order", "", "fail", "FIRST_ORDER_MISMATCH");
+	}
+}
+
+// A periodic identity's small count is judged by RR's cadence over the compared
+// run's span from its first occurrence, not raw: a stream that starts at a session
+// event (ASH's integrity challenges after the joiner's C2S 0x0B) runs longer when the
+// readiness before it differs.
+void test_cadence_counts() {
+	check(periodic_cadence_ms({ 10 * kSec, 20 * kSec, 30 * kSec, 40 * kSec }, 45 * kSec) == 10000.0,
+			"a regular stream's cadence is its median gap");
+	check(periodic_cadence_ms({ 10 * kSec, 21 * kSec, 30 * kSec, 40 * kSec, 49 * kSec }, 50 * kSec) ==
+					9500.0,
+			"the median of an even gap count is the middle pair's mean");
+	check(periodic_cadence_ms({ 10 * kSec, 20 * kSec }, 25 * kSec) == 0.0,
+			"two occurrences are no cadence");
+	check(periodic_cadence_ms({ 10 * kSec, 12 * kSec, 30 * kSec }, 35 * kSec) == 0.0,
+			"irregular gaps are no cadence");
+	check(periodic_cadence_ms({ 10000 * kMs, 10200 * kMs, 10400 * kMs }, 40 * kSec) == 0.0,
+			"a burst that stopped is no cadence");
+	{
+		// R4's shape: four in RR from 25 s, six in the subject from 24 s over 11 s more.
+		MetricValue raw, cadence;
+		count_metric(raw, 4, 63000, 6, 80000);
+		check(raw.distance > raw.floor, "the raw count rule fails 6 against 4");
+		cadence_count_metric(cadence, 4, 10000, 6, 56000);
+		check(cadence.distance <= cadence.floor, "RR's cadence over the subject's span predicts 6");
+		MetricValue doubled;
+		cadence_count_metric(doubled, 4, 10000, 12, 56000);
+		check(doubled.distance > doubled.floor, "twice the cadence fails");
+	}
+
+	auto add = [](wire::ParityTrace &trace, const std::vector<uint64_t> &times) {
+		const wire::ParityEvent model = trace.events.back();
+		for (const uint64_t ts : times) {
+			wire::ParityEvent e = model;
+			e.dir = 'S';
+			e.full_tag = 0x079;
+			e.ts_ns = ts;
+			e.body = bytes({ 1, 0, 0, 0 });
+			e.length = e.body.size();
+			trace.events.push_back(e);
+		}
+	};
+	auto ms = [](std::initializer_list<uint64_t> list) {
+		std::vector<uint64_t> out;
+		for (const uint64_t v : list)
+			out.push_back(v * kMs);
+		return out;
+	};
+	wire::ParityTrace rr = scripted(1), aa = scripted(2);
+	add(rr, ms({ 10500, 13500, 16500, 19500 }));
+	add(aa, ms({ 10600, 13600, 16600, 19600 }));
+	{
+		wire::ParityTrace subject = scripted(3);
+		add(subject, ms({ 4500, 7500, 10500, 13500, 16500, 19500 }));
+		expect_row(judge_case(rr, aa, subject), 'S', "tag_count", "0x79:0", "pass");
+	}
+	{
+		wire::ParityTrace subject = scripted(3);
+		std::vector<uint64_t> fast;
+		for (uint64_t t = 4500; t <= 19500; t += 1500)
+			fast.push_back(t * kMs);
+		add(subject, fast);
+		expect_row(judge_case(rr, aa, subject), 'S', "tag_count", "0x79:0", "fail", "COUNT_MISMATCH");
+	}
+	{
+		wire::ParityTrace subject = scripted(3);
+		add(subject, ms({ 4500, 7500, 10500 }));
+		expect_row(judge_case(rr, aa, subject), 'S', "tag_count", "0x79:0", "fail", "COUNT_MISMATCH");
 	}
 }
 
@@ -1492,6 +1525,89 @@ void test_world_records() {
 	}
 }
 
+// S2C 0x0D compares by slot with a live record's pose left out: a hull on water
+// (entity+0x24 bit 0x8000), an awake vehicle (bit 0x40 or an occupant) and a record
+// carried on a live one, its carrier on an earlier page. An awake vehicle's contact bit
+// and ground link follow its physics too; a carried record's carrier link compares. A
+// parked vehicle, a record carried on it and every other field compare.
+void test_pool_live_pose() {
+	struct Pose {
+		int32_t hull = 0, manned = 0, parked = 0, on_hull = 0, on_parked = 0;
+		uint8_t hull_team = 1;
+		bool manned_airborne = false, manned_on_hull = false, on_hull_moved = false,
+			 parked_airborne = false;
+	};
+	auto record = [](uint16_t slot, uint32_t entity_flags, int32_t jitter) {
+		PoolSpawnRecord r;
+		r.spawn_flags = kPoolSpawnHasEntityFlags | kPoolSpawnHasEulerZ | kPoolSpawnHasEulerX |
+				kPoolSpawnHasEulerY | kPoolSpawnHasTeamByte;
+		r.slot_id = slot;
+		r.item_type_id = 0x0500;
+		r.entity_flags = entity_flags;
+		r.pos_x = 0x100000 + jitter;
+		r.pos_y = 0x200000 - jitter;
+		r.pos_z = 0x0d0000 + jitter;
+		r.euler_z = 0x40000000 + jitter * 64;
+		r.euler_x = jitter * 32;
+		r.euler_y = -jitter * 16;
+		r.team_byte = 1;
+		return r;
+	};
+	auto pages = [&](const Pose &p) {
+		PoolSpawnBatch first, second;
+		first.records.push_back(record(0x1003, 0x00028400, p.hull));
+		first.records.back().team_byte = p.hull_team;
+		first.records.push_back(
+				record(0x1001, 0x00020440 | (p.manned_airborne ? 0x2000u : 0u), p.manned));
+		first.records.back().spawn_flags |= kPoolSpawnHasParentHandle;
+		first.records.back().parent_handle = 0x0055;
+		if (p.manned_on_hull) {
+			first.records.back().spawn_flags |= kPoolSpawnHasTargetHandle;
+			first.records.back().target_handle = 0x1003;
+		}
+		first.records.push_back(
+				record(0x1000, 0x00020400 | (p.parked_airborne ? 0x2000u : 0u), p.parked));
+		second.records.push_back(record(0x1004, 0x00020000, p.on_hull));
+		second.records.back().spawn_flags |= kPoolSpawnHasTargetHandle;
+		second.records.back().target_handle = p.on_hull_moved ? 0x1001 : 0x1003;
+		second.records.push_back(record(0x1005, 0x00020000, p.on_parked));
+		second.records.back().spawn_flags |= kPoolSpawnHasTargetHandle;
+		second.records.back().target_handle = 0x1000;
+		return std::make_pair(encode_pool_spawn_batch(first), encode_pool_spawn_batch(second));
+	};
+	auto with = [&](uint32_t seed, const Pose &p) {
+		wire::ParityTrace trace = scripted(seed);
+		const auto bodies = pages(p);
+		add_initial(trace, 'S', 0x07B, 0x00D, bodies.first);
+		add_initial(trace, 'S', 0x07B, 0x00D, bodies.second);
+		return trace;
+	};
+	const Pose rest;
+	Pose live = rest;
+	live.hull = 0x1e2;
+	live.manned = 5;
+	live.on_hull = 0x1e2;
+	live.manned_airborne = true;
+	live.manned_on_hull = true;
+	const Case moved = judge_case(with(1, rest), with(2, rest), with(3, live));
+	expect_row(moved, 'S', "initial_records", "0x0d:0", "pass");
+	check(find_row(moved.verdict.rows, 'S', "initial_body", "0x0d:0") == nullptr,
+			"S2C 0x0D compares as records, not bytes");
+	for (const auto &change : std::vector<std::pair<const char *, Pose>>{
+				 { "a parked vehicle's z", [&] { Pose p = rest; p.parked = 1; return p; }() },
+				 { "a record carried on a parked vehicle",
+						 [&] { Pose p = rest; p.on_parked = 1; return p; }() },
+				 { "a live hull's team", [&] { Pose p = live; p.hull_team = 2; return p; }() },
+				 { "a parked vehicle's contact bit",
+						 [&] { Pose p = rest; p.parked_airborne = true; return p; }() },
+				 { "a carried record's carrier link",
+						 [&] { Pose p = rest; p.on_hull_moved = true; return p; }() } }) {
+		const Case c = judge_case(with(1, rest), with(2, rest), with(3, change.second));
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "initial_records", "0x0d:0");
+		check(row && row->status == "fail", std::string("0x0D: ") + change.first + " compares");
+	}
+}
+
 void test_reply_rules() {
 	auto page = [](uint32_t start, size_t dwords) {
 		std::vector<uint8_t> body;
@@ -1726,6 +1842,8 @@ void test_steady_rules() {
 int main() {
 	test_registry();
 	test_body_masks();
+	test_cadence_counts();
+	test_pool_live_pose();
 	test_timestamps();
 	test_identical();
 	test_tag_histogram();

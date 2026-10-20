@@ -9,7 +9,9 @@
 // Distances by metric family:
 //   presence, boolean shape checks       0 or 1, floor 0
 //   exact sets                           Jaccard distance (1 - |A n B| / |A u B|), floor 0
-//   counts and cadences                  |subject - RR rate-normalized|, floor max(1, ceil 20%)
+//   counts and cadences                  |subject - RR rate-normalized|, floor max(1, ceil 20%);
+//                                        a periodic count under 20 by RR's cadence
+//                                        (cadence_count_metric)
 //   rates (bandwidth, gameplay cadence)  |subject / RR - 1|, floor 0.20
 //   share distributions                  max over keys of |share delta| / max(0.08, RR/2),
 //                                        floor 1 (keys under a 2% share on both sides skip)
@@ -78,8 +80,7 @@ uint16_t event_identity(const wire::ParityEvent &event);
 // The direction's gameplay identity: C2S 0x0C, S2C 0x0A.
 uint16_t gameplay_identity(char dir);
 // A stable body's comparison key: the registered prefix (S2C 0x0F's live tick)
-// stripped; S2C 0x64's session-block random bytes and S2C 0x0D's bobbing-hull z zeroed
-// (body.S.0x64.session_block, body.S.0x0d.hull_bob).
+// stripped; S2C 0x64's session-block random bytes zeroed (body.S.0x64.session_block).
 std::string stable_body_key(char dir, uint16_t identity, const std::string &raw);
 // One physical record's framing key; a registered grouping length renders `len=*`.
 std::string wire_key(char dir, const wire::ParityWireRecord &record);
@@ -101,6 +102,20 @@ double relative_distance(double subject, double reference);
 // has at least 20, with the max(1, ceil 20%) floor.
 void count_metric(
 		MetricValue &value, double rr_count, double rr_ms, double other_count, double other_ms);
+// A periodic identity's cadence in ms: the median gap between its occurrences in
+// the comparison interval when there are at least three, every gap lies within 25%
+// of that median and the interval's end (`end_ns`) falls within 1.25 gaps of the
+// last (a stream still running, not a burst); 0 otherwise.
+double periodic_cadence_ms(std::vector<uint64_t> times_ns, uint64_t end_ns);
+// The count rule for an identity RR sends periodically fewer than 20 times: its
+// count follows the cadence, not the interval's length (a periodic stream starts at
+// a session event, e.g. the integrity challenges after the joiner's C2S 0x0B, and
+// the time before it differs by readiness). RR's cadence over the compared run's
+// span from that identity's first occurrence to its interval's end predicts
+// 0.5 + span / cadence occurrences (the mean of 1 + floor(span / cadence) over the
+// phase), with the count rule's floor. Where the stream starts is not judged here.
+void cadence_count_metric(MetricValue &value, double rr_count, double cadence_ms,
+		double other_count, double other_span_ms);
 // The nearest-rank 90th percentile (the ceil(0.9 n)-th smallest): two samples give
 // the larger, never the minimum. 0 for none.
 double p90(std::vector<double> values);

@@ -7,7 +7,7 @@
 //   initial_count      how many each identity carries (the count rule)
 //   initial_body_set   a phase-bound identity's distinct bodies (S2C 0x16, 0x46)
 //   initial_records    the world stream decoded record by record, keyed by slot
-//                      (S2C 0x0C organics, S2C 0x10 statics)
+//                      (S2C 0x0C organics, S2C 0x0D pool spawns, S2C 0x10 statics)
 // Every route is the registry's (normalization.h).
 
 #include "metric.h"
@@ -153,11 +153,14 @@ std::set<std::string> body_set(char dir, uint16_t identity, const std::vector<st
 }
 
 // One decoded world-stream record: its fields, plus the pose fields a live
-// record leaves out (the live flag is decided by RR's record).
+// record leaves out and the physics state (contact flag, ground link) one live by
+// its own physics leaves out (both flags are decided by RR's record).
 struct WorldRecord {
 	Fields fields;
 	Fields pose;
+	Fields state;
 	bool live = false;
+	bool self_live = false;
 };
 
 using WorldRecords = std::map<uint32_t, WorldRecord>; // by slot; the first sighting
@@ -221,14 +224,92 @@ void static_records(const std::string &raw, WorldRecords &out) {
 	}
 }
 
+// A pool spawn record's own liveness and its carrier (+0x28, the record's target).
+struct PoolLink {
+	bool live = false;
+	uint16_t carrier = 0xFFFF;
+};
+
+// S2C 0x0D pool spawns. A record whose physics runs every tick is live
+// (initial.S.0x0d.live_pose): a hull on water (entity+0x24 bit 0x8000), a vehicle
+// the sleep gate keeps awake (bit 0x2000 or 0x40, or an occupant: the parent), and,
+// folded in world_records, a record carried on a live one. One live by its own physics
+// also leaves out its contact bit (0x2000) and its ground link (the target), which its
+// mover re-probes every tick.
+void pool_records(const std::string &raw, WorldRecords &out, std::map<uint32_t, PoolLink> &links) {
+	static_assert(has_normalization("initial.S.0x0d.live_pose"));
+	constexpr uint32_t kInAir = 0x2000;
+	constexpr uint32_t kAwakeFlags = 0x8000 | kInAir | 0x40;
+	// The euler presence bits follow the values (the serializer sets each for a
+	// nonzero angle, NetPacket_SerializeEntityPoolToPacket_0 @0x503B3A..0x503B74): the
+	// pose carries them; the target's bit rides the ground link.
+	constexpr uint16_t kStateBits =
+			kPoolSpawnHasEulerZ | kPoolSpawnHasEulerX | kPoolSpawnHasEulerY | kPoolSpawnHasTargetHandle;
+	PoolSpawnBatch batch;
+	decode_pool_spawn_batch(reinterpret_cast<const uint8_t *>(raw.data()), raw.size(), batch);
+	const size_t complete = batch.records.size() - (batch.last_record_partial ? 1 : 0);
+	for (size_t i = 0; i < complete; ++i) {
+		const PoolSpawnRecord &r = batch.records[i];
+		if (out.count(r.slot_id))
+			continue; // the first sighting
+		char flags[8], entity_flags[16];
+		std::snprintf(flags, sizeof(flags), "%04x", unsigned(r.spawn_flags & ~kStateBits));
+		std::snprintf(entity_flags, sizeof(entity_flags), "%08x", unsigned(r.entity_flags & ~kInAir));
+		std::string mounts;
+		for (const uint16_t handle : r.mount_handles)
+			mounts += num(handle) + ",";
+		mounts += num(r.mount_handle_8) + "," + num(r.mount_handle_9);
+		WorldRecord record;
+		record.fields = { { "spawn_flags", flags }, { "type", num(r.item_type_id) },
+			{ "name", r.entity_name }, { "entity_flags", entity_flags },
+			{ "section", num(r.section_mask) }, { "team", num(r.team_byte) },
+			{ "parent", num(r.parent_handle) },
+			{ "seat_mask", num(r.seat_mask) }, { "mounts", mounts }, { "bone", num(r.bone_byte) },
+			{ "ai_profile_1", num(r.ai_profile_1) }, { "ai_profile_2", num(r.ai_profile_2) },
+			{ "ai_name", r.ai_name }, { "ref_num", num(r.alert_byte) },
+			{ "sub_type", num(r.action_byte) }, { "sound_latch", num(r.sound_latch_byte) },
+			{ "zone_rank", num(r.zone_number_rank) }, { "zone_radius", num(r.zone_radius) },
+			{ "difficulty", num(r.difficulty_byte) } };
+		record.pose = { { "x", num(r.pos_x) }, { "y", num(r.pos_y) }, { "z", num(r.pos_z) },
+			{ "euler_z", num(r.euler_z) }, { "euler_x", num(r.euler_x) },
+			{ "euler_y", num(r.euler_y) } };
+		record.state = { { "in_air", num((r.entity_flags & kInAir) ? 1 : 0) },
+			{ "target", num((r.spawn_flags & kPoolSpawnHasTargetHandle) ? r.target_handle : -1) } };
+		PoolLink link;
+		link.live = ((r.spawn_flags & kPoolSpawnHasEntityFlags) && (r.entity_flags & kAwakeFlags)) ||
+				(r.spawn_flags & kPoolSpawnHasParentHandle);
+		record.self_live = link.live;
+		if (r.spawn_flags & kPoolSpawnHasTargetHandle)
+			link.carrier = r.target_handle;
+		links.emplace(r.slot_id, link);
+		out.emplace(r.slot_id, std::move(record));
+	}
+}
+
 WorldRecords world_records(uint16_t identity, const std::vector<std::string> &raw) {
 	WorldRecords out;
+	std::map<uint32_t, PoolLink> links;
 	for (const std::string &body : raw) {
 		if (identity == 0x00C)
 			organic_records(body, out);
+		else if (identity == 0x00D)
+			pool_records(body, out, links);
 		else if (identity == 0x010)
 			static_records(body, out);
 	}
+	// A record carried on a live one is live, its carrier often on an earlier page.
+	for (bool changed = true; changed;) {
+		changed = false;
+		for (auto &entry : links) {
+			const auto carrier = links.find(entry.second.carrier);
+			if (!entry.second.live && carrier != links.end() && carrier->second.live) {
+				entry.second.live = true;
+				changed = true;
+			}
+		}
+	}
+	for (const auto &entry : links)
+		out[entry.first].live = entry.second.live;
 	return out;
 }
 
@@ -272,6 +353,10 @@ MetricValue compare_records(char dir, uint16_t identity, const std::vector<std::
 			if (!fa->second.live) {
 				const std::string pose = first_difference(fa->second.pose, fb->second.pose, names);
 				what = what.empty() ? pose : what;
+			}
+			if (!fa->second.self_live) {
+				const std::string state = first_difference(fa->second.state, fb->second.state, names);
+				what = what.empty() ? state : what;
 			}
 		}
 		if (what.empty())
