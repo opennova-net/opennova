@@ -531,6 +531,7 @@ add_library(opennova_runtime STATIC
     # --- parity lane L3 sources ---
     # --- parity lane L4 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_select.cpp # the infantry state selection + commit (split off infantry.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/slot_staging.cpp # the parity runner's slot staging (a slot body's Position write)
     # --- parity lane L5 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-NEW-L5-5)
     # --- parity lane L7 sources ---

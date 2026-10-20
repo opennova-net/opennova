@@ -5076,6 +5076,11 @@ add_test(NAME terrain_bilinear_fixed COMMAND terrain_bilinear_fixed_test)
 add_executable(player_body_chase_test world/player_body_chase_test.cpp)
 target_link_libraries(player_body_chase_test PRIVATE opennova_runtime)
 add_test(NAME player_body_chase COMMAND player_body_chase_test)
+# The parity runner's slot staging on our host: a slot body's Position write,
+# holding against its player's uplinks only past the chase's 2-unit drop.
+add_executable(npruntime_slot_staging_test npruntime/slot_staging_test.cpp)
+target_link_libraries(npruntime_slot_staging_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_slot_staging COMMAND npruntime_slot_staging_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

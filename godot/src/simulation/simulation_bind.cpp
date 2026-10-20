@@ -345,6 +345,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::debug_teleport_local_player);
 	ClassDB::bind_method(D_METHOD("debug_apply_local_pose", "x", "y", "z", "yaw_deg", "pitch_deg"),
 	                     &Simulation::debug_apply_local_pose);
+	ClassDB::bind_method(D_METHOD("debug_stage_slot", "slot", "x", "y", "z"),
+	                     &Simulation::debug_stage_slot);
 	ClassDB::bind_method(D_METHOD("get_round_outcome_debug"), &Simulation::get_round_outcome_debug);
 	ClassDB::bind_static_method("Simulation", D_METHOD("ai_state_name", "state"), &Simulation::ai_state_name);
 	ClassDB::bind_static_method("Simulation", D_METHOD("infantry_anim_key", "state"), &Simulation::infantry_anim_key);

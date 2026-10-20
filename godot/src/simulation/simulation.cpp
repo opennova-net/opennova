@@ -17,6 +17,7 @@
 #include <base/gameprofile/game_type.h> // game_type::for_mission_attribs
 
 #include <runtime/inmatch/host_settings.h> // host_player_slot_limit (the BMS admission limit)
+#include <runtime/inmatch/slot_staging.h> // stage_slot_position (the parity runner's slot staging)
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 
@@ -1079,6 +1080,24 @@ Error Simulation::debug_apply_local_pose(double p_x, double p_y, double p_z, dou
 	return kernel_->local.apply_pose(pose.position_q16, pose.heading_bam, pose.pitch_bam)
 			? OK
 			: ERR_UNAVAILABLE;
+}
+
+// The parity runner's slot staging (godot/probes/net/stage_slot_probe.gd): the
+// engine owns the slot walk and the Position write (inmatch::stage_slot_position);
+// the binding maps its refusals onto Error codes.
+Error Simulation::debug_stage_slot(int p_slot, double p_x, double p_y, double p_z) {
+	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	if (ctx == nullptr) return ERR_UNAVAILABLE;
+	const opennova::inmatch::SlotStagingResult staged =
+			opennova::inmatch::stage_slot_position(*ctx, p_slot, p_x, p_y, p_z);
+	switch (staged.status) {
+		case opennova::inmatch::SlotStagingStatus::Staged: return OK;
+		case opennova::inmatch::SlotStagingStatus::NotAuthority: return ERR_UNAVAILABLE;
+		case opennova::inmatch::SlotStagingStatus::NoPlayer: return ERR_DOES_NOT_EXIST;
+		case opennova::inmatch::SlotStagingStatus::NoBody: return ERR_UNCONFIGURED;
+		case opennova::inmatch::SlotStagingStatus::OutOfRange: return ERR_INVALID_PARAMETER;
+	}
+	return FAILED;
 }
 
 // The by-net-id sibling of debug_set_entity_position: the net-id resolve is

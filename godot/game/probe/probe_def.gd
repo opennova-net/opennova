@@ -672,4 +672,13 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"path": { "type": "string", "default": "" },
 					"wait": { "type": "boolean", "default": true },
 				}, [], false, true, 1_800_000),
+		ProbeDef.make("stage_slot",
+				"The parity runner's slot staging on an OpenNova host: each `staging` entry "
+				+ "{slot, position_bms} writes the three Position words of the body that player "
+				+ "slot holds (the authority-side twin of the onHook bridge's apply_pose_slot); "
+				+ "position only, any other field refused; a result per entry, passing only if "
+				+ "every entry staged.",
+				NET + "stage_slot_probe.gd", {
+					"staging": { "type": "array", "minItems": 1, "items": { "type": "object" } },
+				}, ["staging"], false, true, 60_000),
 	]

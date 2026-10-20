@@ -1739,6 +1739,12 @@ public:
 	// ERR_UNAVAILABLE unless a joiner with L; ERR_INVALID_PARAMETER for an unencodable pose.
 	Error debug_apply_local_pose(double p_x, double p_y, double p_z, double p_yaw_deg,
 			double p_pitch_deg);
+	// The parity runner's slot staging (engine: runtime/inmatch/slot_staging.h): the host's
+	// Position write for the body player slot `p_slot` holds, at the BMS position in units.
+	// ERR_UNAVAILABLE without a host session; ERR_DOES_NOT_EXIST for a slot holding no
+	// player; ERR_UNCONFIGURED for a player holding no body; ERR_INVALID_PARAMETER for a
+	// position outside the 16.16 range.
+	Error debug_stage_slot(int p_slot, double p_x, double p_y, double p_z);
 	// Round-outcome card: {ended, winner_team, bluekills, greenkills, enemy_kills,
 	// team_kills_by_others, friendly_kills_by_others, enemy_kills_by_others, humans}.
 	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score
