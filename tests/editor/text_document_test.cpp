@@ -1304,15 +1304,25 @@ static int test_shader_definitions() {
 	};
 	TEST_EXPECT(check_text(bytes, std::string(), "_ffp.fx") == 0);
 	TEST_EXPECT(blank_shader_tags() == Names({"VS_PHONGT", "VS_DOT3DIFF2", "VS_SKBUMPPHONGT", "VS_SKBUMPDIFFT"}));
+	// Each registers its tag, and the #UV twin exactly where the shipped effect of the tag asks for one (the
+	// renderer's registry rows: JO:CA's PhongT.fx sets EffectAlt_UV; BDiffT2.fx, SkBPhongT.fx and SkBDiffT.fx none).
+	const auto in_registry = [](const std::string &tag) {
+		return std::any_of(std::begin(opennova::renderer::kMaterialDescriptorTable),
+		                   std::end(opennova::renderer::kMaterialDescriptorTable),
+		                   [&](const auto &row) { return tag == row.name; });
+	};
 	for (const std::string &tag : blank_shader_tags()) {
 		BlankRequest request;
 		request.logical_name = "shaders/new.fx";
 		request.values = {{"tag", tag}};
 		TEST_EXPECT(make_blank(request, AssetKind::Shader, bytes, error));
-		const bool skinned = tag.find("_SK") != std::string::npos;
-		TEST_EXPECT(shader_tags_of(bytes, "new.fx") == (skinned ? Names({tag}) : Names({tag, tag + "#UV"})));
+		const bool twin = in_registry(tag + "#UV");
+		TEST_EXPECT(in_registry(tag) &&
+		            shader_tags_of(bytes, "new.fx") == (twin ? Names({tag, tag + "#UV"}) : Names({tag})));
 		TEST_EXPECT(check_text(bytes, tag, "new.fx") == 0);
 	}
+	TEST_EXPECT(blank_shader_text("VS_PHONGT", "x.fx").find("EffectAlt_UV = true;") != std::string::npos &&
+	            blank_shader_text("VS_DOT3DIFF2", "x.fx").find("EffectAlt_UV") == std::string::npos);
 	// Refused: a tag it makes no effect for, a name the archive walk skips.
 	BlankRequest refused;
 	refused.logical_name = "glass.fx";
@@ -1584,8 +1594,9 @@ static int test_shipped_credits() {
 // finding; the tags they register are the registry's 46 exactly (render-material-re.md's shader-tag registry: the 24
 // fixed-function built-ins, the shipped effects' tags and their #UV twins; JO:CA's 44 shaders registered exactly
 // these through the editor), the includes none. And every shader of the base game (assets/: its _ffp.fx and its
-// effects) as stored, each tag it registers one of the registry's or its #UV twin (the editor's blank asks for the
-// twin of every unskinned effect, VS_DOT3DIFF2's among them, which JO:CA's BDiffT2.fx does not).
+// effects) as stored, each tag it registers one of the registry's (a #UV twin only where the shipped effect of the
+// tag asks for one: not VS_DOT3DIFF2's, which JO:CA's BDiffT2.fx does not), the file the editor's blank of its tag
+// writes.
 static int test_shader_registry() {
 	using opennova::renderer::kMaterialDescriptorTable;
 	using opennova::renderer::kMaterialDescriptorTableCount;
@@ -1630,11 +1641,21 @@ static int test_shader_registry() {
 	for (const std::string &path : variants.files) {
 		const std::vector<uint8_t> stored = editor_test::repo_bytes(path);
 		const std::string name = path.substr(path.rfind('/') + 1);
+		// Every tag it registers a row of the renderer's registry (a #UV twin only where the shipped effect asks for
+		// one), and the file the editor's blank of its tag writes (New > Shader; Create Missing for _ffp.fx).
 		bool registered_tags = true;
-		for (const std::string &tag : shader_tags_of(stored, name.c_str()))
-			registered_tags = registered_tags && registry.count(tag.substr(0, tag.find('#'))) != 0;
-		if (!as_stored(name, stored) || !registered_tags) {
-			std::fprintf(stderr, "FAIL %s: not as stored, or a tag the registry lacks\n", path.c_str());
+		const std::vector<std::string> tags = shader_tags_of(stored, name.c_str());
+		for (const std::string &tag : tags) registered_tags = registered_tags && registry.count(tag) != 0;
+		BlankRequest blank;
+		blank.logical_name = name;
+		if (opennova::strutil::iequals(name, "_ffp.fx")) blank.role = "ffp_shader";
+		else if (!tags.empty()) blank.values = {{"tag", tags.front()}};
+		std::vector<uint8_t> made;
+		Diagnostic made_error;
+		const bool as_made = make_blank(blank, AssetKind::Shader, made, made_error) && made == stored;
+		if (!as_stored(name, stored) || !registered_tags || !as_made) {
+			std::fprintf(stderr, "FAIL %s: not as stored, a tag the registry lacks, or not the blank of its tag\n",
+			             path.c_str());
 			++failures;
 		}
 	}
