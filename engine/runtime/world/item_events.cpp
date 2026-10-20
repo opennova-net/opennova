@@ -822,9 +822,9 @@ bool tick_item_class_motion(World &world, Entity &entity,
     update_item_destroy_fade(world, entity);
     if (tick_item_section_motion(world, entity)) return true;
     if (entity.death_motion == DeathMotionMode::CraneFalling) {
-        int32_t ground = terrain != nullptr && terrain->valid() ? int32_t(
-                terrain::height_field_height_mission_bilinear(*terrain,
-                    entity.position.x, entity.position.y) * 65536) : 0;
+        int32_t ground = terrain != nullptr && terrain->valid()
+                ? terrain::height_field_height_bilinear_fixed(*terrain,
+                    entity.position.x.q16, entity.position.y.q16) : 0;
         if (const Entity *parent = world.registry.get(entity.attach_parent)) {
             if (const auto *traits = world.tables.item_death_traits.get(parent->item_id))
                 ground = io::bam_add(ground, io::bam_sub(

@@ -84,8 +84,7 @@ ProjectileHit CollisionWorld::trace_squib(World &world, EntityHandle source,
             best.hit_class=ProjectileHitClass::Terrain;
             best.surface_type=terrain::surface_type_at_fixed(world.tables.surface_map,end.x,end.y);
             const int32_t hd=vec_len_ftol(hit[0]-start.x,hit[1]-start.y,hit[2]-start.z);
-            const int32_t height=int32_t(terrain::height_field_height_mission_bilinear(
-                    *terrain,hit[0]/65536.0f,hit[1]/65536.0f)*65536);
+            const int32_t height=terrain::height_field_height_bilinear_fixed(*terrain,hit[0],hit[1]);
             if (distance > hd && hit[2] < height) {
                 const int32_t dz=abs32(hit[2]-start.z);
                 distance=dz>6553 ? int32_t((int64_t(int32_t(int64_t(

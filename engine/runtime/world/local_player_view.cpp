@@ -73,8 +73,7 @@ void enter_death_camera(World &world, const Entity &e, PlayerViewState &v,
         world.ai.terrain;
     const CameraTerrainSampler sampler = [terrain](int32_t x, int32_t y) -> int32_t {
         if (terrain == nullptr || !terrain->valid()) return INT32_MIN / 2;
-        return to_fixed(terrain::height_field_height_mission_bilinear(
-            *terrain, static_cast<float>(x) / 65536.0f, static_cast<float>(y) / 65536.0f));
+        return terrain::height_field_height_bilinear_fixed(*terrain, x, y); // the words (D-NET-507)
     };
     const CameraRayProbe probe = [&sampler](const int32_t origin[3], const int32_t dir[3],
                                             int32_t lift, int32_t max_dist) {

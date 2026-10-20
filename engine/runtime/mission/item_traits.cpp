@@ -970,10 +970,9 @@ void resolve_minefields(world::World &world, const def::DefItemsFile &items,
                     transformed[axis] = static_cast<int32_t>(
                             static_cast<float>(value) * io::kFp16One);
                 }
-                transformed[2] = world.tables.terrain ? static_cast<int32_t>(
-                        terrain::height_field_height_mission_bilinear(*world.tables.terrain,
-                            transformed[0] * io::kInvFp16One,
-                            transformed[1] * io::kInvFp16One) * io::kFp16One) : 0;
+                transformed[2] = world.tables.terrain
+                        ? terrain::height_field_height_bilinear_fixed(*world.tables.terrain,
+                            transformed[0], transformed[1]) : 0;
                 points.push_back({type, {transformed[0], transformed[1], transformed[2]}});
             }
         }

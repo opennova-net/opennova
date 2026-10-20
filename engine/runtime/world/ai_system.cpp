@@ -1052,9 +1052,7 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
     if (!field.valid()) return INT32_MIN; // [orig: terrain assumed present; null -> no ground]
 
     auto sample = [&](int32_t x16, int32_t y16) -> int32_t {
-        const float h = terrain::height_field_height_mission_bilinear(field, static_cast<float>(x16) / 65536.0f,
-                                                         static_cast<float>(y16) / 65536.0f);
-        return static_cast<int32_t>(h * 65536.0f);
+        return terrain::height_field_height_bilinear_fixed(field, x16, y16); // the words (D-NET-507)
     };
 
     int32_t result;

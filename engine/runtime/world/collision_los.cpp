@@ -207,11 +207,9 @@ terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t 
 
 terrain::TerrainRaycastSample los_field_bilinear_sample(const terrain::TerrainHeightField &f,
                                                         int32_t x, int32_t y) {
-    const float h = terrain::height_field_height_mission_bilinear(f, static_cast<float>(x) / 65536.0f,
-                                                     static_cast<float>(y) / 65536.0f);
     terrain::TerrainRaycastSample s;
     s.kind = terrain::TerrainRaycastSample::kHeight;
-    s.height_1616 = static_cast<int32_t>(h * 65536.0f);
+    s.height_1616 = terrain::height_field_height_bilinear_fixed(f, x, y); // the words (D-NET-507)
     return s;
 }
 

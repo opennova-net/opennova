@@ -495,8 +495,8 @@ int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source
     const bool object_ground = hit.hit() && hit.distance_q16 < position.z;
     int32_t height = object_ground ? position.z - hit.distance_q16 : position.z;
     if (!indoors) {
-        const int32_t floor = terrain ? to_fixed(terrain::height_field_height_mission_bilinear(
-                *terrain, position.x * io::kInvFp16One, position.y * io::kInvFp16One)) : 0;
+        const int32_t floor = terrain
+                ? terrain::height_field_height_bilinear_fixed(*terrain, position.x, position.y) : 0;
         if (!object_ground || height < floor) height = floor;
     }
     // A client's pool-1 movers trace as wire proxies: the hit names the

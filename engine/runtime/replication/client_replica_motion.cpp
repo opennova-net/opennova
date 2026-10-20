@@ -775,12 +775,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// Entity_RaycastCollision terrain window @0x413785..0x4137CB, reached by
 	// Entity_RaycastGroundHeightAndObject @0x414320]
 	if (terrain != nullptr && terrain->valid()) {
-		const float mission_x = static_cast<float>(es.x) / 65536.0f;
-		const float mission_y = static_cast<float>(es.y) / 65536.0f;
-		const int32_t terrain_ground = static_cast<int32_t>(
-				terrain::height_field_height_mission_bilinear(
-						*terrain, mission_x, mission_y) *
-				65536.0f);
+		const int32_t terrain_ground =
+				terrain::height_field_height_bilinear_fixed(*terrain, es.x, es.y); // the words (D-NET-507)
 		const int32_t probe_start = world::ground_probe_origin_z(es.z);
 		int32_t resolved_ground = static_cast<int32_t>(
 				static_cast<uint32_t>(probe_start) - 0x20000u);
