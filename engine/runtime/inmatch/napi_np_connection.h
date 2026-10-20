@@ -848,6 +848,17 @@ inline void reset_s2c_send_holdoff_counter(NapiNPConnection &conn) {
 // unbound/freed/lifetime-stale owner before the writer can mutate or emit.
 // [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate; recipient entity eye reads
 // @0x517BF5..0x517C13; the outer filtered fan is NapiNPServer_SendFiltered @0x4C87E0]
+// The punt leg: retail's fans still pass SendFiltered's connection gate after a punt (+0x24 == 1,
+// which the punt writes no part of), and the queue drops them: the punt's description sets the
+// connection's sent byte +0x70D (+0x28, set at the connection's state-1 entry, holds while it
+// lives), and every later message to it returns from the queue unqueued. Dropping at the fan sends
+// the same nothing (V-L8-s4's 652 item).
+// [orig: NapiNPServer_SendFiltered @0x4C87E0 - the +0x24 test @0x4C8874..0x4C8878;
+//  NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640 - the +0x70D
+//  test @0x62864D..0x628654; CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 (the call @0x4C800C)
+//  -> CNapiNPConnection_SendDescriptionOnce @0x629750 - the +0x28 test @0x62975C, the store
+//  @0x629772; CNapiNPConnection_OnStateChange @0x626060 (+0x28 = 1 @0x626172);
+//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 (+0x28 = 0 @0x625535)]
 inline bool is_in_match(const NapiNPConnection &conn) {
 	return conn.burst.spawned && !conn.host_disconnect_sent;
 }

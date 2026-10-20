@@ -850,7 +850,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// unconditional zero-id 0x51 "spawn-confirm" re-bound the joiner's own player
 				// to a vehicle archetype: the retail-join DBuggy1 shadow (D-NET-148). The
 				// gates: the authority (@0x514F11), the round-over latch (@0x514F2B; its
-				// reachable analog is the Match outcome, g_NetSpawnSuspended is unmodeled)
+				// reachable analog is the Match outcome; g_NetSpawnSuspended is set only
+				// inside the blocking mission load, which pumps no server handler, D-NET-116)
 				// and the sender's player slot (@0x514F38..0x514F53; the 0xA0 mask also
 				// needs it in the match). A short body reads index 0 (@0x514F5F..0x514F6A).
 				if (inputs.server_ctx == nullptr || world == nullptr ||
@@ -1317,7 +1318,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// of a type items.def lacks (the lookup's miss answers row 0).
 				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600 — the authority
 				//  @0x51A600..0x51A607, g_NetSpawnSuspended @0x51A609..0x51A610
-				//  (unmodeled, D-NET-116), the round-over gate @0x51A612..0x51A619, the
+				//  (set only inside the blocking mission load, D-NET-116), the round-over
+				//  gate @0x51A612..0x51A619, the
 				//  session player @0x51A61F..0x51A627 and its slot @0x51A62A..0x51A632;
 				//  body builder Server_CollectEmptyPool0Slots @0x5160f0, the used read
 				//  @0x5160FF, the +0x1C test @0x516123]
