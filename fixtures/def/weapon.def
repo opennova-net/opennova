@@ -1,0 +1,667 @@
+ammoclass_max_carry CLASS_MANA			1000
+ammoclass_max_carry CLASS_RGRENADE		1000
+ammoclass_max_carry CLASS_GRENADEHE		1000
+ammoclass_max_carry CLASS_GRENADEFB		1000
+ammoclass_max_carry CLASS_GRENADESM		1000
+ammoclass_max_carry CLASS_45cal			1000
+ammoclass_max_carry CLASS_357			1000
+ammoclass_max_carry CLASS_9mm			1000
+ammoclass_max_carry CLASS_AK47			1000
+ammoclass_max_carry CLASS_ak74			1000
+ammoclass_max_carry CLASS_9MMSMG		1000
+ammoclass_max_carry CLASS_SGSHELL		1000
+ammoclass_max_carry CLASS_556MM			1000
+ammoclass_max_carry CLASS_40MMNADE		1000
+ammoclass_max_carry CLASS_60MM_MORTAR	1000
+ammoclass_max_carry CLASS_70MM_ROCKET	1000
+
+weapon "WPN_KNIFE"
+	category 1
+	rank     0
+	teamfilter	blue
+	charfilter	medic
+	charfilter	sniper
+	charfilter	gunner
+	charfilter	rifleman
+	charfilter	engineer
+	round_type  "AMMO_KNIFE01"
+	clipsize    -1
+	startrounds -1
+	error 0 0 0 0 0 0
+	launchuserpoint bullet
+	attack_anim	 1
+	special_hold 1
+	run_anim	 1
+	animadm m9k_1st
+	gfx1 M9k_1st
+	gfx3 M9K_3rd
+	action "fire"
+		delaystart		0
+		delayend		0
+	end
+end
+
+weapon "WPN_KNIFE2"
+	category 1
+	rank     1
+	teamfilter	red
+	charfilter	medic
+	charfilter	sniper
+	charfilter	gunner
+	charfilter	rifleman
+	charfilter	engineer
+	round_type  "AMMO_KNIFE01"
+	clipsize    -1
+	startrounds -1
+	error 0 0 0 0 0 0
+	launchuserpoint bullet
+	attack_anim	 1
+	special_hold 1
+	run_anim	 1
+	animadm Mach_1st
+	gfx1 Mach_1st
+	gfx3 mach_3rd
+	action "fire"
+		delaystart		0
+		delayend		0
+	end
+end
+
+weapon "WPN_colt45"
+	category 2
+	rank     0
+	teamfilter	red
+	teamfilter	blue
+	charfilter	medic
+	charfilter	sniper
+	charfilter	rifleman
+	charfilter	engineer
+	loadout_selectable	1
+	loadout_subclasses	0
+	maxclips	5
+	clipweight		1
+	weaponweight	1.5
+	weapon_class	secondary
+	round_type		"AMMO_COLT_45"
+	clipsize		7
+	startrounds		35
+	error 0.05 0.2 0.25 0.05 0.1 0.15
+	ammoclass		CLASS_45cal		1
+	launchuserpoint bullet
+	special_hold 2
+	animadm colt_1st
+	gfx1 colt_1st
+	gfx3 colt_3rd
+end
+
+weapon "WPN_M9Beretta"
+end
+
+weapon "WPN_RemmingtonSG"
+end
+
+weapon "WPN_357"
+	category 2
+	rank     3
+	teamfilter	red
+	charfilter	medic
+	charfilter	sniper
+	charfilter	gunner
+	charfilter	rifleman
+	charfilter	engineer
+	loadout_selectable	1
+	loadout_subclasses	0
+	maxclips		6
+	clipweight		.35
+	weaponweight	2.5
+	weapon_class	secondary
+	round_type		"AMMO_BERETTA_357"
+	clipsize		6
+	startrounds		36
+	error 0.05 0.2 0.25 0.05 0.1 0.15
+	ammoclass		CLASS_357		1
+	launchuserpoint bullet
+	special_hold 2
+	animadm 357_1st
+	gfx1 357_1st
+	gfx3 357_3RD
+end
+
+weapon "WPN_MK23"
+end
+
+weapon "WPN_GLOCK17"
+end
+
+weapon "WPN_M4AUTO"
+	category 3
+	rank     0
+	teamfilter	blue
+	charfilter	rifleman
+	charfilter	medic
+	charfilter	engineer
+	loadout_selectable	1
+	loadout_subclasses	1
+	maxclips		10
+	clipweight		1.5
+	weaponweight	5.5
+	weapon_class	primary
+	round_type		"AMMO_CAR15_556MM"
+	clipsize		30
+	startrounds		300
+	error 0.0165 0.2 0.25 0.0165 0.032 0.047
+	ammoclass		CLASS_556MM 1
+	ammobucket		1
+	launchuserpoint bullet
+	flags auto
+	flags Sighted
+	scope_max_mag	2
+	animadm M4_1st
+	gfx1 M4_1st
+	gfx3 M4_3RD
+	action "fire"
+		delayend			3
+	end
+	action "recoil"
+		delayend			2
+	end
+end
+
+weapon "WPN_M4"
+	category 3
+	rank     1
+	charfilter	rifleman
+	charfilter	medic
+	charfilter	engineer
+	round_type		"AMMO_CAR15_556MM"
+	clipsize		30
+	startrounds		300
+	error 0.0165 0.2 0.25 0.0165 0.032 0.047
+	ammoclass		CLASS_556MM	1
+	ammobucket		1
+	launchuserpoint bullet
+	weaponweight	5.5
+	flags Sighted
+	scope_max_mag	2
+	animadm m4_1st
+	gfx1 M4_1st
+	gfx3 M4_3RD
+	action "recoil"
+		delayend			2
+	end
+end
+
+weapon "WPN_M4M203AUTO"
+	category 3
+	rank     2
+	teamfilter	blue
+	charfilter	rifleman
+	loadout_selectable	1
+	loadout_subclasses	2
+	maxclips		10
+	clipweight		1.5
+	weaponweight	8.5
+	weapon_class	primary
+	round_type		"AMMO_CAR15_556MM"
+	clipsize		30
+	startrounds		300
+	error 0.024 0.063 0.088 0.024 0.3 0.35
+	ammoclass		CLASS_556MM	1
+	ammobucket		2
+	launchuserpoint bullet
+	flags auto
+	flags Sighted
+	scope_max_mag	2
+	animadm m4GL_1st
+	gfx1 M4GL_1st
+	gfx3 M4GL_3RD
+	action "recoil"
+		delayend			2
+	end
+end
+
+weapon "WPN_M4M203"
+	category 3
+	rank     3
+	charfilter	rifleman
+	round_type		"AMMO_CAR15_556MM"
+	clipsize		30
+	startrounds		300
+	error 0.024 0.063 0.088 0.024 0.3 0.35
+	ammoclass		CLASS_556MM	1
+	ammobucket		2
+	launchuserpoint bullet
+	weaponweight	8.5
+	flags Sighted
+	scope_max_mag	2
+	animadm m4GL_1st
+	gfx1 M4GL_1st
+	gfx3 M4GL_3RD
+	action "recoil"
+		delayend			2
+	end
+end
+
+weapon "WPN_M4M203HE"
+	category 3
+	rank     4
+	charfilter	rifleman
+	maxclips		6
+	clipweight		1.5
+	weaponweight	8.5
+	round_type		"AMMO_M203_40MM_NADE"
+	clipsize		1
+	startrounds		6
+	error 0.7 1.4 1.4 0.7 0.7 0.7
+	ammoclass		CLASS_40MMNADE	1
+	launchuserpoint grenade
+	flags	QuickSwitch
+	flags	Sighted
+	scope_max_mag	2
+	animadm m4GL_2nd
+	gfx1 M4GL_1st
+	gfx3 M4GL_3RD
+	action "recoil"
+		delayend			6
+	end
+end
+
+weapon "WPN_M16BURST"
+end
+
+weapon "WPN_M16"
+end
+
+weapon "WPN_M16M203BURST"
+end
+
+weapon "WPN_M16M203"
+end
+
+weapon "WPN_M16M203HE"
+end
+
+weapon "WPN_AK47AUTO"
+end
+
+weapon "WPN_AK47"
+end
+
+weapon "WPN_AK47M203AUTO"
+	category 3
+	rank     12
+	teamfilter	red
+	charfilter	rifleman
+	loadout_selectable	1
+	loadout_subclasses	2
+	maxclips		10
+	clipweight		1.5
+	weaponweight	12.7
+	weapon_class	primary
+	round_type		"AMMO_AK47_556MM"
+	clipsize		30
+	startrounds		300
+	error 0.04 0.35 0.45 0.04 0.055 0.072
+	ammoclass		CLASS_AK47	1
+	ammobucket		2
+	launchuserpoint bullet
+	flags auto
+	flags Sighted
+	scope_max_mag	2
+	animadm 47GL_1st
+	gfx1 47GL_1st
+	gfx3 47GL_3RD
+	action "fire"
+		delayend			6
+	end
+	action "recoil"
+		delayend			0
+	end
+end
+
+weapon "WPN_AK47M203"
+	category 3
+	rank     13
+	charfilter	rifleman
+	clipweight		1.5
+	round_type		"AMMO_AK47_556MM"
+	clipsize		30
+	startrounds		300
+	error 0.04 0.35 0.45 0.04 0.055 0.072
+	ammoclass		CLASS_AK47 1
+	ammobucket		2
+	launchuserpoint bullet
+	weaponweight	12.7
+	flags Sighted
+	scope_max_mag	2
+	animadm 47GL_1st
+	gfx1 47GL_1st
+	gfx3 47GL_3RD
+end
+
+weapon "WPN_AK47M203HE"
+	category 3
+	rank     14
+	charfilter	rifleman
+	maxclips		6
+	clipweight		1.5
+	weaponweight	12.7
+	round_type		"AMMO_M203_40MM_NADE"
+	clipsize		1
+	startrounds		6
+	error 0.7 1.4 1.4 0.7 0.7 0.7
+	ammoclass		CLASS_40MMNADE	1
+	launchuserpoint grenade
+	flags	QuickSwitch
+	flags	Sighted
+	scope_max_mag	2
+	animadm 47GL_2nd
+	gfx1 47GL_1st
+	gfx3 47GL_3RD
+	action "recoil"
+		delayend			6
+	end
+end
+
+weapon "WPN_ak74AUTO"
+end
+
+weapon "WPN_ak74"
+end
+
+weapon "WPN_ak74M203AUTO"
+end
+
+weapon "WPN_ak74M203"
+end
+
+weapon "WPN_ak74M203HE"
+end
+
+weapon "WPN_FNFNCAUTO"
+end
+
+weapon "WPN_FNFNCBURST"
+end
+
+weapon "WPN_FNFNC"
+end
+
+weapon "WPN_G3AUTO"
+end
+
+weapon "WPN_G3"
+end
+
+weapon "WPN_G36AUTO"
+end
+
+weapon "WPN_G36"
+end
+
+weapon "WPN_PKM"
+end
+
+weapon "WPN_RPK"
+end
+
+weapon "WPN_M249SAW"
+end
+
+weapon "WPN_M60"
+end
+
+weapon "WPN_MAG58"
+end
+
+weapon "WPN_MP5"
+end
+
+weapon "WPN_MP5SD"
+end
+
+weapon "WPN_P90AUTO"
+end
+
+weapon "WPN_P90"
+end
+
+weapon "WPN_DRAGUNOV"
+end
+
+weapon "WPN_L115A"
+end
+
+weapon "WPN_SR25"
+end
+
+weapon "WPN_M21"
+end
+
+weapon "WPN_M24"
+end
+
+weapon "WPN_Barret"
+end
+
+weapon "WPN_GRENADEFB"
+end
+
+weapon "WPN_GRENADEHE"
+end
+
+weapon "WPN_GRENADESM"
+end
+
+weapon "WPN_MEDPACK"
+end
+
+weapon "WPN_SATCHEL_CHARGE"
+end
+
+weapon "WPN_SATCHEL_DETONATOR"
+end
+
+weapon "WPN_CLAYMORE"
+end
+
+weapon "WPN_AT4"
+end
+
+weapon "WPN_MORTAR"
+	category 7
+	rank     3
+	teamfilter	red
+	teamfilter	blue
+	charfilter	engineer
+	loadout_selectable	1
+	loadout_subclasses	0
+	maxclips		4
+	clipweight		3.7
+	weaponweight	46.5
+	weapon_class	accessory
+	round_type  "AMMO_60MM_MORTAR"
+	clipsize    1
+	startrounds 4
+	error 4 4 4 4 4 4
+	error_hipTheta 4
+	error_upTheta 4
+	ammoclass	CLASS_60MM_MORTAR	1
+	launchuserpoint bullet
+	animadm Mort_1st
+	gfx1 Mort_1st
+	gfx3 Mort_3rd
+end
+
+weapon "WPN_STINGER"
+end
+
+weapon "WPN_DESIGNATOR"
+end
+
+weapon "WPN_RPG"
+end
+
+weapon "WPN_JAVELIN"
+end
+
+weapon "WPN_ANTITANK"
+end
+
+weapon "WPN_EMPLCD50"
+	category 11
+	rank     0
+	round_type  "50cal"
+	clipsize    -1
+	startrounds 500
+	error 0.063 0.063 0.063 0.063 0.063 0.063
+	launchuserpoint camera
+	animadm b50_1st
+	gfx1 H50_1st
+	flags auto
+	flags Emplaced
+	action "recoil"
+		delayend			1
+	end
+end
+
+weapon "WPN_EMPLCDMINI"
+end
+
+weapon "WPN_EMPLCDGRND"
+end
+
+weapon "WPN_EMPLMORTAR"
+end
+
+weapon "WPN_EMP50ETEK"
+end
+
+weapon "WPN_EMP50BD"
+end
+
+weapon "WPN_EMP50TRI"
+end
+
+weapon "WPN_EMcannon"
+end
+
+weapon "WPN_UG50cal"
+end
+
+weapon "WPN_EMPLCD50NA"
+end
+
+weapon "WPN_EMP50TRI180"
+end
+
+weapon "WPN_WEAKAIMINI"
+	category 11
+	rank     10
+	round_type  "wkminirnds"
+	clipsize    -1
+	startrounds 500
+	error 0.063 0.063 0.063 0.063 0.063 0.063
+	launchuserpoint camera
+	flags auto
+	flags Emplaced
+	action "fire"
+		delayend	  0
+	end
+	action "recoil"
+		delaystart    0
+		delayend	  7
+	end
+end
+
+weapon "WPN_EMPLCDHUM"
+	category 11
+	rank     11
+	round_type  "MK19nade"
+	clipsize    -1
+	startrounds 48
+	error 0.5 0.5 0.5 0.5 0.5 0.5
+	launchuserpoint camera
+	flags auto
+	flags Emplaced
+end
+
+weapon "WPN_EMPLCDBOT"
+	category 11
+	rank     12
+	round_type  "MK19nade"
+	clipsize    -1
+	startrounds 48
+	error 0.5 0.5 0.5 0.5 0.5 0.5
+	launchuserpoint camera
+	flags auto
+	flags Emplaced
+end
+
+weapon "WPN_EMP50BOT180"
+end
+
+weapon "WPN_EMPLCDSUV"
+end
+
+weapon "WPN_EMPLCD50SUV"
+end
+
+weapon "WPN_EMINIDFLT"
+end
+
+weapon "WPN_HELOROCKET"
+	category 11
+	rank     17
+	round_type  "ROCKET"
+	clipsize    32
+	startrounds 32
+	error 0.5 0.5 0.5 0.5 0.5 0.5
+	launchuserpoint bullet
+	ammoclass	CLASS_70MM_ROCKET 1
+	flags auto
+	flags Emplaced
+end
+
+weapon "WPN_ROCKTDFLT"
+end
+
+weapon "WPN_EMPLCDM60"
+end
+
+weapon "WPN_BTRTURRET"
+end
+
+weapon "WPN_STRYKERTURRET"
+end
+
+weapon "WPN_M1TURRET"
+end
+
+weapon "WPN_T80TURRET"
+end
+
+weapon "WPN_QUAD50"
+end
+
+weapon "WPN_AVENGER"
+	category 11
+	rank     24
+	round_type  "STINGER"
+	clipsize    8
+	startrounds 8
+	error 0.5 0.5 0.5 0.5 0.5 0.5
+	launchuserpoint bullet
+	ammoclass	CLASS_70MM_ROCKET 1
+	flags auto
+	flags Emplaced
+end
+
+weapon "WPN_HELOGUN"
+end
+
+weapon "WPN_BODYARMOR"
+end
+
+weapon "WPN_PARACHUTE"
+end

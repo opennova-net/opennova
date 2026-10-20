@@ -58,7 +58,7 @@ the reference fixture set the gated tests read (`retail::reference_fixture`,
 
 ## Authored files
 
-`def/items.def` (test rows 106100..), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
+`def/items.def` (test rows 106100..), `def/weapon.def` and `def/ammo.def` (the armory the native weapon-table, handshake and round-trail tests read: the shipped JO:CA weapon.def's 94 weapons in the shipped order, the rows the tests pin carrying the shipped field values and every other row its name alone, and the rounds those rows name), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
 `mnu/all_widgets.mnu`, `mns/test_style.mns`, `score/score_sample.ini`,
 `anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`, and
 `weapon_timing.txt`, the `opennova-3di weapon timing` input the Blender packaging

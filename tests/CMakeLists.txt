@@ -2863,13 +2863,13 @@ target_include_directories(husk_section_origins_test PRIVATE ${CMAKE_CURRENT_SOU
 target_compile_features(husk_section_origins_test PRIVATE cxx_std_17)
 add_test(NAME husk_section_origins COMMAND husk_section_origins_test)
 
-# Asset-gated (OPENNOVA_JO_ASSETS fixtures): the RoundSim debug trail over the
-# shipped ammo.def — a grenadehe dies by its fuse, never by an impact.
+# The RoundSim debug trail over the authored fixtures/def/ammo.def (the shipped
+# grenadehe row's values) — a grenadehe dies by its fuse, never by an impact.
 add_executable(round_debug_trail_test world/round_debug_trail_test.cpp)
 target_link_libraries(round_debug_trail_test PRIVATE opennova_runtime)
 target_include_directories(round_debug_trail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(round_debug_trail_test PRIVATE cxx_std_17)
-opennova_add_gated_test(round_debug_trail COMMAND round_debug_trail_test)
+add_test(NAME round_debug_trail COMMAND round_debug_trail_test)
 
 # The physics callback table (world/physics_class_table.h): a move_function
 # binds its row by whole name, ignoring case; anything else binds null.
@@ -4281,12 +4281,13 @@ target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
 
 # D-NET-141: the weapon.def armory table — witnessed index allocation (null@0 + file order),
-# ammo-clip resolution, and charfilter/teamfilter masks, against the committed fixture; §5.57.
+# ammo-clip resolution, and charfilter/teamfilter masks, against the authored fixtures/def/weapon.def
+# (the shipped table's order and pinned rows); the SIGHTS file check over a scratch mount; §5.57.
 add_executable(npruntime_weapon_table_test npruntime/weapon_table_test.cpp)
 target_link_libraries(npruntime_weapon_table_test
     PRIVATE opennova_net opennova_runtime opennova_formats opennova_base)
 target_include_directories(npruntime_weapon_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(npruntime_weapon_table COMMAND npruntime_weapon_table_test)
+add_test(NAME npruntime_weapon_table COMMAND npruntime_weapon_table_test)
 
 # D-NET-168 / D-NET-176 / D-NET-177: the S2C 0x50 team-assign re-latch + 0x2F re-submit, the
 # C2S 0x32 -> S2C 0x5D empty-slot sweep (entity removal) vs the bookkeeping-only 0x46 bit15, and
@@ -4470,7 +4471,7 @@ add_executable(npruntime_handshake_server_test npruntime/handshake_server_test.c
 target_link_libraries(npruntime_handshake_server_test
     PRIVATE opennova_net opennova_runtime opennova_formats)
 target_include_directories(npruntime_handshake_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(npruntime_handshake_server COMMAND npruntime_handshake_server_test)
+add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test)
 
 add_executable(npruntime_host_producers_test npruntime/host_producers_test.cpp)
 target_link_libraries(npruntime_host_producers_test PRIVATE opennova_net opennova_runtime)
