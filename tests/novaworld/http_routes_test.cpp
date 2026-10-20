@@ -2901,7 +2901,7 @@ private:
 	static opennova::ClientSession::Config config(uint32_t client_index, const Cookies *cookies) {
 		opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = client_index;
-		cfg.client_key = 0x50555348u;
+		cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x50555348u, opennova::make_dev_scrk() }; };
 		cfg.na = "http:push";
 		cfg.cookie_vars = [cookies]() {
 			Cookies vars{ { "NWUID", "" } };

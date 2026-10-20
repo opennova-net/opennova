@@ -150,7 +150,7 @@ int main(int argc, char **argv) {
 
 	opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x50555348u;
-	cfg.client_key = 0x434D4453u;
+	cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x434D4453u, opennova::make_dev_scrk() }; };
 	cfg.na = "push:host";
 	cfg.cookie_vars = []() {
 		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};

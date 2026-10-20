@@ -150,7 +150,9 @@ struct Host {
 		opennova::ClientSession::Config cfg =
 				opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = index;
-		cfg.client_key = index ^ 0x5A5A5A5Au;
+		cfg.connection_keys = [key = index ^ 0x5A5A5A5Au] {
+			return opennova::ConnectionKeys{ key, opennova::make_dev_scrk() };
+		};
 		cfg.na = "instances:host";
 		cfg.cookie_vars = [] {
 			return std::vector<std::pair<std::string, std::string>>{ { "NWUID", "" } };
@@ -664,13 +666,15 @@ int test_relisted_behind_one_address() {
 
 	opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x524c5354u;
-	cfg.client_key = 0x524c5331u;
 	cfg.na = "relist:host";
 	cfg.cookie_vars = [] {
 		return std::vector<std::pair<std::string, std::string>>{ { "NWUID", "" } };
 	};
-	uint32_t next_key = 0x524c5332u;
-	cfg.next_client_key = [&next_key] { return next_key++; };
+	// The 0x81s' draws (D-NET-704): the connect's CK, then each re-join's the next.
+	uint32_t next_key = 0x524c5331u;
+	cfg.connection_keys = [&next_key] {
+		return opennova::ConnectionKeys{ next_key++, opennova::make_dev_scrk() };
+	};
 	RelistHost host(port, std::move(cfg));
 	TEST_EXPECT(host.socket.is_valid());
 	const auto listing_on = [&db](int64_t lobby_id) -> std::optional<hostdb::HostRow> {

@@ -129,11 +129,10 @@ int main() {
 
 		opennova::ClientSession::Config direct_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		direct_cfg.client_index = 0x44495245u;
-		direct_cfg.client_key = 0x43544155u;
 		direct_cfg.na = "direct:auth";
 		const opennova::ClientAuth direct_auth =
 				opennova::make_client_auth(
-						direct_cfg, direct_cfg.co, 0x12345678u,
+						direct_cfg, direct_cfg.co, 0x12345678u, 0x43544155u,
 						opennova::make_dev_scrk());
 		const std::vector<uint8_t> direct_datagram =
 				opennova::nw_encode_outbound(
@@ -191,7 +190,7 @@ int main() {
 
 		opennova::ClientSession::Config old_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		old_cfg.client_index = 0x4F4C4441u;
-		old_cfg.client_key = 0x4F4C444Bu;
+		old_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x4F4C444Bu, opennova::make_dev_scrk() }; };
 		old_cfg.na = "reordered:old";
 		opennova::ClientSession old_session(old_cfg);
 		send_reordered(old_session.start());
@@ -211,7 +210,7 @@ int main() {
 
 		opennova::ClientSession::Config fresh_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		fresh_cfg.client_index = 0x4E455741u;
-		fresh_cfg.client_key = 0x4E45574Bu;
+		fresh_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x4E45574Bu, opennova::make_dev_scrk() }; };
 		fresh_cfg.na = "reordered:fresh";
 		opennova::ClientSession fresh_session(fresh_cfg);
 		send_reordered(fresh_session.start());
@@ -299,7 +298,6 @@ int main() {
 
 		opennova::ClientSession::Config keyless_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		keyless_cfg.client_index = 0x4B4C4553u;
-		keyless_cfg.client_key = 0x4B4C454Bu;
 		keyless_cfg.na = "keyless:lobby";
 		send_keyless(opennova::nw_encode_outbound(
 				opennova::SESSION_OPCODE_CLIENT_HELLO,
@@ -312,7 +310,7 @@ int main() {
 				               keyless_body.data(), keyless_body.size(), keyless_hello),
 		       "SCRK-less lobby Hello receives ServerHello");
 		const opennova::ClientAuth keyless_auth = opennova::make_client_auth(
-				keyless_cfg, keyless_cfg.co, keyless_hello.hk, /*client_scrk=*/"");
+				keyless_cfg, keyless_cfg.co, keyless_hello.hk, 0x4B4C454Bu, /*client_scrk=*/"");
 		send_keyless(opennova::nw_encode_outbound(
 				opennova::SESSION_OPCODE_CLIENT_AUTH,
 				opennova::client_auth_to_bytes(keyless_auth)));
@@ -528,12 +526,15 @@ int main() {
 		};
 		opennova::ClientSession::Config rcfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		rcfg.client_index = 0x5245434Eu;
-		rcfg.client_key = 0x52454331u;
 		rcfg.na = "reconnect:host";
 		rcfg.cookie_vars = []() {
 			return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
 		};
-		rcfg.next_client_key = []() { return 0x52454332u; };
+		// The 0x81s' draws (D-NET-704): the connect's CK, then the re-join's.
+		rcfg.connection_keys = [draws = 0]() mutable {
+			return opennova::ConnectionKeys{ draws++ == 0 ? 0x52454331u : 0x52454332u,
+				opennova::make_dev_scrk() };
+		};
 		opennova::ClientSession recon(rcfg);
 		// Receive, dispatch and answer until `done` holds (the session clock stays put).
 		auto drive = [&](auto done, int rounds) {
@@ -650,7 +651,7 @@ int main() {
 
 		opennova::ClientSession::Config collision_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		collision_cfg.client_index = 1;
-		collision_cfg.client_key = 0x76543210u;
+		collision_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x76543210u, opennova::make_dev_scrk() }; };
 		collision_cfg.na = "collision:second-peer";
 		opennova::ClientSession collision(collision_cfg);
 		const std::vector<uint8_t> repeated_hello = collision.start();
@@ -741,7 +742,7 @@ int main() {
 
 		opennova::ClientSession::Config retry_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		retry_cfg.client_index = 0x13572468u;
-		retry_cfg.client_key = 0x24681357u;
+		retry_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x24681357u, opennova::make_dev_scrk() }; };
 		retry_cfg.na = "retry:stable-auth";
 		opennova::ClientSession retry_session(retry_cfg);
 
@@ -820,7 +821,7 @@ int main() {
 		// retransmission. Its fresh sequence-one exchange must succeed.
 		opennova::ClientSession::Config replacement_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		replacement_cfg.client_index = 0x89ABCDEFu;
-		replacement_cfg.client_key = 0x10293847u;
+		replacement_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x10293847u, opennova::make_dev_scrk() }; };
 		replacement_cfg.na = "retry:new-auth";
 		opennova::ClientSession replacement(replacement_cfg);
 		send_retry(replacement.start());
@@ -892,7 +893,7 @@ int main() {
 		// [orig: NapiNPProtocol_HandleClientJoin @0x62beba..0x62bf06 (FindConnection,
 		//  the same-CI/CK SendSessionInit retransmit, else Destroy + Create)]
 		opennova::ClientSession::Config restarted_cfg = replacement_cfg;
-		restarted_cfg.client_key = 0x5EB007EDu;
+		restarted_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x5EB007EDu, opennova::make_dev_scrk() }; };
 		opennova::ClientSession restarted(restarted_cfg);
 		send_retry(restarted.start());
 		inbound.clear();
@@ -1175,7 +1176,7 @@ int main() {
 	expect(hello_only_client.is_valid(), "Hello-only lobby UDP socket bound");
 	opennova::ClientSession::Config hello_only_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	hello_only_cfg.client_index = 0x48454C4Fu;
-	hello_only_cfg.client_key = 0x4F4E4C59u;
+	hello_only_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x4F4E4C59u, opennova::make_dev_scrk() }; };
 	hello_only_cfg.na = "restart:hello-only";
 	opennova::ClientSession hello_only_session(hello_only_cfg);
 	const std::vector<uint8_t> hello_only_datagram =

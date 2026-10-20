@@ -4,6 +4,7 @@
 #include <net/napi/tlv.h>           // NapiMessage (lobby container shape)
 #include <net/novaworld/lobby_vars.h> // HostRegistration / HostPlayerSlot
 #include <net/npwire/cs_config.h>
+#include <net/npwire/nw_session_framing.h> // ConnectionKeys / manager_connection_keys
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 
@@ -25,8 +26,8 @@ namespace opennova {
 // legs and the server notifications:
 //
 //   start()                       -> ClientHello (0x41)
-//   <- ServerHello (0x81)            : learn host key `hk`
-//   ClientAuth (0x42)                : hk echoed, ck = client key, client scrk
+//   <- ServerHello (0x81)            : learn host key `hk`; draw the CK, then the SCRK
+//   ClientAuth (0x42)                : hk echoed, the drawn ck and client scrk
 //   <- ServerAuth (0x82)             : learn server key `sk` + server scrk (cr==1) + the CS block
 //   process_periodic_update() queues ClientConnected: begin lobby verification
 //   <- ServerStartVerify (0x83)
@@ -95,8 +96,9 @@ public:
 	};
 
 	struct Config {
-		uint32_t client_index = 1;   // ci — caller-chosen (binding: random)
-		uint32_t client_key = 1;     // ck — caller-chosen (binding: random)
+		// The CI: the connection's index on its protocol (NwuLobbySession: the lobby protocol's
+		// counter, 1 at every connect).
+		uint32_t client_index = 1;
 		// The gate tag echoed in ClientAuth NA: the title's, or the mount's gt.ssc's
 		// (title_gate_tag), copied into the connection's parameters at the connect.
 		// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d494f - Napi_CopyString(params,
@@ -180,14 +182,17 @@ public:
 		// [orig: CNapiGameSession_InitNPConnection @0x4d3df4..0x4d3eb8]
 		int32_t max_packet_size = 0;
 
-		// The fresh CK and SCRK a reconnect's re-join mints, the CK drawn from next_client_key
-		// until nonzero (make_session_key). Unset, the engine's own random draws
-		// (make_random_session_u32 / make_dev_scrk) stand; the owner injects its generator, a
-		// test a deterministic one.
-		// [orig: CNapiNPConnection_InitFromSession @0x626320 — NapiNP_GenerateSessionKey
-		//  @0x6263fb (CK), CNapiNPConnection_GenerateTxKey @0x626401 (SCRK)]
-		std::function<uint32_t()> next_client_key;
-		std::function<std::string()> next_scrk;
+		// The CK and the SCRK, drawn at each 0x81 the connection takes (the first connect's and
+		// every re-join's), the CK first. Unset: the process's one manager LCG
+		// (manager_connection_keys), which the game protocol's keys draw from too, as retail's one
+		// NAPI manager serves both protocols; a test injects its own keys.
+		// [orig: Nwu_HandleServerHello @0x626D20 - the re-join's CNapiNPConnection_InitFromSession
+		//  @0x627E8C, the first connect's @0x627EE5; InitFromSession @0x626320 -
+		//  NapiNP_GenerateSessionKey(manager) @0x6263FB (CK), CNapiNPConnection_GenerateTxKey
+		//  @0x626401 (SCRK); the lobby protocol on g_NapiNPCtx's manager:
+		//  CNapiGameSession_InitNPConnection @0x4D3BE0 - NapiNPProtocol_Create @0x4D3C89;
+		//  NapiNPManager_Create @0x62C5E0, its one caller CNapiNetwork_Init @0x4CA638]
+		std::function<ConnectionKeys()> connection_keys;
 
 		// The NovaWorld session connection of a title (complete:
 		// resolve_title_identity) whose gate manager holds `gate_tag`
@@ -508,7 +513,8 @@ public:
 	bool is_verified() const { return state_ == State::Verified; }
 
 	uint32_t client_index() const { return cfg_.client_index; }
-	uint32_t client_key() const { return cfg_.client_key; }
+	// The CK and SCRK the last 0x81 drew (0 and empty before the first).
+	uint32_t client_key() const { return client_key_; }
 	uint32_t server_host_key() const { return server_hk_; }
 	uint32_t server_key() const { return server_sk_; }
 	const std::string &client_scrk() const { return client_scrk_; }
@@ -554,6 +560,8 @@ private:
 
 	// The 0x81's CI is this connection's and its identity block this protocol's.
 	bool server_hello_is_ours(const ServerHello &sh) const;
+	// InitFromSession's CK, then SCRK (Config::connection_keys, else the manager LCG).
+	void draw_connection_keys();
 	void on_server_hello(const std::vector<uint8_t> &body,
 	                     std::vector<std::vector<uint8_t>> &out);
 	void on_server_auth(const std::vector<uint8_t> &body);
@@ -594,7 +602,8 @@ private:
 
 	uint32_t server_hk_ = 0;       // ServerHello.hk — echoed in ClientAuth
 	uint32_t server_sk_ = 0;       // ServerAuth.sk — session_id on our 0x43s
-	std::string client_scrk_;      // we generate; encrypts our 0x43 inner stream
+	uint32_t client_key_ = 0;      // drawn at each 0x81 (draw_connection_keys)
+	std::string client_scrk_;      // drawn with it; encrypts our 0x43 inner stream
 	std::string server_scrk_;      // ServerAuth.scrk; decrypts inbound 0x83 inner
 	std::string server_nwuid_;     // ServerSessionInit NWUID — echoed in the verify
 	std::string server_web_domain_;// ServerSessionInit NovaworldWebDomainNameAndPortNumber
@@ -696,7 +705,7 @@ private:
 // AFTER 0x82, not in the identity emit.]
 ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view co);
 ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view co, uint32_t server_hk,
-                            std::string_view client_scrk);
+                            uint32_t client_key, std::string_view client_scrk);
 
 // The gate-sourced inputs to the 0x42-join CU var set. Both the join (client)
 // and the host-registration (host) connection carry this same set — retail

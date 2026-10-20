@@ -62,9 +62,12 @@ public:
 		std::function<void()> on_sessionless;
 	};
 	struct Environment {
-		// The client index/key draws, the reconnect's fresh CK and the host role's AppId and
-		// cookie-key seeds. Unset: make_random_session_u32, the OS CSPRNG (base/os_random).
+		// The host role's AppId and cookie-key seeds. Unset: make_random_session_u32, the OS
+		// CSPRNG (base/os_random).
 		std::function<uint32_t()> random_u32;
+		// The connection's CK and SCRK at each 0x81 (ClientSession::Config::connection_keys).
+		// Unset: the process's one manager LCG, as retail's; a test injects its own.
+		std::function<ConnectionKeys()> connection_keys;
 		// Resolve a gate host or a UDPNOVAWORLD entry's host ("a.b.c.d" or a name) into `out`
 		// (its port left alone): the platform's inet_addr, then its name lookup; false when
 		// neither reads it. Unset: dotted quads only.
@@ -179,8 +182,9 @@ public:
 	bool session_verified() const { return session_ && session_->is_verified(); }
 	const GateResponse &gate_response() const { return gate_response_; }
 	MatchFacts match_facts() const;
+	// The connection's CI (1 once a session is made, 0 before) and the CK its last 0x81 drew.
 	uint32_t client_index() const { return client_index_; }
-	uint32_t client_key() const { return client_key_; }
+	uint32_t client_key() const { return session_ ? session_->client_key() : 0u; }
 	// One probe target: an address and the port as parsed (the send narrows it to 16 bits).
 	struct Target {
 		uint32_t ip = 0; // PeerAddr's packing
@@ -232,7 +236,6 @@ private:
 	std::vector<uint8_t> gate_probe_datagram_;
 	std::unique_ptr<ClientSession> session_;
 	uint32_t client_index_ = 0;
-	uint32_t client_key_ = 0;
 	std::vector<Target> targets_; // the enumerator's target list
 	PeerAddr nw_peer_;
 	GateResponse gate_response_;

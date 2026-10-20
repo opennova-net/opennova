@@ -117,7 +117,7 @@ int main() {
 
 	opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x52455345u;
-	cfg.client_key = 0x4E444C53u;
+	cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x4E444C53u, opennova::make_dev_scrk() }; };
 	cfg.na = "resend:lobby";
 	cfg.cookie_vars = []() {
 		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};

@@ -132,12 +132,12 @@
   from the NAPI manager's 16-bit LCG or the protocol's connection counter: the host key
   (HK), each connection's SK / CK and SCRK, and the CI (`net/npwire/nw_session_framing.h`:
   `manager_session_key`, `manager_connection_keys`, `next_connection_index`; D-NET-524,
-  D-NET-521). They stay on the LCG and the counter by the maintainer's decision ("retail
-  LCG everywhere"), predictable as retail's are (net-re §8, D-NET-524 records the cost):
-  never move them back to the CSPRNG. Everything else stays on
-  `os_random`: the NovaWorld service's values (HOSTKEY, the service's SK / SCRK, cookies,
-  salts, tags and ids) and the NovaWorld lobby client's (its CI, CK and SCRK; D-NET-704
-  tracks retail's LCG there and waits on the maintainer). Do
+  D-NET-521), and the NovaWorld lobby client's CK and SCRK (the same manager) and CI (its
+  own protocol's counter, 1 at every connect; D-NET-704). They stay on the LCG and the
+  counters by the maintainer's decision ("retail LCG everywhere"), predictable as retail's
+  are (net-re §8, D-NET-524 records the cost): never move them back to the CSPRNG.
+  Everything else stays on `os_random`: the NovaWorld service's values (HOSTKEY, the
+  service's SK / SCRK, cookies, salts, tags and ids). Do
   not hand-roll a new byte reader; migrate existing per-lib copies on-touch
   (delegate the body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
   The 16.16 / 2.14 scales are `io/fixed.h`'s `kFp16One` (float), `kFp16OneD`

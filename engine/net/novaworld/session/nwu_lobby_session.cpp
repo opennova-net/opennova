@@ -4,7 +4,7 @@
 #include <net/napi/session.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/lobby_vars.h> // parse_host_and_port
-#include <net/npwire/nw_session_framing.h> // make_random_session_u32 / make_session_key
+#include <net/npwire/nw_session_framing.h> // advance_connection_index / make_random_session_u32
 #include <net/npwire/session_keys.h>      // the server-direction opcodes
 #include <net/title/title_identity.h>
 
@@ -118,10 +118,7 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 		junction_code_.clear();
 	gate_socket_ = &gate;
 	session_socket_ = &session;
-	client_index_ = random_u32();
-	// The CK is a session key, drawn until nonzero.
-	// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey]
-	client_key_ = make_session_key([this]() { return random_u32(); });
+	client_index_ = 0;
 	session_.reset();
 	gate_resolved_ = false;
 	probe_sent_ = false;
@@ -515,9 +512,18 @@ void NwuLobbySession::poll_gate() {
 // or host: all 11 chunks, type 2, the locale chunks empty on the join; UdpCode1/2 and MetTag come
 // from the gate. [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4640]
 void NwuLobbySession::begin_session() {
+	// The connect makes a fresh lobby protocol, its connection counter 0, and one connection on
+	// it, whose index is the CI every 0x41 and the 0x42 carry: 1 at every connect. Its CK and
+	// SCRK are drawn at each 0x81 it takes, from the process's one manager LCG
+	// (ClientSession::Config::connection_keys; Environment::connection_keys in a test).
+	// [orig: CNapiGameSession_InitNPConnection @0x4D3BE0 - NapiNPProtocol_Create @0x4D3C89 (the
+	//  counter +0xECC zeroed @0x625A81), CNapiNPConnection_Create @0x4D3F70 (the step and the
+	//  index @0x62B282..0x62B296)]
+	uint32_t protocol_connections = 0;
+	client_index_ = advance_connection_index(protocol_connections);
 	ClientSession::Config cfg = ClientSession::Config::lobby(*title_, gate_tag_);
 	cfg.client_index = client_index_;
-	cfg.client_key = client_key_;
+	cfg.connection_keys = env_.connection_keys;
 	cfg.max_packet_size = env_.max_packet_size;
 	NovaWorldJoinCu cu;
 	cu.build_date_and_time = title_->lobby_bdat;
@@ -533,8 +539,6 @@ void NwuLobbySession::begin_session() {
 	cfg.glsvss_agrms_ms = gate_response_.glsvss_agrms;
 	// The "Cookie" var-list every Cookie-bearing statement re-serializes.
 	cfg.cookie_vars = hooks_.cookie_vars;
-	// A reconnect's re-join mints a fresh client key (the client index stays) from this draw.
-	cfg.next_client_key = [this]() { return random_u32(); };
 
 	session_ = std::make_unique<ClientSession>(cfg);
 	session_->set_clock_ms(clock_ms_);

@@ -179,12 +179,16 @@ ClientSession::Config ClientSession::Config::game_protocol(const TitleIdentity &
 
 ClientSession::ClientSession() : ClientSession(Config{}) {}
 
-// The per-session SCRK in the 63-draw generator's shape, from the CSPRNG (make_dev_scrk);
-// retail draws it from the manager's LCG (generate_tx_key), which this lobby leg has not
-// moved to yet (D-NET-524's residual). [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0]
-ClientSession::ClientSession(Config config)
-	: cfg_(std::move(config)),
-	  client_scrk_(make_dev_scrk()) {}
+ClientSession::ClientSession(Config config) : cfg_(std::move(config)) {}
+
+// InitFromSession's draws: the CK, then the SCRK, from the configured source or the process's
+// one manager LCG. [orig: CNapiNPConnection_InitFromSession @0x626320 - NapiNP_GenerateSessionKey
+//  @0x6263FB, CNapiNPConnection_GenerateTxKey @0x626401]
+void ClientSession::draw_connection_keys() {
+	const ConnectionKeys keys = cfg_.connection_keys ? cfg_.connection_keys() : manager_connection_keys();
+	client_key_ = keys.key;
+	client_scrk_ = keys.scrk;
+}
 
 std::vector<uint8_t> ClientSession::start() {
 	state_ = State::Hello;
@@ -230,6 +234,9 @@ std::vector<uint8_t> ClientSession::start() {
 	// [orig: CNapiGameSession_InitNPConnection @0x4d3f70 -> CNapiNPConnection_Create @0x62acb0].
 	send_queue_.clear();
 	ack_pending_ = false;
+	// No key until the 0x81's InitFromSession draws one (the create zeroes the local key).
+	client_key_ = 0;
+	client_scrk_.clear();
 	last_recv_activity_ms_ = 0;
 	sent_client_connected_ = false;
 	reassembly_ = ProtocolReassemblyState{};
@@ -294,7 +301,7 @@ ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view
 }
 
 ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view co, uint32_t server_hk,
-                            std::string_view client_scrk) {
+                            uint32_t client_key, std::string_view client_scrk) {
 	ClientAuth auth;
 	// Identity block — the real server re-validates NVS/PN/PG/PV1 (+PV2 in its is_server branch) on the
 	// 0x42 join exactly as on the 0x41 hello (HandleClientJoin @0x62B750); without it real NW silently
@@ -311,7 +318,7 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 	auth.pv2  = cfg.pv2;
 	auth.ci   = cfg.client_index;
 	auth.hk   = server_hk;        // echo ServerHello.hk
-	auth.ck   = cfg.client_key;
+	auth.ck   = client_key;
 	auth.na   = cfg.na;
 	auth.scrk = std::string(client_scrk);
 	// CU chunks (NW-S3) — the gate-issued session-auth codes + client env the live NW server validates.
@@ -340,7 +347,7 @@ std::vector<uint8_t> ClientSession::build_announce(uint32_t eip, uint32_t epn) {
 
 std::vector<uint8_t> ClientSession::build_client_auth() {
 	last_framed_send_ms_ = clock_ms_;
-	ClientAuth auth = make_client_auth(cfg_, cfg_.co, server_hk_, client_scrk_);
+	ClientAuth auth = make_client_auth(cfg_, cfg_.co, server_hk_, client_key_, client_scrk_);
 	// A re-join carries the counted disconnects and the last 0x82's RCNT (each only when
 	// nonzero, so a first join is unchanged) [orig: SendClientJoin @0x62033d..0x62037f].
 	auth.dcnt = dcnt_;
@@ -504,15 +511,13 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 	if (reconnecting()) {
 		// The re-join: the probe stops and InitFromSession re-keys the connection (a fresh CK
 		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42
-		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join. The CK is
-		// drawn until nonzero (NapiNP_GenerateSessionKey's jz @0x61EAC3).
-		// [orig: Nwu_HandleServerHello @0x627e62..0x627eb3; CNapiNPConnection_InitFromSession
-		//  @0x626320 — the keys @0x6263fb/@0x626401, the cs_dir copies @0x626449/@0x62645c,
-		//  state 3 @0x626496]
+		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join.
+		// [orig: Nwu_HandleServerHello @0x627e62..0x627eb3, InitFromSession @0x627E8C;
+		//  CNapiNPConnection_InitFromSession @0x626320 — the keys @0x6263fb/@0x626401, the
+		//  cs_dir copies @0x626449/@0x62645c, state 3 @0x626496]
 		reconnect_.probing = false;
 		connection_down_ = false;
-		cfg_.client_key = make_session_key(cfg_.next_client_key);
-		client_scrk_ = cfg_.next_scrk ? cfg_.next_scrk() : make_dev_scrk();
+		draw_connection_keys();
 		server_hk_ = sh.hk;
 		server_sk_ = 0;
 		server_scrk_.clear();
@@ -524,6 +529,9 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 		out.push_back(build_client_auth());
 		return;
 	}
+	// The first connect's InitFromSession draws the CK and the SCRK the 0x42 carries.
+	// [orig: Nwu_HandleServerHello @0x627EBE..0x627EE5 -> CNapiNPConnection_InitFromSession]
+	draw_connection_keys();
 	server_hk_ = sh.hk;       // [Phase 1] the value we must echo in ClientAuth
 	state_ = State::Auth;
 	out.push_back(build_client_auth());
@@ -540,7 +548,7 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	// splits it: any nonzero CR accepts, zero rejects.
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
 	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
-	if (sa.ci != cfg_.client_index || sa.ck != cfg_.client_key) return;
+	if (sa.ci != cfg_.client_index || sa.ck != client_key_) return;
 	// A zero CR rejects: the connection keeps its JFC, JFP and JFS (64 bytes) and drops straight
 	// to its down state, with no teardown and no state-change callback; RCNT is not read. A first
 	// connect's periodic update then gives the connect up (NwuLobbySession), and a re-join's
@@ -613,7 +621,7 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 //  @0x6240c4]
 void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body,
                                       std::vector<std::vector<uint8_t>> &out) {
-	if (body.size() < 4 || opennova::io::read_u32_le(body.data()) != cfg_.client_key) return;
+	if (body.size() < 4 || opennova::io::read_u32_le(body.data()) != client_key_) return;
 	DisconnectEvent event;
 	if (!parse_disconnect_event(body.data() + 4, body.size() - 4, event)) return;
 	last_receive_ms_ = clock_ms_;
@@ -889,7 +897,7 @@ void ClientSession::build_outgoing_packets(std::vector<std::vector<uint8_t>> &ou
 void ClientSession::on_server_resend_list(const std::vector<uint8_t> &body,
                                           std::vector<std::vector<uint8_t>> &out) {
 	std::vector<uint32_t> requested;
-	if (!decode_session_resend_list(body.data(), body.size(), cfg_.client_key, requested)) return;
+	if (!decode_session_resend_list(body.data(), body.size(), client_key_, requested)) return;
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0 ? seq_.next_outbound_seq : requested_sequence;
 		std::vector<uint8_t> body_out;
@@ -1019,7 +1027,7 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 	// receive tail), and the packets a closing gap releases drain in order.
 	// [orig: NapiNPProtocol_HandleSessionPacket @0x626a00 — the receiver key @0x626b72, the gate
 	//  and queue @0x626be0..0x626c3a]
-	if (!deframe_session_packet(seq_, SessionCrypto{{}, server_scrk_, 0, cfg_.client_key},
+	if (!deframe_session_packet(seq_, SessionCrypto{{}, server_scrk_, 0, client_key_},
 	                            body.data(), body.size(), hdr, messages, &admission)) {
 		fail("bad 0x83 protocol packet");
 		return;

@@ -128,12 +128,15 @@ int main() {
 	// ---- 2. ClientSession EMITS them in its generated ClientAuth (0x42) ----
 	ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x11223344u;
-	cfg.client_key = 0x55667788u;
+	// The CK and SCRK the 0x81's InitFromSession draws (D-NET-704; injected here).
+	cfg.connection_keys = [] { return ConnectionKeys{ 0x55667788u, "CUTESTSCRK" }; };
 	cfg.cu_vars = cu;
 
 	ClientSession session(cfg);
 	auto hello_dg = session.start();
 	expect(!hello_dg.empty(), "ClientSession.start() produced a ClientHello");
+	expect(session.client_key() == 0u && session.client_scrk().empty(),
+	       "no CK or SCRK before the 0x81 (InitFromSession draws them)");
 
 	// Recover the ClientHello so we can craft a matching ServerHello.
 	uint8_t op = 0;
@@ -162,6 +165,9 @@ int main() {
 		ClientAuth auth;
 		expect(parse_client_auth(auth_body.data(), auth_body.size(), auth),
 		       "parse ClientAuth");
+		expect(auth.ck == 0x55667788u && auth.scrk == "CUTESTSCRK" &&
+		               session.client_key() == 0x55667788u,
+		       "the 0x42 carries the CK and SCRK drawn at the 0x81");
 		// The whole point of NW-S3: the join is no longer CU-empty.
 		if (expect(auth.cu.size() == kCount,
 		           "ClientAuth carries all 11 CU chunks (NW-S3 closed)")) {

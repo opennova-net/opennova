@@ -206,12 +206,14 @@ public:
 		: session_([ci, ck] {
 			  ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 			  cfg.client_index = ci;
-			  cfg.client_key = ck;
 			  cfg.na = "ownership:host";
 			  cfg.cookie_vars = [] {
 				  return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
 			  };
-			  cfg.next_client_key = [next = ck]() mutable { return ++next; };
+			  // The 0x81s' draws (D-NET-704): the connect's CK, then each re-join's the next.
+			  cfg.connection_keys = [next = ck]() mutable {
+				  return opennova::ConnectionKeys{ next++, opennova::make_dev_scrk() };
+			  };
 			  return cfg;
 		  }()) {
 		socket_ = net::ScopedSocket(net::udp_bind(0));

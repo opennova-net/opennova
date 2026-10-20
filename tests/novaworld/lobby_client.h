@@ -154,7 +154,7 @@ private:
 		opennova::ClientSession::Config cfg =
 				opennova::ClientSession::Config::lobby(jo_title(), jo_title().gate_tag);
 		cfg.client_index = index;
-		cfg.client_key = key;
+		cfg.connection_keys = [key] { return opennova::ConnectionKeys{ key, opennova::make_dev_scrk() }; };
 		cfg.na = na;
 		cfg.cookie_vars = [] {
 			return std::vector<std::pair<std::string, std::string>>{ { "NWUID", "" } };
