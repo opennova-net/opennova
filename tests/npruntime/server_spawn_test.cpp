@@ -387,10 +387,6 @@ int main() {
 	// [orig: Server_AssignPlayerTeam @0x4FE398..0x4FE400,
 	// @0x4FE51A..0x4FE587]
 	{
-		auto team_world = std::make_unique<w::World>();
-		w::AiSystem &team_ai = team_world->ai;
-		make_world(*team_world);
-
 		auto reserve_sequence = [&](inmatch::GameConfig config,
 				std::initializer_list<uint8_t> requests,
 				const inmatch::HostSlotRow *host_slot = nullptr) {
@@ -400,8 +396,10 @@ int main() {
 			for (uint8_t request : requests) {
 				roster.emplace_back();
 				roster.back().char_vars.team_request = request;
+				// The row first, as the add takes it: the tally counts claimed rows.
+				(void)inmatch::Server_ReservePlayerSlot(roster, roster.back(), 8);
 				teams.push_back(inmatch::Server_ReservePlayerTeam(
-						config, true, roster, roster.back(), *team_world, nullptr, host_slot));
+						config, true, roster, roster.back(), nullptr, host_slot));
 			}
 			return teams;
 		};
@@ -465,12 +463,14 @@ int main() {
 
 		std::vector<inmatch::NapiNPConnection> mixed(4);
 		for (std::size_t i = 0; i < 3; ++i) {
+			mixed[i].reply.player_slot = static_cast<uint8_t>(i);
+			mixed[i].reply.player_slot_reserved = true;
 			mixed[i].assigned_team_valid = true;
 			mixed[i].assigned_team = static_cast<uint8_t>(i == 2 ? 4 : i + 1);
 		}
 		mixed.back().char_vars.team_request = 0xFF;
 		if (!expect(inmatch::Server_ReservePlayerTeam(
-					four, true, mixed, mixed.back(), *team_world) == 2,
+					four, true, mixed, mixed.back()) == 2,
 				"four-team mixed-index lookup is reproduced exactly")) return 1;
 
 		four.side_a_password = "side-a";
@@ -493,12 +493,14 @@ int main() {
 			tdm_locked.side_a_password = "side-a";
 			std::vector<inmatch::NapiNPConnection> roster(3);
 			for (std::size_t i = 0; i < 2; ++i) {
+				roster[i].reply.player_slot = static_cast<uint8_t>(i);
+				roster[i].reply.player_slot_reserved = true;
 				roster[i].assigned_team_valid = true;
 				roster[i].assigned_team = 2;
 			}
 			roster.back().char_vars.team_request = 1; // side B, which is open
 			if (!expect(inmatch::Server_ReservePlayerTeam(
-						tdm_locked, true, roster, roster.back(), *team_world) == 3,
+						tdm_locked, true, roster, roster.back()) == 3,
 					"TDM with a locked side forces TR to automatic (balance picks team 3)")) return 1;
 			// The force is keyed on the exact 0x10000 game type: TKOTH keeps
 			// honoring the open-side request under the same passwords.
@@ -506,8 +508,36 @@ int main() {
 			tkoth_locked.game_type = opennova::game_type::kTeamKingOfTheHill;
 			roster.back().assigned_team_valid = false;
 			if (!expect(inmatch::Server_ReservePlayerTeam(
-						tkoth_locked, true, roster, roster.back(), *team_world) == 2,
+						tkoth_locked, true, roster, roster.back()) == 2,
 					"non-TDM four-team hosts still honor the open-side TR")) return 1;
+		}
+
+		// D-NET-NEW-L3-6: the balance tally reads the slot rows' team bytes, each active row
+		// but the joiner's, whatever its body or join state: two loading joiners' rows on
+		// team 2 send the next joiner to team 1, and a session spectator's row (team 0)
+		// counts nowhere.
+		// [orig: Server_AssignPlayerTeam @0x4FE5BD..0x4FE5DE, the 2-team pick @0x4FE619;
+		//  the spectator's team 0 @0x4FE368]
+		{
+			inmatch::GameConfig tdm;
+			tdm.game_type = opennova::game_type::kTeamDeathmatch;
+			std::vector<inmatch::NapiNPConnection> rows(4);
+			for (std::size_t i = 0; i < 3; ++i) {
+				rows[i].reply.player_slot = static_cast<uint8_t>(i + 1);
+				rows[i].reply.player_slot_reserved = true;
+				rows[i].assigned_team_valid = true;
+			}
+			rows[0].link.spectator = true; // a session spectator's row: team 0
+			rows[0].assigned_team = 0;
+			rows[1].assigned_team = 2;     // loading joiners: rows claimed, no body
+			rows[2].assigned_team = 2;
+			rows[3].char_vars.team_request = 0xFF;
+			if (!expect(inmatch::Server_ReservePlayerTeam(tdm, true, rows, rows[3]) == 1,
+					"two loading joiners' team-2 rows send the next joiner to team 1")) return 1;
+			rows[2].assigned_team = 1;
+			rows[3].assigned_team_valid = false;
+			if (!expect(inmatch::Server_ReservePlayerTeam(tdm, true, rows, rows[3]) == 1,
+					"one row per team and a spectator's team 0: a tie takes team 1")) return 1;
 		}
 
 		// The side compares see the add event's 16-character copy of the JSP
@@ -522,12 +552,12 @@ int main() {
 			roster.back().char_vars.team_request = 0xFF;
 			roster.back().join_password = "abcdefghijklmnopQRS";
 			if (!expect(inmatch::Server_ReservePlayerTeam(
-						prefix, true, roster, roster.back(), *team_world) == 1,
+						prefix, true, roster, roster.back()) == 1,
 					"a JSP matching the 16-char truncation selects the locked side")) return 1;
 			roster.back().assigned_team_valid = false;
 			roster.back().join_password = "abcdefghijklmnoZ"; // differs inside the window
 			if (!expect(inmatch::Server_ReservePlayerTeam(
-						prefix, true, roster, roster.back(), *team_world) == 2,
+						prefix, true, roster, roster.back()) == 2,
 					"a JSP differing inside the 16-char window falls to the open side")) return 1;
 		}
 	}
@@ -633,6 +663,55 @@ int main() {
 				if (!expect(r.net_id != 0, "var-less joiner netId falls back to the encoder shim")) return 1;
 			}
 		}
+
+		// D-NET-NEW-L3-7: a session spectator's slot team is 0, so in a team game the side
+		// pick (slot team 1 or 3, or a non-team game, takes side A) gives it side B.
+		// [orig: Server_AssignPlayerTeam @0x4FE368; Server_PlayerAdd @0x51CFDF..0x51CFF7]
+		{
+			cctx.is_in_session = 1;
+			inmatch::NapiNPConnection spec;
+			spec.type = 1;
+			spec.connection_id = inmatch::kFirstJoinerDcb + 2;
+			spec.self_id_seen = true;
+			spec.phase = inmatch::ConnectionPhase::Joined;
+			spec.link.spectator = true;
+			spec.char_vars.char_id[0] = 0x0200;
+			spec.char_vars.char_id[1] = 0x8207;
+			spec.char_vars.char_class[0] = 8;
+			spec.char_vars.char_class[1] = 5;
+			spec.char_vars.avatar[0] = 1;
+			spec.char_vars.avatar[1] = 4;
+			cctx.np_protocol.connection_list.push_back(spec);
+		}
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1,
+		            "char-stamp: spectator spawned")) return 1;
+		const inmatch::NapiNPConnection &spec_conn = cctx.np_protocol.connection_list.back();
+		const w::Entity *cspec = pool0_player(cw, inmatch::kFirstJoinerDcb + 2);
+		if (!expect(spec_conn.assigned_team_valid && spec_conn.assigned_team == 0,
+		            "a session spectator's slot team is 0")) return 1;
+		if (!expect(cspec != nullptr && cspec->anim_slot == 4 && cspec->minimap_net_id == 0x8207,
+		            "the spectator's team 0 takes side B's avatar and character id")) return 1;
+
+		// D-NET-NEW-L3-6 through the pump: the tally reads the rows' team bytes, not the
+		// bodies. Rows: the host and the bare joiner on team 1, the joiner on team 2, the
+		// spectator on 0. A write to the host body's team (2) changes no row, so the next
+		// joiner balances to team 2; a body walk would have counted 1 against 2 and said 1.
+		// [orig: Server_AssignPlayerTeam @0x4FE5BD..0x4FE5DE, @0x4FE619]
+		if (!expect(chost != nullptr, "char-stamp: host body")) return 1;
+		const_cast<w::Entity *>(pool0_player(cw, inmatch::kHostPlayerDcb))->team = 2;
+		{
+			inmatch::NapiNPConnection next;
+			next.type = 1;
+			next.connection_id = inmatch::kFirstJoinerDcb + 3;
+			next.self_id_seen = true;
+			next.phase = inmatch::ConnectionPhase::Joined;
+			next.char_vars.team_request = 0xFF;
+			cctx.np_protocol.connection_list.push_back(next);
+		}
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1,
+		            "char-stamp: next joiner spawned")) return 1;
+		if (!expect(cctx.np_protocol.connection_list.back().assigned_team == 2,
+		            "the tally counts the rows' teams (team 1: 2, team 2: 1), not the bodies'")) return 1;
 	}
 
 	// The standalone SP host: a campaign mission authors ONLY the Co-op 6001 start (every

@@ -36,8 +36,8 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEn
 
 // Reserve the team written to both the pre-spawn S2C 0x04 slot assignment and
 // the later player entity. Repeated calls for one connection are idempotent.
-// Pending MP reservations participate in autobalance, so admissions received
-// in one socket drain cannot all observe stale World counts.
+// The balance tally reads the slot rows (each claiming connection's team byte),
+// never the bodies, so admissions received in one socket drain all count.
 // The side arms (a side password, a TeamChoose request) return the team the
 // rotation's side-to-team map gives that side (null: sides 1, 2), which the
 // Attack-and-Defend swap exchanges between the halves.
@@ -46,11 +46,11 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEn
 // @0x4FE408, @0x4FE456, @0x4FE492, @0x4FE507, @0x4FE543, @0x4FE56D]
 // The balance tally counts every active slot's team but the joiner's, so a
 // Serve Only host's own slot 0 (`host_slot`, its team 1 from the session
-// create) counts there too (D-NET-352). [orig: @0x4FE5BD..0x4FE5DE]
+// create) counts there too (D-NET-352), a loading joiner counts, and a session
+// spectator's team 0 counts nowhere (D-NET-NEW-L3-6). [orig: @0x4FE5BD..0x4FE5DE]
 uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		const world::World &world, const HostRotation *rotation = nullptr,
-		const HostSlotRow *host_slot = nullptr);
+		const HostRotation *rotation = nullptr, const HostSlotRow *host_slot = nullptr);
 
 // Reserve a free fixed roster-table row before S2C 0x04 advertises it: of the
 // inactive rows below `slot_capacity`, the one free the longest by

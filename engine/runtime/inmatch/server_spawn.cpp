@@ -42,9 +42,11 @@ namespace {
 // Retail's misleading g_Team1Name/g_Team2Name symbols are the live SidePasswordA/B strings
 // (Game_ApplySessionSettingsToGlobals @0x552043/@0x552054), not a second team-name domain.
 // The submitted JSP credential selects a matching protected side before balancing.
+bool connection_claims_player_slot(const NapiNPConnection &connection);
+
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection &joining, const world::World &world,
+		const NapiNPConnection &joining,
 		const std::array<uint8_t, 2> &side_team, const HostSlotRow *host_slot) {
 	// A spectator is a roster player on neutral team zero, bypassing the team
 	// password/selection path. Retail gates the early return on being in a
@@ -110,22 +112,20 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		if (team_request == 1 && !side_b_locked) return side_team[1];
 	}
 
+	// The tally walks the slot table: every active row but the joiner's, by
+	// the row's own team byte (+416), whatever its body or its join state (a
+	// loading joiner counts; a session spectator's team 0 counts nowhere;
+	// D-NET-NEW-L3-6).
+	// [orig: @0x4FE588..0x4FE5EA: `+4 && slot != joiner` @0x4FE5BD, +416
+	//  @0x4FE5BF, the four compares @0x4FE5C7..0x4FE5DE]
 	std::array<uint32_t, 4> counts{};
-	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 0 || e.item_id != world::kPlayerInfantryTypeId) return;
-		if (e.team >= 1 && e.team <= 4) ++counts[e.team - 1];
-	});
-	// Reservations without an entity are already player-slot assignments for
-	// balancing. Spawned reservations are represented by the World walk above.
 	for (const NapiNPConnection &c : roster) {
-		if (&c == &joining || !c.assigned_team_valid ||
-		    c.link.owned_entity.valid())
-			continue;
+		if (&c == &joining || !connection_claims_player_slot(c)) continue;
 		if (c.assigned_team >= 1 && c.assigned_team <= 4)
 			++counts[c.assigned_team - 1];
 	}
 	// A Serve Only host's own slot 0 is an active row of the table the tally
-	// walks, with no body here to count it (D-NET-352).
+	// walks, with no connection here to count it (D-NET-352).
 	// [orig: @0x4FE5BD..0x4FE5DE: `+4 && slot != joiner`, +416]
 	if (host_slot != nullptr && host_slot->active && host_slot->team >= 1 && host_slot->team <= 4)
 		++counts[host_slot->team - 1];
@@ -280,11 +280,10 @@ void Server_AdvanceFreeRowTicks(NapiNPServerCtx &ctx) {
 
 uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		const world::World &world, const HostRotation *rotation,
-		const HostSlotRow *host_slot) {
+		const HostRotation *rotation, const HostSlotRow *host_slot) {
 	if (!conn.assigned_team_valid) {
 		conn.assigned_team =
-				assign_player_team(config, is_in_session, roster, conn, world,
+				assign_player_team(config, is_in_session, roster, conn,
 						rotation != nullptr ? rotation->side_team
 											: std::array<uint8_t, 2>{1, 2},
 						host_slot);
@@ -364,7 +363,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// Server_PositionPlayerForSpawn's team switch @0x50d266]
 	spawn.team = Server_ReservePlayerTeam(
 			ctx.config, ctx.is_in_session, ctx.np_protocol.connection_list,
-			conn, world, ctx.rotation, &ctx.host_slot); // [orig: Server_AssignPlayerTeam @0x4fe310]
+			conn, ctx.rotation, &ctx.host_slot); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	// The join spawn enters the no-pick arm (Server_OnPlayerJoin passes spawn
 	// handle low word 0, which Server_ResolveSpawnTargetHandle rejects), where
 	// a spectator slot is POSITIONED with the substitute team (Co-op 1; team
@@ -426,7 +425,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// @0x57ad40); the reimpl has no registry yet, so the id is echoed unvalidated and 0 falls back
 	// to the encoder's D-NET-137 shim (two default-profile joiners colliding on 0x8207 is a
 	// tracked deferral, harmless at 2-player scope).
-	const int side = (conn.link.spectator || spawn.team == 1 || spawn.team == 3 ||
+	// The pick reads the slot's team byte the assignment just wrote: a session
+	// spectator's team 0 takes side B in a team game (D-NET-NEW-L3-7).
+	// [orig: Server_PlayerAdd @0x51CFDF..0x51CFF7 - slot+0x1A0 against 1 and 3,
+	//  then g_GameType & 0x10000; Server_AssignPlayerTeam's team 0 @0x4FE368]
+	const int side = (spawn.team == 1 || spawn.team == 3 ||
 	                  (ctx.config.game_type & 0x10000u) == 0)
 	        ? 0
 	        : 1;

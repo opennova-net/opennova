@@ -88,7 +88,7 @@ uint8_t side_a_team(HostRotation &rotation) {
 	config.side_a_password = "blue";
 	std::vector<NapiNPConnection> roster(1);
 	roster[0].join_password = "blue";
-	return Server_ReservePlayerTeam(config, true, roster, roster[0], *world, &rotation);
+	return Server_ReservePlayerTeam(config, true, roster, roster[0], &rotation);
 }
 
 void test_words_carry_into_the_next_session() {

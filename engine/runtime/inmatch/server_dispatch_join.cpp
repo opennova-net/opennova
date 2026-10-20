@@ -419,7 +419,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		team = entity != nullptr
 				? entity->team
 				: Server_ReservePlayerTeam(
-						config, /*is_in_session=*/true, roster, conn, *world, rotation, host_slot);
+						config, /*is_in_session=*/true, roster, conn, rotation, host_slot);
 	}
 
 	// Exact CNapiServer_ProcessPendingPlayerSpawns ordering from the retail LAN

@@ -504,11 +504,11 @@ void test_side_map_team_assignment() {
 	HostRotation rotation;
 	std::vector<NapiNPConnection> roster(1);
 	roster[0].join_password = "blue";
-	CHECK(Server_ReservePlayerTeam(config, true, roster, roster[0], world, &rotation) == 1);
+	CHECK(Server_ReservePlayerTeam(config, true, roster, roster[0], &rotation) == 1);
 	rotation.side_team = {2, 1};
 	std::vector<NapiNPConnection> swapped(1);
 	swapped[0].join_password = "blue";
-	CHECK(Server_ReservePlayerTeam(config, true, swapped, swapped[0], world, &rotation) == 2);
+	CHECK(Server_ReservePlayerTeam(config, true, swapped, swapped[0], &rotation) == 2);
 }
 
 } // namespace
