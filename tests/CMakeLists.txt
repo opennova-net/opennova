@@ -5051,6 +5051,11 @@ target_link_libraries(npruntime_load_stream_rows_test PRIVATE opennova_net openn
 add_test(NAME npruntime_load_stream_rows COMMAND npruntime_load_stream_rows_test)
 
 # --- parity lane L7 (vehicles/weapons) ---
+# D-NET-515 / D-NET-514: a parked hull's AI trailer keeps the model init's words across the
+# settle, and the contact wake compares the candidate's own def mass.
+add_executable(parked_hull_load_test world/parked_hull_load_test.cpp)
+target_link_libraries(parked_hull_load_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME parked_hull_load COMMAND parked_hull_load_test)
 
 # --- parity lane L8 (round/info/serve) ---
 

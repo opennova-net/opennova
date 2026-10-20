@@ -402,6 +402,12 @@ struct Entity {
     bool has_item_def = false; // retail entity+0x20 ItemDef pointer is non-null
 	bool render_sway = false;
 	uint8_t item_type = 0; // raw ItemDef+0x5C type (1 vehicle, 3 person)
+	// The def's mass word (ItemDef+0x908, raw atol, the allocator's 5 when the
+	// def authors none), stamped by the item-traits sweep for every def: the
+	// vehicle contact pass compares it whatever the candidate's def type.
+	// [orig: ItemDef_ParsePhysicsProperty store @0x49DC76;
+	//  Entity_CheckCollisionState @0x462E94 / @0x462E9A / @0x462EE8]
+	int32_t def_mass = 0;
 	// Whether the live graphic model carries the +0xE0 portal/occlusion pointer
     // used by Entity_ClassifyForMinimap for ordinary Building entries. Kept as
     // a resolved entity trait because engine/runtime/world deliberately does not own .3di

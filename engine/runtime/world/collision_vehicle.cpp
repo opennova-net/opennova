@@ -92,9 +92,15 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 		}
 		bool push_other = false;
 		if ((mass_source->item_attrib & 0x40u) != 0) {
-			const VehicleTraits *other_traits = world.vehicles.traits.get(other->item_id);
+			// The wake compares the CANDIDATE's own def mass (+0x908), whatever its
+			// def type: an addeweap gun authors none and keeps the allocator's 5,
+			// so a light hull (a Dune Buggy's 3, an SUV's 5) leaves a neighbour's
+			// gun asleep. A PlayerControl mass source is a vehicle def, whose
+			// traits mass is that same word.
+			// [orig: Entity_CheckCollisionState - the source's def+0x908 @0x462E94,
+			//  the candidate's @0x462E9A..0x462EA4, the mass source's @0x462EE8]
 			const VehicleTraits *resolved_traits = world.vehicles.traits.get(mass_source->item_id);
-			const int32_t other_mass = other_traits != nullptr ? other_traits->mass : 0;
+			const int32_t other_mass = other->def_mass;
 			const int32_t resolved_mass = resolved_traits != nullptr ? resolved_traits->mass : 0;
 			if (int64_t(own_mass) > 2LL * other_mass ||
 					source.bound_radius > 2.0f * other->bound_radius) {

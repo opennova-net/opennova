@@ -266,6 +266,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				}
 		}
 		e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
+		// The def's +0x908 mass, for every def type [orig: ItemDef_ParsePhysicsProperty
+		//  @0x49DC76; the allocator's 5, ItemDef_AllocateWithDefaults @0x49E3B0].
+		e->def_mass = def != nullptr ? def->mass : 0;
 		// entity+0x30: the def's graphic model as its load returned it, which
 		// every mission start loads and stores from the def for pools 1, 2 and
 		// 0 alone, so a marker (pool 3) carries none. A player's is its visual

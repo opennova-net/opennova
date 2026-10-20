@@ -65,12 +65,16 @@ void mirror_pose(World &world, Entity &e) {
 }
 } // namespace
 
-// [orig: Game_StartMission @0x526012..0x52606B;
-// Entity_TransformWorldToLocal @0x43BB50]
+// The settle writes the spawn pose (+0x24C..+0x260) and its support (+0x264)
+// alone: the AI slot's +0x10/+0x14 keep the words the model init stamped
+// before it (the BMS record's, Entity::spawn_position), which the 0x0D AI
+// trailer streams, so a hull the settle tick moved still streams its record.
+// [orig: Game_StartMission @0x526012..0x52606B (the model init
+//  Entity_InitAllFromModels @0x52567F; Entity_InitFromModel @0x40E113..0x40E127);
+//  Entity_TransformWorldToLocal @0x43BB50]
 void VehicleSystem::capture_spawn_pose(Entity &e) {
 	auto &m = e.veh;
 	read_pose(e, m.spawn_pose);
-	e.spawn_position = e.position;
 	m.spawn_team = e.team;
 	m.spawn_support = e.ground_target;
 	if (const Entity *support = world_.registry.get(m.spawn_support)) {
