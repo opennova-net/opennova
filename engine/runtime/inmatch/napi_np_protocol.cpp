@@ -320,6 +320,28 @@ uint32_t occupied_player_count(const NapiNPServerCtx &ctx) {
 	return occupied;
 }
 
+// The protocol's server-side (type-1) connection count, the 0x81's NC: retail counts its
+// type-1 nodes as it links and unlinks them, so the word is the list's type-1 population. A
+// remote joiner's node is one; the listen host's own client is one node here, standing for
+// retail's pair, its type-2 connection and the type-1 node its own 0x42 creates on its server
+// (no constant: the host's 1 is that node's presence). (D-NET-523)
+// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0 - NC from proto+0xED4 @0x620A4D,
+//  written iff nonzero @0x620A53..0x620A6C; CNapiNPConnection_Create @0x62ACB0 - the list link
+//  @0x62B17A..0x62B1AE, ++proto+0xED4 for type 1 @0x62B1BD..0x62B1CB; CNapiNPConnection_Destroy
+//  @0x62A4B0 - the unlink @0x62A5A8..0x62A5E5, the type-1 decrement @0x62A5FF; the listen host's
+//  self-join: CNapiGameSession_CreateSession @0x4C97C0 (the gate @0x4C9B6A..0x4C9B76, its type-2
+//  create @0x4C9B9C, CNapiGameSession_WaitForHostResponse @0x4C9C76), its 0x42's type-1 create
+//  in NapiNPProtocol_HandleClientJoin @0x62BF06]
+uint32_t server_connection_count(const NapiNPServerCtx &ctx) {
+	uint32_t count = 0;
+	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list) {
+		if (connection.type == NapiNPConnection::kTypeServerSide ||
+				connection.type == NapiNPConnection::kTypeClientSide)
+			++count;
+	}
+	return count;
+}
+
 // The witnessed 0x42-time rejection is a CR=0 0x82 carrying ONLY the identity
 // echo plus the JFC failure family, the JFP sub-reason, and an optional JFS
 // string — no MI/SK/CS/SCRK/NA. The validate-callback family is JFC=14 with
@@ -670,6 +692,7 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	reply.p2 = ctx.np_protocol.build_flags;
 	reply.np = occupied_player_count(ctx);
 	reply.mp = ctx.np_protocol.max_players; // the session's cap [orig: protocol +0x524 @0x6209FF]
+	reply.nc = server_connection_count(ctx); // (D-NET-523)
 	// SUS1 is the protocol's server_user_string1: the GSID a NovaWorld
 	// ServerHostResult handed this host, copied into the protocol block and
 	// written whenever non-empty. A pure LAN host never ran that leg, so fresh
@@ -766,6 +789,16 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		}
 	}
 
+	// Retail creates the server-side node here, past the protocol's own gates and the
+	// retransmit, ahead of the validate callback, and the create steps the protocol's
+	// connection counter, so a 0x42 the lock, the ban or the capacity then refuses still steps
+	// it (the refused node is destroyed in the same handler). Ours keeps no server-side
+	// index; only the counter moves. (D-NET-713)
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the pre-create gates
+	//  @0x62BDAE..0x62BE8F, the lookup @0x62BEBA, the retransmit @0x62BEE6..0x62BEF1, the create
+	//  @0x62BF06 ahead of the validate callback @0x62C0B1; CNapiNPConnection_Create - the step
+	//  @0x62B282..0x62B296]
+	(void)next_connection_index();
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, registered as the join-validate callback by
 	// CNapiGameSession_CreateSession @0x4c97c0 and invoked at the 0x42 join]. Reject when the session
 	// is already full. The witnessed gate is ONE count, players and spectators alike: the host's

@@ -115,10 +115,12 @@ uint32_t make_session_key(const std::function<uint32_t()> &draw = {});
 // enumerator connection twice and keeps the second (next_browse_connection_index,
 // net/npwire/lan_discovery.h), and the join from a row it discovered goes on with that
 // same connection, so the browse's 0x41s and the join's 0x42 carry one CI; a join with
-// no row enumerates on its own connection, created the same way. Only our client connections
-// step it: the host's server-side creates do not (D-NET-713; a server-side index never
-// reaches the wire, the 0x82 echoing the client's CI, so only a later client
-// connection in the same process numbers differently).
+// no row enumerates on its own connection, created the same way. The host's creates step it
+// too (D-NET-713): each 0x42 that passes the protocol's gates at its server-side create (a
+// lock, ban or capacity refusal after it included), and twice at a listen host's session
+// create (its own client and its self-join's server-side node). A server-side index never
+// reaches the wire (the 0x82 echoes the client's CI); a later client connection in the
+// same process numbers from where the host left the counter.
 // [orig: CNapiNPConnection_Create @0x62acb0 - `add [esi+0ECCh], edx` @0x62b282 on both
 //  arms (the type test @0x62b1d1..0x62b1d5), the 0 -> 1 wrap @0x62b288..0x62b28a,
 //  conn+0x14 @0x62b296; a type-2 connection's enumerator is created with it @0x62b1dc;

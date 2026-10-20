@@ -7,6 +7,7 @@
 #include <runtime/world/world.h> // World::crt_rand — the session-seeded CRT stream
 
 #include <base/io/log.h>
+#include <net/npwire/nw_session_framing.h> // next_connection_index (the self-join's two creates)
 #include <runtime/inmatch/server_console.h> // the /INOUT host line
 
 namespace opennova::inmatch {
@@ -184,6 +185,15 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		self.link.transport = local_client;
 		self.link.mode = replication::TransportMode::Loopback; // socketless mode 1
 		ctx.np_protocol.connection_list.push_back(self);
+		// Retail's self-join creates two connections on the game protocol, each stepping its
+		// connection counter: the host's own client (type 2), then the server-side node its own
+		// 0x42 creates (type 1). (D-NET-713)
+		// [orig: CNapiGameSession_CreateSession @0x4C97C0 - the type-2 create @0x4C9B9C;
+		//  NapiNPProtocol_HandleClientJoin @0x62BF06 (the self-join's 0x42, through
+		//  CNapiGameSession_WaitForHostResponse @0x4C9C76); CNapiNPConnection_Create - the step
+		//  @0x62B282..0x62B296]
+		(void)next_connection_index();
+		(void)next_connection_index();
 		// The host's own connection coming up counts a login like every
 		// other [orig: NapiNPServer_HandleNewConnection @0x4c8203 runs before
 		// its local-connection arm @0x4c8213].
