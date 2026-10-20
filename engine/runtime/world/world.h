@@ -140,6 +140,10 @@ struct EnvState {
     // load; the infantry footstep water pick and the landing legs read it
     // sim-side. [orig: g_EnvWaterHeightFixed @ 0x26C6454]
     int32_t water_z = 0;
+    // The mission's time-of-day class (env::Config::time_of_day_enum), host-fed from the
+    // environment load; the NovaWorld listing's TimeOfDay reads it. [orig: g_EnvTimeOfDayEnum
+    // @ 0x24D2364]
+    int32_t time_of_day_enum = 0;
     int32_t fog_dist = 0;      // legacy whole-metre mirror; WeatherState owns the Q16 target
     int32_t sky_speed = 0;
     int32_t rain = 0;

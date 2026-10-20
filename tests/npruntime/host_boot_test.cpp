@@ -108,7 +108,8 @@ std::string mission_text_bytes(const char *title) {
 std::map<std::string, std::string> mount() {
 	std::map<std::string, std::string> files;
 	files["synth.til"] = til_bytes();
-	files["synth.env"] = "enviro_name \"Synth\"\r\nwater_height 40\r\nfog_level 900\r\n";
+	files["synth.env"] =
+			"enviro_name \"Synth\"\r\ntimeofday \"Dusk\"\r\nwater_height 40\r\nfog_level 900\r\n";
 	files["synthstrip.tsd"] = "INDEX_7 TSD_SNOW\r\n";
 	files["score.ini"] = "VERSION 40\r\nGAMETYPE \"DM\"\r\nFIELD \"NUMENEMYKILLS\" 1\r\n"
 	                     "VAR \"FIRE\" 7\r\nVAR \"ENEMYKILL\" 9\r\n";
@@ -225,6 +226,10 @@ int main() {
 		CHECK(host.mission_start_pending_at_bringup == false); // the boot had not ended yet
 		CHECK(kernel.world.env.water_z == (20 << 16));
 		CHECK(kernel.terrain_store.height_field().has_water);
+		// D-NET-709: the .env's timeofday "Dusk" leaves class 1 on the world (retail's chain
+		// stores 1 for anything but "dawn"), the class the listing's TimeOfDay reads
+		// [orig: TimeOfDay_ParseProperty @0x57CDE2; Lobby_UpdateServerInfo @0x4FF038].
+		CHECK(kernel.world.env.time_of_day_enum == 1);
 
 		// D-NET-344: the dedicated host carries the "Server" strings.
 		CHECK(ctx.server_text.medic_request_format == "%s needs a medic");

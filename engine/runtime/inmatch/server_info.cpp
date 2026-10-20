@@ -38,6 +38,9 @@ void read_session_listing_columns(
 	r.locked = ctx.join_locked;
 	// [orig: dword_24D218C @0x4FECD7]
 	r.skins = config.allow_custom_skins != 0;
+	// The mission environment's time-of-day class (World::env, the host boot's)
+	// [orig: g_EnvTimeOfDayEnum @0x24D2364, read @0x4FF038]
+	if (ctx.world != nullptr) r.time_of_day = ctx.world->env.time_of_day_enum;
 	// [orig: g_RoundTimeRemaining @0x24C1958, read @0x4FED57]
 	r.round_time_remaining_ticks = ctx.world != nullptr ? ctx.world->match.remaining_ticks() : -1;
 	// [orig: the strlen of the password @0x24D1FE4 @0x4FEDCA..0x4FEDDD]

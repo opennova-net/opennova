@@ -84,6 +84,8 @@ void load_environment_and_water(const mission::BootFileSource &files,
 	boot.water_z_q16 = static_cast<int32_t>(water * io::kFp16One);
 	kernel.world.env.water_z = boot.water_z_q16;
 	kernel.sync_water_plane();
+	// The class the load's timeofday lines left (0 with none), which the server-info update lists.
+	kernel.world.env.time_of_day_enum = boot.env_config.time_of_day_enum;
 }
 
 } // namespace

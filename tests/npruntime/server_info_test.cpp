@@ -9,6 +9,7 @@
 // [orig: Lobby_UpdateServerInfo @0x4FE8C0; Game_ApplySessionSettingsToGlobals
 //  @0x551C22; Server_ToggleJoinLock @0x50D750]
 #include <base/gameprofile/game_type.h>
+#include <formats/env/env.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <formats/mission/bms.h>
 #include <net/novaworld/lobby_vars.h>
@@ -101,6 +102,8 @@ void test_columns_follow_the_session() {
 	CHECK(r.password);
 	CHECK(r.country == "DE");
 	CHECK(r.round_time_remaining_ticks == 3720 * 7 + 5);
+	// D-NET-709: no timeofday line: the zeroed class, Unknown.
+	CHECK(r.time_of_day == 0);
 	// The registration's own keys stay.
 	CHECK(r.lobby_name == "jop_2_consumer" && r.host_key == "KEY");
 
@@ -126,6 +129,37 @@ void test_columns_follow_the_session() {
 	ctx.mission_text_title = "Text Title";
 	inmatch::read_session_listing_columns(r, ctx, gametext);
 	CHECK(r.mission_name == "Text Title");
+
+	// D-NET-709: the TimeOfDay column is the class the environment load left on the world, the
+	// line's value through retail's inverted chain: "dawn" (any case) stores 2, any other value 1
+	// [orig: TimeOfDay_ParseProperty @0x57CDB3..0x57CE51; g_EnvTimeOfDayEnum read @0x4FF038].
+	CHECK(env::env_time_of_day_class("dawn") == 2 && env::env_time_of_day_class("DAWN") == 2);
+	CHECK(env::env_time_of_day_class("Day") == 1 && env::env_time_of_day_class("dusk") == 1);
+	CHECK(env::env_time_of_day_class("night") == 1 && env::env_time_of_day_class("") == 1);
+	{
+		const std::string trn = "timeofday \"dawn\"\r\n";
+		const std::string with_line = "timeofday \"Night\"\r\n";
+		const std::string without_line = "fog_level 900\r\n";
+		env::MissionEnvTexts texts;
+		texts.terrain = &trn;
+		texts.environment = &without_line;
+		env::MissionEnv loaded;
+		(void)env::load_mission_env(texts, loaded);
+		CHECK(loaded.config.time_of_day_enum == 2); // the .trn's line stands
+		texts.environment = &with_line;
+		env::MissionEnv overridden;
+		(void)env::load_mission_env(texts, overridden);
+		CHECK(overridden.config.time_of_day_enum == 1); // the .env's line, later, wins
+		env::MissionEnv none;
+		(void)env::load_mission_env(env::MissionEnvTexts{}, none);
+		CHECK(none.config.time_of_day_enum == 0);
+		world.env.time_of_day_enum = loaded.config.time_of_day_enum;
+		inmatch::read_session_listing_columns(r, ctx, gametext);
+		CHECK(r.time_of_day == 2);
+		HostLobbyText tod_text;
+		CHECK(value(make_host_var_list(r, tod_text, /*full=*/true), "TimeOfDay") == "Day");
+		world.env.time_of_day_enum = 0;
+	}
 
 	// A map change: the next mission, its mode and the kept session's rename, unlocked, tracers on,
 	// untimed, no skins, no password.
