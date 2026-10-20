@@ -464,6 +464,11 @@ static int test_bam_wrap_arithmetic()
     TEST_EXPECT(io::bam_sar(7, 1) == 3);
     TEST_EXPECT(io::bam_abs(-5) == 5);
     TEST_EXPECT(io::bam_abs(kMin) == kMin);            // x86 neg: stays put
+    // Radians to the nearest BAM32 (the atan2 ports' scale, LocalPlayer::aim_at's), wrapped
+    // to the signed turn: half a turn lands on the seam.
+    TEST_EXPECT(io::bam_from_radians(io::kPi / 2) == 0x40000000);
+    TEST_EXPECT(io::bam_from_radians(-io::kPi / 2) == -0x40000000);
+    TEST_EXPECT(io::bam_from_radians(io::kPi) == kMin);
     return 0;
 }
 

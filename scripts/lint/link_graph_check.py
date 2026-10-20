@@ -209,11 +209,11 @@ DOT_EDGE = re.compile(r'^\s*"(node\d+)"\s*->\s*"(node\d+)"')
 TLL_CALL = re.compile(r"target_link_libraries\s*\(([^)]*)\)", re.DOTALL)
 TARGET_DEF = re.compile(r"add_(?:library|executable)\s*\(\s*([A-Za-z0-9_.\-]+)")
 SET_CALL = re.compile(r"set\s*\(\s*([A-Za-z0-9_]+)\s+([^)]+)\)", re.DOTALL)
-# tests/editor/CMakeLists.txt's rows: opennova_add_editor_test(<stem> [MIXED [RETAIL_PARTS ...]]
+# tests/editor/CMakeLists.txt's rows: opennova_add_editor_test(<stem> [BAKES] [TIMEOUT <s>]
 # [NAME <name>] [SOURCES ...] [LIBS ...]) builds <name, else editor_<stem>>_test linked against LIBS (else
 # opennova_editor); opennova_add_editor_executable(<target> SOURCES ... LIBS ...) builds <target>.
 EDITOR_TEST_CALL = re.compile(r"\bopennova_add_editor_(test|executable)\s*\(([^)]*)\)", re.DOTALL)
-EDITOR_TEST_KEYWORDS = {"MIXED", "RETAIL_PARTS", "BAKES", "NAME", "TIMEOUT", "SOURCES", "LIBS"}
+EDITOR_TEST_KEYWORDS = {"BAKES", "NAME", "TIMEOUT", "SOURCES", "LIBS"}
 
 
 def graph_from_graphviz(build_dir: Path) -> tuple[dict[str, set[str]], set[str]] | None:

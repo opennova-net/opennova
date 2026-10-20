@@ -51,16 +51,12 @@ Packet tools:
 opennova-wire capture.pcapng --stream --items /path/to/items.def
 ```
 
-## Env-Gated Witnesses
+## Retail Witnesses
 
-These tests often skip cleanly when local captures or retail assets are absent.
-A skip is not coverage.
-
-- `OPENNOVA_JO_DIR` (a packed retail install)
-- `OPENNOVA_JO_ASSETS` (an extracted retail tree, its `.bms` missions loose at the root)
-
-The two roots are the whole registry ([docs/asset-gated-tests.md](../docs/asset-gated-tests.md));
-a gated ctest reports Skipped (exit 77) without its root, never a silent pass.
+No test reads retail data or a machine-local capture: the suite runs on minted
+and authored fixtures (the wire fixtures in `fixtures/novaworld/`), with a
+witnessed value pinned as a cited constant. A local retail run (a capture, an
+install for `--resource-dir`) is a tool argument, never an environment variable.
 
 ## Logs and Cleanup
 

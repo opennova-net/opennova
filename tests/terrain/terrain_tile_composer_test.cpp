@@ -1,15 +1,15 @@
 // Terrain tile-page composer: portable pixel-oracle coverage for the 128-page
 // device cache. Synthetic cases pin page density, quadrant-locked source
 // sampling, DOT3 byte order, .til atlas orientation, tint/alpha, clipping, and
-// painter order. The optional CP12 leg follows docs/asset-gated-tests.md.
+// painter order; the witnessed CP12 and 00TRa entries over a minted atlas.
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 #include <runtime/terrain/terrain_tile_quadrant_update.h>
 #include <runtime/renderer/texture_dxt.h>
 
+#include <formats/tga/tga.h>
 #include <formats/til/til.h>
 #include <formats/til/til_io.h>
-#include <base/vfs/vfs.h>
 
 #include <algorithm>
 #include <array>
@@ -19,7 +19,6 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
-#include "common/retail_paths.h"
 
 namespace {
 
@@ -796,71 +795,61 @@ bool til_entry_oracle(const opennova::TilOverlayEntry &entry,
 	return true;
 }
 
-// Mount the retail install (OPENNOVA_JO_DIR) — base, then every expansion it
-// ships — and read the two oracle files from the first mount carrying both.
-// Which expansion carries a retail SKU's tile set is machine-specific (the
-// JO:CA unified install ships jox01 without the CP12 files; JOTAC ships
-// revx02 with them), so an install without them is an environment condition,
-// not a regression: the leg reports SKIP-LEG and the synthetic legs stand.
-bool read_retail_tile_pair(const char *til_name, const char *tga_name,
-		std::vector<uint8_t> &til_bytes, std::vector<uint8_t> &tga_bytes,
-		const char *leg) {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg((std::string("OPENNOVA_JO_DIR (") + leg + ")").c_str());
-		return false;
-	}
-	std::vector<std::string> mounts{std::string()};
-	for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
-	for (const std::string &expansion : mounts) {
-		opennova::Vfs vfs;
-		if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) continue;
-		til_bytes.clear();
-		tga_bytes.clear();
-		if (vfs.read_file(til_name, til_bytes) && vfs.read_file(tga_name, tga_bytes))
-			return true;
-	}
-	retail::skip_leg((std::string("an install carrying ") + til_name + "/" + tga_name +
-			" (" + leg + ")").c_str());
-	return false;
+// A tile-set atlas of our own in the shipped atlases' form (TRNTILE10.TGA's and trntileA1.tga's: 512 x 512, 32
+// bits, the TGA 2.0 footer), its texels from integer data and no two cells alike: written by the TGA writer and
+// read back as the oracle legs read the shipped ones, so the hashes pin the atlas cell, the flags and the TGA row
+// orientation over it.
+bool minted_tile_atlas(Rgba8Image &tilestrip) {
+	constexpr uint32_t kSide = 512;
+	std::vector<uint8_t> rgba(size_t(kSide) * kSide * 4u);
+	for (uint32_t y = 0; y < kSide; ++y)
+		for (uint32_t x = 0; x < kSide; ++x) {
+			uint8_t *p = &rgba[(size_t(y) * kSide + x) * 4u];
+			p[0] = uint8_t(x * 7 + y * 3);
+			p[1] = uint8_t(x ^ (y * 5));
+			p[2] = uint8_t(((x >> 6) + (y >> 6) * 8) * 4);
+			p[3] = 255;
+		}
+	std::vector<uint8_t> tga;
+	std::string error;
+	return expect(opennova::tga::tga_write(rgba.data(), kSide, kSide,
+						  opennova::tga::TgaForm{32, opennova::tga::TGA_DESCRIPTOR_ALPHA_8, true}, tga, error),
+			       "the minted atlas writes as a shipped atlas's TGA") &&
+			expect(decode_uncompressed_tga_rgba(tga, tilestrip),
+					"the minted atlas decodes into normalized top-origin RGBA rows");
 }
 
-bool test_optional_cp12_assets() {
-	std::vector<uint8_t> til_bytes;
-	std::vector<uint8_t> tga_bytes;
-	if (!read_retail_tile_pair("CP12.TIL", "TRNTILEA1.TGA", til_bytes, tga_bytes,
-			"CP12 tile composer oracle")) return true;
-	opennova::TilFile tiles;
-	std::string error;
-	if (!expect(opennova::load_til(
-				til_bytes.data(), til_bytes.size(), tiles, error),
-			"CP12.TIL parses")) return false;
-	Rgba8Image tilestrip;
-	if (!expect(decode_uncompressed_tga_rgba(tga_bytes, tilestrip),
-			"TRNTILEA1.TGA decodes into normalized top-origin RGBA rows")) return false;
-	if (!expect(tiles.entries.size() > 1013,
-			"CP12 contains witnessed entries 53 and 1013")) return false;
+opennova::TilOverlayEntry witnessed_entry(int x, int z, uint8_t tile_index, uint8_t flags) {
+	opennova::TilOverlayEntry entry;
+	entry.x_fixed = opennova::til_x_fixed_from_world(x);
+	entry.z_fixed = opennova::til_z_fixed_from_world(z);
+	entry.tile_index = tile_index;
+	entry.flags = flags;
+	return entry;
+}
 
-	const opennova::TilOverlayEntry &entry_53 = tiles.entries[53];
-	const opennova::TilOverlayEntry &entry_1013 = tiles.entries[1013];
-	if (!expect(static_cast<int>(std::lround(
-				opennova::til_world_x_from_fixed(entry_53.x_fixed))) == -426 &&
-			static_cast<int>(std::lround(
-				opennova::til_world_z_from_fixed(entry_53.z_fixed))) == -1560 &&
-			entry_53.tile_index == 42 && entry_53.flags == 7,
-			"CP12 entry 53 matches the witnessed tile/flags/placement")) return false;
-	if (!expect(static_cast<int>(std::lround(
-				opennova::til_world_x_from_fixed(entry_1013.x_fixed))) == -426 &&
-			static_cast<int>(std::lround(
-				opennova::til_world_z_from_fixed(entry_1013.z_fixed))) == -1576 &&
-			entry_1013.tile_index == 41 && entry_1013.flags == 7,
-			"CP12 entry 1013 matches the witnessed tile/flags/placement")) return false;
+bool placed_at(const opennova::TilOverlayEntry &entry, int x, int z) {
+	return static_cast<int>(std::lround(opennova::til_world_x_from_fixed(entry.x_fixed))) == x &&
+			static_cast<int>(std::lround(opennova::til_world_z_from_fixed(entry.z_fixed))) == z;
+}
+
+// The CP12 oracle: JOTAC's CP12.TIL entries 53 and 1013 (witnessed: tile 42 at (-426, -1560) and tile 41 at
+// (-426, -1576), both flags 7, on the LOD-2 page at sector (-512, -2048), local (0, 256)), composed over the minted
+// atlas. The retail run matched them over TRNTILEA1.TGA (RGB hashes d99b29b978eb8576 and 6e24c8ae86b9ad45); the
+// per-pixel mip-2 comparison in til_entry_oracle is the rule, the hashes its pin over this atlas.
+bool test_cp12_entries() {
+	Rgba8Image tilestrip;
+	if (!minted_tile_atlas(tilestrip)) return false;
+	const opennova::TilOverlayEntry entry_53 = witnessed_entry(-426, -1560, 42, 7);
+	const opennova::TilOverlayEntry entry_1013 = witnessed_entry(-426, -1576, 41, 7);
+	if (!expect(placed_at(entry_53, -426, -1560) && placed_at(entry_1013, -426, -1576),
+			"the CP12 entries stand at the witnessed placements")) return false;
 	const opennova::TerrainTilePageKey cp12_key{-512, -2048, 0, 256, 2};
 	return til_entry_oracle(entry_53, tilestrip, 53, cp12_key,
-			UINT64_C(0xd99b29b978eb8576),
+			UINT64_C(0x329ca6f063ae9cb4),
 			UINT64_C(0xdce53c1df8560f83)) &&
 			til_entry_oracle(entry_1013, tilestrip, 1013, cp12_key,
-					UINT64_C(0x6e24c8ae86b9ad45),
+					UINT64_C(0x7fe1efb0b6d006e9),
 					UINT64_C(0xdce53c1df8560f83));
 }
 
@@ -868,55 +857,31 @@ bool test_optional_cp12_assets() {
 // 00tra-tire-marks-retail fixture camera is built from ROTATE_90-plus-single-
 // flip entries (0x05/0x06) — exactly the combos where retail's mirror-then-
 // corner-cycle order diverges from flip-then-rotate. The CP12 oracles are
-// flags-7 and blind to that order, so this leg pins one entry of each combo.
-// Gated like the CP12 leg (docs/asset-gated-tests.md).
-bool test_optional_00tra_fork_oracle() {
-	std::vector<uint8_t> til_bytes;
-	std::vector<uint8_t> tga_bytes;
-	if (!read_retail_tile_pair("00TRA.TIL", "TRNTILE10.TGA", til_bytes, tga_bytes,
-			"00TRa fork oracle")) return true;
-	opennova::TilFile tiles;
-	std::string error;
-	if (!expect(opennova::load_til(
-				til_bytes.data(), til_bytes.size(), tiles, error),
-			"00TRA.TIL parses for the fork oracle")) return false;
+// flags-7 and blind to that order, so this leg pins one entry of each combo:
+// JO:CA's 00TRA.TIL entries 761 (tile 42 at (317, 350), flags 0x05) and 781
+// (tile 42 at (308, 363), flags 0x06) on the LOD-2 page at local (256, 256),
+// composed over the minted atlas. The transform itself is independently
+// witnessed in PolyTrn_DrawTileOverlayQuad and pinned synthetically by
+// til_render_uv_test; the per-pixel mip-2 comparison shares
+// til_transform_local_uv and therefore proves placement/channel/level parity,
+// not transform independence. The retail run matched them over TRNTILE10.TGA
+// (SHA-256 eb3b25ca50f66f2006668198919c8e25374d093c0290e9aceb613ee37d8bc490;
+// RGB hashes 5242a373347a260e and 5d281e2b51b47088). Alpha pins are the
+// all-zero page hash: the overlay loops run under COLORWRITEENABLE = 7 and
+// never write A.
+bool test_00tra_fork_entries() {
 	Rgba8Image tilestrip;
-	if (!expect(decode_uncompressed_tga_rgba(tga_bytes, tilestrip),
-			"TRNTILE10.TGA decodes for the fork oracle")) return false;
-	if (!expect(tiles.entries.size() > 781,
-			"00TRa contains witnessed fork entries 761 and 781")) return false;
-
-	const opennova::TilOverlayEntry &entry_761 = tiles.entries[761];
-	const opennova::TilOverlayEntry &entry_781 = tiles.entries[781];
-	if (!expect(static_cast<int>(std::lround(
-				opennova::til_world_x_from_fixed(entry_761.x_fixed))) == 317 &&
-			static_cast<int>(std::lround(
-				opennova::til_world_z_from_fixed(entry_761.z_fixed))) == 350 &&
-			entry_761.tile_index == 42 && entry_761.flags == 0x05,
-			"00TRa entry 761 matches the witnessed tile/flags/placement")) return false;
-	if (!expect(static_cast<int>(std::lround(
-				opennova::til_world_x_from_fixed(entry_781.x_fixed))) == 308 &&
-			static_cast<int>(std::lround(
-				opennova::til_world_z_from_fixed(entry_781.z_fixed))) == 363 &&
-			entry_781.tile_index == 42 && entry_781.flags == 0x06,
-			"00TRa entry 781 matches the witnessed tile/flags/placement")) return false;
+	if (!minted_tile_atlas(tilestrip)) return false;
+	const opennova::TilOverlayEntry entry_761 = witnessed_entry(317, 350, 42, 0x05);
+	const opennova::TilOverlayEntry entry_781 = witnessed_entry(308, 363, 42, 0x06);
+	if (!expect(placed_at(entry_761, 317, 350) && placed_at(entry_781, 308, 363),
+			"the 00TRa fork entries stand at the witnessed placements")) return false;
 	const opennova::TerrainTilePageKey fork_key{0, 0, 256, 256, 2};
-	// These are regression pins for the retail archive payload
-	// TRNTILE10.TGA (SHA-256 eb3b25ca50f66f2006668198919c8e25374d093c0290e9aceb613ee37d8bc490).
-	// The transform itself is independently witnessed in PolyTrn_DrawTileOverlayQuad
-	// and pinned synthetically by til_render_uv_test; the per-pixel mip-2
-	// comparison above shares til_transform_local_uv and therefore proves
-	// placement/channel/level parity, not transform independence. On that
-	// payload, under retail's point-sampled box level 2 on a 1:1 LOD-2 page,
-	// 0x05 -> T(x,z)=(z,x) hashes d0eea35d8f11850b and
-	// 0x06 -> T(x,z)=(1-z,1-x) hashes 1cb6a4f7cec6660f. Alpha pins are the
-	// all-zero page hash: the overlay loops run under COLORWRITEENABLE = 7
-	// and never write A.
 	return til_entry_oracle(entry_761, tilestrip, 761, fork_key,
-			UINT64_C(0x5242a373347a260e),
+			UINT64_C(0xa3c150933928948e),
 			UINT64_C(0xdce53c1df8560f83)) &&
 			til_entry_oracle(entry_781, tilestrip, 781, fork_key,
-					UINT64_C(0x5d281e2b51b47088),
+					UINT64_C(0xac15ff6710402b00),
 					UINT64_C(0xdce53c1df8560f83));
 }
 
@@ -1217,8 +1182,7 @@ bool test_page_samples() {
 					"a page routed to another quadrant reads none of it");
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
 	if (!test_map_split_rules()) return 1;
 	if (!test_overlay_changes()) return 1;
 	if (!test_quadrant_update()) return 1;
@@ -1236,8 +1200,8 @@ int main(int argc, char **argv) {
 	if (!test_til_line_is_point_sampled_one_to_one()) return 1;
 	if (!test_til_coarse_page_takes_box_level()) return 1;
 	if (!test_til_index_past_the_atlas_draws_the_clamped_edge()) return 1;
-	if (!test_optional_cp12_assets()) return 1;
-	if (!test_optional_00tra_fork_oracle()) return 1;
+	if (!test_cp12_entries()) return 1;
+	if (!test_00tra_fork_entries()) return 1;
 	std::printf("OK: terrain tile page composition\n");
 	return 0;
 }

@@ -10,10 +10,11 @@
 // file, and a crash's staging folder is never scanned and goes with the next import; an
 // .o3d's textures come through its plan, a direct import saying which it leaves; a plan cut
 // by its cap holds a converter's files whole or not at all; the unsaved guard reads the plan the
-// dialog shows (S13 A3); and, with a packed game install (OPENNOVA_JO_DIR), a retail menu and
-// its stylesheet imported with the files they need, against what is known of them without the
-// planner, then built, one texture changed and built again (S13 A8: one file read, one archive
-// written).
+// dialog shows (S13 A3); and, with a packed game install minted from OpenNova's own game
+// (minted_install.h), its main menu and its stylesheet imported with the files they need, against
+// what is known of them without the planner, then built, one texture changed and built again (S13
+// A8: one file read, one archive written); its mission's closure planned, imported, checked and
+// built; and its expansion's served to an expansion project of its own.
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -48,10 +49,10 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/pff/pff.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/import_test_support.h"
+#include "editor/minted_install.h"
 #include "common/png_test_support.h"
 
 using namespace opennova::editor;
@@ -777,16 +778,18 @@ static int test_apply_staging_leftover() {
 	return 0;
 }
 
-// With a packed game install: its main.mnu and menu_style.mns imported with the files they need.
-// What is known without the planner: the shipped game loads this menu and its stylesheet with
-// every file they name, so the plan finds each of them (none not found, none the project cannot
-// take) and, once imported, every reference of every file imported to a file resolves; and a
-// shell menu's style variables, SCREEN and WINDOW targets and string ids are followed to the
-// files defining them and its sound bank (menu.lwf) to its waves (S14): nothing is not followed.
-static int test_apply_retail_menu() {
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a retail menu imported with the files it needs)");
-	Project project("opennova_editor_apply_retail");
+// With a packed game install (minted from OpenNova's own game, minted_install.h): its main.mnu and
+// menu_style.mns imported with the files they need. What is known without the planner: the game
+// loads this menu and its stylesheet with every file they name, so the plan finds each of them (none
+// not found, none the project cannot take) and, once imported, every reference of every file
+// imported to a file resolves; and a shell menu's style variables, SCREEN and WINDOW targets and
+// string ids are followed to the files defining them and its sound bank (menu.lwf) to its waves
+// (S14): nothing is not followed.
+static int test_apply_install_menu() {
+	Project project("opennova_editor_apply_install");
+	const std::string install = project.dir.file("install");
+	std::string minted;
+	TEST_EXPECT(minted_install::mint(install, minted));
 	editor_test::set_game_install(project.session, install);
 	const SessionView &view = project.view();
 	EditorRequest listed = request::preview_install_import();
@@ -800,7 +803,7 @@ static int test_apply_retail_menu() {
 	size_t found = 0;
 	for (const ImportPlanRow &row : plan.rows) {
 		if (row.state == State::NotFound)
-			std::printf("editor_import retail: %s (%s) not found, needed by %s\n", row.name.c_str(),
+			std::printf("editor_import install: %s (%s) not found, needed by %s\n", row.name.c_str(),
 			            asset_kind_token(row.kind), row.needed_by.file.c_str());
 		TEST_EXPECT(row.state != State::NotFound && row.selected && row.problem.empty());
 		found += row.state == State::Found ? 1 : 0;
@@ -820,7 +823,7 @@ static int test_apply_retail_menu() {
 		waves += row.kind == AssetKind::Wave && normalized_logical_name(row.needed_by.file) == normalized_logical_name("menu.lwf") ? 1 : 0;
 	TEST_EXPECT(waves > 0);
 	for (const ImportNotFollowed &entry : plan.undefined)
-		std::printf("editor_import retail: %zu %s reference(s) no place defines, the first in %s\n", entry.count,
+		std::printf("editor_import install: %zu %s reference(s) no place defines, the first in %s\n", entry.count,
 		            reference_row(entry.reference).token, entry.first.c_str());
 	const ActionOutcome imported = import(project.session, selected_sources(plan));
 	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
@@ -831,12 +834,12 @@ static int test_apply_retail_menu() {
 			if (reference_row(edge->kind).resolution != ReferenceResolution::File) continue;
 			++references;
 			if (view.findings.graph->resolve(*edge) == ReferenceStatus::Present) continue;
-			std::printf("editor_import retail: %s: %s %s resolves nowhere\n", row.name.c_str(), edge->record.c_str(),
+			std::printf("editor_import install: %s: %s %s resolves nowhere\n", row.name.c_str(), edge->record.c_str(),
 			            edge->value.c_str());
 			TEST_EXPECT(false);
 		}
 	}
-	std::printf("editor_import retail: %zu files imported, %zu references to files resolved\n", plan.rows.size(), references);
+	std::printf("editor_import install: %zu files imported, %zu references to files resolved\n", plan.rows.size(), references);
 	TEST_EXPECT(references > 0);
 
 	// S13 A8: the imported project built (the required files the import did not bring made), every
@@ -852,7 +855,7 @@ static int test_apply_retail_menu() {
 		return run_build(plan_build(paths, *view.project.scan, *view.project.requirements, {}), out);
 	};
 	const BuildReport first = build();
-	for (const Diagnostic &d : first.diagnostics) std::printf("editor_import retail build: %s: %s\n", d.code().c_str(), d.message.c_str());
+	for (const Diagnostic &d : first.diagnostics) std::printf("editor_import install build: %s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(first.ok && first.files_hashed > plan.rows.size());
 	std::string texture;
 	for (const ImportPlanRow &row : plan.rows)
@@ -871,7 +874,7 @@ static int test_apply_retail_menu() {
 	            second.archives_linked == std::vector<std::string>({"language.pff", "localres.pff"}));
 	const BuildReport third = build();
 	TEST_EXPECT(third.ok && third.reused_existing && third.files_hashed == 0);
-	std::printf("editor_import retail: built %zu files (%llu bytes); one texture changed: %zu file read (%llu bytes), "
+	std::printf("editor_import install: built %zu files (%llu bytes); one texture changed: %zu file read (%llu bytes), "
 	            "%zu archive written, %zu linked; unchanged: %zu read\n",
 	            first.files_hashed, static_cast<unsigned long long>(first.bytes_hashed), second.files_hashed,
 	            static_cast<unsigned long long>(second.bytes_hashed), second.archives_written.size(),
@@ -879,166 +882,179 @@ static int test_apply_retail_menu() {
 	return 0;
 }
 
-// ADR 0046 S14, the retail leg: the smallest and the largest shipped JO mission (04TR.bms, 140 KB;
-// ASH_I1gA.bms, 398 KB) each planned from the install with their dependencies into a fresh project.
-// The plan is the mission's closure: every file found by its name the install has, its terrain,
-// its environment, the catalogs and the game's manifest, nothing of a kind the graph reads left
-// unfollowed, no Required manifest file not found; the rows and the bytes printed (the numbers
-// the design estimated at 8,700 files and 515 MB from the archives' listing). The smaller one is
-// then imported, checked (every file reference resolves or names what the install itself lacks;
-// the checklist is met; the only errors are the shipped files' own unresolved references, which
-// gate nothing) and built by the session's own build. A run plans the missions `names` (04TR's import
-// and build its own part of the editor_import program, run_import_apply_retail_closure, about 60 s).
-static int test_apply_retail_mission_closure(std::initializer_list<const char *> names) {
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped mission's closure planned)");
-	for (const char *name : names) {
-		Project project("opennova_editor_apply_retail_closure");
-		editor_test::set_game_install(project.session, install);
-		const SessionView &view = project.view();
-		EditorRequest listed = request::preview_install_import();
-		listed.names = {name};
-		listed.with_dependencies = true;
-		const auto started = std::chrono::steady_clock::now();
-		project.session.handle(listed);
-		project.session.run_operations();
-		const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-		const ImportPlan &plan = *view.dialogs.import_preview.plan;
-		TEST_EXPECT(project.session.outcome().done() && view.dialogs.import_preview.open);
-		TEST_EXPECT(!plan.truncated && !has_error(plan.diagnostics));
-		size_t found = 0, missing = 0, problems = 0;
-		std::map<std::string, std::pair<size_t, uint64_t>> by_kind;
-		for (const ImportPlanRow &row : plan.rows) {
-			if (row.state == State::NotFound) {
-				++missing;
-				std::printf("editor_import retail closure %s: %s (%s) not found, needed by %s\n", name, row.name.c_str(),
-				            asset_kind_token(row.kind), need_words_of(row.needed_by).c_str());
-				continue;
-			}
-			found += row.state == State::Found ? 1 : 0;
-			if (!row.problem.empty()) {
-				++problems;
-				std::printf("editor_import retail closure %s: %s cannot be taken: %s\n", name, row.name.c_str(), row.problem.c_str());
-			}
-			auto &kind = by_kind[asset_kind_token(row.kind)];
-			++kind.first;
-			kind.second += row.size;
+// ADR 0046 S14: the mission of a packed game install (minted from OpenNova's own game,
+// minted_install.h: its onjo_m1.bms) planned from the install with its dependencies into a fresh
+// project. The plan is the mission's closure: every file found by its name the install has, its
+// terrain, its environment, the catalogs and the game's manifest, nothing of a kind the graph reads
+// left unfollowed, no Required manifest file not found; the rows and the bytes printed (JO's: the
+// design estimated 8,700 files and 515 MB from its archives' listing; JO:CA's 04TR.bms, 140 KB, and
+// ASH_I1gA.bms, 398 KB, were planned so). It is then imported, checked (every file reference
+// resolves or names what the install itself lacks; the checklist is met; the only errors are the
+// game's files' own unresolved references, which gate nothing) and built by the session's own build.
+static int test_apply_install_mission_closure() {
+	const char *const name = "onjo_m1.bms";
+	Project project("opennova_editor_apply_install_closure");
+	const std::string install = project.dir.file("install");
+	std::string minted;
+	TEST_EXPECT(minted_install::mint(install, minted));
+	editor_test::set_game_install(project.session, install);
+	const SessionView &view = project.view();
+	EditorRequest listed = request::preview_install_import();
+	listed.names = {name};
+	listed.with_dependencies = true;
+	const auto started = std::chrono::steady_clock::now();
+	project.session.handle(listed);
+	project.session.run_operations();
+	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+	const ImportPlan &plan = *view.dialogs.import_preview.plan;
+	TEST_EXPECT(project.session.outcome().done() && view.dialogs.import_preview.open);
+	TEST_EXPECT(!plan.truncated && !has_error(plan.diagnostics));
+	size_t found = 0, missing = 0, problems = 0;
+	std::map<std::string, std::pair<size_t, uint64_t>> by_kind;
+	for (const ImportPlanRow &row : plan.rows) {
+		if (row.state == State::NotFound) {
+			++missing;
+			std::printf("editor_import install closure %s: %s (%s) not found, needed by %s\n", name, row.name.c_str(),
+			            asset_kind_token(row.kind), need_words_of(row.needed_by).c_str());
+			continue;
 		}
-		std::printf("editor_import retail closure %s: %zu files (%zu found), %.1f MB, %zu not found, %zu the project cannot "
-		            "take, planned in %.1f s\n",
-		            name, plan.file_count(), found, plan.total_bytes() / 1e6, missing, problems, seconds);
-		for (const auto &entry : by_kind)
-			std::printf("  %-20s %5zu %8.1f MB\n", entry.first.c_str(), entry.second.first, entry.second.second / 1e6);
-		for (const ImportNotFollowed &entry : plan.not_followed)
-			std::printf("  not followed: %s (%zu, the first %s)\n",
-			            entry.reference != ReferenceKind::None ? reference_row(entry.reference).token : asset_kind_token(entry.kind),
-			            entry.count, entry.first.c_str());
-		for (const ImportNotFollowed &entry : plan.undefined)
-			std::printf("  undefined: %s (%zu, the first in %s)\n", reference_row(entry.reference).token, entry.count,
-			            entry.first.c_str());
-		// The mission's own set (as the install spells each): the install has a .bin, a .til and a
-		// .pcx for every shipped mission, each needed by the mission.
-		const auto row_called = [&plan](const std::string &wanted) -> const ImportPlanRow * {
-			for (const ImportPlanRow &row : plan.rows)
-				if (normalized_logical_name(row.name) == normalized_logical_name(wanted)) return &row;
-			return nullptr;
-		};
-		for (const char *extension : {".bin", ".til", ".pcx"}) {
-			const std::string own = std::string(name).substr(0, std::string(name).size() - 4) + extension;
-			const ImportPlanRow *row = row_called(own);
-			TEST_EXPECT(row && row->state == State::Found &&
-			            normalized_logical_name(row->needed_by.file) == normalized_logical_name(name));
+		found += row.state == State::Found ? 1 : 0;
+		if (!row.problem.empty()) {
+			++problems;
+			std::printf("editor_import install closure %s: %s cannot be taken: %s\n", name, row.name.c_str(), row.problem.c_str());
 		}
-		// The catalogs and the terrain, through the mission; no symbol kind left unfollowed.
-		TEST_EXPECT(row_called("items.def") && row_called("weapon.def") && row_called("ammo.def"));
-		// The HUD's fixed names a running mission opens (S14 R4): the compass ring, the map's
-		// icons and the first crosshair style, each for the game.
-		for (const char *fixed : {"compring.tga", "TSDicon.tga", "cross01.tga"}) {
-			const ImportPlanRow *row = row_called(fixed);
-			TEST_EXPECT(row && row->state == State::Found && row->needed_by.field.find("the game, for ") == 0);
-		}
-		for (const ImportNotFollowed &entry : plan.not_followed)
-			TEST_EXPECT(entry.reference == ReferenceKind::None ||
-			            reference_row(entry.reference).resolution == ReferenceResolution::Unchecked);
-		TEST_EXPECT(found > 100 && plan.total_bytes() > (uint64_t(100) << 20) && problems == 0);
-		// The terrain and the banks are read (S14): the height data and the waves come.
-		TEST_EXPECT(by_kind.count("terrain_polydata") && by_kind["wave"].first > 1000 &&
-		            !not_followed(plan, ReferenceKind::None, AssetKind::Terrain) &&
-		            !not_followed(plan, ReferenceKind::None, AssetKind::SoundBank));
-		if (std::string(name) != "04TR.bms") continue;
-
-		// The smaller mission's closure imported (the menu's videos and the music banks left
-		// unchecked: 236 MB a mission starts without). What the plan did not find is what the
-		// shipped game itself lacks: once imported, every reference to a file, of every file the
-		// project holds, resolves or names one of those.
-		std::set<std::string> lacking;
-		std::vector<ImportChoice> sources;
-		for (const ImportPlanRow &row : plan.rows) {
-			if (row.state == State::NotFound) lacking.insert(normalized_logical_name(row.name));
-			else if (row.selected && row.problem.empty() && row.kind != AssetKind::Video && row.kind != AssetKind::MusicBank)
-				sources.push_back(row.source);
-		}
-		const size_t planned = sources.size();
-		const auto import_started = std::chrono::steady_clock::now();
-		const ActionOutcome imported = import(project.session, sources);
-		const double import_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - import_started).count();
-		TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
-		size_t references = 0, unresolved = 0, unplanned = 0;
-		for (const AssetEntry &entry : view.project.scan->entries)
-			for (const GraphEdge *edge : view.findings.graph->references_of(entry.relative_path)) {
-				if (reference_row(edge->kind).resolution != ReferenceResolution::File) continue;
-				++references;
-				if (view.findings.graph->resolve(*edge) == ReferenceStatus::Present) continue;
-				++unresolved;
-				// A file the game runs without (a person's face its model lacks) is no row of the plan.
-				if (edge->optional || lacking.count(normalized_logical_name(edge->value))) continue;
-				++unplanned;
-				std::printf("editor_import retail closure %s: %s: %s %s names %s, which the plan neither brought nor listed\n", name,
-				            entry.relative_path.c_str(), edge->record.c_str(), edge->field.c_str(), edge->value.c_str());
-			}
-		TEST_EXPECT(references > 1000 && unplanned == 0);
-		// With the Missions feature on, the checklist: every Required file of the three phases the
-		// install has is in; one the project lacks is one the plan listed as not found (an install
-		// without its NovaWorld table), which "create every missing file" then makes.
-		editor_test::set_missions(project.session, true);
-		project.session.run_operations();
-		for (const RequirementRow &row : view.project.requirements->rows) {
-			if (!row.required || row.state == RequirementState::Present) continue;
-			std::printf("editor_import retail closure %s: the required %s is not in the project\n", name, row.name.c_str());
-			TEST_EXPECT(row.state == RequirementState::Missing && lacking.count(normalized_logical_name(row.name)));
-		}
-		editor_test::create_missing_files(project.session);
-		project.session.run_operations();
-		TEST_EXPECT(view.project.requirements->required_missing + view.project.requirements->required_wrong_kind == 0);
-		// The project's errors: each a reference the shipped game's own files leave unresolved (a
-		// name the install lacks, an effect no particle file of it defines), never a file the import
-		// left behind. They are listed and gate nothing (S14: the game ships them and runs), so no
-		// finding blocks a build.
-		std::map<std::string, size_t> errors;
-		size_t errors_listed = 0, gating = 0;
-		for (const Diagnostic &d : view.findings.diagnostics) {
-			if (d.severity != DiagnosticSeverity::Error) continue;
-			++errors[d.code()];
-			++errors_listed;
-			gating += blocks_build(d) ? 1 : 0;
-		}
-		for (const auto &entry : errors)
-			std::printf("editor_import retail closure %s: %zu error(s) %s\n", name, entry.second, entry.first.c_str());
-		TEST_EXPECT(errors.size() <= 1 && (errors.empty() || errors.begin()->first == "reference.missing") && gating == 0);
-		// The session's own build, gated on the Problems rows as they are, packs it.
-		const auto build_started = std::chrono::steady_clock::now();
-		editor_test::handle_to_end(project.session, request::build(project.dir.file("builds")));
-		const double build_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - build_started).count();
-		TEST_EXPECT(view.activity.has_build);
-		const BuildReport &built = *view.activity.last_build;
-		for (const Diagnostic &d : built.diagnostics)
-			std::printf("editor_import retail closure build: %s: %s\n", d.code().c_str(), d.message.c_str());
-		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && built.ok && built.files_hashed >= planned);
-		std::printf("editor_import retail closure %s: %zu files imported in %.1f s; %zu references to files, %zu unresolved (each a "
-		            "name the install lacks); %zu error(s) listed, none gating; built %zu files (%.1f MB) in %.1f s\n",
-		            name, planned, import_seconds, references, unresolved, errors_listed, built.files_hashed, built.bytes_hashed / 1e6,
-		            build_seconds);
+		auto &kind = by_kind[asset_kind_token(row.kind)];
+		++kind.first;
+		kind.second += row.size;
 	}
+	std::printf("editor_import install closure %s: %zu files (%zu found), %.1f MB, %zu not found, %zu the project cannot "
+	            "take, planned in %.1f s\n",
+	            name, plan.file_count(), found, plan.total_bytes() / 1e6, missing, problems, seconds);
+	for (const auto &entry : by_kind)
+		std::printf("  %-20s %5zu %8.1f MB\n", entry.first.c_str(), entry.second.first, entry.second.second / 1e6);
+	for (const ImportNotFollowed &entry : plan.not_followed)
+		std::printf("  not followed: %s (%zu, the first %s)\n",
+		            entry.reference != ReferenceKind::None ? reference_row(entry.reference).token : asset_kind_token(entry.kind),
+		            entry.count, entry.first.c_str());
+	for (const ImportNotFollowed &entry : plan.undefined)
+		std::printf("  undefined: %s (%zu, the first in %s)\n", reference_row(entry.reference).token, entry.count,
+		            entry.first.c_str());
+	// The mission's own set (as the install spells each): the install has a .bin, a .til and a
+	// .pcx of its name (JO:CA has them for every shipped mission), each needed by the mission.
+	const auto row_called = [&plan](const std::string &wanted) -> const ImportPlanRow * {
+		for (const ImportPlanRow &row : plan.rows)
+			if (normalized_logical_name(row.name) == normalized_logical_name(wanted)) return &row;
+		return nullptr;
+	};
+	for (const char *extension : {".bin", ".til", ".pcx"}) {
+		const std::string own = std::string(name).substr(0, std::string(name).size() - 4) + extension;
+		const ImportPlanRow *row = row_called(own);
+		TEST_EXPECT(row && row->state == State::Found &&
+		            normalized_logical_name(row->needed_by.file) == normalized_logical_name(name));
+	}
+	// The catalogs and the terrain, through the mission; no symbol kind left unfollowed.
+	TEST_EXPECT(row_called("items.def") && row_called("weapon.def") && row_called("ammo.def"));
+	// The HUD's fixed names a running mission opens (S14 R4): the compass ring, the map's
+	// icons and the first crosshair style, each for the game.
+	for (const char *fixed : {"compring.tga", "TSDicon.tga", "cross01.tga"}) {
+		const ImportPlanRow *row = row_called(fixed);
+		TEST_EXPECT(row && row->state == State::Found && row->needed_by.field.find("the game, for ") == 0);
+	}
+	for (const ImportNotFollowed &entry : plan.not_followed)
+		TEST_EXPECT(entry.reference == ReferenceKind::None ||
+		            reference_row(entry.reference).resolution == ReferenceResolution::Unchecked);
+	TEST_EXPECT(found > 0 && problems == 0);
+	// The terrain and the banks are read (S14): the height data and the waves come.
+	TEST_EXPECT(by_kind.count("terrain_polydata") && by_kind["wave"].first > 0 &&
+	            !not_followed(plan, ReferenceKind::None, AssetKind::Terrain) &&
+	            !not_followed(plan, ReferenceKind::None, AssetKind::SoundBank));
+	// The closure imported (the videos and the music banks left unchecked, which a mission starts
+	// without: on JO's 04TR, 236 MB). What the plan did not find is what the game itself lacks:
+	// once imported, every reference to a file, of every file the project holds, resolves or names
+	// one of those.
+	std::set<std::string> lacking;
+	std::vector<ImportChoice> sources;
+	for (const ImportPlanRow &row : plan.rows) {
+		if (row.state == State::NotFound) lacking.insert(normalized_logical_name(row.name));
+		else if (row.selected && row.problem.empty() && row.kind != AssetKind::Video && row.kind != AssetKind::MusicBank)
+			sources.push_back(row.source);
+	}
+	const size_t planned = sources.size();
+	const auto import_started = std::chrono::steady_clock::now();
+	const ActionOutcome imported = import(project.session, sources);
+	const double import_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - import_started).count();
+	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
+	// Its one Output line: the files, their bytes past a mebibyte in MB, the four kinds it holds most of and how
+	// many more.
+	const std::string imported_words = "Imported " + opennova::strutil::grouped(planned) + " files (";
+	bool worded = false;
+	for (size_t i = 0; i < view.activity.output.size(); ++i) {
+		const std::string &line = view.activity.output[i];
+		worded = worded || (line.rfind(imported_words, 0) == 0 && line.find(" MB): ") != std::string::npos &&
+		                    line.find(" more kind") != std::string::npos);
+	}
+	TEST_EXPECT(worded);
+	size_t references = 0, unresolved = 0, unplanned = 0;
+	for (const AssetEntry &entry : view.project.scan->entries)
+		for (const GraphEdge *edge : view.findings.graph->references_of(entry.relative_path)) {
+			if (reference_row(edge->kind).resolution != ReferenceResolution::File) continue;
+			// A file the reader reads only beside one the project lacks is no reference (GraphEdge::needs:
+			// the mission's dialog sounds, read beside its dialog bank, which this mission has none of).
+			const ReferenceStatus status = view.findings.graph->resolve(*edge);
+			if (status == ReferenceStatus::NotAReference) continue;
+			++references;
+			if (status == ReferenceStatus::Present) continue;
+			++unresolved;
+			// A file the game runs without (a person's face its model lacks) is no row of the plan.
+			if (edge->optional || lacking.count(normalized_logical_name(edge->value))) continue;
+			++unplanned;
+			std::printf("editor_import install closure %s: %s: %s %s names %s, which the plan neither brought nor listed\n", name,
+			            entry.relative_path.c_str(), edge->record.c_str(), edge->field.c_str(), edge->value.c_str());
+		}
+	TEST_EXPECT(references > 0 && unplanned == 0);
+	// With the Missions feature on, the checklist: every Required file of the three phases the
+	// install has is in; one the project lacks is one the plan listed as not found (an install
+	// without its NovaWorld table), which "create every missing file" then makes.
+	editor_test::set_missions(project.session, true);
+	project.session.run_operations();
+	for (const RequirementRow &row : view.project.requirements->rows) {
+		if (!row.required || row.state == RequirementState::Present) continue;
+		std::printf("editor_import install closure %s: the required %s is not in the project\n", name, row.name.c_str());
+		TEST_EXPECT(row.state == RequirementState::Missing && lacking.count(normalized_logical_name(row.name)));
+	}
+	editor_test::create_missing_files(project.session);
+	project.session.run_operations();
+	TEST_EXPECT(view.project.requirements->required_missing + view.project.requirements->required_wrong_kind == 0);
+	// The project's errors: each a reference the shipped game's own files leave unresolved (a
+	// name the install lacks, an effect no particle file of it defines), never a file the import
+	// left behind. They are listed and gate nothing (S14: the game ships them and runs), so no
+	// finding blocks a build.
+	std::map<std::string, size_t> errors;
+	size_t errors_listed = 0, gating = 0;
+	for (const Diagnostic &d : view.findings.diagnostics) {
+		if (d.severity != DiagnosticSeverity::Error) continue;
+		if (errors[d.code()]++ == 0)
+			std::printf("editor_import install closure %s: the first %s: %s: %s\n", name, d.code().c_str(), d.asset.c_str(),
+			            d.message.c_str());
+		++errors_listed;
+		gating += blocks_build(d) ? 1 : 0;
+	}
+	for (const auto &entry : errors)
+		std::printf("editor_import install closure %s: %zu error(s) %s\n", name, entry.second, entry.first.c_str());
+	TEST_EXPECT(errors.size() <= 1 && (errors.empty() || errors.begin()->first == "reference.missing") && gating == 0);
+	// The session's own build, gated on the Problems rows as they are, packs it.
+	const auto build_started = std::chrono::steady_clock::now();
+	editor_test::handle_to_end(project.session, request::build(project.dir.file("builds")));
+	const double build_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - build_started).count();
+	TEST_EXPECT(view.activity.has_build);
+	const BuildReport &built = *view.activity.last_build;
+	for (const Diagnostic &d : built.diagnostics)
+		std::printf("editor_import install closure build: %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && built.ok && built.files_hashed >= planned);
+	std::printf("editor_import install closure %s: %zu files imported in %.1f s; %zu references to files, %zu unresolved (each a "
+	            "name the install lacks); %zu error(s) listed, none gating; built %zu files (%.1f MB) in %.1f s\n",
+	            name, planned, import_seconds, references, unresolved, errors_listed, built.files_hashed, built.bytes_hashed / 1e6,
+	            build_seconds);
 	return 0;
 }
 
@@ -1112,20 +1128,21 @@ static int test_apply_never_player_files() {
 	return 0;
 }
 
-// ADR 0046 S16: a project that builds as an expansion (jxm) on the installed one (jox01) imports the
-// install as `/exp jox01` serves it: the closure of jox01's smallest mission planned with what it needs,
-// the expansion's own files under the project's names (jox01.bin as jxm.bin), each byte for byte what the
-// game is served; and the whole install listed, each name once.
-static int test_apply_retail_expansion() {
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (an expansion's mission closure planned)");
-	if (!fs::is_regular_file(fs::path(install) / "expansion" / "jox01" / "jox01.pff"))
-		return retail::skip_leg("OPENNOVA_JO_DIR with the jox01 expansion");
-	test_temp::TempDir dir("opennova_editor_apply_retail_expansion");
+// ADR 0046 S16: a project that builds as an expansion (jxm) on the installed one (a packed game install
+// minted from OpenNova's own game, minted_install.h, and its expansion onjo1, in the place JO:CA's jox01
+// has) imports the install as `/exp onjo1` serves it: the closure of the expansion's smallest mission
+// planned with what it needs, the expansion's own files under the project's names (onjo1.bin as jxm.bin),
+// each byte for byte what the game is served; and the whole install listed, each name once.
+static int test_apply_install_expansion() {
+	test_temp::TempDir dir("opennova_editor_apply_install_expansion");
+	const std::string install = dir.file("install");
+	std::string minted;
+	TEST_EXPECT(minted_install::mint(install, minted) &&
+	            fs::is_regular_file(fs::path(install) / "expansion" / minted_install::kExpansion / "onjo1.pff"));
 	const std::string root = dir.file("project");
 	ProjectDocument created;
 	Diagnostic error;
-	TEST_EXPECT(create_project(root, "Escalation Mod", "jo", created, error, ProjectExpansion{ "jxm", "jox01" }));
+	TEST_EXPECT(create_project(root, "Escalation Mod", "jo", created, error, ProjectExpansion{ "jxm", minted_install::kExpansion }));
 	// The whole install as the project imports it, against the base game's.
 	std::vector<Diagnostic> diagnostics;
 	const std::vector<ImportChoice> whole = list_retail_import_choices(install, created, diagnostics);
@@ -1139,12 +1156,12 @@ static int test_apply_retail_expansion() {
 		TEST_EXPECT(names.insert(normalized_logical_name(choice.name())).second);
 		renamed += choice.as.empty() ? 0 : 1;
 	}
-	TEST_EXPECT(names.count("JXM.BIN") && names.count("MJXM.SBF") && !names.count("JOX01.BIN") &&
+	TEST_EXPECT(names.count("JXM.BIN") && names.count("MJXM.SBF") && !names.count("ONJO1.BIN") &&
 	            !names.count("MENUMUS.SBF") && !names.count("VERSION.TXT"));
-	std::printf("editor_import retail expansion: the whole install with jox01 as jxm lists %zu names (%zu under the "
+	std::printf("editor_import install expansion: the whole install with onjo1 as jxm lists %zu names (%zu under the "
 	            "project's own names), the base game %zu\n",
 	            whole.size(), renamed, base.size());
-	// The smallest mission of jox01's own.
+	// The smallest mission of the expansion's own.
 	InstallView origin;
 	std::string why;
 	TEST_EXPECT(origin.open(install_spec(install, created), why));
@@ -1172,11 +1189,11 @@ static int test_apply_retail_expansion() {
 	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 	const ImportPlan &plan = *view.dialogs.import_preview.plan;
 	TEST_EXPECT(session.outcome().done() && !plan.truncated && !has_error(plan.diagnostics));
-	// What /exp jox01 serves, read the game's way, against each planned file of the install's archives.
+	// What /exp onjo1 serves, read the game's way, against each planned file of the install's archives.
 	opennova::Vfs game;
 	opennova::LaunchFlags flags;
-	flags.expansion = "jox01";
-	TEST_EXPECT(opennova::mount_install(game, install, flags) && game.mounted_expansion() == "jox01");
+	flags.expansion = minted_install::kExpansion;
+	TEST_EXPECT(opennova::mount_install(game, install, flags) && game.mounted_expansion() == minted_install::kExpansion);
 	size_t checked = 0, own = 0, expansion_layer = 0;
 	for (const ImportPlanRow &row : plan.rows) {
 		if (row.state == State::NotFound || !row.source.install) continue;
@@ -1191,12 +1208,12 @@ static int test_apply_retail_expansion() {
 		expansion_layer += file->layer == InstallFile::Layer::Expansion ? 1 : 0;
 	}
 	// The same, independently of the view's mount (the mount above is the code path the view reads
-	// through): jox01's own archives opened directly. A row of the expansion's layer is a member of
-	// jox01L.pff or jox01.pff, served as stored there; a row of the base's is a member of neither (the
+	// through): the expansion's own archives opened directly. A row of the expansion's layer is a member of
+	// onjo1L.pff or onjo1.pff, served as stored there; a row of the base's is a member of neither (the
 	// expansion would serve it); a loose row is the file on the disk, the expansion's in its folder.
 	opennova::pff::PffArchive language{}, resources{};
-	const bool language_open = opennova::pff::pff_open(&language, (install + "/expansion/jox01/jox01L.pff").c_str()) == 0;
-	const bool resources_open = opennova::pff::pff_open(&resources, (install + "/expansion/jox01/jox01.pff").c_str()) == 0;
+	const bool language_open = opennova::pff::pff_open(&language, (install + "/expansion/onjo1/onjo1L.pff").c_str()) == 0;
+	const bool resources_open = opennova::pff::pff_open(&resources, (install + "/expansion/onjo1/onjo1.pff").c_str()) == 0;
 	TEST_EXPECT(language_open && resources_open);
 	const auto stored = [](const opennova::pff::PffArchive &archive, const opennova::pff::PffEntry *entry) {
 		std::vector<uint8_t> bytes(entry ? entry->size : 0);
@@ -1216,7 +1233,7 @@ static int test_apply_retail_expansion() {
 			opennova::vfs_decode_payload(decoded, origin.vfs().scr_policy());
 			TEST_EXPECT(planned == on_disk || planned == decoded);
 			if (file->layer == InstallFile::Layer::Expansion)
-				TEST_EXPECT(opennova::strutil::to_lower(file->loose_path).find("jox01") != std::string::npos);
+				TEST_EXPECT(opennova::strutil::to_lower(file->loose_path).find(minted_install::kExpansion) != std::string::npos);
 			++loose_rows;
 			continue;
 		}
@@ -1244,12 +1261,12 @@ static int test_apply_retail_expansion() {
 	};
 	// The expansion's own files come with a mission as the game's fixed names do, under the project's.
 	const ImportPlanRow *table = row_called("jxm.bin");
-	TEST_EXPECT(table && table->state == State::Found && table->source.entry == "jox01.bin" &&
+	TEST_EXPECT(table && table->state == State::Found && table->source.entry == "onjo1.bin" &&
 	            table->needed_by.field.find("the game, ") == 0);
-	TEST_EXPECT(!row_called("jox01.bin") && !row_called("menumus.bin"));
-	std::printf("editor_import retail expansion: %s's closure %zu files (%.1f MB), %zu of the install's archives' checked "
-	            "byte for byte against /exp jox01 (%zu from the expansion's, %zu under the project's names; %zu against "
-	            "jox01's archives opened directly, %zu loose against the disk), planned in %.1f s\n",
+	TEST_EXPECT(!row_called("onjo1.bin") && !row_called("menumus.bin"));
+	std::printf("editor_import install expansion: %s's closure %zu files (%.1f MB), %zu of the install's archives' checked "
+	            "byte for byte against /exp onjo1 (%zu from the expansion's, %zu under the project's names; %zu against "
+	            "onjo1's archives opened directly, %zu loose against the disk), planned in %.1f s\n",
 	            smallest->name.c_str(), plan.file_count(), plan.total_bytes() / 1e6, checked, expansion_layer, own, independent,
 	            loose_rows, seconds);
 	TEST_EXPECT(checked > 100 && expansion_layer > 0 && own > 0);
@@ -1259,8 +1276,8 @@ static int test_apply_retail_expansion() {
 int run_import_apply_tests() {
 	int failures = 0;
 	failures += test_apply_never_player_files();
-	failures += test_apply_retail_expansion();
-	failures += test_apply_retail_mission_closure({"ASH_I1gA.bms"});
+	failures += test_apply_install_expansion();
+	failures += test_apply_install_mission_closure();
 	failures += test_apply_closure();
 	failures += test_apply_unchecked();
 	failures += test_apply_changed();
@@ -1275,10 +1292,6 @@ int run_import_apply_tests() {
 	failures += test_apply_write_cancel();
 	failures += test_apply_staging_leftover();
 	failures += test_apply_guard_reads_the_shown_plan();
-	failures += test_apply_retail_menu();
+	failures += test_apply_install_menu();
 	return failures;
 }
-
-// The smaller shipped mission's closure planned, imported, checked and built: the editor_import
-// program's part of its own (closure_04tr).
-int run_import_apply_retail_closure() { return test_apply_retail_mission_closure({"04TR.bms"}); }

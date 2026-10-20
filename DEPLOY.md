@@ -80,7 +80,7 @@ and rule, its database's dumps (`backup restore` takes the deployment's own alon
   each member account's `OrganizationAccountAccessRole`, and nothing else).
 - The 1Password vault, with separate items per deployment (above) and a few shared ones:
   `aws-org`, `cloudflare`, `alerts`, `email`, `stripe-test`, `stripe-live`,
-  `github-terraform`, `reference-assets`.
+  `github-terraform`.
 - The Cloudflare zone: one zone holds every deployment's records. Its zone-wide settings,
   its rulesets (each deployment's edge authentication rule with that deployment's own
   secret, the Stripe webhook's rule) and Email Routing are one stack, `infra/zone`; each
@@ -189,8 +189,8 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
    resolves every reference (before it, the deploy keys it checks do not exist yet).
 6. **The shared stacks** (section 3, step 5): `./deploy/run.sh zone apply`, then click
    Cloudflare's verification link (section 4, "Email"), then [admin] give each member
-   account's root user a password and an MFA device. Fill the `github-terraform` and
-   `reference-assets` items and `./deploy/run.sh github apply` (section "GitHub"), or on
+   account's root user a password and an MFA device. Fill the `github-terraform` item
+   and `./deploy/run.sh github apply` (section "GitHub"), or on
    a GitHub organization of your own make the two environments by hand ("Running it
    under your own names"). Then the CI runners: the `runs-on` item, `./deploy/run.sh ci
    apply`, the GitHub App and the fork approval setting (section "CI runners").
@@ -236,7 +236,7 @@ own, change these on your fork:
 | `infra/org/variables.tf` | `github_repository`, `opennova-net/opennova`: the repository whose deploy workflow may assume each account's deploy role | its default (the toolbox passes none) |
 | `infra/ci/variables.tf` | `github_organization`, `opennova-net`: the organization whose GitHub App the RunsOn setup page registers | its default |
 | `infra/github/` | the GitHub organization `opennova-net`, all of it | adapt it to your organization, or leave it out and make what the deploy workflow needs by hand: the repository environments `staging` and `prod` (prod with required reviewers), each with the variables `AWS_DEPLOY_ROLE_ARN` (the vault's `aws-<deployment>/github_deploy_role_arn`), `AWS_REGION` and `AWS_ACCOUNT_ID`; optionally the secret `STRIPE_TEST_SECRET_KEY` (the billing end-to-end test) |
-| `.github/workflows/ci.yml` | RunsOn's runner labels on the build and test legs (section "CI runners"), and the retail legs' private reference repositories (`REFERENCE_ASSETS_TOKEN`) | your own RunsOn stack, or `windows-latest` and `ubuntu-latest` in place of the labels; no retail legs. The image workflows run on `ubuntu-latest` and need neither |
+| `.github/workflows/ci.yml` | RunsOn's runner labels on the build and test legs (section "CI runners") | your own RunsOn stack, or `windows-latest` and `ubuntu-latest` in place of the labels. The image workflows run on `ubuntu-latest` and need neither |
 | `infra/zone/variables.tf` | `email_routes`: `support`, `aws-prod`, `aws-staging`, `aws-ci` | its default, if your accounts' root addresses differ (the zone stack takes no var-file) |
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
@@ -268,7 +268,6 @@ contract, item by item (`deploy/env/*.tpl` holds every reference the toolbox rea
 | `stripe-test`, `stripe-live` | `webhook_secret`, `price_*` | `stripe setup` |
 | `alerts`, `email` | `email`, `forward_to` | hand |
 | `github-terraform` | `token`, `billing_email`, `members` | hand (section "GitHub") |
-| `reference-assets` | `token` | hand (section "GitHub") |
 
 The manual steps outside the vault: the Organization and its member accounts, the
 `opennova-org` user's policy, the CI runners' GitHub App, EC2 quotas and fork approval
@@ -1727,12 +1726,6 @@ workflow"). What stays out of this public repository comes from the vault:
   - `members`: the members and their roles as JSON, `{"login": "admin", "other": "member"}`.
     Every member keeps the membership private. A login left out is removed from the
     organization at the next apply, and a new one is invited.
-- **`reference-assets`**, field `token`: the value of the `REFERENCE_ASSETS_TOKEN` secret,
-  which the retail legs use to mount the two private reference repositories
-  (`docs/asset-gated-tests.md`). A fine-grained token, resource owner **opennova-net**,
-  access to only `opennova-reference-assets` and `opennova-reference-retail-packed`,
-  **Contents: Read-only**. When it expires, put the new token in the item and `github
-  apply`: Terraform keeps the value in its state and overwrites a secret set by hand.
 - **`stripe-test`**, field `restricted_key` (`secrets init` adds it as `REPLACE_ME`): the
   value of the `STRIPE_TEST_SECRET_KEY` secret, which test-linux hands the billing
   end-to-end test (`billing_stripe_e2e`) as `ONNET_STRIPE_TEST_SECRET_KEY`. The test makes
@@ -1758,8 +1751,8 @@ or secret is a change to the stack: add it, plan, apply.
 
 ## CI runners
 
-`ci.yml`'s build and test legs (test-core, test-retail, test-linux, both gdext builds, the
-Godot package) run on [RunsOn](https://runs-on.com)'s runners in the Organization's third
+`ci.yml`'s build and test legs (test-core, test-linux, both gdext builds, the Godot
+package) run on [RunsOn](https://runs-on.com)'s runners in the Organization's third
 account, `opennova-ci`, which holds them alone (`infra/ci`). Each job gets an EC2 instance
 of its own with 16 vCPUs, spot unless spot is short (then on demand), launched when GitHub
 queues the job and ended when it finishes: nothing runs between jobs. The Godot tests (one
@@ -1791,7 +1784,7 @@ Once, in order:
 3. **The license**: RunsOn's license key (runs-on.com) into the vault item `runs-on`, field
    `key` (the toolbox finds the item's title in any case).
 4. **[admin] The account's EC2 quotas** (the access portal, `OpenNovaAdmin` in
-   `opennova-ci`, Service Quotas): a run takes 96 vCPUs at once (six 16-vCPU legs). The
+   `opennova-ci`, Service Quotas): a run takes 80 vCPUs at once (five 16-vCPU legs). The
    quotas are the runners' spending ceiling: "All Standard (A, C, D, H, I, M, R, T, Z) Spot
    Instance Requests" (L-34B43A08) and "Running On-Demand Standard (A, C, D, H, I, M, R,
    T, Z) instances" (L-1216C47A, for when spot is short), 192 each in OpenNova's account:

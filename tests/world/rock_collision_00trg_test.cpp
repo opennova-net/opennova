@@ -1,21 +1,25 @@
-// The rock directly in front of the sole 00TRg single-player start, on the
-// retail data: the production mission promotion -> .3di collision IR ->
-// RoundSim path, with no rendering. RckS05 (bms 650, item 101471) must expose
-// its 52 authored CFAC faces, its collision vertices must sit on the render
+// The rock directly in front of the sole 00TRg single-player start: the
+// production mission promotion -> .3di collision IR -> RoundSim path, with no
+// rendering. The rock (bms 650, item 101471) must expose its 52 authored CFAC
+// faces -- the shipped RckS05's count, which the minted mrock carries -- its
+// collision vertices must sit on the render
 // mesh under the same placement matrix (no collision/render drift), and rays
 // through real LOD-0 render-triangle centroids at the four angular silhouette
 // extremes — directions guaranteed to cross authored visible geometry — must
 // strike the entity's CFAC mesh (a miss there is a concrete render-vs-bullet
 // hole, not an AABB approximation artifact).
-// Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms).
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+// The mission is the mission set's rock_collision.bms (tests/fixtures/mission_set_gen.cpp):
+// 00TRg's start and rock by their bms ids, the minted mrock in the shipped RckS05's shape (one
+// 52-triangle mesh whose collision faces are its render triangles).
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <formats/threedi/threedi_strip_decode.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/round_sim.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -41,11 +45,17 @@ bool expect(bool cond, const char *msg) {
 constexpr int kSpawnBmsId = 1197;
 constexpr int kTargetBmsId = 650;
 constexpr int kTargetItemId = 101471;
-constexpr const char *kTargetGraphic = "RckS05";
+constexpr const char *kTargetGraphic = "mrock";
+// The shipped RckS05's authored CFAC face count (00TRg bms 650), pinned on the minted rock.
 constexpr int kTargetFaceCount = 52;
 constexpr float kMaxVertexError = 0.02f;
 constexpr const char *kAmmo = "AMMO_M16_556MM";
 constexpr float kEyeHeight = 1.6f;
+
+std::string lower_ascii(std::string s) {
+	for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	return s;
+}
 
 using V = w::Vec3;
 V sub(const V &a, const V &b) { return V{a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -137,7 +147,7 @@ struct Fire {
 	std::string terminal = "no_event";
 };
 
-Fire fire_one(testrig::RetailMissionRig &rig, const V &origin, const V &dir, uint16_t target, int ammo_index) {
+Fire fire_one(testrig::MissionRig &rig, const V &origin, const V &dir, uint16_t target, int ammo_index) {
 	static const char *const kKindNames[] = {"organic", "item face", "item sphere", "terrain", "expired", "face miss"};
 	const uint32_t spawn_tick = rig.world.logic_tick;
 	w::RoundSpawnParams params;
@@ -176,11 +186,14 @@ Fire fire_one(testrig::RetailMissionRig &rig, const V &origin, const V &dir, uin
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
-			"OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("rock_collision");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(assets, "00TRg.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "rock_collision.bms", error), "rock_collision.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	if (!expect(rig.items_ok, "items.def parses from the tree")) return 1;
 	const bms::Entity *spawn_record = find_record(rig.mission, kSpawnBmsId);
 	const bms::Entity *target_record = find_record(rig.mission, kTargetBmsId);
@@ -188,8 +201,8 @@ int main() {
 		return 1;
 	const int target_item = static_cast<int>(target_record->type_id) + static_cast<int>(mission::kItemIdOffset);
 	const DefItemDef *target_def = mission::find_item_def(rig.items, target_item);
-	if (!expect(target_item == kTargetItemId && target_def != nullptr && retail::lower_ascii(target_def->graphic) == retail::lower_ascii(kTargetGraphic),
-				"entity 650 keeps its identity (item 101471, graphic RckS05)"))
+	if (!expect(target_item == kTargetItemId && target_def != nullptr && lower_ascii(target_def->graphic) == lower_ascii(kTargetGraphic),
+				"entity 650 keeps its identity (item 101471, graphic mrock)"))
 		return 1;
 
 	// The bare production promotion -> collision IR -> RoundSim path: no
@@ -199,7 +212,7 @@ int main() {
 	options.terrain = false;
 	options.wac = false;
 	options.listen_server = false;
-	if (!expect(rig.boot(options, error), "00TRg promotes with collision")) {
+	if (!expect(rig.boot(options, error), "the mission promotes with collision")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
@@ -219,9 +232,9 @@ int main() {
 	if (!expect(target != nullptr, "entity 650 promoted")) return 1;
 	const w::CollisionMatrix placement = w::entity_placement_matrix(*target);
 	const Threedi3di3 *model = rig.assets().model(kTargetGraphic).get();
-	if (!expect(model != nullptr, "RckS05.3di parses through the shared asset store")) return 1;
+	if (!expect(model != nullptr, "mrock.3di parses through the shared asset store")) return 1;
 	const RenderMesh render = render_mesh(*model, placement);
-	if (!expect(!render.triangles.empty(), "RckS05 has LOD-0 render triangles")) return 1;
+	if (!expect(!render.triangles.empty(), "the rock has LOD-0 render triangles")) return 1;
 	V vmin = render.points[0], vmax = render.points[0];
 	for (const V &p : render.points) {
 		vmin = V{std::min(vmin.x, p.x), std::min(vmin.y, p.y), std::min(vmin.z, p.z)};
@@ -273,9 +286,9 @@ int main() {
 			unique_collision.size(), render.points.size(),
 			unique_collision.empty() ? 0.0f : total / float(unique_collision.size()), worst);
 	if (!expect(emitted_faces == kTargetFaceCount && target_box->face_total == kTargetFaceCount,
-				"RckS05 exposes its 52 authored collision faces"))
+				"the rock exposes its 52 authored collision faces"))
 		return 1;
-	if (!expect(worst <= kMaxVertexError, "RckS05 collision vertices sit on the render mesh (<= 0.02 u)")) return 1;
+	if (!expect(worst <= kMaxVertexError, "the rock's collision vertices sit on the render mesh (<= 0.02 u)")) return 1;
 
 	// Rays: the spawn facing, the visual center and four offsets (diagnostic),
 	// then the four render-triangle silhouette extremes (required).
@@ -321,7 +334,7 @@ int main() {
 				result.terminal.c_str());
 		if (ray.required && (!debug_cross || !result.hit)) misses += ray.name + " ";
 	}
-	expect(misses.empty(), ("RckS05 entity 650 missed render-triangle rays: " + misses).c_str());
+	expect(misses.empty(), ("the rock entity 650 missed render-triangle rays: " + misses).c_str());
 	if (failures == 0) std::printf("rock_collision_00trg: all 4 render-triangle rays hit entity 650's CFAC mesh\n");
 	return failures == 0 ? 0 : 1;
 }

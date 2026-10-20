@@ -20,8 +20,9 @@ class ProjectCheck;
 // files interleaved by the upper-cased name, as one archive's table walks them [orig: CEffectSystem_Init
 // @ 0x5F6070 -> File_ParseASCIIFile with CEffectWorld_ParseSectionCallback @ 0x5ECB40]; the port of
 // that reader is formats/particle's load_particles, which reads every text as the game does (it refuses
-// none). Its findings are the reader's: an effect the file defines twice. What it names (each effect's id, a symbol
-// at its place; each graphic's texture) the asset graph reads through the same reader
+// none). Its findings are the reader's: an effect the file defines twice. What it names (each effect's
+// id, a symbol at its place; each table's id, a symbol; each graphic's texture; each particle's
+// curves, by their tables' ids) the asset graph reads through the same reader
 // (graph/extractors.cpp, extract_particles), so the type names no references of its own and a rename
 // rewrites its names as a native text's (graph/native_text_sites.h). Its Document tab is the script
 // device (S13 V10); the Preview window plays the effect the text defines (preview/effect_viewport.h).

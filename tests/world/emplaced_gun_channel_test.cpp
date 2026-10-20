@@ -383,6 +383,17 @@ void test_parent_publication_gates() {
         CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] == 0);
     }
     {
+        // A root-anchored child whose parent brain has no owner word publishes
+        // nothing either. [orig: Entity_UpdateTransformAndTurret -- the
+        //  publication's owner gate, after the subobject test @0x440f50]
+        ParentRig pr(2, /*anchor_subobject=*/0, 0);
+        pr.parent_ai->brain.f[AiBrain::kOwner] = 0;
+        pr.r.gun().emplaced_gun_yaw_word = 0x1234;
+        publish_emplaced_gun_words_to_parent(pr.r.w, pr.r.gun());
+        CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0);
+        CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] == 0);
+    }
+    {
         ParentRig pr(2, /*anchor_subobject=*/-1, 0);
         pr.r.look(bam_sub(kGunHeading, 20 * kBamPerDegree), 0);
         CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));

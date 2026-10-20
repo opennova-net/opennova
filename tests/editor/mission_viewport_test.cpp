@@ -12,8 +12,8 @@
 // hits and boxes (each entity at its projected pixel, the front-most, a kind's marks off and the
 // mark range dropping marks, a box's records); and its envelope (the body's counts, a page of items,
 // the notes). S14 V10: a drop's item facts and its one batch (on the plane, over a device's ground
-// with the model's anchor baked in), its refusals; the ground command. S14 V11, the retail leg
-// (--retail, OPENNOVA_JO_DIR): every shipped mission in a project, each opened in its viewport. DI-07:
+// with the model's anchor baked in), its refusals; the ground command. S14 V11, the sweep (mission_sweep.h):
+// every mission of it in a project, each opened in its viewport. DI-07:
 // the ground under a point in the game's words over a minted terrain with a char map (the class, its
 // footstep slots and effects row at known places, a placed tile, the water plane, the ocean), and the
 // hit and the canvas carrying it.
@@ -22,16 +22,13 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <filesystem>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <vector>
 
 #include <base/io/bam.h>
 #include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include <base/io/json.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_camera.h>
@@ -71,10 +68,10 @@
 #include <runtime/world/presentation_frame.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_sweep.h"
 #include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
@@ -1802,8 +1799,14 @@ static int measure_labels(Rig &rig, const std::string &path) {
 		if (ms > slowest) slowest_at = frame_index;
 		slowest = std::max(slowest, ms);
 		++frame_index;
+		// The labels: the titles drawn, not a path's stop numbers or a link's badge (digits alone), which a mission of
+		// many stops (scale.bms holds the corpus's most, 667) draws more of than it shows marks.
 		labels = 0;
-		for (const OverlayShape &shape : list.shapes) labels += shape.kind == OverlayKind::Text ? 1 : 0;
+		for (const OverlayShape &shape : list.shapes)
+			labels += shape.kind == OverlayKind::Text &&
+			                          shape.text.find_first_not_of("0123456789") != std::string::npos
+			                  ? 1
+			                  : 0;
 	};
 	constexpr int kFrames = 120;
 	double idle = 0.0, idle_slowest = 0.0, drag = 0.0, drag_slowest = 0.0;
@@ -1850,39 +1853,25 @@ static int measure_labels(Rig &rig, const std::string &path) {
 	return 0;
 }
 
-// The retail leg (S14 V11; OPENNOVA_JO_DIR, base and each expansion through the VFS): every shipped
-// mission written into one project (a mission's own file, as an import writes it; its terrain, its
-// environment and its models are the device's, and the fake devices read none), then each opened in
-// its viewport: ready, the scene's pools as many as the document's (each entity pool, the areas);
-// every mark shown on the first framing hit at its pixel answers the front-most record there; the
-// first item framed and moved by a drag of 64 pixels is one edit, and its undo gives the document's
-// bytes back. Prints the largest mission's counts.
-static int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission in its viewport)");
-	Rig rig("opennova_editor_mission_viewport_retail");
+// The sweep (S14 V11; mission_sweep.h, in place of every mission the install ships): every mission of it
+// written into one project (a mission's own file, as an import writes it; its terrain, its environment and
+// its models are the device's, and the fake devices read none), then each opened in its viewport: ready,
+// the scene's pools as many as the document's (each entity pool, the areas); every mark shown on the first
+// framing hit at its pixel answers the front-most record there; the first item framed and moved by a drag
+// of 64 pixels is one edit, and its undo gives the document's bytes back. The largest (scale.bms, at the
+// most records a shipped mission holds in each table) the labels' measure's.
+static int test_sweep() {
+	Rig rig("opennova_editor_mission_viewport_sweep");
 	TEST_EXPECT(rig.open(false));
 	const std::string project = rig.session.view().project.root;
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string());
-	std::set<std::string> seen;
+	std::vector<std::string> missing;
 	std::vector<std::string> paths;
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string()) != ".bms") continue;
-			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			TEST_EXPECT(game.read_file(file.logical_name, bytes));
-			const std::string path = "missions/" + (expansion.empty() ? std::string("base") : expansion) + "/" +
-					std::filesystem::path(file.logical_name).filename().string();
-			TEST_EXPECT(test_io::write_file(project + "/" + path, bytes));
-			paths.push_back(path);
-		}
+	for (const mission_sweep::Mission &file : mission_sweep::load(missing)) {
+		const std::string path = "missions/sweep/" + file.name;
+		TEST_EXPECT(test_io::write_file(project + "/" + path, file.bytes));
+		paths.push_back(path);
 	}
-	if (paths.empty()) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
+	TEST_EXPECT(!paths.empty());
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
 	const auto started = std::chrono::steady_clock::now();
@@ -1982,12 +1971,13 @@ static int test_retail() {
 		rig.pump();
 	}
 	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-	std::printf("retail: %zu missions in their viewports (%zu marks hit, %zu first items moved and undone) in %.1f s; the "
+	std::printf("sweep: %zu missions in their viewports (%zu marks hit, %zu first items moved and undone) in %.1f s; the "
 	            "largest, %s: %zu entities (%s)\n",
 	            opened, hits, moved, seconds, largest.c_str(), largest_entities, largest_counts.c_str());
 	TEST_EXPECT(opened == paths.size() && opened > 0 && hits > 0 && moved > 0);
-	TEST_EXPECT(measure_labels(rig, largest) == 0);
-	std::printf("test_retail passed\n");
+	TEST_EXPECT(largest == "missions/sweep/scale.bms" && measure_labels(rig, largest) == 0);
+	TEST_EXPECT(mission_sweep::none_missing(missing));
+	std::printf("test_sweep passed\n");
 	return 0;
 }
 
@@ -2378,8 +2368,7 @@ static int test_ground_hit() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	TEST_EXPECT(test_ground_facts() == 0);
 	TEST_EXPECT(test_ground_hit() == 0);
 	TEST_EXPECT(test_kind_row() == 0);
@@ -2401,7 +2390,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_palette() == 0);
 	TEST_EXPECT(test_placing() == 0);
 	TEST_EXPECT(test_tweaking_commands() == 0);
-	TEST_EXPECT(test_retail() == 0);
+	TEST_EXPECT(test_sweep() == 0);
 	std::printf("editor_mission_viewport: all tests passed\n");
 	return 0;
 }

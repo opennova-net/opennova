@@ -101,7 +101,6 @@ make_vault() {
     price_tier2=REPLACE_ME price_tier3=REPLACE_ME price_own_machine=REPLACE_ME price_static_address=REPLACE_ME
   mkitem github-terraform API_CREDENTIAL token=SECRETVALUEgithubtoken billing_email=billing@example.org \
     "members=$MEMBERS_JSON"
-  mkitem reference-assets API_CREDENTIAL token=SECRETVALUEreferenceassets
 }
 # A fixture field's value.
 fixture() { jq -j --arg l "$2" '[.fields[] | select(.label == $l) | .value][0]' "$STUB_VAULT_DIR/$1.json"; }
@@ -472,7 +471,7 @@ expect_requests "zone plan" 5 zone plan
 expect_tf_var TF_VAR_edge_auth_secret_prod app-prod edge_auth_secret
 expect_tf_var TF_VAR_edge_auth_secret_staging app-staging edge_auth_secret
 expect_tf_var AWS_ACCESS_KEY_ID aws-prod access_key_id
-expect_requests "github plan" 5 github plan
+expect_requests "github plan" 4 github plan
 expect_tf_var GITHUB_TOKEN github-terraform token
 expect_tf_var TF_VAR_members github-terraform members
 expect_tf_var TF_VAR_stripe_test_secret_key stripe-test restricted_key

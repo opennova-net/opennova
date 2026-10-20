@@ -13,10 +13,12 @@
 
 #include "common/boot_file_source.h"
 #include "common/synthetic_mission.h"
+#include "common/temp_dir.h"
 
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <string>
@@ -176,6 +178,32 @@ int main() {
 		std::string error;
 		CHECK(!kernel.open("./definitely/not/a/mounted/root", "nowhere.bms", error));
 		CHECK(!error.empty());
+	}
+	{
+		// A root that mounts but carries no such mission: the read after the mount fails.
+		test_temp::TempDir dir("kernel_open_missing");
+		{
+			std::ofstream items(dir.file("items.def"), std::ios::binary);
+			items << "begin \"Crate\"\r\n  id 104000\r\n  type object\r\nend\r\n";
+		}
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
+		std::string error;
+		CHECK(!kernel.open(dir.root(), "nowhere.bms", error));
+		CHECK(error.find("is not under") != std::string::npos);
+	}
+	{
+		// A kernel reopened on a second document (the next mission of a run) releases
+		// the first one's item table and holds the second's alone.
+		std::map<std::string, std::string> files;
+		files["items.def"] = "begin \"Crate\"\r\n  id 104000\r\n  type object\r\nend\r\n";
+		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_box;
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
+		CHECK(kernel.items_ok && kernel.items.count == 1);
+		files["items.def"] += "begin \"Barrel\"\r\n  id 104001\r\n  type object\r\nend\r\n";
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
+		CHECK(kernel.items_ok && kernel.items.count == 2);
 	}
 
 	// --- the sealed play-start baseline ----------------------------------------

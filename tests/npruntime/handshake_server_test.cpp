@@ -35,7 +35,6 @@
 #include <runtime/world/world.h>
 
 #include "common/test_paths.h"
-#include "common/retail_paths.h"
 #include "host_test_setup.h"
 
 #include <runtime/inmatch/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
@@ -3589,7 +3588,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	              "a listen host's 0x64 +36 is the same cap; +48 the raw word");
 }
 
-// Armory-fed loadout resolve (D-NET-141): with world.tables.weapons built from the committed fixture,
+// Armory-fed loadout resolve (D-NET-141): with world.tables.weapons built from the authored fixture,
 // the 0x5A reply resolves REAL ammo counts from the rebuilt slot table instead of echoing —
 // filters drop unfiltered (emplaced) request entries, counts come from startrounds/clipsize
 // (min(req,maxclips) on an explicit request), the alt byte carries the first different-ammoclass
@@ -3608,14 +3607,13 @@ bool run_loadout_resolve_with_armory() {
 	//  `slot[89] <= 0 || preround` gate @0x5158d0 -> the re-send @0x515fa5]
 	ctx.config.armory_reuse_time = 0;
 
-	// The armory: the shipped weapon.def from the reference fixture set -> the
-	// witnessed table (null@0 + file order). A SKIP-LEG retail leg without it.
-	const std::string def_path = retail::reference_fixture("def/weapon.def");
-	const std::string ammo_path = retail::reference_fixture("def/ammo.def");
-	if (def_path.empty() || ammo_path.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def + ammo.def (the shipped armory the loadout resolve keys on)");
-		return true;
-	}
+	// The armory: the authored fixtures/def/weapon.def (the shipped table's 94
+	// weapons in the shipped order, the rows this resolve keys on with their
+	// shipped fields) -> the witnessed table (null@0 + file order), and the
+	// rounds those rows name in fixtures/def/ammo.def.
+	const std::string repo = test_paths_repo_root(__FILE__);
+	const std::string def_path = repo + "/fixtures/def/weapon.def";
+	const std::string ammo_path = repo + "/fixtures/def/ammo.def";
 	DefWeaponsFile wf{};
 	if (!expect(def_parse_weapons(def_path.c_str(), &wf) == 0, "fixture weapon.def parses")) return false;
 	world::World world;
@@ -4466,7 +4464,6 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 } // namespace
 
 int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
 	bool ok = run_side_password_admission();
 	ok = run_mission_transfers_match_retail_lan_contract() && ok;
 	ok = run_tag60_mission_name_selects_by_game_type() && ok;

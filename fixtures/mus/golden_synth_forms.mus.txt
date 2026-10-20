@@ -1,0 +1,488 @@
+// Script: menuscript
+// Original source: C:\opennova\fixtures\mus\synth_forms.mus
+//
+// IMPORTANT: Load MUSIC.LAN before opening this file in MDEdit
+// The following methods are used: GEcho, GGRnd, GSV, GSDV, GFB, F.Set, F.Clear, F.IsSet, F.IsClear, T.Start, T.Stop
+
+script menuscript
+
+// Sound bind declarations (play requires bind identifiers)
+bind sound_0 "sound_0"
+bind sound_1 "sound_1"
+bind sound_2 "sound_2"
+bind sound_3 "sound_3"
+bind sound_4 "sound_4"
+bind sound_5 "sound_5"
+bind sound_6 "sound_6"
+bind sound_7 "sound_7"
+bind sound_8 "sound_8"
+bind sound_9 "sound_9"
+bind sound_10 "sound_10"
+bind sound_11 "sound_11"
+bind sound_12 "sound_12"
+bind sound_13 "sound_13"
+bind sound_14 "sound_14"
+bind sound_15 "sound_15"
+bind sound_16 "sound_16"
+bind sound_17 "sound_17"
+bind sound_18 "sound_18"
+bind sound_19 "sound_19"
+bind sound_20 "sound_20"
+bind sound_21 "sound_21"
+bind sound_22 "sound_22"
+bind sound_23 "sound_23"
+bind sound_24 "sound_24"
+bind sound_25 "sound_25"
+bind sound_26 "sound_26"
+bind sound_27 "sound_27"
+bind sound_28 "sound_28"
+bind sound_29 "sound_29"
+bind sound_30 "sound_30"
+bind sound_31 "sound_31"
+bind sound_32 "sound_32"
+bind sound_33 "sound_33"
+bind sound_34 "sound_34"
+bind sound_35 "sound_35"
+bind sound_36 "sound_36"
+bind sound_37 "sound_37"
+bind sound_38 "sound_38"
+bind sound_39 "sound_39"
+bind sound_40 "sound_40"
+bind sound_41 "sound_41"
+bind sound_42 "sound_42"
+bind sound_43 "sound_43"
+bind sound_44 "sound_44"
+bind sound_45 "sound_45"
+bind sound_46 "sound_46"
+bind sound_47 "sound_47"
+bind sound_48 "sound_48"
+bind sound_49 "sound_49"
+bind sound_50 "sound_50"
+bind sound_51 "sound_51"
+bind sound_52 "sound_52"
+bind sound_53 "sound_53"
+bind sound_54 "sound_54"
+bind sound_55 "sound_55"
+bind sound_56 "sound_56"
+bind sound_57 "sound_57"
+bind sound_58 "sound_58"
+bind sound_59 "sound_59"
+bind sound_60 "sound_60"
+bind sound_61 "sound_61"
+bind sound_62 "sound_62"
+bind sound_63 "sound_63"
+bind sound_64 "sound_64"
+bind sound_65 "sound_65"
+bind sound_66 "sound_66"
+bind sound_67 "sound_67"
+bind sound_68 "sound_68"
+bind sound_69 "sound_69"
+bind sound_70 "sound_70"
+bind sound_71 "sound_71"
+bind sound_72 "sound_72"
+bind sound_73 "sound_73"
+bind sound_74 "sound_74"
+bind sound_75 "sound_75"
+bind sound_76 "sound_76"
+bind sound_77 "sound_77"
+bind sound_78 "sound_78"
+bind sound_79 "sound_79"
+bind sound_80 "sound_80"
+bind sound_81 "sound_81"
+bind sound_82 "sound_82"
+bind sound_83 "sound_83"
+bind sound_84 "sound_84"
+bind sound_85 "sound_85"
+bind sound_86 "sound_86"
+bind sound_87 "sound_87"
+bind sound_88 "sound_88"
+bind sound_89 "sound_89"
+bind sound_90 "sound_90"
+bind sound_91 "sound_91"
+bind sound_92 "sound_92"
+bind sound_93 "sound_93"
+bind sound_94 "sound_94"
+bind sound_95 "sound_95"
+bind sound_96 "sound_96"
+bind sound_97 "sound_97"
+bind sound_98 "sound_98"
+bind sound_99 "sound_99"
+bind sound_100 "sound_100"
+bind sound_101 "sound_101"
+bind sound_102 "sound_102"
+bind sound_103 "sound_103"
+bind sound_104 "sound_104"
+bind sound_105 "sound_105"
+bind sound_106 "sound_106"
+bind sound_107 "sound_107"
+bind sound_108 "sound_108"
+bind sound_109 "sound_109"
+bind sound_110 "sound_110"
+bind sound_111 "sound_111"
+bind sound_112 "sound_112"
+bind sound_113 "sound_113"
+bind sound_114 "sound_114"
+bind sound_115 "sound_115"
+bind sound_116 "sound_116"
+bind sound_117 "sound_117"
+bind sound_118 "sound_118"
+bind sound_119 "sound_119"
+bind sound_120 "sound_120"
+bind sound_121 "sound_121"
+bind sound_122 "sound_122"
+bind sound_123 "sound_123"
+bind sound_124 "sound_124"
+bind sound_125 "sound_125"
+bind sound_126 "sound_126"
+bind sound_127 "sound_127"
+bind sound_128 "sound_128"
+bind sound_129 "sound_129"
+bind sound_130 "sound_130"
+bind sound_131 "sound_131"
+bind sound_132 "sound_132"
+bind sound_133 "sound_133"
+bind sound_134 "sound_134"
+bind sound_135 "sound_135"
+bind sound_136 "sound_136"
+bind sound_137 "sound_137"
+bind sound_138 "sound_138"
+bind sound_139 "sound_139"
+bind sound_140 "sound_140"
+bind sound_141 "sound_141"
+bind sound_142 "sound_142"
+bind sound_143 "sound_143"
+bind sound_144 "sound_144"
+bind sound_145 "sound_145"
+bind sound_146 "sound_146"
+bind sound_147 "sound_147"
+bind sound_148 "sound_148"
+bind sound_149 "sound_149"
+bind sound_150 "sound_150"
+bind sound_151 "sound_151"
+bind sound_152 "sound_152"
+bind sound_153 "sound_153"
+bind sound_154 "sound_154"
+bind sound_155 "sound_155"
+bind sound_156 "sound_156"
+bind sound_157 "sound_157"
+bind sound_158 "sound_158"
+bind sound_159 "sound_159"
+bind sound_160 "sound_160"
+bind sound_161 "sound_161"
+bind sound_162 "sound_162"
+bind sound_163 "sound_163"
+bind sound_164 "sound_164"
+bind sound_165 "sound_165"
+bind sound_166 "sound_166"
+bind sound_167 "sound_167"
+bind sound_168 "sound_168"
+bind sound_169 "sound_169"
+bind sound_170 "sound_170"
+bind sound_171 "sound_171"
+bind sound_172 "sound_172"
+bind sound_173 "sound_173"
+bind sound_174 "sound_174"
+bind sound_175 "sound_175"
+bind sound_176 "sound_176"
+bind sound_177 "sound_177"
+bind sound_178 "sound_178"
+bind sound_179 "sound_179"
+bind sound_180 "sound_180"
+bind sound_181 "sound_181"
+bind sound_182 "sound_182"
+bind sound_183 "sound_183"
+bind sound_184 "sound_184"
+bind sound_185 "sound_185"
+bind sound_186 "sound_186"
+bind sound_187 "sound_187"
+bind sound_188 "sound_188"
+bind sound_189 "sound_189"
+bind sound_190 "sound_190"
+bind sound_191 "sound_191"
+bind sound_192 "sound_192"
+bind sound_193 "sound_193"
+bind sound_194 "sound_194"
+bind sound_195 "sound_195"
+bind sound_196 "sound_196"
+bind sound_197 "sound_197"
+bind sound_198 "sound_198"
+bind sound_199 "sound_199"
+bind sound_200 "sound_200"
+bind sound_201 "sound_201"
+bind sound_202 "sound_202"
+bind sound_203 "sound_203"
+bind sound_204 "sound_204"
+bind sound_205 "sound_205"
+bind sound_206 "sound_206"
+bind sound_207 "sound_207"
+bind sound_208 "sound_208"
+bind sound_209 "sound_209"
+bind sound_210 "sound_210"
+bind sound_211 "sound_211"
+bind sound_212 "sound_212"
+bind sound_213 "sound_213"
+bind sound_214 "sound_214"
+bind sound_215 "sound_215"
+bind sound_216 "sound_216"
+bind sound_217 "sound_217"
+bind sound_218 "sound_218"
+bind sound_219 "sound_219"
+bind sound_220 "sound_220"
+bind sound_221 "sound_221"
+bind sound_222 "sound_222"
+bind sound_223 "sound_223"
+bind sound_224 "sound_224"
+bind sound_225 "sound_225"
+bind sound_226 "sound_226"
+bind sound_227 "sound_227"
+bind sound_228 "sound_228"
+bind sound_229 "sound_229"
+bind sound_230 "sound_230"
+bind sound_231 "sound_231"
+bind sound_232 "sound_232"
+bind sound_233 "sound_233"
+bind sound_234 "sound_234"
+bind sound_235 "sound_235"
+bind sound_236 "sound_236"
+bind sound_237 "sound_237"
+bind sound_238 "sound_238"
+bind sound_239 "sound_239"
+bind sound_240 "sound_240"
+bind sound_241 "sound_241"
+bind sound_242 "sound_242"
+bind sound_243 "sound_243"
+bind sound_244 "sound_244"
+bind sound_245 "sound_245"
+bind sound_246 "sound_246"
+bind sound_247 "sound_247"
+bind sound_248 "sound_248"
+bind sound_249 "sound_249"
+bind sound_250 "sound_250"
+bind sound_251 "sound_251"
+bind sound_252 "sound_252"
+bind sound_253 "sound_253"
+bind sound_254 "sound_254"
+bind sound_255 "sound_255"
+bind sound_256 "sound_256"
+bind sound_257 "sound_257"
+bind sound_258 "sound_258"
+bind sound_259 "sound_259"
+bind sound_260 "sound_260"
+bind sound_261 "sound_261"
+bind sound_262 "sound_262"
+bind sound_263 "sound_263"
+bind sound_264 "sound_264"
+bind sound_265 "sound_265"
+bind sound_266 "sound_266"
+bind sound_267 "sound_267"
+bind sound_268 "sound_268"
+bind sound_269 "sound_269"
+bind sound_270 "sound_270"
+bind sound_271 "sound_271"
+bind sound_272 "sound_272"
+bind sound_273 "sound_273"
+bind sound_274 "sound_274"
+bind sound_275 "sound_275"
+bind sound_276 "sound_276"
+bind sound_277 "sound_277"
+bind sound_278 "sound_278"
+bind sound_279 "sound_279"
+bind sound_280 "sound_280"
+bind sound_281 "sound_281"
+bind sound_282 "sound_282"
+bind sound_283 "sound_283"
+bind sound_284 "sound_284"
+bind sound_285 "sound_285"
+bind sound_286 "sound_286"
+bind sound_287 "sound_287"
+bind sound_288 "sound_288"
+bind sound_289 "sound_289"
+bind sound_290 "sound_290"
+bind sound_291 "sound_291"
+bind sound_292 "sound_292"
+bind sound_293 "sound_293"
+bind sound_294 "sound_294"
+bind sound_295 "sound_295"
+bind sound_296 "sound_296"
+bind sound_297 "sound_297"
+bind sound_298 "sound_298"
+bind sound_299 "sound_299"
+bind sound_300 "sound_300"
+bind sound_301 "sound_301"
+bind sound_302 "sound_302"
+bind sound_303 "sound_303"
+bind sound_304 "sound_304"
+bind sound_305 "sound_305"
+bind sound_306 "sound_306"
+bind sound_307 "sound_307"
+bind sound_308 "sound_308"
+bind sound_309 "sound_309"
+bind sound_310 "sound_310"
+bind sound_311 "sound_311"
+bind sound_312 "sound_312"
+bind sound_313 "sound_313"
+bind sound_314 "sound_314"
+bind sound_315 "sound_315"
+bind sound_316 "sound_316"
+
+// Global variables
+// Used global offsets from original: [0, 8, 56, 60, 64]
+// Original globals_area = 68 bytes
+// NOTE: MDEdit pre-defines Var00-Var15 at offsets 0-60 (64 bytes)
+global INT counter
+
+// Section forward declarations
+declsection Begin
+declsection Poll
+declsection Title
+declsection Cycle
+declsection Route
+declsection Fault
+declsection Setup
+declsection Profile
+declsection Solo
+declsection Lobby
+declsection Server
+
+section Begin
+{
+Var14 = 0
+counter = 0
+SV(250)
+enter Poll
+}
+
+section Poll
+{
+on (Var00) enter Title Title Title
+enter Title
+}
+
+section Title
+{
+SV(250)
+if ((Var14 == 0))
+{
+    Var14 = 1
+    play sound_1
+}
+else
+{
+    enter Cycle
+}
+enter Poll
+}
+
+section Cycle
+{
+SV(250)
+play sound_2
+if ((Var02 != 1))
+{
+    enter Route
+}
+play sound_3
+if ((Var02 != 1))
+{
+    enter Route
+}
+play sound_256
+if ((Var02 != 1))
+{
+    enter Route
+}
+enter Cycle
+}
+
+section Route
+{
+if ((Var02 == 0))
+{
+    enter Fault
+}
+if ((Var02 == 9))
+{
+    play sound_12
+    enter Setup
+}
+if ((Var02 == 10))
+{
+    enter Profile
+}
+if ((Var02 == 11))
+{
+    enter Solo
+}
+if ((Var02 == 5))
+{
+    enter Lobby
+}
+enter Server
+}
+
+section Fault
+{
+play sound_4
+enter Poll
+}
+
+section Setup
+{
+SV(250)
+play sound_5
+if ((Var02 != 9))
+{
+    play sound_6
+    enter Route
+}
+enter Setup
+}
+
+section Profile
+{
+play sound_300
+if ((Var02 != 10))
+{
+    enter Route
+}
+enter Profile
+}
+
+section Solo
+{
+play sound_7
+if ((Var02 != 11))
+{
+    play sound_8
+    enter Route
+}
+enter Solo
+}
+
+section Lobby
+{
+SV(250)
+if ((Var15 == 0))
+{
+    Var15 = 1
+    play sound_9
+    if (((Var02 != 5) && (Var02 != 6)))
+    {
+        play sound_10
+        enter Route
+    }
+    play sound_316
+}
+counter = 1
+enter Lobby
+}
+
+section Server
+{
+play sound_11
+if (((Var02 != 5) && (Var02 != 6)))
+{
+    enter Route
+}
+enter Server
+}

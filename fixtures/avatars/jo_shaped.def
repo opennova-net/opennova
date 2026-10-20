@@ -1,0 +1,225 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+// Avatars.def in JO's shape, authored for the avatars tests (fixtures/README.md)
+//
+////////////////////////////////////////////////////////////////////////////////
+// voice (attached to heads)
+//		1   BM1	=	first voice
+//		2	BM2	=	second voice
+//
+// The constructs JO's table uses: banners, tab alignment, a comment after a
+// header and after a value, quoted names holding blanks and a '-', ids
+// spelled N00 / D00 / 001, a trailing "skipdemo" after a nationality's and a
+// division's name, and a second set of parts below the good nationalities
+// with the evil one under it.
+////////////////////////////////////////////////////////////////////////////////
+
+
+//////// heads ////////
+
+define head		JO_HEAD_SEAL
+{
+	name		AV_BOONIEHAT
+	graphic		Boonie.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_SEAL_CAMO_1
+{
+	name		AV_BOONIEHAT
+	graphic		Boonie.3di
+	camo		3 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_MASK
+{
+	name		AV_FACESHIELD	//the dark one
+	graphic		Mask.3di
+	camo		0 0 0
+	voice		2
+	sex			m
+}
+
+define head		JO_HEAD_COMBAT //a helmet
+{
+	name		AV_HELMET
+	graphic		Helmet.3di
+	camo		0 1 0
+	voice		3
+	sex			m
+}
+
+define head		JO_HEAD_FEMALE_BERET	// a beret
+{
+	name		AV_BERET
+	graphic		BeretF.3di
+	camo		0 0 0
+	voice		5
+	sex			f
+}
+
+
+//////// bodies ////////
+
+define body		JO_BODY_SEAL_1
+{
+	name		AV_WOODLAND
+	graphic		SealB1.3di
+	camo		0 0 0
+}
+
+define body		JO_BODY_SEAL_2
+{
+	name		AV_DESERT
+	graphic		SealB2.3di
+	camo		1 0 0
+}
+
+define body		JO_BODY_FEMALE_1
+{
+	name		AV_WOODLAND
+	graphic		FemB1.3di
+	camo		0 0 0
+}
+
+
+//////// arms ////////
+
+define arms		JO_ARMS_US_1
+{
+	name		"US Camo -Black Gloves"
+	graphic		ArmsUS1.3di
+	camo		0 0 0
+}
+
+define arms		JO_ARMS_US_2
+{
+	name		"Olive Camo -Green Flight Gloves"
+	graphic		ArmsUS2.3di
+	camo		0 0 0
+}
+
+define arms		JO_ARMS_BARE
+{
+	name		"Bare Arms"
+	graphic		ArmsBare.3di
+	camo		0 0 0
+}
+
+
+//////// nationalities ////////
+
+nationality  N00  AV_NAT_UNITEDSTATES
+{
+	alignment	good
+
+	division  D00  AV_DIV_SEAL skipdemo
+	{
+		combo	001		JO_HEAD_SEAL		JO_BODY_SEAL_1		JO_ARMS_US_1
+		combo	002		JO_HEAD_SEAL_CAMO_1	JO_BODY_SEAL_2		JO_ARMS_US_1
+		combo	003		JO_HEAD_MASK		JO_BODY_SEAL_1		JO_ARMS_US_2
+		combo	004		JO_HEAD_COMBAT		JO_BODY_SEAL_2		JO_ARMS_BARE
+	}
+	division  D01  AV_DIV_DELTAFORCE skipdemo
+	{
+		combo	001		JO_HEAD_COMBAT		JO_BODY_SEAL_1		JO_ARMS_US_1
+	}
+	division  D02  AV_DIV_FORCERECON
+	{
+		combo	001		JO_HEAD_MASK		JO_BODY_SEAL_2		JO_ARMS_US_2
+	}
+	division  D03  AV_DIV_RANGER
+	{
+		combo	001		JO_HEAD_SEAL		JO_BODY_SEAL_2		JO_ARMS_US_1
+	}
+	division  D04  AV_DIV_GREENBERET skipdemo
+	{
+		combo	001		JO_HEAD_COMBAT		JO_BODY_SEAL_2		JO_ARMS_US_2
+	}
+	division  D05  AV_DIV_USMC skipdemo
+	{
+		combo	001		JO_HEAD_SEAL		JO_BODY_SEAL_1		JO_ARMS_BARE
+	}
+	division  D06  AV_DIV_ARMY
+	{
+		combo	001		JO_HEAD_MASK		JO_BODY_SEAL_1		JO_ARMS_US_1
+	}
+	division  D07  AV_DIV_PILOT skipdemo
+	{
+		combo	001		JO_HEAD_COMBAT		JO_BODY_SEAL_1		JO_ARMS_US_2
+	}
+	division  D08  AV_DIV_USAFCOMBATOP skipdemo
+	{
+		combo	001		JO_HEAD_FEMALE_BERET	JO_BODY_FEMALE_1	JO_ARMS_US_1
+	}
+}
+
+nationality  N01  AV_NAT_GREATBRITAIN  skipdemo
+{
+	alignment	good
+
+	division  D00  AV_DIV_SAS
+	{
+		combo	001		JO_HEAD_COMBAT		JO_BODY_SEAL_2		JO_ARMS_US_1
+		combo	002		JO_HEAD_FEMALE_BERET	JO_BODY_FEMALE_1	JO_ARMS_BARE
+	}
+}
+
+nationality  N04  AV_NAT_RUSSIA  skipdemo
+{
+	alignment	good
+
+	division  D00  AV_DIV_SPETSNAZ
+	{
+		combo	001		JO_HEAD_MASK		JO_BODY_SEAL_2		JO_ARMS_US_2
+	}
+}
+
+
+//////// the rebels' parts ////////
+
+define head		RB_HEAD_BOONIE
+{
+	name		AV_BOONIEHAT
+	graphic		RebelH1.3di
+	camo		0 0 0
+	voice		7
+	sex			m
+}
+
+define body		RB_BODY_TSHIRT
+{
+	name		AV_TSHIRT
+	graphic		RebelB1.3di
+	camo		0 0 0
+}
+
+define arms		RB_ARMS_BARE
+{
+	name		"Bare Arms"
+	graphic		RebelA1.3di
+	camo		0 0 0
+}
+
+
+nationality  N07  AV_NAT_INDONESIANREBEL
+{
+	alignment	evil
+
+	division  D00  AV_DIV_REBELMILITIA
+	{
+		combo	001		RB_HEAD_BOONIE		RB_BODY_TSHIRT		RB_ARMS_BARE
+		combo	002		RB_HEAD_BOONIE		RB_BODY_TSHIRT		JO_ARMS_BARE
+	}
+	division  D01  AV_DIV_EXMILITARY  skipdemo
+	{
+		combo	001		RB_HEAD_BOONIE		JO_BODY_SEAL_1		RB_ARMS_BARE
+	}
+}
+
+
+

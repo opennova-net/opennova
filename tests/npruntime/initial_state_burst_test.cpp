@@ -1213,6 +1213,60 @@ int location_names_by_name_index_impl() {
 	std::printf("PASS location_names_by_name_index\n");
 	return 0;
 }
+
+// A host context brought up with no resolved MissionText location table (a
+// tool or test embedder) names the 0x0F deploy-map labels from the promoted
+// type-2044 markers' own labels, in spawn order.
+int location_names_fall_back_to_marker_labels_impl() {
+	w::World world;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(3, 16);
+	const auto add_marker = [&](int32_t type_id, const char *label) {
+		w::Entity m;
+		m.kind = w::EntityKind::Marker;
+		m.item_id = type_id;
+		m.name = label;
+		m.position = {static_cast<float>(world.registry.live_count()), 20.0f, 1.0f};
+		m.item_type_index = 1; // the trait sweep's row: not an empty slot
+		m.has_item_def = true;
+		world.registry.spawn(3, m);
+	};
+	add_marker(6002, "");
+	add_marker(2044, "North Ridge");
+	add_marker(2044, "South Pier");
+	ns::LoopbackChannel loopback;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
+	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
+	ctx.world = &world;
+	ctx.mission_location_names.clear();
+	inmatch::Server_InitNewRoundState(ctx);
+	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
+	const std::vector<uint8_t> *body = nullptr;
+	std::vector<inmatch::InitialStateMessage> emitted;
+	bool reached = false;
+	for (int i = 0; i < 64 && !reached; ++i) {
+		inmatch::InitialStateStep step =
+				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
+		if (!step.advanced) break;
+		for (auto &m : step.messages) emitted.push_back(m);
+		reached = step.reached_in_game;
+	}
+	for (const inmatch::InitialStateMessage &m : emitted)
+		if (m.tag == 0x0F) body = &m.body;
+	opennova::WorldStateLoad state;
+	if (!expect(reached && body != nullptr &&
+	                    opennova::decode_world_state_load(body->data(), body->size(), state),
+	            "the fallback burst carries a decodable 0x0F"))
+		return 1;
+	const std::vector<std::string> want = {"North Ridge", "South Pier"};
+	if (!expect(state.team_name_count == want.size() && state.team_names == want,
+	            "the 0x0F names fall back to the location markers' labels in spawn order"))
+		return 1;
+	std::printf("PASS location_names_fall_back_to_marker_labels\n");
+	return 0;
+}
 } // namespace
 
 int main() {
@@ -1221,6 +1275,9 @@ int main() {
 	const int bytes = pool1_fixture_bytes_impl();
 	const int pool3 = pool3_page_start_impl();
 	const int locations = location_names_by_name_index_impl();
+	const int fallback = location_names_fall_back_to_marker_labels_impl();
 	return burst != 0 ? burst
-	                  : (flags != 0 ? flags : (bytes != 0 ? bytes : (pool3 != 0 ? pool3 : locations)));
+	                  : (flags != 0 ? flags
+	                                : (bytes != 0 ? bytes
+	                                              : (pool3 != 0 ? pool3 : (locations != 0 ? locations : fallback))));
 }

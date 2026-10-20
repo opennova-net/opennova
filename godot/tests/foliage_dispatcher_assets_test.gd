@@ -152,6 +152,53 @@ func test_clear_asset_cache_drops_every_entry() -> void:
 		"clear_asset_cache drops every cache (listing, path, mesh and :fd).")
 
 
+# Every foliage slot a terrain authors resolves end to end: the minted Tmap
+# (tests/fixtures/minimal_terrain_gen.cpp) authors two foliage blocks in the
+# shape of the retail Dvxi5 this witness first ran on (Dvxi5: mveg5b.3di
+# matching 254, mveg5.3di matching 253; Tmap: bush1.3di on 254, bush2.3di on
+# 253), each graphic a synthetic model whose diffuse is staged beside it.
+func test_terrain_foliage_assets_enable_every_authored_slot() -> void:
+	var resource_root := _prepare_terrain_foliage_fixture()
+	var terrain := TerrainData.new()
+	assert_eq(terrain.load_from_resource_root(resource_root, TestFs.TMAP_TRN), OK)
+	var defs: Array = terrain.get_foliage_defs()
+	assert_gt(defs.size(), 0, 'Tmap must contain authored foliage definitions.')
+	var meshes := _dispatcher.resolve_slot_meshes(resource_root, defs)
+	var textures := _dispatcher.resolve_slot_fd_textures(resource_root, defs)
+	_dispatcher.configure_slots(defs, meshes, textures)
+
+	var diagnostics: Array = _dispatcher.get_slot_diagnostics()
+	for slot in range(defs.size()):
+		assert_true(meshes[slot] is Mesh,
+			'The foliage graphic must resolve for authored slot %d.' % slot)
+		assert_true(textures[slot] is Texture2D,
+			'The foliage diffuse must produce an :fd texture for slot %d.' % slot)
+		assert_eq(String(diagnostics[slot].status), 'enabled',
+			'Authored foliage slot %d must reach the renderer.' % slot)
+	var stats := _dispatcher.get_frame_stats()
+	assert_eq(int(stats.enabled_slots), defs.size())
+	assert_eq(int(stats.disabled_slots), 0)
+
+
+# The Tmap terrain over the minimal assets it names, its two foliage graphics
+# (the bird and the house) and their materials' diffuse textures.
+func _prepare_terrain_foliage_fixture() -> ResourceRoot:
+	var root := _fixture_root()
+	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
+	for source in [TestFs.TMAP_FIXTURE_DIR, TestFs.BOOT_FIXTURE_DIR]:
+		var source_dir := ProjectSettings.globalize_path(source)
+		for file_name in DirAccess.get_files_at(source_dir):
+			TestFs.copy(self, source_dir.path_join(file_name), root.path_join(file_name))
+	TestFs.copy(self, ProjectSettings.globalize_path(SOURCE_OBJECT), root.path_join("bush1.3di"))
+	TestFs.copy(self, ProjectSettings.globalize_path(OVERRIDE_OBJECT), root.path_join("bush2.3di"))
+	for texture in ["bird.tga", "wall.tga", "roof.tga", "wood.tga"]:
+		TestFs.write_bytes(self, root.path_join(texture),
+				TestFs.tga_bytes(Vector2i(64, 64), Color(0.25, 0.5, 0.25, 1.0)))
+	var resource_root := ResourceRoot.new()
+	assert_eq(resource_root.set_root_dir(root), OK)
+	return resource_root
+
+
 func _prepare_veg_fixture(filename: String) -> ResourceRoot:
 	var root := _fixture_root()
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)

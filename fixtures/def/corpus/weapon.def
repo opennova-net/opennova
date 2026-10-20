@@ -1,0 +1,357 @@
+
+
+
+
+
+ammoclass_max_carry CLASS_CORPUS_A			1000
+ammoclass_max_carry CLASS_CORPUS_B		250
+
+// Authored for the def writers' corpus legs (fixtures/README.md): weapon blocks that together use
+// every key JO:CA's weapon.def and its jox01 expansion's use, each in the forms the two files write
+// its values in (pos/tpos with and without commas, reals spelled 1.5 / 2.500 / .35 / -.574,
+// `delayend 3 \\auto`, a SIGHTS row with its scale or slide flag), the stray `v` lines between two
+// blocks the game reads nothing of, and the top-of-file ammoclass_max_carry rows. No value here is
+// shipped data.
+
+weapon "WPN_CORPUSKNIFE"
+	category 1
+	rank     0
+	statid 120
+
+	teamfilter	blue
+	charfilter	medic
+	charfilter	sniper
+	charfilter	gunner
+	charfilter	rifleman
+	charfilter	engineer
+
+	round_type  "AMMO_CORPUSBLADE"
+	clipsize    -1
+	startrounds -1
+	error 0 0 0 0 0 0
+	targetpitchmax  85
+	targetpitchmin  85
+	targetyawrange  120
+	launchuserpoint bullet
+
+	attack_anim	 1
+	special_hold 1
+	run_anim	 1
+
+	flags Underwater
+	flags WhileSwimming
+
+	crosshair corpus01.tga
+	hudicon H_cknife.tga
+
+	animadm cknf_1st
+
+	gfx1 Cknf_1st
+	gfx1a armsC
+	gfx1b armsCb
+  	gfx3 CKNF_3rd
+	pos  5 -6 -180 0 0 0
+
+	action "idle"
+		delayend		  auto
+		anim		  anim_wpn_idle
+		function      wpn_std_idle
+	end
+
+	action "fire"
+		delaystart		0
+		delayend		0
+		soundsetend		GS_CKNIFE
+		anim			anim_wpn_idle
+		function		wpn_std_fire
+	end
+
+	action "recoil"
+		delaystart	auto
+		anim		  anim_wpn_fire
+		function      wpn_std_recoil
+	end
+end
+
+
+weapon "WPN_CORPUSRIFLE"
+	category 3
+	rank     1
+	statid 320
+
+	teamfilter	red
+	teamfilter	blue
+
+	charfilter	rifleman
+	charfilter	medic
+
+	loadout_selectable	1
+	loadout_subclasses	1
+
+	maxclips		8
+	clipweight		1.25
+	weaponweight	6.5
+
+	loadout_menu_icon	M_crifle.tga
+	loadout_menu_textid	WEAP_SHORT_CORPUS
+	loadout_menu_ttdesc WEAP_DESC_CORPUS
+	weapon_class	primary
+
+	round_type		"AMMO_CORPUS_556"
+	clipsize		30
+	startrounds		240
+	error 0.0125 0.15 0.2 0.0125 0.025 0.04
+	targetpitchmax  22
+	targetpitchmin  50
+	targetyawrange  120
+	ammoclass		CLASS_CORPUS_A 1
+	ammobucket		1
+	launchuserpoint bullet
+
+	flags auto
+	flags Sighted
+	scope_max_mag	2
+	scope_min_mag	1
+	flags WhileSwimming
+	flags LaserBeam
+
+	sights  crpsaim.tga   112  0 889 768 blend
+	sights  crpsgls.tga   112  0 896 774 multiplyat
+	sights  crpsdot.tga    496  368 527 399 add		scale
+
+	crosshair corpus02.tga
+	hudicon H_crifle.tga
+	hudclipgfx 	 0  0		H_cclip.tga
+	hudrndgfx	 6  0 4 0 1	H_cround.tga
+
+	animadm crfl_1st
+
+	gfx1 Crfl_1st
+	gfx1a armsC
+	gfx1b armsCb
+	gfx3 CRFL_3RD
+  	pos  -20.55, 21.25, -160.00 2.500, 0.750, 356.750
+	tpos -50.25, 38.50, -150.75, 1.250, 2.250, 0.250
+
+	action "fire"
+		delayend			3	\\auto
+		soundsetend			GS_CRIFLE
+		anim				anim_wpn_fire
+		function			wpn_std_fire
+		particle			Effect_CorpusMF
+		particleuserpoint	mflash01
+	end
+
+	action "reload"
+		delaystart			100
+		delayend			auto
+		soundset			GF_CRIFLE_RL
+		anim				anim_wpn_reload
+		function			wpn_std_reload
+	end
+end
+
+v
+v
+
+weapon "WPN_CORPUSLAUNCHER"
+	category 3
+	rank     9
+	statid 329
+
+	charfilter	rifleman
+
+	maxclips		6
+	clipweight		.35
+	weaponweight	12
+
+	round_type		"AMMO_CORPUS_40MM"
+	clipsize		1
+	startrounds		6
+	error 0.7 1.4 1.40 0.7 0.7 0.7
+	ammoclass		CLASS_CORPUS_B	1
+	classrounds		gunner 2
+	classrounds		sniper 4
+	launchuserpoint grenade
+
+	flags	QuickSwitch
+	flags	Sighted
+	flags	ShowElevation
+
+	scope_max_mag	2
+	scope_max_zero 8 40 0 0
+
+	sights  cl203a.tga   112  0 883 768 blendat
+    sights  CLirnB.tga   447  356 576 485 blend
+	sights  cl203b.tga   112  -68 892 703 blendat slide 33
+
+	crosshair csoflam1.tga csoflam2.tga
+	hudicon H_clnch.tga
+
+	animadm cl203_2nd
+	gfx1 cl203_1st
+	gfx3 cl203_3RD
+  	pos  -15.25, 20.00, -170.00 1.500, 3.750, 358.250
+	tpos -44.13 42.75 -148.53 -0.5 -2 0
+
+	action "fire"
+		delayend			auto
+		soundsetend			GS_CLAUNCH
+		function			wpn_std_fire
+		particle			Effect_CorpusGrenMF
+		particleuserpoint	mflash02
+	end
+end
+
+weapon "WPN_CORPUSMORTAR"
+	category 7
+	rank     3
+	statid 523
+
+	teamfilter	red
+	charfilter	engineer
+	weapon_class	accessory
+
+	error 3 3 3 3 3 3
+	error_hipTheta 4
+	error_upTheta 4
+
+	flags   AbsorbPitch
+	flags   2DImpact
+	flags   NoMove
+	flags	NoCardSwitch
+	flags	ForceCrouch
+	flags   OnlyScoped
+	flags	OnlyFireScoped
+	flags	UseDesignator
+	flags	UseSpreadTwo
+	flags	ShowImpactDist
+	designation_time 30
+	splash  4
+
+	pos  8.75, 1.25, -240.50 356.000, 18.500, 1.250
+	tpos 80.50, -10.75, -320.25 0.000, 11.500, 0.000
+
+	action "scopeup"
+		delaystart    60
+		function      wpn_std_scopeup_map
+		soundset	GF_CMORTAR_DPLOY
+	end
+end
+
+weapon "WPN_CORPUSMINIGUN"
+	category 11
+	rank     0
+	statid 930
+
+	round_type  "AMMO_CORPUS_762"
+	clipsize    -1
+	startrounds 3000
+	error 0.07 0.07 0.07 0.07 0.07 0.07 0.07
+	targetpitchmax  15
+	targetpitchmin  45
+	targetyawrange  180
+
+	vmacrotoken gunn
+	emplacedstance	5
+	launchuserpoint camera
+
+	heat_values 3,5
+	heat_effect heat, .25, 20, 50
+
+	soundfireloop LP_GS_CMINIGUN
+	soundhead GS_CMINIHEAD
+	soundtrailoff GS_CMINITAIL
+	soundlockedtone TONE_CLOCK
+
+	commandersX UiCGunner.tga
+	attachtextid attach_corpusmini
+	crosshair 50cal.tga
+	hudicon h_cmini.tga
+
+	farpinfo	3  2
+
+	flags auto
+	flags Emplaced
+	flags ForceScoped
+	flags ShowComander
+
+	scope_max_zero   1  90 90 1
+	scope_max_mag	8	2
+	scope_paralax_distance		-.574
+	Tpos  -18 0 -150 0 0 0
+	pos  -60 0 -150 0 0 0
+
+	action "fire"
+		anim				anim_wpn_fire
+		soundsetend			GS_CMINI
+		delayend			auto
+		function			wpn_std_fire
+		particle			Effect_CorpusMiniMuz
+		particleuserpoint	mflash01
+		action_value		10
+	end
+
+	action "overheated"
+		anim				anim_wpn_idle
+		delaystart		1
+		delayend		1
+		function			wpn_std_emptyidle
+		particleuserpoint	heat
+		particle			fx_coverheat1
+	end
+end
+
+weapon "WPN_CORPUSCANNON"
+	category 11
+	rank     21
+	statid 931
+
+	round_type  "AMMO_CORPUS_120"
+	clipsize    1
+	startrounds 40
+	error 0.05 0.05 0.05 0.05 0.05 0.05
+
+	heat_values .5,4
+	vmacrotoken gunn
+	attachtextid attach_corpuscannon
+	scope_max_zero 10 100 250 1
+	scope_paralax_distance		.814
+	pos  -14 0 -152 0 0 0
+	Tpos  -16.5 0.5 -155.25 0.5 1 0
+
+	action "reload"
+		delaystart		100
+		delayend        307
+		soundset		GF_CTANK_RL
+		function		wpn_std_reload
+	end
+end
+
+weapon "WPN_CORPUSGRENADE"
+	category 5
+	rank     0
+	statid 540
+
+	charfilter	medic
+	charfilter	rifleman
+
+	loadout_selectable	1	
+	loadout_subclasses	0	
+	maxclips		3			
+	clipweight		.5			
+	weaponweight	.5		
+	weapon_class	grenade
+
+	round_type		"AMMO_CORPUS_FRAG"
+	clipsize		1
+	startrounds		3
+	ammoclass		CLASS_CORPUS_B	1
+	launchuserpoint grenade
+
+	action "fire"
+		delayend			auto
+		soundsetend			GS_CTHROW
+		function			wpn_std_fire
+	end
+end

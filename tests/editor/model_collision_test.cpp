@@ -10,39 +10,39 @@
 // smallest sphere; the words name each volume type as the game acts on it; a live part carries its
 // section's shapes.
 //
-// Retail (a leg, OPENNOVA_JO_DIR): every model the game install serves: each volume's planes make a solid
-// inside its box (a flat ladder its facing), each face a triangle, how long the shapes take.
+// The shipped forms: over every model of the format's fixtures (the synthetic set and the forms of the
+// shipped models the threedi rows mint, model_variant_files.h), each volume's planes make a solid inside
+// its box; and a model minted with the shipped models' other volumes (a flat ladder, planes that bound no
+// solid, planes reaching past the box, a box stored inside out) shows each as the game tests it.
 #include <editor/documents/model_collision_words.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
 #include <editor/preview/model_collision.h>
 #include <editor/project/project_document.h>
 
-#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
-#include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
-#include <base/vfs/vfs.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
+#include <formats/threedi/threedi_o3d_lower.h>
 #include <formats/threedi/threedi_panm_pose.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/renderer/model_target.h>
 #include <formats/threedi/threedi_strip_decode.h>
 #include <formats/threedi/threedi_volume_solid.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/model_geometry.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/model_variant_files.h"
 
 using namespace opennova::editor;
-using opennova::pff::normalized_logical_name;
 using namespace opennova::threedi;
 namespace fs = std::filesystem;
 
@@ -385,109 +385,153 @@ int picking() {
 	return 0;
 }
 
-// Every model the game install serves: each volume's planes make a solid inside its box, each face a
-// triangle; how long the shapes take.
-int retail_collision() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every model's collision as shapes)");
-	const ProjectDocument project;
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string());
-	std::set<std::string> seen;
-	size_t models = 0, volumes = 0, solids = 0, flat = 0, boxes = 0, outside = 0, clipped = 0, inverted = 0, faces = 0,
-	       sections = 0, occlusion = 0;
-	double seconds = 0.0;
-	size_t persons = 0, not_persons = 0;
-	std::vector<std::string> not_person_names;
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::gameprofile::gameprofile_scr_policy_for_code(project.target_game.c_str()));
-		TEST_EXPECT(game.mount_game(root, expansion) && game.has_mounted_archive());
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(fs::path(file.logical_name).extension().string()) != ".3di") continue;
-			if (!seen.insert(file.source_path + "|" + normalized_logical_name(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			if (!game.read_file(file.logical_name, bytes) || bytes.size() < 4 || std::memcmp(bytes.data(), "3DI3", 4) != 0)
-				continue;
-			ModelDocument document;
-			Diagnostic error;
-			if (!document.load_bytes(bytes, file.logical_name, AssetKind::Model, project.target_game, error)) continue;
-			const ModelRow *row = document.model_row();
-			if (!row || !row->base || !row->base->collision) continue;
-			++models;
-			const ThreediCollisionModel &c = *row->base->collision;
-			size_t plane_cursor = 0;
-			for (size_t v = 0; v < c.volume_count; ++v) {
-				const ThreediBoundingVolume &bv = c.volumes[v];
-				const size_t planes = bv.plane_count > 0 ? size_t(bv.plane_count) : 0;
-				if (plane_cursor + planes > c.plane_count) break;
-				// The planes' own solid, then within the box (the game's quick test): how many reach past it.
-				const bool reaches = !inside_box(threedi_volume_polygons(c.planes + plane_cursor, planes, bv.collidable_type == 4), bv);
-				clipped += reaches ? 1 : 0;
-				const auto polygons = threedi_volume_solid(bv, c.planes + plane_cursor);
-				plane_cursor += planes;
-				++volumes;
-				if (polygons.empty()) ++boxes;
-				else if (polygons.size() == 1) ++flat;
-				else ++solids;
-				const bool inside_out = bv.min_x_fp16 > bv.max_x_fp16 || bv.min_y_fp16 > bv.max_y_fp16 ||
-				                        bv.min_z_fp16 > bv.max_z_fp16;
-				inverted += inside_out ? 1 : 0;
-				if (!inside_out && !inside_box(polygons, bv)) {
-					++outside;
-					if (outside <= 8)
-						std::printf("retail collision: %s volume %zu (type %d, %d planes, %zu facets): its solid "
-						            "reaches %.3f m past its box %.3f %.3f %.3f .. %.3f %.3f %.3f\n",
-						            file.logical_name.c_str(), v, bv.collidable_type, bv.plane_count, polygons.size(),
-						            past_box(polygons, bv), bv.min_x_fp16 / 65536.0, bv.min_y_fp16 / 65536.0,
-						            bv.min_z_fp16 / 65536.0, bv.max_x_fp16 / 65536.0, bv.max_y_fp16 / 65536.0,
-						            bv.max_z_fp16 / 65536.0);
-				}
-			}
-			int32_t bus[96] = {};
-			const auto start = std::chrono::steady_clock::now();
-			const auto shapes = model_collision_shapes(row->base, 0, 0, bus, every_layer());
-			seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-			// The skinned models: a person's (its bone sections hit spheres) or not (no face anywhere).
-			if (row->base->header.mesh_type == THREEDI_MESH_SKINNED) {
-				bool bones = false, person = false;
-				for (size_t o = 0; o < c.object_count; ++o) {
-					bones = bones || (c.objects[o].num_faces == 0 && c.objects[o].num_bounding_volumes == 0 && c.objects[o].radius > 0);
-					person = person || opennova::world::model_section_is_person_sphere(*row->base, o);
-				}
-				if (bones) {
-					(person ? persons : not_persons) += 1;
-					if (!person && not_person_names.size() < 6) not_person_names.push_back(file.logical_name);
-				}
-			}
-			for (const ModelCollisionShape &s : shapes) {
-				faces += s.kind == ModelCollisionKind::Face ? 1 : 0;
-				sections += s.kind == ModelCollisionKind::Section ? 1 : 0;
-				occlusion += s.kind == ModelCollisionKind::Occlusion ? 1 : 0;
-			}
+// Every model of the format's fixtures (each form of the shipped models the threedi rows mint there): each
+// volume's planes make a solid inside its stored box, a box stored inside out aside (the install's 14,811
+// volumes, none leaving its box), and every volume a shape.
+int volumes_inside_boxes() {
+	const model_variants::Files models = model_variants::models();
+	size_t volumes = 0;
+	for (const std::string &path : models.paths) {
+		ModelDocument document;
+		TEST_EXPECT(load(document, model_variants::repo_path(path), fs::path(path).filename().generic_string()));
+		const ModelRow *row = document.model_row();
+		if (!row || !row->base || !row->base->collision) continue;
+		const ThreediCollisionModel &c = *row->base->collision;
+		size_t plane_cursor = 0;
+		for (size_t v = 0; v < c.volume_count; ++v) {
+			const ThreediBoundingVolume &bv = c.volumes[v];
+			const size_t planes = bv.plane_count > 0 ? size_t(bv.plane_count) : 0;
+			TEST_EXPECT(plane_cursor + planes <= c.plane_count);
+			const auto polygons = threedi_volume_solid(bv, c.planes + plane_cursor);
+			plane_cursor += planes;
+			const bool inside_out = bv.min_x_fp16 > bv.max_x_fp16 || bv.min_y_fp16 > bv.max_y_fp16 ||
+			                        bv.min_z_fp16 > bv.max_z_fp16;
+			if (!inside_out && !inside_box(polygons, bv))
+				std::printf("volumes: %s volume %zu (type %d, %d planes): its solid reaches %.3f m past its box\n", path.c_str(),
+				            v, bv.collidable_type, bv.plane_count, past_box(polygons, bv));
+			TEST_EXPECT(inside_out || inside_box(polygons, bv));
+			++volumes;
 		}
+		int32_t bus[96] = {};
+		ModelOverlayOptions options;
+		options.volumes = true;
+		TEST_EXPECT(model_collision_shapes(row->base, 0, 0, bus, options).size() == c.volume_count);
 	}
-	if (models == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's models in its archives");
-	std::printf("retail collision: %zu models with collision: %zu volumes (%zu solids, %zu flat, %zu as their box; %zu "
-	            "whose planes reach past their box, clipped to it; %zu boxes inside out; %zu leave it), %zu bullet faces, "
-	            "%zu section spheres, %zu occlusion records; shapes made in %.2f s (first time, every layer)\n",
-	            models, volumes, solids, flat, boxes, clipped, inverted, outside, faces, sections, occlusion, seconds);
-	std::string names;
-	for (const std::string &n : not_person_names) names += (names.empty() ? "" : ", ") + n;
-	std::printf("retail collision: %zu skinned models with bone spheres: %zu persons (a face mesh row), %zu not (%s...)\n",
-	            persons + not_persons, persons, not_persons, names.c_str());
-	TEST_EXPECT(outside == 0);
-	TEST_EXPECT(boxes * 50 <= volumes);
+	TEST_EXPECT(volumes > 20);
+	std::printf("volumes: %zu volumes of the fixtures' models, each solid inside its box\n", volumes);
+	return model_variants::report_missing(models) == 0 ? 0 : 1;
+}
+
+// The shipped models' other volumes, each as the game tests it: a ladder flat in one axis keeps its facing's
+// polygon (the install's 94 flat ladders, Cargo04's); planes whose last one flattens the solid to a face bound
+// none, and the volume shows as its box (the install's 39, Brdg02X's seventh plane); planes reaching past the
+// box are clipped to it (I_LFP2's and I_LFPB's, by 8 cm; here a slanted top 0.2 m past); a box stored inside
+// out (z above z: the install's four, I_Base1's walls) is named so, its planes' solid standing as authored.
+// And a bullet face rounds pass through is named so.
+int other_volumes() {
+	std::istringstream text(R"(o3d 2
+model VOLUMES
+material FF_ST_OP
+texture wall.tga 1 0 0 0
+lod 200 gnrc
+part 0 0 0 0
+mesh 0 0
+v 0 -1 0 1 0 0 0 1
+v 0 1 0 1 0 0 1 1
+v 0 1 2 1 0 0 1 0
+t 0 1 2
+panm 0 0
+cobj 0 0 0 0
+cvolume 4 0 1 1.5 0 2 1.5 3
+cp 0 1 0 -1.5
+cp -1 0 0 1
+cp 1 0 0 -2
+cp 0 -1 0 1.5
+cp 0 0 1 -3
+cp 0 0 -1 0
+cvolume 1 1 3 -4 2 4 -2 4
+cp 1 0 0 -4
+cp -1 0 0 3
+cp 0 1 0 2
+cp 0 -1 0 -4
+cp 0 0 1 -4
+cp 0 0 -1 2
+cp 0 -1 0 -2
+cvolume 1 0 -3 -1 0 -2 0 1
+cp 1 0 0 2
+cp -1 0 0 -3
+cp 0 1 0 0
+cp 0 -1 0 -1
+cp 0 0 -1 0
+cp 0.371391 0 0.928477 0
+cvolume 1 0 5 -1 3 6 0 0
+cp 1 0 0 -6
+cp -1 0 0 5
+cp 0 1 0 0
+cp 0 -1 0 -1
+cp 0 0 1 -1
+cp 0 0 -1 0
+cv 0 -1 0
+cv 0 1 0
+cv 0 1 2
+cf 0 1 2 1 256
+)");
+	std::vector<uint8_t> bytes;
+	std::vector<SceneFinding> findings;
+	const bool built = threedi_o3d_build(text, opennova::renderer::retail_model_target(), bytes, findings);
+	for (const SceneFinding &f : findings) std::printf("other volumes: line %d: %s\n", f.line, f.message.c_str());
+	TEST_EXPECT(built);
+	ModelDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(bytes, "volumes.3di", AssetKind::Model, "jo", error));
+	const ModelRow *row = document.model_row();
+	TEST_EXPECT(row && row->base && row->base->collision && row->base->collision->volume_count == 4);
+	if (!row || !row->base || !row->base->collision || row->base->collision->volume_count != 4) return 1;
+	const ThreediCollisionModel &c = *row->base->collision;
+	std::vector<std::vector<std::vector<ThreediBuildVec3>>> own, solid;
+	size_t plane_cursor = 0;
+	for (size_t v = 0; v < c.volume_count; ++v) {
+		const ThreediBoundingVolume &bv = c.volumes[v];
+		own.push_back(threedi_volume_polygons(c.planes + plane_cursor, size_t(bv.plane_count), bv.collidable_type == 4));
+		solid.push_back(threedi_volume_solid(bv, c.planes + plane_cursor));
+		plane_cursor += size_t(bv.plane_count);
+	}
+	int32_t bus[96] = {};
+	ModelOverlayOptions options;
+	options.volumes = true;
+	const std::vector<ModelCollisionShape> shapes = model_collision_shapes(row->base, 0, 0, bus, options);
+	TEST_EXPECT(shapes.size() == 4);
+	if (shapes.size() != 4) return 1;
+	const auto named = [&](size_t v, const char *words) { return shapes[v].name.find(words) != std::string::npos; };
+	// The ladder: one polygon, its facing, inside its box.
+	TEST_EXPECT(solid[0].size() == 1 && inside_box(solid[0], c.volumes[0]) &&
+	            model_volume_type(4).family == ModelVolumeFamily::Ladder && !named(0, "its box"));
+	// No solid: the box drawn, its edges and its six sides' twelve triangles.
+	TEST_EXPECT(solid[1].empty() && named(1, ", its box (its planes bound no solid)") && !shapes[1].edges.empty() &&
+	            shapes[1].triangles.size() == 36);
+	// Past its box: the planes' own solid reaches past it, the one the game tests stays in it.
+	TEST_EXPECT(past_box(own[2], c.volumes[2]) > 0.1 && !solid[2].empty() && inside_box(solid[2], c.volumes[2]));
+	// Inside out: named so, the planes' six facets standing.
+	TEST_EXPECT(named(3, "its box inside out") && solid[3].size() == 6 && !named(3, "planes bound no solid"));
+	for (size_t v = 0; v < 4; ++v) TEST_EXPECT(shapes[v].kind == ModelCollisionKind::Volume && shapes[v].index == int(v));
+	// A face rounds pass (flag 0x100: the rotor blades', 10,066 shipped faces) says so in its name.
+	ModelOverlayOptions faces;
+	faces.bullet_faces = true;
+	const std::vector<ModelCollisionShape> face_shapes = model_collision_shapes(row->base, 0, 0, bus, faces);
+	TEST_EXPECT(face_shapes.size() == 1 && face_shapes[0].name == "Face 1: Dirt, bullets pass");
+	std::printf("other volumes: a flat ladder, planes bounding none, planes past the box, a box inside out; a face "
+	            "rounds pass\n");
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (synthetic_shapes() != 0) return 1;
 	if (a_person_and_a_live_part() != 0) return 1;
 	if (a_part_no_node_drives() != 0) return 1;
 	if (picking() != 0) return 1;
-	return retail_collision();
+	if (other_volumes() != 0) return 1;
+	// The sweep over the format's fixtures last: it names every variant it lacks.
+	return volumes_inside_boxes();
 }

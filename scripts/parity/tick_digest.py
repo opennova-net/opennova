@@ -8,12 +8,12 @@ the test itself; this script drives the RETAIL missions, whose digests depend
 on the local toolchain's float codegen and are therefore compared on one
 machine and never committed.
 
-    python scripts/parity/tick_digest.py --record before      # on the base commit
-    python scripts/parity/tick_digest.py --check before       # after the slice
+    python scripts/parity/tick_digest.py --install <JO dir> --record before  # on the base commit
+    python scripts/parity/tick_digest.py --install <JO dir> --check before   # after the slice
 
-Needs OPENNOVA_JO_DIR (docs/asset-gated-tests.md) and a built
-tick_digest_test binary (scripts/build.sh --no-godot; --binary overrides the
-path). Records live under build/tick_digest/<label>.json, outside the tree.
+Needs a packed retail install (--install) and a built tick_digest_test binary
+(scripts/build.sh --no-godot; --binary overrides the path). Records live under
+build/tick_digest/<label>.json, outside the tree.
 """
 
 from __future__ import annotations
@@ -46,8 +46,8 @@ def find_binary(explicit: str | None) -> Path | None:
     return None
 
 
-def run_digest(binary: Path, mission: str, ticks: int, listen: bool) -> str | None:
-    args = [str(binary), "--mission", mission, "--ticks", str(ticks)]
+def run_digest(binary: Path, install: Path, mission: str, ticks: int, listen: bool) -> str | None:
+    args = [str(binary), "--install", str(install), "--mission", mission, "--ticks", str(ticks)]
     if not listen:
         args.append("--no-listen")
     proc = subprocess.run(args, capture_output=True, text=True, encoding="utf-8",
@@ -56,8 +56,6 @@ def run_digest(binary: Path, mission: str, ticks: int, listen: bool) -> str | No
         parts = line.split()
         if len(parts) == 4 and parts[0] == "digest":
             return parts[3]
-    # The binary resolves the retail root itself (tests/common/retail_paths.h)
-    # and reports `SKIP: needs OPENNOVA_JO_DIR` when it is unset.
     print(f"[tick-digest] {mission}: no digest line (exit {proc.returncode}):\n{proc.stdout}")
     return None
 
@@ -68,6 +66,8 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--record", metavar="LABEL", help="record digests under LABEL")
     mode.add_argument("--check", metavar="LABEL", help="compare digests against LABEL")
+    parser.add_argument("--install", type=Path, required=True,
+                        help="the packed retail install the missions boot from")
     parser.add_argument("--missions", nargs="*", default=list(DEFAULT_MISSIONS))
     parser.add_argument("--ticks", type=int, default=DEFAULT_TICKS)
     parser.add_argument("--no-listen", action="store_true",
@@ -79,10 +79,13 @@ def main() -> int:
     if binary is None:
         print("[tick-digest] tick_digest_test binary not found (build first, or --binary)")
         return 1
+    if not args.install.is_dir():
+        print(f"[tick-digest] --install {args.install} is no folder")
+        return 1
 
     current: dict[str, str] = {}
     for mission in args.missions:
-        digest = run_digest(binary, mission, args.ticks, not args.no_listen)
+        digest = run_digest(binary, args.install, mission, args.ticks, not args.no_listen)
         if digest is None:
             return 1
         current[mission] = digest

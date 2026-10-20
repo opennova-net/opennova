@@ -769,7 +769,9 @@ std::string fill(std::string text, std::initializer_list<std::pair<const char *,
 }
 
 // The object effects the editor makes, one for each shader tag of the base game's models: the family it
-// lights as and what it reads.
+// lights as, what it reads, and whether it asks for the #UV twin as the shipped effect of its tag does: JO:CA's
+// PhongT.fx sets EffectAlt_UV (the registry's VS_PHONGT#UV row), its BDiffT2.fx, SkBPhongT.fx and SkBDiffT.fx
+// set none (no VS_DOT3DIFF2#UV, VS_SKBUMPPHONGT#UV or VS_SKBUMPDIFFT#UV row: runtime/renderer/material_descriptor.h).
 struct ObjectEffect {
 	const char *tag;
 	const char *name; // EffectName
@@ -777,13 +779,15 @@ struct ObjectEffect {
 	bool skinned;     // the skinned layout, its bones in SkinWorldMatrixArray
 	bool phong;       // the Phong highlight, its strength the diffuse texture's alpha
 	bool detail;      // the detail texture on the second UV set
+	bool alt_uv;      // EffectAlt_UV: the TEX_UVXFORM twin registered as the tag and #UV
 };
 constexpr ObjectEffect kObjectEffects[] = {
-	{"VS_PHONGT", "OpenNova: normal-mapped Phong", "normal-mapped Phong", false, true, false},
+	{"VS_PHONGT", "OpenNova: normal-mapped Phong", "normal-mapped Phong", false, true, false, true},
 	{"VS_DOT3DIFF2", "OpenNova: normal-mapped diffuse with detail", "normal-mapped diffuse with a detail texture", false,
-	 false, true},
-	{"VS_SKBUMPPHONGT", "OpenNova: skinned normal-mapped Phong", "skinned normal-mapped Phong", true, true, false},
-	{"VS_SKBUMPDIFFT", "OpenNova: skinned normal-mapped diffuse", "skinned normal-mapped diffuse", true, false, false},
+	 false, true, false},
+	{"VS_SKBUMPPHONGT", "OpenNova: skinned normal-mapped Phong", "skinned normal-mapped Phong", true, true, false, false},
+	{"VS_SKBUMPDIFFT", "OpenNova: skinned normal-mapped diffuse", "skinned normal-mapped diffuse", true, false, false,
+	 false},
 };
 
 const ObjectEffect *object_effect(const std::string &tag) {
@@ -797,7 +801,7 @@ std::string object_text(const ObjectEffect &effect, const std::string &file) {
 	                                   {"WHAT", effect.what},
 	                                   {"TAG", effect.tag},
 	                                   {"NAME", effect.name},
-	                                   {"ALT_UV", effect.skinned ? "" : "\n\tbool EffectAlt_UV = true;"},
+	                                   {"ALT_UV", effect.alt_uv ? "\n\tbool EffectAlt_UV = true;" : ""},
 	                                   {"SHARED", kShared},
 	                                   {"FILTERS", kFilters},
 	                                   {"SKIN_DECL", effect.skinned ? kSkinDecl : ""},

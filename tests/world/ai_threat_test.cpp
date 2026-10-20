@@ -1,15 +1,14 @@
-// The organic ammo seed (§33.35) on the retail data: the slice-1 threat loop
-// (world-wac-ai-re §17).
-// CP01 boots on the engine's own boot policy, the local player walks toward
+// The organic ammo seed (§33.35): the slice-1 threat loop (world-wac-ai-re §17).
+// The mission set's infantry.bms (CP01's foot soldiers by their shipped rows, the
+// minted soldier rig and clips) boots on the engine's own boot policy, the local player walks toward
 // the nearest foot NPC (retail start markers deliberately spawn FARTHEST from
 // the enemy set, net-re §5.2c — out of perception range), then stands still
 // and watches: hostile AI fire must damage and then kill the player, and the
 // AI fire events the presentation layer drains must have been produced.
 // Movement rides the same PlayerInput packet the shell's input router fills;
 // the look is set straight at the target in the engine's BAM frame.
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms).
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <runtime/terrain_query/height_field.h>
 #include <cmath>
@@ -42,7 +41,7 @@ struct Nearest {
 // occupant rides its seat and fires via the D-AI-2 emplacement solver, and an
 // NPC authored with the no-scan slot bit never perceives anyone
 // [orig: aiSlot byte+4 & 1 -> no scan] — both are out of the slice-1 loop.
-Nearest nearest_npc(testrig::RetailMissionRig &rig) {
+Nearest nearest_npc(testrig::MissionRig &rig) {
 	Nearest best;
 	const w::Vec3 player = rig.local.player_position();
 	const w::AiEntity *self = rig.local.player_ai();
@@ -67,13 +66,16 @@ Nearest nearest_npc(testrig::RetailMissionRig &rig) {
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("ai_threat");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "CP01.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "infantry.bms", error), "infantry.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "CP01 boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
@@ -82,7 +84,7 @@ int main() {
 	rig.install_weapon("WPN_M4AUTO");
 
 	const Nearest first = nearest_npc(rig);
-	if (!expect(first.ai != nullptr, "CP01 carries at least one foot NPC")) return 1;
+	if (!expect(first.ai != nullptr, "the mission carries at least one foot NPC")) return 1;
 	std::printf("threat: nearest NPC %.1f u (item %d team %d hp %d)\n", first.distance,
 			first.entity->item_id, int(first.ai->team), int(first.ai->health));
 
@@ -197,7 +199,7 @@ int main() {
 			expect(damaged_at >= 0, "the player took damage before dying");
 			expect(fires > 0, "the AI fire events the presentation drains were produced");
 			if (failures == 0)
-				std::printf("ai_threat: acquire -> fire -> damage -> kill observed on CP01\n");
+				std::printf("ai_threat: acquire -> fire -> damage -> kill observed\n");
 			return failures == 0 ? 0 : 1;
 		}
 		mission_second();

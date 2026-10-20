@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -1666,7 +1667,34 @@ void test_kill_event_unit_score_rides_every_session() {
 			"the 0x56 row's third word carries field 30");
 }
 
+// The mission-start census walks pool 1 as well as pool 0: an enemy vehicle
+// row (unit class 3 or 4) there counts in the vehicle total, an enemy soldier
+// (class 1) in the infantry total. [orig: Score_CountMissionSubgoalsAndUnits
+//  @0x509dc0 -- the pool walks @0x509e13..0x509e4a -> Score_ClassifyEntityForCounts
+//  @0x4fd070]
+void test_census_counts_pool_one_vehicles() {
+	auto storage = std::make_unique<w::World>();
+	w::World &world = *storage;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::Entity soldier;
+	soldier.kind = w::EntityKind::Organic;
+	soldier.team = 2;
+	soldier.item_unit_type = 1;
+	world.registry.spawn(0, soldier);
+	w::Entity truck;
+	truck.kind = w::EntityKind::Item;
+	truck.team = 2;
+	truck.item_unit_type = 4;
+	world.registry.spawn(1, truck);
+	w::count_mission_units(world);
+	expect(world.kill_stats.enemy_unit_total == 2 && world.kill_stats.enemy_vehicle_total == 1 &&
+	               world.kill_stats.enemy_infantry_total == 1,
+	       "the census counts a pool-1 enemy vehicle in the vehicle total");
+}
+
 int main() {
+	test_census_counts_pool_one_vehicles();
 	test_sp_auto_lose_reads_the_dead_bit();
 	test_end_round_row_flags_word_is_field_11();
 	test_org1_death_transaction_is_the_motor_edge();

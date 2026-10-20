@@ -1,9 +1,9 @@
 // Smoke test: every .ptl under fixtures/particle/ must parse without error
 // and survive save_particles -> parse with its section counts intact (field
 // assertions live in the focused tests; this is the regression net for a new
-// fixture). With <OPENNOVA_JO_ASSETS> set, the same sweep runs
-// over the extracted retail .ptl corpus; without it that leg prints SKIP-LEG
-// and the committed sweep alone decides the result.
+// fixture). lexical_forms.ptl among them carries the shipped corpus's own forms
+// (the layout NovaLogic's effect tool writes), which the retired retail leg swept
+// over the extracted .ptl files.
 
 #include <formats/particle/parser.h>
 
@@ -11,7 +11,6 @@
 #include <filesystem>
 #include <sstream>
 #include <string>
-#include "common/retail_paths.h"
 
 namespace {
 
@@ -49,8 +48,8 @@ int sweep(const std::string &dir, const char *label, int &parsed) {
 		}
 		// The writer's output re-parses to the same section counts (the
 		// per-field comparison is particle_writer_roundtrip's job over the
-		// minted set; here the shipped corpus proves the writer emits what
-		// the parser accepts for every retail shape).
+		// minted set; here lexical_forms.ptl proves the writer emits what the
+		// parser accepts for the shipped corpus's shapes).
 		std::ostringstream serialized;
 		std::string write_error;
 		opennova::particle::ParticleFile replayed;
@@ -86,23 +85,12 @@ int sweep(const std::string &dir, const char *label, int &parsed) {
 
 } // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
 	int parsed = 0;
-	int failures = sweep(fixtures_dir(), "fixtures/particle", parsed);
+	const int failures = sweep(fixtures_dir(), "fixtures/particle", parsed);
 	if (parsed == 0) {
 		std::fprintf(stderr, "FAIL: no .ptl fixtures found under %s\n", fixtures_dir().c_str());
 		return 1;
-	}
-
-	const std::string assets = retail::assets();
-	if (assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (the extracted retail .ptl corpus)");
-	} else {
-		int retail_parsed = 0;
-		failures += sweep(assets, "OPENNOVA_JO_ASSETS", retail_parsed);
-		if (retail_parsed == 0)
-			std::fprintf(stderr, "WARN: no .ptl files directly under %s\n", assets.c_str());
 	}
 	return failures == 0 ? 0 : 1;
 }

@@ -4,11 +4,11 @@
 // light solve must clear BYTE2(aiRef0) (m.grounded) as it sets Flags 0x2000,
 // otherwise the mover rebuilds slide_z from the grounded forward row every
 // tick and the occupied bike floats instead of accumulating gravity.
-// Gated on OPENNOVA_JO_DIR (a retail install whose base mount carries
-// 06TR.bms), else OPENNOVA_JO_ASSETS (the extracted tree, 06TR.bms loose at its
-// root): JO:CA ships the mission in its jox01 archive, not the base set.
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+// The mission is the mission set's motorcycle.bms (tests/fixtures/mission_set_gen.cpp): 06TR's
+// instructor ride by its SSNs (the minted mbike in the shipped Dcycle2's shape, its instructor
+// command-mounted at spawn, the boarding event's group redirect onto the ride path).
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <algorithm>
 #include <cmath>
@@ -39,26 +39,22 @@ bool expect(bool cond, const char *msg) {
 } // namespace
 
 int main() {
-	const std::string install = retail::install();
-	const std::string assets = retail::assets();
-	if (install.empty() && assets.empty())
-		return retail::skip("OPENNOVA_JO_DIR or OPENNOVA_JO_ASSETS (a retail JO install or extracted tree "
-				"carrying 06TR.bms)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("motorcycle_gravity");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	testrig::MissionRig rig;
 	std::string error;
-	bool opened = !install.empty() && rig.open(install, "06TR.bms", error);
-	if (!opened && !assets.empty())
-		opened = rig.open(assets, "06TR.bms", error);
-	if (!opened)
-		return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "motorcycle.bms", error), "motorcycle.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "06TR boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
 	if (!expect(rig.local.has_local_player(), "the host's player spawned"))
 		return 1;
-	if (!expect(rig.has_terrain(), "06TR terrain loaded"))
+	if (!expect(rig.has_terrain(), "the mission terrain loaded"))
 		return 1;
 
 	w::Entity *bike = rig.world.registry.by_net_id(kBikeSsn);

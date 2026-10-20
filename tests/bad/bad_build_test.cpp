@@ -1,10 +1,9 @@
 // The .bad construction seam (formats/bad/bad_build.h): the mission <-> clip
 // frame maps, the derived bone table, the events as the author states them,
-// the validation, and the canonical .adm table. The retail legs
-// (OPENNOVA_JO_ASSETS, SKIP-LEG) pin the two derivations: every bone's rotation
-// is the transpose of its first key (the shipped 19-bone BINOC.bad), and a
-// clip's positions are the rig's pivots through its set's reset bind (US01's
-// DT1RUNF against DT1RST).
+// the validation, and the canonical .adm table. The two derivations are pinned
+// on values witnessed in shipped clips: a bone's rotation is the transpose of
+// its first key (BINOC.bad), and a clip's positions are the rig's pivots
+// through its set's reset bind (US01's DT1PRONE.BAD against DT1RST.BAD).
 #include <formats/adm/adm.h>
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_build.h>
@@ -17,8 +16,6 @@
 #include <string_view>
 #include <vector>
 
-#include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 
 using namespace opennova::bad;
@@ -85,8 +82,7 @@ BadBuildClip two_bone_clip(uint32_t flags) {
 
 } // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     // The frame maps: mission x forward / y left / z up becomes clip
     // x side / y up / z forward, and both directions invert.
     {
@@ -457,95 +453,70 @@ int main(int argc, char **argv) {
         std::printf("table: canonical rows, and four rows refused\n");
     }
 
-    // The retail legs. The bind: every bone's rotation is the transpose of its
-    // first key (the corpus sweep: 13517 of 13517, worst 5.0e-7), on the
-    // shipped 19-bone BINOC.bad.
-    const std::string fixture = retail::reference_fixture("bad/BINOC.bad");
-    if (fixture.empty()) {
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bad/BINOC.bad (the shipped 19-bone rig)");
-    }
-    std::vector<uint8_t> retail_bytes;
-    TEST_EXPECT(test_io::read_file(fixture, retail_bytes) && !retail_bytes.empty());
-    BadFile retail_file = {};
-    TEST_EXPECT(bad_parse_buffer(retail_bytes.data(), retail_bytes.size(), &retail_file) == 0);
-    TEST_EXPECT(retail_file.bone_count == 19);
-    double worst_bind = 0.0;
-    for (size_t i = 0; i < retail_file.num_bones; ++i) {
-        const BadBone &bone = retail_file.bones[i];
-        const BadQuaternion &k0 = retail_file.channels[i].rotations[0];
+    // The bind: every bone's rotation is the transpose of its first key (the
+    // corpus sweep: 13517 of 13517, worst 5.0e-7). One witnessed bone, BINOC.bad
+    // bone 3 (BN04 R Clavicle): its first key (x, y, z, w) and the rotation rows
+    // the file stores (the sweep's last run put the 19 bones within 1.5e-7).
+    {
+        const BadBuildQuat key{-0.471554816, -0.530660629, 0.448825985, 0.542761922};
+        const float stored[9] = {0.0339089558f, 0.987682521f, 0.152752668f, 0.0132598262f, 0.152382508f,
+                                 -0.988232613f, -0.999336958f, 0.0355354063f, -0.00792932883f};
         float rows[9];
-        bad_quat_to_rows(BadBuildQuat{k0.x, k0.y, k0.z, k0.w}, rows);
+        bad_quat_to_rows(key, rows);
         float want[9];
         bad_rows_transpose(rows, want);
-        for (int k = 0; k < 9; ++k) {
-            const double d = std::fabs(static_cast<double>(bone.rotation[k]) - want[k]);
-            if (d > worst_bind) worst_bind = d;
-        }
+        double worst_bind = 0.0;
+        for (int k = 0; k < 9; ++k)
+            worst_bind = std::max(worst_bind, std::fabs(static_cast<double>(stored[k]) - want[k]));
+        TEST_EXPECT(worst_bind <= 1e-5);
+        // The rows untransposed are not the stored ones: the transpose is the rule.
+        double worst_untransposed = 0.0;
+        for (int k = 0; k < 9; ++k)
+            worst_untransposed = std::max(worst_untransposed, std::fabs(static_cast<double>(stored[k]) - rows[k]));
+        TEST_EXPECT(worst_untransposed > 0.1);
+        std::printf("witness: BINOC.bad bone 3's bind within %g of its first key's transpose\n", worst_bind);
     }
-    TEST_EXPECT(worst_bind <= 1e-5);
-    std::printf("retail leg: BINOC.bad bind within %g\n", worst_bind);
-    bad_free(&retail_file);
 
     // The position: a clip stores the rig's pivots turned through its SET's
     // reset bind, not its own (the corpus: 30358 of 32011 non-junk bones of
     // the tables' other clips, 365 through their own). US01's prone clip
-    // DT1PRONE against its reset DT1RST: the pivots recovered from the reset
-    // clip, derived through the reset's bind, land on 17 of its 18 child
-    // bones (its neck is stale by 1.4 cm), and through its own bind on none.
-    const std::string reset_path = retail::asset_file("DT1RST.BAD");
-    const std::string run_path = retail::asset_file("DT1PRONE.BAD");
-    if (reset_path.empty() || run_path.empty())
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/DT1RST.BAD and DT1PRONE.BAD (US01's reset and prone)");
-    BadFile reset_file = {};
-    BadFile run_file = {};
-    TEST_EXPECT(bad_parse(reset_path.c_str(), &reset_file) == 0);
-    TEST_EXPECT(bad_parse(run_path.c_str(), &run_file) == 0);
-    TEST_EXPECT(reset_file.num_bones == run_file.num_bones && reset_file.num_bones > 1);
-    const auto shape = [](const BadFile &file) {
-        BadBuildClip clip;
-        clip.bones.resize(file.num_bones);
-        for (size_t i = 0; i < file.num_bones; ++i) {
-            clip.bones[i].parent = file.bones[i].parent_index;
-            const BadQuaternion &q = file.channels[i].rotations[0];
-            clip.bones[i].keys.push_back(bad_mission_from_clip(BadBuildQuat{q.x, q.y, q.z, q.w}));
-        }
-        return clip;
-    };
-    const BadBuildClip reset_shape = shape(reset_file);
-    BadBuildClip run_shape = shape(run_file);
-    for (size_t i = 0; i < reset_file.num_bones; ++i) {
-        const int parent = reset_file.bones[i].parent_index;
-        BadBuildVec3 pivot = bad_mission_from_clip(BadBuildVec3{
-                reset_file.bones[i].position[0], reset_file.bones[i].position[1],
-                reset_file.bones[i].position[2]});
-        if (parent >= 0) {
-            float bind[9];
-            bad_derive_bind_rows(reset_shape, nullptr, static_cast<size_t>(parent), bind);
-            const BadBuildVec3 rel = bad_bone_rel(bind, reset_file.bones[i].position);
-            const BadBuildVec3 &up = run_shape.bones[static_cast<size_t>(parent)].pivot;
-            pivot = BadBuildVec3{up.x + rel.x, up.y + rel.y, up.z + rel.z};
-        }
-        run_shape.bones[i].pivot = pivot;
-    }
-    const auto fits = [&](const BadBuildClip *reset) {
-        std::vector<BadBone> derived;
-        bad_derive_bone_table(run_shape, reset, derived);
-        int count = 0;
-        for (size_t i = 1; i < run_file.num_bones; ++i) {
+    // DT1PRONE.BAD against its reset DT1RST.BAD: the pivots recovered from the
+    // reset clip, derived through the reset's bind, landed on 17 of its 18 child
+    // bones (its neck stale by 1.4 cm) and through its own bind on none. One
+    // witnessed bone, 3 (BN04 R Clavicle, parent 2): the parent's first key in
+    // each clip and the bone's stored position in each.
+    {
+        const BadQuaternion reset_parent{-4.95343556e-07f, 0.706825197f, 0.707388282f, 4.96510381e-07f};
+        const float reset_position[3] = {0.0545783751f, 1.50633795e-07f, 0.280747235f};
+        const BadQuaternion prone_parent{-0.0126676662f, 0.0676731095f, 0.997074723f, 0.033195056f};
+        const float prone_position[3] = {0.0545783713f, 1.5491436e-07f, 0.280747265f};
+        const auto shape = [](const BadQuaternion &parent) {
+            BadBuildClip clip;
+            clip.bones.resize(2);
+            clip.bones[0].keys.push_back(bad_mission_from_clip(BadBuildQuat{parent.x, parent.y, parent.z, parent.w}));
+            clip.bones[1].parent = 0;
+            clip.bones[1].keys.push_back(BadBuildQuat{});
+            return clip;
+        };
+        const BadBuildClip reset_shape = shape(reset_parent);
+        BadBuildClip prone_shape = shape(prone_parent);
+        float bind[9];
+        bad_derive_bind_rows(reset_shape, nullptr, 0, bind);
+        prone_shape.bones[1].pivot = bad_bone_rel(bind, reset_position);
+        const auto gap = [&](const BadBuildClip *reset) {
+            std::vector<BadBone> derived;
+            bad_derive_bone_table(prone_shape, reset, derived);
             double worst = 0.0;
             for (int k = 0; k < 3; ++k)
-                worst = std::max(worst, std::fabs(static_cast<double>(derived[i].position[k]) -
-                                                  run_file.bones[i].position[k]));
-            if (worst <= 1e-4) ++count;
-        }
-        return count;
-    };
-    const int through_reset = fits(&reset_shape);
-    const int through_own = fits(nullptr);
-    TEST_EXPECT(through_reset == 17 && through_own == 0);
-    std::printf("retail leg: DT1PRONE positions, %d bones through DT1RST's bind, %d through its own\n",
-                through_reset, through_own);
-    bad_free(&reset_file);
-    bad_free(&run_file);
+                worst = std::max(worst, std::fabs(static_cast<double>(derived[1].position[k]) - prone_position[k]));
+            return worst;
+        };
+        const double through_reset = gap(&reset_shape);
+        const double through_own = gap(nullptr);
+        TEST_EXPECT(through_reset <= 1e-4 && through_own > 1e-4);
+        std::printf("witness: DT1PRONE.BAD bone 3 sits %g from the derivation through DT1RST's bind, %g through "
+                    "its own\n",
+                    through_reset, through_own);
+    }
     return 0;
 }

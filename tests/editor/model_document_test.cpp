@@ -1,17 +1,20 @@
-// The model document (ADR 0046 S10) over the neutral core: every synthetic model loads
-// and an untouched save writes its own bytes; field edits land in the written model
-// (a material moved keeps its strips drawing with it); the structural edits and their
-// refusals; undo back to the file's bytes; a save and a reload keep the edits; the
-// validator's findings, a part animation's frame and a record's register read as the runtime
-// reads them (S11h); (a SKIP-LEG without OPENNOVA_JO_ASSETS) every retail model saved
-// untouched is its own bytes; and (a SKIP-LEG without OPENNOVA_JO_DIR) every model of the game
-// install validated with no error (S11h). Two versions of the model row alike but for their user
-// points only when every other table is the same (S13 V8).
+// The model document (ADR 0046 S10) over the neutral core: every model of the format's fixtures
+// (the synthetic set and the forms of the shipped models the threedi rows mint, model_variant_files.h)
+// loads and an untouched save writes its own bytes, each shipped form validating with no error (a
+// model the game loads raises none, S11h); the forms the document's rows compose back (an empty LOD and an empty
+// part-animation table, a strip naming no material, a material no strip draws); field edits land in
+// the written model (a material moved keeps its strips drawing with it); the structural edits and
+// their refusals; undo back to the file's bytes; a save and a reload keep the edits; the validator's
+// findings, a part animation's frame and a record's register read as the runtime reads them (S11h),
+// and the forms the shipped models use near its errors raising none; every Black Hawk Down GP model
+// of the fixtures, migrated as the import does, validated with no error. Two versions of the model
+// row alike but for their user points only when every other table is the same (S13 V8).
 #include <formats/threedi_gp/threedi_gp.h>
 #include <formats/threedi_gp/threedi_gp_migrate.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/model_document.h>
+#include <editor/documents/model_labels.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
@@ -20,27 +23,28 @@
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
+#include <cctype>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
-#include <base/vfs/vfs.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_panm.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
+#include "common/gp_model_bytes.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/model_variant_files.h"
 #include "editor/rig_model.h"
 
 using namespace opennova::editor;
-using opennova::pff::normalized_logical_name;
 using namespace opennova::threedi;
 namespace fs = std::filesystem;
 
@@ -72,19 +76,163 @@ std::vector<Diagnostic> validated(const std::shared_ptr<const ModelDocument> &do
 	return document_type(DocumentTypeId::Model)->validate_file(*document);
 }
 
+// Every model of the format's fixtures opens as its two rows and saves untouched as its own bytes (the
+// reader's and the writer's round trip, composed back from the rows: compose_model). Each form of the
+// shipped models the format's rows mint is a model the game loads, and validates with no error: a model
+// the game loads raises none (S11h; every shipped model, 967 of them, held to it while the corpus was
+// read). (The synthetic set's own variants need not load: shed_lght0_sub2's light names a part the shed
+// lacks, on purpose.) A form that is not there fails the sweep.
 int untouched_saves() {
-	int models = 0;
-	std::error_code ec;
-	for (const auto &entry : fs::directory_iterator(synth_dir(), ec)) {
-		if (entry.path().extension() != ".3di") continue;
-		ModelDocument document;
-		TEST_EXPECT(load(document, entry.path().generic_string(), entry.path().filename().generic_string()));
-		TEST_EXPECT(document.rows().size() == 2 && document.model_row() && document.collision_row());
-		TEST_EXPECT(serialized(document) == test_io::read_file(entry.path().string()));
-		++models;
+	const model_variants::Files models = model_variants::models();
+	int count = 0;
+	for (const std::string &path : models.paths) {
+		const std::string name = fs::path(path).filename().generic_string();
+		auto document = std::make_shared<ModelDocument>();
+		TEST_EXPECT(load(*document, model_variants::repo_path(path), name));
+		TEST_EXPECT(document->rows().size() == 2 && document->model_row() && document->collision_row());
+		if (!document->model_row()) continue;
+		TEST_EXPECT(serialized(*document) == model_variants::bytes_of(path));
+		if (models.is_required(path))
+			for (const Diagnostic &d : validated(document)) {
+				if (d.severity != DiagnosticSeverity::Error) continue;
+				std::printf("untouched: %s %s: %s: %s\n", path.c_str(), d.record.c_str(), d.code().c_str(), d.message.c_str());
+				TEST_EXPECT(d.severity != DiagnosticSeverity::Error);
+			}
+		++count;
 	}
-	TEST_EXPECT(models > 20);
-	std::printf("untouched: %d synthetic models save as their own bytes\n", models);
+	TEST_EXPECT(count > 20);
+	std::printf("untouched: %d models save as their own bytes, the shipped forms with no error\n", count);
+	return model_variants::report_missing(models) == 0 ? 0 : 1;
+}
+
+// A model the format's writer writes from `base` (a synthetic model) as `edit` leaves it: the edit
+// works on a shallow copy whose tables it may point at arrays of its own (`hold` keeps them alive),
+// the base's own freed untouched.
+struct Held {
+	std::vector<ThreediLod> lods;
+	std::vector<std::vector<ThreediTriangleStrip>> strips;
+	std::vector<ThreediMaterial> materials;
+	ThreediPartAnimation none[1] = {}; // an empty PANM table's (a table there with no row)
+};
+std::vector<uint8_t> minted(const char *base, const std::function<void(Threedi3di3 &, Held &)> &edit) {
+	Threedi3di3 model{};
+	std::vector<uint8_t> bytes;
+	if (threedi_3di3_read((synth_dir() + "/" + base).c_str(), &model) != 0) return bytes;
+	Threedi3di3 copy = model;
+	Held hold;
+	hold.lods.assign(model.lods, model.lods + model.lod_count);
+	copy.lods = hold.lods.data();
+	hold.materials.assign(model.materials, model.materials + model.material_count);
+	copy.materials = hold.materials.data();
+	edit(copy, hold);
+	if (threedi_3di3_write_memory(&copy, bytes) != 0) bytes.clear();
+	threedi_3di3_free(&model);
+	return bytes;
+}
+
+// The forms of the shipped models whose rows compose back otherwise than as the file's tables hold
+// them (compose_model): LODs of no part, no strip and no vertex whose PANM tables are there and empty,
+// after LOD 0's rows (Flsh_1st's LODs 1 and 2, CNet01's LOD 3); strips naming material 2 and 5 of a
+// one-material table (Tent1's LODs 3 and 4); materials no strip draws (fxd200D draws three strips
+// over six). Each saves untouched as its own bytes; a material moved takes the strips that name it
+// along while the strips naming none keep their indices; an empty table stays its LOD's own; a
+// material no strip draws is a note, never an error.
+int composed_forms() {
+	Diagnostic error;
+	// The pump, its LOD 1 emptied.
+	const std::vector<uint8_t> emptied = minted("pump.3di", [](Threedi3di3 &m, Held &hold) {
+		ThreediLod &lod = m.lods[m.lod_count - 1];
+		lod.vertices.count = 0;
+		lod.vertices.items = nullptr;
+		lod.indices.count = 0;
+		lod.indices.indices = nullptr;
+		lod.strips = nullptr;
+		lod.strip_count = 0;
+		lod.render_objects = nullptr;
+		lod.render_object_count = 0;
+		lod.rmdl_render_object_count = 0;
+		lod.part_animations = hold.none;
+		lod.part_animation_count = 0;
+	});
+	TEST_EXPECT(!emptied.empty());
+	{
+		ModelDocument document;
+		TEST_EXPECT(document.load_bytes(emptied, "pump.3di", AssetKind::Model, "jo", error));
+		const ModelRow *row = document.model_row();
+		TEST_EXPECT(row && row->lods.size() >= 2 && row->lods.back().panm.empty() &&
+		            row->lods.back().lod.render_object_count == 0 && row->lods.back().lod.strip_count == 0);
+		if (!row || row->lods.size() < 2) return 1;
+		const std::string empty_lod =
+				model_record_label(document, {row->id, node_kind(ModelKind::Lod), row->ids.lists[0].back().id}, nullptr);
+		TEST_EXPECT(empty_lod.size() >= 10 && empty_lod.compare(empty_lod.size() - 10, 10, ", no parts") == 0);
+		TEST_EXPECT(serialized(document) == emptied);
+		Threedi3di3 back{};
+		const std::vector<uint8_t> bytes = serialized(document);
+		TEST_EXPECT(threedi_3di3_read_memory(bytes.data(), bytes.size(), &back) == 0 && back.lod_count >= 2 &&
+		            back.lods[back.lod_count - 1].part_animations != nullptr &&
+		            back.lods[back.lod_count - 1].part_animation_count == 0 && back.lods[0].part_animation_count > 0);
+		threedi_3di3_free(&back);
+	}
+	// The pump, two of its LOD 1's strips on materials one and four past its table (Tent1's LODs 3 and 4: 2 and
+	// 5 of its one), and a material no strip draws added after its own.
+	int32_t first_past = -1;
+	const std::vector<uint8_t> past = minted("pump.3di", [&](Threedi3di3 &m, Held &hold) {
+		ThreediLod &lod = m.lods[1];
+		hold.strips.emplace_back(lod.strips, lod.strips + lod.strip_count);
+		std::vector<ThreediTriangleStrip> &strips = hold.strips.back();
+		first_past = int32_t(m.material_count) + 1;
+		strips.front().material_index = first_past;
+		strips.back().material_index = int32_t(m.material_count) + 4;
+		lod.strips = strips.data();
+		ThreediMaterial unused = hold.materials.front();
+		unused.index = int32_t(hold.materials.size());
+		hold.materials.push_back(unused);
+		m.materials = hold.materials.data();
+		m.material_count = uint32_t(hold.materials.size());
+	});
+	TEST_EXPECT(!past.empty() && first_past > 0);
+	{
+		auto document = std::make_shared<ModelDocument>();
+		TEST_EXPECT(document->load_bytes(past, "pump.3di", AssetKind::Model, "jo", error));
+		TEST_EXPECT(serialized(*document) == past);
+		const ModelRow *row = document->model_row();
+		TEST_EXPECT(row && row->materials.size() >= 2 && row->lods.size() >= 2 && row->lods[1].lod.strip_count >= 2);
+		if (!row || row->materials.size() < 2 || row->lods.size() < 2) return 1;
+		const size_t materials = row->materials.size();
+		// The materials no strip draws: the one added and any the strips moved off left; each a note.
+		size_t undrawn = 0, unused = 0;
+		for (size_t m = 0; m < materials; ++m) {
+			bool drawn = false;
+			for (const ModelLod &lod : row->lods)
+				for (size_t s = 0; s < lod.lod.strip_count; ++s) drawn = drawn || lod.lod.strips[s].material_index == int32_t(m);
+			undrawn += drawn ? 0 : 1;
+		}
+		for (const Diagnostic &d : validated(document)) {
+			TEST_EXPECT(d.severity != DiagnosticSeverity::Error);
+			unused += d.code() == "model.material_unused" && d.severity == DiagnosticSeverity::Info ? 1 : 0;
+		}
+		TEST_EXPECT(undrawn >= 1 && unused == undrawn);
+		// The first material moved last: the strips naming it follow, the ones naming none keep their bytes.
+		const NodeAddress first{row->id, kMaterial, row->ids.lists[1][0].id};
+		TEST_EXPECT(document->apply(op_edit(EditOperation::Move, first, 0, materials - 1), error));
+		const std::vector<uint8_t> bytes = serialized(*document);
+		Threedi3di3 before{}, after{};
+		TEST_EXPECT(threedi_3di3_read_memory(past.data(), past.size(), &before) == 0 &&
+		            threedi_3di3_read_memory(bytes.data(), bytes.size(), &after) == 0);
+		for (size_t l = 0; l < before.lod_count; ++l)
+			for (size_t s = 0; s < before.lods[l].strip_count; ++s) {
+				const int32_t was = before.lods[l].strips[s].material_index;
+				const int32_t now = after.lods[l].strips[s].material_index;
+				if (was < 0 || uint32_t(was) >= before.material_count) TEST_EXPECT(now == was);
+				else TEST_EXPECT(now == (was == 0 ? int32_t(materials - 1) : was - 1));
+			}
+		TEST_EXPECT(after.lods[1].strips[0].material_index == first_past);
+		threedi_3di3_free(&before);
+		threedi_3di3_free(&after);
+		document->undo();
+		TEST_EXPECT(serialized(*document) == past);
+	}
+	std::printf("composed forms: empty LODs and tables, strips naming no material, a material none draws\n");
 	return 0;
 }
 
@@ -243,6 +391,191 @@ int validation() {
 	TEST_EXPECT(has("model.light_part", DiagnosticSeverity::Error) && has("model.seats", DiagnosticSeverity::Warning));
 	std::printf("validation: a light off LOD 0's parts is an error, a ninth seat a warning\n");
 	return 0;
+}
+
+// S11h: a shipped model loads in the game, so the validator finds no error in one; the gate blocks
+// exactly where retail fails. The forms the shipped models use beside the validator's errors (a
+// register past the table, a light naming one with no table, a light on a part LOD 0 lacks, a frame
+// past the MTRX table), each minted on the mount (three CTRL registers) or the house (none), raise
+// none of them; the forms the shipped corpus raised warnings and notes for raise that warning, never
+// an error (the install's 967 models: 20 LOD orders, 5 unknown registers, 84 repeated user point
+// names, 3 materials no strip draws; Black Hawk Down's migrated 677 the same three warnings).
+int shipped_forms_validate() {
+	constexpr NodeKind kLod = node_kind(ModelKind::Lod);
+	int forms = 0;
+	// `what` minted on `base` by `make`; `warning` the one finding it must raise, "" for none.
+	const auto form = [&](const char *base, const char *what, const std::function<bool(ModelDocument &)> &make,
+	                      const char *warning = "") {
+		auto document = std::make_shared<ModelDocument>();
+		Diagnostic error;
+		bool ok = load(*document, synth_dir() + "/" + base, base) && document->model_row();
+		// Two MTRX rows at least, for a frame byte of 1 to name one.
+		while (ok && document->model_row()->frames.size() < 2)
+			ok = document->apply(op_edit(EditOperation::Add, {document->model_row()->id, kFrame, 0}), error);
+		ok = ok && make(*document);
+		bool clean = ok, warned = !*warning;
+		for (const Diagnostic &d : validated(document)) {
+			if (d.severity == DiagnosticSeverity::Error) {
+				std::printf("shipped forms: %s on %s: %s: %s\n", what, base, d.code().c_str(), d.message.c_str());
+				clean = false;
+			}
+			warned = warned || d.code() == warning;
+		}
+		if (!ok) std::printf("shipped forms: %s on %s: not minted (%s)\n", what, base, error.message.c_str());
+		if (!warned) std::printf("shipped forms: %s on %s: no %s\n", what, base, warning);
+		++forms;
+		return clean && warned;
+	};
+	// Each edit through the document; false when one is refused.
+	const auto edits = [](ModelDocument &document, std::initializer_list<Edit> list) {
+		Diagnostic error;
+		return document.apply(std::vector<Edit>(list), error);
+	};
+	const auto model_of = [](const ModelDocument &document) { return document.model_row()->id; };
+	const auto material = [&](const ModelDocument &d) { return NodeAddress{model_of(d), kMaterial, d.model_row()->ids.lists[1][0].id}; };
+	// LOD 0's first part animation (none: an address no edit takes).
+	const auto panm = [&](const ModelDocument &d) {
+		const std::vector<RecordIds> &rows = d.model_row()->ids.lists[0][0].lists[0];
+		return rows.empty() ? NodeAddress{} : NodeAddress{model_of(d), kPanm, rows[0].id};
+	};
+	const auto added = [&](ModelDocument &d, NodeKind kind) {
+		Diagnostic error;
+		return d.apply(op_edit(EditOperation::Add, {model_of(d), kind, 0}), error)
+		               ? NodeAddress{model_of(d), kind, d.last_added()}
+		               : NodeAddress{};
+	};
+	// A flipbook on the register clock naming a register of the table (ArmGlove's: 8 frames on register 0).
+	TEST_EXPECT(form("mount.3di", "a flipbook on a table register", [&](ModelDocument &d) {
+		return edits(d, {set_edit(material(d), "texanim.frames", int64_t(8)), set_edit(material(d), "texanim.type", int64_t(1)),
+		                 set_edit(material(d), "texanim.time", int64_t(2))});
+	}));
+	// The U and V generators reading a table register (dM1A1's style 117 on registers 0 and 3), the RGB one adding
+	// one (B50Cal's style 114, 0x72, on register 0).
+	TEST_EXPECT(form("mount.3di", "generators on table registers", [&](ModelDocument &d) {
+		return edits(d, {set_edit(material(d), "ugen.style", int64_t(117)), set_edit(material(d), "ugen.param", int64_t(0)),
+		                 set_edit(material(d), "vgen.style", int64_t(117)), set_edit(material(d), "vgen.param", int64_t(2)),
+		                 set_edit(material(d), "rgbgen.style", int64_t(114)), set_edit(material(d), "rgbgen.param", int64_t(1))});
+	}));
+	// A light naming a table register on part 0 (FireBrl1's style 113 on register 0), one on a part LOD 0 has
+	// (Armry01's).
+	TEST_EXPECT(form("mount.3di", "lights on table registers and LOD 0's parts", [&](ModelDocument &d) {
+		const NodeAddress lit = added(d, kLight);
+		if (!lit.child || !edits(d, {set_edit(lit, "style", int64_t(113)), set_edit(lit, "param", int64_t(2))})) return false;
+		const NodeAddress on_part = added(d, kLight);
+		const int64_t parts = int64_t(d.model_row()->lods[0].lod.render_object_count);
+		return on_part.child && parts > 1 && edits(d, {set_edit(on_part, "part", parts - 1)});
+	}));
+	// A part turning through a row of the MTRX table (B50Cal's rows of tracks on row 1, its rotx on register 1).
+	TEST_EXPECT(form("mount.3di", "a part turning through an MTRX row", [&](ModelDocument &d) {
+		return edits(d, {set_edit(panm(d), "flags.rotation", int64_t(2)), set_edit(panm(d), "matrix", int64_t(1)),
+		                 set_edit(panm(d), "rotx.style", int64_t(113)), set_edit(panm(d), "rotx.param", int64_t(1))});
+	}));
+	// A frame byte of 0x80 and above names no row: on a row that turns through none (ArmGlove's), on a row of
+	// tracks (Black Hawk Down's minigund, migrated).
+	TEST_EXPECT(form("mount.3di", "frame bytes past 0x7F", [&](ModelDocument &d) {
+		return edits(d, {set_edit(panm(d), "flags.rotation", int64_t(2)), set_edit(panm(d), "matrix", int64_t(0x80))});
+	}));
+	TEST_EXPECT(form("mount.3di", "frame byte 0xFF on a still row", [&](ModelDocument &d) {
+		return edits(d, {set_edit(panm(d), "flags.rotation", int64_t(0)), set_edit(panm(d), "matrix", int64_t(255))});
+	}));
+	// A frame byte on a row that turns through no frame, past the table (the install's 3,040 such bytes: a still
+	// row's, a billboard's).
+	TEST_EXPECT(form("mount.3di", "a frame byte on a still row past the table", [&](ModelDocument &d) {
+		return edits(d, {set_edit(panm(d), "flags.rotation", int64_t(0)), set_edit(panm(d), "matrix", int64_t(100))});
+	}));
+	TEST_EXPECT(form("mount.3di", "a frame byte on a billboard past the table", [&](ModelDocument &d) {
+		return edits(d, {set_edit(panm(d), "flags.rotation", int64_t(3)), set_edit(panm(d), "matrix", int64_t(100))});
+	}));
+	// A loaded track on a phase style above 0x70 (0x74: a track reads its register for 0x71 alone) naming a table
+	// register (the install's one, FTruck1's), and tracks the load does not copy naming registers past the table
+	// (Black Hawk Down's Ship01, migrated).
+	TEST_EXPECT(form("mount.3di", "tracks on table registers, unloaded ones past the table", [&](ModelDocument &d) {
+		return edits(d, {set_edit(panm(d), "flags.rotation", int64_t(2)), set_edit(panm(d), "flags.scale", int64_t(0)),
+		                 set_edit(panm(d), "roty.style", int64_t(0x74)), set_edit(panm(d), "roty.param", int64_t(2)),
+		                 set_edit(panm(d), "scalex.style", int64_t(113)), set_edit(panm(d), "scalex.param", int64_t(9)),
+		                 set_edit(panm(d), "flags.trans_axis", int64_t(0)), set_edit(panm(d), "trans.style", int64_t(113)),
+		                 set_edit(panm(d), "trans.param", int64_t(200))});
+	}));
+	// With no CTRL table: an unloaded track naming a register (Black Hawk Down's AirHang1, migrated) and a light
+	// of a style that names none (CmpFire1's style 24).
+	TEST_EXPECT(form("house.3di", "with no table, an unloaded track naming a register and a plain light", [&](ModelDocument &d) {
+		const NodeAddress lit = added(d, kLight);
+		return lit.child && edits(d, {set_edit(panm(d), "flags.scale", int64_t(0)), set_edit(panm(d), "scalex.style", int64_t(113)),
+		                              set_edit(panm(d), "scalex.param", int64_t(9)), set_edit(lit, "style", int64_t(24))});
+	}));
+	// A user point on no part (Bed01's -1).
+	TEST_EXPECT(form("mount.3di", "a user point on no part", [&](ModelDocument &d) {
+		return edits(d, {set_edit({model_of(d), kUserPoint, d.model_row()->ids.lists[3][0].id}, "part", int64_t(-1))});
+	}));
+	// The warnings: a register of no name the engine knows, an empty one (IBlock02's register 1) and one past the
+	// catalog (DT801's VEHICLE_TIRE14); a LOD that takes over at more pixels than the one before it (Cboat05's LOD
+	// 1 at 57 after LOD 0's 0); two user points of one name, in any case (CmbtHlmt's GFLASH01).
+	TEST_EXPECT(form("mount.3di", "an empty register name", [&](ModelDocument &d) {
+		const NodeAddress reg{model_of(d), kRegister, d.model_row()->ids.lists[4][1].id};
+		if (!edits(d, {set_edit(reg, "name", std::string())})) return false;
+		// Its record by its place alone; the rows reading it name no register in their words (the cradle's yaw).
+		const NodeAddress cradle{model_of(d), kPanm, d.model_row()->ids.lists[0][0].lists[0][1].id};
+		const std::string words = model_record_label(d, cradle, nullptr);
+		return model_record_label(d, reg, nullptr) == "1: (no name)" && words.find("turns") != std::string::npos &&
+		       words.back() != ' ' && words.find("EWEAP") == std::string::npos;
+	}, "model.register_unknown"));
+	TEST_EXPECT(form("mount.3di", "a register past the catalog", [&](ModelDocument &d) {
+		return edits(d, {set_edit({model_of(d), kRegister, d.model_row()->ids.lists[4][2].id}, "name",
+		                          std::string("VEHICLE_TIRE14"))});
+	}, "model.register_unknown"));
+	TEST_EXPECT(form("pump.3di", "a LOD out of order", [&](ModelDocument &d) {
+		return d.model_row()->lods.size() >= 2 &&
+		       edits(d, {set_edit({model_of(d), kLod, d.model_row()->ids.lists[0][0].id}, "threshold", int64_t(0)),
+		                 set_edit({model_of(d), kLod, d.model_row()->ids.lists[0][1].id}, "threshold", int64_t(57))});
+	}, "model.lod_order"));
+	TEST_EXPECT(form("mount.3di", "two user points of one name", [&](ModelDocument &d) {
+		const ModelRow &row = *d.model_row();
+		std::string name = row.user_points[0].name;
+		for (char &c : name) c = char(std::tolower(static_cast<unsigned char>(c)));
+		return row.user_points.size() >= 2 && edits(d, {set_edit({model_of(d), kUserPoint, row.ids.lists[3][1].id}, "name", name)});
+	}, "model.user_point_duplicate"));
+	std::printf("shipped forms: %d forms the shipped models use beside the validator's errors raise none\n", forms);
+	return 0;
+}
+
+// Every Black Hawk Down GP model of the fixtures (the synthetic GPM and GPP, common/gp_model_bytes.h, and the
+// variants the threedi_gp rows mint), migrated to 3DI3 as the editor's import does (formats/threedi_gp), opens
+// as a model and validates with no error: the migration writes nothing a project's model check refuses (BHD's
+// 677 shipped models held to it while the corpus was read).
+int bhd_migrated() {
+	const model_variants::Files gp = model_variants::gp_models();
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {{"gpm_model", gp_test::gpm_model()},
+	                                                                   {"gpp_model", gp_test::gpp_model()}};
+	for (const std::string &path : gp.paths) files.push_back({path, model_variants::bytes_of(path)});
+	size_t models = 0;
+	for (const auto &file : files) {
+		// A GP model is no model the game's loader takes, its chunk tag not 3DI3 [orig:
+		// ThreediGp_LoadFromFile @ 0x5B5806, CChunkFile_LoadFromFile with the tag 0x33494433]: the editor migrates it
+		// before it opens.
+		TEST_EXPECT(file.second.size() >= 4 && std::memcmp(file.second.data(), "3DI3", 4) != 0);
+		std::string message;
+		opennova::threedi_gp::File parsed;
+		std::vector<uint8_t> model;
+		std::vector<opennova::threedi_gp::MigrateNote> notes;
+		const bool migrated = opennova::threedi_gp::parse(file.second.data(), file.second.size(), parsed, message) &&
+		                      opennova::threedi_gp::migrate(parsed, model, notes, message);
+		if (!migrated) std::printf("bhd migrated: %s does not migrate: %s\n", file.first.c_str(), message.c_str());
+		TEST_EXPECT(migrated);
+		if (!migrated) continue;
+		auto document = std::make_shared<ModelDocument>();
+		Diagnostic error;
+		const ProjectDocument project;
+		TEST_EXPECT(document->load_bytes(model, "models/" + fs::path(file.first).filename().generic_string(), AssetKind::Model,
+		                                 project.target_game, error));
+		for (const Diagnostic &d : validated(document)) {
+			if (d.severity != DiagnosticSeverity::Error) continue;
+			std::printf("bhd migrated: %s %s: %s: %s\n", file.first.c_str(), d.record.c_str(), d.code().c_str(), d.message.c_str());
+			TEST_EXPECT(d.severity != DiagnosticSeverity::Error);
+		}
+		++models;
+	}
+	std::printf("bhd migrated: %zu GP models migrate, open and validate with no error\n", models);
+	return model_variants::report_missing(gp) == 0 ? 0 : 1;
 }
 
 // S11h: the frame a part animation turns through and the registers the records name, as the
@@ -674,133 +1007,6 @@ int record_references() {
 	return 0;
 }
 
-int retail_models() {
-	const std::string root = retail::assets();
-	if (!retail::dir_exists(root)) return retail::skip_leg("OPENNOVA_JO_ASSETS (the retail models at its root)");
-	int models = 0;
-	std::error_code ec;
-	for (const auto &entry : fs::directory_iterator(root, ec)) {
-		if (!entry.is_regular_file(ec) || retail::lower_ascii(entry.path().extension().string()) != ".3di") continue;
-		ModelDocument document;
-		TEST_EXPECT(load(document, entry.path().generic_string(), entry.path().filename().generic_string()));
-		TEST_EXPECT(serialized(document) == test_io::read_file(entry.path().string()));
-		++models;
-	}
-	if (models == 0) return retail::skip_leg("OPENNOVA_JO_ASSETS with the retail .3di models at its root");
-	std::printf("retail: %d models open and save untouched as their own bytes\n", models);
-	return 0;
-}
-
-// Every GP model Black Hawk Down ships (the reference tree's fixtures/bhd/3di), migrated to 3DI3 as
-// the editor's import does (formats/threedi_gp), opens as a model and validates with no error: the
-// migration writes nothing a project's model check refuses.
-int retail_bhd_migrated() {
-	const std::vector<std::string> files = retail::reference_fixture_files("bhd/3di", ".3di");
-	if (files.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bhd/3di (the models BHD ships)");
-	const ProjectDocument project;
-	size_t models = 0, errors = 0;
-	std::map<std::string, size_t> notes;
-	for (const std::string &path : files) {
-		const std::vector<uint8_t> bytes = test_io::read_file(path);
-		std::string message;
-		opennova::threedi_gp::File gp;
-		std::vector<uint8_t> model;
-		std::vector<opennova::threedi_gp::MigrateNote> migrate_notes;
-		if (!opennova::threedi_gp::parse(bytes.data(), bytes.size(), gp, message) ||
-		    !opennova::threedi_gp::migrate(gp, model, migrate_notes, message)) {
-			std::printf("bhd migrated: %s does not migrate: %s\n", path.c_str(), message.c_str());
-			++errors;
-			continue;
-		}
-		const std::string name = fs::path(path).filename().string();
-		auto document = std::make_shared<ModelDocument>();
-		Diagnostic error;
-		if (!document->load_bytes(model, "models/" + name, AssetKind::Model, project.target_game, error)) {
-			std::printf("bhd migrated: %s does not open: %s\n", name.c_str(), error.message.c_str());
-			++errors;
-			continue;
-		}
-		for (const Diagnostic &d : validated(document)) {
-			if (d.severity != DiagnosticSeverity::Error) {
-				++notes[d.code()];
-				continue;
-			}
-			std::printf("bhd migrated: %s %s: %s: %s\n", name.c_str(), d.record.c_str(), d.code().c_str(), d.message.c_str());
-			++errors;
-		}
-		++models;
-	}
-	std::printf("bhd migrated: %zu models, %zu errors\n", models, errors);
-	for (const auto &note : notes) std::printf("bhd migrated: %zu x %s\n", note.second, note.first.c_str());
-	TEST_EXPECT(errors == 0);
-	return 0;
-}
-
-// S11h: a retail model loads in the game, so the validator finds no error in one. Every model
-// the game install serves (the base game's archives and each expansion's, each file once) is
-// opened from its bytes and validated as each model of a project is (validate_model_file); every
-// error is listed with its model, record, code and message before the leg fails. A file the
-// game's model loader refuses is no model it loads, and is counted apart: one whose chunk tag is
-// not 3DI3 (an install may carry GP-era GPM files among its models) [orig:
-// ThreediGp_LoadFromFile @ 0x5B5806, CChunkFile_LoadFromFile with the tag 0x33494433].
-int retail_validation() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every model of the game install validated)");
-	const ProjectDocument project;
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string()); // the base game first
-	std::set<std::string> seen;
-	size_t models = 0, errors = 0, refused = 0, part_animations = 0, no_frame = 0;
-	std::map<std::string, size_t> notes; // the warnings and notes, by code
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::gameprofile::gameprofile_scr_policy_for_code(project.target_game.c_str()));
-		TEST_EXPECT(game.mount_game(root, expansion) && game.has_mounted_archive());
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(fs::path(file.logical_name).extension().string()) != ".3di") continue;
-			if (!seen.insert(file.source_path + "|" + normalized_logical_name(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			TEST_EXPECT(game.read_file(file.logical_name, bytes));
-			if (bytes.size() < 4 || std::memcmp(bytes.data(), "3DI3", 4) != 0) {
-				std::printf("retail validation: %s (%s) is no 3DI3 model: the game's loader refuses it too\n",
-				            file.logical_name.c_str(), file.source_path.c_str());
-				++refused;
-				continue;
-			}
-			auto document = std::make_shared<ModelDocument>();
-			Diagnostic error;
-			if (!document->load_bytes(bytes, file.logical_name, AssetKind::Model, project.target_game, error)) {
-				std::printf("retail validation: %s (%s) does not open: %s\n", file.logical_name.c_str(),
-				            file.source_path.c_str(), error.message.c_str());
-				++errors;
-				continue;
-			}
-			for (const Diagnostic &d : validated(document)) {
-				if (d.severity != DiagnosticSeverity::Error) {
-					++notes[d.code()];
-					continue;
-				}
-				std::printf("retail validation: %s (%s) %s: %s: %s\n", file.logical_name.c_str(), file.source_path.c_str(),
-				            d.record.c_str(), d.code().c_str(), d.message.c_str());
-				++errors;
-			}
-			for (const ModelLod &lod : document->model_row()->lods)
-				for (const ThreediPartAnimation &pa : lod.panm) {
-					++part_animations;
-					no_frame += pa.matrix_index >= 0x80 ? 1 : 0;
-				}
-			++models;
-		}
-	}
-	if (models == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's models in its archives");
-	std::printf("retail validation: %zu models, %zu errors (%zu files no model); %zu part animations, %zu of them a "
-	            "frame byte 0x80 or above (no frame)\n",
-	            models, errors, refused, part_animations, no_frame);
-	for (const auto &note : notes) std::printf("retail validation: %zu x %s\n", note.second, note.first.c_str());
-	TEST_EXPECT(errors == 0);
-	return 0;
-}
-
 } // namespace
 
 // S12 D6: what the table says of a field reaches the Inspector: a unit apart from the name,
@@ -1008,17 +1214,18 @@ int alike_but_user_points_tables() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	if (untouched_saves() != 0) return 1;
+int main() {
 	if (edits() != 0) return 1;
+	if (composed_forms() != 0) return 1;
 	if (alike_but_user_points_tables() != 0) return 1;
 	if (part_animations() != 0) return 1;
 	if (validation() != 0) return 1;
+	if (shipped_forms_validate() != 0) return 1;
 	if (frames_and_registers() != 0) return 1;
 	if (record_references() != 0) return 1;
 	if (field_metadata() != 0) return 1;
-	if (retail_models() != 0) return 1;
-	if (retail_bhd_migrated() != 0) return 1;
-	return retail_validation();
+	// The sweeps over the formats' fixtures, each naming every variant it lacks.
+	const int saves = untouched_saves();
+	const int migrated = bhd_migrated();
+	return saves != 0 || migrated != 0 ? 1 : 0;
 }

@@ -1,0 +1,45 @@
+; OpenNova authored terrain: the shipped .trn line forms (spaces, an 8-sector grid, no last line end)
+
+terrain_name "Forms8"
+terrain_creator "Open/Nova"
+polytrn_colormap forms8_c.tga
+polytrn_detailmap forms8_dm.tga
+polytrn_detailmap2 forms8_dm2.tga
+polytrn_detailmap_c1 forms8_dc1.tga
+polytrn_detailmap_c2 forms8_dc2.tga
+polytrn_detailmap_c3 forms8_dc3.tga
+polytrn_detailmapdist forms8_dmd.tga
+polytrn_detailblendmap forms8_d1.tga
+polytrn_detaildensity 192
+polytrn_detaildensity2 4
+polytrn_polydata Forms8.cpt
+polytrn_charmap Forms8_m.pcx
+polytrn_foliagemap Forms8_f.pcx
+polytrn_tilestrip trntilea1.tga
+water_height 30 ;sea level, in units above the floor
+water_murk 0.6
+water_rgb 30,50,40
+polytrn_sectorcount 8 ; sectors a side
+polytrn_wrapx 0 ; wrap along x?
+polytrn_wrapy 1 ; wrap along y?
+polytrn_origin -4 -4 ; the sector at world (x,y)
+lock_topleft 1 1
+lock_topright 1 1
+lock_bottomleft 1 1
+lock_bottomright 1 1
+
+polytrn_sectors 0 1 2 3 4 0 1 2 ; this row
+polytrn_sectors 3 4 0 1 2 3 4 0
+polytrn_sectors 1 2 3 4 0 1 2 3
+polytrn_sectors 4 0 1 2 3 4 0 1 ; this row
+polytrn_sectors 2 3 4 0 1 2 3 4
+polytrn_sectors 0 1 2 3 4 0 1 2
+polytrn_sectors 3 4 0 1 2 3 4 0 ; this row
+polytrn_sectors 1 2 3 4 0 1 2 3
+
+foliage
+  graphic         fgrass.3di                ; the model to place - a small one
+  color_lower     0                         ; 0=match ground  1=half blend  2=keep its colour
+  color_upper     0                         ; 0=match ground  1=half blend  2=keep its colour
+  match           252                       ; up to four foliage map codes
+end

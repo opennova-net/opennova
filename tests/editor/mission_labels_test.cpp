@@ -7,13 +7,16 @@
 // a group, a path, a stop, a text key by its string; every value naming nothing said in words); through
 // a session over a project holding the catalog and the mission's table (the graph's names: the
 // outline's titles, the picker's choices worded, the wire's `display`, Problems' places, the status
-// line). Its retail leg words every record and every reference of the install's 115 missions with the
-// install's catalog and tables, and times it.
+// line). Every record and every reference of the sweep's missions (mission_sweep.h) worded with a project's
+// catalogs and tables, what names nothing found as such, timed over the mission at the most records a shipped
+// mission holds.
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -21,12 +24,11 @@
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
+#include <editor/documents/mission_reads.h>
 #include <editor/documents/mission_uses.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
@@ -42,11 +44,11 @@
 #include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "common/thread_cpu_clock.h"
 #include "editor/editor_test_support.h"
+#include "editor/mission_sweep.h"
 #include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
@@ -540,17 +542,25 @@ int test_text_key_picks() {
 	return 0;
 }
 
-// The names an install's files define, keyed for lookups by kind, name and scope (the graph's keys,
-// without case): the items of its catalog, the string ids of every table it ships; a text key found in
-// its edge's own table where the install ships that table, else in the alternate (as the graph's lookup
-// tries them, AssetGraph::lookup_scope).
-class InstallNames : public NameSource {
+// The names a project's files define, keyed for lookups by kind, name and scope (the graph's keys, without
+// case): the items of its catalogs, the string ids of every table; a text key found in its edge's own table
+// where that table is among the names, else in the alternate (as the graph's lookup tries them,
+// AssetGraph::lookup_scope).
+class TableSetNames : public NameSource {
 public:
-	void add(const Extracted &extracted) {
+	// The definitions of a file read as a document of `kind`; false where it does not load as one.
+	bool add(const std::vector<uint8_t> &bytes, const std::string &name, AssetKind kind) {
+		const DocumentType *type = document_type_for(kind);
+		std::unique_ptr<Document> table = type ? records_of(type->make()) : nullptr;
+		Diagnostic error;
+		if (!table || bytes.empty() || !table->load_bytes(bytes, name, kind, "jo", error)) return false;
+		Extracted extracted;
+		extract_from_document(*table, extracted);
 		for (const GraphSymbol &symbol : extracted.symbols) {
 			symbols_.emplace(key(symbol.kind, symbol.display, symbol.scope), symbol);
 			if (!symbol.scope.empty()) tables_.insert(opennova::strutil::to_upper(symbol.scope.substr(0, symbol.scope.find('/'))));
 		}
+		return true;
 	}
 	const GraphSymbol *symbol(ReferenceKind kind, const std::string &name, const std::string &scope) const override {
 		const auto found = symbols_.find(key(kind, name, scope));
@@ -572,142 +582,176 @@ private:
 	std::set<std::string> tables_;
 };
 
-// Every record and every value of the shipped missions in words (OPENNOVA_JO_DIR, base and each
-// expansion through the VFS), with the install's item catalog and string tables as the names: every
-// record titled, every reference value worded, what names nothing counted by what it is (the SSNs and
-// zones mission_document's retail leg counts as naming nothing, the same here), and the time each
-// mission's words took (a title or a value a row, per drawn row: held to a bound well under a frame).
-int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission worded)");
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string());
-	std::set<std::string> seen;
-	size_t missions = 0, titles = 0, values = 0, items_named = 0, shown_names = 0;
+// The marker types the minted missions place that neither catalog below names, authored: a named location, a KOTH
+// centre, a numbered marker and team 1's and team 2's starts (the fixtures' catalog has a row of 106001's id).
+constexpr const char *kMarkerItems = "begin \"Named Location\"\nid 102044\ntype marker\nend\n"
+                                     "begin \"KOTH Centre\"\nid 106006\ntype marker\nend\n"
+                                     "begin \"Numbered Marker\"\nid 106088\ntype marker\nend\n"
+                                     "begin \"Team 1 Start\"\nid 106003\ntype marker\nend\n"
+                                     "begin \"Team 2 Start\"\nid 106004\ntype marker\nend\n";
+
+// A win message past the 60 characters a sentence quotes of a text (mission_sentence.cpp quoted).
+constexpr const char *kLongMessage = "The gate is ours, and the road to the ridge lies open past the river crossing";
+
+// records.bms's table, authored: some of the keys its numbers form (a location, a person, waypoints, the objectives'
+// rows, directives, chat lines and a lose message), the others none (as a shipped mission's table lacks some it names).
+std::vector<uint8_t> records_table() {
+	opennova::rtxt::File table;
+	const auto section = [&table](const char *name, std::initializer_list<std::pair<const char *, const char *>> rows) {
+		const uint32_t index = static_cast<uint32_t>(table.sections.size());
+		table.sections.push_back({name, static_cast<uint32_t>(rows.size())});
+		for (const auto &row : rows) table.entries.push_back({row.first, row.second, {}, index});
+	};
+	section("Locations", {{"LOCATION000", "Ridge"}});
+	section("PeopleNames", {{"STRNAME002", "Cpl. Ortiz"}});
+	section("WPNames", {{"STRWPNAME000", "Gate"}, {"STRWPNAME003", "Bridge"}});
+	section("WinConditions", {{"STRWINCOND004", "Ridge held"}, {"STRWINCOND001", "Gate taken"}, {"STRWINMSG001", kLongMessage},
+	                          {"STRWINDIRECTIVE000", "Take the ridge"}});
+	section("LoseConditions", {{"STRLOSEDIRECTIVE001", "Hold the ridge"}, {"STRLOSEMSG001", "The ridge is lost"}});
+	std::vector<uint8_t> bytes;
+	std::string error;
+	opennova::rtxt::write(table, bytes, error);
+	return bytes;
+}
+
+// Every record and every value of the sweep's missions (mission_sweep.h, in place of every mission the install
+// ships) in words, with a project's catalogs and tables as the names (the base game's own, assets/, beside the
+// fixtures' catalog, the marker types above, synth_logic.bin and records.bms's table): every record titled, every
+// reference value worded, what names nothing counted by what it is: the SSNs and the zones naming nothing are the
+// entity and zone parameters the document's extraction finds naming no record of the mission (each such form
+// minted in logic.bms and records.bms), none an event past its table or a marker past the pool; a value the game
+// never records (an SSN past the 128 rows a sees or visited trigger keys), a stop past its path's and a text key no
+// table holds are said so too. And the time a mission's words take, a title or a value a row, per drawn row: over
+// scale.bms, at the most records a shipped mission holds in each table, held to the bound well under a frame.
+int test_sweep() {
+	TableSetNames names;
+	const std::string base = repo() + "/assets/";
+	for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(base)) {
+		const std::string name = entry.path().filename().string();
+		const std::string extension = opennova::strutil::to_lower(entry.path().extension().string());
+		if (extension != ".def" && extension != ".bin") continue;
+		// A .bin's kind needs its bytes (a string table or another table): read as one, skipped where it does
+		// not load as one.
+		const AssetKind kind = extension == ".bin" ? AssetKind::Strings : opennova::file_kind_for_name(name);
+		names.add(test_io::read_file(base + name), name, kind);
+	}
+	TEST_EXPECT(names.add(test_io::read_file(repo() + "/fixtures/def/items.def"), "items.def", AssetKind::ItemDefs));
+	TEST_EXPECT(names.add(std::vector<uint8_t>(kMarkerItems, kMarkerItems + std::strlen(kMarkerItems)), "markers.def",
+	                      AssetKind::ItemDefs));
+	TEST_EXPECT(names.add(test_io::read_file(repo() + "/fixtures/bms/synth_logic.bin"), "synth_logic.bin", AssetKind::Strings));
+	TEST_EXPECT(names.add(records_table(), "records.bin", AssetKind::Strings));
+	std::vector<std::string> missing;
+	const std::vector<mission_sweep::Mission> sweep = mission_sweep::load(missing);
+	size_t missions = 0, titles = 0, values = 0, items_named = 0, shown_names = 0, entity_missing = 0, zone_missing = 0;
 	std::map<std::string, size_t> dangling;
-	double words_ms = 0, slowest_ms = 0, slowest_per_row_us = 0;
-	size_t slowest_rows = 0, all_rows = 0;
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
-		// The names: the def catalogs (the items, the weapons a loadout names) and every string table the
-		// mount holds.
-		InstallNames names;
-		std::vector<opennova::VfsFileLocation> bms;
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			const std::string extension = retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string());
-			if (extension == ".bms") {
-				bms.push_back(file);
-				continue;
-			}
-			if (extension != ".def" && extension != ".bin") continue;
-			// A .bin's kind needs its bytes (a string table or another table): read as one, skipped
-			// where it does not load as one.
-			const AssetKind kind = extension == ".bin" ? AssetKind::Strings : opennova::file_kind_for_name(file.logical_name);
-			std::vector<uint8_t> bytes;
-			const DocumentType *type = document_type_for(kind);
-			std::unique_ptr<Document> table = type ? records_of(type->make()) : nullptr;
-			Diagnostic error;
-			if (!table || !game.read_file(file.logical_name, bytes) ||
-			    !table->load_bytes(bytes, file.logical_name, kind, "jo", error))
-				continue;
-			Extracted extracted;
-			extract_from_document(*table, extracted);
-			names.add(extracted);
-		}
-		for (const opennova::VfsFileLocation &file : bms) {
-			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			TEST_EXPECT(game.read_file(file.logical_name, bytes));
-			std::unique_ptr<Document> document = open(bytes, file.logical_name.c_str());
-			TEST_EXPECT(document && !document->blocked());
-			if (!document) continue;
-			++missions;
-			// The thread's CPU (common/thread_cpu_clock.h): what the words cost, which another process's
-			// load (ctest -j8, a build beside it) does not stretch as it stretches the wall clock.
-			const double started = test_clock::thread_cpu_ms();
-			size_t rows = 0;
-			for (const auto &row : document->rows()) {
-				++rows;
-				const NodeAddress address{row->id, row->kind, 0};
-				std::vector<NodeAddress> records{address};
-				document->walk_records(*row, [&](const NodeAddress &record, const Document::Placement &) {
-					records.push_back(record);
-					return true;
-				});
-				for (const NodeAddress &record : records) {
-					const std::string title = record_display(*document, record, &names);
-					TEST_EXPECT(!title.empty());
-					++titles;
-					if (is_entity_kind(record.kind) && !record.child) shown_names += title.find(" (") != std::string::npos;
-					// Every field a record's type words or that names something.
-					for (const FieldSchema &schema : document->fields(record.kind)) {
-						const FieldUse field = document->field_on(record, schema);
-						if (field.applies == Applicability::Ignored) continue;
-						Value value;
-						if (!document->get(record, schema.id, value)) continue;
-						const DisplayName words = value_display(*document, record, field, value, &names);
-						if (words.text.empty()) continue;
-						++values;
-						if (schema.id == "item" && !words.dangling) ++items_named;
-						if (!words.dangling) continue;
-						// What it is that names nothing: its first word ("No entity has SSN 5" an SSN).
-						const std::string &text = words.text;
-						// A value the game never records (an SSN of 128 or more in a sees, targeted, shot or
-						// visited trigger, a visited stop past 31: section 3a) apart from what names nothing.
-						const std::string what = text.find("never recorded") != std::string::npos ? "never recorded"
-						                         : text.find("SSN") != std::string::npos      ? "ssn"
-						                         : text.find("zone") != std::string::npos   ? "zone"
-						                         : text.find("item") != std::string::npos   ? "item"
-						                         : text.find("text") != std::string::npos   ? "text"
-						                         : text.find("event") != std::string::npos  ? "event"
-						                         : text.find("marker") != std::string::npos ? "marker"
-						                         : text.find("stop") != std::string::npos   ? "stop"
-						                                                                    : "other: " + text;
-						++dangling[what];
-					}
+	double scale_per_row_us = -1, words_ms = 0;
+	size_t all_rows = 0;
+	for (const mission_sweep::Mission &file : sweep) {
+		std::unique_ptr<Document> document = open(file.bytes, file.name.c_str());
+		TEST_EXPECT(document && !document->blocked());
+		if (!document) continue;
+		++missions;
+		// The thread's CPU (common/thread_cpu_clock.h): what the words cost, which another process's load
+		// (ctest -j8, a build beside it) does not stretch as it stretches the wall clock.
+		const double started = test_clock::thread_cpu_ms();
+		size_t rows = 0;
+		for (const auto &row : document->rows()) {
+			++rows;
+			const NodeAddress address{row->id, row->kind, 0};
+			std::vector<NodeAddress> records{address};
+			document->walk_records(*row, [&](const NodeAddress &record, const Document::Placement &) {
+				records.push_back(record);
+				return true;
+			});
+			for (const NodeAddress &record : records) {
+				const std::string title = record_display(*document, record, &names);
+				TEST_EXPECT(!title.empty());
+				++titles;
+				if (is_entity_kind(record.kind) && !record.child) shown_names += title.find(" (") != std::string::npos;
+				// Every field a record's type words or that names something.
+				for (const FieldSchema &schema : document->fields(record.kind)) {
+					const FieldUse field = document->field_on(record, schema);
+					if (field.applies == Applicability::Ignored) continue;
+					Value value;
+					if (!document->get(record, schema.id, value)) continue;
+					const DisplayName words = value_display(*document, record, field, value, &names);
+					if (words.text.empty()) continue;
+					++values;
+					if (schema.id == "item" && !words.dangling) ++items_named;
+					if (!words.dangling) continue;
+					// What it is that names nothing: its first word ("No entity has SSN 5" an SSN).
+					const std::string &text = words.text;
+					// A value the game never records (an SSN of 128 or more in a sees, targeted, shot or
+					// visited trigger, a visited stop past 31: section 3a) apart from what names nothing.
+					const std::string what = text.find("never recorded") != std::string::npos ? "never recorded"
+					                         : text.find("SSN") != std::string::npos      ? "ssn"
+					                         : text.find("zone") != std::string::npos   ? "zone"
+					                         : text.find("item") != std::string::npos   ? "item"
+					                         : text.find("text") != std::string::npos   ? "text"
+					                         : text.find("event") != std::string::npos  ? "event"
+					                         : text.find("marker") != std::string::npos ? "marker"
+					                         : text.find("stop") != std::string::npos   ? "stop"
+					                         : text.find("weapon") != std::string::npos ? "weapon"
+					                                                                    : "other: " + text;
+					++dangling[what];
 				}
 			}
-			const double took = test_clock::thread_cpu_ms() - started;
-			words_ms += took;
-			all_rows += rows;
-			if (took > slowest_ms) {
-				slowest_ms = took;
-				slowest_rows = rows;
-			}
-			slowest_per_row_us = std::max(slowest_per_row_us, took * 1000.0 / double(std::max<size_t>(rows, 1)));
+		}
+		const double took = test_clock::thread_cpu_ms() - started;
+		words_ms += took;
+		all_rows += rows;
+		if (mission_sweep::minted(file, "scale.bms")) scale_per_row_us = took * 1000.0 / double(std::max<size_t>(rows, 1));
+		// What the document's extraction finds naming no record of the mission: its entity parameters naming no
+		// SSN, its zone parameters naming no zone (the counts mission_document's sweep makes).
+		std::set<int32_t> ssns, zones;
+		for (const MissionEntityRead &entity : mission_entities(as_mission(*document))) ssns.insert(entity.ssn);
+		for (const MissionAreaRead &area : mission_areas(as_mission(*document))) zones.insert(area.id);
+		Extracted extracted;
+		extract_from_document(*document, extracted);
+		for (const GraphEdge &edge : extracted.edges) {
+			const std::optional<int> number = opennova::strutil::parse_int(edge.value);
+			if (edge.kind == ReferenceKind::MissionEntity) entity_missing += number && !ssns.count(*number);
+			if (edge.kind == ReferenceKind::MissionZone) zone_missing += number && !zones.count(*number);
 		}
 	}
-	if (missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
-	std::printf("retail: %zu missions, %zu records titled (%zu entities with a name the game shows), %zu values worded "
+	std::printf("sweep: %zu missions, %zu records titled (%zu entities with a name the game shows), %zu values worded "
 	            "(%zu items by their catalog's name)\n",
 	            missions, titles, shown_names, values, items_named);
 	for (const auto &[what, count] : dangling) std::printf("  naming nothing, %s: %zu\n", what.c_str(), count);
-	std::printf("retail: the words took %.1f ms of CPU over the %zu missions, the slowest %.1f ms (%zu rows), at most %.1f us a row\n",
-	            words_ms, missions, slowest_ms, slowest_rows, slowest_per_row_us);
-	TEST_EXPECT(missions == 115);
-	// The SSNs and zones naming nothing are the ones mission_document's retail leg counts (162 entity
-	// parameters naming no SSN of their mission, 53 zone parameters naming no zone); no event past its
-	// table, no stop past the markers.
-	TEST_EXPECT(dangling["ssn"] == 162 && dangling["zone"] == 53 && !dangling.count("event") && !dangling.count("marker"));
-	// Fast enough to word every row of a mission each time it is drawn whole: a few microseconds a row
-	// over the 115 (the bound is the whole pass's mean of the thread's CPU, which neither a loaded
-	// machine nor one slow mission moves, and Windows' tick a mission averages out; the slowest
-	// mission's is printed).
-	const double mean_per_row_us = words_ms * 1000.0 / double(std::max<size_t>(all_rows, 1));
-	std::printf("retail: %.1f us a row over the %zu rows\n", mean_per_row_us, all_rows);
-	TEST_EXPECT(mean_per_row_us < 200.0);
+	std::printf("sweep: the words took %.1f ms of CPU over the %zu rows (%.1f us a row); scale.bms %.1f us a row\n", words_ms,
+	            all_rows, words_ms * 1000.0 / double(std::max<size_t>(all_rows, 1)), scale_per_row_us);
+	// The SSNs and zones naming nothing are the ones the document's extraction counts naming no record; no event
+	// past its table, no marker past the pool; the other forms each said.
+	TEST_EXPECT(entity_missing > 0 && zone_missing > 0 && dangling["ssn"] == entity_missing && dangling["zone"] == zone_missing);
+	TEST_EXPECT(!dangling.count("event") && !dangling.count("marker"));
+	TEST_EXPECT(dangling["never recorded"] > 0 && dangling["stop"] > 0 && dangling["text"] > 0 && items_named > 0 && shown_names > 0);
+	// Fast enough to word every row of a mission each time it is drawn whole: a few microseconds a row over
+	// scale.bms (the bound is the mission's mean of the thread's CPU, which neither a loaded machine nor one slow
+	// row moves; the install's 115 averaged 41 us a row, their slowest 117).
+	TEST_EXPECT(scale_per_row_us >= 0 && scale_per_row_us < 200.0);
+	// records.bms's objectives in words with its table: a message past 60 characters cut as the sentence quotes it, a
+	// shown directive by its text (its slot's id 0), a lose slot by its message.
+	for (const mission_sweep::Mission &file : sweep) {
+		if (!mission_sweep::minted(file, "records.bms")) continue;
+		std::unique_ptr<Document> document = open(file.bytes, file.name.c_str());
+		TEST_EXPECT(document);
+		if (!document) return 1;
+		const std::string sentence = record_display(*document, row_at(*document, MissionKind::Event, 1), &names);
+		TEST_EXPECT(sentence.find("saying '" + std::string(kLongMessage).substr(0, 57) + "...'") != std::string::npos &&
+		            sentence.find(": 'Take the ridge'") != std::string::npos);
+		TEST_EXPECT(same(shown(*document, row_at(*document, MissionKind::Mission, 0), "lose_conditions[0]", &names).text,
+		                 "A lose objective: its message \"The ridge is lost\""));
+	}
+	TEST_EXPECT(mission_sweep::none_missing(missing));
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (test_document_words() != 0) return 1;
 	if (test_named_words() != 0) return 1;
 	if (test_session_words() != 0) return 1;
 	if (test_text_key_picks() != 0) return 1;
-	return test_retail();
+	return test_sweep();
 }

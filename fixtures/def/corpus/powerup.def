@@ -1,0 +1,57 @@
+
+
+
+powerup "CORPUS_HP"  
+	hp   -1
+	respawn_time 45
+	max_respawns 2
+	action "respawn"
+		function powerup_respawn
+	end
+	action "pickup"
+		soundset CORPUS_UP
+		function powerup_pickup
+	end
+end
+
+powerup "CORPUS_HP_INF"  
+	hp   -1
+	respawn_time 45
+	action "respawn"
+		function powerup_respawn
+	end
+	action "pickup"
+		soundset CORPUS_UP
+		function powerup_pickup
+	end
+end
+
+powerup "CorpusAmmo"
+	respawn_time 90
+	max_respawns 2
+
+	allammo
+
+	action "respawn"
+		function powerup_respawn
+	end
+	action "pickup"
+		soundset CORPUS_AMMO
+		function powerup_pickup
+	end
+end
+
+powerup "CorpusAmmo_INF"
+	respawn_time 90
+
+	allammo
+
+	action "respawn"
+		function powerup_respawn
+	end
+	action "pickup"
+		soundset CORPUS_AMMO
+		function powerup_pickup
+	end
+end
+ 

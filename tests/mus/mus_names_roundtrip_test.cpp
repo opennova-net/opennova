@@ -6,8 +6,8 @@
      1. a program on disk: decompile_with_names(x) recompiles, byte-identical
         to the names-less decompile's bytecode (incl. a name with a space -> the
         play target is quoted and still resolves) -- the minted synth_gamemus.bin
-        unconditionally, the shipped jo_gamemus.bin from the reference fixture
-        set (OPENNOVA_JO_ASSETS) as the retail leg;
+        and synth_forms.bin (the shipped menu programs' form: its plays past the
+        names a bank holds, and past 255, keep their sound_N spelling);
      2. a hand-written script: `play "Name"` / `play Name` / `play sound_N` all
         resolve through the bind map to the right index; an unbound name fails. */
 
@@ -18,7 +18,6 @@
 
 #include <string>
 
-#include "common/retail_paths.h"
 
 using namespace opennova::mus;
 
@@ -33,7 +32,6 @@ static int passed = 0, failed = 0;
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif
 
-static std::string g_retail_gamemus;
 
 /* Decompile `s` (names-aware when names!=NULL), compile, and hand the caller the
    recompiled bytecode. Returns 1 on success. */
@@ -98,8 +96,8 @@ static int test_names_roundtrip_synth_gamemus(void) {
     return names_roundtrip(MUS_FIXTURE_DIR "/synth_gamemus.bin");
 }
 
-static int test_names_roundtrip_jo_gamemus(void) {
-    return names_roundtrip(g_retail_gamemus.c_str());
+static int test_names_roundtrip_synth_forms(void) {
+    return names_roundtrip(MUS_FIXTURE_DIR "/synth_forms.bin");
 }
 
 /* Count occurrences of the 2-byte play opcode (0x3E, idx) in a code buffer. */
@@ -149,17 +147,10 @@ static int test_bind_resolves_play_by_name(void) {
     return 1;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main(void) {
     RUN_TEST(test_names_roundtrip_synth_gamemus);
+    RUN_TEST(test_names_roundtrip_synth_forms);
     RUN_TEST(test_bind_resolves_play_by_name);
-
-    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
-    if (g_retail_gamemus.empty()) {
-        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_gamemus.bin (the shipped game script)");
-    } else {
-        RUN_TEST(test_names_roundtrip_jo_gamemus);
-    }
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

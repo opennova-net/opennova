@@ -6,11 +6,10 @@
 // the references a sibling decides; the two texts written as attribute names take only the reader's
 // tokens; and the shape's parts as the menu fills them (each kind's labelled fields, its choices with
 // their words, its lists by their tokens); what a record's owners decide of it (an ITEMS row's
-// text by its window's type); and a window's TYPE set as the game reads the window after it. Over a synthetic menu holding every element, the fifteen shipped revx02
-// menus of the reference fixture set (a SKIP-LEG without OPENNOVA_JO_ASSETS) and every menu the packed
-// install serves, the same menus editor_menus_retail sweeps (a SKIP-LEG without OPENNOVA_JO_DIR). Which
-// window type reads what, what a field names and what a new record is are the format's rules
-// (tests/mnu/mnu_schema_test.cpp).
+// text by its window's type); and a window's TYPE set as the game reads the window after it. Over a synthetic menu
+// holding every element and every menu of the variant set (the format's minted menus, our base game's), the same
+// menus editor_menus sweeps. Which window type reads what, what a field names and what a new record is are the
+// format's rules (tests/mnu/mnu_schema_test.cpp).
 #include <algorithm>
 #include <cstdlib>
 #include <functional>
@@ -27,7 +26,9 @@
 #include <formats/mnu/mnu.h>
 #include <formats/mnu/mnu_layout.h>
 
-#include "common/retail_paths.h"
+#include "common/temp_dir.h"
+#include "editor/menus_audio_fixtures.h"
+#include "editor/minted_install.h"
 
 namespace {
 
@@ -898,50 +899,48 @@ bool test_type_change_reads_as_the_game() {
 	return true;
 }
 
-// The shipped menus, each rebuilt through the table alone.
-bool test_retail_fixtures() {
-	static const char *const kFixtures[] = {
-		"jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player", "jo_weapon", "jo_loadout",
-		"jo_color", "jo_cmap", "jo_stat", "jo_death", "jo_vehicle", "jo_item_db", "jo_splash",
-	};
-	if (retail::reference_fixture("mnu/jo_main.mnu").empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mnu/jo_*.mnu (the shipped revx02 menus through the table)");
-		return true;
-	}
+// Every menu of the variant set (menus_audio_fixtures.h: fixtures/mnu/'s, the format's minted variants of the shipped
+// menus' forms among them, and our base game's, the menus editor_menus sweeps through MnuDocument), each rebuilt
+// through the table alone.
+bool test_variant_menus() {
+	std::vector<variant_fixtures::Input> menus;
+	const bool all = variant_fixtures::menus(menus);
 	size_t records = 0;
-	for (const char *name : kFixtures) {
-		const std::string path = retail::reference_fixture((std::string("mnu/") + name + ".mnu").c_str());
-		CHECK(!path.empty(), "fixture " << name);
+	for (const variant_fixtures::Input &menu : menus) {
 		mnu::Document doc;
 		std::string error;
-		CHECK(mnu::parse_file(path, doc, error), name << ": " << error);
+		CHECK(mnu::parse_file(menu.path, doc, error), menu.label << ": " << error);
 		records += walk(doc).size();
-		CHECK(rebuilds(doc, name), name << " rebuilt through the table");
+		CHECK(rebuilds(doc, menu.label), menu.label << " rebuilt through the table");
 	}
-	std::cout << "  fixture leg: 15 menus, " << records << " records rebuilt through the table\n";
+	std::cout << "  " << menus.size() << " menus, " << records << " records rebuilt through the table\n";
+	CHECK(all && !menus.empty(), "every variant menu there");
 	return true;
 }
 
-// Every .mnu the packed install serves (the base game's, then each expansion's, a later layer's copy of
-// the same bytes counted once: the menus editor_menus_retail sweeps through MnuDocument), each rebuilt
-// through the table alone.
-bool test_retail_install() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (every .mnu the packed install serves, through the table)");
-		return true;
-	}
+// Every .mnu a packed install serves (the base game's, then each expansion's, a later layer's copy of the same bytes
+// counted once: the menus editor_menus sweeps through MnuDocument), each rebuilt through the table alone. The install
+// is minted from our own game (minted_install.h: the base game's project and the onjo1 expansion, carrying its own
+// main.mnu, variant_fixtures::expansion_main_menu).
+bool test_install_menus() {
+	test_temp::TempDir dir("opennova_menu_table_install");
+	const std::string install = dir.file("install");
+	std::string minted;
+	std::vector<uint8_t> patched;
+	CHECK(variant_fixtures::expansion_main_menu(patched), "assets/main.mnu holds MUSICVAR 1");
+	CHECK(minted_install::mint_with(install, {{"main.mnu", minted_install::share(patched)}}, minted),
+	      "the install mints: " << minted);
 	std::map<std::string, std::vector<uint8_t>> seen;
-	size_t menus = 0, repeats = 0, records = 0;
+	size_t menus = 0, repeats = 0, records = 0, base_menus = 0;
 	std::vector<std::string> mounts = {std::string()};
-	for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
+	for (const std::string &expansion : opennova::vfs_list_expansions(install)) mounts.push_back(expansion);
 	for (const std::string &expansion : mounts) {
 		opennova::Vfs vfs;
 		CHECK(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed),
 		      (expansion.empty() ? "<install>" : expansion) << ": " << vfs.last_error());
 		for (const auto &location : vfs.list_files()) {
 			const std::string &name = location.logical_name;
-			if (name.size() < 4 || !opennova::strutil::iequals(name.substr(name.size() - 4), ".mnu")) continue;
+			if (!opennova::strutil::ends_with_icase(name, ".mnu")) continue;
 			const std::string label = (expansion.empty() ? std::string("<install>/") : expansion + "/") + name;
 			std::vector<uint8_t> stored, decoded;
 			CHECK(vfs.read_file_raw(name, stored) && vfs.read_file(name, decoded), label << ": unreadable");
@@ -958,8 +957,12 @@ bool test_retail_install() {
 			CHECK(rebuilds(doc, label), label << " rebuilt through the table");
 			++menus;
 		}
+		if (expansion.empty()) base_menus = menus;
 	}
 	CHECK(menus > 0, "the packed install served no .mnu");
+	CHECK(menus == base_menus + 1, "the expansion's own main.mnu rebuilt");
+	// The expansion's mount serves the base game's menus again, unchanged: each counted once.
+	CHECK(mounts.size() > 1 && repeats > 0, "a later layer served the base game's menus again");
 	std::cout << "  install leg: " << menus << " menus (" << repeats << " more served unchanged by a later layer), "
 	          << records << " records rebuilt through the table\n";
 	return true;
@@ -967,8 +970,7 @@ bool test_retail_install() {
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 #define RUN_TEST(name)                         \
 	do {                                       \
@@ -989,8 +991,8 @@ int main(int argc, char **argv) {
 	RUN_TEST(test_tokens_held_as_read);
 	RUN_TEST(test_owners);
 	RUN_TEST(test_type_change_reads_as_the_game);
-	RUN_TEST(test_retail_fixtures);
-	RUN_TEST(test_retail_install);
+	RUN_TEST(test_variant_menus);
+	RUN_TEST(test_install_menus);
 	if (failed > 0) {
 		std::cerr << "\n" << failed << " test(s) FAILED\n";
 		return EXIT_FAILURE;

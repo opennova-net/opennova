@@ -1,8 +1,8 @@
 /* engine/runtime/anim SkeletalClips — the SECONDARY (upper-body weapon)
-   channel's composition, pinned headless over the shipped BINOC.bad rig (the
-   real 19-tag BN01..BN19 body skeleton the weapon mask keys on; both rigs come
-   from the reference fixture set, OPENNOVA_JO_ASSETS, and the whole test is
-   gated on them):
+   channel's composition, pinned headless over the 19-tag BN01..BN19 body
+   skeleton the weapon mask keys on: the minted fixtures/anim/rig19_idle.bad
+   (the stock idle's shape, the shipped BINOC.bad's) and its twist
+   (tests/fixtures/minimal_bad_gen.cpp):
 
      1. the mask splice: mask bones take the weapon channel's world rotation,
         unmasked bones keep the primary's, and the hierarchy re-localizes exactly
@@ -16,14 +16,13 @@
         [orig: AnimMap_UpdateDualChannels @0x40b8c0 -> @0x40b5f0;
          AnimChannel_BlendTwoChannels @0x410740].
 
-   The healthy-export trap: with only real retail clips a naive test passes for
-   the wrong reason (channel-at-reset == bind). So the second clip is BINOC.bad
+   The healthy-export trap: with only healthy clips a naive test passes for
+   the wrong reason (channel-at-reset == bind). So the second clip is the idle
    with ONE mask bone (BN06 R UpperArm) rotated 90 deg and ONE unmasked bone
-   (BN08 R Thigh) rotated 90 deg: the reference set's bad/BINOC_twist.bad,
-   minted once by the from-scratch .bad writer before ADR 0038 retired it
-   (ADR 0047 returned it: formats/bad/bad_write.h). Its provenance is ASSERTED
+   (BN08 R Thigh) rotated 90 deg: fixtures/anim/rig19_twist.bad, the recipe
+   the retired BINOC_twist.bad was minted with. Its provenance is ASSERTED
    below against twist_channel's in-memory expectation, never assumed, and it
-   is staged into the temp dir beside a byte copy of BINOC.bad and a two-key
+   is staged into the temp dir beside a byte copy of the idle and a two-key
    .adm. */
 
 #include <cmath>
@@ -41,7 +40,6 @@
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
-#include "common/retail_paths.h"
 #include "common/test_paths.h"
 
 #include <runtime/anim/aim_overlay.h>
@@ -89,8 +87,9 @@ float angle_between(Quat a, Quat b) {
 
 // Rotate every keyframe of one channel by a fixed quaternion (about the bone's
 // local Y), so the clip differs from reset on exactly that bone. This is the
-// recipe the committed BINOC_twist.bad was minted with; it now produces the
-// in-memory EXPECTATION the fixture is checked against.
+// recipe the committed rig19_twist.bad is minted with (in double, the
+// generator's own arithmetic); it produces the in-memory EXPECTATION the
+// fixture is checked against.
 void twist_channel(BadFile &bf, int bone, float radians) {
     const float h = radians * 0.5f;
     const Quat rot = { std::cos(h), 0.0f, std::sin(h), 0.0f }; // w,x,y,z about Y
@@ -118,17 +117,13 @@ bool copy_bytes(const std::string &src, const std::string &dst) {
 } // namespace
 
 int main() {
-    const std::string binoc = retail::reference_fixture("bad/BINOC.bad");
-    const std::string twist_fixture = retail::reference_fixture("bad/BINOC_twist.bad");
-    if (binoc.empty() || twist_fixture.empty())
-        return retail::skip("OPENNOVA_JO_ASSETS/fixtures/bad/BINOC.bad + BINOC_twist.bad (the shipped rig and its twist)");
+    const std::string binoc = test_paths_fixture("anim/rig19_idle.bad");
+    const std::string twist_fixture = test_paths_fixture("anim/rig19_twist.bad");
 
-    // ---- fixture provenance: BINOC_twist.bad IS BINOC.bad with bones 5 and 7 twisted ----
-    // Parse-level, not a byte diff: that writer zero-filled the 32-byte
-    // name fields where BINOC carries residual bytes after the NUL, so the two
-    // files re-parse identical without being byte-identical. The twisted
-    // channels are compared within 1e-5 (another libm's cosf/sinf at mint time
-    // is ulp noise; a wrong bone or angle is off by ~1e-1).
+    // ---- fixture provenance: rig19_twist.bad IS rig19_idle.bad with bones 5 and 7 twisted ----
+    // Parse-level: the twisted channels are compared within 1e-5 (the
+    // generator turns them in double, this test in float: ulp noise; a wrong
+    // bone or angle is off by ~1e-1).
     {
         BadFile expect_bf = {};
         TEST_EXPECT(bad_parse(binoc.c_str(), &expect_bf) == 0);
@@ -186,7 +181,7 @@ int main() {
         bad_free(&expect_bf);
     }
 
-    // ---- stage the temp rig: reset.bad (byte copy of BINOC), twist.bad (the fixture) ----
+    // ---- stage the temp rig: reset.bad (byte copy of the idle), twist.bad (the fixture) ----
     const std::string dir = std::string(test_paths_temp_dir()) + "/" + test_paths_unique("opennova_wpnch_test");
 #ifdef _WIN32
     _mkdir(dir.c_str());

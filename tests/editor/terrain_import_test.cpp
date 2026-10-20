@@ -10,7 +10,8 @@
 // key). The surface map: written as <stem>_m.pcx, 8-bit with the legend its palette, the .trn's polytrn_charmap
 // naming it; and the runtime's surface sampler reading the classes painted at known mission positions over the
 // island, at 512 and at 1024. The heightmap, surface map and foliage map reads are the engine's codecs, with their
-// own ctests (cpt_trngen_heightmap_depth, terrain_map_source); with --retail, what a shipped foliage map grows.
+// own ctests (cpt_trngen_heightmap_depth, terrain_map_source); and what a foliage map of the shipped form grows
+// (fixtures/terrain/tmap, minted after JO:CA's Dvxi5: its unpainted 255s nothing).
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -53,8 +54,8 @@
 #include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "common/png_test_support.h"
 #include "editor/test_platform.h"
@@ -864,23 +865,25 @@ int test_new_terrain_foliage() {
 	return 0;
 }
 
-// With --retail: what a shipped foliage map grows by its terrain's definitions (the map read by the engine's codec,
-// whose own retail leg is terrain_map_source_retail): Dvxi5's definitions match 254 and 253, so its 255s grow
-// nothing.
-int test_retail_foliage_notes() {
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped foliage map, Dvxi5_f.pcx)");
-	opennova::ResourceIndex index;
-	std::vector<uint8_t> bytes, text;
-	TEST_EXPECT(index.scan(install) && index.read_file("Dvxi5_f.pcx", bytes) && index.read_file("Dvxi5.trn", text));
+// What a foliage map of the shipped form grows by its terrain's definitions (the map read by the engine's codec, its
+// PCX leg): fixtures/terrain/tmap, minted after JO:CA's Dvxi5 (tests/fixtures/minimal_terrain_gen.cpp), its map an
+// 8-bit PCX whose unpainted texels are 255 (Dvxi5_f.pcx holds 253, 254 and 255 alone), its .trn's two definitions
+// matching 254 and 253 as Dvxi5's do; so its 255s grow nothing, the one note.
+int test_shipped_foliage_notes() {
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap_f.pcx"));
+	const std::vector<uint8_t> text = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"));
+	TEST_EXPECT(!bytes.empty() && !text.empty());
 	std::string why;
 	IndexedImage8 out;
-	TEST_EXPECT(opennova::terrain::decode_foliage_map_source("Dvxi5_f.pcx", bytes, out, why));
+	TEST_EXPECT(opennova::terrain::decode_foliage_map_source("Tmap_f.pcx", bytes, out, why) && out.width == 256);
 	opennova::TrnConfig trn;
 	std::istringstream in(std::string(text.begin(), text.end()));
-	TEST_EXPECT(opennova::load_trn(in, trn, why) && trn.foliagemap == "Dvxi5_f.pcx" && trn.foliage_defs.size() == 2);
+	TEST_EXPECT(opennova::load_trn(in, trn, why) && trn.foliagemap == "Tmap_f.pcx" && trn.foliage_defs.size() == 2);
+	if (trn.foliage_defs.size() != 2) return 1;
+	TEST_EXPECT(trn.foliage_defs[0].match[0] == 254 && trn.foliage_defs[1].match[0] == 253);
 	const std::vector<std::string> notes = terrain_foliage_notes(out, trn.foliage_defs);
-	TEST_EXPECT(notes.size() == 1 && notes[0].find("codes 255 (") == 0);
+	for (const std::string &note : notes) std::printf("  shipped form: %s\n", note.c_str());
+	TEST_EXPECT(notes.size() == 1 && notes[0].find("codes 255 (65358 texels) match no foliage definition") == 0);
 	return 0;
 }
 
@@ -899,8 +902,7 @@ int test_blank_environment() {
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_set_text();
 	failures += test_surface_legend_words();
@@ -910,7 +912,7 @@ int main(int argc, char **argv) {
 	failures += test_foliage_set_text();
 	failures += test_foliage_notes();
 	failures += test_new_terrain_foliage();
-	failures += test_retail_foliage_notes();
+	failures += test_shipped_foliage_notes();
 	if (failures == 0) std::printf("editor_terrain_import: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

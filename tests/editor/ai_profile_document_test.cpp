@@ -3,22 +3,23 @@
 // form (the S26 ruling): its keys as fields in the units the file writes them (a degree, a second, a km/h; a choice,
 // a mask, an ammo's name), each read by its type's key set alone (a HELO key ignored on a GROUND profile); a value
 // set read back as the game reads it (0.25 seconds holds 15 ticks, shown 0.24), its own line; the lines the reader
-// reads nothing of and a profile of no type as findings; no row added. The retail leg (OPENNOVA_JO_DIR): every
-// shipped profile through the document, unchanged, saved as the format's writer writes what its reader reads, a
-// fixed point.
+// reads nothing of and a profile of no type as findings; no row added. The shipped profiles' two shapes (authored
+// here) and the format's variants (its fixtures) through the document, unchanged, saved as the format's writer
+// writes what its reader reads, a fixed point.
 #include <editor/documents/ai_profile_document.h>
 #include <editor/documents/document_types.h>
-#include <base/vfs/vfs.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/variant_files.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -196,46 +197,65 @@ int test_findings() {
 	return 0;
 }
 
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (every shipped AI profile through the document)");
-		return 0;
-	}
-	Vfs vfs;
-	TEST_EXPECT(vfs.mount_game(install, "", VfsMountMode::Packed));
-	size_t files = 0;
-	for (const auto &location : vfs.list_files()) {
-		std::string lower = location.logical_name;
-		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-		if (lower.size() < 4 || lower.substr(lower.size() - 4) != ".aip") continue;
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(vfs.read_file(location.logical_name, bytes));
+// The shipped profiles' two shapes, authored: a GROUND and a HELO, each its description before its type, tabs and
+// trailing blanks, a line of a tab alone, a flag mask of two words, a decimal, a number after blanks, a key of the
+// other type, and the file ending in a NUL after its last line end.
+const std::string kGroundShape =
+		std::string("description     \"Grnd - truck\"\r\ntype\t\t\tGROUND\r\ndefault_state\tGROUND_FOLLOWWP\t\t\r\n\r\n"
+		            "rank\t\t\t\t1\r\nview_fov\t\t\t200\t\r\nview_dist\t\t\t350\t\r\n\t\r\n"
+		            "evade_flags\t\t\tFOLLOW_WP FLEE\r\ncombat_flags\t\tFOLLOW_WP FLEE\r\n\r\n"
+		            "primary_weap\t\tAI_LAW\t\r\nprimary_rate\t\t0.5\t\r\nprimary_fov\t\t    90\t\t\t\r\n"
+		            "secondary_weap\t\t20MM\t\r\n\r\npatrol_speed\t\t60\t\r\nmin_speed\t\t\t0\t\r\n"
+		            "max_chase_dist\t\t250\t\r\ndrive_skill\t\t\t2\r\nturn_rate\t\t\t40\t\r\n\r\naccel_time\t\t\t30\r\n"
+		            "radio_delay\t\t\t0\r\n") +
+		std::string(1, '\0');
+const std::string kHeloShape =
+		std::string("description     \"Helo - test\"\r\ntype\t\t\t\tHELO\r\ndefault_state\t\tHELO_FOLLOWWP\t\t\r\n\r\n"
+		            "rank\t\t\t\t2\r\nview_fov\t\t\t150\t\r\n\t\r\nevade_flags\t\t\tNO_ACTION COUNTER\r\n"
+		            "combat_flags\t\tNO_ACTION COUNTER\r\n\r\nprimary_weap\t\t50CAL\t\t\r\nprimary_rate\t\t0.01\t\t\r\n"
+		            "primary_fov\t\t    100\t\t\t\r\nprimary_facing\t\tWEAPON_TURRET\r\nprimary_flags\t\t0\r\n"
+		            "secondary_flags\t\tWEAPON_TURRET\r\nhunt_flags\t\t0\r\n\r\npatrol_speed\t\t90\t\r\n"
+		            "patrol_altitude\t\t30\t\r\npatrol_climb\t\t8\t\r\nmin_agl\t\t\t\t4\t\r\nmin_speed\t\t\t0\t\r\n"
+		            "flight_skill\t\t3\r\nturn_rate\t\t\t60\t\r\n\r\naccel_time\t\t\t25\r\nuse_waypoint_z\t\t1\r\n") +
+		std::string(1, '\0');
+
+// The format's variants: the two shapes above and each profile the format's fixtures hold (its rows' shapes of the
+// shipped profiles among them: a ground vehicle, a helicopter, a boat, a turret) through the document, unchanged and
+// unblocked, saved as the format's writer writes what its reader reads, and that save read again the same text.
+const char *const kShapes[] = {"fixtures/aip/ground_vehicle.aip", "fixtures/aip/helo.aip", "fixtures/aip/boat.aip",
+                               "fixtures/aip/turret.aip"};
+
+int test_variants() {
+	const editor_test::VariantFiles variants = editor_test::variant_files(
+			{"fixtures/aip"}, {".aip"}, std::vector<std::string>(std::begin(kShapes), std::end(kShapes)));
+	int failures = editor_test::report_missing(variants);
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> inputs{{"the GROUND shape", bytes_of(kGroundShape)},
+	                                                                 {"the HELO shape", bytes_of(kHeloShape)}};
+	for (const std::string &path : variants.files) inputs.emplace_back(path, editor_test::repo_bytes(path));
+	for (const auto &[name, bytes] : inputs) {
 		AiProfileDocument document;
 		Diagnostic error;
-		TEST_EXPECT(document.load_bytes(bytes, location.logical_name, AssetKind::AiProfile, "jo", error));
+		TEST_EXPECT(!bytes.empty() && document.load_bytes(bytes, "ai/profile.aip", AssetKind::AiProfile, "jo", error));
 		TEST_EXPECT(!document.blocked());
 		const SerializeResult saved = document.serialize();
+		const std::string expected = written(std::string(bytes.begin(), bytes.end()));
 		AiProfileDocument again;
-		if (!saved.ok() || saved.text != written(std::string(bytes.begin(), bytes.end())) ||
-		    !again.load_bytes(bytes_of(saved.text), location.logical_name, AssetKind::AiProfile, "jo", error) ||
+		if (!saved.ok() || expected.empty() || saved.text != expected ||
+		    !again.load_bytes(bytes_of(saved.text), "ai/profile.aip", AssetKind::AiProfile, "jo", error) ||
 		    again.serialize().text != saved.text) {
-			std::fprintf(stderr, "FAIL %s is not saved as the format's writer writes it\n", location.logical_name.c_str());
-			return 1;
+			std::fprintf(stderr, "FAIL %s is not saved as the format's writer writes it\n", name.c_str());
+			++failures;
+			continue;
 		}
-		++files;
+		std::printf("variant: %s saved as the format's writer writes it, a fixed point\n", name.c_str());
 	}
-	std::printf("retail: %zu shipped profiles through the document, saved as the format's writer writes them, a fixed "
-	            "point\n",
-	            files);
-	TEST_EXPECT(files >= 98);
-	return 0;
+	TEST_EXPECT(variants.files.size() >= 4);
+	return failures;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	if (test_fields() || test_type_keys() || test_findings() || test_retail()) return 1;
+int main() {
+	if (test_fields() || test_type_keys() || test_findings() || test_variants()) return 1;
 	return 0;
 }

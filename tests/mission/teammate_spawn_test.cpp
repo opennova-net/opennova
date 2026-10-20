@@ -1,5 +1,12 @@
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+// The teammate operations (BMS action 39): the helicopter factory's two
+// synthetic legs, then the flyover dispatched over CP01's opening ground in
+// miniature (the mission set's infantry.bms) with the mission set's minted
+// medevac helicopter (mheli, in the shipped Fblkhawm's shape) and medics (the
+// synthetic person over mmedic2.adm and mmedic1.adm, the shipped Medic02 and
+// Medic01 tables' drag poses), by the shipped rows' ids (items.def 101281,
+// 104529, 104520, the 106088 teleport marker) and profile (H_BHawkN.aip).
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 #include <runtime/world/teammate_operations.h>
 #include <runtime/world/vehicle_motor.h>
 #include <formats/aip/aip.h>
@@ -99,14 +106,15 @@ int main() {
     test_helicopter_ammo_seed_needs_a_resolved_byte();
     test_flyover_helicopter_keeps_its_spawn_heading();
     if (failures) {
-        std::printf("retail teammate factory: FAIL\n");
+        std::printf("teammate factory: FAIL\n");
         return 1;
     }
-    RETAIL_REQUIRE_OR_SKIP(install, retail::install(), "OPENNOVA_JO_DIR (CP01 and the teammate DEF/AIP assets)");
-    auto owned = std::make_unique<testrig::RetailMissionRig>();
+    test_mission_set::Root root("teammate_spawn");
+    if (!root.ok()) { std::printf("FAIL the mission set does not stage\n"); return 1; }
+    auto owned = std::make_unique<testrig::MissionRig>();
     auto &rig = *owned;
     std::string error;
-    if (!rig.open(install, "CP01.bms", error)) return retail::skip(error.c_str());
+    if (!rig.open(root.path(), "infantry.bms", error)) { std::printf("FAIL %s\n", error.c_str()); return 1; }
     if (rig.mission.organics.empty()) return 1;
     bms::Entity patient = rig.mission.organics.front();
     patient.id = 22000; patient.team = 1; patient.waypoint_id = 0;
@@ -123,12 +131,9 @@ int main() {
     rig.mission.events = {event}; rig.mission.actions = {action}; rig.mission.triggers.clear();
     testrig::BootOptions options; options.listen_server = false; options.wac = false;
     if (!rig.boot(options, error)) { std::printf("%s\n", error.c_str()); return 1; }
-    const bool medic_assets = rig.index.has_file("DeltaMED.3di")
-            && rig.index.has_file("Medic01.3di") && rig.index.has_file("Medic01.adm")
-            && rig.index.has_file("Medic02.adm");
-    if (!medic_assets)
-        std::printf("UNEXERCISED: retail medic ADM/3DI assets absent; authored scene coverage is separate\n");
-    CHECK(rig.assets().model("Fblkhawm").get() != nullptr);
+    CHECK(rig.index.has_file("person.3di") && rig.index.has_file("mmedic1.adm")
+            && rig.index.has_file("mmedic2.adm"));
+    CHECK(rig.assets().model("mheli").get() != nullptr);
     CHECK(rig.world.teammates.count() == 1); // pre-mission dispatch sees initialized marker DEFs
     if (rig.world.teammates.count() != 1) return 1;
     rig.capture_baseline();
@@ -143,7 +148,7 @@ int main() {
         CHECK(first->inf.active && second->inf.active && !heli->inf.active);
         CHECK(!first->has_occupant && !second->has_occupant && !heli->has_occupant);
         CHECK(heli->brain.f[w::AiBrain::kCurState] == 0);
-        if (medic_assets) {
+        {
             CHECK(first->inf.adm_id >= 0 && second->inf.adm_id >= 0);
             CHECK(first->inf.adm_id != second->inf.adm_id);
             CHECK(rig.root_motion.has_clip(first->inf.adm_id, 137));
@@ -200,6 +205,6 @@ int main() {
     }
     for (const auto &gap : rig.world.diagnostics.gaps())
         CHECK(gap.origin.kind != w::RuntimeGapKind::BmsAction || gap.origin.code != 39);
-    std::printf("retail teammate factory: %s\n", failures ? "FAIL" : "PASS");
+    std::printf("teammate factory: %s\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;
 }

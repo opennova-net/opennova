@@ -2,7 +2,7 @@ class_name PresenterFixture
 extends RefCounted
 
 ## The rig the in-world presenter tests share (the armory, the deploy screen,
-## the host-punt surfacing): reference fixtures staged under a scratch res://
+## the host-punt surfacing): fixtures staged under a scratch res://
 ## directory, a ResourceRoot over that directory, the synthetic anim root, and
 ## the WorldView fake the deploy-screen presenter reads. Every helper that
 ## asserts takes the GutTest so the check lands in the calling test's report.

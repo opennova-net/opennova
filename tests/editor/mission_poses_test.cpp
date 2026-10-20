@@ -7,13 +7,11 @@
 // the pose follows the records live (a route edited, an SSN edited: an Update with the poses moved;
 // another item's catalog edit), and its wire form names the row, the clip, the playhead and the alert byte; the
 // people play on as the world's bodies do, their think of a still body included (S27: an alert person turns to
-// idle_2 at its first think, a guard holds guard). Mixed:
-// the retail leg (OPENNOVA_JO_DIR) poses every shipped mission's people over the game's own catalog
-// and clips and holds each pose to the world init's.
+// idle_2 at its first think, a guard holds guard). And a project of several minted missions over two tables
+// sharing their ring heads, every person of each posed and held to the world init's, as the shipped missions are.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
-#include <filesystem>
 #include <map>
 #include <memory>
 #include <set>
@@ -21,8 +19,6 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_people.h>
 #include <editor/preview/mission_poses.h>
@@ -46,7 +42,6 @@
 #include <runtime/world/world.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -99,10 +94,11 @@ const Placed kPeople[] = { { 106200, 13, 0, 0, 0 }, { 106200, 6, 3, 0, 0 }, { 10
 	{ 106201, 4, 3, 0x2, 2 }, { 106200, 2, 126, 0, 0 }, { 106200, 1, 127, 0x2, 1 }, { 106200, 12, 0, 0, 2 },
 	{ 106202, 7, 0, 0, 0 }, { 106203, 8, 0, 0, 0 }, { 106204, 9, 0, 0, 0 }, { 109999, 10, 0, 0, 0 } };
 
-std::vector<uint8_t> people_mission() {
+// A mission of `people` (in the file's order).
+template <typename People> std::vector<uint8_t> mission_of(const People &people) {
 	opennova::bms::File mission;
 	opennova::mission::make_default(mission);
-	for (const Placed &person : kPeople) {
+	for (const Placed &person : people) {
 		opennova::bms::Entity entity =
 				opennova::mission::new_entity(opennova::mission::EntityKind::Organic, person.item, person.ssn);
 		entity.waypoint_id = uint8_t(person.route);
@@ -116,6 +112,7 @@ std::vector<uint8_t> people_mission() {
 	if (!opennova::bms::write(mission, bytes, error)) bytes.clear();
 	return bytes;
 }
+std::vector<uint8_t> people_mission() { return mission_of(kPeople); }
 
 using editor_test::set_edit;
 
@@ -385,53 +382,55 @@ static int test_poses() {
 	return 0;
 }
 
-// The retail leg (OPENNOVA_JO_DIR): every shipped mission of the base game written into one project with
-// the game's catalog and every animation table and clip, each opened in its viewport; every person the
-// game poses is held to the world's own init over the same clips (each mission's bodies in pool order);
-// prints the poses by state.
-static int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped person posed as the game spawns it)");
-	opennova::Vfs game;
-	game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-	TEST_EXPECT(game.mount_game(root, std::string(), opennova::VfsMountMode::Packed));
-	Rig rig("opennova_editor_mission_poses_retail");
+// A second person's table, its rows rings of other lengths than the people's: a body of it serves the ring heads
+// of its own table, which the world shares among the bodies of each table in pool order.
+constexpr const char *kTroopsAdm = "anim_reset\t\"walk\"\r\nanim_idle\t\"walk\" \"idle\" \"walk\"\r\nanim_idle_2\t\"walk\"\r\n"
+								   "anim_walk_forward\t\"idle\" \"walk\"\r\nanim_guard\t\"idle\" \"walk\"\r\n";
+// A trooper (org1, its body on the org1 row, aidata, the second table) and a militiaman (its body on the org0 row,
+// the second table, no aidata), beside the catalog's people.
+constexpr const char *kTroopItems = "begin \"Spawn Trooper\"\nid 106205\ntype person\ngraphic shed\nanim_def troops\n"
+									"move_function org1\nai_function org1\nattrib: aidata\nend\n"
+									"begin \"Spawn Militia\"\nid 106206\ntype person\ngraphic shed\nanim_def troops\n"
+									"move_function org0\nai_function org1\nend\n";
+// The missions: the two tables' people mixed in pool order, idle, on routes (126 and 127 among them), on guard and
+// alert; a garrison of one table's nine, its rings wrapped; a village of the people's and a trooper.
+const Placed kPatrol[] = { { 106200, 21, 0, 0, 0 }, { 106205, 22, 3, 0, 0 }, { 106200, 23, 0, 0x2, 2 },
+	{ 106205, 24, 0, 0x2, 1 }, { 106205, 25, 126, 0, 0 }, { 106200, 26, 127, 0, 0 }, { 106205, 27, 0, 0, 2 },
+	{ 106206, 28, 3, 0x2, 2 } };
+const Placed kGarrison[] = { { 106205, 31, 0, 0, 0 }, { 106205, 32, 0, 0, 0 }, { 106205, 33, 5, 0, 0 },
+	{ 106205, 34, 0, 0, 0 }, { 106205, 35, 0, 0, 1 }, { 106205, 36, 0, 0x2, 0 }, { 106205, 37, 0, 0, 0 },
+	{ 106205, 38, 126, 0, 0 }, { 106205, 39, 0, 0, 2 } };
+const Placed kVillage[] = { { 106201, 41, 0, 0, 0 }, { 106200, 42, 4, 0, 0 }, { 106201, 43, 0, 0x2, 0 },
+	{ 106200, 44, 0, 0x2, 0 }, { 106200, 45, 0, 0, 1 }, { 106205, 46, 0, 0, 0 } };
+
+// The sweep the shipped missions are held to, over minted ones (JO:CA's 88 base-game missions, measured once over the
+// game's catalog and clips: 2,393 people, every one posed, 1,232 idle, 1,100 on a route's walk and 61 on guard, each
+// held to the world's init): the three missions above written into one project with both tables, their clips and the
+// catalog, each opened in its viewport; every person the game poses is held to the world's own init over the same
+// clips (each mission's bodies in pool order, a fresh world a mission); prints the poses by state.
+static int test_missions_sweep() {
+	Rig rig("opennova_editor_mission_poses_sweep");
 	rig.session.handle(request::new_project(rig.dir.file("project"), "People"));
 	rig.session.run_operations();
 	editor_test::create_missing_files(rig.session);
 	const std::string project = rig.session.view().project.root;
+	const std::vector<std::pair<std::string, std::vector<uint8_t>>> written = {
+		{ "missions/patrol.bms", mission_of(kPatrol) }, { "missions/garrison.bms", mission_of(kGarrison) },
+		{ "missions/village.bms", mission_of(kVillage) } };
 	std::vector<std::string> missions;
-	std::set<std::string> seen;
-	std::string items_def;
-	for (const opennova::VfsFileLocation &file : game.list_files()) {
-		const std::string name = std::filesystem::path(file.logical_name).filename().string();
-		const std::string lower = retail::lower_ascii(name);
-		const std::string extension = retail::lower_ascii(std::filesystem::path(name).extension().string());
-		if (extension != ".bms" && extension != ".adm" && extension != ".bad" && lower != "items.def") continue;
-		if (!seen.insert(lower).second) continue;
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(game.read_file(file.logical_name, bytes));
-		const std::string at = extension == ".bms" ? "missions/" + name : lower == "items.def" ? "defs/items.def" : name;
-		TEST_EXPECT(test_io::write_file(project + "/" + at, bytes));
-		if (extension == ".bms") missions.push_back(at);
+	for (const auto &[path, bytes] : written) {
+		TEST_EXPECT(!bytes.empty() && test_io::write_file(project + "/" + path, bytes));
+		missions.push_back(path);
 	}
-	if (missions.empty()) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
+	const size_t placed = std::size(kPatrol) + std::size(kGarrison) + std::size(kVillage);
+	TEST_EXPECT(test_io::write_text(project + "/defs/items.def", std::string(kItems) + kTroopItems) &&
+	            test_io::write_text(project + "/people.adm", kPeopleAdm) && test_io::write_text(project + "/troops.adm", kTroopsAdm));
+	for (const char *clip : { "idle.bad", "walk.bad" })
+		TEST_EXPECT(test_io::write_file(project + "/" + clip, test_io::read_file(test_paths_fixture(std::string("anim/") + clip))));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();
-	struct VfsRigFiles : opennova::anim::RigFiles {
-		opennova::Vfs *vfs = nullptr;
-		std::shared_ptr<const opennova::adm::AdmFile> animation_map(const std::string &name) const override {
-			std::vector<uint8_t> bytes;
-			if (!vfs->read_file(opennova::assets::asset_file_name(name, ".adm"), bytes) || bytes.empty()) return nullptr;
-			return opennova::assets::parse_animation_map(bytes.data(), bytes.size());
-		}
-		std::shared_ptr<const opennova::bad::BadFile> bone_animation(const std::string &name) const override {
-			std::vector<uint8_t> bytes;
-			if (!vfs->read_file(opennova::assets::asset_file_name(name, ".bad"), bytes) || bytes.empty()) return nullptr;
-			return opennova::assets::parse_bone_animation(bytes.data(), bytes.size());
-		}
-	} files;
-	files.vfs = &game;
+	DirRigFiles files;
+	files.root = project;
 	const auto started = std::chrono::steady_clock::now();
 	size_t people = 0, posed = 0, held = 0;
 	std::map<int, size_t> by_state;
@@ -474,10 +473,13 @@ static int test_retail() {
 	std::string states;
 	for (const auto &entry : by_state)
 		states += (states.empty() ? "" : ", ") + world::infantry_anim_key(entry.first) + " " + std::to_string(entry.second);
-	std::printf("retail: %zu missions, %zu people, %zu posed (%s), %zu held to the world's init, in %.1f s\n",
+	std::printf("sweep: %zu missions, %zu people, %zu posed (%s), %zu held to the world's init, in %.1f s\n",
 			missions.size(), people, posed, states.c_str(), held, seconds);
-	TEST_EXPECT(posed > 0 && held == posed);
-	std::printf("test_retail passed\n");
+	// Every person placed posed, as every shipped one is, and held; the requests the shipped people make among them.
+	TEST_EXPECT(people == placed && posed == people && held == posed);
+	TEST_EXPECT(by_state.count(world::anim_state::kIdle) && by_state.count(world::anim_state::kWalkForward) &&
+	            by_state.count(world::anim_state::kGuard));
+	std::printf("test_missions_sweep passed\n");
 	return 0;
 }
 
@@ -662,12 +664,11 @@ static int test_people_heard() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	TEST_EXPECT(test_poses() == 0);
 	TEST_EXPECT(test_people_play() == 0);
 	TEST_EXPECT(test_people_heard() == 0);
-	TEST_EXPECT(test_retail() == 0);
+	TEST_EXPECT(test_missions_sweep() == 0);
 	std::printf("editor_mission_poses: all tests passed\n");
 	return 0;
 }

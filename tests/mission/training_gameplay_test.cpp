@@ -1,12 +1,19 @@
-// The reported training regressions through the actual mounted assets and host
-// tick: US01 locomotion/footsteps, neutral tags, and the Little Bird pilot gun.
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+// The reported training regressions through the mounted assets and host tick:
+// the player's locomotion and footsteps and the truck's glass on 00TRa's vehicle
+// gate (the mission set's vehicle_ride.bms: the player's run in US01's shape,
+// the transport truck SSN 11 with its windshield), and the neutral tags and the
+// Little Bird pilot gun on 03TR's ground (the mission set's tags.bms: a section
+// of the player's team, two jungle birds, the minigun Little Bird SSN 41 over
+// the minted DAH62-shaped model).
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 #include <runtime/world/friendly_tags.h>
 #include <runtime/audio/sound_profile.h>
+#include <runtime/world/collision.h>
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <string>
 
 using namespace opennova;
 using namespace opennova::world;
@@ -17,7 +24,7 @@ static int failures = 0;
 // The shell consumes switch requests through MissionKernel::install_weapon.
 // Exercise that public boundary here as well; advancing the host alone leaves
 // presentation-requested weapon definitions uninstalled in a headless rig.
-static void advance(testrig::RetailMissionRig &rig, int count = 1) {
+static void advance(testrig::MissionRig &rig, int count = 1) {
     for (int tick = 0; tick < count; ++tick) {
         // FireEvent is an embedder-drained presentation queue, not a per-tick
         // snapshot. Consume the previous frame before observing new shots.
@@ -34,13 +41,12 @@ static void advance(testrig::RetailMissionRig &rig, int count = 1) {
     }
 }
 
-static std::unique_ptr<testrig::RetailMissionRig> boot(const std::string &root,
-        const std::string &expansion, const char *mission) {
-    auto rig = std::make_unique<testrig::RetailMissionRig>();
+static std::unique_ptr<testrig::MissionRig> boot(const std::string &root, const char *mission) {
+    auto rig = std::make_unique<testrig::MissionRig>();
     std::string error;
-    if (!rig->open(root, mission, error, expansion) ||
+    if (!rig->open(root, mission, error) ||
             !rig->boot(testrig::BootOptions{}, error)) {
-        std::printf("FAIL %s/%s: %s\n", expansion.c_str(), mission, error.c_str());
+        std::printf("FAIL %s: %s\n", mission, error.c_str());
         ++failures;
         return {};
     }
@@ -48,7 +54,7 @@ static std::unique_ptr<testrig::RetailMissionRig> boot(const std::string &root,
     return rig;
 }
 
-static void truck_glass(testrig::RetailMissionRig &rig) {
+static void truck_glass(testrig::MissionRig &rig) {
     Entity *truck = rig.world.registry.by_net_id(11);
     CHECK(truck != nullptr);
     if (!truck) return;
@@ -116,8 +122,8 @@ static void truck_glass(testrig::RetailMissionRig &rig) {
     CHECK(false); // the authored truck must supply a ray-visible glass pane
 }
 
-static void locomotion(const std::string &root, const std::string &expansion) {
-    auto rig = boot(root, expansion, "00TRa.bms");
+static void locomotion(const std::string &root) {
+    auto rig = boot(root, "vehicle_ride.bms");
     if (!rig) return;
     const Vec3 start = rig->local.player_position();
     rig->local.input.forward = true;
@@ -134,16 +140,15 @@ static void locomotion(const std::string &root, const std::string &expansion) {
         }
     }
     const float distance = testrig::planar_distance(start, rig->local.player_position());
-    std::printf("%s locomotion: distance=%.3f footstep_ticks=%d\n",
-            expansion.c_str(), distance, footstep_ticks);
+    std::printf("locomotion: distance=%.3f footstep_ticks=%d\n", distance, footstep_ticks);
     CHECK(distance > 5.0f);
     CHECK(footstep_ticks > 0);
     CHECK(footstep_sounds > 0);
     truck_glass(*rig);
 }
 
-static void tags_and_pilot(const std::string &root, const std::string &expansion) {
-    auto rig = boot(root, expansion, "03TR.bms");
+static void tags_and_pilot(const std::string &root) {
+    auto rig = boot(root, "tags.bms");
     if (!rig) return;
     World &world = rig->world;
     const EntityHandle player_handle = world.cached.local_player;
@@ -155,7 +160,7 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
     CHECK(!tags.empty());
     for (const auto &tag : tags)
         CHECK(world.registry.get(tag.entity)->team == player->team);
-    // 03TR must author a labelable neutral organic for this leg to pin the
+    // The mission must author a labelable neutral organic for this leg to pin the
     // drawer's unequal-team rejection.
     CHECK(player->team != 0);
     int neutral_organics = 0;
@@ -164,8 +169,7 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
                 e.has_item_def && e.team == 0 && (e.flags & kEntityFlagCarried) == 0)
             ++neutral_organics;
     });
-    std::printf("%s 03TR tags: labels=%zu neutral_organics=%d\n",
-            expansion.c_str(), tags.size(), neutral_organics);
+    std::printf("tags: labels=%zu neutral_organics=%d\n", tags.size(), neutral_organics);
     CHECK(neutral_organics > 0);
     // A round passing a person parks past its entity+0 boundRadius, so every
     // mission person must carry one. [orig: Projectile_UpdatePhysics @0x4EA7BE]
@@ -176,11 +180,29 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
     });
     CHECK(unsized_people == 0);
 
-    // 03TR SSN 41 is the authored minigun Little Bird, with a free ctrlx seat.
+    // SSN 41 is the authored minigun Little Bird (03TR's), with a free ctrlx seat.
     Entity *heli = world.registry.by_net_id(41);
     CHECK(heli != nullptr);
     if (!heli) return;
     CHECK((heli->item_attrib & kItemAttribEweap) != 0);
+    // A modeled non-person is aimed at its def TARGET userpoint: the raw point
+    // through the placement matrix alone. The minigun Little Bird carries the
+    // shipped one. [orig: Entity_ComputeWeaponFireOrigin -- def+1350
+    //  @0x43b5d4..0x43b5f6; Entity_InitFromModel @0x40dd04]
+    {
+        const auto *model = rig->assets().model("mlbird").get();
+        CHECK(model != nullptr && heli->target_userpoint_byte != 0);
+        if (model != nullptr && heli->target_userpoint_byte != 0 &&
+                heli->target_userpoint_byte <= model->user_point_count) {
+            const auto &point = model->user_points[heli->target_userpoint_byte - 1];
+            CHECK(std::string(point.name) == "TARGET");
+            const int32_t local[3] = {point.x, point.y, point.z};
+            int32_t want[3], aim[3];
+            entity_placement_matrix(*heli).transform_point(local, want);
+            world.ai.weapon_aim_origin(world, *heli, aim);
+            CHECK(aim[0] == want[0] && aim[1] == want[1] && aim[2] == want[2]);
+        }
+    }
     const Seat *control_seat = nullptr;
     for (const Seat &seat : heli->seats)
         if (seat.type == SeatType::Controller) control_seat = &seat;
@@ -200,8 +222,7 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
         advance(*rig);
         ++commit_ticks;
     }
-    std::printf("%s Little Bird: carrier gun committed after %d ticks\n",
-            expansion.c_str(), commit_ticks);
+    std::printf("Little Bird: carrier gun committed after %d ticks\n", commit_ticks);
     CHECK(commit_ticks >= 1 && commit_ticks < 124);
     advance(*rig, 124 - commit_ticks);
     CHECK(player->mount_type == SeatType::Controller);
@@ -223,8 +244,8 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
             CHECK(testrig::distance(shot.origin, heli->position) < heli->bound_radius * 2.0f);
         }
     }
-    std::printf("%s Little Bird: shots=%d carrier_adm=%d clip=%d->%d\n",
-            expansion.c_str(), shots, heli->primary_weapon_slot_adm, clip_before,
+    std::printf("Little Bird: shots=%d carrier_adm=%d clip=%d->%d\n",
+            shots, heli->primary_weapon_slot_adm, clip_before,
             heli->primary_weapon_slot.clip);
     CHECK(shots > 0);
     // The pilot spends the carrier's persistent clip, not a personal one.
@@ -262,14 +283,12 @@ static void tags_and_pilot(const std::string &root, const std::string &expansion
 }
 
 int main() {
-    const std::string root = retail::install();
-    if (root.empty()) return retail::skip("OPENNOVA_JO_DIR for training gameplay");
-    std::vector<std::string> mounts{std::string()};
-    for (const auto &expansion : retail::expansions())
-        if (retail::lower_ascii(expansion) == "revx02") mounts.push_back(expansion);
-    for (const auto &mount : mounts) {
-        locomotion(root, mount);
-        tags_and_pilot(root, mount);
+    test_mission_set::Root root("training_gameplay");
+    if (!root.ok()) {
+        std::printf("FAIL the mission set does not stage\n");
+        return 1;
     }
+    locomotion(root.path());
+    tags_and_pilot(root.path());
     return failures == 0 ? 0 : 1;
 }

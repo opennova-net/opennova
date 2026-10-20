@@ -7,7 +7,7 @@ extends GutTest
 # every world draw passing LESSEQUAL afterwards paints over it: the gun's glow
 # survives only over the gun's own depth band and over the empty sky. The
 # check renders through the real device: a tests/windowed/ script, run by
-# `scripts/test_godot.sh --suite core --windowed` (a headless run pends it).
+# `scripts/test_godot.sh --windowed` (a headless run pends it).
 
 const GLOW_SHADER := "res://shaders/object/self_lit/additive_double_sided.gdshader"
 const GUN_SHADER := "res://shaders/object/fixed/opaque_double_sided.gdshader"

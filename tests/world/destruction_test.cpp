@@ -903,6 +903,124 @@ void test_glass_userpoints_shatter_once_at_authored_radius() {
     CHECK(w.out.destruction.effects.empty());
     CHECK(w.destruction_rng.state == state_after_first);
     CHECK((w.registry.get(building)->broken_glass_point_bits[0] & 2u) == 0);
+
+    // A husk's glass is gone with it: the same blast against the husked
+    // building, its broken bits cleared, neither emits nor draws.
+    // [orig: Projectile_ProcessExplosionQueue — the husk gate @0x4eb814..0x4eb84d]
+    w.registry.get(building)->engine_flags |= kEntityFlagHusk;
+    w.registry.get(building)->broken_glass_point_bits.assign(1, 0u);
+    w.explosions.queue_explosion(w, explosion);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    CHECK(w.out.destruction.effects.empty());
+    CHECK(w.destruction_rng.state == state_after_first);
+    CHECK(w.registry.get(building)->broken_glass_point_bits[0] == 0u);
+}
+
+// The death blast's radius falls back from the def kz to the bound radius and,
+// with neither, to one unit.
+// [orig: Entity_InitDeathSounds @0x4939b0 -> the fallback radius legs
+//  @0x4ead12..0x4ead68]
+void test_death_blast_radius_falls_back_to_one_unit() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+    ItemDeathTraits traits = barrel_traits();
+    traits.kz = 0.0f;
+    w.tables.item_death_traits.set(501, traits);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 501;
+    seed.health = 10;
+    seed.position = Vec3{0.0f, 0.0f, 0.0f};
+    seed.bound_radius = 0.0f;
+    Entity *item = w.registry.get(w.registry.spawn(1, seed));
+    item->health = 0;
+    destruction_notify_item_damage(w, *item, 1);
+    CHECK((item->engine_flags & kEntityFlagDead) != 0);
+    CHECK(w.explosions.queue.size() == 1);
+    if (!w.explosions.queue.empty()) CHECK(w.explosions.queue[0].radius_override == 1.0f);
+}
+
+// A blast without NoMItems walks pool 1, but an indestructible item in range
+// takes no damage. [orig: Projectile_ProcessExplosionQueue — the pool-1
+//  walk @0x4eb349..0x4eb36c, the Flags 1 / indestructible skip @0x4eb3cb]
+void test_mitem_blast_spares_indestructible_items() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+    w.tables.item_death_traits.set(502, barrel_traits());
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 502;
+    seed.health = 100;
+    seed.health_max = 100;
+    seed.bound_radius = 1.0f;
+    seed.position = Vec3{1.5f, 0.0f, 0.0f};
+    const EntityHandle plain = w.registry.spawn(1, seed);
+    seed.position = Vec3{-1.5f, 0.0f, 0.0f};
+    const EntityHandle hard = w.registry.spawn(1, seed);
+    w.registry.get(hard)->engine_flags |= kEntityFlagIndestructible;
+    ExplosionEntry blast;
+    blast.pos = Vec3{0.0f, 0.0f, 0.0f};
+    blast.type = ammo_kz::kStandard;
+    blast.ammo_index = 1; // the standard blast: no NoMItems, armor passed
+    w.explosions.queue_explosion(w, blast);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    CHECK(w.registry.get(plain)->health < 100);
+    CHECK(w.registry.get(hard)->health == 100);
+}
+
+// A routed (Falling) wreck lands on a posed model as well as on terrain: over
+// no terrain it settles on the box under it, at the box's top.
+// [orig: Entity_UpdateFallingDeathPhysics — the object ray @0x493FF1..0x494001,
+//  the ground contact @0x494113]
+void test_routed_wreck_lands_on_a_posed_model() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+    w.registry.configure_pool(2, 4);
+    Entity block_seed;
+    block_seed.kind = EntityKind::Building;
+    block_seed.item_id = 503;
+    block_seed.health = 1000;
+    block_seed.alive = true;
+    block_seed.position = Vec3{0.0f, 0.0f, 0.0f};
+    block_seed.bound_radius = 4.0f;
+    block_seed.item_type_index = 1; // the def row's ordinal: the +0x1C slice gate
+    block_seed.has_item_def = true;
+    const EntityHandle block = w.registry.spawn(2, block_seed);
+    CollisionWorld collision;
+    collision.assign_entity(block, collision.add_model(solid_box_model(4.0, 3.0)));
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 700;
+    seed.health = 100;
+    seed.alive = true;
+    seed.position = Vec3{0.0f, 0.0f, 6.0f};
+    seed.bound_radius = 1.0f;
+    seed.item_type_index = 1; // a pool-1 slice source: the +0x1C word and an ItemDef
+    seed.has_item_def = true;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    w.tables.item_death_traits.set(700, barrel_traits());
+    // The wreck's candidate list is the one its live hull built.
+    collision.build_initial_tables(w);
+    w.ai.collision = &collision;
+    Entity *e = w.registry.get(h);
+    e->health = 0;
+    e->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
+    e->alive = false;
+    e->death_motion = DeathMotionMode::Falling;
+    e->veh.slide_z = -16384; // a quarter unit a tick
+    for (int tick = 0; tick < 62 && e->death_motion == DeathMotionMode::Falling; ++tick)
+        tick_dead_items(w, nullptr, -1.0e9f, w.out.destruction);
+    w.ai.collision = nullptr;
+    // On the box's top, not through it (the routed tail commits its last
+    // integrated step, a fraction under the contact).
+    CHECK(e->death_motion != DeathMotionMode::Falling);
+    CHECK(std::abs(e->position.z - 3.0f) < 0.1f);
 }
 
 void test_synthetic_husk_events_preserve_distinct_handles() {
@@ -1180,6 +1298,56 @@ void test_death_piece_launch_and_spin() {
         const float h0 = first->heading;
         w.death_pieces.tick(w, nullptr, -1.0e9f, w.out.destruction);
         CHECK(std::abs((first->heading - h0) - spin) < 1.0e-4f);
+    }
+}
+
+// A moving vehicle's wreck spreads its pieces about twice its travel, and an AI
+// row adds each type's launch_add along its normalized motion: the same wreck
+// with and without a brain, over the same PRNG stream, throws the same pieces
+// (the WHEEL's 0.5 roll included), each AI-row piece aimed nearer the travel
+// whenever its type adds launch.
+// [orig: Entity_SpawnDeathPieces — the velocity fold @0x493589..0x4935ff, the
+//  aiRuntime direction @0x49353c..0x49355d, the probability roll @0x49365f,
+//  the launch build @0x493718..0x49380e]
+void test_ai_wreck_pieces_follow_its_travel() {
+    auto wreck = [](bool brained) {
+        auto w = std::make_unique<World>();
+        seed_ammo(*w);
+        w->registry.configure_pool(1, 4);
+        ItemDeathTraits t = barrel_traits();
+        t.husk_sub_part_count = 4;
+        t.husk_sub_part_types[1] = 1; // WHEEL, probability 0.5
+        t.husk_sub_part_types[2] = 4; // CHUNK_L, launch_add 0.25
+        t.husk_sub_part_types[3] = 3; // CHUNK_M, launch_add 0.5
+        w->tables.item_death_traits.set(704, t);
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = 704;
+        seed.health = 0;
+        seed.position = Vec3{0.0f, 0.0f, 10.0f};
+        seed.bound_radius = 2.0f;
+        Entity *e = w->registry.get(w->registry.spawn(1, seed));
+        e->is_ai_capable = brained;
+        e->veh.vel_x = 65536; // one unit a tick along +x
+        spawn_death_pieces(*w, *e);
+        return w;
+    };
+    const auto ai = wreck(true);
+    const auto plain = wreck(false);
+    std::vector<const DeathPiece *> a, b;
+    for (const DeathPiece &p : ai->death_pieces.pieces) if (p.active) a.push_back(&p);
+    for (const DeathPiece &p : plain->death_pieces.pieces) if (p.active) b.push_back(&p);
+    CHECK(!a.empty() && a.size() == b.size());
+    if (a.size() != b.size()) return;
+    for (size_t i = 0; i < a.size(); ++i) {
+        CHECK(a[i]->type_index == b[i]->type_index);
+        CHECK(a[i]->vel.x > 0.0f && b[i]->vel.x > 0.0f); // about the travel, +x
+        const float off_ai = std::abs(std::atan2(a[i]->vel.y, a[i]->vel.x));
+        const float off_plain = std::abs(std::atan2(b[i]->vel.y, b[i]->vel.x));
+        if (death_piece_type(a[i]->type_index).launch_add > 0.0f)
+            CHECK(off_ai < off_plain || off_plain < 1.0e-6f);
+        else
+            CHECK(std::abs(off_ai - off_plain) < 1.0e-6f);
     }
 }
 
@@ -2193,10 +2361,11 @@ void test_death_dispatch_flag_routing() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
     w.registry.configure_pool(1, 4);
-    auto dispatch = [&](int32_t item_id, int32_t unit_type, bool has_husk) {
+    auto dispatch = [&](int32_t item_id, int32_t unit_type, bool husk) {
         ItemDeathTraits traits;
         traits.unit_type = unit_type;
-        traits.has_husk = has_husk;
+        traits.has_husk = husk;
+        traits.husk_model_loaded = husk;
         w.tables.item_death_traits.set(item_id, traits);
         Entity seed;
         seed.kind = EntityKind::Item;
@@ -2379,6 +2548,52 @@ void test_building_death_requires_loaded_husk_model() {
     for (const DestructionSoundEvent &sound : w.out.destruction.sounds)
         if (sound.sound == "EXPLO_SHIP_TINY") collapse_sound = true;
     CHECK(!collapse_sound);
+}
+
+// The death-piece spawn gates on the LOADED husk model too, not the authored
+// name: a vehicle whose items.def row names a husk the install does not carry
+// (JO's item 101281 names Fblkhawx, which only BHD's files hold) spawns no
+// pieces, takes no kick and keeps the def's +0x1C4 mover, so its parked-mover
+// leg goes on stamping the brain, as a husk-less row's does (such a
+// PlayerControl hull never respawns). With the model the land row installs the
+// falling mover. [orig: Entity_SpawnDeathPieces @0x4934AF..0x4934E5
+// (huskFinalModel ?: huskModel), the +0x1C4 store @0x493925..0x49394B past it;
+// the land row's arg Entity_UpdateFallingDeathPhysics @0x493F70, table @0x815410]
+void test_vehicle_death_pieces_require_loaded_husk_model() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(1, 4);
+    auto kill = [&](int32_t item_id, bool loaded) {
+        ItemDeathTraits traits = barrel_traits();
+        traits.unit_type = 1;       // the land row
+        traits.has_husk = true;     // the def authors a husk name
+        traits.husk_model_loaded = loaded;
+        w.tables.item_death_traits.set(item_id, traits);
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = item_id;
+        seed.health = 0;
+        seed.position = Vec3{0.0f, 0.0f, 5.0f};
+        seed.bound_radius = 2.0f;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        Entity *e = w.registry.get(h);
+        entity_update_death_transforms(w, *e, /*silent=*/true);
+        return e;
+    };
+    const Entity *missing = kill(720, false);
+    CHECK((missing->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+          (kEntityFlagDead | kEntityFlagHusk));
+    CHECK(missing->death_motion == DeathMotionMode::None);
+    CHECK(missing->spawned_piece_mask == 0);
+    CHECK(missing->veh.slide_z == 0);
+    size_t active_pieces = 0;
+    for (const DeathPiece &piece : w.death_pieces.pieces)
+        if (piece.active) ++active_pieces;
+    CHECK(active_pieces == 0);
+    const Entity *loaded = kill(721, true);
+    CHECK(loaded->death_motion == DeathMotionMode::Falling);
+    CHECK(loaded->veh.slide_z >= 4096); // the pop [orig: @0x493977]
 }
 
 // The MP VISUAL CLIENT runs the destruction chain locally. Retail's client
@@ -2955,6 +3170,41 @@ static void test_spawn_markers_ride_the_script_admission() {
 	w.logic_tick = 64;
 	w.run_logic_tick(true, TickPhase::Gameplay);
 	CHECK(v.veh.spawn_pose[0] == 10 * 65536 && v.veh.spawn_pose[2] == 3 * 65536);
+}
+
+// The frontier's ends come from the NUMBERED zone definitions only: an
+// unnumbered zone (zone 0) is collected for the nearest-zone scan but never
+// sets low or high. With team 1's zone 1 as both ends, a zone-1 marker takes
+// priority 1 (the low team 1 counts up); had the team-2 zone 0 been the low
+// end, the priority would count down from the high end to 0.
+// [orig: Spawn_BuildMarkerBudgetList @0x529B40 -- the attrib2&4 / zone-0 skip]
+static void test_spawn_markers_skip_unnumbered_zones() {
+	auto storage = std::make_unique<World>();
+	World &w = *storage;
+	w.registry.configure_pool(1, 8);
+	w.registry.configure_pool(2, 4);
+	w.registry.configure_pool(3, 8);
+	Entity seed;
+	seed.has_item_def = true;
+	seed.item_type = 5;
+	seed.item_attrib = 0x60000;
+	seed.zone_number = 0;
+	seed.team = 2;
+	seed.position = { 0, 0, 0 };
+	(void)w.registry.spawn(2, seed);
+	seed.zone_number = 1;
+	seed.team = 1;
+	seed.position = { 10, 0, 0 };
+	(void)w.registry.spawn(2, seed);
+	seed = Entity{};
+	seed.has_item_def = true;
+	seed.item_type = 4;
+	seed.item_attrib2 = 4;
+	seed.zone_number = 1;
+	seed.position = { 10, 0, 3 };
+	const EntityHandle marker = w.registry.spawn(3, seed);
+	w.vehicles.build_spawn_markers();
+	CHECK(w.registry.get(marker)->vehicle_spawn_priority == 1);
 }
 
 // Captured AS zones select a category-compatible marker in team frontier order.
@@ -4449,6 +4699,7 @@ int main() {
 	test_aircraft_landing_and_navigation_states();
 	test_vehicle_spawn_marker_selection();
 	test_spawn_markers_ride_the_script_admission();
+	test_spawn_markers_skip_unnumbered_zones();
 	test_aircraft_death_lifecycle();
 	test_aircraft_death_spin_rates_roll_in_retail_order();
 	test_vehicle_death_kills_authored_children();
@@ -4467,12 +4718,16 @@ int main() {
     test_destructible_death_chain();
     test_section_debris_samples_collision_faces();
     test_glass_userpoints_shatter_once_at_authored_radius();
+    test_death_blast_radius_falls_back_to_one_unit();
+    test_mitem_blast_spares_indestructible_items();
+    test_routed_wreck_lands_on_a_posed_model();
     test_synthetic_husk_events_preserve_distinct_handles();
     test_kz_point_full_euler();
     test_bridge_dead_points_emit_water_shocks();
     test_death_pieces();
     test_death_piece_ring_generation();
     test_death_piece_launch_and_spin();
+    test_ai_wreck_pieces_follow_its_travel();
     test_death_piece_rng_is_world_local();
     test_death_piece_section_center();
     test_death_piece_render_contract();
@@ -4489,6 +4744,7 @@ int main() {
     test_death_kick_field();
     test_round_destroys_item();
     test_building_death_requires_loaded_husk_model();
+    test_vehicle_death_pieces_require_loaded_husk_model();
     test_net_kill_runs_client_side_death_chain();
     test_medic_kill_zone_queues_both_arms();
     if (failures == 0) std::printf("destruction_test: all checks passed\n");

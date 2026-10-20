@@ -190,8 +190,10 @@ struct ItemDeathTraits {
     bool no_die = false;        // attrib & 0x40000000 — damage clamps to health-1
     bool has_husk = false;      // husk/huskfinal name authored in items.def
     // At least one authored husk/final model resolved to a live render object.
-    // Building callbacks gate on this runtime state, not the authored name.
-    // [orig: Entity_ProcessBuildingDeath @ 0x49442c: huskFinalModel||huskModel]
+    // The death-piece spawn and the building callbacks gate on this runtime
+    // state, not the authored name.
+    // [orig: Entity_SpawnDeathPieces @ 0x4934af..0x4934e5 and
+    //  Entity_ProcessBuildingDeath @ 0x49442c: huskFinalModel||huskModel]
     bool husk_model_loaded = false;
     // The husk MODEL's section count — the death-piece loop bound. Retail
     // reads it off the husk RENDER object (renderObj[8]+52 @ 0x49361a), NOT

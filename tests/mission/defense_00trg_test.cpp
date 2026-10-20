@@ -1,4 +1,8 @@
-// 00TRg "move in to defend" host-side diagnosis on the retail data. SP is a
+// 00TRg "move in to defend" host-side diagnosis on its camp in miniature (the
+// mission set's garrison.bms: 00TRg's vehicles, crews, paths and events by
+// their SSNs, groups and indices, the trucks all transport trucks and the boats
+// over the minted Zodiac and patrol-craft hulls, resting on the shore: the rig
+// authors no water plane). SP is a
 // listen server, so this exercises the exact run_logic_tick(is_authority)
 // path a LAN host runs: a retail host delivers 00TRg's AI boat/truck defense
 // waves, ours parks them (the D-NET-161 deferral tail; D-AI-11 / D-INF-2
@@ -18,14 +22,13 @@
 // Gates (the fix's acceptance bar):
 //   P0 promote : every vehicle has seats + an AI brain row + a live ctrl/drvr occupant
 //   P1 orders  : each vehicle brain takes its list (wp_channel) + SM state 16 post-event
-//   P2 motion  : planar displacement after the kickoff; boats hold authored z (afloat)
+//   P2 motion  : planar displacement after the kickoff; boats hold their kickoff z
 //   P3 arrival : debark events 20/22 fire; defender groups 14/15 take their redirects
 // P0 is asserted; P1-P3 are REPORTED until D-NET-161 closes (the divergence
 // ledger carries the tail) — a FAIL line there is the known state, not a
 // regression of this test. `--ticks N` sets the run budget (default 15000).
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRg.bms).
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <cmath>
 #include <cstdio>
@@ -50,7 +53,6 @@ bool expect(bool cond, const char *msg) {
 
 constexpr int kSnapshotEveryTicks = 620;
 constexpr int kBaselineTick = 400;
-constexpr float kBoatAuthoredZ = 10.5f;
 constexpr float kBoatZTolerance = 2.0f;
 constexpr float kMinDepartDistance = 15.0f;
 
@@ -90,13 +92,15 @@ int main(int argc, char **argv) {
 	int run_ticks = 15000;
 	for (int i = 1; i + 1 < argc; ++i)
 		if (std::strcmp(argv[i], "--ticks") == 0) run_ticks = std::max(1, std::atoi(argv[i + 1]));
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRg.bms)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("defense");
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "00TRg.bms", error)) return retail::skip(error.c_str());
+	if (!expect(root.ok() && rig.open(root.path(), "garrison.bms", error), "garrison.bms opens")) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "00TRg boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
@@ -196,7 +200,7 @@ int main(int argc, char **argv) {
 				if (st == 16 && !state16_seen.count(row.ssn)) state16_seen[row.ssn] = tick;
 			}
 			if (std::strcmp(row.family, "boat") == 0 && kickoff_pos.count(row.ssn)) {
-				const float dz = std::fabs(veh->position.z - kBoatAuthoredZ);
+				const float dz = std::fabs(veh->position.z - kickoff_pos[row.ssn].z); // the z it held at its kickoff
 				max_boat_dz[row.ssn] = std::max(max_boat_dz[row.ssn], dz);
 			}
 			if (kickoff_pos.count(row.ssn)) {

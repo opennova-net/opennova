@@ -25,12 +25,6 @@ variable "members" {
   }
 }
 
-variable "reference_assets_token" {
-  description = "The REFERENCE_ASSETS_TOKEN secret's value (secrets.tf): a fine-grained token with Contents: Read-only on opennova-reference-assets and opennova-reference-retail-packed. The toolbox reads it from the vault item reference-assets (deploy/env/github.env.tpl)."
-  type        = string
-  sensitive   = true
-}
-
 variable "stripe_test_secret_key" {
   description = "The STRIPE_TEST_SECRET_KEY secret's value (secrets.tf): a Stripe test-mode key (rk_test_ restricted to Customers, Checkout Sessions, Subscriptions and Customer portal write and Prices and Products read; or sk_test_), or the vault's REPLACE_ME, with which the billing end-to-end test skips. The toolbox reads it from the vault item stripe-test, field restricted_key (deploy/env/github.env.tpl)."
   type        = string

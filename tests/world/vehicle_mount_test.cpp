@@ -2458,6 +2458,39 @@ void test_mounted_ammo_slot_route() {
     CHECK(w.vehicles.resolve_mounted_ammo_slot(*live_child) == nullptr);
 }
 
+// An optic weapon (Flags & 3, here sighted) seeds its vehicle slot's elevation
+// from the scope-zero table at its initial step; a plain one keeps zero.
+// [orig: WeaponSlot_InitFromEntityDef @0x5466C0 -> WeaponSlot_InitFromDef
+//  @0x53EE70 -- +0x04 = def[+0x3B0 + 4*step] under def+8 & 3 @0x53EEDA..0x53EEEC]
+void test_sighted_vehicle_weapon_seeds_its_zero_pitch() {
+    for (const int32_t flags : {0x2, 0x0}) {
+        World w;
+        w.tables.weapons.entries.resize(2);
+        WeaponTableEntry &gun = w.tables.weapons.entries[1];
+        gun.name = "WPN_SIGHTED";
+        gun.valid = true;
+        gun.clipsize = 1;
+        gun.startrounds = 5;
+        gun.flags = flags;
+        WeaponScopeZero &zero = gun.action_fsm.scope_zero;
+        zero.max_steps = 10;
+        zero.step_metres = 100;
+        zero.default_metres = 300;
+        for (int i = 0; i < 40; ++i) zero.elevation[size_t(i)] = (i + 1) * 1000;
+        Entity mount;
+        mount.primary_weapon = gun.name;
+        CHECK(w.vehicles.prepare_weapon_slot(mount));
+        const int16_t step = weapon_scope_zero_initial(zero);
+        CHECK(mount.primary_weapon_slot.scope_zero == step);
+        if (flags != 0) {
+            CHECK(mount.primary_weapon_slot.zero_pitch == weapon_scope_zero_pitch(zero, step));
+            CHECK(mount.primary_weapon_slot.zero_pitch != 0);
+        } else {
+            CHECK(mount.primary_weapon_slot.zero_pitch == 0);
+        }
+    }
+}
+
 void test_prepare_vehicle_weapon_slot_after_armory_load() {
     World w;
     w.tables.weapons.entries.resize(4);
@@ -4158,6 +4191,46 @@ void test_vehicle_hull_stops_at_building() {
 		r.veh().position = {100.0f, 200.0f, 10.0f};
     }
 
+	// The same face as an EWeap child (attrib 0x20 without PlayerControl) riding a
+	// PlayerControl carrier answers with its CARRIER as the mass source; the truck,
+	// more than twice the gun's size, only wakes the small gun (Flags 0x40) and its
+	// probe passes on through. [orig: the mounted-child mass source
+	//  @0x462E26..0x462E4F; the wake-and-skip arm of Entity_CheckCollisionState]
+	{
+		Entity carrier{};
+		carrier.kind = EntityKind::Item;
+		carrier.alive = true;
+		carrier.item_attrib = kItemAttribPlayerControl;
+		carrier.position = {300.0f, 300.0f, 10.0f};
+		const EntityHandle carrier_h = r.w.registry.spawn(1, carrier);
+		Entity &gun = *r.w.registry.get(wh);
+		const uint32_t attrib = gun.item_attrib;
+		const float radius = gun.bound_radius;
+		gun.item_attrib = kItemAttribEweap;
+		gun.ground_target = carrier_h;
+		gun.bound_radius = 0.5f;
+		gun.flags &= ~0x40u;
+		r.veh().position = {146.8f, 200.0f, 10.0f};
+		for (int i = 0; i < 17; ++i) cw.build_tick_tables(r.w);
+		const int32_t probe_pos[3] = {static_cast<int32_t>(146.8 * 65536), 200 << 16, 10 << 16};
+		const int32_t probes[1][3] = { { probe_pos[0], probe_pos[1], probe_pos[2] + 65536 } };
+		const int32_t radii[1] = { 98304 };
+		VehicleProbeForce force[1];
+		EntityHandle hit;
+		const int sev = cw.resolve_vehicle_probes(
+				r.w, r.veh(), probe_pos, probes, radii, 1, 2500000, 3400000, force, hit);
+		CHECK(sev == 0);
+		CHECK(!hit.valid());
+		CHECK((r.w.registry.get(wh)->flags & 0x40u) != 0);
+		Entity &restored = *r.w.registry.get(wh);
+		restored.item_attrib = attrib;
+		restored.ground_target = {};
+		restored.bound_radius = radius;
+		restored.flags &= ~0x40u;
+		r.w.registry.despawn(carrier_h);
+		r.veh().position = {100.0f, 200.0f, 10.0f};
+	}
+
     for (int i = 0; i < 950; ++i) {
         cw.build_tick_tables(r.w); // self-gated to the 17-tick cadence
         VehicleDriveCmd cmd;
@@ -4907,6 +4980,7 @@ int main() {
     test_bms_mount_predicates();
     test_mounted_ammo_slot_route();
     test_prepare_vehicle_weapon_slot_after_armory_load();
+    test_sighted_vehicle_weapon_seeds_its_zero_pitch();
     test_prepare_vehicle_weapon_slot_seeds_the_zoom();
     test_ai_drive_leg();
     test_ai_drive_avoid_brake();

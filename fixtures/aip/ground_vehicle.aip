@@ -1,0 +1,49 @@
+description     "Ground - authored vehicle"
+type			GROUND
+default_state	GROUND_FOLLOWWP		
+
+rank				2
+view_fov			180	
+view_dist			400	
+radar_fov			360	
+radar_dist			600	
+priority_air		1
+priority_ground		4
+priority_organics	3
+	
+evade_flags			FOLLOW_WP FLEE
+combat_flags		FOLLOW_WP FLEE
+
+react_time			2
+aim_skill			3
+check_six_rate		4	
+target_eval_rate	2
+tether_dist			50
+
+primary_weap		AI_STINGER	
+primary_ammo		2	
+primary_rate		4	
+primary_fov			30	
+primary_range		300	
+
+secondary_weap		20MM	
+secondary_ammo		-1	
+secondary_rate		0.20	
+secondary_fov		60	
+secondary_range		250	
+
+patrol_speed		30	
+combat_speed		45	
+
+min_speed			0	
+min_chase_dist		100	
+max_chase_dist		500	
+
+drive_skill			2
+turn_rate			45	
+
+accel_time			12
+
+
+radio_distance		0
+radio_delay			0

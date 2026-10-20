@@ -634,6 +634,33 @@ void test_plat_terrain_probe_grazing_uses_wrapped_product() {
 	CHECK(out.fx == -89066);
 	CHECK(out.fy == 0);
 	CHECK(out.fz == 0);
+
+	// The same contact (cosr 3290533) between a lower soft bound (0x300000) and
+	// the midpoint of soft and hard (3670016) is severity 2: a quarter of the
+	// planar push. [orig: @0x4624BB..0x462528 -- the `(hard + soft) >> 1` arm]
+	detail::PlatProbeForce mid{};
+	const int32_t mid_severity = detail::plat_terrain_probe(world, 10 << 16, -(5 << 16), 768042,
+			2 << 16, 0x300000, 0x400000, mid, /*wheel_probe=*/true);
+	CHECK(mid_severity == 2);
+	CHECK(mid.fx == -(89066 >> 2));
+	CHECK(mid.fy == 0);
+
+	// The first-pass speed response over the wheeled solve's thirteen probes:
+	// severity 2 decays the speed by >> (torque + 1), severity 1 by >> (torque + 2).
+	// [orig: the shared response, the wheeled call site @0x48a9ef]
+	{
+		Entity::VehicleMotorState m{};
+		VehicleTraits t;
+		t.torque = 3;
+		const detail::PlatProbeForce forces[13]{};
+		const int32_t probes[13][3]{};
+		m.speed = 64000;
+		detail::contact_speed_response(m, t, 2, EntityHandle{}, forces, probes, 7, 0, 0);
+		CHECK(m.speed == 64000 - (64000 >> 4));
+		m.speed = 64000;
+		detail::contact_speed_response(m, t, 1, EntityHandle{}, forces, probes, 7, 0, 0);
+		CHECK(m.speed == 64000 - (64000 >> 5));
+	}
 }
 
 void test_simple_motors_and_contact() {
@@ -2783,7 +2810,40 @@ static void test_mount_and_dismount_clear_the_local_stance_latches() {
     r.w.local_player_state = nullptr;
 }
 
+// At speed (over 4096) a bike leans at its full lean rate into the side its
+// steer angle bends to, once the bend passes 2 degrees: steered right (an angle
+// between 2 and 180 degrees) the roll rate is +lean_velocity * 0.01 degrees a
+// tick in BAM, steered left (past 180) its negation, each unless the roll error
+// already passes the lean limit (lean * 0.1 * 8192) on that side, which holds it
+// at 0. The shipped motorcycle row's lean 30 and lean_velocity 40 give the rate
+// int(float(0.4) * 11930465) = 4772185 and the limit 24576.
+// [orig: Entity_SmoothHeadingToTarget @0x45B2C0 -- the bike lean, its caller
+//  Entity_ProcessLightVehiclePhysics @0x479600 site @0x47A7B1..0x47A7D3]
+void test_bike_lean_at_speed_both_ways() {
+	VehicleTraits t;
+	t.family = VehicleFamily::Bike;
+	t.lean = 30;
+	t.lean_velocity = 40;
+	struct Case { double steer_deg; int32_t error; int32_t want; };
+	const Case cases[] = {
+		{30.0, -1000, 4772185},   // steered right, rolling toward it: full rate right
+		{30.0, 1000, 4772185},    // steered right, inside the limit: full rate right
+		{30.0, 30000, 0},         // steered right, past the limit that way: held
+		{-30.0, 1000, -4772185},  // steered left: full rate left
+		{-30.0, -30000, 0},       // steered left, past the limit that way: held
+	};
+	for (const Case &c : cases) {
+		Entity e;
+		e.veh.speed = 8192;
+		e.veh.steer_state = static_cast<int32_t>(std::lround(c.steer_deg * 11930465.0));
+		detail::vehicle_bike_lean(e, t, c.error);
+		CHECK(e.veh.air_roll_rate == c.want);
+		CHECK(e.veh.byte_2ef == 1);
+	}
+}
+
 int main() {
+    test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();
     test_mount_and_dismount_clear_the_local_stance_latches();
     test_rider_below_its_carrier_follows_the_same_pass();

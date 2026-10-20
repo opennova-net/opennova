@@ -192,6 +192,97 @@ func test_comparison_contract_requires_full_frame_m16_and_exact_player_pose() ->
 				"the comparison contract must reject %s" % [mutation])
 
 
+func test_comparison_contract_uses_production_spawn_profile_and_presentation_witness() -> void:
+	var contract := {
+		"weapon": "WPN_M16BURST",
+		"retail_hud_weapon_label": "M16 - Burst",
+		"hud_enabled": true,
+		"viewmodel_enabled": true,
+		"terrain_enabled": true,
+		"player_position_bms": Vector3(283.129364, -357.799469, 27.0),
+		"yaw_deg": -90.0,
+		"pitch_deg": -6.5,
+	}
+
+	assert_eq(RenderFixtureContract.comparison_spawn_profile(contract), {
+		"player_class": 9,
+		"primary": "WPN_M16BURST",
+		"primary_clips": 9,
+		"secondary": "",
+		"secondary_clips": -1,
+		"accessory": "",
+		"accessory_clips": -1,
+	}, "legacy full_frame keeps its committed spawn-profile shape")
+	var hidden_profile_contract := {
+		"capture_mode": "hud_hidden",
+		"equipped_weapon": "WPN_M16BURST",
+	}
+	assert_eq(RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract), {
+		"team": 0,
+		"player_class": 9,
+		"primary": "WPN_M16BURST",
+		"primary_clips": 9,
+		"secondary": "",
+		"secondary_clips": -1,
+		"accessory": "",
+		"accessory_clips": -1,
+		"side_profiles": [
+			{
+				"team": 0,
+				"nationality": 2,
+				"division": 0,
+				"combo": 1,
+				"player_class": 9,
+			},
+			{
+				"team": 1,
+				"nationality": 7,
+				"division": 0,
+				"combo": 0,
+				"player_class": 9,
+			},
+		],
+	})
+	var avatar_db := AvatarDatabase.new()
+	assert_eq(avatar_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/avatars/synth_avatars.def")), OK)
+	# The comparison stands for a LAN host session's start (the class clamp; 9 stays 9).
+	var join_profile := avatar_db.character_join_profile(
+			RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract), true)
+	assert_eq([join_profile.get_character_id(0), join_profile.get_character_id(1)],
+			[0x0402, 0x8207],
+			"the staged tree selections resolve to retail slot 0's character IDs")
+	assert_eq([join_profile.get_player_class(0), join_profile.get_player_class(1)], [9, 9])
+	# The presentation witness: in the shipped table (Avatars.def, blue Australia /
+	# SASR combo 002, packed character 0x0402) the arms part is IndoArms.3di at
+	# camo 1 0 0, the arms the retail capture shows. Proven once against the shipped
+	# file; the contract's comparison constants carry it.
+	assert_eq(RenderFixtureContract.COMPARISON_CHARACTER_ID, 0x0402)
+	assert_eq(RenderFixtureContract.COMPARISON_ARMS_GRAPHIC, "IndoArms.3di")
+	assert_eq(RenderFixtureContract.COMPARISON_ARMS_CAMO, [1, 0, 0])
+	# The registry decode resolves that packed id to the combo whose arms carry
+	# those values: the synthetic table with its 0x0402 combo's arms (SYN_ARMS_4)
+	# authored as the shipped row's.
+	var source := FileAccess.get_file_as_string(ProjectSettings.globalize_path(
+			"res://../fixtures/avatars/synth_avatars.def")).replace("\r\n", "\n")
+	var shipped_shape := source.replace("\tgraphic\t\tsynth_arms_4.3di\n\tcamo\t\t0 0 0",
+			"\tgraphic\t\tIndoArms.3di\n\tcamo\t\t1 0 0")
+	assert_ne(shipped_shape, source, "the 0x0402 combo's arms row is authored as the shipped one")
+	var staged := TestFs.cache_dir(self, "render_fixture_avatars").path_join("Avatars.def")
+	TestFs.write_text(self, staged, shipped_shape)
+	var shipped_db := AvatarDatabase.new()
+	assert_eq(shipped_db.load(staged), OK)
+	TestFs.remove_dir_recursive(staged.get_base_dir())
+	var combo := shipped_db.resolve_character_id(RenderFixtureContract.COMPARISON_CHARACTER_ID, 0)
+	assert_not_null(combo)
+	if combo != null:
+		var arms := combo.get_arms()
+		assert_not_null(arms, "blue 0x0402 authors an arms part")
+		if arms != null:
+			assert_eq(arms.graphic, RenderFixtureContract.COMPARISON_ARMS_GRAPHIC)
+			assert_eq(arms.camo, Vector3i(1, 0, 0))
+
+
 func test_comparison_legs_refuse_real_owners_without_the_matched_spawn() -> void:
 	var contract := {
 		"weapon": "WPN_M16BURST",

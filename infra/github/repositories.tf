@@ -64,8 +64,6 @@ locals {
       opennova-int-bhd = {
         default_branch = "master"
       }
-      opennova-reference-assets        = {}
-      opennova-reference-retail-packed = {}
     } : name => merge(local.repository_defaults, settings)
   }
 }

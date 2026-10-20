@@ -156,7 +156,7 @@ stock host of that corpus in a mission (read-only; it prints the ammo rows, the
 executable's SHA-256 and the row digest), with the whole-table CRC a retail
 joiner's C2S 0x20 reply to a stock host's `{FF,00,00}` challenge: those are
 the oracles the computed sources must reproduce (the
-`npruntime_integrity_sources_retail` ctest pins jox01's).
+`npruntime_integrity_sources` ctest pins jox01's).
 
 For a cold retail-to-retail session, the lower-level call is
 `onhook_run_lan_pair`, a method of the external onHook executable and invoked

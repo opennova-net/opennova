@@ -3,8 +3,8 @@
 // New events by what they wait on (ADR 0046 S24, The board): a recipe is a title, one of the existing trigger
 // types (or none) with preset parameters, and the event flags it starts with; it invents no logic. Each is a
 // composition the shipped missions use: a recipe's `events` and `missions` are what the install's 115
-// missions hold of it (one trigger of the type, not negated, the same flags; measured and pinned by the
-// editor_mission_logic ctest's retail leg), the measurement its citation. The words follow the game's
+// missions hold of it (one trigger of the type, not negated, the same flags; measured once over them, pinned
+// by the editor_mission_logic ctest's test_common_and_recipes), the measurement its citation. The words follow the game's
 // reading of the type (documents/mission_sentence.h): an area trigger holds while the entity stands inside
 // the area's box, tested each time the chain is checked [docs/mission/bms-event-runtime-re.md 7.4, sub 10], and a
 // repeating event fires again while it holds [1.2], so the recipe says "is inside", never "enters".

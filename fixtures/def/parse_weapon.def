@@ -1,0 +1,157 @@
+// Authored for def_parse_weapons (fixtures/README.md): the weapon blocks its pins read, each
+// holding only the keys the test reads, in the grammar JO's weapon.def is written in (tabs and
+// runs of blanks between a key and its values, comma-separated pos/tpos triples, a key's case
+// as JO spells it, a trailing word after a value). Each pinned value is the test's witnessed
+// pin; every other number is ours.
+
+weapon "WPN_KNIFE"
+	category 1
+	statid 100
+
+	teamfilter	blue
+
+	charfilter	medic
+	charfilter	sniper
+	charfilter	gunner
+	charfilter	rifleman
+	charfilter	engineer
+
+	clipsize    -1
+	startrounds -1
+
+	attack_anim	 1
+	special_hold 1
+	run_anim	 1
+end
+
+weapon "WPN_colt45"
+	category 2
+	statid 200
+
+	teamfilter	red
+	teamfilter	blue
+
+	charfilter	medic
+	charfilter	sniper
+
+	charfilter	rifleman
+	charfilter	engineer
+
+	loadout_selectable	1
+	loadout_subclasses	0
+
+	maxclips	5
+	weapon_class	secondary
+
+	clipsize		7
+	startrounds		35
+	ammoclass		CLASS_45cal		1
+
+	special_hold 2
+end
+
+weapon "WPN_RemmingtonSG"
+	category 4
+	statid 610
+	flags NoAmmoTypes
+end
+
+weapon "WPN_357"
+	category 4
+	statid	611
+	clipweight		.35
+end
+
+weapon "WPN_M4AUTO"
+	category 3
+	statid 300
+
+	teamfilter	blue
+
+	charfilter	rifleman
+	charfilter	medic
+	charfilter	engineer
+
+	loadout_selectable	1
+	loadout_subclasses	1
+
+	maxclips		10
+	clipweight		1.5
+	weaponweight	5.5
+
+	loadout_menu_textid	WEAP_SHORT_M4
+	weapon_class	primary
+
+	round_type		"AMMO_CAR15_556MM"
+	clipsize		30
+	error 0.0165 0.2 0.25 0.0165 0.032 0.047
+	ammoclass		CLASS_556MM 1
+	ammobucket		1
+
+	flags auto
+	flags Sighted
+	scope_max_mag	2
+	flags WhileSwimming
+	flags LaserBeam
+
+	sights  car15aim.tga   100  4 900 760 blend
+	sights  onsight2.tga   120  8 880 750 multiplyat
+	sights  onsight3.tga    480  360 540 410 add		scale
+
+	hudclipgfx 	 2  1		H_clip.tga
+
+  	pos  -26.55, 23.25, -165.00 2.500, 0.750, 356.750
+	tpos -52.55, 40.50, -158.75 1.500, 3.250, 0.500
+
+	action "fire"
+		delayend			3	\\auto
+		soundsetend			GS_M4
+		particle			Effect_CAR15MF
+	end
+
+	action "reload"
+		delaystart			100
+		delayend			auto
+	end
+end
+
+weapon "WPN_M4"
+	category 3
+	statid 301
+	ammobucket		1
+end
+
+weapon "WPN_M16M203HE"
+	category 3
+	statid 612
+	scope_max_zero 10 50 0 0
+
+	sights  onsightA.tga   96  2 870 752 blendat
+    sights  onsightB.tga   430  340 590 470 blend
+	sights  m16203b.tga   112  -68 892 703 blendat slide 33
+end
+
+weapon "WPN_MORTAR"
+	category 7
+	statid 613
+	error_hipTheta 4
+	error_upTheta 4
+end
+
+weapon "WPN_EMPLCD50"
+	category 11
+	statid 614
+	attachtextid attach_50cal
+end
+
+weapon "WPN_M1TURRET"
+	category 11
+	statid 615
+	scope_paralax_distance		.814
+end
+
+weapon "WPN_T80TURRET"
+	category 11
+	statid 616
+	scope_paralax_distance		-.574
+end

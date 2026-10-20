@@ -15,10 +15,9 @@
 #include <utility>
 #include <vector>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
-#include <base/vfs/vfs.h>
+#include <base/io/hash.h>
 #include <formats/avatars/avatars.h>
 
 using namespace opennova::avatars;
@@ -37,8 +36,8 @@ size_t total_combos(const AvatarsFile &f) {
 
 } // namespace
 
-// Lossless + idempotent over a table on disk (the minted synth_avatars.def unconditionally, the
-// shipped Avatars.def as the reference-tree leg).
+// Lossless + idempotent over a table on disk (the minted synth_avatars.def and the authored JO-shaped
+// jo_shaped.def).
 int check_roundtrip(const std::string &path) {
     AvatarsFile m1;
     TEST_EXPECT(avatars_parse(path.c_str(), &m1) == 0);
@@ -88,8 +87,8 @@ bool reads_back(const std::string &text, const AvatarsFile &file) {
     return same;
 }
 
-// A shipped table read through the game's reader, written from its model and read again: the same fields; one
-// value changed reads back changed.
+// A table in the shipped one's shape read through the game's reader, written from its model and read again: the
+// same fields; one value changed reads back changed.
 int check_written(const std::string &text, const std::string &what) {
     AvatarsFile file;
     TEST_EXPECT(avatars_parse_memory(text.data(), text.size(), &file) == 0);
@@ -99,6 +98,56 @@ int check_written(const std::string &text, const std::string &what) {
     TEST_EXPECT(reads_back(written(file), file));
     avatars_free(&file);
     std::printf("%s: written from its model, read back as its fields; a voice changed reads back\n", what.c_str());
+    return 0;
+}
+
+// fixtures/avatars/jo_shaped.def: an authored table in the shipped one's shape (its banners, a comment after a
+// header and after a value, quoted names, N00 / D00 / 001 ids, the trailing "skipdemo", parts below the good
+// nationalities and the evil one under them).
+std::string jo_shaped_path() { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/avatars/jo_shaped.def"; }
+
+std::string jo_shaped_text() {
+    std::string text;
+    if (std::FILE *file = std::fopen(jo_shaped_path().c_str(), "rb")) {
+        char buffer[4096];
+        size_t got = 0;
+        while ((got = std::fread(buffer, 1, sizeof(buffer), file)) > 0) text.append(buffer, got);
+        std::fclose(file);
+    }
+    return text;
+}
+
+// The writer's form of the JO-shaped table, pinned (the nw_codec_identity rule: a vector changes only with an
+// [orig] witness on the writer or a D-entry; `avatars_roundtrip_test --dump` prints it).
+constexpr size_t kJoShapedWrittenBytes = 3415;
+constexpr uint64_t kJoShapedWrittenFnv = UINT64_C(0x5bab546e2e04bf75);
+
+uint64_t fnv1a64(const std::string &text) {
+    return opennova::io::fnv1a64_bytes(opennova::io::kFnv1a64Offset, text.data(), text.size());
+}
+
+int dump() {
+    const std::string text = jo_shaped_text();
+    AvatarsFile file;
+    if (avatars_parse_memory(text.data(), text.size(), &file) != 0) return 1;
+    const std::string out = written(file);
+    std::printf("constexpr size_t kJoShapedWrittenBytes = %zu;\nconstexpr uint64_t kJoShapedWrittenFnv = UINT64_C(0x%016llx);\n",
+                out.size(), static_cast<unsigned long long>(fnv1a64(out)));
+    avatars_free(&file);
+    return 0;
+}
+
+int check_jo_shaped_written() {
+    const std::string text = jo_shaped_text();
+    TEST_EXPECT(!text.empty());
+    AvatarsFile file;
+    TEST_EXPECT(avatars_parse_memory(text.data(), text.size(), &file) == 0);
+    const std::string out = written(file);
+    if (out.size() != kJoShapedWrittenBytes || fnv1a64(out) != kJoShapedWrittenFnv)
+        std::printf("FAIL jo_shaped.def: the writer's form is %zu bytes, fnv 0x%016llx\n", out.size(),
+                    static_cast<unsigned long long>(fnv1a64(out)));
+    TEST_EXPECT(out.size() == kJoShapedWrittenBytes && fnv1a64(out) == kJoShapedWrittenFnv);
+    avatars_free(&file);
     return 0;
 }
 
@@ -225,7 +274,7 @@ int check_order() {
 }
 
 int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+    if (argc > 1 && std::strcmp(argv[1], "--dump") == 0) return dump();
     const std::string root = test_paths_repo_root(__FILE__);
     if (check_roundtrip(root + "/fixtures/avatars/synth_avatars.def") != 0) return 1;
     if (check_order() != 0) return 1;
@@ -319,26 +368,11 @@ int main(int argc, char **argv) {
         SETSTR(combo.head_name, "TEST_HEAD");
     }
     if (check_authored() != 0) return 1;
-    // The retail legs: the install's Avatars.def (its base archives and each expansion's mount) through the game's
-    // reader, written from its model and read back as its fields, and the reference fixture set's.
-    const std::string install = retail::install();
-    if (install.empty()) {
-        retail::skip_leg("OPENNOVA_JO_DIR (the packed install's Avatars.def written and read back)");
-    } else {
-        std::vector<std::string> mounts{std::string()};
-        for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
-        for (const std::string &expansion : mounts) {
-            opennova::Vfs vfs;
-            TEST_EXPECT(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed));
-            std::vector<uint8_t> bytes;
-            TEST_EXPECT(vfs.read_file("Avatars.def", bytes) && !bytes.empty());
-            if (check_written(std::string(bytes.begin(), bytes.end()), "the install's Avatars.def " + expansion) != 0) return 1;
-        }
-    }
-    const std::string retail = retail::reference_fixture("avatars/Avatars.def");
-    if (retail.empty())
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/avatars/Avatars.def (the shipped avatar table)");
-    if (check_roundtrip(retail) != 0) return 1;
-    std::printf("retail leg: Avatars.def round-trips losslessly and idempotently\n");
+    // The JO-shaped table: written from its model and read back as its fields, lossless and idempotent, its
+    // writer's form pinned.
+    if (check_written(jo_shaped_text(), "jo_shaped.def") != 0) return 1;
+    if (check_roundtrip(jo_shaped_path()) != 0) return 1;
+    if (check_jo_shaped_written() != 0) return 1;
+    std::printf("JO-shaped table: round-trips losslessly and idempotently, its written form pinned\n");
     return 0;
 }

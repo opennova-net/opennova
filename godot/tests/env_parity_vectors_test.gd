@@ -169,8 +169,8 @@ extends GutTest
 #
 # NOT PINNED (honest gaps, no fake greens):
 # - Celestial node-level MODEL application (materials/tints on loaded
-#   3DIs): needs a ResourceRoot with retail models (asset-gated; with no
-#   bodies the process path returns before the pushes). The MATH is fully
+#   3DIs): needs a ResourceRoot with the celestial models (none is staged; with
+#   no bodies the process path returns before the pushes). The MATH is fully
 #   vectored through the statics (celestial/body_*, celestial/glow) and the
 #   env_render_unit ctest (the occlusion window); the terrain ray march itself
 #   needs a loaded terrain (the no-terrain path = unobstructed is the pinned case).

@@ -8,8 +8,9 @@
 // graph's edge to a .bad. S12: a table's rows duplicate, move and remove; the lines a table
 // leaves out are findings Save drops (a ten-clip row reads whole); a slot two rows name is a note;
 // a bone's parent is named by the parent bone, and one numbered after it is a warning.
-// A SKIP-LEG opens every retail clip and table and saves each untouched field-equal /
-// row-equal.
+// Every clip and table of the formats' fixtures (the authored ones, the base game's tables, the
+// forms of the shipped clips the anim rows mint: model_variant_files.h) opens and saves untouched
+// field for field / row for row; a table of the line forms the shipped tables hold saves.
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
@@ -36,10 +37,10 @@
 
 #include "common/bad_equal.h"
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/model_variant_files.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -144,6 +145,15 @@ int clips() {
 		TEST_EXPECT(document.record_title(event) == "Frame 0: left footstep");
 		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(0x2 | 0x40 | 0x10000)), error));
 		TEST_EXPECT(document.record_title(event) == "Frame 0: right footstep, sound 2, an unread bit (0x10000)");
+		// A bit the engine reads nowhere is a note on its frame (five shipped clips set bits 0x800 to 0x8000,
+		// COLT_1F's and DET_1F's among them).
+		size_t unread = 0;
+		for (const Diagnostic &d : validate_animation_file(document))
+			unread += d.row() == &finding_code(AnimationFinding::TriggerUnknown) && d.child_id == event.child &&
+			                          d.severity == DiagnosticSeverity::Info && d.field == "trigger"
+			                  ? 1
+			                  : 0;
+		TEST_EXPECT(unread == 1);
 		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(0)), error) && document.record_title(event) == "Frame 0");
 		TEST_EXPECT(document.apply(set_edit(event, "trigger", int64_t(1)), error));
 	}
@@ -198,7 +208,23 @@ int clips() {
 	TEST_EXPECT(document.save(error));
 	while (document.can_undo()) document.undo();
 	TEST_EXPECT(serialized(document) == source);
-	std::printf("clips: untouched saves, engine data edits, the motion refused, undo\n");
+
+	// A version 0 clip's events carry no trigger word (m60_rst's, m60_1d's, m60_1r's; the model lane mints the
+	// form, fixtures/anim/rig19_v0.bad): its frames are titled by their number alone.
+	{
+		const std::vector<uint8_t> v0 = model_variants::bytes_of("fixtures/anim/rig19_v0.bad");
+		AnimationDocument first;
+		TEST_EXPECT(!v0.empty() && first.load_bytes(v0, "rig19_v0.bad", AssetKind::Animation, "jo", error));
+		const ClipRow *v0_clip = first.clip();
+		TEST_EXPECT(v0_clip && v0_clip->version == 0 && v0_clip->events.size() > 1);
+		if (!v0_clip || v0_clip->events.size() < 2) return 1;
+		TEST_EXPECT(first.record_title({v0_clip->id, kEvent, v0_clip->collections[1][0]}) == "Frame 0" &&
+		            serialized(first) == v0);
+		// No trigger word, so no finding about one (the reader's -1 is no bit the file sets).
+		for (const Diagnostic &d : validate_animation_file(first))
+			TEST_EXPECT(d.code() != "animation.trigger_unknown" && d.code() != "animation.end_pose_trigger");
+	}
+	std::printf("clips: untouched saves, engine data edits, the motion refused, undo, a version 0 clip\n");
 	return 0;
 }
 
@@ -582,46 +608,100 @@ int validation_and_graph() {
 	return 0;
 }
 
-int retail_files() {
-	const std::string root = retail::assets();
-	if (!retail::dir_exists(root)) return retail::skip_leg("OPENNOVA_JO_ASSETS (the retail clips and tables at its root)");
-	size_t clips = 0, tables = 0;
-	std::error_code ec;
-	for (const auto &entry : fs::directory_iterator(root, ec)) {
-		if (!entry.is_regular_file(ec)) continue;
-		const std::string extension = retail::lower_ascii(entry.path().extension().string());
-		const std::string name = entry.path().filename().generic_string();
-		Diagnostic error;
-		if (extension == ".bad") {
-			AnimationDocument document;
-			TEST_EXPECT(document.load(entry.path().generic_string(), name, AssetKind::Animation, "jo", error));
-			const std::vector<uint8_t> bytes = serialized(document);
-			const std::vector<uint8_t> source = test_io::read_file(entry.path().string());
-			bad::BadFile a{}, b{};
-			TEST_EXPECT(bad::bad_parse_buffer(source.data(), source.size(), &a) == 0);
-			TEST_EXPECT(bad::bad_parse_buffer(bytes.data(), bytes.size(), &b) == 0);
-			TEST_EXPECT(bad_equal::field_equal(a, b));
-			bad::bad_free(&a);
-			bad::bad_free(&b);
-			++clips;
-		} else if (extension == ".adm") {
-			AnimationMapDocument document;
-			TEST_EXPECT(document.load(entry.path().generic_string(), name, AssetKind::AnimationMap, "jo", error));
-			const SerializeResult saved = document.serialize();
-			if (!saved.ok()) std::printf("%s: %s\n", name.c_str(), saved.issues.front().message.c_str());
-			TEST_EXPECT(saved.ok());
-			++tables;
-		}
+// A table's rows as the format reads them, the same keys with the same clips in the same order.
+bool same_rows(const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) {
+	adm::AdmFile x{}, y{};
+	bool same = adm::adm_parse_buffer(reinterpret_cast<const char *>(a.data()), a.size(), &x) == 0 &&
+	            adm::adm_parse_buffer(reinterpret_cast<const char *>(b.data()), b.size(), &y) == 0 && x.count == y.count;
+	for (size_t i = 0; same && i < x.count; ++i) {
+		same = std::strcmp(x.entries[i].key, y.entries[i].key) == 0 && x.entries[i].variants.size() == y.entries[i].variants.size();
+		for (size_t v = 0; same && v < x.entries[i].variants.size(); ++v)
+			same = std::strcmp(x.entries[i].variants[v], y.entries[i].variants[v]) == 0;
 	}
-	if (clips + tables == 0) return retail::skip_leg("OPENNOVA_JO_ASSETS with the retail .bad/.adm files at its root");
-	std::printf("retail: %zu clips and %zu tables open and save untouched\n", clips, tables);
+	adm::adm_free(&x);
+	adm::adm_free(&y);
+	return same;
+}
+
+// Every clip of the format's fixtures (the authored ones and the forms of the shipped clips the anim rows mint,
+// each of which must be there) opens and saves untouched field for field (common/bad_equal.h: every field the
+// reader keeps); every table (the authored ones, the base game's) opens, nothing in it blocks, and the save's
+// canonical form reads back as its rows. The install's 477 clips and 82 tables were held to it while the
+// corpus was read.
+int variant_files() {
+	const model_variants::Files clips = model_variants::clips();
+	size_t clip_count = 0;
+	for (const std::string &path : clips.paths) {
+		AnimationDocument document;
+		Diagnostic error;
+		TEST_EXPECT(document.load(model_variants::repo_path(path), fs::path(path).filename().generic_string(),
+		                          AssetKind::Animation, "jo", error));
+		const std::vector<uint8_t> bytes = serialized(document);
+		const std::vector<uint8_t> source = model_variants::bytes_of(path);
+		bad::BadFile a{}, b{};
+		TEST_EXPECT(bad::bad_parse_buffer(source.data(), source.size(), &a) == 0);
+		TEST_EXPECT(bad::bad_parse_buffer(bytes.data(), bytes.size(), &b) == 0);
+		const bool equal = bad_equal::field_equal(a, b);
+		bad::bad_free(&a);
+		bad::bad_free(&b);
+		if (!equal) std::printf("variants: %s saves other fields\n", path.c_str());
+		TEST_EXPECT(equal);
+		++clip_count;
+	}
+	const model_variants::Files maps = model_variants::maps();
+	size_t table_count = 0;
+	for (const std::string &path : maps.paths) {
+		AnimationMapDocument document;
+		Diagnostic error;
+		TEST_EXPECT(document.load(model_variants::repo_path(path), fs::path(path).filename().generic_string(),
+		                          AssetKind::AnimationMap, "jo", error));
+		TEST_EXPECT(!document.blocked());
+		const SerializeResult saved = document.serialize();
+		if (!saved.ok()) std::printf("variants: %s: %s\n", path.c_str(), saved.issues.front().message.c_str());
+		TEST_EXPECT(saved.ok() && same_rows(model_variants::bytes_of(path), std::vector<uint8_t>(saved.text.begin(), saved.text.end())));
+		++table_count;
+	}
+	TEST_EXPECT(clip_count >= 2 && table_count >= 10);
+	std::printf("variants: %zu clips save field for field, %zu tables in their canonical form\n", clip_count, table_count);
+	return model_variants::report_missing(clips) + model_variants::report_missing(maps) == 0 ? 0 : 1;
+}
+
+// The line forms the shipped tables hold that the authored ones lack, in one table as the tool's tables lay them
+// out (CR LF, a NUL after the last line and no line end before it): a free-text line between the rows, its key no
+// slot's, commas among its words (BIRD1.ADM's "(if anim is not availble, AI will seek cover)"); rows of one clip
+// named four times over two names (BIRD1's); a space after a row's last clip (the install's 2,053 such lines);
+// runs of tabs and spaces between a key and its clip (DEFAULT.ADM's); keys in capitals (anim_swim_BACK,
+// anim_for_menus_Idle1). The table opens, what it leaves out is a note on its line and blocks nothing, and the
+// save's canonical form reads back as its rows.
+int shipped_table_forms() {
+	const std::string text = std::string("\r\n\r\nanim_reset                                \"bird_rst.bad\" \r\n\r\n"
+	                                     "anim_idle                                 \"b_fly.bad\" \"b_fly.bad\" \"b_fly.bad\" \"b_fly1.bad\"\r\n"
+	                                     "\t\t\t\t\t\t\t  (if anim is not there, the bird, will land)\r\n"
+	                                     "anim_emote_1 \t      \t\t\t\"default.bad\"\r\n"
+	                                     "anim_swim_BACK\t\t\"b_fly.bad\"\r\n"
+	                                     "anim_for_menus_Idle1\t\"b_fly.bad\" \r\n"
+	                                     "anim_death_drown                          \"b_dead.bad\" \r\n") +
+	                         std::string(1, '\0');
+	AnimationMapDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(std::vector<uint8_t>(text.begin(), text.end()), "bird.adm", AssetKind::AnimationMap, "jo", error));
+	TEST_EXPECT(!document.blocked() && document.rows().size() >= 5 && document.rows()[0]->name() == "anim_reset");
+	bool free_text = false;
+	for (const SourceIssue &issue : document.issues()) {
+		TEST_EXPECT(!issue.blocks);
+		free_text = free_text || issue.record == "(if";
+	}
+	TEST_EXPECT(free_text);
+	const SerializeResult saved = document.serialize();
+	TEST_EXPECT(saved.ok() && same_rows(std::vector<uint8_t>(text.begin(), text.end()),
+	                                    std::vector<uint8_t>(saved.text.begin(), saved.text.end())));
+	std::printf("shipped table forms: free text, repeated clips, trailing spaces, tab runs, capitals\n");
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (clips() != 0) return 1;
 	if (bone_parents() != 0) return 1;
 	if (tables() != 0) return 1;
@@ -631,5 +711,7 @@ int main(int argc, char **argv) {
 	if (define_slot() != 0) return 1;
 	if (findings_follow_rows() != 0) return 1;
 	if (validation_and_graph() != 0) return 1;
-	return retail_files();
+	if (shipped_table_forms() != 0) return 1;
+	// The sweep over the formats' fixtures last: it names every variant it lacks.
+	return variant_files();
 }

@@ -1,0 +1,66 @@
+description     "Helo - authored gunship"
+type				HELO
+subtype				PLANE
+default_state		HELO_WINGMAN		
+
+rank				4
+view_fov			120	
+view_dist			900	
+radar_fov			360	
+radar_dist			1500	
+priority_air		3
+priority_ground		4
+priority_organics	2
+priority_decorations	1
+
+evade_flags			FOLLOW_WP FLEE COUNTER
+combat_flags		FOLLOW_WP NO_CAP COUNTER
+
+react_time			2
+aim_skill			4
+check_six_rate		3	
+target_eval_rate	2
+tether_dist			200
+
+primary_weap		HELLFIRE	
+primary_ammo		4		
+primary_rate		0.25		
+primary_fov			20		
+primary_range		700		
+primary_facing		0
+primary_flags		WEAPON_TURRET WEAPON_FAST
+primary_pitch		0.0	
+
+secondary_weap		20MM	
+secondary_ammo		-1		
+secondary_rate		0.10	
+secondary_fov		60		
+secondary_range		500		
+secondary_facing	0
+secondary_flags		WEAPON_TURRET
+secondary_pitch		10.0	
+
+hunt_flags			MAINTAIN_SPEED
+hunt_limit			30	
+
+patrol_speed		60	
+patrol_altitude		40	
+patrol_climb		5	
+
+combat_speed		120	
+combat_altitude		30	
+combat_climb		10	
+
+min_agl				15	
+min_speed			0	
+min_chase_dist		200	
+max_chase_dist		2000	
+
+flight_skill		3
+turn_rate			60	
+
+accel_time			20
+
+radio_distance		0
+radio_delay			0
+use_waypoint_z		1

@@ -2,9 +2,10 @@ class_name DefFixture
 extends RefCounted
 
 ## Authored test tables for binding and presenter tests. These are deliberately
-## small inputs, not copies of shipped definitions. Retail parser/catalog pins
-## remain in the retail suite. Files exist only because ResourceRoot and the
-## GDExtension loaders exercise the real file-loading boundary.
+## small inputs, not copies of shipped definitions; a test that pins a shipped
+## value authors the rows it reads and stages them with stage_catalog(). Files
+## exist only because ResourceRoot and the GDExtension loaders exercise the real
+## file-loading boundary.
 static var _directory := ""
 
 const HUD := """VEHICLE_HUD
@@ -113,6 +114,30 @@ static func directory() -> String:
 			_directory.path_join("items.def"))
 	assert(copied == OK, "the committed items table copies beside the authored defs")
 	return _directory
+
+
+## A flat def root of a test's own authored tables: `weapon_text` as weapon.def,
+## `ammo` as ammo.def (this fixture's ammo_text() when empty), `hudpos` as
+## hudpos.def, beside the committed items table, staged fresh under
+## `.godot-test-fixtures/defs_<name>` (ResourceRoot indexes flat names and
+## rejects user://). A test that pins a shipped value authors only the rows
+## and fields its assertions read, each value cited where it is defined.
+static func stage_catalog(name: String, weapon_text: String, ammo := "",
+		hudpos := HUD) -> String:
+	var dir := ProjectSettings.globalize_path(
+			"res://../.godot-test-fixtures/defs_%s" % name)
+	var made := DirAccess.make_dir_recursive_absolute(dir)
+	assert(made == OK, "the def catalog directory is creatable")
+	WorldFixture.write_file(dir.path_join("weapon.def"), weapon_text)
+	WorldFixture.write_file(dir.path_join("ammo.def"), ammo_text() if ammo.is_empty() else ammo)
+	WorldFixture.write_file(dir.path_join("hudpos.def"), hudpos)
+	var items := dir.path_join("items.def")
+	if FileAccess.file_exists(items):
+		DirAccess.remove_absolute(items)
+	var copied := DirAccess.copy_absolute(
+			ProjectSettings.globalize_path(ItemDbFixture.FIXTURE_ITEMS), items)
+	assert(copied == OK, "the committed items table copies beside the authored defs")
+	return dir
 
 
 static func ammo_text() -> String:

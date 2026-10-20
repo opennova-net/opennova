@@ -18,8 +18,8 @@
 // curves its graphicN line copies, a texture on every layer (an empty one reads
 // as the blend word after it), flip_frames 1 on every layer but the last.
 //
-// No retail file is carried: the shipped .ptl corpus is the OPENNOVA_JO_ASSETS
-// leg of particle_smoke_all_fixtures.
+// No retail file is carried: the shipped .ptl files' forms are the authored
+// lexical_forms.ptl, which particle_smoke_all_fixtures also sweeps.
 //
 // Default: rebuild in memory and byte-compare the committed files. `--write`
 // (re)writes them.

@@ -161,14 +161,16 @@
   over an external buffer; `formats/bad` and `formats/rtxt` read through offset-indexed
   wrappers over `io::read_*_le` plus a NUL-string scanner, not cursors.
 - The CPT codec (`engine/formats/cpt`) reads and writes through `io::BitReader` /
-  `io::BitWriter`, its writer's bytes (the high-water rule, the zero pads) pinned by the
-  retail corpus: run `--suite retail` (ctest `cpt_jo_assets_sweep`, every retail .cpt read and
-  written again byte for byte) whenever you touch the CPT encoder; `cpt_roundtrip` and
-  the `cpt_trngen_bake_*` rows pin the bit codec and the bake in core.
+  `io::BitWriter`, its writer's bytes (the high-water rule, the zero pads) pinned over the
+  form the shipped .cpt files take: run ctest `cpt_shipped_form` (the minted
+  `terrain/variants/shipped.cpt`, every CDEP block width, read and written again byte for
+  byte) whenever you touch the CPT encoder; `cpt_roundtrip` and the `cpt_trngen_bake_*`
+  rows pin the bit codec and the bake.
 - The parity rules (faithful ports cited `[orig: Name @ 0xADDR]`, writers from scratch, ADR
   0003) are the root CLAUDE.md's Conventions and docs/engine-primer.md. The full
-  writer-parity gate is writer from scratch + roundtrip test + retail-corpus byte sweep
-  where a corpus exists + a ledgered D-entry when output legitimately differs.
+  writer-parity gate is writer from scratch + roundtrip test + a byte sweep over every
+  form the shipped corpus takes (minted, FNV-pinned) + a ledgered D-entry when output
+  legitimately differs.
 - The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`,
   `engine/net/admin`) and the
   replication seam (`engine/runtime/replication`) are

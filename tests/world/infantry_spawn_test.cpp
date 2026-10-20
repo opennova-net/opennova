@@ -1,9 +1,12 @@
 // Fresh org1 initialization and the native dual-channel spawn settle.
 // [orig: Entity_InitOrganicAI @0x4BFCC0; Entity_WarmUpOrganicAnimation @0x4B8B20]
-#include "common/retail_paths.h"
+#include "common/file_io.h"
+#include "common/temp_dir.h"
 
 #include <base/io/bam.h>
 #include <base/resource_index/resource_index.h>
+#include <base/vfs/vfs.h>
+#include <formats/bad/bad_build.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/anim/clip_timeline.h>
 #include <runtime/assets/asset_store.h>
@@ -647,18 +650,54 @@ void channelless_body_runs_nothing() {
     CHECK(!infantry_has_anim_channel(held.body().inf, nullptr));
 }
 
-// A retail soldier (the install's Eindo01.adm, a body of net id 13 standing), posed and ticked on over
-// the install's clips: the world's motor and the shared head leave the same channels, the idle
-// (I_idle1.bad at 363 ticks after the warmup) wraps where its own clock wraps, and each unblended
-// tick's event word is the trigger its clip authors on the frame under the playhead.
-void retail_soldier_ticks_on() {
-    const std::string install = retail::install();
-    if (install.empty()) {
-        retail::skip_leg("OPENNOVA_JO_DIR (a soldier's Eindo01.adm)");
-        return;
+// One looping 30 fps clip of `frames` intervals: a hip `bottom` over the ground, a forward step of
+// `step` metres a frame, and the trigger word `trigger` on every `every`-th frame from 0 (none
+// when `every` is 0).
+bool write_soldier_clip(const std::string &path, const char *stem, uint32_t frames, double bottom, double step,
+                        int32_t trigger, uint32_t every) {
+    opennova::bad::BadBuildClip clip;
+    clip.name = stem;
+    clip.fps = 30;
+    clip.flags = 0x1; // loop
+    clip.frame_count = frames;
+    opennova::bad::BadBuildBone bone;
+    bone.name = "BN01";
+    bone.keys.assign(frames + 1, opennova::bad::BadBuildQuat{});
+    clip.bones.push_back(bone);
+    for (uint32_t f = 0; f <= frames; ++f) {
+        opennova::bad::BadBuildEvent event;
+        event.velocity.x = step; // mission axes: x forward
+        event.bottom = bottom;
+        event.top = bottom + 0.75;
+        event.trigger = (every != 0 && f % every == 0 && f < frames) ? trigger : 0;
+        clip.events.push_back(event);
     }
+    std::vector<uint8_t> bytes;
+    std::string error;
+    return opennova::bad::bad_build_mint(clip, nullptr, opennova::bad::bad_retail_limits(), bytes, &error) &&
+           test_io::write_file(path, bytes);
+}
+
+// A soldier (a body of net id 13 standing) over a clip table in the shape of the shipped
+// Eindo01.adm (the reset Dt1rst, 2 frames; the idle I_idle1, 308 frames; its two other idle rows,
+// 70 frames each; the walk I_WalkF, 152 frames with a footstep word, 0x2, every 14th frame, as the
+// shipped clip authors its eleven), posed and ticked on: the world's motor and the shared head leave
+// the same channels, the idle (I_idle1.bad at 363 ticks after the warmup, the shipped clip's) wraps
+// where its own clock wraps, and each unblended tick's event word is the trigger its clip authors on
+// the frame under the playhead.
+void soldier_ticks_on() {
+    test_temp::TempDir dir("infantry_spawn_soldier");
+    const std::string root = dir.root();
+    CHECK(write_soldier_clip(root + "/Dt1rst.bad", "Dt1rst", 2, 1.0185, 0.0, 0, 0));
+    CHECK(write_soldier_clip(root + "/I_idle1.bad", "I_idle1", 308, 1.0, 0.0, 0, 0));
+    CHECK(write_soldier_clip(root + "/I_Search.bad", "I_Search", 70, 0.9168, 0.0, 0, 0));
+    CHECK(write_soldier_clip(root + "/I_IDLE3.bad", "I_IDLE3", 70, 0.4856, 0.0, 0, 0));
+    CHECK(write_soldier_clip(root + "/I_WalkF.bad", "I_WalkF", 152, 0.98, 0.0619, 0x2, 14));
+    CHECK(test_io::write_text(root + "/Eindo01.adm",
+            "anim_reset\t\"Dt1rst.bad\"\r\nanim_idle\t\"I_idle1.bad\"\r\nanim_idle_2\t\"I_Search.bad\"\r\n"
+            "anim_idle_3\t\"I_IDLE3.bad\"\r\nanim_walk_forward\t\"I_WalkF.bad\"\r\n"));
     opennova::ResourceIndex index;
-    CHECK(index.scan(install));
+    CHECK(index.scan(root, std::string(), opennova::VfsMountMode::LooseOnly));
     opennova::assets::AssetStore store{&index};
     opennova::anim::AdmRootMotion clips;
     const int adm = clips.register_adm(&store, "Eindo01.adm");
@@ -675,7 +714,7 @@ void retail_soldier_ticks_on() {
     std::string served = clips.clip_file(adm, anim_state::kIdle, spawned.pose.variant);
     for (char &c : served) c = char(std::tolower(static_cast<unsigned char>(c)));
     CHECK(served.find("i_idle1.bad") != std::string::npos);
-    std::printf("retail soldier: idle %s, variant %d of %d, phase %d\n", served.c_str(), spawned.pose.variant,
+    std::printf("soldier: idle %s, variant %d of %d, phase %d\n", served.c_str(), spawned.pose.variant,
                 clips.variant_count(adm, anim_state::kIdle), spawned.pose.phase);
     std::vector<uint32_t> words(8192);
     uint32_t tick = 1000;
@@ -712,7 +751,7 @@ void retail_soldier_ticks_on() {
     };
     int wraps = 0, sampled = 0, events = 0;
     play(anim_state::kIdle, 1200, wraps, sampled, events);
-    std::printf("retail soldier idle: %d wraps, %d ticks sampled, %d on authored event frames\n", wraps, sampled,
+    std::printf("soldier idle: %d wraps, %d ticks sampled, %d on authored event frames\n", wraps, sampled,
                 events);
     CHECK(wraps >= 2 && sampled > 0);
     // The walk a script stores [orig: WacCmd_Anim @0x4ED5B0], played on by both: its footsteps are the
@@ -721,7 +760,7 @@ void retail_soldier_ticks_on() {
     r.body().inf.store_body_animation(anim_state::kWalkForward);
     wraps = sampled = events = 0;
     play(anim_state::kWalkForward, 1200, wraps, sampled, events);
-    std::printf("retail soldier walk: %d wraps, %d ticks sampled, %d on authored event frames\n", wraps, sampled,
+    std::printf("soldier walk: %d wraps, %d ticks sampled, %d on authored event frames\n", wraps, sampled,
                 events);
     CHECK(wraps >= 2 && sampled > 0 && events > 0);
 }
@@ -771,8 +810,7 @@ void grounding_strict_one_unit_limit() {
 }
 } // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     warmup_permutation_and_root_motion();
     postures_mounts_and_wash();
     world_free_pose_matches_the_world();
@@ -780,7 +818,7 @@ int main(int argc, char **argv) {
     still_body_thinks_as_the_world();
     still_bodies_attend_as_the_world();
     channelless_body_runs_nothing();
-    retail_soldier_ticks_on();
+    soldier_ticks_on();
     control_point_pool_precedence();
     grounding_strict_one_unit_limit();
     std::printf("infantry_spawn: %s\n", failures ? "FAIL" : "PASS");

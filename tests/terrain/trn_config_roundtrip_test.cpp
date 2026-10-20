@@ -1,16 +1,10 @@
 #include <formats/trn/trn_io.h>
 
 #include <formats/foliage/foliage.h>
-#include <formats/mission/bms.h>
 
 #include <cstdio>
-#include <cstring>
-#include <fstream>
 #include <sstream>
 #include <vector>
-
-#include "common/file_io.h"
-#include "common/retail_paths.h"
 
 namespace {
 
@@ -25,7 +19,9 @@ bool expect(bool condition, const char *message) {
 // A mission's BMS tile-set name replaces the .trn tilestrip: the extension
 // from the first '.' becomes "TGA" (or "TGA" is appended); an empty name keeps
 // the .trn value. [orig: Terrain_LoadEnvironmentConfig @ 0x6109C8..0x6109EE;
-// Path_ReplaceOrAppendExtension @ 0x53C780]
+// Path_ReplaceOrAppendExtension @ 0x53C780] Witnessed on JO:CA: 06TR.bms
+// authors the tile set "trntilec1" over G13.trn's trntile10.tga, so its .til
+// roads draw from trntilec1.TGA (the case below).
 bool test_mission_tilestrip() {
     opennova::TrnConfig trn;
     trn.tilestrip = "trntile10.tga";
@@ -39,47 +35,10 @@ bool test_mission_tilestrip() {
                    "everything from the first dot is replaced");
 }
 
-// Retail 06TR authors tile set "trntilec1" over G13.trn's trntile10: its
-// .til roads draw from trntilec1.TGA. Gated on the extracted retail tree
-// (docs/asset-gated-tests.md).
-bool test_retail_06tr_draws_from_its_mission_tile_set() {
-    const std::string bms_path = retail::asset_file("06TR.bms");
-    const std::string trn_path = retail::asset_file("G13.trn");
-    if (bms_path.empty() || trn_path.empty()) {
-        retail::skip_leg("OPENNOVA_JO_ASSETS with 06TR.bms and G13.trn");
-        return true;
-    }
-    const std::vector<uint8_t> bytes = test_io::read_file(bms_path);
-    opennova::bms::Header header;
-    std::string error;
-    if (!expect(bytes.size() >= opennova::bms::kHeaderSize &&
-                        opennova::bms::parse_header_blob(bytes.data(), opennova::bms::kHeaderSize,
-                                                         header, error),
-                "06TR.bms header parses")) {
-        return false;
-    }
-    // Binary: the reader splits lines at CR LF as the game's walk does, and a
-    // text-mode stream would hand it LF alone [orig: File_ParseASCIIFile
-    // @0x53D8C7..0x53D8F5].
-    std::ifstream trn_file(trn_path, std::ios::binary);
-    opennova::TrnConfig trn;
-    if (!expect(opennova::load_trn(trn_file, trn, error), "G13.trn parses")) {
-        return false;
-    }
-    const std::string tile_set(header.terrain_tile,
-                               ::strnlen(header.terrain_tile, sizeof(header.terrain_tile)));
-    return expect(retail::lower_ascii(trn.tilestrip) == "trntile10.tga",
-                   "G13.trn authors the trntile10 strip") &&
-           expect(retail::lower_ascii(opennova::trn_mission_tilestrip(trn, tile_set)) ==
-                          "trntilec1.tga",
-                   "06TR's header tile set replaces it with trntilec1");
-}
-
 } // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
-    if (!test_mission_tilestrip() || !test_retail_06tr_draws_from_its_mission_tile_set()) {
+int main() {
+    if (!test_mission_tilestrip()) {
         return 1;
     }
     opennova::TrnConfig saved;

@@ -2,8 +2,8 @@
 //
 // The shape is lifted from engine/formats/cpt's CDEP/POLY bit codec (the proven
 // consumer), and cpt reads through io::BitReader and writes through
-// io::BitWriter; its byte-exact retail re-encode (cpt_jo_assets_sweep) pins
-// the writer's bytes and its high-water rule.
+// io::BitWriter; its byte-exact re-encode of the shipped form (cpt_shipped_form)
+// pins the writer's bytes and its high-water rule.
 //
 // Layout contract: values pack LSB-first within a little-endian dword stream;
 // align_dword() pads to the next 4-byte boundary (a partial byte first).

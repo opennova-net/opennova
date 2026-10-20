@@ -5,11 +5,20 @@
 // shape: total_size 0x1008, valid 0x08A8); TONE01 spans three chunks
 // (4096 + 4096 + 1000); TONE02..TONE12 are one full chunk each of distinct
 // integer triangle waves (no floating point, so every platform mints the
-// same bytes). The retail banks themselves are swept by
-// tests/sbf/sbf_jo_install_sweep_test.cpp behind OPENNOVA_JO_DIR.
+// same bytes).
 //
-// Default: rebuild the bank in memory, assert it parses with the pinned
-// shape and byte-matches the committed file. `--write` (re)writes it.
+// And fixtures/sbf/tool_bank.sbf, a bank our writer writes from the model and
+// then left as the retail encoder leaves every shipped bank (each a header the
+// writer's, its streams packed): one reserved pair in every chunk header, not
+// the writer's (menumus.sbf's 0x1A, 0x01; one pair a bank: gamemus.sbf 0xFA, 0x00,
+// the jox01 banks 0x20, 0x01 and 0xFB, 0x00), and each stream's last chunk
+// partial, its audio area past the bytes it plays the encoder's reused buffer:
+// the previous chunk's bytes there, a one-chunk stream's zero (every stream of
+// JO:CA's six banks so; docs/audio/mus-sbf-re.md). The retail banks themselves
+// are swept by tests/sbf/sbf_bank_sweep_test.cpp's forms of them.
+//
+// Default: rebuild the banks in memory, assert they parse with the pinned
+// shape and byte-match the committed files. `--write` (re)writes them.
 #include <formats/sbf/sbf.h>
 
 #include "common/file_io.h"
@@ -120,6 +129,75 @@ bool verify_shape(const std::vector<uint8_t> &bytes) {
 	return ok;
 }
 
+// The tool bank's streams: a one-chunk silence of the NULLS shape (2216 bytes), and three streams of
+// two to four chunks, each ending in a partial one.
+const Tone kToolTones[] = {
+    {"SILENCE", 2216, 0, 0},
+    {"TOOL_A", 2 * 4096 + 1500, 50, 18000},
+    {"TOOL_B", 4096 + 333, 36, 9000},
+    {"TOOL_C", 3 * 4096 + 4000, 120, 3000},
+};
+constexpr size_t kToolToneCount = sizeof(kToolTones) / sizeof(kToolTones[0]);
+// menumus.sbf's reserved pair.
+constexpr uint8_t kToolReservedA = 0x1A;
+constexpr uint8_t kToolReservedB = 0x01;
+
+uint32_t read_u32(const std::vector<uint8_t> &bytes, size_t at) {
+	uint32_t v = 0;
+	std::memcpy(&v, bytes.data() + at, 4);
+	return v;
+}
+
+// The model's write, then the retail encoder's leavings: its reserved pair in every chunk, each
+// stream's last chunk's tail the previous chunk's bytes there (zero for a stream of one chunk).
+bool build_tool_bank(std::vector<uint8_t> &bytes) {
+	SbfFile bank;
+	for (const Tone &tone : kToolTones) {
+		const std::vector<int16_t> pcm = waveform(tone);
+		bank.streams.push_back(sbf_encode_stream(tone.name, pcm.data(), pcm.size()));
+	}
+	std::string error;
+	if (!sbf_write_bank(bank, bytes, error)) return false;
+	for (size_t i = 0; i < bank.streams.size(); ++i) {
+		const size_t entry = size_t(SBF_HEADER_SIZE) + i * size_t(SBF_ENTRY_SIZE);
+		const uint32_t offset = read_u32(bytes, entry + 16), total = read_u32(bytes, entry + 20),
+		               block = read_u32(bytes, entry + 24);
+		const uint32_t chunks = total / block;
+		for (uint32_t c = 0; c < chunks; ++c) {
+			bytes[offset + c * block + 6] = kToolReservedA;
+			bytes[offset + c * block + 7] = kToolReservedB;
+		}
+		const size_t last = offset + size_t(chunks - 1) * block;
+		const uint32_t valid = read_u32(bytes, last);
+		for (size_t k = SBF_CHUNK_HEADER + valid; k < block; ++k)
+			bytes[last + k] = chunks > 1 ? bytes[last - block + k] : 0;
+	}
+	return true;
+}
+
+// The tool bank reads into the model as its streams, laid out as the writer lays a bank out but for
+// the leavings, and its write is the writer's bytes again.
+bool verify_tool_bank(const std::vector<uint8_t> &bytes) {
+	SbfFile bank;
+	SbfFileLayout layout;
+	std::string error;
+	if (!expect(sbf_read_bank(bytes.data(), bytes.size(), bank, error, &layout), "the tool bank reads")) return false;
+	size_t chunks = 0;
+	for (const SbfStream &stream : bank.streams) chunks += stream.chunks.size();
+	bool ok = expect(bank.streams.size() == kToolToneCount && layout.packed && layout.trailing_bytes == 0 &&
+	                         layout.short_chunks == 0 && layout.header_words_other == 0 &&
+	                         layout.reserved_other == chunks && layout.tails_other == kToolToneCount,
+	                 "the tool bank's reserved pairs and tails are the encoder's, the rest the writer's");
+	std::vector<uint8_t> written, again;
+	ok &= expect(sbf_write_bank(bank, written, error) && written != bytes && written.size() == bytes.size(),
+	             "the tool bank's write is the writer's own bytes, its size");
+	SbfFile back;
+	ok &= expect(sbf_read_bank(written.data(), written.size(), back, error) && sbf_write_bank(back, again, error) &&
+	                     again == written,
+	             "the tool bank's write is a fixed point");
+	return ok;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -131,13 +209,25 @@ int main(int argc, char **argv) {
 	std::vector<uint8_t> bytes;
 	if (!expect(build(bytes), "sbf_encode_file")) return 1;
 	if (!verify_shape(bytes)) return 1;
+	const std::string tool_path = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/sbf/tool_bank.sbf";
+	std::vector<uint8_t> tool;
+	if (!expect(build_tool_bank(tool), "sbf_write_bank (the tool bank)")) return 1;
+	if (!verify_tool_bank(tool)) return 1;
 
 	if (write_mode) {
-		std::ofstream o(path, std::ios::binary);
-		o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-		std::printf("wrote %s (%zu bytes)\n", path.c_str(), bytes.size());
+		for (const auto &file : {std::make_pair(path, &bytes), std::make_pair(tool_path, &tool)}) {
+			std::ofstream o(file.first, std::ios::binary);
+			o.write(reinterpret_cast<const char *>(file.second->data()), static_cast<std::streamsize>(file.second->size()));
+			std::printf("wrote %s (%zu bytes)\n", file.first.c_str(), file.second->size());
+		}
 		return 0;
 	}
+	std::vector<uint8_t> committed_tool;
+	if (!expect(test_io::read_file(tool_path, committed_tool), "committed fixtures/sbf/tool_bank.sbf missing; run with --write"))
+		return 1;
+	if (!test_io::is_lfs_pointer(committed_tool) &&
+	    !expect(committed_tool == tool, "tool_bank.sbf differs from the generator output; regenerate with --write"))
+		return 1;
 	std::vector<uint8_t> committed;
 	if (!expect(test_io::read_file(path, committed), "committed fixtures/sbf/synth_gamemus.sbf missing; run with --write")) return 1;
 	if (test_io::is_lfs_pointer(committed)) {

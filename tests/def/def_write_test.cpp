@@ -8,22 +8,20 @@
 // write; a name whose closing quote is missing reads to the end of the line as the
 // retail tokenizer reads it, and a weapon or action name needs no quotes and ends its
 // keyword at a comma or a quote as at a space; jox01's bare `attrib:`, effect-only particle
-// slot and addeweap placeholder tail read as the game reads them; and, with a JO install
-// configured, the three retail catalogs (the base's and each installed expansion's) and the
-// retail powerup.def parse with zero blocking findings and
-// write back, the powerup table's canonical form a fixed point (written, parsed, written
-// again: the same bytes and the same rows). The numbers an
+// slot and addeweap placeholder tail read as the game reads them; and the corpus catalogs
+// (fixtures/def/corpus: every key JO:CA's items, weapon and ammo catalogs and its jox01
+// expansion's use, in their forms, with the lines the game reads nothing of; as authored and
+// ending in the shipped files' NUL) and a powerup.def in the shipped one's shape parse with zero
+// blocking findings and write back, the powerup table's canonical form a fixed point (written,
+// parsed, written again: the same bytes and the same rows). The numbers an
 // editor shows in the units the file writes them (def_authored_get / def_authored_set, ADR
 // 0046 S12 D5) read as the saved line's arguments, and a set of what one shows leaves its
 // record byte for byte as it was, directly and after another number went through the line,
-// over the inline catalogs, the items fixture and the three retail catalogs.
+// over the inline catalogs, the items fixture and the corpus catalogs.
 #include <formats/def/def_scan.h>
 #include <formats/def/def_write.h>
 #include <formats/def/def_write_record.h>
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_paths.h"
 
 #include <algorithm>
@@ -1202,8 +1200,7 @@ int numbers_at_both_precisions() {
 	return wrong ? 1 : 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	for (const auto &empty : {def_write_items({}), def_write_weapons({}), def_write_ammo({})})
 		if (!empty.ok() || empty.text.empty()) ++failures; // runtime reads distinguish empty payloads from empty tables
@@ -1389,113 +1386,108 @@ int main(int argc, char **argv) {
 	failures += refused("items.def", "begin \"Bad\"\r\nhp twelve\r\nend\r\n");
 	failures += refused("items.def", "begin \"Partial\"\r\naddeweap ewep01 100201 15 37\r\nend\r\n");
 
-	const std::string root = retail::install();
-	if (root.empty()) retail::skip_leg("def_write retail corpus needs OPENNOVA_JO_DIR");
-	else {
-		opennova::Vfs vfs;
-		vfs.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-		if (!vfs.mount_game(root, "", opennova::VfsMountMode::Packed)) return 1;
-		// The base catalogs, then each installed expansion's (what `/exp <name>` serves: JO:CA's
-		// jox01, whose items.def carries bare `attrib:` lines, effect-only particle slots and
-		// addeweap placeholder text, ADR 0046 S16).
-		const auto catalogs = [&](opennova::Vfs &mounted, const std::string &label) {
-			for (const char *family : {"items.def", "weapon.def", "ammo.def"}) {
-				std::vector<uint8_t> bytes;
-				if (!mounted.read_file(family, bytes)) { std::printf("Cannot read %s%s\n", label.c_str(), family); ++failures; continue; }
-				// Every retail catalog must open in the editor: nothing blocking, and the
-				// canonical rewrite must succeed. Ignored lines are counted for the record.
-				const Outcome out = run(family, bytes);
-				std::map<std::string, int> ignored;
-				for (const auto &d : out.diagnostics) ++ignored[d.field];
-				std::printf("%s%s: %zu records, %zu ignored line(s), %s\n", label.c_str(), family, out.count, out.ignored(),
-				            out.written.ok() ? "written" : "REFUSED");
-				for (const auto &[key, n] : ignored) std::printf("  ignored %s: %d\n", key.c_str(), n);
-				if (out.blocking() || !out.written.ok()) {
-					for (const auto &d : out.diagnostics)
-						if (d.blocks()) std::printf("  BLOCKING line %zu %s.%s: %s\n", d.line, d.record.c_str(), d.field.c_str(), d.message.c_str());
-					for (const auto &d : out.written.diagnostics)
-						std::printf("  write %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
-					++failures;
-				}
-				// Every number the Inspector shows in written units reads back from the line
-				// the saved file writes, and a set of it leaves the record as it was.
-				failures += authored_catalog(family, bytes, true);
-				// A save after one field changed changes that one line of what a save before it writes: an
-				// item's hp, a weapon's clipsize, an ammo's velocity, each on the first record that holds one.
-				const auto layout = [&](const DefWriteResult &before, const DefWriteResult &after, const char *what) {
-					const size_t changed = lines_differing(before.text, after.text);
-					std::printf("%s%s: one %s changed, %zu line(s) of the save change\n", label.c_str(), family, what, changed);
-					if (!before.ok() || !after.ok() || changed != 1) ++failures;
-				};
-				if (std::strcmp(family, "items.def") == 0) {
-					DefItemsFile parsed{};
-					def_parse_items_memory(bytes.data(), bytes.size(), &parsed, nullptr);
-					const DefWriteResult before = def_write_items(parsed);
-					// No retail item text holds a space (the writer would quote it for the game's tokenizer,
-					// where our parser kept the rest of the line): a quote is a block header's alone.
-					size_t quoted = 0;
-					for (size_t at = before.text.find('"'); at != std::string::npos; at = before.text.find('"', at + 1)) {
-						const size_t line = before.text.rfind('\n', at) + 1;
-						if (before.text.compare(line, 6, "begin ") != 0) ++quoted;
-					}
-					if (quoted) {
-						std::printf("FAIL %sitems.def: %zu quote(s) outside a begin line\n", label.c_str(), quoted);
-						++failures;
-					}
-					for (size_t i = 0; i < parsed.count; ++i)
-						if (parsed.entries[i].hp > 0) {
-							parsed.entries[i].hp += 1;
-							break;
-						}
-					layout(before, def_write_items(parsed), "hp");
-					def_free_items(&parsed);
-				} else if (std::strcmp(family, "weapon.def") == 0) {
-					DefWeaponsFile parsed{};
-					def_parse_weapons_memory(bytes.data(), bytes.size(), &parsed, nullptr);
-					const DefWriteResult before = def_write_weapons(parsed);
-					for (size_t i = 0; i < parsed.count; ++i)
-						if (parsed.entries[i].clipsize > 0) {
-							parsed.entries[i].clipsize += 1;
-							break;
-						}
-					layout(before, def_write_weapons(parsed), "clipsize");
-					def_free_weapons(&parsed);
-				} else {
-					DefAmmoFile parsed{};
-					def_parse_ammo_memory(bytes.data(), bytes.size(), &parsed, nullptr);
-					const DefWriteResult before = def_write_ammo(parsed);
-					for (size_t i = 0; i < parsed.count; ++i)
-						if (parsed.entries[i].velocity > 0) {
-							parsed.entries[i].velocity += 1;
-							break;
-						}
-					layout(before, def_write_ammo(parsed), "velocity");
-					def_free_ammo(&parsed);
-				}
-			}
-		};
-		catalogs(vfs, "");
-		for (const std::string &expansion : retail::expansions()) {
-			opennova::Vfs served;
-			served.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-			if (!served.mount_game(root, expansion, opennova::VfsMountMode::Packed)) return 1;
-			catalogs(served, "/exp " + expansion + ": ");
+	// The corpus catalogs (fixtures/def/corpus: every key JO:CA's catalogs and its jox01 expansion's use, in the
+	// forms the shipped files write them in, with the lines the game reads nothing of), each as authored and ending
+	// in the NUL the shipped catalogs end in (ammo's right after its last `end`): nothing blocking, the canonical
+	// rewrite succeeds, every number the Inspector shows reads back from the saved line, one field changed changes
+	// one line of the save, and no item text outside a header is quoted.
+	const std::string corpus = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/corpus/";
+	const auto catalog = [&](const char *family, const std::vector<uint8_t> &bytes, const std::string &label) {
+		const Outcome out = run(family, bytes);
+		std::map<std::string, int> ignored;
+		for (const auto &d : out.diagnostics) ++ignored[d.field];
+		std::printf("%s%s: %zu records, %zu ignored line(s), %s\n", label.c_str(), family, out.count, out.ignored(),
+		            out.written.ok() ? "written" : "REFUSED");
+		for (const auto &[key, n] : ignored) std::printf("  ignored %s: %d\n", key.c_str(), n);
+		if (out.blocking() || !out.written.ok() || out.count == 0) {
+			for (const auto &d : out.diagnostics)
+				if (d.blocks()) std::printf("  BLOCKING line %zu %s.%s: %s\n", d.line, d.record.c_str(), d.field.c_str(), d.message.c_str());
+			for (const auto &d : out.written.diagnostics)
+				std::printf("  write %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
+			++failures;
 		}
-		// The powerup table opens with nothing blocking and writes; its canonical form written again
-		// is the same text (the writer compares the rows it parses back).
-		std::vector<uint8_t> powerup;
-		if (!vfs.read_file("powerup.def", powerup)) { std::printf("Cannot read powerup.def\n"); return 1; }
+		failures += authored_catalog(family, bytes, true);
+		const auto layout = [&](const DefWriteResult &before, const DefWriteResult &after, const char *what) {
+			const size_t changed = lines_differing(before.text, after.text);
+			std::printf("%s%s: one %s changed, %zu line(s) of the save change\n", label.c_str(), family, what, changed);
+			if (!before.ok() || !after.ok() || changed != 1) ++failures;
+		};
+		if (std::strcmp(family, "items.def") == 0) {
+			DefItemsFile parsed{};
+			def_parse_items_memory(bytes.data(), bytes.size(), &parsed, nullptr);
+			const DefWriteResult before = def_write_items(parsed);
+			// No item text holds a space (the writer would quote it for the game's tokenizer, where our parser kept
+			// the rest of the line): a quote is a block header's alone.
+			size_t quoted = 0;
+			for (size_t at = before.text.find('"'); at != std::string::npos; at = before.text.find('"', at + 1)) {
+				const size_t line = before.text.rfind('\n', at) + 1;
+				if (before.text.compare(line, 6, "begin ") != 0) ++quoted;
+			}
+			if (quoted) {
+				std::printf("FAIL %sitems.def: %zu quote(s) outside a begin line\n", label.c_str(), quoted);
+				++failures;
+			}
+			for (size_t i = 0; i < parsed.count; ++i)
+				if (parsed.entries[i].hp > 0) {
+					parsed.entries[i].hp += 1;
+					break;
+				}
+			layout(before, def_write_items(parsed), "hp");
+			def_free_items(&parsed);
+		} else if (std::strcmp(family, "weapon.def") == 0) {
+			DefWeaponsFile parsed{};
+			def_parse_weapons_memory(bytes.data(), bytes.size(), &parsed, nullptr);
+			const DefWriteResult before = def_write_weapons(parsed);
+			for (size_t i = 0; i < parsed.count; ++i)
+				if (parsed.entries[i].clipsize > 0) {
+					parsed.entries[i].clipsize += 1;
+					break;
+				}
+			layout(before, def_write_weapons(parsed), "clipsize");
+			def_free_weapons(&parsed);
+		} else {
+			DefAmmoFile parsed{};
+			def_parse_ammo_memory(bytes.data(), bytes.size(), &parsed, nullptr);
+			const DefWriteResult before = def_write_ammo(parsed);
+			for (size_t i = 0; i < parsed.count; ++i)
+				if (parsed.entries[i].velocity > 0) {
+					parsed.entries[i].velocity += 1;
+					break;
+				}
+			layout(before, def_write_ammo(parsed), "velocity");
+			def_free_ammo(&parsed);
+		}
+	};
+	for (const char *family : {"items.def", "weapon.def", "ammo.def"}) {
+		std::vector<uint8_t> bytes = test_io::read_file(corpus + family);
+		if (bytes.empty()) {
+			std::printf("FAIL cannot read %s%s\n", corpus.c_str(), family);
+			++failures;
+			continue;
+		}
+		catalog(family, bytes, "corpus ");
+		// As shipped: the walk drops the NUL the file ends in.
+		if (std::strcmp(family, "ammo.def") == 0)
+			while (!bytes.empty() && (bytes.back() == '\n' || bytes.back() == '\r')) bytes.pop_back();
+		bytes.push_back(0);
+		catalog(family, bytes, "corpus + NUL ");
+	}
+	// The powerup table in the shipped one's shape opens with nothing blocking and writes; its canonical form
+	// written again is the same text (the writer compares the rows it parses back).
+	{
+		std::vector<uint8_t> powerup = test_io::read_file(corpus + "powerup.def");
+		powerup.push_back(0);
 		const Outcome first = run("powerup.def", powerup);
 		const Outcome second = run("powerup.def", first.written.text.c_str());
 		std::printf("powerup.def: %zu records, %zu ignored line(s), %s\n", first.count, first.ignored(),
 		            first.written.ok() ? "written" : "REFUSED");
-		if (first.blocking() || !first.written.ok() || first.count == 0 || !second.written.ok() ||
+		if (first.blocking() || !first.written.ok() || first.count != 4 || !second.written.ok() ||
 		    second.written.text != first.written.text || second.count != first.count || !second.diagnostics.empty()) {
 			for (const auto &d : first.diagnostics)
 				if (d.blocks()) std::printf("  BLOCKING line %zu %s.%s: %s\n", d.line, d.record.c_str(), d.field.c_str(), d.message.c_str());
 			for (const auto &d : first.written.diagnostics)
 				std::printf("  write %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
-			std::printf("FAIL retail powerup.def is no fixed point\n");
+			std::printf("FAIL the corpus powerup.def is no fixed point\n");
 			++failures;
 		}
 	}

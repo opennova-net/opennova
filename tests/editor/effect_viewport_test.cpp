@@ -1,7 +1,7 @@
 // DI-14 (ADR 0046, the deep-integration plan's particle effect preview): a particle file's effect played
 // through the engine's own effect scene (the reader's places, each effect's block and its id's place, are
 // formats/particle's: tests/particle/particle_effect_places_test; the closure's, runtime/particle/effect_closure,
-// tests/particle/particle_effect_closure_test, with its retail leg over the install's catalog). The playback
+// tests/particle/particle_effect_closure_test, over a catalog of the shipped files' cross-file shapes). The playback
 // (preview/effect_playback): spawned once at tick 0, stepped a tick at a time (one call or many alike),
 // left dead as it dies, a jump or Replay spawning it pre-aged (bounded by the engine's catch-up), the wind. The particle type (documents/particle_type): the
 // reader's stop and a duplicate effect as findings at their places. The kinds'
