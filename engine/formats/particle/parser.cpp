@@ -195,7 +195,8 @@ ParticleDef particle_defaults() {
 // clears a bit an earlier line set (a repeated line; a graphic's line over the entry its graphicN
 // line copied). That modifier is `reverse` (0x02) or `inverse` (0x01) without case, and no other
 // word: `invert`, which NovaLogic's writers spell bit 0x01 (CurveRef_ModifierSuffix @ 0x42bf60;
-// SoundBank_BuildFlagString @ 0x5e28d0), is none to the game, so `table2 invert` reads as `table2`.
+// ParticleCurve_BuildModifierString @ 0x5e28d0), is none to the game, so `table2 invert` reads as
+// `table2`.
 // Retail reads that one token alone; the port reads every modifier after the id in either order,
 // stopping at the first that is neither (D-PTL-20) [orig: CParticleDef_ParseProperties
 // @ 0x5eb000..0x5eb07a (scale_func: the id copied over the entry, _stricmp "reverse" @ 0x5eb051 then

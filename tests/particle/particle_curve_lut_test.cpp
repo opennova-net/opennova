@@ -237,7 +237,7 @@ bool test_the_row_count_outlives_the_file() {
 bool test_curve_modifiers_are_the_readers_words() {
 	// The word after a curve's table id is a modifier only as `reverse` or `inverse`, without case [orig:
 	// CParticleDef_ParseProperties @ 0x5eb051 / @ 0x5eb06a, _stricmp]: `invert`, the word NovaLogic's writers spell
-	// bit 0x01 (SoundBank_BuildFlagString @ 0x5e28d0), is none, so rocket2.ptl's `scale_func = smokeContrail invert;`
+	// bit 0x01 (ParticleCurve_BuildModifierString @ 0x5e28d0), is none, so rocket2.ptl's `scale_func = smokeContrail invert;`
 	// loads uninverted. The port reads on past a modifier (D-PTL-20) and stops at the first word that is neither.
 	// A quoted id holding a blank is the playback-flag path, which finds `reverse` and `invert` in what follows the
 	// blank, with case [orig: ParticleDef_ParsePlaybackFlags @ 0x5e2990, strstr @ 0x5e29b9 / @ 0x5e29d0].

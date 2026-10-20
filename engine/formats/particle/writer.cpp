@@ -34,10 +34,11 @@ void write_vec3(std::ostream &out, const Vec3 &v) {
 
 // The modifier words after a curve's table id: bit 0x01 " inverse", then bit 0x02 " reverse", the
 // order NovaLogic's writers use [orig: CurveRef_ModifierSuffix @ 0x42bf60 (ParticleEdit_v1_1.exe);
-// SoundBank_BuildFlagString @ 0x5e28d0, called from CParticleDef_SaveToFile @ 0x5e5109]. Those spell
-// bit 0x01 " invert", a word the game's reader takes for no modifier (it compares the token after the
-// id with "reverse" and "inverse" alone [orig: CParticleDef_ParseProperties @ 0x5eb051 / @ 0x5eb06a]),
-// so a curve they write inverted loads uninverted; ours writes the word the reader takes (D-PTL-20).
+// ParticleCurve_BuildModifierString @ 0x5e28d0, called from CParticleDef_SaveToFile @ 0x5e5109].
+// Those spell bit 0x01 " invert", a word the game's reader takes for no modifier (it compares the
+// token after the id with "reverse" and "inverse" alone [orig: CParticleDef_ParseProperties
+// @ 0x5eb051 / @ 0x5eb06a]), so a curve they write inverted loads uninverted; ours writes the word
+// the reader takes (D-PTL-20).
 std::string format_curve_suffix(const CurveRef &ref) {
 	std::string out;
 	if (ref.inverse) out += " inverse";
