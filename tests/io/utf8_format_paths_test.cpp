@@ -103,7 +103,7 @@ int main() {
 
 	// A particle file: particle::load_particles_from_file.
 	{
-		const std::string text = "[effectdef]\n{\n\tid = fx;\n\tpdefs = p1;\n}\n\n";
+		const std::string text = "[effectdef]\r\n{\r\n\tid = fx;\r\n\tpdefs = p1;\r\n}\r\n\r\n";
 		const std::string path = io::utf8_join(dir, "t.ptl");
 		expect(io::write_file_atomic(path, text, error), "the particle file is written");
 		particle::ParticleFile effects;

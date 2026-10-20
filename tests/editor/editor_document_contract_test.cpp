@@ -633,8 +633,10 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::MusicScript, "two.bin", music_in_two_chunks(file("mus/synth_gamemus.bin"))},
 	        {AssetKind::Credits, "spaced.kda", file("cbin/synth_nlist.kda")},
 	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
-	        // A particle file the effect system's reader stops in (DI-14: particle.unreadable).
-	        {AssetKind::Particles, "open.ptl", text_bytes("[effectdef]\n{\n\tid = OPEN;\n")},
+	        // A particle file that defines an effect twice (DI-14: particle.duplicate_effect).
+	        {AssetKind::Particles, "twice.ptl",
+	         text_bytes("[effectdef]\r\n{\r\n\tid = TWICE;\r\n\tpdefs = a;\r\n}\r\n"
+	                    "[effectdef]\r\n{\r\n\tid = twice;\r\n\tpdefs = b;\r\n}\r\n")},
 	        // An avatar table the avatar reader notes a duplicate nationality in (S23 B: avatars.ignored_input).
 	        {AssetKind::AvatarDefs, "Avatars.def",
 	         text_bytes("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n")},

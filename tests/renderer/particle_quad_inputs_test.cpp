@@ -2,12 +2,15 @@
 // builders (CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 and its two
 // siblings; docs/particles/ptl-format-re.md), pinned on witnessed values: the
 // scale blend's weights (D-PTL-35) and the colour curves' and tint's
-// truncations (D-PTL-36) each have a vector off their midpoint.
+// truncations (D-PTL-36) each have a vector off their midpoint, and the scale
+// blend's last sample reads the TableDef's transform-flags byte (D-PTL-11).
 
 #include <runtime/renderer/particle_quad_inputs.h>
 
+#include <formats/particle/particle.h>
 #include <runtime/renderer/particle_color.h>
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 
@@ -78,8 +81,10 @@ void colour_luts_read_the_raw_byte_at_the_truncated_phase() {
 			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
 	check(wrapped.primary_color == out.primary_color, "phase 266 reads index 10");
 
-	// A curve bit with no baked LUT leaves the channel; a graphic without its
-	// own LUT reads the definition's.
+	// A curve bit with no baked LUT leaves the channel; the builders read the
+	// graphic's LUT pointers alone, so a definition's LUT the graphic does not
+	// hold draws nothing (the graphicN line copies it, parser.cpp) [orig:
+	// CParticleEmitter_BuildBillboardQuads @ 0x5e701a, graphic+0x1E0].
 	p::GraphicLayer bare;
 	bare.present = true;
 	p::ParticleDef with_def_curve;
@@ -87,12 +92,12 @@ void colour_luts_read_the_raw_byte_at_the_truncated_phase() {
 	particle.curve_phase = 3.0f;
 	const r::ParticleQuadInputs from_def =
 			r::particle_quad_inputs(particle, with_def_curve, bare, false, {}, kIdentityView);
-	check(byte_at(from_def.primary_color, 24) == 63, "the def's LUT: (64 * 255) >> 8 = 63");
+	check(byte_at(from_def.primary_color, 24) == 255, "the def's LUT alone is no curve: alpha stays 255");
 	check(byte_at(from_def.primary_color, 16) == 255, "red's bit with no LUT anywhere is 1.0");
 	bake(bare.alpha_func, 128);
 	const r::ParticleQuadInputs own =
 			r::particle_quad_inputs(particle, with_def_curve, bare, false, {}, kIdentityView);
-	check(byte_at(own.primary_color, 24) == 127, "the graphic's own LUT wins over the def's");
+	check(byte_at(own.primary_color, 24) == 127, "the graphic's own LUT draws: (128 * 255) >> 8");
 }
 
 // The scale curve lerps two bytes by the phase fraction, / 128, then x 0.5
@@ -113,13 +118,6 @@ void scale_lut_lerps_into_the_half_extent() {
 			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
 	check(near(mid.half_extent, 2.0f), "(64 + 192) / 2 / 128 x 4 x 0.5 = 2");
 
-	// The last sample: retail reads one byte past the table, the port clamps
-	// to lut[255] (D-PTL-11).
-	particle.curve_phase = 255.5f;
-	const r::ParticleQuadInputs last =
-			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
-	check(near(last.half_extent, 4.0f * 200.0f / 128.0f * 0.5f), "lut[255] clamps the i + 1 read");
-
 	// Off the midpoint: lut[i+1] by 1 - frac, lut[i] by frac, 192 x 0.75 +
 	// 64 x 0.25 = 160 -> 160 / 128 x 4 x 0.5 = 2.5 (D-PTL-35; the swapped
 	// weights gave 96 -> 1.5). At phase 20.0 the blend reads lut[21] whole.
@@ -136,6 +134,75 @@ void scale_lut_lerps_into_the_half_extent() {
 	const r::ParticleQuadInputs unscaled =
 			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
 	check(near(unscaled.half_extent, 2.0f), "no ScaleCurve bit: size x 0.5");
+}
+
+// The last sample, i = 255: retail's lut[i + 1] read (@ 0x5e70e7) lands one
+// byte past the LUT (TableDef+0x148) on TableDef+0x248, the low byte of the
+// transform flags: 0 for a base table (CParticleTableDef_Construct
+// @ 0x5e26d4), the reference's mask for the transformed clone
+// (sub_5E80F0 @ 0x5e80fc), inverse 0x01 and reverse 0x02 (D-PTL-11).
+void the_last_scale_sample_blends_toward_the_table_flags() {
+	p::ParticleDef definition;
+	p::GraphicLayer graphic;
+	graphic.present = true;
+	bake(graphic.scale_func, 0);
+	graphic.scale_func.baked_lut[255] = 200;
+	p::Particle particle = white_particle();
+	particle.flags = p::particle_runtime_flag::ScaleCurve;
+	auto extent_of = [&](const p::ParticleDef &def, const p::GraphicLayer &layer, float phase) {
+		particle.curve_phase = phase;
+		return r::particle_quad_inputs(particle, def, layer, false, {}, kIdentityView).half_extent;
+	};
+	auto half_extent_at = [&](float phase) { return extent_of(definition, graphic, phase); };
+
+	// A base curve blends toward 0: 0 x 0.5 + 200 x 0.5 = 100 -> 100 / 128 x 4
+	// x 0.5 = 1.5625 (the clamp to lut[255] gave 3.125); at frac 0 the quad
+	// is the flags byte whole, 0; at frac 0.75, 150 -> 2.34375.
+	check(near(half_extent_at(255.5f), 1.5625f), "a base curve's last sample blends toward 0");
+	check(near(half_extent_at(255.0f), 0.0f), "frac 0 at i = 255 reads the base flags byte whole");
+	check(near(half_extent_at(255.75f), 2.34375f), "lut[255] by frac at a three-quarter phase");
+	// A NEVERAGE particle's phase wraps; each cycle's index 255 reads the same byte.
+	check(near(half_extent_at(511.5f), 1.5625f), "phase 511.5 is index 255 again");
+
+	// A transformed clone blends toward its mask: reverse 2 -> 101, inverse 1
+	// -> 100.5, both 3 -> 101.5 at frac 0.5; both at frac 0 is 3 / 128 x 2.
+	graphic.scale_func.reverse = true;
+	check(near(half_extent_at(255.5f), 1.578125f), "reverse: (2 + 200) / 2 / 128 x 2");
+	graphic.scale_func.reverse = false;
+	graphic.scale_func.inverse = true;
+	check(near(half_extent_at(255.5f), 1.5703125f), "inverse: (1 + 200) / 2 / 128 x 2");
+	graphic.scale_func.reverse = true;
+	check(near(half_extent_at(255.5f), 1.5859375f), "inverse reverse: (3 + 200) / 2 / 128 x 2");
+	check(near(half_extent_at(255.0f), 0.046875f), "frac 0 reads the mask 3 whole");
+	// Below the last sample the next byte is the LUT's own.
+	graphic.scale_func.baked_lut[254] = 100;
+	check(near(half_extent_at(254.5f), 2.34375f), "i = 254 reads lut[255]: (200 + 100) / 2");
+
+	// Through the resolve: the bare `grow` reference reads the base table
+	// (lut[255] = flat[255] = 200, flags 0), `grow reverse inverse` the
+	// transformed clone (lut[i] = 255 - flat[255 - i], so lut[255] = 255 - 55
+	// = 200) and its mask 3.
+	p::TableDef grow;
+	grow.id = "grow";
+	grow.rows.assign(32, std::array<std::uint8_t, 8>{});
+	grow.rows[0][0] = 55;
+	grow.rows[31][7] = 200;
+	p::ParticleDef resolved;
+	resolved.graphics[0].present = true;
+	resolved.graphics[0].scale_func.present = true;
+	resolved.graphics[0].scale_func.name = "grow";
+	resolved.graphics[0].scale_func.reverse = true;
+	resolved.graphics[0].scale_func.inverse = true;
+	resolved.graphics[1].present = true;
+	resolved.graphics[1].scale_func.present = true;
+	resolved.graphics[1].scale_func.name = "grow";
+	p::bake_particle_def_curves(resolved, { grow });
+	check(resolved.graphics[0].scale_func.baked && resolved.graphics[1].scale_func.baked,
+			"both references resolve");
+	check(near(extent_of(resolved, resolved.graphics[0], 255.5f), 1.5859375f),
+			"the baked clone's last sample blends toward its mask 3");
+	check(near(extent_of(resolved, resolved.graphics[1], 255.5f), 1.5625f),
+			"the base table's last sample blends toward its flags 0");
 }
 
 // The manager tint `(c * tint) >> 7`, saturated, picked by the definition's
@@ -290,6 +357,7 @@ void lit_quads_carry_the_light_and_the_colour() {
 int main() {
 	colour_luts_read_the_raw_byte_at_the_truncated_phase();
 	scale_lut_lerps_into_the_half_extent();
+	the_last_scale_sample_blends_toward_the_table_flags();
 	the_tint_pick_and_its_saturation();
 	the_flipbook_clock();
 	the_topalign_roll();

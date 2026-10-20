@@ -10,11 +10,11 @@ namespace opennova::particle {
 
 namespace {
 
-// Engine writers (CParticleDef_SaveToFile @ 0x5e4d70 et al.) use plain "\n" in
-// fprintf format strings; the OS may translate to CRLF in text-mode stdio.
-// We emit LF only — consumers can convert if they need CRLF for parity with
-// captured corpus.
-constexpr const char *NL = "\n";
+// CR LF: the engine writers' "\n" (CParticleDef_SaveToFile @ 0x5e4d70 et al.)
+// as every shipped file has it, and the only line end the game's reader cuts
+// at [orig: File_ParseASCIIFile @ 0x53D8DE]: a text of LF line ends is one
+// line to it.
+constexpr const char *NL = "\r\n";
 
 std::string format_float(float value) {
 	char buffer[32];
@@ -32,15 +32,15 @@ void write_vec3(std::ostream &out, const Vec3 &v) {
 	out << format_float(v.x) << ", " << format_float(v.y) << ", " << format_float(v.z);
 }
 
-// [orig: CurveRef_ModifierSuffix @ 0x42bf60 (ParticleEdit_v1_1.exe)]; JO's suffix writer in
-// [orig: CParticleDef_SaveToFile @ 0x5e4d70]
-// The engine writer maps modifier bit 0x01 -> " invert", bit 0x02 ->
-// " reverse", and both -> " invert reverse". Its parser spells the first token
-// "inverse" instead; our parser accepts both spellings so retail writer output
-// remains round-trippable.
+// The modifier words after a curve's table id: bit 0x01 " inverse", then bit 0x02 " reverse", the
+// order NovaLogic's writers use [orig: CurveRef_ModifierSuffix @ 0x42bf60 (ParticleEdit_v1_1.exe);
+// SoundBank_BuildFlagString @ 0x5e28d0, called from CParticleDef_SaveToFile @ 0x5e5109]. Those spell
+// bit 0x01 " invert", a word the game's reader takes for no modifier (it compares the token after the
+// id with "reverse" and "inverse" alone [orig: CParticleDef_ParseProperties @ 0x5eb051 / @ 0x5eb06a]),
+// so a curve they write inverted loads uninverted; ours writes the word the reader takes (D-PTL-20).
 std::string format_curve_suffix(const CurveRef &ref) {
 	std::string out;
-	if (ref.inverse) out += " invert";
+	if (ref.inverse) out += " inverse";
 	if (ref.reverse) out += " reverse";
 	return out;
 }
@@ -121,8 +121,12 @@ void write_graphic(std::ostream &out, const GraphicLayer &layer, int slot) {
 	out << prefix << "scale\t= " << format_float(layer.scale) << ";" << NL;
 	out << prefix << "scale_adj\t= " << format_float(layer.scale_adj) << ";" << NL;
 
-	// CurveRef::present is the serialization gate. A graphic can author a
-	// curve without a particle-level fallback, so each layer is independent.
+	// The layer's own curve entries, the ones its graphicN line copied from the
+	// particle among them, as the game's writer writes each layer's [orig:
+	// CParticleDef_SaveToFile @ 0x5e55ac..0x5e56d1, the layer's name and mask];
+	// it writes one only under a particle-level curve of the channel, where this
+	// writes every entry the layer holds (CurveRef::present), so a save keeps a
+	// layer curve whose channel the particle lacks (D-PTL-40).
 	write_curve_line(out, prefix.c_str(), "scale_func", layer.scale_func);
 	write_curve_line(out, prefix.c_str(), "alpha_func", layer.alpha_func);
 	write_curve_line(out, prefix.c_str(), "red_func", layer.red_func);

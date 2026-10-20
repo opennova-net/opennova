@@ -65,6 +65,19 @@ inline bool particle_def_is_distortion_class(const ParticleDef &definition) noex
 	return definition.graphics[0].blend_mode == BlendMode::Distort;
 }
 
+// The scale curve's blended LUT byte (128 = 1.0) at LUT index `lut_index`
+// (the curve phase truncated, mod 256) and the phase's fraction, as every
+// retail scale read takes it: the three billboard builders and the
+// USEPARENTSCALE inherit [orig: CParticleEmitter_BuildBillboardQuads
+// @ 0x5e70d4..0x5e710c; CParticleEmitter_RenderStaticBillboards
+// @ 0x5f51a7..0x5f51dd; CParticleEmitter_RenderTopAlignedBillboards
+// @ 0x5f5b59..0x5f5b8f; CParticleEmitter_SpawnParticle @ 0x5e7eb5..0x5e7efc].
+// The NEXT byte takes 1 - fraction and the index byte the fraction (D-PTL-35),
+// and at index 255 the next byte is the one past the 256-byte LUT: the low
+// byte of the resolved TableDef's transform flags, 0 for a base curve and the
+// inverse/reverse mask for a transformed one (D-PTL-11).
+float particle_scale_curve_blend(const CurveRef &curve, int lut_index, float fraction) noexcept;
+
 struct Particle;
 // Borrowed for one simulation advance; an absent field leaves ordinary effects unchanged.
 class ParticleForceField {
@@ -112,7 +125,7 @@ struct Particle {
 	// graphic layer: `graphic.scale + graphic.scale_adj * rand_signed`
 	// [orig: CParticleEmitter_SpawnParticle @ 0x5e7862 — graphic+328/+332 into
 	// particle+0x38]. The renderer's quad half-extent is
-	// `0.5 * size * (ScaleCurve ? scale_lut_lerp(phase) / 128 : 1)`
+	// `0.5 * size * (ScaleCurve ? particle_scale_curve_blend(...) / 128 : 1)`
 	// [orig: CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 — the
 	// flt_7C3DD4 (1/128) * flt_7C3B94 (0.5) chain].
 	float size = 0.0f;

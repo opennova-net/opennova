@@ -51,10 +51,12 @@ std::string table_text(const std::string &id, int value) {
 	return out + "}\n\n";
 }
 
+// The text as the game's reader takes it, its lines ended CR LF.
 particle::ParticleFile parsed(const std::string &text) {
+	const std::string crlf = opennova::strutil::normalized_crlf_line_ends(text);
 	particle::ParticleFile file;
 	particle::ParseError error;
-	particle::load_particles_from_buffer(text.data(), text.size(), file, error);
+	particle::load_particles_from_buffer(crlf.data(), crlf.size(), file, error);
 	return file;
 }
 
@@ -196,6 +198,8 @@ int test_retail() {
 	opennova::ResourceIndex index;
 	TEST_EXPECT(index.scan(install));
 	std::vector<particle::EffectCatalogDocument> documents;
+	// One reader state through the files in the effect system's order, as the game reads them.
+	particle::ParticleReadState state;
 	for (const std::string &name : index.effect_files()) {
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(index.read_file(name, bytes));
@@ -203,7 +207,7 @@ int test_retail() {
 		read.source = name;
 		particle::ParseError error;
 		if (!particle::load_particles_from_buffer(reinterpret_cast<const char *>(bytes.data()), bytes.size(), read.file,
-		                                          error)) {
+		                                          state, error)) {
 			std::printf("retail: %s does not read (%s, line %d)\n", name.c_str(), error.message.c_str(), error.line);
 			continue;
 		}

@@ -58,26 +58,26 @@ namespace {
 // graphic `graphic` (none: no layer), its child `child`.
 std::string particle_text(const std::string &id, float dur, float rate, float age, const std::string &graphic = "",
                           const std::string &child = "", const std::string &flags = "") {
-	std::string out = "[particledef]\n{\n\tid = " + id + ";\n";
-	if (!child.empty()) out += "\tchild_id = " + child + ";\n";
-	if (!flags.empty()) out += "\tflags = " + flags + ";\n";
-	out += "\temit_dur = " + std::to_string(dur) + ";\n\temit_rate = " + std::to_string(rate) +
-	       ";\n\temit_burst = 1;\n\tage = " + std::to_string(age) + ";\n\tscale = 0.5;\n\tspeed = 2.0;\n\tspread = 30.0;\n"
-	       "\tgravity = 1.0;\n\tscale_func = grow;\n";
-	if (!graphic.empty()) out += "\tgraphic1 = " + graphic + ", additive;\n";
-	return out + "}\n\n";
+	std::string out = "[particledef]\r\n{\r\n\tid = " + id + ";\r\n";
+	if (!child.empty()) out += "\tchild_id = " + child + ";\r\n";
+	if (!flags.empty()) out += "\tflags = " + flags + ";\r\n";
+	out += "\temit_dur = " + std::to_string(dur) + ";\r\n\temit_rate = " + std::to_string(rate) +
+	       ";\r\n\temit_burst = 1;\r\n\tage = " + std::to_string(age) + ";\r\n\tscale = 0.5;\r\n\tspeed = 2.0;\r\n"
+	       "\tspread = 30.0;\r\n\tgravity = 1.0;\r\n\tscale_func = grow;\r\n";
+	if (!graphic.empty()) out += "\tgraphic1 = " + graphic + ", additive;\r\n";
+	return out + "}\r\n\r\n";
 }
 
 using editor_test::effect_text;
 
 std::string table_text(const std::string &id, int value) {
-	std::string out = "[tabledef]\n{\n\tid = " + id + ";\n";
+	std::string out = "[tabledef]\r\n{\r\n\tid = " + id + ";\r\n";
 	for (int row = 1; row <= 32; ++row) {
 		out += "\ttl" + std::to_string(row) + " =";
 		for (int i = 0; i < 8; ++i) out += std::string(i ? ", " : " ") + std::to_string(value);
-		out += ";\n";
+		out += ";\r\n";
 	}
-	return out + "}\n\n";
+	return out + "}\r\n\r\n";
 }
 
 particle::ParticleFile parsed(const std::string &text) {
@@ -212,16 +212,13 @@ int test_particle_type() {
 		return type->validate_file(*made);
 	};
 	TEST_EXPECT(validate(effect_text("Ok", "Dot") + particle_text("Dot", 0.1f, 1.0f, 1.0f)).empty());
-	// The reader stops at an open block: one finding, at its line.
-	const std::vector<Diagnostic> open = validate(effect_text("Ok", "Dot") + "[particledef]\n{\n\tid = Dot;\n");
-	if (!open.empty()) std::printf("unreadable at %zu:%zu: %s\n", open[0].line, open[0].column, open[0].message.c_str());
-	TEST_EXPECT(open.size() == 1 && open[0].code() == "particle.unreadable" && open[0].severity == DiagnosticSeverity::Warning &&
-	            open[0].line == 10 && open[0].column == 1);
+	// An open block is no finding: the game's reader refuses no text, and registers nothing of the block.
+	TEST_EXPECT(validate(effect_text("Ok", "Dot") + "[particledef]\r\n{\r\n\tid = Dot;\r\n").empty());
 	// An effect defined twice: the second, at its id.
 	const std::vector<Diagnostic> twice = validate(effect_text("Twice", "Dot") + effect_text("twice", "Dot"));
 	TEST_EXPECT(twice.size() == 1 && twice[0].code() == "particle.duplicate_effect" && twice[0].line == 9 &&
 	            twice[0].column == 7 && twice[0].message.find("line 3") != std::string::npos);
-	std::printf("particle type: %s at 10:1, %s at 9:7\n", open[0].code().c_str(), twice[0].code().c_str());
+	std::printf("particle type: %s at 9:7\n", twice.empty() ? "" : twice[0].code().c_str());
 	return 0;
 }
 
@@ -355,7 +352,7 @@ int test_session() {
 	size_t offset = 0;
 	TEST_EXPECT(text->offset_of(1, 1, offset));
 	editor_test::handle_to_end(rig.session,
-	                           request::edit_record(rig.second, TextDocument::replace(text->span_at(0, 0), "\n")));
+	                           request::edit_record(rig.second, TextDocument::replace(text->span_at(0, 0), "\r\n")));
 	rig.pump();
 	TEST_EXPECT(viewport->opens() == opens + 1 && device->last() == ViewportAction::Rebuild);
 	// The symbol moved with the edit (the graph reads the open document through the reader).
@@ -363,13 +360,13 @@ int test_session() {
 	for (const GraphSymbol *symbol : rig.view().findings.graph->symbols_of_kind(ReferenceKind::Particle))
 		if (symbol->display == "Smoke") moved = symbol;
 	TEST_EXPECT(moved && moved->locator == "4:7");
-	// A text the reader stops in: the viewport says where, its effect kept for when it reads again.
+	// An open block at the text's end is nothing the reader registers: the effect plays on, the scene opened
+	// over the text again.
 	const size_t end = text->text().size();
 	editor_test::handle_to_end(rig.session,
-	                           request::edit_record(rig.second, TextDocument::replace(text->span_at(end, 0), "[effectdef]\n{\n")));
+	                           request::edit_record(rig.second, TextDocument::replace(text->span_at(end, 0), "[effectdef]\r\n{\r\n")));
 	rig.pump();
-	TEST_EXPECT(viewport->view_status() == EffectViewStatus::Unreadable && viewport->status() == ViewportStatus::Failed &&
-	            viewport->detail().find("line") != std::string::npos && device->last() == ViewportAction::Clear);
+	TEST_EXPECT(viewport->status() == ViewportStatus::Ready && viewport->shown_effect() == "Smoke");
 	editor_test::handle_to_end(rig.session, request::undo(rig.second));
 	rig.pump();
 	TEST_EXPECT(viewport->status() == ViewportStatus::Ready && viewport->shown_effect() == "Smoke" &&

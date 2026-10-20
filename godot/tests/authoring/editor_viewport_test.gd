@@ -1174,7 +1174,7 @@ func test_a_clip_s_fire_events_fire_the_item_s_ammo() -> void:
 			+ "\tweight_in_grains 62\n\ttracerrate 1\n\ttracer_type 1 2\n\tscar_type 1\n\teffects_table\n"
 			+ "\t\tobj Puff GS_AI 15\n\t\tdirt Puff GS_AI 15\n\tend\n\tai_launch GS_AI\n\tai_launcheffect Puff\nend\n")
 			.to_utf8_buffer())
-	TestFs.write_bytes(self, root.path_join("particles/puff.ptl"), ("[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n"
+	TestFs.write_bytes(self, root.path_join("particles/puff.ptl"), TestFs.crlf("[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n"
 			+ "[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 30;\n\temit_rate = 40;\n\temit_burst = 1;\n"
 			+ "\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n\tgraphic1 = particle_dot.tga, blend;\n"
 			+ "\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n").to_utf8_buffer())

@@ -62,12 +62,13 @@ inline const opennova::io::JsonValue *at(const opennova::io::JsonValue &value, c
 // A particle `id` emitting `rate` a second for `dur` seconds, each living `age` seconds; an effect `id`
 // of the particles `pdefs`.
 inline std::string particle_text(const std::string &id, float dur, float rate, float age) {
-	return "[particledef]\n{\n\tid = " + id + ";\n\temit_dur = " + std::to_string(dur) + ";\n\temit_rate = " +
-			std::to_string(rate) + ";\n\temit_burst = 1;\n\tage = " + std::to_string(age) +
-			";\n\tscale = 0.5;\n\tspeed = 2.0;\n\tspread = 30.0;\n\tgravity = 1.0;\n\tscale_func = grow;\n}\n\n";
+	// CR LF: the only line end the game's reader cuts at.
+	return "[particledef]\r\n{\r\n\tid = " + id + ";\r\n\temit_dur = " + std::to_string(dur) + ";\r\n\temit_rate = " +
+			std::to_string(rate) + ";\r\n\temit_burst = 1;\r\n\tage = " + std::to_string(age) +
+			";\r\n\tscale = 0.5;\r\n\tspeed = 2.0;\r\n\tspread = 30.0;\r\n\tgravity = 1.0;\r\n\tscale_func = grow;\r\n}\r\n\r\n";
 }
 inline std::string effect_text(const std::string &id, const std::string &pdefs) {
-	return "[effectdef]\n{\n\tid = " + id + ";\n\tpdefs = " + pdefs + ";\n}\n\n";
+	return "[effectdef]\r\n{\r\n\tid = " + id + ";\r\n\tpdefs = " + pdefs + ";\r\n}\r\n\r\n";
 }
 
 // The spawns of `source` the definition viewport's effects keep.

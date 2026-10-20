@@ -233,7 +233,7 @@ std::string particle_key_words(const KeyRow &row) {
 	case KeyValueKind::Members: words = "the effect's particles, by id, ',' between"; break;
 	case KeyValueKind::TableRow:
 		words = "the table's next row, eight bytes, each 0 to 255 (the game takes any key holding a 't' as the next "
-		        "row in order, its number aside; OpenNova reads tl1 to tl32 by number, D-PTL-32)";
+		        "row in order, its number aside, a short row's next one going on from its last byte)";
 		break;
 	}
 	if (row.clamped && row.port_bound)
@@ -268,7 +268,15 @@ bool particle_key_value_ok(const KeyRow &row, const std::string &value, std::str
 		return false;
 	}
 	switch (row.value) {
-	case KeyValueKind::Text: return true;
+	case KeyValueKind::Text:
+		// The game's tokenizer ends a word at a blank, a tab or a ',' [orig: Config_TokenizeLine @ 0x53CB60], and the
+		// reader takes one word as the name [orig: CParticleDefEntry_NextToken @ 0x5DFFB0].
+		if (trimmed.find_first_of(" \t,") != std::string::npos) {
+			why = "the game reads a name to its first blank or ',': it reads '" +
+			      trimmed.substr(0, trimmed.find_first_of(" \t,")) + "'";
+			return false;
+		}
+		return true;
 	case KeyValueKind::Real:
 		if (!real(trimmed)) why = not_a_number(trimmed, false);
 		return why.empty();
@@ -304,8 +312,14 @@ bool particle_key_value_ok(const KeyRow &row, const std::string &value, std::str
 	case KeyValueKind::Curve: {
 		const std::vector<std::string> words = words_of(trimmed);
 		for (size_t i = 1; i < words.size(); ++i) {
+			// The game compares the word after the id with these two alone, without case [orig:
+			// CParticleDef_ParseProperties @ 0x5EB051 / @ 0x5EB06A]: `invert`, NovaLogic's editor's word, is none.
 			const std::string word = strutil::to_lower(words[i]);
-			if (word != "reverse" && word != "inverse" && word != "invert") {
+			if (word == "invert") {
+				why = "the game reads no 'invert' (it takes 'inverse'): the curve loads uninverted";
+				return false;
+			}
+			if (word != "reverse" && word != "inverse") {
 				why = "after the table's id the game reads reverse or inverse alone";
 				return false;
 			}
@@ -318,8 +332,14 @@ bool particle_key_value_ok(const KeyRow &row, const std::string &value, std::str
 			why = "a graphic names its texture first";
 			return false;
 		}
+		if (parts[0].find_first_of(" \t") != std::string::npos) {
+			why = "the game reads a texture to its first blank, the word after it as the blend mode";
+			return false;
+		}
 		if (parts.size() > 1) {
-			const std::string blend = strutil::to_lower(parts[1]);
+			// The words are found with case [orig: CParticleDefEntry_ParseBlendMode @ 0x5E29F0, strstr]: "Additive"
+			// is none of them, Blend.
+			const std::string &blend = parts[1];
 			const std::string read = particle::blend_mode_name(particle::parse_blend_mode(blend));
 			if (read != blend) {
 				why = "the game reads the blend mode '" + parts[1] + "' as " + read;
@@ -329,11 +349,18 @@ bool particle_key_value_ok(const KeyRow &row, const std::string &value, std::str
 		return true;
 	}
 	case KeyValueKind::Members:
-		for (const std::string &part : split_values(trimmed, ','))
+		for (const std::string &part : split_values(trimmed, ',')) {
 			if (part.empty()) {
 				why = "an empty member, which the game skips";
 				return false;
 			}
+			// Each word a member of its own: the game's tokenizer ends a word at a blank too [orig: Config_TokenizeLine
+			// @ 0x53CB60; CParticleTableDef_ParseScriptLine @ 0x5E944E..0x5E948B, every word a member].
+			if (part.find_first_of(" \t") != std::string::npos) {
+				why = "the game reads '" + part + "' as a member for each of its words";
+				return false;
+			}
+		}
 		return true;
 	}
 	return true;

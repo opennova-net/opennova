@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
+#include <formats/particle/parser.h>
 #include <formats/particle/particle.h>
 
 #include "particle/particle_effect.h"
@@ -31,6 +32,10 @@ public:
 
 	Error load_from_file(const String &path);
 	Error load_from_buffer(const PackedByteArray &bytes, const String &display_path);
+	// The same read through a reader state an earlier file left: the effect system's files in its
+	// order (opennova::particle::ParticleReadState).
+	Error load_from_buffer_after(const PackedByteArray &bytes, const String &display_path,
+			opennova::particle::ParticleReadState &state);
 	const opennova::particle::ParticleFile &native_file() const { return file_; }
 };
 
