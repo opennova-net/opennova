@@ -57,6 +57,30 @@ std::string in_line_ends(std::string written, const std::string &file) {
 	return written;
 }
 
+// Where a block the writer makes (its first line end before its header, its last after its closing brace) goes in a
+// particle text so that every line around it reads as it did: after the line end the walk cuts the last block of
+// `kind`'s closing brace at (its CR LF), else at the text's end; and at the end of a text whose last line has no CR
+// LF, before that line's last byte, which the walk drops [orig: File_ParseASCIIFile @ 0x53D8C7..0x53D8F5]: the block's
+// own first line end then ends what the line read, and the dropped byte stays the text's last (inserted after it, a
+// lone LF there would cling to the line before, a closing brace read as "}\n" closing nothing). `after` says whether a
+// block of the kind was found. A text of no CR LF (an LF alone ending its lines, documents/line_ends.h) takes it at
+// its end.
+size_t block_insertion(const std::string &text, const particle::ParticlePlaces &places, particle::BlockKind kind,
+		bool &after) {
+	after = false;
+	size_t at = text.size();
+	for (const particle::BlockPlace &place : places.blocks) {
+		if (place.kind != kind) continue;
+		const size_t cut = text.find("\r\n", place.close_offset);
+		at = cut == std::string::npos ? text.size() : cut + 2;
+		after = true;
+	}
+	const bool crlf = text.find("\r\n") != std::string::npos;
+	const bool ended = text.size() >= 2 && text.compare(text.size() - 2, 2, "\r\n") == 0;
+	if (at == text.size() && crlf && !ended) at = text.size() - 1;
+	return at;
+}
+
 } // namespace
 
 std::unique_ptr<DocumentBase> make_particle_document() {
@@ -97,8 +121,9 @@ bool define_particle_effect(const DocumentBase &document, const ReferenceSubject
 	const TextDocument *text = text_of(document);
 	if (!text || missing.kind != ReferenceKind::Particle || missing.target.empty()) return false;
 	particle::ParticleFile read;
+	particle::ParticlePlaces places;
 	particle::ParseError error;
-	read_particle_text(*text, read, error);
+	particle::load_particles_with_places(text->text().data(), text->text().size(), read, places, error);
 	// The block the engine's own writer makes of an effect of that id and a pdefs line of no particle: the game's
 	// reader makes an effect only at a pdefs line [orig: CParticleTableDef_ParseScriptLine @ 0x5e93b0..0x5e9430].
 	particle::ParticleFile made;
@@ -111,11 +136,9 @@ bool define_particle_effect(const DocumentBase &document, const ReferenceSubject
 	if (!particle::save_particles(written, made, write_error)) return false;
 	const std::string block = in_line_ends(written.str(), text->text());
 	// After the file's last effect, where the writer puts every effect (before its particles and tables), else
-	// at its end.
-	size_t offset = text->text().size();
-	size_t after = 0;
-	for (const particle::EffectDef &each : read.effects) after = std::max(after, size_t(std::max(each.last_line, 0)));
-	if (after && !text->offset_of(after + 1, 1, offset)) offset = text->text().size();
+	// at its end (block_insertion: the lines around it read as they did).
+	bool after = false;
+	const size_t offset = block_insertion(text->text(), places, particle::BlockKind::Effect, after);
 	out = PlannedFix();
 	out.edits.push_back(TextDocument::replace(text->span_at(offset, 0), block));
 	const std::string file = basename_of(document.path());
@@ -157,14 +180,8 @@ bool add_particle_fix(const LoadedParticles &read, const std::vector<size_t> &li
 	std::ostringstream written;
 	std::string write_error;
 	if (!particle::save_particles(written, made, write_error)) return false;
-	size_t offset = read.text.size();
-	const particle::BlockPlace *last = nullptr;
-	for (const particle::BlockPlace &place : read.places.blocks)
-		if (place.kind == particle::BlockKind::Particle) last = &place;
-	if (last) {
-		const size_t lf = read.text.find('\n', last->close_offset);
-		offset = lf == std::string::npos ? read.text.size() : lf + 1;
-	}
+	bool last = false;
+	const size_t offset = block_insertion(read.text, read.places, particle::BlockKind::Particle, last);
 	const std::string file = basename_of(read.path);
 	out = PlannedFix();
 	out.edits.push_back(TextDocument::replace(text_span_at(lines, offset, 0), in_line_ends(written.str(), read.text)));
@@ -179,7 +196,8 @@ bool add_particle_fix(const LoadedParticles &read, const std::vector<size_t> &li
 // "Take X out of pdefs" (particle.effect_unresolved's second fix): the member, the `nth` word of the pdefs line `place`
 // writes (`words` its members of a name, in order), taken out with the separator before the next member, or after the
 // one before it for the last; offered only where another member stays, so the effect still names a particle. False
-// where the member is not at its place (a word the reader takes otherwise) or is the effect's one member.
+// where the member is not at its place (a word the reader takes otherwise), is the effect's one member, or the cut
+// would part a quote from its pair.
 bool take_member_fix(const LoadedParticles &read, const std::vector<size_t> &lines, const particle::KeyPlace &place,
 		const std::vector<std::string> &words, size_t nth, const std::string &effect, PlannedFix &out) {
 	if (words.size() < 2 || nth >= words.size()) return false;
@@ -193,6 +211,10 @@ bool take_member_fix(const LoadedParticles &read, const std::vector<size_t> &lin
 		if (!particle_value_name(read.text, place.offset, place.length, nth - 1, words[nth - 1], before)) return false;
 		from = before + words[nth - 1].size();
 	}
+	// A quote between the cut's ends (a member quoted, or the one beside it) would be cut without its pair, the
+	// tokenizer then reading the rest of the line otherwise [orig: Config_TokenizeLine @ 0x53CB60, '"' toggling]: no
+	// fix offered.
+	if (read.text.find('"', from) < to) return false;
 	out = PlannedFix();
 	out.edits.push_back(TextDocument::replace(text_span_at(lines, from, to - from), std::string()));
 	out.label = "Take " + words[nth] + " out of pdefs";

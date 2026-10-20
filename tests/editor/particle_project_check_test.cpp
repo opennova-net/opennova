@@ -239,6 +239,85 @@ int test_fixes() {
 	return 0;
 }
 
+// The ids the game's reader registers from a text: each effect's and each particle's, in order.
+std::vector<std::string> registered(const std::string &text) {
+	opennova::particle::ParticleFile read;
+	opennova::particle::ParseError error;
+	opennova::particle::load_particles_from_buffer(text.data(), text.size(), read, error);
+	std::vector<std::string> out;
+	for (const auto &effect : read.effects) out.push_back("effect " + effect.id);
+	for (const auto &particle : read.particles) out.push_back("particle " + particle.id);
+	return out;
+}
+
+// The text a document of `text` holds once the edits apply.
+std::string applied(const std::string &text, const std::vector<Edit> &edits) {
+	std::unique_ptr<DocumentBase> document = make_particle_document();
+	Diagnostic error;
+	document->load_bytes(std::vector<uint8_t>(text.begin(), text.end()), "particles/a.ptl", AssetKind::Particles, "jo", error);
+	TextDocument &doc = *text_of(*document);
+	doc.apply(edits, error);
+	return doc.text();
+}
+
+// A block added at a CR LF file's end whose last line has no CR LF: every id the reader read before is read after, the
+// new one besides. A last line "}\n" (the walk drops its LF and reads the brace) keeps its brace closing its block; a
+// last brace with nothing after it (dropped by the walk, its block never registered) stays unread. Over the effect's
+// Add it there (define_particle_effect) and the particle's Add (the project check's fix), and a member's Take refused
+// where its cut would part a quote from its pair.
+int test_fixes_at_the_end() {
+	// define_particle_effect.
+	for (const std::string &text : {std::string("[effectdef]\r\n{\r\n\tid = Hit;\r\n\tpdefs = puff;\r\n}\n"),
+	                                std::string("[effectdef]\r\n{\r\n\tid = Hit;\r\n\tpdefs = puff;\r\n}\r\n\r\n[tabledef]\r\n"
+	                                            "{\r\n\tid = t;\r\n}")}) {
+		std::unique_ptr<DocumentBase> document = make_particle_document();
+		Diagnostic error;
+		TEST_EXPECT(document->load_bytes(std::vector<uint8_t>(text.begin(), text.end()), "particles/a.ptl", AssetKind::Particles,
+		                                 "jo", error));
+		PlannedFix fix;
+		TEST_EXPECT(define_particle_effect(*document, ReferenceSubject{ReferenceKind::Particle, "Boom", "", -1}, fix));
+		std::vector<std::string> wanted = registered(text);
+		wanted.insert(wanted.begin() + 1, "effect Boom");
+		TEST_EXPECT(registered(applied(text, fix.edits)) == wanted);
+	}
+	// The particle's Add through the project check: the last particle's brace a "}\n", and a file whose last particle
+	// the walk never closes.
+	test_temp::TempDir dir("opennova_editor_particle_project_check_end");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Particles"));
+	const std::string root = session.view().project.root;
+	const std::string lf = "[effectdef]\r\n{\r\n\tid = Smoke;\r\n\tpdefs = puff, ghost;\r\n}\r\n\r\n[particledef]\r\n{\r\n"
+	                       "\tid = puff;\r\n}\n";
+	const std::string open = "[effectdef]\r\n{\r\n\tid = Lone;\r\n\tpdefs = keep, nobody;\r\n}\r\n\r\n[particledef]\r\n{\r\n"
+	                         "\tid = keep;\r\n}";
+	const std::string quoted = "[effectdef]\r\n{\r\n\tid = Quoted;\r\n\tpdefs = puff, \"spook\";\r\n}\r\n";
+	// The bytes as written (write_text would end each file's last line CR LF).
+	const auto raw = [](const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); };
+	TEST_EXPECT(test_io::write_file(root + "/particles/a.ptl", raw(lf)) && test_io::write_file(root + "/particles/b.ptl", raw(open)) &&
+	            test_io::write_file(root + "/particles/c.ptl", raw(quoted)));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const auto row = [&](const std::string &name) -> const Diagnostic * {
+		for (const Diagnostic &d : session.view().findings.diagnostics)
+			if (d.code() == std::string("particle.effect_unresolved") && d.message.find("The particle " + name + ",") == 0)
+				return &d;
+		return nullptr;
+	};
+	const Diagnostic *ghost = row("ghost"), *nobody = row("nobody"), *spook = row("spook");
+	TEST_EXPECT(ghost && !ghost->planned.empty() && nobody && !nobody->planned.empty() && spook);
+	if (!ghost || ghost->planned.empty() || !nobody || nobody->planned.empty() || !spook) return 1;
+	TEST_EXPECT(registered(applied(lf, ghost->planned.front().edits)) ==
+	            std::vector<std::string>({"effect Smoke", "particle puff", "particle ghost"}));
+	TEST_EXPECT(registered(applied(open, nobody->planned.front().edits)) ==
+	            std::vector<std::string>({"effect Lone", "particle nobody"}));
+	// The quoted member: Add offered, no Take (its cut would leave the quote's pair).
+	TEST_EXPECT(spook->planned.size() == 1 && spook->planned.front().label == "Add particle spook to c.ptl");
+	std::printf("particle project check fixes at a file's end: what was read stays read; a quoted member no Take\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -246,6 +325,7 @@ int main() {
 	failed += test_check();
 	failed += test_session();
 	failed += test_fixes();
+	failed += test_fixes_at_the_end();
 	if (failed == 0) std::printf("editor particle project check: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

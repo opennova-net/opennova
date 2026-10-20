@@ -414,6 +414,13 @@ bool particle_name_edit(const ParticleKeyField &field, const TextSpan &name, con
 		                           to.substr(0, to.find_first_of(" \t,")) + "' and more words after it";
 		return false;
 	}
+	// An effect's member goes in a name slot of the effect's (kPdefsNameSlot), as Rename everywhere refuses a member's
+	// name the slot cannot hold (GraphEdge::width).
+	if (field.row->value == particle::KeyValueKind::Members && to.size() >= kPdefsNameSlot) {
+		why = "the game keeps an effect's member in a slot of " + std::to_string(kPdefsNameSlot - 1) + " characters: '" +
+		      to + "' has " + std::to_string(to.size());
+		return false;
+	}
 	std::string value = field.value;
 	value.replace(name.column - field.span.column, name.length, to);
 	if (!particle_key_value_ok(*field.row, value, why)) return false;
