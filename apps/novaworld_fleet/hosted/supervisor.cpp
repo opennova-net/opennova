@@ -43,25 +43,25 @@ std::string own_machines_text(int n) {
 }
 
 // A server past its owner's dedicated machines that cannot go to a shared
-// machine stops: the event its owner reads, when its owner has no shared
-// server free, and when the fleet has no shared room for it.
-std::string no_shared_server_detail(int own_machines) {
-	return own_machines_text(own_machines) + " and no shared server free";
-}
-std::string no_shared_room_detail(int own_machines) {
-	return own_machines_text(own_machines) + " and the fleet has no shared room";
+// machine stops (`limit`, NoSharedServer or NoSharedRoom): the event its owner
+// reads, when its owner has no shared server free, and when the fleet has no
+// shared room for it.
+std::string own_limit_detail(const StopLimit &limit) {
+	const std::string have = own_machines_text(limit.count);
+	if (limit.kind == LimitKind::NoSharedRoom) return have + " and the fleet has no shared room";
+	return have + " and no shared server free";
 }
 
-// Why a move that did not happen (move_to_shared's `outcome`) stops its
-// server; "" for one moved, or no longer the pass's to move.
-std::string move_refusal(MoveOutcome outcome, int own_machines) {
+// The limit a move that did not happen (move_to_shared's `outcome`) stops its
+// server for; unset for one moved, or no longer the pass's to move.
+std::optional<StopLimit> move_refusal(MoveOutcome outcome, int own_machines) {
 	switch (outcome) {
-		case MoveOutcome::NoSharedServer: return no_shared_server_detail(own_machines);
-		case MoveOutcome::NoRoom: return no_shared_room_detail(own_machines);
+		case MoveOutcome::NoSharedServer: return StopLimit{ LimitKind::NoSharedServer, own_machines };
+		case MoveOutcome::NoRoom: return StopLimit{ LimitKind::NoSharedRoom, own_machines };
 		case MoveOutcome::Moved:
 		case MoveOutcome::Gone: break;
 	}
-	return {};
+	return std::nullopt;
 }
 
 // "machine 3, slot 1": where a server runs, as its events say it.
@@ -385,6 +385,7 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 	struct Stop {
 		int64_t id;
 		std::string detail;
+		StopLimit limit;
 	};
 	std::vector<Stop> stops;
 	// The servers on dedicated machines past their owners' dedicated machines,
@@ -410,7 +411,9 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 		std::vector<const HostedServer *> own;
 		for (const HostedServer *s : servers) (s->own_machine ? own : shared).push_back(s);
 		const size_t shared_max = static_cast<size_t>(std::max(e.shared_servers, 0));
-		for (size_t i = shared.size(); i > shared_max; --i) stops.push_back({ shared[i - 1]->id, limit_detail(e) });
+		const StopLimit past_shared{ LimitKind::SharedServers, e.shared_servers };
+		for (size_t i = shared.size(); i > shared_max; --i)
+			stops.push_back({ shared[i - 1]->id, limit_detail(e), past_shared });
 		const size_t own_max = static_cast<size_t>(std::max(e.own_machines, 0));
 		for (size_t i = own.size(); i > own_max; --i) moves.push_back({ own[i - 1], e.own_machines });
 		if (shared.size() > shared_max || own.size() > own_max) owners_past.insert(owner_id);
@@ -460,19 +463,18 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 				reason.c_str());
 	}
 	std::set<int64_t> stopped;
-	const auto stop_for = [&](int64_t id, const std::string &detail) {
-		if (!request_stop(db, id, detail)) return;
-		set_start_cause(db, id, StartCause::Limits);
+	const auto stop_for = [&](int64_t id, const std::string &detail, const StopLimit &limit) {
+		if (!request_stop(db, id, detail, StartCause::Limits, limit)) return;
 		stopped.insert(id);
 		std::printf("[hosted] server %lld: -> stopping (%s)\n", static_cast<long long>(id), detail.c_str());
 	};
-	for (const Stop &s : stops) stop_for(s.id, s.detail);
+	for (const Stop &s : stops) stop_for(s.id, s.detail, s.limit);
 	// Then each server past its owner's dedicated machines: moved to a shared
 	// machine while its owner has a shared server free (the stops above still
 	// count) and the fleet has room for it, else stopped.
 	for (const Move &m : moves) {
-		const std::string why = move_refusal(move_to_shared(db, *m.server, now_ms, m.own_machines), m.own_machines);
-		if (!why.empty()) stop_for(m.server->id, why);
+		const auto limit = move_refusal(move_to_shared(db, *m.server, now_ms, m.own_machines), m.own_machines);
+		if (limit) stop_for(m.server->id, own_limit_detail(*limit), *limit);
 	}
 	return stopped;
 }
@@ -502,7 +504,7 @@ void Supervisor::step(db::Database &db, const Fleet &fleet, const HostedServer &
 	if (s.state != State::Stopping) {
 		std::string why;
 		if (!owner_active(db, s, why)) {
-			if (request_stop(db, s.id, why)) {
+			if (request_stop(db, s.id, why, StartCause::Stop)) {
 				std::printf("[hosted] server %lld: %s -> stopping (%s)\n", static_cast<long long>(s.id),
 						state_name(s.state), why.c_str());
 			}
@@ -562,7 +564,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	// restart's backoff gives an admin time to withdraw a grant).
 	std::string why;
 	if (!owner_active(db, s, why)) {
-		if (request_stop(db, s.id, why)) {
+		if (request_stop(db, s.id, why, StartCause::Stop)) {
 			std::printf("[hosted] server %lld: provisioning -> stopping (%s)\n", static_cast<long long>(s.id),
 					why.c_str());
 		}
@@ -585,21 +587,20 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		if (other.state == State::Stopping) continue;
 		++(other.own_machine ? own_rank : shared_rank);
 	}
-	const auto stop_for = [&](const std::string &limit) {
-		if (request_stop(db, s.id, limit)) {
-			set_start_cause(db, s.id, StartCause::Limits);
+	const auto stop_for = [&](const std::string &detail, const StopLimit &limit) {
+		if (request_stop(db, s.id, detail, StartCause::Limits, limit)) {
 			std::printf("[hosted] server %lld: provisioning -> stopping (%s)\n", static_cast<long long>(s.id),
-					limit.c_str());
+					detail.c_str());
 		}
 	};
 	if (!s.own_machine && shared_rank >= entitlement.shared_servers && !limits_hold::held(db)) {
-		stop_for(limit_detail(entitlement));
+		stop_for(limit_detail(entitlement), { LimitKind::SharedServers, entitlement.shared_servers });
 		return;
 	}
 	if (s.own_machine && own_rank >= entitlement.own_machines && !limits_hold::held(db)) {
-		const std::string why =
+		const auto limit =
 				move_refusal(move_to_shared(db, s, now_ms, entitlement.own_machines), entitlement.own_machines);
-		if (!why.empty()) stop_for(why);
+		if (limit) stop_for(own_limit_detail(*limit), *limit);
 		return;
 	}
 

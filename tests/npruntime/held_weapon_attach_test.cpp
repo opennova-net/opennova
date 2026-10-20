@@ -1,15 +1,19 @@
-// The held-weapon attach math on the retail data. The presentation record the
-// replica pipeline writes carries the attach triple the original composes for
-// the third-person weapon [orig: the held-weapon euler @ entity+0x2B8..0x2C0]:
-// a level-standing soldier's weapon comes out at the attach PITCH and the attach
-// YAW, roll rides the body roll plus the lean, and the 0x80 hold states flag the
-// hand frame. Five poses pin the triple; the US01 rig then pins the anchor the
-// shell hangs it on — bone 16 (the weapon hand) rests out along the arm at
-// shoulder height in the bind T-pose — and M4_3RD carries user points ahead of
-// its origin (muzzle authored +Z).
-// Gated on OPENNOVA_JO_ASSETS (an extracted JO tree carrying items.def, US01
-// and M4_3RD).
-#include "common/retail_paths.h"
+// The held-weapon attach math. The presentation record the replica pipeline
+// writes carries the attach triple the original composes for the third-person
+// weapon [orig: the held-weapon euler @ entity+0x2B8..0x2C0]: a level-standing
+// soldier's weapon comes out at the attach PITCH and the attach YAW, roll rides
+// the body roll plus the lean, and the 0x80 hold states flag the hand frame.
+// Five poses pin the triple; the player's rig then pins the anchor the shell
+// hangs it on -- bone 16 (the weapon hand) rests out along the arm at shoulder
+// height in the bind T-pose -- and the held third-person model carries user
+// points ahead of its origin (muzzle authored +Z). The rig and the model are
+// the synthetic set's (fixtures/threedi/synth person.3di, in the shipped US01's
+// rig order with bone 16 the weapon hand, and gun.3di, in the role the shipped
+// M4_3RD plays), mounted beside an items.def row for the player's runtime type
+// and the one-bone clip table fixtures/anim/soldier.adm.
+#include "common/file_io.h"
+#include "common/temp_dir.h"
+#include "common/test_paths.h"
 
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
@@ -48,6 +52,8 @@ bool expect(bool cond, const char *msg) {
 
 constexpr int kPlayerRuntimeType = 0x14B9;
 constexpr int kHandBone = 16;
+// The held third-person model: the shipped M4_3RD's role.
+constexpr const char *kHeldModel = "gun";
 constexpr size_t kRecordFloats = 512; // comfortably past the last PF_ index
 
 int32_t bam_deg(double degrees) {
@@ -77,9 +83,6 @@ const Case kCases[] = {
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
-			"OPENNOVA_JO_ASSETS (an extracted JO tree carrying items.def, US01 and M4_3RD)");
-
 	// --- The attach triple through the present-record writer, five poses.
 	int hand_frame_state = -1;
 	for (int s = 50; s <= 61; ++s)
@@ -136,15 +139,27 @@ int main() {
 				"a rolling body drops the body roll and keeps the lean");
 	}
 
-	// --- The anchor: US01 bone 16 rests at identity; M4_3RD points +Z.
+	// --- The anchor: the rig's bone 16 rests out along the arm; the held model points +Z.
+	test_temp::TempDir dir("held_weapon_attach");
+	const std::string root = dir.root();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	const bool staged =
+			test_io::write_text(root + "/items.def",
+					"begin \"Player #1, Multiplayer\"\n id 105305\n type person\n graphic person\n"
+					" anim_def soldier\n ai_function plyr\n move_function org2\nend\n") &&
+			test_io::write_file(root + "/person.3di", test_io::read_file(repo + "/fixtures/threedi/synth/person.3di")) &&
+			test_io::write_file(root + "/gun.3di", test_io::read_file(repo + "/fixtures/threedi/synth/gun.3di")) &&
+			test_io::write_file(root + "/soldier.adm", test_io::read_file(repo + "/fixtures/anim/soldier.adm")) &&
+			test_io::write_file(root + "/idle.bad", test_io::read_file(repo + "/fixtures/anim/idle.bad")) &&
+			test_io::write_file(root + "/walk.bad", test_io::read_file(repo + "/fixtures/anim/walk.bad"));
+	if (!expect(staged, "the synthetic rig and model mount")) return 1;
 	ResourceIndex index;
-	if (!index.scan(assets) && !index.scan(assets, std::string(), VfsMountMode::LooseOnly))
-		return retail::skip("a mountable OPENNOVA_JO_ASSETS tree");
+	if (!expect(index.scan(root, std::string(), VfsMountMode::LooseOnly), "the scratch mount scans")) return 1;
 	std::vector<uint8_t> items_bytes;
-	if (!index.read_file("items.def", items_bytes)) return retail::skip("items.def under OPENNOVA_JO_ASSETS");
+	if (!expect(index.read_file("items.def", items_bytes), "items.def reads")) return 1;
 	DefItemsFile items{};
-	if (def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) != 0)
-		return retail::skip("a parseable items.def");
+	if (!expect(def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0, "items.def parses"))
+		return 1;
 	const DefItemDef *def = mission::find_item_def(
 			items, mission::visual_item_id_for_runtime_type(kPlayerRuntimeType, items));
 	assets::AssetStore models{&index};
@@ -168,18 +183,18 @@ int main() {
 		}
 	}
 	def_free_items(&items);
-	if (const Threedi3di3 *m4 = models.model("M4_3RD").get()) {
+	if (const Threedi3di3 *m4 = models.model(kHeldModel).get()) {
 		int ahead = 0;
 		for (size_t i = 0; i < m4->user_point_count; ++i) {
 			float p[3];
 			threedi_user_point_position(&m4->user_points[i], p);
 			if (p[2] > 0.1f) ++ahead;
 		}
-		std::printf("held_weapon_attach: M4_3RD user points %zu (%d ahead of the origin)\n",
+		std::printf("held_weapon_attach: %s user points %zu (%d ahead of the origin)\n", kHeldModel,
 				m4->user_point_count, ahead);
-		expect(ahead > 0, "M4_3RD has user points ahead of its origin (muzzle authored +Z)");
+		expect(ahead > 0, "the held model has user points ahead of its origin (muzzle authored +Z)");
 	} else {
-		expect(false, "M4_3RD loads");
+		expect(false, "the held model loads");
 	}
 
 	if (failures == 0) std::printf("held_weapon_attach: OK\n");

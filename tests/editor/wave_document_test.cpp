@@ -1,9 +1,10 @@
 // Waves (ADR 0046, round S23 lane A): a .wav as a document held as its bytes and read as the game's loader reads it
 // (lwf::wave_facts, lwf::wave_retail_check): its facts and picture on the wire; the one finding a wave the loader
 // refuses makes (asset.wave_unplayable), on the wave's own file; a trim and a normalise, each one undo step written
-// in the form the game takes; the wave_operation request through a session and its refusals. Minted waves alone (the
-// engine's writer); the retail leg (OPENNOVA_JO_ASSETS): every shipped wave through the document byte for byte, every
-// one but DSkid.wav (D-SND-33) found playable.
+// in the form the game takes; the wave_operation request through a session and its refusals. Every wave of the
+// variant set through the document byte for byte (the loader's forms minted under fixtures/lwf/, IMA ADPCM among
+// them, our base game's, the PCM forms at the rates the shipped waves take), its one finding exactly where the loader
+// refuses the wave, as for DSkid.wav's 16-bit stereo alone of JO's (D-SND-33). Minted waves and our own alone.
 #include <editor/documents/document_types.h>
 #include <editor/documents/wave_document.h>
 #include <editor/session/preferences_store.h>
@@ -13,20 +14,18 @@
 #include <formats/lwf/wav_source.h>
 
 #include <base/io/le.h>
-#include <base/io/strutil.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
-#include <filesystem>
+#include <iterator>
 #include <string>
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/menus_audio_fixtures.h"
 #include "editor/test_platform.h"
 
 using namespace opennova;
@@ -166,52 +165,82 @@ int test_session() {
 	return 0;
 }
 
-int test_retail() {
-	if (!retail::selected()) return 0;
-	const std::string assets = retail::assets();
-	if (assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (the shipped waves)");
-		return 0;
+// The IMA ADPCM waves the format's lane mints (tests/fixtures/minimal_lwf_gen.cpp, tests/fixtures/ima_adpcm_source.h):
+// mono 4-bit IMA ADPCM, a 20-byte fmt chunk and a fact chunk, the form a third of JO's waves take (D-SND-45), in its
+// two shipped shapes: 11025 Hz in 256-byte blocks of 505 samples, 22050 Hz in 512-byte blocks of 1017.
+const char *const kAdpcmVariants[] = {"fixtures/lwf/ima_adpcm.wav", "fixtures/lwf/ima_adpcm_512.wav"};
+
+// A mono 8-bit wave of `frames` frames of the 441 Hz sine at 0.25, through the engine's writer.
+std::vector<uint8_t> mono_wave8(size_t frames, uint32_t rate) {
+	std::vector<uint8_t> data;
+	for (size_t f = 0; f < frames; ++f)
+		data.push_back(uint8_t(128 + std::lround(0.25 * 127.0 * std::sin(2.0 * 3.14159265358979 * 441.0 * double(f) / rate))));
+	std::vector<uint8_t> out;
+	std::string error;
+	lwf::wav_write_pcm_mono(data.data(), data.size(), rate, 8, out, error);
+	return out;
+}
+
+// Every wave of the variant set through the document: fixtures/lwf/'s (the loader's forms, minted), our base game's
+// (assets/: mono 8- and 16-bit PCM at 11025, 22050 and 44100 Hz) and, made here, the PCM forms at the other rates
+// the shipped waves take (16-bit at 5000 and 16000 Hz, 8-bit at 8000 and 48000). Each reads and writes back byte for
+// byte, and makes its one finding (asset.wave_unplayable) exactly where the game's loader refuses it; none of the
+// forms the shipped waves take but DSkid.wav's 16-bit stereo, test_document's refused wave (D-SND-33), makes one, the
+// IMA ADPCM variants decoded to their frames among them.
+int test_every_wave() {
+	std::vector<variant_fixtures::Input> inputs;
+	const bool all = variant_fixtures::inputs({"fixtures/lwf", "assets"}, ".wav",
+	                                          std::vector<std::string>(std::begin(kAdpcmVariants), std::end(kAdpcmVariants)), inputs);
+	struct Wave {
+		std::string label;
+		std::vector<uint8_t> bytes;
+		bool shipped_form; // a form a shipped wave the loader takes is written in: no finding
+	};
+	std::vector<Wave> waves;
+	for (const variant_fixtures::Input &input : inputs) {
+		const bool adpcm = std::find(std::begin(kAdpcmVariants), std::end(kAdpcmVariants), input.label) != std::end(kAdpcmVariants);
+		waves.push_back({input.label, test_io::read_file(input.path), adpcm || input.label.rfind("assets/", 0) == 0});
 	}
-	size_t waves = 0, unplayable = 0;
-	std::string refused;
-	std::error_code ec;
-	for (const auto &entry : std::filesystem::directory_iterator(std::filesystem::u8path(assets), ec)) {
-		std::string ext = entry.path().extension().u8string();
-		for (char &c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-		if (ext != ".wav") continue;
-		const std::vector<uint8_t> bytes = test_io::read_file(entry.path().u8string());
+	waves.push_back({"16-bit PCM at 5000 Hz", mono_wave(500, 0.25, 5000), true});
+	waves.push_back({"16-bit PCM at 16000 Hz", mono_wave(1600, 0.25, 16000), true});
+	waves.push_back({"8-bit PCM at 8000 Hz", mono_wave8(800, 8000), true});
+	waves.push_back({"8-bit PCM at 48000 Hz", mono_wave8(4800, 48000), true});
+	size_t refused = 0, adpcm = 0;
+	for (const Wave &w : waves) {
 		WaveDocument wave;
 		Diagnostic error;
-		TEST_EXPECT(wave.load_bytes(bytes, entry.path().filename().u8string(), AssetKind::Wave, "jo", error));
+		const bool loaded = !w.bytes.empty() && wave.load_bytes(w.bytes, "sounds/wave.wav", AssetKind::Wave, "jo", error);
 		const SerializeResult same = wave.serialize();
-		const bool equal = same.ok() && same.text == std::string(bytes.begin(), bytes.end());
-		if (!equal)
-			std::printf("  %s: %zu bytes, written again %zu\n", entry.path().filename().u8string().c_str(), bytes.size(),
-			            same.text.size());
+		const bool equal = loaded && same.ok() && same.text == std::string(w.bytes.begin(), w.bytes.end());
+		if (!equal) std::printf("  %s: %zu bytes, written again %zu\n", w.label.c_str(), w.bytes.size(), same.text.size());
 		TEST_EXPECT(equal);
-		if (!validate_wave_file(wave).empty()) {
-			++unplayable;
-			refused = entry.path().filename().u8string();
+		const lwf::WaveRetailCheck check = lwf::wave_retail_check(w.bytes);
+		const std::vector<Diagnostic> findings = validate_wave_file(wave);
+		const bool said = check.plays ? findings.empty()
+		                              : findings.size() == 1 && findings[0].code() == "asset.wave_unplayable";
+		if (!said || (w.shipped_form && !check.plays))
+			std::printf("  %s: %s, %zu finding(s)\n", w.label.c_str(), check.plays ? "plays" : check.why.c_str(), findings.size());
+		TEST_EXPECT(said && (!w.shipped_form || check.plays));
+		refused += check.plays ? 0 : 1;
+		if (wave.facts().format.tag == lwf::kWaveTagImaAdpcm) {
+			++adpcm;
+			TEST_EXPECT(wave.facts().read && wave.facts().frames > 0);
 		}
-		++waves;
 	}
-	std::printf("retail: %zu waves through the document byte for byte, %zu the loader refuses (%s)\n", waves, unplayable,
-	            refused.c_str());
-	// The one shipped wave the loader refuses, DSkid.wav (its name as the tree spells it).
-	TEST_EXPECT(waves > 1000 && unplayable == 1 && opennova::strutil::to_lower(refused) == "dskid.wav");
+	std::printf("waves: %zu through the document byte for byte, %zu of them IMA ADPCM, %zu the loader refuses\n",
+	            waves.size(), adpcm, refused);
+	TEST_EXPECT(all && adpcm >= std::size(kAdpcmVariants));
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 	failed += test_document();
 	failed += test_operations();
 	failed += test_session();
-	failed += test_retail();
+	failed += test_every_wave();
 	if (failed == 0) std::printf("editor wave document: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

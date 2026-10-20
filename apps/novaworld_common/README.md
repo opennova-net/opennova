@@ -219,6 +219,10 @@ Service policy (`core/health.*`), what the container runtime and the uptime chec
   around a web task that cannot reach the cache. Both sit outside `/api`
   (`Cache-Control: no-store`), so `ONNET_API_PROXY_ONLY` never refuses them; `GET
   /api/health` stays, a static `{"status":"ok"}` behind the proxy rule.
+- **The probes leave the logs**: web drops Crow's two lines a request (`Request:`,
+  `Response:`) for `/livez` and `/healthz`, and the portal's nginx logs no `/healthz`
+  (`web/nginx.conf`); the other programs' health listener logs no request at all. Every
+  other request keeps its lines.
 - **The heartbeat**, one line on stdout every 60 s, for the log pipeline's metric
   filters: `{"heartbeat":{"program":"<program>",...}}`, the program first, then the
   fields that program knows in this order, then every program's lock failures:
@@ -462,9 +466,25 @@ UDP 64206, which spreads the clients across the lobby tasks by flow (a client's 
 port) and keeps each flow on one task.
 
 - **Why one address** (ADR 0063 decision 8, with its witness): a stock host reconnects
-  only to the lobby address the gate first gave it, after 240 s of silence, so with one
-  address a host whose lobby went away is listed again on a live one within about 271 s,
-  with no restart; retail self-hosts recover the same way.
+  only to the lobby address the gate first gave it, after its session's teardown (a
+  ServerGoodBye from the lobby address, or 240 s of silence), so with one address a host
+  whose lobby went away is listed again on a live one with no restart; retail self-hosts
+  recover the same way.
+- **The goodbyes** (`0022_lobby_goodbyes.sql`, `lobbydb::leave_goodbyes` / `list_goodbyes`;
+  service policy): a NAPI server that stops sends each connection its ServerGoodBye burst
+  (`{1, 9, 0, 0, "", 0, "NP.C:SH:STOP"}`), but behind the balancer a stopping lobby's flows
+  ended before its stop's signal, so its burst would reach no one. Its clean stop leaves a
+  row per session it held instead (the session's address, the SK its packets carry, the
+  client's CK). Every lobby reads the rows left within the last 240 s every second, and a
+  SESSION packet from an address it admitted nothing from, carrying such a row's SK, draws
+  that burst keyed by the CK (again at most once a second while such packets keep coming;
+  another key, or another address, draws nothing). The client tears its session down and
+  reconnects to the lobby address at once, onto the lobby that answered: a host lists again
+  on its next update (30 s at most) plus its reconnect's few seconds. A lobby that dies
+  without its stop leaves none, and its hosts list again within about 271 s (the 240 s of
+  silence, the reconnect's 1 s delay, its 10 s probe window and 20 s re-join at most). A
+  stop's write deletes the rows past the 240 s, and a row at an address replaces the one
+  before it.
 - **Its row** (`lobby_instances`: id, endpoint, `active` or `draining`, the task its lobby
   runs as, `started_at`, `last_seen_at`; the task, its ECS task id else its hostname, is the
   key its `program_samples` rows carry). The NW UDP listener's start registers a new row, reaps every instance
@@ -472,8 +492,8 @@ port) and keeps each flow on one task.
   and clears the rows no instance holds, all before it serves. Its receive thread moves
   `last_seen_at` every 5 s; a row found reaped all the same is registered again under a new
   id (draining still when it was) and the lobby writes its session rows and listings anew
-  from memory. A clean stop drains the row, then deletes it with its rows. Every row the
-  lobby writes names its instance (`lobby_id`).
+  from memory. A clean stop drains the row, leaves its sessions' goodbyes (above), then
+  deletes the row with its rows. Every row the lobby writes names its instance (`lobby_id`).
 - **The gate hands every client the one lobby address** while at least one instance is
   active and seen within 15 s (`lobbydb::live_lobbies`, read every 5 s on the gate's own
   connection); after a failed read, its fallback for six refreshes; with none live, its
@@ -804,6 +824,7 @@ compose stack takes the test-mode set from the vault through
 | `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the dedicated machine's amount (`own_machine`), the static-address add-on's while the fleet sells addresses, and each one's `available` (the fleet takes one more for an account that has nothing yet, no tier assumed; false: hosting is full) |
 | `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `shared_servers`, `comp_servers`, `comp_own_machines`, `own_machines`, `static_addresses`, `used`, `stopping`, `shared_used`, `shared_stopping`, `can_start`), the support tier shown, each dedicated machine's subscription still open (`own_machine_subscriptions`, newest first), each static address's subscription (`address_subscriptions`, with its address once named), `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
 | `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine" \| "static_address"}`: 200 `{"url"}`; 400; 403 `not_eligible` (an account not active, or with an admin grant), `payment_past_due` (an add-on while a payment is past due); 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `address_limit` (an address for every dedicated machine already), `sold_out` (the fleet has sold all it holds of what the item adds); 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. A dedicated machine needs no tier. The account's previous session is settled first (a completed one synced), then the item judged and reserved under the hosting-start lock, so nothing is sold twice or past the fleet; the session asks for the terms of service and stamps the instance, the account and the reservation on the subscription |
+| `POST /api/billing/checkout/cancel` | a website session, the CSRF header | the account's open checkout session, its buyer back unpaid (`?checkout=cancel`): expired in Stripe and its reservation dropped, so the room it held sells again now; 200 `{"released"}` (false with no open session, or one Stripe calls paid); 409 `checkout_in_progress`; 429 (the checkout bucket); 503 `stripe_unavailable` |
 | `POST /api/billing/portal` | a website session, the CSRF header | 200 `{"url"}`; with `{"cancel_subscription": "sub_..."}` (a static address's) the Portal's cancel flow for it, returning to `/me/addresses`; 400; 404 `no_billing_account`, `not_found`; 429; 503 |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook): as `GET /api/me/billing`; 404; 429 (3, then one every 10 s); 503 |
 | `POST /api/billing/webhook` | Stripe's signature | above |
@@ -1388,7 +1409,7 @@ databases, one per case, on the PostgreSQL server `-DOPENNOVA_TEST_PG=<uri>` nam
 (`tests/common/test_database.h`); the HTTP layer's (label `redis`) also need the Redis
 server `-DOPENNOVA_TEST_REDIS=<url>` names, each in a key namespace of its own
 (`tests/common/test_redis.h`). Without the server a test prints `SKIP: needs a PostgreSQL
-server` (or `a Redis server`) and exits 77, which `--suite core` counts as a failure.
+server` (or `a Redis server`) and exits 77, which the suite counts as a failure.
 `scripts/dev_postgres.sh up` and `scripts/dev_redis.sh up` print the values for local
 servers, and the Linux CI jobs run both beside the build. The route harness,
 `opennova_novaworld_web_http_routes_*` (`tests/novaworld/http_routes_test.cpp`, a row per part),

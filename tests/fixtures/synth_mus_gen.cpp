@@ -1,12 +1,14 @@
 // Generator + guard for the synthetic MUS programs fixtures/mus/synth_gamemus.bin,
-// fixtures/mus/synth_menumus.bin and the decompile golden
-// fixtures/mus/golden_synth_gamemus.mus.txt: two interactive-music scripts
+// fixtures/mus/synth_menumus.bin, fixtures/mus/synth_forms.bin and the decompile
+// goldens fixtures/mus/golden_synth_gamemus.mus.txt and
+// fixtures/mus/golden_synth_forms.mus.txt: three interactive-music scripts
 // authored in the MDEdit source dialect, compiled by mus_compile and written by
 // mus_encode_file (the SCR0/MU01 container with the canonical eleven intrinsic
 // names and the editor debug export table, so section names and the source
-// path reload as authored). No retail program is carried: the shipped
-// jo_gamemus.bin / jo_menumus.bin are the reference-tree legs of the mus ctests
-// (docs/asset-gated-tests.md), their text pinned by mus_decompile's retail leg.
+// path reload as authored). The compiler writes MDEdit's layout (every shipped
+// script, decompiled and compiled again, is its own bytes: mus_encode_idempotence
+// proved it over the install's four), so the minted programs hold MDEdit's
+// bytecode for every construct they use. No retail program is carried.
 //
 //  * gamescript has the shipped gamemus SHAPE: eight sections in the same
 //    order (Begin, Missionnull, Missionwin, Win000, Missionlose, Lose000,
@@ -19,11 +21,13 @@
 //  * menuscript is a Var02-dispatched attract/idle/browse/ambient state
 //    machine: every branch loops through setstate, so the VM never runs off
 //    the end.
+//  * the forms program is a menuscript in the form the shipped menu programs
+//    take (forms_source below): the constructs theirs and the pair's not.
 //
-// Default: rebuild both programs in memory, prove they reload with their
+// Default: rebuild the programs in memory, prove they reload with their
 // names, that the gamescript golden is the decompiler's own output and a
-// compile fixed point, and byte-compare the three committed files. `--write`
-// (re)writes them.
+// compile fixed point and the forms program decompiles to its own source, and
+// byte-compare the five committed files. `--write` (re)writes them.
 #include "common/test_paths.h"
 
 #include <formats/mus/mus.h>
@@ -140,6 +144,186 @@ const char *const kMenuSource =
 	"  play sound_2\n"
 	"  enter Ambient\n"
 	"}\n";
+
+// The forms program, fixtures/mus/synth_forms.bin: a menuscript of eleven sections in the form the
+// shipped menu programs take (menumus.bin and jox01's MJox01.bin, both MDEdit's), each form theirs and
+// the minted pair's not: a global of the script's own past MDEdit's Var00..Var15 (`global INT`, the
+// globals 0x44 bytes), assignments to a Var and to it (pop_g, 0x08), `==` (equal, 0x20) and `&&`
+// (l_and, 0x15) in an if's condition, an if inside an if's body, an on-switch naming one section
+// three times, and plays past sound 255 through the word-wide play (0x3D [orig: AudioVM_Op_PlayWait @
+// 0x672C90]; MJox01.bin plays 61 of its 884 so, its bank 317 streams). Its text is the decompiler's own
+// layout, each statement on the line MDEdit's line table names with no `#line` (the shipped layout,
+// whose source binds every sound and declares every section ahead of the code), so the program
+// decompiles to this text exactly.
+std::string forms_source() {
+	std::string s =
+		"// Script: menuscript\n"
+		"// Original source: C:\\opennova\\fixtures\\mus\\synth_forms.mus\n"
+		"//\n"
+		"// IMPORTANT: Load MUSIC.LAN before opening this file in MDEdit\n"
+		"// The following methods are used: GEcho, GGRnd, GSV, GSDV, GFB, F.Set, F.Clear, F.IsSet, F.IsClear, "
+		"T.Start, T.Stop\n"
+		"\n"
+		"script menuscript\n"
+		"\n"
+		"// Sound bind declarations (play requires bind identifiers)\n";
+	for (int i = 0; i <= 316; ++i) s += "bind sound_" + std::to_string(i) + " \"sound_" + std::to_string(i) + "\"\n";
+	s += "\n"
+	     "// Global variables\n"
+	     "// Used global offsets from original: [0, 8, 56, 60, 64]\n"
+	     "// Original globals_area = 68 bytes\n"
+	     "// NOTE: MDEdit pre-defines Var00-Var15 at offsets 0-60 (64 bytes)\n"
+	     "global INT counter\n"
+	     "\n"
+	     "// Section forward declarations\n";
+	const char *const sections[] = {"Begin", "Poll",    "Title", "Cycle", "Route", "Fault",
+	                                "Setup", "Profile", "Solo",  "Lobby", "Server"};
+	for (const char *section : sections) s += std::string("declsection ") + section + "\n";
+	s += "\n"
+	     "section Begin\n"
+	     "{\n"
+	     "Var14 = 0\n"
+	     "counter = 0\n"
+	     "SV(250)\n"
+	     "enter Poll\n"
+	     "}\n"
+	     "\n"
+	     "section Poll\n"
+	     "{\n"
+	     "on (Var00) enter Title Title Title\n"
+	     "enter Title\n"
+	     "}\n"
+	     "\n"
+	     "section Title\n"
+	     "{\n"
+	     "SV(250)\n"
+	     "if ((Var14 == 0))\n"
+	     "{\n"
+	     "    Var14 = 1\n"
+	     "    play sound_1\n"
+	     "}\n"
+	     "else\n"
+	     "{\n"
+	     "    enter Cycle\n"
+	     "}\n"
+	     "enter Poll\n"
+	     "}\n"
+	     "\n"
+	     "section Cycle\n"
+	     "{\n"
+	     "SV(250)\n"
+	     "play sound_2\n"
+	     "if ((Var02 != 1))\n"
+	     "{\n"
+	     "    enter Route\n"
+	     "}\n"
+	     "play sound_3\n"
+	     "if ((Var02 != 1))\n"
+	     "{\n"
+	     "    enter Route\n"
+	     "}\n"
+	     "play sound_256\n"
+	     "if ((Var02 != 1))\n"
+	     "{\n"
+	     "    enter Route\n"
+	     "}\n"
+	     "enter Cycle\n"
+	     "}\n"
+	     "\n"
+	     "section Route\n"
+	     "{\n"
+	     "if ((Var02 == 0))\n"
+	     "{\n"
+	     "    enter Fault\n"
+	     "}\n"
+	     "if ((Var02 == 9))\n"
+	     "{\n"
+	     "    play sound_12\n"
+	     "    enter Setup\n"
+	     "}\n"
+	     "if ((Var02 == 10))\n"
+	     "{\n"
+	     "    enter Profile\n"
+	     "}\n"
+	     "if ((Var02 == 11))\n"
+	     "{\n"
+	     "    enter Solo\n"
+	     "}\n"
+	     "if ((Var02 == 5))\n"
+	     "{\n"
+	     "    enter Lobby\n"
+	     "}\n"
+	     "enter Server\n"
+	     "}\n"
+	     "\n"
+	     "section Fault\n"
+	     "{\n"
+	     "play sound_4\n"
+	     "enter Poll\n"
+	     "}\n"
+	     "\n"
+	     "section Setup\n"
+	     "{\n"
+	     "SV(250)\n"
+	     "play sound_5\n"
+	     "if ((Var02 != 9))\n"
+	     "{\n"
+	     "    play sound_6\n"
+	     "    enter Route\n"
+	     "}\n"
+	     "enter Setup\n"
+	     "}\n"
+	     "\n"
+	     "section Profile\n"
+	     "{\n"
+	     "play sound_300\n"
+	     "if ((Var02 != 10))\n"
+	     "{\n"
+	     "    enter Route\n"
+	     "}\n"
+	     "enter Profile\n"
+	     "}\n"
+	     "\n"
+	     "section Solo\n"
+	     "{\n"
+	     "play sound_7\n"
+	     "if ((Var02 != 11))\n"
+	     "{\n"
+	     "    play sound_8\n"
+	     "    enter Route\n"
+	     "}\n"
+	     "enter Solo\n"
+	     "}\n"
+	     "\n"
+	     "section Lobby\n"
+	     "{\n"
+	     "SV(250)\n"
+	     "if ((Var15 == 0))\n"
+	     "{\n"
+	     "    Var15 = 1\n"
+	     "    play sound_9\n"
+	     "    if (((Var02 != 5) && (Var02 != 6)))\n"
+	     "    {\n"
+	     "        play sound_10\n"
+	     "        enter Route\n"
+	     "    }\n"
+	     "    play sound_316\n"
+	     "}\n"
+	     "counter = 1\n"
+	     "enter Lobby\n"
+	     "}\n"
+	     "\n"
+	     "section Server\n"
+	     "{\n"
+	     "play sound_11\n"
+	     "if (((Var02 != 5) && (Var02 != 6)))\n"
+	     "{\n"
+	     "    enter Route\n"
+	     "}\n"
+	     "enter Server\n"
+	     "}\n";
+	return s;
+}
 
 struct Program {
 	const char *name;
@@ -285,6 +469,51 @@ bool guard(const std::string &path, const std::vector<uint8_t> &bytes) {
 	return expect(committed == bytes, ("differs from the generator output; regenerate with --write: " + path).c_str());
 }
 
+// The forms program: built as the minted pair are, its shipped forms in its bytes (the globals 0x44,
+// the opcodes pop_g, equal, l_and and the wide play among its code's), and it decompiles to its own
+// text, no `#line` in it.
+bool build_forms(const std::string &source, std::vector<uint8_t> &bytes, std::string &err) {
+	const Program forms = {"menuscript", source.c_str(), "synth_forms.bin", 11, "Begin", "Server"};
+	if (!build(forms, bytes, err)) return false;
+	MusFile file;
+	if (mus_open_memory(&file, bytes.data(), bytes.size()) != 0) {
+		err = "synth_forms.bin does not open";
+		return false;
+	}
+	const MusScript &s = file.scripts[0];
+	bool ops[256] = {};
+	// The opcodes as the decoder's widths walk them (the 1-, 2- and 4-byte operands, the table's own).
+	for (uint32_t pc = 0; pc < s.code_size;) {
+		const uint8_t op = s.code[pc++];
+		ops[op] = true;
+		if (op == MUS_OP_TABLEXEC && pc + 4 <= s.code_size) pc += 4 + uint32_t(s.code[pc]) * s.code[pc + 2];
+		else if (op == 0x02 || (op >= 0x30 && op <= 0x34 && op != 0x33)) pc += 4;
+		else if (op == 0x05 || op == 0x06 || op == 0x0A || op == 0x0B || op == MUS_OP_PLAYW) pc += 2;
+		else if (op == 0x01 || op == 0x03 || op == 0x04 || op == 0x07 || op == 0x08 || op == 0x09 || op == 0x33 ||
+		         (op >= 0x28 && op <= 0x2B) || op == MUS_OP_ENTER || op == MUS_OP_SETSTATE || op == MUS_OP_PLAY ||
+		         op == 0x40)
+			pc += 1;
+	}
+	std::string text;
+	const bool decompiled = decompile(s, text, err);
+	const bool forms_ok = s.globals_size == 0x44 && ops[0x08] && ops[0x15] && ops[0x20] && ops[MUS_OP_PLAYW] &&
+	                      ops[MUS_OP_PLAY] && ops[MUS_OP_TABLEXEC] && s.variable_count >= 1;
+	mus_close(&file);
+	if (!decompiled) return false;
+	if (!forms_ok) {
+		err = "the program lacks a shipped menu program's form";
+		return false;
+	}
+	if (text != source || text.find("#line") != std::string::npos) {
+		size_t at = 0;
+		while (at < text.size() && at < source.size() && text[at] == source[at]) ++at;
+		err = "the program does not decompile to its own text (at " + std::to_string(at) + ": '" +
+		      text.substr(at, 60) + "')";
+		return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -293,10 +522,15 @@ int main(int argc, char **argv) {
 		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
 	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/mus/";
 
-	std::vector<uint8_t> game, menu;
+	std::vector<uint8_t> game, menu, forms;
 	std::string err;
 	if (!expect(build(kPrograms[0], game, err), ("synth_gamemus.bin: " + err).c_str())) return 1;
 	if (!expect(build(kPrograms[1], menu, err), ("synth_menumus.bin: " + err).c_str())) return 1;
+	const std::string forms_text = forms_source();
+	if (!expect(build_forms(forms_text, forms, err), ("synth_forms.bin: " + err).c_str())) return 1;
+	const std::vector<uint8_t> forms_text_bytes(forms_text.begin(), forms_text.end());
+	const std::string forms_path = dir + "synth_forms.bin";
+	const std::string forms_golden_path = dir + "golden_synth_forms.mus.txt";
 	std::string golden;
 	if (!expect(build_golden(game, golden, err), ("golden_synth_gamemus.mus.txt: " + err).c_str())) return 1;
 	const std::vector<uint8_t> golden_bytes(golden.begin(), golden.end());
@@ -309,15 +543,22 @@ int main(int argc, char **argv) {
 		if (!expect(write_file(menu_path, menu.data(), menu.size()), ("cannot write " + menu_path).c_str())) return 1;
 		if (!expect(write_file(golden_path, golden.data(), golden.size()), ("cannot write " + golden_path).c_str()))
 			return 1;
-		std::printf("wrote %s (%zu bytes), %s (%zu bytes), %s (%zu bytes)\n", game_path.c_str(), game.size(),
-		            menu_path.c_str(), menu.size(), golden_path.c_str(), golden.size());
+		if (!expect(write_file(forms_path, forms.data(), forms.size()), ("cannot write " + forms_path).c_str())) return 1;
+		if (!expect(write_file(forms_golden_path, forms_text.data(), forms_text.size()),
+		            ("cannot write " + forms_golden_path).c_str()))
+			return 1;
+		std::printf("wrote %s (%zu bytes), %s (%zu bytes), %s (%zu bytes), %s (%zu bytes), %s (%zu bytes)\n",
+		            game_path.c_str(), game.size(), menu_path.c_str(), menu.size(), golden_path.c_str(), golden.size(),
+		            forms_path.c_str(), forms.size(), forms_golden_path.c_str(), forms_text.size());
 		return 0;
 	}
 	bool ok = guard(game_path, game);
 	ok = guard(menu_path, menu) && ok;
 	ok = guard(golden_path, golden_bytes) && ok;
+	ok = guard(forms_path, forms) && ok;
+	ok = guard(forms_golden_path, forms_text_bytes) && ok;
 	if (!ok) return 1;
-	std::printf("OK: fixtures/mus synth programs + golden byte-reproducible (%zu + %zu + %zu bytes)\n", game.size(),
-	            menu.size(), golden.size());
+	std::printf("OK: fixtures/mus synth programs + goldens byte-reproducible (%zu + %zu + %zu + %zu + %zu bytes)\n",
+	            game.size(), menu.size(), golden.size(), forms.size(), forms_text.size());
 	return 0;
 }

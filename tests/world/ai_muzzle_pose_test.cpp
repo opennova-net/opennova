@@ -1,15 +1,16 @@
-// The sim-side muzzle pose on the retail data: every foot NPC on CP01 resolves
+// The sim-side muzzle pose: every foot NPC of the mission set's infantry.bms
+// (CP01's foot soldiers by their shipped rows) resolves
 // its launch userpoint on its OWN posed skeleton through the world's muzzle
 // pose provider [orig: Entity_GetAttachmentWorldPosition @0x4b2670], and the
 // point lands in the rifle envelope (a little above the entity origin, a little
 // ahead of it) — never at the head-height point the old 0.9 u chest-lift
 // fallback produced. The player's US01 rig backs the same provider: its head
 // (bone 14) rests above its weapon hand (bone 16) in the bind pose, and the
-// held-weapon model (M4_3RD) carries the user points the fire pass reads
-// (MFLASH01 ahead of the origin, muzzle authored +Z).
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms).
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+// held-weapon model (the synthetic gun, in the shipped M4_3RD's role) carries the
+// user points the fire pass reads (MFLASH01 ahead of the origin, muzzle authored +Z).
+// The rig is the synthetic person (the shipped US01's rig order) on the minted clips.
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/anim/skeletal_clips.h>
@@ -36,19 +37,24 @@ bool expect(bool cond, const char *msg) {
 constexpr int kItemTypePerson = 3;
 constexpr int kHeadBone = 14; // LocalPlayerPresenter.PLAYER_HEAD_BONE_INDEX
 constexpr int kHandBone = 16; // the held-weapon attach bone
+// The held third-person model: the shipped M4_3RD's role.
+constexpr const char *kHeldModel = "gun";
 
 float fx(int32_t q16) { return static_cast<float>(q16) / 65536.0f; }
 
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms)");
-	testrig::RetailMissionRig rig;
+	test_mission_set::Root root("ai_muzzle_pose");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
+	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "CP01.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "infantry.bms", error), "infantry.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "CP01 boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
@@ -139,15 +145,15 @@ int main() {
 	}
 	std::printf("muzzle: %d foot NPCs, %d resolved, %d guards, %d in the rifle envelope, "
 			"%d at head height\n", persons, stamped, guards, good, head_height);
-	expect(persons > 0, "CP01 carries foot NPCs");
+	expect(persons > 0, "the mission carries foot NPCs");
 	expect(stamped > 0, "at least one NPC resolved a muzzle (the provider is registered)");
 	expect(head_height == 0, "no muzzle sits at the head-height fallback point");
 	// Crouched/prone bodies and the odd mid-transition pose sit outside the
-	// standing rifle envelope; the rest of CP01 lands ~9 in 10 inside it.
+	// standing rifle envelope; the rest land inside it (~9 in 10 on the shipped CP01).
 	expect(good * 5 >= (stamped - guards) * 4,
 			"at least four in five stamped non-guard muzzles land in the rifle envelope");
 
-	// --- The player's own rig: US01's head and hand pivots, and the held model.
+	// --- The player's own rig: its head and hand pivots, and the held model.
 	const w::Entity *pe = rig.local.player();
 	int32_t pm[3] = {};
 	const bool player_muzzle = rig.world.pose_provider->resolve_muzzle_pose(
@@ -168,22 +174,22 @@ int main() {
 			expect(hand.y > 0.0f, "the weapon hand rests above the pelvis origin");
 		}
 	}
-	if (const Threedi3di3 *m4 = rig.assets().model("M4_3RD").get()) {
-		expect(m4->user_point_count > 0, "M4_3RD carries user points");
+	if (const Threedi3di3 *m4 = rig.assets().model(kHeldModel).get()) {
+		expect(m4->user_point_count > 0, "the held model carries user points");
 		int forward = 0;
 		for (size_t i = 0; i < m4->user_point_count; ++i) {
 			float p[3];
 			threedi_user_point_position(&m4->user_points[i], p);
 			if (i < 8)
-				std::printf("muzzle: M4_3RD userpoint %zu %s (%.3f, %.3f, %.3f)\n", i + 1,
+				std::printf("muzzle: %s userpoint %zu %s (%.3f, %.3f, %.3f)\n", kHeldModel, i + 1,
 						m4->user_points[i].name, p[0], p[1], p[2]);
 			if (p[2] > 0.1f) ++forward;
 		}
-		expect(forward > 0, "M4_3RD has a user point ahead of its origin (muzzle authored +Z)");
+		expect(forward > 0, "the held model has a user point ahead of its origin (muzzle authored +Z)");
 	} else {
-		expect(false, "M4_3RD loads from the mount");
+		expect(false, "the held model loads from the mount");
 	}
 
-	if (failures == 0) std::printf("ai_muzzle_pose: OK on CP01\n");
+	if (failures == 0) std::printf("ai_muzzle_pose: OK\n");
 	return failures == 0 ? 0 : 1;
 }

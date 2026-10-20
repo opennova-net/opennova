@@ -1,8 +1,8 @@
 extends GutTest
 
 # The runtime HudOverlay (native, over the engine HudFrameCompiler): configure
-# from authored hudpos.def text (the reference fixture's rows the health and
-# weapon-cluster legs read are authored below), feed typed per-frame state, and
+# from authored hudpos.def text (the rows the health and weapon-cluster legs
+# read are authored below), feed typed per-frame state, and
 # assert on the compiled draw list (get_draw_list_stats) plus the visible canvas
 # geometry.
 # The shell-side HudSightsCard child stack is covered here too.
@@ -1363,8 +1363,8 @@ const M4AUTO_SIGHTED_ROW := """weapon "WPN_M4AUTO"
 end
 """
 
-# The reference fixture set's hudpos.def (an earlier build's layout, not
-# JO:CA's) cut to the rows the health and weapon-cluster tests read: the font
+# A reference hudpos.def (an earlier build's layout, not JO:CA's) cut to the
+# rows the health and weapon-cluster tests read: the font
 # row, the health bar's rect and border colour, the clip anchor and ammo text
 # position, and the declutter rows of the elements those frames could draw
 # (HUDDECLUT_DMGBAR 0 1 1 0 hides the bar at the default level 0 and shows it

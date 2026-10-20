@@ -301,6 +301,11 @@ int main() {
 		            "attrib 0x2 arms only the fog distance")) return 1;
 		if (!expect(ungated.has_water_color && near(ungated.water_color.g, 30.0f / 255.0f), "a nonzero water byte arms the color")) return 1;
 		if (!expect(ungated.has_water_murk && near(ungated.water_murk, 0.35f), "a nonzero murk byte arms murk * 0.01")) return 1;
+		// An armed water color replaces the .env's [orig: Game_StartMission @ 0x525371..0x525399].
+		Config watered;
+		apply_bms_overrides(watered, ungated);
+		if (!expect(near(watered.water_rgb.g, 30.0f / 255.0f) && near(watered.water_rgb.r, 0.0f),
+		            "the armed water color replaces the config's")) return 1;
 	}
 
 	// Horizon blend — the frame-clear cross-fade, byte-exact vs the witnessed

@@ -113,6 +113,11 @@ public:
 		LOAD_STAGE_FINISH = 8,
 		LOAD_PROGRESS_WORLD_READY = 90,
 		LOAD_PROGRESS_COMPLETE = 100,
+		// Mirrors opennova::bms::WaypointFlags (engine/formats/mission/bms.h, where the
+		// witnesses are), pinned in the .cpp: the path flags the game reads. DOES_NOT_LOOP: the
+		// patrol stops at the path's last stop; PLAYER_ROUTE: the player's route.
+		WAYPOINT_DOES_NOT_LOOP = 0x1,
+		WAYPOINT_PLAYER_ROUTE = 0x2,
 		// items.def id = wire type id + this offset (engine/runtime/mission kItemIdOffset;
 		// pinned by static_assert in the .cpp). Bound so GDScript never
 		// re-hardcodes the 100000. [orig: the +100000 item-id bias in the BMS
@@ -213,6 +218,12 @@ public:
 	int get_area_trigger_count() const;
 	int add_area_trigger(const Vector3 &min_bounds, const Vector3 &max_bounds,
 			bool active, bool constrain_z, int zone_id);
+
+	// A waypoint path's flags (WAYPOINT_*), by path number (a marker's waypoint_id). The
+	// stops stay the markers' (waypoint_id / wp_number through set_entity_property_int).
+	// get: -1 without a document or for a path out of range; set: false then, dirty on success.
+	int get_waypoint_path_flags(int path) const;
+	bool set_waypoint_path_flags(int path, int flags);
 
 	// Each loadout input row is {name, ammo_primary, ammo_secondary, flags}.
 	// The native document validates and serializes these four strings.

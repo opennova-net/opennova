@@ -33,7 +33,7 @@ const HeightsState &empty_state() {
 
 // A .cpt read whole: its CDEP (or DPTH) depth as both planes (the input is the atlas: its tool's input is lost), the
 // rest of the file the side state; written back from them, the live atlas its depth (an unedited file writes its own
-// bytes: cpt_jo_assets_sweep's re-encode leg over every JO:CA .cpt).
+// bytes: the shipped form, fixtures/terrain/variants/shipped.cpt, re-encoded in cpt_shipped_form).
 class CptHeightsCodec final : public RasterCodec {
 public:
 	bool read(const std::vector<uint8_t> &decoded, RasterState &out, std::vector<SourceIssue> &issues,

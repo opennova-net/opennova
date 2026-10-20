@@ -1,7 +1,7 @@
 // D-NET-141 — the armory table build + the witnessed loadout-service rules, exercised against
-// the shipped weapon.def from the reference fixture set (94 weapons; NOTE a live install's VFS-resolved
-// weapon.def differs — e.g. the JO:CA host resolves 126 weapons — so LIVE index anchors beyond
-// the shared low range belong to the live wire gates, not this unit test).
+// the authored fixtures/def/weapon.def: the shipped JO:CA weapon.def's 94 weapons in the shipped
+// order, the rows these pins key on carrying the shipped field values (the live install resolves a
+// larger weapon.def, so LIVE index anchors beyond the shared low range belong to the live wire gates).
 //
 // Witnessed rules under test (docs/net/novaworld-net-re.md §5.57, 2026-07-02 grill):
 //   index    — null@0 [orig: AnimDef_InitAll @0x543615]; weapon blocks reuse-by-name else
@@ -25,8 +25,9 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "common/file_io.h"
+#include "common/temp_dir.h"
 #include "common/test_paths.h"
-#include "common/retail_paths.h"
 
 using namespace opennova;
 using namespace opennova::def;
@@ -40,80 +41,48 @@ static int failures = 0;
 		} \
 	} while (0)
 
-// The retail-install oracle: the base mount and every expansion the install
-// ships (OPENNOVA_JO_DIR), so protocol work can inspect the exact
-// expansion-scoped ADM indices and ammo classes a capture used. A retail leg of
-// an otherwise hermetic test; reported, never a pin.
-static int live_weapon_oracle(const std::string &install, const std::string &expansion) {
-	opennova::Vfs vfs;
-	if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) {
-		std::fprintf(stderr, "FAIL: live weapon mount (%s): %s\n", expansion.c_str(),
-		             vfs.last_error().c_str());
-		return 1;
-	}
-	std::vector<uint8_t> bytes;
-	if (!vfs.read_file("weapon.def", bytes) || bytes.empty()) {
-		std::fprintf(stderr, "FAIL: mounted weapon.def is unavailable\n");
-		return 1;
-	}
-	DefWeaponsFile live_file{};
-	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &live_file) != 0) {
-		std::fprintf(stderr, "FAIL: mounted weapon.def does not parse\n");
-		return 1;
-	}
-	const world::WeaponTable live = world::build_weapon_table(live_file);
-	std::printf("LIVE weapon.def bytes=%zu entries=%zu expansion=%s\n", bytes.size(),
-	            live.entries.size(), vfs.mounted_expansion().c_str());
-	for (size_t i = 0; i < live.ammo_class_names.size(); ++i)
-		std::printf("LIVE ammo-class local=%zu cap=%d name=%s\n", i,
-		            live.ammo_class_caps[i], live.ammo_class_names[i].c_str());
-	for (const int index : {1, 3, 16, 83, 84, 85, 88, 93, 97}) {
-		const world::WeaponTableEntry *entry =
-				live.by_index(static_cast<uint8_t>(index));
-		if (entry == nullptr) continue;
-		std::printf(
-				"LIVE adm=%d name=%s combo=%u:%u class=%s local=%d units=%d "
-				"clip=%d start=%d maxclips=%d bucket=%d weapon-class=%d\n",
-				index, entry->name.c_str(), entry->category, entry->rank,
-				entry->ammo_class.c_str(), entry->ammo_class_id,
-				entry->ammo_class_count, entry->clipsize, entry->startrounds,
-				entry->maxclips, entry->ammo_bucket, entry->weapon_class_slot);
-	}
-	def_free_weapons(&live_file);
-	return 0;
-}
-
-// The install's own mount answers the SIGHTS arm's file check: JO:CA's Colt
-// .45 authors `sights clt45aim.tga`, which no archive carries, so the weapon
-// the kernel loads has no SIGHTS row, while weapons whose cards exist keep
-// theirs [orig: WeaponDefs_ParseLineCallback's sights arm,
-// FileSystem_FileExists @0x544AE2, the return @0x544B10].
-static int colt_sights_through_the_mount(const std::string &install) {
+// The mount answers the SIGHTS arm's file check: JO:CA's Colt .45 authors
+// `sights clt45aim.tga`, which no archive carries, so the weapon the kernel
+// loads has no SIGHTS row, while a weapon whose card exists keeps its own
+// [orig: WeaponDefs_ParseLineCallback's sights arm, FileSystem_FileExists
+// @0x544AE2, the return @0x544B10]. The mount here carries the M4's card
+// alone, the two rows as the shipped weapon.def spells them.
+static int colt_sights_through_the_mount() {
+	test_temp::TempDir dir("weapon_table_sights");
+	const std::string root = dir.root();
+	CHECK(test_io::write_text(root + "/weapon.def",
+			"weapon \"WPN_colt45\"\n"
+			"\tsights  clt45aim.tga   112  0 889 768 blend\n"
+			"end\n"
+			"weapon \"WPN_M4AUTO\"\n"
+			"\tsights  car15aim.tga   112  0 889 768 blend\n"
+			"end\n"));
+	CHECK(test_io::write_file(root + "/car15aim.tga", std::vector<uint8_t>(18, 0)));
 	ResourceIndex index;
-	if (!index.scan(install)) {
-		std::fprintf(stderr, "FAIL: the base mount of %s does not scan\n", install.c_str());
+	if (!index.scan(root, std::string(), VfsMountMode::LooseOnly)) {
+		std::fprintf(stderr, "FAIL: the sights mount %s does not scan\n", root.c_str());
 		return 1;
 	}
 	const mission::BootFileSource files = mission::boot_files_from_index(index);
 	mission::MissionKernel kernel;
 	CHECK(kernel.load_weapon_table(files, nullptr));
 	const DefWeaponDef *colt = nullptr;
+	const DefWeaponDef *m4 = nullptr;
 	size_t rows = 0;
 	for (size_t i = 0; i < kernel.weapon_defs.count; ++i) {
 		const DefWeaponDef &w = kernel.weapon_defs.entries[i];
 		rows += w.sights_count;
 		if (std::strcmp(w.weapon_name, "WPN_colt45") == 0) colt = &w;
+		if (std::strcmp(w.weapon_name, "WPN_M4AUTO") == 0) m4 = &w;
 	}
-	CHECK(colt != nullptr);
+	CHECK(colt != nullptr && m4 != nullptr);
 	if (colt != nullptr) CHECK(colt->sights_count == 0);
+	if (m4 != nullptr) CHECK(m4->sights_count == 1);
 	CHECK(rows > 0);
-	std::printf("mounted weapon.def: WPN_colt45 has %zu SIGHTS rows, the table %zu\n",
-	            colt != nullptr ? colt->sights_count : (size_t)0, rows);
 	return 0;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     // Authored/default stability survives DEF -> runtime-table promotion.
     {
         static const char kStability[] =
@@ -203,21 +172,11 @@ int main(int argc, char **argv) {
         def_free_weapons(&parsed);
     }
 
-	if (const std::string install = retail::install(); !install.empty()) {
-		if (live_weapon_oracle(install, std::string()) != 0) return 1;
-		for (const std::string &expansion : retail::expansions())
-			if (live_weapon_oracle(install, expansion) != 0) return 1;
-		if (colt_sights_through_the_mount(install) != 0) return 1;
-	} else {
-		retail::skip_leg("OPENNOVA_JO_DIR (the live weapon.def oracle over the install's expansions)");
-	}
+	if (colt_sights_through_the_mount() != 0) return 1;
 
-	// The shipped weapon.def from the reference fixture set: the index/field pins
-	// below are its SKIP-LEG retail leg; the inline tables after it run always.
-	const std::string fixture = retail::reference_fixture("def/weapon.def");
-	if (fixture.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def (the shipped weapon table's index and field pins)");
-	} else {
+	// The authored armory (fixtures/def/weapon.def): the shipped table's index and field pins.
+	{
+	const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/weapon.def";
 	const char *path = fixture.c_str();
 	DefWeaponsFile wf;
 	std::memset(&wf, 0, sizeof(wf));
@@ -390,7 +349,7 @@ int main(int argc, char **argv) {
 	}
 
 	def_free_weapons(&wf);
-	}  // retail leg
+	}  // the authored armory
 
 	// --- the explosion-sound fallback: ammo def 0's static effect bank, row 5
 	// dword +8 (dword_A2EB80) = the FIFTH authored tag in ascending tag order,

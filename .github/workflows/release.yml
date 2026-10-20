@@ -10,8 +10,8 @@ permissions:
 
 jobs:
   # A tag publishes only a commit master carries whose master CI run passed,
-  # so a release inherits every gate CI requires (the maturity lints, native
-  # core and retail, Godot GUT) instead of re-running a subset of them. Master
+  # so a release inherits every gate CI requires (the maturity lints, the
+  # native ctests, Godot GUT) instead of re-running a subset of them. Master
   # pushes always run everything and are never cancelled (ci.yml's `changes`
   # and concurrency), so a tag on a pushed master head finds its run; a tag
   # pushed straight after the merge waits for that run to finish.

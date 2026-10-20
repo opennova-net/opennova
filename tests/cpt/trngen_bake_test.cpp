@@ -9,9 +9,9 @@
 // with its 8-bit `.raw` depth map and TrnGen's own `<case>.cpt`, the corpus retired from fixtures/
 // with the old builder; `git show d57608b3d^:fixtures/terrain/...` through `git lfs smudge`
 // restores it) and compares every byte. ctest runs the first part alone, as four rows side by side
-// (cpt_trngen_bake_island, _hills, _flat and _refusals, tests/common/test_parts.h); the retail-corpus
-// byte diff of the CPT writer the bake writes with is the re-encode leg of the gated
-// cpt_jo_assets_sweep (tests/terrain/cpt_jo_assets_sweep_test.cpp).
+// (cpt_trngen_bake_island, _hills, _flat and _refusals, tests/common/test_parts.h); the CPT writer
+// the bake writes with re-encodes the shipped .cpt form byte for byte in cpt_shipped_form
+// (tests/terrain/cpt_shipped_form_test.cpp).
 #include <formats/cpt/trngen/lod_mesh_data.h>
 #include <formats/cpt/trngen/terrain_bake.h>
 #include <formats/cpt/trngen/tristrip.h>

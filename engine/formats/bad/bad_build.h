@@ -9,8 +9,8 @@
 // runtime walks a BadBuildClip; `BadFile` stays the one clip every consumer
 // reads.
 //
-// What the builder derives, never the author (witnessed over the 477 retail
-// `.bad` clips under OPENNOVA_JO_ASSETS, 2026-09-24):
+// What the builder derives, never the author (witnessed over the 477 shipped
+// `.bad` clips of the JO:CA asset tree, 2026-09-24):
 //   * `BadBone.rotation[9]` is the transpose of the bone's first key as a
 //     matrix, in 13517 of 13517 bones (worst deviation 5.0e-7). The runtime
 //     reads it as the bind of the rig's RESET clip, which every clip of the rig

@@ -9,8 +9,6 @@
 
 #include <string>
 
-#include "common/retail_paths.h"
-
 using namespace opennova::mus;
 
 static int passed = 0, failed = 0;
@@ -1236,15 +1234,11 @@ static int test_vm_pc_accessor(void) {
 }
 
 /* End-to-end smoke: load a gamescript program and tick the VM until the first
-   sound trigger. Both the minted synth_gamemus.bin (tests/fixtures/synth_mus_gen.cpp)
-   and the shipped jo_gamemus.bin run through `enter Testmission` ->
+   sound trigger. The minted synth_gamemus.bin (tests/fixtures/synth_mus_gen.cpp)
+   runs, as the shipped gamemus.bin does, through `enter Testmission` ->
    `enter Multiplayerstart` (since Var01 == 0) -> first opcode is play sound_0.
-   Assert on_play_sound fires with index=0 within the tick budget. The shipped
-   programs come from the reference fixture set (OPENNOVA_JO_ASSETS) and are the
-   retail legs of the three fixture tests below. */
+   Assert on_play_sound fires with index=0 within the tick budget. */
 #ifdef MUS_FIXTURE_DIR
-static std::string g_retail_gamemus, g_retail_menumus;
-
 static int fixture_first_sound(const char *path) {
     MusFile mf;
     int rc = mus_open(&mf, path);
@@ -1288,16 +1282,13 @@ static int test_vm_synth_fixture_first_sound(void) {
     return fixture_first_sound(MUS_FIXTURE_DIR "/synth_gamemus.bin");
 }
 
-static int test_vm_jo_fixture_first_sound(void) {
-    return fixture_first_sound(g_retail_gamemus.c_str());
-}
-
-/* Executable form of the opcode census: drive the real shipped scripts through
-   the VM for many ticks and assert the engine-width walk never desyncs into an
-   unknown opcode (MUS_VM_ERROR). gamescript exercises enter/tablexec/method;
-   menuscript exercises the large push_g/l_and/brfalse/setstate/play state
-   machine. Proves the VM executes the stock bins faithfully. */
-static int run_fixture_no_error(const char *path, int max_ticks) {
+/* Executable form of the opcode census: drive the minted programs through the VM
+   for many ticks and assert the engine-width walk never desyncs into an unknown
+   opcode (MUS_VM_ERROR): the gamescript exercises enter/tablexec/method, the forms
+   program the shipped menu programs' push_g/equal/l_and/brfalse/pop_g/setstate/
+   play/playw state machine under every Var02 its routing reads (the stock bins
+   ran so, menumus.bin 2000 ticks, gamemus.bin 500). */
+static int run_fixture_no_error(const char *path, int max_ticks, uint8_t var = 0, int32_t value = 0) {
     const char *fname = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
     MusFile mf;
     int rc = mus_open(&mf, path);
@@ -1305,6 +1296,7 @@ static int run_fixture_no_error(const char *path, int max_ticks) {
     CHECK(mf.scripts != NULL, "scripts present");
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &mf.scripts[0]);
+    mus_vm_set_var(vm, var, value);
     mus_vm_start(vm);
     int ok = 1;
     for (int t = 0; t < max_ticks; ++t) {
@@ -1328,19 +1320,24 @@ static int test_vm_synth_fixtures_no_desync(void) {
     return 1;
 }
 
-static int test_vm_jo_fixtures_no_desync(void) {
-    CHECK(run_fixture_no_error(g_retail_gamemus.c_str(), 500),  "gamescript runs without VM error");
-    CHECK(run_fixture_no_error(g_retail_menumus.c_str(), 2000), "menuscript runs without VM error");
+static int test_vm_forms_no_desync(void) {
+    for (const int32_t value : {0, 1, 5, 6, 7, 9, 10, 11})
+        CHECK(run_fixture_no_error(MUS_FIXTURE_DIR "/synth_forms.bin", 2000, 2, value),
+              "the forms program runs without VM error");
     return 1;
 }
 
-/* Behavioral proof (Tier 3, CI form): assert the shipped programs produce the
-   EXACT observable event stream the Tier-4 Unicorn differential proved byte-
-   identical to the ORIGINAL Jointops handlers (mus_diff_jointops.py, local RE tooling per docs/audio/mus-sbf-re.md:
-   original == reimpl for all scenarios). `V<v>` = on_volume_changed (GSV; 200<<16),
-   `P<i>` = on_play_sound. The golden streams are captured at a fixed 12-tick window;
-   each Var value yields a DISTINCT stream, which is the proof that var-gated routing
-   works (gamescript's `push_g Var1; neq; brfalse; setstate`; menuscript's Var2). */
+/* Behavioral proof (Tier 3, CI form): the observable event streams over a fixed
+   12-tick window. The Tier-4 Unicorn differential (mus_diff_jointops.py, local RE
+   tooling per docs/audio/mus-sbf-re.md) proved the VM's streams over the shipped
+   programs byte-identical to the ORIGINAL Jointops handlers' (gamemus.bin with Var1
+   0 "V13107200" then ten P0, with Var1 1 "V13107200" alone; menumus.bin with Var2 0
+   "V13107200 V13107200 P1 V13107200 V13107200 P2 P0 P0", with 1 the P2..P8 loop, with
+   2 the V,P2 loop); the same handlers' streams over the minted programs, whose
+   opcodes are theirs, are pinned below. `V<v>` = on_volume_changed (GSV; 200<<16),
+   `P<i>` = on_play_sound; each Var value yields a DISTINCT stream, which is the proof
+   that var-gated routing works (gamescript's `push_g Var1; neq; brfalse; setstate`;
+   the forms program's Var2). */
 struct BehLog {
     char ev[2048];                 /* "V<v> P<i> ..." accumulated in order */
     int  saw_mpstart, saw_null;    /* gamescript section routing */
@@ -1367,29 +1364,7 @@ static void beh_run(const char *path, uint8_t varIdx, int32_t varVal, int ticks,
     mus_vm_destroy(vm); mus_close(&mf);
 }
 
-static int test_vm_jo_behavioral(void) {
-    BehLog L;
-    beh_run(g_retail_gamemus.c_str(), 1, 0, 12, &L);
-    CHECK(L.ev[0] != 0, "the shipped gamescript produced a stream");
-    /* Var1=0 (no mission): SV(200), then Multiplayerstart loops sound_0. */
-    CHECK(strcmp(L.ev, "V13107200 P0 P0 P0 P0 P0 P0 P0 P0 P0 P0 ") == 0, "gamemus Var1=0 stream == original");
-    CHECK(L.saw_mpstart && !L.saw_null, "gamemus Var1=0 routes to Multiplayerstart");
-
-    beh_run(g_retail_gamemus.c_str(), 1, 1, 12, &L);
-    /* Var1=1 (mission active): branch routes to silent Missionnull -- the discriminator. */
-    CHECK(strcmp(L.ev, "V13107200 ") == 0, "gamemus Var1=1 stream == original (SV200 then silent)");
-    CHECK(L.saw_null && !L.saw_mpstart, "gamemus Var1=1 routes to Missionnull (branch discriminator)");
-
-    beh_run(g_retail_menumus.c_str(), 2, 0, 12, &L);
-    CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 P0 P0 ") == 0, "menumus Var2=0 stream == original");
-    beh_run(g_retail_menumus.c_str(), 2, 1, 12, &L);
-    CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 P3 P4 P5 P6 P7 P8 P2 ") == 0, "menumus Var2=1 stream == original (P2..P8 loop)");
-    beh_run(g_retail_menumus.c_str(), 2, 2, 12, &L);
-    CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 V13107200 P2 V13107200 P2 ") == 0, "menumus Var2=2 stream == original (V,P2 loop)");
-    return 1;
-}
-
-/* The same proof over the minted programs, whose streams follow from their
+/* The proof over the minted programs, whose streams follow from their
    source (tests/fixtures/synth_mus_gen.cpp) under the witnessed halting rules
    (a play, setstate or done ends the tick; a method call does not, and an
    on-switch whose entry jumps FORWARD continues the tick with the target
@@ -1424,6 +1399,38 @@ static int test_vm_synth_behavioral(void) {
     beh_run(menu, 2, 2, 12, &L);
     CHECK(beh_expect(&L, "V13107200 P1 V13107200 P2 V13107200 P2 V13107200 P2 V13107200 P2 V13107200 P2 "),
           "synth menumus Var2=2: Attract then the Ambient (SV, sound_2) loop");
+    return 1;
+}
+/* The forms program's streams, from its source (tests/fixtures/synth_mus_gen.cpp) under the same rules:
+   Begin sets Var14 0, the volume (250<<16) and enters Poll; Poll's on-switch on Var00 jumps forward into
+   Title, which plays sound_1 the first time (Var14 then 1) and enters Cycle after; Cycle plays sound_2,
+   sound_3 and sound_256 (the word-wide play) while Var02 is 1, else enters Route, whose `==` chain sends
+   Var02 0 to Fault (sound_4, back to Poll), 9 to Setup (sound_12, then the sound_5 loop), 10 to Profile
+   (the sound_300 loop), 11 to Solo (the sound_7 loop), 5 to Lobby (sound_9 and sound_316 the first time,
+   Var15 then 1; the `&&` false for 5), and any other to Server (the sound_11 loop, the `&&` sending 7
+   back through Route and keeping 6). */
+static int test_vm_forms_behavioral(void) {
+    const char *forms = MUS_FIXTURE_DIR "/synth_forms.bin";
+    const char *opening = "V16384000 V16384000 P1 V16384000 V16384000 P2 ";
+    const struct {
+        int32_t var02;
+        const char *rest;
+    } kStreams[] = {
+        {0, "P4 V16384000 V16384000 P2 "},
+        {1, "P3 P256 V16384000 P2 P3 P256 "},
+        {5, "V16384000 P9 P316 V16384000 V16384000 "},
+        {6, "P11 P11 P11 "},
+        {7, "P11 P11 "},
+        {9, "P12 V16384000 P5 V16384000 P5 "},
+        {10, "P300 P300 P300 "},
+        {11, "P7 P7 P7 "},
+    };
+    BehLog L;
+    for (const auto &stream : kStreams) {
+        beh_run(forms, 2, stream.var02, 12, &L);
+        const std::string expected = std::string(opening) + stream.rest;
+        CHECK(beh_expect(&L, expected.c_str()), "the forms program's stream for its Var02");
+    }
     return 1;
 }
 #endif
@@ -1488,8 +1495,7 @@ static int test_vm_load_null_script(void) {
     return 1;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main(void) {
     /* E1 */
     RUN_TEST(test_vm_lifecycle);
     RUN_TEST(test_vm_hooks_registered);
@@ -1546,16 +1552,8 @@ int main(int argc, char **argv) {
     RUN_TEST(test_vm_synth_fixture_first_sound);
     RUN_TEST(test_vm_synth_fixtures_no_desync);
     RUN_TEST(test_vm_synth_behavioral);
-    /* The retail legs: the shipped programs from the reference fixture set. */
-    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
-    g_retail_menumus = retail::reference_fixture("mus/jo_menumus.bin");
-    if (g_retail_gamemus.empty() || g_retail_menumus.empty()) {
-        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_{gamemus,menumus}.bin (the shipped programs)");
-    } else {
-        RUN_TEST(test_vm_jo_fixture_first_sound);
-        RUN_TEST(test_vm_jo_fixtures_no_desync);
-        RUN_TEST(test_vm_jo_behavioral);
-    }
+    RUN_TEST(test_vm_forms_no_desync);
+    RUN_TEST(test_vm_forms_behavioral);
 #endif
 
     printf("\n%d passed, %d failed\n", passed, failed);

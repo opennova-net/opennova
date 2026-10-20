@@ -12,17 +12,19 @@ id and judges each run by the probe's verdict (its 11-file output contract:
 The probe refuses, before its publication transaction, when the window is
 missing or the wrong size: run from an interactive desktop session.
 
-Machine paths default to the documented roots (OPENNOVA_JO_ASSETS for the
-loose .bms corpus, OPENNOVA_JO_DIR for the retail install, GODOT_BIN for the
-binary) -- never tracked defaults.
+The machine paths are arguments, never tracked defaults: -MissionResourceDir
+names the loose .bms corpus, -RuntimeResourceDir the retail install, and
+-GodotBin (or GODOT_BIN) the binary.
 
 .EXAMPLE
 # Full sweep at the frozen commit
-.\scripts\render\capture_opennova_fixtures.ps1 -SourceCommit $frozen
+.\scripts\render\capture_opennova_fixtures.ps1 -SourceCommit $frozen `
+  -MissionResourceDir $assets -RuntimeResourceDir $install
 
 .EXAMPLE
 # Retake two fixtures from the same source commit
 .\scripts\render\capture_opennova_fixtures.ps1 -SourceCommit $frozen `
+  -MissionResourceDir $assets -RuntimeResourceDir $install `
   -Ids 00tra-tire-marks-retail,cp01-water-wide-retail
 #>
 [CmdletBinding()]
@@ -34,8 +36,8 @@ param(
     # only valid for evidence when the tree is clean and unrebuilt.
     [string]$SourceCommit = "",
     [string]$OutputRoot = "",
-    [string]$MissionResourceDir = "",
-    [string]$RuntimeResourceDir = "",
+    [Parameter(Mandatory = $true)][string]$MissionResourceDir,
+    [Parameter(Mandatory = $true)][string]$RuntimeResourceDir,
     [string]$Expansion = "revx02",
     [string]$CaptureMode = "hud_hidden",
     [string]$GodotBin = "",
@@ -53,13 +55,11 @@ if (-not $SourceCommit) { $SourceCommit = (& git rev-parse HEAD).Trim() }
 if ($SourceCommit -notmatch "^[0-9a-f]{40}$") {
     throw "SourceCommit must be a full lowercase 40-hex sha: $SourceCommit"
 }
-if (-not $MissionResourceDir) { $MissionResourceDir = Get-OpenNovaRetailAssets }
-if (-not $MissionResourceDir -or -not (Test-Path $MissionResourceDir)) {
-    throw "MissionResourceDir (or OPENNOVA_JO_ASSETS) must name the loose .bms corpus"
+if (-not (Test-Path $MissionResourceDir)) {
+    throw "MissionResourceDir must name the loose .bms corpus"
 }
-if (-not $RuntimeResourceDir) { $RuntimeResourceDir = Get-OpenNovaRetailInstall }
-if (-not $RuntimeResourceDir -or -not (Test-Path $RuntimeResourceDir)) {
-    throw "RuntimeResourceDir (or OPENNOVA_JO_DIR) must name the retail install"
+if (-not (Test-Path $RuntimeResourceDir)) {
+    throw "RuntimeResourceDir must name the retail install"
 }
 if ($GodotBin) { $env:GODOT_BIN = $GodotBin }
 if (-not (Find-GodotBinary)) { throw "Godot 4.6.1 was not found; set GODOT_BIN or pass -GodotBin" }

@@ -14,16 +14,16 @@ tool call. The retail game is driven separately through `onhook-mcp`
 
 ```bash
 python scripts/mcp/game_mcp.py launch --windowed --resolution 1280x720 \
-    --resource-dir "$OPENNOVA_JO_DIR" [--exp revx02] [--mission 00TRa.bms] \
+    --resource-dir "<JO install>" [--exp revx02] [--mission 00TRa.bms] \
     --pid-file build/game.pid
 ```
 
 - `--headless` when no window is needed (window probes then report
   `available: false`); `--windowed` otherwise (never rely on the project's
   fullscreen default under automation).
-- The two machine roots come from `.claude/settings.local.json` `env`
-  (`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`); never guess or commit a local
-  path. `GODOT_BIN` names
+- `--resource-dir` names the game data, a retail install on this machine (a
+  machine-local path: never guess or commit one); without it the game boots
+  its own base game (`assets/`). `GODOT_BIN` names
   the binary (else the main checkout's `.godot-bin/`).
 - A `--mission` launch parks under the start splash with the world un-ticked:
   every mission probe begins with `wait_for_local_player`.

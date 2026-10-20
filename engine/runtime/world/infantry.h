@@ -803,7 +803,8 @@ struct InfantryState {
     // Lean inputs (MoveOrder bits 6/7 [orig: entity+0x12C 0x40/0x80]) and the smoothed
     // lean angle (entity+0xB0, BAM32). Every body tick decays lean -= (lean+8)>>4
     // [orig: @0x4b5c97]; the on-foot ramp adds -/+0x3000000 per held lean key, gated
-    // alive + not prone [orig: @0x4b7dbf/@0x4b7dd6; Flags&0x100020 legs unmodeled].
+    // alive + not prone + not on a ladder or under a chute [orig: @0x4b7dbf/@0x4b7dd6;
+    // the Flags & 0x100020 gate @0x4b7dad].
     // Consumers: prone roll anims 41/42, the aim-overlay lean term, and the FP camera
     // roll = torsoRoll + lean/4 [orig: @0x437fcd].
     // [orig: Player_PackInputStateToEntity @0x4df6e3..0x4df7a0]
@@ -854,7 +855,7 @@ struct InfantryState {
     // 0xD000) * cos(lean), floored 0x2000 at the store [orig: on-foot
     // @0x4b6984..0x4b6bab, floor @0x4b6b98; mounted floor @0x4b68e7]; that
     // leg's full 3-angle lateral tilt (on-foot @0x4b69ab..0x4b6b7c, mounted
-    // @0x4b66fc..0x4b68e5) is the tracked residue, D-HUD-20.
+    // @0x4b66fc..0x4b68e5) is the tracked residue, D-INF-18.
     int32_t eye_offset_x = 0;
     int32_t eye_offset_y = 0;
     int32_t eye_offset_z = 0;

@@ -7,7 +7,6 @@
 
 #include <formats/def/def.h>
 #include "common/test_paths.h"
-#include "common/retail_paths.h"
 
 #include <ctype.h>
 #include <string>
@@ -125,7 +124,10 @@ static int test_score_word(void) {
    third <secondary_effect> token; particlefx/particlefxw3/particlefxw4 never
    do), the death/h2odeath/fire/other/spawn/finale keys take the effect name
    only, keys match case-insensitively, and extra tokens are ignored. The
-   snippet mirrors the retail "Drivable Dune Buggy" rows (JOX ITEMS.DEF). */
+   snippet mirrors the retail "Drivable Dune Buggy" rows (JOX ITEMS.DEF):
+   DBuggy1 (101291) anchors Effect_whiteExhaust at FX00 there, the row the
+   effect-attach pass consumes (witnessed over the shipped table by the retired
+   def_parse_items_retail leg, 2026-10-19). */
 static int test_particle_keys(void) {
     static const char snippet[] =
         "begin \"Drivable Dune Buggy\"\r\n"
@@ -432,7 +434,11 @@ static int test_item_def_allocator_defaults(void) {
    whose second callback is the mounted camera. The key is matched case-
    insensitively (stock data writes `Virtualdisplay`) and the two tokens may be
    separated by any run of blanks. [orig: ItemDef_ParseProperty @0x49F4E0 ->
-   def+0xD0 / def+0xE0; @0x49F650 -> def+0x168] */
+   def+0xD0 / def+0xE0; @0x49F650 -> def+0x168]
+   The two tank blocks are JO:CA ITEMS.DEF's only virtual displays, spelled as it
+   spells them: the M1A1 (100164) `tankdrvr` and the T80 (100165) `t80_drvr`, both
+   at `camera` with input_function tank (witnessed over the shipped table by the
+   retired def_parse_items_retail leg, 2026-10-19). */
 static int test_virtual_display_and_input_function(void) {
     static const char snippet[] =
         "begin \"Drivable M1A1 Tank\"\r\n"
@@ -441,17 +447,23 @@ static int test_virtual_display_and_input_function(void) {
         "  graphic Dm1a1\r\n"
         "\r\n"
         "  Virtualdisplay tankdrvr  camera\r\n"
-        "  input_function tank\t\t\r\n"
+        "  input_function tank\t\t\t\t\r\n"
         "  render_function tank\r\n"
         "end\r\n"
         "begin \"Plain\"\r\n"
         "  id 100001\r\n"
         "  type vehicle\r\n"
+        "end\r\n"
+        "begin \"Drivable T80 Tank\"\r\n"
+        "  id 100165\r\n"
+        "  type vehicle\r\n"
+        "  Virtualdisplay t80_drvr  camera\r\n"
+        "  input_function tank\t\t\t\t\r\n"
         "end\r\n";
     DefItemsFile items;
     memset(&items, 0, sizeof(items));
     if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1, &items) != 0 ||
-        items.count != 2) {
+        items.count != 3) {
         fprintf(stderr, "FAIL: virtualdisplay snippet did not parse\n");
         def_free_items(&items);
         return 1;
@@ -475,95 +487,16 @@ static int test_virtual_display_and_input_function(void) {
         fprintf(stderr, "FAIL: a def without the keys must carry empty fields\n");
         bad = 1;
     }
+    const DefItemDef *t80 = &items.entries[2];
+    if (t80->id != 100165 || strcmp(t80->virtual_display, "t80_drvr") != 0 ||
+        strcmp(t80->virtual_display_userpoint, "camera") != 0 ||
+        strcmp(t80->input_function, "tank") != 0) {
+        fprintf(stderr, "FAIL: T80 virtualdisplay '%s' '%s' input '%s'\n", t80->virtual_display,
+                t80->virtual_display_userpoint, t80->input_function);
+        bad = 1;
+    }
     def_free_items(&items);
     return bad;
-}
-/* The stock tanks are the only items that author a virtual display (SKIP-LEG
-   without OPENNOVA_JO_ASSETS). */
-static int test_retail_tank_virtual_displays(void) {
-    const std::string path = retail::asset_file("items.def");
-    if (path.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS carrying items.def");
-    DefItemsFile items;
-    memset(&items, 0, sizeof(items));
-    if (def_parse_items(path.c_str(), &items) != 0) {
-        fprintf(stderr, "FAIL: retail items.def did not parse: %s\n", path.c_str());
-        return 1;
-    }
-    int rc = 0;
-    size_t displays = 0;
-    for (size_t i = 0; i < items.count; ++i) {
-        const DefItemDef &def = items.entries[i];
-        if (def.virtual_display[0] == '\0') continue;
-        ++displays;
-        if (strcmp(def.virtual_display_userpoint, "camera") != 0 ||
-            strcmp(def.input_function, "tank") != 0) {
-            fprintf(stderr, "FAIL: item %d virtualdisplay '%s' '%s' input '%s'\n", def.id,
-                    def.virtual_display, def.virtual_display_userpoint, def.input_function);
-            rc = 1;
-        }
-        const char *want = def.id == 100164 ? "tankdrvr" : def.id == 100165 ? "t80_drvr" : NULL;
-        if (want != NULL && strcmp(def.virtual_display, want) != 0) {
-            fprintf(stderr, "FAIL: item %d virtualdisplay '%s' != '%s'\n", def.id,
-                    def.virtual_display, want);
-            rc = 1;
-        }
-    }
-    printf("retail items.def: %zu items author a virtual display\n", displays);
-    if (displays == 0) {
-        fprintf(stderr, "FAIL: no retail item authors virtualdisplay\n");
-        rc = 1;
-    }
-    def_free_items(&items);
-    return rc;
-}
-/* The per-item particle-effect slots on the retail items.def (SKIP-LEG without
-   OPENNOVA_JO_ASSETS): the shipped table authors particlefx rows, and DBuggy1
-   (101291) anchors Effect_whiteExhaust at the model's FX00 user point — the row
-   the effect-attach pass consumes. [orig: ItemDef_ParseProperty @ 0x49eb00] */
-static int test_retail_particlefx_rows(void) {
-    const std::string path = retail::asset_file("items.def");
-    if (path.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS carrying items.def");
-    DefItemsFile items;
-    memset(&items, 0, sizeof(items));
-    if (def_parse_items(path.c_str(), &items) != 0) {
-        fprintf(stderr, "FAIL: retail items.def did not parse: %s\n", path.c_str());
-        return 1;
-    }
-    size_t with_fx = 0;
-    const DefItemDef *buggy = NULL;
-    for (size_t i = 0; i < items.count; ++i) {
-        if (items.entries[i].particlefx.effect[0] != '\0') ++with_fx;
-        if (items.entries[i].id == 101291) buggy = &items.entries[i];
-    }
-    printf("retail items.def: %zu items, %zu author particlefx\n", items.count, with_fx);
-    int rc = 0;
-    if (with_fx == 0) {
-        fprintf(stderr, "FAIL: no retail item authors particlefx\n");
-        rc = 1;
-    }
-    if (buggy == NULL) {
-        fprintf(stderr, "FAIL: DBuggy1 (101291) is not in the retail items.def\n");
-        rc = 1;
-    } else {
-        printf("retail items.def: DBuggy1 particlefx %s @ %s\n", buggy->particlefx.effect,
-               buggy->particlefx.userpoint);
-        std::string fx(buggy->particlefx.effect);
-        for (size_t i = 0; i < fx.size(); ++i) fx[i] = (char)tolower((unsigned char)fx[i]);
-        if (fx != "effect_whiteexhaust") {
-            fprintf(stderr, "FAIL: DBuggy1 particlefx effect '%s', expected Effect_whiteExhaust\n",
-                    buggy->particlefx.effect);
-            rc = 1;
-        }
-        std::string up(buggy->particlefx.userpoint);
-        for (size_t i = 0; i < up.size(); ++i) up[i] = (char)toupper((unsigned char)up[i]);
-        if (up != "FX00") {
-            fprintf(stderr, "FAIL: DBuggy1 particlefx user point '%s', expected FX00\n",
-                    buggy->particlefx.userpoint);
-            rc = 1;
-        }
-    }
-    def_free_items(&items);
-    return rc;
 }
 
 /* A line carries 30 tokens at most: the key and 29 values, the 29th running on to
@@ -1018,8 +951,7 @@ static int test_attrib_reads_the_29_values(void) {
     return bad;
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     if (test_items_read_the_retail_tokens() != 0) return 1;
     if (test_tab_separated_keys() != 0) return 1;
     if (test_atof_is_the_crt_atof() != 0) return 1;
@@ -1047,9 +979,6 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (test_virtual_display_and_input_function() != 0) {
-        return 1;
-    }
-    if (test_retail_tank_virtual_displays() != 0) {
         return 1;
     }
     const char *repo_root = test_paths_repo_root(__FILE__);
@@ -1681,10 +1610,6 @@ int main(int argc, char **argv) {
         return 1;
     }
     def_free_items(&shadow_items);
-
-    if (test_retail_particlefx_rows() != 0) {
-        return 1;
-    }
 
     printf("PASS: items parsing OK\n");
     return 0;

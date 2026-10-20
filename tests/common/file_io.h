@@ -8,17 +8,16 @@
 // ANSI code page, a path past MAX_PATH). And the CR LF text a test stages a
 // retail text file with. Header-only, infrastructure only.
 //
-// The UTF-8 contract holds here and in temp_dir.h, not yet in the two roots
+// The UTF-8 contract holds here and in temp_dir.h, not yet in the root
 // tests/common reads from the environment: test_paths_temp_dir() (test_paths.h)
-// and the retail roots with the files found under them (retail_paths.h) are the
-// narrow strings getenv and std::filesystem::path::string() give, in the ANSI
-// code page on Windows. The tests that take them hand them to fopen, _mkdir and
+// is the narrow string getenv and std::filesystem::path::string() give, in the
+// ANSI code page on Windows. The tests that take it hand it to fopen, _mkdir and
 // std::filesystem::path(std::string), which read that code page, as well as to
-// the UTF-8 calls here and in the engine, so turning those roots to UTF-8 turns
-// their callers too (to io::os_path, io::fopen_utf8 or test_temp::TempDir), a
-// change beyond tests/common. Where a root is ASCII (the runners' temp
-// directories, a retail tree under an ASCII path) both spellings are the same
-// bytes and either passes here; a root outside ASCII waits on that change.
+// the UTF-8 calls here and in the engine, so turning that root to UTF-8 turns
+// its callers too (to io::os_path, io::fopen_utf8 or test_temp::TempDir), a
+// change beyond tests/common. Where the root is ASCII (the runners' temp
+// directories) both spellings are the same bytes and either passes here; a root
+// outside ASCII waits on that change.
 #pragma once
 
 #include <cctype>

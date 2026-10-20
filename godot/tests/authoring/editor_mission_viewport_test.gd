@@ -345,7 +345,7 @@ func test_the_mission_builds_over_frames() -> void:
 
 
 ## The scale witness: the shipped mission with the most entities (ASH_I1gA.bms, 2,193 entities,
-## the retail leg's measurement) stands as the minted mission grown to that count. It is packed with
+## measured once) stands as the minted mission grown to that count. It is packed with
 ## its closure (the Tmap terrain and its textures, the environment, the item table, the models)
 ## into a game install minted as PFF archives, imported with its dependencies into a new project
 ## on that install (the flow's end-to-end import: apply_project_settings' game_install,

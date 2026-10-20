@@ -107,7 +107,7 @@ constexpr FileKindFacts kRows[] = {
 	Kind(FileKind::Archive, ArchiveSlot::None).extensions(kArchive).row,
 	Kind(FileKind::Model, ArchiveSlot::Resource).resource_kind("object_model").row,
 	// Retail packs its animations, their maps and the AI profiles in localres.pff, every one (JO:CA's,
-	// file_kind_test's retail leg).
+	// witnessed once over its archives; file_kind_test pins the table).
 	Kind(FileKind::Animation, ArchiveSlot::Localres).extensions(kAnimation).row,
 	Kind(FileKind::AnimationMap, ArchiveSlot::Localres)
 	        .extensions(kAnimationMap)

@@ -30,6 +30,8 @@ bool status_grants(std::string_view status) {
 	return status == "active" || status == "trialing" || status == "past_due";
 }
 
+bool status_terminal(std::string_view status) { return status == "canceled" || status == "incomplete_expired"; }
+
 bool subscription_grants(const SubscriptionRow &row, int64_t now) {
 	if (!status_grants(row.status)) return false;
 	if (row.item == ItemKind::Tier) {

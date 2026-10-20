@@ -1,14 +1,18 @@
-// The remote body-state arbitration on the retail US01 clip set: a wire remote
+// The remote body-state arbitration over a real clip set: a wire remote
 // player lying prone (48 idle_prone) taps a roll (41 roll_left, a hold-class
 // state that LOCKS); the follow-up roll_right (42) QUEUES behind the lock
 // [orig: the queue classes @0x4c1169..0x4c1190] and promotes at the roll
-// clip's completion boundary, measured against US01.adm's real clip length
-// (a looping clip's boundary is its next loop end; from phase 0 that is one
-// clip length either way). The
-// synthetic sibling (netsim_client_replica_pipeline_body_arbitration) pins the
-// rule with a fake clip source; this leg pins it against the shipped data.
-// Gated on OPENNOVA_JO_ASSETS (an extracted JO tree carrying US01.adm).
-#include "common/retail_paths.h"
+// clip's completion boundary, measured against the .adm's real clip length
+// through AdmRootMotion (a looping clip's boundary is its next loop end; from
+// phase 0 that is one clip length either way). The synthetic sibling
+// (netsim_client_replica_pipeline_body_arbitration) pins the rule with a fake
+// clip source; this one runs the loaded clips. The set is minted here in the
+// shape of the shipped US01.adm's (Dt1Prone 60 frames, Dt1RollL/R 30 frames,
+// all 30 fps and looping).
+#include "common/file_io.h"
+#include "common/temp_dir.h"
+
+#include <formats/bad/bad_build.h>
 
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
@@ -70,28 +74,60 @@ std::vector<uint8_t> player_frame(uint8_t anim_state, uint8_t ratio) {
 	return encode_frame_update(fu);
 }
 
+// A one-bone looping clip at 30 fps over `frames` intervals.
+bool write_clip(const std::string &path, const char *stem, uint32_t frames) {
+	bad::BadBuildClip clip;
+	clip.name = stem;
+	clip.fps = 30;
+	clip.flags = 0x1; // loop
+	clip.frame_count = frames;
+	bad::BadBuildBone bone;
+	bone.name = "BN01";
+	bone.keys.assign(frames + 1, bad::BadBuildQuat{});
+	clip.bones.push_back(bone);
+	// The root records the runtime reads a clip's length from (one per frame
+	// and the extra end record), a prone body's capsule.
+	bad::BadBuildEvent event;
+	event.bottom = 0.16;
+	event.top = 0.24;
+	clip.events.assign(frames + 1, event);
+	std::vector<uint8_t> bytes;
+	std::string error;
+	return bad::bad_build_mint(clip, nullptr, bad::bad_retail_limits(), bytes, &error) &&
+	       test_io::write_file(path, bytes);
+}
+
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
-			"OPENNOVA_JO_ASSETS (an extracted JO tree carrying US01.adm)");
+	test_temp::TempDir dir("remote_body_state");
+	const std::string root = dir.root();
+	if (!expect(write_clip(root + "/rbrst.bad", "rbrst", 1) && write_clip(root + "/rbprone.bad", "rbprone", 60) &&
+						write_clip(root + "/rbrolll.bad", "rbrolll", 30) &&
+						write_clip(root + "/rbrollr.bad", "rbrollr", 30) &&
+						test_io::write_text(root + "/rb.adm",
+								"anim_reset \"rbrst.bad\"\r\n"
+								"anim_idle_prone \"rbprone.bad\"\r\n"
+								"anim_roll_left \"rbrolll.bad\"\r\n"
+								"anim_roll_right \"rbrollr.bad\"\r\n"),
+				"the clip set is minted"))
+		return 1;
 	ResourceIndex index;
-	if (!index.scan(assets) && !index.scan(assets, std::string(), VfsMountMode::LooseOnly))
-		return retail::skip("a mountable OPENNOVA_JO_ASSETS tree");
+	if (!expect(index.scan(root, std::string(), VfsMountMode::LooseOnly), "the clip set mounts")) return 1;
 	opennova::assets::AssetStore store{&index};
 	anim::AdmRootMotion root_motion;
-	const int adm = root_motion.register_adm(&store, "US01.adm");
-	if (adm < 0) return retail::skip("US01.adm under OPENNOVA_JO_ASSETS");
+	const int adm = root_motion.register_adm(&store, "rb.adm");
+	if (!expect(adm >= 0, "rb.adm registers")) return 1;
 
 	expect(std::strcmp(anim::kAnimSlotNames[as::kRollLeft], "roll_left") == 0,
 			"state 41 maps to roll_left");
 	expect(std::strcmp(anim::kAnimSlotNames[as::kRollRight], "roll_right") == 0,
 			"state 42 maps to roll_right");
-	expect(root_motion.has_clip(adm, as::kIdleProne), "US01 carries anim_idle_prone");
-	expect(root_motion.has_clip(adm, as::kRollLeft), "US01 carries anim_roll_left");
-	expect(root_motion.has_clip(adm, as::kRollRight), "US01 carries anim_roll_right");
+	expect(root_motion.has_clip(adm, as::kIdleProne), "the set carries anim_idle_prone");
+	expect(root_motion.has_clip(adm, as::kRollLeft), "the set carries anim_roll_left");
+	expect(root_motion.has_clip(adm, as::kRollRight), "the set carries anim_roll_right");
 	const int32_t roll_len = root_motion.clip_length_ticks(adm, as::kRollLeft, 0);
-	std::printf("remote_body_state: US01 roll_left %d ticks (loops=%d), idle_prone %d ticks (loops=%d)\n",
+	std::printf("remote_body_state: roll_left %d ticks (loops=%d), idle_prone %d ticks (loops=%d)\n",
 			roll_len, int(root_motion.clip_loops(adm, as::kRollLeft, 0)),
 			root_motion.clip_length_ticks(adm, as::kIdleProne, 0),
 			int(root_motion.clip_loops(adm, as::kIdleProne, 0)));
@@ -136,6 +172,6 @@ int main() {
 	view.tick_remote_motion(0xFFFF);
 	expect(es->rm_state == as::kRollRight, "the promoted retarget lands on the following tick");
 
-	if (failures == 0) std::printf("remote_body_state: OK on US01\n");
+	if (failures == 0) std::printf("remote_body_state: OK\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -8,9 +8,9 @@
 // recently placed, the item saved as items.def writes it; the refusals, nothing written (a person, a vehicle, a
 // mounted gun, a model several items draw), and an entity never placed once its item's batch is refused; a
 // model's Place in mission arming the Place tool of the mission last active with its item, made first where
-// none draws it, refusing with no mission open and with several items drawing it. The retail leg (--retail,
-// OPENNOVA_JO_DIR): the rule over every model the shipped ITEMS.DEF draws against the TYPE its row gives it, and a
-// shipped building and decoration dropped, each made its row's TYPE.
+// none draws it, refusing with no mission open and with several items drawing it. And the rule's calibration:
+// every part shape the shipped models have, a synth model edited to have it, told the kind the TYPE most of its
+// shipped rows give (their counts cited constants), the shipped rows of each kind within the calibration's bounds.
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -21,8 +21,6 @@
 #include <vector>
 
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include <editor/documents/def_table.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/model_item.h>
@@ -40,7 +38,6 @@
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -208,21 +205,27 @@ static int test_model_item_facts() {
 	TEST_EXPECT(facts.kind == ModelItemKind::Vehicle && !facts.makes);
 	facts = facts_of("mount");
 	TEST_EXPECT(facts.kind == ModelItemKind::MountedWeapon && !facts.makes && facts.because.find("Usegun") != std::string::npos);
-	// A part a register DOOR_00 turns: a door, which the item made leaves shut.
-	facts = facts_of("house_lod0_sine_rotx", [](threedi::Threedi3di3 &model) {
-		auto *registers = static_cast<threedi::ThreediControlRegister *>(std::calloc(1, sizeof(threedi::ThreediControlRegister)));
-		std::snprintf(registers[0].name, sizeof(registers[0].name), "DOOR_00");
-		std::free(model.ctrl.registers);
-		model.ctrl.registers = registers;
-		model.ctrl.count = 1;
-		threedi::ThreediLod &lod = model.lods[0];
-		for (size_t i = 0; i < lod.part_animation_count; ++i)
-			if (lod.part_animations[i].rotation_x.control != 0) {
-				lod.part_animations[i].rotation_x.control = 113; // SET_CONTROL_REGISTER
-				lod.part_animations[i].rotation_x.control_param = 0;
-			}
-	});
+	// A part a register turns: DOOR_00 a door, which the item made leaves shut; another register (a light's, as some
+	// shipped models' parts read) no door.
+	const auto turned_by = [](const char *name) {
+		return facts_of("house_lod0_sine_rotx", [name](threedi::Threedi3di3 &model) {
+			auto *registers = static_cast<threedi::ThreediControlRegister *>(std::calloc(1, sizeof(threedi::ThreediControlRegister)));
+			std::snprintf(registers[0].name, sizeof(registers[0].name), "%s", name);
+			std::free(model.ctrl.registers);
+			model.ctrl.registers = registers;
+			model.ctrl.count = 1;
+			threedi::ThreediLod &lod = model.lods[0];
+			for (size_t i = 0; i < lod.part_animation_count; ++i)
+				if (lod.part_animations[i].rotation_x.control != 0) {
+					lod.part_animations[i].rotation_x.control = 113; // SET_CONTROL_REGISTER
+					lod.part_animations[i].rotation_x.control_param = 0;
+				}
+		});
+	};
+	facts = turned_by("DOOR_00");
 	TEST_EXPECT(facts.kind == ModelItemKind::Decoration && facts.doors == 1);
+	facts = turned_by("FLICKER");
+	TEST_EXPECT(facts.kind == ModelItemKind::Decoration && facts.doors == 0);
 	std::printf("test_model_item_facts passed\n");
 	return 0;
 }
@@ -396,121 +399,119 @@ static int test_place_in_mission() {
 	return 0;
 }
 
-// The retail leg (--retail, OPENNOVA_JO_DIR): the rule over the game's own models, nothing of the base game's.
-// For the base game and each installed expansion (its mount: jox01's ITEMS.DEF over the base's), every model its
-// ITEMS.DEF draws (the first row drawing it) read through the game's mount and told its item's kind from its parts
-// alone, against the TYPE the shipped row gives it: every model with a seat or a driver's place a vehicle there and
-// refused here (but the one decoration retail parks a boat as), every UseGun model an object, every skinned model
-// a person; of the models with occlusion or a blink box, the buildings retail makes of them nine in ten at least
-// (its land-for-points stations the objects), and of the others the decorations and foliage four in five at least.
-// Then a shipped building model and a shipped decoration model, no item of the project drawing them, dropped on a
-// mission: each made the TYPE its shipped row has.
-static int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (the shipped models against their items)");
-	std::vector<std::string> mounts = opennova::vfs_list_expansions(root);
-	mounts.insert(mounts.begin(), std::string());
-	std::string building, decoration; // the first base-game model of each the rule and retail agree on
-	opennova::Vfs base;
-	base.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-	TEST_EXPECT(base.mount_game(root, std::string(), opennova::VfsMountMode::Packed));
-	for (const std::string &expansion : mounts) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(game.read_file("ITEMS.DEF", bytes));
-		def::DefItemsFile items{};
-		TEST_EXPECT(def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0);
-		// By the kind told from the model: how many models, and how many of them retail's row gives each TYPE.
+namespace {
+
+// `model`'s user point `from` named `to` (the synth models' points renamed to give a model another seat or none).
+void rename_point(threedi::Threedi3di3 &model, const char *from, const char *to) {
+	for (size_t i = 0; i < model.user_point_count; ++i)
+		if (std::string(model.user_points[i].name) == from)
+			std::snprintf(model.user_points[i].name, sizeof(model.user_points[i].name), "%s", to);
+}
+
+// How many of the shipped models of a part shape the shipped rows type as `type`: JO:CA's ITEMS.DEF (the base game)
+// and jox01's over it.
+struct ShippedTally {
+	int type;
+	size_t base, jox01;
+};
+
+} // namespace
+
+// The heuristic's calibration (model_item.h's "Retail:" counts), its witnessed cases pinned: every part shape the
+// shipped models have, measured once over JO:CA's ITEMS.DEF and jox01's (every model a row draws, read through the
+// game's mount, its first row's TYPE against the kind told from its parts alone: 457 models of the base game, 705 of
+// jox01's), as cited constants by shape, each shape a synth model edited to have it and told its kind here. The kind
+// each shape is told is the TYPE most of its shipped rows give it; and summed over the kinds the shapes are told, the
+// shipped rows hold the calibration's bounds: the vehicles every one a vehicle but the one decoration retail parks a
+// boat as, the mounted guns all objects (the ewep class's), the people all persons, the buildings nine in ten at least
+// but for the land-for-points stations (objects), and the models of none of those parts decorations and foliage four
+// in five at least. (A shipped building and a shipped decoration dropped on a mission were each made their rows'
+// TYPE: test_drop_makes_item drops their minted kin, the armory's twin and the crate.)
+static int test_calibration() {
+	using namespace def;
+	struct Shape {
+		const char *name;
+		ModelItemFacts facts;
+		ModelItemKind kind; // the kind the heuristic tells it
+		std::vector<ShippedTally> shipped;
+	};
+	const Shape shapes[] = {
+		// A driver's place (ctrlx), the skinned tanks' too; seats alone (sitex: the one boat retail parks as a
+		// decoration); a driver's place of drvrx.
+		{ "ctrlx", facts_of("tank"), ModelItemKind::Vehicle, { { DEF_ITEM_TYPE_VEHICLE, 23, 27 } } },
+		{ "ctrlx, skinned", facts_of("person", [](threedi::Threedi3di3 &m) { rename_point(m, "LOOK", "ctrlx01"); }),
+		  ModelItemKind::Vehicle, { { DEF_ITEM_TYPE_VEHICLE, 0, 2 } } },
+		{ "sitex", facts_of("carrier", [](threedi::Threedi3di3 &m) { rename_point(m, "ctrlx13", "FX02"); }),
+		  ModelItemKind::Vehicle, { { DEF_ITEM_TYPE_VEHICLE, 5, 5 }, { DEF_ITEM_TYPE_DECORATION, 1, 1 } } },
+		{ "drvrx", facts_of("crate", [](threedi::Threedi3di3 &m) { rename_point(m, "ground", "drvrx01"); }),
+		  ModelItemKind::Vehicle, { { DEF_ITEM_TYPE_VEHICLE, 0, 2 } } },
+		// A gun mount (UseGun); skinned parts.
+		{ "UseGun", facts_of("mount"), ModelItemKind::MountedWeapon, { { DEF_ITEM_TYPE_OBJECT, 17, 24 } } },
+		{ "skinned", facts_of("person"), ModelItemKind::Person, { { DEF_ITEM_TYPE_PERSON, 30, 30 } } },
+		// Occlusion alone (its blink boxes made solids), and occlusion with blink boxes.
+		{ "occlusion",
+		  facts_of("armory",
+		           [](threedi::Threedi3di3 &m) {
+			           for (size_t i = 0; m.collision && i < m.collision->volume_count; ++i)
+				           if (m.collision->volumes[i].collidable_type == 8) m.collision->volumes[i].collidable_type = 1;
+		           }),
+		  ModelItemKind::Building,
+		  { { DEF_ITEM_TYPE_BUILDING, 47, 85 }, { DEF_ITEM_TYPE_DECORATION, 3, 7 }, { DEF_ITEM_TYPE_OBJECT, 2, 5 } } },
+		{ "occlusion and blink boxes", facts_of("armory"), ModelItemKind::Building,
+		  { { DEF_ITEM_TYPE_BUILDING, 37, 49 }, { DEF_ITEM_TYPE_OBJECT, 2, 9 } } },
+		// None of those parts.
+		{ "none", facts_of("crate"), ModelItemKind::Decoration,
+		  { { DEF_ITEM_TYPE_DECORATION, 240, 396 }, { DEF_ITEM_TYPE_OBJECT, 29, 36 }, { DEF_ITEM_TYPE_BUILDING, 20, 26 },
+		    { DEF_ITEM_TYPE_VEHICLE, 1, 1 } } },
+	};
+	// Each kind's word on the wire, each the word of a kind the shapes are told.
+	const std::map<ModelItemKind, std::string> words = { { ModelItemKind::Decoration, "decoration" },
+		{ ModelItemKind::Building, "building" }, { ModelItemKind::Person, "person" }, { ModelItemKind::Vehicle, "vehicle" },
+		{ ModelItemKind::MountedWeapon, "mounted_weapon" } };
+	for (const bool jox01 : { false, true }) {
 		std::map<ModelItemKind, std::map<int, size_t>> tally;
-		std::set<std::string> seen;
-		size_t read = 0;
-		for (size_t i = 0; i < items.count; ++i) {
-			const std::string graphic = retail::lower_ascii(items.entries[i].graphic);
-			if (graphic.empty() || !seen.insert(graphic).second) continue;
-			std::vector<uint8_t> model_bytes;
-			if (!game.read_file(graphic + ".3di", model_bytes)) continue;
-			threedi::Threedi3di3 model{};
-			if (threedi::threedi_3di3_read_memory(model_bytes.data(), model_bytes.size(), &model) == 0) {
-				++read;
-				const ModelItemFacts facts = model_item_facts(model);
-				const int type = items.entries[i].type;
-				++tally[facts.kind][type];
-				if (expansion.empty() && graphic.size() <= 8) {
-					if (facts.kind == ModelItemKind::Building && type == def::DEF_ITEM_TYPE_BUILDING && building.empty())
-						building = graphic;
-					if (facts.kind == ModelItemKind::Decoration && type == def::DEF_ITEM_TYPE_DECORATION && decoration.empty())
-						decoration = graphic;
-				}
+		size_t models = 0;
+		for (const Shape &shape : shapes) {
+			TEST_EXPECT(shape.facts.kind == shape.kind && model_item_kind_token(shape.facts.kind) == words.at(shape.kind));
+			// The kind told is the TYPE most of the shape's shipped rows give it.
+			size_t most = 0, told = 0;
+			for (const ShippedTally &row : shape.shipped) {
+				const size_t count = jox01 ? row.jox01 : row.base;
+				most = std::max(most, count);
+				told += row.type == shape.facts.type ? count : 0;
+				tally[shape.facts.kind][row.type] += count;
+				models += count;
 			}
-			threedi::threedi_3di3_free(&model);
+			TEST_EXPECT(told == most);
+			if (!jox01) std::printf("  %-26s %s\n", shape.name, model_item_words(shape.facts).c_str());
 		}
-		def::def_free_items(&items);
 		const auto total = [&](ModelItemKind kind) {
 			size_t n = 0;
 			for (const auto &[type, count] : tally[kind]) n += count;
 			return n;
 		};
 		const auto of = [&](ModelItemKind kind, int type) { return tally[kind][type]; };
-		std::printf("  %s: %zu shipped models read\n", expansion.empty() ? "the base game" : expansion.c_str(), read);
-		for (const ModelItemKind kind : { ModelItemKind::Vehicle, ModelItemKind::MountedWeapon, ModelItemKind::Person,
-		                                  ModelItemKind::Building, ModelItemKind::Decoration }) {
-			std::printf("    %-14s %3zu models:", model_item_kind_token(kind), total(kind));
-			for (const auto &[type, count] : tally[kind]) std::printf(" %s %zu", def::def_item_type_name(type), count);
-			std::printf("\n");
-		}
-		TEST_EXPECT(read > 400);
-		// Seats or a driver's place: a vehicle in retail, but one boat parked as a decoration.
-		TEST_EXPECT(total(ModelItemKind::Vehicle) > 25 &&
-		            of(ModelItemKind::Vehicle, def::DEF_ITEM_TYPE_VEHICLE) + 1 >= total(ModelItemKind::Vehicle));
-		// A UseGun point: an object (the ewep class's) every one; skinned: a person every one.
-		TEST_EXPECT(total(ModelItemKind::MountedWeapon) > 15 &&
-		            of(ModelItemKind::MountedWeapon, def::DEF_ITEM_TYPE_OBJECT) == total(ModelItemKind::MountedWeapon));
-		TEST_EXPECT(total(ModelItemKind::Person) > 25 &&
-		            of(ModelItemKind::Person, def::DEF_ITEM_TYPE_PERSON) == total(ModelItemKind::Person));
-		// Occlusion or a blink box: buildings, but for the land-for-points stations (objects), nine in ten at least.
-		const size_t buildings = total(ModelItemKind::Building) - of(ModelItemKind::Building, def::DEF_ITEM_TYPE_OBJECT);
-		TEST_EXPECT(buildings > 80 && of(ModelItemKind::Building, def::DEF_ITEM_TYPE_BUILDING) * 10 >= buildings * 9);
-		// None of those parts: decorations and foliage (one TYPE, 2), four in five at least.
-		TEST_EXPECT(total(ModelItemKind::Decoration) > 250 &&
-		            of(ModelItemKind::Decoration, def::DEF_ITEM_TYPE_DECORATION) * 5 >= total(ModelItemKind::Decoration) * 4);
+		TEST_EXPECT(models == (jox01 ? 705u : 457u));
+		TEST_EXPECT(of(ModelItemKind::Vehicle, DEF_ITEM_TYPE_VEHICLE) + 1 >= total(ModelItemKind::Vehicle));
+		TEST_EXPECT(of(ModelItemKind::MountedWeapon, DEF_ITEM_TYPE_OBJECT) == total(ModelItemKind::MountedWeapon));
+		TEST_EXPECT(of(ModelItemKind::Person, DEF_ITEM_TYPE_PERSON) == total(ModelItemKind::Person));
+		const size_t buildings = total(ModelItemKind::Building) - of(ModelItemKind::Building, DEF_ITEM_TYPE_OBJECT);
+		TEST_EXPECT(of(ModelItemKind::Building, DEF_ITEM_TYPE_BUILDING) * 10 >= buildings * 9);
+		TEST_EXPECT(of(ModelItemKind::Decoration, DEF_ITEM_TYPE_DECORATION) * 5 >= total(ModelItemKind::Decoration) * 4);
+		std::printf("  %s: %zu shipped models, the buildings %zu of %zu, the decorations %zu of %zu\n",
+		            jox01 ? "jox01" : "the base game", models, of(ModelItemKind::Building, DEF_ITEM_TYPE_BUILDING), buildings,
+		            of(ModelItemKind::Decoration, DEF_ITEM_TYPE_DECORATION), total(ModelItemKind::Decoration));
 	}
-
-	// A shipped building and a shipped decoration, dropped where no item draws them: the TYPE their rows have.
-	TEST_EXPECT(!building.empty() && !decoration.empty());
-	if (building.empty() || decoration.empty()) return 1;
-	Rig rig("opennova_editor_place_model_retail");
-	TEST_EXPECT(rig.open());
-	if (rig.mission.empty()) return 1;
-	const SessionView &view = rig.session.view();
-	for (const auto &[graphic, type] : { std::pair<std::string, int>{ building, def::DEF_ITEM_TYPE_BUILDING },
-	                                     { decoration, def::DEF_ITEM_TYPE_DECORATION } }) {
-		std::vector<uint8_t> model_bytes;
-		TEST_EXPECT(base.read_file(graphic + ".3di", model_bytes) &&
-		            test_io::write_file(view.project.root + "/models/" + graphic + ".3di", model_bytes));
-		rig.session.handle(request::rescan());
-		rig.session.run_operations();
-		rig.devices.sync(rig.session);
-		rig.drop((graphic + ".3di").c_str());
-		int64_t id = 0, made = 0;
-		std::string named;
-		TEST_EXPECT(rig.session.outcome().done() && rig.item_named(graphic, id, made, named) && made == type && named == graphic);
-		std::printf("  %s.3di dropped: item %s (%lld), %s\n", graphic.c_str(), graphic.c_str(), (long long)id,
-		            def::def_item_type_name(int(made)));
-		rig.session.run_operations();
-	}
-	std::printf("test_retail passed\n");
+	std::printf("test_calibration passed\n");
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 	failed += test_model_item_facts();
 	failed += test_drop_makes_item();
 	failed += test_drop_refusals();
 	failed += test_place_in_mission();
-	failed += test_retail();
+	failed += test_calibration();
 	return failed ? 1 : 0;
 }

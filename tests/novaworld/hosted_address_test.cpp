@@ -446,7 +446,7 @@ int test_naming_and_starts() {
 	TEST_EXPECT(start(ana, true, smoke).outcome == hosted::RequestOutcome::AddressUnavailable);
 	TEST_EXPECT(start(ana, true, std::nullopt).outcome == hosted::RequestOutcome::Created);
 	// Ended, it is free again; a lapse lets a server go of it.
-	TEST_EXPECT(hosted::request_stop(db, made.id, "test") &&
+	TEST_EXPECT(hosted::request_stop(db, made.id, "test", hosted::StartCause::OwnerStop) &&
 			hosted::transition(db, made.id, hosted::State::Stopping, hosted::State::Stopped, "test"));
 	TEST_EXPECT(!hosted::server_of_address(db, smoke));
 	const auto again = start(ana, true, smoke);
@@ -976,6 +976,17 @@ int test_comp_uncovered() {
 	subscribe_item(db, eve, billing::ItemKind::Tier, 1, "sub_unc_eve_t1", "canceled");
 	u = uncovered_at(db, now);
 	TEST_EXPECT(u.size() == 1 && u.count(eve_comp) == 1);
+
+	// Gil's only subscription ended for good: the cache can change nothing for
+	// her, so her uncovered comp address lapses at once, as a comp-only one does.
+	const int64_t gil = make_player(db, "unc_gil", 0);
+	subscribe_item(db, gil, billing::ItemKind::Tier, 2, "sub_unc_gil_t2", "canceled");
+	TEST_EXPECT(billing::set_comp_grants(db, gil, { 0, 1 }));
+	const int64_t gil_comp = hosted::add_comp_address(db, gil, "gil-comp", now).id;
+	TEST_EXPECT(gil_comp > 0 && billing::set_comp_grants(db, gil, { 0, 0 }));
+	u = uncovered_at(db, now);
+	TEST_EXPECT(u.count(gil_comp) == 1 && !u[gil_comp].cached && u[gil_comp].why == machines_why);
+	TEST_EXPECT(billing::set_comp_grants(db, gil, { 0, 1 }) && uncovered_at(db, now).count(gil_comp) == 0);
 
 	// A banned account's comp addresses go, every one; a deleted one's too.
 	nws::UpdateUserParams ban;

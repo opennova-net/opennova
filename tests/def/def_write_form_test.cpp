@@ -5,19 +5,19 @@
 // game reads nothing of; each edit (a value, a flag, a row or a block added or removed, a row moved or
 // duplicated within its record, a copy) reads back; an attribute past a full `attrib:` line goes on a line of its
 // own; and every real the writer puts down is the shortest decimal that reads back to the same value (`pos 4 -5
-// -186 0 0 0`, never `0.00000762939453125`; `21.76`, never `21.7600002288818359375`). With a JO install
-// configured: every retail catalog (items, weapon with its action blocks, ammo, the base's and each installed
-// expansion's, and powerup) through the game's reader, written from its model and read again, has the same
-// fields and is written again the same; one field changed changes one line of the writer's form; and the writer's
+// -186 0 0 0`, never `0.00000762939453125`; `21.76`, never `21.7600002288818359375`). Over the corpus catalogs
+// (fixtures/def/corpus: every key and form JO:CA's items, weapon and ammo catalogs and its jox01 expansion's use, and
+// a powerup table in the shipped one's shape, each ending in the shipped files' NUL): each through the game's reader,
+// written from its model and read again, has the same fields and is written again the same; one field changed changes one line of the writer's form; and the writer's
 // form puts down no real with a long tail, nor one a decimal of one place fewer reads the same as (each record
-// read alone again with it). The retail edits: a whole number, a real (its new line's reals the shortest their
-// reader takes back) and, in items, an attribute (its `attrib:` line), each one line.
+// read alone again with it). The edits: a whole number, a real (its new line's reals the shortest their reader
+// takes back) and, in items, an attribute (its `attrib:` line), each one line; the corpus writer's forms pinned.
 #include <formats/def/def_scan.h>
 #include <formats/def/def_write.h>
 #include <formats/def/def_write_record.h>
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
-#include "common/retail_paths.h"
+#include <base/io/hash.h>
+#include "common/file_io.h"
+#include "common/test_paths.h"
 
 #include <algorithm>
 #include <chrono>
@@ -167,7 +167,7 @@ const std::string kItems =
         "\ttype vehicle\r\n"
         // The walk drops the last byte of a tail line with no CR LF [orig: File_ParseASCIIFile
         // @0x53D8E9 / @0x53D8EC], so a last `end` with none would read `en`: the file ends its
-        // last line (the retail catalogs end in a NUL the walk drops, their leg below).
+        // last line (the shipped catalogs end in a NUL the walk drops: the corpus leg below).
         "end\r\n";
 
 int written_items() {
@@ -561,7 +561,7 @@ int shortest_reals() {
 	return failures;
 }
 
-// --- retail -----------------------------------------------------------------------------------------------
+// --- the corpus catalogs ------------------------------------------------------------------------------------
 
 std::string plain_form(const char *family, const std::string &text) {
 	const uint8_t *bytes = bytes_of(text);
@@ -758,7 +758,7 @@ size_t changed_line(const std::string &a, const std::string &b) {
 	return found;
 }
 
-// An edit of a retail catalog: what changed, the save, and how many lines it changed (`gone` removed, `put`
+// An edit of a corpus catalog: what changed, the save, and how many lines it changed (`gone` removed, `put`
 // added) against the first save.
 struct RetailEdit {
 	std::string field;
@@ -766,13 +766,13 @@ struct RetailEdit {
 	size_t gone = 0, put = 0;
 };
 
-int retail_catalog(const std::string &label, const char *family, const std::vector<uint8_t> &bytes) {
+int corpus_catalog(const std::string &label, const char *family, const std::vector<uint8_t> &bytes) {
 	int failures = 0;
 	const std::string original(bytes.begin(), bytes.end());
 	const std::string what = label + family;
 	DefWriteResult first;
 	// Each edit on a read of its own: a whole number, a real (the writer's decimal of it: bug 1 over a
-	// retail line), and an item's attribute (its `attrib:` line).
+	// shipped line), and an item's attribute (its `attrib:` line).
 	RetailEdit whole, real, attribute;
 	const auto edit = [&](auto &read, RetailEdit &out, auto change) {
 		out.field = change(read.file);
@@ -919,32 +919,65 @@ int retail_catalog(const std::string &label, const char *family, const std::vect
 	return failures;
 }
 
-int retail_catalogs() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("the def writers' retail catalogs need OPENNOVA_JO_DIR");
+// The corpus catalogs (fixtures/def/corpus): every key JO:CA's items, weapon and ammo catalogs and its jox01
+// expansion's use, in the forms the shipped files write them in (the reals among them: 1.5, 2.500, .35, -.574, 0.0165,
+// 0.00278 ...), and a powerup table in the shipped one's shape; each ending in the NUL the shipped catalogs end in.
+const char *const kCorpusFamilies[] = { "items.def", "weapon.def", "ammo.def", "powerup.def" };
+
+std::vector<uint8_t> corpus_bytes(const char *family) {
+	std::vector<uint8_t> bytes =
+			test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/corpus/" + family);
+	if (!bytes.empty()) bytes.push_back(0);
+	return bytes;
+}
+
+uint64_t fnv1a64(const std::string &text) {
+	return opennova::io::fnv1a64_bytes(opennova::io::kFnv1a64Offset, text.data(), text.size());
+}
+
+// Each corpus catalog's writer's form, pinned (the nw_codec_identity rule: a vector changes only with an [orig]
+// witness on the writer or a D-entry; `def_write_form_test --dump` prints the table).
+struct Vector {
+	const char *family;
+	size_t length;
+	uint64_t fnv;
+};
+const Vector kWritten[] = {
+	{ "items.def", 6928u, 0xb06176f6a3f42f2aull },
+	{ "weapon.def", 5859u, 0xe4b17d27937a67b6ull },
+	{ "ammo.def", 3934u, 0x479c48e82941110cull },
+	{ "powerup.def", 786u, 0xba9671b5137c8761ull },
+};
+
+int dump() {
+	std::printf("const Vector kWritten[] = {\n");
+	for (const char *family : kCorpusFamilies) {
+		const std::vector<uint8_t> bytes = corpus_bytes(family);
+		const std::string form = plain_form(family, std::string(bytes.begin(), bytes.end()));
+		std::printf("\t{ \"%s\", %zuu, 0x%016llxull },\n", family, form.size(), static_cast<unsigned long long>(fnv1a64(form)));
+	}
+	std::printf("};\n");
+	return 0;
+}
+
+int corpus_catalogs() {
 	int failures = 0;
-	opennova::Vfs vfs;
-	vfs.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-	if (!vfs.mount_game(root, "", opennova::VfsMountMode::Packed)) return 1;
-	const auto catalogs = [&](opennova::Vfs &mounted, const std::string &label, bool powerup) {
-		std::vector<const char *> families = {"items.def", "weapon.def", "ammo.def"};
-		if (powerup) families.push_back("powerup.def");
-		for (const char *family : families) {
-			std::vector<uint8_t> bytes;
-			if (!mounted.read_file(family, bytes)) {
-				std::printf("FAIL cannot read %s%s\n", label.c_str(), family);
-				++failures;
-				continue;
-			}
-			failures += retail_catalog(label, family, bytes);
+	for (size_t i = 0; i < sizeof(kCorpusFamilies) / sizeof(kCorpusFamilies[0]); ++i) {
+		const char *family = kCorpusFamilies[i];
+		const std::vector<uint8_t> bytes = corpus_bytes(family);
+		if (bytes.empty()) {
+			std::printf("FAIL cannot read the corpus %s\n", family);
+			++failures;
+			continue;
 		}
-	};
-	catalogs(vfs, "", true);
-	for (const std::string &expansion : retail::expansions()) {
-		opennova::Vfs served;
-		served.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-		if (!served.mount_game(root, expansion, opennova::VfsMountMode::Packed)) return 1;
-		catalogs(served, "/exp " + expansion + ": ", false);
+		failures += corpus_catalog("corpus ", family, bytes);
+		const std::string form = plain_form(family, std::string(bytes.begin(), bytes.end()));
+		if (form.size() != kWritten[i].length || fnv1a64(form) != kWritten[i].fnv || std::strcmp(kWritten[i].family, family) != 0) {
+			std::printf("FAIL corpus %s: the writer's form is %zu bytes, fnv 0x%016llx; pinned %zu, 0x%016llx\n", family,
+			            form.size(), static_cast<unsigned long long>(fnv1a64(form)), kWritten[i].length,
+			            static_cast<unsigned long long>(kWritten[i].fnv));
+			++failures;
+		}
 	}
 	return failures;
 }
@@ -992,7 +1025,7 @@ int review_1098() {
 }
 
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+	if (argc > 1 && std::strcmp(argv[1], "--dump") == 0) return dump();
 	int failures = 0;
 	failures += review_1098();
 	failures += shortest_reals();
@@ -1003,7 +1036,7 @@ int main(int argc, char **argv) {
 	failures += written_weapons();
 	failures += written_ammo();
 	failures += written_powerups();
-	failures += retail_catalogs();
+	failures += corpus_catalogs();
 	if (failures) std::printf("%d failure(s)\n", failures);
 	return failures ? 1 : 0;
 }

@@ -97,6 +97,7 @@ enum class ReferenceKind {
 	FaceAnimation,  // a person's face animation, the .grm its model's name makes (an item's graphic)
 	MusicStream,    // a music bank's stream by its place, in the bank the scope names (a music script's play)
 	ItemName,       // an item by its primary name, the first of it without case (an ammo's tracer, by the ammo's name)
+	ParticleTable,  // a particle file's [tabledef] by its id, without case (a particle's curve: its *_func, a graphic's)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is

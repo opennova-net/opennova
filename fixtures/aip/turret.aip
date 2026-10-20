@@ -1,0 +1,53 @@
+description     "Turret - authored"
+type			GROUND
+subtype			TRAIN
+default_state	GROUND_FOLLOWWP
+
+rank				3
+view_fov			360.0	
+view_dist			800	
+radar_fov			360	
+radar_dist			900	
+priority_air		5
+priority_ground		5
+priority_organics	1
+
+evade_flags			0
+combat_flags		NO_CAP FOLLOW_WP
+
+react_time			1
+aim_skill			4
+check_six_rate		2	
+target_eval_rate	1
+tether_dist			0
+
+primary_weap		30MM	
+primary_ammo		-1	
+primary_rate		.05	
+primary_fov			90	
+primary_range		600	
+primary_facing		WEAPON_TURRET
+primary_flags		WEAPON_TURRET WEAPON_TURRET
+
+secondary_weap		0	
+secondary_ammo		0	
+secondary_rate		0	
+secondary_fov		0	
+secondary_range		0	
+secondary_facing	WEAPON_TURRET
+secondary_flags		WEAPON_PITCHLOCKED
+
+patrol_speed		0	
+combat_speed		0	
+
+min_speed			0	
+min_chase_dist		0	
+max_chase_dist		900	
+
+drive_skill			3
+turn_rate			90	
+
+accel_time			1
+
+radio_distance		1
+radio_delay			0

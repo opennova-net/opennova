@@ -3,9 +3,9 @@
 // header; over a minted project the texture_uses query's budgets, the use check's texture.memory on a texture
 // past 16 MB with its chain and texture.normal_slot_loader on a normal-map slot's row the diffuse loader reads,
 // its fix giving an .mdt's row type 4; the texture_budget query (one texture a name written, any case, its rows
-// counted, the totals the rows' sums) and a texture's tooltip line. The retail leg (OPENNOVA_JO_DIR): every texture row of every model the
-// install ships costed through the file its loader opens, the most a model texture holds, and no normal-map
-// slot's row of a type the diffuse loader reads.
+// counted, the totals the rows' sums) and a texture's tooltip line. And a model holding a row of each kind the
+// shipped models carry, each costed through the file its loader opens as the game holds it, the most a shipped
+// model texture holds under the warning, and no normal-map slot's row of a type the diffuse loader reads.
 #include <algorithm>
 #include <cstdio>
 #include <map>
@@ -13,10 +13,7 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
-#include <editor/assets/asset_type_registry.h>
-#include <editor/assets/install_view.h>
 #include <editor/documents/texture_budget.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/texture_uses.h>
@@ -33,7 +30,6 @@
 #include <formats/tga/tga.h>
 #include <runtime/renderer/material_texture.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
@@ -319,96 +315,129 @@ int test_project() {
 	return 0;
 }
 
-// Every texture row of every model the install ships, through the file its loader opens: the most a model
-// texture holds, the rows past the warning, and no normal-map slot's row of a type the diffuse loader reads.
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (every shipped model's textures costed)");
-		return 0;
+// A model holding a texture row of each kind the shipped models carry (the census of JO:CA's 649 models and their
+// 3,111 rows), each at the largest size the install gives it, its file as the game reads it (the install stores its
+// .dds and .mdt BFC1-packed; the game and the budget read them unpacked): slots 1 and 2 of type 0 over a .tga name
+// whose opaque DXT5 .dds the stage loader opens (1,842 rows), over one whose DXT5 holds an alpha (870), over a .tga
+// with no .dds beside it (3) and over a name with no extension (2); slot 3 of type 4 over an .mdt (370) and of type
+// 5 over a .tga whose .dds the normal-map loader reads (18). Each costed through the file its loader opens, as the
+// game holds it (proven over the install, 2026-10-19: the words each row's kind takes there); the most any holds the
+// normal maps' 1,398,080 bytes (1.3 MB) [JO:CA 357_1st.3di's u357.mdt and zM60.3di's t_m60.mdt: 512 x 512, A8R8G8B8,
+// 8 levels], under 2 MB and the warning; no normal-map slot's row of a type the diffuse loader reads. The use check
+// says nothing of any of them.
+int test_shipped_rows() {
+	test_temp::TempDir dir{"opennova_editor_texture_budget_shipped"};
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Shipped"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	const std::string t = root + "/textures/";
+	const std::map<std::string, std::vector<uint8_t>> files = {
+			{"wall.dds", dxt5(512, 255)},  {"flag.dds", dxt5(512, 0)},   {"glare.tga", tga(256, 256)},
+			{"banner.dds", dxt5(256, 0)},  {"hut.dds", dxt5(512, 255)},  {"tent.dds", dxt5(512, 0)},
+			{"gun.mdt", tga(512, 512)},    {"shot.dds", dxt5(512, 0)}};
+	for (const auto &[name, bytes] : files) TEST_EXPECT(test_io::write_file(t + name, bytes));
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(test_io::write_text(scene + "/rows.o3d",
+	                                "o3d 2\nmodel ROWS\nmaterial VS_PHONGT\ntexture wall.tga 1 0\ntexture gun.mdt 3 4\n"
+	                                "material VS_PHONGT\ntexture flag.tga 1 0\ntexture shot.tga 3 5\n"
+	                                "material VS_SKBASIC\ntexture glare.tga 1 0\ntexture hut.tga 2 0\n"
+	                                "material VS_SKBASIC\ntexture banner 1 0\ntexture tent.tga 2 0\n"
+	                                "lod 0\npart 0 0 0 0\nmesh 0 0\n"
+	                                "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	ImportChoice model;
+	model.path = scene + "/rows.o3d";
+	const ImportResult imported = import_assets({model}, ProjectPaths::for_root(root), *view.project.document, false);
+	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/rows.3di"}));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	for (const Diagnostic &d : view.findings.diagnostics) {
+		if (d.asset != "models/rows.3di" || (d.code() != "texture.memory" && d.code() != "texture.normal_slot_loader")) continue;
+		std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+		TEST_EXPECT(false);
 	}
-	ProjectDocument project;
-	project.target_game = "jo";
-	InstallView install_view;
-	std::string why;
-	TEST_EXPECT(install_view.open(install_spec(install, project), why));
-	const opennova::Vfs &mount = install_view.vfs();
-	const auto exists = [&mount](const std::string &name) { return mount.has_file(name); };
-	size_t models = 0, rows = 0, costed = 0, past = 0, normal_slot = 0;
+	// The check costed them: the project's budget holds each file its rows' loaders open, the normal maps' by theirs.
+	{
+		JsonValue args;
+		std::string error;
+		TEST_EXPECT(opennova::io::json_parse("{\"limit\":100}", args, error));
+		const JsonValue answer = session.query("texture_budget", args, error);
+		const JsonValue *rows = answer.get("textures");
+		TEST_EXPECT(error.empty() && rows);
+		if (!rows) return 1;
+		std::map<std::string, std::string> loaders;
+		for (const JsonValue &row : rows->array)
+			loaders[row.get_string("file", "")] = row.get("budget") ? row.get("budget")->get_string("loader", "") : std::string();
+		for (const auto &[name, file] : files) TEST_EXPECT(loaders.count("textures/" + name));
+		TEST_EXPECT(loaders["textures/gun.mdt"] == "normal" && loaders["textures/shot.dds"] == "normal" &&
+		            loaders["textures/wall.dds"] == "stage");
+	}
+	// Each row costed as the game holds it: its runtime type's role and loader, the file its loader opens.
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(test_io::read_file(root + "/models/rows.3di", bytes));
+	opennova::threedi::Threedi3di3 read{};
+	TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &read) == 0);
+	const auto exists = [&files](const std::string &name) { return files.count(name) != 0; };
+	std::map<std::string, std::string> words;
+	size_t normal_slot = 0;
 	uint64_t largest = 0;
-	std::string largest_row;
-	std::map<std::string, size_t> by_format;
-	std::map<std::string, std::pair<TextureHeader, bool>> headers;
-	for (const opennova::VfsFileLocation &location : mount.list_files()) {
-		const std::string &name = location.logical_name;
-		if (classify_asset(name, nullptr) != AssetKind::Model) continue;
-		std::vector<uint8_t> bytes;
-		opennova::threedi::Threedi3di3 model{};
-		if (!mount.read_file(name, bytes) ||
-		    opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) != 0)
-			continue;
-		++models;
-		for (uint32_t m = 0; m < model.material_count; ++m) {
-			const opennova::threedi::ThreediMaterial &material = model.materials[m];
-			for (uint32_t r = 0; r < material.texture_count && r < 24; ++r) {
-				const opennova::threedi::ThreediMaterialTexture &row = material.textures[r];
-				if (row.name[0] == 0) continue;
-				++rows;
-				renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
-				const uint8_t runtime = opennova::renderer::material_texture_runtime_type(row.type);
-				if (runtime == 4 || runtime == 5) role = renderer::TextureRoleId::ModelNormalMap;
-				else if (runtime == 1) role = renderer::TextureRoleId::ModelPlain;
-				else if (runtime == 0 || runtime == 2 || runtime == 8) role = renderer::TextureRoleId::ModelDiffuse;
-				renderer::TextureLoader loader = renderer::TextureLoader::Stage;
-				if (!texture_role_budget_loader(role, loader)) continue;
-				if ((row.slot == 3 || row.slot == 4) && loader != renderer::TextureLoader::Normal) {
-					++normal_slot;
-					std::fprintf(stderr, "retail: %s row %s slot %u type %u\n", name.c_str(), row.name, unsigned(row.slot),
-					             unsigned(row.type));
-				}
-				const opennova::renderer::MaterialTextureSource source =
-						opennova::renderer::material_texture_source(row.name, row.type, exists);
-				if (source.file.empty()) continue;
-				auto &[header, read] = headers[source.file];
-				if (!read) {
-					read = true;
-					std::vector<uint8_t> file;
-					if (mount.read_file(source.file, file)) header = texture_header(source.file, file);
-				}
-				const TextureBudget budget = texture_budget(header, source.file, loader, row.slot);
-				if (!budget.known) continue;
-				++costed;
-				const uint64_t bytes_held = budget.full().bytes;
-				++by_format[opennova::renderer::device_texture_format_name(budget.full().format)];
-				if (bytes_held > largest) {
-					largest = bytes_held;
-					largest_row = name + ": " + source.file + " (" + device_texture_words(budget.full()) + ")";
-				}
-				past += bytes_held > kTextureMemoryWarnBytes ? 1 : 0;
-			}
+	for (uint32_t m = 0; m < read.material_count; ++m) {
+		const opennova::threedi::ThreediMaterial &material = read.materials[m];
+		for (uint32_t r = 0; r < material.texture_count && r < 24; ++r) {
+			const opennova::threedi::ThreediMaterialTexture &row = material.textures[r];
+			if (row.name[0] == 0) continue;
+			renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
+			const uint8_t runtime = opennova::renderer::material_texture_runtime_type(row.type);
+			if (runtime == 4 || runtime == 5) role = renderer::TextureRoleId::ModelNormalMap;
+			else if (runtime == 1) role = renderer::TextureRoleId::ModelPlain;
+			else if (runtime == 0 || runtime == 2 || runtime == 8) role = renderer::TextureRoleId::ModelDiffuse;
+			renderer::TextureLoader loader = renderer::TextureLoader::Stage;
+			TEST_EXPECT(texture_role_budget_loader(role, loader));
+			if ((row.slot == 3 || row.slot == 4) && loader != renderer::TextureLoader::Normal) ++normal_slot;
+			const opennova::renderer::MaterialTextureSource source = opennova::renderer::material_texture_source(row.name, row.type, exists);
+			TEST_EXPECT(files.count(source.file) != 0);
+			if (!files.count(source.file)) continue;
+			const TextureBudget budget = texture_budget(texture_header(source.file, files.at(source.file)), source.file, loader, row.slot);
+			TEST_EXPECT(budget.known);
+			words[std::string(row.name) + " " + std::to_string(unsigned(row.slot))] = device_texture_words(budget.full());
+			largest = std::max(largest, budget.full().bytes);
+			TEST_EXPECT(budget.full().bytes <= kTextureMemoryWarnBytes);
 		}
-		opennova::threedi::threedi_3di3_free(&model);
 	}
-	for (const auto &[format, count] : by_format) std::printf("retail: %-12s %zu rows\n", format.c_str(), count);
-	std::printf("retail: %zu models, %zu texture rows, %zu costed; the largest %s; %zu past %s; %zu normal-map slots read "
-	            "as a diffuse\n",
-	            models, rows, costed, largest_row.c_str(), past,
-	            texture_bytes_words(kTextureMemoryWarnBytes).c_str(), normal_slot);
-	// JO:CA: 649 models, 3,105 of 3,111 rows costed (six name a file the install lacks), 1,842 of them as the DXT1 an
-	// opaque DXT5 loads as, 872 as DXT5, 391 built from pixels; the largest 1.3 MB.
-	TEST_EXPECT(models > 500 && costed > 3000 && largest <= 2 * 1024 * 1024 && past == 0 && normal_slot == 0);
+	opennova::threedi::threedi_3di3_free(&read);
+	const std::string opaque = "512 x 512, DXT1 (a DXT5 the game stores as DXT1, every block opaque), 10 levels: 171 KB";
+	const std::string alpha = "512 x 512, DXT5, 10 levels: 341 KB";
+	const std::string normal = "512 x 512, A8R8G8B8 (uncompressed), 8 levels: 1.3 MB";
+	const std::map<std::string, std::string> want = {
+			{"wall.tga 1", opaque},
+			{"flag.tga 1", alpha},
+			{"glare.tga 1", "256 x 256, A8R8G8B8 (uncompressed), 7 levels: 341 KB"},
+			{"banner 1", "256 x 256, DXT5, 9 levels: 85 KB"},
+			{"hut.tga 2", opaque},
+			{"tent.tga 2", alpha},
+			{"gun.mdt 3", normal},
+			{"shot.tga 3", normal}};
+	for (const auto &[row, said] : words)
+		if (!want.count(row) || want.at(row) != said) std::fprintf(stderr, "row %s: %s\n", row.c_str(), said.c_str());
+	TEST_EXPECT(words == want);
+	TEST_EXPECT(normal_slot == 0 && largest <= 2 * kMB && largest == 1398080);
+	std::printf("shipped rows: each kind of row the shipped models carry costed as the game holds it, the most %s, none "
+	            "past %s, no normal-map slot read as a diffuse\n",
+	            texture_bytes_words(largest).c_str(), texture_bytes_words(kTextureMemoryWarnBytes).c_str());
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_budget();
 	failures += test_role_budgets();
 	failures += test_project();
-	failures += test_retail();
+	failures += test_shipped_rows();
 	if (failures == 0) std::printf("editor_texture_budget: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

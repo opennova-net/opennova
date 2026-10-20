@@ -51,7 +51,6 @@ override_resource {
 variables {
   billing_email          = "billing@example.com"
   members                = { mock-admin = "admin", mock-member = "member" }
-  reference_assets_token = "github_pat_mock"
   stripe_test_secret_key = "rk_test_mock"
   aws_account_id_prod    = "111111111111"
   aws_account_id_staging = "222222222222"

@@ -172,7 +172,7 @@ describe('ServerOverviewTab', () => {
       hostedServer(1, {
         state: 'failed',
         failure_reason: 'it crashed 3 times in an hour',
-        stopped_because: { cause: 'crash', exit_code: 3, oom: false, line: 'fatal: mission jo_two.bms is missing' },
+        stopped_because: { cause: 'crash', limit: null, exit_code: 3, oom: false, line: 'fatal: mission jo_two.bms is missing' },
       }),
     );
     const why = page.get('.server-stopped-because');
@@ -181,5 +181,31 @@ describe('ServerOverviewTab', () => {
     expect(why.text()).toContain('fatal: mission jo_two.bms is missing');
     expect(why.findAll('p')[1].classes()).toContain('text-danger');
     expect(page.find('.server-phase').exists()).toBe(false);
+  });
+
+  it('says who stopped it, to its owner and to an admin', async () => {
+    const stopped = hostedServer(1, { state: 'stopped', stopped_because: { cause: 'owner_stop', limit: null, exit_code: 0, oom: false, line: '' } });
+    let page = await mountTab(stopped);
+    expect(page.get('.server-stopped-because').text()).toContain('You stopped it.');
+    wrapper?.unmount();
+    page = await mountTab(stopped, 'admin');
+    expect(page.get('.server-stopped-because').text()).toContain('Its owner stopped it.');
+    wrapper?.unmount();
+    page = await mountTab(
+      hostedServer(1, { state: 'stopped', stopped_because: { cause: 'admin_stop', limit: null, exit_code: 0, oom: false, line: '' } }),
+    );
+    expect(page.get('.server-stopped-because').text()).toContain('An admin stopped it.');
+  });
+
+  it('says which hosting limit stopped it', async () => {
+    const page = await mountTab(
+      hostedServer(1, {
+        state: 'stopped',
+        stopped_because: { cause: 'limits', limit: { kind: 'no_shared_server', count: 0 }, exit_code: null, oom: false, line: '' },
+      }),
+    );
+    const why = page.get('.server-stopped-because');
+    expect(why.text()).toContain('Your dedicated machines went down to 0 and you had no shared server free for it, so it was stopped.');
+    expect(why.findAll('p')[1].classes()).not.toContain('text-danger');
   });
 });

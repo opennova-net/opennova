@@ -1,0 +1,251 @@
+<!-- render_cases.mnu: an OpenNova test menu, hand-written: the drawing cases the shipped screens hold -->
+<!-- (menu_render_corpus). Its strips (band20.tga, band24.tga, arrows.tga) are minted by the test; its -->
+<!-- fonts and colours are the base game's (assets/menu_style.mns). -->
+<SCREEN>
+	<NAME>CASES</NAME>
+	<WINDOW type="window" name="MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<FONT>
+			<NAME>%DEF_FONTNAME%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+		<!-- Statics with no MOUSEOVER, SELECTED or DISABLED row: one with a DEFAULT row, one with none. -->
+		<WINDOW type="static" name="QUIET_LABEL">
+			<APPEARANCE state="default"></APPEARANCE>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>20</TOP>
+				<BOTTOM>44</BOTTOM>
+			</POSITION>
+			<STRING justify="LEFT" vjustify="CENTER">Quiet label</STRING>
+		</WINDOW>
+		<WINDOW type="static" name="BARE_LABEL">
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>50</TOP>
+				<BOTTOM>74</BOTTOM>
+			</POSITION>
+			<STRING justify="LEFT" vjustify="CENTER">Bare label</STRING>
+		</WINDOW>
+		<!-- band20.tga loads first at HEIGHT 20; the TALL_ROWS rows name it at 24. -->
+		<WINDOW type="button" name="FIRST_20">
+			<APPEARANCE type="image" state="default" map_state="0" height="20">band20.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="20">band20.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="20">band20.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="20">band20.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>300</LEFT>
+				<RIGHT>420</RIGHT>
+				<TOP>20</TOP>
+				<BOTTOM>40</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">First</STRING>
+		</WINDOW>
+		<WINDOW type="combobox" name="TALL_ROWS">
+			<APPEARANCE type="image" state="default" map_state="0" height="24">band20.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">band20.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">band20.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">band20.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>300</LEFT>
+				<RIGHT>420</RIGHT>
+				<TOP>50</TOP>
+				<BOTTOM>74</BOTTOM>
+			</POSITION>
+			<STRING edge="5" justify="LEFT" vjustify="CENTER"></STRING>
+		</WINDOW>
+		<!-- band24.tga loads first at HEIGHT 24; LOW_ROW's DISABLED row names it at 2. -->
+		<WINDOW type="button" name="FIRST_24">
+			<APPEARANCE type="image" state="default" map_state="0" height="24">band24.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">band24.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">band24.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">band24.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>440</LEFT>
+				<RIGHT>560</RIGHT>
+				<TOP>20</TOP>
+				<BOTTOM>44</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">Second</STRING>
+		</WINDOW>
+		<WINDOW type="edit" name="LOW_ROW">
+			<APPEARANCE type="image" state="default" map_state="0" height="24">band24.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">band24.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">band24.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="2">band24.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>440</LEFT>
+				<RIGHT>560</RIGHT>
+				<TOP>50</TOP>
+				<BOTTOM>74</BOTTOM>
+			</POSITION>
+			<STRING edge="5" justify="LEFT" vjustify="CENTER"></STRING>
+		</WINDOW>
+		<!-- Spin arrows: whole buttons drawing the row of the state they are in. -->
+		<WINDOW type="spinlist" name="SPIN_ONE">
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>100</TOP>
+				<BOTTOM>116</BOTTOM>
+			</POSITION>
+			<ITEMS justify="CENTER" vjustify="CENTER">
+				<ITEM value="0">One</ITEM>
+				<ITEM value="1">Two</ITEM>
+			</ITEMS>
+			<SPINUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="16">arrows.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="16">arrows.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="16">arrows.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="16">arrows.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>184</LEFT>
+					<RIGHT>200</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>16</BOTTOM>
+				</POSITION>
+			</SPINUP>
+			<SPINDOWN>
+				<APPEARANCE type="image" state="default" map_state="0" height="16">arrows.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="16">arrows.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="16">arrows.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="16">arrows.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>16</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>16</BOTTOM>
+				</POSITION>
+			</SPINDOWN>
+		</WINDOW>
+		<WINDOW type="spinlist" name="SPIN_TWO">
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>130</TOP>
+				<BOTTOM>146</BOTTOM>
+			</POSITION>
+			<ITEMS justify="CENTER" vjustify="CENTER">
+				<ITEM value="0">Low</ITEM>
+				<ITEM value="1">High</ITEM>
+			</ITEMS>
+			<SPINUP>
+				<APPEARANCE type="image" state="default">arrowup.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover">arrowup.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected">arrowup.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled">arrowup.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>184</LEFT>
+					<RIGHT>200</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>16</BOTTOM>
+				</POSITION>
+			</SPINUP>
+			<SPINDOWN>
+				<APPEARANCE type="image" state="default">arrowup.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover">arrowup.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected">arrowup.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled">arrowup.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>16</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>16</BOTTOM>
+				</POSITION>
+			</SPINDOWN>
+		</WINDOW>
+		<!-- Typeless rows mark their state and draw nothing; a TYPE the parse does not know reads as none. -->
+		<WINDOW type="button" name="MARKED">
+			<APPEARANCE state="default"></APPEARANCE>
+			<APPEARANCE state="mouseover"></APPEARANCE>
+			<APPEARANCE state="selected"></APPEARANCE>
+			<APPEARANCE state="disabled"></APPEARANCE>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>170</TOP>
+				<BOTTOM>194</BOTTOM>
+			</POSITION>
+			<STRING justify="LEFT" vjustify="CENTER">Marked</STRING>
+		</WINDOW>
+		<WINDOW type="window" name="FRAMED" DRAW_FRAME>
+			<APPEARANCE type="window" state="default"></APPEARANCE>
+			<POSITION>
+				<LEFT>300</LEFT>
+				<RIGHT>560</RIGHT>
+				<TOP>170</TOP>
+				<BOTTOM>260</BOTTOM>
+			</POSITION>
+			<WINDOW type="static" name="FRAMED_LABEL">
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<POSITION>
+					<LEFT>10</LEFT>
+					<RIGHT>250</RIGHT>
+					<TOP>10</TOP>
+					<BOTTOM>34</BOTTOM>
+				</POSITION>
+				<STRING justify="LEFT" vjustify="CENTER">Framed label</STRING>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+<!-- A label drawn at the right of its rect, a PASSWORD edit and a spin list's IMAGE item whose -->
+<!-- texture no strip supplies (its load note names the item row), as shipped screens hold them. -->
+<SCREEN>
+	<NAME>FORMS</NAME>
+	<WINDOW type="window" name="FORMS_MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<FONT>
+			<NAME>%DEF_FONTNAME%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+		<WINDOW type="button" name="RIGHT_LABEL">
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>20</TOP>
+				<BOTTOM>44</BOTTOM>
+			</POSITION>
+			<STRING justify="RIGHT" vjustify="CENTER">Right</STRING>
+		</WINDOW>
+		<WINDOW type="edit" name="SECRET" PASSWORD>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>50</TOP>
+				<BOTTOM>74</BOTTOM>
+			</POSITION>
+			<STRING edge="5" justify="LEFT" vjustify="CENTER">hidden</STRING>
+		</WINDOW>
+		<WINDOW type="spinlist" name="FLAGS">
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>80</TOP>
+				<BOTTOM>96</BOTTOM>
+			</POSITION>
+			<ITEMS justify="CENTER" vjustify="CENTER">
+				<ITEM type="image" value="0">flag.tga</ITEM>
+			</ITEMS>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>

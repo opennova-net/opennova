@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bytesOf, phaseSlow, phaseText, stoppedBecauseText } from './hostedState';
+import type { StoppedBecause } from '../types/hostedServer';
 
 describe('the phase in its owner words', () => {
   it('reads the data downloaded so far of its total in one unit', () => {
@@ -54,16 +55,53 @@ describe('the phase in its owner words', () => {
   });
 
   it('says why a server stopped', () => {
-    expect(stoppedBecauseText({ cause: 'crash', exit_code: 3, oom: false, line: '' })).toBe('It crashed (exit code 3).');
-    expect(stoppedBecauseText({ cause: 'crash', exit_code: 137, oom: true, line: '' })).toBe('It crashed: it ran out of memory.');
-    expect(stoppedBecauseText({ cause: 'stop', exit_code: 0, oom: false, line: '' })).toBe('It was stopped.');
-    expect(stoppedBecauseText({ cause: 'limits', exit_code: null, oom: false, line: '' })).toBe(
-      'Your hosting limit no longer covers it (your support tier, dedicated machine or admin grant ended or changed), so it was stopped.',
-    );
+    const because = (cause: string, extra: Partial<StoppedBecause> = {}): StoppedBecause => ({
+      cause,
+      limit: null,
+      exit_code: null,
+      oom: false,
+      line: '',
+      ...extra,
+    });
+    expect(stoppedBecauseText(because('crash', { exit_code: 3 }), 'owner')).toBe('It crashed (exit code 3).');
+    expect(stoppedBecauseText(because('crash', { exit_code: 137, oom: true }), 'owner')).toBe('It crashed: it ran out of memory.');
     // A start whose data could not be fetched never crashed, whatever docker's code.
-    expect(stoppedBecauseText({ cause: 'data_unavailable', exit_code: 125, oom: false, line: '' })).toBe(
-      'Its game data could not be fetched.',
+    expect(stoppedBecauseText(because('data_unavailable', { exit_code: 125 }), 'owner')).toBe('Its game data could not be fetched.');
+    expect(stoppedBecauseText(because('gone'), 'owner')).toBe('It ended (gone).');
+    // Who stopped it: its owner, an admin, or the service (and every older stop).
+    expect(stoppedBecauseText(because('owner_stop'), 'owner')).toBe('You stopped it.');
+    expect(stoppedBecauseText(because('owner_stop'), 'admin')).toBe('Its owner stopped it.');
+    expect(stoppedBecauseText(because('admin_stop'), 'owner')).toBe('An admin stopped it.');
+    expect(stoppedBecauseText(because('admin_stop'), 'admin')).toBe('An admin stopped it.');
+    expect(stoppedBecauseText(because('stop', { exit_code: 0 }), 'owner')).toBe('It was stopped.');
+  });
+
+  it('says which hosting limit stopped a server', () => {
+    const limits = (kind: string, count: number): StoppedBecause => ({
+      cause: 'limits',
+      limit: { kind, count },
+      exit_code: null,
+      oom: false,
+      line: '',
+    });
+    expect(stoppedBecauseText(limits('shared_servers', 1), 'owner')).toBe('Your shared servers went down to 1, so it was stopped.');
+    expect(stoppedBecauseText(limits('shared_servers', 1), 'admin')).toBe("Its owner's shared servers went down to 1, so it was stopped.");
+    expect(stoppedBecauseText(limits('no_shared_server', 0), 'owner')).toBe(
+      'Your dedicated machines went down to 0 and you had no shared server free for it, so it was stopped.',
     );
-    expect(stoppedBecauseText({ cause: 'gone', exit_code: null, oom: false, line: '' })).toBe('It ended (gone).');
+    expect(stoppedBecauseText(limits('no_shared_server', 0), 'admin')).toBe(
+      "Its owner's dedicated machines went down to 0 and they had no shared server free for it, so it was stopped.",
+    );
+    expect(stoppedBecauseText(limits('no_shared_room', 1), 'owner')).toBe(
+      'Your dedicated machines went down to 1 and the shared machines had no room for it, so it was stopped.',
+    );
+    // A stop that recorded no limit (an older one), and a limit this site does not know.
+    const generic =
+      'Your hosting limit no longer covers it (your support tier, dedicated machine or admin grant ended or changed), so it was stopped.';
+    expect(stoppedBecauseText({ ...limits('shared_servers', 1), limit: null }, 'owner')).toBe(generic);
+    expect(stoppedBecauseText(limits('tier_gone', 1), 'owner')).toBe(generic);
+    expect(stoppedBecauseText({ ...limits('shared_servers', 1), limit: null }, 'admin')).toBe(
+      "Its owner's hosting limit no longer covers it (their support tier, dedicated machine or admin grant ended or changed), so it was stopped.",
+    );
   });
 });

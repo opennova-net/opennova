@@ -8,14 +8,13 @@
 
 #include <string>
 
-#include "common/retail_paths.h"
+#include "common/test_paths.h"
 
 using namespace opennova::def;
 
 #define FEPS 0.01f
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
     // The default matters for shipped defs: no stability key still enables
     // drift. Each authored column retains Math_ParseFixedPoint16 precision.
     {
@@ -114,16 +113,15 @@ int main(int argc, char **argv) {
         def_free_weapons(&refused);
     }
 
-    /* The shipped weapon.def from the reference fixture set (OPENNOVA_JO_ASSETS):
-       its field/pos/sights/actions pins and the memory-parse parity are the
-       SKIP-LEG retail leg; the inline blocks run unconditionally. */
-    const std::string fixture = retail::reference_fixture("def/weapon.def");
-    const bool have_retail = !fixture.empty();
+    /* fixtures/def/parse_weapon.def: the authored weapon blocks (the shipped table's grammar, the
+       witnessed values) its field/pos/sights/actions pins and the memory-parse parity read;
+       the inline blocks below run beside them. */
+    const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/parse_weapon.def";
     const char *path = fixture.c_str();
 
     DefWeaponsFile wf;
     memset(&wf, 0, sizeof(wf));
-    if (have_retail) {
+    {
     if (def_parse_weapons(path, &wf) != 0) {
         fprintf(stderr, "FAIL: def_parse_weapons failed for %s\n", path);
         return 1;
@@ -610,7 +608,7 @@ int main(int argc, char **argv) {
         }
     }
     printf("scope_max_zero + scope_paralax_distance + the M203 slide row OK\n");
-    }  /* retail leg */
+    }
     {
         /* WeaponDef_CreateBlendNamedMaterial recognizes all six tokens at
            0x5401b9..0x540257. Keep the established Blend/Add/BlendAt values
@@ -1057,7 +1055,7 @@ int main(int argc, char **argv) {
 
     /* def_parse_weapons_memory parity: same bytes, same result (covers both the
        string armory fields and the D-PLAYERINFO-11 loadout slot/masks). */
-    if (have_retail) {
+    {
         FILE *fp = fopen(path, "rb");
         if (!fp) {
             fprintf(stderr, "FAIL: could not reopen fixture for memory parity\n");
@@ -1550,8 +1548,6 @@ int main(int argc, char **argv) {
     }
 
     def_free_weapons(&wf);
-    if (!have_retail)
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def (the shipped weapon table)");
     printf("PASS: weapon parsing OK\n");
     return 0;
 }

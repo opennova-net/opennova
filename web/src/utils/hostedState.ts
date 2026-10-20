@@ -6,7 +6,7 @@
 // figures: the phase and the server's own last line are all.
 
 import { timeMs } from './format';
-import type { HostedServer, HostedState, ServerPhase, StoppedBecause } from '../types/hostedServer';
+import type { HostedServer, HostedState, ServerPhase, StopLimit, StoppedBecause } from '../types/hostedServer';
 
 export const STATE_LABELS: Record<HostedState, string> = {
   requested: 'Requested',
@@ -202,8 +202,11 @@ export function phaseSlow(server: Pick<HostedServer, 'phase' | 'updated_at'>, no
 export const LAUNCHES_HELD_NOTICE =
   'New machines are held for a moment after the cloud turned a launch down. A server waiting for a machine starts as soon as launches resume; running servers carry on.';
 
-// Why a stopped or failed server's last run ended, in its owner's words.
-export function stoppedBecauseText(b: StoppedBecause): string {
+// Why a stopped or failed server's last run ended, in its owner's words (on an
+// admin's page, `scope` admin, of its owner): who stopped it, and for a stop
+// the hosting limits made, the limit it was past.
+export function stoppedBecauseText(b: StoppedBecause, scope: 'owner' | 'admin'): string {
+  const owner = scope === 'owner';
   switch (b.cause) {
     case 'crash':
       if (b.oom) return 'It crashed: it ran out of memory.';
@@ -214,10 +217,14 @@ export function stoppedBecauseText(b: StoppedBecause): string {
       return 'The fleet ended the machine it ran on.';
     case 'stop':
       return 'It was stopped.';
+    case 'owner_stop':
+      return owner ? 'You stopped it.' : 'Its owner stopped it.';
+    case 'admin_stop':
+      return 'An admin stopped it.';
     case 'update':
       return 'It was restarted onto newer game data.';
     case 'limits':
-      return 'Your hosting limit no longer covers it (your support tier, dedicated machine or admin grant ended or changed), so it was stopped.';
+      return limitsText(b.limit, owner);
     case 'no_data':
       return 'Its game data is no longer offered, so it could not run.';
     case 'data_unavailable':
@@ -227,4 +234,25 @@ export function stoppedBecauseText(b: StoppedBecause): string {
     default:
       return `It ended (${b.cause}).`;
   }
+}
+
+// A limits stop: the limit its server was past and how many its owner had
+// then, or, for a stop that recorded none (an older one), what such a stop
+// means.
+function limitsText(limit: StopLimit | null, owner: boolean): string {
+  const your = owner ? 'Your' : "Its owner's";
+  if (limit) {
+    const machines = `${your} dedicated machines went down to ${limit.count}`;
+    switch (limit.kind) {
+      case 'shared_servers':
+        return `${your} shared servers went down to ${limit.count}, so it was stopped.`;
+      case 'no_shared_server':
+        return `${machines} and ${owner ? 'you' : 'they'} had no shared server free for it, so it was stopped.`;
+      case 'no_shared_room':
+        return `${machines} and the shared machines had no room for it, so it was stopped.`;
+    }
+  }
+  return owner
+    ? 'Your hosting limit no longer covers it (your support tier, dedicated machine or admin grant ended or changed), so it was stopped.'
+    : "Its owner's hosting limit no longer covers it (their support tier, dedicated machine or admin grant ended or changed), so it was stopped.";
 }

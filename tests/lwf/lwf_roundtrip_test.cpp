@@ -1,8 +1,8 @@
 // Parse->encode round-trip for opennova::lwf over the synthetic menu.lwf
 // (tests/fixtures/minimal_lwf_gen.cpp, our writer's own bytes, so byte-exact),
 // plus a mutate-and-reread check, and the stale bytes a tool leaves written
-// zero. The retail profiles are swept by lwf_jo_assets_sweep_test behind
-// OPENNOVA_JO_ASSETS. Mirrors mission/mission_bms_test.cpp.
+// zero. The banks as the tools leave them (fixtures/lwf/stale.lwf) are swept by
+// lwf_bank_sweep_test. Mirrors mission/mission_bms_test.cpp.
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>

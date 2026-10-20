@@ -6,14 +6,14 @@
 #
 # Usage:
 #   pwsh -File scripts\net\decode.ps1 -Capture .scratch\retail-ref-<stamp>.pcapng `
-#        [-Items <items.def>] [-Tags '0x0c','0x0d'] [-Stream]
+#        -Items <items.def> [-Tags '0x0c','0x0d'] [-Stream]
 #
-# -Items defaults to ITEMS.DEF under OPENNOVA_JO_ASSETS when that tree is set.
+# -Items names the items.def the capture's game ran (the install's own).
 # Prints DECODE_FILE=<path> and the first lines of the decode.
 
 param(
     [Parameter(Mandatory = $true)] [string] $Capture,
-    [string] $Items = "",
+    [Parameter(Mandatory = $true)] [string] $Items,
     [string[]] $Tags = @(),
     [switch] $Stream
 )
@@ -41,7 +41,6 @@ if (-not (Test-Path $Capture)) {
     exit 1
 }
 $Capture = (Resolve-Path $Capture).Path
-if (-not $Items) { $Items = Get-OpenNovaRetailAssetFile -Name "ITEMS.DEF" }
 
 $wire = Find-App -Dir "wire"
 if (-not $wire) {
@@ -51,7 +50,7 @@ if (-not $wire) {
 
 $ppArgs = @($Capture)
 if ($Stream) { $ppArgs += "--stream" }
-if ($Items)  { $ppArgs += @("--items", $Items) }
+$ppArgs += @("--items", $Items)
 if ($Tags)   { $ppArgs += $Tags }
 
 $decodeFile = "$Capture.txt"

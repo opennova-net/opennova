@@ -12,10 +12,12 @@ namespace opennova {
 
 // Thin SQL wrapper around the lobby's tables (backend/migrations/0006_lobby_commands.sql,
 // 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql,
-// 0020_lobby_live_view.sql): `lobby_instances`, the
+// 0020_lobby_live_view.sql, 0022_lobby_goodbyes.sql): `lobby_instances`, the
 // lobbies that run (one per lobby process, each its own id, all announcing the deployment's one
 // lobby address), `lobby_sessions`, the NovaWorld sessions each lobby holds, which
-// that lobby alone writes and everything else reads, and `lobby_commands`, what the HTTP routes
+// that lobby alone writes and everything else reads, `lobby_goodbyes`, the goodbyes a lobby's
+// clean stop leaves for the sessions it held, which the lobby their next packets reach sends,
+// and `lobby_commands`, what the HTTP routes
 // and the hosted servers' supervisor address to the lobby that holds a session, which that lobby
 // alone takes and runs. A lobby is a NovaWorld UDP listener (apps/novaworld_lobby/
 // nw_udp_listener.h) in a lobby process of its own; nothing else reaches its memory, so a route
@@ -167,6 +169,25 @@ std::vector<SessionRow> list_sessions(db::Database &db);
 // under, as the HTTP routes read a login (accounts/auth.h get_user_by_login_session_tag). nullopt
 // for an empty or unknown tag. The lobby pins the session's account with it (LobbyState::user_id).
 std::optional<int64_t> login_account(db::Database &db, const std::string &session_tag);
+
+// --- lobby_goodbyes ---------------------------------------------------------
+
+// The ServerGoodBye a lobby's clean stop leaves for one session it held (lobby_goodbyes'
+// comment): the session's address ("a.b.c.d" and its port), the key its packets address (the SK
+// the lobby minted) and the key the goodbye bears (the client's CK).
+struct Goodbye {
+	std::string peer_ip;
+	int peer_port = 0;
+	uint32_t server_sk = 0;
+	uint32_t client_ck = 0;
+};
+
+// A stopping lobby's goodbyes (each address once), in one statement, each replacing any row at its
+// address; first, the rows left more than `max_age_seconds` ago go.
+void leave_goodbyes(
+		db::Database &db, const std::vector<Goodbye> &goodbyes, int64_t max_age_seconds);
+// The goodbyes left within the last `max_age_seconds`, by address.
+std::vector<Goodbye> list_goodbyes(db::Database &db, int64_t max_age_seconds);
 
 // --- lobby_commands ---------------------------------------------------------
 

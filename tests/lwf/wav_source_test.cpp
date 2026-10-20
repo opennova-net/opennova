@@ -2,31 +2,31 @@
 // loader takes, by its own walk [orig: Audio_LoadWavFileFromArchive @ 0x766480]: the minted mono 16-bit
 // tone; not a stereo wave, a 24-bit or float one, a LIST ahead of the data, an ADPCM wave with no fact
 // chunk. A wave the game refuses converts into one it takes, the samples kept; a wave's facts: the
-// format, the peak and the RMS of a sine at 0.5, its picture. The retail leg (OPENNOVA_JO_ASSETS): every
-// shipped wave the loader takes but DSkid.wav (D-SND-33), by the check and by the runtime's decode, and
-// every IMA ADPCM one decoded to its fact count, as a reference decode written apart decodes it (D-SND-45).
+// format, the peak and the RMS of a sine at 0.5, its picture. Every form the shipped waves take: mono PCM
+// at their rates and widths, which the loader and the runtime's decode take; the 16-bit stereo wave both
+// refuse (DSkid.wav, D-SND-33); and the two IMA ADPCM forms (fixtures/lwf/ima_adpcm.wav and
+// ima_adpcm_512.wav, minted by tests/fixtures/minimal_lwf_gen.cpp), each decoded to its fact count as a
+// reference decode written apart decodes it (D-SND-45).
 #include <formats/lwf/wav_source.h>
 
 #include <formats/bfc1/bfc1.h>
 #include <formats/lwf/wav_pcm.h>
 
 #include <base/io/le.h>
-#include <base/io/os_path.h>
-#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "fixtures/ima_adpcm_source.h"
 
 using namespace opennova;
 using namespace opennova::lwf;
@@ -292,67 +292,104 @@ uint32_t fnv1a(const std::vector<uint8_t> &bytes) {
 	return h;
 }
 
-// Every shipped wave the game's loader takes, by the check's own walk, but one: DSkid.wav, the 16-bit
-// stereo wave game.lwf's IMP_TMBL_DSKID plays, which the loader's channel test refuses [orig:
-// Audio_LoadWavFileFromArchive @ 0x7666db], so retail plays nothing for that set (D-SND-33). The
-// runtime's decode, handed the bytes as the VFS reads them (BFC1 undone), refuses the same one. Every
-// IMA ADPCM wave decodes its fact count of samples, each the reference decode's (D-SND-45), none with a
-// block's step index outside 0..88; xpmid1.wav's 37648 samples hash as the reference computes them.
-int test_retail_waves() {
-	const std::string assets = retail::assets();
-	if (assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (every shipped wave through the loader's walk)");
-		return 0;
+// Every PCM form the shipped waves take: a mono wave at each rate and width JO:CA's hold (8-bit at 8000,
+// 11025, 22050, 44100 and 48000 Hz; 16-bit at 5000, 11025, 16000, 22050 and 44100), its fmt and then its
+// data, or a fact between them: the loader takes each, and the runtime's decode, handed the bytes as the
+// VFS reads them (BFC1 undone), reads its sample count as the loader records it. The one shipped wave of
+// another form, DSkid.wav, the 16-bit stereo wave game.lwf's IMP_TMBL_DSKID plays, the loader's channel
+// test refuses [orig: Audio_LoadWavFileFromArchive @ 0x7666db], so retail plays nothing for that set
+// (D-SND-33); the runtime's decode refuses the same one.
+int test_shipped_pcm_forms() {
+	const struct {
+		uint16_t bits;
+		uint32_t rate;
+	} kForms[] = {{8, 8000},  {8, 11025},  {8, 22050},  {8, 44100},  {8, 48000},
+	              {16, 5000}, {16, 11025}, {16, 16000}, {16, 22050}, {16, 44100}};
+	for (const auto &form : kForms) {
+		for (const bool fact : {false, true}) {
+			std::vector<uint8_t> bytes = wave_of(1, form.bits, form.rate, 300);
+			if (fact) {
+				const uint8_t chunk[12] = {'f', 'a', 'c', 't', 4, 0, 0, 0, 0x2C, 1, 0, 0};
+				bytes.insert(bytes.begin() + 36, std::begin(chunk), std::end(chunk));
+				const uint32_t riff = uint32_t(bytes.size() - 8);
+				std::memcpy(bytes.data() + 4, &riff, 4);
+			}
+			TEST_EXPECT(wave_retail_check(bytes).plays);
+			WavPcm pcm;
+			std::string error;
+			TEST_EXPECT(bfc1::bfc1_unpack(bytes) && wav_decode_pcm16(bytes.data(), bytes.size(), pcm, error) &&
+			            pcm.channels == 1 && pcm.loader_samples == 300 && pcm.pcm16.size() == 600);
+		}
 	}
-	size_t waves = 0, ima = 0, ima_counted = 0, ima_matched = 0, outside = 0;
-	uint32_t xpmid1 = 0;
-	size_t xpmid1_samples = 0;
-	std::vector<std::string> refused, undecoded;
-	std::error_code ec;
-	for (const auto &entry : std::filesystem::directory_iterator(io::os_path(assets), ec)) {
-		if (strutil::to_lower(entry.path().extension().string()) != ".wav") continue;
-		std::vector<uint8_t> bytes = test_io::read_file(io::utf8_path(entry.path()));
-		const WaveRetailCheck check = wave_retail_check(bytes);
-		++waves;
-		const std::string name = strutil::to_lower(io::utf8_path(entry.path().filename()));
-		if (!check.plays) refused.push_back(name);
+	std::vector<uint8_t> dskid = wave_of(2, 16, 22050, 300);
+	const WaveRetailCheck refused = wave_retail_check(dskid);
+	TEST_EXPECT(!refused.plays && refused.why.find("2 channels") != std::string::npos);
+	WavPcm pcm;
+	std::string error;
+	TEST_EXPECT(bfc1::bfc1_unpack(dskid) && !wav_decode_pcm16(dskid.data(), dskid.size(), pcm, error));
+	std::printf("pcm forms: every shipped rate and width taken, the 16-bit stereo wave refused\n");
+	return 0;
+}
+
+// Each minted IMA ADPCM form's decode, its samples hashed as the reference decode computes them; pinned
+// once the reference matched the runtime's (a change is a change to the loader's decode: an [orig]
+// witness or a D-SND entry, `--dump` printing the hashes).
+struct ImaPin {
+	const char *file;
+	uint32_t hash;
+};
+const ImaPin kImaPins[] = {
+	{"ima_adpcm.wav", 0x7E6D6C8Du},
+	{"ima_adpcm_512.wav", 0x85672290u},
+};
+
+// Each minted IMA ADPCM form (tests/fixtures/ima_adpcm_source.h: the two every shipped IMA ADPCM wave
+// takes) through the loader's walk and the runtime's decode, as every shipped one goes: taken, decoded to
+// its fact count of samples (1300 of the three blocks' 1515; the 2034 two blocks hold), each sample the
+// reference decode's (D-SND-45), no block's step index outside 0..88 (D-SND-47); past the first block's
+// ramp from step index 0 (the shipped waves' first header, which a step of 7 takes some dozen samples to
+// climb out of), the decode within the quantizer's error of the signal the generator encoded (its
+// encoder tracks the loader's own step); and its samples hashed as pinned.
+int test_ima_forms(bool dump) {
+	for (size_t f = 0; f < ima_fixture::kFormCount; ++f) {
+		const ima_fixture::Form &form = ima_fixture::kForms[f];
+		std::vector<uint8_t> bytes = test_io::read_file(repo() + "/fixtures/lwf/" + form.file);
+		TEST_EXPECT(!bytes.empty() && wave_retail_check(bytes).plays);
 		WavPcm pcm;
 		std::string error;
-		if (!bfc1::bfc1_unpack(bytes) || !wav_decode_pcm16(bytes.data(), bytes.size(), pcm, error)) {
-			undecoded.push_back(name);
-			continue;
-		}
+		TEST_EXPECT(bfc1::bfc1_unpack(bytes) && wav_decode_pcm16(bytes.data(), bytes.size(), pcm, error));
 		const WaveLoaderWalk walk = wave_loader_walk(bytes.data(), bytes.size());
-		if (walk.bits != 4) continue;
-		++ima;
+		TEST_EXPECT(walk.refusal == WaveRefusal::None && walk.bits == 4 && walk.tag == 0x11 && walk.has_fact &&
+		            walk.channels == 1 && walk.rate == form.rate && walk.block_align == form.block_align);
+		if (walk.bits != 4 || !walk.has_fact) continue;
+		size_t outside = 0;
 		const std::vector<int16_t> reference = reference_ima(bytes, walk, outside);
 		std::vector<uint8_t> reference_pcm;
 		for (const int16_t s : reference) io::append_u16_le(reference_pcm, uint16_t(s));
-		ima_counted += pcm.pcm16.size() / 2 == pcm.loader_samples ? 1 : 0;
-		ima_matched += pcm.pcm16 == reference_pcm ? 1 : 0;
-		if (name == "xpmid1.wav") {
-			xpmid1 = fnv1a(reference_pcm);
-			xpmid1_samples = reference.size();
-		}
+		TEST_EXPECT(pcm.loader_samples == form.samples && pcm.pcm16.size() / 2 == pcm.loader_samples);
+		TEST_EXPECT(pcm.pcm16 == reference_pcm && outside == 0);
+		int worst = 0;
+		for (size_t i = 16; i < reference.size(); ++i)
+			worst = std::max(worst, std::abs(int(reference[i]) - int(ima_fixture::source_sample(uint32_t(i), form.rate))));
+		const uint32_t hash = fnv1a(reference_pcm);
+		std::printf("%s: %zu samples, past the ramp at worst %d from the signal, %08X\n", form.file,
+		            reference.size(), worst, unsigned(hash));
+		if (dump) continue;
+		TEST_EXPECT(worst <= 1024);
+		TEST_EXPECT(std::strcmp(kImaPins[f].file, form.file) == 0 && hash == kImaPins[f].hash);
 	}
-	std::printf("retail: %zu waves, %zu the check refuses, %zu the decode refuses; %zu IMA ADPCM, %zu of the fact "
-	            "count, %zu the reference's, %zu blocks indexed outside 0..88; xpmid1.wav %zu samples, %08X\n",
-	            waves, refused.size(), undecoded.size(), ima, ima_counted, ima_matched, outside, xpmid1_samples,
-	            unsigned(xpmid1));
-	TEST_EXPECT(waves > 100 && refused == std::vector<std::string>({"dskid.wav"}));
-	TEST_EXPECT(undecoded == std::vector<std::string>({"dskid.wav"}));
-	TEST_EXPECT(ima == 1907 && ima_counted == ima && ima_matched == ima && outside == 0);
-	TEST_EXPECT(xpmid1_samples == 37648 && xpmid1 == 0x44A6CE0Du);
 	return 0;
 }
 
 } // namespace
 
+// `wav_source_test --dump` prints the IMA ADPCM forms' hashes and checks no pin.
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+	const bool dump = argc > 1 && std::strcmp(argv[1], "--dump") == 0;
 	int failed = 0;
 	failed += test_waves();
-	failed += test_retail_waves();
+	failed += test_shipped_pcm_forms();
+	failed += test_ima_forms(dump);
 	if (failed == 0) std::printf("wav_source: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

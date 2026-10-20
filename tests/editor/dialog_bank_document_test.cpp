@@ -4,8 +4,9 @@
 // by, a rename writing the number, Add it there), a line's wave one of the bank's sounds (<bank>.lwf), and the
 // session's play_sound of a dialog: its lines one after another as the game plays them, each the wave of its name at
 // its dialog volume, its subtitle in the words. Minted fixtures alone (a bank, its sounds, a mission and its text
-// minted here through the engine's writers, the short PCM wave); the retail leg (OPENNOVA_JO_ASSETS) reads every
-// shipped dialog bank through the document and writes it back byte for byte, every line's wave in its sounds.
+// minted here through the engine's writers, the short PCM wave); every bank of the variant set (the format's minted
+// banks under fixtures/dbf/, the never-read bytes NovaLogic's tool left among them) through the document, written back
+// byte for byte or, past those bytes, every value the game reads the same; every line's wave in its sounds.
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/dialog_bank_document.h>
 #include <editor/documents/document_types.h>
@@ -30,21 +31,19 @@
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/mission/mission_sidecars.h>
 
-#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/menus_audio_fixtures.h"
 #include "editor/test_platform.h"
 
 using namespace opennova;
@@ -449,29 +448,45 @@ int test_session_play() {
 	return 0;
 }
 
-// --- retail -------------------------------------------------------------------------------------------------
+// --- the variant set -----------------------------------------------------------------------------------------
 
-// Every shipped dialog bank through the document, written back byte for byte; every line's wave in the bank's own
-// sounds (the .LWF of its name), as the game's lookup finds it.
-int test_retail_banks() {
-	const std::string assets = retail::assets();
-	if (assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (the shipped dialog banks through the document)");
-		return 0;
-	}
-	size_t banks = 0, exact = 0, lines = 0, found = 0;
-	std::error_code ec;
-	for (const auto &entry : std::filesystem::directory_iterator(io::os_path(assets), ec)) {
-		const std::string name = io::utf8_path(entry.path().filename());
-		if (strutil::to_lower(entry.path().extension().string()) != ".dbf") continue;
-		const std::vector<uint8_t> bytes = test_io::read_file(io::utf8_path(entry.path()));
+// The bank the format's lane mints with the bytes NovaLogic's dialog tool left where no reader reaches
+// (tests/fixtures/minimal_dbf_gen.cpp, 04TR.DBF's form, the one stale form JO's banks hold): its lines' sequences
+// "##" written over the older "_0000N", that text's tail past the new terminator [orig: Dialog_LoadAudioClip @
+// 0x44ddec, strlen].
+const char *const kStaleBank = "fixtures/dbf/stale_bank.dbf";
+
+// A bank's own sounds (the .LWF of its name): a wave for each its lines name, the name upper-cased as the shipped
+// pairs spell theirs (00TRg.DBF's line Z00gR100 is 00TRg.LWF's Z00GR100), which the game's lookup finds without case.
+lwf::File sounds_of(const dbf::File &bank) {
+	lwf::File sounds;
+	for (const dbf::Group &group : bank.groups)
+		for (const dbf::Line &line : group.lines) {
+			lwf::Single single;
+			single.name = strutil::to_upper(line.def_id_name);
+			single.path = strutil::to_lower(line.def_id_name) + ".wav";
+			sounds.singles.push_back(single);
+		}
+	return sounds;
+}
+
+// Every bank of the variant set (fixtures/dbf/'s, the format's minted banks) through the document, written back byte
+// for byte, or (the stale bank: the bytes no reader reaches written zero, ADR 0003) every value the game reads the
+// same; every line's wave in the bank's own sounds, as the game's lookup finds it.
+int test_every_bank() {
+	std::vector<variant_fixtures::Input> inputs;
+	const bool all = variant_fixtures::inputs({"fixtures/dbf"}, ".dbf", {kStaleBank}, inputs);
+	size_t banks = 0, exact = 0, stale = 0, lines = 0, found = 0;
+	for (const variant_fixtures::Input &input : inputs) {
+		const std::string &name = input.label;
+		const std::vector<uint8_t> bytes = test_io::read_file(input.path);
 		DialogBankDocument bank;
 		Diagnostic error;
 		TEST_EXPECT(bank.load_bytes(bytes, name, AssetKind::DialogBank, "jo", error));
 		const SerializeResult written = bank.serialize();
-		// Byte for byte, or (04TR.DBF: its sequences hold "##" over an older "_0000N", the bytes past the terminator
-		// that no reader reaches [orig: Dialog_LoadAudioClip @ 0x44ddec, strlen]) every value the game reads the same.
 		if (written.ok() && std::vector<uint8_t>(written.text.begin(), written.text.end()) == bytes) ++exact;
+		else if (name == kStaleBank) ++stale;
+		else std::fprintf(stderr, "%s is not written back byte for byte\n", name.c_str());
 		dbf::File original, again;
 		std::string message;
 		TEST_EXPECT(written.ok() && dbf::parse_dbf_memory(bytes.data(), bytes.size(), original, message) &&
@@ -489,10 +504,12 @@ int test_retail_banks() {
 		}
 		if (!same) std::fprintf(stderr, "%s does not read back the same\n", name.c_str());
 		TEST_EXPECT(same);
-		const std::string sounds_path = retail::asset_file((strutil::to_lower(mission::mission_base_name(name)) + ".lwf").c_str());
+		// The bank's sounds as the game reads them: written by the engine's writer, read by its reader.
+		std::vector<uint8_t> sound_bytes;
 		lwf::File sounds;
-		const std::vector<uint8_t> sound_bytes = sounds_path.empty() ? std::vector<uint8_t>() : test_io::read_file(sounds_path);
-		const bool read = !sound_bytes.empty() && lwf::parse_lwf_buffer(sound_bytes.data(), sound_bytes.size(), sounds, message);
+		const bool read = lwf::encode_lwf(sounds_of(original), sound_bytes, message) &&
+		                  lwf::parse_lwf_buffer(sound_bytes.data(), sound_bytes.size(), sounds, message);
+		TEST_EXPECT(read);
 		for (const DialogBankRow *row : bank.dialogs())
 			for (const BankLine &line : row->dialog.lines) {
 				++lines;
@@ -500,16 +517,16 @@ int test_retail_banks() {
 			}
 		++banks;
 	}
-	std::printf("retail: %zu dialog banks (%zu written back byte for byte), %zu lines, %zu waves found in their sounds\n",
-	            banks, exact, lines, found);
-	TEST_EXPECT(banks >= 17 && exact + 1 >= banks && lines > 0 && found == lines);
+	std::printf("dialog banks: %zu (%zu written back byte for byte, %zu past their never-read bytes), %zu lines, %zu waves "
+	            "found in their sounds\n",
+	            banks, exact, stale, lines, found);
+	TEST_EXPECT(all && banks == inputs.size() && exact + stale == banks && lines > 0 && found == lines);
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 	failed += test_reads_and_writes_back();
 	failed += test_edits();
@@ -517,7 +534,7 @@ int main(int argc, char **argv) {
 	failed += test_graph();
 	failed += test_rename_and_add_there();
 	failed += test_session_play();
-	failed += test_retail_banks();
+	failed += test_every_bank();
 	if (failed == 0) std::printf("editor dialog bank: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

@@ -25,8 +25,8 @@ class MissionDocument;
 
 // What a new record's parameter of a kind holds: the value the shipped records of the kind hold most
 // often where the kind is a quantity or a choice (a count, a distance, seconds, a speed, on or off, a
-// team, a sub-goal: measured over the install's 115 missions, the `mission_logic` ctest's retail leg
-// pinning each), 0 for an index or a record named (none named yet: the form asks for a pick).
+// team, a sub-goal: measured once over the install's 115 missions, the `editor_mission_logic` ctest's
+// test_measured_defaults pinning each), 0 for an index or a record named (none named yet: the form asks for a pick).
 int64_t logic_param_default(mission::ParamKind kind);
 // The unit a kind's number is in ("m", "s", "km/h"; "" for none).
 const char *logic_param_unit(mission::ParamKind kind);

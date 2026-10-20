@@ -2,11 +2,13 @@
 // particle file's and the HUD layout's, as text (graph/native_text_sites.h): only the token the game reads
 // at each site, every other byte kept (a comment naming it, a line the game reads over, the line ends); a
 // particle flipbook's frame refuses the rename (its name is the graphic's); a file stored in the SCR form
-// is written back as plain text; the way back rewrites the same tokens. The retail leg (OPENNOVA_JO_DIR):
-// every name the install's native texts write is found as its one token.
+// is written back as plain text; the way back rewrites the same tokens. Every name a native text writes is
+// found as its one token, over a text of each kind holding every form the shipped texts write a name in and
+// over the native texts of a game install minted from OpenNova's own game.
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <base/vfs/vfs.h>
@@ -27,11 +29,10 @@
 #include <formats/tga/tga.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
-#include "common/test_parts.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/minted_install.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -212,68 +213,141 @@ int test_rename_in_native_texts() {
 	return 0;
 }
 
-// Every name the install's native texts write (each terrain, environment, particle file and the HUD
-// layout) found as its token: renamed alone in its file, the text reads it back as the new name and
-// nothing else changed. Each rename parses its whole file again (3016 names over 126 files, 132 s in
-// one row), so the names are dealt round the kShares parts of the program by their place in the walk,
-// a big file's spread over them all: a run renames share `share` alone, over the whole install's walk.
-constexpr size_t kShares = 4;
+// The texts each form of name the shipped native texts write is written in, one text of each kind (the 3,016
+// names of JO:CA's 126 terrains, environments, particle files and HUD layout, 3,144 with its expansion's,
+// read once, 2026-10-19, each found as its token; and the forms of its particle files' curve keys, names
+// since): an environment's sky maps and celestial models, each padded
+// by spaces to a comment, its star model's key left without one (no default named); the HUD layout's fonts and
+// frame after a tab, its icons before their place, a stance's icon
+// among its numbers, a vehicle panel's interface at its line's end and before trailing spaces; a particle
+// file's graphics after `=` and a tab, before a comma, one named by two definitions (the first token of it
+// another site), and its curves after a tab and `=`, before the `;` or a `reverse` or `inverse` word, one table
+// named by two definitions; a terrain's maps padded by spaces or a tab, each at its line's end or before a tab and a
+// comment, and a foliage block's model before its comment, two blocks naming one model. Every line ends CR LF,
+// as every shipped one does.
+std::vector<std::pair<std::string, std::string>> corpus_forms() {
+	using test_io::crlf;
+	return {
+	        {"forms.env", crlf("sky_map1          cloud01.pcx           ;cloud pcx - the full range layer\n"
+	                           "sky_map2          cloud01b.pcx          ;cloud pcx, its modulation layer\n"
+	                           "sun_3di             sun.3di              ;sun object\n"
+	                           "moon_3di          moon4.3di            ;moon object\n"
+	                           "glare_3di          glare.3di            ;glare object\n"
+	                           "star_3di                                ;star object, none\n")},
+	        {"hudpos.def", crlf("fonthud1_hi\tbig18b.fnt\nfonthud1_lo\tsmall14.fnt\n"
+	                            "StaticFrame\tframe.tga  2,570\t\nParachuteIcon\tchute.tga  10,659\t\n"
+	                            "ArmorIcon\t\tarmor.tga    10,659\t\nHUDSTANCE 0\t0 0 stance_1.tga STAND\t\n"
+	                            "VEHICLE_HUD \n  sid Dbuggy1  \n  interface h_buggy.tga\n  driver 51,103\nVEHICLE_END\n\n"
+	                            "VEHICLE_HUD \n  sid Dtruck1 \n  interface h_truck.tga  \n  driver 51,103\nVEHICLE_END\n")},
+	        {"forms.ptl", crlf("[particledef]\n{\n\tid = puff_a;\n\tscale_func\t= grow_t;\n\tgraphic1 =\tpuff.tga, blend;\n"
+	                           "\tg1_alpha_func\t= fade_t reverse;\n\tgraphic2 =\tthin.tga, blend;\n}\n"
+	                           "[particledef]\n{\n\tid = puff_b;\n\talpha_func\t= fade_t;\n\tgraphic1 =\tpuff.tga, blend;\n}\n"
+	                           "[particledef]\n{\n\tid = flash;\n\tgraphic1 =\tflash.tga, additive;\n\tg1_scale_func\t= grow_t inverse;\n}\n")},
+	        {"forms.trn", crlf("terrain_name     \"Forms\"\n"
+	                           "polytrn_colormap         forms_c.tga\n"
+	                           "polytrn_detailmap        det_a.tga\t; grayscale base detail map\n"
+	                           "polytrn_detailmap_c1     det_g.tga\t; color grass\n"
+	                           "polytrn_detailmap_c2     det_d.tga\n"
+	                           "polytrn_detailmap_c3     det_r.tga\n"
+	                           "polytrn_detailmap2       det_b.tga\t; grayscale distance detail map\n"
+	                           "polytrn_detailmapdist    det_c.tga\n"
+	                           "polytrn_detailblendmap   forms_m2.tga\n"
+	                           "polytrn_polydata     \tforms.cpt\n"
+	                           "polytrn_tilestrip   \ttiles10.tga\n"
+	                           "polytrn_charmap     \tforms_m.pcx\n"
+	                           "polytrn_foliagemap  \tforms_f.pcx\n"
+	                           "foliage\n  graphic         veg5.3di                 ; the model it places\n  match 254\nend\n"
+	                           "foliage\n  graphic         veg5.3di                 ; the same model again\n  match 253\nend\n"
+	                           "foliage\n  graphic         veg6.3di\n  match 252\nend\n")},
+	};
+}
 
-int test_retail(size_t share) {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's native texts renamed in)");
-		return 0;
+// Every name a native text writes (a terrain, an environment, a particle file, the HUD layout) found as its one
+// token: renamed alone in its file, the text reads it back as the new name and nothing else changed. Over the
+// corpus' forms (corpus_forms, each kind's text naming as many names as it writes forms, the environment's also
+// stored in the SCR form, as an archive may hold it) and the native texts of a game install minted from
+// OpenNova's own game (minted_install.h, its terrain the importer's .trn), each read as the game reads it (its
+// payload decoded).
+int test_every_name_one_token() {
+	// Each text, and how many names its forms write (0: a text of the install's, its names its own).
+	struct Text {
+		std::string name;
+		std::vector<uint8_t> bytes;
+		size_t forms;
+	};
+	std::vector<Text> texts;
+	const size_t written[] = {5, 8, 8, 15};
+	for (size_t i = 0; i < corpus_forms().size(); ++i) {
+		const std::string text = corpus_forms()[i].second;
+		texts.push_back({corpus_forms()[i].first, std::vector<uint8_t>(text.begin(), text.end()), written[i]});
 	}
+	{
+		const std::string env = corpus_forms()[0].second;
+		std::vector<uint8_t> stored{'S', 'C', 'R', 1};
+		std::vector<uint8_t> body(env.begin(), env.end());
+		opennova::scr::scr_encrypt(body.data(), body.size(), opennova::scr::SCR_KEY_JO_DFX2);
+		stored.insert(stored.end(), body.begin(), body.end());
+		texts.push_back({"stored.env", stored, written[0]});
+	}
+	test_temp::TempDir dir("opennova_editor_native_rename_install");
+	const std::string install = dir.file("install");
+	std::string why;
+	TEST_EXPECT(minted_install::mint(install, why));
 	ProjectDocument project;
 	project.target_game = "jo";
 	InstallView install_view;
-	std::string why;
 	TEST_EXPECT(install_view.open(install_spec(install, project), why));
 	const opennova::Vfs &mount = install_view.vfs();
-	size_t files = 0, names = 0, shared = 0, found = 0;
+	size_t from_install = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
-		const std::string &name = location.logical_name;
-		const AssetKind kind = classify_asset(name, nullptr);
 		std::vector<uint8_t> bytes;
-		if (!native_text_kind(kind) || !mount.read_file_raw(name, bytes)) continue;
+		if (!native_text_kind(classify_asset(location.logical_name, nullptr)) || !mount.read_file_raw(location.logical_name, bytes))
+			continue;
+		texts.push_back({location.logical_name, bytes, 0});
+		++from_install;
+	}
+	TEST_EXPECT(from_install >= 8); // its environments, particle files, HUD layout and terrain
+	size_t names = 0, found = 0;
+	for (Text &each : texts) {
+		const std::string &name = each.name;
+		std::vector<uint8_t> &bytes = each.bytes;
+		const AssetKind kind = classify_asset(name, nullptr);
 		opennova::vfs_decode_payload(bytes, opennova::VFS_SCR_FORCE_JO_DFX2);
 		Extracted extracted;
 		Diagnostic error;
-		if (!extract_from_bytes(name, kind, bytes, "jo", extracted, error)) continue;
-		++files;
+		TEST_EXPECT(native_text_kind(kind) && extract_from_bytes(name, kind, bytes, "jo", extracted, error));
 		const std::string text(bytes.begin(), bytes.end());
+		size_t sites = 0;
 		for (const GraphEdge &edge : extracted.edges) {
 			if (!edge.rewritable) continue;
-			if (names++ % kShares != share) continue;
-			++shared;
+			++sites;
+			++names;
 			std::string renamed = text;
 			std::vector<size_t> missed;
 			if (rewrite_native_text(name, kind, "jo", renamed, {{edge.record, edge.field, edge.value, "q" + edge.value}}, missed) == 1)
 				++found;
 			else
-				std::fprintf(stderr, "retail: %s: %s %s '%s' not found as one token\n", name.c_str(), edge.record.c_str(),
-				             edge.field.c_str(), edge.value.c_str());
+				std::fprintf(stderr, "%s: %s %s '%s' not found as one token\n", name.c_str(), edge.record.c_str(), edge.field.c_str(),
+				             edge.value.c_str());
 		}
+		if (each.forms != 0 && sites != each.forms)
+			std::fprintf(stderr, "%s: %zu names read where its forms write %zu\n", name.c_str(), sites, each.forms);
+		TEST_EXPECT(each.forms == 0 || sites == each.forms);
 	}
-	std::printf("retail: %zu native texts, %zu names; share %zu of %zu: %zu of its %zu found as one token\n", files,
-	            names, share + 1, kShares, found, shared);
-	TEST_EXPECT(files > 100 && names > 1000 && shared > 0 && found == shared);
+	std::printf("native texts: %zu (%zu of the minted install's), %zu names, %zu found as one token\n", texts.size(), from_install,
+	            names, found);
+	TEST_EXPECT(names > 50 && found == names);
 	return 0;
 }
 
 } // namespace
 
-// The retail twin's parts (tests/common/test_parts.h): `main` the synthetic cases and the retail
-// leg's first share of the install's names, `share_2` to `_4` the others, side by side.
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	const int failures = test_parts::run(
-	        argc, argv,
-	        {{"main", {test_rewrite_text, test_native_text_place, test_rename_in_native_texts, [] { return test_retail(0); }}},
-	         {"share_2", {[] { return test_retail(1); }}, true},
-	         {"share_3", {[] { return test_retail(2); }}, true},
-	         {"share_4", {[] { return test_retail(3); }}, true}});
+int main() {
+	int failures = 0;
+	failures += test_rewrite_text();
+	failures += test_native_text_place();
+	failures += test_rename_in_native_texts();
+	failures += test_every_name_one_token();
 	if (failures == 0) std::printf("editor_native_rename: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

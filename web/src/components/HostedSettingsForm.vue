@@ -273,6 +273,10 @@
         </p>
       </div>
     </div>
+    <!-- Every dedicated machine of the account's in use: it runs on a shared machine. -->
+    <p v-else-if="ownMachines > 0" :id="`${baseId}-pool`" class="text-sm text-ink">
+      On a shared machine: your dedicated machines are all in use.
+    </p>
 
     <div class="flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
       <p class="text-xs text-ink-muted">Hosted servers are experimental (pre-1.0).</p>
@@ -352,6 +356,8 @@ const props = withDefaults(
     // while both have room.
     sharedFree?: number;
     ownMachinesFree?: number;
+    // The account's dedicated machines, free or not.
+    ownMachines?: number;
     // The ended server started again ran on a dedicated machine: the choice
     // starts there (while one is free).
     previousOwnMachine?: boolean;
@@ -365,6 +371,7 @@ const props = withDefaults(
     baseId: 'hosted-settings',
     sharedFree: 1,
     ownMachinesFree: 0,
+    ownMachines: 0,
     previousOwnMachine: false,
     addresses: () => [],
     preferredAddressId: null,

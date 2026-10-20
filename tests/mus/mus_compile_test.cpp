@@ -849,7 +849,7 @@ static int test_strings(void) {
         MusScript refused = {};
         CHECK(mus_compile(("script s\nsection B\n{\n  " + std::string(other) + "\n  done\n}\n").c_str(), &refused,
                           &err_line, &err_col, &err_msg) != 0,
-              std::string("refused: ") + other);
+              (std::string("refused: ") + other).c_str());
     }
     /* Balanced parentheses are the literal's: MDEdit's scan counts their depth from the call's own. A `(` the literal
        leaves open closes with a `)` after it, before the call's own, as MDEdit compiles it: "a(" is Echo("a(")). */

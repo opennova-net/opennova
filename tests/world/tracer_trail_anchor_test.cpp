@@ -87,6 +87,28 @@ int main() {
 	expect(bullet.x == 0.0f && bullet.y == 0.015625f && bullet.z == 0.015625f,
 	       "stdred: entry 256 at update 4, d = 0x400");
 
+	// A jitter style stamps each stored point with a width of 1 + PRNG16 * 1e-5
+	// from the pool's own LCG (the first draw off its seed, 61163); a plain style
+	// stores exactly 1. The fresh channel's first append stores nothing.
+	// [orig: CEffectChannel_AppendPoint -- the desc+4 gate @ 0x5db2e2, w @ 0x5db30a]
+	{
+		w::TracerTrailPool jitter_pool;
+		const int jitter = jitter_pool.alloc(3); // the rocket's smoke: a jitter style
+		const int plain = jitter_pool.alloc(1);  // stdred: plain
+		expect(jitter >= 0 && plain >= 0, "two channels allocate");
+		if (jitter >= 0 && plain >= 0) {
+			for (int i = 0; i < 2; ++i) {
+				jitter_pool.append(jitter, w::Vec3{1.0f, 2.0f, 3.0f});
+				jitter_pool.append(plain, w::Vec3{1.0f, 2.0f, 3.0f});
+			}
+			const w::TracerTrailChannel &jc = jitter_pool.channels[size_t(jitter)];
+			const w::TracerTrailChannel &pc = jitter_pool.channels[size_t(plain)];
+			expect(jc.count == 1 && pc.count == 1, "the second append stores the first point");
+			expect(jc.pts[0].w > 1.61162f && jc.pts[0].w < 1.61164f, "the jitter width is 1 + 61163e-5");
+			expect(pc.pts[0].w == 1.0f, "a plain tracer's width is exactly 1");
+		}
+	}
+
 	if (failures != 0) return 1;
 	std::printf("tracer_trail_anchor_test: all green\n");
 	return 0;

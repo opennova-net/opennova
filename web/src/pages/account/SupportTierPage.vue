@@ -251,8 +251,10 @@
 // confirmed, then every 30 s with a note that it went through, and drops the
 // query once confirmed. A sync that finds no billing account (or support
 // tiers closed) drops the query with nothing claimed, and a page whose read
-// failed holds the confirmation back until "Try again". ?checkout=cancel says
-// no payment was taken. With billing off the page says support tiers are not
+// failed holds the confirmation back until "Try again". ?checkout=cancel expires
+// the open session (POST /api/billing/checkout/cancel, its hold on the fleet's
+// room gone at once) and says no payment was taken. With billing off the page
+// says support tiers are not
 // open. A payment past due (the tier's or a dedicated machine's or a static
 // address's) shows a banner to the portal; the tier box counts the servers on
 // shared machines and says what the tier's end leaves (an admin's grant of
@@ -261,6 +263,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import TierPicker from '../../components/TierPicker.vue';
 import {
+  cancelCheckout,
   fetchMyBilling,
   fetchTiers,
   openPortal,
@@ -614,6 +617,8 @@ onMounted(async () => {
     if (loaded === 'ok') void confirmCheckout();
     else if (loaded === 'closed') void dropQuery();
   } else if (outcome === 'cancel') {
+    // The session's hold on the fleet's room goes now, not at its end.
+    void cancelCheckout();
     notice.value = 'No payment was taken.';
     void dropQuery();
   }

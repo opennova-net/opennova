@@ -1,11 +1,13 @@
 // The model's table (editor/documents/model_table.cpp, ADR 0046 S10; rows of the one table shape since
 // S13 D10, from the format's property table it was) against the reader and the writer: a Set of every
-// field of every record to the value it reads changes no byte (every synthetic model, and with the
-// game install every model it ships, the base game's and each expansion's, as a SKIP-LEG leg); a value
-// read back is the value set; a light's position re-derives its view_proj and its colour does not; a
-// generator's style keeps its parameter byte; the refusals; a group's members sit together, named
-// apart; and the shape's parts as the model fills them (each kind's lists, a part animation's tracks by
-// their flags).
+// field of every record to the value it reads changes no byte (every model of the format's fixtures,
+// the synthetic set and the forms of the shipped models the threedi rows mint, model_variant_files.h;
+// and a model holding the values at the edges of what each field holds, as shipped models hold them,
+// each name one past its width refused); a value read back is the value set; a light's position
+// re-derives its view_proj and its colour does not; a generator's style keeps its parameter byte; the
+// refusals; a group's members sit together, named apart; and the shape's parts as the model fills them
+// (each kind's lists, a part animation's tracks by their flags).
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -16,8 +18,6 @@
 #include <string>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
-#include <base/vfs/vfs.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/model_document.h>
 #include <editor/project/project_document.h>
@@ -25,12 +25,11 @@
 #include <formats/threedi/threedi_panm.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/model_variant_files.h"
 
 using namespace opennova::editor;
-using opennova::pff::normalized_logical_name;
 using namespace opennova::threedi;
 namespace fs = std::filesystem;
 
@@ -135,25 +134,119 @@ long set_everything_to_itself(const std::vector<uint8_t> &bytes, const std::stri
 	return count;
 }
 
-int test_synthetic_models() {
-	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth";
-	int models = 0;
+// Every model of the format's fixtures (the synthetic set and the forms of the shipped models the threedi rows
+// mint, each of which must be there), set to itself through the table.
+int test_fixture_models() {
+	const model_variants::Files models = model_variants::models();
+	int count = 0;
 	long fields = 0;
-	std::error_code ec;
-	for (const auto &entry : fs::directory_iterator(dir, ec)) {
-		if (entry.path().extension() != ".3di") continue;
-		const long n = set_everything_to_itself(test_io::read_file(entry.path().string()), entry.path().filename().string());
-		TEST_EXPECT(n >= 0);
-		++models;
+	for (const std::string &path : models.paths) {
+		const long n = set_everything_to_itself(model_variants::bytes_of(path), fs::path(path).filename().string());
+		TEST_EXPECT(n > 0);
+		++count;
 		fields += n;
 	}
-	TEST_EXPECT(models > 20);
-	std::printf("synthetic: %d models, %ld fields set to themselves, bytes unchanged\n", models, fields);
-	return 0;
+	TEST_EXPECT(count > 20);
+	std::printf("fixtures: %d models, %ld fields set to themselves, bytes unchanged\n", count, fields);
+	return model_variants::report_missing(models) == 0 ? 0 : 1;
 }
 
 std::string synth(const char *name) {
 	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/" + name;
+}
+
+// A Set to the value a field reads changes nothing, so what a shipped model's values ask of the table is that
+// each reads and each is one the field takes: within its range and its width. The armory, holding the values
+// at those edges as the shipped models hold them (the GHDR name's 15 characters, a LOD type's 4, a shader's
+// 32, a texture file's 16 (retail's bo105blur.dds.tg), a user point's 15 and a register's 24; a flipbook on
+// the register clock, the top of its clock's range (ArmGlove's); an MTRX row of NaN words (US01's row 1, a
+// quiet NaN of each sign) and a light's axis word of -0.0 (CmpFire1's); texture rows flagged 1, 2 and 3 on
+// frames (ArmGlove's, IJava05's, JntOpsB1's); a volume's flag bits above the letters (Armry02's); a user point
+// on no part (Bed01's); a face's flag word 0x501 (Comtowr1's) and a surface past the game's 24 (Black Hawk
+// Down's FSUN, migrated: 60)), set to itself, changes no byte; each name one past its width is refused.
+int test_edges() {
+	const std::vector<uint8_t> source = test_io::read_file(synth("armory.3di"));
+	Threedi3di3 model{};
+	TEST_EXPECT(threedi_3di3_read_memory(source.data(), source.size(), &model) == 0);
+	TEST_EXPECT(model.lod_count > 0 && model.material_count > 0 && model.light_count > 0 && model.user_point_count > 0 &&
+	            model.ctrl.count > 0 && model.collision && model.collision->face_count > 0 &&
+	            model.collision->volume_count > 0);
+	// A shallow copy over tables of its own; the model's own freed untouched.
+	Threedi3di3 copy = model;
+	std::vector<ThreediLod> lods(model.lods, model.lods + model.lod_count);
+	std::vector<ThreediMaterial> materials(model.materials, model.materials + model.material_count);
+	std::vector<ThreediLight> lights(model.lights, model.lights + model.light_count);
+	std::vector<ThreediUserPoint> points(model.user_points, model.user_points + model.user_point_count);
+	std::vector<ThreediControlRegister> registers(model.ctrl.registers, model.ctrl.registers + model.ctrl.count);
+	std::vector<ThreediMatrix4x4> frames(model.mtrx.matrices, model.mtrx.matrices + model.mtrx.count);
+	ThreediCollisionModel collision = *model.collision;
+	std::vector<ThreediBoundingVolume> volumes(collision.volumes, collision.volumes + collision.volume_count);
+	std::vector<ThreediCollisionFace> faces(collision.faces, collision.faces + collision.face_count);
+	const auto fill = [](char *field, size_t length) {
+		for (size_t i = 0; i < length; ++i) field[i] = char('A' + i % 26);
+		field[length] = '\0';
+	};
+	fill(copy.header.name, 15);
+	fill(lods[0].model_type, 4);
+	fill(materials[0].shader_name, 32);
+	std::memcpy(materials[0].textures[0].name, "bo105blur.dds.tg", 17);
+	materials[0].animation = ThreediTexAnim{8, 1, SHRT_MAX};
+	for (uint32_t t = 0; t < materials[0].texture_count && t < 3; ++t) {
+		materials[0].textures[t].flags = uint8_t(t + 1);
+		materials[0].textures[t].frame = uint8_t(t);
+	}
+	fill(points[0].name, 15);
+	points[0].subobject_index = -1;
+	fill(registers[0].name, 24);
+	ThreediMatrix4x4 nan_row{};
+	threedi_mat4_identity(&nan_row);
+	const uint32_t quiet[2] = {0xFFC00000u, 0x7FC00000u};
+	for (int k = 0; k < 15; ++k)
+		if (k % 4 != 3) std::memcpy(&nan_row.m[k], &quiet[k % 2], sizeof(float));
+	frames.push_back(nan_row);
+	lights[0].rotation[1] = -0.0f;
+	volumes[0].flags |= 0x100;
+	faces[0].material_flags = 0x501;
+	faces[0].poly_type = 60;
+	copy.lods = lods.data();
+	copy.materials = materials.data();
+	copy.lights = lights.data();
+	copy.user_points = points.data();
+	copy.ctrl.registers = registers.data();
+	copy.mtrx.matrices = frames.data();
+	copy.mtrx.count = uint32_t(frames.size());
+	collision.volumes = volumes.data();
+	collision.faces = faces.data();
+	copy.collision = &collision;
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(threedi_3di3_write_memory(&copy, bytes) == 0);
+	threedi_3di3_free(&model);
+	const long n = set_everything_to_itself(bytes, "edges.3di");
+	TEST_EXPECT(n > 0);
+
+	// One past each width refused.
+	ModelDocument document;
+	Rows rows;
+	TEST_EXPECT(open(bytes, "edges.3di", document, rows));
+	ModelRow &m = *rows.model;
+	TEST_EXPECT(m.frames.size() == frames.size() && std::isnan(m.frames.back().m[0]) && std::signbit(m.frames.back().m[0]));
+	std::string error;
+	Value v;
+	const auto past = [&](const RecordHandle &record, const char *id, size_t length) {
+		return get(record, id, v) && std::get<std::string>(v).size() == length &&
+		       !set(record, id, std::string(length + 1, 'Z'), error) && set(record, id, std::string(length, 'Z'), error);
+	};
+	TEST_EXPECT(past(m.record(), "name", 15));
+	TEST_EXPECT(past({k(ModelKind::Lod), &m.lods[0]}, "type", 4));
+	TEST_EXPECT(past({k(ModelKind::Material), &m.materials[0]}, "shader", 32));
+	TEST_EXPECT(past({k(ModelKind::Texture), &m.materials[0].material.textures[0]}, "name", 16));
+	TEST_EXPECT(past({k(ModelKind::UserPoint), &m.user_points[0]}, "name", 15));
+	TEST_EXPECT(past({k(ModelKind::Register), &m.registers[0]}, "name", 24));
+	TEST_EXPECT(!set({k(ModelKind::Material), &m.materials[0]}, "texanim.type", int64_t(2), error));
+	std::printf("edges: %ld fields at the edges the shipped models reach set to themselves; each name one past its "
+	            "width refused\n",
+	            n);
+	return 0;
 }
 
 int test_edits() {
@@ -346,48 +439,14 @@ int test_panm() {
 	return 0;
 }
 
-// Every model the game install ships (the base game's and each expansion's, each file once), set to
-// itself through the table.
-int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every model of the game install set to itself)");
-	const ProjectDocument project;
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string()); // the base game first
-	std::set<std::string> seen;
-	int models = 0;
-	long fields = 0;
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::gameprofile::gameprofile_scr_policy_for_code(project.target_game.c_str()));
-		TEST_EXPECT(game.mount_game(root, expansion) && game.has_mounted_archive());
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(fs::path(file.logical_name).extension().string()) != ".3di") continue;
-			if (!seen.insert(file.source_path + "|" + normalized_logical_name(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			TEST_EXPECT(game.read_file(file.logical_name, bytes));
-			// A file the game's model loader refuses is no model it loads [orig: ThreediGp_LoadFromFile @
-			// 0x5B5806, CChunkFile_LoadFromFile with the tag 0x33494433].
-			if (bytes.size() < 4 || std::memcmp(bytes.data(), "3DI3", 4) != 0) continue;
-			const long n = set_everything_to_itself(bytes, file.logical_name);
-			TEST_EXPECT(n > 0);
-			++models;
-			fields += n;
-		}
-	}
-	if (models == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's models in its archives");
-	std::printf("retail: %d models, %ld fields set to themselves, bytes unchanged\n", models, fields);
-	return 0;
-}
-
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	if (test_synthetic_models() != 0) return 1;
+int main() {
 	if (test_edits() != 0) return 1;
 	if (test_lists() != 0) return 1;
 	if (test_panm() != 0) return 1;
 	if (test_rows() != 0) return 1;
-	return test_retail();
+	if (test_edges() != 0) return 1;
+	// The sweep over the format's fixtures last: it names every variant it lacks.
+	return test_fixture_models();
 }

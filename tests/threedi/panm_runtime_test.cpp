@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 
+#include <formats/threedi/threedi_panm.h>
 #include <formats/threedi/threedi_panm_runtime.h>
 
 using namespace opennova::threedi;
@@ -179,6 +180,37 @@ int main(void) {
     ok &= expect_near("pole_down_sy", pole_out[0].m[5], 0.0f);
     ok &= expect_near("pole_down_ty", pole_out[0].m[13], 11.5f);
     ok &= expect_near("flag_down_ty", pole_out[1].m[13], 11.5f - 15.3f);
+
+    // An Euler row in the reversed (Z, X, Y) order whose rotation-z track turns on a
+    // register, as shipped rows flagged 0x00010200 carry one (the retired retail rows'
+    // models reached it, 2026-10-19): register full, the part turns about Z by the
+    // track's end; register zero, it stands. [orig: Model_TransformBoneMatrices
+    // @0x58E8AA, the reversed order]
+    ThreediPartAnimation zyx;
+    ThreediVec3 origin = {0.0f, 0.0f, 0.0f};
+    ThreediMatrix4x4 zyx_in, zyx_out;
+    memset(&zyx, 0, sizeof(zyx));
+    zyx.flags = threedi_panm_pack_flags(0, 2, 1, 0);
+    zyx.rotation_z.control = 113;
+    zyx.rotation_z.control_param = 3;
+    zyx.rotation_z.end = 4096; // a quarter turn
+    threedi_mat4_identity(&zyx_in);
+    memset(ctrl, 0, sizeof(ctrl));
+    ctrl[3] = 0x10000;
+    ok &= expect_eq("zyx_rotz_rc", threedi_panm_build_node_matrices(
+        &zyx, 1, &origin, NULL, NULL, &zyx_in, ThreediPanmInputs::kRestFrames, NULL, 0,
+        ctrl, &zyx_out), 0);
+    const float zyx_angle = (float)threedi_panm_sample_track_raw(&zyx.rotation_z, 0, ctrl) * 0.0000014980282f;
+    ok &= expect_near("zyx_rotz_m0", zyx_out.m[0], cosf(zyx_angle));
+    ok &= expect_near("zyx_rotz_m1", zyx_out.m[1], sinf(zyx_angle));
+    ok &= expect_near("zyx_rotz_m10", zyx_out.m[10], 1.0f);
+    ok &= expect_eq("zyx_rotz_turns", zyx_angle > 1.0f ? 1 : 0, 1);
+    ctrl[3] = 0;
+    ok &= expect_eq("zyx_rest_rc", threedi_panm_build_node_matrices(
+        &zyx, 1, &origin, NULL, NULL, &zyx_in, ThreediPanmInputs::kRestFrames, NULL, 0,
+        ctrl, &zyx_out), 0);
+    ok &= expect_near("zyx_rest_m0", zyx_out.m[0], 1.0f);
+    ok &= expect_near("zyx_rest_m1", zyx_out.m[1], 0.0f);
 
     return ok ? 0 : 1;
 }

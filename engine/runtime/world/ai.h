@@ -1276,8 +1276,8 @@ public:
     void player_body_select(AiEntity &e, World &world, uint32_t entity_flags, uint32_t logic_tick);
     // The lean-angle producer, every body tick: decay lean -= (lean+8)>>4, then the
     // on-foot ramp -0x3000000 (left) / +0x3000000 (right) per held lean bit, gated
-    // alive + not prone + not latched on a ladder (entity_flags carries the retail
-    // Flags view for the 0x100020 gate; the parachute half rides D-INF-20).
+    // alive + not prone + not latched on a ladder or under a deployed chute
+    // (entity_flags carries the retail Flags view for the 0x100020 gate).
     // [orig: decay @0x4b5c97; ramp @0x4b7dbf/@0x4b7dd6 under the (Flags & 0x100020)
     // gate @0x4b7dad; the seated (+0x168==1) +-0x1400000 variant unported]
     void infantry_lean_tick(AiEntity &e, uint32_t entity_flags);

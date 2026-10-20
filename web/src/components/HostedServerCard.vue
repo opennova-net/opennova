@@ -59,7 +59,7 @@
         {{ phaseLine }}<span v-if="slow" class="font-semibold text-warn">{{ ` ${SLOW_PHASE_TEXT}` }}</span>
       </p>
       <p v-if="!server.live && server.stopped_because" class="hosted-stopped-because text-sm text-ink-muted">
-        {{ stoppedBecauseText(server.stopped_because) }}
+        {{ stoppedBecauseText(server.stopped_because, 'owner') }}
       </p>
     </div>
     <div class="flex shrink-0 flex-wrap gap-2 sm:flex-col sm:items-end">

@@ -6,20 +6,16 @@
 // wrong shape, a tile atlas not in 64-texel cells, a cut-out material over a PCX, a normal map halved, a
 // height map whose side is no power of two, a particle graphic too wide, a colour map of a format its
 // loader does not read, a .tga beside the .dds its loader opens, the default loading screen's size); which
-// of them refuse a build. Over a minted project, every texture written here. The retail leg
-// (OPENNOVA_JO_DIR): every texture the install ships, its own findings none that refuse a build, and every
-// shipped terrain's colour map 1024 x 1024.
+// of them refuse a build. Over a minted project, every texture written here. And every form of texture JO:CA
+// ships (editor/texture_forms.h) raises no finding of its own, and the shipped terrains' maps, in the forms they
+// take, none of their roles' (each colour map 1024 x 1024 through the TGA reader).
 #include <algorithm>
 #include <cstdio>
-#include <map>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/vfs/vfs.h>
-#include <editor/assets/install_view.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/documents/texture_document.h>
@@ -34,12 +30,11 @@
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
-#include <formats/trn/trn_io.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/texture_forms.h"
 
 using namespace opennova::editor;
 namespace renderer = opennova::renderer;
@@ -181,6 +176,9 @@ int test_checks() {
 		TEST_EXPECT(test_io::write_file(t + "dotskin.pcx", pcx(8, 8, 8)) && test_io::write_file(t + "dotdet.tga", tga(8, 8)) &&
 		            test_io::write_file(t + "dotnorm.mdt", rgb));
 	}
+	// An alpha-tested flipbook's frames (rows of flag 1, the model flip-frame role) over 32-bit TGAs holding alpha:
+	// no cut-out finding.
+	TEST_EXPECT(test_io::write_file(t + "flame1.tga", tga(8, 8, 200)) && test_io::write_file(t + "flame2.tga", tga(8, 8, 200)));
 	// A char map holding classes past the twenty the tile set tables name (S25): listed, the build going on.
 	{
 		opennova::IndexedImage8 classes;
@@ -245,8 +243,10 @@ int test_checks() {
 	TEST_EXPECT(test_io::write_text(scene + "/thing.o3d",
 	                                    "o3d 2\nmodel THING\nmaterial VS_SKBASIC\nmatflags 1\nalphatest 128\n"
 	                                    "texture skin.pcx 1 0\ntexture wall.tga 2 0\nmaterial FF_ST_OP\ntexture big.mdt 3 4\n"
-	                                    "texture bump.tga 3 5\nmaterial VS_DOT3DIFF2\nmatflags 1\nalphatest 64\n"
+	                                    "texture bump.tga 3 5\ntexture wall.tga 2 0\nmaterial VS_DOT3DIFF2\nmatflags 1\nalphatest 64\n"
 	                                    "texture dotskin.pcx 1 0\ntexture dotdet.tga 2 0\ntexture dotnorm.mdt 3 4\n"
+	                                    "material VS_SKBASIC\nmatflags 1\nalphatest 128\ntexanim 2 0 10\n"
+	                                    "texture flame1.tga 1 0 1 0\ntexture flame2.tga 1 0 1 1\n"
 	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	ImportChoice model;
@@ -381,7 +381,9 @@ int test_checks() {
 			TEST_EXPECT(f.message.find("fits.tga") == std::string::npos);
 		}
 	TEST_EXPECT(too_big == 2);
-	TEST_EXPECT(has("texture.not_read", "textures/wall.tga", S::Warning, false));
+	// wall.tga, which two rows name, is passed over for wall.dds once: said once.
+	TEST_EXPECT(has("texture.not_read", "textures/wall.tga", S::Warning, false) &&
+	            std::count_if(found.begin(), found.end(), [](const Found &f) { return f.code == "texture.not_read"; }) == 1);
 	for (const Found &f : found) TEST_EXPECT(f.asset != "textures/det.tga");
 	TEST_EXPECT(has("texture.wrong_reader", "terrains/h.trn", S::Warning, false));
 	for (const Found &f : found)
@@ -405,10 +407,18 @@ int test_checks() {
 	for (const Found &f : found)
 		if (f.code == "texture.alpha_not_loaded") {
 			++cut_outs;
-			TEST_EXPECT(f.message.find("dotskin.pcx") == std::string::npos);
+			TEST_EXPECT(f.message.find("dotskin.pcx") == std::string::npos && f.message.find("flame") == std::string::npos);
 			TEST_EXPECT(f.message.find("every texel is kept, and nothing is cut out") != std::string::npos);
 		}
 	TEST_EXPECT(cut_outs == 2);
+	{
+		opennova::io::JsonValue args;
+		std::string error;
+		TEST_EXPECT(opennova::io::json_parse("{\"path\":\"flame2.tga\"}", args, error));
+		const opennova::io::JsonValue answer = session.query("texture_uses", args, error);
+		const opennova::io::JsonValue *uses = answer.get("uses");
+		TEST_EXPECT(error.empty() && uses && uses->array.size() == 1 && uses->array[0].get_string("role", "") == "model_flip_frame");
+	}
 	bool normal_cut = false;
 	for (const Found &f : found) normal_cut = normal_cut || (f.code == "texture.alpha_not_loaded" && f.message.find("dotnorm.mdt") != std::string::npos);
 	TEST_EXPECT(normal_cut);
@@ -417,68 +427,79 @@ int test_checks() {
 	return 0;
 }
 
-// Every texture the install ships, read by the reader its name picks: no finding of its own refuses a
-// build; and every terrain's colour map, through the TGA reader, is 1024 x 1024.
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's textures checked)");
-		return 0;
+// Every form of texture JO:CA ships (editor/texture_forms.h, the census of the install's 2,579 textures), opened as
+// the texture document opens it: none raises a finding of its own (not one of the 2,579 does), so none refuses a
+// build, and each loads (the two 24-bit loading screens too, CP06.pcx and ASX_G4A.pcx, the three-plane form).
+int test_shipped_forms() {
+	size_t forms = 0;
+	for (const texture_forms::TextureForm &form : texture_forms::shipped_texture_forms()) {
+		std::unique_ptr<DocumentBase> document = make_texture_document();
+		Diagnostic error;
+		TEST_EXPECT(document->load_bytes(form.bytes, form.name, AssetKind::Texture, "jo", error));
+		const std::vector<Diagnostic> found = validate_texture_file(*document);
+		for (const Diagnostic &d : found)
+			std::fprintf(stderr, "%s (%s): %s: %s\n", form.name.c_str(), form.what, d.code().c_str(), d.message.c_str());
+		TEST_EXPECT(found.empty());
+		++forms;
 	}
-	ProjectDocument project;
-	project.target_game = "jo";
-	InstallView install_view;
-	std::string why;
-	TEST_EXPECT(install_view.open(install_spec(install, project), why));
-	const opennova::Vfs &mount = install_view.vfs();
-	std::map<std::string, size_t> codes;
-	size_t textures = 0, gating = 0, maps = 0;
-	for (const opennova::VfsFileLocation &location : mount.list_files()) {
-		const std::string &name = location.logical_name;
-		const AssetKind kind = classify_asset(name, nullptr);
+	TEST_EXPECT(forms > 20);
+	std::printf("shipped forms: %zu forms of texture the install ships, none with a finding of its own\n", forms);
+	return 0;
+}
+
+// The shipped terrains' maps in the forms they take (the census of JO:CA's 30 terrains), each read by its role's
+// reader: every colour map a BFC1-stored 1024 x 1024 24-bit TGA; the detail blend maps 1024 x 1024, BFC1-stored, of
+// 24 bits (7) or 32 bits of descriptor 8 (22); the char maps 8-bit PCX squares of 512 (28) or 256 (2), the foliage maps
+// squares of 256; the tile atlases 512 x 512 32-bit TGA and the detail maps 512 x 512 TGA of 32 bits (29) or 24 (1),
+// BFC1-stored. No role's rule finds anything of one, and each colour map, through the TGA reader, is 1024 x 1024.
+int test_shipped_terrain_maps() {
+	using R = renderer::TextureRoleId;
+	using texture_forms::bfc1_stored;
+	using texture_forms::tga_true_colour;
+	struct Map {
+		R role;
+		const char *file;
+		TextureReader reader;
 		std::vector<uint8_t> bytes;
-		if (kind == AssetKind::Texture && mount.read_file_raw(name, bytes)) {
-			++textures;
-			std::unique_ptr<DocumentBase> document = make_texture_document();
-			Diagnostic error;
-			TEST_EXPECT(document->load_bytes(bytes, name, AssetKind::Texture, "jo", error));
-			for (const Diagnostic &d : validate_texture_file(*document)) {
-				++codes[d.code()];
-				std::printf("retail: %s %s: %s\n", d.code().c_str(), name.c_str(), d.message.c_str());
-				if (blocks_build(d)) {
-					++gating;
-					std::fprintf(stderr, "retail: %s: %s\n", name.c_str(), d.message.c_str());
-				}
-			}
-		} else if (kind == AssetKind::Terrain && mount.read_file_raw(name, bytes)) {
-			std::istringstream input(std::string(bytes.begin(), bytes.end()));
-			opennova::TrnConfig config;
-			std::string message;
-			std::vector<uint8_t> map;
-			if (!opennova::load_trn(input, config, message) || !mount.read_file_raw(config.colormap, map)) continue;
-			++maps;
-			check_texture_role(renderer::TextureRoleId::TerrainColourMap, config.colormap, texture_header_as(TextureReader::Tga, map), name,
-			                   [&](CoreFinding, DiagnosticSeverity, const std::string &words) {
-				                   std::fprintf(stderr, "retail: %s\n", words.c_str());
-				                   ++gating;
-			                   });
-		}
+	};
+	const auto pcx8 = [](int side) {
+		std::vector<uint8_t> out;
+		std::string error;
+		opennova::encode_pcx_indexed(texture_forms::indexed_pattern(side, side), out, error);
+		return out;
+	};
+	std::vector<Map> maps;
+	maps.push_back({R::TerrainColourMap, "isle_c.tga", TextureReader::Tga, bfc1_stored(tga_true_colour(1024, 1024, 24, 0, true))});
+	maps.push_back({R::TerrainBlendMap, "isle_d1.tga", TextureReader::Tga, bfc1_stored(tga_true_colour(1024, 1024, 24, 0, true))});
+	maps.push_back({R::TerrainBlendMap, "cove_d1.tga", TextureReader::Tga, bfc1_stored(tga_true_colour(1024, 1024, 32, 8, true))});
+	maps.push_back({R::TerrainCharMap, "isle_m.pcx", TextureReader::Pcx, pcx8(512)});
+	maps.push_back({R::TerrainCharMap, "reef_m.pcx", TextureReader::Pcx, pcx8(256)});
+	maps.push_back({R::TerrainFoliageMap, "isle_f.pcx", TextureReader::Pcx, pcx8(256)});
+	maps.push_back({R::TerrainTileAtlas, "trntile10.tga", TextureReader::Tga, bfc1_stored(tga_true_colour(512, 512, 32, 8, true))});
+	maps.push_back({R::TerrainDetailCoefficient, "det_d1.tga", TextureReader::Tga, bfc1_stored(tga_true_colour(512, 512, 32, 8, true))});
+	maps.push_back({R::TerrainDetailCoefficient, "det_dd1.tga", TextureReader::Tga, bfc1_stored(tga_true_colour(512, 512, 24, 0, true))});
+	size_t found = 0;
+	for (const Map &map : maps) {
+		const TextureHeader header = texture_header_as(map.reader, map.bytes);
+		TEST_EXPECT(header.read);
+		if (map.role == R::TerrainColourMap) TEST_EXPECT(header.bfc1 && header.width == 1024 && header.height == 1024);
+		check_texture_role(map.role, map.file, header, "the shipped form", [&](CoreFinding, DiagnosticSeverity, const std::string &words) {
+			std::fprintf(stderr, "%s: %s\n", map.file, words.c_str());
+			++found;
+		});
 	}
-	for (const auto &[code, count] : codes) std::printf("retail: %-32s %zu\n", code.c_str(), count);
-	std::printf("retail: %zu textures and %zu terrains' colour maps checked, %zu findings refusing a build\n", textures, maps,
-	            gating);
-	// Every one loads (the two 24-bit loading screens too, CP06.pcx and ASX_G4A.pcx).
-	TEST_EXPECT(textures > 1000 && maps > 20 && gating == 0 && codes.count("texture.unloadable") == 0);
+	TEST_EXPECT(found == 0);
+	std::printf("shipped terrain maps: %zu maps in the forms the shipped terrains take, no role's finding\n", maps.size());
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failures = 0;
 	failures += test_checks();
-	failures += test_retail();
+	failures += test_shipped_forms();
+	failures += test_shipped_terrain_maps();
 	if (failures == 0) std::printf("editor_texture_checks: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

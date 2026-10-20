@@ -23,7 +23,7 @@ description: >-
 
 inputs:
   leg:
-    description: The test leg's name (core-editor, core-rest, retail, linux-core).
+    description: The test leg's name (core-editor, core-rest, linux-core).
     required: true
   mode:
     description: "'restore' before the tests, 'save' after them."

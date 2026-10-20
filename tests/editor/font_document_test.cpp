@@ -1,8 +1,9 @@
 // Fonts (ADR 0046, round S23 lane A): a .fnt as a record document over the engine's own reader and from-scratch
 // writer (fnt_parse, fnt_write): the minted fixtures (fixtures/fnt, tests/fixtures/minimal_fnt_gen.cpp) read and
 // written back byte for byte; the header and a glyph's page and rect edited and written; the findings; the blank;
-// the font a sheet import makes, opened clean. The retail leg (OPENNOVA_JO_ASSETS): every shipped .fnt through the
-// document and back, byte for byte, its pages' coloured texels kept.
+// the font a sheet import makes, opened clean. Every .fnt of the format's fixtures and of the base game (assets/:
+// one page to four, a spacing of 0 to -4, white and coloured pages, the shipped fonts' shapes) through the document
+// and back, byte for byte, its pages' coloured texels kept.
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/font_document.h>
@@ -21,11 +22,11 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/variant_files.h"
 #include "editor/viewport_test_support.h"
 
 using namespace opennova;
@@ -252,49 +253,49 @@ int test_viewport() {
 	return 0;
 }
 
-// The retail leg: every shipped font through the document and back, byte for byte.
-int test_retail() {
-	if (!retail::selected()) return 0;
-	const std::string assets = retail::assets();
-	if (assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS (the shipped .fnt files)");
-		return 0;
-	}
-	size_t fonts = 0, coloured = 0;
-	std::error_code ec;
-	for (const auto &entry : std::filesystem::directory_iterator(std::filesystem::u8path(assets), ec)) {
-		std::string ext = entry.path().extension().u8string();
-		for (char &c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-		if (ext != ".fnt") continue;
-		const std::vector<uint8_t> bytes = test_io::read_file(entry.path().u8string());
+// Every font of the format's fixtures and of the base game through the document and back, byte for byte, with
+// nothing the save leaves out. Among them the shapes the shipped fonts take (JO:CA's thirty: 800 wide, one to three
+// pages, a spacing of 0, -2 or -3, white pages and coloured ones): a font of each is met.
+int test_every_font() {
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/fnt", "assets"}, {".fnt"});
+	int failures = editor_test::report_missing(variants);
+	size_t fonts = 0, coloured = 0, white = 0;
+	bool pages[4] = {false, false, false, false}, spacing[3] = {false, false, false}; // spacing 0, -2, -3
+	for (const std::string &path : variants.files) {
+		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
 		FontDocument font;
 		Diagnostic error;
-		TEST_EXPECT(load(font, bytes, error));
-		TEST_EXPECT(font.issues().empty() && saved(font) == bytes);
-		TEST_EXPECT(!has_code(validate_font_file(font), "font.unserializable"));
-		for (size_t i = 0; i + 3 < font.font_row()->texels->size(); i += 4)
-			if ((*font.font_row()->texels)[i] != 0xFF) {
-				++coloured;
-				break;
-			}
+		TEST_EXPECT(load(font, bytes, error) && font.font_row());
+		if (!font.issues().empty() || saved(font) != bytes || has_code(validate_font_file(font), "font.unserializable")) {
+			std::fprintf(stderr, "FAIL %s is not written back byte for byte\n", path.c_str());
+			++failures;
+			continue;
+		}
+		const FontRow &row = *font.font_row();
+		TEST_EXPECT(row.design_width == fnt::FNT_DESIGN_REFERENCE_WIDTH);
+		bool tinted = false;
+		for (size_t i = 0; i + 3 < row.texels->size() && !tinted; i += 4) tinted = (*row.texels)[i] != 0xFF;
+		++(tinted ? coloured : white);
+		if (row.pages >= 1 && row.pages <= 4) pages[row.pages - 1] = true;
+		if (row.spacing == 0 || row.spacing == -2 || row.spacing == -3) spacing[row.spacing == 0 ? 0 : -row.spacing - 1] = true;
 		++fonts;
 	}
-	TEST_EXPECT(fonts >= 30);
-	std::printf("retail: %zu fonts through the document byte for byte (%zu with coloured pages)\n", fonts, coloured);
-	return 0;
+	std::printf("every font: %zu through the document byte for byte (%zu with coloured pages, %zu white)\n", fonts,
+	            coloured, white);
+	TEST_EXPECT(coloured > 0 && white > 0 && pages[0] && pages[1] && pages[2] && spacing[0] && spacing[1] && spacing[2]);
+	return failures;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 	failed += test_reads_and_writes_back();
 	failed += test_edits();
 	failed += test_findings();
 	failed += test_blank();
 	failed += test_viewport();
-	failed += test_retail();
+	failed += test_every_font();
 	if (failed == 0) std::printf("editor font document: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

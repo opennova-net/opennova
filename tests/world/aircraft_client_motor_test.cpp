@@ -619,8 +619,30 @@ bool run_merged_free_look_holds_until_the_pack() {
 
 } // namespace
 
+// The climb servo's gain splits on the hull's size: a heavy hull (bound radius
+// 15 u or more) closes on its altitude target at 1/512 a tick, a light one at
+// 1/256, so twenty units under the same target the heavy hull climbs slower.
+// [orig: the climb servo @0x491D2D..0x491E2F -- the `bound >= 0xF0000` pick]
+bool run_heavy_hull_climbs_on_the_slow_servo() {
+	bool ok = true;
+	int32_t climb[2] = {};
+	for (int heavy = 0; heavy < 2; ++heavy) {
+		Rig r;
+		make_rig(r);
+		auto *heli = prime(r, true);
+		if (heli == nullptr) return false;
+		heli->bound_radius = heavy ? 16.0f : 5.0f;
+		heli->veh.net_alt_target = w::to_fixed(80.0f);
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
+		climb[heavy] = heli->veh.slide_z;
+	}
+	ok &= expect(climb[1] > 0 && climb[1] < climb[0], "the heavy hull climbs on the slower servo");
+	return ok;
+}
+
 int main() {
 	bool ok = run_non_drivable_hover_seed();
+	ok &= run_heavy_hull_climbs_on_the_slow_servo();
 	ok &= run_collective_and_view_boundaries();
 	ok &= run_dead_hull_skips_live_servos();
 	ok &= run_flare_roles_and_seat_cadence();

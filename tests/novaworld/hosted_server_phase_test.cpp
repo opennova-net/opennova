@@ -195,7 +195,20 @@ int test_stopped_because() {
 	run.reason.clear();
 	why = hosted::stopped_because(State::Stopped, run, false);
 	TEST_EXPECT(why && why->cause == hosted::StartCause::LinkLost && !why->exit_code &&
-			why->line.empty());
+			why->line.empty() && !why->limit);
+	// A limits stop carries the limit its server was past; an older one, none.
+	run.cause = hosted::StartCause::Limits;
+	run.limit = hosted::StopLimit{ hosted::LimitKind::NoSharedServer, 0 };
+	why = hosted::stopped_because(State::Stopped, run, false);
+	TEST_EXPECT(why && why->cause == hosted::StartCause::Limits && why->limit &&
+			why->limit->kind == hosted::LimitKind::NoSharedServer && why->limit->count == 0);
+	run.limit.reset();
+	why = hosted::stopped_because(State::Stopped, run, false);
+	TEST_EXPECT(why && why->cause == hosted::StartCause::Limits && !why->limit);
+	// Who stopped it is its cause.
+	run.cause = hosted::StartCause::AdminStop;
+	why = hosted::stopped_because(State::Stopped, run, false);
+	TEST_EXPECT(why && why->cause == hosted::StartCause::AdminStop && !why->limit);
 	// A live server, a server with no run, a run not ended: nothing to say.
 	TEST_EXPECT(!hosted::stopped_because(State::Running, run, false));
 	TEST_EXPECT(!hosted::stopped_because(State::Stopped, std::nullopt, false));

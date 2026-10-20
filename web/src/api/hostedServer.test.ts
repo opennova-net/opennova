@@ -137,11 +137,27 @@ describe('fetchMyServers', () => {
       state: 'booting',
       phase: { name: 'downloading_data', bytes_done: 5, bytes_total: 10 },
     });
-    const stopped = hostedServer(4, { state: 'failed', stopped_because: { cause: 'crash', exit_code: 3, oom: true, line: 'out of memory' } });
-    get.mockResolvedValue(reply(serversResponse([server, stopped])));
+    const stopped = hostedServer(4, {
+      state: 'failed',
+      stopped_because: { cause: 'crash', limit: null, exit_code: 3, oom: true, line: 'out of memory' },
+    });
+    const limited = hostedServer(8, {
+      state: 'stopped',
+      stopped_because: { cause: 'limits', limit: { kind: 'shared_servers', count: 1 }, exit_code: null, oom: false, line: '' },
+    });
+    get.mockResolvedValue(reply(serversResponse([server, stopped, limited])));
     const result = await fetchMyServers();
     expect(result.ok && result.value.servers[0].phase).toEqual({ name: 'downloading_data', bytes_done: 5, bytes_total: 10 });
-    expect(result.ok && result.value.servers[1].stopped_because).toEqual({ cause: 'crash', exit_code: 3, oom: true, line: 'out of memory' });
+    expect(result.ok && result.value.servers[1].stopped_because).toEqual({ cause: 'crash', limit: null, exit_code: 3, oom: true, line: 'out of memory' });
+    // A limits stop's limit reads; a malformed one reads as none.
+    expect(result.ok && result.value.servers[2].stopped_because?.limit).toEqual({ kind: 'shared_servers', count: 1 });
+    const malformed = hostedServer(9, {
+      state: 'stopped',
+      stopped_because: { cause: 'limits', limit: { kind: 'shared_servers', count: -1 }, exit_code: null, oom: false, line: '' },
+    });
+    get.mockResolvedValue(reply(serversResponse([malformed])));
+    const unread = await fetchMyServers();
+    expect(unread.ok && unread.value.servers[0].stopped_because).toEqual({ cause: 'limits', limit: null, exit_code: null, oom: false, line: '' });
 
     // A restart's cause reads.
     get.mockResolvedValue(

@@ -6,8 +6,9 @@
 // map's texel, each texel the class the game's sampler reads with the legend's colour, a deciding tile outlined,
 // the ocean's 7 past it, the legend's classes and shares); the foliage overlay (each definition's colour where it
 // grows, a placed tile's square grey, the legend's definitions); no foliage map and no char map; the options'
-// overlay on the wire. With --retail, both overlays over a JO:CA terrain (Dvxi5) as shipped: nothing in them is
-// the base game's.
+// overlay on the wire. And both overlays over the maps of a shipped terrain's form (JO:CA's Dvxi5, which Tmap's
+// layout and foliage map are minted after: a char map of 512 a side, one class at every texel, and a foliage map of
+// 256 a side whose unpainted texels are 255).
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -26,10 +27,7 @@
 #include <formats/til/til_io.h>
 #include <formats/trn/charmap_legend.h>
 
-#include <base/resource_index/resource_index.h>
-
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/mission_test_support.h"
@@ -349,27 +347,26 @@ int test_overlay_wire() {
 	return 0;
 }
 
-// The game's files through its own index, each present one stamped alike.
-struct InstallFiles final : opennova::FileSource {
-	opennova::ResourceIndex index;
-	bool read(const std::string &name, std::vector<uint8_t> &out) const override { return index.read_file(name, out); }
-	uint64_t stamp(const std::string &name) const override { return index.has_file(name) ? 1 : 0; }
-};
-
-// With --retail, a JO:CA terrain (Dvxi5, nothing of the base game's): its char map (512 a side, class 1 at every
-// texel) read as one class over its four mapped sectors at its own texel, the ocean past them; its foliage map
-// (256 a side) to its two shipped definitions, mveg5b.3di on 254 and mveg5.3di on 253, each by the share of the
-// texels the map gives its code, the 255s growing nothing.
-int test_retail_overlays() {
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped terrain, Dvxi5)");
-	auto files = std::make_shared<InstallFiles>();
-	TEST_EXPECT(files->index.scan(install));
+// The shipped terrain's form (JO:CA's Dvxi5: four mapped sectors in an 8-sector grid, a char map of 512 a side
+// holding class 1 at every texel, a foliage map of 256 a side holding 253, 254 and 255 alone, its two definitions
+// matching 254 and 253), over Tmap, minted after it: a char map of 512 a side, class 1 at every texel, read as one
+// class over the four mapped sectors at its own texel, the ocean past them; the fixture foliage map (its 255 field
+// with 254 and 253 painted, tests/fixtures/minimal_terrain_gen.cpp) to the .trn's two definitions, bush1.3di on 254
+// and bush2.3di on 253, each by the share of the texels the map gives its code, the 255s growing nothing.
+int test_shipped_form_overlays() {
+	auto files = std::make_shared<GroundFiles>();
+	files->put("Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")));
+	files->put("Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt")));
+	files->put("Tmap_f.pcx", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap_f.pcx")));
+	opennova::IndexedImage8 uniform;
+	uniform.width = uniform.height = 512;
+	uniform.indices.assign(size_t(512) * 512, 1);
+	files->put("Tmap_m.pcx", pcx_of(uniform));
 	MissionSceneHeader header;
-	header.terrain = "Dvxi5";
+	header.terrain = "Tmap";
 	MissionGround ground;
 	ground.follow(files, 1, header, "");
-	TEST_EXPECT(ground.terrain() && ground.surface_map() == "Dvxi5_m.pcx" && ground.foliage_map() == "Dvxi5_f.pcx");
+	TEST_EXPECT(ground.terrain() && ground.surface_map() == "Tmap_m.pcx" && ground.foliage_map() == "Tmap_f.pcx");
 	MissionOverlayImage image = mission_ground_overlay(ground, MissionGroundOverlay::Surfaces);
 	TEST_EXPECT(image.width == 512 && image.height == 512 && image.texel == 2.0 && image.west == -512.0 &&
 	            image.north == 512.0 && image.legend.size() == 1 && image.outside);
@@ -378,9 +375,9 @@ int test_retail_overlays() {
 	TEST_EXPECT(image.width == 256 && image.texel == 4.0 && image.legend.size() == 2);
 	const MissionOverlayRow *first = row_of(image, "foliage 1");
 	const MissionOverlayRow *second = row_of(image, "foliage 2");
-	TEST_EXPECT(first && first->words == "grows mveg5b.3di (foliage 1, codes 254)" && std::fabs(first->share - 13293.0 / 65536.0) < 1e-9);
-	TEST_EXPECT(second && second->words == "grows mveg5.3di (foliage 2, codes 253)" && std::fabs(second->share - 5888.0 / 65536.0) < 1e-9);
-	std::printf("test_retail_overlays passed\n");
+	TEST_EXPECT(first && first->words == "grows bush1.3di (foliage 1, codes 254)" && std::fabs(first->share - 162.0 / 65536.0) < 1e-9);
+	TEST_EXPECT(second && second->words == "grows bush2.3di (foliage 2, codes 253)" && std::fabs(second->share - 16.0 / 65536.0) < 1e-9);
+	std::printf("test_shipped_form_overlays passed\n");
 	return 0;
 }
 
@@ -416,10 +413,9 @@ int test_named_files() {
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	TEST_EXPECT(test_named_files() == 0);
-	TEST_EXPECT(test_retail_overlays() == 0);
+	TEST_EXPECT(test_shipped_form_overlays() == 0);
 	TEST_EXPECT(test_foliage_facts() == 0);
 	TEST_EXPECT(test_surface_overlay() == 0);
 	TEST_EXPECT(test_foliage_overlay() == 0);

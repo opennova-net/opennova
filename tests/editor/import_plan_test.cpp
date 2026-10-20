@@ -10,7 +10,8 @@
 // textures (the model's texture rows found by their type's rule, a missing one listed,
 // nothing the converter copies); an .mdt and a chunk file found, imported, resolved and
 // packed; the stylesheets the shell reads once the import is in; two lookups of one name
-// kept apart; a candidate taken for what it is, not its name; a PNG dependency copied as
+// kept apart; a screen looked for in the file its action loads, not where a planned menu defines
+// its name; a candidate taken for what it is, not its name; a PNG dependency copied as
 // the game's own and resolving; a bare relative source; a cycle of menus ending; the cap
 // stopping the walk and the selection, a converter's outputs whole or not at all; a symbol,
 // a sound and a mission text (a .mis) listed as not followed; and nothing written
@@ -613,6 +614,31 @@ static int test_plan_missing_lookups() {
 	return 0;
 }
 
+// A screen looked for in the file a SCREEN action loads, which a menu planned before defines in another file: the
+// plan's own definitions are of that file's scope alone (the game selects a screen in the file it loads), so the
+// file the action loads is looked in and, lacking the screen, the name is undefined there; a screen in a file no
+// place has is undefined too; a window of a name its screen already has is no definition (the lookup finds the
+// first).
+static int test_plan_screen_elsewhere() {
+	Project project("opennova_editor_plan_screen_elsewhere");
+	const std::string art = project.dir.file("art");
+	TEST_EXPECT(test_io::write_text(art + "/b.mnu", screen("ONE", window("STATIC", "W") + window("STATIC", "W"))) &&
+	            test_io::write_text(art + "/c.mnu", screen("TWO", window("STATIC", "X"))) &&
+	            test_io::write_text(art + "/a.mnu",
+	                                screen("A", window("BUTTON", "GO", go_to("c.mnu", "ONE") + go_to("gone.mnu", "LOST")))));
+	const ImportPlan plan = project.plan({{art + "/b.mnu", {}}, {art + "/a.mnu", {}}});
+	const ImportPlanRow *c = row_named(plan, "c.mnu");
+	const ImportPlanRow *gone = row_named(plan, "gone.mnu");
+	TEST_EXPECT(c && c->state == State::Found && gone && gone->state == State::NotFound && plan.rows.size() == 4);
+	size_t screens = 0;
+	for (const ImportNotFollowed &entry : plan.undefined) {
+		std::printf("  undefined: %s (%zu, the first in %s)\n", reference_row(entry.reference).token, entry.count, entry.first.c_str());
+		if (entry.reference == ReferenceKind::MenuScreen) screens += entry.count;
+	}
+	TEST_EXPECT(screens == 2);
+	return 0;
+}
+
 // A candidate counts by what it is, not by its name: a raw labels.bin the selection brings
 // is no string table for the menu naming it (the menu's table is not found: the project holds
 // one file of a name), and a folder's raw labels.bin gives way to the game install's string
@@ -794,9 +820,10 @@ static std::string bank_text(const std::vector<std::pair<std::string, std::strin
 // place defines, fx.ptl defining BOOM, and a few of the game's manifest files. The plan: the
 // mission's own set each needed by the mission, its role and its edge's kind (data commit 8: the
 // set is the mission's edges); the file references; the symbols
-// followed to their files (the effect to fx.ptl, the item to items.def, which the manifest brings
-// first); the manifest's files the install has found, each needed by the mission for the game, a
-// Required one the install lacks not found (vmacros.bin), an optional one no row (hiscore.txt);
+// followed to their files (the effect to fx.ptl, a particle's curves to the file defining their
+// tables, the item to items.def, which the manifest brings first); the manifest's files the
+// install has found, each needed by the mission for the game, a Required one the install lacks
+// not found (vmacros.bin), an optional one no row (hiscore.txt);
 // the undefined ammo counted; nothing not followed but the kinds the graph does not read; the
 // same plan stepped a byte at a time. Without dependencies, the .bms alone. A second mission with
 // almost none of its set: the optional files no row, the text table's fallback serving it.
@@ -868,11 +895,15 @@ static int test_plan_mission_closure() {
 	                       {"m.til", "til"},
 	                       // An effect of two particles: a plain graphic, and a flipbook of two frames, which
 	                       // loads a file a frame named from the graphic's and never the graphic's own name.
-	                       {"fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tpdefs = puff;\n\tgraphic1 = puff.tga, additive;\n}\n\n"
-	                                  "[particledef]\n{\n\tid = flame;\n\tgraphic1 = Flame.TGA, additive;\n\tg1_flip_frames = 2;\n}\n"},
+	                       {"fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tpdefs = puff;\n\talpha_func = Fade;\n\tgraphic1 = puff.tga, additive;\n}\n\n"
+	                                  "[particledef]\n{\n\tid = flame;\n\tgraphic1 = Flame.TGA, additive;\n\tg1_flip_frames = 2;\n\tg1_scale_func = Grow reverse;\n}\n"},
 	                       {"puff.tga", "tga"}, {"Flame.TGA", "never loaded"}, {"flame_01.tga", "tga"}, {"flame_02.tga", "tga"},
 	                       {"stand.tga", "tga"}, {"old.tga", "tga"}, {"frame.tga", "tga"}, {"first.tga", "tga"},
-	                       {"other.ptl", "[effectdef]\n{\n\tid = OTHER;\n\tpdefs = p;\n}\n\n[particledef]\n{\n\tid = p;\n}\n"}}));
+	                       {"other.ptl", "[effectdef]\n{\n\tid = OTHER;\n\tpdefs = p;\n}\n\n[particledef]\n{\n\tid = p;\n}\n"},
+	                       // The tables the particles' curves name, in a file of their own (as the base game's onatable.ptl
+	                       // holds tables alone), one spelt in another case; a table file no curve names.
+	                       {"tables.ptl", "[tabledef]\n{\n\tid = FADE;\n\ttl1 = 255, 128, 0;\n}\n\n[tabledef]\n{\n\tid = Grow;\n\ttl1 = 0, 128, 255;\n}\n"},
+	                       {"spare.ptl", "[tabledef]\n{\n\tid = Spare;\n\ttl1 = 0, 255;\n}\n"}}));
 	// The music banks the game streams loose from its root (the manifest's, found there), and a
 	// save beside them, which is the player's, never the game's.
 	TEST_EXPECT(test_io::write_text(install + "/menumus.sbf", "menu music") &&
@@ -911,6 +942,12 @@ static int test_plan_mission_closure() {
 	const ImportPlanRow *fx = found("fx.ptl"), *puff = found("puff.tga"), *items = found("items.def");
 	TEST_EXPECT(fx && fx->needed_by.file == "items.def" && fx->needed_by.reference == ReferenceKind::Particle &&
 	            fx->needed_by.name == "BOOM" && puff && puff->needed_by.file == "fx.ptl" && !row_named(plan, "other.ptl"));
+	// A particle's curve to the file defining its table, by the table's id without case [orig:
+	// CParticleManager_FindTableDefByName @ 0x5E9540]; the table file no curve names not.
+	const ImportPlanRow *tables = found("tables.ptl");
+	TEST_EXPECT(tables && tables->needed_by.file == "fx.ptl" && tables->needed_by.reference == ReferenceKind::ParticleTable &&
+	            tables->needed_by.record == "puff" && tables->needed_by.field == "alpha_func" &&
+	            tables->needed_by.name == "Fade" && !row_named(plan, "spare.ptl"));
 	TEST_EXPECT(items && items->needed_by.file == "m.bms" && items->needed_by.reference == ReferenceKind::None &&
 	            items->needed_by.field.find("the game") == 0);
 	// A flipbook's frames, each a file of its own; the graphic's own name is never loaded.
@@ -986,6 +1023,7 @@ static int test_plan_mission_closure() {
 	            !not_followed(plan, ReferenceKind::None, AssetKind::Terrain) &&
 	            !not_followed(plan, ReferenceKind::None, AssetKind::SoundBank) &&
 	            !not_followed(plan, ReferenceKind::None, AssetKind::MusicBank) && !not_followed(plan, ReferenceKind::Particle) &&
+	            !not_followed(plan, ReferenceKind::ParticleTable) &&
 	            !not_followed(plan, ReferenceKind::Item) && !not_followed(plan, ReferenceKind::Weapon));
 	TEST_EXPECT(plan.file_count() >= 18 && plan.total_bytes() > mission_bytes.size());
 	// Stepped a byte at a time: the same plan.
@@ -1087,6 +1125,7 @@ int run_import_plan_tests() {
 	failures += test_plan_material_sources();
 	failures += test_plan_stylesheets();
 	failures += test_plan_missing_lookups();
+	failures += test_plan_screen_elsewhere();
 	failures += test_plan_kinds();
 	failures += test_plan_native_png();
 	failures += test_plan_relative_path();

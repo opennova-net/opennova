@@ -6,22 +6,20 @@
 #include <formats/def/def.h>
 #include <string>
 
-#include "common/retail_paths.h"
+#include "common/test_paths.h"
 
 using namespace opennova::def;
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
-    /* The shipped ammo.def from the reference fixture set (OPENNOVA_JO_ASSETS):
-       its per-round pins are the SKIP-LEG retail leg; the digit-walker block
-       below runs unconditionally. */
-    const std::string fixture = retail::reference_fixture("def/ammo.def");
-    const bool have_retail = !fixture.empty();
+int main() {
+    /* fixtures/def/parse_ammo.def: the authored ammo blocks (the shipped table's grammar, the
+       witnessed values) its per-round pins read; the digit-walker block below runs beside
+       them. */
+    const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/parse_ammo.def";
     const char *path = fixture.c_str();
 
     DefAmmoFile ammo;
     memset(&ammo, 0, sizeof(ammo));
-    if (have_retail) {
+    {
     if (def_parse_ammo(path, &ammo) != 0) {
         fprintf(stderr, "FAIL: def_parse_ammo failed for %s\n", path);
         return 1;
@@ -309,7 +307,7 @@ int main(int argc, char **argv) {
     }
 
     def_free_ammo(&ammo);
-    }  /* retail leg */
+    }
 
     /* The 16.16 decimal keys ride the engine's digit walker (Math_ParseFixedPoint16
        @0x6131f0 — per-digit scale 419430/2^22, a hair UNDER 1/10, accumulator seeded
@@ -604,8 +602,6 @@ int main(int argc, char **argv) {
         if (!correct) return 1;
     }
 
-    if (!have_retail)
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/ammo.def (the shipped ammo table)");
     printf("PASS: ammo parsing OK\n");
     return 0;
 }

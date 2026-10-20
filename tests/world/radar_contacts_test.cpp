@@ -285,6 +285,32 @@ void test_tracer_whiz() {
 	CHECK(state.rows[1].kind == kRadarKindOlive24, "a class-6 category-3 shooter takes the 24-ring");
 }
 
+// A brained shooter's blip sits at its AI body's position (the brain's carrier),
+// not the entity's float mirror. [orig: the shooter bearing @0x4e5c82..0x4e5ca6;
+// Radar_AddBlip @0x4e5cb1]
+void test_whiz_blip_reads_a_brained_shooter_body() {
+	Rig rig;
+	World &world = *rig.world;
+	RadarContactState &state = rig.local->radar;
+	world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+	AmmoTableEntry ammo;
+	ammo.valid = true;
+	ammo.whiz_radius_q16 = 5 << 16;
+	AiEntity *body = world.ai.at(world.ai.attach(rig.enemy));
+	CHECK(body != nullptr, "the shooter takes a brain");
+	if (body == nullptr) return;
+	body->pos[0] = 40 << 16; // the brain's carrier, ten units past the float mirror
+	body->pos[1] = 2 << 16;
+	body->pos[2] = 0;
+	LiveRound round;
+	round.owner = rig.enemy;
+	round_tracer_whiz(world, round, &ammo, {3 << 16, 1 << 16, 0}, {-(1 << 16), 1 << 16, 0},
+			{-(4 << 16), 0, 0});
+	CHECK(round.whiz_latched && state.rows[0].life == 62, "the brained shooter's round whizzes");
+	CHECK(state.rows[0].pos[0] == (40 << 16) && state.rows[0].pos[1] == (2 << 16),
+			"the blip sits at the brained shooter's body");
+}
+
 void test_lock_note_and_hud_frame() {
 	Rig rig;
 	World &world = *rig.world;
@@ -529,6 +555,7 @@ int main() {
 	test_damage_kind();
 	test_damage_entry_point();
 	test_tracer_whiz();
+	test_whiz_blip_reads_a_brained_shooter_body();
 	test_lock_note_and_hud_frame();
 	test_zip_impact();
 	test_wire_shooter_and_target();

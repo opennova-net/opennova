@@ -5,11 +5,15 @@
 // read back through the 3DI3 reader; the loader's gates refused; the writer a fixed point of the
 // reader (read, write, read, write: the two writes agree) on both models; the synthetic GPM
 // lowered back from its migration, the lowering a fixed point after one step, and a skinned
-// model or a technique BHD has no form for refused. The retail leg takes every GP model BHD
-// ships, which the reference tree mirrors under fixtures/bhd/3di: each parses, migrates, reads
-// back as 3DI3 with a runtime-safe collision block and keeps its LOD, primitive and section
-// counts; the writer is a fixed point on each; and every rigid one (GPM) lowers back to the GP
-// whose migration is the first migration byte for byte.
+// model or a technique BHD has no form for refused. The minted leg takes the GP models of
+// fixtures/threedi_gp (tests/fixtures/minimal_gp_gen.cpp: one per GP kind, between them every
+// construct the 677 GP models BHD ships use and every migration note they raised when this row
+// read them, 2026-10-19): each parses, migrates, reads back as 3DI3 with a runtime-safe
+// collision block and keeps its LOD, primitive and section counts; the writer is a fixed point
+// on each; every rigid one (GPM) lowers back to the GP whose migration is the first migration
+// byte for byte; every note BHD's models raised is raised; and each migration's 3DI3 is pinned
+// by its FNV-1a64 (`threedi_gp_test --dump` prints the table; a vector that moves needs an
+// [orig] witness or a D-entry).
 
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi_gp/threedi_gp.h>
@@ -18,10 +22,11 @@
 #include <formats/threedi_gp/threedi_gp_write.h>
 #include "common/file_io.h"
 #include "common/gp_model_bytes.h"
-#include "common/retail_paths.h"
+#include "common/test_paths.h"
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -336,15 +341,63 @@ int lower_refusals() {
 	return 0;
 }
 
-int retail_corpus() {
-	const std::vector<std::string> files = retail::reference_fixture_files("bhd/3di", ".3di");
-	if (files.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bhd/3di (the models BHD ships)");
+uint64_t fnv1a64(const std::vector<uint8_t> &bytes) {
+	uint64_t h = 1469598103934665603ull;
+	for (uint8_t b : bytes) {
+		h ^= b;
+		h *= 1099511628211ull;
+	}
+	return h;
+}
+
+struct Vector {
+	const char *name;
+	size_t len;
+	uint64_t hash;
+};
+
+// Each minted model's migration (region 0), in name order.
+const Vector kMigrated[] = {
+		{"synth_gpm.3di", 14600u, 0xba7c23db7ac11dc8ull},
+		{"synth_gpp.3di", 4158u, 0xef52cecf80f989e6ull},
+		{"synth_gps.3di", 1454u, 0x0ea7060eb9616025ull},
+};
+
+// The notes the 677 BHD models raised, every one of which the minted set must raise.
+const char *const kCorpusNotes[] = {
+		"a bump material takes the JO technique of its structure",
+		"a bump material's second stage is dropped",
+		"a clamped texture wraps under JO",
+		"a face BHD's rounds pass through (flag 0x2)",
+		"a flat-colour (untextured) material has no JO form",
+		"a flipbook on a BHD counter JO has no control for",
+		"a lens-flare user point has no JO pass",
+		"a lit material with a colour generator turns self-lit",
+		"a material that ignored its texture's alpha takes it",
+		"a material's texture depends on BHD's mission region",
+		"a self-lit alpha-tested material fails JO's test",
+		"a spinning part (fan, rotor) stands still under JO",
+		"an additive material fogs under JO",
+		"an alpha-blended self-lit material loses its colour generator",
+		"an environment-map pass is dropped",
+};
+
+int minted_corpus(bool dump) {
+	const std::filesystem::path dir = test_paths_fixture("threedi_gp");
+	std::vector<std::string> files;
+	std::error_code ec;
+	for (const auto &entry : std::filesystem::directory_iterator(dir, ec))
+		if (entry.is_regular_file(ec) && entry.path().extension() == ".3di") files.push_back(entry.path().generic_string());
+	std::sort(files.begin(), files.end());
+	std::vector<Vector> migrated;
+	std::vector<std::string> names;
 	std::map<gp::Kind, int> kinds;
 	std::map<std::string, int> notes_seen;
-	int other = 0, failed = 0, rewritten = 0, retail_bytes = 0, lowered = 0;
+	int other = 0, failed = 0, rewritten = 0, source_bytes = 0, lowered = 0;
 	std::vector<std::string> rewritten_apart;
 	for (const std::string &path : files) {
 		const std::vector<uint8_t> bytes = test_io::read_file(path);
+		names.push_back(std::filesystem::path(path).filename().string());
 		const gp::Kind kind = gp::detect(bytes.data(), bytes.size());
 		if (kind == gp::Kind::None) {
 			++other;
@@ -359,6 +412,7 @@ int retail_corpus() {
 			++failed;
 			continue;
 		}
+		migrated.push_back(Vector{nullptr, out.size(), fnv1a64(out)});
 		Threedi3di3 m{};
 		if (threedi_3di3_read_memory(out.data(), out.size(), &m) != 0) {
 			std::fprintf(stderr, "%s: the 3DI3 does not read back\n", path.c_str());
@@ -387,7 +441,7 @@ int retail_corpus() {
 			continue;
 		}
 		++rewritten;
-		if (written == bytes) ++retail_bytes;
+		if (written == bytes) ++source_bytes;
 		else rewritten_apart.push_back(std::filesystem::path(path).filename().string());
 		// A rigid model lowers back to a GP whose migration is the first one.
 		if (kind != gp::Kind::Gpm) continue;
@@ -406,22 +460,48 @@ int retail_corpus() {
 		}
 		++lowered;
 	}
+	if (dump) {
+		std::printf("const Vector kMigrated[] = {\n");
+		for (size_t i = 0; i < names.size() && i < migrated.size(); ++i)
+			std::printf("\t\t{\"%s\", %zuu, 0x%016llxull},\n", names[i].c_str(), migrated[i].len,
+					static_cast<unsigned long long>(migrated[i].hash));
+		std::printf("};\n");
+		return 0;
+	}
 	std::printf("threedi_gp: %d GPM, %d GPS, %d GPP migrated; %d not GP; %d failed\n", kinds[gp::Kind::Gpm],
 			kinds[gp::Kind::Gps], kinds[gp::Kind::Gpp], other, failed);
 	std::printf("threedi_gp: %d written back (%d byte for byte); %d GPM lowered back to their migration\n", rewritten,
-			retail_bytes, lowered);
-	for (const std::string &name : rewritten_apart) std::printf("  written back apart from retail: %s\n", name.c_str());
+			source_bytes, lowered);
+	for (const std::string &name : rewritten_apart) std::printf("  written back apart from its source: %s\n", name.c_str());
 	for (const auto &n : notes_seen) std::printf("  %6d  %s\n", n.second, n.first.c_str());
 	TEST_EXPECT(failed == 0);
-	TEST_EXPECT(kinds[gp::Kind::Gpm] + kinds[gp::Kind::Gps] + kinds[gp::Kind::Gpp] > 0);
+	TEST_EXPECT(kinds[gp::Kind::Gpm] == 1 && kinds[gp::Kind::Gps] == 1 && kinds[gp::Kind::Gpp] == 1);
 	TEST_EXPECT(lowered == kinds[gp::Kind::Gpm]);
+	for (const char *note : kCorpusNotes) {
+		bool raised = false;
+		for (const auto &n : notes_seen) raised = raised || n.first.find(note) != std::string::npos;
+		if (!raised) std::fprintf(stderr, "no minted model raises: %s\n", note);
+		TEST_EXPECT(raised);
+	}
+	const size_t expected = sizeof(kMigrated) / sizeof(kMigrated[0]);
+	TEST_EXPECT(expected == names.size() && migrated.size() == names.size());
+	for (size_t i = 0; i < names.size() && i < expected && i < migrated.size(); ++i) {
+		const bool same = names[i] == kMigrated[i].name && migrated[i].len == kMigrated[i].len &&
+				migrated[i].hash == kMigrated[i].hash;
+		if (!same)
+			std::fprintf(stderr, "%s: migrates to %zu bytes hash 0x%016llx, pinned %s %zu bytes 0x%016llx\n",
+					names[i].c_str(), migrated[i].len, static_cast<unsigned long long>(migrated[i].hash),
+					kMigrated[i].name, kMigrated[i].len, static_cast<unsigned long long>(kMigrated[i].hash));
+		TEST_EXPECT(same);
+	}
 	return 0;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+	const bool dump = argc > 1 && std::strcmp(argv[1], "--dump") == 0;
+	if (dump) return minted_corpus(true);
 	if (synthetic_gpm() != 0) return 1;
 	if (synthetic_gpp() != 0) return 1;
 	if (rejections() != 0) return 1;
@@ -429,5 +509,5 @@ int main(int argc, char **argv) {
 	if (synthetic_write() != 0) return 1;
 	if (synthetic_lower() != 0) return 1;
 	if (lower_refusals() != 0) return 1;
-	return retail_corpus();
+	return minted_corpus(false);
 }

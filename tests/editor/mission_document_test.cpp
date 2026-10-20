@@ -12,13 +12,13 @@
 // the stops that visit it (removal_edits), an event named by index removed only with its namer, a
 // marker added before the markers named leaving every stop naming its marker, a stop edit refused on
 // a path counted past its slots (D-MIS-6), a stop put in, taken out or moved renumbering what names its path's
-// stops by place (S24, over the shipped missions too); what the parse makes of a file laid out otherwise than its
+// stops by place (S24, over the sweep's missions too); what the parse makes of a file laid out otherwise than its
 // events stand (event_order), of one whose runs share a record (invalid_input, blocked) and of one
 // holding bytes the writer writes otherwise (rewrite_differs), each a finding of the type's; what the
 // picture reads (mission_reads.h); a second record of an SSN or a zone id inert; and an item's TYPE on
-// its symbol (the def catalog's refine_symbol).
+// its symbol (the def catalog's refine_symbol). And the sweep (mission_sweep.h), every record kind and field form
+// the shipped missions hold: each mission opened, written back, its references counted, its findings by code.
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -30,8 +30,6 @@
 #include <vector>
 
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
@@ -56,11 +54,11 @@
 #include <formats/mission/mission_params.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "common/png_test_support.h"
+#include "editor/mission_sweep.h"
 #include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 
@@ -1322,7 +1320,8 @@ int test_item_type_on_symbol() {
 
 // The validator's record findings (mission_validation.h), each made by one edit of the minted
 // mission: the code on the record it concerns, at its severity; the minted mission itself makes
-// none. The pool limit is left to the retail leg (no shipped mission crosses it either).
+// none. No pool crosses its limit in the sweep's scale.bms, at the most records a shipped mission holds in each
+// (test_sweep), as none of the shipped missions does.
 int test_validation() {
 	const DocumentType &type = *document_type_for(AssetKind::Mission);
 	std::unique_ptr<Document> document = open(fixture_bytes());
@@ -1751,12 +1750,6 @@ int test_mission_first_dot() {
 	return 0;
 }
 
-// What the shipped missions reference (OPENNOVA_JO_DIR, base and each expansion through the VFS): each
-// opened as a document, unblocked, its runs canonical (the five with a damaged loadout chunk noted,
-// mission_corpus's); the references counted: the entity parameters and those naming no SSN of their
-// mission, the zone parameters and those naming no zone, the event references and those past the
-// table, the stops and those past the markers, the text keys by key; and the findings the validator
-// makes over the install, by code.
 // ADR 0046 S23 D, the rules the witnesses settled: a bounding box made from nothing is a type-0 box, its
 // value worded and read by its type (D-MIS-8); a waypoint name read on the two waypoint marker types
 // alone; a type-6005 marker's advance trigger an event of the mission (its edge, renumbered with the
@@ -1886,190 +1879,198 @@ int test_witnessed_rules() {
 	return 0;
 }
 
-int test_retail() {
-	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission as a document)");
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
-	expansions.insert(expansions.begin(), std::string());
-	std::set<std::string> seen;
-	size_t missions = 0, differing = 0, unedited_same = 0;
+// The minted missions' parameters naming nothing, as editor_missions_gen.cpp's forms place them: logic.bms's 16
+// entity parameters of an SSN no record holds (four triggers', twelve actions') and its two zone parameters of a
+// zone no area has; records.bms's one SSN command whose rider no record holds and its one negated area trigger of a
+// zone no area has.
+constexpr size_t kLogicEntitiesMissing = 16, kLogicZonesMissing = 2, kRecordsEntitiesMissing = 1, kRecordsZonesMissing = 1;
+
+// The validator's findings over the minted missions, by code, each of a form the shipped missions hold (over the
+// 115: a path counted past its slots, CP19.bms's; entities on empty paths; paths of one stop; starts past a path's
+// stops; SSNs two records carry; CP13.bms's alive test on a marker's SSN): records.bms's path of 39 stops, its five
+// entities on an empty path, its path of one stop, its walker starting at its path's count and its four records of
+// an SSN another holds; logic.bms's alive test on its marker's SSN, which scale.bms holds six times over.
+const std::map<std::string, std::map<std::string, size_t>> &sweep_findings() {
+	static const std::map<std::string, std::map<std::string, size_t>> findings = {
+	        {"fixtures/editor/missions/logic.bms", {{"mission.ssn_unscanned", 1}}},
+	        {"fixtures/editor/missions/records.bms",
+	         {{"mission.path_count", 1}, {"mission.path_empty", 5}, {"mission.path_one_shot", 1}, {"mission.path_start", 1},
+	          {"mission.ssn_duplicate", 4}}},
+	        {"fixtures/editor/missions/scale.bms", {{"mission.ssn_unscanned", 6}}},
+	};
+	return findings;
+}
+
+// The sweep (mission_sweep.h), in place of every mission the install ships: each opened as a document,
+// unblocked, its runs canonical (a damaged loadout chunk the format's writer writes otherwise noted
+// alone, mission_corpus's D-EVT-7); an unedited save writes its bytes, the waypoint markers' numbers kept
+// (D-MIS-6), a noted one the format's canonical bytes. Its references: an entity parameter naming no SSN of its
+// mission and a zone parameter naming no zone found as such (each form the shipped records hold, minted in
+// logic.bms and records.bms), no event reference past its table, no stop past the markers, and every form of
+// text key the records' numbers make (LOCATION, STRNAME, STRWPNAME and its -1's STRWPNAME-01, STRWINCOND,
+// STRWINDIRECTIVE, STRWINMSG, STRLOSEDIRECTIVE, STRLOSEMSG; and Show text's ID, which logic.bms holds of every
+// type and no shipped event uses). A path's
+// first stop taken out: every record naming a later stop by place follows it, the first's namers keep 0, in one
+// step the undo takes back. And the validator's findings, each minted mission's by code: those its forms make,
+// every one a code the shipped missions' forms made, no other.
+int test_sweep() {
+	std::vector<std::string> missing;
+	const std::vector<mission_sweep::Mission> sweep = mission_sweep::load(missing);
+	size_t missions = 0, differing = 0;
 	size_t entity_refs = 0, entity_missing = 0, zone_refs = 0, zone_missing = 0, event_refs = 0, event_past = 0,
 	       stops = 0, stops_past = 0, text_refs = 0;
 	size_t stop_missions = 0, stop_shifted_actions = 0, stop_shifted_triggers = 0, stop_shifted_entities = 0, stop_kept = 0;
-	std::map<std::string, size_t> findings_by_code, text_by_key;
-	// What the extractions took (timed, not held to a bound): all of them, and the slowest with its rows.
-	double extraction_ms = 0, slowest_ms = 0;
-	size_t slowest_rows = 0;
+	std::map<std::string, size_t> text_by_key;
+	std::map<std::string, std::map<std::string, size_t>> findings_by_mission;
 	const DocumentType &type = *document_type_for(AssetKind::Mission);
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
-		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
-		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string()) != ".bms") continue;
-			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
-			std::vector<uint8_t> bytes;
-			TEST_EXPECT(game.read_file(file.logical_name, bytes));
-			std::unique_ptr<Document> document = open(bytes, file.logical_name.c_str());
-			TEST_EXPECT(document && !document->blocked());
-			if (!document) continue;
-			++missions;
-			const MissionDocument &m = as_mission(*document);
-			for (const MissionFinding code : m.issue_codes()) {
-				TEST_EXPECT(code == MissionFinding::RewriteDiffers); // every shipped mission's runs canonical
-				++differing;
+	for (const mission_sweep::Mission &file : sweep) {
+		const std::vector<uint8_t> &bytes = file.bytes;
+		std::unique_ptr<Document> document = open(bytes, file.name.c_str());
+		TEST_EXPECT(document && !document->blocked());
+		if (!document) continue;
+		++missions;
+		const MissionDocument &m = as_mission(*document);
+		// Its runs canonical; a damaged loadout chunk its one note, and only where the sweep says so.
+		for (const MissionFinding code : m.issue_codes()) TEST_EXPECT(code == MissionFinding::RewriteDiffers);
+		TEST_EXPECT(m.issue_codes().empty() != file.rewrites);
+		differing += !m.issue_codes().empty();
+		// An unedited save writes the file's bytes, the waypoint markers' numbers kept (D-MIS-6); a mission the
+		// writer writes otherwise (its noted chunk) writes what the format's writer writes of it.
+		{
+			const std::string saved = bytes_of(*document);
+			bms::File read;
+			std::vector<uint8_t> canonical;
+			std::string why;
+			TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), read, why) && bms::write(read, canonical, why));
+			const bool noted = !m.issue_codes().empty();
+			const bool same = saved == (noted ? std::string(canonical.begin(), canonical.end())
+			                                  : std::string(bytes.begin(), bytes.end()));
+			if (!same) std::printf("  %s: an unedited save writes other bytes\n", file.path.c_str());
+			TEST_EXPECT(same);
+		}
+		std::set<int32_t> ssns, zones;
+		for (const MissionEntityRead &entity : mission_entities(m)) ssns.insert(entity.ssn);
+		for (const MissionAreaRead &area : mission_areas(m)) zones.insert(area.id);
+		const size_t events = m.rows_of(MissionKind::Event).size(), markers = m.rows_of(MissionKind::Marker).size();
+		Extracted extracted;
+		extract_from_document(*document, extracted);
+		size_t own_entity_missing = 0, own_zone_missing = 0;
+		for (const GraphEdge &edge : extracted.edges) {
+			const std::optional<int> number = opennova::strutil::parse_int(edge.value);
+			switch (edge.kind) {
+			case ReferenceKind::MissionEntity:
+				++entity_refs;
+				own_entity_missing += number && !ssns.count(*number);
+				break;
+			case ReferenceKind::MissionZone:
+				++zone_refs;
+				own_zone_missing += number && !zones.count(*number);
+				break;
+			case ReferenceKind::MissionEvent:
+				++event_refs;
+				event_past += number && size_t(*number) >= events;
+				break;
+			case ReferenceKind::MissionMarker:
+				++stops;
+				stops_past += number && size_t(*number) >= markers;
+				break;
+			case ReferenceKind::TextId:
+				++text_refs;
+				++text_by_key[edge.value.substr(0, edge.value.find_first_of("0123456789"))];
+				break;
+			default: break;
 			}
-			// An unedited save writes the shipped bytes, the waypoint markers' numbers kept (D-MIS-6); a mission
-			// the writer writes otherwise (its noted chunk) writes what the format's writer writes of it.
-			{
-				const std::string saved = bytes_of(*document);
-				bms::File read;
-				std::vector<uint8_t> canonical;
-				std::string why;
-				TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), read, why) && bms::write(read, canonical, why));
-				const bool noted = !m.issue_codes().empty();
-				const bool same = saved == (noted ? std::string(canonical.begin(), canonical.end())
-				                                  : std::string(bytes.begin(), bytes.end()));
-				if (!same) std::printf("  %s: an unedited save writes other bytes\n", file.logical_name.c_str());
-				TEST_EXPECT(same);
-				unedited_same += same;
-			}
-			std::set<int32_t> ssns, zones;
-			for (const MissionEntityRead &entity : mission_entities(m)) ssns.insert(entity.ssn);
-			for (const MissionAreaRead &area : mission_areas(m)) zones.insert(area.id);
-			const size_t events = m.rows_of(MissionKind::Event).size(), markers = m.rows_of(MissionKind::Marker).size();
-			Extracted extracted;
-			const auto started = std::chrono::steady_clock::now();
-			extract_from_document(*document, extracted);
-			const double took = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-			extraction_ms += took;
-			if (took > slowest_ms) {
-				slowest_ms = took;
-				slowest_rows = document->rows().size();
-			}
-			for (const GraphEdge &edge : extracted.edges) {
-				const std::optional<int> number = opennova::strutil::parse_int(edge.value);
-				switch (edge.kind) {
-				case ReferenceKind::MissionEntity:
-					++entity_refs;
-					entity_missing += number && !ssns.count(*number);
-					break;
-				case ReferenceKind::MissionZone:
-					++zone_refs;
-					zone_missing += number && !zones.count(*number);
-					break;
-				case ReferenceKind::MissionEvent:
-					++event_refs;
-					event_past += number && size_t(*number) >= events;
-					break;
-				case ReferenceKind::MissionMarker:
-					++stops;
-					stops_past += number && size_t(*number) >= markers;
-					break;
-				case ReferenceKind::TextId:
-					++text_refs;
-					++text_by_key[edge.value.substr(0, edge.value.find_first_of("0123456789"))];
-					break;
-				default: break;
+		}
+		entity_missing += own_entity_missing;
+		zone_missing += own_zone_missing;
+		// The minted missions' references naming nothing, where their forms place them (editor_missions_gen.cpp):
+		// logic.bms's entity parameters of an SSN no record holds (4321, 99) and its zone parameters of a zone none
+		// has (77); records.bms's SSN command riding an SSN none holds (4321) and its area trigger of zone 55.
+		if (file.path.rfind("fixtures/editor/missions/", 0) == 0)
+			std::printf("  %s: %zu entity parameters naming no SSN, %zu zone parameters naming no zone\n", file.path.c_str(),
+			            own_entity_missing, own_zone_missing);
+		if (mission_sweep::minted(file, "logic.bms"))
+			TEST_EXPECT(own_entity_missing == kLogicEntitiesMissing && own_zone_missing == kLogicZonesMissing);
+		if (mission_sweep::minted(file, "records.bms"))
+			TEST_EXPECT(own_entity_missing == kRecordsEntitiesMissing && own_zone_missing == kRecordsZonesMissing);
+		std::map<std::string, size_t> &codes = findings_by_mission[file.path];
+		for (const Diagnostic &d : type.validate_file(*document)) ++codes[d.code()];
+		// The stops named by place (S24): the first path whose stop past its first a Redirect names (else any
+		// record), its first stop taken out: every place past it moves down one, the first's namers keep 0 (as
+		// mission_removed_stop_namers counts them), in one step the undo takes back to the bytes.
+		{
+			const auto namers_of = [&](int number) {
+				std::vector<MissionStopNamer> namers;
+				for (const auto &row : document->rows()) mission_stop_namers(*row, number, namers);
+				return namers;
+			};
+			int chosen = 0;
+			for (int pass = 0; pass < 2 && !chosen; ++pass)
+				for (int number = 1; number < mission::kFirstPathCommand && !chosen; ++number) {
+					if (m.row_of(MissionKind::WaypointPath, size_t(number)) == nullptr) continue;
+					for (const MissionStopNamer &namer : namers_of(number))
+						if (namer.place > 0 && (pass == 1 || namer.record.kind == k(MissionKind::Action))) chosen = number;
 				}
-			}
-			for (const Diagnostic &d : type.validate_file(*document)) {
-				++findings_by_code[d.code()];
-				if (d.code() == "mission.ssn_unscanned")
-					std::printf("  %s, %s: %s\n", file.logical_name.c_str(), d.record.c_str(), d.message.c_str());
-			}
-			// The stops named by place (S24): the first path whose stop past its first a Redirect names (else any
-			// record), its first stop taken out: every place past it moves down one, the first's namers keep 0 (as
-			// mission_removed_stop_namers counts them), in one step the undo takes back to the bytes.
-			{
-				const auto namers_of = [&](int number) {
-					std::vector<MissionStopNamer> namers;
-					for (const auto &row : document->rows()) mission_stop_namers(*row, number, namers);
-					return namers;
-				};
-				int chosen = 0;
-				for (int pass = 0; pass < 2 && !chosen; ++pass)
-					for (int number = 1; number < mission::kFirstPathCommand && !chosen; ++number) {
-						if (m.row_of(MissionKind::WaypointPath, size_t(number)) == nullptr) continue;
-						for (const MissionStopNamer &namer : namers_of(number))
-							if (namer.place > 0 && (pass == 1 || namer.record.kind == k(MissionKind::Action))) chosen = number;
-					}
-				const Node *path = chosen ? m.row_of(MissionKind::WaypointPath, size_t(chosen)) : nullptr;
-				if (path && !static_cast<const PathRow &>(*path).native.stops.empty()) {
-					const std::string before_bytes = bytes_of(*document);
-					const std::vector<MissionStopNamer> before = namers_of(chosen);
-					const NodeAddress first{path->id, k(MissionKind::Stop), document->collections_of({path->id, path->kind, 0})[0].ids[0]};
-					const size_t kept = mission_removed_stop_namers(m, {edit_of(EditOperation::Remove, first)});
-					Diagnostic error;
-					TEST_EXPECT(document->apply(edit_of(EditOperation::Remove, first), error));
-					const std::vector<MissionStopNamer> after = namers_of(chosen);
-					TEST_EXPECT(after.size() == before.size());
-					size_t zeros = 0;
-					for (size_t i = 0; i < before.size() && i < after.size(); ++i) {
-						const int64_t was = before[i].place;
-						TEST_EXPECT(after[i].record == before[i].record && after[i].place == (was > 0 ? was - 1 : was));
-						zeros += was == 0;
-						stop_shifted_actions += was > 0 && before[i].record.kind == k(MissionKind::Action);
-						stop_shifted_triggers += was > 0 && before[i].record.kind == k(MissionKind::Trigger);
-						stop_shifted_entities += was > 0 && before[i].record.child == 0;
-					}
-					TEST_EXPECT(kept == zeros);
-					stop_kept += kept;
-					++stop_missions;
-					document->undo();
-					TEST_EXPECT(bytes_of(*document) == before_bytes);
+			const Node *path = chosen ? m.row_of(MissionKind::WaypointPath, size_t(chosen)) : nullptr;
+			if (path && !static_cast<const PathRow &>(*path).native.stops.empty()) {
+				const std::string before_bytes = bytes_of(*document);
+				const std::vector<MissionStopNamer> before = namers_of(chosen);
+				const NodeAddress first{path->id, k(MissionKind::Stop), document->collections_of({path->id, path->kind, 0})[0].ids[0]};
+				const size_t kept = mission_removed_stop_namers(m, {edit_of(EditOperation::Remove, first)});
+				Diagnostic error;
+				TEST_EXPECT(document->apply(edit_of(EditOperation::Remove, first), error));
+				const std::vector<MissionStopNamer> after = namers_of(chosen);
+				TEST_EXPECT(after.size() == before.size());
+				size_t zeros = 0;
+				for (size_t i = 0; i < before.size() && i < after.size(); ++i) {
+					const int64_t was = before[i].place;
+					TEST_EXPECT(after[i].record == before[i].record && after[i].place == (was > 0 ? was - 1 : was));
+					zeros += was == 0;
+					stop_shifted_actions += was > 0 && before[i].record.kind == k(MissionKind::Action);
+					stop_shifted_triggers += was > 0 && before[i].record.kind == k(MissionKind::Trigger);
+					stop_shifted_entities += was > 0 && before[i].record.child == 0;
 				}
+				TEST_EXPECT(kept == zeros);
+				stop_kept += kept;
+				++stop_missions;
+				document->undo();
+				TEST_EXPECT(bytes_of(*document) == before_bytes);
 			}
 		}
 	}
-	if (missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
-	std::printf("retail: %zu missions opened, %zu with a chunk the writer writes otherwise; %zu entity parameters (%zu naming "
+	std::printf("sweep: %zu missions opened, %zu with a chunk the writer writes otherwise; %zu entity parameters (%zu naming "
 	            "no SSN), %zu zone parameters (%zu naming no zone), %zu event references (%zu past the table), %zu stops (%zu "
 	            "past the markers), %zu text keys\n",
 	            missions, differing, entity_refs, entity_missing, zone_refs, zone_missing, event_refs, event_past, stops,
 	            stops_past, text_refs);
-	std::printf("retail: the %zu extractions took %.1f ms, the slowest %.1f ms (%zu rows)\n", missions, extraction_ms,
-	            slowest_ms, slowest_rows);
-	std::printf("retail: a path's first stop taken out in %zu missions: %zu actions, %zu triggers and %zu entities follow "
+	std::printf("sweep: a path's first stop taken out in %zu missions: %zu actions, %zu triggers and %zu entities follow "
 	            "their stops, %zu records keep the first's place\n",
 	            stop_missions, stop_shifted_actions, stop_shifted_triggers, stop_shifted_entities, stop_kept);
-	TEST_EXPECT(stop_missions == 35 && stop_shifted_actions == 22 && stop_shifted_triggers == 60 &&
-	            stop_shifted_entities == 26 && stop_kept == 37);
 	for (const auto &[key, count] : text_by_key) std::printf("  %s%%03i: %zu\n", key.c_str(), count);
-	for (const auto &[code, count] : findings_by_code) std::printf("  %s: %zu\n", code.c_str(), count);
-	// What the install holds, measured by this document (the design's emulation counted 3,272 entity
-	// parameters with 140 missing, before the waypoint riders and the Redirect actions' entity slot
-	// were parameters of that kind; the rest as it counted): no event reference past its table, no
-	// stop past the markers, and the findings the validator makes over the shipped missions, one
-	// path counted past its slots (CP19), 36 SSNs carried twice, one alive test on a marker's SSN
-	// (CP13's SSN 2072), every mission with an entity on an empty path.
-	TEST_EXPECT(missions == 115 && differing == 5 && unedited_same == 115);
-	TEST_EXPECT(entity_refs == 4561 && entity_missing == 162 && zone_refs == 879 && zone_missing == 53);
-	// The event references: 841 Event triggers' and ResetEvent actions' and 73 type-6005 waypoints' advance
-	// triggers.
-	// The stops: every shipped path's waypoint markers (D-MIS-6), CP19's path 6 of 39 among them (its record's
-	// slots hold 32 of them).
-	TEST_EXPECT(event_refs == 914 && event_past == 0 && stops == 11242 && stops_past == 0 && text_refs == 12824);
-	// The text keys by key: no shipped action outputs a triggered text; each of the 11,250 type-6005 waypoints
-	// forms its name's, 822 of them of id -1 ("STRWPNAME-01", the key the spawn forms of it).
-	const std::map<std::string, size_t> keys = {{"LOCATION", 581},     {"STRLOSEDIRECTIVE", 17}, {"STRLOSEMSG", 29},
-	                                            {"STRNAME", 544},      {"STRWINCOND", 130},      {"STRWINDIRECTIVE", 133},
-	                                            {"STRWINMSG", 140},      {"STRWPNAME", 10428},     {"STRWPNAME-", 822}};
-	TEST_EXPECT(text_by_key == keys);
-	// (path_start: the 7 entities that walk a path from a stop past its slots; a waypoint marker's place is its
-	// membership of its path, D-MIS-6, no start.)
-	const std::map<std::string, size_t> expected = {{"mission.path_count", 1},      {"mission.path_empty", 115},
-	                                                {"mission.path_one_shot", 72},   {"mission.path_start", 7},
-	                                                {"mission.rewrite_differs", 5}, {"mission.ssn_duplicate", 36},
-	                                                {"mission.ssn_unscanned", 1}};
-	TEST_EXPECT(findings_by_code == expected);
+	for (const auto &[path, codes] : findings_by_mission)
+		for (const auto &[code, count] : codes) std::printf("  %s: %s %zu\n", path.c_str(), code.c_str(), count);
+	// Records of each kind name a stop by place and follow it; some keep the first's place.
+	TEST_EXPECT(stop_missions > 0 && stop_shifted_actions > 0 && stop_shifted_triggers > 0 && stop_shifted_entities > 0 &&
+	            stop_kept > 0);
+	// No event reference past its table, no stop past the markers (the shipped missions' none either).
+	TEST_EXPECT(event_refs > 0 && event_past == 0 && stops > 0 && stops_past == 0);
+	// Every key form the shipped records' numbers make, Show text's beside them, and no other.
+	std::set<std::string> forms;
+	for (const auto &[key, count] : text_by_key) forms.insert(key);
+	TEST_EXPECT(forms == (std::set<std::string>{"ID", "LOCATION", "STRLOSEDIRECTIVE", "STRLOSEMSG", "STRNAME", "STRWINCOND",
+	                                            "STRWINDIRECTIVE", "STRWINMSG", "STRWPNAME", "STRWPNAME-"}));
+	// The minted missions' findings (sweep_findings).
+	for (const auto &[path, expected] : sweep_findings()) {
+		const auto found = findings_by_mission.find(path);
+		TEST_EXPECT(found != findings_by_mission.end() && found->second == expected);
+	}
+	TEST_EXPECT(mission_sweep::none_missing(missing));
 	return 0;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	if (test_rows() != 0) return 1;
 	if (test_references() != 0) return 1;
 	if (test_edits() != 0) return 1;
@@ -2091,5 +2092,5 @@ int main(int argc, char **argv) {
 	if (test_mission_named_like_a_bank() != 0) return 1;
 	if (test_witnessed_rules() != 0) return 1;
 	if (test_mission_first_dot() != 0) return 1;
-	return test_retail();
+	return test_sweep();
 }

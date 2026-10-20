@@ -97,6 +97,7 @@ private:
 	crow::response tiers();
 	crow::response me_billing(const crow::request &req);
 	crow::response checkout(const crow::request &req);
+	crow::response cancel_checkout(const crow::request &req);
 	crow::response portal(const crow::request &req);
 	crow::response me_sync(const crow::request &req);
 	crow::response webhook(const crow::request &req);

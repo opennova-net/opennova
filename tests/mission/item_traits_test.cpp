@@ -13,6 +13,8 @@
 #include <formats/def/def.h>
 #include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/item_traits.h>
+#include <runtime/audio/oneshot_play.h>
+#include <formats/lwf/lwf.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/item_sections.h>
 #include <runtime/world/ai.h>
@@ -364,7 +366,7 @@ void test_graphic_model_is_the_loads_result() {
     const std::vector<uint8_t> mount = test_io::read_file(
             std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/mount.3di");
     if (mount.empty() || test_io::is_lfs_pointer(mount)) {
-        std::printf("SKIP-LEG: needs the LFS fixture fixtures/threedi/synth/mount.3di\n");
+        std::printf("[skip] fixtures/threedi/synth/mount.3di is an unpulled LFS pointer\n");
         return;
     }
     const std::string root = std::string(test_paths_temp_dir()) + "/" +
@@ -462,7 +464,44 @@ void test_graphic_model_is_the_loads_result() {
 
 } // namespace
 
+// A row's sound profile binds its region loops (Soundloop_1..4, dawn to night)
+// only where the loaded banks carry the named set: the one the banks hold
+// binds, the missing one stays empty. [orig: the def's regional loop slots
+//  resolved by ItemDef_ResolveAllResources @0x49E7F0 against the loaded sets]
+static void test_regional_loops_bind_loaded_sets() {
+    static const char kRows[] =
+            "begin \"Truck\"\r\n  id 100700\r\n  type vehicle\r\n  sound_profile SP_Truck\r\nend\r\n";
+    DefItemsFile rows = {};
+    CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(kRows), sizeof(kRows) - 1, &rows) == 0);
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    static const char kProfile[] =
+            "begin SP_Truck\r\nSoundloop_1 LP_TRUCK_DAWN\r\nSoundloop_2 LP_TRUCK_GONE\r\nend\r\n";
+    CHECK(w.tables.sound_profiles.parse(kProfile, sizeof(kProfile) - 1) == 1);
+    audio::SoundSetIndex sets;
+    {
+        lwf::File bank;
+        lwf::Multi set;
+        set.name = "LP_TRUCK_DAWN";
+        bank.multis.push_back(set);
+        sets.add_bank(0, bank);
+    }
+    w.tables.sound_sets = &sets;
+    spawn(w, 1, 700, EntityKind::Item);
+    mission::resolve_item_traits(w, rows, {}, nullptr);
+    const ItemDeathTraits *t = w.tables.item_death_traits.get(700);
+    CHECK(t != nullptr);
+    if (t != nullptr) {
+        CHECK(t->regional_loops[0] == "LP_TRUCK_DAWN");
+        CHECK(t->regional_loops[1].empty());
+    }
+    w.tables.sound_sets = nullptr;
+    def_free_items(&rows);
+}
+
 int main() {
+    test_regional_loops_bind_loaded_sets();
     DefItemsFile file = {};
     CHECK(def_parse_items_memory(
                   reinterpret_cast<const uint8_t *>(kItemsDef),

@@ -24,25 +24,32 @@
 // over a use reaching another ammo through its fallback refused, and one of a definition reached
 // through it keeping the prefix once; a stale text site partial; the rename preview's text sites; a
 // closed music script's spans read by its scan's kind; a shader imported as stored; one compile of
-// a text for its findings and its references; a snapshot copying the text alone. The retail leg
-// (OPENNOVA_JO_DIR): the install's scripts, music scripts, credits and shaders read and validated,
-// its counts pinned.
+// a text for its findings and its references; a snapshot copying the text alone. What JO:CA ships
+// of each, by its constructs: scripts authored with each kind of the shipped scripts' own compiler
+// reports, those reports the editor's findings at the compiler's lines, with the base game's
+// scripts and the format's; every music script of the format and the base game through its MUS
+// text byte for byte; a credits file laid out as JO:CA's through the CBIN form byte for byte, its
+// fonts and images named; a shader for each tag of the renderer's effect registry, as stored, their
+// tags the registry's 46, and the base game's shaders as stored.
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+#include <initializer_list>
 #include <memory>
+#include <set>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
-#include <editor/assets/install_view.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/document_types.h>
@@ -72,17 +79,16 @@
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/scr/scr.h>
-#include <base/io/sha256.h>
 #include <net/novacrypto/pubcrypto.h>
+#include <runtime/renderer/material_descriptor.h>
 #include <runtime/wac/compiler.h>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
-#include "wac/wac_listing.h"
+#include "editor/variant_files.h"
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
@@ -172,20 +178,6 @@ std::vector<uint8_t> minted_credits() {
 	std::string error;
 	opennova::cbin::encode_binary_config(config, out, error);
 	return out;
-}
-
-// The listings the original compiler wrote of the shipped scripts (wac_corpus's vectors, by each
-// source's SHA-256), which the runtime's own corpus test holds its compiler to.
-struct CorpusVector {
-	const char *source_sha256;
-	const char *listing_sha256;
-};
-const CorpusVector kCorpus[] = {
-#include "wac/fixtures/wac_retail_corpus_vectors.inc"
-};
-
-std::string sha256(const std::string &bytes) {
-	return opennova::io::sha256_hex(bytes.data(), bytes.size());
 }
 
 using editor_test::has_code;
@@ -1312,15 +1304,25 @@ static int test_shader_definitions() {
 	};
 	TEST_EXPECT(check_text(bytes, std::string(), "_ffp.fx") == 0);
 	TEST_EXPECT(blank_shader_tags() == Names({"VS_PHONGT", "VS_DOT3DIFF2", "VS_SKBUMPPHONGT", "VS_SKBUMPDIFFT"}));
+	// Each registers its tag, and the #UV twin exactly where the shipped effect of the tag asks for one (the
+	// renderer's registry rows: JO:CA's PhongT.fx sets EffectAlt_UV; BDiffT2.fx, SkBPhongT.fx and SkBDiffT.fx none).
+	const auto in_registry = [](const std::string &tag) {
+		return std::any_of(std::begin(opennova::renderer::kMaterialDescriptorTable),
+		                   std::end(opennova::renderer::kMaterialDescriptorTable),
+		                   [&](const auto &row) { return tag == row.name; });
+	};
 	for (const std::string &tag : blank_shader_tags()) {
 		BlankRequest request;
 		request.logical_name = "shaders/new.fx";
 		request.values = {{"tag", tag}};
 		TEST_EXPECT(make_blank(request, AssetKind::Shader, bytes, error));
-		const bool skinned = tag.find("_SK") != std::string::npos;
-		TEST_EXPECT(shader_tags_of(bytes, "new.fx") == (skinned ? Names({tag}) : Names({tag, tag + "#UV"})));
+		const bool twin = in_registry(tag + "#UV");
+		TEST_EXPECT(in_registry(tag) &&
+		            shader_tags_of(bytes, "new.fx") == (twin ? Names({tag, tag + "#UV"}) : Names({tag})));
 		TEST_EXPECT(check_text(bytes, tag, "new.fx") == 0);
 	}
+	TEST_EXPECT(blank_shader_text("VS_PHONGT", "x.fx").find("EffectAlt_UV = true;") != std::string::npos &&
+	            blank_shader_text("VS_DOT3DIFF2", "x.fx").find("EffectAlt_UV") == std::string::npos);
 	// Refused: a tag it makes no effect for, a name the archive walk skips.
 	BlankRequest refused;
 	refused.logical_name = "glass.fx";
@@ -1399,150 +1401,271 @@ static int test_import_shader() {
 	return 0;
 }
 
-// The retail leg (OPENNOVA_JO_DIR): the install's scripts, music scripts, credits and shaders read
-// and validated as the editor reads them. Each script compiled as the runtime's corpus test compiles
-// it (no catalog, a RUN's file from the install) writes the listing the original compiler wrote
-// (wac_corpus's committed vectors): the editor's compiler is the game's, and so are its reports; a
-// script that RUNs no other file makes exactly those reports a finding each, at their places, but
-// the names other files hold. Both music scripts (gamemus's MessageHandler among them) go through their MUS
-// text and back byte for byte, as do the credits file and every shader.
-static int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's scripts, music scripts, credits and shaders)");
-		return 0;
+// A script through the editor as the shipped ones went (JO:CA's 23: every line CR LF, none RUNning another file):
+// as stored, unchanged; its findings the compiler's reports of the text alone (no name another file holds), one
+// each, in the compiler's order, on the line the compiler counted (its CRs, so the editor's lines are the
+// compiler's) at a column; the compile the runtime makes of it (no catalog, a RUN's file read through `load`), where
+// it RUNs nothing, reporting as many of its own. `messages` takes the reports' words and lines.
+static int script_reports(const std::string &name, const std::string &stored,
+		const std::function<bool(const std::string &, std::string &)> &load,
+		std::vector<std::pair<std::string, int>> *messages = nullptr) {
+	const DocumentType *type = document_type_for(AssetKind::Script);
+	std::unique_ptr<DocumentBase> document = type->make();
+	Diagnostic error;
+	TEST_EXPECT(document->load_bytes(bytes_of(stored), name, AssetKind::Script, "jo", error) && !document->blocked());
+	TEST_EXPECT(document->serialize().text == stored && document->rewrite_need() == DocumentBase::RewriteNeed::None);
+	const std::vector<Diagnostic> found = type->validate_file(*document);
+	const opennova::wac::Program program = compile_script(*text_of(*document));
+	std::vector<const opennova::wac::Diagnostic *> own;
+	for (const opennova::wac::Diagnostic &d : program.diagnostics)
+		if (!d.table && d.source == 0) own.push_back(&d);
+	TEST_EXPECT(found.size() == own.size() && text_of(*document)->odd_line_end() == std::string::npos);
+	for (size_t i = 0; i < found.size(); ++i) {
+		if (found[i].line != size_t(own[i]->line))
+			std::fprintf(stderr, "%s: \"%s\" at line %zu, the compiler's %d\n", name.c_str(), own[i]->message.c_str(),
+			             found[i].line, own[i]->line);
+		TEST_EXPECT(found[i].code() == "script.compile" && found[i].line == size_t(own[i]->line) && found[i].column >= 1);
+		if (messages) messages->emplace_back(own[i]->message, own[i]->line);
 	}
-	ProjectDocument project;
-	project.target_game = "jo";
-	InstallView view;
-	std::string view_error;
-	TEST_EXPECT(view.open(install_spec(install, project), view_error));
-	const opennova::Vfs &mount = view.vfs();
-	size_t scripts = 0, compiled = 0, findings = 0, references = 0, operands = 0, music = 0, credits = 0, shaders = 0;
-	size_t variable_operands = 0, event_operands = 0;
-	size_t witnessed = 0, alone = 0, shader_tags = 0, credit_fonts = 0, credit_images = 0;
-	for (const opennova::VfsFileLocation &location : mount.list_files()) {
-		const std::string &name = location.logical_name;
-		const AssetKind kind = classify_asset(name, nullptr);
-		std::vector<uint8_t> bytes;
-		if (kind != AssetKind::Script && kind != AssetKind::Credits && kind != AssetKind::Shader &&
-		    !opennova::strutil::ends_with_icase(name, ".bin"))
-			continue;
-		if (!mount.read_file_raw(name, bytes)) continue; // as stored: the document decodes it
-		const AssetKind typed = classify_asset(name, &bytes);
-		const DocumentType *type = document_type_for(typed);
-		if (!type || document_content(*type) != DocumentContent::Text) continue;
-		std::unique_ptr<DocumentBase> document = type->make();
-		Diagnostic error;
-		const bool loaded = document->load_bytes(bytes, name, typed, "jo", error);
-		if (!loaded) std::fprintf(stderr, "retail: %s does not load: %s\n", name.c_str(), error.message.c_str());
-		TEST_EXPECT(loaded);
-		const std::vector<Diagnostic> found = type->validate_file(*document);
-		const std::string stored(bytes.begin(), bytes.end());
-		switch (typed) {
-		case AssetKind::Script: {
-			++scripts;
-			TEST_EXPECT(document->serialize().text == stored);
-			// As the runtime's corpus test compiles it: the original compiler's listing.
-			opennova::wac::CompileEnv env;
-			env.source_names = {"script.wac"};
-			env.load_source = [&mount](const std::string &file, std::string &text) {
-				std::vector<uint8_t> run;
-				if (!mount.read_file_raw(file, run)) return false;
-				text.assign(run.begin(), run.end());
-				return true;
-			};
-			const opennova::wac::Program corpus = opennova::wac::compile_source(stored, env);
-			const std::string source_hash = sha256(stored);
-			const auto vector = std::find_if(std::begin(kCorpus), std::end(kCorpus),
-			                                 [&](const CorpusVector &v) { return source_hash == v.source_sha256; });
-			if (vector != std::end(kCorpus)) {
-				++witnessed;
-				TEST_EXPECT(sha256(wac_listing::document(corpus)) == vector->listing_sha256);
-			}
-			// The editor's findings: the reports of the text alone but the names other files hold, each
-			// on the line the compiler counted (its CRs: every shipped script ends its lines CR LF, so
-			// the editor's lines are the compiler's).
-			const opennova::wac::Program program = compile_script(*text_of(*document));
-			std::vector<const opennova::wac::Diagnostic *> own;
-			for (const opennova::wac::Diagnostic &d : program.diagnostics)
-				if (!d.table && d.source == 0) own.push_back(&d);
-			TEST_EXPECT(found.size() == own.size() && text_of(*document)->odd_line_end() == std::string::npos);
-			for (size_t i = 0; i < found.size() && i < own.size(); ++i) {
-				if (found[i].line != size_t(own[i]->line))
-					std::fprintf(stderr, "retail: %s: \"%s\" at line %zu, the compiler's %d\n", name.c_str(),
-					             own[i]->message.c_str(), found[i].line, own[i]->line);
-				TEST_EXPECT(found[i].line == size_t(own[i]->line) && found[i].column >= 1);
-			}
-			// One that RUNs nothing reports what the corpus compile reports of it.
-			if (corpus.source_names.size() == 1) {
-				size_t corpus_own = 0;
-				for (const opennova::wac::Diagnostic &d : corpus.diagnostics) corpus_own += d.table ? 0 : 1;
-				TEST_EXPECT(corpus_own == own.size());
-				++alone;
-			}
-			compiled += program.diagnostics.size();
-			findings += found.size();
-			std::vector<TextReference> named;
-			type->references(*text_of(*document), named);
-			references += named.size();
-			// The mission's entities and areas its literal operands name (S23 B); its variables and events, apart
-			// (S24 C4: a script's V# and event() index).
-			for (const TextReference &each : named) {
-				operands += each.kind == ReferenceKind::MissionEntity || each.kind == ReferenceKind::MissionZone ? 1 : 0;
-				variable_operands += each.kind == ReferenceKind::MissionVariable ? 1 : 0;
-				event_operands += each.kind == ReferenceKind::MissionEventLatch ? 1 : 0;
-			}
-			break;
-		}
-		case AssetKind::MusicScript:
-			// Both shipped scripts: their text, MDEdit's layout written again, byte for byte.
-			++music;
-			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
-			break;
-		case AssetKind::Credits: {
-			++credits;
-			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
-			std::vector<TextReference> names;
-			type->references(*text_of(*document), names);
-			for (const TextReference &name : names)
-				++(name.kind == ReferenceKind::Font ? credit_fonts : credit_images);
-			break;
-		}
-		case AssetKind::Shader: {
-			++shaders;
-			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
-			std::vector<TextDefinition> tags;
-			type->definitions(*text_of(*document), tags);
-			shader_tags += tags.size();
-			break;
-		}
-		default: break;
-		}
+	opennova::wac::CompileEnv env;
+	env.source_names = {"script.wac"};
+	env.load_source = load;
+	const opennova::wac::Program corpus = opennova::wac::compile_source(stored, env);
+	if (corpus.source_names.size() == 1) {
+		size_t corpus_own = 0;
+		for (const opennova::wac::Diagnostic &d : corpus.diagnostics) corpus_own += d.table ? 0 : 1;
+		TEST_EXPECT(corpus_own == own.size());
 	}
-	std::printf("retail: %zu scripts (%zu with the original compiler's listing matched, %zu running no other "
-	            "file; %zu compiler reports, %zu findings, %zu references, %zu of them entity and area operands, %zu "
-	            "variable and %zu event operands), %zu music scripts, %zu credits files (%zu fonts and %zu images "
-	            "named), %zu shaders (%zu shader tags)\n",
-	            scripts, witnessed, alone, compiled, findings, references, operands, variable_operands, event_operands,
-	            music, credits, credit_fonts, credit_images, shaders, shader_tags);
-	// The install's counts, pinned (Joint Operations: Combined Arms).
-	TEST_EXPECT(scripts == 23 && witnessed == 23 && alone == 23 && compiled == 47 && findings == 11 &&
-	            references == 141 && operands == 61 && music == 2 && credits == 1 && shaders == 44);
-	// The scripts' V# (44) and event() (none ships) operands, apart from the entities' and areas' (S24 C4): the 44
-	// references they added are theirs.
-	TEST_EXPECT(variable_operands == 44 && event_operands == 0);
-	// The credits' names: each text line's font (every one of the 231 writes one) and its 19 images (17 fading,
-	// 2 spacing).
-	TEST_EXPECT(credit_fonts == 231 && credit_images == 19);
-	// The tags the shaders register, as the renderer's registry holds them: _ffp.fx's 24 and the shipped
-	// effects' (render-material-re.md, the 46-tag registry).
-	TEST_EXPECT(shader_tags == 46);
 	return 0;
 }
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+// The shipped scripts' own reports, each kind in a script authored as they are written (the eleven of JO:CA's: a
+// block an "Else if" opens that no END closes, at its If's line, the script's first or after a comment; an IF whose
+// ( is left open, which runs its conditions on to the endif, an END among them, and the next If an IF among them,
+// its block then left open), through script_reports, the compiler's words and lines the witnessed ones'. Then the
+// base game's scripts and the format's fixtures, each RUN read from its directory.
+static int test_shipped_scripts() {
+	using Reports = std::vector<std::pair<std::string, int>>;
+	struct Script {
+		const char *name;
+		const char *text;
+		Reports reports;
+	};
+	const Script scripts[] = {
+		{"else_if.wac", "If true(greenkills) then\r\n\t\tWin (1)\r\nElse if true(bluekills) then\r\n\t\tWin (0)\r\nendif\r\n",
+		 {{"Missing END", 1}}},
+		{"after_note.wac",
+		 "\t\r\n//the side that wins\r\nIf true(greenkills) then\r\n\t\tWin (1)\r\nElse if true(bluekills) then\r\n"
+		 "\t\tWin (0)\r\nendif\r\n\r\n\r\n//a later block\r\nif eq(v3, 1) then\r\n\tset(v3, 2) \r\nendif\r\n",
+		 {{"Missing END", 3}}},
+		{"open_paren.wac",
+		 "if eq(v3, 1) then\r\n\tset(v3, 2)\r\nendif\r\nif (eq(v3, 2) and lt(v4, 9)\r\n\tinc(v4)\r\nendif\r\n\r\n"
+		 "If true(greenkills) then\r\n\t\tWin (1)\r\nElse if true(bluekills) then\r\n\t\tWin (0)\r\nendif\r\n",
+		 {{"Open Paren", 6}, {"END inside IF", 6}, {"Unexpected IF", 8}, {"Missing END", 4}}},
+	};
+	const auto none = [](const std::string &, std::string &) { return false; };
+	for (const Script &script : scripts) {
+		Reports reports;
+		TEST_EXPECT(script_reports(script.name, script.text, none, &reports) == 0);
+		if (reports != script.reports)
+			for (const auto &[message, line] : reports) std::fprintf(stderr, "  %s: \"%s\" at %d\n", script.name, message.c_str(), line);
+		TEST_EXPECT(reports == script.reports);
+	}
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/wac", "assets"}, {".wac"});
+	int failures = editor_test::report_missing(variants);
+	for (const std::string &path : variants.files) {
+		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
+		const std::string dir = path.substr(0, path.rfind('/') + 1);
+		const auto load = [&dir](const std::string &file, std::string &text) {
+			const std::vector<uint8_t> run = editor_test::repo_bytes(dir + file);
+			text.assign(run.begin(), run.end());
+			return !run.empty();
+		};
+		if (script_reports(path, std::string(bytes.begin(), bytes.end()), load) != 0) {
+			std::fprintf(stderr, "FAIL %s\n", path.c_str());
+			++failures;
+		}
+	}
+	TEST_EXPECT(variants.files.size() >= 4);
+	std::printf("shipped scripts: the shipped reports' kinds at the compiler's lines; %zu scripts of the base game and "
+	            "the format\n",
+	            variants.files.size());
+	return failures;
+}
+
+// Every music script of the format's fixtures and of the base game (assets/gamemus.bin, menumus.bin) through its MUS
+// text and back byte for byte (MDEdit's layout written again, as JO:CA's two are), unblocked, with no finding.
+static int test_music_scripts() {
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/mus", "assets"}, {".bin"});
+	int failures = editor_test::report_missing(variants);
+	const DocumentType *type = document_type_for(AssetKind::MusicScript);
+	size_t scripts = 0;
+	for (const std::string &path : variants.files) {
+		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
+		if (classify_asset(path, &bytes) != AssetKind::MusicScript) continue; // a string table
+		std::unique_ptr<DocumentBase> document = type->make();
+		Diagnostic error;
+		TEST_EXPECT(document->load_bytes(bytes, path, AssetKind::MusicScript, "jo", error));
+		if (document->blocked() || document->serialize().text != std::string(bytes.begin(), bytes.end()) ||
+		    !type->validate_file(*document).empty()) {
+			std::fprintf(stderr, "FAIL %s is not its MUS text's bytes\n", path.c_str());
+			++failures;
+		}
+		++scripts;
+	}
+	TEST_EXPECT(scripts >= 4);
+	std::printf("music scripts: %zu through their MUS text byte for byte\n", scripts);
+	return failures;
+}
+
+// A credits file laid out as JO:CA's nlist.kda is (its [ENV] values: a real and two whole numbers; then its [TEXT]
+// lines: both justifies, the colours, names each with its font, a space written '_', an '@' and a lone '*', the line
+// ends, the images that fade in (~F) and the one that spaces (~I)), minted through the CBIN form's writer: through
+// the document byte for byte, unblocked, with no finding, naming each text line's font and each image's texture in
+// the file's order. With it, every credits file of the format's fixtures and of the base game that opens writable,
+// as stored.
+static int test_shipped_credits() {
+	using Config = opennova::cbin::BinaryConfig;
+	Config config;
+	config.strings = {"env",          "text",        "scroll_rate", "vertical_space", "center_x",    "~JR",
+	                  "~CFF0000",     "Our_Game:",   "onmnub23",    "<CR>",           "~CFFFFFF",    "~F0|0|cr1.png",
+	                  "Lead@_Code",   "onmnu19",     "*",           "~JC",            "~Ilogo.tga",  "~F0|0|cr2.png"};
+	config.xor_key = 0x0DDBA11u;
+	const auto value = [](uint32_t raw, uint32_t flags) { return Config::Value{raw, flags}; };
+	float half = 0.5f;
+	uint32_t half_bits = 0;
+	std::memcpy(&half_bits, &half, sizeof half_bits);
+	const auto line = [&](std::initializer_list<uint32_t> strings) {
+		Config::Entry entry;
+		entry.name = 2;
+		for (const uint32_t s : strings) entry.values.push_back(value(s, Config::kString));
+		return entry;
+	};
+	Config::Label env{1, {{3, {value(half_bits, Config::kFloat)}}, {4, {value(14, Config::kInteger)}},
+	                      {5, {value(400, Config::kInteger)}}}};
+	Config::Label text{2, {line({6}), line({7}), line({8, 9}), line({10}), line({11}), line({12}), line({10}), line({13, 14}),
+	                       line({15, 14}), line({16}), line({17}), line({18}), line({10})}};
+	config.labels = {env, text};
+	std::vector<uint8_t> stored;
+	std::string why;
+	TEST_EXPECT(opennova::cbin::encode_binary_config(config, stored, why));
+	const DocumentType *type = document_type_for(AssetKind::Credits);
+	std::unique_ptr<DocumentBase> made = type->make();
+	Diagnostic error;
+	TEST_EXPECT(made->load_bytes(stored, "nlist.kda", AssetKind::Credits, "jo", error) && !made->blocked());
+	TEST_EXPECT(made->serialize().text == std::string(stored.begin(), stored.end()) && type->validate_file(*made).empty());
+	std::vector<TextReference> names;
+	type->references(*text_of(*made), names);
+	using Named = std::vector<std::pair<ReferenceKind, std::string>>;
+	Named read;
+	for (const TextReference &name : names) read.emplace_back(name.kind, name.value);
+	TEST_EXPECT(read == Named({{ReferenceKind::Font, "onmnub23"},
+	                           {ReferenceKind::MenuTexture, "cr1.png"},
+	                           {ReferenceKind::Font, "onmnu19"},
+	                           {ReferenceKind::Font, "onmnu19"},
+	                           {ReferenceKind::MenuTexture, "logo.tga"},
+	                           {ReferenceKind::MenuTexture, "cr2.png"}}));
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/cbin", "assets"}, {".kda"});
+	int failures = editor_test::report_missing(variants);
+	size_t writable = 0;
+	for (const std::string &path : variants.files) {
+		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
+		std::unique_ptr<DocumentBase> credits = type->make();
+		TEST_EXPECT(credits->load_bytes(bytes, path, AssetKind::Credits, "jo", error));
+		if (credits->blocked()) continue; // a CBIN value its text form would read as two (synth_nlist.kda)
+		if (credits->serialize().text != std::string(bytes.begin(), bytes.end()) ||
+		    credits->rewrite_need() != DocumentBase::RewriteNeed::None) {
+			std::fprintf(stderr, "FAIL %s is not written back as stored\n", path.c_str());
+			++failures;
+		}
+		++writable;
+	}
+	TEST_EXPECT(writable >= 1);
+	std::printf("shipped credits: JO:CA's layout byte for byte, its fonts and images named; %zu credits files as stored\n",
+	            writable);
+	return failures;
+}
+
+// The shaders. A set minted in the shader loader's SCR form: _ffp.fx (its EffectAlt_UV asking for the fixed-function
+// tags' #UV twins, its EffectTag one the renderer does not read), two includes, and an effect for each tag of
+// the renderer's effect registry that is no fixed-function one nor a #UV twin (runtime/renderer
+// material_descriptor.h, kMaterialDescriptorTable: FFP_GLASS and the VS_ effects), its EffectTag the tag and its
+// EffectAlt_UV where the registry holds the tag's #UV twin. Each through the document as stored, unblocked, with no
+// finding; the tags they register are the registry's 46 exactly (render-material-re.md's shader-tag registry: the 24
+// fixed-function built-ins, the shipped effects' tags and their #UV twins; JO:CA's 44 shaders registered exactly
+// these through the editor), the includes none. And every shader of the base game (assets/: its _ffp.fx and its
+// effects) as stored, each tag it registers one of the registry's (a #UV twin only where the shipped effect of the
+// tag asks for one: not VS_DOT3DIFF2's, which JO:CA's BDiffT2.fx does not), the file the editor's blank of its tag
+// writes.
+static int test_shader_registry() {
+	using opennova::renderer::kMaterialDescriptorTable;
+	using opennova::renderer::kMaterialDescriptorTableCount;
+	TEST_EXPECT(kMaterialDescriptorTableCount == 46);
+	std::set<std::string> registry;
+	for (const auto &row : kMaterialDescriptorTable) registry.insert(row.name);
+	TEST_EXPECT(registry.size() == kMaterialDescriptorTableCount);
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> shaders{
+			{"_ffp.fx", scr_shader("// the fixed-function effect\r\nstring EffectInfo <\r\n\tstring EffectTag = \"FFP_NAMED\";\r\n"
+			                       "\tbool EffectAlt_UV = true;\r\n>;\r\ntechnique T0 { pass P0 { } }\r\n")},
+			{"_vsinc.fx", scr_shader("// an include\r\nfloat4x4 WorldViewProj;\r\n")},
+			{"_psinc.fx", scr_shader("string EffectInfo < string EffectTag = \"VS_INCLUDED\"; >;\r\n")}};
+	for (const std::string &tag : registry) {
+		if (tag.rfind("FF_", 0) == 0 || tag.find('#') != std::string::npos) continue;
+		std::string file = tag;
+		for (char &c : file) c = char(std::tolower(static_cast<unsigned char>(c)));
+		const bool twin = registry.count(tag + "#UV") != 0;
+		shaders.emplace_back(file + ".fx", scr_shader("string EffectInfo <\r\n\tstring EffectName = \"" + file +
+		                                               "\";\r\n\tstring EffectTag = \"" + tag + "\";\r\n\tbool EffectAlt_UV = " +
+		                                               (twin ? "true" : "false") + ";\r\n>;\r\n"));
+	}
+	const DocumentType *type = document_type_for(AssetKind::Shader);
+	const auto as_stored = [&](const std::string &name, const std::vector<uint8_t> &stored) {
+		std::unique_ptr<DocumentBase> document = type->make();
+		Diagnostic error;
+		return document->load_bytes(stored, name, AssetKind::Shader, "jo", error) && !document->blocked() &&
+		       document->serialize().text == std::string(stored.begin(), stored.end()) &&
+		       type->validate_file(*document).empty();
+	};
+	std::multiset<std::string> registered;
+	for (const auto &[name, stored] : shaders) {
+		TEST_EXPECT(as_stored(name, stored));
+		const std::vector<std::string> tags = shader_tags_of(stored, name.c_str());
+		TEST_EXPECT(name[0] != '_' || name == "_ffp.fx" || tags.empty());
+		registered.insert(tags.begin(), tags.end());
+	}
+	if (registered.size() != 46 || std::set<std::string>(registered.begin(), registered.end()) != registry)
+		for (const std::string &tag : registered) std::fprintf(stderr, "  registered %s\n", tag.c_str());
+	TEST_EXPECT(registered.size() == 46 && std::set<std::string>(registered.begin(), registered.end()) == registry);
+	const editor_test::VariantFiles variants = editor_test::variant_files({"assets"}, {".fx"});
+	int failures = editor_test::report_missing(variants);
+	for (const std::string &path : variants.files) {
+		const std::vector<uint8_t> stored = editor_test::repo_bytes(path);
+		const std::string name = path.substr(path.rfind('/') + 1);
+		// Every tag it registers a row of the renderer's registry (a #UV twin only where the shipped effect asks for
+		// one), and the file the editor's blank of its tag writes (New > Shader; Create Missing for _ffp.fx).
+		bool registered_tags = true;
+		const std::vector<std::string> tags = shader_tags_of(stored, name.c_str());
+		for (const std::string &tag : tags) registered_tags = registered_tags && registry.count(tag) != 0;
+		BlankRequest blank;
+		blank.logical_name = name;
+		if (opennova::strutil::iequals(name, "_ffp.fx")) blank.role = "ffp_shader";
+		else if (!tags.empty()) blank.values = {{"tag", tags.front()}};
+		std::vector<uint8_t> made;
+		Diagnostic made_error;
+		const bool as_made = make_blank(blank, AssetKind::Shader, made, made_error) && made == stored;
+		if (!as_stored(name, stored) || !registered_tags || !as_made) {
+			std::fprintf(stderr, "FAIL %s: not as stored, a tag the registry lacks, or not the blank of its tag\n",
+			             path.c_str());
+			++failures;
+		}
+	}
+	TEST_EXPECT(variants.files.size() >= 2);
+	std::printf("shaders: %zu minted register the registry's %zu tags; %zu of the base game's as stored\n",
+	            shaders.size(), registry.size(), variants.files.size());
+	return failures;
+}
+
+int main() {
 	int failures = 0;
 	failures += test_lines_and_places();
 	failures += test_span_edits();
@@ -1564,7 +1687,10 @@ int main(int argc, char **argv) {
 	failures += test_shader_definitions();
 	failures += test_gate_tag_config();
 	failures += test_import_shader();
-	failures += test_retail();
+	failures += test_shipped_scripts();
+	failures += test_music_scripts();
+	failures += test_shipped_credits();
+	failures += test_shader_registry();
 	if (failures == 0) std::printf("editor_text_document: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

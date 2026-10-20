@@ -6,8 +6,8 @@
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/world.h>
 #include <runtime/world/powerup.h>
-#include "common/retail_mission_files.h"
-#include "common/retail_paths.h"
+#include "common/mission_rig.h"
+#include "common/mission_set.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -32,29 +32,23 @@ world::Entity base_entity() {
 	return entity;
 }
 
-// The persistent overlay set on 00TRg (SKIP-LEG without the retail data): the
-// retail oracle's first persistent 0x40 walk covers pool-2 slots 2..25 — every
+// The persistent overlay set on 00TRg's pool-2 records (the mission set's
+// minimap.bms, the same records in the same order): the retail oracle's first
+// persistent 0x40 walk on 00TRg covers pool-2 slots 2..25, every
 // classifier-visible pool-2 entity in the promoted mission, no more, no fewer.
 // 00TRg is the important negative control: no Advance & Secure zone chain.
 void test_00trg_persistent_overlay_set() {
-	const std::string install = retail::install();
-	const std::string assets = retail::assets();
-	if (install.empty() && assets.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (revx02) or OPENNOVA_JO_ASSETS carrying 00TRg.bms");
-		return;
-	}
-	opennova::testrig::RetailMissionRig rig;
+	test_mission_set::Root root("minimap_overlay");
+	opennova::testrig::MissionRig rig;
 	std::string error;
-	bool opened = !install.empty() && rig.open(install, "00TRg.bms", error, "revx02") &&
-			rig.index.mounted_expansion() == "revx02";
-	if (!opened && !assets.empty()) opened = rig.open(assets, "00TRg.bms", error);
-	if (!opened) {
-		retail::skip_leg("a mount carrying 00TRg.bms");
+	if (!root.ok() || !rig.open(root.path(), "minimap.bms", error)) {
+		std::fprintf(stderr, "FAIL: minimap.bms opens: %s\n", error.c_str());
+		++failures;
 		return;
 	}
 	opennova::testrig::BootOptions options;
 	if (!rig.boot(options, error)) {
-		std::fprintf(stderr, "FAIL: 00TRg boots for the overlay leg: %s\n", error.c_str());
+		std::fprintf(stderr, "FAIL: minimap.bms boots for the overlay leg: %s\n", error.c_str());
 		++failures;
 		return;
 	}
@@ -79,8 +73,7 @@ void test_00trg_persistent_overlay_set() {
 
 } // namespace
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
 	CHECK(world::minimap_team_color(1) == 0x0A &&
 			world::minimap_team_color(2) == 0x09 &&
 			world::minimap_team_color(0) == 0x0C,
@@ -98,6 +91,20 @@ int main(int argc, char **argv) {
 	row = world::classify_minimap_overlay(entity, nullptr);
 	CHECK(row.visible && row.icon == 13,
 			"armory classification outranks the vehicle branch");
+
+	// The vehicle branch's other unit types: a helicopter (3, 4) draws cell 11, unit type 12 cell
+	// 25; and a live unit type 11 draws cell 9 ahead of every later branch.
+	entity = base_entity();
+	entity.item_type = 1;
+	entity.item_unit_type = 3;
+	row = world::classify_minimap_overlay(entity, nullptr);
+	CHECK(row.visible && row.icon == 11, "a unit type 3 vehicle draws cell 11");
+	entity.item_unit_type = 12;
+	row = world::classify_minimap_overlay(entity, nullptr);
+	CHECK(row.visible && row.icon == 25, "a unit type 12 vehicle draws cell 25");
+	entity.item_unit_type = 11;
+	row = world::classify_minimap_overlay(entity, nullptr);
+	CHECK(row.visible && row.icon == 9, "a live unit type 11 draws cell 9");
 
 	entity = base_entity();
 	entity.item_type = 5;

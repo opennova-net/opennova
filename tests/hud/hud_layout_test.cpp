@@ -3,8 +3,8 @@
 // suite (ADR 0040 ladder E3b): the corner rects against the one x,y,w,h rect,
 // the 4-field positioned records, the packed colours, the spinmap extent gate,
 // the stance slots by id (later wins), the last-authored static frame and the
-// font fallback — on a synthetic file, then on the reference fixture's hudpos.def
-// (an earlier build's layout, not JO:CA's: hud-re.md "Render pipeline"); and the
+// font fallback — on a synthetic file, then on the authored fixtures/def/hudpos.def
+// (the values of an earlier build's layout, not JO:CA's: hud-re.md "Render pipeline"); and the
 // HUD an empty, a key-less and a partial file make (D-HUD-54).
 // [orig: HUD_ParseHudposToken @0x59f370; HUD_DrawHealthBar @0x5a2e50;
 //  HUD_DrawPowerThrowChargeBar @0x599830]
@@ -19,7 +19,7 @@
 #include <cstring>
 #include <string>
 
-#include "common/retail_paths.h"
+#include "common/test_paths.h"
 #include "common/test_font.h"
 
 using namespace opennova::def;
@@ -423,12 +423,11 @@ static void unauthored_hud() {
 	opennova::fnt::fnt_free(&font);
 }
 
-static void retail_leg() {
-	const std::string fixture = retail::reference_fixture("def/hudpos.def");
-	if (fixture.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (an earlier build's HUD layout, not JO:CA's)");
-		return;
-	}
+// fixtures/def/hudpos.def: an authored layout carrying the values the earlier build's hudpos.def the
+// HudPos GUT suite read held (its HUDHEALTH rect, colours, spinmap extent, stances, ALPHAFADE, GAMEINFO
+// and HUDDECLUT rows), in the spellings JO's files use.
+static void authored_layout() {
+	const std::string fixture = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/def/hudpos.def";
 	DefHudPosFile file;
 	std::memset(&file, 0, sizeof(file));
 	if (def_parse_hudpos(fixture.c_str(), &file) != 0) {
@@ -490,13 +489,12 @@ static void retail_leg() {
 	def_free_hudpos(&file);
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
 	synthetic();
 	alphafade_converts();
 	network_indicator();
 	unauthored_hud();
-	retail_leg();
+	authored_layout();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

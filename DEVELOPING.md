@@ -51,15 +51,15 @@ scripts/build.sh
 - `scripts/build.sh --no-godot` skips the GDExtension for fast library-only iteration.
 - `scripts/build.sh --no-test` builds without running `ctest`; `-R <regex>` runs only the
   matching tests.
-- `scripts/build.sh --suite core --shard editor|rest` runs one of CI's two core shards (the
-  rows labelled `editor`, or the others) with its own attestation.
+- `scripts/build.sh --shard editor|rest` runs one of CI's two ctest shards (the rows
+  labelled `editor`, or the others) with its own attestation.
 - `--jobs N` sets the build parallelism (`scripts/build.sh` and `scripts/build_godot.sh`).
 - Both scripts configure their build tree once and skip that step on later runs; the build
   re-runs CMake by itself when a `CMakeLists.txt` changes.
 - `scripts/test_godot.sh --keep-user-dir` leaves the suite's isolated `user://` in place.
-- `scripts/test_godot.sh --suite core|retail --shard shells|world` runs one of a suite's
-  two Windows GUT shards in CI (the scripts under `tests/authoring`, `game`, `mcp` and
-  `probes`, or `tests/retail/` the same, or the others) with its own attestation.
+- `scripts/test_godot.sh --shard shells|world` runs one of CI's two Windows GUT shards
+  (the scripts under `tests/authoring`, `game`, `mcp` and `probes`, or the others) with its
+  own attestation.
 - On Windows, keeping the build trees out of real-time antivirus scanning (a Defender
   exclusion, or a Dev Drive) speeds up compiling, linking and the first launch of each
   freshly linked test.
@@ -80,7 +80,7 @@ second fetches Asio + Crow and adds the HTTP layer, which web, the fleet, the wo
 data program need (without it only the gate and the lobby build).
 Both are OFF by default, so the game and tool builds stay lean. The service's database
 tests make their databases on a PostgreSQL server named by
-`-DOPENNOVA_TEST_PG=<uri>`, and without one they skip (which `--suite core` fails):
+`-DOPENNOVA_TEST_PG=<uri>`, and without one they skip (which the suite fails):
 `scripts/dev_postgres.sh up` starts a local one in Docker and prints the value. The HTTP
 layer's tests need a Redis server as well, `-DOPENNOVA_TEST_REDIS=<url>`, and skip the same
 way without one: `scripts/dev_redis.sh up` starts one and prints the value. Then scope
@@ -218,7 +218,7 @@ runtime"); the fleet's admin links reach the slots' admin ports at the machine's
 address, and the servers list through the gate at the announced address.
 
 ```bash
-scripts/dev_stack.sh up --data "<Joint Operations install>"   # a licensed install (the default: OPENNOVA_JO_DIR)
+scripts/dev_stack.sh up --data "<Joint Operations install>"   # a licensed install
 scripts/dev_stack.sh up --synthetic-data                      # no licensed data: one synthetic deathmatch map
 scripts/dev_stack.sh up --no-hosting                          # neither
 ```

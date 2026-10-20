@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
 """Environment-variable lint: the runtime, tools and tests read a closed set.
 
-docs/dev-env-vars.md is the registry. After the 2026-08 cut the whole set is:
+docs/dev-env-vars.md is the registry. The whole set is:
 
-  the two machine roots   OPENNOVA_JO_DIR, OPENNOVA_JO_ASSETS - read ONLY
-                          by the three resolvers (tests/common/retail_paths.h,
-                          godot/tests/support/retail_data.gd, scripts/net/lib.ps1),
-                          the Blender tests' tests/blender/addon_harness.py
-                          (OPENNOVA_JO_ASSETS), the scripts/mcp/game_mcp.py
-                          launch default and the scripts/dev_stack.sh hosted
-                          data set default (OPENNOVA_JO_DIR);
-                          scripts/ci/test_suites.py validates root availability
   GODOT_BIN               the scripts' Godot binary
   the deployed service    ONNET_*, DATABASE_URL, ADMIN_*, ... under
                           apps/novaworld_*, deploy, web, backend, infra
@@ -21,11 +13,10 @@ deleted. This lint scans tracked code for environment reads in every
 language the tree carries and buckets each hit against
 scripts/lint/env_allowlist.json:
 
-  gates        {NAME: [file globs]}  the roots and where they may be read
   files        {glob: [NAME|*]}      per-file allowances (GODOT_BIN in scripts,
                                      the OS variables, the service family '*')
   indirect_ok  [file globs]          files whose helper reads a name passed in
-                                     (the resolvers); everywhere else a
+                                     (the service's config); everywhere else a
                                      non-literal read is a hit
 
 Modes: (default) summary; --report lists every uncovered hit; --enforce exits
@@ -109,15 +100,12 @@ def tracked_code_files() -> list[str]:
 
 class Allowlist:
     def __init__(self, config: dict):
-        self.gates: dict[str, list[str]] = config.get("gates", {})
         self.files: dict[str, list[str]] = config.get("files", {})
         self.indirect_ok: list[str] = config.get("indirect_ok", [])
 
     def bucket(self, rel: str, name: str | None) -> str | None:
         if name is None:
             return "indirect" if any(fnmatch.fnmatch(rel, g) for g in self.indirect_ok) else None
-        if name in self.gates:
-            return f"gate:{name}" if any(fnmatch.fnmatch(rel, g) for g in self.gates[name]) else None
         for glob, names in self.files.items():
             if fnmatch.fnmatch(rel, glob) and ("*" in names or name in names):
                 return "service" if "*" in names else f"file:{name}"
@@ -182,8 +170,8 @@ def main() -> int:
         if names:
             print("[env-lint] uncovered names: " + ", ".join(f"{n} x{c}" for n, c in names.most_common()))
     if buckets["UNCOVERED"] and args.enforce:
-        print("[env-lint] FAIL: only the two machine roots (through their resolvers), GODOT_BIN "
-              "(scripts), the deployed service's config and the listed OS variables may be read "
+        print("[env-lint] FAIL: only GODOT_BIN (scripts), the deployed service's config and the "
+              "listed OS variables may be read "
               "from the environment; everything else is a launch flag, an argv option or an MCP "
               "argument (docs/dev-env-vars.md).")
         return 1

@@ -625,3 +625,26 @@ func test_set_header_flag_toggles_one_bit_and_preserves_others() -> void:
 	assert_eq(after & MissionData.ATTRIB_COOP, MissionData.ATTRIB_COOP, "COOP bit is set")
 	var other_mask := ~MissionData.ATTRIB_COOP
 	assert_eq(after & other_mask, before & other_mask, "other attrib bits are preserved")
+
+
+# A waypoint path's flags: the one-shot DOES_NOT_LOOP a course's routes take, set by
+# path number, kept through the byte-faithful save; a path outside the table is refused.
+func test_waypoint_path_flags_round_trip() -> void:
+	var m := MissionData.new()
+	assert_eq(m.get_waypoint_path_flags(4), -1, "no document, no path")
+	assert_eq(m.create_default(), OK)
+	assert_eq(m.get_waypoint_path_flags(4), 0, "a new path loops")
+	assert_true(m.set_waypoint_path_flags(4, MissionData.WAYPOINT_DOES_NOT_LOOP))
+	assert_true(m.is_modified(), "a flags edit dirties the mission")
+	assert_eq(m.get_waypoint_path_flags(4), MissionData.WAYPOINT_DOES_NOT_LOOP)
+	assert_false(m.set_waypoint_path_flags(128, MissionData.WAYPOINT_DOES_NOT_LOOP), "past the 128 paths")
+	assert_false(m.set_waypoint_path_flags(-1, MissionData.WAYPOINT_DOES_NOT_LOOP), "a negative path")
+	assert_eq(m.get_waypoint_path_flags(-1), -1)
+	var tmp := _temp_bms_path()
+	assert_eq(m.save_as(tmp), OK)
+	var reopened := MissionData.new()
+	assert_eq(reopened.open_file(tmp), OK)
+	assert_eq(reopened.get_waypoint_path_flags(4), MissionData.WAYPOINT_DOES_NOT_LOOP,
+		"the one-shot flag survives the save and reload")
+	assert_eq(reopened.get_waypoint_path_flags(5), 0, "the other paths keep theirs")
+	DirAccess.remove_absolute(tmp)

@@ -3,7 +3,7 @@ extends GutTest
 ## S24 B8 (ADR 0046 S24, In the views): the mission's logic in its 3D view, in a window, the editor's ImGui pass
 ## attached and the Document window's canvas drawing the device each frame, over a project minted from the fixtures
 ## (the mission, its terrain and textures, its env, the item table, the models). A tests/windowed/ script, run by
-## `scripts/test_godot.sh --suite core --windowed`.
+## `scripts/test_godot.sh --windowed`.
 ## - Pick in view: a chip's pick for event 1's trigger's entity (the workspace's document pick), then a click on a
 ##   shown item's mark: the trigger's entity is that item's SSN, and the pick ends. The click is the wire's
 ##   (`edit_in_viewport`'s click command), which drives the canvas a person clicks, its frame followed, a press and

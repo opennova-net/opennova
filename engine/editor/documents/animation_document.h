@@ -20,7 +20,7 @@ namespace opennova::editor {
 // (`assets::parse_bone_animation`) and are written as read. One row, the clip, holds its
 // bones and its events (both fixed: their count is the motion's). serialize() writes
 // from scratch through the engine's writer (bad_write.h); an untouched clip reads back
-// field-equal (ctest anim_retail_rewrite).
+// field-equal (ctest anim_rewrite).
 
 enum class AnimationKind : NodeKind { Clip = 0, Bone = 1, Event = 2 };
 constexpr NodeKind node_kind(AnimationKind kind) { return static_cast<NodeKind>(kind); }

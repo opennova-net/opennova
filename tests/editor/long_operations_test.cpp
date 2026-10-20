@@ -11,9 +11,11 @@
 // rename stepped coming to the view they come to run to their end; a validation started again
 // mid-way composing what the one it replaced had moved; a rename keeping the selection the modder
 // made while it ran (a file rewritten at its size moving its stamp, and a rename tried again
-// while another holds the file, are tests/io/file_io_test's now). Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a
-// step at a time at the editor's budget (its polls, its steps, its longest poll, bounded, and its
-// wall time), and the install as the base layer under an expansion project's graph.
+// while another holds the file, are tests/io/file_io_test's now). And at the scale of the JO install
+// (a game install minted from OpenNova's own game and grown to JO:CA's archives' files and bytes,
+// minted_install.h): a project of its files opened a step at a time at the editor's budget (its
+// polls, its steps, its longest poll, bounded, and its wall time), and the install as the base layer
+// under an expansion project's graph.
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -56,12 +58,12 @@
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_parts.h"
 #include "common/thread_cpu_clock.h"
 #include "editor/editor_test_support.h"
 #include "editor/fixture_projects.h"
+#include "editor/minted_install.h"
 #include "common/png_test_support.h"
 #include "editor/test_platform.h"
 
@@ -936,26 +938,38 @@ static int test_rename_keeps_the_selection() {
 	return 0;
 }
 
-// Retail leg (OPENNOVA_JO_DIR): the JO install's files a document type opens, and the textures and
-// fonts they name, exported into a project whose game install is the JO one (its local.json, as a
-// modder's project names it), opened a poll at a time at the editor's own budget
-// (kDefaultPollBudget: 10 ms of 64 KiB steps), each loop bounded: the polls the Open takes and its
-// wall time, its first poll (the install's names listed, one step), then the validation's, and the
-// longest poll of each (the frame the editor would stall for), bounded by the budget and the
+// The scale of the JO install: JO:CA's three boot archives (language.pff, localres.pff, resource.pff)
+// hold 9,290 names and 687,452,983 bytes of files (read once from the install, 2026-10-19; the leg this
+// replaces, over the install itself, listed its 9,300 names with its loose banks and videos and
+// exported 9,289 files, 941.1 MB, its 1,264 files the graph reads making 218,906 edges).
+constexpr size_t kInstallFiles = 9290;
+constexpr uint64_t kInstallBytes = 687452983;
+
+// A game install at the JO install's scale (OpenNova's own game minted, minted_install.h, and grown to
+// kInstallFiles files of kInstallBytes bytes by copies of its files, scale_to): its files a document
+// type opens, and the textures and fonts they name, exported into a project whose game install is
+// that one (its local.json, as a modder's project names it), opened a poll at a time at the editor's
+// own budget (kDefaultPollBudget: 10 ms of 64 KiB steps), each loop bounded: the polls the Open takes
+// and its wall time, its first poll (the install's names listed, one step), then the validation's,
+// and the longest poll of each (the frame the editor would stall for), bounded by the budget and the
 // longest single step (one file's or one menu's work, timed afresh); and the install as the base
 // layer under an expansion project's graph (GraphLayer::build), timed.
-static int test_retail_open() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (a project of the JO install's files opened a step at a time)");
-		return 0;
-	}
-	test_temp::TempDir dir("opennova_long_ops_retail");
-	const std::string root = make_project(dir.file("project"), "Retail", {});
+static int test_install_open() {
+	test_temp::TempDir dir("opennova_long_ops_install");
+	const std::string install = dir.file("install");
+	std::vector<minted_install::File> game;
+	std::string error;
+	const bool minted = minted_install::base_game(game, error) && minted_install::scale_to(game, kInstallFiles, kInstallBytes, error) &&
+	                    minted_install::write_install(install, game, std::string(), {}, error);
+	if (!minted) std::fprintf(stderr, "the minted install: %s\n", error.c_str());
+	TEST_EXPECT(minted);
+	// The bytes to within a hundredth (the copies' sizes come in a texture's whole rows).
+	TEST_EXPECT(game.size() == kInstallFiles && minted_install::total_bytes(game) >= kInstallBytes / 100 * 99 &&
+	            minted_install::total_bytes(game) <= kInstallBytes / 100 * 101);
+	const std::string root = make_project(dir.file("project"), "Install", {});
 	TEST_EXPECT(!root.empty());
 	const ProjectDocument document = document_of(root);
 	ImportOrigin origin;
-	std::string error;
 	TEST_EXPECT(origin.open(ImportOrigin::Kind::GameInstall, install, document, error));
 	InstallView view;
 	TEST_EXPECT(view.open(install_spec(install, document), error));
@@ -981,7 +995,6 @@ static int test_retail_open() {
 		++exported;
 		bytes_exported += file.size();
 	}
-	TEST_EXPECT(exported > 1000);
 	LocalSettings local;
 	local.game_install = install;
 	Diagnostic unsaved;
@@ -1031,8 +1044,11 @@ static int test_retail_open() {
 	const double validation_ms = ms_since(validating);
 	TEST_EXPECT(!v.activity.validation.running && open_polls > 1 && validation_polls > 1);
 	TEST_EXPECT(v.project.open && v.activity.last_operation.end == OperationEnd::Done && !v.findings.diagnostics.empty());
-	TEST_EXPECT(v.project.retail_files.size() > 1000);
-	std::printf("retail: %zu files exported (%.1f MB); opened in %zu polls, %.0f ms (the request %.1f ms, the first "
+	// Every name minted is the install's and offered to the project, and the project is at its scale: all
+	// but the few files of a kind no document type opens, nor a texture or a font.
+	TEST_EXPECT(view.files().size() == kInstallFiles && v.project.retail_files.size() == kInstallFiles &&
+	            exported * 100 >= kInstallFiles * 99);
+	std::printf("install: %zu files exported (%.1f MB); opened in %zu polls, %.0f ms (the request %.1f ms, the first "
 	            "poll %.1f ms of CPU listing the install's %zu names, the longest poll %.1f ms of CPU); validated in %zu "
 	            "polls, %.0f ms (the longest poll %.1f ms of CPU, from %llu of %llu files); %zu files scanned, %zu "
 	            "Problems rows, %zu edges\n",
@@ -1100,7 +1116,7 @@ static int test_retail_open() {
 			slowest(step, slowest_render, no_name, std::string());
 		}
 		const double render_ms = ms_since(part);
-		std::printf("retail: the validation's parts afresh: the graph's files read %.0f ms (%zu files, the longest %.1f "
+		std::printf("install: the validation's parts afresh: the graph's files read %.0f ms (%zu files, the longest %.1f "
 		            "ms of CPU, %s), its update over them %.0f ms (%.1f ms of CPU), the files' own findings %.0f ms (%zu "
 		            "files, the longest %.1f ms of CPU, %s), the render check %.0f ms (%zu menus rendered, the longest "
 		            "step %.1f ms of CPU)\n",
@@ -1112,8 +1128,8 @@ static int test_retail_open() {
 	// No poll stalls the editor much past its budget (S13 A3 review): a poll steps until its 10 ms
 	// have passed, so it ends at most a step past them, and a step is at most one file's or one
 	// menu's work, which no step splits, or the Open's first (the install's names): the longest of
-	// those, measured above (on the JO install a menu the graph reads and ITEMS.DEF's own findings,
-	// some 50 to 60 ms on an idle machine). Twice that and 50 ms, far short of a walk, the graph's
+	// those, measured above (here the graph's update over its readings, some 0.8 s of CPU on an idle
+	// machine; on the JO install itself 2.1 s). Twice that and 50 ms, far short of a walk, the graph's
 	// reading or the files' findings run in one poll (the render check a menu a step is
 	// editor_menu_render's to pin, its whole run near the bound). The polls and the steps are the
 	// thread's CPU, so a loaded machine (ctest -j8) stretches neither; a tick each way for Windows'
@@ -1127,21 +1143,20 @@ static int test_retail_open() {
 	const auto layered = clock::now();
 	GraphStats built;
 	const std::shared_ptr<const GraphLayer> layer = GraphLayer::build(layer_files, document.target_game, &built);
-	std::printf("retail: a base layer over the install (%zu files, %zu read) in %.0f ms\n", layer->file_count(),
+	std::printf("install: a base layer over the install (%zu files, %zu read) in %.0f ms\n", layer->file_count(),
 	            built.files_extracted, ms_since(layered));
 	return 0;
 }
 
-// The retail twin's parts (tests/common/test_parts.h): `main` every case but the JO install's project
-// opened a step at a time (about 75 s), `install_open` that leg, side by side.
+// The program's parts (tests/common/test_parts.h): `main` every case but the project at the JO install's
+// scale opened a step at a time, `install_open` that case, a row each, side by side.
 int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
 	const int failures = test_parts::run(
 	        argc, argv,
 	        {{"main", {test_project_scan_steps, test_import_pass_steps, test_scan_update, test_validation_steps,
 	                   test_validation_keeps_its_readings, test_rename_transaction_steps, test_open_stepped,
 	                   test_open_cancelled, test_save_scans_one_file, test_stale_import_refused,
 	                   test_stepped_equals_whole, test_validation_started_again, test_rename_keeps_the_selection}},
-	         {"install_open", {test_retail_open}, true}});
+	         {"install_open", {test_install_open}}});
 	return failures == 0 ? 0 : 1;
 }

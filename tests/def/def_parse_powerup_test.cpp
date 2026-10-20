@@ -1,17 +1,14 @@
 // powerup.def: the pickup rows the Powerup items bind. The inline block is the
-// shipped JO:CA table verbatim (four rows) plus the parser's edge arms; the
-// reference-fixture copy, when OPENNOVA_JO_ASSETS carries one, is the SKIP-LEG
-// retail leg. [orig: PowerUpDef_LoadFromFile @0x443350; PowerUpDef_ParseProperty
+// shipped JO:CA table verbatim (four rows; the packed install's resource.pff
+// copy read the same rows, the retired retail leg) plus the parser's edge arms.
+// [orig: PowerUpDef_LoadFromFile @0x443350; PowerUpDef_ParseProperty
 // @0x442EE0; PowerUpDef_RegisterNewEntry @0x442C00]
 #include <formats/def/def.h>
-#include <base/vfs/vfs.h>
 
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
-
-#include "common/retail_paths.h"
 
 using namespace opennova::def;
 
@@ -129,8 +126,7 @@ static void check_shipped_rows(const DefPowerupFile &f) {
     CHECK(ammo_inf.allammo == 1 && ammo_inf.max_respawns == 0);
 }
 
-int main(int argc, char **argv) {
-    retail::configure_mixed(argc, argv);
+int main() {
 
     // The shipped table, inline.
     {
@@ -233,29 +229,6 @@ int main(int argc, char **argv) {
                                        sizeof(kLfOnly) - 1, &f) == 0);
         CHECK(f.count == 0);
         def_free_powerup(&f);
-    }
-
-    // The shipped table out of the packed install (SKIP-LEG retail leg): the
-    // file rides resource.pff, read the way the mission start mounts it
-    // [orig: Game_StartMission @0x5256CD -> PowerUpDef_LoadFromFile @0x443350].
-    const std::string install = retail::install();
-    if (!install.empty()) {
-        opennova::Vfs vfs;
-        std::vector<uint8_t> bytes;
-        if (!vfs.mount_game(install, std::string(), opennova::VfsMountMode::Packed)) {
-            std::printf("FAIL mount_game(%s): %s\n", install.c_str(), vfs.last_error().c_str());
-            ++failures;
-        } else if (!vfs.read_file("powerup.def", bytes) || bytes.empty()) {
-            std::printf("FAIL powerup.def is not on the install mount %s\n", install.c_str());
-            ++failures;
-        } else {
-            DefPowerupFile f;
-            CHECK(def_parse_powerup_memory(bytes.data(), bytes.size(), &f) == 0);
-            check_shipped_rows(f);
-            def_free_powerup(&f);
-        }
-    } else {
-        retail::skip_leg("OPENNOVA_JO_DIR (the packed install's powerup.def)");
     }
 
     if (failures == 0) std::printf("def_parse_powerup: OK\n");

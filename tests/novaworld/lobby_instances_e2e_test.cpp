@@ -28,9 +28,11 @@
 //     own lobby's drain or an admin's through the row (which its heartbeat reads);
 //   - a lobby's sweep deletes its row of no session it holds (a drop whose delete failed);
 //   - a clean stop deletes the instance's row;
-//   - a lobby replaced behind the address: a host listed on the first, its receive window run
-//     out, reconnects to the address it first had, which the new lobby serves, and is listed on
-//     the new instance.
+//   - a lobby replaced behind the address: its clean stop leaves the goodbye it owed a host
+//     listed on it, which the new lobby sends that host's next packet (and no packet carrying
+//     another key or from another address), so the host reconnects to the address it first had
+//     at once and is listed on the new instance within seconds; with no goodbye left (a lobby
+//     gone without its stop), the host's receive window runs out first, then the same.
 
 #include "gate_listener.h"
 #include "nw_udp_listener.h"
@@ -46,6 +48,9 @@
 #include <net/novaworld/gate_response.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_repository.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h>
 
 #include "net_sockets.h"
@@ -67,6 +72,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -568,16 +574,86 @@ int run() {
 	return 0;
 }
 
+// A host's NovaWorld session to the one lobby address, which the test reaches at 127.0.0.1 and
+// the port each lobby in turn binds (as the balancer's flows reach each task in turn), pumped by
+// the test at the session's own clock: `step` moves it 20 ms a turn, about as the wall clock moves,
+// and `drive` holds it.
+struct RelistHost {
+	opennova::ClientSession session;
+	net::ScopedSocket socket;
+	uint16_t port = 0;
+	net::Endpoint address;
+	uint32_t clock = 0;
+	uint32_t heard = 0; // the clock at the latest datagram it took
+
+	RelistHost(uint16_t lobby_port, opennova::ClientSession::Config cfg) : session(std::move(cfg)) {
+		socket = net::ScopedSocket(net::udp_bind(0, &port));
+		address.ip = { 127, 0, 0, 1 };
+		address.port = lobby_port;
+	}
+
+	void send(const std::vector<uint8_t> &datagram) {
+		if (!datagram.empty())
+			net::udp_send_to(socket.get(), address, datagram.data(), datagram.size());
+	}
+
+	// Receive, dispatch, pump and answer, the clock `advance` ms on each turn, until `done` holds
+	// or `ms` of wall time passed.
+	bool turns(const std::function<bool()> &done, int ms, uint32_t advance) {
+		const auto deadline = Clock::now() + std::chrono::milliseconds(ms);
+		while (!done() && Clock::now() < deadline) {
+			clock += advance;
+			session.set_clock_ms(clock);
+			uint8_t rx[4096];
+			net::Endpoint from;
+			const int n = net::udp_recv_from(socket.get(), rx, sizeof rx, from, 20);
+			std::vector<std::vector<uint8_t>> out;
+			if (n > 0) {
+				heard = clock;
+				session.handle_datagram(rx, static_cast<size_t>(n), out);
+			}
+			session.finish_receive_batch(out);
+			session.pump(out);
+			session.process_periodic_update();
+			for (const auto &datagram : out)
+				send(datagram);
+		}
+		return done();
+	}
+	bool drive(const std::function<bool()> &done, int ms) { return turns(done, ms, 0); }
+	bool step(const std::function<bool()> &done, int ms) { return turns(done, ms, 20); }
+};
+
+// A header-only SESSION packet addressing the session whose key is `session_id`, at sequence 1.
+std::vector<uint8_t> session_packet(uint32_t session_id) {
+	std::vector<uint8_t> header(opennova::PROTOCOL_PACKET_HEADER_SIZE, 0);
+	for (int i = 0; i < 4; ++i)
+		header[i] = static_cast<uint8_t>(session_id >> (8 * i));
+	header[4] = 1;
+	return opennova::nw_encode_outbound(
+			opennova::SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(header));
+}
+
 // A lobby replaced behind the one lobby address, as a deployment replaces a lobby task behind its
 // load balancer. A host listed on the first lobby: the first stops (its listing with it, nothing
-// sent), and a new lobby serves the same address (bound at the first one's port, as the
-// balancer's flow reaches the new task). The host's receive window runs out (240 s by its clock;
-// what it sent meanwhile reached a lobby that holds no session for it), and it reconnects to the
-// address the gate gave it at its first connect, its one target: it re-probes, re-joins,
-// re-verifies and re-hosts with CurrentlyHosting=1, and is listed on the new instance, its RID a
-// new one. [orig: CNapiNPConnection_PumpStateMachine @0x6292e0, the reconnect tail
-// @0x629487..0x6296cb; CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0, the target walk
-// @0x629183..0x6291B4; CNapiGameSession_HandleConnectVerifyResponse @0x4d5961..0x4d599e]
+// sent: the balancer ended its flows before ECS signalled the stop), leaving the goodbye it owed
+// the host's session (lobby_goodbyes), and a new lobby serves the same address (bound at the
+// first one's port, as the balancer's next flow from the host reaches the new task).
+//   - A packet from the host's address carrying another key, and one from another address
+//     carrying the session's, draw nothing. The host's next packets (its server-info update, then
+//     its send-interval leg's), which still address the first lobby's session, draw the
+//     ServerGoodBye the first one's stop sends, {1, 9, ..., "NP.C:SH:STOP"}, from the new lobby:
+//     the host tears its session down and reconnects to the address it first had at once,
+//     re-probing, re-joining, re-verifying and re-hosting with CurrentlyHosting=1, and is listed
+//     on the new instance under a new RID within seconds of the stop by its clock, never near its
+//     240 s receive window.
+//   - A lobby gone without its clean stop leaves no goodbye (the second's deleted here), so what
+//     the host sends a third lobby at the address draws nothing until its receive window runs out
+//     (240 s by its clock); its reap arms the same reconnect, and it is listed on the third.
+// [orig: NapiNPProtocol_StopServer @0x62A820 (the record @0x62a8c3..0x62a924);
+//  Nwu_HandleDisconnect @0x623CE0; CNapiNPConnection_PumpStateMachine @0x6292e0, the reconnect
+//  tail @0x629487..0x6296cb; CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0, the target walk
+//  @0x629183..0x6291B4; CNapiGameSession_HandleConnectVerifyResponse @0x4d5961..0x4d599e]
 int test_relisted_behind_one_address() {
 	test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
 	opennova::db::ConnectionPool pool(database.options());
@@ -586,9 +662,6 @@ int test_relisted_behind_one_address() {
 	TEST_EXPECT(first.start());
 	const uint16_t port = first.listener.bound_port();
 
-	net::ScopedSocket socket(net::udp_bind(0));
-	TEST_EXPECT(socket.is_valid());
-	const net::Endpoint address{ { 127, 0, 0, 1 }, port };
 	opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x524c5354u;
 	cfg.client_key = 0x524c5331u;
@@ -596,30 +669,10 @@ int test_relisted_behind_one_address() {
 	cfg.cookie_vars = [] {
 		return std::vector<std::pair<std::string, std::string>>{ { "NWUID", "" } };
 	};
-	cfg.next_client_key = [] { return 0x524c5332u; };
-	opennova::ClientSession host(cfg);
-	const auto send = [&](const std::vector<uint8_t> &datagram) {
-		if (!datagram.empty())
-			net::udp_send_to(socket.get(), address, datagram.data(), datagram.size());
-	};
-	// Receive, dispatch and answer until `done` holds (the session's clock stays put).
-	const auto drive = [&](const std::function<bool()> &done, int ms) {
-		const auto deadline = Clock::now() + std::chrono::milliseconds(ms);
-		while (!done() && Clock::now() < deadline) {
-			uint8_t rx[4096];
-			net::Endpoint from;
-			const int n = net::udp_recv_from(socket.get(), rx, sizeof rx, from, 20);
-			std::vector<std::vector<uint8_t>> out;
-			if (n > 0)
-				host.handle_datagram(rx, static_cast<size_t>(n), out);
-			host.finish_receive_batch(out);
-			host.pump(out);
-			host.process_periodic_update();
-			for (const auto &datagram : out)
-				send(datagram);
-		}
-		return done();
-	};
+	uint32_t next_key = 0x524c5332u;
+	cfg.next_client_key = [&next_key] { return next_key++; };
+	RelistHost host(port, std::move(cfg));
+	TEST_EXPECT(host.socket.is_valid());
 	const auto listing_on = [&db](int64_t lobby_id) -> std::optional<hostdb::HostRow> {
 		for (const auto &h : hostdb::list_hosts(db))
 			if (h.server_name == "Relisted Host" && h.lobby_id == lobby_id)
@@ -627,62 +680,104 @@ int test_relisted_behind_one_address() {
 		return std::nullopt;
 	};
 	using HostState = opennova::ClientSession::HostState;
+	const auto listed_on = [&](int64_t lobby_id) {
+		return [&host, &listing_on, lobby_id] {
+			return host.session.host_state() == HostState::Established &&
+					listing_on(lobby_id).has_value();
+		};
+	};
 
-	send(host.start());
-	TEST_EXPECT(drive([&] { return host.is_verified(); }, 8000));
+	host.send(host.session.start());
+	TEST_EXPECT(host.drive([&] { return host.session.is_verified(); }, 8000));
 	opennova::HostRegistration reg;
 	reg.lobby_name = "jop_2_consumer";
 	reg.server_name = "Relisted Host";
 	reg.app_id = 2468;
-	TEST_EXPECT(host.request_hosting(reg, 0));
-	TEST_EXPECT(drive([&] { return host.host_state() == HostState::Established; }, 8000));
+	TEST_EXPECT(host.session.request_hosting(reg, 0));
+	TEST_EXPECT(
+			host.drive([&] { return host.session.host_state() == HostState::Established; }, 8000));
 	const int64_t first_id = first.listener.lobby_id();
 	TEST_EXPECT(wait_for([&] { return listing_on(first_id).has_value(); }, 3000));
 	const uint32_t first_rid = listing_on(first_id)->rid;
 
-	// The first lobby stops, its listing with it; the new one serves the same address.
+	// The first lobby stops, its listing with it, and leaves the goodbye it owed the host's
+	// session: its address, the SK its packets carry and the host's CK.
 	first.stop();
 	TEST_EXPECT(!hostdb::find_host_by_rid(db, first_rid));
+	const std::vector<lobbydb::Goodbye> left = lobbydb::list_goodbyes(db, 240);
+	TEST_EXPECT(left.size() == 1 && left[0].peer_ip == "127.0.0.1" &&
+			left[0].peer_port == host.port && left[0].client_ck == 0x524c5331u &&
+			left[0].server_sk != 0);
+	const uint32_t first_sk = left.empty() ? 0 : left[0].server_sk;
 	Lobby second(pool);
 	TEST_EXPECT(second.start(kShared, port));
 	const int64_t second_id = second.listener.lobby_id();
 	TEST_EXPECT(second_id != first_id && second.listener.bound_port() == port);
 
-	// The receive window runs out: the host's reap (its 0x46 burst reaches the new lobby, which
-	// holds no session for it) arms its reconnect.
-	host.set_clock_ms(240001);
-	std::vector<std::vector<uint8_t>> burst;
-	host.pump(burst);
-	TEST_EXPECT(host.reconnecting());
-	for (const auto &datagram : burst)
-		send(datagram);
-	// The re-probe: past its first delay, the 0x41 to the address it first had.
-	bool probed = false;
-	for (uint32_t t = 240002; t < 260000 && !probed; t += 10) {
-		host.set_clock_ms(t);
-		std::vector<std::vector<uint8_t>> pumped;
-		host.pump(pumped);
-		for (const auto &datagram : pumped)
-			send(datagram);
-		probed = !pumped.empty();
+	// Another key from the host's address, the session's key from another address: nothing back,
+	// across more than one of the new lobby's reads of the goodbyes.
+	net::ScopedSocket stranger(net::udp_bind(0));
+	TEST_EXPECT(stranger.is_valid());
+	const std::vector<uint8_t> other_key = session_packet(first_sk ^ 0x00010000u);
+	const std::vector<uint8_t> session_key = session_packet(first_sk);
+	for (int i = 0; i < 12; ++i) {
+		host.send(other_key);
+		net::udp_send_to(stranger.get(), host.address, session_key.data(), session_key.size());
+		TEST_EXPECT(!host.drive([&] { return host.session.reconnecting(); }, 100));
 	}
-	TEST_EXPECT(probed);
-	// Re-joined, re-verified and re-hosted: listed on the new instance under a new RID.
-	TEST_EXPECT(drive(
-			[&] {
-				return host.host_state() == HostState::Established &&
-						listing_on(second_id).has_value();
-			},
-			10000));
-	TEST_EXPECT(host.host_reconnect_counter() == 1);
+	uint8_t rx[512];
+	net::Endpoint from;
+	TEST_EXPECT(net::udp_recv_from(stranger.get(), rx, sizeof rx, from, 100) <= 0);
+
+	// The host's next packets draw the first lobby's goodbye from the new one: torn down at once,
+	// the STOP record latched.
+	const uint32_t stopped_at = host.clock;
+	TEST_EXPECT(host.session.send_host_update(true));
+	TEST_EXPECT(host.step([&] { return host.session.reconnecting(); }, 5000));
+	TEST_EXPECT(host.session.disconnect_event().dc == 9 &&
+			host.session.disconnect_event().ddstr == "NP.C:SH:STOP");
+	// Re-probed, re-joined, re-verified and re-hosted: listed on the new instance under a new RID,
+	// seconds after the stop by its clock.
+	TEST_EXPECT(host.step(listed_on(second_id), 15000));
+	TEST_EXPECT(host.clock - stopped_at < 30000);
+	TEST_EXPECT(host.session.host_reconnect_counter() == 1);
 	const auto relisted = listing_on(second_id);
 	TEST_EXPECT(relisted && relisted->rid != first_rid);
-	std::printf("  the host listed on instance %lld relisted on instance %lld behind %s\n",
-			static_cast<long long>(first_id), static_cast<long long>(second_id), kShared);
+	std::printf("  the host listed on instance %lld relisted on instance %lld behind %s, %u ms "
+				"after its lobby's stop by its clock\n",
+			static_cast<long long>(first_id), static_cast<long long>(second_id), kShared,
+			static_cast<unsigned>(host.clock - stopped_at));
 
-	send(host.build_goodbye());
-	TEST_EXPECT(wait_for([&] { return !listing_on(second_id).has_value(); }, 3000));
+	// The second lobby gone without its clean stop: no goodbye left, and a third serves the
+	// address. What the host sends draws nothing.
 	second.stop();
+	db.exec("DELETE FROM lobby_goodbyes;");
+	Lobby third(pool);
+	TEST_EXPECT(third.start(kShared, port));
+	const int64_t third_id = third.listener.lobby_id();
+	TEST_EXPECT(host.session.send_host_update(true));
+	TEST_EXPECT(!host.step([&] { return host.session.reconnecting(); }, 1500));
+	// The receive window runs out, 240 s past what it last heard: the reap (its 0x46 burst reaches
+	// the third lobby, which holds no session for it) arms its reconnect, and it is listed on the
+	// third instance.
+	host.clock = host.heard + 240001;
+	host.session.set_clock_ms(host.clock);
+	std::vector<std::vector<uint8_t>> burst;
+	host.session.pump(burst);
+	TEST_EXPECT(host.session.reconnecting() &&
+			host.session.disconnect_event().ddstr == "NP.C:PT:CLNTTMOUT");
+	for (const auto &datagram : burst)
+		host.send(datagram);
+	TEST_EXPECT(host.step(listed_on(third_id), 20000));
+	TEST_EXPECT(host.session.host_reconnect_counter() == 2);
+	const auto relisted_again = listing_on(third_id);
+	TEST_EXPECT(relisted_again && relisted && relisted_again->rid != relisted->rid);
+	std::printf("  with no goodbye left, it relisted on instance %lld past its receive window\n",
+			static_cast<long long>(third_id));
+
+	host.send(host.session.build_goodbye());
+	TEST_EXPECT(wait_for([&] { return !listing_on(third_id).has_value(); }, 3000));
+	third.stop();
 	TEST_EXPECT(lobbydb::list_instances(db).empty());
 	return 0;
 }
@@ -701,6 +796,6 @@ int main(int argc, char **argv) {
 	net::shutdown();
 	if (rc == 0)
 		std::printf("OK: lobby instances share one address, push their own, drain, reap the "
-					"stale, and a host relists behind the address\n");
+					"stale, and a host relists behind the address on its old lobby's goodbye\n");
 	return rc;
 }

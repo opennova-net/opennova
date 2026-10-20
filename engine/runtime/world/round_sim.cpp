@@ -809,8 +809,9 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
             compute_death_anim_state(record.section, quadrant, death_cause::kBullet);
     // The ammo's burn/force pair from the round's position, crediting its
     // owner [orig: Entity_ApplyCollisionForce call @0x4074BA]. The ammo's
-    // burn emitter and its 173 clip (ammo dword +72) stay with D-ITEM-6,
-    // whose field source is unwitnessed [orig: @0x4074C7..0x40754A,
+    // hit emitter (ammo dword +72, its `secondary_effect`) and its 173 clip
+    // stay with D-ITEM-6 on this native leg; a joiner's wire-built person rows
+    // run them (wire_person_hit.cpp) [orig: @0x4074C7..0x40754A,
     // @0x4076D3..0x4076D5].
     if (ammo != nullptr)
         apply_collision_force(world, victim, ammo->secondary_anim, ammo->kz_physics,

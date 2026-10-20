@@ -4,8 +4,9 @@
 // reference: a vertex moved, added before them or removed); the type's findings; the references (each texture name
 // made .TGA by the stage loader, the base's .MDT twin derived) and the blank. JO ships no face animation (a scan of
 // every PFF of the install found none, docs/world/world-wac-ai-re.md section 33.30); Black Hawk Down ships 13, read
-// by JO's loader line for line, which the reference tree mirrors under fixtures/bhd/grm: the retail twin opens each
-// with no layout issue, saves it byte for byte and finds no error in it.
+// by JO's loader line for line: every face of the format's fixtures (person.grm and the one the grm rows mint in
+// the layout BHD's tool wrote its faces in, model_variant_files.h) opens with no layout issue, saves byte for byte
+// and holds no error.
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/face_animation_document.h>
@@ -24,10 +25,10 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/model_variant_files.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -309,11 +310,12 @@ int test_blank() {
 	return 0;
 }
 
-// Every face BHD ships opens as written, saves byte for byte and holds no error.
-int test_retail_bhd_faces() {
-	const std::vector<std::string> files = retail::reference_fixture_files("bhd/grm", ".grm");
-	if (files.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bhd/grm (the faces BHD ships)");
-	for (const std::string &path : files) {
+// Every face of the format's fixtures opens as written, saves byte for byte and holds no error (BHD's 13 shipped
+// faces held to it while the reference tree was read); the one minted in BHD's layout must be there.
+int test_variant_faces() {
+	const model_variants::Files faces = model_variants::faces();
+	for (const std::string &relative : faces.paths) {
+		const std::string path = model_variants::repo_path(relative);
 		const std::vector<uint8_t> bytes = test_io::read_file(path);
 		FaceAnimationDocument face;
 		Diagnostic error;
@@ -329,14 +331,13 @@ int test_retail_bhd_faces() {
 				return 1;
 			}
 	}
-	std::printf("editor face animation: %zu BHD faces open, save and validate\n", files.size());
-	return 0;
+	std::printf("editor face animation: %zu faces open, save and validate\n", faces.paths.size());
+	return model_variants::report_missing(faces) == 0 ? 0 : 1;
 }
 
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 	failed += test_reads_and_writes_back();
 	failed += test_edits();
@@ -344,7 +345,7 @@ int main(int argc, char **argv) {
 	failed += test_findings();
 	failed += test_references();
 	failed += test_blank();
-	failed += test_retail_bhd_faces();
+	failed += test_variant_faces();
 	if (failed == 0) std::printf("editor face animation: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }
