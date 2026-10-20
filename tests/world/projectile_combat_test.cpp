@@ -2348,6 +2348,16 @@ void test_retail_aerodynamic_drag_vectors() {
     FlightResult edge_wet = fly_one_tick(FixedVec3{0x4000, 0, 0}, 0x100u, 0, 0,
                                          4 * 65536, 5 * 65536);
     CHECK(edge_wet.active && edge_wet.pos.x == 0x4000);
+    // The Z word is compared with the water word raw: with no water authored the
+    // word is 0, so a slow round below Z 0 stalls and one above it does not
+    // [orig: Projectile_UpdatePhysics @0x4EA12A..0x4EA137; Environment_InitDefaults
+    // @0x57C010 (@0x57C011..0x57C01E)].
+    FlightResult slow_dry_low = fly_one_tick(FixedVec3{0x3fff, 0, 0}, 0x100u, 0, 0,
+                                             -65536, 0);
+    CHECK(!slow_dry_low.active);
+    FlightResult slow_dry_high = fly_one_tick(FixedVec3{0x3fff, 0, 0}, 0x100u, 0, 0,
+                                              65536, 0);
+    CHECK(slow_dry_high.active);
 
     // Drag zero returns before the stability branch. With drag live, the exact
     // below-stable damping follows drag, including retail's NoGravity Z step.

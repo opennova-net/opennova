@@ -1378,13 +1378,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// The heat window is a deadline against the logic tick, not a stored level.
 	// [orig: current_tick @ 0x24C1968]
 	in.current_tick = static_cast<int32_t>(world.logic_tick);
-	// The window's water gate is the owner's BODY Z against the global water
-	// plane, not the drowning bit and not the eye height: `Position.Z >
-	// g_EnvWaterHeightFixed` keeps the window, at-or-below (with no Underwater def
-	// flag) clears it. No authored water (env.water_z == 0) never submerges.
-	// [orig: WeaponAction_ProcessFrame @ 0x540e60, the gate @ 0x54101c]
-	in.submerged = player != nullptr && world.env.water_z != 0 &&
-			player->position.z.q16 <= world.env.water_z;
+	// The heat window's water gate rides the environment inputs (the walked
+	// entity's body Z against the water word).
 	if (player != nullptr) weapon_fire_environment_inputs(world, *player, in);
 	if (!accept_weapon_input) active_slot.refire_queued = false;
 	WeaponFsmEvents ev;

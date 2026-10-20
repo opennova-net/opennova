@@ -968,11 +968,12 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     const int32_t eye_x = player.position.x.q16 + player.eye_offset_x;
     const int32_t eye_y = player.position.y.q16 + player.eye_offset_y;
     const int32_t eye_z = player.position.z.q16 + player.eye_offset_z;
-    // _ftol2_sse over the 0x4EFFFE00 (2^31 - 16384) float clamp the block keeps
-    // on the x87 stack [orig: flt_7C19E0 @0x43604d / @0x43607d / @0x4360f4];
-    // an out-of-range conversion is the x87 indefinite integer.
+    // _ftol2_sse over the 0x4EFFFE00 (2147418112.0, 2^31 - 65536) float clamp the
+    // block keeps on the x87 stack [orig: Entity_FindNearestSeatOrArmory @0x435D50
+    // (flt_7C19E0 @0x43604D / @0x43607D / @0x4360F4)]; an out-of-range conversion is
+    // the x87 indefinite integer.
     const auto ftol_clamped = [](double v) -> int32_t {
-        if (v > 2147467264.0) v = 2147467264.0;
+        if (v > 2147418112.0) v = 2147418112.0;
         return static_cast<int32_t>(v);
     };
     const auto ftol = [](double v) -> int32_t {

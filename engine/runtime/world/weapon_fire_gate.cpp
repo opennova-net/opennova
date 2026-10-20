@@ -13,6 +13,15 @@ void weapon_fire_environment_inputs(const World &world, const Entity &owner,
     inputs.head_submerged = io::bam_add(owner.position.z.q16, owner.eye_offset_z) <
             world.env.water_z;
     inputs.drowning = ((owner.flags | owner.engine_flags) & 0x8000u) != 0;
+    // The heat window's water gate: the walked entity's BODY Z against the water
+    // word, not the drowning bit and not the eye: `Position.Z >
+    // g_EnvWaterHeightFixed` keeps the window, at or below (with no Underwater def
+    // flag) clears it. Every walked row takes it, and the word is compared raw: a
+    // map with no water authored keeps it 0 [orig: WeaponAction_ProcessFrame
+    // @0x540E60 (the entity @0x540E9B, the compare @0x541004..0x54100D, the
+    // Underwater flag @0x54100F..0x54101C); Environment_InitDefaults @0x57C010
+    // (@0x57C011..0x57C01E)].
+    inputs.submerged = owner.position.z.q16 <= world.env.water_z;
     inputs.ignore_ammo_cost = world.rules.ignore_weapon_ammo_cost;
     // The outer loop's catch-up flag the fire-loop emitter reads
     // [orig: dword_24E0E80 @0x5412a7; Game_MainLoop @0x52ba32..0x52ba3a].

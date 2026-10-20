@@ -1841,9 +1841,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // the next tick's lifetime head check [orig: the +684/+28 zero
         // @0x4ea142-0x4ea148 with no early return]. Model that as one final
         // ordinary sweep followed by retirement at the end of this iteration.
+        // The Z word is compared with the water word raw, signed, with no dry
+        // gate: a map with no water authored keeps the word 0, so a slow round
+        // below Z 0 stalls there too [orig: Projectile_UpdatePhysics `cmp ecx,
+        // g_EnvWaterHeightFixed; jge` @0x4EA12A..0x4EA137, the speed @0x4EA13E;
+        // Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)].
         const bool submerged_stall =
-            ammo != nullptr && world.env.water_z != 0 &&
-            position_q16.z < world.env.water_z && fixed_magnitude(velocity_q16) < 0x4000;
+            ammo != nullptr && position_q16.z < world.env.water_z &&
+            fixed_magnitude(velocity_q16) < 0x4000;
 
         // Exact-zero is a distinct retail leaf: no sweep or position commit, one
         // gravity step even for NoGravity ammo, and no aerodynamic drag. A

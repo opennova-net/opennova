@@ -2084,11 +2084,14 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
 
 // The walk's pool-1 leg pumps an unoccupied EWEAP row's own slot only while
 // its heat window is open: the kick decays and a lapsed window closes, and a
-// row with an occupant, a non-EWEAP row or a cold slot is left alone.
+// row with an occupant, a non-EWEAP row or a cold slot is left alone. A gun at or
+// below the water word closes its window at the visit, the word compared raw: a
+// map with no water authored keeps it 0, so a gun at Z 0 is under it.
 // [orig: WeaponAction_ProcessAllEntities @0x5426CB..0x54271E -- the occupant
 //  test @0x5426E9, the EWEAP bit @0x5426FF, the window @0x54270E;
 //  WeaponAction_ProcessFrame -- the kick decay @0x541262..0x54129B, the
-//  window close @0x54125F]
+//  window close @0x54125F, the water compare @0x541004..0x54100D;
+//  Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
 static void test_weapon_walk_pumps_hot_unoccupied_guns() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 4);
@@ -2099,9 +2102,11 @@ static void test_weapon_walk_pumps_hot_unoccupied_guns() {
     w->tables.weapons.entries[1].valid = true;
     configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
     w->ai.is_authority = true;
-    const auto spawn_gun = [&](uint32_t attrib, bool occupied, int32_t window) {
+    const auto spawn_gun = [&](uint32_t attrib, bool occupied, int32_t window,
+                               float z = 10.0f) {
         Entity gun{};
         gun.kind = EntityKind::Item;
+        gun.position = {0.0f, 0.0f, z};
         gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         gun.has_item_def = true;
         gun.has_graphic_model = true;
@@ -2116,8 +2121,10 @@ static void test_weapon_walk_pumps_hot_unoccupied_guns() {
     const EntityHandle manned = spawn_gun(kItemAttribEweap, true, 50);
     const EntityHandle plain = spawn_gun(0, false, 50);
     const EntityHandle cold = spawn_gun(kItemAttribEweap, false, 0);
+    const EntityHandle wet = spawn_gun(kItemAttribEweap, false, 50, 0.0f);
     w->logic_tick = 11; // the frame's own tick is 10, inside the window
     w->pump_weapon_actions();
+    CHECK(w->registry.get(wet)->primary_weapon_slot.heat_window_end_tick == 0);
     CHECK(w->registry.get(hot)->primary_weapon_slot.kick == 2);
     CHECK(w->registry.get(hot)->primary_weapon_slot.heat_window_end_tick == 50);
     CHECK(w->registry.get(manned)->primary_weapon_slot.kick == 3);
