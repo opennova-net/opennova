@@ -45,7 +45,8 @@ using ServerDesignationTable = std::array<ServerDesignation, kServerDesignationC
 // retail (an original crash, no stock wire effect); ours drops the mark.
 // [orig: EntityTracker_RegisterOrUpdate @0x511580 — the owner scan
 //  @0x51158d..0x5115a5, the free scan @0x5115a9..0x5115c9, the mode-1 tests
-//  @0x5115D2 / @0x51168D and the row's mode @0x5115DC, the stores
+//  @0x5115D2 / @0x51168D and the row's mode @0x5115D4 (the fresh test
+//  @0x5115DA..0x5115DC), the stores
 //  @0x511656..0x511676]
 bool Server_RegisterDesignation(ServerDesignationTable &table, world::EntityHandle owner,
 		const int32_t point[3], int32_t ticks, int32_t radius_units, uint8_t mode);

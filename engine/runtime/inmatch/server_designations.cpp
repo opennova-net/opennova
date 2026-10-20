@@ -33,7 +33,8 @@ bool Server_RegisterDesignation(ServerDesignationTable &table, world::EntityHand
 	}
 	if (row == nullptr) return false; // a full table drops the mark [orig: @0x51164c]
 	// The mode-1 notice: a fresh row, or the owner's row not yet in mode 1
-	// [orig: @0x5115D2 / @0x51168D, `cmp byte ptr [slot+24], 1` @0x5115DC].
+	// [orig: @0x5115D2 / @0x51168D, `cmp byte ptr [slot+24], 1` @0x5115D4, the
+	//  fresh test's `jz` @0x5115DC].
 	const bool notice = mode == 1 && (fresh || row->mode != 1);
 	// [orig: @0x511656..0x511676]
 	row->owner = owner;

@@ -650,13 +650,19 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 					/*reliable=*/false);
 			continue;
 		}
-		// AdmDef_GetEntryByIndex(*(u8 *)(entity+688)), then row =
-		// adm_entry[1] [orig: @0x508540]. An unresolved equipped ADM
-		// skips the request (and its draw) exactly as retail does; no
-		// fallback row exists.
+		// AdmDef_GetEntryByIndex(*(u8 *)(entity+688)), then the body's byte
+		// is the low byte of adm+4, the row's round index. An unresolved
+		// equipped ADM skips the request (and its draw) exactly as retail
+		// does; no fallback row exists. A resolved row is the only test: a
+		// weapon with no round type keeps adm+4's default -1, so its 0x31
+		// carries 0xFF and still spends the draw (D-NET-700).
+		// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 (the row
+		//  @0x508605..0x508611, its byte `mov ecx, [edi+4]` @0x50863E);
+		//  AdmDef_InitEntryDefaults @0x53FF00 (`or ecx, -1` @0x53FF16, the
+		//  store @0x53FF58)]
 		const world::WeaponTableEntry *adm =
 				world.tables.weapons.by_index(player->equipped_adm_index);
-		if (adm != nullptr && adm->ammo_index >= 0 && adm->ammo_index <= 0xFF) {
+		if (adm != nullptr) {
 			if (reply.integrity_ammo_crc_salt == 0)
 				reply.integrity_ammo_crc_salt = next_maintenance_prng16(world);
 			reply.integrity_ammo_crc_salt = 0;

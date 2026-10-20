@@ -25,7 +25,8 @@ namespace opennova::inmatch {
 //  team types, Entity_SpawnFromAnimSlotProperty @0x43c546..0x43c54f), the
 //  per-slot gates @0x5063e0..0x506419 (+4 active, +0 entity, `!+5 ||
 //  is_mp_session_peer`, `!+96481 || !+97536` — +96481 is never set — and
-//  `!+100567`), the team / self / +96481 admit @0x506440, the entry slot+0x14
+//  `!+100567`), the team / self / +96481 admit @0x506422..0x506438 (the
+//  capacity `jge` @0x506440), the entry slot+0x14
 //  and packed handle @0x506445..0x506490]
 std::vector<uint8_t> build_visible_players_snapshot(const NapiNPConnection &requester,
 		const std::vector<NapiNPConnection> &roster, uint32_t game_type,

@@ -1474,11 +1474,13 @@ bool check_quartet_skips_a_spectator_slot() {
 
 // The integrity family spends one PRNG_Next16 draw per request it sends, the
 // slot's word filled and zeroed again, so every request carries 0: a 0x31
-// boundary with one resolvable ADM row draws once (the unresolved peer sends
-// and draws nothing), the next boundary's 0x30 to both peers draws twice.
+// boundary draws once per resolvable ADM row (the unresolved peer sends and
+// draws nothing; a resolved row with no round type sends 0xFF, the low byte
+// of adm+4's default -1, and draws), the next boundary's 0x30 to all three
+// peers draws three times.
 // [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 - the 0x30 draw
-//  @0x5085A6..0x5085B9, the 0x31's ADM row @0x508605..0x508611 and draw
-//  @0x508613..0x508626; PRNG_Next16 @0x6130A0]
+//  @0x5085A6..0x5085B9, the 0x31's ADM row @0x508605..0x508611, its draw
+//  @0x508613..0x508626 and byte @0x50863E; PRNG_Next16 @0x6130A0]
 bool check_integrity_family_draws_once_per_send() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
@@ -1493,26 +1495,37 @@ bool check_integrity_family_draws_once_per_send() {
 	world.tables.weapons.entries.resize(0x21);
 	world.tables.weapons.entries[0x20].valid = true;
 	world.tables.weapons.entries[0x20].ammo_index = 0x1A;
+	// A row with no round type keeps adm+4's default -1
+	// [orig: AdmDef_InitEntryDefaults @0x53FF16 / @0x53FF58].
+	world.tables.weapons.entries[0x1F].valid = true;
+	world.tables.weapons.entries[0x1F].ammo_index = -1;
 	ctx.world = &world;
 	ns::UdpSessionTransport ta(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport tb(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport tc(ns::UdpSessionTransport::Role::Host);
 	const w::EntityHandle pa = w::spawn_remote_player(world, w::PlayerSpawn{});
 	const w::EntityHandle pb = w::spawn_remote_player(world, w::PlayerSpawn{});
-	for (const w::EntityHandle h : {pa, pb}) {
+	const w::EntityHandle pc = w::spawn_remote_player(world, w::PlayerSpawn{});
+	for (const w::EntityHandle h : {pa, pb, pc}) {
 		// Hold the bodies so only the family draws from the stream
 		// [orig: Entity_UpdateAllEntities @0x4C2460..0x4C2474 skips a held +0x1C4].
 		world.registry.get(h)->motor_suspended = true;
 	}
 	world.registry.get(pa)->equipped_adm_index = 0x20;
 	world.registry.get(pb)->equipped_adm_index = 0xFF; // no ADM row
+	world.registry.get(pc)->equipped_adm_index = 0x1F; // a row, no round type
 	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
 			7, inmatch::NapiNPConnection::kTypeServerSide, &ta, ns::TransportMode::Client, pa, true));
 	ctx.np_protocol.connection_list.back().reply.player_slot = 1;
 	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
 			8, inmatch::NapiNPConnection::kTypeServerSide, &tb, ns::TransportMode::Client, pb, true));
 	ctx.np_protocol.connection_list.back().reply.player_slot = 2;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			9, inmatch::NapiNPConnection::kTypeServerSide, &tc, ns::TransportMode::Client, pc, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 3;
 	world.match.upsert_player({pa, 1, "A"});
 	world.match.upsert_player({pb, 1, "B"});
+	world.match.upsert_player({pc, 1, "C"});
 	world.prng16_state = 1;
 	ctx.integrity_entity_family_next = false;
 	const auto requests = [](ns::UdpSessionTransport &t, uint8_t tag) {
@@ -1534,18 +1547,26 @@ bool check_integrity_family_draws_once_per_send() {
 	inmatch::Server_TickUpdate(ctx);
 	const auto a31 = requests(ta, s2c::LOADOUT_CRC_REQ);
 	const auto b31 = requests(tb, s2c::LOADOUT_CRC_REQ);
+	const auto c31 = requests(tc, s2c::LOADOUT_CRC_REQ);
 	if (!expect(a31.size() == 1 && a31[0] == std::vector<uint8_t>({0x1A, 0x00, 0x00}) &&
-	                    b31.empty() && world.prng16_state == state_after(1),
-	            "a 0x31 boundary draws once for the one resolvable row and sends 0"))
+	                    b31.empty() && world.prng16_state == state_after(2),
+	            "a 0x31 boundary draws once per resolvable row and sends 0"))
+		return false;
+	// The row resolves, so the request goes with the low byte of -1
+	// [orig: @0x508611, `mov ecx, [edi+4]` @0x50863E].
+	if (!expect(c31.size() == 1 && c31[0] == std::vector<uint8_t>({0xFF, 0x00, 0x00}),
+	            "a resolved row with no round type sends 0xFF and draws"))
 		return false;
 	ctx.scoreboard_broadcast_timer = 0x136u;
 	inmatch::Server_TickUpdate(ctx);
 	const auto a30 = requests(ta, s2c::ENTITY_CHECKSUM_REQ);
 	const auto b30 = requests(tb, s2c::ENTITY_CHECKSUM_REQ);
-	return expect(a30.size() == 1 && b30.size() == 1 &&
+	const auto c30 = requests(tc, s2c::ENTITY_CHECKSUM_REQ);
+	return expect(a30.size() == 1 && b30.size() == 1 && c30.size() == 1 &&
 	                      a30[0] == std::vector<uint8_t>({0xFF, 0x00, 0x00}) &&
-	                      b30[0] == a30[0] && world.prng16_state == state_after(3),
-	              "the next boundary's 0x30 to both peers draws twice");
+	                      b30[0] == a30[0] && c30[0] == a30[0] &&
+	                      world.prng16_state == state_after(5),
+	              "the next boundary's 0x30 to all three peers draws three times");
 }
 
 // D-NET-NEW-L3-5: the per-slot 0x0A runs in or out of a session; only the 0x57
@@ -1679,7 +1700,7 @@ bool check_a_loading_joiner_takes_no_proximity_or_census_place() {
 // of the slot's own team byte keep the slot's. The visible-players snapshot
 // lists the requester's slot-team mates, the 0x32 join line carries the slot
 // team, and the status page colours by it.
-// [orig: NetPacket_SerializeVisiblePlayersSnapshot @0x50636B / @0x506440;
+// [orig: NetPacket_SerializeVisiblePlayersSnapshot @0x50636B / @0x506422..0x506429;
 //  Server_PlayerAdd @0x51D25C; Server_DrawStatusScreen @0x50A565]
 bool check_slot_team_readers_ignore_a_body_team_write() {
 	inmatch::NapiNPServerCtx ctx;
@@ -1787,7 +1808,7 @@ bool check_host_quality_samples_ahead_of_the_receive_pump() {
 // in-match slot on the firer's team; the owner's next mark refreshes its row
 // with no second notice.
 // [orig: RoundData_SpawnRound @0x4EC249..0x4EC270; EntityTracker_RegisterOrUpdate
-//  @0x511580 - the notice test @0x5115DC, the body @0x511608..0x511632, the send
+//  @0x511580 - the notice test @0x5115D4..0x5115DC, the body @0x511608..0x511632, the send
 //  @0x511645, the stores @0x511656..0x511676]
 bool check_designator_round_marks_and_notifies_the_team() {
 	inmatch::NapiNPServerCtx ctx;

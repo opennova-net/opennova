@@ -22,7 +22,8 @@ bool slot_live(const NapiNPConnection &c) {
 // The slot's own team byte (slot+0x1A0), not its body's: a script team write
 // to the body moves the entity's byte alone (D-NET-593).
 // [orig: NetPacket_SerializeVisiblePlayersSnapshot - the requester's
-//  `movzx eax, [esi+1A0h]` @0x50636B, each slot's compare @0x506440]
+//  `movzx eax, [esi+1A0h]` @0x50636B, each slot's read and compare
+//  @0x506422..0x506429]
 uint8_t slot_team(const NapiNPConnection &c) {
 	return c.assigned_team_valid ? c.assigned_team : uint8_t{0};
 }
@@ -57,7 +58,7 @@ std::vector<uint8_t> build_visible_players_snapshot(const NapiNPConnection &requ
 		// pair is always admitted (+96481 has no writer).
 		if (c->link.spectator) continue;
 		const bool self = c == &requester;
-		if (!self && slot_team(*c) != requester_team) continue; // @0x506440
+		if (!self && slot_team(*c) != requester_team) continue; // @0x506422..0x506429
 		VisiblePlayers::Entry e;
 		e.slot = c->reply.player_slot;                  // slot+0x14 @0x506445
 		e.entity_handle = c->link.owned_entity.packed; // the packed handle @0x506485
