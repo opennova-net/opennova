@@ -1448,18 +1448,6 @@ std::vector<TickOut> tick_connections(
 			ship_burst_messages(conn, step.messages, to.outbound);
 		}
 
-		// The join line and the join-time 0x46 push, once per slot.
-		if (conn.burst.spawned && !conn.reply.roster_counted) {
-			conn.reply.roster_counted = true;
-			// The join-time 0x46 push (fieldFlags 0x1CF7) to every EXISTING in-match client,
-			// so its next 0x16's new row is ACCEPTED instead of dropped + 0x22-retried — the
-			// unknown-slot churn behind the stale HUD count (D-NET-158). The
-			// 0x32 join line leads it, as in the original [orig:
-			// Server_PlayerAdd @0x51d28a (0x32) then @0x51D296 (0x46)].
-			broadcast_player_joined_text(ctx.np_protocol.connection_list, conn, ctx.world);
-			broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list, conn,
-			                              ctx.world);
-		}
 
 		// Surface the F3 / PeerSpawned events from conn.burst (verbatim predicates). Same latch as the
 		// datagram-driven handle_client_session path — whichever observes the burst change first wins.

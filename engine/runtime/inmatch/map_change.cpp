@@ -109,7 +109,6 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	reply.admission_metadata_pushed = kept.admission_metadata_pushed;
 	reply.spawn_metadata_pushed = kept.spawn_metadata_pushed;
 	reply.admission_completed_tick = kept.admission_completed_tick;
-	reply.roster_counted = kept.roster_counted;
 	reply.player_name = kept.player_name;
 	reply.player_slot = kept.player_slot;
 	// The kit outlives the mission [orig: the reset's stores @0x5163B2..0x516417

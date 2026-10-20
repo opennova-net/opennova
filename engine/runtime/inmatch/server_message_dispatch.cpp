@@ -400,10 +400,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	const PlayerReplicationState rep = make_rep_state(config, conn, world);
 	const IntegritySources &integrity = config.integrity_sources;
 
-	// The loadout gate (burst phase 7→8) is opened ONLY by the C2S 0x2F handler (case 0x2F below).
-	// A prior auto-advance ("any C2S at phase 8") fired on stale handshake messages before the
-	// client had processed 0x1A, defeating the pacing. The loopback (type-2) bypasses the gate.
-
 	if (conn.admission_stage != GameAdmissionStage::Complete)
 		return dispatch_admission(config, conn, messages, now_tick, roster, world, inputs);
 
@@ -1046,7 +1042,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				dispatch_spectator_respawn(config, conn, msg, inputs);
 				break;
 			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
-				Server_HandlePlayerJoinRequest(conn, world);
+				Server_HandlePlayerJoinRequest(inputs.server_ctx, conn, world, now_tick, replies);
 				break;
 			case c2s::FIRED_ROUND: // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
 				Server_HandleClientFiredRound(config, conn, msg.payload.data(), msg.payload.size(), world);

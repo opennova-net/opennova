@@ -11,6 +11,7 @@
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/server_tick.h> // CONTROL_REQUEST_PERIOD_TICKS (the join's quartet seed)
 
 #include "host_test_setup.h"
 
@@ -205,7 +206,9 @@ int main_impl() {
 	}
 
 	if (!expect(reached, "burst reached game-state 9 (the world-stream terminator)")) return 1;
-	if (!expect(conn.burst.spawned && conn.burst.game_state == 9, "burst marks spawned + game_state 9")) return 1;
+	if (!expect(conn.burst.spawned && conn.burst.game_state == 10 &&
+	                    conn.slot_state == inmatch::PlayerSlotState::Joined,
+	            "the loopback's in-process join marks spawned, game state 10, slot state 6")) return 1;
 	if (!expect(conn.phase == inmatch::ConnectionPhase::Spawned, "connection advanced to Spawned")) return 1;
 
 	// (1) The full §5.2a emitted tag order. Player-sync: 0x2C, 0x08, 0x2A×6, 0x1C, 0x0B, 0x66, 0x76,
@@ -603,28 +606,36 @@ int main_impl() {
 		jconn.burst.game_state = 9;
 		jconn.slot_state = inmatch::PlayerSlotState::WorldStream;
 		jconn.burst.world_stream_phase = 0;
-		bool reached_loadout_gate = false;
-		for (int i = 0; i < 256 && !reached_loadout_gate; ++i) {
+		bool reached_await_join = false;
+		for (int i = 0; i < 256 && !reached_await_join; ++i) {
 			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			++paced_calls;
 			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
-			// The per-tick budget means each call emits a bounded number of datagrams (the game-start
-			// bundle is the only atomic >budget batch, and it's past the gate).
-			if (jconn.slot_state == inmatch::PlayerSlotState::WorldStream && jconn.burst.world_stream_phase == 8 &&
-			    !jconn.burst.loadout_received) {
-				reached_loadout_gate = true;
-			}
+			reached_await_join = jconn.slot_state == inmatch::PlayerSlotState::AwaitJoin;
 		}
-		if (!expect(reached_loadout_gate, "paced joiner burst reaches the phase 7->8 loadout gate")) return 1;
+		if (!expect(reached_await_join && jconn.burst.game_state == 9,
+		            "the world stream's 0x1A parks the slot in state 5, game state 9")) return 1;
 		if (!expect(paced_calls > 3, "burst was actually PACED across multiple calls (not one-shot)")) return 1;
-		if (!expect(!jconn.burst.spawned, "joiner burst not yet spawned (waiting for loadout)")) return 1;
+		if (!expect(!jconn.burst.spawned, "joiner not joined before its C2S 0x0B")) return 1;
+		for (int i = 0; i < 4; ++i) {
+			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			if (!expect(s.messages.empty(), "the producer sends nothing in slot state 5")) return 1;
+		}
 
-		// Simulate the C2S 0x2F -> sets loadout_received, and the stock client's
-		// C2S 0x0B mission-file report that TRIGGERS the bundle [orig:
-		// NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> Server_OnPlayerJoin
-		// @0x51A680]; drive to completion.
+		// The stock client's join-time C2S 0x2F pair seeded the armory cooldown, then its
+		// C2S 0x0B runs the join [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 ->
+		// Server_OnPlayerJoin @0x51A680].
 		jconn.burst.loadout_received = true;
-		jconn.reply.mission_status_received = true;
+		jconn.link.armory_reuse_seconds = 30;
+		jconn.reply.chat_last_ms = 1234;
+		jconn.reply.rtt_request_countdown = 17;
+		jconn.reply.control_request_countdown = 0;
+		jconn.reply.charattr_unanswered_count = 3;
+		jconn.reply.time_sync_unanswered_count = 2;
+		jconn.reply.time_sync_sequence = 9;
+		w::PlayerSpawn jbody;
+		jbody.team = 1;
+		jconn.link.owned_entity = w::spawn_remote_player(w3, jbody);
 		// D-NET-374: the session's mp_NoCharAbilities and mp_NoScopeDrift ride the
 		// join as one S2C 0x41 each (properties 0 and 7) ahead of the 0x42, whose
 		// body is the authority's packed latches [orig: Server_OnPlayerJoin
@@ -637,36 +648,68 @@ int main_impl() {
 		// [orig: Server_OnPlayerJoin @0x51A71F / @0x51A725].
 		jconn.reply.client_quality = 3;
 		jconn.reply.client_quality_dirty = true;
+		std::vector<opennova::ProtocolMessage> join_tail;
+		{
+			inmatch::ServerDispatchInputs inputs;
+			inputs.server_ctx = &ctx3;
+			std::vector<opennova::ProtocolMessage> msgs;
+			msgs.push_back(opennova::make_protocol_message(opennova::c2s::MISSION_FILE_STATUS, {0x00}));
+			join_tail = inmatch::dispatch_session_replies(ctx3.config, jconn, msgs, 2,
+					ctx3.np_protocol.connection_list, &w3, inputs);
+		}
 		bool saw_0f = false, saw_42 = false, saw_3e = false;
 		bool saw_transient_42 = false;
 		std::vector<std::vector<uint8_t>> clears;
 		std::vector<uint8_t> latches;
-		bool reached = false;
-		for (int i = 0; i < 16 && !reached; ++i) {
-			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/2);
-			for (const auto &m : s.messages) {
-				if (m.tag == 0x41 && !saw_42) clears.push_back(m.body);
-				if (m.tag == 0x42) {
-					saw_42 = true;
-					saw_transient_42 = !m.reliable;
-					latches = m.body;
-				}
-				if (m.tag == 0x0F) saw_0f = true;
-				if (m.tag == 0x3E) saw_3e = true;
+		for (const auto &m : join_tail) {
+			if (m.tag == 0x41 && !saw_42) clears.push_back(m.payload);
+			if (m.tag == 0x42) {
+				saw_42 = true;
+				saw_transient_42 = !m.reliable;
+				latches = m.payload;
 			}
-			reached = s.reached_in_game;
+			if (m.tag == 0x0F) saw_0f = true;
+			if (m.tag == 0x3E) saw_3e = true;
 		}
 		if (!expect(clears == std::vector<std::vector<uint8_t>>({{0x00}, {0x07}}),
 		            "the join's 0x41s name the session's restricted properties, ahead of its 0x42")) return 1;
 		if (!expect(latches == std::vector<uint8_t>({0x12, 0x00}), "the join's 0x42 carries the authority's latches"))
 			return 1;
-		if (!expect(reached, "joiner burst reached game-state 9 after loadout gate opened")) return 1;
 		if (!expect(jconn.reply.client_quality == 0 && !jconn.reply.client_quality_dirty,
 		            "the join zeroes the slot's quality level and its resend flag")) return 1;
-		if (!expect(jconn.burst.spawned, "joiner burst spawned after loadout gate opened")) return 1;
-		if (!expect(saw_42 && saw_0f && saw_3e, "phase 8 emits the game-start bundle (0x42/0x0F/0x3E)")) return 1;
+		if (!expect(jconn.burst.spawned && jconn.slot_state == inmatch::PlayerSlotState::Joined &&
+		                    jconn.burst.game_state == 10,
+		            "the 0x0B joins the slot: state 6, game state 10")) return 1;
+		if (!expect(saw_42 && saw_0f && saw_3e, "the join sends the game-start messages (0x42/0x0F/0x3E)")) return 1;
 		if (!expect(saw_transient_42,
-		            "phase-8 input flags use retail's one-send transient delivery")) return 1;
+		            "the join's input flags use retail's one-send transient delivery")) return 1;
+		// D-NET-502: the join, not the add, zeroes the armory cooldown the join-time 0x2F seeded
+		// and rewrites the state byte's bits [orig: @0x51A752; @0x51A6D3..0x51A73A].
+		if (!expect(jconn.link.armory_reuse_seconds == 0 && jconn.reply.chat_last_ms == 0 &&
+		                    jconn.reply.rtt_request_countdown == 0 &&
+		                    !jconn.link.preround_loadout_latch &&
+		                    jconn.reply.frontier_hint_pending && !jconn.reply.capture_nag_held &&
+		                    jconn.reply.state6_entry_host_ms_valid,
+		            "the join writes the slot's join words")) return 1;
+		// D-NET-532: the state-6 entry's network reset seeds the quartet countdown with its
+		// period and zeroes the silence counters and the time-sync round
+		// [orig: PlayerSlot_ResetNetworkState @0x4F9FD0, 744 @0x4FA021].
+		if (!expect(jconn.reply.control_request_countdown == inmatch::CONTROL_REQUEST_PERIOD_TICKS &&
+		                    inmatch::CONTROL_REQUEST_PERIOD_TICKS == 744u &&
+		                    jconn.reply.charattr_unanswered_count == 0 &&
+		                    jconn.reply.time_sync_unanswered_count == 0 &&
+		                    jconn.reply.time_sync_sequence == 0,
+		            "the join's network reset seeds the 744-tick quartet countdown")) return 1;
+		// A second 0x0B from the joined slot (game state 10) is dropped.
+		{
+			inmatch::ServerDispatchInputs inputs;
+			inputs.server_ctx = &ctx3;
+			std::vector<opennova::ProtocolMessage> msgs;
+			msgs.push_back(opennova::make_protocol_message(opennova::c2s::MISSION_FILE_STATUS, {0x00}));
+			if (!expect(inmatch::dispatch_session_replies(ctx3.config, jconn, msgs, 3,
+					ctx3.np_protocol.connection_list, &w3, inputs).empty(),
+			            "a joined slot's second 0x0B is dropped")) return 1;
+		}
 	}
 
 	// --- The game-start bundle opens on the C2S 0x0B alone, for a spectator (whose 0x2F draws
@@ -716,17 +759,14 @@ int main_impl() {
 		bool gated = false;
 		for (int i = 0; i < 256 && !gated; ++i) {
 			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, /*now_tick=*/1);
-			gated = sconn.slot_state == inmatch::PlayerSlotState::WorldStream &&
-			        sconn.burst.world_stream_phase == 8;
+			gated = sconn.slot_state == inmatch::PlayerSlotState::AwaitJoin;
 		}
-		if (!expect(gated, "the joiner's burst reaches the phase-8 gate")) return 1;
+		if (!expect(gated, "the joiner's world stream ends in slot state 5")) return 1;
 		// An accepted 0x2F alone opens nothing.
 		sconn.burst.loadout_received = true;
-		bool reached = false;
-		for (int i = 0; i < 16 && !reached; ++i)
-			reached = inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 2).reached_in_game;
-		if (!expect(!reached && !sconn.burst.spawned,
-		            "the bundle does not open on a 0x2F")) return 1;
+		for (int i = 0; i < 16; ++i)
+			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 2);
+		if (!expect(!sconn.burst.spawned, "the join does not run on a 0x2F")) return 1;
 		sconn.burst.loadout_received = false;
 		// The C2S 0x0B through the receiver.
 		auto send_0b = [&]() {
@@ -737,20 +777,16 @@ int main_impl() {
 			(void)inmatch::dispatch_session_replies(ctx4.config, sconn, msgs, 3,
 					ctx4.np_protocol.connection_list, &w4, inputs);
 		};
-		// The slot has no entity yet: retail drops its 0x0B, so the bundle stays shut.
+		// The slot has no entity yet: retail drops its 0x0B, so the join does not run.
 		send_0b();
-		for (int i = 0; i < 16 && !reached; ++i)
-			reached = inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 3).reached_in_game;
-		if (!expect(!reached && !sconn.reply.mission_status_received,
+		if (!expect(!sconn.burst.spawned && sconn.slot_state == inmatch::PlayerSlotState::AwaitJoin,
 		            "a 0x0B from a slot without its entity is dropped")) return 1;
 		w::PlayerSpawn body;
 		body.team = 1;
 		sconn.link.owned_entity = w::spawn_remote_player(w4, body);
 		if (!expect(sconn.link.owned_entity.valid(), "the slot's entity spawns")) return 1;
 		send_0b();
-		for (int i = 0; i < 16 && !reached; ++i)
-			reached = inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 4).reached_in_game;
-		if (!expect(reached && sconn.burst.spawned,
+		if (!expect(sconn.burst.spawned,
 		            as_spectator ? "a spectator's bundle opens on its 0x0B alone"
 		                         : "a player's bundle opens on its 0x0B alone")) return 1;
 	}

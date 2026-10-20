@@ -82,7 +82,6 @@ struct JoinFixture {
 			existing.phase = inmatch::ConnectionPhase::InMatch;
 			existing.slot_state = inmatch::PlayerSlotState::Joined;
 			existing.burst.spawned = true;
-			existing.reply.roster_counted = true;
 			existing.reply.player_slot = 1;
 			existing.link.transport = &existing_transport;
 			existing.link.mode = ns::TransportMode::Client;
@@ -191,11 +190,10 @@ bool run_no_player_list_off_the_scoreboard_clock() {
 	if (!expect(j.slot_state == inmatch::PlayerSlotState::AwaitWorldRequest,
 	            "the track's tail parks for the C2S 0x0A")) return false;
 	keep(f.send(opennova::c2s::SPAWN_MENU_REQUEST));
-	for (int i = 0; i < 256 && !(j.slot_state == inmatch::PlayerSlotState::WorldStream &&
-	                             j.burst.world_stream_phase == 8); ++i)
+	for (int i = 0; i < 256 && j.slot_state != inmatch::PlayerSlotState::AwaitJoin; ++i)
 		keep(f.pump());
 	keep(f.send(opennova::c2s::MISSION_FILE_STATUS, {0x00}));
-	for (int i = 0; i < 16 && !j.burst.spawned; ++i) keep(f.pump());
+	keep(JoinFixture::drain(f.joiner_transport));
 	if (!expect(j.burst.spawned && j.slot_state == inmatch::PlayerSlotState::Joined,
 	            "the joiner's 0x0B joins it (slot state 6)")) return false;
 	for (int i = 0; i < 8; ++i) keep(f.pump());

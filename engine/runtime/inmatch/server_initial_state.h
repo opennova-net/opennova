@@ -48,6 +48,16 @@ uint32_t build_server_config_flags(const NapiNPServerCtx &ctx);
 InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                      uint32_t now_tick = 0);
 
+// The join: the C2S 0x0B's (a remote joiner's, from its dispatch; the host's own client's,
+// in-process, from the producer). Writes the slot's join words (chat stamp, the +89912 state
+// byte's bits, game state 10, and on the first state-6 entry the quality reset, the network
+// reset, the armory cooldown zero, the RTT countdown and the entry stamp), enters slot state 6
+// and returns this connection's game-start messages in order (0x41s, 0x42, 0x0F, 0x4D, 0x61,
+// 0x3E); the 0x4D's copies to the other joined clients go out on their transports.
+// [orig: Server_OnPlayerJoin @0x51A680]
+std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiNPConnection &conn,
+		uint32_t now_tick);
+
 // The deploy-map LOCATION labels for every type-2044 marker the promoted
 // `world` holds (the spawn's admitted records), in spawn order: the mission
 // text's [Locations] string keyed by the record's own name_index, else that

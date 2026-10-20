@@ -75,17 +75,17 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx);
 // host's own type-2 loopback is just another entry in this list. Returns the number spawned this pass.
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world);
 
-// The C2S 0x0B mission-file report, the game-start bundle's one player-path trigger
-// (conn.reply.mission_status_received, read by Server_SendInitialGameStateToPlayer's
-// phase 8): kept only from an added slot, not yet joined, whose entity exists, so a
-// 0x0B sent while the slot awaits its entity is dropped and never releases the bundle
-// later. Retail builds the bundle in the handler; this port builds it at the next burst
-// step. (D-NET-678)
+// The C2S 0x0B mission-file report, the join's one player-path trigger: from an added slot
+// whose net player is not yet in game state 10 and whose entity exists it runs the join
+// (Server_OnPlayerJoin), whose game-start messages go out on the connection's transport
+// (into `replies` for a transport-less test seam); any other 0x0B is dropped. (D-NET-678,
+// D-NET-502)
 // [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 - the authority @0x51AB10..0x51AB17
 //  (the dispatcher's), the player context @0x51AB21..0x51AB29, the slot
 //  @0x51AB30..0x51AB38, game state 10 @0x51AB3E..0x51AB45, the slot's entity
 //  @0x51AB47..0x51AB4B; the Server_OnPlayerJoin calls @0x51ABA1 / @0x51ABB5]
-void Server_HandlePlayerJoinRequest(NapiNPConnection &conn, const world::World *world);
+void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn,
+		world::World *world, uint32_t now_tick, std::vector<ProtocolMessage> &replies);
 
 // §5.2a step 2 (per player) — [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd
 // @0x51cbc0]. Build the spawn pose from the mission's promoted start markers (§5.2c,

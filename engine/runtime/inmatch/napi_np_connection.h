@@ -164,22 +164,18 @@ struct InitialStateBurst {
 		kStreamTerrainTiles = 5,
 		kStreamMissionText = 6,
 		kStreamWaitForGameStartAck = 7,
-		kStreamGameStartBundle = 8,
 	};
 	uint16_t player_sync_subphase = kSyncMissionMapNames;  // [playerSlot+89878] 8..16 (see server_initial_state)
 	uint8_t  world_stream_phase = kStreamInit;    // [playerSlot+89882] 0 phase-0 init [orig: @0x51bc1a case 0], 1=0x10 .. 7=0x1A
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
 	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
-	bool     loadout_received = false;  // a C2S 0x2F accepted (the 0x5A grant sent). The
-	                                    // game-start bundle (phase 8) waits for the 0x0B, not
-	                                    // this (D-NET-678).
+	bool     loadout_received = false;  // a C2S 0x2F accepted (the 0x5A grant sent). The join
+	                                    // runs on the 0x0B, not this (D-NET-678).
 	                                    // Golden: 0x1A (end of world-stream, f316) -> client sends
 	                                    // 0x2F + 0x0B (f317) -> server replies 0x5A + game-start
 	                                    // (f318).
-	// (the prior loadout_wait_ticks fallback counter was removed — the phase-8 wait has NO
-	//  timeout: the golden host emits nothing in-match until the joiner's 0x2F, D-NET-145)
-	bool     spawned = false;           // set with game_state==9 (the PeerSpawned source)
+	bool     spawned = false;           // set by the join (the in-match latch, the PeerSpawned source)
 };
 
 // The joiner's pose cached from its pre-spawn C2S 0x0C uplink — the host's fallback spawn/pose
@@ -357,7 +353,6 @@ struct SessionReplyState {
 	//  g_SpawnLoadoutBuffer @0x51D12A]
 	LoadoutSubmit loadout_buffer;
 	bool loadout_buffer_set = false;
-	bool mission_status_received = false; // an accepted 0x0B (Server_HandlePlayerJoinRequest)
 	// Retail's admission completion is two packet boundaries, not one semantic
 	// bag. The C2S 0x02 handler emits admission metadata; a later pending-spawn
 	// pump replays settings + 0x04. Keeping independent latches prevents a
@@ -374,18 +369,16 @@ struct SessionReplyState {
 	uint32_t admission_hold_nag_host_ms = 0;
 	bool admission_hold_nag_host_ms_valid = false;
 	uint32_t admission_completed_tick = 0;
-	// The join's 0x32 line and 0x46 push to the in-game clients went out for this
-	// slot (tick_connections, once per slot).
-	bool roster_counted = false;
 	// Retail's 0x30/0x31 integrity family rides the global scoreboard countdown,
 	// so it has no per-connection epoch/serial. Network quality retains its own
 	// independently witnessed global clock.
 	// Per-player maintenance state [orig: Server_UpdateAllActivePlayerSlots
 	// @0x518820]. Eligible active player slots (including the listen host) accrue
 	// the 1,860-tick age after the quartet check; hidden/deploy-pending pauses
-	// (never resets) that age. Thus
-	// the first quartet is observed on call 1,861. Once mature, its 744-tick
-	// countdown continues through death/deploy presentation state.
+	// (never resets) that age. The join's network reset seeds the 744-tick
+	// countdown (PlayerSlot_ResetNetworkState @0x4F9FD0, @0x4FA021), so the first
+	// quartet comes 744 gated calls after the age gate opens (D-NET-532). Once
+	// mature, its countdown continues through death/deploy presentation state.
 	uint32_t control_live_ticks = 0;
 	uint32_t control_request_countdown = 0;
 	uint32_t charattr_unanswered_count = 0;

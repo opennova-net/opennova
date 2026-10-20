@@ -1,6 +1,9 @@
 #include <runtime/inmatch/server_spawn.h>
 
 #include <runtime/inmatch/mission_rotation.h> // HostRotation (LASTGAME, the side-to-team map)
+#include <runtime/inmatch/server_chat.h> // broadcast_player_joined_text (the add's 0x32 line)
+#include <runtime/inmatch/server_initial_state.h> // Server_OnPlayerJoin (the 0x0B's join)
+#include <runtime/inmatch/server_message_dispatch.h> // broadcast_player_sync_on_join (the add's 0x46)
 
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
@@ -9,6 +12,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
+#include <net/npwire/protocol_message.h> // make_protocol_message (a transport-less join's replies)
 #include <net/title/title_identity.h>  // title_in_match (the join's state byte, DFX2-11)
 #include <runtime/inmatch/punt_log.h>     // the punt table the round init clears
 #include <runtime/inmatch/server_log_recorder.h> // the /PROFILE PDEF of a player add
@@ -455,35 +459,15 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 binds the newly allocated
 	// player row into the recipient slot used by Server_SendEntityStateToPlayer]
 
-	// RESPAWN-PENDING at join, iff the mission offers deploy-selectable spawn zones — the
-	// joiner enters UNDEPLOYED and its per-frame 0x0A flags1 bit1 holds the deploy screen
-	// open until a successful C2S 0x0E pick clears it [orig: Server_OnPlayerJoin @0x51a6f2
-	// stateByte |= 0x10 iff SpawnZoneList_GetCount() > 0 — UNCONDITIONAL on the spectator
-	// latch, so a join-time spectator holds the bit forever (nothing ever deploys it);
-	// the sole clear is the deploy leg of Server_DeployPlayer @0x517791]. The
-	// pending entity is HIDDEN (state_flags bit0 — the golden pre-deploy record
-	// byte13 = 0x01) [orig: NetPacket_WritePlayerState @0x4ff7dd ORs entity+36 bit0
-	// each frame while pending]. The host's OWN loopback player is held too: its
-	// client joins with the same C2S 0x0B over the loopback (the single-player and
-	// listen-host connection mode 3 sets is_mp_session_peer), and the join has no
-	// host exemption, so it deploys through its own C2S 0x0E pick like any joiner.
-	// [orig: Game_StartMission @0x526189 (is_mp_session_peer gate) -> C2S 0x0B
-	//  @0x52624B -> NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> Server_OnPlayerJoin
-	//  @0x51a6a3..0x51a6c7 (slot gates only)] (D-NET-339)
-	// Out of a session (single player, world.rules.mp_session being our stand-in
-	// for retail's is_in_session) the hold shows nothing: its hidden bit and its
-	// overlay bit both ride the per-frame 0x0A writer, which only a session runs
-	// [orig: g_NapiNPCtx.is_in_session (+0x58) gates Server_TickUpdate's
-	// replication loop], so the single player is never held.
-	// A DFX2 join writes 0x13 whatever the mission: every joiner undeployed (DFX2-11)
-	// [orig: Server_OnPlayerJoin @0x517717 (dfx2.exe)].
+	// The join (Server_OnPlayerJoin, server_initial_state.cpp) writes the slot's state byte and
+	// the armory cooldown; the add writes neither (D-NET-502) [orig: Server_PlayerAdd
+	// @0x51CBC0, its row memset @0x51CD06]. A pending body is hidden from the add on.
+	// [orig: NetPacket_WritePlayerState @0x4FF7B3..0x4FF7B8 ORs entity+36 bit0 each frame
+	//  while +89912 & 0x10]
 	const TitleInMatch &title_rules = title_in_match(ctx.np_protocol.identity);
 	if ((world.zones.has_spawn_zone() || title_rules.join_state_fixed) &&
-			(!is_host_own || world.rules.mp_session)) {
-		conn.link.respawn_pending = true;
-		if (!conn.link.spectator) {
-			if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
-		}
+			(!is_host_own || world.rules.mp_session) && !conn.link.spectator) {
+		if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
 	}
 	// Every created player entity starts under the 620-tick spawn protection
 	// (entity+292): the round-init creation stores 620 for every active slot and
@@ -496,28 +480,13 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 @0x516bba;
 	//  Server_OnPlayerJoin @0x51A680 @0x51a882 (620), @0x51a878 (bot 0)]
 	if (world::Entity *pe = world.registry.get(h)) pe->damage_state = 620;
-	// The join writes the whole +89912 state byte: bit 1 (the pre-round loadout
-	// latch) iff the pre-round timer runs, always for DFX2's 0x13 (DFX2-11), and
-	// zeroes the +356 armory cooldown on the first state-6 entry.
-	// [orig: Server_OnPlayerJoin @0x51a6d3/@0x51a6e2 (byte = 1, or 3 while
-	//  g_PreRoundDelayTimer); slot[89] = 0 @0x51a752] [orig: @0x517717 (dfx2.exe)]
-	conn.link.preround_loadout_latch =
-			world.preround_delay_seconds != 0 || title_rules.join_state_fixed;
-	conn.link.armory_reuse_seconds = 0;
-	// SetGameState(10) then sets 0x04 (the frontier hint) and clears 0x08 (the
-	// refused-touch hold); the join also zeroes the +100360 stamp.
-	// [orig: Server_OnPlayerJoin @0x51A6CD, the call @0x51A6FD
-	//  (CNetPlayer_SetGameState @0x4C4213..0x4C421F), @0x51A730..0x51A73A]
-	conn.reply.frontier_hint_pending = true;
-	conn.reply.capture_nag_held = false;
-	conn.reply.chat_last_ms = 0;
 	if (conn.link.spectator) {
 		// Retail still creates a player entity for a spectator, but leaves it
 		// hidden and permanently damage-disabled while S2C 0x75 drives the
 		// client's free-fly camera: the spectator leg stores entity+36 |= 1
 		// and entity+292 = -1 (no 620-tick countdown — the dead/disabled
-		// sentinel). The deploy-hold bit set above stays held, so the
-		// spectator's 0x0A flags1 reads 0x03 (spectator | deploy-hold) exactly
+		// sentinel). The join's deploy-hold bit (spawn zones) then stays held, so
+		// the spectator's 0x0A flags1 reads 0x03 (spectator | deploy-hold) exactly
 		// like a retail join-time spectator's slot state. [orig:
 		// Server_PlayerAdd @0x51cbc0 — the slot+100567 branch;
 		// Entity_UpdateInfantryPlayerBody @0x4b40e0]
@@ -569,15 +538,10 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// which the numbered capture's scorers match (D-NET-650)
 	// [orig: CaptureZone_CheckProximityScoring @0x500CEE].
 	world.match.set_player_spectator(h, conn.link.spectator);
-	world.match.set_player_respawn_pending(h, conn.link.respawn_pending);
+	world.match.set_player_respawn_pending(h, false); // the join's [orig: Server_PlayerAdd @0x51CD06]
 	world.match.set_player_slot_team(h, conn.assigned_team_valid ? conn.assigned_team : uint8_t{0});
 
 	conn.phase = ConnectionPhase::PlayerAdded;
-	if (!is_host_own) {
-		conn.reply.state6_entry_host_ms =
-				ctx.np_protocol.host_run_duration_ms;
-		conn.reply.state6_entry_host_ms_valid = true;
-	}
 	conn.reply.player_slot_reserved = false;
 	// The /PROFILE roster row, late in the add [orig: Server_PlayerAdd
 	//  @0x51d2fd..0x51d30f -> CServerLog_WritePlayerNameRecord].
@@ -667,10 +631,21 @@ bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &con
 } // namespace
 
 // See header. [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
-void Server_HandlePlayerJoinRequest(NapiNPConnection &conn, const world::World *world) {
-	if (!player_slot_active(conn) || is_in_match(conn)) return;
-	if (world == nullptr || world->registry.get(conn.link.owned_entity) == nullptr) return;
-	conn.reply.mission_status_received = true;
+void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn,
+		world::World *world, uint32_t now_tick, std::vector<ProtocolMessage> &replies) {
+	if (ctx == nullptr || world == nullptr || ctx->world != world) return;
+	if (!player_slot_active(conn) || conn.burst.game_state == 10) return;
+	if (world->registry.get(conn.link.owned_entity) == nullptr) return;
+	// [orig: the Server_OnPlayerJoin calls @0x51ABA1 / @0x51ABB5]
+	for (InitialStateMessage &m : Server_OnPlayerJoin(*ctx, conn, now_tick)) {
+		if (conn.link.transport != nullptr) {
+			conn.link.transport->host_send(m.tag, std::move(m.body), m.reliable);
+		} else {
+			ProtocolMessage message = make_protocol_message(m.tag, std::move(m.body));
+			message.reliable = m.reliable;
+			replies.push_back(std::move(message));
+		}
+	}
 }
 
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !dword_24D1DE0 &&
@@ -737,6 +712,15 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				// @0x4C903A -> Server_PlayerAdd @0x51D7A7; Server_InitAllPlayerEntitiesForRound
 				// @0x516AA0 -> Entity_SpawnFromAnimSlotProperty @0x516B67, no SetOrCreate].
 				stamp_player_list_add(conn, world);
+				// The add's join line and its 0x46 push (fieldFlags 0x1CF7) go to every
+				// joined client (send mask 0x80, slot states 6 / 7; the added slot itself
+				// is not one yet), so their next 0x16's new row is accepted rather than
+				// dropped and 0x22-retried (D-NET-158).
+				// [orig: Server_PlayerAdd @0x51CBC0 - the 0x32 @0x51D291, the 0x46
+				//  @0x51D2BF / @0x51D2CA, ahead of the bot's join @0x51D2E1]
+				broadcast_player_joined_text(ctx.np_protocol.connection_list, conn, &world);
+				broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list,
+						conn, &world);
 				++spawned;
 				restart = true;
 				break;

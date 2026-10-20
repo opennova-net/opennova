@@ -10,6 +10,7 @@
 // instead (D-NET-181).
 
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/server_initial_state.h>
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/joiner_connection.h>
@@ -1279,17 +1280,22 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
 	const opennova::world::EntityHandle player =
 			inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world, /*round_init=*/false);
+	// The join (its C2S 0x0B) writes the pending bit and the state-6 stamp (D-NET-502).
+	(void)inmatch::Server_OnPlayerJoin(ctx, live, 1);
 	if (!expect(player.valid() && live.link.respawn_pending &&
-				live.phase == inmatch::ConnectionPhase::PlayerAdded &&
+				live.phase == inmatch::ConnectionPhase::Spawned &&
 				live.reply.state6_entry_host_ms_valid &&
 				live.reply.state6_entry_host_ms == 1234,
-			"player-add stamps state-6 time and the join-only pending bit"))
+			"the join stamps state-6 time and the join-only pending bit"))
 		return false;
 
+	// The joined slot takes its per-frame 0x0A each tick; no record is the description.
 	auto expect_no_description = [&](const char *message) {
 		replication::Datagram datagram;
-		return expect(!live.host_disconnect_sent &&
-					!transport.pop_outbound(datagram), message);
+		bool description = false;
+		while (transport.pop_outbound(datagram))
+			description = description || datagram.protocol_flags_raw == kDescriptionFlags;
+		return expect(!live.host_disconnect_sent && !description, message);
 	};
 	const uint32_t state6_ms = live.reply.state6_entry_host_ms;
 	live.reply.state6_entry_host_ms_valid = false;
