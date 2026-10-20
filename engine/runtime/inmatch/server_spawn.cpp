@@ -583,6 +583,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	world.match.set_player_spectator(h, conn.link.spectator);
 	world.match.set_player_respawn_pending(h, false); // the join's [orig: Server_PlayerAdd @0x51CD06]
 	world.match.set_player_slot_team(h, conn.assigned_team_valid ? conn.assigned_team : uint8_t{0});
+	// An added slot is short of state 6 until its join, which the proximity
+	// pass, the alive-holder count and the capture census read (D-NET-441); the
+	// tick's stamp keeps the row in step after that.
+	// [orig: CNapiServer_ProcessPendingPlayerSpawns - CServerTick_SetPhase(slot, 1)
+	//  @0x4C9123; Server_OnPlayerJoin's state 6 @0x51A712]
+	world.match.set_player_slot_in_game(h, false);
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	conn.reply.player_slot_reserved = false;

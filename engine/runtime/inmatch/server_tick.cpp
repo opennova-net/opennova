@@ -580,8 +580,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// The roster rows carry each slot's state-6 fact for the world's readers
 	// (the proximity pass, the alive-holder count, the capture census), which
 	// read the slot word live: the receive pump above made this tick's joins
-	// and re-syncs, and nothing after this point changes a slot's state before
-	// they read it (D-NET-441).
+	// and re-syncs; after this point only the round end moves a stamped slot (to
+	// state 7, which the readers see through the match outcome), and a slot the
+	// periodic block's spawn pump adds marks its own new row short of state 6
+	// (Server_BuildPlayerInfoAndAdd) (D-NET-441).
 	// [orig: Server_UpdateCaptureZoneProximity @0x50872A; Game_CountAlivePlayersPerTeam
 	//  @0x500208; CaptureZone_CalculateControlDelta @0x501188]
 	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list)
