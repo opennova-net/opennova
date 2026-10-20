@@ -830,8 +830,8 @@ bool check_cs_config_update_decoder() {
 // ACK reads 0 and the packet is admitted with no record, the sequence advanced; 12 bytes carry the
 // ACK. No call fails.
 // [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the key @0x626B52..0x626B60 and its test
-//  @0x626B72, the sequence @0x626B8A..0x626B96, zero consumed @0x626BCC, the in-order parse
-//  @0x626BFC; CNapiNPConnection_ParseMessages @0x625BC0 - the ACK @0x625CD3..0x625CE5, the flag
+//  @0x626B72, the sequence @0x626B8A..0x626B96, zero consumed @0x626BCC, the in-order parse (the
+//  call @0x626BF4); CNapiNPConnection_ParseMessages @0x625BC0 - the ACK @0x625CD3..0x625CE5, the flag
 //  byte @0x625CF4, return 1 @0x625F21]
 bool check_short_session_header_reads_zero() {
 	const uint32_t key = 0x11223344u;

@@ -105,8 +105,8 @@ int main() {
 
 	// The command line's first token, quote-aware, from past its last backslash on; a '/' is no
 	// separator to retail's basename.
-	// [orig: Napi_GetExeBasename @0x62E0B0 - String_TokenizeQuotedToArray @0x62E13E;
-	//  Path_BasenameInPlace @0x617530 - the backslash test @0x617550]
+	// [orig: Napi_GetExeBasename @0x62E0B0 - String_TokenizeQuotedToArray (the call @0x62E133, its
+	//  count @0x62E13E); Path_BasenameInPlace @0x617530 - the backslash test @0x617550]
 	check(exe_basename_from_command_line("\"C:\\Games\\Joint Operations\\Jointops.exe\" /w") ==
 	              "Jointops.exe",
 	      "a quoted path with spaces gives its file name");

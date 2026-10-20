@@ -27,8 +27,8 @@ bool read_retail_machine_inputs(RetailMachineInputs &out);
 // The executable's file name as retail reads it off its process command line: the first token
 // of the quote-aware tokenizer, from past its last backslash on (a '/' is kept); "" for a line with
 // no token. [orig: Napi_GetExeBasename @0x62E0B0 - GetCommandLineA @0x62E11B,
-//  String_TokenizeQuotedToArray @0x62E13E, Path_BasenameInPlace @0x62E14D (@0x617530, the backslash
-//  test @0x617550)]
+//  String_TokenizeQuotedToArray (the call @0x62E133, its count @0x62E13E), Path_BasenameInPlace
+//  @0x62E14D (@0x617530, the backslash test @0x617550)]
 std::string exe_basename_from_command_line(std::string_view command_line);
 
 // The running process's executable file name, what the lobby connection's AP and its 0x42's

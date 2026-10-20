@@ -557,8 +557,8 @@ void check_disconnect_request_by_state() {
 // verify still completes: the service's ServerVerifyResult as packet 1 is now stale and passed
 // over, as packet 2 it is read.
 // [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the key @0x626B52..0x626B72, the sequence
-//  @0x626B8A..0x626BCC, the in-order parse @0x626BFC; CNapiNPConnection_ParseMessages @0x625BC0 -
-//  the ACK @0x625CD3..0x625CE5, return 1 @0x625F21]
+//  @0x626B8A..0x626BCC, the in-order parse (the call @0x626BF4); CNapiNPConnection_ParseMessages
+//  @0x625BC0 - the ACK @0x625CD3..0x625CE5, return 1 @0x625F21]
 void check_short_protocol_packets_keep_the_connection() {
 	Rig rig;
 	const std::vector<uint8_t> auth = bring_to_verify(rig);
