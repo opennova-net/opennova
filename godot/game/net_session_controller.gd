@@ -37,12 +37,16 @@ var _join_role_target: JoinTarget
 var _spectator_probe: LanSession
 var _spectator_probe_target: JoinTarget
 var _spectator_probe_serial := 0
+# The `--lan-join browse[:<port>]` search and the port its row must carry (0 = any).
+var _launch_browse: LanSession
+var _launch_browse_port := 0
 
 const SPECTATOR_PREFLIGHT_SECONDS := 1.0
 const NOVAWORLD_PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
 
 func _exit_tree() -> void:
+	_cancel_launch_browse()
 	_cancel_spectator_probe()
 	_dismiss_join_role_prompt()
 	_release_novaworld_client()
@@ -66,7 +70,8 @@ func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
 # Co-op LAN launches (LaunchFlags, ADR 0041). These remain useful for
 # deterministic smoke runs even though mp.mnu's LAN_SEARCH now browses live
 # hosts through LanSession. `--lan-host <mission.bms>` boots straight in as a
-# co-op host; `--lan-join <ip[:port]>` boots as a joiner dialing that host. The
+# co-op host; `--lan-join <ip[:port]>` boots as a joiner dialing that host, and
+# `--lan-join browse[:<port>]` as one joining from a LAN search's row. The
 # joiner learns the mission from S2C 0x7B after authentication; there is no
 # local mission override (D-NET-194). Two instances on localhost = the
 # bidirectional co-op demo. The 1..4 rate mode (the witnessed holdoffs
@@ -93,18 +98,75 @@ func maybe_launch_lan_from_flags() -> bool:
 		demo_config.lan_mode = LaunchFlags.lan_mode(demo_config.lan_mode)
 		_on_lan_host_start_requested(demo_config)
 		return true
+	if LaunchFlags.lan_join_browse():
+		_begin_launch_browse(LaunchFlags.lan_join_port(0))
+		return true
 	var lan_join_ip := LaunchFlags.lan_join_ip()
 	if not lan_join_ip.is_empty():
 		var demo_target := JoinTarget.new()
 		demo_target.host_ip = lan_join_ip
 		demo_target.port = LaunchFlags.lan_join_port(demo_target.port)
-		if LaunchFlags.spectator():
-			demo_target.join_role = JoinTarget.ROLE_SPECTATOR
-			demo_target.spectator_password = LaunchFlags.spectator_password()
-			demo_target.role_explicit = true
+		_apply_launch_join_role(demo_target)
 		join_lan_server(demo_target)
 		return true
 	return false
+
+
+# `--spectator` / `--spectator-password` answer the join's role question.
+func _apply_launch_join_role(target: JoinTarget) -> void:
+	if LaunchFlags.spectator():
+		target.join_role = JoinTarget.ROLE_SPECTATOR
+		target.spectator_password = LaunchFlags.spectator_password()
+		target.role_explicit = true
+
+
+# `--lan-join browse[:<port>]` joins as a player does from the LAN screen
+# (mp_menu_companion: LAN_SEARCH, then LAN_JOINGAME on a row): the search runs
+# on LanSession's defaults, the broadcast over the retail port range, and the
+# join takes the row's discovered session (JoinTarget.from_lan_row). The row is
+# the first on <port> (any port without one), the endpoint rule a scripted
+# retail joiner picks its row by. The search closes before the join opens its
+# own socket, as the spectator preflight's does.
+func _begin_launch_browse(port: int) -> void:
+	_cancel_launch_browse()
+	_launch_browse_port = port
+	_launch_browse = LanSession.new()
+	_launch_browse.name = "LaunchBrowse"
+	_launch_browse.resource_root = _resource_root()
+	add_child(_launch_browse)
+	_launch_browse.servers_changed.connect(_on_launch_browse_rows.bind(_launch_browse))
+	_launch_browse.browse_finished.connect(_on_launch_browse_finished.bind(_launch_browse))
+	if int(_launch_browse.start_browsing()) != OK:
+		push_warning("NetSessionController: --lan-join browse could not start the LAN search")
+		_cancel_launch_browse()
+
+
+func _on_launch_browse_rows(rows: Array, browse: LanSession) -> void:
+	if browse != _launch_browse:
+		return
+	for candidate in rows:
+		var row := candidate as LanServerRow
+		if row == null or (_launch_browse_port != 0 and row.port != _launch_browse_port):
+			continue
+		_cancel_launch_browse()
+		var target := JoinTarget.from_lan_row(row)
+		_apply_launch_join_role(target)
+		join_lan_server(target)
+		return
+
+
+func _on_launch_browse_finished(browse: LanSession) -> void:
+	if browse != _launch_browse:
+		return
+	push_warning("NetSessionController: --lan-join browse found no host on port %d" % _launch_browse_port)
+	_cancel_launch_browse()
+
+
+func _cancel_launch_browse() -> void:
+	if _launch_browse != null:
+		_launch_browse.stop()
+		_launch_browse.queue_free()
+	_launch_browse = null
 
 
 # --- LAN co-op (mp.mnu) --------------------------------------------------------

@@ -153,11 +153,12 @@ LanEndpoint launch_lan_join_endpoint(const LaunchFlags &flags, int default_port)
     const std::string &target = flags.lan_join;
     if (target.empty()) return endpoint;
     const std::size_t colon = target.find(':');
-    if (colon == std::string::npos) {
-        endpoint.ip = strutil::trim(target);
-        return endpoint;
+    endpoint.ip = strutil::trim(colon == std::string::npos ? target : target.substr(0, colon));
+    if (strutil::iequals(endpoint.ip, "browse")) {
+        endpoint.browse = true;
+        endpoint.ip.clear();
     }
-    endpoint.ip = strutil::trim(target.substr(0, colon));
+    if (colon == std::string::npos) return endpoint;
     const long port = parse_long(strutil::trim(target.substr(colon + 1)), 0);
     if (port >= 1 && port <= 65535) endpoint.port = static_cast<int>(port);
     return endpoint;

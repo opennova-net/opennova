@@ -26,6 +26,8 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_join_ip"), &LaunchFlags::lan_join_ip);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_join_port", "fallback"),
 			&LaunchFlags::lan_join_port);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_join_browse"),
+			&LaunchFlags::lan_join_browse);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_port", "fallback"),
 			&LaunchFlags::lan_port);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_gametype"), &LaunchFlags::lan_gametype);
@@ -124,6 +126,10 @@ String LaunchFlags::lan_join_ip() {
 
 int LaunchFlags::lan_join_port(int fallback) {
 	return opennova::launch_lan_join_endpoint(parse(), fallback).port;
+}
+
+bool LaunchFlags::lan_join_browse() {
+	return opennova::launch_lan_join_endpoint(parse(), 0).browse;
 }
 
 int LaunchFlags::lan_port(int fallback) {

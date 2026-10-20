@@ -38,6 +38,9 @@
 //                               through the menu's Start path (no navigation).
 //   --lan-host <mission.bms>    boot as a co-op LAN listen host on that mission.
 //   --lan-join <ip[:port]>      boot as a LAN joiner dialing that host.
+//   --lan-join browse[:port]    boot as a LAN joiner that searches as the LAN
+//                               screen does and joins the row found on that
+//                               port (the first row without one).
 //   --lan-port <n>              host bind port (1..65535; else the retail default).
 //   --lan-gametype <n|0xN>      numeric g_GameType override; absent = auto
 //                               (derived from the mission).
@@ -121,7 +124,7 @@ struct LaunchFlags {
     bool loose_root = false;       // --loose-root
     std::string mission;           // --mission <name.bms>
     std::string lan_host;          // --lan-host <mission.bms>
-    std::string lan_join;          // --lan-join <ip[:port]>, verbatim
+    std::string lan_join;          // --lan-join <ip[:port]> or browse[:port], verbatim
     int lan_port = 0;              // --lan-port; 0 = unset (1..65535 accepted)
     int lan_gametype = -1;         // --lan-gametype; -1 = auto (>= 0 accepted)
     int lan_mode = 0;              // --lan-mode; 0 = unset (1..4 accepted)
@@ -189,10 +192,13 @@ int launch_lan_mode(const LaunchFlags &flags, int fallback);
 int launch_lan_max_players(const LaunchFlags &flags, int fallback);
 
 // A joiner's dial target from `--lan-join <ip[:port]>`: no flag reads an
-// empty ip; a missing or malformed port reads `default_port`.
+// empty ip; a missing or malformed port reads `default_port`. The host
+// `browse` (any case) is no address: `browse` is set, `ip` stays empty, and
+// the port names the row to join.
 struct LanEndpoint {
     std::string ip;
     int port = 0;
+    bool browse = false;
 };
 LanEndpoint launch_lan_join_endpoint(const LaunchFlags &flags, int default_port);
 

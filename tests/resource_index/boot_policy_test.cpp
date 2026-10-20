@@ -213,6 +213,17 @@ void test_lan_fallbacks_and_join_endpoint() {
     CHECK(full.ip == "192.168.10.120" && full.port == 32770);
     const LanEndpoint junk = launch_lan_join_endpoint(parse_launch_flags({"--lan-join", "10.0.0.2:zz"}), 32768);
     CHECK(junk.ip == "10.0.0.2" && junk.port == 32768);
+    CHECK(!absent.browse && !bare.browse && !full.browse && !junk.browse);
+
+    // `browse` is no address: the join searches and takes the row on the port.
+    const LanEndpoint browse = launch_lan_join_endpoint(
+        parse_launch_flags({"--lan-join", "browse:32786"}), 32768);
+    CHECK(browse.browse && browse.ip.empty() && browse.port == 32786);
+    const LanEndpoint any_row = launch_lan_join_endpoint(parse_launch_flags({"--lan-join", " Browse "}), 0);
+    CHECK(any_row.browse && any_row.ip.empty() && any_row.port == 0);
+    const LanEndpoint bad_port = launch_lan_join_endpoint(
+        parse_launch_flags({"--lan-join", "BROWSE:70000"}), 0);
+    CHECK(bad_port.browse && bad_port.ip.empty() && bad_port.port == 0);
 }
 
 void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {

@@ -37,7 +37,9 @@ Godot direct-launch flags, passed after `--` (the full table is
 - Host: `--lan-host <mission.bms>`, `--lan-port`, `--callsign`, `--lan-gametype`,
   `--lan-mode`, `--lan-max-players`
 - Joiner: `--lan-join <ip[:port]>`, `--callsign` (the mission comes from the wire,
-  D-NET-194)
+  D-NET-194); `--lan-join browse[:port]` searches as the LAN screen does and
+  joins the row on that port (the parity runner's joiner: a broadcast browse,
+  as a retail joiner's)
 - Both: `--resource-dir`, `/exp`, `--capture-pcap`, `--mcp-port` (the
   `opennova-game` endpoint, [docs/mcp.md](../docs/mcp.md))
 

@@ -25,6 +25,7 @@ func test_runtime_flags_read_through_the_override() -> void:
 	assert_eq(LaunchFlags.lan_host(), "ASH_I5A.BMS")
 	assert_eq(LaunchFlags.lan_join_ip(), "192.168.10.120")
 	assert_eq(LaunchFlags.lan_join_port(32768), 32770)
+	assert_false(LaunchFlags.lan_join_browse())
 	assert_eq(LaunchFlags.lan_port(1), 32768)
 	assert_eq(LaunchFlags.lan_gametype(), 0x10020)
 	assert_eq(LaunchFlags.lan_mode(1), 3)
@@ -47,6 +48,7 @@ func test_absent_flags_fall_back() -> void:
 	assert_eq(LaunchFlags.lan_host(), "")
 	assert_eq(LaunchFlags.lan_join_ip(), "")
 	assert_eq(LaunchFlags.lan_join_port(32768), 32768)
+	assert_false(LaunchFlags.lan_join_browse())
 	assert_eq(LaunchFlags.lan_port(32768), 32768)
 	assert_eq(LaunchFlags.lan_gametype(), -1)
 	assert_eq(LaunchFlags.lan_mode(1), 1)
@@ -59,6 +61,19 @@ func test_absent_flags_fall_back() -> void:
 	assert_eq(LaunchFlags.resource_dir(), "")
 	assert_false(LaunchFlags.resource_dir_given())
 	assert_false(LaunchFlags.loose_override_enabled())
+
+
+# `--lan-join browse[:<port>]` names no address: the joiner searches and joins
+# the row on the port (any row without one), so no dial address reads.
+func test_lan_join_browse_names_no_address() -> void:
+	LaunchFlags.set_args_override(PackedStringArray(["--lan-join", "browse:32786"]))
+	assert_true(LaunchFlags.lan_join_browse())
+	assert_eq(LaunchFlags.lan_join_ip(), "")
+	assert_eq(LaunchFlags.lan_join_port(0), 32786)
+	LaunchFlags.set_args_override(PackedStringArray(["--lan-join", "BROWSE"]))
+	assert_true(LaunchFlags.lan_join_browse())
+	assert_eq(LaunchFlags.lan_join_ip(), "")
+	assert_eq(LaunchFlags.lan_join_port(0), 0)
 
 
 func test_resource_dir_without_a_value_is_given_but_empty() -> void:

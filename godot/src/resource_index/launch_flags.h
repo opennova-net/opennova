@@ -41,6 +41,8 @@ public:
 	static String lan_host();
 	static String lan_join_ip();
 	static int lan_join_port(int fallback);
+	// `--lan-join browse[:port]`: search, then join the row on the port.
+	static bool lan_join_browse();
 	static int lan_port(int fallback);
 	// -1 = auto (derive the game type from the mission).
 	static int lan_gametype();

@@ -279,6 +279,44 @@ func test_browse_row_ci_reaches_the_joiner_connection() -> void:
 	assert_eq(int(joiner.get_joiner_network_diagnostics()["client_index"]), row.client_index)
 
 
+# `--lan-join browse:<port>` (the parity runner's joiner) joins as a player does
+# from the LAN screen: a search on LanSession's defaults, then the join from the
+# row on that port as its discovered session (JoinTarget.from_lan_row). A row on
+# another port is passed over; the row taken ends the search. This row's
+# spectator flag stops the join at the role question, so no world load starts.
+func test_launch_browse_joins_the_row_on_its_port() -> void:
+	LaunchFlags.set_args_override(PackedStringArray(["--lan-join", "browse:32786"]))
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := NetSessionController.new()
+	add_child_autofree(controller)
+	controller.setup(null, null, null, layer)
+	assert_true(controller.maybe_launch_lan_from_flags(), "the browse form is a join launch")
+	var browse := controller.get_node_or_null("LaunchBrowse") as LanSession
+	assert_not_null(browse, "the launch starts a LAN search")
+	if browse == null:
+		LaunchFlags.clear_args_override()
+		return
+	assert_null(controller.get_node_or_null("SpectatorPreflight"),
+			"the search is the join's only enumeration")
+	var other := LanServerRow.make("Other Host", "192.0.2.7", 32770)
+	browse.servers_changed.emit([other])
+	assert_null(layer.get_node_or_null("JoinRolePrompt"), "a row on another port is passed over")
+	var row := LanServerRow.make("Untitled ", "192.0.2.8", 32786)
+	row.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS
+	row.client_index = 5
+	browse.servers_changed.emit([other, row])
+	assert_false(browse.is_browsing(), "the row taken ends the search")
+	var prompt := layer.get_node_or_null("JoinRolePrompt")
+	assert_not_null(prompt, "the row's session goes on to the join")
+	if prompt != null:
+		var labels := prompt.find_children("*", "Label", true, false)
+		assert_gt(labels.size(), 0)
+		if labels.size() > 0:
+			assert_eq((labels[0] as Label).text, "Join Untitled ", "the join is the row's")
+	LaunchFlags.clear_args_override()
+
+
 func test_invalid_port_range_fails_without_browsing() -> void:
 	var browser := LanSession.new()
 	add_child_autofree(browser)
