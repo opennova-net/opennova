@@ -185,12 +185,16 @@ int test_closures() {
 }
 
 // A particle definition of the shipped files' fuller shape: `child` its child, `curves` its curve keys
-// whole ("alpha_func = fade", "g2_scale_func = burn invert"), a second layer when `layers` is 2.
+// whole ("alpha_func = fade", "g2_scale_func = burn invert"), a second layer when `layers` is 2, `rate`
+// its emit rate, `flags` its flags line's words (none: no flags line), `max_override` its emit_maxoverride.
 std::string shaped_particle(const std::string &id, const std::string &child, const std::vector<std::string> &curves,
-                            int layers = 1) {
+                            int layers = 1, int rate = 30, const std::string &flags = "", int max_override = 0) {
 	std::string out = "[particledef]\n{\nid\t= " + id + ";\n";
 	if (!child.empty()) out += "child_id\t= " + child + ";\n";
-	out += "move\t=  NORMAL ;\n\n\temit_dur\t= 0.300;\n\temit_rate\t= 30.000;\n\temit_burst\t= 2;\n\temit_dur\t= 0.300;\n"
+	if (!flags.empty()) out += "flags\t=  " + flags + " ;\n";
+	out += "move\t=  NORMAL ;\n\n\temit_dur\t= 0.300;\n\temit_rate\t= " + std::to_string(rate) +
+	       ".000;\n\temit_burst\t= 2;\n\temit_maxoverride\t= " + std::to_string(max_override) +
+	       ";\n\temit_dur\t= 0.300;\n"
 	       "\tage\t= 0.500;\n\tscale\t= 0.400;\n\tspeed\t= 3.000;\n\tspread\t= 45.000;\n\tgravity\t= 1.000;\n";
 	for (const std::string &curve : curves) out += "\t" + curve + ";\n";
 	for (int layer = 1; layer <= layers; ++layer)
@@ -205,7 +209,12 @@ std::string shaped_particle(const std::string &id, const std::string &child, con
 // file (5735; table.ptl's and troytabl.ptl's tables) or of their own, reversed (1256) or inverted (4), an
 // emit rate curve (26); an effect (37), a particle (160) and a table (104) a later file defines again, the
 // first registration standing; a member named twice in one effect (3); an effect of no members (3); a
-// member named in another case than its particle's (3); child chains two deep (44).
+// member named in another case than its particle's (3); child chains two deep (44); and the definitions
+// whose spawn takes their own branches: a child emitting faster than the game's tick (fx_cmkp.ptl's
+// fx_carm_kids at 100 a second, veh_joexp.ptl's m1a1_smkchildf_trail at 75), a child whose emit rate rides
+// a curve (foliage.ptl's jtreegrpl_faldebt on falldeb_table), a particle capped by emit_maxoverride
+// (bugSwarm.ptl's Mosquito_Swarm_L2 at 80; 13 in all), the water-plane flags ABOVEH20 (24 particles,
+// fx_carm_kids among them) and BELOWH20 (6).
 std::vector<particle::EffectCatalogDocument> shipped_shapes() {
 	return {
 	        document("a_fx.ptl",
@@ -230,6 +239,14 @@ std::vector<particle::EffectCatalogDocument> shipped_shapes() {
 	                                     effect_text("Effect_Grit", "Hit_Grit")),
 	        document("table.ptl", table_text("fade", 255) + table_text("grow", 128) + table_text("slow", 64)),
 	        document("stock.ptl", effect_text("stockeffect", "Stock_Puff") + shaped_particle("Stock_Puff", "", {})),
+	        document("water_fx.ptl",
+	                 effect_text("Effect_Kids", "Kid_Parent") + shaped_particle("Kid_Parent", "Kid_Fast", {}) +
+	                         shaped_particle("Kid_Fast", "", {}, 1, 100, "AMBIENTCOLOR ABOVEH20") +
+	                         effect_text("Effect_Fall", "Fall_Parent") +
+	                         shaped_particle("Fall_Parent", "Fall_Debris", {}) +
+	                         shaped_particle("Fall_Debris", "", {"emit_rate_func = slow"}, 1, 60) +
+	                         effect_text("Effect_Swarm", "Swarm_Bugs") +
+	                         shaped_particle("Swarm_Bugs", "", {}, 1, 30, "FOREVEREMIT BELOWH20", 80)),
 	};
 }
 
@@ -258,7 +275,7 @@ int test_shipped_shapes() {
 			spawned += a.status == particle::EffectSpawnStatus::Spawned;
 			shadowed += closure.shadowed;
 		}
-	TEST_EXPECT(effects == 6 && spawned == 5 && shadowed == 1);
+	TEST_EXPECT(effects == 9 && spawned == 8 && shadowed == 1);
 	// The fire is the first file's (its two-layer flame), the shadowed one's member never asked for.
 	const particle::EffectClosure fire = particle::effect_closure(documents, "EFFECT_FIRE");
 	TEST_EXPECT(fire.source == "a_fx.ptl" && fire.members == std::vector<std::string>({"Fire_Flame"}) &&

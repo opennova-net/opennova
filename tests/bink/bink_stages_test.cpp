@@ -88,12 +88,15 @@ int32_t floor_shift(int64_t value, unsigned count) {
 // --- the Huffman trees -------------------------------------------------------------------------------
 
 // A tree as the stream spells it: number 0 (the identity, no more bits), an explicit symbol prefix (the
-// rest of the symbols follow in order), or the merge passes with depths 0 and 1 and every choice bit
-// set, which swaps each pair and then each pair of pairs: 3 2 1 0 7 6 5 4 11 10 9 8 15 14 13 12 (worked
-// by hand from the merge rule).
+// rest of the symbols follow in order), or the merge passes with depths 0 and 1. Merged: every choice
+// bit set, the second list taken first, which swaps each pair and then each pair of pairs: 3 2 1 0 7 6 5
+// 4 11 10 9 8 15 14 13 12. Interleaved: depth 0's choices clear (each pair's first taken, its second
+// copied after), depth 1's 0 1 0 in each group (first, second, first, then the second list's last
+// copied after the first ran out): 0 2 1 3 4 6 5 7 8 10 9 11 12 14 13 15. Both worked by hand from the
+// merge rule.
 struct TreeSpec {
 	uint8_t number = 0;
-	enum Form { Identity, Prefix, Merged } form = Identity;
+	enum Form { Identity, Prefix, Merged, Interleaved } form = Identity;
 	std::vector<uint8_t> prefix;
 
 	std::array<uint8_t, 16> symbols() const {
@@ -106,6 +109,10 @@ struct TreeSpec {
 		} else if (form == Merged) {
 			for (uint8_t group = 0; group < 16; group += 4)
 				for (uint8_t i = 0; i < 4; ++i) out[group + i] = static_cast<uint8_t>(group + 3 - i);
+		} else if (form == Interleaved) {
+			static constexpr uint8_t kOrder[4] = {0, 2, 1, 3};
+			for (uint8_t group = 0; group < 16; group += 4)
+				for (uint8_t i = 0; i < 4; ++i) out[group + i] = static_cast<uint8_t>(group + kOrder[i]);
 		} else {
 			for (uint8_t s = 0; s < 16; ++s) out[s] = s;
 		}
@@ -126,7 +133,13 @@ struct TreeSpec {
 		}
 		w.write(0, 1);
 		w.write(1, 2);  // the last depth: 1
-		for (int i = 0; i < 16; ++i) w.write(1, 1);  // 8 merges of depth 0, 4 of depth 1, two bits each
+		if (form == Merged) {
+			for (int i = 0; i < 16; ++i) w.write(1, 1);  // 8 merges of depth 0, 4 of depth 1, two bits each
+			return;
+		}
+		for (int i = 0; i < 8; ++i) w.write(0, 1);  // depth 0: one bit a pair
+		for (int group = 0; group < 4; ++group)    // depth 1: three bits a group
+			for (uint32_t bit : {0u, 1u, 0u}) w.write(bit, 1);
 	}
 
 	// The symbol's code: its leaf's place in the tree's symbol order, that leaf's code in the retail
@@ -153,6 +166,12 @@ TreeSpec merged(uint8_t number) {
 	t.form = TreeSpec::Merged;
 	return t;
 }
+TreeSpec interleaved(uint8_t number) {
+	TreeSpec t;
+	t.number = number;
+	t.form = TreeSpec::Interleaved;
+	return t;
+}
 
 // The bundles in the decoder's order.
 enum Bundle { BlockTypes, SubTypes, Colors, Patterns, XMotion, YMotion, IntraDc, InterDc, Runs, kBundles };
@@ -173,7 +192,7 @@ struct Trees {
 Trees the_trees() {
 	Trees t;
 	t.bundle[BlockTypes] = prefixed(1, {6, 0, 1});
-	t.bundle[SubTypes] = identity();
+	t.bundle[SubTypes] = interleaved(5);
 	t.bundle[Colors] = prefixed(7, {5, 9, 0});
 	t.bundle[Patterns] = prefixed(2, {0});
 	t.bundle[XMotion] = identity();
@@ -205,6 +224,9 @@ struct Run {
 	std::vector<uint8_t> colors;  // one when `repeat`, else `length`
 };
 
+// Coefficients by their coded place (0..63, kCoefficientScan's index), each a nonzero value.
+using Coefficients = std::vector<std::pair<int, int>>;
+
 enum class Kind { Copy, Scaled, ScaledSkip, Motion, RunBlock, Residue, IntraDct, Fill, InterDct, Pattern, Raw };
 
 struct Block {
@@ -220,7 +242,8 @@ struct Block {
 	int dx = 0, dy = 0;
 	int dc = 0;
 	unsigned q = 0;
-	bool ac = false;  // a DCT with one AC coefficient, 15 at the first coded place after the DC
+	Coefficients coefficients;  // a DCT's AC terms, a residue's terms
+	bool run_out = true;        // a residue's event count ends the walk at its last term
 };
 
 Block copy() { return Block{}; }
@@ -265,17 +288,19 @@ Block motion(int dx, int dy) {
 	b.dy = dy;
 	return b;
 }
-Block residue(int dx, int dy) {
+Block residue(int dx, int dy, Coefficients terms, bool run_out = true) {
 	Block b = motion(dx, dy);
 	b.kind = Kind::Residue;
+	b.coefficients = std::move(terms);
+	b.run_out = run_out;
 	return b;
 }
-Block intra(int dc, unsigned q, bool ac = false) {
+Block intra(int dc, unsigned q, Coefficients ac = {}) {
 	Block b;
 	b.kind = Kind::IntraDct;
 	b.dc = dc;
 	b.q = q;
-	b.ac = ac;
+	b.coefficients = std::move(ac);
 	return b;
 }
 Block inter(int dx, int dy, int dc, unsigned q) {
@@ -310,6 +335,136 @@ using Inline = std::vector<std::pair<uint32_t, unsigned>>;  // a row's in-block 
 int dc_only_pixel(int dc, uint32_t quant) {
 	const int32_t v = dc == 0 ? 0 : floor_shift(static_cast<int64_t>(dc) * quant, 11);
 	return floor_shift(static_cast<int64_t>(v) + 0x7f, 8);
+}
+
+// A value's top bit (its magnitude plane), -1 for 0.
+int top_bit(int value) {
+	int magnitude = std::abs(value), bit = -1;
+	while (magnitude != 0) {
+		++bit;
+		magnitude >>= 1;
+	}
+	return bit;
+}
+
+// The coefficient list both the DCT and the residue are coded through, walked as the decoder walks it
+// plane by plane, with the encoder's answers: an entry is active at the plane of the top bit of the
+// coefficients it stands for (a mode 0 entry at c for c..c+19, a mode 1 entry for its 16, a mode 2 entry
+// for its 4, a mode 3 entry for its one); of a group's four read at once, each is deferred (a mode 3
+// entry ahead of the list, met from the next plane on) unless its own top bit is this plane.
+struct ListWalk {
+	struct Entry {
+		int coordinate = 0;
+		int mode = 0;
+	};
+	std::array<int, 64> values{};
+	std::array<Entry, 128> list{};
+	int start = 64, end = 64;
+
+	ListWalk(const Coefficients &terms, std::initializer_list<Entry> initial) {
+		for (const auto &term : terms) values[term.first] = term.second;
+		for (const Entry &entry : initial) list[end++] = entry;
+	}
+
+	int span_top(const Entry &e) const {
+		const int last = e.coordinate + (e.mode == 0 ? 19 : e.mode == 1 ? 15 : e.mode == 2 ? 3 : 0);
+		int top = -1;
+		for (int c = e.coordinate; c <= last && c < 64; ++c) top = std::max(top, top_bit(values[c]));
+		return top;
+	}
+
+	// One plane; `place(c)` writes coefficient c's own bits and answers false where the walk ends there.
+	template <typename Place>
+	bool pass(Inline &bits, int plane, Place place) {
+		for (int position = start; position < end;) {
+			Entry &e = list[position];
+			if ((e.coordinate | e.mode) == 0) {
+				++position;
+				continue;
+			}
+			const bool active = span_top(e) == plane;
+			bits.push_back({active ? 1u : 0u, 1});
+			if (!active) {
+				++position;
+				continue;
+			}
+			int c = e.coordinate;
+			const int mode = e.mode;
+			if (mode == 0) e = {c + 4, 1};
+			if (mode == 0 || mode == 2) {
+				if (mode == 2) {
+					e = {0, 0};
+					++position;
+				}
+				for (int i = 0; i < 4; ++i, ++c) {
+					const bool defer = top_bit(values[c]) != plane;
+					bits.push_back({defer ? 1u : 0u, 1});
+					if (defer) list[--start] = {c, 3};
+					else if (!place(c)) return false;
+				}
+				continue;
+			}
+			if (mode == 1) {
+				e.mode = 2;
+				for (int i = 0; i < 3; ++i) {
+					c += 4;
+					list[end++] = {c, 2};
+				}
+				continue;
+			}
+			e = {0, 0};
+			++position;
+			if (!place(c)) return false;
+		}
+		return true;
+	}
+};
+
+// A DCT's AC bits: the plane count, each plane's walk, a coefficient read at its top plane as its bits
+// below the top one and its sign (a sign alone at plane 0).
+void dct_bits(Inline &bits, const Coefficients &terms) {
+	ListWalk walk(terms, {{4, 0}, {24, 0}, {44, 0}, {1, 3}, {2, 3}, {3, 3}});
+	int planes = 0;
+	for (const auto &term : terms) planes = std::max(planes, top_bit(term.second) + 1);
+	bits.push_back({static_cast<uint32_t>(planes), 4});
+	for (int plane = planes - 1; plane >= 0; --plane)
+		walk.pass(bits, plane, [&](int c) {
+			const int value = walk.values[c];
+			if (plane != 0)
+				bits.push_back({static_cast<uint32_t>(std::abs(value)) - (1u << plane), static_cast<unsigned>(plane)});
+			bits.push_back({value < 0 ? 1u : 0u, 1});
+			return true;
+		});
+}
+
+// A residue's bits: the event count (one less than its events where `run_out`, so the walk ends at the last
+// one; else 127, the walk running every plane out), the top plane, then per plane the refinements of the
+// terms already placed (each set bit of a term below its top an event) and the walk (a term placed: its
+// sign, an event).
+void residue_bits(Inline &bits, const Coefficients &terms, bool run_out) {
+	ListWalk walk(terms, {{4, 0}, {24, 0}, {44, 0}, {0, 2}});
+	int events = 0, top = 0;
+	for (const auto &term : terms) {
+		for (int m = std::abs(term.second); m != 0; m >>= 1) events += m & 1;
+		top = std::max(top, top_bit(term.second));
+	}
+	int remaining = run_out ? events - 1 : 127;
+	bits.push_back({static_cast<uint32_t>(remaining), 7});
+	bits.push_back({static_cast<uint32_t>(top), 3});
+	std::vector<int> placed;
+	for (int plane = top; plane >= 0; --plane) {
+		for (int c : placed) {
+			const bool refine = ((std::abs(walk.values[c]) >> plane) & 1) != 0;
+			bits.push_back({refine ? 1u : 0u, 1});
+			if (refine && --remaining < 0) return;
+		}
+		const bool more = walk.pass(bits, plane, [&](int c) {
+			placed.push_back(c);
+			bits.push_back({walk.values[c] < 0 ? 1u : 0u, 1});
+			return --remaining >= 0;
+		});
+		if (!more) return;
+	}
 }
 
 class PlaneEncoder {
@@ -469,18 +624,16 @@ private:
 			push(YMotion, r, b.dy);
 			for (int i = 0; i < 64; ++i) cells[i] = ref_.at(x0 + b.dx + i % 8, y0 + b.dy + i / 8);
 			if (b.kind == Kind::Residue) {
-				// One event: the walk's list (4,0) (24,0) (44,0) idle, (0,2) active, its first two places
-				// placed at mask 1 (+1 at scan 0, -1 at scan 1), the second ending the walk.
-				bits.push_back({1, 7});
-				bits.push_back({0, 3});
-				for (uint32_t bit : {0u, 0u, 0u, 1u, 0u, 0u, 0u, 1u}) bits.push_back({bit, 1});
-				const int at0 = detail::kCoefficientScan[0], at1 = detail::kCoefficientScan[1];
-				if (cells[at0] >= 0) cells[at0] = static_cast<int16_t>((cells[at0] + 1) & 0xff);
-				if (cells[at1] >= 0) cells[at1] = static_cast<int16_t>((cells[at1] - 1) & 0xff);
+				// Each term added at its scan place over the motion copy.
+				residue_bits(bits, b.coefficients, b.run_out);
+				for (const auto &term : b.coefficients) {
+					int16_t &cell = cells[detail::kCoefficientScan[term.first]];
+					if (cell >= 0) cell = static_cast<int16_t>((cell + term.second) & 0xff);
+				}
 			}
 			if (b.kind == Kind::InterDct) {
 				push(InterDc, r, b.dc);
-				bits.push_back({0, 4});
+				dct_bits(bits, {});
 				bits.push_back({b.q, 4});
 				const int add = dc_only_pixel(b.dc, detail::kInterQuant[b.q][0]);
 				for (int16_t &c : cells)
@@ -505,21 +658,11 @@ private:
 		}
 		case Kind::IntraDct:
 			push(IntraDc, r, b.dc);
-			if (b.ac) {
-				// Four magnitude planes: at bit 3 the list (4,0) (24,0) (44,0) idle, (1,3) active (low bits
-				// 7 and sign +: the coefficient 15), (2,3) (3,3) idle; the three lower planes all idle (the
-				// placed entry cleared, five left to answer).
-				bits.push_back({4, 4});
-				for (uint32_t bit : {0u, 0u, 0u, 1u}) bits.push_back({bit, 1});
-				bits.push_back({7, 3});
-				for (int i = 0; i < 3; ++i) bits.push_back({0, 1});
-				for (int i = 0; i < 15; ++i) bits.push_back({0, 1});
-				std::fill(cells.begin(), cells.end(), int16_t(-1));
-			} else {
-				bits.push_back({0, 4});
+			dct_bits(bits, b.coefficients);
+			if (!b.coefficients.empty()) std::fill(cells.begin(), cells.end(), int16_t(-1));  // the shape tests'
+			else
 				std::fill(cells.begin(), cells.end(),
 				          static_cast<int16_t>(dc_only_pixel(b.dc, detail::kIntraQuant[b.q][0]) & 0xff));
-			}
 			bits.push_back({b.q, 4});
 			break;
 		case Kind::Fill:
@@ -596,6 +739,13 @@ PlaneSpec chroma(std::vector<std::vector<Block>> rows) {
 	return p;
 }
 
+// A DCT's AC terms spread over the coefficient list's every path: an initial single term at plane 0 (a
+// sign alone), one at plane 1, the first group entered at plane 3 with its four read and deferred, its
+// expansion (mode 1) and the expanded groups (mode 2), deferred terms met later as single entries, the
+// second and third groups' terms, the last place.
+const Coefficients kSpreadTerms = {{1, 1},  {3, -2},  {4, 5},   {6, -1},  {9, 3},  {13, 9},
+                                   {20, -4}, {25, 1}, {30, 6}, {47, -7}, {63, 2}};
+
 std::vector<Frame> the_frames() {
 	std::vector<Frame> frames(2);
 	// Frame 0: every intra kind; the block types and colors refilled row by row.
@@ -609,10 +759,10 @@ std::vector<Frame> the_frames() {
 	         scaled(run_block(5, {repeat_run(16, 60), spread_run(16, 61), repeat_run(16, 90), repeat_run(16, 120)})),
 	         scaled(fill(180))},
 	        {scaled_skip(), scaled_skip(), scaled_skip(), scaled_skip()},
-	        {scaled(intra(700, 1)), intra(1024, 0), intra(1024, 0, true), fill(33), raw(2), pattern(50, 150, 2),
+	        {scaled(intra(700, 1)), intra(1024, 0), intra(1024, 0, {{1, 15}}), fill(33), raw(2), pattern(50, 150, 2),
 	         run_block(12, {spread_run(16, 30), repeat_run(16, 77), repeat_run(16, 88), spread_run(15, 100)}, 222)},
 	        {scaled_skip(), run_block(0, {repeat_run(16, 70), repeat_run(16, 80), repeat_run(16, 90), repeat_run(16, 100)}),
-	         fill(200), fill(201), fill(202), raw(3), fill(33)},
+	         fill(200), intra(1024, 0, {{2, 15}}), intra(1024, 0, kSpreadTerms), raw(3), fill(33)},
 	};
 	// The chroma: fills, the block types in one repeat, V's colors apart, U's one repeated colour.
 	std::vector<std::vector<Block>> v_rows(2), u_rows(2);
@@ -632,8 +782,11 @@ std::vector<Frame> the_frames() {
 	f1.y.per_row[XMotion] = true;
 	f1.y.per_row[YMotion] = true;
 	f1.y.rows = {
-	        {copy(), copy(), copy(), copy(), copy(), motion(3, 2), motion(-4, 1), residue(-8, 0)},
-	        {inter(0, 0, -64, 0), inter(1, -1, 40, 2), copy(), copy(), copy(), copy(), copy(), copy()},
+	        {copy(), copy(), copy(), copy(), copy(), motion(3, 2), motion(-4, 1), residue(-8, 0, {{0, 1}, {1, -1}})},
+	        // The residues: one ending on a refinement, one on a deferred single term, one run out over every
+	        // plane (its cleared entries met again, a group expanded, a deferred term placed mid-walk).
+	        {inter(0, 0, -64, 0), inter(1, -1, 40, 2), copy(), copy(), copy(), residue(0, 0, {{0, 3}, {5, 2}}),
+	         residue(2, -3, {{0, 2}, {1, 1}}), residue(-5, 4, {{4, 5}, {5, -1}, {9, 1}, {2, 2}, {30, 3}}, false)},
 	        {scaled(raw(4)), scaled(fill(77)), raw(5), pattern(60, 160, 3), fill(44), motion(0, -5)},
 	        {scaled_skip(), scaled_skip(),
 	         run_block(15, {spread_run(16, 20), repeat_run(16, 40), spread_run(16, 120), repeat_run(16, 210)}),
@@ -782,14 +935,14 @@ void test_truncated_packet() {
 }
 
 // The two frames decoded: each pixel the construction fixes equals the retail YUV law over the expected
-// planes; the AC block's rows alike (an AC term on the first row of coefficients only); the frames
-// pinned.
+// planes; the horizontal AC block's rows alike and the vertical one's columns (a term on the first row,
+// then the first column, of coefficients only); the spread DCT block and the frames pinned.
 void test_frames() {
 	const Built built = build_movie(2);
 	std::string error;
 	auto movie = open_bytes(built.file, error);
 	if (!expect(movie != nullptr, "the built movie opens: " + error)) return;
-	static constexpr uint64_t kPinned[2] = {0xd63a81f7b45a0bc3ull, 0x0f016786b961c7b0ull};
+	static constexpr uint64_t kPinned[2] = {0x0e177a6594a94050ull, 0x0a3075a52747c14aull};
 	for (size_t f = 0; f < built.expected.size(); ++f) {
 		if (!expect(movie->decode_next() == BinkStatus::frame_ready, "frame decodes: " + movie->last_error())) return;
 		const auto &frame = movie->frame();
@@ -824,6 +977,17 @@ void test_frames() {
 			const std::vector<uint8_t> first = row_of(16);
 			expect(rows_alike && *std::min_element(first.begin(), first.end()) != *std::max_element(first.begin(), first.end()),
 			       "an AC term of the first coefficient row varies across the block, not down it");
+			// The vertical AC block (block 4 of row 3, a term at coded place 2: row 1 of the coefficients,
+			// through the column transform): each row one value, the rows not all alike.
+			bool rows_flat = true;
+			std::vector<uint8_t> column;
+			for (uint32_t y = 24; y < 32; ++y) {
+				const uint8_t *row = frame.rgba.data() + (static_cast<size_t>(y) * kWidth + 32) * 4;
+				for (uint32_t x = 1; x < 8; ++x) rows_flat = rows_flat && row[x * 4] == row[0];
+				column.push_back(row[0]);
+			}
+			expect(rows_flat && *std::min_element(column.begin(), column.end()) != *std::max_element(column.begin(), column.end()),
+			       "an AC term of the first coefficient column varies down the block, not across it");
 		}
 		const uint64_t hash = fnv1a64(frame.rgba);
 		std::printf("frame %zu: %zu pixels as built, rgba fnv1a64 0x%016llx\n", f, checked, (unsigned long long)hash);

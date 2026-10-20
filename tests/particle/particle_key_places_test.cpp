@@ -264,6 +264,25 @@ int test_lexical_forms() {
 	for (const particle::KeyPlace &key : read.places.keys)
 		emit_durs += key.block == BlockKind::Particle && key.index == 0 && key.key == "emit_dur";
 	TEST_EXPECT(emit_durs == 2);
+	// The words of the move and flags values (the shipped ones: NORMAL, ORBIT and GRAVITATE; COLLIDEKILL,
+	// AMBIENTCOLOR and the rest), each a name of its own table and of no other; but ONDEATH, which two
+	// shipped particles carry (bounce.ptl's), names no flag (the table has ONMYDEATH) and no move.
+	size_t words = 0;
+	for (const particle::KeyPlace &key : read.places.keys) {
+		if (key.block != BlockKind::Particle || (key.key != "move" && key.key != "flags")) continue;
+		const std::string value = text.substr(key.offset, key.length);
+		for (size_t at = 0; at < value.size();) {
+			const size_t end = std::min(value.find(' ', at), value.size());
+			const std::string word = value.substr(at, end - at);
+			at = end + 1;
+			if (word.empty()) continue;
+			++words;
+			const bool move = key.key == "move";
+			TEST_EXPECT(particle::is_move_flag_name(word) == move &&
+			            particle::is_particle_flag_name(word) == (!move && word != "ONDEATH"));
+		}
+	}
+	TEST_EXPECT(words == 13);
 	return 0;
 }
 } // namespace
