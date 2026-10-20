@@ -4063,15 +4063,22 @@ void test_seat_and_emplacement_keep_subdegree_carrier_pose() {
     CHECK(std::abs(pose.position.y - from_fixed(expected[1])) < 0.001);
     CHECK(std::abs(pose.position.z - from_fixed(expected[2])) < 0.001);
     // The bone resolver must retain the same fractional attitude as its point.
-    CHECK(std::abs(mission_yaw_deg_from_bam_heading(pose.heading) - 0.25) < 0.001);
+    // An addeweap frame's heading is read back off the composed fixed matrix,
+    // which moves it by up to about 0.003 degrees near a quarter turn: retail's
+    // TDH_I3A SUV 0x1015 streams heading 0xC0000000 and its gun 0x1037
+    // 0xBFFF800A (D-NET-513). [orig: Math_FixedPointMatrixToEulerAngles @0x613310]
+    CHECK(std::abs(mission_yaw_deg_from_bam_heading(pose.heading) - 0.25) < 0.005);
     CHECK(std::abs(pose.pitch * kDegreesPerBam - 0.25) < 0.001);
     CHECK(std::abs(pose.roll * kDegreesPerBam + 0.25) < 0.001);
-    // A point without an authored direction falls back to the same full frame.
+    // A point without an authored direction (a zero vector) builds an all-zero
+    // look-at frame, so the composed rotation is zero and every euler reads 0;
+    // the position still rides the full frame (D-NET-513).
+    // [orig: Math_BuildDirectionLookAtMatrix @0x612C90 - the zero arms @0x612CFB,
+    //  @0x612D53, @0x612DF6; Math_FixedPointMatrixToEulerAngles @0x613310]
     point.rot_x = 0;
     CHECK(resolve_model_mounted_pose(model, carrier, anchor, nullptr, 0, pose));
-    CHECK(std::abs(mission_yaw_deg_from_bam_heading(pose.heading) - 0.25) < 0.001);
-    CHECK(std::abs(pose.pitch * kDegreesPerBam - 0.25) < 0.001);
-    CHECK(std::abs(pose.roll * kDegreesPerBam + 0.25) < 0.001);
+    CHECK(pose.heading == 0 && pose.pitch == 0 && pose.roll == 0);
+    CHECK(std::abs(pose.position.x - from_fixed(expected[0])) < 0.001);
     // The attachment's part bound, signed: any negative and an index past the part
     // count ride part 0; the count itself reads past the posed rows in retail and
     // resolves nothing here (D-3DI-8). [orig: Bone_BuildAttachmentMatrix

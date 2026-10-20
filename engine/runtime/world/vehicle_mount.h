@@ -24,6 +24,12 @@ struct MountedPose {
     int32_t heading = 0;
     int32_t pitch = 0;
     int32_t roll = 0;
+    // An addeweap frame the original's fixed / float pipeline composed: its
+    // 16.16 position words, which the occupant takes as they are.
+    // [orig: Math_FixedPointMatrixToEulerAngles @0x613310 (the translation copy
+    //  @0x613481..0x61348C), from Entity_UpdateTransformAndTurret @0x4410DD]
+    bool exact_words = false;
+    int32_t position_q16[3] = {0, 0, 0};
 };
 
 // Seat-type pose/channel predicates (moved beside the mount surface, S7a):

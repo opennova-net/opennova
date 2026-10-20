@@ -18,6 +18,10 @@
 // gun (items.def: no mass) keeps the 5, so a Dune Buggy (mass 3) never wakes its
 // neighbour's gun and a Mark V (mass 114) does: retail's TDH_I3A Mark V pair streams its
 // children awake, its 01TR / ASH_I5A buggy pairs streams theirs asleep.
+//
+// D-NET-513 (the addeweap child pose): the child composes its carrier's matrix with the
+// anchor userpoint through the original's fixed / float pipeline and reads its position
+// and eulers back off the product (test_a_root_anchor_composes_like_retail).
 
 #include <runtime/mission/promote.h>
 #include <runtime/replication/entity_wire_bridge.h>
@@ -180,12 +184,78 @@ void test_a_heavy_hull_wakes_a_neighbours_gun() {
 	CHECK((rig.world.registry.get(b)->flags & 0x40u) == 0);
 }
 
+
+// D-NET-513: retail's addeweap child is its carrier's matrix composed with the
+// userpoint and read back as words [orig: Entity_UpdateTransformAndTurret @0x440CA0 -
+// Bone_BuildAttachmentMatrix @0x44109D, Math_FixedPointMatrixToEulerAngles @0x4410DD].
+// Oracle: the TDH_I3A host of parity-20261011 (RR; RR-aa streams the same words for
+// the land hulls): each carrier's 0x0D words in, its gun's words out. Each userpoint
+// is its model's (the root part, subobject 0) as the def's addeweap row names it.
+struct ComposeVector {
+	const char *name;
+	int32_t carrier[6]; // x, y, z, yaw, pitch, roll (the 0x0D's position and eulers)
+	int32_t point[3];   // the userpoint's position words (x, y, z)
+	int32_t look[3];    // its direction words (x, y, z)
+	int32_t child[6];
+	bool z_checked;     // a boat bobs its hull between its guns' pose and the record
+};
+
+constexpr int32_t u(uint32_t v) { return static_cast<int32_t>(v); }
+
+void test_a_root_anchor_composes_like_retail() {
+	const ComposeVector vectors[] = {
+		// DSuv1 ewep01: SUV 0x1016 -> gun 0x1038, SUV 0x1015 -> gun 0x1037
+		{"suv 0x1038",
+		 {0x0032e2d9, u(0xffdf4ffc), 0x000f0d32, u(0xaaaa0000), u(0xfe0a75cf), u(0xfea1871d)},
+		 {-50937, -32348, 81435}, {65536, 0, 0},
+		 {0x0032da64, u(0xffe0287e), 0x0010588e, u(0xaaa95548), u(0xfe0a7232), u(0xfea17b6f)},
+		 true},
+		{"suv 0x1037",
+		 {0x003f1750, u(0xffcec497), 0x000e989e, u(0xc0000000), u(0xffb4e0bd), u(0xfd5188e7)},
+		 {-50937, -32348, 81435}, {65536, 0, 0},
+		 {0x003eae28, u(0xffcf8938), 0x000fdfc4, u(0xbfff800a), u(0xffb4e030), u(0xfd5183a3)},
+		 true},
+		// Dbtr801 ewep01: BTR-80 0x1000 -> cannon 0x102D
+		{"btr 0x102d",
+		 {0x00581e8e, u(0xffbb7d04), 0x000fea75, u(0xa7d20000), u(0xfdb3c271), 0x03012a6d},
+		 {88142, -317, 6720}, {65536, 0, 0},
+		 {0x00575ad8, u(0xffba609b), 0x000ff118, u(0xa7d14f6b), u(0xfdb3be09), 0x03012640},
+		 true},
+		// DAAV1 ewep01: AAV 0x100C -> 50cal 0x102E
+		{"aav 0x102e", {0x00186c08, u(0xfbe09ac2), 0x00112928, u(0x82220000), 0, 0},
+		 {-17226, -3289, 76985}, {65536, 0, 0},
+		 {0x0018ae8e, u(0xfbe0ab18), 0x001255e1, u(0x822103f8), 0, 0}, true},
+		// DMrk51 ewep03 (slot 3, subType 2), a direction off every axis: Mark V 0x100E -> 50cal 0x1031
+		{"mark v 0x1031", {0x002c8c79, u(0xfc4ae114), 0x000d6320, 0x40000000, 0, 0},
+		 {176020, -111627, 126513}, {-1438, -65520, 110},
+		 {0x002e407b, u(0xfc4d90ac), 0x000f5049, u(0xff1b9de1), 0x0000620a, u(0xffee7ed5)},
+		 false},
+	};
+	for (const ComposeVector &v : vectors) {
+		const w::CollisionMatrix carrier =
+				w::collision_matrix_from_euler(v.carrier[3], v.carrier[4], v.carrier[5], v.carrier);
+		w::CollisionMatrix child;
+		CHECK(w::collision_matrix_attach_userpoint(carrier, v.point, v.look, child));
+		int32_t euler[3];
+		w::collision_matrix_to_euler(child, euler);
+		const bool same = child.m[3] == v.child[0] && child.m[7] == v.child[1] &&
+				(!v.z_checked || child.m[11] == v.child[2]) && euler[0] == v.child[3] &&
+				euler[1] == v.child[4] && euler[2] == v.child[5];
+		if (!same)
+			std::printf("  %s: %08x %08x %08x  %08x %08x %08x\n", v.name, unsigned(child.m[3]),
+			            unsigned(child.m[7]), unsigned(child.m[11]), unsigned(euler[0]),
+			            unsigned(euler[1]), unsigned(euler[2]));
+		CHECK(same);
+	}
+}
+
 } // namespace
 
 int main() {
 	test_the_settle_keeps_the_trailer_words();
 	test_a_light_hull_leaves_a_neighbours_gun_asleep();
 	test_a_heavy_hull_wakes_a_neighbours_gun();
+	test_a_root_anchor_composes_like_retail();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

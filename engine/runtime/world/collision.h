@@ -310,6 +310,19 @@ bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
                                         const float pose_row_major[16],
                                         CollisionMatrix &out);
 
+// An addeweap child's fixed matrix on a userpoint of its carrier's root part:
+// the carrier matrix as render floats, the userpoint's 16.16 position words
+// (x, y, z) through it, its direction words (x, y, z) as a look-at frame
+// times it, back to Q22 / 16.16. A root part with no animation leaves the
+// bone matrix the carrier's own. False on a non-finite or out-of-range float.
+// [orig: Bone_BuildAttachmentMatrix @0x56C630 (from Entity_UpdateTransformAndTurret
+//  @0x44109D); Math_FixedPointToFloatMatrix4x4_Swizzled @0x611080;
+//  Math_TransformPointByMatrix4x4 @0x40CF20; Math_BuildDirectionLookAtMatrix
+//  @0x612C90; Math_MultiplyMatrix4x4_Float @0x611750;
+//  Math_FloatMatrixToFixedPoint22 @0x611140]
+bool collision_matrix_attach_userpoint(const CollisionMatrix &carrier, const int32_t point[3],
+                                       const int32_t look[3], CollisionMatrix &out);
+
 // The inverse of the euler builder: yaw/pitch/roll (BAM32) back out of a Q22
 // rotation — yaw from row 1 col 0 over row 0 col 0, then the yaw-unrotated
 // pitch from row 2 col 0, then roll. Every product is a 64-bit `>> 22` with no

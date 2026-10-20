@@ -4,6 +4,7 @@
 // (the Godot Transform3D round trip contributed no semantics — its basis
 // conversions are reproduced here explicitly).
 #include <runtime/world/mounted_pose.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/world.h>
 #include <runtime/world/vehicle_motor.h>
 
@@ -194,6 +195,13 @@ bool affine_inverse(const Affine &t, Affine &o) {
 	return true;
 }
 
+// A part matrix that is the identity: the bone pass leaves its parent's.
+bool panm_matrix_is_identity(const ThreediMatrix4x4 &m) {
+	for (int i = 0; i < 16; ++i)
+		if (m.m[i] != ((i % 5) == 0 ? 1.0f : 0.0f)) return false;
+	return true;
+}
+
 // The evaluator's row-major render matrix into the model-world affine — the
 // exact panm_matrix_to_transform mapping (the (-x, y, z) mirror + row-vector
 // transpose).
@@ -273,6 +281,35 @@ bool resolve_model_mounted_pose_from_parts(
 	if (!v3_finite(authored_model_position)) return false;
 
 	if (part_index >= part_count) return false;
+	// An addeweap child on its carrier's root part, the root unanimated (its
+	// rest and live matrices both the identity, so the bone pass leaves the
+	// carrier's own matrix), composes through the original's fixed / float
+	// pipeline word for word: the carrier's placement matrix, the userpoint
+	// through it, the child's position and eulers read back off the product.
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - Bone_BuildAttachmentMatrix
+	//  @0x44109D, Math_FixedPointMatrixToEulerAngles @0x4410DD]
+	if (seat.attachment_frame && part_index == 0 &&
+			panm_matrix_is_identity(rest_parts[0]) && panm_matrix_is_identity(live_parts[0])) {
+		const int32_t point[3] = {up.x, up.y, up.z};
+		const int32_t look[3] = {up.rot_x, up.rot_y, up.rot_z};
+		CollisionMatrix child;
+		if (!collision_matrix_attach_userpoint(entity_placement_matrix(carrier), point, look,
+				child))
+			return false;
+		int32_t euler[3];
+		collision_matrix_to_euler(child, euler);
+		out.exact_words = true;
+		out.position_q16[0] = child.m[3];
+		out.position_q16[1] = child.m[7];
+		out.position_q16[2] = child.m[11];
+		out.position = world::Vec3{static_cast<float>(child.m[3] / 65536.0),
+				static_cast<float>(child.m[7] / 65536.0),
+				static_cast<float>(child.m[11] / 65536.0)};
+		out.heading = euler[0];
+		out.pitch = euler[1];
+		out.roll = euler[2];
+		return true;
+	}
 	const Affine rest_part = affine_from_panm_matrix(
 			rest_parts[static_cast<size_t>(part_index)]);
 	const Affine live_part = affine_from_panm_matrix(
