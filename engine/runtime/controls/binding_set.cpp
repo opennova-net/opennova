@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -542,6 +543,56 @@ std::string display_string_for_token(const BindingSet &set, const std::string &t
     return format_display_string(*rec, (cat[i].flags & 0x200u) != 0u);
   }
   return "???";
+}
+
+std::string keylist_text(const BindingSet &set) {
+  constexpr uint32_t kFiltered = 0x4000000u;
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  struct Row {
+    int code;
+    std::size_t index;  // catalog row
+  };
+  std::vector<Row> rows;
+  for (int code = 0; code < 768; ++code) {
+    const ActionDef *def = action_for_code(code);
+    if (def == nullptr || (def->flags & kFiltered) == 0u) continue;
+    rows.push_back({code, static_cast<std::size_t>(def - cat)});
+  }
+  std::string out;
+  const auto line = [&out](const std::string &text) {
+    for (const char c : text) {
+      if (c == '\n') out += '\r';
+      out += c;
+    }
+  };
+  char buf[512];
+  std::snprintf(buf, sizeof(buf),
+      "v-0x%08x  %d If the Version is out of sync, the CommandCodes may not work sync\n",
+      0x31313230u, static_cast<int>(rows.size()));
+  line(buf);
+  line("//Index    SEQ           Base: Key1    Key2   Mod: Key1    Key2,  Mouse , MMouse,  "
+       "Joy, MJoy,                       Description\n");
+  int index = 0;
+  for (const Row &row : rows) {
+    const ActionDef &def = cat[row.index];
+    const BindingRecord *rec = set.record(static_cast<int>(row.index));
+    const BindingRecord none;
+    const BindingRecord &r = rec != nullptr ? *rec : none;
+    const std::string description = key_help_string("Text", def.token, def.name);
+    const std::string display = format_display_string(r, (def.flags & 0x200u) != 0u);
+    std::snprintf(buf, sizeof(buf),
+        "%4d,            0x%04x,     0x%04x, 0x%04x,     0x%04x, 0x%04x,  0x%04x, 0x%04x, "
+        "0x%02x, 0x%02x, %4d, %s%s, %27s    ,%s    %s\n",
+        index, static_cast<unsigned>(row.code), r.primary, r.secondary, r.primary_mod,
+        r.secondary_mod, r.mouse_mask, r.mouse_mod, r.joy_button, r.joy_mod, row.code,
+        (def.flags & 0x800u) != 0u ? "*" : "", (def.flags & kFiltered) != 0u ? "*" : "",
+        description.c_str(), display.c_str(),
+        (def.flags & 0x800000u) != 0u ? " Action on Key Up only" : "");
+    line(buf);
+    ++index;
+  }
+  return out;
 }
 
 int BindingSet::index_of_token(const std::string &token) const {

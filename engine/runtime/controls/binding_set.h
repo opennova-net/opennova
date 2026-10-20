@@ -80,6 +80,24 @@ class BindingSet;
 //  record's own +4 flags, `test [esi+4], 200h` @0x49715f)]
 std::string display_string_for_token(const BindingSet &set, const std::string &token);
 
+// The console's SAVEKEYS dump, keylist.key's text: a version line with the filtered
+// table's count, a column header, then one line per filtered binding (the records,
+// by action code, whose static flags carry 0x4000000): the filtered index, the live
+// record's code word, both keys, both key modifiers, the mouse mask and modifier,
+// the joystick button and modifier bytes, the code, the SEQ star (flags 0x800), the
+// filter star (0x4000000), the action's "Text" help name right-justified in 27, the
+// in-game display string and " Action on Key Up only" for flags 0x800000. Written
+// in text mode: every line ends CR LF. The lines are fprintf'd as their own format
+// strings, so a '%' in a name would be read as a conversion; no shipped name has one.
+// [orig: KeyBinding_DumpAllToFile @0x54C0A0 - DeleteFileA / fopen("keylist.key",
+//  "a+t") @0x54c0ba..0x54c0ca, the version line @0x54c0f9 (0x31313230 and
+//  dword_2550190), the header @0x54c127, the row format @0x54c252 over
+//  g_FilteredKeyBindings (KeyBinding_BuildFilteredTable @0x54C2B0, run after the
+//  re-lay KeyBinding_SortBySequentialId @0x498260 in Game_InitSubsystems
+//  @0x4a6de7 / @0x4a70a1), KeyBinding_FormatDisplayString @0x496BD0,
+//  KeyHelp_GetStringWithFallback("Text", token, name) @0x54c1c5]
+std::string keylist_text(const BindingSet &set);
+
 struct BindingRecord {
   uint16_t primary = 0;        // slot-1 VK scan (0 = unbound)
   uint16_t secondary = 0;      // slot-2 VK scan

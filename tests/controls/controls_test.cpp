@@ -3,6 +3,7 @@
 // the binding format rules, and the per-device row build against the canonical JO
 // defaults. [orig: aAbsoluteTurnLe @ 0x8159cb; KeyBinding_* @ 0x494c60/0x559a10;
 // UI_PopulateControlMappingList @ 0x55c0c0]
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <set>
@@ -845,6 +846,49 @@ bool test_binding_revision() {
   return true;
 }
 
+// SAVEKEYS' keylist.key (D-NET-710): the version line with the filtered count, the header,
+// then one CR LF line per binding whose static flags carry 0x4000000, by action code: the
+// live record's words, the SEQ and filter stars, the help name right-justified in 27, the
+// display string. move_forward (code 152, flags 0x0C002C05: SEQ 0x800 and the filter bit,
+// no key-up 0x800000) keeps its defaults W / Up.
+// [orig: KeyBinding_DumpAllToFile @0x54C0A0 - the version line @0x54c0f9, the header
+//  @0x54c127, the row format @0x54c252; KeyBinding_BuildFilteredTable @0x54C2B0]
+bool test_keylist_text() {
+  BindingSet set;
+  const std::string text = keylist_text(set);
+  int filtered = 0;
+  int forward_index = -1;
+  for (int code = 0; code < 768; ++code) {
+    const ActionDef *def = action_for_code(code);
+    if (def == nullptr || (def->flags & 0x4000000u) == 0u) continue;
+    if (code == 152) forward_index = filtered;
+    ++filtered;
+  }
+  CHECK(forward_index >= 0, "move_forward (code 152) is in the filtered table");
+  const std::string version = "v-0x31313230  " + std::to_string(filtered) +
+      " If the Version is out of sync, the CommandCodes may not work sync\r\n";
+  CHECK(text.compare(0, version.size(), version) == 0, "the version line and its count");
+  const std::string header =
+      "//Index    SEQ           Base: Key1    Key2   Mod: Key1    Key2,  Mouse , MMouse,  "
+      "Joy, MJoy,                       Description\r\n";
+  CHECK(text.compare(version.size(), header.size(), header) == 0, "the column header");
+  const BindingRecord *rec = set.record(set.index_of_token("move_forward"));
+  CHECK(rec != nullptr, "move_forward's record");
+  char index[8];
+  std::snprintf(index, sizeof(index), "%4d", forward_index);
+  const std::string row = std::string(index) +
+      ",            0x0098,     0x0057, 0x0026,     0x0000, 0x0000,  0x0000, 0x0000, "
+      "0x00, 0x00,  152, **,                     Forward    ," +
+      format_display_string(*rec, false) + "    \r\n";
+  CHECK(text.find(row) != std::string::npos, "move_forward's line");
+  std::size_t lines = 0;
+  for (std::size_t at = text.find("\r\n"); at != std::string::npos;
+       at = text.find("\r\n", at + 2))
+    ++lines;
+  CHECK(lines == static_cast<std::size_t>(filtered) + 2, "one line per filtered binding");
+  return true;
+}
+
 int main() {
   int failed = 0;
 
@@ -881,6 +925,7 @@ int main() {
   RUN_TEST(test_action_codes);
   RUN_TEST(test_head_gate_by_code);
   RUN_TEST(test_binding_revision);
+  RUN_TEST(test_keylist_text);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";
