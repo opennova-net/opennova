@@ -146,13 +146,6 @@ public:
 		uint16_t net_id = 0;                      // packed character/minimap id (entity+0x15C)
 	};
 
-	// S2C 0x53 and 0x6F mutate one shared retail timer-list entry; 0x6C updates
-	// the selected active-window presence byte. Keeping them in
-	// one typed FIFO preserves message order when both tags share a protocol packet;
-	// separate per-tag vectors would necessarily reorder that packet at the runtime fold.
-	using ZoneTimerUpdate =
-			std::variant<ZoneTimerValue, ZoneTimerWindow, ZonePresenceCount>;
-
 	struct PollResult {
 		// Datagrams to send back to the host at the next send boundary: the admission packets
 		// whose sequences this receive allocated (ClientRuntime holds them behind the
@@ -242,7 +235,6 @@ public:
 		// [orig: NapiNPClientMsg_0x00F @0x42e324..0x42e34a -> @0x42e424]
 		bool ammo_pools_set = false;
 		std::array<int32_t, kWorldStateAmmoPoolCount> ammo_pools{};
-		std::vector<ZoneTimerUpdate> zone_timer_updates;
 		// S2C 0x50 leg 1: this poll re-latched OUR OWN team (the same g_LocalTeam
 		// latch the S2C 0x04 tail writes). The binding re-styles friend/foe from it.
 		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — g_LocalTeam store @0x4319db]

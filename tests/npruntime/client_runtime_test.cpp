@@ -5660,6 +5660,77 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 // releases nothing, and the self row's first alive sample is no edge.
 // [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
 //  @0x4C114C, g_ClientDeployHold = 0 @0x4227CE; Server_DeployPlayer @0x5178C5]
+// D-NET-687: one pump holding the self record's respawn and then a 0x53: the respawn arm
+// writes the local player's Position in the receive, so the 0x53 later in the same pump
+// measures from the respawned Position. The frame's stamp put the body at 100 u; the
+// record respawns it at 10 u; the tracked zone sits at 85 u (75 u from the respawn) and
+// the new one at 12 u (2 u): the window is adopted. From the stale 100 u the new zone is
+// 88 u off and the window would not be.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the respawn arm @0x4C1109, the
+//  Position stores @0x4C110F..0x4C111D; NapiNPClientMsg_ZoneTimerWindow @0x428ae0 - the
+//  Position reads @0x428C19..0x428CB1, the compare @0x428CF5]
+bool run_zone_window_adoption_reads_the_pumps_respawn() {
+	const std::string client_scrk = "CLIENT-ZONE-RESPAWN-SCRK";
+	const std::string server_scrk = "SERVER-ZONE-RESPAWN-SCRK";
+	inmatch::ClientRuntime client("ZoneRespawn", [] { return uint64_t{4000}; });
+	client.set_title(&kJo);
+	client.seed_session(
+			0x50607081u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	constexpr uint16_t kSelf = 0x0002;
+	constexpr uint16_t kTracked = 0x1003, kNear = 0x1004;
+	ns::ClientEntityState &self_row = client.state().upsert(kSelf);
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	self_row.cls = EntityClass::Player;
+	client.state().upsert(kTracked).x = w::to_fixed(85.0);
+	client.state().upsert(kNear).x = w::to_fixed(12.0);
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.position = {100.0f, 0.0f, 0.0f};
+	world.cached.local_player = world.registry.spawn(0, body);
+	client.set_local_player_position(world);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	uint32_t tick = 1;
+	auto self_record = [&](uint8_t flags, double x) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = (flags & 0x02u) != 0 ? 0 : 100;
+		FrameUpdateRecord rec;
+		rec.handle = kSelf;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.state_flags = flags;
+		rec.player.pos_x_compressed = network_compress_fixedpoint(w::to_fixed(x));
+		fu.records.push_back(rec);
+		return make_protocol_message(0x0A, encode_frame_update(fu));
+	};
+	auto pump = [&](std::vector<ProtocolMessage> messages) {
+		const std::vector<uint8_t> dg =
+				frame_server_session(server_tx, server_scrk, 1u, std::move(messages));
+		client.receive(dg.data(), dg.size());
+		(void)client.Client_ProcessNetworkFrame(tick++);
+	};
+	pump({self_record(0x00, 100.0)});
+	pump({self_record(0x02, 100.0),
+			make_protocol_message(s2c::ZONE_TIMER_WINDOW,
+					zone_timer_window_body(kTracked, 0, 1, 0, 15, 1))});
+	const inmatch::ClientRuntime::TrackedCaptureWindow &tracked =
+			client.tracked_capture_window();
+	if (!expect(tracked.tracked() && tracked.zone == kTracked,
+			"respawn adoption: the first window is tracked from nothing"))
+		return false;
+	pump({self_record(0x00, 10.0),
+			make_protocol_message(s2c::ZONE_TIMER_WINDOW,
+					zone_timer_window_body(kNear, 0, 1, 0, 15, 1))});
+	return expect(tracked.zone == kNear,
+			"respawn adoption: the 0x53 after the self respawn measures from the respawned "
+			"Position");
+}
+
 bool run_self_respawn_edge_releases_a_revive_deploy() {
 	const std::string client_scrk = "CLIENT-REVIVE-EDGE-SCRK";
 	const std::string server_scrk = "SERVER-REVIVE-EDGE-SCRK";
@@ -8465,6 +8536,7 @@ int main() {
 	                run_split_batch_keeps_deployment_pick_ack_causal() &&
 	                run_unrelated_loadout_cannot_revive_dead_client() &&
 	                run_self_respawn_edge_releases_a_revive_deploy() &&
+	                run_zone_window_adoption_reads_the_pumps_respawn() &&
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
 	                run_queued_gameplay_survives_a_death_before_the_boundary() &&
 	                run_dead_joiner_keeps_pinging_every_boundary() &&

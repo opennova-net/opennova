@@ -216,6 +216,7 @@ void ClientRuntime::apply_zone_timer_window(const ZoneTimerWindow &window) {
 
 void ClientRuntime::set_local_player_position(const world::World &world) {
 	const world::Entity *player = world.registry.get(world.cached.local_player);
+	local_player_present_ = player != nullptr;
 	if (player == nullptr) return;
 	local_player_position_[0] = player->position.x.q16;
 	local_player_position_[1] = player->position.y.q16;
@@ -1279,7 +1280,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				const bool self_row_before = self_before != nullptr;
 				const uint32_t self_respawns_before =
 						self_row_before ? self_before->respawn_revision : 0u;
-				view_.apply(tb.first, tb.second);
+				const uint32_t world_state_before = view_.state().world_state.revision;
+				// The zone messages run at their place in the pump, as every handler does,
+				// so a 0x53 measures from the local Position the handlers before it left
+				// (D-NET-687) [orig: NapiNPClientMsg_ZoneTimerWindow @0x428ae0 - the
+				// Position reads @0x428C19..0x428CB1].
+				if (!apply_zone_timer_body(tb.first, tb.second)) view_.apply(tb.first, tb.second);
 				// The echo of our console line runs the client's command walk at its
 				// place [orig: NapiNPClientMsg_HandleConsoleEcho @0x432BC0].
 				if (tb.first == s2c::CLIENT_CONSOLE_COMMAND) run_console_echo(tb.second);
@@ -1292,9 +1298,27 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					const replication::ClientEntityState *self_after =
 							view_.state().find(joiner_->self_handle());
 					if (self_after != nullptr &&
-							self_after->respawn_revision != self_respawns_before &&
-							joiner_->release_deployment_on_respawn())
-						respawn_release_in_poll = true;
+							self_after->respawn_revision != self_respawns_before) {
+						// The respawn arm writes the local player's Position from the
+						// record in the receive, so the pump's later handlers read it
+						// (D-NET-687) [orig: NetPacket_SerializePlayerState @0x4C09C0 -
+						// the arm @0x4C1109, the stores @0x4C110F..0x4C111D].
+						if (local_player_present_)
+							for (int axis = 0; axis < 3; ++axis)
+								local_player_position_[axis] = self_after->record_sample[axis];
+						if (joiner_->release_deployment_on_respawn())
+							respawn_release_in_poll = true;
+					}
+				}
+				// The 0x0F handler writes the local player's Position the same way
+				// [orig: NapiNPClientMsg_0x00F @0x42E200, the pose stores past its
+				// `g_LocalPlayerEntity` null test].
+				if (tb.first == s2c::WORLD_STATE_LOAD && local_player_present_ &&
+						view_.state().world_state.revision != world_state_before) {
+					const replication::ClientWorldStateLoad &ws = view_.state().world_state;
+					local_player_position_[0] = ws.pos_x;
+					local_player_position_[1] = ws.pos_y;
+					local_player_position_[2] = ws.pos_z;
 				}
 				// Every 0x0F a joiner handles clears the link errors and holds
 				// new ones off for 10 s [orig: NapiNPClientMsg_0x00F — the
@@ -1354,17 +1378,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			if (pr.ammo_pools_set) {
 				authoritative_ammo_pools_ = pr.ammo_pools;
 				++authoritative_ammo_pools_revision_;
-			}
-			for (const JoinerConnection::ZoneTimerUpdate &update :
-			     pr.zone_timer_updates) {
-				if (const auto *value = std::get_if<ZoneTimerValue>(&update))
-					apply_zone_timer_value(*value);
-				else if (const auto *window =
-				         std::get_if<ZoneTimerWindow>(&update))
-					apply_zone_timer_window(*window);
-				else if (const auto *presence =
-				         std::get_if<ZonePresenceCount>(&update))
-					apply_zone_presence_count(*presence);
 			}
 			// The local-team latch has client-session consequences beyond entity state.
 			if (pr.self_team_changed) ++self_team_revision_;

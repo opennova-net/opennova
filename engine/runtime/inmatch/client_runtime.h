@@ -426,7 +426,9 @@ public:
 	// The local player's Position (fixed 16.16), the client handlers' read of
 	// g_LocalPlayerEntity->Position: each role stamps its world's local player
 	// ahead of the client frame (the joiner's L, the listen host's own body);
-	// with none the last stamp stands. The 0x53 adoption distance reads it
+	// with none the last stamp stands. The receive's own Position writes move it in
+	// wire order (a self record's respawn arm, a 0x0F), and the 0x53 adoption distance
+	// reads it at the 0x53's place in the pump (D-NET-687)
 	// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428C19..0x428CB1].
 	void set_local_player_position(const world::World &world);
 	// The bucketed 0..4 quality level the C2S 0x4C report carries and the
@@ -949,6 +951,9 @@ private:
 	void advance_tracked_window();
 	TrackedCaptureWindow tracked_window_;
 	int32_t local_player_position_[3] = {0, 0, 0}; // set_local_player_position
+	// The stamp found a local player (retail's g_LocalPlayerEntity non-null): the
+	// receive's own Position writes (the respawn arm, the 0x0F) land only then.
+	bool local_player_present_ = false;
 	// The client-side 1 Hz revive countdown over the roster: every 63rd frame
 	// each active slot with an entity and a nonzero revive window loses one
 	// second [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA —
