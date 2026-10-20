@@ -989,11 +989,13 @@ void JoinerRole::wire_frame_providers() {
         return skeletal_pose_inputs_for_client(*row, state, context, inputs);
     };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
-	// The replica water/float channel reads the mission water plane
-	// [orig: g_EnvWaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
-	// water in this world).
-	rt.view().set_water_z(
-			world.env.water_z, world.env.water_z != 0);
+	// The replica water/float channel reads the mission water plane raw: retail
+	// keeps no dry sentinel (the word is 0 with no water authored), and the body
+	// updates compare against it unconditionally.
+	// [orig: g_EnvWaterHeightFixed @ 0x26C6454; Environment_InitDefaults
+	//  @0x57C010 (the memset @0x57C011..0x57C01E); Entity_UpdateInfantryPlayerBody @0x4B803C,
+	//  Entity_UpdateInfantryAI @0x4BFAFE]
+	rt.view().set_water_z(world.env.water_z, true);
 	// Replica peer/source spheres are initialized from the exact same typed
 	// items.def/model result as projectile and lighting projections. The
 	// pipeline retains this callback across frames; it reads the kernel the
@@ -1677,8 +1679,9 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 		// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
 		// decoded row has no CameraOffset carrier, so raw fixed position Z is
 		// the bounded projection. Do not invent a standing-eye constant here.
-		const bool below_water = world.env.water_z != 0 &&
-				shooter_row->z < world.env.water_z;
+		// The plane is compared raw (no dry sentinel) [orig: `cmp ecx,
+		// g_EnvWaterHeightFixed` @0x4EC2E4 / @0x4EC87F].
+		const bool below_water = shooter_row->z < world.env.water_z;
 		source.person_with_item_def =
 				shooter_row->cls == EntityClass::Player ||
 				shooter_row->cls == EntityClass::Infantry;

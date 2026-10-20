@@ -156,7 +156,10 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         // @0x24D2118; WeaponAction_Idle @0x5429a6 tests no owner].
         input.auto_reload = world.rules.auto_reload;
         input.current_tick = static_cast<int32_t>(world.logic_tick);
-        input.submerged = world.env.water_z != 0 && owner.position.z.q16 <= world.env.water_z;
+        // The heat window's water gate compares the body Z with the plane raw (no
+        // dry sentinel) [orig: WeaponAction_ProcessFrame @0x540E60 - `cmp eax,
+        // g_EnvWaterHeightFixed; jg` @0x541007..0x54100D].
+        input.submerged = owner.position.z.q16 <= world.env.water_z;
         input.last_tick_of_batch = world.rules.last_tick_of_batch;
         world::WeaponFsmEvents events;
         world::weapon_fsm_tick(def->action_fsm, slot, input, events);
