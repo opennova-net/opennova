@@ -16,7 +16,9 @@
 //     row, 2 on one first loaded at 24); the spin arrows draw each of their four state
 //     rows (the grill's 68); and the typeless APPEARANCE rows, and a TYPE the parse
 //     does not know (death.mnu's one "window"), mark their state and draw nothing (the
-//     grill's 217).
+//     grill's 217). Its FORMS screen draws the forms the shipped screens also hold: a
+//     label at the right of its rect, a PASSWORD edit, and a spin list's IMAGE item whose
+//     texture does not load (the load note naming the item row).
 //  3. Every screen of the base game's menus (assets/) compiles with the base game's
 //     files beside it, as an install serves its menus.
 // [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60; CUIStringTable_LookupString

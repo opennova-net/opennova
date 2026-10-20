@@ -200,3 +200,52 @@
 		</WINDOW>
 	</WINDOW>
 </SCREEN>
+<!-- A label drawn at the right of its rect, a PASSWORD edit and a spin list's IMAGE item whose -->
+<!-- texture no strip supplies (its load note names the item row), as shipped screens hold them. -->
+<SCREEN>
+	<NAME>FORMS</NAME>
+	<WINDOW type="window" name="FORMS_MAIN">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>800</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<FONT>
+			<NAME>%DEF_FONTNAME%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+		<WINDOW type="button" name="RIGHT_LABEL">
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>20</TOP>
+				<BOTTOM>44</BOTTOM>
+			</POSITION>
+			<STRING justify="RIGHT" vjustify="CENTER">Right</STRING>
+		</WINDOW>
+		<WINDOW type="edit" name="SECRET" PASSWORD>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>50</TOP>
+				<BOTTOM>74</BOTTOM>
+			</POSITION>
+			<STRING edge="5" justify="LEFT" vjustify="CENTER">hidden</STRING>
+		</WINDOW>
+		<WINDOW type="spinlist" name="FLAGS">
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>80</TOP>
+				<BOTTOM>96</BOTTOM>
+			</POSITION>
+			<ITEMS justify="CENTER" vjustify="CENTER">
+				<ITEM type="image" value="0">flag.tga</ITEM>
+			</ITEMS>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>

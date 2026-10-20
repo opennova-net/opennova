@@ -1055,7 +1055,7 @@ struct WriterVector {
 const WriterVector kWriterVectors[] = {
     {"all_widgets.mnu", 6510u, 0x226e6c3d4cd87841ull},
     {"hotkeys.mnu", 7027u, 0x051b5ec893bf1ddcull},
-    {"render_cases.mnu", 7515u, 0x2abc77c9581a74b8ull},
+    {"render_cases.mnu", 8834u, 0xf4c8ca5e92eff389ull},
     {"shipped_forms.mnu", 10552u, 0x2aa7d1861d63e481ull},
     {"widgets.mnu", 2675u, 0xc23947a90b1f90d2ull},
 };
