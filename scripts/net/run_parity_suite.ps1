@@ -245,6 +245,14 @@ function Read-ParityCases {
                 @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
             throw "Parity case '$($case.id)': a rotation case runs RR, RR-aa and RO only"
         }
+        # Only a retail host stages players (onhook_load_debug_snapshot
+        # target_slot); the OpenNova host has no slot pose (run_parity_topology.ps1).
+        if ($case.PSObject.Properties.Name -contains "scenario" -and
+                ((Get-Content -LiteralPath (Join-Path $PSScriptRoot ("scenarios\" + [string] $case.scenario)) -Raw |
+                    ConvertFrom-Json).PSObject.Properties.Name -contains "staging") -and
+                @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
+            throw "Parity case '$($case.id)': a staged scenario runs RR, RR-aa and RO only"
+        }
         # The runner wires a retail late joiner only (run_parity_topology.ps1).
         if ((Get-CaseLateJoiner $case) -and
                 @($caseTopologies | Where-Object { $_ -cin @("RO", "OO") }).Count -gt 0) {

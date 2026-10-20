@@ -1,0 +1,38 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "tdm_host_kill",
+  "mission": "TDH_I3A.bms",
+  "game_type": 65536,
+  "actor": "host",
+  "setup": {"pose": {"position_bms": [37.4, -16.0, 17.1], "yaw": 270, "pitch": -10}},
+  "steps": [
+    {"tick": 30, "down": 149},
+    {"tick": 36, "up": 149},
+    {"tick": 42, "down": 149},
+    {"tick": 48, "up": 149},
+    {"tick": 54, "down": 149},
+    {"tick": 60, "up": 149},
+    {"tick": 66, "down": 149},
+    {"tick": 72, "up": 149},
+    {"tick": 78, "down": 149},
+    {"tick": 84, "up": 149},
+    {"tick": 90, "down": 149},
+    {"tick": 96, "up": 149},
+    {"tick": 102, "down": 149},
+    {"tick": 108, "up": 149},
+    {"tick": 114, "down": 149},
+    {"tick": 120, "up": 149},
+    {"tick": 300, "end": true}
+  ],
+  "settle_seconds": 15,
+  "expect": {
+    "sequence": [
+      {"dir": "S", "kind": "entity_death", "entity": "0x0001"},
+      {"dir": "S", "kind": "tick_seed", "seed": "0"},
+      {"dir": "S", "kind": "death_camera"},
+      {"dir": "S", "kind": "game_event", "type": ["4", "5", "6", "10", "11", "12"], "attacker": "actor", "victim": "1"}
+    ],
+    "count_kinds": ["entity_death", "game_event"],
+    "mask": {"game_event": ["type"]}
+  }
+}

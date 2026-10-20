@@ -1,0 +1,37 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "coop_ai_kill",
+  "mission": "01TR.bms",
+  "game_type": 65568,
+  "actor": "joiner",
+  "staging": [
+    {"slot": 1, "position_bms": [245.4, 838.8, 43.5]}
+  ],
+  "setup": {"pose": {"position_bms": [245.4, 838.8, 43.5], "yaw": 300, "pitch": -6}},
+  "steps": [
+    {"tick": 20, "down": 149},
+    {"tick": 26, "up": 149},
+    {"tick": 32, "down": 149},
+    {"tick": 38, "up": 149},
+    {"tick": 44, "down": 149},
+    {"tick": 50, "up": 149},
+    {"tick": 56, "down": 149},
+    {"tick": 62, "up": 149},
+    {"tick": 68, "down": 149},
+    {"tick": 74, "up": 149},
+    {"tick": 80, "down": 149},
+    {"tick": 86, "up": 149},
+    {"tick": 92, "down": 149},
+    {"tick": 98, "up": 149},
+    {"tick": 104, "down": 149},
+    {"tick": 110, "up": 149},
+    {"tick": 300, "end": true}
+  ],
+  "settle_seconds": 10,
+  "expect": {
+    "sequence": [
+      {"dir": "C", "kind": "fired_round", "shooter": "actor"},
+      {"dir": "S", "kind": "entity_death", "entity": "0x0000"}
+    ]
+  }
+}

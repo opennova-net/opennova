@@ -347,6 +347,21 @@ so the default suite is unchanged. An extension case may add:
 the death screen. It is what judges a dead joiner's send pump (D-NET-529),
 which the main table's 03TR walk no longer reaches since its joiner stands.
 
+E5's gameplay cases each play one scenario (the table below) where the
+standard cases play the input exercise: `tdh-i3a-tdm-hostkill` (the host
+shoots the joiner dead), `tdh-i3a-tdm-fragrespawn` (the joiner's frag kills
+the staged host and itself, then the joiner respawns), `01tr-coop-aikill` (the
+staged joiner shoots a co-op AI), `01tr-coop-drive` (`drive`) and
+`ash-i5a-aas-capture` (`capture_base`). A case whose scenario stages players
+runs RR, RR-aa and RO only, and the suite refuses one that lists OR or OO.
+Three E5 plays have no case: a team switch is a mouse click on the death
+screen's SWAP TEAMS button (`DeathScreen_OnSwapTeams @0x5535B0`, no key and no
+typed command reaches C2S 0x4D); a spectator comes only from a spectator join
+or the permanent-death convert (`Server_ProcessClientRequestSpectatorRespawn
+@0x51C840`), which the pinned `game.cfg` leaves off; and a revive needs a
+class-5 medic (`GameEvent_RevivePlayer @0x517CD0`), which no stock profile
+plays (a retail joiner that picks no class plays class 8).
+
 The summary records `rotation`, `time_limit_minutes` and `late_joiner`, and a
 reference is reused only for a case with the same values.
 
@@ -404,16 +419,24 @@ units apart (`Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A`, skipped on
 the authority), so a joiner pose sets only the heading. A scenario that needs
 a place uses the host as its actor.
 
-A scenario may also list `staging` (E5): `[{"slot": n, "pose": {position_bms,
-yaw, pitch}}]`, poses the host applies to other players' slots after the
-prelude and before the actor's setup, so the snap above carries them to the
-joiner. A retail host applies them through `onhook_load_debug_snapshot`'s
-`target_slot` (an onHook pair with `apply_pose_slot`, opennova-int #74); the
-OpenNova host has no slot pose yet, so a staged scenario runs RR and RO. The
-scenario witness records each staging result, and `compare_scenario.py`
-requires every run to have played the same staging. Whether the joiner's
-in-flight uplinks pull a staged pose back before its client snaps is still to
-be seen on the first staged run.
+A scenario may also list `staging` (E5): `[{"slot": n, "position_bms": [x, y,
+z]}]`, positions the host gives players' slots after the prelude and before
+the actor's setup, so the snap above carries them to the joiner. A retail host
+applies them through `onhook_load_debug_snapshot`'s `target_slot` (an onHook
+pair with `apply_pose_slot`, opennova-int #74); the OpenNova host has no slot
+pose yet, so a staged scenario runs RR and RO. The scenario witness records
+each staging result, and `compare_scenario.py` requires every run to have
+played the same staging. The E5 probe (two TDH RR cells) showed what sticks:
+
+- a position more than two units from where that player stands sticks (its
+  client snaps to it); a nearer one is pulled back by the player's own next
+  uplink. A staging position is at least 3 units from the slot's position
+  when it is staged.
+- z settles onto the ground, so a staging z is on or near the ground.
+- the heading never sticks: the host's next frame carries the player's own
+  heading again. A staging entry has no heading (the runner writes yaw 0 and
+  pitch 0, which the snapshot format needs); a joiner actor's heading comes
+  from its own setup pose.
 
 A scenario whose play ends the joiner's session (E4's `kick`) says
 `"ends_joiner_session": true`. The runner then reads the joiner's closing
@@ -451,4 +474,7 @@ expects.
 | `chat` | TDH_I3A team deathmatch | the joiner opens the command prompt (action 1), types `hello` one `char` a step, return | E4. The line goes out as C2S 0x04 and the host echoes it to its sender alone as S2C 0x06, the line a NETLOG handler did not take (`NapiNPServerMsg_HandleConsoleLine @0x5199D0`; `opennova-wire --scenario-events` prints both as `console_line` / `console_echo` with the text in hex). A retail actor needs an onHook pair with `char` steps (opennova-int #73); an OpenNova actor needs the `scenario_play` driver to type them. |
 | `kick` | TDH_I3A team deathmatch | the host opens the command prompt (action 1), types `PUNT ALL`, return | E4. A host's typed line goes to the admin commands, not the binding names, in session (`Client_ProcessConsoleCommand @0x520E80`; the binding-name match in `Client_ProcessLocalCommand @0x520BF0` is offline only). `PUNT ALL` sends every connected non-host player the session disconnect with an empty reason, code 33 and the tag `S.C:SPA` (`Server_HandleBanPuntCommand @0x50B380`, the send @0x50B951; `PUNT <slot>` tags `S.C:SP#`, @0x50B9C6). `BAN <slot>` only adds the player's PCID to `banlist.txt` and disconnects no one. The joiner's capture (RR) or the host's (RO) carries it as `kind=disconnect`. A retail host needs an onHook pair with `char` steps (opennova-int #73). |
 | `capture_base` | ASH_I5A Advance & Secure, `deploy_hold` | the host deploys with SPACE (auto team spawn), is posed inside zone 2's bunker (`0x1032`) and holds it | The zone drains (mode 0, -2730/s), turns (0x1E 60, 0x50 to team 1, 0x1E 52 and 56) and secures (mode 1, +1820/s, 0x1E 59) in about a minute. The first timer sample's `value` is masked: it depends on where the 1 Hz block falls after the pose. |
+| `tdm_host_kill` | TDH_I3A team deathmatch (`tdh-i3a-tdm-hostkill`) | the host, posed 4 units east of the joiner's spawn (33.4, -16.0, 16.8) facing it and aiming 10 degrees down, taps fire eight times | An enemy kill of a remote client: S2C 0x13, the victim's zero 0x61 and its 0x52, then 0x1E type 4..6 (10..12 on a head hit) (`GameEvent_PlayerDeath @0x516DD0`). `game_event.type` is masked (the PRNG draw). The joiner stays dead (no client respawns by itself). No staging, so it runs on every topology. |
+| `tdm_frag_respawn` | TDH_I3A team deathmatch (`tdh-i3a-tdm-fragrespawn`) | the host is staged 1.6 units east of the joiner's spawn; the joiner throws a frag at its feet (the `self_nade` play), then presses SPACE twice once its respawn delay has run | The frag kills the host (0x1E 4..6) and the joiner (1..3), as `frag_kill` does in deathmatch. A dead player's SPACE is the death screen's auto team pick, C2S 0x0E 0xFFFE (`Input_HandleSpecialKeys @0x49CA06..0x49CA0D`); the host drops picks while the `timeout` delay (5 s in the pinned `game.cfg`) runs, and a client never retries, hence the second press. The deploy's S2C 0x61 carries a nonzero seed (`Server_DeployPlayer @0x517740`), masked; TDH has no frontier zone, so no 0x1E 58 follows (@0x5179D9..0x5179E0). |
+| `coop_ai_kill` | 01TR co-op (`01tr-coop-aikill`) | the joiner is staged 4 units behind the standing AI 0x0000 at (241.9, 840.8, 43.0) and faces its back, aiming 6 degrees down, and taps fire eight times | The client's fire (C2S 0x06) and the host's AI death (S2C 0x13 for 0x0000). Nearby AI may answer the fire, so nothing after the death is counted. |
 | `dm_host_walk` | 03TR deathmatch (the `03tr-dm` suite case) | the host, posed on the shared spawn (0, 0, 62.4) facing +y, walks the runner's input exercise legs (forward, strafe, back, each with its mouse turn) | The case's play. The joiner exercise walked a retail host's joiner (spawned facing yaw 0x00) off the spawn ledge to its death on some runs and not others, so the 03TR A/A floor was a coin flip; the posed host stays on the raised side. `expect` is empty: the suite judges the run by its parity metrics. |

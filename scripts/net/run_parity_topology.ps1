@@ -222,20 +222,23 @@ function Read-ParityScenario {
             throw "Scenario $($spec.name): setup.pose needs position_bms [x, y, z], yaw and pitch numbers"
         }
     }
-    # E5's staging: poses the host applies to other players' slots before the
-    # actor plays (a joiner's own pose would not stick, above).
+    # E5's staging: positions the host gives players' slots before the actor
+    # plays (a joiner's own pose would not stick, above). A staged slot takes
+    # a position only: its own client puts its heading back within one frame
+    # (the E5 pose-stick probe), so a scenario declares none.
     if ($spec.PSObject.Properties.Name -contains "staging") {
         $staging = @($spec.staging)
         if ($staging.Count -lt 1) {
-            throw "Scenario $($spec.name): staging lists at least one slot pose"
+            throw "Scenario $($spec.name): staging lists at least one slot position"
         }
         foreach ($entry in $staging) {
-            $position = @($entry.pose.position_bms)
+            $position = @($entry.position_bms)
+            $fields = @($entry.PSObject.Properties.Name)
             if (-not (Test-JsonInteger $entry.slot) -or $entry.slot -lt 0 -or $entry.slot -gt 254 -or
                     $position.Count -ne 3 -or
                     @($position | Where-Object { -not (Test-JsonNumber $_) }).Count -gt 0 -or
-                    -not (Test-JsonNumber $entry.pose.yaw) -or -not (Test-JsonNumber $entry.pose.pitch)) {
-                throw "Scenario $($spec.name): each staging entry needs a slot 0..254 and a pose with position_bms [x, y, z], yaw and pitch"
+                    @($fields | Where-Object { $_ -notin @("slot", "position_bms") }).Count -gt 0) {
+                throw "Scenario $($spec.name): each staging entry is a slot 0..254 and its position_bms [x, y, z], no heading"
             }
         }
         if ($Topology -in @("OR", "OO")) {
@@ -1295,9 +1298,14 @@ function Write-ScenarioPoseSnapshot {
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Path -Encoding ASCII
 }
 
-# E5: the scenario's staging poses, applied by the retail host to each
+# E5: the scenario's staging positions, applied by the retail host to each
 # listed slot (onhook_load_debug_snapshot target_slot, opennova-int #74), in
-# order, before the actor's setup and steps.
+# order, before the actor's setup and steps. A position sticks only when it
+# is more than two units from where that player stands: nearer, its own
+# uplink pulls it back; past two units its client snaps to the host's
+# [orig: Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A]. The snapshot
+# format needs an orientation, so the runner writes yaw 0 and pitch 0; the
+# player's own client puts its heading back on the next frame.
 function Invoke-ScenarioStaging {
     param([string] $RetailHostInstanceId = "")
     $spec = $script:ScenarioSpec
@@ -1309,7 +1317,9 @@ function Invoke-ScenarioStaging {
     $index = 0
     foreach ($entry in @($spec.staging)) {
         $path = Join-Path $RunRoot "scenario-staging-$index.debug_snapshot.json"
-        Write-ScenarioPoseSnapshot -Path $path -Pose $entry.pose
+        Write-ScenarioPoseSnapshot -Path $path -Pose ([pscustomobject]@{
+            position_bms = @($entry.position_bms); yaw = 0; pitch = 0
+        })
         $applied.Add((Get-StructuredResult (Invoke-OnHookTool -Name "onhook_load_debug_snapshot" -Arguments @{
             instance_id = $RetailHostInstanceId
             path = $path
