@@ -296,9 +296,6 @@ private:
 	// gate after every tick, then the Godot pipeline's tick sink.
 	void after_tick() override;
 	bool accept_tick(const opennova::inmatch::TickOutcome &p_tick) override;
-	// The renderer viewport height a listen host wraps its S2C 0x68 cursor
-	// against (0 = headless / no drawable viewport, D-NET-206).
-	int32_t renderer_viewport_height() const;
 	// The pool-2 building a packed blink hit names, as a bms_id (0 = none).
 	int blink_hit_owner_bms_id(uint32_t p_hit) const;
 	// Resource-install invariant only. Public lifecycle is

@@ -639,14 +639,17 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 				conn.link.transport->host_send(
 						s2c::TIME_SYNC_PING, std::move(time_sync));
 
-				// The dedicated path does not query renderer state or send 0x68.
-				// Non-dedicated hosts must have an explicitly installed viewport seam;
-				// zero height suppresses the request rather than inventing one.
-				if (ctx.connection_mode != ConnectionMode::HostOnly &&
-						ctx.loaded_model_viewport_height != 0) {
+				// A dedicated host sends no 0x68; any other advances the slot's
+				// cursor by 50 and wraps it to 0 at its own frozen loaded-model
+				// list count (the IDB's "viewport height" getter returns that
+				// count, g_LoadedModelChallengeCount), unsigned.
+				// [orig: Server_SendRandomSeedSync @0x511360 - the dedicated test
+				//  @0x511363..0x51136A, CEffectWorld_GetViewportDimensions @0x511375
+				//  (g_LoadedModelChallengeCount @0x5B1578), +50 @0x51137E, `jb`
+				//  @0x511391, the wrap @0x511393, mask 32 @0x5113C5, the send @0x5113D4]
+				if (ctx.connection_mode != ConnectionMode::HostOnly) {
 					reply.loaded_model_page_cursor += 50u;
-					if (reply.loaded_model_page_cursor >=
-							ctx.loaded_model_viewport_height)
+					if (reply.loaded_model_page_cursor >= ctx.loaded_model_list_count)
 						reply.loaded_model_page_cursor = 0;
 					std::vector<uint8_t> model_page;
 					io::append_u32_le(model_page, reply.loaded_model_page_cursor);

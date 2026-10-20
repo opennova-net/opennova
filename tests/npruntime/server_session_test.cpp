@@ -2850,7 +2850,7 @@ bool check_listen_host_receives_targeted_maintenance() {
 	world.tables.weapons.entries[0x20].valid = true;
 	world.tables.weapons.entries[0x20].ammo_index = 0x1A;
 	ctx.world = &world;
-	ctx.loaded_model_viewport_height = 100;
+	ctx.loaded_model_list_count = 100;
 	ctx.scoreboard_broadcast_timer = 0x136u;
 	// The authority's latches ride the quartet's 0x42 (D-NET-374).
 	world.tables.charattr_disabled_word = 0x0012u;
@@ -2908,7 +2908,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.connection_mode = opennova::inmatch::ConnectionMode::HostClient;
-	ctx.loaded_model_viewport_height = 100;
+	ctx.loaded_model_list_count = 100;
 	opennova::world::World world;
 	world.prng16_state = 1;
 	world.rules.mp_session = true;

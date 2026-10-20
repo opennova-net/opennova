@@ -521,12 +521,10 @@ void HostRole::run_tick(const TickInput &input) {
 	kernel.local.view_session_inputs = view_session_inputs_for(
 			state.client_runtime.get(), /*joiner=*/false, kernel.local.local_player_dead(),
 			kernel.world.rules.mp_session);
-	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor wraps against
-	// the renderer viewport height [orig: Server_SendRandomSeedSync @0x511360];
-	// a missing viewport leaves the seam unset and inmatch suppresses 0x68
-	// instead of inventing a screen size (D-NET-206).
-	state.host_owner.ctx.loaded_model_viewport_height =
-			input.viewport_height > 0 ? static_cast<uint32_t>(input.viewport_height) : 0u;
+	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor wraps at the
+	// host's frozen loaded-model list count [orig: Server_SendRandomSeedSync
+	// @0x511375 / @0x511391].
+	state.host_owner.ctx.loaded_model_list_count = input.loaded_model_list_count;
 	const uint32_t now = state.host_owner.now_tick;
 	// The stats board's host-prep row: the view/viewport setup before the
 	// portable host pump.

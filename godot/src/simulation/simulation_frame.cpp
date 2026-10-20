@@ -216,28 +216,6 @@ void Simulation::close_session() {
 	(void)session_.close();
 }
 
-// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
-// and wraps against the current renderer viewport height [orig:
-// Server_SendRandomSeedSync @ 0x511360 -- CEffectWorld_GetViewportDimensions
-// @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Resolve the render window
-// the way retail's CEffectWorld query does: the live window (the scene
-// tree's root; the simulation is a RefCounted the runtime owns, not a node
-// in that tree). A headless DisplayServer has no
-// renderer (the dedicated-host analogue); a missing/non-drawable viewport
-// hands the host role 0 and inmatch suppresses 0x68 instead of inventing
-// a screen size (D-NET-206).
-int32_t Simulation::renderer_viewport_height() const {
-	Viewport *viewport = nullptr;
-	DisplayServer *display = DisplayServer::get_singleton();
-	if (display != nullptr && display->get_name() != "headless") {
-		SceneTree *tree = Object::cast_to<SceneTree>(
-				Engine::get_singleton()->get_main_loop());
-		if (tree != nullptr)
-			viewport = tree->get_root();
-	}
-	return viewport != nullptr ? static_cast<int32_t>(viewport->get_visible_rect().size.y) : 0;
-}
-
 void Simulation::after_tick() {
 	// The dead-player map-mode clear rides every advanced tick -- retail's
 	// render-frame gate, observed before the presenters read the mode.
@@ -274,7 +252,7 @@ opennova::inmatch::FrameInput Simulation::begin_session_frame(
 		set_sound_listener(Vector3(input.camera.position[0],
 				input.camera.position[1], input.camera.position[2]));
 	}
-	input.viewport_height = renderer_viewport_height();
+	input.loaded_model_list_count = net_.loaded_model_list_count;
 	return input;
 }
 
@@ -308,7 +286,7 @@ bool Simulation::step() {
 	input.player.pressed_action_bits =
 			(kernel_->local.weapon.fire_pressed ? opennova::inmatch::PRESSED_FIRE : 0u) |
 			(kernel_->local.weapon.reload_pressed ? opennova::inmatch::PRESSED_RELOAD : 0u);
-	input.viewport_height = renderer_viewport_height();
+	input.loaded_model_list_count = net_.loaded_model_list_count;
 	return session_.drive_one(input).ticks_run() == 1;
 }
 

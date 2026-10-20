@@ -77,9 +77,9 @@ int local_loopback_connections(const inmatch::ListenHostState &state) {
 
 // One tick's input with the renderer viewport height a listen host wraps its
 // S2C 0x68 cursor against.
-inmatch::TickInput tick_input(int32_t viewport_height) {
+inmatch::TickInput tick_input(uint32_t loaded_model_list_count) {
 	inmatch::TickInput in;
-	in.viewport_height = viewport_height;
+	in.loaded_model_list_count = loaded_model_list_count;
 	return in;
 }
 
@@ -359,13 +359,13 @@ int main() {
 		//  @0x561bce; the +0x58 store @0x4c4a85]
 		CHECK(!kernel.world.rules.mp_session);
 		CHECK(!kernel.local.view_session_inputs.in_session);
-		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 0u);
+		CHECK(host.host_owner.ctx.loaded_model_list_count == 0u);
 		if (host.client_runtime) {
 			CHECK(host.client_runtime->state().frames_applied > 0);
 			CHECK(!host.client_runtime->state().entities.empty());
 		}
-		role.run_tick(tick_input(768));
-		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 768u);
+		role.run_tick(tick_input(305));
+		CHECK(host.host_owner.ctx.loaded_model_list_count == 305u);
 		CHECK(kernel.world.logic_tick == tick0 + 9);
 
 		// No input frame runs under a menu screen: the deferred ToSpecial queue

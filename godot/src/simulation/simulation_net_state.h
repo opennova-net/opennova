@@ -123,6 +123,9 @@ struct SimulationNetState {
 	// The joiner's mission-start seam (JoinerConnection::set_mission_start_loading): the
 	// shell's load runs after the S2C 0x1A. Retained across rebuilds.
 	bool join_mission_start_loading = false;
+	// The count of the loaded-model list frozen at this mission's load
+	// (finalize_loaded_model_challenge_snapshot): a host's S2C 0x68 cursor wrap.
+	uint32_t loaded_model_list_count = 0;
 	// The joiner's network type (JoinTarget::network_type; retail's
 	// g_NapiNPCtx.transport_mode on the client). Retained across rebuilds.
 	opennova::inmatch::NetworkType join_network_type = opennova::inmatch::NetworkType::Lan;

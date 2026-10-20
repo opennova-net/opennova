@@ -94,7 +94,8 @@ struct FrameInput {
 	double since_render_seconds = -1.0;
 	CameraSample camera;
 	InputPacket player;
-	int32_t viewport_height = 0;
+	// The host's frozen loaded-model list count (TickInput::loaded_model_list_count).
+	uint32_t loaded_model_list_count = 0;
 };
 
 struct TickInput {
@@ -103,9 +104,11 @@ struct TickInput {
 	// True only until the first successful tick in an outer frame. Targets use
 	// this to consume edge-triggered actions exactly once across catch-up.
 	bool consume_one_shots = false;
-	// The renderer viewport height a listen host wraps its S2C 0x68 cursor
-	// against (0 = headless / no renderer, the seam left unset).
-	int32_t viewport_height = 0;
+	// The count of the loaded-model list the host froze at its mission start,
+	// which a listen host wraps its S2C 0x68 cursor at (0 until a list froze)
+	// [orig: Server_SendRandomSeedSync @0x511375 / @0x511391 reads
+	//  g_LoadedModelChallengeCount through CEffectWorld_GetViewportDimensions @0x5B1578].
+	uint32_t loaded_model_list_count = 0;
 	// True on the last logic tick of this frame's batch, false while the bank
 	// catches up: the outer loop's "<16 ms of backlog left" flag the fire-loop
 	// emitter and the lock tone read (World::rules.last_tick_of_batch).

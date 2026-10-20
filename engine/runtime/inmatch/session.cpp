@@ -329,7 +329,7 @@ TickInput Session::merged_tick_input(
 		const FrameInput &input, bool consume_one_shots) {
 	TickInput out;
 	out.camera = latest_camera_;
-	out.viewport_height = input.viewport_height;
+	out.loaded_model_list_count = input.loaded_model_list_count;
 	out.player = pending_input_;
 	out.consume_one_shots = consume_one_shots;
 	if (!consume_one_shots) {

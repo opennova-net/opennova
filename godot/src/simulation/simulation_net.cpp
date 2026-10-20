@@ -693,8 +693,11 @@ void Simulation::set_join_world_ready(bool p_ready) {
 }
 
 void Simulation::finalize_loaded_model_challenge_snapshot() {
-	if (!is_joiner() || !runtime_) return;
 	const int64_t count = ObjectData::network_challenge_model_count();
+	// The same frozen count is a host's S2C 0x68 cursor wrap (the role reads
+	// it every tick) [orig: Server_SendRandomSeedSync @0x511375 / @0x511391].
+	net_.loaded_model_list_count = count > 0 ? static_cast<uint32_t>(count) : 0u;
+	if (!is_joiner() || !runtime_) return;
 	if (count <= 0) {
 		runtime_->set_loaded_model_challenge_snapshot({});
 		return;

@@ -58,6 +58,7 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
+#include <memory>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -1352,6 +1353,58 @@ bool check_armory_reuse_cooldown() {
 // --------------------------------------------------------------------------
 // The 744-tick priority-target sweep.
 // --------------------------------------------------------------------------
+
+// A listen host's S2C 0x68 cursor advances by 50 per quartet and wraps to 0 at
+// its own frozen loaded-model list count (the count retail's misnamed viewport
+// getter returns): with 305 frozen rows it asks 50, 100, ..., 300, then 0, 50;
+// with none frozen every request wraps to 0.
+// [orig: Server_SendRandomSeedSync @0x511360 - +50 @0x51137E, the `jb` against
+//  g_LoadedModelChallengeCount (CEffectWorld_GetViewportDimensions @0x5B1578) @0x511391, the
+//  wrap @0x511393, the send @0x5113D4]
+bool check_model_page_cursor_wraps_at_the_list_count() {
+	const auto cursors = [](uint32_t list_count, int quartets) {
+		ns::LoopbackChannel loopback;
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostClient);
+		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+		inmatch::GameConfig config;
+		config.max_players = 4;
+		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, &loopback);
+		auto heap = std::make_unique<w::World>();
+		w::World &world = *heap;
+		world.rules.mp_session = true;
+		world.registry.configure_pool(0, 8);
+		const w::EntityHandle player = w::spawn_remote_player(world, w::PlayerSpawn{});
+		ctx.world = &world;
+		ctx.loaded_model_list_count = list_count;
+		auto &self = ctx.np_protocol.connection_list.front();
+		self.phase = inmatch::ConnectionPhase::InMatch;
+		self.burst.spawned = true;
+		self.link.owned_entity = player;
+		self.reply.control_live_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+		std::vector<uint32_t> out;
+		for (int q = 0; q < quartets; ++q) {
+			self.reply.control_request_countdown = 0;
+			self.reply.charattr_unanswered_count = 0;
+			self.reply.time_sync_unanswered_count = 0;
+			inmatch::Server_TickUpdate(ctx);
+			ns::Datagram d;
+			while (loopback.client_recv(d))
+				if (d.tag == s2c::LOADED_MODEL_PAGE_REQUEST && d.body.size() == 4)
+					out.push_back(static_cast<uint32_t>(d.body[0]) |
+							(static_cast<uint32_t>(d.body[1]) << 8) |
+							(static_cast<uint32_t>(d.body[2]) << 16) |
+							(static_cast<uint32_t>(d.body[3]) << 24));
+		}
+		return out;
+	};
+	bool ok = expect(cursors(305, 8) ==
+					std::vector<uint32_t>({50, 100, 150, 200, 250, 300, 0, 50}),
+			"the 0x68 cursor wraps to 0 at the 305-row list");
+	ok = expect(cursors(0, 2) == std::vector<uint32_t>({0, 0}),
+			"with no list frozen every 0x68 asks row 0") && ok;
+	return ok;
+}
 
 bool check_priority_target_sweep() {
 	w::World world;
@@ -2972,6 +3025,7 @@ int main() {
 	ok = check_death_consumer_reads_and_clears_the_reported_cause_bit() && ok;
 	ok = check_spectator_latch_mirrors_onto_the_roster_row() && ok;
 	ok = check_armory_reuse_cooldown() && ok;
+	ok = check_model_page_cursor_wraps_at_the_list_count() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;
 	ok = check_kit_weight_reads_the_seat() && ok;
