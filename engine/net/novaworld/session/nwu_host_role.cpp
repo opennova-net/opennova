@@ -2,6 +2,7 @@
 
 #include <base/io/log.h>
 #include <base/io/tick_rate.h>
+#include <net/novaworld/connect_or_host.h> // ConnectOrHost's lines
 #include <net/novaworld/lobby_update.h>
 #include <net/npwire/peer_addr.h>
 #include <net/title/title_identity.h>
@@ -27,10 +28,18 @@ bool NwuHostRole::request(const HostRegistration &cfg) {
 	// A fresh host sends CurrentlyHosting = 0 (ConnectOrHost's StartHostingSession(ctx, 0)).
 	send_host_request(/*currently_hosting=*/0);
 	if (phase_ != Phase::Requested) {
+		// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - "%s : NWU HOSTING
+		//  FAILED...StartHostingSession failed!!!" @0x4D5153, NWEC51 @0x4D5165]
+		menu_leg_line(kHostStartFailedLine);
 		if (hooks_.on_failed) hooks_.on_failed(NWEC_HOST_START_FAILED);
 		return false;
 	}
 	return true;
+}
+
+// ConnectOrHost's lines are the menu's legs': the command-line host writes none.
+void NwuHostRole::menu_leg_line(const std::string &text) {
+	if (!lobby_.command_line_host() && lobby_.connect_log_on()) lobby_.connect_log(text);
 }
 
 void NwuHostRole::stop() {
@@ -48,10 +57,18 @@ void NwuHostRole::tick(uint32_t now_ms) {
 	ClientSession *session = lobby_.session();
 	if (session == nullptr) return;
 	if (phase_ == Phase::Requested) {
-		// The host poll: no ServerHostResult within SESSION_CONNECT_TIMEOUT_MS ->
-		// ClientStopHosting + NWEC52. [orig: CNapiGameSession_ConnectOrHost @0x4d4f10 (0xEA60)]
-		if (now_ms - register_started_ms_ > SESSION_CONNECT_TIMEOUT_MS) {
+		// The menu's host poll: no ServerHostResult within SESSION_CONNECT_TIMEOUT_MS -> its
+		// line, ClientStopHosting, the timeout line and NWEC52. The command-line host waits on
+		// with no timeout. [orig: CNapiGameSession_ConnectOrHost @0x4d4f10 - the 0xEA60 compare
+		//  @0x4D5193, "%s : NWU HOSTING FAILED...TIMEOUT WAITING FOR REPLY FROM NOVAWORLD!!!"
+		//  @0x4D5245, CGameSession_StopHosting (the call @0x4D5252), "%s : NWU HOSTING TIMEOUT!!!"
+		//  @0x4D528E, NWEC52 @0x4D52A4; Game_HostMultiplayerSession @0x4A65A0 - the untimed wait
+		//  @0x4A6725..0x4A6735]
+		if (!lobby_.command_line_host() &&
+				now_ms - register_started_ms_ > SESSION_CONNECT_TIMEOUT_MS) {
+			menu_leg_line(kHostTimeoutWaitingLine);
 			stop();
+			menu_leg_line(kHostTimeoutLine);
 			if (hooks_.on_failed) hooks_.on_failed(NWEC_HOST_TIMEOUT);
 		}
 		return;
@@ -173,13 +190,20 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 	} else if (phase_ != Phase::Requested) {
 		return;
 	} else if (!notice.fields.success) {
-		// Rejected: the MsgCode maps through the host switch (NWEC53..60).
+		// Rejected: its line, then the MsgCode maps through the host switch (NWEC53..60).
+		// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - "%s : NWU HOSTING FAILED...WE'RE NOT IN
+		//  HOSTING STATE!!!" @0x4D51DF, the switch @0x4D5207]
 		phase_ = Phase::Idle;
+		menu_leg_line(kHostNotHostingLine);
 		if (hooks_.on_failed)
 			hooks_.on_failed(novaworld_host_error_tag(notice.fields.msg_code));
 		return;
 	} else {
-		// Hosting (state 6): the refresh clock starts.
+		// Hosting (state 6): the menu leg's two lines, and the refresh clock starts.
+		// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - "%s : NWU HOSTING STARTED!  YIPPEE"
+		//  @0x4D532D, then "%s : NWU MOVING ON TO HOSTING OR PLAYING..." @0x4D536D]
+		menu_leg_line(kHostStartedLine);
+		menu_leg_line(kMovingOnLine);
 		phase_ = Phase::Hosting;
 		refresh_ticks_ = 0.0;
 		hosting_started_ms_ = lobby_.clock_ms();

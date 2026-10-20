@@ -472,6 +472,7 @@ void NovaWorldClient::_process(double delta) {
 	// window (SESSION_CONNECT_TIMEOUT_MS), else the play is cancelled (NWEC02).
 	if (play_in_flight_ && lobby_.session() &&
 	    lobby_.clock_ms() - play_started_ms_ > opennova::SESSION_CONNECT_TIMEOUT_MS) {
+		lobby_.connect_log(opennova::kPlayTimeoutLine);
 		abort_playing(String(opennova::NWEC_PLAY_TIMEOUT));
 	}
 }
@@ -729,6 +730,7 @@ void NovaWorldClient::drain_session_notices() {
 			if (!play_in_flight_) break;
 			if (notice.fields.success) {
 				play_in_flight_ = false;
+				lobby_.connect_log(opennova::kMovingOnLine);
 				resolve_join_target();
 			} else {
 				// The rejected play maps through the dword_B60110 switch (NWEC04..14).
@@ -1073,16 +1075,23 @@ void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
 	// installs on its NP connection (engine/net/novaworld/proxy_rendezvous.h).
 	// The engine's install of the six fields (net/novaworld/http_flow.h).
 	join_proxy_ = opennova::proxy_rendezvous_from_join(resolved);
+	// ConnectOrHost's play leg: its checks and their lines (engine: connect_or_host.h).
 	opennova::ClientSession *session = lobby_.session();
-	if (!session || !session->is_verified()) {
+	const char *refusal = opennova::play_leg_refusal(
+			session != nullptr && lobby_.is_open(), session ? session->session_flags() : 0u);
+	for (const std::string &line : opennova::connect_or_host_check_lines(
+			     /*host_leg=*/false, refusal, session ? session->lobby_state() : 0))
+		lobby_.connect_log(line);
+	if (refusal != nullptr) {
 		enter_state(STATE_CONNECTED);
-		emit_signal("join_failed", String(opennova::NWEC_WRONG_SESSION_STATE));
+		emit_signal("join_failed", String(refusal));
 		return;
 	}
 	const std::vector<opennova::ClientVar> play_setup = opennova::make_play_setup_vars(
 			pending_join_server_name_, resolved.host_ip, std::to_string(resolved.host_port),
 			resolved.app_id, resolved.ln);
 	if (!session->request_playing(play_setup)) {
+		lobby_.connect_log(opennova::kPlayStartFailedLine);
 		enter_state(STATE_CONNECTED);
 		emit_signal("join_failed", String(opennova::NWEC_PLAY_START_FAILED));
 		return;
@@ -1091,10 +1100,16 @@ void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
 	play_started_ms_ = lobby_.clock_ms();
 }
 
+// A play the poll leaves: a timeout's (or an escape's) StopPlaying, then, as for a rejected
+// result, the not-playing line with the session's state. [orig: CNapiGameSession_ConnectOrHost
+//  @0x4D4F10 - CGameSession_StopPlaying (the call @0x4D5592), "%s : NWU STARTPLAYING failed.  Not
+//  in playing state[%ld]!!!" @0x4D55E7]
 void NovaWorldClient::abort_playing(const String &tag) {
 	if (play_in_flight_ && lobby_.session()) {
 		lobby_.session()->stop_playing();
 	}
+	if (play_in_flight_ && lobby_.session())
+		lobby_.connect_log(opennova::play_not_playing_line(lobby_.session()->lobby_state()));
 	play_in_flight_ = false;
 	enter_state(STATE_CONNECTED);
 	emit_signal("join_failed", tag);
@@ -1147,6 +1162,9 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	const bool set_up = options.is_valid() && session != nullptr && lobby_.is_open();
 	const char *refusal = opennova::host_leg_refusal(set_up,
 			set_up ? session->session_flags() : 0u, server_info_.is_valid(), gate.lobby_name);
+	for (const std::string &line : opennova::connect_or_host_check_lines(
+			     /*host_leg=*/true, refusal, set_up ? session->lobby_state() : 0))
+		lobby_.connect_log(line);
 	if (refusal != nullptr) {
 		emit_signal("host_failed", String(refusal));
 		return;

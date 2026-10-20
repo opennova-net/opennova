@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace opennova {
 
@@ -39,6 +40,68 @@ inline const char *host_leg_refusal(bool session_set_up, uint32_t session_flags,
 inline int host_leg_max_players(int max_players, bool dedicated, int title) {
 	if (title == gameprofile::GAME_DFX2) return std::clamp(max_players, 1, dedicated ? 251 : 250);
 	return std::clamp(max_players, 1, dedicated ? 65 : 64);
+}
+
+// The menu's play and host legs' _connectlog.txt lines, past their "<time> : " prefix (the
+// device stamps them). The command-line host runs neither leg and writes none of them.
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - each line's NapiFile_AppendLine at the
+//  address beside it]
+inline constexpr char kConnectOrHostStartLine[] = "NWU START HOSTING OR PLAYING.";   // @0x4D4F60
+inline constexpr char kConnectOrHostNotSetUpLine[] = "NWU NOT SET UP!!!";            // @0x4D4FD2
+inline std::string connect_or_host_wrong_state_line(int session_state) {             // @0x4D56E3
+	return "NWU NOT CORRECT STATE[" + std::to_string(session_state) + "]!!!";
+}
+inline constexpr char kPlayAttemptLine[] = "NWU ATTEMPTING TO START PLAYING";        // @0x4D53AE
+inline constexpr char kPlayStartFailedLine[] = "NWU STARTPLAYING failed!";           // @0x4D5486
+inline constexpr char kPlayEscapedLine[] = "NWU STARTPLAYING user pressed escape!!!"; // @0x4D5577
+inline constexpr char kPlayTimeoutLine[] = "NWU STARTPLAYING timout!!!";             // @0x4D552C
+inline std::string play_not_playing_line(int session_state) {                         // @0x4D55E7
+	return "NWU STARTPLAYING failed.  Not in playing state[" + std::to_string(session_state) +
+	       "]!!!";
+}
+inline constexpr char kMovingOnLine[] = "NWU MOVING ON TO HOSTING OR PLAYING...";    // @0x4D536D
+inline constexpr char kHostAttemptLine[] = "NWU ATTEMPTING TO START HOSTING";        // @0x4D5038
+inline constexpr char kHostGateNotOkLine[] = "NWU HOSTING FAILED...GATEINFO NOT OK!!!"; // @0x4D50C9
+inline constexpr char kHostStartFailedLine[] =
+		"NWU HOSTING FAILED...StartHostingSession failed!!!";                         // @0x4D5153
+inline constexpr char kHostNotHostingLine[] =
+		"NWU HOSTING FAILED...WE'RE NOT IN HOSTING STATE!!!";                         // @0x4D51DF
+inline constexpr char kHostStartedLine[] = "NWU HOSTING STARTED!  YIPPEE";           // @0x4D532D
+inline constexpr char kHostTimeoutWaitingLine[] =
+		"NWU HOSTING FAILED...TIMEOUT WAITING FOR REPLY FROM NOVAWORLD!!!";           // @0x4D5245
+inline constexpr char kHostTimeoutLine[] = "NWU HOSTING TIMEOUT!!!";                 // @0x4D528E
+
+// The legs' checks ahead of their work, in ConnectOrHost's order, as lines: the start line,
+// then a session not set up, else one outside the right states (its state), else the leg's
+// attempt line and, for the host leg, a gate reply missing or without a lobby name. `refusal`
+// is the leg's tag (host_leg_refusal's, or the play leg's same first two), nullptr to go on.
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - @0x4D4F60, the not-set-up test
+//  @0x4D4F95..0x4D4FD2, the flags test @0x4D4FD8 -> @0x4D56E3, the play leg @0x4D53AE, the host
+//  leg @0x4D5038, the gate test @0x4D5085..0x4D50C9]
+inline std::vector<std::string> connect_or_host_check_lines(bool host_leg, const char *refusal,
+		int session_state) {
+	std::vector<std::string> lines{ kConnectOrHostStartLine };
+	const std::string tag = refusal != nullptr ? refusal : "";
+	if (tag == NWEC_SESSION_NOT_SET_UP) {
+		lines.push_back(kConnectOrHostNotSetUpLine);
+		return lines;
+	}
+	if (tag == NWEC_WRONG_SESSION_STATE) {
+		lines.push_back(connect_or_host_wrong_state_line(session_state));
+		return lines;
+	}
+	lines.push_back(host_leg ? kHostAttemptLine : kPlayAttemptLine);
+	if (host_leg && tag == NWEC_HOST_GATE_NOT_OK) lines.push_back(kHostGateNotOkLine);
+	return lines;
+}
+
+// The play leg's checks: a session not set up (NWEC01), one outside the verified states -- flags
+// bits 2 and 8 -- (NWEC49); nullptr to go on.
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - @0x4D4F89..0x4D4FD2, @0x4D4FD8..0x4D56F6]
+inline const char *play_leg_refusal(bool session_set_up, uint32_t session_flags) {
+	if (!session_set_up) return NWEC_SESSION_NOT_SET_UP;
+	if ((session_flags & 0x2u) == 0 || (session_flags & 0x8u) == 0) return NWEC_WRONG_SESSION_STATE;
+	return nullptr;
 }
 
 } // namespace opennova

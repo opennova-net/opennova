@@ -88,12 +88,15 @@ public:
 		int32_t max_packet_size = 0;
 		// The gate socket's bound port, which the connect log's gate lines name. Unset: 0.
 		std::function<uint16_t()> gate_local_port;
-		// The dedicated host's gate wait (opennova-serve, retail's command-line host): the
-		// worker's deadline reports nothing and stops the gate's receive, and the wait ends
-		// SESSION_DEDICATED_GATE_WAIT_MS after the probe with the gate service's stop line, then
-		// the gate-error map's NWEC15 to on_fatal. False: the menu's NWEC15 at the worker's
-		// deadline. [orig: CNapiGameSession_WaitForStateChange @0x4D1510]
-		bool dedicated_gate_wait = false;
+		// Retail's command-line host (opennova-serve), which runs no NovaWorld menu: its gate wait
+		// outlives the worker (the worker's deadline reports nothing and stops the gate's
+		// receive; SESSION_DEDICATED_GATE_WAIT_MS after the probe the gate service's stop line,
+		// then the gate-error map's NWEC15 to on_fatal), and its host request waits for the
+		// result with no timeout and writes none of ConnectOrHost's lines (NwuHostRole). False:
+		// the menu's legs. [orig: Game_HostMultiplayerSession @0x4A65A0 -
+		//  CNapiGameSession_WaitForStateChange @0x4D1510 (the call @0x4A66B6), the hosting wait
+		//  while state 5 @0x4A6725..0x4A6735]
+		bool command_line_host = false;
 	};
 	// The NovaWorld switches of the game's command line the gate response and the connect read
 	// (LaunchFlags): the POST address (resolved with DNS on; one that does not resolve overrides
@@ -270,6 +273,10 @@ public:
 	// The driver's wall clock in ms (the session's GetTickCount).
 	uint32_t clock_ms() const { return clock_ms_; }
 	uint32_t random_u32() const;
+	bool command_line_host() const { return env_.command_line_host; }
+	// The connect log (Hooks::connect_log_on / connect_log): on now, and one line when on.
+	bool connect_log_on() const;
+	void connect_log(const std::string &text);
 
 private:
 	void begin_session();
@@ -300,9 +307,6 @@ private:
 	// A connect wait's failure: the session's reset (a connection still up tears down), the
 	// code's NWEC to on_fatal, then the connection dropped (session() null from here).
 	void fail_connect(int code);
-	// The connect log (Hooks::connect_log_on / connect_log): on now, and one line when on.
-	bool connect_log_on() const;
-	void connect_log(const std::string &text);
 	// The connection's state-5 callbacks' lines (ClientSession::Config::on_connection_up / _down).
 	void log_connection_up();
 	void log_connection_down();
@@ -332,7 +336,7 @@ private:
 	// The gate worker: the probe re-sent every retry interval until the deadline.
 	uint32_t gate_started_ms_ = 0;
 	uint32_t gate_last_send_ms_ = 0;
-	// The dedicated host's gate wait ended (Environment::dedicated_gate_wait).
+	// The dedicated host's gate wait ended (Environment::command_line_host).
 	bool dedicated_wait_over_ = false;
 	// The connect log's gate stamp, written only while the log is on (dword_B5F440).
 	uint32_t gate_log_stamp_ms_ = 0;

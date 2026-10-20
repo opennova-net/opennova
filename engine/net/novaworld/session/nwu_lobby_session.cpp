@@ -357,7 +357,7 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	if (probe_sent_ && !session_ && !gate_probe_datagram_.empty()) {
 		if (clock_ms_ - gate_started_ms_ > SESSION_GATE_PROBE_TIMEOUT_MS) {
 			gate_probe_datagram_.clear(); // the worker is gone: report once, read no more
-			if (!env_.dedicated_gate_wait) {
+			if (!env_.command_line_host) {
 				if (hooks_.on_fatal) hooks_.on_fatal(novaworld_gate_error_tag(0, false));
 				return;
 			}
@@ -372,7 +372,7 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	//  CNapiGameSession_StopHosting @0x4CEC10 - the socket +0x30 @0x4CEC3A, Napi_FormatAddress
 	//  @0x4CEC53 ("n/a" @0x4CEC63), "%s : GATE STOPPING GATE SERVICE... [%s]" @0x4CECA4, the stamp
 	//  @0x4CECB2, the context freed @0x4CECC7, the gate state 1 -> 0 @0x4CECEC]
-	if (env_.dedicated_gate_wait && probe_sent_ && !session_ && !gate_answered_ &&
+	if (env_.command_line_host && probe_sent_ && !session_ && !gate_answered_ &&
 			!dedicated_wait_over_ && clock_ms_ - gate_started_ms_ > SESSION_DEDICATED_GATE_WAIT_MS) {
 		dedicated_wait_over_ = true;
 		if (connect_log_on()) {

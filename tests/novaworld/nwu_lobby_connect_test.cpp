@@ -14,6 +14,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <net/napi/session.h>
 #include <net/novacrypto/nwu.h>
+#include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/nwu_host_role.h>
 #include <net/novaworld/nwu_lobby_session.h>
@@ -107,15 +108,15 @@ struct Rig {
 	std::vector<std::string> log;
 	NwuLobbySession lobby;
 
-	explicit Rig(bool dedicated_gate_wait = false)
-		: lobby(hooks(), environment(dedicated_gate_wait)) {
+	explicit Rig(bool command_line_host = false)
+		: lobby(hooks(), environment(command_line_host)) {
 		lobby.set_title(&kJo, kJo.gate_tag);
 	}
 
-	static NwuLobbySession::Environment environment(bool dedicated_gate_wait) {
+	static NwuLobbySession::Environment environment(bool command_line_host) {
 		NwuLobbySession::Environment env;
 		env.gate_local_port = []() { return uint16_t{2300}; };
-		env.dedicated_gate_wait = dedicated_gate_wait;
+		env.command_line_host = command_line_host;
 		return env;
 	}
 
@@ -851,8 +852,8 @@ void check_gate_probe_cadence() {
 // CNapiGameSession_WaitForStateChange @0x4D1510 - the 0x4E20 compare @0x4D1546,
 // CNapiGameSession_StopHosting (the call @0x4D154A); CNapiGameSession_StopHosting @0x4CEC10 -
 // "%s : GATE STOPPING GATE SERVICE... [%s]" @0x4CECA4]
-void check_dedicated_gate_wait() {
-	Rig rig(/*dedicated_gate_wait=*/true);
+void check_command_line_host_gate_wait() {
+	Rig rig(/*command_line_host=*/true);
 	rig.log_on = true;
 	rig.lobby.open(rig.gate, rig.session);
 	rig.lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
@@ -920,6 +921,72 @@ std::vector<NapiMessage> client_statements(
 		}
 	}
 	return out;
+}
+
+// ConnectOrHost's lines: the legs' checks in order (the start line; not set up; the wrong state
+// with the session's state; the attempt; the host leg's gate), and the host leg's result lines from
+// the host role: started and moving on, not hosting, the 60 s timeout's two around its
+// ClientStopHosting; the command-line host writes none and waits with no timeout.
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - @0x4D4F60, @0x4D4FD2, @0x4D56E3, @0x4D53AE,
+//  @0x4D5038, @0x4D50C9, @0x4D51DF, @0x4D532D, @0x4D536D, @0x4D5245, @0x4D528E;
+//  Game_HostMultiplayerSession @0x4A65A0 - @0x4A6725..0x4A6735]
+void check_connect_or_host_lines() {
+	using L = std::vector<std::string>;
+	CHECK((connect_or_host_check_lines(true, NWEC_SESSION_NOT_SET_UP, 0) ==
+			L{ "NWU START HOSTING OR PLAYING.", "NWU NOT SET UP!!!" }));
+	CHECK((connect_or_host_check_lines(false, NWEC_WRONG_SESSION_STATE, 2) ==
+			L{ "NWU START HOSTING OR PLAYING.", "NWU NOT CORRECT STATE[2]!!!" }));
+	CHECK((connect_or_host_check_lines(true, NWEC_HOST_GATE_NOT_OK, 4) ==
+			L{ "NWU START HOSTING OR PLAYING.", "NWU ATTEMPTING TO START HOSTING",
+					"NWU HOSTING FAILED...GATEINFO NOT OK!!!" }));
+	CHECK((connect_or_host_check_lines(true, nullptr, 4) ==
+			L{ "NWU START HOSTING OR PLAYING.", "NWU ATTEMPTING TO START HOSTING" }));
+	CHECK((connect_or_host_check_lines(false, nullptr, 4) ==
+			L{ "NWU START HOSTING OR PLAYING.", "NWU ATTEMPTING TO START PLAYING" }));
+	CHECK(play_leg_refusal(false, 0xFFu) == std::string(NWEC_SESSION_NOT_SET_UP));
+	CHECK(play_leg_refusal(true, 0x2u) == std::string(NWEC_WRONG_SESSION_STATE));
+	CHECK(play_leg_refusal(true, 0xAu) == nullptr);
+	CHECK(play_not_playing_line(4) == "NWU STARTPLAYING failed.  Not in playing state[4]!!!");
+
+	const auto hosting = [](bool command_line_host, const char *success, uint32_t result_at) {
+		Rig rig(command_line_host);
+		rig.log_on = true;
+		const std::vector<uint8_t> auth = bring_to_verify(rig);
+		rig.session.inbound.push_back({ kServer,
+				server_statement_to(auth, "ServerVerifyResult", { { "Success", "1" } }, 1) });
+		rig.lobby.tick(300);
+		std::vector<std::string> failed;
+		NwuHostRole::Hooks hooks;
+		hooks.on_failed = [&failed](const std::string &tag) { failed.push_back(tag); };
+		NwuHostRole role(rig.lobby, hooks);
+		HostRegistration reg;
+		reg.server_name = "Lines";
+		role.request(reg);
+		rig.lobby.tick(310);
+		role.tick(310);
+		rig.log.clear();
+		if (success != nullptr)
+			rig.session.inbound.push_back({ kServer,
+					server_statement_to(auth, "ServerHostResult", { { "Success", success } }, 2) });
+		rig.lobby.tick(result_at);
+		if (ClientSession *session = rig.lobby.session())
+			for (const auto &notice : session->take_notices()) role.handle_notice(notice);
+		role.tick(result_at);
+		rig.lobby.close();
+		return std::make_pair(rig.log, failed);
+	};
+	const auto started = hosting(false, "1", 320);
+	CHECK((started.first == L{ "NWU HOSTING STARTED!  YIPPEE", "NWU MOVING ON TO HOSTING OR PLAYING..." }));
+	const auto refused = hosting(false, "0", 320);
+	CHECK((refused.first == L{ "NWU HOSTING FAILED...WE'RE NOT IN HOSTING STATE!!!" }));
+	const auto timed_out = hosting(false, nullptr, 310 + SESSION_CONNECT_TIMEOUT_MS + 1);
+	CHECK((timed_out.first == L{ "NWU HOSTING FAILED...TIMEOUT WAITING FOR REPLY FROM NOVAWORLD!!!",
+			"NWU HOSTING TIMEOUT!!!" }));
+	CHECK((timed_out.second == L{ NWEC_HOST_TIMEOUT }));
+	const auto served = hosting(true, "1", 320);
+	CHECK(served.first.empty());
+	const auto waits = hosting(true, nullptr, 310 + SESSION_CONNECT_TIMEOUT_MS + 1);
+	CHECK(waits.first.empty() && waits.second.empty());
 }
 
 // D-NET-490: a player's add on a hosting session sends ClientHostPlayerAdded and then, at once,
@@ -1002,12 +1069,13 @@ void check_host_player_add_sends_update() {
 
 int main() {
 	check_host_player_add_sends_update();
+	check_connect_or_host_lines();
 	check_connect_error_tags();
 	check_connect_log_gate_and_connect();
 	check_connect_log_give_ups();
 	check_connect_log_gate_failures();
 	check_gate_probe_cadence();
-	check_dedicated_gate_wait();
+	check_command_line_host_gate_wait();
 	check_gate_response_lines();
 	check_short_protocol_packets_keep_the_connection();
 	check_disconnect_request_by_state();

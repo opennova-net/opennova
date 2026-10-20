@@ -144,6 +144,8 @@ public:
 	                          const std::string &join_ticket);
 
 private:
+	// One of ConnectOrHost's lines to the connect log, the menu's legs only (connect_or_host.h).
+	void menu_leg_line(const std::string &text);
 	// The column source's read into the role's columns: a successful one replaces them, a read
 	// with no session leaves the last live columns standing.
 	void read_columns();
