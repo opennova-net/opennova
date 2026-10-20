@@ -275,10 +275,13 @@ void test_the_kill_command_credits_its_killer() {
 	CHECK(killer != nullptr && killer->stats[w::MatchStats::kEnemyKills] == 1);
 }
 
-// A hidden body (Flags bit 0) at Health 0: the edge skips it.
+// A hidden body (Flags bit 0, a held slot's, which every 0x0A re-sets) at
+// Health 0: the edge skips it. [orig: NetPacket_WritePlayerState @0x4FF6D7 /
+// @0x4FF7B8]
 void test_hidden_body_is_skipped() {
 	Fixture f;
 	f.entity(0).flags |= 1u;
+	f.conn(0).link.respawn_pending = true;
 	f.entity(0).health = 0;
 	inmatch::Server_TickUpdate(f.ctx);
 	inmatch::Server_TickUpdate(f.ctx);

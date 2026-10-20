@@ -5012,6 +5012,10 @@ target_link_libraries(npruntime_joiner_mission_start_test PRIVATE opennova_net o
 add_test(NAME npruntime_joiner_mission_start COMMAND npruntime_joiner_mission_start_test)
 
 # --- parity lane L3 (host tick) ---
+# The 0x0A writer's stores on the slot's body, slot by slot (D-NET-439, 461, 462).
+add_executable(npruntime_player_state_writer_test npruntime/player_state_writer_test.cpp)
+target_link_libraries(npruntime_player_state_writer_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_state_writer COMMAND npruntime_player_state_writer_test)
 
 # --- parity lane L4 (spawn/death) ---
 # The player body's death edge raising the player-death transaction in the

@@ -187,12 +187,14 @@ void test_dead_body_only_stores() {
 	CHECK(g.deaths_of(0) == 1);
 }
 
-// A hidden body (Flags bit 0, a spectator's) takes the stores; the edge skips
-// it, so no death.
+// A hidden body (Flags bit 0, a held slot's, which every 0x0A re-sets) takes
+// the stores; the edge skips it, so no death. [orig: NetPacket_WritePlayerState
+// @0x4FF6D7 / @0x4FF7B8]
 void test_hidden_body_raises_no_death() {
 	Fixture f;
 	f.ctx.config.respawn_timeout = 4;
 	f.entity(0).flags |= 1u;
+	f.conn(0).link.respawn_pending = true;
 	f.request(0);
 	CHECK(f.entity(0).health == 0);
 	CHECK(f.conn(0).link.respawn_delay_seconds == 4);

@@ -923,8 +923,11 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	count_deaths();
 	if (!expect(deaths == 1, "waiting-edge: the team change kills the waiting body"))
 		return false;
-	// The own client's copy clears: the next entity update runs and its edge
-	// skips the dead body.
+	// The pre-round ends and the own client's copy clears: the next entity
+	// update runs and its edge skips the dead body. (While the pre-round runs,
+	// each 0x0A clears the dead bit and the edge re-kills the body, D-NET-439:
+	// npruntime_player_state_writer.)
+	world.preround_delay_seconds = 0;
 	world.cached.client_preround_timer = 0;
 	const uint32_t updates = world.entity_update_counter;
 	inmatch::Server_TickUpdate(ctx);

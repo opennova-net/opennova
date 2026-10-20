@@ -16,10 +16,9 @@ class World;
 // [orig: Server_SendEntityStateToPlayer @0x517BA0]
 namespace opennova::inmatch {
 
-// Every 0x0A written for a spectator slot first restamps its body: the hide bit, damage
-// disabled and Health 1, whatever a deploy left (the hide bytes are the latch here,
-// replication_model.h owner_hidden). Run ahead of the snapshot: the slot's own records
-// read the body after it.
+// Every 0x0A written for a spectator slot restamps its body among the writer's stores
+// (write_entity_state): the hide bit, damage disabled and Health 1, whatever a deploy
+// left (the hide bytes are the latch here, replication_model.h owner_hidden).
 // [orig: NetPacket_WritePlayerState @0x4FF6FA..0x4FF728, called from
 //  Server_SendEntityStateToPlayer @0x517C76 before its records @0x517C81]
 void restamp_spectator_body(world::World &world, const NapiNPConnection &conn);
@@ -34,13 +33,17 @@ bool entity_state_takes_records(const world::World &world, const NapiNPConnectio
 std::vector<GameEntitySnapshot> snapshot_entity_states(const NapiNPServerCtx &ctx,
 		world::World &world);
 
-// Builds `conn`'s 0x0A body from `ents` into `frame_out`; false when the slot has no
-// transport or no live owned entity.
+// Builds `conn`'s 0x0A body from `ents` into `frame_out`; false, storing nothing, when
+// the slot has no transport or no live owned entity. The writer's stores on the slot's
+// body (NetPacket_WritePlayerState's hide-bit clear and re-sets, the spectator restamp,
+// the pre-round dead-bit clear) follow the slot's priority list and precede its header
+// and records; `ents` is the snapshot the fan's slots share, whose row of this body
+// takes the stores for the slots written after this one.
 bool write_entity_state(NapiNPServerCtx &ctx, world::World &world, NapiNPConnection &conn,
-		const std::vector<GameEntitySnapshot> &ents, std::vector<uint8_t> &frame_out);
+		std::vector<GameEntitySnapshot> &ents, std::vector<uint8_t> &frame_out);
 
-// The one-slot writer the join calls: the spectator restamp, the snapshot when the slot
-// takes records, and the 0x0A body into `frame_out`.
+// The one-slot writer the join calls: the snapshot when the slot takes records, and the
+// 0x0A body (the writer's stores included) into `frame_out`.
 // [orig: Server_SendEntityStateToPlayer @0x517BA0]
 bool Server_SendEntityStateToPlayer(NapiNPServerCtx &ctx, world::World &world,
 		NapiNPConnection &conn, std::vector<uint8_t> &frame_out);

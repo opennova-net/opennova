@@ -25,6 +25,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_idle_timers.h>
+#include <runtime/inmatch/server_entity_state.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_tick.h>
 
@@ -2589,7 +2590,14 @@ int main() {
 		if (!expect(conn.link.spawn_target_hold_seconds == 2,
 		            "the Default Spawn deploy leaves the +364 hold")) return 1;
 		je = world.registry.get(jb);
-		if (!expect((je->flags & 1u) == 0, "deploy clears the hidden bit")) return 1;
+		// The deploy stores nothing to the hidden bit; the slot's next 0x0A
+		// clears it. [orig: Server_DeployPlayer @0x51787A; NetPacket_WritePlayerState
+		//  @0x4FF6D7]
+		if (!expect((je->flags & 1u) != 0, "the deploy leaves the hidden bit")) return 1;
+		std::vector<uint8_t> frame;
+		(void)inmatch::Server_SendEntityStateToPlayer(ctx, world, conn, frame);
+		if (!expect((je->flags & 1u) == 0, "the slot's next 0x0A clears the hidden bit"))
+			return 1;
 		if (!expect(je->health > 0, "deploy restores health")) return 1;
 
 		// An alive DEPLOYED player's 0x0E is a no-op (the dead-or-pending gate @0x519cc7):

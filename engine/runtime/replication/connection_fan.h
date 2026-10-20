@@ -92,6 +92,14 @@ int view_distance_units(const world::World &world);
 std::vector<std::vector<uint8_t>> build_water_cross_messages(
         const world::World &world);
 
+// Resolve the one legal S2C 0x0A anchor: this connection's live player
+// allocation, or null. Retail's wrapper is state==6 gated and immediately reads
+// that player's eye/reference position; an unbound/freed slot never enters the
+// writer and therefore never emits a map-centre fallback frame.
+// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate and recipient
+// eye stores @0x517BF5..0x517C13]
+const world::Entity *owned_entity_for_emit(const world::World &w, const Connection &conn);
+
 // The fan's phases lap onto the SIM_REPLICATION_* rows of the world's profile
 // (ADR 0043 d5); an inactive profile keeps selection and encoding free of
 // clock reads.

@@ -972,13 +972,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
 	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
 	if (ctx.is_in_session && !world.match.outcome().ended) {
-		// Every 0x0A written for a spectator slot first restamps its body, ahead
-		// of the snapshot (server_entity_state.h).
-		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn) || !conn.link.spectator) continue;
-			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
-			restamp_spectator_body(world, conn);
-		}
 		// The snapshot is built only for recipients that take entity records.
 		// Type-1 peers take one only at their open send boundary (see the fan below).
 		bool any_record_recipient = false;
@@ -991,7 +984,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		}
 		std::vector<GameEntitySnapshot> ents;
 		if (any_record_recipient) ents = snapshot_entity_states(ctx, world);
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		// The slot table's order, not the join order: each slot's writer stores
+		// show in the records of the slots after it.
+		std::vector<NapiNPConnection *> slots;
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) slots.push_back(&conn);
+		std::stable_sort(slots.begin(), slots.end(),
+				[](const NapiNPConnection *a, const NapiNPConnection *b) {
+					return a->reply.player_slot < b->reply.player_slot;
+				});
+		for (NapiNPConnection *slot : slots) {
+			NapiNPConnection &conn = *slot;
 			if (!is_in_match(conn)) continue;
 			// The host's type-2 loopback is an in-process seam and remains
 			// full-rate (its own player takes the header-only frame inside the
@@ -1001,6 +1003,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
 			// Built here and queued just below: the frame's CONTENT is the world
 			// after the script pass and the maintenance, before the motor step.
+			// Slot by slot, each slot's list, writer stores and records in turn,
+			// so a slot's records read the bodies of the slots written before it
+			// after their stores and those after it before theirs.
+			// [orig: Server_TickUpdate's per-slot loop @0x51E3A0..0x51E47C, the
+			//  call @0x51E3E4 -> Server_SendEntityStateToPlayer @0x51BBDC]
 			conn.frame_update_staged =
 					write_entity_state(ctx, world, conn, ents, conn.staged_frame_update);
 		}

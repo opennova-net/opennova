@@ -113,9 +113,8 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 				!target->primary_occupant.valid() ||
 				!world::find_best_vehicle_seat(
 						world, target_zone, player->handle, selected)) {
-			// Each a bare return [orig: @0x517A7C]; the next 0x0A shows the unheld slot, as
-			// the deploy's below [orig: NetPacket_WritePlayerState @0x4FF6D7, the hold @0x4FF7AA].
-			if (!conn.link.spectator) player->flags &= ~1u;
+			// Each a bare return [orig: @0x517A7C]; the slot's next 0x0A shows the
+			// unheld body, as after the deploy below (Server_SendEntityStateToPlayer).
 			return replies;
 		}
 	}
@@ -204,9 +203,11 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	conn.link.armory_reuse_seconds = 0;
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
-	// The next 0x0A clears the hide bit and re-sets a spectator's, so a deployed
-	// spectator stays hidden [orig: NetPacket_WritePlayerState @0x4FF6D7, @0x4FF7A1].
-	if (!conn.link.spectator) player->flags &= ~1u;
+	// The leg stores nothing to the hide bit: the slot's next 0x0A clears it and
+	// re-sets a spectator's or a held slot's, so a held body stays hidden, and
+	// out of that tick's humans count, until then (Server_SendEntityStateToPlayer)
+	// [orig: Server_DeployPlayer's one Flags store @0x51787A;
+	//  NetPacket_WritePlayerState @0x4FF6D7, @0x4FF7A1, @0x4FF7B8].
 	server_logs_deploy(server_log, *player); // /PROFILE's PBRK [orig: Server_DeployPlayer @0x517a27..0x517a37]
 	if (mobile_spawn) {
 		// Retail repeats FindBestSeatSlot after the reset, then requests the

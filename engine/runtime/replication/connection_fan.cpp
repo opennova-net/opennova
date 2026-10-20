@@ -474,12 +474,9 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	return encode_frame_update(fu, authority_recipient);
 }
 
-// Resolve the one legal S2C 0x0A anchor: this connection's live player
-// allocation. Retail's wrapper is state==6 gated and immediately reads that
-// player's eye/reference position; an unbound/freed slot never enters the
-// writer and therefore never emits a map-centre fallback frame.
-// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate and recipient
-// eye stores @0x517BF5..0x517C13]
+} // namespace
+
+// See header.
 // [orig: the per-player send descriptor / 12-byte frame anchor = player.spawn_x/y/z, §5.2a.]
 const world::Entity *owned_entity_for_emit(const world::World &w,
                                            const Connection &conn) {
@@ -491,6 +488,8 @@ const world::Entity *owned_entity_for_emit(const world::World &w,
 		return nullptr;
 	return entity;
 }
+
+namespace {
 
 // The anchor is the recipient's EYE: its Position plus its CameraOffset
 // (entity+0x6C/+0x70/+0x74, ours's eye_offset mirror the body tick stamps),
@@ -1350,10 +1349,21 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	for (const RoundEventRecord &r : rounds)
 		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ROUNDS);
-	const std::vector<GameEntitySnapshot> selected =
+	std::vector<GameEntitySnapshot> selected =
 			select_frame_entities(
 					w, conn, ents, anchor, body, header_bytes + rounds_bytes,
 					max_frame_body_bytes, frame_budget);
+	// The list read the recipient's body as the caller's snapshot holds it,
+	// ahead of the writer's stores (the hide bit, the spectator restamp, the
+	// pre-round dead-bit clear, which the host applies before this call); its
+	// own record reads the body after them.
+	// [orig: Server_SendEntityStateToPlayer - the list @0x517C1E, the writer
+	//  @0x517C76, the records @0x517C81]
+	for (GameEntitySnapshot &row : selected) {
+		if (row.wire_handle != owned->handle.packed) continue;
+		row.state_flags = static_cast<uint8_t>(owned->flags & 0xFF);
+		row.health = owned->health;
+	}
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITIES);
 
 	frame_out = build_0a_frame(

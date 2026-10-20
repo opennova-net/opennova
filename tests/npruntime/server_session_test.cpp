@@ -3948,10 +3948,12 @@ bool check_refused_mobile_spawn_deploy_clears_hold() {
 		return conn.link.respawn_pending || row == nullptr || row->respawn_pending;
 	};
 	// No primary occupant: the 0x0E's own gates pass, the deploy's +0x170 refuses.
+	// The leg stores nothing to the hide bit: the slot's next 0x0A clears it.
+	// [orig: Server_DeployPlayer @0x51787A; NetPacket_WritePlayerState @0x4FF6D7]
 	bool ok = expect(dispatch().empty() && unmoved() && !held() &&
-	                         (world.registry.get(player)->flags & 1u) == 0 &&
+	                         (world.registry.get(player)->flags & 1u) != 0 &&
 	                         conn.reply.frontier_hint_pending,
-	                 "a refused mobile-spawn deploy leaves the slot unheld and shown");
+	                 "a refused mobile-spawn deploy leaves the slot unheld, hidden until its 0x0A");
 	// A driver now powers the vehicle, but the live, unheld body's pick is refused.
 	w::Entity driver_seed;
 	driver_seed.kind = w::EntityKind::Organic;
