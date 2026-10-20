@@ -82,7 +82,8 @@ int main() {
 	opennova::novaworld_server::ServerConfig config;
 	config.nw_udp_port = 0;
 	// The JO loss probe below drives the listener's in-match JO host, which is
-	// opt-in (ONNET_EMBEDDED_JO_HOST, off by default).
+	// opt-in (ONNET_EMBEDDED_JO_HOST, off by default) and listens on a UDP port of
+	// its own, apart from the lobby's (D-NET-717).
 	config.embedded_jo_host = true;
 	if (!listener.start(config)) {
 		std::fprintf(stderr, "FAIL: listener.start\n");
@@ -115,6 +116,10 @@ int main() {
 	auto client = opennova::net::udp_bind(0, &client_port);
 	expect(client.is_valid(), "client UDP socket bound");
 	const auto server_ep = loopback_ep(test_nw_port);
+	const uint16_t jo_host_port = listener.embedded_jo_host_port();
+	expect(jo_host_port != 0 && jo_host_port != test_nw_port,
+	       "the JO host listens on a UDP port of its own");
+	const auto jo_ep = loopback_ep(jo_host_port);
 
 	// ClientAuth is not a stateless entry point for the lobby route. A peer
 	// must first own the exact Handshaking row created by its ClientHello;
@@ -466,6 +471,24 @@ int main() {
 			return seen;
 		};
 		service_session(200); // the update's ACK
+
+		// A full JO in-match Hello from the lobby session's own address to the lobby's port is
+		// the lobby's ordinary Hello, never the game host's, which listens on its own port
+		// (D-NET-717): the session's next statement is still the lobby's to serve.
+		{
+			opennova::inmatch::JoinerConnection stray("E2EStrayJoHello");
+			stray.set_title(&kJo);
+			send(stray.start());
+			service_session(200); // the lobby's 0x81 to it, which the session does not take
+			session.queue_statement(opennova::make_client_host_update(
+			    /*Host*/      {{0, "Players", "3"}}, true,
+			    /*PlayerList*/{{0, "PlayerName", "Host"}, {1, "PlayerName", "Joiner"},
+			                   {2, "PlayerName", "Third"}}, true));
+			flush_session();
+			expect(wait_players(3) == 3,
+			       "a JO Hello to the lobby's port leaves the session's traffic on the lobby");
+			service_session(200); // that update's ACK
+		}
 		const auto gap_datagram = built(opennova::make_client_host_update(
 		    /*Host*/      {{0, "Players", "4"}}, true,
 		    /*PlayerList*/{}, true));
@@ -939,7 +962,7 @@ int main() {
 		auto send_jo = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
 				opennova::net::udp_send_to(
-						jo_client, server_ep, dg.data(), dg.size());
+						jo_client, jo_ep, dg.data(), dg.size());
 			}
 		};
 		auto receive_jo = [&](std::vector<uint8_t> &dg) {
@@ -1004,8 +1027,8 @@ int main() {
 		       "JO loss probe frames dropped sequence one and delivered sequence two");
 
 		// A delayed goodbye from a prior occupant of this endpoint is rejected
-		// by the JO session verifier. The socket owner must keep its JO route
-		// and spawn bookkeeping unless that verifier surfaces PeerGoodbye.
+		// by the JO session verifier. The JO host must keep the session and its
+		// spawn bookkeeping unless that verifier surfaces PeerGoodbye.
 		const std::vector<uint8_t> stale_jo_goodbye =
 				opennova::nw_encode_outbound(
 						opennova::SESSION_OPCODE_CLIENT_GOODBYE,
@@ -1075,7 +1098,7 @@ int main() {
 		auto send_live = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
 				opennova::net::udp_send_to(
-						live_client, server_ep, dg.data(), dg.size());
+						live_client, jo_ep, dg.data(), dg.size());
 			}
 		};
 		send_live(live_joiner.start());
@@ -1248,7 +1271,7 @@ int main() {
 
 	// Restart the same listener and reuse the prior JO endpoint. A new
 	// production host must rotate HK and accept a fresh handshake; retaining
-	// jo_ctx/route/auth state would either replay the fixed key or reject this
+	// the JO host's connection or auth state would either replay the fixed key or reject this
 	// new ClientAuth as belonging to the old run.
 	uint16_t rebound_port = 0;
 	auto restart_client =
@@ -1281,11 +1304,14 @@ int main() {
 		       "listener restart preserves the shared manager's unrelated peer");
 	}
 	if (restarted && restart_client.is_valid()) {
+		// The restarted JO host's own socket, a port of its own again.
+		const auto restarted_jo_ep = loopback_ep(listener.embedded_jo_host_port());
+		expect(listener.embedded_jo_host_port() != 0, "the restarted JO host has its own port");
 		opennova::inmatch::JoinerConnection restart_joiner("E2ERestartProbe");
 		restart_joiner.set_title(&kJo);
 		const auto restart_hello = restart_joiner.start();
 		opennova::net::udp_send_to(
-				restart_client, server_ep,
+				restart_client, restarted_jo_ep,
 				restart_hello.data(), restart_hello.size());
 
 		opennova::net::Endpoint from;
@@ -1313,7 +1339,7 @@ int main() {
 			       "restarted JO ServerHello produces fresh ClientAuth");
 			if (handled.outbound.size() == 1) {
 				opennova::net::udp_send_to(
-						restart_client, server_ep,
+						restart_client, restarted_jo_ep,
 						handled.outbound[0].data(),
 						handled.outbound[0].size());
 				const int auth_size = opennova::net::udp_recv_from(

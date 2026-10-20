@@ -35,7 +35,6 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
-#include <deque>
 #include <exception>
 #include <future>
 #include <iterator>
@@ -156,45 +155,6 @@ NapiMessage make_server_verify_failure(const std::string &message) {
 	reply.children.push_back(std::move(var_list));
 	return reply;
 }
-
-// The shared HostOwner pump expects sole ownership of an IDatagramSocket's
-// receive stream. This listener also serves lobby traffic on the same OS
-// socket, so demultiplexed JO datagrams are queued here while sends go
-// straight back through that socket.
-class QueuedJoSocket final : public opennova::IDatagramSocket {
-public:
-	explicit QueuedJoSocket(opennova::net::Socket &socket) : sender_(socket) {}
-
-	void push(const PeerAddr &peer, const uint8_t *data, std::size_t size) {
-		Pending item;
-		item.peer = peer;
-		item.bytes.assign(data, data + size);
-		pending_.push_back(std::move(item));
-	}
-
-	int recv_from(uint8_t *data, std::size_t capacity, PeerAddr &peer) override {
-		if (pending_.empty()) return 0;
-		Pending item = std::move(pending_.front());
-		pending_.pop_front();
-		if (item.bytes.size() > capacity) return -1;
-		peer = item.peer;
-		std::memcpy(data, item.bytes.data(), item.bytes.size());
-		return static_cast<int>(item.bytes.size());
-	}
-
-	void send_to(const PeerAddr &peer, const uint8_t *data, std::size_t size) override {
-		sender_.send_to(peer, data, size);
-	}
-
-private:
-	struct Pending {
-		PeerAddr peer{};
-		std::vector<uint8_t> bytes;
-	};
-
-	opennova::net::NetDatagramSocket sender_;
-	std::deque<Pending> pending_;
-};
 
 // One lobby statement as the layer-4 record it rides in: the container alone in a root stream,
 // LEN8 or LEN16 by its size, at full message type 0, reliable (retained under its packet's
@@ -380,29 +340,10 @@ void NwUdpListener::reset_per_run_state(const char *reason) {
 	goodbyes_.clear();
 	last_goodbye_read_ms_ = 0;
 
-	jo_peers_.clear();
 	jo_owner_.reset();
 	jo_mission_.reset();
 	jo_world_.reset();
-}
-
-void NwUdpListener::observe_jo_event(
-		void *context, const inmatch::HostAcceptEvent &event) {
-	if (event.kind != inmatch::HostAcceptEvent::Kind::PeerGoodbye) return;
-	auto &listener = *static_cast<NwUdpListener *>(context);
-	if (!listener.jo_owner_) {
-		listener.jo_peers_.erase(event.peer);
-		return;
-	}
-	// A changed ClientAuth can retire an old node and create its replacement
-	// in one HandleResult. Keep routing when that fresh connection exists.
-	const bool replacement_exists = std::any_of(
-			listener.jo_owner_->ctx.np_protocol.connection_list.begin(),
-			listener.jo_owner_->ctx.np_protocol.connection_list.end(),
-			[&event](const inmatch::NapiNPConnection &connection) {
-				return connection.type == 1 && connection.peer == event.peer;
-			});
-	if (!replacement_exists) listener.jo_peers_.erase(event.peer);
+	jo_bound_port_ = 0;
 }
 
 bool NwUdpListener::start(const ServerConfig &config) {
@@ -437,6 +378,25 @@ bool NwUdpListener::start(const ServerConfig &config) {
 		return false;
 	}
 	bound_port_ = bound;
+	// The opt-in JO host's own socket, on a port of the OS's pick: retail's game
+	// hosts and its NovaWorld service are separate sockets, a joiner connecting
+	// only to the session it discovered, so no datagram to the lobby's port
+	// reaches the game host and none to the host's reaches the lobby.
+	// [orig: CNapiNetwork_StartClientConnection @0x4CA160 - the session by the
+	//  enumerator's timer id (NapiNPEnumerator_FindTimerById, the call @0x4CA1EE),
+	//  its connection opened on that session (CNapiNPConnection_InitFromSession, the
+	//  call @0x4CA41B); the lobby's own connection CNapiGameSession_InitNPConnection
+	//  @0x4D3BE0]
+	opennova::net::ScopedSocket jo_socket;
+	if (config.embedded_jo_host) {
+		uint16_t jo_bound = 0;
+		jo_socket = opennova::net::ScopedSocket(opennova::net::udp_bind(0, &jo_bound));
+		if (!jo_socket.is_valid()) {
+			std::fprintf(stderr, "[nwudp] failed to bind the JO host's UDP socket\n");
+			return false;
+		}
+		jo_bound_port_ = jo_bound;
+	}
 	instance_endpoint_ = config.lobby_endpoint;
 	lobby_id_.store(0);
 	// The SessionInit CU carries the web domain as bare host:port — the
@@ -458,8 +418,8 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	std::promise<bool> leased;
 	std::future<bool> lease_taken = leased.get_future();
 	const bool embedded_jo_host = config.embedded_jo_host;
-	worker_ = std::thread([this, socket = std::move(socket), leased = std::move(leased),
-			embedded_jo_host]() mutable {
+	worker_ = std::thread([this, socket = std::move(socket), jo_socket = std::move(jo_socket),
+			leased = std::move(leased), embedded_jo_host]() mutable {
 		std::optional<db::ConnectionPool::Lease> db_conn;
 		if (db_pool_) {
 			try {
@@ -474,7 +434,7 @@ bool NwUdpListener::start(const ServerConfig &config) {
 		// The in-match JO host only when the config asks for it (ONNET_EMBEDDED_JO_HOST).
 		if (embedded_jo_host) initialize_jo_host();
 		leased.set_value(true);
-		run_loop(std::move(socket), std::move(db_conn));
+		run_loop(std::move(socket), std::move(jo_socket), std::move(db_conn));
 	});
 	if (!lease_taken.get()) {
 		worker_.join();
@@ -483,6 +443,9 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	running_.store(true);
 	std::printf("[nwudp] listening on UDP :%u\n",
 	            static_cast<unsigned>(bound_port_));
+	if (jo_bound_port_ != 0)
+		std::printf("[nwudp] the embedded JO host listens on UDP :%u\n",
+		            static_cast<unsigned>(jo_bound_port_));
 	return true;
 }
 
@@ -1119,13 +1082,15 @@ void NwUdpListener::send_missing_requests(opennova::net::Socket &socket) {
 }
 
 void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
+                             opennova::net::ScopedSocket jo_socket,
                              std::optional<db::ConnectionPool::Lease> db_conn) {
 	// The receive thread's own connection: the lobby session's host rows, the session rows, the
 	// commands. None in the tests that bring up no database.
 	db::Database *const loop_db = db_conn ? db_conn->get() : nullptr;
 	lobby_session_.set_database(loop_db);
 
-	QueuedJoSocket jo_socket(socket.get());
+	// The JO host's own socket, read by its pump alone (non-blocking).
+	opennova::net::NetDatagramSocket jo_datagrams(jo_socket.get());
 	using PumpClock = std::chrono::steady_clock;
 	const auto pump_period =
 			std::chrono::nanoseconds(1000000000LL / opennova::io::kTicksPerSecondInt);
@@ -1147,9 +1112,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			const auto now = PumpClock::now();
 			if (now >= next_pump) {
 				if (jo_owner_) {
-					inmatch::host_session_pump(
-							*jo_owner_, jo_socket, nullptr, nullptr,
-							&NwUdpListener::observe_jo_event, this);
+					inmatch::host_session_pump(*jo_owner_, jo_datagrams);
 					// The frame's weapon-action walk follows the server
 					// tick's entity pass on every host; this one has no
 					// weather or view legs to wait for.
@@ -1240,30 +1203,6 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 		// (peer_addr_ip_to_string): a joiner's PlaySetup names the listing by it
 		// (hostdb::rid_at), so the two must agree byte for byte.
 		const std::string client_ip_str = peer_addr_ip_to_string(peer);
-
-		// Demultiplex the in-match game protocol onto the shared authoritative host
-		// pump. A hello's PN names its title; a route is installed only for a hello
-		// carrying that title's complete in-match identity, when the host speaks that
-		// title; subsequent opcodes stay on that route so the lobby path never sees
-		// game SCRKs.
-		bool route_jo = jo_peers_.count(peer) != 0;
-		if (opcode == SESSION_OPCODE_CLIENT_HELLO && jo_owner_) {
-			ClientHello probe;
-			if (parse_client_hello(body.data(), body.size(), probe)) {
-				const SessionProtocol protocol = classify_session_protocol(probe.pn);
-				const TitleIdentity *title = protocol.title;
-				if (title != nullptr && title == jo_owner_->ctx.np_protocol.identity &&
-				    title_identity_complete(*title, TitleIdentityPart::Session) &&
-				    matches_title_identity(*title, probe)) {
-					route_jo = true;
-					jo_peers_.insert(peer);
-				}
-			}
-		}
-		if (route_jo && jo_owner_) {
-			jo_socket.push(peer, rx, static_cast<std::size_t>(n));
-			continue;
-		}
 
 		switch (opcode) {
 		case SESSION_OPCODE_CLIENT_HELLO: {
@@ -1572,9 +1511,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			// the row's Hello identity (D-NET-630).
 			const SessionProtocolKind protocol =
 					classify_session_protocol(conn_opt->session_pn).kind;
-			// In-match peers of the host's title are routed to the shared HostOwner above and
-			// never reach this switch — only the lobby (NOVAWORLDUDP) container
-			// path and unsupported PNs land here.
+			// The opt-in JO host has a socket of its own (D-NET-717), so no in-match peer's
+			// datagram reaches this socket's switch: only the lobby (NOVAWORLDUDP) container
+			// path and the other PNs land here.
 			if (protocol == SessionProtocolKind::Lobby) {
 				for (const auto &pm : messages) {
 					std::printf("[nwudp]     pm flags=0x%02x tag=0x%03x len=%u settings=%d frag_cont=%d frag_end=%d\n",

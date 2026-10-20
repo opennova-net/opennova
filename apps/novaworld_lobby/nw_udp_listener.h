@@ -9,7 +9,6 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include <net/novaworld/db/database.h>
@@ -142,10 +141,10 @@ inline constexpr uint64_t kGoodbyeResendMs = 1000;
 //   0x46 ClientGoodBye -> 0x86 ServerGoodBye + drop the connection
 //
 // PN dispatch happens at HELLO time. "NOVAWORLDUDP" peers use the lobby
-// container path; a title's in-match PN (classify_session_protocol), with that
-// title's complete in-match identity, uses the shared authoritative inmatch host
-// lifecycle on the same retail UDP session port when the host speaks that title
-// (JO's, "JOINTOPERATIONS").
+// container path. The opt-in in-match JO host (ServerConfig::embedded_jo_host)
+// runs the shared authoritative inmatch host lifecycle on a socket of its own
+// (embedded_jo_host_port), never on this port: retail's game hosts and its
+// service are separate sockets (D-NET-717).
 //
 // The lobby's memory is its own: nothing outside the listener reads or changes
 // it but the ConnectionManager's drops (erase_lobby_state, the on_lost sink) and
@@ -233,6 +232,11 @@ public:
 	// Whether the in-match JO host runs (ServerConfig::embedded_jo_host); read
 	// after start() returns, which waits for the worker to set it up.
 	bool embedded_jo_host_running() const { return jo_owner_ != nullptr; }
+	// The UDP port the JO host's own socket bound (the OS's pick), 0 with no
+	// host: a game host has a socket of its own, apart from the lobby's, as a
+	// retail joiner connects to the session it discovered and nothing else
+	// (D-NET-717).
+	uint16_t embedded_jo_host_port() const { return jo_bound_port_; }
 
 	// The receive loop's turns so far (one per receive, which waits at most a
 	// pump period): the stall watchdog's progress counter (core/health.h).
@@ -275,7 +279,7 @@ public:
 	void erase_lobby_state(const PeerAddr &peer, const char *reason, db::Database *db = nullptr);
 
 private:
-	void run_loop(opennova::net::ScopedSocket socket,
+	void run_loop(opennova::net::ScopedSocket socket, opennova::net::ScopedSocket jo_socket,
 	              std::optional<db::ConnectionPool::Lease> db_conn);
 
 	// One admitted peer (lobby_peers_): its lobby_sessions row (0 until written, and with no
@@ -387,7 +391,6 @@ private:
 	void pump_send_intervals(opennova::net::Socket &socket);
 	void initialize_jo_host();
 	void reset_per_run_state(const char *reason);
-	static void observe_jo_event(void *context, const inmatch::HostAcceptEvent &event);
 
 	ConnectionManager &manager_;
 	std::thread worker_;
@@ -405,14 +408,14 @@ private:
 	// state lives in the map (keyed by PeerAddr — see erase_lobby_state
 	// comment above for why CI was the wrong key).
 	LobbySession lobby_session_;
-	// JO's in-match peers run through the same HostOwner/start_host_session/
-	// host_session_pump lifecycle as the game's host. This listener contributes
-	// only UDP protocol demultiplexing; the minimal authoritative World makes
-	// the complete named-spawn stream reachable.
+	// The opt-in JO host runs through the same HostOwner/start_host_session/
+	// host_session_pump lifecycle as the game's host, on its own socket
+	// (jo_bound_port_), pumped from this thread; the minimal authoritative
+	// World makes the complete named-spawn stream reachable.
 	std::unique_ptr<world::World> jo_world_;
 	std::unique_ptr<bms::File> jo_mission_;
 	std::unique_ptr<inmatch::HostOwner> jo_owner_;
-	std::unordered_set<PeerAddr, PeerAddrHash> jo_peers_;
+	uint16_t jo_bound_port_ = 0;
 	mutable std::mutex lobby_states_mu_;
 	// Every peer address this listener admitted onto the lobby route, with its
 	// session row. This is deliberately broader than lobby_states_: a valid

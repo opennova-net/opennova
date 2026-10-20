@@ -15,7 +15,7 @@ The hosted servers (the fleet, its supervisor, the data sets, the console) are
 | Listener | Port | Protocol |
 | --- | --- | --- |
 | `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: one per title" below); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
-| `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> PN dispatch: NOVAWORLDUDP containers or JointOperations game runtime |
+| `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> NOVAWORLDUDP containers; the opt-in JO game host (`ONNET_EMBEDDED_JO_HOST`) on a UDP port of its own |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 | `InternalListener` (`hosted/internal_listener.*`) | TCP 8070 | the machines' agent routes alone (`hosted/agent_route.*`), on a private address |
 | `HealthListener` (`core/health_listener.*`) | TCP 8081 | `GET /livez` alone, from the program's stall watchdog ("Health" below) |
@@ -1086,10 +1086,10 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 listed with no owner; "Listed servers and owners" above).
 `ONNET_CD_KEY_AUTO_MINT=0` stops minting a DFX2 account's first CD key at its first
 activation (default on; "CD keys (DFX2 activation)" above).
-`ONNET_EMBEDDED_JO_HOST=1` runs an in-match JO host in the service process on the
-NovaWorld UDP port, which serves a Hello carrying JO's complete in-match identity as a
-game session; the `nw_host_register_e2e` harness turns it on (default off: the service
-runs no game host).
+`ONNET_EMBEDDED_JO_HOST=1` runs an in-match JO host in the service process on a UDP
+socket of its own (a port of the OS's pick, logged at start), apart from the NovaWorld
+UDP port as a retail game host is (D-NET-717); the `nw_host_register_e2e` harness turns
+it on (default off: the service runs no game host).
 Billing takes the `STRIPE_*` set and `ONNET_SITE_URL`, `ONNET_STRIPE_CURL`,
 `ONNET_BILLING_AUTOMATIC_TAX` and `ONNET_BILLING_RECONCILE_MINUTES` ("Billing (monthly
 support tiers)" above). Outbound mail takes `ONNET_MAIL_FROM`, `ONNET_MAIL_REGION` and
