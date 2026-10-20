@@ -9,7 +9,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_ban_lists.h>
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
-#include <runtime/inmatch/server_player_death.h> // Server_ProcessPlayerDeath
+#include <runtime/inmatch/server_player_death.h> // Server_RunPlayerDeath
 #include <runtime/inmatch/server_tick.h>  // Server_StageHostDisconnect
 #include <runtime/world/ai.h>
 #include <runtime/world/round_sim.h>
@@ -134,13 +134,7 @@ void kill_entity(NapiNPServerCtx &ctx, world::EntityHandle handle) {
 	world::World &world = *ctx.world;
 	world::Entity *entity = world.registry.get(handle);
 	if (entity == nullptr) return;
-	world::RoundDeath death;
-	death.victim = handle;
-	death.victim_handle = handle.packed;
-	death.killer = entity->last_attacker;
-	death.killer_handle = entity->last_attacker.packed;
-	death.event_flags = entity->cause_flags & 0xF00u;
-	Server_ProcessPlayerDeath(ctx, world, death);
+	Server_RunPlayerDeath(ctx, world, handle);
 	if ((entity = world.registry.get(handle)) != nullptr) entity->flags |= 2u;
 }
 

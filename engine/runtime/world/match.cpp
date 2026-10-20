@@ -887,21 +887,24 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
     return !near_home;
 }
 
+// A Player's death first unlinks every pool-0 AI body whose +0x170
+// point-share link names it. [orig: GameEvent_PlayerDeath
+// @0x516E07..0x516E45]
+void Match::unlink_point_share_links(World &world, EntityHandle victim_handle) {
+    const Entity *dead = world.registry.get(victim_handle);
+    if (dead == nullptr || ((dead->flags | dead->engine_flags) & kEntityFlagPlayer) == 0)
+        return;
+    world.registry.for_each_in_pool(0, [&](const Entity &row) {
+        if (row.handle == victim_handle || row.primary_occupant != victim_handle ||
+                world.ai.for_handle(row.handle) == nullptr)
+            return;
+        world.registry.get(row.handle)->primary_occupant = EntityHandle{};
+    });
+}
+
 void Match::record_death(World &world, EntityHandle victim_handle,
                          EntityHandle killer_handle, uint32_t cause_flags) {
-    // A Player's death first unlinks every pool-0 AI body whose +0x170
-    // point-share link names it. [orig: GameEvent_PlayerDeath
-    // @0x516E07..0x516E45]
-    if (const Entity *dead = world.registry.get(victim_handle);
-            dead != nullptr &&
-            ((dead->flags | dead->engine_flags) & kEntityFlagPlayer) != 0) {
-        world.registry.for_each_in_pool(0, [&](const Entity &row) {
-            if (row.handle == victim_handle || row.primary_occupant != victim_handle ||
-                    world.ai.for_handle(row.handle) == nullptr)
-                return;
-            world.registry.get(row.handle)->primary_occupant = EntityHandle{};
-        });
-    }
+    unlink_point_share_links(world, victim_handle);
     if (outcome_.ended)
         return;
     // The kill scorer reads the victim's carried-object link (+0x268) as the

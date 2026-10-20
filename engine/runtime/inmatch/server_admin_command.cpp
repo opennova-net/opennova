@@ -8,11 +8,10 @@
 #include <net/npwire/session_hello.h>   // DisconnectEvent
 #include <net/novaworld/lobby_vars.h> // parse_host_and_port / resolve_address_without_dns
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_player_death.h> // Server_RunPlayerDeath
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
 #include <runtime/world/entity.h>
-#include <runtime/world/infantry.h>     // compute_death_anim_state / death_cause
-#include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -39,10 +38,12 @@ int32_t atol_token(const std::string &token) {
 	return io::retail_atol(token.c_str());
 }
 
-// Player-slot state 6: an added player still in the match with its entity.
+// Player-slot state 6 (joined) with its entity: a slot still joining (1..5)
+// or joined into a finished round (7) is no target.
+// [orig: KillPlayer `cmp dword ptr [eax+20h], 6` @0x4D29C6, the entity
+//  @0x4D29D0; ChangeTeam / SwapTeam state 6 @0x4D32E6, the entity @0x4D32EC]
 bool slot_in_game(const NapiNPConnection &conn) {
-	return conn.phase >= ConnectionPhase::PlayerAdded && conn.phase < ConnectionPhase::Goodbye &&
-	       conn.link.owned_entity.valid();
+	return conn.slot_state == PlayerSlotState::Joined && conn.link.owned_entity.valid();
 }
 
 // PlayerState_GetByIndex: an index outside [0, capacity) is no slot, so a
@@ -246,23 +247,21 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 			send_reliable(*target, s2c::CHAT_BROADCAST, chat_body(channel, args[1]));
 			return outcome;
 		}
-		// KillPlayer: the slot must be in the game; health and the kill credit
-		// are cleared and the death check runs the full player-death event.
-		// [orig: @0x4D29C6..0x4D29EC -> Entity_CheckAndProcessDeath @0x51B550 ->
-		//  GameEvent_PlayerDeath @0x516DD0 for a Flags&0x100 player]
+		// KillPlayer: the slot must be in the game; Health and the kill credit
+		// are cleared and the death check runs the player-death transaction
+		// inline. Nothing stores the dead bit, so the body's edge in the next
+		// entity update raises the transaction a second time.
+		// [orig: @0x4D29C6 (state 6), @0x4D29D0 (the entity), Health 0
+		//  @0x4D29DA, +0x178 = 0 @0x4D29E3, Entity_CheckAndProcessDeath
+		//  @0x4D29EC -> GameEvent_PlayerDeath @0x51B55F for a Flags & 0x100
+		//  player; the edge Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA]
 		if (!slot_in_game(*target)) return outcome;
 		world::Entity *entity = world->registry.get(target->link.owned_entity);
 		if (entity == nullptr) return outcome;
 		outcome.handled = true;
 		entity->health = 0;
 		entity->last_attacker = world::EntityHandle{};
-		entity->death_anim_state = world::compute_death_anim_state(
-				0, 0, world::death_cause::kGeneric);
-		world::RoundDeath death;
-		death.victim = entity->handle;
-		death.victim_handle = entity->handle.packed;
-		death.event_flags = entity->cause_flags & 0xF00u;
-		world->round_sim.deaths.push_back(death);
+		Server_RunPlayerDeath(ctx, *world, entity->handle);
 		return outcome;
 	}
 	if (strutil::iequals(verb, "TextChatServer")) {

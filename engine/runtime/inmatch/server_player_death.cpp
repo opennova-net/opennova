@@ -234,9 +234,14 @@ void kill_player_body_at_frame_tail(world::World &, world::Entity *player) {
 	player->health = -1;
 }
 
-// See header. [orig: GameEvent_PlayerDeath @0x516DD0]
-void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
-		const world::RoundDeath &d) {
+namespace {
+
+// GameEvent_PlayerDeath (and Entity_CheckAndProcessDeath's non-player leg) for
+// one record. `direct` is a caller that runs it on a slot's body outside any
+// death edge (Server_RunPlayerDeath): no tally, no Flags store, the live +0x2C0.
+// [orig: GameEvent_PlayerDeath @0x516DD0]
+void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
+		const world::RoundDeath &d, bool direct) {
 	// The kill accounting of a damage-pass lethal edge (process_kill_event):
 	// scorer event 12 in every session, then the SP tallies behind
 	// world.rules.mp_session (our SP listen server always runs
@@ -255,14 +260,6 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 	const world::Entity *killer_entity = world.registry.get(d.killer);
 	const bool victim_is_player = victim_entity != nullptr &&
 			(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
-	// An edge record's victim is a person even when its corpse leg removed the row.
-	const bool organic_victim = d.motor_edge || (victim_entity != nullptr &&
-			victim_entity->kind == world::EntityKind::Organic);
-	// The revive-window and resend gates read the victim's live entity+44
-	// cause word BEFORE the classifier clears the bit it reports.
-	// [orig: GameEvent_PlayerDeath @0x516f4d precedes the ladder @0x517180]
-	const uint32_t victim_cause_bits =
-			victim_entity != nullptr ? victim_entity->cause_flags : 0u;
 	NapiNPConnection *victim_connection = nullptr;
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (!c.link.owned_entity.valid() ||
@@ -271,6 +268,28 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		victim_connection = &c;
 		break;
 	}
+	// The player transaction's head: a mounted victim leaves its seat, every
+	// pool-0 AI body's link to it goes, and a slot whose spectator latch is set
+	// stops there: no 0x13, holds, scoring or carried-object drop.
+	// [orig: GameEvent_PlayerDeath -- the +0x16C test and
+	//  Entity_DetachFromVehicleIfServer @0x516DE7..0x516DFF, the pool-0 walk
+	//  @0x516E07..0x516E45, Entity_ValidatePtr @0x516E48, the latch
+	//  `cmp [edi+188D7h], bl` @0x516E5A, the return @0x516E60]
+	if (victim_is_player) {
+		if (victim_entity->mounted) world.vehicles.detach(d.victim);
+		if (victim_connection != nullptr && victim_connection->link.spectator) {
+			world.match.unlink_point_share_links(world, d.victim);
+			return;
+		}
+	}
+	// An edge record's victim is a person even when its corpse leg removed the row.
+	const bool organic_victim = d.motor_edge || (victim_entity != nullptr &&
+			victim_entity->kind == world::EntityKind::Organic);
+	// The revive-window and resend gates read the victim's live entity+44
+	// cause word BEFORE the classifier clears the bit it reports.
+	// [orig: GameEvent_PlayerDeath @0x516f4d precedes the ladder @0x517180]
+	const uint32_t victim_cause_bits =
+			victim_entity != nullptr ? victim_entity->cause_flags : 0u;
 	// Match drops a carried objective, so capture the retail classifier's
 	// mountedChild and player-slot inputs before handing the transaction to
 	// its score ledger.
@@ -293,8 +312,10 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 	// knows it died (v33). [orig: the death path sets entity+36 bit1; §5.10 off-13
 	// "bit 0x02 = DEAD/UNDEPLOYED", apply @0x4c1005-0x4c1027, edge @0x4c1109]
 	// An edge record's row carries the edge's own latch (or, an org1 row's, a
-	// respawned life).
-	if (organic_victim && !d.motor_edge) {
+	// respawned life); a direct caller's transaction stores no Flags (a caller
+	// that latches does it after) [orig: GameEvent_PlayerDeath @0x516DD0 has no
+	// store to +0x24; the team change's @0x519061; KillPlayer's none @0x4D29EC].
+	if (organic_victim && !d.motor_edge && !direct) {
 		victim_entity->flags |= 2u;
 		victim_entity->alive = false;
 	}
@@ -334,16 +355,18 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		// slot into the anim state and ZERO it before the authority-gated
 		// Entity_CheckAndProcessDeath call, so an edge-driven infantry
 		// death always ships 0 (every 0x13 in the retail capture carries
-		// 0); only the direct third sender ships a live slot. Both edges'
-		// transactions run after their consume; a person victim reports
-		// that post-edge zero on the direct paths too (the team change, the
-		// console kill), and every other kind ships the slot as stored.
-		// The retail receiver stores the word sign-extended into +0x2C0.
+		// 0), as does a person's record standing in for its edge. A direct
+		// caller (the team change, the admin kills) ships the slot as it
+		// stands, a staged selection included, and every other kind ships
+		// the slot as stored. The retail receiver stores the word
+		// sign-extended into +0x2C0.
 		// [orig: NetPacket_BuildDeathNotifyPayload @0x5036E0 (movzx word [esi+2C0h]
 		//  @0x503733, store @0x50374A); edges @0x4B9D38 -> @0x4B9D4D (AI)
-		//  and @0x4B4CD5 -> @0x4B4CEA (player body); direct sender
-		//  @0x4D29EC; receiver NapiNPClientMsg_EntityDeath @0x42EB8D/@0x42EBDF]
-		const bool edge_consumes_slot = victim_entity != nullptr &&
+		//  and @0x4B4CD5 -> @0x4B4CEA (player body); direct senders
+		//  @0x4D29EC (KillPlayer), @0x519059 (the team change), @0x404254
+		//  (the admin console); receiver NapiNPClientMsg_EntityDeath
+		//  @0x42EB8D/@0x42EBDF]
+		const bool edge_consumes_slot = !direct && victim_entity != nullptr &&
 				(victim_entity->item_type == 3 ||
 				 (victim_entity->item_type == 0 &&
 				  victim_entity->kind == world::EntityKind::Organic));
@@ -392,8 +415,7 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		if (victim_connection != nullptr &&
 				is_in_match(*victim_connection) &&
 				victim_connection->link.transport != nullptr) {
-			const world::Entity *camera_entity = d.killer.valid()
-					? world.registry.get(d.killer) : nullptr;
+			const world::Entity *camera_entity = killer_entity;
 			if (camera_entity == nullptr) camera_entity = victim_entity;
 			DeathCameraTarget target;
 			if (camera_entity != nullptr) {
@@ -457,7 +479,14 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		}
 	}
 
-	if (!d.motor_edge) world.match.process_kill_event(world, d);
+	if (!d.motor_edge && !direct) world.match.process_kill_event(world, d);
+
+	// The killer-less arm names the victim its own last attacker, which a
+	// later medic test and a later edge's transaction read.
+	// [orig: GameEvent_PlayerDeath -- the +0x178 test @0x516FF4..0x516FFC, the
+	//  store `mov [esi+178h], esi` @0x5172E6]
+	if (victim_connection != nullptr && victim_is_player && killer_entity == nullptr)
+		victim_entity->last_attacker = d.victim;
 
 	if (victim_connection != nullptr) {
 		// Every player slot gets the same two whole-second counters. A
@@ -475,6 +504,28 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 				? std::max(link.spawn_target_hold_seconds, hold)
 				: 0u;
 	}
+}
+
+} // namespace
+
+// See header. [orig: GameEvent_PlayerDeath @0x516DD0]
+void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
+		const world::RoundDeath &d) {
+	player_death_transaction(ctx, world, d, false);
+}
+
+// See header.
+void Server_RunPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
+		world::EntityHandle victim) {
+	const world::Entity *entity = world.registry.get(victim);
+	if (entity == nullptr) return;
+	world::RoundDeath death;
+	death.victim = victim;
+	death.victim_handle = victim.packed;
+	death.killer = entity->last_attacker;
+	death.killer_handle = entity->last_attacker.valid() ? entity->last_attacker.packed : 0xFFFFu;
+	death.event_flags = entity->cause_flags & 0xF00u;
+	player_death_transaction(ctx, world, death, true);
 }
 
 // See header: no death waits for the frame tail.

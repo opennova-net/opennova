@@ -6,7 +6,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/inmatch/mission_rotation.h> // HostRotation::previous_game_type
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
-#include <runtime/inmatch/server_player_death.h> // Server_ProcessPlayerDeath
+#include <runtime/inmatch/server_player_death.h> // Server_RunPlayerDeath
 #include <runtime/world/entity.h>
 #include <runtime/world/round_sim.h>      // RoundDeath
 #include <runtime/world/world.h>
@@ -179,11 +179,7 @@ void Server_HandleTeamChangeRequest(NapiNPServerCtx &ctx, NapiNPConnection &conn
 		if (entity != nullptr) {
 			entity->health = 0;                           // +0x11E
 			entity->last_attacker = world::EntityHandle{}; // +0x178
-			world::RoundDeath death;
-			death.victim = handle;
-			death.victim_handle = handle.packed;
-			death.event_flags = entity->cause_flags & 0xF00u;
-			Server_ProcessPlayerDeath(ctx, world, death);
+			Server_RunPlayerDeath(ctx, world, handle);
 			if ((entity = world.registry.get(handle)) != nullptr) entity->flags |= 2u;
 		}
 		// The penalty replaces the death's respawn holds, and the revive

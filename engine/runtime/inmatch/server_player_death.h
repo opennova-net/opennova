@@ -42,6 +42,18 @@ void Server_RouteFrameTailEdges(NapiNPServerCtx &ctx);
 void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		const world::RoundDeath &death);
 
+// The transaction as a direct caller runs it on a slot's body (the C2S 0x4D
+// team change, the admin console's kill, the admin KillPlayer): the killer the
+// body's +0x178 as it stands, no tally, no Flags store (a caller that latches
+// the dead bit does it after; KillPlayer does not, so the body's edge raises
+// the transaction again), and the 0x13 word the body's live +0x2C0.
+// [orig: NapiNPServerMsg_0x04D_ChangeTeam @0x519059 (Flags |= 2 @0x519061);
+//  CAdminServer_HandlePlayer @0x404254 (Flags @0x40425E);
+//  CNapiGameSession_HandleServerCommand @0x4D29EC -> Entity_CheckAndProcessDeath
+//  @0x51B55F; GameEvent_PlayerDeath @0x516DD0 has no store to +0x24]
+void Server_RunPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
+		world::EntityHandle victim);
+
 // Which drain: the tick's head (HoldAtHead) also releases the previous entity
 // update's staged sends at their records' places; the later drain (Route)
 // drains alone, as nothing is held for a player body's edge any more.

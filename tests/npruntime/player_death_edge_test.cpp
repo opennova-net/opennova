@@ -19,6 +19,7 @@
 //  @0x516F4F, +360 floored @0x516EC4..0x516EC6]
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_admin_command.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_tick.h>
@@ -64,6 +65,7 @@ struct Fixture {
 		ctx.is_in_session = 1;
 		ctx.config.game_type = 0x10000u; // TDM
 		ctx.config.respawn_timeout = 1;
+		ctx.config.max_players = 16; // the admin commands' slot index range
 		ctx.config.death_messages = 1; // the 0x1E kill feed
 		world.rules.mp_session = true;
 		world.rules.logic_authority = true;
@@ -275,6 +277,78 @@ void test_the_kill_command_credits_its_killer() {
 	CHECK(killer != nullptr && killer->stats[w::MatchStats::kEnemyKills] == 1);
 }
 
+// D-NET-553: the admin KillPlayer kills twice. The command stores Health 0 and
+// clears +0x178, then runs the transaction inline: its 0x13 ships the body's
+// live +0x2C0 (a prior hit's staged selection) and its killer-less arm names
+// the victim its own last attacker; nothing stores the dead bit, so the edge in
+// the next entity update keeps that +0x178 (the selection is staged) and raises
+// the transaction again: a second 0x13 (the consumed word 0) and a suicide's
+// feed, the holds re-armed.
+// [orig: CNapiGameSession_HandleServerCommand -- Health 0 @0x4D29DA, +0x178 = 0
+//  @0x4D29E3, Entity_CheckAndProcessDeath @0x4D29EC; NetPacket_BuildDeathNotifyPayload
+//  -- +0x2C0 @0x503733; GameEvent_PlayerDeath -- the killer-less store
+//  @0x5172E6, no store to +0x24; Entity_UpdateInfantryPlayerBody -- Health <= 0
+//  @0x4B4BF1, the dead bit @0x4B4BFE, the staged-selection test
+//  @0x4B4C72..0x4B4C8D, the consume @0x4B4CD5, the call @0x4B4CEA]
+void test_kill_player_dies_twice() {
+	Fixture f;
+	f.conn(0).slot_state = inmatch::PlayerSlotState::Joined;
+	const int32_t staged = w::compute_death_anim_state(1, 2, w::death_cause::kBullet);
+	f.entity(0).death_anim_state = staged; // a prior non-lethal hit by player 1
+	f.entity(0).last_attacker = f.players[1];
+	const inmatch::ServerCommandOutcome out =
+			inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "KillPlayer", "ByIndex", {"1"});
+	CHECK(out.handled);
+	CHECK(f.entity(0).health == 0 && !f.dead_bit(0));
+	CHECK(f.entity(0).last_attacker == f.players[0]);
+	CHECK(f.conn(0).link.downed_revive_seconds == 0u);
+	const std::vector<ns::Datagram> first = f.drain(2);
+	CHECK(f.deaths(first) == std::vector<uint16_t>{f.players[0].packed});
+	const int first_at = Fixture::first(first, s2c::ENTITY_DEATH);
+	CHECK(first_at >= 0 && first[first_at].body.size() >= 4 &&
+			static_cast<uint16_t>(first[first_at].body[2] | (first[first_at].body[3] << 8)) ==
+					static_cast<uint16_t>(staged));
+	const int first_feed = Fixture::first(first, s2c::GAME_EVENT);
+	CHECK(first_feed >= 0 && first[first_feed].body[0] == 22);
+	f.conn(0).link.respawn_delay_seconds = 0; // the first transaction's holds, spent
+	inmatch::Server_TickUpdate(f.ctx); // the edge latches and raises the second
+	CHECK(f.dead_bit(0));
+	CHECK(f.conn(0).link.respawn_delay_seconds == 3u);
+	inmatch::Server_TickUpdate(f.ctx);
+	const std::vector<ns::Datagram> second = f.drain(2);
+	CHECK(f.deaths(second) == std::vector<uint16_t>{f.players[0].packed});
+	const int second_at = Fixture::first(second, s2c::ENTITY_DEATH);
+	CHECK(second_at >= 0 && second[second_at].body.size() >= 4 &&
+			second[second_at].body[2] == 0 && second[second_at].body[3] == 0);
+	const int second_feed = Fixture::first(second, s2c::GAME_EVENT);
+	CHECK(second_feed >= 0 && second[second_feed].body[0] >= 1 &&
+			second[second_feed].body[0] <= 3);
+}
+
+// FOUND (GameEvent_PlayerDeath's spectator latch): a direct caller's death on a
+// spectator-latched slot unlinks the AI bodies' links to it and stops there: no
+// 0x13, no feed, no holds.
+// [orig: GameEvent_PlayerDeath -- the pool-0 walk @0x516E07..0x516E45, the
+//  latch @0x516E5A, the return @0x516E60]
+void test_a_spectator_slots_death_stops_at_the_latch() {
+	Fixture f;
+	f.conn(0).slot_state = inmatch::PlayerSlotState::Joined;
+	f.conn(0).link.spectator = true;
+	f.entity(0).flags |= 1u; // the convert's hidden body
+	f.entity(2).primary_occupant = f.players[0];
+	const inmatch::ServerCommandOutcome out =
+			inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "KillPlayer", "ByIndex", {"1"});
+	CHECK(out.handled);
+	CHECK(f.entity(0).health == 0);
+	CHECK(!f.entity(2).primary_occupant.valid());
+	CHECK(f.conn(0).link.respawn_delay_seconds == 0u);
+	inmatch::Server_TickUpdate(f.ctx);
+	inmatch::Server_TickUpdate(f.ctx);
+	const std::vector<ns::Datagram> out_run = f.drain(2);
+	CHECK(f.deaths(out_run).empty());
+	CHECK(Fixture::first(out_run, s2c::GAME_EVENT) < 0);
+}
+
 // A hidden body (Flags bit 0, a held slot's, which every 0x0A re-sets) at
 // Health 0: the edge skips it. [orig: NetPacket_WritePlayerState @0x4FF6D7 /
 // @0x4FF7B8]
@@ -456,6 +530,8 @@ int main() {
 	test_two_bodies_die_in_slot_order();
 	test_damage_record_only_tallies();
 	test_the_kill_command_credits_its_killer();
+	test_kill_player_dies_twice();
+	test_a_spectator_slots_death_stops_at_the_latch();
 	test_hidden_body_is_skipped();
 	test_dedicated_host_updates_through_the_preround();
 	test_own_clients_copy_holds_the_update();

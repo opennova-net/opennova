@@ -125,6 +125,7 @@ struct HostFixture {
 			// The slot team (+0x1A0) the player add stores beside the body's.
 			conn.assigned_team = static_cast<uint8_t>(first_team + (i % 2));
 			conn.assigned_team_valid = true;
+			conn.slot_state = inmatch::PlayerSlotState::Joined; // in game (state 6)
 			(void)inmatch::Server_RerollPlayerTickSeed(conn);
 			ctx.np_protocol.connection_list.push_back(std::move(conn));
 		}
@@ -1128,11 +1129,17 @@ bool check_server_commands() {
 		flashed = flashed && saw;
 	}
 	if (!expect(flashed, "Lightning broadcasts the SETFLASH1 16 text command")) return false;
-	// KillPlayer zeroes the health and queues the death.
+	// KillPlayer zeroes the health and runs the death transaction inline (its
+	// 0x13 out at once); nothing stores the dead bit, which the body's edge
+	// latches in the next entity update.
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "KillPlayer", "ByIndex", {"2"});
 	const w::Entity *p2 = f.world.registry.get(f.players[1]);
-	if (!expect(out.handled && p2 != nullptr && p2->health == 0 && f.world.round_sim.deaths.size() == 1 &&
-					f.world.round_sim.deaths[0].victim == f.players[1],
+	bool p2_death = false;
+	for (const ns::Datagram &d : drain(f.transports[0]))
+		p2_death = p2_death || (d.tag == s2c::ENTITY_DEATH && d.body.size() >= 2 &&
+				static_cast<uint16_t>(d.body[0] | (d.body[1] << 8)) == f.players[1].packed);
+	if (!expect(out.handled && p2 != nullptr && p2->health == 0 && f.world.round_sim.deaths.empty() &&
+					(p2->flags & w::kEntityFlagDead) == 0u && p2_death,
 			"KillPlayerByIndex kills slot 2"))
 		return false;
 	// EndMission ends the round with the named winner and shortens the linger.
@@ -1489,11 +1496,11 @@ bool check_change_team() {
 	ok = expect(out.handled && f.world.registry.get(f.players[1])->team == 3 &&
 					to_p3.size() == 1 && to_p3[0].tag == s2c::CHAT_BROADCAST,
 			"a team-3 player keeps its team and still gets the chat") && ok;
-	// A target that is not in the game is a no-op.
-	f.conn(1).phase = inmatch::ConnectionPhase::Joined;
+	// A target that is not in the game (slot state 6) is a no-op.
+	f.conn(1).slot_state = inmatch::PlayerSlotState::AwaitJoin;
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "ChangeTeam", "ByName", {"P2"});
 	ok = expect(!out.handled, "a target outside the game is a no-op") && ok;
-	f.conn(1).phase = inmatch::ConnectionPhase::InMatch;
+	f.conn(1).slot_state = inmatch::PlayerSlotState::Joined;
 
 	// C2S 0x29 [0] reads the list back as S2C 0x51 [0][the 0x50 record] to
 	// the sender; an index past the list draws nothing; a new round clears it.

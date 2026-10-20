@@ -431,6 +431,11 @@ class Match {
     void record_death(World &world, EntityHandle victim,
                       EntityHandle killer = EntityHandle{},
                       uint32_t cause_flags = 0);
+    // The death's first leg alone, which a spectator-latched slot's death
+    // still runs: every pool-0 AI body whose +0x170 point-share link names the
+    // Player victim is unlinked. [orig: GameEvent_PlayerDeath
+    // @0x516E07..0x516E45, ahead of the latch return @0x516E5A..0x516E60]
+    void unlink_point_share_links(World &world, EntityHandle victim);
 
     // The kill accounting a damage-pass lethal edge runs (RoundDeath::
     // kill_event): with a killer and a victim whose ItemDef `score` word is

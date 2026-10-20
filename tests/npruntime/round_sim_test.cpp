@@ -534,8 +534,10 @@ bool run_death_feed_classifier_matrix() {
 		                    submerged->death_anim_state == 175,
 		            "the 32-tick authority breath sample drowns the player"))
 			return false;
-		if (!expect(!submerged->last_attacker.valid(),
-		            "the drowning clears the attacker slot"))
+		// The killer-less death then names the victim its own last attacker.
+		// [orig: GameEvent_PlayerDeath `mov [esi+178h], esi` @0x5172E6]
+		if (!expect(submerged->last_attacker == victim,
+		            "the drowning clears the attacker slot; the killer-less death names the victim"))
 			return false;
 		const auto feed = route(death(w::EntityHandle{}));
 		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26,
