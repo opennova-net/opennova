@@ -18,6 +18,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
+#include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
 
@@ -89,6 +90,21 @@ struct Fixture {
 		ns::Datagram d;
 		while (transports[i].pop_outbound(d)) death = death || d.tag == s2c::ENTITY_DEATH;
 		return death;
+	}
+	// Player i's 0x0A of the next frame, built with the phase-0 (weapon) block.
+	FrameUpdate next_frame(size_t i) {
+		conn(i).s2c_send_boundary_open = true;
+		conn(i).link.s2c_phase = 0xFF; // the writer's ++ lands on phase 0
+		inmatch::Server_TickUpdate(ctx);
+		FrameUpdate frame;
+		ns::Datagram d;
+		while (transports[i].pop_outbound(d)) {
+			if (d.tag != s2c::PER_FRAME_UPDATE) continue;
+			frame = FrameUpdate{};
+			(void)decode_frame_update(d.body.data(), d.body.size(),
+					[](uint16_t) { return EntityClass::Player; }, frame);
+		}
+		return frame;
 	}
 	bool dead_bit(size_t i) {
 		return ((entity(i).flags | entity(i).engine_flags) & w::kEntityFlagDead) != 0u;
@@ -278,6 +294,54 @@ void test_reset_deploy_reset_in_one_pump_dies_once() {
 	CHECK(f.world.round_sim.deaths.empty());
 }
 
+// D-NET-477: the 0x41's frame. The 0x41 runs in the tick's receive pump and its
+// death is the player body's edge in the entity update after the tick, so the
+// frame's 0x0A to the sender carries the body undead at Health 0: its +360 byte
+// withheld (the writer's dead-bit test) and +364 at the raw timeout. The next
+// frame's 0x0A carries the death's re-armed +360, its 0x13 ahead of it.
+// [orig: Server_TickUpdate -- the receive pump @0x51D895, the per-slot 0x0A
+//  @0x51E3E4; NetPacket_WritePlayerState -- the dead-bit test @0x4FF83C;
+//  Game_ProcessMainFrame -- Entity_UpdateAllEntities @0x52674B after
+//  Server_TickUpdate @0x5266B6; the edge Entity_UpdateInfantryPlayerBody
+//  @0x4B4BF1..0x4B4CEA]
+void test_the_0x41s_frame_fans_the_body_undead() {
+	Fixture f;
+	f.ctx.config.respawn_timeout = 5;
+	inmatch::Server_TickUpdate(f.ctx); // the first frame's periodic second
+	(void)f.sent_death(1);
+	(void)f.sent_death(0);
+	f.request(0);
+	const FrameUpdate own = f.next_frame(0);
+	CHECK(own.local_tail_present && own.health == 0);
+	CHECK(own.weapon.present);
+	CHECK(own.weapon.slot_state360 == 0); // withheld: the dead bit is still clear
+	CHECK(own.weapon.slot_state364 == 5); // the raw timeout
+	CHECK(!f.sent_death(1));
+	// The frame's entity update latched the death and re-armed +360 (5, over
+	// the request's 5); no spawn zones clear +364.
+	CHECK(f.dead_bit(0));
+	CHECK(f.conn(0).link.respawn_delay_seconds == 5);
+	CHECK(f.conn(0).link.spawn_target_hold_seconds == 0);
+	const FrameUpdate next = f.next_frame(0);
+	CHECK(next.weapon.present && next.weapon.slot_state360 == 5);
+	CHECK(f.sent_death(1));
+}
+
+// D-NET-477: on a periodic-second frame the 0x41's death re-arms +360 after
+// that second's decrement, so the re-armed value escapes it: the request's 1
+// counts down to 0, and the death's floor of 3 stands.
+// [orig: Server_TickUpdate -- the periodic decrement @0x51DFB0..0x51E00B ahead
+//  of the per-slot 0x0A @0x51E3E4; GameEvent_PlayerDeath -- +360 floored
+//  @0x516EC4..0x516EC6]
+void test_a_periodic_frames_death_escapes_its_decrement() {
+	Fixture f;
+	f.ctx.config.respawn_timeout = 1;
+	f.request(0); // the first frame is a periodic second
+	inmatch::Server_TickUpdate(f.ctx);
+	CHECK(f.dead_bit(0));
+	CHECK(f.conn(0).link.respawn_delay_seconds == 3);
+}
+
 // Not the authority, no player slot, or a slot with no entity: nothing.
 void test_refusals() {
 	Fixture f;
@@ -306,6 +370,8 @@ int main() {
 	test_team_change_in_the_same_pump_dies_once();
 	test_spectator_convert_in_the_same_pump_raises_no_death();
 	test_reset_deploy_reset_in_one_pump_dies_once();
+	test_the_0x41s_frame_fans_the_body_undead();
+	test_a_periodic_frames_death_escapes_its_decrement();
 	test_refusals();
 	if (failures == 0) std::printf("death_timeout_reset: all passed\n");
 	return failures == 0 ? 0 : 1;
