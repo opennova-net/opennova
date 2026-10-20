@@ -6,7 +6,8 @@
 // seven), and the SSN_ prefix form; what a word is (a command, a keyword, an entity by its SSN, an area
 // by its zone id, a variable); where it is defined (the entity's and the area's records); the mission's
 // script found and one not yet made; a compiler report in plain words, a finding's message leading
-// with them and its gutter mark's note its first sentence; and the `script_assist` query.
+// with them and its gutter mark's note its first sentence; and the `script_assist` query. Over a particle file
+// (the name jumps): Ctrl+click and the hover on an effect's member, the particle's id at its line and column.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -254,8 +255,36 @@ int test_compiler_words() {
 
 } // namespace
 
+// The script device over a particle file (the name jumps: its names are spans): Ctrl+click on an effect's pdefs
+// member lands on the particle's id at its line and column, in the file defining it; its hover names the particle
+// and that file. A word the graph reads nothing at goes nowhere.
+int test_particle_text() {
+	test_temp::TempDir dir("opennova_script_assist_particle");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Particles"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(test_io::write_text(root + "/a.ptl", "[effectdef]\r\n{\r\n\tid = Burst;\r\n\tpdefs = puff, spark;\r\n}\r\n") &&
+	            test_io::write_text(root + "/b.ptl", "[particledef]\r\n{\r\n\tid = puff;\r\n}\r\n\r\n[particledef]\r\n{\r\n"
+	                                                 "\tid = Spark;\r\n}\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("a.ptl"));
+	const TextDocument *text = text_of(*session.document_base_for("a.ptl"));
+	TEST_EXPECT(text != nullptr);
+	if (!text) return 1;
+	const SessionView &view = session.view();
+	EditorRequest go;
+	TEST_EXPECT(script_definition(view, *text, 4, 17, go) && go.path == "b.ptl" && go.locator == "8:7" && go.field == "id");
+	ScriptHover hover;
+	TEST_EXPECT(script_hover(view, *text, 4, 17, hover) && hover.text == "particle 'spark': defined in b.ptl.");
+	TEST_EXPECT(!script_definition(view, *text, 4, 3, go));
+	return 0;
+}
+
 int main() {
 	if (test_report_words() != 0) return 1;
 	if (test_compiler_words() != 0) return 1;
+	if (test_particle_text() != 0) return 1;
 	return test_assist();
 }

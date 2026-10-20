@@ -71,5 +71,12 @@ std::string particle_key_words(const particle::KeyRow &row);
 // reader would take into another layer (a layer key of no graphic line, a graphic line out of its order).
 bool particle_key_edit(const TextDocument &document, const ParticleKeyBlock &block, const std::string &key,
 		const std::string &value, Edit &out, std::string &why, const ParticleKeyField *field = nullptr);
+// The edit that gives one name a value holds another (the panel's name fields: a pdefs member, a curve's table, a
+// graphic's texture, a child_id): `name`, a span inside `field`'s value (its line, within its columns), replaced by
+// `to` (in the text's code page), the value as it would then read checked as particle_key_edit checks a value; false
+// with why for a span outside the value, or a value the reader would take otherwise (a blank or a ',' in the name
+// making two words of it, an empty name).
+bool particle_name_edit(const ParticleKeyField &field, const TextSpan &name, const std::string &to, Edit &out,
+		std::string &why);
 
 } // namespace opennova::editor

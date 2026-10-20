@@ -1,12 +1,14 @@
 // S12 D9 (ADR 0046 S12): Rename everywhere from the Inspector, over a real session's weapon
 // table. A weapon's name has Rename... (and F2 in the Inspector), which asks the session for the
 // plan and the dialog; the dialog opens on the name, plans again as it is typed, shows the
-// definition and the item using it, and Enter raises RenameSymbol for the name typed.
+// definition and the item using it, and Enter raises RenameSymbol for the name typed. A particle
+// file's id row in its panel: F2 over its box and its Usages.
 #include <filesystem>
 #include <string>
 #include <vector>
 
 #include <editor/graph/reference_queries.h>
+#include <editor/graph/rename_transaction.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
 #include "editor_ui_test_support.h"
@@ -153,9 +155,58 @@ void test_hint_on_a_fallback() {
 
 } // namespace
 
+// The name jumps: a particle file's id row in its panel has Rename everywhere, F2 over its box (the box with the
+// keyboard) asking the plan and the dialog on the particle's id at its span, and Find usages.
+void test_particle_id_row() {
+	test_temp::TempDir dir("opennova_editor_ui_rename_particle");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Rename"));
+	session.run_operations();
+	const SessionView &v = session.view();
+	CHECK(test_io::write_text(v.project.root + "/particles/b.ptl", "[particledef]\r\n{\r\n\tid = spark;\r\n}\r\n") &&
+	              test_io::write_text(v.project.root + "/particles/a.ptl",
+	                                  "[effectdef]\r\n{\r\n\tid = Burst;\r\n\tpdefs = spark;\r\n}\r\n"),
+	      "the particle files");
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("particles/b.ptl"));
+	session.run_operations();
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	// The particle's block: its id the first row.
+	const ImGuiID row = pushed(Ui::window_id("Inspector"), 0);
+	ui.activate(item_id(row, {"##value"}));
+	const std::vector<EditorRequest> requests = ui.chord({ImGuiKey_F2});
+	const EditorRequest *preview = only(requests, EditorRequestKind::PreviewRename);
+	CHECK(preview && preview->ask_name && preview->path == "particles/b.ptl" && preview->locator == "3:7" &&
+	              preview->field == "id" && preview->new_name == "spark",
+	      "F2 over the id's box asks the plan and the dialog on the particle's id");
+	ImGui::ClearActiveID();
+	ui.frames(2);
+	ui.drain();
+	ui.activate(item_id(row, {"Usages"}));
+	ui.drain();
+	CHECK(v.workspace.project_find.path == "particles/b.ptl" && v.workspace.project_find.locator == "3:7",
+	      "Find usages opens the find over the particle's uses");
+	// The session plans it as the dialog asks for a name typed: the definition and the member naming it.
+	if (preview) session.handle(request::preview_rename(preview->path, preview->locator, preview->field, "flash"));
+	ui.frames(2);
+	CHECK(v.dialogs.rename_preview.sites && v.dialogs.rename_preview.sites->size() == 2 && v.dialogs.rename_preview.refusals.empty(),
+	      "the plan: its id and the effect's member");
+	ImGui::ClosePopupsExceptModals();
+	ui.frames(2);
+}
+
 void run_rename_tests() {
 	test_rename_everywhere_ui();
 	test_hint_on_a_fallback();
+	test_particle_id_row();
 }
 
 } // namespace editor_ui_test

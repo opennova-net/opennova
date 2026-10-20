@@ -4,6 +4,7 @@
 // lacks put on its own line before the block's closing brace in its indent and line end; a value the reader would
 // take otherwise refused with why; the query over a session; the format's variants (its fixtures) and the base
 // game's particle files read so, each key's text at its span its value.
+// A name a value holds given another: its span alone, a name the tokenizer would cut refused.
 #include <algorithm>
 #include <cstdio>
 #include <memory>
@@ -237,10 +238,37 @@ int test_variants() {
 	return failures;
 }
 
+// A name a value holds given another (the panel's name fields, particle_name_edit): its span alone replaced; a name
+// the tokenizer would cut (a blank, a ','), an empty one, a span outside the value refused; the value as it would
+// read checked as a set's is (a graphic's texture: the name, then its mode).
+int test_name_edit() {
+	int failures = 0;
+	const std::unique_ptr<DocumentBase> document =
+			loaded("[effectdef]\r\n{\r\n\tid = Hit;\r\n\tpdefs = spark, smok;\r\n}\r\n");
+	const TextDocument &text = *text_of(*document);
+	const std::vector<ParticleKeyBlock> blocks = particle_key_blocks(text);
+	const ParticleKeyField *pdefs = blocks.empty() ? nullptr : field_of(blocks.front(), "pdefs");
+	TEST_EXPECT(pdefs != nullptr);
+	if (!pdefs) return failures + 1;
+	const TextSpan smok{4, 17, 4};
+	Edit edit;
+	std::string why;
+	TEST_EXPECT(particle_name_edit(*pdefs, smok, "smoke", edit, why));
+	const auto *replaced = dynamic_cast<const TextSpanEdit *>(edit.payload.get());
+	TEST_EXPECT(replaced && replaced->span.line == 4 && replaced->span.column == 17 && replaced->span.length == 4 &&
+	            replaced->text == "smoke");
+	TEST_EXPECT(!particle_name_edit(*pdefs, smok, "two words", edit, why) && why.find("blank") != std::string::npos);
+	TEST_EXPECT(!particle_name_edit(*pdefs, smok, "a,b", edit, why));
+	TEST_EXPECT(!particle_name_edit(*pdefs, smok, "", edit, why));
+	TEST_EXPECT(!particle_name_edit(*pdefs, TextSpan{4, 2, 5}, "smoke", edit, why));
+	return failures;
+}
+
 } // namespace
 
 int main() {
 	int failures = test_blocks_and_sets();
+	failures += test_name_edit();
 	failures += test_line_order();
 	failures += test_query();
 	failures += test_variants();

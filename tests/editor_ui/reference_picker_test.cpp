@@ -7,7 +7,9 @@
 // nothing when it does not. A missing value's picker offers the fixes Problems offers for it. S18: a texture
 // field's picture and its picker's; a texture an import makes shows how it is made in its tab, and under a
 // model row's use what the texture costs the game; the texture's toolbar shows its object texture detail and
-// its alpha as the use shown reads it; a texture no use reads says so under its uses, with its Set it aside.
+// its alpha as the use shown reads it; a texture no use reads says so under its uses, with its Set it aside. The
+// name jumps: a particle file's names in its panel, each a text field over its span (its fixes, its completion, a
+// drop, each replacing that span alone).
 #include <cstring>
 #include <string>
 #include <utility>
@@ -1029,6 +1031,99 @@ void test_texture_drop_replaces() {
 
 } // namespace
 
+// The name jumps: a particle file's panel draws each name a value holds as a text_reference_field. a.ptl's effect names
+// spark and smok (no file defines smok): the missing member's dot offers its finding's fixes (Add particle, Take it out
+// of pdefs); its box completes smok to smoke, a pick that replaces only the member's span. b.ptl's particle: its
+// child_id is a name field in its box's place; a texture dropped on its graphic's name replaces that name's span alone,
+// an item table dropped there nothing.
+struct ParticleProject {
+	test_temp::TempDir dir{"opennova_editor_ui_particle_names"};
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+
+	bool open() {
+		session.handle(request::new_project(dir.file("project"), "Particles"));
+		session.run_operations();
+		const std::string root = session.view().project.root;
+		if (!test_io::write_text(root + "/particles/a.ptl", "[effectdef]\r\n{\r\n\tid = Burst;\r\n\tpdefs = spark, smok;\r\n}\r\n") ||
+		    !test_io::write_text(root + "/particles/b.ptl", "[particledef]\r\n{\r\n\tid = spark;\r\n\tchild_id = smoke;\r\n"
+		                                                    "\tgraphic1 = puff.tga, additive;\r\n}\r\n\r\n[particledef]\r\n{\r\n"
+		                                                    "\tid = smoke;\r\n}\r\n") ||
+		    !test_io::write_file(root + "/textures/puff.tga", editor_test::tga_bytes()) ||
+		    !test_io::write_file(root + "/textures/other.tga", editor_test::tga_bytes()))
+			return false;
+		session.handle(request::rescan());
+		session.run_operations();
+		return session.view().project.scan->find("other.tga") != nullptr;
+	}
+	void show(Ui &ui, const char *path) {
+		session.handle(request::open_document(path));
+		session.run_operations();
+		ui.frames(4);
+		ui.focus("Inspector");
+		ui.away();
+		ui.drain();
+	}
+};
+
+// The one text span edit among the requests (held by the caller), of the file `path`.
+const TextSpanEdit *span_edit(const std::vector<EditorRequest> &requests, const std::string &path) {
+	const EditorRequest *edit = only(requests, EditorRequestKind::EditRecord);
+	if (!edit || edit->path != path || edit->edits.size() != 1) return nullptr;
+	return dynamic_cast<const TextSpanEdit *>(edit->edits.front().payload.get());
+}
+
+void test_particle_name_fields() {
+	ParticleProject project;
+	CHECK(project.open(), "the particle files' project");
+	Ui ui;
+	ui.windows.set_view(&project.session.view());
+	ui.frames(4);
+	project.show(ui, "particles/a.ptl");
+	// The effect block's rows: its id (0), its pdefs (1), whose second member is smok.
+	const ImGuiID smok = pushed(pushed(Ui::window_id("Inspector"), 1), 1);
+	ui.activate(item_id(smok, {"go to dot"}));
+	ui.frames(2);
+	CHECK(GImGui->OpenPopupStack.Size == 1, "a click on the missing member's dot opens its fixes");
+	const std::string shown = logged_frame(ui);
+	CHECK(shown.find("Add particle smok to a.ptl") != std::string::npos && shown.find("Take smok out of pdefs") != std::string::npos,
+	      "the finding's fixes: the particle added, the member taken out");
+	ImGui::ClosePopupsExceptModals();
+	ui.frames(2);
+	ui.drain();
+	// Completing: smok's box with the keyboard lists smoke; Down and Enter take it, the member's span alone replaced.
+	ui.activate(item_id(smok, {"##name"}));
+	CHECK(logged_frame(ui).find("smoke") != std::string::npos, "the particle names smok begins");
+	press(ui, ImGuiKey_DownArrow);
+	press(ui, ImGuiKey_Enter);
+	const std::vector<EditorRequest> taken = ui.drain();
+	const TextSpanEdit *completed = span_edit(taken, "particles/a.ptl");
+	CHECK(completed && completed->span.line == 4 && completed->span.column == 17 && completed->span.length == 4 &&
+	              completed->text == "smoke",
+	      "the completion replaces the member's span alone");
+	ImGui::ClearActiveID();
+	ui.frames(2);
+	ui.drain();
+	// b.ptl's particle: its child_id (row 1) a name field in its box's place; its graphic (row 2) a box, its texture's name
+	// under it.
+	project.show(ui, "particles/b.ptl");
+	const ImGuiID inspector = Ui::window_id("Inspector");
+	ImRect child;
+	CHECK(ui.locate(item_id(pushed(inspector, 1), {"##name"}), child), "the child_id is a name field");
+	const ImVec2 texture = centre_of(ui, item_id(pushed(pushed(inspector, 2), 0), {"##name"}));
+	const AssetEntry *other = project.session.view().project.scan->find("other.tga");
+	CHECK(other && texture.x > 0.0f, "the graphic's texture name on the screen");
+	if (!other) return;
+	const std::vector<EditorRequest> drop = drop_at(ui, texture, other->relative_path);
+	const TextSpanEdit *dropped = span_edit(drop, "particles/b.ptl");
+	CHECK(dropped && dropped->span.line == 5 && dropped->span.column == 13 && dropped->span.length == 8 &&
+	              dropped->text == "other.tga",
+	      "a texture dropped on the graphic's name replaces that name alone");
+	const AssetEntry *ptl = project.session.view().project.scan->find("a.ptl");
+	CHECK(ptl && drop_at(ui, texture, ptl->relative_path).empty(), "a particle file dropped on a texture's name sets nothing");
+}
+
 void run_reference_picker_tests() {
 	test_filters_apart();
 	test_drop_on_value();
@@ -1046,6 +1141,7 @@ void run_reference_picker_tests() {
 	test_texture_role_legend();
 	test_texture_set_aside_line();
 	test_texture_drop_replaces();
+	test_particle_name_fields();
 }
 
 } // namespace editor_ui_test

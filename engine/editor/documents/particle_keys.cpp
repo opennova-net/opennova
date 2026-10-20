@@ -401,6 +401,26 @@ bool particle_key_value_ok(const KeyRow &row, const std::string &value, std::str
 
 } // namespace
 
+bool particle_name_edit(const ParticleKeyField &field, const TextSpan &name, const std::string &to, Edit &out,
+		std::string &why) {
+	if (!field.row || !field.present || name.line != field.span.line || name.column < field.span.column ||
+	    name.column + name.length > field.span.column + field.span.length) {
+		why = "the name is not in the value the block writes";
+		return false;
+	}
+	if (to.empty() || to.find_first_of(" \t,") != std::string::npos) {
+		why = to.empty() ? "an empty name, which the game reads as none"
+		                 : "the game's tokenizer ends a name at a blank or a ',': it would read '" +
+		                           to.substr(0, to.find_first_of(" \t,")) + "' and more words after it";
+		return false;
+	}
+	std::string value = field.value;
+	value.replace(name.column - field.span.column, name.length, to);
+	if (!particle_key_value_ok(*field.row, value, why)) return false;
+	out = TextDocument::replace(name, to);
+	return true;
+}
+
 bool particle_key_edit(const TextDocument &document, const ParticleKeyBlock &block, const std::string &key,
 		const std::string &value, Edit &out, std::string &why, const ParticleKeyField *field) {
 	const KeyRow *row = particle::key_row(block.kind, key);
