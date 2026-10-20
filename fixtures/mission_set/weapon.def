@@ -1,0 +1,177 @@
+ammoclass_max_carry CLASS_45cal			1000
+ammoclass_max_carry CLASS_556MM			1000
+
+weapon "WPN_KNIFE"
+	category 1
+	rank     0
+	teamfilter	blue
+	charfilter	medic
+	charfilter	sniper
+	charfilter	gunner
+	charfilter	rifleman
+	charfilter	engineer
+	round_type  "AMMO_KNIFE01"
+	clipsize    -1
+	startrounds -1
+	error 0 0 0 0 0 0
+	launchuserpoint bullet
+	attack_anim	 1
+	special_hold 1
+	run_anim	 1
+	animadm mfp_m4
+	gfx1 gun
+	gfx3 gun
+	action "fire"
+		delaystart		0
+		delayend		0
+	end
+end
+
+weapon "WPN_colt45"
+	category 2
+	rank     0
+	teamfilter	red
+	teamfilter	blue
+	charfilter	medic
+	charfilter	sniper
+	charfilter	rifleman
+	charfilter	engineer
+	loadout_selectable	1
+	loadout_subclasses	0
+	maxclips	5
+	clipweight		1
+	weaponweight	1.5
+	weapon_class	secondary
+	round_type		"AMMO_COLT_45"
+	clipsize		7
+	startrounds		35
+	error 0.05 0.2 0.25 0.05 0.1 0.15
+	ammoclass		CLASS_45cal		1
+	launchuserpoint bullet
+	special_hold 2
+	flags	HandGunUp
+	animadm mfp_m4
+	gfx1 gun
+	gfx3 gun
+	action "idle"
+		delayend				auto
+	end
+	action "fire"
+		delayend			auto
+	end
+	action "recoil"
+		delayend			0
+	end
+	action "reload"
+		delaystart			90
+		delayend				auto
+	end
+end
+
+weapon "WPN_M4AUTO"
+	category 3
+	rank     0
+	teamfilter	blue
+	charfilter	rifleman
+	charfilter	medic
+	charfilter	engineer
+	loadout_selectable	1
+	loadout_subclasses	0
+	maxclips		10
+	clipweight		1.5
+	weaponweight	5.5
+	weapon_class	primary
+	round_type		"AMMO_CAR15_556MM"
+	clipsize		30
+	startrounds		300
+	error 0.0165 0.2 0.25 0.0165 0.032 0.047
+	targetpitchmax  22
+	targetpitchmin  50
+	targetyawrange  120
+	ammoclass		CLASS_556MM 1
+	ammobucket		1
+	launchuserpoint bullet
+	flags auto
+	flags Sighted
+	scope_max_mag	2
+	flags WhileSwimming
+	animadm mfp_m4
+	gfx1 gun
+	gfx3 gun
+	action "idle"
+		delayend				auto
+		anim				anim_wpn_idle
+	end
+	action "emptyidle"
+		delayend				auto
+		anim				anim_wpn_idle
+	end
+	action "fire"
+		delayend			3
+		anim				anim_wpn_fire
+	end
+	action "recoil"
+		delayend			2
+		anim				anim_wpn_recoil
+	end
+	action "reload"
+		delaystart			100
+		delayend			auto
+		anim				anim_wpn_reload
+	end
+	action "empty"
+		delaystart			0
+		delayend			auto
+		anim				anim_wpn_empty
+	end
+	action "switchto"
+		delaystart		1
+		delayend		1
+		anim				anim_wpn_switchto
+	end
+	action "switchfrom"
+		delaystart		1
+		delayend		1
+		anim				anim_wpn_switchfrom
+	end
+	action "switchrank"
+		delaystart		1
+		delayend		1
+		anim				anim_wpn_switchrank
+	end
+end
+
+weapon "WPN_EMPLCD50NA"
+	category 11
+	rank     1
+	round_type  "50cal"
+	clipsize    -1
+	startrounds 500
+	error 0.063 0.063 0.063 0.063 0.063 0.063
+	targetpitchmax  15
+	targetpitchmin  45
+	targetyawrange  180
+	launchuserpoint camera
+	animadm mfp_m4
+	gfx1 gun
+	flags auto
+	flags Emplaced
+	action "fire"
+		delayend			auto
+		anim				anim_wpn_fire
+	end
+	action "recoil"
+		delayend			1
+		anim				anim_wpn_recoil
+	end
+	action "switchto"
+		delaystart		1
+		delayend		1
+		anim				anim_wpn_switchto
+	end
+	action "switchfrom"
+		delaystart		1
+		delayend		1
+		anim				anim_wpn_switchfrom
+	end
+end

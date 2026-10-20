@@ -1,4 +1,6 @@
-// 01TR ("Training: Land Vehicles") on the retail data: the Drivable Dune
+// 01TR ("Training: Land Vehicles") in miniature (the mission set's land_vehicles.bms:
+// the minted mbuggy in the shipped Dbuggy1's shape, its gun child the synthetic mount
+// in the shipped B50Cal's articulation): the Drivable Dune
 // Buggy (items.def 101291) parked by the spawn carries an addeweap gun child
 // (ewep01 -> 101419). Two USE-ITEM facts the retail engine holds:
 //
@@ -12,11 +14,10 @@
 //   * the gun child rides the driven buggy (pose_emplacement_attachments over
 //     the authored userpoint), so it never falls behind a moving carrier.
 //
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms).
 #include "common/mission_rig.h"
+#include "common/mission_set.h"
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/player_weapon.h>
-#include "common/retail_paths.h"
 
 #include <cmath>
 #include <cstdio>
@@ -62,13 +63,16 @@ const w::Entity *gun_child_of(testrig::MissionRig &rig, w::EntityHandle carrier)
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms)");
+	test_mission_set::Root root("buggy");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
 	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "01TR.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "land_vehicles.bms", error), "land_vehicles.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "01TR boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}

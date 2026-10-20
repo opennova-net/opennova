@@ -14,7 +14,7 @@ begin "Player #1, Single player"
   type person
   unit_type 9
   graphic person
-  anim_def soldier
+  anim_def mplayer
   attrib: aidata fo notool pfoil
   ai_function plyr
   disk_function PLAYER
@@ -27,11 +27,56 @@ begin "Player #1, Single player"
   mana 0
 end
 
+begin "Player #1, Multiplayer"
+  id 105305
+  type person
+  unit_type 9
+  graphic person
+  anim_def mplayer
+  attrib: aidata fo notool pfoil
+  ai_function plyr
+  disk_function PLAYER
+  phrase_set 0
+  move_function org2
+  input_function troop
+  hp 150
+  armor 0 0
+  radarsig 300
+  mana 0
+end
+
+begin "Indonesian Soldier #2 with AK47"
+  id 101799
+  type person
+  graphic person
+  anim_def msoldier
+  attrib: evil aidata nodismember
+  deathtime	30
+  hp 100
+  radarsig 300
+  score 10
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 33
+  move_function org1
+  heatsig  0
+  radarsig 0
+  unit_type 9
+  clipsize 30
+  ammo_closeattack    AMMO_AK47_556MM
+  ammo_easyrocket     AMMO_AK47_556MM
+  ammo_advancedrocket AMMO_AK47_556MM
+  ammo_marker3        AMMO_AK47_556MM
+  launchups_closeattack	mflash01
+  launchups_rocket		mflash01
+  launchups_marker3		mflash01
+end
+
 begin "Friendly Soldier #3 with M16"
   id 102072
   type person
   graphic person
-  anim_def soldier
+  anim_def msoldier
   attrib: good aidata nodismember
   deathtime	30
   hp 100
@@ -56,7 +101,7 @@ begin "Friendly Soldier #4 with MP5"
   id 102073
   type person
   graphic person
-  anim_def soldier
+  anim_def msoldier
   attrib: good aidata nodismember
   deathtime	30
   hp 100
@@ -111,6 +156,179 @@ begin "Drivable Motorcycle"
     torque 	9
   default_aip d_buggy
   unit_type 12
+end
+
+begin "Singe rock formation5"
+  id 101471
+  type decoration
+  attrib:
+  graphic mrock
+  hp 10
+  armor -1
+  ai_function gnrl
+end
+
+begin "Modular wooden Ladder 8m tall"
+  id 101622
+  type decoration
+  graphic mladder
+  attrib: notarget
+end
+
+begin "Drivable ATV"
+  id 101301
+  sid matv
+  type vehicle
+  graphic matv
+  attrib: AIData noscar neutral PlayerControl  forceasset DynamicShadow
+  hp 3000
+  armor 10 10
+  criticalhp 300
+  criticaldrain 15
+  score 50
+  radarsig 500
+  render_function cveh
+  ai_function cveh
+  move_function catv
+    turn_rate 75
+    turn_rate2 35
+    acceleration 30
+    deceleration 60
+    slip_speed 0
+    player_speed 65
+    water_speed 25
+    slip_slope	55
+    max_slope	65
+    physics     1
+    spring		3
+    shock		3
+    flip		45
+    mass 2
+    torque 3
+    minai		1
+    lean 0
+    lean_velocity 0
+    pitch 0
+    pitch_velocity 0
+    bob 0
+  default_aip d_buggy
+  unit_type 1
+end
+
+begin "Friendly Soldier #1 with M4"
+  id 102070
+  type person
+  graphic person
+  anim_def msoldier
+  attrib: good aidata nodismember
+  deathtime	30
+  hp 100
+  radarsig 300
+  score 10
+  ai_function org1
+  disk_function ORGANIC
+  phrase_set 33
+  move_function org1
+  unit_type 9
+  clipsize 30
+  ammo_closeattack    AMMO_CAR15_556MM
+  ammo_easyrocket     AMMO_CAR15_556MM
+  ammo_advancedrocket AMMO_CAR15_556MM
+  ammo_marker3        AMMO_CAR15_556MM
+  launchups_closeattack	mflash01
+  launchups_rocket		mflash01
+  launchups_marker3		mflash01
+end
+
+begin "Drivable Dune Buggy"
+  id 101291
+  sid mbuggy
+  type vehicle
+  graphic mbuggy
+  attrib: AIData noscar neutral PlayerControl  forceasset DynamicShadow
+  hp 3000
+  armor 10 10
+  criticalhp 300
+  criticaldrain 15
+  score 50
+  radarsig 500
+  ai_function cveh
+  render_function cveh
+  move_function cveh
+    turn_rate 65
+    turn_rate2 41
+    acceleration 15
+    deceleration 70
+    slip_speed 0
+    player_speed 94
+    slip_slope	50
+    max_slope	60
+    spring		1
+    spring_comp 35
+    shock		1
+    mass		3
+    minai		1
+    physics     1
+    flip		30
+    torque 	9
+  default_aip d_buggy
+  unit_type 1
+  addeweap ewep01 101419  15 37 92 92
+end
+
+begin "NON-Armored Emplaced 50cal for FAV"
+  id 101419
+  type object
+  graphic mount
+  attrib: EWeap forceasset
+  HP 10
+  armor -1
+  ai_function ewep
+  move_function ewep
+  render_function ewep
+  disk_function EMPLACE
+  phrase_set 4
+  primary_weapon WPN_EMPLCD50NA
+	weaplbup bullet
+	weaplmup mflash01
+	weaplcup bcasing
+	weaprbup bullet
+	weaprmup mflash01
+	weaprcup bcasing
+end
+
+begin "Concrete lane divider 6"
+  id 102289
+  attrib:
+  type decoration
+  graphic crate
+end
+
+begin "Concrete lane divider 7"
+  id 102290
+  attrib:
+  type decoration
+  graphic crate
+end
+
+begin "Concrete lane divider 8"
+  id 102291
+  attrib:
+  type decoration
+  graphic crate
+end
+
+begin "All Un-marked Land Mine Section"
+	id 101896
+	type decoration
+	attrib: LandMine notarget NoShadow
+	hp 20
+	armor  -1 -1
+	graphic mlndmine
+    render_function lndm
+    ai_function lndm
+    ammo_closeattack    SMALLLANDMINE
+    ammo_marker3        LARGELANDMINE
 end
 
 begin "Drivable Transport Truck"

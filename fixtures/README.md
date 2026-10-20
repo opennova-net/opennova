@@ -219,8 +219,13 @@ stands in for.
 
 | File | Shape |
 |---|---|
-| `mtruck.3di` | the shipped transport truck's (DTruck1): a "veh0" LOD, the hull on part 0 and six wheels on parts 1..6 at the shipped hubs, each a PANM row on the shipped VEHICLE_* registers; the shipped controller and seven passenger user points; a collision object per part with type-1 volumes on the hull, the wheels' bottoms 0.01 over the origin (the shipped CMDL floor); `truck_rest_00tra`'s |
+| `mtruck.3di` | the shipped transport truck's (DTruck1): a "veh0" LOD, the hull on part 0 and six wheels on parts 1..6 at the shipped hubs, each a PANM row on the shipped VEHICLE_* registers; the shipped controller and seven passenger user points, each in the open over the chassis, the cab and the bed's low walls (the seat scan's line of sight); a collision object per part with type-1 volumes on the hull, the wheels' bottoms 0.01 over the origin (the shipped CMDL floor); `truck_rest_00tra`'s |
 | `mbike.3di` | the shipped motorcycle's (Dcycle2): the body on part 0, the front and rear wheels on parts 1 and 2 (hubs 0.82 fore and aft, 0.385 up) on VEHICLE_WHEELS and their VEHICLE_TIRE registers; the rider's ctrlx24 and the pillion's sitex00; one collision object with the body's one type-1 volume; `motorcycle_gravity_06tr`'s |
+| `mrock.3di` | the shipped rock formation's (RckS05, 00TRg's bms 650): one part, a closed 52-triangle mesh over 28 vertices (a thirteen-sided body, its two apexes and two rings) whose collision faces are the render triangles (poly type 12), centred on the origin, one type-1 volume; `rock_collision_00trg`'s |
+| `matv.3di` | the shipped ATV's (Datv1): the hull on part 0, six wheels on parts 1..6 at the shipped hubs (the front pair steering); the rider's ctrlx14 and the passengers sitex08 and sitex12; a collision object per part, the hull's type-1 volumes the shipped skirts and decks; `vehicle_ride_00tra`'s |
+| `mbuggy.3di` | the shipped dune buggy's (Dbuggy1): the hull on part 0, four wheels on parts 1..4 (the front pair steering); the driver's ctrlx02, the passenger sitex06 and the gun anchor ewep01; a collision object per part; `buggy_01tr`'s |
+| `mladder.3di` | the shipped 8 m ladder's (WLad03): two rails and sixteen rungs as collision faces (poly type 13), one type-1 volume around them and the type-4 climb volume (CL), the flat face 0.37 in front of the rungs; `ladder_00tra`'s |
+| `mlndmine.3di` | the shipped unmarked minefield section's (Lndmine1): one flat 16 x 16 part, its `ground` point, then nine `small` and five `large` mine points in the shipped order and places; one collision object, the slab; `minefield_missions`' |
 | `door.3di` | the shipped door building's (IBlock01): a "door" LOD, part 0 a 6 x 6 block house with a doorway in its +x wall, part 1 the door hinged at (2.9, -0.5), its PANM row a rotation on control register 0 (`DOOR_00`) from 0 to -5688; a collision object per part, the door's offset to its hinge; `doors`' |
 
 Its missions, each the scenario of the shipped training mission the test it serves is named
@@ -230,9 +235,24 @@ falling a sixteenth of a unit per unit of mission y):
 | File | Scenario |
 |---|---|
 | `motorcycle.bms` | 06TR's instructor ride: motorcycle SSN 80 (group 4) with its instructor SSN 1715 command-mounted at spawn, the start beside it, ride path 6, and the boarding event (a Player sub-39 trigger on SSN 80) redirecting group 4 onto the path |
+| `infantry.bms` | CP01's opening ground: the single-player start with six of the shipped AK47 soldier (team 2, group 33, CP01's squad record values) spread some 60 units apart in front of it; `ai_threat`, `ai_corpse`, `ai_muzzle_pose` and `ground_conform`'s |
+| `ladder.bms` | 00TRa's ladder ground: the single-player start with the 8 m ladder (bms 1134) twenty units in front of it |
+| `land_vehicles.bms` | 01TR's opening ground: the single-player start, the dune buggy SSN 300 with its `addeweap` gun child, the player's team's riflemen SSNs 2, 70 and 71 (the shipped records' distances) and five team-2 concrete lane dividers (hp 0) in their arc |
+| `minefield.bms`, `minefield_coop.bms` | 00TRd's and CP09's minefields: three and two unmarked sections in front of the start, the second an objective Co-op mission |
+| `rock_collision.bms` | 00TRg's single-player start (bms 1197) with the rock formation (bms 650) seven units in front of it |
 | `truck_rest.bms` | 00TRa's three parked trucks by their SSNs (11 and 1714 crewed by a command-mounted friendly soldier, 6 empty) around the single-player start |
+| `vehicle_ride.bms` | 00TRa's vehicle gate: truck SSN 11 crewed by the instructor SSN 1, the free ATV SSN 1766, path 2, and 00TRa's first three events (event 2, on the player attaching to SSN 11, redirects group 3 onto path 2 and sets its speed) |
+
+Its clips and clip tables, minted through the canonical `.bad` and `.adm` writers: the
+soldier's one-bone clips `ms_*.bad` (the reset, the idle, the walk with its footstep word
+and forward root motion, the run, the crouch and prone poses, the attack with its fire
+words, the guard, the reload, the death, the ladder's hold, climb up and down, the jump and
+the roll), the tables `msoldier.adm` and `E_STAND.adm` (the shipped soldier's slots) and
+`mplayer.adm` (the shipped player's), and the first-person M4's clips `mfp_*.bad` and table
+`mfp_m4.adm` (the shipped M4_1st table's slots).
 
 Its authored text: `items.def` (the rows its missions place, by the shipped rows' ids and
-field values over the minted models) and the AI profiles its vehicles name (`d_5ton.aip`,
-`d_buggy.aip`: the shipped profiles' values). Tests read it through `tests/common/mission_set.h`, which stages it beside
+field values over the minted models), `weapon.def` (the knife, the Colt, the M4 with its
+actions and the buggy's emplaced gun, over the minted first-person table) and the AI
+profiles its vehicles name (`d_5ton.aip`, `d_buggy.aip`: the shipped profiles' values). Tests read it through `tests/common/mission_set.h`, which stages it beside
 the Tmap terrain, the synthetic models and the authored clips as one loose game root.

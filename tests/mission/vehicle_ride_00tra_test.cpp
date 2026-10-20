@@ -1,5 +1,8 @@
-// Vehicle mount / ride / drive on the retail data: 00TRa's ("Training:
-// Basics / Armory") vehicle gate end to end on the engine's own world:
+// Vehicle mount / ride / drive: 00TRa's ("Training: Basics / Armory") vehicle
+// gate end to end on the engine's own world, over the mission set's
+// vehicle_ride.bms (00TRa's truck, instructor, ATV, path 2 and events 0..2 by
+// their SSNs and indices; the minted mtruck and matv in the shipped DTruck1's
+// and Datv1's shapes):
 //
 //   * the USE-ITEM toggle mounts the local player into the DTruck1 (SSN 11)
 //     [orig: Entity_ToggleVehicleMount @0x436950 + the nearest-seat scan @0x435d50],
@@ -16,9 +19,8 @@
 // The camera mode the sim RESOLVES for each seat is checked through the local
 // view frame: the chase in a control seat, first person otherwise [orig: the
 // arbiter Render_ProcessMainSceneFrame @0x5ca1d2..0x5ca1f2].
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms).
 #include "common/mission_rig.h"
-#include "common/retail_paths.h"
+#include "common/mission_set.h"
 
 #include <runtime/world/vehicle_mount.h>
 
@@ -78,13 +80,16 @@ int first_free_seat(const w::Entity &vehicle) {
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms)");
+	test_mission_set::Root root("vehicle_ride");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
 	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "00TRa.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "vehicle_ride.bms", error), "vehicle_ride.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "00TRa boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}

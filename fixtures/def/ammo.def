@@ -376,3 +376,49 @@ ammo 50CAL
 	bullet_radius  0.2
 	tracer_type		stdred stdgreen
 end
+
+ammo SMALLLANDMINE
+	max_age		1
+	arm_age		0
+	velocity	2
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	40
+	penetration_kz		40
+	scorch_id	2
+	scar_type	2
+	flag instantkillzone
+	kztype rounds_kz_C4
+	kz_damage 155
+	kz_minradius 2
+	kz_maxradius 5
+	light_impact   8.0  255 192 96  0.25
+end
+
+ammo LARGELANDMINE
+	max_age		1
+	arm_age		0
+	velocity	2
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	scorch_id	2
+	scar_type	2
+	flag instantkillzone
+	kztype rounds_kz_C4
+	kz_damage 500
+	kz_minradius 4
+	kz_maxradius 8
+	light_impact   8.0  255 192 96  0.25
+end

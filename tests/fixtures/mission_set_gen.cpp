@@ -23,8 +23,12 @@
 #include <formats/def/reserved_items.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
+#include <formats/bad/bad_build.h>
 #include <formats/rtxt/rtxt.h>
+#include <runtime/anim/anim_slot_names.h>
 
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -306,11 +310,15 @@ synth3di::Model make_truck() {
 	const int lod = m.add_lod(96, "veh0");
 	const int paint = m.add_material("FF_ST_OP", "mtruck.tga");
 	const int rubber = m.add_material("FF_ST_OP", "mtruck_tire.tga");
-	const Box cab = box(0.4, -1.2, 1.0, 3.0, 1.2, 3.4);
-	const Box bed = box(-6.5, -1.3, 1.0, 0.4, 1.3, 2.4);
+	// The chassis, the cab ahead of the controller and the bed's low walls: every seat point
+	// stands in the open over them, as the shipped truck's do (the seat scan's line of sight).
+	const Box chassis = box(-6.5, -1.2, 0.9, 3.0, 1.2, 1.3);
+	const Box cab = box(1.0, -1.2, 1.3, 3.0, 1.2, 3.4);
+	const Box wall_l = box(-6.5, 1.2, 1.3, 0.9, 1.3, 2.0);
+	const Box wall_r = box(-6.5, -1.3, 1.3, 0.9, -1.2, 2.0);
+	const Box tail = box(-6.5, -1.2, 1.3, -6.4, 1.2, 2.0);
 	const int hull = m.add_part(lod, 0, Vec3{});
-	m.add_box(lod, hull, paint, cab);
-	m.add_box(lod, hull, paint, bed);
+	for (const Box &b : {chassis, cab, wall_l, wall_r, tail}) m.add_box(lod, hull, paint, b);
 	m.add_control_register("VEHICLE_STEERING");
 	m.add_control_register("VEHICLE_WHEELS");
 	for (int t = 0; t < 6; ++t) {
@@ -353,10 +361,9 @@ synth3di::Model make_truck() {
 		m.add_user_point(seat_names[s], seats[s], facing, 0, synth3di::kUserPointGameplay);
 	}
 	const int c_hull = m.add_cobj(0);
-	m.add_face_box(c_hull, cab);
-	m.add_face_box(c_hull, bed);
+	for (const Box &b : {chassis, cab, wall_l, wall_r, tail}) m.add_face_box(c_hull, b);
+	m.add_volume(c_hull, 1, 0, chassis);
 	m.add_volume(c_hull, 1, 0, cab);
-	m.add_volume(c_hull, 1, 0, bed);
 	for (const auto &wheel : wheels) {
 		const int c = m.add_cobj(0, wheel.first);
 		m.add_face_box(c, wheel.second);
@@ -399,6 +406,264 @@ synth3di::Model make_bike() {
 	m.add_face_box(c, box(0.4345, -0.08, 0.0, 1.2045, 0.08, 0.77));
 	m.add_face_box(c, box(-1.2045, -0.08, 0.0, -0.4345, 0.08, 0.77));
 	m.add_volume(c, 1, 0, box(-1.23, -0.25, 0.0, 1.23, 0.25, 1.13));
+	return m;
+}
+
+// mrock.3di: a single rock formation in the shape of the shipped RckS05 (00TRg's bms 650): one
+// part, one LOD, a closed mesh of 52 triangles over 28 vertices (a thirteen-sided body: the top
+// apex, two rings and the bottom apex, so 13 + 26 + 13 triangles) whose collision faces are the
+// render triangles themselves (poly type 12, as the shipped faces), centred on its origin (2.5
+// across, 1.5 up and down), with one type-1 volume around it and its `ground` point at the origin.
+synth3di::Model make_rock() {
+	synth3di::Model m;
+	m.name = "mrock";
+	const int lod = m.add_lod(0);
+	const int stone = m.add_material("FF_MT_OP", "mrock.tga");
+	const int part = m.add_part(lod, 0, Vec3{});
+	static constexpr int kSides = 13;
+	constexpr double kPi = 3.14159265358979323846;
+	std::vector<Vec3> verts;
+	verts.push_back(Vec3{0.0, 0.0, 1.5});
+	const double ring_z[2] = {0.6, -0.6}, ring_r[2] = {2.3, 2.5};
+	for (int r = 0; r < 2; ++r)
+		for (int s = 0; s < kSides; ++s) {
+			const double a = 2.0 * kPi * (s + 0.5 * r) / kSides;
+			verts.push_back(Vec3{ring_r[r] * std::cos(a), ring_r[r] * std::sin(a), ring_z[r]});
+		}
+	verts.push_back(Vec3{0.0, 0.0, -1.5});
+	const auto ring = [](int r, int s) { return 1 + r * kSides + ((s % kSides) + kSides) % kSides; };
+	// Each triangle counter-clockwise about its outward normal (mission axes).
+	std::vector<std::array<int, 3>> tris;
+	for (int s = 0; s < kSides; ++s) tris.push_back({0, ring(0, s), ring(0, s + 1)});
+	for (int s = 0; s < kSides; ++s) {
+		tris.push_back({ring(0, s), ring(1, s), ring(0, s + 1)});
+		tris.push_back({ring(0, s + 1), ring(1, s), ring(1, s + 1)});
+	}
+	const int bottom = 1 + 2 * kSides;
+	for (int s = 0; s < kSides; ++s) tris.push_back({bottom, ring(1, s + 1), ring(1, s)});
+	// The render strip: the same 28 vertices (model axes), smooth normals, each triangle wound
+	// counter-clockwise about its outward normal in model space.
+	opennova::threedi::ThreediBuildStrip strip;
+	strip.material = stone;
+	for (const Vec3 &p : verts) {
+		const Vec3 q = opennova::threedi::threedi_build_to_model(p);
+		const double len = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+		const Vec3 n = opennova::threedi::threedi_build_to_model(Vec3{p.x / len, p.y / len, p.z / len});
+		opennova::threedi::ThreediVertex v{};
+		v.position[0] = static_cast<float>(q.x);
+		v.position[1] = static_cast<float>(q.y);
+		v.position[2] = static_cast<float>(q.z);
+		v.normal[0] = static_cast<float>(n.x);
+		v.normal[1] = static_cast<float>(n.y);
+		v.normal[2] = static_cast<float>(n.z);
+		v.uv0[0] = static_cast<float>(0.5 + p.x / 5.0);
+		v.uv0[1] = static_cast<float>(0.5 + p.y / 5.0);
+		v.uv1[0] = v.uv0[0];
+		v.uv1[1] = v.uv0[1];
+		strip.vertices.push_back(v);
+	}
+	for (const auto &t : tris) {
+		const Vec3 a = opennova::threedi::threedi_build_to_model(verts[t[0]]);
+		const Vec3 b = opennova::threedi::threedi_build_to_model(verts[t[1]]);
+		const Vec3 c = opennova::threedi::threedi_build_to_model(verts[t[2]]);
+		const Vec3 centre{(a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0, (a.z + b.z + c.z) / 3.0};
+		const double ex = b.x - a.x, ey = b.y - a.y, ez = b.z - a.z;
+		const double fx = c.x - a.x, fy = c.y - a.y, fz = c.z - a.z;
+		const double cx = ey * fz - ez * fy, cy = ez * fx - ex * fz, cz = ex * fy - ey * fx;
+		const bool ccw = cx * centre.x + cy * centre.y + cz * centre.z > 0.0;
+		strip.indices.push_back(static_cast<uint16_t>(t[0]));
+		strip.indices.push_back(static_cast<uint16_t>(ccw ? t[1] : t[2]));
+		strip.indices.push_back(static_cast<uint16_t>(ccw ? t[2] : t[1]));
+	}
+	m.lods[lod].parts[part].strips.push_back(strip);
+	m.add_panm(lod, part, 0);
+	m.add_user_point("ground", Vec3{}, kUp, 0, synth3di::kUserPointGameplay);
+	const int c = m.add_cobj(0);
+	std::vector<uint16_t> cv;
+	for (const Vec3 &p : verts) cv.push_back(m.add_collision_vertex(c, p));
+	for (const auto &t : tris) m.add_face(c, cv[t[0]], cv[t[1]], cv[t[2]], 12);
+	m.add_volume(c, 1, 0, box(-2.6, -2.6, -1.6, 2.6, 2.6, 1.6));
+	return m;
+}
+
+// matv.3di: an ATV in the shape of the shipped Datv1: the hull on part 0 and six wheels on parts
+// 1..6 at the shipped hubs (0.729, -0.324 and -1.361 along, 0.74 each side, 0.068 up, 0.42 in
+// radius, so 0.35 under the origin), the front pair steering, every wheel on VEHICLE_WHEELS and its
+// own VEHICLE_TIRE0n; the shipped rider's controller ctrlx14 and the two passengers sitex08 and
+// sitex12; a collision object per part, the hull's type-1 volumes the shipped skirts (-0.35..0.5)
+// and decks (0.5..1.19).
+synth3di::Model make_atv() {
+	synth3di::Model m;
+	m.name = "matv";
+	const int lod = m.add_lod(160);
+	const int paint = m.add_material("FF_ST_OP", "matv.tga");
+	const Box deck = box(-1.76, -0.67, 0.2, 1.14, 0.74, 0.6);
+	const Box seat = box(-1.06, -0.5, 0.6, 0.33, 0.5, 1.0);
+	const Box nose = box(0.10, -0.6, 0.6, 1.62, 0.6, 1.0);
+	const int hull = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {deck, seat, nose}) m.add_box(lod, hull, paint, b);
+	m.add_control_register("VEHICLE_STEERING");
+	m.add_control_register("VEHICLE_WHEELS");
+	for (int t = 0; t < 6; ++t) {
+		char name[24];
+		std::snprintf(name, sizeof(name), "VEHICLE_TIRE%02d", t);
+		m.add_control_register(name);
+	}
+	m.add_panm(lod, hull, 0);
+	const double hubs_x[3] = {0.729, -0.324, -1.361};
+	constexpr double kHubZ = 0.068, kRadius = 0.418;
+	std::vector<std::pair<Vec3, Box>> wheels;
+	for (int axle = 0; axle < 3; ++axle) {
+		for (int side = 0; side < 2; ++side) {
+			const double y = side == 0 ? 0.74 : -0.74;
+			const Vec3 hub{hubs_x[axle], y, kHubZ};
+			const Box b = box(hubs_x[axle] - kRadius, y - 0.15, kHubZ - kRadius, hubs_x[axle] + kRadius, y + 0.15,
+					kHubZ + kRadius);
+			const int part = m.add_part(lod, 0, hub);
+			m.add_box(lod, part, paint, b);
+			const bool front = axle == 0;
+			opennova::threedi::ThreediPartAnimation &row = m.add_panm(lod, part, 0, front ? 0x02010200u : 0x02000200u);
+			if (front)
+				row.rotation_x = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0, 0, 16338);
+			row.rotation_y = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16338);
+			row.translation = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER,
+					static_cast<uint8_t>(2 + axle * 2 + side), 0, 0, 256);
+			wheels.push_back({hub, b});
+		}
+	}
+	m.add_user_point("ctrlx14", Vec3{-0.280, 0.360, 0.610}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("FX00", Vec3{-2.512, 0.027, 0.263}, Vec3{-0.996, 0.0, 0.087}, 0, synth3di::kUserPointEffect);
+	m.add_user_point("ground", Vec3{}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("sitex08", Vec3{-1.004, 0.008, 0.570}, Vec3{-1.0, 0.0, 0.0}, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("sitex12", Vec3{-0.279, -0.390, 0.668}, kForward, 0, synth3di::kUserPointGameplay);
+	const int c_hull = m.add_cobj(0);
+	for (const Box &b : {deck, seat, nose}) m.add_face_box(c_hull, b);
+	m.add_volume(c_hull, 1, 0, box(-1.76, 0.74, -0.35, 1.14, 1.30, 0.50));
+	m.add_volume(c_hull, 1, 0, box(-1.76, -1.23, -0.35, 1.14, -0.67, 0.50));
+	m.add_volume(c_hull, 1, 0, box(0.10, -0.87, 0.50, 1.62, 0.94, 1.09));
+	m.add_volume(c_hull, 1, 0, box(-1.06, -0.95, 0.51, 0.33, 1.01, 1.19));
+	for (const auto &wheel : wheels) {
+		const int c = m.add_cobj(0, wheel.first);
+		m.add_face_box(c, wheel.second);
+	}
+	return m;
+}
+
+// mladder.3di: an 8 m wooden ladder in the shape of the shipped WLad03: one part, two rails and
+// sixteen rungs as collision faces (poly type 13, as the shipped faces), one type-1 volume around
+// them (x -0.04..0.24, y -0.5..0.52, up to 8.01) and the climb volume, type 4 (CL), the flat
+// face 0.37 in front of the rungs from the ground to 8.47, as the shipped ladder's.
+synth3di::Model make_ladder() {
+	synth3di::Model m;
+	m.name = "mladder";
+	const int lod = m.add_lod(128);
+	const int wood = m.add_material("FF_ST_OP", "mladder.tga");
+	const int part = m.add_part(lod, 0, Vec3{});
+	const Box rails[2] = {box(0.0, -0.42, 0.0, 0.06, -0.36, 8.01), box(0.0, 0.43, 0.0, 0.06, 0.49, 8.01)};
+	for (const Box &b : rails) m.add_box(lod, part, wood, b);
+	std::vector<Box> rungs;
+	for (int r = 0; r < 16; ++r) {
+		const double z = 0.3 + 0.5 * r;
+		rungs.push_back(box(-0.03, -0.36, z, 0.03, 0.43, z + 0.05));
+	}
+	for (const Box &b : rungs) m.add_box(lod, part, wood, b);
+	m.add_panm(lod, part, 0);
+	const int c = m.add_cobj(0);
+	for (const Box &b : rails) m.add_face_box(c, b, 13);
+	for (const Box &b : rungs) m.add_face_box(c, b, 13);
+	m.add_volume(c, 1, 0, box(-0.04, -0.50, 0.0, 0.24, 0.52, 8.01));
+	m.add_volume(c, 4, 0, box(0.37, -0.50, 0.0, 0.37, 0.52, 8.47));
+	return m;
+}
+
+// mbuggy.3di: a dune buggy in the shape of the shipped Dbuggy1: the hull on part 0, four wheels
+// on parts 1..4 (front hubs 1.851 forward, rear 1.686 back, 0.94 each side, 0.25 under the
+// origin), the front pair steering; the shipped driver's controller ctrlx02, the passenger
+// sitex06 and the gun anchor ewep01 (the items.def `addeweap` child rides it); a collision object
+// per part, the hull's type-1 volumes its lower skirts and its frame.
+synth3di::Model make_buggy() {
+	synth3di::Model m;
+	m.name = "mbuggy";
+	const int lod = m.add_lod(96);
+	const int paint = m.add_material("FF_ST_OP", "mbuggy.tga");
+	const Box tub = box(-1.85, -0.9, -0.34, 2.27, 0.9, 0.41);
+	const Box cage = box(-1.54, -0.75, 0.41, -0.04, 0.75, 1.13);
+	const int hull = m.add_part(lod, 0, Vec3{});
+	for (const Box &b : {tub, cage}) m.add_box(lod, hull, paint, b);
+	m.add_control_register("VEHICLE_STEERING");
+	m.add_control_register("VEHICLE_WHEELS");
+	for (int t = 0; t < 4; ++t) {
+		char name[24];
+		std::snprintf(name, sizeof(name), "VEHICLE_TIRE%02d", t);
+		m.add_control_register(name);
+	}
+	m.add_panm(lod, hull, 0);
+	const double hubs_x[2] = {1.851, -1.686};
+	constexpr double kHubZ = -0.25, kRadius = 0.49;
+	std::vector<std::pair<Vec3, Box>> wheels;
+	for (int axle = 0; axle < 2; ++axle) {
+		for (int side = 0; side < 2; ++side) {
+			const double y = side == 0 ? 0.94 : -0.94;
+			const Vec3 hub{hubs_x[axle], y, kHubZ};
+			const Box b = box(hubs_x[axle] - kRadius, y - 0.2, kHubZ - kRadius, hubs_x[axle] + kRadius, y + 0.2,
+					kHubZ + kRadius);
+			const int part = m.add_part(lod, 0, hub);
+			m.add_box(lod, part, paint, b);
+			const bool front = axle == 0;
+			opennova::threedi::ThreediPartAnimation &row = m.add_panm(lod, part, 0, front ? 0x02010200u : 0x02000200u);
+			if (front)
+				row.rotation_x = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 0, 0, 0, 16338);
+			row.rotation_y = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0, 0, 16338);
+			row.translation = synth3di::track(opennova::threedi::THREEDI_PANM_STYLE_CONTROL_REGISTER,
+					static_cast<uint8_t>(2 + axle * 2 + side), 0, 0, 256);
+			wheels.push_back({hub, b});
+		}
+	}
+	m.add_user_point("ctrlx02", Vec3{-0.288, 0.413, -0.150}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("ewep01", Vec3{-0.218, 0.007, 0.955}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("FX00", Vec3{-2.658, 0.304, 1.442}, Vec3{-0.766, 0.0, 0.643}, 0, synth3di::kUserPointEffect);
+	m.add_user_point("sitex06", Vec3{-0.288, -0.340, -0.150}, kForward, 0, synth3di::kUserPointGameplay);
+	m.add_user_point("FX01", Vec3{-2.520, -0.009, -0.418}, Vec3{-1.0, 0.0, 0.0}, 0, synth3di::kUserPointEffect);
+	const int c_hull = m.add_cobj(0);
+	for (const Box &b : {tub, cage}) m.add_face_box(c_hull, b);
+	m.add_volume(c_hull, 1, 0, box(-2.23, 1.04, -0.75, -1.16, 1.47, 0.31));
+	m.add_volume(c_hull, 1, 0, box(-2.23, -1.46, -0.75, -1.16, -1.03, 0.31));
+	m.add_volume(c_hull, 1, 0, box(1.35, -1.34, -0.74, 2.35, -0.95, 0.22));
+	m.add_volume(c_hull, 1, 0, box(1.35, 0.95, -0.74, 2.35, 1.35, 0.22));
+	m.add_volume(c_hull, 1, 0, box(0.07, -1.01, -0.34, 2.27, 1.01, 0.41));
+	m.add_volume(c_hull, 1, 0, box(-1.85, -1.25, -0.34, -0.60, 1.25, 0.91));
+	for (const auto &wheel : wheels) {
+		const int c = m.add_cobj(0, wheel.first);
+		m.add_face_box(c, wheel.second);
+	}
+	return m;
+}
+
+// mlndmine.3di: an unmarked minefield section in the shape of the shipped Lndmine1: one flat part
+// over 16 x 16 units, its `ground` point, then its fourteen mine points in the shipped order and
+// places (nine `small`, five `large`, half a unit up); one collision object, the slab.
+synth3di::Model make_minefield() {
+	synth3di::Model m;
+	m.name = "mlndmine";
+	const int lod = m.add_lod(0);
+	const int soil = m.add_material("FF_ST_OP", "mlndmine.tga");
+	const Box slab = box(-8.0, -8.0, 0.0, 8.0, 8.0, 1.0);
+	const int part = m.add_part(lod, 0, Vec3{});
+	m.add_box(lod, part, soil, slab);
+	m.add_panm(lod, part, 0);
+	m.add_user_point("ground", Vec3{}, kUp, 0, synth3di::kUserPointEffect);
+	struct Mine {
+		const char *name;
+		double x, y;
+	};
+	const Mine mines[14] = {{"small", -0.656, -1.695}, {"small", -3.5, -3.5}, {"large", 3.5, -3.5}, {"large", -1.0, 3.5},
+		{"large", 6.0, 0.0}, {"small", -5.549, 0.899}, {"small", 2.305, 0.344}, {"small", 6.110, -5.725},
+		{"small", -1.428, -6.845}, {"small", -4.557, 7.257}, {"small", -7.216, 4.525}, {"small", -6.775, -7.110},
+		{"large", 2.5, 7.0}, {"large", 7.0, 5.0}};
+	for (const Mine &mine : mines)
+		m.add_user_point(mine.name, Vec3{mine.x, mine.y, 0.5}, kUp, 0, synth3di::kUserPointEffect);
+	const int c = m.add_cobj(0);
+	m.add_face_box(c, slab);
 	return m;
 }
 
@@ -539,13 +804,14 @@ bool add_event_rows(bms::File &doc, int delay, std::initializer_list<Row> trigge
 }
 
 // Waypoint path `path` over new waypoint markers at `stops`, flagged `flags`.
+// The markers take the ids from `first_id` on.
 bool add_path(bms::File &doc, size_t path, std::initializer_list<std::pair<double, double>> stops, int flags,
-		std::string &err) {
+		std::string &err, int32_t first_id) {
 	std::vector<int> markers;
+	int32_t id = first_id;
 	for (const auto &stop : stops) {
 		const size_t index = place_on_ground(doc, EntityKind::Marker,
-				mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT, stop.first, stop.second, 0, 0);
-		doc.markers[index].id = 0;
+				mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT, stop.first, stop.second, 0, id++);
 		markers.push_back(static_cast<int>(index));
 	}
 	std::string edit_error;
@@ -577,11 +843,155 @@ bool build_motorcycle(std::vector<uint8_t> &bytes, std::string &err) {
 	doc.organics[instructor].wp_number = 80;
 	doc.organics[instructor].max_engagement_distance = 200;
 	doc.organics[instructor].max_attack_distance = 200;
-	if (!add_path(doc, 6, {{-170.0, 0.0}, {-120.0, 0.0}, {-70.0, 0.0}, {-20.0, 0.0}}, 1, err)) return false;
+	if (!add_path(doc, 6, {{-170.0, 0.0}, {-120.0, 0.0}, {-70.0, 0.0}, {-20.0, 0.0}}, 1, err, 5000)) return false;
 	if (!add_event_rows(doc, 2, {{7, 39, 80, -1, -1, -1}},
 			{{1, 0, 4, 6, 0, -1}, {3, 30, 4, 92, -1, -1}}, err))
 		return false;
 	return finish_mission(doc, bytes, err);
+}
+
+constexpr int kRockFormation = 101471; // the shipped "Singe rock formation5" row's id
+
+// rock_collision.bms: the shipped 00TRg's single-player start (bms 1197, facing mission +y) with
+// the rock formation (bms 650) seven units in front of it, both on the ground.
+bool build_rock_collision(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Rock Collision", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -100.0, 0.0, 0, 1197);
+	place_on_ground(doc, EntityKind::Item, kRockFormation, -100.0, 7.0, 0, 650);
+	return finish_mission(doc, bytes, err);
+}
+
+constexpr int kIndoSoldier = 101799; // the shipped "Indonesian Soldier #2 with AK47" row's id
+
+// infantry.bms: CP01's opening ground in miniature: the single-player start (facing mission +y)
+// with a squad of the shipped AK47 soldier (team 2, group 33) spread some 60 units apart, 70 to 140
+// units in front of it,
+// each authored with CP01's own squad's record values (alert state 2, accuracies 39 and 70, the
+// engagement distances 15 and 65, attack distance 40, advance timer 4), all on the ground.
+bool build_infantry(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Infantry", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -150.0, -60.0, 0, 1);
+	const double spots[6][2] = {{-210.0, 0.0}, {-150.0, 10.0}, {-90.0, 0.0}, {-180.0, 60.0}, {-120.0, 70.0},
+		{-60.0, 60.0}};
+	for (int i = 0; i < 6; ++i) {
+		const size_t index = place_on_ground(doc, EntityKind::Organic, kIndoSoldier, spots[i][0], spots[i][1],
+				180, 2803 + i);
+		bms::Entity &e = doc.organics[index];
+		e.team = 2;
+		e.group_id = 33;
+		e.alert_state = 2;
+		e.w_accuracy1 = 39;
+		e.w_accuracy2 = 70;
+		e.min_engagement_distance = 15;
+		e.max_engagement_distance = 65;
+		e.max_attack_distance = 40;
+		e.advancetimer = 4;
+	}
+	return finish_mission(doc, bytes, err);
+}
+
+constexpr int kLadder8m = 101622; // the shipped "Modular wooden Ladder 8m tall" row's id
+
+// ladder.bms: 00TRa's ladder-climbing tutorial ground in miniature: the single-player start with
+// an 8 m ladder standing twenty units in front of it, far enough west that the ground within 400
+// units of the start stays under the 60 units the test's sweep drops the player from (00TRa's own
+// ground lies lower still).
+bool build_ladder(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Ladder", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -420.0, 100.0, 0, 1654);
+	place_on_ground(doc, EntityKind::Building, kLadder8m, -420.0, 120.0, 0, 1134);
+	return finish_mission(doc, bytes, err);
+}
+
+constexpr int kAtv = 101301; // the shipped "Drivable ATV" row's id
+
+// vehicle_ride.bms: 00TRa's vehicle gate: truck SSN 11 (team 1, group 3) crewed at spawn by the
+// instructor SSN 1 (command-mounted, waypoint_id 125), the free ATV SSN 1766 beside the motor pool,
+// path 2 (DoesNotLoop) leading off from the truck, and 00TRa's first three events: 0 shows the
+// waypoints (ShowWaypoints 0), 1 is empty, and 2 (a quantum's delay) fires when the player attaches
+// to SSN 11 (a Player trigger, sub 38) and kicks the ride off: RedirectGroupTo group 3 onto path 2
+// and ChangeGroupAI group 3 (40, sub 30), as 00TRa lists them.
+bool build_vehicle_ride(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Vehicle Ride", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -120.0, -30.0, 0, 1654);
+	const size_t truck = place_on_ground(doc, EntityKind::Item, kTransportTruck, -110.0, -10.0, 0, 11);
+	doc.items[truck].team = 1;
+	doc.items[truck].group_id = 3;
+	name_record(doc.items[truck], "mtruck", "d_5ton");
+	const size_t atv = place_on_ground(doc, EntityKind::Item, kAtv, -130.0, -12.0, 11, 1766);
+	name_record(doc.items[atv], "matv", "d_buggy");
+	place_crewman(doc, -108.0, -12.0, -60, 1, 11, 1);
+	if (!add_path(doc, 2, {{-110.0, 10.0}, {-110.0, 40.0}, {-100.0, 70.0}, {-80.0, 100.0}, {-60.0, 130.0}}, 1, err,
+			1655))
+		return false;
+	if (!add_event_rows(doc, 0, {}, {{40, 0, 0, -1, -1, -1}}, err)) return false;
+	if (!add_event_rows(doc, 0, {}, {}, err)) return false;
+	if (!add_event_rows(doc, 1, {{7, 38, 11, -1, -1, -1}}, {{1, 0, 3, 2, 0, -1}, {3, 30, 3, 40, -1, -1}}, err))
+		return false;
+	return finish_mission(doc, bytes, err);
+}
+
+constexpr int kDuneBuggy = 101291;     // the shipped "Drivable Dune Buggy" row's id
+constexpr int kFriendlyM4 = 102070;    // the shipped "Friendly Soldier #1 with M4" row's id
+constexpr int kLaneDividers[3] = {102289, 102290, 102291}; // the shipped concrete lane dividers 6..8
+
+// land_vehicles.bms: 01TR's opening ground in miniature: the single-player start; the dune buggy
+// (its items.def `addeweap` gun child rides its ewep01 point) beside it; the player's team's three
+// riflemen by their SSNs (2, 70, 71: team 1, the shipped records' engagement distances 0 and 300
+// and attack distance 300) beside the start; and five of the course's team-2 concrete lane
+// dividers (hp 0) sixty to eighty units in front of them, well inside that range.
+bool build_land_vehicles(std::vector<uint8_t> &bytes, std::string &err) {
+	bms::File doc;
+	if (!begin_mission(doc, "Land Vehicles", err)) return false;
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -200.0, -80.0, 70, 1890);
+	const size_t buggy = place_on_ground(doc, EntityKind::Item, kDuneBuggy, -188.0, -84.0, 70, 300);
+	name_record(doc.items[buggy], "mbuggy", "d_buggy");
+	const int32_t riflemen[3] = {2, 70, 71};
+	for (int i = 0; i < 3; ++i) {
+		const size_t index = place_on_ground(doc, EntityKind::Organic, kFriendlyM4, -196.0 + 6.0 * i, -74.0, 170,
+				riflemen[i]);
+		bms::Entity &e = doc.organics[index];
+		e.team = 1;
+		e.min_engagement_distance = 0;
+		e.max_engagement_distance = 300;
+		e.max_attack_distance = 300;
+		e.advancetimer = 5;
+	}
+	// The dividers lie sixty-odd units in front of the riflemen, inside their 70-degree radar arc
+	// (01TR's sit the same way off its three).
+	const double spots[5][2] = {{-210.0, -138.0}, {-196.0, -142.0}, {-184.0, -136.0}, {-170.0, -146.0},
+			{-205.0, -150.0}};
+	for (int i = 0; i < 5; ++i) {
+		const size_t index = place_on_ground(doc, EntityKind::Building, kLaneDividers[i % 3], spots[i][0], spots[i][1],
+				-90, 1780 + i);
+		doc.buildings[index].team = 2;
+	}
+	return finish_mission(doc, bytes, err);
+}
+
+constexpr int kMinefieldSection = 101896; // the shipped "All Un-marked Land Mine Section" row's id
+
+// minefield.bms / minefield_coop.bms: the two shipped minefield missions in miniature (00TRd, a
+// single-player training mission, and CP09, an objective Co-op mission): three and two unmarked
+// sections laid out in front of the start.
+bool build_minefield_mission(std::vector<uint8_t> &bytes, std::string &err, bool coop, int sections) {
+	bms::File doc;
+	if (!begin_mission(doc, coop ? "Minefield Co-op" : "Minefield", err)) return false;
+	if (coop) bms::set_game_mode(doc.header.attrib_flags, uint32_t(bms::AttribFlags::Coop));
+	place_on_ground(doc, EntityKind::Marker, kStartMarker, -150.0, -120.0, 0, 1);
+	for (int i = 0; i < sections; ++i)
+		place_on_ground(doc, EntityKind::Building, kMinefieldSection, -180.0 + 30.0 * i, -60.0, 0, 3000 + i);
+	return finish_mission(doc, bytes, err);
+}
+bool build_minefield(std::vector<uint8_t> &bytes, std::string &err) {
+	return build_minefield_mission(bytes, err, false, 3);
+}
+bool build_minefield_coop(std::vector<uint8_t> &bytes, std::string &err) {
+	return build_minefield_mission(bytes, err, true, 2);
 }
 
 // fixtures/bms/synth_areas.bms: a mission whose area triggers take the shape of a shipped
@@ -648,6 +1058,204 @@ int emit(const std::string &path, const std::vector<uint8_t> &bytes, bool write_
 	return 0;
 }
 
+// --- the mission set's clips (fixtures/mission_set/ms_*.bad, mfp_*.bad and their tables) ---------
+
+// One 30 fps clip of `frames` intervals on the one root bone: the hips `bottom` over the ground,
+// falling to `bottom_end` across the clip (the head `top` keeping its height over them), a forward
+// step of `step` metres a frame and a vertical one of `rise`, and the trigger word `trigger` on every
+// `every`-th frame from 0 (none when `every` is 0).
+opennova::bad::BadBuildClip one_bone_clip(const char *name, uint32_t frames, bool loop, double bottom,
+		double bottom_end, double top, double step, int32_t trigger, uint32_t every, double rise = 0.0) {
+	opennova::bad::BadBuildClip clip;
+	clip.name = name;
+	clip.fps = 30;
+	clip.flags = loop ? 0x1u : 0u;
+	clip.frame_count = frames;
+	opennova::bad::BadBuildBone bone;
+	bone.name = "BN01";
+	bone.keys.assign(frames + 1, opennova::bad::BadBuildQuat{});
+	clip.bones.push_back(bone);
+	for (uint32_t f = 0; f <= frames; ++f) {
+		const double t = static_cast<double>(f) / frames;
+		opennova::bad::BadBuildEvent event;
+		event.velocity.x = step; // mission axes: x forward, z up (the vertical lane)
+		event.velocity.z = rise;
+		event.bottom = bottom + (bottom_end - bottom) * t;
+		event.top = top + (bottom_end - bottom) * t;
+		event.trigger = (every != 0 && f % every == 0 && f < frames) ? trigger : 0;
+		clip.events.push_back(event);
+	}
+	return clip;
+}
+
+// The soldier's attack: the shipped E_SHOT8a's shape, a looping 92-frame hold whose fire word
+// (0x8, the shot the combat pass fires on) falls on its frames 9, 17, 30, 44, 55, 63, 69 and 82.
+opennova::bad::BadBuildClip soldier_attack_clip() {
+	opennova::bad::BadBuildClip clip = one_bone_clip("ms_attack", 92, true, 0.9128, 0.9128, 1.6468, 0.0, 0, 0);
+	for (const uint32_t f : {9u, 17u, 30u, 44u, 55u, 63u, 69u, 82u}) clip.events[f].trigger = 0x8;
+	return clip;
+}
+
+// The soldier's clips, in the shape of the shipped soldiers' (Dt1rst, I_idle1, I_walkf and the
+// death matrix's clips): the reset; a standing idle; the walk (152 frames at 0.0619 m a frame, the
+// footstep word 0x2 every 14th frame, as I_walkf authors its eleven); a run; a crouch and a prone
+// idle and walk; an attack and a guard hold; a reload; a death that lowers the hips to the ground;
+// and the ladder's hold, its climb up (0.8 a loop on the clip's vertical lane) and down.
+std::vector<opennova::bad::BadBuildClip> soldier_clips() {
+	return {
+		one_bone_clip("ms_rst", 2, true, 1.0185, 1.0185, 1.7756, 0.0, 0, 0),
+		one_bone_clip("ms_idle", 8, true, 0.95, 0.95, 1.69, 0.0, 0, 0),
+		one_bone_clip("ms_walk", 152, true, 0.98, 0.98, 1.72, 0.0619, 0x2, 14),
+		one_bone_clip("ms_run", 40, true, 0.95, 0.95, 1.68, 0.15, 0x2, 10),
+		one_bone_clip("ms_crouch", 70, true, 0.6, 0.6, 1.2, 0.0, 0, 0),
+		one_bone_clip("ms_crwalk", 60, true, 0.6, 0.6, 1.2, 0.03, 0x2, 15),
+		one_bone_clip("ms_prone", 60, true, 0.164, 0.164, 0.244, 0.0, 0, 0),
+		one_bone_clip("ms_prwalk", 60, true, 0.164, 0.164, 0.244, 0.02, 0, 0),
+		soldier_attack_clip(),
+		one_bone_clip("ms_guard", 70, true, 1.0, 1.0, 1.76, 0.0, 0, 0),
+		one_bone_clip("ms_reload", 70, true, 1.0, 1.0, 1.76, 0.0, 0, 0),
+		one_bone_clip("ms_death", 40, false, 1.0, 0.2, 1.76, 0.0, 0, 0),
+		one_bone_clip("ms_climb", 30, true, 1.0, 1.0, 1.76, 0.0, 0, 0),
+		one_bone_clip("ms_climbup", 30, true, 1.0, 1.0, 1.76, 0.0, 0, 0, 0.8 / 30.0),
+		one_bone_clip("ms_climbdn", 30, true, 1.0, 1.0, 1.76, 0.0, 0, 0, -0.8 / 30.0),
+		one_bone_clip("ms_jump", 20, false, 1.0, 1.0, 1.76, 0.1, 0, 0),
+		one_bone_clip("ms_roll", 30, false, 0.164, 0.164, 0.244, 0.05, 0, 0),
+	};
+}
+
+// The clip a body slot plays: a death slot the death; a walk or a wash the walk, a run or a jog
+// the run; the crouch and prone families theirs; reloads, the guard family and the attacks theirs;
+// every other body slot the idle. The reset row is the reset.
+const char *soldier_slot_clip(const std::string &slot) {
+	const auto starts = [&slot](const char *prefix) { return slot.rfind(prefix, 0) == 0; };
+	if (slot == "reset") return "ms_rst";
+	if (starts("death")) return "ms_death";
+	if (slot == "climb_up") return "ms_climbup";
+	if (slot == "climb_down") return "ms_climbdn";
+	if (starts("climb")) return "ms_climb";
+	if (starts("walk_crouch") || starts("run2crouch") || starts("runl2crouch") || starts("runr2crouch"))
+		return "ms_crwalk";
+	if (starts("roll_") || starts("run2prone")) return "ms_roll";
+	if (starts("jump_start")) return "ms_jump";
+	if (starts("walk_prone")) return "ms_prwalk";
+	if (slot == "idle_crouch") return "ms_crouch";
+	if (slot == "idle_prone") return "ms_prone";
+	if (starts("walk") || starts("wash") || starts("wounded_walk")) return "ms_walk";
+	if (starts("run_attack")) return "ms_attack";
+	if (starts("run") || starts("jog") || starts("wounded_run") || starts("cover_run")) return "ms_run";
+	if (starts("reload")) return "ms_reload";
+	if (starts("guard")) return "ms_guard";
+	if (starts("attack") || starts("post_attack") || starts("pre_attack") || starts("cover_attack"))
+		return "ms_attack";
+	return "ms_idle";
+}
+
+// The first-person M4's clips (the shipped M4_1st table's slots): the reset, the idle, the fire
+// (6 frames), the recoil (4), the reload (90), the empty and the three switches (10 each).
+std::vector<opennova::bad::BadBuildClip> fp_m4_clips() {
+	return {
+		one_bone_clip("mfp_rst", 2, true, 0.0, 0.0, 0.0, 0.0, 0, 0),
+		one_bone_clip("mfp_idle", 30, true, 0.0, 0.0, 0.0, 0.0, 0, 0),
+		one_bone_clip("mfp_fire", 6, false, 0.0, 0.0, 0.0, 0.0, 0, 0),
+		one_bone_clip("mfp_recoil", 4, false, 0.0, 0.0, 0.0, 0.0, 0, 0),
+		one_bone_clip("mfp_reload", 90, false, 0.0, 0.0, 0.0, 0.0, 0, 0),
+		one_bone_clip("mfp_empty", 10, false, 0.0, 0.0, 0.0, 0.0, 0, 0),
+		one_bone_clip("mfp_swto", 10, false, 0.0, 0.0, 0.0, 0.0, 0, 0),
+		one_bone_clip("mfp_swfrom", 10, false, 0.0, 0.0, 0.0, 0.0, 0, 0),
+		one_bone_clip("mfp_swrank", 10, false, 0.0, 0.0, 0.0, 0.0, 0, 0),
+	};
+}
+
+// A clip table written through the canonical .adm writer, its rows `rows` over `clips`.
+bool mint_table(const std::vector<std::pair<std::string, std::string>> &rows,
+		const std::vector<opennova::bad::BadBuildClip> &clips, std::vector<uint8_t> &bytes, std::string &err) {
+	opennova::bad::BadBuildSet set;
+	for (const auto &row : rows) set.rows.push_back(opennova::bad::BadBuildRow{row.first, {row.second}});
+	set.clips = clips;
+	std::string text;
+	if (!opennova::bad::bad_build_mint_table(set, opennova::bad::bad_retail_limits(), text, &err)) return false;
+	bytes.assign(text.begin(), text.end());
+	return true;
+}
+
+// Whether `slot` is one a shipped table authors: the soldier's (Eindo01.adm: the idles, the burns,
+// the emplaced and seat holds, the guard, the walk, jog and run forward, the climb holds, the jump
+// loop, the attacks and the post attack, the reload, the cover poses, the run away, the swims, the
+// washes and every death) or the player's (US01.adm: those but the guard, the jog and run forward,
+// the swim attack, the cover poses, the wash run and the run away, and the emotes, the drag poses,
+// the second burn, the held weapons' poses, the reloads, the binoculars, the mortar idle, the idles
+// to idle_5, the crouch and prone idles and every walk, the jump start, the climb top, every swim,
+// the rolls, the run into prone and runs 2 and 3). A table authoring every slot plays transitions
+// the shipped ones leave to the reset ring (a looping jump start, run into crouch, stop), which
+// stalls a body's think.
+bool soldier_authors(const std::string &slot) {
+	static const char *const kSlots[] = {"reset", "idle", "idle_2", "idle_3", "burn", "burn_2", "emplaced",
+		"emplaced_2", "emplaced_3", "emplaced_4", "emplaced_5", "emplaced_6", "emplaced_7", "emplaced_8", "guard",
+		"walk_forward", "jog_forward", "run_forward", "climb_idle", "climb_up", "climb_down", "jump_loop", "attack",
+		"attack_2", "attack_3", "post_attack", "reload", "cover_idle", "cover_attack", "run_away", "swim_idle",
+		"swim_forward", "swim_attack", "wash_idle", "wash_walk", "wash_run"};
+	for (const char *s : kSlots)
+		if (slot == s) return true;
+	return slot.rfind("sit", 0) == 0 || slot.rfind("death_", 0) == 0;
+}
+bool player_authors(const std::string &slot) {
+	static const char *const kSlots[] = {"reset", "run2prone", "dragger_idle", "dragger_walk", "draggee", "burn_2",
+		"grenade_attack", "knife_attack", "P90", "P90_scoped", "MP7", "MP7_scoped", "parachute", "designator",
+		"designator_scoped", "reload", "reload2", "binoculars", "stinger", "javelin", "javelin_scoped", "grenade",
+		"knife", "pistol", "idle_mortar", "idle", "idle_2", "idle_3", "idle_4", "idle_5", "idle_crouch", "idle_prone",
+		"wash_idle", "wash_walk", "jump_start", "jump_loop", "climb_idle", "climb_up", "climb_down", "climb_top",
+		"swim_idle", "swim_forward", "swim_left", "swim_right", "swim_back", "roll_left", "roll_right", "run_2",
+		"run_3"};
+	for (const char *s : kSlots)
+		if (slot == s) return true;
+	if (slot.rfind("emote_", 0) == 0) return slot.size() == 7 && slot[6] >= '1' && slot[6] <= '7';
+	return slot.rfind("walk_", 0) == 0 || slot.rfind("sit", 0) == 0 || slot.rfind("emplaced", 0) == 0 ||
+	       slot.rfind("death_", 0) == 0;
+}
+
+// A table over the body slots (0..239) `authors` names, each row its clip.
+bool build_body_table(bool (*authors)(const std::string &), std::vector<uint8_t> &bytes, std::string &err) {
+	std::vector<std::pair<std::string, std::string>> rows;
+	for (int s = 0; s < 240; ++s) {
+		const std::string slot = opennova::anim::kAnimSlotNames[s];
+		if (authors(slot)) rows.push_back({"anim_" + slot, soldier_slot_clip(slot)});
+	}
+	return mint_table(rows, soldier_clips(), bytes, err);
+}
+
+// msoldier.adm (and E_STAND.adm, the default infantry table, the same rows): the soldier's.
+bool build_soldier_table(std::vector<uint8_t> &bytes, std::string &err) {
+	return build_body_table(soldier_authors, bytes, err);
+}
+
+// mplayer.adm: the player's.
+bool build_player_table(std::vector<uint8_t> &bytes, std::string &err) {
+	return build_body_table(player_authors, bytes, err);
+}
+
+// mfp_m4.adm: the first-person M4's rows.
+bool build_fp_m4_table(std::vector<uint8_t> &bytes, std::string &err) {
+	return mint_table({{"anim_reset", "mfp_rst"}, {"anim_wpn_idle", "mfp_idle"}, {"anim_wpn_fire", "mfp_fire"},
+			{"anim_wpn_recoil", "mfp_recoil"}, {"anim_wpn_reload", "mfp_reload"}, {"anim_wpn_empty", "mfp_empty"},
+			{"anim_wpn_switchto", "mfp_swto"}, {"anim_wpn_switchfrom", "mfp_swfrom"},
+			{"anim_wpn_switchrank", "mfp_swrank"}},
+			fp_m4_clips(), bytes, err);
+}
+
+// Each clip of `clips` minted against the first (the table's reset).
+bool mint_clips(const std::vector<opennova::bad::BadBuildClip> &clips, const std::string &dir, bool write_mode,
+		int &failures) {
+	for (const opennova::bad::BadBuildClip &clip : clips) {
+		std::vector<uint8_t> bytes;
+		std::string error;
+		if (!expect(opennova::bad::bad_build_mint(clip, &clips.front(), opennova::bad::bad_retail_limits(), bytes,
+				&error), (clip.name + ": " + error).c_str()))
+			return false;
+		failures += emit(dir + clip.name + ".bad", bytes, write_mode);
+	}
+	return true;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -676,6 +1284,11 @@ int main(int argc, char **argv) {
 		{"door.3di", make_door_building},
 		{"mtruck.3di", make_truck},
 		{"mbike.3di", make_bike},
+		{"mrock.3di", make_rock},
+		{"matv.3di", make_atv},
+		{"mladder.3di", make_ladder},
+		{"mbuggy.3di", make_buggy},
+		{"mlndmine.3di", make_minefield},
 	};
 	for (const ModelRecipe &recipe : models) {
 		std::vector<uint8_t> bytes;
@@ -695,11 +1308,37 @@ int main(int argc, char **argv) {
 	const MissionRecipe missions[] = {
 		{"truck_rest.bms", build_truck_rest},
 		{"motorcycle.bms", build_motorcycle},
+		{"rock_collision.bms", build_rock_collision},
+		{"infantry.bms", build_infantry},
+		{"ladder.bms", build_ladder},
+		{"vehicle_ride.bms", build_vehicle_ride},
+		{"land_vehicles.bms", build_land_vehicles},
+		{"minefield.bms", build_minefield},
+		{"minefield_coop.bms", build_minefield_coop},
 	};
 	for (const MissionRecipe &recipe : missions) {
 		std::vector<uint8_t> bytes;
 		if (!expect(recipe.build(bytes, err), (std::string(recipe.file) + ": " + err).c_str())) return 1;
 		if (emit(set + recipe.file, bytes, write_mode) != 0) return 1;
 	}
-	return 0;
+	// Its clips and their tables.
+	int failures = 0;
+	if (!mint_clips(soldier_clips(), set, write_mode, failures) || !mint_clips(fp_m4_clips(), set, write_mode, failures))
+		return 1;
+	struct TableRecipe {
+		const char *file;
+		bool (*build)(std::vector<uint8_t> &, std::string &);
+	};
+	const TableRecipe tables[] = {
+		{"msoldier.adm", build_soldier_table},
+		{"E_STAND.adm", build_soldier_table},
+		{"mplayer.adm", build_player_table},
+		{"mfp_m4.adm", build_fp_m4_table},
+	};
+	for (const TableRecipe &recipe : tables) {
+		std::vector<uint8_t> bytes;
+		if (!expect(recipe.build(bytes, err), (std::string(recipe.file) + ": " + err).c_str())) return 1;
+		failures += emit(set + recipe.file, bytes, write_mode);
+	}
+	return failures == 0 ? 0 : 1;
 }

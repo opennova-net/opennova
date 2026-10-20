@@ -1,5 +1,5 @@
-// 01TR ("Training: Land Vehicles") on the retail data: the player's team holds
-// its fire at the spawn. The nearest hostile rows are team-2 concrete lane
+// 01TR ("Training: Land Vehicles") in miniature (the mission set's
+// land_vehicles.bms): the player's team holds its fire at the spawn. The nearest hostile rows are team-2 concrete lane
 // dividers (items.def 102289..102291, decorations with no hp and no armor). An
 // hp-0 def's init writes its two armor words to the invulnerable 0xFFFF
 // [orig: Entity_InitFromModel @0x40DC95 / @0x40DC9F], and the AI target walk
@@ -8,9 +8,8 @@
 // nothing to shoot until the course events hand them targets. Before the port
 // they emptied their rifles into the dividers from the first second.
 // `--verbose` dumps the shooters and every round; `--seconds N` sets the watch.
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms).
 #include "common/mission_rig.h"
-#include "common/retail_paths.h"
+#include "common/mission_set.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -40,13 +39,16 @@ int main(int argc, char **argv) {
 		if (std::strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) seconds = std::atoi(argv[++i]);
 		else if (std::strcmp(argv[i], "--verbose") == 0) verbose = true;
 	}
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 01TR.bms)");
+	test_mission_set::Root root("fire_hold");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
 	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "01TR.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "land_vehicles.bms", error), "land_vehicles.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "01TR boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}

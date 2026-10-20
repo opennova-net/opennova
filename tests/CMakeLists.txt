@@ -2717,7 +2717,7 @@ add_test(NAME renderer_scar_draw_list COMMAND renderer_scar_draw_list_test)
 add_executable(ground_conform_test world/ground_conform_test.cpp)
 target_link_libraries(ground_conform_test PRIVATE opennova_runtime opennova_test_rig)
 target_include_directories(ground_conform_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(ground_conform COMMAND ground_conform_test)
+add_test(NAME ground_conform COMMAND ground_conform_test)
 
 # The spring leg's WIRING (vehicle_suspension.cpp): def keys, the role-picked
 # parked latch + Flags 0x10 replication, the spring dt, the per-wheel step.
@@ -4377,10 +4377,8 @@ opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_
 # shared rig (common/mission_rig.h). Gated: OPENNOVA_JO_DIR (a packed
 # install) or OPENNOVA_JO_ASSETS (an extracted tree), per test header.
 foreach(port
-        world/rock_collision_00trg world/ai_corpse world/ai_threat
-        world/ai_muzzle_pose
-        world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
-        mission/native_assets_00trg mission/buggy_01tr mission/fire_hold_01tr
+        mission/defense_00trg mission/soak_00trg
+        mission/native_assets_00trg
         mission/training_gameplay
         mission/watercraft_02tr mission/parachute_09tr)
     get_filename_component(port_name ${port} NAME)
@@ -4393,7 +4391,9 @@ endforeach()
 # tests/fixtures/mission_set_gen.cpp): each boots its own mission set mission on the
 # shared rig, the scenario of the shipped training mission it is named after.
 foreach(port
-        world/truck_rest_00tra world/motorcycle_gravity_06tr)
+        world/truck_rest_00tra world/motorcycle_gravity_06tr world/rock_collision_00trg
+        world/ai_corpse world/ai_threat world/ai_muzzle_pose world/ladder_00tra
+        mission/vehicle_ride_00tra mission/buggy_01tr mission/fire_hold_01tr)
     get_filename_component(port_name ${port} NAME)
     add_executable(${port_name}_test ${port}_test.cpp)
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
@@ -4875,10 +4875,12 @@ add_executable(minefield_test world/minefield_test.cpp)
 target_link_libraries(minefield_test PRIVATE opennova_runtime)
 add_test(NAME minefield COMMAND minefield_test)
 
-add_executable(minefield_retail_test world/minefield_retail_test.cpp)
-target_link_libraries(minefield_retail_test PRIVATE opennova_test_rig)
-target_include_directories(minefield_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_gated_test(minefield_retail COMMAND minefield_retail_test)
+# The shipped minefield missions in miniature (the mission set's minefield.bms and
+# minefield_coop.bms): section counts, a mine firing on and killing the player, the reset.
+add_executable(minefield_missions_test world/minefield_missions_test.cpp)
+target_link_libraries(minefield_missions_test PRIVATE opennova_test_rig)
+target_include_directories(minefield_missions_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minefield_missions COMMAND minefield_missions_test)
 
 target_include_directories(minefield_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(minefield_replica_test netsim/minefield_replica_test.cpp)

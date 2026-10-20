@@ -1,6 +1,7 @@
-// D-COL-5 ladder climb on the retail data: 00TRa's ladder-climbing tutorial
-// section drives the climb motor end to end on the engine's own collision
-// world.
+// D-COL-5 ladder climb: 00TRa's ladder-climbing tutorial section in miniature
+// (the mission set's ladder.bms: the minted mladder in the shipped WLad03's
+// shape, its CL volume the flat face in front of the rungs) drives the climb
+// motor end to end on the engine's own collision world.
 //
 //   * sweep the collision debug view around the spawn for CL/type-4 volumes
 //     (the ladder is authored purely as a .3di BVOL — no items.def attribute)
@@ -17,9 +18,8 @@
 //     within 60 deg + pitch UP [orig: @0x4b32a5-0x4b32c0]) and climb the whole
 //     span without a drop (the "pushed off halfway up" report).
 //   The dismount family is pinned by the `collision`/`infantry` ctests.
-// Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms).
 #include "common/mission_rig.h"
-#include "common/retail_paths.h"
+#include "common/mission_set.h"
 
 #include <algorithm>
 #include <cmath>
@@ -113,13 +113,16 @@ void look_up(testrig::MissionRig &rig) {
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms)");
+	test_mission_set::Root root("ladder");
+	if (!expect(root.ok(), "the mission set stages")) return 1;
 	testrig::MissionRig rig;
 	std::string error;
-	if (!rig.open(install, "00TRa.bms", error)) return retail::skip(error.c_str());
+	if (!expect(rig.open(root.path(), "ladder.bms", error), "ladder.bms opens")) {
+		std::fprintf(stderr, "  %s", error.c_str());
+		return 1;
+	}
 	testrig::BootOptions options;
-	if (!expect(rig.boot(options, error), "00TRa boots")) {
+	if (!expect(rig.boot(options, error), "the mission boots")) {
 		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
@@ -278,6 +281,6 @@ int main() {
 		if (!dropped) std::printf("ladder: BOTTOM full span climbed %.2f -> %.2f\n", base + 0.6f, z_max);
 	}
 
-	if (failures == 0) std::printf("ladder_00tra: CL entry + gravity-off hold + climb_up + the full span on 00TRa\n");
+	if (failures == 0) std::printf("ladder_00tra: CL entry + gravity-off hold + climb_up + the full span\n");
 	return failures == 0 ? 0 : 1;
 }

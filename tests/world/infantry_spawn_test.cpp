@@ -666,7 +666,7 @@ bool write_soldier_clip(const std::string &path, const char *stem, uint32_t fram
     clip.bones.push_back(bone);
     for (uint32_t f = 0; f <= frames; ++f) {
         opennova::bad::BadBuildEvent event;
-        event.velocity.z = step;
+        event.velocity.x = step; // mission axes: x forward
         event.bottom = bottom;
         event.top = bottom + 0.75;
         event.trigger = (every != 0 && f % every == 0 && f < frames) ? trigger : 0;
