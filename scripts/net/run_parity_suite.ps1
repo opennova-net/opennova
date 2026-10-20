@@ -140,6 +140,9 @@ function Get-CaseField {
 # the cell's round limit) and topologies (the cells the case has; default all
 # five, RR and RR-aa always among them).
 function Get-CaseRotation { param($Case) return @(Get-CaseField $Case "rotation" @()) }
+# late_joiner (E3): a second joiner of the first joiner's kind joins in the
+# steady window (retail only so far: RR, RR-aa, OR).
+function Get-CaseLateJoiner { param($Case) return [bool] (Get-CaseField $Case "late_joiner" $false) }
 function Get-CaseTimeLimit { param($Case) return [int] (Get-CaseField $Case "time_limit_minutes" 0) }
 function Get-CaseTopologies {
     param($Case)
@@ -236,6 +239,11 @@ function Read-ParityCases {
                 @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
             throw "Parity case '$($case.id)': a rotation case runs RR, RR-aa and RO only"
         }
+        # The runner wires a retail late joiner only (run_parity_topology.ps1).
+        if ((Get-CaseLateJoiner $case) -and
+                @($caseTopologies | Where-Object { $_ -cin @("RO", "OO") }).Count -gt 0) {
+            throw "Parity case '$($case.id)': a late-joiner case runs RR, RR-aa and OR only"
+        }
     }
     return $table
 }
@@ -273,6 +281,7 @@ function Get-CellArguments {
     if ($rotation.Count -gt 0) { $arguments += @("-Rotation", ($rotation -join ",")) }
     $limit = Get-CaseTimeLimit $Case
     if ($limit -gt 0) { $arguments += @("-TimeLimitMinutes", [string] $limit) }
+    if (Get-CaseLateJoiner $Case) { $arguments += "-LateJoiner" }
     if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
     return $arguments
 }
@@ -348,6 +357,10 @@ function Get-ReferenceMismatches {
     } else { 0 }
     if ($recordedLimit -ne $limit) {
         $reasons.Add("time_limit_minutes $recordedLimit is not $limit")
+    }
+    $recordedLate = ($fields -contains "late_joiner") -and ($null -ne $Summary.late_joiner)
+    if ($recordedLate -ne (Get-CaseLateJoiner $Case)) {
+        $reasons.Add("late_joiner $recordedLate is not $(Get-CaseLateJoiner $Case)")
     }
     if ($fields -contains "retail_stock_observer" -and -not [bool] $Summary.retail_stock_observer) {
         $reasons.Add("the retail roles ran without StockObserver")

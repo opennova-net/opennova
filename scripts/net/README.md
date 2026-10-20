@@ -296,11 +296,18 @@ so the default suite is unchanged. An extension case may add:
   `g_TimeLimitMinutes`), so the runner writes it there for the cell and
   restores the file's exact bytes after every process has stopped. The summary
   records the write and the restore as `server_game_cfg_override`.
+- `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's
+  kind and joins during the steady window, after the first joiner's scripted
+  input. In RR and OR it is retail (`onhook_join_lan`, callsign `ParityLate`,
+  from the CLIENT copy or `-RetailLateClientRoot`, its own capture under the
+  run's `late\`). An OpenNova late joiner is not wired yet, so a late-joiner
+  case runs RR, RR-aa and OR. The summary's `late_joiner` records its run,
+  capture and `client_port`, the session the late join's verdict selects.
 - `topologies`: the cells the case has (default all five; RR and RR-aa always).
   The other cells report `not_applicable` and are not counted as missing.
 
-The summary records `rotation` and `time_limit_minutes`, and a reference is
-reused only for a case with the same values.
+The summary records `rotation`, `time_limit_minutes` and `late_joiner`, and a
+reference is reused only for a case with the same values.
 
 ### Comparing two suites
 

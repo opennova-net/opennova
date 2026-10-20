@@ -60,6 +60,17 @@ param(
     [ValidateRange(0, 600)]
     [int] $TimeLimitMinutes = 0,
 
+    # Late join (extension E3): a second joiner of the first joiner's kind
+    # joins during the steady window, after the first joiner's scripted input,
+    # so the host serves a join with a remote player already in the match and
+    # the first joiner sees a player arrive. RR and OR: a retail late joiner
+    # (onhook_join_lan) from -RetailLateClientRoot (default the CLIENT copy,
+    # launched after the first joiner read its onhook.cfg). An OpenNova late
+    # joiner (RO, OO) is not wired yet, so those refuse it.
+    [switch] $LateJoiner,
+    [string] $RetailLateClientRoot = "",
+    [string] $LateJoinerCallsign = "ParityLate",
+
     [ValidatePattern('^[1-9][0-9]{2,4}x[1-9][0-9]{2,4}$')]
     [string] $Resolution = "1920x1080",
 
@@ -263,6 +274,16 @@ foreach ($entry in $RotationList) {
 if ($RotationList.Count -gt 0 -and $Topology -in @("OR", "OO")) {
     throw "-Rotation needs a retail host (RR or RO): the OpenNova listen host has no rotation launch flag."
 }
+if ($LateJoiner -and $Topology -in @("RO", "OO")) {
+    throw "-LateJoiner needs a retail joiner (RR or OR): an OpenNova late joiner is not wired yet."
+}
+if ($LateJoiner -and $WireOnly) {
+    throw "-LateJoiner and -WireOnly do not combine."
+}
+if ($LateJoiner -and ([string]::IsNullOrWhiteSpace($LateJoinerCallsign) -or
+        $LateJoinerCallsign -ceq $JoinerCallsign -or $LateJoinerCallsign -ceq $HostCallsign)) {
+    throw "-LateJoinerCallsign must name a third player."
+}
 
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $ServerDir = (Resolve-Path -LiteralPath $RetailServerRoot).Path
@@ -324,6 +345,20 @@ if (-not $OnHookProxySha256 -or $OnHookProxySha256 -ne $clientProxySha256) {
 foreach ($copy in @($ServerDir, $ClientDir)) {
     if (-not (Test-Path -LiteralPath (Join-Path $copy "binkw32_.dll") -PathType Leaf)) {
         throw "$copy has no binkw32_.dll, the original Bink DLL the onHook proxy forwards to."
+    }
+}
+# E3's retail late joiner runs from its own copy when given one, else from the
+# CLIENT copy; either way the same retail image under the same hook build.
+$LateClientDir = $ClientDir
+if ($LateJoiner -and $RetailLateClientRoot) {
+    $LateClientDir = (Resolve-Path -LiteralPath $RetailLateClientRoot).Path
+    if ([string]::Equals($LateClientDir, $ServerDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "RetailLateClientRoot must not be the SERVER copy."
+    }
+    if ((Get-FileSha256OrNull (Join-Path $LateClientDir "Jointops.exe")) -ne $RetailServerExeSha256 -or
+            (Get-FileSha256OrNull (Join-Path $LateClientDir "binkw32.dll")) -ne $OnHookProxySha256 -or
+            -not (Test-Path -LiteralPath (Join-Path $LateClientDir "binkw32_.dll") -PathType Leaf)) {
+        throw "RetailLateClientRoot must hold the same Jointops.exe and onHook proxy pair as the other copies."
     }
 }
 # A retail LAN host binds only inside its game.cfg mplanserverportmin..max
@@ -732,7 +767,7 @@ function Invoke-RetailInputExercise {
 function Bind-EffectiveRetailConfig {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("server", "client")]
+        [ValidateSet("server", "client", "late_client")]
         [string] $Role,
         [Parameter(Mandatory = $true)]
         [string] $Source
@@ -1301,6 +1336,83 @@ function Assert-RetailHostRotation {
     }
 }
 
+# E3: the retail late joiner, launched during the steady window and owned by
+# run id like the pair's roles (its capture drains and its process stops
+# through onhook_stop_run; the cleanup stops it with every owned run).
+$script:LateJoinerWitness = $null
+$script:RetailLateJoinerProcess = $null
+function Start-RetailLateJoiner {
+    if (-not $LateJoiner) { return }
+    $lateDir = Join-Path $RunRoot "late"
+    New-Item -ItemType Directory -Path $lateDir -Force | Out-Null
+    $requested = [DateTime]::UtcNow.ToString("o")
+    $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_join_lan" -Arguments @{
+        game_dir = $LateClientDir
+        expansion = $Expansion
+        join_address = "127.0.0.1"
+        port = $Port
+        callsign = $LateJoinerCallsign
+        run_id = "$RunId-late"
+        output_dir = $lateDir
+        capture = $true
+        windowed = $true
+        allow_many = $true
+        stock_observer = $StockObserver
+        readiness = $(if ($ReadinessMode -eq "in_match") { "in_match" } else { "peer" })
+        wait_timeout_ms = 240000
+    })
+    Assert-OnHookRoleLaunch -Tool "onhook_join_lan (late joiner)" -Result $result
+    $script:OwnedRetailRuns.Add([string] $result.run_id)
+    $script:RetailLateJoinerProcess = Get-Process -Id ([int] $result.pid) -ErrorAction Stop
+    Bind-EffectiveRetailConfig -Role late_client -Source (Join-Path $LateClientDir "onhook.cfg")
+    $status = if ($ReadinessMode -eq "in_match") {
+        Wait-RetailRunForPeer -OwnedRunId ([string] $result.run_id)
+    } else {
+        Get-StructuredResult (Invoke-OnHookTool -Name "onhook_run_status" -Arguments @{
+            run_id = [string] $result.run_id
+        })
+    }
+    $state = $status.instance.run_state
+    if ([string] $state.failure -ne "none" -or -not [bool] $state.peer -or
+            [int] $state.local_port -le 0) {
+        throw "Retail late joiner $($result.run_id) is not a connected peer: phase $($state.phase), failure $($state.failure)"
+    }
+    $script:LateJoinerWitness = [pscustomobject][ordered]@{
+        kind = "retail"
+        callsign = $LateJoinerCallsign
+        run_id = [string] $result.run_id
+        pid = [int] $result.pid
+        instance_id = [string] $result.instance_id
+        game_dir = $LateClientDir
+        capture_path = [string] $result.capture_path
+        # The comparator's session selector: the late joiner's client port.
+        client_port = [int] $state.local_port
+        launch_requested_utc = $requested
+        ready_utc = [DateTime]::UtcNow.ToString("o")
+        ready_state = $state
+        final_state = $null
+    }
+}
+
+function Complete-RetailLateJoiner {
+    if (-not $script:LateJoinerWitness) { return }
+    $script:RetailLateJoinerProcess.Refresh()
+    if ($script:RetailLateJoinerProcess.HasExited) {
+        throw "The retail late joiner exited during the steady window"
+    }
+    $runId = [string] $script:LateJoinerWitness.run_id
+    $status = if ($ReadinessMode -eq "in_match") {
+        Wait-RetailRunForPeer -OwnedRunId $runId
+    } else {
+        Get-StructuredResult (Invoke-OnHookTool -Name "onhook_run_status" -Arguments @{
+            run_id = $runId
+        })
+    }
+    $script:LateJoinerWitness.final_state = $status.instance.run_state
+    Stop-OwnedRetailRun -OwnedRunId $runId
+    $script:RetailLateJoinerProcess = $null
+}
+
 function Start-RetailHostExact {
     $hostDir = Join-Path $RunRoot "host"
     New-Item -ItemType Directory -Path $hostDir -Force | Out-Null
@@ -1830,6 +1942,7 @@ try {
                 Begin-SteadyWindow
                 Invoke-ScenarioIfRequested -RetailJoinerInstanceId ([string] $retailJoiner.instance_id) `
                     -RetailHostInstanceId $hostInstanceId
+                Start-RetailLateJoiner
                 Wait-UntilSteadyDeadline
                 $hostInstance = Wait-RetailProcessForPeer `
                     -ProcessId $script:RetailHostProcess.Id -Role host
@@ -1843,6 +1956,7 @@ try {
                     joiner_pid = $script:RetailJoinerProcess.Id
                     wire_ready = $script:WireReadyWitness
                 }
+                Complete-RetailLateJoiner
                 Complete-SteadyWindow
                 Stop-RetailProcessCapture -InstanceId ([string] $retailJoiner.instance_id) `
                     -RunLabel "$RunId-joiner"
@@ -1907,6 +2021,7 @@ try {
                 Invoke-RetailInputExercise -InstanceId ([string] $pair.joiner.instance_id) `
                     -ProcessId ([int] $pair.joiner.pid)
             }
+            Start-RetailLateJoiner
             Wait-UntilSteadyDeadline
             $hostStatus = Wait-RetailRunForPeer -OwnedRunId ([string] $pair.host.run_id)
             $joinerStatus = Wait-RetailRunForPeer -OwnedRunId ([string] $pair.joiner.run_id)
@@ -1917,6 +2032,7 @@ try {
                 joiner_pid = [int] $pair.joiner.pid
                 wire_ready = $script:WireReadyWitness
             }
+            Complete-RetailLateJoiner
             Complete-SteadyWindow
             Save-RetailScreenshot -InstanceId ([string] $pair.joiner.instance_id)
             Stop-OwnedRetailRun -OwnedRunId ([string] $pair.joiner.run_id)
@@ -2135,6 +2251,7 @@ try {
                     Invoke-RetailInputExercise -InstanceId $script:RetailInstanceId `
                         -ProcessId $script:RetailProcess.Id
                 }
+                Start-RetailLateJoiner
                 Wait-UntilSteadyDeadline
                 $script:RetailProcess.Refresh()
                 $script:OpenNovaHost.Refresh()
@@ -2162,6 +2279,7 @@ try {
                         state = Get-OpenNovaHostState
                     }
                 }
+                Complete-RetailLateJoiner
                 Complete-SteadyWindow
                 if ($ReadinessMode -eq "in_match") {
                     Save-RetailScreenshot -InstanceId $script:RetailInstanceId
@@ -2286,6 +2404,8 @@ finally {
             catch { Add-CleanupFailure "Retail capture cleanup failed for ${instanceId}: $($_.Exception.Message)" }
         }
     }
+    try { Stop-ExactProcess -Process $script:RetailLateJoinerProcess }
+    catch { Add-CleanupFailure "Retail late joiner cleanup failed: $($_.Exception.Message)" }
     try { Stop-ExactProcess -Process $script:RetailJoinerProcess }
     catch { Add-CleanupFailure "Retail joiner cleanup failed: $($_.Exception.Message)" }
     try { Stop-ExactProcess -Process $script:RetailHostProcess }
@@ -2455,6 +2575,9 @@ $summary = [pscustomobject]@{
     rotation = @($RotationList)
     time_limit_minutes = $TimeLimitMinutes
     server_game_cfg_override = $script:ServerGameCfgOverride
+    # E3: the late joiner (null without -LateJoiner): its run, capture and
+    # client port (the comparator's session selector), ready and final state.
+    late_joiner = $script:LateJoinerWitness
     joiner_dial =$(if ($Topology -in @("RO", "OO")) { $JoinerDial } else { $null })
     repo_commit = [string] $RepoCommit
     repo_dirty = $RepoDirty
