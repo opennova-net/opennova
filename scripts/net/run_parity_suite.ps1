@@ -204,6 +204,11 @@ function Read-ParityCases {
         }
         if ($ids.ContainsKey([string] $case.id)) { throw "Parity case id '$($case.id)' repeats" }
         $ids[[string] $case.id] = $true
+        # run_parity_topology.ps1's -SteadySeconds range: caught at load (and by
+        # -Plan), not by every attempt of the case's cells.
+        if ([int] $case.steady_seconds -lt 5 -or [int] $case.steady_seconds -gt 300) {
+            throw "Parity case '$($case.id)': steady_seconds is 5..300"
+        }
         if ([string] $case.readiness -cnotin @("in_match", "deploy_hold")) {
             throw "Parity case '$($case.id)': readiness is in_match or deploy_hold"
         }

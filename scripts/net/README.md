@@ -274,7 +274,7 @@ checkout unless `-AllowDirtyRepo`, and the OpenNova joiner browses unless
 
 A case (`parity-cases.json`, `opennova.parity-cases.v1`) gives `id`,
 `mission`, `mission_sha256`, `game_type`, `port` (inside the SERVER copy's `mplanserverportmin`..`max`, stock 32768-32787), `readiness` (`in_match` or
-`deploy_hold`), `steady_seconds`, `exercise_input` and `auto_deploy`, and
+`deploy_hold`), `steady_seconds` (5 to 300), `exercise_input` and `auto_deploy`, and
 optionally `scenario`: a `scenarios\` file its actor plays at the steady
 window's start in place of the input exercise (a reference is reused only
 when it played the same scenario). The table

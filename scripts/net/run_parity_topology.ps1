@@ -26,7 +26,9 @@ param(
     [ValidatePattern('^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,54}[A-Za-z0-9])?$')]
     [string] $RunId,
 
-    [ValidateRange(5, 120)]
+    # Up to five minutes: E5's capture case holds a base for 150 s. The suite
+    # refuses a case outside this range when it loads the table.
+    [ValidateRange(5, 300)]
     [int] $SteadySeconds = 15,
 
     [switch] $WireOnly,
