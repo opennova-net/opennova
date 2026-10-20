@@ -37,9 +37,11 @@
 #include <net/napi/session.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
+#include <net/novacrypto/pubcrypto.h> // encode_pub_value (the joiner's CD identity cookie)
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/gate_probe.h>
+#include <net/novaworld/join_identity.h> // build_pub_join_identity_plaintexts
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/lan_discovery.h>
 #include <net/npwire/peer_addr.h>
@@ -56,6 +58,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
@@ -319,6 +322,33 @@ int main() {
 	// A NovaWorld join carries the session's AppId as its APPID, the .joi CK's value; the
 	// host refuses a NovaWorld joiner without it (code 9, B-7).
 	client.set_app_id(std::to_string(server.lister()->host_role().app_id()));
+	// It also carries the CD identity cookie the service's /NWJoin.dll set for the joiner's
+	// account: PUBPCID, PUBNAMEINFO and PUBSQUADINFO, each encoded under the PCIDKey the host's
+	// Host list advertises, relayed as the [name\0][value\0] pairs of every PUB* cookie
+	// (LobbyHttpFlow::on_join_response). The host refuses a NovaWorld JOIN with no cookie (code
+	// 23) and one whose NAMEINFO or PCID does not decrypt (24 / 25), D-NET-702. This listener
+	// has no HTTP leg, so the test encodes them as /NWJoin.dll does; the service answers
+	// HostRequiresJoinTicket 0, so no JOINTICKET is read.
+	// [orig: Server_ValidatePlayerJoinRequest @0x512100 - 23 @0x512969, NAMEINFO @0x512648,
+	//  PCID @0x5126FE]
+	{
+		const std::optional<LobbyState> keyed = row();
+		CHECK(keyed && !keyed->pcid_key.empty());
+		const PubJoinIdentityPlaintexts identity =
+				build_pub_join_identity_plaintexts("A-LISTED-JOINER1", "ListedJoiner");
+		std::vector<uint8_t> cd;
+		for (const auto &[name, plain] : {std::pair{"PUBPCID", &identity.pcid},
+				     std::pair{"PUBNAMEINFO", &identity.name_info},
+				     std::pair{"PUBSQUADINFO", &identity.squad_info}}) {
+			std::string value;
+			CHECK(keyed && encode_pub_value(*plain, keyed->pcid_key, value));
+			cd.insert(cd.end(), name, name + std::char_traits<char>::length(name));
+			cd.push_back(0);
+			cd.insert(cd.end(), value.begin(), value.end());
+			cd.push_back(0);
+		}
+		client.set_join_cd_cookie(std::move(cd));
+	}
 	ship(client.start());
 	bool in_match = false;
 	for (int f = 0; f < 900 && !in_match; ++f) {
