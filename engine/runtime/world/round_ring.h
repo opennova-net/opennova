@@ -19,9 +19,9 @@ namespace opennova::world {
 // the round from — NOT an impact record (the §5.9.1 "weapon-hit" reading was a decode-era
 // guess; witness 2026-07-03). Field sources are the 36-B ring record:
 struct RoundEvent {
-    // Monotonic append sequence, compared against each recipient's watermark. [orig:
-    // ring+0 = g_ServerFrameClock @0xC86FB0 (the frame clock); ours is a per-append sequence — the
-    // same strictly-greater watermark semantics at finer grain.]
+    // ring+0: the server frame clock at the add, compared against each recipient's
+    // watermark (strictly greater is newer), so every round one frame adds shares it.
+    // [orig: RoundData_AddRound @0x4FDCAC..0x4FDCBA stores g_ServerFrameClock @0xC86FB0]
     uint32_t stat = 0;
     // ring+4 — the SHOOTER's pool<<12|slot handle (RoundData_AddRound resolves the
     // shooter entity ptr, NOT the hit target) [orig: @0x4fdca8].
@@ -58,14 +58,16 @@ struct RoundRing {
     std::array<RoundEvent, kCapacity> records{};
     int32_t cursor = 0;      // next write index [orig: g_RoundRingCursor @0xC8FC4C]
     int32_t count = 0;       // saturates at capacity [orig: g_RoundRingCount @0xC8FC48]
-    uint32_t next_stat = 1;  // append sequence; 0 stays "before any round" for watermarks
+    // The server frame clock: 1 at the session's start, one step per server tick after
+    // its send pump, so the entity update that follows the tick and the next tick's
+    // receive pump and 0x0A fan read the same value; a mission change keeps it.
+    // [orig: g_ServerFrameClock @0xC86FB0 - = 1 @0x51E815 (Session_ResetFrameCounters
+    //  @0x51E7F0, from Client_ResetDisconnectState @0x5202CA at a session start), `add 1`
+    //  @0x51E48C after CNapiNetwork_PumpServerProtocolSend @0x51E487 in Server_TickUpdate]
+    uint32_t frame_clock = 1;
 
-    // Last stamped sequence — what a recipient's watermark advances to after a sweep
-    // [orig: playerSlot+97544 = stat_id after Server_BuildRoundEventListForPlayer].
-    uint32_t last_stat() const { return next_stat - 1; }
-
-    // OpenNova retry boundary: discard the prior mission's pending rounds,
-    // but keep append sequences ahead of connected recipients' watermarks.
+    // OpenNova retry boundary: discard the prior mission's pending rounds; the frame
+    // clock runs on with the session.
     void clear() {
         records = {};
         cursor = 0;
@@ -73,7 +75,7 @@ struct RoundRing {
     }
 
     void add(RoundEvent ev) {
-        ev.stat = next_stat++;
+        ev.stat = frame_clock;
         records[static_cast<size_t>(cursor)] = ev;
         if (count < kCapacity) ++count;          // [orig: @0x4fdd0d]
         if (++cursor >= kCapacity) cursor = 0;   // [orig: @0x4fdd1e/@0x4fdd2d]

@@ -684,11 +684,15 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// SetGameState(10) sets 0x04 (the frontier hint) and clears 0x08 (the refused-touch
 	// hold), as the state-6 entry's `& 0xF2 | 5` does again.
 	// [orig: CNetPlayer_SetGameState @0x4C4213..0x4C421F; @0x51A730..0x51A73A]
+	// Entering game state 10 arms the round-event watermark at the frame clock less one
+	// (NEW-L1-8) [orig: CNetPlayer_SetGameState @0x4C4225..0x4C422D].
 	st.frontier_hint_pending = true;
 	st.capture_nag_held = false;
 	conn.burst.game_state = 10;
+	conn.link.round_watermark = world.out.rounds.frame_clock - 1;
 	if (conn.slot_state != PlayerSlotState::Joined) {
 		conn.slot_state = PlayerSlotState::Joined; // [orig: the test @0x51A707..0x51A70A, @0x51A712]
+		conn.link.round_watermark = world.out.rounds.frame_clock - 1; // [orig: @0x51A740..0x51A74C]
 		// The quality level and its resend flag: a level kept across a map change (or stored
 		// ahead of the join) is gone, and the client's next C2S 0x4C above 0 dirties it again.
 		// [orig: +418 = 0 @0x51A71F, +89860 = 0 @0x51A725]
@@ -849,14 +853,12 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 						build_end_round_header(result, static_cast<uint8_t>(st.player_slot),
 								non_team_header),
 						non_team_header)});
+		// Leaving game state 10, then slot state 6, disarms the watermark
+		// [orig: CNetPlayer_SetGameState @0x4C4135 from @0x51AA44; @0x51AA54..0x51AA56].
 		conn.burst.game_state = 11;
-		if (conn.slot_state != PlayerSlotState::RoundOver) {
-			if (conn.slot_state == PlayerSlotState::Joined) {
-				conn.link.round_watermark = 0;
-				conn.link.round_watermark_armed = false;
-			}
+		conn.link.round_watermark = 0;
+		if (conn.slot_state != PlayerSlotState::RoundOver)
 			conn.slot_state = PlayerSlotState::RoundOver;
-		}
 	}
 	// The NovaWorld minutes-left line (Client/STRCLI02 over the net player's +0x48, behind its
 	// byte +0x4C) has no setter in JO: NapiNPPlayer_Create zeroes the byte (@0x4C79CC) and

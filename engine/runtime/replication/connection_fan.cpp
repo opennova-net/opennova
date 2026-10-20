@@ -920,16 +920,13 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 	std::vector<RoundEventRecord> out;
 	const world::RoundRing &ring = w.out.rounds;
 
-	// Watermark arm gate [orig: the playerSlot+97544 non-zero gate @0x4ffee8 — a
-	// fresh player is armed at the current sequence, so the pre-join ring backlog
-	// is never replayed to a joiner].
-	if (!conn.round_watermark_armed) {
-		conn.round_watermark_armed = true;
-		conn.round_watermark = ring.last_stat();
-		return out;
-	}
+	// A disarmed watermark (0) walks nothing and stamps nothing; the join arms it at the
+	// frame clock less one, so the join's own frame's rounds reach the joiner and older
+	// ones never do (NEW-L1-8).
+	// [orig: the playerSlot+97544 test @0x4FFEE8, its jz past the stamp to @0x5001B5]
+	if (conn.round_watermark == 0) return out;
 	if (ring.count == 0 || budget_left == 0) {
-		conn.round_watermark = ring.last_stat();
+		conn.round_watermark = ring.frame_clock; // [orig: @0x5001A8..0x5001AE]
 		return out;
 	}
 
@@ -1043,7 +1040,7 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		if (written >= budget_left) break;
 	}
 
-	conn.round_watermark = ring.last_stat(); // [orig: @0x5001ae stamps stat_id]
+	conn.round_watermark = ring.frame_clock; // [orig: the frame clock @0x5001A8, stored @0x5001AE]
 	return out;
 }
 

@@ -140,7 +140,6 @@ bool run_fanout_and_per_connection_anchor() {
 	conns[conn_join].s2c_entity_heading[3] = 11;
 	conns[conn_join].s2c_entity_speed[3] = 13;
 	conns[conn_join].round_watermark = 17;
-	conns[conn_join].round_watermark_armed = true;
 	ns::test::emit_all(world, conns);
 	if (!expect(self_ch.s2c_pending() == 1, "loopback got one S2C frame")) return false;
 	if (!expect(udp_host.outbound_pending() == 0,
@@ -149,8 +148,7 @@ bool run_fanout_and_per_connection_anchor() {
 	                    conns[conn_join].s2c_entity_age[3] == 9 &&
 	                    conns[conn_join].s2c_entity_heading[3] == 11 &&
 	                    conns[conn_join].s2c_entity_speed[3] == 13 &&
-	                    conns[conn_join].round_watermark == 17 &&
-	                    conns[conn_join].round_watermark_armed,
+	                    conns[conn_join].round_watermark == 17,
 	            "ownerless skip preserved phase, cache, age, and watermark state"))
 		return false;
 
@@ -273,7 +271,6 @@ bool run_fanout_and_per_connection_anchor() {
 	const uint8_t stale_phase = conns[conn_join].s2c_phase;
 	const uint8_t stale_age = conns[conn_join].s2c_entity_age[0];
 	const uint32_t stale_watermark = conns[conn_join].round_watermark;
-	const bool stale_armed = conns[conn_join].round_watermark_armed;
 	const std::vector<nw::GameEntitySnapshot> replacement_snapshot =
 			ns::snapshot_world(world);
 	if (!expect(!ns::emit_connection_s2c(
@@ -283,8 +280,7 @@ bool run_fanout_and_per_connection_anchor() {
 	if (!expect(udp_host.outbound_pending() == 0 &&
 	                    conns[conn_join].s2c_phase == stale_phase &&
 	                    conns[conn_join].s2c_entity_age[0] == stale_age &&
-	                    conns[conn_join].round_watermark == stale_watermark &&
-	                    conns[conn_join].round_watermark_armed == stale_armed,
+	                    conns[conn_join].round_watermark == stale_watermark,
 	            "stale-lifetime skip emits no bytes and mutates no frame state"))
 		return false;
 
@@ -1492,6 +1488,21 @@ struct FanFlatTerrain {
 	}
 };
 
+// The join arms each recipient's round-event watermark at the frame clock less one, in a
+// session past its first frame [orig: Server_OnPlayerJoin @0x51A74C; the clock's 1
+// @0x51E815].
+void arm_round_watermarks(w::World &world, std::vector<ns::Connection> &conns) {
+	if (world.out.rounds.frame_clock < 2) world.out.rounds.frame_clock = 2;
+	for (ns::Connection &c : conns) c.round_watermark = world.out.rounds.frame_clock - 1;
+}
+
+// One server frame's fan, then the tick's frame-clock step [orig: Server_TickUpdate
+// @0x51E48C].
+void emit_frame(w::World &world, std::vector<ns::Connection> &conns) {
+	ns::test::emit_all(world, conns);
+	++world.out.rounds.frame_clock;
+}
+
 bool run_0a_round_score_and_los_read_the_body() {
 	constexpr int32_t kEyeZ = 5 << 16;
 	bool ok = true;
@@ -1510,7 +1521,8 @@ bool run_0a_round_score_and_los_read_the_body() {
 		std::vector<ns::Connection> conns;
 		ns::LoopbackChannel ch;
 		conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, me, 0});
-		ns::test::emit_all(world, conns); // arms the watermark
+		arm_round_watermarks(world, conns);
+		emit_frame(world, conns);
 		ns::Datagram dg;
 		(void)ch.client_recv(dg);
 		const auto round = [&](uint16_t seq, float z) {
@@ -2106,15 +2118,17 @@ bool run_round_event_fanout() {
 		                               fu);
 	};
 
-	// A round fired BEFORE either connection's first emit = the pre-join backlog; the
-	// arm gate must swallow it for both.
+	// A round fired a frame BEFORE the join = the pre-join backlog; the join's arm (the
+	// frame clock less one) must swallow it for both.
 	{
 		w::RoundEvent backlog;
 		backlog.shooter_handle = peer_h.packed;
 		backlog.adm_index = 9;
 		world.out.rounds.add(backlog);
 	}
-	ns::test::emit_all(world, conns);
+	++world.out.rounds.frame_clock;
+	arm_round_watermarks(world, conns);
+	emit_frame(world, conns);
 	{
 		nw::FrameUpdate fh, fp;
 		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp), "arm frames decode"))
@@ -2145,7 +2159,7 @@ bool run_round_event_fanout() {
 		ev.adm_index = 11;
 		world.out.rounds.add(ev);
 	}
-	ns::test::emit_all(world, conns);
+	emit_frame(world, conns);
 	{
 		nw::FrameUpdate fh;
 		if (!expect(next_frame(ch_host, fh), "host frame decodes")) return false;
@@ -2178,7 +2192,7 @@ bool run_round_event_fanout() {
 	}
 
 	// Watermark: the same round never repeats on the next frame.
-	ns::test::emit_all(world, conns);
+	emit_frame(world, conns);
 	{
 		nw::FrameUpdate fh, fp;
 		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp),
@@ -2229,7 +2243,8 @@ bool run_ai_round_reaches_the_joiner() {
 		return nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id,
 		                               fu);
 	};
-	ns::test::emit_all(world, conns); // arm both watermarks
+	arm_round_watermarks(world, conns);
+	emit_frame(world, conns);
 	{
 		nw::FrameUpdate fh, fp;
 		(void)next_frame(ch_host, fh);
@@ -2238,7 +2253,7 @@ bool run_ai_round_reaches_the_joiner() {
 	const w::FixedVec3 origin{w::to_fixed(4.0), w::to_fixed(5.0), w::to_fixed(7.0)};
 	const auto fire_and_read = [&](nw::FrameUpdate &fp) {
 		world.round_sim.fire_source(world, world.registry.get(craft_h), origin, 0, 0, 3);
-		ns::test::emit_all(world, conns);
+		emit_frame(world, conns);
 		nw::FrameUpdate fh;
 		(void)next_frame(ch_host, fh);
 		return next_frame(ch_peer, fp);

@@ -1026,6 +1026,9 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	Server_RouteGuidance(ctx, world);
 
 	emit_periodic_rtt(ctx, world);
+	// The frame clock steps after the send pump, so the entity update below stamps its rounds
+	// with the next frame's clock (NEW-L1-8) [orig: Server_TickUpdate @0x51E48C].
+	++world.out.rounds.frame_clock;
 	// The tail ages the designation table [orig: Server_TickUpdate @0x51e496].
 	Server_TickDesignations(ctx.designations);
 	lap.mark(devtools::Slot::SIM_SERVER_REPLICATION);

@@ -259,16 +259,16 @@ static void test_ssn_fire_uses_the_models_alternating_userpoints() {
     CHECK(f.world.script.vars.get_mission(3) == 1 && entity().script_fire_userpoint_counter == 0);
     CHECK(f.world.out.rounds.count == 2 && f.world.round_sim.fired.size() == 3);
     CHECK(entity().primary_occupant == victim);
-    const uint32_t last_stat = f.world.out.rounds.last_stat();
+    const uint32_t clock = f.world.out.rounds.frame_clock;
     f.world.restore(baseline);
     CHECK(!f.world.rules.cease_fire);
     CHECK(f.world.out.rounds.count == 0 && f.world.out.rounds.cursor == 0);
-    CHECK(f.world.out.rounds.last_stat() == last_stat);
+    CHECK(f.world.out.rounds.frame_clock == clock); // the frame clock runs on with the session
     CHECK(entity().script_fire_userpoint_counter == 0 && !entity().last_attacker.valid());
     CHECK(!entity().primary_occupant.valid());
     f.script("ammo2ssn(SCRIPT,1,2)\n");
     CHECK(f.world.out.rounds.count == 1 && f.world.out.rounds.records[0].origin_x == 11 * 65536);
-    CHECK(f.world.out.rounds.records[0].stat == last_stat + 1);
+    CHECK(f.world.out.rounds.records[0].stat == clock);
 
     // ItemDef/health-word/model/zero-ammo gates precede the alternating byte.
     entity().has_item_def = false;

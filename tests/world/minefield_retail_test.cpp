@@ -70,12 +70,15 @@ int main() {
         }
         rig->local.teleport_local_player({point.x * io::kInvFp16One,
                 point.y * io::kInvFp16One, point.z * io::kInvFp16One + 1.0f}, 0, 0);
-        const auto before = rig->world.out.rounds.last_stat();
+        rig->world.out.rounds.clear(); // only the rounds this approach adds
         const auto mine_fired = [&] {
-            for (const auto &round : rig->world.out.rounds.records)
-                if (round.stat > before && round.shooter_handle == 0xFFFF &&
+            const auto &ring = rig->world.out.rounds;
+            for (int i = 0; i < ring.count; ++i) {
+                const auto &round = ring.records[static_cast<std::size_t>(i)];
+                if (round.shooter_handle == 0xFFFF &&
                         round.adm_index == small_id && round.origin_x == point.x &&
                         round.origin_y == point.y && round.origin_z == point.z) return true;
+            }
             return false;
         };
         for (int i = 0; i < 160 && !mine_fired(); ++i) rig->tick();

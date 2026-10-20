@@ -609,12 +609,12 @@ void dispatch_mission_chunk_request(const GameConfig &config, const ProtocolMess
 //  the state-6 watermark clear @0x51323F, state 2 @0x513249]
 void dispatch_player_sync_request(NapiNPConnection &conn) {
 	if (!player_slot_active(conn)) return;
+	// Leaving game state 10 or slot state 6 disarms the round-event watermark
+	// [orig: CNetPlayer_SetGameState @0x4C4135].
+	if (conn.burst.game_state == 10) conn.link.round_watermark = 0;
 	conn.burst.game_state = 9;
 	if (conn.slot_state == PlayerSlotState::PlayerSync) return;
-	if (conn.slot_state == PlayerSlotState::Joined) {
-		conn.link.round_watermark = 0;
-		conn.link.round_watermark_armed = false;
-	}
+	if (conn.slot_state == PlayerSlotState::Joined) conn.link.round_watermark = 0;
 	conn.slot_state = PlayerSlotState::PlayerSync;
 }
 

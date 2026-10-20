@@ -804,6 +804,8 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->phase = ConnectionPhase::PlayerAdded;
 	conn->burst.spawned = true; // in-match (is_in_match): drained + emitted by Server_TickUpdate
 	conn->slot_state = PlayerSlotState::Joined;
+	// Armed as the join's state-6 entry arms it [orig: Server_OnPlayerJoin @0x51A74C].
+	conn->link.round_watermark = world.out.rounds.frame_clock - 1;
 	conn->reply.player_slot = *player_slot;
 	conn->reply.player_slot_reserved = false;
 	// The admitted player's name is its record's and its entity's Name, as on

@@ -117,13 +117,15 @@ struct Connection {
 	uint8_t uplink_frame_rate = 0;
 	uint8_t uplink_cpu_percent = 0;
 
-	// Per-connection round-event watermark: the newest world.out.rounds sequence already swept
-	// into this connection's 0x0A tag-2 stream [orig: playerSlot+97544, stamped = stat_id after
-	// each Server_BuildRoundEventListForPlayer @0x4ffee0 sweep; its non-zero gate skips the walk
-	// until the player is armed]. Armed on the first in-match emit at the CURRENT ring sequence,
-	// so a joiner never receives the pre-join round backlog. (D-NET-152)
+	// Per-connection round-event watermark: the frame clock of the newest rounds already swept
+	// into this connection's 0x0A tag-2 stream; 0 sends none. The join (and any entry into game
+	// state 10 or slot state 6) arms it at the frame clock less one, leaving either state
+	// disarms it, and each walk stamps the clock (select_round_events). (D-NET-152)
+	// [orig: playerSlot+97544 - CNetPlayer_SetGameState @0x4C422D (enter 10) / @0x4C4135
+	//  (leave 10), CServerTick_SetPhase @0x5100B2 (enter 6) / @0x510056 (leave 6),
+	//  Server_OnPlayerJoin @0x51A74C; Server_BuildRoundEventListForPlayer @0x4FFEE8 (the gate),
+	//  @0x5001A8..0x5001AE (the stamp)]
 	uint32_t round_watermark = 0;
-	bool round_watermark_armed = false;
 
 	// RESPAWN-PENDING / undeployed — the reimpl of the player slot's stateByte bit4
 	// (slot+89912 & 0x10). Set at join iff the mission offers deploy-selectable spawn zones,

@@ -14,21 +14,27 @@
 //     0x42 @0x51A81F, Server_SendEntityStateToPlayer @0x51A82D, 0x0F @0x51A869, 0x4D @0x51A97A,
 //     0x61 @0x51A982, 0x14 @0x51A9F3, the round-over legs @0x51A9F8..0x51AA5C, 0x3E @0x51AAEE];
 //   - D-NET-NEW-L1-7: the producer waits while the round is over [orig:
-//     Server_SendInitialGameStateToPlayer @0x51BBA3..0x51BBA9, @0x51BEFF..0x51BF05].
+//     Server_SendInitialGameStateToPlayer @0x51BBA3..0x51BBA9, @0x51BEFF..0x51BF05];
+//   - D-NET-NEW-L1-8: the join arms the round-event watermark at the frame clock less one
+//     [orig: CNetPlayer_SetGameState @0x4C422D; Server_OnPlayerJoin @0x51A74C;
+//     Server_BuildRoundEventListForPlayer @0x4FFEE8, @0x5001A8..0x5001AE].
 
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/udp_session_transport.h>
+#include <runtime/replication/entity_wire_bridge.h> // class_for_type_id
 
 #include "host_test_setup.h"
 
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/geom.h> // to_fixed
 #include <runtime/world/world.h>
 
 #include <cstdio>
@@ -398,7 +404,7 @@ bool run_join_into_a_finished_round() {
 	            "the join's seed, then the zero seed")) return false;
 	const inmatch::NapiNPConnection &j = f.joiner();
 	return expect(j.slot_state == inmatch::PlayerSlotState::RoundOver &&
-	                      j.burst.game_state == 11 && !j.link.round_watermark_armed &&
+	                      j.burst.game_state == 11 && j.link.round_watermark == 0 &&
 	                      j.tick_seed == 0,
 	              "slot state 7, game state 11, the watermark and the seed cleared");
 }
@@ -422,6 +428,74 @@ bool run_track_waits_while_the_round_is_over() {
 	              "the track holds where it stood");
 }
 
+// The shot words of the round events the first S2C 0x0A among `datagrams` carries.
+std::vector<uint16_t> round_shots(const std::vector<ns::Datagram> &datagrams) {
+	std::vector<uint16_t> shots;
+	for (const ns::Datagram &d : datagrams) {
+		if (d.tag != opennova::s2c::PER_FRAME_UPDATE) continue;
+		opennova::FrameUpdate frame;
+		if (!opennova::decode_frame_update(d.body.data(), d.body.size(), ns::class_for_type_id,
+				frame))
+			break;
+		for (const opennova::RoundEventRecord &round : frame.round_events)
+			shots.push_back(round.shot_seq);
+		break;
+	}
+	return shots;
+}
+
+// D-NET-NEW-L1-8: the join arms the slot's round-event watermark at the frame clock less one,
+// so the join's own 0x0A carries the rounds its frame fired and none older; each walk stamps
+// the clock, and a round the frame's entity update fires (the next frame's clock, the tick
+// having stepped it after its send pump) rides the next 0x0A. Ours armed lazily at the first
+// walk, which sent nothing, so a joiner lost its join frame's rounds.
+// [orig: RoundData_AddRound @0x4FDCAC..0x4FDCBA; CNetPlayer_SetGameState @0x4C4225..0x4C422D;
+//  Server_OnPlayerJoin @0x51A740..0x51A74C; Server_BuildRoundEventListForPlayer @0x4FFEE8,
+//  @0x5001A8..0x5001AE; Server_TickUpdate @0x51E48C]
+bool run_join_arms_the_round_watermark() {
+	JoinFixture f(/*with_existing=*/false);
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1,
+	            "the spawn pump adds the joiner")) return false;
+	if (!expect(f.drive_to_await_join(), "the world stream parks the slot in state 5"))
+		return false;
+	w::Entity seed;
+	seed.kind = w::EntityKind::Organic;
+	seed.health = 100;
+	seed.alive = true;
+	seed.position = {12.0f, 22.0f, 1.0f};
+	const w::EntityHandle shooter = f.world->registry.spawn(0, seed);
+	w::RoundRing &ring = f.world->out.rounds;
+	const auto fire = [&](uint16_t shot) {
+		w::RoundEvent round;
+		round.shooter_handle = shooter.packed;
+		round.origin_x = w::to_fixed(12.0);
+		round.origin_y = w::to_fixed(22.0);
+		round.origin_z = w::to_fixed(2.0);
+		round.shot_seq = shot;
+		ring.add(round);
+	};
+	ring.frame_clock = 99;
+	fire(1); // an earlier frame's round
+	ring.frame_clock = 100;
+	fire(2); // the join's own frame, ahead of its 0x0B
+	const std::vector<ns::Datagram> bundle = f.join();
+	if (!expect(round_shots(bundle) == std::vector<uint16_t>{2},
+	            "the join's 0x0A carries its own frame's round and no older one")) return false;
+	if (!expect(f.joiner().link.round_watermark == 100, "the walk stamps the frame clock"))
+		return false;
+	f.joiner().s2c_send_boundary_open = true;
+	inmatch::Server_TickUpdate(*f.ctx); // its fan finds nothing new; the clock steps
+	(void)JoinFixture::drain(f.joiner_transport);
+	if (!expect(ring.frame_clock == 101, "the tick steps the frame clock once")) return false;
+	fire(3); // the entity update's round
+	inmatch::Server_TickUpdate(*f.ctx);
+	std::vector<ns::Datagram> next;
+	ns::Datagram d;
+	while (f.joiner_transport.pop_outbound(d)) next.push_back(d);
+	return expect(round_shots(next) == std::vector<uint16_t>{3},
+	              "the next 0x0A carries the entity update's round");
+}
+
 } // namespace
 
 int main() {
@@ -434,6 +508,7 @@ int main() {
 	if (!run_join_tells_the_cease_fire()) ++failures;
 	if (!run_join_into_a_finished_round()) ++failures;
 	if (!run_track_waits_while_the_round_is_over()) ++failures;
+	if (!run_join_arms_the_round_watermark()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

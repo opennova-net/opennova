@@ -114,7 +114,7 @@ void peer_and_ceasefire() {
         w.rules.projectile_authority = mode != 1;
         w.rules.mp_session = mode == 1;
         w.rules.cease_fire = mode == 2;
-        const auto before = w.out.rounds.last_stat();
+        const auto before = w.out.rounds.count;
         w.minefields.think(w, *w.registry.get(h));
         CHECK(w.registry.get(h)->section_mask == 1);
         CHECK(w.registry.get(h)->minefield.age == (mode == 1 ? 1 : 3));
@@ -122,7 +122,7 @@ void peer_and_ceasefire() {
         CHECK(w.round_sim.fired[0].ammo_index == 2);
         CHECK(w.round_sim.active_count == 0); // instantkillzone
         CHECK(w.explosions.queue.size() == (mode == 0 ? 1u : 0u));
-        CHECK(w.out.rounds.last_stat() == before + (mode == 0 ? 1 : 0));
+        CHECK(w.out.rounds.count == before + (mode == 0 ? 1 : 0));
     }
 }
 
