@@ -108,8 +108,11 @@ public:
 	// running game's logic is polled (its Logic pane shows). Vsync and the low-processor mode stay as they are.
 	// An idle frame costs the process some 6 ms of a core whatever the project (Godot's frame and its draw; the
 	// layout under 1 ms on a 22,000-file project): 10 a second is some 6% of a core, 20 twice that, and the first
-	// input after idle is answered within a tenth of a second.
+	// input after idle is answered within a tenth of a second. A frame active only for the playing preview clock
+	// draws at kPreviewFps at most: the previews move on the game's 62.5 Hz tick (io/tick_rate.h), so a faster
+	// display draws no new step, only spends the core (a 360 Hz display held a whole one).
 	static constexpr int kIdleFps = 10;
+	static constexpr int kPreviewFps = 60;
 	static constexpr int kFallbackFps = 60;
 	static constexpr int kQuietFrames = 30;
 	void set_frame_pacing(bool p_on);

@@ -501,7 +501,8 @@ void EditorApp::pace_frame_() {
 		max_fps_found_ = engine->get_max_fps();
 		frame_capped_ = true;
 	}
-	const int fps = idle ? kIdleFps : display_fps_;
+	const bool clock_alone = active_reasons_.size() == 1 && std::string(active_reasons_.front()) == "clock";
+	const int fps = idle ? kIdleFps : clock_alone ? std::min(display_fps_, int(kPreviewFps)) : display_fps_;
 	if (engine->get_max_fps() != fps) engine->set_max_fps(fps);
 	if (session_) session_->frame_times().note_pacing(idle ? "idle" : "active", fps, active_reasons_);
 }
