@@ -8,17 +8,18 @@
 // name and scope (S11b), and the file names a reference loads (S11f: a model's texture row
 // by its type, as the runtime's loaders pick the file); unchanged files reused on the
 // next update; the rename transaction: the sites rewritten and the file moved, or
-// the refusals that leave everything as it was; and (a SKIP-LEG without OPENNOVA_JO_ASSETS)
-// the shipped menus' targets. S12: the
+// the refusals that leave everything as it was; and every ACTION target OpenNova's own menus
+// and the shipped menus' forms write, found. S12: the
 // reference kinds' table (D1), a symbol per defining field with its place (D2), and where Go
 // to leads and who uses a file (D3). S13 D3: an update patches only the files whose reading
-// changed and equals a graph built fresh over the same files after every scripted step (also as
-// a retail leg over the JO install, OPENNOVA_JO_DIR), resolving again only what a change reaches
-// (GraphStats); references_of by a file's own slot; the base layer's rules (also over the JO
-// install) and its choices after the project's. S13 D8: a model's registers and MTRX rows named by
-// index (Record references) resolved within its file, Referenced by, users and the picker over its
-// record sets, and an open model's register removed in the middle, its references renumbered, the
-// graph equal to one built fresh (also as a retail leg over the JO install's models).
+// changed and equals a graph built fresh over the same files after every scripted step (also
+// over a game install minted from OpenNova's own game, minted_install.h), resolving again only
+// what a change reaches (GraphStats); references_of by a file's own slot; the base layer's rules
+// (also over that install) and its choices after the project's. S13 D8: a model's registers and
+// MTRX rows named by index (Record references) resolved within its file, Referenced by, users and
+// the picker over its record sets, and an open model's register removed in the middle, its
+// references renumbered, the graph equal to one built fresh (and over the minted model set, a
+// register added at a model's front and removed again).
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -70,13 +71,12 @@
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_load_rules.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
-#include "common/test_parts.h"
 #include "editor/editor_test_support.h"
 #include "editor/graph_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
+#include "editor/minted_install.h"
 #include "editor/rig_model.h"
 
 using namespace opennova::editor;
@@ -1417,43 +1417,61 @@ static int test_menu_names_and_targets() {
 	return 0;
 }
 
-// The shipped menus loose at OPENNOVA_JO_ASSETS' root (the grill's census corpus) in a
-// project of their own, through the graph (a SKIP-LEG without the root): every ACTION's
-// target an edge, every WINDOW target resolving on its screen as the 2026-09-23 grill found
-// (110 WINDOW rows, all found under retail's rules), every SCREEN target in a swept file
-// resolving; the counts printed.
-static int test_retail_menu_graph() {
-	const std::string assets = retail::assets();
-	std::vector<fs::path> menus;
-	std::error_code ec;
-	if (!assets.empty())
-		for (const auto &entry : fs::directory_iterator(assets, ec)) {
-			const std::string name = entry.path().filename().string();
-			if (entry.is_regular_file(ec) && name.size() > 4 && retail::lower_ascii(name.substr(name.size() - 4)) == ".mnu")
-				menus.push_back(entry.path());
-		}
-	if (menus.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/*.mnu (the shipped menus' ACTION targets through the asset graph)");
-		return 0;
-	}
-	test_temp::TempDir dir("opennova_asset_graph_retail");
+// What the shipped menus' ACTIONs write a target in, each form a menu of our own writes (the 2026-09-23 grill's
+// census corpus, the 16 shipped menus, read again 2026-10-19: 114 WINDOW ACTIONs, `type="window"` and
+// `state="HIDE"` or `"SHOW"` in lower case, each naming a window of its own screen, the acting window's later
+// sibling, an ancestor of it (a dialog's button hiding its dialog) or a window of another branch before or after
+// it; 7 SCREEN ACTIONs, `type="screen"` or `"SCREEN"`, each with a `file` of another menu or its own; POP_SCREEN
+// in both cases and a URL to the outside browser, which name nothing). OpenNova's own menus (assets/) write every
+// such target in upper case; the menu here writes them in the shipped case.
+std::string shipped_target_forms() {
+	using graph_test::window;
+	const std::string acting = "<ACTION type=\"window\" state=\"HIDE\">PANEL</ACTION>\r\n"
+	                           "<ACTION type=\"window\" state=\"HIDE\">LATER</ACTION>\r\n"
+	                           "<ACTION type=\"window\" state=\"SHOW\">LATER</ACTION>\r\n"
+	                           "<ACTION type=\"window\" state=\"SHOW\">EARLIER</ACTION>\r\n"
+	                           "<ACTION type=\"window\" state=\"SHOW\">AFTER</ACTION>\r\n"
+	                           "<ACTION type=\"screen\" file=\"main.mnu\">STARTUP</ACTION>\r\n"
+	                           "<ACTION type=\"SCREEN\" file=\"forms.mnu\">FORMS</ACTION>\r\n"
+	                           "<ACTION type=\"pop_screen\"></ACTION>\r\n"
+	                           "<ACTION type=\"POP_SCREEN\"></ACTION>\r\n"
+	                           "<ACTION type=\"URL\" EXTERNAL_BROWSER>http://example.invalid/</ACTION>\r\n";
+	return screen("FORMS", window("STATIC", "EARLIER") +
+	                               window("STATIC", "PANEL", window("BUTTON", "GO", acting) + window("STATIC", "LATER")) +
+	                               window("STATIC", "AFTER"));
+}
+
+// OpenNova's own menus (assets/, with their stylesheets) and the shipped forms' menu in a project of their own,
+// through the graph: every ACTION's target an edge, every WINDOW target found on its screen, every SCREEN target
+// found in its file or, where its file is none of the project's or holds no screen of the name, unverified (a
+// screen another menu loaded before may hold, which the graph cannot know), never missing; no screen named twice;
+// the shipped forms' each an edge of its own, found; the counts printed.
+static int test_menu_graph_targets() {
+	std::vector<minted_install::File> game;
+	std::string error;
+	TEST_EXPECT(minted_install::base_game(game, error));
+	test_temp::TempDir dir("opennova_asset_graph_menus");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Retail"));
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Menus"));
 	const std::string root = session.view().project.root;
-	for (const fs::path &menu : menus) fs::copy_file(menu, fs::path(root) / menu.filename(), ec);
-	// The shipped stylesheet, loose beside the menus or in the reference fixture set.
-	std::string style = retail::asset_file("menu_style.mns");
-	if (style.empty()) style = retail::reference_fixture("mns/menu_style.mns");
-	if (!style.empty()) fs::copy_file(style, fs::path(root) / "menu_style.mns", ec);
+	size_t menus = 0;
+	for (const minted_install::File &file : game) {
+		const std::string extension = minted_install::extension_of(file.name);
+		if (extension != ".mnu" && extension != ".mns") continue;
+		TEST_EXPECT(test_io::write_file(root + "/" + file.name, *file.bytes));
+		menus += extension == ".mnu";
+	}
+	TEST_EXPECT(menus >= 12 && test_io::write_text(root + "/forms.mnu", shipped_target_forms()));
 	editor_test::handle_to_end(session, request::rescan());
 	const SessionView &view = session.view();
 	const AssetGraph &graph = *view.findings.graph;
 	std::map<std::string, size_t> edges, missing;
 	size_t screen_targets = 0, screen_found = 0, screen_other = 0, window_targets = 0, window_found = 0;
+	std::vector<std::string> forms;
 	for (const GraphEdge &edge : all_edges(graph)) {
-		if (retail::lower_ascii(fs::path(edge.source).extension().string()) != ".mnu") continue;
+		if (opennova::strutil::to_lower(fs::path(edge.source).extension().string()) != ".mnu") continue;
 		const std::string token = reference_row(edge.kind).token;
 		++edges[token];
 		const ReferenceStatus status = graph.resolve(edge.kind, edge.target, edge.scope);
@@ -1469,6 +1487,9 @@ static int test_retail_menu_graph() {
 			if (status == ReferenceStatus::Present) ++window_found;
 			else std::printf("  FAIL %s %s: the window %s on %s\n", edge.source.c_str(), edge.record.c_str(), edge.value.c_str(), edge.scope.c_str());
 		}
+		if (edge.source == "forms.mnu" && (edge.kind == ReferenceKind::MenuScreen || edge.kind == ReferenceKind::MenuWindow))
+			forms.push_back(std::string(token) + " " + edge.value + " " + edge.scope + " " +
+			                (status == ReferenceStatus::Present ? "found" : "not found"));
 	}
 	size_t screens = 0, windows = 0, inert = 0;
 	for (const GraphSymbol &symbol : all_symbols(graph)) {
@@ -1476,21 +1497,25 @@ static int test_retail_menu_graph() {
 		windows += symbol.kind == ReferenceKind::MenuWindow;
 		inert += (symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow) && symbol.inert;
 	}
-	std::printf("the shipped menus at %s through the asset graph (%zu menus and %s; their other files left out):\n",
-	            assets.c_str(), menus.size(), style.empty() ? "no stylesheet" : "menu_style.mns");
+	std::printf("OpenNova's menus and the shipped forms through the asset graph (%zu menus and their stylesheets):\n", menus + 1);
 	for (const auto &entry : edges)
 		std::printf("  %-14s edges %5zu  missing here %4zu\n", entry.first.c_str(), entry.second, missing[entry.first]);
 	std::printf("  symbols: %zu screens, %zu windows, %zu no lookup finds\n", screens, windows, inert);
-	std::printf("  SCREEN targets %zu: %zu found, %zu unverified (a menu the corpus lacks, or a screen only another menu has)\n",
-	            screen_targets, screen_found, screen_other);
-	std::printf("  WINDOW / TAB / GLB_FILTER targets %zu: %zu found\n", window_targets, window_found);
-	std::printf("  findings: duplicate_screen %zu, duplicate_window %zu, action_inert %zu, style.unused %zu\n",
-	            count_code(view.findings.diagnostics, "menu.duplicate_screen"), count_code(view.findings.diagnostics, "menu.duplicate_window"),
-	            count_code(view.findings.diagnostics, "menu.action_inert"), count_code(view.findings.diagnostics, "style.unused"));
-	// The grill's census (B1): 110 WINDOW rows and 7 SCREEN rows, each found.
-	TEST_EXPECT(window_targets == 110 && window_found == window_targets);
-	TEST_EXPECT(screen_targets == 7 && screen_found + screen_other == screen_targets);
+	std::printf("  SCREEN targets %zu: %zu found, %zu unverified\n", screen_targets, screen_found, screen_other);
+	std::printf("  WINDOW targets %zu: %zu found\n", window_targets, window_found);
+	TEST_EXPECT(window_targets > 0 && window_found == window_targets);
+	TEST_EXPECT(screen_targets > 0 && screen_found + screen_other == screen_targets);
 	TEST_EXPECT(count_code(view.findings.diagnostics, "menu.duplicate_screen") == 0);
+	// The shipped forms: each WINDOW target on the screen FORMS, each SCREEN target in its file, all found.
+	std::sort(forms.begin(), forms.end());
+	const std::vector<std::string> expected = {
+	        "menu_screen FORMS FORMS.MNU found",          "menu_screen STARTUP MAIN.MNU found",
+	        "menu_window AFTER FORMS.MNU/FORMS found",    "menu_window EARLIER FORMS.MNU/FORMS found",
+	        "menu_window LATER FORMS.MNU/FORMS found",    "menu_window LATER FORMS.MNU/FORMS found",
+	        "menu_window PANEL FORMS.MNU/FORMS found"};
+	if (forms != expected)
+		for (const std::string &line : forms) std::printf("  forms.mnu: %s\n", line.c_str());
+	TEST_EXPECT(forms == expected);
 	return 0;
 }
 
@@ -3317,64 +3342,45 @@ static int test_record_references() {
 	return 0;
 }
 
-// The retail leg of the Record references (OPENNOVA_JO_DIR): the JO install's models (the base
-// game's and each expansion's, each source's once, as editor_model_document's retail leg reads them)
-// in a project, every register and MTRX row their records name by index an edge into the model's
-// own record set that resolves; one model whose records name a register opened, a register added
-// at its front (every reference to its registers renumbered up in the same step) and removed again
-// (renumbered back down), the graph after each equal to one built fresh.
-static int test_retail_record_references() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the Record references of the JO install's models)");
-		return 0;
-	}
-	test_temp::TempDir dir("opennova_asset_graph_retail_records");
+// The Record references over a set of models (the minted model set, fixtures/threedi/synth: the registers its
+// variants name from their materials' generators, their lights and their part animations, and the MTRX rows their
+// part animations name; and the rig model, rig_model.h), each in a project: every register and MTRX row their
+// records name by index an edge into the model's own record set that resolves; the rig model opened, a register
+// added at its front (every reference to its registers renumbered up in the same step) and removed again
+// (renumbered back down), the graph after each equal to one built fresh, each reference naming the register it
+// named.
+static int test_model_set_record_references() {
+	test_temp::TempDir dir("opennova_asset_graph_model_records");
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
-	std::vector<std::string> expansions = opennova::vfs_list_expansions(install);
-	expansions.insert(expansions.begin(), std::string()); // the base game first
-	std::set<std::string> seen_models;
+	const fs::path synth = fs::path(test_paths_fixture("threedi/synth"));
+	std::error_code ec;
 	size_t models = 0;
-	for (const std::string &expansion : expansions) {
-		opennova::Vfs game;
-		game.set_scr_policy(
-		        opennova::gameprofile::gameprofile_scr_policy_for_code(project.document.target_game.c_str()));
-		TEST_EXPECT(game.mount_game(install, expansion) && game.has_mounted_archive());
-		for (const opennova::VfsFileLocation &location : game.list_files()) {
-			const std::string &name = location.logical_name;
-			if (!opennova::strutil::ends_with_icase(name, ".3di") ||
-			    !seen_models.insert(location.source_path + "|" + normalized_logical_name(name)).second)
-				continue;
-			std::vector<uint8_t> bytes;
-			if (!game.read_file(name, bytes) || bytes.size() < 4 || std::memcmp(bytes.data(), "3DI3", 4) != 0)
-				continue; // not a model the game's loader reads either
-			const std::string folder = expansion.empty() ? std::string("base") : expansion;
-			const std::string placed = "model/" + folder + "/" + std::to_string(models) + "/" + name;
-			TEST_EXPECT(test_io::write_file(project.file(placed), bytes));
-			++models;
-		}
+	for (const auto &entry : fs::directory_iterator(synth, ec)) {
+		if (opennova::strutil::to_lower(entry.path().extension().string()) != ".3di") continue;
+		const std::vector<uint8_t> bytes = test_io::read_file(entry.path().string());
+		TEST_EXPECT(bytes.size() > 4 && std::memcmp(bytes.data(), "3DI3", 4) == 0); // pulled from LFS
+		TEST_EXPECT(test_io::write_file(project.file("model/" + entry.path().filename().string()), bytes));
+		++models;
 	}
+	const std::string named = "model/rig.3di";
+	TEST_EXPECT(test_io::write_file(project.file(named), rig_model::bytes()));
+	++models;
 	AssetGraph graph;
-	const auto clock = std::chrono::steady_clock::now();
 	graph.update(project.paths, project.document, project.rescan(), {});
-	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - clock).count();
 	size_t registers = 0, frames = 0, unresolved = 0;
-	std::string named;
+	std::set<std::string> naming;
 	graph.for_each_edge([&](const GraphEdge &edge) {
 		if (edge.kind != ReferenceKind::ModelRegister && edge.kind != ReferenceKind::ModelFrame) return;
 		(edge.kind == ReferenceKind::ModelRegister ? registers : frames) += 1;
 		if (graph.resolve(edge) != ReferenceStatus::Present) ++unresolved;
-		if (named.empty() && edge.kind == ReferenceKind::ModelRegister) named = edge.source;
+		naming.insert(edge.source);
 	});
-	std::printf("the JO install's models through the graph: %zu models, %zu edges (%zu registers and %zu MTRX rows "
-	            "named by index, %zu not in their collection), %zu symbols (%zu registers, %zu rows), read in %.2f "
-	            "s\n",
-	            models, graph.edge_count(), registers, frames, unresolved, graph.symbol_count(),
-	            graph.symbols_of_kind(ReferenceKind::ModelRegister).size(),
-	            graph.symbols_of_kind(ReferenceKind::ModelFrame).size(), seconds);
-	TEST_EXPECT(models > 900 && registers > 0 && frames > 0 && unresolved == 0 && !named.empty());
-	if (named.empty()) return 0;
+	std::printf("the model set through the graph: %zu models (%zu naming their records), %zu edges (%zu registers and %zu "
+	            "MTRX rows named by index, %zu not in their collection), %zu symbols (%zu registers, %zu rows)\n",
+	            models, naming.size(), graph.edge_count(), registers, frames, unresolved, graph.symbol_count(),
+	            graph.symbols_of_kind(ReferenceKind::ModelRegister).size(), graph.symbols_of_kind(ReferenceKind::ModelFrame).size());
+	TEST_EXPECT(models > 40 && naming.size() > 10 && registers > 0 && frames > 0 && unresolved == 0 && naming.count(named));
 	auto model = std::make_shared<ModelDocument>();
 	Diagnostic error;
 	TEST_EXPECT(model->load(project.file(named), named, AssetKind::Model, "jo", error));
@@ -3399,8 +3405,7 @@ static int test_retail_record_references() {
 	TEST_EXPECT(all_found);
 	const auto step = [&](const char *what) {
 		const GraphUpdate update = graph.update(project.paths, project.document, project.scan, open);
-		const std::string different =
-		        fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
+		const std::string different = fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
 		const bool same = resolved() == before;
 		std::printf("  %s: %zu files patched, %zu edges resolved of %zu, %zu register references naming the "
 		            "registers they named%s%s%s\n",
@@ -3415,7 +3420,7 @@ static int test_retail_record_references() {
 	add.address = {row, node_kind(ModelKind::Register), 0};
 	add.position = 0;
 	TEST_EXPECT(model->apply(add, error));
-	TEST_EXPECT(step(("a register added at the front of " + named).c_str()));
+	TEST_EXPECT(step("a register added at the front of the rig"));
 	Edit remove;
 	remove.operation = EditOperation::Remove;
 	remove.address = {row, node_kind(ModelKind::Register), model->last_added()};
@@ -3424,26 +3429,19 @@ static int test_retail_record_references() {
 	return 0;
 }
 
-// The retail leg of the incremental graph (OPENNOVA_JO_DIR): the install's menus, stylesheet,
-// string tables, catalogs, animation tables, environments, avatars, particles and missions
-// (every kind the graph reads but the models and clips) exported into a project, then edited: a
-// stylesheet's font changed, brand.mns added, a string table gone, a model the items name added,
-// a menu moved, an item added; after each, the graph equals one built fresh. A fresh graph over the
-// install's files is the leg's cost (about 20 s each), so a run compares the steps `first` to `last`
-// (from 1) alone, each part of the program a pair (main's parts): the steps before them are made and
-// patched as before, their names, paths and searches seen, without the fresh graph their own part
-// compares; the steps after them are not made.
-static int test_retail_incremental(int first, int last) {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the incremental graph over the JO install's files)");
-		return 0;
-	}
-	test_temp::TempDir dir("opennova_asset_graph_retail_incremental");
+// The incremental graph over a game install's files (minted from OpenNova's own game, minted_install.h): its
+// menus, stylesheets, string tables, catalogs, animation tables, environments, avatars, particles, missions and
+// terrain (every kind the graph reads but the models and clips) exported into a project, then edited: a
+// stylesheet's font changed, brand.mns added, a string table gone, a model the items name added, a menu moved, an
+// item added; after each, the graph equals one built fresh.
+static int test_install_incremental() {
+	test_temp::TempDir dir("opennova_asset_graph_install_incremental");
+	const std::string install = dir.file("install");
+	std::string error;
+	TEST_EXPECT(minted_install::mint(install, error));
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	ImportOrigin origin;
-	std::string error;
 	TEST_EXPECT(origin.open(ImportOrigin::Kind::GameInstall, install, project.document, error));
 	InstallView view;
 	TEST_EXPECT(view.open(install_spec(install, project.document), error));
@@ -3455,49 +3453,26 @@ static int test_retail_incremental(int first, int last) {
 		if (opennova::strutil::ends_with_icase(name, ".pff")) continue;
 		const AssetKind kind = origin.file_kind(name);
 		if (kind == AssetKind::Model && model_name.empty()) model_name = name;
-		if (!graph_reads_kind(kind) || kind == AssetKind::Model ||
-				kind == AssetKind::Animation)
-			continue;
+		if (!graph_reads_kind(kind) || kind == AssetKind::Model || kind == AssetKind::Animation) continue;
 		std::vector<uint8_t> bytes;
 		if (!origin.read(name, bytes)) continue;
-		TEST_EXPECT(test_io::write_file(
-				project.file(std::string(asset_kind_token(kind)) + "/" + name), bytes));
+		TEST_EXPECT(test_io::write_file(project.file(std::string(asset_kind_token(kind)) + "/" + name), bytes));
 		++exported;
 	}
 	TEST_EXPECT(exported > 0 && !model_name.empty());
 	std::vector<std::shared_ptr<const DocumentBase>> open;
 	AssetGraph graph;
-	const auto clock = std::chrono::steady_clock::now();
 	graph.update(project.paths, project.document, project.rescan(), open);
-	const double seconds =
-			std::chrono::duration<double>(std::chrono::steady_clock::now() - clock).count();
-	std::printf("the JO install's files through the incremental graph: %zu files exported, %zu "
-				"edges, %zu symbols, %zu "
-				"missing, read in %.2f s\n",
-			exported, graph.edge_count(), graph.symbol_count(), graph.missing_count(), seconds);
+	std::printf("the install's files through the incremental graph: %zu files exported, %zu edges, %zu symbols, %zu "
+	            "missing\n",
+	            exported, graph.edge_count(), graph.symbol_count(), graph.missing_count());
 	Seen seen({"main", "font", "d3"});
-	int made = 0;
 	const auto step = [&](const char *what) {
-		if (++made > last) return true;
-		const GraphUpdate update =
-				graph.update(project.paths, project.document, project.rescan(), open);
-		if (made < first) {
-			// Compared by an earlier part: what its comparison saw (a graph equal to the fresh one
-			// sees what the fresh one does).
-			seen.add(graph, project.scan);
-			return update.changed;
-		}
-		const auto compared = std::chrono::steady_clock::now();
-		const std::string different =
-				fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
-		std::printf("  %s: %zu files patched, %zu edges resolved of %zu, %zu findings worded, %zu "
-					"missing (compared in %.1f s)%s%s\n",
-				what, graph.stats().files_patched, graph.stats().edges_resolved,
-				graph.edge_count(), graph.stats().findings_made, graph.missing_count(),
-				std::chrono::duration<double>(std::chrono::steady_clock::now() - compared)
-						.count(),
-				different.empty() ? "" : "; FAIL, differs from a fresh graph in ",
-				different.c_str());
+		const GraphUpdate update = graph.update(project.paths, project.document, project.rescan(), open);
+		const std::string different = fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
+		std::printf("  %s: %zu files patched, %zu edges resolved of %zu, %zu findings worded, %zu missing%s%s\n", what,
+		            graph.stats().files_patched, graph.stats().edges_resolved, graph.edge_count(), graph.stats().findings_made,
+		            graph.missing_count(), different.empty() ? "" : "; FAIL, differs from a fresh graph in ", different.c_str());
 		return different.empty() && update.changed;
 	};
 	const AssetEntry *style = project.scan.find("menu_style.mns");
@@ -3506,14 +3481,16 @@ static int test_retail_incremental(int first, int last) {
 		std::string text, problem;
 		TEST_EXPECT(opennova::io::read_file_text(project.file(style->relative_path), text, problem));
 		const size_t fnt = text.find(".fnt");
-		if (fnt != std::string::npos) text.replace(fnt, 4, "_x.fnt");
+		TEST_EXPECT(fnt != std::string::npos);
+		text.replace(fnt, 4, "_x.fnt");
 		TEST_EXPECT(rewrite(project.file(style->relative_path), text));
 		TEST_EXPECT(step("a stylesheet font renamed"));
-		TEST_EXPECT(rewrite(project.file("menu_style/brand.mns"),
-				"DEF_FONTNAME_LG arial.fnt\r\nBRAND_ONLY 1\r\n"));
+		TEST_EXPECT(rewrite(project.file("menu_style/brand.mns"), "DEF_FONTNAME_LG arial.fnt\r\nBRAND_ONLY 1\r\n"));
 		TEST_EXPECT(step("brand.mns added"));
 	}
-	if (const AssetEntry *table = project.scan.find("menutxt.bin")) {
+	const AssetEntry *table = project.scan.find("menutxt.bin");
+	TEST_EXPECT(table != nullptr);
+	if (table) {
 		fs::remove(project.file(table->relative_path));
 		TEST_EXPECT(step("menutxt.bin gone"));
 	}
@@ -3521,39 +3498,37 @@ static int test_retail_incremental(int first, int last) {
 	TEST_EXPECT(origin.read(model_name, model));
 	TEST_EXPECT(test_io::write_file(project.file("model/" + model_name), model));
 	TEST_EXPECT(step("a model added"));
-	if (const AssetEntry *menu = project.scan.find("main.mnu")) {
+	const AssetEntry *menu = project.scan.find("main.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (menu) {
 		fs::create_directories(project.file("moved"));
 		fs::rename(project.file(menu->relative_path), project.file("moved/main.mnu"));
 		TEST_EXPECT(step("main.mnu moved"));
 	}
-	if (const AssetEntry *items = project.scan.find("items.def")) {
+	const AssetEntry *items = project.scan.find("items.def");
+	TEST_EXPECT(items != nullptr);
+	if (items) {
 		std::string text, problem;
 		TEST_EXPECT(opennova::io::read_file_text(project.file(items->relative_path), text, problem));
 		TEST_EXPECT(rewrite(project.file(items->relative_path),
-				text +
-						"\r\nbegin \"D3 RETAIL\"\r\nid 199999\r\ntype building\r\ngraphic "
-						"nothing_here\r\nend\r\n"));
+		                    text + "\r\nbegin \"D3 ADDED\"\r\nid 199999\r\ntype building\r\ngraphic nothing_here\r\nend\r\n"));
 		TEST_EXPECT(step("an item added"));
 	}
 	return 0;
 }
 
-// The retail leg of the base layer (OPENNOVA_JO_DIR): a layer over the mounted JO install, every
-// file the graph reads (models and clips included) read once for the names it defines, under a
-// project of one menu naming what only the install has: its stylesheet's font variable, a
-// texture, a screen of its main menu; each resolves through the base, and the base makes no
-// finding.
-static int test_retail_base_layer() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the base layer over the mounted JO install)");
-		return 0;
-	}
-	test_temp::TempDir dir("opennova_asset_graph_retail_base");
+// The base layer over a mounted game install (minted from OpenNova's own game, minted_install.h): every file the
+// graph reads (models and clips included) read once for the names it defines, under a project of one menu naming
+// what only the install has: its stylesheet's font variable, a texture, a screen of its main menu; each resolves
+// through the base, and the base makes no finding.
+static int test_install_base_layer() {
+	test_temp::TempDir dir("opennova_asset_graph_install_base");
+	const std::string install = dir.file("install");
+	std::string error;
+	TEST_EXPECT(minted_install::mint(install, error));
 	Project project(dir.file("project"));
 	TEST_EXPECT(project.made);
 	ImportOrigin origin;
-	std::string error;
 	TEST_EXPECT(origin.open(ImportOrigin::Kind::GameInstall, install, project.document, error));
 	InstallView view;
 	TEST_EXPECT(view.open(install_spec(install, project.document), error));
@@ -3564,30 +3539,23 @@ static int test_retail_base_layer() {
 		LayerFile file;
 		file.name = location.logical_name;
 		file.kind = origin.file_kind(location.logical_name);
-		file.read = [&origin, name = location.logical_name](std::vector<uint8_t> &bytes,
-							std::string &) { return origin.read(name, bytes); };
+		file.read = [&origin, name = location.logical_name](std::vector<uint8_t> &bytes, std::string &) {
+			return origin.read(name, bytes);
+		};
 		files.push_back(std::move(file));
 	}
-	const auto clock = std::chrono::steady_clock::now();
 	GraphStats built;
-	const std::shared_ptr<const GraphLayer> layer =
-			GraphLayer::build(files, project.document.target_game, &built);
-	const double seconds =
-			std::chrono::duration<double>(std::chrono::steady_clock::now() - clock).count();
+	const std::shared_ptr<const GraphLayer> layer = GraphLayer::build(files, project.document.target_game, &built);
 	std::map<std::string, size_t> kinds;
 	for (size_t k = 0; k < kReferenceKindCount; ++k)
 		if (const size_t n = layer->index().symbols_of_kind(static_cast<ReferenceKind>(k)).size())
 			kinds[reference_row(static_cast<ReferenceKind>(k)).token] = n;
-	std::printf("a base layer over the JO install: %zu files, %zu read, %zu did not read, %zu "
-				"symbols, built in %.2f s\n",
-			layer->file_count(), built.files_extracted, built.files_failed, layer->symbol_count(),
-			seconds);
-	for (const auto &entry : kinds)
-		std::printf("  %-14s %6zu\n", entry.first.c_str(), entry.second);
-	TEST_EXPECT(layer->index().edge_count() == 0 && layer->file_named("menu_style.mns") &&
-			layer->file_named("main.mnu"));
-	TEST_EXPECT(kinds["style_var"] > 0 && kinds["menu_screen"] > 0 && kinds["text_id"] > 0 &&
-			kinds["weapon"] > 0 && kinds["item"] > 0);
+	std::printf("a base layer over the install: %zu files, %zu read, %zu did not read, %zu symbols\n", layer->file_count(),
+	            built.files_extracted, built.files_failed, layer->symbol_count());
+	for (const auto &entry : kinds) std::printf("  %-14s %6zu\n", entry.first.c_str(), entry.second);
+	TEST_EXPECT(layer->index().edge_count() == 0 && layer->file_named("menu_style.mns") && layer->file_named("main.mnu"));
+	TEST_EXPECT(kinds["style_var"] > 0 && kinds["menu_screen"] > 0 && kinds["text_id"] > 0 && kinds["weapon"] > 0 &&
+	            kinds["item"] > 0);
 	// A screen of the install's main menu, and a texture it has.
 	std::string screen_name, texture;
 	for (const GraphIndex::Ref ref : layer->index().symbols_of_kind(ReferenceKind::MenuScreen)) {
@@ -3599,56 +3567,60 @@ static int test_retail_base_layer() {
 	}
 	layer->index().for_each_slot([&](uint32_t id) {
 		const GraphSlot &slot = layer->index().slot(id);
-		if (texture.empty() && slot.kind == AssetKind::Texture &&
-				opennova::strutil::ends_with_icase(slot.logical_name, ".tga"))
+		if (texture.empty() && slot.kind == AssetKind::Texture && opennova::strutil::ends_with_icase(slot.logical_name, ".tga"))
 			texture = slot.logical_name;
 	});
 	TEST_EXPECT(!screen_name.empty() && !texture.empty());
 	TEST_EXPECT(rewrite(project.file("mine.mnu"),
-			screen("MINE",
-					window("STATIC", "W1", font("%DEF_FONTNAME_LG%") + image(texture)) +
-							window("BUTTON", "W2", go_screen("main.mnu", screen_name)) +
-							window("STATIC", "W3", image("not_in_the_install.tga")))));
+	                    screen("MINE", window("STATIC", "W1", font("%DEF_FONTNAME_LG%") + image(texture)) +
+	                                           window("BUTTON", "W2", go_screen("main.mnu", screen_name)) +
+	                                           window("STATIC", "W3", image("not_in_the_install.tga")))));
 	AssetGraph graph;
 	graph.set_base(layer);
 	graph.update(project.paths, project.document, project.rescan(), {});
 	std::string file;
 	TEST_EXPECT(graph.resolve(ReferenceKind::StyleVar, "%DEF_FONTNAME_LG%") == ReferenceStatus::Present);
-	TEST_EXPECT(graph.resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(), &file) ==
-					ReferenceStatus::Present &&
-			layer->file_named(file));
+	TEST_EXPECT(graph.resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(), &file) == ReferenceStatus::Present &&
+	            layer->file_named(file));
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuTexture, texture) == ReferenceStatus::Present);
-	TEST_EXPECT(graph.resolve(ReferenceKind::MenuScreen, screen_name, "MAIN.MNU") ==
-			ReferenceStatus::Present);
+	TEST_EXPECT(graph.resolve(ReferenceKind::MenuScreen, screen_name, "MAIN.MNU") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.missing_count() == 1 && graph.diagnostics().size() == 1 &&
 	            graph.diagnostics()[0].message.find("not_in_the_install.tga") != std::string::npos);
 	Seen seen({"main", "font"});
-	TEST_EXPECT(
-			fresh_difference(graph, project.paths, project.document, project.scan, {}, seen, layer)
-					.empty());
+	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, {}, seen, layer).empty());
 	return 0;
 }
 
-// The retail twin's parts (tests/common/test_parts.h): `main` every case but the incremental
-// retail leg, which `incremental_1` to `_3` split two steps each, side by side.
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	const int failures = test_parts::run(argc, argv,
-			{{"main",
-					 {test_generation, test_incremental_equals_fresh, test_patch_counts,
-							 test_references_of, test_base_layer, test_base_layer_file_set,
-							 test_retail_base_layer, test_record_references,
-							 test_retail_record_references, test_reference_kind_rows,
-							 test_reference_file_candidates, test_terrain_and_bank_extractors,
-							 test_model_texture_references, test_model_shader_references,
-							 test_rename_keeps_loader_spelling, test_user_point_references,
-							 test_blank_project, test_menu_names_and_targets, test_retail_menu_graph,
-							 test_menu_text_scope, test_stylesheet_bindings, test_native_extractors,
-							 test_catalog_symbols, test_symbol_locators, test_rename,
-							 test_rename_rewrites_planned_sites_only, test_rename_by_locator}},
-					{"incremental_1", {[] { return test_retail_incremental(1, 2); }}, true},
-					{"incremental_2", {[] { return test_retail_incremental(3, 4); }}, true},
-					{"incremental_3", {[] { return test_retail_incremental(5, 6); }}, true}});
+int main() {
+	int failures = 0;
+	failures += test_generation();
+	failures += test_incremental_equals_fresh();
+	failures += test_patch_counts();
+	failures += test_references_of();
+	failures += test_base_layer();
+	failures += test_base_layer_file_set();
+	failures += test_install_base_layer();
+	failures += test_record_references();
+	failures += test_model_set_record_references();
+	failures += test_install_incremental();
+	failures += test_reference_kind_rows();
+	failures += test_reference_file_candidates();
+	failures += test_terrain_and_bank_extractors();
+	failures += test_model_texture_references();
+	failures += test_model_shader_references();
+	failures += test_rename_keeps_loader_spelling();
+	failures += test_user_point_references();
+	failures += test_blank_project();
+	failures += test_menu_names_and_targets();
+	failures += test_menu_graph_targets();
+	failures += test_menu_text_scope();
+	failures += test_stylesheet_bindings();
+	failures += test_native_extractors();
+	failures += test_catalog_symbols();
+	failures += test_symbol_locators();
+	failures += test_rename();
+	failures += test_rename_rewrites_planned_sites_only();
+	failures += test_rename_by_locator();
 	if (failures == 0) std::printf("editor_asset_graph: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
