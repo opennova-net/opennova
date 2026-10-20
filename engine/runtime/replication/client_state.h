@@ -1065,7 +1065,49 @@ struct ClientNetQuality {
 	std::uint32_t ping_ms = 0;
 	std::uint32_t average_ping_ms = 0;
 	std::uint8_t level = 0;
+	// The host's quality metric (CNetQuality +0x0C): the last S2C 0x79 byte, 0
+	// for an empty body; a client's quality update never recomputes it and takes
+	// the larger of it and its own receive metric for the level. Zero at the
+	// mission start and the connection start.
+	// [orig: NapiNPClientMsg_NetworkQuality @0x429B00 - the read @0x429B15, the
+	//  empty-body zero @0x429B11, the store @0x429B32; CNetQuality_UpdateMetrics
+	//  @0x4C52C0 - the combine @0x4C585A..0x4C5867; CNetStats_Reset @0x4C2FF0
+	//  (Game_StartMission's call @0x5243AA), CNetStats_ClearAll @0x4C71F0]
+	std::uint8_t host_metric = 0;
 };
+
+// The vehicle-spawn availability table a client keeps from S2C 0x70, the reply
+// to its C2S 0x42: each row in wire order up to the type-0 terminator or the
+// body end (an absent byte reads 0), and the received flag, raised on every
+// reply, which the vehicle-spawn screen clears when it opens and asks again.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutList @0x429A30 (a misnomer) - the
+//  rows @0x429A60..0x429AB9 (stride 12 from 0xA81BB8), the count
+//  g_VehicleSpawnAvailabilityCount @0x429AC8 / @0x429AE2, the flag
+//  g_VehicleSpawnAvailabilityReceived @0x429ACE / @0x429AE7; read by
+//  UI_PopulateVehicleWeaponSlotList @0x5638A0; the flag cleared by VehicleMenu_Open
+//  @0x564240 (@0x56425D)]
+struct ClientVehicleSpawnAvailability {
+	bool received = false;
+	std::vector<VehicleSpawnAvailabilityRow> rows;
+};
+
+// The client's server-command table S2C 0x2A fills: 16 ten-byte entries
+// [u8 id][u8 length][8 bytes of name, each XOR 0xFE]; an entry lands in the
+// first slot whose length byte is 0 or whose id is the entry's, and an entry
+// with neither is dropped. The console's command lookup reads it (D-NET-710's
+// console). A stock host sends its six static entries, each id 0 "NULL", so the
+// table holds one.
+// [orig: NapiNPClientMsg_0x02A @0x425BA0 - the non-authority gate @0x425BB9, the
+//  10-byte read @0x425BC6..0x425BD8 (a short body leaves the stack entry
+//  unread); Chat_AddToHistory @0x422920 (a misnomer) - the slot walk
+//  @0x422927..0x422947, the copy @0x422957..0x422963; read by
+//  NapiClientCmd_HandleDebug @0x42CCE0 (@0x42CD00, @0x42CD6F); the host's table
+//  byte_82F1DC sent by Server_SendInitialGameStateToPlayer @0x51BBA0 (@0x51BFF6)]
+inline constexpr std::size_t kServerCommandSlots = 16;
+inline constexpr std::size_t kServerCommandEntryBytes = 10;
+using ServerCommandEntry = std::array<uint8_t, kServerCommandEntryBytes>;
+using ClientServerCommandTable = std::array<ServerCommandEntry, kServerCommandSlots>;
+void fold_server_command_entry(ClientServerCommandTable &table, const ServerCommandEntry &entry);
 
 // The session status a client keeps from S2C 0x58 (the authority builds the
 // same record from its own report): the CMAP RULES text's source. The fold
@@ -1341,6 +1383,10 @@ struct ClientState {
 	//  @0x431b10..0x431b2d -> Entity_BuildMapPoiLists @0x42de40].
 	std::uint32_t local_team_assigns = 0;
 	ClientNetQuality net;
+	// S2C 0x70 (the vehicle-spawn screen's availability rows) and S2C 0x2A
+	// (the console's server-command table).
+	ClientVehicleSpawnAvailability vehicle_spawn_availability;
+	ClientServerCommandTable server_commands{};
 
 	// The Tab board's two folded lanes: the 0x16 scoreboard and the 0x46
 	// connection-slot roster it joins names from.

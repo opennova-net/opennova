@@ -126,13 +126,13 @@ struct PlaySoundCommand {
 bool decode_play_sound(const uint8_t *body, size_t len, PlaySoundCommand &out);
 
 // §5.51 S2C 0x2C — SESSION + MISSION-FILE NAME assign: [cstr sessionName]
-// [cstr bmsFileName] → byte_A82378 / g_MapFileName; bumps g_LoadingProgress
+// [cstr bmsFileName] → g_ClientServerNameBuffer / g_MapFileName; bumps g_LoadingProgress
 // to >= 1. A join-burst member; the historic "chat entry" table note was wrong
 // (chat-history is 0x2A). Golden values: "Untitled" (the host's session name,
 // matching the 0x58 server name) + "TDH_I5A.BMS".
 // [orig: NapiNPClientMsg_MissionMapNames @ 0x427E10]
 struct MissionMapNames {
-	std::string session_name;   // → byte_A82378 (host session/server name)
+	std::string session_name;   // → g_ClientServerNameBuffer (host session/server name; read only by unreferenced code)
 	std::string map_file_name;  // → g_MapFileName (0x24D1F3E), the .BMS file
 };
 bool decode_mission_map_names(const uint8_t *body, size_t len, MissionMapNames &out);

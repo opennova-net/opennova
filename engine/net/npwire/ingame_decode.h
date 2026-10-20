@@ -2154,8 +2154,8 @@ bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
 // max) (unsigned compare) [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0 —
 // the constant 3 @0x5105c3, the ladder @0x5105ff..0x510651, rows @0x510660..
 // 0x510681, terminator @0x5106b8]. The client stores the leading byte
-// (dword_A81BB4) and fills a 12-B-stride table until the 0 word or fewer than
-// two bytes remain; missing row bytes read 0 [orig:
+// (g_VehicleSpawnAvailabilityLeadByte) and fills a 12-B-stride table until the
+// 0 word or fewer than two bytes remain; missing row bytes read 0 [orig:
 // NapiNPClientMsg_HandleWeaponLoadoutList @0x429a30 — count @0x429a53, the loop
 // @0x429a6a..0x429ab9]. Requester-only reply to C2S 0x42 (send_mask 32)
 // [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930].

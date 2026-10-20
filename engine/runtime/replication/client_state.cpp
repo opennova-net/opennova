@@ -89,6 +89,18 @@ void fold_server_config_strings(const std::vector<uint8_t> &body, ClientServerCo
 			body.begin() + static_cast<std::ptrdiff_t>(second_end));
 }
 
+// The table walk: the first slot whose length byte is 0 or whose id matches
+// takes the entry whole; a full table of other ids drops it [orig:
+// Chat_AddToHistory @0x422920 - `slot[1] && slot[0] != entry[0]` @0x42293A, the
+// end test @0x422947, the copy @0x422957..0x422963].
+void fold_server_command_entry(ClientServerCommandTable &table, const ServerCommandEntry &entry) {
+	for (ServerCommandEntry &slot : table) {
+		if (slot[1] != 0 && slot[0] != entry[0]) continue;
+		slot = entry;
+		return;
+	}
+}
+
 // strncpy(dst, src, 0x400): a source of 1024 or more characters leaves the
 // buffer unterminated.
 static constexpr size_t kServerConfigBuffer = 0x400;

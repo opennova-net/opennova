@@ -447,6 +447,69 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		fold_server_config_strings(body, state_.server_config_strings);
 		state_.mark_changed();
 		break;
+	case s2c::NETWORK_QUALITY: { // the host's quality metric (0x79)
+		// One byte into CNetQuality +0x0C, 0 when the body is empty; the client's
+		// quality update combines it with its own (client_state.h host_metric)
+		// [orig: NapiNPClientMsg_NetworkQuality @0x429B00 - @0x429B11, @0x429B15,
+		//  @0x429B32; sender Server_TickUpdate @0x51D7E0 (the send @0x51E1DD)].
+		uint8_t metric = 0;
+		size_t consumed = 0;
+		if (!decode_network_quality(body.data(), body.size(), metric, consumed)) metric = 0;
+		state_.net.host_metric = metric;
+		break;
+	}
+	case s2c::VEHICLE_SPAWN_AVAILABILITY: { // the reply to C2S 0x42 (0x70)
+		// Every reply stores its rows and raises the received flag, a short or
+		// unterminated body included [orig: NapiNPClientMsg_HandleWeaponLoadoutList
+		// @0x429A30 - both exits store the count and the flag @0x429AC8..0x429ACE /
+		// @0x429AE2..0x429AE7; sender NapiNPServerMsg_SendWeaponSlotStates @0x510930 (the
+		// send @0x51097D)].
+		VehicleSpawnAvailabilityList list;
+		(void)decode_vehicle_spawn_availability(body.data(), body.size(), list);
+		state_.vehicle_spawn_availability.rows = std::move(list.rows);
+		state_.vehicle_spawn_availability.received = true;
+		state_.mark_changed();
+		break;
+	}
+	case s2c::CHAT_HISTORY: { // one server-command table entry (0x2A)
+		// Off the authority only. Retail reads the ten bytes only when the body
+		// holds them and adds its stack entry either way, so a short body adds
+		// uninitialized bytes; no stock host sends one (its entries are ten
+		// bytes, NetPacket_CopyTenBytes), and ours drops it.
+		// [orig: NapiNPClientMsg_0x02A @0x425BA0 - @0x425BB9, @0x425BC6..0x425BE1]
+		if (authority_recipient_ || body.size() < kServerCommandEntryBytes) break;
+		ServerCommandEntry entry{};
+		for (std::size_t i = 0; i < kServerCommandEntryBytes; ++i) entry[i] = body[i];
+		fold_server_command_entry(state_.server_commands, entry);
+		break;
+	}
+	// Retail's handler stores nothing here: an empty body.
+	// [orig: NapiNPClientMsg_0x007 @0x422730, NapiNPClientMsg_0x01C @0x4227F0 (the
+	//  host's join tail sends it, Server_SendInitialGameStateToPlayer @0x51BBA0 (the
+	//  send @0x51C021)), NapiNPClientMsg_0x05E @0x4297B0, NapiNPClientMsg_0x05F @0x4228F0,
+	//  NapiNPClientMsg_0x065 @0x429870, NapiNPClientMsg_0x07F @0x429E60: each a
+	//  bare retn]
+	case s2c::RESERVED_NOOP_07:
+	case s2c::NOOP:
+	case s2c::RESERVED_NOOP_5E:
+	case s2c::RESERVED_NOOP_5F:
+	case s2c::RESERVED_NOOP_65:
+	case s2c::RESERVED_NOOP_7F:
+		break;
+	// Retail stores a global no client code reads: 0x1B the network delay
+	// (g_NetworkDelayTicks; its other access is the authority's own store), 0x7A
+	// a name into 0xA86C80 (written by the 0x7B, the connect and the disconnect
+	// besides, read by nothing).
+	// [orig: NapiNPClientMsg_HandleRandomSeed @0x426080 (a misnomer) - the stores
+	//  @0x42609C / @0x4260A4, sender Server_SetNetworkDelay @0x50CBC0 (the send @0x50CC01);
+	//  NapiNPClientMsg_HandlePlayerName @0x429B40 - the store @0x429B8D, sender
+	//  NapiNPServerMsg_0x002 @0x512FD0 (the send @0x5130D9); the other stores
+	//  NapiNPClientMsg_HandlePlayerInfoFull @0x429BB0 (@0x429DCB),
+	//  CNapiNetwork_OnConnectedToServer @0x4C62E0 (@0x4C630D),
+	//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 (@0x4C64BA)]
+	case s2c::NETWORK_DELAY:
+	case s2c::PLAYER_NAME:
+		break;
 	default:
 		// Game-start scalars and other non-entity tags this reducer
 		// does not model.
