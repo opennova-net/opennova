@@ -137,6 +137,12 @@ func _boot() -> Dictionary:
 	_presenter = LocalPlayerPresenter.new()
 	add_child_autofree(_presenter)
 	_presenter.setup(_world, _camera, null, ControlsModel.new())
+	# The load ends with the host's own slot waiting on its own C2S 0x0B; the
+	# first frame's receive pump runs its join, which places the body at its
+	# spawn (D-NET-NEW-L4-5) [orig: Game_StartMission @0x52624B;
+	# Server_TickUpdate @0x51D895 -> NapiNPServerMsg_PlayerJoinRequest
+	# @0x51AB10]. The test moves the player after that frame.
+	_frame()
 	return {"sim": sim, "site": site}
 
 
