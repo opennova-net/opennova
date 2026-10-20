@@ -8,6 +8,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/texture_checks.h>
 #include <editor/model/diagnostic.h>
 
 namespace opennova::editor {
@@ -50,7 +51,8 @@ std::vector<Diagnostic> project_rows(
 		const ValidationInput &input, const AssetGraph &graph, const ValidationCache &cache);
 
 // The files validate_project gives their own checks, in its order: every file of the scan a
-// document type opens, type by type in the registry's order, each type's in the scan's order.
+// document type opens, type by type in the registry's order, each type's in the scan's order. Made once per
+// scan (its serial): a validation and the rows composed after it ask the same.
 std::vector<const AssetEntry *> validation_files(const AssetScan &scan);
 
 // What a step of a stepped validation spends on a file besides the bytes of a closed file it
@@ -59,8 +61,10 @@ inline constexpr uint64_t kValidationFileCost = 4096;
 
 // refresh_project a file at a time (ADR 0046 S13 A3): the files the graph's update would read, read
 // ahead a file at a time (AssetGraph::files_to_read, read_file); the graph brought to the files in a
-// step of its own, which takes those readings and reads only what changed since; then each file's
-// own findings (validation_files' order); then the files the validation did not ask let go. Every
+// step of its own, which takes those readings and reads only what changed since; then the texture
+// check's reads of the headers its uses ask (texture_checks.h texture_use_reads), one a step, so the
+// composition reads none; then each file's own findings (validation_files' order); then the files the
+// validation did not ask let go. Every
 // step within a budget of bytes (each file kValidationFileCost and the bytes it reads): what the
 // session's poll runs a step of before the running operation's, so an editor validating a large
 // project for the first time keeps drawing. `input` is the same from the first step to the last
@@ -82,16 +86,22 @@ public:
 	// Whether the graph's update changed it.
 	bool graph_moved() const;
 	// Whether the graph's update has run (the graph holds the input's files).
-	bool graph_read() const { return phase_ == Phase::Files || phase_ == Phase::Done; }
+	bool graph_read() const { return phase_ == Phase::Uses || phase_ == Phase::Files || phase_ == Phase::Done; }
 	// Where it stands, in files: those read for the graph (a reading kept from a validation before
-	// counted read) and asked for their own findings, of those to read and to ask (known once the
-	// reading starts and once the graph's update ran), and the file last read or asked.
-	size_t files_done() const { return kept_ + read_next_ + next_; }
-	size_t files_total() const { return kept_ + to_read_.size() + files_.size(); }
+	// counted read), the texture headers read for the uses (one the check kept counted read) and the
+	// files asked for their own findings, of those to read and to ask (known once the reading starts,
+	// once the uses are listed and once the graph's update ran), and the file last read or asked.
+	size_t files_done() const { return kept_ + read_next_ + uses_next_ + next_; }
+	size_t files_total() const { return kept_ + to_read_.size() + uses_.size() + files_.size(); }
 	const std::string &current() const { return current_; }
 
 private:
-	enum class Phase : uint8_t { Start, Read, Graph, Files, Done };
+	enum class Phase : uint8_t { Start, Read, Graph, Uses, Files, Done };
+
+	// The files whose own findings the validation asks, and the cache begun: every file of validation_files, or,
+	// over the scan the last validation that ended read (ValidationCache::keeps), only those an open document
+	// stands in for, now or then, the cache keeping the rest (ValidationCache::begin_kept).
+	void begin_files(const ValidationInput &input);
 
 	AssetGraph &graph_;
 	ValidationCache &cache_;
@@ -100,6 +110,9 @@ private:
 	size_t kept_ = 0; // the files the update reads whose readings were kept from before
 	std::vector<const AssetEntry *> to_read_; // the closed files the graph's update would read, not read yet
 	size_t read_next_ = 0;
+	bool uses_listed_ = false;
+	std::vector<TextureRead> uses_; // the texture check's reads over the updated graph
+	size_t uses_next_ = 0;
 	std::vector<const AssetEntry *> files_;
 	size_t next_ = 0;
 	std::string current_;

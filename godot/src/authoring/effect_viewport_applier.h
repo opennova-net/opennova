@@ -42,12 +42,6 @@ public:
 	// The editor's preview background behind the effect, the grid's lines read against it.
 	void background(opennova::editor::PreviewBackground background) override;
 
-	// Its nodes and values, for the device tests: the camera, the grid, the backdrop, the effects drawn.
-	Camera3D *camera() const { return camera_; }
-	MeshInstance3D *grid() const { return grid_; }
-	MeshInstance3D *backdrop() const { return backdrop_; }
-	PreviewEffects &effects() { return *effects_; }
-
 private:
 	// The camera where the viewport's is, the grid as its options say.
 	void place_(const opennova::editor::ViewportModel &model);

@@ -410,6 +410,23 @@ void EditorWindows::end_frame() {
 	if (document_window_) document_window_->end_frame();
 	// A drop no item took within two frames is none's (the frame it came in may have drawn before it).
 	if (!dropped_.paths.empty() && --dropped_.frames <= 0) dropped_ = Dropped();
+	// What the frame saw of a person: the input events its NewFrame took (each a change: Dear ImGui drops one
+	// that repeats the state; the pointer's moves only while it is over one of the editor's windows, since the
+	// platform windows' backend follows it across the whole screen), a button or a key still held, an item
+	// active (a drag, a held button; never a text field that only holds the caret: Dear ImGui keeps it active
+	// while it has the keyboard, and a person typing into it brings input events).
+	input_seen_ = false;
+	if (const ImGuiContext *context = ImGui::GetCurrentContext()) {
+		bool held = ImGui::IsAnyMouseDown() || (ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput);
+		for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END && !held; ++key)
+			held = ImGui::IsKeyDown(static_cast<ImGuiKey>(key));
+		const bool over = context->HoveredWindow != nullptr;
+		for (const ImGuiInputEvent &event : context->InputEventsTrail) {
+			const bool moved = event.Type == ImGuiInputEventType_MousePos || event.Type == ImGuiInputEventType_MouseViewport;
+			held = held || !moved || over;
+		}
+		input_seen_ = held;
+	}
 	in_frame_ = false;
 	for (EditorRequest &request : deferred_) requests_.push_back(std::move(request));
 	deferred_.clear();
@@ -897,7 +914,7 @@ void EditorWindows::draw_new_project() {
 	// Why the last New project was refused, here as on the welcome page.
 	if (!v.project.refused.empty()) {
 		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-		ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s", v.project.refused.c_str());
+		ImGui::TextColored(ui_kit::refusal_color(), "%s", v.project.refused.c_str());
 		ImGui::PopTextWrapPos();
 	}
 	ImGui::EndPopup();
@@ -1028,7 +1045,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		state = last.ok ? "Built" : last.refused ? "Build refused" : "Build failed";
 		// What refused it, from its own report (the status line has moved on since).
 		state_tip = last.ok ? "The last build: " + last.build_dir
-		            : last.refused ? refused_words(last) + "\nA click shows what refuses it in Problems."
+		            : last.refused ? refused_words(last)
 		                           : "See Problems.";
 	}
 
@@ -1079,7 +1096,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		return clicked;
 	};
 	if (first == 0 && !unsaved.empty()) {
-		if (clickable("##unsaved", widths[0], "Files with unsaved changes: a click lists them.")) ImGui::OpenPopup("unsaved");
+		if (clickable("##unsaved", widths[0], "Files with unsaved changes.")) ImGui::OpenPopup("unsaved");
 		ui_kit::unsaved_dot(height);
 		ImGui::TextUnformatted(unsaved_text.c_str());
 		if (ImGui::BeginPopup("unsaved")) {
@@ -1101,7 +1118,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		if (const int missing = v.project.requirements->required_missing + v.project.requirements->required_wrong_kind)
 			tip += " " + std::to_string(missing) + " of " + std::to_string(v.project.requirements->required_total) +
 			       " required files " + (missing == 1 ? "is" : "are") + " missing.";
-		if (clickable("##problems", widths[1], tip + " A click shows Problems.")) window_requests::focus(*this, "problems");
+		if (clickable("##problems", widths[1], tip)) window_requests::focus(*this, "problems");
 		ui_kit::severity_count(DiagnosticSeverity::Error, errors, height);
 		ui_kit::severity_count(DiagnosticSeverity::Warning, warnings, height);
 	}
@@ -1112,8 +1129,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		                   v.activity.play_state == PlayState::Stopped && v.activity.has_build;
 		const bool refused = built && v.activity.last_build->refused;
 		if (built) {
-			if (clickable("##built", ui_kit::text_width(state.c_str()),
-			              state_tip + (refused ? std::string() : std::string("\nA click shows what it built.")))) {
+			if (clickable("##built", ui_kit::text_width(state.c_str()), state_tip)) {
 				if (refused && problems_window_) problems_window_->show_blocking();
 				else window_requests::set_workspace(*this, "build_result", "open", io::JsonValue::make_bool(true));
 			}

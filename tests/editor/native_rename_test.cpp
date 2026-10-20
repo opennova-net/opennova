@@ -101,14 +101,16 @@ int test_native_text_place() {
 	                              column) &&
 	            line == 10 && column == 17);
 	// (A face animation is a record document since round S23: a Go to lands on its face's field, not a line.)
-	// A particle file's effect (a symbol the record names): its id's line.
+	// A particle file's effect (a symbol the record names): its id's line. The file defines the particle too.
 	const std::string ptl = "[particledef]\r\n{\r\n\tid = spark;\r\n\tgraphic1 = spark.tga;\r\n}\r\n[effectdef]\r\n{\r\n\tid = Hit;\r\n"
 	                        "\tpdefs = spark;\r\n}\r\n";
 	Extracted read;
 	Diagnostic error;
 	TEST_EXPECT(extract_from_bytes("fx.ptl", AssetKind::Particles, std::vector<uint8_t>(ptl.begin(), ptl.end()), "jo", read, error) &&
-	            read.symbols.size() == 1);
-	TEST_EXPECT(native_text_place("fx.ptl", AssetKind::Particles, "jo", ptl, "Hit", "", line, column) && line == 8 && column == 7);
+	            read.symbols.size() == 2);
+	TEST_EXPECT(native_text_place("fx.ptl", AssetKind::Particles, "jo", ptl, "Hit", "id", line, column) && line == 8 && column == 7);
+	// The record alone: the first name it names, its pdefs member.
+	TEST_EXPECT(native_text_place("fx.ptl", AssetKind::Particles, "jo", ptl, "Hit", "", line, column) && line == 9 && column == 10);
 	// Nowhere: a record or field the text has not, the file alone.
 	TEST_EXPECT(!native_text_place("hudpos.def", AssetKind::HudPosDefs, "jo", hudpos, "VEHICLE_HUD C", "icon", line, column));
 	TEST_EXPECT(!native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "Terrain", "polytrn_charmap", line, column));

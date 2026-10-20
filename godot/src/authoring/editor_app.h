@@ -96,6 +96,35 @@ public:
 	void set_first_picture_budget_ms(int p_ms) { first_picture_budget_ms_ = p_ms > 0 ? p_ms : 0; }
 	int get_first_picture_budget_ms() const { return first_picture_budget_ms_; }
 
+	// Frame pacing (the `frame_pacing` property; off by default, on in res://editor/editor_root.tscn, dropped by
+	// a headless run as the node becomes ready, so neither the game nor a test paces unless a test turns it on
+	// after): Engine's max_fps the display's refresh rate (kFallbackFps where the display says none) while the
+	// editor is active, kIdleFps once kQuietFrames frames in a row were quiet, and the value it found put back as
+	// pacing is turned off or the node leaves the tree. A frame is active when a person's input reached the root
+	// (_input) or Dear ImGui (EditorWindows::input_seen: an undocked window's input reaches it alone), the window
+	// was resized, the session's polls have work (ProjectSession::busy), a device builds its picture
+	// (ViewportDeviceCache::building), the preview clock plays over a picture drawn (drawn: the clock plays by
+	// default, so it never counts alone), the wire asked (request_json, query_json: the editor MCP) or the
+	// running game's logic is polled (its Logic pane shows). Vsync and the low-processor mode stay as they are.
+	// An idle frame costs the process some 6 ms of a core whatever the project (Godot's frame and its draw; the
+	// layout under 1 ms on a 22,000-file project): 10 a second is some 6% of a core, 20 twice that, and the first
+	// input after idle is answered within a tenth of a second. A frame active only for the playing preview clock
+	// draws at kPreviewFps at most: the previews move on the game's 62.5 Hz tick (io/tick_rate.h), so a faster
+	// display draws no new step, only spends the core (a 360 Hz display held a whole one).
+	static constexpr int kIdleFps = 10;
+	static constexpr int kPreviewFps = 60;
+	// Quiet means kQuietFrames frames in a row, or half a second of the display's frames where it draws faster (a
+	// 360 Hz display's 30 frames are 83 ms, and a double click's second press then came at the idle rate). A
+	// display reporting a rate under kLeastDisplayFps (a remote or virtual one may say 1, the hardware default)
+	// reads as kFallbackFps.
+	static constexpr int kLeastDisplayFps = 24;
+	static constexpr int kFallbackFps = 60;
+	static constexpr int kQuietFrames = 30;
+	void set_frame_pacing(bool p_on);
+	bool get_frame_pacing() const { return frame_pacing_; }
+	// "off" (not pacing, or no frame paced yet), "active" or "idle": for the tests and the measure.
+	String get_frame_pacing_state() const;
+
 	// The wire seam (ADR 0046 S13 A5): a request and a query as JSON text, read and answered
 	// by the portable session (ProjectSession::handle_json and query), so the transport is a pump
 	// and nothing about the project lives here. request_json answers {ok, served, error?, outcome
@@ -214,6 +243,12 @@ private:
 	void _on_files_selected(const PackedStringArray &p_files);
 	void _on_picker_canceled();
 	void _on_files_dropped(const PackedStringArray &p_files);
+	void _on_window_resized();
+	// Frame pacing (set_frame_pacing): the frame just run active or quiet, the cap that follows set; whether this
+	// frame was active (what it saw since the last, taken); the cap let go, max_fps put back as it was found.
+	void pace_frame_();
+	bool frame_active_();
+	void release_frame_cap_();
 
 public:
 	// Files dropped at `p_at` of the window's pixels, as the OS's drop is taken (a test's, S18).
@@ -271,6 +306,20 @@ private:
 	// The milliseconds each frame gives the devices' builds (S13 V6).
 	int build_budget_ms_ = kBuildBudgetMs;
 	int first_picture_budget_ms_ = kFirstPictureBudgetMs;
+	// Frame pacing (set_frame_pacing): on; whether it set max_fps, and the value it found there; the quiet frames in
+	// a row (kQuietFrames at most); the display's rate as last read and the frame it was read at; an input event at
+	// the root, a resize and a wire call since the last frame.
+	bool frame_pacing_ = false;
+	bool frame_capped_ = false;
+	int max_fps_found_ = 0;
+	int quiet_frames_ = 0;
+	int display_fps_ = 0;
+	uint64_t display_read_frame_ = 0;
+	bool root_input_ = false;
+	bool resized_ = false;
+	bool wire_asked_ = false;
+	std::vector<const char *> active_reasons_; // the last frame's reasons it was active by (frame_active_)
+	int quiet_needed_() const;                 // the quiet frames that make the editor idle
 	String settings_path_ = "user://editor_settings.json";
 	PackedStringArray play_engine_args_;
 	FileDialog *picker_ = nullptr;
@@ -292,6 +341,7 @@ private:
 	// The external round trip (S18, DI-01): when the files were last checked, the last view event taken, and
 	// the file the last open_externally named.
 	uint64_t last_disk_check_ms_ = 0;
+	int64_t frame_started_us_ = 0; // the frame under way's start (the perf query's Wall)
 	uint64_t external_seq_ = 0;
 	bool open_externally_ = true;
 	String last_external_open_;

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -87,9 +88,14 @@ public:
 
 	// The file a click selected (project-relative; "" = none).
 	const std::string &selected() const { return selected_; }
-	// How many times the tree and the counts were made again (refresh): once per change of what
-	// they read, never for a change of anything else (a line of Output, a build's step).
+	// How many times the tree or the counts were made again (refresh): once per change of what
+	// they read, never for a change of anything else (a line of Output, a build's step). The tree reads
+	// the files alone (tree_rebuilds), the counts the findings alone.
 	size_t rebuilds() const { return rebuilds_; }
+	size_t tree_rebuilds() const { return tree_rebuilds_; }
+	// How many rows (folders' and files') the last draw drew: those that show, however many the tree or
+	// the flat list holds.
+	size_t rows_drawn() const { return rows_drawn_; }
 	// A RevealFile event (a ShowInFiles): Files comes forward at once, whether it draws this frame
 	// or not, and holds the event until it draws; then it selects the file, clears a filter that
 	// hides it (the workspace's), opens its folders and scrolls to it (a show_in_files that asks the
@@ -100,13 +106,25 @@ public:
 	const ViewEventMailbox<> &events() const { return events_; }
 
 private:
-	// A folder of the tree: its folders (sorted by name) and its files (the scan's order,
-	// indices into the scan's entries).
+	// A folder of the tree: its name and the key it sorts by (pff::normalized_logical_name), its path, the
+	// folder it is in, its folders (sorted by that key) and its files (the scan's order, indices into the
+	// scan's entries).
 	struct Folder {
 		std::string name;
+		std::string key;
 		std::string path;
+		size_t parent = 0;
 		std::vector<size_t> folders;
 		std::vector<size_t> files;
+	};
+	// A row of the tree as it shows (visible_): a folder's (its index in folders_) or a file's (its scan
+	// index), at its depth (the folders it is in, the project's own aside), in the folder it sits in, whose
+	// ids and its parents' its row's ids are made under, as a tree of nested nodes makes them.
+	struct Row {
+		size_t index = 0;
+		size_t folder = 0;
+		uint32_t depth = 0;
+		bool is_folder = false;
 	};
 	// A file's findings, for the counts after its name: the modder's, as Problems counts them; a file
 	// that is the game's own data (S15) has its errors and warnings counted apart, said in its tooltip.
@@ -117,14 +135,25 @@ private:
 		size_t original_warnings = 0;
 	};
 
+	// The tree made again when the files moved (with each kind's count and the folders' keys), each
+	// file's counts when the findings did.
 	void refresh(const SessionView &view);
+	void make_tree(const SessionView &view);
+	void make_counts(const SessionView &view);
+	// The tree's rows as they show (visible_), every folder open but those folded, and the files among
+	// them in that order (rows_): made again when the tree, a fold or a reveal moved.
+	void make_visible();
 	// The files the filter matches (their scan indices), found again only when the filter or the
 	// scan moved; each file's path as the filter compares it made only while a filter is set,
 	// once a scan.
 	const std::vector<size_t> &matching(const SessionView &view);
 	void show_revealed(const SessionView &view, const ViewEvent &event);
 	void draw_toolbar(const SessionView &view);
-	void draw_folder(const SessionView &view, const Folder &folder);
+	// The tree's rows that show (a list clipper over visible_), and a folder's row, open until folded.
+	void draw_tree(const SessionView &view);
+	void draw_folder_row(const SessionView &view, size_t index);
+	// The ids of `folder` and the folders it is in pushed, the outermost first: how many.
+	size_t push_folder_ids(size_t folder);
 	void draw_file(const SessionView &view, const AssetEntry &entry, bool in_tree);
 	void draw_file_menu(const SessionView &view, const AssetEntry &entry);
 	// Move to folder (DI-03, a file's menu): the project's folders, the top level first, and a new one by
@@ -162,7 +191,7 @@ private:
 	void start_rename(const AssetEntry &entry);
 	void draw_rename(const SessionView &view);
 	// The kind filter beside the text: every kind, or one the project has files of (with how many).
-	void draw_kind_filter(const SessionView &view, float width);
+	void draw_kind_filter(float width);
 	// The filter, the kind and the order, as the workspace holds them (files {filter, kind, by_cost}): taken
 	// when the session's moved; one the person sets goes to the session.
 	void follow_filter(const SessionView &view);
@@ -180,19 +209,29 @@ private:
 	ui_kit::HeldText<kWorkspaceText> filter_;
 	ui_kit::Held<AssetKind> kind_held_;
 	std::string selected_;
-	// The other rows selected with it (DI-25: a chore acts on them together), and the rows in the order they
-	// were last drawn, which a Shift+click's run follows.
+	// The other rows selected with it (DI-25: a chore acts on them together).
 	std::vector<std::string> also_;
-	std::vector<std::string> rows_, rows_drawing_;
-	// What refresh() makes of the view, kept while what it reads stands (cache_key); the files the
-	// filter last matched and the filter and kind they matched (matching()'s).
+	// What refresh() makes of the view, kept while what it reads stands (the files for the tree, the
+	// findings for the counts); the files the filter last matched and the filter and kind they matched
+	// (matching()'s).
 	const SessionView *view_ = nullptr;
-	RevisionKey key_;
-	size_t rebuilds_ = 0;
+	RevisionKey tree_key_, counts_key_;
+	bool counts_made_ = false;
+	size_t rebuilds_ = 0, tree_rebuilds_ = 0, rows_drawn_ = 0;
 	std::vector<Folder> folders_; // [0]: the project's own folder
+	std::vector<size_t> kind_counts_; // the files of each kind, by AssetKind
 	std::unordered_map<std::string, Counts> counts_;
+	// The folders folded (by path; every other open), the tree's rows as they show and whether they are made
+	// for the tree, the folds and the reveal as they stand; the files among those rows in their order, and
+	// whether the rows a Shift+click's run follows are the flat list's matches instead (a filter's).
+	std::set<std::string> folded_;
+	std::vector<Row> visible_;
+	bool visible_made_ = false;
+	std::vector<size_t> rows_;
+	bool rows_flat_ = false;
 	std::string matched_;
 	bool matches_made_ = false;
+	uint64_t matched_documents_ = 0; // the open documents' revision (DocumentSet) the costs were made at
 	std::vector<size_t> matches_;
 	// The graph the matches were found over (its generation): a file is matched by a record naming it
 	// too (a model by its item's name, ADR 0046 S17), each such file's record by its path.

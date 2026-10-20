@@ -129,6 +129,10 @@ public:
 	// A window asked this frame for the system pointer hidden (a picture under the mouse draws the game's,
 	// DI-08): the Shell hides it after the frame and shows it again after one that does not ask.
 	bool pointer_hidden() const { return pointer_hidden_; }
+	// What the last frame saw of a person (end_frame; the Shell's frame pacing): an input event Dear ImGui took
+	// in it (the mouse moved, a button, the wheel, a key, a character, the focus; an undocked window's input
+	// reaches Dear ImGui alone), a mouse button or a key held down, or an item active (a drag, a text field).
+	bool input_seen() const { return input_seen_; }
 
 	// MenuBarContributor
 	void draw_menu_bar(devtools::ImGuiPass &pass) override;
@@ -173,6 +177,7 @@ private:
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;
 	bool pointer_hidden_ = false; // hide_pointer asked this frame (begin_frame clears it)
+	bool input_seen_ = false;     // input_seen's, as the last end_frame found it
 	std::vector<ViewportMouse> canvas_mice_; // canvas_mouse this frame (begin_frame clears it)
 	// The terrain brush's ground under the pointer this frame and the frame before (note_brush_ground; the path empty:
 	// none).

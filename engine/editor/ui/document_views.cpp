@@ -239,10 +239,18 @@ static_assert(views_in_order(), "the views follow DocumentTypeId's order, each a
 void inspector_jump_line(Workspace &workspace, const ReferenceTarget &target, const std::string &line,
                          const std::string &id) {
 	ImGui::PushID(id.c_str());
-	const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
-	if (ImGui::Selectable((shown + "###jump").c_str())) window_requests::go_to(workspace, target);
-	ui_kit::tooltip(line + "\nClick to go there.");
+	if (ui_kit::fitted_selectable(line, "jump")) window_requests::go_to(workspace, target);
 	ImGui::PopID();
+}
+
+bool mission_uses_heading(size_t count, bool reading, const char *how) {
+	if (count) {
+		ImGui::Text("Missions that run on it (%zu):", count);
+		return true;
+	}
+	if (reading) ui_kit::empty_state(ui_kit::reading_references());
+	else ui_kit::empty_state("No mission runs on it.", how);
+	return false;
 }
 
 const DocumentViewRow *document_view_row(DocumentTypeId type) {

@@ -215,6 +215,12 @@ private:
 	TextHistory history_;
 };
 
+// Where each line of a text starts (TextDocument's lines: the first at 0, each other after an LF), and the span
+// `length` characters from `offset` names by them (its line and column, 1-based): TextDocument::span_at's answer for
+// a text no document holds (a native file the graph reads through the engine's own parser, graph/extractors.cpp).
+std::vector<size_t> text_line_starts(const std::string &text);
+TextSpan text_span_at(const std::vector<size_t> &line_starts, size_t offset, size_t length);
+
 // The text document a document is, null for another kind (as records_of is for records).
 inline const TextDocument *text_of(const DocumentBase &document) { return document.as_text(); }
 inline TextDocument *text_of(DocumentBase &document) { return document.as_text(); }

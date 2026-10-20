@@ -390,14 +390,14 @@ int test_show_use() {
 	const auto *stance =
 			static_cast<const TextureViewport *>(session.viewports().find("textures/stance.tga", ViewportKind::Texture));
 	TEST_EXPECT(view.documents.active == "textures/stance.tga" && stance && stance->options().as_used == 0);
-	// Two particles of one file naming it in the same field, told apart by their records (a native text's use
-	// has no locator): each shown as its own mode draws it.
+	// Two particles of one file naming it in the same field, told apart by their records (and by their spans'
+	// places, a particle file's names being spans): each shown as its own mode draws it.
 	{
 		const std::vector<TextureUse> &puffs = view.documents.texture_uses->uses_of(view, "textures/puff.tga");
-		TEST_EXPECT(puffs.size() == 2 && puffs[0].field == puffs[1].field && puffs[0].locator.empty() &&
-		            puffs[0].record != puffs[1].record);
+		TEST_EXPECT(puffs.size() == 2 && puffs[0].field == puffs[1].field && !puffs[0].locator.empty() &&
+		            puffs[0].locator != puffs[1].locator && puffs[0].record != puffs[1].record);
 		if (puffs.size() == 2) {
-			const std::string second = puffs[1].record;
+			const std::string second = puffs[1].locator;
 			editor_test::handle_to_end(session, request::show_use("textures/puff.tga", "effects/fx.ptl", second, "graphic1"));
 			const auto *puff =
 					static_cast<const TextureViewport *>(session.viewports().find("textures/puff.tga", ViewportKind::Texture));

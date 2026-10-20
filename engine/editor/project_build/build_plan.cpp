@@ -1,6 +1,7 @@
 #include <editor/project_build/build_plan.h>
 
 #include <algorithm>
+#include <unordered_set>
 
 #include <base/gameprofile/player_files.h>
 #include <base/gameprofile/required_resources.h>
@@ -209,19 +210,68 @@ static std::string base_missing_words(const BuildTarget &target) {
 	                         target.install + " does not mount as the game: choose its folder in File > Project settings...";
 }
 
+std::vector<Diagnostic> plan_blockers(const ProjectPaths &paths, const AssetScan &scan,
+                                      const RequirementReport &requirements,
+                                      const std::vector<Diagnostic> &document_findings, const BuildTarget &target,
+                                      const BaseNames *base, const ShippedFiles *shipped,
+                                      std::vector<Diagnostic> *diagnostics) {
+	std::vector<Diagnostic> own_findings;
+	std::vector<Diagnostic> &found = diagnostics ? *diagnostics : own_findings;
+	found.clear();
+	const bool base_mounts = base && base->sorted && !base->sorted->empty();
+	if (target.is_expansion() && !base_mounts) {
+		// The expansion plays over the base game, which its build compares its files with and its gate
+		// reads (lean packing, BaseNames): no base, no build the editor can vouch for.
+		found.push_back(
+		        make_finding(CoreFinding::BuildExpansionBaseMissing, DiagnosticSeverity::Error, base_missing_words(target)));
+	}
+	// The same document gate CLI validate and the editor's Problems show.
+	for (const Diagnostic &d : document_findings) found.push_back(d);
+	// The gate: a broken tree or an unmet requirement never packs.
+	for (const Diagnostic &d : scan.diagnostics) {
+		if (d.severity == DiagnosticSeverity::Error) found.push_back(d);
+	}
+	// An unmet Required row blocks; an optional file the project lacks is a note the game
+	// does without, never the build's business.
+	for (const Diagnostic &d : requirements.diagnostics)
+		if (d.severity == DiagnosticSeverity::Error) found.push_back(d);
+	// An expansion's name and description as the Mods list copies them (ADR 0046 S16).
+	if (target.is_expansion()) check_expansion_table(paths, scan, target.expansion, found);
+	// The plan's own word on each file (an archive, a player's file, a name no archive stores), once: the gate holds
+	// it already when the Problems rows were composed over this scan, which a set of the gate's findings answers
+	// (made at the first such word: most scans have none).
+	std::unordered_set<const Diagnostic *, DiagnosticHash, DiagnosticPointerEqual> gate;
+	bool gate_made = false;
+	for (const AssetEntry &asset : scan.entries) {
+		Diagnostic own;
+		if (!own_finding(asset, target, own)) continue;
+		if (!gate_made) {
+			gate.reserve(document_findings.size());
+			for (const Diagnostic &d : document_findings) gate.insert(&d);
+			gate_made = true;
+		}
+		if (!gate.count(&own)) found.push_back(std::move(own));
+	}
+	// An error whose code gates refuses the build (blocks_build): a missing reference is listed
+	// among the plan's findings and refuses nothing (ADR 0046 S14); an expansion's required file or
+	// gating reference the base serves refuses nothing either (S16, BaseNames), nor does a finding that
+	// the game's own bytes, packed as stored, do not serialize (ShippedFiles).
+	std::vector<Diagnostic> blockers;
+	for (const Diagnostic &d : found)
+		if (blocks_build(d, target.is_expansion() ? base : nullptr, shipped)) blockers.push_back(d);
+	return blockers;
+}
+
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings, const BuildTarget &target,
                      const BaseNames *base, const ShippedFiles *shipped) {
 	BuildPlan plan;
 	plan.target = target;
 	plan.hash_cache = paths.build_cache_file;
-	const bool base_mounts = base && base->sorted && !base->sorted->empty();
-	if (target.is_expansion() && !base_mounts) {
-		// The expansion plays over the base game, which its build compares its files with and its gate
-		// reads (lean packing, BaseNames): no base, no build the editor can vouch for.
-		plan.diagnostics.push_back(
-		        make_finding(CoreFinding::BuildExpansionBaseMissing, DiagnosticSeverity::Error, base_missing_words(target)));
-	}
+	// Its findings and the refusals among them, as Problems marks them.
+	plan.blockers =
+	        plan_blockers(paths, scan, requirements, document_findings, target, base, shipped, &plan.diagnostics);
+	plan.ok = plan.blockers.empty();
 	if (target.is_expansion()) {
 		// An expansion's two archives always exist in its build, even empty: the game opens the pair by
 		// its name, and a missing <b>.pff is no expansion at all, the base game loading in its place
@@ -245,34 +295,17 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		}
 	}
 
-	// The same document gate CLI validate and the editor's Problems show.
-	for (const Diagnostic &d : document_findings) plan.diagnostics.push_back(d);
-	// The gate: a broken tree or an unmet requirement never packs.
-	for (const Diagnostic &d : scan.diagnostics) {
-		if (d.severity == DiagnosticSeverity::Error) plan.diagnostics.push_back(d);
-	}
-	// An unmet Required row blocks; an optional file the project lacks is a note the game
-	// does without, never the build's business.
-	for (const Diagnostic &d : requirements.diagnostics)
-		if (d.severity == DiagnosticSeverity::Error) plan.diagnostics.push_back(d);
-	// An expansion's name and description as the Mods list copies them (ADR 0046 S16).
-	if (target.is_expansion()) check_expansion_table(paths, scan, target.expansion, plan.diagnostics);
-
 	for (const AssetEntry &asset : scan.entries) {
-		// The plan's own word on the file (an archive, a player's file, a name no archive stores), once: the
-		// gate holds it already when the Problems rows were composed over this scan.
+		// A file the plan has its own word on (plan_blockers listed it) is left out.
 		Diagnostic own;
-		if (own_finding(asset, target, own)) {
-			if (std::find(document_findings.begin(), document_findings.end(), own) == document_findings.end())
-				plan.diagnostics.push_back(std::move(own));
-			continue;
-		}
+		if (own_finding(asset, target, own)) continue;
 		// An import source (its outputs, named after it, are in the scan) and a file of no kind the
 		// game knows, which the game never asks for (S13 A8), are left out.
 		if (!asset_kind_packed(asset.kind)) continue;
 		const Placement placement = place(asset, target);
 		BuildEntry entry;
 		entry.logical_name = asset.logical_name;
+		entry.key = asset.key.empty() ? pff::normalized_logical_name(asset.logical_name) : asset.key;
 		entry.source_path = join_path(paths.root, asset.relative_path);
 		entry.relative_path = asset.relative_path;
 		entry.size_bytes = asset.size_bytes;
@@ -294,18 +327,11 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 			if (archive.slot == slot) archive.entries.push_back(std::move(entry));
 		}
 	}
-	for (BuildArchive &archive : plan.archives) {
-		std::sort(archive.entries.begin(), archive.entries.end(), [](const BuildEntry &a, const BuildEntry &b) {
-			return pff::normalized_logical_name(a.logical_name) < pff::normalized_logical_name(b.logical_name);
-		});
-	}
-	// An error whose code gates refuses the build (blocks_build): a missing reference is listed
-	// among the plan's findings and refuses nothing (ADR 0046 S14); an expansion's required file or
-	// gating reference the base serves refuses nothing either (S16, BaseNames), nor does a finding that
-	// the game's own bytes, packed as stored, do not serialize (ShippedFiles).
-	for (const Diagnostic &d : plan.diagnostics)
-		if (blocks_build(d, target.is_expansion() ? base : nullptr, shipped)) plan.blockers.push_back(d);
-	plan.ok = plan.blockers.empty();
+	// Each archive by its entries' normalized names, which the scan's own order already follows (by key, then path):
+	// a stable sort keeps two files of one name (a duplicate, which refuses the build) in the scan's order.
+	for (BuildArchive &archive : plan.archives)
+		std::stable_sort(archive.entries.begin(), archive.entries.end(),
+		                 [](const BuildEntry &a, const BuildEntry &b) { return a.key < b.key; });
 	return plan;
 }
 

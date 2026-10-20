@@ -4,9 +4,8 @@
 #include <cfloat>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
-#include <map>
 #include <memory>
+#include <unordered_map>
 
 #include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
@@ -29,6 +28,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/file_page_view.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/project_find.h>
 #include <editor/ui/reference_picker.h>
@@ -40,24 +40,14 @@
 
 namespace opennova::editor {
 
-namespace fs = std::filesystem;
-
 namespace {
 
 // An open document's name in Files.
 const ImVec4 kOpenColor(0.55f, 0.78f, 1.0f, 1.0f);
-const ImVec4 kRefusalColor(0.95f, 0.55f, 0.45f, 1.0f);
 
+// The scan's entry at a project-relative path (its path index's binary search), or null.
 const AssetEntry *entry_at(const SessionView &view, const std::string &path) {
-	for (const AssetEntry &entry : view.project.scan->entries)
-		if (entry.relative_path == path) return &entry;
-	return nullptr;
-}
-
-// What the tree and each file's counts read of the view: the files and the findings (and which
-// documents are open).
-RevisionKey tree_key(const SessionView &view) {
-	return revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Findings, ViewConcern::DocumentSet});
+	return view.project.scan->at_path(path);
 }
 
 // A file's jumps (DI-18): F12 opens it (its page where the editor has no editor for it), Shift+F12 lists who
@@ -117,8 +107,13 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		if (popup_.dismissed()) window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
 		return;
 	}
-	if (terrain) ImGui::TextUnformatted("New terrain from images");
-	else ImGui::Text("New file: %s", asset_kind_label(kind));
+	if (terrain) {
+		ImGui::TextUnformatted("New terrain from images");
+		ui_kit::tooltip("Each image is a file on disk (copied into art/terrain/) or a file of the project; the terrain is "
+		                "imported from them, and imported again when one changes.");
+	} else {
+		ImGui::Text("New file: %s", asset_kind_label(kind));
+	}
 	// A folder's New here (DI-25): the folder it is made in.
 	if (!terrain && !held.folder.empty())
 		ImGui::TextDisabled("In %s", held.folder == "/" ? "the top level of the project" : (held.folder + "/").c_str());
@@ -141,11 +136,9 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	// it makes).
 	const std::string file = terrain ? std::string(name) + ".trn" : std::string(name);
 	const bool in_use = named && v.project.scan->find(file) != nullptr;
-	if (named && !fits) ImGui::TextColored(kRefusalColor, "%s", message.c_str());
-	else if (in_use) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", file.c_str());
-	if (terrain)
-		ImGui::TextWrapped("Each image is a file on disk (copied into art/terrain/) or a file of the project; the "
-		                   "terrain is imported from them, and imported again when one changes.");
+	// Why Create waits, whole: the prompt grows to hold it.
+	if (named && !fits) ImGui::TextColored(ui_kit::refusal_color(), "%s", message.c_str());
+	else if (in_use) ImGui::TextColored(ui_kit::refusal_color(), "The project has a file named %s already.", file.c_str());
 	// What the kind's blank takes beside its name (a mission's title, terrain and environment): a
 	// text, or one of the project's files its reference loads. A project is its own files, so a
 	// kind the project has no file of says to import one.
@@ -178,7 +171,8 @@ void NewFilePrompt::draw(Workspace &workspace) {
 				for (const AssetEntry &entry : v.project.scan->entries) offered += entry.kind == wanted ? 1 : 0;
 			}
 			if (offered == 0)
-				ImGui::TextColored(kRefusalColor, "The project has no %s: import one first (Files > Import).", param.token);
+				ImGui::TextColored(ui_kit::refusal_color(), "The project has no %s: import one first (Files > Import).",
+				                   param.token);
 		}
 		ImGui::PopID();
 		given = given && (!param.required || !values_[i].empty());
@@ -221,55 +215,88 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	ImGui::EndPopup();
 }
 
-// The tree of the scan's folders and each file's findings, made again when what they read moves.
+// The tree of the scan's folders, made again when the files move (a save, a rescan, an import: which documents
+// are open the rows read as they draw), and each file's findings, made again when the findings do.
 void FilesWindow::refresh(const SessionView &view) {
-	const RevisionKey key = tree_key(view);
-	if (view_ == &view && key_ == key && !folders_.empty()) return;
+	const bool another = view_ != &view;
 	view_ = &view;
-	key_ = key;
-	++rebuilds_;
+	const RevisionKey tree = revision_key(view.revisions, {ViewConcern::Files});
+	const RevisionKey counts = revision_key(view.revisions, {ViewConcern::Findings});
+	const bool tree_moved = another || tree != tree_key_ || folders_.empty();
+	const bool counts_moved = another || counts != counts_key_ || !counts_made_;
+	if (tree_moved) {
+		tree_key_ = tree;
+		make_tree(view);
+	}
+	if (counts_moved) {
+		counts_key_ = counts;
+		make_counts(view);
+	}
+	if (tree_moved || counts_moved) ++rebuilds_;
+}
+
+void FilesWindow::make_tree(const SessionView &view) {
+	++tree_rebuilds_;
+	const AssetScan &scan = *view.project.scan;
 	folders_.assign(1, Folder());
+	kind_counts_.assign(kAssetKindCount, 0);
+	visible_made_ = false;
 	matches_made_ = false; // made again by matching(), once a filter is set
-	std::map<std::string, size_t> index;
-	for (size_t i = 0; i < view.project.scan->entries.size(); ++i) {
-		const AssetEntry &entry = view.project.scan->entries[i];
-		// An imported file sits in the cache: it shows beside its source.
-		const std::string &place = entry.imported_from.empty() ? entry.relative_path : entry.imported_from;
+	std::unordered_map<std::string, size_t> index;
+	// The folder of the first `length` characters of `place` (its '/'-separated parts, each folder made on the
+	// way): its index.
+	const auto folder_at = [&](const std::string &place, size_t length) {
 		size_t at = 0;
 		std::string path;
-		for (const fs::path &part : path_of(place).parent_path()) {
-			path += (path.empty() ? "" : "/") + utf8_of(part);
-			auto found = index.find(path);
-			if (found == index.end()) {
-				folders_.push_back(Folder{utf8_of(part), path, {}, {}});
-				found = index.emplace(path, folders_.size() - 1).first;
-				folders_[at].folders.push_back(found->second);
+		for (size_t start = 0; start < length;) {
+			const size_t slash = place.find('/', start);
+			const size_t end = slash == std::string::npos || slash > length ? length : slash;
+			if (end > start) {
+				const std::string part = place.substr(start, end - start);
+				path += (path.empty() ? "" : "/") + part;
+				auto found = index.find(path);
+				if (found == index.end()) {
+					Folder made;
+					made.name = part;
+					made.key = pff::normalized_logical_name(part);
+					made.path = path;
+					made.parent = at;
+					folders_.push_back(std::move(made));
+					found = index.emplace(path, folders_.size() - 1).first;
+					folders_[at].folders.push_back(found->second);
+				}
+				at = found->second;
 			}
-			at = found->second;
+			start = end + 1;
 		}
-		folders_[at].files.push_back(i);
+		return at;
+	};
+	for (size_t i = 0; i < scan.entries.size(); ++i) {
+		const AssetEntry &entry = scan.entries[i];
+		if (static_cast<size_t>(entry.kind) < kAssetKindCount) ++kind_counts_[static_cast<size_t>(entry.kind)];
+		// An imported file sits in the cache: it shows beside its source.
+		const std::string &place = entry.imported_from.empty() ? entry.relative_path : entry.imported_from;
+		const size_t slash = place.rfind('/');
+		const size_t folder = folder_at(place, slash == std::string::npos ? 0 : slash);
+		folders_[folder].files.push_back(i);
 	}
 	// The project's folders that hold no file of its own (DI-25: a New folder's, or one whose files went), each
 	// in the tree too; the walk enters no dot-folder, so the cache is never one.
-	for (const auto &[held, stamp] : view.project.scan->folders()) {
-		if (held.empty()) continue;
-		size_t at = 0;
-		std::string path;
-		for (const fs::path &part : path_of(held)) {
-			path += (path.empty() ? "" : "/") + utf8_of(part);
-			auto found = index.find(path);
-			if (found == index.end()) {
-				folders_.push_back(Folder{utf8_of(part), path, {}, {}});
-				found = index.emplace(path, folders_.size() - 1).first;
-				folders_[at].folders.push_back(found->second);
-			}
-			at = found->second;
-		}
-	}
+	for (const auto &[held, stamp] : scan.folders())
+		if (!held.empty()) folder_at(held, held.size());
 	for (Folder &folder : folders_)
 		std::sort(folder.folders.begin(), folder.folders.end(), [this](size_t a, size_t b) {
-			return pff::normalized_logical_name(folders_[a].name) < pff::normalized_logical_name(folders_[b].name);
+			const Folder &x = folders_[a], &y = folders_[b];
+			return x.key != y.key ? x.key < y.key : x.name < y.name;
 		});
+	if (!entry_at(view, selected_)) selected_.clear();
+	also_.erase(std::remove_if(also_.begin(), also_.end(),
+	                           [&](const std::string &path) { return selected_.empty() || !entry_at(view, path); }),
+	            also_.end());
+}
+
+void FilesWindow::make_counts(const SessionView &view) {
+	counts_made_ = true;
 	counts_.clear();
 	FindingMarks scratch;
 	const FindingMarks &marks = finding_marks(view, scratch);
@@ -282,10 +309,24 @@ void FilesWindow::refresh(const SessionView &view) {
 		if (d.severity == DiagnosticSeverity::Error) ++(original ? counts.original_errors : counts.errors);
 		else if (d.severity == DiagnosticSeverity::Warning) ++(original ? counts.original_warnings : counts.warnings);
 	}
-	if (!entry_at(view, selected_)) selected_.clear();
-	also_.erase(std::remove_if(also_.begin(), also_.end(),
-	                           [&](const std::string &path) { return selected_.empty() || !entry_at(view, path); }),
-	            also_.end());
+}
+
+void FilesWindow::make_visible() {
+	visible_made_ = true;
+	visible_.clear();
+	rows_.clear();
+	// Each folder's folders (a folded one's row alone), then its files, depth first as the nested tree drew them.
+	const auto walk = [this](const auto &self, size_t folder, uint32_t depth) -> void {
+		for (const size_t inner : folders_[folder].folders) {
+			visible_.push_back(Row{inner, folder, depth, true});
+			if (folded_.count(folders_[inner].path) == 0) self(self, inner, depth + 1);
+		}
+		for (const size_t file : folders_[folder].files) {
+			visible_.push_back(Row{file, folder, depth, false});
+			rows_.push_back(file);
+		}
+	};
+	walk(walk, 0, 0);
 }
 
 void FilesWindow::follow_filter(const SessionView &view) {
@@ -312,10 +353,14 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 	const uint64_t generation = view.findings.graph ? view.findings.graph->generation() : 0;
 	const std::string asked =
 			std::string(filter) + '\n' + std::to_string(static_cast<int>(kind_shown_)) + (by_cost_ ? "\ncost" : "");
-	if (matches_made_ && matched_ == asked && matched_generation_ == generation) return matches_;
+	// The costs read the open documents' textures too (texture_budget_list).
+	const uint64_t documents = view.revisions.of(ViewConcern::DocumentSet);
+	if (matches_made_ && matched_ == asked && matched_generation_ == generation && matched_documents_ == documents)
+		return matches_;
 	matches_made_ = true;
 	matched_ = asked;
 	matched_generation_ = generation;
+	matched_documents_ = documents;
 	via_.clear();
 	// The paths holding the text, then the files of a kind it names ("texture" lists the textures), each of
 	// the kind chosen (match_files, the files query's own rule).
@@ -389,6 +434,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	// overwriting the one before; an older ask is passed over, its Rename... too. With no project
 	// open none shows.
 	const std::vector<ViewEvent> reveals = events_.take();
+	rows_drawn_ = 0;
 	if (!v.project.open) {
 		ui_kit::empty_state("No project open.", "Make one or open one in the Document window.");
 		return;
@@ -441,7 +487,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		                       "whose names hold the text."))
 			send_filter(true, false);
 		row.next(kind);
-		draw_kind_filter(v, kind);
+		draw_kind_filter(kind);
 		if (offers_cost) {
 			row.next(cost);
 			if (ImGui::Checkbox("By cost", &by_cost_)) send_filter(false, false, true);
@@ -463,8 +509,8 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (v.project.scan->entries.empty()) {
 		ui_kit::empty_state("The project has no files yet.", "Import files, or make one with New.");
 	} else if (narrowed && matches.empty()) {
-		ui_kit::empty_state(kind_shown_ != AssetKind::kCount && filter_.text[0] == '\0' ? "The project has no file of this kind."
-		                                                                              : "No file matches the filter.");
+		if (filter_.text[0] == '\0') ui_kit::empty_state("The project has no file of this kind.");
+		else if (ui_kit::nothing_matches(filter_.text, "file")) send_filter(true, false);
 	} else if (const bool kind_fits = ImGui::GetContentRegionAvail().x >= ImGui::GetFontSize() * kKindRoomEm;
 	           // "project_files": a table id of its own since the Kind column shows by default, so a layout an
 	           // earlier editor saved with it hidden (its default then) does not hide it (the UX round's project lane).
@@ -486,6 +532,8 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			ImGui::TableSetColumnEnabled(1, kind_fits);
 		}
 		ImGui::TableHeadersRow();
+		// A Shift+click runs over the rows as they show: the flat list's, or the tree's files.
+		rows_flat_ = narrowed;
 		if (narrowed) {
 			// Many rows (every texture of a game): only those that show are drawn.
 			ImGuiListClipper clipper;
@@ -496,13 +544,9 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			while (clipper.Step())
 				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
 					draw_file(v, v.project.scan->entries[matches[size_t(i)]], false);
-			rows_.clear();
-			for (const size_t index : matches) rows_.push_back(v.project.scan->entries[index].relative_path);
 		} else {
-			rows_drawing_.clear();
 			draw_top_level_drop(v);
-			draw_folder(v, folders_.front());
-			rows_.swap(rows_drawing_);
+			draw_tree(v);
 		}
 		ImGui::EndTable();
 	}
@@ -529,11 +573,9 @@ void FilesWindow::draw_card_window() {
 	draw_card(v);
 }
 
-void FilesWindow::draw_kind_filter(const SessionView &view, float width) {
-	// The kinds the project has files of, each with how many, in the rows' order.
-	std::vector<size_t> counts(kAssetKindCount, 0);
-	for (const AssetEntry &entry : view.project.scan->entries)
-		if (static_cast<size_t>(entry.kind) < kAssetKindCount) ++counts[static_cast<size_t>(entry.kind)];
+void FilesWindow::draw_kind_filter(float width) {
+	// The kinds the project has files of, each with how many (made with the tree), in the rows' order.
+	const std::vector<size_t> &counts = kind_counts_;
 	const std::string shown = kind_shown_ == AssetKind::kCount ? std::string("Every kind")
 	                          : std::string(asset_kind_label(kind_shown_));
 	ImGui::SetNextItemWidth(width);
@@ -633,28 +675,75 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		workspace_.request(request::undo_file());
 }
 
-// A folder's folders, each a node open until folded, then its files.
-void FilesWindow::draw_folder(const SessionView &view, const Folder &folder) {
-	for (const size_t index : folder.folders) {
-		const Folder &inner = folders_[index];
-		ImGui::TableNextRow();
-		ImGui::TableNextColumn();
-		const std::string label = ui_kit::fit(inner.name, ImGui::GetContentRegionAvail().x - ImGui::GetTreeNodeToLabelSpacing());
-		if (!open_to_.empty() && open_to_.rfind(inner.path + "/", 0) == 0) ImGui::SetNextItemOpen(true);
-		const bool open = ImGui::TreeNodeEx(inner.path.c_str(), ImGuiTreeNodeFlags_SpanAllColumns | ImGuiTreeNodeFlags_DefaultOpen,
-		                                    "%s", label.c_str());
-		ui_kit::tooltip(inner.path);
-		accept_move(view, inner.path);
-		if (ImGui::BeginPopupContextItem("folder_menu")) {
-			draw_folder_menu(view, inner.path);
-			ImGui::EndPopup();
-		}
-		if (!open) continue;
-		draw_folder(view, inner);
-		ImGui::TreePop();
+// The tree's rows that show, each folder open until folded and its rows under it, drawn through a list clipper
+// (a game's 20,000 files are a screenful of rows a frame): each row indented by its depth and its ids made under
+// its folders' as a tree of nested nodes makes them. A reveal opens the folders on its way first, and its row is
+// drawn wherever the list stands, which scrolls to it (draw_file).
+void FilesWindow::draw_tree(const SessionView &view) {
+	if (!open_to_.empty()) {
+		for (size_t i = 1; i < folders_.size(); ++i)
+			if (open_to_.rfind(folders_[i].path + "/", 0) == 0 && folded_.erase(folders_[i].path) != 0) visible_made_ = false;
+		open_to_.clear();
 	}
-	for (const size_t index : folder.files)
-		draw_file(view, view.project.scan->entries[index], true);
+	if (!visible_made_) make_visible();
+	int scroll_row = -1;
+	if (!scroll_to_.empty())
+		for (size_t i = 0; i < visible_.size() && scroll_row < 0; ++i)
+			if (!visible_[i].is_folder && view.project.scan->entries[visible_[i].index].relative_path == scroll_to_)
+				scroll_row = int(i);
+	ImGuiListClipper clipper;
+	clipper.Begin(static_cast<int>(visible_.size()));
+	if (scroll_row >= 0) clipper.IncludeItemByIndex(scroll_row);
+	const float indent = ImGui::GetStyle().IndentSpacing;
+	uint32_t depth = 0;
+	while (clipper.Step())
+		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+			// A copy: a fold drawn here makes the rows again next frame, never under this loop.
+			const Row row = visible_[size_t(i)];
+			if (row.depth > depth) ImGui::Indent(indent * float(row.depth - depth));
+			else if (row.depth < depth) ImGui::Unindent(indent * float(depth - row.depth));
+			depth = row.depth;
+			const size_t pushed = push_folder_ids(row.folder);
+			if (row.is_folder) draw_folder_row(view, row.index);
+			else draw_file(view, view.project.scan->entries[row.index], true);
+			for (size_t n = 0; n < pushed; ++n) ImGui::PopID();
+		}
+	if (depth > 0) ImGui::Unindent(indent * float(depth));
+}
+
+size_t FilesWindow::push_folder_ids(size_t folder) {
+	if (folder == 0 || folder >= folders_.size()) return 0;
+	const size_t pushed = push_folder_ids(folders_[folder].parent);
+	ImGui::PushID(folders_[folder].path.c_str());
+	return pushed + 1;
+}
+
+// A folder's row: a node open until folded (a click folds it and opens it again), its path in its tooltip, a file
+// dropped on it moved there, and its menu.
+void FilesWindow::draw_folder_row(const SessionView &view, size_t index) {
+	const Folder &folder = folders_[index];
+	++rows_drawn_;
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
+	const std::string label = ui_kit::fit(folder.name, ImGui::GetContentRegionAvail().x - ImGui::GetTreeNodeToLabelSpacing());
+	const bool folded = folded_.count(folder.path) != 0;
+	ImGui::SetNextItemOpen(!folded);
+	const bool open = ImGui::TreeNodeEx(folder.path.c_str(), ImGuiTreeNodeFlags_SpanAllColumns | ImGuiTreeNodeFlags_NoTreePushOnOpen,
+	                                    "%s", label.c_str());
+	if (open == folded) {
+		if (open) folded_.erase(folder.path);
+		else folded_.insert(folder.path);
+		visible_made_ = false;
+	}
+	ui_kit::tooltip(folder.path);
+	accept_move(view, folder.path);
+	// Its menu under its own id, where a node open pushes it.
+	ImGui::PushID(folder.path.c_str());
+	if (ImGui::BeginPopupContextItem("folder_menu")) {
+		draw_folder_menu(view, folder.path);
+		ImGui::EndPopup();
+	}
+	ImGui::PopID();
 }
 
 // A file's row: a selectable under the whole row, its name (cut to what its dot and counts
@@ -667,7 +756,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	const bool dirty = open && open->unsaved();
 	const auto found = counts_.find(entry.relative_path);
 	const Counts counts = found != counts_.end() ? found->second : Counts();
-	if (in_tree) rows_drawing_.push_back(entry.relative_path);
+	++rows_drawn_;
 	if (ImGui::Selectable("##row", chosen(entry.relative_path),
 	                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick |
 	                              ImGuiSelectableFlags_AllowOverlap)) {
@@ -854,7 +943,7 @@ void FilesWindow::draw_move_menu(const SessionView &view, const AssetEntry &entr
 	ImGui::BeginDisabled(!named || folder == here);
 	const bool move = ImGui::Button("Move");
 	ImGui::EndDisabled();
-	if (new_folder_[0] != '\0' && !named) ImGui::TextColored(kRefusalColor, "%s", why.c_str());
+	if (new_folder_[0] != '\0' && !named) ImGui::TextColored(ui_kit::refusal_color(), "%s", why.c_str());
 	if ((move || enter) && named && folder != here) move_to(folder);
 	ImGui::EndMenu();
 }
@@ -1018,14 +1107,12 @@ void FilesWindow::draw_card(const SessionView &view) {
 		if (!open) close_card();
 		return;
 	}
-	ImGui::PushTextWrapPos(0.0f);
-	ImGui::Text("%s, %s", card.kind_label.c_str(), strutil::byte_size_text(card.size).c_str());
-	ImGui::TextDisabled("%s", card.path.c_str());
-	ImGui::Spacing();
-	ImGui::TextWrapped("%s", card.what.c_str());
-	ImGui::TextWrapped("%s", card.build.c_str());
-	if (!card.imported_from.empty()) ImGui::TextWrapped("Made from %s by its import.", card.imported_from.c_str());
-	ImGui::PopTextWrapPos();
+	// Its kind and size, what it is behind a help mark (the page's head, without the name the title says); where it is,
+	// where a build puts it and what it is made from a line each.
+	draw_file_card_head(card, false);
+	ui_kit::quiet_text(card.path);
+	ui_kit::clipped_text(card.build);
+	if (!card.imported_from.empty()) ui_kit::clipped_text("Made from " + card.imported_from + " by its import.");
 	// A wave's sound, as the game decodes it, played by the editor.
 	if (card.wave) {
 		ImGui::Spacing();
@@ -1072,16 +1159,11 @@ void FilesWindow::draw_card(const SessionView &view) {
 				}
 				ImGui::Dummy(ImVec2(width, height));
 			}
-			if (!card.sound.plays) {
-				ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);
-				ImGui::TextWrapped("The game's loader refuses it: %s Import it again to write it as the game plays it.",
-				                   card.sound.refusal.c_str());
-				ImGui::PopStyleColor();
-			}
+			if (!card.sound.plays)
+				ui_kit::refusal_text("The game's loader refuses it: " + card.sound.refusal +
+				                     " Import it again to write it as the game plays it.");
 		} else {
-			ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);
-			ImGui::TextWrapped("The game cannot play it: %s", card.sound.error.c_str());
-			ImGui::PopStyleColor();
+			ui_kit::refusal_text("The game cannot play it: " + card.sound.error);
 		}
 	}
 	ImGui::Spacing();
@@ -1107,7 +1189,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	const bool names_any = !card.names.empty() || asset_kind_row(card.kind).names_files;
 	if (names_any && ImGui::CollapsingHeader(names.c_str(), card.names.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
 		if (card.names.empty())
-			ui_kit::empty_state(card.reading ? "The project's references are still being read." : "No other file or record.");
+			ui_kit::empty_state(card.reading ? ui_kit::reading_references() : "No other file or record.");
 		else if (ImGui::BeginTable("names", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 2.0f);
@@ -1125,8 +1207,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 					ImGui::TableNextColumn();
 					const bool goes = !named.target.file.empty();
 					if (goes) {
-						if (ImGui::Selectable((ui_kit::fit(named.value, ImGui::GetContentRegionAvail().x) + "###go").c_str()))
-							window_requests::go_to(workspace_, named.target);
+						if (ui_kit::fitted_selectable(named.value, "go")) window_requests::go_to(workspace_, named.target);
 						ui_kit::tooltip(window_requests::go_to_words(named.target));
 					} else {
 						ui_kit::clipped_text(named.value);
@@ -1147,7 +1228,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	const std::string users = "Named by (" + count(card.used_by.size()) + ")###users";
 	if (ImGui::CollapsingHeader(users.c_str(), card.used_by.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
 		if (card.used_by.empty())
-			ui_kit::empty_state(card.reading ? "The project's references are still being read."
+			ui_kit::empty_state(card.reading ? ui_kit::reading_references()
 			                                 : "No file of the project names it or what it defines.");
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(card.used_by.size()));
@@ -1156,8 +1237,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 				const FileCard::User &user = card.used_by[size_t(i)];
 				ImGui::PushID(i);
 				const std::string line = user.file + ": " + (user.record.empty() ? "" : user.record + " - ") + user.field;
-				if (ImGui::Selectable((ui_kit::fit(line, ImGui::GetContentRegionAvail().x) + "###use").c_str()))
-					window_requests::go_to(workspace_, user.target);
+				if (ui_kit::fitted_selectable(line, "use")) window_requests::go_to(workspace_, user.target);
 				ui_kit::tooltip(line + "\n" + window_requests::go_to_words(user.target));
 				ImGui::PopID();
 			}

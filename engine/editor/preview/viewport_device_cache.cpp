@@ -28,6 +28,20 @@ bool ViewportDeviceCache::first_picture_pending() const {
 	return false;
 }
 
+bool ViewportDeviceCache::building() const {
+	for (const Slot &slot : slots_)
+		if (slot.device->build().loading) return true;
+	return false;
+}
+
+bool ViewportDeviceCache::drawn() const {
+	if (drawn_) return true;
+	if (!pin_all_) return false;
+	for (const Slot &slot : slots_)
+		if (slot.device->holds_picture()) return true;
+	return false;
+}
+
 ViewportDeviceCache::Slot *ViewportDeviceCache::slot_(const std::string &path, ViewportKind kind) {
 	for (Slot &slot : slots_)
 		if (slot.kind == kind && slot.path == path) return &slot;
@@ -84,6 +98,8 @@ void ViewportDeviceCache::use_(Viewports &viewports, const std::string &path, Vi
 
 void ViewportDeviceCache::sync(Viewports &viewports, const SessionView &view) {
 	++round_;
+	drawn_ = asked_;
+	asked_ = false;
 	// A device whose viewport went (its document closed), or is another than the one it was attached
 	// to (closed and opened again since: made again at the defaults, attached to nothing), goes; the
 	// viewport made again is given a device as any other.
@@ -205,6 +221,7 @@ ViewportDevice *ViewportDeviceCache::device(const std::string &path, ViewportKin
 		slot->used = ++clock_;
 		slot->asked = slot->used;
 		slot->round = round_ + 1;
+		asked_ = true;
 		return slot->device.get();
 	}
 	const bool asked = std::any_of(wanted_.begin(), wanted_.end(),

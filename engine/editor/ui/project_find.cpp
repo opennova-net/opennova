@@ -215,14 +215,18 @@ void ProjectFind::draw_hits(const SessionView &view, const std::function<void(co
 	cursor_ = moved_cursor(cursor_, shown);
 	if (text.empty())
 		ui_kit::empty_state(scope_ == Scope::Files   ? "Type part of a file's name."
-		                    : scope_ == Scope::Names ? "Type part of a name a file defines (an item's, a weapon's, a string's)."
-		                                             : "Type part of a file's name, of a name a file defines, or of the record "
-		                                               "that names a file (an item's name finds its model).");
+		                    : scope_ == Scope::Names ? "Type part of a name."
+		                                             : "Type part of a file's name or a name.",
+		                    scope_ == Scope::Files   ? nullptr
+		                    : scope_ == Scope::Names ? "A name a file defines: an item's, a weapon's, a string's."
+		                                             : "A file's name, a name a file defines, or the record that names a "
+		                                               "file (an item's name finds its model).");
 	else if (hits_.empty())
 		ui_kit::empty_state(scope_ == Scope::Files ? "No file's name holds it." : scope_ == Scope::Names ? "No name holds it."
 		                                                                                                : "No file or name holds it.");
 	else if (hits_.size() > kShownMax)
-		ImGui::TextDisabled("%zu results; the first %zu listed. Type more to narrow them.", hits_.size(), kShownMax);
+		ui_kit::quiet_text(std::to_string(hits_.size()) + " results; the first " + std::to_string(kShownMax) + " listed.",
+		                   "Type more to narrow them.");
 	ImGui::BeginChild("results", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_Borders);
 	const bool tree = scope_ == Scope::All;
 	for (size_t i = 0; i < shown; ++i) {
@@ -246,9 +250,8 @@ void ProjectFind::draw_hits(const SessionView &view, const std::function<void(co
 		if (marked && enter) go(hit_target(view, hit));
 		if (!tree) {
 			// Go to file and Go to name: a line a click goes to.
-			if (ImGui::Selectable((ui_kit::fit(title, ImGui::GetContentRegionAvail().x) + "###hit").c_str(), marked))
-				go(hit_target(view, hit));
-			ui_kit::tooltip(tip + "\nA click, or Enter while it is marked, goes there.");
+			if (ui_kit::fitted_selectable(title, "hit", marked)) go(hit_target(view, hit));
+			ui_kit::tooltip(tip);
 			ImGui::PopID();
 			continue;
 		}
@@ -274,8 +277,7 @@ void ProjectFind::draw_hits(const SessionView &view, const std::function<void(co
 				for (int u = clipper.DisplayStart; u < clipper.DisplayEnd; ++u) {
 					const Usage &use = uses_of[size_t(u)];
 					ImGui::PushID(u);
-					if (ImGui::Selectable((ui_kit::fit(use.line, ImGui::GetContentRegionAvail().x) + "###use").c_str()))
-						go(use.target);
+					if (ui_kit::fitted_selectable(use.line, "use")) go(use.target);
 					ui_kit::tooltip(use.tip);
 					ImGui::PopID();
 				}
@@ -291,9 +293,9 @@ void ProjectFind::draw_uses(const std::function<void(const ReferenceTarget &)> &
 	const std::string count = shown_uses_.size() == uses_.size()
 	                                  ? std::to_string(uses_.size()) + (uses_.size() == 1 ? " use" : " uses")
 	                                  : std::to_string(shown_uses_.size()) + " of " + std::to_string(uses_.size()) + " uses";
-	ImGui::TextWrapped("%s: %s", subject_.c_str(), count.c_str());
-	ui_kit::tooltip("Who names it in the project's files (what a record defines: each name a lookup of the game finds), "
-	                "each a Go to.");
+	ui_kit::clipped_text(subject_ + ": " + count,
+	                     subject_ + ": " + count + "\nWho names it in the project's files (what a record defines: each "
+	                     "name a lookup of the game finds).");
 	if (uses_.empty()) ui_kit::empty_state("No file of the project names it.");
 	else if (shown_uses_.empty()) ui_kit::empty_state("No use holds the text.");
 	ImGui::BeginChild("uses", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing()), ImGuiChildFlags_Borders);
@@ -306,8 +308,7 @@ void ProjectFind::draw_uses(const std::function<void(const ReferenceTarget &)> &
 			const bool marked = size_t(i) == cursor_;
 			ImGui::PushID(i);
 			if (marked && moved) ImGui::SetScrollHereY(0.5f);
-			if (ImGui::Selectable((ui_kit::fit(use.line, ImGui::GetContentRegionAvail().x) + "###use").c_str(), marked))
-				go(use.target);
+			if (ui_kit::fitted_selectable(use.line, "use", marked)) go(use.target);
 			ui_kit::tooltip(use.tip + "\n" + window_requests::go_to_words(use.target));
 			ImGui::PopID();
 		}

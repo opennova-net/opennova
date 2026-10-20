@@ -3,7 +3,7 @@
 // their tooltips naming where with their keys, a right-click listing the places one goes to; Alt+Left and
 // Alt+Right, which a text field with the keyboard keeps; the mouse's back and forward buttons (Dear
 // ImGui's buttons 3 and 4, as the bridge maps the OS's); nothing while a dialog takes the whole editor; and
-// a Back to a file's page showing its tab over the active document's.
+// a Back to a file's page showing its tab over the active document's; Back through the name jumps' Go tos.
 #include <string>
 #include <vector>
 
@@ -193,7 +193,7 @@ void test_page_tab() {
 	CHECK(!font.empty(), "nw_cdata.coo, a file the editor has no editor for");
 	const auto page_shows = [&] {
 		n.ui.frames(2);
-		return logged_frame(n.ui).find("Read by the game") != std::string::npos;
+		return logged_frame(n.ui).find("Show in folder") != std::string::npos;
 	};
 	n.go(request::open_document("main.mnu"));
 	n.go(request::open_document(font));
@@ -211,9 +211,39 @@ void test_page_tab() {
 	CHECK(!page_shows() && v.documents.active.find("extra.mnu") != std::string::npos, "Forward: the new menu's tab");
 }
 
+// The name jumps keep places as every Go to does: a particle file's member leads to the particle in another file
+// (its name field's dot, a click), that particle's child_id to a third; Back goes back through each.
+void test_name_jumps_back() {
+	Navigating n("opennova_editor_ui_navigation_names");
+	const SessionView &v = n.view();
+	const std::string root = v.project.root;
+	CHECK(test_io::write_text(root + "/particles/a.ptl", "[effectdef]\r\n{\r\n\tid = Burst;\r\n\tpdefs = spark;\r\n}\r\n") &&
+	              test_io::write_text(root + "/particles/b.ptl", "[particledef]\r\n{\r\n\tid = spark;\r\n\tchild_id = ember;\r\n}\r\n") &&
+	              test_io::write_text(root + "/particles/c.ptl", "[particledef]\r\n{\r\n\tid = ember;\r\n}\r\n"),
+	      "three particle files");
+	n.go(request::rescan());
+	n.go(request::open_document("particles/a.ptl"));
+	n.ui.focus("Inspector");
+	n.ui.away();
+	n.ui.drain();
+	// Each block's second row (its pdefs, its child_id) holds one name alone: its name field's dot is its Go to.
+	const ImGuiID dot = item_id(pushed(Ui::window_id("Inspector"), 1), {"go to dot"});
+	n.ui.activate(dot);
+	n.serve();
+	CHECK(v.documents.active == "particles/b.ptl", "the member's Go to opens the particle's file");
+	n.ui.activate(dot);
+	n.serve();
+	CHECK(v.documents.active == "particles/c.ptl", "the child_id's Go to opens the child's file");
+	n.go(request::navigate_back());
+	CHECK(v.documents.active == "particles/b.ptl", "Back: the particle's file");
+	n.go(request::navigate_back());
+	CHECK(v.documents.active == "particles/a.ptl", "Back: the effect's file");
+}
+
 } // namespace
 
 void run_navigation_tests() {
+	test_name_jumps_back();
 	test_arrows();
 	test_keys_and_buttons();
 	test_page_tab();

@@ -1,7 +1,6 @@
 #include <editor/ui/terrain_viewport_view.h>
 
 #include <algorithm>
-#include <cstdio>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -21,7 +20,6 @@
 #include <editor/ui/viewport_widgets.h>
 #include <editor/ui/viewport_canvas.h>
 #include <editor/ui/workspace.h>
-#include <formats/trn/charmap_legend.h>
 
 namespace opennova::editor {
 
@@ -70,43 +68,26 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	                      : std::string("Drawn under the engine's own environment, as a mission with no .env starts on "
 	                                    "it, with the terrain's own tiles."));
 	// The layers.
-	row.next(ui_kit::button_width("Show"));
-	if (ImGui::Button("Show")) ImGui::OpenPopup("show");
-	ui_kit::tooltip("What the picture draws over the ground: the terrain's foliage, the water.");
-	if (ImGui::BeginPopup("show")) {
-		bool foliage = options.foliage, water = options.water;
-		const bool changed = ImGui::Checkbox("Foliage", &foliage) | ImGui::Checkbox("Water", &water);
-		if (changed) {
-			JsonValue show = JsonValue::make_object();
-			show.set("foliage", JsonValue::make_bool(foliage));
-			show.set("water", JsonValue::make_bool(water));
-			JsonValue change = JsonValue::make_object();
-			change.set("show", std::move(show));
-			set_options(workspace, model, std::move(change));
-		}
-		ImGui::EndPopup();
+	bool foliage = options.foliage, water = options.water;
+	if (show_layers(row, "What the picture draws over the ground: the terrain's foliage, the water.",
+	                {{"Foliage", &foliage}, {"Water", &water}})) {
+		JsonValue show = JsonValue::make_object();
+		show.set("foliage", JsonValue::make_bool(foliage));
+		show.set("water", JsonValue::make_bool(water));
+		JsonValue change = JsonValue::make_object();
+		change.set("show", std::move(show));
+		set_options(workspace, model, std::move(change));
 	}
 	// DI-29: what the game reads at each point of the ground, tinted over the terrain with its legend.
-	row.next(ui_kit::button_width("Over the terrain"));
-	if (ImGui::Button("Over the terrain")) ImGui::OpenPopup("overlay");
-	ui_kit::tooltip("Tint the terrain with what the game reads at each point: its surface classes, or where its foliage "
-	                "grows.");
-	if (ImGui::BeginPopup("overlay")) {
-		const auto overlay = [&](const char *label, MissionGroundOverlay kind, const char *tip) {
-			if (ImGui::RadioButton(label, options.overlay == kind)) {
-				JsonValue change = JsonValue::make_object();
-				change.set("overlay", io::json_string(mission_ground_overlay_token(kind)));
-				set_options(workspace, model, std::move(change));
-			}
-			ui_kit::tooltip(tip);
-		};
-		overlay("Nothing", MissionGroundOverlay::None, "The terrain as the game draws it.");
-		overlay("Surface classes", MissionGroundOverlay::Surfaces,
-		        "Each point's surface class as the game reads it (its char map, the placed tiles): what footsteps play "
-		        "and what a round's impact plays there. The legend names each class.");
-		overlay("Foliage", MissionGroundOverlay::Foliage,
-		        "Where the foliage map's codes grow each definition, and what the placed tiles keep off. The legend names "
-		        "each definition's model.");
+	if (ui_kit::tool_popup(row, "Over the terrain", "overlay", true,
+	                       "Tint the terrain with what the game reads at each point: its surface classes, or where its "
+	                       "foliage grows.")) {
+		const MissionGroundOverlay picked = ground_overlay_choice(options.overlay);
+		if (picked != options.overlay) {
+			JsonValue change = JsonValue::make_object();
+			change.set("overlay", io::json_string(mission_ground_overlay_token(picked)));
+			set_options(workspace, model, std::move(change));
+		}
 		ImGui::EndPopup();
 	}
 	// The Terrain pane (S25): sculpt, paint and lay tiles in the picture (Ctrl+E), the button naming the brush's tool.
@@ -166,38 +147,12 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		       ground_ = mission_ground_line(facts);
 		       ground_surface_ = facts.on == MissionGroundOn::Terrain && !facts.under_water ? facts.surface : -1;
 	       });
-	if (!brush_hint_.empty()) {
-		ui_kit::clipped_text(brush_hint_);
-	} else if (ground_.empty()) {
-		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ui_kit::clipped_text("Ground: point at the terrain to read its surface class, the footsteps a body plays there, the "
-		                     "row a round plays and the foliage it grows.");
-		ImGui::PopStyleColor();
-	} else {
-		// The class's colour in the char map legend (formats/trn/charmap_legend.h).
-		if (ground_surface_ >= 0 && ground_surface_ < kCharmapLegendCount) {
-			const CharmapLegendColour &c = kCharmapLegend[ground_surface_];
-			const float side = ImGui::GetTextLineHeight();
-			ImGui::ColorButton("##ground_class", ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
-			                   ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoDragDrop,
-			                   ImVec2(side, side));
-			ImGui::SameLine();
-		}
-		ui_kit::clipped_text("Ground: " + ground_);
-	}
-	if (!model.missing().empty()) {
-		const std::vector<std::string> &missing = model.missing();
-		std::string text = std::to_string(missing.size()) + (missing.size() == 1 ? " file missing: " : " files missing: ");
-		std::string all;
-		for (size_t i = 0; i < missing.size(); ++i) {
-			if (i < 3) text += (i ? ", " : "") + missing[i];
-			all += (i ? "\n" : "") + missing[i];
-		}
-		if (missing.size() > 3) text += ", ...";
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
-		ui_kit::clipped_text(text, all + "\nImport them to see them (Problems).");
-		ImGui::PopStyleColor();
-	}
+	if (!brush_hint_.empty()) ui_kit::clipped_text(brush_hint_);
+	else
+		ground_line(ground_, ground_surface_,
+		            "Point at the terrain to read its surface class, the footsteps a body plays there, the row a round "
+		            "plays and the foliage it grows.");
+	missing_files_line(model.missing());
 }
 
 } // namespace opennova::editor

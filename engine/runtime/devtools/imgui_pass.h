@@ -256,6 +256,9 @@ public:
 	// nothing was drawn (closed or not attached). The caller reads is_open()
 	// after processing the Game window's requests (including Escape).
 	bool draw_frame(uint64_t frame_index);
+	// What the last layout pass spent drawing each window it drew, in microseconds, in the order drawn
+	// ("menu bar" first: the product's menus): the editor's perf query names the costliest.
+	const std::vector<std::pair<const char *, int64_t>> &window_times() const { return window_times_; }
 
 	// Restore the default docked layout on the next layout pass: the
 	// persisted dockspace is rebuilt from every window's declared placement
@@ -314,6 +317,7 @@ private:
 	void draw_status();
 
 	std::vector<std::unique_ptr<Window>> windows_;
+	std::vector<std::pair<const char *, int64_t>> window_times_; // the last layout's, window_times()
 	std::vector<OverlayLayer *> overlays_; // registration order (the menu's)
 	std::deque<StatusLine> status_; // newest first
 	MenuBarContributor *menu_bar_ = nullptr;

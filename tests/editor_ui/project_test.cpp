@@ -238,7 +238,7 @@ void test_files_kind_and_card() {
 	ui.activate(item_id(ImHashStr("##Combo_00"), {"Wave (1)###wave"}));
 	// Files draws first: its text runs to the Document window's.
 	text = logged_frame(ui);
-	text = text.substr(0, text.find("Double-click a file in Files"));
+	text = text.substr(0, text.find("No file open."));
 	CHECK(text.find("tone.wav") != std::string::npos && text.find("rootpic.tga") == std::string::npos &&
 	              text.find("menu.lwf") == std::string::npos && text.find("1 of 4 files") != std::string::npos,
 	      "Wave: the waves alone");

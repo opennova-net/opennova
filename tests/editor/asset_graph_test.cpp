@@ -47,6 +47,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/documents/particle_keys.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
@@ -364,6 +365,86 @@ static int test_menu_text_scope() {
 	TEST_EXPECT(missing_message("NOSUCH.BIN, a string table the project does not have"));
 	TEST_EXPECT(scope_matches("MENUTXT.BIN/Menu", "menutxt.bin/MENU") && scope_matches("A.BIN/x", "A.BIN") &&
 	            !scope_matches("A.BIN/x", "/x") && scope_matches("A.BIN/x", ""));
+	return 0;
+}
+
+// A particle file's names (the name jumps): each [particledef]'s id a symbol of its own kind, at its span, as each
+// effect's and table's id is (field "id"); each pdefs member and child_id an edge to a particle, each curve to a table,
+// each graphic's texture, every one at the span its text writes it (the span's text its value, its locator the span's
+// place), over the shipped corpus's own forms (fixtures/particle/lexical_forms.ptl). A particle's name resolves without
+// case and is never missing: a member's miss is its file's project check's (particle.effect_unresolved).
+static int test_particle_names() {
+	const std::string text = test_io::read_file_text(test_paths_fixture("particle/lexical_forms.ptl"));
+	TEST_EXPECT(!text.empty());
+	Extracted read;
+	Diagnostic error;
+	TEST_EXPECT(extract_from_bytes("fx/lexical_forms.ptl", AssetKind::Particles, std::vector<uint8_t>(text.begin(), text.end()),
+	                               "jo", read, error));
+	const std::vector<size_t> lines = text_line_starts(text);
+	const auto spelled = [&](const TextSpan &span) {
+		if (!span.line || span.line > lines.size()) return std::string("?");
+		return text.substr(lines[span.line - 1] + span.column - 1, span.length);
+	};
+	size_t spanned = 0;
+	for (const GraphEdge &edge : read.edges) {
+		if (!edge.span.line) continue;
+		++spanned;
+		TEST_EXPECT(spelled(edge.span) == edge.value && edge.rewritable &&
+		            edge.locator == TextDocument::locator(edge.span.line, edge.span.column));
+	}
+	for (const GraphSymbol &symbol : read.symbols)
+		TEST_EXPECT(symbol.field == "id" && symbol.span.line && spelled(symbol.span) == symbol.display &&
+		            symbol.locator == TextDocument::locator(symbol.span.line, symbol.span.column));
+	const auto symbol_named = [&](ReferenceKind kind, const std::string &id) -> const GraphSymbol * {
+		for (const GraphSymbol &symbol : read.symbols)
+			if (symbol.kind == kind && symbol.display == id) return &symbol;
+		return nullptr;
+	};
+	const GraphSymbol *burst = symbol_named(ReferenceKind::Particle, "Lex_Burst");
+	const GraphSymbol *spark = symbol_named(ReferenceKind::ParticleDefinition, "Lex_Spark");
+	TEST_EXPECT(burst && burst->locator == "4:7" && spark && spark->locator == "17:6" && spark->record == "Lex_Spark" &&
+	            symbol_named(ReferenceKind::ParticleDefinition, "Lex_Ember") &&
+	            symbol_named(ReferenceKind::ParticleDefinition, "Lex_Smoke") &&
+	            symbol_named(ReferenceKind::ParticleTable, "lex_fade") && symbol_named(ReferenceKind::ParticleTable, "lex_grow"));
+	// The effect block of no pdefs line is no effect (D-PTL-32): no symbol.
+	TEST_EXPECT(!symbol_named(ReferenceKind::Particle, "Lex_Quiet"));
+	// The members, each at its own place in its 64-byte slot, the second Lex_Spark apart from the first.
+	std::vector<const GraphEdge *> members;
+	const GraphEdge *child = nullptr, *haze = nullptr;
+	for (const GraphEdge &edge : read.edges) {
+		if (edge.kind == ReferenceKind::ParticleDefinition && edge.field == "pdefs") members.push_back(&edge);
+		if (edge.kind == ReferenceKind::ParticleDefinition && edge.field == "child_id") child = &edge;
+		if (edge.kind == ReferenceKind::Texture && edge.value == "lex_haze.tga") haze = &edge;
+	}
+	TEST_EXPECT(members.size() == 3 && members[0]->value == "Lex_Spark" && members[1]->value == "Lex_Smoke" &&
+	            members[2]->value == "Lex_Spark" && members[0]->record == "Lex_Burst" && members[0]->locator == "5:10" &&
+	            members[1]->locator == "5:21" && members[2]->locator == "5:32" && members[0]->width == kPdefsNameSlot);
+	TEST_EXPECT(child && child->record == "Lex_Spark" && child->value == "Lex_Ember" && child->locator == "18:12");
+	// The texture its graphic line writes (the third layer's line names its own texture); a flipbook's frames none.
+	TEST_EXPECT(haze && haze->record == "Lex_Smoke" && haze->field == "graphic2" && haze->span.line);
+	for (const GraphEdge &edge : read.edges)
+		TEST_EXPECT(edge.field.find('[') == std::string::npos || !edge.span.line);
+	TEST_EXPECT(spanned >= members.size() + 1 + 10);
+
+	// Through the graph: a member resolves without case to the file defining the particle; a member nothing defines is
+	// Missing to its badge alone, no finding.
+	test_temp::TempDir dir("opennova_asset_graph_particle_names");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Particles"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(test_io::write_text(root + "/a.ptl", "[effectdef]\r\n{\r\n\tid = Hit;\r\n\tpdefs = PUFF, ghost;\r\n}\r\n") &&
+	            test_io::write_text(root + "/b.ptl", "[particledef]\r\n{\r\n\tid = puff;\r\n}\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetGraph &graph = *session.view().findings.graph;
+	std::string file;
+	TEST_EXPECT(graph.resolve(ReferenceKind::ParticleDefinition, "PUFF", "", &file) == ReferenceStatus::Present && file == "b.ptl");
+	TEST_EXPECT(graph.resolve(ReferenceKind::ParticleDefinition, "ghost") == ReferenceStatus::Missing);
+	for (const GraphEdge *edge : graph.missing()) TEST_EXPECT(edge->kind != ReferenceKind::ParticleDefinition);
+	const GraphSymbol *puff = graph.resolve_symbol(ReferenceKind::ParticleDefinition, "Puff");
+	TEST_EXPECT(puff && puff->file == "b.ptl" && graph.users_of(*puff).size() == 1 &&
+	            graph.users_of(*puff).front()->locator == "4:10");
 	return 0;
 }
 
@@ -1689,11 +1770,12 @@ static int test_reference_kind_rows() {
 		TEST_EXPECT(row.defined_in == AssetKind::Unknown || row.names_symbol());
 		// A Record reference names its collection, and the graph finds none missing (S13 D8).
 		TEST_EXPECT(record == (*row.collection != '\0') && (!row.none || record));
-		// The symbol kinds never missing: a mission variable (every index is a word of its mission's bank) and a
-		// particle's curve table (a miss is its particle file's own finding, particle.curve_unresolved).
+		// The symbol kinds never missing: a mission variable (every index is a word of its mission's bank), a
+		// particle's curve table and an effect's particle (a miss is its particle file's own finding,
+		// particle.curve_unresolved and particle.effect_unresolved).
 		TEST_EXPECT((row.missing_message != nullptr) ==
 		            (file || (row.names_symbol() && !record && kind != ReferenceKind::MissionVariable &&
-		                      kind != ReferenceKind::ParticleTable)));
+		                      kind != ReferenceKind::ParticleTable && kind != ReferenceKind::ParticleDefinition)));
 		const bool tolerated = kind == ReferenceKind::Wave || kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
 		                       kind == ReferenceKind::SoundBank || kind == ReferenceKind::Credits ||
 		                       kind == ReferenceKind::MenuScreen || kind == ReferenceKind::MenuWindow ||
@@ -2196,8 +2278,8 @@ static int test_rename_keeps_loader_spelling() {
 
 // S13 D1: an update that finds the files as they were (their rows in the scan, what each read
 // references and defines) changes nothing: the generation stands and every edge and symbol stays
-// where it was, a file read again whose content is the same included. One whose files moved
-// assembles again. A generation is a process-wide counter's value: no two graphs, a copy or a
+// where it was, a file read again whose content is the same included (over the scan it read last, no file is
+// even visited). One whose files moved assembles again. A generation is a process-wide counter's value: no two graphs, a copy or a
 // cleared graph share one. The symbols of a kind come in the order the files define them.
 static int test_generation() {
 	test_temp::TempDir dir("opennova_asset_graph_generation");
@@ -2222,8 +2304,15 @@ static int test_generation() {
 		return graph.generation() == assembled && &all_edges(graph).front().get() == edge &&
 				&all_symbols(graph).front().get() == symbol;
 	};
+	// Over the scan the last update read (its serial) no file is visited; over another scan of the same files,
+	// every one, each reused.
 	graph.update(paths, doc, scan, {});
-	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_reused == 1);
+	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_walked == 0);
+	TEST_EXPECT(kept());
+	const AssetScan same = scan_project_assets(paths, doc);
+	graph.update(paths, doc, same, {});
+	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_reused == 1 &&
+	            graph.stats().files_walked == same.entries.size());
 	TEST_EXPECT(kept());
 	// The same bytes written again: read again, and still the graph as it was.
 	TEST_EXPECT(test_io::write_text(items, text));
@@ -3665,6 +3754,7 @@ int main() {
 	failures += test_menu_text_scope();
 	failures += test_stylesheet_bindings();
 	failures += test_native_extractors();
+	failures += test_particle_names();
 	failures += test_catalog_symbols();
 	failures += test_symbol_locators();
 	failures += test_rename();

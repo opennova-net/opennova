@@ -27,11 +27,18 @@ public:
 		take_events();
 		const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(&document);
 		if (!heights) return;
+		const HeightsState &state = heights->heights();
+		// The file's name, what it is and how it is sculpted in its tooltip; then one numbers line and the warnings.
 		ImGui::TextUnformatted(basename_of(document.path()).c_str());
-		ui_kit::tooltip(document.path() + "\nThe terrain's heights, " + heights_form_words(heights->heights().form) +
-		                ", 1024 x 1024, a height a world unit across.");
+		ui_kit::tooltip(document.path() + "\nThe terrain's heights, " + heights_form_words(state.form) +
+		                ", 1024 x 1024, a height a world unit across. " +
+		                (state.form == HeightsForm::Cpt
+		                         ? "Sculpted in place: each stroke's ground is baked again by TrnGen's bake over the stretch "
+		                           "it reaches, and every other tile keeps its bytes."
+		                         : "An imported terrain's heightmap: made into the terrain's .cpt by its import as you save.") +
+		                "\nSculpt them in a mission's view or the terrain's: Terrain on the toolbar, or Ctrl+E.");
 		if (heights->plane_count() < 2) {
-			ImGui::TextWrapped("The editor reads no heights in this file.");
+			ui_kit::refusal_text("The editor reads no heights in this file.");
 			return;
 		}
 		// The facts walk the million heights: made again only when the document moves.
@@ -42,29 +49,17 @@ public:
 			revision_ = document.revision();
 			facts_ = heights->facts();
 		}
-		const HeightsState &state = heights->heights();
-		if (state.form == HeightsForm::Cpt)
-			ImGui::TextWrapped("Sculpted in place: each stroke's ground is baked again by TrnGen's bake over the stretch it "
-			                   "reaches, and every other tile of the file keeps its bytes.");
-		else
-			ImGui::TextWrapped("An imported terrain's heightmap (%s): sculpted here, made into the terrain's .cpt by its "
-			                   "import as you save.",
-			                   heights_form_words(state.form));
-		ImGui::TextWrapped("Heights from %s to %s units; %zu tiles.", units(facts_.lowest).c_str(),
-		                   units(facts_.highest).c_str(), facts_.tiles);
+		ui_kit::clipped_text("Heights from " + units(facts_.lowest) + " to " + units(facts_.highest) + " units; " +
+		                     std::to_string(facts_.tiles) + " tiles.");
 		if (facts_.over_rasterizer)
-			ImGui::TextWrapped("%zu heights stand past 128 units, where TrnGen's bake draws no ground back.",
-			                   facts_.over_rasterizer);
+			ui_kit::warning_line(std::to_string(facts_.over_rasterizer) + " heights stand past 128 units",
+			                     "TrnGen's bake draws no ground back there.");
 		if (facts_.steep_blocks)
-			ImGui::TextWrapped("%d stretches of 256 heights rise past what the .cpt holds (32,766 raw): written clamped.",
-			                   facts_.steep_blocks);
+			ui_kit::warning_line(std::to_string(facts_.steep_blocks) + " stretches written clamped",
+			                     "Stretches of 256 heights rise past what the .cpt holds (32,766 raw).");
 		if (facts_.unbaked)
-			ImGui::TextWrapped("%zu regions wait for their bake: the ground there is drawn from the sculpted heights "
-			                   "until it lands.",
-			                   facts_.unbaked);
-		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ImGui::TextWrapped("Sculpt them in a mission's view or the terrain's: Terrain on the toolbar, or Ctrl+E.");
-		ImGui::PopStyleColor();
+			ui_kit::quiet_text(std::to_string(facts_.unbaked) + " regions wait for their bake",
+			                   "The ground there is drawn from the sculpted heights until it lands.");
 	}
 
 private:

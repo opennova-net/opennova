@@ -1,6 +1,7 @@
 #include <editor/assets/asset_registry.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <numeric>
 #include <set>
@@ -135,6 +136,8 @@ const AssetEntry *AssetScan::at_path(std::string_view relative_path) const {
 }
 
 void AssetScan::index() {
+	static std::atomic<uint64_t> serials{0};
+	serial_ = ++serials;
 	for (AssetEntry &entry : entries) entry.key = pff::normalized_logical_name(entry.logical_name);
 	std::sort(entries.begin(), entries.end(), entry_before);
 	by_path_.resize(entries.size());

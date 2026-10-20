@@ -119,6 +119,23 @@ void changed_names(const GraphSlot &slot, const std::vector<GraphSymbol> &now,
 	}
 }
 
+// An edge a texture use's check reads (graph/texture_checks.cpp): a texture, a menu's texture, a loading image.
+bool texture_use(const GraphEdge &edge) {
+	return edge.kind == ReferenceKind::Texture || edge.kind == ReferenceKind::MenuTexture ||
+	       edge.kind == ReferenceKind::LoadingImage;
+}
+
+// Whether two readings of a file hold the same texture uses, in the same order.
+bool same_texture_uses(const std::vector<GraphEdge> &a, const std::vector<GraphEdge> &b) {
+	size_t i = 0, j = 0;
+	for (;; ++i, ++j) {
+		while (i < a.size() && !texture_use(a[i])) ++i;
+		while (j < b.size() && !texture_use(b[j])) ++j;
+		if (i == a.size() || j == b.size()) return i == a.size() && j == b.size();
+		if (!same_reading(a[i], b[j])) return false;
+	}
+}
+
 // An edge whose resolution reads the file set: a file reference, a screen's (its lookup asks
 // whether its menu file is one), and one whose scope a file decides (its table there or not, its
 // owner there or not), or whose reading at all does (GraphEdge::needs).
@@ -144,6 +161,7 @@ struct AssetGraph::Patch {
 	// when its findings come out otherwise.
 	std::vector<std::pair<uint32_t, std::vector<Diagnostic>>> held;
 	bool diagnostics_moved = false;    // a failure changed, or a file holding findings gone
+	bool texture_uses = false;         // a file's texture uses read otherwise, or gone
 	bool file_set = false;             // a file added, gone or of another kind
 	bool base = false;                 // another base layer: everything resolves again
 };
@@ -184,24 +202,46 @@ bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_ar
 	return renderer::material_texture_source(std::string(), type, {}).reader == renderer::MaterialTextureReader::Chunk;
 }
 
+bool AssetGraph::scan_kept(const AssetScan &scan) const {
+	return scan.serial() != 0 && scan.serial() == scan_serial_;
+}
+
+std::vector<const AssetEntry *> AssetGraph::stand_ins(const AssetScan &scan,
+		const std::vector<std::shared_ptr<const DocumentBase>> &open) const {
+	std::set<std::string> paths(open_paths_.begin(), open_paths_.end());
+	for (const auto &document : open)
+		if (document) paths.insert(document->path());
+	std::vector<const AssetEntry *> out;
+	for (const std::string &path : paths)
+		if (const AssetEntry *asset = scan.at_path(path)) out.push_back(asset);
+	// In the scan's order, as a walk of every file visits them.
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
 std::vector<const AssetEntry *> AssetGraph::files_to_read(const AssetScan &scan,
 		const std::vector<std::shared_ptr<const DocumentBase>> &open) const {
 	std::unordered_set<std::string> records;
 	for (const auto &document : open)
 		if (document && records_of(*document)) records.insert(document->path());
 	std::vector<const AssetEntry *> out;
-	for (const AssetEntry &asset : scan.entries) {
-		if (!graph_reads_kind(asset.kind) || records.count(asset.relative_path)) continue;
+	const auto consider = [&](const AssetEntry &asset) {
+		if (!graph_reads_kind(asset.kind) || records.count(asset.relative_path)) return;
 		const uint32_t id = index_.find(asset.relative_path);
 		if (id != GraphIndex::kNone) {
 			const GraphSlot &slot = index_.slot(id);
 			// update() keeps a slot read from this file as it is (reused), whatever else it does.
 			if (slot.logical_name == asset.logical_name && slot.kind == asset.kind && slot.read && !slot.open &&
 					slot.size == asset.size_bytes && slot.modified == asset.modified_ticks)
-				continue;
+				return;
 		}
 		out.push_back(&asset);
-	}
+	};
+	// The scan as the last update read it: every other slot holds its file's reading as the scan lists it.
+	if (scan_kept(scan))
+		for (const AssetEntry *asset : stand_ins(scan, open)) consider(*asset);
+	else
+		for (const AssetEntry &asset : scan.entries) consider(asset);
 	return out;
 }
 
@@ -243,9 +283,14 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 	for (const auto &document : open)
 		if (document && (records_of(*document) || text_of(*document)))
 			documents[document->path()] = document.get();
+	// The scan as the last update read it (its serial): every file it lists has its slot, read as it lists it
+	// (or from its document, standing in), so only the files whose stand-in may have moved are visited (the open
+	// documents', and those open at the last update, closed since); every other slot keeps what it read, and no
+	// file is gone. Any other scan, every file.
+	const bool kept = scan_kept(scan);
 	std::unordered_set<uint32_t> listed;
-	listed.reserve(scan.entries.size());
-	for (const AssetEntry &asset : scan.entries) {
+	std::vector<std::string> open_now; // the files a document stands in for after this update (open_paths_)
+	const auto visit = [&](const AssetEntry &asset) {
 		uint32_t id = index_.find(asset.relative_path);
 		// Another name at a path is another file.
 		if (id != GraphIndex::kNone && index_.slot(id).logical_name != asset.logical_name) {
@@ -265,7 +310,7 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 			patch.file_set = true;
 			patch.files.push_back(asset.relative_path);
 		}
-		listed.insert(id);
+		if (!kept) listed.insert(id);
 		GraphSlot &slot = index_.slot(id);
 		// A file the graph does not read (a texture, a mission text) holds nothing; its row still
 		// counts (the file set), so one added or gone reaches the edges that could name it.
@@ -274,15 +319,16 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 				slot.read = slot.open = false;
 				take(id, Extracted(), true, Diagnostic(), patch);
 			}
-			continue;
+			return;
 		}
 		const auto found = documents.find(asset.relative_path);
 		const DocumentBase *document = found == documents.end() ? nullptr : found->second;
 		if (document) {
+			open_now.push_back(asset.relative_path);
 			if (!retyped && slot.read && slot.open && slot.identity == document->identity() &&
 			    slot.revision == document->revision()) {
 				++stats_.files_reused;
-				continue;
+				return;
 			}
 			Extracted content;
 			if (const Document *records = records_of(*document))
@@ -296,12 +342,12 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 			slot.size = 0;
 			slot.modified = 0;
 			take(id, std::move(content), true, Diagnostic(), patch);
-			continue;
+			return;
 		}
 		if (!retyped && slot.read && !slot.open && slot.size == asset.size_bytes &&
 				slot.modified == asset.modified_ticks) {
 			++stats_.files_reused;
-			continue;
+			return;
 		}
 		Extracted content;
 		Diagnostic error, failure;
@@ -330,12 +376,23 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 		slot.size = asset.size_bytes;
 		slot.modified = asset.modified_ticks;
 		take(id, std::move(content), ok, failure, patch);
+	};
+	if (kept) {
+		const std::vector<const AssetEntry *> touched = stand_ins(scan, open);
+		for (const AssetEntry *asset : touched) visit(*asset);
+		stats_.files_walked = touched.size();
+	} else {
+		listed.reserve(scan.entries.size());
+		for (const AssetEntry &asset : scan.entries) visit(asset);
+		stats_.files_walked = scan.entries.size();
+		std::vector<uint32_t> gone;
+		index_.for_each_slot([&](uint32_t id) {
+			if (!listed.count(id)) gone.push_back(id);
+		});
+		for (const uint32_t id : gone) drop(id, patch);
 	}
-	std::vector<uint32_t> gone;
-	index_.for_each_slot([&](uint32_t id) {
-		if (!listed.count(id)) gone.push_back(id);
-	});
-	for (const uint32_t id : gone) drop(id, patch);
+	open_paths_ = std::move(open_now);
+	scan_serial_ = scan.serial();
 	std::sort(patch.files.begin(), patch.files.end());
 	patch.files.erase(std::unique(patch.files.begin(), patch.files.end()), patch.files.end());
 	stats_.files_patched = patch.files.size();
@@ -345,8 +402,10 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 	// Everything the graph holds is made from the files' rows and what each one read: when
 	// neither moved it stays as it is, every edge and symbol where it was.
 	if (patch.files.empty()) return out;
+	texture_moved_ = false;
 	resolve_patch(patch, out);
 	generation_.value = next_generation();
+	if (patch.texture_uses || patch.file_set || patch.base || texture_moved_) texture_uses_.value = next_generation();
 	out.changed = true;
 	return out;
 }
@@ -356,6 +415,7 @@ void AssetGraph::take(
 	GraphSlot &slot = index_.slot(id);
 	if (reads_the_same(slot, content, ok, failure)) return;
 	changed_names(slot, content.symbols, patch.symbol_keys, patch.style_keys);
+	patch.texture_uses = patch.texture_uses || !same_texture_uses(slot.edges, content.edges);
 	// The findings its edges held, which those it holds once resolved are compared against.
 	std::vector<Diagnostic> held;
 	for (EdgeResolution &resolution : slot.resolutions)
@@ -383,6 +443,7 @@ void AssetGraph::take(
 void AssetGraph::drop(uint32_t id, Patch &patch) {
 	const GraphSlot &slot = index_.slot(id);
 	changed_names(slot, {}, patch.symbol_keys, patch.style_keys);
+	patch.texture_uses = patch.texture_uses || std::any_of(slot.edges.begin(), slot.edges.end(), texture_use);
 	patch.names.emplace(slot.key, true);
 	patch.files.push_back(slot.path);
 	patch.file_set = true;
@@ -616,6 +677,9 @@ bool AssetGraph::resolve_edge(Ref ref) {
 	const bool missing = counts_missing(slot, edge, target, status);
 	// Each entry of the index moves only when it changed.
 	const bool was = resolution.resolved;
+	// A texture use resolved otherwise (texture_uses_generation).
+	if (was && texture_use(edge) && (status != resolution.status || file != resolution.file || target != edge.target))
+		texture_moved_ = true;
 	if (!was || target != edge.target || target_kind != edge.target_kind) {
 		if (was) index_.remove_target(GraphIndex::key_of(edge.target_as(), edge.target, edge.scope), ref);
 		edge.target = target;
@@ -722,6 +786,7 @@ GraphUpdate AssetGraph::set_base(std::shared_ptr<const GraphLayer> base) {
 	patch.base = true;
 	resolve_patch(patch, out);
 	generation_.value = next_generation();
+	texture_uses_.value = next_generation();
 	out.changed = true;
 	return out;
 }

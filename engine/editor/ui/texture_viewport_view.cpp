@@ -176,17 +176,17 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		                "or twice below full detail, a normal map never.");
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), texture_options_change(options)));
-	// What the picture is, in words: the device texture at the detail shown; the alpha as the use shown reads it.
-	ImGui::PushTextWrapPos(0.0f);
+	// What the picture is, in words, a line each (whole in its tooltip): the device texture at the detail shown; the
+	// alpha as the use shown reads it.
 	if (model.shown_detail() >= 0)
-		ImGui::TextDisabled("At object texture detail %d the game makes %s.", model.shown_detail(),
-		                    device_texture_words(model.shown_device()).c_str());
+		ui_kit::quiet_text("At object texture detail " + std::to_string(model.shown_detail()) + " the game makes " +
+		                   device_texture_words(model.shown_device()) + ".");
 	const TextureShownUse &use_shown = model.shown_use();
-	if (use_shown.index >= 0 && !use_shown.alpha_words.empty()) ImGui::TextDisabled("Alpha: %s.", use_shown.alpha_words.c_str());
+	if (use_shown.index >= 0 && !use_shown.alpha_words.empty()) ui_kit::quiet_text("Alpha: " + use_shown.alpha_words + ".");
 	// What the use's role reads of it: a line (a particle graphic's atlas page), and a legend (a blend map's weights,
 	// a foliage map's codes), each row its swatch, its share and what the game does with it; six rows show, more scroll.
 	const TextureRoleView &role = model.role_view();
-	if (!role.words.empty()) ImGui::TextDisabled("%s", role.words.c_str());
+	if (!role.words.empty()) ui_kit::quiet_text(role.words);
 	if (!role.title.empty()) {
 		ImGui::TextDisabled("%s:", role.title.c_str());
 		const float line = ImGui::GetTextLineHeightWithSpacing();
@@ -210,7 +210,6 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		}
 		ImGui::EndChild();
 	}
-	ImGui::PopTextWrapPos();
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y));
 }
 

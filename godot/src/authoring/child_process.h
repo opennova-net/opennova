@@ -55,6 +55,9 @@ public:
 	// pump) sends its shown windows to the bottom of the z-order without activation and stops their taskbar
 	// flashing, until one is the foreground window (left alone from then on) or kTendMs. Windows only.
 	void tend();
+	// A child started behind is still tended (frame pacing keeps the Shell's pumps at the display's rate while
+	// one is, so its first window goes back as soon as it shows).
+	bool tending();
 
 private:
 	// The child spawn started under `pid` (the id it had then: base/proc's reads 0 once it is reaped), or null.

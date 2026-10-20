@@ -61,9 +61,33 @@ struct ProblemsService::Pass {
 	bool graph_shown = false; // Graph moved for its update
 };
 
+// What the rows' marks were last planned over (mark_rows): the scan's serial and the requirements made with it,
+// the gate's rows, the build's target, the base game's names and the files packed as shipped. While each
+// stands the plan's refusals do (plan_blockers reads nothing else but the expansion's table, which a save of it
+// rescans).
+struct ProblemsService::BlockerMemo {
+	bool made = false;
+	uint64_t serial = 0;
+	std::shared_ptr<const RequirementReport> requirements;
+	std::vector<Diagnostic> gate;
+	BuildTarget target;
+	std::vector<std::string> base_files;
+	ShippedFiles shipped;
+
+	bool same(uint64_t serial_now, const std::shared_ptr<const RequirementReport> &requirements_now,
+	          const BuildTarget &target_now, const std::vector<std::string> &base_now,
+	          const ShippedFiles &shipped_now) const {
+		return made && serial_now != 0 && serial == serial_now && requirements == requirements_now &&
+		       target.expansion == target_now.expansion && target.install == target_now.install &&
+		       target.game == target_now.game && target.base_project == target_now.base_project &&
+		       base_files == base_now && shipped.original == shipped_now.original &&
+		       shipped.unsaved == shipped_now.unsaved;
+	}
+};
+
 ProblemsService::ProblemsService(SessionCore &core) :
 		core_(core), view_(core.view()), checks_(std::make_shared<ProjectChecks>()),
-		originals_(std::make_unique<OriginalFiles>()) {
+		originals_(std::make_unique<OriginalFiles>()), blocker_memo_(std::make_unique<BlockerMemo>()) {
 	view_.findings.graph = graph_;
 	view_.findings.assets = assets_;
 	view_.findings.project_checks = checks_;
@@ -173,23 +197,25 @@ void ProblemsService::step_validation(const PollBudget &budget, const OperationC
 
 void ProblemsService::want_originals() {
 	if (!view_.project.open || !view_.project.scan) return;
+	// The install is validated for the files a row may be the game's own in (problem_query.h's
+	// original_candidate): a finding on a file of a name the install serves, each name validated once (the
+	// install's files of those names and what their findings read, session/original_files.h).
+	// The install's names normalized once while its listing stands (a composition asks every row's).
+	if (served_listing_ != view_.project.retail_files) {
+		served_listing_ = view_.project.retail_files;
+		served_.clear();
+		for (const std::string &name : served_listing_) served_.insert(pff::normalized_logical_name(name));
+	}
+	std::vector<std::string> names;
+	for (const Diagnostic &d : view_.findings.diagnostics)
+		if (original_candidate(d))
+			if (std::string name = served_name(d); served_.count(name)) names.push_back(std::move(name));
+	std::sort(names.begin(), names.end());
+	names.erase(std::unique(names.begin(), names.end()), names.end());
+	originals_needed_ = !names.empty();
 	// Another install or game forgets what was found (the view says so at once); a new scan looks at the
 	// install's folder again.
-	originals_->want(core_.base_game(), view_.project.document, view_.project.scan.get());
-	// The install is validated once a row may be about its data: a finding on a file of a name it serves.
-	originals_needed_ = false;
-	const std::vector<std::string> &served = view_.project.retail_files;
-	const auto by_name = [](const std::string &a, const std::string &b) {
-		return pff::normalized_logical_name(a) < pff::normalized_logical_name(b);
-	};
-	for (const Diagnostic &d : view_.findings.diagnostics) {
-		if (d.asset.empty() || blocks_build(d)) continue;
-		const std::string name = basename_of(d.asset);
-		if (std::binary_search(served.begin(), served.end(), name, by_name)) {
-			originals_needed_ = true;
-			break;
-		}
-	}
+	originals_->want(core_.base_game(), view_.project.document, view_.project.scan.get(), names);
 	show_originals();
 }
 
@@ -197,8 +223,10 @@ bool ProblemsService::step_originals(uint64_t bytes) {
 	if (!originals_needed_ || originals_->settled()) return true;
 	// The install validated as a project of its own, nothing of the session's read (the polls step this
 	// only once no validation of the project is due or under way).
+	const int64_t started = steady_clock_us();
 	const bool done = originals_->step(bytes);
 	show_originals();
+	spent_.originals_us += steady_clock_us() - started;
 	if (done) show_validation(); // the counts stand from here
 	return done;
 }
@@ -210,25 +238,40 @@ void ProblemsService::show_originals() {
 	core_.touch(ViewConcern::Findings);
 }
 
-// The gate as it stands among the rows (gate_findings' range), never composing: empty when the rows no
-// longer hold it.
-std::vector<Diagnostic> ProblemsService::gate_rows() const {
-	const std::vector<Diagnostic> &rows = view_.findings.diagnostics;
-	if (gate_size_ + gate_tail_ + trailing_ > rows.size()) return {};
-	const auto end = rows.end() - static_cast<std::ptrdiff_t>(gate_tail_ + trailing_);
-	return std::vector<Diagnostic>(end - static_cast<std::ptrdiff_t>(gate_size_), end);
-}
-
 void ProblemsService::mark_rows() {
-	blockers_.clear();
+	BlockerMemo &memo = *blocker_memo_;
 	if (view_.project.open && view_.project.scan && view_.project.requirements && view_.project.document) {
 		// The plan a build would make (ADR 0046 S16): the project's target, an expansion's gate over its base
-		// game's names, and the game's own bytes packed as stored.
-		const std::vector<Diagnostic> gate = gate_rows();
-		const BaseNames base{&view_.project.base_files};
-		const ShippedFiles shipped = core_.shipped_files(gate);
-		blockers_ = build_blockers(plan_build(core_.paths(), *view_.project.scan, *view_.project.requirements, gate,
-		                                      core_.build_target(), &base, &shipped));
+		// game's names, and the game's own bytes packed as stored; its refusals alone (plan_blockers), planned
+		// again only when what they are made of moved. The gate is compared where it stands among the rows
+		// (gate_findings' range, none when the rows no longer hold it), never composing, and copied only when
+		// it moved.
+		const std::vector<Diagnostic> &rows = view_.findings.diagnostics;
+		const bool held = gate_size_ + gate_tail_ + trailing_ <= rows.size();
+		const auto end = held ? rows.end() - static_cast<std::ptrdiff_t>(gate_tail_ + trailing_) : rows.end();
+		const auto begin = held ? end - static_cast<std::ptrdiff_t>(gate_size_) : rows.end();
+		if (size_t(end - begin) != memo.gate.size() || !std::equal(begin, end, memo.gate.begin())) {
+			memo.gate.assign(begin, end);
+			memo.made = false;
+		}
+		const BuildTarget target = core_.build_target();
+		const ShippedFiles shipped = core_.shipped_files(memo.gate);
+		const uint64_t serial = view_.project.scan->serial();
+		if (!memo.same(serial, view_.project.requirements, target, view_.project.base_files, shipped)) {
+			const BaseNames base{&view_.project.base_files};
+			++blocker_plans_;
+			blockers_ = plan_blockers(core_.paths(), *view_.project.scan, *view_.project.requirements, memo.gate, target,
+			                          &base, &shipped);
+			memo.made = true;
+			memo.serial = serial;
+			memo.requirements = view_.project.requirements;
+			memo.target = target;
+			memo.base_files = view_.project.base_files;
+			memo.shipped = shipped;
+		}
+	} else {
+		blockers_.clear();
+		*blocker_memo_ = BlockerMemo();
 	}
 	auto marks = std::make_shared<const FindingMarks>(
 	        mark_findings(view_.findings.diagnostics, view_.findings.originals.get(), &blockers_));
@@ -270,6 +313,12 @@ void ProblemsService::show_validation() {
 }
 
 void ProblemsService::compose_rows(bool keep_reported) {
+	const int64_t started = steady_clock_us();
+	compose_rows_now(keep_reported);
+	spent_.compose_us += steady_clock_us() - started;
+}
+
+void ProblemsService::compose_rows_now(bool keep_reported) {
 	read_once_ = true;
 	const bool moved = pass_->validation.moved() || pass_->checks_moved || moved_since_composed_;
 	moved_since_composed_ = false;
@@ -414,6 +463,7 @@ void ProblemsService::clear() {
 	originals_->clear();
 	originals_needed_ = false;
 	blockers_.clear();
+	*blocker_memo_ = BlockerMemo();
 	view_.findings.marks.reset();
 	show_originals();
 	show_validation();

@@ -183,32 +183,34 @@ void pool_findings(const AssetGraph &graph, const std::string &path, std::vector
 	}
 }
 
+// What the cross-file checks keep between compositions (forget_use_checks lets it all go), each under its lock.
+std::mutex g_pools_mutex, g_clips_mutex, g_slots_mutex, g_terrain_mutex;
+
+// Every mission's pool_findings (each mission's path, its findings), by the state of the graph they were made of.
+using MissionPools = std::vector<std::pair<std::string, std::vector<Diagnostic>>>;
+UseCheckMemo<uint64_t, MissionPools> g_pools; // g_pools_mutex held
+
 // Every mission's pool_findings, made once per state of the graph (AssetGraph::generation: while it
 // stands, every edge and symbol is where it was), not at every composition of the rows (the editor
 // composes them after every edit that validates a file); a composition takes those of each mission
 // whose records its validation checked.
 void check_mission_pools(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &,
 		std::vector<Diagnostic> &out) {
-	struct Made {
-		std::mutex mutex;
-		uint64_t generation = 0; // no graph's (the counter starts at 1)
-		std::vector<std::pair<std::string, std::vector<Diagnostic>>> missions; // each mission's path, its findings
-	};
-	static Made made;
-	const std::lock_guard<std::mutex> lock(made.mutex);
-	if (made.generation != graph.generation()) {
-		made.missions.clear();
+	const std::lock_guard<std::mutex> lock(g_pools_mutex);
+	const MissionPools *missions = g_pools.find(graph.generation());
+	if (!missions) {
+		MissionPools made;
 		std::string last;
 		for (const GraphSymbol *symbol : graph.symbols_of_kind(ReferenceKind::MissionEntity)) {
 			const std::string &path = symbol->file;
 			if (path == last) continue;
 			last = path;
-			made.missions.emplace_back(path, std::vector<Diagnostic>());
-			pool_findings(graph, path, made.missions.back().second);
+			made.emplace_back(path, std::vector<Diagnostic>());
+			pool_findings(graph, path, made.back().second);
 		}
-		made.generation = graph.generation();
+		missions = &g_pools.keep(graph.generation(), std::move(made));
 	}
-	for (const auto &[path, findings] : made.missions)
+	for (const auto &[path, findings] : *missions)
 		if (files.records_checked(path)) out.insert(out.end(), findings.begin(), findings.end());
 }
 
@@ -281,6 +283,11 @@ std::string slot_fault_words(const ParticleSlotFault &fault) {
 // table: each list that reads a slot no line before it filled faults the game (documents/particle_token_slots.h), an
 // error at the line. An open document stands in with its text. An expansion's base game parses its own particle files
 // among them, which the project does not list: none there.
+// The token slots' findings by what they were read from: the project's folder, the SCR policy, and each particle
+// file in the game's order with its stamp (an open document's instance, load and revision; else the file's size
+// and last write as the scan lists it).
+UseCheckMemo<std::string, std::vector<Diagnostic>> g_slots; // g_slots_mutex held
+
 void check_particle_token_slots(const AssetGraph &, const ValidationCache &, const ValidationInput &input,
 		std::vector<Diagnostic> &out) {
 	if (!input.project.expansion.standalone()) return;
@@ -293,30 +300,54 @@ void check_particle_token_slots(const AssetGraph &, const ValidationCache &, con
 	const std::vector<std::string> order =
 	        effect_file_order(names, gore_particle_extension(input.scan.find(kGoreContentMarker) != nullptr));
 	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
-	std::vector<ParticleLoadFile> files;
+	// The files in the game's order, each with what it is read from, which the findings are kept by: read again
+	// only once a stamp, the order or the policy moved (every composition read them all before).
+	struct Read {
+		const AssetEntry *entry = nullptr;
+		const TextDocument *text = nullptr;
+	};
+	std::vector<Read> reads;
+	std::string key = input.paths.root + "\x1f" + std::to_string(policy);
 	for (const std::string &name : order) {
 		const AssetEntry *entry = input.scan.find(name);
 		if (!entry) continue;
-		ParticleLoadFile file;
-		file.path = entry->relative_path;
 		const std::shared_ptr<const DocumentBase> open = input.open_document(*entry);
-		if (const TextDocument *text = open ? text_of(*open) : nullptr) {
-			file.bytes.assign(text->text().begin(), text->text().end());
+		const TextDocument *text = open ? text_of(*open) : nullptr;
+		key += "\x1e" + entry->relative_path +
+		       (text ? "|o" + std::to_string(open->identity()) + "." + std::to_string(open->load_generation()) + "." +
+		                       std::to_string(open->revision())
+		             : "|f" + std::to_string(entry->size_bytes) + "." + std::to_string(entry->modified_ticks));
+		reads.push_back({entry, text}); // the input holds each open document alive
+	}
+	const std::lock_guard<std::mutex> lock(g_slots_mutex);
+	if (const std::vector<Diagnostic> *kept = g_slots.find(key)) {
+		out.insert(out.end(), kept->begin(), kept->end());
+		return;
+	}
+	std::vector<ParticleLoadFile> files;
+	for (const Read &read : reads) {
+		ParticleLoadFile file;
+		file.path = read.entry->relative_path;
+		if (read.text) {
+			file.bytes.assign(read.text->text().begin(), read.text->text().end());
 		} else {
 			std::string error;
-			if (!io::read_file_bytes(join_path(input.paths.root, entry->relative_path), file.bytes, error) ||
+			if (!io::read_file_bytes(join_path(input.paths.root, read.entry->relative_path), file.bytes, error) ||
 			    !vfs_decode_payload(file.bytes, policy))
 				continue;
 		}
 		files.push_back(std::move(file));
 	}
+	std::vector<Diagnostic> found;
 	for (const ParticleSlotFault &fault : particle_token_slot_faults(files)) {
 		Diagnostic d = make_finding(finding_code(ParticleFinding::UnfilledTokenSlot), DiagnosticSeverity::Error,
 		                            slot_fault_words(fault), files[fault.file].path, fault.key);
 		d.line = size_t(fault.line);
 		d.column = 1;
-		out.push_back(std::move(d));
+		found.push_back(std::move(d));
 	}
+	out.insert(out.end(), found.begin(), found.end());
+	g_slots.keep(key, std::move(found));
 }
 
 // A file's text as this validation reads it, the file a build packs: an open document with changes, its save
@@ -382,11 +413,12 @@ struct TerrainAdmission {
 // fixes); a .trn every mission reading it loads is taken, its own row taken back (the .trn's own check,
 // documents/terrain_document validate_terrain_file, judges it alone, which stands for a .trn no mission reads).
 // Each mission's judgement is made again only once one of its three files' stamps moves.
+std::map<std::string, std::pair<std::string, TerrainAdmission>> g_terrain; // by mission: its stamps, its judgement
+
 void check_terrain_admission(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
 		std::vector<Diagnostic> &out) {
-	static std::mutex mutex;
-	static std::map<std::string, std::pair<std::string, TerrainAdmission>> made; // by mission: its stamps, its judgement
-	const std::lock_guard<std::mutex> lock(mutex);
+	const std::lock_guard<std::mutex> lock(g_terrain_mutex);
+	std::map<std::string, std::pair<std::string, TerrainAdmission>> &made = g_terrain;
 	const AssetEntry *overcast = input.scan.find(env::kOvercastFile);
 	std::map<std::string, std::vector<const TerrainAdmission *>> by_terrain;
 	std::set<std::string> unjudged; // a .trn a mission reads that was not judged (its records unchecked, unread)
@@ -495,12 +527,10 @@ void check_terrain_admission(const AssetGraph &graph, const ValidationCache &fil
 // so the name built is the one looked for; a clip with no file of it, or one over the 500,000 bytes the load
 // refuses [orig: BoneFile_Load @ 0x40fff0, the 0x7A120 test @ 0x41005d], takes failsafe.bad's node, which fits
 // (@ 0x40c295): the reference's own finding, or the clip's.
-void check_animation_clip_names(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
-		std::vector<Diagnostic> &out) {
+void walk_clip_names(const AssetGraph &graph, const ValidationInput &input, std::vector<Diagnostic> &out) {
 	constexpr uint64_t kClipLoadBytes = 500000;
 	graph.for_each_edge([&](const GraphEdge &edge) {
-		if (edge.kind != ReferenceKind::Animation || !strutil::ends_with_icase(edge.source, ".adm") ||
-				!files.records_checked(edge.source))
+		if (edge.kind != ReferenceKind::Animation || !strutil::ends_with_icase(edge.source, ".adm"))
 			return;
 		std::string name = edge.value;
 		const size_t dot = name.rfind('.');
@@ -522,6 +552,26 @@ void check_animation_clip_names(const AssetGraph &graph, const ValidationCache &
 		d.record_kind = edge.address.kind;
 		out.push_back(std::move(d));
 	});
+}
+
+// The clips' findings of every animation map, whoever checked its records, by the graph's state and the scan's
+// serial they were made of (each file's size, which the load's limit reads).
+UseCheckMemo<std::pair<uint64_t, uint64_t>, std::vector<Diagnostic>> g_clips; // g_clips_mutex held
+
+void check_animation_clip_names(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
+		std::vector<Diagnostic> &out) {
+	// Every map's findings, made once per state of the graph and the scan (a walk of every edge); a composition
+	// takes those of each map whose records its validation checked, each finding on its map (its asset).
+	const std::lock_guard<std::mutex> lock(g_clips_mutex);
+	const std::pair<uint64_t, uint64_t> key{graph.generation(), input.scan.serial()};
+	const std::vector<Diagnostic> *made = key.second != 0 ? g_clips.find(key) : nullptr;
+	std::vector<Diagnostic> walked;
+	if (!made) {
+		walk_clip_names(graph, input, walked);
+		made = key.second != 0 ? &g_clips.keep(key, std::move(walked)) : &walked;
+	}
+	for (const Diagnostic &d : *made)
+		if (files.records_checked(d.asset)) out.push_back(d);
 }
 
 // The cross-file checks, one row per asset kind, in AssetKind's order.
@@ -549,6 +599,26 @@ static_assert(rows_in_kind_order(),
 		"one use check per asset kind, in AssetKind's order, each with its check");
 
 } // namespace
+
+void forget_use_checks() {
+	{
+		const std::lock_guard<std::mutex> lock(g_pools_mutex);
+		g_pools.clear();
+	}
+	{
+		const std::lock_guard<std::mutex> lock(g_clips_mutex);
+		g_clips.clear();
+	}
+	{
+		const std::lock_guard<std::mutex> lock(g_slots_mutex);
+		g_slots.clear();
+	}
+	{
+		const std::lock_guard<std::mutex> lock(g_terrain_mutex);
+		g_terrain.clear();
+	}
+	forget_texture_checks();
+}
 
 const UseCheckRow *use_check(AssetKind kind) {
 	for (const UseCheckRow &row : kUseChecks)

@@ -104,12 +104,8 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 	const float em = ImGui::GetFontSize();
 	ui_kit::WrapRow row;
 	// New event: a recipe (the shipped missions' compositions, the most used first), its subject left to its chip.
-	row.next(ui_kit::button_width("New event"));
-	ImGui::BeginDisabled(!editable);
-	if (ImGui::Button("New event")) ImGui::OpenPopup("new_event");
-	ImGui::EndDisabled();
-	ui_kit::tooltip("A new event at the end of the events, from what the shipped missions' events wait on.");
-	if (ImGui::BeginPopup("new_event")) {
+	if (ui_kit::tool_popup(row, "New event", "new_event", editable,
+	                       "A new event at the end of the events, from what the shipped missions' events wait on.")) {
 		for (const MissionRecipe &recipe : mission_recipes()) {
 			if (ImGui::MenuItem(recipe.title)) {
 				std::vector<Edit> edits;
@@ -175,7 +171,7 @@ void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mi
 	std::sort(indexes.begin(), indexes.end());
 	const std::string heading = "Variables (" + std::to_string(indexes.size()) + ")###variables";
 	if (!ImGui::CollapsingHeader(heading.c_str())) return;
-	if (indexes.empty()) ImGui::TextDisabled("No trigger or action, and no line of the script, uses a variable.");
+	if (indexes.empty()) ui_kit::empty_state("No variable is used.", "No trigger or action, and no line of the script, uses one.");
 	for (const int64_t index : indexes) {
 		const auto event = events.find(index);
 		const auto scripted = script_variables_.find(index);
@@ -316,7 +312,7 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 	MissionPickSlot picking;
 	if (shown.pick.active() && mission_pick_slot(*mission, shown.pick.record, shown.pick.slot, picking) &&
 	    picking.kind == mission::ParamKind::Event) {
-		ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Click a card's title for %s (Esc cancels).", picking.label.c_str());
+		ImGui::TextColored(ui_kit::warning_color(), "Click a card's title for %s (Esc cancels).", picking.label.c_str());
 		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !popup_last_frame_ && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows))
 			window_requests::pick_in_view(workspace, mission->path(), NodeAddress(), -1);
 	}

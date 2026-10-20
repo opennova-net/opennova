@@ -336,6 +336,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/viewport_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/particle_keys_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/frame_times.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_family.cpp
@@ -477,6 +478,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/project_settings_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_reveal.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_tree.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_picker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/rename_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/script_view.cpp

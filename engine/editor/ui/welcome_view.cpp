@@ -16,9 +16,6 @@ namespace opennova::editor {
 
 namespace {
 
-const ImVec4 kFoundColor(0.55f, 0.85f, 0.55f, 1.0f);
-const ImVec4 kWrongColor(0.95f, 0.55f, 0.45f, 1.0f);
-
 template <size_t N> void copy_into(char (&buffer)[N], const std::string &text) {
 	const size_t n = std::min(text.size(), N - 1);
 	std::memcpy(buffer, text.data(), n);
@@ -29,7 +26,9 @@ template <size_t N> void copy_into(char (&buffer)[N], const std::string &text) {
 // muted.
 void install_line(const std::string &words, bool ok, bool named) {
 	if (words.empty()) return;
-	ImGui::PushStyleColor(ImGuiCol_Text, !named ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled) : ok ? kFoundColor : kWrongColor);
+	ImGui::PushStyleColor(ImGuiCol_Text, !named ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)
+	                                     : ok   ? ui_kit::reference_color(ReferenceStatus::Present)
+	                                            : ui_kit::refusal_color());
 	ImGui::TextWrapped("%s", words.c_str());
 	ImGui::PopStyleColor();
 }
@@ -82,7 +81,7 @@ void draw_recent(Workspace &workspace) {
 		workspace.request(request::pick_directory(PickPurpose::OpenProject));
 	ImGui::EndDisabled();
 	if (v.project.recent_projects.empty()) {
-		ImGui::TextDisabled("The projects you open are listed here.");
+		ui_kit::empty_state("No recent project.", "The projects you open are listed here.");
 		return;
 	}
 	ImGui::Spacing();
@@ -157,9 +156,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	const ui_kit::PathField folder = ui_kit::path_field("Folder", folder_.text, sizeof(folder_.text), "Browse...##folder", 0.0f, allowed);
 	if (folder.edited) set("dir", io::JsonValue::make_string(folder_.sent()));
 	if (folder.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
-	ImGui::PushTextWrapPos(0.0f);
-	ImGui::TextDisabled("The folder is made if it does not exist; it must not hold a project already.");
-	ImGui::PopTextWrapPos();
+	ui_kit::tooltip("The folder is made if it does not exist; it must not hold a project already.");
 	const ui_kit::PathField field = ui_kit::path_field("Game install", install_.text, sizeof(install_.text), "Browse...##install", 0.0f, allowed);
 	if (field.edited) set("game_install", io::JsonValue::make_string(install_.sent()));
 	if (field.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectInstall));
@@ -227,12 +224,12 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 	ImGui::SetWindowFontScale(1.6f);
 	ImGui::TextUnformatted("OpenNova Editor");
 	ImGui::SetWindowFontScale(1.0f);
-	ImGui::TextDisabled("A project is your mod's own files: import the game's, change them, build, and play.");
+	ui_kit::tooltip("A project is your mod's own files: import the game's, change them, build, and play.");
 	// Why the last New project or Open was refused, in its own words: Output and Problems stand aside while no
 	// project is open, so this is where it shows.
 	if (!v.project.refused.empty()) {
 		ImGui::Spacing();
-		ImGui::PushStyleColor(ImGuiCol_Text, kWrongColor);
+		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::refusal_color());
 		ImGui::TextWrapped("%s", v.project.refused.c_str());
 		ImGui::PopStyleColor();
 	}

@@ -54,6 +54,9 @@ static func boot(test: GutTest, label: String, dirs: Array[String], frames := 0)
 	test.assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
 	dirs.append(settings_dir)
 	app.set("settings_path", settings_dir.path_join("editor_settings.json"))
+	# Its frames unpaced, a windowed run's too (the scene paces a windowed editor's: EditorApp's
+	# frame_pacing); a test of the pacing turns it on.
+	app.set("frame_pacing", false)
 	test.add_child_autofree(app)
 	if frames > 0:
 		await test.get_tree().process_frame

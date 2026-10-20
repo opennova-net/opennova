@@ -30,23 +30,16 @@ using window_requests::matches;
 using window_requests::select;
 using window_requests::set;
 
-// What the game makes of a stylesheet, from its Problems rows.
-const char *sheet_status(const SessionView &view, const FindingsIndex &findings,
-                         const MnsDocument &document) {
-	if (!document.read_by_game()) return "Not read by the game: it reads menu_style.mns and brand.mns only.";
+// What the game makes of a stylesheet, from its Problems rows: one line, why in its tooltip.
+void sheet_status(const SessionView &view, const FindingsIndex &findings, const MnsDocument &document) {
+	if (!document.read_by_game())
+		return ui_kit::quiet_text("Not read by the game.", "It reads menu_style.mns and brand.mns only.");
 	for (const size_t i : findings.of_file(document.path())) {
 		const Diagnostic &d = view.findings.diagnostics[i];
 		if (d.severity == DiagnosticSeverity::Error && d.row() && d.row()->group == FindingGroup::Stylesheets)
-			return "The game reads it only in part: see Problems.";
+			return ui_kit::warning_line("The game reads it only in part.", "Problems says what it leaves.");
 	}
-	return "Read by the game.";
-}
-
-// A line's note in a cell, dimmed and cut to the cell (whole, or `tip`, in its tooltip).
-void quiet_text(const std::string &text, const std::string &tip = std::string()) {
-	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-	ui_kit::clipped_text(text, tip);
-	ImGui::PopStyleColor();
+	ui_kit::quiet_text("Read by the game.");
 }
 
 // A colour swatch over the value, read and written as the game's AARRGGBB word (the
@@ -214,15 +207,17 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 	reveal_.follow(view, *document);
 	findings_.follow(view);
 	draw_document_toolbar(workspace, *document);
-	ui_kit::empty_state(sheet_status(view, findings_, *document));
+	sheet_status(view, findings_, *document);
 	// The filter is the workspace's (the MCP gaps lane: workspace.document's filter).
 	filter_.follow(view.workspace.document(document->path()).filter);
-	if (ui_kit::filter_box("##filter", filter_.text, sizeof(filter_.text), "Filter names and values", 0.0f, nullptr, false)) {
+	const auto send_filter = [&] {
 		io::JsonValue members = io::JsonValue::make_object();
 		members.set("path", io::JsonValue::make_string(document->path()));
 		members.set("filter", io::JsonValue::make_string(filter_.sent()));
 		window_requests::set_workspace(workspace, "document", std::move(members));
-	}
+	};
+	if (ui_kit::filter_box("##filter", filter_.text, sizeof(filter_.text), "Filter names and values", 0.0f, nullptr, false))
+		send_filter();
 	refresh_lines(*document);
 	const std::vector<size_t> &listed = lines_.listed;
 	const std::vector<size_t> &shown = lines_.shown;
@@ -260,7 +255,10 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 	if (tools.locked) ui_kit::empty_state(tools.locked);
 
 	if (listed.empty()) return ui_kit::empty_state("The stylesheet has no variables yet.");
-	if (shown.empty()) return ui_kit::empty_state("No line matches the filter.");
+	if (shown.empty()) {
+		if (ui_kit::nothing_matches(filter_.text, "line")) send_filter();
+		return;
+	}
 	// The columns start at widths of the font's size and resize; narrower than they need,
 	// the table scrolls sideways.
 	const bool read = document->read_by_game();
@@ -342,7 +340,7 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 				ImGui::TableNextColumn();
 				used_by_cell(workspace, use.users);
 				ImGui::TableNextColumn();
-				if (!read) quiet_text("not read by the game");
+				if (!read) ui_kit::quiet_text("not read by the game");
 			}
 			ImGui::PopID();
 		}

@@ -34,13 +34,34 @@ namespace opennova::editor {
 
 namespace {
 
-const ImVec4 kChoreRefusalColor(0.95f, 0.55f, 0.45f, 1.0f);
-const ImVec4 kChoreWarningColor(0.95f, 0.8f, 0.4f, 1.0f);
+// The body the file's and the folder's Delete... share, under their question and their own lines: who names what goes
+// (amber, `named_by`, the first `uses` listed of `count`) or that nothing does (`none`); one quiet line saying Undo
+// file brings it back, where it goes (`trash`) and what its uses become in its tooltip; then Delete (Delete anyway
+// while uses name it, only while `allowed`) and Cancel. The button pressed: 1 Delete, -1 Cancel, 0 none.
+int delete_dialog_body(const std::string &named_by, size_t count, const std::vector<std::string> &uses, const char *none,
+                       const char *trash, bool allowed) {
+	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+	if (count) {
+		ui_kit::warning_line(named_by);
+		for (const std::string &place : uses) ImGui::BulletText("%s", place.c_str());
+		if (count > uses.size()) ImGui::TextDisabled("and %zu more", count - uses.size());
+	} else if (none) {
+		ImGui::TextDisabled("%s", none);
+	}
+	ImGui::PopTextWrapPos();
+	ui_kit::quiet_text("Edit > Undo file brings it back.",
+	                   std::string(trash) +
+	                           (count ? " Deleted, what names it shows as Problems rows until it is changed." : ""));
+	ImGui::BeginDisabled(!allowed);
+	const bool remove = ImGui::Button(count ? "Delete anyway" : "Delete");
+	ImGui::EndDisabled();
+	if (remove && allowed) return 1;
+	ImGui::SameLine();
+	return ImGui::Button("Cancel") ? -1 : 0;
+}
 
 const AssetEntry *chore_entry_at(const SessionView &view, const std::string &path) {
-	for (const AssetEntry &entry : view.project.scan->entries)
-		if (entry.relative_path == path) return &entry;
-	return nullptr;
+	return view.project.scan->at_path(path);
 }
 
 // Whether `path` lies in `folder`.
@@ -73,14 +94,21 @@ std::vector<std::string> FilesWindow::others_of(const SessionView &view, const s
 void FilesWindow::choose(const std::string &path) {
 	const ImGuiIO &io = ImGui::GetIO();
 	if (io.KeyShift && !selected_.empty() && selected_ != path) {
-		// The run of rows from the one selected to this one, as they were last drawn.
-		const auto from = std::find(rows_.begin(), rows_.end(), selected_);
-		const auto to = std::find(rows_.begin(), rows_.end(), path);
-		if (from != rows_.end() && to != rows_.end()) {
+		// The run of rows from the one selected to this one, as they show: the flat list's, or the tree's files
+		// (none of a folded folder's), each a scan index.
+		const std::vector<AssetEntry> &entries = workspace_.view().project.scan->entries;
+		const std::vector<size_t> &rows = rows_flat_ ? matches_ : rows_;
+		size_t from = rows.size(), to = rows.size();
+		for (size_t i = 0; i < rows.size() && (from == rows.size() || to == rows.size()); ++i) {
+			if (rows[i] >= entries.size()) continue;
+			const std::string &at = entries[rows[i]].relative_path;
+			if (at == selected_) from = i;
+			if (at == path) to = i;
+		}
+		if (from < rows.size() && to < rows.size()) {
 			also_.clear();
-			const auto first = std::min(from, to), last = std::max(from, to);
-			for (auto it = first; it <= last; ++it)
-				if (*it != path) also_.push_back(*it);
+			for (size_t i = std::min(from, to); i <= std::max(from, to); ++i)
+				if (entries[rows[i]].relative_path != path) also_.push_back(entries[rows[i]].relative_path);
 			selected_ = path;
 			return;
 		}
@@ -167,7 +195,7 @@ void FilesWindow::draw_folder_menu(const SessionView &view, const std::string &f
 	ImGui::BeginDisabled(!makes);
 	const bool make = ImGui::Button("Make");
 	ImGui::EndDisabled();
-	if (folder_new_[0] != '\0' && !named) ImGui::TextColored(kChoreRefusalColor, "%s", why.c_str());
+	if (folder_new_[0] != '\0' && !named) ImGui::TextColored(ui_kit::refusal_color(), "%s", why.c_str());
 	if ((make || make_enter) && makes) {
 		workspace_.request(request::new_folder(made));
 		ImGui::CloseCurrentPopup();
@@ -298,7 +326,7 @@ void FilesWindow::draw_delete(const SessionView &view) {
 		for (const std::string &other : held.paths) names += ", " + basename_of(other);
 		ImGui::TextWrapped("%s.", names.c_str());
 	}
-	for (const std::string &refusal : delete_refusals_) ImGui::TextColored(kChoreRefusalColor, "%s", refusal.c_str());
+	for (const std::string &refusal : delete_refusals_) ImGui::TextColored(ui_kit::refusal_color(), "%s", refusal.c_str());
 	// An import source: with its outputs, or alone, its outputs kept as files of the project.
 	if (sources) {
 		bool alone = held.alone;
@@ -319,30 +347,20 @@ void FilesWindow::draw_delete(const SessionView &view) {
 		for (const std::string &file : delete_kept_) kept += (kept.empty() ? "" : ", ") + file;
 		ImGui::TextWrapped("Kept as files of the project: %s.", kept.c_str());
 	}
-	// Who names it, before anything goes (DI-05's uses).
-	if (delete_use_count_) {
-		ImGui::TextColored(kChoreWarningColor, "Named by %s:", counted(delete_use_count_, "use").c_str());
-		for (const std::string &place : delete_uses_) ImGui::BulletText("%s", place.c_str());
-		if (delete_use_count_ > delete_uses_.size()) ImGui::TextDisabled("and %zu more", delete_use_count_ - delete_uses_.size());
-		ImGui::TextWrapped("Deleted, they name nothing: Problems rows until they are changed, or Undo file brings it back.");
-	} else if (delete_refusals_.empty()) {
-		ImGui::TextDisabled("Nothing names %s.", held.paths.empty() ? "it" : "them");
-	}
-	ImGui::TextDisabled("It goes to the project's trash (.opennova/trash/): Edit > Undo file brings it back.");
 	ImGui::PopTextWrapPos();
-	const bool allowed = delete_refusals_.empty() && view.allows(EditorRequestKind::DeleteAsset);
-	ImGui::BeginDisabled(!allowed);
-	const bool remove = ImGui::Button(delete_use_count_ ? "Delete anyway" : "Delete");
-	ImGui::EndDisabled();
-	if (remove && allowed) {
+	// Who names it, before anything goes (DI-05's uses).
+	const int pressed = delete_dialog_body("Named by " + counted(delete_use_count_, "use") + ":", delete_use_count_,
+	                                       delete_uses_, delete_refusals_.empty() ? (held.paths.empty() ? "Nothing names it."
+	                                                                                                   : "Nothing names them.")
+	                                                                              : nullptr,
+	                                       "It goes to the project's trash (.opennova/trash/).",
+	                                       delete_refusals_.empty() && view.allows(EditorRequestKind::DeleteAsset));
+	if (pressed > 0) {
 		// The session closes Delete... as it takes the delete (delete_asset alone, over the wire); its button closes
 		// it too.
 		workspace_.request(request::delete_asset(entry->relative_path, delete_use_count_ > 0, held.alone, held.paths));
-		close();
-		delete_popup_.close();
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Cancel")) {
+	if (pressed != 0) {
 		close();
 		delete_popup_.close();
 	}
@@ -375,29 +393,16 @@ void FilesWindow::draw_folder_delete(const SessionView &view) {
 	ImGui::Text("Delete %s with what it holds (%s)?", folder_words(folder_delete_).c_str(),
 	            counted(folder_delete_files_, "file").c_str());
 	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-	for (const std::string &refusal : folder_delete_refusals_) ImGui::TextColored(kChoreRefusalColor, "%s", refusal.c_str());
-	if (folder_delete_use_count_) {
-		ImGui::TextColored(kChoreWarningColor, "What it holds is named by %s:", counted(folder_delete_use_count_, "use").c_str());
-		for (const std::string &place : folder_delete_uses_) ImGui::BulletText("%s", place.c_str());
-		if (folder_delete_use_count_ > folder_delete_uses_.size())
-			ImGui::TextDisabled("and %zu more", folder_delete_use_count_ - folder_delete_uses_.size());
-		ImGui::TextWrapped("Deleted, they name nothing: Problems rows until they are changed, or Undo file brings it back.");
-	} else if (folder_delete_refusals_.empty()) {
-		ImGui::TextDisabled("Nothing outside it names what it holds.");
-	}
-	ImGui::TextDisabled("It goes to the project's trash (.opennova/trash/) whole: Edit > Undo file brings it back.");
+	for (const std::string &refusal : folder_delete_refusals_) ImGui::TextColored(ui_kit::refusal_color(), "%s", refusal.c_str());
 	ImGui::PopTextWrapPos();
-	const bool allowed = folder_delete_refusals_.empty() && view.allows(EditorRequestKind::DeleteFolder);
-	ImGui::BeginDisabled(!allowed);
-	const bool remove = ImGui::Button(folder_delete_use_count_ ? "Delete anyway" : "Delete");
-	ImGui::EndDisabled();
-	if (remove && allowed) {
-		workspace_.request(request::delete_folder(folder_delete_, true, folder_delete_use_count_ > 0));
-		folder_delete_.clear();
-		folder_delete_popup_.close();
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Cancel")) {
+	const int pressed =
+	        delete_dialog_body("What it holds is named by " + counted(folder_delete_use_count_, "use") + ":",
+	                           folder_delete_use_count_, folder_delete_uses_,
+	                           folder_delete_refusals_.empty() ? "Nothing outside it names what it holds." : nullptr,
+	                           "It goes to the project's trash (.opennova/trash/) whole.",
+	                           folder_delete_refusals_.empty() && view.allows(EditorRequestKind::DeleteFolder));
+	if (pressed > 0) workspace_.request(request::delete_folder(folder_delete_, true, folder_delete_use_count_ > 0));
+	if (pressed != 0) {
 		folder_delete_.clear();
 		folder_delete_popup_.close();
 	}
@@ -414,7 +419,7 @@ void FilesWindow::draw_empty_trash(const SessionView &view) {
 	else ImGui::TextWrapped("The project's trash holds nothing.");
 	const size_t steps = view.activity.file_history.undo_steps + view.activity.file_history.redo_steps;
 	if (steps)
-		ImGui::TextColored(kChoreWarningColor, "The file history goes with it (%s): Undo file brings nothing back after.",
+		ImGui::TextColored(ui_kit::warning_color(), "The file history goes with it (%s): Undo file brings nothing back after.",
 		                   counted(steps, "step").c_str());
 	ImGui::PopTextWrapPos();
 	const bool allowed = (trash_files_ || steps) && view.allows(EditorRequestKind::EmptyTrash);

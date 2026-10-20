@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <tuple>
@@ -9,6 +10,7 @@
 #include <editor/documents/name_source.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/document.h>
+#include <editor/model/text_document.h>
 #include <editor/session/view/view_revisions.h>
 #include <editor/ui/record_drag.h>
 #include <editor/ui/workspace.h>
@@ -20,6 +22,32 @@ struct SessionView;
 
 // What a Files row carries while it is dragged: its project-relative path, NUL-ended.
 inline constexpr const char *kFileDragPayload = "opennova.file";
+
+// A name a text writes (ADR 0046 DI-14's particle file: a pdefs member, a curve's table, a graphic's texture, at the
+// span the graph's edge carries), as the picker, its completions and its fixes take one over text: the text document,
+// the record and the key its reader takes it under (GraphEdge::record, field), where it is written, the name, the
+// reference it makes (its kind, scope and loader argument, as the edge's) and the bytes its reader's slot holds of it
+// (GraphEdge::width; 0 for no bound). A pick, a completion taken or a file dropped gives a name; the caller replaces
+// the span.
+struct TextPlace {
+	const TextDocument *document = nullptr;
+	std::string record;
+	std::string key;
+	TextSpan span;
+	std::string value;
+	ReferenceKind kind = ReferenceKind::None;
+	std::string scope;
+	int32_t loader_arg = -1;
+	size_t width = 0;
+	// The graph's edge of the name, as the text's reader reads it there.
+	GraphEdge edge() const;
+	// The name as a readout names it (its kind, the name, its scope and loader argument).
+	ReferenceSubject subject() const { return ReferenceSubject{kind, value, scope, loader_arg}; }
+	// What the picker lists for it: a field of no schema naming `kind` in `scope` by `loader_arg`.
+	FieldUse field() const;
+	// The characters its reader keeps of a name: the slot less its terminator (0 for no bound).
+	size_t limit() const { return width > 1 ? width - 1 : 0; }
+};
 
 // The reference picker (ADR 0046 S12): the one widget that picks the name a reference field
 // holds, in the Inspector's rows, its tables' cells and the stylesheet view. Its button (Pick,
@@ -88,6 +116,19 @@ public:
 	// its fixes): once per opening, and again while it is open only when what it reads moves
 	// (ListKey), never for a change of anything else (a line of Output, a build's step).
 	size_t lists_made() const { return lists_made_; }
+
+	// The same over a name a text writes (TextPlace): the Pick button and its popup (the graph's names of its kind in
+	// its scope, picker_choices without a document; a missing name's fixes in its footer), the fixes of its state's
+	// dot (the reference.missing finding the graph would make of its edge, else, for a kind the graph finds none of
+	// missing, the findings at its place with what their makers planned: a pdefs member's particle.effect_unresolved),
+	// and the completions under its box while it is typed (`typed`, the box's text). Each popup and list is the
+	// place's own, by the document's instance and the popup's id (a caller pushes an id per name).
+	bool draw(Workspace &workspace, const TextPlace &place, bool compact, std::string &picked);
+	void draw_fixes(Workspace &workspace, const TextPlace &place, bool open);
+	bool draw_completions(Workspace &workspace, const TextPlace &place, const std::string &typed, std::string &picked);
+	// A Files row dropped on the item just drawn, as accept_file over a field: the file a reference of `kind` loads by
+	// `loader_arg`.
+	static bool accept_file(const SessionView &view, ReferenceKind kind, int32_t loader_arg, std::string &picked);
 	// The lists the popups hold now: an open popup's (none once it closes, or once another draws
 	// while it is not drawn open).
 	size_t lists_held() const;
@@ -112,7 +153,7 @@ private:
 		}
 		bool operator!=(const ListKey &other) const { return !(*this == other); }
 	};
-	static ListKey cache_key(const SessionView &view, const Document &document);
+	static ListKey cache_key(const SessionView &view, const DocumentBase &document);
 	// Whose a popup's state is: the document (its instance), the record, the popup's id.
 	struct Key {
 		uint64_t document = 0;
@@ -135,6 +176,7 @@ private:
 		const SessionView *view = nullptr;
 		ListKey key;
 		FieldUse field;
+		size_t limit = 0; // the characters the field holds of a name (field_name_limit, TextPlace::limit), 0 none
 		std::vector<ReferenceChoice> choices;
 		bool missing = false;
 		std::vector<ProblemFix> fixes;
@@ -145,6 +187,17 @@ private:
 	// The popup's missing value and its fixes alone (refresh's, without the choices), kept as refresh keeps them.
 	void refresh_fixes(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
 	                   const FieldUse &field, const Value &value);
+	// The same over a name a text writes.
+	void refresh(Popup &popup, const SessionView &view, const TextPlace &place, bool choices);
+	// The popup `key` drawn open this frame: its state, its list let go once it is no longer drawn open.
+	Popup &opened(const SessionView &view, const Key &key);
+	// The popup `key` not drawn open: a list it held goes now.
+	void closed(const Key &key);
+	// The completions under the box just drawn (draw_completions' body, a field's or a text place's): `limit` the
+	// characters the field holds of a name, `choices_of` its names, made again only when what they read moves.
+	using ChoicesOf = std::function<std::vector<ReferenceChoice>(const SessionView &view, const NameSource *names)>;
+	bool completions(Workspace &workspace, const Key &key, const FieldUse &field, size_t limit, const std::string &typed,
+	                 std::string &picked, const ChoicesOf &choices_of);
 	// A popup closed: its list goes, its filter and its "Show unreachable" stay.
 	static void drop_list(Popup &popup);
 	// The lists of the popups not drawn open this frame or the last let go (held_ swept).
@@ -161,6 +214,7 @@ private:
 		Key key;
 		RevisionKey view;
 		std::string scope;
+		ReferenceKind kind = ReferenceKind::None;
 		std::vector<ReferenceChoice> choices;
 		size_t cursor = SIZE_MAX; // the marked row, none
 		std::string hidden;       // the text Escape hid the list at

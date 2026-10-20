@@ -820,7 +820,7 @@ static std::string bank_text(const std::vector<std::pair<std::string, std::strin
 // place defines, fx.ptl defining BOOM, and a few of the game's manifest files. The plan: the
 // mission's own set each needed by the mission, its role and its edge's kind (data commit 8: the
 // set is the mission's edges); the file references; the symbols
-// followed to their files (the effect to fx.ptl, a particle's curves to the file defining their
+// followed to their files (the effect to fx.ptl, its member to smoke.ptl, a particle's curves to the file defining their
 // tables, the item to items.def, which the manifest brings first); the manifest's files the
 // install has found, each needed by the mission for the game, a Required one the install lacks
 // not found (vmacros.bin), an optional one no row (hiscore.txt);
@@ -895,7 +895,8 @@ static int test_plan_mission_closure() {
 	                       {"m.til", "til"},
 	                       // An effect of two particles: a plain graphic, and a flipbook of two frames, which
 	                       // loads a file a frame named from the graphic's and never the graphic's own name.
-	                       {"fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tpdefs = puff;\n\talpha_func = Fade;\n\tgraphic1 = puff.tga, additive;\n}\n\n"
+	                       // Its second member another file's particle (smoke.ptl's, spelt in another case).
+	                       {"fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff, smoke;\n}\n\n[particledef]\n{\n\tid = puff;\n\tpdefs = puff;\n\talpha_func = Fade;\n\tgraphic1 = puff.tga, additive;\n}\n\n"
 	                                  "[particledef]\n{\n\tid = flame;\n\tgraphic1 = Flame.TGA, additive;\n\tg1_flip_frames = 2;\n\tg1_scale_func = Grow reverse;\n}\n"},
 	                       {"puff.tga", "tga"}, {"Flame.TGA", "never loaded"}, {"flame_01.tga", "tga"}, {"flame_02.tga", "tga"},
 	                       {"stand.tga", "tga"}, {"old.tga", "tga"}, {"frame.tga", "tga"}, {"first.tga", "tga"},
@@ -903,7 +904,8 @@ static int test_plan_mission_closure() {
 	                       // The tables the particles' curves name, in a file of their own (as the base game's onatable.ptl
 	                       // holds tables alone), one spelt in another case; a table file no curve names.
 	                       {"tables.ptl", "[tabledef]\n{\n\tid = FADE;\n\ttl1 = 255, 128, 0;\n}\n\n[tabledef]\n{\n\tid = Grow;\n\ttl1 = 0, 128, 255;\n}\n"},
-	                       {"spare.ptl", "[tabledef]\n{\n\tid = Spare;\n\ttl1 = 0, 255;\n}\n"}}));
+	                       {"spare.ptl", "[tabledef]\n{\n\tid = Spare;\n\ttl1 = 0, 255;\n}\n"},
+	                       {"smoke.ptl", "[particledef]\n{\n\tid = Smoke;\n}\n"}}));
 	// The music banks the game streams loose from its root (the manifest's, found there), and a
 	// save beside them, which is the player's, never the game's.
 	TEST_EXPECT(test_io::write_text(install + "/menumus.sbf", "menu music") &&
@@ -948,6 +950,11 @@ static int test_plan_mission_closure() {
 	TEST_EXPECT(tables && tables->needed_by.file == "fx.ptl" && tables->needed_by.reference == ReferenceKind::ParticleTable &&
 	            tables->needed_by.record == "puff" && tables->needed_by.field == "alpha_func" &&
 	            tables->needed_by.name == "Fade" && !row_named(plan, "spare.ptl"));
+	// An effect's member to the file defining the particle, by its id without case [orig:
+	// CEffectWorld_FindParticleDefByName @ 0x5E41D0].
+	const ImportPlanRow *smoke = found("smoke.ptl");
+	TEST_EXPECT(smoke && smoke->needed_by.file == "fx.ptl" && smoke->needed_by.reference == ReferenceKind::ParticleDefinition &&
+	            smoke->needed_by.record == "BOOM" && smoke->needed_by.field == "pdefs" && smoke->needed_by.name == "smoke");
 	TEST_EXPECT(items && items->needed_by.file == "m.bms" && items->needed_by.reference == ReferenceKind::None &&
 	            items->needed_by.field.find("the game") == 0);
 	// A flipbook's frames, each a file of its own; the graphic's own name is never loaded.
@@ -1023,7 +1030,7 @@ static int test_plan_mission_closure() {
 	            !not_followed(plan, ReferenceKind::None, AssetKind::Terrain) &&
 	            !not_followed(plan, ReferenceKind::None, AssetKind::SoundBank) &&
 	            !not_followed(plan, ReferenceKind::None, AssetKind::MusicBank) && !not_followed(plan, ReferenceKind::Particle) &&
-	            !not_followed(plan, ReferenceKind::ParticleTable) &&
+	            !not_followed(plan, ReferenceKind::ParticleTable) && !not_followed(plan, ReferenceKind::ParticleDefinition) &&
 	            !not_followed(plan, ReferenceKind::Item) && !not_followed(plan, ReferenceKind::Weapon));
 	TEST_EXPECT(plan.file_count() >= 18 && plan.total_bytes() > mission_bytes.size());
 	// Stepped a byte at a time: the same plan.

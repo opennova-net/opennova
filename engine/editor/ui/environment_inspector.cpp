@@ -59,11 +59,11 @@ void keyframe_words(const EnvironmentDocument &document, const NodeAddress &reco
 	const env::KeyframeSegment segment = env::find_keyframe_segment(hours, env::hhmm_to_hours_fp(float(at)));
 	if (segment.hi < 0) return;
 	const int next = times[size_t(segment.hi)];
-	if (times.size() < 2)
-		ui_kit::note("The only keyframe: its colours hold all day.");
+	if (times.size() < 2) ui_kit::quiet_text("The only keyframe: its colours hold all day.");
 	else
-		ui_kit::note("The clock reaches these colours at " + clock(at) + "; after it the game blends toward the keyframe at " +
-		             clock(next) + ".");
+		ui_kit::quiet_text("At " + clock(at) + ", blending toward " + clock(next),
+		                   "The clock reaches these colours at " + clock(at) +
+		                           "; after it the game blends toward the keyframe at " + clock(next) + ".");
 }
 
 // A terrain key's line of a mission: its terrain takes it after its .trn and overcast.def, over what the keyword held
@@ -89,18 +89,17 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 	// @ 0x6109AD; Environment_LoadTimeOfDayConfig @ 0x57DCBF] (D-TERRAIN-18).
 	const bool on_key = record.child && record.kind == node_kind(EnvironmentKind::TerrainKey);
 	if (on_key)
-		ui_kit::note("A terrain key: the terrain's reader reads this file's lines after each mission's .trn and overcast.def, "
-		             "so the terrain of a mission that runs on this environment takes it over theirs.");
+		ui_kit::quiet_text("A terrain key, read over the mission's terrain",
+		                   "The terrain's reader reads this file's lines after each mission's .trn and overcast.def, so the "
+		                   "terrain of a mission that runs on this environment takes it over theirs.");
 	if (!view.project.scan) return true;
 	const AssetScan &scan = *view.project.scan;
 	const EnvironmentUses &uses = uses_of(view, environment->path());
-	if (uses.missions.empty()) {
-		ui_kit::note(uses.reading ? "Reading the project's references..."
-		                          : "No mission runs on it: a mission's header names its environment (Environment).");
+	if (!mission_uses_heading(uses.missions.size(), uses.reading,
+	                          "A mission's header names its environment (Environment).")) {
 		ImGui::Separator();
 		return true;
 	}
-	ImGui::Text("Missions that run on it (%zu):", uses.missions.size());
 	int id = 0;
 	for (const EnvironmentMissionUse &use : uses.missions) {
 		const std::string tag = std::to_string(id++);
@@ -111,7 +110,7 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 		if (!use.terrain_file.empty())
 			inspector_jump_line(workspace, file_target(scan, use.terrain_file), "On the terrain " + io::utf8_file_name(use.terrain_file), "t" + tag);
 		else if (!use.terrain.empty())
-			ui_kit::note("On the terrain " + use.terrain + ", which the project does not have.");
+			ui_kit::quiet_text("On the terrain " + use.terrain + " (not in the project)");
 		// What its header sets over this environment, each on the header's field.
 		const std::string locator = use.edge ? use.edge->locator : std::string();
 		const auto header = [&](const char *field) { return window_requests::target_at(use.mission, locator, field); };
@@ -140,9 +139,9 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 			                    "k" + tag + "." + std::to_string(key.index));
 		}
 		if (on_key && !taken)
-			ui_kit::note(use.terrain_file.empty() ? "Its terrain is not in the project, so the line is read over nothing here."
-			                                      : "Its terrain does not take this line (Problems says why where the file alone "
-			                                        "shows it).");
+			ui_kit::quiet_text(use.terrain_file.empty() ? "Its terrain is not in the project." : "Its terrain does not take this line.",
+			                   use.terrain_file.empty() ? "The line is read over nothing here."
+			                                            : "Problems says why where the file alone shows it.");
 		ImGui::Unindent();
 	}
 	ImGui::Separator();

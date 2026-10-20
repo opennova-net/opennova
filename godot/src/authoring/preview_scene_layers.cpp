@@ -18,6 +18,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/viewport_device.h>
+#include <editor/session/operation_progress.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
 #include <runtime/environment/environment_state.h>
@@ -419,7 +420,6 @@ void PreviewSceneLayers::run_environment_() {
 	weather_start_ = true;
 	environment_key_ = environment_key_of_(source_);
 	environment_built_ = true;
-	++environment_builds_;
 	touch_scene_state();
 }
 
@@ -498,7 +498,6 @@ void PreviewSceneLayers::run_terrain_build_() {
 	if (result == Terrain::BUILD_STEP_DONE) {
 		terrain_built_ = true;
 		terrain_key_ = planned_terrain_;
-		++terrain_builds_;
 		// Its foliage as the game's load configures it after the build (the reads its slots make
 		// are the terrain layer's: a foliage model or texture moved builds the terrain again).
 		configure_foliage_();
@@ -560,10 +559,7 @@ void PreviewSceneLayers::set_shown(const Shown &shown) {
 }
 
 void PreviewSceneLayers::place_camera(const opennova::editor::OrbitCamera &camera) {
-	opennova::editor::PreviewVec3 right, up, back;
-	camera.axes(right, up, back);
-	camera_->set_transform(Transform3D(
-			Basis(to_godot(right), to_godot(up), to_godot(back)), to_godot(camera.eye())));
+	place_orbit_pose(*camera_, camera);
 	// The world pass's planes: the game's near, its far from the environment's fog.
 	nodes().environment->apply_scene_pass_planes(*camera_);
 }
@@ -648,6 +644,30 @@ void PreviewSceneLayers::begin_frame() {
 
 void PreviewSceneLayers::end_frame() {
 	scene_.hold_globals(true);
+}
+
+void PreviewSceneLayers::present_frame(double dt, int64_t clock_ms) {
+	// In the game's leg order (game_world_frame.cpp).
+	begin_frame();
+	present_environment(dt);
+	present_ground(dt, clock_ms);
+	present_sun_veil();
+	present_particles(clock_ms);
+	present_drops();
+	present_overlay(nullptr);
+	present_frame_effects();
+	present_clear_and_cube();
+	end_frame();
+}
+
+opennova::editor::OperationProgress PreviewSceneLayers::progress(bool building) const {
+	opennova::editor::OperationProgress progress;
+	progress.unit = opennova::editor::OperationUnit::Steps;
+	if (!building) return progress;
+	progress.done = units_done();
+	progress.total = units_planned() + 1;
+	progress.label = this->building() ? step_label() : "pose";
+	return progress;
 }
 
 bool PreviewSceneLayers::water_drawn() const {

@@ -49,19 +49,22 @@ void row_words(const TerrainDocument &document, const NodeAddress &record) {
 	const int row = int(at.index);
 	const int north = -(row + config->origin_y) * 512;
 	const int west = config->origin_x * 512;
+	char line[96];
+	std::snprintf(line, sizeof(line), "y %d to %d, cell 1 at x %d, %d cells read", north, north - 512, west,
+	              config->sector_count);
 	char text[256];
 	std::snprintf(text, sizeof(text),
 	              "This row spans the mission's y from %d down to %d; its cell 1 spans x from %d to %d, each next cell the "
 	              "512 east of it. The game reads its first %d cells (the grid's width).",
 	              north, north - 512, west, west + 512, config->sector_count);
-	ui_kit::note(text);
+	ui_kit::quiet_text(line, text);
 }
 
 void draw_import(Workspace &workspace, const AssetScan &scan, const TerrainImport &made) {
-	ImGui::TextWrapped("Made by the import of %s.", io::utf8_file_name(made.source).c_str());
-	ui_kit::note("The terrain set's images and the import's options make this terrain: the editor takes no edit of it here, "
-	             "which the next import would make again. Change an image or an option, then Reimport.");
-	if (!made.error.empty()) ui_kit::note(made.error);
+	ui_kit::clipped_text("Made by the import of " + io::utf8_file_name(made.source) + ".",
+	                     "The terrain set's images and the import's options make this terrain: the editor takes no edit of "
+	                     "it here. Change an image or an option, then Reimport.");
+	if (!made.error.empty()) ui_kit::refusal_text(made.error);
 	inspector_jump_line(workspace, file_target(scan, made.source), "The terrain set: " + made.source, "set");
 	ImGui::Indent();
 	for (const TerrainSetImage &image : made.images) {
@@ -69,10 +72,10 @@ void draw_import(Workspace &workspace, const AssetScan &scan, const TerrainImpor
 		inspector_jump_line(workspace, image.file.empty() ? ReferenceTarget() : file_target(scan, image.file), line, "i" + image.key);
 	}
 	if (made.foliage)
-		ui_kit::note(std::to_string(made.foliage) + (made.foliage == 1 ? " foliage definition" : " foliage definitions") +
-		             ", written into the terrain as its foliage blocks.");
+		ui_kit::quiet_text(std::to_string(made.foliage) + (made.foliage == 1 ? " foliage definition" : " foliage definitions"),
+		                   "Written into the terrain as its foliage blocks.");
 	for (const TerrainImportOption &option : made.options)
-		ui_kit::note(option.label + ": " + option.value + (option.set ? "" : " (the importer's own)"));
+		ui_kit::quiet_text(option.label + ": " + option.value + (option.set ? "" : " (the importer's own)"));
 	ImGui::Unindent();
 	const bool can = workspace.view().allows(EditorRequestKind::Reimport);
 	ImGui::BeginDisabled(!can);
@@ -96,13 +99,10 @@ bool draw_terrain_inspector(Workspace &workspace, const Document &document, cons
 		draw_import(workspace, scan, uses.import);
 		ImGui::Separator();
 	}
-	if (uses.missions.empty()) {
-		ui_kit::note(uses.reading ? "Reading the project's references..."
-		                          : "No mission runs on it: a mission's header names its terrain (Terrain).");
+	if (!mission_uses_heading(uses.missions.size(), uses.reading, "A mission's header names its terrain (Terrain).")) {
 		ImGui::Separator();
 		return true;
 	}
-	ImGui::Text("Missions that run on it (%zu):", uses.missions.size());
 	int id = 0;
 	for (const TerrainMissionUse &use : uses.missions) {
 		const std::string tag = std::to_string(id++);
@@ -113,9 +113,9 @@ bool draw_terrain_inspector(Workspace &workspace, const Document &document, cons
 			inspector_jump_line(workspace, file_target(scan, use.environment_file),
 			                    "Under the environment " + io::utf8_file_name(use.environment_file), "e" + tag);
 		else if (!use.environment.empty())
-			ui_kit::note("Under the environment " + use.environment + ", which the project does not have.");
-		if (!use.tile_set.empty()) ui_kit::note("Its tiles from the tile set " + use.tile_set + ", not the terrain's own.");
-		if (use.tiles) ui_kit::note("It places its own tiles (" + use.name + ".til).");
+			ui_kit::quiet_text("Under the environment " + use.environment + " (not in the project)");
+		if (!use.tile_set.empty()) ui_kit::quiet_text("Its tiles from the tile set " + use.tile_set, "Not the terrain's own.");
+		if (use.tiles) ui_kit::quiet_text("It places its own tiles (" + use.name + ".til)");
 		// The terrain keys overcast.def and its environment set after this file's (the game's terrain reader reads
 		// their lines too): the mission's terrain has each from there. A Go to on the line: the environment's terrain
 		// key, overcast.def's line (a text).

@@ -27,6 +27,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
 
@@ -309,6 +310,36 @@ static int test_place_item_in_mission() {
 
 } // namespace
 
+// The name jumps over a particle file: F12 on an effect's pdefs member (the script device's lookup, script_definition)
+// goes to the [particledef] defining it in another file, opened at its id's span; Find usages of that id (by its
+// locator, as the panel's Usages asks) lists the member, its subject the particle in words.
+static int test_particle_member() {
+	test_temp::TempDir dir("opennova_jumps_particle");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Jumps"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(test_io::write_text(root + "/particles/a.ptl", "[effectdef]\r\n{\r\n\tid = Burst;\r\n\tpdefs = SPARK;\r\n}\r\n") &&
+	            test_io::write_text(root + "/particles/b.ptl", "[particledef]\r\n{\r\n\tid = spark;\r\n}\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("particles/a.ptl"));
+	const SessionView &view = session.view();
+	const TextDocument *text = text_of(*session.document_base_for("particles/a.ptl"));
+	TEST_EXPECT(text != nullptr);
+	if (!text) return 1;
+	EditorRequest go;
+	TEST_EXPECT(script_definition(view, *text, 4, 12, go) && go.kind == EditorRequestKind::OpenDocument &&
+	            go.path == "particles/b.ptl" && go.locator == "3:7" && go.field == "id");
+	editor_test::handle_to_end(session, go);
+	TEST_EXPECT(view.documents.active == "particles/b.ptl");
+	const std::vector<const GraphEdge *> uses = usages_at(*view.findings.graph, "particles/b.ptl", "3:7");
+	TEST_EXPECT(uses.size() == 1 && uses[0]->source == "particles/a.ptl" && uses[0]->field == "pdefs" && uses[0]->locator == "4:10");
+	TEST_EXPECT(usages_subject_words(*view.findings.graph, "particles/b.ptl", "3:7") == "particle spark in b.ptl");
+	std::printf("particle member: F12 to its definition, its usages\n");
+	return 0;
+}
+
 int main() {
 	int failed = 0;
 	failed += test_search_scopes();
@@ -316,6 +347,7 @@ int main() {
 	failed += test_record_definition();
 	failed += test_wire();
 	failed += test_place_item_in_mission();
+	failed += test_particle_member();
 	if (failed) std::printf("%d test(s) failed\n", failed);
 	return failed ? 1 : 0;
 }

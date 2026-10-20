@@ -62,14 +62,12 @@ public:
 	// The editor's preview background behind the HUD (its own mid grey on Dark).
 	void background(opennova::editor::PreviewBackground background) override;
 
-	// What it holds (a GUT device test reads it): the overlay, the view effects (null where the game's
-	// script is not in the build), whether a layout is configured, the weapon applied.
+	// Its nodes: the overlay, the view effects (null where the game's script is not in the build), the sights card
+	// and the scope mask.
 	HudOverlay *overlay() const;
 	Control *view_effects() const;
 	Control *sights_card() const;
 	Control *scope_mask() const;
-	bool configured() const { return configured_; }
-	const std::string &weapon_applied() const { return weapon_; }
 
 private:
 	// The options applied to the overlay as it last applied them (a configure applies them all again).

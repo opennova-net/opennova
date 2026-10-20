@@ -74,6 +74,9 @@ std::vector<ReferenceChoice> reference_choices(const AssetGraph &graph, const Fi
 // validation reports an index past its collection).
 bool missing_finding(const AssetGraph &graph, const Document &document, const NodeAddress &address,
                      const FieldUse &field, const Value &value, Diagnostic &out);
+// The same of an edge (a name a text writes at a span: a particle file's, which its picker builds as the text's reader
+// reads it there): the graph's finding of it; false when it resolves, and for a kind the graph finds none of missing.
+bool missing_finding(const AssetGraph &graph, const GraphEdge &edge, Diagnostic &out);
 // The file a field's value loads, where it resolves to one (a symbol's defining file for a symbol
 // kind); "" for none.
 std::string reference_target_file(
@@ -85,6 +88,11 @@ std::string reference_target_file(
 // game reads, then the file its value names). None when nothing resolves.
 std::vector<ReferenceTarget> reference_targets(
 		const AssetGraph &graph, const AssetScan &scan, const FieldUse &field, const Value &value);
+// The same of a name of `kind`, looked up in `scope` by `loader_arg`, as a field naming it there would (a readout's
+// name: an impact row's effect, a log line's sound set, Listen's bank; a name a text writes): the field's overload
+// is its value's name through this.
+std::vector<ReferenceTarget> reference_targets(const AssetGraph &graph, const AssetScan &scan, ReferenceKind kind,
+		const std::string &name, const std::string &scope, int32_t loader_arg = -1);
 // Where "Go to" on a use goes: the record of the edge's file that makes it (its locator, else the
 // record's path where the file keeps no places; the field shown), opened when the editor edits the
 // file's kind, else on the file's page.

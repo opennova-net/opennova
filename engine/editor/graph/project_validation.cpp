@@ -3,6 +3,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <set>
+#include <string>
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
@@ -11,19 +14,48 @@
 
 namespace opennova::editor {
 
-std::vector<const AssetEntry *> validation_files(const AssetScan &scan) {
+namespace {
+
+// The document type a file's own checks are a validator of (its row's), 0 for none: a type whose files no
+// validator reads (S18: a texture's, with no finding codes yet) has none.
+size_t validated_type(const AssetEntry &asset) {
+	const size_t type = static_cast<size_t>(asset_kind_row(asset.kind).document);
+	const DocumentType *registered = document_type_for(asset.kind);
+	return type != 0 && type <= kDocumentTypeCount && registered && validates_files(*registered) ? type : 0;
+}
+
+// The validation's files of a scan as indices into its entries, kept by the scan's serial (a pass and the rows
+// composed after it ask the same list).
+std::mutex g_files_mutex;
+UseCheckMemo<uint64_t, std::vector<uint32_t>> g_files; // g_files_mutex held
+
+std::vector<uint32_t> validation_indices(const AssetScan &scan) {
 	// Each type's files in the scan's order, then the types in the registry's (DocumentTypeId's).
-	std::array<std::vector<const AssetEntry *>, kDocumentTypeCount + 1> by_type;
-	for (const AssetEntry &asset : scan.entries) {
-		const size_t type = static_cast<size_t>(asset_kind_row(asset.kind).document);
-		// A type whose files no validator reads (S18: a texture's, with no finding codes yet) has none.
-		const DocumentType *registered = document_type_for(asset.kind);
-		if (type != 0 && type < by_type.size() && registered && validates_files(*registered))
-			by_type[type].push_back(&asset);
+	std::array<std::vector<uint32_t>, kDocumentTypeCount + 1> by_type;
+	for (size_t i = 0; i < scan.entries.size(); ++i)
+		if (const size_t type = validated_type(scan.entries[i])) by_type[type].push_back(uint32_t(i));
+	std::vector<uint32_t> out;
+	for (const std::vector<uint32_t> &files : by_type)
+		out.insert(out.end(), files.begin(), files.end());
+	return out;
+}
+
+} // namespace
+
+std::vector<const AssetEntry *> validation_files(const AssetScan &scan) {
+	std::vector<uint32_t> made;
+	const std::vector<uint32_t> *indices = nullptr;
+	std::unique_lock<std::mutex> lock(g_files_mutex);
+	if (scan.serial() != 0) indices = g_files.find(scan.serial());
+	if (!indices) {
+		lock.unlock();
+		made = validation_indices(scan);
+		lock.lock();
+		indices = scan.serial() != 0 ? &g_files.keep(scan.serial(), std::move(made)) : &made;
 	}
 	std::vector<const AssetEntry *> out;
-	for (const std::vector<const AssetEntry *> &files : by_type)
-		out.insert(out.end(), files.begin(), files.end());
+	out.reserve(indices->size());
+	for (const uint32_t i : *indices) out.push_back(&scan.entries[i]);
 	return out;
 }
 
@@ -55,7 +87,7 @@ ProjectValidation::ProjectValidation(AssetGraph &graph, ValidationCache &cache, 
 		graph_(graph), cache_(cache), readings_(readings), generation_(graph.generation()) {}
 
 bool ProjectValidation::graph_moved() const {
-	return (phase_ == Phase::Files || phase_ == Phase::Done) && graph_.generation() != generation_;
+	return graph_read() && graph_.generation() != generation_;
 }
 
 bool ProjectValidation::step(const ValidationInput &input, uint64_t budget) {
@@ -97,10 +129,27 @@ bool ProjectValidation::step(const ValidationInput &input, uint64_t budget) {
 			// The update, a step of its own: it takes the readings and resolves what they reach.
 			graph_.update(input.paths, input.project, input.scan, input.open, &readings_);
 			readings_.clear();
-			cache_.begin();
-			files_ = validation_files(input.scan);
-			phase_ = Phase::Files;
+			phase_ = Phase::Uses;
 			return false;
+		case Phase::Uses: {
+			// The headers the texture check reads of the files its uses' loaders open (none where it keeps its
+			// walk of this graph and scan), listed once over the updated graph, then one a step: the check
+			// composes from them, reading none (a project's thousands of textures were read in one composition).
+			if (!uses_listed_) {
+				uses_ = texture_use_reads(graph_, input);
+				uses_listed_ = true;
+				break;
+			}
+			if (uses_next_ == uses_.size()) {
+				begin_files(input);
+				phase_ = Phase::Files;
+				break;
+			}
+			const TextureRead &read = uses_[uses_next_++];
+			current_ = read.entry->relative_path;
+			spent += kValidationFileCost + read_texture_use(input, read);
+			break;
+		}
 		case Phase::Files: {
 			if (next_ == files_.size()) {
 				cache_.end();
@@ -120,6 +169,43 @@ bool ProjectValidation::step(const ValidationInput &input, uint64_t budget) {
 		}
 	} while (spent < budget);
 	return false;
+}
+
+void ProjectValidation::begin_files(const ValidationInput &input) {
+	const uint64_t serial = input.scan.serial();
+	const std::string &game = input.project.target_game;
+	if (input.scope) {
+		// The scope's files alone (the game's own data's check), each asked: one the cache holds as the scan lists
+		// it kept, every other file's findings left unmade.
+		std::vector<std::string> asked;
+		for (const AssetEntry *asset : validation_files(input.scan))
+			if (input.scope->has(asset->relative_path)) {
+				files_.push_back(asset);
+				asked.push_back(asset->relative_path);
+			}
+		if (cache_.keeps(serial, game)) cache_.begin_kept(serial, game, asked);
+		else cache_.begin(serial, game);
+		return;
+	}
+	if (!cache_.keeps(serial, game)) {
+		cache_.begin(serial, game);
+		files_ = validation_files(input.scan);
+		return;
+	}
+	// The scan the last validation that ended read, for the same game: every closed file's findings stand as
+	// they were made, so only the files an open document stands in for, now or then (one closed since), are
+	// asked; the cache keeps the rest.
+	std::set<std::string> paths;
+	for (const std::string &path : cache_.open_files()) paths.insert(path);
+	for (const auto &document : input.open)
+		if (document) paths.insert(document->path());
+	std::vector<std::string> asked;
+	for (const std::string &path : paths)
+		if (const AssetEntry *asset = input.scan.at_path(path); asset && validated_type(*asset)) {
+			files_.push_back(asset);
+			asked.push_back(path);
+		}
+	cache_.begin_kept(serial, game, asked);
 }
 
 std::vector<Diagnostic> project_rows(

@@ -60,6 +60,7 @@ enum class EditorQueryKind : uint8_t {
 	Complete,
 	ParticleKeys,
 	Terrain,
+	Perf,
 	kCount,
 };
 

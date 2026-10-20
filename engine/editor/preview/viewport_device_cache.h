@@ -96,6 +96,14 @@ public:
 	// canvas draws after the Document's, so the most recently used device is rarely the one the user
 	// waits on).
 	bool first_picture_pending() const;
+	// A held device builds its picture (a build in flight: its units still to run): the Shell's frame pacing keeps
+	// the display's rate while one does.
+	bool building() const;
+	// A picture was drawn in the round the last sync closed: a canvas asked for a held device (device()) between
+	// the sync before it and it; where every target is pinned (set_pin_all_targets: nothing draws to ask), a held
+	// device holding a picture stands for one drawn. The Shell's frame pacing keeps the display's rate while one
+	// is and the preview clock plays.
+	bool drawn() const;
 
 private:
 	struct Slot {
@@ -123,6 +131,9 @@ private:
 	uint64_t clock_ = 0; // the recency stamp
 	uint64_t round_ = 0; // the syncs so far: the round a device used now belongs to
 	bool pin_all_ = true;
+	// A canvas asked for a held device since the last sync, and in the round before it (drawn()).
+	bool asked_ = false;
+	bool drawn_ = false;
 	uint64_t published_ = 0; // the scene state published last (E13)
 	bool published_any_ = false;
 };

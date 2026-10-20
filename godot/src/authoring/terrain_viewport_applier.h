@@ -70,17 +70,6 @@ public:
 	void publish_scene_state() override { layers_->publish_scene_state(); }
 	void present(double dt) override;
 
-	// Its nodes, for the device tests.
-	Camera3D *camera() const { return layers_->camera(); }
-	MissionEnvironment *environment() const { return layers_->nodes().environment; }
-	Terrain *terrain() const { return layers_->nodes().terrain; }
-	Water *water() const { return layers_->nodes().water; }
-	FoliageDispatcher *foliage() const { return layers_->nodes().foliage; }
-	// How many builds of each layer it ran, and how many frames it presented.
-	int environment_builds() const { return layers_->environment_builds(); }
-	int terrain_builds() const { return layers_->terrain_builds(); }
-	int64_t presented() const { return presented_; }
-
 private:
 	void apply_state_(const opennova::editor::TerrainViewport &model);
 	opennova::io::JsonValue drawn_json_() const;
