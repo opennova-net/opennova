@@ -251,12 +251,14 @@ bool run_the_self_record_mount_edge_snaps_l() {
 	if (!expect(local != nullptr && local->mounted && local->mount_target == vh,
 			"attach edge: the record's seat attaches L"))
 		return false;
-	if (!expect(self != nullptr && (self->x != pre[0] || self->y != pre[1]),
+	if (!expect(self != nullptr &&
+					(self->record_sample[0] != pre[0] || self->record_sample[1] != pre[1]),
 			"attach edge: the record's sample is not where L stood"))
 		return false;
 	if (!expect(!ups.empty() && ups.back().carrier_handle == 0xFFFFu &&
-					ups.back().pos_x == self->x && ups.back().pos_y == self->y &&
-					ups.back().pos_z == self->z,
+					ups.back().pos_x == self->record_sample[0] &&
+					ups.back().pos_y == self->record_sample[1] &&
+					ups.back().pos_z == self->record_sample[2],
 			"attach edge: the frame's 0x0C carries the record's world sample under the "
 			"seat's ground link (none on open ground)"))
 		return false;
@@ -275,9 +277,54 @@ bool run_the_self_record_mount_edge_snaps_l() {
 			"detach edge: the record's empty seat detaches L"))
 		return false;
 	return expect(!ups.empty() && ups.back().carrier_handle == 0xFFFFu &&
-					ups.back().pos_x == self->x && ups.back().pos_y == self->y &&
-					ups.back().pos_z == self->z,
+					ups.back().pos_x == self->record_sample[0] &&
+					ups.back().pos_y == self->record_sample[1] &&
+					ups.back().pos_z == self->record_sample[2],
 			"detach edge: the frame's 0x0C carries the record's world sample, unparented");
+}
+
+// The self record's echo stages L's chase, which L's own update walks off the
+// authority (D-NET-NEW-L2-14): a record 0.07 units off moves nothing (the deadband),
+// one exactly 2 units off steps by (256 + 0x20000) / 512 = 256 while L stands still,
+// one over 2 units snaps L's position to it.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FD7..0x4C0FFC;
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the local path @0x4B4279..0x4B42A2, the
+//  snap @0x4B4332..0x4B434A, 512 @0x4B449E]
+bool run_the_self_record_echo_chases_l() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, kSelf, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "echo: L spawned")) return false;
+	auto &self_row = h.role.runtime->state().upsert(kSelf);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	h.frame(0x00);
+	w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->alive, "echo: L alive")) return false;
+	// A record at L's x plus `dx` (y, z on L's), then the frame.
+	auto echo = [&](int32_t dx) {
+		local = h.kernel->local.player();
+		PlayerCompactRecord rec;
+		rec.carrier_handle = 0xFFFF;
+		rec.pos_x_compressed = network_compress_fixedpoint(local->position.x.q16 + dx);
+		rec.pos_y_compressed = network_compress_fixedpoint(local->position.y.q16);
+		rec.pos_z_compressed = network_compress_fixedpoint(local->position.z.q16);
+		const int32_t before = local->position.x.q16;
+		h.frame(rec);
+		local = h.kernel->local.player();
+		return local->position.x.q16 - before;
+	};
+	const int32_t held = echo(0x11EB);
+	if (!expect(held == 0, "echo: 0.07 units off, the deadband holds L")) return false;
+	const int32_t stepped = echo(0x20000);
+	if (!expect(stepped == 256, "echo: 2 units off, L steps by its still bucket")) return false;
+	const int32_t snapped = echo(0x30000);
+	const replication::ClientEntityState *self = h.role.runtime->state().find(kSelf);
+	return expect(self != nullptr && local->position.x.q16 == self->record_sample[0] &&
+					snapped > 0x20000,
+			"echo: over 2 units off, L snaps to the record's sample");
 }
 
 } // namespace
@@ -286,6 +333,7 @@ int main() {
 	bool ok = true;
 	ok &= run_the_self_record_flags_ride_back_the_same_frame();
 	ok &= run_the_self_record_mount_edge_snaps_l();
+	ok &= run_the_self_record_echo_chases_l();
 	if (ok) std::printf("joiner_record_flags: ok\n");
 	return ok ? 0 : 1;
 }

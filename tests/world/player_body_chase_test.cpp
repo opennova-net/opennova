@@ -162,13 +162,13 @@ void test_a_fast_vertical_body_takes_no_horizontal_step() {
     Rig r;
     r.ai().inf.vel[2] = 1671;
     CHECK(r.uplink(0x8000, 0, 0));
-    player_body_authority_chase(r.ai(), r.ent());
+    player_body_network_chase(r.ai(), r.ent(), true, false);
     CHECK(r.ai().net_smooth_target[0] == 0);
     CHECK(r.ent().position.x.q16 == 0);
     Rig s;
     s.ai().inf.vel[2] = -1670;
     CHECK(s.uplink(0x8000, 0, 0));
-    player_body_authority_chase(s.ai(), s.ent());
+    player_body_network_chase(s.ai(), s.ent(), true, false);
     CHECK(s.ai().net_smooth_target[0] == 3277);
 }
 
@@ -180,12 +180,12 @@ void test_the_angle_steps_run_for_the_divisor_ticks() {
     CHECK(r.uplink(0, 0, 0, 0x2000));
     CHECK(r.ai().heading == 0x20000000);
     r.ai().heading = 0x20000000 - 0x1000;
-    player_body_authority_chase(r.ai(), r.ent());
+    player_body_network_chase(r.ai(), r.ent(), true, false);
     CHECK(r.ai().net_smooth_heading == (0x1000 + 1) / 2);
     CHECK(r.ai().heading == 0x20000000 - 0x1000 + 0x800);
-    player_body_authority_chase(r.ai(), r.ent());
+    player_body_network_chase(r.ai(), r.ent(), true, false);
     CHECK(r.ai().heading == 0x20000000);
-    player_body_authority_chase(r.ai(), r.ent());
+    player_body_network_chase(r.ai(), r.ent(), true, false);
     CHECK(r.ai().heading == 0x20000000); // progress 2: no more angle steps
 }
 
@@ -194,10 +194,10 @@ void test_progress_caps_at_512_and_a_movement_clip_falls_back_to_idle() {
     Rig r;
     r.ai().net_interp_progress = 511;
     r.ai().inf.store_body_animation(anim_state::kWalkForward);
-    player_body_authority_chase(r.ai(), r.ent());
+    player_body_network_chase(r.ai(), r.ent(), true, false);
     CHECK(r.ai().net_interp_progress == 512);
     CHECK(r.ai().inf.anim_state == anim_state::kWalkForward);
-    player_body_authority_chase(r.ai(), r.ent());
+    player_body_network_chase(r.ai(), r.ent(), true, false);
     CHECK(r.ai().net_interp_progress == 512);
     CHECK(r.ai().inf.anim_state == anim_state::kIdle);
 }
@@ -257,6 +257,112 @@ void test_the_read_apply_gates_hold_the_pose_not_the_inputs() {
     }
 }
 
+// The client's own body (D-NET-NEW-L2-14): off the authority the local body chases
+// its own record's echo, which the receive staged (target, progress 0). The gap is
+// measured against the head's savedLivePose; the divisor is 12, the local body takes
+// no angle step, the bucket is 48 while its MoveOrder moves (bit 3) and 512 while
+// still, the vertical step halves below 0x5555 and is none below 0x2AAA, a gap over 2
+// units snaps the position alone, and past the 512 cap the update is skipped.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the local path @0x4B4279..0x4B42A2,
+//  the snap @0x4B4332..0x4B4364, the local buckets @0x4B4478..0x4B449E, the vertical
+//  damping @0x4B461D..0x4B4640, the angle apply's local test @0x4B43F3, the client's
+//  skip @0x4B4669..0x4B4670; NetPacket_SerializePlayerState case 2's stage
+//  @0x4C0FD7..0x4C0FFC]
+struct ClientBody {
+    Rig r;
+    ClientBody(int32_t x, int32_t y, int32_t z, uint8_t move_order) {
+        r.world->ai.is_authority = false;
+        r.ai().inf.is_local_player = true;
+        r.ent().position.x.q16 = x;
+        r.ent().position.y.q16 = y;
+        r.ent().position.z.q16 = z;
+        r.ent().net_move_input = move_order;
+    }
+    // One record's echo at (tx, ty, tz), then the update's chase.
+    bool echo_then_chase(int32_t tx, int32_t ty, int32_t tz) {
+        AiEntity &e = r.ai();
+        e.net_smooth_target[0] = tx;
+        e.net_smooth_target[1] = ty;
+        e.net_smooth_target[2] = tz;
+        e.net_interp_progress = 0;
+        return chase();
+    }
+    bool chase() {
+        Entity &b = r.ent();
+        b.saved_live_pos[0] = b.position.x.q16; // the head's stamp
+        b.saved_live_pos[1] = b.position.y.q16;
+        b.saved_live_pos[2] = b.position.z.q16;
+        return player_body_network_chase(r.ai(), b, false, true);
+    }
+};
+
+// 0.07 units off its echo (4587 < 0x2AAA): the deadband, no step.
+void test_client_body_inside_the_deadband_holds() {
+    ClientBody c(-0x11EB, 0, 0, 0x08);
+    for (int i = 0; i < 20; ++i) CHECK(c.echo_then_chase(0, 0, 0));
+    CHECK(c.r.ent().position.x.q16 == -0x11EB);
+    CHECK(c.r.ai().net_interp_steps == 0);
+}
+
+// Exactly 2 units off: chased. Still, the bucket is 512: (256 + 0x20000) / 512 = 256
+// a tick; moving, 48: (24 + 0x20000) / 48 = 2731 a tick for 48 ticks.
+void test_client_body_two_units_is_chased_in_its_bucket() {
+    ClientBody still(0, 0, 0, 0x00);
+    CHECK(still.echo_then_chase(0x20000, 0, 0));
+    CHECK(still.r.ai().net_interp_steps == 0x200);
+    CHECK(still.r.ent().position.x.q16 == 256);
+    ClientBody moving(0, 0, 0, 0x08);
+    CHECK(moving.echo_then_chase(0x20000, 0, 0));
+    CHECK(moving.r.ai().net_interp_steps == 0x30);
+    CHECK(moving.r.ent().position.x.q16 == 2731);
+    for (int i = 0; i < 60; ++i) CHECK(moving.chase());
+    CHECK(moving.r.ent().position.x.q16 == 2731 * 48); // the steps stop at the bucket
+}
+
+// Over 2 units off: the position snaps to the echo; the local body's angles do not
+// (the staged heading is not taken), and the words clear.
+void test_client_body_over_two_units_snaps_the_position_alone() {
+    ClientBody c(0, 0, 0, 0x08);
+    c.r.ai().heading = 0x10000000;
+    c.r.ai().net_smooth_heading = 0x30000000;
+    CHECK(c.echo_then_chase(0x20001 + 0x8000, 0x4000, 0x2000));
+    CHECK(c.r.ent().position.x.q16 == 0x20001 + 0x8000);
+    CHECK(c.r.ent().position.y.q16 == 0x4000);
+    CHECK(c.r.ent().position.z.q16 == 0x2000);
+    CHECK(c.r.ai().heading == 0x10000000);
+    CHECK(c.r.ai().net_smooth_target[0] == 0);
+    CHECK(c.r.ai().net_interp_steps == 0);
+}
+
+// The vertical step: (24 + 0x4000) / 48 = 341 halved to 170 while |dz| < 0x5555; none
+// while |dz| < 0x2AAA; the local body takes no angle step inside the divisor.
+void test_client_body_vertical_damping_and_no_angle_step() {
+    ClientBody c(0, 0, 0, 0x08);
+    c.r.ai().heading = 0x10000000;
+    c.r.ai().net_smooth_heading = 0x10001000;
+    CHECK(c.echo_then_chase(0x10000, 0, 0x4000));
+    CHECK(c.r.ai().net_smooth_target[0] == (24 + 0x10000) / 48);
+    CHECK(c.r.ai().net_smooth_target[2] == 170);
+    CHECK(c.r.ent().position.z.q16 == 170);
+    CHECK(c.r.ai().heading == 0x10000000);
+    ClientBody low(0, 0, 0, 0x08);
+    CHECK(low.echo_then_chase(0x10000, 0, 0x2000));
+    CHECK(low.r.ai().net_smooth_target[2] == 0);
+    CHECK(low.r.ent().position.z.q16 == 0);
+}
+
+// Past the cap the client skips the rest of the update: false; the authority goes on.
+void test_client_body_cap_skips_the_update() {
+    ClientBody c(0, 0, 0, 0x00);
+    c.r.ai().net_interp_progress = 511;
+    CHECK(c.chase());
+    CHECK(c.r.ai().net_interp_progress == 512);
+    CHECK(!c.chase());
+    Rig host;
+    host.ai().net_interp_progress = 512;
+    CHECK(player_body_network_chase(host.ai(), host.ent(), true, false));
+}
+
 } // namespace
 
 int main() {
@@ -270,6 +376,11 @@ int main() {
     test_progress_caps_at_512_and_a_movement_clip_falls_back_to_idle();
     test_a_hidden_body_snaps_at_the_read_apply();
     test_the_read_apply_gates_hold_the_pose_not_the_inputs();
+    test_client_body_inside_the_deadband_holds();
+    test_client_body_two_units_is_chased_in_its_bucket();
+    test_client_body_over_two_units_snaps_the_position_alone();
+    test_client_body_vertical_damping_and_no_angle_step();
+    test_client_body_cap_skips_the_update();
     if (failures == 0) std::printf("player_body_chase: all passed\n");
     return failures == 0 ? 0 : 1;
 }

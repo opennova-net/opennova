@@ -238,6 +238,21 @@ void JoinerRole::fold_local_record() {
 	world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
 	local_flags_revision_seen_ = self->compact_revision;
+	// The record's stage first: its world sample becomes L's chase target, its yaw and
+	// pitch the staged angles, and the chase restarts; L's own update then walks toward
+	// it off the authority (world::player_body_network_chase, D-NET-NEW-L2-14).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - +0x240 @0x4C0FD7, +0x234..+0x23C
+	//  @0x4C0FE4..0x4C0FF0, +0x244 @0x4C0FF6, +0x27C = 0 @0x4C0FFC]
+	if (world::AiEntity *local_ai = world.ai.for_handle(world.cached.local_player)) {
+		local_ai->net_smooth_target[0] = self->record_sample[0];
+		local_ai->net_smooth_target[1] = self->record_sample[1];
+		local_ai->net_smooth_target[2] = self->record_sample[2];
+		local_ai->net_smooth_heading =
+				static_cast<int32_t>(static_cast<uint32_t>(self->yaw_byte) << 24);
+		local_ai->net_smooth_pitch =
+				static_cast<int32_t>(static_cast<uint32_t>(self->pitch_byte) << 24);
+		local_ai->net_interp_progress = 0;
+	}
 	constexpr uint32_t kLocalRecordFlagsMask = 0xE1u;
 	const uint32_t wire = self->state_flags;
 	local->flags ^= (local->flags ^ wire) & kLocalRecordFlagsMask;
@@ -277,7 +292,8 @@ void JoinerRole::fold_local_record() {
 	} else {
 		edge = local->mounted;
 	}
-	const int32_t sample[3] = {self->x, self->y, self->z};
+	const int32_t sample[3] = {self->record_sample[0], self->record_sample[1],
+			self->record_sample[2]};
 	const uint16_t wire_carrier = self->carrier_handle;
 	sync_authoritative_mount();
 	if (edge) local->position.set_q16({sample[0], sample[1], sample[2]});

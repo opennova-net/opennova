@@ -214,6 +214,9 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 		int32_t wy, int32_t wz, bool has_heading, int32_t heading_bam,
 		bool force_live_snap) {
 	es.net_has_compact = true;
+	es.record_sample[0] = wx;
+	es.record_sample[1] = wy;
+	es.record_sample[2] = wz;
 	if (!remote_motion_mode_ || force_live_snap || es.net_world_mover) {
 		// Live snap: the host/SP roles (full-rate loopback; the authority never
 		// interpolates, D-NET-89), the respawn edge [orig: live snap +
@@ -1421,6 +1424,9 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		child->x = w.x;
 		child->y = w.y;
 		child->z = w.z;
+		child->record_sample[0] = w.x;
+		child->record_sample[1] = w.y;
+		child->record_sample[2] = w.z;
 		// World heading = carrier + local for every carried class: the player
 		// read composes its yaw byte [orig: @0x4c10d4] and the vehicle read
 		// lifts its eulerZ through Entity_TransformLocalToWorld's out[3] =

@@ -673,6 +673,11 @@ struct ClientEntityState {
 	// vector at staging time, exactly like retail [orig: entity+0x234/238/23C,
 	// step re-store @0x4b9b2e (org1) / @0x4B459F (org2) / watercraft @0x48D480].
 	int32_t net_smooth_target[3] = {};
+	// The last record's world sample as its read staged it, before any chase reuses
+	// the staged words: the joiner's own record stages its body L from this, and the
+	// mount edge snaps L to it (JoinerRole::fold_local_record).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FE4..0x4C0FF0]
+	int32_t record_sample[3] = {};
 	// Recaptured from the live pose at the top of every mover tick
 	// [orig: entity+0x80/84/88 recapture @0x4b9a5f and each family head].
 	int32_t net_saved_live_pose[3] = {};

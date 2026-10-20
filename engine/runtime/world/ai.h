@@ -472,7 +472,7 @@ struct AiEntity {
     // --- network receive-apply: a remote peer's pose, read-applied on the host ---
     // The host stages a joiner's reported 0x0C pose into these engine-frame slots
     // [orig: NetPacket_SerializePlayerState case 4 @0x4C2042..0x4C20A9] and the body's
-    // own update chases it (player_body_authority_chase, from AiSystem::tick_infantry):
+    // own update chases it (player_body_network_chase, from AiSystem::tick_infantry):
     // the chase overwrites the staged target with its per-tick steps, as retail reuses
     // the same words. `net_is_remote_peer` is OpenNova's snapshot-ownership fact (a
     // client keeps such a body outside the mover); the org2 mover itself is chosen by
@@ -486,7 +486,8 @@ struct AiEntity {
     // entity+0x80/+0x84/+0x88: a second store of savedLivePose (the infantry head
     // stamps Entity::saved_live_pos, which the chase reads).
     int32_t net_saved_live_pose[3] = {};
-    int16_t net_interp_steps = 0;        // entity+0x27E: the chase's step bucket (10 on the authority)
+    int16_t net_interp_steps = 0;        // entity+0x27E: the chase's step bucket (10 on the authority;
+                                         // the client's local body 48 / 512)
 
     int32_t vel_x = 0;         // entity+152 (0x98, velocity X)
     int32_t vel_y = 0;         // entity+156 (0x9C, velocity Y), a hull's mirror; an
@@ -549,18 +550,25 @@ struct AiCandidate {
     bool los_blocked = false;
 };
 
-// The player-body update's network chase on the authority, for every player body
-// but the local one (a remote player whose 0x0C the read-apply staged), run at the
-// update head after the savedLivePose stamp. At progress 0 it measures the staged
-// target against `body`'s savedLivePose (3D, float, truncated): a gap over 2 units is
-// dropped (no snap on the authority), one under 0x2AAA moves nothing but the angles,
-// anything between steps in a bucket of 10 with no vertical step (and none at all
-// while the vertical speed exceeds 1670); then it applies the steps while progress
-// is below the divisor 2 (angles) or the bucket (position), and counts progress up
-// to 512, past which a movement clip falls back to idle 43.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B428B..0x4B4445,
-//  @0x4B4459..0x4B4612, @0x4B464F..0x4B465F]
-void player_body_authority_chase(AiEntity &e, Entity &body);
+// The player-body update's network chase, run at the update head after the
+// savedLivePose stamp, toward the target the last record staged: on the authority for
+// every player body but the local one (a remote player whose 0x0C the read-apply
+// staged), off it for the local body (its own record's echo, staged by the client's
+// receive; a client's other player bodies chase in the replica motion,
+// client_replica_motion.cpp). At progress 0 it measures the staged target against
+// `body`'s savedLivePose (3D, float, truncated): a gap over 2 units is dropped on the
+// authority and snaps the position off it (the angles too for a body not the local
+// one); one under 0x2AAA moves nothing but the angles; anything between steps in a
+// bucket (10 on the authority; the local body's 48 while its MoveOrder moves, else
+// 512), with on the authority no vertical step (and none at all while the vertical
+// speed exceeds 1670), off it the vertical step halved below 0x5555 and none below
+// 0x2AAA. Then it applies the steps while progress is below the divisor (2 on the
+// authority, 12 off it; the local body takes no angle step) or the bucket (position),
+// and counts progress up to 512, past which a movement clip falls back to idle 43
+// and, off the authority, the rest of the body update is skipped: false.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4279..0x4B4445,
+//  @0x4B444A..0x4B4640, @0x4B464F..0x4B4670]
+bool player_body_network_chase(AiEntity &e, Entity &body, bool authority, bool local);
 
 class AiSystem; // fwd
 

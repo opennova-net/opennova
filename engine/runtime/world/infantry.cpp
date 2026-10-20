@@ -744,19 +744,19 @@ bool infantry_org2_body(const AiEntity &e, const Entity *ent) {
            (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
 }
 
-// See the ai.h declaration. The authority's leg of the player-body update's network
-// chase: a body that is not the local player's (the local body on the authority goes
-// straight to the mover, @0x4B428B..0x4B428F). The staged words are reused as the
-// steps, as retail reuses them.
-void player_body_authority_chase(AiEntity &e, Entity &body) {
-    // The angle divisor: 2 for a non-local body on the authority (12 off it, the
-    // client's leg). [orig: `cmp edi(is_authority), ebp` @0x4B4299, `mov ebx, 2`
-    //  @0x4B429B, `jnz` @0x4B42A0, the 12 @0x4B42A2, v369 @0x4B42A7, the half @0x4B42B2]
-    constexpr int32_t kDivisor = 2;
-    constexpr int32_t kHalf = kDivisor >> 1;
-    // The authority's position bucket. [orig: @0x4B4466]
-    constexpr int16_t kAuthorityBucket = 10;
-    const int16_t progress = e.net_interp_progress; // [orig: +0x27C @0x4B42B7]
+// See the ai.h declaration. The player-body update's network chase: on the authority
+// every player body but the local one (the local body there goes straight to the
+// mover, @0x4B428B..0x4B428F), off it the local body. The staged words are reused as
+// the steps, as retail reuses them.
+bool player_body_network_chase(AiEntity &e, Entity &body, bool authority, bool local) {
+    // The angle divisor: 2 for a non-local body on the authority, 12 off it (the local
+    // body's path takes the 12 straight). [orig: `cmp esi, g_LocalPlayerEntity`
+    //  @0x4B4279, `xor ebp, ebp` @0x4B4295 to the 12; `cmp edi(is_authority), ebp`
+    //  @0x4B4299, `mov ebx, 2` @0x4B429B, `jnz` @0x4B42A0, the 12 @0x4B42A2, the
+    //  progress read @0x4B42A7, the divisor stored @0x4B42AE, the half @0x4B42B2]
+    const int32_t divisor = authority ? 2 : 12;
+    const int32_t half = divisor >> 1;
+    const int16_t progress = e.net_interp_progress; // [orig: +0x27C, the test @0x4B42B4..0x4B42BB]
     if (progress == 0) {
         // The gap: the staged target less the savedLivePose the head stamped, a float
         // 3D length clamped by flt_7C19E0 (2147418112.0) and truncated.
@@ -772,11 +772,22 @@ void player_body_authority_chase(AiEntity &e, Entity &body) {
         if (length > 2147418112.0) length = 2147418112.0;
         const int32_t gap = static_cast<int32_t>(length);
         if (gap > 0x20000) {
-            // Over 2 units: off the authority the body snaps to the target; on it
-            // nothing moves. Either way the target, the bucket and the angle steps
-            // clear. [orig: `cmp eax, 20000h; jle` @0x4B431F..0x4B4324, the client's
-            //  snap skipped `cmp edi(is_authority), eax; jnz` @0x4B432A..0x4B4330, the clears
+            // Over 2 units: off the authority the body snaps to the target, its angles
+            // too unless it is the local body; on the authority nothing moves. Either
+            // way the target, the bucket and the angle steps clear.
+            // [orig: `cmp eax, 20000h; jle` @0x4B431F..0x4B4324, `cmp edi(is_authority),
+            //  eax; jnz` @0x4B432A..0x4B4330, the position @0x4B4332..0x4B434A, the local
+            //  test @0x4B434D..0x4B4353, the angles @0x4B4355..0x4B4364, the clears
             //  @0x4B4367..0x4B4386]
+            if (!authority) {
+                body.position.x.q16 = e.net_smooth_target[0];
+                body.position.y.q16 = e.net_smooth_target[1];
+                body.position.z.q16 = e.net_smooth_target[2];
+                if (!local) {
+                    e.heading = e.net_smooth_heading;
+                    e.pitch = e.net_smooth_pitch;
+                }
+            }
             e.net_smooth_target[0] = 0;
             e.net_smooth_target[1] = 0;
             e.net_smooth_target[2] = 0;
@@ -792,42 +803,58 @@ void player_body_authority_chase(AiEntity &e, Entity &body) {
             e.net_smooth_target[2] = 0;
             e.net_interp_steps = 0;
             e.net_smooth_heading =
-                    io::bam_sub(io::bam_add(e.net_smooth_heading, kHalf), e.heading) / kDivisor;
+                    io::bam_sub(io::bam_add(e.net_smooth_heading, half), e.heading) / divisor;
             e.net_smooth_pitch =
-                    io::bam_sub(io::bam_add(kHalf, e.net_smooth_pitch), e.pitch) / kDivisor;
+                    io::bam_sub(io::bam_add(half, e.net_smooth_pitch), e.pitch) / divisor;
         } else {
-            // The bucket steps: ((bucket >> 1) + delta) / bucket per axis and
-            // (half + delta) / divisor per angle, each an idiv (truncation toward
-            // zero); on the authority no vertical step, and no horizontal one while
-            // the body's vertical speed (+0xA0) exceeds 1670.
-            // [orig: the angle deltas @0x4B444A..0x4B445E, the bucket @0x4B4466, the
-            //  steps @0x4B458A..0x4B45CA, the angles @0x4B45C4..0x4B45DF, `cmp
-            //  is_authority` @0x4B45E5..0x4B45EC, the vertical-speed abs @0x4B45EE..0x4B45F9,
-            //  z = 0 @0x4B4600, `cmp eax, 686h` @0x4B45FB / `jle` @0x4B4606, x/y = 0
-            //  @0x4B460C / @0x4B4612]
+            // The bucket: 10 on the authority; off it the local body's 48 while its
+            // MoveOrder moves (bit 3, decoded at the head), else 512. Then the steps,
+            // ((bucket >> 1) + delta) / bucket per axis and (half + delta) / divisor per
+            // angle, each an idiv (truncation toward zero); on the authority no
+            // vertical step, and no horizontal one while the body's vertical speed
+            // (+0xA0) exceeds 1670; off it the vertical step halves while |dz| is below
+            // 0x5555 and is none below 0x2AAA.
+            // [orig: the angle deltas @0x4B444A..0x4B445E, the authority's bucket
+            //  @0x4B4466, the local test @0x4B4478, the moving bit @0x4B4480 (MoveOrder
+            //  >> 3 & 1 @0x4B4161), 48 @0x4B4490 / 512 @0x4B449E, the steps
+            //  @0x4B458A..0x4B45CA, the angles @0x4B45C4..0x4B45DF, `cmp is_authority`
+            //  @0x4B45E5..0x4B45EC, the vertical-speed abs @0x4B45EE..0x4B45F9, z = 0
+            //  @0x4B4600, `cmp eax, 686h` @0x4B45FB / `jle` @0x4B4606, x/y = 0 @0x4B460C /
+            //  @0x4B4612; off it |dz| @0x4B461D..0x4B4624, `cmp eax, 5555h` @0x4B4626 and
+            //  the `sar` @0x4B462D, `cmp eax, 2AAAh` @0x4B4635 and the zero @0x4B4640]
             const int32_t dh = io::bam_sub(e.net_smooth_heading, e.heading);
             const int32_t dp = io::bam_sub(e.net_smooth_pitch, e.pitch);
-            e.net_interp_steps = kAuthorityBucket;
-            const int32_t bucket = kAuthorityBucket;
+            const int16_t bucket = authority ? 10
+                    : (body.net_move_input & Entity::kMoveOrderMoving) != 0 ? 0x30 : 0x200;
+            e.net_interp_steps = bucket;
             e.net_smooth_target[0] = io::bam_add(bucket >> 1, dx) / bucket;
             e.net_smooth_target[1] = io::bam_add(bucket >> 1, dy) / bucket;
-            e.net_smooth_target[2] = io::bam_add(bucket >> 1, dz) / bucket;
-            e.net_smooth_heading = io::bam_add(kHalf, dh) / kDivisor;
-            e.net_smooth_pitch = io::bam_add(kHalf, dp) / kDivisor;
-            e.net_smooth_target[2] = 0;
-            if (io::bam_abs(e.inf.vel[2]) > 1670) {
-                e.net_smooth_target[0] = 0;
-                e.net_smooth_target[1] = 0;
+            const int32_t step_z = io::bam_add(bucket >> 1, dz) / bucket;
+            e.net_smooth_target[2] = step_z;
+            e.net_smooth_heading = io::bam_add(half, dh) / divisor;
+            e.net_smooth_pitch = io::bam_add(half, dp) / divisor;
+            if (authority) {
+                e.net_smooth_target[2] = 0;
+                if (io::bam_abs(e.inf.vel[2]) > 1670) {
+                    e.net_smooth_target[0] = 0;
+                    e.net_smooth_target[1] = 0;
+                }
+            } else {
+                const int32_t adz = io::bam_abs(dz);
+                if (adz < 0x5555) e.net_smooth_target[2] = step_z >> 1;
+                if (adz < 0x2AAA) e.net_smooth_target[2] = 0;
             }
         }
     }
-    // The apply, every tick: the angle steps while progress is below the divisor,
-    // the position steps while it is below the bucket (16-bit signed compares), then
-    // progress counts up to 512; held there, a movement clip (flag-table bit 0) falls
-    // back to idle 43 by a direct store. [orig: @0x4B43E6..0x4B440A, @0x4B440D..0x4B442E,
-    //  `cmp ax, 200h; jge` @0x4B4431..0x4B4435, the count @0x4B443B..0x4B443E; the
-    //  fallback @0x4B464F..0x4B465F]
-    if (progress < kDivisor) {
+    // The apply, every tick: the angle steps while progress is below the divisor (a
+    // body not the local one), the position steps while it is below the bucket (16-bit
+    // signed compares), then progress counts up to 512; held there, a movement clip
+    // (flag-table bit 0) falls back to idle 43 by a direct store, and off the authority
+    // the rest of the update is skipped. [orig: @0x4B43E6..0x4B440A (the local test
+    //  @0x4B43F3), @0x4B440D..0x4B442E, `cmp ax, 200h; jge` @0x4B4431..0x4B4435, the
+    //  count @0x4B443B..0x4B443E; the fallback @0x4B464F..0x4B465F, `cmp is_authority`
+    //  @0x4B4669, `jz loc_4B83A8` @0x4B4670]
+    if (progress < divisor && !local) {
         e.heading = io::bam_add(e.heading, e.net_smooth_heading);
         e.pitch = io::bam_add(e.pitch, e.net_smooth_pitch);
     }
@@ -838,9 +865,11 @@ void player_body_authority_chase(AiEntity &e, Entity &body) {
     }
     if (progress < 512) {
         e.net_interp_progress = static_cast<int16_t>(progress + 1);
-    } else if ((infantry_anim_flags(e.inf.anim_state) & 0x1u) != 0) {
-        e.inf.store_body_animation(anim_state::kIdle);
+        return true;
     }
+    if ((infantry_anim_flags(e.inf.anim_state) & 0x1u) != 0)
+        e.inf.store_body_animation(anim_state::kIdle);
+    return authority;
 }
 
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
@@ -870,8 +899,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const bool npc_body = !infantry_org2_body(e, tick_entity);
     const bool local = e.inf.is_local_player;
     // A wire-owned body on a client stays outside this mover: the joiner's
-    // replica motion owns it (the client leg of the chase, divisor 12, lives
-    // there). On the authority a remote player runs the whole org2 update.
+    // replica motion owns it (the client leg of the chase for a body not the local
+    // one, divisor 12, lives there). On the authority a remote player runs the
+    // whole org2 update.
     const bool client_wire_peer = e.net_is_remote_peer && !is_authority;
     // A hidden player body runs nothing at all: the org2 head returns at Flags
     // bit 0 ahead of its channels, its motion and its edge, so an added body
@@ -968,12 +998,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         tick_entity->engine_flags &= ~kEntityFlagQueuedMount;
     }
     // The network chase, after the queued use: on the authority every player body
-    // but the local one walks toward the target its last 0x0C staged; the local
-    // body goes straight to the mover. [orig: Entity_UpdateInfantryPlayerBody
-    // `cmp esi, g_LocalPlayerEntity` and the authority skip @0x4B428B..0x4B428F,
-    // the chase @0x4B4299..0x4B4445]
-    if (!npc_body && !local && is_authority && tick_entity != nullptr)
-        player_body_authority_chase(e, *tick_entity);
+    // but the local one walks toward the target its last 0x0C staged, the local body
+    // going straight to the mover; off it the local body walks toward its own record's
+    // echo, and past the cap the rest of the update is skipped. [orig:
+    // Entity_UpdateInfantryPlayerBody `cmp esi, g_LocalPlayerEntity` and the authority
+    // skip @0x4B4279..0x4B428F, the chase @0x4B4299..0x4B4445, the client's skip
+    // @0x4B4669..0x4B4670]
+    if (!npc_body && tick_entity != nullptr && local != is_authority &&
+            !player_body_network_chase(e, *tick_entity, is_authority, local)) {
+        finish_infantry_tick(e, world);
+        return;
+    }
     // The player bodies decay recoil and spread at their head; org1 runs the
     // same pair after its think (below). [orig: org1 Entity_UpdateInfantryAI
     //  @0x4BE7FD..0x4BE86F]
